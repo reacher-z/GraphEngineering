@@ -12,7 +12,8 @@
       "enum": [
         "RunCreated", "RunStarted", "RunPaused", "RunResumed",
         "GraphPatched", "NodeScheduled", "NodeStarted", "NodeAttemptFailed",
-        "NodeRetried", "NodeSucceeded", "EdgeEmitted", "BarrierSatisfied",
+        "NodeSettledWithoutAttempt", "NodeRetried", "NodeSucceeded",
+        "EdgeEmitted", "BarrierSatisfied",
         "RouteSelected", "VerificationRecorded", "BudgetUpdated",
         "ArtifactCreated", "HumanInputRequested", "HumanInputReceived",
         "RunCancelled", "RunFailed", "RunSucceeded"

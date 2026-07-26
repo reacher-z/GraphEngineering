@@ -11,8 +11,9 @@ issue.
 ## Alpha warning
 
 This project is **not production hardened**. Current packages establish Graph IR,
-structural compilation, bounded native schedulers, and structured failures. They
-do not yet provide a sandbox or a complete security policy engine.
+structural compilation, bounded native schedulers, structured failures, and
+event-sourced continuation. They do not yet provide a sandbox or a complete
+security policy engine.
 
 In particular, today:
 
@@ -20,8 +21,9 @@ In particular, today:
 - a Python node handler runs inside the host Python process;
 - executor code can inherit the process environment, filesystem, network, and
   subprocess authority;
-- Graph IR `resources`, `isolation`, and `sideEffects` fields are descriptive and
-  are not capability enforcement;
+- Graph IR `resources` and `isolation` fields are descriptive; `sideEffects` is
+  a trusted declaration used to gate durable retry, not verified capability or
+  idempotency enforcement;
 - timeout and cancellation are cooperative controls, not containment boundaries;
 - worktree, process, and container isolation providers are target-v1 work;
 - scoped secret injection, payload redaction, human approval, authenticated
@@ -113,6 +115,12 @@ Current controls are useful, but none is a substitute for process isolation:
   identifiers, fsync, and corruption detection;
 - native checkpoint stores use safe identifiers, atomic replacement, strict
   portable state, and verified content hashes;
+- native durable schedulers bind graph/input/implementation identity, commit an
+  attempt claim before executor dispatch, commit successful outcomes before
+  releasing dependants, and rebuild continuation from scheduler events;
+- durable terminal resume returns the recorded result without appending an event
+  or invoking an executor; ambiguous open attempts declared non-idempotent or
+  without a side-effect class fail closed with `IN_DOUBT_SIDE_EFFECT`;
 - the MCP server exposes only bounded validation, planning, and a fixed bundled
   schema over local stdio; it has no run, file, network, or shell tool.
 
@@ -128,8 +136,11 @@ Important limitations:
 - graph hashes provide identity, not author authenticity or authorization;
 - an executor can bypass Graph IR metadata and directly use ambient process
   privileges;
-- local JSONL history is durable after a successful fsync, but it is not
-  authenticated or tamper-evident and is not connected to scheduler recovery.
+- local JSONL history is durable after a successful fsync and is the current
+  scheduler recovery source, but it is neither authenticated nor tamper-evident;
+  an attacker with write access can forge data and recompute unkeyed hashes;
+- checkpoint files are not connected to scheduler recovery and provide no
+  authorization or resume claim.
 
 ## Capability model (target v1)
 
@@ -300,7 +311,17 @@ apply their own allowlists.
 ## External side effects and recovery
 
 External mutation is at least once. A crash can occur after the remote service
-commits but before the orchestrator records success. Target-v1 handling requires:
+commits but before the orchestrator records success.
+
+Current durable recovery commits `NodeStarted` before dispatch and gives every
+attempt for one logical node activity the same activity/idempotency key. After
+process loss, an open attempt declared `sideEffects: "none"` or
+`"idempotent"` may retry within the original budgets. An omitted or
+`"non-idempotent"` declaration fails closed with `IN_DOUBT_SIDE_EFFECT`; the
+runtime does not reinvoke that executor. The application must actually forward
+the key to the remote API and must not mislabel an operation as idempotent.
+
+Safe production handling additionally requires:
 
 - one stable idempotency key per logical activity, reused across retries;
 - an activity record linking request hash, remote identity, and result evidence;
@@ -313,22 +334,31 @@ commits but before the orchestrator records success. Target-v1 handling requires
 An attempt number is useful audit metadata but is usually the wrong idempotency
 key: changing it on every retry defeats deduplication.
 
-The alpha runtime has no durable activity ledger or recovery approval gate.
-Custom executors are responsible for idempotency today.
+The alpha runtime has no durable activity ledger, reconciliation engine,
+compensation coordinator, or recovery approval callback. Custom executors and
+their applications are responsible for idempotency and ambiguous external
+effects. Graph Engineering does not claim external exactly-once execution.
 
 ## Durable state and artifact integrity
 
 The alpha local adapters implement CAS event append and content-hashed
-checkpoint files for one process. They reject unsafe path identifiers and detect
-truncated or modified records. They do not provide encryption, tenant
-authorization, multi-process locking, leases, scheduler resume, or an artifact
-store. Use a private directory owned by the least-privileged runtime identity.
+checkpoint files for one process. The native durable schedulers now use event
+streams for start/resume and fold the complete history before continuation.
+They reject unsafe path identifiers and detect malformed, truncated, or
+hash-inconsistent records. They do not provide authentication, encryption,
+tenant authorization, multi-process locking, leases, checkpoint-accelerated
+resume, or an artifact store. Use a private directory owned by the
+least-privileged runtime identity.
+
+Current recovery binds immutable graph/input/implementation hashes and uses CAS
+for every event append. The implementation ID is supplied by the caller and is
+not code attestation. CAS detects stale commits but cannot fence an old
+coordinator before it performs external work. Stop the prior coordinator before
+resuming.
 
 The remaining target-v1 requirements are:
 
-- Event appends use expected sequence/version to reject concurrent writers.
 - One active orchestrator lease owns run progression; lease loss stops scheduling.
-- Every run binds an immutable graph hash and implementation/version metadata.
 - Checkpoints have schema/version and integrity metadata and can be rebuilt from
   event history.
 - Artifact references are content-addressed where feasible and include size/media
@@ -404,7 +434,9 @@ Before running the current code:
 - inspect the graph hash and validation diagnostics before execution;
 - keep local event/checkpoint directories private and do not treat their hashes
   as signatures or their CAS as a distributed lock;
-- assume a process crash requires a fresh run; durable resume is not available;
+- resume a crashed durable run only after confirming the old coordinator has
+  stopped; allow automatic recovery only for truly effect-free or idempotent
+  activities and reconcile ambiguous external state;
 - do not expose alpha execution directly to untrusted multi-tenant users.
 
 ## Target-v1 security acceptance criteria

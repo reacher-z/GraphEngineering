@@ -1,0 +1,20 @@
+{
+  "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+  "kind": "Graph",
+  "metadata": { "name": "unsafe-budget", "version": "1" },
+  "inputSchema": {},
+  "outputSchema": {},
+  "entrypoints": ["root"],
+  "outputs": { "result": { "node": "root" } },
+  "nodes": [
+    {
+      "id": "root",
+      "kind": "transform",
+      "inputSchema": {},
+      "outputSchema": {},
+      "config": {}
+    }
+  ],
+  "edges": [],
+  "policies": { "maxTotalAttempts": 9007199254740992 }
+}

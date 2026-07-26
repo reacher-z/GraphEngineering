@@ -11,6 +11,17 @@ from graph_engineering import GraphEvent
 ROOT = Path(__file__).resolve().parents[2]
 
 
+def test_graph_event_consumes_shared_strict_rfc3339_corpus() -> None:
+    corpus = json.loads((ROOT / "spec/conformance/strict-rfc3339.case.json").read_text())
+    base = json.loads((ROOT / "spec/conformance/run-created.event.json").read_text())
+
+    for timestamp in corpus["valid"]:
+        GraphEvent.model_validate({**base, "timestamp": timestamp})
+    for timestamp in corpus["invalid"]:
+        with pytest.raises(ValidationError):
+            GraphEvent.model_validate({**base, "timestamp": timestamp})
+
+
 def test_graph_event_matches_shared_conformance_envelope() -> None:
     document = json.loads((ROOT / "spec/conformance/run-created.event.json").read_text())
 

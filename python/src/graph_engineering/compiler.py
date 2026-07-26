@@ -13,6 +13,7 @@ from pydantic import ValidationError
 
 from ._json import normalize_json_strings
 from .models import EdgeSpec, GraphSpec, NodeSpec
+from .portable_json import portable_json_snapshot
 
 
 class DiagnosticCode(StrEnum):
@@ -102,13 +103,18 @@ def _unsafe_input_result() -> CompilationResult:
 def try_compile_graph(graph: GraphSpec | Mapping[str, Any]) -> CompilationResult:
     """Validate and compile a graph without raising for expected diagnostics."""
 
-    if not isinstance(graph, GraphSpec):
-        try:
-            graph = GraphSpec.model_validate(normalize_json_strings(graph))
-        except ValidationError as exc:
-            return _invalid_result(exc)
-        except Exception:
-            return _unsafe_input_result()
+    try:
+        validated = (
+            graph
+            if isinstance(graph, GraphSpec)
+            else GraphSpec.model_validate(normalize_json_strings(graph))
+        )
+        document = validated.model_dump(mode="json", by_alias=True, exclude_unset=True)
+        graph = GraphSpec.model_validate(portable_json_snapshot(document))
+    except ValidationError as exc:
+        return _invalid_result(exc)
+    except Exception:
+        return _unsafe_input_result()
 
     diagnostics: list[Diagnostic] = []
     duplicate_nodes = _duplicate_values(node.id for node in graph.nodes)

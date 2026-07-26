@@ -1,0 +1,94 @@
+{
+  "caseVersion": "scheduler-recovery/v1alpha1",
+  "name": "resume reuses committed success and advances an interrupted safe node",
+  "runId": "resume-basic",
+  "implementationId": "fixture@1",
+  "graph": {
+    "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+    "kind": "Graph",
+    "metadata": { "name": "durable-resume", "version": "1" },
+    "inputSchema": {},
+    "outputSchema": {},
+    "entrypoints": ["left", "right"],
+    "outputs": { "result": { "node": "merge" } },
+    "nodes": [
+      {
+        "id": "left",
+        "kind": "agent",
+        "inputSchema": {},
+        "outputSchema": {},
+        "config": {},
+        "retry": { "maxAttempts": 2 },
+        "sideEffects": "none"
+      },
+      {
+        "id": "right",
+        "kind": "agent",
+        "inputSchema": {},
+        "outputSchema": {},
+        "config": {},
+        "retry": { "maxAttempts": 2 },
+        "sideEffects": "none"
+      },
+      {
+        "id": "merge",
+        "kind": "agent",
+        "inputSchema": {},
+        "outputSchema": {},
+        "config": {},
+        "sideEffects": "none"
+      }
+    ],
+    "edges": [
+      {
+        "id": "left-merge",
+        "from": { "node": "left" },
+        "to": { "node": "merge", "port": "left" }
+      },
+      {
+        "id": "right-merge",
+        "from": { "node": "right" },
+        "to": { "node": "merge", "port": "right" }
+      }
+    ],
+    "policies": { "maxConcurrency": 2, "maxTotalAttempts": 4 }
+  },
+  "graphInput": { "seed": 1 },
+  "preCrash": {
+    "succeeded": {
+      "nodeId": "left",
+      "attempt": 1,
+      "input": { "seed": 1 },
+      "output": { "left": true }
+    },
+    "interrupted": {
+      "nodeId": "right",
+      "attempt": 1,
+      "input": { "seed": 1 }
+    }
+  },
+  "resumeReturns": {
+    "right": { "right": true },
+    "merge": { "merged": true }
+  },
+  "expect": {
+    "executorCalls": [
+      { "nodeId": "right", "attempt": 2 },
+      { "nodeId": "merge", "attempt": 1 }
+    ],
+    "neverExecute": ["left"],
+    "reusedNodeIds": ["left"],
+    "interruptedNodeIds": ["right"],
+    "totalAttempts": 4,
+    "status": "succeeded",
+    "output": { "result": { "merged": true } },
+    "mergeInput": {
+      "left": { "left": true },
+      "right": { "right": true }
+    },
+    "terminalResume": {
+      "newEvents": 0,
+      "executorCalls": 0
+    }
+  }
+}

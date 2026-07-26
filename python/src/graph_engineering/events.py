@@ -21,6 +21,7 @@ EventType: TypeAlias = Literal[
     "NodeScheduled",
     "NodeStarted",
     "NodeAttemptFailed",
+    "NodeSettledWithoutAttempt",
     "NodeRetried",
     "NodeSucceeded",
     "EdgeEmitted",
@@ -36,7 +37,8 @@ EventType: TypeAlias = Literal[
     "RunSucceeded",
 ]
 _RFC3339 = re.compile(
-    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$"
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?"
+    r"(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$"
 )
 
 
@@ -69,9 +71,7 @@ class GraphEvent(StrictModel):
     type: EventType
     timestamp: str
     run_id: Annotated[str, Field(min_length=1)] = Field(alias="runId")
-    graph_revision: Annotated[int, Field(ge=1, le=MAX_SAFE_INTEGER)] = Field(
-        alias="graphRevision"
-    )
+    graph_revision: Annotated[int, Field(ge=1, le=MAX_SAFE_INTEGER)] = Field(alias="graphRevision")
     sequence: Annotated[int, Field(ge=0, le=MAX_SAFE_INTEGER)]
     trace_id: str | None = Field(default=None, alias="traceId")
     span_id: str | None = Field(default=None, alias="spanId")

@@ -3,6 +3,10 @@ import { fileURLToPath } from "node:url";
 import type { GraphSpec, NodeSpec } from "@graph-engineering/core";
 import { describe, expect, it, vi } from "vitest";
 import { runGraph, type NodeExecutor } from "../src/index.js";
+import {
+  runGraphWithJournal,
+  type SchedulerJournal,
+} from "../src/scheduler.js";
 
 function fixture(name: string): GraphSpec {
   const path = fileURLToPath(new URL(`../../../spec/conformance/${name}`, import.meta.url));
@@ -90,6 +94,21 @@ function graph(overrides: Partial<GraphSpec>): GraphSpec {
 
 function wait(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function testJournal(overrides: Partial<SchedulerJournal> = {}): SchedulerJournal {
+  return {
+    beforeAttempt: async ({ node, attempt }) => ({
+      runId: "test-run",
+      attemptId: `test-run/${node.id}/${attempt}`,
+      activityKey: `activity/${node.id}`,
+    }),
+    attemptFailed: async () => undefined,
+    nodeSucceeded: async () => undefined,
+    nodeSettledWithoutAttempt: async () => undefined,
+    runTerminal: async () => undefined,
+    ...overrides,
+  };
 }
 
 describe("runGraph", () => {
@@ -374,6 +393,69 @@ describe("runGraph", () => {
     ]);
   });
 
+  it("does not resolve inherited node or kind executor properties", async () => {
+    const inherited = graph({
+      entrypoints: ["toString"],
+      outputs: { result: { node: "toString" } },
+      nodes: [node("toString", { kind: "agent" })],
+    });
+    const result = await runGraph(inherited, {}, { nodeExecutors: {}, executors: {} });
+    expect(result.status).toBe("failed");
+    expect(result.failures[0]).toMatchObject({
+      code: "EXECUTOR_NOT_FOUND", nodeId: "toString", attempt: 0,
+    });
+  });
+
+  it("executes an immutable snapshot of the compiled graph", async () => {
+    const mutableConfig = { value: "original" };
+    const document = graph({ nodes: [node("root", { config: mutableConfig })] });
+    const running = runGraph(document, {}, {
+      nodeExecutors: {
+        root: ({ graph: runtimeGraph }) => {
+          expect(Object.isFrozen(runtimeGraph)).toBe(true);
+          expect(Object.isFrozen(runtimeGraph.nodes[0])).toBe(true);
+          expect(() => {
+            (runtimeGraph.nodes as NodeSpec[])[0]!.id = "changed";
+          }).toThrow(TypeError);
+          return (runtimeGraph.nodes[0]?.config as { value: string }).value;
+        },
+      },
+    });
+    mutableConfig.value = "caller-mutated";
+    const result = await running;
+    expect(result.output).toEqual({ result: "original" });
+  });
+
+  it("treats __proto__ output names and target ports as ordinary own JSON keys", async () => {
+    const outputs = JSON.parse('{"__proto__":{"node":"consumer"}}') as GraphSpec["outputs"];
+    let consumerInput: Record<string, unknown> | undefined;
+    const document = graph({
+      outputs,
+      nodes: [node("root"), node("consumer")],
+      edges: [{
+        id: "root-consumer",
+        from: { node: "root" },
+        to: { node: "consumer", port: "__proto__" },
+      }],
+    });
+    const result = await runGraph(document, {}, {
+      nodeExecutors: {
+        root: () => ({ safe: true }),
+        consumer: ({ input }) => {
+          consumerInput = input as Record<string, unknown>;
+          return { received: Object.hasOwn(input as object, "__proto__") };
+        },
+      },
+    });
+    expect(result.status).toBe("succeeded");
+    expect(Object.hasOwn(consumerInput as object, "__proto__")).toBe(true);
+    expect(consumerInput?.__proto__).toEqual({ safe: true });
+    expect(Object.getPrototypeOf(consumerInput)).toBe(Object.prototype);
+    expect(Object.hasOwn(result.output as object, "__proto__")).toBe(true);
+    expect(result.output?.__proto__).toEqual({ received: true });
+    expect(Object.getPrototypeOf(result.output)).toBe(Object.prototype);
+  });
+
   it("retries within node and global attempt budgets", async () => {
     let calls = 0;
     const result = await runGraph(
@@ -395,6 +477,234 @@ describe("runGraph", () => {
     expect(result.status).toBe("succeeded");
     expect(result.output).toEqual({ result: "ok" });
     expect(result.nodes[0]).toMatchObject({ attempts: 3, status: "succeeded" });
+  });
+
+  it("does not journal a retry when the global attempt budget has no capacity", async () => {
+    const retryAdmissions: boolean[] = [];
+    const result = await runGraphWithJournal(
+      graph({
+        nodes: [node("root", { retry: { maxAttempts: 2 } })],
+        policies: { maxTotalAttempts: 1 },
+      }),
+      {},
+      {
+        nodeExecutors: { root: () => { throw new Error("fail once"); } },
+        journal: testJournal({
+          attemptFailed: async ({ willRetry }) => { retryAdmissions.push(willRetry); },
+        }),
+      },
+    );
+
+    expect(retryAdmissions).toEqual([false]);
+    expect(result.totalAttempts).toBe(1);
+    expect(result.nodes[0]).toMatchObject({
+      attempts: 1,
+      status: "failed",
+      failure: { retryable: false },
+    });
+  });
+
+  it("atomically grants only one final retry reservation to parallel failures", async () => {
+    let firstAttemptStarts = 0;
+    let releaseFirstAttempts!: () => void;
+    const firstAttemptsStarted = new Promise<void>((resolve) => { releaseFirstAttempts = resolve; });
+    const calls = new Map<string, number>();
+    const retryAdmissions: { nodeId: string; willRetry: boolean }[] = [];
+    const executor: NodeExecutor = async ({ node: current }) => {
+      const count = (calls.get(current.id) ?? 0) + 1;
+      calls.set(current.id, count);
+      if (count === 1) {
+        firstAttemptStarts += 1;
+        if (firstAttemptStarts === 2) releaseFirstAttempts();
+        await firstAttemptsStarted;
+        throw new Error(`first ${current.id}`);
+      }
+      return `${current.id}-recovered`;
+    };
+
+    const result = await runGraphWithJournal(
+      graph({
+        entrypoints: ["a", "b"],
+        outputs: { a: { node: "a" }, b: { node: "b" } },
+        nodes: [
+          node("a", { retry: { maxAttempts: 2 } }),
+          node("b", { retry: { maxAttempts: 2 } }),
+        ],
+        policies: { maxConcurrency: 2, maxTotalAttempts: 3 },
+      }),
+      {},
+      {
+        nodeExecutors: { a: executor, b: executor },
+        journal: testJournal({
+          attemptFailed: async ({ node: current, willRetry }) => {
+            retryAdmissions.push({ nodeId: current.id, willRetry });
+          },
+        }),
+      },
+    );
+
+    expect([...calls.values()].reduce((sum, count) => sum + count, 0)).toBe(3);
+    expect(retryAdmissions.filter(({ willRetry }) => willRetry)).toHaveLength(1);
+    expect(retryAdmissions.filter(({ willRetry }) => !willRetry)).toHaveLength(1);
+    expect(result.totalAttempts).toBe(3);
+  });
+
+  it("measures only globally admitted, journal-committed attempts", async () => {
+    let historyOpen = 0;
+    let maximumHistoryOpen = 0;
+    const executor = vi.fn(async ({ node: current }: Parameters<NodeExecutor>[0]) => {
+      await wait(5);
+      return current.id;
+    });
+    const journal = testJournal({
+      beforeAttempt: async ({ node: current, attempt }) => {
+        historyOpen += 1;
+        maximumHistoryOpen = Math.max(maximumHistoryOpen, historyOpen);
+        return {
+          runId: "metric-run",
+          attemptId: `metric-run/${current.id}/${attempt}`,
+          activityKey: `activity/${current.id}`,
+        };
+      },
+      attemptFailed: async () => { historyOpen -= 1; },
+      nodeSucceeded: async () => { historyOpen -= 1; },
+    });
+
+    const result = await runGraphWithJournal(
+      graph({
+        entrypoints: ["a", "b"],
+        outputs: { a: { node: "a" }, b: { node: "b" } },
+        nodes: [node("a"), node("b")],
+        policies: { maxConcurrency: 2, maxTotalAttempts: 1 },
+      }),
+      {},
+      { nodeExecutors: { a: executor, b: executor }, journal },
+    );
+
+    expect(executor).toHaveBeenCalledOnce();
+    expect(result.totalAttempts).toBe(1);
+    expect(result.maxObservedConcurrency).toBe(1);
+    expect(maximumHistoryOpen).toBe(1);
+    expect(historyOpen).toBe(0);
+  });
+
+  it("commits a failed attempt before releasing its concurrency slot", async () => {
+    const order: string[] = [];
+    const journal = testJournal({
+      beforeAttempt: async ({ node: current, attempt }) => {
+        order.push(`${current.id}:started`);
+        return {
+          runId: "ordering-run",
+          attemptId: `ordering-run/${current.id}/${attempt}`,
+          activityKey: `activity/${current.id}`,
+        };
+      },
+      attemptFailed: async ({ node: current }) => {
+        order.push(`${current.id}:failure-begin`);
+        await wait(5);
+        order.push(`${current.id}:failure-commit`);
+      },
+      nodeSucceeded: async ({ node: current }) => {
+        order.push(`${current.id}:success-commit`);
+      },
+    });
+
+    await runGraphWithJournal(
+      graph({
+        entrypoints: ["a", "b"],
+        outputs: { a: { node: "a" }, b: { node: "b" } },
+        nodes: [node("a"), node("b")],
+        policies: { maxConcurrency: 1, maxTotalAttempts: 2 },
+      }),
+      {},
+      {
+        nodeExecutors: {
+          a: () => { throw new Error("a failed"); },
+          b: () => "b succeeded",
+        },
+        journal,
+      },
+    );
+
+    expect(order.indexOf("a:failure-commit")).toBeLessThan(order.indexOf("b:started"));
+    expect(order).toEqual([
+      "a:started",
+      "a:failure-begin",
+      "a:failure-commit",
+      "b:started",
+      "b:success-commit",
+    ]);
+  });
+
+  it("counts persisted retry-delay seeds as reserved global attempts", async () => {
+    await expect(
+      runGraphWithJournal(
+        graph({
+          entrypoints: ["a", "b"],
+          outputs: { a: { node: "a" }, b: { node: "b" } },
+          nodes: [node("a"), node("b")],
+          policies: { maxTotalAttempts: 2 },
+        }),
+        {},
+        {
+          initialTotalAttempts: 1,
+          initialRetryDelaysMs: new Map([["a", 0], ["b", 0]]),
+        },
+      ),
+    ).rejects.toThrow("initial durable attempts and retry reservations exceed maxTotalAttempts");
+  });
+
+  it("commits zero-attempt settlement before releasing a failed descendant", async () => {
+    let releaseRootCommit!: () => void;
+    let rootCommitStarted!: () => void;
+    const rootCommitGate = new Promise<void>((resolve) => { releaseRootCommit = resolve; });
+    const rootCommitEntered = new Promise<void>((resolve) => { rootCommitStarted = resolve; });
+    const order: string[] = [];
+    const child = vi.fn(() => "should-not-run");
+    const journal = testJournal({
+      nodeSettledWithoutAttempt: async ({ node: current }) => {
+        order.push(`${current.id}:begin`);
+        if (current.id === "root") {
+          rootCommitStarted();
+          await rootCommitGate;
+        }
+        order.push(`${current.id}:end`);
+      },
+    });
+
+    const run = runGraphWithJournal(
+      graph({
+        outputs: { result: { node: "child" } },
+        nodes: [node("root", { kind: "agent" }), node("child", { kind: "agent" })],
+        edges: [{ id: "root-child", from: { node: "root" }, to: { node: "child" } }],
+      }),
+      {},
+      { nodeExecutors: { child }, journal },
+    );
+
+    await rootCommitEntered;
+    expect(order).toEqual(["root:begin"]);
+    expect(child).not.toHaveBeenCalled();
+    releaseRootCommit();
+    const result = await run;
+    expect(order).toEqual(["root:begin", "root:end", "child:begin", "child:end"]);
+    expect(result.nodes.map(({ status }) => status)).toEqual(["failed", "skipped"]);
+    expect(child).not.toHaveBeenCalled();
+  });
+
+  it("keeps the public runGraph enumerable result shape unchanged", async () => {
+    const result = await runGraph(graph({}), {}, { nodeExecutors: { root: () => "ok" } });
+    expect(Object.keys(result).sort()).toEqual([
+      "failures",
+      "graphHash",
+      "maxObservedConcurrency",
+      "nodes",
+      "output",
+      "status",
+      "totalAttempts",
+    ]);
+    expect("scheduledOrder" in result).toBe(false);
+    expect("completionOrder" in result).toBe(false);
   });
 
   it("does not hold an attempt concurrency slot during retry backoff", async () => {

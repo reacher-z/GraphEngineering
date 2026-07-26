@@ -34,6 +34,40 @@ function hash(value) {
   return createHash("sha256").update(serialized, "utf8").digest("hex");
 }
 
+function floatFromBits(bits) {
+  const bytes = Buffer.from(bits, "hex");
+  assert.equal(bytes.length, 8, `expected one binary64 value, received ${bits}`);
+  return bytes.readDoubleBE(0);
+}
+
+function floatBits(value) {
+  const bytes = Buffer.allocUnsafe(8);
+  bytes.writeDoubleBE(value, 0);
+  return bytes.toString("hex");
+}
+
+function encodeDurableJson(value) {
+  if (value === null) return ["n"];
+  if (typeof value === "boolean") return ["b", value];
+  if (typeof value === "string") return ["s", value];
+  if (typeof value === "number") {
+    assert.ok(Number.isFinite(value), "Durable JSON source numbers must be finite");
+    if (Number.isInteger(value)) {
+      assert.ok(Number.isSafeInteger(value), "Durable JSON source integers must be safe");
+      return ["i", Object.is(value, -0) ? 0 : value];
+    }
+    return ["f", floatBits(value)];
+  }
+  if (Array.isArray(value)) return ["a", value.map(encodeDurableJson)];
+  assert.equal(typeof value, "object");
+  return [
+    "o",
+    Object.keys(value)
+      .sort(compareUnicodeCodePoints)
+      .map((key) => [key, encodeDurableJson(value[key])]),
+  ];
+}
+
 async function loadJson(name) {
   return JSON.parse(await readFile(join(fixtureRoot, name), "utf8"));
 }
@@ -56,6 +90,26 @@ for (const [name, expectation] of Object.entries(expected.checkpoints ?? {})) {
   assert.equal(hash(body), expectation.contentHash, `${name} checkpoint body hash drifted`);
 }
 
+const durableJson = await loadJson("durable-json.case.json");
+for (const testCase of durableJson.validCases) {
+  const source = testCase.source.kind === "float64Bits"
+    ? floatFromBits(testCase.source.bits)
+    : testCase.source.value;
+  const encoding = encodeDurableJson(source);
+  const canonicalJson = JSON.stringify(encoding);
+  assert.deepEqual(encoding, testCase.expect.encoding, `${testCase.name} Durable JSON encoding drifted`);
+  assert.equal(
+    canonicalJson,
+    testCase.expect.canonicalJson,
+    `${testCase.name} Durable JSON canonical text drifted`,
+  );
+  assert.equal(
+    createHash("sha256").update(canonicalJson, "utf8").digest("hex"),
+    testCase.expect.sha256,
+    `${testCase.name} Durable JSON hash drifted`,
+  );
+}
+
 const diamond = await loadJson("diamond.graph.json");
 assert.equal(diamond.apiVersion, "graphengineering.reacher-z.github.io/v1alpha1");
 assert.equal(diamond.kind, "Graph");
@@ -63,5 +117,5 @@ assert.equal(new Set(diamond.nodes.map(({ id }) => id)).size, diamond.nodes.leng
 assert.equal(new Set(diamond.edges.map(({ id }) => id)).size, diamond.edges.length);
 
 process.stdout.write(
-  `Validated ${fixtureNames.length} JSON fixtures, ${Object.keys(expected.canonicalization).length} graph hash, and ${Object.keys(expected.checkpoints ?? {}).length} checkpoint hash.\n`,
+  `Validated ${fixtureNames.length} JSON fixtures, ${Object.keys(expected.canonicalization).length} graph hash, ${Object.keys(expected.checkpoints ?? {}).length} checkpoint hash, and ${durableJson.validCases.length} Durable JSON vectors.\n`,
 );

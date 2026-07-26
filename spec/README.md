@@ -3,6 +3,8 @@
 `graph.schema.json` is the language-neutral Graph IR contract.
 `event.schema.json` defines the portable runtime event envelope.
 `checkpoint.schema.json` defines the portable stored-checkpoint envelope.
+`durable-json.schema.json` defines the tagged, checkpoint-safe encoding used by
+scheduler recovery for portable finite JSON, including exact binary64 values.
 `conformance/` contains inputs and expected results used by every native runtime,
 including settled-barrier and deterministic route-selection decision corpora.
 
@@ -10,6 +12,8 @@ Runtime scheduling is fixed by [runtime-semantics.md](runtime-semantics.md), and
 local event/checkpoint behavior is fixed by
 [persistence-semantics.md](persistence-semantics.md). Deterministic primitive
 behavior is fixed by [primitives-semantics.md](primitives-semantics.md).
+Scheduler-integrated continuation for one immutable DAG is fixed by
+[durable-recovery-semantics.md](durable-recovery-semantics.md).
 
 ## Canonical serialization v1alpha1
 

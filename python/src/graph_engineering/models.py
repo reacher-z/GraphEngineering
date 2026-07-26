@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Annotated, Literal, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -11,6 +12,11 @@ JsonPrimitive: TypeAlias = str | int | float | bool | None
 JsonValue: TypeAlias = PydanticJsonValue
 JsonObject: TypeAlias = dict[str, JsonValue]
 MAX_SAFE_INTEGER = 2**53 - 1
+MAX_TIMER_MILLISECONDS = 2**31 - 1
+SafePositiveInteger: TypeAlias = Annotated[int, Field(ge=1, le=MAX_SAFE_INTEGER)]
+SafeNonNegativeInteger: TypeAlias = Annotated[int, Field(ge=0, le=MAX_SAFE_INTEGER)]
+TimerPositiveMilliseconds: TypeAlias = Annotated[int, Field(ge=1, le=MAX_TIMER_MILLISECONDS)]
+TimerNonNegativeMilliseconds: TypeAlias = Annotated[int, Field(ge=0, le=MAX_TIMER_MILLISECONDS)]
 
 NodeKind: TypeAlias = Literal[
     "agent",
@@ -56,14 +62,23 @@ class RetryPolicy(StrictModel):
     max_attempts: Annotated[int, Field(ge=1, le=100)] | None = Field(
         default=None, alias="maxAttempts"
     )
-    initial_delay_ms: Annotated[int, Field(ge=0)] | None = Field(
+    initial_delay_ms: TimerNonNegativeMilliseconds | None = Field(
         default=None, alias="initialDelayMs"
     )
-    max_delay_ms: Annotated[int, Field(ge=0)] | None = Field(default=None, alias="maxDelayMs")
+    max_delay_ms: TimerNonNegativeMilliseconds | None = Field(default=None, alias="maxDelayMs")
     backoff_multiplier: Annotated[float, Field(ge=1)] | None = Field(
         default=None, alias="backoffMultiplier"
     )
     jitter: bool | None = None
+
+    @field_validator("backoff_multiplier")
+    @classmethod
+    def backoff_multiplier_is_portable(cls, value: float | None) -> float | None:
+        if value is not None and (
+            not math.isfinite(value) or (value.is_integer() and abs(value) > MAX_SAFE_INTEGER)
+        ):
+            raise ValueError("backoffMultiplier must be a portable finite number")
+        return value
 
 
 class NodeSpec(StrictModel):
@@ -73,7 +88,7 @@ class NodeSpec(StrictModel):
     output_schema: JsonObject = Field(alias="outputSchema")
     config: JsonValue
     retry: RetryPolicy | None = None
-    timeout_ms: Annotated[int, Field(ge=1)] | None = Field(default=None, alias="timeoutMs")
+    timeout_ms: TimerPositiveMilliseconds | None = Field(default=None, alias="timeoutMs")
     cache: JsonObject | None = None
     resources: JsonObject | None = None
     isolation: JsonObject | None = None
@@ -100,21 +115,22 @@ class GraphPolicies(BaseModel):
         strict=True,
     )
 
-    max_concurrency: Annotated[int, Field(ge=1)] | None = Field(
-        default=None, alias="maxConcurrency"
-    )
-    max_dynamic_nodes: Annotated[int, Field(ge=0)] | None = Field(
-        default=None, alias="maxDynamicNodes"
-    )
-    max_depth: Annotated[int, Field(ge=1)] | None = Field(default=None, alias="maxDepth")
-    max_fan_out: Annotated[int, Field(ge=1)] | None = Field(default=None, alias="maxFanOut")
-    max_total_attempts: Annotated[int, Field(ge=1)] | None = Field(
-        default=None, alias="maxTotalAttempts"
-    )
-    max_duration_ms: Annotated[int, Field(ge=1)] | None = Field(
-        default=None, alias="maxDurationMs"
-    )
+    max_concurrency: SafePositiveInteger | None = Field(default=None, alias="maxConcurrency")
+    max_dynamic_nodes: SafeNonNegativeInteger | None = Field(default=None, alias="maxDynamicNodes")
+    max_depth: SafePositiveInteger | None = Field(default=None, alias="maxDepth")
+    max_fan_out: SafePositiveInteger | None = Field(default=None, alias="maxFanOut")
+    max_total_attempts: SafePositiveInteger | None = Field(default=None, alias="maxTotalAttempts")
+    max_duration_ms: TimerPositiveMilliseconds | None = Field(default=None, alias="maxDurationMs")
     max_cost_usd: Annotated[float, Field(ge=0)] | None = Field(default=None, alias="maxCostUsd")
+
+    @field_validator("max_cost_usd")
+    @classmethod
+    def max_cost_usd_is_portable(cls, value: float | None) -> float | None:
+        if value is not None and (
+            not math.isfinite(value) or (value.is_integer() and abs(value) > MAX_SAFE_INTEGER)
+        ):
+            raise ValueError("maxCostUsd must be a portable finite number")
+        return value
 
 
 class GraphSpec(StrictModel):

@@ -1,0 +1,233 @@
+{
+  "contractVersion": "graphengineering.reacher-z.github.io/durable-json-conformance/v1alpha1",
+  "sourceKinds": {
+    "json": "The value is supplied directly through the runtime portable-JSON boundary.",
+    "float64Bits": "The value is constructed from the exact IEEE-754 binary64 big-endian bit pattern before encoding."
+  },
+  "validCases": [
+    {
+      "name": "null",
+      "source": { "kind": "json", "value": null },
+      "expect": {
+        "encoding": ["n"],
+        "canonicalJson": "[\"n\"]",
+        "sha256": "e00e71c16c36d75ab3d0f00c3647ac15d0f62b1fd6bec81dce7c7b5b3cc22d91"
+      }
+    },
+    {
+      "name": "boolean-false",
+      "source": { "kind": "json", "value": false },
+      "expect": {
+        "encoding": ["b", false],
+        "canonicalJson": "[\"b\",false]",
+        "sha256": "0e18bc49d2784c233215706d4ba8f6d2f39ed2df682db7ae0aa0c6d828652fdf"
+      }
+    },
+    {
+      "name": "boolean-true",
+      "source": { "kind": "json", "value": true },
+      "expect": {
+        "encoding": ["b", true],
+        "canonicalJson": "[\"b\",true]",
+        "sha256": "0dbefb4639551bc45eb8fd259a34cf1ca856f1fca6ae929eb0f876c4afc5831a"
+      }
+    },
+    {
+      "name": "unicode-string",
+      "source": { "kind": "json", "value": "研究🚀" },
+      "expect": {
+        "encoding": ["s", "研究🚀"],
+        "canonicalJson": "[\"s\",\"研究🚀\"]",
+        "sha256": "9de41f886dd112ad06f21fcbb129392ed4da88bfab57239c667095c362eb041d"
+      }
+    },
+    {
+      "name": "safe-integer-zero",
+      "source": { "kind": "json", "value": 0 },
+      "expect": {
+        "encoding": ["i", 0],
+        "canonicalJson": "[\"i\",0]",
+        "sha256": "cf90071f7873eb01c9442fcc709f5ac1106731c3a9e766e000753f2a35073c64"
+      }
+    },
+    {
+      "name": "safe-integer-maximum",
+      "source": { "kind": "json", "value": 9007199254740991 },
+      "expect": {
+        "encoding": ["i", 9007199254740991],
+        "canonicalJson": "[\"i\",9007199254740991]",
+        "sha256": "559391a8de45a57d0d2f4279a14fec1192264ca6c5e640b67f6681aa20b0996c"
+      }
+    },
+    {
+      "name": "safe-integer-minimum",
+      "source": { "kind": "json", "value": -9007199254740991 },
+      "expect": {
+        "encoding": ["i", -9007199254740991],
+        "canonicalJson": "[\"i\",-9007199254740991]",
+        "sha256": "82de17a167919d3df57af77d4871534d73ed7866c27a2ba2646621f82685b14d"
+      }
+    },
+    {
+      "name": "float-one-point-five",
+      "source": { "kind": "float64Bits", "bits": "3ff8000000000000" },
+      "expect": {
+        "encoding": ["f", "3ff8000000000000"],
+        "canonicalJson": "[\"f\",\"3ff8000000000000\"]",
+        "sha256": "402d08cb036936e5c214e5f0a14288cf45d6935aa9d798a671f9526c1a10c954"
+      }
+    },
+    {
+      "name": "float-zero-point-one",
+      "source": { "kind": "float64Bits", "bits": "3fb999999999999a" },
+      "expect": {
+        "encoding": ["f", "3fb999999999999a"],
+        "canonicalJson": "[\"f\",\"3fb999999999999a\"]",
+        "sha256": "2184d4b652ef5806e5481327c29fa93a19e30c16d1abf39dfc3647d173da51a5"
+      }
+    },
+    {
+      "name": "float-minimum-positive-subnormal",
+      "source": { "kind": "float64Bits", "bits": "0000000000000001" },
+      "expect": {
+        "encoding": ["f", "0000000000000001"],
+        "canonicalJson": "[\"f\",\"0000000000000001\"]",
+        "sha256": "c016ee244b58fae0f74ef3de6746063dac0819c909f443277d92472a7a633959"
+      }
+    },
+    {
+      "name": "negative-zero-normalizes-to-integer-zero",
+      "source": { "kind": "float64Bits", "bits": "8000000000000000" },
+      "expect": {
+        "encoding": ["i", 0],
+        "canonicalJson": "[\"i\",0]",
+        "sha256": "cf90071f7873eb01c9442fcc709f5ac1106731c3a9e766e000753f2a35073c64"
+      }
+    },
+    {
+      "name": "integer-valued-double-normalizes-to-integer",
+      "source": { "kind": "float64Bits", "bits": "3ff0000000000000" },
+      "expect": {
+        "encoding": ["i", 1],
+        "canonicalJson": "[\"i\",1]",
+        "sha256": "f9040b6e372a701015fda86238d49df633cd2e695f8446a8a480b5107ff16141"
+      }
+    },
+    {
+      "name": "unicode-code-point-object-order",
+      "source": {
+        "kind": "json",
+        "value": {
+          "𐀀": "astral",
+          "\ue000": "bmp-private-use",
+          "a": 1
+        }
+      },
+      "expect": {
+        "encoding": [
+          "o",
+          [
+            ["a", ["i", 1]],
+            ["\ue000", ["s", "bmp-private-use"]],
+            ["𐀀", ["s", "astral"]]
+          ]
+        ],
+        "canonicalJson": "[\"o\",[[\"a\",[\"i\",1]],[\"\ue000\",[\"s\",\"bmp-private-use\"]],[\"𐀀\",[\"s\",\"astral\"]]]]",
+        "sha256": "9781e710d5ffac2e06b9483eaeb5f7f4414b78629f8f08d4e7ede8472d5509c3"
+      }
+    },
+    {
+      "name": "nested-array-object",
+      "source": {
+        "kind": "json",
+        "value": {
+          "z": [null, true, { "b": "text", "a": 1 }],
+          "a": { "nested": [1, false] }
+        }
+      },
+      "expect": {
+        "encoding": [
+          "o",
+          [
+            ["a", ["o", [["nested", ["a", [["i", 1], ["b", false]]]]]]],
+            [
+              "z",
+              [
+                "a",
+                [
+                  ["n"],
+                  ["b", true],
+                  ["o", [["a", ["i", 1]], ["b", ["s", "text"]]]]
+                ]
+              ]
+            ]
+          ]
+        ],
+        "canonicalJson": "[\"o\",[[\"a\",[\"o\",[[\"nested\",[\"a\",[[\"i\",1],[\"b\",false]]]]]]],[\"z\",[\"a\",[[\"n\"],[\"b\",true],[\"o\",[[\"a\",[\"i\",1]],[\"b\",[\"s\",\"text\"]]]]]]]]]",
+        "sha256": "e4fa829e271e60d7ab0ed53abef034ce87f7e43848c321c93829c2652b138030"
+      }
+    }
+  ],
+  "invalidEncodedCases": [
+    {
+      "name": "unknown-tag",
+      "encoding": ["x"],
+      "reason": "The tag is not part of Durable JSON v1alpha1.",
+      "expect": { "schemaValid": false, "codecValid": false }
+    },
+    {
+      "name": "wrong-arity",
+      "encoding": ["n", null],
+      "reason": "The n form has exactly one item.",
+      "expect": { "schemaValid": false, "codecValid": false }
+    },
+    {
+      "name": "unsafe-integer",
+      "encoding": ["i", 9007199254740992],
+      "reason": "Integer payloads cannot exceed the interoperable safe range.",
+      "expect": { "schemaValid": false, "codecValid": false }
+    },
+    {
+      "name": "positive-infinity-bits",
+      "encoding": ["f", "7ff0000000000000"],
+      "reason": "The f bits decode to a non-finite value.",
+      "expect": { "schemaValid": true, "codecValid": false }
+    },
+    {
+      "name": "quiet-nan-bits",
+      "encoding": ["f", "7ff8000000000000"],
+      "reason": "The f bits decode to a non-finite value.",
+      "expect": { "schemaValid": true, "codecValid": false }
+    },
+    {
+      "name": "integer-valued-float-bits",
+      "encoding": ["f", "3ff0000000000000"],
+      "reason": "The value 1.0 has the canonical i encoding instead.",
+      "expect": { "schemaValid": true, "codecValid": false }
+    },
+    {
+      "name": "negative-zero-float-bits",
+      "encoding": ["f", "8000000000000000"],
+      "reason": "Negative zero normalizes to the canonical i zero encoding.",
+      "expect": { "schemaValid": true, "codecValid": false }
+    },
+    {
+      "name": "uppercase-float-bits",
+      "encoding": ["f", "3FF8000000000000"],
+      "reason": "The binary64 payload must use exactly sixteen lowercase hexadecimal digits.",
+      "expect": { "schemaValid": false, "codecValid": false }
+    },
+    {
+      "name": "unsorted-object-keys",
+      "encoding": ["o", [["b", ["n"]], ["a", ["n"]]]],
+      "reason": "Object keys must be strictly increasing by Unicode code point.",
+      "expect": { "schemaValid": true, "codecValid": false }
+    },
+    {
+      "name": "duplicate-object-keys",
+      "encoding": ["o", [["a", ["n"]], ["a", ["b", true]]]],
+      "reason": "Strict key ordering forbids duplicate normalized keys.",
+      "expect": { "schemaValid": true, "codecValid": false }
+    }
+  ]
+}

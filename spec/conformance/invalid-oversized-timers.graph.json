@@ -1,0 +1,26 @@
+{
+  "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+  "kind": "Graph",
+  "metadata": { "name": "oversized-timers", "version": "1" },
+  "inputSchema": {},
+  "outputSchema": {},
+  "entrypoints": ["root"],
+  "outputs": { "result": { "node": "root" } },
+  "nodes": [
+    {
+      "id": "root",
+      "kind": "transform",
+      "inputSchema": {},
+      "outputSchema": {},
+      "config": {},
+      "retry": {
+        "maxAttempts": 2,
+        "initialDelayMs": 2147483648,
+        "maxDelayMs": 2147483648
+      },
+      "timeoutMs": 2147483648
+    }
+  ],
+  "edges": [],
+  "policies": { "maxDurationMs": 2147483648 }
+}

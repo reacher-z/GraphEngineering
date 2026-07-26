@@ -14,6 +14,7 @@ export const GRAPH_EVENT_TYPES = [
   "NodeScheduled",
   "NodeStarted",
   "NodeAttemptFailed",
+  "NodeSettledWithoutAttempt",
   "NodeRetried",
   "NodeSucceeded",
   "EdgeEmitted",

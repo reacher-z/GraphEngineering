@@ -5,12 +5,14 @@ from __future__ import annotations
 import asyncio
 import inspect
 from collections.abc import Awaitable, Callable, Mapping
+from contextlib import suppress
 from dataclasses import dataclass
 from enum import StrEnum
 from types import MappingProxyType
+from typing import Protocol
 
-from .compiler import CompiledGraph
-from .models import Endpoint, GraphSpec, JsonValue, NodeSpec
+from .compiler import CompiledGraph, compile_graph
+from .models import MAX_SAFE_INTEGER, Endpoint, GraphSpec, JsonValue, NodeSpec
 from .portable_json import PortableJsonError, portable_json_snapshot
 
 
@@ -36,6 +38,7 @@ class FailureCode(StrEnum):
     INPUT_BINDING_FAILED = "INPUT_BINDING_FAILED"
     OUTPUT_BINDING_FAILED = "OUTPUT_BINDING_FAILED"
     ATTEMPT_BUDGET_EXHAUSTED = "ATTEMPT_BUDGET_EXHAUSTED"
+    NODE_EXECUTION_INTERRUPTED = "NODE_EXECUTION_INTERRUPTED"
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,6 +51,7 @@ class NodeFailure:
     exception_type: str | None = None
     upstream_nodes: tuple[str, ...] = ()
     output_name: str | None = None
+    output_port: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +63,9 @@ class NodeResult:
     input: JsonValue = None
     value: JsonValue = None
     failure: NodeFailure | None = None
+    # JSON null is a valid bound input, so durable recovery needs a separate
+    # presence bit for outcomes that settled before input binding completed.
+    input_bound: bool = True
 
     @property
     def succeeded(self) -> bool:
@@ -96,6 +103,10 @@ class NodeContext:
     completed: Mapping[str, JsonValue]
     attempt: int
     cancel_signal: CancellationSignal
+    run_id: str | None = None
+    attempt_id: str | None = None
+    idempotency_key: str | None = None
+    activity_key: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,6 +129,46 @@ class RunResult:
 NodeHandler = Callable[[NodeContext], JsonValue | Awaitable[JsonValue]]
 
 
+@dataclass(frozen=True, slots=True)
+class _AttemptIdentity:
+    run_id: str
+    attempt_id: str
+    activity_key: str
+
+
+class _SchedulerJournal(Protocol):
+    async def before_attempt(
+        self,
+        node: NodeSpec,
+        node_input: JsonValue,
+        attempt: int,
+    ) -> _AttemptIdentity: ...
+
+    async def attempt_failed(
+        self,
+        failure: NodeFailure,
+        *,
+        will_retry: bool,
+        retry_delay_ms: float,
+    ) -> int: ...
+
+    async def node_succeeded(
+        self,
+        node: NodeSpec,
+        node_input: JsonValue,
+        attempt: int,
+        output: JsonValue,
+    ) -> int: ...
+
+    async def node_settled_without_attempt(
+        self,
+        node: NodeSpec,
+        result: NodeResult,
+    ) -> int: ...
+
+    async def run_terminal(self, result: RunResult) -> None: ...
+
+
 class _BindingError(ValueError):
     pass
 
@@ -134,6 +185,15 @@ class _HandlerCancelled(Exception):
     pass
 
 
+def _consume_background_task_outcome(task: asyncio.Task[NodeResult]) -> None:
+    """Observe a detached durable task so a late failure is never unhandled."""
+
+    if task.cancelled():
+        return
+    with suppress(asyncio.CancelledError):
+        _ = task.exception()
+
+
 def _snapshot_node_output(value: object) -> JsonValue:
     try:
         return portable_json_snapshot(value)
@@ -141,6 +201,19 @@ def _snapshot_node_output(value: object) -> JsonValue:
         raise _InvalidOutputError(
             "node returned a value that is not a portable finite JSON value"
         ) from exc
+
+
+def _snapshot_context_graph(graph: GraphSpec) -> GraphSpec:
+    document = portable_json_snapshot(
+        graph.model_dump(mode="json", by_alias=True, exclude_unset=True)
+    )
+    if type(document) is not dict:
+        raise AssertionError("graph context snapshot must be an object")
+    return GraphSpec.model_validate(document)
+
+
+def _snapshot_compiled_graph(graph: CompiledGraph) -> CompiledGraph:
+    return compile_graph(_snapshot_context_graph(graph.spec))
 
 
 async def _resolve_node_output(value: Awaitable[JsonValue]) -> JsonValue:
@@ -225,6 +298,7 @@ def _cancelled_result(
     *,
     status: NodeStatus,
     node_input: JsonValue = None,
+    input_bound: bool = True,
 ) -> NodeResult:
     return NodeResult(
         node_id=node_id,
@@ -232,6 +306,7 @@ def _cancelled_result(
         status=status,
         attempts=attempts,
         input=node_input,
+        input_bound=input_bound,
         failure=NodeFailure(
             FailureCode.NODE_CANCELLED,
             f"node {node_id!r} was cancelled",
@@ -267,9 +342,7 @@ class AsyncScheduler:
 
     def _handler_for(self, node: NodeSpec) -> NodeHandler | None:
         handler = (
-            self._handlers.get(node.id)
-            or self._handlers.get(node.kind)
-            or self._handlers.get("*")
+            self._handlers.get(node.id) or self._handlers.get(node.kind) or self._handlers.get("*")
         )
         if handler is None and node.kind in {"transform", "barrier"}:
             return _identity_handler
@@ -300,8 +373,17 @@ class AsyncScheduler:
     def _retry_delay_ms(node: NodeSpec, failed_attempt: int) -> float:
         initial = float(node.retry.initial_delay_ms or 0) if node.retry else 0.0
         multiplier = float(node.retry.backoff_multiplier or 1) if node.retry else 1.0
-        maximum = float(node.retry.max_delay_ms or initial) if node.retry else initial
-        return min(maximum, initial * multiplier ** max(0, failed_attempt - 1))
+        configured_maximum = (
+            float(node.retry.max_delay_ms)
+            if node.retry and node.retry.max_delay_ms is not None
+            else initial
+        )
+        maximum = max(initial, configured_maximum)
+        try:
+            scaled = initial * multiplier ** max(0, failed_attempt - 1)
+        except OverflowError:
+            scaled = float("inf")
+        return min(maximum, scaled)
 
     async def _attempt(self, handler: NodeHandler, context: NodeContext) -> JsonValue:
         if context.cancel_signal.cancelled:
@@ -355,59 +437,114 @@ class AsyncScheduler:
         graph_input: JsonValue,
         completed: Mapping[str, JsonValue],
         cancel_signal: CancellationSignal,
-        claim_attempt: Callable[[], bool],
+        claim_attempt: Callable[[str], bool],
+        reserve_retry: Callable[[str], bool],
+        release_retry_reservation: Callable[[str], None],
         attempt_semaphore: asyncio.Semaphore,
         on_attempt_started: Callable[[], None],
         on_attempt_finished: Callable[[], None],
+        on_outcome_committed: Callable[[str, int], None],
+        *,
+        attempt_offset: int = 0,
+        journal: _SchedulerJournal | None = None,
+        initial_retry_delay_seconds: float = 0,
     ) -> NodeResult:
         node = graph.nodes[node_id]
-        if cancel_signal.cancelled:
-            return _cancelled_result(
-                node_id,
-                sequence,
-                0,
-                status=NodeStatus.FAILED,
-                node_input=node_input,
-            )
-        handler = self._handler_for(node)
-        if handler is None:
-            return NodeResult(
-                node_id=node_id,
-                sequence=sequence,
-                status=NodeStatus.FAILED,
-                attempts=0,
-                input=node_input,
-                failure=NodeFailure(
-                    FailureCode.EXECUTOR_NOT_FOUND,
-                    f"no executor is registered for node {node_id!r} or kind {node.kind!r}",
-                    node_id,
-                    0,
-                ),
-            )
+        attempts = attempt_offset
 
-        max_attempts = (node.retry.max_attempts or 1) if node.retry else 1
-        attempts = 0
-        last_failure: NodeFailure | None = None
-        while attempts < max_attempts:
-            if not await _acquire_attempt_slot(attempt_semaphore, cancel_signal):
-                return _cancelled_result(
+        async def settled_without_attempt(result: NodeResult) -> NodeResult:
+            if journal is not None:
+                ordinal = await journal.node_settled_without_attempt(node, result)
+                on_outcome_committed(node_id, ordinal)
+            release_retry_reservation(node_id)
+            return result
+
+        if cancel_signal.cancelled:
+            return await settled_without_attempt(
+                _cancelled_result(
                     node_id,
                     sequence,
                     attempts,
                     status=NodeStatus.FAILED,
                     node_input=node_input,
                 )
-            on_attempt_started()
-            try:
-                if cancel_signal.cancelled:
-                    return _cancelled_result(
+            )
+        handler = self._handler_for(node)
+        if handler is None:
+            return await settled_without_attempt(
+                NodeResult(
+                    node_id=node_id,
+                    sequence=sequence,
+                    status=NodeStatus.FAILED,
+                    attempts=attempts,
+                    input=node_input,
+                    failure=NodeFailure(
+                        FailureCode.EXECUTOR_NOT_FOUND,
+                        f"no executor is registered for node {node_id!r} or kind {node.kind!r}",
+                        node_id,
+                        attempts,
+                    ),
+                )
+            )
+
+        max_attempts = (node.retry.max_attempts or 1) if node.retry else 1
+        last_failure: NodeFailure | None = None
+        if initial_retry_delay_seconds > 0 and not await _delay_or_cancel(
+            initial_retry_delay_seconds,
+            cancel_signal,
+        ):
+            return await settled_without_attempt(
+                _cancelled_result(
+                    node_id,
+                    sequence,
+                    attempts,
+                    status=NodeStatus.FAILED,
+                    node_input=node_input,
+                )
+            )
+        if attempts >= max_attempts:
+            failure = NodeFailure(
+                FailureCode.ATTEMPT_BUDGET_EXHAUSTED,
+                f"node {node_id!r} has exhausted its durable attempt budget",
+                node_id,
+                attempts,
+            )
+            return await settled_without_attempt(
+                NodeResult(
+                    node_id=node_id,
+                    sequence=sequence,
+                    status=NodeStatus.FAILED,
+                    attempts=attempts,
+                    input=node_input,
+                    failure=failure,
+                )
+            )
+        while attempts < max_attempts:
+            if not await _acquire_attempt_slot(attempt_semaphore, cancel_signal):
+                return await settled_without_attempt(
+                    _cancelled_result(
                         node_id,
                         sequence,
                         attempts,
                         status=NodeStatus.FAILED,
                         node_input=node_input,
                     )
-                if not claim_attempt():
+                )
+            attempt_counted = False
+            may_retry = False
+            delay_ms = 0.0
+            try:
+                if cancel_signal.cancelled:
+                    return await settled_without_attempt(
+                        _cancelled_result(
+                            node_id,
+                            sequence,
+                            attempts,
+                            status=NodeStatus.FAILED,
+                            node_input=node_input,
+                        )
+                    )
+                if not claim_attempt(node_id):
                     if last_failure is None:
                         last_failure = NodeFailure(
                             FailureCode.ATTEMPT_BUDGET_EXHAUSTED,
@@ -424,19 +561,30 @@ class AsyncScheduler:
                             retryable=False,
                             exception_type=last_failure.exception_type,
                         )
-                    return NodeResult(
-                        node_id=node_id,
-                        sequence=sequence,
-                        status=NodeStatus.FAILED,
-                        attempts=attempts,
-                        input=node_input,
-                        failure=last_failure,
+                    return await settled_without_attempt(
+                        NodeResult(
+                            node_id=node_id,
+                            sequence=sequence,
+                            status=NodeStatus.FAILED,
+                            attempts=attempts,
+                            input=node_input,
+                            failure=last_failure,
+                        )
                     )
 
                 attempts += 1
+                identity = (
+                    await journal.before_attempt(node, node_input, attempts)
+                    if journal is not None
+                    else None
+                )
+                on_attempt_started()
+                attempt_counted = True
                 attempt_input = portable_json_snapshot(node_input)
                 attempt_graph_input = portable_json_snapshot(graph_input)
                 attempt_completed = portable_json_snapshot(dict(completed))
+                context_graph = _snapshot_context_graph(graph.spec)
+                context_node = next(item for item in context_graph.nodes if item.id == node_id)
                 if not isinstance(attempt_completed, dict):
                     raise AssertionError("completed snapshot must be an object")
                 mapping_input = (
@@ -445,14 +593,18 @@ class AsyncScheduler:
                     else MappingProxyType({})
                 )
                 context = NodeContext(
-                    graph=graph.spec,
-                    node=node,
+                    graph=context_graph,
+                    node=context_node,
                     input=attempt_input,
                     graph_input=attempt_graph_input,
                     inputs=mapping_input,
                     completed=MappingProxyType(attempt_completed),
                     attempt=attempts,
                     cancel_signal=cancel_signal,
+                    run_id=identity.run_id if identity is not None else None,
+                    attempt_id=identity.attempt_id if identity is not None else None,
+                    idempotency_key=(identity.activity_key if identity is not None else None),
+                    activity_key=identity.activity_key if identity is not None else None,
                 )
                 try:
                     value = await self._attempt(handler, context)
@@ -463,8 +615,7 @@ class AsyncScheduler:
                 except _HandlerCancelled:
                     code = FailureCode.NODE_EXECUTION_FAILED
                     message = (
-                        f"node {node_id!r} failed: handler was cancelled without "
-                        "run cancellation"
+                        f"node {node_id!r} failed: handler was cancelled without run cancellation"
                     )
                     exception_type = "CancelledError"
                 except TimeoutError as exc:
@@ -488,6 +639,14 @@ class AsyncScheduler:
                     )
                     exception_type = type(exc).__name__
                 else:
+                    if journal is not None:
+                        ordinal = await journal.node_succeeded(
+                            node,
+                            node_input,
+                            attempts,
+                            value,
+                        )
+                        on_outcome_committed(node_id, ordinal)
                     return NodeResult(
                         node_id=node_id,
                         sequence=sequence,
@@ -496,19 +655,36 @@ class AsyncScheduler:
                         input=node_input,
                         value=value,
                     )
+
+                may_retry = (
+                    attempts < max_attempts
+                    and code is not FailureCode.NODE_CANCELLED
+                    and reserve_retry(node_id)
+                )
+                last_failure = NodeFailure(
+                    code,
+                    message,
+                    node_id,
+                    attempts,
+                    retryable=may_retry,
+                    exception_type=exception_type,
+                )
+                delay_ms = self._retry_delay_ms(node, attempts) if may_retry else 0.0
+                if journal is not None:
+                    ordinal = await journal.attempt_failed(
+                        last_failure,
+                        will_retry=may_retry,
+                        retry_delay_ms=delay_ms,
+                    )
+                    if not may_retry:
+                        on_outcome_committed(node_id, ordinal)
             finally:
-                on_attempt_finished()
+                if attempt_counted:
+                    on_attempt_finished()
                 attempt_semaphore.release()
 
-            may_retry = attempts < max_attempts and code is not FailureCode.NODE_CANCELLED
-            last_failure = NodeFailure(
-                code,
-                message,
-                node_id,
-                attempts,
-                retryable=may_retry,
-                exception_type=exception_type,
-            )
+            if last_failure is None:
+                raise AssertionError("failed node attempt omitted its failure")
             if not may_retry:
                 return NodeResult(
                     node_id=node_id,
@@ -518,66 +694,117 @@ class AsyncScheduler:
                     input=node_input,
                     failure=last_failure,
                 )
-            delay_ms = self._retry_delay_ms(node, attempts)
-            if delay_ms > 0 and not await _delay_or_cancel(
-                delay_ms / 1000, cancel_signal
-            ):
-                return _cancelled_result(
-                    node_id,
-                    sequence,
-                    attempts,
-                    status=NodeStatus.FAILED,
-                    node_input=node_input,
+            if delay_ms > 0 and not await _delay_or_cancel(delay_ms / 1000, cancel_signal):
+                return await settled_without_attempt(
+                    _cancelled_result(
+                        node_id,
+                        sequence,
+                        attempts,
+                        status=NodeStatus.FAILED,
+                        node_input=node_input,
+                    )
                 )
 
         raise AssertionError("bounded retry loop exited unexpectedly")
 
-    async def run(
+    async def _run(
         self,
         graph: CompiledGraph,
         graph_input: JsonValue,
         *,
         cancel_event: asyncio.Event | None = None,
+        journal: _SchedulerJournal | None = None,
+        initial_results: Mapping[str, NodeResult] | None = None,
+        attempt_offsets: Mapping[str, int] | None = None,
+        initial_total_attempts: int = 0,
+        initial_scheduled_order: tuple[str, ...] = (),
+        initial_completion_order: tuple[str, ...] = (),
+        initial_max_observed_concurrency: int = 0,
+        initial_retry_delays: Mapping[str, float] | None = None,
     ) -> RunResult:
         """Run a compiled graph and return deterministic, structured results."""
 
+        graph = _snapshot_compiled_graph(graph)
         try:
             graph_input_snapshot = portable_json_snapshot(graph_input)
         except PortableJsonError:
-            raise TypeError(
-                "graph input must be a portable finite JSON value"
-            ) from None
+            raise TypeError("graph input must be a portable finite JSON value") from None
         if cancel_event is not None and not isinstance(cancel_event, asyncio.Event):
             raise TypeError("cancel_event must be an asyncio.Event")
         cancellation = CancellationSignal(cancel_event or asyncio.Event())
 
         sequence = {node_id: index for index, node_id in enumerate(graph.topological_order)}
+        restored_results = dict(initial_results or {})
+        if not set(restored_results).issubset(graph.nodes):
+            raise ValueError("initial_results contains a node outside the compiled graph")
         remaining = {node_id: len(graph.incoming[node_id]) for node_id in graph.nodes}
+        for restored_node_id in graph.topological_order:
+            if restored_node_id not in restored_results:
+                continue
+            for edge in graph.outgoing[restored_node_id]:
+                remaining[edge.target.node] -= 1
         ready = sorted(
-            (node_id for node_id, count in remaining.items() if count == 0),
+            (
+                node_id
+                for node_id, count in remaining.items()
+                if count == 0 and node_id not in restored_results
+            ),
             key=sequence.__getitem__,
         )
         active: dict[asyncio.Task[NodeResult], str] = {}
-        results: dict[str, NodeResult] = {}
-        scheduled: list[str] = []
-        completion: list[str] = []
+        results: dict[str, NodeResult] = restored_results
+        scheduled: list[str] = list(initial_scheduled_order)
+        completion: list[str] = list(initial_completion_order)
+        durable_completion_prefix = tuple(initial_completion_order)
+        completion_ordinals: dict[str, int] = {}
         concurrency = self._effective_concurrency(graph)
         attempt_limit = (
             graph.spec.policies.max_total_attempts
             if graph.spec.policies and graph.spec.policies.max_total_attempts is not None
-            else 2**63 - 1
+            else MAX_SAFE_INTEGER
         )
-        total_attempts = 0
+        if (
+            type(initial_total_attempts) is not int
+            or initial_total_attempts < 0
+            or initial_total_attempts > MAX_SAFE_INTEGER
+        ):
+            raise TypeError("initial_total_attempts must be a non-negative safe integer")
+        total_attempts = initial_total_attempts
+        retry_reservations = set((initial_retry_delays or {}).keys())
+        for node_id in retry_reservations:
+            if node_id not in graph.nodes:
+                raise ValueError(f"initial_retry_delays contains unknown node {node_id!r}")
+            if node_id in restored_results:
+                raise ValueError(f"initial retry reservation targets settled node {node_id!r}")
+        if total_attempts + len(retry_reservations) > attempt_limit:
+            raise ValueError(
+                "initial durable attempts and retry reservations exceed maxTotalAttempts"
+            )
         running_attempts = 0
-        max_observed_concurrency = 0
+        max_observed_concurrency = initial_max_observed_concurrency
         attempt_semaphore = asyncio.Semaphore(concurrency)
 
-        def claim_attempt() -> bool:
+        def claim_attempt(node_id: str) -> bool:
             nonlocal total_attempts
-            if total_attempts >= attempt_limit:
+            if node_id in retry_reservations:
+                retry_reservations.remove(node_id)
+                total_attempts += 1
+                return True
+            if total_attempts + len(retry_reservations) >= attempt_limit:
                 return False
             total_attempts += 1
             return True
+
+        def reserve_retry(node_id: str) -> bool:
+            if node_id in retry_reservations:
+                return False
+            if total_attempts + len(retry_reservations) >= attempt_limit:
+                return False
+            retry_reservations.add(node_id)
+            return True
+
+        def release_retry_reservation(node_id: str) -> None:
+            retry_reservations.discard(node_id)
 
         def on_attempt_started() -> None:
             nonlocal running_attempts, max_observed_concurrency
@@ -587,6 +814,11 @@ class AsyncScheduler:
         def on_attempt_finished() -> None:
             nonlocal running_attempts
             running_attempts -= 1
+
+        def on_outcome_committed(node_id: str, ordinal: int) -> None:
+            if node_id in completion_ordinals:
+                raise RuntimeError(f"node {node_id!r} committed more than one terminal outcome")
+            completion_ordinals[node_id] = ordinal
 
         def settle(node_id: str, result: NodeResult) -> None:
             results[node_id] = result
@@ -598,18 +830,28 @@ class AsyncScheduler:
                     ready.append(target)
             ready.sort(key=sequence.__getitem__)
 
-        def launch_ready() -> None:
+        async def settle_without_attempt(node_id: str, result: NodeResult) -> None:
+            if journal is not None:
+                ordinal = await journal.node_settled_without_attempt(graph.nodes[node_id], result)
+                on_outcome_committed(node_id, ordinal)
+            release_retry_reservation(node_id)
+            settle(node_id, result)
+
+        async def launch_ready() -> None:
             while ready:
                 node_id = ready.pop(0)
-                scheduled.append(node_id)
+                attempt_offset = (attempt_offsets or {}).get(node_id, 0)
+                if node_id not in scheduled:
+                    scheduled.append(node_id)
                 if cancellation.cancelled:
-                    settle(
+                    await settle_without_attempt(
                         node_id,
                         _cancelled_result(
                             node_id,
                             sequence[node_id],
-                            0,
+                            attempt_offset,
                             status=NodeStatus.SKIPPED,
+                            input_bound=False,
                         ),
                     )
                     continue
@@ -623,18 +865,19 @@ class AsyncScheduler:
                     )
                 )
                 if upstream_failed:
-                    settle(
+                    await settle_without_attempt(
                         node_id,
                         NodeResult(
                             node_id=node_id,
                             sequence=sequence[node_id],
                             status=NodeStatus.SKIPPED,
-                            attempts=0,
+                            attempts=attempt_offset,
+                            input_bound=False,
                             failure=NodeFailure(
                                 FailureCode.UPSTREAM_FAILED,
                                 "node did not start because upstream dependencies failed",
                                 node_id,
-                                0,
+                                attempt_offset,
                                 upstream_nodes=upstream_failed,
                             ),
                         ),
@@ -649,18 +892,19 @@ class AsyncScheduler:
                         results,
                     )
                 except _BindingError as exc:
-                    settle(
+                    await settle_without_attempt(
                         node_id,
                         NodeResult(
                             node_id=node_id,
                             sequence=sequence[node_id],
                             status=NodeStatus.FAILED,
-                            attempts=0,
+                            attempts=attempt_offset,
+                            input_bound=False,
                             failure=NodeFailure(
                                 FailureCode.INPUT_BINDING_FAILED,
                                 f"could not bind input for node {node_id!r}: {exc}",
                                 node_id,
-                                0,
+                                attempt_offset,
                                 exception_type=type(exc).__name__,
                             ),
                         ),
@@ -684,27 +928,46 @@ class AsyncScheduler:
                         completed,
                         cancellation,
                         claim_attempt,
+                        reserve_retry,
+                        release_retry_reservation,
                         attempt_semaphore,
                         on_attempt_started,
                         on_attempt_finished,
+                        on_outcome_committed,
+                        attempt_offset=attempt_offset,
+                        journal=journal,
+                        initial_retry_delay_seconds=(initial_retry_delays or {}).get(node_id, 0),
                     )
                 )
                 active[task] = node_id
 
-        while len(results) < len(graph.nodes):
-            launch_ready()
-            if not active:
-                break
-            done, _ = await asyncio.wait(active, return_when=asyncio.FIRST_COMPLETED)
-            for task in sorted(done, key=lambda item: sequence[active[item]]):
-                node_id = active.pop(task)
-                settle(node_id, task.result())
+        try:
+            while len(results) < len(graph.nodes):
+                await launch_ready()
+                if not active:
+                    break
+                done, _ = await asyncio.wait(active, return_when=asyncio.FIRST_COMPLETED)
+                for task in sorted(done, key=lambda item: sequence[active[item]]):
+                    node_id = active.pop(task)
+                    settle(node_id, task.result())
+        except BaseException:
+            active_tasks = tuple(active)
+            if journal is not None:
+                # A journal failure is authoritative and must be surfaced even
+                # when an unrelated handler ignores cancellation. Observe each
+                # detached task's eventual outcome without delaying the error.
+                for task in active_tasks:
+                    task.add_done_callback(_consume_background_task_outcome)
+            for task in active_tasks:
+                if not task.done():
+                    task.cancel()
+            if journal is None:
+                await asyncio.gather(*active_tasks, return_exceptions=True)
+            raise
 
         ordered_results = {node_id: results[node_id] for node_id in graph.topological_order}
         failures = [
-            result.failure
-            for result in ordered_results.values()
-            if result.failure is not None
+            result.failure for result in ordered_results.values() if result.failure is not None
         ]
         output_values: dict[str, JsonValue] = {}
         outputs_complete = True
@@ -728,6 +991,7 @@ class AsyncScheduler:
                         0,
                         exception_type=type(exc).__name__,
                         output_name=output_name,
+                        output_port=endpoint.port,
                     )
                 )
 
@@ -738,17 +1002,44 @@ class AsyncScheduler:
         else:
             status = RunStatus.FAILED
         outputs = MappingProxyType(output_values) if outputs_complete else None
-        return RunResult(
+        completion_order = tuple(completion)
+        if journal is not None:
+            committed_suffix = tuple(
+                node_id
+                for node_id, _ in sorted(
+                    completion_ordinals.items(),
+                    key=lambda item: item[1],
+                )
+                if node_id not in durable_completion_prefix
+            )
+            completion_order = durable_completion_prefix + committed_suffix
+            if len(completion_order) != len(results) or set(completion_order) != set(results):
+                raise RuntimeError("durable run is missing an explicit committed node outcome")
+        run_result = RunResult(
             status=status,
             graph_hash=graph.graph_hash,
             nodes=MappingProxyType(ordered_results),
             outputs=outputs,
             failures=tuple(failures),
             scheduled_order=tuple(scheduled),
-            completion_order=tuple(completion),
+            completion_order=completion_order,
             max_observed_concurrency=max_observed_concurrency,
             total_attempts=total_attempts,
         )
+        if journal is not None:
+            await journal.run_terminal(run_result)
+        return run_result
+
+    async def run(
+        self,
+        graph: CompiledGraph,
+        graph_input: JsonValue,
+        *,
+        cancel_event: asyncio.Event | None = None,
+    ) -> RunResult:
+        """Run a compiled graph and return deterministic, structured results."""
+
+        return await self._run(graph, graph_input, cancel_event=cancel_event)
 
 
 async def run_graph(

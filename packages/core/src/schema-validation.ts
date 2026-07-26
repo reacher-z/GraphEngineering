@@ -49,6 +49,7 @@ const EDGE_MODES = new Set(["value", "stream", "artifact-ref"]);
 const SIDE_EFFECT_MODES = new Set(["none", "idempotent", "non-idempotent"]);
 const IDENTIFIER = /^[A-Za-z][A-Za-z0-9_.-]{0,127}$/;
 const GRAPH_NAME = /^[a-z][a-z0-9-]{0,62}$/;
+const MAX_TIMER_MILLISECONDS = 2_147_483_647;
 
 function record(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -108,8 +109,10 @@ function validateNode(value: unknown, index: number, issues: string[]): void {
   if (typeof value.kind !== "string" || !NODE_KINDS.has(value.kind)) issues.push(`${path}/kind: invalid node kind`);
   if (!record(value.inputSchema)) issues.push(`${path}/inputSchema: expected an object`);
   if (!record(value.outputSchema)) issues.push(`${path}/outputSchema: expected an object`);
-  if (value.timeoutMs !== undefined && (!Number.isInteger(value.timeoutMs) || (value.timeoutMs as number) < 1)) {
-    issues.push(`${path}/timeoutMs: expected a positive integer`);
+  if (value.timeoutMs !== undefined &&
+      (!Number.isSafeInteger(value.timeoutMs) || (value.timeoutMs as number) < 1 ||
+       (value.timeoutMs as number) > MAX_TIMER_MILLISECONDS)) {
+    issues.push(`${path}/timeoutMs: expected an integer from 1 to ${MAX_TIMER_MILLISECONDS}`);
   }
   if (value.sideEffects !== undefined && (typeof value.sideEffects !== "string" || !SIDE_EFFECT_MODES.has(value.sideEffects))) {
     issues.push(`${path}/sideEffects: invalid mode`);
@@ -123,12 +126,16 @@ function validateNode(value: unknown, index: number, issues: string[]): void {
     } else {
       unknownKeys(value.retry, RETRY_KEYS, `${path}/retry`, issues);
       const { maxAttempts, initialDelayMs, maxDelayMs, backoffMultiplier, jitter } = value.retry;
-      if (maxAttempts !== undefined && (!Number.isInteger(maxAttempts) || (maxAttempts as number) < 1 || (maxAttempts as number) > 100)) {
+      if (maxAttempts !== undefined && (!Number.isSafeInteger(maxAttempts) || (maxAttempts as number) < 1 || (maxAttempts as number) > 100)) {
         issues.push(`${path}/retry/maxAttempts: expected an integer from 1 to 100`);
       }
       for (const [name, delayValue] of [["initialDelayMs", initialDelayMs], ["maxDelayMs", maxDelayMs]] as const) {
-        if (delayValue !== undefined && (!Number.isInteger(delayValue) || (delayValue as number) < 0)) {
-          issues.push(`${path}/retry/${name}: expected a non-negative integer`);
+        if (delayValue !== undefined &&
+            (!Number.isSafeInteger(delayValue) || (delayValue as number) < 0 ||
+             (delayValue as number) > MAX_TIMER_MILLISECONDS)) {
+          issues.push(
+            `${path}/retry/${name}: expected an integer from 0 to ${MAX_TIMER_MILLISECONDS}`,
+          );
         }
       }
       if (backoffMultiplier !== undefined && (typeof backoffMultiplier !== "number" || backoffMultiplier < 1)) {
@@ -204,16 +211,23 @@ export function validateGraphDocument(value: unknown): readonly string[] {
         "maxDepth",
         "maxFanOut",
         "maxTotalAttempts",
-        "maxDurationMs",
       ] as const;
       for (const key of positiveIntegers) {
         const item = value.policies[key];
-        if (item !== undefined && (!Number.isInteger(item) || (item as number) < 1)) {
+        if (item !== undefined && (!Number.isSafeInteger(item) || (item as number) < 1)) {
           issues.push(`#/policies/${key}: expected a positive integer`);
         }
       }
+      const maxDurationMs = value.policies.maxDurationMs;
+      if (maxDurationMs !== undefined &&
+          (!Number.isSafeInteger(maxDurationMs) || (maxDurationMs as number) < 1 ||
+           (maxDurationMs as number) > MAX_TIMER_MILLISECONDS)) {
+        issues.push(
+          `#/policies/maxDurationMs: expected an integer from 1 to ${MAX_TIMER_MILLISECONDS}`,
+        );
+      }
       const dynamicNodes = value.policies.maxDynamicNodes;
-      if (dynamicNodes !== undefined && (!Number.isInteger(dynamicNodes) || (dynamicNodes as number) < 0)) {
+      if (dynamicNodes !== undefined && (!Number.isSafeInteger(dynamicNodes) || (dynamicNodes as number) < 0)) {
         issues.push("#/policies/maxDynamicNodes: expected a non-negative integer");
       }
       const cost = value.policies.maxCostUsd;

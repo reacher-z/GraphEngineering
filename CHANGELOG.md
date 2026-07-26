@@ -6,9 +6,25 @@ migration note.
 
 ## [Unreleased]
 
+### Added
+
+- Event-sourced durable start and resume APIs in TypeScript and Python. Runs bind
+  graph, original input, and caller-supplied implementation identity; node
+  outcomes commit before releasing dependants; committed successes are reused
+  after process loss.
+- Cross-language tagged Durable JSON for exact finite binary64 payload hashing,
+  stable activity/idempotency keys, terminal-result snapshots, and recovery
+  conformance fixtures.
+- Fail-closed interrupted-attempt handling: nodes declared with no or idempotent
+  side effects may retry within their original budgets, while omitted or
+  non-idempotent declarations surface `IN_DOUBT_SIDE_EFFECT`. Resuming a valid
+  terminal run returns its recorded result with no new event or executor call.
+
 ### In progress
 
-- Scheduler-integrated event emission, checkpoint recovery, replay, and fork.
+- Scheduler checkpoint acceleration, replay/fork, and distributed lease/fencing
+  providers. Recovery correctness currently comes from the complete event
+  stream; checkpoint files are not wired into the scheduler.
 - Streaming pipelines, conditional edge lowering, verifier panels, and bounded
   runtime loops.
 

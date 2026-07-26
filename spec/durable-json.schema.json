@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/durable-json.schema.json",
+  "title": "Graph Engineering Tagged Durable JSON",
+  "description": "Canonical, checkpoint-safe representation of portable finite JSON values. Semantic validation must additionally reject non-finite or integer-valued f payloads and object entries whose keys are not strictly increasing by Unicode code point.",
+  "$ref": "#/$defs/value",
+  "$defs": {
+    "value": {
+      "oneOf": [
+        { "$ref": "#/$defs/nullValue" },
+        { "$ref": "#/$defs/booleanValue" },
+        { "$ref": "#/$defs/stringValue" },
+        { "$ref": "#/$defs/integerValue" },
+        { "$ref": "#/$defs/floatValue" },
+        { "$ref": "#/$defs/arrayValue" },
+        { "$ref": "#/$defs/objectValue" }
+      ]
+    },
+    "nullValue": {
+      "type": "array",
+      "prefixItems": [{ "const": "n" }],
+      "items": false,
+      "minItems": 1,
+      "maxItems": 1
+    },
+    "booleanValue": {
+      "type": "array",
+      "prefixItems": [{ "const": "b" }, { "type": "boolean" }],
+      "items": false,
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "stringValue": {
+      "type": "array",
+      "prefixItems": [{ "const": "s" }, { "type": "string" }],
+      "items": false,
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "integerValue": {
+      "type": "array",
+      "prefixItems": [
+        { "const": "i" },
+        {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        }
+      ],
+      "items": false,
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "floatValue": {
+      "type": "array",
+      "description": "The payload is an IEEE-754 binary64 bit pattern in big-endian order. Canonical semantic validation rejects NaN, infinities, negative zero, and every value representable by the i form.",
+      "prefixItems": [
+        { "const": "f" },
+        { "type": "string", "pattern": "^[0-9a-f]{16}$" }
+      ],
+      "items": false,
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "arrayValue": {
+      "type": "array",
+      "prefixItems": [
+        { "const": "a" },
+        {
+          "type": "array",
+          "items": { "$ref": "#/$defs/value" }
+        }
+      ],
+      "items": false,
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "objectEntry": {
+      "type": "array",
+      "prefixItems": [
+        { "type": "string" },
+        { "$ref": "#/$defs/value" }
+      ],
+      "items": false,
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "objectValue": {
+      "type": "array",
+      "description": "Entries must be strictly increasing by Unicode code point. Strict ordering makes duplicate keys invalid; JSON Schema validates the shape while the codec enforces this semantic invariant.",
+      "prefixItems": [
+        { "const": "o" },
+        {
+          "type": "array",
+          "items": { "$ref": "#/$defs/objectEntry" }
+        }
+      ],
+      "items": false,
+      "minItems": 2,
+      "maxItems": 2
+    }
+  }
+}
