@@ -20,6 +20,8 @@ corepack pnpm install
 corepack pnpm build
 corepack pnpm test
 corepack pnpm typecheck
+corepack pnpm check:release-map
+corepack pnpm check:evidence-closure
 ```
 
 Python uses uv:

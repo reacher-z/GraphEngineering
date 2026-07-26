@@ -6,3 +6,6 @@ daily summaries, architecture decisions, and incident reports may be committed.
 
 Events are append-only and must never contain credentials, authorization headers,
 private user data, or full model prompts/responses.
+
+Immutable candidate binding and exact task-coverage rules are documented in
+[release evidence](release-evidence/README.md).

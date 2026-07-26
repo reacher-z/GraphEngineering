@@ -132,6 +132,7 @@ uv run --project python pytest python/tests
 node scripts/validate-fixtures.mjs
 node scripts/check-doc-links.mjs
 corepack pnpm check:release-map
+corepack pnpm check:evidence-closure
 corepack pnpm build
 corepack pnpm typecheck
 corepack pnpm lint

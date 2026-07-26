@@ -1,0 +1,323 @@
+{
+  "schema_version": 1,
+  "evidence_kind": "task-source-candidate",
+  "recorded_at": "2026-07-26T21:31:29Z",
+  "tasks": [
+    "D2-BUILDERS-YAML-020",
+    "D3-PY-CLI-021"
+  ],
+  "candidate": {
+    "revision": "dd8c0f7a159a717fc4cd75a5c9b3d90451433a93",
+    "tree": "b8ad7cec59d901fa79e77de820460c3c21afaa2f",
+    "base_revision": "582b78ba9c0db9eab698b18c9cebf12bf547627a",
+    "branch_at_recording": "feat/authoring-foundation"
+  },
+  "source_digests": [
+    {
+      "path": "spec/authoring-semantics.md",
+      "sha256": "1da0201aa30a6992f30cff3e1d5be5d8ad770876b0b0dbdf8652cca9f1622318"
+    },
+    {
+      "path": "spec/compiled-identity.schema.json",
+      "sha256": "0695d1c41ce7178fc5f17fc8d42c7d60f5a5656a3955d0f80d311e3515feaf3f"
+    },
+    {
+      "path": "spec/conformance/authoring/component-identity.expected.json",
+      "sha256": "2bed6d06d48e9306f237d79e6a3de7097bfb5ad7d80f923661299ee7555882fa"
+    },
+    {
+      "path": "spec/conformance/canonical-number.case.json",
+      "sha256": "92064ed193d14421cdaddcb4f0cc61f2ba20511ca7a82e1ce18759fa94c45079"
+    }
+  ],
+  "environment": {
+    "cwd": "/home/nick/work/GraphEngineering",
+    "os": "Linux 7.0.0-27-generic x86_64",
+    "node": "v22.23.1",
+    "pnpm": "10.13.1",
+    "python": "3.14.4",
+    "uv": "0.11.11"
+  },
+  "clean_worktree_revalidation": {
+    "worktree_kind": "detached temporary worktree",
+    "revision": "dd8c0f7a159a717fc4cd75a5c9b3d90451433a93",
+    "tree": "b8ad7cec59d901fa79e77de820460c3c21afaa2f",
+    "node": "v22.23.1",
+    "pnpm": "10.13.1",
+    "uv": "0.11.11",
+    "uv_project_python": "3.14.0",
+    "isolated_artifact_smoke_python": "3.14.4",
+    "setup": {
+      "argv": [
+        "uv",
+        "sync",
+        "--project",
+        "python",
+        "--extra",
+        "dev",
+        "--locked"
+      ],
+      "cwd": "/tmp/graph-engineering-dd8c0f7-CS3sop/worktree",
+      "result": "passed",
+      "exit_code": 0
+    },
+    "attempt_history": [
+      {
+        "order": 1,
+        "argv": [
+          "uv",
+          "run",
+          "--project",
+          "python",
+          "pytest",
+          "-q"
+        ],
+        "result": "invalid-test-environment",
+        "exit_code": 2,
+        "summary": "19 collection errors: the optional dev extra had not been synced, so uv found the system pytest outside the project environment; the project venv itself could import graph_engineering",
+        "disposition": "preserved as a gate-procedure failure; the documented and CI setup command was then run before retry"
+      },
+      {
+        "order": 2,
+        "argv": [
+          "uv",
+          "run",
+          "--project",
+          "python",
+          "pytest",
+          "-q"
+        ],
+        "result": "passed",
+        "exit_code": 0,
+        "summary": "1012 passed, 2 subtests passed after the locked dev environment was installed"
+      }
+    ],
+    "checks": [
+      {
+        "argv": [
+          "bash",
+          "-lc",
+          "corepack pnpm install --frozen-lockfile && corepack pnpm build && corepack pnpm typecheck && corepack pnpm lint && corepack pnpm test && corepack pnpm check:packages && corepack pnpm check:packed-install && corepack pnpm audit:prod"
+        ],
+        "result": "passed",
+        "exit_code": 0,
+        "summary": "locked install; all workspace packages; core 166/166; CLI 147/147; seven manifests/tarballs and installed consumer smoke; no known production vulnerability"
+      },
+      {
+        "argv": [
+          "bash",
+          "-lc",
+          "uv sync --project python --extra dev --locked && uv run --project python pytest -q && uv run --project python ruff check python/src/graph_engineering python/tests tools/conformance/python_authoring_report.py && uv run --project python mypy --config-file python/pyproject.toml python/src && uv build --project python && python3 scripts/check-python-artifacts.py"
+        ],
+        "result": "passed",
+        "exit_code": 0,
+        "summary": "1012 tests plus 2 subtests; Ruff; strict mypy over 28 files; reproducible wheel/sdist and isolated installed CLI/YAML/identity smoke"
+      },
+      {
+        "argv": [
+          "bash",
+          "-lc",
+          "corepack pnpm test:conformance && corepack pnpm validate:fixtures && corepack pnpm check:docs && git diff --check"
+        ],
+        "result": "passed",
+        "exit_code": 0,
+        "summary": "complete authoring/numeric/runtime/persistence/durable/pipeline conformance; commit-local legacy validator 27 JSON vectors; 196 commit-local Markdown links; clean diff"
+      }
+    ],
+    "result": "passed",
+    "summary": "clean install, complete Node/Python gates, package installation, production audit, and cross-language conformance all passed; wheel and sdist digests reproduced exactly"
+  },
+  "requirements": [
+    {
+      "task_id": "D2-BUILDERS-YAML-020",
+      "requirement": "builder hash parity",
+      "result": "passed",
+      "reference": "cross-language authoring conformance: two four-path equivalence cases and frozen graph/component/revision hashes"
+    },
+    {
+      "task_id": "D2-BUILDERS-YAML-020",
+      "requirement": "YAML/JSON equivalence",
+      "result": "passed",
+      "reference": "six valid four-report source cases plus 77 shared strict JSON/safe YAML rejection cases"
+    },
+    {
+      "task_id": "D2-BUILDERS-YAML-020",
+      "requirement": "revision and typed-port diagnostics",
+      "result": "passed",
+      "reference": "13 shared typed-port diagnostics and 10 identity mutations"
+    },
+    {
+      "task_id": "D2-BUILDERS-YAML-020",
+      "requirement": "optional IR fields reject explicit null in both languages",
+      "result": "passed",
+      "reference": "shared explicit-null fixtures plus exhaustive Python optional-field matrix"
+    },
+    {
+      "task_id": "D3-PY-CLI-021",
+      "requirement": "init/validate/compile/plan/doctor parity",
+      "result": "passed",
+      "reference": "native Python CLI tests and installed wheel/sdist command smoke"
+    },
+    {
+      "task_id": "D3-PY-CLI-021",
+      "requirement": "graph and grapheng entry points",
+      "result": "passed",
+      "reference": "wheel and sdist metadata plus isolated installation entry-point checks"
+    },
+    {
+      "task_id": "D3-PY-CLI-021",
+      "requirement": "stable exit codes",
+      "result": "passed",
+      "reference": "native CLI machine-envelope and hostile input tests"
+    }
+  ],
+  "checks": [
+    {
+      "argv": [
+        "bash",
+        "-lc",
+        "corepack pnpm build && corepack pnpm typecheck && corepack pnpm lint && corepack pnpm test"
+      ],
+      "command": "corepack pnpm build && corepack pnpm typecheck && corepack pnpm lint && corepack pnpm test",
+      "cwd": "/home/nick/work/GraphEngineering",
+      "environment_ref": "$.environment",
+      "result": "passed",
+      "exit_code": 0,
+      "summary": "all seven workspace packages; core 166/166 and isolated CLI 147/147"
+    },
+    {
+      "argv": [
+        "uv",
+        "run",
+        "--project",
+        "python",
+        "pytest",
+        "-q"
+      ],
+      "command": "uv run --project python pytest -q",
+      "cwd": "/home/nick/work/GraphEngineering",
+      "environment_ref": "$.environment",
+      "result": "passed",
+      "exit_code": 0,
+      "summary": "1012 passed, 2 subtests passed"
+    },
+    {
+      "argv": [
+        "uv",
+        "run",
+        "--project",
+        "python",
+        "mypy",
+        "--config-file",
+        "python/pyproject.toml",
+        "python/src"
+      ],
+      "command": "uv run --project python mypy --config-file python/pyproject.toml python/src",
+      "cwd": "/home/nick/work/GraphEngineering",
+      "environment_ref": "$.environment",
+      "result": "passed",
+      "exit_code": 0,
+      "summary": "strict typing: 28 source files"
+    },
+    {
+      "argv": [
+        "uv",
+        "run",
+        "--project",
+        "python",
+        "ruff",
+        "check",
+        "python/src/graph_engineering",
+        "python/tests",
+        "tools/conformance/python_authoring_report.py"
+      ],
+      "command": "uv run --project python ruff check python/src/graph_engineering python/tests tools/conformance/python_authoring_report.py",
+      "cwd": "/home/nick/work/GraphEngineering",
+      "environment_ref": "$.environment",
+      "result": "passed",
+      "exit_code": 0,
+      "summary": "all checks passed"
+    },
+    {
+      "argv": [
+        "corepack",
+        "pnpm",
+        "test:conformance"
+      ],
+      "command": "corepack pnpm test:conformance",
+      "cwd": "/home/nick/work/GraphEngineering",
+      "environment_ref": "$.environment",
+      "result": "passed",
+      "exit_code": 0,
+      "summary": "14 graph fixtures; 24/13/15/10000 numeric corpus; persistence, durable recovery, terminal interop, pipeline, and full authoring join"
+    },
+    {
+      "argv": [
+        "bash",
+        "-lc",
+        "corepack pnpm validate:fixtures && corepack pnpm check:docs"
+      ],
+      "command": "corepack pnpm validate:fixtures && corepack pnpm check:docs",
+      "cwd": "/home/nick/work/GraphEngineering",
+      "environment_ref": "$.environment",
+      "result": "passed",
+      "exit_code": 0,
+      "summary": "49 JSON fixtures, 14 manifests, 11 YAML fixtures, 3 compiled identities, and 201 local links"
+    },
+    {
+      "argv": [
+        "bash",
+        "-lc",
+        "corepack pnpm check:packages && corepack pnpm check:packed-install && corepack pnpm audit:prod"
+      ],
+      "command": "corepack pnpm check:packages && corepack pnpm check:packed-install && corepack pnpm audit:prod",
+      "cwd": "/home/nick/work/GraphEngineering",
+      "environment_ref": "$.environment",
+      "result": "passed",
+      "exit_code": 0,
+      "summary": "seven npm manifests/tarballs and isolated consumer installation; no known production vulnerability"
+    },
+    {
+      "argv": [
+        "bash",
+        "-lc",
+        "uv build --project python && python3 scripts/check-python-artifacts.py"
+      ],
+      "command": "uv build --project python && python3 scripts/check-python-artifacts.py",
+      "cwd": "/home/nick/work/GraphEngineering",
+      "environment_ref": "$.environment",
+      "result": "passed",
+      "exit_code": 0,
+      "summary": "wheel 35 entries; sdist 36 entries; isolated source/YAML/builder/identity/CLI smoke"
+    }
+  ],
+  "ephemeral_artifact_digests": [
+    {
+      "name": "graph_engineering-0.1.0a1-py3-none-any.whl",
+      "sha256": "f93ab3971f237b3adaa77e74909af37188d73f0de25365787442be7da63cf908",
+      "retained_in_repository": false
+    },
+    {
+      "name": "graph_engineering-0.1.0a1.tar.gz",
+      "sha256": "1a541cf784b4c5717db7799a5b559299591dcc32e6850a86d03b0b12e2bdce06",
+      "retained_in_repository": false
+    }
+  ],
+  "review": {
+    "reviewer": "/root/d2_independent_review",
+    "independent": true,
+    "decision": "accepted-for-commit-and-integration",
+    "report": "codex_logs/reviews/D2-Authoring-Canonical-Independent-2026-07-26.md",
+    "report_sha256": "b32625342a58055d6c0a1e62ac6ed79a609d561e1da4a7cd1ca1229630d4999b",
+    "open_p0": 0,
+    "open_p1": 0,
+    "open_p2": 2
+  },
+  "exclusions": [
+    "This is a source milestone, not a final release candidate and not a stable-v1 decision.",
+    "GraphPatch and graph revision 2+ are outside D2 and remain unavailable.",
+    "Dynamic cycles, Graph IR stream/artifact execution, reducers, subgraphs, and general schema assignability remain open tasks.",
+    "The npm and Python artifacts tested here are unpublished ephemeral smoke artifacts; registry provenance and publication are not claimed.",
+    "The two non-blocking P2 items are same-worktree dist/prepack serialization and duplicate internal Python portable-capture maintenance."
+  ]
+}

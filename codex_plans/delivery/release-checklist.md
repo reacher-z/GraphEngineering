@@ -327,24 +327,25 @@ release gates. Organic conduct, truthful assets, and consent are mandatory.
 ## 17. Post-audit control-to-release overlay
 
 This overlay prevents the 16 newly explicit tasks from becoming orphaned work.
-It is not the final 178-row machine map: `CTRL-RELEASE-MAP-074` must still emit
-and validate `release-task-map.json` before any candidate roll-up.
+The 178-row machine map now exists, but its structural/semantic validation is
+not candidate evidence and changes no release-row status. Candidate-bound
+revalidation and the final roll-up remain separate fail-closed controls.
 
 | Control | Release rows it must produce or review | Current state |
 |---|---|---|
-| `CTRL-RELEASE-MAP-074` | All 178 unique `REL-*` IDs, including explicit blocking/non-blocking classification | Open; no machine map yet. |
+| `CTRL-RELEASE-MAP-074` | All 178 unique `REL-*` IDs, including explicit blocking/non-blocking classification and full-requirement semantic joins | Structural and semantic content independently accepted in the mutable worktree; the task remains reopened until the remediated map, 40-test hostile suite, and superseding review are bound to one immutable revision. No release leaf is Green. |
 | `CTRL-EVIDENCE-BACKFILL-075` | Every blocking row whose producer was completed before evidence-policy cutoff | Open; historical status has zero candidate weight. |
 | `D17-USABILITY-076` | `REL-UX01`-`REL-UX10`, `REL-Q10`, `REL-Q11`, adopter/case-study consent rows | Open/External; real reports required. |
-| `D9-APPROVAL-077` | `REL-I05`, `REL-I08`, `REL-T22`, `REL-RC08`, stale approval and idempotency rows | Open. |
-| `D14-NPM-DIST-078` | `REL-PKG02`, `REL-PKG05`, `REL-PKG13`, canonical install/bin rows | Open/External for namespace rehearsal. |
-| `D16-PRIVACY-079` | `REL-I06`, `REL-UX09`, `REL-DOC12`, telemetry/capture/retention/withdrawal rows | Open/External for human data-owner approval. |
-| `D18-SUPPORT-READINESS-080` | `REL-SUP01`-`REL-SUP08`, `REL-RC07`, rollback/yank/tabletop rows | Open/External for roster and registry authority. |
+| `D9-APPROVAL-077` | Produces the canonical approval/idempotency contract consumed by `REL-I05`, `REL-T22`, and `REL-RC08` downstream joins; the contract alone closes none of them | Open. |
+| `D14-NPM-DIST-078` | Directly proves `REL-PKG02`; feeds D19's npm-plus-Python executable join for `REL-PKG05` and D20's registry/alias audit for `REL-PKG13` | Open/External for namespace rehearsal. |
+| `D16-PRIVACY-079` | Directly proves `REL-I06`; feeds Growth's real-entry consent joins for `REL-UX09`/`REL-DOC12` and D20's clean-installed default-off `REL-SC13` evidence | Open/External for human data-owner approval. |
+| `D18-SUPPORT-READINESS-080` | `REL-SUP01`-`REL-SUP08`, `REL-T26`, `REL-RC07`, `REL-RC08`, rollback/yank/tabletop, full support-sink redaction and irreversible-effect compensation rows | Open/External for roster and registry authority. |
 | `D13-TS-ADAPTERS-081`, `D13-PY-ADAPTERS-082`, join `D13-ADAPTERS-049` | `REL-X10`, `REL-T25`, `REL-T27`, `REL-Q03`, `REL-Q06`, adapter package/security rows | Open; mock evidence cannot impersonate live evidence. |
-| `D18-EDUCATION-ASSETS-083` | Course, case-study, demo, bilingual and executable-doc rows including `REL-DOC01`-`REL-DOC16` where applicable | Open; existing plans are not executable assets. |
+| `D18-EDUCATION-ASSETS-083` | Directly proves `REL-DOC01`, `REL-DOC02`, `REL-DOC04`, `REL-DOC06`, `REL-DOC08`, and `REL-DOC13`; feeds the final cross-surface `REL-DOC16` roll-up after compatibility and usability | Open; existing plans are not executable assets. |
 | `D8-RUNTIME-CHAOS-084` | `REL-T11`, `REL-T18`, `REL-T27`, `REL-Q04`, deadlock/leak/retry rows | Open. |
-| `D9-OPS-CONTROL-085` | `REL-T29`, operational CLI JSON/exit/race rows and relevant support diagnostics | Open. |
+| `D9-OPS-CONTROL-085` | Produces operational status/watch/inspect/logs/pause/resume/cancel/retry evidence; D18 joins it with both native CLIs for `REL-X09`, and D19 runs the complete installed command matrix for `REL-T29`/`REL-PKG10` | Open. |
 | `CTRL-RELEASE-ROLLUP-086` | `REL-V1-01`-`REL-V1-08`, `REL-RC01`-`REL-RC10`, final candidate decision | Open; depends on every blocking evidence producer. |
-| `D9-TS-REDACTION-087`, `D9-PY-REDACTION-088`, join `D9-REDACTION-CONFORMANCE-089` | `REL-V1-02`, `REL-I06`, `REL-T26`, `REL-Q08`, `REL-SC07`, `REL-SC12`, `REL-SUP06` | Open/Critical; raw payload plus `redacted: true` remains a release blocker. |
+| `D9-TS-REDACTION-087`, `D9-PY-REDACTION-088`, join `D9-REDACTION-CONFORMANCE-089` | Feeds the downstream whole-requirement joins for `REL-V1-02`, `REL-I06`, `REL-T26`, `REL-Q08`, `REL-SC07`, `REL-SC12`, and `REL-SUP06`; this redaction slice alone closes none of them | Open/Critical; raw payload plus `redacted: true` remains a release blocker. |
 
 `REL-T26` accepts evidence only when the wire flag is truthful, protection occurs
 before every sink write, legacy misleading histories follow the frozen migration

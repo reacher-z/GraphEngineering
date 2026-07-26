@@ -139,18 +139,18 @@ downstream artifact that relied on the failed property.
 
 | Node | Hard entry gate | Required deliverables by lane | Exit gate | Failure containment and re-entry |
 |---|---|---|---|---|
-| `D04` | `D03` compiler/diagnostic gate | **Integration:** integrate chain and diamond. **TS/Python:** deterministic ready-queue scheduler and bounded fan-out/fan-in. **Platform:** trace viewer and concurrency tests. | Deterministic diamond parity: outputs, event constraints, hashes, and terminal envelopes agree. | Keep only deterministic mock execution enabled; do not publish concurrency/performance claims; fix ordering through shared fixtures before re-entry. |
+| `D04` | `D03` compiler/diagnostic gate; the later subgraph/edge contract additionally consumes frozen D2 builders, both native runtimes, durable namespace semantics, and pipeline conformance | **Integration:** integrate chain and diamond, then freeze subgraph/reducer/artifact-ref/stream-edge semantics. **TS/Python:** deterministic ready-queue scheduler and bounded fan-out/fan-in. **Platform:** trace viewer and concurrency tests. | Deterministic diamond parity: outputs, event constraints, hashes, and terminal envelopes agree; the later edge contract has shared TS/Python fixtures rather than claiming pipeline behavior from the initial scheduler. | Keep only deterministic mock execution enabled; do not publish concurrency/performance claims; fix ordering through shared fixtures before re-entry. |
 | `D05` | `D04` scheduler parity and bounded concurrency | **Integration:** review scheduling semantics. **TS/Python:** pipeline, barrier, and backpressure. **Platform:** research demo and benchmarks. | Fast items flow without an accidental whole-stage barrier; buffers, demand, cancellation, retry/drop/stop/dead-letter, and barrier waits remain bounded and observable. | Mark the primitive experimental, stop on buffer/item/attempt limits, and withhold demo/benchmark claims. Re-enter with adversarial slow-consumer, cancellation, timeout, and parity evidence. |
 | `D06` | `D05` scheduling contract; structured settled-result base | **Integration:** freeze state and failure envelopes. **TS/Python:** router, failures, quorum. **Platform:** diff-review flow and failure injection. | Every terminal state is defined; router/barrier/quorum semantics and failure envelopes match across languages. | Reject unknown envelope/state variants at the boundary, never coerce to null, and block cycles/verifiers that consume ambiguous outcomes. Add fixtures and refreeze deliberately. |
-| `D07` | `D06`; pipeline and failure boundaries are bounded | **Integration:** Alpha 1 integration. **TS/Python:** bounded cycles with seen-set and hard iteration/duration/cost/node/attempt limits. **Platform:** discovery demo and build-in-public content. | Honest `0.1.0-alpha.1` artifact plus bounded-cycle exit reasons and release evidence; a tag alone does not satisfy missing scope. | Retain the last verified prerelease, label excluded capability explicitly, and do not broaden release claims. Re-enter after cycle-budget and package-install evidence passes. |
+| `D07` | Cycle/GraphPatch contract consumes the frozen D2 builder/IR contract and both native runtime bases; native execution also consumes `D06`, bounded pipeline, and failure boundaries | **Integration:** Alpha 1 integration. **TS/Python:** bounded cycles with seen-set and hard iteration/duration/cost/node/attempt limits. **Platform:** discovery demo and build-in-public content. | Honest `0.1.0-alpha.1` artifact plus bounded-cycle exit reasons and release evidence; a tag alone does not satisfy missing scope. | Retain the last verified prerelease, label excluded capability explicitly, and do not broaden release claims. Re-enter after cycle-budget and package-install evidence passes. |
 
 ### W3: bounded control, recovery, cost, and verification
 
 | Node | Hard entry gate | Required deliverables by lane | Exit gate | Failure containment and re-entry |
 |---|---|---|---|---|
 | `D08` | `D06` failure state machine and `D07` hard bounds | **Integration:** join independent runtime chaos (`084`) and durable operational controls (`085`). **TS/Python:** retry, timeout, cancellation, propagated abort and exact accounting. **Platform:** commands land only after extended durability. | No unbounded retry/deadlock/leak; cancellation terminates scheduling; operational commands reject stale/racing actions with stable envelopes. | Fail closed on exhausted/unsafe bounds, disable automatic retry for ambiguous effects, and keep operations diagnostic-only until D9 recovery exists. |
-| `D09` | `D06` durable envelope; canonical `D9-REDACTION-039` and `D9-APPROVAL-077` contracts may advance without the later CLI/chaos join | **Integration:** redaction, approval, durable-extension contracts. **TS/Python:** independent redaction (`087/088`) then leases, stores, resume/replay/fork. **Platform/security:** conformance `089`, canary sinks and crash/race tests. | Persisted flags describe actual bytes; successful internal results never rerun; approvals are authority-bound; dual resume cannot advance twice; replay/fork lineage is traceable. | Disable unsupported recovery, never label raw bytes redacted, preserve history and stop before ambiguous non-idempotent replay. |
-| `D10` | Budget contract needs `D06` accounting and `D07` cycle bounds; native crash-safe ledgers additionally need extended `D09` conformance | **Integration:** freeze units/reservations early. **TS/Python:** cost, budget and model router after durable accounting. **Platform:** cost UI and pricing snapshots. | Hard duration/cost/token/node/attempt budgets stop new scheduling and survive resume. | Use deterministic mock pricing/routing, reject unsafe unknown cost and withhold claims until snapshot/recovery tests pass. |
+| `D09` | `D06` durable envelope; durable-extension spec explicitly consumes canonical redaction and approval contracts; final durable conformance also consumes scheduler-integrated router/barrier behavior for zero-rejudge replay | **Integration:** redaction, approval, durable-extension contracts. **TS/Python:** independent redaction (`087/088`) then leases, stores, resume/replay/fork. **Platform/security:** conformance `089`, canary sinks and crash/race tests. | Persisted flags describe actual bytes; successful internal results never rerun; approvals are authority-bound; dual resume cannot advance twice; replay/fork lineage and replayed route decisions are traceable. | Disable unsupported recovery, never label raw bytes redacted, preserve history and stop before ambiguous non-idempotent replay. |
+| `D10` | Budget contract needs `D06` accounting and `D07` cycle bounds; native crash-safe ledgers additionally need extended `D09` conformance; the final join consumes native `D07` cycle conformance | **Integration:** freeze units/reservations early. **TS/Python:** cost, budget and model router after durable accounting. **Platform:** cost UI and pricing snapshots. | Hard iteration, duration, cost, node, fan-out, and attempt bounds each pass boundary and over-limit tests, stop new scheduling, and survive resume. | Use deterministic mock pricing/routing, reject unsafe unknown cost and withhold claims until snapshot/recovery tests pass. |
 | `D11` | Verification contract needs `D06` quorum and approval `077`; native execution additionally consumes `D10` budget conformance | **Integration:** verifier-semantics review. **TS/Python:** adversarial refutation, diverse lenses, citations, judges, reflection and abstention/unknown. **Platform:** cited report and verifier tests. | Rejected and unknown results are gated; insufficient quorum never becomes implicit pass; votes, evidence, rubric and tie-break version are retained. | Return unknown or require a human gate, preserve evidence and never substitute maker context for isolated verification. |
 
 ### W4: isolation, adapters, and public API freeze
@@ -167,15 +167,15 @@ downstream artifact that relied on the failed property.
 |---|---|---|---|---|
 | `D15` | `D09` storage semantics, `D13` adapters, and `D14` API freeze | **Integration:** performance review. **TS/Python:** PostgreSQL, S3-compatible artifacts, worker mode. **Platform:** Explorer, site, and video. | A clean first run is under five minutes, production stores pass conformance, and worker/resource bounds meet approved baselines. | Retain SQLite/local artifacts and single-worker mode, label production adapters unavailable, and block performance claims after an unapproved regression over 10%. |
 | `D16` | `D12` isolation, `D13` providers, complete `D15` storage/Explorer surface and independent redaction join `089` | **Integration:** security preflight. **TS/Python:** independently reverify redaction/policy. **Platform:** privacy, canary, threat, fuzz, license and SBOM evidence. | No unaccepted high/critical blocker; secret, dependency, license and static scans pass with telemetry/capture off by default. | Disable affected surfaces, deny capability, rotate exposed credentials outside the repository and stay prerelease until full reviewed rescan. |
-| `D17` | `D14` frozen API, `D15` performance and `D16` security | **Integration:** immutable Beta artifact and bug burn-down. **External/PQG:** separate `D17-USABILITY-076` consumes Beta plus privacy policy. | Beta artifact is immutable with zero repository-owned P0/P1; external usability evidence remains an independent roll-up dependency. | Keep the last alpha/beta and continue tester rounds; missing external evidence cannot be replaced with maintainer self-testing. |
+| `D17` | `D14` frozen API, `D15` performance, `D16` security, and the complete doctor/score/badge DX surface | **Integration:** immutable Beta artifact and bug burn-down. **External/PQG:** separate `D17-USABILITY-076` consumes Beta plus privacy policy. | Beta artifact is immutable with zero repository-owned P0/P1; external usability evidence remains an independent roll-up dependency. | Keep the last alpha/beta and continue tester rounds; missing external evidence cannot be replaced with maintainer self-testing. |
 
 ### W6: compatibility, RC, provenance, and release
 
 | Node | Hard entry gate | Required deliverables by lane | Exit gate | Failure containment and re-entry |
 |---|---|---|---|---|
-| `D18` | `D14` frozen contracts and `D17` complete Beta surface | **Integration:** compatibility audit. **TS/Python:** parity and compatibility fixes. **Platform:** reproducible benchmarks, cases, and launch copy. | No cross-language conformance divergence across canonical data, compilation, runtime, persistence, CLI envelopes, adapters, stores, and all patterns. | Block RC, freeze incompatible feature work, reduce every mismatch to a shared fixture, and rerun all affected matrices before re-entry. |
-| `D19` | `D16` security gate and `D18` compatibility gate | **Integration:** release-candidate freeze. **TS/Python:** clean install and upgrade. **Platform:** release matrix and documentation tests. | `1.0.0-rc.1` is reproducibly installable/upgradable and complete feature freeze is enforced. | Retain Beta, allow only reviewed release-blocker fixes, invalidate affected RC artifacts, and restart compatibility/install/doc checks. |
-| `D20` | `D16`, `D17`, and `D19`; all evidence collectors available | **Integration:** provenance and go/no-go. **TS:** npm rehearsal. **Python:** PyPI rehearsal. **Platform:** site, assets, and community readiness. | Every mandatory gate in Sections 7-9 is green; the Section 10 asset manifest is release-ready; trusted-publishing, SBOM, checksums, attestations, and install rehearsals are verified. | Do not publish stable packages. Rebuild from a clean trusted environment or ship a fully labeled RC with an explicit blocker list. Never infer external publishing authority. |
+| `D18` | `D14` frozen contracts, `D17` complete Beta surface, durable operational commands, and the complete DX command surface | **Integration:** compatibility audit. **TS/Python:** parity and compatibility fixes, including full source CLI goldens. **Platform:** reproducible benchmarks, cases, and launch copy. | No cross-language conformance divergence across canonical data, compilation, runtime, persistence, full source CLI JSON/errors/exits, adapters, stores, and all patterns. | Block RC, freeze incompatible feature work, reduce every mismatch to a shared fixture, and rerun all affected matrices before re-entry. |
+| `D19` | `D16` security gate, `D18` compatibility gate, and canonical unscoped npm distribution gate `D14-NPM-DIST-078` | **Integration:** release-candidate freeze. **TS/Python:** clean install and upgrade. **Platform:** installed-artifact OS/runtime and complete CLI matrices plus documentation tests. | `1.0.0-rc.1` is reproducibly installable/upgradable; npm tarballs and Python wheel/sdist expose working `graph` and `grapheng`; every installed command has schema-valid JSON/errors/exits; the Linux/macOS/Windows Node/Python matrix passes; complete feature freeze is enforced. | Retain Beta, allow only reviewed release-blocker fixes, invalidate affected RC artifacts, and restart compatibility/install/doc checks. |
+| `D20` | `D16`, `D17`, and `D19`; all evidence collectors available | **Integration:** provenance and go/no-go. **TS:** npm rehearsal. **Python:** PyPI rehearsal. **Platform:** site, assets, and community readiness. | Every mandatory gate in Sections 7-9 is green; the Section 10 asset manifest is release-ready; trusted-publishing, SBOM, checksums, attestations, namespace/alias ownership, clean-install default-off privacy, full final-package/support secret scanning, and install rehearsals are verified. | Do not publish stable packages. Rebuild from a clean trusted environment or ship a fully labeled RC with an explicit blocker list. Never infer external publishing authority. |
 | `D21` | `D20` go decision | **Integration:** release/support. **TS:** npm release/support. **Python:** PyPI release/support. **Platform:** GitHub, site, content, and community launch/support. | All planned assets and at least a complete Beta/RC exist. Stable v1 ships only when recovery, security, conformance, provenance, and external-usability gates pass; otherwise the release remains a complete RC. | Publish/support only the label justified by evidence, deprecate a broken package version rather than rewriting history, disclose blockers, and continue RC support until re-entry criteria pass. |
 
 ## 5. Cross-cutting product closure
@@ -420,15 +420,15 @@ the full-plan audit's 16 omitted lanes into executable, single-primary controls.
 | `CTRL-RELEASE-MAP-074` | `CTRL-PLAN-COVERAGE-001` | `CTRL-RELEASE-ROLLUP-086`; all 178 release leaves map uniquely with an explicit blocking bit. |
 | `CTRL-EVIDENCE-BACKFILL-075` | `CTRL-EVIDENCE-002` | `CTRL-RELEASE-ROLLUP-086`; historical completed status has zero candidate weight without immutable revalidation. |
 | `D17-USABILITY-076` | `D17-BETA-063`, `D16-PRIVACY-079` | Acceptance and roll-up; real consenting testers satisfy 5-report/80%-in-300s gates. |
-| `D9-APPROVAL-077` | `D6-DURABLE-SPEC-010`, `D9-REDACTION-039` | D9 extended conformance, D11/D12 contracts and approval-dependent patterns. |
-| `D14-NPM-DIST-078` | `D14-API-FREEZE-050`, `D3-CLI-002` | Package/release leaves; real unscoped package and both binaries pass clean installs. |
-| `D16-PRIVACY-079` | redaction contract and D12 red-team | External usability; default-off collection, retention and withdrawal are accepted. |
-| `D18-SUPPORT-READINESS-080` | D16 security and D18 compatibility | RC and final roll-up; support/incident/rollback/yank readiness is proved before publish. |
+| `D9-APPROVAL-077` | `D6-DURABLE-SPEC-010`, `D9-REDACTION-039` | D9 durable-extension spec/conformance, D11/D12 contracts and approval-dependent patterns; the contract alone does not prove stale-decision runtime behavior or RC fallback. |
+| `D14-NPM-DIST-078` | `D14-API-FREEZE-050`, `D3-CLI-002` | `D19-RC-065`; this task proves the npm tarball only, while D19 joins its binaries with the independently installed Python executables. |
+| `D16-PRIVACY-079` | redaction contract, independent native redaction conformance and D12 red-team | External usability/growth; default-off collection, retention, withdrawal and gallery consent are accepted. |
+| `D18-SUPPORT-READINESS-080` | D16 security and D18 compatibility | RC and final roll-up; support/incident/rollback/yank readiness and irreversible-side-effect idempotency/approval/compensation fallbacks are proved before publish. |
 | `D13-TS-ADAPTERS-081` | `D13-ADAPTER-SPEC-048` | Adapter join `049`; TypeScript native suite passes independently. |
 | `D13-PY-ADAPTERS-082` | `D13-ADAPTER-SPEC-048` | Adapter join `049`; Python native suite passes independently. |
-| `D18-EDUCATION-ASSETS-083` | patterns, Explorer, Beta and API freeze | RC/docs; executable course, cases, demo and bilingual claim audit pass. |
+| `D18-EDUCATION-ASSETS-083` | patterns, Explorer, Beta/API freeze, external usability and D18 compatibility | RC/docs/growth; executable course, authentic cases, demo, TS/Python examples and bilingual claim audit pass. |
 | `D8-RUNTIME-CHAOS-084` | cycle and pipeline conformance | D8 join, durable operations and CI pattern; bounded seeded faults have no leak/deadlock. |
-| `D9-OPS-CONTROL-085` | D9 extended conformance and runtime chaos | D8 join; status/watch/inspect/logs/pause/resume/cancel/retry reject races consistently. |
+| `D9-OPS-CONTROL-085` | D9 extended conformance and runtime chaos | `D8-CHAOS-OPS-030`, D18 source-CLI parity, D19 installed CLI and then `CTRL-ACCEPTANCE-070`; the operational subset alone cannot prove the complete command surface. |
 | `CTRL-RELEASE-ROLLUP-086` | provenance, acceptance, patterns, docs, growth, usability, support, mapping and backfill | `D21-RELEASE-067`; one candidate receives stable, complete-RC or no-release decision. |
 | `D9-TS-REDACTION-087` | canonical redaction contract | TS durable extension and redaction join; every TS sink is canary-free. |
 | `D9-PY-REDACTION-088` | canonical redaction contract | Python durable extension and redaction join; every Python sink is canary-free. |
@@ -439,6 +439,37 @@ dependency and no cycle. `D21-RELEASE-067` consumes the signed `086` decision;
 neither provenance nor acceptance can authorize itself. Pattern tasks explicitly
 depend on the runtime, durability, budget, verifier, isolation, adapter and
 security producers their examples claim to demonstrate.
+
+### 12.1 Release-leaf semantic joins
+
+A release leaf maps to the earliest downstream task whose own evidence contract
+proves the entire checklist sentence. Merely being an ancestor or implementing
+one named noun is insufficient. The machine map therefore uses these joins:
+
+| Requirement family | Candidate-bound join | Required closure |
+|---|---|---|
+| Durable stable-v1 recovery | `CTRL-ACCEPTANCE-070` | D9 crash/replay/approval plus D15 production-store races and D19 candidate artifacts. |
+| Canonical spec authority, final compiler corpus and source CLI parity | `D18-COMPAT-BENCH-064` | D2/D3 canonical/compiler and native CLIs, every later compiler feature and positive/negative diagnostic fixture, D9 operational commands, D13 DX, full `X01-X10` source parity. |
+| No implicit cycles, unbounded retry, or dynamic fan-out | `CTRL-ACCEPTANCE-070` | D2 compiler cycle rejection, D7 cycle/GraphPatch caps, D8 randomized retry/worker chaos and stable errors. |
+| Dynamic patch policy/permission/budget safety | `CTRL-ACCEPTANCE-070` | D7 patch semantics and native parity, D10 all-dimension budgets, D12/D16 authority/security enforcement. |
+| Runtime schema and cross-boundary cancellation | `CTRL-ACCEPTANCE-070` | Compiler plus runtime/persistence rejection before write, and D8/D13 runtime-provider-tool cancellation/accounting. |
+| Authority expansion and prompt injection | `D16-SECURITY-062` | D12 red-team plus completed adapters, MCP mutation policy, Explorer/storage attack surfaces and independent disposition. |
+| Stable-v1 security decision | `CTRL-ACCEPTANCE-070` | D16 runtime-surface preflight plus D18 support sinks, D19 installed artifacts, D20 package/supply-chain evidence, `T09`, `T15`, `T23-T28`, `Q08`, and independent final-candidate disposition. |
+| Installed binaries, full CLI, matrix, Quickstart and API/upgrade compatibility | `D19-RC-065` | Real npm tarball and Python wheel/sdist, both executable names, every command envelope/exit, all supported OS/runtime cells. |
+| Registry aliases and default-off installed packages | `D20-PROVENANCE-066` | D19 clean artifacts, npm/PyPI authority/alias audit and clean-install privacy observation. |
+| Full release secret scan | `D20-PROVENANCE-066` | D16 source/runtime scan plus repository history, final npm/Python packages and source maps, docs/traces, D18 support bundles, positive controls and seeded-negative leak detection. |
+| Full sink/support redaction and irreversible-side-effect fallback | `D18-SUPPORT-READINESS-080` | D9 redaction/approval/durability, D16 full-surface security, support-bundle canaries, idempotency, approval and compensation table-top traces. |
+| Authentic galleries and external-entry consent | `CTRL-GROWTH-072` | Beta/security/privacy/usability and education artifacts; each public entry is authentic, consented, redacted and withdrawable. |
+| Final release claims, surface identity and RC label | `CTRL-RELEASE-ROLLUP-086` | Package, site, docs, demo, release-note, draft GitHub Release and channel-copy audit after every other blocking producer; all surfaces share candidate identity/known limits and any fallback is labeled complete RC. |
+
+Consequently `D2-BUILDERS-YAML-020`, `D7-CYCLE-CONFORMANCE-027`,
+`D9-APPROVAL-077`, `D9-OPS-CONTROL-085`, `D14-NPM-DIST-078`,
+`D16-PRIVACY-079`, `D16-SECURITY-062`, and `D19-RC-065` remain important
+producers but cannot individually close a broader final-compiler, stable
+security, full-secret-scan, surface-identity, or RC-label row. The semantic
+regression suite fixes all 178 whole-requirement bindings and removes
+representative dependencies and evidence fields to prove these joins fail
+closed when narrowed again.
 
 ## 13. Gate evidence protocol
 
@@ -457,3 +488,34 @@ A day or gate can be recorded as complete only when its evidence includes:
 The progress scanner is a liveness and artifact-presence signal. A healthy scan
 does not satisfy any semantic, threshold, external-usability, provenance, or
 release gate in this graph.
+
+`codex_logs/release-evidence/task-revalidation.json` is the append-only
+candidate overlay for this protocol. `pnpm check:evidence-closure` audits an
+empty overlay successfully but assigns it zero release weight. A release
+decision must pass a full, explicit `--candidate <full-commit-sha>` check from a
+clean, non-shallow checkout. The selected candidate and every candidate retained
+in the overlay must be ancestors of the overlay commit. The checker dynamically
+recomputes the transitive ancestors of `CTRL-RELEASE-ROLLUP-086` (excluding the
+root), reads candidate sources and evidence files from regular Git blobs rather
+than the worktree, and checks the full candidate/record prefix across every
+parent edge in the complete overlay ancestry. Replace refs, grafts, symlinks,
+skip-worktree/assume-unchanged entries, deletion, rewrite, and an unrelated
+commit after a rewrite all fail closed.
+
+Each record contains a digest-bound `coverage` object. Every candidate
+`expected_tests` string appears exactly once and maps to one or more valid
+command indexes; every `expected_artifacts` path appears exactly once and maps
+to one or more valid artifact indexes. The index sets are closed—no command or
+artifact can be left unbound—and every artifact must equal its expected path or
+be a regular file below that exact directory boundary. Missing, invented,
+duplicate, reordered, dangling, unrelated-prefix, or failed-command coverage
+rejects the record. A superseding record must use commands and review timestamps
+strictly newer than its predecessor and cannot reuse any earlier command/review
+report path or digest.
+
+These machine checks prove immutable binding and exact declared coverage; they
+do not interpret whether a command semantically proves a natural-language test
+or whether a report is truthful. That judgment remains the responsibility of
+the distinct independent reviewer and its immutable report. Registry status,
+scanner output, superseded records, and historical completion logs remain zero
+weight without this candidate binding.

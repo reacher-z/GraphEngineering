@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "sources": {
+    "registry": "codex_logs/task-registry.json",
+    "release_task_map": "codex_plans/delivery/release-task-map.json",
+    "release_checklist": "codex_plans/delivery/release-checklist.md"
+  },
+  "root_task_id": "CTRL-RELEASE-ROLLUP-086",
+  "historical_cutoff": "2026-07-26T16:20:00Z",
+  "policy": {
+    "missing_candidate_weight": 0,
+    "missing_task_record_weight": 0,
+    "failed_or_superseded_record_weight": 0,
+    "require_independent_reviewer": true,
+    "require_explicit_exclusions": true
+  },
+  "candidates": []
+}

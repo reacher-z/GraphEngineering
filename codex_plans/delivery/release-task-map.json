@@ -1,0 +1,908 @@
+{
+  "schema_version": 1,
+  "expected_release_leaf_count": 178,
+  "sources": {
+    "checklist": "codex_plans/delivery/release-checklist.md",
+    "registry": "codex_logs/task-registry.json"
+  },
+  "classification_policy": {
+    "blocking_default": true,
+    "non_blocking_release_ids": [
+      "REL-GR03",
+      "REL-GR04",
+      "REL-GR05"
+    ]
+  },
+  "mappings": [
+    {
+      "release_id": "REL-V1-01",
+      "task_id": "CTRL-ACCEPTANCE-070",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-V1-02",
+      "task_id": "CTRL-ACCEPTANCE-070",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-V1-03",
+      "task_id": "CTRL-ACCEPTANCE-070",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-V1-04",
+      "task_id": "D20-PROVENANCE-066",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-V1-05",
+      "task_id": "D17-USABILITY-076",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-V1-06",
+      "task_id": "CTRL-RELEASE-ROLLUP-086",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-V1-07",
+      "task_id": "CTRL-RELEASE-ROLLUP-086",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-V1-08",
+      "task_id": "CTRL-RELEASE-ROLLUP-086",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-I01",
+      "task_id": "D18-COMPAT-BENCH-064",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-I02",
+      "task_id": "CTRL-ACCEPTANCE-070",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-I03",
+      "task_id": "CTRL-ACCEPTANCE-070",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-I04",
+      "task_id": "CTRL-ACCEPTANCE-070",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-I05",
+      "task_id": "CTRL-ACCEPTANCE-070",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-I06",
+      "task_id": "D16-PRIVACY-079",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-I07",
+      "task_id": "CTRL-ACCEPTANCE-070",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-I08",
+      "task_id": "D16-SECURITY-062",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-I09",
+      "task_id": "D11-VERIFY-CONFORMANCE-043",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-I10",
+      "task_id": "CTRL-RELEASE-ROLLUP-086",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-X01",
+      "task_id": "D2-BUILDERS-YAML-020",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-X02",
+      "task_id": "D18-COMPAT-BENCH-064",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-X03",
+      "task_id": "D9-DURABLE-EXT-CONFORMANCE-034",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-X04",
+      "task_id": "D6-ROUTER-BARRIER-023",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-X05",
+      "task_id": "D9-DURABLE-EXT-CONFORMANCE-034",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-X06",
+      "task_id": "CTRL-ACCEPTANCE-070",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-X07",
+      "task_id": "D18-COMPAT-BENCH-064",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-X08",
+      "task_id": "D9-DURABLE-EXT-CONFORMANCE-034",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-X09",
+      "task_id": "D18-COMPAT-BENCH-064",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-X10",
+      "task_id": "CTRL-ACCEPTANCE-070",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-T01",
+      "task_id": "D2-BUILDERS-YAML-020",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-T02",
+      "task_id": "D2-BUILDERS-YAML-020",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-T03",
+      "task_id": "D2-BUILDERS-YAML-020",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-T04",
+      "task_id": "D2-BUILDERS-YAML-020",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-T05",
+      "task_id": "CTRL-ACCEPTANCE-070",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-T06",
+      "task_id": "D2-BUILDERS-YAML-020",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-T07",
+      "task_id": "D6-ROUTER-BARRIER-023",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-T08",
+      "task_id": "D7-CYCLE-CONFORMANCE-027",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-T09",
+      "task_id": "D12-ISOLATION-REDTEAM-047",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-T10",
+      "task_id": "D18-COMPAT-BENCH-064",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-T11",
+      "task_id": "CTRL-ACCEPTANCE-070",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-T12",
+      "task_id": "D7-PIPELINE-CONFORMANCE-013",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-T13",
+      "task_id": "D6-ROUTER-BARRIER-023",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-T14",
+      "task_id": "D9-DURABLE-EXT-CONFORMANCE-034",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-T15",
+      "task_id": "CTRL-ACCEPTANCE-070",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-T16",
+      "task_id": "D11-VERIFY-CONFORMANCE-043",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-T17",
+      "task_id": "D7-CYCLE-CONFORMANCE-027",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-T18",
+      "task_id": "D10-BUDGET-CONFORMANCE-038",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-T19",
+      "task_id": "D9-DURABLE-EXT-CONFORMANCE-034",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-T20",
+      "task_id": "D9-DURABLE-EXT-CONFORMANCE-034",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-T21",
+      "task_id": "D9-DURABLE-EXT-CONFORMANCE-034",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-T22",
+      "task_id": "D9-DURABLE-EXT-CONFORMANCE-034",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-T23",
+      "task_id": "D12-ISOLATION-REDTEAM-047",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-T24",
+      "task_id": "D12-ISOLATION-REDTEAM-047",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-T25",
+      "task_id": "D13-ADAPTERS-049",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-T26",
+      "task_id": "D18-SUPPORT-READINESS-080",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-T27",
+      "task_id": "CTRL-ACCEPTANCE-070",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-T28",
+      "task_id": "D16-SECURITY-062",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-T29",
+      "task_id": "D19-RC-065",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-T30",
+      "task_id": "D15-STORAGE-WORKERS-054",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-T31",
+      "task_id": "CTRL-PATTERNS-071",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-T32",
+      "task_id": "D18-COMPAT-BENCH-064",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-T33",
+      "task_id": "D18-COMPAT-BENCH-064",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-Q01",
+      "task_id": "CTRL-ACCEPTANCE-070",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-Q02",
+      "task_id": "CTRL-ACCEPTANCE-070",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-Q03",
+      "task_id": "CTRL-ACCEPTANCE-070",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-Q04",
+      "task_id": "D18-COMPAT-BENCH-064",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-Q05",
+      "task_id": "D19-RC-065",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-Q06",
+      "task_id": "D13-ADAPTERS-049",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-Q07",
+      "task_id": "D15-PERFORMANCE-061",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-Q08",
+      "task_id": "D16-SECURITY-062",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-Q09",
+      "task_id": "D20-PROVENANCE-066",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-Q10",
+      "task_id": "D17-USABILITY-076",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-Q11",
+      "task_id": "D17-USABILITY-076",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-MX-N01",
+      "task_id": "D19-RC-065",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-MX-N02",
+      "task_id": "D19-RC-065",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-MX-N03",
+      "task_id": "D19-RC-065",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-MX-N04",
+      "task_id": "D19-RC-065",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-MX-N05",
+      "task_id": "D19-RC-065",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-MX-N06",
+      "task_id": "D19-RC-065",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-MX-P01",
+      "task_id": "D19-RC-065",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-MX-P02",
+      "task_id": "D19-RC-065",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-MX-P03",
+      "task_id": "D19-RC-065",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-MX-P04",
+      "task_id": "D19-RC-065",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-MX-P05",
+      "task_id": "D19-RC-065",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-MX-P06",
+      "task_id": "D19-RC-065",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-MX-P07",
+      "task_id": "D19-RC-065",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-MX-P08",
+      "task_id": "D19-RC-065",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-MX-P09",
+      "task_id": "D19-RC-065",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-MX-X01",
+      "task_id": "D18-COMPAT-BENCH-064",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-MX-X02",
+      "task_id": "D18-COMPAT-BENCH-064",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-PKG01",
+      "task_id": "D20-PROVENANCE-066",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-PKG02",
+      "task_id": "D14-NPM-DIST-078",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-PKG03",
+      "task_id": "D20-PROVENANCE-066",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-PKG04",
+      "task_id": "D19-RC-065",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-PKG05",
+      "task_id": "D19-RC-065",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-PKG06",
+      "task_id": "D19-RC-065",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-PKG07",
+      "task_id": "D19-RC-065",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-PKG08",
+      "task_id": "D19-RC-065",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-PKG09",
+      "task_id": "D19-RC-065",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-PKG10",
+      "task_id": "D19-RC-065",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-PKG11",
+      "task_id": "D19-RC-065",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-PKG12",
+      "task_id": "D19-RC-065",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-PKG13",
+      "task_id": "D20-PROVENANCE-066",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-SC01",
+      "task_id": "D20-PROVENANCE-066",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-SC02",
+      "task_id": "D20-PROVENANCE-066",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-SC03",
+      "task_id": "D20-PROVENANCE-066",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-SC04",
+      "task_id": "D20-PROVENANCE-066",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-SC05",
+      "task_id": "D20-PROVENANCE-066",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-SC06",
+      "task_id": "D20-PROVENANCE-066",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-SC07",
+      "task_id": "D20-PROVENANCE-066",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-SC08",
+      "task_id": "D16-SECURITY-062",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-SC09",
+      "task_id": "D16-SECURITY-062",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-SC10",
+      "task_id": "D16-SECURITY-062",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-SC11",
+      "task_id": "D16-SECURITY-062",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-SC12",
+      "task_id": "D16-SECURITY-062",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-SC13",
+      "task_id": "D20-PROVENANCE-066",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-SC14",
+      "task_id": "D20-PROVENANCE-066",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-UX01",
+      "task_id": "D17-USABILITY-076",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-UX02",
+      "task_id": "D17-USABILITY-076",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-UX03",
+      "task_id": "D17-USABILITY-076",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-UX04",
+      "task_id": "D17-USABILITY-076",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-UX05",
+      "task_id": "D17-USABILITY-076",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-UX06",
+      "task_id": "D17-USABILITY-076",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-UX07",
+      "task_id": "D17-USABILITY-076",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-UX08",
+      "task_id": "D17-USABILITY-076",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-UX09",
+      "task_id": "CTRL-GROWTH-072",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-UX10",
+      "task_id": "D17-USABILITY-076",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-PAT00",
+      "task_id": "CTRL-PATTERNS-071",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-PAT01",
+      "task_id": "PATTERN-01-RESEARCH",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-PAT02",
+      "task_id": "PATTERN-02-CITED",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-PAT03",
+      "task_id": "PATTERN-03-AUTH",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-PAT04",
+      "task_id": "PATTERN-04-DIFF",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-PAT05",
+      "task_id": "PATTERN-05-UNTIL-DRY",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-PAT06",
+      "task_id": "PATTERN-06-MIGRATION",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-PAT07",
+      "task_id": "PATTERN-07-CI",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-PAT08",
+      "task_id": "PATTERN-08-DEPS",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-PAT09",
+      "task_id": "PATTERN-09-PR",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-PAT10",
+      "task_id": "PATTERN-10-ECOSYSTEM",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-DOC01",
+      "task_id": "D18-EDUCATION-ASSETS-083",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-DOC02",
+      "task_id": "D18-EDUCATION-ASSETS-083",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-DOC03",
+      "task_id": "D15-EXPLORER-060",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-DOC04",
+      "task_id": "D18-EDUCATION-ASSETS-083",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-DOC05",
+      "task_id": "CTRL-DOCS-073",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-DOC06",
+      "task_id": "D18-EDUCATION-ASSETS-083",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-DOC07",
+      "task_id": "D15-PERFORMANCE-061",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-DOC08",
+      "task_id": "D18-EDUCATION-ASSETS-083",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-DOC09",
+      "task_id": "D13-DX-051",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-DOC10",
+      "task_id": "CTRL-DOCS-073",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-DOC11",
+      "task_id": "D15-EXPLORER-060",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-DOC12",
+      "task_id": "CTRL-GROWTH-072",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-DOC13",
+      "task_id": "D18-EDUCATION-ASSETS-083",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-DOC14",
+      "task_id": "CTRL-GROWTH-072",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-DOC15",
+      "task_id": "D19-RC-065",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-DOC16",
+      "task_id": "CTRL-RELEASE-ROLLUP-086",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-GR01",
+      "task_id": "CTRL-GROWTH-072",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-GR02",
+      "task_id": "CTRL-GROWTH-072",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-GR03",
+      "task_id": "CTRL-GROWTH-072",
+      "blocking": false
+    },
+    {
+      "release_id": "REL-GR04",
+      "task_id": "CTRL-GROWTH-072",
+      "blocking": false
+    },
+    {
+      "release_id": "REL-GR05",
+      "task_id": "CTRL-GROWTH-072",
+      "blocking": false
+    },
+    {
+      "release_id": "REL-GR06",
+      "task_id": "CTRL-GROWTH-072",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-GR07",
+      "task_id": "CTRL-GROWTH-072",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-SUP01",
+      "task_id": "D18-SUPPORT-READINESS-080",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-SUP02",
+      "task_id": "D18-SUPPORT-READINESS-080",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-SUP03",
+      "task_id": "D18-SUPPORT-READINESS-080",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-SUP04",
+      "task_id": "D18-SUPPORT-READINESS-080",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-SUP05",
+      "task_id": "D18-SUPPORT-READINESS-080",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-SUP06",
+      "task_id": "D18-SUPPORT-READINESS-080",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-SUP07",
+      "task_id": "D18-SUPPORT-READINESS-080",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-SUP08",
+      "task_id": "D18-SUPPORT-READINESS-080",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-RC01",
+      "task_id": "CTRL-RELEASE-ROLLUP-086",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-RC02",
+      "task_id": "CTRL-RELEASE-ROLLUP-086",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-RC03",
+      "task_id": "CTRL-RELEASE-ROLLUP-086",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-RC04",
+      "task_id": "CTRL-RELEASE-ROLLUP-086",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-RC05",
+      "task_id": "CTRL-RELEASE-ROLLUP-086",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-RC06",
+      "task_id": "D20-PROVENANCE-066",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-RC07",
+      "task_id": "D18-SUPPORT-READINESS-080",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-RC08",
+      "task_id": "D18-SUPPORT-READINESS-080",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-RC09",
+      "task_id": "CTRL-RELEASE-ROLLUP-086",
+      "blocking": true
+    },
+    {
+      "release_id": "REL-RC10",
+      "task_id": "D18-SUPPORT-READINESS-080",
+      "blocking": true
+    }
+  ]
+}
