@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-07-26T22:23:16Z",
+  "updated_at": "2026-07-26T23:18:00Z",
   "repository": ".",
   "scan_policy": {
     "warning_after_minutes": 60,
@@ -766,18 +766,18 @@
     {
       "id": "D4-TRACE-SUBGRAPH-022",
       "title": "Nested subgraph, reducer, artifact-ref, stream-edge, and trace contract",
-      "owner": "main + runtime lanes",
-      "status": "planned",
+      "owner": "/root/d4_subgraph_edge_contract; main owns integration",
+      "status": "in_progress",
       "work_package": "WP1-WP2-WP8",
       "depends_on": ["D2-BUILDERS-YAML-020", "D3-TS-RUNTIME-002", "D3-PY-RUNTIME-002", "D6-DURABLE-SPEC-010", "D7-PIPELINE-CONFORMANCE-013"],
       "expected_artifacts": ["spec/subgraph-and-edge-semantics.md", "spec/conformance/subgraph-edge.case.json", "packages/runtime", "python/src/graph_engineering"],
       "expected_tests": ["namespace and checkpoint scope", "concurrent state reducer", "artifact-ref and executable stream edges", "TypeScript and Python subgraph reducer artifact-ref and stream-edge parity"],
       "assigned_at": "2026-07-26T16:45:30Z",
-      "started_at": null,
-      "last_heartbeat": "2026-07-26T16:45:30Z",
+      "started_at": "2026-07-26T22:39:37Z",
+      "last_heartbeat": "2026-07-26T23:12:00Z",
       "risk": "high",
       "blocker": null,
-      "next_action": "Define subgraph and edge execution semantics without weakening current DAG compatibility"
+      "next_action": "Finish the dedicated plan event checkpoint artifact-ref stream-edge namespace reducer and trace contract plus its standalone semantic validator; record current native stream and subgraph behavior as nonconformant without modifying shared validators or runtimes"
     },
     {
       "id": "D6-ROUTER-BARRIER-023",
@@ -799,33 +799,42 @@
       "id": "D7-CYCLE-SPEC-024",
       "title": "Bounded cycle, convergence, seen-set, and GraphPatch contract",
       "owner": "main",
-      "status": "in_progress",
+      "status": "completed",
       "work_package": "WP5",
       "depends_on": ["D1-SPEC-001", "D2-BUILDERS-YAML-020", "D3-TS-RUNTIME-002", "D3-PY-RUNTIME-002"],
       "expected_artifacts": ["spec/cycle-semantics.md", "spec/graph-patch.schema.json", "spec/conformance"],
       "expected_tests": ["until-dry convergence", "hard iteration/time/cost/node limits", "malicious patch rejection", "replayed exit reason"],
+      "evidence_required": true,
+      "test_evidence": [
+        {"requirement": "until-dry convergence", "result": "passed", "recorded_at": "2026-07-26T23:17:10Z", "reference": "immutable 48d5b0d clean-tree fixture gate: first-occurrence global seen state, within/across-round duplicates, dry reset/increment, and exact DRY result"},
+        {"requirement": "hard iteration/time/cost/node limits", "result": "passed", "recorded_at": "2026-07-26T23:17:10Z", "reference": "immutable 48d5b0d: seven inclusive hard-stop fold vectors plus complete reservation settlement release and terminal-precedence histories"},
+        {"requirement": "malicious patch rejection", "result": "passed", "recorded_at": "2026-07-26T23:17:10Z", "reference": "immutable 48d5b0d: nine schema cases thirteen semantic patch vectors and durable authority budget stale-base idempotency byte depth race and dry-run attacks"},
+        {"requirement": "replayed exit reason", "result": "passed", "recorded_at": "2026-07-26T23:17:10Z", "reference": "immutable 48d5b0d: terminal history refold equality plus twenty hostile histories and eleven hostile checkpoint folds; native executable replay remains D7-CYCLE-CONFORMANCE-027"}
+      ],
+      "completion_evidence": ["commit:48d5b0d99618e899c15c5f718dcca4a7d8300225", "tree:0f9e8d0ee237c9964b9270ea310de2e7fc99664d", "spec/cycle-semantics.md", "spec/graph-patch.schema.json", "spec/conformance/bounded-cycle.case.json", "spec/conformance/graph-patch.case.json", "spec/conformance/cycle-controller.case.json", "spec/conformance/cycle-controller-durable.case.json", "codex_logs/reviews/D7-CYCLE-SPEC-024-contract-independent-2026-07-26.md", "codex_logs/reviews/D7-CYCLE-SPEC-024-immutable-48d5b0d-2026-07-26.md"],
       "assigned_at": "2026-07-26T16:45:30Z",
       "started_at": "2026-07-26T20:45:00Z",
-      "last_heartbeat": "2026-07-26T20:45:00Z",
+      "last_heartbeat": "2026-07-26T23:18:00Z",
+      "completed_at": "2026-07-26T23:18:00Z",
       "risk": "high",
       "blocker": null,
-      "next_action": "Freeze fail-closed until-dry, hard-stop accounting, replayed exit reasons, and append-only GraphPatch revision invariants"
+      "next_action": "Preserve immutable D7 protocol commit 48d5b0d and its no-P0/P1 contract boundary; complete native TypeScript 025 native Python 026 and executable cross-language 027 before any Day-7 capability or release claim"
     },
     {
       "id": "D7-TS-CYCLES-025",
       "title": "TypeScript bounded cycles and GraphPatch runtime",
-      "owner": "TypeScript lane",
-      "status": "planned",
+      "owner": "/root/d7_ts_cycles_native",
+      "status": "in_progress",
       "work_package": "WP5",
       "depends_on": ["D7-CYCLE-SPEC-024"],
       "expected_artifacts": ["packages/runtime", "packages/core"],
-      "expected_tests": ["global seen set", "bounded while/untilDry/evaluator optimizer", "patch dry run and budget gate"],
+      "expected_tests": ["global seen set", "bounded while/untilDry/evaluator optimizer", "patch dry run and budget gate", "closed request validation domain hashes and complete event fold", "every iteration duration cost attempt discovery candidate byte dynamic node depth fanout graph size and structural hard stop", "start resume replay and fork preserve lease fence checkpoint lineage and in-doubt activity semantics", "GraphPatch compiler policy authority budget CAS and accepted or rejected idempotent retry gates", "shared D7 fixtures drive real TypeScript behavior without Python delegation"],
       "assigned_at": "2026-07-26T16:45:30Z",
-      "started_at": null,
-      "last_heartbeat": "2026-07-26T16:45:30Z",
+      "started_at": "2026-07-26T22:50:00Z",
+      "last_heartbeat": "2026-07-26T23:18:00Z",
       "risk": "high",
       "blocker": null,
-      "next_action": "Wait for cycle and GraphPatch contract freeze"
+      "next_action": "Implement and test native TypeScript cycle controller fold recovery hard bounds and GraphPatch behavior in packages/runtime only against the accepted shared fixtures; do not claim Python or cross-language conformance"
     },
     {
       "id": "D7-PY-CYCLES-026",
@@ -950,10 +959,10 @@
       "expected_tests": ["canonical wire flag truth table", "sink-before-write transform and policy contract", "replay identity and authority invariants", "legacy misleading-history migration contract"],
       "assigned_at": "2026-07-26T17:45:00Z",
       "started_at": "2026-07-26T18:18:36Z",
-      "last_heartbeat": "2026-07-26T20:30:06Z",
+      "last_heartbeat": "2026-07-26T23:12:00Z",
       "risk": "critical",
       "blocker": null,
-      "next_action": "Resolve the independent audit's sink inventory, pointer semantics, failure atomicity, migration, and wire-flag truth blockers before native implementation"
+      "next_action": "Resolve the independent R3 changes-required findings for occurrence-bound AAD, receipt and ruleset identity, complete live source-by-sink policy inventory, pointer and resource bounds, semantic negative oracles, side-effect vocabulary, and the 039 versus 087/088/089 dependency boundary"
     },
     {
       "id": "D10-BUDGET-SPEC-035",
@@ -1610,10 +1619,10 @@
       "expected_tests": ["planned-document inventory", "link and snippet checks", "implementation-status audit", "English and Chinese launch essentials", "architecture essay claim-to-spec review covers IR execution durability at-least-once effects safety and limits", "pattern picker anti-pattern failure-mode operations and safety guide manifest passes pattern mapping and security review"],
       "assigned_at": "2026-07-26T16:20:00Z",
       "started_at": "2026-07-26T16:20:00Z",
-      "last_heartbeat": "2026-07-26T20:30:06Z",
+      "last_heartbeat": "2026-07-26T23:12:00Z",
       "risk": "high",
       "blocker": null,
-      "next_action": "Validate the new cross-language CLI contract and authoring documentation, then continue the exact open-document inventory as implementations advance"
+      "next_action": "Independently map every normative requirement in the append-only sections 9 through 30 to live task IDs release leaves tests and evidence producers, add missing tasks only where genuinely absent, and keep implementation claims synchronized with executable reality"
     },
     {
       "id": "CTRL-RELEASE-MAP-074",
