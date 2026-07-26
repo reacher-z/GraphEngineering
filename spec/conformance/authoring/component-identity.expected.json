@@ -1,0 +1,164 @@
+{
+  "apiVersion": "graphengineering.reacher-z.github.io/authoring-conformance/v1alpha1",
+  "kind": "CompiledIdentityGoldenSet",
+  "identities": {
+    "equivalent": {
+      "apiVersion": "graphengineering.reacher-z.github.io/compiled-identity/v1alpha1",
+      "kind": "CompiledGraphIdentity",
+      "graphRevision": 1,
+      "graphHash": "e0a73c69d3891b35fbb775514b0dbc9b246e237af2af3d426124c9330b7333d2",
+      "nodes": [
+        {
+          "id": "split",
+          "index": 0,
+          "contentHash": "06fc498eea9d9573c45352d5e95d684a011a4da66e875ab0762d95e8c0911eb6",
+          "inputSchemaHash": "c628a99a2c2801d7f6aa5a6ef5bc93c4e0d811147254b6667f44deb443319e2e",
+          "outputSchemaHash": "c628a99a2c2801d7f6aa5a6ef5bc93c4e0d811147254b6667f44deb443319e2e"
+        },
+        {
+          "id": "left",
+          "index": 1,
+          "contentHash": "855998da64d8271ac29696cf2516fc8b4d12c43953971d429a7b1e5d8e358005",
+          "inputSchemaHash": "c628a99a2c2801d7f6aa5a6ef5bc93c4e0d811147254b6667f44deb443319e2e",
+          "outputSchemaHash": "c628a99a2c2801d7f6aa5a6ef5bc93c4e0d811147254b6667f44deb443319e2e"
+        },
+        {
+          "id": "right",
+          "index": 2,
+          "contentHash": "2b0307a852ba00c472dd75d033798ba661660a12cbf83a7bc912a9e532a51d56",
+          "inputSchemaHash": "c628a99a2c2801d7f6aa5a6ef5bc93c4e0d811147254b6667f44deb443319e2e",
+          "outputSchemaHash": "c628a99a2c2801d7f6aa5a6ef5bc93c4e0d811147254b6667f44deb443319e2e"
+        },
+        {
+          "id": "merge",
+          "index": 3,
+          "contentHash": "5d19f56b6b7ff76a3e25eb5949e6a74a5c3ea11ace27b53e3a8bc9b9c108546d",
+          "inputSchemaHash": "c628a99a2c2801d7f6aa5a6ef5bc93c4e0d811147254b6667f44deb443319e2e",
+          "outputSchemaHash": "c628a99a2c2801d7f6aa5a6ef5bc93c4e0d811147254b6667f44deb443319e2e"
+        }
+      ],
+      "edges": [
+        {
+          "id": "split-left",
+          "index": 0,
+          "contentHash": "e006f5134344cf612fd75aa748c4ec89fb2650c69a13c7a83b9f517830ae6e66",
+          "schemaHash": null
+        },
+        {
+          "id": "split-right",
+          "index": 1,
+          "contentHash": "5c9cd781bedd76f509926df2ab7f3c8a4e9219509f6022cb8be00c224f7a8ee7",
+          "schemaHash": null
+        },
+        {
+          "id": "left-merge",
+          "index": 2,
+          "contentHash": "b278a48b8a64da45030bba9a2453c18eb4ee9675c324c62d5c83851fb04d3a00",
+          "schemaHash": null
+        },
+        {
+          "id": "right-merge",
+          "index": 3,
+          "contentHash": "b0059175dfef3204a9901e129304cad038830fa185d84c48f5562053c26b8fb8",
+          "schemaHash": null
+        }
+      ],
+      "graphSchemas": {
+        "input": "c628a99a2c2801d7f6aa5a6ef5bc93c4e0d811147254b6667f44deb443319e2e",
+        "output": "c628a99a2c2801d7f6aa5a6ef5bc93c4e0d811147254b6667f44deb443319e2e",
+        "state": null
+      },
+      "revisionHash": "92f5fbf1525dbff4b666408f447adcdf6a51c79a1678dec143985a0c4db47991"
+    },
+    "typed-ports": {
+      "apiVersion": "graphengineering.reacher-z.github.io/compiled-identity/v1alpha1",
+      "kind": "CompiledGraphIdentity",
+      "graphRevision": 1,
+      "graphHash": "56e8a96ae2229faaa1732182f08df8782cedebda9f6770b54d336752522329e0",
+      "nodes": [
+        {
+          "id": "split",
+          "index": 0,
+          "contentHash": "b3e7c46e38d7087a8c2903b63f296fef32022c657fd9576a487e9c9de1904e02",
+          "inputSchemaHash": "0494ca1e5594fe3e4a9b5f73e68203223763504587f2171e967d9c0acf6bf822",
+          "outputSchemaHash": "38c691ad91316f8543d85c075e7d871ca46c4dacefe3a37cedf87d1c10e12fe0"
+        },
+        {
+          "id": "left",
+          "index": 1,
+          "contentHash": "283a6251c2512677073b11fd8afeb2792e0bcec10c802e5b5aefc22b3d05fdd9",
+          "inputSchemaHash": "2654afded3dd4f16df92b78ae6fc9f4676e2f4f5c320c6d3e6da1ab87857f83a",
+          "outputSchemaHash": "226d5ca5d4f08e94ac6a3cb72f455d71250dfbbc5d07e921e9d23af83cc0d177"
+        },
+        {
+          "id": "right",
+          "index": 2,
+          "contentHash": "a9af4c95e2aa86d0e1c2c1d86f587df3eb0cf5ae0a4c410f9e50ea6e6fb506bd",
+          "inputSchemaHash": "2654afded3dd4f16df92b78ae6fc9f4676e2f4f5c320c6d3e6da1ab87857f83a",
+          "outputSchemaHash": "226d5ca5d4f08e94ac6a3cb72f455d71250dfbbc5d07e921e9d23af83cc0d177"
+        },
+        {
+          "id": "merge",
+          "index": 3,
+          "contentHash": "7062eb10efd8ad8ee9ddae7e6e4a0932ac00943ae9d6db247a73fcc56e6606a7",
+          "inputSchemaHash": "d4da66bc871ee672350012ad77b64bcf8341e009c78b675f7ce3fd63cef43926",
+          "outputSchemaHash": "a8ea38a49a78029193988472de2de7dd7f41d96e8270ab201ed30ad82c11f0d0"
+        }
+      ],
+      "edges": [
+        {
+          "id": "split-left",
+          "index": 0,
+          "contentHash": "6a1314c20879b66daed792f6b8323cccf5b9ad988de2871dd78fac5bd5d53649",
+          "schemaHash": "841e288a99d0fa98c5fc027654952f72fecc436b5ac0d202bd6c58241e355773"
+        },
+        {
+          "id": "split-right",
+          "index": 1,
+          "contentHash": "8d260cd3e90c1e93c41c3962f9a66f2ebf6842b1f0652141bed03e215a54e891",
+          "schemaHash": "841e288a99d0fa98c5fc027654952f72fecc436b5ac0d202bd6c58241e355773"
+        },
+        {
+          "id": "left-merge",
+          "index": 2,
+          "contentHash": "b1d813954282d960e0162ac446648e2d8f2ccb64abda4de5d36bc9f08d704768",
+          "schemaHash": "841e288a99d0fa98c5fc027654952f72fecc436b5ac0d202bd6c58241e355773"
+        },
+        {
+          "id": "right-merge",
+          "index": 3,
+          "contentHash": "0918807b1349c9efd70e829799b333c111a66587f60ad2ef84fe6c569f9d0e2e",
+          "schemaHash": "841e288a99d0fa98c5fc027654952f72fecc436b5ac0d202bd6c58241e355773"
+        }
+      ],
+      "graphSchemas": {
+        "input": "0494ca1e5594fe3e4a9b5f73e68203223763504587f2171e967d9c0acf6bf822",
+        "output": "a8ea38a49a78029193988472de2de7dd7f41d96e8270ab201ed30ad82c11f0d0",
+        "state": "bb7f6edcb12796aa7fedcf8eb32330a7beeac6312620f97ad4b8848330ee8b79"
+      },
+      "revisionHash": "1cb0dfc959d6b0e3ba17f5a0dc63018dba888d62895a6fb44e2c7e1b8ec8fb9b"
+    },
+    "unicode-and-keys": {
+      "apiVersion": "graphengineering.reacher-z.github.io/compiled-identity/v1alpha1",
+      "kind": "CompiledGraphIdentity",
+      "graphRevision": 1,
+      "graphHash": "8c8f9b6149d0a26437599a9a26924d6b5016441c7c94531c549232fec370653b",
+      "nodes": [
+        {
+          "id": "unicode",
+          "index": 0,
+          "contentHash": "60c727c5a1a989aa1f9fb4b0960e528465a092d5b6373486ef2fdbcd1a4af37e",
+          "inputSchemaHash": "c628a99a2c2801d7f6aa5a6ef5bc93c4e0d811147254b6667f44deb443319e2e",
+          "outputSchemaHash": "c628a99a2c2801d7f6aa5a6ef5bc93c4e0d811147254b6667f44deb443319e2e"
+        }
+      ],
+      "edges": [],
+      "graphSchemas": {
+        "input": "c628a99a2c2801d7f6aa5a6ef5bc93c4e0d811147254b6667f44deb443319e2e",
+        "output": "c628a99a2c2801d7f6aa5a6ef5bc93c4e0d811147254b6667f44deb443319e2e",
+        "state": null
+      },
+      "revisionHash": "77a5a865912f610f2ab4aef65f781f7a3a423abeeae32594513a6f145d28694c"
+    }
+  }
+}

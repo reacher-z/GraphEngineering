@@ -145,9 +145,12 @@ def test_hostile_exception_stringification_is_structured_and_releases_stage_slot
 
 
 def test_hostile_invalid_input_diagnostic_is_structured_without_hanging() -> None:
+    calls: list[str] = []
+
     class HostileTypeName(type):
         def __getattribute__(cls, name: str) -> object:
             if name == "__name__":
+                calls.append(name)
                 raise RuntimeError("hostile type name")
             return super().__getattribute__(name)
 
@@ -165,7 +168,8 @@ def test_hostile_invalid_input_diagnostic_is_structured_without_hanging() -> Non
         assert result.total_attempts == 0
         assert result.failure is not None
         assert result.failure.code is PipelineFailureCode.INVALID_INPUT
-        assert result.failure.message == "hostile type name"
+        assert result.failure.message == "value is not portable JSON"
+        assert calls == []
         summary = await run.completion()
         assert summary.status is PipelineRunStatus.FAILED
         assert summary.accepted == summary.emitted == 1
@@ -175,9 +179,12 @@ def test_hostile_invalid_input_diagnostic_is_structured_without_hanging() -> Non
 
 
 def test_hostile_invalid_output_diagnostic_remains_invalid_output() -> None:
+    calls: list[str] = []
+
     class HostileTypeName(type):
         def __getattribute__(cls, name: str) -> object:
             if name == "__name__":
+                calls.append(name)
                 raise RuntimeError("hostile output type name")
             return super().__getattribute__(name)
 
@@ -196,8 +203,9 @@ def test_hostile_invalid_output_diagnostic_remains_invalid_output() -> None:
         assert result.total_attempts == 1
         assert result.failure is not None
         assert result.failure.code is PipelineFailureCode.INVALID_OUTPUT
-        assert result.failure.message == "hostile output type name"
+        assert result.failure.message == "value is not portable JSON"
         assert result.failure.cause_name == "PortableJsonError"
+        assert calls == []
         with pytest.raises(StopAsyncIteration):
             await anext(run)
 

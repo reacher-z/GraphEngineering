@@ -165,6 +165,72 @@ function validateEdge(value: unknown, index: number, issues: string[]): void {
   }
 }
 
+function validatePolicies(value: unknown, issues: string[]): void {
+  if (!record(value)) {
+    issues.push("#/policies: expected an object");
+    return;
+  }
+  const positiveIntegers = [
+    "maxConcurrency",
+    "maxDepth",
+    "maxFanOut",
+    "maxTotalAttempts",
+  ] as const;
+  for (const key of positiveIntegers) {
+    const item = value[key];
+    if (item !== undefined && (!Number.isSafeInteger(item) || (item as number) < 1)) {
+      issues.push(`#/policies/${key}: expected a positive integer`);
+    }
+  }
+  const maxDurationMs = value.maxDurationMs;
+  if (maxDurationMs !== undefined &&
+      (!Number.isSafeInteger(maxDurationMs) || (maxDurationMs as number) < 1 ||
+       (maxDurationMs as number) > MAX_TIMER_MILLISECONDS)) {
+    issues.push(
+      `#/policies/maxDurationMs: expected an integer from 1 to ${MAX_TIMER_MILLISECONDS}`,
+    );
+  }
+  const dynamicNodes = value.maxDynamicNodes;
+  if (dynamicNodes !== undefined && (!Number.isSafeInteger(dynamicNodes) || (dynamicNodes as number) < 0)) {
+    issues.push("#/policies/maxDynamicNodes: expected a non-negative integer");
+  }
+  const cost = value.maxCostUsd;
+  if (cost !== undefined && (typeof cost !== "number" || !Number.isFinite(cost) || cost < 0)) {
+    issues.push("#/policies/maxCostUsd: expected a non-negative finite number");
+  }
+}
+
+/** Internal fragment validators reused by the general builder before mutation. */
+export function validateMetadataDocument(value: unknown): readonly string[] {
+  const issues: string[] = [];
+  validateMetadata(value, issues);
+  return issues;
+}
+
+export function validateNodeDocument(value: unknown, index: number): readonly string[] {
+  const issues: string[] = [];
+  validateNode(value, index, issues);
+  return issues;
+}
+
+export function validateEdgeDocument(value: unknown, index: number): readonly string[] {
+  const issues: string[] = [];
+  validateEdge(value, index, issues);
+  return issues;
+}
+
+export function validateEndpointDocument(value: unknown, path: string): readonly string[] {
+  const issues: string[] = [];
+  validateEndpoint(value, path, issues);
+  return issues;
+}
+
+export function validatePoliciesDocument(value: unknown): readonly string[] {
+  const issues: string[] = [];
+  validatePolicies(value, issues);
+  return issues;
+}
+
 /** Dependency-free structural validation of the public v1alpha1 Graph envelope. */
 export function validateGraphDocument(value: unknown): readonly string[] {
   const issues: string[] = [];
@@ -202,40 +268,7 @@ export function validateGraphDocument(value: unknown): readonly string[] {
   else value.nodes.forEach((item, index) => validateNode(item, index, issues));
   if (!Array.isArray(value.edges)) issues.push("#/edges: expected an array");
   else value.edges.forEach((item, index) => validateEdge(item, index, issues));
-  if (value.policies !== undefined) {
-    if (!record(value.policies)) {
-      issues.push("#/policies: expected an object");
-    } else {
-      const positiveIntegers = [
-        "maxConcurrency",
-        "maxDepth",
-        "maxFanOut",
-        "maxTotalAttempts",
-      ] as const;
-      for (const key of positiveIntegers) {
-        const item = value.policies[key];
-        if (item !== undefined && (!Number.isSafeInteger(item) || (item as number) < 1)) {
-          issues.push(`#/policies/${key}: expected a positive integer`);
-        }
-      }
-      const maxDurationMs = value.policies.maxDurationMs;
-      if (maxDurationMs !== undefined &&
-          (!Number.isSafeInteger(maxDurationMs) || (maxDurationMs as number) < 1 ||
-           (maxDurationMs as number) > MAX_TIMER_MILLISECONDS)) {
-        issues.push(
-          `#/policies/maxDurationMs: expected an integer from 1 to ${MAX_TIMER_MILLISECONDS}`,
-        );
-      }
-      const dynamicNodes = value.policies.maxDynamicNodes;
-      if (dynamicNodes !== undefined && (!Number.isSafeInteger(dynamicNodes) || (dynamicNodes as number) < 0)) {
-        issues.push("#/policies/maxDynamicNodes: expected a non-negative integer");
-      }
-      const cost = value.policies.maxCostUsd;
-      if (cost !== undefined && (typeof cost !== "number" || !Number.isFinite(cost) || cost < 0)) {
-        issues.push("#/policies/maxCostUsd: expected a non-negative finite number");
-      }
-    }
-  }
+  if (value.policies !== undefined) validatePolicies(value.policies, issues);
 
   return issues;
 }

@@ -1,0 +1,36 @@
+apiVersion: graphengineering.reacher-z.github.io/v1alpha1
+kind: Graph
+metadata:
+  name: yaml-scalars
+  version: "1.0.0"
+  labels:
+    yes-value: yes
+    no-value: no
+    on-value: on
+    off-value: off
+inputSchema: {type: object}
+outputSchema: {type: object}
+entrypoints: [scalar]
+outputs:
+  result: {node: scalar}
+nodes:
+  - id: scalar
+    kind: transform
+    inputSchema: {type: object}
+    outputSchema: {type: object}
+    config:
+      enabled: true
+      disabled: false
+      empty: null
+      integer: 42
+      fraction: 1.25
+      numericUnderscore: 1_000
+      binaryToken: 0b10
+      octal: 0o10
+      hexadecimal: 0x10
+      exponent: 1e3
+      quotedTimestamp: "2026-07-26"
+      block: |-
+        first line
+        second line
+edges: []

@@ -5,22 +5,28 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
-from pydantic import BaseModel
-
-from ._json import compact_json, utf8_bytes
+from ._json import _compact_captured_json, utf8_bytes
+from .portable_json import portable_json_snapshot
 
 
 def _json_value(value: Any) -> Any:
-    if isinstance(value, BaseModel):
-        # exclude_unset preserves explicit JSON null while omitting absent optional fields.
-        return value.model_dump(mode="json", by_alias=True, exclude_unset=True)
+    # Avoid virtual BaseModel serialization: only an exact GraphSpec is part of
+    # this public convenience boundary, and its raw Pydantic storage is captured
+    # without invoking caller-controlled methods or nested subclasses.
+    from .models import GraphSpec, capture_graph_model_document
+
+    if type(value) is GraphSpec:
+        return capture_graph_model_document(value, GraphSpec)
     return value
 
 
 def canonical_json(value: Any) -> str:
     """Serialize using the Graph Engineering v1alpha1 canonical JSON rules."""
 
-    return compact_json(_json_value(value), sort_keys=True)
+    return _compact_captured_json(
+        portable_json_snapshot(_json_value(value)),
+        sort_keys=True,
+    )
 
 
 def canonical_bytes(value: Any) -> bytes:

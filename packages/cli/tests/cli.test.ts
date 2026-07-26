@@ -145,7 +145,7 @@ test("invalid JSON from stdin respects the machine stream boundary", () => {
   const result = invoke(["validate", "-", "--json"], "{not json");
   assert.equal(result.status, 2);
   const envelope = parseMachine(result);
-  assert.equal(envelope.error?.code, "GECLI_INPUT_JSON");
+  assert.equal(envelope.error?.code, "GE_SOURCE_SYNTAX");
 });
 
 test("doctor reports a healthy local installation through the common envelope", () => {

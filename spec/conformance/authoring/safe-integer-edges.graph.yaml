@@ -1,0 +1,23 @@
+apiVersion: graphengineering.reacher-z.github.io/v1alpha1
+kind: Graph
+metadata:
+  name: safe-integer-edges
+  version: "1.0.0"
+inputSchema: {type: object}
+outputSchema: {type: object}
+entrypoints: [bounds]
+outputs:
+  result: {node: bounds}
+nodes:
+  - id: bounds
+    kind: transform
+    inputSchema: {type: object}
+    outputSchema: {type: object}
+    timeoutMs: 2147483647
+    config:
+      minimumSafeInteger: -9007199254740991
+      maximumSafeInteger: 9007199254740991
+edges: []
+policies:
+  maxConcurrency: 9007199254740991
+  maxDynamicNodes: 9007199254740991

@@ -129,24 +129,25 @@ serialized as JSON zero. These are canonicalization properties, not semantic
 equivalence rules: the project has no graph-normalization pass that sorts node
 or edge arrays for arbitrary callers.
 
-### Numeric limitation
+### Numeric profile
 
-Graph canonicalization accepts finite JSON numbers and rejects integer values
-outside JavaScript's interoperable safe-integer range. However, the v1alpha1
-cross-language graph-hash corpus intentionally contains no fractional numbers.
-Full RFC 8785 number serialization has not been adopted. Consequently:
+Graph canonicalization accepts finite JSON numbers and rejects integer-valued
+numbers outside JavaScript's interoperable safe-integer range. Every accepted
+finite binary64 is serialized with ECMAScript's shortest-round-trip number
+algorithm, including closest-value selection, round-to-even ties, `-0` to `0`,
+fixed notation for `1e-6 <= abs(x) < 1e21`, and lowercase scientific notation
+otherwise. No implementation may round values preemptively or stringify them
+as application data.
 
-- the diamond hash is a valid cross-language compatibility commitment;
-- safe-integer graph documents stay inside the proven profile;
-- fractional values may be accepted locally but are not yet a fully frozen
-  byte-equivalent cross-language hash contract; and
-- Day 2 cannot claim a complete numeric freeze until an exact number profile
-  and adversarial cross-language vectors are accepted.
-
-Do not “fix” this by rounding, stringifying numbers implicitly, or tolerating
-non-finite values. A future contract must either adopt a precise canonical
-number algorithm or require explicit decimal/scaled-integer encodings in the
-affected fields.
+[`canonical-number.case.json`](../../spec/conformance/canonical-number.case.json)
+freezes the RFC 8785 Appendix B finite tokens, non-finite rejection, 10,000
+fixed-seed random finite bit patterns against Node `JSON.stringify`, and one
+fractional whole graph through JSON/YAML decoding, direct canonicalization,
+both compilers, both builders, component/revision identity, and SHA-256. Public
+canonicalization separately rejects unsafe integer-valued and non-finite
+binary64 values. This adopts RFC 8785 Section 3.2.2.3 only. The project
+sorts keys by Unicode code point rather than RFC 8785's UTF-16 code units and
+therefore does not claim full JCS conformance.
 
 ## 4. Portable JSON boundary
 
@@ -200,35 +201,13 @@ retry, and known-policy fields do not include `null` in their declared types.
 `config` may legally be null because it deliberately accepts any portable JSON
 value, and null can also appear inside an otherwise valid schema/config object.
 
-There is a current Day 2 parity defect at this boundary: TypeScript follows the
-canonical schema and returns `GE1007_INVALID_GRAPH` for explicit null in fields
-such as `metadata.description`, `stateSchema`, endpoint `port`, or node `retry`,
-while the Python Pydantic projection currently accepts those values through its
-`T | None` declarations. Until Python distinguishes “absent” from “present but
-null” during validation and a shared negative fixture locks the rule, nullability
-parity is **not frozen**. The canonical schema remains authoritative.
-
-#### Reproduced nullability variants
-
-The following read-only probe started from
-[`diamond.graph.json`](../../spec/conformance/diamond.graph.json), made exactly
-one JSON change per copy, and compiled each copy with the currently built
-TypeScript core and current Python package. The JSON column is a minimal
-replacement fragment, not a new extension syntax.
-
-| Suggested shared fixture | Single JSON replacement | TypeScript actual | Python actual |
-| --- | --- | --- | --- |
-| `invalid-null-metadata-description.graph.json` | `{ "metadata": { "description": null } }` | `valid: false`; `GE1007_INVALID_GRAPH` | `valid: true`; no diagnostic |
-| `invalid-null-state-schema.graph.json` | `{ "stateSchema": null }` | `valid: false`; `GE1007_INVALID_GRAPH` | `valid: true`; no diagnostic |
-| `invalid-null-output-port.graph.json` | `{ "outputs": { "result": { "node": "merge", "port": null } } }` | `valid: false`; `GE1007_INVALID_GRAPH` | `valid: true`; no diagnostic |
-| `invalid-null-node-retry.graph.json` | `{ "nodes": [{ "id": "split", "retry": null }] }` | `valid: false`; `GE1007_INVALID_GRAPH` | `valid: true`; no diagnostic |
-
-Each shared fixture must otherwise be a complete, valid graph and introduce
-exactly one explicit-null defect; abbreviated fragments above must never replace
-required sibling fields. The expected corpus entry for every case is
-`valid: false` with exactly `GE1007_INVALID_GRAPH`. This keeps the fix
-schema-led: Python should reject the documents rather than TypeScript relaxing
-the canonical contract.
+The earlier Python nullability divergence is closed. Both compilers distinguish
+absence from a present null for every known optional non-null field. Four shared
+JSON fixtures and four equivalent YAML fixtures lock `metadata.description`,
+`stateSchema`, endpoint `port`, and node `retry` to
+`GE1007_INVALID_GRAPH`; Python also enumerates all known optional model fields.
+Required `config: null` and null inside an unknown policy extension remain valid
+and hash-identical across languages.
 
 ### Metadata
 
@@ -243,11 +222,13 @@ a substitute for an implementation check.
 
 ### Graph input, output, and state schemas
 
-Each schema-valued field is currently validated only as a JSON object. Core
-does not meta-validate it against Draft 2020-12, resolve external references,
-or enforce it against graph/node runtime values. The declarations are retained
-and hashed so a future validator can do that work without redesigning the
-envelope.
+Each root schema-valued field is structurally a JSON object. Ordinary graphs
+retain and hash these declarations without claiming runtime value validation.
+When the exact versioned strict-typed-port policy is enabled, both compilers
+meta-validate every participating schema as Draft 2020-12, reject all `$ref`
+and `$dynamicRef`, reject regex-bearing keywords and empty `enum` arrays, and
+prove only canonical-exact endpoint compatibility. This does not validate
+runtime values or claim general schema assignability.
 
 `stateSchema` is especially easy to overclaim. Its presence does not create a
 shared state store, state transaction, reducer, conflict detector, checkpoint
@@ -330,15 +311,13 @@ selects a property from the producer result. A target port chooses the key in
 the consumer input map; without one, the source node ID is the key. Duplicate
 target binding keys are detected during runtime binding as structured failure.
 
-This is **named-port binding**, not typed-port compilation. The compiler does
-not currently:
-
-- resolve a port declaration inside an input/output JSON Schema;
-- reject a source port absent from the producer schema;
-- reject a target port absent from the consumer schema;
-- prove producer and consumer schema compatibility;
-- validate edge `schema` against either endpoint; or
-- detect duplicate target binding keys statically.
+Legacy graphs use named-port binding without a static type claim. Graphs that
+opt into `graphengineering.reacher-z.github.io/typed-ports/v1alpha1` receive a
+strict-exact compile-time proof: required source and target properties must
+exist, source/edge/target schemas must be canonical-identical, duplicate target
+bindings fail, public outputs and entrypoints match graph schemas, and non-value
+modes fail closed. All reference keywords are rejected to prevent identical
+local reference tokens in different roots from producing a false proof.
 
 ### Edge vocabulary versus execution
 
@@ -351,7 +330,7 @@ not currently:
 | `mode: artifact-ref` | Accepted and hashed | No ArtifactStore contract or reference validation |
 | `map` | Must be an object if present | Not lowered or evaluated |
 | `condition` | Must be an object if present | Not lowered; all statically reachable branches still run |
-| `schema` | Must be an object if present | Not meta-validated or applied to the transferred value |
+| `schema` | Object in Graph IR; Draft 2020-12 meta-validated in strict-exact mode | Compared statically in strict mode; transferred runtime values are not yet schema-validated |
 
 An omitted edge mode is accepted, but authors should not use omission as a
 portable promise for future mode negotiation until the default is explicitly
@@ -384,8 +363,7 @@ cannot honor it. Silent “best effort” would make safety budgets fictional.
 ## 10. Compiler stages and implemented diagnostics
 
 TypeScript compilation is implemented by
-[`compiler.ts`](../../packages/core/src/compiler.ts) with dependency-free
-envelope checks in
+[`compiler.ts`](../../packages/core/src/compiler.ts) with closed-envelope checks in
 [`schema-validation.ts`](../../packages/core/src/schema-validation.ts). Python
 implements the corresponding behavior in
 [`compiler.py`](../../python/src/graph_engineering/compiler.py) and strict
@@ -400,8 +378,9 @@ The observable compile pipeline is:
 4. index node and edge identities;
 5. resolve edge endpoints, entrypoints, and output nodes;
 6. build adjacency and deterministic topological layers;
-7. reject cycles, incoming edges to entrypoints, and unreachable nodes; and
-8. enforce static max-fan-out and max-depth policies.
+7. reject cycles, incoming edges to entrypoints, and unreachable nodes;
+8. enforce static max-fan-out and max-depth policies; and
+9. when explicitly enabled, meta-validate and prove strict-exact typed ports.
 
 Identity/reference failures stop topology analysis so the compiler does not
 manufacture cascaded cycle/reachability diagnoses from an ambiguous index.
@@ -422,6 +401,17 @@ portable identifiers are the compatibility surface.
 | `GE1010_ENTRYPOINT_HAS_INCOMING` | A declared entrypoint has an incoming edge. |
 | `GE1101_MAX_FAN_OUT` | A node's static outgoing edge count exceeds policy. |
 | `GE1102_MAX_DEPTH` | Static topological layer count exceeds policy. |
+| `GE1201_MISSING_SOURCE_PORT` | A strict source/public-output port is absent or not required. |
+| `GE1202_MISSING_TARGET_PORT` | A strict target binding is absent or not required. |
+| `GE1203_PORT_SCHEMA_MISMATCH` | Strict source, edge, and target schemas differ canonically. |
+| `GE1204_DUPLICATE_TARGET_BINDING` | Two strict edges bind one target input key. |
+| `GE1205_INVALID_PORT_SCHEMA` | Strict policy/schema is invalid or contains a reference. |
+| `GE1206_OUTPUT_SCHEMA_MISMATCH` | A public output differs from graph output schema. |
+| `GE1207_ENTRYPOINT_SCHEMA_MISMATCH` | An entrypoint differs from graph input schema. |
+| `GE1208_UNSUPPORTED_TYPED_EDGE_MODE` | Strict mode sees stream or artifact-ref. |
+| `GE1301_UNSUPPORTED_GRAPH_REVISION` | Initial identity revision is not the safe integer 1. |
+| `GE1302_GRAPH_IDENTITY_MISMATCH` | Identity graph hash differs from the compiled graph. |
+| `GE1303_COMPONENT_IDENTITY_MISMATCH` | Component/schema/order/revision identity differs. |
 
 The shared negative corpus currently covers duplicate node, missing endpoint,
 cycle, unreachable node, incoming-entrypoint, unsafe budget, and oversized
@@ -433,7 +423,8 @@ invalid field/path combination.
 Current compilation does not establish:
 
 - full JSON Schema validity or runtime input/output conformance;
-- typed-port existence or producer/consumer compatibility;
+- general schema assignability or reference resolution beyond opt-in
+  strict-exact typed-port identity;
 - router exhaustiveness, defaults, or condition-language validity;
 - concurrent state-write conflicts or reducer correctness;
 - capability authorization or resource/isolation feasibility;
@@ -461,14 +452,16 @@ evidence includes:
 - safe handling of mutation, aliases, hostile accessors/proxies, cycles,
   sparse arrays, Unicode edge cases, and non-portable numbers in package tests;
   and
-- preservation of required `config: null` plus the generic canonical
-  distinction between a legal null value and an absent property.
+- preservation of required `config: null`, rejection of known optional-field
+  null, and lossless unknown policy-extension values.
 
-This evidence proves one bounded DAG/compiler slice. It does not prove every
-Draft 2020-12 keyword, every fractional number spelling, YAML equivalence,
-builder parity, typed schemas, full node-kind behavior, or future migrations.
-It also does not cover the known optional-field nullability divergence described
-above; that gap must not be hidden behind the otherwise green fixture set.
+The D2 authoring candidate adds a three-way golden coordinator for strict JSON,
+safe YAML, both general builders, declaration order, YAML lexical traps and
+limits, `GE1201`-`GE1208`, domain-separated component identities, and
+`GE1301`-`GE1303` mutation cases. Its v1alpha1 profile rejects regex-bearing
+keywords rather than inheriting incompatible host regex grammars. It still does
+not prove every Draft 2020-12 keyword, general schema assignability, full
+node-kind behavior, or future migrations.
 
 ## 12. Authoring and advanced IR gaps
 
@@ -477,17 +470,17 @@ examples, and launch content.
 
 | Promised surface | Evidence that exists | Missing work / honest current label |
 | --- | --- | --- |
-| General TypeScript builder | Four zero-side-effect topology constructors exist in [`@graph-engineering/patterns`](../../packages/patterns/README.md) | No general builder for arbitrary nodes/edges/typed ports; **not implemented** |
-| General Python builder | Strict GraphSpec Pydantic models exist | No fluent/general parity builder or Python pattern set; **not implemented** |
-| YAML authoring | JSON is accepted by the TypeScript CLI | No YAML loader, duplicate-key policy, tag/anchor safety profile, canonical conversion, or parity fixtures; **not implemented** |
-| Typed ports | Endpoint port strings bind values at runtime | No declared port registry, schema extraction, assignability algorithm, or compile-time compatibility diagnostic; **not implemented** |
-| Runtime schema contracts | Schema objects are required and hashed | No Draft 2020-12 meta-validation or node/edge/graph value validation; **not implemented** |
+| General TypeScript builder | Detached arbitrary GraphSpec builder, duplicate/seal checks, compiler/hash/identity result | **Implemented for immutable v1alpha1 revision 1**; no GraphPatch inference |
+| General Python builder | Same operation model with detached-on-access nested graph snapshot | **Implemented for immutable v1alpha1 revision 1**; no Python pattern-set claim |
+| YAML authoring | Bounded strict YAML 1.2 JSON-compatible decoder plus CLI file/stdin selection | **Implemented safe subset**; anchors/tags/merge/directives/multi-doc and non-JSON values fail closed |
+| Typed ports | Versioned strict-exact policy and `GE1201`-`GE1208` | **Implemented opt-in canonical-exact proof**; no runtime value validation, `$ref`, widening, stream, or artifact proof |
+| Runtime schema contracts | Schema objects are required and hashed; the opt-in strict typed-port profile meta-validates participating Draft 2020-12 schemas | No node/edge/graph runtime instance validation or general schema execution; **not implemented** |
 | Shared graph state | `stateSchema` is accepted | No state instance, transaction, reducer, conflict check, or persistence semantics; **vocabulary only** |
 | Nested subgraphs | `kind: subgraph` is accepted | No embedded/reference form, namespace expansion, input/output mapping, policy inheritance, checkpoint scope, or trace lineage; **vocabulary only** |
 | Stream/artifact edges | Edge mode literals are accepted | No Graph IR stream scheduler or ArtifactStore lowering; **vocabulary only** |
 | Conditions and mappings | Opaque objects are accepted and hashed | No portable expression language, compiler, sandbox, or scheduler application; **declarative only** |
 | Dynamic `GraphPatch` | `GraphPatched` exists in the event-type enum | No patch document schema, compiler API, revision transition, authorization/budget check, dry run, durable fold, or runtime execution; **not implemented** |
-| Node/edge/schema content hashes | Whole-graph canonical SHA-256 exists | No stable individual content hashes or dependency/revision manifest; **not implemented** |
+| Node/edge/schema content hashes | Domain-separated component/schema hashes and revision-1 manifest | **Implemented for initial revision 1**; no patch lineage, signing, or durable manifest store |
 
 The `GraphPatched` event name is reserved vocabulary. The current durable
 contract intentionally runs one immutable compiled DAG at graph revision `1`.
@@ -580,24 +573,26 @@ the complete promise, not only one green diamond hash.
 | --- | --- | --- |
 | Canonical Graph v1alpha1 schema under controlled namespace | Green for current document | Canonical schema plus accepted namespace ADR |
 | Native strict TS/Python GraphSpec projections | Green for current envelope | Core types/validator and Pydantic models |
-| Byte-identical canonical JSON/hash | Green for safe-integer shared diamond; Partial overall | Fractional number profile/corpus is not frozen |
+| Byte-identical canonical JSON/hash | Green for the current Graph IR number domain | Shared diamond plus RFC/seeded fractional manifest and compiler/builder whole-graph identity |
 | Shared positive/negative compiler corpus | Partial | Core DAG cases exist; not every stable diagnostic or advanced validation has a fixture |
-| Optional-field nullability parity | Open defect | Schema/TypeScript reject present null; Python currently accepts it |
-| General TypeScript builder | Open | Pattern-specific constructors are insufficient |
-| General Python builder | Open | Models are not a parity builder |
-| Safe deterministic YAML loader | Open | CLI is JSON-only |
-| Graph/node/edge/schema content hashes | Partial/Open | Whole graph hash only |
-| Typed ports and schema compatibility | Open | Port strings bind dynamically; compiler does not analyze schemas |
+| Optional-field nullability parity | Green | Shared JSON/YAML negatives plus exhaustive Python optional-field matrix |
+| General TypeScript builder | Candidate green | General detached builder; package/full gates still bind final evidence |
+| General Python builder | Candidate green | General detached builder; package/full gates still bind final evidence |
+| Safe deterministic YAML loader | Candidate green | Bounded shared safety corpus and CLI JSON/YAML/stdin behavior |
+| Graph/node/edge/schema content hashes | Candidate green for revision 1 | Golden domain-separated identities and fail-closed verifier |
+| Typed ports and schema compatibility | Candidate green for strict-exact v1alpha1 | Opt-in exact proof only; general assignability remains out of scope |
 | State/reducer conflict validation | Open | `stateSchema` has no execution model |
 | Subgraph namespace/checkpoint contract | Open | Node kind literal only |
 | Dynamic revision/GraphPatch schema | Open | Event name only; durable graph remains immutable revision 1 |
 | Policy/budget/capability/loop validation promised by plan | Partial/Open | Static fan-out/depth and numeric shapes exist; broader semantics do not |
-| Schema bundle drift detection | Open control | Current CLI/MCP copies are byte-identical but need an automated source-of-truth assertion |
+| Schema bundle drift detection | Green locally / published URL open | CLI package tests and MCP stdio tests byte-compare bundled copies to `spec/graph.schema.json`; published schema URL byte-equality remains a release gate |
 | Compatibility/migration ADR and fixtures | Open | No migration surface exists |
 
-Therefore Day 2 is **Partial**, not fully exited. The implemented canonical DAG
-slice is useful and conformance-backed, but it does not satisfy the full
-authoring and semantic-validation scope.
+The bounded D2 authoring/identity task can close only after clean package,
+full-suite, three-way conformance, and independent-review evidence is bound to a
+candidate commit. The broader Day 2 semantic surface remains **Partial** because
+runtime schemas, state, subgraphs, GraphPatch, and wider policy validation are
+explicit later work.
 
 ### Required evidence to close the gate
 

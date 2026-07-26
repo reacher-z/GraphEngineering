@@ -1,0 +1,115 @@
+apiVersion: graphengineering.reacher-z.github.io/v1alpha1
+kind: Graph
+metadata:
+  name: typed-port-diamond
+  version: "1.0.0"
+inputSchema:
+  type: object
+  additionalProperties: false
+  properties:
+    query: {type: string}
+  required: [query]
+outputSchema:
+  type: object
+  additionalProperties: false
+  properties:
+    result: {type: string}
+  required: [result]
+stateSchema:
+  type: object
+  additionalProperties: false
+  properties:
+    completed: {type: integer}
+  required: [completed]
+entrypoints: [split]
+outputs:
+  result: {node: merge, port: result}
+nodes:
+  - id: split
+    kind: transform
+    inputSchema:
+      type: object
+      additionalProperties: false
+      properties:
+        query: {type: string}
+      required: [query]
+    outputSchema:
+      type: object
+      additionalProperties: false
+      properties:
+        left: {type: string}
+        right: {type: string}
+      required: [left, right]
+    config: null
+  - id: left
+    kind: agent
+    inputSchema:
+      type: object
+      additionalProperties: false
+      properties:
+        payload: {type: string}
+      required: [payload]
+    outputSchema:
+      type: object
+      additionalProperties: false
+      properties:
+        item: {type: string}
+      required: [item]
+    config: {role: left}
+  - id: right
+    kind: agent
+    inputSchema:
+      type: object
+      additionalProperties: false
+      properties:
+        payload: {type: string}
+      required: [payload]
+    outputSchema:
+      type: object
+      additionalProperties: false
+      properties:
+        item: {type: string}
+      required: [item]
+    config: {role: right}
+  - id: merge
+    kind: barrier
+    inputSchema:
+      type: object
+      additionalProperties: false
+      properties:
+        leftResult: {type: string}
+        rightResult: {type: string}
+      required: [leftResult, rightResult]
+    outputSchema:
+      type: object
+      additionalProperties: false
+      properties:
+        result: {type: string}
+      required: [result]
+    config: {condition: all}
+edges:
+  - id: split-left
+    from: {node: split, port: left}
+    to: {node: left, port: payload}
+    mode: value
+    schema: {type: string}
+  - id: split-right
+    from: {node: split, port: right}
+    to: {node: right, port: payload}
+    mode: value
+    schema: {type: string}
+  - id: left-merge
+    from: {node: left, port: item}
+    to: {node: merge, port: leftResult}
+    mode: value
+    schema: {type: string}
+  - id: right-merge
+    from: {node: right, port: item}
+    to: {node: merge, port: rightResult}
+    mode: value
+    schema: {type: string}
+policies:
+  maxConcurrency: 2
+  graphengineering.reacher-z.github.io/typed-ports:
+    apiVersion: graphengineering.reacher-z.github.io/typed-ports/v1alpha1
+    mode: strict-exact

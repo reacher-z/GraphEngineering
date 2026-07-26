@@ -1,0 +1,20 @@
+apiVersion: graphengineering.reacher-z.github.io/v1alpha1
+kind: Graph
+metadata:
+  name: explicit-null-config
+  version: "1.0.0"
+inputSchema: {type: object}
+outputSchema: {type: object}
+entrypoints: [node]
+outputs:
+  result: {node: node}
+nodes:
+  - id: node
+    kind: transform
+    inputSchema: {type: object}
+    outputSchema: {type: object}
+    config: null
+edges: []
+policies:
+  future-policy:
+    optional: null

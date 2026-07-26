@@ -120,8 +120,9 @@ node packages/cli/dist/src/cli.js plan examples/quickstart/research-diamond.grap
 ```
 
 Exit code `0` means success, `1` means the graph is invalid, and `2` means the
-file, JSON, or command invocation could not be read. Compiler failures use stable
-diagnostic codes such as `GE1004_MISSING_TARGET` and `GE1005_CYCLE`.
+file, source document, or command invocation could not be read. Source failures
+use stable `GE_SOURCE_*` codes; compiler failures use codes such as
+`GE1004_MISSING_TARGET` and `GE1005_CYCLE`.
 
 ## Safely initialize a graph project
 
@@ -150,10 +151,12 @@ invalid graph.
 
 ## Current alpha boundary
 
-This CLI slice accepts canonical Graph IR as JSON and implements `init`,
-`validate`, `plan`, `compile`, and `doctor`. Planning and compilation are
-read-only: they do not call a provider or pretend that a model ran. Native
-schedulers, local persistence adapters, and event-sourced start/resume are
-available as library APIs, but are not exposed by this CLI command flow. YAML
-input, scheduler checkpoint acceleration, replay/fork, distributed leases, and
-the Web Explorer are subsequent public slices.
+This CLI slice accepts canonical Graph IR as strict JSON or the bounded safe-YAML
+profile and implements `init`, `validate`, `plan`, `compile`, `visualize`, and
+`doctor`. `.json`, `.yaml`, and `.yml` files are inferred in `auto` mode; stdin
+defaults to JSON, so YAML on stdin must use `--input-format yaml`. Planning,
+compilation, and visualization are read-only: they do not call a provider or
+pretend that a model ran. Native schedulers, local persistence adapters, and
+event-sourced start/resume are available as library APIs, but are not exposed by
+this CLI command flow. Scheduler checkpoint acceleration, replay/fork,
+distributed leases, and the Web Explorer are subsequent public slices.

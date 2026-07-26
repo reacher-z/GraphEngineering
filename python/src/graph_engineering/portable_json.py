@@ -85,6 +85,6 @@ def _snapshot(value: object, ancestors: set[int]) -> JsonValue:
         finally:
             ancestors.remove(identity)
 
-    raise PortableJsonError(
-        f"value of type {type(value).__name__!r} is not portable JSON"
-    )
+    # Do not inspect the rejected class name: a hostile metaclass can override
+    # ``__name__`` and turn a structured boundary rejection into code execution.
+    raise PortableJsonError("value is not portable JSON")

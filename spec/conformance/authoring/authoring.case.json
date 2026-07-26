@@ -1,0 +1,469 @@
+{
+  "apiVersion": "graphengineering.reacher-z.github.io/authoring-conformance/v1alpha1",
+  "kind": "AuthoringCases",
+  "identityGolden": "component-identity.expected.json",
+  "equivalenceCases": [
+    {
+      "name": "equivalent-diamond",
+      "json": "equivalent.graph.json",
+      "yaml": "equivalent.graph.yaml",
+      "builderGraph": "equivalent.graph.json",
+      "identityKey": "equivalent",
+      "expect": {
+        "graphHash": "e0a73c69d3891b35fbb775514b0dbc9b246e237af2af3d426124c9330b7333d2",
+        "topologicalLayers": [["split"], ["left", "right"], ["merge"]]
+      }
+    },
+    {
+      "name": "typed-port-diamond",
+      "json": "typed-ports.graph.json",
+      "yaml": "typed-ports.graph.yaml",
+      "builderGraph": "typed-ports.graph.json",
+      "identityKey": "typed-ports",
+      "expect": {
+        "graphHash": "56e8a96ae2229faaa1732182f08df8782cedebda9f6770b54d336752522329e0",
+        "topologicalLayers": [["split"], ["left", "right"], ["merge"]]
+      }
+    }
+  ],
+  "validSourceCases": [
+    {
+      "name": "declaration-order",
+      "yaml": "declaration-order.graph.yaml",
+      "expect": {
+        "graphHash": "cf66493e26334db367adc33a64b19a6774fcf42eb6d76100856dc317f4b3ff5e",
+        "revisionHash": "accacf45d2b9fd4257bdd4ae94d5b2eb673c5f12b9fb4353d4e5519617ef8810",
+        "nodeOrder": ["zeta", "alpha", "merge"],
+        "edgeOrder": ["zeta-merge", "alpha-merge"],
+        "topologicalLayers": [["zeta", "alpha"], ["merge"]]
+      }
+    },
+    {
+      "name": "yaml-1.2-scalars",
+      "yaml": "yaml-scalars.graph.yaml",
+      "expect": {
+        "graphHash": "38da2d912d44ffde0b6fb8e82ce9b824f4986fd5ca940e4703174ec5d63a05e2",
+        "revisionHash": "fcbfa941b620a9de66c2ba0695af3f2e72104d222eaa1bc3367f9ebbbcdfd68d",
+        "labels": {
+          "yes-value": "yes",
+          "no-value": "no",
+          "on-value": "on",
+          "off-value": "off"
+        },
+        "configScalars": {
+          "numericUnderscore": "1_000",
+          "binaryToken": "0b10",
+          "octal": 8,
+          "hexadecimal": 16,
+          "exponent": 1000,
+          "quotedTimestamp": "2026-07-26"
+        }
+      }
+    },
+    {
+      "name": "explicit-null-config",
+      "yaml": "explicit-null-config.graph.yaml",
+      "expect": {
+        "graphHash": "c2ec7a9d064dc0eaf7bdf812f8cf9ed07c3bfec96decb8d7a733654849632b4e",
+        "revisionHash": "a58f675edb879a2755de1b300dfc3647da5f605a8df881268bcde8dc7fe6ae07",
+        "nodeConfig": null,
+        "policyExtensionValue": null
+      }
+    },
+    {
+      "name": "safe-integer-and-timer-ceilings",
+      "yaml": "safe-integer-edges.graph.yaml",
+      "expect": {
+        "graphHash": "e11c2920f41b0fd7f0fc84863fc85d3f4f5ae9f4aeff0f9c19b2442c375c7e4f",
+        "revisionHash": "1ec4f9607056543b17ae8f702cb3635b219bad7214c58fed66181cb9dfd3fc7a"
+      }
+    },
+    {
+      "name": "unicode-and-reserved-output-keys",
+      "json": "unicode-and-keys.graph.json",
+      "identityKey": "unicode-and-keys",
+      "expect": {
+        "graphHash": "8c8f9b6149d0a26437599a9a26924d6b5016441c7c94531c549232fec370653b",
+        "revisionHash": "77a5a865912f610f2ab4aef65f781f7a3a423abeeae32594513a6f145d28694c",
+        "outputNames": ["__proto__", "结果"]
+      }
+    },
+    {
+      "name": "typed-boolean-subschema",
+      "json": "typed-boolean-subschema.graph.json",
+      "expect": {
+        "graphHash": "47fb6ccca91610338b5db112863f13b02f3d365ef08757158d1ead9054b313b1",
+        "revisionHash": "62f0ce9e4ac8c4e6390e9804ac10d2afd4f805a0773d0f87a67e531eef829ba5"
+      }
+    }
+  ],
+  "sourceBoundaryCases": [
+    {
+      "name": "json-node-limit-exact",
+      "format": "json",
+      "source": "{\"a\":1}",
+      "limits": { "maxNodes": 3 },
+      "expect": { "value": { "a": 1 } }
+    },
+    {
+      "name": "yaml-node-limit-exact",
+      "format": "yaml",
+      "source": "a: 1\n",
+      "limits": { "maxNodes": 3 },
+      "expect": { "value": { "a": 1 } }
+    },
+    {
+      "name": "yaml-comment-only-is-null",
+      "format": "yaml",
+      "source": "# no graph document\n",
+      "limits": {},
+      "expect": { "value": null }
+    },
+    {
+      "name": "yaml-empty-is-null",
+      "format": "yaml",
+      "source": "",
+      "limits": {},
+      "expect": { "value": null }
+    },
+    {
+      "name": "yaml-explicit-end-of-empty-document-is-null",
+      "format": "yaml",
+      "source": "...\n",
+      "limits": {},
+      "expect": { "value": null }
+    },
+    {
+      "name": "yaml-explicit-end-with-trailing-spaces-is-null",
+      "format": "yaml",
+      "source": "...   \n",
+      "limits": {},
+      "expect": { "value": null }
+    },
+    {
+      "name": "yaml-explicit-empty-document-is-null",
+      "format": "yaml",
+      "source": "---\n...\n",
+      "limits": {},
+      "expect": { "value": null }
+    },
+    {
+      "name": "yaml-signed-radix-tokens-are-strings",
+      "format": "yaml",
+      "source": "positiveOctal: +0o10\nnegativeOctal: -0o10\npositiveHex: +0xA\nnegativeHex: -0xA\n",
+      "limits": {},
+      "expect": {
+        "value": {
+          "positiveOctal": "+0o10",
+          "negativeOctal": "-0o10",
+          "positiveHex": "+0xA",
+          "negativeHex": "-0xA"
+        }
+      }
+    },
+    {
+      "name": "yaml-crlf-and-escaped-tab",
+      "format": "yaml",
+      "source": "value: \"a\\tb\"\r\n",
+      "limits": {},
+      "expect": { "value": { "value": "a\tb" } }
+    },
+    {
+      "name": "yaml-escaped-line-and-paragraph-separators",
+      "format": "yaml",
+      "source": "value: \"a\\Lb\\Pc\"\n",
+      "limits": {},
+      "expect": { "value": { "value": "a b c" } }
+    },
+    {
+      "name": "yaml-core-scalar-case-set",
+      "format": "yaml",
+      "source": "lowerNull: null\ntitleNull: Null\nupperNull: NULL\nmixedNull: nUlL\nlowerTrue: true\ntitleTrue: True\nupperTrue: TRUE\nmixedTrue: tRuE\nlowerFalse: false\ntitleFalse: False\nupperFalse: FALSE\nmixedFalse: fAlSe\n",
+      "limits": {},
+      "expect": {
+        "value": {
+          "lowerNull": null,
+          "titleNull": null,
+          "upperNull": null,
+          "mixedNull": "nUlL",
+          "lowerTrue": true,
+          "titleTrue": true,
+          "upperTrue": true,
+          "mixedTrue": "tRuE",
+          "lowerFalse": false,
+          "titleFalse": false,
+          "upperFalse": false,
+          "mixedFalse": "fAlSe"
+        }
+      }
+    },
+    {
+      "name": "yaml-indented-end-token-is-plain-scalar",
+      "format": "yaml",
+      "source": " ...\n",
+      "limits": {},
+      "expect": { "value": "..." }
+    },
+    {
+      "name": "yaml-indented-end-token-with-continuation-is-folded-scalar",
+      "format": "yaml",
+      "source": " ...\nfoo\n",
+      "limits": {},
+      "expect": { "value": "... foo" }
+    },
+    {
+      "name": "yaml-double-quoted-multiline-percent-is-scalar-content",
+      "format": "yaml",
+      "source": "\"a\n%b\"\n",
+      "limits": {},
+      "expect": { "value": "a %b" }
+    },
+    {
+      "name": "yaml-single-quoted-multiline-percent-is-scalar-content",
+      "format": "yaml",
+      "source": "'a\n%b'\n",
+      "limits": {},
+      "expect": { "value": "a %b" }
+    },
+    {
+      "name": "yaml-plain-multiline-percent-is-scalar-content",
+      "format": "yaml",
+      "source": "a\n%b\n",
+      "limits": {},
+      "expect": { "value": "a %b" }
+    },
+    {
+      "name": "yaml-mapping-quoted-continuation-with-indent",
+      "format": "yaml",
+      "source": "a: \"x\n y\"\n",
+      "limits": {},
+      "expect": { "value": { "a": "x y" } }
+    },
+    {
+      "name": "yaml-sequence-quoted-continuation-with-indent",
+      "format": "yaml",
+      "source": "- 'x\n y'\n",
+      "limits": {},
+      "expect": { "value": ["x y"] }
+    },
+    {
+      "name": "yaml-spaced-plain-flow-key-with-collection-value",
+      "format": "yaml",
+      "source": "{a: []}\n",
+      "limits": {},
+      "expect": { "value": { "a": [] } }
+    },
+    {
+      "name": "yaml-compact-quoted-flow-key-with-collection-value",
+      "format": "yaml",
+      "source": "{\"a\":[]}\n",
+      "limits": {},
+      "expect": { "value": { "a": [] } }
+    },
+    {
+      "name": "yaml-quoted-root-comment-with-separation",
+      "format": "yaml",
+      "source": "\"x\" # comment\n",
+      "limits": {},
+      "expect": { "value": "x" }
+    },
+    {
+      "name": "yaml-flow-root-comment-with-separation",
+      "format": "yaml",
+      "source": "[] # comment\n",
+      "limits": {},
+      "expect": { "value": [] }
+    },
+    {
+      "name": "yaml-plain-hash-remains-scalar-content",
+      "format": "yaml",
+      "source": "a#c\n",
+      "limits": {},
+      "expect": { "value": "a#c" }
+    },
+    {
+      "name": "yaml-mapping-comment-with-separation",
+      "format": "yaml",
+      "source": "a: \"x\" # comment\n",
+      "limits": {},
+      "expect": { "value": { "a": "x" } }
+    }
+  ],
+  "compilerInvalidYamlCases": [
+    {
+      "name": "null-metadata-description",
+      "yaml": "invalid-null-metadata-description.graph.yaml",
+      "expect": { "diagnosticCodes": ["GE1007_INVALID_GRAPH"] }
+    },
+    {
+      "name": "null-state-schema",
+      "yaml": "invalid-null-state-schema.graph.yaml",
+      "expect": { "diagnosticCodes": ["GE1007_INVALID_GRAPH"] }
+    },
+    {
+      "name": "null-output-port",
+      "yaml": "invalid-null-output-port.graph.yaml",
+      "expect": { "diagnosticCodes": ["GE1007_INVALID_GRAPH"] }
+    },
+    {
+      "name": "null-node-retry",
+      "yaml": "invalid-null-node-retry.graph.yaml",
+      "expect": { "diagnosticCodes": ["GE1007_INVALID_GRAPH"] }
+    }
+  ],
+  "builderDiagnosticCases": [
+    { "name": "constructor-missing-metadata", "expect": { "code": "GE_BUILDER_MISSING_REQUIRED", "path": "#/metadata", "diagnosticCodes": [] } },
+    { "name": "constructor-missing-input-schema", "expect": { "code": "GE_BUILDER_MISSING_REQUIRED", "path": "#/inputSchema", "diagnosticCodes": [] } },
+    { "name": "constructor-missing-output-schema", "expect": { "code": "GE_BUILDER_MISSING_REQUIRED", "path": "#/outputSchema", "diagnosticCodes": [] } },
+    { "name": "duplicate-node", "expect": { "code": "GE_BUILDER_DUPLICATE_NODE", "path": "#/nodes/1/id", "diagnosticCodes": [] } },
+    { "name": "duplicate-edge", "expect": { "code": "GE_BUILDER_DUPLICATE_EDGE", "path": "#/edges/1/id", "diagnosticCodes": [] } },
+    { "name": "duplicate-entrypoint", "expect": { "code": "GE_BUILDER_DUPLICATE_ENTRYPOINT", "path": "#/entrypoints/1", "diagnosticCodes": [] } },
+    { "name": "duplicate-output", "expect": { "code": "GE_BUILDER_DUPLICATE_OUTPUT", "path": "#/outputs/result", "diagnosticCodes": [] } },
+    { "name": "malformed-node", "expect": { "code": "GE_BUILDER_INVALID_INPUT", "path": "#/nodes/0", "diagnosticCodes": [] } },
+    { "name": "malformed-edge", "expect": { "code": "GE_BUILDER_INVALID_INPUT", "path": "#/edges/0", "diagnosticCodes": [] } },
+    { "name": "malformed-output", "expect": { "code": "GE_BUILDER_INVALID_INPUT", "path": "#/outputs/result", "diagnosticCodes": [] } },
+    { "name": "malformed-policies", "expect": { "code": "GE_BUILDER_INVALID_INPUT", "path": "#/policies", "diagnosticCodes": [] } },
+    { "name": "missing-entrypoint", "expect": { "code": "GE_BUILDER_MISSING_REQUIRED", "path": "#/entrypoints", "diagnosticCodes": [] } },
+    { "name": "missing-output", "expect": { "code": "GE_BUILDER_MISSING_REQUIRED", "path": "#/outputs", "diagnosticCodes": [] } },
+    { "name": "core-rejected", "expect": { "code": "GE_BUILDER_CORE_REJECTED", "path": "#", "diagnosticCodes": ["GE1008_MISSING_ENTRYPOINT", "GE1009_MISSING_OUTPUT"] } },
+    { "name": "sealed-add-node", "expect": { "code": "GE_BUILDER_SEALED", "path": "#/nodes/1", "diagnosticCodes": [] } },
+    { "name": "sealed-add-edge", "expect": { "code": "GE_BUILDER_SEALED", "path": "#/edges/0", "diagnosticCodes": [] } },
+    { "name": "sealed-add-entrypoint", "expect": { "code": "GE_BUILDER_SEALED", "path": "#/entrypoints/1", "diagnosticCodes": [] } },
+    { "name": "sealed-add-output", "expect": { "code": "GE_BUILDER_SEALED", "path": "#/outputs/next~1value~0", "diagnosticCodes": [] } },
+    { "name": "sealed-set-policies", "expect": { "code": "GE_BUILDER_SEALED", "path": "#/policies", "diagnosticCodes": [] } },
+    { "name": "sealed-enable-typed-ports", "expect": { "code": "GE_BUILDER_SEALED", "path": "#/policies", "diagnosticCodes": [] } },
+    { "name": "sealed-build", "expect": { "code": "GE_BUILDER_SEALED", "path": "#", "diagnosticCodes": [] } }
+  ],
+  "typedDiagnosticCases": [
+    {
+      "name": "missing-source-port",
+      "graph": "invalid-typed-missing-source-port.graph.json",
+      "expect": [{ "code": "GE1201_MISSING_SOURCE_PORT", "path": "#/edges/0/from/port", "edgeId": "edge", "nodeIds": ["source"] }]
+    },
+    {
+      "name": "missing-target-port",
+      "graph": "invalid-typed-missing-target-port.graph.json",
+      "expect": [{ "code": "GE1202_MISSING_TARGET_PORT", "path": "#/edges/0/to/port", "edgeId": "edge", "nodeIds": ["target"] }]
+    },
+    {
+      "name": "schema-mismatch",
+      "graph": "invalid-typed-schema-mismatch.graph.json",
+      "expect": [{ "code": "GE1203_PORT_SCHEMA_MISMATCH", "path": "#/edges/0", "edgeId": "edge", "nodeIds": ["source", "target"] }]
+    },
+    {
+      "name": "duplicate-target-binding",
+      "graph": "invalid-typed-duplicate-binding.graph.json",
+      "expect": [{ "code": "GE1204_DUPLICATE_TARGET_BINDING", "path": "#/edges/1/to/port", "edgeId": "edge-b", "nodeIds": ["target"] }]
+    },
+    {
+      "name": "unsupported-schema-profile",
+      "graph": "invalid-typed-schema-profile.graph.json",
+      "expect": [{ "code": "GE1205_INVALID_PORT_SCHEMA", "path": "#/edges/0/schema", "edgeId": "edge", "nodeIds": [] }]
+    },
+    {
+      "name": "foreign-schema-dialect",
+      "graph": "invalid-typed-foreign-dialect.graph.json",
+      "expect": [{ "code": "GE1205_INVALID_PORT_SCHEMA", "path": "#/edges/0/schema", "edgeId": "edge", "nodeIds": [] }]
+    },
+    {
+      "name": "malformed-schema-regex",
+      "graph": "invalid-typed-malformed-regex.graph.json",
+      "expect": [{ "code": "GE1205_INVALID_PORT_SCHEMA", "path": "#/edges/0/schema", "edgeId": "edge", "nodeIds": [] }]
+    },
+    {
+      "name": "unsupported-regex-keywords-at-any-depth",
+      "graph": "invalid-typed-regex-keywords.graph.json",
+      "expect": [{ "code": "GE1205_INVALID_PORT_SCHEMA", "path": "#/edges/0/schema", "edgeId": "edge", "nodeIds": [] }]
+    },
+    {
+      "name": "empty-enum-at-any-depth",
+      "graph": "invalid-typed-empty-enum.graph.json",
+      "expect": [{ "code": "GE1205_INVALID_PORT_SCHEMA", "path": "#/edges/0/schema", "edgeId": "edge", "nodeIds": [] }]
+    },
+    {
+      "name": "public-output-schema-mismatch",
+      "graph": "invalid-typed-output-schema.graph.json",
+      "expect": [{ "code": "GE1206_OUTPUT_SCHEMA_MISMATCH", "path": "#/outputs/result", "outputName": "result", "nodeIds": ["target"] }]
+    },
+    {
+      "name": "entrypoint-schema-mismatch",
+      "graph": "invalid-typed-entrypoint-schema.graph.json",
+      "expect": [{ "code": "GE1207_ENTRYPOINT_SCHEMA_MISMATCH", "path": "#/entrypoints/0", "nodeIds": ["source"] }]
+    },
+    {
+      "name": "unsupported-stream-mode",
+      "graph": "invalid-typed-stream-mode.graph.json",
+      "expect": [{ "code": "GE1208_UNSUPPORTED_TYPED_EDGE_MODE", "path": "#/edges/0/mode", "edgeId": "edge", "nodeIds": ["source", "target"] }]
+    },
+    {
+      "name": "local-ref-cross-root-collision",
+      "graph": "invalid-typed-local-ref.graph.json",
+      "expect": [
+        { "code": "GE1205_INVALID_PORT_SCHEMA", "path": "#/nodes/0/outputSchema", "nodeIds": ["source"] },
+        { "code": "GE1205_INVALID_PORT_SCHEMA", "path": "#/nodes/1/inputSchema", "nodeIds": ["target"] }
+      ]
+    }
+  ],
+  "identityMutationCases": [
+    {
+      "name": "revision-zero",
+      "identityKey": "typed-ports",
+      "mutation": { "operation": "replace", "path": "#/graphRevision", "value": 0 },
+      "expect": { "code": "GE1301_UNSUPPORTED_GRAPH_REVISION", "path": "#/graphRevision" }
+    },
+    {
+      "name": "revision-two",
+      "identityKey": "typed-ports",
+      "mutation": { "operation": "replace", "path": "#/graphRevision", "value": 2 },
+      "expect": { "code": "GE1301_UNSUPPORTED_GRAPH_REVISION", "path": "#/graphRevision" }
+    },
+    {
+      "name": "integer-valued-float-revision",
+      "identityKey": "typed-ports",
+      "mutation": { "operation": "replace", "path": "#/graphRevision", "value": 1.0 },
+      "expect": { "valid": true }
+    },
+    {
+      "name": "unsafe-revision",
+      "identityKey": "typed-ports",
+      "mutation": { "operation": "replace", "path": "#/graphRevision", "value": 9007199254740992 },
+      "expect": { "code": "GE1301_UNSUPPORTED_GRAPH_REVISION", "path": "#/graphRevision" }
+    },
+    {
+      "name": "graph-hash-mutation",
+      "identityKey": "typed-ports",
+      "mutation": { "operation": "replace", "path": "#/graphHash", "value": "0000000000000000000000000000000000000000000000000000000000000000" },
+      "expect": { "code": "GE1302_GRAPH_IDENTITY_MISMATCH", "path": "#/graphHash" }
+    },
+    {
+      "name": "node-content-hash-mutation",
+      "identityKey": "typed-ports",
+      "mutation": { "operation": "replace", "path": "#/nodes/0/contentHash", "value": "0000000000000000000000000000000000000000000000000000000000000000" },
+      "expect": { "code": "GE1303_COMPONENT_IDENTITY_MISMATCH", "path": "#" }
+    },
+    {
+      "name": "edge-order-mutation",
+      "identityKey": "typed-ports",
+      "mutation": { "operation": "swap", "path": "#/edges", "indices": [0, 1] },
+      "expect": { "code": "GE1303_COMPONENT_IDENTITY_MISMATCH", "path": "#" }
+    },
+    {
+      "name": "schema-hash-mutation",
+      "identityKey": "typed-ports",
+      "mutation": { "operation": "replace", "path": "#/graphSchemas/input", "value": "0000000000000000000000000000000000000000000000000000000000000000" },
+      "expect": { "code": "GE1303_COMPONENT_IDENTITY_MISMATCH", "path": "#" }
+    },
+    {
+      "name": "node-zero-index-boolean-mutation",
+      "identityKey": "typed-ports",
+      "mutation": { "operation": "replace", "path": "#/nodes/0/index", "value": false },
+      "expect": { "code": "GE1303_COMPONENT_IDENTITY_MISMATCH", "path": "#" }
+    },
+    {
+      "name": "edge-one-index-boolean-mutation",
+      "identityKey": "typed-ports",
+      "mutation": { "operation": "replace", "path": "#/edges/1/index", "value": true },
+      "expect": { "code": "GE1303_COMPONENT_IDENTITY_MISMATCH", "path": "#" }
+    }
+  ]
+}

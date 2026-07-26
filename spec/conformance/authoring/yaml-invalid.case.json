@@ -1,0 +1,477 @@
+{
+  "apiVersion": "graphengineering.reacher-z.github.io/authoring-conformance/v1alpha1",
+  "kind": "SourceFailureCases",
+  "cases": [
+    {
+      "name": "duplicate-root-key",
+      "format": "yaml",
+      "source": "name: first\nname: second\n",
+      "expect": { "code": "GE_SOURCE_DUPLICATE_KEY", "path": "#/name" }
+    },
+    {
+      "name": "duplicate-nested-key",
+      "format": "yaml",
+      "source": "outer:\n  value: 1\n  value: 2\n",
+      "expect": { "code": "GE_SOURCE_DUPLICATE_KEY", "path": "#/outer/value" }
+    },
+    {
+      "name": "anchor",
+      "format": "yaml",
+      "source": "value: &shared 1\n",
+      "expect": { "code": "GE_SOURCE_UNSAFE_YAML_FEATURE" }
+    },
+    {
+      "name": "alias",
+      "format": "yaml",
+      "source": "first: &shared 1\nsecond: *shared\n",
+      "expect": { "code": "GE_SOURCE_UNSAFE_YAML_FEATURE" }
+    },
+    {
+      "name": "merge-key",
+      "format": "yaml",
+      "source": "value:\n  <<: {nested: true}\n",
+      "expect": { "code": "GE_SOURCE_UNSAFE_YAML_FEATURE", "path": "#/value/<<" }
+    },
+    {
+      "name": "custom-tag",
+      "format": "yaml",
+      "source": "value: !secret hidden\n",
+      "expect": { "code": "GE_SOURCE_UNSAFE_YAML_FEATURE" }
+    },
+    {
+      "name": "directive",
+      "format": "yaml",
+      "source": "%YAML 1.2\n---\nvalue: one\n",
+      "expect": { "code": "GE_SOURCE_UNSAFE_YAML_FEATURE" }
+    },
+    {
+      "name": "unknown-directive",
+      "format": "yaml",
+      "source": "%FOO bar\n---\nvalue: one\n",
+      "expect": { "code": "GE_SOURCE_UNSAFE_YAML_FEATURE" }
+    },
+    {
+      "name": "invalid-yaml-version-directive",
+      "format": "yaml",
+      "source": "%YAML 9.9\n---\nvalue: one\n",
+      "expect": { "code": "GE_SOURCE_UNSAFE_YAML_FEATURE" }
+    },
+    {
+      "name": "malformed-numeric-directive",
+      "format": "yaml",
+      "source": "%0 foo\n---\nvalue: one\n",
+      "expect": { "code": "GE_SOURCE_UNSAFE_YAML_FEATURE" }
+    },
+    {
+      "name": "empty-directive-token",
+      "format": "yaml",
+      "source": "%\n",
+      "expect": { "code": "GE_SOURCE_UNSAFE_YAML_FEATURE" }
+    },
+    {
+      "name": "directive-without-document",
+      "format": "yaml",
+      "source": "%x\n",
+      "expect": { "code": "GE_SOURCE_UNSAFE_YAML_FEATURE" }
+    },
+    {
+      "name": "indented-percent-plain-scalar",
+      "format": "yaml",
+      "source": " %FOO bar\n",
+      "expect": { "code": "GE_SOURCE_SYNTAX" }
+    },
+    {
+      "name": "leading-bom-unknown-directive",
+      "format": "yaml",
+      "source": "﻿%FOO bar\n---\nvalue: one\n",
+      "expect": { "code": "GE_SOURCE_UNSAFE_YAML_FEATURE" }
+    },
+    {
+      "name": "non-leading-bom",
+      "format": "yaml",
+      "source": "value: one\n﻿value: two\n",
+      "expect": { "code": "GE_SOURCE_SYNTAX" }
+    },
+    {
+      "name": "multiple-documents",
+      "format": "yaml",
+      "source": "value: one\n---\nvalue: two\n",
+      "expect": { "code": "GE_SOURCE_MULTIPLE_DOCUMENTS" }
+    },
+    {
+      "name": "empty-end-then-second-document",
+      "format": "yaml",
+      "source": "...\n---\n",
+      "expect": { "code": "GE_SOURCE_MULTIPLE_DOCUMENTS" }
+    },
+    {
+      "name": "content-after-explicit-end",
+      "format": "yaml",
+      "source": "...\nfoo\n",
+      "expect": { "code": "GE_SOURCE_SYNTAX" }
+    },
+    {
+      "name": "second-end-marker-without-document",
+      "format": "yaml",
+      "source": "...\n...\n",
+      "expect": { "code": "GE_SOURCE_SYNTAX" }
+    },
+    {
+      "name": "content-after-spaced-explicit-end",
+      "format": "yaml",
+      "source": "...   \nfoo\n",
+      "expect": { "code": "GE_SOURCE_SYNTAX" }
+    },
+    {
+      "name": "spaced-empty-end-then-second-document",
+      "format": "yaml",
+      "source": "...   \n---\n",
+      "expect": { "code": "GE_SOURCE_MULTIPLE_DOCUMENTS" }
+    },
+    {
+      "name": "directive-after-spaced-explicit-end",
+      "format": "yaml",
+      "source": "...   \n%x\n",
+      "expect": { "code": "GE_SOURCE_UNSAFE_YAML_FEATURE" }
+    },
+    {
+      "name": "directive-after-explicit-empty-document",
+      "format": "yaml",
+      "source": "---\n...\n%YAML 1.2\n---\n",
+      "expect": { "code": "GE_SOURCE_UNSAFE_YAML_FEATURE" }
+    },
+    {
+      "name": "malformed-directive-after-explicit-empty-document",
+      "format": "yaml",
+      "source": "---\n...\n%x\n",
+      "expect": { "code": "GE_SOURCE_UNSAFE_YAML_FEATURE" }
+    },
+    {
+      "name": "complex-key",
+      "format": "yaml",
+      "source": "? [one, two]\n: value\n",
+      "expect": { "code": "GE_SOURCE_NON_JSON_VALUE" }
+    },
+    {
+      "name": "mapping-double-quoted-continuation-without-indent",
+      "format": "yaml",
+      "source": "a: \"x\ny\"\n",
+      "expect": { "code": "GE_SOURCE_SYNTAX" }
+    },
+    {
+      "name": "mapping-single-quoted-continuation-without-indent",
+      "format": "yaml",
+      "source": "a: 'x\ny'\n",
+      "expect": { "code": "GE_SOURCE_SYNTAX" }
+    },
+    {
+      "name": "sequence-double-quoted-continuation-without-indent",
+      "format": "yaml",
+      "source": "- \"x\ny\"\n",
+      "expect": { "code": "GE_SOURCE_SYNTAX" }
+    },
+    {
+      "name": "sequence-single-quoted-continuation-without-indent",
+      "format": "yaml",
+      "source": "- 'x\ny'\n",
+      "expect": { "code": "GE_SOURCE_SYNTAX" }
+    },
+    {
+      "name": "plain-flow-key-adjacent-colon-before-map-end",
+      "format": "yaml",
+      "source": "{a:}\n",
+      "expect": { "code": "GE_SOURCE_SYNTAX" }
+    },
+    {
+      "name": "plain-flow-key-adjacent-colon-before-comma",
+      "format": "yaml",
+      "source": "{a:, b: 2}\n",
+      "expect": { "code": "GE_SOURCE_SYNTAX" }
+    },
+    {
+      "name": "plain-flow-key-adjacent-colon-before-sequence",
+      "format": "yaml",
+      "source": "{a:[]}\n",
+      "expect": { "code": "GE_SOURCE_SYNTAX" }
+    },
+    {
+      "name": "plain-flow-key-adjacent-colon-before-mapping",
+      "format": "yaml",
+      "source": "{a:{}}\n",
+      "expect": { "code": "GE_SOURCE_SYNTAX" }
+    },
+    {
+      "name": "plain-flow-pair-adjacent-colon-in-sequence",
+      "format": "yaml",
+      "source": "[a:]\n",
+      "expect": { "code": "GE_SOURCE_SYNTAX" }
+    },
+    {
+      "name": "empty-quoted-root-comment-without-separation",
+      "format": "yaml",
+      "source": "''#c\n",
+      "expect": { "code": "GE_SOURCE_SYNTAX" }
+    },
+    {
+      "name": "quoted-root-comment-without-separation",
+      "format": "yaml",
+      "source": "\"x\"#c\n",
+      "expect": { "code": "GE_SOURCE_SYNTAX" }
+    },
+    {
+      "name": "flow-sequence-root-comment-without-separation",
+      "format": "yaml",
+      "source": "[]#c\n",
+      "expect": { "code": "GE_SOURCE_SYNTAX" }
+    },
+    {
+      "name": "flow-mapping-root-comment-without-separation",
+      "format": "yaml",
+      "source": "{a: b}#c\n",
+      "expect": { "code": "GE_SOURCE_SYNTAX" }
+    },
+    {
+      "name": "mapping-quoted-comment-without-separation",
+      "format": "yaml",
+      "source": "a: \"x\"#c\n",
+      "expect": { "code": "GE_SOURCE_SYNTAX" }
+    },
+    {
+      "name": "mapping-flow-comment-without-separation",
+      "format": "yaml",
+      "source": "a: []#c\n",
+      "expect": { "code": "GE_SOURCE_SYNTAX" }
+    },
+    {
+      "name": "sequence-flow-comment-without-separation",
+      "format": "yaml",
+      "source": "- {}#c\n",
+      "expect": { "code": "GE_SOURCE_SYNTAX" }
+    },
+    {
+      "name": "timestamp",
+      "format": "yaml",
+      "source": "value: 2026-07-26\n",
+      "expect": { "code": "GE_SOURCE_NON_JSON_VALUE", "path": "#/value" }
+    },
+    {
+      "name": "nan",
+      "format": "yaml",
+      "source": "value: .nan\n",
+      "expect": { "code": "GE_SOURCE_NON_JSON_VALUE", "path": "#/value" }
+    },
+    {
+      "name": "positive-infinity",
+      "format": "yaml",
+      "source": "value: .inf\n",
+      "expect": { "code": "GE_SOURCE_NON_JSON_VALUE", "path": "#/value" }
+    },
+    {
+      "name": "unsafe-integer",
+      "format": "yaml",
+      "source": "value: 9007199254740992\n",
+      "expect": { "code": "GE_SOURCE_NON_JSON_VALUE", "path": "#/value" }
+    },
+    {
+      "name": "depth-limit",
+      "format": "yaml",
+      "source": "one:\n  two:\n    three: value\n",
+      "limits": { "maxDepth": 3 },
+      "expect": { "code": "GE_SOURCE_TOO_LARGE", "path": "#/one/two" }
+    },
+    {
+      "name": "node-limit",
+      "format": "yaml",
+      "source": "values: [one, two, three]\n",
+      "limits": { "maxNodes": 3 },
+      "expect": { "code": "GE_SOURCE_TOO_LARGE" }
+    },
+    {
+      "name": "byte-limit",
+      "format": "yaml",
+      "source": "value: longer-than-limit\n",
+      "limits": { "maxBytes": 8 },
+      "expect": { "code": "GE_SOURCE_TOO_LARGE" }
+    },
+    {
+      "name": "trailing-invalid-token",
+      "format": "yaml",
+      "source": "value: valid\n]\n",
+      "expect": { "code": "GE_SOURCE_SYNTAX" }
+    },
+    {
+      "name": "raw-nul-control",
+      "format": "yaml",
+      "sourceHex": "76616c75653a206100620a",
+      "expect": { "code": "GE_SOURCE_SYNTAX" }
+    },
+    {
+      "name": "raw-tab-control",
+      "format": "yaml",
+      "source": "value: \"a\tb\"\n",
+      "expect": { "code": "GE_SOURCE_SYNTAX" }
+    },
+    {
+      "name": "lone-carriage-return",
+      "format": "yaml",
+      "source": "value: a\rb\n",
+      "expect": { "code": "GE_SOURCE_SYNTAX" }
+    },
+    {
+      "name": "nel-control",
+      "format": "yaml",
+      "source": "value: ab\n",
+      "expect": { "code": "GE_SOURCE_SYNTAX" }
+    },
+    {
+      "name": "del-control",
+      "format": "yaml",
+      "source": "value: ab\n",
+      "expect": { "code": "GE_SOURCE_SYNTAX" }
+    },
+    {
+      "name": "c1-control",
+      "format": "yaml",
+      "source": "value: ab\n",
+      "expect": { "code": "GE_SOURCE_SYNTAX" }
+    },
+    {
+      "name": "yaml-noncharacter-fffe",
+      "format": "yaml",
+      "source": "value: a￾b\n",
+      "expect": { "code": "GE_SOURCE_SYNTAX" }
+    },
+    {
+      "name": "raw-line-separator",
+      "format": "yaml",
+      "source": "value: |\n  a b\n",
+      "expect": { "code": "GE_SOURCE_SYNTAX" }
+    },
+    {
+      "name": "raw-paragraph-separator",
+      "format": "yaml",
+      "source": "value: |\n  a b\n",
+      "expect": { "code": "GE_SOURCE_SYNTAX" }
+    },
+    {
+      "name": "out-of-range-unicode-escape",
+      "format": "yaml",
+      "source": "\"\\U00110000\"\n",
+      "expect": { "code": "GE_SOURCE_SYNTAX" }
+    },
+    {
+      "name": "syntax-precedes-anchor",
+      "format": "yaml",
+      "source": "a: &x 1\n]\n",
+      "expect": { "code": "GE_SOURCE_SYNTAX" }
+    },
+    {
+      "name": "incomplete-alias-indicator-is-syntax",
+      "format": "yaml",
+      "source": "*\n",
+      "expect": { "code": "GE_SOURCE_SYNTAX" }
+    },
+    {
+      "name": "incomplete-anchor-indicator-is-syntax",
+      "format": "yaml",
+      "source": "&\n",
+      "expect": { "code": "GE_SOURCE_SYNTAX" }
+    },
+    {
+      "name": "malformed-tag-before-flow-end-is-syntax",
+      "format": "yaml",
+      "source": "!x]\n",
+      "expect": { "code": "GE_SOURCE_SYNTAX" }
+    },
+    {
+      "name": "incomplete-tag-before-flow-start-is-syntax",
+      "format": "yaml",
+      "source": "![\n",
+      "expect": { "code": "GE_SOURCE_SYNTAX" }
+    },
+    {
+      "name": "syntax-precedes-duplicate-key",
+      "format": "yaml",
+      "source": "a: one\na: two\n]\n",
+      "expect": { "code": "GE_SOURCE_SYNTAX" }
+    },
+    {
+      "name": "syntax-precedes-non-json-scalar",
+      "format": "yaml",
+      "source": "value: .nan\n]\n",
+      "expect": { "code": "GE_SOURCE_SYNTAX" }
+    },
+    {
+      "name": "second-document-precedes-anchor",
+      "format": "yaml",
+      "source": "a: &x 1\n---\nb: two\n",
+      "expect": { "code": "GE_SOURCE_MULTIPLE_DOCUMENTS" }
+    },
+    {
+      "name": "second-document-precedes-flow-profile-syntax",
+      "format": "yaml",
+      "source": "{a:}\n---\nb: 2\n",
+      "expect": { "code": "GE_SOURCE_MULTIPLE_DOCUMENTS" }
+    },
+    {
+      "name": "json-duplicate-key",
+      "format": "json",
+      "source": "{\"value\":1,\"value\":2}",
+      "expect": { "code": "GE_SOURCE_DUPLICATE_KEY", "path": "#/value" }
+    },
+    {
+      "name": "json-nested-duplicate-key",
+      "format": "json",
+      "source": "{\"root\":{\"a\":1,\"a\":2}}",
+      "expect": { "code": "GE_SOURCE_DUPLICATE_KEY", "path": "#/root/a" }
+    },
+    {
+      "name": "json-nonstandard-number",
+      "format": "json",
+      "source": "{\"value\":NaN}",
+      "expect": { "code": "GE_SOURCE_NON_JSON_VALUE" }
+    },
+    {
+      "name": "json-extremely-long-positive-integer",
+      "format": "json",
+      "sourceRepeat": { "value": "1", "count": 5000 },
+      "expect": { "code": "GE_SOURCE_NON_JSON_VALUE" }
+    },
+    {
+      "name": "json-extremely-long-negative-integer",
+      "format": "json",
+      "sourceRepeat": { "prefix": "-", "value": "1", "count": 5000 },
+      "expect": { "code": "GE_SOURCE_NON_JSON_VALUE" }
+    },
+    {
+      "name": "json-parser-recursion-is-resource-limit",
+      "format": "json",
+      "sourceSegments": [
+        { "value": "[", "count": 1000 },
+        { "value": "0", "count": 1 },
+        { "value": "]", "count": 1000 }
+      ],
+      "expect": { "code": "GE_SOURCE_TOO_LARGE" }
+    },
+    {
+      "name": "json-mapping-key-counts-toward-node-limit",
+      "format": "json",
+      "source": "{\"a\":1}",
+      "limits": { "maxNodes": 2 },
+      "expect": { "code": "GE_SOURCE_TOO_LARGE", "path": "#/a" }
+    },
+    {
+      "name": "yaml-mapping-key-counts-toward-node-limit",
+      "format": "yaml",
+      "source": "a: 1\n",
+      "limits": { "maxNodes": 2 },
+      "expect": { "code": "GE_SOURCE_TOO_LARGE", "path": "#/a" }
+    },
+    {
+      "name": "invalid-utf8",
+      "format": "yaml",
+      "sourceHex": "ff",
+      "expect": { "code": "GE_SOURCE_INVALID_UTF8" }
+    }
+  ]
+}

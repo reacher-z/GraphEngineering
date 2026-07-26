@@ -1,11 +1,19 @@
 #!/usr/bin/env node
 
-import { readFile, realpath } from "node:fs/promises";
+import { open, realpath } from "node:fs/promises";
 import { basename, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { GraphSourceFormat } from "@graph-engineering/core";
 import { runDoctor, type DoctorReport } from "./doctor.js";
 import type { InitReport } from "./init.js";
 import type { GraphPlan } from "./planner.js";
+import {
+  decodeGraphInput,
+  GraphInputFormatError,
+  GraphInputSourceError,
+  resolveGraphSourceFormat,
+  type GraphInputFormat,
+} from "./source-loader.js";
 import type { ValidationResult } from "./validation.js";
 import type { VisualizationFormat, VisualizationResult } from "./visualize.js";
 
@@ -29,13 +37,22 @@ export type CommandName =
   | "init";
 export type CliExitCode = (typeof EXIT_CODES)[keyof typeof EXIT_CODES];
 
+export interface MachineError {
+  code: string;
+  message: string;
+  format?: "json" | "yaml";
+  path?: string | null;
+  line?: number | null;
+  column?: number | null;
+}
+
 export interface MachineEnvelope {
   schemaVersion: typeof MACHINE_SCHEMA_VERSION;
   command: CommandName | null;
   ok: boolean;
   exitCode: CliExitCode;
   data: Record<string, unknown> | null;
-  error: { code: string; message: string } | null;
+  error: MachineError | null;
 }
 
 interface ParsedCommand {
@@ -44,17 +61,35 @@ interface ParsedCommand {
   json: boolean;
   dryRun: boolean;
   format: VisualizationFormat | null;
+  inputFormat: GraphInputFormat | null;
 }
 
 class CliError extends Error {
   readonly code: string;
   readonly exitCode: CliExitCode;
+  readonly machineError: MachineError;
+  readonly humanMessage: string;
 
-  constructor(code: string, message: string, exitCode: CliExitCode = EXIT_CODES.input) {
+  constructor(
+    code: string,
+    message: string,
+    exitCode: CliExitCode = EXIT_CODES.input,
+    details: Omit<MachineError, "code" | "message"> = {},
+    humanMessage = message,
+  ) {
     super(message);
     this.name = "CliError";
     this.code = code;
     this.exitCode = exitCode;
+    this.machineError = { code, message, ...details };
+    this.humanMessage = humanMessage;
+  }
+}
+
+class InputTooLargeError extends Error {
+  constructor() {
+    super("Graph IR source exceeds the hard byte ceiling");
+    this.name = "InputTooLargeError";
   }
 }
 
@@ -62,10 +97,10 @@ function usage(): string {
   return `Graph Engineering CLI ${VERSION}
 
 Usage:
-  graph validate <graph.json|-> [--json]
-  graph plan <graph.json|-> [--json]
-  graph compile <graph.json|-> [--json]
-  graph visualize <graph.json|-> [--format mermaid|dot] [--json]
+  graph validate <graph.json|graph.yaml|-> [--input-format json|yaml|auto] [--json]
+  graph plan <graph.json|graph.yaml|-> [--input-format json|yaml|auto] [--json]
+  graph compile <graph.json|graph.yaml|-> [--input-format json|yaml|auto] [--json]
+  graph visualize <graph.json|graph.yaml|-> [--input-format json|yaml|auto] [--format mermaid|dot] [--json]
   graph doctor [--json]
   graph init [directory] [--dry-run] [--json]
   graph --version
@@ -118,6 +153,8 @@ function parseArguments(argv: string[]): ParsedCommand | "help" | "version" {
   const dryRun = dryRunCount === 1;
   let formatValue: string | null = null;
   let formatCount = 0;
+  let inputFormatValue: string | null = null;
+  let inputFormatCount = 0;
   const positionals: string[] = [];
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
@@ -137,10 +174,28 @@ function parseArguments(argv: string[]): ParsedCommand | "help" | "version" {
       formatValue = argument.slice("--format=".length);
       continue;
     }
+    if (argument === "--input-format") {
+      inputFormatCount += 1;
+      const value = argv[index + 1];
+      if (value === undefined || value.startsWith("-")) {
+        throw new CliError("GECLI_USAGE", "--input-format requires json, yaml, or auto");
+      }
+      inputFormatValue = value;
+      index += 1;
+      continue;
+    }
+    if (argument?.startsWith("--input-format=")) {
+      inputFormatCount += 1;
+      inputFormatValue = argument.slice("--input-format=".length);
+      continue;
+    }
     if (argument !== undefined) positionals.push(argument);
   }
   if (formatCount > 1) {
     throw new CliError("GECLI_USAGE", "--format may be specified at most once");
+  }
+  if (inputFormatCount > 1) {
+    throw new CliError("GECLI_USAGE", "--input-format may be specified at most once");
   }
   const [rawCommand, ...operands] = positionals;
   if (
@@ -162,6 +217,23 @@ function parseArguments(argv: string[]): ParsedCommand | "help" | "version" {
   if (formatCount > 0 && rawCommand !== "visualize") {
     throw new CliError("GECLI_USAGE", "--format is supported only by visualize");
   }
+  if (inputFormatCount > 0 && (rawCommand === "doctor" || rawCommand === "init")) {
+    throw new CliError(
+      "GECLI_USAGE",
+      `--input-format is not supported by ${rawCommand}`,
+    );
+  }
+  const inputFormat = inputFormatValue === null || inputFormatValue === "auto"
+    ? "auto"
+    : inputFormatValue === "json" || inputFormatValue === "yaml"
+      ? inputFormatValue
+      : null;
+  if (inputFormat === null) {
+    throw new CliError(
+      "GECLI_USAGE",
+      `unsupported input format ${inputFormatValue}; expected json, yaml, or auto`,
+    );
+  }
   const format: VisualizationFormat | null = rawCommand === "visualize"
     ? formatValue === null || formatValue === "mermaid"
       ? "mermaid"
@@ -180,7 +252,14 @@ function parseArguments(argv: string[]): ParsedCommand | "help" | "version" {
     if (operands.length > 0) {
       throw new CliError("GECLI_USAGE", "doctor does not accept a file or other operand");
     }
-    return { command: rawCommand, file: null, json, dryRun: false, format: null };
+    return {
+      command: rawCommand,
+      file: null,
+      json,
+      dryRun: false,
+      format: null,
+      inputFormat: null,
+    };
   }
 
   if (rawCommand === "init") {
@@ -194,37 +273,116 @@ function parseArguments(argv: string[]): ParsedCommand | "help" | "version" {
         `unknown option ${directory}; prefix a directory name with ./ if it begins with '-'`,
       );
     }
-    return { command: rawCommand, file: directory, json, dryRun, format: null };
+    return {
+      command: rawCommand,
+      file: directory,
+      json,
+      dryRun,
+      format: null,
+      inputFormat: null,
+    };
   }
 
   if (operands.length !== 1 || operands[0] === undefined || operands[0].length === 0) {
-    throw new CliError("GECLI_USAGE", `${rawCommand} requires exactly one Graph IR JSON file`);
+    throw new CliError("GECLI_USAGE", `${rawCommand} requires exactly one Graph IR source`);
   }
-  return { command: rawCommand, file: operands[0], json, dryRun: false, format };
+  return {
+    command: rawCommand,
+    file: operands[0],
+    json,
+    dryRun: false,
+    format,
+    inputFormat,
+  };
 }
 
-async function readGraph(path: string): Promise<unknown> {
-  let source: string;
+async function readGraph(path: string, inputFormat: GraphInputFormat): Promise<unknown> {
+  let format: GraphSourceFormat;
   try {
-    source = path === "-" ? await readStandardInput() : await readFile(path, "utf8");
+    format = resolveGraphSourceFormat(path, inputFormat);
   } catch (error) {
+    if (error instanceof GraphInputFormatError) {
+      throw new CliError(error.code, error.message);
+    }
+    throw error;
+  }
+
+  const { MAX_GRAPH_SOURCE_BYTES: maxBytes } = await import("@graph-engineering/core");
+  let source: Uint8Array;
+  try {
+    source = path === "-" ? await readStandardInput(maxBytes) : await readBoundedFile(path, maxBytes);
+  } catch (error) {
+    if (error instanceof InputTooLargeError) {
+      const message = `Source exceeds the configured ${maxBytes}-byte limit`;
+      const sourceName = path === "-" ? "standard input" : basename(path);
+      throw new CliError("GE_SOURCE_TOO_LARGE", message, EXIT_CODES.input, {
+        format,
+        path: null,
+        line: null,
+        column: null,
+      }, `invalid ${format.toUpperCase()} in ${sourceName}: ${message}`);
+    }
     const message = error instanceof Error ? error.message : String(error);
     throw new CliError("GECLI_INPUT_READ", `cannot read ${path}: ${message}`);
   }
   try {
-    return JSON.parse(source) as unknown;
+    return await decodeGraphInput(source, path, format);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new CliError("GECLI_INPUT_JSON", `invalid JSON in ${path}: ${message}`);
+    if (error instanceof GraphInputSourceError) {
+      const projection = error.projection;
+      const sourceName = path === "-" ? "standard input" : basename(path);
+      const humanMessage =
+        `invalid ${projection.format.toUpperCase()} in ${sourceName}: ${projection.message}`;
+      throw new CliError(projection.code, projection.message, EXIT_CODES.input, {
+        format: projection.format,
+        path: projection.path,
+        line: projection.line,
+        column: projection.column,
+      }, humanMessage);
+    }
+    throw error;
   }
 }
 
-async function readStandardInput(): Promise<string> {
+async function readStandardInput(maxBytes: number): Promise<Uint8Array> {
   const chunks: Buffer[] = [];
+  let total = 0;
   for await (const chunk of process.stdin) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    const remaining = maxBytes + 1 - total;
+    if (remaining <= 0) throw new InputTooLargeError();
+    const accepted = bytes.subarray(0, remaining);
+    chunks.push(accepted);
+    total += accepted.byteLength;
+    if (total > maxBytes) throw new InputTooLargeError();
   }
-  return Buffer.concat(chunks).toString("utf8");
+  return Buffer.concat(chunks, total);
+}
+
+async function readBoundedFile(path: string, maxBytes: number): Promise<Uint8Array> {
+  const handle = await open(path, "r");
+  try {
+    const metadata = await handle.stat();
+    if (metadata.isFile() && metadata.size > maxBytes) {
+      throw new InputTooLargeError();
+    }
+
+    const chunks: Buffer[] = [];
+    let total = 0;
+    while (total <= maxBytes) {
+      const buffer = Buffer.allocUnsafe(
+        Math.min(64 * 1024, maxBytes + 1 - total),
+      );
+      const { bytesRead } = await handle.read(buffer, 0, buffer.byteLength, null);
+      if (bytesRead === 0) return Buffer.concat(chunks, total);
+      chunks.push(buffer.subarray(0, bytesRead));
+      total += bytesRead;
+      if (total > maxBytes) throw new InputTooLargeError();
+    }
+    throw new InputTooLargeError();
+  } finally {
+    await handle.close();
+  }
 }
 
 function validationData(file: string, result: ValidationResult): Record<string, unknown> {
@@ -437,10 +595,10 @@ function printInitHuman(report: InitReport): void {
 
 function emitCliError(error: CliError, command: CommandName | null, json: boolean): CliExitCode {
   if (json) {
-    writeEnvelope(command, error.exitCode, null, { code: error.code, message: error.message });
+    writeEnvelope(command, error.exitCode, null, error.machineError);
   } else {
     writeStderr(
-      `graph: ${terminalSafeText(error.message)}` +
+      `graph: ${terminalSafeText(error.humanMessage)}` +
       `${error.code === "GECLI_USAGE" ? "\nRun graph --help for usage." : ""}`,
     );
   }
@@ -510,7 +668,10 @@ export async function run(argv: string[]): Promise<CliExitCode> {
 
     const file = parsed.file;
     if (file === null) throw new Error(`${parsed.command} unexpectedly has no input file`);
-    const document = await readGraph(file);
+    if (parsed.inputFormat === null) {
+      throw new Error(`${parsed.command} unexpectedly has no input format`);
+    }
+    const document = await readGraph(file, parsed.inputFormat);
     const { validateGraphDocument } = await import("./validation.js");
     const validation = validateGraphDocument(document);
     const exitCode = validation.valid ? EXIT_CODES.success : EXIT_CODES.invalidGraph;

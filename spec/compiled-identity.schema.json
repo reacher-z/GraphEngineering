@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/compiled-identity.schema.json",
+  "title": "Graph Engineering compiled graph identity",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "graphRevision",
+    "graphHash",
+    "nodes",
+    "edges",
+    "graphSchemas",
+    "revisionHash"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "graphengineering.reacher-z.github.io/compiled-identity/v1alpha1"
+    },
+    "kind": { "const": "CompiledGraphIdentity" },
+    "graphRevision": { "const": 1 },
+    "graphHash": { "$ref": "#/$defs/hash" },
+    "nodes": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/nodeIdentity" }
+    },
+    "edges": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/edgeIdentity" }
+    },
+    "graphSchemas": { "$ref": "#/$defs/graphSchemas" },
+    "revisionHash": { "$ref": "#/$defs/hash" }
+  },
+  "$defs": {
+    "hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "index": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "nodeIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "index",
+        "contentHash",
+        "inputSchemaHash",
+        "outputSchemaHash"
+      ],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "index": { "$ref": "#/$defs/index" },
+        "contentHash": { "$ref": "#/$defs/hash" },
+        "inputSchemaHash": { "$ref": "#/$defs/hash" },
+        "outputSchemaHash": { "$ref": "#/$defs/hash" }
+      }
+    },
+    "edgeIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "index", "contentHash", "schemaHash"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "index": { "$ref": "#/$defs/index" },
+        "contentHash": { "$ref": "#/$defs/hash" },
+        "schemaHash": {
+          "oneOf": [
+            { "$ref": "#/$defs/hash" },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "graphSchemas": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["input", "output", "state"],
+      "properties": {
+        "input": { "$ref": "#/$defs/hash" },
+        "output": { "$ref": "#/$defs/hash" },
+        "state": {
+          "oneOf": [
+            { "$ref": "#/$defs/hash" },
+            { "type": "null" }
+          ]
+        }
+      }
+    }
+  }
+}

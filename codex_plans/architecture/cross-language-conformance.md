@@ -29,9 +29,15 @@ Both implementations must agree on:
 - canonical UTF-8 bytes and lowercase SHA-256;
 - numeric-domain restrictions declared by each versioned hash contract.
 
-Graph v1alpha1 fixtures avoid floating-point values while full RFC 8785 number
-serialization is absent. Checkpoint v1alpha1 is stricter: hashed state accepts
-only safe integers, so its fixture is byte-portable now.
+Graph v1alpha1 freezes accepted finite-binary64 rendering with ECMAScript's
+shortest-round-trip number algorithm. The shared canonical-number manifest
+separates RFC 8785 Appendix B formatter tokens from public portable acceptance,
+covers unsafe-integer/non-finite rejection and a fixed-seed live Node oracle,
+and joins JSON, YAML, both compilers, both builders, component hashes, and the
+revision hash. This adopts RFC 8785 Section 3.2.2.3 only; code-point key
+ordering deliberately differs from full JCS. Checkpoint v1alpha1 remains
+stricter: its canonical state format accepts only safe integers. Tagged Durable
+JSON is a separate exact-bit codec.
 
 ### C1 — compiler
 

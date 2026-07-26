@@ -74,6 +74,260 @@ for (const [name, expectation] of Object.entries(expected.compilation)) {
 
 process.stdout.write(`Cross-language conformance passed for ${checked} graph fixtures.\n`);
 
+const canonicalNumberCase = JSON.parse(
+  await readFile(join(fixtureRoot, "canonical-number.case.json"), "utf8"),
+);
+const fractionalYamlSource = await readFile(
+  join(fixtureRoot, canonicalNumberCase.wholeGraph.yamlSource),
+  "utf8",
+);
+
+function binary64FromHex(bits) {
+  return Buffer.from(bits, "hex").readDoubleBE(0);
+}
+
+function splitmix64Samples(seed, count) {
+  const mask = (1n << 64n) - 1n;
+  let state = BigInt(`0x${seed}`);
+  const samples = [];
+  while (samples.length < count) {
+    state = (state + 0x9e3779b97f4a7c15n) & mask;
+    let value = state;
+    value = ((value ^ (value >> 30n)) * 0xbf58476d1ce4e5b9n) & mask;
+    value = ((value ^ (value >> 27n)) * 0x94d049bb133111ebn) & mask;
+    value = (value ^ (value >> 31n)) & mask;
+    if (((value >> 52n) & 0x7ffn) !== 0x7ffn) {
+      samples.push(value.toString(16).padStart(16, "0"));
+    }
+  }
+  return samples;
+}
+
+const randomNumberBits = splitmix64Samples(
+  canonicalNumberCase.randomDifferential.seed,
+  canonicalNumberCase.randomDifferential.finiteSamples,
+);
+const pythonCanonicalNumbers = spawnSync(
+  "uv",
+  [
+    "run",
+    "--project",
+    "python",
+    "python",
+    "-c",
+    `
+import json
+import struct
+import sys
+
+from graph_engineering import (
+    canonical_json,
+    canonical_sha256,
+    create_compiled_graph_identity,
+    graph_builder,
+    parse_graph_source,
+    try_compile_graph,
+)
+from graph_engineering._json import _render_finite_float
+
+payload = json.load(sys.stdin)
+
+
+def binary64(bits):
+    return struct.unpack(">d", bytes.fromhex(bits))[0]
+
+
+def rejects(bits):
+    try:
+        canonical_json(binary64(bits))
+    except (TypeError, ValueError):
+        return True
+    return False
+
+
+document = payload["graph"]
+yaml_document = parse_graph_source(payload["yamlSource"], format="yaml")
+author = graph_builder(
+    metadata=document["metadata"],
+    input_schema=document["inputSchema"],
+    output_schema=document["outputSchema"],
+    **({"state_schema": document["stateSchema"]} if "stateSchema" in document else {}),
+    **({"policies": document["policies"]} if "policies" in document else {}),
+)
+for node in document["nodes"]:
+    author.add_node(node)
+for edge in document["edges"]:
+    author.add_edge(edge)
+for entrypoint in document["entrypoints"]:
+    author.add_entrypoint(entrypoint)
+for name, endpoint in document["outputs"].items():
+    author.add_output(name, endpoint)
+built = author.build()
+compiled = try_compile_graph(document)
+yaml_compiled = try_compile_graph(yaml_document)
+
+print(json.dumps({
+    "formatter": [_render_finite_float(binary64(bits)) for bits in payload["formatterBits"]],
+    "accepted": [canonical_json(binary64(bits)) for bits in payload["acceptedBits"]],
+    "random": [_render_finite_float(binary64(bits)) for bits in payload["randomBits"]],
+    "rejected": [rejects(bits) for bits in payload["rejectedBits"]],
+    "graphCanonical": canonical_json(document),
+    "graphHash": canonical_sha256(document),
+    "graphIdentity": create_compiled_graph_identity(document).to_dict(),
+    "yamlCanonical": canonical_json(yaml_document),
+    "yamlHash": canonical_sha256(yaml_document),
+    "yamlCompilerCanonical": yaml_compiled.canonical_graph,
+    "yamlCompilerHash": yaml_compiled.graph_hash,
+    "yamlIdentity": create_compiled_graph_identity(yaml_document).to_dict(),
+    "compilerCanonical": compiled.canonical_graph,
+    "compilerHash": compiled.graph_hash,
+    "builderCanonical": built.canonical_graph,
+    "builderHash": built.graph_hash,
+    "builderIdentity": built.identity.to_dict(),
+}, separators=(",", ":")))
+`,
+  ],
+  {
+    cwd: root,
+    encoding: "utf8",
+    input: JSON.stringify({
+      formatterBits: canonicalNumberCase.formatterVectors.map(({ bits }) => bits),
+      acceptedBits: canonicalNumberCase.portableAccepted,
+      rejectedBits: canonicalNumberCase.portableRejected.map(({ bits }) => bits),
+      randomBits: randomNumberBits,
+      graph: canonicalNumberCase.wholeGraph.document,
+      yamlSource: fractionalYamlSource,
+    }),
+  },
+);
+if (pythonCanonicalNumbers.status !== 0) {
+  throw new Error(
+    `Python canonical-number report failed:\n${pythonCanonicalNumbers.stderr || pythonCanonicalNumbers.stdout}`,
+  );
+}
+const pythonCanonicalNumberReport = JSON.parse(pythonCanonicalNumbers.stdout);
+
+const formatterByBits = new Map(
+  canonicalNumberCase.formatterVectors.map((sample) => [sample.bits, sample.canonical]),
+);
+for (const [index, sample] of canonicalNumberCase.formatterVectors.entries()) {
+  assert.equal(
+    JSON.stringify(binary64FromHex(sample.bits)),
+    sample.canonical,
+    `${sample.bits}: Node does not match the shared canonical token`,
+  );
+  assert.equal(
+    pythonCanonicalNumberReport.formatter[index],
+    sample.canonical,
+    `${sample.bits}: Python does not match the shared canonical token`,
+  );
+}
+for (const [index, bits] of canonicalNumberCase.portableAccepted.entries()) {
+  const expected = formatterByBits.get(bits);
+  assert.equal(
+    core.canonicalSerialize(binary64FromHex(bits)),
+    expected,
+    `${bits}: TypeScript public canonical boundary differs`,
+  );
+  assert.equal(
+    pythonCanonicalNumberReport.accepted[index],
+    expected,
+    `${bits}: Python public canonical boundary differs`,
+  );
+}
+for (const [index, sample] of canonicalNumberCase.portableRejected.entries()) {
+  assert.throws(
+    () => core.canonicalSerialize(binary64FromHex(sample.bits)),
+    `${sample.bits}: TypeScript canonicalization must reject nonportable values`,
+  );
+  assert.equal(
+    pythonCanonicalNumberReport.rejected[index],
+    true,
+    `${sample.bits}: Python canonicalization must reject nonportable values`,
+  );
+}
+for (const [index, bits] of randomNumberBits.entries()) {
+  assert.equal(
+    pythonCanonicalNumberReport.random[index],
+    JSON.stringify(binary64FromHex(bits)),
+    `${bits}: seeded Python/Node binary64 rendering differs`,
+  );
+}
+
+const fractionalDocument = canonicalNumberCase.wholeGraph.document;
+const tsFractionalYamlDocument = core.decodeGraphSource(fractionalYamlSource, {
+  format: "yaml",
+});
+const tsFractionalCompilation = core.compileGraph(fractionalDocument);
+const tsFractionalYamlCompilation = core.compileGraph(tsFractionalYamlDocument);
+const tsFractionalBuilder = core.graphBuilder({
+  metadata: fractionalDocument.metadata,
+  inputSchema: fractionalDocument.inputSchema,
+  outputSchema: fractionalDocument.outputSchema,
+});
+for (const node of fractionalDocument.nodes) tsFractionalBuilder.addNode(node);
+for (const edge of fractionalDocument.edges) tsFractionalBuilder.addEdge(edge);
+for (const entrypoint of fractionalDocument.entrypoints) {
+  tsFractionalBuilder.addEntrypoint(entrypoint);
+}
+for (const [name, endpoint] of Object.entries(fractionalDocument.outputs)) {
+  tsFractionalBuilder.addOutput(name, endpoint);
+}
+const tsFractionalBuilt = tsFractionalBuilder.build();
+for (const canonical of [
+  core.canonicalSerialize(fractionalDocument),
+  core.canonicalSerialize(tsFractionalYamlDocument),
+  tsFractionalCompilation.canonicalGraph,
+  tsFractionalYamlCompilation.canonicalGraph,
+  tsFractionalBuilt.canonicalGraph,
+  pythonCanonicalNumberReport.graphCanonical,
+  pythonCanonicalNumberReport.yamlCanonical,
+  pythonCanonicalNumberReport.yamlCompilerCanonical,
+  pythonCanonicalNumberReport.compilerCanonical,
+  pythonCanonicalNumberReport.builderCanonical,
+]) {
+  assert.equal(canonical, canonicalNumberCase.wholeGraph.canonicalGraph);
+}
+for (const hash of [
+  core.canonicalHash(fractionalDocument),
+  core.canonicalHash(tsFractionalYamlDocument),
+  tsFractionalCompilation.graphHash,
+  tsFractionalYamlCompilation.graphHash,
+  tsFractionalBuilt.graphHash,
+  pythonCanonicalNumberReport.graphHash,
+  pythonCanonicalNumberReport.yamlHash,
+  pythonCanonicalNumberReport.yamlCompilerHash,
+  pythonCanonicalNumberReport.compilerHash,
+  pythonCanonicalNumberReport.builderHash,
+]) {
+  assert.equal(hash, canonicalNumberCase.wholeGraph.sha256);
+}
+assert.deepEqual(tsFractionalBuilt.identity, canonicalNumberCase.wholeGraph.identity);
+assert.deepEqual(
+  core.createCompiledGraphIdentity(fractionalDocument),
+  canonicalNumberCase.wholeGraph.identity,
+);
+assert.deepEqual(
+  core.createCompiledGraphIdentity(tsFractionalYamlDocument),
+  canonicalNumberCase.wholeGraph.identity,
+);
+assert.deepEqual(
+  pythonCanonicalNumberReport.graphIdentity,
+  canonicalNumberCase.wholeGraph.identity,
+);
+assert.deepEqual(
+  pythonCanonicalNumberReport.yamlIdentity,
+  canonicalNumberCase.wholeGraph.identity,
+);
+assert.deepEqual(
+  pythonCanonicalNumberReport.builderIdentity,
+  canonicalNumberCase.wholeGraph.identity,
+);
+
+process.stdout.write(
+  `Cross-language canonical-number conformance passed for ${canonicalNumberCase.formatterVectors.length} RFC formatter vectors, ${canonicalNumberCase.portableAccepted.length} portable values, ${canonicalNumberCase.portableRejected.length} public-boundary rejections, ${randomNumberBits.length} seeded finite bit patterns, and compiler/builder whole-graph identity.\n`,
+);
+
 const runtimeCase = JSON.parse(
   await readFile(join(fixtureRoot, "runtime-ready-queue.case.json"), "utf8"),
 );
@@ -994,4 +1248,461 @@ for (const testCase of pipelineFixture.cases) {
 
 process.stdout.write(
   `Cross-language bounded-pipeline conformance passed for ${pipelineFixture.cases.length} cases.\n`,
+);
+
+// Authoring conformance is intentionally expected-vs-TypeScript-vs-Python.
+// Native equality alone is insufficient because both implementations can share
+// the same bug.
+const authoringRoot = join(fixtureRoot, "authoring");
+
+async function loadAuthoringJson(name) {
+  return JSON.parse(await readFile(join(authoringRoot, name), "utf8"));
+}
+
+function normalizeAuthoringDiagnostic(item) {
+  const normalized = {
+    code: item.code,
+    path: item.path ?? null,
+    nodeIds: [...(item.nodeIds ?? [])],
+  };
+  if (item.edgeId !== undefined) normalized.edgeId = item.edgeId;
+  if (item.outputName !== undefined) normalized.outputName = item.outputName;
+  return normalized;
+}
+
+function compileAuthoringDocument(document) {
+  const result = core.compileGraph(document);
+  const report = {
+    valid: result.valid,
+    diagnostics: result.diagnostics.map(normalizeAuthoringDiagnostic),
+  };
+  if (!result.valid || result.canonicalGraph === null || result.graphHash === null) {
+    return report;
+  }
+  return {
+    ...report,
+    graph: JSON.parse(result.canonicalGraph),
+    canonicalGraph: result.canonicalGraph,
+    graphHash: result.graphHash,
+    identity: core.createCompiledGraphIdentity(document),
+    topologicalLayers: result.topologicalLayers,
+  };
+}
+
+function buildAuthoringDocument(document) {
+  const options = {
+    metadata: document.metadata,
+    inputSchema: document.inputSchema,
+    outputSchema: document.outputSchema,
+    ...(Object.hasOwn(document, "stateSchema") ? { stateSchema: document.stateSchema } : {}),
+    ...(Object.hasOwn(document, "policies") ? { policies: document.policies } : {}),
+  };
+  const builder = core.graphBuilder(options);
+  for (const node of document.nodes) builder.addNode(node);
+  for (const edge of document.edges) builder.addEdge(edge);
+  for (const entrypoint of document.entrypoints) builder.addEntrypoint(entrypoint);
+  for (const [name, endpoint] of Object.entries(document.outputs)) {
+    builder.addOutput(name, endpoint);
+  }
+  const built = builder.build();
+  return {
+    valid: true,
+    diagnostics: [],
+    graph: built.graph,
+    canonicalGraph: built.canonicalGraph,
+    graphHash: built.graphHash,
+    identity: built.identity,
+  };
+}
+
+function captureBuilderFailure(operation) {
+  try {
+    operation();
+  } catch (error) {
+    assert.ok(error instanceof core.GraphBuilderError, "unexpected builder error type");
+    return {
+      code: error.code,
+      path: error.path,
+      diagnosticCodes: error.diagnostics.map(({ code }) => code),
+    };
+  }
+  throw new Error("builder diagnostic operation unexpectedly succeeded");
+}
+
+function typescriptBuilderDiagnosticReport() {
+  const node = {
+    id: "a",
+    kind: "transform",
+    inputSchema: {},
+    outputSchema: {},
+    config: null,
+  };
+  const edge = { id: "edge", from: { node: "a" }, to: { node: "b" } };
+  const makeBuilder = () => core.graphBuilder({
+    metadata: { name: "builder-diagnostics", version: "1" },
+    inputSchema: {},
+    outputSchema: {},
+  });
+  const sealed = makeBuilder()
+    .addNode(node)
+    .addEntrypoint("a")
+    .addOutput("result", { node: "a" });
+  sealed.build();
+
+  const operations = {
+    "constructor-missing-metadata": () => core.graphBuilder({ inputSchema: {}, outputSchema: {} }),
+    "constructor-missing-input-schema": () => core.graphBuilder({
+      metadata: { name: "builder-diagnostics", version: "1" },
+      outputSchema: {},
+    }),
+    "constructor-missing-output-schema": () => core.graphBuilder({
+      metadata: { name: "builder-diagnostics", version: "1" },
+      inputSchema: {},
+    }),
+    "duplicate-node": () => makeBuilder().addNode(node).addNode(node),
+    "duplicate-edge": () => makeBuilder().addEdge(edge).addEdge(edge),
+    "duplicate-entrypoint": () => makeBuilder().addEntrypoint("a").addEntrypoint("a"),
+    "duplicate-output": () => makeBuilder()
+      .addOutput("result", { node: "a" })
+      .addOutput("result", { node: "a" }),
+    "malformed-node": () => makeBuilder().addNode({ id: "a" }),
+    "malformed-edge": () => makeBuilder().addEdge({
+      id: "bad edge",
+      from: { node: "a" },
+      to: { node: "b" },
+    }),
+    "malformed-output": () => makeBuilder().addOutput("result", { node: "a", port: null }),
+    "malformed-policies": () => makeBuilder().setPolicies({ maxDepth: 0 }),
+    "missing-entrypoint": () => makeBuilder()
+      .addNode(node)
+      .addOutput("result", { node: "a" })
+      .build(),
+    "missing-output": () => makeBuilder().addNode(node).addEntrypoint("a").build(),
+    "core-rejected": () => makeBuilder()
+      .addNode(node)
+      .addEntrypoint("missing")
+      .addOutput("result", { node: "also-missing" })
+      .build(),
+    "sealed-add-node": () => sealed.addNode(node),
+    "sealed-add-edge": () => sealed.addEdge(edge),
+    "sealed-add-entrypoint": () => sealed.addEntrypoint("next"),
+    "sealed-add-output": () => sealed.addOutput("next/value~", { node: "a" }),
+    "sealed-set-policies": () => sealed.setPolicies({}),
+    "sealed-enable-typed-ports": () => sealed.enableStrictTypedPorts(),
+    "sealed-build": () => sealed.build(),
+  };
+  return Object.fromEntries(
+    Object.entries(operations).map(([name, operation]) => [name, captureBuilderFailure(operation)]),
+  );
+}
+
+async function decodeAuthoringFile(name, format) {
+  return core.decodeGraphSource(await readFile(join(authoringRoot, name)), { format });
+}
+
+function authoringMutation(identity, mutation) {
+  const candidate = JSON.parse(JSON.stringify(identity));
+  const parts = mutation.path === "#"
+    ? []
+    : mutation.path.slice(2).split("/").map((part) =>
+      part.replaceAll("~1", "/").replaceAll("~0", "~"));
+  let parent = candidate;
+  for (const part of parts.slice(0, -1)) {
+    parent = Array.isArray(parent) ? parent[Number(part)] : parent[part];
+  }
+  const final = parts.at(-1);
+  if (mutation.operation === "replace") {
+    if (Array.isArray(parent)) parent[Number(final)] = mutation.value;
+    else parent[final] = mutation.value;
+  } else if (mutation.operation === "swap") {
+    const sequence = Array.isArray(parent) ? parent[Number(final)] : parent[final];
+    const [left, right] = mutation.indices;
+    [sequence[left], sequence[right]] = [sequence[right], sequence[left]];
+  } else {
+    throw new Error(`unsupported authoring mutation '${mutation.operation}'`);
+  }
+  return candidate;
+}
+
+function assertAuthoringSubset(actual, expectedValue, label) {
+  if (expectedValue === null || typeof expectedValue !== "object") {
+    assert.deepEqual(actual, expectedValue, label);
+    return;
+  }
+  if (Array.isArray(expectedValue)) {
+    assert.ok(Array.isArray(actual), `${label}: actual value is not an array`);
+    assert.equal(actual.length, expectedValue.length, `${label}: array length differs`);
+    expectedValue.forEach((value, index) => {
+      assertAuthoringSubset(actual[index], value, `${label}[${index}]`);
+    });
+    return;
+  }
+  assert.ok(actual !== null && typeof actual === "object", `${label}: actual is not an object`);
+  for (const [key, value] of Object.entries(expectedValue)) {
+    assert.ok(Object.hasOwn(actual, key), `${label}: missing key '${key}'`);
+    assertAuthoringSubset(actual[key], value, `${label}.${key}`);
+  }
+}
+
+function assertSourceFailure(actual, testCase, language) {
+  const expectedValue = testCase.expect;
+  const label = `${testCase.name}: ${language}`;
+  assert.equal(actual.code, expectedValue.code, `${label} source code`);
+  assert.equal(actual.format, testCase.format, `${label} source format`);
+  if (Object.hasOwn(expectedValue, "path")) {
+    assert.equal(actual.path, expectedValue.path, `${label} source path`);
+  }
+  for (const field of ["line", "column"]) {
+    if (actual[field] !== null) {
+      assert.ok(Number.isInteger(actual[field]) && actual[field] >= 1, `${label} ${field}`);
+    }
+  }
+}
+
+const authoringCases = await loadAuthoringJson("authoring.case.json");
+const identityGoldenSet = await loadAuthoringJson("component-identity.expected.json");
+const identityGolden = identityGoldenSet.identities;
+const pythonAuthoring = spawnSync(
+  "uv",
+  ["run", "--project", "python", "python", "tools/conformance/python_authoring_report.py"],
+  { cwd: root, encoding: "utf8" },
+);
+if (pythonAuthoring.status !== 0) {
+  throw new Error(
+    `Python authoring conformance failed:\n${pythonAuthoring.stderr || pythonAuthoring.stdout}`,
+  );
+}
+const pyAuthoringReport = JSON.parse(pythonAuthoring.stdout);
+const tsBuilderDiagnostics = typescriptBuilderDiagnosticReport();
+
+for (const testCase of authoringCases.builderDiagnosticCases) {
+  const tsReport = tsBuilderDiagnostics[testCase.name];
+  const pyReport = pyAuthoringReport.builderDiagnostics[testCase.name];
+  assert.deepEqual(tsReport, testCase.expect, `${testCase.name}: TypeScript builder diagnostic`);
+  assert.deepEqual(pyReport, testCase.expect, `${testCase.name}: Python builder diagnostic`);
+}
+
+for (const testCase of authoringCases.equivalenceCases) {
+  const expectedGraph = await loadAuthoringJson(testCase.builderGraph);
+  const expectedIdentity = identityGolden[testCase.identityKey];
+  const expectedCanonical = core.canonicalSerialize(expectedGraph);
+  const reports = {
+    typescriptJson: compileAuthoringDocument(
+      await decodeAuthoringFile(testCase.json, "json"),
+    ),
+    typescriptYaml: compileAuthoringDocument(
+      await decodeAuthoringFile(testCase.yaml, "yaml"),
+    ),
+    typescriptBuilder: buildAuthoringDocument(expectedGraph),
+    pythonJson: pyAuthoringReport.equivalence[testCase.name].json,
+    pythonYaml: pyAuthoringReport.equivalence[testCase.name].yaml,
+    pythonBuilder: pyAuthoringReport.equivalence[testCase.name].builder,
+  };
+  for (const [pathName, report] of Object.entries(reports)) {
+    assert.equal(report.valid, true, `${testCase.name}: ${pathName} must be valid`);
+    assert.deepEqual(report.graph, expectedGraph, `${testCase.name}: ${pathName} graph`);
+    assert.equal(
+      report.canonicalGraph,
+      expectedCanonical,
+      `${testCase.name}: ${pathName} canonical graph`,
+    );
+    assert.equal(
+      report.graphHash,
+      testCase.expect.graphHash,
+      `${testCase.name}: ${pathName} graph hash`,
+    );
+    assert.deepEqual(
+      report.identity,
+      expectedIdentity,
+      `${testCase.name}: ${pathName} compiled identity`,
+    );
+    if (report.topologicalLayers !== undefined) {
+      assert.deepEqual(
+        report.topologicalLayers,
+        testCase.expect.topologicalLayers,
+        `${testCase.name}: ${pathName} topological layers`,
+      );
+    }
+  }
+}
+
+for (const testCase of authoringCases.validSourceCases) {
+  const sourceName = testCase.yaml ?? testCase.json;
+  const format = testCase.yaml === undefined ? "json" : "yaml";
+  const decoded = await decodeAuthoringFile(sourceName, format);
+  const reports = {
+    typescriptSource: compileAuthoringDocument(decoded),
+    typescriptBuilder: buildAuthoringDocument(decoded),
+    pythonSource: pyAuthoringReport.validSource[testCase.name].source,
+    pythonBuilder: pyAuthoringReport.validSource[testCase.name].builder,
+  };
+  const tsReport = reports.typescriptSource;
+  for (const [pathName, report] of Object.entries(reports)) {
+    assert.equal(report.valid, true, `${testCase.name}: ${pathName} must be valid`);
+    assert.deepEqual(report.graph, tsReport.graph, `${testCase.name}: ${pathName} graph`);
+    assert.equal(
+      report.canonicalGraph,
+      tsReport.canonicalGraph,
+      `${testCase.name}: ${pathName} canonical graph`,
+    );
+    assert.equal(
+      report.graphHash,
+      testCase.expect.graphHash,
+      `${testCase.name}: ${pathName} graph hash`,
+    );
+    assert.deepEqual(
+      report.identity,
+      tsReport.identity,
+      `${testCase.name}: ${pathName} identity`,
+    );
+  }
+  assert.equal(tsReport.graphHash, testCase.expect.graphHash, `${testCase.name}: graph hash`);
+  assert.equal(
+    tsReport.identity.revisionHash,
+    testCase.expect.revisionHash,
+    `${testCase.name}: revision hash`,
+  );
+  if (testCase.identityKey !== undefined) {
+    assert.deepEqual(
+      tsReport.identity,
+      identityGolden[testCase.identityKey],
+      `${testCase.name}: golden identity`,
+    );
+  }
+  if (testCase.expect.nodeOrder !== undefined) {
+    assert.deepEqual(
+      tsReport.graph.nodes.map(({ id }) => id),
+      testCase.expect.nodeOrder,
+      `${testCase.name}: node declaration order`,
+    );
+  }
+  if (testCase.expect.edgeOrder !== undefined) {
+    assert.deepEqual(
+      tsReport.graph.edges.map(({ id }) => id),
+      testCase.expect.edgeOrder,
+      `${testCase.name}: edge declaration order`,
+    );
+  }
+  if (testCase.expect.topologicalLayers !== undefined) {
+    assert.deepEqual(
+      tsReport.topologicalLayers,
+      testCase.expect.topologicalLayers,
+      `${testCase.name}: topological layers`,
+    );
+  }
+  if (testCase.expect.labels !== undefined) {
+    assert.deepEqual(tsReport.graph.metadata.labels, testCase.expect.labels, `${testCase.name}: labels`);
+  }
+  if (testCase.expect.configScalars !== undefined) {
+    assertAuthoringSubset(
+      tsReport.graph.nodes[0].config,
+      testCase.expect.configScalars,
+      `${testCase.name}: scalar projection`,
+    );
+  }
+  if (Object.hasOwn(testCase.expect, "nodeConfig")) {
+    assert.deepEqual(tsReport.graph.nodes[0].config, testCase.expect.nodeConfig);
+    assert.deepEqual(
+      tsReport.graph.policies["future-policy"].optional,
+      testCase.expect.policyExtensionValue,
+    );
+  }
+  if (testCase.expect.outputNames !== undefined) {
+    assert.deepEqual(Object.keys(tsReport.graph.outputs), testCase.expect.outputNames);
+  }
+}
+
+for (const testCase of authoringCases.sourceBoundaryCases) {
+  const options = { format: testCase.format, limits: testCase.limits };
+  const tsValue = core.decodeGraphSource(testCase.source, options);
+  const pyValue = pyAuthoringReport.sourceBoundary[testCase.name];
+  assert.deepEqual({ value: tsValue }, testCase.expect, `${testCase.name}: TypeScript boundary`);
+  assert.deepEqual(pyValue, testCase.expect, `${testCase.name}: Python boundary`);
+  assert.deepEqual({ value: tsValue }, pyValue, `${testCase.name}: native boundary values differ`);
+}
+
+for (const testCase of authoringCases.compilerInvalidYamlCases) {
+  const tsReport = compileAuthoringDocument(
+    await decodeAuthoringFile(testCase.yaml, "yaml"),
+  );
+  const pyReport = pyAuthoringReport.compilerInvalid[testCase.name];
+  const expectedCodes = testCase.expect.diagnosticCodes;
+  assert.equal(tsReport.valid, false, `${testCase.name}: TypeScript must reject Graph IR`);
+  assert.equal(pyReport.valid, false, `${testCase.name}: Python must reject Graph IR`);
+  assert.deepEqual(tsReport.diagnostics.map(({ code }) => code), expectedCodes);
+  assert.deepEqual(pyReport.diagnostics.map(({ code }) => code), expectedCodes);
+}
+
+for (const testCase of authoringCases.typedDiagnosticCases) {
+  const document = await loadAuthoringJson(testCase.graph);
+  const tsReport = compileAuthoringDocument(document);
+  const pyReport = pyAuthoringReport.typedDiagnostics[testCase.name];
+  assert.equal(tsReport.valid, false, `${testCase.name}: TypeScript typed graph must fail`);
+  assert.equal(pyReport.valid, false, `${testCase.name}: Python typed graph must fail`);
+  assert.deepEqual(tsReport.diagnostics, testCase.expect, `${testCase.name}: TypeScript diagnostics`);
+  assert.deepEqual(pyReport.diagnostics, testCase.expect, `${testCase.name}: Python diagnostics`);
+}
+
+const sourceFailureCases = await loadAuthoringJson("yaml-invalid.case.json");
+for (const testCase of sourceFailureCases.cases) {
+  const source = testCase.sourceHex !== undefined
+    ? Buffer.from(testCase.sourceHex, "hex")
+    : testCase.sourceRepeat !== undefined
+      ? `${testCase.sourceRepeat.prefix ?? ""}${testCase.sourceRepeat.value.repeat(testCase.sourceRepeat.count)}${testCase.sourceRepeat.suffix ?? ""}`
+      : testCase.sourceSegments !== undefined
+        ? testCase.sourceSegments.map((segment) => segment.value.repeat(segment.count)).join("")
+        : testCase.source;
+  let tsProjection;
+  try {
+    core.decodeGraphSource(source, { format: testCase.format, limits: testCase.limits });
+    assert.fail(`${testCase.name}: TypeScript accepted invalid source`);
+  } catch (error) {
+    assert.ok(error instanceof core.GraphSourceError, `${testCase.name}: wrong TypeScript error`);
+    tsProjection = error.toJSON();
+  }
+  const pyProjection = pyAuthoringReport.sourceFailures[testCase.name];
+  assertSourceFailure(tsProjection, testCase, "TypeScript");
+  assertSourceFailure(pyProjection, testCase, "Python");
+  assert.equal(tsProjection.code, pyProjection.code, `${testCase.name}: native source codes differ`);
+  if (Object.hasOwn(testCase.expect, "path")) {
+    assert.equal(tsProjection.path, pyProjection.path, `${testCase.name}: native paths differ`);
+  }
+}
+
+const graphByIdentity = {
+  equivalent: await loadAuthoringJson("equivalent.graph.json"),
+  "typed-ports": await loadAuthoringJson("typed-ports.graph.json"),
+  "unicode-and-keys": await loadAuthoringJson("unicode-and-keys.graph.json"),
+};
+for (const [identityKey, identity] of Object.entries(identityGolden)) {
+  const positive = core.verifyCompiledGraphIdentity(graphByIdentity[identityKey], identity);
+  assert.equal(positive.valid, true, `${identityKey}: TypeScript rejected golden identity`);
+}
+for (const testCase of authoringCases.identityMutationCases) {
+  const candidate = authoringMutation(
+    identityGolden[testCase.identityKey],
+    testCase.mutation,
+  );
+  const tsResult = core.verifyCompiledGraphIdentity(
+    graphByIdentity[testCase.identityKey],
+    candidate,
+  );
+  const pyResult = pyAuthoringReport.identityMutations[testCase.name];
+  if (testCase.expect.valid === true) {
+    assert.equal(tsResult.valid, true, `${testCase.name}: TypeScript should accept identity`);
+    assert.equal(pyResult.valid, true, `${testCase.name}: Python should accept identity`);
+    continue;
+  }
+  const tsDiagnostic = normalizeAuthoringDiagnostic(tsResult.diagnostics[0]);
+  const pyDiagnostic = pyResult.diagnostics[0];
+  assert.equal(tsResult.valid, false, `${testCase.name}: TypeScript identity must fail`);
+  assert.equal(pyResult.valid, false, `${testCase.name}: Python identity must fail`);
+  assert.equal(tsDiagnostic.code, testCase.expect.code, `${testCase.name}: TypeScript code`);
+  assert.equal(pyDiagnostic.code, testCase.expect.code, `${testCase.name}: Python code`);
+  assert.equal(tsDiagnostic.path, testCase.expect.path, `${testCase.name}: TypeScript path`);
+  assert.equal(pyDiagnostic.path, testCase.expect.path, `${testCase.name}: Python path`);
+}
+
+process.stdout.write(
+  `Cross-language authoring conformance passed for ${authoringCases.equivalenceCases.length} four-authoring-path equivalence cases (six native reports), ${authoringCases.validSourceCases.length} four-report valid-source cases, ${authoringCases.builderDiagnosticCases.length} builder diagnostics, ${sourceFailureCases.cases.length} source failures, ${authoringCases.typedDiagnosticCases.length} typed diagnostics, and ${authoringCases.identityMutationCases.length} identity mutations.\n`,
 );

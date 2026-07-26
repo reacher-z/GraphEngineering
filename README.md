@@ -36,6 +36,11 @@ Checkpoint acceleration, replay/fork, distributed leases, Graph IR stream
 execution, and the broader v1 surface remain under active development; the
 repository does not silently mock unfinished capabilities.
 
+Strict JSON and safe YAML authoring, declaration-ordered builders, opt-in typed
+ports, and revision-1 compiled component identities are implemented in both
+languages. Equivalent JSON, YAML, and builder inputs are checked against shared
+golden graph/schema/component hashes rather than language-local snapshots.
+
 > **Source-only alpha:** npm and PyPI packages are not published yet. Clone this
 > repository to try the current release candidate; registry publication remains
 > gated on trusted publishing and package-specific security review.
@@ -90,6 +95,11 @@ uv run --project python pytest python/tests
 | Strict Graph IR models | Yes | Yes, with Pydantic v2 |
 | Canonical SHA-256 | Yes | Yes |
 | Stable compiler diagnostics | Yes | Yes |
+| Strict JSON and safe YAML source decoder | Yes | Yes |
+| Declaration-ordered graph builder | Yes | Yes |
+| Strict typed-port contract checks | Yes | Yes |
+| Revision-1 compiled component identity | Yes | Yes |
+| Native `graph`/`grapheng` CLI | Yes | Yes |
 | Ready-queue DAG scheduler | Yes | Yes |
 | Bounded concurrency | Yes | Yes |
 | Standalone bounded pipeline and backpressure | Yes | Yes |
@@ -121,6 +131,7 @@ uv run --project python pytest python/tests
 ```bash
 node scripts/validate-fixtures.mjs
 node scripts/check-doc-links.mjs
+corepack pnpm check:release-map
 corepack pnpm build
 corepack pnpm typecheck
 corepack pnpm lint
@@ -138,6 +149,7 @@ python3 scripts/check-python-artifacts.py
 ## Documentation
 
 - [Concepts](docs/CONCEPTS.md)
+- [CLI contract](docs/CLI.md)
 - [Failure modes](docs/FAILURE_MODES.md)
 - [Security policy](SECURITY.md)
 - [Architecture](ARCHITECTURE.md)
@@ -149,6 +161,7 @@ python3 scripts/check-python-artifacts.py
 - [Durable recovery semantics](spec/durable-recovery-semantics.md)
 - [Bounded pipeline semantics](spec/pipeline-semantics.md)
 - [Primitive semantics](spec/primitives-semantics.md)
+- [Authoring and identity semantics](spec/authoring-semantics.md)
 - [21-day delivery plan](codex_plans/Graph-Engineering-21-Day-Master-Plan.md)
 
 ## Status

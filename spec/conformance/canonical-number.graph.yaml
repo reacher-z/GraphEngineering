@@ -1,0 +1,29 @@
+apiVersion: graphengineering.reacher-z.github.io/v1alpha1
+kind: Graph
+metadata:
+  name: fractional-canonical
+  version: 1.0.0
+inputSchema:
+  type: object
+outputSchema:
+  type: object
+entrypoints:
+  - fractional
+outputs:
+  result:
+    node: fractional
+    port: result
+nodes:
+  - id: fractional
+    kind: transform
+    inputSchema:
+      type: object
+    outputSchema:
+      type: object
+    config:
+      epsilon: 0.000001
+      scientific: 1e-7
+      roundToEven: 1424953923781206.2
+      third: 333333333.3333333
+      negative: -0.0000033333333333333333
+edges: []

@@ -5,6 +5,7 @@ import {
   hashCanonicalSerialization,
 } from "./canonical.js";
 import { validateGraphDocument } from "./schema-validation.js";
+import { validateStrictTypedPortsSnapshot } from "./typed-ports.js";
 import type { EdgeSpec, GraphSpec } from "./types.js";
 
 export type DiagnosticSeverity = "error" | "warning";
@@ -21,7 +22,18 @@ export type DiagnosticCode =
   | "GE1009_MISSING_OUTPUT"
   | "GE1010_ENTRYPOINT_HAS_INCOMING"
   | "GE1101_MAX_FAN_OUT"
-  | "GE1102_MAX_DEPTH";
+  | "GE1102_MAX_DEPTH"
+  | "GE1201_MISSING_SOURCE_PORT"
+  | "GE1202_MISSING_TARGET_PORT"
+  | "GE1203_PORT_SCHEMA_MISMATCH"
+  | "GE1204_DUPLICATE_TARGET_BINDING"
+  | "GE1205_INVALID_PORT_SCHEMA"
+  | "GE1206_OUTPUT_SCHEMA_MISMATCH"
+  | "GE1207_ENTRYPOINT_SCHEMA_MISMATCH"
+  | "GE1208_UNSUPPORTED_TYPED_EDGE_MODE"
+  | "GE1301_UNSUPPORTED_GRAPH_REVISION"
+  | "GE1302_GRAPH_IDENTITY_MISMATCH"
+  | "GE1303_COMPONENT_IDENTITY_MISMATCH";
 
 export interface CompilerDiagnostic {
   code: DiagnosticCode;
@@ -30,6 +42,7 @@ export interface CompilerDiagnostic {
   path?: string;
   nodeIds?: readonly string[];
   edgeId?: string;
+  outputName?: string;
 }
 
 export interface CompilationResult {
@@ -311,6 +324,11 @@ export function compileGraph(document: GraphSpec | unknown): CompilationResult {
       ),
     );
   }
+
+  // Typed-port proof is deliberately opt-in. It runs only after the base
+  // envelope, references, DAG, and graph policies are stable, so malformed
+  // graphs cannot trigger misleading schema cascades.
+  diagnostics.push(...validateStrictTypedPortsSnapshot(graph));
 
   return {
     valid: diagnostics.every((item) => item.severity !== "error"),

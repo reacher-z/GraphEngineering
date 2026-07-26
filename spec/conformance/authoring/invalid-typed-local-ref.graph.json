@@ -1,0 +1,37 @@
+{
+  "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+  "kind": "Graph",
+  "metadata": { "name": "typed-local-ref", "version": "1.0.0" },
+  "inputSchema": { "type": "object", "properties": { "input": { "type": "string" } }, "required": ["input"] },
+  "outputSchema": { "type": "object", "properties": { "result": { "type": "string" } }, "required": ["result"] },
+  "entrypoints": ["source"],
+  "outputs": { "result": { "node": "target", "port": "result" } },
+  "nodes": [
+    {
+      "id": "source",
+      "kind": "transform",
+      "inputSchema": { "type": "object", "properties": { "input": { "type": "string" } }, "required": ["input"] },
+      "outputSchema": {
+        "type": "object",
+        "$defs": { "Payload": { "type": "string" } },
+        "properties": { "payload": { "$ref": "#/$defs/Payload" } },
+        "required": ["payload"]
+      },
+      "config": {}
+    },
+    {
+      "id": "target",
+      "kind": "transform",
+      "inputSchema": {
+        "type": "object",
+        "$defs": { "Payload": { "type": "number" } },
+        "properties": { "payload": { "$ref": "#/$defs/Payload" } },
+        "required": ["payload"]
+      },
+      "outputSchema": { "type": "object", "properties": { "result": { "type": "string" } }, "required": ["result"] },
+      "config": {}
+    }
+  ],
+  "edges": [{ "id": "edge", "from": { "node": "source", "port": "payload" }, "to": { "node": "target", "port": "payload" }, "mode": "value" }],
+  "policies": { "graphengineering.reacher-z.github.io/typed-ports": { "apiVersion": "graphengineering.reacher-z.github.io/typed-ports/v1alpha1", "mode": "strict-exact" } }
+}

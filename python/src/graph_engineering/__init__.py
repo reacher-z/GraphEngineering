@@ -1,5 +1,12 @@
 """Graph Engineering Python runtime public API."""
 
+from .builder import (
+    BuilderErrorCode,
+    BuiltGraph,
+    GraphBuilder,
+    GraphBuilderError,
+    graph_builder,
+)
 from .canonical import canonical_bytes, canonical_json, canonical_sha256
 from .compiler import (
     CompilationResult,
@@ -9,6 +16,16 @@ from .compiler import (
     GraphCompileError,
     compile_graph,
     try_compile_graph,
+)
+from .component_identity import (
+    CompiledGraphIdentity,
+    EdgeComponentIdentity,
+    GraphIdentityError,
+    GraphSchemaIdentity,
+    IdentityVerificationResult,
+    NodeComponentIdentity,
+    create_compiled_graph_identity,
+    verify_compiled_graph_identity,
 )
 from .durable import (
     DurableRunError,
@@ -89,28 +106,56 @@ from .scheduler import (
     RunStatus,
     run_graph,
 )
+from .source import (
+    GraphSourceError,
+    SourceErrorCode,
+    SourceFormat,
+    SourceLimits,
+    parse_graph_source,
+)
+from .typed_ports import (
+    TYPED_PORT_POLICY_API_VERSION,
+    TYPED_PORT_POLICY_KEY,
+    TYPED_PORT_POLICY_MODE,
+    strict_typed_ports_policy,
+    validate_strict_typed_ports,
+)
 
 __all__ = [
+    "TYPED_PORT_POLICY_API_VERSION",
+    "TYPED_PORT_POLICY_KEY",
+    "TYPED_PORT_POLICY_MODE",
     "AllBarrierPolicy",
     "AsyncScheduler",
+    "BuilderErrorCode",
+    "BuiltGraph",
     "CancellationSignal",
     "CompilationResult",
     "CompiledGraph",
+    "CompiledGraphIdentity",
     "Diagnostic",
     "DiagnosticCode",
     "DurableJsonError",
     "DurableRunError",
     "DurableRunErrorCode",
+    "EdgeComponentIdentity",
     "EdgeSpec",
     "Endpoint",
     "FailureCode",
+    "GraphBuilder",
+    "GraphBuilderError",
     "GraphCompileError",
     "GraphEvent",
+    "GraphIdentityError",
     "GraphPolicies",
+    "GraphSchemaIdentity",
+    "GraphSourceError",
     "GraphSpec",
+    "IdentityVerificationResult",
     "Metadata",
     "MinimumBarrierPolicy",
     "MultiRouteSelectionPolicy",
+    "NodeComponentIdentity",
     "NodeContext",
     "NodeFailure",
     "NodeHandler",
@@ -152,22 +197,31 @@ __all__ = [
     "SettledItem",
     "SettledStatus",
     "SingleRouteSelectionPolicy",
+    "SourceErrorCode",
+    "SourceFormat",
+    "SourceLimits",
     "SucceededSettledItem",
     "UnsuccessfulSettledItem",
     "canonical_bytes",
     "canonical_json",
     "canonical_sha256",
     "compile_graph",
+    "create_compiled_graph_identity",
     "decode_durable_json",
     "durable_json_hash",
     "encode_durable_json",
     "evaluate_route_selection",
     "evaluate_settled_barrier",
+    "graph_builder",
+    "parse_graph_source",
     "resume_graph_run",
     "run_graph",
     "run_pipeline",
     "start_graph_run",
+    "strict_typed_ports_policy",
     "try_compile_graph",
+    "validate_strict_typed_ports",
+    "verify_compiled_graph_identity",
 ]
 
 __version__ = "0.1.0a1"

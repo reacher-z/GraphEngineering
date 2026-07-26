@@ -232,3 +232,11 @@ export function canonicalHash(value: unknown): string {
   const { serialized } = captureCanonicalJson(value);
   return hashCanonicalSerialization(serialized);
 }
+
+/** Rehydrate trusted canonical bytes as a recursively frozen ordinary JSON value. */
+export function parseFrozenCanonicalJson<T>(serialized: string): T {
+  return JSON.parse(serialized, (_key: string, value: unknown) => {
+    if (typeof value === "object" && value !== null) return Object.freeze(value);
+    return value;
+  }) as T;
+}

@@ -6,7 +6,15 @@ from pathlib import Path
 
 import pytest
 
-from graph_engineering import DiagnosticCode, GraphCompileError, compile_graph, try_compile_graph
+from graph_engineering import (
+    DiagnosticCode,
+    GraphCompileError,
+    GraphSpec,
+    canonical_json,
+    canonical_sha256,
+    compile_graph,
+    try_compile_graph,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = ROOT / "spec/conformance"
@@ -17,10 +25,16 @@ def load_fixture(name: str) -> dict[str, object]:
 
 
 def test_diamond_topological_layers_match_conformance() -> None:
-    compiled = compile_graph(load_fixture("diamond.graph.json"))
+    document = load_fixture("diamond.graph.json")
+    result = try_compile_graph(document)
+    compiled = result.raise_for_errors()
 
     assert compiled.topological_layers == (("split",), ("left", "right"), ("merge",))
     assert compiled.topological_order == ("split", "left", "right", "merge")
+    assert result.canonical_graph == canonical_json(document)
+    assert result.graph_hash == compiled.graph_hash == canonical_sha256(document)
+    assert result.entrypoints == ("split",)
+    assert result.topological_layers == compiled.topological_layers
 
 
 @pytest.mark.parametrize(
@@ -90,6 +104,48 @@ def test_schema_validation_becomes_invalid_graph_diagnostic() -> None:
     result = try_compile_graph(document)
 
     assert [item.code for item in result.diagnostics] == [DiagnosticCode.INVALID_GRAPH]
+    assert result.canonical_graph is None
+    assert result.graph_hash is None
+    assert result.entrypoints == ()
+    assert result.topological_layers == ()
+
+
+@pytest.mark.parametrize(
+    ("fixture", "layers"),
+    [
+        ("invalid-duplicate-node.graph.json", ()),
+        ("invalid-missing-endpoint.graph.json", ()),
+        ("invalid-cycle.graph.json", ()),
+        ("invalid-unreachable.graph.json", (("start", "orphan"),)),
+        ("invalid-entrypoint-incoming.graph.json", (("root",), ("child",))),
+    ],
+)
+def test_semantic_invalid_result_retains_typescript_projection(
+    fixture: str,
+    layers: tuple[tuple[str, ...], ...],
+) -> None:
+    document = load_fixture(fixture)
+    result = try_compile_graph(document)
+
+    assert not result.valid
+    assert result.graph is None
+    assert result.canonical_graph == canonical_json(document)
+    assert result.graph_hash == canonical_sha256(document)
+    assert result.entrypoints == tuple(document["entrypoints"])  # type: ignore[arg-type]
+    assert result.topological_layers == layers
+
+
+def test_cycle_result_retains_completed_acyclic_layers() -> None:
+    document = load_fixture("invalid-cycle.graph.json")
+    independent = json.loads(json.dumps(document["nodes"][0]))  # type: ignore[index]
+    independent["id"] = "independent"
+    document["nodes"].append(independent)  # type: ignore[union-attr]
+    document["entrypoints"].append("independent")  # type: ignore[union-attr]
+
+    result = try_compile_graph(document)
+
+    assert [item.code for item in result.diagnostics] == [DiagnosticCode.CYCLE]
+    assert result.topological_layers == (("independent",),)
 
 
 def test_policy_limits_produce_stable_diagnostics() -> None:
@@ -245,3 +301,24 @@ def test_compiling_a_model_instance_detaches_and_revalidates_nested_json() -> No
 
     assert result.graph is None
     assert [item.code for item in result.diagnostics] == [DiagnosticCode.INVALID_GRAPH]
+
+
+def test_tampered_exact_graph_model_is_rejected_without_hostile_access() -> None:
+    calls: list[str] = []
+
+    class Evil:
+        def __getattribute__(self, name: str) -> object:
+            if name.startswith("__"):
+                calls.append(name)
+                raise RuntimeError("SECRET_GRAPH_ATTR")
+            return object.__getattribute__(self, name)
+
+    graph = GraphSpec.model_validate(load_fixture("diamond.graph.json"))
+    object.__setattr__(graph.nodes[0], "config", Evil())
+
+    result = try_compile_graph(graph)
+
+    assert calls == []
+    assert result.graph is None
+    assert [item.code for item in result.diagnostics] == [DiagnosticCode.INVALID_GRAPH]
+    assert "SECRET_GRAPH_ATTR" not in result.diagnostics[0].message

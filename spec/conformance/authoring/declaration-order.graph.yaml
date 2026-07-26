@@ -1,0 +1,33 @@
+apiVersion: graphengineering.reacher-z.github.io/v1alpha1
+kind: Graph
+metadata:
+  name: declaration-order
+  version: "1.0.0"
+inputSchema: {type: object}
+outputSchema: {type: object}
+entrypoints: [zeta, alpha]
+outputs:
+  result: {node: merge}
+nodes:
+  - id: zeta
+    kind: transform
+    inputSchema: {type: object}
+    outputSchema: {type: object}
+    config: {ordinal: 0}
+  - id: alpha
+    kind: transform
+    inputSchema: {type: object}
+    outputSchema: {type: object}
+    config: {ordinal: 1}
+  - id: merge
+    kind: barrier
+    inputSchema: {type: object}
+    outputSchema: {type: object}
+    config: {condition: all}
+edges:
+  - id: zeta-merge
+    from: {node: zeta}
+    to: {node: merge, port: zeta}
+  - id: alpha-merge
+    from: {node: alpha}
+    to: {node: merge, port: alpha}

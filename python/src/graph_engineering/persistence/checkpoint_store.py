@@ -17,7 +17,12 @@ from pydantic import Field, ValidationError, field_validator
 
 from .._json import JsonKeyCollisionError, normalize_json_strings
 from ..canonical import canonical_json, canonical_sha256
-from ..models import MAX_SAFE_INTEGER, JsonValue, StrictModel
+from ..models import (
+    MAX_SAFE_INTEGER,
+    JsonValue,
+    StrictModel,
+    capture_graph_model_document,
+)
 from .errors import (
     CorruptCheckpointError,
     PersistenceIOError,
@@ -247,7 +252,11 @@ class FileCheckpointStore:
             )
             temporary_path = Path(temporary_name)
             with os.fdopen(descriptor, "wb") as handle:
-                handle.write(f"{canonical_json(checkpoint)}\n".encode())
+                checkpoint_document = capture_graph_model_document(
+                    checkpoint,
+                    StoredCheckpoint,
+                )
+                handle.write(f"{canonical_json(checkpoint_document)}\n".encode())
                 handle.flush()
                 os.fsync(handle.fileno())
             os.replace(temporary_path, path)

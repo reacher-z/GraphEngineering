@@ -11,24 +11,29 @@ in this slice that writes.
 
 ```bash
 graph validate graph.json
+graph validate graph.yaml
 graph plan graph.json
 graph compile graph.json
+graph compile - --input-format yaml
 graph visualize graph.json
+graph visualize graph.yaml --input-format auto
 graph visualize graph.json --format dot
 graph doctor
 graph init my-graph
 graph init my-graph --dry-run
 ```
 
-`validate`, `plan`, `compile`, and `visualize` accept a JSON file or `-` for
-standard input. Add `--json` before or after the command operands for automation:
+`validate`, `plan`, `compile`, and `visualize` accept JSON or safe YAML files and
+`-` for standard input. Add `--json` before or after the command operands for
+automation:
 
 ```bash
 graph --json validate graph.json
 graph plan graph.json --json
 graph compile graph.json --json
+graph compile graph.yaml --input-format yaml --json
 graph visualize graph.json --json
-graph visualize - --format dot --json
+graph visualize - --input-format yaml --format dot --json
 graph doctor --json
 graph init my-graph --json
 graph init my-graph --dry-run --json
@@ -42,7 +47,7 @@ graph init my-graph --dry-run --json
   JSON mode includes `canonicalGraph`. Both `canonicalGraph` and `graphHash` are
   returned unchanged from `@graph-engineering/core`; this package contains no
   second compiler or hashing implementation.
-- `visualize <graph.json|->` first runs the canonical core compiler and renders
+- `visualize <graph.json|graph.yaml|->` first runs the canonical core compiler and renders
   only a valid Graph IR. Mermaid flowchart text is the default; `--format dot`
   emits Graphviz DOT. Human mode writes only the diagram to stdout. It performs
   no node execution, configuration discovery, network access, or writes.
@@ -55,6 +60,34 @@ graph init my-graph --dry-run --json
   repository quickstart and is validated by the canonical core compiler before
   any write. The directory defaults to `.`. `--dry-run` performs all safety
   checks and reports planned output without creating a directory or file.
+
+## JSON and safe YAML input
+
+Input selection and visualization output are independent:
+
+- `--input-format json|yaml|auto` chooses the Graph IR source decoder. `auto` is
+  the default.
+- In `auto`, `.json` uses JSON and `.yaml`/`.yml` uses YAML. Extension matching
+  is case-insensitive. An unknown or absent extension fails closed; use an
+  explicit `json` or `yaml` override when that filename is intentional.
+- Standard input (`-`) in `auto` is always JSON. The CLI never sniffs content;
+  YAML on stdin requires `--input-format yaml`.
+- `visualize --format mermaid|dot` chooses diagram output only. It never changes
+  source decoding, and it can be combined with `--input-format`.
+
+The CLI reads raw bytes and delegates decoding to the canonical
+`@graph-engineering/core` source decoder. UTF-8 is fatal rather than replacing
+bad bytes. YAML is limited to one JSON-compatible YAML 1.2 document and rejects
+duplicate keys, anchors, aliases, merge keys, tags, directives, non-string keys,
+non-finite or unsafe numbers, excessive size/depth/node counts, parser recovery,
+and other non-JSON values. The CLI has no second YAML parser or safety policy.
+
+Source decoding and Graph IR compilation are distinct gates. An unreadable,
+malformed, unsafe, or ambiguous-format source exits `2`; a successfully decoded
+document rejected by the canonical compiler exits `1` with compiler
+diagnostics. Both JSON and YAML produce the same detached Graph IR snapshot
+before compilation, so equivalent documents have the same canonical graph and
+hash.
 
 ## Safe initialization boundary
 
@@ -92,10 +125,19 @@ A successful visualization has exactly these command data fields:
 {"graphHash":"…","format":"mermaid","content":"flowchart TD\n…\n","nodeCount":4,"edgeCount":4}
 ```
 
-Command results live in `data`. Usage, read, and JSON parsing failures set
-`data` to `null` and return a stable `{code, message}` in `error`. Invalid Graph
-IR and unhealthy doctor reports remain structured command results, so their
-diagnostics/checks are in `data` and `error` is `null`.
+Command results live in `data`. Usage and read failures set `data` to `null` and
+return a stable `{code, message}` in `error`. Source decoder failures additionally
+return `format`, JSON Pointer `path`, and 1-based `line`/`column`; unavailable
+locations are `null`. Source-decoder errors do not include source text, parser
+stacks, or an absolute user path; read errors retain the requested path. Invalid
+Graph IR and unhealthy doctor reports remain structured command results, so
+their diagnostics/checks are in `data` and `error` is `null`.
+
+For example, malformed YAML returns one machine envelope and exit `2`:
+
+```json
+{"schemaVersion":"graph-engineering.cli/v1alpha1","command":"validate","ok":false,"exitCode":2,"data":null,"error":{"code":"GE_SOURCE_DUPLICATE_KEY","message":"YAML mapping keys must be unique","format":"yaml","path":"#/kind","line":2,"column":1}}
+```
 
 Without `--json`, successful summaries or diagram text are written to stdout.
 Usage/input errors and invalid-graph diagnostics are written to stderr. `doctor`
@@ -110,12 +152,13 @@ controls—as visible `\u{NNNN}` text. Machine mode retains normal JSON escaping
 | ---: | --- |
 | `0` | Command succeeded, or `doctor` is healthy |
 | `1` | Graph IR is invalid |
-| `2` | Usage/input error, invalid JSON, or refused/failed safe initialization |
+| `2` | Usage/read/source error, ambiguous input format, or refused/failed safe initialization |
 | `3` | `doctor` found an unhealthy local installation |
 | `70` | Unexpected internal error |
 
-Graph hashing, canonical serialization, semantic diagnostics, reachability,
-policy checks, and topological layers are owned by `@graph-engineering/core`.
+JSON/safe-YAML decoding, Graph hashing, canonical serialization, semantic
+diagnostics, reachability, policy checks, and topological layers are owned by
+`@graph-engineering/core`.
 The public JavaScript API intentionally exposes validation/planning adapters but
 does not re-export `compileGraph`.
 

@@ -240,3 +240,145 @@ class GraphSpec(StrictModel):
         from .canonical import canonical_sha256
 
         return canonical_sha256(self)
+
+
+class GraphModelSnapshotError(TypeError):
+    """Raised when an untrusted exact model cannot be captured without dispatch."""
+
+
+_CAPTURABLE_GRAPH_MODELS: tuple[type[BaseModel], ...] = (
+    Metadata,
+    Endpoint,
+    RetryPolicy,
+    NodeSpec,
+    EdgeSpec,
+    GraphPolicies,
+    GraphSpec,
+)
+
+
+def _matches_trusted_default(value: object, default: object) -> bool:
+    """Compare exact built-in defaults without caller-controlled equality."""
+
+    if value is None or type(value) in (str, bool, int, float):
+        return type(value) is type(default) and value == default
+    if type(value) is list and type(default) is list:
+        return len(value) == len(default) and all(
+            _matches_trusted_default(left, right)
+            for left, right in zip(value, default, strict=True)
+        )
+    if type(value) is dict and type(default) is dict:
+        if any(type(key) is not str for key in value) or set(value) != set(default):
+            return False
+        return all(
+            _matches_trusted_default(value[key], default[key]) for key in value
+        )
+    return False
+
+
+def _capture_graph_model_value(value: object, ancestors: set[int]) -> object:
+    value_type = type(value)
+    if (
+        value is None
+        or value_type is str
+        or value_type is bool
+        or value_type is int
+        or value_type is float
+    ):
+        return value
+
+    if value_type is list:
+        sequence = cast(list[object], value)
+        identity = id(value)
+        if identity in ancestors:
+            raise GraphModelSnapshotError("graph model contains a cycle")
+        ancestors.add(identity)
+        try:
+            return [_capture_graph_model_value(item, ancestors) for item in sequence]
+        finally:
+            ancestors.remove(identity)
+
+    if value_type is dict:
+        mapping = cast(dict[object, object], value)
+        identity = id(value)
+        if identity in ancestors:
+            raise GraphModelSnapshotError("graph model contains a cycle")
+        ancestors.add(identity)
+        try:
+            captured: dict[object, object] = {}
+            for key, item in mapping.items():
+                if type(key) is not str:
+                    raise GraphModelSnapshotError("graph model object key is not a string")
+                captured[key] = _capture_graph_model_value(item, ancestors)
+            return captured
+        finally:
+            ancestors.remove(identity)
+
+    for model_type in _CAPTURABLE_GRAPH_MODELS:
+        if value_type is model_type:
+            return _capture_exact_graph_model(cast(BaseModel, value), model_type, ancestors)
+
+    raise GraphModelSnapshotError("graph model contains an unsupported value")
+
+
+def _capture_exact_graph_model(
+    value: BaseModel,
+    model_type: type[BaseModel],
+    ancestors: set[int],
+) -> JsonObject:
+    identity = id(value)
+    if identity in ancestors:
+        raise GraphModelSnapshotError("graph model contains a cycle")
+    ancestors.add(identity)
+    try:
+        raw_fields = object.__getattribute__(value, "__dict__")
+        fields_set = object.__getattribute__(value, "__pydantic_fields_set__")
+        extras = object.__getattribute__(value, "__pydantic_extra__")
+        if type(raw_fields) is not dict or type(fields_set) is not set:
+            raise GraphModelSnapshotError("graph model storage is not sealed")
+        if extras is not None and type(extras) is not dict:
+            raise GraphModelSnapshotError("graph model extras are not sealed")
+        if any(type(key) is not str for key in raw_fields):
+            raise GraphModelSnapshotError("graph model storage key is not a string")
+        if any(type(marker) is not str for marker in fields_set):
+            raise GraphModelSnapshotError("graph model field marker is not a string")
+
+        document: JsonObject = {}
+        for field_name, field in model_type.model_fields.items():
+            if field_name not in raw_fields:
+                raise GraphModelSnapshotError("graph model field is missing")
+            if not field.is_required() and field_name not in fields_set:
+                # A different value with an absent fields-set marker proves the
+                # shallow-frozen model was mutated after validation. Compare
+                # only exact built-ins so a hostile nested value cannot run.
+                if not _matches_trusted_default(
+                    raw_fields[field_name],
+                    field.default,
+                ):
+                    raise GraphModelSnapshotError("graph model field markers are inconsistent")
+                continue
+            alias = field.alias or field_name
+            document[alias] = cast(
+                JsonValue,
+                _capture_graph_model_value(raw_fields[field_name], ancestors),
+            )
+
+        if extras is not None:
+            for key, item in extras.items():
+                if type(key) is not str or key in document:
+                    raise GraphModelSnapshotError("graph model extra field is invalid")
+                document[key] = cast(JsonValue, _capture_graph_model_value(item, ancestors))
+        return document
+    finally:
+        ancestors.remove(identity)
+
+
+def capture_graph_model_document(
+    value: object,
+    model_type: type[BaseModel],
+) -> JsonObject:
+    """Project one exact Graph IR model without invoking caller-controlled code."""
+
+    if type(value) is not model_type:
+        raise GraphModelSnapshotError("graph model type is not exact")
+    return _capture_exact_graph_model(value, model_type, set())

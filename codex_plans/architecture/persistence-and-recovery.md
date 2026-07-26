@@ -191,10 +191,11 @@ implemented yet.
 ## 5. Tagged Durable JSON and identity hashes
 
 The ordinary runtime accepts portable finite JSON, including non-integer
-binary64 values. Checkpoint-safe canonical JSON cannot rely on TypeScript and
-Python producing identical decimal spellings for every binary64 value. Tagged
-Durable JSON solves that transport problem without weakening the checkpoint
-number profile.
+binary64 values, and Graph IR now has a frozen cross-language decimal
+serialization for them. Checkpoint v1alpha1 nevertheless remains deliberately
+stricter and accepts only safe integers in its canonical state envelope.
+Tagged Durable JSON transports non-integer binary64 values by exact bits for
+durable runtime histories without weakening that checkpoint profile.
 
 | Runtime value | Tagged form |
 | --- | --- |

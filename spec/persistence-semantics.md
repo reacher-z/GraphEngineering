@@ -76,11 +76,12 @@ itself excluded:
 ```
 
 Objects are recursively sorted by Unicode code point, arrays preserve order,
-and serialization contains no insignificant whitespace. To guarantee identical
-hashes in JavaScript and Python without pretending to implement full RFC 8785,
-checkpoint state v1alpha1 allows only null, booleans, strings, arrays, objects,
-and integers in JavaScript's safe range (`-(2^53-1)` through `2^53-1`). Encode
-decimals as strings or explicitly scaled integers. A writer rejects other
+and serialization contains no insignificant whitespace. Checkpoint state
+v1alpha1 intentionally uses a stricter number domain than Graph IR: it allows
+only null, booleans, strings, arrays, objects, and integers in JavaScript's safe
+range (`-(2^53-1)` through `2^53-1`). Encode decimals as strings or explicitly
+scaled integers. Tagged Durable JSON separately preserves non-integer finite
+binary64 runtime values by their exact bits. A checkpoint writer rejects other
 numeric values with `PERSISTENCE_VALIDATION`; a reader treats them as
 `CORRUPT_CHECKPOINT`.
 

@@ -21,7 +21,15 @@ classifiers = [
   "Programming Language :: Python :: 3.13",
   "Typing :: Typed",
 ]
-dependencies = ["pydantic>=2.10,<3"]
+dependencies = [
+  "jsonschema>=4.25,<5",
+  "pydantic>=2.10,<3",
+  "ruamel.yaml>=0.18.16,<0.19",
+]
+
+[project.scripts]
+graph = "graph_engineering.cli:main"
+grapheng = "graph_engineering.cli:main"
 
 [project.optional-dependencies]
 dev = [

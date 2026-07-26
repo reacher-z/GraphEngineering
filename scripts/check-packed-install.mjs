@@ -56,6 +56,15 @@ const workspace = new Map(
 const versions = new Set([...workspace.values()].map(({ manifest }) => manifest.version));
 assert.equal(versions.size, 1, "public workspace packages must use one release version");
 const [releaseVersion] = versions;
+const authoringRoot = join(root, "spec", "conformance", "authoring");
+const authoringCases = JSON.parse(readFileSync(join(authoringRoot, "authoring.case.json"), "utf8"));
+const typedCase = authoringCases.equivalenceCases.find(({ name }) => name === "typed-port-diamond");
+assert.ok(typedCase, "shared typed-port authoring case is missing");
+const identityGolden = JSON.parse(
+  readFileSync(join(authoringRoot, authoringCases.identityGolden), "utf8"),
+).identities[typedCase.identityKey];
+assert.ok(identityGolden, "shared typed-port identity golden is missing");
+const sharedAuthoringYaml = readFileSync(join(authoringRoot, typedCase.yaml), "utf8");
 
 const temporaryRoot = mkdtempSync(join(tmpdir(), "graph-engineering-packed-install-"));
 const tarballRoot = join(temporaryRoot, "tarballs");
@@ -99,6 +108,8 @@ try {
     ["install", "--ignore-scripts", "--no-audit", "--no-fund", "--package-lock=false"],
     { cwd: consumerRoot },
   );
+  const installedGraphPath = join(consumerRoot, typedCase.yaml);
+  writeFileSync(installedGraphPath, sharedAuthoringYaml);
 
   for (const [name, { manifest: sourceManifest }] of workspace) {
     const installedPath = join(consumerRoot, "node_modules", ...name.split("/"), "package.json");
@@ -126,6 +137,61 @@ try {
   writeFileSync(
     smokePath,
     `${importSmoke}
+const core = await import("@graph-engineering/core");
+for (const name of [
+  "compileGraph",
+  "decodeGraphSource",
+  "graphBuilder",
+  "createCompiledGraphIdentity",
+  "verifyCompiledGraphIdentity",
+  "validateStrictTypedPorts",
+]) {
+  if (typeof core[name] !== "function") throw new Error(\`installed core omits \${name}\`);
+}
+const installedDecoded = core.decodeGraphSource(${JSON.stringify(sharedAuthoringYaml)}, {
+  format: "yaml",
+});
+const installedBuilder = core.graphBuilder({
+  metadata: installedDecoded.metadata,
+  inputSchema: installedDecoded.inputSchema,
+  outputSchema: installedDecoded.outputSchema,
+  ...(Object.hasOwn(installedDecoded, "stateSchema")
+    ? { stateSchema: installedDecoded.stateSchema }
+    : {}),
+  ...(Object.hasOwn(installedDecoded, "policies")
+    ? { policies: installedDecoded.policies }
+    : {}),
+});
+for (const node of installedDecoded.nodes) installedBuilder.addNode(node);
+for (const edge of installedDecoded.edges) installedBuilder.addEdge(edge);
+for (const entrypoint of installedDecoded.entrypoints) installedBuilder.addEntrypoint(entrypoint);
+for (const [name, endpoint] of Object.entries(installedDecoded.outputs)) {
+  installedBuilder.addOutput(name, endpoint);
+}
+const installedBuilt = installedBuilder.build();
+const installedCompiled = core.compileGraph(installedDecoded);
+if (
+  !installedCompiled.valid ||
+  installedCompiled.graphHash !== installedBuilt.graphHash ||
+  installedCompiled.graphHash !== ${JSON.stringify(typedCase.expect.graphHash)}
+) {
+  throw new Error("installed JSON/YAML compiler and builder hashes differ");
+}
+if (core.validateStrictTypedPorts(installedDecoded).length !== 0) {
+  throw new Error("installed strict typed-port validator rejected the packed smoke graph");
+}
+const installedIdentity = core.createCompiledGraphIdentity(installedDecoded);
+const installedVerification = core.verifyCompiledGraphIdentity(
+  installedDecoded,
+  installedIdentity,
+);
+if (
+  !installedVerification.valid ||
+  installedIdentity.revisionHash !== installedBuilt.identity.revisionHash ||
+  installedIdentity.revisionHash !== ${JSON.stringify(identityGolden.revisionHash)}
+) {
+  throw new Error("installed component identity APIs failed their packed smoke test");
+}
 const { runPipeline } = await import("@graph-engineering/runtime");
 if (typeof runPipeline !== "function") throw new Error("runtime package omits runPipeline");
 const pipelineRun = runPipeline([null], [], { maxItems: 2, maxStages: 1 });
@@ -154,6 +220,18 @@ if (!(await pipelineRun.next()).done || (await pipelineRun.completion).status !=
   const doctorResult = run(process.execPath, [cliPath, "doctor", "--json"], { cwd: consumerRoot });
   const doctor = JSON.parse(doctorResult.stdout);
   assert.equal(doctor.ok, true, "installed CLI doctor did not report healthy");
+  const compileResult = run(
+    process.execPath,
+    [cliPath, "compile", installedGraphPath, "--json"],
+    { cwd: consumerRoot },
+  );
+  const compiled = JSON.parse(compileResult.stdout);
+  assert.equal(compiled.ok, true, "installed CLI did not compile the shared YAML fixture");
+  assert.equal(
+    compiled.data.graphHash,
+    typedCase.expect.graphHash,
+    "installed CLI returned the wrong shared YAML graph hash",
+  );
 
   const mcpExecutable = join(
     consumerRoot,

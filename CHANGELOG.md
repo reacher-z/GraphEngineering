@@ -8,6 +8,16 @@ migration note.
 
 ### Added
 
+- Native strict JSON/safe-YAML authoring in TypeScript and Python, including
+  bounded parser work, deterministic source errors, duplicate-key protection,
+  and shared cross-language boundary fixtures.
+- Declaration-ordered builders, opt-in strict typed ports, and revision-1
+  compiled identities with frozen graph, node, edge, input/output/state schema,
+  and revision hashes.
+- A native Python `graph`/`grapheng` CLI matching the TypeScript command,
+  machine-envelope, exit-code, bounded-input, safe-init, and visualization
+  contracts without delegating to Node.js.
+
 - Event-sourced durable start and resume APIs in TypeScript and Python. Runs bind
   graph, original input, and caller-supplied implementation identity; node
   outcomes commit before releasing dependants; committed successes are reused

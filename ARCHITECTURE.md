@@ -15,7 +15,9 @@ The protocol in `spec/` defines serialization, stable diagnostics, events, and
 conformance fixtures. Native runtimes may use idiomatic APIs internally, but
 their observable behavior must agree on the shared corpus.
 
-General TypeScript/Python builders, YAML input, ArtifactStore/LockManager,
+The current authoring layer includes general TypeScript/Python builders, a
+bounded JSON-compatible YAML profile, opt-in strict-exact typed ports, and
+revision-1 component identities. ArtifactStore/LockManager,
 SQLite/PostgreSQL/S3, distributed workers, and telemetry exporters remain target
 surfaces. Local memory/JSONL events and file checkpoints exist today. Recovery
 currently rebuilds from the authoritative event history; checkpoint

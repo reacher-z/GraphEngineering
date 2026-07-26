@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from collections import Counter, deque
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
@@ -11,8 +12,8 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from ._json import normalize_json_strings
-from .models import EdgeSpec, GraphSpec, NodeSpec
+from .canonical import canonical_json
+from .models import EdgeSpec, GraphSpec, NodeSpec, capture_graph_model_document
 from .portable_json import portable_json_snapshot
 
 
@@ -29,6 +30,17 @@ class DiagnosticCode(StrEnum):
     ENTRYPOINT_HAS_INCOMING = "GE1010_ENTRYPOINT_HAS_INCOMING"
     MAX_FAN_OUT = "GE1101_MAX_FAN_OUT"
     MAX_DEPTH = "GE1102_MAX_DEPTH"
+    MISSING_SOURCE_PORT = "GE1201_MISSING_SOURCE_PORT"
+    MISSING_TARGET_PORT = "GE1202_MISSING_TARGET_PORT"
+    PORT_SCHEMA_MISMATCH = "GE1203_PORT_SCHEMA_MISMATCH"
+    DUPLICATE_TARGET_BINDING = "GE1204_DUPLICATE_TARGET_BINDING"
+    INVALID_PORT_SCHEMA = "GE1205_INVALID_PORT_SCHEMA"
+    OUTPUT_SCHEMA_MISMATCH = "GE1206_OUTPUT_SCHEMA_MISMATCH"
+    ENTRYPOINT_SCHEMA_MISMATCH = "GE1207_ENTRYPOINT_SCHEMA_MISMATCH"
+    UNSUPPORTED_TYPED_EDGE_MODE = "GE1208_UNSUPPORTED_TYPED_EDGE_MODE"
+    UNSUPPORTED_GRAPH_REVISION = "GE1301_UNSUPPORTED_GRAPH_REVISION"
+    GRAPH_IDENTITY_MISMATCH = "GE1302_GRAPH_IDENTITY_MISMATCH"
+    COMPONENT_IDENTITY_MISMATCH = "GE1303_COMPONENT_IDENTITY_MISMATCH"
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,11 +50,14 @@ class Diagnostic:
     node_id: str | None = None
     edge_id: str | None = None
     output_name: str | None = None
+    path: str | None = None
+    node_ids: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class CompiledGraph:
     spec: GraphSpec
+    canonical_graph: str
     graph_hash: str
     topological_layers: tuple[tuple[str, ...], ...]
     topological_order: tuple[str, ...]
@@ -55,6 +70,10 @@ class CompiledGraph:
 class CompilationResult:
     graph: CompiledGraph | None
     diagnostics: tuple[Diagnostic, ...]
+    canonical_graph: str | None = None
+    graph_hash: str | None = None
+    entrypoints: tuple[str, ...] = ()
+    topological_layers: tuple[tuple[str, ...], ...] = ()
 
     @property
     def valid(self) -> bool:
@@ -104,17 +123,27 @@ def try_compile_graph(graph: GraphSpec | Mapping[str, Any]) -> CompilationResult
     """Validate and compile a graph without raising for expected diagnostics."""
 
     try:
-        validated = (
-            graph
-            if isinstance(graph, GraphSpec)
-            else GraphSpec.model_validate(normalize_json_strings(graph))
-        )
-        document = validated.model_dump(mode="json", by_alias=True, exclude_unset=True)
-        graph = GraphSpec.model_validate(portable_json_snapshot(document))
+        document: object
+        if type(graph) is GraphSpec:
+            document = capture_graph_model_document(graph, GraphSpec)
+        elif type(graph) is dict:
+            document = portable_json_snapshot(graph)
+        else:
+            return _unsafe_input_result()
+        validated = GraphSpec.model_validate(portable_json_snapshot(document))
+        graph_document = portable_json_snapshot(capture_graph_model_document(validated, GraphSpec))
+        graph = GraphSpec.model_validate(graph_document)
     except ValidationError as exc:
         return _invalid_result(exc)
     except Exception:
         return _unsafe_input_result()
+
+    try:
+        canonical_graph = canonical_json(graph_document)
+        graph_hash = hashlib.sha256(canonical_graph.encode("utf-8")).hexdigest()
+    except Exception:
+        return _unsafe_input_result()
+    entrypoints = tuple(graph.entrypoints)
 
     diagnostics: list[Diagnostic] = []
     duplicate_nodes = _duplicate_values(node.id for node in graph.nodes)
@@ -181,7 +210,13 @@ def try_compile_graph(graph: GraphSpec | Mapping[str, Any]) -> CompilationResult
     # Duplicate identities or missing references make adjacency ambiguous. Avoid
     # cascading diagnostics whose meaning depends on a valid structural index.
     if diagnostics:
-        return CompilationResult(graph=None, diagnostics=tuple(diagnostics))
+        return CompilationResult(
+            graph=None,
+            diagnostics=tuple(diagnostics),
+            canonical_graph=canonical_graph,
+            graph_hash=graph_hash,
+            entrypoints=entrypoints,
+        )
 
     node_order = {node.id: index for index, node in enumerate(graph.nodes)}
     node_by_id = {node.id: node for node in graph.nodes}
@@ -219,6 +254,10 @@ def try_compile_graph(graph: GraphSpec | Mapping[str, Any]) -> CompilationResult
                     f"graph contains a cycle involving: {', '.join(cycle_nodes)}",
                 ),
             ),
+            canonical_graph=canonical_graph,
+            graph_hash=graph_hash,
+            entrypoints=entrypoints,
+            topological_layers=tuple(layers),
         )
 
     for entrypoint in graph.entrypoints:
@@ -275,8 +314,21 @@ def try_compile_graph(graph: GraphSpec | Mapping[str, Any]) -> CompilationResult
                     f"graph depth {depth} exceeds policy limit {graph.policies.max_depth}",
                 )
             )
+
+    # Import lazily because typed-port validation projects through this module's
+    # stable Diagnostic type.  The validator does not compile or mutate graphs.
+    from .typed_ports import validate_strict_typed_ports
+
+    diagnostics.extend(validate_strict_typed_ports(graph))
     if diagnostics:
-        return CompilationResult(graph=None, diagnostics=tuple(diagnostics))
+        return CompilationResult(
+            graph=None,
+            diagnostics=tuple(diagnostics),
+            canonical_graph=canonical_graph,
+            graph_hash=graph_hash,
+            entrypoints=entrypoints,
+            topological_layers=tuple(layers),
+        )
 
     incoming = MappingProxyType(
         {node_id: tuple(edges) for node_id, edges in incoming_lists.items()}
@@ -284,13 +336,9 @@ def try_compile_graph(graph: GraphSpec | Mapping[str, Any]) -> CompilationResult
     outgoing = MappingProxyType(
         {node_id: tuple(edges) for node_id, edges in outgoing_lists.items()}
     )
-    try:
-        graph_hash = graph.canonical_hash()
-    except Exception:
-        return _unsafe_input_result()
-
     compiled = CompiledGraph(
         spec=graph,
+        canonical_graph=canonical_graph,
         graph_hash=graph_hash,
         topological_layers=tuple(layers),
         topological_order=tuple(visited),
@@ -298,7 +346,14 @@ def try_compile_graph(graph: GraphSpec | Mapping[str, Any]) -> CompilationResult
         incoming=incoming,
         outgoing=outgoing,
     )
-    return CompilationResult(graph=compiled, diagnostics=())
+    return CompilationResult(
+        graph=compiled,
+        diagnostics=(),
+        canonical_graph=canonical_graph,
+        graph_hash=graph_hash,
+        entrypoints=entrypoints,
+        topological_layers=tuple(layers),
+    )
 
 
 def compile_graph(graph: GraphSpec | Mapping[str, Any]) -> CompiledGraph:

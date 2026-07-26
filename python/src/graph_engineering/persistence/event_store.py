@@ -13,7 +13,7 @@ from pydantic import ValidationError
 
 from ..canonical import canonical_json
 from ..events import GraphEvent
-from ..models import MAX_SAFE_INTEGER
+from ..models import MAX_SAFE_INTEGER, capture_graph_model_document
 from .errors import (
     CorruptEventLogError,
     PersistenceIOError,
@@ -67,7 +67,7 @@ def _validate_append(
     next_sequence = actual_version + 1
     issues: list[ValidationIssue] = []
     for index, event in enumerate(events):
-        if not isinstance(event, GraphEvent):
+        if type(event) is not GraphEvent:
             issues.append(
                 ValidationIssue(f"#/events/{index}", "expected a validated GraphEvent")
             )
@@ -232,7 +232,10 @@ class JsonlEventStore:
         if not events:
             return actual_version
 
-        payload = "".join(f"{canonical_json(event)}\n" for event in events).encode("utf-8")
+        payload = "".join(
+            f"{canonical_json(capture_graph_model_document(event, GraphEvent))}\n"
+            for event in events
+        ).encode("utf-8")
         created = not path.exists()
         try:
             descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)

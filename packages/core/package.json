@@ -35,6 +35,10 @@
     "lint": "tsc -p tsconfig.json --noEmit",
     "prepack": "npm run build"
   },
+  "dependencies": {
+    "ajv": "^8.20.0",
+    "yaml": "^2.9.0"
+  },
   "devDependencies": {
     "@types/node": "^22.0.0",
     "typescript": "^5.8.0",

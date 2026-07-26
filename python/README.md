@@ -15,6 +15,65 @@ uv sync --extra dev
 uv run pytest
 ```
 
+## Native Python CLI
+
+Installing the Python distribution provides both `graph` and the compatibility
+alias `grapheng`. They are the same native Python entry point: neither command
+starts Node.js, delegates to the TypeScript CLI, executes graph nodes, nor calls
+a model or provider.
+
+```bash
+graph validate graph.json
+graph plan graph.yaml
+graph compile - --input-format yaml --json
+graph visualize graph.json --format mermaid
+graph doctor --json
+graph init my-graph --dry-run
+```
+
+`validate`, `plan`, `compile`, and `visualize` accept strict JSON or the safe
+YAML profile described below. `auto` is the default input format: `.json`,
+`.yaml`, and `.yml` select their corresponding decoder, case-insensitively. An
+unknown or absent file extension fails closed. Standard input (`-`) is always
+JSON in `auto`; YAML on stdin requires `--input-format yaml`. Format selection
+happens before a file is opened. File and stdin reads stop at the source
+decoder's 1 MiB ceiling plus one sentinel byte, so the CLI never buffers an
+unbounded source before validation.
+
+`plan` reports compiler-owned topological layers and concurrency without
+executing nodes. `compile` returns the canonical Graph IR and SHA-256 in JSON
+mode, while its human output stays concise. `visualize` renders deterministic,
+read-only Mermaid or Graphviz DOT using generated syntax identifiers and
+numeric escaping for caller-controlled label characters. `doctor` performs
+only bounded local Python/package/fixture checks. `init` exclusively creates
+`graph.json` from the package-owned quickstart template in a new or existing
+empty non-symlink directory; it has no force or overwrite mode.
+
+Add `--json` to any command for automation. Machine mode writes exactly one
+newline-terminated JSON document to stdout and nothing to stderr:
+
+```json
+{"schemaVersion":"graph-engineering.cli/v1alpha1","command":"validate","ok":true,"exitCode":0,"data":{"file":"graph.json","valid":true,"graphName":"example","graphHash":"…","diagnosticCodes":[],"diagnostics":[]},"error":null}
+```
+
+The envelope version, command result shapes, source-error projection, and exit
+codes match the TypeScript CLI. Invalid Graph IR is command data with
+`error: null`; usage, read, and source failures set `data: null` and return a
+stable error object. Source errors include `format`, JSON Pointer `path`, and
+one-based `line`/`column` when available, without source contents or parser
+stacks. Human output renders C0/C1, escape, line-break, bidirectional, and lone
+surrogate controls as visible `\u{NNNN}` text.
+
+| Exit | Meaning |
+| ---: | --- |
+| `0` | command success or healthy doctor |
+| `1` | decoded Graph IR rejected by the canonical compiler |
+| `2` | usage, read, source, format, or safe-init failure |
+| `3` | doctor found an unhealthy local installation |
+| `70` | unexpected internal failure |
+
+## Runtime SDK quick start
+
 ```python
 import asyncio
 import json
@@ -44,6 +103,115 @@ Every handler receives only explicit graph input, incoming edge values, and a
 read-only snapshot of completed values. A failure is returned as a typed
 `NodeFailure`; independent siblings finish, while descendants are marked
 `UPSTREAM_FAILED`.
+
+## Safe authoring, builders, and revision-1 identity
+
+`parse_graph_source` accepts explicit `json` or `yaml` input and returns only a
+detached portable JSON value. It does not infer a format or silently repair a
+graph; pass its result to `compile_graph` for the one canonical validation and
+hashing path.
+
+```python
+from graph_engineering import compile_graph, parse_graph_source
+
+document = parse_graph_source(
+    b"""
+    apiVersion: graphengineering.reacher-z.github.io/v1alpha1
+    kind: Graph
+    metadata: {name: one-node, version: 1.0.0}
+    inputSchema: {type: object}
+    outputSchema: {type: object}
+    entrypoints: [root]
+    outputs: {result: {node: root}}
+    nodes:
+      - id: root
+        kind: transform
+        inputSchema: {type: object}
+        outputSchema: {type: object}
+        config: null
+    edges: []
+    """,
+    format="yaml",
+)
+compiled = compile_graph(document)
+```
+
+The YAML v1alpha1 profile is one YAML 1.2 document using only JSON-compatible
+mappings, sequences, strings, finite numbers, booleans, and null. It rejects
+duplicate keys, directives, tags, anchors, aliases, merge keys, timestamps,
+complex keys, non-finite or unsafe numbers, multiple documents, invalid UTF-8,
+and sources above 1 MiB, 100 nesting levels, or 100,000 scalar/collection AST
+nodes (including mapping-key scalars). `SourceLimits` can lower but never raise
+those ceilings. Empty, comment-only, or explicit-end-only YAML decodes to
+`None` as one implicit null document; the compiler then reports
+`GE1007_INVALID_GRAPH`. Plain YAML
+supports decimal, `0o` octal, `0x` hexadecimal, and finite float/exponent
+forms; numeric underscores, `0b` tokens, and signed octal/hex tokens remain
+strings. `GraphSourceError.to_dict()` exposes
+the stable `code`, `format`, redacted `message`, `path`, `line`, and `column`
+projection without embedding source contents.
+
+The cross-parser profile also fails closed on three host-specific ambiguities:
+quoted continuations nested in a block collection must remain indented; a plain
+key inside a flow collection requires whitespace after its `:` (`{a:[]}` is
+rejected while `{"a":[]}` is valid); and comments after quoted or flow values
+require separation (`"x"#c` is rejected while `"x" #c` is valid). A `#`
+without preceding whitespace inside an ordinary plain scalar remains data.
+
+Use `graph_builder` when authoring in Python. Every constructor and `add_*`
+boundary immediately snapshots its input; node and edge declaration order is
+preserved, and roots, public outputs, and IDs are never inferred.
+
+```python
+from graph_engineering import graph_builder
+
+built = (
+    graph_builder(
+        metadata={"name": "one-node", "version": "1.0.0"},
+        input_schema={"type": "object"},
+        output_schema={"type": "object"},
+    )
+    .add_node(
+        {
+            "id": "root",
+            "kind": "transform",
+            "inputSchema": {"type": "object"},
+            "outputSchema": {"type": "object"},
+            "config": None,
+        }
+    )
+    .add_entrypoint("root")
+    .add_output("result", {"node": "root"})
+    .build()
+)
+
+assert built.graph_hash == built.identity.graph_hash
+assert built.identity.graph_revision == 1
+```
+
+A successful build seals the builder. `built.graph` returns a fresh validated
+copy on every access, while canonical text, graph hash, domain-separated
+node/edge/schema hashes, and revision hash stay bound to the private snapshot.
+Duplicate authoring values and post-build writes raise `GraphBuilderError` with
+stable `GE_BUILDER_*` codes. Canonical compiler rejection retains every original
+diagnostic rather than returning a partial graph or `None`.
+
+Strict typed ports are opt-in through `enable_strict_typed_ports()`. The
+v1alpha1 profile meta-validates Draft 2020-12 schemas, accepts an absent
+`$schema` or the exact `https://json-schema.org/draft/2020-12/schema` dialect,
+rejects every `pattern`/`patternProperties` keyword at any depth, empty `enum`
+arrays, and all `$ref`/`$dynamicRef` uses without attempting resolution. Regex
+schemas require a later profile with one cross-language grammar. The current
+profile requires explicit required
+object properties at bindings (including valid boolean subschemas), and uses
+canonical-exact schema equality—there is no unproved widening or assignability.
+Compiler diagnostics are `GE1201` through `GE1208`. Initial identity verification
+uses `GE1301` through `GE1303` for unsupported revisions, graph hash mismatch,
+and component/order/schema mismatch. Portable JSON number normalization accepts
+an integral `graphRevision` value of `1.0` as revision 1, while booleans remain
+invalid. Revision 2+, `GraphPatch`, and runtime
+lowering for stream or artifact-ref edges are intentionally not implemented by
+this authoring slice.
 
 ## Bounded standalone pipelines
 
@@ -284,8 +452,10 @@ ordered by `(sequence, checkpointId)`.
 Checkpoint hash inputs intentionally permit only booleans, strings, null,
 containers, and integers in JavaScript's safe range `±(2^53-1)`. Floating-point
 or decimal values must be encoded as strings or application-defined scaled
-integers until the protocol adopts a cross-language number canonicalization
-standard.
+integers because checkpoint v1alpha1 deliberately retains this stricter number
+domain. Graph IR's cross-language finite-binary64 formatter does not widen the
+checkpoint schema; tagged Durable JSON separately preserves runtime doubles by
+their exact bits.
 
 These file stores coordinate store instances in one process and event loop by
 absolute storage path. They do not provide cross-process locks or distributed
@@ -354,5 +524,10 @@ a graph-wide attempt budget, named source/input/output port binding, and
 event-sourced durable continuation. Edge `map` and `condition`, runtime JSON
 Schema validation, streams, checkpoint acceleration, dynamic graph patches,
 distributed leases, non-idempotent recovery approval, and provider adapters
-remain follow-up work. Floating-point Graph IR canonicalization is not stable
-until the shared protocol adopts RFC 8785.
+remain follow-up work. Accepted non-integer finite binary64 Graph IR values now
+have stable TypeScript/Python bytes and hashes through ECMAScript's
+shortest-round-trip number serialization, including `-0` normalization and the
+`1e-6`/`1e21` fixed/scientific thresholds. The shared RFC 8785 Appendix B and
+seeded bit-pattern corpus tests this number rule, not full JCS: Graph IR keys
+continue to sort by Unicode code point. Tagged Durable JSON remains a separate
+exact-bit persistence protocol.

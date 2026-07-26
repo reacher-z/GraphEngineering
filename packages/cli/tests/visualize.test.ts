@@ -422,7 +422,7 @@ test("visualize missing input file exits two", () => {
 test("visualize invalid stdin JSON exits two", () => {
   const envelope = parseMachine(invoke(["visualize", "-", "--json"], "{bad json"));
   assert.equal(envelope.exitCode, 2);
-  assert.equal(envelope.error?.code, "GECLI_INPUT_JSON");
+  assert.equal(envelope.error?.code, "GE_SOURCE_SYNTAX");
 });
 
 test("invalid format is rejected before attempting to read the input", () => {
@@ -471,7 +471,10 @@ test("schema-invalid caller IDs are rejected before visualization", async () => 
 test("help documents visualize and its two formats", () => {
   const result = invoke(["--help"]);
   assert.equal(result.status, 0);
-  assert.match(result.stdout, /graph visualize <graph\.json\|-> \[--format mermaid\|dot\]/);
+  assert.match(
+    result.stdout,
+    /graph visualize <graph\.json\|graph\.yaml\|-> \[--input-format json\|yaml\|auto\] \[--format mermaid\|dot\]/,
+  );
   assert.match(result.stdout, /read-only Mermaid \(default\) or DOT/);
 });
 
