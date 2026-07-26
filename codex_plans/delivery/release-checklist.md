@@ -57,6 +57,18 @@ Independent go/no-go reviewer:
 Decision timestamp (UTC):
 ```
 
+### Control-plane checkpoint — not a release candidate
+
+Commit `105881fccab3d556b5b987e062cced9e645099b7` freezes the current
+178-leaf semantic task map and the fail-closed candidate-evidence protocol.
+An independent detached-worktree review is recorded in
+`codex_logs/reviews/CTRL-CONTROL-COMMIT-105881f-immutable-2026-07-26.md`.
+The canonical evidence overlay intentionally contains no candidate: selected
+tasks are `0`, release weight is `0/93`, and historical registry status has
+weight `0`. This checkpoint completes control infrastructure only. It fills no
+candidate coordinate above, changes no release row from Open, and supplies no
+stable-v1 evidence.
+
 ## 3. Stable-v1 decision joins
 
 | Gate | Mandatory decision condition | Owner | Task ID | Status | Evidence slot |

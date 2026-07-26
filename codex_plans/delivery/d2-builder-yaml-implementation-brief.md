@@ -1,16 +1,32 @@
 # D2 通用 Builder、Safe YAML、Typed Port 与初始 Revision 施工简报
 
-- 状态：**Ready for contract freeze; implementation not started**
+- 状态：**Source milestone delivered in `dd8c0f7`; downstream runtime extensions remain open**
 - 日期：2026-07-26（America/Vancouver）
 - 对应任务：`D2-BUILDERS-YAML-020`
 - 权威计划：`codex_plans/Graph-Engineering-21-Day-Master-Plan.md`
 - 架构账本：`codex_plans/architecture/graph-ir-and-schema.md`
-- 审计基线：`HEAD=d4de336`，分支 `feat/pipeline-runtime`，dirty worktree
+- 历史审计基线：`HEAD=d4de336`，分支 `feat/pipeline-runtime`，dirty worktree
 - 本文作用：把 D2 剩余范围拆成可并行施工、可共享验收、不会过度宣称的契约。
 
-本文是在完整阅读 355 行主计划后，对当前 TypeScript、Python、Graph IR、
-CLI、共享 conformance 与发布控制做的只读审计。除本文外，本轮不修改实现、
-schema、fixture、registry 或日志。
+本文最初是在完整阅读 355 行主计划后，对当时 TypeScript、Python、Graph IR、
+CLI、共享 conformance 与发布控制做的只读施工审计。正文中的“当前”均指上述
+历史基线；下面的交付附记是后续不可变证据，不能反向扩大正文明确排除的范围。
+
+## 0. 交付附记 — 2026-07-26
+
+提交 `dd8c0f7a159a717fc4cd75a5c9b3d90451433a93` 完成了本文冻结的 D2
+source-authoring 范围：严格 JSON、受限 safe YAML、声明顺序 TS/Python builder、
+strict-exact typed ports、node/edge/schema/component/revision-1 identity，以及跨语言
+ECMAScript binary64 number rendering。相同提交还完成初始 native Python
+`graph`/`grapheng` CLI、wheel/sdist 与安装后 smoke。
+
+独立审查记录是
+`codex_logs/reviews/D2-Authoring-Canonical-Independent-2026-07-26.md`，结论为
+P0=0、P1=0；不可变复核记录是
+`codex_logs/release-evidence/d2-authoring-dd8c0f7.json`。GraphPatch/revision 2+、
+runtime value validation、一般 JSON Schema assignability、state reducers、subgraph、
+stream/artifact execution、budget/capability enforcement 仍由后续任务负责，不因本
+里程碑交付而变成已实现。
 
 ## 1. 结论与 P0 顺序
 

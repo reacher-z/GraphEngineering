@@ -42,8 +42,8 @@ heartbeats are not implementation proof by themselves.
 | Day | State | Evidence already present | Work still required for the plan | Registry control |
 |---|---|---|---|---|
 | 1 — contracts, ownership, governance | Partial | Public MIT repository, governance files, CI, protected `main`, canonical Graph IR/event schemas, logs, timer-backed scanner | Finish every listed planning/architecture/growth document; make completion evidence machine-verifiable; correct historical over-broad task titles | `CTRL-PLAN-COVERAGE-001`, `CTRL-EVIDENCE-002` |
-| 2 — builders and canonical IR | Partial | TS/Python schema models, portable canonical JSON and shared hashes | General TS builder API, Python builder API, YAML loader, revision/content hashes for node/edge/schema, port/schema compatibility, concurrent-state/budget/capability validation | `D2-BUILDERS-YAML-020` |
-| 3 — diagnostics and CLI | Partial | Shared invalid graph fixtures; TS `init`, `validate`, `compile`, `plan`, `doctor`; Quickstart | Python CLI and compatibility alias, exhaustive stable diagnostics, complete machine envelopes and exit-code reference | `D3-PY-CLI-021`, `D14-API-FREEZE-050` |
+| 2 — builders and canonical IR | Partial; D2 authoring milestone delivered | Commit `dd8c0f7`: strict JSON/bounded safe YAML, declaration-ordered TS/Python builders, strict typed ports, node/edge/schema identity, initial component/revision identity, shared hashes and hostile cross-language source corpus | GraphPatch/revision 2+, general schema assignability/runtime value validation, state reducers, subgraphs, executable stream/artifact edges, and later budget/capability enforcement remain in their downstream controls | `D2-BUILDERS-YAML-020` delivered at source milestone; downstream controls remain Open |
+| 3 — diagnostics and CLI | Partial; initial dual-language command surface delivered | Shared invalid graph fixtures; TS and native Python `init`, `validate`, `compile`, `plan`, `doctor`; `graph`/`grapheng` entry points; stable initial envelopes/exits; Quickstart | Freeze the complete public diagnostic/API surface and add runtime/provider/score/artifact/operational commands with installed cross-platform parity | `D3-PY-CLI-021` delivered at source milestone; `D9-OPS-CONTROL-085`, `D13-DX-051`, `D14-API-FREEZE-050`, `D18-COMPAT-BENCH-064` remain Open |
 | 4 — scheduler and trace view | Partial | Native deterministic DAG scheduler; chain/diamond parity; bounded ready queue | Trace viewer, nested subgraphs/namespaces, explicit state reducers, executable stream/artifact edges | `D4-TRACE-SUBGRAPH-022`, `D15-EXPLORER-060` |
 | 5 — pipeline, barrier, router | Partial; standalone pipeline delivered | Pure barrier/router evaluators; commit `3df201d` delivers bounded TS/Python pipelines, eight shared cases, hostile cleanup/configuration tests and full package gates | Scheduler-integrated deadline/quorum barriers, conditional edges, durable route replay/confidence escalation, stream-edge IR activation | `D7-PIPELINE-CONFORMANCE-013` Green; `D6-ROUTER-BARRIER-023` Open |
 | 6 — terminal semantics and quorum | Partial | Structured scheduler and pipeline failures; retry/timeout/cancellation; attempt budgets; upstream isolation | Every planned node/edge terminal state, quorum/abstention at runtime, human/unknown escalation, failure-injection matrix | `D6-ROUTER-BARRIER-023`, `D11-VERIFY-SPEC-040` |
@@ -61,13 +61,13 @@ heartbeats are not implementation proof by themselves.
 | 18 — compatibility and benchmark audit | Open | CI covers Node 20/22 and Python 3.11/3.12/3.13 on Linux | macOS/Windows, scale/resource tests, reproducible baselines, 100 randomized faults, education assets, support/incident readiness and no >10% unexplained regression | `D18-COMPAT-BENCH-064`, `D18-EDUCATION-ASSETS-083`, `D18-SUPPORT-READINESS-080`, `CTRL-ACCEPTANCE-070` |
 | 19 — RC freeze | Open | npm tarball and Python wheel/sdist local rehearsals exist | Clean install and upgrade matrix, migration guide, full docs link/code checks, P0/P1 zero, signed `1.0.0-rc.1` candidate | `D19-RC-065` |
 | 20 — provenance | Open/External | Source release and protected checks exist | Trusted npm/PyPI identity and rehearsal, checksums, SBOM, attestations and provenance verification; provenance does not self-authorize release | `D20-PROVENANCE-066` |
-| 21 — release and support | Open/External | Repository, alpha release, issues and Discussions are public | Map all 178 leaves, revalidate historical evidence against one candidate, run a fail-closed stable-vs-RC roll-up, then publish only the authorized channel with support and transparent metrics | `CTRL-RELEASE-MAP-074`, `CTRL-EVIDENCE-BACKFILL-075`, `CTRL-RELEASE-ROLLUP-086`, `D21-RELEASE-067`, `CTRL-GROWTH-072` |
+| 21 — release and support | Open/External; control protocol delivered | Repository, alpha release, issues and Discussions are public; immutable control commit `105881f` maps 178/178 leaves and verifies an empty fail-closed overlay at `0/93` release weight | Populate fresh exact evidence against one clean immutable candidate, run the stable-vs-RC roll-up, then publish only the authorized channel with provenance, support, authentic external evidence, and transparent metrics | `CTRL-RELEASE-MAP-074` and `CTRL-EVIDENCE-BACKFILL-075` delivered as infrastructure; `CTRL-RELEASE-ROLLUP-086`, `D21-RELEASE-067`, `CTRL-GROWTH-072` remain Open |
 
 ## Product-capability coverage
 
 | Capability family | Current evidence | Missing acceptance evidence | State |
 |---|---|---|---|
-| Graph IR and compiler | Shared schema, canonical hashes, DAG compile parity | Full node kinds, typed ports, YAML/builders, nested graphs, state conflicts, policy/budget/capability diagnostics | Partial |
+| Graph IR and compiler | Shared schema, canonical hashes, DAG compile parity, strict JSON/bounded safe YAML, TS/Python builders, strict typed ports and revision-1 identity | Dynamic GraphPatch/revision 2+, nested graphs, state reducers/conflicts, runtime schema validation and policy/budget/capability enforcement | Partial; D2 authoring source milestone Green |
 | DAG scheduling | Native ready-queue schedulers, deterministic diamond | 100-way and 1,000-node bounds, worker/distributed mode, full node-kind execution | Partial |
 | Pipeline | Commit `3df201d`: standalone bounded native APIs, eight shared behavioral cases, docs and full local package gates | Durable per-item semantics deliberately excluded; stream IR remains declarative | Green for standalone scope; broader Graph IR scope Open |
 | Barriers | Deterministic all/minimum/percentage settled evaluator | Durable wait, deadline, quorum, missing statistics in scheduler | Partial |
@@ -80,7 +80,7 @@ heartbeats are not implementation proof by themselves.
 | Providers/tools | Deterministic local executors, read-only MCP | All official adapters and shared conformance, rate/circuit/fallback behavior | Open |
 | Security/isolation | Honest boundary docs and supply-chain CI; the durable false-redaction signal is explicitly registered as a critical corrective task | Runtime enforcement, capabilities, approvals, truthful sink-before-write redaction, worktree/process/container providers | Open; `D9-REDACTION-039` blocks extension/release claims |
 | Observability | Event history and Mermaid/DOT output | OTel, live status, trace/critical path metrics, web Explorer/time travel | Open |
-| CLI/SDK DX | TS init/validate/compile/plan/doctor/visualize | Python CLI; remaining operational commands; scoring, badge, picker, artifacts, plugins | Partial |
+| CLI/SDK DX | TS and native Python init/validate/compile/plan/doctor, `graph`/`grapheng`, TS visualize, packed-install smoke | Remaining operational/provider commands; scoring, badge, picker, artifacts, plugins and complete installed OS/runtime parity | Partial; initial dual-language CLI milestone Green |
 | Education/patterns | Quickstarts and four TS constructors, two runnable examples | Ten complete cross-language pattern bundles and executable 14-step course | Partial |
 | Release/community | Public alpha, governance, issue templates, Discussions | Trusted packages/provenance, external evidence, launch site/assets and sustained support | Partial/External |
 
@@ -178,8 +178,9 @@ their work hidden inside broad aggregate tasks:
 
 Registry check at this checkpoint: 107 tasks, 107 unique IDs, zero dangling
 dependencies, zero cycles, and `updated_at` not older than any task timestamp.
-The scanner reports 6 of 77 evidence-required tasks satisfied; this is a scope
-and evidence checkpoint, not a stable-release claim.
+At this registry-expansion checkpoint the scanner reported 6 of 77
+evidence-required tasks satisfied. Later timer-backed scans supersede that
+historical count; neither liveness nor a higher count is a stable-release claim.
 
 ## Exit rule
 

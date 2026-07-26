@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-07-26T22:08:16Z",
+  "updated_at": "2026-07-26T22:23:16Z",
   "repository": ".",
   "scan_policy": {
     "warning_after_minutes": 60,
@@ -82,19 +82,23 @@
     },
     {
       "id": "D1-BRAND-001",
-      "title": "Restore GitHub remote and secure package identities",
+      "title": "Restore the public source remote and align source-package identities",
       "owner": "main",
       "status": "completed",
       "work_package": "WP12",
       "depends_on": [],
       "expected_artifacts": ["README.md", "package.json", "python/pyproject.toml"],
-      "expected_tests": ["registry availability and authenticated publication rehearsal"],
+      "expected_tests": ["public source remote and source-package metadata identity consistency"],
+      "test_evidence": [
+        {"requirement": "public source remote and source-package metadata identity consistency", "result": "passed", "recorded_at": "2026-07-26T22:23:16Z", "reference": "git remote -v and git ls-remote resolve https://github.com/reacher-z/GraphEngineering.git; root package repository and Python graph-engineering metadata agree with the public source identity"}
+      ],
+      "completion_evidence": ["README.md", "package.json", "python/pyproject.toml", "https://github.com/reacher-z/GraphEngineering", "commit:dd8c0f7a159a717fc4cd75a5c9b3d90451433a93"],
       "assigned_at": "2026-07-26T09:37:00Z",
       "started_at": "2026-07-26T09:37:00Z",
       "last_heartbeat": "2026-07-26T12:20:00Z",
       "risk": "medium",
       "blocker": null,
-      "next_action": "Maintain the public source release, protected main branch, community/security settings, and keep registry publication deferred until trusted publishing and package-specific gates are ready"
+      "next_action": "Maintain the public source identity; authenticated npm/PyPI rehearsal, trusted publishing, provenance, namespace ownership, and registry publication remain exclusively open under D20-PROVENANCE-066 and its release gates"
     },
     {
       "id": "D1-DOCS-001",
@@ -713,36 +717,51 @@
       "id": "D2-BUILDERS-YAML-020",
       "title": "General TypeScript/Python graph builders and YAML compiler parity",
       "owner": "TS + Python lanes; main owns fixtures",
-      "status": "in_progress",
+      "status": "completed",
       "work_package": "WP1-WP7",
       "depends_on": ["D1-SPEC-001"],
       "expected_artifacts": ["packages/core", "python/src/graph_engineering", "spec/conformance"],
       "expected_tests": ["builder hash parity", "YAML/JSON equivalence", "revision and typed-port diagnostics", "optional IR fields reject explicit null in both languages", "missing duplicate unreachable endpoint port and implicit-cycle compiler fixtures produce aligned verdicts and stable diagnostics", "canonical graph node edge and schema bytes and stable hashes match across TypeScript Python YAML and JSON"],
       "test_evidence": [
-        {"requirement": "optional IR fields reject explicit null in both languages", "result": "passed", "recorded_at": "2026-07-26T17:48:00Z", "reference": "4 shared GE1007 fixtures plus exhaustive Python matrix over 27 known optional fields; cross-language conformance passed for 12 graph fixtures"}
+        {"requirement": "optional IR fields reject explicit null in both languages", "result": "passed", "recorded_at": "2026-07-26T17:48:00Z", "reference": "4 shared GE1007 fixtures plus exhaustive Python matrix over 27 known optional fields; cross-language conformance passed for 12 graph fixtures"},
+        {"requirement": "builder hash parity", "result": "passed", "recorded_at": "2026-07-26T22:23:16Z", "reference": "dd8c0f7 clean detached worktree: shared four-authoring-path graph/component/revision identity join; codex_logs/release-evidence/d2-authoring-dd8c0f7-semantic-coverage.json"},
+        {"requirement": "YAML/JSON equivalence", "result": "passed", "recorded_at": "2026-07-26T22:23:16Z", "reference": "dd8c0f7: six valid four-report source cases, two frozen equivalence cases, and 77 strict JSON/safe-YAML rejection cases"},
+        {"requirement": "revision and typed-port diagnostics", "result": "passed", "recorded_at": "2026-07-26T22:23:16Z", "reference": "dd8c0f7: 13 shared typed-port diagnostics and 10 identity mutations passed in both native implementations"},
+        {"requirement": "optional IR fields reject explicit null in both languages", "result": "passed", "recorded_at": "2026-07-26T22:23:16Z", "reference": "dd8c0f7 shared explicit-null fixtures plus exhaustive Python optional-field matrix; supersedes the pre-candidate source record"},
+        {"requirement": "missing duplicate unreachable endpoint port and implicit-cycle compiler fixtures produce aligned verdicts and stable diagnostics", "result": "passed", "recorded_at": "2026-07-26T22:23:16Z", "reference": "dd8c0f7 clean-worktree conformance passed all 14 Graph IR fixtures and 13 typed-port diagnostic fixtures"},
+        {"requirement": "canonical graph node edge and schema bytes and stable hashes match across TypeScript Python YAML and JSON", "result": "passed", "recorded_at": "2026-07-26T22:23:16Z", "reference": "dd8c0f7 frozen graph bytes/hash, node/edge/schema hashes, component identity, and revision-1 hash matched across both languages and both source formats"}
       ],
+      "completion_evidence": ["commit:dd8c0f7a159a717fc4cd75a5c9b3d90451433a93", "tree:b8ad7cec59d901fa79e77de820460c3c21afaa2f", "codex_logs/release-evidence/d2-authoring-dd8c0f7.json", "codex_logs/release-evidence/d2-authoring-dd8c0f7-semantic-coverage.json", "codex_logs/reviews/D2-Authoring-Canonical-Independent-2026-07-26.md", "codex_logs/reviews/CTRL-CONTROL-COMMIT-105881f-immutable-2026-07-26.md"],
       "assigned_at": "2026-07-26T16:45:30Z",
       "started_at": "2026-07-26T17:15:00Z",
-      "last_heartbeat": "2026-07-26T20:30:06Z",
+      "last_heartbeat": "2026-07-26T22:23:16Z",
+      "completed_at": "2026-07-26T22:23:16Z",
       "risk": "high",
       "blocker": null,
-      "next_action": "Re-run full gates after the final YAML resource and parser-differential fixes, then bind package, artifact, conformance, and independent-review evidence to an immutable candidate"
+      "next_action": "Preserve the bounded D2 source-authoring contract at dd8c0f7; GraphPatch revision 2+, general schema assignability, runtime value validation, reducers, subgraphs, stream/artifact execution, budgets, and capabilities remain open in downstream tasks"
     },
     {
       "id": "D3-PY-CLI-021",
       "title": "Native Python CLI and cross-language command-envelope parity",
       "owner": "Python + platform lanes",
-      "status": "in_progress",
+      "status": "completed",
       "work_package": "WP7",
       "depends_on": ["D2-BUILDERS-YAML-020", "D3-CLI-002"],
       "expected_artifacts": ["python/src/graph_engineering", "python/pyproject.toml", "docs/CLI.md"],
       "expected_tests": ["init/validate/compile/plan/doctor parity", "graph and grapheng entry points", "stable exit codes"],
+      "test_evidence": [
+        {"requirement": "init/validate/compile/plan/doctor parity", "result": "passed", "recorded_at": "2026-07-26T22:23:16Z", "reference": "dd8c0f7 native Python CLI suite plus isolated installed wheel/sdist command smoke"},
+        {"requirement": "graph and grapheng entry points", "result": "passed", "recorded_at": "2026-07-26T22:23:16Z", "reference": "dd8c0f7 wheel and sdist metadata plus isolated installation entry-point checks"},
+        {"requirement": "stable exit codes", "result": "passed", "recorded_at": "2026-07-26T22:23:16Z", "reference": "dd8c0f7 native CLI machine-envelope and hostile-input tests; 1012 Python tests plus 2 subtests in clean revalidation"}
+      ],
+      "completion_evidence": ["commit:dd8c0f7a159a717fc4cd75a5c9b3d90451433a93", "tree:b8ad7cec59d901fa79e77de820460c3c21afaa2f", "codex_logs/release-evidence/d2-authoring-dd8c0f7.json", "codex_logs/reviews/D2-Authoring-Canonical-Independent-2026-07-26.md", "python/pyproject.toml", "docs/CLI.md"],
       "assigned_at": "2026-07-26T16:45:30Z",
       "started_at": "2026-07-26T19:45:00Z",
-      "last_heartbeat": "2026-07-26T20:30:06Z",
+      "last_heartbeat": "2026-07-26T22:23:16Z",
+      "completed_at": "2026-07-26T22:23:16Z",
       "risk": "medium",
       "blocker": null,
-      "next_action": "Complete the independent wheel/sdist console-entrypoint gate, then bind native CLI parity evidence to the D2 candidate"
+      "next_action": "Preserve the initial native CLI milestone; the complete runtime/provider/score/artifact/operational command surface and installed cross-platform parity remain open under D9-OPS-CONTROL-085, D13-DX-051, D14-API-FREEZE-050, and D18-COMPAT-BENCH-064"
     },
     {
       "id": "D4-TRACE-SUBGRAPH-022",
@@ -1600,7 +1619,7 @@
       "id": "CTRL-RELEASE-MAP-074",
       "title": "Machine-map every release-checklist leaf to live tasks",
       "owner": "integration lane (primary); independent QA review",
-      "status": "in_progress",
+      "status": "completed",
       "work_package": "WP11-WP12",
       "depends_on": ["CTRL-PLAN-COVERAGE-001"],
       "expected_artifacts": ["codex_plans/delivery/release-task-map.json", "scripts/check-release-task-map.mjs", "scripts/tests/release-task-map.test.mjs", "codex_logs/reviews/CTRL-RELEASE-MAP-074-semantic-independent-2026-07-26.md"],
@@ -1654,6 +1673,36 @@
           "result": "failed",
           "recorded_at": "2026-07-26T21:57:15Z",
           "reference": "Superseded: the recorded 34-test suite does not include the current partial-producer regressions"
+        },
+        {
+          "requirement": "all 178 release IDs map exactly once",
+          "result": "passed",
+          "recorded_at": "2026-07-26T22:23:16Z",
+          "reference": "immutable commit 105881f detached review: 178/178 exact unique canonical checklist leaves; 40/40 hostile tests"
+        },
+        {
+          "requirement": "blocking classification is explicit",
+          "result": "passed",
+          "recorded_at": "2026-07-26T22:23:16Z",
+          "reference": "immutable commit 105881f: 175 blocking and exactly REL-GR03/04/05 non-blocking; downgrade, upgrade, label, and policy mutations fail closed"
+        },
+        {
+          "requirement": "every mapped task exists",
+          "result": "passed",
+          "recorded_at": "2026-07-26T22:23:16Z",
+          "reference": "immutable commit 105881f: 107 registry tasks, 37 semantically complete blocking producers in the 94-task final roll-up closure, zero dangling dependency, acyclic graph"
+        },
+        {
+          "requirement": "duplicate dangling and cyclic mappings fail closed",
+          "result": "passed",
+          "recorded_at": "2026-07-26T22:23:16Z",
+          "reference": "immutable commit 105881f 40-test suite covers duplicate/dangling/retired tasks, cycles, forged tables, evidence-plan drift, roll-up bypass, and manifest mutations"
+        },
+        {
+          "requirement": "all 178 release IDs retain independently reviewed semantic whole-requirement bindings and fail on partial-producer substitutions",
+          "result": "passed",
+          "recorded_at": "2026-07-26T22:23:16Z",
+          "reference": "codex_logs/reviews/CTRL-RELEASE-MAP-074-semantic-independent-2026-07-26.md plus immutable 105881f partial-producer regressions for V1-02 X02 SC07 DOC16 and RC03"
         }
       ],
       "completion_evidence": [
@@ -1662,33 +1711,48 @@
         "scripts/tests/release-task-map.test.mjs",
         "codex_logs/reviews/CTRL-RELEASE-MAP-074-independent-2026-07-26.md",
         "codex_logs/reviews/CTRL-RELEASE-MAP-074-semantic-independent-2026-07-26.md",
+        "codex_logs/reviews/CTRL-CONTROL-COMMIT-105881f-immutable-2026-07-26.md",
+        "commit:105881fccab3d556b5b987e062cced9e645099b7",
+        "tree:13054dae3111c20d6ba481a97a316f1919deaf2d",
         ".github/workflows/ci.yml protocol check:release-map gate"
       ],
       "assigned_at": "2026-07-26T18:09:04Z",
       "started_at": "2026-07-26T20:39:45Z",
-      "last_heartbeat": "2026-07-26T22:08:16Z",
-      "completed_at": "2026-07-26T20:59:29Z",
+      "last_heartbeat": "2026-07-26T22:23:16Z",
+      "completed_at": "2026-07-26T22:23:16Z",
       "reopened_at": "2026-07-26T21:57:15Z",
       "risk": "critical",
       "blocker": null,
-      "next_action": "Bind the remediated semantic map, full hostile suite, and superseding independent review to a new immutable revision before restoring completed status; all 175 blocking release leaves remain Open"
+      "next_action": "Keep the 178-leaf semantic mapping fail closed as tasks evolve; this control completion does not close any leaf, and all 175 blocking release leaves remain Open until immutable candidate evidence exists"
     },
     {
       "id": "CTRL-EVIDENCE-BACKFILL-075",
-      "title": "Candidate revalidation overlay for historical completed tasks",
+      "title": "Fail-closed candidate revalidation overlay protocol",
       "owner": "integration lane (primary); independent release review",
-      "status": "in_progress",
+      "status": "completed",
       "work_package": "WP11-WP12",
       "depends_on": ["CTRL-EVIDENCE-002"],
-      "expected_artifacts": ["codex_logs/release-evidence/task-revalidation.json", "scripts/check-evidence-closure.mjs"],
-      "expected_tests": ["every release ancestor has candidate revision and digest", "commands environments and results are immutable", "reviewer and exclusions are present", "historical status without overlay contributes zero release weight"],
+      "expected_artifacts": ["codex_logs/release-evidence/task-revalidation.json", "codex_logs/release-evidence/README.md", "scripts/check-evidence-closure.mjs", "scripts/tests/evidence-closure.test.mjs", "codex_logs/reviews/CTRL-EVIDENCE-BACKFILL-075-independent-2026-07-26.md"],
+      "expected_tests": ["a selected candidate requires every release ancestor revision tree digest and exact task contract", "commands environments results artifacts and reports bind immutable candidate bytes", "reviewer independence and explicit exclusions are mandatory", "historical status and an empty overlay contribute zero release weight", "full overlay ancestry rejects deletion rewrite shallow replace and graft laundering", "append-only supersession rejects stale reclose branching cycles and reused evidence", "test and artifact coverage closes the exact expected contract without surplus or cross-requirement substitution", "Git path symlink blob size record count and structural envelope attacks fail closed"],
       "evidence_required": true,
+      "test_evidence": [
+        {"requirement": "a selected candidate requires every release ancestor revision tree digest and exact task contract", "result": "passed", "recorded_at": "2026-07-26T22:23:16Z", "reference": "immutable 105881f evidence-closure suite: dynamic 94-task roll-up closure with 93 required ancestors, candidate/tree/spec/source/task-contract digest checks"},
+        {"requirement": "commands environments results artifacts and reports bind immutable candidate bytes", "result": "passed", "recorded_at": "2026-07-26T22:23:16Z", "reference": "immutable 105881f: command argv/cwd/exit/time envelopes and candidate-blob artifact/command/review SHA-256 checks pass"},
+        {"requirement": "reviewer independence and explicit exclusions are mandatory", "result": "passed", "recorded_at": "2026-07-26T22:23:16Z", "reference": "immutable 105881f hostile tests reject producer-as-reviewer, omitted fallback/exclusions, reused paths, and byte-identical review reports"},
+        {"requirement": "historical status and an empty overlay contribute zero release weight", "result": "passed", "recorded_at": "2026-07-26T22:23:16Z", "reference": "canonical audit object at 105881f: candidates=[]; releaseWeight=0/93; historicalStatusWeight=0"},
+        {"requirement": "full overlay ancestry rejects deletion rewrite shallow replace and graft laundering", "result": "passed", "recorded_at": "2026-07-26T22:23:16Z", "reference": "immutable 105881f full-ancestry and CLI tests reject non-ancestor candidates, deleted records, shallow overlays, replace refs, and graft-style history substitution"},
+        {"requirement": "append-only supersession rejects stale reclose branching cycles and reused evidence", "result": "passed", "recorded_at": "2026-07-26T22:23:16Z", "reference": "immutable 105881f supersedes tests reject dangling/cyclic/branching links, latest failed/reopened state, stale timestamps, and reused command/review blobs"},
+        {"requirement": "test and artifact coverage closes the exact expected contract without surplus or cross-requirement substitution", "result": "passed", "recorded_at": "2026-07-26T22:23:16Z", "reference": "immutable 105881f coverage-digest tests reject missing/duplicate/forged requirements, dangling/duplicate/surplus indexes, cross-requirement artifacts, and failed commands"},
+        {"requirement": "Git path symlink blob size record count and structural envelope attacks fail closed", "result": "passed", "recorded_at": "2026-07-26T22:23:16Z", "reference": "immutable 105881f resource and parser tests reject traversal, wildcard ambiguity, symlinks, oversized blobs, record-count DoS, unknown fields, prototypes, and malformed command envelopes"}
+      ],
+      "completion_evidence": ["commit:105881fccab3d556b5b987e062cced9e645099b7", "tree:13054dae3111c20d6ba481a97a316f1919deaf2d", "codex_logs/release-evidence/task-revalidation.json", "codex_logs/release-evidence/README.md", "scripts/check-evidence-closure.mjs", "scripts/tests/evidence-closure.test.mjs", "codex_logs/reviews/CTRL-EVIDENCE-BACKFILL-075-independent-2026-07-26.md", "codex_logs/reviews/CTRL-CONTROL-COMMIT-105881f-immutable-2026-07-26.md"],
       "assigned_at": "2026-07-26T18:09:04Z",
       "started_at": "2026-07-26T21:01:49Z",
-      "last_heartbeat": "2026-07-26T21:01:49Z",
+      "last_heartbeat": "2026-07-26T22:23:16Z",
+      "completed_at": "2026-07-26T22:23:16Z",
       "risk": "critical",
       "blocker": null,
-      "next_action": "Implement an append-only overlay and fail-closed checker whose no-candidate state contributes zero release weight; do not bind the dirty worktree as a candidate"
+      "next_action": "Keep the canonical overlay empty until a clean immutable release candidate supplies fresh exact evidence for all 93 required ancestors; infrastructure completion alone contributes zero release weight"
     },
     {
       "id": "D17-USABILITY-076",

@@ -1,6 +1,6 @@
 # Graph Engineering: 21-Day Dual-Language Open-Source Platform Plan
 
-Status: **Approved and executing — source alpha 1 released; durable recovery and bounded pipeline delivered; D2 authoring and D9 redaction contracts in progress**
+Status: **Approved and executing — source alpha 1 released; durable recovery, bounded pipeline, D2 authoring, and the initial native Python CLI delivered; D7 cycle and D9 redaction contracts in progress**
 Started: **2026-07-26**
 Repository: <https://github.com/reacher-z/GraphEngineering> (public)
 Current release: <https://github.com/reacher-z/GraphEngineering/releases/tag/v0.1.0-alpha.1>
@@ -40,12 +40,12 @@ or weaken any later-day acceptance gate.
 
 | Plan area | State | Evidence / next gate |
 |---|---|---|
-| Day 1-4 foundations | Partial; current alpha slice green | Public source alpha, canonical IR/compiler, deterministic ready-queue schedulers, native TS/Python parity, a TypeScript CLI/read-only MCP, security checks, and package rehearsal are green. General builders/YAML, Python CLI, the trace viewer, and several planned control documents remain open. |
+| Day 1-4 foundations | Partial; current alpha slice green | Public source alpha, canonical IR/compiler, deterministic ready-queue schedulers, native TS/Python parity, read-only MCP, security checks, and package rehearsal are green. Commit `dd8c0f7` adds strict JSON/bounded safe YAML, declaration-ordered TS/Python builders, strict typed ports, initial component/revision identity, exact cross-language binary64 rendering, and the native Python `graph`/`grapheng` CLI. Trace/subgraph/reducer/artifact execution and later operational commands remain open. |
 | Day 5 barriers and routing primitives | Partial | Settled all/minimum/percentage barriers and deterministic single/multicast routing have shared pure-evaluator parity; scheduler-integrated waiting, deadlines/quorum, conditional edge execution, and durable route replay remain open. |
 | Day 5 pipeline/backpressure | Delivered for the standalone native scope | Commit `3df201d` provides lazy bounded TypeScript/Python pipelines, backpressure, ordered/completion delivery, stop/drop/dead-letter policies, cancellation/cleanup, a hard 2,048-stage construction bound, 8 shared cases, 115 TS runtime tests and 59 Python pipeline tests. Graph IR stream-edge lowering and durable item recovery remain separate open scope. |
 | Day 6 failure envelopes | Partially complete | Scheduler failures, retry/timeout/cancellation, upstream isolation, invalid input/output, and attempt budgets are structured; pipeline terminal/run failures are the active parity slice. |
 | Day 9 durable execution | Delivered for immutable local DAG scope | Commit-before-release event-sourced start/resume, exact tagged binary64 JSON, crash-window handling, terminal idempotence, and bidirectional terminal-history interop are in draft PR #14. Leases, checkpoint acceleration, replay/fork, approvals, and distributed stores remain explicit follow-ups. |
-| Release/growth | Active | Public repository and `v0.1.0-alpha.1` exist; protected main and CI/CodeQL are green. The controlled objective remains trustworthy activation/adoption; 6,000+ organic stars is a breakout OKR, not a manufactured or guaranteed result. |
+| Release/growth | Active; control plane delivered, candidate still absent | Public repository and `v0.1.0-alpha.1` exist; protected main and CI/CodeQL are green. Commit `105881f` freezes the 178/178 semantic release map and fail-closed evidence protocol, but the canonical overlay intentionally remains empty at `0/93` release weight and every blocking release row remains Open. The controlled objective remains trustworthy activation/adoption; 6,000+ organic stars is a breakout OKR, not a manufactured or guaranteed result. |
 
 Current critical path after the pipeline milestone is: bounded convergent cycles
 and their hard budgets; cost/model routing; verifier/judge/reflection semantics;
@@ -77,9 +77,12 @@ controls (`074`-`089`): independent TS/Python adapter and redaction lanes,
 approval authority, runtime chaos versus durable operations, privacy/usability,
 education/support readiness, canonical npm distribution, release-leaf mapping,
 candidate evidence backfill, and a final fail-closed release roll-up. The task
-graph is unique, has no dangling dependency and is acyclic. The scanner reports
-completed pipeline evidence as 6 of 77 required gates satisfied; every other
-planned or external outcome remains open.
+graph is unique, has no dangling dependency and is acyclic. At the
+registry-expansion checkpoint the scanner reported completed pipeline evidence
+as 6 of 77 required gates satisfied. That number is historical: the
+timer-backed live scan and immutable task evidence are authoritative as later
+milestones close. Planned and external outcomes remain open until their own
+evidence contracts pass.
 
 ## 2. Planning, logs, and agent operations
 

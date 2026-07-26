@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "evidence_kind": "task-source-semantic-coverage-supplement",
+  "recorded_at": "2026-07-26T22:17:19Z",
+  "task_id": "D2-BUILDERS-YAML-020",
+  "source_candidate": {
+    "revision": "dd8c0f7a159a717fc4cd75a5c9b3d90451433a93",
+    "tree": "b8ad7cec59d901fa79e77de820460c3c21afaa2f",
+    "base_revision": "582b78ba9c0db9eab698b18c9cebf12bf547627a"
+  },
+  "contract_revision": {
+    "revision": "105881fccab3d556b5b987e062cced9e645099b7",
+    "tree": "13054dae3111c20d6ba481a97a316f1919deaf2d"
+  },
+  "source_evidence": {
+    "path": "codex_logs/release-evidence/d2-authoring-dd8c0f7.json",
+    "sha256": "863e51a01dd02a8b54350a560e4731d8f832260a76f4c4ad35ff1cd5b0719bc6"
+  },
+  "requirements": [
+    {
+      "requirement": "builder hash parity",
+      "result": "passed",
+      "reference": "The clean detached dd8c0f7 worktree passed the shared four-authoring-path graph/component/revision identity join."
+    },
+    {
+      "requirement": "YAML/JSON equivalence",
+      "result": "passed",
+      "reference": "Six valid source cases and two frozen equivalence cases matched across JSON, YAML, TypeScript builder, and Python builder reports."
+    },
+    {
+      "requirement": "revision and typed-port diagnostics",
+      "result": "passed",
+      "reference": "Thirteen shared typed-port diagnostics and ten identity mutations passed in both native implementations."
+    },
+    {
+      "requirement": "optional IR fields reject explicit null in both languages",
+      "result": "passed",
+      "reference": "Shared explicit-null fixtures plus the exhaustive Python optional-field matrix passed."
+    },
+    {
+      "requirement": "missing duplicate unreachable endpoint port and implicit-cycle compiler fixtures produce aligned verdicts and stable diagnostics",
+      "result": "passed",
+      "reference": "The dd8c0f7 clean-worktree conformance run passed all 14 Graph IR fixtures and 13 typed-port diagnostic fixtures without delegated cross-language execution."
+    },
+    {
+      "requirement": "canonical graph node edge and schema bytes and stable hashes match across TypeScript Python YAML and JSON",
+      "result": "passed",
+      "reference": "Frozen canonical graph bytes, graph hash, node/edge/schema hashes, component identity, and revision-1 hash matched across both languages and both source formats."
+    }
+  ],
+  "reviews": [
+    {
+      "path": "codex_logs/reviews/D2-Authoring-Canonical-Independent-2026-07-26.md",
+      "sha256": "b32625342a58055d6c0a1e62ac6ed79a609d561e1da4a7cd1ca1229630d4999b",
+      "decision": "accepted-for-commit-and-integration",
+      "open_p0": 0,
+      "open_p1": 0
+    },
+    {
+      "path": "codex_logs/reviews/CTRL-RELEASE-MAP-074-semantic-independent-2026-07-26.md",
+      "sha256": "5ab30ffce5fd01462672e682e8f29386f0431c3ba5aa814b7261d05b5083c4a1",
+      "decision": "accepted-d2-as-the-whole-requirement-producer-for-six-bounded-source-leaves"
+    }
+  ],
+  "exclusions": [
+    "This supplement closes the expanded D2 source-authoring task contract only; it is not a final release-candidate overlay record.",
+    "GraphPatch revision 2+, runtime value validation, general schema assignability, reducers, subgraphs, and stream or artifact execution remain open downstream tasks.",
+    "Dynamic cycles, budgets, capabilities, provider execution, and registry publication are not claimed."
+  ]
+}
