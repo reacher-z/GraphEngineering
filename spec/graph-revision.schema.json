@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/graph-revision.schema.json",
+  "title": "Graph Engineering dynamic graph revision record",
+  "description": "Closed revision-chain record for revision 2 and later. Revision 1 is represented only by CompiledGraphIdentity v1alpha1.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["body", "revisionHash"],
+  "properties": {
+    "body": { "$ref": "#/$defs/body" },
+    "revisionHash": { "$ref": "#/$defs/hash" }
+  },
+  "$defs": {
+    "hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 2,
+      "maximum": 9007199254740991
+    },
+    "body": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "apiVersion",
+        "kind",
+        "graphRevision",
+        "previousRevisionHash",
+        "patchHash",
+        "graphHash"
+      ],
+      "properties": {
+        "apiVersion": {
+          "const": "graphengineering.reacher-z.github.io/graph-revisions/v1alpha1"
+        },
+        "kind": { "const": "GraphRevision" },
+        "graphRevision": { "$ref": "#/$defs/revision" },
+        "previousRevisionHash": { "$ref": "#/$defs/hash" },
+        "patchHash": { "$ref": "#/$defs/hash" },
+        "graphHash": { "$ref": "#/$defs/hash" }
+      }
+    },
+    "coordinate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["graphRevision", "graphHash", "revisionHash"],
+      "properties": {
+        "graphRevision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "graphHash": { "$ref": "#/$defs/hash" },
+        "revisionHash": { "$ref": "#/$defs/hash" }
+      }
+    }
+  }
+}

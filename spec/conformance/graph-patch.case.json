@@ -1,0 +1,291 @@
+{
+  "schemaVersion": 1,
+  "schema": "spec/graph-patch.schema.json",
+  "validCases": [
+    {
+      "name": "append-node",
+      "expectPatchHash": "ca6ba9762870a8b7f3de18607cd1f6db191bc3ecb473825516b3e26627a6ea07",
+      "document": {
+        "apiVersion": "graphengineering.reacher-z.github.io/patches/v1alpha1",
+        "kind": "GraphPatch",
+        "patchId": "round-2-node",
+        "base": {
+          "graphRevision": 1,
+          "graphHash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "revisionHash": "1111111111111111111111111111111111111111111111111111111111111111"
+        },
+        "append": {
+          "nodes": [
+            {
+              "id": "verify-2",
+              "kind": "validator",
+              "inputSchema": {},
+              "outputSchema": {},
+              "config": null,
+              "sideEffects": "none"
+            }
+          ],
+          "edges": [],
+          "outputs": {}
+        }
+      }
+    },
+    {
+      "name": "append-edge-and-output",
+      "expectPatchHash": "03c5ccd81f3bdae8ce8a25e8efde6bd9001b4d695d5cbd9b98af7a0ca1c13adb",
+      "document": {
+        "apiVersion": "graphengineering.reacher-z.github.io/patches/v1alpha1",
+        "kind": "GraphPatch",
+        "patchId": "round-2-wire",
+        "base": {
+          "graphRevision": 2,
+          "graphHash": "2222222222222222222222222222222222222222222222222222222222222222",
+          "revisionHash": "3333333333333333333333333333333333333333333333333333333333333333"
+        },
+        "append": {
+          "nodes": [],
+          "edges": [
+            {
+              "id": "finding-verify-2",
+              "from": {"node": "finding"},
+              "to": {"node": "verify-2", "port": "finding"},
+              "mode": "value"
+            }
+          ],
+          "outputs": {
+            "verification": {"node": "verify-2"}
+          }
+        }
+      }
+    }
+  ],
+  "invalidCases": [
+    {
+      "name": "empty-append",
+      "document": {
+        "apiVersion": "graphengineering.reacher-z.github.io/patches/v1alpha1",
+        "kind": "GraphPatch",
+        "patchId": "empty",
+        "base": {
+          "graphRevision": 1,
+          "graphHash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "revisionHash": "1111111111111111111111111111111111111111111111111111111111111111"
+        },
+        "append": {"nodes": [], "edges": [], "outputs": {}}
+      }
+    },
+    {
+      "name": "zero-base-revision",
+      "document": {
+        "apiVersion": "graphengineering.reacher-z.github.io/patches/v1alpha1",
+        "kind": "GraphPatch",
+        "patchId": "bad-revision",
+        "base": {
+          "graphRevision": 0,
+          "graphHash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "revisionHash": "1111111111111111111111111111111111111111111111111111111111111111"
+        },
+        "append": {
+          "nodes": [],
+          "edges": [],
+          "outputs": {"result": {"node": "done"}}
+        }
+      }
+    },
+    {
+      "name": "noncanonical-hash",
+      "document": {
+        "apiVersion": "graphengineering.reacher-z.github.io/patches/v1alpha1",
+        "kind": "GraphPatch",
+        "patchId": "bad-hash",
+        "base": {
+          "graphRevision": 1,
+          "graphHash": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "revisionHash": "1111111111111111111111111111111111111111111111111111111111111111"
+        },
+        "append": {
+          "nodes": [],
+          "edges": [],
+          "outputs": {"result": {"node": "done"}}
+        }
+      }
+    },
+    {
+      "name": "delete-operation",
+      "document": {
+        "apiVersion": "graphengineering.reacher-z.github.io/patches/v1alpha1",
+        "kind": "GraphPatch",
+        "patchId": "delete-node",
+        "base": {
+          "graphRevision": 1,
+          "graphHash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "revisionHash": "1111111111111111111111111111111111111111111111111111111111111111"
+        },
+        "append": {
+          "nodes": [],
+          "edges": [],
+          "outputs": {"result": {"node": "done"}}
+        },
+        "delete": {"nodes": ["done"]}
+      }
+    },
+    {
+      "name": "unknown-node-field",
+      "document": {
+        "apiVersion": "graphengineering.reacher-z.github.io/patches/v1alpha1",
+        "kind": "GraphPatch",
+        "patchId": "bad-node",
+        "base": {
+          "graphRevision": 1,
+          "graphHash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "revisionHash": "1111111111111111111111111111111111111111111111111111111111111111"
+        },
+        "append": {
+          "nodes": [
+            {
+              "id": "new-node",
+              "kind": "transform",
+              "inputSchema": {},
+              "outputSchema": {},
+              "config": {},
+              "authority": "all"
+            }
+          ],
+          "edges": [],
+          "outputs": {}
+        }
+      }
+    },
+    {
+      "name": "base-revision-cannot-overflow-next-revision",
+      "document": {
+        "apiVersion": "graphengineering.reacher-z.github.io/patches/v1alpha1",
+        "kind": "GraphPatch",
+        "patchId": "overflow-revision",
+        "base": {
+          "graphRevision": 9007199254740991,
+          "graphHash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "revisionHash": "1111111111111111111111111111111111111111111111111111111111111111"
+        },
+        "append": {
+          "nodes": [],
+          "edges": [],
+          "outputs": {"result": {"node": "done"}}
+        }
+      }
+    },
+    {
+      "name": "dry-run-is-not-a-hashable-document-field",
+      "document": {
+        "apiVersion": "graphengineering.reacher-z.github.io/patches/v1alpha1",
+        "kind": "GraphPatch",
+        "patchId": "embedded-dry-run",
+        "base": {
+          "graphRevision": 1,
+          "graphHash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "revisionHash": "1111111111111111111111111111111111111111111111111111111111111111"
+        },
+        "append": {
+          "nodes": [],
+          "edges": [],
+          "outputs": {"result": {"node": "done"}}
+        },
+        "dryRun": true
+      }
+    }
+  ],
+  "revisionHashCases": [
+    {
+      "name": "revision-two-binds-seed-patch-and-resulting-graph",
+      "domain": "graph-engineering/revision-chain/v1alpha1\u0000",
+      "body": {
+        "apiVersion": "graphengineering.reacher-z.github.io/graph-revisions/v1alpha1",
+        "kind": "GraphRevision",
+        "graphRevision": 2,
+        "previousRevisionHash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "patchHash": "ca6ba9762870a8b7f3de18607cd1f6db191bc3ecb473825516b3e26627a6ea07",
+        "graphHash": "2222222222222222222222222222222222222222222222222222222222222222"
+      },
+      "expectRevisionHash": "d3c8e14f571bb97a4fafca6d351886d50d93c1c1a5faeff72ff189789cbf48bc"
+    }
+  ],
+  "semanticCases": [
+    {
+      "name": "stale-base-is-not-rebased",
+      "baseGraph": "diamond.graph.json",
+      "mutation": "replace base.graphRevision with the prior revision",
+      "expectCode": "GE_PATCH_STALE_BASE"
+    },
+    {
+      "name": "existing-node-id-cannot-be-shadowed",
+      "baseGraph": "diamond.graph.json",
+      "mutation": "append a node whose id is split",
+      "expectCode": "GE_PATCH_DUPLICATE_ID"
+    },
+    {
+      "name": "back-edge-remains-an-ordinary-cycle",
+      "baseGraph": "diamond.graph.json",
+      "mutation": "append an edge from merge to split",
+      "expectCode": "GE_PATCH_GRAPH_INVALID"
+    },
+    {
+      "name": "capability-expansion-fails-closed",
+      "baseGraph": "diamond.graph.json",
+      "mutation": "append a node requesting an unavailable network capability",
+      "expectCode": "GE_PATCH_AUTHORITY_EXPANSION"
+    },
+    {
+      "name": "incoming-edge-to-existing-pending-node-is-forbidden",
+      "baseGraph": "diamond.graph.json",
+      "mutation": "append an edge targeting the existing pending node merge",
+      "expectCode": "GE_PATCH_STATE_CONFLICT"
+    },
+    {
+      "name": "unsupported-stream-edge-fails-before-scheduling",
+      "baseGraph": "diamond.graph.json",
+      "mutation": "append a stream edge when stream execution is unavailable",
+      "expectCode": "GE_PATCH_UNSUPPORTED"
+    },
+    {
+      "name": "exact-accepted-retry-precedes-stale-base",
+      "operation": "apply one accepted patch, advance the current revision, then retry its exact canonical bytes",
+      "expectOutcome": "return-recorded-acceptance",
+      "expectSchedulerMutations": 0
+    },
+    {
+      "name": "exact-rejected-retry-is-idempotent",
+      "operation": "retry exact canonical bytes for a durably rejected patchId after policy changes",
+      "expectOutcome": "return-recorded-rejection",
+      "expectSchedulerMutations": 0
+    },
+    {
+      "name": "decided-id-with-different-bytes-conflicts",
+      "operation": "reuse a decided patchId with one changed append value",
+      "expectCode": "GE_PATCH_IDEMPOTENCY_CONFLICT"
+    },
+    {
+      "name": "stale-base-race-has-one-winner",
+      "operation": "concurrently apply two distinct patchIds against the same current base",
+      "expectAccepted": 1,
+      "expectRejectedCode": "GE_PATCH_STALE_BASE"
+    },
+    {
+      "name": "dry-run-does-not-reserve-id-budget-or-cache-authority",
+      "operation": "dry-run, change authority and budget, then perform a real apply",
+      "expectRealApply": "repeat-all-gates",
+      "expectDryRunMutations": 0
+    },
+    {
+      "name": "patch-over-canonical-byte-ceiling-fails-before-compiler",
+      "operation": "supply a patch whose canonical UTF-8 exceeds 4194304 bytes",
+      "expectCode": "GE_PATCH_INVALID",
+      "expectCompilerCalls": 0
+    },
+    {
+      "name": "patch-over-portable-depth-fails-before-compiler",
+      "operation": "supply config nested beyond 100 constructed levels",
+      "expectCode": "GE_PATCH_INVALID",
+      "expectCompilerCalls": 0
+    }
+  ]
+}

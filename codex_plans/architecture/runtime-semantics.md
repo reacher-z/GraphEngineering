@@ -444,8 +444,8 @@ green in both languages.
 | Runtime `edge.map` and `edge.condition` | Not implemented | Deterministic lowering, validation, events, resume/replay parity |
 | Scheduler barrier quorum/deadline | Pure evaluator only | Arrival state machine, missing/timeout policy, event history and fixtures |
 | Scheduler route application | Pure evaluator only | Route event, selected-edge scheduling, unselected-branch settlement and recovery |
-| Explicit cycles and `untilDry` | Rejected/not implemented | Bounded convergence contract, seen-set semantics, budgets and durable iteration identity |
-| Dynamic graph patches/fan-out | Not implemented | Revision lineage, authorization, hard cardinality/depth/attempt limits and replay |
+| Explicit cycles and `untilDry` | Protocol frozen; runtime rejected/not implemented | Native TS/Python standalone controllers, budget/lease/store integration, crash recovery, and executable cross-language transition evidence |
+| Dynamic graph patches/fan-out | Protocol frozen; runtime not implemented | Native patch compilers/appliers, authority/budget enforcement, scheduler exposure, replay, and executable cross-language evidence |
 | Verifiers, judge panels, reflection, citation gates | Not implemented runtime primitives | Typed policies, evidence lineage, deterministic aggregation and adversarial fixtures |
 | Unknown/abstain and human approval gates | Not implemented | Durable decision state, callbacks/CLI/API, timeout/escalation and audit trail |
 | Worktree/process/container isolation | Not implemented | Capability policy, filesystem ownership, cleanup, merge conflict and threat model tests |

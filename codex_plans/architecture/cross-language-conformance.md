@@ -137,8 +137,14 @@ The following are release gates, not accepted permanent differences:
 3. Normalize output-binding failure fields and cancellation terminal status.
 4. Add controlled simultaneous-completion and retry-delay cases.
 5. Add shared event/checkpoint vectors and machine error-envelope comparison.
-6. Add pipeline, barrier, router, verifier, and bounded-loop cases before those
-   primitives can be marked implemented in the capability table.
+6. Add native bounded-cycle/GraphPatch reporters that consume the frozen D7
+   request, policy, result, revision, controller-event, and checkpoint schemas;
+   execute every transition/recovery/hostile case in both languages; and compare
+   exact folds. The offline schema/golden validator is contract evidence, not
+   this executable join.
+7. Add remaining barrier, router, verifier, and scheduler-integrated pipeline
+   cases before those primitives can be marked implemented in the capability
+   table.
 
 No README capability becomes `Yes` solely because one language has code. It
 must have a shared fixture, both reporters, a green coordinator, and an honest

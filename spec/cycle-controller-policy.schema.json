@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/cycle-controller-policy.schema.json",
+  "title": "Graph Engineering effective bounded-cycle controller policy",
+  "description": "The fully resolved, closed policy accepted by the standalone cycle-controller v1alpha1 API. Every resource bound is explicit; inherited or implicit limits are normalized before this document is constructed.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "mode",
+    "maxIterations",
+    "maxDurationMs",
+    "maxCostUsd",
+    "maxTotalAttempts",
+    "maxDiscoveries",
+    "maxDynamicNodes",
+    "maxCandidatesPerRound",
+    "maxCandidateBytes",
+    "maxCandidateBatchBytes"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "graphengineering.reacher-z.github.io/cycle-policies/v1alpha1"
+    },
+    "kind": { "const": "CycleControllerPolicy" },
+    "mode": {
+      "enum": ["until-dry", "while", "evaluator-optimizer"]
+    },
+    "maxIterations": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 10000
+    },
+    "maxDurationMs": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 2147483647
+    },
+    "maxCostUsd": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "maxTotalAttempts": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "maxDiscoveries": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10000000
+    },
+    "maxDynamicNodes": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100000
+    },
+    "maxCandidatesPerRound": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100000
+    },
+    "maxCandidateBytes": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1048576
+    },
+    "maxCandidateBatchBytes": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 16777216
+    },
+    "consecutiveDryRounds": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "mode": { "const": "until-dry" } },
+        "required": ["mode"]
+      },
+      "then": {
+        "properties": {
+          "consecutiveDryRounds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          }
+        },
+        "required": ["consecutiveDryRounds"]
+      },
+      "else": {
+        "properties": { "consecutiveDryRounds": false }
+      }
+    }
+  ]
+}

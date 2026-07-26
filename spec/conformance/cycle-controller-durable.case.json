@@ -1,0 +1,860 @@
+{
+  "schemaVersion": 1,
+  "schemas": {
+    "event": "spec/cycle-controller-event.schema.json",
+    "checkpoint": "spec/cycle-controller-checkpoint.schema.json"
+  },
+  "sourceFixtures": {
+    "requestManifest": "spec/conformance/cycle-controller.case.json",
+    "patchManifest": "spec/conformance/graph-patch.case.json"
+  },
+  "expectedTestCoverage": {
+    "until-dry convergence": ["global-seen-dedupes-against-every-prior-observation"],
+    "hard iteration/time/cost/node limits": [
+      "iteration-bound-is-inclusive",
+      "duration-bound-is-inclusive",
+      "positive-cost-bound-is-inclusive",
+      "positive-dynamic-node-bound-is-inclusive"
+    ],
+    "malicious patch rejection": [
+      "delete-operation",
+      "unknown-node-field",
+      "back-edge-remains-an-ordinary-cycle",
+      "capability-expansion-fails-closed",
+      "incoming-edge-to-existing-pending-node-is-forbidden",
+      "unsupported-stream-edge-fails-before-scheduling",
+      "patch-over-portable-depth-fails-before-compiler",
+      "patch-authority-detached-from-planner",
+      "patch-budget-summary-does-not-reconcile"
+    ],
+    "replayed exit reason": [
+      "terminal-replay-is-read-only",
+      "terminal-hard-stop-observation-lies",
+      "terminal-observation-substitution"
+    ]
+  },
+  "untilDryFoldCases": [
+    {
+      "name": "global-seen-dedupes-against-every-prior-observation",
+      "consecutiveDryRounds": 2,
+      "maxDiscoveries": 10,
+      "rounds": [
+        {
+          "candidateKeys": ["finding-b", "finding-a", "finding-b"],
+          "expectFreshKeys": ["finding-b", "finding-a"],
+          "expectDuplicateKeys": ["finding-b"],
+          "expectConsecutiveDryRounds": 0
+        },
+        {
+          "candidateKeys": ["finding-a", "finding-c"],
+          "expectFreshKeys": ["finding-c"],
+          "expectDuplicateKeys": ["finding-a"],
+          "expectConsecutiveDryRounds": 0
+        },
+        {
+          "candidateKeys": ["finding-c", "finding-a"],
+          "expectFreshKeys": [],
+          "expectDuplicateKeys": ["finding-c", "finding-a"],
+          "expectConsecutiveDryRounds": 1
+        },
+        {
+          "candidateKeys": ["finding-b"],
+          "expectFreshKeys": [],
+          "expectDuplicateKeys": ["finding-b"],
+          "expectConsecutiveDryRounds": 2
+        }
+      ],
+      "expectSeenKeys": ["finding-b", "finding-a", "finding-c"],
+      "expectExitReason": "DRY"
+    }
+  ],
+  "hardStopFoldCases": [
+    {
+      "name": "iteration-bound-is-inclusive",
+      "fold": {"cancelled": false, "durationMs": 99, "costUsd": 0, "attemptsUsed": 3, "dynamicNodes": 0, "seenCount": 2, "iterations": 3, "patchRejected": false, "failed": false, "unknownVerdict": false, "convergenceReason": "DRY"},
+      "expectExitReason": "MAX_ITERATIONS"
+    },
+    {
+      "name": "duration-bound-is-inclusive",
+      "fold": {"cancelled": false, "durationMs": 100, "costUsd": 0, "attemptsUsed": 1, "dynamicNodes": 0, "seenCount": 1, "iterations": 1, "patchRejected": false, "failed": false, "unknownVerdict": false, "convergenceReason": null},
+      "expectExitReason": "MAX_DURATION"
+    },
+    {
+      "name": "positive-cost-bound-is-inclusive",
+      "fold": {"cancelled": false, "durationMs": 99, "costUsd": 5, "attemptsUsed": 1, "dynamicNodes": 0, "seenCount": 1, "iterations": 1, "patchRejected": false, "failed": false, "unknownVerdict": false, "convergenceReason": null},
+      "expectExitReason": "MAX_COST"
+    },
+    {
+      "name": "positive-dynamic-node-bound-is-inclusive",
+      "fold": {"cancelled": false, "durationMs": 99, "costUsd": 0, "attemptsUsed": 1, "dynamicNodes": 2, "seenCount": 1, "iterations": 1, "patchRejected": false, "failed": false, "unknownVerdict": false, "convergenceReason": null},
+      "expectExitReason": "MAX_DYNAMIC_NODES"
+    },
+    {
+      "name": "attempt-bound-is-inclusive",
+      "fold": {"cancelled": false, "durationMs": 99, "costUsd": 0, "attemptsUsed": 4, "dynamicNodes": 0, "seenCount": 1, "iterations": 1, "patchRejected": false, "failed": false, "unknownVerdict": false, "convergenceReason": null},
+      "expectExitReason": "MAX_TOTAL_ATTEMPTS"
+    },
+    {
+      "name": "discovery-bound-is-inclusive",
+      "fold": {"cancelled": false, "durationMs": 99, "costUsd": 0, "attemptsUsed": 1, "dynamicNodes": 0, "seenCount": 3, "iterations": 1, "patchRejected": false, "failed": false, "unknownVerdict": false, "convergenceReason": null},
+      "expectExitReason": "MAX_DISCOVERIES"
+    },
+    {
+      "name": "cancellation-wins-simultaneous-hard-stops",
+      "fold": {"cancelled": true, "durationMs": 100, "costUsd": 5, "attemptsUsed": 4, "dynamicNodes": 2, "seenCount": 3, "iterations": 3, "patchRejected": true, "failed": true, "unknownVerdict": true, "convergenceReason": "DRY"},
+      "expectExitReason": "CANCELLED"
+    }
+  ],
+  "hardStopPolicy": {"maxIterations": 3, "maxDurationMs": 100, "maxCostUsd": 5, "maxTotalAttempts": 4, "maxDiscoveries": 3, "maxDynamicNodes": 2},
+  "leaseTransitionCases": [
+    {
+      "name": "higher-fenced-takeover-replaces-the-active-holder",
+      "prefixThroughEvent": 1,
+      "events": [
+        {
+          "type": "LeaseAcquired",
+          "timestamp": "2026-07-26T00:00:00.005Z",
+          "lease": {
+            "leaseId": "lease-2",
+            "holderId": "worker-2",
+            "leaseEpoch": 2,
+            "fencingToken": 2,
+            "acquiredAt": "2026-07-26T00:00:00.005Z",
+            "expiresAt": "2026-07-26T00:01:00Z"
+          },
+          "data": {"reason": "takeover", "previousLeaseId": "lease-1"}
+        }
+      ],
+      "expectTailHash": "12ce8eb4c2189c764110fac06205fa1c2676efe37721a678c11ceade9e68098f",
+      "expectLeaseId": "lease-2"
+    },
+    {
+      "name": "voluntary-handoff-can-resume-under-a-new-fence",
+      "prefixThroughEvent": 1,
+      "events": [
+        {
+          "type": "LeaseReleased",
+          "timestamp": "2026-07-26T00:00:00.004Z",
+          "lease": {"$fixture": "lease"},
+          "data": {"reason": "handoff"}
+        },
+        {
+          "type": "LeaseAcquired",
+          "timestamp": "2026-07-26T00:00:00.005Z",
+          "lease": {
+            "leaseId": "lease-2",
+            "holderId": "worker-2",
+            "leaseEpoch": 2,
+            "fencingToken": 2,
+            "acquiredAt": "2026-07-26T00:00:00.005Z",
+            "expiresAt": "2026-07-26T00:01:00Z"
+          },
+          "data": {"reason": "resume", "previousLeaseId": "lease-1"}
+        }
+      ],
+      "expectTailHash": "b45065bad8d7513fed822635992675cb9829b8796e1709d69360132a8e63c754",
+      "expectLeaseId": "lease-2"
+    }
+  ],
+  "invalidLeaseTransitionCases": [
+    {
+      "name": "takeover-must-bind-the-prior-lease-id",
+      "base": "higher-fenced-takeover-replaces-the-active-holder",
+      "mutation": {"op": "replace", "event": 2, "path": "/data/previousLeaseId", "value": "lease-other"},
+      "expectCode": "GE_CYCLE_INVALID_HISTORY"
+    },
+    {
+      "name": "takeover-must-advance-the-fencing-token",
+      "base": "higher-fenced-takeover-replaces-the-active-holder",
+      "mutation": {"op": "replace", "event": 2, "path": "/lease/fencingToken", "value": 1},
+      "expectCode": "GE_CYCLE_INVALID_HISTORY"
+    }
+  ],
+  "hashDomains": {
+    "eventRecord": "graph-engineering/cycle-event/v1alpha1\u0000",
+    "activity": "graph-engineering/cycle-activity/v1alpha1\u0000",
+    "roundPlan": "graph-engineering/cycle-round-plan/v1alpha1\u0000"
+  },
+  "validHistory": {
+    "name": "one-round-accepted-patch-then-max-iterations",
+    "requestFixture": "explicit-standalone-child-controller",
+    "resultFixture": "max-iterations-after-one-patched-round",
+    "patchFixture": "append-node",
+    "revisionFixture": "revision-two",
+    "lease": {
+      "leaseId": "lease-1",
+      "holderId": "worker-1",
+      "leaseEpoch": 1,
+      "fencingToken": 1,
+      "acquiredAt": "2026-07-26T00:00:00Z",
+      "expiresAt": "2026-07-26T00:01:00Z"
+    },
+    "events": [
+      {
+        "type": "ControllerCreated",
+        "graphRevision": 1,
+        "data": {
+          "request": {"$fixture": "request"},
+          "requestHash": "121678db9a00d9d13f5c68f2a9429677e165de6fedfce337960ebe7a0709b140",
+          "identity": {
+            "policy": {"$fixture": "policy"},
+            "objectiveHash": "8606fc0f8114b9501a72c9520e72c59f655b2b85ceeb6251722f6e882733ac2b",
+            "keyStrategyId": "finding-key/v1",
+            "rubricIdentity": "auth-rubric/v1",
+            "authorityCeilingHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "pricingPolicyHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "initialGraphRevision": 1,
+            "initialGraphHash": "0000000000000000000000000000000000000000000000000000000000000000",
+            "initialRevisionHash": "1111111111111111111111111111111111111111111111111111111111111111"
+          },
+          "controllerHash": "d51253f9c969723dbbd682e1814f36c1938fba795341775424c09141b4b50fcc",
+          "startedAt": "2026-07-26T00:00:00Z",
+          "deadlineAt": "2026-07-26T00:00:01Z"
+        }
+      },
+      {
+        "type": "LeaseAcquired",
+        "graphRevision": 1,
+        "data": {"reason": "start", "previousLeaseId": null}
+      },
+      {
+        "type": "RoundReserved",
+        "graphRevision": 1,
+        "data": {
+          "iteration": 1,
+          "plan": {
+            "finder": {
+              "phase": "finder",
+              "activityId": "finder",
+              "maxAttempts": 1,
+              "maxCostUsd": 0
+            },
+            "candidateEvaluator": {
+              "phase": "candidate-evaluator",
+              "activityId": "candidate-evaluator",
+              "maxAttempts": 1,
+              "maxCostUsd": 0
+            },
+            "modeActivity": null,
+            "patchPlanner": {
+              "phase": "patch-planner",
+              "activityId": "patch-planner",
+              "maxAttempts": 1,
+              "maxCostUsd": 0
+            },
+            "maxDynamicNodes": 10
+          },
+          "planHash": "cd0a569e7dacd4839fc1527715dbee6fad23827086a270f4f334eca5a1bd1f2f",
+          "reservationId": "round-1",
+          "maximum": {"attempts": 3, "costUsd": 0, "dynamicNodes": 10},
+          "deadlineAt": "2026-07-26T00:00:01Z",
+          "currentRevision": {
+            "graphRevision": 1,
+            "graphHash": "0000000000000000000000000000000000000000000000000000000000000000",
+            "revisionHash": "1111111111111111111111111111111111111111111111111111111111111111"
+          }
+        }
+      },
+      {
+        "type": "ActivityStarted",
+        "graphRevision": 1,
+        "data": {
+          "iteration": 1,
+          "phase": "finder",
+          "activityId": "finder",
+          "activityKey": "f29b551fb3fbf8402699ce93f99d0e7e8c1a29b6b1d003aaaba2d13b9d7c611b",
+          "attempt": 1,
+          "sideEffects": "none",
+          "inputHash": "1717171717171717171717171717171717171717171717171717171717171717",
+          "reservationId": "round-1"
+        }
+      },
+      {
+        "type": "DiscoveryCommitted",
+        "graphRevision": 1,
+        "data": {
+          "iteration": 1,
+          "activityKey": "f29b551fb3fbf8402699ce93f99d0e7e8c1a29b6b1d003aaaba2d13b9d7c611b",
+          "candidateBatch": {
+            "disposition": "inline-unredacted",
+            "redacted": false,
+            "encoding": "canonical-json/v1alpha1",
+            "canonicalJson": "[{\"key\":\"finding-a\",\"value\":{\"claim\":\"A\"}}]",
+            "utf8ByteLength": 43,
+            "sha256": "2ec191fd63fa91eca0f77caf876b694380814fef0b102e1e1039c81e3fd1633f"
+          },
+          "candidateBatchHash": "2ec191fd63fa91eca0f77caf876b694380814fef0b102e1e1039c81e3fd1633f",
+          "candidateCount": 1,
+          "freshKeys": ["finding-a"],
+          "duplicateKeys": [],
+          "seenAdditions": ["finding-a"],
+          "usage": {"attempts": 1, "costUsd": 0},
+          "durationMs": 10
+        }
+      },
+      {
+        "type": "BudgetReservationSettled",
+        "graphRevision": 1,
+        "data": {
+          "iteration": 1,
+          "reservationId": "round-1",
+          "phase": "finder",
+          "committed": {"attempts": 1, "costUsd": 0, "dynamicNodes": 0},
+          "totals": {
+            "attemptsCommitted": 1,
+            "costUsdCommitted": 0,
+            "dynamicNodesCommitted": 0,
+            "liveReservations": {"attempts": 2, "costUsd": 0, "dynamicNodes": 10}
+          }
+        }
+      },
+      {
+        "type": "ActivityStarted",
+        "graphRevision": 1,
+        "data": {
+          "iteration": 1,
+          "phase": "candidate-evaluator",
+          "activityId": "candidate-evaluator",
+          "activityKey": "a682a5a489de722d2205512a0ee27f6f6a19b8bb6672f7599d940dd06d75002a",
+          "attempt": 1,
+          "sideEffects": "none",
+          "inputHash": "1919191919191919191919191919191919191919191919191919191919191919",
+          "reservationId": "round-1"
+        }
+      },
+      {
+        "type": "CandidateEvaluationCommitted",
+        "graphRevision": 1,
+        "data": {
+          "iteration": 1,
+          "activityKey": "a682a5a489de722d2205512a0ee27f6f6a19b8bb6672f7599d940dd06d75002a",
+          "verdicts": [{"key": "finding-a", "verdict": "accept"}],
+          "acceptedKeys": ["finding-a"],
+          "rejectedKeys": [],
+          "unknownKeys": [],
+          "usage": {"attempts": 1, "costUsd": 0},
+          "durationMs": 20
+        }
+      },
+      {
+        "type": "BudgetReservationSettled",
+        "graphRevision": 1,
+        "data": {
+          "iteration": 1,
+          "reservationId": "round-1",
+          "phase": "candidate-evaluator",
+          "committed": {"attempts": 1, "costUsd": 0, "dynamicNodes": 0},
+          "totals": {
+            "attemptsCommitted": 2,
+            "costUsdCommitted": 0,
+            "dynamicNodesCommitted": 0,
+            "liveReservations": {"attempts": 1, "costUsd": 0, "dynamicNodes": 10}
+          }
+        }
+      },
+      {
+        "type": "ModeOutcomeCommitted",
+        "graphRevision": 1,
+        "data": {
+          "iteration": 1,
+          "activityKey": null,
+          "outcome": {"mode": "until-dry"},
+          "usage": {"attempts": 0, "costUsd": 0},
+          "durationMs": 20
+        }
+      },
+      {
+        "type": "ActivityStarted",
+        "graphRevision": 1,
+        "data": {
+          "iteration": 1,
+          "phase": "patch-planner",
+          "activityId": "patch-planner",
+          "activityKey": "c3c4ca8440d7ba9cc48e7da75ccd480ceedd65a880047dcde3b01fabca83b6af",
+          "attempt": 1,
+          "sideEffects": "idempotent",
+          "inputHash": "2121212121212121212121212121212121212121212121212121212121212121",
+          "reservationId": "round-1"
+        }
+      },
+      {
+        "type": "PatchAccepted",
+        "graphRevision": 2,
+        "data": {
+          "iteration": 1,
+          "plannerActivityKey": "c3c4ca8440d7ba9cc48e7da75ccd480ceedd65a880047dcde3b01fabca83b6af",
+          "patchId": "round-2-node",
+          "patch": {"$fixture": "patch-payload"},
+          "patchHash": "ca6ba9762870a8b7f3de18607cd1f6db191bc3ecb473825516b3e26627a6ea07",
+          "requestedBase": {
+            "graphRevision": 1,
+            "graphHash": "0000000000000000000000000000000000000000000000000000000000000000",
+            "revisionHash": "1111111111111111111111111111111111111111111111111111111111111111"
+          },
+          "authoritySnapshot": {
+            "proposerActivityKey": "c3c4ca8440d7ba9cc48e7da75ccd480ceedd65a880047dcde3b01fabca83b6af",
+            "principalHash": "2222222222222222222222222222222222222222222222222222222222222222",
+            "proposerGrantHash": "2323232323232323232323232323232323232323232323232323232323232323",
+            "runGrantHash": "2424242424242424242424242424242424242424242424242424242424242424",
+            "tenantGrantHash": "2525252525252525252525252525252525252525252525252525252525252525",
+            "deploymentGrantHash": "2626262626262626262626262626262626262626262626262626262626262626",
+            "effectiveGrantHash": "2727272727272727272727272727272727272727272727272727272727272727",
+            "policyHash": "2828282828282828282828282828282828282828282828282828282828282828",
+            "approvalHash": null
+          },
+          "policySnapshotHash": "2929292929292929292929292929292929292929292929292929292929292929",
+          "budgetOutcome": {
+            "reservationId": "round-1",
+            "requested": {"attempts": 1, "costUsd": 0, "dynamicNodes": 10},
+            "committed": {"attempts": 1, "costUsd": 0, "dynamicNodes": 1},
+            "released": {"attempts": 0, "costUsd": 0, "dynamicNodes": 9}
+          },
+          "diagnostics": [],
+          "decidedAtDurationMs": 30,
+          "outcome": "accepted",
+          "resultingRevision": {"$fixture": "revision"}
+        }
+      },
+      {
+        "type": "BudgetReservationSettled",
+        "graphRevision": 2,
+        "data": {
+          "iteration": 1,
+          "reservationId": "round-1",
+          "phase": "patch-planner",
+          "committed": {"attempts": 1, "costUsd": 0, "dynamicNodes": 1},
+          "totals": {
+            "attemptsCommitted": 3,
+            "costUsdCommitted": 0,
+            "dynamicNodesCommitted": 1,
+            "liveReservations": {"attempts": 0, "costUsd": 0, "dynamicNodes": 9}
+          }
+        }
+      },
+      {
+        "type": "BudgetReservationReleased",
+        "graphRevision": 2,
+        "data": {
+          "iteration": 1,
+          "reservationId": "round-1",
+          "reason": "round-complete",
+          "released": {"attempts": 0, "costUsd": 0, "dynamicNodes": 9},
+          "remaining": {"attempts": 0, "costUsd": 0, "dynamicNodes": 0},
+          "totals": {
+            "attemptsCommitted": 3,
+            "costUsdCommitted": 0,
+            "dynamicNodesCommitted": 1,
+            "liveReservations": {"attempts": 0, "costUsd": 0, "dynamicNodes": 0}
+          }
+        }
+      },
+      {
+        "type": "RoundCommitted",
+        "graphRevision": 2,
+        "data": {
+          "record": {
+            "iteration": 1,
+            "candidateBatchHash": "2ec191fd63fa91eca0f77caf876b694380814fef0b102e1e1039c81e3fd1633f",
+            "candidateCount": 1,
+            "freshKeys": ["finding-a"],
+            "duplicateKeys": [],
+            "acceptedKeys": ["finding-a"],
+            "rejectedKeys": [],
+            "unknownKeys": [],
+            "modeOutcome": {"mode": "until-dry"},
+            "patchDecision": {
+              "patchId": "round-2-node",
+              "patchHash": "ca6ba9762870a8b7f3de18607cd1f6db191bc3ecb473825516b3e26627a6ea07",
+              "outcome": "accepted",
+              "requestedBase": {
+                "graphRevision": 1,
+                "graphHash": "0000000000000000000000000000000000000000000000000000000000000000",
+                "revisionHash": "1111111111111111111111111111111111111111111111111111111111111111"
+              },
+              "resultingRevision": {
+                "graphRevision": 2,
+                "graphHash": "2222222222222222222222222222222222222222222222222222222222222222",
+                "revisionHash": "d3c8e14f571bb97a4fafca6d351886d50d93c1c1a5faeff72ff189789cbf48bc"
+              }
+            },
+            "consecutiveDryRounds": 0,
+            "attemptsUsed": 3,
+            "costUsd": 0,
+            "dynamicNodes": 1,
+            "durationMs": 30,
+            "currentRevision": {
+              "graphRevision": 2,
+              "graphHash": "2222222222222222222222222222222222222222222222222222222222222222",
+              "revisionHash": "d3c8e14f571bb97a4fafca6d351886d50d93c1c1a5faeff72ff189789cbf48bc"
+            }
+          }
+        }
+      },
+      {
+        "type": "ControllerTerminated",
+        "graphRevision": 2,
+        "data": {
+          "observation": {
+            "cancelled": false,
+            "maxDuration": false,
+            "maxCost": false,
+            "maxTotalAttempts": false,
+            "maxDynamicNodes": false,
+            "maxDiscoveries": false,
+            "maxIterations": true,
+            "patchRejected": false,
+            "failed": false,
+            "failureCode": null,
+            "unknownVerdict": false,
+            "convergenceReason": null
+          },
+          "result": {"$fixture": "result"}
+        }
+      }
+    ],
+    "expectEventRecordHashes": [
+      "c795d28fa779d2490c84fcc83e0d3a36daedd062f073d5be0bf1c1d4a228f76e",
+      "eb427a370be02fc8c627a0c7b0c4fef5a111b81db853c131cda0eb61ea1944a2",
+      "475bae3fef8a95ec9621611c3edd7916f31b3f56b42c9a9ca9b44a41883b5626",
+      "e24a5cf19a128452c9210ebfc4de61acf7e49ae1e4801b43dd03bd573c7948ae",
+      "af9e71729ad653c8840acab81322688580b0884530c4d1d8b47e8564fd45de01",
+      "7f2292c87273654ba8297fd51739fabf0fe405ea97f0275fc4840e1e636dc7d6",
+      "da7d67119ad26e77311ac2a587d8b475780ccb992343f2cac60882740ca192ab",
+      "e1124cde6742d702015afe60c470e1c079638c038c5144ace96ed89b8937e2b7",
+      "2119b06f1d257a5da559b12440fcb02b8373d36c10a2fba65c79102e82651bfd",
+      "d4f206a19934e7db375da579572b0bd44abf5b1854e6d844de9e9abcfb6e88de",
+      "7c39374b28104702443a89e9852afb2b74391e3c4089b70e7436a93f2180ed8e",
+      "69ae835cf57b5a60deb4c1c7e518cd935884ddce5e0830367d03eade6d6bbcd4",
+      "bda5400634f96a66433932fef892d8b38b7982e0d9c2a9fcd88a2b44cf7e4321",
+      "0d2a5b5d4183bf8a46705e89a269cd0f043ed91a1d4f5129d500ca01ba7ade22",
+      "9510e38c39997eecdb091060caa3e3392209ff55b7fc8c0425acaed29f950ce1",
+      "adda235f56e473d3b505225787387be9e94ea93033f2933fceb8b2225cd52f09"
+    ],
+    "expectTerminalRecordHash": "adda235f56e473d3b505225787387be9e94ea93033f2933fceb8b2225cd52f09"
+  },
+  "validInterruptedHistoryCases": [
+    {
+      "name": "cancelled-open-patch-planner-is-charged-and-retained-in-doubt",
+      "prefixThroughEvent": 10,
+      "settlement": {
+        "phase": "patch-planner",
+        "committed": {"attempts": 1, "costUsd": 0, "dynamicNodes": 0},
+        "totals": {
+          "attemptsCommitted": 3,
+          "costUsdCommitted": 0,
+          "dynamicNodesCommitted": 0,
+          "liveReservations": {"attempts": 0, "costUsd": 0, "dynamicNodes": 10}
+        }
+      },
+      "release": {
+        "reason": "cancelled",
+        "released": {"attempts": 0, "costUsd": 0, "dynamicNodes": 10},
+        "remaining": {"attempts": 0, "costUsd": 0, "dynamicNodes": 0},
+        "totals": {
+          "attemptsCommitted": 3,
+          "costUsdCommitted": 0,
+          "dynamicNodesCommitted": 0,
+          "liveReservations": {"attempts": 0, "costUsd": 0, "dynamicNodes": 0}
+        }
+      },
+      "observation": {
+        "cancelled": true,
+        "maxDuration": false,
+        "maxCost": false,
+        "maxTotalAttempts": false,
+        "maxDynamicNodes": false,
+        "maxDiscoveries": false,
+        "maxIterations": true,
+        "patchRejected": false,
+        "failed": false,
+        "failureCode": null,
+        "unknownVerdict": false,
+        "convergenceReason": null
+      },
+      "expect": {
+        "terminalRecordHash": "7f6dd8d0783d967add732d19f116982066a1b8283b1e31427ea51e97df1d358e",
+        "checkpointContentHash": "8155a732b966e1dabf04561694bdf2ce44b82787eac6b30333e44ca16d963e72",
+        "inDoubtActivityKey": "c3c4ca8440d7ba9cc48e7da75ccd480ceedd65a880047dcde3b01fabca83b6af"
+      }
+    },
+    {
+      "name": "failed-finder-is-settled-released-and-closed-without-a-round-commit",
+      "prefixThroughEvent": 3,
+      "timestamp": "2026-07-26T00:00:00.005Z",
+      "failure": {
+        "iteration": 1,
+        "activityKey": "f29b551fb3fbf8402699ce93f99d0e7e8c1a29b6b1d003aaaba2d13b9d7c611b",
+        "attempt": 1,
+        "failure": {
+          "phase": "finder",
+          "code": "GE_ACTIVITY_FAILED",
+          "retryable": false,
+          "inDoubt": false
+        },
+        "usage": {"attempts": 1, "costUsd": 0}
+      },
+      "expectRetryBlocked": "non-retryable activity failure was retried",
+      "settlement": {
+        "phase": "finder",
+        "committed": {"attempts": 1, "costUsd": 0, "dynamicNodes": 0},
+        "totals": {
+          "attemptsCommitted": 1,
+          "costUsdCommitted": 0,
+          "dynamicNodesCommitted": 0,
+          "liveReservations": {"attempts": 2, "costUsd": 0, "dynamicNodes": 10}
+        }
+      },
+      "release": {
+        "reason": "failed",
+        "released": {"attempts": 2, "costUsd": 0, "dynamicNodes": 10},
+        "remaining": {"attempts": 0, "costUsd": 0, "dynamicNodes": 0},
+        "totals": {
+          "attemptsCommitted": 1,
+          "costUsdCommitted": 0,
+          "dynamicNodesCommitted": 0,
+          "liveReservations": {"attempts": 0, "costUsd": 0, "dynamicNodes": 0}
+        }
+      },
+      "observation": {
+        "cancelled": false,
+        "maxDuration": false,
+        "maxCost": false,
+        "maxTotalAttempts": false,
+        "maxDynamicNodes": false,
+        "maxDiscoveries": false,
+        "maxIterations": true,
+        "patchRejected": false,
+        "failed": true,
+        "failureCode": "GE_ACTIVITY_FAILED",
+        "unknownVerdict": false,
+        "convergenceReason": null
+      },
+      "result": {
+        "status": "bounded",
+        "exitReason": "MAX_ITERATIONS",
+        "seenCount": 0,
+        "acceptedCount": 0,
+        "rejectedCount": 0,
+        "unknownCount": 0,
+        "unevaluatedCount": 0,
+        "attemptsUsed": 1,
+        "dynamicNodes": 0,
+        "durationMs": 0,
+        "lastGraphRevision": 1,
+        "lastGraphHash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "lastRevisionHash": "1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      "expect": {
+        "terminalRecordHash": "f383fb04474e52cb240e38ed9babb38c5a5a854db2c976c90a09ee53082db6e4",
+        "checkpointContentHash": "6f50baa7f54658fd9d4500cd09b46f6332b624e53d56245309d9b2b407ed8101",
+        "inDoubtActivityCount": 0
+      }
+    }
+  ],
+  "checkpoint": {
+    "name": "terminal-projection-at-event-tail",
+    "body": {
+      "apiVersion": "graphengineering.reacher-z.github.io/cycle-controller-checkpoints/v1alpha1",
+      "kind": "CycleControllerCheckpoint",
+      "controllerRunId": "cycle-run-1",
+      "hostRunId": "graph-run-1",
+      "eventStreamId": "cycle-run-1.events",
+      "checkpointId": "cycle-run-1-terminal",
+      "lastSequence": 15,
+      "historyPrefixHash": {"$fixture": "terminal-record-hash"},
+      "controllerHash": "d51253f9c969723dbbd682e1814f36c1938fba795341775424c09141b4b50fcc",
+      "requestHash": "121678db9a00d9d13f5c68f2a9429677e165de6fedfce337960ebe7a0709b140",
+      "graphRevision": 2,
+      "createdAt": "2026-07-26T00:00:16Z",
+      "lease": null,
+      "payloadDisposition": "inline-unredacted",
+      "redacted": false,
+      "state": {
+        "contractVersion": "cycle-controller-recovery/v1alpha1",
+        "request": {"$fixture": "request"},
+        "requestHash": "121678db9a00d9d13f5c68f2a9429677e165de6fedfce337960ebe7a0709b140",
+        "controllerHash": "d51253f9c969723dbbd682e1814f36c1938fba795341775424c09141b4b50fcc",
+        "startedAt": "2026-07-26T00:00:00Z",
+        "deadlineAt": "2026-07-26T00:00:01Z",
+        "currentRevision": {
+          "graphRevision": 2,
+          "graphHash": "2222222222222222222222222222222222222222222222222222222222222222",
+          "revisionHash": "d3c8e14f571bb97a4fafca6d351886d50d93c1c1a5faeff72ff189789cbf48bc"
+        },
+        "status": "terminal",
+        "nextIteration": 2,
+        "seenKeys": ["finding-a"],
+        "acceptedKeys": ["finding-a"],
+        "rejectedKeys": [],
+        "unknownKeys": [],
+        "unevaluatedKeys": [],
+        "consecutiveDryRounds": 0,
+        "attemptsUsed": 3,
+        "costUsd": 0,
+        "dynamicNodes": 1,
+        "durationMs": 30,
+        "liveReservations": [],
+        "inDoubtActivities": [],
+        "decidedPatches": [
+          {
+            "patchId": "round-2-node",
+            "patchHash": "ca6ba9762870a8b7f3de18607cd1f6db191bc3ecb473825516b3e26627a6ea07",
+            "outcome": "accepted",
+            "decisionSequence": 11
+          }
+        ],
+        "committedRounds": [{"$fixture": "round-record"}],
+        "openRound": null,
+        "terminalObservation": {
+          "cancelled": false,
+          "maxDuration": false,
+          "maxCost": false,
+          "maxTotalAttempts": false,
+          "maxDynamicNodes": false,
+          "maxDiscoveries": false,
+          "maxIterations": true,
+          "patchRejected": false,
+          "failed": false,
+          "failureCode": null,
+          "unknownVerdict": false,
+          "convergenceReason": null
+        },
+        "terminalResult": {"$fixture": "result"}
+      }
+    },
+    "expectContentHash": "5f7ba523ae67c65334842e8f9b78399a6d4ceb23aa24211c08a3add4cbdced88"
+  },
+  "validStandaloneEventSchemaCases": [
+    {
+      "name": "lease-renewal-payload",
+      "baseEvent": 1,
+      "mutations": [
+        {"op": "replace", "path": "/type", "value": "LeaseRenewed"},
+        {"op": "replace", "path": "/lease/expiresAt", "value": "2026-07-26T00:02:00Z"},
+        {"op": "replace", "path": "/data", "value": {"previousExpiresAt": "2026-07-26T00:01:00Z", "newExpiresAt": "2026-07-26T00:02:00Z"}}
+      ]
+    },
+    {
+      "name": "lease-release-payload",
+      "baseEvent": 1,
+      "mutations": [
+        {"op": "replace", "path": "/type", "value": "LeaseReleased"},
+        {"op": "replace", "path": "/data", "value": {"reason": "handoff"}}
+      ]
+    },
+    {
+      "name": "activity-failure-payload",
+      "baseEvent": 3,
+      "mutations": [
+        {"op": "replace", "path": "/type", "value": "ActivityFailed"},
+        {"op": "replace", "path": "/data", "value": {"iteration": 1, "activityKey": "f29b551fb3fbf8402699ce93f99d0e7e8c1a29b6b1d003aaaba2d13b9d7c611b", "attempt": 1, "failure": {"phase": "finder", "code": "GE_ACTIVITY_INTERRUPTED", "retryable": true, "inDoubt": true}, "usage": {"attempts": 1, "costUsd": 0}}}
+      ]
+    },
+    {
+      "name": "patch-rejection-payload",
+      "baseEvent": 11,
+      "mutations": [
+        {"op": "replace", "path": "/type", "value": "PatchRejected"},
+        {"op": "replace", "path": "/graphRevision", "value": 1},
+        {"op": "replace", "path": "/data/outcome", "value": "rejected"},
+        {"op": "remove", "path": "/data/resultingRevision"},
+        {"op": "add", "path": "/data/errorCode", "value": "GE_PATCH_AUTHORITY_EXPANSION"},
+        {"op": "replace", "path": "/data/diagnostics", "value": [{"code": "GE_PATCH_AUTHORITY_EXPANSION", "phase": 9, "path": "/append/nodes/0/config"}]},
+        {"op": "replace", "path": "/data/budgetOutcome/committed/dynamicNodes", "value": 0},
+        {"op": "replace", "path": "/data/budgetOutcome/released/dynamicNodes", "value": 1}
+      ]
+    }
+  ],
+  "invalidEventSchemaCases": [
+    {"name": "unknown-envelope-field", "event": 4, "mutation": {"op": "add", "path": "/authority", "value": "all"}},
+    {"name": "partial-discovery-record", "event": 4, "mutation": {"op": "remove", "path": "/data/seenAdditions"}},
+    {"name": "unsafe-sequence", "event": 8, "mutation": {"op": "replace", "path": "/sequence", "value": 9007199254740992}},
+    {"name": "revision-overflow", "event": 11, "mutation": {"op": "replace", "path": "/graphRevision", "value": 9007199254740992}},
+    {"name": "authority-widening-representation", "event": 11, "mutation": {"op": "replace", "path": "/data/authoritySnapshot/effectiveGrantHash", "value": {"network": "all"}}},
+    {"name": "inline-bytes-cannot-claim-redacted", "event": 11, "mutation": {"op": "replace", "path": "/redacted", "value": true}},
+    {"name": "phase-complete-release-must-name-phase", "event": 13, "mutation": {"op": "replace", "path": "/data/reason", "value": "phase-complete"}},
+    {"name": "terminal-observation-is-required", "event": 15, "mutation": {"op": "remove", "path": "/data/observation"}}
+  ],
+  "invalidEventHistoryCases": [
+    {"name": "payload-hash-mismatch", "mutation": {"op": "replace", "event": 4, "path": "/payloadHash", "value": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"}, "expectCode": "GE_CYCLE_INVALID_HISTORY"},
+    {"name": "record-hash-mismatch", "mutation": {"op": "replace", "event": 7, "path": "/recordHash", "value": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"}, "expectCode": "GE_CYCLE_INVALID_HISTORY"},
+    {"name": "sequence-gap", "mutation": {"op": "replace-and-rehash", "event": 8, "path": "/sequence", "value": 9}, "expectCode": "GE_CYCLE_INVALID_HISTORY"},
+    {"name": "wrong-phase-order", "mutation": {"op": "swap-and-rehash", "left": 4, "right": 7}, "expectCode": "GE_CYCLE_INVALID_HISTORY"},
+    {"name": "patch-byte-hash-mismatch", "mutation": {"op": "replace-and-rehash", "event": 11, "path": "/data/patchHash", "value": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"}, "expectCode": "GE_CYCLE_INVALID_HISTORY"},
+    {"name": "revision-chain-hash-mismatch", "mutation": {"op": "replace-and-rehash", "event": 11, "path": "/data/resultingRevision/revisionHash", "value": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"}, "expectCode": "GE_CYCLE_INVALID_HISTORY"},
+    {"name": "graph-revision-jump", "mutation": {"op": "replace-and-rehash", "event": 11, "path": "/graphRevision", "value": 3}, "expectCode": "GE_CYCLE_INVALID_HISTORY"},
+    {"name": "duplicate-event-id", "mutation": {"op": "copy-and-rehash", "fromEvent": 5, "event": 6, "fromPath": "/eventId", "path": "/eventId"}, "expectCode": "GE_CYCLE_INVALID_HISTORY"},
+    {"name": "wrong-expected-version", "mutation": {"op": "replace-and-rehash", "event": 10, "path": "/expectedPreviousSequence", "value": 8}, "expectCode": "GE_CYCLE_INVALID_HISTORY"},
+    {"name": "stale-lease-fencing-identity", "mutation": {"op": "replace-and-rehash", "event": 10, "path": "/lease/fencingToken", "value": 2}, "expectCode": "GE_CYCLE_INVALID_HISTORY"},
+    {"name": "phase-event-iteration-substitution", "mutation": {"op": "replace-and-rehash", "event": 11, "path": "/data/iteration", "value": 2}, "expectCode": "GE_CYCLE_INVALID_HISTORY"},
+    {"name": "under-reserved-round-plan", "mutation": {"op": "replace-and-rehash", "event": 2, "path": "/data/maximum/dynamicNodes", "value": 1}, "expectCode": "GE_CYCLE_COUNTER_MISMATCH"},
+    {
+      "name": "activity-dispatch-after-closing-release",
+      "mutation": {
+        "op": "insert-release-and-rehash",
+        "beforeEvent": 6,
+        "data": {
+          "iteration": 1,
+          "reservationId": "round-1",
+          "reason": "cancelled",
+          "released": {"attempts": 2, "costUsd": 0, "dynamicNodes": 10},
+          "remaining": {"attempts": 0, "costUsd": 0, "dynamicNodes": 0},
+          "totals": {
+            "attemptsCommitted": 1,
+            "costUsdCommitted": 0,
+            "dynamicNodesCommitted": 0,
+            "liveReservations": {"attempts": 0, "costUsd": 0, "dynamicNodes": 0}
+          }
+        }
+      },
+      "expectCode": "GE_CYCLE_INVALID_HISTORY",
+      "expectMessage": "activity starts after a closing budget release"
+    },
+    {"name": "lying-budget-totals", "mutation": {"op": "replace-and-rehash", "event": 5, "path": "/data/totals/attemptsCommitted", "value": 2}, "expectCode": "GE_CYCLE_COUNTER_MISMATCH"},
+    {"name": "until-dry-cannot-bypass-mode-activity-rule", "mutation": {"op": "replace-and-rehash", "event": 9, "path": "/data/activityKey", "value": "9999999999999999999999999999999999999999999999999999999999999999"}, "expectCode": "GE_CYCLE_INVALID_HISTORY"},
+    {"name": "patch-authority-detached-from-planner", "mutation": {"op": "replace-and-rehash", "event": 11, "path": "/data/authoritySnapshot/proposerActivityKey", "value": "9999999999999999999999999999999999999999999999999999999999999999"}, "expectCode": "GE_CYCLE_INVALID_HISTORY"},
+    {"name": "patch-budget-summary-does-not-reconcile", "mutation": {"op": "replace-and-rehash", "event": 11, "path": "/data/budgetOutcome/released/dynamicNodes", "value": 8}, "expectCode": "GE_CYCLE_COUNTER_MISMATCH"},
+    {"name": "activity-dispatch-after-deadline", "mutation": {"op": "replace-and-rehash", "event": 10, "path": "/timestamp", "value": "2026-07-26T00:00:02Z"}, "expectCode": "GE_CYCLE_INVALID_HISTORY"},
+    {"name": "terminal-hard-stop-observation-lies", "mutation": {"op": "replace-and-rehash", "event": 15, "path": "/data/observation/maxIterations", "value": false}, "expectCode": "GE_CYCLE_INVALID_HISTORY"},
+    {"name": "terminal-invents-dry-convergence", "mutation": {"op": "replace-and-rehash", "event": 15, "path": "/data/observation/convergenceReason", "value": "DRY"}, "expectCode": "GE_CYCLE_INVALID_HISTORY"}
+  ],
+  "invalidCheckpointSchemaCases": [
+    {"name": "unknown-checkpoint-field", "mutation": {"op": "add", "path": "/authority", "value": "all"}},
+    {"name": "unsafe-last-sequence", "mutation": {"op": "replace", "path": "/lastSequence", "value": 9007199254740992}},
+    {"name": "terminal-live-reservation", "mutation": {"op": "add", "path": "/state/liveReservations/0", "value": {"reservationId": "live", "iteration": 2, "maximum": {"attempts": 1, "costUsd": 0, "dynamicNodes": 0}, "committed": {"attempts": 0, "costUsd": 0, "dynamicNodes": 0}, "released": {"attempts": 0, "costUsd": 0, "dynamicNodes": 0}, "remaining": {"attempts": 1, "costUsd": 0, "dynamicNodes": 0}}}},
+    {"name": "checkpoint-inline-bytes-cannot-claim-redacted", "mutation": {"op": "replace", "path": "/redacted", "value": true}},
+    {"name": "terminal-checkpoint-cannot-retain-active-lease", "mutation": {"op": "replace", "path": "/lease", "value": {
+      "leaseId": "lease-1",
+      "holderId": "worker-1",
+      "leaseEpoch": 1,
+      "fencingToken": 1,
+      "acquiredAt": "2026-07-26T00:00:00Z",
+      "expiresAt": "2026-07-26T00:01:00Z"
+    }}}
+  ],
+  "invalidCheckpointSemanticCases": [
+    {"name": "content-hash-mismatch", "mutation": {"op": "replace", "path": "/contentHash", "value": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"}, "expectCode": "GE_CYCLE_INVALID_HISTORY"},
+    {"name": "ahead-of-event-tail", "mutation": {"op": "replace-and-rehash", "path": "/lastSequence", "value": 16}, "expectCode": "GE_CYCLE_INVALID_HISTORY"},
+    {"name": "projection-counter-mismatch", "mutation": {"op": "replace-and-rehash", "path": "/state/attemptsUsed", "value": 2}, "expectCode": "GE_CYCLE_COUNTER_MISMATCH"},
+    {"name": "history-prefix-mismatch", "mutation": {"op": "replace-and-rehash", "path": "/historyPrefixHash", "value": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"}, "expectCode": "GE_CYCLE_INVALID_HISTORY"},
+    {"name": "seen-key-substitution-with-same-count", "mutation": {"op": "replace-and-rehash", "path": "/state/seenKeys/0", "value": "forged-key"}, "expectCode": "GE_CYCLE_INVALID_HISTORY"},
+    {"name": "request-substitution", "mutation": {"op": "replace-and-rehash", "path": "/state/request/objective/canonicalJson", "value": "\"different objective\""}, "expectCode": "GE_CYCLE_INVALID_HISTORY"},
+    {"name": "decided-patch-sequence-substitution", "mutation": {"op": "replace-and-rehash", "path": "/state/decidedPatches/0/decisionSequence", "value": 12}, "expectCode": "GE_CYCLE_INVALID_HISTORY"},
+    {"name": "committed-round-substitution", "mutation": {"op": "replace-and-rehash", "path": "/state/committedRounds/0/durationMs", "value": 29}, "expectCode": "GE_CYCLE_INVALID_HISTORY"},
+    {"name": "next-iteration-substitution", "mutation": {"op": "replace-and-rehash", "path": "/state/nextIteration", "value": 3}, "expectCode": "GE_CYCLE_INVALID_HISTORY"},
+    {"name": "revision-coordinate-substitution", "mutation": {"op": "replace-and-rehash", "path": "/state/currentRevision/revisionHash", "value": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"}, "expectCode": "GE_CYCLE_INVALID_HISTORY"},
+    {"name": "terminal-observation-substitution", "mutation": {"op": "replace-and-rehash", "path": "/state/terminalObservation/maxIterations", "value": false}, "expectCode": "GE_CYCLE_INVALID_HISTORY"}
+  ],
+  "recoveryBoundaries": [
+    {"name": "open-none-finder-may-retry", "phase": "finder", "sideEffects": "none", "expect": "retry-same-activity-key"},
+    {"name": "open-idempotent-patch-planner-may-retry", "phase": "patch-planner", "sideEffects": "idempotent", "expect": "retry-same-activity-key"},
+    {"name": "open-non-idempotent-is-in-doubt", "phase": "finder", "sideEffects": "non-idempotent", "expect": "IN_DOUBT_SIDE_EFFECT"},
+    {"name": "committed-discovery-never-reruns-finder", "prefixThroughEvent": 4, "expectFinderCallsOnResume": 0},
+    {"name": "accepted-patch-replays-exact-bytes", "prefixThroughEvent": 11, "expectPatchPlannerCallsOnResume": 0},
+    {"name": "terminal-replay-is-read-only", "prefixThroughEvent": 15, "expectExternalCalls": 0}
+  ],
+  "forkCases": [
+    {"name": "fork-binds-prefix", "parentSequence": 4, "parentHistoryHashFromEvent": 4, "expectInheritedSeenKeys": ["finding-a"], "expectIndependentFuture": true},
+    {"name": "fork-open-non-idempotent-remains-in-doubt", "parentPhase": "finder", "sideEffects": "non-idempotent", "expect": "IN_DOUBT_SIDE_EFFECT"}
+  ]
+}

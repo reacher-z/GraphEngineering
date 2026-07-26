@@ -1,0 +1,363 @@
+{
+  "schemaVersion": 1,
+  "schemas": {
+    "policy": "spec/cycle-controller-policy.schema.json",
+    "request": "spec/cycle-controller.schema.json",
+    "result": "spec/cycle-controller-result.schema.json",
+    "revision": "spec/graph-revision.schema.json"
+  },
+  "hashDomains": {
+    "controller": "graph-engineering/cycle-controller/v1alpha1\u0000",
+    "request": "graph-engineering/cycle-controller-request/v1alpha1\u0000",
+    "revision": "graph-engineering/revision-chain/v1alpha1\u0000"
+  },
+  "validPolicies": [
+    {
+      "name": "until-dry-all-effective-bounds",
+      "document": {
+        "apiVersion": "graphengineering.reacher-z.github.io/cycle-policies/v1alpha1",
+        "kind": "CycleControllerPolicy",
+        "mode": "until-dry",
+        "maxIterations": 1,
+        "maxDurationMs": 1000,
+        "maxCostUsd": 10,
+        "maxTotalAttempts": 10,
+        "maxDiscoveries": 10,
+        "maxDynamicNodes": 10,
+        "maxCandidatesPerRound": 10,
+        "maxCandidateBytes": 1024,
+        "maxCandidateBatchBytes": 4096,
+        "consecutiveDryRounds": 2
+      }
+    },
+    {
+      "name": "bounded-while",
+      "document": {
+        "apiVersion": "graphengineering.reacher-z.github.io/cycle-policies/v1alpha1",
+        "kind": "CycleControllerPolicy",
+        "mode": "while",
+        "maxIterations": 5,
+        "maxDurationMs": 1000,
+        "maxCostUsd": 0,
+        "maxTotalAttempts": 10,
+        "maxDiscoveries": 10,
+        "maxDynamicNodes": 0,
+        "maxCandidatesPerRound": 10,
+        "maxCandidateBytes": 1024,
+        "maxCandidateBatchBytes": 4096
+      }
+    },
+    {
+      "name": "bounded-evaluator-optimizer",
+      "document": {
+        "apiVersion": "graphengineering.reacher-z.github.io/cycle-policies/v1alpha1",
+        "kind": "CycleControllerPolicy",
+        "mode": "evaluator-optimizer",
+        "maxIterations": 5,
+        "maxDurationMs": 1000,
+        "maxCostUsd": 10,
+        "maxTotalAttempts": 10,
+        "maxDiscoveries": 10,
+        "maxDynamicNodes": 0,
+        "maxCandidatesPerRound": 10,
+        "maxCandidateBytes": 1024,
+        "maxCandidateBatchBytes": 4096
+      }
+    }
+  ],
+  "invalidPolicyCases": [
+    {"name": "unknown-field", "mutation": {"op": "add", "path": "/unbounded", "value": true}},
+    {"name": "missing-explicit-duration", "mutation": {"op": "remove", "path": "/maxDurationMs"}},
+    {"name": "zero-iterations", "mutation": {"op": "replace", "path": "/maxIterations", "value": 0}},
+    {"name": "unsafe-attempt-count", "mutation": {"op": "replace", "path": "/maxTotalAttempts", "value": 9007199254740992}},
+    {"name": "until-dry-missing-counter", "mutation": {"op": "remove", "path": "/consecutiveDryRounds"}},
+    {"name": "while-forbids-dry-counter", "base": "bounded-while", "mutation": {"op": "add", "path": "/consecutiveDryRounds", "value": 1}}
+  ],
+  "validRequests": [
+    {
+      "name": "explicit-standalone-child-controller",
+      "expectObjectiveHash": "8606fc0f8114b9501a72c9520e72c59f655b2b85ceeb6251722f6e882733ac2b",
+      "expectControllerHash": "d51253f9c969723dbbd682e1814f36c1938fba795341775424c09141b4b50fcc",
+      "expectRequestHash": "121678db9a00d9d13f5c68f2a9429677e165de6fedfce337960ebe7a0709b140",
+      "document": {
+        "apiVersion": "graphengineering.reacher-z.github.io/cycle-controllers/v1alpha1",
+        "kind": "CycleControllerRequest",
+        "controllerRunId": "cycle-run-1",
+        "controllerId": "auth-discovery",
+        "hostRun": {
+          "relationship": "standalone-child-controller",
+          "runId": "graph-run-1"
+        },
+        "eventStreamId": "cycle-run-1.events",
+        "checkpointScope": "cycle-run-1.checkpoints",
+        "policy": {
+          "apiVersion": "graphengineering.reacher-z.github.io/cycle-policies/v1alpha1",
+          "kind": "CycleControllerPolicy",
+          "mode": "until-dry",
+          "maxIterations": 1,
+          "maxDurationMs": 1000,
+          "maxCostUsd": 10,
+          "maxTotalAttempts": 10,
+          "maxDiscoveries": 10,
+          "maxDynamicNodes": 10,
+          "maxCandidatesPerRound": 10,
+          "maxCandidateBytes": 1024,
+          "maxCandidateBatchBytes": 4096,
+          "consecutiveDryRounds": 2
+        },
+        "objective": {
+          "disposition": "inline-unredacted",
+          "redacted": false,
+          "encoding": "canonical-json/v1alpha1",
+          "canonicalJson": "\"audit auth routes\"",
+          "utf8ByteLength": 19,
+          "sha256": "8606fc0f8114b9501a72c9520e72c59f655b2b85ceeb6251722f6e882733ac2b"
+        },
+        "keyStrategyId": "finding-key/v1",
+        "rubricIdentity": "auth-rubric/v1",
+        "authorityCeilingHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "pricingPolicyHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "implementationHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "payloadProfile": {
+          "contractVersion": "cycle-controller-inline-payloads/v1alpha1",
+          "disposition": "inline-unredacted",
+          "redacted": false,
+          "inlineRiskAuthorizationHash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        },
+        "initialGraph": {
+          "graphRevision": 1,
+          "graphHash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "revisionHash": "1111111111111111111111111111111111111111111111111111111111111111"
+        },
+        "activities": {
+          "finder": {
+            "activityId": "finder",
+            "implementationHash": "1212121212121212121212121212121212121212121212121212121212121212",
+            "sideEffects": "none",
+            "maxAttemptsPerRound": 1,
+            "maxCostUsdPerAttempt": 0,
+            "timeoutMs": 100
+          },
+          "candidateEvaluator": {
+            "activityId": "candidate-evaluator",
+            "implementationHash": "1313131313131313131313131313131313131313131313131313131313131313",
+            "sideEffects": "none",
+            "maxAttemptsPerRound": 1,
+            "maxCostUsdPerAttempt": 0,
+            "timeoutMs": 100
+          },
+          "condition": null,
+          "optimizerEvaluator": null,
+          "patchPlanner": {
+            "activityId": "patch-planner",
+            "implementationHash": "1414141414141414141414141414141414141414141414141414141414141414",
+            "sideEffects": "idempotent",
+            "maxAttemptsPerRound": 1,
+            "maxCostUsdPerAttempt": 0,
+            "timeoutMs": 100
+          }
+        },
+        "patches": {
+          "enabled": true,
+          "limits": {
+            "maxNodes": 100,
+            "maxEdges": 200,
+            "maxOutputs": 100,
+            "maxDepth": 20,
+            "maxFanOut": 20
+          }
+        },
+        "lineage": {"origin": "start"}
+      }
+    }
+  ],
+  "invalidRequestCases": [
+    {"name": "free-form-node-config-is-not-a-carrier", "mutation": {"op": "add", "path": "/nodeConfig", "value": {"cycle": true}}},
+    {"name": "unknown-authority-object", "mutation": {"op": "add", "path": "/authorityCeiling", "value": {"network": "all"}}},
+    {"name": "authority-hash-cannot-be-object", "mutation": {"op": "replace", "path": "/authorityCeilingHash", "value": {"network": true}}},
+    {"name": "patch-enabled-requires-closed-limits", "mutation": {"op": "replace", "path": "/patches/limits", "value": null}},
+    {"name": "until-dry-forbids-condition", "mutation": {"op": "replace", "path": "/activities/condition", "valueFrom": "/activities/finder"}},
+    {"name": "inline-profile-cannot-claim-redacted", "mutation": {"op": "replace", "path": "/payloadProfile/redacted", "value": true}},
+    {"name": "patch-enabled-revision-cannot-overflow-next", "mutation": {"op": "replace", "path": "/initialGraph/graphRevision", "value": 9007199254740991}},
+    {"name": "request-unsafe-graph-revision", "mutation": {"op": "replace", "path": "/initialGraph/graphRevision", "value": 9007199254740992}}
+  ],
+  "validResults": [
+    {
+      "name": "max-iterations-after-one-patched-round",
+      "document": {
+        "apiVersion": "graphengineering.reacher-z.github.io/cycle-results/v1alpha1",
+        "kind": "CycleControllerResult",
+        "controllerRunId": "cycle-run-1",
+        "controllerHash": "d51253f9c969723dbbd682e1814f36c1938fba795341775424c09141b4b50fcc",
+        "requestHash": "121678db9a00d9d13f5c68f2a9429677e165de6fedfce337960ebe7a0709b140",
+        "mode": "until-dry",
+        "status": "bounded",
+        "exitReason": "MAX_ITERATIONS",
+        "iterations": 1,
+        "consecutiveDryRounds": 0,
+        "seenCount": 1,
+        "acceptedCount": 1,
+        "rejectedCount": 0,
+        "unknownCount": 0,
+        "unevaluatedCount": 0,
+        "attemptsUsed": 3,
+        "costUsd": 0,
+        "dynamicNodes": 1,
+        "durationMs": 30,
+        "lastGraphRevision": 2,
+        "lastGraphHash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "lastRevisionHash": "d3c8e14f571bb97a4fafca6d351886d50d93c1c1a5faeff72ff189789cbf48bc",
+        "terminalSequence": 15,
+        "historyPrefixHash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      }
+    },
+    {
+      "name": "dry-after-two-global-empty-rounds",
+      "document": {
+        "apiVersion": "graphengineering.reacher-z.github.io/cycle-results/v1alpha1",
+        "kind": "CycleControllerResult",
+        "controllerRunId": "cycle-run-dry",
+        "controllerHash": "d51253f9c969723dbbd682e1814f36c1938fba795341775424c09141b4b50fcc",
+        "requestHash": "121678db9a00d9d13f5c68f2a9429677e165de6fedfce337960ebe7a0709b140",
+        "mode": "until-dry",
+        "status": "converged",
+        "exitReason": "DRY",
+        "iterations": 4,
+        "consecutiveDryRounds": 2,
+        "seenCount": 3,
+        "acceptedCount": 0,
+        "rejectedCount": 0,
+        "unknownCount": 0,
+        "unevaluatedCount": 3,
+        "attemptsUsed": 8,
+        "costUsd": 0,
+        "dynamicNodes": 0,
+        "durationMs": 40,
+        "lastGraphRevision": 1,
+        "lastGraphHash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "lastRevisionHash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "terminalSequence": 24,
+        "historyPrefixHash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      }
+    },
+    {
+      "name": "while-condition-false",
+      "document": {
+        "apiVersion": "graphengineering.reacher-z.github.io/cycle-results/v1alpha1",
+        "kind": "CycleControllerResult",
+        "controllerRunId": "cycle-run-while",
+        "controllerHash": "d51253f9c969723dbbd682e1814f36c1938fba795341775424c09141b4b50fcc",
+        "requestHash": "121678db9a00d9d13f5c68f2a9429677e165de6fedfce337960ebe7a0709b140",
+        "mode": "while",
+        "status": "converged",
+        "exitReason": "CONDITION_FALSE",
+        "iterations": 2,
+        "consecutiveDryRounds": 0,
+        "seenCount": 1,
+        "acceptedCount": 1,
+        "rejectedCount": 0,
+        "unknownCount": 0,
+        "unevaluatedCount": 0,
+        "attemptsUsed": 6,
+        "costUsd": 0,
+        "dynamicNodes": 0,
+        "durationMs": 20,
+        "lastGraphRevision": 1,
+        "lastGraphHash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "lastRevisionHash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "terminalSequence": 20,
+        "historyPrefixHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      }
+    },
+    {
+      "name": "evaluator-accepted",
+      "document": {
+        "apiVersion": "graphengineering.reacher-z.github.io/cycle-results/v1alpha1",
+        "kind": "CycleControllerResult",
+        "controllerRunId": "cycle-run-evaluator-accepted",
+        "controllerHash": "d51253f9c969723dbbd682e1814f36c1938fba795341775424c09141b4b50fcc",
+        "requestHash": "121678db9a00d9d13f5c68f2a9429677e165de6fedfce337960ebe7a0709b140",
+        "mode": "evaluator-optimizer",
+        "status": "converged",
+        "exitReason": "EVALUATOR_ACCEPTED",
+        "iterations": 2,
+        "consecutiveDryRounds": 0,
+        "seenCount": 1,
+        "acceptedCount": 1,
+        "rejectedCount": 0,
+        "unknownCount": 0,
+        "unevaluatedCount": 0,
+        "attemptsUsed": 6,
+        "costUsd": 0,
+        "dynamicNodes": 0,
+        "durationMs": 20,
+        "lastGraphRevision": 1,
+        "lastGraphHash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "lastRevisionHash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "terminalSequence": 20,
+        "historyPrefixHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    },
+    {
+      "name": "evaluator-unknown-is-not-acceptance",
+      "document": {
+        "apiVersion": "graphengineering.reacher-z.github.io/cycle-results/v1alpha1",
+        "kind": "CycleControllerResult",
+        "controllerRunId": "cycle-run-evaluator-unknown",
+        "controllerHash": "d51253f9c969723dbbd682e1814f36c1938fba795341775424c09141b4b50fcc",
+        "requestHash": "121678db9a00d9d13f5c68f2a9429677e165de6fedfce337960ebe7a0709b140",
+        "mode": "evaluator-optimizer",
+        "status": "unknown",
+        "exitReason": "UNKNOWN_VERDICT",
+        "iterations": 1,
+        "consecutiveDryRounds": 0,
+        "seenCount": 1,
+        "acceptedCount": 0,
+        "rejectedCount": 0,
+        "unknownCount": 1,
+        "unevaluatedCount": 0,
+        "attemptsUsed": 3,
+        "costUsd": 0,
+        "dynamicNodes": 0,
+        "durationMs": 10,
+        "lastGraphRevision": 1,
+        "lastGraphHash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "lastRevisionHash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "terminalSequence": 10,
+        "historyPrefixHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    }
+  ],
+  "invalidResultCases": [
+    {"name": "status-exit-mismatch", "mutation": {"op": "replace", "path": "/status", "value": "converged"}},
+    {"name": "mode-specific-exit-mismatch", "mutations": [
+      {"op": "replace", "path": "/status", "value": "converged"},
+      {"op": "replace", "path": "/exitReason", "value": "CONDITION_FALSE"}
+    ]},
+    {"name": "unknown-result-field", "mutation": {"op": "add", "path": "/answer", "value": 42}},
+    {"name": "unsafe-counter", "mutation": {"op": "replace", "path": "/seenCount", "value": 9007199254740992}},
+    {"name": "category-count-mismatch", "semanticMutation": {"op": "replace", "path": "/acceptedCount", "value": 0}, "expectSemanticCode": "GE_CYCLE_COUNTER_MISMATCH"}
+  ],
+  "validRevisions": [
+    {
+      "name": "revision-two",
+      "document": {
+        "body": {
+          "apiVersion": "graphengineering.reacher-z.github.io/graph-revisions/v1alpha1",
+          "kind": "GraphRevision",
+          "graphRevision": 2,
+          "previousRevisionHash": "1111111111111111111111111111111111111111111111111111111111111111",
+          "patchHash": "ca6ba9762870a8b7f3de18607cd1f6db191bc3ecb473825516b3e26627a6ea07",
+          "graphHash": "2222222222222222222222222222222222222222222222222222222222222222"
+        },
+        "revisionHash": "d3c8e14f571bb97a4fafca6d351886d50d93c1c1a5faeff72ff189789cbf48bc"
+      }
+    }
+  ],
+  "invalidRevisionCases": [
+    {"name": "revision-one-is-initial-identity-only", "mutation": {"op": "replace", "path": "/body/graphRevision", "value": 1}},
+    {"name": "revision-overflow", "mutation": {"op": "replace", "path": "/body/graphRevision", "value": 9007199254740992}},
+    {"name": "self-hash-field-forbidden", "mutation": {"op": "add", "path": "/body/revisionHash", "value": "d3c8e14f571bb97a4fafca6d351886d50d93c1c1a5faeff72ff189789cbf48bc"}},
+    {"name": "revision-hash-drift", "semanticMutation": {"op": "replace", "path": "/revisionHash", "value": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"}, "expectSemanticCode": "GE_CYCLE_INVALID_HISTORY"}
+  ]
+}

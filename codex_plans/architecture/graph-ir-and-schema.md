@@ -479,8 +479,8 @@ examples, and launch content.
 | Nested subgraphs | `kind: subgraph` is accepted | No embedded/reference form, namespace expansion, input/output mapping, policy inheritance, checkpoint scope, or trace lineage; **vocabulary only** |
 | Stream/artifact edges | Edge mode literals are accepted | No Graph IR stream scheduler or ArtifactStore lowering; **vocabulary only** |
 | Conditions and mappings | Opaque objects are accepted and hashed | No portable expression language, compiler, sandbox, or scheduler application; **declarative only** |
-| Dynamic `GraphPatch` | `GraphPatched` exists in the event-type enum | No patch document schema, compiler API, revision transition, authorization/budget check, dry run, durable fold, or runtime execution; **not implemented** |
-| Node/edge/schema content hashes | Domain-separated component/schema hashes and revision-1 manifest | **Implemented for initial revision 1**; no patch lineage, signing, or durable manifest store |
+| Dynamic `GraphPatch` | Closed patch and later-revision schemas, standalone cycle carrier, separate durable-controller phase/checkpoint contracts, offline hostile fixtures | **Protocol frozen; runtime not implemented** — no native patch compiler/applier, authority/budget enforcement, scheduler exposure, or TS/Python executable conformance |
+| Node/edge/schema content hashes | Domain-separated component/schema hashes and revision-1 manifest; D7 freezes a separate revision-2+ chain preimage | **Implemented for initial revision 1; later lineage is contract-only** — no native patch lineage fold, signing, or durable manifest store |
 
 The `GraphPatched` event name is reserved vocabulary. The current durable
 contract intentionally runs one immutable compiled DAG at graph revision `1`.
@@ -542,8 +542,9 @@ the project needs a deterministic migration contract that:
 
 Durable resume must continue to require the graph hash bound by `RunCreated`.
 A changed graph, including metadata-only changes, cannot be substituted into an
-existing immutable run. Future GraphPatch revisions require their own protocol
-and lineage; migration is not a back door for patching live history.
+existing immutable run. D7 now freezes a separate standalone GraphPatch
+protocol and revision lineage, but the current native schedulers do not consume
+it; migration is not a back door for patching immutable scheduler history.
 
 ### Compatibility test matrix
 
@@ -583,7 +584,7 @@ the complete promise, not only one green diamond hash.
 | Typed ports and schema compatibility | Candidate green for strict-exact v1alpha1 | Opt-in exact proof only; general assignability remains out of scope |
 | State/reducer conflict validation | Open | `stateSchema` has no execution model |
 | Subgraph namespace/checkpoint contract | Open | Node kind literal only |
-| Dynamic revision/GraphPatch schema | Open | Event name only; durable graph remains immutable revision 1 |
+| Dynamic revision/GraphPatch schema | Protocol frozen / execution open | `graph-patch`, graph-revision, standalone controller, controller-event, and controller-checkpoint schemas plus offline hostile goldens exist; both native schedulers remain immutable revision 1 and do not execute them |
 | Policy/budget/capability/loop validation promised by plan | Partial/Open | Static fan-out/depth and numeric shapes exist; broader semantics do not |
 | Schema bundle drift detection | Green locally / published URL open | CLI package tests and MCP stdio tests byte-compare bundled copies to `spec/graph.schema.json`; published schema URL byte-equality remains a release gate |
 | Compatibility/migration ADR and fixtures | Open | No migration surface exists |

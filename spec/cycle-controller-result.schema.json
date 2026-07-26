@@ -1,0 +1,210 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/cycle-controller-result.schema.json",
+  "title": "Graph Engineering bounded-cycle controller terminal result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "controllerRunId",
+    "controllerHash",
+    "requestHash",
+    "mode",
+    "status",
+    "exitReason",
+    "iterations",
+    "consecutiveDryRounds",
+    "seenCount",
+    "acceptedCount",
+    "rejectedCount",
+    "unknownCount",
+    "unevaluatedCount",
+    "attemptsUsed",
+    "costUsd",
+    "dynamicNodes",
+    "durationMs",
+    "lastGraphRevision",
+    "lastGraphHash",
+    "lastRevisionHash",
+    "terminalSequence",
+    "historyPrefixHash"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "graphengineering.reacher-z.github.io/cycle-results/v1alpha1"
+    },
+    "kind": { "const": "CycleControllerResult" },
+    "controllerRunId": { "$ref": "#/$defs/identifier" },
+    "controllerHash": { "$ref": "#/$defs/hash" },
+    "requestHash": { "$ref": "#/$defs/hash" },
+    "mode": { "enum": ["until-dry", "while", "evaluator-optimizer"] },
+    "status": { "enum": ["converged", "bounded", "unknown", "failed", "cancelled"] },
+    "exitReason": {
+      "enum": [
+        "DRY",
+        "CONDITION_FALSE",
+        "EVALUATOR_ACCEPTED",
+        "UNKNOWN_VERDICT",
+        "MAX_ITERATIONS",
+        "MAX_DURATION",
+        "MAX_COST",
+        "MAX_TOTAL_ATTEMPTS",
+        "MAX_DYNAMIC_NODES",
+        "MAX_DISCOVERIES",
+        "PATCH_REJECTED",
+        "FAILED",
+        "CANCELLED"
+      ]
+    },
+    "iterations": { "$ref": "#/$defs/counter" },
+    "consecutiveDryRounds": { "$ref": "#/$defs/counter" },
+    "seenCount": { "$ref": "#/$defs/counter" },
+    "acceptedCount": { "$ref": "#/$defs/counter" },
+    "rejectedCount": { "$ref": "#/$defs/counter" },
+    "unknownCount": { "$ref": "#/$defs/counter" },
+    "unevaluatedCount": { "$ref": "#/$defs/counter" },
+    "attemptsUsed": { "$ref": "#/$defs/counter" },
+    "costUsd": { "$ref": "#/$defs/cost" },
+    "dynamicNodes": { "$ref": "#/$defs/counter" },
+    "durationMs": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 2147483647
+    },
+    "lastGraphRevision": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "lastGraphHash": { "$ref": "#/$defs/hash" },
+    "lastRevisionHash": { "$ref": "#/$defs/hash" },
+    "terminalSequence": { "$ref": "#/$defs/counter" },
+    "historyPrefixHash": { "$ref": "#/$defs/hash" }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "mode": { "const": "until-dry" } },
+        "required": ["mode"]
+      },
+      "else": {
+        "properties": { "consecutiveDryRounds": { "const": 0 } }
+      }
+    },
+    {
+      "if": {
+        "properties": { "mode": { "const": "until-dry" } },
+        "required": ["mode"]
+      },
+      "then": {
+        "properties": {
+          "exitReason": {
+            "enum": [
+              "DRY", "MAX_ITERATIONS", "MAX_DURATION", "MAX_COST",
+              "MAX_TOTAL_ATTEMPTS", "MAX_DYNAMIC_NODES", "MAX_DISCOVERIES",
+              "PATCH_REJECTED", "FAILED", "CANCELLED"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "mode": { "const": "while" } },
+        "required": ["mode"]
+      },
+      "then": {
+        "properties": {
+          "exitReason": {
+            "enum": [
+              "CONDITION_FALSE", "MAX_ITERATIONS", "MAX_DURATION", "MAX_COST",
+              "MAX_TOTAL_ATTEMPTS", "MAX_DYNAMIC_NODES", "MAX_DISCOVERIES",
+              "PATCH_REJECTED", "FAILED", "CANCELLED"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "mode": { "const": "evaluator-optimizer" } },
+        "required": ["mode"]
+      },
+      "then": {
+        "properties": {
+          "exitReason": {
+            "enum": [
+              "EVALUATOR_ACCEPTED", "UNKNOWN_VERDICT", "MAX_ITERATIONS",
+              "MAX_DURATION", "MAX_COST", "MAX_TOTAL_ATTEMPTS",
+              "MAX_DYNAMIC_NODES", "MAX_DISCOVERIES", "PATCH_REJECTED",
+              "FAILED", "CANCELLED"
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "oneOf": [
+    {
+      "properties": {
+        "status": { "const": "converged" },
+        "exitReason": { "enum": ["DRY", "CONDITION_FALSE", "EVALUATOR_ACCEPTED"] }
+      }
+    },
+    {
+      "properties": {
+        "status": { "const": "bounded" },
+        "exitReason": {
+          "enum": [
+            "MAX_ITERATIONS",
+            "MAX_DURATION",
+            "MAX_COST",
+            "MAX_TOTAL_ATTEMPTS",
+            "MAX_DYNAMIC_NODES",
+            "MAX_DISCOVERIES"
+          ]
+        }
+      }
+    },
+    {
+      "properties": {
+        "status": { "const": "unknown" },
+        "exitReason": { "const": "UNKNOWN_VERDICT" }
+      }
+    },
+    {
+      "properties": {
+        "status": { "const": "failed" },
+        "exitReason": { "enum": ["PATCH_REJECTED", "FAILED"] }
+      }
+    },
+    {
+      "properties": {
+        "status": { "const": "cancelled" },
+        "exitReason": { "const": "CANCELLED" }
+      }
+    }
+  ],
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+      "not": { "enum": [".", ".."] }
+    },
+    "hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "counter": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "cost": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    }
+  }
+}

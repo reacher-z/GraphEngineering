@@ -1,0 +1,323 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/cycle-controller.schema.json",
+  "title": "Graph Engineering standalone bounded-cycle controller request",
+  "description": "Explicit public carrier for cycle execution. It is not a GraphSpec node or free-form NodeSpec.config value.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "controllerRunId",
+    "controllerId",
+    "hostRun",
+    "eventStreamId",
+    "checkpointScope",
+    "policy",
+    "objective",
+    "keyStrategyId",
+    "rubricIdentity",
+    "authorityCeilingHash",
+    "pricingPolicyHash",
+    "implementationHash",
+    "payloadProfile",
+    "initialGraph",
+    "activities",
+    "patches",
+    "lineage"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "graphengineering.reacher-z.github.io/cycle-controllers/v1alpha1"
+    },
+    "kind": { "const": "CycleControllerRequest" },
+    "controllerRunId": { "$ref": "#/$defs/identifier" },
+    "controllerId": { "$ref": "#/$defs/identifier" },
+    "hostRun": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["relationship", "runId"],
+      "properties": {
+        "relationship": { "const": "standalone-child-controller" },
+        "runId": { "$ref": "#/$defs/identifier" }
+      }
+    },
+    "eventStreamId": { "$ref": "#/$defs/identifier" },
+    "checkpointScope": { "$ref": "#/$defs/identifier" },
+    "policy": {
+      "$ref": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/cycle-controller-policy.schema.json"
+    },
+    "objective": { "$ref": "#/$defs/inlinePayload" },
+    "keyStrategyId": { "$ref": "#/$defs/versionedIdentity" },
+    "rubricIdentity": { "$ref": "#/$defs/versionedIdentity" },
+    "authorityCeilingHash": { "$ref": "#/$defs/hash" },
+    "pricingPolicyHash": { "$ref": "#/$defs/hash" },
+    "implementationHash": { "$ref": "#/$defs/hash" },
+    "payloadProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contractVersion", "disposition", "redacted", "inlineRiskAuthorizationHash"],
+      "properties": {
+        "contractVersion": { "const": "cycle-controller-inline-payloads/v1alpha1" },
+        "disposition": { "const": "inline-unredacted" },
+        "redacted": { "const": false },
+        "inlineRiskAuthorizationHash": { "$ref": "#/$defs/hash" }
+      }
+    },
+    "initialGraph": {
+      "$ref": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/graph-revision.schema.json#/$defs/coordinate"
+    },
+    "activities": { "$ref": "#/$defs/activities" },
+    "patches": { "$ref": "#/$defs/patches" },
+    "lineage": { "$ref": "#/$defs/lineage" }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "policy": {
+            "type": "object",
+            "properties": { "mode": { "const": "until-dry" } },
+            "required": ["mode"]
+          }
+        },
+        "required": ["policy"]
+      },
+      "then": {
+        "properties": {
+          "activities": {
+            "type": "object",
+            "properties": {
+              "condition": { "type": "null" },
+              "optimizerEvaluator": { "type": "null" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "policy": {
+            "type": "object",
+            "properties": { "mode": { "const": "while" } },
+            "required": ["mode"]
+          }
+        },
+        "required": ["policy"]
+      },
+      "then": {
+        "properties": {
+          "activities": {
+            "type": "object",
+            "properties": {
+              "condition": { "$ref": "#/$defs/activity" },
+              "optimizerEvaluator": { "type": "null" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "policy": {
+            "type": "object",
+            "properties": { "mode": { "const": "evaluator-optimizer" } },
+            "required": ["mode"]
+          }
+        },
+        "required": ["policy"]
+      },
+      "then": {
+        "properties": {
+          "activities": {
+            "type": "object",
+            "properties": {
+              "condition": { "type": "null" },
+              "optimizerEvaluator": { "$ref": "#/$defs/activity" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "patches": {
+            "type": "object",
+            "properties": { "enabled": { "const": true } },
+            "required": ["enabled"]
+          }
+        },
+        "required": ["patches"]
+      },
+      "then": {
+        "properties": {
+          "initialGraph": {
+            "type": "object",
+            "properties": {
+              "graphRevision": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740990
+              }
+            }
+          },
+          "activities": {
+            "type": "object",
+            "properties": { "patchPlanner": { "$ref": "#/$defs/activity" } }
+          },
+          "patches": {
+            "type": "object",
+            "properties": { "limits": { "$ref": "#/$defs/graphLimits" } }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "activities": {
+            "type": "object",
+            "properties": { "patchPlanner": { "type": "null" } }
+          },
+          "patches": {
+            "type": "object",
+            "properties": { "limits": { "type": "null" } }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+      "not": { "enum": [".", ".."] }
+    },
+    "versionedIdentity": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,254}/v[0-9]+(?:alpha[0-9]+|beta[0-9]+)?$"
+    },
+    "hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "counter": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "cost": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "inlinePayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["disposition", "redacted", "encoding", "canonicalJson", "utf8ByteLength", "sha256"],
+      "properties": {
+        "disposition": { "const": "inline-unredacted" },
+        "redacted": { "const": false },
+        "encoding": { "const": "canonical-json/v1alpha1" },
+        "canonicalJson": { "type": "string", "minLength": 1, "maxLength": 4194304 },
+        "utf8ByteLength": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4194304
+        },
+        "sha256": { "$ref": "#/$defs/hash" }
+      }
+    },
+    "activity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "activityId",
+        "implementationHash",
+        "sideEffects",
+        "maxAttemptsPerRound",
+        "maxCostUsdPerAttempt",
+        "timeoutMs"
+      ],
+      "properties": {
+        "activityId": { "$ref": "#/$defs/identifier" },
+        "implementationHash": { "$ref": "#/$defs/hash" },
+        "sideEffects": { "enum": ["none", "idempotent", "non-idempotent"] },
+        "maxAttemptsPerRound": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "maxCostUsdPerAttempt": { "$ref": "#/$defs/cost" },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        }
+      }
+    },
+    "activities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["finder", "candidateEvaluator", "condition", "optimizerEvaluator", "patchPlanner"],
+      "properties": {
+        "finder": { "$ref": "#/$defs/activity" },
+        "candidateEvaluator": { "$ref": "#/$defs/activity" },
+        "condition": {
+          "oneOf": [{ "$ref": "#/$defs/activity" }, { "type": "null" }]
+        },
+        "optimizerEvaluator": {
+          "oneOf": [{ "$ref": "#/$defs/activity" }, { "type": "null" }]
+        },
+        "patchPlanner": {
+          "oneOf": [{ "$ref": "#/$defs/activity" }, { "type": "null" }]
+        }
+      }
+    },
+    "graphLimits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["maxNodes", "maxEdges", "maxOutputs", "maxDepth", "maxFanOut"],
+      "properties": {
+        "maxNodes": { "type": "integer", "minimum": 1, "maximum": 100000 },
+        "maxEdges": { "type": "integer", "minimum": 0, "maximum": 200000 },
+        "maxOutputs": { "type": "integer", "minimum": 1, "maximum": 100000 },
+        "maxDepth": { "type": "integer", "minimum": 1, "maximum": 100000 },
+        "maxFanOut": { "type": "integer", "minimum": 1, "maximum": 100000 }
+      }
+    },
+    "patches": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "limits"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "limits": {
+          "oneOf": [{ "$ref": "#/$defs/graphLimits" }, { "type": "null" }]
+        }
+      }
+    },
+    "lineage": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["origin"],
+          "properties": { "origin": { "const": "start" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["origin", "parentControllerRunId", "parentSequence", "parentHistoryHash"],
+          "properties": {
+            "origin": { "const": "fork" },
+            "parentControllerRunId": { "$ref": "#/$defs/identifier" },
+            "parentSequence": { "$ref": "#/$defs/counter" },
+            "parentHistoryHash": { "$ref": "#/$defs/hash" }
+          }
+        }
+      ]
+    }
+  }
+}

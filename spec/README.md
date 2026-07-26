@@ -19,6 +19,24 @@ Standalone per-item streaming, bounded buffers, source backpressure, structured
 failure policies, and cancellation are fixed by
 [pipeline-semantics.md](pipeline-semantics.md). This standalone contract does
 not activate Graph IR stream edges or durable item recovery.
+General builders, strict JSON, safe YAML, opt-in typed ports, and immutable
+initial graph identity are fixed by
+[authoring-semantics.md](authoring-semantics.md). The machine-readable initial
+identity envelope is [compiled-identity.schema.json](compiled-identity.schema.json).
+Bounded dynamic-cycle and append-only patch behavior is frozen by
+[cycle-semantics.md](cycle-semantics.md). Its standalone carrier and effective
+policy/result contracts are
+[cycle-controller.schema.json](cycle-controller.schema.json),
+[cycle-controller-policy.schema.json](cycle-controller-policy.schema.json), and
+[cycle-controller-result.schema.json](cycle-controller-result.schema.json).
+Later revision lineage is closed by
+[graph-revision.schema.json](graph-revision.schema.json); the separate durable
+controller event and fold/checkpoint contracts are
+[cycle-controller-event.schema.json](cycle-controller-event.schema.json) and
+[cycle-controller-checkpoint.schema.json](cycle-controller-checkpoint.schema.json).
+These D7 schemas are protocol-frozen but not native runtime capability. Their
+v1alpha1 authoritative payloads are explicitly inline-unredacted and therefore
+do not satisfy the still-open D9 protected-payload or stable-release gate.
 
 ## Canonical serialization v1alpha1
 
@@ -27,12 +45,26 @@ Before hashing a Graph IR document, implementations must:
 1. Preserve array order.
 2. Recursively sort object property names by Unicode code point.
 3. Serialize UTF-8 JSON with no insignificant whitespace.
-4. Encode booleans, strings, integers, arrays, objects, and null using normal JSON.
-5. Calculate SHA-256 over the UTF-8 bytes and emit lowercase hexadecimal.
+4. Encode booleans, strings, arrays, objects, and null using the frozen project
+   JSON rules.
+5. Serialize every accepted finite binary64 number with ECMAScript's
+   shortest-round-trip number algorithm: normalize negative zero to `0`, use
+   fixed notation for magnitudes from `1e-6` (inclusive) through `1e21`
+   (exclusive), and otherwise use lowercase scientific notation with an
+   explicit `+` for positive exponents.
+6. Calculate SHA-256 over the UTF-8 bytes and emit lowercase hexadecimal.
 
-The v1alpha1 conformance corpus intentionally avoids floating-point values in
-hashed documents. Full RFC 8785 number canonicalization must be adopted before
-floating-point values become part of a stable hash contract.
+The numeric rule is the finite-binary64 serialization defined by RFC 8785
+Section 3.2.2.3 and ECMA-262 `Number::toString`, including closest-value and
+round-to-even selection. The shared
+[`canonical-number.case.json`](conformance/canonical-number.case.json) corpus
+separates low-level formatter vectors from the public portable domain and
+freezes unsafe-integer/non-finite rejection, a seeded differential, and a
+fractional JSON/YAML/compiler/builder graph identity. This is not a claim of
+full RFC 8785 JCS conformance: Graph IR property ordering remains
+Unicode-code-point order, not RFC 8785's UTF-16-code-unit order. Integer-valued
+numbers outside
+`[-(2^53-1), 2^53-1]` and all non-finite numbers remain invalid Graph IR.
 
 Unknown fields are rejected by the graph envelope, nodes, edges, and metadata.
 Extension data belongs under explicitly versioned `config` or policy objects.
@@ -58,6 +90,17 @@ The following codes are stable across languages:
 - `GE1010_ENTRYPOINT_HAS_INCOMING`
 - `GE1101_MAX_FAN_OUT`
 - `GE1102_MAX_DEPTH`
+- `GE1201_MISSING_SOURCE_PORT`
+- `GE1202_MISSING_TARGET_PORT`
+- `GE1203_PORT_SCHEMA_MISMATCH`
+- `GE1204_DUPLICATE_TARGET_BINDING`
+- `GE1205_INVALID_PORT_SCHEMA`
+- `GE1206_OUTPUT_SCHEMA_MISMATCH`
+- `GE1207_ENTRYPOINT_SCHEMA_MISMATCH`
+- `GE1208_UNSUPPORTED_TYPED_EDGE_MODE`
+- `GE1301_UNSUPPORTED_GRAPH_REVISION`
+- `GE1302_GRAPH_IDENTITY_MISMATCH`
+- `GE1303_COMPONENT_IDENTITY_MISMATCH`
 
 Compilers may attach language-specific explanatory messages and source
 locations, but conformance tests compare the stable diagnostic code and

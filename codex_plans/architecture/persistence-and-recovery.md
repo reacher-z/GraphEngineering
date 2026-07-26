@@ -18,6 +18,13 @@ recover bounded safe attempts, and fail closed on an in-doubt external effect.
 It is not a distributed coordinator, a production storage system, or an
 exactly-once activity engine.
 
+The later D7 contract under
+[`cycle-semantics.md`](../../spec/cycle-semantics.md) now defines a separate
+`cycle-controller-recovery/v1alpha1` event/checkpoint/fold protocol for a
+standalone controller. That protocol is schema- and fixture-frozen only. It is
+not an extension of this scheduler, is not implemented by either native
+runtime, and does not change any capability claim below.
+
 ## 1. Current boundary at a glance
 
 ```mermaid
@@ -402,8 +409,8 @@ the operational capability exists.
 | PostgreSQL store | Not implemented; planned production adapter | Transaction/isolation contract, migrations, connection failure handling, lease/fencing integration, and multi-host tests |
 | S3 artifact/checkpoint store | Not implemented; planned production adapter | Object consistency/version contract, integrity metadata, atomic publish protocol, retry policy, and fault tests |
 | Scheduler checkpoint acceleration | Specified but not integrated | Prefix/projection validation, stale/ahead/corrupt fallback warnings, suffix fold, and equivalence tests against full replay |
-| Replay | Explicitly outside durable v1alpha1 | Recorded-activity policy, deterministic decision reuse, lineage, new-run identity, and conformance corpus |
-| Fork | Explicitly outside durable v1alpha1 | Parent/history reference, fork point rules, mutable inputs/implementation policy, lineage events, and parity tests |
+| Replay | Explicitly outside scheduler durable v1alpha1; controller-specific D7 contract frozen only | Native recorded-activity behavior, read-only execution proof, new-run identity rules where applicable, and executable parity corpus |
+| Fork | Explicitly outside scheduler durable v1alpha1; controller-specific prefix/lineage contract frozen only | Native parent-prefix validation, in-doubt transfer, independent child history, and parity tests |
 | Approval/reconciliation workflow | Not implemented | Durable request/decision events, authorization, stale-decision handling, timeout/escalation, CLI/API callback, and audit tests |
 | Non-idempotent confirmation | Not implemented | The approval protocol above; current behavior always fails closed with `IN_DOUBT_SIDE_EFFECT` |
 | Distributed workers | Not implemented | Worker protocol, queue/claim semantics, leases, heartbeats, fencing, ownership transfer, cancellation, and chaos suite |
