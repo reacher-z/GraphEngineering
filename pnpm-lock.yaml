@@ -100,6 +100,9 @@ importers:
       '@graph-engineering/core':
         specifier: workspace:*
         version: link:../core
+      '@graph-engineering/persistence':
+        specifier: workspace:*
+        version: link:../persistence
     devDependencies:
       '@types/node':
         specifier: ^22.0.0

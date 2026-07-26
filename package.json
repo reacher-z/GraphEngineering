@@ -36,6 +36,6 @@
     "audit:prod": "corepack pnpm audit --prod --audit-level moderate",
     "check:python-package": "python3 scripts/check-python-artifacts.py",
     "test:python": "uv run --project python pytest",
-    "test:conformance": "corepack pnpm --filter @graph-engineering/core build && corepack pnpm --filter @graph-engineering/runtime build && corepack pnpm --filter @graph-engineering/persistence build && corepack pnpm --filter @graph-engineering/primitives build && node tools/conformance/run.mjs"
+    "test:conformance": "corepack pnpm --filter @graph-engineering/core build && corepack pnpm --filter @graph-engineering/persistence build && corepack pnpm --filter @graph-engineering/runtime build && corepack pnpm --filter @graph-engineering/primitives build && node tools/conformance/run.mjs"
   }
 }

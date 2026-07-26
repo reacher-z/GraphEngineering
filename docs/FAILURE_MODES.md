@@ -7,20 +7,24 @@ must handle.
 
 ## Status and guarantees
 
-The current TypeScript and Python runtimes are **in-memory DAG schedulers**. Both
-native implementations pass the shared diamond and no-layer-barrier ready-queue
-conformance cases, bound concurrency/attempts, retry and time out node attempts,
-preserve structured failures, skip affected descendants, and let independent
-branches continue. Both expose cooperative run cancellation and reject graph
-inputs or node results that are not detached portable finite JSON.
+The TypeScript and Python runtimes provide both an ordinary in-memory DAG
+scheduler and separate event-sourced start/resume operations. Both native
+implementations pass shared ready-queue and durable-recovery conformance cases,
+bound concurrency/attempts, retry and time out node attempts, preserve structured
+failures, skip affected descendants, and let independent branches continue. Both
+expose cooperative run cancellation and reject graph inputs or node results that
+are not detached portable finite JSON.
 
-Native local event and checkpoint stores now exist, but the schedulers do not yet
-write or recover from them. They do not yet provide scheduler-integrated resume,
-streaming pipelines, conditional routing, verifier panels, explicit loop
-primitives, dynamic graph patches, distributed leases, provider rate limiting,
-worktree isolation, or capability enforcement. Sections about those features are
-marked **target v1** and are operational requirements, not claims about current
-code.
+Durable runs write authoritative scheduler events and reconstruct continuation
+from the complete event history. They bind graph, original input, and
+caller-supplied implementation identity, reuse committed successes, preserve
+consumed attempt budgets, and make terminal resume side-effect free. Standalone
+checkpoint stores exist, but scheduler checkpoint acceleration does not. Replay,
+fork, dynamic graph patches, distributed leases, streaming pipelines,
+conditional routing, verifier panels, explicit loop primitives, provider rate
+limiting, worktree isolation, and capability enforcement also remain future
+work. Sections marked **target v1** are operational requirements, not current
+claims.
 
 ## Failure is data
 
@@ -187,8 +191,12 @@ idempotency key for the logical activity and reuse it across attempts. Query the
 external system before retrying an ambiguous result. Mark truly non-idempotent
 nodes and require review or approval on recovery.
 
-The current `sideEffects` field is metadata only; the alpha runtime does not
-enforce idempotency or approvals.
+The ordinary in-memory scheduler treats `sideEffects` as descriptive metadata.
+Durable resume uses it only to decide whether an open, unknown-outcome attempt
+may be invoked again: `none` and `idempotent` are eligible within the original
+budgets, while an omitted or `non-idempotent` declaration fails closed with
+`IN_DOUBT_SIDE_EFFECT`. This policy cannot prove that an external operation is
+actually idempotent, and there is no approval callback.
 
 ### Timeout does not terminate executor code
 
@@ -321,40 +329,57 @@ the eventual durable implementation.
 Track rubric score and artifact hash. Stop on threshold, no improvement, repeated
 state, budget, or iteration limit. Do not equate “different output” with progress.
 
-## Durable execution failures (scheduler integration target v1)
+## Durable execution failures
 
-The current scheduler restarts from the beginning after process loss even though
-standalone local event/checkpoint adapters are available. The following are
-target-v1 recovery requirements.
+### Crash after effect, before the durable outcome
 
-### Crash after effect, before checkpoint
-
-The external effect may exist while local state says it is incomplete. Reuse a
-stable activity idempotency key, record request intent before dispatch where
-appropriate, reconcile ambiguous activities, and gate non-idempotent retries.
+The external effect may exist after `NodeStarted` commits while the event stream
+still has no attempt outcome. Resume records the interrupted attempt as consumed.
+It may retry a node declared `sideEffects: "none"` or `"idempotent"`; idempotent
+attempts receive the same stable activity key. For omitted or non-idempotent
+declarations it throws `IN_DOUBT_SIDE_EFFECT` without invoking the executor
+again. Applications must still forward the key, reconcile ambiguous remote
+state, and authorize any compensation. External exactly-once execution is not
+provided.
 
 ### Crash after one branch succeeds
 
-Persist each validated node result immediately; do not wait for an entire visual
-layer or barrier. Resume must reuse that result and schedule only unfinished work.
+The current durable scheduler commits each validated `NodeSucceeded` together
+with its ordered outgoing `EdgeEmitted` facts before releasing dependants. Resume
+reuses that result and schedules only unfinished work; it does not wait for an
+entire visual layer or barrier before persisting progress.
 
 ### Two orchestrators resume one run
 
-Use a lease plus compare-and-swap event append. A stale owner cannot continue
-after losing its lease. Split-brain execution is especially dangerous for side
-effects; detecting it after both workers write is too late.
+The current continuation claim appends `RunResumed` with compare-and-swap before
+calling an executor, so competing resume calls cannot both commit that claim.
+CAS is not a lease or fencing token: an old coordinator or two processes may
+still execute external work before one loses a write race. Ensure the old
+coordinator has stopped before resume. A lease/fencing provider that stops stale
+owners is target-v1 work.
 
 ### Code or graph changes during resume
 
-Bind each run to an immutable graph revision/hash and activity implementation
-version. Resume the original revision. Replay or fork under changed code must be
-an explicit operation with compatibility checks, not an invisible upgrade.
+Current start binds each run to graph revision/hash, original input hash, and a
+hash of the caller-supplied `implementationId`; resume rejects mismatches before
+invoking executors. The implementation ID is a caller assertion, not code
+attestation. Replay or fork under changed code is not implemented and must
+eventually be an explicit operation rather than an invisible upgrade.
 
 ### Checkpoint is mistaken for truth
 
-Treat the append-only event history as the source of truth and checkpoints as
-reconstruction accelerators. Validate checkpoint hash/version, and rebuild from
-events when it is missing or corrupt.
+The append-only event history is the current source of truth and resume folds it
+in full. Local checkpoint adapters are not connected to scheduler recovery, so a
+checkpoint cannot authorize or change continuation. Future checkpoint
+acceleration must validate its history position and projection, ignore stale or
+corrupt caches, and remain rebuildable from events.
+
+### Terminal resume repeats completed work
+
+A valid terminal history is idempotent in both native runtimes: resume returns
+the recorded graph result with zero new events, zero checkpoint writes, and zero
+executor calls. A terminal snapshot that contradicts folded node history is
+`INVALID_RUN_HISTORY`, not a reason to trust the snapshot or rerun work.
 
 ## Security and isolation failures
 

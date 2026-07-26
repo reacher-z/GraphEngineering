@@ -98,7 +98,7 @@ jobs:
       - run: uv run --project python --python ${{ matrix.python }} pytest
       - run: uv run --project python --python ${{ matrix.python }} python examples/quickstart/run.py
       - run: uv run --project python --python ${{ matrix.python }} ruff check python/src python/tests
-      - run: uv run --project python --python ${{ matrix.python }} mypy python/src
+      - run: uv run --project python --python ${{ matrix.python }} mypy --config-file python/pyproject.toml python/src
       - if: matrix.python == '3.13'
         run: uv build --project python
       - if: matrix.python == '3.13'

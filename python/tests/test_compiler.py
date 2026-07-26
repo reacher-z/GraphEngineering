@@ -30,6 +30,7 @@ def test_diamond_topological_layers_match_conformance() -> None:
         ("invalid-missing-endpoint.graph.json", DiagnosticCode.MISSING_TARGET),
         ("invalid-cycle.graph.json", DiagnosticCode.CYCLE),
         ("invalid-unreachable.graph.json", DiagnosticCode.UNREACHABLE_NODE),
+        ("invalid-oversized-timers.graph.json", DiagnosticCode.INVALID_GRAPH),
     ],
 )
 def test_invalid_conformance_fixtures(fixture: str, code: DiagnosticCode) -> None:
@@ -143,3 +144,85 @@ def test_surrogate_pair_key_collision_returns_invalid_graph() -> None:
     assert result.graph is None
     assert [item.code for item in result.diagnostics] == [DiagnosticCode.INVALID_GRAPH]
     assert result.diagnostics[0].message == "graph input could not be inspected safely"
+
+
+@pytest.mark.parametrize(
+    "policy_name",
+    [
+        "maxConcurrency",
+        "maxDynamicNodes",
+        "maxDepth",
+        "maxFanOut",
+        "maxTotalAttempts",
+        "maxDurationMs",
+    ],
+)
+def test_graph_policy_integers_reject_values_above_javascript_safe_range(
+    policy_name: str,
+) -> None:
+    document = load_fixture("diamond.graph.json")
+    document["policies"] = {policy_name: 2**53}
+
+    result = try_compile_graph(document)
+
+    assert result.graph is None
+    assert [item.code for item in result.diagnostics] == [DiagnosticCode.INVALID_GRAPH]
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value"),
+    [
+        ("timeoutMs", 2**53),
+        ("initialDelayMs", 2**53),
+        ("maxDelayMs", 2**53),
+        ("backoffMultiplier", float(2**53)),
+    ],
+)
+def test_node_timing_numbers_must_be_portable(field_name: str, value: object) -> None:
+    document = load_fixture("diamond.graph.json")
+    node = document["nodes"][0]  # type: ignore[index]
+    if field_name == "timeoutMs":
+        node[field_name] = value
+    else:
+        node["retry"] = {field_name: value}
+
+    result = try_compile_graph(document)
+
+    assert result.graph is None
+    assert [item.code for item in result.diagnostics] == [DiagnosticCode.INVALID_GRAPH]
+
+
+def test_timer_fields_accept_the_shared_32_bit_maximum() -> None:
+    document = load_fixture("diamond.graph.json")
+    node = document["nodes"][0]  # type: ignore[index]
+    node["timeoutMs"] = 2**31 - 1
+    node["retry"] = {
+        "initialDelayMs": 2**31 - 1,
+        "maxDelayMs": 2**31 - 1,
+    }
+    document["policies"] = {"maxDurationMs": 2**31 - 1}
+
+    assert try_compile_graph(document).valid
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float(2**53)])
+def test_max_cost_must_be_finite_portable_json(value: float) -> None:
+    document = load_fixture("diamond.graph.json")
+    document["policies"] = {"maxCostUsd": value}
+
+    result = try_compile_graph(document)
+
+    assert result.graph is None
+    assert [item.code for item in result.diagnostics] == [DiagnosticCode.INVALID_GRAPH]
+
+
+def test_compiling_a_model_instance_detaches_and_revalidates_nested_json() -> None:
+    compiled = compile_graph(load_fixture("diamond.graph.json"))
+    config = compiled.spec.nodes[0].config
+    assert isinstance(config, dict)
+    config["unsafe"] = 2**53
+
+    result = try_compile_graph(compiled.spec)
+
+    assert result.graph is None
+    assert [item.code for item in result.diagnostics] == [DiagnosticCode.INVALID_GRAPH]

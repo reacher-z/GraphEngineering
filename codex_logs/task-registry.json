@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-07-26T12:20:00Z",
+  "updated_at": "2026-07-26T13:40:44Z",
   "repository": ".",
   "scan_policy": {
     "warning_after_minutes": 60,
@@ -428,6 +428,102 @@
       "risk": "medium",
       "blocker": null,
       "next_action": "Use the 9,416+ moving parity benchmark, finish GitHub launch settings, and execute the adoption/content backlog without promising stars"
+    },
+    {
+      "id": "D6-DURABLE-SPEC-010",
+      "title": "Cross-language durable scheduler recovery contract and fixtures",
+      "owner": "main + /root/durable_contract",
+      "status": "completed",
+      "work_package": "WP3",
+      "depends_on": ["D1-SPEC-001", "D2-TS-PERSIST-001", "D2-PY-PERSIST-001"],
+      "expected_artifacts": [
+        "spec/durable-recovery-semantics.md",
+        "spec/durable-json.schema.json",
+        "spec/conformance/durable-json.case.json",
+        "spec/conformance/durable-resume.case.json"
+      ],
+      "expected_tests": [
+        "tagged Durable JSON hash parity",
+        "committed-success reuse",
+        "interrupted-attempt recovery",
+        "terminal resume idempotence"
+      ],
+      "assigned_at": "2026-07-26T12:23:00Z",
+      "started_at": "2026-07-26T12:23:00Z",
+      "last_heartbeat": "2026-07-26T13:40:44Z",
+      "risk": "high",
+      "blocker": null,
+      "next_action": "Hold the contract stable while both native implementations and the shared recovery harness are verified"
+    },
+    {
+      "id": "D6-TS-DURABLE-010",
+      "title": "TypeScript event-sourced scheduler start and resume",
+      "owner": "/root/durable_contract (handoff from /root/durable_ts)",
+      "status": "completed",
+      "work_package": "WP3",
+      "depends_on": ["D6-DURABLE-SPEC-010", "D3-TS-RUNTIME-002", "D2-TS-PERSIST-001"],
+      "expected_artifacts": ["packages/runtime"],
+      "expected_tests": [
+        "commit-before-release",
+        "successful node never reruns",
+        "attempt budgets survive crash",
+        "identity/history/CAS rejection",
+        "terminal idempotence"
+      ],
+      "assigned_at": "2026-07-26T12:42:00Z",
+      "started_at": "2026-07-26T12:42:00Z",
+      "last_heartbeat": "2026-07-26T14:39:43Z",
+      "risk": "high",
+      "blocker": null,
+      "next_action": "Maintain the 81-test durable runtime contract while shared release and package gates run"
+    },
+    {
+      "id": "D6-PY-DURABLE-010",
+      "title": "Python event-sourced scheduler start and resume",
+      "owner": "/root/durable_py",
+      "status": "completed",
+      "work_package": "WP3",
+      "depends_on": ["D6-DURABLE-SPEC-010", "D3-PY-RUNTIME-002", "D2-PY-PERSIST-001"],
+      "expected_artifacts": ["python/src/graph_engineering"],
+      "expected_tests": [
+        "commit-before-release",
+        "successful node never reruns",
+        "attempt budgets survive crash",
+        "identity/history/CAS rejection",
+        "terminal idempotence"
+      ],
+      "assigned_at": "2026-07-26T12:42:00Z",
+      "started_at": "2026-07-26T12:42:00Z",
+      "last_heartbeat": "2026-07-26T14:39:43Z",
+      "risk": "high",
+      "blocker": null,
+      "next_action": "Maintain the 486-test durable runtime contract as the branch enters CI review"
+    },
+    {
+      "id": "D6-DURABLE-CONFORMANCE-011",
+      "title": "Cross-language crash/resume and adversarial history conformance",
+      "owner": "main",
+      "status": "completed",
+      "work_package": "WP3-WP11",
+      "depends_on": ["D6-TS-DURABLE-010", "D6-PY-DURABLE-010"],
+      "expected_artifacts": [
+        "tools/conformance/python_durable_report.py",
+        "tools/conformance/python_durable_interop.py",
+        "tools/conformance/run.mjs"
+      ],
+      "expected_tests": [
+        "Python-created crash history resumes in TypeScript",
+        "shared result and event sequence parity",
+        "terminal zero-event zero-executor resume",
+        "resigned history rejection",
+        "full repository and package gates"
+      ],
+      "assigned_at": "2026-07-26T13:28:00Z",
+      "started_at": "2026-07-26T13:28:00Z",
+      "last_heartbeat": "2026-07-26T14:49:21Z",
+      "risk": "high",
+      "blocker": null,
+      "next_action": "Monitor protected-branch CI and review feedback without weakening the recovery contract"
     }
   ]
 }

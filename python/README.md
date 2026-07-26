@@ -241,12 +241,67 @@ absolute storage path. They do not provide cross-process locks or distributed
 writer leases. SQLite, PostgreSQL, object storage, compaction, and
 multi-process coordination remain follow-up adapters.
 
+## Durable start and resume
+
+`start_graph_run` creates a new event-sourced run, while `resume_graph_run`
+continues an existing non-terminal history. The operations never silently
+substitute for one another. Resume reads the original input from `RunCreated`,
+checks the graph and caller-supplied implementation identity, and reuses every
+committed successful node.
+
+```python
+from graph_engineering import resume_graph_run, start_graph_run
+from graph_engineering.persistence import JsonlEventStore
+
+store = JsonlEventStore(".graph-engineering")
+result = await start_graph_run(
+    graph,
+    {"seed": 1},
+    handlers,
+    run_id="research-001",
+    implementation_id="research-handlers@1",
+    event_store=store,
+)
+
+# In a later process, after confirming the old coordinator has stopped:
+result = await resume_graph_run(
+    graph,
+    handlers,
+    run_id="research-001",
+    implementation_id="research-handlers@1",
+    event_store=store,
+)
+```
+
+The durable journal commits `NodeScheduled` and `NodeStarted` before calling a
+handler. It commits a validated `NodeSucceeded` together with its ordered
+`EdgeEmitted` events before releasing dependants. An interrupted attempt remains
+charged to both retry budgets. Nodes declared `sideEffects: none` or
+`sideEffects: idempotent` can retry; the latter receives the same
+`NodeContext.idempotency_key` on every attempt. An omitted or non-idempotent
+declaration fails closed with `IN_DOUBT_SIDE_EFFECT` and is not invoked again.
+
+Inputs, outputs, implementation IDs, and terminal results use tagged Durable
+JSON. Non-integer finite doubles are encoded from their exact IEEE-754 bits, so
+hashes do not depend on Python or JavaScript decimal rendering. The public
+`encode_durable_json`, `decode_durable_json`, and `durable_json_hash` helpers
+implement the shared conformance corpus.
+
+Terminal resume is idempotent: it returns the recorded result without an event,
+checkpoint write, or handler call. CAS detects a losing continuation but is not
+a distributed lease. Applications must stop the old coordinator before resume,
+forward idempotency keys to remote systems, and reconcile ambiguous external
+effects. Scheduler checkpoint acceleration and explicit non-idempotent approval
+callbacks are not implemented in this slice; correctness comes from replaying
+the complete event stream.
+
 ## Current boundary
 
 This alpha deliberately focuses on deterministic DAG compilation and
 execution. It includes bounded concurrency, retry/backoff, per-attempt timeout,
-a graph-wide attempt budget, and named source/input/output port binding. Edge
-`map` and `condition`, runtime JSON Schema validation, streams, runtime
-checkpoint integration/resume, dynamic graph patches, and provider adapters
+a graph-wide attempt budget, named source/input/output port binding, and
+event-sourced durable continuation. Edge `map` and `condition`, runtime JSON
+Schema validation, streams, checkpoint acceleration, dynamic graph patches,
+distributed leases, non-idempotent recovery approval, and provider adapters
 remain follow-up work. Floating-point Graph IR canonicalization is not stable
 until the shared protocol adopts RFC 8785.

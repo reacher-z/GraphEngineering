@@ -28,7 +28,7 @@ Python uses uv:
 uv sync --project python --extra dev
 uv run --project python pytest python/tests
 uv run --project python ruff check python/src python/tests
-uv run --project python mypy python/src
+uv run --project python mypy --config-file python/pyproject.toml python/src
 ```
 
 Changes affecting the Graph IR, compiler diagnostics, event protocol, or

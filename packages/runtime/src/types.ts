@@ -34,7 +34,8 @@ export type RuntimeFailureCode =
   | "INVALID_OUTPUT"
   | "UPSTREAM_FAILED"
   | "INPUT_BINDING_FAILED"
-  | "ATTEMPT_BUDGET_EXHAUSTED";
+  | "ATTEMPT_BUDGET_EXHAUSTED"
+  | "NODE_EXECUTION_INTERRUPTED";
 
 export interface CompilationRunFailure {
   phase: "compile";

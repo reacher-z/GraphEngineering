@@ -68,6 +68,48 @@ The Python runtime executes the identical Graph IR natively:
 uv run --project python python examples/quickstart/run.py
 ```
 
+## Continue a durable run after process loss
+
+The library APIs also support event-sourced continuation. TypeScript uses
+`startDurableGraphRun` for a new stream and `resumeDurableGraphRun` for an
+existing stream; Python exposes the equivalent `start_graph_run` and
+`resume_graph_run`. Start and resume never silently substitute for one another.
+
+```ts
+import { JsonlEventStore } from "@graph-engineering/persistence";
+import {
+  resumeDurableGraphRun,
+  startDurableGraphRun,
+} from "@graph-engineering/runtime";
+
+const eventStore = new JsonlEventStore({ directory: ".graph-engineering" });
+const options = {
+  runId: "research-001",
+  implementationId: "research-handlers@1",
+  eventStore,
+  nodeExecutors: {
+    scope: () => ({ topic: "graphs" }),
+    "research-docs": () => ({ finding: "document the contract" }),
+    "research-code": () => ({ finding: "test the runtime" }),
+    synthesize: () => ({ summary: "graph engineering" }),
+  },
+};
+
+// Invoke with --resume only in a replacement process after confirming that the
+// former coordinator stopped.
+const result = process.argv.includes("--resume")
+  ? await resumeDurableGraphRun(graph, options)
+  : await startDurableGraphRun(graph, { topic: "graphs" }, options);
+```
+
+If the run already reached a terminal event, resume simply returns its recorded
+result with no new event and no executor call. After a real interrupted attempt,
+automatic retry is limited to nodes declared `sideEffects: "none"` or
+`"idempotent"`; omitted and non-idempotent declarations fail closed. See the
+[runtime package guide](../packages/runtime/README.md) and
+[durable recovery contract](../spec/durable-recovery-semantics.md) before using
+this alpha API with external effects.
+
 ## Automation-friendly output
 
 Both commands support stable JSON:
@@ -111,7 +153,7 @@ invalid graph.
 This CLI slice accepts canonical Graph IR as JSON and implements `init`,
 `validate`, `plan`, `compile`, and `doctor`. Planning and compilation are
 read-only: they do not call a provider or pretend that a model ran. Native
-schedulers and standalone local persistence adapters are available as library
-APIs, but are not exposed by this Quickstart command flow. YAML input,
-scheduler-integrated recovery/replay, and the Web Explorer are subsequent public
-slices.
+schedulers, local persistence adapters, and event-sourced start/resume are
+available as library APIs, but are not exposed by this CLI command flow. YAML
+input, scheduler checkpoint acceleration, replay/fork, distributed leases, and
+the Web Explorer are subsequent public slices.

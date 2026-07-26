@@ -34,6 +34,14 @@
       "valid": false,
       "diagnosticCodes": ["GE1006_UNREACHABLE_NODE"]
     },
+    "invalid-unsafe-budget.graph.json": {
+      "valid": false,
+      "diagnosticCodes": ["GE1007_INVALID_GRAPH"]
+    },
+    "invalid-oversized-timers.graph.json": {
+      "valid": false,
+      "diagnosticCodes": ["GE1007_INVALID_GRAPH"]
+    },
     "invalid-entrypoint-incoming.graph.json": {
       "valid": false,
       "diagnosticCodes": ["GE1010_ENTRYPOINT_HAS_INCOMING", "GE1006_UNREACHABLE_NODE"]

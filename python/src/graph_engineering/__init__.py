@@ -10,6 +10,18 @@ from .compiler import (
     compile_graph,
     try_compile_graph,
 )
+from .durable import (
+    DurableRunError,
+    DurableRunErrorCode,
+    resume_graph_run,
+    start_graph_run,
+)
+from .durable_json import (
+    DurableJsonError,
+    decode_durable_json,
+    durable_json_hash,
+    encode_durable_json,
+)
 from .events import GraphEvent
 from .models import (
     EdgeSpec,
@@ -67,6 +79,9 @@ __all__ = [
     "CompiledGraph",
     "Diagnostic",
     "DiagnosticCode",
+    "DurableJsonError",
+    "DurableRunError",
+    "DurableRunErrorCode",
     "EdgeSpec",
     "Endpoint",
     "FailureCode",
@@ -108,9 +123,14 @@ __all__ = [
     "canonical_json",
     "canonical_sha256",
     "compile_graph",
+    "decode_durable_json",
+    "durable_json_hash",
+    "encode_durable_json",
     "evaluate_route_selection",
     "evaluate_settled_barrier",
+    "resume_graph_run",
     "run_graph",
+    "start_graph_run",
     "try_compile_graph",
 ]
 

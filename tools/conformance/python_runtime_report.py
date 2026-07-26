@@ -10,7 +10,6 @@ from typing import Any
 
 from graph_engineering import NodeContext, compile_graph, run_graph
 
-
 ROOT = Path(__file__).resolve().parents[2]
 CASE_PATH = ROOT / "spec" / "conformance" / "runtime-ready-queue.case.json"
 
@@ -50,4 +49,11 @@ async def execute() -> dict[str, Any]:
 
 
 if __name__ == "__main__":
-    print(json.dumps(asyncio.run(execute()), ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+    print(
+        json.dumps(
+            asyncio.run(execute()),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+    )

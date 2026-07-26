@@ -89,6 +89,26 @@ describe("graph compiler conformance", () => {
     ]);
   });
 
+  it("accepts the single-timer ceiling and rejects every oversized timer field", () => {
+    const maximum = 2_147_483_647;
+    expect(compileGraph(graph({
+      nodes: [node("a", {
+        timeoutMs: maximum,
+        retry: { maxAttempts: 2, initialDelayMs: maximum, maxDelayMs: maximum },
+      })],
+      policies: { maxDurationMs: maximum },
+    })).valid).toBe(true);
+
+    const oversized = compileGraph(fixture("invalid-oversized-timers.graph.json"));
+    expect(oversized).toMatchObject({
+      valid: false,
+      graphHash: null,
+      canonicalGraph: null,
+      diagnostics: [expect.objectContaining({ code: "GE1007_INVALID_GRAPH" })],
+    });
+    expect(oversized.diagnostics[0]?.message).toMatch(/timeoutMs.*initialDelayMs.*maxDelayMs.*maxDurationMs/);
+  });
+
   it("orders ready peers by semantic node declaration order", () => {
     const result = compileGraph(
       graph({

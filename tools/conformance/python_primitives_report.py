@@ -9,7 +9,6 @@ from typing import Any
 
 from graph_engineering import evaluate_settled_barrier
 
-
 ROOT = Path(__file__).resolve().parents[2]
 CASE_PATH = ROOT / "spec" / "conformance" / "settled-barrier.case.json"
 

@@ -28,9 +28,11 @@ The project is an early alpha. The DAG compiler, ready-queue schedulers, safe pr
 initializer, machine-readable CLI, structured failure handling, retries,
 timeouts, budgets, settled barrier/router decisions, safe Mermaid/DOT rendering,
 pattern constructors, local event/checkpoint stores, read-only MCP server, and
-development progress scanner are executable today. Scheduler-integrated durable
-recovery and the broader v1 surface remain under active development; the
-repository does not silently mock unfinished capabilities.
+development progress scanner are executable today. Both native runtimes also
+provide event-sourced durable start/resume: committed successes are reused after
+process loss and unsafe ambiguous effects fail closed. Checkpoint acceleration,
+replay/fork, distributed leases, and the broader v1 surface remain under active
+development; the repository does not silently mock unfinished capabilities.
 
 > **Source-only alpha:** npm and PyPI packages are not published yet. Clone this
 > repository to try the current release candidate; registry publication remains
@@ -95,7 +97,8 @@ uv run --project python pytest python/tests
 | Diamond/verifier pattern constructors | Yes | Consumes the portable Graph IR |
 | Safe Mermaid/DOT visualization | Yes, through the CLI | Same portable Graph IR |
 | Local event/checkpoint stores | Yes | Yes |
-| Scheduler checkpoint/resume | In development | In development |
+| Event-sourced scheduler start/resume | Yes | Yes |
+| Scheduler checkpoint acceleration | Not yet | Not yet |
 | Read-only validation/planning MCP | Yes | Uses the same portable IR |
 | Streaming and scheduler-applied routers/verifier panels/loops | Target v1 | Target v1 |
 
@@ -103,7 +106,8 @@ uv run --project python pytest python/tests
 
 - Explicit node and edge data contracts.
 - Parallel, pipeline, barrier, router, verifier, and bounded-loop topologies.
-- Durable checkpoints, resume, replay, and fork.
+- Durable event-sourced start/resume today; rebuildable checkpoint acceleration,
+  replay, and fork as explicit follow-up protocols.
 - Deterministic plumbing; models are reserved for judgment.
 - Provider-neutral adapters and deny-by-default capabilities.
 - Observable runs with portable events and traces.
@@ -123,7 +127,7 @@ corepack pnpm check:packages
 corepack pnpm check:packed-install
 corepack pnpm audit:prod
 uv run --project python ruff check python/src python/tests
-uv run --project python mypy python/src
+uv run --project python mypy --config-file python/pyproject.toml python/src
 uv build --project python
 python3 scripts/check-python-artifacts.py
 ```
@@ -139,6 +143,7 @@ python3 scripts/check-python-artifacts.py
 - [Support](SUPPORT.md)
 - [Runtime semantics](spec/runtime-semantics.md)
 - [Persistence semantics](spec/persistence-semantics.md)
+- [Durable recovery semantics](spec/durable-recovery-semantics.md)
 - [Primitive semantics](spec/primitives-semantics.md)
 - [21-day delivery plan](codex_plans/Graph-Engineering-21-Day-Master-Plan.md)
 

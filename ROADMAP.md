@@ -18,15 +18,19 @@ earned by executable cross-language tests.
 
 ## Alpha 2 — durable graph patterns
 
-- Scheduler event emission and checkpoint-safe node commit.
-- Crash recovery that reuses completed node results.
-- Replay and fork with immutable lineage.
-- Pipeline buffers/backpressure and explicit barrier policies.
-- Deterministic routers, verifier verdicts, quorum/unknown outcomes, reflection,
+- [x] Scheduler event emission with commit-before-release node outcomes and
+  tagged Durable JSON payloads.
+- [x] Event-sourced crash continuation that reuses committed successes, preserves
+  attempt budgets, and fails closed for ambiguous unsafe effects.
+- [ ] Scheduler checkpoint acceleration; correctness already rebuilds from the
+  authoritative event history.
+- [ ] Replay and fork with immutable lineage.
+- [ ] Pipeline buffers/backpressure and explicit barrier policies.
+- [ ] Deterministic routers, verifier verdicts, quorum/unknown outcomes, reflection,
   and bounded loop-until-dry primitives.
-- Deterministic mock, OpenAI, Anthropic, Gemini, OpenAI-compatible, HTTP, shell,
+- [ ] Deterministic mock, OpenAI, Anthropic, Gemini, OpenAI-compatible, HTTP, shell,
   and MCP adapters behind explicit capability declarations.
-- Ten executable TypeScript/Python patterns with failure and recovery fixtures.
+- [ ] Ten executable TypeScript/Python patterns with failure and recovery fixtures.
 
 ## Beta — operations and external validation
 

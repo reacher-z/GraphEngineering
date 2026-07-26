@@ -14,10 +14,10 @@ behavior that exists today and the intended v1 architecture.
 | Area | Current alpha | Target v1 |
 | --- | --- | --- |
 | Portable format | Versioned JSON Graph IR, canonical hash, compiler diagnostics, conformance fixtures | Stable compatibility and migration policy |
-| Native runtimes | TypeScript and Python IR, compilers, and in-memory ready-queue schedulers pass the shared diamond and no-layer-barrier runtime conformance cases; APIs remain unstable | Durable/distributed execution and a broader cross-language conformance corpus |
+| Native runtimes | TypeScript and Python IR, compilers, ready-queue schedulers, and event-sourced start/resume pass shared conformance cases; APIs remain unstable | Distributed execution and a broader cross-language conformance corpus |
 | Topologies | DAG fan-out/fan-in; deterministic settled all/minimum/percentage evaluation; TypeScript constructors for diamonds, verifier fan-out, declarative routing, and finite loop expansion | Streaming pipelines, scheduler-applied routing, verifier policies, quorum/deadline barriers, subgraphs, and dynamic bounded loops |
-| Persistence | Native local JSONL event and atomic checkpoint stores implement the shared CAS/hash contract; schedulers remain in-memory and are not wired to recovery | Scheduler-integrated resume, replay, fork, leases, artifact stores, and production databases |
-| Security | Graph bounds and explicit side-effect metadata; executors still have the ambient authority of their process | Enforced capabilities, worktree/process/container isolation, redaction, approval gates, and policy-audited dynamic graphs |
+| Persistence | Native local event stores drive scheduler start/resume from authoritative history; atomic checkpoint stores exist separately but do not accelerate the scheduler | Checkpoint acceleration, replay, fork, leases, artifact stores, and production databases |
+| Security | Graph bounds and a trusted `sideEffects` declaration gate ambiguous durable retries; executors still have ambient process authority | Enforced capabilities, worktree/process/container isolation, redaction, approval gates, and policy-audited dynamic graphs |
 
 “Target v1” is a design commitment, not a claim that the feature is already
 available. See the [runtime package status](../packages/runtime/README.md) for the
@@ -256,48 +256,56 @@ critical-path cost estimation remain target-v1 capabilities.
 
 ## Durable execution: the semantic boundary
 
-The current TypeScript and Python schedulers are in-memory. A process crash loses
-their run progress, and rerunning starts a new execution. Separate native local
-persistence packages now provide last-sequence-CAS event streams and atomic,
-content-hashed checkpoints, but the schedulers do not yet emit those events or
-resume from those checkpoints. Storage primitives are not recovery by
-themselves.
+Both native runtimes now expose separate event-sourced start and resume
+operations in addition to their existing in-memory scheduler APIs. Start creates
+a new run and never silently resumes one. Resume requires an existing run, reads
+its original input from `RunCreated`, and never silently creates or replaces it.
+Each run binds the compiler graph hash, input hash, effective attempt budget, and
+a hash of the caller-supplied implementation identity.
 
-The target-v1 durable contract is stricter than periodically serializing memory:
+The v1alpha1 durable contract is stricter than periodically serializing memory:
 
 - an append-only run event log is the source of truth;
 - every event has a monotonically increasing sequence per run;
 - appends use an expected prior version to detect concurrent writers;
 - a validated node result is durable before a dependant becomes schedulable;
-- checkpoints accelerate reconstruction but do not replace event history;
 - resume reuses recorded successful activity results;
-- replay uses recorded nondeterministic results instead of calling the outside
-  world again;
-- fork creates a new linked history rather than rewriting the old one.
+- an attempt claim is committed before executor code runs, and a success plus
+  its ordered edge emissions is committed before dependants are released;
+- a valid terminal resume returns the recorded result with no new event,
+  checkpoint write, or executor call.
 
-The first three storage-level rules are executable in both languages and pass a
-shared checkpoint hash vector. The remaining scheduler-level rules define what
-recovery must mean before resume can be claimed. See the
-[persistence semantics](../spec/persistence-semantics.md); the existence of a
-store is not evidence that the alpha scheduler already persists progress.
+Recovery correctness currently rebuilds from the complete event stream.
+Content-hashed checkpoint adapters exist, but scheduler checkpoint acceleration
+is not implemented. Replay, fork, dynamic graph changes, and distributed
+lease/fencing are also outside this slice. CAS rejects stale event appends but is
+not a distributed lease, so an application must stop the old coordinator before
+resuming a run. See the
+[durable recovery semantics](../spec/durable-recovery-semantics.md) and
+[persistence semantics](../spec/persistence-semantics.md).
 
 ### Exactly-once stops at the external boundary
 
-The system can make an internal checkpointed result effectively once. It cannot
-atomically commit both its store and an arbitrary email, payment, shell command,
-or third-party API. A crash can occur after the external effect succeeds but
-before local success is recorded.
-
-Therefore target-v1 external activities are **at least once**:
+The scheduler can make a committed internal result authoritative for a run. It
+cannot atomically commit both its event store and an arbitrary email, payment,
+shell command, or third-party API. A crash can occur after the external effect
+succeeds but before local success is recorded. External activities are therefore
+**at least once**:
 
 - idempotent activities reuse a stable logical-activity key across retries;
-- an activity ledger records request and result evidence;
-- non-idempotent recovery requires explicit policy or human confirmation;
 - documentation must never promise universal exactly-once effects.
 
-Node `sideEffects` metadata exists in Graph IR, but the alpha executor does
-not yet enforce idempotency or approval. Treat every custom executor according to
-the actual external system it calls.
+For an open attempt after process loss, durable resume automatically retries only
+nodes declared `sideEffects: "none"` or `sideEffects: "idempotent"`, within the
+original per-node and global attempt budgets. An idempotent executor receives the
+same activity key, but the application must actually forward it to the external
+system. An omitted or `"non-idempotent"` declaration fails closed with
+`IN_DOUBT_SIDE_EFFECT` and is not invoked again.
+
+The runtime cannot verify that a claimed idempotent operation really is
+idempotent. It has no durable activity ledger, reconciliation engine, or approval
+callback. Those controls, along with an auditable non-idempotent recovery
+protocol, remain application responsibilities and target-v1 work.
 
 ## State, artifacts, and isolation
 

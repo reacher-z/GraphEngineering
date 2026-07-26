@@ -1,9 +1,9 @@
 # Persistence semantics v1alpha1
 
 This document freezes the observable contract shared by the TypeScript and
-Python local persistence implementations. It describes storage primitives, not
-durable scheduler recovery. Resume, replay, leases, and effectively-once node
-commit remain later runtime work until their own conformance cases exist.
+Python local persistence implementations. Scheduler integration is specified
+separately in `durable-recovery-semantics.md`; replay, fork, and distributed
+leases remain later runtime work.
 
 ## Event stream versioning
 

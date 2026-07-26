@@ -77,6 +77,8 @@ Events receive a monotonically increasing sequence per run. Appends use an
 expected prior sequence/version. A validated node result is persisted before
 dependents become schedulable. Resume reconstructs state from durable history
 and cannot rerun a successful node unless a new replay/fork history requests it.
+The executable continuation contract, event payloads, crash windows, and
+side-effect safety gates are defined by `durable-recovery-semantics.md`.
 
 ## Determinism boundary
 

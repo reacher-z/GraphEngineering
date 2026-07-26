@@ -36,7 +36,8 @@
     "prepack": "npm run build"
   },
   "dependencies": {
-    "@graph-engineering/core": "workspace:*"
+    "@graph-engineering/core": "workspace:*",
+    "@graph-engineering/persistence": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

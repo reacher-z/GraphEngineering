@@ -194,6 +194,77 @@ def test_global_attempt_budget_exhaustion_is_structured() -> None:
     assert not result.nodes["root"].failure.retryable
 
 
+def test_restored_attempt_offsets_are_preserved_without_another_attempt() -> None:
+    resumable = compile_graph(
+        make_graph(nodes=[make_node("root", kind="agent", retry={"maxAttempts": 3})])
+    )
+
+    missing = asyncio.run(
+        AsyncScheduler()._run(
+            resumable,
+            {},
+            attempt_offsets={"root": 2},
+            initial_total_attempts=2,
+        )
+    )
+    assert missing.nodes["root"].attempts == 2
+    assert missing.nodes["root"].failure is not None
+    assert missing.nodes["root"].failure.attempt == 2
+    assert missing.nodes["root"].failure.code is FailureCode.EXECUTOR_NOT_FOUND
+
+    cancelled_event = asyncio.Event()
+    cancelled_event.set()
+    cancelled = asyncio.run(
+        AsyncScheduler({"root": lambda _: "must-not-run"})._run(
+            resumable,
+            {},
+            cancel_event=cancelled_event,
+            attempt_offsets={"root": 2},
+            initial_total_attempts=2,
+        )
+    )
+    assert cancelled.nodes["root"].attempts == 2
+    assert cancelled.nodes["root"].failure is not None
+    assert cancelled.nodes["root"].failure.attempt == 2
+    assert cancelled.nodes["root"].failure.code is FailureCode.NODE_CANCELLED
+
+    exhausted = compile_graph(
+        make_graph(nodes=[make_node("root", kind="agent", retry={"maxAttempts": 2})])
+    )
+    budget = asyncio.run(
+        AsyncScheduler({"root": lambda _: "must-not-run"})._run(
+            exhausted,
+            {},
+            attempt_offsets={"root": 2},
+            initial_total_attempts=2,
+        )
+    )
+    assert budget.nodes["root"].attempts == 2
+    assert budget.nodes["root"].failure is not None
+    assert budget.nodes["root"].failure.attempt == 2
+    assert budget.nodes["root"].failure.code is FailureCode.ATTEMPT_BUDGET_EXHAUSTED
+
+
+def test_retry_delay_is_capped_without_overflow_and_never_below_initial_delay() -> None:
+    compiled = compile_graph(
+        make_graph(
+            nodes=[
+                make_node(
+                    "root",
+                    retry={
+                        "maxAttempts": 100,
+                        "initialDelayMs": 10,
+                        "maxDelayMs": 1,
+                        "backoffMultiplier": float(2**53 - 1),
+                    },
+                )
+            ]
+        )
+    )
+
+    assert AsyncScheduler._retry_delay_ms(compiled.nodes["root"], 100) == 10
+
+
 def test_timeout_is_structured() -> None:
     graph = compile_graph(make_graph(nodes=[make_node("root", timeoutMs=2)]))
 
