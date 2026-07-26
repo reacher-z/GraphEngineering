@@ -45,6 +45,57 @@ read-only snapshot of completed values. A failure is returned as a typed
 `NodeFailure`; independent siblings finish, while descendants are marked
 `UPSTREAM_FAILED`.
 
+## Bounded standalone pipelines
+
+`run_pipeline` moves each accepted item through the same ordered stages without
+waiting for every item to finish one stage before the next stage starts. Source
+intake, stage queues, stage concurrency, per-item attempts, and the total item
+count are all bounded.
+
+```python
+from graph_engineering import PipelineStage, run_pipeline
+
+source_items = ["a", "b", "c"]
+
+
+async def enrich(context):
+    return {"value": context.input, "enriched": True}
+
+
+async def run_items():
+    async with run_pipeline(
+        source_items,
+        [PipelineStage("enrich", enrich, concurrency=4)],
+        buffer_capacity=8,
+        max_in_flight=16,
+        max_items=1_000,
+    ) as run:
+        results = [item async for item in run]
+        summary = await run.completion()
+    return results, summary
+```
+
+The source is not advanced until the first read or async-context entry. The
+runtime acquires an in-flight credit before every source pull and releases it
+only when the consumer receives that item's terminal record, so a slow consumer
+eventually stops source intake. Results are structured as `succeeded`, `failed`,
+`dropped`, or `cancelled`; JSON `None` remains distinct from an absent input or
+output in `to_dict()` projections. Stage policies are `dead-letter`, `drop`, and
+`stop`, and retries and timeouts are bounded and cooperatively cancellable.
+
+Stage configuration is also synchronously bounded. `max_stages` defaults to
+`2048`, which is also the hard protocol maximum. The factory accepts a finite
+sequence with exactly that budget, but inspects at most `max_stages + 1` entries
+and raises `ValueError` if another stage is present. Overflow is rejected before
+the extra stage's properties or the item source are accessed; callers may set a
+smaller positive `max_stages` budget for untrusted configuration.
+
+This primitive is in-memory and standalone. It does not activate Graph IR
+`edge.mode: "stream"`, persist item queues, or provide item-level crash recovery.
+When called inside a durable graph node, the complete pipeline is part of that
+single node attempt and external effects remain at-least-once. See the canonical
+contract in [`spec/pipeline-semantics.md`](../spec/pipeline-semantics.md).
+
 ## Settled barrier primitive
 
 `evaluate_settled_barrier` is a deterministic, model-free decision primitive

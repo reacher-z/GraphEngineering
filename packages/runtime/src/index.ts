@@ -1,4 +1,5 @@
 export { runGraph } from "./scheduler.js";
+export { runPipeline } from "./pipeline.js";
 export {
   resumeDurableGraphRun,
   resumeGraphRun,
@@ -35,6 +36,22 @@ export type {
   NodeRunResult,
   NodeRunStatus,
   OutputRunFailure,
+  PipelineFailureCode,
+  PipelineFailurePolicy,
+  PipelineHandler,
+  PipelineHandlerContext,
+  PipelineItemFailure,
+  PipelineItemResult,
+  PipelineItemStatus,
+  PipelineOptions,
+  PipelineOrdering,
+  PipelineRetryOptions,
+  PipelineRun,
+  PipelineRunFailure,
+  PipelineRunStatus,
+  PipelineSource,
+  PipelineStage,
+  PipelineSummary,
   RuntimeFailureCode,
   SchedulerOptions,
 } from "./types.js";

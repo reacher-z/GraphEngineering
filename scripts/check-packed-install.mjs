@@ -123,7 +123,21 @@ try {
     .map((name) => `await import(${JSON.stringify(name)});`)
     .join("\n");
   const smokePath = join(consumerRoot, "smoke.mjs");
-  writeFileSync(smokePath, `${importSmoke}\n`);
+  writeFileSync(
+    smokePath,
+    `${importSmoke}
+const { runPipeline } = await import("@graph-engineering/runtime");
+if (typeof runPipeline !== "function") throw new Error("runtime package omits runPipeline");
+const pipelineRun = runPipeline([null], [], { maxItems: 2, maxStages: 1 });
+const pipelineItem = await pipelineRun.next();
+if (pipelineItem.done || pipelineItem.value.output !== null) {
+  throw new Error("installed runPipeline failed its null-presence smoke test");
+}
+if (!(await pipelineRun.next()).done || (await pipelineRun.completion).status !== "succeeded") {
+  throw new Error("installed runPipeline failed to terminate successfully");
+}
+`,
+  );
   run(process.execPath, [smokePath], { cwd: consumerRoot });
 
   const cliManifest = workspace.get("@graph-engineering/cli")?.manifest;

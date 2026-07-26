@@ -14,8 +14,8 @@ behavior that exists today and the intended v1 architecture.
 | Area | Current alpha | Target v1 |
 | --- | --- | --- |
 | Portable format | Versioned JSON Graph IR, canonical hash, compiler diagnostics, conformance fixtures | Stable compatibility and migration policy |
-| Native runtimes | TypeScript and Python IR, compilers, ready-queue schedulers, and event-sourced start/resume pass shared conformance cases; APIs remain unstable | Distributed execution and a broader cross-language conformance corpus |
-| Topologies | DAG fan-out/fan-in; deterministic settled all/minimum/percentage evaluation; TypeScript constructors for diamonds, verifier fan-out, declarative routing, and finite loop expansion | Streaming pipelines, scheduler-applied routing, verifier policies, quorum/deadline barriers, subgraphs, and dynamic bounded loops |
+| Native runtimes | TypeScript and Python IR, compilers, ready-queue schedulers, standalone bounded pipelines, and event-sourced start/resume pass shared conformance cases; APIs remain unstable | Distributed execution and a broader cross-language conformance corpus |
+| Topologies | DAG fan-out/fan-in; standalone per-item pipelines with bounded buffers/backpressure; deterministic settled all/minimum/percentage evaluation; TypeScript constructors for diamonds, verifier fan-out, declarative routing, and finite loop expansion | Graph-integrated/durable item streaming, scheduler-applied routing, verifier policies, quorum/deadline barriers, subgraphs, and dynamic bounded loops |
 | Persistence | Native local event stores drive scheduler start/resume from authoritative history; atomic checkpoint stores exist separately but do not accelerate the scheduler | Checkpoint acceleration, replay, fork, leases, artifact stores, and production databases |
 | Security | Graph bounds and a trusted `sideEffects` declaration gate ambiguous durable retries; executors still have ambient process authority | Enforced capabilities, worktree/process/container isolation, redaction, approval gates, and policy-audited dynamic graphs |
 
@@ -149,10 +149,38 @@ global collection barrier. Item A can be in stage three while item B remains in
 stage one. Pipelines reduce tail latency when downstream processing does not need
 the complete cross-item set.
 
-Graph IR reserves `edge.mode: "stream"`, but the current runtime does **not**
-implement streaming, bounded buffers, or backpressure. Those are target-v1
-features. Until then, describing an edge as `stream` does not make execution a
-pipeline.
+The current TypeScript and Python runtimes implement this as a **standalone**
+bounded-pipeline API, separate from graph execution. A run has a synchronous or
+asynchronous source, an immutable ordered stage list, bounded queues between
+stages, and a global in-flight credit window. Credit is acquired before a source
+pull and held until the consumer receives that item's terminal result. A slow
+consumer therefore propagates pressure through the bounded result/reorder
+buffer, stage queues, and source rather than accumulating an unbounded result
+array.
+
+Stages remain ordered for one item, but a successful item enters the next stage
+as soon as queue capacity and a stage slot are available; it does not wait for
+the other items in its current stage. Per-stage `concurrency` bounds active
+handler attempts. Terminal `ordering: "input"` may hold a later completed result
+behind an earlier one, while `ordering: "completion"` exposes committed terminal
+order. Neither option serializes internal stage execution, downstream work, or
+side effects.
+
+Every accepted item has a structured `succeeded`, `failed`, `dropped`, or
+`cancelled` result. `drop` is explicit, `dead-letter` is an in-memory failed
+terminal record rather than a durable external queue, and `stop` ends deliberate
+source intake while already accepted items drain. JSON `null` remains data, not
+a failure sentinel. Item count, in-flight work, queue depth, concurrency, retry
+attempts, timeout, and computed total attempts all have hard bounds.
+
+This does not change Graph IR execution. Graph IR stream mode remains declarative:
+`edge.mode: "stream"` does not make `runGraph` lower stream edges into queues;
+it still waits for one terminal result per upstream node. There are no durable item identities,
+offsets, acknowledgements, queue snapshots, stream joins/windows, replay, or
+fork. If a graph node calls the standalone API, the complete pipeline belongs to
+that single node attempt and may rerun in full after a crash. See the
+[runtime pipeline API](../packages/runtime/README.md#standalone-bounded-pipeline)
+and [bounded pipeline semantics](../spec/pipeline-semantics.md).
 
 ### Barrier
 
@@ -243,16 +271,21 @@ Graph shape controls latency and cost:
 
 - wider fan-out reduces wall time but increases concurrent resource pressure;
 - barriers make the critical path wait for the slowest required input;
-- pipelines improve flow but require bounded buffers and backpressure;
+- standalone pipelines improve flow through bounded buffers and end-to-end
+  backpressure;
 - retries multiply attempts;
 - verification multiplies calls in exchange for confidence;
 - cycles and dynamic expansion can grow without a static node count.
 
 Current compilation can enforce graph `maxFanOut` and `maxDepth`; the native
 runtimes enforce effective concurrency, node retry counts, timeouts, and
-`maxTotalAttempts`, and both expose run cancellation. Cost budgets, dynamic node
-budgets, provider rate limits, and
-critical-path cost estimation remain target-v1 capabilities.
+`maxTotalAttempts`, and both expose run cancellation. Standalone pipelines also
+enforce `maxItems`, `maxInFlight`, a lowerable `maxStages` budget capped at
+2048, per-boundary buffer capacity, per-stage concurrency/retry limits, and a
+safe derived maximum-attempt bound. Their inner
+attempts are not charged to an enclosing graph's `maxTotalAttempts`. Cost
+budgets, dynamic graph-node budgets, provider rate limits, and critical-path
+cost estimation remain target-v1 capabilities.
 
 ## Durable execution: the semantic boundary
 

@@ -25,7 +25,10 @@ earned by executable cross-language tests.
 - [ ] Scheduler checkpoint acceleration; correctness already rebuilds from the
   authoritative event history.
 - [ ] Replay and fork with immutable lineage.
-- [ ] Pipeline buffers/backpressure and explicit barrier policies.
+- [x] Standalone native pipeline buffers/backpressure with structured terminal
+  outcomes and shared TypeScript/Python behavioral cases.
+- [ ] Graph IR-integrated/durable item streaming and scheduler-integrated
+  deadline/quorum barrier policies.
 - [ ] Deterministic routers, verifier verdicts, quorum/unknown outcomes, reflection,
   and bounded loop-until-dry primitives.
 - [ ] Deterministic mock, OpenAI, Anthropic, Gemini, OpenAI-compatible, HTTP, shell,

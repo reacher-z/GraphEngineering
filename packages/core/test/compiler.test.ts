@@ -75,6 +75,21 @@ describe("graph compiler conformance", () => {
     ]);
   });
 
+  it.each([
+    "invalid-null-metadata-description.graph.json",
+    "invalid-null-state-schema.graph.json",
+    "invalid-null-output-port.graph.json",
+    "invalid-null-node-retry.graph.json",
+  ] as const)("rejects schema-optional fields when explicitly null in %s", (name) => {
+    const result = compileGraph(fixture(name));
+    expect(result).toMatchObject({
+      valid: false,
+      graphHash: null,
+      canonicalGraph: null,
+      diagnostics: [expect.objectContaining({ code: "GE1007_INVALID_GRAPH" })],
+    });
+  });
+
   it("validates bounded retry and policy fields at the IR boundary", () => {
     const invalid = graph({
       nodes: [node("a", { retry: { maxAttempts: 0 } })],

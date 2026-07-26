@@ -1,0 +1,191 @@
+# Master-plan coverage matrix
+
+Updated: 2026-07-26
+
+This is the canonical gap ledger for the
+[21-day master plan](../Graph-Engineering-21-Day-Master-Plan.md). It answers a
+stricter question than the progress scanner: whether every promised capability,
+test, document, release control, and adoption prerequisite has objective
+evidence. A task may be healthy while its deliverable is still open. `Green`
+means the named scope is implemented and verified; `Partial` means useful code
+exists but the master-plan promise is broader; `Open` means there is no accepted
+implementation evidence yet; `External` requires people, credentials, elapsed
+time, or hosted systems outside the repository.
+
+The matrix is append-only in meaning. A later correction must name the evidence
+that supersedes an earlier assessment. Stars are an observed organic outcome,
+not a shippable artifact: 6,000+ remains the breakout target, while stable-v1
+eligibility depends only on the release gates below.
+
+## Evidence rules
+
+A row becomes Green only when all applicable evidence exists:
+
+1. A normative contract or an explicit statement that no persistent contract is
+   required.
+2. Native TypeScript and Python implementations when the public surface promises
+   both languages.
+3. Shared, language-neutral conformance vectors for portable behavior.
+4. Positive, negative, cancellation, cleanup, resource-bound, and restart tests
+   appropriate to the risk.
+5. User documentation and an executable, provider-free example.
+6. Clean repository gates, installable artifact checks, and a reviewed commit or
+   protected-branch pull request.
+7. Release evidence for anything described as published, supported, secure, or
+   externally validated.
+
+Source files, enum members, planned CLI verbs, issue labels, and scanner
+heartbeats are not implementation proof by themselves.
+
+## Day-by-day delivery coverage
+
+| Day | State | Evidence already present | Work still required for the plan | Registry control |
+|---|---|---|---|---|
+| 1 — contracts, ownership, governance | Partial | Public MIT repository, governance files, CI, protected `main`, canonical Graph IR/event schemas, logs, timer-backed scanner | Finish every listed planning/architecture/growth document; make completion evidence machine-verifiable; correct historical over-broad task titles | `CTRL-PLAN-COVERAGE-001`, `CTRL-EVIDENCE-002` |
+| 2 — builders and canonical IR | Partial | TS/Python schema models, portable canonical JSON and shared hashes | General TS builder API, Python builder API, YAML loader, revision/content hashes for node/edge/schema, port/schema compatibility, concurrent-state/budget/capability validation | `D2-BUILDERS-YAML-020` |
+| 3 — diagnostics and CLI | Partial | Shared invalid graph fixtures; TS `init`, `validate`, `compile`, `plan`, `doctor`; Quickstart | Python CLI and compatibility alias, exhaustive stable diagnostics, complete machine envelopes and exit-code reference | `D3-PY-CLI-021`, `D14-API-FREEZE-050` |
+| 4 — scheduler and trace view | Partial | Native deterministic DAG scheduler; chain/diamond parity; bounded ready queue | Trace viewer, nested subgraphs/namespaces, explicit state reducers, executable stream/artifact edges | `D4-TRACE-SUBGRAPH-022`, `D15-EXPLORER-060` |
+| 5 — pipeline, barrier, router | Partial; standalone pipeline delivered | Pure barrier/router evaluators; commit `3df201d` delivers bounded TS/Python pipelines, eight shared cases, hostile cleanup/configuration tests and full package gates | Scheduler-integrated deadline/quorum barriers, conditional edges, durable route replay/confidence escalation, stream-edge IR activation | `D7-PIPELINE-CONFORMANCE-013` Green; `D6-ROUTER-BARRIER-023` Open |
+| 6 — terminal semantics and quorum | Partial | Structured scheduler and pipeline failures; retry/timeout/cancellation; attempt budgets; upstream isolation | Every planned node/edge terminal state, quorum/abstention at runtime, human/unknown escalation, failure-injection matrix | `D6-ROUTER-BARRIER-023`, `D11-VERIFY-SPEC-040` |
+| 7 — bounded cycles and Alpha 1 | Partial | Source-only `v0.1.0-alpha.1` exists; static bounded-loop graph constructor exists | Executable `untilDry`, bounded `while`, evaluator-optimizer loops, global seen-set, semantic convergence, hard duration/cost/node limits and replayable exit reasons | `D7-CYCLE-SPEC-024`, `D7-TS-CYCLES-025`, `D7-PY-CYCLES-026`, `D7-CYCLE-CONFORMANCE-027` |
+| 8 — retry/cancel operations | Partial | Native retry, timeout, cancellation and pipeline cleanup suites | Runtime chaos is isolated from durable operational commands; both must join without deadlock, leaks, unbounded retry or stale control | `D8-RUNTIME-CHAOS-084`, `D9-OPS-CONTROL-085`, `D8-CHAOS-OPS-030` |
+| 9 — durable execution | Partial, strong local-DAG slice; critical redaction open | Event-sourced start/resume, CAS event stores, file checkpoints, stable activity keys, terminal idempotence, cross-language interrupted-history recovery | Freeze redaction/approval contracts, implement independent TS/Python sink-before-write lanes and canary join, then add Lease/LockManager, checkpoint acceleration, SQLite, ArtifactStore, replay/fork, non-idempotent confirmation and dual-resume races | `D9-REDACTION-039`, `D9-TS-REDACTION-087`, `D9-PY-REDACTION-088`, `D9-REDACTION-CONFORMANCE-089`, `D9-APPROVAL-077`, `D9-DURABLE-EXT-*` |
+| 10 — budget/model/cost | Open | Graph-level concurrency/attempt limits provide a narrow bound | Token/money/time/node budgets, atomic reservations, model tier/router, usage and pricing snapshots, cost command/UI, hard stop before scheduling | `D10-BUDGET-SPEC-035`, `D10-TS-BUDGET-036`, `D10-PY-BUDGET-037`, `D10-BUDGET-CONFORMANCE-038` |
+| 11 — verification | Open | Verified-fanout graph constructor is declarative only | Reflection, adversarial refutation, diverse lenses, citation verification, judge panels, versioned rubrics, votes, majority/quorum/abstention/unknown/human gating | `D11-VERIFY-SPEC-040`, `D11-TS-VERIFY-041`, `D11-PY-VERIFY-042`, `D11-VERIFY-CONFORMANCE-043` |
+| 12 — isolation and policy | Open | Documentation accurately states current ambient-authority boundary | Capability manifests/enforcement, deny-by-default tool/filesystem/network/secrets, worktree leases/merge node, process/container isolation, escape tests and approvals | `D12-ISOLATION-SPEC-044`, `D12-TS-ISOLATION-045`, `D12-PY-ISOLATION-046`, `D12-ISOLATION-REDTEAM-047` |
+| 13 — adapters and Alpha 2 | Open | Deterministic local mock execution | Independent TS/Python adapter lanes, shared streaming/tools/usage/retry/rate/cancel/fallback conformance, opt-in live provider evidence, doctor/score/badge | `D13-ADAPTER-SPEC-048`, `D13-TS-ADAPTERS-081`, `D13-PY-ADAPTERS-082`, `D13-ADAPTERS-049`, `D13-DX-051` |
+| 14 — API freeze, plugins, patterns | Open | Read-only validation/planning MCP alpha and four TS graph constructors | Runtime MCP opt-in mutation policy, plugin SDK/discovery, public API review, all ten complete pattern skeletons and canonical unscoped npm distribution | `D14-API-FREEZE-050`, `D14-MCP-PLUGINS-052`, `D14-PATTERN-SKELETONS-053`, `D14-NPM-DIST-078` |
+| 15 — production stores, workers, Explorer | Open | In-memory/JSONL events and local file checkpoints | SQLite/local artifacts default, PostgreSQL/S3 adapters, LockManager/distributed workers, React Explorer, JSONL/console/OTLP, critical-path/utilization views, first-run study | `D15-STORAGE-WORKERS-054`, `D15-EXPLORER-060`, `D15-PERFORMANCE-061` |
+| 16 — security preflight | Partial | CodeQL, dependency review, Dependabot, private reporting, source package audits and an implementation-aligned security ledger | Close independent redaction conformance; complete privacy/retention, threat model, enforceable policy, secret scan, fuzz/property/chaos, license/SBOM, escape tests and zero unaccepted high/critical findings | `D9-REDACTION-CONFORMANCE-089`, `D16-PRIVACY-079`, `D16-SECURITY-062` |
+| 17 — Beta | Open | Public alpha issues/discussions provide recruitment surface | First build immutable Beta/API artifacts; separately obtain consent-safe external usability evidence, at least five reports, 80% five-minute completion, retest and feedback disposition | `D17-BETA-063`, `D17-USABILITY-076` |
+| 18 — compatibility and benchmark audit | Open | CI covers Node 20/22 and Python 3.11/3.12/3.13 on Linux | macOS/Windows, scale/resource tests, reproducible baselines, 100 randomized faults, education assets, support/incident readiness and no >10% unexplained regression | `D18-COMPAT-BENCH-064`, `D18-EDUCATION-ASSETS-083`, `D18-SUPPORT-READINESS-080`, `CTRL-ACCEPTANCE-070` |
+| 19 — RC freeze | Open | npm tarball and Python wheel/sdist local rehearsals exist | Clean install and upgrade matrix, migration guide, full docs link/code checks, P0/P1 zero, signed `1.0.0-rc.1` candidate | `D19-RC-065` |
+| 20 — provenance | Open/External | Source release and protected checks exist | Trusted npm/PyPI identity and rehearsal, checksums, SBOM, attestations and provenance verification; provenance does not self-authorize release | `D20-PROVENANCE-066` |
+| 21 — release and support | Open/External | Repository, alpha release, issues and Discussions are public | Map all 178 leaves, revalidate historical evidence against one candidate, run a fail-closed stable-vs-RC roll-up, then publish only the authorized channel with support and transparent metrics | `CTRL-RELEASE-MAP-074`, `CTRL-EVIDENCE-BACKFILL-075`, `CTRL-RELEASE-ROLLUP-086`, `D21-RELEASE-067`, `CTRL-GROWTH-072` |
+
+## Product-capability coverage
+
+| Capability family | Current evidence | Missing acceptance evidence | State |
+|---|---|---|---|
+| Graph IR and compiler | Shared schema, canonical hashes, DAG compile parity | Full node kinds, typed ports, YAML/builders, nested graphs, state conflicts, policy/budget/capability diagnostics | Partial |
+| DAG scheduling | Native ready-queue schedulers, deterministic diamond | 100-way and 1,000-node bounds, worker/distributed mode, full node-kind execution | Partial |
+| Pipeline | Commit `3df201d`: standalone bounded native APIs, eight shared behavioral cases, docs and full local package gates | Durable per-item semantics deliberately excluded; stream IR remains declarative | Green for standalone scope; broader Graph IR scope Open |
+| Barriers | Deterministic all/minimum/percentage settled evaluator | Durable wait, deadline, quorum, missing statistics in scheduler | Partial |
+| Routers | Deterministic single/multicast evaluator | Runtime conditional edge selection, confidence escalation and durable replay | Partial |
+| Cycles | Static finite graph constructor | Runtime bounded cycles, convergence/global seen set, budgets and exit reasons | Open |
+| Dynamic GraphPatch | Schema vocabulary only | Append-only revision compiler, permissions/budget gates, dry run and malicious-patch tests | Open |
+| Verification | Declarative pattern constructor | Runtime maker/verifier isolation, votes, citations, panels, reflection and unknown gates | Open |
+| Durable state | Events, CAS, checkpoints, local start/resume | Leases, ArtifactStore/LockManager, SQLite/Postgres/S3, replay/fork and approvals | Partial |
+| Cost/model routing | Narrow attempt/concurrency limits | Models, pricing, usage, reservations, cost views and hard budget scheduling | Open |
+| Providers/tools | Deterministic local executors, read-only MCP | All official adapters and shared conformance, rate/circuit/fallback behavior | Open |
+| Security/isolation | Honest boundary docs and supply-chain CI; the durable false-redaction signal is explicitly registered as a critical corrective task | Runtime enforcement, capabilities, approvals, truthful sink-before-write redaction, worktree/process/container providers | Open; `D9-REDACTION-039` blocks extension/release claims |
+| Observability | Event history and Mermaid/DOT output | OTel, live status, trace/critical path metrics, web Explorer/time travel | Open |
+| CLI/SDK DX | TS init/validate/compile/plan/doctor/visualize | Python CLI; remaining operational commands; scoring, badge, picker, artifacts, plugins | Partial |
+| Education/patterns | Quickstarts and four TS constructors, two runnable examples | Ten complete cross-language pattern bundles and executable 14-step course | Partial |
+| Release/community | Public alpha, governance, issue templates, Discussions | Trusted packages/provenance, external evidence, launch site/assets and sustained support | Partial/External |
+
+## Ten-pattern completeness ledger
+
+Every pattern must satisfy one bundle gate: YAML and JSON; native TS and Python;
+fixtures and expected events; deterministic mock e2e; optional real-provider
+setup; architecture diagram; declared token/money/time budgets; least-privilege
+permissions; injected failure plus resume; tests; and Claude Code, Codex, MCP,
+and shell launch guides.
+
+| Pattern | Current evidence | State | Control |
+|---|---|---|---|
+| Multi-source research diamond | TS constructor and provider-free showcase | Partial | `PATTERN-01-RESEARCH` |
+| Cited deep research | No citation-verifier runtime bundle | Open | `PATTERN-02-CITED` |
+| Route-auth security sweep | No complete runtime bundle | Open | `PATTERN-03-AUTH` |
+| Diff-risk router and judge panel | Router constructor only | Partial | `PATTERN-04-DIFF` |
+| Loop-until-dry discovery | Static bounded constructor only | Partial | `PATTERN-05-UNTIL-DRY` |
+| File migration with worktrees | No isolation/merge implementation | Open | `PATTERN-06-MIGRATION` |
+| CI failure sweeper | No complete bundle | Open | `PATTERN-07-CI` |
+| Dependency update sweeper | No complete bundle | Open | `PATTERN-08-DEPS` |
+| PR babysitter | No complete bundle | Open | `PATTERN-09-PR` |
+| Scheduled ecosystem scan | No scheduling/provider bundle | Open | `PATTERN-10-ECOSYSTEM` |
+
+`D14-PATTERN-SKELETONS-053` creates the common cross-language structure;
+`CTRL-PATTERNS-071` remains open until all ten rows satisfy the entire bundle
+gate, not merely until ten directories exist.
+
+## Mandatory-test ledger
+
+| Test group | Included scenarios | Current status | Control |
+|---|---|---|---|
+| Compiler negatives | Missing/duplicate/unreachable nodes, ports/schemas, cycles, routers, loop bounds, unauthorized transforms | Core DAG subset Green; router/loop/policy cases open | `CTRL-ACCEPTANCE-070` |
+| Parallel and streaming | 100-way concurrency, all failure policies, backpressure, barrier timeout, cancellation | Bounded pipeline and ordinary DAG subset Green; scale/deadline open | `D8-CHAOS-OPS-030`, `D18-COMPAT-BENCH-064` |
+| Dynamic and verifier | Malicious patches, pass/reject/abstain, citation checks, quorum/unknown, seen-set convergence | Open | `D11-VERIFY-CONFORMANCE-043`, `D12-ISOLATION-REDTEAM-047` |
+| Recovery | Every crash window, truthful redaction signal, dual resume, replay/fork, stale approvals, non-idempotent confirmation | Local DAG crash/resume subset Green; raw payloads currently contradict `redacted: true`; remaining cases open | `D9-REDACTION-039`, `D9-DURABLE-EXT-CONFORMANCE-034` |
+| Isolation | Worktree conflicts, merge gate, allowed paths, port/temp/cache/database namespaces, prompt injection | Open | `D12-ISOLATION-REDTEAM-047` |
+| Adapters/storage | Fallback, rate limit, circuit breaker, cancellation, secret redaction, shared storage/adapter suites | Open | `D13-ADAPTERS-049`, `D15-STORAGE-WORKERS-054` |
+| Product e2e | Full CLI, all ten patterns, Explorer/replay, clean install/upgrade | Partial CLI; remainder open | `CTRL-PATTERNS-071`, `D19-RC-065` |
+| Scale and chaos | 1,000 nodes, 100 randomized failures, kill/network/store/artifact faults | Open | `D18-COMPAT-BENCH-064` |
+
+## Quantitative release thresholds
+
+| Threshold | Current evidence | State |
+|---|---|---|
+| Compiler/scheduler/event store/policy coverage >=90% statements and >=85% branches | No consolidated threshold report | Open |
+| >=250 unit/integration cases per language | Python exceeds the raw count; TS workspace exceeds it, but classification and coverage ownership need a release report | Partial |
+| Shared adapter and storage conformance | Current compiler/runtime/persistence primitives are shared; provider and production storage matrices are absent | Partial |
+| 100 randomized failure runs without deadlock/spawn/budget escape | No accepted report | Open |
+| Linux/macOS/Windows; Node 20/22; Python 3.11/3.12/3.13 | Linux version matrix present; macOS and Windows absent | Partial |
+| Mock normal CI; real-provider opt-in/nightly | Mock/local behavior exists; real-provider opt-in matrix absent | Partial |
+| >10% performance regression blocks merge | No benchmark baseline/enforcement | Open |
+| No unaccepted high/critical; secret/dependency/license/static scans pass | Several scans exist; complete secret/license/runtime-policy evidence absent | Partial |
+| Trusted npm/PyPI, SBOM, checksums, attestations | Local artifacts only | Open/External |
+| Quickstart <=3 commands; >=80% external testers finish <=5 minutes | Command count is within target; external study absent | Partial/External |
+| Zero P0/P1 and >=5 external usability reports | No complete beta evidence | Open/External |
+
+No stable-v1 decision may treat aggregate test count as a substitute for
+coverage, portability, chaos, external usability, or provenance evidence.
+
+## Required planning, architecture, delivery, and growth documents
+
+| Document | State | Control |
+|---|---|---|
+| `research/loop-engineering-benchmark.md` | Present; refresh before major release | `CTRL-DOCS-073` |
+| `research/graph-engineering-source-review.md` | Present | `CTRL-DOCS-073` |
+| `research/competitor-capability-matrix.md` | Present; domain review Open | `CTRL-DOCS-073` |
+| `architecture/graph-ir-and-schema.md` | Present; implementation acceptance Open | `CTRL-DOCS-073` |
+| `architecture/runtime-semantics.md` | Present; implementation acceptance Open | `CTRL-DOCS-073` |
+| `architecture/persistence-and-recovery.md` | Present; implementation acceptance Open | `CTRL-DOCS-073` |
+| `architecture/security-and-isolation.md` | Present; independent security review Open | `CTRL-DOCS-073` |
+| `architecture/cross-language-conformance.md` | Present | `CTRL-DOCS-073` |
+| `delivery/master-plan-coverage-matrix.md` | Present, maintained | `CTRL-PLAN-COVERAGE-001` |
+| `delivery/task-dependency-graph.md` | Present, maintained | `CTRL-PLAN-COVERAGE-001` |
+| `delivery/agent-ownership-map.md` | Present, maintained | `CTRL-PLAN-COVERAGE-001` |
+| `delivery/release-checklist.md` | Present, maintained; mandatory evidence rows remain Open | `CTRL-PLAN-COVERAGE-001` |
+| `delivery/full-plan-gap-audit.md` | Present; findings registered, remediation Open | `CTRL-PLAN-COVERAGE-001` |
+| `delivery/d2-builder-yaml-implementation-brief.md` | Present; native implementation active | `D2-BUILDERS-YAML-020` |
+| `delivery/d9-redaction-implementation-brief.md` | Present; critical implementation Open | `D9-REDACTION-039` |
+| `growth/launch-plan.md` | Present as plan; launch execution Open | `CTRL-GROWTH-072` |
+| `growth/content-calendar.md` | Present as plan; scheduled execution Open | `CTRL-GROWTH-072` |
+| `growth/metrics-and-experiments.md` | Present as plan; observed outcomes Open | `CTRL-GROWTH-072` |
+
+## Post-audit registry closure
+
+The 2026-07-26 full-plan audit added 16 explicit controls instead of leaving
+their work hidden inside broad aggregate tasks:
+
+| Closure family | New controls | Release effect |
+|---|---|---|
+| Machine evidence and decision | `CTRL-RELEASE-MAP-074`, `CTRL-EVIDENCE-BACKFILL-075`, `CTRL-RELEASE-ROLLUP-086` | Every `REL-*` leaf must map 178/178; historical status has zero candidate weight without revalidation; stable/RC decision fails closed. |
+| Authority, privacy, usability, support | `D9-APPROVAL-077`, `D16-PRIVACY-079`, `D17-USABILITY-076`, `D18-SUPPORT-READINESS-080` | Human authority, consent, elapsed external evidence and support readiness can block release and cannot be fabricated. |
+| Independent native lanes | `D13-TS-ADAPTERS-081`, `D13-PY-ADAPTERS-082`, `D9-TS-REDACTION-087`, `D9-PY-REDACTION-088`, `D9-REDACTION-CONFORMANCE-089` | Implementers no longer self-certify cross-language adapters or critical secret handling. |
+| Runtime, operations, distribution, education | `D8-RUNTIME-CHAOS-084`, `D9-OPS-CONTROL-085`, `D14-NPM-DIST-078`, `D18-EDUCATION-ASSETS-083` | Chaos no longer blocks early durable specs; operations, canonical package and executable education each have independent gates. |
+
+Registry check at this checkpoint: 107 tasks, 107 unique IDs, zero dangling
+dependencies, zero cycles, and `updated_at` not older than any task timestamp.
+The scanner reports 6 of 77 evidence-required tasks satisfied; this is a scope
+and evidence checkpoint, not a stable-release claim.
+
+## Exit rule
+
+The master plan is complete only when every capability and pattern row is Green,
+every mandatory-test and quantitative threshold has a durable evidence link, all
+required documents exist and pass checks, package provenance is verified, and
+the release checklist records a go decision. External adoption and the 6,000+
+star target are reported honestly as outcomes; they cannot be fabricated or
+declared complete by code changes.

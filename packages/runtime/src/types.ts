@@ -106,3 +106,102 @@ export interface SchedulerOptions {
   concurrency?: number;
   signal?: AbortSignal;
 }
+
+export type PipelineFailureCode =
+  | "INVALID_INPUT"
+  | "STAGE_EXECUTION_FAILED"
+  | "STAGE_TIMEOUT"
+  | "INVALID_OUTPUT"
+  | "ITEM_CANCELLED";
+
+export type PipelineItemStatus = "succeeded" | "failed" | "dropped" | "cancelled";
+export type PipelineRunStatus = "succeeded" | "failed" | "cancelled";
+export type PipelineOrdering = "input" | "completion";
+export type PipelineFailurePolicy = "stop" | "drop" | "dead-letter";
+
+export interface PipelineItemFailure {
+  code: PipelineFailureCode;
+  message: string;
+  itemIndex: number;
+  stageId?: string;
+  stageIndex?: number;
+  attempt: number;
+  retryable: false;
+  causeName?: string;
+}
+
+export interface PipelineItemResult {
+  itemIndex: number;
+  status: PipelineItemStatus;
+  inputBound: boolean;
+  input?: JsonValue;
+  output?: JsonValue;
+  completedStages: number;
+  totalAttempts: number;
+  failure?: PipelineItemFailure;
+}
+
+export interface PipelineRunFailure {
+  code: "SOURCE_FAILED" | "ITEM_LIMIT_REACHED";
+  message: string;
+  causeName?: string;
+}
+
+export interface PipelineSummary {
+  status: PipelineRunStatus;
+  accepted: number;
+  emitted: number;
+  succeeded: number;
+  failed: number;
+  dropped: number;
+  cancelled: number;
+  maxObservedInFlight: number;
+  stageMaxObservedConcurrency: Readonly<Record<string, number>>;
+  stageMaxObservedQueueDepth: Readonly<Record<string, number>>;
+  runFailure?: PipelineRunFailure;
+}
+
+export interface PipelineHandlerContext {
+  readonly input: JsonValue;
+  readonly itemIndex: number;
+  readonly stageId: string;
+  readonly stageIndex: number;
+  readonly attempt: number;
+  readonly signal: AbortSignal;
+}
+
+export type PipelineHandler = (
+  context: PipelineHandlerContext,
+) => unknown | Promise<unknown>;
+
+export interface PipelineRetryOptions {
+  maxAttempts?: number;
+  initialDelayMs?: number;
+  backoffMultiplier?: number;
+  maxDelayMs?: number;
+}
+
+export interface PipelineStage {
+  id: string;
+  handler: PipelineHandler;
+  concurrency?: number;
+  timeoutMs?: number;
+  retry?: PipelineRetryOptions;
+  onFailure?: PipelineFailurePolicy;
+}
+
+export interface PipelineOptions {
+  bufferCapacity?: number;
+  maxInFlight?: number;
+  maxItems?: number;
+  maxStages?: number;
+  ordering?: PipelineOrdering;
+  cancellationSignal?: AbortSignal;
+}
+
+export type PipelineSource = Iterable<unknown> | AsyncIterable<unknown>;
+
+export interface PipelineRun extends AsyncIterableIterator<PipelineItemResult> {
+  readonly completion: Promise<PipelineSummary>;
+  close(reason?: unknown): Promise<PipelineSummary>;
+}

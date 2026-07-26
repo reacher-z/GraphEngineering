@@ -6,7 +6,8 @@
 `durable-json.schema.json` defines the tagged, checkpoint-safe encoding used by
 scheduler recovery for portable finite JSON, including exact binary64 values.
 `conformance/` contains inputs and expected results used by every native runtime,
-including settled-barrier and deterministic route-selection decision corpora.
+including settled-barrier, deterministic route-selection, and bounded-pipeline
+decision and coordination corpora.
 
 Runtime scheduling is fixed by [runtime-semantics.md](runtime-semantics.md), and
 local event/checkpoint behavior is fixed by
@@ -14,6 +15,10 @@ local event/checkpoint behavior is fixed by
 behavior is fixed by [primitives-semantics.md](primitives-semantics.md).
 Scheduler-integrated continuation for one immutable DAG is fixed by
 [durable-recovery-semantics.md](durable-recovery-semantics.md).
+Standalone per-item streaming, bounded buffers, source backpressure, structured
+failure policies, and cancellation are fixed by
+[pipeline-semantics.md](pipeline-semantics.md). This standalone contract does
+not activate Graph IR stream edges or durable item recovery.
 
 ## Canonical serialization v1alpha1
 

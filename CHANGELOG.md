@@ -19,14 +19,22 @@ migration note.
   side effects may retry within their original budgets, while omitted or
   non-idempotent declarations surface `IN_DOUBT_SIDE_EFFECT`. Resuming a valid
   terminal run returns its recorded result with no new event or executor call.
+- Native standalone `runPipeline` and `run_pipeline` APIs with lazy source
+  intake, bounded end-to-end backpressure, per-stage concurrency and retry,
+  input/completion delivery order, explicit stop/drop/dead-letter outcomes,
+  cooperative cancellation, and shared cross-language behavioral cases.
+- Evidence-gated progress scanning and a full Day 1-21 delivery control surface:
+  107 registered tasks, a dependency graph, ownership map, coverage matrix,
+  three organic-growth plans, and a 178-item stable-v1/RC release checklist.
 
 ### In progress
 
 - Scheduler checkpoint acceleration, replay/fork, and distributed lease/fencing
   providers. Recovery correctness currently comes from the complete event
   stream; checkpoint files are not wired into the scheduler.
-- Streaming pipelines, conditional edge lowering, verifier panels, and bounded
-  runtime loops.
+- Graph IR stream-edge lowering and durable item recovery, conditional edge
+  lowering, verifier panels, and bounded runtime loops. The new standalone
+  pipeline deliberately does not claim these graph/durability semantics.
 
 ## [0.1.0-alpha.1] - 2026-07-26
 

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Local, zero-dependency progress scanner for Graph Engineering.
 
 The scanner deliberately does not contact agents or mutate the task registry.  It
@@ -21,10 +20,10 @@ import shlex
 import subprocess
 import sys
 import tempfile
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, Iterator, Mapping, Sequence
-
+from typing import Any
 
 SCHEMA_VERSION = 1
 DEFAULT_WARNING_MINUTES = 60
@@ -52,7 +51,7 @@ class ScanPolicy:
     escalate_same_blocker_after_scans: int = DEFAULT_ESCALATE_SCANS
 
     @classmethod
-    def from_registry(cls, registry: Mapping[str, Any]) -> "ScanPolicy":
+    def from_registry(cls, registry: Mapping[str, Any]) -> ScanPolicy:
         value = registry.get("scan_policy", {})
         if not isinstance(value, Mapping):
             raise ScannerError("task-registry.json: scan_policy must be an object")
@@ -60,22 +59,49 @@ class ScanPolicy:
         def positive_int(key: str, default: int) -> int:
             raw = value.get(key, default)
             if isinstance(raw, bool) or not isinstance(raw, int) or raw <= 0:
-                raise ScannerError(f"task-registry.json: scan_policy.{key} must be a positive integer")
+                raise ScannerError(
+                    f"task-registry.json: scan_policy.{key} must be a positive integer"
+                )
             return raw
 
         policy = cls(
-            warning_after_minutes=positive_int("warning_after_minutes", DEFAULT_WARNING_MINUTES),
-            stale_after_minutes=positive_int("stale_after_minutes", DEFAULT_STALE_MINUTES),
-            nudge_cooldown_minutes=positive_int("nudge_cooldown_minutes", DEFAULT_COOLDOWN_MINUTES),
+            warning_after_minutes=positive_int(
+                "warning_after_minutes", DEFAULT_WARNING_MINUTES
+            ),
+            stale_after_minutes=positive_int(
+                "stale_after_minutes", DEFAULT_STALE_MINUTES
+            ),
+            nudge_cooldown_minutes=positive_int(
+                "nudge_cooldown_minutes", DEFAULT_COOLDOWN_MINUTES
+            ),
             escalate_same_blocker_after_scans=positive_int(
                 "escalate_same_blocker_after_scans", DEFAULT_ESCALATE_SCANS
             ),
         )
         if policy.warning_after_minutes > policy.stale_after_minutes:
             raise ScannerError(
-                "task-registry.json: warning_after_minutes cannot exceed stale_after_minutes"
+                "task-registry.json: warning_after_minutes cannot exceed "
+                "stale_after_minutes"
             )
         return policy
+
+
+@dataclass(frozen=True)
+class EvidencePolicy:
+    """Opt-in completion evidence policy with a migration cutoff for legacy tasks."""
+
+    required_for_assigned_at_or_after: dt.datetime | None = None
+
+    @classmethod
+    def from_registry(cls, registry: Mapping[str, Any]) -> EvidencePolicy:
+        value = registry.get("evidence_policy", {})
+        if not isinstance(value, Mapping):
+            raise ScannerError("task-registry.json: evidence_policy must be an object")
+        threshold = parse_time(
+            value.get("required_for_assigned_at_or_after"),
+            field="task-registry.json: evidence_policy.required_for_assigned_at_or_after",
+        )
+        return cls(required_for_assigned_at_or_after=threshold)
 
 
 def utc_now() -> dt.datetime:
@@ -83,7 +109,11 @@ def utc_now() -> dt.datetime:
 
 
 def format_time(value: dt.datetime) -> str:
-    return value.astimezone(dt.timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+    return (
+        value.astimezone(dt.timezone.utc)
+        .isoformat(timespec="seconds")
+        .replace("+00:00", "Z")
+    )
 
 
 def parse_time(value: Any, *, field: str) -> dt.datetime | None:
@@ -97,7 +127,9 @@ def parse_time(value: Any, *, field: str) -> dt.datetime | None:
     try:
         parsed = dt.datetime.fromisoformat(candidate)
     except ValueError as exc:
-        raise ScannerError(f"{field} is not a valid ISO-8601 timestamp: {value!r}") from exc
+        raise ScannerError(
+            f"{field} is not a valid ISO-8601 timestamp: {value!r}"
+        ) from exc
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=dt.timezone.utc)
     return parsed.astimezone(dt.timezone.utc)
@@ -112,12 +144,16 @@ def json_load(path: Path, *, required: bool = True) -> Any:
             raise ScannerError(f"required file does not exist: {path}") from None
         return None
     except json.JSONDecodeError as exc:
-        raise ScannerError(f"invalid JSON in {path}: line {exc.lineno}, column {exc.colno}") from exc
+        raise ScannerError(
+            f"invalid JSON in {path}: line {exc.lineno}, column {exc.colno}"
+        ) from exc
 
 
 def atomic_write_json(path: Path, value: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    fd, temporary = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
+    )
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             json.dump(value, handle, indent=2, ensure_ascii=False, sort_keys=True)
@@ -138,7 +174,10 @@ def atomic_write_json(path: Path, value: Any) -> None:
 
 def append_jsonl(path: Path, value: Mapping[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n"
+    payload = (
+        json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        + "\n"
+    )
     with path.open("a", encoding="utf-8") as handle:
         handle.write(payload)
         handle.flush()
@@ -156,9 +195,13 @@ def read_jsonl(path: Path) -> list[dict[str, Any]]:
             try:
                 value = json.loads(line)
             except json.JSONDecodeError as exc:
-                raise ScannerError(f"invalid JSONL in {path} at line {line_number}") from exc
+                raise ScannerError(
+                    f"invalid JSONL in {path} at line {line_number}"
+                ) from exc
             if not isinstance(value, dict):
-                raise ScannerError(f"invalid JSONL in {path} at line {line_number}: expected object")
+                raise ScannerError(
+                    f"invalid JSONL in {path} at line {line_number}: expected object"
+                )
             events.append(value)
     return events
 
@@ -174,7 +217,9 @@ def repository_lock(log_dir: Path) -> Iterator[None]:
             fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError as exc:
             if exc.errno in {errno.EACCES, errno.EAGAIN}:
-                raise ScannerBusy(f"another graph-progress process owns {lock_path}") from None
+                raise ScannerBusy(
+                    f"another graph-progress process owns {lock_path}"
+                ) from None
             raise
         try:
             handle.seek(0)
@@ -213,13 +258,20 @@ def validated_tasks(registry: Mapping[str, Any]) -> list[dict[str, Any]]:
             raise ScannerError(f"task-registry.json: tasks[{index}] must be an object")
         task_id = raw.get("id")
         if not isinstance(task_id, str) or not task_id.strip():
-            raise ScannerError(f"task-registry.json: tasks[{index}].id must be a non-empty string")
+            raise ScannerError(
+                f"task-registry.json: tasks[{index}].id must be a non-empty string"
+            )
         if task_id in identifiers:
             raise ScannerError(f"task-registry.json: duplicate task id {task_id!r}")
         identifiers.add(task_id)
         dependencies = raw.get("depends_on", raw.get("dependencies", []))
-        if not isinstance(dependencies, list) or not all(isinstance(item, str) for item in dependencies):
-            raise ScannerError(f"task-registry.json: task {task_id!r} depends_on must be a string array")
+        if not isinstance(dependencies, list) or not all(
+            isinstance(item, str) for item in dependencies
+        ):
+            raise ScannerError(
+                f"task-registry.json: task {task_id!r} depends_on must be a "
+                "string array"
+            )
         normalized = dict(raw)
         normalized["id"] = task_id
         normalized["depends_on"] = dependencies
@@ -249,7 +301,13 @@ def safe_artifact_evidence(repo: Path, raw_paths: Any) -> dict[str, Any]:
     elif isinstance(raw_paths, list):
         paths = raw_paths
     else:
-        return {"present": [], "missing": [], "unsafe": [], "invalid": True, "latest_mtime": None}
+        return {
+            "present": [],
+            "missing": [],
+            "unsafe": [],
+            "invalid": True,
+            "latest_mtime": None,
+        }
 
     present: list[str] = []
     missing: list[str] = []
@@ -259,7 +317,11 @@ def safe_artifact_evidence(repo: Path, raw_paths: Any) -> dict[str, Any]:
         if not isinstance(raw, str) or not raw.strip():
             unsafe.append(repr(raw))
             continue
-        candidate = (repo / raw).resolve() if not Path(raw).is_absolute() else Path(raw).resolve()
+        candidate = (
+            (repo / raw).resolve()
+            if not Path(raw).is_absolute()
+            else Path(raw).resolve()
+        )
         try:
             candidate.relative_to(repo)
         except ValueError:
@@ -268,7 +330,11 @@ def safe_artifact_evidence(repo: Path, raw_paths: Any) -> dict[str, Any]:
         if candidate.exists():
             present.append(raw)
             with contextlib.suppress(OSError):
-                mtimes.append(dt.datetime.fromtimestamp(candidate.stat().st_mtime, tz=dt.timezone.utc))
+                mtimes.append(
+                    dt.datetime.fromtimestamp(
+                        candidate.stat().st_mtime, tz=dt.timezone.utc
+                    )
+                )
         else:
             missing.append(raw)
     return {
@@ -280,11 +346,161 @@ def safe_artifact_evidence(repo: Path, raw_paths: Any) -> dict[str, Any]:
     }
 
 
+def task_completion_evidence(
+    task: Mapping[str, Any], policy: EvidencePolicy, *, now: dt.datetime
+) -> dict[str, Any]:
+    explicit_required = task.get("evidence_required")
+    if explicit_required is not None and not isinstance(explicit_required, bool):
+        raise ScannerError(f"task {task['id']}.evidence_required must be a boolean")
+    assigned_at = parse_time(
+        task.get("assigned_at"), field=f"task {task['id']}.assigned_at"
+    )
+    required = bool(explicit_required)
+    if (
+        explicit_required is None
+        and policy.required_for_assigned_at_or_after is not None
+    ):
+        required = bool(
+            assigned_at and assigned_at >= policy.required_for_assigned_at_or_after
+        )
+
+    expected = task.get("expected_tests", [])
+    if not isinstance(expected, list) or not all(
+        isinstance(item, str) and item.strip() for item in expected
+    ):
+        raise ScannerError(
+            f"task {task['id']}.expected_tests must be a non-empty string array"
+        )
+    expected_requirements = [item.strip() for item in expected]
+    if required and not expected_requirements:
+        raise ScannerError(
+            f"task {task['id']}.expected_tests must not be empty when "
+            "evidence is required"
+        )
+    if len(set(expected_requirements)) != len(expected_requirements):
+        raise ScannerError(f"task {task['id']}.expected_tests contains duplicates")
+
+    raw_records = task.get("test_evidence", [])
+    if not isinstance(raw_records, list):
+        raise ScannerError(f"task {task['id']}.test_evidence must be an array")
+    records: list[dict[str, Any]] = []
+    latest_results: dict[str, tuple[dt.datetime, int, str]] = {}
+    for index, raw in enumerate(raw_records):
+        if not isinstance(raw, Mapping):
+            raise ScannerError(
+                f"task {task['id']}.test_evidence[{index}] must be an object"
+            )
+        requirement = raw.get("requirement")
+        result = raw.get("result")
+        reference = raw.get("reference")
+        if not isinstance(requirement, str) or not requirement.strip():
+            raise ScannerError(
+                f"task {task['id']}.test_evidence[{index}].requirement must be "
+                "a non-empty string"
+            )
+        normalized_requirement = requirement.strip()
+        if normalized_requirement not in expected_requirements:
+            raise ScannerError(
+                f"task {task['id']}.test_evidence[{index}] names an unknown requirement"
+            )
+        if not isinstance(result, str) or result.casefold() not in {
+            "passed",
+            "failed",
+            "skipped",
+        }:
+            raise ScannerError(
+                f"task {task['id']}.test_evidence[{index}].result must be "
+                "passed, failed, or skipped"
+            )
+        if not isinstance(reference, str) or not reference.strip():
+            raise ScannerError(
+                f"task {task['id']}.test_evidence[{index}].reference must be "
+                "a non-empty string"
+            )
+        recorded_at = parse_time(
+            raw.get("recorded_at"),
+            field=f"task {task['id']}.test_evidence[{index}].recorded_at",
+        )
+        if recorded_at is None:
+            raise ScannerError(
+                f"task {task['id']}.test_evidence[{index}].recorded_at is required"
+            )
+        if assigned_at is not None and recorded_at < assigned_at:
+            raise ScannerError(
+                f"task {task['id']}.test_evidence[{index}].recorded_at "
+                "predates assigned_at"
+            )
+        if recorded_at > now:
+            raise ScannerError(
+                f"task {task['id']}.test_evidence[{index}].recorded_at is in the future"
+            )
+        normalized_result = result.casefold()
+        previous = latest_results.get(normalized_requirement)
+        if previous is None or (recorded_at, index) >= (previous[0], previous[1]):
+            latest_results[normalized_requirement] = (
+                recorded_at,
+                index,
+                normalized_result,
+            )
+        records.append(
+            {
+                "requirement": normalized_requirement,
+                "result": normalized_result,
+                "reference": reference.strip(),
+                "recorded_at": format_time(recorded_at),
+            }
+        )
+
+    passed = {
+        requirement
+        for requirement, (_, _, result) in latest_results.items()
+        if result == "passed"
+    }
+    failed = {
+        requirement
+        for requirement, (_, _, result) in latest_results.items()
+        if result == "failed"
+    }
+
+    raw_completion = task.get("completion_evidence", [])
+    if not isinstance(raw_completion, list) or not all(
+        isinstance(item, str) and item.strip() for item in raw_completion
+    ):
+        raise ScannerError(
+            f"task {task['id']}.completion_evidence must be a string array"
+        )
+    completion = [item.strip() for item in raw_completion]
+    missing = [
+        requirement
+        for requirement in expected_requirements
+        if requirement not in passed
+    ]
+    satisfied = not required or (not missing and bool(completion) and not failed)
+    return {
+        "required": required,
+        "satisfied": satisfied,
+        "expected_requirements": expected_requirements,
+        "passing_requirements": sorted(passed),
+        "failed_requirements": sorted(failed),
+        "missing_requirements": missing,
+        "test_records": records,
+        "completion_references": completion,
+    }
+
+
 def latest_task_activity(
-    task: Mapping[str, Any], artifact_evidence: Mapping[str, Any], log_activity: dt.datetime | None
+    task: Mapping[str, Any],
+    artifact_evidence: Mapping[str, Any],
+    log_activity: dt.datetime | None,
 ) -> tuple[dt.datetime | None, str | None]:
     candidates: list[tuple[dt.datetime, str]] = []
-    for key in ("last_heartbeat", "last_progress_at", "updated_at", "started_at", "assigned_at"):
+    for key in (
+        "last_heartbeat",
+        "last_progress_at",
+        "updated_at",
+        "started_at",
+        "assigned_at",
+    ):
         timestamp = parse_time(task.get(key), field=f"task {task['id']}.{key}")
         if timestamp:
             candidates.append((timestamp, key))
@@ -295,7 +511,11 @@ def latest_task_activity(
         candidates.append((artifact_time, "artifact_mtime"))
     if log_activity:
         candidates.append((log_activity, "agent_log"))
-    return max(candidates, default=(None, None), key=lambda item: item[0] or dt.datetime.min.replace(tzinfo=dt.timezone.utc))
+    return max(
+        candidates,
+        default=(None, None),
+        key=lambda item: item[0] or dt.datetime.min.replace(tzinfo=dt.timezone.utc),
+    )
 
 
 def blocker_text(task: Mapping[str, Any]) -> str | None:
@@ -306,7 +526,11 @@ def blocker_text(task: Mapping[str, Any]) -> str | None:
         return raw.strip() or None
     if isinstance(raw, Mapping):
         summary = raw.get("summary") or raw.get("reason") or raw.get("message")
-        return str(summary) if summary else json.dumps(raw, sort_keys=True, ensure_ascii=False)
+        return (
+            str(summary)
+            if summary
+            else json.dumps(raw, sort_keys=True, ensure_ascii=False)
+        )
     return str(raw)
 
 
@@ -322,6 +546,7 @@ def classify_task(
     *,
     all_tasks: Mapping[str, Mapping[str, Any]],
     evidence: Mapping[str, Any],
+    completion_evidence: Mapping[str, Any],
     log_activity: dt.datetime | None,
     previous: Mapping[str, Any] | None,
     policy: ScanPolicy,
@@ -337,17 +562,27 @@ def classify_task(
         item
         for item in dependencies
         if item in all_tasks
-        and str(all_tasks[item].get("status", "")).strip().casefold() not in TERMINAL_SUCCESS
+        and str(all_tasks[item].get("status", "")).strip().casefold()
+        not in TERMINAL_SUCCESS
     ]
     artifact_evidence = dict(evidence)
-    last_activity, activity_source = latest_task_activity(task, artifact_evidence, log_activity)
+    last_activity, activity_source = latest_task_activity(
+        task, artifact_evidence, log_activity
+    )
     age_minutes = None
     if last_activity:
         age_minutes = max(0.0, (now - last_activity).total_seconds() / 60)
 
-    quiet_until = parse_time(task.get("quiet_until"), field=f"task {task_id}.quiet_until")
+    quiet_until = parse_time(
+        task.get("quiet_until"), field=f"task {task_id}.quiet_until"
+    )
     in_quiet_window = bool(quiet_until and quiet_until > now)
-    failed_test = str(task.get("test_result", "")).casefold() in {"failed", "failure", "error"}
+    failed_test = str(task.get("test_result", "")).casefold() in {
+        "failed",
+        "failure",
+        "error",
+    }
+    failed_evidence = bool(completion_evidence["failed_requirements"])
 
     if blocker or raw_status == "blocked":
         classification = "blocked"
@@ -355,12 +590,25 @@ def classify_task(
     elif unknown_dependencies:
         classification = "integration-risk"
         reason = "unknown dependencies: " + ", ".join(unknown_dependencies)
-    elif raw_status in TERMINAL_FAILURE or failed_test:
+    elif raw_status in TERMINAL_FAILURE or failed_test or failed_evidence:
         classification = "integration-risk"
-        reason = "task or test result is failed"
-    elif raw_status in TERMINAL_SUCCESS and (artifact_evidence["missing"] or artifact_evidence["unsafe"]):
+        reason = "task or recorded test evidence is failed"
+    elif raw_status in TERMINAL_SUCCESS and (
+        artifact_evidence["missing"] or artifact_evidence["unsafe"]
+    ):
         classification = "integration-risk"
         reason = "completed task is missing or references unsafe expected artifacts"
+    elif raw_status in TERMINAL_SUCCESS and not completion_evidence["satisfied"]:
+        classification = "integration-risk"
+        details = []
+        if completion_evidence["missing_requirements"]:
+            details.append(
+                "missing passing test evidence: "
+                + ", ".join(completion_evidence["missing_requirements"])
+            )
+        if not completion_evidence["completion_references"]:
+            details.append("missing completion evidence reference")
+        reason = "; ".join(details) or "completion evidence is incomplete"
     elif unresolved_dependencies:
         classification = "waiting-dependency"
         reason = "waiting for: " + ", ".join(unresolved_dependencies)
@@ -392,7 +640,11 @@ def classify_task(
 
     previous_fingerprint = previous.get("blocker_fingerprint") if previous else None
     previous_count = previous.get("consecutive_blocked_scans", 0) if previous else 0
-    if classification == "blocked" and fingerprint and previous_fingerprint == fingerprint:
+    if (
+        classification == "blocked"
+        and fingerprint
+        and previous_fingerprint == fingerprint
+    ):
         consecutive_blocked = int(previous_count) + 1
     elif classification == "blocked":
         consecutive_blocked = 1
@@ -422,12 +674,15 @@ def classify_task(
         "escalated": escalated,
         "quiet_until": format_time(quiet_until) if quiet_until else None,
         "expected_artifacts": artifact_evidence,
+        "completion_evidence": completion_evidence,
         "risk": task.get("risk"),
         "next_action": task.get("next_action"),
     }
 
 
-def queue_state(events: Sequence[Mapping[str, Any]]) -> tuple[dict[str, dt.datetime], set[str]]:
+def queue_state(
+    events: Sequence[Mapping[str, Any]],
+) -> tuple[dict[str, dt.datetime], set[str]]:
     last_created: dict[str, dt.datetime] = {}
     acknowledged: set[str] = set()
     for event in events:
@@ -474,6 +729,7 @@ def scan_repository(repo: Path, *, now: dt.datetime | None = None) -> dict[str, 
     if not isinstance(registry, dict):
         raise ScannerError("task-registry.json must contain a JSON object")
     policy = ScanPolicy.from_registry(registry)
+    evidence_policy = EvidencePolicy.from_registry(registry)
     tasks = validated_tasks(registry)
     task_by_id = {task["id"]: task for task in tasks}
     previous_snapshot = json_load(latest_path, required=False)
@@ -489,11 +745,13 @@ def scan_repository(repo: Path, *, now: dt.datetime | None = None) -> dict[str, 
     classified: list[dict[str, Any]] = []
     for task in tasks:
         evidence = safe_artifact_evidence(repo, task.get("expected_artifacts"))
+        completion_evidence = task_completion_evidence(task, evidence_policy, now=now)
         classified.append(
             classify_task(
                 task,
                 all_tasks=task_by_id,
                 evidence=evidence,
+                completion_evidence=completion_evidence,
                 log_activity=activity.get(task["id"]),
                 previous=previous_tasks.get(task["id"]),
                 policy=policy,
@@ -511,7 +769,9 @@ def scan_repository(repo: Path, *, now: dt.datetime | None = None) -> dict[str, 
         cooldown_elapsed = last_nudge is None or now - last_nudge >= cooldown
         task["nudge_eligible"] = bool(needs_nudge and cooldown_elapsed)
         task["nudge_cooldown_until"] = (
-            format_time(last_nudge + cooldown) if last_nudge and not cooldown_elapsed else None
+            format_time(last_nudge + cooldown)
+            if last_nudge and not cooldown_elapsed
+            else None
         )
         if task["nudge_eligible"]:
             nudge = make_nudge(task, now)
@@ -521,11 +781,33 @@ def scan_repository(repo: Path, *, now: dt.datetime | None = None) -> dict[str, 
         else:
             task["nudge_id"] = None
 
-    counts = {key: 0 for key in ("healthy", "waiting-dependency", "stale", "blocked", "integration-risk")}
+    counts = {
+        key: 0
+        for key in (
+            "healthy",
+            "waiting-dependency",
+            "stale",
+            "blocked",
+            "integration-risk",
+        )
+    }
     for task in classified:
         counts[task["classification"]] += 1
     warning_count = sum(1 for task in classified if task["warning"])
-    overall = "attention" if any(counts[key] for key in NUDGEABLE) or warning_count else "healthy"
+    evidence_required = sum(
+        1 for task in classified if task["completion_evidence"]["required"]
+    )
+    evidence_satisfied = sum(
+        1
+        for task in classified
+        if task["completion_evidence"]["required"]
+        and task["completion_evidence"]["satisfied"]
+    )
+    overall = (
+        "attention"
+        if any(counts[key] for key in NUDGEABLE) or warning_count
+        else "healthy"
+    )
     snapshot = {
         "schema_version": SCHEMA_VERSION,
         "scan_id": now.strftime("scan-%Y%m%dT%H%M%S.%fZ"),
@@ -537,9 +819,24 @@ def scan_repository(repo: Path, *, now: dt.datetime | None = None) -> dict[str, 
             "warning_after_minutes": policy.warning_after_minutes,
             "stale_after_minutes": policy.stale_after_minutes,
             "nudge_cooldown_minutes": policy.nudge_cooldown_minutes,
-            "escalate_same_blocker_after_scans": policy.escalate_same_blocker_after_scans,
+            "escalate_same_blocker_after_scans": (
+                policy.escalate_same_blocker_after_scans
+            ),
+            "evidence_required_for_assigned_at_or_after": (
+                format_time(evidence_policy.required_for_assigned_at_or_after)
+                if evidence_policy.required_for_assigned_at_or_after
+                else None
+            ),
         },
-        "summary": {**counts, "warnings": warning_count, "nudges_created": len(nudges), "total": len(classified)},
+        "summary": {
+            **counts,
+            "warnings": warning_count,
+            "nudges_created": len(nudges),
+            "total": len(classified),
+            "evidence_required": evidence_required,
+            "evidence_satisfied": evidence_satisfied,
+            "evidence_open": evidence_required - evidence_satisfied,
+        },
         "tasks": classified,
         "nudges_created": nudges,
     }
@@ -552,14 +849,23 @@ def scan_repository(repo: Path, *, now: dt.datetime | None = None) -> dict[str, 
     return snapshot
 
 
-def acknowledge_nudge(repo: Path, nudge_id: str, *, now: dt.datetime | None = None) -> dict[str, Any]:
+def acknowledge_nudge(
+    repo: Path, nudge_id: str, *, now: dt.datetime | None = None
+) -> dict[str, Any]:
     now = (now or utc_now()).astimezone(dt.timezone.utc)
     queue_path = repo / "codex_logs" / "nudges" / "queue.jsonl"
     events = read_jsonl(queue_path)
-    created = [event for event in events if event.get("event") == "created" and event.get("nudge_id") == nudge_id]
+    created = [
+        event
+        for event in events
+        if event.get("event") == "created" and event.get("nudge_id") == nudge_id
+    ]
     if not created:
         raise ScannerError(f"unknown nudge id: {nudge_id}")
-    if any(event.get("event") == "acknowledged" and event.get("nudge_id") == nudge_id for event in events):
+    if any(
+        event.get("event") == "acknowledged" and event.get("nudge_id") == nudge_id
+        for event in events
+    ):
         raise ScannerError(f"nudge is already acknowledged: {nudge_id}")
     event = {
         "schema_version": SCHEMA_VERSION,
@@ -586,7 +892,9 @@ def timer_kind(requested: str) -> str:
         return "launchd"
     if sys.platform.startswith("linux"):
         return "systemd"
-    raise ScannerError("automatic timer installation supports Linux systemd and macOS launchd only")
+    raise ScannerError(
+        "automatic timer installation supports Linux systemd and macOS launchd only"
+    )
 
 
 def scanner_command(repo: Path) -> list[str]:
@@ -607,21 +915,18 @@ def systemd_units(repo: Path) -> tuple[str, str]:
             "",
         ]
     )
-    timer = "\n".join(
-        [
-            "[Unit]",
-            "Description=Run Graph Engineering progress scan every 30 minutes",
-            "",
-            "[Timer]",
-            "OnBootSec=5min",
-            "OnUnitActiveSec=30min",
-            "Persistent=true",
-            "Unit=graph-progress.service",
-            "",
-            "[Install]",
-            "WantedBy=timers.target",
-            "",
-        ]
+    timer = (
+        "[Unit]\n"
+        "Description=Run Graph Engineering progress scan every 30 minutes\n"
+        "\n"
+        "[Timer]\n"
+        "OnBootSec=5min\n"
+        "OnUnitActiveSec=30min\n"
+        "Persistent=true\n"
+        "Unit=graph-progress.service\n"
+        "\n"
+        "[Install]\n"
+        "WantedBy=timers.target\n"
     )
     return service, timer
 
@@ -693,7 +998,12 @@ def uninstall_timer(*, kind: str, dry_run: bool = False) -> dict[str, Any]:
             ["systemctl", "--user", "daemon-reload"],
         ]
     else:
-        paths = [home / "Library" / "LaunchAgents" / "dev.graphengineering.progress-scanner.plist"]
+        paths = [
+            home
+            / "Library"
+            / "LaunchAgents"
+            / "dev.graphengineering.progress-scanner.plist"
+        ]
         commands = [["launchctl", "bootout", f"gui/{os.getuid()}", str(paths[0])]]
     result = {
         "kind": selected,
@@ -717,7 +1027,9 @@ def atomic_write_text(path: Path, value: str) -> None:
 
 def atomic_write_bytes(path: Path, value: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    fd, temporary = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
+    )
     try:
         with os.fdopen(fd, "wb") as handle:
             handle.write(value)
@@ -729,13 +1041,17 @@ def atomic_write_bytes(path: Path, value: bytes) -> None:
             os.unlink(temporary)
 
 
-def run_commands(commands: Iterable[Sequence[str]], *, tolerate_failure: bool = False) -> None:
+def run_commands(
+    commands: Iterable[Sequence[str]], *, tolerate_failure: bool = False
+) -> None:
     for command in commands:
         try:
             subprocess.run(command, check=True)
         except (FileNotFoundError, subprocess.CalledProcessError) as exc:
             if not tolerate_failure:
-                raise ScannerError(f"timer command failed: {shlex.join(command)}: {exc}") from exc
+                raise ScannerError(
+                    f"timer command failed: {shlex.join(command)}: {exc}"
+                ) from exc
 
 
 def print_human_scan(snapshot: Mapping[str, Any]) -> None:
@@ -744,13 +1060,22 @@ def print_human_scan(snapshot: Mapping[str, Any]) -> None:
         f"Graph progress: {snapshot['overall']} — {summary['total']} tasks, "
         f"{summary['healthy']} healthy, {summary['waiting-dependency']} waiting, "
         f"{summary['stale']} stale, {summary['blocked']} blocked, "
-        f"{summary['integration-risk']} integration risk, {summary['warnings']} warnings"
+        f"{summary['integration-risk']} integration risk, "
+        f"{summary['warnings']} warnings"
+    )
+    print(
+        f"Evidence gates: {summary['evidence_satisfied']}/"
+        f"{summary['evidence_required']} satisfied, "
+        f"{summary['evidence_open']} open"
     )
     for task in snapshot["tasks"]:
         marker = "!" if task["classification"] in NUDGEABLE or task["warning"] else "·"
         print(f"{marker} {task['id']} [{task['classification']}] {task['reason']}")
     if snapshot.get("nudges_created"):
-        print(f"Queued {len(snapshot['nudges_created'])} nudge(s) for supervisor delivery.")
+        print(
+            f"Queued {len(snapshot['nudges_created'])} nudge(s) for supervisor "
+            "delivery."
+        )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -760,13 +1085,27 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("scan", help="scan registry and append eligible nudges")
     subparsers.add_parser("status", help="show the most recent scan without rescanning")
-    install = subparsers.add_parser("install-timer", help="install a 30-minute user timer")
-    install.add_argument("--kind", choices=("auto", "systemd", "launchd"), default="auto")
-    install.add_argument("--dry-run", action="store_true", help="print files and commands without changing anything")
+    install = subparsers.add_parser(
+        "install-timer", help="install a 30-minute user timer"
+    )
+    install.add_argument(
+        "--kind", choices=("auto", "systemd", "launchd"), default="auto"
+    )
+    install.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="print files and commands without changing anything",
+    )
     uninstall = subparsers.add_parser("uninstall-timer", help="remove the user timer")
-    uninstall.add_argument("--kind", choices=("auto", "systemd", "launchd"), default="auto")
-    uninstall.add_argument("--dry-run", action="store_true", help="print actions without changing anything")
-    acknowledge = subparsers.add_parser("acknowledge", help="append an acknowledgement for a nudge")
+    uninstall.add_argument(
+        "--kind", choices=("auto", "systemd", "launchd"), default="auto"
+    )
+    uninstall.add_argument(
+        "--dry-run", action="store_true", help="print actions without changing anything"
+    )
+    acknowledge = subparsers.add_parser(
+        "acknowledge", help="append an acknowledgement for a nudge"
+    )
     acknowledge.add_argument("nudge_id")
     return parser
 

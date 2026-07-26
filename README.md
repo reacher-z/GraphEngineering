@@ -26,13 +26,15 @@ decisions while scheduler-level conditional routing remains an explicit v1 goal.
 
 The project is an early alpha. The DAG compiler, ready-queue schedulers, safe project
 initializer, machine-readable CLI, structured failure handling, retries,
-timeouts, budgets, settled barrier/router decisions, safe Mermaid/DOT rendering,
-pattern constructors, local event/checkpoint stores, read-only MCP server, and
-development progress scanner are executable today. Both native runtimes also
-provide event-sourced durable start/resume: committed successes are reused after
-process loss and unsafe ambiguous effects fail closed. Checkpoint acceleration,
-replay/fork, distributed leases, and the broader v1 surface remain under active
-development; the repository does not silently mock unfinished capabilities.
+timeouts, bounded concurrency and attempt budgets, settled barrier/router
+decisions, standalone bounded pipelines with backpressure, safe Mermaid/DOT
+rendering, pattern constructors, local event/checkpoint stores, a read-only MCP
+server, and a development progress scanner are executable today. Both native
+runtimes also provide event-sourced durable start/resume: committed successes
+are reused after process loss and unsafe ambiguous effects fail closed.
+Checkpoint acceleration, replay/fork, distributed leases, Graph IR stream
+execution, and the broader v1 surface remain under active development; the
+repository does not silently mock unfinished capabilities.
 
 > **Source-only alpha:** npm and PyPI packages are not published yet. Clone this
 > repository to try the current release candidate; registry publication remains
@@ -90,6 +92,7 @@ uv run --project python pytest python/tests
 | Stable compiler diagnostics | Yes | Yes |
 | Ready-queue DAG scheduler | Yes | Yes |
 | Bounded concurrency | Yes | Yes |
+| Standalone bounded pipeline and backpressure | Yes | Yes |
 | Retry, timeout, attempt budget | Yes | Yes |
 | Failure isolation and named ports | Yes | Yes |
 | Shared compiler/runtime conformance | Yes | Yes |
@@ -100,7 +103,7 @@ uv run --project python pytest python/tests
 | Event-sourced scheduler start/resume | Yes | Yes |
 | Scheduler checkpoint acceleration | Not yet | Not yet |
 | Read-only validation/planning MCP | Yes | Uses the same portable IR |
-| Streaming and scheduler-applied routers/verifier panels/loops | Target v1 | Target v1 |
+| Graph IR streaming and scheduler-applied routers/verifier panels/loops | Target v1 | Target v1 |
 
 ## Design commitments
 
@@ -144,6 +147,7 @@ python3 scripts/check-python-artifacts.py
 - [Runtime semantics](spec/runtime-semantics.md)
 - [Persistence semantics](spec/persistence-semantics.md)
 - [Durable recovery semantics](spec/durable-recovery-semantics.md)
+- [Bounded pipeline semantics](spec/pipeline-semantics.md)
 - [Primitive semantics](spec/primitives-semantics.md)
 - [21-day delivery plan](codex_plans/Graph-Engineering-21-Day-Master-Plan.md)
 

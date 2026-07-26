@@ -1,6 +1,6 @@
 # Graph Engineering: 21-Day Dual-Language Open-Source Platform Plan
 
-Status: **Approved and executing — source alpha 1 released**
+Status: **Approved and executing — source alpha 1 released; durable recovery and bounded pipeline delivered; D2 authoring and D9 redaction contracts in progress**
 Started: **2026-07-26**
 Repository: <https://github.com/reacher-z/GraphEngineering> (public)
 Current release: <https://github.com/reacher-z/GraphEngineering/releases/tag/v0.1.0-alpha.1>
@@ -32,6 +32,54 @@ The Day-21 6,000-star number is a breakout growth OKR, not an engineering guaran
 ### Release rule
 
 Day 21 must produce all planned assets and at least a complete beta/release candidate. Stable v1 ships only if recovery, security, cross-language conformance, package provenance, and external usability gates pass. Quality takes precedence over falsely labeling an incomplete build as production-ready.
+
+### Live execution checkpoint — 2026-07-26
+
+This checkpoint is append-only evidence of plan execution; it does not remove
+or weaken any later-day acceptance gate.
+
+| Plan area | State | Evidence / next gate |
+|---|---|---|
+| Day 1-4 foundations | Partial; current alpha slice green | Public source alpha, canonical IR/compiler, deterministic ready-queue schedulers, native TS/Python parity, a TypeScript CLI/read-only MCP, security checks, and package rehearsal are green. General builders/YAML, Python CLI, the trace viewer, and several planned control documents remain open. |
+| Day 5 barriers and routing primitives | Partial | Settled all/minimum/percentage barriers and deterministic single/multicast routing have shared pure-evaluator parity; scheduler-integrated waiting, deadlines/quorum, conditional edge execution, and durable route replay remain open. |
+| Day 5 pipeline/backpressure | Delivered for the standalone native scope | Commit `3df201d` provides lazy bounded TypeScript/Python pipelines, backpressure, ordered/completion delivery, stop/drop/dead-letter policies, cancellation/cleanup, a hard 2,048-stage construction bound, 8 shared cases, 115 TS runtime tests and 59 Python pipeline tests. Graph IR stream-edge lowering and durable item recovery remain separate open scope. |
+| Day 6 failure envelopes | Partially complete | Scheduler failures, retry/timeout/cancellation, upstream isolation, invalid input/output, and attempt budgets are structured; pipeline terminal/run failures are the active parity slice. |
+| Day 9 durable execution | Delivered for immutable local DAG scope | Commit-before-release event-sourced start/resume, exact tagged binary64 JSON, crash-window handling, terminal idempotence, and bidirectional terminal-history interop are in draft PR #14. Leases, checkpoint acceleration, replay/fork, approvals, and distributed stores remain explicit follow-ups. |
+| Release/growth | Active | Public repository and `v0.1.0-alpha.1` exist; protected main and CI/CodeQL are green. The controlled objective remains trustworthy activation/adoption; 6,000+ organic stars is a breakout OKR, not a manufactured or guaranteed result. |
+
+Current critical path after the pipeline milestone is: bounded convergent cycles
+and their hard budgets; cost/model routing; verifier/judge/reflection semantics;
+then worktree/process isolation and provider adapters. Completed work is not
+counted as evidence for excluded functionality merely because it landed ahead
+of its calendar day.
+
+Two independent full-plan audits on 2026-07-26 found that the registry covered
+only the implemented alpha slice through the active pipeline work. Days 8-21,
+ten complete patterns, and most hard release thresholds were not yet represented
+as executable tasks. Therefore “healthy” scanner output is a liveness/artifact
+signal only and must not be read as master-plan completion. The canonical
+coverage matrix and dependency backlog under `codex_plans/delivery/` must stay
+synchronized until every row is evidence-backed; missing external adoption or
+publishing authority remains an explicit gate rather than an inferred success.
+
+Superseding execution update: the registry now contains 107 concrete controls
+covering the entire calendar, every runtime lane, all ten pattern bundles,
+mandatory acceptance evidence, documentation, provenance, privacy, support,
+release-leaf mapping, historical candidate revalidation, and organic growth.
+The delivery directory now contains a day-by-day coverage matrix, a dependency
+graph, an ownership/write-lease map, and a 178-item release checklist. Planned,
+waiting, and external-gate rows remain visibly non-complete; this expansion fixes
+the scanner's former scope blind spot but does not itself satisfy any product or
+release gate.
+
+The 107-task checkpoint incorporates the full-plan gap audit's 16 missing
+controls (`074`-`089`): independent TS/Python adapter and redaction lanes,
+approval authority, runtime chaos versus durable operations, privacy/usability,
+education/support readiness, canonical npm distribution, release-leaf mapping,
+candidate evidence backfill, and a final fail-closed release roll-up. The task
+graph is unique, has no dangling dependency and is acyclic. The scanner reports
+completed pipeline evidence as 6 of 77 required gates satisfied; every other
+planned or external outcome remains open.
 
 ## 2. Planning, logs, and agent operations
 

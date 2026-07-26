@@ -1,0 +1,440 @@
+{
+  "schemaVersion": 1,
+  "description": "Language-neutral behavioral cases for the bounded standalone pipeline contract.",
+  "defaults": {
+    "bufferCapacity": 16,
+    "maxInFlight": 16,
+    "maxItems": 1000,
+    "maxStages": 2048,
+    "ordering": "input",
+    "stageConcurrency": 1,
+    "maxAttempts": 1,
+    "onFailure": "dead-letter"
+  },
+  "mockOutcomeKinds": [
+    "return",
+    "throw",
+    "invalid-output",
+    "wait-for-gate"
+  ],
+  "mockGrammar": {
+    "outcomesByItem": "Each array position is the one-based attempt outcome for that item at that stage; after the final declared outcome, the last outcome repeats.",
+    "waitForGate": "wait-for-gate is one attempt action and must contain a terminal then action for the same attempt.",
+    "onStartByItem": "Coordination side effects happen immediately after an attempt starts and before its declared outcome."
+  },
+  "cases": [
+    {
+      "id": "identity-preserves-null-presence",
+      "source": {
+        "kind": "array",
+        "items": [null, { "value": 1 }, ["x", true]]
+      },
+      "stages": [],
+      "options": {
+        "bufferCapacity": 1,
+        "maxInFlight": 2,
+        "maxItems": 4,
+        "ordering": "input"
+      },
+      "expect": {
+        "deliveryOrder": [0, 1, 2],
+        "items": [
+          {
+            "itemIndex": 0,
+            "status": "succeeded",
+            "inputBound": true,
+            "input": null,
+            "output": null,
+            "completedStages": 0,
+            "totalAttempts": 0
+          },
+          {
+            "itemIndex": 1,
+            "status": "succeeded",
+            "inputBound": true,
+            "input": { "value": 1 },
+            "output": { "value": 1 },
+            "completedStages": 0,
+            "totalAttempts": 0
+          },
+          {
+            "itemIndex": 2,
+            "status": "succeeded",
+            "inputBound": true,
+            "input": ["x", true],
+            "output": ["x", true],
+            "completedStages": 0,
+            "totalAttempts": 0
+          }
+        ],
+        "summary": {
+          "status": "succeeded",
+          "accepted": 3,
+          "emitted": 3,
+          "succeeded": 3,
+          "failed": 0,
+          "dropped": 0,
+          "cancelled": 0,
+          "runFailure": null
+        }
+      }
+    },
+    {
+      "id": "bounded-retry-and-dead-letter",
+      "source": {
+        "kind": "array",
+        "items": [{ "id": "a" }, { "id": "b" }, { "id": "c" }]
+      },
+      "stages": [
+        {
+          "id": "prepare",
+          "concurrency": 2,
+          "retry": {
+            "maxAttempts": 2,
+            "initialDelayMs": 0,
+            "backoffMultiplier": 1,
+            "maxDelayMs": 0
+          },
+          "onFailure": "dead-letter",
+          "outcomesByItem": {
+            "0": [{ "kind": "return", "value": { "n": 1 } }],
+            "1": [
+              { "kind": "throw", "causeName": "TransientError", "message": "try again" },
+              { "kind": "return", "value": { "n": 2 } }
+            ],
+            "2": [{ "kind": "invalid-output", "valueType": "non-finite-number" }]
+          }
+        },
+        {
+          "id": "finish",
+          "concurrency": 1,
+          "onFailure": "dead-letter",
+          "outcomesByItem": {
+            "0": [{ "kind": "return", "value": { "answer": 10 } }],
+            "1": [{ "kind": "return", "value": { "answer": 20 } }]
+          }
+        }
+      ],
+      "options": {
+        "bufferCapacity": 1,
+        "maxInFlight": 3,
+        "maxItems": 4,
+        "maxStages": 2,
+        "ordering": "input"
+      },
+      "expect": {
+        "deliveryOrder": [0, 1, 2],
+        "items": [
+          {
+            "itemIndex": 0,
+            "status": "succeeded",
+            "inputBound": true,
+            "input": { "id": "a" },
+            "output": { "answer": 10 },
+            "completedStages": 2,
+            "totalAttempts": 2
+          },
+          {
+            "itemIndex": 1,
+            "status": "succeeded",
+            "inputBound": true,
+            "input": { "id": "b" },
+            "output": { "answer": 20 },
+            "completedStages": 2,
+            "totalAttempts": 3
+          },
+          {
+            "itemIndex": 2,
+            "status": "failed",
+            "inputBound": true,
+            "input": { "id": "c" },
+            "completedStages": 0,
+            "totalAttempts": 1,
+            "failure": {
+              "code": "INVALID_OUTPUT",
+              "itemIndex": 2,
+              "stageId": "prepare",
+              "stageIndex": 0,
+              "attempt": 1,
+              "retryable": false
+            }
+          }
+        ],
+        "summary": {
+          "status": "failed",
+          "accepted": 3,
+          "emitted": 3,
+          "succeeded": 2,
+          "failed": 1,
+          "dropped": 0,
+          "cancelled": 0,
+          "runFailure": null
+        }
+      }
+    },
+    {
+      "id": "drop-is-explicit",
+      "source": {
+        "kind": "array",
+        "items": ["bad", "good"]
+      },
+      "stages": [
+        {
+          "id": "validate",
+          "concurrency": 1,
+          "onFailure": "drop",
+          "outcomesByItem": {
+            "0": [{ "kind": "throw", "causeName": "Rejected", "message": "bad item" }],
+            "1": [{ "kind": "return", "value": "accepted" }]
+          }
+        }
+      ],
+      "options": {
+        "bufferCapacity": 1,
+        "maxInFlight": 2,
+        "maxItems": 3,
+        "ordering": "input"
+      },
+      "expect": {
+        "deliveryOrder": [0, 1],
+        "items": [
+          {
+            "itemIndex": 0,
+            "status": "dropped",
+            "inputBound": true,
+            "input": "bad",
+            "completedStages": 0,
+            "totalAttempts": 1,
+            "failure": {
+              "code": "STAGE_EXECUTION_FAILED",
+              "itemIndex": 0,
+              "stageId": "validate",
+              "stageIndex": 0,
+              "attempt": 1,
+              "retryable": false,
+              "causeName": "Rejected"
+            }
+          },
+          {
+            "itemIndex": 1,
+            "status": "succeeded",
+            "inputBound": true,
+            "input": "good",
+            "output": "accepted",
+            "completedStages": 1,
+            "totalAttempts": 1
+          }
+        ],
+        "summary": {
+          "status": "failed",
+          "accepted": 2,
+          "emitted": 2,
+          "succeeded": 1,
+          "failed": 0,
+          "dropped": 1,
+          "cancelled": 0,
+          "runFailure": null
+        }
+      }
+    },
+    {
+      "id": "stop-closes-intake-and-drains-accepted",
+      "source": {
+        "kind": "counting-array",
+        "items": ["stop", "must-not-pull"]
+      },
+      "stages": [
+        {
+          "id": "gate",
+          "concurrency": 1,
+          "onFailure": "stop",
+          "outcomesByItem": {
+            "0": [{ "kind": "throw", "causeName": "StopRequested", "message": "stop" }]
+          }
+        }
+      ],
+      "options": {
+        "bufferCapacity": 1,
+        "maxInFlight": 1,
+        "maxItems": 3,
+        "ordering": "input"
+      },
+      "expect": {
+        "sourcePullCount": 1,
+        "sourceCloseCount": 1,
+        "deliveryOrder": [0],
+        "items": [
+          {
+            "itemIndex": 0,
+            "status": "failed",
+            "inputBound": true,
+            "input": "stop",
+            "completedStages": 0,
+            "totalAttempts": 1,
+            "failure": {
+              "code": "STAGE_EXECUTION_FAILED",
+              "itemIndex": 0,
+              "stageId": "gate",
+              "stageIndex": 0,
+              "attempt": 1,
+              "retryable": false,
+              "causeName": "StopRequested"
+            }
+          }
+        ],
+        "summary": {
+          "status": "failed",
+          "accepted": 1,
+          "emitted": 1,
+          "succeeded": 0,
+          "failed": 1,
+          "dropped": 0,
+          "cancelled": 0,
+          "runFailure": null
+        }
+      }
+    },
+    {
+      "id": "source-failure-drains-prefix",
+      "source": {
+        "kind": "throwing-array",
+        "items": [1, 2],
+        "thenThrow": {
+          "causeName": "SourceOffline",
+          "message": "source failed"
+        }
+      },
+      "stages": [],
+      "options": {
+        "bufferCapacity": 1,
+        "maxInFlight": 3,
+        "maxItems": 4,
+        "ordering": "input"
+      },
+      "expect": {
+        "deliveryOrder": [0, 1],
+        "summary": {
+          "status": "failed",
+          "accepted": 2,
+          "emitted": 2,
+          "succeeded": 2,
+          "failed": 0,
+          "dropped": 0,
+          "cancelled": 0,
+          "runFailure": {
+            "code": "SOURCE_FAILED",
+            "causeName": "SourceOffline"
+          }
+        }
+      }
+    },
+    {
+      "id": "item-limit-does-not-probe",
+      "source": {
+        "kind": "counting-array",
+        "items": [1, 2, 3]
+      },
+      "stages": [],
+      "options": {
+        "bufferCapacity": 1,
+        "maxInFlight": 2,
+        "maxItems": 2,
+        "ordering": "input"
+      },
+      "expect": {
+        "sourcePullCount": 2,
+        "deliveryOrder": [0, 1],
+        "summary": {
+          "status": "failed",
+          "accepted": 2,
+          "emitted": 2,
+          "succeeded": 2,
+          "failed": 0,
+          "dropped": 0,
+          "cancelled": 0,
+          "runFailure": {
+            "code": "ITEM_LIMIT_REACHED"
+          }
+        }
+      }
+    },
+    {
+      "id": "fast-item-crosses-stage-without-barrier",
+      "source": {
+        "kind": "array",
+        "items": ["slow", "fast"]
+      },
+      "gates": ["release-slow"],
+      "stages": [
+        {
+          "id": "first",
+          "concurrency": 2,
+          "onFailure": "dead-letter",
+          "outcomesByItem": {
+            "0": [
+              {
+                "kind": "wait-for-gate",
+                "gate": "release-slow",
+                "then": { "kind": "return", "value": "slow-first" }
+              }
+            ],
+            "1": [{ "kind": "return", "value": "fast-first" }]
+          }
+        },
+        {
+          "id": "second",
+          "concurrency": 1,
+          "onStartByItem": {
+            "1": [{ "releaseGate": "release-slow" }]
+          },
+          "outcomesByItem": {
+            "0": [{ "kind": "return", "value": "slow-done" }],
+            "1": [{ "kind": "return", "value": "fast-done" }]
+          }
+        }
+      ],
+      "options": {
+        "bufferCapacity": 1,
+        "maxInFlight": 2,
+        "maxItems": 3,
+        "ordering": "input"
+      },
+      "expect": {
+        "mustOccurBefore": [
+          ["stage:second:item:1:start", "stage:first:item:0:return"]
+        ],
+        "deliveryOrder": [0, 1],
+        "outputByItem": {
+          "0": "slow-done",
+          "1": "fast-done"
+        },
+        "maxObservedInFlightAtMost": 2,
+        "maxObservedQueueDepthAtMost": 1
+      }
+    },
+    {
+      "id": "slow-consumer-backpressures-source",
+      "source": {
+        "kind": "counting-array",
+        "items": [0, 1, 2, 3, 4]
+      },
+      "stages": [],
+      "options": {
+        "bufferCapacity": 1,
+        "maxInFlight": 2,
+        "maxItems": 6,
+        "ordering": "completion"
+      },
+      "consumer": {
+        "readResults": 1,
+        "thenPauseUntil": "pipeline-idle"
+      },
+      "expect": {
+        "sourcePullCountWhilePausedAtMost": 3,
+        "deliveryItemSet": [0, 1, 2, 3, 4],
+        "maxObservedInFlightAtMost": 2,
+        "maxObservedQueueDepthAtMost": 1
+      }
+    }
+  ]
+}

@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import math
-from typing import Annotated, Literal, TypeAlias
+from collections.abc import Mapping
+from typing import Annotated, Literal, TypeAlias, cast
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic import JsonValue as PydanticJsonValue
 
 JsonPrimitive: TypeAlias = str | int | float | bool | None
@@ -44,6 +45,22 @@ class StrictModel(BaseModel):
         populate_by_name=True,
         strict=True,
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def present_optional_fields_are_not_null(cls, value: object) -> object:
+        """Keep schema-optional fields absent instead of accepting explicit null."""
+
+        if not isinstance(value, Mapping):
+            return value
+        for field_name, field in cls.model_fields.items():
+            if field.is_required():
+                continue
+            alias = field.alias or field_name
+            for input_name in {field_name, alias}:
+                if input_name in value and value[input_name] is None:
+                    raise ValueError(f"{alias} cannot be null when present")
+        return value
 
 
 class Metadata(StrictModel):
@@ -105,15 +122,8 @@ class EdgeSpec(StrictModel):
     schema_: JsonObject | None = Field(default=None, alias="schema")
 
 
-class GraphPolicies(BaseModel):
-    """Known policies plus forward-compatible extension keys."""
-
-    model_config = ConfigDict(
-        extra="allow",
-        frozen=True,
-        populate_by_name=True,
-        strict=True,
-    )
+class _KnownGraphPolicies(StrictModel):
+    """Validation-only view of the policy keys defined by Graph IR v1alpha1."""
 
     max_concurrency: SafePositiveInteger | None = Field(default=None, alias="maxConcurrency")
     max_dynamic_nodes: SafeNonNegativeInteger | None = Field(default=None, alias="maxDynamicNodes")
@@ -131,6 +141,72 @@ class GraphPolicies(BaseModel):
         ):
             raise ValueError("maxCostUsd must be a portable finite number")
         return value
+
+
+class GraphPolicies(StrictModel):
+    """Lossless policy map with typed accessors for the v1alpha1 keys.
+
+    Policy objects deliberately keep every JSON key in ``model_extra``.  A
+    Python field name such as ``max_concurrency`` is a valid future extension
+    key and must not be mistaken for the canonical ``maxConcurrency`` key.
+    """
+
+    model_config = ConfigDict(
+        extra="allow",
+        frozen=True,
+        populate_by_name=False,
+        strict=True,
+    )
+    __pydantic_extra__: dict[str, JsonValue] = Field(init=False)
+
+    @classmethod
+    def known_keys(cls) -> frozenset[str]:
+        """Return the canonical policy keys defined by this IR version."""
+
+        return frozenset(
+            field.alias or name for name, field in _KnownGraphPolicies.model_fields.items()
+        )
+
+    @model_validator(mode="before")
+    @classmethod
+    def validate_known_policy_keys(cls, value: object) -> object:
+        if not isinstance(value, Mapping):
+            return value
+        _KnownGraphPolicies.model_validate(
+            {key: item for key, item in value.items() if key in cls.known_keys()}
+        )
+        return value
+
+    def _known_value(self, alias: str) -> JsonValue | None:
+        return self.__pydantic_extra__.get(alias)
+
+    @property
+    def max_concurrency(self) -> int | None:
+        return cast(int | None, self._known_value("maxConcurrency"))
+
+    @property
+    def max_dynamic_nodes(self) -> int | None:
+        return cast(int | None, self._known_value("maxDynamicNodes"))
+
+    @property
+    def max_depth(self) -> int | None:
+        return cast(int | None, self._known_value("maxDepth"))
+
+    @property
+    def max_fan_out(self) -> int | None:
+        return cast(int | None, self._known_value("maxFanOut"))
+
+    @property
+    def max_total_attempts(self) -> int | None:
+        return cast(int | None, self._known_value("maxTotalAttempts"))
+
+    @property
+    def max_duration_ms(self) -> int | None:
+        return cast(int | None, self._known_value("maxDurationMs"))
+
+    @property
+    def max_cost_usd(self) -> float | None:
+        return cast(float | None, self._known_value("maxCostUsd"))
 
 
 class GraphSpec(StrictModel):

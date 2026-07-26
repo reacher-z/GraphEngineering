@@ -38,12 +38,53 @@ can be overridden with:
 }
 ```
 
+New work can require evidence before a terminal status is trusted:
+
+```json
+{
+  "evidence_policy": {
+    "required_for_assigned_at_or_after": "2026-07-26T16:20:00Z"
+  },
+  "tasks": [{
+    "id": "example",
+    "assigned_at": "2026-07-26T16:30:00Z",
+    "expected_tests": ["unit suite"],
+    "test_evidence": [{
+      "requirement": "unit suite",
+      "result": "passed",
+      "recorded_at": "2026-07-26T17:00:00Z",
+      "reference": "command: pytest tests/unit"
+    }],
+    "completion_evidence": ["review: PR #42"]
+  }]
+}
+```
+
+Each required expected-test string needs a matching passing record, and at least
+one completion reference is required. A failed record is an integration risk
+even before the task is marked complete. The timestamp cutoff is an explicit
+legacy migration boundary; a task can override it with
+`"evidence_required": true` or `false`. References are auditable descriptions,
+not commands the scanner executes.
+
+Evidence records are append-only: for each exact requirement, the newest
+`recorded_at` value wins (array order breaks equal-timestamp ties). This permits
+a later passing rerun to supersede a recorded failure without deleting history,
+while a later failure reopens the gate. Evidence cannot predate task assignment
+or claim a future timestamp, and an evidence-required task must declare at least
+one expected test.
+
 Classification precedence is blocked, integration risk, waiting dependency,
 quiet window, completion, staleness, then healthy. A dependency is satisfied only
 when its registry status is one of `complete`, `completed`, `done`, `merged`, or
 `released`. A completed task with missing expected artifacts is an integration
 risk. A registered `quiet_until` suppresses age warnings while long-running work
 is expected.
+
+For evidence-required completed work, missing passing records or a missing
+completion reference is also an integration risk. Scan snapshots preserve the
+expected, passing, failed, and missing requirements so a healthy liveness result
+cannot be mistaken for release acceptance.
 
 Snapshots are written to `codex_logs/scans/<scan-id>.json` and atomically mirrored
 to `codex_logs/scans/latest.json`. Nudge and acknowledgement events are append-only
