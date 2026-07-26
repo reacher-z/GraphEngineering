@@ -1,8 +1,9 @@
 # Graph Engineering: 21-Day Dual-Language Open-Source Platform Plan
 
-Status: **Approved and executing**
+Status: **Approved and executing — source alpha 1 released**
 Started: **2026-07-26**
-Repository: `reacher-z/GraphEngineering` (remote must be restored or recreated)
+Repository: <https://github.com/reacher-z/GraphEngineering> (public)
+Current release: <https://github.com/reacher-z/GraphEngineering/releases/tag/v0.1.0-alpha.1>
 Primary objective: ship a trustworthy Graph Engineering platform and create the product and launch conditions for a **6,000+ GitHub stars breakout target**.
 
 ## 1. Mission and success definition

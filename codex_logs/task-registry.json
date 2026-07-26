@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-07-26T12:02:00Z",
+  "updated_at": "2026-07-26T12:20:00Z",
   "repository": ".",
   "scan_policy": {
     "warning_after_minutes": 60,
@@ -81,17 +81,17 @@
       "id": "D1-BRAND-001",
       "title": "Restore GitHub remote and secure package identities",
       "owner": "main",
-      "status": "in_progress",
+      "status": "completed",
       "work_package": "WP12",
       "depends_on": [],
       "expected_artifacts": ["README.md", "package.json", "python/pyproject.toml"],
       "expected_tests": ["registry availability and authenticated publication rehearsal"],
       "assigned_at": "2026-07-26T09:37:00Z",
       "started_at": "2026-07-26T09:37:00Z",
-      "last_heartbeat": "2026-07-26T12:02:00Z",
+      "last_heartbeat": "2026-07-26T12:20:00Z",
       "risk": "medium",
       "blocker": null,
-      "next_action": "Push the green initial alpha to the existing private repository, then perform the requested public visibility change; defer registry publication until trusted publishing is configured"
+      "next_action": "Maintain the public source release, protected main branch, community/security settings, and keep registry publication deferred until trusted publishing and package-specific gates are ready"
     },
     {
       "id": "D1-DOCS-001",
