@@ -1,0 +1,20 @@
+cff-version: 1.2.0
+message: "If Graph Engineering supports your work, please cite this software release."
+title: "Graph Engineering"
+type: software
+authors:
+  - name: "Graph Engineering contributors"
+abstract: >-
+  A vendor-neutral, typed graph orchestration platform for reliable agentic
+  systems, with native TypeScript and Python runtimes and shared conformance.
+keywords:
+  - agentic systems
+  - multi-agent orchestration
+  - graph runtime
+  - workflow engine
+  - artificial intelligence
+repository-code: "https://github.com/reacher-z/GraphEngineering"
+url: "https://github.com/reacher-z/GraphEngineering"
+license: MIT
+version: 0.1.0-alpha.1
+date-released: 2026-07-26

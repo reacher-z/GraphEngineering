@@ -1,0 +1,50 @@
+{
+  "name": "@graph-engineering/cli",
+  "version": "0.1.0-alpha.1",
+  "description": "Safely initialize, validate, inspect, compile, visualize, and diagnose Graph Engineering Graph IR tooling",
+  "keywords": ["ai", "agents", "graph", "workflow", "cli", "visualization"],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/reacher-z/GraphEngineering.git",
+    "directory": "packages/cli"
+  },
+  "homepage": "https://github.com/reacher-z/GraphEngineering#readme",
+  "bugs": { "url": "https://github.com/reacher-z/GraphEngineering/issues" },
+  "publishConfig": { "access": "public" },
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "graph": "dist/src/cli.js",
+    "grapheng": "dist/src/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/src/index.js"
+    }
+  },
+  "files": [
+    "dist/src",
+    "assets",
+    "README.md"
+  ],
+  "dependencies": {
+    "@graph-engineering/core": "workspace:*",
+    "@graph-engineering/runtime": "workspace:*"
+  },
+  "scripts": {
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.json && node -e \"require('node:fs').chmodSync('dist/src/cli.js', 0o755)\"",
+    "test": "npm run build && node --test --test-concurrency=1 dist/tests/*.test.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "prepack": "npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "typescript": "^5.8.3"
+  }
+}

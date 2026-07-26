@@ -1,0 +1,58 @@
+name: Bug report
+description: Report reproducible incorrect behavior
+title: "[Bug]: "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: Do not include secrets, private prompts, or sensitive trace payloads.
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Surface
+      options:
+        - TypeScript runtime
+        - Python runtime
+        - Deterministic primitives
+        - Pattern constructors
+        - CLI
+        - Visualization
+        - MCP
+        - Explorer
+        - Documentation or example
+        - Packaging or CI
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      placeholder: 0.1.0-alpha.1 or commit SHA
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Include a minimal graph, input, command, and deterministic mock where possible.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior and sanitized evidence
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      placeholder: OS, Node/Python version, storage adapter
+    validations:
+      required: true

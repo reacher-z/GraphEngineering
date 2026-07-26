@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/reacher-z/GraphEngineering/security/advisories/new
+    about: Report vulnerabilities privately; never open a public security issue.
+  - name: Questions and design discussion
+    url: https://github.com/reacher-z/GraphEngineering/discussions
+    about: Ask for help or discuss a design before proposing a protocol change.

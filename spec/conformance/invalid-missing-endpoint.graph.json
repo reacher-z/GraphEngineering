@@ -1,0 +1,15 @@
+{
+  "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+  "kind": "Graph",
+  "metadata": { "name": "invalid-missing-endpoint", "version": "1.0.0" },
+  "inputSchema": { "type": "object" },
+  "outputSchema": { "type": "object" },
+  "entrypoints": ["start"],
+  "outputs": { "result": { "node": "start" } },
+  "nodes": [
+    { "id": "start", "kind": "transform", "inputSchema": {}, "outputSchema": {}, "config": {} }
+  ],
+  "edges": [
+    { "id": "missing", "from": { "node": "start" }, "to": { "node": "does-not-exist" } }
+  ]
+}

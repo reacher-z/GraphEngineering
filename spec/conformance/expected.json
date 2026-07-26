@@ -1,0 +1,42 @@
+{
+  "canonicalization": {
+    "diamond.graph.json": {
+      "sha256": "24819fe69f3b9449c79bcdd85b2049000c7cc8f313aab5957657a6078a80d288"
+    }
+  },
+  "checkpoints": {
+    "checkpoint-basic.json": {
+      "contentHash": "c32a90e5788f3b1f951fe3c021f2e64b20c99c13df01d7919cd0d7a3e1d4690f"
+    }
+  },
+  "compilation": {
+    "diamond.graph.json": {
+      "valid": true,
+      "topologicalLayers": [
+        ["split"],
+        ["left", "right"],
+        ["merge"]
+      ]
+    },
+    "invalid-duplicate-node.graph.json": {
+      "valid": false,
+      "diagnosticCodes": ["GE1001_DUPLICATE_NODE"]
+    },
+    "invalid-missing-endpoint.graph.json": {
+      "valid": false,
+      "diagnosticCodes": ["GE1004_MISSING_TARGET"]
+    },
+    "invalid-cycle.graph.json": {
+      "valid": false,
+      "diagnosticCodes": ["GE1005_CYCLE"]
+    },
+    "invalid-unreachable.graph.json": {
+      "valid": false,
+      "diagnosticCodes": ["GE1006_UNREACHABLE_NODE"]
+    },
+    "invalid-entrypoint-incoming.graph.json": {
+      "valid": false,
+      "diagnosticCodes": ["GE1010_ENTRYPOINT_HAS_INCOMING", "GE1006_UNREACHABLE_NODE"]
+    }
+  }
+}

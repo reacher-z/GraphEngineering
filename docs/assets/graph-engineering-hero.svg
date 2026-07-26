@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="360" viewBox="0 0 1200 360" role="img" aria-labelledby="title description">
+  <title id="title">Graph Engineering</title>
+  <desc id="description">Typed graphs for parallel, verified, deterministic agent workflows.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#081427"/>
+      <stop offset="0.55" stop-color="#102650"/>
+      <stop offset="1" stop-color="#12213a"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#38bdf8"/>
+      <stop offset="1" stop-color="#a78bfa"/>
+    </linearGradient>
+    <filter id="glow" x="-100%" y="-100%" width="300%" height="300%">
+      <feGaussianBlur stdDeviation="6" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#66d9ef"/>
+    </marker>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M 32 0 L 0 0 0 32" fill="none" stroke="#7dd3fc" stroke-opacity="0.055"/>
+    </pattern>
+  </defs>
+  <rect width="1200" height="360" rx="24" fill="url(#background)"/>
+  <rect width="1200" height="360" rx="24" fill="url(#grid)"/>
+  <circle cx="1125" cy="38" r="155" fill="#7c3aed" opacity="0.08"/>
+  <circle cx="610" cy="342" r="190" fill="#0284c7" opacity="0.07"/>
+
+  <g font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+    <text x="64" y="112" fill="#f8fafc" font-size="54" font-weight="750" letter-spacing="-1.5">Graph Engineering</text>
+    <rect x="64" y="136" width="455" height="4" rx="2" fill="url(#accent)"/>
+    <text x="64" y="181" fill="#bae6fd" font-size="21" font-weight="500">Typed graphs. Parallel work. Verified convergence.</text>
+    <text x="64" y="218" fill="#94a3b8" font-size="16">One portable IR · Native TypeScript + Python · Deterministic plumbing</text>
+
+    <g transform="translate(64 258)" font-size="14" font-weight="650">
+      <rect width="116" height="38" rx="19" fill="#0ea5e9" fill-opacity="0.16" stroke="#38bdf8" stroke-opacity="0.65"/>
+      <text x="58" y="24" text-anchor="middle" fill="#e0f2fe">FAN OUT</text>
+      <rect x="130" width="116" height="38" rx="19" fill="#8b5cf6" fill-opacity="0.16" stroke="#a78bfa" stroke-opacity="0.65"/>
+      <text x="188" y="24" text-anchor="middle" fill="#ede9fe">VERIFY</text>
+      <rect x="260" width="116" height="38" rx="19" fill="#14b8a6" fill-opacity="0.16" stroke="#5eead4" stroke-opacity="0.65"/>
+      <text x="318" y="24" text-anchor="middle" fill="#ccfbf1">MERGE</text>
+    </g>
+  </g>
+
+  <g fill="none" stroke="#66d9ef" stroke-width="2.4" stroke-linecap="round" stroke-opacity="0.78" marker-end="url(#arrow)">
+    <path d="M 655 180 C 700 180, 702 102, 755 102"/>
+    <path d="M 655 180 C 700 180, 702 258, 755 258"/>
+    <path d="M 835 102 L 905 102"/>
+    <path d="M 835 258 L 905 258"/>
+    <path d="M 985 102 C 1035 102, 1025 180, 1065 180"/>
+    <path d="M 985 258 C 1035 258, 1025 180, 1065 180"/>
+    <path d="M 1135 180 L 1170 180"/>
+  </g>
+
+  <g font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="12" font-weight="700" text-anchor="middle">
+    <circle cx="625" cy="180" r="30" fill="#082f49" stroke="#38bdf8" stroke-width="2" filter="url(#glow)"/>
+    <text x="625" y="184" fill="#e0f2fe">SPLIT</text>
+
+    <rect x="755" y="76" width="80" height="52" rx="12" fill="#172554" stroke="#818cf8" stroke-width="2"/>
+    <text x="795" y="106" fill="#e0e7ff">WORK A</text>
+    <rect x="755" y="232" width="80" height="52" rx="12" fill="#172554" stroke="#818cf8" stroke-width="2"/>
+    <text x="795" y="262" fill="#e0e7ff">WORK B</text>
+
+    <rect x="905" y="76" width="80" height="52" rx="26" fill="#2e1065" stroke="#c084fc" stroke-width="2"/>
+    <text x="945" y="106" fill="#f3e8ff">CHECK</text>
+    <rect x="905" y="232" width="80" height="52" rx="26" fill="#2e1065" stroke="#c084fc" stroke-width="2"/>
+    <text x="945" y="262" fill="#f3e8ff">CHECK</text>
+
+    <path d="M 1100 145 L 1137 180 L 1100 215 L 1063 180 Z" fill="#042f2e" stroke="#5eead4" stroke-width="2"/>
+    <text x="1100" y="184" fill="#ccfbf1">MERGE</text>
+    <circle cx="1181" cy="180" r="11" fill="#f8fafc" stroke="#38bdf8" stroke-width="4" filter="url(#glow)"/>
+  </g>
+</svg>

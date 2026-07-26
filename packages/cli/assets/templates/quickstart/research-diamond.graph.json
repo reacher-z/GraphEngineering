@@ -1,0 +1,91 @@
+{
+  "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+  "kind": "Graph",
+  "metadata": {
+    "name": "quickstart-research",
+    "version": "1.0.0",
+    "description": "Split one topic into two independent research lanes, then merge"
+  },
+  "inputSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["topic"],
+    "properties": {
+      "topic": { "type": "string", "minLength": 1 }
+    }
+  },
+  "outputSchema": {
+    "type": "object"
+  },
+  "entrypoints": ["scope"],
+  "outputs": {
+    "report": { "node": "synthesize" }
+  },
+  "nodes": [
+    {
+      "id": "scope",
+      "kind": "transform",
+      "inputSchema": { "type": "object" },
+      "outputSchema": { "type": "object" },
+      "config": { "operation": "identity" },
+      "sideEffects": "none"
+    },
+    {
+      "id": "research-docs",
+      "kind": "agent",
+      "inputSchema": { "type": "object" },
+      "outputSchema": { "type": "object" },
+      "config": { "role": "Find primary documentation and return cited facts" },
+      "sideEffects": "none"
+    },
+    {
+      "id": "research-code",
+      "kind": "agent",
+      "inputSchema": { "type": "object" },
+      "outputSchema": { "type": "object" },
+      "config": { "role": "Find executable examples and implementation constraints" },
+      "sideEffects": "none"
+    },
+    {
+      "id": "synthesize",
+      "kind": "barrier",
+      "inputSchema": { "type": "object" },
+      "outputSchema": { "type": "object" },
+      "config": { "condition": "all" },
+      "sideEffects": "none"
+    }
+  ],
+  "edges": [
+    {
+      "id": "scope-docs",
+      "from": { "node": "scope" },
+      "to": { "node": "research-docs" },
+      "mode": "value"
+    },
+    {
+      "id": "scope-code",
+      "from": { "node": "scope" },
+      "to": { "node": "research-code" },
+      "mode": "value"
+    },
+    {
+      "id": "docs-synthesis",
+      "from": { "node": "research-docs" },
+      "to": { "node": "synthesize", "port": "docs" },
+      "mode": "value"
+    },
+    {
+      "id": "code-synthesis",
+      "from": { "node": "research-code" },
+      "to": { "node": "synthesize", "port": "code" },
+      "mode": "value"
+    }
+  ],
+  "policies": {
+    "maxConcurrency": 2,
+    "maxDynamicNodes": 0,
+    "maxDepth": 8,
+    "maxFanOut": 4,
+    "maxTotalAttempts": 8
+  }
+}

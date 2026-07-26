@@ -1,0 +1,47 @@
+{
+  "name": "@graph-engineering/patterns",
+  "version": "0.1.0-alpha.1",
+  "description": "Deterministic, portable Graph IR pattern constructors",
+  "keywords": ["ai", "agents", "graph", "workflow", "patterns", "orchestration"],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/reacher-z/GraphEngineering.git",
+    "directory": "packages/patterns"
+  },
+  "homepage": "https://github.com/reacher-z/GraphEngineering#readme",
+  "bugs": { "url": "https://github.com/reacher-z/GraphEngineering/issues" },
+  "publishConfig": { "access": "public" },
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/src/index.js"
+    }
+  },
+  "files": [
+    "dist/src",
+    "README.md"
+  ],
+  "dependencies": {
+    "@graph-engineering/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "typescript": "^5.8.3"
+  },
+  "scripts": {
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.json",
+    "test": "npm run build && node --test --test-concurrency=1 dist/test/*.test.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "prepack": "npm run build"
+  }
+}

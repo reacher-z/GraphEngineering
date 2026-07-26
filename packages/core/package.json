@@ -1,0 +1,44 @@
+{
+  "name": "@graph-engineering/core",
+  "version": "0.1.0-alpha.1",
+  "description": "Canonical Graph IR types, hashing, and compiler for Graph Engineering",
+  "keywords": ["ai", "agents", "graph", "workflow", "compiler", "orchestration"],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/reacher-z/GraphEngineering.git",
+    "directory": "packages/core"
+  },
+  "homepage": "https://github.com/reacher-z/GraphEngineering#readme",
+  "bugs": { "url": "https://github.com/reacher-z/GraphEngineering/issues" },
+  "publishConfig": { "access": "public" },
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "prepack": "npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.8.0",
+    "vitest": "^4.0.0"
+  },
+  "license": "MIT"
+}

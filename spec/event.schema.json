@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/event.schema.json",
+  "title": "Graph Engineering Runtime Event",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "eventId", "type", "timestamp", "runId", "graphRevision", "sequence", "data"],
+  "properties": {
+    "apiVersion": { "const": "graphengineering.reacher-z.github.io/events/v1alpha1" },
+    "eventId": { "type": "string", "minLength": 1 },
+    "type": {
+      "enum": [
+        "RunCreated", "RunStarted", "RunPaused", "RunResumed",
+        "GraphPatched", "NodeScheduled", "NodeStarted", "NodeAttemptFailed",
+        "NodeRetried", "NodeSucceeded", "EdgeEmitted", "BarrierSatisfied",
+        "RouteSelected", "VerificationRecorded", "BudgetUpdated",
+        "ArtifactCreated", "HumanInputRequested", "HumanInputReceived",
+        "RunCancelled", "RunFailed", "RunSucceeded"
+      ]
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\\d|3[01])T([01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|[+-](?:[01]\\d|2[0-3]):[0-5]\\d)$"
+    },
+    "runId": { "type": "string", "minLength": 1 },
+    "graphRevision": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+    "sequence": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+    "traceId": { "type": "string" },
+    "spanId": { "type": "string" },
+    "parentSpanId": { "type": "string" },
+    "nodeId": { "type": "string" },
+    "edgeId": { "type": "string" },
+    "attempt": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+    "payloadHash": { "type": "string" },
+    "artifactRef": { "type": "string" },
+    "redacted": { "type": "boolean", "default": true },
+    "data": { "type": "object" }
+  }
+}

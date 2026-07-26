@@ -1,0 +1,58 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "graph-engineering"
+version = "0.1.0a1"
+description = "A typed, deterministic graph runtime for multi-agent systems"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Graph Engineering contributors" }]
+keywords = ["ai", "agents", "multi-agent", "graph", "workflow", "orchestration"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Typing :: Typed",
+]
+dependencies = ["pydantic>=2.10,<3"]
+
+[project.optional-dependencies]
+dev = [
+  "mypy>=1.15",
+  "pytest>=8.3",
+  "ruff>=0.11",
+]
+
+[project.urls]
+Homepage = "https://github.com/reacher-z/GraphEngineering"
+Repository = "https://github.com/reacher-z/GraphEngineering"
+Issues = "https://github.com/reacher-z/GraphEngineering/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/graph_engineering"]
+
+[tool.hatch.build.targets.sdist]
+exclude = ["/tests"]
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-config --strict-markers"
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+packages = ["graph_engineering"]

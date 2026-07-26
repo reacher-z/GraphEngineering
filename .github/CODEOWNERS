@@ -1,0 +1,14 @@
+* @reacher-z
+
+/spec/ @reacher-z
+/packages/core/ @reacher-z
+/packages/runtime/ @reacher-z
+/packages/persistence/ @reacher-z
+/packages/primitives/ @reacher-z
+/packages/patterns/ @reacher-z
+/packages/mcp-server/ @reacher-z
+/packages/cli/ @reacher-z
+/python/src/graph_engineering/ @reacher-z
+/examples/ @reacher-z
+/.github/workflows/ @reacher-z
+/SECURITY.md @reacher-z

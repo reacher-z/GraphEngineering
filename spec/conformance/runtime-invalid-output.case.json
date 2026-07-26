@@ -1,0 +1,51 @@
+{
+  "name": "invalid-output-is-contained-to-its-branch",
+  "graph": {
+    "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+    "kind": "Graph",
+    "metadata": {
+      "name": "invalid-output-isolation",
+      "version": "1.0.0"
+    },
+    "inputSchema": { "type": "object" },
+    "outputSchema": { "type": "object" },
+    "entrypoints": ["bad", "good"],
+    "outputs": { "survivor": { "node": "good" } },
+    "nodes": [
+      { "id": "bad", "kind": "tool", "inputSchema": {}, "outputSchema": {}, "config": {} },
+      { "id": "good", "kind": "tool", "inputSchema": {}, "outputSchema": {}, "config": {} },
+      { "id": "bad-child", "kind": "tool", "inputSchema": {}, "outputSchema": {}, "config": {} }
+    ],
+    "edges": [
+      { "id": "bad-child", "from": { "node": "bad" }, "to": { "node": "bad-child" } }
+    ],
+    "policies": {
+      "maxConcurrency": 2,
+      "maxTotalAttempts": 4
+    }
+  },
+  "mock": {
+    "graphInput": { "seed": 1 },
+    "invalidOutputNode": "bad",
+    "returns": {
+      "good": { "ok": true },
+      "bad-child": { "mustNotRun": true }
+    }
+  },
+  "expect": {
+    "status": "failed",
+    "nodeStatuses": {
+      "bad": "failed",
+      "good": "succeeded",
+      "bad-child": "skipped"
+    },
+    "failureCodes": ["INVALID_OUTPUT", "UPSTREAM_FAILED"],
+    "attempts": {
+      "bad": 1,
+      "good": 1,
+      "bad-child": 0
+    },
+    "outputs": { "survivor": { "ok": true } },
+    "mustNotExecute": ["bad-child"]
+  }
+}

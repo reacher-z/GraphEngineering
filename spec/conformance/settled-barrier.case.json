@@ -1,0 +1,177 @@
+{
+  "schemaVersion": "graphengineering.reacher-z.github.io/conformance/settled-barrier/v1alpha1",
+  "cases": [
+    {
+      "name": "empty-all",
+      "items": [],
+      "policy": { "kind": "all" },
+      "expect": {
+        "satisfied": false,
+        "reasonCode": "NO_ITEMS",
+        "total": 0,
+        "succeeded": 0,
+        "failed": 0,
+        "missing": 0,
+        "timedOut": 0,
+        "acceptedIds": [],
+        "failedIds": [],
+        "missingIds": [],
+        "timedOutIds": []
+      }
+    },
+    {
+      "name": "all-succeeded",
+      "items": [
+        { "id": "one", "status": "succeeded", "value": null },
+        { "id": "two", "status": "succeeded", "value": { "score": 2.5 } }
+      ],
+      "policy": { "kind": "all" },
+      "expect": {
+        "satisfied": true,
+        "reasonCode": "ALL_SUCCEEDED",
+        "total": 2,
+        "succeeded": 2,
+        "failed": 0,
+        "missing": 0,
+        "timedOut": 0,
+        "acceptedIds": ["one", "two"],
+        "failedIds": [],
+        "missingIds": [],
+        "timedOutIds": []
+      }
+    },
+    {
+      "name": "all-classifies-every-status-in-declaration-order",
+      "items": [
+        { "id": "ok-a", "status": "succeeded", "value": { "nested": [1, true] } },
+        { "id": "lost-a", "status": "missing" },
+        { "id": "failed-a", "status": "failed" },
+        { "id": "late-a", "status": "timed_out" },
+        { "id": "ok-b", "status": "succeeded", "value": "done" },
+        { "id": "failed-b", "status": "failed" }
+      ],
+      "policy": { "kind": "all" },
+      "expect": {
+        "satisfied": false,
+        "reasonCode": "ALL_NOT_SUCCEEDED",
+        "total": 6,
+        "succeeded": 2,
+        "failed": 2,
+        "missing": 1,
+        "timedOut": 1,
+        "acceptedIds": ["ok-a", "ok-b"],
+        "failedIds": ["failed-a", "failed-b"],
+        "missingIds": ["lost-a"],
+        "timedOutIds": ["late-a"]
+      }
+    },
+    {
+      "name": "minimum-met",
+      "items": [
+        { "id": "a", "status": "failed" },
+        { "id": "b", "status": "succeeded", "value": 1 },
+        { "id": "c", "status": "succeeded", "value": 2 }
+      ],
+      "policy": { "kind": "minimum", "minimum": 2 },
+      "expect": {
+        "satisfied": true,
+        "reasonCode": "MINIMUM_MET",
+        "total": 3,
+        "succeeded": 2,
+        "failed": 1,
+        "missing": 0,
+        "timedOut": 0,
+        "acceptedIds": ["b", "c"],
+        "failedIds": ["a"],
+        "missingIds": [],
+        "timedOutIds": []
+      }
+    },
+    {
+      "name": "minimum-not-met",
+      "items": [
+        { "id": "a", "status": "succeeded", "value": 1 },
+        { "id": "b", "status": "missing" },
+        { "id": "c", "status": "timed_out" }
+      ],
+      "policy": { "kind": "minimum", "minimum": 2 },
+      "expect": {
+        "satisfied": false,
+        "reasonCode": "MINIMUM_NOT_MET",
+        "total": 3,
+        "succeeded": 1,
+        "failed": 0,
+        "missing": 1,
+        "timedOut": 1,
+        "acceptedIds": ["a"],
+        "failedIds": [],
+        "missingIds": ["b"],
+        "timedOutIds": ["c"]
+      }
+    },
+    {
+      "name": "minimum-exceeds-total",
+      "items": [
+        { "id": "a", "status": "succeeded", "value": 1 }
+      ],
+      "policy": { "kind": "minimum", "minimum": 2 },
+      "expect": {
+        "satisfied": false,
+        "reasonCode": "MINIMUM_EXCEEDS_TOTAL",
+        "total": 1,
+        "succeeded": 1,
+        "failed": 0,
+        "missing": 0,
+        "timedOut": 0,
+        "acceptedIds": ["a"],
+        "failedIds": [],
+        "missingIds": [],
+        "timedOutIds": []
+      }
+    },
+    {
+      "name": "percentage-exact-integer-threshold-met",
+      "items": [
+        { "id": "a", "status": "succeeded", "value": 1 },
+        { "id": "b", "status": "succeeded", "value": 2 },
+        { "id": "c", "status": "failed" }
+      ],
+      "policy": { "kind": "percentage", "basisPoints": 6666 },
+      "expect": {
+        "satisfied": true,
+        "reasonCode": "PERCENTAGE_MET",
+        "total": 3,
+        "succeeded": 2,
+        "failed": 1,
+        "missing": 0,
+        "timedOut": 0,
+        "acceptedIds": ["a", "b"],
+        "failedIds": ["c"],
+        "missingIds": [],
+        "timedOutIds": []
+      }
+    },
+    {
+      "name": "percentage-exact-integer-threshold-not-met",
+      "items": [
+        { "id": "a", "status": "succeeded", "value": 1 },
+        { "id": "b", "status": "succeeded", "value": 2 },
+        { "id": "c", "status": "failed" }
+      ],
+      "policy": { "kind": "percentage", "basisPoints": 6667 },
+      "expect": {
+        "satisfied": false,
+        "reasonCode": "PERCENTAGE_NOT_MET",
+        "total": 3,
+        "succeeded": 2,
+        "failed": 1,
+        "missing": 0,
+        "timedOut": 0,
+        "acceptedIds": ["a", "b"],
+        "failedIds": ["c"],
+        "missingIds": [],
+        "timedOutIds": []
+      }
+    }
+  ]
+}

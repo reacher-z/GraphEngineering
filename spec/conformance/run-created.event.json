@@ -1,0 +1,14 @@
+{
+  "apiVersion": "graphengineering.reacher-z.github.io/events/v1alpha1",
+  "eventId": "evt-0001",
+  "type": "RunCreated",
+  "timestamp": "2026-07-26T00:00:00Z",
+  "runId": "run-conformance-001",
+  "graphRevision": 1,
+  "sequence": 0,
+  "traceId": "trace-conformance-001",
+  "redacted": true,
+  "data": {
+    "graphHash": "24819fe69f3b9449c79bcdd85b2049000c7cc8f313aab5957657a6078a80d288"
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "name": "run-cancellation-preserves-success-and-skips-unstarted-work",
+  "graph": {
+    "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+    "kind": "Graph",
+    "metadata": {
+      "name": "cancellation-isolation",
+      "version": "1.0.0"
+    },
+    "inputSchema": { "type": "object" },
+    "outputSchema": { "type": "object" },
+    "entrypoints": ["fast"],
+    "outputs": { "completed": { "node": "fast" } },
+    "nodes": [
+      { "id": "fast", "kind": "tool", "inputSchema": {}, "outputSchema": {}, "config": {} },
+      { "id": "slow", "kind": "tool", "inputSchema": {}, "outputSchema": {}, "config": {} },
+      { "id": "after-slow", "kind": "tool", "inputSchema": {}, "outputSchema": {}, "config": {} }
+    ],
+    "edges": [
+      { "id": "fast-slow", "from": { "node": "fast" }, "to": { "node": "slow" } },
+      { "id": "slow-after", "from": { "node": "slow" }, "to": { "node": "after-slow" } }
+    ],
+    "policies": {
+      "maxConcurrency": 2,
+      "maxTotalAttempts": 4
+    }
+  },
+  "mock": {
+    "graphInput": { "seed": 1 },
+    "cancelAfterStarted": ["slow"],
+    "returns": {
+      "fast": { "preserved": true },
+      "after-slow": { "mustNotRun": true }
+    }
+  },
+  "expect": {
+    "status": "cancelled",
+    "nodeStatuses": {
+      "fast": "succeeded",
+      "slow": "failed",
+      "after-slow": "skipped"
+    },
+    "failureCodes": ["NODE_CANCELLED", "NODE_CANCELLED"],
+    "outputs": { "completed": { "preserved": true } },
+    "mustNotExecute": ["after-slow"]
+  }
+}

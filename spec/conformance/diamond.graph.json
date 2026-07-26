@@ -1,0 +1,34 @@
+{
+  "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+  "kind": "Graph",
+  "metadata": {
+    "name": "diamond",
+    "version": "1.0.0",
+    "description": "Conformance fixture for fan-out and fan-in"
+  },
+  "inputSchema": { "type": "object" },
+  "outputSchema": { "type": "object" },
+  "entrypoints": ["split"],
+  "outputs": {
+    "result": { "node": "merge" }
+  },
+  "nodes": [
+    { "id": "split", "kind": "transform", "inputSchema": { "type": "object" }, "outputSchema": { "type": "object" }, "config": {} },
+    { "id": "left", "kind": "transform", "inputSchema": { "type": "object" }, "outputSchema": { "type": "object" }, "config": {} },
+    { "id": "right", "kind": "transform", "inputSchema": { "type": "object" }, "outputSchema": { "type": "object" }, "config": {} },
+    { "id": "merge", "kind": "barrier", "inputSchema": { "type": "object" }, "outputSchema": { "type": "object" }, "config": { "condition": "all" } }
+  ],
+  "edges": [
+    { "id": "split-left", "from": { "node": "split" }, "to": { "node": "left" }, "mode": "value" },
+    { "id": "split-right", "from": { "node": "split" }, "to": { "node": "right" }, "mode": "value" },
+    { "id": "left-merge", "from": { "node": "left" }, "to": { "node": "merge", "port": "left" }, "mode": "value" },
+    { "id": "right-merge", "from": { "node": "right" }, "to": { "node": "merge", "port": "right" }, "mode": "value" }
+  ],
+  "policies": {
+    "maxConcurrency": 2,
+    "maxDynamicNodes": 0,
+    "maxDepth": 8,
+    "maxFanOut": 4,
+    "maxTotalAttempts": 8
+  }
+}

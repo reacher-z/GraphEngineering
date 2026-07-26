@@ -1,0 +1,102 @@
+{
+  "caseVersion": "graphengineering.reacher-z.github.io/runtime-cases/v1alpha1",
+  "name": "invalid-output-isolation",
+  "graph": {
+    "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+    "kind": "Graph",
+    "metadata": {
+      "name": "invalid-output-isolation",
+      "version": "1"
+    },
+    "inputSchema": {},
+    "outputSchema": {},
+    "entrypoints": [
+      "producer",
+      "independent"
+    ],
+    "outputs": {
+      "dependent": {
+        "node": "dependent"
+      },
+      "independent": {
+        "node": "independent"
+      }
+    },
+    "nodes": [
+      {
+        "id": "producer",
+        "kind": "agent",
+        "inputSchema": {},
+        "outputSchema": {},
+        "config": {},
+        "retry": {
+          "maxAttempts": 2
+        }
+      },
+      {
+        "id": "dependent",
+        "kind": "transform",
+        "inputSchema": {},
+        "outputSchema": {},
+        "config": {}
+      },
+      {
+        "id": "independent",
+        "kind": "agent",
+        "inputSchema": {},
+        "outputSchema": {},
+        "config": {}
+      }
+    ],
+    "edges": [
+      {
+        "id": "producer-dependent",
+        "from": {
+          "node": "producer"
+        },
+        "to": {
+          "node": "dependent"
+        }
+      }
+    ],
+    "policies": {
+      "maxConcurrency": 2,
+      "maxTotalAttempts": 3
+    }
+  },
+  "graphInput": {
+    "seed": 7
+  },
+  "mock": {
+    "producerOutput": "non-finite-number",
+    "independentOutput": {
+      "ok": true
+    }
+  },
+  "expect": {
+    "status": "failed",
+    "totalAttempts": 3,
+    "nodes": [
+      {
+        "nodeId": "producer",
+        "sequence": 0,
+        "status": "failed",
+        "attempts": 2,
+        "failureCode": "INVALID_OUTPUT"
+      },
+      {
+        "nodeId": "independent",
+        "sequence": 1,
+        "status": "succeeded",
+        "attempts": 1
+      },
+      {
+        "nodeId": "dependent",
+        "sequence": 2,
+        "status": "skipped",
+        "attempts": 0,
+        "failureCode": "UPSTREAM_FAILED"
+      }
+    ]
+  }
+}

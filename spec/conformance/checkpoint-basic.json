@@ -1,0 +1,17 @@
+{
+  "apiVersion": "graphengineering.reacher-z.github.io/checkpoints/v1alpha1",
+  "runId": "run-persistence-001",
+  "checkpointId": "after-research",
+  "sequence": 3,
+  "createdAt": "2026-07-26T10:00:00.000Z",
+  "state": {
+    "status": "running",
+    "results": {
+      "count": 2,
+      "研究": "verified"
+    },
+    "pending": ["synthesize"],
+    "budgetMicros": 1250000
+  },
+  "contentHash": "c32a90e5788f3b1f951fe3c021f2e64b20c99c13df01d7919cd0d7a3e1d4690f"
+}

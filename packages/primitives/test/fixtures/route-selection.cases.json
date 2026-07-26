@@ -1,0 +1,216 @@
+{
+  "caseVersion": "graphengineering.reacher-z.github.io/primitive-cases/route-selection/v1alpha1",
+  "validCases": [
+    {
+      "name": "single-selects-requested-route",
+      "request": { "requestedRoutes": ["audit"] },
+      "policy": {
+        "kind": "single",
+        "allowedRoutes": ["quick", "audit", "human"],
+        "defaultRoute": "human"
+      },
+      "expect": {
+        "routed": true,
+        "reasonCode": "REQUESTED_ROUTES_SELECTED",
+        "requestedRoutes": ["audit"],
+        "selectedRoutes": ["audit"],
+        "unknownRoutes": [],
+        "confidenceBasisPoints": null,
+        "usedDefault": false,
+        "escalated": false
+      }
+    },
+    {
+      "name": "multi-canonicalizes-policy-order",
+      "request": { "requestedRoutes": ["audit", "quick"] },
+      "policy": {
+        "kind": "multi",
+        "allowedRoutes": ["quick", "audit", "human"],
+        "maxMulticast": 2
+      },
+      "expect": {
+        "routed": true,
+        "reasonCode": "REQUESTED_ROUTES_SELECTED",
+        "requestedRoutes": ["audit", "quick"],
+        "selectedRoutes": ["quick", "audit"],
+        "unknownRoutes": [],
+        "confidenceBasisPoints": null,
+        "usedDefault": false,
+        "escalated": false
+      }
+    },
+    {
+      "name": "empty-uses-explicit-default",
+      "request": { "requestedRoutes": [] },
+      "policy": {
+        "kind": "single",
+        "allowedRoutes": ["quick", "human"],
+        "defaultRoute": "human"
+      },
+      "expect": {
+        "routed": true,
+        "reasonCode": "DEFAULT_SELECTED_NO_REQUEST",
+        "requestedRoutes": [],
+        "selectedRoutes": ["human"],
+        "unknownRoutes": [],
+        "confidenceBasisPoints": null,
+        "usedDefault": true,
+        "escalated": false
+      }
+    },
+    {
+      "name": "empty-without-default-remains-unrouted",
+      "request": { "requestedRoutes": [] },
+      "policy": { "kind": "single", "allowedRoutes": ["quick", "human"] },
+      "expect": {
+        "routed": false,
+        "reasonCode": "NO_REQUESTED_ROUTE",
+        "requestedRoutes": [],
+        "selectedRoutes": [],
+        "unknownRoutes": [],
+        "confidenceBasisPoints": null,
+        "usedDefault": false,
+        "escalated": false
+      }
+    },
+    {
+      "name": "unknown-uses-explicit-default",
+      "request": { "requestedRoutes": ["surprise"] },
+      "policy": {
+        "kind": "single",
+        "allowedRoutes": ["quick", "human"],
+        "defaultRoute": "human"
+      },
+      "expect": {
+        "routed": true,
+        "reasonCode": "DEFAULT_SELECTED_UNKNOWN_ROUTE",
+        "requestedRoutes": ["surprise"],
+        "selectedRoutes": ["human"],
+        "unknownRoutes": ["surprise"],
+        "confidenceBasisPoints": null,
+        "usedDefault": true,
+        "escalated": false
+      }
+    },
+    {
+      "name": "unknown-without-default-remains-unrouted",
+      "request": { "requestedRoutes": ["surprise"] },
+      "policy": { "kind": "single", "allowedRoutes": ["quick", "human"] },
+      "expect": {
+        "routed": false,
+        "reasonCode": "UNKNOWN_ROUTE",
+        "requestedRoutes": ["surprise"],
+        "selectedRoutes": [],
+        "unknownRoutes": ["surprise"],
+        "confidenceBasisPoints": null,
+        "usedDefault": false,
+        "escalated": false
+      }
+    },
+    {
+      "name": "low-confidence-escalates-before-unknown-and-count",
+      "request": {
+        "requestedRoutes": ["quick", "surprise"],
+        "confidenceBasisPoints": 6999
+      },
+      "policy": {
+        "kind": "single",
+        "allowedRoutes": ["quick", "audit", "human"],
+        "defaultRoute": "quick",
+        "confidence": { "minimumBasisPoints": 7000, "escalationRoute": "human" }
+      },
+      "expect": {
+        "routed": true,
+        "reasonCode": "ESCALATION_SELECTED_LOW_CONFIDENCE",
+        "requestedRoutes": ["quick", "surprise"],
+        "selectedRoutes": ["human"],
+        "unknownRoutes": ["surprise"],
+        "confidenceBasisPoints": 6999,
+        "usedDefault": false,
+        "escalated": true
+      }
+    },
+    {
+      "name": "confidence-equal-threshold-passes",
+      "request": { "requestedRoutes": ["audit"], "confidenceBasisPoints": 7000 },
+      "policy": {
+        "kind": "single",
+        "allowedRoutes": ["quick", "audit", "human"],
+        "confidence": { "minimumBasisPoints": 7000, "escalationRoute": "human" }
+      },
+      "expect": {
+        "routed": true,
+        "reasonCode": "REQUESTED_ROUTES_SELECTED",
+        "requestedRoutes": ["audit"],
+        "selectedRoutes": ["audit"],
+        "unknownRoutes": [],
+        "confidenceBasisPoints": 7000,
+        "usedDefault": false,
+        "escalated": false
+      }
+    },
+    {
+      "name": "single-count-precedes-unknown-default",
+      "request": { "requestedRoutes": ["quick", "surprise"] },
+      "policy": {
+        "kind": "single",
+        "allowedRoutes": ["quick", "human"],
+        "defaultRoute": "human"
+      },
+      "expect": {
+        "routed": false,
+        "reasonCode": "MULTIPLE_ROUTES_FOR_SINGLE",
+        "requestedRoutes": ["quick", "surprise"],
+        "selectedRoutes": [],
+        "unknownRoutes": ["surprise"],
+        "confidenceBasisPoints": null,
+        "usedDefault": false,
+        "escalated": false
+      }
+    },
+    {
+      "name": "multicast-count-precedes-unknown-default",
+      "request": { "requestedRoutes": ["quick", "audit", "surprise"] },
+      "policy": {
+        "kind": "multi",
+        "allowedRoutes": ["quick", "audit", "human"],
+        "defaultRoute": "human",
+        "maxMulticast": 2
+      },
+      "expect": {
+        "routed": false,
+        "reasonCode": "MULTICAST_LIMIT_EXCEEDED",
+        "requestedRoutes": ["quick", "audit", "surprise"],
+        "selectedRoutes": [],
+        "unknownRoutes": ["surprise"],
+        "confidenceBasisPoints": null,
+        "usedDefault": false,
+        "escalated": false
+      }
+    }
+  ],
+  "invalidCases": [
+    {
+      "name": "duplicate-request-and-unconfigured-confidence",
+      "request": {
+        "requestedRoutes": ["audit", "audit"],
+        "confidenceBasisPoints": 5000,
+        "extra": true
+      },
+      "policy": { "kind": "single", "allowedRoutes": ["quick", "audit"] },
+      "issues": [
+        { "path": "#/request/extra", "code": "UNKNOWN_FIELD", "message": "unknown field" },
+        {
+          "path": "#/request/requestedRoutes/1",
+          "code": "DUPLICATE_SELECTION",
+          "message": "duplicate requested route 'audit'"
+        },
+        {
+          "path": "#/request/confidenceBasisPoints",
+          "code": "CONFIDENCE_CONFIGURATION",
+          "message": "confidenceBasisPoints requires policy confidence configuration"
+        }
+      ]
+    }
+  ]
+}

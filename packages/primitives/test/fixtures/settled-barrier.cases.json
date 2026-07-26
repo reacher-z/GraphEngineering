@@ -1,0 +1,139 @@
+{
+  "caseVersion": "graphengineering.reacher-z.github.io/primitive-cases/v1alpha1",
+  "validCases": [
+    {
+      "name": "empty-all-never-vacuously-succeeds",
+      "items": [],
+      "policy": { "kind": "all" },
+      "expect": {
+        "satisfied": false,
+        "reasonCode": "NO_ITEMS",
+        "total": 0,
+        "succeeded": 0,
+        "failed": 0,
+        "missing": 0,
+        "timedOut": 0,
+        "acceptedIds": [],
+        "failedIds": [],
+        "missingIds": [],
+        "timedOutIds": []
+      }
+    },
+    {
+      "name": "minimum-classifies-in-declaration-order",
+      "items": [
+        { "id": "accepted-a", "status": "succeeded", "value": { "score": 1.25 } },
+        { "id": "failed-a", "status": "failed" },
+        { "id": "missing-a", "status": "missing" },
+        { "id": "accepted-b", "status": "succeeded", "value": null },
+        { "id": "timeout-a", "status": "timed_out" }
+      ],
+      "policy": { "kind": "minimum", "minimum": 2 },
+      "expect": {
+        "satisfied": true,
+        "reasonCode": "MINIMUM_MET",
+        "total": 5,
+        "succeeded": 2,
+        "failed": 1,
+        "missing": 1,
+        "timedOut": 1,
+        "acceptedIds": ["accepted-a", "accepted-b"],
+        "failedIds": ["failed-a"],
+        "missingIds": ["missing-a"],
+        "timedOutIds": ["timeout-a"]
+      }
+    },
+    {
+      "name": "percentage-exact-half",
+      "items": [
+        { "id": "a", "status": "succeeded", "value": true },
+        { "id": "b", "status": "failed" }
+      ],
+      "policy": { "kind": "percentage", "basisPoints": 5000 },
+      "expect": {
+        "satisfied": true,
+        "reasonCode": "PERCENTAGE_MET",
+        "total": 2,
+        "succeeded": 1,
+        "failed": 1,
+        "missing": 0,
+        "timedOut": 0,
+        "acceptedIds": ["a"],
+        "failedIds": ["b"],
+        "missingIds": [],
+        "timedOutIds": []
+      }
+    },
+    {
+      "name": "percentage-one-basis-point-above-half",
+      "items": [
+        { "id": "a", "status": "succeeded", "value": true },
+        { "id": "b", "status": "failed" }
+      ],
+      "policy": { "kind": "percentage", "basisPoints": 5001 },
+      "expect": {
+        "satisfied": false,
+        "reasonCode": "PERCENTAGE_NOT_MET",
+        "total": 2,
+        "succeeded": 1,
+        "failed": 1,
+        "missing": 0,
+        "timedOut": 0,
+        "acceptedIds": ["a"],
+        "failedIds": ["b"],
+        "missingIds": [],
+        "timedOutIds": []
+      }
+    },
+    {
+      "name": "minimum-exceeds-total",
+      "items": [
+        { "id": "a", "status": "succeeded", "value": 1 }
+      ],
+      "policy": { "kind": "minimum", "minimum": 2 },
+      "expect": {
+        "satisfied": false,
+        "reasonCode": "MINIMUM_EXCEEDS_TOTAL",
+        "total": 1,
+        "succeeded": 1,
+        "failed": 0,
+        "missing": 0,
+        "timedOut": 0,
+        "acceptedIds": ["a"],
+        "failedIds": [],
+        "missingIds": [],
+        "timedOutIds": []
+      }
+    }
+  ],
+  "invalidCases": [
+    {
+      "name": "ordered-multi-issue",
+      "items": [
+        { "id": "dup", "status": "succeeded" },
+        { "id": "dup", "status": "failed", "value": null, "extra": true }
+      ],
+      "policy": { "kind": "percentage", "basisPoints": 10001, "unexpected": true },
+      "issues": [
+        {
+          "path": "#/items/0/value",
+          "code": "STATUS_VALUE_MISMATCH",
+          "message": "succeeded items require a value"
+        },
+        { "path": "#/items/1/extra", "code": "UNKNOWN_FIELD", "message": "unknown field" },
+        { "path": "#/items/1/id", "code": "DUPLICATE_ID", "message": "duplicate id 'dup'" },
+        {
+          "path": "#/items/1/value",
+          "code": "STATUS_VALUE_MISMATCH",
+          "message": "failed items must not contain a value"
+        },
+        { "path": "#/policy/unexpected", "code": "UNKNOWN_FIELD", "message": "unknown field" },
+        {
+          "path": "#/policy/basisPoints",
+          "code": "INVALID_POLICY",
+          "message": "basisPoints must be a safe integer in [1, 10000]"
+        }
+      ]
+    }
+  ]
+}

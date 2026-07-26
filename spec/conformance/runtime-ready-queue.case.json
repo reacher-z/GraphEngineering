@@ -1,0 +1,73 @@
+{
+  "name": "ready-queue-does-not-create-layer-barriers",
+  "graph": {
+    "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+    "kind": "Graph",
+    "metadata": {
+      "name": "ready-queue",
+      "version": "1.0.0"
+    },
+    "inputSchema": { "type": "object" },
+    "outputSchema": { "type": "object" },
+    "entrypoints": ["root"],
+    "outputs": { "result": { "node": "merge" } },
+    "nodes": [
+      { "id": "root", "kind": "transform", "inputSchema": {}, "outputSchema": {}, "config": {} },
+      { "id": "fast", "kind": "transform", "inputSchema": {}, "outputSchema": {}, "config": {} },
+      { "id": "slow", "kind": "transform", "inputSchema": {}, "outputSchema": {}, "config": {} },
+      { "id": "after-fast", "kind": "transform", "inputSchema": {}, "outputSchema": {}, "config": {} },
+      { "id": "merge", "kind": "barrier", "inputSchema": {}, "outputSchema": {}, "config": { "condition": "all" } }
+    ],
+    "edges": [
+      { "id": "root-fast", "from": { "node": "root" }, "to": { "node": "fast" } },
+      { "id": "root-slow", "from": { "node": "root" }, "to": { "node": "slow" } },
+      { "id": "fast-after", "from": { "node": "fast" }, "to": { "node": "after-fast" } },
+      { "id": "after-merge", "from": { "node": "after-fast" }, "to": { "node": "merge", "port": "fast" } },
+      { "id": "slow-merge", "from": { "node": "slow" }, "to": { "node": "merge", "port": "slow" } }
+    ],
+    "policies": {
+      "maxConcurrency": 2,
+      "maxDepth": 4,
+      "maxFanOut": 2,
+      "maxTotalAttempts": 8
+    }
+  },
+  "mock": {
+    "graphInput": { "seed": 1 },
+    "delaysMs": {
+      "root": 0,
+      "fast": 5,
+      "slow": 100,
+      "after-fast": 5,
+      "merge": 0
+    },
+    "returns": {
+      "root": { "root": true },
+      "fast": { "fast": true },
+      "slow": { "slow": true },
+      "after-fast": { "afterFast": true },
+      "merge": { "done": true }
+    }
+  },
+  "expect": {
+    "status": "succeeded",
+    "maxObservedConcurrency": 2,
+    "mustCompleteBefore": [
+      ["root", "fast"],
+      ["fast", "after-fast"],
+      ["after-fast", "slow"],
+      ["slow", "merge"]
+    ],
+    "inputs": {
+      "root": { "seed": 1 },
+      "fast": { "root": { "root": true } },
+      "slow": { "root": { "root": true } },
+      "after-fast": { "fast": { "fast": true } },
+      "merge": {
+        "fast": { "afterFast": true },
+        "slow": { "slow": true }
+      }
+    },
+    "outputs": { "result": { "done": true } }
+  }
+}

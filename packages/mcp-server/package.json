@@ -1,0 +1,50 @@
+{
+  "name": "@graph-engineering/mcp-server",
+  "version": "0.1.0-alpha.1",
+  "description": "Read-only MCP server for Graph Engineering Graph IR",
+  "keywords": ["ai", "agents", "graph", "workflow", "mcp", "model-context-protocol"],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/reacher-z/GraphEngineering.git",
+    "directory": "packages/mcp-server"
+  },
+  "homepage": "https://github.com/reacher-z/GraphEngineering#readme",
+  "bugs": { "url": "https://github.com/reacher-z/GraphEngineering/issues" },
+  "publishConfig": { "access": "public" },
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "graph-engineering-mcp": "dist/src/stdio.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/src/index.js"
+    }
+  },
+  "files": [
+    "dist/src",
+    "schemas",
+    "README.md"
+  ],
+  "scripts": {
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.json && node -e \"require('node:fs').chmodSync('dist/src/stdio.js', 0o755)\"",
+    "test": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.json && node -e \"require('node:fs').chmodSync('dist/src/stdio.js', 0o755)\" && node --test dist/tests/*.test.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "@graph-engineering/core": "workspace:*",
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "typescript": "^5.8.3"
+  }
+}

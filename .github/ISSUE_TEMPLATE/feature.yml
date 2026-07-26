@@ -1,0 +1,31 @@
+name: Feature proposal
+description: Propose a graph capability, adapter, pattern, or developer-experience improvement
+title: "[Proposal]: "
+labels: ["proposal", "needs-triage"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Describe the user problem without prescribing an implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Desired observable behavior
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives and trade-offs
+  - type: checkboxes
+    id: impact
+    attributes:
+      label: Contract impact
+      options:
+        - label: This changes Graph IR or canonical hashing.
+        - label: This changes runtime or recovery semantics.
+        - label: This adds external side effects or permissions.
+        - label: This may diverge between TypeScript and Python.

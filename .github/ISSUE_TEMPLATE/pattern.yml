@@ -1,0 +1,32 @@
+name: New graph pattern
+description: Propose a complete executable pattern
+title: "[Pattern]: "
+labels: ["pattern", "community"]
+body:
+  - type: input
+    id: name
+    attributes:
+      label: Pattern name
+    validations:
+      required: true
+  - type: textarea
+    id: topology
+    attributes:
+      label: Topology and real data dependencies
+      description: Identify split, merge, router, verifier, loop, and human gates.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Mock fixture and acceptance criteria
+    validations:
+      required: true
+  - type: checkboxes
+    id: completeness
+    attributes:
+      label: Completeness
+      options:
+        - label: I can provide TypeScript and Python definitions.
+        - label: I can provide deterministic mock fixtures.
+        - label: I can document budget, failure, and permission policies.

@@ -1,0 +1,226 @@
+{
+  "schemaVersion": "graphengineering.reacher-z.github.io/conformance/route-selection/v1alpha1",
+  "cases": [
+    {
+      "name": "single-request-selected",
+      "request": { "requestedRoutes": ["security"] },
+      "policy": { "kind": "single", "allowedRoutes": ["quick", "security", "human"] },
+      "expect": {
+        "routed": true,
+        "reasonCode": "REQUESTED_ROUTES_SELECTED",
+        "requestedRoutes": ["security"],
+        "selectedRoutes": ["security"],
+        "unknownRoutes": [],
+        "confidenceBasisPoints": null,
+        "usedDefault": false,
+        "escalated": false
+      }
+    },
+    {
+      "name": "multi-selection-uses-policy-order",
+      "request": { "requestedRoutes": ["performance", "correctness"] },
+      "policy": {
+        "kind": "multi",
+        "allowedRoutes": ["correctness", "security", "performance"],
+        "maxMulticast": 3
+      },
+      "expect": {
+        "routed": true,
+        "reasonCode": "REQUESTED_ROUTES_SELECTED",
+        "requestedRoutes": ["performance", "correctness"],
+        "selectedRoutes": ["correctness", "performance"],
+        "unknownRoutes": [],
+        "confidenceBasisPoints": null,
+        "usedDefault": false,
+        "escalated": false
+      }
+    },
+    {
+      "name": "empty-request-selects-default",
+      "request": { "requestedRoutes": [] },
+      "policy": {
+        "kind": "single",
+        "allowedRoutes": ["quick", "human"],
+        "defaultRoute": "human"
+      },
+      "expect": {
+        "routed": true,
+        "reasonCode": "DEFAULT_SELECTED_NO_REQUEST",
+        "requestedRoutes": [],
+        "selectedRoutes": ["human"],
+        "unknownRoutes": [],
+        "confidenceBasisPoints": null,
+        "usedDefault": true,
+        "escalated": false
+      }
+    },
+    {
+      "name": "empty-request-without-default-remains-unrouted",
+      "request": { "requestedRoutes": [] },
+      "policy": { "kind": "single", "allowedRoutes": ["quick", "human"] },
+      "expect": {
+        "routed": false,
+        "reasonCode": "NO_REQUESTED_ROUTE",
+        "requestedRoutes": [],
+        "selectedRoutes": [],
+        "unknownRoutes": [],
+        "confidenceBasisPoints": null,
+        "usedDefault": false,
+        "escalated": false
+      }
+    },
+    {
+      "name": "unknown-route-selects-whole-request-default",
+      "request": { "requestedRoutes": ["invented"] },
+      "policy": {
+        "kind": "single",
+        "allowedRoutes": ["quick", "human"],
+        "defaultRoute": "human"
+      },
+      "expect": {
+        "routed": true,
+        "reasonCode": "DEFAULT_SELECTED_UNKNOWN_ROUTE",
+        "requestedRoutes": ["invented"],
+        "selectedRoutes": ["human"],
+        "unknownRoutes": ["invented"],
+        "confidenceBasisPoints": null,
+        "usedDefault": true,
+        "escalated": false
+      }
+    },
+    {
+      "name": "unknown-route-without-default-remains-unrouted",
+      "request": { "requestedRoutes": ["invented"] },
+      "policy": { "kind": "single", "allowedRoutes": ["quick", "human"] },
+      "expect": {
+        "routed": false,
+        "reasonCode": "UNKNOWN_ROUTE",
+        "requestedRoutes": ["invented"],
+        "selectedRoutes": [],
+        "unknownRoutes": ["invented"],
+        "confidenceBasisPoints": null,
+        "usedDefault": false,
+        "escalated": false
+      }
+    },
+    {
+      "name": "low-confidence-escalation-precedes-count-and-unknown",
+      "request": {
+        "requestedRoutes": ["quick", "invented"],
+        "confidenceBasisPoints": 6999
+      },
+      "policy": {
+        "kind": "single",
+        "allowedRoutes": ["quick", "security", "human"],
+        "defaultRoute": "quick",
+        "confidence": { "minimumBasisPoints": 7000, "escalationRoute": "human" }
+      },
+      "expect": {
+        "routed": true,
+        "reasonCode": "ESCALATION_SELECTED_LOW_CONFIDENCE",
+        "requestedRoutes": ["quick", "invented"],
+        "selectedRoutes": ["human"],
+        "unknownRoutes": ["invented"],
+        "confidenceBasisPoints": 6999,
+        "usedDefault": false,
+        "escalated": true
+      }
+    },
+    {
+      "name": "confidence-equality-follows-normal-selection",
+      "request": { "requestedRoutes": ["security"], "confidenceBasisPoints": 7000 },
+      "policy": {
+        "kind": "single",
+        "allowedRoutes": ["quick", "security", "human"],
+        "confidence": { "minimumBasisPoints": 7000, "escalationRoute": "human" }
+      },
+      "expect": {
+        "routed": true,
+        "reasonCode": "REQUESTED_ROUTES_SELECTED",
+        "requestedRoutes": ["security"],
+        "selectedRoutes": ["security"],
+        "unknownRoutes": [],
+        "confidenceBasisPoints": 7000,
+        "usedDefault": false,
+        "escalated": false
+      }
+    },
+    {
+      "name": "signed-zero-confidence-normalizes-and-escalates",
+      "request": { "requestedRoutes": ["quick"], "confidenceBasisPoints": -0 },
+      "policy": {
+        "kind": "single",
+        "allowedRoutes": ["quick", "human"],
+        "confidence": { "minimumBasisPoints": 1, "escalationRoute": "human" }
+      },
+      "expect": {
+        "routed": true,
+        "reasonCode": "ESCALATION_SELECTED_LOW_CONFIDENCE",
+        "requestedRoutes": ["quick"],
+        "selectedRoutes": ["human"],
+        "unknownRoutes": [],
+        "confidenceBasisPoints": 0,
+        "usedDefault": false,
+        "escalated": true
+      }
+    },
+    {
+      "name": "integer-valued-json-floats-follow-integer-semantics",
+      "request": { "requestedRoutes": ["quick"], "confidenceBasisPoints": 1.0 },
+      "policy": {
+        "kind": "single",
+        "allowedRoutes": ["quick", "human"],
+        "confidence": { "minimumBasisPoints": 1.0, "escalationRoute": "human" }
+      },
+      "expect": {
+        "routed": true,
+        "reasonCode": "REQUESTED_ROUTES_SELECTED",
+        "requestedRoutes": ["quick"],
+        "selectedRoutes": ["quick"],
+        "unknownRoutes": [],
+        "confidenceBasisPoints": 1,
+        "usedDefault": false,
+        "escalated": false
+      }
+    },
+    {
+      "name": "single-count-violation-precedes-unknown-default",
+      "request": { "requestedRoutes": ["quick", "invented"] },
+      "policy": {
+        "kind": "single",
+        "allowedRoutes": ["quick", "human"],
+        "defaultRoute": "human"
+      },
+      "expect": {
+        "routed": false,
+        "reasonCode": "MULTIPLE_ROUTES_FOR_SINGLE",
+        "requestedRoutes": ["quick", "invented"],
+        "selectedRoutes": [],
+        "unknownRoutes": ["invented"],
+        "confidenceBasisPoints": null,
+        "usedDefault": false,
+        "escalated": false
+      }
+    },
+    {
+      "name": "multicast-limit-precedes-unknown-default",
+      "request": { "requestedRoutes": ["security", "invented", "correctness"] },
+      "policy": {
+        "kind": "multi",
+        "allowedRoutes": ["correctness", "security", "human"],
+        "defaultRoute": "human",
+        "maxMulticast": 2
+      },
+      "expect": {
+        "routed": false,
+        "reasonCode": "MULTICAST_LIMIT_EXCEEDED",
+        "requestedRoutes": ["security", "invented", "correctness"],
+        "selectedRoutes": [],
+        "unknownRoutes": ["invented"],
+        "confidenceBasisPoints": null,
+        "usedDefault": false,
+        "escalated": false
+      }
+    }
+  ]
+}
