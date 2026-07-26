@@ -36,8 +36,8 @@
     "prepack": "npm run build"
   },
   "devDependencies": {
-    "@types/node": "^22.0.0",
-    "typescript": "^5.8.0",
+    "@types/node": "^26.1.1",
+    "typescript": "^7.0.2",
     "vitest": "^4.0.0"
   },
   "license": "MIT"
