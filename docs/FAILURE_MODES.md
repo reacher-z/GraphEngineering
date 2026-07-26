@@ -7,24 +7,24 @@ must handle.
 
 ## Status and guarantees
 
-The TypeScript and Python runtimes provide both an ordinary in-memory DAG
-scheduler and separate event-sourced start/resume operations. Both native
-implementations pass shared ready-queue and durable-recovery conformance cases,
-bound concurrency/attempts, retry and time out node attempts, preserve structured
-failures, skip affected descendants, and let independent branches continue. Both
-expose cooperative run cancellation and reject graph inputs or node results that
-are not detached portable finite JSON.
+The TypeScript and Python runtimes provide an ordinary in-memory DAG scheduler,
+separate event-sourced start/resume operations, and a standalone bounded-pipeline
+API. Both native implementations pass shared ready-queue, durable-recovery, and
+pipeline conformance cases, bound concurrency/attempts, preserve structured
+failures, and expose cooperative cancellation. Graph inputs, node results, and
+pipeline items must be detached portable finite JSON.
 
 Durable runs write authoritative scheduler events and reconstruct continuation
 from the complete event history. They bind graph, original input, and
 caller-supplied implementation identity, reuse committed successes, preserve
 consumed attempt budgets, and make terminal resume side-effect free. Standalone
 checkpoint stores exist, but scheduler checkpoint acceleration does not. Replay,
-fork, dynamic graph patches, distributed leases, streaming pipelines,
-conditional routing, verifier panels, explicit loop primitives, provider rate
-limiting, worktree isolation, and capability enforcement also remain future
-work. Sections marked **target v1** are operational requirements, not current
-claims.
+fork, dynamic graph patches, distributed leases, Graph IR-integrated or durable
+item streaming, conditional routing, verifier panels, explicit loop primitives,
+provider rate limiting, worktree isolation, and capability enforcement also
+remain future work. The current pipeline is a lazy single-consumer in-memory API,
+not durable graph streaming. Sections marked **target v1** are operational
+requirements, not current claims.
 
 ## Failure is data
 
@@ -252,6 +252,205 @@ Use provider SDK rate limits and randomized delay in executors where necessary.
 limits, jitter, retry-after handling, and circuit breaking. A breaker-open result
 is structured and should route to fallback or pause, not trigger more fan-out.
 
+## Standalone bounded-pipeline failures
+
+The current `runPipeline`/`run_pipeline` APIs are standalone, bounded, and
+single-pass. They do not use graph node statuses or graph failure codes. Every
+accepted item has a terminal result, while failures that occur before a source
+value is accepted belong to the run summary.
+
+| Pipeline code | Scope | Meaning |
+|---|---|---|
+| `INVALID_INPUT` | Item | The accepted source value could not be snapshotted as portable JSON |
+| `STAGE_EXECUTION_FAILED` | Item/stage | A handler threw, rejected, or cancelled itself without pipeline cancellation |
+| `STAGE_TIMEOUT` | Item/stage | The configured attempt timer won |
+| `INVALID_OUTPUT` | Item/stage | A handler returned a non-portable JSON value |
+| `ITEM_CANCELLED` | Item/stage | Caller cancellation or consumer close prevented completion |
+| `SOURCE_FAILED` | Run | Iterator creation or iteration failed; no item is fabricated for the failed pull |
+| `ITEM_LIMIT_REACHED` | Run | Exactly `maxItems` values were accepted, so intake stopped without another pull |
+
+A terminal item failure has `retryable: false`: if another attempt had been
+allowed, it would already have happened before the terminal result committed.
+
+### Source failure is confused with item failure
+
+**Symptom:** A source yields a valid prefix and then throws, but an operator
+looks for a failed item at the next index.
+
+**Behavior:** The prefix is already accepted and drains to item results. The
+summary records `runFailure.code: "SOURCE_FAILED"`; the failed source pull has no
+`itemIndex` because it did not produce an accepted item. A source-iterator
+factory failure is the same run-level class and starts no handler.
+
+**Mitigation:** Inspect both item results and `PipelineSummary.runFailure`. Keep
+source acquisition idempotent where possible. A failure raised only by the
+source's `return()` cleanup hook is observed for diagnostics but does not
+replace the first run failure or explicit consumer close.
+
+### An invalid item is silently treated as null
+
+**Symptom:** A sparse array, cycle, bigint, non-finite number, unsafe integer,
+class instance, or other non-portable value enters the source.
+
+**Behavior:** Admission has already assigned an index and consumed the item
+budget. Snapshot failure emits a `failed` item with `INVALID_INPUT`,
+`inputBound: false`, zero stages, and zero attempts; intake continues. Valid JSON
+`null` has `inputBound: true` and remains ordinary data. Source values and stage
+outputs are detached before a later pull or downstream release, so caller-owned
+mutation cannot rewrite accepted work.
+
+**Mitigation:** Validate/serialize at the source boundary, but keep the
+structured item result as the audit record. Never collapse `inputBound: false`
+and a bound `null` input into one representation.
+
+### The item budget unexpectedly fails a finite run
+
+**Symptom:** A source believed to contain exactly `maxItems` values produces all
+those results and still ends with `ITEM_LIMIT_REACHED`.
+
+**Cause:** The producer checks the hard budget before another source pull. It
+does not peek past the limit to distinguish an exhausted source from an infinite
+one.
+
+**Mitigation:** For a known finite source, configure `maxItems` strictly above
+the expected count. Treat the limit as a run failure, retain the drained item
+results, and do not add a diagnostic “one extra pull” that could trigger more
+unbounded or side-effecting source work.
+
+### An unbounded stage generator blocks configuration
+
+**Symptom:** Constructing a pipeline never returns because its stage iterable
+does not terminate.
+
+**Behavior:** `maxStages`/`max_stages` defaults to the protocol hard maximum of
+2048 and can be lowered. Construction inspects at most that many accepted stage
+declarations plus one overflow value, then rejects synchronously before reading
+the overflow stage's properties, constructing the item-source iterator, or
+calling a handler.
+
+**Mitigation:** Use a finite stage collection and set the stage budget near the
+expected topology size. This bound limits the number of iterator pulls; it
+cannot preempt one hostile synchronous `next()` call or property getter that
+itself never returns. Isolate untrusted configuration producers in a process.
+
+### Stop, drop, and dead-letter are collapsed together
+
+The failure policy applies after a stage failure can no longer retry:
+
+- `dead-letter` emits `failed`, prevents that item from entering downstream
+  stages, and lets source intake and other items continue. It does **not** write
+  a durable or external dead-letter queue; the returned terminal result is the
+  record.
+- `drop` emits `dropped` with its failure and prevents downstream work. Drop is
+  explicit, never silent disappearance.
+- `stop` emits `failed`, requests source intake to stop, and lets every item
+  already accepted at the concurrent boundary drain. Up to `maxInFlight` items
+  may already belong to that accepted set; they must not be discarded merely
+  because a sibling stopped intake.
+
+Any failed or dropped item makes a normally drained summary `failed`. Caller
+cancellation/consumer close has higher summary-status precedence. Stage policy
+does not apply to `SOURCE_FAILED`, which is a run-level condition.
+
+### A retry repeats an external effect
+
+Only `STAGE_EXECUTION_FAILED` and `STAGE_TIMEOUT` can retry, and only while the
+bounded `maxAttempts` budget remains. `maxAttempts` includes the first attempt.
+Invalid input, invalid output, and pipeline cancellation never retry. Queue wait
+does not consume the stage timeout; the timer starts immediately before handler
+invocation. Retry delay is cancellable and does not occupy a stage concurrency
+slot.
+
+Pipeline retries are in-memory at-least-once attempts. The API has no durable
+retry claim and no exactly-once effect boundary. A mutating handler should derive
+an application idempotency key from stable run/item/stage identity and reuse it
+across attempts, reconcile an ambiguous timeout before retrying, and ignore the
+attempt number when identifying the logical effect. A graph-node wrapper does
+not change this rule.
+
+### Input ordering is mistaken for a stage barrier
+
+**Symptom:** A fast later item completes internally but is not returned while a
+slow earlier item is still running.
+
+**Cause:** The default `ordering: "input"` holds terminal delivery in index order.
+It does not prevent the later item from entering downstream stages. Switching to
+`"completion"` changes terminal delivery only; it still does not serialize or
+reorder internal side effects.
+
+**Mitigation:** Choose output ordering for the consumer contract, not as a
+concurrency control. Use gates/probes rather than sleep timing to test that a
+fast item entered the next stage before the slow sibling finished.
+
+### Completion waits while the consumer is idle
+
+**Symptom:** Handlers appear finished, but `run.completion` remains pending.
+
+**Cause:** Global in-flight credit is held until a terminal result is returned to
+the consumer. An open consumer that stops reading can fill the bounded
+result/reorder buffer; automatically collecting an unbounded output array just
+to resolve completion would violate end-to-end backpressure.
+
+**Mitigation:** Naturally drain the iterator before awaiting completion, or call
+`close()`/`aclose()` when stopping early. Input-order head-of-line blocking is
+bounded by `maxInFlight`; stage queues are bounded by `bufferCapacity`.
+
+### Cancellation is mistaken for preemption or rollback
+
+Caller cancellation or consumer close stops intentional source intake, wakes
+runtime queue/retry waiters, signals active handlers, and settles accepted
+non-terminal items as `cancelled`. No new handler attempt starts after
+cancellation is observed. Cancellation before the first read creates no source
+iterator and performs no pull.
+
+Cancellation remains cooperative. It cannot undo completed effects, and it
+cannot forcibly stop arbitrary JavaScript/Python code, a request, or a process
+that ignores the supplied signal. Reconcile or compensate external state
+explicitly; do not report cancellation as rollback.
+
+### Early exit abandons cleanup
+
+In TypeScript, breaking a `for await` loop calls iterator `return()`, which
+delegates to idempotent `close()`. Code that calls `next()` manually must call
+`close()` in `finally`. In Python, use the pipeline async context manager or call
+`aclose()` in `finally`; breaking an arbitrary custom async iterator does not
+portably invoke it.
+
+Explicit close accounts all accepted work in the summary even when the consumer
+did not receive every terminal record, so `emitted` may be smaller than
+`accepted`. It also wakes a pending consumer read and must settle completion
+without more reads. Merely dropping a run object or consumer task is not a
+portable cleanup guarantee.
+
+### Non-cooperative source or handler outlives the pipeline
+
+A synchronous source or handler can block its event-loop thread; the runtime
+cannot observe cancellation until control returns. An asynchronous handler that
+ignores its attempt signal may also complete an external effect after timeout or
+cancellation. The pipeline detaches and observes a late outcome to avoid an
+unhandled rejection, but observing it cannot retract the effect. A source that
+ignores its close/return hook may likewise finish its pending operation later.
+
+Use cooperative asynchronous APIs, pass the signal through every provider/tool
+call, release application resources in `finally`, and isolate blocking or
+untrusted work in a killable process/container when the application provides
+one. The pipeline cleans up runtime-owned producers, workers, waiters, timers,
+and listeners; it cannot clean up arbitrary tasks spawned and abandoned by user
+code. Process/container providers are not supplied by this current alpha.
+
+### A standalone pipeline is mistaken for durable stream execution
+
+`edge.mode: "stream"` remains declarative and `runGraph` still consumes one
+terminal value per upstream node. The standalone pipeline persists no item ID,
+queue content, offset, acknowledgement, retry claim, stream join/window, replay,
+or fork state. Calling it inside a graph node makes the complete pipeline part of
+one node attempt: a crash can replay the whole pipeline, and its inner attempts
+do not consume the graph's `maxTotalAttempts`.
+
+Materialize only a bounded portable-JSON node output, include inner retry cost in
+the application budget, and never describe this boundary as durable item
+streaming or production-ready exactly-once processing.
+
 ## Failure containment mistakes
 
 ### One failed branch aborts unrelated work
@@ -443,3 +642,4 @@ within a bounded policy, and repeating the activity is safe.
 - [Security architecture](./SECURITY.md)
 - [Current runtime boundary](../packages/runtime/README.md)
 - [Portable runtime semantics](../spec/runtime-semantics.md)
+- [Standalone bounded-pipeline semantics](../spec/pipeline-semantics.md)

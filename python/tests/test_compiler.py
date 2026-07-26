@@ -42,6 +42,25 @@ def test_invalid_conformance_fixtures(fixture: str, code: DiagnosticCode) -> Non
         result.raise_for_errors()
 
 
+@pytest.mark.parametrize(
+    "fixture",
+    [
+        "invalid-null-metadata-description.graph.json",
+        "invalid-null-state-schema.graph.json",
+        "invalid-null-output-port.graph.json",
+        "invalid-null-node-retry.graph.json",
+    ],
+)
+def test_explicit_null_optional_field_fixtures_report_only_invalid_graph(
+    fixture: str,
+) -> None:
+    result = try_compile_graph(load_fixture(fixture))
+
+    assert not result.valid
+    assert result.graph is None
+    assert [item.code for item in result.diagnostics] == [DiagnosticCode.INVALID_GRAPH]
+
+
 def test_missing_entrypoint_and_output_are_structured() -> None:
     document = load_fixture("diamond.graph.json")
     document["entrypoints"] = ["missing-entry"]

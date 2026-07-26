@@ -18,6 +18,14 @@
         ["merge"]
       ]
     },
+    "policy-extension-python-name-null.graph.json": {
+      "valid": true,
+      "topologicalLayers": [["node"]]
+    },
+    "policy-extension-python-name-number.graph.json": {
+      "valid": true,
+      "topologicalLayers": [["node"]]
+    },
     "invalid-duplicate-node.graph.json": {
       "valid": false,
       "diagnosticCodes": ["GE1001_DUPLICATE_NODE"]
@@ -39,6 +47,22 @@
       "diagnosticCodes": ["GE1007_INVALID_GRAPH"]
     },
     "invalid-oversized-timers.graph.json": {
+      "valid": false,
+      "diagnosticCodes": ["GE1007_INVALID_GRAPH"]
+    },
+    "invalid-null-metadata-description.graph.json": {
+      "valid": false,
+      "diagnosticCodes": ["GE1007_INVALID_GRAPH"]
+    },
+    "invalid-null-state-schema.graph.json": {
+      "valid": false,
+      "diagnosticCodes": ["GE1007_INVALID_GRAPH"]
+    },
+    "invalid-null-output-port.graph.json": {
+      "valid": false,
+      "diagnosticCodes": ["GE1007_INVALID_GRAPH"]
+    },
+    "invalid-null-node-retry.graph.json": {
       "valid": false,
       "diagnosticCodes": ["GE1007_INVALID_GRAPH"]
     },

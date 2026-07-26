@@ -1,0 +1,25 @@
+{
+  "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+  "kind": "Graph",
+  "metadata": {
+    "name": "invalid-null-metadata-description",
+    "version": "1.0.0",
+    "description": null
+  },
+  "inputSchema": {},
+  "outputSchema": {},
+  "entrypoints": ["only"],
+  "outputs": {
+    "result": { "node": "only" }
+  },
+  "nodes": [
+    {
+      "id": "only",
+      "kind": "transform",
+      "inputSchema": {},
+      "outputSchema": {},
+      "config": {}
+    }
+  ],
+  "edges": []
+}

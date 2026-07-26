@@ -46,6 +46,7 @@ with zipfile.ZipFile(wheel) as archive:
         raise SystemExit("wheel contains an unsafe or forbidden path")
     required_wheel = {
         "graph_engineering/__init__.py",
+        "graph_engineering/pipeline.py",
         "graph_engineering/py.typed",
         "graph_engineering/scheduler.py",
         "graph_engineering/persistence/__init__.py",
@@ -97,6 +98,7 @@ with tarfile.open(sdist, mode="r:gz") as archive:
         f"{prefix}src/graph_engineering/__init__.py",
         f"{prefix}src/graph_engineering/_json.py",
         f"{prefix}src/graph_engineering/canonical.py",
+        f"{prefix}src/graph_engineering/pipeline.py",
         f"{prefix}src/graph_engineering/py.typed",
         f"{prefix}src/graph_engineering/scheduler.py",
         f"{prefix}src/graph_engineering/persistence/event_store.py",

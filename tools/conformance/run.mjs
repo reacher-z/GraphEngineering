@@ -703,3 +703,295 @@ for (const testCase of durableInteropCases) {
 process.stdout.write(
   `Cross-language terminal durable-history interop passed for ${durableInteropCases.length} cases in both directions.\n`,
 );
+
+class PipelineFixtureSource {
+  constructor(document) {
+    this.document = document;
+    this.items = [...(document.items ?? [])];
+    this.index = 0;
+    this.pulls = 0;
+    this.closes = 0;
+    this.pullWaiters = [];
+  }
+
+  [Symbol.iterator]() {
+    return this;
+  }
+
+  next() {
+    if (this.document.kind === "throwing-array" && this.index >= this.items.length) {
+      const failure = this.document.thenThrow;
+      const error = new Error(failure.message);
+      error.name = failure.causeName;
+      throw error;
+    }
+    if (this.index >= this.items.length) return { done: true, value: undefined };
+    const value = this.items[this.index];
+    this.index += 1;
+    this.pulls += 1;
+    for (const waiter of this.pullWaiters.splice(0)) waiter();
+    return { done: false, value };
+  }
+
+  async waitForPullCount(target) {
+    while (this.pulls < target) {
+      await new Promise((resolve) => this.pullWaiters.push(resolve));
+    }
+  }
+
+  return() {
+    this.closes += 1;
+    return { done: true, value: undefined };
+  }
+}
+
+function pipelineFixtureGate() {
+  let open;
+  const promise = new Promise((resolve) => {
+    open = resolve;
+  });
+  return { promise, open };
+}
+
+async function executePipelineFixtureAction(document, gates, trace, stageId, itemIndex) {
+  switch (document.kind) {
+    case "wait-for-gate":
+      await gates[document.gate].promise;
+      return await executePipelineFixtureAction(document.then, gates, trace, stageId, itemIndex);
+    case "throw": {
+      const error = new Error(document.message);
+      error.name = document.causeName;
+      throw error;
+    }
+    case "invalid-output":
+      return Number.POSITIVE_INFINITY;
+    case "return":
+      trace.push(`stage:${stageId}:item:${itemIndex}:return`);
+      return document.value;
+    default:
+      throw new Error(`unknown pipeline fixture action '${document.kind}'`);
+  }
+}
+
+function compactPipelineItem(item) {
+  const document = { ...item };
+  if (document.failure !== undefined) {
+    document.failure = { ...document.failure };
+    delete document.failure.message;
+  }
+  return document;
+}
+
+function compactPipelineSummary(summary) {
+  const document = { ...summary, runFailure: summary.runFailure ?? null };
+  delete document.maxObservedInFlight;
+  delete document.stageMaxObservedConcurrency;
+  delete document.stageMaxObservedQueueDepth;
+  if (document.runFailure !== null) {
+    document.runFailure = { ...document.runFailure };
+    delete document.runFailure.message;
+  }
+  return document;
+}
+
+async function exercisePipelineFixture(testCase) {
+  const source = new PipelineFixtureSource(testCase.source);
+  const gates = Object.fromEntries(
+    (testCase.gates ?? []).map((name) => [name, pipelineFixtureGate()]),
+  );
+  const trace = [];
+  const stages = testCase.stages.map((stage) => ({
+    id: stage.id,
+    concurrency: stage.concurrency ?? 1,
+    onFailure: stage.onFailure ?? "dead-letter",
+    ...(stage.retry === undefined ? {} : { retry: stage.retry }),
+    handler: async (context) => {
+      trace.push(`stage:${stage.id}:item:${context.itemIndex}:start`);
+      for (const effect of stage.onStartByItem?.[String(context.itemIndex)] ?? []) {
+        gates[effect.releaseGate].open();
+      }
+      const outcomes = stage.outcomesByItem?.[String(context.itemIndex)];
+      if (outcomes === undefined || outcomes.length === 0) return context.input;
+      const selected = outcomes[Math.min(context.attempt - 1, outcomes.length - 1)];
+      return await executePipelineFixtureAction(
+        selected,
+        gates,
+        trace,
+        stage.id,
+        context.itemIndex,
+      );
+    },
+  }));
+  const run = runtime.runPipeline(source, stages, testCase.options);
+  const results = [];
+  let pullCountWhilePaused;
+  if (testCase.consumer !== undefined) {
+    for (let index = 0; index < testCase.consumer.readResults; index += 1) {
+      const delivered = await run.next();
+      assert.equal(delivered.done, false, `${testCase.id}: pipeline ended before consumer read`);
+      results.push(delivered.value);
+    }
+    assert.equal(
+      testCase.consumer.thenPauseUntil,
+      "pipeline-idle",
+      `${testCase.id}: unsupported deterministic pause condition`,
+    );
+    assert.equal(stages.length, 0, `${testCase.id}: pause probe requires an identity pipeline`);
+    const pauseTarget = Math.min(
+      source.items.length,
+      testCase.consumer.readResults + testCase.options.maxInFlight,
+    );
+    await source.waitForPullCount(pauseTarget);
+    pullCountWhilePaused = source.pulls;
+  }
+  for await (const result of run) results.push(result);
+  const summary = await run.completion;
+  const report = {
+    deliveryOrder: results.map(({ itemIndex }) => itemIndex),
+    items: results.map(compactPipelineItem),
+    summary: compactPipelineSummary(summary),
+    sourcePullCount: source.pulls,
+    sourceCloseCount: source.closes,
+    observations: {
+      maxObservedInFlight: summary.maxObservedInFlight,
+      maxObservedQueueDepth: Math.max(
+        0,
+        ...Object.values(summary.stageMaxObservedQueueDepth),
+      ),
+      ...(pullCountWhilePaused === undefined
+        ? {}
+        : { sourcePullCountWhilePaused: pullCountWhilePaused }),
+    },
+  };
+  if (testCase.expect.mustOccurBefore !== undefined) {
+    report.requiredTraceRelations = testCase.expect.mustOccurBefore.map(
+      ([before, after]) => trace.indexOf(before) >= 0 && trace.indexOf(before) < trace.indexOf(after),
+    );
+  }
+  return JSON.parse(JSON.stringify(report));
+}
+
+function assertPipelineSubset(actual, expectedValue, label) {
+  if (expectedValue === null || typeof expectedValue !== "object") {
+    assert.deepEqual(actual, expectedValue, label);
+    return;
+  }
+  if (Array.isArray(expectedValue)) {
+    assert.ok(Array.isArray(actual), `${label}: actual value is not an array`);
+    assert.equal(actual.length, expectedValue.length, `${label}: array length differs`);
+    expectedValue.forEach((value, index) => {
+      assertPipelineSubset(actual[index], value, `${label}[${index}]`);
+    });
+    return;
+  }
+  assert.ok(actual !== null && typeof actual === "object", `${label}: actual value is not an object`);
+  for (const [key, value] of Object.entries(expectedValue)) {
+    assert.ok(Object.hasOwn(actual, key), `${label}: missing key '${key}'`);
+    assertPipelineSubset(actual[key], value, `${label}.${key}`);
+  }
+}
+
+function pipelineSemanticProjection(report, testCase) {
+  const projected = JSON.parse(JSON.stringify(report));
+  delete projected.observations;
+  const expectedItems = new Map(
+    (testCase.expect.items ?? []).map((item) => [item.itemIndex, item]),
+  );
+  for (const item of projected.items) {
+    const expectedItem = expectedItems.get(item.itemIndex);
+    if (item.failure !== undefined && expectedItem?.failure?.causeName === undefined) {
+      delete item.failure.causeName;
+    }
+  }
+  if (
+    projected.summary.runFailure !== null &&
+    testCase.expect.summary?.runFailure?.causeName === undefined
+  ) {
+    delete projected.summary.runFailure.causeName;
+  }
+  return projected;
+}
+
+function assertPipelineExpectations(report, testCase, language) {
+  const expectation = testCase.expect;
+  const prefix = `${testCase.id}: ${language}`;
+  if (expectation.deliveryOrder !== undefined) {
+    assert.deepEqual(report.deliveryOrder, expectation.deliveryOrder, `${prefix} delivery order`);
+  }
+  if (expectation.items !== undefined) {
+    assertPipelineSubset(report.items, expectation.items, `${prefix} items`);
+  }
+  if (expectation.summary !== undefined) {
+    assertPipelineSubset(report.summary, expectation.summary, `${prefix} summary`);
+  }
+  if (expectation.sourcePullCount !== undefined) {
+    assert.equal(report.sourcePullCount, expectation.sourcePullCount, `${prefix} source pulls`);
+  }
+  if (expectation.sourceCloseCount !== undefined) {
+    assert.equal(report.sourceCloseCount, expectation.sourceCloseCount, `${prefix} source closes`);
+  }
+  if (expectation.outputByItem !== undefined) {
+    const outputs = Object.fromEntries(report.items.map((item) => [item.itemIndex, item.output]));
+    assert.deepEqual(outputs, expectation.outputByItem, `${prefix} outputs by item`);
+  }
+  if (expectation.deliveryItemSet !== undefined) {
+    assert.deepEqual(
+      [...report.deliveryOrder].sort((left, right) => left - right),
+      [...expectation.deliveryItemSet].sort((left, right) => left - right),
+      `${prefix} delivery item set`,
+    );
+  }
+  for (const relation of report.requiredTraceRelations ?? []) {
+    assert.equal(relation, true, `${prefix} required trace relation`);
+  }
+  if (expectation.maxObservedInFlightAtMost !== undefined) {
+    assert.ok(
+      report.observations.maxObservedInFlight <= expectation.maxObservedInFlightAtMost,
+      `${prefix} exceeded maxObservedInFlight bound`,
+    );
+  }
+  if (expectation.maxObservedQueueDepthAtMost !== undefined) {
+    assert.ok(
+      report.observations.maxObservedQueueDepth <= expectation.maxObservedQueueDepthAtMost,
+      `${prefix} exceeded maxObservedQueueDepth bound`,
+    );
+  }
+  if (expectation.sourcePullCountWhilePausedAtMost !== undefined) {
+    assert.ok(
+      report.observations.sourcePullCountWhilePaused <=
+        expectation.sourcePullCountWhilePausedAtMost,
+      `${prefix} source was not backpressured while consumer paused`,
+    );
+  }
+}
+
+const pipelineFixture = JSON.parse(
+  await readFile(join(fixtureRoot, "pipeline.case.json"), "utf8"),
+);
+const pythonPipeline = spawnSync(
+  "uv",
+  ["run", "--project", "python", "python", "tools/conformance/python_pipeline_report.py"],
+  { cwd: root, encoding: "utf8" },
+);
+if (pythonPipeline.status !== 0) {
+  throw new Error(
+    `Python bounded-pipeline conformance failed:\n${pythonPipeline.stderr || pythonPipeline.stdout}`,
+  );
+}
+const pyPipelineReport = JSON.parse(pythonPipeline.stdout);
+for (const testCase of pipelineFixture.cases) {
+  const tsPipelineReport = await exercisePipelineFixture(testCase);
+  const pythonCaseReport = pyPipelineReport[testCase.id];
+  assert.ok(pythonCaseReport !== undefined, `${testCase.id}: Python report is missing`);
+  assertPipelineExpectations(tsPipelineReport, testCase, "TypeScript");
+  assertPipelineExpectations(pythonCaseReport, testCase, "Python");
+  assert.deepEqual(
+    pipelineSemanticProjection(tsPipelineReport, testCase),
+    pipelineSemanticProjection(pythonCaseReport, testCase),
+    `${testCase.id}: bounded-pipeline semantic reports differ`,
+  );
+}
+
+process.stdout.write(
+  `Cross-language bounded-pipeline conformance passed for ${pipelineFixture.cases.length} cases.\n`,
+);
