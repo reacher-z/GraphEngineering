@@ -23,6 +23,9 @@ migration note.
   intake, bounded end-to-end backpressure, per-stage concurrency and retry,
   input/completion delivery order, explicit stop/drop/dead-letter outcomes,
   cooperative cancellation, and shared cross-language behavioral cases.
+- Evidence-gated progress scanning and a full Day 1-21 delivery control surface:
+  107 registered tasks, a dependency graph, ownership map, coverage matrix,
+  three organic-growth plans, and a 178-item stable-v1/RC release checklist.
 
 ### In progress
 

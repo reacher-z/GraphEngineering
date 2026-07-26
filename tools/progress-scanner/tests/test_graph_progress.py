@@ -11,7 +11,6 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from unittest import mock
 
-
 MODULE_PATH = Path(__file__).parents[1] / "graph_progress.py"
 SPEC = importlib.util.spec_from_file_location("graph_progress", MODULE_PATH)
 assert SPEC and SPEC.loader
@@ -35,7 +34,7 @@ class ProgressScannerTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temporary.cleanup()
 
-    def write_registry(self, tasks, policy=None) -> None:
+    def write_registry(self, tasks, policy=None, evidence_policy=None) -> None:
         value = {
             "schema_version": 1,
             "updated_at": "2026-07-26T10:00:00Z",
@@ -43,11 +42,15 @@ class ProgressScannerTests(unittest.TestCase):
         }
         if policy:
             value["scan_policy"] = policy
+        if evidence_policy:
+            value["evidence_policy"] = evidence_policy
         (self.repo / "codex_logs" / "task-registry.json").write_text(
             json.dumps(value), encoding="utf-8"
         )
 
-    def test_classifies_healthy_waiting_stale_blocked_and_integration_risk(self) -> None:
+    def test_classifies_healthy_waiting_stale_blocked_and_integration_risk(
+        self,
+    ) -> None:
         artifact = self.repo / "result.txt"
         artifact.write_text("done", encoding="utf-8")
         self.write_registry(
@@ -172,7 +175,9 @@ class ProgressScannerTests(unittest.TestCase):
         events = graph_progress.read_jsonl(
             self.repo / "codex_logs" / "nudges" / "queue.jsonl"
         )
-        self.assertEqual([event["event"] for event in events], ["created", "acknowledged"])
+        self.assertEqual(
+            [event["event"] for event in events], ["created", "acknowledged"]
+        )
         with self.assertRaises(graph_progress.ScannerError):
             graph_progress.acknowledge_nudge(self.repo, nudge_id, now=self.now)
 
@@ -194,9 +199,223 @@ class ProgressScannerTests(unittest.TestCase):
         self.assertEqual(task["expected_artifacts"]["missing"], ["missing.txt"])
         self.assertEqual(task["expected_artifacts"]["unsafe"], ["../outside.txt"])
 
+    def test_required_completion_evidence_must_cover_every_expected_test(self) -> None:
+        artifact = self.repo / "result.txt"
+        artifact.write_text("done", encoding="utf-8")
+        self.write_registry(
+            [
+                {
+                    "id": "incomplete-evidence",
+                    "status": "completed",
+                    "assigned_at": "2026-07-26T11:00:00Z",
+                    "expected_artifacts": ["result.txt"],
+                    "expected_tests": ["unit suite", "integration suite"],
+                    "test_evidence": [
+                        {
+                            "requirement": "unit suite",
+                            "result": "passed",
+                            "recorded_at": "2026-07-26T11:30:00Z",
+                            "reference": "command: unit",
+                        }
+                    ],
+                    "completion_evidence": ["review: 17"],
+                }
+            ],
+            evidence_policy={
+                "required_for_assigned_at_or_after": "2026-07-26T10:30:00Z"
+            },
+        )
+
+        task = graph_progress.scan_repository(self.repo, now=self.now)["tasks"][0]
+
+        self.assertEqual(task["classification"], "integration-risk")
+        self.assertEqual(
+            task["completion_evidence"]["missing_requirements"], ["integration suite"]
+        )
+        self.assertIn("integration suite", task["reason"])
+
+    def test_required_completion_evidence_can_make_completed_task_healthy(self) -> None:
+        artifact = self.repo / "result.txt"
+        artifact.write_text("done", encoding="utf-8")
+        records = [
+            {
+                "requirement": requirement,
+                "result": "passed",
+                "recorded_at": "2026-07-26T11:30:00Z",
+                "reference": f"command: {requirement}",
+            }
+            for requirement in ("unit suite", "integration suite")
+        ]
+        self.write_registry(
+            [
+                {
+                    "id": "evidenced",
+                    "status": "completed",
+                    "evidence_required": True,
+                    "expected_artifacts": ["result.txt"],
+                    "expected_tests": ["unit suite", "integration suite"],
+                    "test_evidence": records,
+                    "completion_evidence": ["review: 18", "commit: abc123"],
+                }
+            ]
+        )
+
+        task = graph_progress.scan_repository(self.repo, now=self.now)["tasks"][0]
+
+        self.assertEqual(task["classification"], "healthy")
+        self.assertTrue(task["completion_evidence"]["satisfied"])
+        self.assertEqual(task["completion_evidence"]["missing_requirements"], [])
+        snapshot = graph_progress.current_status(self.repo)
+        self.assertEqual(snapshot["summary"]["evidence_required"], 1)
+        self.assertEqual(snapshot["summary"]["evidence_satisfied"], 1)
+        self.assertEqual(snapshot["summary"]["evidence_open"], 0)
+
+    def test_failed_recorded_evidence_is_integration_risk_before_completion(
+        self,
+    ) -> None:
+        self.write_registry(
+            [
+                {
+                    "id": "failed-test",
+                    "status": "in_progress",
+                    "last_heartbeat": "2026-07-26T11:59:00Z",
+                    "expected_tests": ["red team"],
+                    "test_evidence": [
+                        {
+                            "requirement": "red team",
+                            "result": "failed",
+                            "recorded_at": "2026-07-26T11:58:00Z",
+                            "reference": "log: failure-1",
+                        }
+                    ],
+                }
+            ]
+        )
+
+        task = graph_progress.scan_repository(self.repo, now=self.now)["tasks"][0]
+
+        self.assertEqual(task["classification"], "integration-risk")
+        self.assertEqual(
+            task["completion_evidence"]["failed_requirements"], ["red team"]
+        )
+
+    def test_latest_evidence_record_supersedes_an_earlier_failure(self) -> None:
+        self.write_registry(
+            [
+                {
+                    "id": "retested",
+                    "status": "completed",
+                    "evidence_required": True,
+                    "assigned_at": "2026-07-26T10:00:00Z",
+                    "expected_tests": ["red team"],
+                    "test_evidence": [
+                        {
+                            "requirement": "red team",
+                            "result": "failed",
+                            "recorded_at": "2026-07-26T10:30:00Z",
+                            "reference": "run: first",
+                        },
+                        {
+                            "requirement": "red team",
+                            "result": "passed",
+                            "recorded_at": "2026-07-26T11:30:00Z",
+                            "reference": "run: fixed",
+                        },
+                    ],
+                    "completion_evidence": ["review: fixed"],
+                }
+            ]
+        )
+
+        task = graph_progress.scan_repository(self.repo, now=self.now)["tasks"][0]
+
+        self.assertEqual(task["classification"], "healthy")
+        self.assertEqual(
+            task["completion_evidence"]["passing_requirements"], ["red team"]
+        )
+        self.assertEqual(task["completion_evidence"]["failed_requirements"], [])
+
+    def test_evidence_timestamps_cannot_predate_assignment_or_claim_the_future(
+        self,
+    ) -> None:
+        base = {
+            "id": "impossible-time",
+            "status": "completed",
+            "evidence_required": True,
+            "assigned_at": "2026-07-26T11:00:00Z",
+            "expected_tests": ["unit suite"],
+            "completion_evidence": ["review: time"],
+        }
+        for recorded_at, message in (
+            ("2026-07-26T10:59:00Z", "predates assigned_at"),
+            ("2026-07-26T12:01:00Z", "is in the future"),
+        ):
+            with self.subTest(recorded_at=recorded_at):
+                self.write_registry(
+                    [
+                        {
+                            **base,
+                            "test_evidence": [
+                                {
+                                    "requirement": "unit suite",
+                                    "result": "passed",
+                                    "recorded_at": recorded_at,
+                                    "reference": "run: impossible",
+                                }
+                            ],
+                        }
+                    ]
+                )
+                with self.assertRaisesRegex(graph_progress.ScannerError, message):
+                    graph_progress.scan_repository(self.repo, now=self.now)
+
+    def test_evidence_required_task_needs_an_expected_test(self) -> None:
+        self.write_registry(
+            [
+                {
+                    "id": "empty-gate",
+                    "status": "in_progress",
+                    "evidence_required": True,
+                    "last_heartbeat": "2026-07-26T11:59:00Z",
+                    "expected_tests": [],
+                }
+            ]
+        )
+
+        with self.assertRaisesRegex(graph_progress.ScannerError, "must not be empty"):
+            graph_progress.scan_repository(self.repo, now=self.now)
+
+    def test_invalid_test_evidence_is_rejected(self) -> None:
+        self.write_registry(
+            [
+                {
+                    "id": "invalid-evidence",
+                    "status": "completed",
+                    "expected_tests": ["unit suite"],
+                    "test_evidence": [
+                        {
+                            "requirement": "unknown suite",
+                            "result": "passed",
+                            "recorded_at": "2026-07-26T11:30:00Z",
+                            "reference": "command: unit",
+                        }
+                    ],
+                }
+            ]
+        )
+
+        with self.assertRaisesRegex(graph_progress.ScannerError, "unknown requirement"):
+            graph_progress.scan_repository(self.repo, now=self.now)
+
     def test_agent_jsonl_is_progress_evidence(self) -> None:
         self.write_registry(
-            [{"id": "active", "status": "in_progress", "last_heartbeat": "2026-07-26T08:00:00Z"}]
+            [
+                {
+                    "id": "active",
+                    "status": "in_progress",
+                    "last_heartbeat": "2026-07-26T08:00:00Z",
+                }
+            ]
         )
         (self.repo / "codex_logs" / "agents" / "worker.jsonl").write_text(
             json.dumps(
@@ -216,13 +435,23 @@ class ProgressScannerTests(unittest.TestCase):
         self.assertEqual(snapshot["tasks"][0]["activity_source"], "agent_log")
 
     def test_repository_lock_rejects_overlap(self) -> None:
-        with graph_progress.repository_lock(self.repo / "codex_logs"):
-            with self.assertRaises(graph_progress.ScannerBusy):
-                with graph_progress.repository_lock(self.repo / "codex_logs"):
-                    pass
+        with (
+            graph_progress.repository_lock(self.repo / "codex_logs"),
+            self.assertRaises(graph_progress.ScannerBusy),
+            graph_progress.repository_lock(self.repo / "codex_logs"),
+        ):
+            pass
 
     def test_snapshot_and_latest_are_complete_json(self) -> None:
-        self.write_registry([{"id": "active", "status": "in_progress", "last_heartbeat": "2026-07-26T11:59:00Z"}])
+        self.write_registry(
+            [
+                {
+                    "id": "active",
+                    "status": "in_progress",
+                    "last_heartbeat": "2026-07-26T11:59:00Z",
+                }
+            ]
+        )
 
         snapshot = graph_progress.scan_repository(self.repo, now=self.now)
         latest = graph_progress.current_status(self.repo)
@@ -240,9 +469,7 @@ class ProgressScannerTests(unittest.TestCase):
             install = graph_progress.install_timer(
                 self.repo, kind="systemd", dry_run=True
             )
-            uninstall = graph_progress.uninstall_timer(
-                kind="systemd", dry_run=True
-            )
+            uninstall = graph_progress.uninstall_timer(kind="systemd", dry_run=True)
 
         self.assertTrue(install["dry_run"])
         self.assertTrue(uninstall["dry_run"])
@@ -253,7 +480,15 @@ class ProgressScannerTests(unittest.TestCase):
         run_commands.assert_not_called()
 
     def test_cli_json_scan(self) -> None:
-        self.write_registry([{"id": "active", "status": "in_progress", "last_heartbeat": "2099-01-01T00:00:00Z"}])
+        self.write_registry(
+            [
+                {
+                    "id": "active",
+                    "status": "in_progress",
+                    "last_heartbeat": "2099-01-01T00:00:00Z",
+                }
+            ]
+        )
         output = io.StringIO()
 
         with redirect_stdout(output):
