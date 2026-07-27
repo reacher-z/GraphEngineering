@@ -406,6 +406,15 @@ different canonical bytes fails closed. External side effects remain
 at-least-once and require idempotency or explicit approval. See
 [cycle semantics](../../spec/cycle-semantics.md).
 
+The retained
+[`graph-patch-hostile-shape.case.json`](../../spec/conformance/graph-patch-hostile-shape.case.json)
+campaign independently reconstructs 54 hostile patch inputs in TypeScript and
+Python. It covers closed root/base/append/node/edge/output shapes plus the
+100-level and 4 MiB portable-capture ceilings. Every input fails with
+`GE_PATCH_INVALID` before a decision or graph mutation, and the native reports
+compare exact input lengths and hashes. This is the H05A shape boundary; the
+schema-valid semantic attack corpus remains separate work.
+
 ## Alpha semantics
 
 - ready nodes execute concurrently up to the graph policy and caller limit;

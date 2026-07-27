@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import copy
 import json
+import subprocess
+import sys
 from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import Any, cast
@@ -403,3 +405,31 @@ def test_patch_fragments_are_fully_validated_before_compiler_or_recorder(
         assert runtime.coordinate["graphRevision"] == 1
 
     asyncio.run(scenario())
+
+
+def test_closed_hostile_shape_corpus_fails_before_graph_mutation() -> None:
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "tools" / "conformance" / "python_graph_patch_hostile_shape_report.py"),
+        ],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    report = json.loads(completed.stdout)
+
+    assert report["attackCount"] == 54
+    assert report["corpusCanonicalUtf8Bytes"] == 8934
+    assert report["corpusSha256"] == (
+        "cd229d4e9a9559140bc8f457b2237c861ddec1b39baa537d7130e5d2d91156f4"
+    )
+    assert all(
+        outcome["errorCode"] == "GE_PATCH_INVALID"
+        and outcome["coordinateUnchanged"]
+        and outcome["dynamicNodes"] == 0
+        and not outcome["decisionRecorded"]
+        and outcome["callerUnchanged"]
+        for outcome in report["outcomes"]
+    )

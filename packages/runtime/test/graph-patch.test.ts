@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import * as core from "@graph-engineering/core";
 import {
   compileGraph,
   type EdgeSpec,
@@ -5,6 +7,8 @@ import {
   type NodeSpec,
 } from "@graph-engineering/core";
 import { describe, expect, it } from "vitest";
+import { exerciseGraphPatchHostileShapeCampaign } from "../../../tools/conformance/graph_patch_hostile_shape.mjs";
+import * as runtime from "../src/index.js";
 import {
   CycleControllerError,
   graphRevision as createGraphRevision,
@@ -391,5 +395,35 @@ describe("native GraphPatch applier", () => {
     const changedSameId = patch(dry.coordinate, "reusable-id", "second");
     expect(() => dry.prepare(changedSameId, context({ dryRun: true }))).not.toThrow();
     expect(dry.decided("reusable-id")).toBeUndefined();
+  });
+
+  it("executes the closed 54-case hostile shape corpus before graph mutation", async () => {
+    const fixture = JSON.parse(readFileSync(
+      new URL("../../../spec/conformance/graph-patch-hostile-shape.case.json", import.meta.url),
+      "utf8",
+    ));
+    const baseGraph = JSON.parse(readFileSync(
+      new URL("../../../spec/conformance/diamond.graph.json", import.meta.url),
+      "utf8",
+    ));
+    const report = await exerciseGraphPatchHostileShapeCampaign({
+      runtime,
+      core,
+      graph: baseGraph,
+      fixture,
+    });
+
+    expect(report.attackCount).toBe(54);
+    expect(report.corpusCanonicalUtf8Bytes).toBe(8934);
+    expect(report.corpusSha256).toBe(
+      "cd229d4e9a9559140bc8f457b2237c861ddec1b39baa537d7130e5d2d91156f4",
+    );
+    expect(report.outcomes.every((outcome) => (
+      outcome.errorCode === "GE_PATCH_INVALID"
+      && outcome.coordinateUnchanged
+      && outcome.dynamicNodes === 0
+      && !outcome.decisionRecorded
+      && outcome.callerUnchanged
+    ))).toBe(true);
   });
 });

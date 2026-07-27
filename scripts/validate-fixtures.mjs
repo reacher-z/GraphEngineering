@@ -253,6 +253,157 @@ for (const testCase of graphPatchCases.semanticCases) {
   }
 }
 
+function hostilePointerTokens(path) {
+  assert.match(path, /^\//u, "hostile GraphPatch mutation path must be an absolute JSON pointer");
+  return path.slice(1).split("/").map((token) => (
+    token.replaceAll("~1", "/").replaceAll("~0", "~")
+  ));
+}
+
+function hostileParentAt(document, path) {
+  const tokens = hostilePointerTokens(path);
+  assert.ok(tokens.length > 0);
+  let parent = document;
+  for (const token of tokens.slice(0, -1)) {
+    assert.ok(parent !== null && typeof parent === "object");
+    parent = parent[token];
+  }
+  return { parent, token: tokens.at(-1) };
+}
+
+function hostileNestedObject(key, depth) {
+  assert.equal(typeof key, "string");
+  assert.ok(key.length > 0 && Number.isSafeInteger(depth) && depth > 0);
+  let value = "leaf";
+  for (let index = 0; index < depth; index += 1) value = { [key]: value };
+  return value;
+}
+
+function materializeHostileGraphPatch(seedDocument, mutation) {
+  const operationFields = {
+    "replace-root": new Set(["op", "value"]),
+    remove: new Set(["op", "path"]),
+    add: new Set(["op", "path", "value"]),
+    replace: new Set(["op", "path", "value"]),
+    "repeat-string": new Set(["op", "path", "character", "length"]),
+    "nest-object": new Set(["op", "path", "key", "depth"]),
+  };
+  assert.ok(Object.hasOwn(operationFields, mutation.op), `unknown hostile mutation ${String(mutation.op)}`);
+  assert.ok(
+    Object.keys(mutation).every((field) => operationFields[mutation.op].has(field))
+      && Object.keys(mutation).length === operationFields[mutation.op].size,
+    `hostile mutation ${mutation.op} is not closed`,
+  );
+  if (mutation.op === "replace-root") return structuredClone(mutation.value);
+  const document = structuredClone(seedDocument);
+  const { parent, token } = hostileParentAt(document, mutation.path);
+  assert.ok(parent !== null && typeof parent === "object");
+  if (mutation.op === "remove") {
+    assert.ok(Object.hasOwn(parent, token), `${mutation.path} does not exist for removal`);
+    delete parent[token];
+  } else if (mutation.op === "add" || mutation.op === "replace") {
+    parent[token] = structuredClone(mutation.value);
+  } else if (mutation.op === "repeat-string") {
+    assert.equal(typeof mutation.character, "string");
+    assert.equal([...mutation.character].length, 1);
+    assert.ok(Number.isSafeInteger(mutation.length) && mutation.length >= 0);
+    parent[token] = mutation.character.repeat(mutation.length);
+  } else if (mutation.op === "nest-object") {
+    parent[token] = hostileNestedObject(mutation.key, mutation.depth);
+  }
+  return document;
+}
+
+function portableDepth(value, depth = 0) {
+  if (value === null || typeof value !== "object") return depth;
+  return Math.max(depth, ...Object.values(value).map((child) => portableDepth(child, depth + 1)));
+}
+
+const graphPatchHostileShape = await loadJson("graph-patch-hostile-shape.case.json");
+assert.equal(graphPatchHostileShape.schemaVersion, 1);
+assert.equal(graphPatchHostileShape.id, "graph-patch-hostile-shape-v1alpha1");
+assert.equal(graphPatchHostileShape.patchSchema, "spec/graph-patch.schema.json");
+assert.equal(
+  fixtureReference("graph-patch-hostile-shape.case.json", graphPatchHostileShape.baseGraph),
+  "diamond.graph.json",
+);
+assert.equal(
+  validateGraphPatch(graphPatchHostileShape.seedDocument),
+  true,
+  `hostile GraphPatch seed does not conform: ${JSON.stringify(validateGraphPatch.errors)}`,
+);
+assert.equal(
+  graphPatchHostileShape.seedDocument.base.graphHash,
+  expected.canonicalization[graphPatchHostileShape.baseGraph].sha256,
+  "hostile GraphPatch seed is detached from the selected base graph",
+);
+const hostileShapeCases = graphPatchHostileShape.cases;
+const hostileShapeExpect = graphPatchHostileShape.expect;
+assert.equal(hostileShapeCases.length, hostileShapeExpect.caseCount);
+assert.equal(new Set(hostileShapeCases.map(({ id }) => id)).size, hostileShapeCases.length);
+const hostileShapeCategories = new Map();
+const hostileShapeLayers = new Map();
+const allowedHostileFields = new Set(["id", "category", "layer", "mutation", "expectCode"]);
+for (const attack of hostileShapeCases) {
+  assert.ok(Object.keys(attack).every((field) => allowedHostileFields.has(field)));
+  assert.match(attack.id, /^[a-z][a-z0-9-]{2,63}$/u);
+  assert.ok(Object.hasOwn(hostileShapeExpect.categoryCounts, attack.category));
+  assert.ok(attack.layer === "schema" || attack.layer === "runtime-capture");
+  assert.equal(attack.expectCode, "GE_PATCH_INVALID");
+  hostileShapeCategories.set(
+    attack.category,
+    (hostileShapeCategories.get(attack.category) ?? 0) + 1,
+  );
+  hostileShapeLayers.set(attack.layer, (hostileShapeLayers.get(attack.layer) ?? 0) + 1);
+  const document = materializeHostileGraphPatch(
+    graphPatchHostileShape.seedDocument,
+    attack.mutation,
+  );
+  const schemaAccepted = validateGraphPatch(document);
+  if (attack.layer === "schema") {
+    assert.equal(schemaAccepted, false, `${attack.id} unexpectedly passes the independent schema`);
+  } else {
+    assert.equal(
+      schemaAccepted,
+      true,
+      `${attack.id} must isolate a runtime capture bound after schema acceptance`,
+    );
+    const canonicalBytes = Buffer.byteLength(JSON.stringify(canonicalize(document)), "utf8");
+    assert.ok(
+      canonicalBytes > 4_194_304 || portableDepth(document) > 100,
+      `${attack.id} does not exceed a retained runtime capture bound`,
+    );
+  }
+}
+assert.deepEqual(
+  Object.fromEntries([...hostileShapeCategories].sort(([left], [right]) => compareUnicodeCodePoints(left, right))),
+  hostileShapeExpect.categoryCounts,
+);
+assert.equal(hostileShapeLayers.get("schema"), hostileShapeExpect.schemaCaseCount);
+assert.equal(
+  hostileShapeLayers.get("runtime-capture"),
+  hostileShapeExpect.runtimeCaptureCaseCount,
+);
+const hostileShapeCanonical = JSON.stringify(canonicalize(hostileShapeCases));
+assert.equal(
+  Buffer.byteLength(hostileShapeCanonical, "utf8"),
+  hostileShapeExpect.casesCanonicalUtf8Bytes,
+);
+assert.equal(hash(hostileShapeCases), hostileShapeExpect.casesSha256);
+const expectedHostileAssertions = new Set([
+  "seed-patch-is-valid-and-bound-to-the-base-graph",
+  "corpus-is-a-closed-ordered-set-with-unique-identities",
+  "schema-attacks-fail-the-independent-json-schema-validator",
+  "runtime-capture-attacks-pass-shape-schema-but-exceed-runtime-bounds",
+  "both-native-runtimes-reconstruct-identical-attack-bytes",
+  "every-attack-fails-with-the-exact-public-error-code",
+  "validation-occurs-before-compiler-decision-recorder-or-graph-mutation",
+  "caller-owned-attack-documents-remain-detached",
+  "corpus-canonical-byte-count-and-digest-are-frozen",
+]);
+assert.equal(graphPatchHostileShape.requiredAssertions.length, expectedHostileAssertions.size);
+assert.deepEqual(new Set(graphPatchHostileShape.requiredAssertions), expectedHostileAssertions);
+
 // D7 bounded-cycle contracts are versioned separately from the immutable-DAG
 // scheduler. This validator freezes their schemas, canonical hashes, event
 // chain, checkpoint projection, and hostile contract vectors without claiming
@@ -2986,5 +3137,5 @@ assert.equal(new Set(diamond.nodes.map(({ id }) => id)).size, diamond.nodes.leng
 assert.equal(new Set(diamond.edges.map(({ id }) => id)).size, diamond.edges.length);
 
 process.stdout.write(
-  `Validated ${fixtureNames.length} JSON fixtures (${caseNames.length} case manifests), ${yamlNames.length} referenced YAML fixtures, ${Object.keys(expected.canonicalization).length} graph hash, ${Object.keys(expected.checkpoints ?? {}).length} checkpoint hash, ${durableJson.validCases.length} Durable JSON vectors, ${compiledIdentities.length} compiled identities, ${graphPatchCases.validCases.length + graphPatchCases.invalidCases.length} graph patch schema cases plus ${graphPatchCases.semanticCases.length} closed semantic vectors, and 6 D7 controller/revision/event/checkpoint schemas with ${durableEvents.length} chained event goldens, ${cycleFaultMatrix.length} retained durable fault obligations, ${cycleInterruptionMatrix.length} activity interruption obligations, ${cycleOperationInterruptionMatrix.length} public-operation interruption obligations, ${cyclePatchVisibilityMatrix.length} patch-visibility fault obligations, ${cyclePatchCheckpointMatrix.length} patch-checkpoint fault obligations, ${cycleDurableCases.leaseTransitionCases.length} valid and ${cycleDurableCases.invalidLeaseTransitionCases.length} hostile lease transitions, ${cycleDurableCases.validInterruptedHistoryCases?.length ?? 0} interrupted terminal/checkpoint folds, ${cycleDurableCases.inDoubtProjectionCases.length} in-doubt singleton cases, ${resolutionProtocol.cases.length} terminal in-doubt resolution cases, ${cycleDurableCases.untilDryFoldCases.length} global-seen convergence fold, ${cycleDurableCases.hardStopFoldCases.length} hard-stop folds, ${cycleDurableCases.invalidEventHistoryCases.length} hostile histories, ${cycleDurableCases.invalidCheckpointSemanticCases.length} hostile checkpoint folds, plus ${cycleDurableCases.validStandaloneEventSchemaCases.length} standalone phase-event shapes; all ${expectedD7Tests.length} D7-CYCLE-SPEC-024 expected-test groups are mapped against meta-valid schemas.\n`,
+  `Validated ${fixtureNames.length} JSON fixtures (${caseNames.length} case manifests), ${yamlNames.length} referenced YAML fixtures, ${Object.keys(expected.canonicalization).length} graph hash, ${Object.keys(expected.checkpoints ?? {}).length} checkpoint hash, ${durableJson.validCases.length} Durable JSON vectors, ${compiledIdentities.length} compiled identities, ${graphPatchCases.validCases.length + graphPatchCases.invalidCases.length} graph patch schema cases plus ${graphPatchCases.semanticCases.length} closed semantic vectors and ${hostileShapeCases.length} hostile GraphPatch shape attacks, and 6 D7 controller/revision/event/checkpoint schemas with ${durableEvents.length} chained event goldens, ${cycleFaultMatrix.length} retained durable fault obligations, ${cycleInterruptionMatrix.length} activity interruption obligations, ${cycleOperationInterruptionMatrix.length} public-operation interruption obligations, ${cyclePatchVisibilityMatrix.length} patch-visibility fault obligations, ${cyclePatchCheckpointMatrix.length} patch-checkpoint fault obligations, ${cycleDurableCases.leaseTransitionCases.length} valid and ${cycleDurableCases.invalidLeaseTransitionCases.length} hostile lease transitions, ${cycleDurableCases.validInterruptedHistoryCases?.length ?? 0} interrupted terminal/checkpoint folds, ${cycleDurableCases.inDoubtProjectionCases.length} in-doubt singleton cases, ${resolutionProtocol.cases.length} terminal in-doubt resolution cases, ${cycleDurableCases.untilDryFoldCases.length} global-seen convergence fold, ${cycleDurableCases.hardStopFoldCases.length} hard-stop folds, ${cycleDurableCases.invalidEventHistoryCases.length} hostile histories, ${cycleDurableCases.invalidCheckpointSemanticCases.length} hostile checkpoint folds, plus ${cycleDurableCases.validStandaloneEventSchemaCases.length} standalone phase-event shapes; all ${expectedD7Tests.length} D7-CYCLE-SPEC-024 expected-test groups are mapped against meta-valid schemas.\n`,
 );

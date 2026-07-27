@@ -736,6 +736,37 @@ names such as `__proto__` are data, never prototype setters; an implementation
 that cannot preserve that distinction MUST reject the patch rather than invoke
 host behavior.
 
+### 10.1 Hostile shape capture corpus
+
+The retained
+[`graph-patch-hostile-shape.case.json`](conformance/graph-patch-hostile-shape.case.json)
+fixture freezes the first D7-H05 trust-boundary campaign. Its valid seed patch
+is bound to the canonical diamond graph, then 54 ordered attacks are generated
+across root, protocol, base, append, node, edge, output, and resource
+categories. The ordered attack descriptors occupy 8,934 canonical UTF-8 bytes
+with SHA-256
+`cd229d4e9a9559140bc8f457b2237c861ddec1b39baa537d7130e5d2d91156f4`.
+
+Fifty-two attacks violate the closed GraphPatch/Graph IR shape. Two additional
+attacks remain schema-shaped but exceed runtime capture limits: one nests node
+configuration beyond 100 portable levels and one expands the canonical patch
+past 4,194,304 UTF-8 bytes. The fixture stores bounded generator descriptions,
+not the multi-megabyte expanded payload.
+
+Both native runtimes MUST independently materialize every attack and MUST agree
+on its complete input byte count, input digest, and stable
+`GE_PATCH_INVALID` result. Each attack MUST fail before a patch decision is
+recorded or a graph coordinate changes, and validation MUST leave the
+caller-owned input byte-identical. The independent fixture validator separately
+proves the 52 schema rejections, the two post-schema runtime-bound violations,
+closed category counts, unique identities, and the corpus digest.
+
+This H05A corpus covers hostile portable shape capture only. Semantic attacks
+that are valid GraphPatch documents—stale bases, capability expansion, budget
+evasion, state conflicts, candidate-graph failures, decided-ID conflicts, and
+concurrent CAS—remain a distinct H05B decision corpus and are not implied by a
+passing shape campaign.
+
 ## 11. Dry run
 
 `dryRun: true` executes steps 1 through 11 of the patch transition against a

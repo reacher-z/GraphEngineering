@@ -1,0 +1,447 @@
+{
+  "schemaVersion": 1,
+  "id": "graph-patch-hostile-shape-v1alpha1",
+  "baseGraph": "diamond.graph.json",
+  "patchSchema": "spec/graph-patch.schema.json",
+  "seedDocument": {
+    "apiVersion": "graphengineering.reacher-z.github.io/patches/v1alpha1",
+    "kind": "GraphPatch",
+    "patchId": "hostile-seed",
+    "base": {
+      "graphRevision": 1,
+      "graphHash": "24819fe69f3b9449c79bcdd85b2049000c7cc8f313aab5957657a6078a80d288",
+      "revisionHash": "1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    "append": {
+      "nodes": [
+        {
+          "id": "hostile-review",
+          "kind": "validator",
+          "inputSchema": {},
+          "outputSchema": {},
+          "config": {},
+          "sideEffects": "none"
+        }
+      ],
+      "edges": [
+        {
+          "id": "hostile-edge",
+          "from": { "node": "merge" },
+          "to": { "node": "hostile-review" },
+          "mode": "value"
+        }
+      ],
+      "outputs": {
+        "hostileResult": { "node": "hostile-review" }
+      }
+    }
+  },
+  "cases": [
+    {
+      "id": "root-array",
+      "category": "root",
+      "layer": "schema",
+      "mutation": { "op": "replace-root", "value": [] },
+      "expectCode": "GE_PATCH_INVALID"
+    },
+    {
+      "id": "root-null",
+      "category": "root",
+      "layer": "schema",
+      "mutation": { "op": "replace-root", "value": null },
+      "expectCode": "GE_PATCH_INVALID"
+    },
+    {
+      "id": "root-unknown-field",
+      "category": "root",
+      "layer": "schema",
+      "mutation": { "op": "add", "path": "/unexpected", "value": true },
+      "expectCode": "GE_PATCH_INVALID"
+    },
+    {
+      "id": "unsupported-api-version",
+      "category": "protocol",
+      "layer": "schema",
+      "mutation": { "op": "replace", "path": "/apiVersion", "value": "graphengineering.invalid/v9" },
+      "expectCode": "GE_PATCH_INVALID"
+    },
+    {
+      "id": "wrong-kind",
+      "category": "protocol",
+      "layer": "schema",
+      "mutation": { "op": "replace", "path": "/kind", "value": "GraphMutation" },
+      "expectCode": "GE_PATCH_INVALID"
+    },
+    {
+      "id": "empty-patch-id",
+      "category": "protocol",
+      "layer": "schema",
+      "mutation": { "op": "replace", "path": "/patchId", "value": "" },
+      "expectCode": "GE_PATCH_INVALID"
+    },
+    {
+      "id": "non-string-patch-id",
+      "category": "protocol",
+      "layer": "schema",
+      "mutation": { "op": "replace", "path": "/patchId", "value": 7 },
+      "expectCode": "GE_PATCH_INVALID"
+    },
+    {
+      "id": "overlong-patch-id",
+      "category": "protocol",
+      "layer": "schema",
+      "mutation": { "op": "repeat-string", "path": "/patchId", "character": "p", "length": 257 },
+      "expectCode": "GE_PATCH_INVALID"
+    },
+    {
+      "id": "missing-base",
+      "category": "base",
+      "layer": "schema",
+      "mutation": { "op": "remove", "path": "/base" },
+      "expectCode": "GE_PATCH_INVALID"
+    },
+    {
+      "id": "base-is-array",
+      "category": "base",
+      "layer": "schema",
+      "mutation": { "op": "replace", "path": "/base", "value": [] },
+      "expectCode": "GE_PATCH_INVALID"
+    },
+    {
+      "id": "base-unknown-field",
+      "category": "base",
+      "layer": "schema",
+      "mutation": { "op": "add", "path": "/base/tenant", "value": "escape" },
+      "expectCode": "GE_PATCH_INVALID"
+    },
+    {
+      "id": "base-revision-zero",
+      "category": "base",
+      "layer": "schema",
+      "mutation": { "op": "replace", "path": "/base/graphRevision", "value": 0 },
+      "expectCode": "GE_PATCH_INVALID"
+    },
+    {
+      "id": "base-revision-negative",
+      "category": "base",
+      "layer": "schema",
+      "mutation": { "op": "replace", "path": "/base/graphRevision", "value": -1 },
+      "expectCode": "GE_PATCH_INVALID"
+    },
+    {
+      "id": "base-revision-fractional",
+      "category": "base",
+      "layer": "schema",
+      "mutation": { "op": "replace", "path": "/base/graphRevision", "value": 1.5 },
+      "expectCode": "GE_PATCH_INVALID"
+    },
+    {
+      "id": "base-revision-boolean",
+      "category": "base",
+      "layer": "schema",
+      "mutation": { "op": "replace", "path": "/base/graphRevision", "value": true },
+      "expectCode": "GE_PATCH_INVALID"
+    },
+    {
+      "id": "base-revision-cannot-advance",
+      "category": "base",
+      "layer": "schema",
+      "mutation": { "op": "replace", "path": "/base/graphRevision", "value": 9007199254740991 },
+      "expectCode": "GE_PATCH_INVALID"
+    },
+    {
+      "id": "uppercase-graph-hash",
+      "category": "base",
+      "layer": "schema",
+      "mutation": { "op": "replace", "path": "/base/graphHash", "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" },
+      "expectCode": "GE_PATCH_INVALID"
+    },
+    {
+      "id": "short-graph-hash",
+      "category": "base",
+      "layer": "schema",
+      "mutation": { "op": "replace", "path": "/base/graphHash", "value": "00" },
+      "expectCode": "GE_PATCH_INVALID"
+    },
+    {
+      "id": "non-string-revision-hash",
+      "category": "base",
+      "layer": "schema",
+      "mutation": { "op": "replace", "path": "/base/revisionHash", "value": 1 },
+      "expectCode": "GE_PATCH_INVALID"
+    },
+    {
+      "id": "short-revision-hash",
+      "category": "base",
+      "layer": "schema",
+      "mutation": { "op": "replace", "path": "/base/revisionHash", "value": "11" },
+      "expectCode": "GE_PATCH_INVALID"
+    },
+    {
+      "id": "missing-append",
+      "category": "append",
+      "layer": "schema",
+      "mutation": { "op": "remove", "path": "/append" },
+      "expectCode": "GE_PATCH_INVALID"
+    },
+    {
+      "id": "append-is-array",
+      "category": "append",
+      "layer": "schema",
+      "mutation": { "op": "replace", "path": "/append", "value": [] },
+      "expectCode": "GE_PATCH_INVALID"
+    },
+    {
+      "id": "append-unknown-field",
+      "category": "append",
+      "layer": "schema",
+      "mutation": { "op": "add", "path": "/append/delete", "value": [] },
+      "expectCode": "GE_PATCH_INVALID"
+    },
+    {
+      "id": "nodes-not-array",
+      "category": "append",
+      "layer": "schema",
+      "mutation": { "op": "replace", "path": "/append/nodes", "value": {} },
+      "expectCode": "GE_PATCH_INVALID"
+    },
+    {
+      "id": "edges-not-array",
+      "category": "append",
+      "layer": "schema",
+      "mutation": { "op": "replace", "path": "/append/edges", "value": {} },
+      "expectCode": "GE_PATCH_INVALID"
+    },
+    {
+      "id": "outputs-not-object",
+      "category": "append",
+      "layer": "schema",
+      "mutation": { "op": "replace", "path": "/append/outputs", "value": [] },
+      "expectCode": "GE_PATCH_INVALID"
+    },
+    {
+      "id": "empty-append",
+      "category": "append",
+      "layer": "schema",
+      "mutation": { "op": "replace", "path": "/append", "value": { "nodes": [], "edges": [], "outputs": {} } },
+      "expectCode": "GE_PATCH_INVALID"
+    },
+    {
+      "id": "node-missing-id",
+      "category": "node",
+      "layer": "schema",
+      "mutation": { "op": "remove", "path": "/append/nodes/0/id" },
+      "expectCode": "GE_PATCH_INVALID"
+    },
+    {
+      "id": "node-empty-id",
+      "category": "node",
+      "layer": "schema",
+      "mutation": { "op": "replace", "path": "/append/nodes/0/id", "value": "" },
+      "expectCode": "GE_PATCH_INVALID"
+    },
+    {
+      "id": "node-non-string-id",
+      "category": "node",
+      "layer": "schema",
+      "mutation": { "op": "replace", "path": "/append/nodes/0/id", "value": 4 },
+      "expectCode": "GE_PATCH_INVALID"
+    },
+    {
+      "id": "node-missing-kind",
+      "category": "node",
+      "layer": "schema",
+      "mutation": { "op": "remove", "path": "/append/nodes/0/kind" },
+      "expectCode": "GE_PATCH_INVALID"
+    },
+    {
+      "id": "node-invalid-kind",
+      "category": "node",
+      "layer": "schema",
+      "mutation": { "op": "replace", "path": "/append/nodes/0/kind", "value": "root-shell" },
+      "expectCode": "GE_PATCH_INVALID"
+    },
+    {
+      "id": "node-missing-input-schema",
+      "category": "node",
+      "layer": "schema",
+      "mutation": { "op": "remove", "path": "/append/nodes/0/inputSchema" },
+      "expectCode": "GE_PATCH_INVALID"
+    },
+    {
+      "id": "node-missing-output-schema",
+      "category": "node",
+      "layer": "schema",
+      "mutation": { "op": "remove", "path": "/append/nodes/0/outputSchema" },
+      "expectCode": "GE_PATCH_INVALID"
+    },
+    {
+      "id": "node-missing-config",
+      "category": "node",
+      "layer": "schema",
+      "mutation": { "op": "remove", "path": "/append/nodes/0/config" },
+      "expectCode": "GE_PATCH_INVALID"
+    },
+    {
+      "id": "node-invalid-side-effects",
+      "category": "node",
+      "layer": "schema",
+      "mutation": { "op": "replace", "path": "/append/nodes/0/sideEffects", "value": "unbounded-root" },
+      "expectCode": "GE_PATCH_INVALID"
+    },
+    {
+      "id": "node-unknown-field",
+      "category": "node",
+      "layer": "schema",
+      "mutation": { "op": "add", "path": "/append/nodes/0/authority", "value": "all" },
+      "expectCode": "GE_PATCH_INVALID"
+    },
+    {
+      "id": "node-array-scalar",
+      "category": "node",
+      "layer": "schema",
+      "mutation": { "op": "replace", "path": "/append/nodes/0", "value": "hostile-review" },
+      "expectCode": "GE_PATCH_INVALID"
+    },
+    {
+      "id": "edge-missing-id",
+      "category": "edge",
+      "layer": "schema",
+      "mutation": { "op": "remove", "path": "/append/edges/0/id" },
+      "expectCode": "GE_PATCH_INVALID"
+    },
+    {
+      "id": "edge-missing-from",
+      "category": "edge",
+      "layer": "schema",
+      "mutation": { "op": "remove", "path": "/append/edges/0/from" },
+      "expectCode": "GE_PATCH_INVALID"
+    },
+    {
+      "id": "edge-missing-to",
+      "category": "edge",
+      "layer": "schema",
+      "mutation": { "op": "remove", "path": "/append/edges/0/to" },
+      "expectCode": "GE_PATCH_INVALID"
+    },
+    {
+      "id": "edge-non-string-mode",
+      "category": "edge",
+      "layer": "schema",
+      "mutation": { "op": "replace", "path": "/append/edges/0/mode", "value": 1 },
+      "expectCode": "GE_PATCH_INVALID"
+    },
+    {
+      "id": "edge-unknown-field",
+      "category": "edge",
+      "layer": "schema",
+      "mutation": { "op": "add", "path": "/append/edges/0/capabilities", "value": [] },
+      "expectCode": "GE_PATCH_INVALID"
+    },
+    {
+      "id": "edge-from-missing-node",
+      "category": "edge",
+      "layer": "schema",
+      "mutation": { "op": "remove", "path": "/append/edges/0/from/node" },
+      "expectCode": "GE_PATCH_INVALID"
+    },
+    {
+      "id": "edge-from-empty-port",
+      "category": "edge",
+      "layer": "schema",
+      "mutation": { "op": "add", "path": "/append/edges/0/from/port", "value": "" },
+      "expectCode": "GE_PATCH_INVALID"
+    },
+    {
+      "id": "edge-invalid-mode",
+      "category": "edge",
+      "layer": "schema",
+      "mutation": { "op": "replace", "path": "/append/edges/0/mode", "value": "teleport" },
+      "expectCode": "GE_PATCH_INVALID"
+    },
+    {
+      "id": "edge-array-scalar",
+      "category": "edge",
+      "layer": "schema",
+      "mutation": { "op": "replace", "path": "/append/edges/0", "value": "hostile-edge" },
+      "expectCode": "GE_PATCH_INVALID"
+    },
+    {
+      "id": "empty-output-name",
+      "category": "output",
+      "layer": "schema",
+      "mutation": { "op": "add", "path": "/append/outputs/", "value": { "node": "hostile-review" } },
+      "expectCode": "GE_PATCH_INVALID"
+    },
+    {
+      "id": "output-missing-node",
+      "category": "output",
+      "layer": "schema",
+      "mutation": { "op": "remove", "path": "/append/outputs/hostileResult/node" },
+      "expectCode": "GE_PATCH_INVALID"
+    },
+    {
+      "id": "output-empty-node",
+      "category": "output",
+      "layer": "schema",
+      "mutation": { "op": "replace", "path": "/append/outputs/hostileResult/node", "value": "" },
+      "expectCode": "GE_PATCH_INVALID"
+    },
+    {
+      "id": "output-empty-port",
+      "category": "output",
+      "layer": "schema",
+      "mutation": { "op": "add", "path": "/append/outputs/hostileResult/port", "value": "" },
+      "expectCode": "GE_PATCH_INVALID"
+    },
+    {
+      "id": "output-unknown-field",
+      "category": "output",
+      "layer": "schema",
+      "mutation": { "op": "add", "path": "/append/outputs/hostileResult/fallback", "value": true },
+      "expectCode": "GE_PATCH_INVALID"
+    },
+    {
+      "id": "config-over-portable-depth",
+      "category": "resource",
+      "layer": "runtime-capture",
+      "mutation": { "op": "nest-object", "path": "/append/nodes/0/config", "key": "next", "depth": 101 },
+      "expectCode": "GE_PATCH_INVALID"
+    },
+    {
+      "id": "patch-over-canonical-byte-ceiling",
+      "category": "resource",
+      "layer": "runtime-capture",
+      "mutation": { "op": "repeat-string", "path": "/append/nodes/0/config/payload", "character": "x", "length": 4194305 },
+      "expectCode": "GE_PATCH_INVALID"
+    }
+  ],
+  "requiredAssertions": [
+    "seed-patch-is-valid-and-bound-to-the-base-graph",
+    "corpus-is-a-closed-ordered-set-with-unique-identities",
+    "schema-attacks-fail-the-independent-json-schema-validator",
+    "runtime-capture-attacks-pass-shape-schema-but-exceed-runtime-bounds",
+    "both-native-runtimes-reconstruct-identical-attack-bytes",
+    "every-attack-fails-with-the-exact-public-error-code",
+    "validation-occurs-before-compiler-decision-recorder-or-graph-mutation",
+    "caller-owned-attack-documents-remain-detached",
+    "corpus-canonical-byte-count-and-digest-are-frozen"
+  ],
+  "expect": {
+    "caseCount": 54,
+    "schemaCaseCount": 52,
+    "runtimeCaptureCaseCount": 2,
+    "categoryCounts": {
+      "root": 3,
+      "protocol": 5,
+      "base": 12,
+      "append": 7,
+      "node": 11,
+      "edge": 9,
+      "output": 5,
+      "resource": 2
+    },
+    "casesCanonicalUtf8Bytes": 8934,
+    "casesSha256": "cd229d4e9a9559140bc8f457b2237c861ddec1b39baa537d7130e5d2d91156f4"
+  }
+}

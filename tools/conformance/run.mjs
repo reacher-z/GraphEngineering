@@ -12,6 +12,7 @@ import { exerciseCycleActivityInterruptionCampaign } from "./cycle_activity_inte
 import { exerciseCycleOperationInterruptionCampaign } from "./cycle_operation_interruption.mjs";
 import { exerciseCyclePatchVisibilityFaultCampaign } from "./cycle_patch_visibility_fault.mjs";
 import { exerciseCyclePatchCheckpointFaultCampaign } from "./cycle_patch_checkpoint_fault.mjs";
+import { exerciseGraphPatchHostileShapeCampaign } from "./graph_patch_hostile_shape.mjs";
 
 const root = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 const fixtureRoot = join(root, "spec", "conformance");
@@ -1341,6 +1342,40 @@ const cycleGraph = JSON.parse(
 const cycleCompilation = core.compileGraph(cycleGraph);
 assert.equal(cycleCompilation.valid, true, "D7 cross-language graph must compile");
 assert.notEqual(cycleCompilation.graphHash, null, "D7 cross-language graph needs an identity");
+const graphPatchHostileShapeFixture = JSON.parse(
+  await readFile(join(fixtureRoot, "graph-patch-hostile-shape.case.json"), "utf8"),
+);
+const pythonGraphPatchHostileShape = spawnSync(
+  "uv",
+  [
+    "run",
+    "--project",
+    "python",
+    "python",
+    "tools/conformance/python_graph_patch_hostile_shape_report.py",
+  ],
+  { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
+);
+if (pythonGraphPatchHostileShape.status !== 0) {
+  throw new Error(
+    `Python hostile GraphPatch shape campaign failed:\n${pythonGraphPatchHostileShape.stderr || pythonGraphPatchHostileShape.stdout}`,
+  );
+}
+const pyGraphPatchHostileShape = JSON.parse(pythonGraphPatchHostileShape.stdout);
+const tsGraphPatchHostileShape = await exerciseGraphPatchHostileShapeCampaign({
+  runtime,
+  core,
+  graph: cycleGraph,
+  fixture: graphPatchHostileShapeFixture,
+});
+assert.deepEqual(
+  tsGraphPatchHostileShape,
+  pyGraphPatchHostileShape,
+  "D7 hostile GraphPatch shape campaign reports differ",
+);
+process.stdout.write(
+  `Cross-language hostile GraphPatch shape conformance passed for ${tsGraphPatchHostileShape.attackCount} attacks across ${Object.keys(tsGraphPatchHostileShape.categoryCounts).length} categories.\n`,
+);
 const cycleRequestValue = JSON.parse(JSON.stringify(
   cycleContractFixture.validRequests[0].document,
 ));

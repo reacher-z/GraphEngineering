@@ -21,6 +21,9 @@ migration note.
   TypeScript nonnegative-safe-integer schedule when explicitly enabled, plus a
   15-row cross-language `PatchAccepted` checkpoint fault campaign proving
   stale-prefix/exact-prefix recovery and terminal latest-checkpoint identity.
+- A closed 54-case hostile GraphPatch shape corpus with independent schema
+  reconstruction, native TypeScript/Python execution, exact input-byte/hash
+  comparison, and fail-closed depth and 4 MiB capture-bound tests.
 
 - Event-sourced durable start and resume APIs in TypeScript and Python. Runs bind
   graph, original input, and caller-supplied implementation identity; node
