@@ -367,24 +367,92 @@ export interface CycleInDoubtResolutionCommand {
   readonly authoritySnapshot: CycleInDoubtResolutionAuthority;
 }
 
-export type CycleControllerEventType =
-  | "ControllerCreated"
-  | "LeaseAcquired"
-  | "LeaseRenewed"
-  | "LeaseReleased"
-  | "RoundReserved"
-  | "ActivityStarted"
-  | "ActivityFailed"
-  | "InDoubtActivityResolved"
-  | "DiscoveryCommitted"
-  | "CandidateEvaluationCommitted"
-  | "ModeOutcomeCommitted"
-  | "BudgetReservationSettled"
-  | "BudgetReservationReleased"
-  | "PatchAccepted"
-  | "PatchRejected"
-  | "RoundCommitted"
-  | "ControllerTerminated";
+/**
+ * The executable event vocabulary. Durable-boundary coverage is derived from
+ * this tuple, so adding an event is a runtime-visible compatibility change and
+ * cannot silently evade the fault matrix.
+ */
+export const CYCLE_CONTROLLER_EVENT_TYPES = Object.freeze([
+  "ControllerCreated",
+  "LeaseAcquired",
+  "LeaseRenewed",
+  "LeaseReleased",
+  "RoundReserved",
+  "ActivityStarted",
+  "ActivityFailed",
+  "InDoubtActivityResolved",
+  "DiscoveryCommitted",
+  "CandidateEvaluationCommitted",
+  "ModeOutcomeCommitted",
+  "BudgetReservationSettled",
+  "BudgetReservationReleased",
+  "PatchAccepted",
+  "PatchRejected",
+  "RoundCommitted",
+  "ControllerTerminated",
+] as const);
+
+export type CycleControllerEventType = typeof CYCLE_CONTROLLER_EVENT_TYPES[number];
+
+export const CYCLE_DURABLE_FAULT_STAGES = Object.freeze([
+  "before-event-construction",
+  "after-event-construction",
+  "after-prospective-fold",
+  "before-store-commit",
+  "after-store-commit",
+  "after-store-return",
+  "after-state-update",
+  "before-checkpoint-construction",
+  "after-checkpoint-construction",
+  "after-checkpoint-save",
+  "terminal-result-delivery",
+] as const);
+
+export type CycleDurableFaultStage = typeof CYCLE_DURABLE_FAULT_STAGES[number];
+
+export const CYCLE_FAULT_KINDS = Object.freeze([
+  "process-loss",
+  "store-error",
+  "timeout",
+  "cancellation",
+  "commit-then-throw",
+] as const);
+
+export type CycleFaultKind = typeof CYCLE_FAULT_KINDS[number];
+
+export type CycleFaultDurability =
+  | "event-not-committed"
+  | "event-committed"
+  | "event-and-checkpoint-committed"
+  | "terminal-event-committed";
+
+export type CycleDurableFaultBoundary =
+  | `event:${CycleControllerEventType}:before-construction`
+  | `event:${CycleControllerEventType}:after-construction`
+  | `event:${CycleControllerEventType}:after-fold-before-cas`
+  | `store:event:${CycleControllerEventType}:before-commit`
+  | `store:event:${CycleControllerEventType}:after-commit-before-return`
+  | `event:${CycleControllerEventType}:after-store-before-state`
+  | `event:${CycleControllerEventType}:after-state-before-dispatch`
+  | `checkpoint:${CycleControllerEventType}:before-construction`
+  | `checkpoint:${CycleControllerEventType}:after-construction-before-save`
+  | `checkpoint:${CycleControllerEventType}:after-save-before-ack`
+  | "terminal:ControllerTerminated:during-delivery"
+  // v1alpha1 compatibility aliases retained for existing deterministic tests.
+  | `event:${CycleControllerEventType}:before-cas`
+  | `event:${CycleControllerEventType}:after-cas`;
+
+export type CycleFaultHook = (
+  boundary: CycleDurableFaultBoundary,
+) => void | Promise<void>;
+
+export interface CycleDurableFaultMatrixEntry {
+  readonly eventType: CycleControllerEventType;
+  readonly stage: CycleDurableFaultStage;
+  readonly faultKind: CycleFaultKind;
+  readonly boundary: CycleDurableFaultBoundary;
+  readonly durability: CycleFaultDurability;
+}
 
 export interface CycleControllerEvent {
   readonly apiVersion: "graphengineering.reacher-z.github.io/cycle-controller-events/v1alpha1";
@@ -608,6 +676,8 @@ export interface CycleControllerRunOptions {
     readonly sequence: number;
     readonly type: CycleControllerEventType;
   }) => string;
+  /** Deterministic test/simulation hook. Production coordination must use a durable store. */
+  readonly faultHook?: CycleFaultHook;
   readonly patchContext?: Omit<GraphPatchApplyContext, "dryRun" | "reserved" | "reservationId" | "durationMs" | "deadlineMsRemaining">;
 }
 
@@ -622,6 +692,7 @@ export interface CycleInDoubtResolutionOptions {
   readonly lease: CycleLease;
   readonly now?: () => Date;
   readonly createEventId?: CycleControllerRunOptions["createEventId"];
+  readonly faultHook?: CycleFaultHook;
 }
 
 export interface CycleInDoubtResolutionResult {

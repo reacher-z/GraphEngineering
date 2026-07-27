@@ -30,6 +30,10 @@ export {
   startCycleController,
 } from "./cycle-controller.js";
 export {
+  buildCycleDurableFaultMatrix,
+  cycleDurableFaultBoundary,
+} from "./cycle-faults.js";
+export {
   createCycleControllerEvent,
   createCycleInlinePayload,
   createCycleRoundPlan,
@@ -64,7 +68,13 @@ export {
   type FoldCycleOptions,
 } from "./cycle-fold.js";
 export { NativeGraphPatchApplier } from "./graph-patch.js";
-export { CycleActivityFailure, CycleControllerError } from "./cycle-types.js";
+export {
+  CYCLE_CONTROLLER_EVENT_TYPES,
+  CYCLE_DURABLE_FAULT_STAGES,
+  CYCLE_FAULT_KINDS,
+  CycleActivityFailure,
+  CycleControllerError,
+} from "./cycle-types.js";
 export type * from "./cycle-types.js";
 export type {
   CompilationRunFailure,

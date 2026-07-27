@@ -1,6 +1,11 @@
 import { compileGraph, type GraphSpec } from "@graph-engineering/core";
 import { describe, expect, it, vi } from "vitest";
 import {
+  buildCycleDurableFaultMatrix,
+  CYCLE_CONTROLLER_EVENT_TYPES,
+  CYCLE_DURABLE_FAULT_STAGES,
+  CYCLE_FAULT_KINDS,
+  cycleDurableFaultBoundary,
   createCycleInlinePayload,
   CycleActivityFailure,
   CycleControllerError,
@@ -177,6 +182,177 @@ class CountingCycleStore implements CycleControllerEventStore {
 }
 
 describe("native bounded cycle controller", () => {
+  it("derives all 855 durable fault obligations from the closed event vocabulary", () => {
+    const matrix = buildCycleDurableFaultMatrix();
+    expect(CYCLE_CONTROLLER_EVENT_TYPES).toHaveLength(17);
+    expect(CYCLE_DURABLE_FAULT_STAGES).toHaveLength(11);
+    expect(CYCLE_FAULT_KINDS).toHaveLength(5);
+    expect(matrix).toHaveLength(855);
+    expect(new Set(matrix.map((entry) => (
+      `${entry.eventType}\0${entry.stage}\0${entry.faultKind}`
+    ))).size).toBe(matrix.length);
+    for (const eventType of CYCLE_CONTROLLER_EVENT_TYPES) {
+      expect(matrix.filter((entry) => entry.eventType === eventType)).toHaveLength(
+        eventType === "ControllerTerminated" ? 55 : 50,
+      );
+    }
+    expect(matrix.filter(({ stage }) => stage === "terminal-result-delivery")).toEqual(
+      CYCLE_FAULT_KINDS.map((faultKind) => expect.objectContaining({
+        eventType: "ControllerTerminated",
+        faultKind,
+        boundary: "terminal:ControllerTerminated:during-delivery",
+        durability: "terminal-event-committed",
+      })),
+    );
+    expect(() => cycleDurableFaultBoundary(
+      "Unknown" as never,
+      "before-event-construction",
+    )).toThrow("unknown cycle-controller event type");
+    expect(() => cycleDurableFaultBoundary(
+      "ControllerCreated",
+      "unknown" as never,
+    )).toThrow("unknown durable fault stage");
+  });
+
+  it.each([
+    ["event:DiscoveryCommitted:before-construction", false],
+    ["event:DiscoveryCommitted:after-construction", false],
+    ["event:DiscoveryCommitted:after-fold-before-cas", false],
+    ["store:event:DiscoveryCommitted:before-commit", false],
+    ["store:event:DiscoveryCommitted:after-commit-before-return", true],
+    ["event:DiscoveryCommitted:after-store-before-state", true],
+    ["event:DiscoveryCommitted:after-state-before-dispatch", true],
+  ] as const)("recovers the canonical durable boundary %s without duplicate success", async (
+    boundary,
+    committed,
+  ) => {
+    const item = request("until-dry", { maxIterations: 1 });
+    let fired = false;
+    const faultHook = (seen: string): void => {
+      if (!fired && seen === boundary) {
+        fired = true;
+        throw new Error(`injected ${boundary}`);
+      }
+    };
+    const store = boundary.startsWith("store:")
+      ? new MemoryCycleControllerEventStore({ faultHook })
+      : new MemoryCycleControllerEventStore();
+    const finder = vi.fn(() => ({ output: [{ key: "boundary", value: true }] }));
+    const evaluator = vi.fn(({ input }: { input: unknown }) => ({
+      output: (input as { candidates: { key: string }[] }).candidates.map(({ key }) => ({
+        key, verdict: "accept" as const,
+      })),
+    }));
+    await expect(startCycleController(item, graph(), {
+      eventStore: store,
+      lease: lease(),
+      now: fixedNow(),
+      activities: { finder, candidateEvaluator: evaluator },
+      ...(boundary.startsWith("store:") ? {} : { faultHook }),
+    })).rejects.toBeDefined();
+    expect(fired).toBe(true);
+    const interrupted = store.snapshot(item.eventStreamId);
+    expect(interrupted.at(-1)?.type === "DiscoveryCommitted").toBe(committed);
+    expect(interrupted.map(({ type }) => type).filter(
+      (type) => type === "DiscoveryCommitted",
+    )).toHaveLength(committed ? 1 : 0);
+
+    const result = await resumeCycleController(item, graph(), {
+      eventStore: store,
+      expectedSequence: interrupted.at(-1)!.sequence,
+      leaseReason: "takeover",
+      lease: lease("boundary-lease-2", 2),
+      now: fixedNow(),
+      activities: { finder, candidateEvaluator: evaluator },
+    });
+    expect(result.exitReason).toBe("MAX_ITERATIONS");
+    expect(finder).toHaveBeenCalledTimes(committed ? 1 : 2);
+    expect(evaluator).toHaveBeenCalledTimes(1);
+    const terminal = store.snapshot(item.eventStreamId);
+    expect(terminal.filter(({ type }) => type === "DiscoveryCommitted")).toHaveLength(1);
+    expect((await replayCycleController(store, item.eventStreamId)).terminalResult).toEqual(result);
+  });
+
+  it.each([
+    ["checkpoint:ControllerTerminated:before-construction", false],
+    ["checkpoint:ControllerTerminated:after-construction-before-save", false],
+    ["checkpoint:ControllerTerminated:after-save-before-ack", true],
+  ] as const)("retains terminal truth across checkpoint boundary %s", async (
+    boundary,
+    checkpointCommitted,
+  ) => {
+    const item = request("until-dry", { maxIterations: 1 });
+    const store = new MemoryCycleControllerEventStore();
+    const checkpoints = new MemoryCycleControllerCheckpointStore();
+    let fired = false;
+    const faultHook = (seen: string): void => {
+      if (!fired && seen === boundary) {
+        fired = true;
+        throw new Error(`injected ${boundary}`);
+      }
+    };
+    const finder = vi.fn(() => ({ output: [] }));
+    await expect(startCycleController(item, graph(), {
+      eventStore: store,
+      checkpointStore: checkpoints,
+      lease: lease(),
+      now: fixedNow(),
+      faultHook,
+      activities: { finder, candidateEvaluator: () => ({ output: [] }) },
+    })).rejects.toBeDefined();
+    const interrupted = store.snapshot(item.eventStreamId);
+    expect(interrupted.at(-1)?.type).toBe("ControllerTerminated");
+    expect(await checkpoints.read(
+      item.checkpointScope,
+      `${item.controllerRunId}-latest`,
+    ) !== null).toBe(checkpointCommitted);
+    const writes = interrupted.length;
+    const result = await resumeCycleController(item, graph(), {
+      eventStore: store,
+      checkpointStore: checkpoints,
+      expectedSequence: interrupted.at(-1)!.sequence,
+      lease: lease("checkpoint-lease-2", 2),
+      now: () => { throw new Error("terminal resume read the clock"); },
+      activities: {
+        finder: () => { throw new Error("terminal resume dispatched"); },
+        candidateEvaluator: () => { throw new Error("terminal resume dispatched"); },
+      },
+    });
+    expect(result.exitReason).toBe("MAX_ITERATIONS");
+    expect(store.snapshot(item.eventStreamId)).toHaveLength(writes);
+    expect(finder).toHaveBeenCalledTimes(1);
+  });
+
+  it("retains the terminal event when result delivery loses the process", async () => {
+    const item = request("until-dry", { maxIterations: 1 });
+    const store = new MemoryCycleControllerEventStore();
+    const finder = vi.fn(() => ({ output: [] }));
+    await expect(startCycleController(item, graph(), {
+      eventStore: store,
+      lease: lease(),
+      now: fixedNow(),
+      faultHook: (boundary) => {
+        if (boundary === "terminal:ControllerTerminated:during-delivery") {
+          throw new Error("delivery process loss");
+        }
+      },
+      activities: { finder, candidateEvaluator: () => ({ output: [] }) },
+    })).rejects.toThrow("delivery process loss");
+    const interrupted = store.snapshot(item.eventStreamId);
+    expect(interrupted.at(-1)?.type).toBe("ControllerTerminated");
+    const result = await resumeCycleController(item, graph(), {
+      eventStore: store,
+      expectedSequence: interrupted.at(-1)!.sequence,
+      lease: lease("delivery-lease-2", 2),
+      activities: {
+        finder: () => { throw new Error("terminal resume dispatched"); },
+        candidateEvaluator: () => { throw new Error("terminal resume dispatched"); },
+      },
+    });
+    expect(result.exitReason).toBe("MAX_ITERATIONS");
+    expect(finder).toHaveBeenCalledTimes(1);
+  });
+
   it("converges until dry while retaining rejected findings in global seen", async () => {
     const item = request("until-dry", { maxIterations: 4, consecutiveDryRounds: 2 });
     const store = new MemoryCycleControllerEventStore();

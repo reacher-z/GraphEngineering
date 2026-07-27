@@ -253,6 +253,7 @@ class _CycleJournal:
                 if self.fold is None
                 else cast(int, self.fold.current_revision["graphRevision"])
             )
+        await run_fault_hook(self.fault_hook, f"event:{event_type}:before-construction")
         try:
             event_id = self.event_id_factory(self.request.model.controller_run_id, sequence)
         except Exception as exc:
@@ -273,9 +274,11 @@ class _CycleJournal:
             lease=active_lease,
             data=payload,
         )
+        await run_fault_hook(self.fault_hook, f"event:{event_type}:after-construction")
         candidate = (*self.events, event)
         # Prospective full-prefix fold is mandatory before the store sees bytes.
         candidate_fold = fold_cycle_events(candidate, parent_fold=self.parent_fold)
+        await run_fault_hook(self.fault_hook, f"event:{event_type}:after-fold-before-cas")
         await run_fault_hook(self.fault_hook, f"event:{event_type}:before-cas")
         try:
             tail = await self.store.append(
@@ -297,9 +300,11 @@ class _CycleJournal:
                 CycleErrorCode.STORE_FAILED,
                 "cycle store returned an inconsistent committed tail",
             )
+        await run_fault_hook(self.fault_hook, f"event:{event_type}:after-store-before-state")
         self.events = candidate
         self.fold = candidate_fold
         await run_fault_hook(self.fault_hook, f"event:{event_type}:after-cas")
+        await run_fault_hook(self.fault_hook, f"event:{event_type}:after-state-before-dispatch")
         return event
 
     async def checkpoint(self, checkpoint_id: str) -> CycleRuntimeError | None:
@@ -309,16 +314,29 @@ class _CycleJournal:
                 "cannot checkpoint empty stream",
             )
         try:
+            event_type = self.events[-1].type
+            await run_fault_hook(
+                self.fault_hook,
+                f"checkpoint:{event_type}:before-construction",
+            )
             checkpoint = build_checkpoint(
                 self.fold,
                 checkpoint_id=checkpoint_id,
                 created_at=self.timestamp(),
+            )
+            await run_fault_hook(
+                self.fault_hook,
+                f"checkpoint:{event_type}:after-construction-before-save",
             )
             await self.store.save_checkpoint(
                 self.request.model.checkpoint_scope,
                 checkpoint_id,
                 self.fold.tail_sequence,
                 checkpoint,
+            )
+            await run_fault_hook(
+                self.fault_hook,
+                f"checkpoint:{event_type}:after-save-before-ack",
             )
         except CycleRuntimeError as exc:
             # The event stream remains authoritative.  Callers receive a
@@ -717,6 +735,28 @@ class _CycleController:
                 "reservationId": open_round["reservationId"],
             },
         )
+        await self._complete_claim(
+            phase,
+            binding,
+            handler,
+            open_round,
+            attempt,
+            key,
+            input_value,
+        )
+
+    async def _complete_claim(
+        self,
+        phase: ActivityPhase,
+        binding: CycleActivityBinding,
+        handler: ActivityHandler,
+        open_round: dict[str, Any],
+        attempt: int,
+        key: str,
+        input_value: JsonValue,
+    ) -> None:
+        """Execute one already-durable claim, including a resumed open claim."""
+
         context = CycleActivityContext(
             controller_run_id=self.request.model.controller_run_id,
             iteration=cast(int, open_round["iteration"]),
@@ -1195,23 +1235,35 @@ class _CycleController:
                     "activityKey": activity["activityKey"],
                 },
             )
-        await self.journal.append(
-            "ActivityFailed",
-            {
-                "iteration": open_round["iteration"],
-                "activityKey": activity["activityKey"],
-                "attempt": activity["attempt"],
-                "failure": {
-                    "phase": phase.value,
-                    "code": "GE_ACTIVITY_INTERRUPTED",
-                    "retryable": True,
-                    "inDoubt": binding.side_effects != "none",
-                },
-                "usage": {
-                    "attempts": 1,
-                    "costUsd": binding.max_cost_usd_per_attempt,
-                },
-            },
+        handler = self.handlers.for_phase(phase)
+        if handler is None:
+            raise CycleRuntimeError(
+                CycleErrorCode.INVALID_REQUEST,
+                f"phase {phase} has no native Python handler",
+            )
+        input_value = self._phase_input(phase)
+        input_hash = hashlib.sha256(canonical_json(input_value).encode("utf-8")).hexdigest()
+        key = activity_key(
+            controller_run_id=self.request.model.controller_run_id,
+            controller_hash=self.request.controller_hash,
+            iteration=cast(int, open_round["iteration"]),
+            phase=phase.value,
+            activity_id=binding.activity_id,
+            input_hash=input_hash,
+        )
+        if activity["inputHash"] != input_hash or activity["activityKey"] != key:
+            raise CycleRuntimeError(
+                CycleErrorCode.INVALID_HISTORY,
+                "resumed activity input or stable key drifted",
+            )
+        await self._complete_claim(
+            phase,
+            binding,
+            handler,
+            open_round,
+            cast(int, activity["attempt"]),
+            key,
+            input_value,
         )
 
     async def _finish_round(self) -> None:
@@ -1406,6 +1458,10 @@ class _CycleController:
             or self.checkpoint_warning
         )
         assert self.fold.terminal_result is not None
+        await run_fault_hook(
+            self.journal.fault_hook,
+            "terminal:ControllerTerminated:during-delivery",
+        )
         return CycleRunResult(
             self.fold.terminal_result,
             self.journal.events,
@@ -1899,6 +1955,10 @@ async def resume_cycle(
         )
     if fold.terminal:
         assert fold.terminal_result is not None
+        await run_fault_hook(
+            fault_hook,
+            "terminal:ControllerTerminated:during-delivery",
+        )
         return CycleRunResult(fold.terminal_result, events, checkpoint_warning)
     open_round = fold.state["openRound"]
     open_activity = (
@@ -2114,6 +2174,10 @@ async def resolve_cycle_in_doubt_activity(
         )
 
     sequence = len(events)
+    await run_fault_hook(
+        fault_hook,
+        "event:InDoubtActivityResolved:before-construction",
+    )
     try:
         event_id = event_id_factory(
             validated_request.model.controller_run_id,
@@ -2142,8 +2206,16 @@ async def resolve_cycle_in_doubt_activity(
             "commandHash": validated_resolution.command_hash,
         },
     )
+    await run_fault_hook(
+        fault_hook,
+        "event:InDoubtActivityResolved:after-construction",
+    )
     resolved_events = (*events, event)
     resolved_fold = fold_cycle_events(resolved_events, parent_fold=parent_fold)
+    await run_fault_hook(
+        fault_hook,
+        "event:InDoubtActivityResolved:after-fold-before-cas",
+    )
     await run_fault_hook(fault_hook, "event:InDoubtActivityResolved:before-cas")
     try:
         committed_sequence = await store.append(
@@ -2176,13 +2248,29 @@ async def resolve_cycle_in_doubt_activity(
                 "committedSequence": committed_sequence,
             },
         )
+    await run_fault_hook(
+        fault_hook,
+        "event:InDoubtActivityResolved:after-store-before-state",
+    )
     await run_fault_hook(fault_hook, "event:InDoubtActivityResolved:after-cas")
+    await run_fault_hook(
+        fault_hook,
+        "event:InDoubtActivityResolved:after-state-before-dispatch",
+    )
 
     if checkpoint_id is not None:
+        await run_fault_hook(
+            fault_hook,
+            "checkpoint:InDoubtActivityResolved:before-construction",
+        )
         checkpoint = build_checkpoint(
             resolved_fold,
             checkpoint_id=checkpoint_id,
             created_at=timestamp,
+        )
+        await run_fault_hook(
+            fault_hook,
+            "checkpoint:InDoubtActivityResolved:after-construction-before-save",
         )
         try:
             await store.save_checkpoint(
@@ -2198,6 +2286,10 @@ async def resolve_cycle_in_doubt_activity(
                 details={"sequence": sequence, "causeName": type(exc).__name__},
                 cause=exc,
             ) from exc
+        await run_fault_hook(
+            fault_hook,
+            "checkpoint:InDoubtActivityResolved:after-save-before-ack",
+        )
 
     return CycleInDoubtResolutionResult(
         validated_resolution.command_hash,

@@ -1,0 +1,113 @@
+{
+  "schemaVersion": 1,
+  "eventSchema": "spec/cycle-controller-event.schema.json",
+  "eventTypes": [
+    "ControllerCreated",
+    "LeaseAcquired",
+    "LeaseRenewed",
+    "LeaseReleased",
+    "RoundReserved",
+    "ActivityStarted",
+    "ActivityFailed",
+    "InDoubtActivityResolved",
+    "DiscoveryCommitted",
+    "CandidateEvaluationCommitted",
+    "ModeOutcomeCommitted",
+    "BudgetReservationSettled",
+    "BudgetReservationReleased",
+    "PatchAccepted",
+    "PatchRejected",
+    "RoundCommitted",
+    "ControllerTerminated"
+  ],
+  "stages": [
+    {
+      "name": "before-event-construction",
+      "boundaryTemplate": "event:{eventType}:before-construction",
+      "durability": "event-not-committed",
+      "appliesTo": "all-events"
+    },
+    {
+      "name": "after-event-construction",
+      "boundaryTemplate": "event:{eventType}:after-construction",
+      "durability": "event-not-committed",
+      "appliesTo": "all-events"
+    },
+    {
+      "name": "after-prospective-fold",
+      "boundaryTemplate": "event:{eventType}:after-fold-before-cas",
+      "durability": "event-not-committed",
+      "appliesTo": "all-events"
+    },
+    {
+      "name": "before-store-commit",
+      "boundaryTemplate": "store:event:{eventType}:before-commit",
+      "durability": "event-not-committed",
+      "appliesTo": "all-events"
+    },
+    {
+      "name": "after-store-commit",
+      "boundaryTemplate": "store:event:{eventType}:after-commit-before-return",
+      "durability": "event-committed",
+      "appliesTo": "all-events"
+    },
+    {
+      "name": "after-store-return",
+      "boundaryTemplate": "event:{eventType}:after-store-before-state",
+      "durability": "event-committed",
+      "appliesTo": "all-events"
+    },
+    {
+      "name": "after-state-update",
+      "boundaryTemplate": "event:{eventType}:after-state-before-dispatch",
+      "durability": "event-committed",
+      "appliesTo": "all-events"
+    },
+    {
+      "name": "before-checkpoint-construction",
+      "boundaryTemplate": "checkpoint:{eventType}:before-construction",
+      "durability": "event-committed",
+      "appliesTo": "all-events"
+    },
+    {
+      "name": "after-checkpoint-construction",
+      "boundaryTemplate": "checkpoint:{eventType}:after-construction-before-save",
+      "durability": "event-committed",
+      "appliesTo": "all-events"
+    },
+    {
+      "name": "after-checkpoint-save",
+      "boundaryTemplate": "checkpoint:{eventType}:after-save-before-ack",
+      "durability": "event-and-checkpoint-committed",
+      "appliesTo": "all-events"
+    },
+    {
+      "name": "terminal-result-delivery",
+      "boundaryTemplate": "terminal:ControllerTerminated:during-delivery",
+      "durability": "terminal-event-committed",
+      "appliesTo": "ControllerTerminated"
+    }
+  ],
+  "faultKinds": [
+    "process-loss",
+    "store-error",
+    "timeout",
+    "cancellation",
+    "commit-then-throw"
+  ],
+  "expect": {
+    "eventTypeCount": 17,
+    "stageCount": 11,
+    "faultKindCount": 5,
+    "boundaryCount": 171,
+    "matrixEntryCount": 855,
+    "durabilityCounts": {
+      "event-not-committed": 340,
+      "event-committed": 425,
+      "event-and-checkpoint-committed": 85,
+      "terminal-event-committed": 5
+    },
+    "matrixCanonicalUtf8Bytes": 163770,
+    "matrixSha256": "235a81ff9342d91541d092f2306600feece980fb2c6eec1f2cc098273cbc3a23"
+  }
+}

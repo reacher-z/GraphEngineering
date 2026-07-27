@@ -10,6 +10,9 @@ from pathlib import Path
 from typing import Any, cast
 
 from graph_engineering import (
+    CYCLE_DURABLE_FAULT_STAGES,
+    CYCLE_EVENT_TYPES,
+    CYCLE_FAULT_KINDS,
     CycleActivityContext,
     CycleErrorCode,
     CycleHandlers,
@@ -19,6 +22,7 @@ from graph_engineering import (
     MemoryCycleStore,
     PatchAuthority,
     build_cycle_checkpoint,
+    build_cycle_durable_fault_matrix,
     canonical_json,
     compile_graph,
     fold_cycle_events,
@@ -682,6 +686,8 @@ async def _main() -> None:
         lease=_lease(),
         clock=lambda: STARTED_AT,
     )
+    fault_matrix = [entry.to_dict() for entry in build_cycle_durable_fault_matrix()]
+    fault_matrix_canonical = canonical_json(fault_matrix)
     report: dict[str, Any] = {
         "requestCanonical": canonical_json(request),
         **_event_projection(
@@ -706,6 +712,17 @@ async def _main() -> None:
             "exhausted": await _in_doubt_report(graph.graph_hash, exhausted=True),
         },
         "resolution": await _resolution_report(graph.graph_hash),
+        "faultMatrix": {
+            "eventTypes": list(CYCLE_EVENT_TYPES),
+            "stages": list(CYCLE_DURABLE_FAULT_STAGES),
+            "faultKinds": list(CYCLE_FAULT_KINDS),
+            "matrix": fault_matrix,
+            "matrixCanonical": fault_matrix_canonical,
+            "matrixCanonicalUtf8Bytes": len(fault_matrix_canonical.encode("utf-8")),
+            "matrixSha256": hashlib.sha256(
+                fault_matrix_canonical.encode("utf-8")
+            ).hexdigest(),
+        },
     }
     print(json.dumps(report, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
 

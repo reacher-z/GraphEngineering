@@ -174,6 +174,11 @@ class MemoryCycleStore:
                 seen_ids.add(event_id)
                 previous_hash = document["recordHash"]
             await run_fault_hook(self._fault_hook, "store:inside-append-before-commit")
+            for event in events:
+                await run_fault_hook(
+                    self._fault_hook,
+                    f"store:event:{event.type}:before-commit",
+                )
             if not current:
                 first = detached[0]
                 if first["type"] != "ControllerCreated":
@@ -194,6 +199,11 @@ class MemoryCycleStore:
                 self._controller_streams[run_id] = stream_id
             self.append_count += 1
             committed_tail = len(self._events[stream_id]) - 1
+            for event in events:
+                await run_fault_hook(
+                    self._fault_hook,
+                    f"store:event:{event.type}:after-commit-before-return",
+                )
         await run_fault_hook(self._fault_hook, "store:after-append")
         return committed_tail
 

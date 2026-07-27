@@ -11,6 +11,7 @@ import {
   type CycleControllerEventStore,
   type CycleControllerFold,
   type CycleControllerRequest,
+  type CycleFaultHook,
   type CycleExitObservation,
   type CycleGraphCoordinate,
   type CycleLease,
@@ -22,6 +23,7 @@ import {
   type CycleRoundRecord,
   type GraphPatchDecision,
 } from "./cycle-types.js";
+import { runCycleFaultHook } from "./cycle-faults.js";
 import {
   CYCLE_ACTIVITY_DOMAIN,
   CYCLE_ROUND_PLAN_DOMAIN,
@@ -1493,6 +1495,11 @@ export function validateCycleControllerCheckpoint(
 /** Simple native CAS event store for local deterministic execution and tests. */
 export class MemoryCycleControllerEventStore implements CycleControllerEventStore {
   readonly #streams = new Map<string, CycleControllerEvent[]>();
+  readonly #faultHook: CycleFaultHook | undefined;
+
+  constructor(options: { readonly faultHook?: CycleFaultHook } = {}) {
+    this.#faultHook = options.faultHook;
+  }
 
   async append(
     streamId: string,
@@ -1515,7 +1522,16 @@ export class MemoryCycleControllerEventStore implements CycleControllerEventStor
       verifyCycleEventIntegrity(event, previous);
       previous = event;
     }
+    for (const event of events) {
+      await runCycleFaultHook(this.#faultHook, `store:event:${event.type}:before-commit`);
+    }
     this.#streams.set(streamId, [...current, ...events]);
+    for (const event of events) {
+      await runCycleFaultHook(
+        this.#faultHook,
+        `store:event:${event.type}:after-commit-before-return`,
+      );
+    }
     return actual + events.length;
   }
 

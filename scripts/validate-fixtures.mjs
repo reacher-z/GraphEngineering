@@ -471,6 +471,104 @@ function assertResultCounters(result, label) {
 
 const cycleControllerCases = await loadJson("cycle-controller.case.json");
 assert.equal(cycleControllerCases.schemaVersion, 1);
+const cycleFaultMatrixCases = await loadJson("cycle-controller-fault-matrix.case.json");
+assert.equal(cycleFaultMatrixCases.schemaVersion, 1);
+assert.equal(
+  cycleFaultMatrixCases.eventSchema,
+  "spec/cycle-controller-event.schema.json",
+  "D7 fault matrix must name the authoritative event schema",
+);
+assert.deepEqual(
+  cycleFaultMatrixCases.eventTypes,
+  d7Schemas[4].properties.type.enum,
+  "D7 fault matrix event vocabulary differs from the event schema enum",
+);
+assert.equal(
+  new Set(cycleFaultMatrixCases.eventTypes).size,
+  cycleFaultMatrixCases.expect.eventTypeCount,
+  "D7 fault matrix event vocabulary is duplicated or incomplete",
+);
+assert.equal(
+  new Set(cycleFaultMatrixCases.stages.map(({ name }) => name)).size,
+  cycleFaultMatrixCases.expect.stageCount,
+  "D7 fault stage names are duplicated or incomplete",
+);
+assert.equal(
+  new Set(cycleFaultMatrixCases.faultKinds).size,
+  cycleFaultMatrixCases.expect.faultKindCount,
+  "D7 fault kinds are duplicated or incomplete",
+);
+const cycleFaultMatrix = [];
+for (const stage of cycleFaultMatrixCases.stages) {
+  assert.deepEqual(
+    Object.keys(stage).sort(compareUnicodeCodePoints),
+    ["appliesTo", "boundaryTemplate", "durability", "name"],
+    `${stage.name} durable stage is not closed`,
+  );
+  assert.ok(
+    stage.appliesTo === "all-events" || cycleFaultMatrixCases.eventTypes.includes(stage.appliesTo),
+    `${stage.name} names an unknown event applicability`,
+  );
+  const exampleEvent = stage.appliesTo === "all-events"
+    ? cycleFaultMatrixCases.eventTypes[0]
+    : stage.appliesTo;
+  const exampleBoundary = stage.boundaryTemplate.replaceAll("{eventType}", exampleEvent);
+  assert.equal(
+    exampleBoundary.includes("{eventType}"),
+    false,
+    `${stage.name} left an unresolved boundary token`,
+  );
+}
+for (const eventType of cycleFaultMatrixCases.eventTypes) {
+  for (const stage of cycleFaultMatrixCases.stages) {
+    if (stage.appliesTo !== "all-events" && stage.appliesTo !== eventType) continue;
+    const boundary = stage.boundaryTemplate.replaceAll("{eventType}", eventType);
+    for (const faultKind of cycleFaultMatrixCases.faultKinds) {
+      cycleFaultMatrix.push({
+        eventType,
+        stage: stage.name,
+        faultKind,
+        boundary,
+        durability: stage.durability,
+      });
+    }
+  }
+}
+assert.equal(
+  cycleFaultMatrix.length,
+  cycleFaultMatrixCases.expect.matrixEntryCount,
+  "D7 fault matrix entry count drifted",
+);
+assert.equal(
+  new Set(cycleFaultMatrix.map(({ eventType, stage, faultKind }) => (
+    `${eventType}\0${stage}\0${faultKind}`
+  ))).size,
+  cycleFaultMatrix.length,
+  "D7 fault matrix has duplicate obligations",
+);
+assert.equal(
+  new Set(cycleFaultMatrix.map(({ boundary }) => boundary)).size,
+  cycleFaultMatrixCases.expect.boundaryCount,
+  "D7 fault matrix boundary count drifted",
+);
+for (const [durability, count] of Object.entries(cycleFaultMatrixCases.expect.durabilityCounts)) {
+  assert.equal(
+    cycleFaultMatrix.filter((entry) => entry.durability === durability).length,
+    count,
+    `D7 fault matrix ${durability} count drifted`,
+  );
+}
+const cycleFaultMatrixCanonical = JSON.stringify(canonicalize(cycleFaultMatrix));
+assert.equal(
+  Buffer.byteLength(cycleFaultMatrixCanonical, "utf8"),
+  cycleFaultMatrixCases.expect.matrixCanonicalUtf8Bytes,
+  "D7 fault matrix canonical byte count drifted",
+);
+assert.equal(
+  hash(cycleFaultMatrix),
+  cycleFaultMatrixCases.expect.matrixSha256,
+  "D7 fault matrix canonical hash drifted",
+);
 const validPoliciesByName = new Map();
 for (const testCase of cycleControllerCases.validPolicies) {
   assert.equal(
@@ -2175,5 +2273,5 @@ assert.equal(new Set(diamond.nodes.map(({ id }) => id)).size, diamond.nodes.leng
 assert.equal(new Set(diamond.edges.map(({ id }) => id)).size, diamond.edges.length);
 
 process.stdout.write(
-  `Validated ${fixtureNames.length} JSON fixtures (${caseNames.length} case manifests), ${yamlNames.length} referenced YAML fixtures, ${Object.keys(expected.canonicalization).length} graph hash, ${Object.keys(expected.checkpoints ?? {}).length} checkpoint hash, ${durableJson.validCases.length} Durable JSON vectors, ${compiledIdentities.length} compiled identities, ${graphPatchCases.validCases.length + graphPatchCases.invalidCases.length} graph patch schema cases plus ${graphPatchCases.semanticCases.length} closed semantic vectors, and 6 D7 controller/revision/event/checkpoint schemas with ${durableEvents.length} chained event goldens, ${cycleDurableCases.leaseTransitionCases.length} valid and ${cycleDurableCases.invalidLeaseTransitionCases.length} hostile lease transitions, ${cycleDurableCases.validInterruptedHistoryCases?.length ?? 0} interrupted terminal/checkpoint folds, ${cycleDurableCases.inDoubtProjectionCases.length} in-doubt singleton cases, ${resolutionProtocol.cases.length} terminal in-doubt resolution cases, ${cycleDurableCases.untilDryFoldCases.length} global-seen convergence fold, ${cycleDurableCases.hardStopFoldCases.length} hard-stop folds, ${cycleDurableCases.invalidEventHistoryCases.length} hostile histories, ${cycleDurableCases.invalidCheckpointSemanticCases.length} hostile checkpoint folds, plus ${cycleDurableCases.validStandaloneEventSchemaCases.length} standalone phase-event shapes; all ${expectedD7Tests.length} D7-CYCLE-SPEC-024 expected-test groups are mapped against meta-valid schemas.\n`,
+  `Validated ${fixtureNames.length} JSON fixtures (${caseNames.length} case manifests), ${yamlNames.length} referenced YAML fixtures, ${Object.keys(expected.canonicalization).length} graph hash, ${Object.keys(expected.checkpoints ?? {}).length} checkpoint hash, ${durableJson.validCases.length} Durable JSON vectors, ${compiledIdentities.length} compiled identities, ${graphPatchCases.validCases.length + graphPatchCases.invalidCases.length} graph patch schema cases plus ${graphPatchCases.semanticCases.length} closed semantic vectors, and 6 D7 controller/revision/event/checkpoint schemas with ${durableEvents.length} chained event goldens, ${cycleFaultMatrix.length} retained durable fault obligations, ${cycleDurableCases.leaseTransitionCases.length} valid and ${cycleDurableCases.invalidLeaseTransitionCases.length} hostile lease transitions, ${cycleDurableCases.validInterruptedHistoryCases?.length ?? 0} interrupted terminal/checkpoint folds, ${cycleDurableCases.inDoubtProjectionCases.length} in-doubt singleton cases, ${resolutionProtocol.cases.length} terminal in-doubt resolution cases, ${cycleDurableCases.untilDryFoldCases.length} global-seen convergence fold, ${cycleDurableCases.hardStopFoldCases.length} hard-stop folds, ${cycleDurableCases.invalidEventHistoryCases.length} hostile histories, ${cycleDurableCases.invalidCheckpointSemanticCases.length} hostile checkpoint folds, plus ${cycleDurableCases.validStandaloneEventSchemaCases.length} standalone phase-event shapes; all ${expectedD7Tests.length} D7-CYCLE-SPEC-024 expected-test groups are mapped against meta-valid schemas.\n`,
 );

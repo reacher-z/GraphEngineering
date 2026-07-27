@@ -572,8 +572,29 @@ diagnostic, and revision evidence.
 durability nor distributed fencing. It exists for deterministic tests and
 examples. The repository's executable TypeScript ↔ Python D7 join compares
 canonical activity inputs, events, results, accepted GraphPatch revisions, and
-checkpoints. Production storage/lock adapters, the remaining hostile boundary
-matrix, and independent acceptance remain separate deliverables.
+checkpoints.
+
+`build_cycle_durable_fault_matrix()` derives 855 obligations over 17 event
+types, 11 durable stages, and five fault classes. Pass a deterministic
+`fault_hook` to `start_cycle`/`resume_cycle` for controller boundaries or to
+`MemoryCycleStore` for the before-commit and commit-then-throw boundaries:
+
+```python
+from graph_engineering import MemoryCycleStore, build_cycle_durable_fault_matrix
+
+matrix = build_cycle_durable_fault_matrix()
+
+def lose_after_commit(boundary: str) -> None:
+    if boundary == "store:event:DiscoveryCommitted:after-commit-before-return":
+        raise ProcessLost
+
+store = MemoryCycleStore(fault_hook=lose_after_commit)
+```
+
+The cross-language join compares every generated entry and its retained
+canonical hash. Production storage/lock adapters, exhaustive execution of all
+event-family scenarios, and independent acceptance remain separate
+deliverables.
 
 ## Current boundary
 

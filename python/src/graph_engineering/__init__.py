@@ -28,6 +28,7 @@ from .component_identity import (
     verify_compiled_graph_identity,
 )
 from .cycle_contract import (
+    CYCLE_EVENT_TYPES,
     CycleErrorCode,
     CycleEvent,
     CycleInDoubtResolutionAuthority,
@@ -56,6 +57,13 @@ from .cycle_controller import (
     resolve_cycle_in_doubt_activity,
     resume_cycle,
     start_cycle,
+)
+from .cycle_faults import (
+    CYCLE_DURABLE_FAULT_STAGES,
+    CYCLE_FAULT_KINDS,
+    CycleDurableFaultMatrixEntry,
+    build_cycle_durable_fault_matrix,
+    cycle_durable_fault_boundary,
 )
 from .cycle_fold import (
     CycleFold,
@@ -173,6 +181,9 @@ from .typed_ports import (
 )
 
 __all__ = [
+    "CYCLE_DURABLE_FAULT_STAGES",
+    "CYCLE_EVENT_TYPES",
+    "CYCLE_FAULT_KINDS",
     "TYPED_PORT_POLICY_API_VERSION",
     "TYPED_PORT_POLICY_KEY",
     "TYPED_PORT_POLICY_MODE",
@@ -187,6 +198,7 @@ __all__ = [
     "CompiledGraphIdentity",
     "CycleActivityContext",
     "CycleCancellation",
+    "CycleDurableFaultMatrixEntry",
     "CycleErrorCode",
     "CycleEvent",
     "CycleFold",
@@ -278,6 +290,7 @@ __all__ = [
     "ValidatedCycleInDoubtResolution",
     "ValidatedCycleRequest",
     "build_cycle_checkpoint",
+    "build_cycle_durable_fault_matrix",
     "canonical_bytes",
     "canonical_json",
     "canonical_sha256",
@@ -285,6 +298,7 @@ __all__ = [
     "classify_candidates",
     "compile_graph",
     "create_compiled_graph_identity",
+    "cycle_durable_fault_boundary",
     "decode_durable_json",
     "durable_json_hash",
     "encode_durable_json",

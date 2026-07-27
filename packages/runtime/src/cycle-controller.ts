@@ -58,6 +58,7 @@ import {
   validateCycleControllerCheckpoint,
   type FoldCycleOptions,
 } from "./cycle-fold.js";
+import { runCycleFaultHook } from "./cycle-faults.js";
 import { NativeGraphPatchApplier } from "./graph-patch.js";
 import { snapshotJson } from "./json.js";
 import type { JsonValue } from "./types.js";
@@ -181,6 +182,7 @@ class CycleJournal {
     const lease = fields.lease === undefined
       ? (type === "ControllerCreated" ? null : currentFold?.activeLease ?? null)
       : fields.lease;
+    await runCycleFaultHook(this.options.faultHook, `event:${type}:before-construction`);
     let eventId: string;
     try {
       eventId = (this.options.createEventId ?? ((context) => `${context.controllerRunId}-${context.sequence}`))({
@@ -208,6 +210,7 @@ class CycleJournal {
       timestamp: sample.timestamp,
       eventId,
     });
+    await runCycleFaultHook(this.options.faultHook, `event:${type}:after-construction`);
     // Never let an invalid locally-constructed transition poison the
     // authoritative stream. The exact candidate prefix must fold before CAS.
     let candidateFold: CycleControllerFold;
@@ -223,6 +226,8 @@ class CycleJournal {
         "locally constructed event failed semantic preflight", { type, sequence }, { cause: error },
       );
     }
+    await runCycleFaultHook(this.options.faultHook, `event:${type}:after-fold-before-cas`);
+    await runCycleFaultHook(this.options.faultHook, `event:${type}:before-cas`);
     try {
       const committedSequence = await this.options.eventStore.append(
         this.request.eventStreamId, sequence - 1, [event],
@@ -241,17 +246,25 @@ class CycleJournal {
         "cycle event append failed", { type, sequence }, { cause: error },
       );
     }
+    await runCycleFaultHook(this.options.faultHook, `event:${type}:after-store-before-state`);
     this.events.push(event);
     // The pre-CAS fold is also the authoritative new in-memory projection.
     this.#cachedFold = candidateFold;
+    await runCycleFaultHook(this.options.faultHook, `event:${type}:after-cas`);
+    await runCycleFaultHook(this.options.faultHook, `event:${type}:after-state-before-dispatch`);
     const folded = candidateFold;
     const interval = this.options.checkpointEveryEvents ?? 0;
     if (this.options.checkpointStore !== undefined
         && (type === "ControllerTerminated" || (interval > 0 && this.events.length % interval === 0))) {
       const checkpointId = `${this.request.controllerRunId}-latest`;
+      await runCycleFaultHook(this.options.faultHook, `checkpoint:${type}:before-construction`);
       const checkpoint = createCycleControllerCheckpoint(
         this.events, checkpointId, sample.timestamp,
         this.parent === undefined ? {} : { parent: this.parent },
+      );
+      await runCycleFaultHook(
+        this.options.faultHook,
+        `checkpoint:${type}:after-construction-before-save`,
       );
       try {
         await this.options.checkpointStore.write(this.request.checkpointScope, checkpointId, checkpoint);
@@ -262,6 +275,7 @@ class CycleJournal {
           { sequence: folded.lastSequence }, { cause: error },
         );
       }
+      await runCycleFaultHook(this.options.faultHook, `checkpoint:${type}:after-save-before-ack`);
     }
     return event;
   }
@@ -909,6 +923,10 @@ async function terminate(
     historyPrefixHash: journal.events.at(-1)?.recordHash ?? "0".repeat(64),
   });
   await journal.append("ControllerTerminated", { observation, result }, { sample });
+  await runCycleFaultHook(
+    journal.options.faultHook,
+    "terminal:ControllerTerminated:during-delivery",
+  );
   return journal.fold.terminalResult as CycleControllerResult;
 }
 
@@ -1448,8 +1466,9 @@ function validateRunOptions(request: CycleControllerRequest, options: CycleContr
     fail("checkpoint interval must be a nonnegative safe integer");
   }
   if (options.now !== undefined && typeof options.now !== "function"
-      || options.createEventId !== undefined && typeof options.createEventId !== "function") {
-    fail("controller clock or event-ID adapter is invalid");
+      || options.createEventId !== undefined && typeof options.createEventId !== "function"
+      || options.faultHook !== undefined && typeof options.faultHook !== "function") {
+    fail("controller clock, event-ID, or fault-hook adapter is invalid");
   }
   if (options.activities === null || typeof options.activities !== "object"
       || typeof options.activities.finder !== "function"
@@ -1552,7 +1571,10 @@ export async function resumeCycleController(
       { expectedSequence: options.expectedSequence, actualSequence: fold.lastSequence },
     );
   }
-  if (fold.terminalResult !== null) return fold.terminalResult;
+  if (fold.terminalResult !== null) {
+    await runCycleFaultHook(options.faultHook, "terminal:ControllerTerminated:during-delivery");
+    return fold.terminalResult;
+  }
   if (fold.inDoubtActivities.some((activity) => activity.sideEffects === "non-idempotent")
       || fold.openRound?.openActivity?.sideEffects === "non-idempotent") {
     throw new CycleControllerError("IN_DOUBT_SIDE_EFFECT", request.controllerRunId, "resume is blocked by an in-doubt non-idempotent activity");
@@ -1749,6 +1771,10 @@ export async function resolveCycleInDoubtActivity(
     );
   }
   const sequence = events.length;
+  await runCycleFaultHook(
+    options.faultHook,
+    "event:InDoubtActivityResolved:before-construction",
+  );
   let eventId: string;
   try {
     eventId = (options.createEventId ?? ((context) => `${context.controllerRunId}-${context.sequence}`))({
@@ -1781,7 +1807,16 @@ export async function resolveCycleInDoubtActivity(
     timestamp,
     eventId,
   });
+  await runCycleFaultHook(
+    options.faultHook,
+    "event:InDoubtActivityResolved:after-construction",
+  );
   const resolvedFold = foldCycleControllerEvents([...events, event], foldOptions);
+  await runCycleFaultHook(
+    options.faultHook,
+    "event:InDoubtActivityResolved:after-fold-before-cas",
+  );
+  await runCycleFaultHook(options.faultHook, "event:InDoubtActivityResolved:before-cas");
   try {
     const committedSequence = await options.eventStore.append(
       request.eventStreamId,
@@ -1815,13 +1850,30 @@ export async function resolveCycleInDoubtActivity(
       { cause: error },
     );
   }
+  await runCycleFaultHook(
+    options.faultHook,
+    "event:InDoubtActivityResolved:after-store-before-state",
+  );
+  await runCycleFaultHook(options.faultHook, "event:InDoubtActivityResolved:after-cas");
+  await runCycleFaultHook(
+    options.faultHook,
+    "event:InDoubtActivityResolved:after-state-before-dispatch",
+  );
   if (options.checkpointStore !== undefined) {
     const checkpointId = `${request.controllerRunId}-latest`;
+    await runCycleFaultHook(
+      options.faultHook,
+      "checkpoint:InDoubtActivityResolved:before-construction",
+    );
     const checkpoint = createCycleControllerCheckpoint(
       [...events, event],
       checkpointId,
       timestamp,
       foldOptions,
+    );
+    await runCycleFaultHook(
+      options.faultHook,
+      "checkpoint:InDoubtActivityResolved:after-construction-before-save",
     );
     try {
       await options.checkpointStore.write(request.checkpointScope, checkpointId, checkpoint);
@@ -1834,6 +1886,10 @@ export async function resolveCycleInDoubtActivity(
         { cause: error },
       );
     }
+    await runCycleFaultHook(
+      options.faultHook,
+      "checkpoint:InDoubtActivityResolved:after-save-before-ack",
+    );
   }
   return Object.freeze({ commandHash, event, fold: resolvedFold, duplicate: false });
 }

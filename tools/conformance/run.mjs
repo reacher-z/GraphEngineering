@@ -1265,6 +1265,68 @@ if (pythonCycle.status !== 0) {
   );
 }
 const pyCycleReport = JSON.parse(pythonCycle.stdout);
+const cycleFaultFixture = JSON.parse(
+  await readFile(join(fixtureRoot, "cycle-controller-fault-matrix.case.json"), "utf8"),
+);
+const tsCycleFaultMatrix = runtime.buildCycleDurableFaultMatrix();
+const tsCycleFaultCanonical = core.canonicalSerialize(tsCycleFaultMatrix);
+const tsCycleFaultReport = {
+  eventTypes: [...runtime.CYCLE_CONTROLLER_EVENT_TYPES],
+  stages: [...runtime.CYCLE_DURABLE_FAULT_STAGES],
+  faultKinds: [...runtime.CYCLE_FAULT_KINDS],
+  matrix: tsCycleFaultMatrix,
+  matrixCanonical: tsCycleFaultCanonical,
+  matrixCanonicalUtf8Bytes: Buffer.byteLength(tsCycleFaultCanonical, "utf8"),
+  matrixSha256: core.canonicalHash(tsCycleFaultMatrix),
+};
+assert.equal(cycleFaultFixture.schemaVersion, 1, "D7 fault matrix fixture version drifted");
+assert.deepEqual(
+  tsCycleFaultReport.eventTypes,
+  cycleFaultFixture.eventTypes,
+  "D7 TypeScript event vocabulary differs from the retained fault fixture",
+);
+assert.deepEqual(
+  tsCycleFaultReport.stages,
+  cycleFaultFixture.stages.map(({ name }) => name),
+  "D7 TypeScript durable stages differ from the retained fault fixture",
+);
+assert.deepEqual(
+  tsCycleFaultReport.faultKinds,
+  cycleFaultFixture.faultKinds,
+  "D7 TypeScript fault kinds differ from the retained fault fixture",
+);
+assert.deepEqual(
+  tsCycleFaultReport,
+  pyCycleReport.faultMatrix,
+  "D7 TypeScript/Python durable fault matrices differ",
+);
+assert.equal(
+  tsCycleFaultReport.matrix.length,
+  cycleFaultFixture.expect.matrixEntryCount,
+  "D7 fault matrix entry count drifted",
+);
+assert.equal(
+  new Set(tsCycleFaultReport.matrix.map(({ boundary }) => boundary)).size,
+  cycleFaultFixture.expect.boundaryCount,
+  "D7 fault boundary count drifted",
+);
+assert.equal(
+  tsCycleFaultReport.matrixCanonicalUtf8Bytes,
+  cycleFaultFixture.expect.matrixCanonicalUtf8Bytes,
+  "D7 fault matrix canonical byte count drifted",
+);
+assert.equal(
+  tsCycleFaultReport.matrixSha256,
+  cycleFaultFixture.expect.matrixSha256,
+  "D7 fault matrix canonical hash drifted",
+);
+for (const [durability, count] of Object.entries(cycleFaultFixture.expect.durabilityCounts)) {
+  assert.equal(
+    tsCycleFaultReport.matrix.filter((entry) => entry.durability === durability).length,
+    count,
+    `D7 fault matrix ${durability} count drifted`,
+  );
+}
 const cycleContractFixture = JSON.parse(
   await readFile(join(fixtureRoot, "cycle-controller.case.json"), "utf8"),
 );
@@ -2025,7 +2087,7 @@ const tsInDoubtInputCount = Object.values(tsInDoubtReports)
 const tsResolutionEventCount = tsResolutionReport.eventTypes.length;
 const tsResolutionInputCount = tsResolutionReport.inputsCanonical.length;
 process.stdout.write(
-  `Cross-language native-cycle conformance passed for ${tsCycleEvents.length + tsPatchEvents.length + tsResumeEvents.length + tsModeEventCount + tsInDoubtEventCount + tsResolutionEventCount} exact events, ${cycleInputs.length + patchInputs.length + resumeInputs.length + tsModeInputCount + tsInDoubtInputCount + tsResolutionInputCount} activity inputs, all three controller modes, two in-doubt recovery outcomes, one authority-bound terminal resolution, eight terminal results, one accepted GraphPatch/revision, one crash/takeover resume, and eight checkpoints.\n`,
+  `Cross-language native-cycle conformance passed for ${tsCycleEvents.length + tsPatchEvents.length + tsResumeEvents.length + tsModeEventCount + tsInDoubtEventCount + tsResolutionEventCount} exact events, ${cycleInputs.length + patchInputs.length + resumeInputs.length + tsModeInputCount + tsInDoubtInputCount + tsResolutionInputCount} activity inputs, ${tsCycleFaultReport.matrix.length} durable fault obligations over ${cycleFaultFixture.expect.boundaryCount} boundaries, all three controller modes, two in-doubt recovery outcomes, one authority-bound terminal resolution, eight terminal results, one accepted GraphPatch/revision, one crash/takeover resume, and eight checkpoints.\n`,
 );
 
 // Authoring conformance is intentionally expected-vs-TypeScript-vs-Python.

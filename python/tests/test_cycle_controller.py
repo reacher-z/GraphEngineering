@@ -12,7 +12,12 @@ from typing import Any, cast
 import pytest
 
 from graph_engineering import compile_graph
-from graph_engineering.cycle_contract import CycleErrorCode, CycleRuntimeError, GraphPatchLimits
+from graph_engineering.cycle_contract import (
+    CYCLE_EVENT_TYPES,
+    CycleErrorCode,
+    CycleRuntimeError,
+    GraphPatchLimits,
+)
 from graph_engineering.cycle_controller import (
     CycleCancellation,
     CycleHandlers,
@@ -22,6 +27,12 @@ from graph_engineering.cycle_controller import (
     resolve_cycle_in_doubt_activity,
     resume_cycle,
     start_cycle,
+)
+from graph_engineering.cycle_faults import (
+    CYCLE_DURABLE_FAULT_STAGES,
+    CYCLE_FAULT_KINDS,
+    build_cycle_durable_fault_matrix,
+    cycle_durable_fault_boundary,
 )
 from graph_engineering.cycle_fold import validate_checkpoint
 from graph_engineering.cycle_store import MemoryCycleStore
@@ -106,6 +117,10 @@ def test_cycle_surface_is_exported_from_the_native_python_package() -> None:
     assert ge.resolve_cycle_in_doubt_activity is resolve_cycle_in_doubt_activity
     assert ge.MemoryCycleStore is MemoryCycleStore
     assert ge.GraphPatchRuntime is GraphPatchRuntime
+    assert ge.CYCLE_EVENT_TYPES is CYCLE_EVENT_TYPES
+    assert ge.CYCLE_DURABLE_FAULT_STAGES is CYCLE_DURABLE_FAULT_STAGES
+    assert ge.CYCLE_FAULT_KINDS is CYCLE_FAULT_KINDS
+    assert ge.build_cycle_durable_fault_matrix is build_cycle_durable_fault_matrix
 
 
 def handler_binding(
@@ -649,6 +664,223 @@ class Crash(BaseException):
     pass
 
 
+def test_fault_matrix_is_derived_from_all_event_stage_kind_combinations() -> None:
+    matrix = build_cycle_durable_fault_matrix()
+
+    assert len(CYCLE_EVENT_TYPES) == 17
+    assert len(CYCLE_DURABLE_FAULT_STAGES) == 11
+    assert len(CYCLE_FAULT_KINDS) == 5
+    assert len(matrix) == 855
+    assert len({(entry.event_type, entry.stage, entry.fault_kind) for entry in matrix}) == 855
+    for event_type in CYCLE_EVENT_TYPES:
+        expected = 55 if event_type == "ControllerTerminated" else 50
+        assert sum(entry.event_type == event_type for entry in matrix) == expected
+    terminal = [entry.to_dict() for entry in matrix if entry.stage == "terminal-result-delivery"]
+    assert terminal == [
+        {
+            "eventType": "ControllerTerminated",
+            "stage": "terminal-result-delivery",
+            "faultKind": fault_kind,
+            "boundary": "terminal:ControllerTerminated:during-delivery",
+            "durability": "terminal-event-committed",
+        }
+        for fault_kind in CYCLE_FAULT_KINDS
+    ]
+    with pytest.raises(ValueError, match="unknown cycle-controller event type"):
+        cycle_durable_fault_boundary(cast(Any, "Unknown"), "before-event-construction")
+    with pytest.raises(ValueError, match="unknown durable fault stage"):
+        cycle_durable_fault_boundary("ControllerCreated", cast(Any, "unknown"))
+
+
+@pytest.mark.parametrize(
+    ("boundary", "committed"),
+    [
+        ("event:DiscoveryCommitted:before-construction", False),
+        ("event:DiscoveryCommitted:after-construction", False),
+        ("event:DiscoveryCommitted:after-fold-before-cas", False),
+        ("store:event:DiscoveryCommitted:before-commit", False),
+        ("store:event:DiscoveryCommitted:after-commit-before-return", True),
+        ("event:DiscoveryCommitted:after-store-before-state", True),
+        ("event:DiscoveryCommitted:after-state-before-dispatch", True),
+    ],
+)
+def test_canonical_event_boundary_recovers_without_duplicate_success(
+    boundary: str,
+    committed: bool,
+) -> None:
+    async def run() -> None:
+        request = request_document(max_iterations=1)
+        fired = False
+
+        def inject(seen: str) -> None:
+            nonlocal fired
+            if not fired and seen == boundary:
+                fired = True
+                raise Crash()
+
+        store_boundary = boundary.startswith("store:")
+        store = MemoryCycleStore(fault_hook=inject if store_boundary else None)
+        finder_calls = 0
+        evaluator_calls = 0
+
+        def finder(_: object) -> list[dict[str, object]]:
+            nonlocal finder_calls
+            finder_calls += 1
+            return [{"key": "boundary", "value": True}]
+
+        def evaluator(context: Any) -> list[dict[str, str]]:
+            nonlocal evaluator_calls
+            evaluator_calls += 1
+            return [
+                {"key": candidate["key"], "verdict": "accept"}
+                for candidate in context.input["candidates"]
+            ]
+
+        with pytest.raises(Crash):
+            await start_cycle(
+                request,
+                CycleHandlers(finder=finder, candidate_evaluator=evaluator),
+                store=store,
+                lease=lease(),
+                clock=fixed_clock,
+                fault_hook=None if store_boundary else inject,
+            )
+        assert fired
+        interrupted = await store.read(request["eventStreamId"])
+        assert (interrupted[-1].type == "DiscoveryCommitted") is committed
+        assert sum(event.type == "DiscoveryCommitted" for event in interrupted) == int(committed)
+
+        result = await resume_cycle(
+            request,
+            CycleHandlers(finder=finder, candidate_evaluator=evaluator),
+            store=store,
+            expected_version=len(interrupted) - 1,
+            lease=lease(epoch=2, lease_id="boundary-lease-2"),
+            clock=fixed_clock,
+        )
+        assert result.result["exitReason"] == "MAX_ITERATIONS"
+        assert finder_calls == (1 if committed else 2)
+        assert evaluator_calls == 1
+        terminal = await store.read(request["eventStreamId"])
+        assert sum(event.type == "DiscoveryCommitted" for event in terminal) == 1
+        replayed = await replay_cycle(request["eventStreamId"], store=store)
+        assert replayed.result == result.result
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize(
+    ("boundary", "checkpoint_committed"),
+    [
+        ("checkpoint:ControllerTerminated:before-construction", False),
+        ("checkpoint:ControllerTerminated:after-construction-before-save", False),
+        ("checkpoint:ControllerTerminated:after-save-before-ack", True),
+    ],
+)
+def test_terminal_checkpoint_boundaries_retain_authoritative_event_truth(
+    boundary: str,
+    checkpoint_committed: bool,
+) -> None:
+    async def run() -> None:
+        request = request_document(max_iterations=1)
+        store = MemoryCycleStore()
+        fired = False
+        finder_calls = 0
+
+        def inject(seen: str) -> None:
+            nonlocal fired
+            if not fired and seen == boundary:
+                fired = True
+                raise Crash()
+
+        def finder(_: object) -> list[object]:
+            nonlocal finder_calls
+            finder_calls += 1
+            return []
+
+        with pytest.raises(Crash):
+            await start_cycle(
+                request,
+                CycleHandlers(finder=finder, candidate_evaluator=lambda _: []),
+                store=store,
+                lease=lease(),
+                clock=fixed_clock,
+                fault_hook=inject,
+            )
+        interrupted = await store.read(request["eventStreamId"])
+        assert interrupted[-1].type == "ControllerTerminated"
+        checkpoint = await store.load_checkpoint(
+            request["checkpointScope"],
+            f"{request['controllerRunId']}-terminal",
+        )
+        assert (checkpoint is not None) is checkpoint_committed
+        writes = store.append_count
+        resumed = await resume_cycle(
+            request,
+            CycleHandlers(
+                finder=lambda _: (_ for _ in ()).throw(AssertionError("terminal dispatch")),
+                candidate_evaluator=lambda _: (_ for _ in ()).throw(
+                    AssertionError("terminal dispatch")
+                ),
+            ),
+            store=store,
+            expected_version=len(interrupted) - 1,
+            lease=lease(epoch=2, lease_id="checkpoint-lease-2"),
+            clock=lambda: (_ for _ in ()).throw(AssertionError("terminal clock")),
+        )
+        assert resumed.result["exitReason"] == "MAX_ITERATIONS"
+        assert store.append_count == writes
+        assert finder_calls == 1
+
+    asyncio.run(run())
+
+
+def test_terminal_delivery_process_loss_is_read_only_on_resume() -> None:
+    async def run() -> None:
+        request = request_document(max_iterations=1)
+        store = MemoryCycleStore()
+        finder_calls = 0
+
+        def finder(_: object) -> list[object]:
+            nonlocal finder_calls
+            finder_calls += 1
+            return []
+
+        def lose_delivery(boundary: str) -> None:
+            if boundary == "terminal:ControllerTerminated:during-delivery":
+                raise Crash()
+
+        with pytest.raises(Crash):
+            await start_cycle(
+                request,
+                CycleHandlers(finder=finder, candidate_evaluator=lambda _: []),
+                store=store,
+                lease=lease(),
+                clock=fixed_clock,
+                fault_hook=lose_delivery,
+            )
+        interrupted = await store.read(request["eventStreamId"])
+        assert interrupted[-1].type == "ControllerTerminated"
+        writes = store.append_count
+        resumed = await resume_cycle(
+            request,
+            CycleHandlers(
+                finder=lambda _: (_ for _ in ()).throw(AssertionError("terminal dispatch")),
+                candidate_evaluator=lambda _: (_ for _ in ()).throw(
+                    AssertionError("terminal dispatch")
+                ),
+            ),
+            store=store,
+            expected_version=len(interrupted) - 1,
+            lease=lease(epoch=2, lease_id="delivery-lease-2"),
+        )
+        assert resumed.result["exitReason"] == "MAX_ITERATIONS"
+        assert store.append_count == writes
+        assert finder_calls == 1
+
+    asyncio.run(run())
+
+
 def test_resume_after_discovery_cas_reuses_finder_output_exactly() -> None:
     async def run() -> None:
         request = request_document(max_iterations=1)
@@ -769,13 +1001,13 @@ def test_resume_open_activity_honors_idempotency_and_in_doubt(side_effects: str)
                 lease=lease(epoch=2, lease_id="lease-2"),
                 clock=fixed_clock,
             )
-            assert calls >= 1
             starts = [
                 event for event in result.events
                 if event.type == "ActivityStarted" and event.data["phase"] == "finder"
             ]
-            assert [event.data["attempt"] for event in starts[:2]] == [1, 2]
-            assert starts[0].data["activityKey"] == starts[1].data["activityKey"]
+            first_round = [event for event in starts if event.data["iteration"] == 1]
+            assert [event.data["attempt"] for event in first_round] == [1]
+            assert calls == len(starts)
 
     asyncio.run(run())
 

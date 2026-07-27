@@ -298,6 +298,31 @@ overrides a complete event fold. `MemoryCycleControllerEventStore` and
 `MemoryCycleControllerCheckpointStore` are deterministic local implementations,
 not distributed lease providers.
 
+The test/simulation surface derives its complete durable-boundary lattice from
+the public event vocabulary:
+
+```ts
+import {
+  buildCycleDurableFaultMatrix,
+  MemoryCycleControllerEventStore,
+} from "@graph-engineering/runtime";
+
+const matrix = buildCycleDurableFaultMatrix(); // 855 event/stage/fault obligations
+const eventStore = new MemoryCycleControllerEventStore({
+  faultHook: (boundary) => {
+    if (boundary === "store:event:DiscoveryCommitted:after-commit-before-return") {
+      throw new Error("simulate commit-then-process-loss");
+    }
+  },
+});
+```
+
+Controller `faultHook` covers construction, prospective fold, store return,
+in-memory projection, checkpoint, and terminal-delivery boundaries; the memory
+event-store hook covers both sides of its atomic commit. These hooks are
+deterministic verification controls, not a production durability claim. The
+retained fixture and Python join compare all 855 canonical entries.
+
 When replaying or resuming a fork in a fresh process, replay the exact parent
 event prefix locally and pass that verified fold as `parent`. A serialized or
 caller-constructed fold object is not accepted as inheritance authority: its

@@ -775,6 +775,28 @@ CycleEventType: TypeAlias = Literal[
     "InDoubtActivityResolved",
 ]
 
+# Executable vocabulary used by the durable-boundary matrix. Keep this tuple,
+# the Literal above, and the public JSON schema enum byte-for-byte aligned.
+CYCLE_EVENT_TYPES: tuple[CycleEventType, ...] = (
+    "ControllerCreated",
+    "LeaseAcquired",
+    "LeaseRenewed",
+    "LeaseReleased",
+    "RoundReserved",
+    "ActivityStarted",
+    "ActivityFailed",
+    "InDoubtActivityResolved",
+    "DiscoveryCommitted",
+    "CandidateEvaluationCommitted",
+    "ModeOutcomeCommitted",
+    "BudgetReservationSettled",
+    "BudgetReservationReleased",
+    "PatchAccepted",
+    "PatchRejected",
+    "RoundCommitted",
+    "ControllerTerminated",
+)
+
 
 class CycleEvent(_CycleModel):
     api_version: Literal[
@@ -972,6 +994,7 @@ __all__ = [
     "CYCLE_ACTIVITY_DOMAIN",
     "CYCLE_CONTROLLER_DOMAIN",
     "CYCLE_EVENT_DOMAIN",
+    "CYCLE_EVENT_TYPES",
     "CYCLE_IN_DOUBT_RESOLUTION_DOMAIN",
     "CYCLE_REQUEST_DOMAIN",
     "CYCLE_ROUND_PLAN_DOMAIN",

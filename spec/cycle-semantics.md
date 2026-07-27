@@ -1006,6 +1006,45 @@ new lease or external call. Crash behavior is phase-exact:
 - after `ControllerTerminated`, resume is read-only, returns the stored result,
   and preserves any charged unmatched activity as in doubt.
 
+#### Durable-boundary fault lattice
+
+The executable fault lattice is derived from the closed event vocabulary in
+`cycle-controller-event.schema.json`; it is not a hand-maintained selection of
+currently convenient controller paths. For each of the 17 event types, the
+runtime publishes these canonical stages:
+
+| Stage | Canonical boundary | Durable fact when the hook runs |
+|---|---|---|
+| before event construction | `event:{type}:before-construction` | candidate event is absent |
+| after event construction | `event:{type}:after-construction` | candidate event is absent |
+| after prospective fold | `event:{type}:after-fold-before-cas` | candidate event is absent |
+| before store commit | `store:event:{type}:before-commit` | candidate event is absent |
+| after store commit | `store:event:{type}:after-commit-before-return` | event is authoritative |
+| after store return | `event:{type}:after-store-before-state` | event is authoritative |
+| after state update | `event:{type}:after-state-before-dispatch` | event and projection agree |
+| before checkpoint construction | `checkpoint:{type}:before-construction` | event is authoritative; checkpoint may be absent |
+| after checkpoint construction | `checkpoint:{type}:after-construction-before-save` | event is authoritative; checkpoint is absent |
+| after checkpoint save | `checkpoint:{type}:after-save-before-ack` | event and checkpoint are durable |
+| terminal result delivery | `terminal:ControllerTerminated:during-delivery` | terminal event is authoritative |
+
+The terminal-delivery stage applies only to `ControllerTerminated`; the other
+ten stages apply to every event because an interval checkpoint may follow any
+committed event. Crossing these stages with process loss, store error, timeout,
+cancellation, and commit-then-throw creates 855 executable obligations over 171
+unique boundaries. The retained fixture records the canonical 163,770-byte
+matrix with SHA-256
+`235a81ff9342d91541d092f2306600feece980fb2c6eec1f2cc098273cbc3a23`.
+TypeScript and Python must generate that matrix independently and compare every
+entry in conformance. Adding an event without extending the schema, runtime
+vocabulary, fixture, and matrix therefore fails validation.
+
+Fault hooks are deterministic test and simulation controls, not evidence that
+an in-memory adapter is crash durable. A production adapter must establish the
+same before/after-commit facts with its transaction and fsync contract. The
+legacy `event:{type}:before-cas` and `event:{type}:after-cas` aliases remain
+observable for v1alpha1 tests, but new retained evidence uses the canonical
+names above.
+
 The stable cycle activity key is:
 
 ```text
@@ -1019,7 +1058,9 @@ SHA-256(
 
 Attempt is excluded. A correctly declared `none` activity may retry, and an
 `idempotent` activity may retry only with the same key passed to the external
-system. An ambiguous idempotent retry coalesces into the one in-doubt identity;
+system. Resume reuses an unmatched durable claim with its existing attempt and
+key; it does not append a second `ActivityStarted` merely because the process
+lost the uncommitted result. An ambiguous idempotent retry coalesces into the one in-doubt identity;
 a later successful outcome for the same key resolves it. An open or failed
 in-doubt `non-idempotent` activity is `IN_DOUBT_SIDE_EFFECT` and resume may not
 invoke it automatically. A fork cannot continue with any inherited external
