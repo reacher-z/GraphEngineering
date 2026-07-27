@@ -317,6 +317,17 @@ overrides a complete event fold. `MemoryCycleControllerEventStore` and
 `MemoryCycleControllerCheckpointStore` are deterministic local implementations,
 not distributed lease providers.
 
+All four public operations accept cooperative cancellation (`signal` in the
+run options, including replay's fourth options argument and pause options).
+Cancellation before an operation's durable commit returns
+`GE_CYCLE_OPERATION_CANCELLED` with `{ operation, boundary }` and appends
+nothing. After `LeaseAcquired`, resume safely writes a `CANCELLED` terminal;
+after a dispatchable child's `ControllerCreated`, fork completes a child lease
+plus cancelled terminal. A committed pause release or an
+already completed result wins over cancellation observed at return. An open
+resume round is recovery debt and is settled under a replacement lease without
+handler dispatch even when the signal was already aborted.
+
 `renewCycleControllerLease` rejects a changed holder, lease ID, epoch, fencing
 token, acquisition instant, non-extending expiry, expired lease, or stale
 sequence before append. `pauseCycleController` accepts only `paused` or
@@ -356,6 +367,12 @@ retained behavioral campaign also executes all 100 combinations for
 types. Each run proves committed-prefix validity, exact durability class,
 single settlement, stale-version and stale-fence zero-write behavior, safe
 resume, read-only replay, and terminal-resume zero writes.
+
+`buildCycleOperationInterruptionMatrix()` adds the closed 25-row H03B lattice:
+six pause, six resume, four replay, and nine fork boundaries. The conformance
+join executes every row independently in TypeScript and Python and compares
+full event bytes/hashes, appended suffixes, errors, results, handler counts,
+fork parent prefixes, and pause checkpoints.
 
 When replaying or resuming a fork in a fresh process, replay the exact parent
 event prefix locally and pass that verified fold as `parent`. A serialized or

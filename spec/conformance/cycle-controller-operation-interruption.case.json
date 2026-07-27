@@ -1,0 +1,107 @@
+{
+  "schemaVersion": 1,
+  "id": "cycle-controller-operation-interruption-v1alpha1",
+  "operations": [
+    "pause",
+    "resume",
+    "replay",
+    "fork"
+  ],
+  "boundaries": {
+    "pause": [
+      "before-read",
+      "after-read",
+      "after-fold",
+      "before-commit",
+      "after-lease-released",
+      "before-return"
+    ],
+    "resume": [
+      "before-read",
+      "after-read",
+      "after-fold",
+      "before-commit",
+      "after-lease-acquired",
+      "before-return"
+    ],
+    "replay": [
+      "before-read",
+      "after-read",
+      "after-fold",
+      "before-return"
+    ],
+    "fork": [
+      "before-parent-read",
+      "after-parent-read",
+      "after-parent-fold",
+      "before-child-read",
+      "after-child-read",
+      "before-child-commit",
+      "after-child-created",
+      "after-child-lease",
+      "before-return"
+    ]
+  },
+  "linearization": {
+    "readOnlyOperation": "replay",
+    "preCommitBoundaries": [
+      "operation:pause:before-read",
+      "operation:pause:after-read",
+      "operation:pause:after-fold",
+      "operation:pause:before-commit",
+      "operation:resume:before-read",
+      "operation:resume:after-read",
+      "operation:resume:after-fold",
+      "operation:resume:before-commit",
+      "operation:fork:before-parent-read",
+      "operation:fork:after-parent-read",
+      "operation:fork:after-parent-fold",
+      "operation:fork:before-child-read",
+      "operation:fork:after-child-read",
+      "operation:fork:before-child-commit"
+    ],
+    "controllerCancellationBoundaries": [
+      "operation:resume:after-lease-acquired",
+      "operation:fork:after-child-created",
+      "operation:fork:after-child-lease"
+    ],
+    "stableErrorCode": "GE_CYCLE_OPERATION_CANCELLED"
+  },
+  "requiredAssertions": [
+    "every-public-operation-boundary-is-observed-exactly-once",
+    "pre-commit-cancellation-appends-zero-events",
+    "read-only-replay-cancellation-appends-zero-events",
+    "pre-commit-cancellation-uses-stable-structured-error",
+    "pause-release-commit-wins-over-late-cancellation",
+    "resume-lease-commit-converges-to-durable-cancelled-terminal",
+    "fork-dispatchable-child-creation-commit-converges-to-terminal",
+    "fork-child-lease-commit-converges-to-durable-cancelled-terminal",
+    "before-return-cancellation-never-reverses-a-committed-result",
+    "no-operation-cancellation-dispatches-a-handler-after-observation",
+    "replay-remains-zero-dispatch-and-zero-write",
+    "complete-event-bytes-and-record-hashes-match-between-runtimes",
+    "checkpoint-and-result-projections-match-between-runtimes",
+    "operation-matrix-is-reconstructed-independently-by-fixture-validation"
+  ],
+  "expect": {
+    "matrixEntryCount": 25,
+    "operationCounts": {
+      "pause": 6,
+      "resume": 6,
+      "replay": 4,
+      "fork": 9
+    },
+    "durabilityCounts": {
+      "read-only": 4,
+      "operation-not-committed": 14,
+      "operation-committed": 7
+    },
+    "outcomeCounts": {
+      "operation-cancelled": 18,
+      "controller-cancelled": 3,
+      "committed-result": 4
+    },
+    "matrixCanonicalUtf8Bytes": 4288,
+    "matrixSha256": "100c5dccee5f199291813ea723bf0b3996783ad5126820d42e42f58385e32cfd"
+  }
+}

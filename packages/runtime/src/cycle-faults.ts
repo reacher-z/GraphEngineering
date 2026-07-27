@@ -3,15 +3,18 @@ import {
   CYCLE_CONTROLLER_EVENT_TYPES,
   CYCLE_DURABLE_FAULT_STAGES,
   CYCLE_FAULT_KINDS,
+  CYCLE_OPERATION_INTERRUPTION_BOUNDARIES,
   type CycleControllerEventType,
   type CycleActivityInterruptionMatrixEntry,
   type CycleActivityInterruptionTrigger,
   type CycleActivitySideEffects,
+  type CycleFaultBoundary,
   type CycleDurableFaultBoundary,
   type CycleDurableFaultMatrixEntry,
   type CycleDurableFaultStage,
   type CycleFaultDurability,
   type CycleFaultHook,
+  type CycleOperationInterruptionMatrixEntry,
 } from "./cycle-types.js";
 
 const INTERRUPTION_SIDE_EFFECTS = Object.freeze([
@@ -141,10 +144,58 @@ export function buildCycleActivityInterruptionMatrix(): readonly CycleActivityIn
   return Object.freeze(matrix.map((entry) => Object.freeze(entry)));
 }
 
+/**
+ * Build the closed 25-row H03B public-operation cancellation lattice. The
+ * ordering is part of the conformance contract and matches
+ * CYCLE_OPERATION_INTERRUPTION_BOUNDARIES exactly.
+ */
+export function buildCycleOperationInterruptionMatrix(): readonly CycleOperationInterruptionMatrixEntry[] {
+  const preCommit: ReadonlySet<string> = new Set([
+    "operation:pause:before-read",
+    "operation:pause:after-read",
+    "operation:pause:after-fold",
+    "operation:pause:before-commit",
+    "operation:resume:before-read",
+    "operation:resume:after-read",
+    "operation:resume:after-fold",
+    "operation:resume:before-commit",
+    "operation:fork:before-parent-read",
+    "operation:fork:after-parent-read",
+    "operation:fork:after-parent-fold",
+    "operation:fork:before-child-read",
+    "operation:fork:after-child-read",
+    "operation:fork:before-child-commit",
+  ] as const);
+  const controllerCancelled: ReadonlySet<string> = new Set([
+    "operation:resume:after-lease-acquired",
+    "operation:fork:after-child-created",
+    "operation:fork:after-child-lease",
+  ] as const);
+  return Object.freeze(CYCLE_OPERATION_INTERRUPTION_BOUNDARIES.map((boundary) => {
+    const operation = boundary.split(":")[1] as CycleOperationInterruptionMatrixEntry["operation"];
+    const readOnly = operation === "replay";
+    return Object.freeze({
+      id: boundary,
+      operation,
+      boundary,
+      durability: readOnly
+        ? "read-only" as const
+        : preCommit.has(boundary)
+          ? "operation-not-committed" as const
+          : "operation-committed" as const,
+      outcome: readOnly || preCommit.has(boundary)
+        ? "operation-cancelled" as const
+        : controllerCancelled.has(boundary)
+          ? "controller-cancelled" as const
+          : "committed-result" as const,
+    });
+  }));
+}
+
 /** Invoke a deterministic boundary without translating the injected failure. */
 export async function runCycleFaultHook(
   hook: CycleFaultHook | undefined,
-  boundary: CycleDurableFaultBoundary,
+  boundary: CycleFaultBoundary,
 ): Promise<void> {
   if (hook !== undefined) await hook(boundary);
 }

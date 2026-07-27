@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal, TypeAlias
+from typing import Literal, TypeAlias, cast
 
 from .cycle_contract import CYCLE_EVENT_TYPES, CycleEventType
 
@@ -59,6 +59,17 @@ CycleActivityInterruptionKind: TypeAlias = Literal[
     "caller-cancellation",
     "attempt-timeout",
 ]
+CyclePublicOperation: TypeAlias = Literal["pause", "resume", "replay", "fork"]
+CycleOperationInterruptionDurability: TypeAlias = Literal[
+    "read-only",
+    "operation-not-committed",
+    "operation-committed",
+]
+CycleOperationInterruptionOutcome: TypeAlias = Literal[
+    "operation-cancelled",
+    "controller-cancelled",
+    "committed-result",
+]
 
 CYCLE_ACTIVITY_PHASES: tuple[CycleActivityPhase, ...] = (
     "finder",
@@ -78,6 +89,39 @@ CYCLE_ACTIVITY_INTERRUPTION_TRIGGERS: tuple[
     "attempt-timeout",
     "after-round-commit",
     "repeated-cancellation",
+)
+CYCLE_PUBLIC_OPERATIONS: tuple[CyclePublicOperation, ...] = (
+    "pause",
+    "resume",
+    "replay",
+    "fork",
+)
+CYCLE_OPERATION_INTERRUPTION_BOUNDARIES: tuple[str, ...] = (
+    "operation:pause:before-read",
+    "operation:pause:after-read",
+    "operation:pause:after-fold",
+    "operation:pause:before-commit",
+    "operation:pause:after-lease-released",
+    "operation:pause:before-return",
+    "operation:resume:before-read",
+    "operation:resume:after-read",
+    "operation:resume:after-fold",
+    "operation:resume:before-commit",
+    "operation:resume:after-lease-acquired",
+    "operation:resume:before-return",
+    "operation:replay:before-read",
+    "operation:replay:after-read",
+    "operation:replay:after-fold",
+    "operation:replay:before-return",
+    "operation:fork:before-parent-read",
+    "operation:fork:after-parent-read",
+    "operation:fork:after-parent-fold",
+    "operation:fork:before-child-read",
+    "operation:fork:after-child-read",
+    "operation:fork:before-child-commit",
+    "operation:fork:after-child-created",
+    "operation:fork:after-child-lease",
+    "operation:fork:before-return",
 )
 _INTERRUPTION_SIDE_EFFECTS: tuple[CycleActivitySideEffects, ...] = (
     "none",
@@ -146,6 +190,24 @@ class CycleActivityInterruptionMatrixEntry:
             "trigger": self.trigger,
             "phase": self.phase,
             "sideEffects": self.side_effects,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class CycleOperationInterruptionMatrixEntry:
+    id: str
+    operation: CyclePublicOperation
+    boundary: str
+    durability: CycleOperationInterruptionDurability
+    outcome: CycleOperationInterruptionOutcome
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "id": self.id,
+            "operation": self.operation,
+            "boundary": self.boundary,
+            "durability": self.durability,
+            "outcome": self.outcome,
         }
 
 
@@ -281,17 +343,79 @@ def build_cycle_activity_interruption_matrix() -> tuple[
     return tuple(matrix)
 
 
+def build_cycle_operation_interruption_matrix() -> tuple[
+    CycleOperationInterruptionMatrixEntry, ...
+]:
+    """Build all 25 deterministic H03B public-operation obligations."""
+
+    pre_commit = {
+        "operation:pause:before-read",
+        "operation:pause:after-read",
+        "operation:pause:after-fold",
+        "operation:pause:before-commit",
+        "operation:resume:before-read",
+        "operation:resume:after-read",
+        "operation:resume:after-fold",
+        "operation:resume:before-commit",
+        "operation:fork:before-parent-read",
+        "operation:fork:after-parent-read",
+        "operation:fork:after-parent-fold",
+        "operation:fork:before-child-read",
+        "operation:fork:after-child-read",
+        "operation:fork:before-child-commit",
+    }
+    controller_cancelled = {
+        "operation:resume:after-lease-acquired",
+        "operation:fork:after-child-created",
+        "operation:fork:after-child-lease",
+    }
+    matrix: list[CycleOperationInterruptionMatrixEntry] = []
+    for boundary in CYCLE_OPERATION_INTERRUPTION_BOUNDARIES:
+        operation = cast(CyclePublicOperation, boundary.split(":", 2)[1])
+        read_only = operation == "replay"
+        matrix.append(
+            CycleOperationInterruptionMatrixEntry(
+                id=boundary,
+                operation=operation,
+                boundary=boundary,
+                durability=(
+                    "read-only"
+                    if read_only
+                    else (
+                        "operation-not-committed"
+                        if boundary in pre_commit
+                        else "operation-committed"
+                    )
+                ),
+                outcome=(
+                    "operation-cancelled"
+                    if read_only or boundary in pre_commit
+                    else (
+                        "controller-cancelled"
+                        if boundary in controller_cancelled
+                        else "committed-result"
+                    )
+                ),
+            )
+        )
+    return tuple(matrix)
+
+
 __all__ = [
     "CYCLE_ACTIVITY_INTERRUPTION_TRIGGERS",
     "CYCLE_ACTIVITY_PHASES",
     "CYCLE_DURABLE_FAULT_STAGES",
     "CYCLE_FAULT_KINDS",
+    "CYCLE_OPERATION_INTERRUPTION_BOUNDARIES",
+    "CYCLE_PUBLIC_OPERATIONS",
     "CycleActivityInterruptionMatrixEntry",
     "CycleDurableFaultMatrixEntry",
     "CycleDurableFaultStage",
     "CycleFaultDurability",
     "CycleFaultKind",
+    "CycleOperationInterruptionMatrixEntry",
     "build_cycle_activity_interruption_matrix",
     "build_cycle_durable_fault_matrix",
+    "build_cycle_operation_interruption_matrix",
     "cycle_durable_fault_boundary",
 ]

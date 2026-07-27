@@ -34,8 +34,11 @@ from graph_engineering.cycle_faults import (
     CYCLE_ACTIVITY_PHASES,
     CYCLE_DURABLE_FAULT_STAGES,
     CYCLE_FAULT_KINDS,
+    CYCLE_OPERATION_INTERRUPTION_BOUNDARIES,
+    CYCLE_PUBLIC_OPERATIONS,
     build_cycle_activity_interruption_matrix,
     build_cycle_durable_fault_matrix,
+    build_cycle_operation_interruption_matrix,
     cycle_durable_fault_boundary,
 )
 from graph_engineering.cycle_fold import validate_checkpoint
@@ -127,11 +130,17 @@ def test_cycle_surface_is_exported_from_the_native_python_package() -> None:
     assert ge.CYCLE_FAULT_KINDS is CYCLE_FAULT_KINDS
     assert ge.CYCLE_ACTIVITY_PHASES is CYCLE_ACTIVITY_PHASES
     assert ge.CYCLE_ACTIVITY_INTERRUPTION_TRIGGERS is CYCLE_ACTIVITY_INTERRUPTION_TRIGGERS
+    assert ge.CYCLE_OPERATION_INTERRUPTION_BOUNDARIES is CYCLE_OPERATION_INTERRUPTION_BOUNDARIES
+    assert ge.CYCLE_PUBLIC_OPERATIONS is CYCLE_PUBLIC_OPERATIONS
     assert (
         ge.build_cycle_activity_interruption_matrix
         is build_cycle_activity_interruption_matrix
     )
     assert ge.build_cycle_durable_fault_matrix is build_cycle_durable_fault_matrix
+    assert (
+        ge.build_cycle_operation_interruption_matrix
+        is build_cycle_operation_interruption_matrix
+    )
 
 
 def handler_binding(
@@ -720,6 +729,34 @@ def test_activity_interruption_matrix_is_closed_and_complete() -> None:
         "sideEffects": None,
     }
     assert matrix[-1].id == "finder:repeated-cancellation:none"
+
+
+def test_operation_interruption_matrix_is_closed_and_complete() -> None:
+    matrix = build_cycle_operation_interruption_matrix()
+
+    assert CYCLE_PUBLIC_OPERATIONS == ("pause", "resume", "replay", "fork")
+    assert len(matrix) == 25
+    assert tuple(entry.boundary for entry in matrix) == CYCLE_OPERATION_INTERRUPTION_BOUNDARIES
+    assert len({entry.id for entry in matrix}) == 25
+    assert sum(entry.durability == "read-only" for entry in matrix) == 4
+    assert sum(entry.durability == "operation-not-committed" for entry in matrix) == 14
+    assert sum(entry.outcome == "operation-cancelled" for entry in matrix) == 18
+    assert sum(entry.outcome == "controller-cancelled" for entry in matrix) == 3
+    assert sum(entry.outcome == "committed-result" for entry in matrix) == 4
+    assert matrix[0].to_dict() == {
+        "id": "operation:pause:before-read",
+        "operation": "pause",
+        "boundary": "operation:pause:before-read",
+        "durability": "operation-not-committed",
+        "outcome": "operation-cancelled",
+    }
+    assert matrix[-1].to_dict() == {
+        "id": "operation:fork:before-return",
+        "operation": "fork",
+        "boundary": "operation:fork:before-return",
+        "durability": "operation-committed",
+        "outcome": "committed-result",
+    }
 
 
 @pytest.mark.parametrize(

@@ -3,6 +3,9 @@ import { describe, expect, it, vi } from "vitest";
 import {
   buildCycleActivityInterruptionMatrix,
   buildCycleDurableFaultMatrix,
+  buildCycleOperationInterruptionMatrix,
+  CYCLE_OPERATION_INTERRUPTION_BOUNDARIES,
+  CYCLE_PUBLIC_OPERATIONS,
   CYCLE_CONTROLLER_EVENT_TYPES,
   CYCLE_DURABLE_FAULT_STAGES,
   CYCLE_FAULT_KINDS,
@@ -233,6 +236,36 @@ describe("native bounded cycle controller", () => {
       sideEffects: null,
     });
     expect(matrix.at(-1)?.id).toBe("finder:repeated-cancellation:none");
+  });
+
+  it("derives all 25 public-operation interruption obligations in canonical order", () => {
+    const matrix = buildCycleOperationInterruptionMatrix();
+
+    expect(CYCLE_PUBLIC_OPERATIONS).toEqual(["pause", "resume", "replay", "fork"]);
+    expect(matrix).toHaveLength(25);
+    expect(matrix.map(({ boundary }) => boundary)).toEqual(
+      CYCLE_OPERATION_INTERRUPTION_BOUNDARIES,
+    );
+    expect(new Set(matrix.map(({ id }) => id).values()).size).toBe(25);
+    expect(matrix.filter(({ durability }) => durability === "read-only")).toHaveLength(4);
+    expect(matrix.filter(({ durability }) => durability === "operation-not-committed")).toHaveLength(14);
+    expect(matrix.filter(({ outcome }) => outcome === "operation-cancelled")).toHaveLength(18);
+    expect(matrix.filter(({ outcome }) => outcome === "controller-cancelled")).toHaveLength(3);
+    expect(matrix.filter(({ outcome }) => outcome === "committed-result")).toHaveLength(4);
+    expect(matrix.at(0)).toEqual({
+      id: "operation:pause:before-read",
+      operation: "pause",
+      boundary: "operation:pause:before-read",
+      durability: "operation-not-committed",
+      outcome: "operation-cancelled",
+    });
+    expect(matrix.at(-1)).toEqual({
+      id: "operation:fork:before-return",
+      operation: "fork",
+      boundary: "operation:fork:before-return",
+      durability: "operation-committed",
+      outcome: "committed-result",
+    });
   });
 
   it.each([

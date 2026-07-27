@@ -475,6 +475,10 @@ const cycleFaultMatrixCases = await loadJson("cycle-controller-fault-matrix.case
 assert.equal(cycleFaultMatrixCases.schemaVersion, 1);
 const cycleInterruptionCases = await loadJson("cycle-controller-activity-interruption.case.json");
 assert.equal(cycleInterruptionCases.schemaVersion, 1);
+const cycleOperationInterruptionCases = await loadJson(
+  "cycle-controller-operation-interruption.case.json",
+);
+assert.equal(cycleOperationInterruptionCases.schemaVersion, 1);
 assert.equal(
   cycleFaultMatrixCases.eventSchema,
   "spec/cycle-controller-event.schema.json",
@@ -828,6 +832,140 @@ assert.deepEqual(cycleInterruptionCases.requiredAssertions, [
   "terminal-resume-performs-zero-write-and-zero-handler-dispatch",
   "typescript-python-canonical-reports-match",
 ]);
+assert.deepEqual(
+  Object.keys(cycleOperationInterruptionCases).sort(compareUnicodeCodePoints),
+  [
+    "boundaries",
+    "expect",
+    "id",
+    "linearization",
+    "operations",
+    "requiredAssertions",
+    "schemaVersion",
+  ],
+  "D7 H03B operation interruption fixture is not closed",
+);
+assert.equal(
+  cycleOperationInterruptionCases.id,
+  "cycle-controller-operation-interruption-v1alpha1",
+);
+assert.deepEqual(cycleOperationInterruptionCases.operations, [
+  "pause",
+  "resume",
+  "replay",
+  "fork",
+]);
+assert.deepEqual(
+  Object.keys(cycleOperationInterruptionCases.boundaries).sort(compareUnicodeCodePoints),
+  [...cycleOperationInterruptionCases.operations].sort(compareUnicodeCodePoints),
+  "D7 H03B operation boundary groups drifted",
+);
+assert.deepEqual(
+  Object.keys(cycleOperationInterruptionCases.linearization).sort(compareUnicodeCodePoints),
+  [
+    "controllerCancellationBoundaries",
+    "preCommitBoundaries",
+    "readOnlyOperation",
+    "stableErrorCode",
+  ],
+  "D7 H03B linearization contract is not closed",
+);
+assert.equal(
+  cycleOperationInterruptionCases.linearization.stableErrorCode,
+  "GE_CYCLE_OPERATION_CANCELLED",
+);
+assert.equal(cycleOperationInterruptionCases.linearization.readOnlyOperation, "replay");
+const operationPreCommit = new Set(
+  cycleOperationInterruptionCases.linearization.preCommitBoundaries,
+);
+const operationControllerCancelled = new Set(
+  cycleOperationInterruptionCases.linearization.controllerCancellationBoundaries,
+);
+const cycleOperationInterruptionMatrix = [];
+for (const operation of cycleOperationInterruptionCases.operations) {
+  const stages = cycleOperationInterruptionCases.boundaries[operation];
+  assert.ok(Array.isArray(stages) && stages.length > 0, `${operation} has no H03B boundaries`);
+  for (const stage of stages) {
+    const boundary = `operation:${operation}:${stage}`;
+    const readOnly = operation === cycleOperationInterruptionCases.linearization.readOnlyOperation;
+    cycleOperationInterruptionMatrix.push({
+      id: boundary,
+      operation,
+      boundary,
+      durability: readOnly
+        ? "read-only"
+        : operationPreCommit.has(boundary)
+          ? "operation-not-committed"
+          : "operation-committed",
+      outcome: readOnly || operationPreCommit.has(boundary)
+        ? "operation-cancelled"
+        : operationControllerCancelled.has(boundary)
+          ? "controller-cancelled"
+          : "committed-result",
+    });
+  }
+}
+assert.equal(
+  cycleOperationInterruptionMatrix.length,
+  cycleOperationInterruptionCases.expect.matrixEntryCount,
+  "D7 H03B operation matrix count drifted",
+);
+assert.equal(
+  new Set(cycleOperationInterruptionMatrix.map(({ id }) => id)).size,
+  cycleOperationInterruptionMatrix.length,
+  "D7 H03B operation boundary IDs are not unique",
+);
+const operationBoundarySet = new Set(
+  cycleOperationInterruptionMatrix.map(({ boundary }) => boundary),
+);
+for (const boundary of [...operationPreCommit, ...operationControllerCancelled]) {
+  assert.ok(operationBoundarySet.has(boundary), `${boundary} is not an H03B boundary`);
+}
+for (const [operation, count] of Object.entries(
+  cycleOperationInterruptionCases.expect.operationCounts,
+)) {
+  assert.equal(
+    cycleOperationInterruptionMatrix.filter((entry) => entry.operation === operation).length,
+    count,
+    `D7 H03B ${operation} count drifted`,
+  );
+}
+for (const [durability, count] of Object.entries(
+  cycleOperationInterruptionCases.expect.durabilityCounts,
+)) {
+  assert.equal(
+    cycleOperationInterruptionMatrix.filter((entry) => entry.durability === durability).length,
+    count,
+    `D7 H03B ${durability} count drifted`,
+  );
+}
+for (const [outcome, count] of Object.entries(
+  cycleOperationInterruptionCases.expect.outcomeCounts,
+)) {
+  assert.equal(
+    cycleOperationInterruptionMatrix.filter((entry) => entry.outcome === outcome).length,
+    count,
+    `D7 H03B ${outcome} count drifted`,
+  );
+}
+const cycleOperationInterruptionCanonical = JSON.stringify(
+  canonicalize(cycleOperationInterruptionMatrix),
+);
+assert.equal(
+  Buffer.byteLength(cycleOperationInterruptionCanonical, "utf8"),
+  cycleOperationInterruptionCases.expect.matrixCanonicalUtf8Bytes,
+  "D7 H03B operation matrix canonical byte count drifted",
+);
+assert.equal(
+  hash(cycleOperationInterruptionMatrix),
+  cycleOperationInterruptionCases.expect.matrixSha256,
+  "D7 H03B operation matrix canonical hash drifted",
+);
+assert.equal(
+  new Set(cycleOperationInterruptionCases.requiredAssertions).size,
+  cycleOperationInterruptionCases.requiredAssertions.length,
+  "D7 H03B required assertions are duplicated",
+);
 const validPoliciesByName = new Map();
 for (const testCase of cycleControllerCases.validPolicies) {
   assert.equal(
@@ -2532,5 +2670,5 @@ assert.equal(new Set(diamond.nodes.map(({ id }) => id)).size, diamond.nodes.leng
 assert.equal(new Set(diamond.edges.map(({ id }) => id)).size, diamond.edges.length);
 
 process.stdout.write(
-  `Validated ${fixtureNames.length} JSON fixtures (${caseNames.length} case manifests), ${yamlNames.length} referenced YAML fixtures, ${Object.keys(expected.canonicalization).length} graph hash, ${Object.keys(expected.checkpoints ?? {}).length} checkpoint hash, ${durableJson.validCases.length} Durable JSON vectors, ${compiledIdentities.length} compiled identities, ${graphPatchCases.validCases.length + graphPatchCases.invalidCases.length} graph patch schema cases plus ${graphPatchCases.semanticCases.length} closed semantic vectors, and 6 D7 controller/revision/event/checkpoint schemas with ${durableEvents.length} chained event goldens, ${cycleFaultMatrix.length} retained durable fault obligations, ${cycleInterruptionMatrix.length} activity interruption obligations, ${cycleDurableCases.leaseTransitionCases.length} valid and ${cycleDurableCases.invalidLeaseTransitionCases.length} hostile lease transitions, ${cycleDurableCases.validInterruptedHistoryCases?.length ?? 0} interrupted terminal/checkpoint folds, ${cycleDurableCases.inDoubtProjectionCases.length} in-doubt singleton cases, ${resolutionProtocol.cases.length} terminal in-doubt resolution cases, ${cycleDurableCases.untilDryFoldCases.length} global-seen convergence fold, ${cycleDurableCases.hardStopFoldCases.length} hard-stop folds, ${cycleDurableCases.invalidEventHistoryCases.length} hostile histories, ${cycleDurableCases.invalidCheckpointSemanticCases.length} hostile checkpoint folds, plus ${cycleDurableCases.validStandaloneEventSchemaCases.length} standalone phase-event shapes; all ${expectedD7Tests.length} D7-CYCLE-SPEC-024 expected-test groups are mapped against meta-valid schemas.\n`,
+  `Validated ${fixtureNames.length} JSON fixtures (${caseNames.length} case manifests), ${yamlNames.length} referenced YAML fixtures, ${Object.keys(expected.canonicalization).length} graph hash, ${Object.keys(expected.checkpoints ?? {}).length} checkpoint hash, ${durableJson.validCases.length} Durable JSON vectors, ${compiledIdentities.length} compiled identities, ${graphPatchCases.validCases.length + graphPatchCases.invalidCases.length} graph patch schema cases plus ${graphPatchCases.semanticCases.length} closed semantic vectors, and 6 D7 controller/revision/event/checkpoint schemas with ${durableEvents.length} chained event goldens, ${cycleFaultMatrix.length} retained durable fault obligations, ${cycleInterruptionMatrix.length} activity interruption obligations, ${cycleOperationInterruptionMatrix.length} public-operation interruption obligations, ${cycleDurableCases.leaseTransitionCases.length} valid and ${cycleDurableCases.invalidLeaseTransitionCases.length} hostile lease transitions, ${cycleDurableCases.validInterruptedHistoryCases?.length ?? 0} interrupted terminal/checkpoint folds, ${cycleDurableCases.inDoubtProjectionCases.length} in-doubt singleton cases, ${resolutionProtocol.cases.length} terminal in-doubt resolution cases, ${cycleDurableCases.untilDryFoldCases.length} global-seen convergence fold, ${cycleDurableCases.hardStopFoldCases.length} hard-stop folds, ${cycleDurableCases.invalidEventHistoryCases.length} hostile histories, ${cycleDurableCases.invalidCheckpointSemanticCases.length} hostile checkpoint folds, plus ${cycleDurableCases.validStandaloneEventSchemaCases.length} standalone phase-event shapes; all ${expectedD7Tests.length} D7-CYCLE-SPEC-024 expected-test groups are mapped against meta-valid schemas.\n`,
 );

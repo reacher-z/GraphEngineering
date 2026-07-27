@@ -34,6 +34,7 @@ export {
 export {
   buildCycleActivityInterruptionMatrix,
   buildCycleDurableFaultMatrix,
+  buildCycleOperationInterruptionMatrix,
   cycleDurableFaultBoundary,
 } from "./cycle-faults.js";
 export {
@@ -77,6 +78,8 @@ export {
   CYCLE_CONTROLLER_EVENT_TYPES,
   CYCLE_DURABLE_FAULT_STAGES,
   CYCLE_FAULT_KINDS,
+  CYCLE_OPERATION_INTERRUPTION_BOUNDARIES,
+  CYCLE_PUBLIC_OPERATIONS,
   CycleActivityFailure,
   CycleControllerError,
 } from "./cycle-types.js";

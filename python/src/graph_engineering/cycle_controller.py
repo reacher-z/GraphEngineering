@@ -86,6 +86,30 @@ class CycleCancellation:
         await self._event.wait()
 
 
+def _operation_cancellation(
+    operation: Literal["pause", "resume", "replay", "fork"],
+    boundary: str,
+) -> CycleRuntimeError:
+    return CycleRuntimeError(
+        CycleErrorCode.OPERATION_CANCELLED,
+        f"{operation} was cancelled before its durable operation result",
+        details={"operation": operation, "boundary": boundary},
+    )
+
+
+async def _operation_boundary(
+    operation: Literal["pause", "resume", "replay", "fork"],
+    boundary: str,
+    cancellation: CycleCancellation,
+    fault_hook: FaultHook | None,
+    *,
+    cancellation_rejects: bool,
+) -> None:
+    await run_fault_hook(fault_hook, boundary)
+    if cancellation_rejects and cancellation.cancelled:
+        raise _operation_cancellation(operation, boundary)
+
+
 @dataclass(frozen=True, slots=True)
 class CycleActivityContext:
     controller_run_id: str
@@ -1867,6 +1891,7 @@ async def fork_cycle(
     """Create an independent child bound to one immutable parent prefix."""
 
     validated = validate_cycle_request(request)
+    operation_cancellation = cancellation or CycleCancellation()
     lineage = validated.model.lineage
     if lineage.origin != "fork" or (
         lineage.parent_controller_run_id != parent_controller_run_id
@@ -1889,15 +1914,66 @@ async def fork_cycle(
         patch_runtime=patch_runtime,
         patch_authority=patch_authority,
     )
+    await _operation_boundary(
+        "fork",
+        "operation:fork:before-parent-read",
+        operation_cancellation,
+        fault_hook,
+        cancellation_rejects=True,
+    )
+    parent_events = await store.read_by_controller_run_id(
+        lineage.parent_controller_run_id,
+        through_sequence=lineage.parent_sequence,
+    )
+    await _operation_boundary(
+        "fork",
+        "operation:fork:after-parent-read",
+        operation_cancellation,
+        fault_hook,
+        cancellation_rejects=True,
+    )
+    if (
+        len(parent_events) != lineage.parent_sequence + 1
+        or parent_events[-1].record_hash != lineage.parent_history_hash
+    ):
+        raise CycleRuntimeError(
+            CycleErrorCode.INVALID_HISTORY,
+            "fork parent prefix length or history hash differs from lineage",
+        )
+    parent_request = validate_cycle_request(parent_events[0].data["request"])
+    parent_parent = await _resolve_parent_fold(
+        parent_request,
+        store,
+        ancestors=frozenset({validated.model.controller_run_id}),
+    )
+    parent_fold = fold_cycle_events(parent_events, parent_fold=parent_parent)
+    await _operation_boundary(
+        "fork",
+        "operation:fork:after-parent-fold",
+        operation_cancellation,
+        fault_hook,
+        cancellation_rejects=True,
+    )
+    await _operation_boundary(
+        "fork",
+        "operation:fork:before-child-read",
+        operation_cancellation,
+        fault_hook,
+        cancellation_rejects=True,
+    )
     existing = await store.read(validated.model.event_stream_id)
+    await _operation_boundary(
+        "fork",
+        "operation:fork:after-child-read",
+        operation_cancellation,
+        fault_hook,
+        cancellation_rejects=True,
+    )
     if existing:
         raise CycleRuntimeError(
             CycleErrorCode.VERSION_CONFLICT,
             "fork refuses a nonempty child stream",
         )
-    parent_fold = await _resolve_parent_fold(validated, store)
-    if parent_fold is None:  # pragma: no cover - lineage branch above
-        raise CycleRuntimeError(CycleErrorCode.INVALID_HISTORY, "fork parent did not resolve")
     if canonical_json(parent_fold.current_revision) != canonical_json(
         validated.document["initialGraph"]
     ):
@@ -1921,6 +1997,13 @@ async def fork_cycle(
         fault_hook=fault_hook,
         parent_fold=parent_fold,
     )
+    await _operation_boundary(
+        "fork",
+        "operation:fork:before-child-commit",
+        operation_cancellation,
+        fault_hook,
+        cancellation_rejects=True,
+    )
     await journal.append(
         "ControllerCreated",
         lambda timestamp: {
@@ -1934,6 +2017,13 @@ async def fork_cycle(
                 validated.model.policy.max_duration_ms,
             ),
         },
+    )
+    await _operation_boundary(
+        "fork",
+        "operation:fork:after-child-created",
+        operation_cancellation,
+        fault_hook,
+        cancellation_rejects=False,
     )
     child_fold = journal.fold
     if child_fold is None:  # pragma: no cover - successful append invariant
@@ -1951,16 +2041,31 @@ async def fork_cycle(
         {"reason": "start", "previousLeaseId": None},
         lease=lease_document,
     )
+    await _operation_boundary(
+        "fork",
+        "operation:fork:after-child-lease",
+        operation_cancellation,
+        fault_hook,
+        cancellation_rejects=False,
+    )
     controller = _CycleController(
         validated,
         handlers,
         journal,
-        cancellation or CycleCancellation(),
+        operation_cancellation,
         patch_runtime=patch_runtime,
         patch_authority=patch_authority,
         patch_each_round=patch_each_round,
     )
-    return await controller.run()
+    result = await controller.run()
+    await _operation_boundary(
+        "fork",
+        "operation:fork:before-return",
+        operation_cancellation,
+        fault_hook,
+        cancellation_rejects=False,
+    )
+    return result
 
 
 async def resume_cycle(
@@ -1982,7 +2087,24 @@ async def resume_cycle(
     """Resume one exact nonterminal request under a strictly higher lease fence."""
 
     validated = validate_cycle_request(request)
+    operation_cancellation = cancellation or CycleCancellation()
+    cancellation_boundary: str | None = None
+
+    async def observe_resume_cancellation(boundary: str) -> None:
+        nonlocal cancellation_boundary
+        await _operation_boundary(
+            "resume",
+            boundary,
+            operation_cancellation,
+            fault_hook,
+            cancellation_rejects=False,
+        )
+        if operation_cancellation.cancelled and cancellation_boundary is None:
+            cancellation_boundary = boundary
+
+    await observe_resume_cancellation("operation:resume:before-read")
     events = await store.read(validated.model.event_stream_id)
+    await observe_resume_cancellation("operation:resume:after-read")
     if not events:
         raise CycleRuntimeError(CycleErrorCode.INVALID_HISTORY, "resume refuses an empty stream")
     if len(events) - 1 != expected_version:
@@ -1991,6 +2113,7 @@ async def resume_cycle(
             "resume expected version differs from stream tail",
         )
     fold, parent_fold = await _fold_stored_events(validated, events, store)
+    await observe_resume_cancellation("operation:resume:after-fold")
     checkpoint_warning = await _checkpoint_validation_warning(
         validated,
         store,
@@ -2007,6 +2130,8 @@ async def resume_cycle(
             "resume request identity differs from stored history",
         )
     if fold.terminal:
+        if cancellation_boundary is not None:
+            raise _operation_cancellation("resume", cancellation_boundary)
         assert fold.terminal_result is not None
         await run_fault_hook(
             fault_hook,
@@ -2058,6 +2183,9 @@ async def resume_cycle(
         fault_hook=fault_hook,
         parent_fold=parent_fold,
     )
+    await observe_resume_cancellation("operation:resume:before-commit")
+    if cancellation_boundary is not None and fold.state["openRound"] is None:
+        raise _operation_cancellation("resume", cancellation_boundary)
     previous_lease = fold.active_lease
     previous_id = _last_recorded_lease_id(events)
     await journal.append(
@@ -2068,17 +2196,32 @@ async def resume_cycle(
         },
         lease=lease_document,
     )
+    await _operation_boundary(
+        "resume",
+        "operation:resume:after-lease-acquired",
+        operation_cancellation,
+        fault_hook,
+        cancellation_rejects=False,
+    )
     controller = _CycleController(
         validated,
         handlers,
         journal,
-        cancellation or CycleCancellation(),
+        operation_cancellation,
         patch_runtime=patch_runtime,
         patch_authority=patch_authority,
         patch_each_round=patch_each_round,
     )
     controller.checkpoint_warning = checkpoint_warning
-    return await controller.run()
+    result = await controller.run()
+    await _operation_boundary(
+        "resume",
+        "operation:resume:before-return",
+        operation_cancellation,
+        fault_hook,
+        cancellation_rejects=False,
+    )
+    return result
 
 
 async def resolve_cycle_in_doubt_activity(
@@ -2357,10 +2500,27 @@ async def replay_cycle(
     *,
     store: CycleStore,
     through_sequence: int | None = None,
+    cancellation: CycleCancellation | None = None,
+    fault_hook: FaultHook | None = None,
 ) -> CycleReplayResult:
     """Read/fold only: no clock, handler, lease, checkpoint, or append call."""
 
+    operation_cancellation = cancellation or CycleCancellation()
+    await _operation_boundary(
+        "replay",
+        "operation:replay:before-read",
+        operation_cancellation,
+        fault_hook,
+        cancellation_rejects=True,
+    )
     events = await store.read(event_stream_id, through_sequence=through_sequence)
+    await _operation_boundary(
+        "replay",
+        "operation:replay:after-read",
+        operation_cancellation,
+        fault_hook,
+        cancellation_rejects=True,
+    )
     if not events:
         raise CycleRuntimeError(CycleErrorCode.INVALID_HISTORY, "replay stream is empty")
     request = validate_cycle_request(events[0].data["request"])
@@ -2369,6 +2529,20 @@ async def replay_cycle(
         events,
         store,
         require_terminal=through_sequence is None,
+    )
+    await _operation_boundary(
+        "replay",
+        "operation:replay:after-fold",
+        operation_cancellation,
+        fault_hook,
+        cancellation_rejects=True,
+    )
+    await _operation_boundary(
+        "replay",
+        "operation:replay:before-return",
+        operation_cancellation,
+        fault_hook,
+        cancellation_rejects=True,
     )
     return CycleReplayResult(
         fold.terminal_result,
@@ -2484,11 +2658,13 @@ async def pause_cycle(
     reason: Literal["paused", "handoff"] = "paused",
     clock: Clock = _default_clock,
     event_id_factory: EventIdFactory = _default_event_id,
+    cancellation: CycleCancellation | None = None,
     fault_hook: FaultHook | None = None,
 ) -> CyclePauseResult:
     """Voluntarily release the exact active lease without dispatching work."""
 
     validated = validate_cycle_request(request)
+    operation_cancellation = cancellation or CycleCancellation()
     if reason not in {"paused", "handoff"}:
         raise CycleRuntimeError(
             CycleErrorCode.INVALID_REQUEST,
@@ -2499,7 +2675,21 @@ async def pause_cycle(
             CycleErrorCode.INVALID_REQUEST,
             "pause expected version must be a nonnegative exact integer",
         )
+    await _operation_boundary(
+        "pause",
+        "operation:pause:before-read",
+        operation_cancellation,
+        fault_hook,
+        cancellation_rejects=True,
+    )
     events = await store.read(validated.model.event_stream_id)
+    await _operation_boundary(
+        "pause",
+        "operation:pause:after-read",
+        operation_cancellation,
+        fault_hook,
+        cancellation_rejects=True,
+    )
     if not events:
         raise CycleRuntimeError(CycleErrorCode.INVALID_HISTORY, "pause refuses an empty stream")
     if len(events) - 1 != expected_version:
@@ -2508,6 +2698,13 @@ async def pause_cycle(
             "pause expected version differs from stream tail",
         )
     fold, parent_fold = await _fold_stored_events(validated, events, store)
+    await _operation_boundary(
+        "pause",
+        "operation:pause:after-fold",
+        operation_cancellation,
+        fault_hook,
+        cancellation_rejects=True,
+    )
     if (
         fold.request.request_hash != validated.request_hash
         or fold.request.controller_hash != validated.controller_hash
@@ -2539,17 +2736,38 @@ async def pause_cycle(
             CycleErrorCode.STALE_LEASE,
             "pause cannot release an expired lease",
         )
+    await _operation_boundary(
+        "pause",
+        "operation:pause:before-commit",
+        operation_cancellation,
+        fault_hook,
+        cancellation_rejects=True,
+    )
     event = await journal.append(
         "LeaseReleased",
         {"reason": reason},
         lease=fold.active_lease,
         timestamp=timestamp,
     )
+    await _operation_boundary(
+        "pause",
+        "operation:pause:after-lease-released",
+        operation_cancellation,
+        fault_hook,
+        cancellation_rejects=False,
+    )
     checkpoint_warning = await journal.checkpoint(
         f"{validated.model.controller_run_id}-latest",
         created_at=event.timestamp,
     )
     assert journal.fold is not None
+    await _operation_boundary(
+        "pause",
+        "operation:pause:before-return",
+        operation_cancellation,
+        fault_hook,
+        cancellation_rejects=False,
+    )
     return CyclePauseResult(
         journal.events,
         released_id,

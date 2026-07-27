@@ -9,6 +9,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 
 import { exerciseCycleActivityInterruptionCampaign } from "./cycle_activity_interruption.mjs";
+import { exerciseCycleOperationInterruptionCampaign } from "./cycle_operation_interruption.mjs";
 
 const root = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 const fixtureRoot = join(root, "spec", "conformance");
@@ -2407,6 +2408,43 @@ assert.deepEqual(
   pyCycleInterruption,
   "D7 activity cancellation/timeout campaign reports differ",
 );
+const cycleOperationInterruptionFixture = JSON.parse(
+  await readFile(
+    join(fixtureRoot, "cycle-controller-operation-interruption.case.json"),
+    "utf8",
+  ),
+);
+const pythonCycleOperationInterruption = spawnSync(
+  "uv",
+  [
+    "run",
+    "--project",
+    "python",
+    "python",
+    "tools/conformance/python_cycle_operation_interruption_report.py",
+  ],
+  { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
+);
+if (pythonCycleOperationInterruption.status !== 0) {
+  throw new Error(
+    `Python cycle operation interruption campaign failed:\n${pythonCycleOperationInterruption.stderr || pythonCycleOperationInterruption.stdout}`,
+  );
+}
+const pyCycleOperationInterruption = JSON.parse(pythonCycleOperationInterruption.stdout);
+const tsCycleOperationInterruption = await exerciseCycleOperationInterruptionCampaign({
+  runtime,
+  core,
+  graph: cycleGraph,
+  graphHash: cycleCompilation.graphHash,
+  baseRequest: cycleRequestValue,
+  fixture: cycleOperationInterruptionFixture,
+  startedAt: "2026-07-27T12:00:00.000Z",
+});
+assert.deepEqual(
+  tsCycleOperationInterruption,
+  pyCycleOperationInterruption,
+  "D7 pause/resume/replay/fork interruption campaign reports differ",
+);
 const tsModeEventCount = Object.values(tsModeReports)
   .reduce((total, report) => total + report.eventTypes.length, 0);
 const tsModeInputCount = Object.values(tsModeReports)
@@ -2418,7 +2456,7 @@ const tsInDoubtInputCount = Object.values(tsInDoubtReports)
 const tsResolutionEventCount = tsResolutionReport.eventTypes.length;
 const tsResolutionInputCount = tsResolutionReport.inputsCanonical.length;
 process.stdout.write(
-  `Cross-language native-cycle conformance passed for ${tsCycleEvents.length + tsPatchEvents.length + tsResumeEvents.length + tsModeEventCount + tsInDoubtEventCount + tsResolutionEventCount} exact baseline events, ${cycleInputs.length + patchInputs.length + resumeInputs.length + tsModeInputCount + tsInDoubtInputCount + tsResolutionInputCount} activity inputs, ${tsCycleFaultReport.matrix.length} durable fault obligations over ${cycleFaultFixture.expect.boundaryCount} boundaries, ${tsLeaseFaultCampaign.obligationCount} executable lease-renew/release fault recoveries, ${tsCycleInterruption.obligationCount} exact activity cancellation/timeout recoveries, all three controller modes, two in-doubt recovery outcomes, one authority-bound terminal resolution, eight terminal results, one accepted GraphPatch/revision, one crash/takeover resume, and eight baseline checkpoints.\n`,
+  `Cross-language native-cycle conformance passed for ${tsCycleEvents.length + tsPatchEvents.length + tsResumeEvents.length + tsModeEventCount + tsInDoubtEventCount + tsResolutionEventCount} exact baseline events, ${cycleInputs.length + patchInputs.length + resumeInputs.length + tsModeInputCount + tsInDoubtInputCount + tsResolutionInputCount} activity inputs, ${tsCycleFaultReport.matrix.length} durable fault obligations over ${cycleFaultFixture.expect.boundaryCount} boundaries, ${tsLeaseFaultCampaign.obligationCount} executable lease-renew/release fault recoveries, ${tsCycleInterruption.obligationCount} exact activity cancellation/timeout recoveries, ${tsCycleOperationInterruption.obligationCount} exact pause/resume/replay/fork interruption recoveries, all three controller modes, two in-doubt recovery outcomes, one authority-bound terminal resolution, eight terminal results, one accepted GraphPatch/revision, one crash/takeover resume, and eight baseline checkpoints.\n`,
 );
 
 // Authoring conformance is intentionally expected-vs-TypeScript-vs-Python.

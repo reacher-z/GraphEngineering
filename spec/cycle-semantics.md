@@ -1119,10 +1119,62 @@ sleep ordering.
 For every row, native reports compare complete event canonical bytes and
 record hashes, result and checkpoint projections, activity paths, failure and
 settlement facts, in-doubt state, replay, and terminal resume behavior. This is
-the H03A activity-phase campaign. It does not yet claim interruption coverage
-inside the public pause, resume, replay, or fork operations themselves; that
-operation-level H03B lattice remains required before exhaustive cancellation
-or complete D7 conformance can be claimed.
+the H03A activity-phase campaign.
+
+#### Public-operation interruption lattice
+
+The retained
+[`cycle-controller-operation-interruption.case.json`](conformance/cycle-controller-operation-interruption.case.json)
+fixture closes H03B across the public `pause`, `resume`, `replay`, and `fork`
+operations. Its 25 rows are six pause boundaries, six resume boundaries, four
+read-only replay boundaries, and nine fork boundaries. The canonical matrix is
+4,288 UTF-8 bytes with SHA-256
+`100c5dccee5f199291813ea723bf0b3996783ad5126820d42e42f58385e32cfd`.
+Fixture validation reconstructs the rows and their linearization classes
+without importing either runtime's matrix builder.
+
+Operation cancellation is cooperative and uses stable code
+`GE_CYCLE_OPERATION_CANCELLED` with exact `operation` and `boundary` details.
+It is observed immediately before and after bounded store/fold phases; it does
+not claim that an arbitrary adapter can be forcibly preempted while blocked
+inside I/O. The operation rules are:
+
+- `pause` linearizes at the durable `LeaseReleased` append. Cancellation
+  observed earlier rejects with zero new events. Once release commits, the
+  release remains authoritative, checkpoint acceleration is completed when
+  possible, and the successful pause result wins.
+- A quiescent `resume` linearizes at `LeaseAcquired`. Cancellation observed
+  before that append rejects with zero new events. Cancellation observed after
+  it causes the newly fenced controller to append one durable `CANCELLED`
+  terminal result before returning; no activity handler starts.
+- `replay` has no write linearization point. Cancellation at any of its four
+  boundaries rejects with the stable operation code, and the stream remains
+  byte-identical with zero handler, clock, lease, or checkpoint work.
+- `fork` validates and folds the exact parent prefix, confirms the child stream
+  is empty, and then linearizes at `ControllerCreated`. Cancellation before the
+  child append writes nothing. Once creation of a dispatchable child commits,
+  the implementation completes child lease acquisition and durable `CANCELLED`
+  termination rather than returning a misleading operation-cancelled error.
+  Cancellation after child lease follows the same terminal path. A child that
+  inherits external in-doubt evidence remains deliberately reconciliation-
+  blocked after its lineage event, as specified below; it is not dispatchable.
+- Cancellation first observed at `before-return` cannot reverse an already
+  committed pause or completed live resume/fork result. The durable result wins.
+
+There is one recovery-debt exception to the quiescent resume rule. If the
+folded prefix contains an open round or activity claim, a pre-cancelled resume
+must still acquire the replacement lease, settle or release already-durable
+reservations exactly once, and terminate `CANCELLED` without dispatch. Rejecting
+at read time would strand authenticated accounting or external-effect
+uncertainty. Terminal resume remains read-only and may reject cancellation
+without a new event.
+
+For all 25 rows, independent native reports compare the complete target stream
+event bytes and record hashes, appended suffix, parent prefix for forks,
+structured error, terminal result, handler counts, and committed pause
+checkpoint. This closes public-operation interruption coverage; it does not
+turn the remaining structurally enumerated event/fault rows into behavioral
+evidence or make the in-memory adapters production durable.
 
 Fault hooks are deterministic test and simulation controls, not evidence that
 an in-memory adapter is crash durable. A production adapter must establish the

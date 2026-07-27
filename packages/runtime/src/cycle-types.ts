@@ -451,7 +451,7 @@ export type CycleDurableFaultBoundary =
   | `event:${CycleControllerEventType}:after-cas`;
 
 export type CycleFaultHook = (
-  boundary: CycleDurableFaultBoundary,
+  boundary: CycleFaultBoundary,
 ) => void | Promise<void>;
 
 export interface CycleDurableFaultMatrixEntry {
@@ -484,6 +484,73 @@ export interface CycleActivityInterruptionMatrixEntry {
   readonly trigger: CycleActivityInterruptionTrigger;
   readonly phase: CycleActivityPhase | null;
   readonly sideEffects: CycleActivitySideEffects | null;
+}
+
+export const CYCLE_PUBLIC_OPERATIONS = Object.freeze([
+  "pause",
+  "resume",
+  "replay",
+  "fork",
+] as const);
+
+export type CyclePublicOperation = typeof CYCLE_PUBLIC_OPERATIONS[number];
+
+/**
+ * Deterministic public-operation boundaries used by the H03B cancellation
+ * campaign. They are cooperative observation points, not a claim that an
+ * arbitrary store adapter can be forcefully interrupted while inside I/O.
+ */
+export const CYCLE_OPERATION_INTERRUPTION_BOUNDARIES = Object.freeze([
+  "operation:pause:before-read",
+  "operation:pause:after-read",
+  "operation:pause:after-fold",
+  "operation:pause:before-commit",
+  "operation:pause:after-lease-released",
+  "operation:pause:before-return",
+  "operation:resume:before-read",
+  "operation:resume:after-read",
+  "operation:resume:after-fold",
+  "operation:resume:before-commit",
+  "operation:resume:after-lease-acquired",
+  "operation:resume:before-return",
+  "operation:replay:before-read",
+  "operation:replay:after-read",
+  "operation:replay:after-fold",
+  "operation:replay:before-return",
+  "operation:fork:before-parent-read",
+  "operation:fork:after-parent-read",
+  "operation:fork:after-parent-fold",
+  "operation:fork:before-child-read",
+  "operation:fork:after-child-read",
+  "operation:fork:before-child-commit",
+  "operation:fork:after-child-created",
+  "operation:fork:after-child-lease",
+  "operation:fork:before-return",
+] as const);
+
+export type CycleOperationInterruptionBoundary =
+  typeof CYCLE_OPERATION_INTERRUPTION_BOUNDARIES[number];
+
+export type CycleFaultBoundary =
+  | CycleDurableFaultBoundary
+  | CycleOperationInterruptionBoundary;
+
+export type CycleOperationInterruptionDurability =
+  | "read-only"
+  | "operation-not-committed"
+  | "operation-committed";
+
+export type CycleOperationInterruptionOutcome =
+  | "operation-cancelled"
+  | "controller-cancelled"
+  | "committed-result";
+
+export interface CycleOperationInterruptionMatrixEntry {
+  readonly id: string;
+  readonly operation: CyclePublicOperation;
+  readonly boundary: CycleOperationInterruptionBoundary;
+  readonly durability: CycleOperationInterruptionDurability;
+  readonly outcome: CycleOperationInterruptionOutcome;
 }
 
 export interface CycleControllerEvent {
@@ -731,6 +798,15 @@ export interface CycleLeaseAdministrationOptions {
 
 export interface CyclePauseOptions extends CycleLeaseAdministrationOptions {
   readonly reason?: "paused" | "handoff";
+  readonly signal?: AbortSignal;
+}
+
+export interface CycleReplayOptions {
+  readonly parent?: CycleControllerFold;
+  readonly requireTerminal?: boolean;
+  readonly signal?: AbortSignal;
+  /** Deterministic test/simulation hook. Production coordination must use a durable store. */
+  readonly faultHook?: CycleFaultHook;
 }
 
 export interface CycleLeaseRenewalOptions extends CycleLeaseAdministrationOptions {
@@ -783,6 +859,7 @@ export type CycleControllerErrorCode =
   | "GE_CYCLE_LEASE_CONFLICT"
   | "GE_CYCLE_STORE_FAILED"
   | "GE_CYCLE_ACTIVITY_FAILED"
+  | "GE_CYCLE_OPERATION_CANCELLED"
   | "IN_DOUBT_SIDE_EFFECT"
   | "GE_CYCLE_RESOLUTION_INVALID"
   | "GE_CYCLE_RESOLUTION_CONFLICT"

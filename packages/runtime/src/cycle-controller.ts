@@ -29,6 +29,9 @@ import {
   type CycleModeOutcome,
   type CyclePauseOptions,
   type CyclePauseResult,
+  type CycleOperationInterruptionBoundary,
+  type CyclePublicOperation,
+  type CycleReplayOptions,
   type CycleResumeOptions,
   type CycleUsage,
   type GraphPatch,
@@ -72,6 +75,33 @@ interface ClockSample {
   readonly timestamp: string;
   readonly elapsedMs: number;
   readonly remainingMs: number;
+}
+
+function operationCancellation(
+  operation: CyclePublicOperation,
+  boundary: CycleOperationInterruptionBoundary,
+  controllerRunId: string,
+): CycleControllerError {
+  return new CycleControllerError(
+    "GE_CYCLE_OPERATION_CANCELLED",
+    controllerRunId,
+    `${operation} was cancelled before its durable operation result`,
+    { operation, boundary },
+  );
+}
+
+async function operationBoundary(
+  operation: CyclePublicOperation,
+  boundary: CycleOperationInterruptionBoundary,
+  controllerRunId: string,
+  signal: AbortSignal | undefined,
+  faultHook: CycleControllerRunOptions["faultHook"],
+  cancellationRejects: boolean,
+): Promise<void> {
+  await runCycleFaultHook(faultHook, boundary);
+  if (cancellationRejects && signal?.aborted) {
+    throw operationCancellation(operation, boundary, controllerRunId);
+  }
 }
 
 class TrustedCycleClock {
@@ -1578,6 +1608,10 @@ async function prepareLeaseAdministration<Options extends CycleLeaseAdministrati
   requestValue: CycleControllerRequest | unknown,
   options: Options,
   foldOptions: FoldCycleOptions,
+  interruption?: {
+    readonly operation: "pause";
+    readonly signal: AbortSignal | undefined;
+  },
 ): Promise<{
   readonly request: CycleControllerRequest;
   readonly events: readonly CycleControllerEvent[];
@@ -1586,7 +1620,27 @@ async function prepareLeaseAdministration<Options extends CycleLeaseAdministrati
 }> {
   const request = validateCycleControllerRequest(requestValue);
   validateLeaseAdministrationOptions(request, options);
+  if (interruption !== undefined) {
+    await operationBoundary(
+      interruption.operation,
+      "operation:pause:before-read",
+      request.controllerRunId,
+      interruption.signal,
+      options.faultHook,
+      true,
+    );
+  }
   const events = await readCycleControllerEvents(options.eventStore, request.eventStreamId);
+  if (interruption !== undefined) {
+    await operationBoundary(
+      interruption.operation,
+      "operation:pause:after-read",
+      request.controllerRunId,
+      interruption.signal,
+      options.faultHook,
+      true,
+    );
+  }
   if (events.length === 0) {
     throw new CycleControllerError(
       "GE_CYCLE_RUN_NOT_FOUND",
@@ -1604,6 +1658,16 @@ async function prepareLeaseAdministration<Options extends CycleLeaseAdministrati
     );
   }
   const fold = foldCycleControllerEvents(events, foldOptions);
+  if (interruption !== undefined) {
+    await operationBoundary(
+      interruption.operation,
+      "operation:pause:after-fold",
+      request.controllerRunId,
+      interruption.signal,
+      options.faultHook,
+      true,
+    );
+  }
   if (fold.requestHash !== cycleRequestHash(request)
       || fold.controllerHash !== cycleControllerHash(request)
       || canonicalSerialize(fold.request) !== canonicalSerialize(request)) {
@@ -1679,11 +1743,33 @@ async function startInternal(
   initialGraphValue: GraphSpec | unknown,
   options: CycleControllerRunOptions,
   parent?: CycleControllerFold,
+  operation?: "fork",
 ): Promise<CycleControllerResult> {
   const request = validateCycleControllerRequest(requestValue);
   validateRunOptions(request, options);
   const graph = validateInitialGraph(request, initialGraphValue);
-  if (!(await emptyStream(options, request.eventStreamId))) {
+  if (operation === "fork") {
+    await operationBoundary(
+      operation,
+      "operation:fork:before-child-read",
+      request.controllerRunId,
+      options.signal,
+      options.faultHook,
+      true,
+    );
+  }
+  const streamIsEmpty = await emptyStream(options, request.eventStreamId);
+  if (operation === "fork") {
+    await operationBoundary(
+      operation,
+      "operation:fork:after-child-read",
+      request.controllerRunId,
+      options.signal,
+      options.faultHook,
+      true,
+    );
+  }
+  if (!streamIsEmpty) {
     throw new CycleControllerError("GE_CYCLE_RUN_ALREADY_EXISTS", request.controllerRunId, "start requires an empty event stream");
   }
   let firstDate: Date;
@@ -1706,6 +1792,16 @@ async function startInternal(
     nowOption(options), startedAt, deadlineAt, startedAt, request.controllerRunId,
   );
   const journal = new CycleJournal({ request, options, events: [], ...(parent === undefined ? {} : { parent }), clock });
+  if (operation === "fork") {
+    await operationBoundary(
+      operation,
+      "operation:fork:before-child-commit",
+      request.controllerRunId,
+      options.signal,
+      options.faultHook,
+      true,
+    );
+  }
   await journal.append("ControllerCreated", {
     request,
     requestHash: cycleRequestHash(request),
@@ -1714,6 +1810,16 @@ async function startInternal(
     startedAt,
     deadlineAt,
   }, { lease: null, sample: { timestamp: startedAt, elapsedMs: 0, remainingMs: request.policy.maxDurationMs } });
+  if (operation === "fork") {
+    await operationBoundary(
+      operation,
+      "operation:fork:after-child-created",
+      request.controllerRunId,
+      options.signal,
+      options.faultHook,
+      false,
+    );
+  }
   if (parent !== undefined && journal.fold.inDoubtActivities.length !== 0) {
     throw new CycleControllerError(
       "IN_DOUBT_SIDE_EFFECT", request.controllerRunId,
@@ -1724,8 +1830,29 @@ async function startInternal(
     reason: "start",
     previousLeaseId: null,
   }, { lease: options.lease });
+  if (operation === "fork") {
+    await operationBoundary(
+      operation,
+      "operation:fork:after-child-lease",
+      request.controllerRunId,
+      options.signal,
+      options.faultHook,
+      false,
+    );
+  }
   const applier = createApplier(request, graph, journal.events);
-  return continueController(journal, applier);
+  const result = await continueController(journal, applier);
+  if (operation === "fork") {
+    await operationBoundary(
+      operation,
+      "operation:fork:before-return",
+      request.controllerRunId,
+      options.signal,
+      options.faultHook,
+      false,
+    );
+  }
+  return result;
 }
 
 /** Start one native TypeScript bounded controller. This operation never resumes. */
@@ -1747,9 +1874,24 @@ export async function resumeCycleController(
   const request = validateCycleControllerRequest(requestValue);
   validateRunOptions(request, options);
   const graph = validateInitialGraph(request, initialGraphValue);
+  let cancellationBoundary: CycleOperationInterruptionBoundary | undefined;
+  const observeResumeCancellation = async (
+    boundary: CycleOperationInterruptionBoundary,
+  ): Promise<void> => {
+    await operationBoundary(
+      "resume", boundary, request.controllerRunId,
+      options.signal, options.faultHook, false,
+    );
+    if (options.signal?.aborted && cancellationBoundary === undefined) {
+      cancellationBoundary = boundary;
+    }
+  };
+  await observeResumeCancellation("operation:resume:before-read");
   const events = await readCycleControllerEvents(options.eventStore, request.eventStreamId);
+  await observeResumeCancellation("operation:resume:after-read");
   if (events.length === 0) throw new CycleControllerError("GE_CYCLE_RUN_NOT_FOUND", request.controllerRunId, "resume requires an existing stream");
   let fold = foldCycleControllerEvents(events, foldOptions);
+  await observeResumeCancellation("operation:resume:after-fold");
   if (fold.requestHash !== cycleRequestHash(request) || fold.controllerHash !== cycleControllerHash(request)
       || canonicalSerialize(fold.request) !== canonicalSerialize(request)) {
     throw new CycleControllerError("GE_CYCLE_REQUEST_MISMATCH", request.controllerRunId, "resume request does not match history");
@@ -1761,7 +1903,18 @@ export async function resumeCycleController(
     );
   }
   if (fold.terminalResult !== null) {
+    if (cancellationBoundary !== undefined) {
+      throw operationCancellation("resume", cancellationBoundary, request.controllerRunId);
+    }
     await runCycleFaultHook(options.faultHook, "terminal:ControllerTerminated:during-delivery");
+    await operationBoundary(
+      "resume",
+      "operation:resume:before-return",
+      request.controllerRunId,
+      options.signal,
+      options.faultHook,
+      true,
+    );
     return fold.terminalResult;
   }
   if (fold.inDoubtActivities.some((activity) => activity.sideEffects === "non-idempotent")
@@ -1815,13 +1968,37 @@ export async function resumeCycleController(
     ...(foldOptions.parent === undefined ? {} : { parent: foldOptions.parent }),
     clock,
   });
+  await observeResumeCancellation("operation:resume:before-commit");
+  // An already-open round is recovery debt. Even a pre-cancelled resume must
+  // acquire authority long enough to settle/release it and terminate without
+  // dispatch. A quiescent stream has no such debt and remains zero-write.
+  if (cancellationBoundary !== undefined && fold.openRound === null) {
+    throw operationCancellation("resume", cancellationBoundary, request.controllerRunId);
+  }
   await journal.append("LeaseAcquired", {
     reason: options.leaseReason ?? "resume",
     previousLeaseId: fold.lastLeaseId,
   }, { lease: options.lease });
+  await operationBoundary(
+    "resume",
+    "operation:resume:after-lease-acquired",
+    request.controllerRunId,
+    options.signal,
+    options.faultHook,
+    false,
+  );
   fold = journal.fold;
   const applier = createApplier(request, graph, events);
-  return continueController(journal, applier);
+  const result = await continueController(journal, applier);
+  await operationBoundary(
+    "resume",
+    "operation:resume:before-return",
+    request.controllerRunId,
+    options.signal,
+    options.faultHook,
+    false,
+  );
+  return result;
 }
 
 /**
@@ -1833,7 +2010,12 @@ export async function pauseCycleController(
   options: CyclePauseOptions,
   foldOptions: FoldCycleOptions = {},
 ): Promise<CyclePauseResult> {
-  const prepared = await prepareLeaseAdministration(requestValue, options, foldOptions);
+  const prepared = await prepareLeaseAdministration(
+    requestValue,
+    options,
+    foldOptions,
+    { operation: "pause", signal: options.signal },
+  );
   const reason = options.reason ?? "paused";
   if (reason !== "paused" && reason !== "handoff") {
     throw new CycleControllerError(
@@ -1865,6 +2047,14 @@ export async function pauseCycleController(
     ...(foldOptions.parent === undefined ? {} : { parent: foldOptions.parent }),
     clock: prepared.clock,
   });
+  await operationBoundary(
+    "pause",
+    "operation:pause:before-commit",
+    prepared.request.controllerRunId,
+    options.signal,
+    options.faultHook,
+    true,
+  );
   const event = await appendLeaseAdministrationEvent(
     journal,
     "LeaseReleased",
@@ -1872,7 +2062,23 @@ export async function pauseCycleController(
     activeLease,
     sample,
   );
+  await operationBoundary(
+    "pause",
+    "operation:pause:after-lease-released",
+    prepared.request.controllerRunId,
+    options.signal,
+    options.faultHook,
+    false,
+  );
   const checkpointWarning = await leaseAdministrationCheckpoint(journal, event.timestamp);
+  await operationBoundary(
+    "pause",
+    "operation:pause:before-return",
+    prepared.request.controllerRunId,
+    options.signal,
+    options.faultHook,
+    false,
+  );
   return Object.freeze({
     event,
     fold: journal.fold,
@@ -2230,15 +2436,49 @@ export async function replayCycleController(
   store: CycleControllerRunOptions["eventStore"],
   streamId: string,
   throughSequence?: number,
-  options: FoldCycleOptions = {},
+  options: CycleReplayOptions = {},
 ): Promise<CycleControllerFold> {
+  await operationBoundary(
+    "replay",
+    "operation:replay:before-read",
+    "unknown",
+    options.signal,
+    options.faultHook,
+    true,
+  );
   const events = await readCycleControllerEvents(store, streamId);
+  const controllerRunId = events.at(0)?.controllerRunId ?? "unknown";
+  await operationBoundary(
+    "replay",
+    "operation:replay:after-read",
+    controllerRunId,
+    options.signal,
+    options.faultHook,
+    true,
+  );
   if (events.length === 0) throw new CycleControllerError("GE_CYCLE_RUN_NOT_FOUND", "unknown", "replay requires an existing stream");
   const through = throughSequence ?? events.length - 1;
   if (!Number.isSafeInteger(through) || through < 0 || through >= events.length) {
     throw new CycleControllerError("GE_CYCLE_INVALID_HISTORY", events[0]!.controllerRunId, "replay prefix is outside history");
   }
-  return foldCycleControllerEvents(events.slice(0, through + 1), options);
+  const fold = foldCycleControllerEvents(events.slice(0, through + 1), options);
+  await operationBoundary(
+    "replay",
+    "operation:replay:after-fold",
+    controllerRunId,
+    options.signal,
+    options.faultHook,
+    true,
+  );
+  await operationBoundary(
+    "replay",
+    "operation:replay:before-return",
+    controllerRunId,
+    options.signal,
+    options.faultHook,
+    true,
+  );
+  return fold;
 }
 
 /** Create a child stream bound to an exact immutable parent prefix. */
@@ -2253,15 +2493,48 @@ export async function forkCycleController(
   if (childRequest.lineage.origin !== "fork") {
     throw new CycleControllerError("GE_CYCLE_INVALID_REQUEST", childRequest.controllerRunId, "fork requires fork lineage");
   }
-  const parent = await replayCycleController(
-    parentStore, parentStreamId, childRequest.lineage.parentSequence,
+  validateRunOptions(childRequest, options);
+  validateInitialGraph(childRequest, graphAtParentPrefix);
+  await operationBoundary(
+    "fork",
+    "operation:fork:before-parent-read",
+    childRequest.controllerRunId,
+    options.signal,
+    options.faultHook,
+    true,
+  );
+  const parentEvents = await readCycleControllerEvents(parentStore, parentStreamId);
+  await operationBoundary(
+    "fork",
+    "operation:fork:after-parent-read",
+    childRequest.controllerRunId,
+    options.signal,
+    options.faultHook,
+    true,
+  );
+  const parentSequence = childRequest.lineage.parentSequence;
+  if (parentEvents.length === 0 || parentSequence >= parentEvents.length) {
+    throw new CycleControllerError(
+      "GE_CYCLE_INVALID_HISTORY",
+      childRequest.controllerRunId,
+      "fork parent prefix is outside history",
+    );
+  }
+  const parent = foldCycleControllerEvents(parentEvents.slice(0, parentSequence + 1));
+  await operationBoundary(
+    "fork",
+    "operation:fork:after-parent-fold",
+    childRequest.controllerRunId,
+    options.signal,
+    options.faultHook,
+    true,
   );
   if (parent.request.controllerRunId !== childRequest.lineage.parentControllerRunId
       || parent.historyPrefixHash !== childRequest.lineage.parentHistoryHash
       || canonicalSerialize(parent.currentRevision) !== canonicalSerialize(childRequest.initialGraph)) {
     throw new CycleControllerError("GE_CYCLE_INVALID_HISTORY", childRequest.controllerRunId, "child lineage does not bind the parent prefix");
   }
-  return startInternal(childRequest, graphAtParentPrefix, options, parent);
+  return startInternal(childRequest, graphAtParentPrefix, options, parent, "fork");
 }
 
 export type { GraphPatch, CycleCandidate, CycleCandidateVerdict, CycleGraphCoordinate };

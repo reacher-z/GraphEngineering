@@ -566,6 +566,16 @@ sequence and history hash, copies only the event-derived revision, seen/verdict
 categories, committed rounds, counters, decided patch IDs, and in-doubt status,
 and gives the child an independent stream and lease.
 
+`pause_cycle` and `replay_cycle` accept a `CycleCancellation`, as do resume and
+fork. Before an operation's durable commit, cancellation raises stable
+`GE_CYCLE_OPERATION_CANCELLED` with exact `operation` and `boundary` details
+and writes nothing. After resume lease acquisition, the controller durably
+terminates `CANCELLED`; after creation of a dispatchable fork child, the child
+receives its lease and cancelled terminal. A committed pause or a
+completed result wins over cancellation observed at return. A resume prefix
+with an open round is recovery debt: it is settled under a new lease without
+handler dispatch even when cancellation was already set.
+
 `GraphPatchRuntime` snapshots exact portable patch bytes, gates the requested
 base, IDs, current execution state, authority/capabilities, graph compilation,
 graph size/depth/fan-out, and reserved structural capacity under one local CAS
@@ -584,6 +594,12 @@ applicable durable stages and all five retained fault kinds. Every run checks
 the committed prefix, checkpoint durability, stale-version/stale-fence zero
 writes, exactly one target event, one safe handler dispatch, read-only replay,
 and terminal-resume zero writes.
+
+`build_cycle_operation_interruption_matrix()` derives the 25-row H03B public
+operation lattice (pause 6, resume 6, replay 4, fork 9). The native join executes
+every boundary and compares exact stream bytes and record hashes, appended
+events, structured errors, results, handler counts, fork parent prefixes, and
+pause checkpoints with TypeScript.
 
 `build_cycle_durable_fault_matrix()` derives 855 obligations over 17 event
 types, 11 durable stages, and five fault classes. Pass a deterministic
