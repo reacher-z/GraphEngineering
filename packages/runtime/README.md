@@ -374,6 +374,16 @@ join executes every row independently in TypeScript and Python and compares
 full event bytes/hashes, appended suffixes, errors, results, handler counts,
 fork parent prefixes, and pause checkpoints.
 
+The retained H03C campaign also executes 35 `PatchAccepted` visibility faults:
+seven stages from before event construction through after state update crossed
+with all five fault kinds. In the 20 pre-commit rows, recovery reuses the same
+stable activity key and may rerun only the idempotent planner. In the 15
+committed rows, stored patch bytes rebuild revision 2 with zero planner
+reinvocation. Every row ends with one accepted decision, one budget settlement,
+one round commit, read-only replay, and zero-work terminal resume; TypeScript
+and Python compare the complete events, hashes, result, and checkpoint. The
+three checkpoint-stage combinations remain separate H03 work.
+
 When replaying or resuming a fork in a fresh process, replay the exact parent
 event prefix locally and pass that verified fold as `parent`. A serialized or
 caller-constructed fold object is not accepted as inheritance authority: its

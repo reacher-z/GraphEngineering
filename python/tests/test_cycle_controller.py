@@ -11,7 +11,7 @@ from typing import Any, cast
 
 import pytest
 
-from graph_engineering import compile_graph
+from graph_engineering import canonical_json, compile_graph
 from graph_engineering.cycle_contract import (
     CYCLE_EVENT_TYPES,
     CycleErrorCode,
@@ -710,6 +710,33 @@ def test_fault_matrix_is_derived_from_all_event_stage_kind_combinations() -> Non
         cycle_durable_fault_boundary(cast(Any, "Unknown"), "before-event-construction")
     with pytest.raises(ValueError, match="unknown durable fault stage"):
         cycle_durable_fault_boundary("ControllerCreated", cast(Any, "unknown"))
+
+
+def test_patch_accepted_visibility_fault_campaign_is_closed() -> None:
+    stages = {
+        "before-event-construction",
+        "after-event-construction",
+        "after-prospective-fold",
+        "before-store-commit",
+        "after-store-commit",
+        "after-store-return",
+        "after-state-update",
+    }
+    matrix = [
+        entry.to_dict()
+        for entry in build_cycle_durable_fault_matrix()
+        if entry.event_type == "PatchAccepted" and entry.stage in stages
+    ]
+    canonical = canonical_json(matrix)
+
+    assert len(matrix) == 35
+    assert sum(entry["durability"] == "event-not-committed" for entry in matrix) == 20
+    assert sum(entry["durability"] == "event-committed" for entry in matrix) == 15
+    assert {entry["faultKind"] for entry in matrix} == set(CYCLE_FAULT_KINDS)
+    assert len(canonical.encode("utf-8")) == 6249
+    assert hashlib.sha256(canonical.encode("utf-8")).hexdigest() == (
+        "160ed0853f3da4783f39440b7d3ade46b56a1d83f47248be2cb97a37dc46dfd2"
+    )
 
 
 def test_activity_interruption_matrix_is_closed_and_complete() -> None:

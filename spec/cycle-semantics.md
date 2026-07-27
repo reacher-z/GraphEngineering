@@ -1176,6 +1176,36 @@ checkpoint. This closes public-operation interruption coverage; it does not
 turn the remaining structurally enumerated event/fault rows into behavioral
 evidence or make the in-memory adapters production durable.
 
+#### PatchAccepted visibility fault campaign
+
+The retained
+[`cycle-controller-patch-visibility-fault.case.json`](conformance/cycle-controller-patch-visibility-fault.case.json)
+fixture makes 35 additional rows of the durable fault lattice behavioral. It
+crosses `PatchAccepted` with the seven event-visibility stages from before
+event construction through after in-memory state update and all five retained
+fault kinds. The derived matrix contains 20 pre-commit rows and 15 committed
+rows. Its canonical representation is 6,249 UTF-8 bytes with SHA-256
+`160ed0853f3da4783f39440b7d3ade46b56a1d83f47248be2cb97a37dc46dfd2`.
+
+Every row starts from a durable `ModeOutcomeCommitted` prefix whose patch
+planner has not run. The first resume invokes the idempotent planner and loses
+control at the selected `PatchAccepted` boundary. Recovery then follows the
+event linearization point:
+
+- before store commit, no patch decision exists, so recovery may invoke the
+  same idempotent planner once more under the same stable activity key;
+- after store commit, the exact patch bytes and resulting revision are already
+  authoritative, so recovery restores revision 2 without invoking the planner;
+- both paths finish with exactly one `PatchAccepted`, one patch-planner budget
+  settlement, one `RoundCommitted`, and one terminal result; and
+- replay performs no write or handler dispatch, while terminal resume performs
+  no write, handler dispatch, or clock sample.
+
+The TypeScript and Python reports deep-compare every complete final event,
+record hash, interrupted prefix hash, target event, terminal result, and final
+checkpoint. These 35 rows do not include the three checkpoint-specific stages;
+checkpoint write/cancellation combinations remain a separate H03 campaign.
+
 Fault hooks are deterministic test and simulation controls, not evidence that
 an in-memory adapter is crash durable. A production adapter must establish the
 same before/after-commit facts with its transaction and fsync contract. The
@@ -1355,6 +1385,13 @@ freezes the 68-row H03A cancellation and attempt-timeout lattice described in
 section 13.4. Both native reporters execute every row and the conformance join
 compares their full reports without either implementation delegating execution
 to the other.
+
+[`cycle-controller-operation-interruption.case.json`](conformance/cycle-controller-operation-interruption.case.json)
+freezes the 25-row H03B public-operation lattice, and
+[`cycle-controller-patch-visibility-fault.case.json`](conformance/cycle-controller-patch-visibility-fault.case.json)
+freezes the 35-row H03C `PatchAccepted` event-visibility campaign. Both native
+runtimes execute each retained row and the conformance join compares the full
+reports exactly.
 
 The native implementations MUST pass the shared fixtures without one runtime
 delegating execution or number formatting to the other language.

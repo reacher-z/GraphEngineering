@@ -601,6 +601,16 @@ every boundary and compares exact stream bytes and record hashes, appended
 events, structured errors, results, handler counts, fork parent prefixes, and
 pause checkpoints with TypeScript.
 
+The retained H03C campaign executes another 35 `PatchAccepted` visibility
+faults: seven stages from before event construction through after state update
+crossed with five fault kinds. All 20 pre-commit rows reuse the same activity
+key and permit only the idempotent planner to run again; all 15 committed rows
+restore revision 2 from stored patch bytes without planner reinvocation. Each
+row proves one accepted decision, one settlement, one round commit, read-only
+replay, and zero-work terminal resume, then compares complete Python and
+TypeScript events, hashes, result, and checkpoint. Checkpoint-stage combinations
+remain separate H03 work.
+
 `build_cycle_durable_fault_matrix()` derives 855 obligations over 17 event
 types, 11 durable stages, and five fault classes. Pass a deterministic
 `fault_hook` to `start_cycle`/`resume_cycle` for controller boundaries or to

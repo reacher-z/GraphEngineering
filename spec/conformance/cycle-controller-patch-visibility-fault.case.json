@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 1,
+  "id": "cycle-controller-patch-visibility-fault-v1alpha1",
+  "sourceFaultMatrix": "spec/conformance/cycle-controller-fault-matrix.case.json",
+  "eventType": "PatchAccepted",
+  "stages": [
+    "before-event-construction",
+    "after-event-construction",
+    "after-prospective-fold",
+    "before-store-commit",
+    "after-store-commit",
+    "after-store-return",
+    "after-state-update"
+  ],
+  "faultKinds": [
+    "process-loss",
+    "store-error",
+    "timeout",
+    "cancellation",
+    "commit-then-throw"
+  ],
+  "seedBoundary": "event:ModeOutcomeCommitted:after-state-before-dispatch",
+  "linearization": {
+    "authoritativeFact": "PatchAccepted",
+    "preCommitStages": [
+      "before-event-construction",
+      "after-event-construction",
+      "after-prospective-fold",
+      "before-store-commit"
+    ],
+    "committedStages": [
+      "after-store-commit",
+      "after-store-return",
+      "after-state-update"
+    ],
+    "initialGraphRevision": 1,
+    "acceptedGraphRevision": 2,
+    "acceptedDynamicNodes": 1,
+    "preCommitPlannerCalls": 2,
+    "committedPlannerCalls": 1
+  },
+  "requiredAssertions": [
+    "fault-kind-signal-is-observed",
+    "fixture-reconstructs-matrix-without-runtime-import",
+    "pre-commit-fault-appends-no-patch-decision",
+    "committed-fault-retains-exactly-one-patch-decision",
+    "committed-prefix-remains-hash-linked",
+    "pre-commit-recovery-reuses-the-stable-activity-key",
+    "pre-commit-recovery-may-reinvoke-only-the-idempotent-planner",
+    "committed-recovery-performs-zero-planner-reinvocation",
+    "recovery-restores-the-exact-accepted-revision",
+    "patch-budget-settles-exactly-once",
+    "accepted-round-commits-exactly-once",
+    "replay-performs-zero-handler-dispatch-and-zero-write",
+    "terminal-resume-performs-zero-handler-dispatch-clock-and-write",
+    "complete-event-result-checkpoint-bytes-and-hashes-match-between-runtimes"
+  ],
+  "expect": {
+    "matrixEntryCount": 35,
+    "stageCount": 7,
+    "faultKindCount": 5,
+    "stageCounts": {
+      "before-event-construction": 5,
+      "after-event-construction": 5,
+      "after-prospective-fold": 5,
+      "before-store-commit": 5,
+      "after-store-commit": 5,
+      "after-store-return": 5,
+      "after-state-update": 5
+    },
+    "faultKindCounts": {
+      "process-loss": 7,
+      "store-error": 7,
+      "timeout": 7,
+      "cancellation": 7,
+      "commit-then-throw": 7
+    },
+    "durabilityCounts": {
+      "event-not-committed": 20,
+      "event-committed": 15
+    },
+    "matrixCanonicalUtf8Bytes": 6249,
+    "matrixSha256": "160ed0853f3da4783f39440b7d3ade46b56a1d83f47248be2cb97a37dc46dfd2"
+  }
+}

@@ -1,4 +1,9 @@
-import { compileGraph, type GraphSpec } from "@graph-engineering/core";
+import {
+  canonicalHash,
+  canonicalSerialize,
+  compileGraph,
+  type GraphSpec,
+} from "@graph-engineering/core";
 import { describe, expect, it, vi } from "vitest";
 import {
   buildCycleActivityInterruptionMatrix,
@@ -218,6 +223,30 @@ describe("native bounded cycle controller", () => {
       "ControllerCreated",
       "unknown" as never,
     )).toThrow("unknown durable fault stage");
+  });
+
+  it("derives the closed 35-row PatchAccepted visibility campaign", () => {
+    const stages = new Set([
+      "before-event-construction",
+      "after-event-construction",
+      "after-prospective-fold",
+      "before-store-commit",
+      "after-store-commit",
+      "after-store-return",
+      "after-state-update",
+    ]);
+    const matrix = buildCycleDurableFaultMatrix().filter(({ eventType, stage }) => (
+      eventType === "PatchAccepted" && stages.has(stage)
+    ));
+
+    expect(matrix).toHaveLength(35);
+    expect(matrix.filter(({ durability }) => durability === "event-not-committed")).toHaveLength(20);
+    expect(matrix.filter(({ durability }) => durability === "event-committed")).toHaveLength(15);
+    expect(new Set(matrix.map(({ faultKind }) => faultKind))).toEqual(new Set(CYCLE_FAULT_KINDS));
+    expect(Buffer.byteLength(canonicalSerialize(matrix), "utf8")).toBe(6249);
+    expect(canonicalHash(matrix)).toBe(
+      "160ed0853f3da4783f39440b7d3ade46b56a1d83f47248be2cb97a37dc46dfd2",
+    );
   });
 
   it("derives all 68 activity interruption obligations without duplicate identities", () => {
