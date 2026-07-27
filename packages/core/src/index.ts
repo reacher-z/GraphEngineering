@@ -51,7 +51,12 @@ export {
   validateStrictTypedPorts,
 } from "./typed-ports.js";
 export type { StrictTypedJsonSchema, StrictTypedPortsPolicy } from "./typed-ports.js";
-export { validateGraphDocument } from "./schema-validation.js";
+export {
+  validateEdgeDocument,
+  validateEndpointDocument,
+  validateGraphDocument,
+  validateNodeDocument,
+} from "./schema-validation.js";
 export type {
   CompilationResult,
   CompilerDiagnostic,

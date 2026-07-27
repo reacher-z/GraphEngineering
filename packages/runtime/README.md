@@ -251,6 +251,68 @@ JSONL store coordinates one process; confirm that the former coordinator has
 stopped before resume. See the
 [durable recovery semantics](../../spec/durable-recovery-semantics.md).
 
+## Native bounded cycle controllers and GraphPatch
+
+The D7 API executes explicit, bounded `until-dry`, `while`, and
+`evaluator-optimizer` policies. Its event stream—not process memory or a
+checkpoint—is authoritative. Every attempt claim, exact worst-case round
+reservation, result, settlement, patch decision, round commit, and terminal
+observation is hash chained and CAS appended.
+
+```ts
+import {
+  MemoryCycleControllerEventStore,
+  resumeCycleController,
+  startCycleController,
+} from "@graph-engineering/runtime";
+
+const eventStore = new MemoryCycleControllerEventStore();
+const result = await startCycleController(request, initialGraph, {
+  eventStore,
+  lease,
+  activities: {
+    finder: async ({ input, idempotencyKey, signal }) => ({
+      output: await findCandidates(input, { idempotencyKey, signal }),
+    }),
+    candidateEvaluator: async ({ input }) => ({
+      output: await evaluateEveryFreshCandidate(input),
+    }),
+  },
+});
+
+// A replacement holder supplies the exact tail sequence and a strictly newer
+// lease/fencing token. Use takeover only after fencing the former holder.
+const resumed = await resumeCycleController(request, initialGraph, {
+  eventStore,
+  expectedSequence: 12,
+  lease: replacementLease,
+  leaseReason: "takeover",
+  activities,
+});
+```
+
+`replayCycleController` is read-only and dispatches no activity or clock;
+`forkCycleController` binds a child to one immutable parent prefix. Checkpoints
+are optional verified caches. Missing, stale, or corrupt checkpoint data never
+overrides a complete event fold. `MemoryCycleControllerEventStore` and
+`MemoryCycleControllerCheckpointStore` are deterministic local implementations,
+not distributed lease providers.
+
+When replaying or resuming a fork in a fresh process, replay the exact parent
+event prefix locally and pass that verified fold as `parent`. A serialized or
+caller-constructed fold object is not accepted as inheritance authority: its
+history hash may name a real prefix while its copied counters or seen set lie
+about what that prefix contains.
+
+`NativeGraphPatchApplier` accepts append-only nodes, edges, and outputs. It
+validates closed authority/budget context, stale-base CAS, capability ceilings,
+graph limits, and complete compilation before producing a revision. Call
+`prepare`, durably append its decision, then `commitPrepared`; exact retries
+return the originally frozen decision/application, while a reused patch ID with
+different canonical bytes fails closed. External side effects remain
+at-least-once and require idempotency or explicit approval. See
+[cycle semantics](../../spec/cycle-semantics.md).
+
 ## Alpha semantics
 
 - ready nodes execute concurrently up to the graph policy and caller limit;
