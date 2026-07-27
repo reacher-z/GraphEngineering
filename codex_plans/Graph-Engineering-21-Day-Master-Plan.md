@@ -3162,3 +3162,935 @@ is pursued through this complete standard. The project will keep appending
 explicit work whenever real implementation, review, external use, or failure
 reveals a missing requirement. It will not declare victory by making the plan
 smaller.
+
+## 31. D7 native-cycle hardening, productionization, and adoption expansion
+
+This section was appended on 2026-07-27. It does not replace, weaken, reorder,
+or mark complete any earlier requirement. It records additional work discovered
+while implementing the first exact TypeScript/Python native-cycle join. Every
+item below remains subject to the immutable-evidence, independent-review,
+fail-closed release, and no-omission rules above.
+
+### 31.1 Immutable implementation baseline and current truth
+
+The first D7 implementation baseline consists of two immutable commits on
+`feat/authoring-foundation`:
+
+- `abd400b0ffa61b9eb648d69a173939ecf387d004` implements the TypeScript native
+  bounded-cycle controller, event fold, local store, GraphPatch runtime, and
+  focused tests;
+- `a6c8e67c56d9ebcd8596307d9166763f48ac8713` implements the independent Python
+  controller surface, strict Python GraphPatch replay validation, and an
+  executable TypeScript/Python join;
+- the second commit has tree
+  `1c61314bb4abc89222606c4bca15d20275e30e15`, parent
+  `abd400b0ffa61b9eb648d69a173939ecf387d004`, and exact author/committer
+  `reacher-z <mtrxcop@gmail.com>`;
+- the exact join currently compares 93 canonical events, 17 canonical activity
+  input preimages, all three controller modes, five terminal results, one
+  accepted GraphPatch/revision, one commit-then-throw/takeover recovery, and
+  five checkpoints;
+- the clean committed candidate currently passes 1,065 Python tests plus two
+  subtests, Python Ruff and strict Mypy, the workspace lint/typecheck gates,
+  the full cross-language conformance runner, local Markdown link validation,
+  and wheel/sdist build-and-install smoke tests; and
+- these facts describe a meaningful alpha implementation, not production
+  readiness, independent acceptance, scheduler integration, distributed
+  safety, or completion of the master plan.
+
+The baseline establishes these implemented invariants:
+
+1. a request binds activity identity, implementation hash, side-effect class,
+   timeout, maximum attempts, and per-attempt maximum cost;
+2. a round must reserve the complete request-bound worst-case envelope before
+   dispatch, rather than shrinking the reservation to remaining budget;
+3. finder, candidate evaluator, condition or optimizer, and enabled patch
+   planner work have explicit deterministic input preimages;
+4. seen-state deduplication applies to every discovered key, including rejected
+   findings, so rejected candidates cannot keep a loop artificially wet;
+5. every durable append is validated by folding the prospective full prefix;
+6. replay is event-derived and must not call clocks, models, handlers, policy
+   services, random sources, or compilers except where accepted GraphPatch
+   recovery explicitly recompiles the stored graph revision;
+7. a commit-then-throw recovery reuses committed work and does not rerun the
+   finder in the covered scenario;
+8. an open non-idempotent activity is fail-closed and blocks resume or fork
+   before a new lease or new external dispatch;
+9. GraphPatch fragment validation is shared by live application, restoration,
+   and pure event-fold replay; and
+10. TypeScript and Python equality is checked on canonical carriers rather than
+    on a hand-selected semantic summary.
+
+### 31.2 Explicit non-claims and blockers that must remain visible
+
+Until the work below is complete and independently accepted, public materials
+must state all of the following:
+
+- `MemoryCycleStore` and `MemoryCycleControllerEventStore` are deterministic
+  local/test adapters, not durable production stores;
+- the numeric lease and fencing fields are validated and folded, but no current
+  local adapter provides a distributed lock or database-enforced fencing;
+- the native controller is separate from the ordinary DAG scheduler and does
+  not yet mutate an in-flight scheduler graph;
+- scheduler checkpoint acceleration is absent; the authoritative path folds the
+  complete stream;
+- cancellation, corruption, budget, fork, patch rejection, and recovery have
+  substantial tests but not yet the exhaustive cross-language boundary lattice
+  specified below;
+- independent hostile review is still required even when all author-run checks
+  pass;
+- telemetry v1alpha1 payload protection and the D9 redaction contract remain
+  separate open work and may not be inferred from D7 correctness;
+- exactly-once external effects are not claimed; non-idempotent interruption is
+  intentionally in-doubt and requires an explicit future resolution protocol;
+- current event and checkpoint formats are alpha contracts and need versioned
+  migration policy before stable release; and
+- a 5,000- or 6,000-star goal is an adoption aspiration, never a deliverable
+  that engineering can guarantee or manufacture.
+
+### 31.3 Parallel execution topology and ownership discipline
+
+The remaining work should run at the highest safe parallelism without allowing
+multiple writers to collide on the same contract or evidence surface. Use the
+following lanes whenever agent capacity is available:
+
+1. **D7 semantics lane:** owns cycle schemas, normative semantics, event fold,
+   checkpoint projection, replay, fork, and cross-language fixtures;
+2. **D7 storage lane:** owns production event/checkpoint stores, transactional
+   compare-and-swap, leasing, fencing, migrations, and storage chaos tests;
+3. **D7 integration lane:** owns ordinary-scheduler GraphPatch integration,
+   revision routing, scheduler pause/resume interaction, and end-to-end demos;
+4. **D7 security lane:** owns malicious history, hostile patch fragments,
+   authority binding, capabilities, size/depth controls, and threat-model
+   evidence;
+5. **D7 quality lane:** owns property tests, differential fuzzing, model-based
+   state machines, performance benchmarks, package smoke tests, and matrix CI;
+6. **D7 education lane:** owns concepts, failure modes, API reference, examples,
+   migration material, and course exercises; and
+7. **D7 independent-review lane:** must not author the candidate it accepts and
+   owns the final adversarial review report and disposition ledger.
+
+No lane may silently edit another lane's active files. Before dispatching work,
+the root owner must record exact files, inputs, outputs, dependencies, forbidden
+changes, test commands, and acceptance criteria in the task registry. Shared
+control files remain root-owned. If a sub-agent becomes unavailable, the root
+agent may continue implementation but must retain the missing independent-review
+gate rather than self-approving it.
+
+Every 30-minute progress scan must report:
+
+- task ID, owner, current phase, last heartbeat, and exact changed paths;
+- last passing and failing commands with timestamps and candidate hashes;
+- estimated remaining work based on concrete unchecked acceptance rows;
+- blocking dependency and the person or task capable of clearing it;
+- scope drift, shared-file collision, unbounded retry, or suspicious inactivity;
+- whether the task can be split into another independent bounded unit; and
+- the next action the root agent will take if no heartbeat arrives.
+
+The scanner may notify and escalate, but it must never auto-commit unknown
+changes, invent progress, restart an unbounded task, or mark work complete from
+elapsed time alone.
+
+### 31.4 P0 semantic decision: in-doubt activity cardinality and coalescing
+
+The current TypeScript fold can append a failed activity marked `inDoubt` to an
+in-doubt projection while the checkpoint schema caps the collection at one.
+Python and TypeScript must not drift on whether a closed failed activity remains
+in the same projection as an open interrupted non-idempotent claim. Resolve this
+before expanding production stores.
+
+Required design work:
+
+1. enumerate the distinct states: open claim with no settlement, settled
+   failure with `inDoubt=true`, operator-resolved effect, retriable idempotent
+   failure, and terminal controller with unresolved effect;
+2. decide whether the protocol permits zero, one, or many simultaneous in-doubt
+   effects and explain why;
+3. if cardinality remains one, define deterministic replacement/coalescing and
+   prohibit a second non-idempotent dispatch while one unresolved claim exists;
+4. if cardinality becomes many, revise schemas, projection order, checkpoint
+   bounds, query API, resolution API, storage indices, and UI expectations;
+5. define whether a settled-but-unknown effect is retained until explicit
+   operator resolution or transformed into a terminal result immediately;
+6. define replay/fork inheritance exactly, including whether a child may inherit
+   an unresolved effect without inheriting attempt/cost charges it did not make;
+7. specify stable ordering and stable activity identity when multiple records
+   exist;
+8. add expected-event fixtures before modifying either implementation;
+9. implement the chosen semantics in TypeScript and Python independently;
+10. compare canonical checkpoints and error objects cross-language; and
+11. obtain independent review focused on accidental duplicate external effects.
+
+Acceptance tests must cover:
+
+- one open non-idempotent claim followed by resume;
+- one open claim followed by fork;
+- a settled in-doubt failure followed by resume and fork;
+- attempts to start a second non-idempotent activity while one is unresolved;
+- idempotent and side-effect-free failures adjacent to an unresolved effect;
+- checkpoint create/restore at every state;
+- terminal replay with unresolved effect;
+- an operator resolution with the wrong activity key, stale fence, or stale
+  history prefix;
+- duplicate resolution commands; and
+- exact TypeScript/Python error code, path, details, event bytes, and state.
+
+No automatic reinvocation, automatic success, or silent projection drop is
+acceptable.
+
+### 31.5 Complete durable-boundary fault-injection lattice
+
+Build a table-driven harness that injects a process loss, store error, timeout,
+cancellation, and commit-then-throw at every durable boundary. The harness must
+derive boundaries from the event vocabulary so newly added events cannot evade
+coverage.
+
+For each event type, test all meaningful points:
+
+1. before event construction;
+2. after event construction but before prospective fold;
+3. after prospective fold but before compare-and-swap;
+4. before store transaction commit;
+5. after transaction commit but before the store returns;
+6. after store return but before in-memory state update;
+7. after in-memory state update but before the next dispatch;
+8. before checkpoint construction;
+9. after checkpoint construction but before checkpoint save;
+10. after checkpoint save but before caller acknowledgment; and
+11. during terminal result delivery.
+
+The matrix must include at least these event families:
+
+- controller creation, lease acquisition, voluntary lease release, and
+  takeover;
+- round reservation and unused reservation release;
+- activity start, success, failure, timeout, cancellation, and retry;
+- discovery commit, evaluation commit, mode decision, and seen-state update;
+- patch proposed, rejected, accepted, and resulting revision exposure;
+- round commit, dry-count update, and terminal decision;
+- fork creation, parent lineage binding, and child first lease; and
+- explicit future in-doubt resolution.
+
+For every injected failure, assert:
+
+- the committed prefix is valid and hash-linked;
+- no uncommitted event appears on replay;
+- CAS conflicts do not overwrite a winner;
+- a committed success is not dispatched again;
+- reserved attempts/cost/dynamic nodes settle exactly once;
+- a stale fence cannot append;
+- replay has zero handler invocations;
+- resume either progresses safely or emits the exact fail-closed error;
+- terminal resume performs no writes; and
+- TypeScript and Python produce the same canonical outcome for the same
+  committed prefix.
+
+### 31.6 Cancellation and timeout boundary matrix
+
+Cancellation must be cooperative, durable where required, and incapable of
+creating a false success. Add deterministic cancellation triggers:
+
+- before the first round reservation;
+- immediately after reservation but before finder claim;
+- during every finder attempt;
+- after finder success but before discovery commit;
+- after discovery commit but before evaluator claim;
+- during every candidate-evaluator attempt;
+- after evaluator success but before evaluation commit;
+- during condition and optimizer evaluation;
+- immediately before patch-planner claim;
+- during patch planning;
+- after patch proposal but before GraphPatch decision;
+- after accepted decision but before revision visibility;
+- after round commit but before the next preflight; and
+- during pause, resume, replay, and fork public operations.
+
+For each trigger, test `none`, `idempotent`, and `non-idempotent` activity
+classes where meaningful. Distinguish caller cancellation from per-attempt
+timeout and controller max-duration exhaustion. Confirm that:
+
+- a cancellation cannot release work that actually remains in-doubt;
+- timeout charging uses the request-bound per-attempt ceiling and actual runtime
+  charging rules exactly as specified;
+- cancellation never increments the dry counter unless a valid dry round was
+  committed;
+- a late handler result cannot append after its attempt was durably cancelled;
+- repeated cancellation is idempotent;
+- cancellation errors preserve structured codes and stable paths; and
+- cancellation tests use bounded clocks and bounded waits, never real sleeps
+  that make CI flaky.
+
+### 31.7 Budget boundary lattice and accounting proof
+
+For every numeric limit, generate cases at `limit - one unit`, `limit`, and
+`limit + one unit`, plus zero/minimum, maximum representable, fractional USD,
+and invalid non-finite values where the contract allows numeric input.
+
+Limits to cover independently and in combinations:
+
+- maximum iterations;
+- maximum duration in milliseconds;
+- maximum total attempts;
+- maximum total cost USD;
+- maximum discoveries;
+- maximum dynamic nodes;
+- maximum candidates per round;
+- maximum candidate bytes;
+- maximum candidate batch bytes;
+- per-activity attempts per round;
+- per-attempt maximum cost; and
+- GraphPatch structural depth, fan-out, and output limits.
+
+Required accounting invariants:
+
+1. a round starts only if its complete worst-case request-bound envelope fits;
+2. no implementation adaptively reduces retry ceilings to make an otherwise
+   invalid round fit;
+3. a disabled runtime route releases its reserved envelope deterministically;
+4. successful early attempts release unused retry capacity exactly once;
+5. failed and timed-out attempts charge according to the normative rule;
+6. dynamic-node capacity is reserved before patch planning and settled against
+   the accepted patch, not merely the proposal;
+7. rejected and dry-run patches expose complete budget evidence without making
+   a revision visible;
+8. rounding and canonical serialization of fractional cost are identical in
+   both languages;
+9. a crash between reservation and settlement recovers from events without
+   double release or double charge; and
+10. the terminal reason uses one shared precedence table when several limits
+    become true at the same boundary.
+
+Add a model-based ledger oracle that computes expected available, reserved,
+charged, and released vectors independently of the runtime implementation.
+Compare every event prefix against the oracle, not just the terminal result.
+
+### 31.8 Hostile GraphPatch fragment and replay suite
+
+Expand validation beyond the initial missing-config, missing-`from`, and empty
+port regressions. Cover every fragment field and every trust boundary.
+
+Malformed structure cases:
+
+- non-object patch, base, append, node, edge, endpoint, output, or metadata;
+- missing or extra properties at every closed-object level;
+- duplicate node IDs, edge IDs, and output names;
+- invalid identifiers, Unicode normalization ambiguities, pointer escaping, and
+  maximum-length boundaries;
+- missing node kind/config/schema/side-effects;
+- malformed `from`/`to` endpoint node or port;
+- unsupported edge mode and inconsistent stream/value modes;
+- references to missing nodes, removed nodes, or outputs not yet visible;
+- empty append, oversized append, excessive graph depth, fan-out, node count,
+  edge count, output count, and canonical byte size;
+- forbidden mutation or deletion disguised as append;
+- non-portable JSON including NaN, infinity, negative zero ambiguity, cycles,
+  aliases, custom objects, duplicate JSON keys, and out-of-range values; and
+- patch ID/hash/base/revision mismatches.
+
+Authority and execution cases:
+
+- proposer activity key differs from the durable planner claim;
+- stale or mismatched principal, proposer, run, tenant, deployment, effective,
+  policy, or approval hash;
+- missing required capability;
+- capability allowed at one scope but denied at a narrower scope;
+- patch attempts to modify a succeeded node or an edge feeding succeeded work;
+- stale base after another patch wins;
+- concurrent identical patch, concurrent distinct patch, and replayed patch ID;
+- accepted decision commit-then-throw;
+- rejected decision commit-then-throw;
+- compiler diagnostics with deterministic order; and
+- recorder callback failure before and after durable decision.
+
+Run every malicious case through:
+
+1. direct public shape validation;
+2. live `apply` or `propose` execution;
+3. store restoration;
+4. event-fold replay with a correctly re-signed malicious history;
+5. checkpoint validation; and
+6. TypeScript/Python differential comparison.
+
+Every rejected case must prove zero unintended recorder calls, zero visible
+revision mutation, zero leaked dynamic-node capacity, and a stable error code,
+JSON pointer, phase, and diagnostic order.
+
+### 31.9 Replay, fork, and lineage proof expansion
+
+Add a generated lineage tree rather than testing only one parent/child pair.
+The bounded test tree must include start → fork A → fork B, sibling forks at the
+same parent prefix, forks from different valid prefixes, and attempts to create
+cycles in lineage metadata.
+
+Required invariants:
+
+- a child binds exact parent run ID, stream ID, sequence, record hash, history
+  prefix hash, request hash, and controller identity where the contract requires;
+- changing any parent byte invalidates the child lineage;
+- a child inherits only explicitly listed event-derived state;
+- the child does not invent parent attempts, costs, leases, or timestamps;
+- a parent cannot be garbage-collected while a retained child references it;
+- replay detects missing ancestors, duplicate ancestors, ancestry cycles, and
+  a parent prefix longer or shorter than declared;
+- sibling streams cannot mutate one another;
+- fork from terminal history has defined behavior and zero accidental dispatch;
+- fork from an open idempotent claim follows the normative retry rule;
+- fork from an open non-idempotent claim fails before new lease acquisition;
+- checkpoint restore and full-fold restore yield identical child state; and
+- TypeScript and Python canonical child creation events and errors match.
+
+Add a lineage manifest/export format so support tooling can package every
+required ancestor with hashes for offline replay.
+
+### 31.10 Production CycleStore contract
+
+Promote storage semantics into an explicit provider contract before writing a
+database adapter. The contract must define:
+
+- atomic append of one or more events against an expected tail sequence;
+- unique stream identity and immutable committed event bytes;
+- database-enforced record-hash and previous-hash continuity where practical;
+- maximum event batch size and maximum event size;
+- strongly consistent tail reads required for ownership transfer;
+- paginated prefix reads that cannot skip or duplicate events;
+- checkpoint save/load/list/delete semantics without making checkpoints
+  authoritative;
+- lease acquire/renew/release/takeover with monotonically increasing fence;
+- idempotency behavior for retried client requests;
+- transaction isolation requirements;
+- tenant partitioning and authorization hooks;
+- retention, archival, legal hold, backup, restore, and compaction behavior;
+- encryption-at-rest and protected-payload integration boundaries;
+- observability without raw sensitive payload leakage;
+- schema/version discovery and migration locking; and
+- explicit error taxonomy for conflict, stale fence, unavailable store,
+  corruption, quota, permission, and unsupported version.
+
+Write a provider-neutral conformance suite that every adapter must pass. It must
+be runnable against a deterministic reference model, SQLite, and PostgreSQL.
+Tests must never pass merely because an adapter throws a generic exception.
+
+### 31.11 SQLite reference durable adapter
+
+Implement a single-process durable SQLite adapter as the first persistence
+step, with clear non-distributed scope.
+
+Deliverables:
+
+- migrations with schema version table and reversible development migration
+  instructions;
+- events table keyed by tenant/stream/sequence with unique event and record
+  hashes;
+- stream-head table updated in the same transaction as append;
+- checkpoints table keyed by scope/checkpoint ID and bound to tail hash;
+- leases table with epoch/fence/holder/expiry and transactional compare/update;
+- WAL configuration guidance, busy timeout, connection ownership, and bounded
+  transaction retries;
+- corruption and foreign-key checks;
+- export/import and backup/restore commands;
+- Python and TypeScript adapters that do not shell out to one another; and
+- a crash harness that terminates a writer process at transaction boundaries.
+
+Acceptance requires process restart recovery, concurrent-writer CAS conflict,
+stale-fence rejection, checkpoint corruption fallback to full fold, backup
+restore, migration from the immediately previous alpha schema, and exact native
+conformance in both languages.
+
+### 31.12 PostgreSQL production adapter and real fencing
+
+Implement PostgreSQL only after the provider suite and SQLite semantics are
+stable.
+
+Required design:
+
+- one transaction for expected-head verification, event append, head update,
+  and lease-fence verification;
+- row-level lock or equivalent compare-and-swap with documented isolation level;
+- monotonically increasing fence generated by the database, never by an
+  untrusted client clock;
+- database time for lease expiry decisions, with documented skew behavior;
+- bounded lease renewal and takeover rules;
+- server-side constraints for sequence and hash chain;
+- tenant-aware indexes and optional row-level security guidance;
+- pagination that preserves a stable snapshot;
+- connection pool limits, statement timeout, lock timeout, and retry taxonomy;
+- migration locking and zero/low-downtime rollout guidance;
+- logical backup/restore and point-in-time recovery drill; and
+- metrics for conflict rate, lease loss, append latency, fold length,
+  checkpoint hit/fallback, and corruption detection.
+
+Chaos tests must include two owners racing for one stream, delayed old-owner
+writes after takeover, network loss before and after commit, primary failover,
+read replica lag, connection termination, deadlock retry, disk/full quota, and
+schema migration while readers are active. A stale owner must never append even
+if its process resumes after a long pause.
+
+### 31.13 Checkpoint acceleration without checkpoint authority
+
+Define and implement checkpoint-assisted restore while keeping the event stream
+authoritative.
+
+Algorithm requirements:
+
+1. load a named or newest eligible checkpoint;
+2. validate API version, controller/request hashes, stream/scope identity,
+   sequence, tail record hash, history prefix hash, projection schema, and every
+   bounded collection;
+3. reject or warn on a future/unsupported version;
+4. fold all subsequent events from the exact next sequence;
+5. optionally compare a sampled accelerated fold with a full fold;
+6. fall back to full history on any checkpoint read, decode, validation, or
+   compatibility failure unless policy requires a hard stop;
+7. emit a protected structured warning without changing the terminal result;
+8. never call a handler merely because a checkpoint is absent or invalid; and
+9. support deterministic checkpoint cadence based on events/bytes, not wall
+   clock alone.
+
+Benchmarks must measure restore latency and memory for 100, 1,000, 10,000, and
+100,000-event streams, while correctness tests compare every accelerated result
+to a full fold byte-for-byte.
+
+### 31.14 Ordinary scheduler and GraphPatch integration
+
+Integrate dynamic revisions without permitting implicit unbounded graph cycles.
+
+Design constraints:
+
+- the ordinary compiled graph remains acyclic per revision;
+- the cycle controller owns repetition and proposes append-only revisions;
+- a scheduler applies only a durable accepted revision with a matching base;
+- already succeeded/running nodes and consumed edges cannot be redefined;
+- ready-queue derivation is revision-aware and deterministic;
+- a new node cannot observe outputs it is not authorized to read;
+- newly added edges cannot retroactively change already committed input
+  preimages;
+- scheduler events bind graph revision, graph hash, and revision hash;
+- pause/resume has a defined handoff point between scheduler and controller;
+- a rejected/stale patch never changes scheduler-visible topology;
+- concurrent accepted revisions have a single CAS winner; and
+- the integration retains bounded attempts, concurrency, duration, cost,
+  discovery, and dynamic-node limits.
+
+End-to-end scenarios:
+
+1. security sweep discovers routes and appends one verifier node per approved
+   finding under a global dynamic-node cap;
+2. research fan-out adds a synthesis node only after source collection;
+3. code migration loops failing files back through bounded repair attempts while
+   every static revision remains acyclic;
+4. a stale planner loses a base race and replans from the new revision;
+5. process loss after patch acceptance resumes without double-scheduling a new
+   node; and
+6. a malicious patch targeting completed work is rejected before scheduler
+   mutation.
+
+### 31.15 Observability, protected evidence, and support tooling
+
+Add operator views that explain the graph without exposing raw private payloads.
+
+Required derived views:
+
+- controller summary with mode, iteration, dry count, current revision, limits,
+  charged/reserved/released budgets, and terminal reason;
+- activity timeline with stable keys, attempts, side-effect class, duration,
+  outcome, and in-doubt state;
+- graph revision chain with patch decisions, bases, hashes, authority snapshot
+  references, diagnostics, and visible nodes/edges/outputs;
+- replay/fork lineage tree;
+- lease/fence ownership history;
+- checkpoint health and fallback count;
+- seen/accepted/rejected/unknown counts without revealing candidate values; and
+- storage conflicts, corruption warnings, and recovery actions.
+
+All logs and metrics must pass D9 redaction/sink-guard policy before claiming
+protected observability. High-cardinality IDs belong in traces or protected
+evidence, not unbounded metric labels. Provide a support bundle command that
+exports manifest, schemas, hashes, sanitized projections, configuration, and
+version information while excluding raw candidate, prompt, tool output, secret,
+and protected blob content by default.
+
+### 31.16 Property testing, differential fuzzing, and state-machine models
+
+Build generators for valid and invalid requests, activity outputs, event
+prefixes, checkpoints, GraphPatch documents, revisions, lease transitions, and
+lineage trees.
+
+Properties to enforce:
+
+- validation is deterministic and does not mutate caller input;
+- canonical serialization and hashes are stable across languages;
+- fold is a pure function of valid history plus explicitly bound parent state;
+- folding a prefix then its suffix equals folding the complete stream;
+- no valid prefix has negative available/reserved/charged counters;
+- a terminal prefix cannot accept later events;
+- event sequence and record-hash continuity cannot be bypassed;
+- accepted revisions form a strictly increasing, hash-linked chain;
+- a rejected patch does not alter the current revision;
+- seen keys never disappear;
+- dry count changes only on committed dry/non-dry round facts;
+- full-envelope preflight prevents partial work when the envelope cannot fit;
+- stale leases and stale patch bases never win;
+- replay never invokes handlers; and
+- TypeScript and Python either accept to identical canonical state or reject
+  with the same normalized error category and path.
+
+Fuzz runs must be seeded and reproducible in CI, retain minimized counterexample
+fixtures, cap examples/time/bytes, and avoid network/model dependencies. Add a
+longer nightly profile and a bounded pull-request profile.
+
+### 31.17 Performance and scalability budgets
+
+Establish benchmarks before optimizing. Measure both languages on the same
+fixture families and publish methodology, hardware, warm-up, samples, and
+variance.
+
+Benchmark dimensions:
+
+- request validation by document size;
+- event construction, canonical serialization, hashing, prospective fold, and
+  append latency;
+- full replay by event count and candidate/seen cardinality;
+- checkpoint-assisted replay;
+- GraphPatch validation and compilation by appended node/edge count;
+- concurrent local and PostgreSQL writers;
+- memory retained per event, seen key, verdict, revision, and checkpoint;
+- fork lineage resolution depth;
+- conformance runner duration; and
+- package import/startup time.
+
+Initial engineering budgets, to be calibrated with evidence:
+
+- no accidental quadratic replay in ordinary event-count growth;
+- bounded candidate and patch bytes enforced before expensive compilation;
+- 10,000-event local full replay completes within a documented developer-grade
+  budget without unbounded memory;
+- checkpoint restore provides a material measured improvement at long history;
+- a rejected oversize input exits before handler or compiler dispatch; and
+- benchmark regression thresholds account for variance and never encourage
+  disabling correctness checks.
+
+Performance changes require correctness and security gates first. Do not cache
+unvalidated state or weaken prospective-fold/CAS semantics to improve a chart.
+
+### 31.18 Public API, compatibility, and migration policy
+
+Before beta:
+
+- document which D7 symbols are public, experimental, or internal;
+- provide one namespace-consistent TypeScript and Python API map;
+- stabilize structured error codes and JSON pointer conventions;
+- define event/checkpoint/request/patch API version compatibility windows;
+- write migration adapters only for explicitly supported source versions;
+- reject unknown future required fields fail-closed;
+- preserve unknown optional extension data only where the contract explicitly
+  permits it;
+- test old reader/new writer and new reader/old writer combinations;
+- publish deprecation periods and removal policy;
+- add changelog entries with upgrade impact and recovery procedure; and
+- prove package exports, type declarations, Python type markers, and source
+  distributions contain the intended D7 surfaces.
+
+Never mutate committed event bytes during migration. Migrations either transform
+a copy into a new explicitly versioned stream or teach the reader to interpret
+an older immutable version.
+
+### 31.19 Examples, course material, and newcomer success
+
+Build examples that teach graph shape and operational safety, not just API
+syntax:
+
+1. redraw a needless linear chain into independent fan-out and a real barrier;
+2. fan out research, reduce deterministically in code, and synthesize once;
+3. pipeline independent items without a global barrier;
+4. route a low/high-risk review based on validated classifier output;
+5. verify findings through correctness, security, and reproduction lenses;
+6. run an until-dry discovery loop that dedupes against all seen candidates;
+7. demonstrate budget preflight stopping with zero dispatch;
+8. crash after a committed discovery and safely resume without rerunning it;
+9. show an interrupted non-idempotent activity blocking with a remediation
+   explanation;
+10. apply one accepted GraphPatch and inspect its revision evidence;
+11. reject a stale or unauthorized patch with stable diagnostics;
+12. replay and fork an exact prefix;
+13. compare full replay with checkpoint-assisted replay; and
+14. run the same fixture in TypeScript and Python.
+
+Each example needs README context, architecture diagram where it materially
+clarifies flow, copy/paste commands, expected output, bounded budgets, failure
+exercise, test, CI invocation, version pin, and honest production boundary.
+
+Run moderated usability sessions with at least five users unfamiliar with the
+implementation. Measure time to first valid graph, time to diagnose one
+intentional failure, completion rate, wrong mental models, docs search paths,
+and recovery success. Convert every repeated failure into a tracked docs/API
+task.
+
+### 31.20 Security review and threat-model update
+
+Update the threat model with D7-specific assets and attackers.
+
+Assets:
+
+- immutable event history and record hashes;
+- lease/fence authority;
+- budget ledger and reserved capacity;
+- activity implementation identity and idempotency key;
+- GraphPatch authority snapshots and revision chain;
+- candidate values and verdicts;
+- checkpoints and lineage manifests; and
+- protected support evidence.
+
+Threats:
+
+- forged or truncated history;
+- stale owner writes after takeover;
+- malicious activity output exhausting parser/compiler resources;
+- patch privilege escalation or capability laundering;
+- candidate-key collision or Unicode ambiguity;
+- replay of an accepted patch against another base/run/tenant;
+- checkpoint substitution;
+- parent-lineage substitution;
+- budget under-reservation, double release, or cost evasion;
+- duplicate non-idempotent effect;
+- log/support-bundle data exfiltration;
+- denial of service through deep graphs, huge diagnostics, or pathological JSON;
+- dependency or artifact substitution; and
+- maintainer mistake during migration or emergency recovery.
+
+For each threat, record prevention, detection, response, residual risk, test,
+owner, and release gate. Obtain an independent security review and retain every
+finding/disposition, including rejected findings, in append-only evidence.
+
+### 31.21 CI and release evidence expansion
+
+Add a D7 evidence manifest that binds:
+
+- source commit/tree/parents;
+- toolchain and dependency lock hashes;
+- generated schema and fixture hashes;
+- TypeScript package and Python wheel/sdist hashes;
+- exact commands, platforms, and result counts;
+- fuzz seeds and minimized regressions;
+- database image/version and migration version;
+- benchmark environment and raw results;
+- reviewer identity/independence and dispositions;
+- known limitations and intentionally skipped external gates; and
+- remote branch/tag/artifact identities.
+
+Required CI rows before D7 production claim:
+
+- Node supported versions on Linux, macOS, and Windows where supported;
+- Python 3.11, 3.12, and 3.13 on supported platforms;
+- TypeScript native, Python native, and cross-language conformance;
+- SQLite and PostgreSQL provider conformance;
+- fault injection, cancellation, budget, patch, fork, and corruption matrices;
+- deterministic property tests and bounded fuzz profile;
+- package content and fresh-environment installation;
+- documentation links/snippets/examples;
+- license, provenance, SBOM, dependency audit, and secret scan;
+- migration and backup/restore drill; and
+- independent acceptance against an immutable release candidate.
+
+A green branch is not a release. The candidate must be immutable, evidence must
+refer to that exact object, and required external checks must finish on that
+same candidate.
+
+### 31.22 Detailed task contracts and dependency order
+
+Create or update task-registry entries with these minimum contracts:
+
+- **D7-H01 in-doubt semantics:** input current schemas/folds; output normative
+  decision, fixtures, dual implementation, exact conformance; blocks stores and
+  beta API; independent reviewer required.
+- **D7-H02 boundary fault harness:** input event vocabulary; output derived fault
+  matrix and retained results; depends on H01 event semantics.
+- **D7-H03 cancellation matrix:** input handler harness and fake clock; output
+  every-boundary tests; may run with H02 after shared harness ownership is set.
+- **D7-H04 budget oracle:** input policy/request contracts; output independent
+  ledger model, lattice fixtures, dual-runtime comparison; blocks production
+  cost claims.
+- **D7-H05 hostile GraphPatch suite:** input patch/revision/authority schemas;
+  output generated malicious corpus and trust-boundary tests; blocks scheduler
+  integration.
+- **D7-H06 lineage model:** input fork semantics; output bounded lineage-tree
+  fixtures, exporter, dual-runtime tests; blocks retention policy.
+- **D7-S01 store provider contract:** input controller CAS requirements; output
+  adapter interface, error taxonomy, reference model, conformance kit.
+- **D7-S02 SQLite adapter:** depends on S01 and H01; output native adapters,
+  migrations, crash tests, backup/restore evidence.
+- **D7-S03 PostgreSQL adapter:** depends on S01/H01; output database-fenced native
+  adapters and chaos evidence.
+- **D7-S04 checkpoint acceleration:** depends on stable checkpoint projection;
+  output validated fast path, fallback, equivalence and performance tests.
+- **D7-I01 scheduler revision protocol:** depends on H05 and authority contract;
+  output normative handoff and expected fixtures.
+- **D7-I02 scheduler implementation:** depends on I01 plus at least reference
+  durable store; output revision-aware scheduling and end-to-end tests.
+- **D7-Q01 state-machine/property suite:** may start after H01 fixture decision;
+  output seeded generators and minimized regressions.
+- **D7-Q02 benchmark suite:** depends on stable public operations; output raw
+  reproducible baselines and guarded thresholds.
+- **D7-O01 protected operator views:** depends on D9 redaction/sink guard; output
+  projections, CLI/API views, support bundle, leak tests.
+- **D7-E01 examples/course:** depends on truthful alpha API; output tested
+  bilingual examples and exercises.
+- **D7-R01 compatibility/migration:** depends on stable beta candidate; output
+  matrix, adapters, migration drills, docs.
+- **D7-R02 independent acceptance:** depends on all required rows; output hostile
+  review, disposition ledger, immutable evidence, and explicit accept/reject.
+
+Every task contract must include exact owned paths, forbidden shared paths,
+maximum retry/fan-out/time budget, expected artifacts, expected tests, evidence
+path, rollback/recovery procedure, and next dependency. “Improve robustness” or
+“finish tests” is not a valid task description.
+
+### 31.23 Execution waves for maximum safe speed
+
+Wave 1 can run H01 design, H04 oracle design, H05 corpus design, H06 lineage
+fixtures, and S01 provider-contract drafting in parallel because their outputs
+are separable. Root ownership resolves any contract conflict before code edits.
+
+Wave 2 runs H02/H03 harness implementation, H04/H05/H06 dual-runtime code, S02
+SQLite implementation, and Q01 generators. Shared schemas are frozen per
+candidate while these lanes execute.
+
+Wave 3 runs S03 PostgreSQL, S04 checkpoint acceleration, I01 scheduler revision
+protocol, and initial E01 material against the verified alpha surface.
+
+Wave 4 runs I02 scheduler integration, O01 protected operator views, Q02
+benchmarks, full storage chaos, migration design, and complete examples.
+
+Wave 5 creates one immutable release candidate and runs the entire native,
+cross-language, database, chaos, security, package, docs, usability, and
+compatibility matrix. Failures create new commits and a new candidate; evidence
+must never be rebound to changed bytes.
+
+Wave 6 is independent acceptance, release authorization, artifact publication,
+public identity verification, support readiness, and post-release monitoring.
+
+Parallelism rules:
+
+- prefer independent fixture/spec/review tasks over multiple agents editing one
+  implementation file;
+- give each writer a disjoint worktree or path set;
+- cap every agent's retries, fan-out, runtime, and write scope;
+- run deterministic reductions in code rather than spending model calls on
+  flatten/dedupe plumbing;
+- put barriers only where cross-item comparison truly needs the whole set;
+- preserve all failed tests and rejected findings as evidence; and
+- stop dispatch when an unresolved contract decision would cause incompatible
+  implementations.
+
+### 31.24 Organic adoption plan tied to product quality
+
+The repository may target 5,000 and later 6,000 authentic GitHub stars, but it
+must pursue them through user value and community trust:
+
+- a truthful one-command quickstart that succeeds in a fresh environment;
+- a compelling bilingual TypeScript/Python native-cycle demo;
+- clear architecture diagrams and a 14-step graph-engineering course grounded
+  in executable repository code;
+- comparison pages based on reproducible capabilities rather than attacks or
+  unverifiable superiority claims;
+- small, reviewable `good first issue` and `help wanted` tasks with maintainer
+  response targets;
+- regular changelogs, roadmap truth, release notes, and public known limits;
+- examples contributed by real users and adapters maintained with explicit
+  ownership;
+- talks, articles, demos, and launch posts that link to tested artifacts;
+- prompt issue/PR triage, a code of conduct, security policy, support policy, and
+  governance path; and
+- privacy-respecting adoption measurements such as quickstart completion,
+  repeat contributors, issue resolution, release downloads, documentation task
+  success, and retained production users.
+
+Forbidden growth tactics include purchased stars, automated starring, spam,
+misleading benchmarks, concealed sponsorship, fake users, forced engagement,
+or claiming Andrew Ng/Claude/X endorsement without verifiable authorization.
+Star count never overrides security, evidence, licensing, privacy, or release
+quality.
+
+Suggested adoption milestones are observational, not guaranteed deadlines:
+
+- 100 authentic stars: validate positioning and quickstart completion;
+- 500: validate contributor onboarding and recurring external use cases;
+- 1,000: validate support load, governance, and package reliability;
+- 2,500: validate adapter ecosystem and stable migration process;
+- 5,000: validate broad awareness without weakening technical truth; and
+- 6,000+: sustain quality, compatibility, security response, and contributor
+  health rather than optimizing only for acquisition.
+
+At each milestone, publish product evidence and community lessons, not a claim
+that popularity proves correctness.
+
+### 31.25 D7 production-claim acceptance checklist
+
+D7 may be described as production-ready only when every applicable row below is
+green on one immutable candidate and independent review accepts it:
+
+- [ ] in-doubt cardinality/resolution semantics are normative and identical in
+      TypeScript and Python;
+- [ ] every durable event boundary has bounded crash/commit-then-throw coverage;
+- [ ] cancellation and timeout matrices cover every meaningful activity phase;
+- [ ] an independent budget oracle validates every event prefix and boundary;
+- [ ] hostile GraphPatch validation covers structure, authority, resources,
+      replay, restore, and concurrency;
+- [ ] replay/fork lineage trees pass corruption, missing ancestor, sibling, and
+      cycle tests;
+- [ ] provider-neutral CycleStore conformance is published and enforced;
+- [ ] SQLite restart/CAS/backup/migration tests pass in both languages;
+- [ ] PostgreSQL fencing and failover chaos tests pass in both languages;
+- [ ] stale owners cannot append after takeover;
+- [ ] checkpoint acceleration is byte-equivalent to full fold and safely falls
+      back on corruption;
+- [ ] ordinary scheduler applies accepted revisions exactly once and never
+      accepts implicit unbounded cycles;
+- [ ] D9-protected operator views and support bundles pass leak tests;
+- [ ] seeded property/differential/state-machine suites pass and retain
+      counterexamples;
+- [ ] performance budgets are documented and measured without weakening
+      validation;
+- [ ] compatibility/migration matrices and immutable-event policy are tested;
+- [ ] package contents and clean wheel/sdist/npm installation include the
+      intended public surfaces;
+- [ ] examples, snippets, and course exercises execute in CI;
+- [ ] supported OS/runtime/database matrices pass on the exact candidate;
+- [ ] provenance, SBOM, dependency, license, and secret gates pass;
+- [ ] independent technical and security reviewers close every disposition;
+- [ ] public documentation lists remaining non-claims and supported boundaries;
+- [ ] release artifacts, source tag, evidence manifest, and public checks bind
+      the same commit/tree; and
+- [ ] the no-omission audit in section 29 is repeated after this entire appendix
+      is inventoried into the task registry.
+
+### 31.26 Immediate next implementation sequence
+
+The next concrete development sequence after baseline
+`a6c8e67c56d9ebcd8596307d9166763f48ac8713` is:
+
+1. write the immutable D7 baseline evidence record with exact local/remote
+   identities and clean-worktree commands;
+2. preserve D7 TS and Python task states as `in_progress` until independent
+   hostile review and the full boundary matrix complete;
+3. resolve H01 in-doubt semantics with expected fixtures before implementation;
+4. add exact cross-language cases for rejected GraphPatch, resume/fork blocked
+   by non-idempotent claim, cancellation boundaries, and budget one-below/at/
+   above cases;
+5. derive the durable-boundary fault harness from the event vocabulary;
+6. add the independent budget ledger oracle;
+7. extend hostile GraphPatch and lineage suites;
+8. specify the CycleStore provider contract before writing SQLite/PostgreSQL;
+9. implement and validate checkpoint-assisted restore;
+10. freeze the scheduler revision handoff contract before integration code;
+11. rerun full native/cross-language/package/docs/security gates in a clean
+    candidate worktree;
+12. request independent hostile review when agent/reviewer capacity is
+    available; and
+13. append all discoveries, failures, superseding evidence, and newly required
+    work without changing any earlier plan bytes.
+
+Completion of this section means the implementation, tests, production stores,
+integration, evidence, documentation, migration, security review, usability,
+and release gates actually exist and pass. It does not mean the checklist was
+copied into a log, that an author reviewed their own work, or that a popularity
+number was reached.
