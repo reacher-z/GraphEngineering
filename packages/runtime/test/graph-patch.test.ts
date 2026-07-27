@@ -8,6 +8,7 @@ import {
 } from "@graph-engineering/core";
 import { describe, expect, it } from "vitest";
 import { exerciseGraphPatchHostileShapeCampaign } from "../../../tools/conformance/graph_patch_hostile_shape.mjs";
+import { exerciseGraphPatchHostileSemanticCampaign } from "../../../tools/conformance/graph_patch_hostile_semantic.mjs";
 import * as runtime from "../src/index.js";
 import {
   CycleControllerError,
@@ -425,5 +426,47 @@ describe("native GraphPatch applier", () => {
       && !outcome.decisionRecorded
       && outcome.callerUnchanged
     ))).toBe(true);
+  });
+
+  it("executes the closed 24-case hostile semantic and idempotency corpus", async () => {
+    const fixture = JSON.parse(readFileSync(
+      new URL("../../../spec/conformance/graph-patch-hostile-semantic.case.json", import.meta.url),
+      "utf8",
+    ));
+    const baseGraph = JSON.parse(readFileSync(
+      new URL("../../../spec/conformance/diamond.graph.json", import.meta.url),
+      "utf8",
+    ));
+    const report = await exerciseGraphPatchHostileSemanticCampaign({
+      runtime,
+      core,
+      graph: baseGraph,
+      fixture,
+    });
+
+    expect(report.caseCount).toBe(24);
+    expect(report.decisionCaseCount).toBe(19);
+    expect(report.behaviorCaseCount).toBe(5);
+    expect(report.casesCanonicalUtf8Bytes).toBe(3590);
+    expect(report.casesSha256).toBe(
+      "9b58924f80d5b6886652a104dc9e84c0502e939ccc02751a052970c556cabb53",
+    );
+    const decisions = report.outcomes.filter(({ kind }) => kind === "decision");
+    expect(decisions).toHaveLength(19);
+    expect(decisions.every((outcome) => (
+      outcome.decision.outcome === "rejected"
+      && outcome.decision.errorCode !== null
+      && outcome.beforeCoordinate.graphRevision === outcome.afterCoordinate.graphRevision
+      && outcome.decisionCount === 0
+      && outcome.dynamicNodes === 0
+    ))).toBe(true);
+    const race = report.outcomes.find(({ id }) => id === "same-base-one-winner");
+    expect(race?.observations).toMatchObject({
+      acceptedCount: 1,
+      staleCount: 1,
+      decisionCount: 2,
+      runtimeRevision: 2,
+      dynamicNodes: 1,
+    });
   });
 });

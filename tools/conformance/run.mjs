@@ -13,6 +13,7 @@ import { exerciseCycleOperationInterruptionCampaign } from "./cycle_operation_in
 import { exerciseCyclePatchVisibilityFaultCampaign } from "./cycle_patch_visibility_fault.mjs";
 import { exerciseCyclePatchCheckpointFaultCampaign } from "./cycle_patch_checkpoint_fault.mjs";
 import { exerciseGraphPatchHostileShapeCampaign } from "./graph_patch_hostile_shape.mjs";
+import { exerciseGraphPatchHostileSemanticCampaign } from "./graph_patch_hostile_semantic.mjs";
 
 const root = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 const fixtureRoot = join(root, "spec", "conformance");
@@ -1375,6 +1376,40 @@ assert.deepEqual(
 );
 process.stdout.write(
   `Cross-language hostile GraphPatch shape conformance passed for ${tsGraphPatchHostileShape.attackCount} attacks across ${Object.keys(tsGraphPatchHostileShape.categoryCounts).length} categories.\n`,
+);
+const graphPatchHostileSemanticFixture = JSON.parse(
+  await readFile(join(fixtureRoot, "graph-patch-hostile-semantic.case.json"), "utf8"),
+);
+const pythonGraphPatchHostileSemantic = spawnSync(
+  "uv",
+  [
+    "run",
+    "--project",
+    "python",
+    "python",
+    "tools/conformance/python_graph_patch_hostile_semantic_report.py",
+  ],
+  { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
+);
+if (pythonGraphPatchHostileSemantic.status !== 0) {
+  throw new Error(
+    `Python hostile GraphPatch semantic campaign failed:\n${pythonGraphPatchHostileSemantic.stderr || pythonGraphPatchHostileSemantic.stdout}`,
+  );
+}
+const pyGraphPatchHostileSemantic = JSON.parse(pythonGraphPatchHostileSemantic.stdout);
+const tsGraphPatchHostileSemantic = await exerciseGraphPatchHostileSemanticCampaign({
+  runtime,
+  core,
+  graph: cycleGraph,
+  fixture: graphPatchHostileSemanticFixture,
+});
+assert.deepEqual(
+  tsGraphPatchHostileSemantic,
+  pyGraphPatchHostileSemantic,
+  "D7 hostile GraphPatch semantic campaign reports differ",
+);
+process.stdout.write(
+  `Cross-language hostile GraphPatch semantic conformance passed for ${tsGraphPatchHostileSemantic.caseCount} cases (${tsGraphPatchHostileSemantic.decisionCaseCount} decisions and ${tsGraphPatchHostileSemantic.behaviorCaseCount} behaviors).\n`,
 );
 const cycleRequestValue = JSON.parse(JSON.stringify(
   cycleContractFixture.validRequests[0].document,

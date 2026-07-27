@@ -413,7 +413,19 @@ Python. It covers closed root/base/append/node/edge/output shapes plus the
 100-level and 4 MiB portable-capture ceilings. Every input fails with
 `GE_PATCH_INVALID` before a decision or graph mutation, and the native reports
 compare exact input lengths and hashes. This is the H05A shape boundary; the
-schema-valid semantic attack corpus remains separate work.
+schema-valid semantic attack corpus remains a separate decision boundary.
+
+The retained
+[`graph-patch-hostile-semantic.case.json`](../../spec/conformance/graph-patch-hostile-semantic.case.json)
+campaign exercises that H05B boundary with 24 schema-valid cases: 19 semantic
+rejections and five stateful idempotency/CAS behaviors. The native runtimes
+independently compare canonical patch hashes, stable public codes, authority and
+policy hashes, complete budget outcomes, resulting coordinates, decision-cache
+counts, and dynamic-node projections. It includes cumulative dynamic-node
+limits, capability requests in both node `config` and `resources`, historical
+accepted retries, dry-run ID reuse, and one accepted/one stale same-base race.
+See [cycle semantics](../../spec/cycle-semantics.md#102-hostile-semantic-and-decision-corpus)
+for the exact portability boundary.
 
 ## Alpha semantics
 

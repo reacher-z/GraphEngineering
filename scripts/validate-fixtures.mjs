@@ -404,6 +404,204 @@ const expectedHostileAssertions = new Set([
 assert.equal(graphPatchHostileShape.requiredAssertions.length, expectedHostileAssertions.size);
 assert.deepEqual(new Set(graphPatchHostileShape.requiredAssertions), expectedHostileAssertions);
 
+function semanticNode(id, overrides = {}) {
+  return {
+    id,
+    kind: "validator",
+    inputSchema: {},
+    outputSchema: {},
+    config: {},
+    sideEffects: "none",
+    ...overrides,
+  };
+}
+
+function semanticPatch(coordinate, patchId, nodeId) {
+  return {
+    apiVersion: "graphengineering.reacher-z.github.io/patches/v1alpha1",
+    kind: "GraphPatch",
+    patchId,
+    base: structuredClone(coordinate),
+    append: {
+      nodes: [semanticNode(nodeId)],
+      edges: [{
+        id: `${patchId}-edge`,
+        from: { node: "merge" },
+        to: { node: nodeId },
+        mode: "value",
+      }],
+      outputs: { [`${nodeId}Result`]: { node: nodeId } },
+    },
+  };
+}
+
+function materializeSemanticGraphPatch(coordinate, attack) {
+  const nodeId = `${attack.id}-node`;
+  const proposal = semanticPatch(coordinate, `semantic-${attack.id}`, nodeId);
+  switch (attack.scenario) {
+    case "stale-base":
+      proposal.base.graphRevision += 1;
+      break;
+    case "duplicate-existing-node":
+      proposal.append.nodes[0].id = "split";
+      proposal.append.edges[0].to.node = "split";
+      proposal.append.outputs = { duplicateNode: { node: "split" } };
+      break;
+    case "duplicate-new-node":
+      proposal.append.nodes.push(structuredClone(proposal.append.nodes[0]));
+      break;
+    case "duplicate-existing-edge":
+      proposal.append.edges[0].id = "left-merge";
+      break;
+    case "duplicate-new-edge":
+      proposal.append.edges.push(structuredClone(proposal.append.edges[0]));
+      break;
+    case "duplicate-existing-output":
+      proposal.append.outputs = { result: { node: nodeId } };
+      break;
+    case "incoming-existing-target":
+      proposal.append.edges[0].to.node = "left";
+      break;
+    case "unsupported-stream-edge":
+      proposal.append.edges[0].mode = "stream";
+      break;
+    case "config-capability-expansion":
+      proposal.append.nodes[0].config = { capabilities: ["network"] };
+      break;
+    case "resource-capability-expansion":
+      proposal.append.nodes[0].resources = { capabilities: ["network"] };
+      break;
+    case "candidate-cycle": {
+      const left = `${attack.id}-left`;
+      const right = `${attack.id}-right`;
+      proposal.append.nodes = [semanticNode(left), semanticNode(right)];
+      proposal.append.edges = [
+        { id: `${attack.id}-entry`, from: { node: "merge" }, to: { node: left }, mode: "value" },
+        { id: `${attack.id}-forward`, from: { node: left }, to: { node: right }, mode: "value" },
+        { id: `${attack.id}-cycle`, from: { node: right }, to: { node: left }, mode: "value" },
+      ];
+      proposal.append.outputs = { cycleResult: { node: right } };
+      break;
+    }
+    case "source-not-succeeded":
+    case "zero-dynamic-reservation":
+    case "runtime-dynamic-limit":
+    case "maximum-node-limit":
+    case "maximum-edge-limit":
+    case "maximum-output-limit":
+    case "maximum-depth-limit":
+    case "maximum-fanout-limit":
+    case "exact-rejected-retry":
+    case "changed-decided-id":
+    case "historical-accepted-retry":
+    case "dry-run-id-reuse":
+    case "same-base-one-winner":
+      break;
+    default:
+      assert.fail(`unknown hostile semantic scenario ${String(attack.scenario)}`);
+  }
+  return proposal;
+}
+
+const graphPatchHostileSemantic = await loadJson("graph-patch-hostile-semantic.case.json");
+assert.equal(graphPatchHostileSemantic.schemaVersion, 1);
+assert.equal(graphPatchHostileSemantic.id, "graph-patch-hostile-semantic-v1alpha1");
+assert.equal(
+  fixtureReference("graph-patch-hostile-semantic.case.json", graphPatchHostileSemantic.baseGraph),
+  "diamond.graph.json",
+);
+const hostileSemanticCases = graphPatchHostileSemantic.cases;
+const hostileSemanticExpect = graphPatchHostileSemantic.expect;
+assert.equal(hostileSemanticCases.length, hostileSemanticExpect.caseCount);
+assert.equal(new Set(hostileSemanticCases.map(({ id }) => id)).size, hostileSemanticCases.length);
+assert.equal(
+  new Set(hostileSemanticCases.map(({ scenario }) => scenario)).size,
+  hostileSemanticCases.length,
+);
+const expectedSemanticScenarios = new Set([
+  "stale-base",
+  "duplicate-existing-node",
+  "duplicate-new-node",
+  "duplicate-existing-edge",
+  "duplicate-new-edge",
+  "duplicate-existing-output",
+  "incoming-existing-target",
+  "source-not-succeeded",
+  "unsupported-stream-edge",
+  "config-capability-expansion",
+  "resource-capability-expansion",
+  "zero-dynamic-reservation",
+  "runtime-dynamic-limit",
+  "maximum-node-limit",
+  "maximum-edge-limit",
+  "maximum-output-limit",
+  "maximum-depth-limit",
+  "maximum-fanout-limit",
+  "candidate-cycle",
+  "exact-rejected-retry",
+  "changed-decided-id",
+  "historical-accepted-retry",
+  "dry-run-id-reuse",
+  "same-base-one-winner",
+]);
+assert.deepEqual(new Set(hostileSemanticCases.map(({ scenario }) => scenario)), expectedSemanticScenarios);
+const semanticCategories = new Map();
+const semanticCoordinate = {
+  graphRevision: 1,
+  graphHash: expected.canonicalization[graphPatchHostileSemantic.baseGraph].sha256,
+  revisionHash: "1".repeat(64),
+};
+for (const attack of hostileSemanticCases) {
+  assert.match(attack.id, /^[a-z][a-z0-9-]{2,63}$/u);
+  assert.equal(attack.id, attack.scenario, `${attack.id} semantic identity must equal its scenario`);
+  assert.ok(Object.hasOwn(hostileSemanticExpect.categoryCounts, attack.category));
+  const isDecision = attack.expectOutcome === "rejected";
+  const allowedFields = new Set(["id", "category", "scenario", "expectOutcome", "expectCode"]);
+  assert.ok(Object.keys(attack).every((field) => allowedFields.has(field)));
+  assert.equal(Object.hasOwn(attack, "expectCode"), isDecision || attack.scenario === "changed-decided-id");
+  if (Object.hasOwn(attack, "expectCode")) assert.match(attack.expectCode, /^GE_PATCH_[A-Z0-9_]{3,64}$/u);
+  semanticCategories.set(attack.category, (semanticCategories.get(attack.category) ?? 0) + 1);
+  const document = materializeSemanticGraphPatch(semanticCoordinate, attack);
+  assert.equal(
+    validateGraphPatch(document),
+    true,
+    `${attack.id} must pass the independent GraphPatch schema: ${JSON.stringify(validateGraphPatch.errors)}`,
+  );
+}
+assert.deepEqual(
+  Object.fromEntries([...semanticCategories].sort(([left], [right]) => compareUnicodeCodePoints(left, right))),
+  hostileSemanticExpect.categoryCounts,
+);
+assert.equal(
+  hostileSemanticCases.filter(({ expectOutcome }) => expectOutcome === "rejected").length,
+  hostileSemanticExpect.decisionCaseCount,
+);
+assert.equal(
+  hostileSemanticCases.filter(({ expectOutcome }) => expectOutcome !== "rejected").length,
+  hostileSemanticExpect.behaviorCaseCount,
+);
+const hostileSemanticCanonical = JSON.stringify(canonicalize(hostileSemanticCases));
+assert.equal(
+  Buffer.byteLength(hostileSemanticCanonical, "utf8"),
+  hostileSemanticExpect.casesCanonicalUtf8Bytes,
+);
+assert.equal(hash(hostileSemanticCases), hostileSemanticExpect.casesSha256);
+const expectedSemanticAssertions = new Set([
+  "every-generated-patch-passes-the-closed-shape-contract",
+  "semantic-rejections-return-the-exact-public-error-code",
+  "semantic-rejections-leave-the-graph-coordinate-unchanged",
+  "dry-run-rejections-record-no-decision-and-consume-no-id",
+  "rejected-exact-retry-reuses-the-complete-recorded-decision",
+  "changed-bytes-under-a-decided-id-fail-without-a-second-record",
+  "accepted-historical-retry-precedes-current-base-rejection",
+  "dry-run-does-not-reserve-a-patch-id-or-cache-authority",
+  "same-base-applications-produce-one-accepted-revision-and-one-stale-rejection",
+  "both-native-runtimes-match-patch-hashes-budget-outcomes-and-state-projections",
+  "fixture-and-native-scenario-vocabularies-are-closed-and-hashed",
+]);
+assert.equal(graphPatchHostileSemantic.requiredAssertions.length, expectedSemanticAssertions.size);
+assert.deepEqual(new Set(graphPatchHostileSemantic.requiredAssertions), expectedSemanticAssertions);
+
 // D7 bounded-cycle contracts are versioned separately from the immutable-DAG
 // scheduler. This validator freezes their schemas, canonical hashes, event
 // chain, checkpoint projection, and hostile contract vectors without claiming
@@ -3137,5 +3335,5 @@ assert.equal(new Set(diamond.nodes.map(({ id }) => id)).size, diamond.nodes.leng
 assert.equal(new Set(diamond.edges.map(({ id }) => id)).size, diamond.edges.length);
 
 process.stdout.write(
-  `Validated ${fixtureNames.length} JSON fixtures (${caseNames.length} case manifests), ${yamlNames.length} referenced YAML fixtures, ${Object.keys(expected.canonicalization).length} graph hash, ${Object.keys(expected.checkpoints ?? {}).length} checkpoint hash, ${durableJson.validCases.length} Durable JSON vectors, ${compiledIdentities.length} compiled identities, ${graphPatchCases.validCases.length + graphPatchCases.invalidCases.length} graph patch schema cases plus ${graphPatchCases.semanticCases.length} closed semantic vectors and ${hostileShapeCases.length} hostile GraphPatch shape attacks, and 6 D7 controller/revision/event/checkpoint schemas with ${durableEvents.length} chained event goldens, ${cycleFaultMatrix.length} retained durable fault obligations, ${cycleInterruptionMatrix.length} activity interruption obligations, ${cycleOperationInterruptionMatrix.length} public-operation interruption obligations, ${cyclePatchVisibilityMatrix.length} patch-visibility fault obligations, ${cyclePatchCheckpointMatrix.length} patch-checkpoint fault obligations, ${cycleDurableCases.leaseTransitionCases.length} valid and ${cycleDurableCases.invalidLeaseTransitionCases.length} hostile lease transitions, ${cycleDurableCases.validInterruptedHistoryCases?.length ?? 0} interrupted terminal/checkpoint folds, ${cycleDurableCases.inDoubtProjectionCases.length} in-doubt singleton cases, ${resolutionProtocol.cases.length} terminal in-doubt resolution cases, ${cycleDurableCases.untilDryFoldCases.length} global-seen convergence fold, ${cycleDurableCases.hardStopFoldCases.length} hard-stop folds, ${cycleDurableCases.invalidEventHistoryCases.length} hostile histories, ${cycleDurableCases.invalidCheckpointSemanticCases.length} hostile checkpoint folds, plus ${cycleDurableCases.validStandaloneEventSchemaCases.length} standalone phase-event shapes; all ${expectedD7Tests.length} D7-CYCLE-SPEC-024 expected-test groups are mapped against meta-valid schemas.\n`,
+  `Validated ${fixtureNames.length} JSON fixtures (${caseNames.length} case manifests), ${yamlNames.length} referenced YAML fixtures, ${Object.keys(expected.canonicalization).length} graph hash, ${Object.keys(expected.checkpoints ?? {}).length} checkpoint hash, ${durableJson.validCases.length} Durable JSON vectors, ${compiledIdentities.length} compiled identities, ${graphPatchCases.validCases.length + graphPatchCases.invalidCases.length} graph patch schema cases plus ${graphPatchCases.semanticCases.length} closed semantic vectors, ${hostileShapeCases.length} hostile GraphPatch shape attacks, and ${hostileSemanticCases.length} schema-valid hostile GraphPatch semantic/behavior cases, and 6 D7 controller/revision/event/checkpoint schemas with ${durableEvents.length} chained event goldens, ${cycleFaultMatrix.length} retained durable fault obligations, ${cycleInterruptionMatrix.length} activity interruption obligations, ${cycleOperationInterruptionMatrix.length} public-operation interruption obligations, ${cyclePatchVisibilityMatrix.length} patch-visibility fault obligations, ${cyclePatchCheckpointMatrix.length} patch-checkpoint fault obligations, ${cycleDurableCases.leaseTransitionCases.length} valid and ${cycleDurableCases.invalidLeaseTransitionCases.length} hostile lease transitions, ${cycleDurableCases.validInterruptedHistoryCases?.length ?? 0} interrupted terminal/checkpoint folds, ${cycleDurableCases.inDoubtProjectionCases.length} in-doubt singleton cases, ${resolutionProtocol.cases.length} terminal in-doubt resolution cases, ${cycleDurableCases.untilDryFoldCases.length} global-seen convergence fold, ${cycleDurableCases.hardStopFoldCases.length} hard-stop folds, ${cycleDurableCases.invalidEventHistoryCases.length} hostile histories, ${cycleDurableCases.invalidCheckpointSemanticCases.length} hostile checkpoint folds, plus ${cycleDurableCases.validStandaloneEventSchemaCases.length} standalone phase-event shapes; all ${expectedD7Tests.length} D7-CYCLE-SPEC-024 expected-test groups are mapped against meta-valid schemas.\n`,
 );

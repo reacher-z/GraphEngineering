@@ -764,8 +764,40 @@ closed category counts, unique identities, and the corpus digest.
 This H05A corpus covers hostile portable shape capture only. Semantic attacks
 that are valid GraphPatch documents—stale bases, capability expansion, budget
 evasion, state conflicts, candidate-graph failures, decided-ID conflicts, and
-concurrent CAS—remain a distinct H05B decision corpus and are not implied by a
-passing shape campaign.
+concurrent CAS—are covered by the distinct H05B decision corpus below and are
+not implied by a passing shape campaign.
+
+### 10.2 Hostile semantic and decision corpus
+
+The retained
+[`graph-patch-hostile-semantic.case.json`](conformance/graph-patch-hostile-semantic.case.json)
+fixture freezes 24 schema-valid H05B cases: 19 single-decision attacks and five
+stateful behaviors. The ordered descriptors occupy 3,590 canonical UTF-8 bytes
+with SHA-256
+`9b58924f80d5b6886652a104dc9e84c0502e939ccc02751a052970c556cabb53`.
+The decision attacks cover stale state, existing and within-patch identity
+collisions, invalid existing-node targets and sources, unsupported edge modes,
+capability expansion through both `config` and `resources`, per-reservation and
+cumulative dynamic-node ceilings, total graph limits, and candidate cycles.
+
+The five stateful cases prove complete rejected-decision reuse, conflicting
+bytes under an already decided patch ID, accepted historical retry after later
+revisions, changed-byte real application after a dry-run, and one accepted plus
+one durably rejected result for two applications sharing a base. A stale-base
+rejection is itself a valid durable decision: it does not mutate the graph, so
+recording it MUST NOT require the already-known-stale coordinate to become
+current.
+
+TypeScript and Python independently materialize and execute every scenario.
+Their retained reports MUST agree on canonical patch bytes and hashes, public
+outcome and error codes, authority and policy snapshot hashes, budget outcomes,
+resulting coordinates, decision counts, and dynamic-node projections. Dry-run
+decision attacks MUST leave both the decision cache and graph coordinate
+unchanged. Diagnostic paths and phases remain runtime-local explanatory detail;
+H05B freezes the portable public code rather than claiming path/phase parity.
+The independent fixture validator separately closes the scenario vocabulary,
+proves every generated patch passes the JSON Schema boundary, and verifies the
+ordered corpus digest before either native decision engine runs.
 
 ## 11. Dry run
 

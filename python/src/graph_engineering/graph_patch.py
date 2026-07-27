@@ -236,9 +236,11 @@ def _requested_capabilities(nodes: list[Any]) -> frozenset[str]:
         if type(node_value) is not dict:
             continue
         node = cast(dict[str, Any], node_value)
-        config = node.get("config")
-        if type(config) is dict:
-            capabilities = cast(dict[str, Any], config).get("capabilities")
+        for field in ("resources", "config"):
+            record = node.get(field)
+            if type(record) is not dict:
+                continue
+            capabilities = cast(dict[str, Any], record).get("capabilities")
             if capabilities is not None:
                 if type(capabilities) is not list or any(
                     type(item) is not str for item in capabilities
@@ -246,16 +248,17 @@ def _requested_capabilities(nodes: list[Any]) -> frozenset[str]:
                     raise CycleRuntimeError(
                         CycleErrorCode.PATCH_AUTHORITY_EXPANSION,
                         "node capability declaration is not a closed string list",
-                        path=f"/append/nodes/{index}/config/capabilities",
+                        path=f"/append/nodes/{index}/{field}/capabilities",
                     )
                 requested.update(cast(list[str], capabilities))
-            for prohibited in ("authority", "grant", "ambientAuthority"):
-                if prohibited in config:
-                    raise CycleRuntimeError(
-                        CycleErrorCode.PATCH_AUTHORITY_EXPANSION,
-                        "planner cannot provide an authority object",
-                        path=f"/append/nodes/{index}/config/{prohibited}",
-                    )
+            if field == "config":
+                for prohibited in ("authority", "grant", "ambientAuthority"):
+                    if prohibited in record:
+                        raise CycleRuntimeError(
+                            CycleErrorCode.PATCH_AUTHORITY_EXPANSION,
+                            "planner cannot provide an authority object",
+                            path=f"/append/nodes/{index}/config/{prohibited}",
+                        )
     return frozenset(requested)
 
 
@@ -284,7 +287,19 @@ class GraphPatchRuntime:
         limits: GraphPatchLimits,
         succeeded_nodes: frozenset[str] = frozenset(),
         initial_coordinate: JsonObject | None = None,
+        max_dynamic_nodes: int = 100_000,
+        initial_dynamic_nodes: int = 0,
     ) -> None:
+        if (
+            type(max_dynamic_nodes) is not int
+            or not 0 <= max_dynamic_nodes <= 100_000
+            or type(initial_dynamic_nodes) is not int
+            or not 0 <= initial_dynamic_nodes <= max_dynamic_nodes
+        ):
+            raise CycleRuntimeError(
+                CycleErrorCode.PATCH_INVALID,
+                "dynamic-node bounds are outside the portable runtime range",
+            )
         base_document = capture_graph_model_document(graph.spec, GraphSpec)
         detached = capture_portable_json(base_document)
         if type(detached) is not dict:  # pragma: no cover - compiler invariant
@@ -307,6 +322,8 @@ class GraphPatchRuntime:
             )
         self._coordinate = detached_coordinate
         self._limits = limits
+        self._max_dynamic_nodes = max_dynamic_nodes
+        self._dynamic_nodes = initial_dynamic_nodes
         self._succeeded_nodes = frozenset(succeeded_nodes)
         self._decisions: dict[str, PatchDecision] = {}
         self._lock = asyncio.Lock()
@@ -322,6 +339,12 @@ class GraphPatchRuntime:
     @property
     def decision_count(self) -> int:
         return len(self._decisions)
+
+    @property
+    def dynamic_nodes(self) -> int:
+        """Return the number of accepted dynamic nodes in this runtime lineage."""
+
+        return self._dynamic_nodes
 
     async def restore(self, events: Sequence[CycleEvent]) -> None:
         """Rebuild accepted graph revisions and complete decided-ID records.
@@ -458,6 +481,21 @@ class GraphPatchRuntime:
                 )
                 if resulting_revision is not None:
                     append = cast(dict[str, Any], document["append"])
+                    committed = cast(
+                        dict[str, Any],
+                        cast(dict[str, Any], data["budgetOutcome"])["committed"],
+                    )
+                    committed_dynamic_nodes = committed.get("dynamicNodes")
+                    if (
+                        type(committed_dynamic_nodes) is not int
+                        or committed_dynamic_nodes != len(cast(list[Any], append["nodes"]))
+                        or self._dynamic_nodes + committed_dynamic_nodes
+                        > self._max_dynamic_nodes
+                    ):
+                        raise CycleRuntimeError(
+                            CycleErrorCode.INVALID_HISTORY,
+                            "restored accepted GraphPatch exceeds its dynamic-node lineage bound",
+                        )
                     candidate = cast(
                         dict[str, Any],
                         capture_portable_json(self._graph_document),
@@ -496,6 +534,7 @@ class GraphPatchRuntime:
                     self._graph = compiled
                     self._graph_document = candidate
                     self._coordinate = expected_coordinate
+                    self._dynamic_nodes += committed_dynamic_nodes
                 self._decisions[patch_id] = decision
 
     async def apply(
@@ -671,7 +710,11 @@ class GraphPatchRuntime:
                     record=record,
                 )
 
-            if reservation.attempts < 1 or reservation.dynamic_nodes < len(nodes):
+            if (
+                reservation.attempts < 1
+                or reservation.dynamic_nodes < len(nodes)
+                or self._dynamic_nodes + len(nodes) > self._max_dynamic_nodes
+            ):
                 return await self._reject(
                     document,
                     patch_id,
@@ -786,6 +829,7 @@ class GraphPatchRuntime:
             self._graph = compiled
             self._graph_document = candidate
             self._coordinate = cast(JsonObject, decision.projection()["resultingRevision"])
+            self._dynamic_nodes += len(nodes)
             return decision
 
     async def _reject(

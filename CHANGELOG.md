@@ -24,6 +24,10 @@ migration note.
 - A closed 54-case hostile GraphPatch shape corpus with independent schema
   reconstruction, native TypeScript/Python execution, exact input-byte/hash
   comparison, and fail-closed depth and 4 MiB capture-bound tests.
+- A closed 24-case schema-valid GraphPatch semantic corpus with native
+  TypeScript/Python decision parity, cumulative dynamic-node enforcement,
+  resource/config capability ceilings, exact retry and dry-run ID behavior,
+  historical accepted replay, and one-winner same-base CAS coverage.
 
 - Event-sourced durable start and resume APIs in TypeScript and Python. Runs bind
   graph, original input, and caller-supplied implementation identity; node

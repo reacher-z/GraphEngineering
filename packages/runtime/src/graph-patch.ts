@@ -786,7 +786,9 @@ export class NativeGraphPatchApplier {
         "GE_PATCH_INVALID", "graph-patch", "application was not prepared by this applier",
       );
     }
-    if (!sameCoordinate(decision.requestedBase, this.#coordinate)) {
+    const recordsAnAlreadyStaleBase = decision.outcome === "rejected"
+      && decision.errorCode === "GE_PATCH_STALE_BASE";
+    if (!recordsAnAlreadyStaleBase && !sameCoordinate(decision.requestedBase, this.#coordinate)) {
       throw new CycleControllerError(
         "GE_PATCH_STALE_BASE", "graph-patch", "prepared patch lost its base CAS",
       );

@@ -186,6 +186,7 @@ def test_dry_run_repeats_gates_without_decision_budget_or_graph_mutation() -> No
         assert decision.dry_run
         assert runtime.coordinate == before
         assert runtime.decision_count == 0
+        assert runtime.dynamic_nodes == 0
         assert all(node.id != "review" for node in runtime.graph.spec.nodes)
 
     asyncio.run(scenario())
@@ -213,6 +214,7 @@ def test_recorder_failure_keeps_graph_and_patch_id_unmodified() -> None:
             )
         assert runtime.coordinate["graphRevision"] == 1
         assert runtime.decision_count == 0
+        assert runtime.dynamic_nodes == 0
 
         accepted = await runtime.apply(
             patch(runtime),
@@ -321,6 +323,76 @@ def test_same_base_concurrency_has_one_cas_winner() -> None:
         assert runtime.coordinate["graphRevision"] == 2
 
     asyncio.run(scenario())
+
+
+def test_dynamic_lineage_ceiling_and_resource_capabilities_are_enforced() -> None:
+    async def scenario() -> None:
+        bounded = GraphPatchRuntime(
+            diamond(),
+            revision_hash_value=HASH,
+            limits=limits(),
+            succeeded_nodes=frozenset({"merge"}),
+            max_dynamic_nodes=1,
+        )
+        first = await bounded.apply(
+            patch(bounded, "within-lineage-limit", node_id="first-dynamic"),
+            authority=authority(),
+            policy_snapshot_hash="9" * 64,
+            reservation=reservation(),
+            record=accept,
+        )
+        second = await bounded.apply(
+            patch(bounded, "outside-lineage-limit", node_id="second-dynamic"),
+            authority=authority(),
+            policy_snapshot_hash="9" * 64,
+            reservation=reservation(),
+            record=accept,
+        )
+        assert first.outcome == "accepted"
+        assert second.outcome == "rejected"
+        assert second.error_code is CycleErrorCode.PATCH_BUDGET_EXCEEDED
+        assert bounded.dynamic_nodes == 1
+        assert bounded.coordinate["graphRevision"] == 2
+
+        denied = GraphPatchRuntime(
+            diamond(),
+            revision_hash_value=HASH,
+            limits=limits(),
+            succeeded_nodes=frozenset({"merge"}),
+        )
+        resource_patch = patch(denied, "resource-capability", node_id="network-node")
+        resource_patch["append"]["nodes"][0]["resources"] = {
+            "capabilities": ["network"]
+        }
+        rejected = await denied.apply(
+            resource_patch,
+            authority=authority(),
+            policy_snapshot_hash="9" * 64,
+            reservation=reservation(),
+            record=accept,
+        )
+        assert rejected.error_code is CycleErrorCode.PATCH_AUTHORITY_EXPANSION
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    ("maximum", "initial"),
+    [(-1, 0), (100_001, 0), (True, 0), (1, -1), (1, 2), (1, True)],
+)
+def test_dynamic_lineage_bounds_reject_nonportable_values(
+    maximum: int,
+    initial: int,
+) -> None:
+    with pytest.raises(CycleRuntimeError) as raised:
+        GraphPatchRuntime(
+            diamond(),
+            revision_hash_value=HASH,
+            limits=limits(),
+            max_dynamic_nodes=maximum,
+            initial_dynamic_nodes=initial,
+        )
+    assert raised.value.code is CycleErrorCode.PATCH_INVALID
 
 
 class HostileMapping(Mapping[str, object]):
@@ -433,3 +505,49 @@ def test_closed_hostile_shape_corpus_fails_before_graph_mutation() -> None:
         and outcome["callerUnchanged"]
         for outcome in report["outcomes"]
     )
+
+
+def test_closed_hostile_semantic_corpus_matches_native_runtime_decisions() -> None:
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(
+                ROOT
+                / "tools"
+                / "conformance"
+                / "python_graph_patch_hostile_semantic_report.py"
+            ),
+        ],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    report = json.loads(completed.stdout)
+
+    assert report["caseCount"] == 24
+    assert report["decisionCaseCount"] == 19
+    assert report["behaviorCaseCount"] == 5
+    assert report["casesCanonicalUtf8Bytes"] == 3590
+    assert report["casesSha256"] == (
+        "9b58924f80d5b6886652a104dc9e84c0502e939ccc02751a052970c556cabb53"
+    )
+    decisions = [item for item in report["outcomes"] if item["kind"] == "decision"]
+    assert len(decisions) == 19
+    assert all(
+        item["decision"]["outcome"] == "rejected"
+        and item["decision"]["errorCode"] is not None
+        and item["beforeCoordinate"] == item["afterCoordinate"]
+        and item["decisionCount"] == 0
+        and item["dynamicNodes"] == 0
+        for item in decisions
+    )
+    race = next(
+        item for item in report["outcomes"] if item["id"] == "same-base-one-winner"
+    )
+    observations = race["observations"]
+    assert observations["acceptedCount"] == 1
+    assert observations["staleCount"] == 1
+    assert observations["decisionCount"] == 2
+    assert observations["runtimeRevision"] == 2
+    assert observations["dynamicNodes"] == 1

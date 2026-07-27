@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "id": "graph-patch-hostile-semantic-v1alpha1",
+  "baseGraph": "diamond.graph.json",
+  "cases": [
+    { "id": "stale-base", "category": "state", "scenario": "stale-base", "expectOutcome": "rejected", "expectCode": "GE_PATCH_STALE_BASE" },
+    { "id": "duplicate-existing-node", "category": "identity", "scenario": "duplicate-existing-node", "expectOutcome": "rejected", "expectCode": "GE_PATCH_DUPLICATE_ID" },
+    { "id": "duplicate-new-node", "category": "identity", "scenario": "duplicate-new-node", "expectOutcome": "rejected", "expectCode": "GE_PATCH_DUPLICATE_ID" },
+    { "id": "duplicate-existing-edge", "category": "identity", "scenario": "duplicate-existing-edge", "expectOutcome": "rejected", "expectCode": "GE_PATCH_DUPLICATE_ID" },
+    { "id": "duplicate-new-edge", "category": "identity", "scenario": "duplicate-new-edge", "expectOutcome": "rejected", "expectCode": "GE_PATCH_DUPLICATE_ID" },
+    { "id": "duplicate-existing-output", "category": "identity", "scenario": "duplicate-existing-output", "expectOutcome": "rejected", "expectCode": "GE_PATCH_DUPLICATE_ID" },
+    { "id": "incoming-existing-target", "category": "state", "scenario": "incoming-existing-target", "expectOutcome": "rejected", "expectCode": "GE_PATCH_STATE_CONFLICT" },
+    { "id": "source-not-succeeded", "category": "state", "scenario": "source-not-succeeded", "expectOutcome": "rejected", "expectCode": "GE_PATCH_STATE_CONFLICT" },
+    { "id": "unsupported-stream-edge", "category": "feature", "scenario": "unsupported-stream-edge", "expectOutcome": "rejected", "expectCode": "GE_PATCH_UNSUPPORTED" },
+    { "id": "config-capability-expansion", "category": "capability", "scenario": "config-capability-expansion", "expectOutcome": "rejected", "expectCode": "GE_PATCH_AUTHORITY_EXPANSION" },
+    { "id": "resource-capability-expansion", "category": "capability", "scenario": "resource-capability-expansion", "expectOutcome": "rejected", "expectCode": "GE_PATCH_AUTHORITY_EXPANSION" },
+    { "id": "zero-dynamic-reservation", "category": "budget", "scenario": "zero-dynamic-reservation", "expectOutcome": "rejected", "expectCode": "GE_PATCH_BUDGET_EXCEEDED" },
+    { "id": "runtime-dynamic-limit", "category": "budget", "scenario": "runtime-dynamic-limit", "expectOutcome": "rejected", "expectCode": "GE_PATCH_BUDGET_EXCEEDED" },
+    { "id": "maximum-node-limit", "category": "budget", "scenario": "maximum-node-limit", "expectOutcome": "rejected", "expectCode": "GE_PATCH_BUDGET_EXCEEDED" },
+    { "id": "maximum-edge-limit", "category": "budget", "scenario": "maximum-edge-limit", "expectOutcome": "rejected", "expectCode": "GE_PATCH_BUDGET_EXCEEDED" },
+    { "id": "maximum-output-limit", "category": "budget", "scenario": "maximum-output-limit", "expectOutcome": "rejected", "expectCode": "GE_PATCH_BUDGET_EXCEEDED" },
+    { "id": "maximum-depth-limit", "category": "budget", "scenario": "maximum-depth-limit", "expectOutcome": "rejected", "expectCode": "GE_PATCH_BUDGET_EXCEEDED" },
+    { "id": "maximum-fanout-limit", "category": "budget", "scenario": "maximum-fanout-limit", "expectOutcome": "rejected", "expectCode": "GE_PATCH_BUDGET_EXCEEDED" },
+    { "id": "candidate-cycle", "category": "graph", "scenario": "candidate-cycle", "expectOutcome": "rejected", "expectCode": "GE_PATCH_GRAPH_INVALID" },
+    { "id": "exact-rejected-retry", "category": "idempotency", "scenario": "exact-rejected-retry", "expectOutcome": "recorded-rejection-reused" },
+    { "id": "changed-decided-id", "category": "idempotency", "scenario": "changed-decided-id", "expectOutcome": "idempotency-conflict", "expectCode": "GE_PATCH_IDEMPOTENCY_CONFLICT" },
+    { "id": "historical-accepted-retry", "category": "idempotency", "scenario": "historical-accepted-retry", "expectOutcome": "recorded-acceptance-reused" },
+    { "id": "dry-run-id-reuse", "category": "idempotency", "scenario": "dry-run-id-reuse", "expectOutcome": "real-apply-rechecks" },
+    { "id": "same-base-one-winner", "category": "concurrency", "scenario": "same-base-one-winner", "expectOutcome": "one-accepted-one-stale" }
+  ],
+  "requiredAssertions": [
+    "every-generated-patch-passes-the-closed-shape-contract",
+    "semantic-rejections-return-the-exact-public-error-code",
+    "semantic-rejections-leave-the-graph-coordinate-unchanged",
+    "dry-run-rejections-record-no-decision-and-consume-no-id",
+    "rejected-exact-retry-reuses-the-complete-recorded-decision",
+    "changed-bytes-under-a-decided-id-fail-without-a-second-record",
+    "accepted-historical-retry-precedes-current-base-rejection",
+    "dry-run-does-not-reserve-a-patch-id-or-cache-authority",
+    "same-base-applications-produce-one-accepted-revision-and-one-stale-rejection",
+    "both-native-runtimes-match-patch-hashes-budget-outcomes-and-state-projections",
+    "fixture-and-native-scenario-vocabularies-are-closed-and-hashed"
+  ],
+  "expect": {
+    "caseCount": 24,
+    "decisionCaseCount": 19,
+    "behaviorCaseCount": 5,
+    "categoryCounts": {
+      "state": 3,
+      "identity": 5,
+      "feature": 1,
+      "capability": 2,
+      "budget": 7,
+      "graph": 1,
+      "idempotency": 4,
+      "concurrency": 1
+    },
+    "casesCanonicalUtf8Bytes": 3590,
+    "casesSha256": "9b58924f80d5b6886652a104dc9e84c0502e939ccc02751a052970c556cabb53"
+  }
+}

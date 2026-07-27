@@ -579,11 +579,12 @@ handler dispatch even when cancellation was already set.
 
 `GraphPatchRuntime` snapshots exact portable patch bytes, gates the requested
 base, IDs, current execution state, authority/capabilities, graph compilation,
-graph size/depth/fan-out, and reserved structural capacity under one local CAS
-decision lock. A non-dry decision is recorded before a new revision becomes
-visible. Recovery recompiles every stored accepted patch and reconstructs both
-accepted and rejected decisions with their complete authority, policy, budget,
-diagnostic, and revision evidence.
+graph size/depth/fan-out, reserved structural capacity, and the cumulative
+`max_dynamic_nodes` lineage ceiling under one local CAS decision lock. A
+non-dry decision is recorded before a new revision becomes visible. Recovery
+recompiles every stored accepted patch, restores the committed dynamic-node
+count, and reconstructs both accepted and rejected decisions with their
+complete authority, policy, budget, diagnostic, and revision evidence.
 
 The retained
 [`graph-patch-hostile-shape.case.json`](../spec/conformance/graph-patch-hostile-shape.case.json)
@@ -592,7 +593,15 @@ TypeScript. It covers closed root/base/append/node/edge/output shapes plus the
 100-level and 4 MiB portable-capture ceilings. Every input fails with
 `GE_PATCH_INVALID` before a decision or graph mutation, and the native reports
 compare exact input lengths and hashes. This is the H05A shape boundary; the
-schema-valid semantic attack corpus remains separate work.
+schema-valid semantic attack corpus remains a separate decision boundary.
+
+The retained
+[`graph-patch-hostile-semantic.case.json`](../spec/conformance/graph-patch-hostile-semantic.case.json)
+campaign executes that H05B boundary as 19 semantic rejections plus five
+stateful idempotency/CAS behaviors. Python and TypeScript independently agree
+on canonical patch hashes, stable error codes, authority and policy hashes,
+budget outcomes, resulting coordinates, decision counts, and dynamic-node
+projections across all 24 cases.
 
 `MemoryCycleStore` is deliberately process-local and has neither crash
 durability nor distributed fencing. It exists for deterministic tests and
