@@ -246,10 +246,12 @@ unbounded budget.
 
 The alpha compiler rejects implicit graph cycles with `GE1005_CYCLE`. The
 TypeScript pattern pack can produce an explicitly finite, acyclic until-dry
-blueprint, but the current scheduler executes every expanded round and does not
-short-circuit on a dry verdict. Runtime bounded-loop control and dynamic graph
-patches remain target-v1 work; ordinary back-edges are not accepted as a
-substitute.
+blueprint, and the separate native TypeScript/Python bounded controller now
+executes `until-dry`, `while`, and evaluator-optimizer policies with durable
+seen state, exact reservations, replay/fork, and append-only GraphPatch
+revisions. The ordinary DAG scheduler still executes every statically expanded
+round and rejects back-edges; integrating dynamic controller revisions into
+that scheduler and providing production stores remain follow-up work.
 
 ## Failure containment is part of graph shape
 

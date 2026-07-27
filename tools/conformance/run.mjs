@@ -1250,6 +1250,490 @@ process.stdout.write(
   `Cross-language bounded-pipeline conformance passed for ${pipelineFixture.cases.length} cases.\n`,
 );
 
+// D7 native-cycle conformance compares the complete canonical carrier, not a
+// hand-picked semantic summary.  Activity inputs are included because their
+// hashes define the stable activity keys and therefore every downstream event
+// hash in the controller stream.
+const pythonCycle = spawnSync(
+  "uv",
+  ["run", "--project", "python", "python", "tools/conformance/python_cycle_report.py"],
+  { cwd: root, encoding: "utf8" },
+);
+if (pythonCycle.status !== 0) {
+  throw new Error(
+    `Python native-cycle conformance failed:\n${pythonCycle.stderr || pythonCycle.stdout}`,
+  );
+}
+const pyCycleReport = JSON.parse(pythonCycle.stdout);
+const cycleContractFixture = JSON.parse(
+  await readFile(join(fixtureRoot, "cycle-controller.case.json"), "utf8"),
+);
+const cycleGraph = JSON.parse(
+  await readFile(join(fixtureRoot, "diamond.graph.json"), "utf8"),
+);
+const cycleCompilation = core.compileGraph(cycleGraph);
+assert.equal(cycleCompilation.valid, true, "D7 cross-language graph must compile");
+assert.notEqual(cycleCompilation.graphHash, null, "D7 cross-language graph needs an identity");
+const cycleRequestValue = JSON.parse(JSON.stringify(
+  cycleContractFixture.validRequests[0].document,
+));
+Object.assign(cycleRequestValue, {
+  controllerRunId: "cycle-cross-language",
+  controllerId: "cycle-cross-language-controller",
+  hostRun: {
+    relationship: "standalone-child-controller",
+    runId: "cycle-cross-language-host",
+  },
+  eventStreamId: "cycle-cross-language.events",
+  checkpointScope: "cycle-cross-language.checkpoints",
+  initialGraph: {
+    graphRevision: 1,
+    graphHash: cycleCompilation.graphHash,
+    revisionHash: "1".repeat(64),
+  },
+});
+Object.assign(cycleRequestValue.policy, {
+  mode: "until-dry",
+  maxIterations: 4,
+  maxDurationMs: 10_000,
+  maxCostUsd: 10,
+  maxTotalAttempts: 30,
+  maxDiscoveries: 20,
+  maxDynamicNodes: 10,
+  maxCandidatesPerRound: 20,
+  maxCandidateBytes: 4_096,
+  maxCandidateBatchBytes: 16_384,
+  consecutiveDryRounds: 2,
+});
+const cycleRequest = runtime.validateCycleControllerRequest(cycleRequestValue);
+const cycleStartedAt = "2026-07-26T12:00:00.000Z";
+const cycleCheckpointAt = "2026-07-26T12:00:01.000Z";
+const cycleStore = new runtime.MemoryCycleControllerEventStore();
+const cycleInputs = [];
+const cycleFinder = (context) => {
+  cycleInputs.push({ phase: context.phase, iteration: context.iteration, input: context.input });
+  if (context.iteration === 1) {
+    return { output: [
+      { key: "finding-a", value: { source: "first" } },
+      { key: "finding-a", value: { source: "duplicate" } },
+    ] };
+  }
+  if (context.iteration === 2) {
+    return { output: [{ key: "finding-a", value: { source: "rediscovered" } }] };
+  }
+  return { output: [] };
+};
+const cycleEvaluator = (context) => {
+  cycleInputs.push({ phase: context.phase, iteration: context.iteration, input: context.input });
+  return {
+    output: context.input.candidates.map(({ key }) => ({ key, verdict: "reject" })),
+  };
+};
+const tsCycleResult = await runtime.startCycleController(cycleRequest, cycleGraph, {
+  eventStore: cycleStore,
+  lease: {
+    leaseId: "cycle-cross-language-lease",
+    holderId: "cycle-cross-language-holder",
+    leaseEpoch: 1,
+    fencingToken: 1,
+    acquiredAt: cycleStartedAt,
+    expiresAt: "2026-07-26T12:01:00.000Z",
+  },
+  now: () => new Date(cycleStartedAt),
+  activities: { finder: cycleFinder, candidateEvaluator: cycleEvaluator },
+});
+const tsCycleEvents = cycleStore.snapshot(cycleRequest.eventStreamId);
+const tsCycleFold = runtime.foldCycleControllerEvents(tsCycleEvents, { requireTerminal: true });
+const tsCycleCheckpoint = runtime.createCycleControllerCheckpoint(
+  tsCycleEvents,
+  "cycle-cross-language-terminal",
+  cycleCheckpointAt,
+);
+const tsCycleReport = {
+  requestCanonical: core.canonicalSerialize(cycleRequestValue),
+  result: tsCycleResult,
+  resultCanonical: core.canonicalSerialize(tsCycleResult),
+  eventTypes: tsCycleEvents.map(({ type }) => type),
+  eventCanonical: tsCycleEvents.map((event) => core.canonicalSerialize(event)),
+  recordHashes: tsCycleEvents.map(({ recordHash }) => recordHash),
+  activityKeys: tsCycleEvents
+    .filter(({ type }) => type === "ActivityStarted")
+    .map(({ data }) => data.activityKey),
+  inputsCanonical: cycleInputs.map((item) => core.canonicalSerialize(item)),
+  checkpoint: tsCycleCheckpoint,
+  checkpointCanonical: core.canonicalSerialize(tsCycleCheckpoint),
+  checkpointStateCanonical: core.canonicalSerialize(tsCycleCheckpoint.state),
+};
+assert.deepEqual(tsCycleReport.result, pyCycleReport.result, "D7 native result objects differ");
+for (const field of [
+  "requestCanonical",
+  "resultCanonical",
+  "eventTypes",
+  "eventCanonical",
+  "recordHashes",
+  "activityKeys",
+  "inputsCanonical",
+  "checkpointCanonical",
+  "checkpointStateCanonical",
+]) {
+  assert.deepEqual(tsCycleReport[field], pyCycleReport[field], `D7 ${field} differs`);
+}
+assert.deepEqual(tsCycleCheckpoint, pyCycleReport.checkpoint, "D7 checkpoint objects differ");
+assert.equal(tsCycleFold.terminalResult?.historyPrefixHash, tsCycleResult.historyPrefixHash);
+
+const patchRequestValue = JSON.parse(JSON.stringify(cycleRequestValue));
+Object.assign(patchRequestValue, {
+  controllerRunId: "cycle-cross-language-patch",
+  controllerId: "cycle-cross-language-patch-controller",
+  hostRun: {
+    relationship: "standalone-child-controller",
+    runId: "cycle-cross-language-patch-host",
+  },
+  eventStreamId: "cycle-cross-language-patch.events",
+  checkpointScope: "cycle-cross-language-patch.checkpoints",
+});
+patchRequestValue.policy.maxIterations = 1;
+const patchRequest = runtime.validateCycleControllerRequest(patchRequestValue);
+const patchStore = new runtime.MemoryCycleControllerEventStore();
+const patchInputs = [];
+const patchAuthority = {
+  proposerActivityKey: "0".repeat(64),
+  principalHash: "2".repeat(64),
+  proposerGrantHash: "3".repeat(64),
+  runGrantHash: "4".repeat(64),
+  tenantGrantHash: "5".repeat(64),
+  deploymentGrantHash: "6".repeat(64),
+  effectiveGrantHash: "7".repeat(64),
+  policyHash: "8".repeat(64),
+  approvalHash: null,
+};
+const patchFinder = (context) => {
+  patchInputs.push({ phase: context.phase, iteration: context.iteration, input: context.input });
+  return { output: [] };
+};
+const patchEvaluator = (context) => {
+  patchInputs.push({ phase: context.phase, iteration: context.iteration, input: context.input });
+  return { output: [] };
+};
+const patchPlanner = (context) => {
+  patchInputs.push({ phase: context.phase, iteration: context.iteration, input: context.input });
+  patchAuthority.proposerActivityKey = context.activityKey;
+  return { output: {
+    apiVersion: "graphengineering.reacher-z.github.io/patches/v1alpha1",
+    kind: "GraphPatch",
+    patchId: "cycle-cross-language-review",
+    base: context.input.currentRevision,
+    append: {
+      nodes: [{
+        id: "review",
+        kind: "validator",
+        inputSchema: {},
+        outputSchema: {},
+        config: {},
+        sideEffects: "none",
+      }],
+      edges: [{
+        id: "merge-review",
+        from: { node: "merge" },
+        to: { node: "review" },
+        mode: "value",
+      }],
+      outputs: { reviewResult: { node: "review" } },
+    },
+  } };
+};
+const tsPatchResult = await runtime.startCycleController(patchRequest, cycleGraph, {
+  eventStore: patchStore,
+  lease: {
+    leaseId: "cycle-cross-language-patch-lease",
+    holderId: "cycle-cross-language-holder",
+    leaseEpoch: 1,
+    fencingToken: 1,
+    acquiredAt: cycleStartedAt,
+    expiresAt: "2026-07-26T12:01:00.000Z",
+  },
+  now: () => new Date(cycleStartedAt),
+  activities: {
+    finder: patchFinder,
+    candidateEvaluator: patchEvaluator,
+    patchPlanner,
+    shouldPlanPatch: () => true,
+  },
+  patchContext: {
+    authoritySnapshot: patchAuthority,
+    policySnapshotHash: "8".repeat(64),
+    runState: "active",
+    effectiveCapabilities: [],
+    succeededNodeIds: ["merge"],
+    supportedEdgeModes: ["value"],
+  },
+});
+const tsPatchEvents = patchStore.snapshot(patchRequest.eventStreamId);
+const tsPatchCheckpoint = runtime.createCycleControllerCheckpoint(
+  tsPatchEvents,
+  "cycle-cross-language-patch-terminal",
+  cycleCheckpointAt,
+);
+const tsPatchReport = {
+  result: tsPatchResult,
+  resultCanonical: core.canonicalSerialize(tsPatchResult),
+  eventTypes: tsPatchEvents.map(({ type }) => type),
+  eventCanonical: tsPatchEvents.map((event) => core.canonicalSerialize(event)),
+  recordHashes: tsPatchEvents.map(({ recordHash }) => recordHash),
+  activityKeys: tsPatchEvents
+    .filter(({ type }) => type === "ActivityStarted")
+    .map(({ data }) => data.activityKey),
+  inputsCanonical: patchInputs.map((item) => core.canonicalSerialize(item)),
+  checkpoint: tsPatchCheckpoint,
+  checkpointCanonical: core.canonicalSerialize(tsPatchCheckpoint),
+  checkpointStateCanonical: core.canonicalSerialize(tsPatchCheckpoint.state),
+  finalGraphHash: tsPatchResult.lastGraphHash,
+};
+for (const field of [
+  "result",
+  "resultCanonical",
+  "eventTypes",
+  "eventCanonical",
+  "recordHashes",
+  "activityKeys",
+  "inputsCanonical",
+  "checkpoint",
+  "checkpointCanonical",
+  "checkpointStateCanonical",
+  "finalGraphHash",
+]) {
+  assert.deepEqual(
+    tsPatchReport[field],
+    pyCycleReport.acceptedPatch[field],
+    `D7 accepted-patch ${field} differs`,
+  );
+}
+
+class CycleCommitThenThrowStore {
+  constructor(target) {
+    this.target = target;
+    this.delegate = new runtime.MemoryCycleControllerEventStore();
+    this.threw = false;
+  }
+
+  async append(streamId, expectedSequence, values) {
+    const version = await this.delegate.append(streamId, expectedSequence, values);
+    if (!this.threw && values.some(({ type }) => type === this.target)) {
+      this.threw = true;
+      throw new Error(`simulated process loss after ${this.target}`);
+    }
+    return version;
+  }
+
+  read(streamId, fromSequence = 0) {
+    return this.delegate.read(streamId, fromSequence);
+  }
+}
+
+const resumeRequestValue = JSON.parse(JSON.stringify(cycleRequestValue));
+Object.assign(resumeRequestValue, {
+  controllerRunId: "cycle-cross-language-resume",
+  controllerId: "cycle-cross-language-resume-controller",
+  hostRun: {
+    relationship: "standalone-child-controller",
+    runId: "cycle-cross-language-resume-host",
+  },
+  eventStreamId: "cycle-cross-language-resume.events",
+  checkpointScope: "cycle-cross-language-resume.checkpoints",
+});
+resumeRequestValue.policy.maxIterations = 1;
+const resumeRequest = runtime.validateCycleControllerRequest(resumeRequestValue);
+const resumeStore = new CycleCommitThenThrowStore("DiscoveryCommitted");
+const resumeInputs = [];
+let resumeFinderCalls = 0;
+let resumeEvaluatorCalls = 0;
+const resumeFinder = (context) => {
+  resumeFinderCalls += 1;
+  resumeInputs.push({ phase: context.phase, iteration: context.iteration, input: context.input });
+  return { output: [{ key: "durable", value: { source: "finder" } }] };
+};
+const resumeEvaluator = (context) => {
+  resumeEvaluatorCalls += 1;
+  resumeInputs.push({ phase: context.phase, iteration: context.iteration, input: context.input });
+  return {
+    output: context.input.candidates.map(({ key }) => ({ key, verdict: "accept" })),
+  };
+};
+await assert.rejects(
+  runtime.startCycleController(resumeRequest, cycleGraph, {
+    eventStore: resumeStore,
+    lease: {
+      leaseId: "cycle-cross-language-resume-lease-1",
+      holderId: "cycle-cross-language-holder",
+      leaseEpoch: 1,
+      fencingToken: 1,
+      acquiredAt: cycleStartedAt,
+      expiresAt: "2026-07-26T12:01:00.000Z",
+    },
+    now: () => new Date(cycleStartedAt),
+    activities: { finder: resumeFinder, candidateEvaluator: resumeEvaluator },
+  }),
+  (error) => error?.code === "GE_CYCLE_STORE_FAILED",
+);
+const tsResumeInterrupted = resumeStore.delegate.snapshot(resumeRequest.eventStreamId);
+const tsResumeResult = await runtime.resumeCycleController(resumeRequest, cycleGraph, {
+  eventStore: resumeStore,
+  expectedSequence: tsResumeInterrupted.at(-1).sequence,
+  leaseReason: "takeover",
+  lease: {
+    leaseId: "cycle-cross-language-resume-lease-2",
+    holderId: "cycle-cross-language-resume-holder-2",
+    leaseEpoch: 2,
+    fencingToken: 2,
+    acquiredAt: cycleStartedAt,
+    expiresAt: "2026-07-26T12:01:00.000Z",
+  },
+  now: () => new Date(cycleStartedAt),
+  activities: { finder: resumeFinder, candidateEvaluator: resumeEvaluator },
+});
+const tsResumeEvents = resumeStore.delegate.snapshot(resumeRequest.eventStreamId);
+const tsResumeCheckpoint = runtime.createCycleControllerCheckpoint(
+  tsResumeEvents,
+  "cycle-cross-language-resume-terminal",
+  cycleCheckpointAt,
+);
+const tsResumeReport = {
+  result: tsResumeResult,
+  resultCanonical: core.canonicalSerialize(tsResumeResult),
+  eventTypes: tsResumeEvents.map(({ type }) => type),
+  eventCanonical: tsResumeEvents.map((event) => core.canonicalSerialize(event)),
+  recordHashes: tsResumeEvents.map(({ recordHash }) => recordHash),
+  activityKeys: tsResumeEvents
+    .filter(({ type }) => type === "ActivityStarted")
+    .map(({ data }) => data.activityKey),
+  inputsCanonical: resumeInputs.map((item) => core.canonicalSerialize(item)),
+  checkpoint: tsResumeCheckpoint,
+  checkpointCanonical: core.canonicalSerialize(tsResumeCheckpoint),
+  checkpointStateCanonical: core.canonicalSerialize(tsResumeCheckpoint.state),
+  preCrashEventTypes: tsResumeInterrupted.map(({ type }) => type),
+  preCrashRecordHashes: tsResumeInterrupted.map(({ recordHash }) => recordHash),
+  finderCalls: resumeFinderCalls,
+  evaluatorCalls: resumeEvaluatorCalls,
+};
+for (const field of Object.keys(tsResumeReport)) {
+  assert.deepEqual(
+    tsResumeReport[field],
+    pyCycleReport.resumed[field],
+    `D7 crash/resume ${field} differs`,
+  );
+}
+
+function cycleModeBinding(activityId, implementationDigit) {
+  return {
+    activityId,
+    implementationHash: implementationDigit.repeat(64),
+    sideEffects: "none",
+    maxAttemptsPerRound: 1,
+    maxCostUsdPerAttempt: 0,
+    timeoutMs: 100,
+  };
+}
+
+async function exerciseCycleMode(mode) {
+  const suffix = mode === "while" ? "while" : "optimizer";
+  const value = JSON.parse(JSON.stringify(cycleRequestValue));
+  Object.assign(value, {
+    controllerRunId: `cycle-cross-language-${suffix}`,
+    controllerId: `cycle-cross-language-${suffix}-controller`,
+    hostRun: {
+      relationship: "standalone-child-controller",
+      runId: `cycle-cross-language-${suffix}-host`,
+    },
+    eventStreamId: `cycle-cross-language-${suffix}.events`,
+    checkpointScope: `cycle-cross-language-${suffix}.checkpoints`,
+  });
+  value.policy.mode = mode;
+  delete value.policy.consecutiveDryRounds;
+  if (mode === "while") {
+    value.activities.condition = cycleModeBinding("condition", "5");
+    value.activities.optimizerEvaluator = null;
+  } else {
+    value.activities.condition = null;
+    value.activities.optimizerEvaluator = cycleModeBinding("optimizer-evaluator", "6");
+  }
+  const request = runtime.validateCycleControllerRequest(value);
+  const store = new runtime.MemoryCycleControllerEventStore();
+  const inputs = [];
+  const remember = (context) => {
+    inputs.push({ phase: context.phase, iteration: context.iteration, input: context.input });
+  };
+  const finder = (context) => {
+    remember(context);
+    return { output: [] };
+  };
+  const candidateEvaluator = (context) => {
+    remember(context);
+    return { output: [] };
+  };
+  const decide = (context) => {
+    remember(context);
+    return { output: mode === "while" ? false : "accept" };
+  };
+  const result = await runtime.startCycleController(request, cycleGraph, {
+    eventStore: store,
+    lease: {
+      leaseId: `cycle-cross-language-${suffix}-lease`,
+      holderId: "cycle-cross-language-holder",
+      leaseEpoch: 1,
+      fencingToken: 1,
+      acquiredAt: cycleStartedAt,
+      expiresAt: "2026-07-26T12:01:00.000Z",
+    },
+    now: () => new Date(cycleStartedAt),
+    activities: {
+      finder,
+      candidateEvaluator,
+      ...(mode === "while" ? { condition: decide } : { optimizerEvaluator: decide }),
+    },
+  });
+  const events = store.snapshot(request.eventStreamId);
+  const checkpoint = runtime.createCycleControllerCheckpoint(
+    events,
+    `cycle-cross-language-${suffix}-terminal`,
+    cycleCheckpointAt,
+  );
+  return {
+    result,
+    resultCanonical: core.canonicalSerialize(result),
+    eventTypes: events.map(({ type }) => type),
+    eventCanonical: events.map((event) => core.canonicalSerialize(event)),
+    recordHashes: events.map(({ recordHash }) => recordHash),
+    activityKeys: events
+      .filter(({ type }) => type === "ActivityStarted")
+      .map(({ data }) => data.activityKey),
+    inputsCanonical: inputs.map((item) => core.canonicalSerialize(item)),
+    checkpoint,
+    checkpointCanonical: core.canonicalSerialize(checkpoint),
+    checkpointStateCanonical: core.canonicalSerialize(checkpoint.state),
+  };
+}
+
+const tsModeReports = {
+  while: await exerciseCycleMode("while"),
+  evaluatorOptimizer: await exerciseCycleMode("evaluator-optimizer"),
+};
+for (const [mode, tsModeReport] of Object.entries(tsModeReports)) {
+  for (const field of Object.keys(tsModeReport)) {
+    assert.deepEqual(
+      tsModeReport[field],
+      pyCycleReport.modes[mode][field],
+      `D7 ${mode} ${field} differs`,
+    );
+  }
+}
+const tsModeEventCount = Object.values(tsModeReports)
+  .reduce((total, report) => total + report.eventTypes.length, 0);
+const tsModeInputCount = Object.values(tsModeReports)
+  .reduce((total, report) => total + report.inputsCanonical.length, 0);
+process.stdout.write(
+  `Cross-language native-cycle conformance passed for ${tsCycleEvents.length + tsPatchEvents.length + tsResumeEvents.length + tsModeEventCount} exact events, ${cycleInputs.length + patchInputs.length + resumeInputs.length + tsModeInputCount} activity inputs, all three controller modes, five terminal results, one accepted GraphPatch/revision, one crash/takeover resume, and five checkpoints.\n`,
+);
+
 // Authoring conformance is intentionally expected-vs-TypeScript-vs-Python.
 // Native equality alone is insufficient because both implementations can share
 // the same bug.

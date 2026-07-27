@@ -1,0 +1,1411 @@
+from __future__ import annotations
+
+import asyncio
+import copy
+import json
+import time
+from collections.abc import Iterator, Mapping
+from pathlib import Path
+from typing import Any, cast
+
+import pytest
+
+from graph_engineering import compile_graph
+from graph_engineering.cycle_contract import CycleErrorCode, CycleRuntimeError, GraphPatchLimits
+from graph_engineering.cycle_controller import (
+    CycleCancellation,
+    CycleHandlers,
+    fork_cycle,
+    pause_cycle,
+    replay_cycle,
+    resume_cycle,
+    start_cycle,
+)
+from graph_engineering.cycle_store import MemoryCycleStore
+from graph_engineering.graph_patch import GraphPatchRuntime, PatchAuthority, PatchReservation
+
+ROOT = Path(__file__).resolve().parents[2]
+CONFORMANCE = ROOT / "spec" / "conformance"
+
+
+def request_document(*, max_iterations: int = 1, dry_rounds: int = 2) -> dict[str, Any]:
+    manifest = json.loads(
+        (CONFORMANCE / "cycle-controller.case.json").read_text(encoding="utf-8")
+    )
+    document = copy.deepcopy(manifest["validRequests"][0]["document"])
+    document["policy"]["maxIterations"] = max_iterations
+    document["policy"]["consecutiveDryRounds"] = dry_rounds
+    return cast(dict[str, Any], document)
+
+
+def lease(*, epoch: int = 1, lease_id: str = "lease-1") -> dict[str, Any]:
+    return {
+        "leaseId": lease_id,
+        "holderId": "python-test",
+        "leaseEpoch": epoch,
+        "fencingToken": epoch,
+        "acquiredAt": "2026-07-26T00:00:00Z",
+        "expiresAt": "2026-07-26T00:01:00Z",
+    }
+
+
+def fixed_clock() -> str:
+    return "2026-07-26T00:00:00Z"
+
+
+def test_cycle_surface_is_exported_from_the_native_python_package() -> None:
+    import graph_engineering as ge
+
+    assert ge.start_cycle is start_cycle
+    assert ge.resume_cycle is resume_cycle
+    assert ge.replay_cycle is replay_cycle
+    assert ge.fork_cycle is fork_cycle
+    assert ge.pause_cycle is pause_cycle
+    assert ge.MemoryCycleStore is MemoryCycleStore
+    assert ge.GraphPatchRuntime is GraphPatchRuntime
+
+
+def handler_binding(
+    activity_id: str,
+    *,
+    attempts: int = 1,
+    cost: int | float = 0,
+    side_effects: str = "none",
+    timeout_ms: int = 100,
+) -> dict[str, Any]:
+    return {
+        "activityId": activity_id,
+        "implementationHash": (activity_id.encode().hex() + "1" * 64)[:64],
+        "sideEffects": side_effects,
+        "maxAttemptsPerRound": attempts,
+        "maxCostUsdPerAttempt": cost,
+        "timeoutMs": timeout_ms,
+    }
+
+
+def handlers_for_mode(
+    request: dict[str, Any],
+    *,
+    mode: str,
+) -> None:
+    request["policy"]["mode"] = mode
+    request["policy"].pop("consecutiveDryRounds", None)
+    if mode == "while":
+        request["activities"]["condition"] = handler_binding("condition")
+        request["activities"]["optimizerEvaluator"] = None
+    elif mode == "evaluator-optimizer":
+        request["activities"]["condition"] = None
+        request["activities"]["optimizerEvaluator"] = handler_binding("optimizer-evaluator")
+
+
+def patch_runtime() -> GraphPatchRuntime:
+    graph = compile_graph(
+        json.loads((CONFORMANCE / "diamond.graph.json").read_text(encoding="utf-8"))
+    )
+    return GraphPatchRuntime(
+        graph,
+        revision_hash_value="a" * 64,
+        limits=GraphPatchLimits.model_validate(
+            {
+                "maxNodes": 100,
+                "maxEdges": 200,
+                "maxOutputs": 100,
+                "maxDepth": 20,
+                "maxFanOut": 20,
+            }
+        ),
+        succeeded_nodes=frozenset({"merge"}),
+    )
+
+
+def patch_authority() -> PatchAuthority:
+    return PatchAuthority(
+        proposer_activity_key="0" * 64,
+        principal_hash="2" * 64,
+        proposer_grant_hash="3" * 64,
+        run_grant_hash="4" * 64,
+        tenant_grant_hash="5" * 64,
+        deployment_grant_hash="6" * 64,
+        effective_grant_hash="7" * 64,
+        policy_hash="8" * 64,
+        approval_hash=None,
+    )
+
+
+def accepted_patch(runtime: GraphPatchRuntime, patch_id: str = "round-review") -> dict[str, Any]:
+    return {
+        "apiVersion": "graphengineering.reacher-z.github.io/patches/v1alpha1",
+        "kind": "GraphPatch",
+        "patchId": patch_id,
+        "base": copy.deepcopy(runtime.coordinate),
+        "append": {
+            "nodes": [
+                {
+                    "id": "review",
+                    "kind": "validator",
+                    "inputSchema": {},
+                    "outputSchema": {},
+                    "config": {},
+                    "sideEffects": "none",
+                }
+            ],
+            "edges": [
+                {
+                    "id": "merge-review",
+                    "from": {"node": "merge"},
+                    "to": {"node": "review"},
+                    "mode": "value",
+                }
+            ],
+            "outputs": {"reviewResult": {"node": "review"}},
+        },
+    }
+
+
+def patch_request(runtime: GraphPatchRuntime, *, max_iterations: int = 1) -> dict[str, Any]:
+    request = request_document(max_iterations=max_iterations)
+    request["initialGraph"] = copy.deepcopy(runtime.coordinate)
+    return request
+
+
+def fork_request(
+    parent: dict[str, Any],
+    *,
+    parent_sequence: int,
+    parent_history_hash: str,
+) -> dict[str, Any]:
+    child = copy.deepcopy(parent)
+    child["controllerRunId"] = "cycle-run-child"
+    child["controllerId"] = "auth-discovery-child"
+    child["eventStreamId"] = "cycle-run-child.events"
+    child["checkpointScope"] = "cycle-run-child.checkpoints"
+    child["lineage"] = {
+        "origin": "fork",
+        "parentControllerRunId": parent["controllerRunId"],
+        "parentSequence": parent_sequence,
+        "parentHistoryHash": parent_history_hash,
+    }
+    return child
+
+
+def test_shared_request_runs_native_until_dry_and_replays_without_dispatch() -> None:
+    async def run() -> None:
+        store = MemoryCycleStore()
+        calls = {"finder": 0, "evaluator": 0}
+
+        def finder(_: object) -> list[object]:
+            calls["finder"] += 1
+            return []
+
+        def evaluator(_: object) -> list[object]:
+            calls["evaluator"] += 1
+            return []
+
+        request = request_document(max_iterations=2, dry_rounds=2)
+        result = await start_cycle(
+            request,
+            CycleHandlers(finder=finder, candidate_evaluator=evaluator),
+            store=store,
+            lease=lease(),
+            clock=fixed_clock,
+        )
+
+        # The hard iteration bound is simultaneous with convergence and wins by
+        # portable precedence, while the convergence observation remains durable.
+        assert result.result["exitReason"] == "MAX_ITERATIONS"
+        assert calls == {"finder": 2, "evaluator": 2}
+        writes = store.append_count
+
+        replayed = await replay_cycle(request["eventStreamId"], store=store)
+
+        assert replayed.result == result.result
+        assert store.append_count == writes
+
+    asyncio.run(run())
+
+
+def test_global_seen_set_is_preserved_across_rounds() -> None:
+    async def run() -> None:
+        store = MemoryCycleStore()
+        batches = iter(
+            [
+                [
+                    {"key": "finding-a", "value": {"round": 1}},
+                    {"key": "finding-a", "value": {"round": 1, "duplicate": True}},
+                ],
+                [{"key": "finding-a", "value": {"round": 2}}],
+            ]
+        )
+
+        def finder(_: object) -> object:
+            return next(batches)
+
+        def evaluator(context: Any) -> list[dict[str, str]]:
+            return [
+                {"key": candidate["key"], "verdict": "reject"}
+                for candidate in context.input["candidates"]
+            ]
+
+        request = request_document(max_iterations=2, dry_rounds=1)
+        result = await start_cycle(
+            request,
+            CycleHandlers(finder=finder, candidate_evaluator=evaluator),
+            store=store,
+            lease=lease(),
+            clock=fixed_clock,
+        )
+
+        assert result.result["exitReason"] == "MAX_ITERATIONS"
+        assert result.result["seenCount"] == 1
+        assert result.result["rejectedCount"] == 1
+        rounds = cast(
+            list[dict[str, Any]],
+            [event.data["record"] for event in result.events if event.type == "RoundCommitted"],
+        )
+        assert rounds[0]["freshKeys"] == ["finding-a"]
+        assert rounds[0]["duplicateKeys"] == ["finding-a"]
+        assert rounds[1]["freshKeys"] == []
+        assert rounds[1]["duplicateKeys"] == ["finding-a"]
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize(
+    ("mode", "mode_output", "expected"),
+    [
+        ("while", False, "CONDITION_FALSE"),
+        ("evaluator-optimizer", "accept", "EVALUATOR_ACCEPTED"),
+    ],
+)
+def test_native_while_and_evaluator_optimizer_converge(
+    mode: str,
+    mode_output: object,
+    expected: str,
+) -> None:
+    async def run() -> None:
+        request = request_document(max_iterations=3)
+        handlers_for_mode(request, mode=mode)
+        mode_calls = 0
+
+        def decide(_: object) -> object:
+            nonlocal mode_calls
+            mode_calls += 1
+            return mode_output
+
+        result = await start_cycle(
+            request,
+            CycleHandlers(
+                finder=lambda _: [],
+                candidate_evaluator=lambda _: [],
+                condition=decide if mode == "while" else None,
+                optimizer_evaluator=(
+                    decide if mode == "evaluator-optimizer" else None
+                ),
+            ),
+            store=MemoryCycleStore(),
+            lease=lease(),
+            clock=fixed_clock,
+        )
+
+        assert result.result["exitReason"] == expected
+        assert result.result["status"] == "converged"
+        assert mode_calls == 1
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("bound", ["attempts", "cost"])
+def test_unsound_first_round_reservation_fails_before_any_dispatch(bound: str) -> None:
+    async def run() -> None:
+        request = request_document(max_iterations=3)
+        expected = "MAX_TOTAL_ATTEMPTS"
+        if bound == "attempts":
+            request["policy"]["maxTotalAttempts"] = 1
+        else:
+            request["policy"]["maxCostUsd"] = 0.5
+            request["activities"]["finder"]["maxCostUsdPerAttempt"] = 1
+            expected = "MAX_COST"
+        calls = 0
+
+        def forbidden(_: object) -> list[object]:
+            nonlocal calls
+            calls += 1
+            return []
+
+        result = await start_cycle(
+            request,
+            CycleHandlers(finder=forbidden, candidate_evaluator=forbidden),
+            store=MemoryCycleStore(),
+            lease=lease(),
+            clock=fixed_clock,
+        )
+
+        assert result.result["exitReason"] == expected
+        assert calls == 0
+        assert not any(event.type == "RoundReserved" for event in result.events)
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("bound", ["attempts", "cost"])
+def test_native_round_plan_never_shrinks_request_bound_retry_envelopes(bound: str) -> None:
+    async def run() -> None:
+        request = request_document(max_iterations=1)
+        request["activities"]["finder"]["maxAttemptsPerRound"] = 3
+        request["activities"]["candidateEvaluator"]["maxAttemptsPerRound"] = 2
+        request["activities"]["patchPlanner"]["maxAttemptsPerRound"] = 4
+        expected = "MAX_TOTAL_ATTEMPTS"
+        if bound == "attempts":
+            # One attempt per phase would fit, but the complete 3 + 2 + 4
+            # request-bound retry envelope does not.
+            request["policy"]["maxTotalAttempts"] = 8
+        else:
+            request["activities"]["finder"]["maxCostUsdPerAttempt"] = 0.25
+            request["activities"]["candidateEvaluator"]["maxCostUsdPerAttempt"] = 0.5
+            request["activities"]["patchPlanner"]["maxCostUsdPerAttempt"] = 0.75
+            request["policy"]["maxCostUsd"] = 4.5
+            expected = "MAX_COST"
+        calls = 0
+
+        def forbidden(_: object) -> list[object]:
+            nonlocal calls
+            calls += 1
+            return []
+
+        result = await start_cycle(
+            request,
+            CycleHandlers(finder=forbidden, candidate_evaluator=forbidden),
+            store=MemoryCycleStore(),
+            lease=lease(),
+            clock=fixed_clock,
+        )
+
+        assert result.result["exitReason"] == expected
+        assert result.result["attemptsUsed"] == 0
+        assert calls == 0
+        assert not any(event.type == "RoundReserved" for event in result.events)
+
+    asyncio.run(run())
+
+
+def test_patch_enabled_round_reserves_planner_then_skips_unrouted_dispatch() -> None:
+    async def run() -> None:
+        request = request_document(max_iterations=1)
+        request["activities"]["finder"]["maxAttemptsPerRound"] = 2
+        request["activities"]["candidateEvaluator"]["maxAttemptsPerRound"] = 3
+        request["activities"]["patchPlanner"]["maxAttemptsPerRound"] = 4
+        result = await start_cycle(
+            request,
+            CycleHandlers(finder=lambda _: [], candidate_evaluator=lambda _: []),
+            store=MemoryCycleStore(),
+            lease=lease(),
+            clock=fixed_clock,
+        )
+
+        reserved = next(event for event in result.events if event.type == "RoundReserved")
+        assert reserved.data["maximum"] == {
+            "attempts": 9,
+            "costUsd": 0,
+            "dynamicNodes": request["policy"]["maxDynamicNodes"],
+        }
+        reserved_plan = cast(dict[str, Any], reserved.data["plan"])
+        planner_plan = cast(dict[str, Any], reserved_plan["patchPlanner"])
+        assert planner_plan["maxAttempts"] == 4
+        assert not any(
+            event.type == "ActivityStarted"
+            and event.data["phase"] == "patch-planner"
+            for event in result.events
+        )
+        release = next(
+            event
+            for event in result.events
+            if event.type == "BudgetReservationReleased"
+            and event.data["reason"] == "round-complete"
+        )
+        assert release.data["released"] == {
+            # Finder and evaluator each used one attempt; every unused retry
+            # plus the unrouted planner envelope is released atomically.
+            "attempts": 7,
+            "costUsd": 0,
+            "dynamicNodes": request["policy"]["maxDynamicNodes"],
+        }
+
+    asyncio.run(run())
+
+
+def test_deadline_and_pre_cancel_stop_before_round_or_handler() -> None:
+    async def deadline_run() -> None:
+        request = request_document(max_iterations=3)
+        moments = iter(
+            [
+                "2026-07-26T00:00:00Z",
+                "2026-07-26T00:00:00Z",
+                "2026-07-26T00:00:01Z",
+                "2026-07-26T00:00:01Z",
+                "2026-07-26T00:00:01Z",
+            ]
+        )
+        calls = 0
+
+        def forbidden(_: object) -> list[object]:
+            nonlocal calls
+            calls += 1
+            return []
+
+        result = await start_cycle(
+            request,
+            CycleHandlers(finder=forbidden, candidate_evaluator=forbidden),
+            store=MemoryCycleStore(),
+            lease=lease(),
+            clock=lambda: next(moments),
+        )
+        assert result.result["exitReason"] == "MAX_DURATION"
+        assert calls == 0
+        assert not any(event.type == "RoundReserved" for event in result.events)
+
+    async def cancellation_run() -> None:
+        cancellation = CycleCancellation()
+        cancellation.cancel()
+        calls = 0
+
+        def forbidden(_: object) -> list[object]:
+            nonlocal calls
+            calls += 1
+            return []
+
+        result = await start_cycle(
+            request_document(max_iterations=3),
+            CycleHandlers(finder=forbidden, candidate_evaluator=forbidden),
+            store=MemoryCycleStore(),
+            lease=lease(),
+            cancellation=cancellation,
+            clock=fixed_clock,
+        )
+        assert result.result["exitReason"] == "CANCELLED"
+        assert calls == 0
+
+    asyncio.run(deadline_run())
+    asyncio.run(cancellation_run())
+
+
+class HostileOutput(Mapping[str, object]):
+    calls = 0
+
+    def __getitem__(self, key: str) -> object:
+        del key
+        type(self).calls += 1
+        raise AssertionError("hostile getter executed")
+
+    def __iter__(self) -> Iterator[str]:
+        type(self).calls += 1
+        raise AssertionError("hostile iterator executed")
+
+    def __len__(self) -> int:
+        type(self).calls += 1
+        raise AssertionError("hostile length executed")
+
+
+def test_hostile_finder_output_fails_once_without_getters_or_downstream_dispatch() -> None:
+    async def run() -> None:
+        HostileOutput.calls = 0
+        evaluator_calls = 0
+
+        def evaluator(_: object) -> list[object]:
+            nonlocal evaluator_calls
+            evaluator_calls += 1
+            return []
+
+        result = await start_cycle(
+            request_document(max_iterations=3),
+            CycleHandlers(finder=lambda _: HostileOutput(), candidate_evaluator=evaluator),
+            store=MemoryCycleStore(),
+            lease=lease(),
+            clock=fixed_clock,
+        )
+
+        assert result.result["exitReason"] == "FAILED"
+        assert HostileOutput.calls == 0
+        assert evaluator_calls == 0
+        assert not any(event.type == "DiscoveryCommitted" for event in result.events)
+        failures = [event for event in result.events if event.type == "ActivityFailed"]
+        assert len(failures) == 1
+        failure = cast(dict[str, Any], failures[0].data["failure"])
+        assert failure["code"] == "GE_ACTIVITY_OUTPUT_INVALID"
+
+    asyncio.run(run())
+
+
+def test_invalid_evaluator_coverage_never_dispatches_a_later_phase() -> None:
+    async def run() -> None:
+        request = request_document(max_iterations=3)
+        handlers_for_mode(request, mode="while")
+        condition_calls = 0
+
+        def condition(_: object) -> bool:
+            nonlocal condition_calls
+            condition_calls += 1
+            return True
+
+        result = await start_cycle(
+            request,
+            CycleHandlers(
+                finder=lambda _: [{"key": "a", "value": None}],
+                candidate_evaluator=lambda _: [],
+                condition=condition,
+            ),
+            store=MemoryCycleStore(),
+            lease=lease(),
+            clock=fixed_clock,
+        )
+
+        assert result.result["exitReason"] == "FAILED"
+        assert result.result["seenCount"] == 1
+        assert result.result["unevaluatedCount"] == 1
+        assert condition_calls == 0
+        assert not any(event.type == "CandidateEvaluationCommitted" for event in result.events)
+
+    asyncio.run(run())
+
+
+def test_none_activity_retries_with_one_stable_key_and_runtime_derived_cost() -> None:
+    async def run() -> None:
+        request = request_document(max_iterations=2, dry_rounds=1)
+        request["activities"]["finder"]["maxAttemptsPerRound"] = 2
+        request["activities"]["finder"]["maxCostUsdPerAttempt"] = 0.25
+        calls = 0
+
+        def finder(_: object) -> list[object]:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise RuntimeError("first attempt fails")
+            return []
+
+        result = await start_cycle(
+            request,
+            CycleHandlers(finder=finder, candidate_evaluator=lambda _: []),
+            store=MemoryCycleStore(),
+            lease=lease(),
+            clock=fixed_clock,
+        )
+
+        starts = [
+            event for event in result.events
+            if event.type == "ActivityStarted" and event.data["phase"] == "finder"
+        ]
+        assert result.result["exitReason"] == "DRY"
+        assert calls == 2
+        assert [event.data["attempt"] for event in starts] == [1, 2]
+        assert len({event.data["activityKey"] for event in starts}) == 1
+        assert result.result["costUsd"] == 0.5
+
+    asyncio.run(run())
+
+
+class Crash(BaseException):
+    pass
+
+
+def test_resume_after_discovery_cas_reuses_finder_output_exactly() -> None:
+    async def run() -> None:
+        request = request_document(max_iterations=1)
+        store = MemoryCycleStore()
+        finder_calls = 0
+        crashed = False
+
+        def finder(_: object) -> list[dict[str, object]]:
+            nonlocal finder_calls
+            finder_calls += 1
+            return [{"key": "a", "value": None}]
+
+        def evaluator(context: Any) -> list[dict[str, str]]:
+            return [
+                {"key": item["key"], "verdict": "accept"}
+                for item in context.input["candidates"]
+            ]
+
+        def crash_once(boundary: str) -> None:
+            nonlocal crashed
+            if boundary == "event:DiscoveryCommitted:after-cas" and not crashed:
+                crashed = True
+                raise Crash()
+
+        with pytest.raises(Crash):
+            await start_cycle(
+                request,
+                CycleHandlers(
+                    finder=finder,
+                    candidate_evaluator=evaluator,
+                ),
+                store=store,
+                lease=lease(),
+                clock=fixed_clock,
+                fault_hook=crash_once,
+            )
+        interrupted = await store.read(request["eventStreamId"])
+        assert interrupted[-1].type == "DiscoveryCommitted"
+
+        result = await resume_cycle(
+            request,
+            CycleHandlers(
+                finder=finder,
+                candidate_evaluator=evaluator,
+            ),
+            store=store,
+            expected_version=len(interrupted) - 1,
+            lease=lease(epoch=2, lease_id="lease-2"),
+            clock=fixed_clock,
+        )
+
+        assert result.result["exitReason"] == "MAX_ITERATIONS"
+        assert finder_calls == 1
+        assert result.result["acceptedCount"] == 1
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("side_effects", ["none", "non-idempotent"])
+def test_resume_open_activity_honors_idempotency_and_in_doubt(side_effects: str) -> None:
+    async def run() -> None:
+        request = request_document(max_iterations=3)
+        request["activities"]["finder"]["sideEffects"] = side_effects
+        request["activities"]["finder"]["maxAttemptsPerRound"] = 2
+        store = MemoryCycleStore()
+        calls = 0
+        crashed = False
+
+        def finder(_: object) -> list[object]:
+            nonlocal calls
+            calls += 1
+            return []
+
+        def crash_once(boundary: str) -> None:
+            nonlocal crashed
+            if boundary == "event:ActivityStarted:after-cas" and not crashed:
+                crashed = True
+                raise Crash()
+
+        with pytest.raises(Crash):
+            await start_cycle(
+                request,
+                CycleHandlers(finder=finder, candidate_evaluator=lambda _: []),
+                store=store,
+                lease=lease(),
+                clock=fixed_clock,
+                fault_hook=crash_once,
+            )
+        interrupted = await store.read(request["eventStreamId"])
+
+        if side_effects == "non-idempotent":
+            with pytest.raises(CycleRuntimeError) as raised:
+                await resume_cycle(
+                    request,
+                    CycleHandlers(finder=finder, candidate_evaluator=lambda _: []),
+                    store=store,
+                    expected_version=len(interrupted) - 1,
+                    lease=lease(epoch=2, lease_id="lease-2"),
+                    clock=fixed_clock,
+                )
+            assert raised.value.code is CycleErrorCode.IN_DOUBT_SIDE_EFFECT
+            assert calls == 0
+            assert await store.read(request["eventStreamId"]) == interrupted
+            replayed = await replay_cycle(
+                request["eventStreamId"],
+                store=store,
+                through_sequence=interrupted[-1].sequence,
+            )
+            open_round = cast(dict[str, Any], replayed.state["openRound"])
+            open_activity = cast(dict[str, Any], open_round["openActivity"])
+            assert open_activity["sideEffects"] == "non-idempotent"
+        else:
+            result = await resume_cycle(
+                request,
+                CycleHandlers(finder=finder, candidate_evaluator=lambda _: []),
+                store=store,
+                expected_version=len(interrupted) - 1,
+                lease=lease(epoch=2, lease_id="lease-2"),
+                clock=fixed_clock,
+            )
+            assert calls >= 1
+            starts = [
+                event for event in result.events
+                if event.type == "ActivityStarted" and event.data["phase"] == "finder"
+            ]
+            assert [event.data["attempt"] for event in starts[:2]] == [1, 2]
+            assert starts[0].data["activityKey"] == starts[1].data["activityKey"]
+
+    asyncio.run(run())
+
+
+def test_late_noncooperative_handler_is_charged_but_never_committed() -> None:
+    async def run() -> None:
+        request = request_document(max_iterations=3)
+        request["activities"]["finder"]["timeoutMs"] = 1
+        request["activities"]["finder"]["maxCostUsdPerAttempt"] = 0.5
+
+        def late(_: object) -> list[dict[str, object]]:
+            time.sleep(0.03)
+            return [{"key": "late", "value": None}]
+
+        result = await start_cycle(
+            request,
+            CycleHandlers(finder=late, candidate_evaluator=lambda _: []),
+            store=MemoryCycleStore(),
+            lease=lease(),
+            clock=fixed_clock,
+        )
+
+        assert result.result["exitReason"] == "FAILED"
+        assert result.result["costUsd"] == 0.5
+        assert result.result["seenCount"] == 0
+        assert not any(event.type == "DiscoveryCommitted" for event in result.events)
+
+    asyncio.run(run())
+
+
+def test_invalid_patch_output_records_failure_without_revision_or_extra_round() -> None:
+    async def run() -> None:
+        runtime = patch_runtime()
+        request = patch_request(runtime, max_iterations=3)
+        finder_calls = 0
+        planner_calls = 0
+
+        def finder(_: object) -> list[object]:
+            nonlocal finder_calls
+            finder_calls += 1
+            return []
+
+        def planner(_: object) -> dict[str, object]:
+            nonlocal planner_calls
+            planner_calls += 1
+            return {"not": "a GraphPatch"}
+
+        result = await start_cycle(
+            request,
+            CycleHandlers(
+                finder=finder,
+                candidate_evaluator=lambda _: [],
+                patch_planner=planner,
+            ),
+            store=MemoryCycleStore(),
+            lease=lease(),
+            clock=fixed_clock,
+            patch_runtime=runtime,
+            patch_authority=patch_authority(),
+            patch_each_round=True,
+        )
+
+        assert result.result["exitReason"] == "FAILED"
+        assert finder_calls == 1
+        assert planner_calls == 1
+        assert runtime.decision_count == 0
+        assert runtime.coordinate["graphRevision"] == 1
+        assert not any(
+            event.type in {"PatchAccepted", "PatchRejected"} for event in result.events
+        )
+
+    asyncio.run(run())
+
+
+def test_patch_acceptance_and_crash_restore_rebuild_full_native_revision() -> None:
+    async def run() -> None:
+        original = patch_runtime()
+        request = patch_request(original)
+        store = MemoryCycleStore()
+        planner_calls = 0
+        crashed = False
+
+        def planner(_: object) -> dict[str, Any]:
+            nonlocal planner_calls
+            planner_calls += 1
+            return accepted_patch(original)
+
+        def crash_once(boundary: str) -> None:
+            nonlocal crashed
+            if boundary == "event:PatchAccepted:after-cas" and not crashed:
+                crashed = True
+                raise Crash()
+
+        with pytest.raises(Crash):
+            await start_cycle(
+                request,
+                CycleHandlers(
+                    finder=lambda _: [],
+                    candidate_evaluator=lambda _: [],
+                    patch_planner=planner,
+                ),
+                store=store,
+                lease=lease(),
+                clock=fixed_clock,
+                fault_hook=crash_once,
+                patch_runtime=original,
+                patch_authority=patch_authority(),
+                patch_each_round=True,
+            )
+        assert original.coordinate["graphRevision"] == 1
+        interrupted = await store.read(request["eventStreamId"])
+        assert interrupted[-1].type == "PatchAccepted"
+
+        restored = patch_runtime()
+        result = await resume_cycle(
+            request,
+            CycleHandlers(
+                finder=lambda _: (_ for _ in ()).throw(AssertionError("finder reran")),
+                candidate_evaluator=lambda _: (_ for _ in ()).throw(
+                    AssertionError("evaluator reran")
+                ),
+                patch_planner=lambda _: (_ for _ in ()).throw(
+                    AssertionError("planner reran")
+                ),
+            ),
+            store=store,
+            expected_version=len(interrupted) - 1,
+            lease=lease(epoch=2, lease_id="lease-2"),
+            clock=fixed_clock,
+            patch_runtime=restored,
+            patch_authority=patch_authority(),
+            patch_each_round=True,
+        )
+
+        assert planner_calls == 1
+        assert restored.coordinate["graphRevision"] == 2
+        assert restored.graph.spec.nodes[-1].id == "review"
+        assert restored.decision_count == 1
+        assert result.result["lastGraphRevision"] == 2
+        assert result.result["dynamicNodes"] == 1
+
+        retry = await restored.apply(
+            accepted_patch(patch_runtime()),
+            authority=patch_authority(),
+            policy_snapshot_hash="f" * 64,
+            reservation=PatchReservation("ignored-on-exact-retry", 1, 0, 0),
+            record=lambda _: (_ for _ in ()).throw(AssertionError("restored retry wrote")),
+        )
+        assert retry.authority_snapshot["proposerActivityKey"] != "0" * 64
+        assert retry.policy_snapshot_hash == "8" * 64
+        assert retry.budget_outcome["committed"] == {
+            "attempts": 1,
+            "costUsd": 0,
+            "dynamicNodes": 1,
+        }
+        assert retry.diagnostics == ()
+
+    asyncio.run(run())
+
+
+def test_terminal_resume_and_prefix_replay_are_strictly_read_only() -> None:
+    async def run() -> None:
+        request = request_document(max_iterations=1)
+        store = MemoryCycleStore()
+        completed = await start_cycle(
+            request,
+            CycleHandlers(finder=lambda _: [], candidate_evaluator=lambda _: []),
+            store=store,
+            lease=lease(),
+            clock=fixed_clock,
+        )
+        writes = store.append_count
+        calls = 0
+
+        def forbidden(_: object) -> list[object]:
+            nonlocal calls
+            calls += 1
+            raise AssertionError("terminal resume dispatched")
+
+        resumed = await resume_cycle(
+            request,
+            CycleHandlers(finder=forbidden, candidate_evaluator=forbidden),
+            store=store,
+            expected_version=len(completed.events) - 1,
+            lease={"invalid": "terminal path must not inspect this"},
+            clock=lambda: (_ for _ in ()).throw(AssertionError("terminal clock read")),
+        )
+        prefix = await replay_cycle(
+            request["eventStreamId"],
+            store=store,
+            through_sequence=2,
+        )
+
+        assert resumed.result == completed.result
+        assert prefix.result is None
+        assert prefix.terminal is False
+        assert prefix.state["nextIteration"] == 2
+        assert calls == 0
+        assert store.append_count == writes
+
+    asyncio.run(run())
+
+
+def test_dual_resume_has_one_cas_winner_and_one_dispatch_path() -> None:
+    async def run() -> None:
+        request = request_document(max_iterations=1)
+        store = MemoryCycleStore()
+        crashed = False
+
+        def crash_once(boundary: str) -> None:
+            nonlocal crashed
+            if boundary == "event:RoundReserved:after-cas" and not crashed:
+                crashed = True
+                raise Crash()
+
+        with pytest.raises(Crash):
+            await start_cycle(
+                request,
+                CycleHandlers(finder=lambda _: [], candidate_evaluator=lambda _: []),
+                store=store,
+                lease=lease(),
+                clock=fixed_clock,
+                fault_hook=crash_once,
+            )
+        interrupted = await store.read(request["eventStreamId"])
+        calls = 0
+
+        def finder(_: object) -> list[object]:
+            nonlocal calls
+            calls += 1
+            return []
+
+        async def contender(epoch: int) -> object:
+            try:
+                return await resume_cycle(
+                    request,
+                    CycleHandlers(finder=finder, candidate_evaluator=lambda _: []),
+                    store=store,
+                    expected_version=len(interrupted) - 1,
+                    lease=lease(epoch=epoch, lease_id=f"lease-{epoch}"),
+                    clock=fixed_clock,
+                )
+            except BaseException as exc:
+                return exc
+
+        outcomes = await asyncio.gather(contender(2), contender(3))
+
+        assert sum(not isinstance(item, BaseException) for item in outcomes) == 1
+        assert calls == 1
+        history = await store.read(request["eventStreamId"])
+        assert sum(event.type == "ControllerTerminated" for event in history) == 1
+
+    asyncio.run(run())
+
+
+def test_rejected_patch_restore_preserves_diagnostics_and_exact_retry() -> None:
+    async def run() -> None:
+        original = patch_runtime()
+        request = patch_request(original, max_iterations=3)
+        store = MemoryCycleStore()
+        rejected = accepted_patch(original, patch_id="stale-proposal")
+        rejected["base"]["revisionHash"] = "f" * 64
+        crashed = False
+
+        def crash_once(boundary: str) -> None:
+            nonlocal crashed
+            if boundary == "event:PatchRejected:after-cas" and not crashed:
+                crashed = True
+                raise Crash()
+
+        with pytest.raises(Crash):
+            await start_cycle(
+                request,
+                CycleHandlers(
+                    finder=lambda _: [],
+                    candidate_evaluator=lambda _: [],
+                    patch_planner=lambda _: rejected,
+                ),
+                store=store,
+                lease=lease(),
+                clock=fixed_clock,
+                fault_hook=crash_once,
+                patch_runtime=original,
+                patch_authority=patch_authority(),
+                patch_each_round=True,
+            )
+        interrupted = await store.read(request["eventStreamId"])
+        assert interrupted[-1].type == "PatchRejected"
+
+        restored = patch_runtime()
+        result = await resume_cycle(
+            request,
+            CycleHandlers(
+                finder=lambda _: [],
+                candidate_evaluator=lambda _: [],
+                patch_planner=lambda _: rejected,
+            ),
+            store=store,
+            expected_version=len(interrupted) - 1,
+            lease=lease(epoch=2, lease_id="lease-2"),
+            clock=fixed_clock,
+            patch_runtime=restored,
+            patch_authority=patch_authority(),
+            patch_each_round=True,
+        )
+
+        assert result.result["exitReason"] == "PATCH_REJECTED"
+        assert restored.coordinate["graphRevision"] == 1
+        assert restored.decision_count == 1
+        exact = await restored.apply(
+            rejected,
+            authority=patch_authority(),
+            policy_snapshot_hash="f" * 64,
+            reservation=PatchReservation("ignored", 1, 0, 0),
+            record=lambda _: (_ for _ in ()).throw(AssertionError("retry wrote")),
+        )
+        assert exact.outcome == "rejected"
+        assert exact.error_code is CycleErrorCode.PATCH_STALE_BASE
+        assert exact.diagnostics[0].path == "/base"
+        assert exact.authority_snapshot["proposerActivityKey"] != "0" * 64
+
+    asyncio.run(run())
+
+
+def test_event_identity_store_checkpoint_and_clock_fail_closed() -> None:
+    async def event_identity() -> None:
+        store = MemoryCycleStore()
+
+        def broken_id(_: str, __: int) -> str:
+            raise RuntimeError("identity unavailable")
+
+        with pytest.raises(CycleRuntimeError) as raised:
+            await start_cycle(
+                request_document(),
+                CycleHandlers(finder=lambda _: [], candidate_evaluator=lambda _: []),
+                store=store,
+                lease=lease(),
+                clock=fixed_clock,
+                event_id_factory=broken_id,
+            )
+        assert raised.value.code is CycleErrorCode.STORE_FAILED
+        assert store.append_count == 0
+
+    async def store_failure() -> None:
+        def fail_inside(boundary: str) -> None:
+            if boundary == "store:inside-append-before-commit":
+                raise RuntimeError("store unavailable")
+
+        store = MemoryCycleStore(fault_hook=fail_inside)
+        with pytest.raises(CycleRuntimeError) as raised:
+            await start_cycle(
+                request_document(),
+                CycleHandlers(finder=lambda _: [], candidate_evaluator=lambda _: []),
+                store=store,
+                lease=lease(),
+                clock=fixed_clock,
+            )
+        assert raised.value.code is CycleErrorCode.STORE_FAILED
+        assert store.append_count == 0
+
+    async def checkpoint_failure() -> None:
+        def fail_checkpoint(boundary: str) -> None:
+            if boundary == "checkpoint:before-save":
+                raise RuntimeError("cache unavailable")
+
+        store = MemoryCycleStore(fault_hook=fail_checkpoint)
+        request = request_document()
+        result = await start_cycle(
+            request,
+            CycleHandlers(finder=lambda _: [], candidate_evaluator=lambda _: []),
+            store=store,
+            lease=lease(),
+            clock=fixed_clock,
+        )
+        assert result.checkpoint_warning is not None
+        assert result.checkpoint_warning.code is CycleErrorCode.STORE_FAILED
+        replayed = await replay_cycle(request["eventStreamId"], store=store)
+        assert replayed.result == result.result
+
+    async def clock_rollback() -> None:
+        moments = iter(
+            [
+                "2026-07-26T00:00:01Z",
+                "2026-07-26T00:00:01Z",
+                "2026-07-26T00:00:00Z",
+            ]
+        )
+        store = MemoryCycleStore()
+        calls = 0
+
+        def forbidden(_: object) -> list[object]:
+            nonlocal calls
+            calls += 1
+            return []
+
+        with pytest.raises(CycleRuntimeError) as raised:
+            await start_cycle(
+                request_document(max_iterations=3),
+                CycleHandlers(finder=forbidden, candidate_evaluator=forbidden),
+                store=store,
+                lease=lease(),
+                clock=lambda: next(moments),
+            )
+        assert raised.value.code is CycleErrorCode.CLOCK_ROLLBACK
+        assert calls == 0
+        assert store.append_count == 2
+
+    asyncio.run(event_identity())
+    asyncio.run(store_failure())
+    asyncio.run(checkpoint_failure())
+    asyncio.run(clock_rollback())
+
+
+def test_cancellation_racing_output_discards_value_and_retains_claim() -> None:
+    async def run() -> None:
+        cancellation = CycleCancellation()
+        store = MemoryCycleStore()
+        request = request_document(max_iterations=3)
+
+        async def finder(_: object) -> list[dict[str, object]]:
+            cancellation.cancel()
+            return [{"key": "must-not-commit", "value": None}]
+
+        result = await start_cycle(
+            request,
+            CycleHandlers(finder=finder, candidate_evaluator=lambda _: []),
+            store=store,
+            lease=lease(),
+            clock=fixed_clock,
+            cancellation=cancellation,
+        )
+
+        assert result.result["exitReason"] == "CANCELLED"
+        assert result.result["seenCount"] == 0
+        assert not any(event.type == "DiscoveryCommitted" for event in result.events)
+        replayed = await replay_cycle(request["eventStreamId"], store=store)
+        assert len(cast(list[Any], replayed.state["inDoubtActivities"])) == 1
+
+    asyncio.run(run())
+
+
+def test_pause_handoff_and_stale_fence_are_zero_dispatch_operations() -> None:
+    async def run() -> None:
+        request = request_document(max_iterations=1)
+        store = MemoryCycleStore()
+        crashed = False
+
+        def crash_once(boundary: str) -> None:
+            nonlocal crashed
+            if boundary == "event:RoundReserved:after-cas" and not crashed:
+                crashed = True
+                raise Crash()
+
+        with pytest.raises(Crash):
+            await start_cycle(
+                request,
+                CycleHandlers(finder=lambda _: [], candidate_evaluator=lambda _: []),
+                store=store,
+                lease=lease(epoch=5, lease_id="lease-5"),
+                clock=fixed_clock,
+                fault_hook=crash_once,
+            )
+        interrupted = await store.read(request["eventStreamId"])
+        paused = await pause_cycle(
+            request,
+            store=store,
+            expected_version=len(interrupted) - 1,
+            reason="handoff",
+            clock=fixed_clock,
+        )
+        calls = 0
+
+        def finder(_: object) -> list[object]:
+            nonlocal calls
+            calls += 1
+            return []
+
+        writes = store.append_count
+        with pytest.raises(CycleRuntimeError) as stale:
+            await resume_cycle(
+                request,
+                CycleHandlers(finder=finder, candidate_evaluator=lambda _: []),
+                store=store,
+                expected_version=len(paused.events) - 1,
+                lease=lease(epoch=5, lease_id="stale-lease"),
+                clock=fixed_clock,
+            )
+        assert stale.value.code is CycleErrorCode.STALE_LEASE
+        assert calls == 0
+        assert store.append_count == writes
+
+        result = await resume_cycle(
+            request,
+            CycleHandlers(finder=finder, candidate_evaluator=lambda _: []),
+            store=store,
+            expected_version=len(paused.events) - 1,
+            lease=lease(epoch=6, lease_id="lease-6"),
+            clock=fixed_clock,
+        )
+        assert result.result["exitReason"] == "MAX_ITERATIONS"
+        assert calls == 1
+        leases = [event for event in result.events if event.type == "LeaseAcquired"]
+        assert leases[-1].data == {"reason": "resume", "previousLeaseId": "lease-5"}
+
+    asyncio.run(run())
+
+
+def test_fork_binds_exact_prefix_inherits_seen_and_diverges_independently() -> None:
+    async def run() -> None:
+        parent = request_document(max_iterations=3)
+        store = MemoryCycleStore()
+        crashed = False
+
+        def crash_once(boundary: str) -> None:
+            nonlocal crashed
+            if boundary == "event:DiscoveryCommitted:after-cas" and not crashed:
+                crashed = True
+                raise Crash()
+
+        with pytest.raises(Crash):
+            await start_cycle(
+                parent,
+                CycleHandlers(
+                    finder=lambda _: [{"key": "finding-a", "value": {"parent": True}}],
+                    candidate_evaluator=lambda _: [],
+                ),
+                store=store,
+                lease=lease(),
+                clock=fixed_clock,
+                fault_hook=crash_once,
+            )
+        parent_prefix = await store.read(parent["eventStreamId"])
+        parent_tail = parent_prefix[-1]
+        child = fork_request(
+            parent,
+            parent_sequence=parent_tail.sequence,
+            parent_history_hash=parent_tail.record_hash,
+        )
+        child["policy"]["maxIterations"] = 2
+        child_calls = 0
+
+        def child_finder(_: object) -> list[dict[str, object]]:
+            nonlocal child_calls
+            child_calls += 1
+            return [{"key": "finding-a", "value": {"child": True}}]
+
+        result = await fork_cycle(
+            child,
+            CycleHandlers(finder=child_finder, candidate_evaluator=lambda _: []),
+            store=store,
+            lease=lease(lease_id="child-lease"),
+            parent_controller_run_id=parent["controllerRunId"],
+            parent_sequence=parent_tail.sequence,
+            parent_history_hash=parent_tail.record_hash,
+            clock=fixed_clock,
+        )
+
+        assert result.result["exitReason"] == "MAX_ITERATIONS"
+        assert result.result["seenCount"] == 1
+        assert child_calls == 1
+        child_round = next(
+            cast(dict[str, Any], event.data["record"])
+            for event in result.events
+            if event.type == "RoundCommitted"
+        )
+        assert child_round["iteration"] == 2
+        assert child_round["freshKeys"] == []
+        assert child_round["duplicateKeys"] == ["finding-a"]
+        replayed = await replay_cycle(child["eventStreamId"], store=store)
+        assert replayed.state["seenKeys"] == ["finding-a"]
+        assert await store.read(parent["eventStreamId"]) == parent_prefix
+
+    asyncio.run(run())
+
+
+def test_fork_rejects_parent_hash_substitution_before_child_write() -> None:
+    async def run() -> None:
+        parent = request_document(max_iterations=1)
+        store = MemoryCycleStore()
+        completed = await start_cycle(
+            parent,
+            CycleHandlers(finder=lambda _: [], candidate_evaluator=lambda _: []),
+            store=store,
+            lease=lease(),
+            clock=fixed_clock,
+        )
+        parent_tail = completed.events[-1]
+        child = fork_request(
+            parent,
+            parent_sequence=parent_tail.sequence,
+            parent_history_hash="f" * 64,
+        )
+
+        with pytest.raises(CycleRuntimeError) as raised:
+            await fork_cycle(
+                child,
+                CycleHandlers(finder=lambda _: [], candidate_evaluator=lambda _: []),
+                store=store,
+                lease=lease(lease_id="child-lease"),
+                parent_controller_run_id=parent["controllerRunId"],
+                parent_sequence=parent_tail.sequence,
+                parent_history_hash="f" * 64,
+                clock=fixed_clock,
+            )
+
+        assert raised.value.code is CycleErrorCode.INVALID_HISTORY
+        assert await store.read(child["eventStreamId"]) == ()
+
+    asyncio.run(run())
+
+
+def test_fork_open_non_idempotent_claim_is_charged_in_doubt_without_dispatch() -> None:
+    async def run() -> None:
+        parent = request_document(max_iterations=3)
+        parent["activities"]["finder"]["sideEffects"] = "non-idempotent"
+        parent["activities"]["finder"]["maxCostUsdPerAttempt"] = 0.75
+        store = MemoryCycleStore()
+        crashed = False
+
+        def crash_once(boundary: str) -> None:
+            nonlocal crashed
+            if boundary == "event:ActivityStarted:after-cas" and not crashed:
+                crashed = True
+                raise Crash()
+
+        with pytest.raises(Crash):
+            await start_cycle(
+                parent,
+                CycleHandlers(finder=lambda _: [], candidate_evaluator=lambda _: []),
+                store=store,
+                lease=lease(),
+                clock=fixed_clock,
+                fault_hook=crash_once,
+            )
+        parent_prefix = await store.read(parent["eventStreamId"])
+        tail = parent_prefix[-1]
+        child = fork_request(
+            parent,
+            parent_sequence=tail.sequence,
+            parent_history_hash=tail.record_hash,
+        )
+        calls = 0
+
+        def forbidden(_: object) -> list[object]:
+            nonlocal calls
+            calls += 1
+            raise AssertionError("fork dispatched an inherited in-doubt activity")
+
+        with pytest.raises(CycleRuntimeError) as raised:
+            await fork_cycle(
+                child,
+                CycleHandlers(finder=forbidden, candidate_evaluator=forbidden),
+                store=store,
+                lease=lease(lease_id="child-lease"),
+                parent_controller_run_id=parent["controllerRunId"],
+                parent_sequence=tail.sequence,
+                parent_history_hash=tail.record_hash,
+                clock=fixed_clock,
+            )
+
+        assert raised.value.code is CycleErrorCode.IN_DOUBT_SIDE_EFFECT
+        assert calls == 0
+        child_events = await store.read(child["eventStreamId"])
+        assert [event.type for event in child_events] == ["ControllerCreated"]
+        replayed = await replay_cycle(
+            child["eventStreamId"],
+            store=store,
+            through_sequence=child_events[-1].sequence,
+        )
+        in_doubt = cast(list[dict[str, Any]], replayed.state["inDoubtActivities"])
+        assert len(in_doubt) == 1
+        assert in_doubt[0]["sideEffects"] == "non-idempotent"
+        assert replayed.state["attemptsUsed"] == 0
+        assert replayed.state["costUsd"] == 0
+
+    asyncio.run(run())

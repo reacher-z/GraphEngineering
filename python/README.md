@@ -516,15 +516,76 @@ effects. Scheduler checkpoint acceleration and explicit non-idempotent approval
 callbacks are not implemented in this slice; correctness comes from replaying
 the complete event stream.
 
+## Native bounded cycles and GraphPatch
+
+The standalone D7 controller executes the closed
+`cycle-controllers/v1alpha1` request contract natively in Python. It supports
+`until-dry`, bounded `while`, and evaluator-optimizer modes; a global seen set;
+inclusive duration, cost, attempt, discovery, iteration, and dynamic-node
+limits; runtime-derived activity charging; durable retries; cancellation; and
+optional GraphPatch planning. The request—not handler output—binds activity
+identity, side-effect class, retry ceiling, timeout, and maximum per-attempt
+cost.
+
+```python
+from graph_engineering import CycleHandlers, MemoryCycleStore, start_cycle
+
+store = MemoryCycleStore()  # deterministic local/test adapter only
+result = await start_cycle(
+    request_document,
+    CycleHandlers(
+        finder=find_candidates,
+        candidate_evaluator=evaluate_fresh_candidates,
+    ),
+    store=store,
+    lease=lease_claim,
+)
+```
+
+Every activity is claimed by `ActivityStarted` before caller code. A complete
+candidate event is validated by folding the prospective full event prefix
+before its CAS append. Successful output, failure, timeout, cancellation, and
+in-doubt recovery all settle the request-bound reservation exactly; invalid
+finder/evaluator/planner output cannot become a `None` result or release
+downstream work. `none` work may retry, `idempotent` work retries with one stable
+key, and an interrupted `non-idempotent` claim blocks resume/fork with
+`IN_DOUBT_SIDE_EFFECT` before a new lease or automatic reinvocation.
+
+`resume_cycle` validates the complete history, exact request/controller hashes,
+and a strictly higher lease fence before dispatch. `replay_cycle` folds either
+a terminal stream or an explicitly requested prefix without consulting a
+clock, handler, compiler plugin, authority service, or random source.
+`pause_cycle` records a voluntary lease release. `fork_cycle` binds an exact
+parent sequence and history hash, copies only the event-derived revision,
+seen/verdict categories, committed rounds, counters, decided patch IDs, and
+in-doubt status, and gives the child an independent stream and lease.
+
+`GraphPatchRuntime` snapshots exact portable patch bytes, gates the requested
+base, IDs, current execution state, authority/capabilities, graph compilation,
+graph size/depth/fan-out, and reserved structural capacity under one local CAS
+decision lock. A non-dry decision is recorded before a new revision becomes
+visible. Recovery recompiles every stored accepted patch and reconstructs both
+accepted and rejected decisions with their complete authority, policy, budget,
+diagnostic, and revision evidence.
+
+`MemoryCycleStore` is deliberately process-local and has neither crash
+durability nor distributed fencing. It exists for deterministic tests and
+examples. The repository's executable TypeScript ↔ Python D7 join compares
+canonical activity inputs, events, results, accepted GraphPatch revisions, and
+checkpoints. Production storage/lock adapters, the remaining hostile boundary
+matrix, and independent acceptance remain separate deliverables.
+
 ## Current boundary
 
 This alpha deliberately focuses on deterministic DAG compilation and
 execution. It includes bounded concurrency, retry/backoff, per-attempt timeout,
 a graph-wide attempt budget, named source/input/output port binding, and
-event-sourced durable continuation. Edge `map` and `condition`, runtime JSON
-Schema validation, streams, checkpoint acceleration, dynamic graph patches,
-distributed leases, non-idempotent recovery approval, and provider adapters
-remain follow-up work. Accepted non-integer finite binary64 Graph IR values now
+event-sourced durable continuation, plus the separate bounded-cycle/GraphPatch
+surface described above. Edge `map` and `condition`, runtime JSON Schema
+validation, streams, checkpoint acceleration, dynamic mutation of the ordinary
+DAG scheduler, production cycle stores, distributed leases, non-idempotent
+recovery approval, and provider adapters remain follow-up work. Accepted
+non-integer finite binary64 Graph IR values now
 have stable TypeScript/Python bytes and hashes through ECMAScript's
 shortest-round-trip number serialization, including `-0` normalization and the
 `1e-6`/`1e21` fixed/scientific thresholds. The shared RFC 8785 Appendix B and

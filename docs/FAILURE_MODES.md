@@ -9,22 +9,25 @@ must handle.
 
 The TypeScript and Python runtimes provide an ordinary in-memory DAG scheduler,
 separate event-sourced start/resume operations, and a standalone bounded-pipeline
-API. Both native implementations pass shared ready-queue, durable-recovery, and
-pipeline conformance cases, bound concurrency/attempts, preserve structured
-failures, and expose cooperative cancellation. Graph inputs, node results, and
-pipeline items must be detached portable finite JSON.
+API. They also provide a separate alpha bounded-cycle/GraphPatch controller with
+exact event-fold recovery, replay, fork, and cross-language byte conformance.
+Both native implementations pass shared ready-queue, durable-recovery,
+pipeline, and native-cycle cases, bound concurrency/attempts, preserve
+structured failures, and expose cooperative cancellation. Graph inputs, node
+results, and pipeline items must be detached portable finite JSON.
 
 Durable runs write authoritative scheduler events and reconstruct continuation
 from the complete event history. They bind graph, original input, and
 caller-supplied implementation identity, reuse committed successes, preserve
 consumed attempt budgets, and make terminal resume side-effect free. Standalone
 checkpoint stores exist, but scheduler checkpoint acceleration does not. Replay,
-fork, dynamic graph patches, distributed leases, Graph IR-integrated or durable
-item streaming, conditional routing, verifier panels, explicit loop primitives,
-provider rate limiting, worktree isolation, and capability enforcement also
-remain future work. The current pipeline is a lazy single-consumer in-memory API,
-not durable graph streaming. Sections marked **target v1** are operational
-requirements, not current claims.
+fork, and append-only dynamic patches exist only on the standalone controller;
+production controller stores/fencing, ordinary-scheduler dynamic revision
+integration, Graph IR-integrated or durable item streaming, conditional
+routing, verifier panels, provider rate limiting, worktree isolation, and
+general capability enforcement remain future work. The current pipeline is a
+lazy single-consumer in-memory API, not durable graph streaming. Sections marked
+**target v1** are operational requirements, not current claims.
 
 ## Failure is data
 
@@ -119,9 +122,12 @@ quorum, return `unknown` or escalate; never manufacture success from missing dat
 
 **Current mitigation:** Compilation fails with `GE1005_CYCLE`; no executor runs.
 
-**Target-v1 mitigation:** Use an explicit bounded-loop primitive with a semantic
-stop condition plus hard iteration, duration, attempt, node, and cost limits. Do
-not bypass the compiler with hand-written recursive spawning.
+**Bounded repetition:** Keep ordinary Graph IR acyclic and use the standalone
+bounded controller for an explicit `until-dry`, `while`, or
+evaluator-optimizer request with hard iteration, duration, attempt, discovery,
+dynamic-node, and cost limits. Do not bypass the compiler with hand-written
+recursive spawning. Production distributed fencing and ordinary-scheduler
+GraphPatch integration remain follow-up controls.
 
 ## Contract and binding failures
 

@@ -112,6 +112,7 @@ uv run --project python pytest python/tests
 | Local event/checkpoint stores | Yes | Yes |
 | Event-sourced scheduler start/resume | Yes | Yes |
 | Scheduler checkpoint acceleration | Not yet | Not yet |
+| Standalone bounded-cycle/GraphPatch controller | Alpha, local store | Alpha, local store |
 | Read-only validation/planning MCP | Yes | Uses the same portable IR |
 | Graph IR streaming and scheduler-applied routers/verifier panels/loops | Target v1 | Target v1 |
 
@@ -119,8 +120,9 @@ uv run --project python pytest python/tests
 
 - Explicit node and edge data contracts.
 - Parallel, pipeline, barrier, router, verifier, and bounded-loop topologies.
-- Durable event-sourced start/resume today; rebuildable checkpoint acceleration,
-  replay, and fork as explicit follow-up protocols.
+- Durable event-sourced scheduler start/resume today; the separate bounded
+  controller adds replay and fork, while scheduler checkpoint acceleration and
+  production controller stores remain follow-up protocols.
 - Deterministic plumbing; models are reserved for judgment.
 - Provider-neutral adapters and deny-by-default capabilities.
 - Observable runs with portable events and traces.
