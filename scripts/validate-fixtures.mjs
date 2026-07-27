@@ -483,6 +483,10 @@ const cyclePatchVisibilityCases = await loadJson(
   "cycle-controller-patch-visibility-fault.case.json",
 );
 assert.equal(cyclePatchVisibilityCases.schemaVersion, 1);
+const cyclePatchCheckpointCases = await loadJson(
+  "cycle-controller-patch-checkpoint-fault.case.json",
+);
+assert.equal(cyclePatchCheckpointCases.schemaVersion, 1);
 assert.equal(
   cycleFaultMatrixCases.eventSchema,
   "spec/cycle-controller-event.schema.json",
@@ -780,6 +784,174 @@ assert.equal(
   new Set(cyclePatchVisibilityCases.requiredAssertions).size,
   cyclePatchVisibilityCases.requiredAssertions.length,
   "D7 H03C patch-visibility required assertions are duplicated",
+);
+assert.deepEqual(
+  Object.keys(cyclePatchCheckpointCases).sort(compareUnicodeCodePoints),
+  [
+    "eventType",
+    "expect",
+    "faultKinds",
+    "id",
+    "linearization",
+    "requiredAssertions",
+    "schemaVersion",
+    "seedBoundary",
+    "sourceFaultMatrix",
+    "stages",
+  ],
+  "D7 H03D patch-checkpoint fixture is not closed",
+);
+assert.equal(
+  cyclePatchCheckpointCases.id,
+  "cycle-controller-patch-checkpoint-fault-v1alpha1",
+);
+assert.equal(
+  cyclePatchCheckpointCases.sourceFaultMatrix,
+  "spec/conformance/cycle-controller-fault-matrix.case.json",
+);
+assert.equal(cyclePatchCheckpointCases.eventType, "PatchAccepted");
+assert.deepEqual(cyclePatchCheckpointCases.stages, [
+  "before-checkpoint-construction",
+  "after-checkpoint-construction",
+  "after-checkpoint-save",
+]);
+assert.equal(
+  new Set(cyclePatchCheckpointCases.stages).size,
+  cyclePatchCheckpointCases.expect.stageCount,
+  "D7 H03D patch-checkpoint stages are duplicated or incomplete",
+);
+assert.equal(
+  new Set(cyclePatchCheckpointCases.faultKinds).size,
+  cyclePatchCheckpointCases.expect.faultKindCount,
+  "D7 H03D patch-checkpoint fault kinds are duplicated or incomplete",
+);
+assert.deepEqual(
+  cyclePatchCheckpointCases.faultKinds,
+  cycleFaultMatrixCases.faultKinds,
+  "D7 H03D patch-checkpoint campaign must cross every retained fault kind",
+);
+assert.ok(
+  cyclePatchCheckpointCases.stages.every((value) => (
+    cycleFaultMatrixCases.stages.some(({ name }) => name === value)
+  )),
+  "D7 H03D patch-checkpoint fixture names an unknown durable stage",
+);
+assert.ok(
+  cycleFaultMatrix.some(({ boundary }) => boundary === cyclePatchCheckpointCases.seedBoundary),
+  "D7 H03D patch-checkpoint seed boundary is not canonical",
+);
+assert.deepEqual(
+  Object.keys(cyclePatchCheckpointCases.linearization).sort(compareUnicodeCodePoints),
+  [
+    "acceptedDynamicNodes",
+    "acceptedGraphRevision",
+    "authoritativeFact",
+    "authoritativeSource",
+    "checkpointEveryEvents",
+    "checkpointIdSuffix",
+    "checkpointLagEvents",
+    "committedCheckpointStages",
+    "committedPlannerCalls",
+    "initialGraphRevision",
+    "stalePrefixStages",
+  ],
+  "D7 H03D patch-checkpoint linearization contract is not closed",
+);
+assert.equal(
+  cyclePatchCheckpointCases.linearization.authoritativeFact,
+  cyclePatchCheckpointCases.eventType,
+);
+assert.equal(cyclePatchCheckpointCases.linearization.authoritativeSource, "event-stream");
+assert.equal(cyclePatchCheckpointCases.linearization.checkpointEveryEvents, 1);
+assert.equal(cyclePatchCheckpointCases.linearization.checkpointIdSuffix, "-latest");
+assert.equal(cyclePatchCheckpointCases.linearization.initialGraphRevision, 1);
+assert.equal(cyclePatchCheckpointCases.linearization.acceptedGraphRevision, 2);
+assert.equal(cyclePatchCheckpointCases.linearization.acceptedDynamicNodes, 1);
+assert.equal(cyclePatchCheckpointCases.linearization.committedPlannerCalls, 1);
+assert.deepEqual(
+  [
+    ...cyclePatchCheckpointCases.linearization.stalePrefixStages,
+    ...cyclePatchCheckpointCases.linearization.committedCheckpointStages,
+  ],
+  cyclePatchCheckpointCases.stages,
+  "D7 H03D stale/exact checkpoint stages do not partition the campaign",
+);
+assert.deepEqual(
+  Object.keys(cyclePatchCheckpointCases.linearization.checkpointLagEvents),
+  cyclePatchCheckpointCases.stages,
+  "D7 H03D checkpoint-lag map does not preserve the closed stage order",
+);
+for (const stage of cyclePatchCheckpointCases.linearization.stalePrefixStages) {
+  assert.equal(
+    cyclePatchCheckpointCases.linearization.checkpointLagEvents[stage],
+    1,
+    `D7 H03D ${stage} must retain the immediately prior prefix checkpoint`,
+  );
+}
+for (const stage of cyclePatchCheckpointCases.linearization.committedCheckpointStages) {
+  assert.equal(
+    cyclePatchCheckpointCases.linearization.checkpointLagEvents[stage],
+    0,
+    `D7 H03D ${stage} must retain the exact PatchAccepted checkpoint`,
+  );
+}
+const cyclePatchCheckpointMatrix = cycleFaultMatrix.filter((entry) => (
+  entry.eventType === cyclePatchCheckpointCases.eventType
+    && cyclePatchCheckpointCases.stages.includes(entry.stage)
+    && cyclePatchCheckpointCases.faultKinds.includes(entry.faultKind)
+));
+assert.equal(
+  cyclePatchCheckpointMatrix.length,
+  cyclePatchCheckpointCases.expect.matrixEntryCount,
+  "D7 H03D patch-checkpoint matrix count drifted",
+);
+assert.equal(
+  new Set(cyclePatchCheckpointMatrix.map(({ eventType, stage, faultKind }) => (
+    `${eventType}\0${stage}\0${faultKind}`
+  ))).size,
+  cyclePatchCheckpointMatrix.length,
+  "D7 H03D patch-checkpoint obligations are duplicated",
+);
+for (const [stage, count] of Object.entries(cyclePatchCheckpointCases.expect.stageCounts)) {
+  assert.equal(
+    cyclePatchCheckpointMatrix.filter((entry) => entry.stage === stage).length,
+    count,
+    `D7 H03D ${stage} count drifted`,
+  );
+}
+for (const [faultKind, count] of Object.entries(
+  cyclePatchCheckpointCases.expect.faultKindCounts,
+)) {
+  assert.equal(
+    cyclePatchCheckpointMatrix.filter((entry) => entry.faultKind === faultKind).length,
+    count,
+    `D7 H03D ${faultKind} count drifted`,
+  );
+}
+for (const [durability, count] of Object.entries(
+  cyclePatchCheckpointCases.expect.durabilityCounts,
+)) {
+  assert.equal(
+    cyclePatchCheckpointMatrix.filter((entry) => entry.durability === durability).length,
+    count,
+    `D7 H03D ${durability} count drifted`,
+  );
+}
+const cyclePatchCheckpointCanonical = JSON.stringify(canonicalize(cyclePatchCheckpointMatrix));
+assert.equal(
+  Buffer.byteLength(cyclePatchCheckpointCanonical, "utf8"),
+  cyclePatchCheckpointCases.expect.matrixCanonicalUtf8Bytes,
+  "D7 H03D patch-checkpoint canonical byte count drifted",
+);
+assert.equal(
+  hash(cyclePatchCheckpointMatrix),
+  cyclePatchCheckpointCases.expect.matrixSha256,
+  "D7 H03D patch-checkpoint canonical hash drifted",
+);
+assert.equal(
+  new Set(cyclePatchCheckpointCases.requiredAssertions).size,
+  cyclePatchCheckpointCases.requiredAssertions.length,
+  "D7 H03D patch-checkpoint required assertions are duplicated",
 );
 assert.deepEqual(
   Object.keys(cycleInterruptionCases).sort(compareUnicodeCodePoints),
@@ -2814,5 +2986,5 @@ assert.equal(new Set(diamond.nodes.map(({ id }) => id)).size, diamond.nodes.leng
 assert.equal(new Set(diamond.edges.map(({ id }) => id)).size, diamond.edges.length);
 
 process.stdout.write(
-  `Validated ${fixtureNames.length} JSON fixtures (${caseNames.length} case manifests), ${yamlNames.length} referenced YAML fixtures, ${Object.keys(expected.canonicalization).length} graph hash, ${Object.keys(expected.checkpoints ?? {}).length} checkpoint hash, ${durableJson.validCases.length} Durable JSON vectors, ${compiledIdentities.length} compiled identities, ${graphPatchCases.validCases.length + graphPatchCases.invalidCases.length} graph patch schema cases plus ${graphPatchCases.semanticCases.length} closed semantic vectors, and 6 D7 controller/revision/event/checkpoint schemas with ${durableEvents.length} chained event goldens, ${cycleFaultMatrix.length} retained durable fault obligations, ${cycleInterruptionMatrix.length} activity interruption obligations, ${cycleOperationInterruptionMatrix.length} public-operation interruption obligations, ${cyclePatchVisibilityMatrix.length} patch-visibility fault obligations, ${cycleDurableCases.leaseTransitionCases.length} valid and ${cycleDurableCases.invalidLeaseTransitionCases.length} hostile lease transitions, ${cycleDurableCases.validInterruptedHistoryCases?.length ?? 0} interrupted terminal/checkpoint folds, ${cycleDurableCases.inDoubtProjectionCases.length} in-doubt singleton cases, ${resolutionProtocol.cases.length} terminal in-doubt resolution cases, ${cycleDurableCases.untilDryFoldCases.length} global-seen convergence fold, ${cycleDurableCases.hardStopFoldCases.length} hard-stop folds, ${cycleDurableCases.invalidEventHistoryCases.length} hostile histories, ${cycleDurableCases.invalidCheckpointSemanticCases.length} hostile checkpoint folds, plus ${cycleDurableCases.validStandaloneEventSchemaCases.length} standalone phase-event shapes; all ${expectedD7Tests.length} D7-CYCLE-SPEC-024 expected-test groups are mapped against meta-valid schemas.\n`,
+  `Validated ${fixtureNames.length} JSON fixtures (${caseNames.length} case manifests), ${yamlNames.length} referenced YAML fixtures, ${Object.keys(expected.canonicalization).length} graph hash, ${Object.keys(expected.checkpoints ?? {}).length} checkpoint hash, ${durableJson.validCases.length} Durable JSON vectors, ${compiledIdentities.length} compiled identities, ${graphPatchCases.validCases.length + graphPatchCases.invalidCases.length} graph patch schema cases plus ${graphPatchCases.semanticCases.length} closed semantic vectors, and 6 D7 controller/revision/event/checkpoint schemas with ${durableEvents.length} chained event goldens, ${cycleFaultMatrix.length} retained durable fault obligations, ${cycleInterruptionMatrix.length} activity interruption obligations, ${cycleOperationInterruptionMatrix.length} public-operation interruption obligations, ${cyclePatchVisibilityMatrix.length} patch-visibility fault obligations, ${cyclePatchCheckpointMatrix.length} patch-checkpoint fault obligations, ${cycleDurableCases.leaseTransitionCases.length} valid and ${cycleDurableCases.invalidLeaseTransitionCases.length} hostile lease transitions, ${cycleDurableCases.validInterruptedHistoryCases?.length ?? 0} interrupted terminal/checkpoint folds, ${cycleDurableCases.inDoubtProjectionCases.length} in-doubt singleton cases, ${resolutionProtocol.cases.length} terminal in-doubt resolution cases, ${cycleDurableCases.untilDryFoldCases.length} global-seen convergence fold, ${cycleDurableCases.hardStopFoldCases.length} hard-stop folds, ${cycleDurableCases.invalidEventHistoryCases.length} hostile histories, ${cycleDurableCases.invalidCheckpointSemanticCases.length} hostile checkpoint folds, plus ${cycleDurableCases.validStandaloneEventSchemaCases.length} standalone phase-event shapes; all ${expectedD7Tests.length} D7-CYCLE-SPEC-024 expected-test groups are mapped against meta-valid schemas.\n`,
 );

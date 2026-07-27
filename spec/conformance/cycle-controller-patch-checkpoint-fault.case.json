@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "id": "cycle-controller-patch-checkpoint-fault-v1alpha1",
+  "sourceFaultMatrix": "spec/conformance/cycle-controller-fault-matrix.case.json",
+  "eventType": "PatchAccepted",
+  "stages": [
+    "before-checkpoint-construction",
+    "after-checkpoint-construction",
+    "after-checkpoint-save"
+  ],
+  "faultKinds": [
+    "process-loss",
+    "store-error",
+    "timeout",
+    "cancellation",
+    "commit-then-throw"
+  ],
+  "seedBoundary": "event:ModeOutcomeCommitted:after-state-before-dispatch",
+  "linearization": {
+    "authoritativeFact": "PatchAccepted",
+    "authoritativeSource": "event-stream",
+    "checkpointEveryEvents": 1,
+    "checkpointIdSuffix": "-latest",
+    "stalePrefixStages": [
+      "before-checkpoint-construction",
+      "after-checkpoint-construction"
+    ],
+    "committedCheckpointStages": [
+      "after-checkpoint-save"
+    ],
+    "checkpointLagEvents": {
+      "before-checkpoint-construction": 1,
+      "after-checkpoint-construction": 1,
+      "after-checkpoint-save": 0
+    },
+    "initialGraphRevision": 1,
+    "acceptedGraphRevision": 2,
+    "acceptedDynamicNodes": 1,
+    "committedPlannerCalls": 1
+  },
+  "requiredAssertions": [
+    "fault-kind-signal-is-observed",
+    "fixture-reconstructs-matrix-without-runtime-import",
+    "patch-decision-is-committed-before-every-checkpoint-boundary",
+    "pre-save-fault-retains-the-prior-valid-prefix-checkpoint",
+    "post-save-fault-retains-the-exact-patch-checkpoint",
+    "checkpoint-never-overrides-the-authoritative-event-stream",
+    "recovery-accepts-both-stale-prefix-and-exact-prefix-checkpoints",
+    "recovery-performs-zero-planner-reinvocation",
+    "recovery-restores-the-exact-accepted-revision",
+    "patch-budget-settles-exactly-once",
+    "accepted-round-commits-exactly-once",
+    "final-latest-checkpoint-matches-the-terminal-event-prefix",
+    "replay-performs-zero-handler-dispatch-and-zero-write",
+    "terminal-resume-performs-zero-handler-dispatch-clock-and-write",
+    "complete-event-checkpoint-result-bytes-and-hashes-match-between-runtimes"
+  ],
+  "expect": {
+    "matrixEntryCount": 15,
+    "stageCount": 3,
+    "faultKindCount": 5,
+    "stageCounts": {
+      "before-checkpoint-construction": 5,
+      "after-checkpoint-construction": 5,
+      "after-checkpoint-save": 5
+    },
+    "faultKindCounts": {
+      "process-loss": 3,
+      "store-error": 3,
+      "timeout": 3,
+      "cancellation": 3,
+      "commit-then-throw": 3
+    },
+    "durabilityCounts": {
+      "event-committed": 10,
+      "event-and-checkpoint-committed": 5
+    },
+    "matrixCanonicalUtf8Bytes": 2893,
+    "matrixSha256": "c6a79bb3c8ce003f9c5968b39486e4bd1edcb5ff4cc7d87ae26ba810fd355381"
+  }
+}

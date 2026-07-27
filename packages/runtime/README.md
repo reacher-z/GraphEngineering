@@ -382,7 +382,14 @@ committed rows, stored patch bytes rebuild revision 2 with zero planner
 reinvocation. Every row ends with one accepted decision, one budget settlement,
 one round commit, read-only replay, and zero-work terminal resume; TypeScript
 and Python compare the complete events, hashes, result, and checkpoint. The
-three checkpoint-stage combinations remain separate H03 work.
+H03D campaign adds all 15 checkpoint-stage combinations: three checkpoint
+boundaries crossed with five fault kinds. With `checkpointEveryEvents: 1`, the
+two pre-save boundaries retain the immediately prior valid prefix checkpoint,
+while the post-save boundary retains the exact `PatchAccepted` checkpoint.
+Every row restores revision 2 from the event stream without rerunning the
+planner and finishes with an exact terminal `-latest` checkpoint; Python and
+TypeScript compare checkpoint lag, write count, complete events, hashes, result,
+and final stored checkpoint.
 
 When replaying or resuming a fork in a fresh process, replay the exact parent
 event prefix locally and pass that verified fold as `parent`. A serialized or

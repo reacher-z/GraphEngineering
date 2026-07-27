@@ -11,6 +11,7 @@ import { isDeepStrictEqual } from "node:util";
 import { exerciseCycleActivityInterruptionCampaign } from "./cycle_activity_interruption.mjs";
 import { exerciseCycleOperationInterruptionCampaign } from "./cycle_operation_interruption.mjs";
 import { exerciseCyclePatchVisibilityFaultCampaign } from "./cycle_patch_visibility_fault.mjs";
+import { exerciseCyclePatchCheckpointFaultCampaign } from "./cycle_patch_checkpoint_fault.mjs";
 
 const root = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 const fixtureRoot = join(root, "spec", "conformance");
@@ -2484,6 +2485,44 @@ assert.deepEqual(
   pyCyclePatchVisibility,
   "D7 PatchAccepted visibility fault campaign reports differ",
 );
+const cyclePatchCheckpointFixture = JSON.parse(
+  await readFile(
+    join(fixtureRoot, "cycle-controller-patch-checkpoint-fault.case.json"),
+    "utf8",
+  ),
+);
+const pythonCyclePatchCheckpoint = spawnSync(
+  "uv",
+  [
+    "run",
+    "--project",
+    "python",
+    "python",
+    "tools/conformance/python_cycle_patch_checkpoint_fault_report.py",
+  ],
+  { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
+);
+if (pythonCyclePatchCheckpoint.status !== 0) {
+  throw new Error(
+    `Python cycle PatchAccepted checkpoint fault campaign failed:\n${pythonCyclePatchCheckpoint.stderr || pythonCyclePatchCheckpoint.stdout}`,
+  );
+}
+const pyCyclePatchCheckpoint = JSON.parse(pythonCyclePatchCheckpoint.stdout);
+const tsCyclePatchCheckpoint = await exerciseCyclePatchCheckpointFaultCampaign({
+  runtime,
+  core,
+  graph: cycleGraph,
+  graphHash: cycleCompilation.graphHash,
+  baseRequest: cycleRequestValue,
+  fixture: cyclePatchCheckpointFixture,
+  startedAt: cycleStartedAt,
+  checkpointAt: cycleCheckpointAt,
+});
+assert.deepEqual(
+  tsCyclePatchCheckpoint,
+  pyCyclePatchCheckpoint,
+  "D7 PatchAccepted checkpoint fault campaign reports differ",
+);
 const tsModeEventCount = Object.values(tsModeReports)
   .reduce((total, report) => total + report.eventTypes.length, 0);
 const tsModeInputCount = Object.values(tsModeReports)
@@ -2495,7 +2534,7 @@ const tsInDoubtInputCount = Object.values(tsInDoubtReports)
 const tsResolutionEventCount = tsResolutionReport.eventTypes.length;
 const tsResolutionInputCount = tsResolutionReport.inputsCanonical.length;
 process.stdout.write(
-  `Cross-language native-cycle conformance passed for ${tsCycleEvents.length + tsPatchEvents.length + tsResumeEvents.length + tsModeEventCount + tsInDoubtEventCount + tsResolutionEventCount} exact baseline events, ${cycleInputs.length + patchInputs.length + resumeInputs.length + tsModeInputCount + tsInDoubtInputCount + tsResolutionInputCount} activity inputs, ${tsCycleFaultReport.matrix.length} durable fault obligations over ${cycleFaultFixture.expect.boundaryCount} boundaries, ${tsLeaseFaultCampaign.obligationCount} executable lease-renew/release fault recoveries, ${tsCycleInterruption.obligationCount} exact activity cancellation/timeout recoveries, ${tsCycleOperationInterruption.obligationCount} exact pause/resume/replay/fork interruption recoveries, ${tsCyclePatchVisibility.obligationCount} exact PatchAccepted visibility fault recoveries, all three controller modes, two in-doubt recovery outcomes, one authority-bound terminal resolution, eight terminal results, one accepted GraphPatch/revision, one crash/takeover resume, and eight baseline checkpoints.\n`,
+  `Cross-language native-cycle conformance passed for ${tsCycleEvents.length + tsPatchEvents.length + tsResumeEvents.length + tsModeEventCount + tsInDoubtEventCount + tsResolutionEventCount} exact baseline events, ${cycleInputs.length + patchInputs.length + resumeInputs.length + tsModeInputCount + tsInDoubtInputCount + tsResolutionInputCount} activity inputs, ${tsCycleFaultReport.matrix.length} durable fault obligations over ${cycleFaultFixture.expect.boundaryCount} boundaries, ${tsLeaseFaultCampaign.obligationCount} executable lease-renew/release fault recoveries, ${tsCycleInterruption.obligationCount} exact activity cancellation/timeout recoveries, ${tsCycleOperationInterruption.obligationCount} exact pause/resume/replay/fork interruption recoveries, ${tsCyclePatchVisibility.obligationCount} exact PatchAccepted visibility fault recoveries, ${tsCyclePatchCheckpoint.obligationCount} exact PatchAccepted checkpoint fault recoveries, all three controller modes, two in-doubt recovery outcomes, one authority-bound terminal resolution, eight terminal results, one accepted GraphPatch/revision, one crash/takeover resume, and eight baseline checkpoints.\n`,
 );
 
 // Authoring conformance is intentionally expected-vs-TypeScript-vs-Python.

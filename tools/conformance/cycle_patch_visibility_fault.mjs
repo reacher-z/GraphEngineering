@@ -172,6 +172,24 @@ async function exerciseEntry({
     }
   };
   const store = new runtime.MemoryCycleControllerEventStore({ faultHook: targetHook });
+  const checkpointInterval = fixture.linearization.checkpointEveryEvents;
+  const checkpointDelegate = checkpointInterval === undefined
+    ? undefined
+    : new runtime.MemoryCycleControllerCheckpointStore();
+  let checkpointWrites = 0;
+  const checkpointStore = checkpointDelegate === undefined ? undefined : {
+    async write(scope, checkpointId, checkpoint) {
+      await checkpointDelegate.write(scope, checkpointId, checkpoint);
+      checkpointWrites += 1;
+    },
+    async read(scope, checkpointId) {
+      return checkpointDelegate.read(scope, checkpointId);
+    },
+  };
+  const checkpointOptions = checkpointStore === undefined ? {} : {
+    checkpointStore,
+    checkpointEveryEvents: checkpointInterval,
+  };
   const authority = {
     proposerActivityKey: "0".repeat(64),
     principalHash: "2".repeat(64),
@@ -193,6 +211,7 @@ async function exerciseEntry({
   try {
     await runtime.startCycleController(request, graph, {
       eventStore: store,
+      ...checkpointOptions,
       lease: lease(request.controllerRunId, 1, startedAt),
       now: () => new Date(startedAt),
       faultHook: seedHook,
@@ -246,6 +265,7 @@ async function exerciseEntry({
   try {
     await runtime.resumeCycleController(request, graph, {
       eventStore: store,
+      ...checkpointOptions,
       expectedSequence: seedEvents.at(-1).sequence,
       leaseReason: "takeover",
       lease: lease(request.controllerRunId, 2, startedAt),
@@ -266,7 +286,7 @@ async function exerciseEntry({
   assert.deepEqual(forbiddenCalls, { finder: 0, evaluator: 0 });
   const interrupted = store.snapshot(request.eventStreamId);
   const interruptedFold = runtime.foldCycleControllerEvents(interrupted);
-  const expectedCommitted = entry.durability === "event-committed";
+  const expectedCommitted = entry.durability !== "event-not-committed";
   const targetAtFault = interrupted.find(({ type }) => type === "PatchAccepted");
   assert.equal(
     interrupted.filter(({ type }) => type === "PatchAccepted").length,
@@ -279,9 +299,30 @@ async function exerciseEntry({
       ? fixture.linearization.acceptedGraphRevision
       : fixture.linearization.initialGraphRevision,
   );
+  const checkpointId = `${request.controllerRunId}${fixture.linearization.checkpointIdSuffix ?? "-latest"}`;
+  const checkpointWritesAtFault = checkpointWrites;
+  const checkpointAtFault = checkpointStore === undefined
+    ? undefined
+    : await checkpointStore.read(request.checkpointScope, checkpointId);
+  if (checkpointAtFault !== undefined) {
+    assert.notEqual(checkpointAtFault, null);
+    const expectedLag = fixture.linearization.checkpointLagEvents[entry.stage];
+    assert.equal(typeof expectedLag, "number");
+    assert.notEqual(targetAtFault, undefined);
+    assert.equal(targetAtFault.sequence - checkpointAtFault.lastSequence, expectedLag);
+    assert.equal(
+      checkpointAtFault.historyPrefixHash,
+      interrupted[checkpointAtFault.lastSequence].recordHash,
+    );
+    assert.equal(
+      entry.durability === "event-and-checkpoint-committed",
+      expectedLag === 0,
+    );
+  }
 
   const result = await runtime.resumeCycleController(request, graph, {
     eventStore: store,
+    ...checkpointOptions,
     expectedSequence: interrupted.at(-1).sequence,
     leaseReason: "takeover",
     lease: lease(request.controllerRunId, 3, startedAt),
@@ -322,9 +363,11 @@ async function exerciseEntry({
   assert.equal(finalFold.currentRevision.graphRevision, fixture.linearization.acceptedGraphRevision);
 
   const beforeReplay = finalEvents.length;
+  const checkpointWritesBeforeReplay = checkpointWrites;
   const replayed = await runtime.replayCycleController(store, request.eventStreamId);
   assert.deepEqual(replayed.terminalResult, result);
   assert.equal(store.snapshot(request.eventStreamId).length, beforeReplay);
+  assert.equal(checkpointWrites, checkpointWritesBeforeReplay);
 
   let terminalHandlerCalls = 0;
   let terminalClockCalls = 0;
@@ -349,6 +392,7 @@ async function exerciseEntry({
   });
   assert.deepEqual(terminal, result);
   assert.equal(store.snapshot(request.eventStreamId).length, beforeReplay);
+  assert.equal(checkpointWrites, checkpointWritesBeforeReplay);
   assert.equal(terminalHandlerCalls, 0);
   assert.equal(terminalClockCalls, 0);
 
@@ -359,6 +403,14 @@ async function exerciseEntry({
     `${request.controllerRunId}-final`,
     checkpointAt,
   );
+  const finalStoredCheckpoint = checkpointStore === undefined
+    ? undefined
+    : await checkpointStore.read(request.checkpointScope, checkpointId);
+  if (finalStoredCheckpoint !== undefined) {
+    assert.notEqual(finalStoredCheckpoint, null);
+    assert.equal(finalStoredCheckpoint.lastSequence, finalEvents.at(-1).sequence);
+    assert.equal(finalStoredCheckpoint.historyPrefixHash, finalEvents.at(-1).recordHash);
+  }
   return {
     entry,
     index,
@@ -378,6 +430,15 @@ async function exerciseEntry({
     finalEventCanonical: finalEvents.map((event) => core.canonicalSerialize(event)),
     finalRecordHashes: finalEvents.map(({ recordHash }) => recordHash),
     finalCheckpointCanonical: core.canonicalSerialize(checkpoint),
+    ...(checkpointAtFault === undefined ? {} : {
+      checkpointId,
+      checkpointWritesAtFault,
+      checkpointAtFaultCanonical: core.canonicalSerialize(checkpointAtFault),
+      checkpointLagEventsAtFault: targetAtFault.sequence - checkpointAtFault.lastSequence,
+      checkpointTargetsPatchAtFault: checkpointAtFault.lastSequence === targetAtFault.sequence,
+      finalStoredCheckpointCanonical: core.canonicalSerialize(finalStoredCheckpoint),
+      finalCheckpointWriteCount: checkpointWrites,
+    }),
     replayZeroWrite: true,
     terminalResumeZeroWrite: true,
     terminalResumeHandlerCalls: terminalHandlerCalls,

@@ -1127,7 +1127,7 @@ def fold_cycle_events(
             if (
                 failure["phase"] != phase
                 or type(failure["code"]) is not str
-                or re.fullmatch(r"GE_[A-Z0-9_]{3,64}", cast(str, failure["code"])) is None
+                or re.fullmatch(r"GE_[A-Z0-9_]{3,64}", failure["code"]) is None
                 or type(failure["retryable"]) is not bool
                 or type(failure["inDoubt"]) is not bool
                 or binding is None
@@ -1147,7 +1147,7 @@ def fold_cycle_events(
             )
             if (
                 usage["attempts"] != 1
-                or cast(int | float, usage["costUsd"]) > binding.max_cost_usd_per_attempt
+                or usage["costUsd"] > binding.max_cost_usd_per_attempt
             ):
                 raise _history_error("activity failure usage exceeds its claim", counter=True)
             unresolved_failure_activity = dict(open_activity)

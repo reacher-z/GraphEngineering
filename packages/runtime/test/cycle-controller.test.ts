@@ -249,6 +249,28 @@ describe("native bounded cycle controller", () => {
     );
   });
 
+  it("derives the closed 15-row PatchAccepted checkpoint campaign", () => {
+    const stages = new Set([
+      "before-checkpoint-construction",
+      "after-checkpoint-construction",
+      "after-checkpoint-save",
+    ]);
+    const matrix = buildCycleDurableFaultMatrix().filter(({ eventType, stage }) => (
+      eventType === "PatchAccepted" && stages.has(stage)
+    ));
+
+    expect(matrix).toHaveLength(15);
+    expect(matrix.filter(({ durability }) => durability === "event-committed")).toHaveLength(10);
+    expect(matrix.filter(
+      ({ durability }) => durability === "event-and-checkpoint-committed",
+    )).toHaveLength(5);
+    expect(new Set(matrix.map(({ faultKind }) => faultKind))).toEqual(new Set(CYCLE_FAULT_KINDS));
+    expect(Buffer.byteLength(canonicalSerialize(matrix), "utf8")).toBe(2893);
+    expect(canonicalHash(matrix)).toBe(
+      "c6a79bb3c8ce003f9c5968b39486e4bd1edcb5ff4cc7d87ae26ba810fd355381",
+    );
+  });
+
   it("derives all 68 activity interruption obligations without duplicate identities", () => {
     const matrix = buildCycleActivityInterruptionMatrix();
     expect(matrix).toHaveLength(68);

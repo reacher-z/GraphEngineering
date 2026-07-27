@@ -235,6 +235,7 @@ class _CycleJournal:
         event_id_factory: EventIdFactory,
         fault_hook: FaultHook | None,
         parent_fold: CycleFold | None = None,
+        checkpoint_every_events: int | None = None,
     ) -> None:
         self.request = request
         self.store = store
@@ -243,6 +244,8 @@ class _CycleJournal:
         self.event_id_factory = event_id_factory
         self.fault_hook = fault_hook
         self.parent_fold = parent_fold
+        self.checkpoint_every_events = checkpoint_every_events
+        self.checkpoint_warning: CycleRuntimeError | None = None
         self.fold: CycleFold | None = (
             fold_cycle_events(events, parent_fold=parent_fold) if events else None
         )
@@ -343,6 +346,16 @@ class _CycleJournal:
         self.fold = candidate_fold
         await run_fault_hook(self.fault_hook, f"event:{event_type}:after-cas")
         await run_fault_hook(self.fault_hook, f"event:{event_type}:after-state-before-dispatch")
+        interval = self.checkpoint_every_events
+        if interval is not None and (
+            event_type == "ControllerTerminated"
+            or (interval > 0 and len(self.events) % interval == 0)
+        ):
+            warning = await self.checkpoint(
+                f"{self.request.model.controller_run_id}-latest",
+                created_at=event.timestamp,
+            )
+            self.checkpoint_warning = warning or self.checkpoint_warning
         return event
 
     async def checkpoint(
@@ -414,7 +427,7 @@ class _CycleController:
         self.patch_runtime = patch_runtime
         self.patch_authority = patch_authority
         self.patch_each_round = patch_each_round
-        self.checkpoint_warning: CycleRuntimeError | None = None
+        self.checkpoint_warning = journal.checkpoint_warning
 
     @property
     def fold(self) -> CycleFold:
@@ -429,7 +442,7 @@ class _CycleController:
                 return CycleRunResult(
                     self.fold.terminal_result,
                     self.journal.events,
-                    self.checkpoint_warning,
+                    self.journal.checkpoint_warning or self.checkpoint_warning,
                 )
             # Resume/fork reject inherited non-idempotent uncertainty before a
             # controller is constructed. Uncertainty created by this live run
@@ -1372,10 +1385,12 @@ class _CycleController:
             "currentRevision": self.fold.current_revision,
         }
         await self.journal.append("RoundCommitted", {"record": record})
-        warning = await self.journal.checkpoint(
-            f"{self.request.model.controller_run_id}-round-{record['iteration']}"
-        )
-        self.checkpoint_warning = warning or self.checkpoint_warning
+        if self.journal.checkpoint_every_events is None:
+            warning = await self.journal.checkpoint(
+                f"{self.request.model.controller_run_id}-round-{record['iteration']}"
+            )
+            self.checkpoint_warning = warning or self.checkpoint_warning
+        self.checkpoint_warning = self.journal.checkpoint_warning or self.checkpoint_warning
 
     async def _release_remaining(self, reason: str) -> None:
         state = self.fold.state
@@ -1529,10 +1544,12 @@ class _CycleController:
             "ControllerTerminated",
             {"observation": observation, "result": result},
         )
-        self.checkpoint_warning = (
-            await self.journal.checkpoint(f"{self.request.model.controller_run_id}-terminal")
-            or self.checkpoint_warning
-        )
+        if self.journal.checkpoint_every_events is None:
+            self.checkpoint_warning = (
+                await self.journal.checkpoint(f"{self.request.model.controller_run_id}-terminal")
+                or self.checkpoint_warning
+            )
+        self.checkpoint_warning = self.journal.checkpoint_warning or self.checkpoint_warning
         assert self.fold.terminal_result is not None
         await run_fault_hook(
             self.journal.fault_hook,
@@ -1790,6 +1807,17 @@ async def _checkpoint_validation_warning(
     return None
 
 
+def _validate_checkpoint_every_events(value: int | None) -> int | None:
+    if value is None:
+        return None
+    if type(value) is not int or value < 0 or value > 9_007_199_254_740_991:
+        raise CycleRuntimeError(
+            CycleErrorCode.INVALID_REQUEST,
+            "checkpoint interval must be a nonnegative safe integer",
+        )
+    return value
+
+
 async def start_cycle(
     request: object,
     handlers: CycleHandlers,
@@ -1803,10 +1831,12 @@ async def start_cycle(
     patch_runtime: GraphPatchRuntime | None = None,
     patch_authority: PatchAuthority | None = None,
     patch_each_round: bool = False,
+    checkpoint_every_events: int | None = None,
 ) -> CycleRunResult:
     """Create a new empty controller stream and execute it to a bounded terminal."""
 
     validated = validate_cycle_request(request)
+    checkpoint_interval = _validate_checkpoint_every_events(checkpoint_every_events)
     if validated.model.lineage.origin != "start":
         raise CycleRuntimeError(
             CycleErrorCode.INVALID_REQUEST,
@@ -1839,6 +1869,7 @@ async def start_cycle(
         clock=clock,
         event_id_factory=event_id_factory,
         fault_hook=fault_hook,
+        checkpoint_every_events=checkpoint_interval,
     )
     await journal.append(
         "ControllerCreated",
@@ -1887,10 +1918,12 @@ async def fork_cycle(
     patch_runtime: GraphPatchRuntime | None = None,
     patch_authority: PatchAuthority | None = None,
     patch_each_round: bool = False,
+    checkpoint_every_events: int | None = None,
 ) -> CycleRunResult:
     """Create an independent child bound to one immutable parent prefix."""
 
     validated = validate_cycle_request(request)
+    checkpoint_interval = _validate_checkpoint_every_events(checkpoint_every_events)
     operation_cancellation = cancellation or CycleCancellation()
     lineage = validated.model.lineage
     if lineage.origin != "fork" or (
@@ -1996,6 +2029,7 @@ async def fork_cycle(
         event_id_factory=event_id_factory,
         fault_hook=fault_hook,
         parent_fold=parent_fold,
+        checkpoint_every_events=checkpoint_interval,
     )
     await _operation_boundary(
         "fork",
@@ -2083,10 +2117,12 @@ async def resume_cycle(
     patch_authority: PatchAuthority | None = None,
     patch_each_round: bool = False,
     checkpoint_id: str | None = None,
+    checkpoint_every_events: int | None = None,
 ) -> CycleRunResult:
     """Resume one exact nonterminal request under a strictly higher lease fence."""
 
     validated = validate_cycle_request(request)
+    checkpoint_interval = _validate_checkpoint_every_events(checkpoint_every_events)
     operation_cancellation = cancellation or CycleCancellation()
     cancellation_boundary: str | None = None
 
@@ -2182,6 +2218,7 @@ async def resume_cycle(
         event_id_factory=event_id_factory,
         fault_hook=fault_hook,
         parent_fold=parent_fold,
+        checkpoint_every_events=checkpoint_interval,
     )
     await observe_resume_cancellation("operation:resume:before-commit")
     if cancellation_boundary is not None and fold.state["openRound"] is None:

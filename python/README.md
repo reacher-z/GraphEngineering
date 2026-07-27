@@ -539,6 +539,7 @@ result = await start_cycle(
     ),
     store=store,
     lease=lease_claim,
+    checkpoint_every_events=1,  # optional portable latest-checkpoint schedule
 )
 ```
 
@@ -609,7 +610,19 @@ restore revision 2 from stored patch bytes without planner reinvocation. Each
 row proves one accepted decision, one settlement, one round commit, read-only
 replay, and zero-work terminal resume, then compares complete Python and
 TypeScript events, hashes, result, and checkpoint. Checkpoint-stage combinations
-remain separate H03 work.
+are covered by the H03D campaign: all three `PatchAccepted` checkpoint
+boundaries crossed with five fault kinds. At the two pre-save boundaries, the
+latest cache remains one valid event behind; after save it names the exact
+accepted patch. Recovery always trusts the event stream, restores revision 2
+without reinvoking the planner, and ends with the terminal `-latest` checkpoint.
+The native reports compare checkpoint lag and write count as well as complete
+events, record hashes, result, and final stored checkpoint.
+
+Pass a nonnegative safe integer as `checkpoint_every_events` to select the same
+schedule as TypeScript `checkpointEveryEvents`: zero writes only the terminal
+latest checkpoint, while a positive value writes on matching event counts and
+again at terminal completion. Omitting the Python option preserves the existing
+named round/terminal convenience checkpoints.
 
 `build_cycle_durable_fault_matrix()` derives 855 obligations over 17 event
 types, 11 durable stages, and five fault classes. Pass a deterministic

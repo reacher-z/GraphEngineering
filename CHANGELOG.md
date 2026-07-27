@@ -17,6 +17,10 @@ migration note.
 - A native Python `graph`/`grapheng` CLI matching the TypeScript command,
   machine-envelope, exit-code, bounded-input, safe-init, and visualization
   contracts without delegating to Node.js.
+- Portable cycle-controller checkpoint intervals in Python, matching the
+  TypeScript nonnegative-safe-integer schedule when explicitly enabled, plus a
+  15-row cross-language `PatchAccepted` checkpoint fault campaign proving
+  stale-prefix/exact-prefix recovery and terminal latest-checkpoint identity.
 
 - Event-sourced durable start and resume APIs in TypeScript and Python. Runs bind
   graph, original input, and caller-supplied implementation identity; node

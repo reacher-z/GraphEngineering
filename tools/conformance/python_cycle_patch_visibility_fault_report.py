@@ -210,6 +210,14 @@ async def _exercise_entry(
     index: int,
 ) -> dict[str, Any]:
     request = _configure_request(base_request, graph_hash, index)
+    checkpoint_interval = cast(
+        int | None,
+        fixture["linearization"].get("checkpointEveryEvents"),
+    )
+    checkpoint_id = (
+        f"{request['controllerRunId']}"
+        f"{fixture['linearization'].get('checkpointIdSuffix', '-latest')}"
+    )
     target_fired = False
 
     def target_hook(boundary: str) -> None:
@@ -254,6 +262,7 @@ async def _exercise_entry(
             patch_runtime=_patch_runtime(graph_document, request),
             patch_authority=_authority(),
             patch_each_round=True,
+            checkpoint_every_events=checkpoint_interval,
         )
     except PatchVisibilitySeedStop:
         pass
@@ -301,6 +310,8 @@ async def _exercise_entry(
             patch_runtime=first_runtime,
             patch_authority=_authority(),
             patch_each_round=True,
+            checkpoint_id=checkpoint_id if checkpoint_interval is not None else None,
+            checkpoint_every_events=checkpoint_interval,
         )
     except PatchVisibilityFault as exc:
         assert exc.fault_kind == entry["faultKind"]
@@ -317,7 +328,7 @@ async def _exercise_entry(
 
     interrupted = await store.read(cast(str, request["eventStreamId"]))
     interrupted_fold = fold_cycle_events(interrupted)
-    expected_committed = entry["durability"] == "event-committed"
+    expected_committed = entry["durability"] != "event-not-committed"
     target_at_fault = next(
         (event for event in interrupted if event.type == "PatchAccepted"),
         None,
@@ -331,6 +342,27 @@ async def _exercise_entry(
         if expected_committed
         else fixture["linearization"]["initialGraphRevision"]
     )
+    checkpoint_writes_at_fault = store.checkpoint_write_count
+    checkpoint_at_fault = (
+        None
+        if checkpoint_interval is None
+        else await store.load_checkpoint(
+            cast(str, request["checkpointScope"]),
+            checkpoint_id,
+        )
+    )
+    if checkpoint_interval is not None:
+        assert checkpoint_at_fault is not None
+        assert target_at_fault is not None
+        expected_lag = fixture["linearization"]["checkpointLagEvents"][entry["stage"]]
+        checkpoint_last_sequence = cast(int, checkpoint_at_fault["lastSequence"])
+        assert target_at_fault.sequence - checkpoint_last_sequence == expected_lag
+        assert checkpoint_at_fault["historyPrefixHash"] == interrupted[
+            checkpoint_last_sequence
+        ].record_hash
+        assert (entry["durability"] == "event-and-checkpoint-committed") is (
+            expected_lag == 0
+        )
 
     recovered_runtime = _patch_runtime(graph_document, request)
     result = await resume_cycle(
@@ -343,6 +375,8 @@ async def _exercise_entry(
         patch_runtime=recovered_runtime,
         patch_authority=_authority(),
         patch_each_round=True,
+        checkpoint_id=checkpoint_id if checkpoint_interval is not None else None,
+        checkpoint_every_events=checkpoint_interval,
     )
     expected_planner_calls = fixture["linearization"][
         "committedPlannerCalls" if expected_committed else "preCommitPlannerCalls"
@@ -395,9 +429,11 @@ async def _exercise_entry(
     ]
 
     appends_before_replay = store.append_count
+    checkpoint_writes_before_replay = store.checkpoint_write_count
     replayed = await replay_cycle(cast(str, request["eventStreamId"]), store=store)
     assert replayed.result == result.result
     assert store.append_count == appends_before_replay
+    assert store.checkpoint_write_count == checkpoint_writes_before_replay
 
     terminal_handler_calls = 0
     terminal_clock_calls = 0
@@ -426,6 +462,7 @@ async def _exercise_entry(
     )
     assert terminal.result == result.result
     assert store.append_count == appends_before_replay
+    assert store.checkpoint_write_count == checkpoint_writes_before_replay
     assert terminal_handler_calls == 0
     assert terminal_clock_calls == 0
 
@@ -435,8 +472,20 @@ async def _exercise_entry(
         checkpoint_id=f"{request['controllerRunId']}-final",
         created_at=CHECKPOINT_AT,
     )
+    final_stored_checkpoint = (
+        None
+        if checkpoint_interval is None
+        else await store.load_checkpoint(
+            cast(str, request["checkpointScope"]),
+            checkpoint_id,
+        )
+    )
+    if checkpoint_interval is not None:
+        assert final_stored_checkpoint is not None
+        assert final_stored_checkpoint["lastSequence"] == final_events[-1].sequence
+        assert final_stored_checkpoint["historyPrefixHash"] == final_events[-1].record_hash
     event_documents = [_event_document(event) for event in final_events]
-    return {
+    outcome = {
         "entry": entry,
         "index": index,
         "faultSignal": observed_fault_signal,
@@ -462,15 +511,37 @@ async def _exercise_entry(
         "terminalResumeHandlerCalls": terminal_handler_calls,
         "terminalResumeClockCalls": terminal_clock_calls,
     }
+    if checkpoint_interval is not None:
+        assert checkpoint_at_fault is not None
+        assert target_at_fault is not None
+        assert final_stored_checkpoint is not None
+        outcome.update(
+            {
+                "checkpointId": checkpoint_id,
+                "checkpointWritesAtFault": checkpoint_writes_at_fault,
+                "checkpointAtFaultCanonical": canonical_json(checkpoint_at_fault),
+                "checkpointLagEventsAtFault": (
+                    target_at_fault.sequence
+                    - cast(int, checkpoint_at_fault["lastSequence"])
+                ),
+                "checkpointTargetsPatchAtFault": (
+                    cast(int, checkpoint_at_fault["lastSequence"])
+                    == target_at_fault.sequence
+                ),
+                "finalStoredCheckpointCanonical": canonical_json(
+                    final_stored_checkpoint
+                ),
+                "finalCheckpointWriteCount": store.checkpoint_write_count,
+            }
+        )
+    return outcome
 
 
-async def _main() -> None:
+async def run_patch_visibility_campaign(fixture_name: str) -> dict[str, Any]:
     fixture = cast(
         dict[str, Any],
         json.loads(
-            (
-                FIXTURES / "cycle-controller-patch-visibility-fault.case.json"
-            ).read_text(encoding="utf-8")
+            (FIXTURES / fixture_name).read_text(encoding="utf-8")
         ),
     )
     graph_document = cast(
@@ -521,6 +592,13 @@ async def _main() -> None:
         "obligationCount": len(outcomes),
         "outcomes": outcomes,
     }
+    return report
+
+
+async def _main() -> None:
+    report = await run_patch_visibility_campaign(
+        "cycle-controller-patch-visibility-fault.case.json"
+    )
     print(json.dumps(report, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
 
 

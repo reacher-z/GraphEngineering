@@ -1206,6 +1206,45 @@ record hash, interrupted prefix hash, target event, terminal result, and final
 checkpoint. These 35 rows do not include the three checkpoint-specific stages;
 checkpoint write/cancellation combinations remain a separate H03 campaign.
 
+#### PatchAccepted checkpoint fault campaign
+
+The retained
+[`cycle-controller-patch-checkpoint-fault.case.json`](conformance/cycle-controller-patch-checkpoint-fault.case.json)
+fixture closes that H03D checkpoint tranche. It crosses `PatchAccepted` with
+`before-checkpoint-construction`, `after-checkpoint-construction`, and
+`after-checkpoint-save`, then crosses those stages with all five retained fault
+kinds. The resulting 15-row matrix is 2,893 canonical UTF-8 bytes with SHA-256
+`c6a79bb3c8ce003f9c5968b39486e4bd1edcb5ff4cc7d87ae26ba810fd355381`.
+
+Both native campaigns explicitly checkpoint every event into
+`{controllerRunId}-latest`. All 15 faults occur after the authoritative
+`PatchAccepted` event commits. At the first two boundaries, the store retains
+the immediately preceding valid prefix checkpoint, exactly one event behind
+the patch decision. At `after-checkpoint-save`, the checkpoint names the exact
+`PatchAccepted` sequence and history hash. Neither cache state changes the
+event-derived revision:
+
+- recovery always restores revision 2 from the committed event stream;
+- the patch planner is never reinvoked;
+- stale-prefix and exact-prefix checkpoints are both validated without being
+  treated as authority;
+- exactly one patch settlement, round commit, and terminal result follow; and
+- the final `-latest` checkpoint names the exact terminal event prefix.
+
+Python's optional `checkpoint_every_events` and TypeScript's
+`checkpointEveryEvents` use the same nonnegative-safe-integer schedule when
+explicitly supplied. Interval zero checkpoints only terminal completion;
+positive intervals checkpoint matching event counts plus terminal completion.
+Python's omitted option retains its existing named round/terminal convenience
+checkpoints, while conformance passes an explicit interval for portable exact
+behavior.
+
+The reports compare the checkpoint present at the fault, its lag from
+`PatchAccepted`, write counts, final stored checkpoint, complete final events,
+record hashes, result, and independently projected checkpoint. This remains
+deterministic in-memory fault evidence, not an `fsync`, database replication,
+or object-store consistency claim.
+
 Fault hooks are deterministic test and simulation controls, not evidence that
 an in-memory adapter is crash durable. A production adapter must establish the
 same before/after-commit facts with its transaction and fsync contract. The
@@ -1389,9 +1428,10 @@ to the other.
 [`cycle-controller-operation-interruption.case.json`](conformance/cycle-controller-operation-interruption.case.json)
 freezes the 25-row H03B public-operation lattice, and
 [`cycle-controller-patch-visibility-fault.case.json`](conformance/cycle-controller-patch-visibility-fault.case.json)
-freezes the 35-row H03C `PatchAccepted` event-visibility campaign. Both native
-runtimes execute each retained row and the conformance join compares the full
-reports exactly.
+freezes the 35-row H03C `PatchAccepted` event-visibility campaign.
+[`cycle-controller-patch-checkpoint-fault.case.json`](conformance/cycle-controller-patch-checkpoint-fault.case.json)
+adds the 15 checkpoint-stage rows. Both native runtimes execute each retained
+row and the conformance join compares the full reports exactly.
 
 The native implementations MUST pass the shared fixtures without one runtime
 delegating execution or number formatting to the other language.

@@ -354,7 +354,7 @@ async def _main() -> None:
     graph_document = json.loads(
         (FIXTURES / "diamond.graph.json").read_text(encoding="utf-8")
     )
-    graph_hash = cast(str, compile_graph(graph_document).graph_hash)
+    graph_hash = compile_graph(graph_document).graph_hash
     controller_fixture = json.loads(
         (FIXTURES / "cycle-controller.case.json").read_text(encoding="utf-8")
     )

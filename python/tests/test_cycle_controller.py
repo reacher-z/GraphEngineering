@@ -739,6 +739,32 @@ def test_patch_accepted_visibility_fault_campaign_is_closed() -> None:
     )
 
 
+def test_patch_accepted_checkpoint_fault_campaign_is_closed() -> None:
+    stages = {
+        "before-checkpoint-construction",
+        "after-checkpoint-construction",
+        "after-checkpoint-save",
+    }
+    matrix = [
+        entry.to_dict()
+        for entry in build_cycle_durable_fault_matrix()
+        if entry.event_type == "PatchAccepted" and entry.stage in stages
+    ]
+    canonical = canonical_json(matrix)
+
+    assert len(matrix) == 15
+    assert sum(entry["durability"] == "event-committed" for entry in matrix) == 10
+    assert (
+        sum(entry["durability"] == "event-and-checkpoint-committed" for entry in matrix)
+        == 5
+    )
+    assert {entry["faultKind"] for entry in matrix} == set(CYCLE_FAULT_KINDS)
+    assert len(canonical.encode("utf-8")) == 2893
+    assert hashlib.sha256(canonical.encode("utf-8")).hexdigest() == (
+        "c6a79bb3c8ce003f9c5968b39486e4bd1edcb5ff4cc7d87ae26ba810fd355381"
+    )
+
+
 def test_activity_interruption_matrix_is_closed_and_complete() -> None:
     matrix = build_cycle_activity_interruption_matrix()
 
@@ -925,6 +951,56 @@ def test_terminal_checkpoint_boundaries_retain_authoritative_event_truth(
         assert resumed.result["exitReason"] == "MAX_ITERATIONS"
         assert store.append_count == writes
         assert finder_calls == 1
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("interval", [0, 1])
+def test_portable_checkpoint_interval_writes_latest_terminal_prefix(interval: int) -> None:
+    async def run() -> None:
+        request = request_document(max_iterations=1)
+        store = MemoryCycleStore()
+
+        result = await start_cycle(
+            request,
+            CycleHandlers(finder=lambda _: [], candidate_evaluator=lambda _: []),
+            store=store,
+            lease=lease(),
+            clock=fixed_clock,
+            checkpoint_every_events=interval,
+        )
+
+        checkpoint = await store.load_checkpoint(
+            request["checkpointScope"],
+            f"{request['controllerRunId']}-latest",
+        )
+        assert checkpoint is not None
+        assert checkpoint["lastSequence"] == result.events[-1].sequence
+        assert checkpoint["historyPrefixHash"] == result.events[-1].record_hash
+        assert result.checkpoint_warning is None
+        assert store.checkpoint_write_count == (
+            len(result.events) if interval == 1 else 1
+        )
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("interval", [True, -1, 9_007_199_254_740_992])
+def test_checkpoint_interval_rejects_non_safe_values(interval: object) -> None:
+    async def run() -> None:
+        store = MemoryCycleStore()
+        with pytest.raises(CycleRuntimeError) as raised:
+            await start_cycle(
+                request_document(max_iterations=1),
+                CycleHandlers(finder=lambda _: [], candidate_evaluator=lambda _: []),
+                store=store,
+                lease=lease(),
+                clock=fixed_clock,
+                checkpoint_every_events=cast(Any, interval),
+            )
+        assert raised.value.code is CycleErrorCode.INVALID_REQUEST
+        assert store.append_count == 0
+        assert store.checkpoint_write_count == 0
 
     asyncio.run(run())
 
