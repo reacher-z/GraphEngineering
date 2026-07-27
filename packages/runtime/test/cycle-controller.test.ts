@@ -12,7 +12,9 @@ import {
   forkCycleController,
   MemoryCycleControllerCheckpointStore,
   MemoryCycleControllerEventStore,
+  pauseCycleController,
   replayCycleController,
+  renewCycleControllerLease,
   resolveCycleInDoubtActivity,
   resumeCycleController,
   sha256Utf8,
@@ -351,6 +353,179 @@ describe("native bounded cycle controller", () => {
     });
     expect(result.exitReason).toBe("MAX_ITERATIONS");
     expect(finder).toHaveBeenCalledTimes(1);
+  });
+
+  it("renews then voluntarily releases one fenced lease with zero administration dispatch", async () => {
+    const item = request("until-dry", { maxIterations: 1 });
+    const store = new MemoryCycleControllerEventStore();
+    const checkpoints = new MemoryCycleControllerCheckpointStore();
+    const failedCheckpoints = new FailCheckpointWrite();
+    const initialLease = lease("lease-admin-1", 1);
+    let interrupted = false;
+    await expect(startCycleController(item, graph(), {
+      eventStore: store,
+      lease: initialLease,
+      now: fixedNow(),
+      faultHook: (boundary) => {
+        if (!interrupted && boundary === "event:RoundReserved:after-state-before-dispatch") {
+          interrupted = true;
+          throw new Error("hold the controller before finder dispatch");
+        }
+      },
+      activities: {
+        finder: () => { throw new Error("administration dispatched finder"); },
+        candidateEvaluator: () => { throw new Error("administration dispatched evaluator"); },
+      },
+    })).rejects.toThrow("hold the controller before finder dispatch");
+    const openTail = events(store, item).at(-1)!.sequence;
+    expect(events(store, item).at(-1)?.type).toBe("RoundReserved");
+
+    const extendedLease = {
+      ...initialLease,
+      expiresAt: new Date(START + 120_000).toISOString(),
+    };
+    const administrationNow = vi.fn(fixedNow());
+    const renewed = await renewCycleControllerLease(item, {
+      eventStore: store,
+      checkpointStore: failedCheckpoints,
+      expectedSequence: openTail,
+      lease: extendedLease,
+      now: administrationNow,
+    });
+    expect(renewed.event).toMatchObject({
+      type: "LeaseRenewed",
+      lease: extendedLease,
+      data: {
+        previousExpiresAt: initialLease.expiresAt,
+        newExpiresAt: extendedLease.expiresAt,
+      },
+    });
+    expect(renewed.fold.activeLease).toEqual(extendedLease);
+    expect(renewed.checkpointWarning).toMatchObject({ code: "GE_CYCLE_STORE_FAILED" });
+    expect(failedCheckpoints.writes).toBe(1);
+
+    const afterRenew = events(store, item).length;
+    await expect(renewCycleControllerLease(item, {
+      eventStore: store,
+      expectedSequence: renewed.event.sequence,
+      lease: { ...extendedLease, holderId: "different-holder" },
+      now: administrationNow,
+    })).rejects.toMatchObject({ code: "GE_CYCLE_LEASE_CONFLICT" });
+    await expect(renewCycleControllerLease(item, {
+      eventStore: store,
+      expectedSequence: renewed.event.sequence,
+      lease: extendedLease,
+      now: administrationNow,
+    })).rejects.toMatchObject({ code: "GE_CYCLE_STALE_LEASE" });
+    expect(events(store, item)).toHaveLength(afterRenew);
+    expect(administrationNow).toHaveBeenCalledTimes(1);
+
+    await expect(pauseCycleController(item, {
+      eventStore: store,
+      expectedSequence: openTail,
+      reason: "handoff",
+      now: administrationNow,
+    })).rejects.toMatchObject({ code: "GE_CYCLE_VERSION_CONFLICT" });
+    const paused = await pauseCycleController(item, {
+      eventStore: store,
+      checkpointStore: checkpoints,
+      expectedSequence: renewed.event.sequence,
+      reason: "handoff",
+      now: administrationNow,
+    });
+    expect(paused.event).toMatchObject({
+      type: "LeaseReleased",
+      lease: extendedLease,
+      data: { reason: "handoff" },
+    });
+    expect(paused.releasedLeaseId).toBe(initialLease.leaseId);
+    expect(paused.fold.activeLease).toBeNull();
+    expect(paused.checkpointWarning).toBeNull();
+    expect(administrationNow).toHaveBeenCalledTimes(2);
+    const checkpoint = await checkpoints.read(
+      item.checkpointScope,
+      `${item.controllerRunId}-latest`,
+    );
+    expect(checkpoint?.lastSequence).toBe(paused.event.sequence);
+    expect(checkpoint?.lease).toBeNull();
+
+    const finder = vi.fn(() => ({ output: [] }));
+    const result = await resumeCycleController(item, graph(), {
+      eventStore: store,
+      expectedSequence: paused.event.sequence,
+      lease: lease("lease-admin-2", 2),
+      now: fixedNow(),
+      activities: { finder, candidateEvaluator: () => ({ output: [] }) },
+    });
+    expect(result.exitReason).toBe("MAX_ITERATIONS");
+    expect(finder).toHaveBeenCalledTimes(1);
+    expect(events(store, item).filter(({ type }) => type === "LeaseRenewed")).toHaveLength(1);
+    expect(events(store, item).filter(({ type }) => type === "LeaseReleased")).toHaveLength(1);
+  });
+
+  it("commits exactly one winner when lease administration races at CAS", async () => {
+    const item = request("until-dry", { maxIterations: 1 });
+    const store = new MemoryCycleControllerEventStore();
+    const initialLease = lease("lease-race-1", 1);
+    let interrupted = false;
+    await expect(startCycleController(item, graph(), {
+      eventStore: store,
+      lease: initialLease,
+      now: fixedNow(),
+      faultHook: (boundary) => {
+        if (!interrupted && boundary === "event:RoundReserved:after-state-before-dispatch") {
+          interrupted = true;
+          throw new Error("hold the controller before lease race");
+        }
+      },
+      activities: {
+        finder: () => { throw new Error("lease race dispatched finder"); },
+        candidateEvaluator: () => { throw new Error("lease race dispatched evaluator"); },
+      },
+    })).rejects.toThrow("hold the controller before lease race");
+    const before = events(store, item);
+    const expectedSequence = before.at(-1)!.sequence;
+
+    let arrivals = 0;
+    let openGate!: () => void;
+    const gate = new Promise<void>((resolve) => { openGate = resolve; });
+    const raceAtCas = async (boundary: string): Promise<void> => {
+      if (boundary !== "event:LeaseRenewed:before-cas"
+          && boundary !== "event:LeaseReleased:before-cas") return;
+      arrivals += 1;
+      if (arrivals === 2) openGate();
+      await gate;
+    };
+    const outcomes = await Promise.allSettled([
+      renewCycleControllerLease(item, {
+        eventStore: store,
+        expectedSequence,
+        lease: {
+          ...initialLease,
+          expiresAt: new Date(START + 120_000).toISOString(),
+        },
+        now: fixedNow(),
+        faultHook: raceAtCas,
+      }),
+      pauseCycleController(item, {
+        eventStore: store,
+        expectedSequence,
+        reason: "handoff",
+        now: fixedNow(),
+        faultHook: raceAtCas,
+      }),
+    ]);
+    expect(outcomes.map(({ status }) => status).sort()).toEqual(["fulfilled", "rejected"]);
+    const rejected = outcomes.find(({ status }) => status === "rejected");
+    expect(rejected).toMatchObject({
+      status: "rejected",
+      reason: { code: "GE_CYCLE_VERSION_CONFLICT" },
+    });
+    const after = events(store, item);
+    expect(after).toHaveLength(before.length + 1);
+    expect(after.filter(({ type }) => (
+      type === "LeaseRenewed" || type === "LeaseReleased"
+    ))).toHaveLength(1);
   });
 
   it("converges until dry while retaining rejected findings in global seen", async () => {

@@ -555,10 +555,16 @@ key, and an interrupted `non-idempotent` claim blocks resume/fork with
 and a strictly higher lease fence before dispatch. `replay_cycle` folds either
 a terminal stream or an explicitly requested prefix without consulting a
 clock, handler, compiler plugin, authority service, or random source.
-`pause_cycle` records a voluntary lease release. `fork_cycle` binds an exact
-parent sequence and history hash, copies only the event-derived revision,
-seen/verdict categories, committed rounds, counters, decided patch IDs, and
-in-doubt status, and gives the child an independent stream and lease.
+`renew_cycle_lease` preserves lease ID, holder, epoch, fencing token, and
+acquisition instant while strictly extending expiry. `pause_cycle` records a
+voluntary `paused` or `handoff` release. Both are exact-version, zero-handler
+operations and write a verified `{controllerRunId}-latest` acceleration
+checkpoint after the authoritative event. Concurrent administrators produce
+one CAS winner; every loser returns `GE_CYCLE_VERSION_CONFLICT` without a
+second event. `fork_cycle` binds an exact parent
+sequence and history hash, copies only the event-derived revision, seen/verdict
+categories, committed rounds, counters, decided patch IDs, and in-doubt status,
+and gives the child an independent stream and lease.
 
 `GraphPatchRuntime` snapshots exact portable patch bytes, gates the requested
 base, IDs, current execution state, authority/capabilities, graph compilation,
@@ -572,7 +578,12 @@ diagnostic, and revision evidence.
 durability nor distributed fencing. It exists for deterministic tests and
 examples. The repository's executable TypeScript ↔ Python D7 join compares
 canonical activity inputs, events, results, accepted GraphPatch revisions, and
-checkpoints.
+checkpoints. It also executes and compares 100 lease-administration fault
+recoveries: both lease renewal and voluntary release crossed with all ten
+applicable durable stages and all five retained fault kinds. Every run checks
+the committed prefix, checkpoint durability, stale-version/stale-fence zero
+writes, exactly one target event, one safe handler dispatch, read-only replay,
+and terminal-resume zero writes.
 
 `build_cycle_durable_fault_matrix()` derives 855 obligations over 17 event
 types, 11 durable stages, and five fault classes. Pass a deterministic

@@ -569,6 +569,68 @@ assert.equal(
   cycleFaultMatrixCases.expect.matrixSha256,
   "D7 fault matrix canonical hash drifted",
 );
+for (const campaign of cycleFaultMatrixCases.retainedCampaigns) {
+  assert.deepEqual(
+    Object.keys(campaign).sort(compareUnicodeCodePoints),
+    [
+      "eventTypes",
+      "expectedObligationCount",
+      "faultKinds",
+      "id",
+      "requiredAssertions",
+      "seedBoundary",
+      "stages",
+    ],
+    `${campaign.id} retained fault campaign is not closed`,
+  );
+  assert.match(campaign.id, /^[a-z0-9][a-z0-9-]{0,127}$/u);
+  assert.equal(
+    new Set(campaign.eventTypes).size,
+    campaign.eventTypes.length,
+    `${campaign.id} repeats an event type`,
+  );
+  assert.equal(
+    new Set(campaign.stages).size,
+    campaign.stages.length,
+    `${campaign.id} repeats a durable stage`,
+  );
+  assert.equal(
+    new Set(campaign.faultKinds).size,
+    campaign.faultKinds.length,
+    `${campaign.id} repeats a fault kind`,
+  );
+  assert.ok(
+    campaign.eventTypes.every((value) => cycleFaultMatrixCases.eventTypes.includes(value)),
+    `${campaign.id} names an unknown event type`,
+  );
+  assert.ok(
+    campaign.stages.every((value) => cycleFaultMatrixCases.stages.some(({ name }) => name === value)),
+    `${campaign.id} names an unknown durable stage`,
+  );
+  assert.ok(
+    campaign.faultKinds.every((value) => cycleFaultMatrixCases.faultKinds.includes(value)),
+    `${campaign.id} names an unknown fault kind`,
+  );
+  const obligations = cycleFaultMatrix.filter((entry) => (
+    campaign.eventTypes.includes(entry.eventType)
+      && campaign.stages.includes(entry.stage)
+      && campaign.faultKinds.includes(entry.faultKind)
+  ));
+  assert.equal(
+    obligations.length,
+    campaign.expectedObligationCount,
+    `${campaign.id} obligation count drifted`,
+  );
+  assert.equal(
+    new Set(campaign.requiredAssertions).size,
+    campaign.requiredAssertions.length,
+    `${campaign.id} repeats a required assertion`,
+  );
+  assert.ok(
+    cycleFaultMatrix.some(({ boundary }) => boundary === campaign.seedBoundary),
+    `${campaign.id} seed boundary is not canonical`,
+  );
+}
 const validPoliciesByName = new Map();
 for (const testCase of cycleControllerCases.validPolicies) {
   assert.equal(

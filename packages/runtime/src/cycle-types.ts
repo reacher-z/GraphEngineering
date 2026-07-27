@@ -686,6 +686,41 @@ export interface CycleResumeOptions extends CycleControllerRunOptions {
   readonly leaseReason?: "resume" | "takeover";
 }
 
+/** Shared adapters for a zero-dispatch lease administration operation. */
+export interface CycleLeaseAdministrationOptions {
+  readonly eventStore: CycleControllerEventStore;
+  readonly checkpointStore?: CycleControllerCheckpointStore;
+  readonly expectedSequence: number;
+  readonly now?: () => Date;
+  readonly createEventId?: CycleControllerRunOptions["createEventId"];
+  /** Deterministic test/simulation hook. Production coordination must use a durable store. */
+  readonly faultHook?: CycleFaultHook;
+}
+
+export interface CyclePauseOptions extends CycleLeaseAdministrationOptions {
+  readonly reason?: "paused" | "handoff";
+}
+
+export interface CycleLeaseRenewalOptions extends CycleLeaseAdministrationOptions {
+  /** The same fenced lease identity with a strictly later exclusive expiry. */
+  readonly lease: CycleLease;
+}
+
+export interface CyclePauseResult {
+  readonly event: CycleControllerEvent;
+  readonly fold: CycleControllerFold;
+  readonly releasedLeaseId: string;
+  readonly checkpointWarning: CycleControllerError | null;
+}
+
+export interface CycleLeaseRenewalResult {
+  readonly event: CycleControllerEvent;
+  readonly fold: CycleControllerFold;
+  readonly lease: CycleLease;
+  readonly previousExpiresAt: string;
+  readonly checkpointWarning: CycleControllerError | null;
+}
+
 export interface CycleInDoubtResolutionOptions {
   readonly eventStore: CycleControllerEventStore;
   readonly checkpointStore?: CycleControllerCheckpointStore;
@@ -712,6 +747,7 @@ export type CycleControllerErrorCode =
   | "GE_CYCLE_RUN_ALREADY_EXISTS"
   | "GE_CYCLE_REQUEST_MISMATCH"
   | "GE_CYCLE_RESUME_CONFLICT"
+  | "GE_CYCLE_VERSION_CONFLICT"
   | "GE_CYCLE_LEASE_CONFLICT"
   | "GE_CYCLE_STORE_FAILED"
   | "GE_CYCLE_ACTIVITY_FAILED"

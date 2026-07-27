@@ -940,8 +940,11 @@ def fold_cycle_events(
             fence = _integer(event_lease["fencingToken"], "fencing token", positive=True)
             if epoch <= max_epoch or fence <= max_fence:
                 raise _history_error("lease fence did not advance")
-            if parse_timestamp(cast(str, event_lease["expiresAt"])) <= event_time:
-                raise _history_error("lease is already expired")
+            if (
+                parse_timestamp(cast(str, event_lease["acquiredAt"])) > event_time
+                or parse_timestamp(cast(str, event_lease["expiresAt"])) <= event_time
+            ):
+                raise _history_error("lease interval does not contain acquisition event")
             if max_epoch == 0:
                 if data != {"reason": "start", "previousLeaseId": None}:
                     raise _history_error("first lease is not a start lease")
@@ -966,6 +969,7 @@ def fold_cycle_events(
             if (
                 data["previousExpiresAt"] != active_lease["expiresAt"]
                 or data["newExpiresAt"] != event_lease["expiresAt"]
+                or event_time >= parse_timestamp(cast(str, active_lease["expiresAt"]))
                 or parse_timestamp(cast(str, event_lease["expiresAt"]))
                 <= parse_timestamp(cast(str, active_lease["expiresAt"]))
             ):

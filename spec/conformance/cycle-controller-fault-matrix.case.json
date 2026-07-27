@@ -95,6 +95,44 @@
     "cancellation",
     "commit-then-throw"
   ],
+  "retainedCampaigns": [
+    {
+      "id": "lease-administration-v1alpha1",
+      "eventTypes": ["LeaseRenewed", "LeaseReleased"],
+      "stages": [
+        "before-event-construction",
+        "after-event-construction",
+        "after-prospective-fold",
+        "before-store-commit",
+        "after-store-commit",
+        "after-store-return",
+        "after-state-update",
+        "before-checkpoint-construction",
+        "after-checkpoint-construction",
+        "after-checkpoint-save"
+      ],
+      "faultKinds": [
+        "process-loss",
+        "store-error",
+        "timeout",
+        "cancellation",
+        "commit-then-throw"
+      ],
+      "seedBoundary": "event:RoundReserved:after-state-before-dispatch",
+      "expectedObligationCount": 100,
+      "requiredAssertions": [
+        "fault-kind-signal-observed",
+        "committed-prefix-hash-linked",
+        "durability-class-matches-observation",
+        "target-event-settles-exactly-once",
+        "stale-version-zero-write",
+        "stale-fence-zero-write",
+        "resume-progresses-with-one-handler-dispatch",
+        "replay-is-zero-dispatch",
+        "terminal-resume-is-zero-write"
+      ]
+    }
+  ],
   "expect": {
     "eventTypeCount": 17,
     "stageCount": 11,

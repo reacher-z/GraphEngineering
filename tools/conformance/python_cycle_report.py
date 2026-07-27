@@ -26,6 +26,9 @@ from graph_engineering import (
     canonical_json,
     compile_graph,
     fold_cycle_events,
+    pause_cycle,
+    renew_cycle_lease,
+    replay_cycle,
     resolve_cycle_in_doubt_activity,
     resume_cycle,
     start_cycle,
@@ -643,6 +646,347 @@ async def _resolution_report(graph_hash: str) -> dict[str, Any]:
     }
 
 
+_CAMPAIGN_FAULT_SIGNALS = {
+    "process-loss": "coordinator-process-lost",
+    "store-error": "durable-store-error",
+    "timeout": "operation-deadline-exceeded",
+    "cancellation": "operation-cancelled",
+    "commit-then-throw": "commit-acknowledgement-lost",
+}
+
+
+class _CampaignFault(BaseException):
+    def __init__(self, fault_kind: str) -> None:
+        self.fault_kind = fault_kind
+        self.signal = _CAMPAIGN_FAULT_SIGNALS[fault_kind]
+        super().__init__(self.signal)
+
+
+class _SeedStop(BaseException):
+    pass
+
+
+async def _administer_campaign_lease(
+    event_type: str,
+    request: dict[str, Any],
+    store: MemoryCycleStore,
+    renewal: dict[str, Any],
+    expected_version: int,
+    fault_hook: Any,
+) -> object:
+    if event_type == "LeaseRenewed":
+        return await renew_cycle_lease(
+            request,
+            store=store,
+            expected_version=expected_version,
+            lease=renewal,
+            clock=lambda: STARTED_AT,
+            fault_hook=fault_hook,
+        )
+    return await pause_cycle(
+        request,
+        store=store,
+        expected_version=expected_version,
+        reason="handoff",
+        clock=lambda: STARTED_AT,
+        fault_hook=fault_hook,
+    )
+
+
+async def _lease_fault_campaign(
+    graph_hash: str,
+    campaign: dict[str, Any],
+) -> dict[str, Any]:
+    matrix = [
+        entry
+        for entry in build_cycle_durable_fault_matrix()
+        if entry.event_type in campaign["eventTypes"]
+        and entry.stage in campaign["stages"]
+        and entry.fault_kind in campaign["faultKinds"]
+    ]
+    assert len(matrix) == campaign["expectedObligationCount"]
+    outcomes: list[dict[str, Any]] = []
+    for index, obligation in enumerate(matrix):
+        suffix = f"{index:03d}"
+        request = _request(graph_hash)
+        request.update(
+            {
+                "controllerRunId": f"cycle-lease-fault-{suffix}",
+                "controllerId": f"cycle-lease-fault-{suffix}-controller",
+                "hostRun": {
+                    "relationship": "standalone-child-controller",
+                    "runId": f"cycle-lease-fault-{suffix}-host",
+                },
+                "eventStreamId": f"cycle-lease-fault-{suffix}.events",
+                "checkpointScope": f"cycle-lease-fault-{suffix}.checkpoints",
+            }
+        )
+        request["policy"]["maxIterations"] = 1
+        initial_lease = {
+            "leaseId": f"cycle-lease-fault-{suffix}-lease-1",
+            "holderId": "cycle-lease-fault-holder",
+            "leaseEpoch": 1,
+            "fencingToken": 1,
+            "acquiredAt": STARTED_AT,
+            "expiresAt": "2026-07-26T12:01:00.000Z",
+        }
+        extended_lease = {
+            **initial_lease,
+            "expiresAt": "2026-07-26T12:02:00.000Z",
+        }
+        target_fired = False
+
+        def target_hook(
+            boundary: str,
+            target_boundary: str = obligation.boundary,
+            target_fault_kind: str = obligation.fault_kind,
+        ) -> None:
+            nonlocal target_fired
+            if not target_fired and boundary == target_boundary:
+                target_fired = True
+                raise _CampaignFault(target_fault_kind)
+
+        store = MemoryCycleStore(fault_hook=target_hook)
+
+        def seed_hook(boundary: str) -> None:
+            target_hook(boundary)
+            if boundary == campaign["seedBoundary"]:
+                raise _SeedStop()
+
+        try:
+            await start_cycle(
+                request,
+                CycleHandlers(
+                    finder=lambda _: (_ for _ in ()).throw(
+                        AssertionError("seed dispatched finder")
+                    ),
+                    candidate_evaluator=lambda _: (_ for _ in ()).throw(
+                        AssertionError("seed dispatched evaluator")
+                    ),
+                ),
+                store=store,
+                lease=initial_lease,
+                clock=lambda: STARTED_AT,
+                fault_hook=seed_hook,
+            )
+        except _SeedStop:
+            pass
+        else:
+            raise AssertionError("lease campaign seed did not stop at RoundReserved")
+        seed_events = await store.read(request["eventStreamId"])
+        assert seed_events[-1].type == "RoundReserved"
+        seed_tail = seed_events[-1].sequence
+
+        try:
+            await _administer_campaign_lease(
+                obligation.event_type,
+                request,
+                store,
+                extended_lease,
+                seed_tail,
+                target_hook,
+            )
+        except _CampaignFault as exc:
+            assert exc.fault_kind == obligation.fault_kind
+            observed_fault_signal = exc.signal
+        else:
+            raise AssertionError(
+                f"{obligation.event_type}/{obligation.stage}/{obligation.fault_kind} did not fire"
+            )
+        assert target_fired
+        assert observed_fault_signal == _CAMPAIGN_FAULT_SIGNALS[obligation.fault_kind]
+        interrupted = await store.read(request["eventStreamId"])
+        interrupted_fold = fold_cycle_events(interrupted)
+        target_at_fault = sum(
+            event.type == obligation.event_type for event in interrupted
+        )
+        expected_committed = obligation.durability != "event-not-committed"
+        assert target_at_fault == int(expected_committed)
+        checkpoint_id = f"{request['controllerRunId']}-latest"
+        checkpoint_at_fault = await store.load_checkpoint(
+            request["checkpointScope"],
+            checkpoint_id,
+        )
+        expected_checkpoint = obligation.durability == "event-and-checkpoint-committed"
+        assert (checkpoint_at_fault is not None) is expected_checkpoint
+
+        if not expected_committed:
+            await _administer_campaign_lease(
+                obligation.event_type,
+                request,
+                store,
+                extended_lease,
+                seed_tail,
+                None,
+            )
+        recovered_events = await store.read(request["eventStreamId"])
+        assert sum(event.type == obligation.event_type for event in recovered_events) == 1
+        stale_version_writes = store.append_count
+        try:
+            await _administer_campaign_lease(
+                obligation.event_type,
+                request,
+                store,
+                extended_lease,
+                seed_tail,
+                None,
+            )
+        except CycleRuntimeError as exc:
+            stale_version_code = exc.code.value
+        else:
+            raise AssertionError("stale lease administration version unexpectedly committed")
+        assert stale_version_code == CycleErrorCode.VERSION_CONFLICT.value
+        stale_version_zero_write = store.append_count == stale_version_writes
+        assert stale_version_zero_write
+
+        stale_finder_calls = 0
+
+        def stale_finder(_: object) -> list[object]:
+            nonlocal stale_finder_calls
+            stale_finder_calls += 1
+            return []
+
+        stale_fence_writes = store.append_count
+        try:
+            await resume_cycle(
+                request,
+                CycleHandlers(
+                    finder=stale_finder,
+                    candidate_evaluator=lambda _: [],
+                ),
+                store=store,
+                expected_version=len(recovered_events) - 1,
+                lease={
+                    **initial_lease,
+                    "leaseId": f"cycle-lease-fault-{suffix}-stale",
+                },
+                clock=lambda: STARTED_AT,
+            )
+        except CycleRuntimeError as exc:
+            stale_fence_code = exc.code.value
+        else:
+            raise AssertionError("stale lease fence unexpectedly resumed")
+        assert stale_fence_code == CycleErrorCode.STALE_LEASE.value
+        stale_fence_zero_write = (
+            stale_finder_calls == 0 and store.append_count == stale_fence_writes
+        )
+        assert stale_fence_zero_write
+
+        finder_calls = 0
+        evaluator_calls = 0
+
+        def finder(_: object) -> list[object]:
+            nonlocal finder_calls
+            finder_calls += 1
+            return []
+
+        def evaluator(_: object) -> list[object]:
+            nonlocal evaluator_calls
+            evaluator_calls += 1
+            return []
+
+        resumed = await resume_cycle(
+            request,
+            CycleHandlers(finder=finder, candidate_evaluator=evaluator),
+            store=store,
+            expected_version=len(recovered_events) - 1,
+            lease={
+                "leaseId": f"cycle-lease-fault-{suffix}-lease-2",
+                "holderId": "cycle-lease-fault-holder-2",
+                "leaseEpoch": 2,
+                "fencingToken": 2,
+                "acquiredAt": STARTED_AT,
+                "expiresAt": "2026-07-26T12:03:00.000Z",
+            },
+            clock=lambda: STARTED_AT,
+        )
+        assert resumed.result["exitReason"] == "MAX_ITERATIONS"
+        assert finder_calls == 1
+        final_events = await store.read(request["eventStreamId"])
+        final_fold = fold_cycle_events(final_events, require_terminal=True)
+        assert sum(event.type == obligation.event_type for event in final_events) == 1
+        replayed = await replay_cycle(request["eventStreamId"], store=store)
+        assert replayed.result == resumed.result
+        appends_before_terminal_resume = store.append_count
+        terminal_clock_calls = 0
+
+        def terminal_clock() -> str:
+            nonlocal terminal_clock_calls
+            terminal_clock_calls += 1
+            raise AssertionError("terminal resume sampled clock")
+
+        terminal = await resume_cycle(
+            request,
+            CycleHandlers(
+                finder=lambda _: (_ for _ in ()).throw(
+                    AssertionError("terminal resume dispatched finder")
+                ),
+                candidate_evaluator=lambda _: (_ for _ in ()).throw(
+                    AssertionError("terminal resume dispatched evaluator")
+                ),
+            ),
+            store=store,
+            expected_version=len(final_events) - 1,
+            lease={
+                "leaseId": f"cycle-lease-fault-{suffix}-lease-3",
+                "holderId": "cycle-lease-fault-holder-3",
+                "leaseEpoch": 3,
+                "fencingToken": 3,
+                "acquiredAt": STARTED_AT,
+                "expiresAt": "2026-07-26T12:04:00.000Z",
+            },
+            clock=terminal_clock,
+        )
+        assert terminal.result == resumed.result
+        terminal_zero_write = store.append_count == appends_before_terminal_resume
+        assert terminal_zero_write and terminal_clock_calls == 0
+        target_event = next(
+            event for event in final_events if event.type == obligation.event_type
+        )
+        final_checkpoint = build_cycle_checkpoint(
+            final_fold,
+            checkpoint_id=f"cycle-lease-fault-{suffix}-final",
+            created_at=CHECKPOINT_AT,
+        )
+        outcomes.append(
+            {
+                **obligation.to_dict(),
+                "index": index,
+                "faultSignal": observed_fault_signal,
+                "eventCommittedAtFault": expected_committed,
+                "checkpointCommittedAtFault": expected_checkpoint,
+                "interruptedTailHash": interrupted_fold.tail_hash,
+                "interruptedRecordHashes": [event.record_hash for event in interrupted],
+                "checkpointAtFaultCanonical": (
+                    None
+                    if checkpoint_at_fault is None
+                    else canonical_json(checkpoint_at_fault)
+                ),
+                "targetEventCanonical": canonical_json(
+                    target_event.model_dump(mode="json", by_alias=True)
+                ),
+                "staleVersionCode": stale_version_code,
+                "staleVersionZeroWrite": stale_version_zero_write,
+                "staleFenceCode": stale_fence_code,
+                "staleFenceZeroWrite": stale_fence_zero_write,
+                "finderCalls": finder_calls,
+                "evaluatorCalls": evaluator_calls,
+                "resultCanonical": canonical_json(resumed.result),
+                "finalEventTypes": [event.type for event in final_events],
+                "finalRecordHashes": [event.record_hash for event in final_events],
+                "finalCheckpointCanonical": canonical_json(final_checkpoint),
+                "terminalResumeZeroWrite": terminal_zero_write,
+                "terminalResumeClockCalls": terminal_clock_calls,
+            }
+        )
+    return {
+        "campaignId": campaign["id"],
+        "requiredAssertions": campaign["requiredAssertions"],
+        "obligationCount": len(outcomes),
+        "outcomes": outcomes,
+    }
+
+
 async def _main() -> None:
     graph_document = json.loads(
         (FIXTURES / "diamond.graph.json").read_text(encoding="utf-8")
@@ -688,6 +1032,16 @@ async def _main() -> None:
     )
     fault_matrix = [entry.to_dict() for entry in build_cycle_durable_fault_matrix()]
     fault_matrix_canonical = canonical_json(fault_matrix)
+    fault_fixture = json.loads(
+        (FIXTURES / "cycle-controller-fault-matrix.case.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    lease_campaign = next(
+        campaign
+        for campaign in fault_fixture["retainedCampaigns"]
+        if campaign["id"] == "lease-administration-v1alpha1"
+    )
     report: dict[str, Any] = {
         "requestCanonical": canonical_json(request),
         **_event_projection(
@@ -712,6 +1066,10 @@ async def _main() -> None:
             "exhausted": await _in_doubt_report(graph.graph_hash, exhausted=True),
         },
         "resolution": await _resolution_report(graph.graph_hash),
+        "leaseFaultCampaign": await _lease_fault_campaign(
+            graph.graph_hash,
+            lease_campaign,
+        ),
         "faultMatrix": {
             "eventTypes": list(CYCLE_EVENT_TYPES),
             "stages": list(CYCLE_DURABLE_FAULT_STAGES),

@@ -23,6 +23,7 @@ from graph_engineering.cycle_controller import (
     CycleHandlers,
     fork_cycle,
     pause_cycle,
+    renew_cycle_lease,
     replay_cycle,
     resolve_cycle_in_doubt_activity,
     resume_cycle,
@@ -114,6 +115,7 @@ def test_cycle_surface_is_exported_from_the_native_python_package() -> None:
     assert ge.replay_cycle is replay_cycle
     assert ge.fork_cycle is fork_cycle
     assert ge.pause_cycle is pause_cycle
+    assert ge.renew_cycle_lease is renew_cycle_lease
     assert ge.resolve_cycle_in_doubt_activity is resolve_cycle_in_doubt_activity
     assert ge.MemoryCycleStore is MemoryCycleStore
     assert ge.GraphPatchRuntime is GraphPatchRuntime
@@ -1793,7 +1795,15 @@ def test_in_doubt_resolution_rejects_a_nonterminal_interrupted_claim() -> None:
 def test_pause_handoff_and_stale_fence_are_zero_dispatch_operations() -> None:
     async def run() -> None:
         request = request_document(max_iterations=1)
-        store = MemoryCycleStore()
+        checkpoint_failures = 0
+
+        def fail_first_checkpoint(boundary: str) -> None:
+            nonlocal checkpoint_failures
+            if boundary == "checkpoint:before-save" and checkpoint_failures == 0:
+                checkpoint_failures += 1
+                raise RuntimeError("checkpoint cache unavailable")
+
+        store = MemoryCycleStore(fault_hook=fail_first_checkpoint)
         crashed = False
 
         def crash_once(boundary: str) -> None:
@@ -1812,13 +1822,83 @@ def test_pause_handoff_and_stale_fence_are_zero_dispatch_operations() -> None:
                 fault_hook=crash_once,
             )
         interrupted = await store.read(request["eventStreamId"])
-        paused = await pause_cycle(
+        extended_lease = {
+            **lease(epoch=5, lease_id="lease-5"),
+            "expiresAt": "2026-07-26T00:02:00Z",
+        }
+        administration_clock_calls = 0
+
+        def administration_clock() -> str:
+            nonlocal administration_clock_calls
+            administration_clock_calls += 1
+            return fixed_clock()
+
+        renewed = await renew_cycle_lease(
             request,
             store=store,
             expected_version=len(interrupted) - 1,
-            reason="handoff",
-            clock=fixed_clock,
+            lease=extended_lease,
+            clock=administration_clock,
         )
+        assert renewed.event.type == "LeaseRenewed"
+        assert renewed.event.data == {
+            "previousExpiresAt": "2026-07-26T00:01:00Z",
+            "newExpiresAt": "2026-07-26T00:02:00Z",
+        }
+        assert renewed.fold.active_lease == extended_lease
+        assert renewed.checkpoint_warning is not None
+        assert renewed.checkpoint_warning.code is CycleErrorCode.STORE_FAILED
+        assert checkpoint_failures == 1
+        appends_after_renew = store.append_count
+        with pytest.raises(CycleRuntimeError) as wrong_holder:
+            await renew_cycle_lease(
+                request,
+                store=store,
+                expected_version=renewed.event.sequence,
+                lease={**extended_lease, "holderId": "different-holder"},
+                clock=administration_clock,
+            )
+        assert wrong_holder.value.code is CycleErrorCode.LEASE_CONFLICT
+        with pytest.raises(CycleRuntimeError) as no_extension:
+            await renew_cycle_lease(
+                request,
+                store=store,
+                expected_version=renewed.event.sequence,
+                lease=extended_lease,
+                clock=administration_clock,
+            )
+        assert no_extension.value.code is CycleErrorCode.STALE_LEASE
+        assert store.append_count == appends_after_renew
+        assert administration_clock_calls == 1
+        with pytest.raises(CycleRuntimeError) as stale_pause:
+            await pause_cycle(
+                request,
+                store=store,
+                expected_version=len(interrupted) - 1,
+                reason="handoff",
+                clock=administration_clock,
+            )
+        assert stale_pause.value.code is CycleErrorCode.VERSION_CONFLICT
+        paused = await pause_cycle(
+            request,
+            store=store,
+            expected_version=renewed.event.sequence,
+            reason="handoff",
+            clock=administration_clock,
+        )
+        assert paused.event.type == "LeaseReleased"
+        assert paused.event.lease is not None
+        assert paused.event.lease.expires_at == "2026-07-26T00:02:00Z"
+        assert paused.fold.active_lease is None
+        assert paused.checkpoint_warning is None
+        assert administration_clock_calls == 2
+        checkpoint = await store.load_checkpoint(
+            request["checkpointScope"],
+            f"{request['controllerRunId']}-latest",
+        )
+        assert checkpoint is not None
+        assert checkpoint["lastSequence"] == paused.event.sequence
+        assert checkpoint["lease"] is None
         calls = 0
 
         def finder(_: object) -> list[object]:
@@ -1852,6 +1932,77 @@ def test_pause_handoff_and_stale_fence_are_zero_dispatch_operations() -> None:
         assert calls == 1
         leases = [event for event in result.events if event.type == "LeaseAcquired"]
         assert leases[-1].data == {"reason": "resume", "previousLeaseId": "lease-5"}
+
+    asyncio.run(run())
+
+
+def test_concurrent_lease_administration_commits_exactly_one_cas_winner() -> None:
+    async def run() -> None:
+        request = request_document(max_iterations=1)
+        store = MemoryCycleStore()
+        initial_lease = lease(epoch=7, lease_id="lease-race-7")
+        crashed = False
+
+        def stop_before_dispatch(boundary: str) -> None:
+            nonlocal crashed
+            if boundary == "event:RoundReserved:after-cas" and not crashed:
+                crashed = True
+                raise Crash()
+
+        with pytest.raises(Crash):
+            await start_cycle(
+                request,
+                CycleHandlers(finder=lambda _: [], candidate_evaluator=lambda _: []),
+                store=store,
+                lease=initial_lease,
+                clock=fixed_clock,
+                fault_hook=stop_before_dispatch,
+            )
+        before = await store.read(request["eventStreamId"])
+        expected_version = before[-1].sequence
+        arrivals = 0
+        gate = asyncio.Event()
+
+        async def race_at_cas(boundary: str) -> None:
+            nonlocal arrivals
+            if boundary not in {
+                "event:LeaseRenewed:before-cas",
+                "event:LeaseReleased:before-cas",
+            }:
+                return
+            arrivals += 1
+            if arrivals == 2:
+                gate.set()
+            await gate.wait()
+
+        outcomes = await asyncio.gather(
+            renew_cycle_lease(
+                request,
+                store=store,
+                expected_version=expected_version,
+                lease={**initial_lease, "expiresAt": "2026-07-26T00:02:00Z"},
+                clock=fixed_clock,
+                fault_hook=race_at_cas,
+            ),
+            pause_cycle(
+                request,
+                store=store,
+                expected_version=expected_version,
+                reason="handoff",
+                clock=fixed_clock,
+                fault_hook=race_at_cas,
+            ),
+            return_exceptions=True,
+        )
+        failures = [outcome for outcome in outcomes if isinstance(outcome, BaseException)]
+        assert len(failures) == 1
+        assert isinstance(failures[0], CycleRuntimeError)
+        assert failures[0].code is CycleErrorCode.VERSION_CONFLICT
+        after = await store.read(request["eventStreamId"])
+        assert len(after) == len(before) + 1
+        assert sum(
+            event.type in {"LeaseRenewed", "LeaseReleased"} for event in after
+        ) == 1
 
     asyncio.run(run())
 

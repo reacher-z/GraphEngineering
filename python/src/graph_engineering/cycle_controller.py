@@ -138,6 +138,19 @@ class CycleReplayResult:
 class CyclePauseResult:
     events: tuple[CycleEvent, ...]
     released_lease_id: str
+    event: CycleEvent
+    fold: CycleFold
+    checkpoint_warning: CycleRuntimeError | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class CycleLeaseRenewalResult:
+    events: tuple[CycleEvent, ...]
+    event: CycleEvent
+    fold: CycleFold
+    lease: JsonObject
+    previous_expires_at: str
+    checkpoint_warning: CycleRuntimeError | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -239,8 +252,9 @@ class _CycleJournal:
         *,
         lease: JsonObject | None = None,
         graph_revision: int | None = None,
+        timestamp: str | None = None,
     ) -> CycleEvent:
-        timestamp = self.timestamp()
+        timestamp = self.timestamp() if timestamp is None else timestamp
         payload = data(timestamp) if callable(data) else data
         sequence = len(self.events)
         previous_hash = self.events[-1].record_hash if self.events else None
@@ -307,7 +321,12 @@ class _CycleJournal:
         await run_fault_hook(self.fault_hook, f"event:{event_type}:after-state-before-dispatch")
         return event
 
-    async def checkpoint(self, checkpoint_id: str) -> CycleRuntimeError | None:
+    async def checkpoint(
+        self,
+        checkpoint_id: str,
+        *,
+        created_at: str | None = None,
+    ) -> CycleRuntimeError | None:
         if self.fold is None:
             raise CycleRuntimeError(
                 CycleErrorCode.INVALID_HISTORY,
@@ -322,7 +341,7 @@ class _CycleJournal:
             checkpoint = build_checkpoint(
                 self.fold,
                 checkpoint_id=checkpoint_id,
-                created_at=self.timestamp(),
+                created_at=self.timestamp() if created_at is None else created_at,
             )
             await run_fault_hook(
                 self.fault_hook,
@@ -1623,11 +1642,12 @@ def _require_new_lease_fence(events: tuple[CycleEvent, ...], lease: JsonObject) 
         and (
             cast(int, lease["leaseEpoch"]) <= max(epochs)
             or cast(int, lease["fencingToken"]) <= max(fences)
+            or lease["leaseId"] == _last_recorded_lease_id(events)
         )
     ):
         raise CycleRuntimeError(
             CycleErrorCode.STALE_LEASE,
-            "resume lease epoch and fencing token must strictly advance",
+            "resume lease identity, epoch, and fencing token must strictly advance",
         )
 
 
@@ -2325,6 +2345,104 @@ async def replay_cycle(
     )
 
 
+async def renew_cycle_lease(
+    request: object,
+    *,
+    store: CycleStore,
+    expected_version: int,
+    lease: object,
+    clock: Clock = _default_clock,
+    event_id_factory: EventIdFactory = _default_event_id,
+    fault_hook: FaultHook | None = None,
+) -> CycleLeaseRenewalResult:
+    """Extend one active fenced lease without dispatching controller work."""
+
+    validated = validate_cycle_request(request)
+    if type(expected_version) is not int or expected_version < 0:
+        raise CycleRuntimeError(
+            CycleErrorCode.INVALID_REQUEST,
+            "lease renewal expected version must be a nonnegative exact integer",
+        )
+    events = await store.read(validated.model.event_stream_id)
+    if not events:
+        raise CycleRuntimeError(
+            CycleErrorCode.INVALID_HISTORY,
+            "lease renewal refuses an empty stream",
+        )
+    if len(events) - 1 != expected_version:
+        raise CycleRuntimeError(
+            CycleErrorCode.VERSION_CONFLICT,
+            "lease renewal expected version differs from stream tail",
+        )
+    fold, parent_fold = await _fold_stored_events(validated, events, store)
+    if (
+        fold.request.request_hash != validated.request_hash
+        or fold.request.controller_hash != validated.controller_hash
+    ):
+        raise CycleRuntimeError(
+            CycleErrorCode.INVALID_REQUEST,
+            "lease renewal request identity differs from stored history",
+        )
+    if fold.terminal or fold.active_lease is None:
+        raise CycleRuntimeError(
+            CycleErrorCode.LEASE_CONFLICT,
+            "lease renewal requires one active nonterminal lease",
+        )
+    lease_document, _ = validate_lease(lease)
+    active_lease = fold.active_lease
+    for field in ("leaseId", "holderId", "leaseEpoch", "fencingToken", "acquiredAt"):
+        if lease_document[field] != active_lease[field]:
+            raise CycleRuntimeError(
+                CycleErrorCode.LEASE_CONFLICT,
+                "lease renewal cannot change fenced lease identity",
+            )
+    previous_expires_at = cast(str, active_lease["expiresAt"])
+    if parse_timestamp(cast(str, lease_document["expiresAt"])) <= parse_timestamp(
+        previous_expires_at
+    ):
+        raise CycleRuntimeError(
+            CycleErrorCode.STALE_LEASE,
+            "lease renewal must strictly extend the exclusive expiry",
+        )
+    journal = _CycleJournal(
+        validated,
+        store,
+        events=events,
+        clock=clock,
+        event_id_factory=event_id_factory,
+        fault_hook=fault_hook,
+        parent_fold=parent_fold,
+    )
+    timestamp = journal.timestamp()
+    if parse_timestamp(timestamp) >= parse_timestamp(previous_expires_at):
+        raise CycleRuntimeError(
+            CycleErrorCode.STALE_LEASE,
+            "an expired lease cannot renew itself",
+        )
+    event = await journal.append(
+        "LeaseRenewed",
+        {
+            "previousExpiresAt": previous_expires_at,
+            "newExpiresAt": lease_document["expiresAt"],
+        },
+        lease=lease_document,
+        timestamp=timestamp,
+    )
+    checkpoint_warning = await journal.checkpoint(
+        f"{validated.model.controller_run_id}-latest",
+        created_at=event.timestamp,
+    )
+    assert journal.fold is not None
+    return CycleLeaseRenewalResult(
+        journal.events,
+        event,
+        journal.fold,
+        lease_document,
+        previous_expires_at,
+        checkpoint_warning,
+    )
+
+
 async def pause_cycle(
     request: object,
     *,
@@ -2338,6 +2456,16 @@ async def pause_cycle(
     """Voluntarily release the exact active lease without dispatching work."""
 
     validated = validate_cycle_request(request)
+    if reason not in {"paused", "handoff"}:
+        raise CycleRuntimeError(
+            CycleErrorCode.INVALID_REQUEST,
+            "pause reason must be paused or handoff",
+        )
+    if type(expected_version) is not int or expected_version < 0:
+        raise CycleRuntimeError(
+            CycleErrorCode.INVALID_REQUEST,
+            "pause expected version must be a nonnegative exact integer",
+        )
     events = await store.read(validated.model.event_stream_id)
     if not events:
         raise CycleRuntimeError(CycleErrorCode.INVALID_HISTORY, "pause refuses an empty stream")
@@ -2370,8 +2498,32 @@ async def pause_cycle(
         fault_hook=fault_hook,
         parent_fold=parent_fold,
     )
-    await journal.append("LeaseReleased", {"reason": reason})
-    return CyclePauseResult(journal.events, released_id)
+    timestamp = journal.timestamp()
+    if parse_timestamp(timestamp) >= parse_timestamp(
+        cast(str, fold.active_lease["expiresAt"])
+    ):
+        raise CycleRuntimeError(
+            CycleErrorCode.STALE_LEASE,
+            "pause cannot release an expired lease",
+        )
+    event = await journal.append(
+        "LeaseReleased",
+        {"reason": reason},
+        lease=fold.active_lease,
+        timestamp=timestamp,
+    )
+    checkpoint_warning = await journal.checkpoint(
+        f"{validated.model.controller_run_id}-latest",
+        created_at=event.timestamp,
+    )
+    assert journal.fold is not None
+    return CyclePauseResult(
+        journal.events,
+        released_id,
+        event,
+        journal.fold,
+        checkpoint_warning,
+    )
 
 
 __all__ = [
@@ -2382,12 +2534,14 @@ __all__ = [
     "CycleCancellation",
     "CycleHandlers",
     "CycleInDoubtResolutionResult",
+    "CycleLeaseRenewalResult",
     "CyclePauseResult",
     "CycleReplayResult",
     "CycleRunResult",
     "EventIdFactory",
     "fork_cycle",
     "pause_cycle",
+    "renew_cycle_lease",
     "replay_cycle",
     "resolve_cycle_in_doubt_activity",
     "resume_cycle",

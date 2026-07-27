@@ -1257,7 +1257,7 @@ process.stdout.write(
 const pythonCycle = spawnSync(
   "uv",
   ["run", "--project", "python", "python", "tools/conformance/python_cycle_report.py"],
-  { cwd: root, encoding: "utf8" },
+  { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
 );
 if (pythonCycle.status !== 0) {
   throw new Error(
@@ -2076,6 +2076,297 @@ assert.deepEqual(
   pyCycleReport.resolution,
   "D7 terminal in-doubt resolution reports differ",
 );
+
+const LEASE_CAMPAIGN_FAULT_SIGNALS = Object.freeze({
+  "process-loss": "coordinator-process-lost",
+  "store-error": "durable-store-error",
+  timeout: "operation-deadline-exceeded",
+  cancellation: "operation-cancelled",
+  "commit-then-throw": "commit-acknowledgement-lost",
+});
+
+class LeaseCampaignFault extends Error {
+  constructor(faultKind) {
+    const signal = LEASE_CAMPAIGN_FAULT_SIGNALS[faultKind];
+    assert.notEqual(signal, undefined, `unknown lease campaign fault kind ${faultKind}`);
+    super(signal);
+    this.name = "LeaseCampaignFault";
+    this.faultKind = faultKind;
+    this.signal = signal;
+  }
+}
+
+function findLeaseCampaignFault(error) {
+  let candidate = error;
+  for (let depth = 0; depth < 4; depth += 1) {
+    if (candidate instanceof LeaseCampaignFault) return candidate;
+    if (!(candidate instanceof Error) || candidate.cause === undefined) return null;
+    candidate = candidate.cause;
+  }
+  return null;
+}
+
+class LeaseCampaignSeedStop extends Error {}
+
+async function exerciseCycleLeaseFaultCampaign() {
+  const campaign = cycleFaultFixture.retainedCampaigns.find(
+    ({ id }) => id === "lease-administration-v1alpha1",
+  );
+  assert.notEqual(campaign, undefined, "D7 lease administration campaign is absent");
+  const obligations = tsCycleFaultMatrix.filter((entry) => (
+    campaign.eventTypes.includes(entry.eventType)
+      && campaign.stages.includes(entry.stage)
+      && campaign.faultKinds.includes(entry.faultKind)
+  ));
+  assert.equal(obligations.length, campaign.expectedObligationCount);
+  const outcomes = [];
+  for (const [index, obligation] of obligations.entries()) {
+    const suffix = String(index).padStart(3, "0");
+    const value = JSON.parse(JSON.stringify(cycleRequestValue));
+    Object.assign(value, {
+      controllerRunId: `cycle-lease-fault-${suffix}`,
+      controllerId: `cycle-lease-fault-${suffix}-controller`,
+      hostRun: {
+        relationship: "standalone-child-controller",
+        runId: `cycle-lease-fault-${suffix}-host`,
+      },
+      eventStreamId: `cycle-lease-fault-${suffix}.events`,
+      checkpointScope: `cycle-lease-fault-${suffix}.checkpoints`,
+    });
+    value.policy.maxIterations = 1;
+    const request = runtime.validateCycleControllerRequest(value);
+    const initialLease = {
+      leaseId: `cycle-lease-fault-${suffix}-lease-1`,
+      holderId: "cycle-lease-fault-holder",
+      leaseEpoch: 1,
+      fencingToken: 1,
+      acquiredAt: cycleStartedAt,
+      expiresAt: "2026-07-26T12:01:00.000Z",
+    };
+    const extendedLease = {
+      ...initialLease,
+      expiresAt: "2026-07-26T12:02:00.000Z",
+    };
+    let targetFired = false;
+    const targetHook = (boundary) => {
+      if (!targetFired && boundary === obligation.boundary) {
+        targetFired = true;
+        throw new LeaseCampaignFault(obligation.faultKind);
+      }
+    };
+    const store = new runtime.MemoryCycleControllerEventStore({ faultHook: targetHook });
+    const checkpointStore = new runtime.MemoryCycleControllerCheckpointStore();
+    const seedHook = (boundary) => {
+      targetHook(boundary);
+      if (boundary === campaign.seedBoundary) throw new LeaseCampaignSeedStop();
+    };
+    try {
+      await runtime.startCycleController(request, cycleGraph, {
+        eventStore: store,
+        lease: initialLease,
+        now: () => new Date(cycleStartedAt),
+        faultHook: seedHook,
+        activities: {
+          finder: () => { throw new Error("seed dispatched finder"); },
+          candidateEvaluator: () => { throw new Error("seed dispatched evaluator"); },
+        },
+      });
+      throw new Error("lease campaign seed did not stop at RoundReserved");
+    } catch (error) {
+      if (!(error instanceof LeaseCampaignSeedStop)) throw error;
+    }
+    const seedEvents = store.snapshot(request.eventStreamId);
+    assert.equal(seedEvents.at(-1).type, "RoundReserved");
+    const seedTail = seedEvents.at(-1).sequence;
+    const administer = async (expectedSequence, inject) => {
+      const common = {
+        eventStore: store,
+        checkpointStore,
+        expectedSequence,
+        now: () => new Date(cycleStartedAt),
+        ...(inject ? { faultHook: targetHook } : {}),
+      };
+      if (obligation.eventType === "LeaseRenewed") {
+        return runtime.renewCycleControllerLease(request, { ...common, lease: extendedLease });
+      }
+      return runtime.pauseCycleController(request, { ...common, reason: "handoff" });
+    };
+    let observedFaultSignal;
+    try {
+      await administer(seedTail, true);
+      throw new Error(`${obligation.eventType}/${obligation.stage}/${obligation.faultKind} did not fire`);
+    } catch (error) {
+      const injected = findLeaseCampaignFault(error);
+      if (injected === null || !targetFired) throw error;
+      assert.equal(injected.faultKind, obligation.faultKind);
+      observedFaultSignal = injected.signal;
+    }
+    assert.equal(targetFired, true);
+    assert.equal(observedFaultSignal, LEASE_CAMPAIGN_FAULT_SIGNALS[obligation.faultKind]);
+    const interrupted = store.snapshot(request.eventStreamId);
+    const interruptedFold = runtime.foldCycleControllerEvents(interrupted);
+    const targetAtFault = interrupted.filter(({ type }) => type === obligation.eventType).length;
+    const expectedCommitted = obligation.durability !== "event-not-committed";
+    assert.equal(targetAtFault, Number(expectedCommitted));
+    const checkpointId = `${request.controllerRunId}-latest`;
+    const checkpointAtFault = await checkpointStore.read(request.checkpointScope, checkpointId);
+    const expectedCheckpoint = obligation.durability === "event-and-checkpoint-committed";
+    assert.equal(checkpointAtFault !== null, expectedCheckpoint);
+
+    if (!expectedCommitted) await administer(seedTail, false);
+    const recoveredEvents = store.snapshot(request.eventStreamId);
+    assert.equal(
+      recoveredEvents.filter(({ type }) => type === obligation.eventType).length,
+      1,
+    );
+    const staleVersionLength = recoveredEvents.length;
+    let staleVersionCode;
+    try {
+      await administer(seedTail, false);
+      throw new Error("stale lease administration version unexpectedly committed");
+    } catch (error) {
+      if (!(error instanceof runtime.CycleControllerError)) throw error;
+      staleVersionCode = error.code;
+    }
+    const staleVersionZeroWrite = store.snapshot(request.eventStreamId).length === staleVersionLength;
+    assert.equal(staleVersionCode, "GE_CYCLE_VERSION_CONFLICT");
+    assert.equal(staleVersionZeroWrite, true);
+
+    let staleFinderCalls = 0;
+    const staleFenceLength = store.snapshot(request.eventStreamId).length;
+    let staleFenceCode;
+    const recoveredFold = runtime.foldCycleControllerEvents(recoveredEvents);
+    try {
+      await runtime.resumeCycleController(request, cycleGraph, {
+        eventStore: store,
+        expectedSequence: recoveredEvents.at(-1).sequence,
+        leaseReason: recoveredFold.activeLease === null ? "resume" : "takeover",
+        lease: { ...initialLease, leaseId: `cycle-lease-fault-${suffix}-stale` },
+        now: () => new Date(cycleStartedAt),
+        activities: {
+          finder: () => {
+            staleFinderCalls += 1;
+            return { output: [] };
+          },
+          candidateEvaluator: () => ({ output: [] }),
+        },
+      });
+      throw new Error("stale lease fence unexpectedly resumed");
+    } catch (error) {
+      if (!(error instanceof runtime.CycleControllerError)) throw error;
+      staleFenceCode = error.code;
+    }
+    const staleFenceZeroWrite = staleFinderCalls === 0
+      && store.snapshot(request.eventStreamId).length === staleFenceLength;
+    assert.equal(staleFenceCode, "GE_CYCLE_STALE_LEASE");
+    assert.equal(staleFenceZeroWrite, true);
+
+    let finderCalls = 0;
+    let evaluatorCalls = 0;
+    const resumed = await runtime.resumeCycleController(request, cycleGraph, {
+      eventStore: store,
+      expectedSequence: recoveredEvents.at(-1).sequence,
+      leaseReason: recoveredFold.activeLease === null ? "resume" : "takeover",
+      lease: {
+        leaseId: `cycle-lease-fault-${suffix}-lease-2`,
+        holderId: "cycle-lease-fault-holder-2",
+        leaseEpoch: 2,
+        fencingToken: 2,
+        acquiredAt: cycleStartedAt,
+        expiresAt: "2026-07-26T12:03:00.000Z",
+      },
+      now: () => new Date(cycleStartedAt),
+      activities: {
+        finder: () => {
+          finderCalls += 1;
+          return { output: [] };
+        },
+        candidateEvaluator: () => {
+          evaluatorCalls += 1;
+          return { output: [] };
+        },
+      },
+    });
+    assert.equal(resumed.exitReason, "MAX_ITERATIONS");
+    assert.equal(finderCalls, 1);
+    const finalEvents = store.snapshot(request.eventStreamId);
+    const finalFold = runtime.foldCycleControllerEvents(finalEvents, { requireTerminal: true });
+    assert.equal(finalEvents.filter(({ type }) => type === obligation.eventType).length, 1);
+    const replayed = await runtime.replayCycleController(store, request.eventStreamId);
+    assert.deepEqual(replayed.terminalResult, resumed);
+    const terminalResumeLength = finalEvents.length;
+    let terminalClockCalls = 0;
+    const terminal = await runtime.resumeCycleController(request, cycleGraph, {
+      eventStore: store,
+      expectedSequence: finalEvents.at(-1).sequence,
+      lease: {
+        leaseId: `cycle-lease-fault-${suffix}-lease-3`,
+        holderId: "cycle-lease-fault-holder-3",
+        leaseEpoch: 3,
+        fencingToken: 3,
+        acquiredAt: cycleStartedAt,
+        expiresAt: "2026-07-26T12:04:00.000Z",
+      },
+      now: () => {
+        terminalClockCalls += 1;
+        throw new Error("terminal resume sampled clock");
+      },
+      activities: {
+        finder: () => { throw new Error("terminal resume dispatched finder"); },
+        candidateEvaluator: () => { throw new Error("terminal resume dispatched evaluator"); },
+      },
+    });
+    assert.deepEqual(terminal, resumed);
+    const terminalResumeZeroWrite = store.snapshot(request.eventStreamId).length === terminalResumeLength;
+    assert.equal(terminalResumeZeroWrite, true);
+    assert.equal(terminalClockCalls, 0);
+    const targetEvent = finalEvents.find(({ type }) => type === obligation.eventType);
+    assert.notEqual(targetEvent, undefined);
+    const finalCheckpoint = runtime.createCycleControllerCheckpoint(
+      finalEvents,
+      `cycle-lease-fault-${suffix}-final`,
+      cycleCheckpointAt,
+    );
+    outcomes.push({
+      ...obligation,
+      index,
+      faultSignal: observedFaultSignal,
+      eventCommittedAtFault: expectedCommitted,
+      checkpointCommittedAtFault: expectedCheckpoint,
+      interruptedTailHash: interruptedFold.historyPrefixHash,
+      interruptedRecordHashes: interrupted.map(({ recordHash }) => recordHash),
+      checkpointAtFaultCanonical: checkpointAtFault === null
+        ? null
+        : core.canonicalSerialize(checkpointAtFault),
+      targetEventCanonical: core.canonicalSerialize(targetEvent),
+      staleVersionCode,
+      staleVersionZeroWrite,
+      staleFenceCode,
+      staleFenceZeroWrite,
+      finderCalls,
+      evaluatorCalls,
+      resultCanonical: core.canonicalSerialize(resumed),
+      finalEventTypes: finalEvents.map(({ type }) => type),
+      finalRecordHashes: finalEvents.map(({ recordHash }) => recordHash),
+      finalCheckpointCanonical: core.canonicalSerialize(finalCheckpoint),
+      terminalResumeZeroWrite,
+      terminalResumeClockCalls: terminalClockCalls,
+    });
+  }
+  return {
+    campaignId: campaign.id,
+    requiredAssertions: campaign.requiredAssertions,
+    obligationCount: outcomes.length,
+    outcomes,
+  };
+}
+
+const tsLeaseFaultCampaign = await exerciseCycleLeaseFaultCampaign();
+assert.deepEqual(
+  tsLeaseFaultCampaign,
+  pyCycleReport.leaseFaultCampaign,
+  "D7 lease administration fault-campaign reports differ",
+);
 const tsModeEventCount = Object.values(tsModeReports)
   .reduce((total, report) => total + report.eventTypes.length, 0);
 const tsModeInputCount = Object.values(tsModeReports)
@@ -2087,7 +2378,7 @@ const tsInDoubtInputCount = Object.values(tsInDoubtReports)
 const tsResolutionEventCount = tsResolutionReport.eventTypes.length;
 const tsResolutionInputCount = tsResolutionReport.inputsCanonical.length;
 process.stdout.write(
-  `Cross-language native-cycle conformance passed for ${tsCycleEvents.length + tsPatchEvents.length + tsResumeEvents.length + tsModeEventCount + tsInDoubtEventCount + tsResolutionEventCount} exact events, ${cycleInputs.length + patchInputs.length + resumeInputs.length + tsModeInputCount + tsInDoubtInputCount + tsResolutionInputCount} activity inputs, ${tsCycleFaultReport.matrix.length} durable fault obligations over ${cycleFaultFixture.expect.boundaryCount} boundaries, all three controller modes, two in-doubt recovery outcomes, one authority-bound terminal resolution, eight terminal results, one accepted GraphPatch/revision, one crash/takeover resume, and eight checkpoints.\n`,
+  `Cross-language native-cycle conformance passed for ${tsCycleEvents.length + tsPatchEvents.length + tsResumeEvents.length + tsModeEventCount + tsInDoubtEventCount + tsResolutionEventCount} exact baseline events, ${cycleInputs.length + patchInputs.length + resumeInputs.length + tsModeInputCount + tsInDoubtInputCount + tsResolutionInputCount} activity inputs, ${tsCycleFaultReport.matrix.length} durable fault obligations over ${cycleFaultFixture.expect.boundaryCount} boundaries, ${tsLeaseFaultCampaign.obligationCount} executable lease-renew/release fault recoveries, all three controller modes, two in-doubt recovery outcomes, one authority-bound terminal resolution, eight terminal results, one accepted GraphPatch/revision, one crash/takeover resume, and eight baseline checkpoints.\n`,
 );
 
 // Authoring conformance is intentionally expected-vs-TypeScript-vs-Python.

@@ -23,7 +23,12 @@ import {
   type CycleInDoubtResolutionCommand,
   type CycleInDoubtResolutionOptions,
   type CycleInDoubtResolutionResult,
+  type CycleLeaseAdministrationOptions,
+  type CycleLeaseRenewalOptions,
+  type CycleLeaseRenewalResult,
   type CycleModeOutcome,
+  type CyclePauseOptions,
+  type CyclePauseResult,
   type CycleResumeOptions,
   type CycleUsage,
   type GraphPatch,
@@ -123,11 +128,19 @@ class TrustedCycleClock {
   }
 }
 
-class CycleJournal {
+interface CycleJournalOptions {
+  readonly eventStore: CycleControllerRunOptions["eventStore"];
+  readonly checkpointStore?: CycleControllerRunOptions["checkpointStore"];
+  readonly checkpointEveryEvents?: number;
+  readonly createEventId?: CycleControllerRunOptions["createEventId"];
+  readonly faultHook?: CycleControllerRunOptions["faultHook"];
+}
+
+class CycleJournal<Options extends CycleJournalOptions = CycleControllerRunOptions> {
   readonly request: CycleControllerRequest;
   readonly controllerHash: string;
   readonly requestHash: string;
-  readonly options: CycleControllerRunOptions;
+  readonly options: Options;
   readonly parent: CycleControllerFold | undefined;
   readonly clock: TrustedCycleClock;
   readonly events: CycleControllerEvent[];
@@ -135,7 +148,7 @@ class CycleJournal {
 
   constructor(fields: {
     readonly request: CycleControllerRequest;
-    readonly options: CycleControllerRunOptions;
+    readonly options: Options;
     readonly events: readonly CycleControllerEvent[];
     readonly parent?: CycleControllerFold;
     readonly clock: TrustedCycleClock;
@@ -252,32 +265,55 @@ class CycleJournal {
     this.#cachedFold = candidateFold;
     await runCycleFaultHook(this.options.faultHook, `event:${type}:after-cas`);
     await runCycleFaultHook(this.options.faultHook, `event:${type}:after-state-before-dispatch`);
-    const folded = candidateFold;
     const interval = this.options.checkpointEveryEvents ?? 0;
     if (this.options.checkpointStore !== undefined
         && (type === "ControllerTerminated" || (interval > 0 && this.events.length % interval === 0))) {
-      const checkpointId = `${this.request.controllerRunId}-latest`;
-      await runCycleFaultHook(this.options.faultHook, `checkpoint:${type}:before-construction`);
-      const checkpoint = createCycleControllerCheckpoint(
-        this.events, checkpointId, sample.timestamp,
-        this.parent === undefined ? {} : { parent: this.parent },
-      );
-      await runCycleFaultHook(
-        this.options.faultHook,
-        `checkpoint:${type}:after-construction-before-save`,
-      );
-      try {
-        await this.options.checkpointStore.write(this.request.checkpointScope, checkpointId, checkpoint);
-      } catch (error) {
-        throw new CycleControllerError(
-          "GE_CYCLE_STORE_FAILED", this.request.controllerRunId,
-          "checkpoint write failed after the event remained durable",
-          { sequence: folded.lastSequence }, { cause: error },
-        );
-      }
-      await runCycleFaultHook(this.options.faultHook, `checkpoint:${type}:after-save-before-ack`);
+      await this.checkpoint(`${this.request.controllerRunId}-latest`, sample.timestamp);
     }
     return event;
+  }
+
+  async checkpoint(checkpointId: string, createdAt: string): Promise<CycleControllerCheckpoint> {
+    const checkpointStore = this.options.checkpointStore;
+    if (checkpointStore === undefined) {
+      throw new CycleControllerError(
+        "GE_CYCLE_INVALID_REQUEST",
+        this.request.controllerRunId,
+        "checkpoint operation requires a checkpoint store",
+      );
+    }
+    const type = this.events.at(-1)?.type;
+    if (type === undefined) {
+      throw new CycleControllerError(
+        "GE_CYCLE_INVALID_HISTORY",
+        this.request.controllerRunId,
+        "cannot checkpoint an empty controller stream",
+      );
+    }
+    await runCycleFaultHook(this.options.faultHook, `checkpoint:${type}:before-construction`);
+    const checkpoint = createCycleControllerCheckpoint(
+      this.events,
+      checkpointId,
+      createdAt,
+      this.parent === undefined ? {} : { parent: this.parent },
+    );
+    await runCycleFaultHook(
+      this.options.faultHook,
+      `checkpoint:${type}:after-construction-before-save`,
+    );
+    try {
+      await checkpointStore.write(this.request.checkpointScope, checkpointId, checkpoint);
+    } catch (error) {
+      throw new CycleControllerError(
+        "GE_CYCLE_STORE_FAILED",
+        this.request.controllerRunId,
+        "checkpoint write failed after the event remained durable",
+        { sequence: this.fold.lastSequence },
+        { cause: error },
+      );
+    }
+    await runCycleFaultHook(this.options.faultHook, `checkpoint:${type}:after-save-before-ack`);
+    return checkpoint;
   }
 }
 
@@ -1485,6 +1521,135 @@ function validateRunOptions(request: CycleControllerRequest, options: CycleContr
   validateCycleLease(options.lease, request.controllerRunId);
 }
 
+function validateLeaseAdministrationOptions(
+  request: CycleControllerRequest,
+  options: CycleLeaseAdministrationOptions,
+): void {
+  const fail = (message: string): never => {
+    throw new CycleControllerError("GE_CYCLE_INVALID_REQUEST", request.controllerRunId, message);
+  };
+  if (options === null || typeof options !== "object"
+      || options.eventStore === null || typeof options.eventStore !== "object"
+      || typeof options.eventStore.read !== "function"
+      || typeof options.eventStore.append !== "function") {
+    fail("lease administration requires an event store adapter");
+  }
+  if (!Number.isSafeInteger(options.expectedSequence) || options.expectedSequence < 0) {
+    fail("lease administration expected sequence must be a nonnegative safe integer");
+  }
+  if (options.checkpointStore !== undefined
+      && (options.checkpointStore === null || typeof options.checkpointStore !== "object"
+        || typeof options.checkpointStore.read !== "function"
+        || typeof options.checkpointStore.write !== "function")) {
+    fail("lease administration checkpoint store adapter is invalid");
+  }
+  if (options.now !== undefined && typeof options.now !== "function"
+      || options.createEventId !== undefined && typeof options.createEventId !== "function"
+      || options.faultHook !== undefined && typeof options.faultHook !== "function") {
+    fail("lease administration clock, event-ID, or fault-hook adapter is invalid");
+  }
+}
+
+async function prepareLeaseAdministration<Options extends CycleLeaseAdministrationOptions>(
+  requestValue: CycleControllerRequest | unknown,
+  options: Options,
+  foldOptions: FoldCycleOptions,
+): Promise<{
+  readonly request: CycleControllerRequest;
+  readonly events: readonly CycleControllerEvent[];
+  readonly fold: CycleControllerFold;
+  readonly clock: TrustedCycleClock;
+}> {
+  const request = validateCycleControllerRequest(requestValue);
+  validateLeaseAdministrationOptions(request, options);
+  const events = await readCycleControllerEvents(options.eventStore, request.eventStreamId);
+  if (events.length === 0) {
+    throw new CycleControllerError(
+      "GE_CYCLE_RUN_NOT_FOUND",
+      request.controllerRunId,
+      "lease administration requires an existing stream",
+    );
+  }
+  const actualSequence = events.length - 1;
+  if (options.expectedSequence !== actualSequence) {
+    throw new CycleControllerError(
+      "GE_CYCLE_VERSION_CONFLICT",
+      request.controllerRunId,
+      "lease administration expected version differs from stream tail",
+      { expectedSequence: options.expectedSequence, actualSequence },
+    );
+  }
+  const fold = foldCycleControllerEvents(events, foldOptions);
+  if (fold.requestHash !== cycleRequestHash(request)
+      || fold.controllerHash !== cycleControllerHash(request)
+      || canonicalSerialize(fold.request) !== canonicalSerialize(request)) {
+    throw new CycleControllerError(
+      "GE_CYCLE_REQUEST_MISMATCH",
+      request.controllerRunId,
+      "lease administration request does not match history",
+    );
+  }
+  if (fold.terminalResult !== null || fold.activeLease === null) {
+    throw new CycleControllerError(
+      "GE_CYCLE_LEASE_CONFLICT",
+      request.controllerRunId,
+      "lease administration requires one active nonterminal lease",
+    );
+  }
+  const lastTimestamp = events.at(-1)?.timestamp as string;
+  return {
+    request,
+    events,
+    fold,
+    clock: new TrustedCycleClock(
+      options.now ?? (() => new Date()),
+      fold.startedAt,
+      fold.deadlineAt,
+      lastTimestamp,
+      request.controllerRunId,
+    ),
+  };
+}
+
+async function leaseAdministrationCheckpoint<Options extends CycleLeaseAdministrationOptions>(
+  journal: CycleJournal<Options>,
+  createdAt: string,
+): Promise<CycleControllerError | null> {
+  if (journal.options.checkpointStore === undefined) return null;
+  try {
+    await journal.checkpoint(`${journal.request.controllerRunId}-latest`, createdAt);
+    return null;
+  } catch (error) {
+    if (error instanceof CycleControllerError && error.code === "GE_CYCLE_STORE_FAILED") {
+      return error;
+    }
+    throw error;
+  }
+}
+
+async function appendLeaseAdministrationEvent<Options extends CycleLeaseAdministrationOptions>(
+  journal: CycleJournal<Options>,
+  type: "LeaseRenewed" | "LeaseReleased",
+  data: Readonly<Record<string, unknown>>,
+  lease: NonNullable<CycleControllerEvent["lease"]>,
+  sample: ClockSample,
+): Promise<CycleControllerEvent> {
+  try {
+    return await journal.append(type, data, { lease, sample });
+  } catch (error) {
+    if (error instanceof CycleControllerError && error.code === "GE_CYCLE_RESUME_CONFLICT") {
+      throw new CycleControllerError(
+        "GE_CYCLE_VERSION_CONFLICT",
+        journal.request.controllerRunId,
+        "lease administration lost the stream-tail compare-and-swap",
+        error.details,
+        { cause: error },
+      );
+    }
+    throw error;
+  }
+}
+
 async function startInternal(
   requestValue: CycleControllerRequest | unknown,
   initialGraphValue: GraphSpec | unknown,
@@ -1579,6 +1744,22 @@ export async function resumeCycleController(
       || fold.openRound?.openActivity?.sideEffects === "non-idempotent") {
     throw new CycleControllerError("IN_DOUBT_SIDE_EFFECT", request.controllerRunId, "resume is blocked by an in-doubt non-idempotent activity");
   }
+  const resumeLease = validateCycleLease(options.lease, request.controllerRunId);
+  if (resumeLease.leaseEpoch <= fold.maxLeaseEpoch
+      || resumeLease.fencingToken <= fold.maxFencingToken
+      || resumeLease.leaseId === fold.lastLeaseId) {
+    throw new CycleControllerError(
+      "GE_CYCLE_STALE_LEASE",
+      request.controllerRunId,
+      "resume lease must strictly advance epoch, fencing token, and identity",
+      {
+        leaseEpoch: resumeLease.leaseEpoch,
+        maxLeaseEpoch: fold.maxLeaseEpoch,
+        fencingToken: resumeLease.fencingToken,
+        maxFencingToken: fold.maxFencingToken,
+      },
+    );
+  }
   if (options.checkpointStore !== undefined) {
     const checkpointId = `${request.controllerRunId}-latest`;
     let checkpoint: CycleControllerCheckpoint | null;
@@ -1617,6 +1798,132 @@ export async function resumeCycleController(
   fold = journal.fold;
   const applier = createApplier(request, graph, events);
   return continueController(journal, applier);
+}
+
+/**
+ * Voluntarily release one active lease without invoking an activity adapter.
+ * The event is authoritative; an optional checkpoint is acceleration only.
+ */
+export async function pauseCycleController(
+  requestValue: CycleControllerRequest | unknown,
+  options: CyclePauseOptions,
+  foldOptions: FoldCycleOptions = {},
+): Promise<CyclePauseResult> {
+  const prepared = await prepareLeaseAdministration(requestValue, options, foldOptions);
+  const reason = options.reason ?? "paused";
+  if (reason !== "paused" && reason !== "handoff") {
+    throw new CycleControllerError(
+      "GE_CYCLE_INVALID_REQUEST",
+      prepared.request.controllerRunId,
+      "pause reason must be paused or handoff",
+    );
+  }
+  const activeLease = prepared.fold.activeLease;
+  if (activeLease === null) {
+    throw new CycleControllerError(
+      "GE_CYCLE_LEASE_CONFLICT",
+      prepared.request.controllerRunId,
+      "pause requires an active lease",
+    );
+  }
+  const sample = prepared.clock.sample();
+  if (Date.parse(sample.timestamp) >= Date.parse(activeLease.expiresAt)) {
+    throw new CycleControllerError(
+      "GE_CYCLE_STALE_LEASE",
+      prepared.request.controllerRunId,
+      "pause cannot release an expired lease",
+    );
+  }
+  const journal = new CycleJournal<CyclePauseOptions>({
+    request: prepared.request,
+    options,
+    events: prepared.events,
+    ...(foldOptions.parent === undefined ? {} : { parent: foldOptions.parent }),
+    clock: prepared.clock,
+  });
+  const event = await appendLeaseAdministrationEvent(
+    journal,
+    "LeaseReleased",
+    { reason },
+    activeLease,
+    sample,
+  );
+  const checkpointWarning = await leaseAdministrationCheckpoint(journal, event.timestamp);
+  return Object.freeze({
+    event,
+    fold: journal.fold,
+    releasedLeaseId: activeLease.leaseId,
+    checkpointWarning,
+  });
+}
+
+/**
+ * Extend one active lease without changing its holder, epoch, fencing token,
+ * acquisition instant, or identity. This operation dispatches no graph work.
+ */
+export async function renewCycleControllerLease(
+  requestValue: CycleControllerRequest | unknown,
+  options: CycleLeaseRenewalOptions,
+  foldOptions: FoldCycleOptions = {},
+): Promise<CycleLeaseRenewalResult> {
+  const prepared = await prepareLeaseAdministration(requestValue, options, foldOptions);
+  const activeLease = prepared.fold.activeLease;
+  if (activeLease === null) {
+    throw new CycleControllerError(
+      "GE_CYCLE_LEASE_CONFLICT",
+      prepared.request.controllerRunId,
+      "lease renewal requires an active lease",
+    );
+  }
+  const lease = validateCycleLease(options.lease, prepared.request.controllerRunId);
+  if (lease.leaseId !== activeLease.leaseId
+      || lease.holderId !== activeLease.holderId
+      || lease.leaseEpoch !== activeLease.leaseEpoch
+      || lease.fencingToken !== activeLease.fencingToken
+      || lease.acquiredAt !== activeLease.acquiredAt) {
+    throw new CycleControllerError(
+      "GE_CYCLE_LEASE_CONFLICT",
+      prepared.request.controllerRunId,
+      "lease renewal cannot change fenced lease identity",
+    );
+  }
+  if (Date.parse(lease.expiresAt) <= Date.parse(activeLease.expiresAt)) {
+    throw new CycleControllerError(
+      "GE_CYCLE_STALE_LEASE",
+      prepared.request.controllerRunId,
+      "lease renewal must strictly extend the exclusive expiry",
+    );
+  }
+  const sample = prepared.clock.sample();
+  if (Date.parse(sample.timestamp) >= Date.parse(activeLease.expiresAt)) {
+    throw new CycleControllerError(
+      "GE_CYCLE_STALE_LEASE",
+      prepared.request.controllerRunId,
+      "an expired lease cannot renew itself",
+    );
+  }
+  const journal = new CycleJournal<CycleLeaseRenewalOptions>({
+    request: prepared.request,
+    options,
+    events: prepared.events,
+    ...(foldOptions.parent === undefined ? {} : { parent: foldOptions.parent }),
+    clock: prepared.clock,
+  });
+  const event = await appendLeaseAdministrationEvent(
+    journal,
+    "LeaseRenewed",
+    { previousExpiresAt: activeLease.expiresAt, newExpiresAt: lease.expiresAt },
+    lease,
+    sample,
+  );
+  const checkpointWarning = await leaseAdministrationCheckpoint(journal, event.timestamp);
+  return Object.freeze({
+    event,
+    fold: journal.fold,
+    lease,
+    previousExpiresAt: activeLease.expiresAt,
+    checkpointWarning,
+  });
 }
 
 /**

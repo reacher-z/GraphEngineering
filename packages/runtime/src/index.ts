@@ -24,7 +24,9 @@ export {
 } from "./durable-json.js";
 export {
   forkCycleController,
+  pauseCycleController,
   replayCycleController,
+  renewCycleControllerLease,
   resolveCycleInDoubtActivity,
   resumeCycleController,
   startCycleController,

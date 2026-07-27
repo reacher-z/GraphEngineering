@@ -1525,6 +1525,19 @@ export class MemoryCycleControllerEventStore implements CycleControllerEventStor
     for (const event of events) {
       await runCycleFaultHook(this.#faultHook, `store:event:${event.type}:before-commit`);
     }
+    // A before-commit hook may yield, so another append can win after the
+    // optimistic read above. Recheck immediately before the synchronous map
+    // replacement to keep this process-local adapter a real CAS under
+    // concurrent promises instead of allowing a last-writer-wins overwrite.
+    const commitActual = (this.#streams.get(streamId) ?? []).length - 1;
+    if (commitActual !== expectedSequence) {
+      throw new CycleControllerError(
+        "GE_CYCLE_RESUME_CONFLICT",
+        eventValues[0]?.controllerRunId ?? "unknown",
+        "cycle event-store CAS conflict",
+        { expectedSequence, actualSequence: commitActual },
+      );
+    }
     this.#streams.set(streamId, [...current, ...events]);
     for (const event of events) {
       await runCycleFaultHook(

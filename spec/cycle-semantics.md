@@ -883,6 +883,20 @@ can follow it because no event may follow terminal state. CAS
 alone is not a distributed lease implementation, so native conformance must
 exercise a real fencing provider before distributed execution is claimed.
 
+The public `renew` and `pause` operations are zero-dispatch administrative
+transitions. Both bind the exact current sequence and complete request identity
+before sampling a trusted clock or constructing an event. Renewal MUST preserve
+`leaseId`, `holderId`, `leaseEpoch`, `fencingToken`, and `acquiredAt`, MUST
+strictly extend the exclusive `expiresAt`, and MUST occur before the old expiry.
+Pause accepts only `paused` or `handoff` and MUST occur before expiry under the
+exact active lease. A stale sequence fails before append; a stale fence cannot
+resume or overwrite the winning transition. If configured, the implementation
+writes a latest checkpoint after the event. Checkpoint failure cannot erase or
+reinterpret an event that already committed.
+Two administrators that read the same tail may both prepare a candidate, but
+the event-store CAS MUST commit exactly one. Every loser MUST surface
+`GE_CYCLE_VERSION_CONFLICT` and MUST NOT overwrite or append after the winner.
+
 ### 13.3 Closed phase events and fold
 
 The event type and `data` schema form one discriminator. Unknown fields and a
@@ -1037,6 +1051,17 @@ matrix with SHA-256
 TypeScript and Python must generate that matrix independently and compare every
 entry in conformance. Adding an event without extending the schema, runtime
 vocabulary, fixture, and matrix therefore fails validation.
+
+The retained `lease-administration-v1alpha1` campaign makes the first 100 rows
+behavioral rather than structural only: `LeaseRenewed` and `LeaseReleased`, ten
+applicable stages, and five fault kinds. For every row, both native runtimes
+must inject and observe the fault-kind-specific signal, then agree on the
+interrupted record hashes, target-event bytes, checkpoint presence,
+stale-version and stale-fence codes, recovery history, terminal result, final
+checkpoint, handler counts, replay, and terminal-resume zero-write observation.
+The remaining matrix rows stay explicit open behavioral coverage;
+their presence in the 855-row lattice alone is not an exhaustive recovery
+claim.
 
 Fault hooks are deterministic test and simulation controls, not evidence that
 an in-memory adapter is crash durable. A production adapter must establish the

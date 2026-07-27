@@ -262,6 +262,8 @@ observation is hash chained and CAS appended.
 ```ts
 import {
   MemoryCycleControllerEventStore,
+  pauseCycleController,
+  renewCycleControllerLease,
   resumeCycleController,
   startCycleController,
 } from "@graph-engineering/runtime";
@@ -289,6 +291,23 @@ const resumed = await resumeCycleController(request, initialGraph, {
   leaseReason: "takeover",
   activities,
 });
+
+// On a separate active, nonterminal stream, lease administration is
+// zero-dispatch. Renewal preserves the complete fenced identity and only
+// extends its exclusive expiry; pause records a voluntary release. Both
+// operations require that stream's exact current sequence.
+const activeTailSequence = 12;
+const activeLease = lease;
+const renewed = await renewCycleControllerLease(request, {
+  eventStore,
+  expectedSequence: activeTailSequence,
+  lease: { ...activeLease, expiresAt: "2026-07-26T12:02:00.000Z" },
+});
+const paused = await pauseCycleController(request, {
+  eventStore,
+  expectedSequence: renewed.event.sequence,
+  reason: "handoff",
+});
 ```
 
 `replayCycleController` is read-only and dispatches no activity or clock;
@@ -297,6 +316,16 @@ are optional verified caches. Missing, stale, or corrupt checkpoint data never
 overrides a complete event fold. `MemoryCycleControllerEventStore` and
 `MemoryCycleControllerCheckpointStore` are deterministic local implementations,
 not distributed lease providers.
+
+`renewCycleControllerLease` rejects a changed holder, lease ID, epoch, fencing
+token, acquisition instant, non-extending expiry, expired lease, or stale
+sequence before append. `pauseCycleController` accepts only `paused` or
+`handoff`, rejects expired/released/terminal leases, and appends no work. When a
+checkpoint store is supplied, each administration operation writes the
+`{controllerRunId}-latest` acceleration checkpoint after its event; an event
+that committed remains authoritative if checkpointing fails.
+If concurrent administrators present the same tail, exactly one CAS commits;
+every loser returns `GE_CYCLE_VERSION_CONFLICT` without overwriting the winner.
 
 The test/simulation surface derives its complete durable-boundary lattice from
 the public event vocabulary:
@@ -321,7 +350,12 @@ Controller `faultHook` covers construction, prospective fold, store return,
 in-memory projection, checkpoint, and terminal-delivery boundaries; the memory
 event-store hook covers both sides of its atomic commit. These hooks are
 deterministic verification controls, not a production durability claim. The
-retained fixture and Python join compare all 855 canonical entries.
+retained fixture and Python join compare all 855 canonical entries. The first
+retained behavioral campaign also executes all 100 combinations for
+`LeaseRenewed` and `LeaseReleased`: ten stages by five fault kinds by two event
+types. Each run proves committed-prefix validity, exact durability class,
+single settlement, stale-version and stale-fence zero-write behavior, safe
+resume, read-only replay, and terminal-resume zero writes.
 
 When replaying or resuming a fork in a fresh process, replay the exact parent
 event prefix locally and pass that verified fold as `parent`. A serialized or
