@@ -36,6 +36,13 @@ controller event and fold/checkpoint contracts are
 [cycle-controller-checkpoint.schema.json](cycle-controller-checkpoint.schema.json).
 Bounded root-to-target export for offline replay is closed by
 [cycle-controller-lineage-manifest.schema.json](cycle-controller-lineage-manifest.schema.json).
+The provider-neutral storage boundary is fixed by
+[cycle-store-provider-semantics.md](cycle-store-provider-semantics.md) and the
+closed [cycle-store-provider.schema.json](cycle-store-provider.schema.json)
+descriptor. Its 54-case native differential campaign covers append CAS,
+idempotency, snapshot pagination, disposable checkpoints, fencing, tenant
+authorization, governance, and migration exclusion without claiming that the
+memory oracle is durable.
 These D7 schemas are protocol-frozen and consumed by the native TypeScript and
 Python standalone alpha controllers. Schema acceptance alone is not native or
 production evidence; executable conformance remains the capability gate. Their

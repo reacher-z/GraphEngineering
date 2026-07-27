@@ -1069,6 +1069,297 @@ assert.equal(
   cycleLineageCases.requiredAssertions.length,
   "D7 H06 required assertions are duplicated",
 );
+
+const cycleStoreProviderSchema = JSON.parse(
+  await readFile(join(repositoryRoot, "spec", "cycle-store-provider.schema.json"), "utf8"),
+);
+const cycleStoreProviderSchemaEngine = new Ajv2020({ allErrors: true, strict: true });
+assert.equal(
+  cycleStoreProviderSchemaEngine.validateSchema(cycleStoreProviderSchema),
+  true,
+  `CycleStore provider schema is not valid Draft 2020-12: ${JSON.stringify(cycleStoreProviderSchemaEngine.errors)}`,
+);
+const validateCycleStoreProviderDescriptor = cycleStoreProviderSchemaEngine.compile(
+  cycleStoreProviderSchema,
+);
+const cycleStoreProviderCases = await loadJson("cycle-store-provider.case.json");
+assert.deepEqual(
+  Object.keys(cycleStoreProviderCases).sort(compareUnicodeCodePoints),
+  [
+    "cases",
+    "contractVersion",
+    "descriptorSchema",
+    "errorCodes",
+    "expect",
+    "hashDomains",
+    "id",
+    "requiredAssertions",
+    "schemaVersion",
+  ],
+  "D7 S01 CycleStore provider fixture is not closed",
+);
+assert.equal(cycleStoreProviderCases.schemaVersion, 1);
+assert.equal(cycleStoreProviderCases.id, "cycle-store-provider-v1alpha1");
+assert.equal(cycleStoreProviderCases.contractVersion, "cycle-store-provider/v1alpha1");
+assert.equal(
+  cycleStoreProviderCases.descriptorSchema,
+  "spec/cycle-store-provider.schema.json",
+);
+assert.deepEqual(cycleStoreProviderCases.hashDomains, {
+  descriptor: "graph-engineering/cycle-store-provider-descriptor/v1alpha1\0",
+  record: "graph-engineering/cycle-store-record/v1alpha1\0",
+  operation: "graph-engineering/cycle-store-operation/v1alpha1\0",
+});
+const cycleStoreErrorCodes = [
+  "GE_CYCLE_STORE_INVALID_ARGUMENT",
+  "GE_CYCLE_STORE_INVALID_CURSOR",
+  "GE_CYCLE_STORE_NOT_FOUND",
+  "GE_CYCLE_STORE_CONFLICT",
+  "GE_CYCLE_STORE_IDEMPOTENCY_CONFLICT",
+  "GE_CYCLE_STORE_LEASE_CONFLICT",
+  "GE_CYCLE_STORE_STALE_FENCE",
+  "GE_CYCLE_STORE_UNAVAILABLE",
+  "GE_CYCLE_STORE_CORRUPTION",
+  "GE_CYCLE_STORE_QUOTA_EXCEEDED",
+  "GE_CYCLE_STORE_PERMISSION_DENIED",
+  "GE_CYCLE_STORE_UNSUPPORTED_VERSION",
+  "GE_CYCLE_STORE_LEGAL_HOLD",
+  "GE_CYCLE_STORE_MIGRATION_LOCKED",
+  "GE_CYCLE_STORE_INTERNAL",
+];
+assert.deepEqual(cycleStoreProviderCases.errorCodes, cycleStoreErrorCodes);
+const cycleStoreScenarios = new Set([
+  "descriptor-reference",
+  "descriptor-durable-profile",
+  "descriptor-smaller-limits",
+  "schema-inspection",
+  "descriptor-unknown-field",
+  "descriptor-limit-overflow",
+  "empty-tail",
+  "append-single",
+  "append-atomic-batch",
+  "append-exact-retry",
+  "append-commit-then-throw",
+  "append-cas-loss",
+  "append-expected-hash-drift",
+  "append-broken-chain",
+  "append-duplicate-record-id",
+  "append-operation-request-drift",
+  "append-operation-name-reuse",
+  "append-count-overflow",
+  "event-exact-traversal",
+  "event-append-during-scan",
+  "event-beyond-tail",
+  "event-missing-stream",
+  "event-cursor-tenant-scope",
+  "event-cursor-stream-scope",
+  "event-cursor-page-size",
+  "event-cursor-tamper",
+  "checkpoint-save-load",
+  "checkpoint-list-order",
+  "checkpoint-delete",
+  "checkpoint-exact-retry",
+  "checkpoint-stale-tail",
+  "checkpoint-content-hash-drift",
+  "checkpoint-immutable-id",
+  "checkpoint-corrupt-load",
+  "lease-first-acquire",
+  "lease-renew",
+  "lease-release-reacquire",
+  "lease-expired-takeover",
+  "lease-exact-retry",
+  "lease-active-owner-conflict",
+  "lease-early-takeover",
+  "lease-stale-renew",
+  "lease-stale-release",
+  "lease-stale-write",
+  "lease-expired-write",
+  "lease-fence-overflow",
+  "tenant-same-id-isolation",
+  "safe-error-envelope",
+  "authorization-denied-lookup",
+  "injected-error-classification",
+  "governance-hold-declarations",
+  "migration-retry-takeover",
+  "migration-live-lock-conflict",
+  "migration-blocks-online-writer",
+]);
+assert.deepEqual(
+  new Set(cycleStoreProviderCases.cases.map(({ scenario }) => scenario)),
+  cycleStoreScenarios,
+  "D7 S01 CycleStore provider scenario vocabulary drifted",
+);
+const cycleStoreCategories = new Set([
+  "append", "checkpoint", "descriptor", "governance", "lease", "pagination", "tenant-error",
+]);
+const cycleStoreMutations = new Set(["read-only", "committed", "idempotent", "none", "mixed"]);
+const cycleStoreCategoryCounts = new Map();
+for (const item of cycleStoreProviderCases.cases) {
+  assert.deepEqual(
+    Object.keys(item).sort(compareUnicodeCodePoints),
+    [
+      "assertion",
+      "category",
+      "expectCode",
+      "expectOutcome",
+      "id",
+      "mutation",
+      "polarity",
+      "scenario",
+    ],
+    `${item.id} CycleStore provider case is not closed`,
+  );
+  assert.match(item.id, /^[a-z][a-z0-9-]{2,63}$/u);
+  assert.ok(cycleStoreCategories.has(item.category));
+  assert.ok(item.polarity === "behavior" || item.polarity === "attack");
+  assert.ok(cycleStoreMutations.has(item.mutation));
+  assert.equal(typeof item.assertion, "string");
+  assert.ok(item.assertion.length >= 24 && item.assertion.length <= 160);
+  if (item.polarity === "attack") {
+    assert.equal(item.expectOutcome, "rejected");
+    assert.ok(cycleStoreErrorCodes.includes(item.expectCode));
+    assert.equal(item.mutation, "none");
+  } else {
+    assert.ok(item.expectOutcome === "accepted" || item.expectOutcome === "verified");
+    assert.equal(item.expectCode, null);
+  }
+  cycleStoreCategoryCounts.set(
+    item.category,
+    (cycleStoreCategoryCounts.get(item.category) ?? 0) + 1,
+  );
+}
+assert.equal(
+  new Set(cycleStoreProviderCases.cases.map(({ id }) => id)).size,
+  cycleStoreProviderCases.cases.length,
+  "D7 S01 CycleStore provider case IDs are duplicated",
+);
+assert.equal(
+  new Set(cycleStoreProviderCases.cases.map(({ assertion }) => assertion)).size,
+  cycleStoreProviderCases.cases.length,
+  "D7 S01 CycleStore provider assertions are duplicated",
+);
+assert.equal(cycleStoreProviderCases.cases.length, 54);
+assert.equal(cycleStoreProviderCases.expect.caseCount, 54);
+assert.equal(
+  cycleStoreProviderCases.cases.filter(({ polarity }) => polarity === "attack").length,
+  28,
+);
+assert.equal(cycleStoreProviderCases.expect.attackCaseCount, 28);
+assert.equal(
+  cycleStoreProviderCases.cases.filter(({ polarity }) => polarity === "behavior").length,
+  26,
+);
+assert.equal(cycleStoreProviderCases.expect.behaviorCaseCount, 26);
+assert.deepEqual(
+  Object.fromEntries([...cycleStoreCategoryCounts].sort(([left], [right]) => (
+    compareUnicodeCodePoints(left, right)
+  ))),
+  cycleStoreProviderCases.expect.categoryCounts,
+);
+const cycleStoreCasesCanonical = JSON.stringify(canonicalize(cycleStoreProviderCases.cases));
+assert.equal(
+  Buffer.byteLength(cycleStoreCasesCanonical, "utf8"),
+  cycleStoreProviderCases.expect.casesCanonicalUtf8Bytes,
+);
+assert.equal(hash(cycleStoreProviderCases.cases), cycleStoreProviderCases.expect.casesSha256);
+assert.equal(cycleStoreProviderCases.requiredAssertions.length, 12);
+assert.equal(new Set(cycleStoreProviderCases.requiredAssertions).size, 12);
+const cycleStoreDescriptorBody = {
+  apiVersion: "graphengineering.reacher-z.github.io/cycle-store-providers/v1alpha1",
+  kind: "CycleStoreProviderDescriptor",
+  contractVersion: "cycle-store-provider/v1alpha1",
+  providerId: "memory-reference",
+  schemaVersion: 1,
+  compatibility: {
+    minReaderVersion: 1,
+    maxReaderVersion: 1,
+    minWriterVersion: 1,
+    maxWriterVersion: 1,
+  },
+  limits: {
+    maxAppendRecords: 64,
+    maxRecordBytes: 1048576,
+    maxAppendBytes: 8388608,
+    maxPageSize: 256,
+    maxCheckpointBytes: 16777216,
+    maxLeaseTtlMs: 86400000,
+  },
+  guarantees: {
+    appendAtomicity: "all-or-nothing",
+    tailConsistency: "strong",
+    pagination: "snapshot-no-skip-no-duplicate",
+    checkpointAuthority: "cache-only",
+    idempotency: "operation-id-canonical-request",
+    leaseClock: "provider-authoritative",
+    tenantIsolation: "mandatory",
+  },
+  capabilities: {
+    durability: "process-local",
+    distributedFencing: false,
+    snapshotPagination: true,
+    checkpointCrud: true,
+    legalHold: "reference-state-machine",
+    backupRestore: "declared",
+    compaction: "logical-history-preserving",
+  },
+  protection: {
+    payloadProtection: "external",
+    encryptionAtRest: "none",
+    rawPayloadObservability: false,
+  },
+  governance: {
+    retention: "descriptor-only",
+    archival: "descriptor-only",
+    legalHoldBlocksDeletion: true,
+    migrationLock: "exclusive-fenced",
+    backupIdentity: "content-addressed",
+  },
+  observability: {
+    safeFields: [
+      "operation",
+      "resultCode",
+      "durationBucket",
+      "canonicalByteCount",
+      "recordCount",
+      "pageCount",
+      "retryClass",
+      "tenantHash",
+      "providerId",
+    ],
+    payloadLabels: false,
+    authorizationLabels: false,
+  },
+};
+const cycleStoreDescriptorSample = {
+  ...cycleStoreDescriptorBody,
+  descriptorHash: hashWithDomain(
+    cycleStoreProviderCases.hashDomains.descriptor,
+    cycleStoreDescriptorBody,
+  ),
+};
+assert.equal(
+  cycleStoreDescriptorSample.descriptorHash,
+  "8a0caf1fd5c58a94ae15a627098396a033e7026ead96756ea8e7ad6998b6de4c",
+);
+assert.equal(
+  validateCycleStoreProviderDescriptor(cycleStoreDescriptorSample),
+  true,
+  `valid CycleStore provider descriptor failed schema validation: ${JSON.stringify(validateCycleStoreProviderDescriptor.errors)}`,
+);
+const hostileCycleStoreDescriptor = cloneJson(cycleStoreDescriptorSample);
+hostileCycleStoreDescriptor.capabilities.unexpected = true;
+assert.equal(
+  validateCycleStoreProviderDescriptor(hostileCycleStoreDescriptor),
+  false,
+  "CycleStore provider schema accepted an open capability declaration",
+);
+const excessiveCycleStoreDescriptor = cloneJson(cycleStoreDescriptorSample);
+excessiveCycleStoreDescriptor.limits.maxPageSize = 257;
+assert.equal(
+  validateCycleStoreProviderDescriptor(excessiveCycleStoreDescriptor),
+  false,
+  "CycleStore provider schema accepted an advertised limit above the contract ceiling",
+);
 assert.equal(
   cycleFaultMatrixCases.eventSchema,
   "spec/cycle-controller-event.schema.json",
@@ -3603,5 +3894,5 @@ assert.equal(new Set(diamond.nodes.map(({ id }) => id)).size, diamond.nodes.leng
 assert.equal(new Set(diamond.edges.map(({ id }) => id)).size, diamond.edges.length);
 
 process.stdout.write(
-  `Validated ${fixtureNames.length} JSON fixtures (${caseNames.length} case manifests), ${yamlNames.length} referenced YAML fixtures, ${Object.keys(expected.canonicalization).length} graph hash, ${Object.keys(expected.checkpoints ?? {}).length} checkpoint hash, ${durableJson.validCases.length} Durable JSON vectors, ${compiledIdentities.length} compiled identities, ${graphPatchCases.validCases.length + graphPatchCases.invalidCases.length} graph patch schema cases plus ${graphPatchCases.semanticCases.length} closed semantic vectors, ${hostileShapeCases.length} hostile GraphPatch shape attacks, ${hostileSemanticCases.length} schema-valid hostile GraphPatch semantic/behavior cases, ${hostileRestoreCases.length} hostile GraphPatch replay/restore cases, and 7 D7 controller/revision/event/checkpoint/lineage schemas with ${durableEvents.length} chained event goldens, ${cycleLineageCases.cases.length} lineage replay/corruption cases, ${cycleFaultMatrix.length} retained durable fault obligations, ${cycleInterruptionMatrix.length} activity interruption obligations, ${cycleOperationInterruptionMatrix.length} public-operation interruption obligations, ${cyclePatchVisibilityMatrix.length} patch-visibility fault obligations, ${cyclePatchCheckpointMatrix.length} patch-checkpoint fault obligations, ${cycleDurableCases.leaseTransitionCases.length} valid and ${cycleDurableCases.invalidLeaseTransitionCases.length} hostile lease transitions, ${cycleDurableCases.validInterruptedHistoryCases?.length ?? 0} interrupted terminal/checkpoint folds, ${cycleDurableCases.inDoubtProjectionCases.length} in-doubt singleton cases, ${resolutionProtocol.cases.length} terminal in-doubt resolution cases, ${cycleDurableCases.untilDryFoldCases.length} global-seen convergence fold, ${cycleDurableCases.hardStopFoldCases.length} hard-stop folds, ${cycleDurableCases.invalidEventHistoryCases.length} hostile histories, ${cycleDurableCases.invalidCheckpointSemanticCases.length} hostile checkpoint folds, plus ${cycleDurableCases.validStandaloneEventSchemaCases.length} standalone phase-event shapes; all ${expectedD7Tests.length} D7-CYCLE-SPEC-024 expected-test groups are mapped against meta-valid schemas.\n`,
+  `Validated ${fixtureNames.length} JSON fixtures (${caseNames.length} case manifests), ${yamlNames.length} referenced YAML fixtures, ${Object.keys(expected.canonicalization).length} graph hash, ${Object.keys(expected.checkpoints ?? {}).length} checkpoint hash, ${durableJson.validCases.length} Durable JSON vectors, ${compiledIdentities.length} compiled identities, ${graphPatchCases.validCases.length + graphPatchCases.invalidCases.length} graph patch schema cases plus ${graphPatchCases.semanticCases.length} closed semantic vectors, ${hostileShapeCases.length} hostile GraphPatch shape attacks, ${hostileSemanticCases.length} schema-valid hostile GraphPatch semantic/behavior cases, ${hostileRestoreCases.length} hostile GraphPatch replay/restore cases, 1 CycleStore provider descriptor schema with ${cycleStoreProviderCases.cases.length} closed cases, and 7 D7 controller/revision/event/checkpoint/lineage schemas with ${durableEvents.length} chained event goldens, ${cycleLineageCases.cases.length} lineage replay/corruption cases, ${cycleFaultMatrix.length} retained durable fault obligations, ${cycleInterruptionMatrix.length} activity interruption obligations, ${cycleOperationInterruptionMatrix.length} public-operation interruption obligations, ${cyclePatchVisibilityMatrix.length} patch-visibility fault obligations, ${cyclePatchCheckpointMatrix.length} patch-checkpoint fault obligations, ${cycleDurableCases.leaseTransitionCases.length} valid and ${cycleDurableCases.invalidLeaseTransitionCases.length} hostile lease transitions, ${cycleDurableCases.validInterruptedHistoryCases?.length ?? 0} interrupted terminal/checkpoint folds, ${cycleDurableCases.inDoubtProjectionCases.length} in-doubt singleton cases, ${resolutionProtocol.cases.length} terminal in-doubt resolution cases, ${cycleDurableCases.untilDryFoldCases.length} global-seen convergence fold, ${cycleDurableCases.hardStopFoldCases.length} hard-stop folds, ${cycleDurableCases.invalidEventHistoryCases.length} hostile histories, ${cycleDurableCases.invalidCheckpointSemanticCases.length} hostile checkpoint folds, plus ${cycleDurableCases.validStandaloneEventSchemaCases.length} standalone phase-event shapes; all ${expectedD7Tests.length} D7-CYCLE-SPEC-024 expected-test groups are mapped against meta-valid schemas.\n`,
 );

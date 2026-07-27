@@ -1,0 +1,606 @@
+{
+  "schemaVersion": 1,
+  "id": "cycle-store-provider-v1alpha1",
+  "contractVersion": "cycle-store-provider/v1alpha1",
+  "descriptorSchema": "spec/cycle-store-provider.schema.json",
+  "hashDomains": {
+    "descriptor": "graph-engineering/cycle-store-provider-descriptor/v1alpha1\u0000",
+    "record": "graph-engineering/cycle-store-record/v1alpha1\u0000",
+    "operation": "graph-engineering/cycle-store-operation/v1alpha1\u0000"
+  },
+  "errorCodes": [
+    "GE_CYCLE_STORE_INVALID_ARGUMENT",
+    "GE_CYCLE_STORE_INVALID_CURSOR",
+    "GE_CYCLE_STORE_NOT_FOUND",
+    "GE_CYCLE_STORE_CONFLICT",
+    "GE_CYCLE_STORE_IDEMPOTENCY_CONFLICT",
+    "GE_CYCLE_STORE_LEASE_CONFLICT",
+    "GE_CYCLE_STORE_STALE_FENCE",
+    "GE_CYCLE_STORE_UNAVAILABLE",
+    "GE_CYCLE_STORE_CORRUPTION",
+    "GE_CYCLE_STORE_QUOTA_EXCEEDED",
+    "GE_CYCLE_STORE_PERMISSION_DENIED",
+    "GE_CYCLE_STORE_UNSUPPORTED_VERSION",
+    "GE_CYCLE_STORE_LEGAL_HOLD",
+    "GE_CYCLE_STORE_MIGRATION_LOCKED",
+    "GE_CYCLE_STORE_INTERNAL"
+  ],
+  "cases": [
+    {
+      "id": "descriptor-reference",
+      "category": "descriptor",
+      "polarity": "behavior",
+      "scenario": "descriptor-reference",
+      "expectOutcome": "accepted",
+      "expectCode": null,
+      "mutation": "read-only",
+      "assertion": "reference descriptor is closed content-addressed and process-local"
+    },
+    {
+      "id": "descriptor-durable-profile",
+      "category": "descriptor",
+      "polarity": "behavior",
+      "scenario": "descriptor-durable-profile",
+      "expectOutcome": "accepted",
+      "expectCode": null,
+      "mutation": "read-only",
+      "assertion": "stronger durable capabilities remain inside the closed vocabulary"
+    },
+    {
+      "id": "descriptor-smaller-limits",
+      "category": "descriptor",
+      "polarity": "behavior",
+      "scenario": "descriptor-smaller-limits",
+      "expectOutcome": "accepted",
+      "expectCode": null,
+      "mutation": "read-only",
+      "assertion": "a provider may truthfully advertise limits below contract ceilings"
+    },
+    {
+      "id": "schema-inspection",
+      "category": "descriptor",
+      "polarity": "behavior",
+      "scenario": "schema-inspection",
+      "expectOutcome": "accepted",
+      "expectCode": null,
+      "mutation": "read-only",
+      "assertion": "schema discovery binds compatibility descriptor identity and migration state"
+    },
+    {
+      "id": "descriptor-unknown-field",
+      "category": "descriptor",
+      "polarity": "attack",
+      "scenario": "descriptor-unknown-field",
+      "expectOutcome": "rejected",
+      "expectCode": "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "mutation": "none",
+      "assertion": "an unknown descriptor field fails before provider use"
+    },
+    {
+      "id": "descriptor-limit-overflow",
+      "category": "descriptor",
+      "polarity": "attack",
+      "scenario": "descriptor-limit-overflow",
+      "expectOutcome": "rejected",
+      "expectCode": "GE_CYCLE_STORE_QUOTA_EXCEEDED",
+      "mutation": "none",
+      "assertion": "an advertised limit above the contract ceiling fails closed"
+    },
+
+    {
+      "id": "empty-tail",
+      "category": "append",
+      "polarity": "behavior",
+      "scenario": "empty-tail",
+      "expectOutcome": "accepted",
+      "expectCode": null,
+      "mutation": "read-only",
+      "assertion": "a missing stream reports the exact empty tail"
+    },
+    {
+      "id": "append-single",
+      "category": "append",
+      "polarity": "behavior",
+      "scenario": "append-single",
+      "expectOutcome": "accepted",
+      "expectCode": null,
+      "mutation": "committed",
+      "assertion": "one validated record commits with an exact strong tail"
+    },
+    {
+      "id": "append-atomic-batch",
+      "category": "append",
+      "polarity": "behavior",
+      "scenario": "append-atomic-batch",
+      "expectOutcome": "accepted",
+      "expectCode": null,
+      "mutation": "committed",
+      "assertion": "a contiguous multi-record batch commits all records atomically"
+    },
+    {
+      "id": "append-exact-retry",
+      "category": "append",
+      "polarity": "behavior",
+      "scenario": "append-exact-retry",
+      "expectOutcome": "accepted",
+      "expectCode": null,
+      "mutation": "idempotent",
+      "assertion": "an exact operation retry returns the first canonical result"
+    },
+    {
+      "id": "append-commit-then-throw",
+      "category": "append",
+      "polarity": "behavior",
+      "scenario": "append-commit-then-throw",
+      "expectOutcome": "accepted",
+      "expectCode": null,
+      "mutation": "idempotent",
+      "assertion": "a lost acknowledgement recovers without a duplicate append"
+    },
+    {
+      "id": "append-cas-loss",
+      "category": "append",
+      "polarity": "attack",
+      "scenario": "append-cas-loss",
+      "expectOutcome": "rejected",
+      "expectCode": "GE_CYCLE_STORE_CONFLICT",
+      "mutation": "none",
+      "assertion": "a stale expected sequence loses compare-and-swap"
+    },
+    {
+      "id": "append-expected-hash-drift",
+      "category": "append",
+      "polarity": "attack",
+      "scenario": "append-expected-hash-drift",
+      "expectOutcome": "rejected",
+      "expectCode": "GE_CYCLE_STORE_CONFLICT",
+      "mutation": "none",
+      "assertion": "the expected sequence cannot be paired with a substituted tail hash"
+    },
+    {
+      "id": "append-broken-chain",
+      "category": "append",
+      "polarity": "attack",
+      "scenario": "append-broken-chain",
+      "expectOutcome": "rejected",
+      "expectCode": "GE_CYCLE_STORE_CONFLICT",
+      "mutation": "none",
+      "assertion": "a batch-local previous-hash discontinuity commits no prefix"
+    },
+    {
+      "id": "append-duplicate-record-id",
+      "category": "append",
+      "polarity": "attack",
+      "scenario": "append-duplicate-record-id",
+      "expectOutcome": "rejected",
+      "expectCode": "GE_CYCLE_STORE_CONFLICT",
+      "mutation": "none",
+      "assertion": "tenant-wide record identity cannot be indexed twice"
+    },
+    {
+      "id": "append-operation-request-drift",
+      "category": "append",
+      "polarity": "attack",
+      "scenario": "append-operation-request-drift",
+      "expectOutcome": "rejected",
+      "expectCode": "GE_CYCLE_STORE_IDEMPOTENCY_CONFLICT",
+      "mutation": "none",
+      "assertion": "one operation ID cannot name two canonical append requests"
+    },
+    {
+      "id": "append-operation-name-reuse",
+      "category": "append",
+      "polarity": "attack",
+      "scenario": "append-operation-name-reuse",
+      "expectOutcome": "rejected",
+      "expectCode": "GE_CYCLE_STORE_IDEMPOTENCY_CONFLICT",
+      "mutation": "none",
+      "assertion": "one operation ID cannot cross mutation operation classes"
+    },
+    {
+      "id": "append-count-overflow",
+      "category": "append",
+      "polarity": "attack",
+      "scenario": "append-count-overflow",
+      "expectOutcome": "rejected",
+      "expectCode": "GE_CYCLE_STORE_QUOTA_EXCEEDED",
+      "mutation": "none",
+      "assertion": "one-above maximum append count is rejected before mutation"
+    },
+
+    {
+      "id": "event-exact-traversal",
+      "category": "pagination",
+      "polarity": "behavior",
+      "scenario": "event-exact-traversal",
+      "expectOutcome": "accepted",
+      "expectCode": null,
+      "mutation": "read-only",
+      "assertion": "multi-page traversal yields every snapshot record exactly once"
+    },
+    {
+      "id": "event-append-during-scan",
+      "category": "pagination",
+      "polarity": "behavior",
+      "scenario": "event-append-during-scan",
+      "expectOutcome": "accepted",
+      "expectCode": null,
+      "mutation": "mixed",
+      "assertion": "a later append is excluded from an existing snapshot cursor"
+    },
+    {
+      "id": "event-beyond-tail",
+      "category": "pagination",
+      "polarity": "behavior",
+      "scenario": "event-beyond-tail",
+      "expectOutcome": "accepted",
+      "expectCode": null,
+      "mutation": "read-only",
+      "assertion": "fromSequence beyond the snapshot tail returns one empty final page"
+    },
+    {
+      "id": "event-missing-stream",
+      "category": "pagination",
+      "polarity": "behavior",
+      "scenario": "event-missing-stream",
+      "expectOutcome": "accepted",
+      "expectCode": null,
+      "mutation": "read-only",
+      "assertion": "a missing stream page preserves an explicit nonexistence tail"
+    },
+    {
+      "id": "event-cursor-tenant-scope",
+      "category": "pagination",
+      "polarity": "attack",
+      "scenario": "event-cursor-tenant-scope",
+      "expectOutcome": "rejected",
+      "expectCode": "GE_CYCLE_STORE_INVALID_CURSOR",
+      "mutation": "none",
+      "assertion": "an event cursor cannot cross tenant or authorization scope"
+    },
+    {
+      "id": "event-cursor-stream-scope",
+      "category": "pagination",
+      "polarity": "attack",
+      "scenario": "event-cursor-stream-scope",
+      "expectOutcome": "rejected",
+      "expectCode": "GE_CYCLE_STORE_INVALID_CURSOR",
+      "mutation": "none",
+      "assertion": "an event cursor cannot be replayed against another stream"
+    },
+    {
+      "id": "event-cursor-page-size",
+      "category": "pagination",
+      "polarity": "attack",
+      "scenario": "event-cursor-page-size",
+      "expectOutcome": "rejected",
+      "expectCode": "GE_CYCLE_STORE_INVALID_CURSOR",
+      "mutation": "none",
+      "assertion": "an event cursor cannot be combined with a changed page size"
+    },
+    {
+      "id": "event-cursor-tamper",
+      "category": "pagination",
+      "polarity": "attack",
+      "scenario": "event-cursor-tamper",
+      "expectOutcome": "rejected",
+      "expectCode": "GE_CYCLE_STORE_INVALID_CURSOR",
+      "mutation": "none",
+      "assertion": "unknown malformed and replayed cursor tokens fail identically"
+    },
+
+    {
+      "id": "checkpoint-save-load",
+      "category": "checkpoint",
+      "polarity": "behavior",
+      "scenario": "checkpoint-save-load",
+      "expectOutcome": "accepted",
+      "expectCode": null,
+      "mutation": "committed",
+      "assertion": "a checkpoint round trip preserves detached content identity"
+    },
+    {
+      "id": "checkpoint-list-order",
+      "category": "checkpoint",
+      "polarity": "behavior",
+      "scenario": "checkpoint-list-order",
+      "expectOutcome": "accepted",
+      "expectCode": null,
+      "mutation": "committed",
+      "assertion": "checkpoint listing uses deterministic sequence time and ID ordering"
+    },
+    {
+      "id": "checkpoint-delete",
+      "category": "checkpoint",
+      "polarity": "behavior",
+      "scenario": "checkpoint-delete",
+      "expectOutcome": "accepted",
+      "expectCode": null,
+      "mutation": "committed",
+      "assertion": "checkpoint deletion never changes authoritative event history"
+    },
+    {
+      "id": "checkpoint-exact-retry",
+      "category": "checkpoint",
+      "polarity": "behavior",
+      "scenario": "checkpoint-exact-retry",
+      "expectOutcome": "accepted",
+      "expectCode": null,
+      "mutation": "idempotent",
+      "assertion": "an exact checkpoint save retry returns the original summary"
+    },
+    {
+      "id": "checkpoint-stale-tail",
+      "category": "checkpoint",
+      "polarity": "attack",
+      "scenario": "checkpoint-stale-tail",
+      "expectOutcome": "rejected",
+      "expectCode": "GE_CYCLE_STORE_CONFLICT",
+      "mutation": "none",
+      "assertion": "a checkpoint behind the authoritative tail cannot commit"
+    },
+    {
+      "id": "checkpoint-content-hash-drift",
+      "category": "checkpoint",
+      "polarity": "attack",
+      "scenario": "checkpoint-content-hash-drift",
+      "expectOutcome": "rejected",
+      "expectCode": "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "mutation": "none",
+      "assertion": "declared checkpoint content identity must match canonical bytes"
+    },
+    {
+      "id": "checkpoint-immutable-id",
+      "category": "checkpoint",
+      "polarity": "attack",
+      "scenario": "checkpoint-immutable-id",
+      "expectOutcome": "rejected",
+      "expectCode": "GE_CYCLE_STORE_CONFLICT",
+      "mutation": "none",
+      "assertion": "checkpoint identity remains immutable until an explicit delete"
+    },
+    {
+      "id": "checkpoint-corrupt-load",
+      "category": "checkpoint",
+      "polarity": "attack",
+      "scenario": "checkpoint-corrupt-load",
+      "expectOutcome": "rejected",
+      "expectCode": "GE_CYCLE_STORE_CORRUPTION",
+      "mutation": "none",
+      "assertion": "corrupt checkpoint bytes trigger fallback rather than silent repair"
+    },
+
+    {
+      "id": "lease-first-acquire",
+      "category": "lease",
+      "polarity": "behavior",
+      "scenario": "lease-first-acquire",
+      "expectOutcome": "accepted",
+      "expectCode": null,
+      "mutation": "committed",
+      "assertion": "the first lease acquisition starts positive epoch and fence values"
+    },
+    {
+      "id": "lease-renew",
+      "category": "lease",
+      "polarity": "behavior",
+      "scenario": "lease-renew",
+      "expectOutcome": "accepted",
+      "expectCode": null,
+      "mutation": "committed",
+      "assertion": "lease renewal preserves identity and strictly extends provider expiry"
+    },
+    {
+      "id": "lease-release-reacquire",
+      "category": "lease",
+      "polarity": "behavior",
+      "scenario": "lease-release-reacquire",
+      "expectOutcome": "accepted",
+      "expectCode": null,
+      "mutation": "committed",
+      "assertion": "release then reacquire strictly increments epoch and fence"
+    },
+    {
+      "id": "lease-expired-takeover",
+      "category": "lease",
+      "polarity": "behavior",
+      "scenario": "lease-expired-takeover",
+      "expectOutcome": "accepted",
+      "expectCode": null,
+      "mutation": "committed",
+      "assertion": "expired ownership can be taken over only with the prior fence"
+    },
+    {
+      "id": "lease-exact-retry",
+      "category": "lease",
+      "polarity": "behavior",
+      "scenario": "lease-exact-retry",
+      "expectOutcome": "accepted",
+      "expectCode": null,
+      "mutation": "idempotent",
+      "assertion": "an exact acquisition retry survives later clock movement"
+    },
+    {
+      "id": "lease-active-owner-conflict",
+      "category": "lease",
+      "polarity": "attack",
+      "scenario": "lease-active-owner-conflict",
+      "expectOutcome": "rejected",
+      "expectCode": "GE_CYCLE_STORE_LEASE_CONFLICT",
+      "mutation": "none",
+      "assertion": "a second acquire cannot displace a live owner"
+    },
+    {
+      "id": "lease-early-takeover",
+      "category": "lease",
+      "polarity": "attack",
+      "scenario": "lease-early-takeover",
+      "expectOutcome": "rejected",
+      "expectCode": "GE_CYCLE_STORE_LEASE_CONFLICT",
+      "mutation": "none",
+      "assertion": "takeover before provider expiry fails without mutation"
+    },
+    {
+      "id": "lease-stale-renew",
+      "category": "lease",
+      "polarity": "attack",
+      "scenario": "lease-stale-renew",
+      "expectOutcome": "rejected",
+      "expectCode": "GE_CYCLE_STORE_STALE_FENCE",
+      "mutation": "none",
+      "assertion": "a substituted holder or fence cannot renew ownership"
+    },
+    {
+      "id": "lease-stale-release",
+      "category": "lease",
+      "polarity": "attack",
+      "scenario": "lease-stale-release",
+      "expectOutcome": "rejected",
+      "expectCode": "GE_CYCLE_STORE_STALE_FENCE",
+      "mutation": "none",
+      "assertion": "an expired or substituted lease cannot release ownership"
+    },
+    {
+      "id": "lease-stale-write",
+      "category": "lease",
+      "polarity": "attack",
+      "scenario": "lease-stale-write",
+      "expectOutcome": "rejected",
+      "expectCode": "GE_CYCLE_STORE_STALE_FENCE",
+      "mutation": "none",
+      "assertion": "an unfenced write is forbidden after ownership begins"
+    },
+    {
+      "id": "lease-expired-write",
+      "category": "lease",
+      "polarity": "attack",
+      "scenario": "lease-expired-write",
+      "expectOutcome": "rejected",
+      "expectCode": "GE_CYCLE_STORE_STALE_FENCE",
+      "mutation": "none",
+      "assertion": "an exact but expired lease binding cannot authorize a write"
+    },
+    {
+      "id": "lease-fence-overflow",
+      "category": "lease",
+      "polarity": "attack",
+      "scenario": "lease-fence-overflow",
+      "expectOutcome": "rejected",
+      "expectCode": "GE_CYCLE_STORE_QUOTA_EXCEEDED",
+      "mutation": "none",
+      "assertion": "epoch or fencing-token overflow fails before acquisition"
+    },
+
+    {
+      "id": "tenant-same-id-isolation",
+      "category": "tenant-error",
+      "polarity": "behavior",
+      "scenario": "tenant-same-id-isolation",
+      "expectOutcome": "accepted",
+      "expectCode": null,
+      "mutation": "committed",
+      "assertion": "the same stream and record labels remain isolated across tenants"
+    },
+    {
+      "id": "safe-error-envelope",
+      "category": "tenant-error",
+      "polarity": "behavior",
+      "scenario": "safe-error-envelope",
+      "expectOutcome": "verified",
+      "expectCode": null,
+      "mutation": "none",
+      "assertion": "typed unavailable errors serialize without payload cause or stack leakage"
+    },
+    {
+      "id": "authorization-denied-lookup",
+      "category": "tenant-error",
+      "polarity": "attack",
+      "scenario": "authorization-denied-lookup",
+      "expectOutcome": "rejected",
+      "expectCode": "GE_CYCLE_STORE_PERMISSION_DENIED",
+      "mutation": "none",
+      "assertion": "authorization denial occurs before existence can be disclosed"
+    },
+    {
+      "id": "injected-error-classification",
+      "category": "tenant-error",
+      "polarity": "attack",
+      "scenario": "injected-error-classification",
+      "expectOutcome": "rejected",
+      "expectCode": "GE_CYCLE_STORE_QUOTA_EXCEEDED",
+      "mutation": "none",
+      "assertion": "unavailable quota and corruption injections retain exact typed classes"
+    },
+
+    {
+      "id": "governance-hold-declarations",
+      "category": "governance",
+      "polarity": "behavior",
+      "scenario": "governance-hold-declarations",
+      "expectOutcome": "accepted",
+      "expectCode": null,
+      "mutation": "committed",
+      "assertion": "legal hold and lossless logical compaction declarations are inspectable"
+    },
+    {
+      "id": "migration-retry-takeover",
+      "category": "governance",
+      "polarity": "behavior",
+      "scenario": "migration-retry-takeover",
+      "expectOutcome": "accepted",
+      "expectCode": null,
+      "mutation": "idempotent",
+      "assertion": "migration exact retry and expired takeover preserve monotonic fencing"
+    },
+    {
+      "id": "migration-live-lock-conflict",
+      "category": "governance",
+      "polarity": "attack",
+      "scenario": "migration-live-lock-conflict",
+      "expectOutcome": "rejected",
+      "expectCode": "GE_CYCLE_STORE_MIGRATION_LOCKED",
+      "mutation": "none",
+      "assertion": "a second live migration lock cannot be acquired or taken over"
+    },
+    {
+      "id": "migration-blocks-online-writer",
+      "category": "governance",
+      "polarity": "attack",
+      "scenario": "migration-blocks-online-writer",
+      "expectOutcome": "rejected",
+      "expectCode": "GE_CYCLE_STORE_MIGRATION_LOCKED",
+      "mutation": "none",
+      "assertion": "an incompatible active migration blocks a new online append"
+    }
+  ],
+  "requiredAssertions": [
+    "native-runtimes-derive-descriptor-record-and-operation-hashes-independently",
+    "all-cases-use-fresh-deterministic-provider-state-and-provider-owned-time",
+    "every-attack-compares-exact-code-operation-retryability-and-zero-unintended-mutation",
+    "every-behavior-compares-canonical-result-tail-checkpoint-lease-and-fence-state",
+    "cursor-snapshots-are-bounded-single-use-scope-bound-and-exclude-later-appends",
+    "checkpoint-results-never-become-authoritative-event-history",
+    "idempotency-ledger-lookup-precedes-current-cas-clock-fence-and-migration-validation",
+    "lease-and-migration-takeovers-strictly-increase-epoch-and-fencing-token",
+    "tenant-authorization-and-error-observability-never-leak-payload-sentinels",
+    "reference-model-reports-are-structurally-deep-compared-not-count-compared",
+    "scenario-category-polarity-error-and-assertion-vocabularies-are-closed",
+    "generic-exceptions-never-count-as-expected-provider-rejections"
+  ],
+  "expect": {
+    "caseCount": 54,
+    "attackCaseCount": 28,
+    "behaviorCaseCount": 26,
+    "categoryCounts": {
+      "append": 12,
+      "checkpoint": 8,
+      "descriptor": 6,
+      "governance": 4,
+      "lease": 12,
+      "pagination": 8,
+      "tenant-error": 4
+    },
+    "casesCanonicalUtf8Bytes": 14288,
+    "casesSha256": "4c9e40becaba72eed5ae06f95d016d0e7e08806c4e915bf2b0ae16eb16c0b725"
+  }
+}

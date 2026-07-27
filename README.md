@@ -168,6 +168,7 @@ python3 scripts/check-python-artifacts.py
 - [Support](SUPPORT.md)
 - [Runtime semantics](spec/runtime-semantics.md)
 - [Persistence semantics](spec/persistence-semantics.md)
+- [CycleStore provider semantics](spec/cycle-store-provider-semantics.md)
 - [Durable recovery semantics](spec/durable-recovery-semantics.md)
 - [Bounded pipeline semantics](spec/pipeline-semantics.md)
 - [Primitive semantics](spec/primitives-semantics.md)

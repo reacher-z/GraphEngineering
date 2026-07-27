@@ -641,6 +641,48 @@ the committed prefix, checkpoint durability, stale-version/stale-fence zero
 writes, exactly one target event, one safe handler dispatch, read-only replay,
 and terminal-resume zero writes.
 
+### Provider-neutral CycleStore contract
+
+Production adapters implement `CycleStoreProvider`. The independent
+`MemoryCycleStoreProvider` is a deterministic executable oracle for exact tail
+hash CAS, tenant-scoped operation idempotency, snapshot pagination, disposable
+checkpoints, provider-clock leases, fencing, governance, and migration
+exclusion.
+
+```python
+from graph_engineering import MemoryCycleStoreProvider, create_cycle_store_record
+
+provider = MemoryCycleStoreProvider()  # process-local, non-durable oracle
+record = create_cycle_store_record(
+    record_id="controller-created-0",
+    sequence=0,
+    previous_record_hash=None,
+    value=protected_event_carrier,
+)
+committed = await provider.append(
+    {
+        "context": {
+            "tenantId": "tenant-a",
+            "principalHash": principal_hash,
+            "authorizationHash": authorization_hash,
+            "operationId": "controller-create-op",
+        },
+        "streamId": "controller.events",
+        "expectedTail": {"exists": False, "sequence": -1, "recordHash": None},
+        "lease": None,
+        "records": [record],
+    }
+)
+```
+
+The provider captures before its first await and returns detached values. Exact
+mutation retries are answered before current CAS, lease-expiry, or migration
+checks. `MemoryCycleStoreProvider` truthfully declares process-local durability
+and no distributed fencing; SQLite/PostgreSQL claims require separate crash,
+transaction, takeover, failover, backup, and restore evidence. The normative
+[CycleStore provider semantics](../spec/cycle-store-provider-semantics.md)
+describe the adapter rules and 54-case cross-language gate.
+
 `build_cycle_operation_interruption_matrix()` derives the 25-row H03B public
 operation lattice (pause 6, resume 6, replay 4, fork 9). The native join executes
 every boundary and compares exact stream bytes and record hashes, appended
@@ -700,7 +742,7 @@ event-sourced durable continuation, plus the separate bounded-cycle/GraphPatch
 surface described above. Edge `map` and `condition`, runtime JSON Schema
 validation, streams, checkpoint acceleration, dynamic mutation of the ordinary
 DAG scheduler, production cycle stores, distributed leases, non-idempotent
-recovery approval, and provider adapters remain follow-up work. Accepted
+recovery approval, and production provider adapters remain follow-up work. Accepted
 non-integer finite binary64 Graph IR values now
 have stable TypeScript/Python bytes and hashes through ECMAScript's
 shortest-round-trip number serialization, including `-0` normalization and the

@@ -37,6 +37,12 @@ migration note.
   now resolve complete ancestry; a 20-case cross-language campaign covers
   grandchild, sibling and distinct-prefix behavior plus 16 rehashed hostile
   missing/duplicate/cyclic/corrupt/boundary cases.
+- Provider-neutral `cycle-store-provider/v1alpha1` contracts and deterministic
+  TypeScript/Python memory oracles. The closed 54-case differential campaign
+  proves exact-tail append CAS, operation-ledger ambiguity recovery, snapshot
+  pagination, disposable checkpoints, provider-clock lease fencing, tenant
+  authorization, safe errors, legal holds, and migration exclusion while
+  retaining explicit nonclaims for durability and distributed fencing.
 
 - Event-sourced durable start and resume APIs in TypeScript and Python. Runs bind
   graph, original input, and caller-supplied implementation identity; node

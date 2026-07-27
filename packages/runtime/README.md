@@ -328,6 +328,51 @@ overrides a complete event fold. `MemoryCycleControllerEventStore` and
 `MemoryCycleControllerCheckpointStore` are deterministic local implementations,
 not distributed lease providers.
 
+## Provider-neutral CycleStore contract
+
+Durable adapters target `CycleStoreProvider`, not the process-local controller
+store maps. The contract separates controller event semantics from storage
+atomicity and fixes exact expected-tail hash CAS, tenant-scoped mutation
+idempotency, snapshot cursors, cache-only checkpoints, provider-clock leases,
+monotonic fencing, legal holds, and exclusive migration locking.
+
+```ts
+import {
+  createCycleStoreRecord,
+  MemoryCycleStoreProvider,
+} from "@graph-engineering/runtime";
+
+const provider = new MemoryCycleStoreProvider(); // deterministic oracle only
+const record = createCycleStoreRecord({
+  recordId: "controller-created-0",
+  sequence: 0,
+  previousRecordHash: null,
+  value: protectedEventCarrier,
+});
+
+const committed = await provider.append({
+  context: {
+    tenantId: "tenant-a",
+    principalHash,
+    authorizationHash,
+    operationId: "controller-create-op",
+  },
+  streamId: "controller.events",
+  expectedTail: { exists: false, sequence: -1, recordHash: null },
+  lease: null,
+  records: [record],
+});
+```
+
+An exact operation retry returns `committed` even after a lost acknowledgement
+or later state change. Reusing the operation ID with another byte or operation
+fails. Once lease ownership begins, append and checkpoint save require the
+exact active unexpired fence. `MemoryCycleStoreProvider` declares
+process-local durability and `distributedFencing: false`; it is executable
+adapter guidance, not production evidence. See the complete
+[CycleStore provider semantics](../../spec/cycle-store-provider-semantics.md)
+and run `corepack pnpm test:conformance` for the 54-case TypeScript/Python join.
+
 All four public operations accept cooperative cancellation (`signal` in the
 run options, including replay's fourth options argument and pause options).
 Cancellation before an operation's durable commit returns

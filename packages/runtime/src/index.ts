@@ -87,6 +87,30 @@ export {
   type CycleLineageManifestLimits,
   type CycleLineageManifestStream,
 } from "./cycle-lineage.js";
+export {
+  CYCLE_STORE_CURSOR_TTL_MS,
+  CYCLE_STORE_OPERATION_DOMAIN,
+  CYCLE_STORE_PROVIDER_API_VERSION,
+  CYCLE_STORE_PROVIDER_CONTRACT_VERSION,
+  CYCLE_STORE_PROVIDER_DESCRIPTOR_DOMAIN,
+  CYCLE_STORE_PROVIDER_ERROR_CODES,
+  CYCLE_STORE_PROVIDER_OPERATIONS,
+  CYCLE_STORE_RECORD_DOMAIN,
+  MAX_CYCLE_STORE_APPEND_BYTES,
+  MAX_CYCLE_STORE_APPEND_RECORDS,
+  MAX_CYCLE_STORE_CHECKPOINT_BYTES,
+  MAX_CYCLE_STORE_CURSOR_COUNT,
+  MAX_CYCLE_STORE_LEASE_TTL_MS,
+  MAX_CYCLE_STORE_PAGE_SIZE,
+  MAX_CYCLE_STORE_RECORD_BYTES,
+  CycleStoreProviderError,
+  MemoryCycleStoreProvider,
+  createCycleStoreCheckpoint,
+  createCycleStoreRecord,
+  createReferenceCycleStoreProviderDescriptor,
+  validateCycleStoreProviderDescriptor,
+} from "./cycle-store-provider.js";
+export type * from "./cycle-store-provider.js";
 export { NativeGraphPatchApplier } from "./graph-patch.js";
 export {
   CYCLE_ACTIVITY_INTERRUPTION_TRIGGERS,

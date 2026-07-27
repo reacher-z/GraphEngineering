@@ -153,6 +153,7 @@ with zipfile.ZipFile(wheel) as archive:
         "graph_engineering/cli.py",
         "graph_engineering/component_identity.py",
         "graph_engineering/cycle_lineage.py",
+        "graph_engineering/cycle_store_provider.py",
         QUICKSTART_ARCHIVE_PATH,
         "graph_engineering/pipeline.py",
         "graph_engineering/py.typed",
@@ -234,6 +235,7 @@ with tarfile.open(sdist, mode="r:gz") as archive:
         f"{prefix}src/graph_engineering/cli.py",
         f"{prefix}src/graph_engineering/component_identity.py",
         f"{prefix}src/graph_engineering/cycle_lineage.py",
+        f"{prefix}src/graph_engineering/cycle_store_provider.py",
         f"{prefix}src/{QUICKSTART_ARCHIVE_PATH}",
         f"{prefix}src/graph_engineering/pipeline.py",
         f"{prefix}src/graph_engineering/py.typed",
@@ -257,12 +259,28 @@ import sys
 from pathlib import Path
 
 from graph_engineering import (
+    create_cycle_store_record,
     create_compiled_graph_identity,
+    create_reference_cycle_store_provider_descriptor,
     graph_builder,
     parse_graph_source,
     try_compile_graph,
     validate_strict_typed_ports,
     verify_compiled_graph_identity,
+)
+
+provider_descriptor = create_reference_cycle_store_provider_descriptor()
+assert provider_descriptor["descriptorHash"] == (
+    "8a0caf1fd5c58a94ae15a627098396a033e7026ead96756ea8e7ad6998b6de4c"
+)
+provider_record = create_cycle_store_record(
+    record_id="artifact-probe",
+    sequence=0,
+    previous_record_hash=None,
+    value={"artifact": "installed"},
+)
+assert provider_record["recordHash"] == (
+    "11b1de69a0a7f5dc96c5e6653ca027733b06c29e0eb1c94ae488adce97e2e060"
 )
 
 document = parse_graph_source(Path(sys.argv[1]).read_bytes(), format="yaml")

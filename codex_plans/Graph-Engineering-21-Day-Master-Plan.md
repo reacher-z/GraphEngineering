@@ -4662,3 +4662,506 @@ must not encode memory-store implementation details as the provider contract.
 Until additional agent slots recover, the main agent executes these workstreams
 sequentially while preserving their independent artifacts and comparison
 boundaries; quota failure does not justify weakening acceptance.
+
+## 31.29 D7-S01 provider-neutral CycleStore contract and conformance closure
+
+This section is appended after the immutable H06 evidence push. It does not
+rewrite, narrow, reorder, or mark complete any earlier plan item. It converts
+the production-store prerequisite in section 31.10 into an executable contract
+that SQLite and PostgreSQL adapters must satisfy without inheriting
+process-local memory-store assumptions.
+
+### 31.29.1 Outcome and explicit non-claims
+
+S01 MUST publish a closed, versioned provider contract with native TypeScript
+and Python reference models and a shared adversarial conformance campaign. It
+MUST settle the meanings of append CAS, immutable record bytes, snapshot
+pagination, checkpoint caching, mutation idempotency, lease fencing, tenant
+authorization, provider limits, schema discovery, migration exclusion,
+retention declarations, backup declarations, error envelopes, and safe
+observability before a durable adapter is accepted.
+
+S01 does **not** claim:
+
+- that the memory reference model is crash durable;
+- that its process-local lock is distributed fencing;
+- that SQLite supports multi-host ownership;
+- that PostgreSQL migrations, backups, or failover have run;
+- that controller code has switched to a production adapter;
+- that checkpoints are authoritative;
+- that D9 protected payloads or key management are complete;
+- that retention declarations prove an operational archive or legal-hold
+  drill;
+- that release readiness or project popularity targets are complete; or
+- that generic success from an adapter which throws unclassified exceptions is
+  evidence.
+
+The reference model is an executable oracle. Production claims remain blocked
+on S02/S03 native adapters and their database/process-loss evidence.
+
+### 31.29.2 Owned paths and shared-work exclusions
+
+S01 owns these new or directly integrated paths:
+
+- `packages/runtime/src/cycle-store-provider.ts`;
+- `packages/runtime/test/cycle-store-provider.test.ts`;
+- the matching export block in `packages/runtime/src/index.ts`;
+- `python/src/graph_engineering/cycle_store_provider.py`;
+- `python/tests/test_cycle_store_provider.py`;
+- the matching imports and `__all__` entries in
+  `python/src/graph_engineering/__init__.py`;
+- `spec/cycle-store-provider.schema.json`;
+- `spec/cycle-store-provider-semantics.md`;
+- `spec/conformance/cycle-store-provider.case.json`;
+- `tools/conformance/cycle_store_provider.mjs`;
+- `tools/conformance/python_cycle_store_provider_report.py`;
+- the bounded integration in `tools/conformance/run.mjs`;
+- the bounded integration in `scripts/validate-fixtures.mjs`;
+- root/runtime/Python/spec documentation and changelog entries;
+- a new daily log entry or append to the current day's owned log;
+- this append-only plan section; and
+- a later immutable S01 evidence record.
+
+S01 MUST NOT absorb, stage, rename, or normalize the unrelated D4 trace,
+D9 redaction/protected carrier, D10 budget/router, subgraph-edge, security-plan,
+task-registry, or progress-scanner work currently present in the shared tree.
+Any unavoidable overlap in a shared integration file MUST be inspected and
+staged by exact path and exact hunk ownership.
+
+### 31.29.3 Contract identity and descriptor
+
+The portable descriptor MUST be a closed object with:
+
+1. `apiVersion` fixed to
+   `graphengineering.reacher-z.github.io/cycle-store-providers/v1alpha1`;
+2. `kind` fixed to `CycleStoreProviderDescriptor`;
+3. `contractVersion` fixed to `cycle-store-provider/v1alpha1`;
+4. a safe `providerId`;
+5. an exact positive integer `schemaVersion`;
+6. a compatibility window for minimum/maximum reader and writer versions;
+7. fixed resource limits;
+8. fixed online guarantees;
+9. closed provider capability declarations;
+10. payload-protection and observability declarations;
+11. migration-lock and governance declarations; and
+12. a domain-separated descriptor hash.
+
+The reference descriptor MUST identify itself as process-local and
+non-production-durable. The contract MUST allow later durable providers to
+declare stronger capabilities, but a provider cannot claim a guarantee outside
+the closed vocabulary. Unknown fields and unknown enum values fail before any
+provider operation.
+
+The contract-level fixed limits are initially:
+
+- maximum append records per atomic batch: 64;
+- maximum canonical bytes per record: 1,048,576;
+- maximum canonical bytes per append batch: 8,388,608;
+- maximum page size: 256 records;
+- maximum checkpoint canonical bytes: 16,777,216;
+- maximum lease TTL: 86,400,000 milliseconds;
+- maximum safe sequence, epoch, fence, and schema integer:
+  9,007,199,254,740,991; and
+- maximum identifier length: 128 ASCII-safe characters unless a narrower
+  existing controller contract applies.
+
+Providers MAY advertise smaller operational limits but MUST never accept a
+request above their advertised bound or advertise a value above the contract
+ceiling. Limit refusal uses the exact quota or invalid-argument code specified
+below and performs zero mutation.
+
+### 31.29.4 Provider record and tail model
+
+The provider stores a closed record carrier rather than interpreting arbitrary
+controller business semantics. Every record MUST bind:
+
+- stable record/event identity;
+- exact nonnegative sequence;
+- previous record hash, or `null` only at sequence zero;
+- application record hash;
+- canonical value hash;
+- immutable portable JSON value; and
+- exact canonical byte length.
+
+The provider MUST detach caller-owned values before awaiting or committing.
+After append, caller mutation cannot change any read, hash, cursor, checkpoint,
+backup, or metric. A read returns detached values and cannot expose mutable
+provider state.
+
+An empty stream tail is exactly `{ sequence: -1, recordHash: null }`. A nonempty
+tail is exactly the committed final sequence/hash pair. Tail reads used for
+ownership transfer are strongly consistent and cannot come from an eventually
+consistent replica.
+
+### 31.29.5 Atomic append and operation idempotency
+
+`append` MUST accept:
+
+- authorization context and tenant identity;
+- one globally stable mutation `operationId` within that tenant;
+- stream identity;
+- exact expected tail sequence and expected tail hash;
+- an exact active lease binding when the stream has entered fenced ownership;
+  and
+- one to 64 contiguous records.
+
+Validation order is normative:
+
+1. capture and close the request;
+2. validate contract/schema version and limits;
+3. authorize operation and tenant;
+4. consult the mutation idempotency ledger;
+5. validate stream/tail and active fence;
+6. validate every record's canonical bytes, value hash, sequence, identity,
+   previous hash, and batch-local chain;
+7. commit every record plus the idempotency outcome atomically; and
+8. return the new tail.
+
+No prefix may commit. An exact repeated operation ID with byte-identical
+canonical request returns the first canonical result even when the stream has
+advanced, the lease later expired, or the original acknowledgement was lost.
+Reuse of the operation ID with any changed operation name or request byte is an
+idempotency conflict and performs zero mutation. The idempotency check precedes
+ordinary CAS so commit-then-throw recovery is possible.
+
+Record IDs MUST be unique within a tenant. A record cannot be indexed under two
+streams. Reusing a record ID, breaking sequence/previous-hash continuity,
+supplying the wrong expected hash, or changing committed bytes fails closed.
+
+### 31.29.6 Exact snapshot pagination
+
+Event reads MUST expose bounded pages, not an unbounded provider-specific
+iterator. The initial request names tenant, stream, `fromSequence`, and page
+size. The first response fixes a snapshot tail. A continuation cursor MUST be
+opaque, integrity protected, single-contract-version, and bound to:
+
+- tenant and authorization scope;
+- stream;
+- next sequence;
+- snapshot tail sequence and record hash;
+- provider/schema version; and
+- cursor expiry or provider-retained cursor lifetime policy.
+
+Continuation pages MUST neither skip nor duplicate a record. Appends after the
+first page are excluded from that cursor's snapshot and appear only in a new
+scan. A cursor cannot be combined with a new `fromSequence`, page size, tenant,
+stream, principal, or provider version. Unknown, expired, malformed, replayed
+under another scope, or integrity-drifted cursors use the exact invalid-cursor
+code. Cursor errors perform zero reads beyond metadata lookup and leak no
+record payload.
+
+An initial `fromSequence` beyond the fixed tail returns one empty final page,
+not an infinite cursor or a fabricated not-found record. A missing stream is
+distinguished from an existing empty stream by the tail response.
+
+### 31.29.7 Checkpoints remain disposable caches
+
+Checkpoint operations MUST include save, load, list, and delete. A checkpoint
+binds tenant, scope, checkpoint ID, stream, exact event tail sequence/hash,
+content hash, canonical byte length, created-at value, and portable JSON body.
+
+Checkpoint save MUST:
+
+- be an idempotent mutation with an operation ID;
+- require the exact current event tail and active lease binding when fenced;
+- reject a checkpoint whose declared content hash or byte length drifts;
+- reject a checkpoint ahead of, behind, or bound to another stream tail;
+- keep one checkpoint ID immutable unless it is first deleted; and
+- commit no event record.
+
+Checkpoint list ordering is deterministic: descending bound sequence, then
+descending creation timestamp, then checkpoint ID as the final bytewise tie
+breaker. Listing is snapshot-paginated under the same no-skip/no-duplicate
+rules as events.
+
+Delete is idempotent, requires the expected content hash when the checkpoint
+exists, and never deletes events. Missing checkpoints return a closed absent
+result. Corrupt checkpoint bytes return the corruption code; controller logic
+MUST fall back to authoritative event folding. A provider MUST NOT silently
+repair, reinterpret, or promote a checkpoint to authoritative state.
+
+### 31.29.8 Lease lifecycle and fencing
+
+The provider owns the authoritative clock used for leases. Callers request a
+bounded TTL; they do not submit trusted acquisition or expiry timestamps.
+
+Lease operations MUST include acquire, renew, release, inspect, and takeover.
+The closed lease identity binds tenant, stream, lease ID, holder ID, epoch,
+fencing token, provider acquisition time, and provider expiry time.
+
+Rules:
+
+- the first successful acquisition starts epoch/fence at a positive value;
+- every later successful acquisition or takeover strictly increases both;
+- renew preserves lease ID, holder, epoch, and fence while strictly extending
+  expiry;
+- release requires the exact active identity and retains the last epoch/fence;
+- acquisition while another unexpired lease is active is a lease conflict;
+- takeover before expiry is a lease conflict;
+- takeover after expiry still requires the caller's expected prior fence;
+- a stale or substituted lease/fence is `GE_CYCLE_STORE_STALE_FENCE`;
+- append and checkpoint save after ownership begins require the exact active,
+  unexpired lease identity;
+- expiry or release blocks writes until a new higher fence is acquired;
+- exact mutation retry is resolved from the idempotency ledger before current
+  expiry/fence checks; and
+- epoch/fence overflow fails without mutation.
+
+The process-local reference model exercises these semantics but declares
+`distributedFencing: false`. Only a database-enforced implementation may later
+declare true distributed fencing.
+
+### 31.29.9 Closed error taxonomy
+
+Every provider failure MUST be a serializable `CycleStoreProviderError` with
+exact name, code, operation, retryable boolean, safe message, and closed details.
+The v1alpha1 codes are:
+
+- `GE_CYCLE_STORE_INVALID_ARGUMENT`;
+- `GE_CYCLE_STORE_INVALID_CURSOR`;
+- `GE_CYCLE_STORE_NOT_FOUND`;
+- `GE_CYCLE_STORE_CONFLICT`;
+- `GE_CYCLE_STORE_IDEMPOTENCY_CONFLICT`;
+- `GE_CYCLE_STORE_LEASE_CONFLICT`;
+- `GE_CYCLE_STORE_STALE_FENCE`;
+- `GE_CYCLE_STORE_UNAVAILABLE`;
+- `GE_CYCLE_STORE_CORRUPTION`;
+- `GE_CYCLE_STORE_QUOTA_EXCEEDED`;
+- `GE_CYCLE_STORE_PERMISSION_DENIED`;
+- `GE_CYCLE_STORE_UNSUPPORTED_VERSION`;
+- `GE_CYCLE_STORE_LEGAL_HOLD`;
+- `GE_CYCLE_STORE_MIGRATION_LOCKED`; and
+- `GE_CYCLE_STORE_INTERNAL` only as a last-resort boundary translation which
+  cannot count as a successful expected conformance outcome.
+
+Conflict, permission, corruption, quota, version, lease, and cursor cases MUST
+never pass because an adapter throws a generic exception. Conformance compares
+exact code, operation, retryability, safe detail keys, and zero-mutation proof.
+Messages and details MUST omit record values, checkpoint bodies, authorization
+secrets, encryption material, and raw database errors.
+
+### 31.29.10 Tenant, authorization, protection, and observability
+
+Every online/admin request is tenant scoped and carries a principal hash plus a
+policy/authorization snapshot hash. Providers invoke an authorization hook
+before state lookup that could reveal existence. The same stream/checkpoint ID
+MAY exist independently in separate tenants. A denied actor cannot distinguish
+missing from existing protected state through code, details, timing class, or
+metrics exposed to that actor.
+
+The provider contract stores already-classified portable carriers. It MUST
+declare whether payload protection is external, provider-managed, or absent.
+S01's reference model declares external/none-for-tests and never claims D9
+completion. Durable providers must integrate protected carriers before writing
+classified raw payloads and must not leak them through errors, tracing, query
+logs, metrics labels, or backup metadata.
+
+Observability is restricted to bounded safe fields: operation class, result
+code, duration bucket, canonical byte count, record count, page count, retry
+class, tenant hash, and provider ID. Raw values, checkpoint bodies, cursor
+contents, authorization material, and unredacted database errors are forbidden.
+
+### 31.29.11 Retention, archive, backup, compaction, and legal hold
+
+The descriptor MUST state closed support levels and policies for retention,
+archive, legal hold, backup/restore, and physical compaction.
+
+Normative minimums:
+
+- logical committed event sequences and hashes never change under physical
+  compaction;
+- checkpoints may be deleted without changing replayability;
+- archive remains lossless and hash-verifiable before primary deletion;
+- a legal hold blocks destructive retention/archive deletion and returns the
+  exact legal-hold code;
+- retained lineage ancestors cannot be deleted while a retained child requires
+  them;
+- backup identity includes provider/schema version, tenant scope, stream heads,
+  checkpoint summaries, lease/fence state, operation-ledger continuity, and a
+  content hash;
+- restore into a nonempty target requires an explicit conflict-safe mode and
+  never lowers a fence;
+- encryption/key references are metadata, never raw secrets; and
+- unsupported administrative capability fails with the unsupported-version or
+  invalid-argument code declared by the operation, not silent success.
+
+S01 validates the descriptor and executable reference behavior for governance
+locks/holds. S02/S03 must add real archive, backup, restore, migration, and
+retention drills before any production claim.
+
+### 31.29.12 Schema discovery and migration locking
+
+Providers MUST expose strongly consistent schema discovery with current schema
+version, compatible reader/writer interval, migration state, and descriptor
+hash. A writer outside the interval fails before data access.
+
+Migration locking is a separate idempotent mutation protocol. One exclusive
+lock binds operation ID, owner ID, source version, target version, epoch/fence,
+provider clock acquisition/expiry, and descriptor hash. A second live lock is
+`GE_CYCLE_STORE_MIGRATION_LOCKED`. Takeover after expiry strictly increments
+its fence. Release requires the exact lock identity. No online writer may run
+through an incompatible in-progress migration. Memory-model support proves the
+state machine only; real transactional locking belongs to S02/S03.
+
+### 31.29.13 Provider interfaces and reference-model separation
+
+TypeScript and Python MUST expose equivalent public concepts but MUST NOT shell
+out to each other or import generated results from the other runtime.
+
+The online interface includes:
+
+- `describe` / schema inspection;
+- strongly consistent `readTail`;
+- atomic `append`;
+- snapshot `readEventPage`;
+- `saveCheckpoint`, `loadCheckpoint`, `listCheckpoints`, and
+  `deleteCheckpoint`;
+- `acquireLease`, `renewLease`, `releaseLease`, `inspectLease`, and takeover;
+- legal-hold/retention status inspection and bounded governance mutations; and
+- migration lock acquire/inspect/release.
+
+The deterministic reference models MAY expose test-only fake-clock advancement,
+fault injection, committed-byte corruption, and state counters. Those hooks are
+not part of the provider interface and MUST be named unsafe/test-only. They
+exist so conformance can prove ambiguity recovery, expiry, and corruption
+without sleeping or relying on undefined adapter behavior.
+
+### 31.29.14 Shared 54-case conformance campaign
+
+The initial case manifest MUST contain exactly 54 ordered unique cases:
+
+- descriptor/version/limit cases: 6 (four behaviors, two attacks);
+- append/tail/idempotency cases: 12 (five behaviors, seven attacks);
+- event snapshot-pagination cases: 8 (four behaviors, four attacks);
+- checkpoint cases: 8 (four behaviors, four attacks);
+- lease/fence cases: 12 (five behaviors, seven attacks);
+- tenant/authorization/error cases: 4 (two behaviors, two attacks); and
+- governance/migration cases: 4 (two behaviors, two attacks).
+
+Total expected polarity is 26 behaviors and 28 attacks.
+
+The required scenario inventory includes at least:
+
+- exact descriptor acceptance and unknown-field/version/limit refusal;
+- empty-tail creation, multi-record atomic append, exact retry, CAS loss,
+  expected-hash drift, broken batch chain, duplicate record identity,
+  commit-then-throw retry, and changed-operation-ID reuse;
+- multi-page exact traversal, append-during-pagination snapshot isolation,
+  beyond-tail empty page, cursor tenant/stream/from/page-size/tamper refusal;
+- checkpoint save/load/list order/delete, exact retry, stale-tail save,
+  content-hash drift, immutable-ID conflict, and corrupt-load refusal;
+- first acquire, renew, release/reacquire, expired takeover, exact retry,
+  active-owner conflict, early takeover, stale renew/release/write, expired
+  write, substituted holder, and fence overflow;
+- same IDs isolated across tenants, denied existence lookup, exact safe error
+  envelope, and injected unavailable/quota/corruption classification; and
+- legal-hold protection, lossless-compaction declaration, migration-lock exact
+  retry, and live-lock conflict/takeover fence behavior.
+
+Each case MUST assert an exact outcome, error code or canonical result, mutation
+delta, record/checkpoint/lease counts, tail/fence values, and payload-leak
+sentinel absence. Attack cases are green only when the expected typed error and
+zero unintended mutation both match.
+
+### 31.29.15 Independent native reports and differential join
+
+`tools/conformance/cycle_store_provider.mjs` and
+`tools/conformance/python_cycle_store_provider_report.py` MUST independently:
+
+- validate the closed case manifest;
+- instantiate their native reference model and fake clock;
+- construct canonical records and request hashes locally;
+- run all 54 scenarios without calling the other runtime;
+- normalize only explicitly provider-variable fields such as wall-clock
+  duration, never semantic results;
+- emit descriptor hash, case-list identity, category/polarity totals, ordered
+  exact per-case results, final state counters, and leak-sentinel scan; and
+- exit nonzero on an unknown scenario, generic expected error, count drift,
+  mutation drift, or leaked sentinel.
+
+`tools/conformance/run.mjs` MUST deep-compare the complete reports. Comparing
+only totals or error codes is insufficient. Fixture validation MUST freeze
+exact case IDs/order, category counts, 26/28/54 totals, allowed descriptor
+fields, expected-code vocabulary, unique assertions, and canonical case-list
+bytes/hash.
+
+### 31.29.16 Unit, model, and hostile tests
+
+Native tests MUST separately cover implementation details not encoded in the
+portable campaign:
+
+- caller mutation before/after awaits and returned-value mutation;
+- two truly concurrent append promises with one CAS winner;
+- an injected yield immediately before commit;
+- operation-ledger atomicity with commit-then-throw;
+- cursor state cleanup/expiry and bounded cursor count;
+- fake-clock rollback refusal;
+- checkpoint corruption fallback boundary;
+- authorization hook invocation before existence lookup;
+- error serialization with no `cause`, stack, payload, secret, or database
+  string leakage;
+- maximum exact bounds and one-above rejection;
+- migration/lease fence monotonicity under repeated takeover;
+- safe snapshot/export of reference state for debugging; and
+- public export parity and sorted Python `__all__`.
+
+At least one independent model test MUST derive expected tail, page ranges,
+checkpoint order, and fence progression without calling the provider's helper
+that computes those values.
+
+### 31.29.17 Documentation and downstream adapter handoff
+
+Documentation MUST explain:
+
+- why provider CAS differs from controller event semantic validation;
+- why exact expected hash accompanies expected sequence;
+- why mutation idempotency precedes current-state validation;
+- why snapshot cursors exclude later appends;
+- why checkpoints are disposable;
+- why event appends become fenced after lease ownership begins;
+- why the memory provider cannot prove production durability;
+- which descriptor fields SQLite may truthfully claim;
+- which stronger fields require PostgreSQL/database enforcement;
+- how protected payload carriers cross the provider boundary;
+- how to implement typed error translation without leaking database errors;
+- how an adapter runs the shared conformance kit; and
+- the exact remaining S02/S03/S04/I01 blockers.
+
+S02 may start only after the S01 descriptor, error taxonomy, reference reports,
+and immutable evidence are pushed. S02 must implement the same interface rather
+than introducing SQLite-specific semantics into the contract.
+
+### 31.29.18 Verification, evidence, and commit sequence
+
+S01 acceptance MUST run, in order:
+
+1. schema meta-validation and independent valid/hostile descriptor samples;
+2. focused TypeScript provider tests;
+3. focused Python provider tests;
+4. Python Ruff and Mypy;
+5. TypeScript lint and type checking;
+6. exact 54-case native reports and full structural differential comparison;
+7. complete fixture validation and documentation-link check;
+8. full TypeScript and Python test suites;
+9. complete cross-language conformance including all pre-existing joins;
+10. full workspace build;
+11. release-map and evidence-closure audits;
+12. npm package contents and packed-install gates, serialized around artifact
+    writers;
+13. a freshly rebuilt Python wheel/sdist whose required path audit includes the
+    new provider module;
+14. production dependency audit;
+15. exact staged-path and dirty-worktree exclusion audit;
+16. implementation commits using `reacher-z <mtrxcop@gmail.com>`, empty bodies,
+    and no coauthor trailer;
+17. a fresh detached worktree at the final implementation tip with locked
+    dependency install, documented build/dev prerequisites, and a repeat of all
+    material gates;
+18. a retained evidence record with commit/tree/parent, descriptor/case/package
+    hashes, exact counts, all failed-first repairs, agent limitations, and
+    remaining non-claims;
+19. a separate evidence commit; and
+20. push, fetch, identity/body audit, and local/remote zero-divergence proof.
+
+The next dispatch after S01 evidence is S02 SQLite, unless a newly discovered
+provider-contract defect requires an append-only S01 remediation section.

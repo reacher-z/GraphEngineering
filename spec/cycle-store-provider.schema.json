@@ -1,0 +1,194 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/cycle-store-provider.schema.json",
+  "title": "Graph Engineering CycleStore provider descriptor",
+  "description": "Closed capability and guarantee declaration for cycle-store-provider/v1alpha1. Runtime semantic validation additionally verifies compatibility intervals and the domain-separated descriptor hash.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "contractVersion",
+    "providerId",
+    "schemaVersion",
+    "compatibility",
+    "limits",
+    "guarantees",
+    "capabilities",
+    "protection",
+    "governance",
+    "observability",
+    "descriptorHash"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "graphengineering.reacher-z.github.io/cycle-store-providers/v1alpha1"
+    },
+    "kind": { "const": "CycleStoreProviderDescriptor" },
+    "contractVersion": { "const": "cycle-store-provider/v1alpha1" },
+    "providerId": { "$ref": "#/$defs/identifier" },
+    "schemaVersion": { "$ref": "#/$defs/positiveSafeInteger" },
+    "compatibility": { "$ref": "#/$defs/compatibility" },
+    "limits": { "$ref": "#/$defs/limits" },
+    "guarantees": { "$ref": "#/$defs/guarantees" },
+    "capabilities": { "$ref": "#/$defs/capabilities" },
+    "protection": { "$ref": "#/$defs/protection" },
+    "governance": { "$ref": "#/$defs/governance" },
+    "observability": { "$ref": "#/$defs/observability" },
+    "descriptorHash": { "$ref": "#/$defs/hash" }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+      "not": { "enum": [".", ".."] }
+    },
+    "hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "positiveSafeInteger": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "compatibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "minReaderVersion",
+        "maxReaderVersion",
+        "minWriterVersion",
+        "maxWriterVersion"
+      ],
+      "properties": {
+        "minReaderVersion": { "$ref": "#/$defs/positiveSafeInteger" },
+        "maxReaderVersion": { "$ref": "#/$defs/positiveSafeInteger" },
+        "minWriterVersion": { "$ref": "#/$defs/positiveSafeInteger" },
+        "maxWriterVersion": { "$ref": "#/$defs/positiveSafeInteger" }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "maxAppendRecords",
+        "maxRecordBytes",
+        "maxAppendBytes",
+        "maxPageSize",
+        "maxCheckpointBytes",
+        "maxLeaseTtlMs"
+      ],
+      "properties": {
+        "maxAppendRecords": { "type": "integer", "minimum": 1, "maximum": 64 },
+        "maxRecordBytes": { "type": "integer", "minimum": 1, "maximum": 1048576 },
+        "maxAppendBytes": { "type": "integer", "minimum": 1, "maximum": 8388608 },
+        "maxPageSize": { "type": "integer", "minimum": 1, "maximum": 256 },
+        "maxCheckpointBytes": { "type": "integer", "minimum": 1, "maximum": 16777216 },
+        "maxLeaseTtlMs": { "type": "integer", "minimum": 1, "maximum": 86400000 }
+      }
+    },
+    "guarantees": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "appendAtomicity",
+        "tailConsistency",
+        "pagination",
+        "checkpointAuthority",
+        "idempotency",
+        "leaseClock",
+        "tenantIsolation"
+      ],
+      "properties": {
+        "appendAtomicity": { "const": "all-or-nothing" },
+        "tailConsistency": { "const": "strong" },
+        "pagination": { "const": "snapshot-no-skip-no-duplicate" },
+        "checkpointAuthority": { "const": "cache-only" },
+        "idempotency": { "const": "operation-id-canonical-request" },
+        "leaseClock": { "const": "provider-authoritative" },
+        "tenantIsolation": { "const": "mandatory" }
+      }
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "durability",
+        "distributedFencing",
+        "snapshotPagination",
+        "checkpointCrud",
+        "legalHold",
+        "backupRestore",
+        "compaction"
+      ],
+      "properties": {
+        "durability": { "enum": ["process-local", "durable"] },
+        "distributedFencing": { "type": "boolean" },
+        "snapshotPagination": { "const": true },
+        "checkpointCrud": { "const": true },
+        "legalHold": { "enum": ["reference-state-machine", "enforced"] },
+        "backupRestore": { "enum": ["declared", "enforced"] },
+        "compaction": { "const": "logical-history-preserving" }
+      }
+    },
+    "protection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "payloadProtection",
+        "encryptionAtRest",
+        "rawPayloadObservability"
+      ],
+      "properties": {
+        "payloadProtection": { "enum": ["external", "provider-managed"] },
+        "encryptionAtRest": { "enum": ["none", "provider-managed", "external"] },
+        "rawPayloadObservability": { "const": false }
+      }
+    },
+    "governance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "retention",
+        "archival",
+        "legalHoldBlocksDeletion",
+        "migrationLock",
+        "backupIdentity"
+      ],
+      "properties": {
+        "retention": { "enum": ["descriptor-only", "enforced"] },
+        "archival": { "enum": ["descriptor-only", "enforced"] },
+        "legalHoldBlocksDeletion": { "const": true },
+        "migrationLock": { "const": "exclusive-fenced" },
+        "backupIdentity": { "const": "content-addressed" }
+      }
+    },
+    "observability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["safeFields", "payloadLabels", "authorizationLabels"],
+      "properties": {
+        "safeFields": {
+          "type": "array",
+          "prefixItems": [
+            { "const": "operation" },
+            { "const": "resultCode" },
+            { "const": "durationBucket" },
+            { "const": "canonicalByteCount" },
+            { "const": "recordCount" },
+            { "const": "pageCount" },
+            { "const": "retryClass" },
+            { "const": "tenantHash" },
+            { "const": "providerId" }
+          ],
+          "items": false,
+          "minItems": 9,
+          "maxItems": 9
+        },
+        "payloadLabels": { "const": false },
+        "authorizationLabels": { "const": false }
+      }
+    }
+  }
+}

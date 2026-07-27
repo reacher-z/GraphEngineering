@@ -16,6 +16,7 @@ import { exerciseCyclePatchCheckpointFaultCampaign } from "./cycle_patch_checkpo
 import { exerciseGraphPatchHostileShapeCampaign } from "./graph_patch_hostile_shape.mjs";
 import { exerciseGraphPatchHostileSemanticCampaign } from "./graph_patch_hostile_semantic.mjs";
 import { exerciseGraphPatchHostileRestoreCampaign } from "./graph_patch_hostile_restore.mjs";
+import { exerciseCycleStoreProviderCampaign } from "./cycle_store_provider.mjs";
 
 const root = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 const fixtureRoot = join(root, "spec", "conformance");
@@ -1480,6 +1481,39 @@ assert.deepEqual(
 );
 process.stdout.write(
   `Cross-language cycle-controller lineage conformance passed for ${tsCycleLineage.caseCount} cases (${tsCycleLineage.attackCaseCount} attacks and ${tsCycleLineage.behaviorCaseCount} behaviors).\n`,
+);
+const cycleStoreProviderFixture = JSON.parse(
+  await readFile(join(fixtureRoot, "cycle-store-provider.case.json"), "utf8"),
+);
+const pythonCycleStoreProvider = spawnSync(
+  "uv",
+  [
+    "run",
+    "--project",
+    "python",
+    "python",
+    "tools/conformance/python_cycle_store_provider_report.py",
+  ],
+  { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
+);
+if (pythonCycleStoreProvider.status !== 0) {
+  throw new Error(
+    `Python CycleStore provider campaign failed:\n${pythonCycleStoreProvider.stderr || pythonCycleStoreProvider.stdout}`,
+  );
+}
+const pyCycleStoreProvider = JSON.parse(pythonCycleStoreProvider.stdout);
+const tsCycleStoreProvider = await exerciseCycleStoreProviderCampaign({
+  runtime,
+  core,
+  fixture: cycleStoreProviderFixture,
+});
+assert.deepEqual(
+  tsCycleStoreProvider,
+  pyCycleStoreProvider,
+  "D7 CycleStore provider campaign reports differ",
+);
+process.stdout.write(
+  `Cross-language CycleStore provider conformance passed for ${tsCycleStoreProvider.caseCount} cases (${tsCycleStoreProvider.attackCaseCount} attacks and ${tsCycleStoreProvider.behaviorCaseCount} behaviors).\n`,
 );
 const cycleRequestValue = JSON.parse(JSON.stringify(
   cycleContractFixture.validRequests[0].document,
