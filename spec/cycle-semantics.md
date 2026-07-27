@@ -1029,6 +1029,62 @@ block occurs after the child creation event binds lineage but before a child
 lease or external dispatch. The old claim remains charged, late effects remain
 at-least-once, and an operator reconciliation/approval event is later work.
 
+#### 13.4.1 Terminal in-doubt resolution
+
+The first resolution protocol is deliberately narrower than general activity
+recovery. It may resolve exactly one external in-doubt identity only after the
+controller has reached a durable terminal result. It does not invent an
+activity output, alter seen or verdict state, refund charged usage, rewrite the
+terminal result, or authorize an open non-idempotent claim to rerun.
+
+The closed `CycleInDoubtResolution` command contains:
+
+- a stable `resolutionId` used as its idempotency key;
+- the controller run, controller hash, request hash, and event stream identity;
+- the exact pre-resolution tail sequence and record hash;
+- the exact unresolved `activityKey`;
+- either `confirmed-applied` or `confirmed-not-applied`;
+- a hash of the operator's external evidence; and
+- principal, grant, policy, and lease-holder hashes in a closed authority
+  snapshot.
+
+Its command hash is:
+
+```text
+SHA-256(
+  UTF8("graph-engineering/cycle-in-doubt-resolution/v1alpha1\\0") ||
+  UTF8(CanonicalJSON(command))
+)
+```
+
+An `InDoubtActivityResolved` event carries the complete command and command
+hash. Its event lease is a transient administrative fence: both lease epoch and
+fencing token must be strictly greater than every prior lease, the event time
+must be within the lease interval, the lease ID must be new, and SHA-256 of the
+UTF-8 lease holder ID must equal `authoritySnapshot.leaseHolderHash`. The event
+atomically consumes that fence but leaves the terminal controller unleased.
+
+The command's expected sequence and expected history-prefix hash must equal the
+event immediately before the resolution. The target activity key must equal the
+one singleton entry. The fold then removes the singleton and changes no other
+semantic result or accounting projection. A checkpoint after resolution binds
+the new event tail and contains an empty in-doubt projection while retaining the
+original terminal result bytes.
+
+Replaying a byte-identical command with the same `resolutionId` returns the
+already committed resolution with zero new events. Reusing that ID with any
+different command byte is an idempotency conflict. The idempotent replay check
+precedes stale-tail and stale-fence checks because it performs no mutation.
+Wrong activity keys, absent uncertainty, nonterminal histories, stale sequence
+or history hashes, stale fences, authority/holder substitution, and malformed
+closed commands fail before append. A second resolution event in forged history
+is invalid because the first event has already consumed the singleton.
+
+Resolving an interrupted nonterminal activity, converting confirmed effects
+into semantic activity outputs, and approval workflows that can authorize a
+retry remain separate protocol extensions. Until they are specified, resume of
+an open non-idempotent activity remains blocked.
+
 ### 13.5 Replay and fork
 
 Replay validates and folds recorded candidate batches, decisions, patches,

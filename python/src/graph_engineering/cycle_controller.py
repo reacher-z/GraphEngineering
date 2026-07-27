@@ -34,6 +34,7 @@ from .cycle_contract import (
     parse_timestamp,
     round_plan_hash,
     strict_rfc3339,
+    validate_cycle_in_doubt_resolution,
     validate_cycle_request,
     validate_lease,
 )
@@ -137,6 +138,16 @@ class CycleReplayResult:
 class CyclePauseResult:
     events: tuple[CycleEvent, ...]
     released_lease_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class CycleInDoubtResolutionResult:
+    """Result of one authority-bound terminal uncertainty resolution."""
+
+    command_hash: str
+    event: CycleEvent
+    fold: CycleFold
+    duplicate: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -1957,6 +1968,245 @@ async def resume_cycle(
     return await controller.run()
 
 
+async def resolve_cycle_in_doubt_activity(
+    request: object,
+    command: object,
+    *,
+    store: CycleStore,
+    lease: object,
+    clock: Clock = _default_clock,
+    event_id_factory: EventIdFactory = _default_event_id,
+    fault_hook: FaultHook | None = None,
+    checkpoint_id: str | None = None,
+) -> CycleInDoubtResolutionResult:
+    """Resolve one terminal external-effect uncertainty exactly once.
+
+    The command binds the exact terminal prefix and the unresolved activity
+    singleton.  Its administrative lease must strictly advance every prior
+    fence and its holder must match the authority snapshot.  Replaying the
+    byte-identical resolution ID is a read-only success.
+    """
+
+    validated_request = validate_cycle_request(request)
+    validated_resolution = validate_cycle_in_doubt_resolution(command)
+    resolution = validated_resolution.model
+    events = await store.read(validated_request.model.event_stream_id)
+    if not events:
+        raise CycleRuntimeError(
+            CycleErrorCode.INVALID_HISTORY,
+            "in-doubt resolution requires an existing stream",
+        )
+    fold, parent_fold = await _fold_stored_events(validated_request, events, store)
+    if (
+        fold.request.request_hash != validated_request.request_hash
+        or fold.request.controller_hash != validated_request.controller_hash
+        or canonical_json(fold.request.document)
+        != canonical_json(validated_request.document)
+    ):
+        raise CycleRuntimeError(
+            CycleErrorCode.INVALID_REQUEST,
+            "in-doubt resolution request differs from stored history",
+        )
+
+    existing: CycleEvent | None = None
+    for candidate in events:
+        if candidate.type != "InDoubtActivityResolved":
+            continue
+        stored_command = candidate.data.get("command")
+        if (
+            type(stored_command) is dict
+            and stored_command.get("resolutionId") == resolution.resolution_id
+        ):
+            existing = candidate
+            break
+    if existing is not None:
+        if existing.data.get("commandHash") != validated_resolution.command_hash:
+            raise CycleRuntimeError(
+                CycleErrorCode.RESOLUTION_CONFLICT,
+                "resolution ID was reused with different command bytes",
+                details={"resolutionId": resolution.resolution_id},
+            )
+        return CycleInDoubtResolutionResult(
+            validated_resolution.command_hash,
+            existing,
+            fold,
+            True,
+        )
+
+    if (
+        resolution.controller_run_id != validated_request.model.controller_run_id
+        or resolution.controller_hash != fold.request.controller_hash
+        or resolution.request_hash != fold.request.request_hash
+        or resolution.event_stream_id != validated_request.model.event_stream_id
+    ):
+        raise CycleRuntimeError(
+            CycleErrorCode.RESOLUTION_INVALID,
+            "resolution command identity does not match the controller stream",
+        )
+    if not fold.terminal:
+        raise CycleRuntimeError(
+            CycleErrorCode.RESOLUTION_NOT_TERMINAL,
+            "in-doubt resolution requires a terminal controller",
+        )
+    in_doubt = cast(list[dict[str, Any]], fold.state["inDoubtActivities"])
+    if len(in_doubt) != 1 or in_doubt[0]["activityKey"] != resolution.activity_key:
+        raise CycleRuntimeError(
+            CycleErrorCode.RESOLUTION_TARGET_MISMATCH,
+            "resolution target is not the unresolved singleton",
+            details={
+                "activityKey": resolution.activity_key,
+                "actualActivityKey": (
+                    cast(str, in_doubt[0]["activityKey"]) if in_doubt else None
+                ),
+            },
+        )
+    if (
+        resolution.expected_sequence != fold.tail_sequence
+        or resolution.expected_history_prefix_hash != fold.tail_hash
+    ):
+        raise CycleRuntimeError(
+            CycleErrorCode.RESOLUTION_STALE,
+            "resolution command does not bind the current event tail",
+            details={
+                "expectedSequence": resolution.expected_sequence,
+                "actualSequence": fold.tail_sequence,
+                "expectedHistoryPrefixHash": resolution.expected_history_prefix_hash,
+                "actualHistoryPrefixHash": fold.tail_hash,
+            },
+        )
+
+    lease_document, lease_model = validate_lease(lease)
+    _require_new_lease_fence(events, lease_document)
+    if lease_model.lease_id == _last_recorded_lease_id(events):
+        raise CycleRuntimeError(
+            CycleErrorCode.STALE_LEASE,
+            "resolution lease must use a new lease identity",
+        )
+    holder_hash = hashlib.sha256(lease_model.holder_id.encode("utf-8")).hexdigest()
+    if holder_hash != resolution.authority_snapshot.lease_holder_hash:
+        raise CycleRuntimeError(
+            CycleErrorCode.RESOLUTION_AUTHORITY_MISMATCH,
+            "resolution authority does not bind the lease holder",
+        )
+
+    try:
+        timestamp = strict_rfc3339(clock())
+    except Exception as exc:
+        raise CycleRuntimeError(
+            CycleErrorCode.RESOLUTION_INVALID,
+            "resolution clock failed before append",
+            details={"causeName": type(exc).__name__},
+            cause=exc,
+        ) from exc
+    event_time = parse_timestamp(timestamp)
+    if event_time < parse_timestamp(events[-1].timestamp):
+        raise CycleRuntimeError(
+            CycleErrorCode.RESOLUTION_STALE,
+            "resolution timestamp regresses the event stream",
+        )
+    if (
+        event_time < parse_timestamp(lease_model.acquired_at)
+        or event_time >= parse_timestamp(lease_model.expires_at)
+    ):
+        raise CycleRuntimeError(
+            CycleErrorCode.STALE_LEASE,
+            "resolution timestamp is outside the lease interval",
+        )
+
+    sequence = len(events)
+    try:
+        event_id = event_id_factory(
+            validated_request.model.controller_run_id,
+            sequence,
+        )
+        if type(event_id) is not str or not event_id:
+            raise TypeError("empty event ID")
+    except Exception as exc:
+        raise CycleRuntimeError(
+            CycleErrorCode.STORE_FAILED,
+            "resolution event identity factory failed before append",
+            details={"sequence": sequence, "causeName": type(exc).__name__},
+            cause=exc,
+        ) from exc
+    event = make_cycle_event(
+        event_id=event_id,
+        event_type="InDoubtActivityResolved",
+        timestamp=timestamp,
+        request=validated_request,
+        graph_revision=cast(int, fold.current_revision["graphRevision"]),
+        sequence=sequence,
+        previous_event_hash=fold.tail_hash,
+        lease=lease_document,
+        data={
+            "command": validated_resolution.document,
+            "commandHash": validated_resolution.command_hash,
+        },
+    )
+    resolved_events = (*events, event)
+    resolved_fold = fold_cycle_events(resolved_events, parent_fold=parent_fold)
+    await run_fault_hook(fault_hook, "event:InDoubtActivityResolved:before-cas")
+    try:
+        committed_sequence = await store.append(
+            validated_request.model.event_stream_id,
+            resolution.expected_sequence,
+            (event,),
+        )
+    except CycleRuntimeError as exc:
+        if exc.code is CycleErrorCode.VERSION_CONFLICT:
+            raise CycleRuntimeError(
+                CycleErrorCode.RESOLUTION_STALE,
+                "resolution lost the event-store compare-and-swap race",
+                details=dict(exc.details),
+                cause=exc,
+            ) from exc
+        raise
+    except Exception as exc:
+        raise CycleRuntimeError(
+            CycleErrorCode.STORE_FAILED,
+            "resolution event append failed",
+            details={"sequence": sequence, "causeName": type(exc).__name__},
+            cause=exc,
+        ) from exc
+    if committed_sequence != sequence:
+        raise CycleRuntimeError(
+            CycleErrorCode.STORE_FAILED,
+            "resolution store returned an inconsistent committed tail",
+            details={
+                "sequence": sequence,
+                "committedSequence": committed_sequence,
+            },
+        )
+    await run_fault_hook(fault_hook, "event:InDoubtActivityResolved:after-cas")
+
+    if checkpoint_id is not None:
+        checkpoint = build_checkpoint(
+            resolved_fold,
+            checkpoint_id=checkpoint_id,
+            created_at=timestamp,
+        )
+        try:
+            await store.save_checkpoint(
+                validated_request.model.checkpoint_scope,
+                checkpoint_id,
+                sequence,
+                checkpoint,
+            )
+        except Exception as exc:
+            raise CycleRuntimeError(
+                CycleErrorCode.STORE_FAILED,
+                "resolution checkpoint write failed after the event remained durable",
+                details={"sequence": sequence, "causeName": type(exc).__name__},
+                cause=exc,
+            ) from exc
+
+    return CycleInDoubtResolutionResult(
+        validated_resolution.command_hash,
+        event,
+        resolved_fold,
+        False,
+    )
+
+
 async def replay_cycle(
     event_stream_id: str,
     *,
@@ -2039,6 +2289,7 @@ __all__ = [
     "CycleActivityContext",
     "CycleCancellation",
     "CycleHandlers",
+    "CycleInDoubtResolutionResult",
     "CyclePauseResult",
     "CycleReplayResult",
     "CycleRunResult",
@@ -2046,6 +2297,7 @@ __all__ = [
     "fork_cycle",
     "pause_cycle",
     "replay_cycle",
+    "resolve_cycle_in_doubt_activity",
     "resume_cycle",
     "start_cycle",
 ]

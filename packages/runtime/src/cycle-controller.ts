@@ -20,6 +20,9 @@ import {
   type CycleExitObservation,
   type CycleExitReason,
   type CycleGraphCoordinate,
+  type CycleInDoubtResolutionCommand,
+  type CycleInDoubtResolutionOptions,
+  type CycleInDoubtResolutionResult,
   type CycleModeOutcome,
   type CycleResumeOptions,
   type CycleUsage,
@@ -31,6 +34,7 @@ import {
   createCycleControllerEvent,
   createCycleInlinePayload,
   createCycleRoundPlan,
+  cycleInDoubtResolutionCommandHash,
   cycleActivityKey,
   cycleControllerHash,
   cycleControllerIdentity,
@@ -39,8 +43,10 @@ import {
   decodeCycleInlinePayload,
   observeCycleExit,
   selectCycleExitReason,
+  sha256Utf8,
   validateCycleCandidates,
   validateCycleControllerRequest,
+  validateCycleInDoubtResolutionCommand,
   validateCycleLease,
   validateCycleVerdicts,
   validateGraphPatchShape,
@@ -1589,6 +1595,247 @@ export async function resumeCycleController(
   fold = journal.fold;
   const applier = createApplier(request, graph, events);
   return continueController(journal, applier);
+}
+
+/**
+ * Resolve one terminal external-effect uncertainty under an authority-bound,
+ * strictly advancing administrative fence. A byte-identical command replay is
+ * idempotent and appends no second event.
+ */
+export async function resolveCycleInDoubtActivity(
+  requestValue: CycleControllerRequest | unknown,
+  commandValue: CycleInDoubtResolutionCommand | unknown,
+  options: CycleInDoubtResolutionOptions,
+  foldOptions: FoldCycleOptions = {},
+): Promise<CycleInDoubtResolutionResult> {
+  const request = validateCycleControllerRequest(requestValue);
+  const command = validateCycleInDoubtResolutionCommand(commandValue, request.controllerRunId);
+  const commandHash = cycleInDoubtResolutionCommandHash(command, request.controllerRunId);
+  const events = await readCycleControllerEvents(options.eventStore, request.eventStreamId);
+  if (events.length === 0) {
+    throw new CycleControllerError(
+      "GE_CYCLE_RUN_NOT_FOUND",
+      request.controllerRunId,
+      "in-doubt resolution requires an existing stream",
+    );
+  }
+  const fold = foldCycleControllerEvents(events, foldOptions);
+  if (fold.requestHash !== cycleRequestHash(request)
+      || fold.controllerHash !== cycleControllerHash(request)
+      || canonicalSerialize(fold.request) !== canonicalSerialize(request)) {
+    throw new CycleControllerError(
+      "GE_CYCLE_REQUEST_MISMATCH",
+      request.controllerRunId,
+      "in-doubt resolution request does not match history",
+    );
+  }
+  const existing = events.find((event) => {
+    if (event.type !== "InDoubtActivityResolved") return false;
+    const storedCommand = event.data.command;
+    return typeof storedCommand === "object" && storedCommand !== null
+      && "resolutionId" in storedCommand
+      && storedCommand.resolutionId === command.resolutionId;
+  });
+  if (existing !== undefined) {
+    if (existing.data.commandHash !== commandHash) {
+      throw new CycleControllerError(
+        "GE_CYCLE_RESOLUTION_CONFLICT",
+        request.controllerRunId,
+        "resolution ID was reused with different command bytes",
+        { resolutionId: command.resolutionId },
+      );
+    }
+    return Object.freeze({ commandHash, event: existing, fold, duplicate: true });
+  }
+  if (command.controllerRunId !== request.controllerRunId
+      || command.controllerHash !== fold.controllerHash
+      || command.requestHash !== fold.requestHash
+      || command.eventStreamId !== request.eventStreamId) {
+    throw new CycleControllerError(
+      "GE_CYCLE_RESOLUTION_INVALID",
+      request.controllerRunId,
+      "resolution command identity does not match the controller stream",
+    );
+  }
+  if (fold.terminalResult === null) {
+    throw new CycleControllerError(
+      "GE_CYCLE_RESOLUTION_NOT_TERMINAL",
+      request.controllerRunId,
+      "in-doubt resolution requires a terminal controller",
+    );
+  }
+  if (fold.inDoubtActivities.length !== 1
+      || fold.inDoubtActivities[0]?.activityKey !== command.activityKey) {
+    throw new CycleControllerError(
+      "GE_CYCLE_RESOLUTION_TARGET_MISMATCH",
+      request.controllerRunId,
+      "resolution target is not the unresolved singleton",
+      {
+        activityKey: command.activityKey,
+        actualActivityKey: fold.inDoubtActivities[0]?.activityKey ?? null,
+      },
+    );
+  }
+  if (command.expectedSequence !== fold.lastSequence
+      || command.expectedHistoryPrefixHash !== fold.historyPrefixHash) {
+    throw new CycleControllerError(
+      "GE_CYCLE_RESOLUTION_STALE",
+      request.controllerRunId,
+      "resolution command does not bind the current event tail",
+      {
+        expectedSequence: command.expectedSequence,
+        actualSequence: fold.lastSequence,
+        expectedHistoryPrefixHash: command.expectedHistoryPrefixHash,
+        actualHistoryPrefixHash: fold.historyPrefixHash,
+      },
+    );
+  }
+  const lease = validateCycleLease(options.lease, request.controllerRunId);
+  if (lease.leaseEpoch <= fold.maxLeaseEpoch
+      || lease.fencingToken <= fold.maxFencingToken
+      || lease.leaseId === fold.lastLeaseId) {
+    throw new CycleControllerError(
+      "GE_CYCLE_STALE_LEASE",
+      request.controllerRunId,
+      "resolution lease does not strictly advance the controller fence",
+      {
+        leaseEpoch: lease.leaseEpoch,
+        maxLeaseEpoch: fold.maxLeaseEpoch,
+        fencingToken: lease.fencingToken,
+        maxFencingToken: fold.maxFencingToken,
+      },
+    );
+  }
+  if (sha256Utf8(lease.holderId) !== command.authoritySnapshot.leaseHolderHash) {
+    throw new CycleControllerError(
+      "GE_CYCLE_RESOLUTION_AUTHORITY_MISMATCH",
+      request.controllerRunId,
+      "resolution authority does not bind the lease holder",
+    );
+  }
+  let now: Date;
+  try {
+    now = (options.now ?? (() => new Date()))();
+  } catch (error) {
+    throw new CycleControllerError(
+      "GE_CYCLE_RESOLUTION_INVALID",
+      request.controllerRunId,
+      "resolution clock failed before append",
+      {},
+      { cause: error },
+    );
+  }
+  if (!(now instanceof Date) || !Number.isFinite(now.getTime())) {
+    throw new CycleControllerError(
+      "GE_CYCLE_RESOLUTION_INVALID",
+      request.controllerRunId,
+      "resolution clock returned an invalid date",
+    );
+  }
+  const timestamp = now.toISOString();
+  const eventTime = now.getTime();
+  if (eventTime < Date.parse(events.at(-1)?.timestamp as string)) {
+    throw new CycleControllerError(
+      "GE_CYCLE_RESOLUTION_STALE",
+      request.controllerRunId,
+      "resolution timestamp regresses the event stream",
+    );
+  }
+  if (eventTime < Date.parse(lease.acquiredAt) || eventTime >= Date.parse(lease.expiresAt)) {
+    throw new CycleControllerError(
+      "GE_CYCLE_STALE_LEASE",
+      request.controllerRunId,
+      "resolution timestamp is outside the lease interval",
+    );
+  }
+  const sequence = events.length;
+  let eventId: string;
+  try {
+    eventId = (options.createEventId ?? ((context) => `${context.controllerRunId}-${context.sequence}`))({
+      controllerRunId: request.controllerRunId,
+      sequence,
+      type: "InDoubtActivityResolved",
+    });
+    if (typeof eventId !== "string" || eventId.length === 0) {
+      throw new TypeError("empty event ID");
+    }
+  } catch (error) {
+    throw new CycleControllerError(
+      "GE_CYCLE_STORE_FAILED",
+      request.controllerRunId,
+      "resolution event ID factory failed before append",
+      { sequence },
+      { cause: error },
+    );
+  }
+  const event = createCycleControllerEvent({
+    request,
+    controllerHash: fold.controllerHash,
+    requestHash: fold.requestHash,
+    type: "InDoubtActivityResolved",
+    data: snapshotJson({ command, commandHash }) as unknown as Readonly<Record<string, unknown>>,
+    graphRevision: fold.currentRevision.graphRevision,
+    sequence,
+    previousEventHash: fold.historyPrefixHash,
+    lease,
+    timestamp,
+    eventId,
+  });
+  const resolvedFold = foldCycleControllerEvents([...events, event], foldOptions);
+  try {
+    const committedSequence = await options.eventStore.append(
+      request.eventStreamId,
+      command.expectedSequence,
+      [event],
+    );
+    if (committedSequence !== sequence) {
+      throw new CycleControllerError(
+        "GE_CYCLE_STORE_FAILED",
+        request.controllerRunId,
+        "resolution store returned an impossible committed sequence",
+        { sequence, committedSequence },
+      );
+    }
+  } catch (error) {
+    if (error instanceof CycleControllerError && error.code === "GE_CYCLE_RESUME_CONFLICT") {
+      throw new CycleControllerError(
+        "GE_CYCLE_RESOLUTION_STALE",
+        request.controllerRunId,
+        "resolution lost the event-store compare-and-swap race",
+        error.details,
+        { cause: error },
+      );
+    }
+    if (error instanceof CycleControllerError) throw error;
+    throw new CycleControllerError(
+      "GE_CYCLE_STORE_FAILED",
+      request.controllerRunId,
+      "resolution event append failed",
+      { sequence },
+      { cause: error },
+    );
+  }
+  if (options.checkpointStore !== undefined) {
+    const checkpointId = `${request.controllerRunId}-latest`;
+    const checkpoint = createCycleControllerCheckpoint(
+      [...events, event],
+      checkpointId,
+      timestamp,
+      foldOptions,
+    );
+    try {
+      await options.checkpointStore.write(request.checkpointScope, checkpointId, checkpoint);
+    } catch (error) {
+      throw new CycleControllerError(
+        "GE_CYCLE_STORE_FAILED",
+        request.controllerRunId,
+        "resolution checkpoint write failed after the event remained durable",
+        { sequence },
+        { cause: error },
+      );
+    }
+  }
+  return Object.freeze({ commandHash, event, fold: resolvedFold, duplicate: false });
 }
 
 /** Read-only replay of one exact prefix. It acquires no lease and calls no adapter. */

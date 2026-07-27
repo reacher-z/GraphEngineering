@@ -340,6 +340,33 @@ export interface CycleLease {
   readonly expiresAt: string;
 }
 
+export type CycleInDoubtResolutionDisposition =
+  | "confirmed-applied"
+  | "confirmed-not-applied";
+
+export interface CycleInDoubtResolutionAuthority {
+  readonly principalHash: string;
+  readonly grantHash: string;
+  readonly policyHash: string;
+  readonly leaseHolderHash: string;
+}
+
+export interface CycleInDoubtResolutionCommand {
+  readonly apiVersion: "graphengineering.reacher-z.github.io/cycle-in-doubt-resolutions/v1alpha1";
+  readonly kind: "CycleInDoubtResolution";
+  readonly resolutionId: string;
+  readonly controllerRunId: string;
+  readonly controllerHash: string;
+  readonly requestHash: string;
+  readonly eventStreamId: string;
+  readonly expectedSequence: number;
+  readonly expectedHistoryPrefixHash: string;
+  readonly activityKey: string;
+  readonly disposition: CycleInDoubtResolutionDisposition;
+  readonly evidenceHash: string;
+  readonly authoritySnapshot: CycleInDoubtResolutionAuthority;
+}
+
 export type CycleControllerEventType =
   | "ControllerCreated"
   | "LeaseAcquired"
@@ -348,6 +375,7 @@ export type CycleControllerEventType =
   | "RoundReserved"
   | "ActivityStarted"
   | "ActivityFailed"
+  | "InDoubtActivityResolved"
   | "DiscoveryCommitted"
   | "CandidateEvaluationCommitted"
   | "ModeOutcomeCommitted"
@@ -588,6 +616,21 @@ export interface CycleResumeOptions extends CycleControllerRunOptions {
   readonly leaseReason?: "resume" | "takeover";
 }
 
+export interface CycleInDoubtResolutionOptions {
+  readonly eventStore: CycleControllerEventStore;
+  readonly checkpointStore?: CycleControllerCheckpointStore;
+  readonly lease: CycleLease;
+  readonly now?: () => Date;
+  readonly createEventId?: CycleControllerRunOptions["createEventId"];
+}
+
+export interface CycleInDoubtResolutionResult {
+  readonly commandHash: string;
+  readonly event: CycleControllerEvent;
+  readonly fold: CycleControllerFold;
+  readonly duplicate: boolean;
+}
+
 export type CycleControllerErrorCode =
   | "GE_CYCLE_INVALID_POLICY"
   | "GE_CYCLE_INVALID_CANDIDATE"
@@ -602,6 +645,13 @@ export type CycleControllerErrorCode =
   | "GE_CYCLE_STORE_FAILED"
   | "GE_CYCLE_ACTIVITY_FAILED"
   | "IN_DOUBT_SIDE_EFFECT"
+  | "GE_CYCLE_RESOLUTION_INVALID"
+  | "GE_CYCLE_RESOLUTION_CONFLICT"
+  | "GE_CYCLE_RESOLUTION_TARGET_MISMATCH"
+  | "GE_CYCLE_RESOLUTION_NOT_TERMINAL"
+  | "GE_CYCLE_RESOLUTION_STALE"
+  | "GE_CYCLE_RESOLUTION_AUTHORITY_MISMATCH"
+  | "GE_CYCLE_STALE_LEASE"
   | GraphPatchErrorCode;
 
 export interface SerializedCycleControllerError {

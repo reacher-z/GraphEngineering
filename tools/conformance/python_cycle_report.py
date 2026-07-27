@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import hashlib
 import json
 from pathlib import Path
 from typing import Any, cast
@@ -21,6 +22,7 @@ from graph_engineering import (
     canonical_json,
     compile_graph,
     fold_cycle_events,
+    resolve_cycle_in_doubt_activity,
     resume_cycle,
     start_cycle,
 )
@@ -29,6 +31,7 @@ ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = ROOT / "spec" / "conformance"
 STARTED_AT = "2026-07-26T12:00:00.000Z"
 CHECKPOINT_AT = "2026-07-26T12:00:01.000Z"
+RESOLUTION_AT = CHECKPOINT_AT
 
 
 def _request(graph_hash: str) -> dict[str, Any]:
@@ -449,6 +452,193 @@ async def _in_doubt_report(
     return projection
 
 
+async def _resolution_report(graph_hash: str) -> dict[str, Any]:
+    request = _request(graph_hash)
+    request["controllerRunId"] = "cycle-cross-language-resolution"
+    request["controllerId"] = "cycle-cross-language-resolution-controller"
+    request["hostRun"]["runId"] = "cycle-cross-language-resolution-host"
+    request["eventStreamId"] = "cycle-cross-language-resolution.events"
+    request["checkpointScope"] = "cycle-cross-language-resolution.checkpoints"
+    request["policy"]["maxIterations"] = 1
+    request["activities"]["finder"]["sideEffects"] = "idempotent"
+    request["activities"]["finder"]["maxAttemptsPerRound"] = 2
+    store = MemoryCycleStore()
+    inputs: list[dict[str, Any]] = []
+
+    def finder(context: CycleActivityContext) -> list[object]:
+        inputs.append(
+            {"phase": context.phase.value, "iteration": context.iteration, "input": context.input}
+        )
+        raise CycleRuntimeError(
+            CycleErrorCode.ACTIVITY_FAILED,
+            "ambiguous idempotent provider result",
+        )
+
+    initial_lease = {
+        **_lease(),
+        "leaseId": "cycle-cross-language-resolution-lease-1",
+    }
+    terminal = await start_cycle(
+        request,
+        CycleHandlers(finder=finder, candidate_evaluator=lambda _: []),
+        store=store,
+        lease=initial_lease,
+        clock=lambda: STARTED_AT,
+    )
+    before = fold_cycle_events(terminal.events, require_terminal=True)
+    unresolved = cast(list[dict[str, Any]], before.state["inDoubtActivities"])
+    assert len(unresolved) == 1
+    operator_id = "cycle-cross-language-resolution-operator"
+    resolution_lease = {
+        "leaseId": "cycle-cross-language-resolution-lease-2",
+        "holderId": operator_id,
+        "leaseEpoch": 2,
+        "fencingToken": 2,
+        "acquiredAt": STARTED_AT,
+        "expiresAt": "2026-07-26T12:01:00.000Z",
+    }
+    command: dict[str, Any] = {
+        "apiVersion": (
+            "graphengineering.reacher-z.github.io/"
+            "cycle-in-doubt-resolutions/v1alpha1"
+        ),
+        "kind": "CycleInDoubtResolution",
+        "resolutionId": "cycle-cross-language-resolution-1",
+        "controllerRunId": request["controllerRunId"],
+        "controllerHash": before.request.controller_hash,
+        "requestHash": before.request.request_hash,
+        "eventStreamId": request["eventStreamId"],
+        "expectedSequence": before.tail_sequence,
+        "expectedHistoryPrefixHash": before.tail_hash,
+        "activityKey": unresolved[0]["activityKey"],
+        "disposition": "confirmed-not-applied",
+        "evidenceHash": "d" * 64,
+        "authoritySnapshot": {
+            "principalHash": "a" * 64,
+            "grantHash": "b" * 64,
+            "policyHash": "c" * 64,
+            "leaseHolderHash": hashlib.sha256(operator_id.encode("utf-8")).hexdigest(),
+        },
+    }
+
+    async def rejection_code(
+        command_value: object,
+        lease_value: object,
+        timestamp: str = RESOLUTION_AT,
+    ) -> str:
+        appends = store.append_count
+        try:
+            await resolve_cycle_in_doubt_activity(
+                request,
+                command_value,
+                store=store,
+                lease=lease_value,
+                clock=lambda: timestamp,
+            )
+        except CycleRuntimeError as exc:
+            assert store.append_count == appends
+            return exc.code.value
+        raise AssertionError("hostile resolution unexpectedly succeeded")
+
+    malformed = {**command, "unexpected": True}
+    wrong_target = {**command, "activityKey": "f" * 64}
+    stale_tail = {**command, "expectedSequence": command["expectedSequence"] - 1}
+    stale_fence = {**resolution_lease, "leaseEpoch": 1, "fencingToken": 1}
+    wrong_holder = {**resolution_lease, "holderId": "attacker"}
+    errors = {
+        "malformed": await rejection_code(malformed, resolution_lease),
+        "wrongTarget": await rejection_code(wrong_target, resolution_lease),
+        "staleTail": await rejection_code(stale_tail, resolution_lease),
+        "staleFence": await rejection_code(command, stale_fence),
+        "wrongHolder": await rejection_code(command, wrong_holder),
+        "regressedClock": await rejection_code(
+            command,
+            resolution_lease,
+            "2026-07-26T11:59:59.999Z",
+        ),
+        "expiredLease": await rejection_code(
+            command,
+            resolution_lease,
+            "2026-07-26T12:01:00.000Z",
+        ),
+    }
+
+    checkpoint_id = f"{request['controllerRunId']}-latest"
+    resolved = await resolve_cycle_in_doubt_activity(
+        request,
+        command,
+        store=store,
+        lease=resolution_lease,
+        clock=lambda: RESOLUTION_AT,
+        checkpoint_id=checkpoint_id,
+    )
+    events = await store.read(request["eventStreamId"])
+    checkpoint = await store.load_checkpoint(request["checkpointScope"], checkpoint_id)
+    assert checkpoint is not None
+    assert resolved.fold.state["inDoubtActivities"] == []
+    assert resolved.fold.terminal_result == terminal.result
+
+    appends = store.append_count
+    clock_calls = 0
+
+    def forbidden_clock() -> str:
+        nonlocal clock_calls
+        clock_calls += 1
+        raise AssertionError("duplicate resolution sampled the clock")
+
+    duplicate = await resolve_cycle_in_doubt_activity(
+        request,
+        command,
+        store=store,
+        lease={"malformed": True},
+        clock=forbidden_clock,
+    )
+    duplicate_zero_write = store.append_count == appends
+    changed = {**command, "disposition": "confirmed-applied"}
+    conflict = await rejection_code(changed, {"malformed": True})
+    absent = {
+        **command,
+        "resolutionId": "cycle-cross-language-resolution-2",
+        "expectedSequence": resolved.event.sequence,
+        "expectedHistoryPrefixHash": resolved.event.record_hash,
+    }
+    absent_target = await rejection_code(absent, resolution_lease)
+
+    event_documents = [event.model_dump(mode="json", by_alias=True) for event in events]
+    event_document = resolved.event.model_dump(mode="json", by_alias=True)
+    return {
+        "command": command,
+        "commandCanonical": canonical_json(command),
+        "commandHash": resolved.command_hash,
+        "result": terminal.result,
+        "resultCanonical": canonical_json(terminal.result),
+        "eventTypes": [event.type for event in events],
+        "eventCanonical": [canonical_json(event) for event in event_documents],
+        "recordHashes": [event.record_hash for event in events],
+        "inputsCanonical": [canonical_json(item) for item in inputs],
+        "resolutionEvent": event_document,
+        "resolutionEventCanonical": canonical_json(event_document),
+        "stateCanonical": canonical_json(resolved.fold.state),
+        "preResolutionInDoubt": unresolved,
+        "postResolutionInDoubt": resolved.fold.state["inDoubtActivities"],
+        "checkpoint": checkpoint,
+        "checkpointCanonical": canonical_json(checkpoint),
+        "checkpointStateCanonical": canonical_json(checkpoint["state"]),
+        "errors": {
+            **errors,
+            "conflict": conflict,
+            "absentTarget": absent_target,
+        },
+        "duplicate": {
+            "duplicate": duplicate.duplicate,
+            "commandHash": duplicate.command_hash,
+            "eventRecordHash": duplicate.event.record_hash,
+            "zeroWrite": duplicate_zero_write,
+            "clockCalls": clock_calls,
+        },
+    }
+
+
 async def _main() -> None:
     graph_document = json.loads(
         (FIXTURES / "diamond.graph.json").read_text(encoding="utf-8")
@@ -515,6 +705,7 @@ async def _main() -> None:
             "recovered": await _in_doubt_report(graph.graph_hash, exhausted=False),
             "exhausted": await _in_doubt_report(graph.graph_hash, exhausted=True),
         },
+        "resolution": await _resolution_report(graph.graph_hash),
     }
     print(json.dumps(report, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
 

@@ -41,6 +41,7 @@
         "RoundReserved",
         "ActivityStarted",
         "ActivityFailed",
+        "InDoubtActivityResolved",
         "DiscoveryCommitted",
         "CandidateEvaluationCommitted",
         "ModeOutcomeCommitted",
@@ -141,6 +142,12 @@
       "properties": {
         "type": { "const": "ActivityFailed" },
         "data": { "$ref": "#/$defs/activityFailedData" }
+      }
+    },
+    {
+      "properties": {
+        "type": { "const": "InDoubtActivityResolved" },
+        "data": { "$ref": "#/$defs/inDoubtActivityResolvedData" }
       }
     },
     {
@@ -695,6 +702,64 @@
         "attempt": { "$ref": "#/$defs/positiveCounter" },
         "failure": { "$ref": "#/$defs/failure" },
         "usage": { "$ref": "#/$defs/usage" }
+      }
+    },
+    "inDoubtResolutionAuthority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["principalHash", "grantHash", "policyHash", "leaseHolderHash"],
+      "properties": {
+        "principalHash": { "$ref": "#/$defs/hash" },
+        "grantHash": { "$ref": "#/$defs/hash" },
+        "policyHash": { "$ref": "#/$defs/hash" },
+        "leaseHolderHash": { "$ref": "#/$defs/hash" }
+      }
+    },
+    "inDoubtResolutionCommand": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "apiVersion",
+        "kind",
+        "resolutionId",
+        "controllerRunId",
+        "controllerHash",
+        "requestHash",
+        "eventStreamId",
+        "expectedSequence",
+        "expectedHistoryPrefixHash",
+        "activityKey",
+        "disposition",
+        "evidenceHash",
+        "authoritySnapshot"
+      ],
+      "properties": {
+        "apiVersion": {
+          "const": "graphengineering.reacher-z.github.io/cycle-in-doubt-resolutions/v1alpha1"
+        },
+        "kind": { "const": "CycleInDoubtResolution" },
+        "resolutionId": { "$ref": "#/$defs/identifier" },
+        "controllerRunId": { "$ref": "#/$defs/identifier" },
+        "controllerHash": { "$ref": "#/$defs/hash" },
+        "requestHash": { "$ref": "#/$defs/hash" },
+        "eventStreamId": { "$ref": "#/$defs/identifier" },
+        "expectedSequence": { "$ref": "#/$defs/counter" },
+        "expectedHistoryPrefixHash": { "$ref": "#/$defs/hash" },
+        "activityKey": { "$ref": "#/$defs/hash" },
+        "disposition": {
+          "enum": ["confirmed-applied", "confirmed-not-applied"]
+        },
+        "evidenceHash": { "$ref": "#/$defs/hash" },
+        "authoritySnapshot": { "$ref": "#/$defs/inDoubtResolutionAuthority" }
+      }
+    },
+    "inDoubtActivityResolvedData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["command", "commandHash"],
+      "properties": {
+        "command": { "$ref": "#/$defs/inDoubtResolutionCommand" },
+        "commandHash": { "$ref": "#/$defs/hash" }
       }
     },
     "discoveryCommittedData": {

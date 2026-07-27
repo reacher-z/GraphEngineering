@@ -751,6 +751,37 @@
       ]
     },
     {
+      "name": "terminal-in-doubt-resolution-payload",
+      "baseEvent": 15,
+      "mutations": [
+        {"op": "replace", "path": "/type", "value": "InDoubtActivityResolved"},
+        {"op": "replace", "path": "/lease", "value": {"leaseId": "resolution-lease-3", "holderId": "operator-1", "leaseEpoch": 3, "fencingToken": 3, "acquiredAt": "2026-07-26T00:00:00Z", "expiresAt": "2026-07-26T00:01:00Z"}},
+        {"op": "replace", "path": "/data", "value": {
+          "command": {
+            "apiVersion": "graphengineering.reacher-z.github.io/cycle-in-doubt-resolutions/v1alpha1",
+            "kind": "CycleInDoubtResolution",
+            "resolutionId": "resolution-1",
+            "controllerRunId": "cycle-terminal-in-doubt",
+            "controllerHash": "1111111111111111111111111111111111111111111111111111111111111111",
+            "requestHash": "2222222222222222222222222222222222222222222222222222222222222222",
+            "eventStreamId": "cycle-terminal-in-doubt.events",
+            "expectedSequence": 10,
+            "expectedHistoryPrefixHash": "3333333333333333333333333333333333333333333333333333333333333333",
+            "activityKey": "4444444444444444444444444444444444444444444444444444444444444444",
+            "disposition": "confirmed-not-applied",
+            "evidenceHash": "5555555555555555555555555555555555555555555555555555555555555555",
+            "authoritySnapshot": {
+              "principalHash": "6666666666666666666666666666666666666666666666666666666666666666",
+              "grantHash": "7777777777777777777777777777777777777777777777777777777777777777",
+              "policyHash": "8888888888888888888888888888888888888888888888888888888888888888",
+              "leaseHolderHash": "99b6333569c2e999985f7a44f7e3b1fa295062a2d0aff5a1cbdc1a59ed3b324a"
+            }
+          },
+          "commandHash": "e9777dc2fef5c158ba9104316e31fe01115dfd26e49f51a9f1185c53f1ab39be"
+        }}
+      ]
+    },
+    {
       "name": "patch-rejection-payload",
       "baseEvent": 11,
       "mutations": [
@@ -906,5 +937,71 @@
       ],
       "expectCode": "GE_CYCLE_INVALID_HISTORY"
     }
-  ]
+  ],
+  "inDoubtResolutionProtocol": {
+    "hashDomain": "graph-engineering/cycle-in-doubt-resolution/v1alpha1\u0000",
+    "base": {
+      "terminal": true,
+      "currentSequence": 10,
+      "currentHistoryPrefixHash": "3333333333333333333333333333333333333333333333333333333333333333",
+      "pendingActivityKey": "4444444444444444444444444444444444444444444444444444444444444444",
+      "controllerRunId": "cycle-terminal-in-doubt",
+      "controllerHash": "1111111111111111111111111111111111111111111111111111111111111111",
+      "requestHash": "2222222222222222222222222222222222222222222222222222222222222222",
+      "eventStreamId": "cycle-terminal-in-doubt.events",
+      "maxLeaseEpoch": 2,
+      "maxFencingToken": 2,
+      "lastLeaseId": "lease-2",
+      "eventTimestamp": "2026-07-26T00:00:01Z",
+      "lease": {
+        "leaseId": "resolution-lease-3",
+        "holderId": "operator-1",
+        "leaseEpoch": 3,
+        "fencingToken": 3,
+        "acquiredAt": "2026-07-26T00:00:00Z",
+        "expiresAt": "2026-07-26T00:01:00Z"
+      },
+      "command": {
+        "apiVersion": "graphengineering.reacher-z.github.io/cycle-in-doubt-resolutions/v1alpha1",
+        "kind": "CycleInDoubtResolution",
+        "resolutionId": "resolution-1",
+        "controllerRunId": "cycle-terminal-in-doubt",
+        "controllerHash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "requestHash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "eventStreamId": "cycle-terminal-in-doubt.events",
+        "expectedSequence": 10,
+        "expectedHistoryPrefixHash": "3333333333333333333333333333333333333333333333333333333333333333",
+        "activityKey": "4444444444444444444444444444444444444444444444444444444444444444",
+        "disposition": "confirmed-not-applied",
+        "evidenceHash": "5555555555555555555555555555555555555555555555555555555555555555",
+        "authoritySnapshot": {
+          "principalHash": "6666666666666666666666666666666666666666666666666666666666666666",
+          "grantHash": "7777777777777777777777777777777777777777777777777777777777777777",
+          "policyHash": "8888888888888888888888888888888888888888888888888888888888888888",
+          "leaseHolderHash": "99b6333569c2e999985f7a44f7e3b1fa295062a2d0aff5a1cbdc1a59ed3b324a"
+        }
+      },
+      "expectedCommandHash": "e9777dc2fef5c158ba9104316e31fe01115dfd26e49f51a9f1185c53f1ab39be"
+    },
+    "cases": [
+      {"name": "confirmed-not-applied-clears-terminal-singleton", "expect": {"accepted": true, "duplicate": false, "writes": 1, "remainingInDoubt": 0}},
+      {"name": "confirmed-applied-clears-terminal-singleton", "mutation": {"op": "replace", "path": "/command/disposition", "value": "confirmed-applied"}, "expect": {"accepted": true, "duplicate": false, "writes": 1, "remainingInDoubt": 0}},
+      {"name": "byte-identical-resolution-replay-is-zero-write", "existing": "same-command", "expect": {"accepted": true, "duplicate": true, "writes": 0, "remainingInDoubt": 0}},
+      {"name": "changed-command-reusing-resolution-id-conflicts", "existing": "base-command", "mutation": {"op": "replace", "path": "/command/disposition", "value": "confirmed-applied"}, "expectCode": "GE_CYCLE_RESOLUTION_CONFLICT"},
+      {"name": "wrong-activity-key-rejects-before-write", "mutation": {"op": "replace", "path": "/command/activityKey", "value": "9999999999999999999999999999999999999999999999999999999999999999"}, "expectCode": "GE_CYCLE_RESOLUTION_TARGET_MISMATCH"},
+      {"name": "absent-in-doubt-singleton-rejects", "override": {"pendingActivityKey": null}, "expectCode": "GE_CYCLE_RESOLUTION_TARGET_MISMATCH"},
+      {"name": "nonterminal-history-rejects", "override": {"terminal": false}, "expectCode": "GE_CYCLE_RESOLUTION_NOT_TERMINAL"},
+      {"name": "stale-expected-sequence-rejects", "mutation": {"op": "replace", "path": "/command/expectedSequence", "value": 9}, "expectCode": "GE_CYCLE_RESOLUTION_STALE"},
+      {"name": "stale-history-prefix-rejects", "mutation": {"op": "replace", "path": "/command/expectedHistoryPrefixHash", "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, "expectCode": "GE_CYCLE_RESOLUTION_STALE"},
+      {"name": "stale-lease-epoch-rejects", "mutation": {"op": "replace", "path": "/lease/leaseEpoch", "value": 2}, "expectCode": "GE_CYCLE_STALE_LEASE"},
+      {"name": "stale-fencing-token-rejects", "mutation": {"op": "replace", "path": "/lease/fencingToken", "value": 2}, "expectCode": "GE_CYCLE_STALE_LEASE"},
+      {"name": "reused-lease-id-rejects", "mutation": {"op": "replace", "path": "/lease/leaseId", "value": "lease-2"}, "expectCode": "GE_CYCLE_STALE_LEASE"},
+      {"name": "lease-holder-authority-substitution-rejects", "mutation": {"op": "replace", "path": "/lease/holderId", "value": "different-operator"}, "expectCode": "GE_CYCLE_RESOLUTION_AUTHORITY_MISMATCH"},
+      {"name": "lease-not-yet-valid-rejects", "mutation": {"op": "replace", "path": "/lease/acquiredAt", "value": "2026-07-26T00:00:02Z"}, "expectCode": "GE_CYCLE_STALE_LEASE"},
+      {"name": "expired-resolution-lease-rejects", "mutation": {"op": "replace", "path": "/lease/expiresAt", "value": "2026-07-26T00:00:01Z"}, "expectCode": "GE_CYCLE_STALE_LEASE"},
+      {"name": "unknown-command-field-rejects-closed-shape", "mutation": {"op": "add", "path": "/command/debug", "value": true}, "expectCode": "GE_CYCLE_RESOLUTION_INVALID"},
+      {"name": "unknown-disposition-rejects", "mutation": {"op": "replace", "path": "/command/disposition", "value": "assume-safe"}, "expectCode": "GE_CYCLE_RESOLUTION_INVALID"},
+      {"name": "controller-identity-substitution-rejects", "mutation": {"op": "replace", "path": "/command/controllerHash", "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, "expectCode": "GE_CYCLE_RESOLUTION_INVALID"}
+    ]
+  }
 }

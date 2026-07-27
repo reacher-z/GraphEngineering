@@ -27,6 +27,7 @@ import {
   CYCLE_ROUND_PLAN_DOMAIN,
   captureBoundedJson,
   createCycleRoundPlan,
+  cycleInDoubtResolutionCommandHash,
   cycleControllerHash,
   cycleControllerIdentity,
   cycleRequestHash,
@@ -38,6 +39,7 @@ import {
   sha256Utf8,
   validateCycleCandidates,
   validateCycleControllerRequest,
+  validateCycleInDoubtResolutionCommand,
   validateCycleLease,
   validateCycleVerdicts,
   validateGraphPatchShape,
@@ -116,6 +118,7 @@ const DATA_KEYS: Readonly<Record<CycleControllerEvent["type"], readonly string[]
   RoundReserved: ["iteration", "plan", "planHash", "reservationId", "maximum", "deadlineAt", "currentRevision"],
   ActivityStarted: ["iteration", "phase", "activityId", "activityKey", "attempt", "sideEffects", "inputHash", "reservationId"],
   ActivityFailed: ["iteration", "activityKey", "attempt", "failure", "usage"],
+  InDoubtActivityResolved: ["command", "commandHash"],
   DiscoveryCommitted: [
     "iteration", "activityKey", "candidateBatch", "candidateBatchHash", "candidateCount",
     "freshKeys", "duplicateKeys", "seenAdditions", "usage", "durationMs",
@@ -493,7 +496,9 @@ export function foldCycleControllerEvents(
     verifyCycleEventIntegrity(event, index === 0 ? undefined : events[index - 1]);
     if (eventIds.has(event.eventId)) invalid(runId, "event ID is duplicated");
     eventIds.add(event.eventId);
-    if (terminalResult !== null) invalid(runId, "event follows terminal result");
+    if (terminalResult !== null && event.type !== "InDoubtActivityResolved") {
+      invalid(runId, "event follows terminal result");
+    }
     const eventTime = Date.parse(event.timestamp);
     if (!Number.isFinite(eventTime) || eventTime < lastTimestamp) invalid(runId, "event timestamps regress or are invalid");
     lastTimestamp = eventTime;
@@ -504,7 +509,8 @@ export function foldCycleControllerEvents(
     } else {
       if (event.lease === null) invalid(runId, "mutation event has no lease");
       validateCycleLease(event.lease, runId);
-      if (event.type !== "LeaseAcquired" && event.type !== "LeaseRenewed") {
+      if (event.type !== "LeaseAcquired" && event.type !== "LeaseRenewed"
+          && event.type !== "InDoubtActivityResolved") {
         if (activeLease === null) invalid(runId, "event has no active lease");
         exact(event.lease, activeLease, runId, "event uses stale lease identity");
         if (eventTime >= Date.parse(activeLease.expiresAt)) invalid(runId, "event uses an expired lease");
@@ -581,14 +587,51 @@ export function foldCycleControllerEvents(
       continue;
     }
     if (request === undefined || currentRevision === undefined) invalid(runId, "history has no controller request");
-    const elapsed = eventTime - Date.parse(startedAt);
-    if (!Number.isSafeInteger(elapsed) || elapsed < 0) {
-      invalid(runId, "event timestamp is outside the trusted elapsed-time envelope");
+    if (event.type !== "InDoubtActivityResolved") {
+      const elapsed = eventTime - Date.parse(startedAt);
+      if (!Number.isSafeInteger(elapsed) || elapsed < 0) {
+        invalid(runId, "event timestamp is outside the trusted elapsed-time envelope");
+      }
+      durationMs = Math.max(durationMs, elapsed);
     }
-    durationMs = Math.max(durationMs, elapsed);
     if (event.controllerRunId !== runId || event.hostRunId !== request.hostRun.runId
         || event.requestHash !== requestHash || event.controllerHash !== controllerHash) {
       invalid(runId, "event controller identity drifted");
+    }
+
+    if (event.type === "InDoubtActivityResolved") {
+      closedKeys(data, ["command", "commandHash"], runId, "in-doubt resolution data");
+      if (terminalResult === null || activeLease !== null || inDoubt.length !== 1) {
+        invalid(runId, "in-doubt resolution requires one terminal unresolved activity");
+      }
+      const command = validateCycleInDoubtResolutionCommand(data.command, runId);
+      const commandHash = cycleInDoubtResolutionCommandHash(command, runId);
+      const lease = event.lease as CycleLease;
+      if (data.commandHash !== commandHash
+          || command.controllerRunId !== runId
+          || command.controllerHash !== controllerHash
+          || command.requestHash !== requestHash
+          || command.eventStreamId !== request.eventStreamId
+          || command.expectedSequence !== event.sequence - 1
+          || command.expectedHistoryPrefixHash !== event.previousEventHash
+          || command.activityKey !== inDoubt[0]?.activityKey
+          || event.graphRevision !== currentRevision.graphRevision) {
+        invalid(runId, "in-doubt resolution command does not bind the exact terminal prefix");
+      }
+      if (lease.leaseEpoch <= maxLeaseEpoch || lease.fencingToken <= maxFencingToken
+          || lease.leaseId === lastLeaseId
+          || Date.parse(lease.acquiredAt) > eventTime
+          || Date.parse(lease.expiresAt) <= eventTime) {
+        invalid(runId, "in-doubt resolution lease fence or interval is stale");
+      }
+      if (sha256Utf8(lease.holderId) !== command.authoritySnapshot.leaseHolderHash) {
+        invalid(runId, "in-doubt resolution authority does not bind the lease holder");
+      }
+      resolveInDoubt(command.activityKey);
+      lastLeaseId = lease.leaseId;
+      maxLeaseEpoch = lease.leaseEpoch;
+      maxFencingToken = lease.fencingToken;
+      continue;
     }
 
     if (event.type === "LeaseAcquired") {

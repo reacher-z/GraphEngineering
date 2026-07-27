@@ -24,6 +24,7 @@ import {
   type CycleExitObservation,
   type CycleExitReason,
   type CycleGraphCoordinate,
+  type CycleInDoubtResolutionCommand,
   type CycleInlinePayload,
   type CycleLease,
   type CycleModeOutcome,
@@ -40,6 +41,7 @@ export const CYCLE_REQUEST_DOMAIN = "graph-engineering/cycle-controller-request/
 export const CYCLE_EVENT_DOMAIN = "graph-engineering/cycle-event/v1alpha1\0";
 export const CYCLE_ACTIVITY_DOMAIN = "graph-engineering/cycle-activity/v1alpha1\0";
 export const CYCLE_ROUND_PLAN_DOMAIN = "graph-engineering/cycle-round-plan/v1alpha1\0";
+export const CYCLE_IN_DOUBT_RESOLUTION_DOMAIN = "graph-engineering/cycle-in-doubt-resolution/v1alpha1\0";
 export const GRAPH_REVISION_DOMAIN = "graph-engineering/revision-chain/v1alpha1\0";
 
 export const MAX_PORTABLE_DEPTH = 100;
@@ -456,6 +458,84 @@ function validateLeaseShape(value: unknown, controllerRunId: string): CycleLease
 
 export function validateCycleLease(value: unknown, controllerRunId = "unknown"): CycleLease {
   return validateLeaseShape(value, controllerRunId);
+}
+
+/** Validate and detach one authority-bound terminal in-doubt resolution command. */
+export function validateCycleInDoubtResolutionCommand(
+  value: unknown,
+  controllerRunId = "unknown",
+): CycleInDoubtResolutionCommand {
+  let captured: JsonValue;
+  try {
+    captured = captureBoundedJson(value, 16_384).value;
+  } catch (error) {
+    return fail(
+      "GE_CYCLE_RESOLUTION_INVALID",
+      controllerRunId,
+      "in-doubt resolution command is not bounded portable JSON",
+      { causeName: error instanceof Error ? error.name : typeof error },
+    );
+  }
+  if (!isRecord(captured)) {
+    return fail(
+      "GE_CYCLE_RESOLUTION_INVALID",
+      controllerRunId,
+      "in-doubt resolution command must be an object",
+    );
+  }
+  const commandRunId = identifier(captured.controllerRunId)
+    ? captured.controllerRunId
+    : controllerRunId;
+  exactKeys(captured, [
+    "apiVersion", "kind", "resolutionId", "controllerRunId", "controllerHash",
+    "requestHash", "eventStreamId", "expectedSequence", "expectedHistoryPrefixHash",
+    "activityKey", "disposition", "evidenceHash", "authoritySnapshot",
+  ], commandRunId, "in-doubt resolution command", "GE_CYCLE_RESOLUTION_INVALID");
+  if (captured.apiVersion !== "graphengineering.reacher-z.github.io/cycle-in-doubt-resolutions/v1alpha1"
+      || captured.kind !== "CycleInDoubtResolution"
+      || !identifier(captured.resolutionId)
+      || !identifier(captured.controllerRunId)
+      || !identifier(captured.eventStreamId)
+      || !hash(captured.controllerHash)
+      || !hash(captured.requestHash)
+      || !numberInRange(captured.expectedSequence, 0, MAX_SAFE, true)
+      || !hash(captured.expectedHistoryPrefixHash)
+      || !hash(captured.activityKey)
+      || captured.disposition !== "confirmed-applied"
+        && captured.disposition !== "confirmed-not-applied"
+      || !hash(captured.evidenceHash)
+      || !isRecord(captured.authoritySnapshot)) {
+    return fail(
+      "GE_CYCLE_RESOLUTION_INVALID",
+      commandRunId,
+      "in-doubt resolution command fields are invalid",
+    );
+  }
+  exactKeys(captured.authoritySnapshot, [
+    "principalHash", "grantHash", "policyHash", "leaseHolderHash",
+  ], commandRunId, "in-doubt resolution authority", "GE_CYCLE_RESOLUTION_INVALID");
+  if (!hash(captured.authoritySnapshot.principalHash)
+      || !hash(captured.authoritySnapshot.grantHash)
+      || !hash(captured.authoritySnapshot.policyHash)
+      || !hash(captured.authoritySnapshot.leaseHolderHash)) {
+    return fail(
+      "GE_CYCLE_RESOLUTION_INVALID",
+      commandRunId,
+      "in-doubt resolution authority fields are invalid",
+    );
+  }
+  return snapshotJson(captured) as unknown as CycleInDoubtResolutionCommand;
+}
+
+/** Return the stable idempotency hash for one validated resolution command. */
+export function cycleInDoubtResolutionCommandHash(
+  value: CycleInDoubtResolutionCommand | unknown,
+  controllerRunId = "unknown",
+): string {
+  return hashWithDomain(
+    CYCLE_IN_DOUBT_RESOLUTION_DOMAIN,
+    validateCycleInDoubtResolutionCommand(value, controllerRunId),
+  );
 }
 
 function hasUnicodeScalarString(value: string): boolean {

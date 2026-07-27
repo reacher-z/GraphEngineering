@@ -25,6 +25,7 @@ export {
 export {
   forkCycleController,
   replayCycleController,
+  resolveCycleInDoubtActivity,
   resumeCycleController,
   startCycleController,
 } from "./cycle-controller.js";
@@ -32,6 +33,7 @@ export {
   createCycleControllerEvent,
   createCycleInlinePayload,
   createCycleRoundPlan,
+  cycleInDoubtResolutionCommandHash,
   cycleActivityKey,
   cycleControllerHash,
   cycleControllerIdentity,
@@ -42,9 +44,11 @@ export {
   hashWithDomain,
   observeCycleExit,
   selectCycleExitReason,
+  sha256Utf8,
   validateCycleCandidates,
   validateCycleControllerRequest,
   validateCycleControllerPolicy,
+  validateCycleInDoubtResolutionCommand,
   validateCycleLease,
   validateCycleVerdicts,
   validateGraphPatchShape,

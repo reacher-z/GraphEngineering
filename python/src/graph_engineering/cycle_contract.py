@@ -32,6 +32,9 @@ CYCLE_CONTROLLER_DOMAIN = "graph-engineering/cycle-controller/v1alpha1\0"
 CYCLE_EVENT_DOMAIN = "graph-engineering/cycle-event/v1alpha1\0"
 CYCLE_ACTIVITY_DOMAIN = "graph-engineering/cycle-activity/v1alpha1\0"
 CYCLE_ROUND_PLAN_DOMAIN = "graph-engineering/cycle-round-plan/v1alpha1\0"
+CYCLE_IN_DOUBT_RESOLUTION_DOMAIN = (
+    "graph-engineering/cycle-in-doubt-resolution/v1alpha1\0"
+)
 REVISION_DOMAIN = "graph-engineering/revision-chain/v1alpha1\0"
 
 MAX_CAPTURE_DEPTH = 100
@@ -69,6 +72,12 @@ class CycleErrorCode(StrEnum):
     ACTIVITY_FAILED = "GE_ACTIVITY_FAILED"
     ACTIVITY_OUTPUT_INVALID = "GE_ACTIVITY_OUTPUT_INVALID"
     IN_DOUBT_SIDE_EFFECT = "IN_DOUBT_SIDE_EFFECT"
+    RESOLUTION_INVALID = "GE_CYCLE_RESOLUTION_INVALID"
+    RESOLUTION_CONFLICT = "GE_CYCLE_RESOLUTION_CONFLICT"
+    RESOLUTION_TARGET_MISMATCH = "GE_CYCLE_RESOLUTION_TARGET_MISMATCH"
+    RESOLUTION_NOT_TERMINAL = "GE_CYCLE_RESOLUTION_NOT_TERMINAL"
+    RESOLUTION_STALE = "GE_CYCLE_RESOLUTION_STALE"
+    RESOLUTION_AUTHORITY_MISMATCH = "GE_CYCLE_RESOLUTION_AUTHORITY_MISMATCH"
     PATCH_INVALID = "GE_PATCH_INVALID"
     PATCH_STALE_BASE = "GE_PATCH_STALE_BASE"
     PATCH_IDEMPOTENCY_CONFLICT = "GE_PATCH_IDEMPOTENCY_CONFLICT"
@@ -678,6 +687,69 @@ def validate_lease(value: object) -> tuple[JsonObject, LeaseClaim]:
     return captured, model
 
 
+class CycleInDoubtResolutionAuthority(_CycleModel):
+    principal_hash: HashValue = Field(alias="principalHash")
+    grant_hash: HashValue = Field(alias="grantHash")
+    policy_hash: HashValue = Field(alias="policyHash")
+    lease_holder_hash: HashValue = Field(alias="leaseHolderHash")
+
+
+class CycleInDoubtResolutionCommand(_CycleModel):
+    api_version: Literal[
+        "graphengineering.reacher-z.github.io/cycle-in-doubt-resolutions/v1alpha1"
+    ] = Field(alias="apiVersion")
+    kind: Literal["CycleInDoubtResolution"]
+    resolution_id: Identifier = Field(alias="resolutionId")
+    controller_run_id: Identifier = Field(alias="controllerRunId")
+    controller_hash: HashValue = Field(alias="controllerHash")
+    request_hash: HashValue = Field(alias="requestHash")
+    event_stream_id: Identifier = Field(alias="eventStreamId")
+    expected_sequence: SafeCounter = Field(alias="expectedSequence")
+    expected_history_prefix_hash: HashValue = Field(alias="expectedHistoryPrefixHash")
+    activity_key: HashValue = Field(alias="activityKey")
+    disposition: Literal["confirmed-applied", "confirmed-not-applied"]
+    evidence_hash: HashValue = Field(alias="evidenceHash")
+    authority_snapshot: CycleInDoubtResolutionAuthority = Field(alias="authoritySnapshot")
+
+
+@dataclass(frozen=True, slots=True)
+class ValidatedCycleInDoubtResolution:
+    document: JsonObject
+    model: CycleInDoubtResolutionCommand
+    command_hash: str
+
+
+def validate_cycle_in_doubt_resolution(
+    value: object,
+) -> ValidatedCycleInDoubtResolution:
+    """Validate, detach, and hash one closed terminal resolution command."""
+
+    captured = capture_portable_json(
+        value,
+        error_code=CycleErrorCode.RESOLUTION_INVALID,
+    )
+    if type(captured) is not dict:
+        raise CycleRuntimeError(
+            CycleErrorCode.RESOLUTION_INVALID,
+            "in-doubt resolution command must be an object",
+        )
+    try:
+        model = CycleInDoubtResolutionCommand.model_validate(captured)
+    except ValidationError as exc:
+        message, path = _validation_message(exc)
+        raise CycleRuntimeError(
+            CycleErrorCode.RESOLUTION_INVALID,
+            message,
+            path=path,
+            cause=exc,
+        ) from exc
+    return ValidatedCycleInDoubtResolution(
+        document=captured,
+        model=model,
+        command_hash=domain_hash(CYCLE_IN_DOUBT_RESOLUTION_DOMAIN, captured),
+    )
+
+
 def parse_timestamp(value: str) -> datetime:
     normalized = f"{value[:-1]}+00:00" if value.endswith("Z") else value
     return datetime.fromisoformat(normalized)
@@ -700,6 +772,7 @@ CycleEventType: TypeAlias = Literal[
     "PatchRejected",
     "RoundCommitted",
     "ControllerTerminated",
+    "InDoubtActivityResolved",
 ]
 
 
@@ -899,6 +972,7 @@ __all__ = [
     "CYCLE_ACTIVITY_DOMAIN",
     "CYCLE_CONTROLLER_DOMAIN",
     "CYCLE_EVENT_DOMAIN",
+    "CYCLE_IN_DOUBT_RESOLUTION_DOMAIN",
     "CYCLE_REQUEST_DOMAIN",
     "CYCLE_ROUND_PLAN_DOMAIN",
     "MAX_CAPTURE_DEPTH",
@@ -909,11 +983,14 @@ __all__ = [
     "CycleControllerRequest",
     "CycleErrorCode",
     "CycleEvent",
+    "CycleInDoubtResolutionAuthority",
+    "CycleInDoubtResolutionCommand",
     "CycleIssue",
     "CycleRuntimeError",
     "GraphCoordinate",
     "GraphPatchLimits",
     "LeaseClaim",
+    "ValidatedCycleInDoubtResolution",
     "ValidatedCycleRequest",
     "activity_key",
     "capture_portable_json",
@@ -926,6 +1003,7 @@ __all__ = [
     "round_plan_hash",
     "strict_rfc3339",
     "validate_cycle_event",
+    "validate_cycle_in_doubt_resolution",
     "validate_cycle_policy",
     "validate_cycle_request",
     "validate_lease",

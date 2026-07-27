@@ -2006,6 +2006,168 @@ for (const projectionCase of cycleDurableCases.inDoubtProjectionCases) {
   }
 }
 
+class CycleResolutionError extends Error {
+  constructor(code, message) {
+    super(message);
+    this.name = "CycleResolutionError";
+    this.code = code;
+  }
+}
+
+function rejectCycleResolution(code, message) {
+  throw new CycleResolutionError(code, message);
+}
+
+const resolutionProtocol = cycleDurableCases.inDoubtResolutionProtocol;
+const resolutionBase = resolutionProtocol.base;
+const resolutionIdentifier = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
+const resolutionHash = /^[0-9a-f]{64}$/u;
+const resolutionCommandKeys = [
+  "apiVersion", "kind", "resolutionId", "controllerRunId", "controllerHash",
+  "requestHash", "eventStreamId", "expectedSequence", "expectedHistoryPrefixHash",
+  "activityKey", "disposition", "evidenceHash", "authoritySnapshot",
+].sort(compareUnicodeCodePoints);
+const resolutionAuthorityKeys = [
+  "principalHash", "grantHash", "policyHash", "leaseHolderHash",
+].sort(compareUnicodeCodePoints);
+const resolutionLeaseKeys = [
+  "leaseId", "holderId", "leaseEpoch", "fencingToken", "acquiredAt", "expiresAt",
+].sort(compareUnicodeCodePoints);
+
+function validateResolutionCommandShape(command) {
+  if (command === null || typeof command !== "object" || Array.isArray(command)) {
+    rejectCycleResolution("GE_CYCLE_RESOLUTION_INVALID", "resolution command is not an object");
+  }
+  if (!Object.keys(command).sort(compareUnicodeCodePoints)
+    .every((key, index) => key === resolutionCommandKeys[index])
+      || Object.keys(command).length !== resolutionCommandKeys.length) {
+    rejectCycleResolution("GE_CYCLE_RESOLUTION_INVALID", "resolution command is not closed");
+  }
+  if (
+    command.apiVersion !== "graphengineering.reacher-z.github.io/cycle-in-doubt-resolutions/v1alpha1"
+    || command.kind !== "CycleInDoubtResolution"
+    || !resolutionIdentifier.test(command.resolutionId)
+    || !resolutionIdentifier.test(command.controllerRunId)
+    || !resolutionIdentifier.test(command.eventStreamId)
+    || [command.resolutionId, command.controllerRunId, command.eventStreamId].includes(".")
+    || [command.resolutionId, command.controllerRunId, command.eventStreamId].includes("..")
+    || !Number.isSafeInteger(command.expectedSequence)
+    || command.expectedSequence < 0
+    || ![command.controllerHash, command.requestHash, command.expectedHistoryPrefixHash,
+      command.activityKey, command.evidenceHash].every((value) => resolutionHash.test(value))
+    || !["confirmed-applied", "confirmed-not-applied"].includes(command.disposition)
+  ) rejectCycleResolution("GE_CYCLE_RESOLUTION_INVALID", "resolution command fields are invalid");
+  const authority = command.authoritySnapshot;
+  if (authority === null || typeof authority !== "object" || Array.isArray(authority)
+      || Object.keys(authority).length !== resolutionAuthorityKeys.length
+      || !Object.keys(authority).sort(compareUnicodeCodePoints)
+        .every((key, index) => key === resolutionAuthorityKeys[index])
+      || !resolutionAuthorityKeys.every((key) => resolutionHash.test(authority[key]))) {
+    rejectCycleResolution("GE_CYCLE_RESOLUTION_INVALID", "resolution authority is invalid");
+  }
+}
+
+function validateResolutionLeaseShape(lease) {
+  if (lease === null || typeof lease !== "object" || Array.isArray(lease)
+      || Object.keys(lease).length !== resolutionLeaseKeys.length
+      || !Object.keys(lease).sort(compareUnicodeCodePoints)
+        .every((key, index) => key === resolutionLeaseKeys[index])
+      || !resolutionIdentifier.test(lease.leaseId)
+      || !resolutionIdentifier.test(lease.holderId)
+      || !Number.isSafeInteger(lease.leaseEpoch) || lease.leaseEpoch < 1
+      || !Number.isSafeInteger(lease.fencingToken) || lease.fencingToken < 1) {
+    rejectCycleResolution("GE_CYCLE_STALE_LEASE", "resolution lease is invalid");
+  }
+  const acquiredAt = Date.parse(lease.acquiredAt);
+  const expiresAt = Date.parse(lease.expiresAt);
+  if (!Number.isFinite(acquiredAt) || !Number.isFinite(expiresAt) || expiresAt <= acquiredAt) {
+    rejectCycleResolution("GE_CYCLE_STALE_LEASE", "resolution lease interval is invalid");
+  }
+  return { acquiredAt, expiresAt };
+}
+
+assert.equal(
+  hashWithDomain(resolutionProtocol.hashDomain, resolutionBase.command),
+  resolutionBase.expectedCommandHash,
+  "D7 terminal in-doubt resolution command hash drifted",
+);
+
+for (const testCase of resolutionProtocol.cases) {
+  const candidate = cloneJson(resolutionBase);
+  if (testCase.override !== undefined) Object.assign(candidate, cloneJson(testCase.override));
+  if (testCase.mutation !== undefined) applyJsonMutation(candidate, testCase.mutation);
+  let observedCode = null;
+  let observed = null;
+  try {
+    validateResolutionCommandShape(candidate.command);
+    const commandHash = hashWithDomain(resolutionProtocol.hashDomain, candidate.command);
+    const existingHash = testCase.existing === "same-command"
+      ? commandHash
+      : testCase.existing === "base-command"
+        ? resolutionBase.expectedCommandHash
+        : null;
+    if (existingHash !== null) {
+      if (existingHash !== commandHash) {
+        rejectCycleResolution(
+          "GE_CYCLE_RESOLUTION_CONFLICT",
+          "resolution ID was reused with different command bytes",
+        );
+      }
+      observed = { accepted: true, duplicate: true, writes: 0, remainingInDoubt: 0 };
+    } else {
+      if (
+        candidate.command.controllerRunId !== candidate.controllerRunId
+        || candidate.command.controllerHash !== candidate.controllerHash
+        || candidate.command.requestHash !== candidate.requestHash
+        || candidate.command.eventStreamId !== candidate.eventStreamId
+      ) rejectCycleResolution("GE_CYCLE_RESOLUTION_INVALID", "resolution identity drifted");
+      if (!candidate.terminal) {
+        rejectCycleResolution(
+          "GE_CYCLE_RESOLUTION_NOT_TERMINAL",
+          "resolution requires a terminal controller",
+        );
+      }
+      if (candidate.pendingActivityKey === null
+          || candidate.command.activityKey !== candidate.pendingActivityKey) {
+        rejectCycleResolution(
+          "GE_CYCLE_RESOLUTION_TARGET_MISMATCH",
+          "resolution target is not the unresolved singleton",
+        );
+      }
+      if (candidate.command.expectedSequence !== candidate.currentSequence
+          || candidate.command.expectedHistoryPrefixHash !== candidate.currentHistoryPrefixHash) {
+        rejectCycleResolution("GE_CYCLE_RESOLUTION_STALE", "resolution prefix is stale");
+      }
+      const interval = validateResolutionLeaseShape(candidate.lease);
+      const eventTimestamp = Date.parse(candidate.eventTimestamp);
+      if (candidate.lease.leaseEpoch <= candidate.maxLeaseEpoch
+          || candidate.lease.fencingToken <= candidate.maxFencingToken
+          || candidate.lease.leaseId === candidate.lastLeaseId
+          || eventTimestamp < interval.acquiredAt || eventTimestamp >= interval.expiresAt) {
+        rejectCycleResolution("GE_CYCLE_STALE_LEASE", "resolution fence is stale");
+      }
+      const leaseHolderHash = createHash("sha256")
+        .update(candidate.lease.holderId, "utf8")
+        .digest("hex");
+      if (leaseHolderHash !== candidate.command.authoritySnapshot.leaseHolderHash) {
+        rejectCycleResolution(
+          "GE_CYCLE_RESOLUTION_AUTHORITY_MISMATCH",
+          "resolution lease holder differs from the authority snapshot",
+        );
+      }
+      observed = { accepted: true, duplicate: false, writes: 1, remainingInDoubt: 0 };
+    }
+  } catch (error) {
+    observedCode = error?.code ?? null;
+  }
+  if (Object.hasOwn(testCase, "expectCode")) {
+    assert.equal(observedCode, testCase.expectCode, `${testCase.name} code drifted`);
+  } else {
+    assert.equal(observedCode, null, `${testCase.name} unexpectedly rejected`);
+    assert.deepEqual(observed, testCase.expect, `${testCase.name} projection drifted`);
+  }
+}
+
 const diamond = await loadJson("diamond.graph.json");
 assert.equal(diamond.apiVersion, "graphengineering.reacher-z.github.io/v1alpha1");
 assert.equal(diamond.kind, "Graph");
@@ -2013,5 +2175,5 @@ assert.equal(new Set(diamond.nodes.map(({ id }) => id)).size, diamond.nodes.leng
 assert.equal(new Set(diamond.edges.map(({ id }) => id)).size, diamond.edges.length);
 
 process.stdout.write(
-  `Validated ${fixtureNames.length} JSON fixtures (${caseNames.length} case manifests), ${yamlNames.length} referenced YAML fixtures, ${Object.keys(expected.canonicalization).length} graph hash, ${Object.keys(expected.checkpoints ?? {}).length} checkpoint hash, ${durableJson.validCases.length} Durable JSON vectors, ${compiledIdentities.length} compiled identities, ${graphPatchCases.validCases.length + graphPatchCases.invalidCases.length} graph patch schema cases plus ${graphPatchCases.semanticCases.length} closed semantic vectors, and 6 D7 controller/revision/event/checkpoint schemas with ${durableEvents.length} chained event goldens, ${cycleDurableCases.leaseTransitionCases.length} valid and ${cycleDurableCases.invalidLeaseTransitionCases.length} hostile lease transitions, ${cycleDurableCases.validInterruptedHistoryCases?.length ?? 0} interrupted terminal/checkpoint folds, ${cycleDurableCases.inDoubtProjectionCases.length} in-doubt singleton cases, ${cycleDurableCases.untilDryFoldCases.length} global-seen convergence fold, ${cycleDurableCases.hardStopFoldCases.length} hard-stop folds, ${cycleDurableCases.invalidEventHistoryCases.length} hostile histories, ${cycleDurableCases.invalidCheckpointSemanticCases.length} hostile checkpoint folds, plus ${cycleDurableCases.validStandaloneEventSchemaCases.length} standalone phase-event shapes; all ${expectedD7Tests.length} D7-CYCLE-SPEC-024 expected-test groups are mapped against meta-valid schemas.\n`,
+  `Validated ${fixtureNames.length} JSON fixtures (${caseNames.length} case manifests), ${yamlNames.length} referenced YAML fixtures, ${Object.keys(expected.canonicalization).length} graph hash, ${Object.keys(expected.checkpoints ?? {}).length} checkpoint hash, ${durableJson.validCases.length} Durable JSON vectors, ${compiledIdentities.length} compiled identities, ${graphPatchCases.validCases.length + graphPatchCases.invalidCases.length} graph patch schema cases plus ${graphPatchCases.semanticCases.length} closed semantic vectors, and 6 D7 controller/revision/event/checkpoint schemas with ${durableEvents.length} chained event goldens, ${cycleDurableCases.leaseTransitionCases.length} valid and ${cycleDurableCases.invalidLeaseTransitionCases.length} hostile lease transitions, ${cycleDurableCases.validInterruptedHistoryCases?.length ?? 0} interrupted terminal/checkpoint folds, ${cycleDurableCases.inDoubtProjectionCases.length} in-doubt singleton cases, ${resolutionProtocol.cases.length} terminal in-doubt resolution cases, ${cycleDurableCases.untilDryFoldCases.length} global-seen convergence fold, ${cycleDurableCases.hardStopFoldCases.length} hard-stop folds, ${cycleDurableCases.invalidEventHistoryCases.length} hostile histories, ${cycleDurableCases.invalidCheckpointSemanticCases.length} hostile checkpoint folds, plus ${cycleDurableCases.validStandaloneEventSchemaCases.length} standalone phase-event shapes; all ${expectedD7Tests.length} D7-CYCLE-SPEC-024 expected-test groups are mapped against meta-valid schemas.\n`,
 );

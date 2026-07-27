@@ -1825,6 +1825,195 @@ for (const [outcome, tsInDoubtReport] of Object.entries(tsInDoubtReports)) {
     );
   }
 }
+
+async function exerciseCycleInDoubtResolution() {
+  const value = JSON.parse(JSON.stringify(cycleRequestValue));
+  Object.assign(value, {
+    controllerRunId: "cycle-cross-language-resolution",
+    controllerId: "cycle-cross-language-resolution-controller",
+    hostRun: {
+      relationship: "standalone-child-controller",
+      runId: "cycle-cross-language-resolution-host",
+    },
+    eventStreamId: "cycle-cross-language-resolution.events",
+    checkpointScope: "cycle-cross-language-resolution.checkpoints",
+  });
+  value.policy.maxIterations = 1;
+  value.activities.finder.sideEffects = "idempotent";
+  value.activities.finder.maxAttemptsPerRound = 2;
+  const request = runtime.validateCycleControllerRequest(value);
+  const store = new runtime.MemoryCycleControllerEventStore();
+  const checkpointStore = new runtime.MemoryCycleControllerCheckpointStore();
+  const inputs = [];
+  let finderCalls = 0;
+  const finder = (context) => {
+    finderCalls += 1;
+    inputs.push({ phase: context.phase, iteration: context.iteration, input: context.input });
+    throw new runtime.CycleActivityFailure(
+      "GE_ACTIVITY_FAILED",
+      "ambiguous idempotent provider result",
+      { retryable: finderCalls < 2, inDoubt: true },
+    );
+  };
+  const terminal = await runtime.startCycleController(request, cycleGraph, {
+    eventStore: store,
+    lease: {
+      leaseId: "cycle-cross-language-resolution-lease-1",
+      holderId: "cycle-cross-language-holder",
+      leaseEpoch: 1,
+      fencingToken: 1,
+      acquiredAt: cycleStartedAt,
+      expiresAt: "2026-07-26T12:01:00.000Z",
+    },
+    now: () => new Date(cycleStartedAt),
+    activities: { finder, candidateEvaluator: () => ({ output: [] }) },
+  });
+  const terminalEvents = store.snapshot(request.eventStreamId);
+  const before = runtime.foldCycleControllerEvents(terminalEvents, { requireTerminal: true });
+  assert.equal(before.inDoubtActivities.length, 1);
+  const operatorId = "cycle-cross-language-resolution-operator";
+  const resolutionLease = {
+    leaseId: "cycle-cross-language-resolution-lease-2",
+    holderId: operatorId,
+    leaseEpoch: 2,
+    fencingToken: 2,
+    acquiredAt: cycleStartedAt,
+    expiresAt: "2026-07-26T12:01:00.000Z",
+  };
+  const command = {
+    apiVersion: "graphengineering.reacher-z.github.io/cycle-in-doubt-resolutions/v1alpha1",
+    kind: "CycleInDoubtResolution",
+    resolutionId: "cycle-cross-language-resolution-1",
+    controllerRunId: request.controllerRunId,
+    controllerHash: before.controllerHash,
+    requestHash: before.requestHash,
+    eventStreamId: request.eventStreamId,
+    expectedSequence: before.lastSequence,
+    expectedHistoryPrefixHash: before.historyPrefixHash,
+    activityKey: before.inDoubtActivities[0].activityKey,
+    disposition: "confirmed-not-applied",
+    evidenceHash: "d".repeat(64),
+    authoritySnapshot: {
+      principalHash: "a".repeat(64),
+      grantHash: "b".repeat(64),
+      policyHash: "c".repeat(64),
+      leaseHolderHash: runtime.sha256Utf8(operatorId),
+    },
+  };
+  const resolutionAt = cycleCheckpointAt;
+  const rejectionCode = async (commandValue, leaseValue, timestamp = resolutionAt) => {
+    const beforeLength = store.snapshot(request.eventStreamId).length;
+    try {
+      await runtime.resolveCycleInDoubtActivity(request, commandValue, {
+        eventStore: store,
+        lease: leaseValue,
+        now: () => new Date(timestamp),
+      });
+    } catch (error) {
+      assert.equal(store.snapshot(request.eventStreamId).length, beforeLength);
+      if (error !== null && typeof error === "object" && "code" in error) return error.code;
+      throw error;
+    }
+    throw new Error("hostile resolution unexpectedly succeeded");
+  };
+  const errors = {
+    malformed: await rejectionCode({ ...command, unexpected: true }, resolutionLease),
+    wrongTarget: await rejectionCode({ ...command, activityKey: "f".repeat(64) }, resolutionLease),
+    staleTail: await rejectionCode(
+      { ...command, expectedSequence: command.expectedSequence - 1 },
+      resolutionLease,
+    ),
+    staleFence: await rejectionCode(
+      command,
+      { ...resolutionLease, leaseEpoch: 1, fencingToken: 1 },
+    ),
+    wrongHolder: await rejectionCode(
+      command,
+      { ...resolutionLease, holderId: "attacker" },
+    ),
+    regressedClock: await rejectionCode(
+      command,
+      resolutionLease,
+      "2026-07-26T11:59:59.999Z",
+    ),
+    expiredLease: await rejectionCode(
+      command,
+      resolutionLease,
+      "2026-07-26T12:01:00.000Z",
+    ),
+  };
+  const resolved = await runtime.resolveCycleInDoubtActivity(request, command, {
+    eventStore: store,
+    checkpointStore,
+    lease: resolutionLease,
+    now: () => new Date(resolutionAt),
+  });
+  const events = store.snapshot(request.eventStreamId);
+  const checkpoint = await checkpointStore.read(
+    request.checkpointScope,
+    `${request.controllerRunId}-latest`,
+  );
+  assert.notEqual(checkpoint, null);
+  assert.deepEqual(resolved.fold.inDoubtActivities, []);
+  assert.deepEqual(resolved.fold.terminalResult, terminal);
+
+  const duplicateLength = events.length;
+  let clockCalls = 0;
+  const duplicate = await runtime.resolveCycleInDoubtActivity(request, command, {
+    eventStore: store,
+    lease: { malformed: true },
+    now: () => {
+      clockCalls += 1;
+      throw new Error("duplicate resolution sampled the clock");
+    },
+  });
+  const duplicateZeroWrite = store.snapshot(request.eventStreamId).length === duplicateLength;
+  const conflict = await rejectionCode(
+    { ...command, disposition: "confirmed-applied" },
+    { malformed: true },
+  );
+  const absentTarget = await rejectionCode({
+    ...command,
+    resolutionId: "cycle-cross-language-resolution-2",
+    expectedSequence: resolved.event.sequence,
+    expectedHistoryPrefixHash: resolved.event.recordHash,
+  }, resolutionLease);
+
+  return {
+    command,
+    commandCanonical: core.canonicalSerialize(command),
+    commandHash: resolved.commandHash,
+    result: terminal,
+    resultCanonical: core.canonicalSerialize(terminal),
+    eventTypes: events.map(({ type }) => type),
+    eventCanonical: events.map((event) => core.canonicalSerialize(event)),
+    recordHashes: events.map(({ recordHash }) => recordHash),
+    inputsCanonical: inputs.map((item) => core.canonicalSerialize(item)),
+    resolutionEvent: resolved.event,
+    resolutionEventCanonical: core.canonicalSerialize(resolved.event),
+    stateCanonical: core.canonicalSerialize(checkpoint.state),
+    preResolutionInDoubt: before.inDoubtActivities,
+    postResolutionInDoubt: resolved.fold.inDoubtActivities,
+    checkpoint,
+    checkpointCanonical: core.canonicalSerialize(checkpoint),
+    checkpointStateCanonical: core.canonicalSerialize(checkpoint.state),
+    errors: { ...errors, conflict, absentTarget },
+    duplicate: {
+      duplicate: duplicate.duplicate,
+      commandHash: duplicate.commandHash,
+      eventRecordHash: duplicate.event.recordHash,
+      zeroWrite: duplicateZeroWrite,
+      clockCalls,
+    },
+  };
+}
+
+const tsResolutionReport = await exerciseCycleInDoubtResolution();
+assert.deepEqual(
+  tsResolutionReport,
+  pyCycleReport.resolution,
+  "D7 terminal in-doubt resolution reports differ",
+);
 const tsModeEventCount = Object.values(tsModeReports)
   .reduce((total, report) => total + report.eventTypes.length, 0);
 const tsModeInputCount = Object.values(tsModeReports)
@@ -1833,8 +2022,10 @@ const tsInDoubtEventCount = Object.values(tsInDoubtReports)
   .reduce((total, report) => total + report.eventTypes.length, 0);
 const tsInDoubtInputCount = Object.values(tsInDoubtReports)
   .reduce((total, report) => total + report.inputsCanonical.length, 0);
+const tsResolutionEventCount = tsResolutionReport.eventTypes.length;
+const tsResolutionInputCount = tsResolutionReport.inputsCanonical.length;
 process.stdout.write(
-  `Cross-language native-cycle conformance passed for ${tsCycleEvents.length + tsPatchEvents.length + tsResumeEvents.length + tsModeEventCount + tsInDoubtEventCount} exact events, ${cycleInputs.length + patchInputs.length + resumeInputs.length + tsModeInputCount + tsInDoubtInputCount} activity inputs, all three controller modes, two in-doubt recovery outcomes, seven terminal results, one accepted GraphPatch/revision, one crash/takeover resume, and seven checkpoints.\n`,
+  `Cross-language native-cycle conformance passed for ${tsCycleEvents.length + tsPatchEvents.length + tsResumeEvents.length + tsModeEventCount + tsInDoubtEventCount + tsResolutionEventCount} exact events, ${cycleInputs.length + patchInputs.length + resumeInputs.length + tsModeInputCount + tsInDoubtInputCount + tsResolutionInputCount} activity inputs, all three controller modes, two in-doubt recovery outcomes, one authority-bound terminal resolution, eight terminal results, one accepted GraphPatch/revision, one crash/takeover resume, and eight checkpoints.\n`,
 );
 
 // Authoring conformance is intentionally expected-vs-TypeScript-vs-Python.

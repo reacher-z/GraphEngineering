@@ -5,9 +5,12 @@ import {
   CycleActivityFailure,
   CycleControllerError,
   forkCycleController,
+  MemoryCycleControllerCheckpointStore,
   MemoryCycleControllerEventStore,
   replayCycleController,
+  resolveCycleInDoubtActivity,
   resumeCycleController,
+  sha256Utf8,
   startCycleController,
   validateCycleControllerRequest,
   type CycleActivityBinding,
@@ -17,6 +20,7 @@ import {
   type CycleControllerCheckpoint,
   type CycleControllerCheckpointStore,
   type CycleControllerRequest,
+  type CycleInDoubtResolutionCommand,
   type CycleLease,
   type CycleMode,
 } from "../src/index.js";
@@ -632,6 +636,200 @@ describe("native bounded cycle controller", () => {
         expect(fold.inDoubtActivities).toEqual([]);
       }
     }
+  });
+
+  it("resolves one terminal in-doubt singleton under an authority-bound fence", async () => {
+    const base = request("until-dry", { maxIterations: 1, maxTotalAttempts: 10 });
+    const mutable = JSON.parse(JSON.stringify(base)) as CycleControllerRequest;
+    const finderBinding = mutable.activities.finder as {
+      sideEffects: string;
+      maxAttemptsPerRound: number;
+    };
+    finderBinding.sideEffects = "idempotent";
+    finderBinding.maxAttemptsPerRound = 2;
+    const item = validateCycleControllerRequest(mutable);
+    const store = new MemoryCycleControllerEventStore();
+    const checkpointStore = new MemoryCycleControllerCheckpointStore();
+    let calls = 0;
+    const terminal = await startCycleController(item, graph(), {
+      eventStore: store,
+      lease: lease("resolution-source-lease", 1),
+      now: fixedNow(),
+      activities: {
+        finder: () => {
+          calls += 1;
+          throw new CycleActivityFailure(
+            "GE_ACTIVITY_FAILED",
+            "ambiguous idempotent provider result",
+            { retryable: calls < 2, inDoubt: true },
+          );
+        },
+        candidateEvaluator: () => ({ output: [] }),
+      },
+    });
+    const before = await replayCycleController(store, item.eventStreamId);
+    expect(before.inDoubtActivities).toHaveLength(1);
+    const activityKey = before.inDoubtActivities[0]!.activityKey;
+    const resolutionLease: CycleLease = {
+      leaseId: "resolution-lease-2",
+      holderId: "operator-1",
+      leaseEpoch: 2,
+      fencingToken: 2,
+      acquiredAt: new Date(START).toISOString(),
+      expiresAt: new Date(START + 60_000).toISOString(),
+    };
+    const command: CycleInDoubtResolutionCommand = {
+      apiVersion: "graphengineering.reacher-z.github.io/cycle-in-doubt-resolutions/v1alpha1",
+      kind: "CycleInDoubtResolution",
+      resolutionId: "resolution-1",
+      controllerRunId: item.controllerRunId,
+      controllerHash: before.controllerHash,
+      requestHash: before.requestHash,
+      eventStreamId: item.eventStreamId,
+      expectedSequence: before.lastSequence,
+      expectedHistoryPrefixHash: before.historyPrefixHash,
+      activityKey,
+      disposition: "confirmed-not-applied",
+      evidenceHash: "5".repeat(64),
+      authoritySnapshot: {
+        principalHash: "6".repeat(64),
+        grantHash: "7".repeat(64),
+        policyHash: "8".repeat(64),
+        leaseHolderHash: sha256Utf8(resolutionLease.holderId),
+      },
+    };
+    const originalLength = events(store, item).length;
+
+    await expect(resolveCycleInDoubtActivity(item, {
+      ...command,
+      activityKey: "9".repeat(64),
+    }, {
+      eventStore: store, lease: resolutionLease, now: fixedNow(),
+    })).rejects.toMatchObject({ code: "GE_CYCLE_RESOLUTION_TARGET_MISMATCH" });
+    await expect(resolveCycleInDoubtActivity(item, {
+      ...command,
+      expectedSequence: command.expectedSequence - 1,
+    }, {
+      eventStore: store, lease: resolutionLease, now: fixedNow(),
+    })).rejects.toMatchObject({ code: "GE_CYCLE_RESOLUTION_STALE" });
+    await expect(resolveCycleInDoubtActivity(item, command, {
+      eventStore: store,
+      lease: { ...resolutionLease, leaseEpoch: 1, fencingToken: 1 },
+      now: fixedNow(),
+    })).rejects.toMatchObject({ code: "GE_CYCLE_STALE_LEASE" });
+    await expect(resolveCycleInDoubtActivity(item, command, {
+      eventStore: store,
+      lease: { ...resolutionLease, holderId: "different-operator" },
+      now: fixedNow(),
+    })).rejects.toMatchObject({ code: "GE_CYCLE_RESOLUTION_AUTHORITY_MISMATCH" });
+    expect(events(store, item)).toHaveLength(originalLength);
+
+    const resolved = await resolveCycleInDoubtActivity(item, command, {
+      eventStore: store,
+      checkpointStore,
+      lease: resolutionLease,
+      now: fixedNow(),
+    });
+    expect(resolved).toMatchObject({ duplicate: false });
+    expect(resolved.commandHash).toMatch(/^[0-9a-f]{64}$/u);
+    expect(resolved.event.type).toBe("InDoubtActivityResolved");
+    expect(resolved.fold.inDoubtActivities).toEqual([]);
+    expect(resolved.fold.terminalResult).toEqual(terminal);
+    expect(resolved.fold.durationMs).toBe(before.durationMs);
+    expect(resolved.fold.activeLease).toBeNull();
+    expect(resolved.fold.maxLeaseEpoch).toBe(2);
+    expect(resolved.fold.maxFencingToken).toBe(2);
+    expect(events(store, item)).toHaveLength(originalLength + 1);
+    const checkpoint = await checkpointStore.read(
+      item.checkpointScope,
+      `${item.controllerRunId}-latest`,
+    );
+    expect(checkpoint).not.toBeNull();
+    expect(checkpoint?.lastSequence).toBe(resolved.event.sequence);
+    expect(checkpoint?.historyPrefixHash).toBe(resolved.event.recordHash);
+    expect(checkpoint?.lease).toBeNull();
+    expect(checkpoint?.state.inDoubtActivities).toEqual([]);
+    expect(checkpoint?.state.terminalResult).toEqual(terminal);
+
+    const duplicate = await resolveCycleInDoubtActivity(item, command, {
+      eventStore: store,
+      lease: lease("ignored-duplicate-lease", 1),
+      now: () => {
+        throw new Error("duplicate replay must not sample the clock");
+      },
+    });
+    expect(duplicate).toMatchObject({ duplicate: true, commandHash: resolved.commandHash });
+    expect(duplicate.event.recordHash).toBe(resolved.event.recordHash);
+    expect(events(store, item)).toHaveLength(originalLength + 1);
+    await expect(resolveCycleInDoubtActivity(item, {
+      ...command,
+      disposition: "confirmed-applied",
+    }, {
+      eventStore: store, lease: lease("unused-conflict-lease", 3), now: fixedNow(),
+    })).rejects.toMatchObject({ code: "GE_CYCLE_RESOLUTION_CONFLICT" });
+
+    const resumedFinder = vi.fn(() => ({ output: [] }));
+    await expect(resumeCycleController(item, graph(), {
+      eventStore: store,
+      expectedSequence: resolved.event.sequence,
+      lease: lease("terminal-read-lease", 3),
+      now: fixedNow(),
+      activities: { finder: resumedFinder, candidateEvaluator: () => ({ output: [] }) },
+    })).resolves.toEqual(terminal);
+    expect(resumedFinder).not.toHaveBeenCalled();
+  });
+
+  it("rejects terminal resolution against an interrupted nonterminal claim", async () => {
+    const base = request("until-dry", { maxIterations: 1 });
+    const mutable = JSON.parse(JSON.stringify(base)) as CycleControllerRequest;
+    (mutable.activities.finder as { sideEffects: string }).sideEffects = "non-idempotent";
+    const item = validateCycleControllerRequest(mutable);
+    const store = new CommitThenThrowCycleStore("ActivityStarted", "finder");
+    await expect(startCycleController(item, graph(), {
+      eventStore: store,
+      lease: lease("open-resolution-source", 1),
+      now: fixedNow(),
+      activities: {
+        finder: () => ({ output: [] }),
+        candidateEvaluator: () => ({ output: [] }),
+      },
+    })).rejects.toMatchObject({ code: "GE_CYCLE_STORE_FAILED" });
+    const fold = await replayCycleController(store, item.eventStreamId);
+    const activityKey = fold.openRound?.openActivity?.activityKey;
+    expect(activityKey).toMatch(/^[0-9a-f]{64}$/u);
+    const resolutionLease: CycleLease = {
+      leaseId: "nonterminal-resolution-lease",
+      holderId: "operator-1",
+      leaseEpoch: 2,
+      fencingToken: 2,
+      acquiredAt: new Date(START).toISOString(),
+      expiresAt: new Date(START + 60_000).toISOString(),
+    };
+    const command: CycleInDoubtResolutionCommand = {
+      apiVersion: "graphengineering.reacher-z.github.io/cycle-in-doubt-resolutions/v1alpha1",
+      kind: "CycleInDoubtResolution",
+      resolutionId: "resolution-nonterminal",
+      controllerRunId: item.controllerRunId,
+      controllerHash: fold.controllerHash,
+      requestHash: fold.requestHash,
+      eventStreamId: item.eventStreamId,
+      expectedSequence: fold.lastSequence,
+      expectedHistoryPrefixHash: fold.historyPrefixHash,
+      activityKey: activityKey as string,
+      disposition: "confirmed-not-applied",
+      evidenceHash: "5".repeat(64),
+      authoritySnapshot: {
+        principalHash: "6".repeat(64),
+        grantHash: "7".repeat(64),
+        policyHash: "8".repeat(64),
+        leaseHolderHash: sha256Utf8(resolutionLease.holderId),
+      },
+    };
+    const length = store.delegate.snapshot(item.eventStreamId).length;
+    await expect(resolveCycleInDoubtActivity(item, command, {
+      eventStore: store, lease: resolutionLease, now: fixedNow(),
+    })).rejects.toMatchObject({ code: "GE_CYCLE_RESOLUTION_NOT_TERMINAL" });
+    expect(store.delegate.snapshot(item.eventStreamId)).toHaveLength(length);
   });
 
   it("charges an unproven external claim when an already-cancelled resume terminates", async () => {

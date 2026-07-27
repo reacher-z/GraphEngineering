@@ -26,6 +26,7 @@ from .cycle_contract import (
     revision_hash,
     round_plan_hash,
     validate_cycle_event,
+    validate_cycle_in_doubt_resolution,
     validate_cycle_request,
 )
 from .graph_patch import validate_graph_patch_shape
@@ -155,6 +156,7 @@ _EVENT_DATA_KEYS: dict[str, frozenset[str]] = {
     ),
     "RoundCommitted": frozenset({"record"}),
     "ControllerTerminated": frozenset({"observation", "result"}),
+    "InDoubtActivityResolved": frozenset({"command", "commandHash"}),
 }
 
 
@@ -819,7 +821,7 @@ def fold_cycle_events(
     event_ids: set[str] = set()
 
     for index, event in enumerate(events):
-        if terminal:
+        if terminal and event.type != "InDoubtActivityResolved":
             raise _history_error("event follows terminal result")
         data = cast(dict[str, Any], event.data)
         _require_data_shape(event.type, data)
@@ -852,7 +854,11 @@ def fold_cycle_events(
                 raise _history_error("ControllerCreated must be unleased")
         elif event_lease is None:
             raise _history_error("mutation event has no lease")
-        elif event.type not in {"LeaseAcquired", "LeaseRenewed"}:
+        elif event.type not in {
+            "LeaseAcquired",
+            "LeaseRenewed",
+            "InDoubtActivityResolved",
+        }:
             if active_lease is None:
                 raise _history_error("event has no active lease")
             _exact(event_lease, active_lease, "event uses a stale lease")
@@ -879,6 +885,54 @@ def fold_cycle_events(
                 raise _history_error("controller deadline differs from policy")
             if event_time != parse_timestamp(started_at):
                 raise _history_error("ControllerCreated timestamp differs from startedAt")
+
+        elif event.type == "InDoubtActivityResolved":
+            if not terminal or active_lease is not None or len(terminal_in_doubt) != 1:
+                raise _history_error(
+                    "in-doubt resolution requires one terminal unresolved activity"
+                )
+            assert event_lease is not None
+            validated_resolution = validate_cycle_in_doubt_resolution(data["command"])
+            command = validated_resolution.model
+            epoch = _integer(event_lease["leaseEpoch"], "lease epoch", positive=True)
+            fence = _integer(
+                event_lease["fencingToken"],
+                "fencing token",
+                positive=True,
+            )
+            if (
+                data["commandHash"] != validated_resolution.command_hash
+                or command.controller_run_id != request.model.controller_run_id
+                or command.controller_hash != request.controller_hash
+                or command.request_hash != request.request_hash
+                or command.event_stream_id != request.model.event_stream_id
+                or command.expected_sequence != event.sequence - 1
+                or command.expected_history_prefix_hash != event.previous_event_hash
+                or command.activity_key != terminal_in_doubt[0]["activityKey"]
+                or event.graph_revision != current_revision["graphRevision"]
+            ):
+                raise _history_error(
+                    "in-doubt resolution command does not bind the exact terminal prefix"
+                )
+            if (
+                epoch <= max_epoch
+                or fence <= max_fence
+                or event_lease["leaseId"] == last_lease_id
+                or parse_timestamp(cast(str, event_lease["acquiredAt"])) > event_time
+                or parse_timestamp(cast(str, event_lease["expiresAt"])) <= event_time
+            ):
+                raise _history_error("in-doubt resolution lease fence or interval is stale")
+            holder_hash = hashlib.sha256(
+                cast(str, event_lease["holderId"]).encode("utf-8")
+            ).hexdigest()
+            if holder_hash != command.authority_snapshot.lease_holder_hash:
+                raise _history_error(
+                    "in-doubt resolution authority does not bind the lease holder"
+                )
+            _resolve_in_doubt(command.activity_key)
+            last_lease_id = cast(str, event_lease["leaseId"])
+            max_epoch = epoch
+            max_fence = fence
 
         elif event.type == "LeaseAcquired":
             assert event_lease is not None

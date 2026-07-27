@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import hashlib
 import json
 import time
 from collections.abc import Iterator, Mapping
@@ -18,9 +19,11 @@ from graph_engineering.cycle_controller import (
     fork_cycle,
     pause_cycle,
     replay_cycle,
+    resolve_cycle_in_doubt_activity,
     resume_cycle,
     start_cycle,
 )
+from graph_engineering.cycle_fold import validate_checkpoint
 from graph_engineering.cycle_store import MemoryCycleStore
 from graph_engineering.graph_patch import GraphPatchRuntime, PatchAuthority, PatchReservation
 
@@ -38,10 +41,15 @@ def request_document(*, max_iterations: int = 1, dry_rounds: int = 2) -> dict[st
     return cast(dict[str, Any], document)
 
 
-def lease(*, epoch: int = 1, lease_id: str = "lease-1") -> dict[str, Any]:
+def lease(
+    *,
+    epoch: int = 1,
+    lease_id: str = "lease-1",
+    holder_id: str = "python-test",
+) -> dict[str, Any]:
     return {
         "leaseId": lease_id,
-        "holderId": "python-test",
+        "holderId": holder_id,
         "leaseEpoch": epoch,
         "fencingToken": epoch,
         "acquiredAt": "2026-07-26T00:00:00Z",
@@ -53,6 +61,40 @@ def fixed_clock() -> str:
     return "2026-07-26T00:00:00Z"
 
 
+def resolution_command(
+    request: dict[str, Any],
+    events: tuple[Any, ...],
+    activity_key: str,
+    *,
+    resolution_id: str = "resolution-1",
+    holder_id: str = "operator-1",
+) -> dict[str, Any]:
+    tail = events[-1]
+    return {
+        "apiVersion": (
+            "graphengineering.reacher-z.github.io/"
+            "cycle-in-doubt-resolutions/v1alpha1"
+        ),
+        "kind": "CycleInDoubtResolution",
+        "resolutionId": resolution_id,
+        "controllerRunId": request["controllerRunId"],
+        "controllerHash": tail.controller_hash,
+        "requestHash": tail.request_hash,
+        "eventStreamId": request["eventStreamId"],
+        "expectedSequence": tail.sequence,
+        "expectedHistoryPrefixHash": tail.record_hash,
+        "activityKey": activity_key,
+        "disposition": "confirmed-applied",
+        "evidenceHash": "e" * 64,
+        "authoritySnapshot": {
+            "principalHash": "1" * 64,
+            "grantHash": "2" * 64,
+            "policyHash": "3" * 64,
+            "leaseHolderHash": hashlib.sha256(holder_id.encode("utf-8")).hexdigest(),
+        },
+    }
+
+
 def test_cycle_surface_is_exported_from_the_native_python_package() -> None:
     import graph_engineering as ge
 
@@ -61,6 +103,7 @@ def test_cycle_surface_is_exported_from_the_native_python_package() -> None:
     assert ge.replay_cycle is replay_cycle
     assert ge.fork_cycle is fork_cycle
     assert ge.pause_cycle is pause_cycle
+    assert ge.resolve_cycle_in_doubt_activity is resolve_cycle_in_doubt_activity
     assert ge.MemoryCycleStore is MemoryCycleStore
     assert ge.GraphPatchRuntime is GraphPatchRuntime
 
@@ -1264,6 +1307,253 @@ def test_exhausted_idempotent_ambiguity_retains_one_latest_attempt() -> None:
         assert len(in_doubt) == 1
         assert in_doubt[0]["attempt"] == 2
         assert in_doubt[0]["activityKey"] == failures[-1].data["activityKey"]
+
+    asyncio.run(run())
+
+
+def test_terminal_in_doubt_resolution_is_fenced_idempotent_and_checkpointed() -> None:
+    async def run() -> None:
+        request = request_document(max_iterations=1)
+        request["activities"]["finder"]["sideEffects"] = "idempotent"
+        request["activities"]["finder"]["maxAttemptsPerRound"] = 2
+        store = MemoryCycleStore()
+
+        def finder(_: object) -> list[object]:
+            raise CycleRuntimeError(
+                CycleErrorCode.ACTIVITY_FAILED,
+                "ambiguous idempotent provider result",
+            )
+
+        terminal = await start_cycle(
+            request,
+            CycleHandlers(finder=finder, candidate_evaluator=lambda _: []),
+            store=store,
+            lease=lease(),
+            clock=fixed_clock,
+        )
+        terminal_result = copy.deepcopy(terminal.result)
+        terminal_events = terminal.events
+        replayed = await replay_cycle(request["eventStreamId"], store=store)
+        in_doubt = cast(list[dict[str, Any]], replayed.state["inDoubtActivities"])
+        assert len(in_doubt) == 1
+        command = resolution_command(
+            request,
+            terminal_events,
+            cast(str, in_doubt[0]["activityKey"]),
+        )
+        initial_appends = store.append_count
+
+        malformed = copy.deepcopy(command)
+        malformed["unexpected"] = True
+        with pytest.raises(CycleRuntimeError) as invalid_error:
+            await resolve_cycle_in_doubt_activity(
+                request,
+                malformed,
+                store=store,
+                lease=lease(epoch=2, lease_id="operator-lease-2"),
+                clock=fixed_clock,
+            )
+        assert invalid_error.value.code is CycleErrorCode.RESOLUTION_INVALID
+        assert store.append_count == initial_appends
+
+        wrong_target = copy.deepcopy(command)
+        wrong_target["activityKey"] = "f" * 64
+        with pytest.raises(CycleRuntimeError) as target_error:
+            await resolve_cycle_in_doubt_activity(
+                request,
+                wrong_target,
+                store=store,
+                lease=lease(
+                    epoch=2,
+                    lease_id="operator-lease-2",
+                    holder_id="operator-1",
+                ),
+                clock=fixed_clock,
+            )
+        assert target_error.value.code is CycleErrorCode.RESOLUTION_TARGET_MISMATCH
+        assert store.append_count == initial_appends
+
+        stale_tail = copy.deepcopy(command)
+        stale_tail["expectedSequence"] -= 1
+        with pytest.raises(CycleRuntimeError) as tail_error:
+            await resolve_cycle_in_doubt_activity(
+                request,
+                stale_tail,
+                store=store,
+                lease=lease(
+                    epoch=2,
+                    lease_id="operator-lease-2",
+                    holder_id="operator-1",
+                ),
+                clock=fixed_clock,
+            )
+        assert tail_error.value.code is CycleErrorCode.RESOLUTION_STALE
+        assert store.append_count == initial_appends
+
+        with pytest.raises(CycleRuntimeError) as fence_error:
+            await resolve_cycle_in_doubt_activity(
+                request,
+                command,
+                store=store,
+                lease=lease(
+                    epoch=1,
+                    lease_id="operator-lease-stale",
+                    holder_id="operator-1",
+                ),
+                clock=fixed_clock,
+            )
+        assert fence_error.value.code is CycleErrorCode.STALE_LEASE
+        assert store.append_count == initial_appends
+
+        with pytest.raises(CycleRuntimeError) as authority_error:
+            await resolve_cycle_in_doubt_activity(
+                request,
+                command,
+                store=store,
+                lease=lease(
+                    epoch=2,
+                    lease_id="operator-lease-2",
+                    holder_id="attacker",
+                ),
+                clock=fixed_clock,
+            )
+        assert authority_error.value.code is CycleErrorCode.RESOLUTION_AUTHORITY_MISMATCH
+        assert store.append_count == initial_appends
+
+        resolved = await resolve_cycle_in_doubt_activity(
+            request,
+            command,
+            store=store,
+            lease=lease(
+                epoch=2,
+                lease_id="operator-lease-2",
+                holder_id="operator-1",
+            ),
+            clock=fixed_clock,
+            checkpoint_id=f"{request['controllerRunId']}-latest",
+        )
+        assert resolved.duplicate is False
+        assert resolved.event.type == "InDoubtActivityResolved"
+        assert resolved.event.data["commandHash"] == resolved.command_hash
+        assert resolved.fold.terminal is True
+        assert resolved.fold.state["inDoubtActivities"] == []
+        assert resolved.fold.terminal_result == terminal_result
+        assert store.append_count == initial_appends + 1
+        assert store.checkpoint_write_count == 2
+
+        checkpoint_id = f"{request['controllerRunId']}-latest"
+        checkpoint = await store.load_checkpoint(request["checkpointScope"], checkpoint_id)
+        assert checkpoint is not None
+        checkpoint_fold = validate_checkpoint(
+            checkpoint,
+            await store.read(request["eventStreamId"]),
+        )
+        assert checkpoint_fold.state["inDoubtActivities"] == []
+        assert checkpoint_fold.terminal_result == terminal_result
+
+        duplicate_clock_calls = 0
+
+        def forbidden_clock() -> str:
+            nonlocal duplicate_clock_calls
+            duplicate_clock_calls += 1
+            raise AssertionError("duplicate resolution must not sample the clock")
+
+        duplicate = await resolve_cycle_in_doubt_activity(
+            request,
+            command,
+            store=store,
+            lease={"malformed": True},
+            clock=forbidden_clock,
+            checkpoint_id="must-not-write",
+        )
+        assert duplicate.duplicate is True
+        assert duplicate.event.record_hash == resolved.event.record_hash
+        assert duplicate_clock_calls == 0
+        assert store.append_count == initial_appends + 1
+        assert store.checkpoint_write_count == 2
+
+        changed = copy.deepcopy(command)
+        changed["evidenceHash"] = "d" * 64
+        with pytest.raises(CycleRuntimeError) as conflict_error:
+            await resolve_cycle_in_doubt_activity(
+                request,
+                changed,
+                store=store,
+                lease={"malformed": True},
+                clock=forbidden_clock,
+            )
+        assert conflict_error.value.code is CycleErrorCode.RESOLUTION_CONFLICT
+        assert duplicate_clock_calls == 0
+        assert store.append_count == initial_appends + 1
+
+        resumed = await resume_cycle(
+            request,
+            CycleHandlers(
+                finder=lambda _: (_ for _ in ()).throw(AssertionError("no dispatch")),
+                candidate_evaluator=lambda _: (_ for _ in ()).throw(
+                    AssertionError("no dispatch")
+                ),
+            ),
+            store=store,
+            expected_version=resolved.event.sequence,
+            lease={"malformed": True},
+            clock=forbidden_clock,
+        )
+        assert resumed.result == terminal_result
+        assert store.append_count == initial_appends + 1
+
+    asyncio.run(run())
+
+
+def test_in_doubt_resolution_rejects_a_nonterminal_interrupted_claim() -> None:
+    async def run() -> None:
+        request = request_document(max_iterations=2)
+        request["activities"]["finder"]["sideEffects"] = "idempotent"
+        store = MemoryCycleStore()
+
+        def crash_after_claim(boundary: str) -> None:
+            if boundary == "event:ActivityStarted:after-cas":
+                raise Crash()
+
+        with pytest.raises(Crash):
+            await start_cycle(
+                request,
+                CycleHandlers(finder=lambda _: [], candidate_evaluator=lambda _: []),
+                store=store,
+                lease=lease(),
+                clock=fixed_clock,
+                fault_hook=crash_after_claim,
+            )
+        interrupted = await store.read(request["eventStreamId"])
+        replayed = await replay_cycle(
+            request["eventStreamId"],
+            store=store,
+            through_sequence=interrupted[-1].sequence,
+        )
+        open_round = cast(dict[str, Any], replayed.state["openRound"])
+        open_activity = cast(dict[str, Any], open_round["openActivity"])
+        command = resolution_command(
+            request,
+            interrupted,
+            cast(str, open_activity["activityKey"]),
+        )
+        initial_appends = store.append_count
+
+        with pytest.raises(CycleRuntimeError) as raised:
+            await resolve_cycle_in_doubt_activity(
+                request,
+                command,
+                store=store,
+                lease=lease(
+                    epoch=2,
+                    lease_id="operator-lease-2",
+                    holder_id="operator-1",
+                ),
+                clock=fixed_clock,
+            )
+        assert raised.value.code is CycleErrorCode.RESOLUTION_NOT_TERMINAL
+        assert store.append_count == initial_appends
+        assert await store.read(request["eventStreamId"]) == interrupted
 
     asyncio.run(run())
 
