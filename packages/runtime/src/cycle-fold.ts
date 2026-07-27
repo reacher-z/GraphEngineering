@@ -462,6 +462,26 @@ export function foldCycleControllerEvents(
   let round: MutableRound | null = null;
   const reservations = new Map<string, MutableReservation>();
   const inDoubt: CycleOpenActivity[] = [];
+  const upsertInDoubt = (activity: CycleOpenActivity): void => {
+    if (activity.sideEffects === "none") {
+      invalid(runId, "side-effect-free activity cannot enter the external in-doubt projection");
+    }
+    const current = inDoubt[0];
+    if (current === undefined) {
+      inDoubt.push(activity);
+      return;
+    }
+    if (inDoubt.length !== 1 || current.activityKey !== activity.activityKey) {
+      invalid(runId, "multiple external in-doubt activity keys are invalid");
+    }
+    if (activity.attempt < current.attempt) {
+      invalid(runId, "external in-doubt activity attempt regressed");
+    }
+    inDoubt[0] = activity;
+  };
+  const resolveInDoubt = (activityKey: string): void => {
+    if (inDoubt[0]?.activityKey === activityKey) inDoubt.splice(0, 1);
+  };
   const decidedPatches: Array<{ patchId: string; patchHash: string; outcome: "accepted" | "rejected"; decisionSequence: number }> = [];
   const committedRounds: CycleRoundRecord[] = [];
   let terminalObservation: CycleExitObservation | null = null;
@@ -550,12 +570,10 @@ export function foldCycleControllerEvents(
         durationMs = parent.durationMs;
         nextIteration = parent.nextIteration;
         committedRounds.push(...parent.committedRounds);
-        inDoubt.push(...parent.inDoubtActivities);
+        for (const activity of parent.inDoubtActivities) upsertInDoubt(activity);
         const inheritedOpen = parent.openRound?.openActivity;
-        if (inheritedOpen?.sideEffects === "non-idempotent"
-            && !inDoubt.some(({ activityKey }) => activityKey === inheritedOpen.activityKey)) {
-          inDoubt.push(inheritedOpen);
-        }
+        if (inheritedOpen !== null && inheritedOpen !== undefined
+            && inheritedOpen.sideEffects !== "none") upsertInDoubt(inheritedOpen);
       } else if (options.parent !== undefined) {
         invalid(runId, "non-fork history cannot inherit a parent projection");
       }
@@ -732,7 +750,7 @@ export function foldCycleControllerEvents(
       }
       round.pendingSettlement = { phase: round.openActivity.phase, delta };
       round.unresolvedFailure = { code: failure.code, retryable: failure.retryable, inDoubt: failure.inDoubt };
-      if (failure.inDoubt) inDoubt.push(round.openActivity);
+      if (failure.inDoubt) upsertInDoubt(round.openActivity);
       round.openActivity = null;
       continue;
     }
@@ -767,6 +785,7 @@ export function foldCycleControllerEvents(
         candidates: classified.candidates,
       });
       round.pendingSettlement = { phase: "finder", delta };
+      resolveInDoubt(round.openActivity.activityKey);
       round.openActivity = null;
       if (integer(data.durationMs, runId, "discovery duration") !== durationMs) {
         invalid(runId, "discovery duration is not the trusted cumulative elapsed value");
@@ -804,6 +823,7 @@ export function foldCycleControllerEvents(
         unknownKeys: classified.unknownKeys,
       });
       round.pendingSettlement = { phase: "candidate-evaluator", delta };
+      resolveInDoubt(round.openActivity.activityKey);
       round.openActivity = null;
       if (integer(data.durationMs, runId, "evaluation duration") !== durationMs) {
         invalid(runId, "candidate evaluation duration is not the trusted cumulative elapsed value");
@@ -830,6 +850,7 @@ export function foldCycleControllerEvents(
           invalid(runId, "mode outcome has no matching activity claim");
         }
         round.pendingSettlement = { phase, delta };
+        resolveInDoubt(round.openActivity.activityKey);
         round.openActivity = null;
       }
       round.modeOutcome = outcome;
@@ -942,6 +963,7 @@ export function foldCycleControllerEvents(
       decidedPatches.push({ patchId: patch.patchId, patchHash, outcome: decision.outcome, decisionSequence: event.sequence });
       round.patchDecision = decision;
       round.pendingSettlement = { phase: "patch-planner", delta: committed };
+      resolveInDoubt(round.openActivity.activityKey);
       round.openActivity = null;
       if (integer(data.decidedAtDurationMs, runId, "patch duration") !== durationMs) {
         invalid(runId, "patch decision duration is not the trusted cumulative elapsed value");
@@ -1080,9 +1102,7 @@ export function foldCycleControllerEvents(
         }
         if (round.openActivity !== null) {
           if (!round.openActivitySettled) invalid(runId, "terminal open activity was not charged");
-          if (!inDoubt.some((item) => item.activityKey === round?.openActivity?.activityKey)) {
-            inDoubt.push(round.openActivity);
-          }
+          if (round.openActivity.sideEffects !== "none") upsertInDoubt(round.openActivity);
         }
         reservations.delete(round.reservation.reservationId);
       }

@@ -10,7 +10,9 @@ from typing import Any, cast
 
 from graph_engineering import (
     CycleActivityContext,
+    CycleErrorCode,
     CycleHandlers,
+    CycleRuntimeError,
     GraphPatchLimits,
     GraphPatchRuntime,
     MemoryCycleStore,
@@ -379,6 +381,74 @@ async def _mode_report(
     )
 
 
+async def _in_doubt_report(
+    graph_hash: str,
+    *,
+    exhausted: bool,
+) -> dict[str, Any]:
+    request = _request(graph_hash)
+    suffix = "exhausted" if exhausted else "recovered"
+    request["controllerRunId"] = f"cycle-cross-language-in-doubt-{suffix}"
+    request["controllerId"] = f"cycle-cross-language-in-doubt-{suffix}-controller"
+    request["hostRun"]["runId"] = f"cycle-cross-language-in-doubt-{suffix}-host"
+    request["eventStreamId"] = f"cycle-cross-language-in-doubt-{suffix}.events"
+    request["checkpointScope"] = f"cycle-cross-language-in-doubt-{suffix}.checkpoints"
+    request["policy"]["maxIterations"] = 1
+    request["activities"]["finder"]["sideEffects"] = "idempotent"
+    request["activities"]["finder"]["maxAttemptsPerRound"] = 2
+    inputs: list[dict[str, Any]] = []
+    finder_calls = 0
+
+    def remember(context: CycleActivityContext) -> None:
+        inputs.append(
+            {"phase": context.phase.value, "iteration": context.iteration, "input": context.input}
+        )
+
+    def finder(context: CycleActivityContext) -> list[object]:
+        nonlocal finder_calls
+        finder_calls += 1
+        remember(context)
+        if finder_calls == 1 or exhausted:
+            raise CycleRuntimeError(
+                CycleErrorCode.ACTIVITY_FAILED,
+                "ambiguous idempotent provider result",
+            )
+        return []
+
+    def evaluator(context: CycleActivityContext) -> list[object]:
+        remember(context)
+        return []
+
+    in_doubt_lease = _lease()
+    in_doubt_lease["leaseId"] = f"cycle-cross-language-in-doubt-{suffix}-lease"
+    result = await start_cycle(
+        request,
+        CycleHandlers(finder=finder, candidate_evaluator=evaluator),
+        store=MemoryCycleStore(),
+        lease=in_doubt_lease,
+        clock=lambda: STARTED_AT,
+    )
+    projection = _event_projection(
+        result,
+        inputs=inputs,
+        checkpoint_id=f"cycle-cross-language-in-doubt-{suffix}-terminal",
+    )
+    in_doubt = cast(
+        list[dict[str, Any]],
+        cast(dict[str, Any], projection["checkpoint"])["state"]["inDoubtActivities"],
+    )
+    assert result.result["exitReason"] == "MAX_ITERATIONS"
+    assert finder_calls == 2
+    if exhausted:
+        assert len(in_doubt) == 1
+        assert in_doubt[0]["attempt"] == 2
+    else:
+        assert in_doubt == []
+    projection["inDoubtActivities"] = in_doubt
+    projection["finderCalls"] = finder_calls
+    return projection
+
+
 async def _main() -> None:
     graph_document = json.loads(
         (FIXTURES / "diamond.graph.json").read_text(encoding="utf-8")
@@ -440,6 +510,10 @@ async def _main() -> None:
                 graph.graph_hash,
                 "evaluator-optimizer",
             ),
+        },
+        "inDoubt": {
+            "recovered": await _in_doubt_report(graph.graph_hash, exhausted=False),
+            "exhausted": await _in_doubt_report(graph.graph_hash, exhausted=True),
         },
     }
     print(json.dumps(report, ensure_ascii=False, sort_keys=True, separators=(",", ":")))

@@ -1969,6 +1969,43 @@ for (const forkCase of cycleDurableCases.forkCases) {
   }
 }
 
+for (const projectionCase of cycleDurableCases.inDoubtProjectionCases) {
+  let pending = null;
+  let observedCode = null;
+  try {
+    for (const transition of projectionCase.transitions) {
+      assert.ok(Number.isSafeInteger(transition.attempt) && transition.attempt > 0);
+      assert.ok(typeof transition.activityKey === "string" && transition.activityKey.length > 0);
+      if (transition.outcome === "success") {
+        if (pending?.activityKey === transition.activityKey) pending = null;
+        continue;
+      }
+      assert.equal(transition.outcome, "failure");
+      assert.equal(typeof transition.inDoubt, "boolean");
+      if (!transition.inDoubt) continue;
+      assert.notEqual(projectionCase.sideEffects, "none");
+      if (pending !== null && pending.activityKey !== transition.activityKey) {
+        const error = new Error("a second unresolved external key is invalid history");
+        error.code = "GE_CYCLE_INVALID_HISTORY";
+        throw error;
+      }
+      pending = {
+        activityKey: transition.activityKey,
+        attempt: transition.attempt,
+      };
+    }
+  } catch (error) {
+    observedCode = error?.code ?? null;
+  }
+  if (Object.hasOwn(projectionCase, "expectCode")) {
+    assert.equal(observedCode, projectionCase.expectCode, `${projectionCase.name} code drifted`);
+  } else {
+    assert.equal(observedCode, null, `${projectionCase.name} unexpectedly rejected`);
+    assert.equal(pending === null ? 0 : 1, projectionCase.expectCount, `${projectionCase.name} count drifted`);
+    assert.equal(pending?.attempt ?? null, projectionCase.expectAttempt, `${projectionCase.name} attempt drifted`);
+  }
+}
+
 const diamond = await loadJson("diamond.graph.json");
 assert.equal(diamond.apiVersion, "graphengineering.reacher-z.github.io/v1alpha1");
 assert.equal(diamond.kind, "Graph");
@@ -1976,5 +2013,5 @@ assert.equal(new Set(diamond.nodes.map(({ id }) => id)).size, diamond.nodes.leng
 assert.equal(new Set(diamond.edges.map(({ id }) => id)).size, diamond.edges.length);
 
 process.stdout.write(
-  `Validated ${fixtureNames.length} JSON fixtures (${caseNames.length} case manifests), ${yamlNames.length} referenced YAML fixtures, ${Object.keys(expected.canonicalization).length} graph hash, ${Object.keys(expected.checkpoints ?? {}).length} checkpoint hash, ${durableJson.validCases.length} Durable JSON vectors, ${compiledIdentities.length} compiled identities, ${graphPatchCases.validCases.length + graphPatchCases.invalidCases.length} graph patch schema cases plus ${graphPatchCases.semanticCases.length} closed semantic vectors, and 6 D7 controller/revision/event/checkpoint schemas with ${durableEvents.length} chained event goldens, ${cycleDurableCases.leaseTransitionCases.length} valid and ${cycleDurableCases.invalidLeaseTransitionCases.length} hostile lease transitions, ${cycleDurableCases.validInterruptedHistoryCases?.length ?? 0} interrupted terminal/checkpoint folds, ${cycleDurableCases.untilDryFoldCases.length} global-seen convergence fold, ${cycleDurableCases.hardStopFoldCases.length} hard-stop folds, ${cycleDurableCases.invalidEventHistoryCases.length} hostile histories, ${cycleDurableCases.invalidCheckpointSemanticCases.length} hostile checkpoint folds, plus ${cycleDurableCases.validStandaloneEventSchemaCases.length} standalone phase-event shapes; all ${expectedD7Tests.length} D7-CYCLE-SPEC-024 expected-test groups are mapped against meta-valid schemas.\n`,
+  `Validated ${fixtureNames.length} JSON fixtures (${caseNames.length} case manifests), ${yamlNames.length} referenced YAML fixtures, ${Object.keys(expected.canonicalization).length} graph hash, ${Object.keys(expected.checkpoints ?? {}).length} checkpoint hash, ${durableJson.validCases.length} Durable JSON vectors, ${compiledIdentities.length} compiled identities, ${graphPatchCases.validCases.length + graphPatchCases.invalidCases.length} graph patch schema cases plus ${graphPatchCases.semanticCases.length} closed semantic vectors, and 6 D7 controller/revision/event/checkpoint schemas with ${durableEvents.length} chained event goldens, ${cycleDurableCases.leaseTransitionCases.length} valid and ${cycleDurableCases.invalidLeaseTransitionCases.length} hostile lease transitions, ${cycleDurableCases.validInterruptedHistoryCases?.length ?? 0} interrupted terminal/checkpoint folds, ${cycleDurableCases.inDoubtProjectionCases.length} in-doubt singleton cases, ${cycleDurableCases.untilDryFoldCases.length} global-seen convergence fold, ${cycleDurableCases.hardStopFoldCases.length} hard-stop folds, ${cycleDurableCases.invalidEventHistoryCases.length} hostile histories, ${cycleDurableCases.invalidCheckpointSemanticCases.length} hostile checkpoint folds, plus ${cycleDurableCases.validStandaloneEventSchemaCases.length} standalone phase-event shapes; all ${expectedD7Tests.length} D7-CYCLE-SPEC-024 expected-test groups are mapped against meta-valid schemas.\n`,
 );

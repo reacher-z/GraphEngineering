@@ -1500,11 +1500,10 @@ async function startInternal(
     startedAt,
     deadlineAt,
   }, { lease: null, sample: { timestamp: startedAt, elapsedMs: 0, remainingMs: request.policy.maxDurationMs } });
-  if (parent !== undefined
-      && journal.fold.inDoubtActivities.some(({ sideEffects }) => sideEffects === "non-idempotent")) {
+  if (parent !== undefined && journal.fold.inDoubtActivities.length !== 0) {
     throw new CycleControllerError(
       "IN_DOUBT_SIDE_EFFECT", request.controllerRunId,
-      "fork inherited an open non-idempotent activity and cannot dispatch automatically",
+      "fork inherited an external in-doubt activity whose parent key cannot be reused",
     );
   }
   await journal.append("LeaseAcquired", {

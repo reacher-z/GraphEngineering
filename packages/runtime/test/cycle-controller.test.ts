@@ -580,6 +580,60 @@ describe("native bounded cycle controller", () => {
     expect(unsafeFinder).not.toHaveBeenCalled();
   });
 
+  it("coalesces ambiguous idempotent retries and clears the singleton on success", async () => {
+    for (const exhausted of [false, true]) {
+      const base = request("until-dry", { maxIterations: 1, maxTotalAttempts: 10 });
+      const mutable = JSON.parse(JSON.stringify(base)) as CycleControllerRequest;
+      const finderBinding = mutable.activities.finder as {
+        sideEffects: string;
+        maxAttemptsPerRound: number;
+      };
+      finderBinding.sideEffects = "idempotent";
+      finderBinding.maxAttemptsPerRound = 2;
+      const item = validateCycleControllerRequest(mutable);
+      const store = new MemoryCycleControllerEventStore();
+      let calls = 0;
+      const finder = vi.fn(() => {
+        calls += 1;
+        if (calls === 1 || exhausted) {
+          throw new CycleActivityFailure(
+            "GE_ACTIVITY_FAILED",
+            "ambiguous idempotent provider result",
+            { retryable: calls < 2, inDoubt: true },
+          );
+        }
+        return { output: [] };
+      });
+
+      const result = await startCycleController(item, graph(), {
+        eventStore: store,
+        lease: lease(`idempotent-singleton-${String(exhausted)}`, 1),
+        now: fixedNow(),
+        activities: { finder, candidateEvaluator: () => ({ output: [] }) },
+      });
+      const fold = await replayCycleController(store, item.eventStreamId);
+      const starts = events(store, item).filter(
+        ({ type, data }) => type === "ActivityStarted" && data.phase === "finder",
+      );
+      const failures = events(store, item).filter(({ type }) => type === "ActivityFailed");
+
+      expect(finder).toHaveBeenCalledTimes(2);
+      expect(starts.map(({ data }) => data.attempt)).toEqual([1, 2]);
+      expect(starts[0]?.data.activityKey).toBe(starts[1]?.data.activityKey);
+      if (exhausted) {
+        expect(result).toMatchObject({ exitReason: "MAX_ITERATIONS", status: "bounded" });
+        expect(failures).toHaveLength(2);
+        expect(fold.terminalObservation).toMatchObject({ failed: true, failureCode: "GE_ACTIVITY_FAILED" });
+        expect(fold.inDoubtActivities).toHaveLength(1);
+        expect(fold.inDoubtActivities[0]).toMatchObject({ attempt: 2, sideEffects: "idempotent" });
+      } else {
+        expect(result).toMatchObject({ exitReason: "MAX_ITERATIONS", status: "bounded" });
+        expect(failures).toHaveLength(1);
+        expect(fold.inDoubtActivities).toEqual([]);
+      }
+    }
+  });
+
   it("charges an unproven external claim when an already-cancelled resume terminates", async () => {
     const base = request("until-dry", {
       maxIterations: 1,
@@ -655,9 +709,9 @@ describe("native bounded cycle controller", () => {
     expect(result).toMatchObject({ exitReason: "CANCELLED", status: "cancelled" });
     expect(evaluator).not.toHaveBeenCalled();
     expect(events(store, item).map(({ type }) => type)).not.toContain("DiscoveryCommitted");
-    await expect(replayCycleController(store, item.eventStreamId)).resolves.toMatchObject({
-      terminalResult: { exitReason: "CANCELLED" },
-    });
+    const fold = await replayCycleController(store, item.eventStreamId);
+    expect(fold).toMatchObject({ terminalResult: { exitReason: "CANCELLED" } });
+    expect(fold.inDoubtActivities).toEqual([]);
   });
 
   it("rejects stale lease reacquisition before CAS and terminal resume dispatches nothing", async () => {
@@ -1020,48 +1074,51 @@ describe("native bounded cycle controller", () => {
     )).rejects.toMatchObject({ code: "GE_CYCLE_INVALID_HISTORY" });
   });
 
-  it("persists inherited non-idempotent in-doubt status in a fork before any child dispatch", async () => {
-    const parentBase = request("until-dry", { maxIterations: 2 });
-    const parentMutable = JSON.parse(JSON.stringify(parentBase)) as CycleControllerRequest;
-    (parentMutable.activities.finder as { sideEffects: string }).sideEffects = "non-idempotent";
-    const parentRequest = validateCycleControllerRequest(parentMutable);
-    const parentStore = new CommitThenThrowCycleStore("ActivityStarted", "finder");
-    const parentFinder = vi.fn(() => ({ output: [] }));
-    await expect(startCycleController(parentRequest, graph(), {
-      eventStore: parentStore, lease: lease("fork-parent-lease", 1), now: fixedNow(),
-      activities: { finder: parentFinder, candidateEvaluator: () => ({ output: [] }) },
-    })).rejects.toMatchObject({ code: "GE_CYCLE_STORE_FAILED" });
-    expect(parentFinder).not.toHaveBeenCalled();
-    const parentFold = await replayCycleController(parentStore, parentRequest.eventStreamId);
-    expect(parentFold.openRound?.openActivity?.sideEffects).toBe("non-idempotent");
+  it.each(["idempotent", "non-idempotent"] as const)(
+    "persists inherited %s in-doubt status in a fork before any child dispatch",
+    async (sideEffects) => {
+      const parentBase = request("until-dry", { maxIterations: 2 });
+      const parentMutable = JSON.parse(JSON.stringify(parentBase)) as CycleControllerRequest;
+      (parentMutable.activities.finder as { sideEffects: string }).sideEffects = sideEffects;
+      const parentRequest = validateCycleControllerRequest(parentMutable);
+      const parentStore = new CommitThenThrowCycleStore("ActivityStarted", "finder");
+      const parentFinder = vi.fn(() => ({ output: [] }));
+      await expect(startCycleController(parentRequest, graph(), {
+        eventStore: parentStore, lease: lease("fork-parent-lease", 1), now: fixedNow(),
+        activities: { finder: parentFinder, candidateEvaluator: () => ({ output: [] }) },
+      })).rejects.toMatchObject({ code: "GE_CYCLE_STORE_FAILED" });
+      expect(parentFinder).not.toHaveBeenCalled();
+      const parentFold = await replayCycleController(parentStore, parentRequest.eventStreamId);
+      expect(parentFold.openRound?.openActivity?.sideEffects).toBe(sideEffects);
 
-    const childBase = request("until-dry", { maxIterations: 3 });
-    const child = validateCycleControllerRequest({
-      ...JSON.parse(JSON.stringify(childBase)),
-      initialGraph: parentFold.currentRevision,
-      lineage: {
-        origin: "fork",
-        parentControllerRunId: parentRequest.controllerRunId,
-        parentSequence: parentFold.lastSequence,
-        parentHistoryHash: parentFold.historyPrefixHash,
-      },
-    });
-    const childStore = new MemoryCycleControllerEventStore();
-    const childFinder = vi.fn(() => ({ output: [] }));
-    await expect(forkCycleController(
-      parentStore, parentRequest.eventStreamId, child, graph(), {
-        eventStore: childStore, lease: lease("fork-child-lease", 1), now: fixedNow(),
-        activities: { finder: childFinder, candidateEvaluator: () => ({ output: [] }) },
-      },
-    )).rejects.toMatchObject({ code: "IN_DOUBT_SIDE_EFFECT" });
-    expect(childFinder).not.toHaveBeenCalled();
-    expect(childStore.snapshot(child.eventStreamId).map(({ type }) => type)).toEqual(["ControllerCreated"]);
-    const childFold = await replayCycleController(
-      childStore, child.eventStreamId, undefined, { parent: parentFold },
-    );
-    expect(childFold.inDoubtActivities).toHaveLength(1);
-    expect(childFold.inDoubtActivities[0]?.sideEffects).toBe("non-idempotent");
-  });
+      const childBase = request("until-dry", { maxIterations: 3 });
+      const child = validateCycleControllerRequest({
+        ...JSON.parse(JSON.stringify(childBase)),
+        initialGraph: parentFold.currentRevision,
+        lineage: {
+          origin: "fork",
+          parentControllerRunId: parentRequest.controllerRunId,
+          parentSequence: parentFold.lastSequence,
+          parentHistoryHash: parentFold.historyPrefixHash,
+        },
+      });
+      const childStore = new MemoryCycleControllerEventStore();
+      const childFinder = vi.fn(() => ({ output: [] }));
+      await expect(forkCycleController(
+        parentStore, parentRequest.eventStreamId, child, graph(), {
+          eventStore: childStore, lease: lease("fork-child-lease", 1), now: fixedNow(),
+          activities: { finder: childFinder, candidateEvaluator: () => ({ output: [] }) },
+        },
+      )).rejects.toMatchObject({ code: "IN_DOUBT_SIDE_EFFECT" });
+      expect(childFinder).not.toHaveBeenCalled();
+      expect(childStore.snapshot(child.eventStreamId).map(({ type }) => type)).toEqual(["ControllerCreated"]);
+      const childFold = await replayCycleController(
+        childStore, child.eventStreamId, undefined, { parent: parentFold },
+      );
+      expect(childFold.inDoubtActivities).toHaveLength(1);
+      expect(childFold.inDoubtActivities[0]?.sideEffects).toBe(sideEffects);
+    },
+  );
 
   it("fails before mutation when the trusted clock rolls back or event ID creation fails", async () => {
     const rollback = request("until-dry", { maxIterations: 1 });

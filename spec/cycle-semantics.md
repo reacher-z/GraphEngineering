@@ -964,11 +964,18 @@ The fold state stores the exact request, start/deadline, current revision,
 ownership, next iteration, globally seen and mutually exclusive verdict
 categories, cumulative counters, every live reservation, decided patch IDs,
 committed round projections, the exact plan for at most one open round/activity,
-up to one terminal in-doubt activity, and an optional terminal
-observation/result. Terminal state requires a null lease, zero live
-reservations, no open round, an exact terminal observation/result pair, and any
-charged unmatched activity in `inDoubtActivities`; active state has no terminal
-observation or result.
+up to one unresolved external-effect identity in `inDoubtActivities`, and an
+optional terminal observation/result. The in-doubt projection is a singleton
+map keyed by the stable `activityKey`, not an append-only list of failed
+attempts. An `ActivityFailed` with `inDoubt: true` inserts the claimed external
+activity; another ambiguous attempt with the same key replaces it with the
+higher attempt number; a successful outcome committed for that key removes it.
+An activity bound to `sideEffects: "none"` can never enter this projection, and
+a second unresolved key is invalid history because this controller serializes
+claims and cannot safely advance past unresolved external work. Terminal state
+requires a null lease, zero live reservations, no open round, an exact terminal
+observation/result pair, and any charged unresolved external activity in the
+singleton; active state has no terminal observation or result.
 
 The event stream remains authoritative. A missing checkpoint triggers a full
 fold. A stale checkpoint may seed only its verified prefix and then folds the
@@ -1012,9 +1019,15 @@ SHA-256(
 
 Attempt is excluded. A correctly declared `none` activity may retry, and an
 `idempotent` activity may retry only with the same key passed to the external
-system. An open `non-idempotent` activity is `IN_DOUBT_SIDE_EFFECT`; neither
-resume nor fork may invoke it automatically. The old claim can remain charged,
-late effects remain at-least-once, and reconciliation/approval is later work.
+system. An ambiguous idempotent retry coalesces into the one in-doubt identity;
+a later successful outcome for the same key resolves it. An open or failed
+in-doubt `non-idempotent` activity is `IN_DOUBT_SIDE_EFFECT` and resume may not
+invoke it automatically. A fork cannot continue with any inherited external
+in-doubt identity: the child has a new controller run ID and therefore cannot
+derive the parent's activity key required for a safe idempotent retry. The
+block occurs after the child creation event binds lineage but before a child
+lease or external dispatch. The old claim remains charged, late effects remain
+at-least-once, and an operator reconciliation/approval event is later work.
 
 ### 13.5 Replay and fork
 
@@ -1028,10 +1041,12 @@ A fork first validates the parent through the exact `parentSequence` and
 `parentHistoryHash` in the new request's closed lineage. The child receives a
 new controller run/stream/request hash and copies only the event-derived prefix
 projection: current revision, seen/verdict categories, committed rounds,
-counters, and any in-doubt activity status. It does not copy a lease, mutable
-reservation ownership, or future parent facts. The child and parent then
-diverge; additions in either cannot affect the other. A prefix ending in an
-open non-idempotent activity remains in doubt in the child.
+counters, and any external in-doubt activity status. It does not copy a lease,
+mutable reservation ownership, or future parent facts. The child and parent
+then diverge; additions in either cannot affect the other. A prefix ending in
+an open idempotent or non-idempotent external activity is coalesced into the
+child's singleton in-doubt projection and blocks child lease/dispatch because
+the child cannot retry under the parent's stable activity key.
 
 ### 13.6 Payload protection and D9 boundary
 

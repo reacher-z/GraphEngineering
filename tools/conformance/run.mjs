@@ -1726,12 +1726,115 @@ for (const [mode, tsModeReport] of Object.entries(tsModeReports)) {
     );
   }
 }
+
+async function exerciseCycleInDoubt(exhausted) {
+  const suffix = exhausted ? "exhausted" : "recovered";
+  const value = JSON.parse(JSON.stringify(cycleRequestValue));
+  Object.assign(value, {
+    controllerRunId: `cycle-cross-language-in-doubt-${suffix}`,
+    controllerId: `cycle-cross-language-in-doubt-${suffix}-controller`,
+    hostRun: {
+      relationship: "standalone-child-controller",
+      runId: `cycle-cross-language-in-doubt-${suffix}-host`,
+    },
+    eventStreamId: `cycle-cross-language-in-doubt-${suffix}.events`,
+    checkpointScope: `cycle-cross-language-in-doubt-${suffix}.checkpoints`,
+  });
+  value.policy.maxIterations = 1;
+  value.activities.finder.sideEffects = "idempotent";
+  value.activities.finder.maxAttemptsPerRound = 2;
+  const request = runtime.validateCycleControllerRequest(value);
+  const store = new runtime.MemoryCycleControllerEventStore();
+  const inputs = [];
+  let finderCalls = 0;
+  const remember = (context) => {
+    inputs.push({ phase: context.phase, iteration: context.iteration, input: context.input });
+  };
+  const finder = (context) => {
+    finderCalls += 1;
+    remember(context);
+    if (finderCalls === 1 || exhausted) {
+      throw new runtime.CycleActivityFailure(
+        "GE_ACTIVITY_FAILED",
+        "ambiguous idempotent provider result",
+        { retryable: finderCalls < 2, inDoubt: true },
+      );
+    }
+    return { output: [] };
+  };
+  const candidateEvaluator = (context) => {
+    remember(context);
+    return { output: [] };
+  };
+  const result = await runtime.startCycleController(request, cycleGraph, {
+    eventStore: store,
+    lease: {
+      leaseId: `cycle-cross-language-in-doubt-${suffix}-lease`,
+      holderId: "cycle-cross-language-holder",
+      leaseEpoch: 1,
+      fencingToken: 1,
+      acquiredAt: cycleStartedAt,
+      expiresAt: "2026-07-26T12:01:00.000Z",
+    },
+    now: () => new Date(cycleStartedAt),
+    activities: { finder, candidateEvaluator },
+  });
+  const events = store.snapshot(request.eventStreamId);
+  const checkpoint = runtime.createCycleControllerCheckpoint(
+    events,
+    `cycle-cross-language-in-doubt-${suffix}-terminal`,
+    cycleCheckpointAt,
+  );
+  const inDoubtActivities = checkpoint.state.inDoubtActivities;
+  assert.equal(result.exitReason, "MAX_ITERATIONS");
+  assert.equal(finderCalls, 2);
+  if (exhausted) {
+    assert.equal(inDoubtActivities.length, 1);
+    assert.equal(inDoubtActivities[0].attempt, 2);
+  } else {
+    assert.deepEqual(inDoubtActivities, []);
+  }
+  return {
+    result,
+    resultCanonical: core.canonicalSerialize(result),
+    eventTypes: events.map(({ type }) => type),
+    eventCanonical: events.map((event) => core.canonicalSerialize(event)),
+    recordHashes: events.map(({ recordHash }) => recordHash),
+    activityKeys: events
+      .filter(({ type }) => type === "ActivityStarted")
+      .map(({ data }) => data.activityKey),
+    inputsCanonical: inputs.map((item) => core.canonicalSerialize(item)),
+    checkpoint,
+    checkpointCanonical: core.canonicalSerialize(checkpoint),
+    checkpointStateCanonical: core.canonicalSerialize(checkpoint.state),
+    inDoubtActivities,
+    finderCalls,
+  };
+}
+
+const tsInDoubtReports = {
+  recovered: await exerciseCycleInDoubt(false),
+  exhausted: await exerciseCycleInDoubt(true),
+};
+for (const [outcome, tsInDoubtReport] of Object.entries(tsInDoubtReports)) {
+  for (const field of Object.keys(tsInDoubtReport)) {
+    assert.deepEqual(
+      tsInDoubtReport[field],
+      pyCycleReport.inDoubt[outcome][field],
+      `D7 in-doubt ${outcome} ${field} differs`,
+    );
+  }
+}
 const tsModeEventCount = Object.values(tsModeReports)
   .reduce((total, report) => total + report.eventTypes.length, 0);
 const tsModeInputCount = Object.values(tsModeReports)
   .reduce((total, report) => total + report.inputsCanonical.length, 0);
+const tsInDoubtEventCount = Object.values(tsInDoubtReports)
+  .reduce((total, report) => total + report.eventTypes.length, 0);
+const tsInDoubtInputCount = Object.values(tsInDoubtReports)
+  .reduce((total, report) => total + report.inputsCanonical.length, 0);
 process.stdout.write(
-  `Cross-language native-cycle conformance passed for ${tsCycleEvents.length + tsPatchEvents.length + tsResumeEvents.length + tsModeEventCount} exact events, ${cycleInputs.length + patchInputs.length + resumeInputs.length + tsModeInputCount} activity inputs, all three controller modes, five terminal results, one accepted GraphPatch/revision, one crash/takeover resume, and five checkpoints.\n`,
+  `Cross-language native-cycle conformance passed for ${tsCycleEvents.length + tsPatchEvents.length + tsResumeEvents.length + tsModeEventCount + tsInDoubtEventCount} exact events, ${cycleInputs.length + patchInputs.length + resumeInputs.length + tsModeInputCount + tsInDoubtInputCount} activity inputs, all three controller modes, two in-doubt recovery outcomes, seven terminal results, one accepted GraphPatch/revision, one crash/takeover resume, and seven checkpoints.\n`,
 );
 
 // Authoring conformance is intentionally expected-vs-TypeScript-vs-Python.

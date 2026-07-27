@@ -1127,7 +1127,7 @@ class _CycleController:
                 binding.side_effects != "non-idempotent"
                 and attempt < binding.max_attempts_per_round
             )
-        in_doubt = binding.side_effects == "non-idempotent"
+        in_doubt = binding.side_effects != "none"
         code = (
             error.code.value
             if isinstance(error, CycleRuntimeError)
@@ -1159,7 +1159,14 @@ class _CycleController:
         failure = failures[-1]
         details = cast(dict[str, Any], failure.data["failure"])
         phase = ActivityPhase(cast(str, details["phase"]))
-        if details["retryable"] is True and details["inDoubt"] is False:
+        binding = self._binding(phase)
+        if (
+            details["retryable"] is True
+            and not (
+                details["inDoubt"] is True
+                and binding.side_effects == "non-idempotent"
+            )
+        ):
             await self._dispatch(phase)
             return
         await self._terminate("FAILED", failure_code=cast(str, details["code"]))
@@ -1187,7 +1194,7 @@ class _CycleController:
                     "phase": phase.value,
                     "code": "GE_ACTIVITY_INTERRUPTED",
                     "retryable": True,
-                    "inDoubt": False,
+                    "inDoubt": binding.side_effects != "none",
                 },
                 "usage": {
                     "attempts": 1,
@@ -1814,16 +1821,10 @@ async def fork_cycle(
             CycleErrorCode.INVALID_HISTORY,
             "fork child creation did not produce a fold",
         )
-    if any(
-        activity["sideEffects"] == "non-idempotent"
-        for activity in cast(
-            list[dict[str, Any]],
-            child_fold.state["inDoubtActivities"],
-        )
-    ):
+    if cast(list[dict[str, Any]], child_fold.state["inDoubtActivities"]):
         raise CycleRuntimeError(
             CycleErrorCode.IN_DOUBT_SIDE_EFFECT,
-            "fork inherited an open non-idempotent activity and cannot dispatch automatically",
+            "fork inherited an external in-doubt activity whose parent key cannot be reused",
         )
     await journal.append(
         "LeaseAcquired",

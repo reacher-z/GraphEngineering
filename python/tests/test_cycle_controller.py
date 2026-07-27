@@ -1146,11 +1146,19 @@ def test_event_identity_store_checkpoint_and_clock_fail_closed() -> None:
     asyncio.run(clock_rollback())
 
 
-def test_cancellation_racing_output_discards_value_and_retains_claim() -> None:
+@pytest.mark.parametrize(
+    ("side_effects", "expected_in_doubt"),
+    [("none", 0), ("idempotent", 1)],
+)
+def test_cancellation_racing_output_retains_only_external_claims(
+    side_effects: str,
+    expected_in_doubt: int,
+) -> None:
     async def run() -> None:
         cancellation = CycleCancellation()
         store = MemoryCycleStore()
         request = request_document(max_iterations=3)
+        request["activities"]["finder"]["sideEffects"] = side_effects
 
         async def finder(_: object) -> list[dict[str, object]]:
             cancellation.cancel()
@@ -1169,7 +1177,93 @@ def test_cancellation_racing_output_discards_value_and_retains_claim() -> None:
         assert result.result["seenCount"] == 0
         assert not any(event.type == "DiscoveryCommitted" for event in result.events)
         replayed = await replay_cycle(request["eventStreamId"], store=store)
-        assert len(cast(list[Any], replayed.state["inDoubtActivities"])) == 1
+        in_doubt = cast(list[dict[str, Any]], replayed.state["inDoubtActivities"])
+        assert len(in_doubt) == expected_in_doubt
+        if in_doubt:
+            assert in_doubt[0]["sideEffects"] == "idempotent"
+
+    asyncio.run(run())
+
+
+def test_idempotent_ambiguous_retries_coalesce_and_success_resolves_singleton() -> None:
+    async def run() -> None:
+        request = request_document(max_iterations=1)
+        request["activities"]["finder"]["sideEffects"] = "idempotent"
+        request["activities"]["finder"]["maxAttemptsPerRound"] = 2
+        store = MemoryCycleStore()
+        calls = 0
+
+        def finder(_: object) -> list[object]:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise CycleRuntimeError(
+                    CycleErrorCode.ACTIVITY_FAILED,
+                    "ambiguous idempotent provider result",
+                )
+            return []
+
+        result = await start_cycle(
+            request,
+            CycleHandlers(finder=finder, candidate_evaluator=lambda _: []),
+            store=store,
+            lease=lease(),
+            clock=fixed_clock,
+        )
+        replayed = await replay_cycle(request["eventStreamId"], store=store)
+        finder_starts = [
+            event
+            for event in result.events
+            if event.type == "ActivityStarted" and event.data["phase"] == "finder"
+        ]
+        failures = [event for event in result.events if event.type == "ActivityFailed"]
+
+        assert result.result["exitReason"] == "MAX_ITERATIONS"
+        assert calls == 2
+        assert [event.data["attempt"] for event in finder_starts] == [1, 2]
+        assert finder_starts[0].data["activityKey"] == finder_starts[1].data["activityKey"]
+        assert failures[0].data["failure"]["inDoubt"] is True
+        assert replayed.state["inDoubtActivities"] == []
+
+    asyncio.run(run())
+
+
+def test_exhausted_idempotent_ambiguity_retains_one_latest_attempt() -> None:
+    async def run() -> None:
+        request = request_document(max_iterations=1)
+        request["activities"]["finder"]["sideEffects"] = "idempotent"
+        request["activities"]["finder"]["maxAttemptsPerRound"] = 2
+        store = MemoryCycleStore()
+        calls = 0
+
+        def finder(_: object) -> list[object]:
+            nonlocal calls
+            calls += 1
+            raise CycleRuntimeError(
+                CycleErrorCode.ACTIVITY_FAILED,
+                "ambiguous idempotent provider result",
+            )
+
+        result = await start_cycle(
+            request,
+            CycleHandlers(finder=finder, candidate_evaluator=lambda _: []),
+            store=store,
+            lease=lease(),
+            clock=fixed_clock,
+        )
+        replayed = await replay_cycle(request["eventStreamId"], store=store)
+        in_doubt = cast(list[dict[str, Any]], replayed.state["inDoubtActivities"])
+        failures = [event for event in result.events if event.type == "ActivityFailed"]
+
+        assert result.result["exitReason"] == "MAX_ITERATIONS"
+        assert calls == 2
+        assert len(failures) == 2
+        assert all(event.data["failure"]["inDoubt"] is True for event in failures)
+        assert replayed.state["terminalObservation"]["failed"] is True
+        assert replayed.state["terminalObservation"]["failureCode"] == "GE_ACTIVITY_FAILED"
+        assert len(in_doubt) == 1
+        assert in_doubt[0]["attempt"] == 2
+        assert in_doubt[0]["activityKey"] == failures[-1].data["activityKey"]
 
     asyncio.run(run())
 
@@ -1344,10 +1438,11 @@ def test_fork_rejects_parent_hash_substitution_before_child_write() -> None:
     asyncio.run(run())
 
 
-def test_fork_open_non_idempotent_claim_is_charged_in_doubt_without_dispatch() -> None:
+@pytest.mark.parametrize("side_effects", ["idempotent", "non-idempotent"])
+def test_fork_open_external_claim_is_in_doubt_without_dispatch(side_effects: str) -> None:
     async def run() -> None:
         parent = request_document(max_iterations=3)
-        parent["activities"]["finder"]["sideEffects"] = "non-idempotent"
+        parent["activities"]["finder"]["sideEffects"] = side_effects
         parent["activities"]["finder"]["maxCostUsdPerAttempt"] = 0.75
         store = MemoryCycleStore()
         crashed = False
@@ -1404,7 +1499,7 @@ def test_fork_open_non_idempotent_claim_is_charged_in_doubt_without_dispatch() -
         )
         in_doubt = cast(list[dict[str, Any]], replayed.state["inDoubtActivities"])
         assert len(in_doubt) == 1
-        assert in_doubt[0]["sideEffects"] == "non-idempotent"
+        assert in_doubt[0]["sideEffects"] == side_effects
         assert replayed.state["attemptsUsed"] == 0
         assert replayed.state["costUsd"] == 0
 

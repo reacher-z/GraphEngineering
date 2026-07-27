@@ -855,6 +855,56 @@
   ],
   "forkCases": [
     {"name": "fork-binds-prefix", "parentSequence": 4, "parentHistoryHashFromEvent": 4, "expectInheritedSeenKeys": ["finding-a"], "expectIndependentFuture": true},
-    {"name": "fork-open-non-idempotent-remains-in-doubt", "parentPhase": "finder", "sideEffects": "non-idempotent", "expect": "IN_DOUBT_SIDE_EFFECT"}
+    {"name": "fork-open-non-idempotent-remains-in-doubt", "parentPhase": "finder", "sideEffects": "non-idempotent", "expect": "IN_DOUBT_SIDE_EFFECT"},
+    {"name": "fork-open-idempotent-cannot-reuse-parent-key", "parentPhase": "finder", "sideEffects": "idempotent", "expect": "IN_DOUBT_SIDE_EFFECT"}
+  ],
+  "inDoubtProjectionCases": [
+    {
+      "name": "none-failure-never-enters-external-in-doubt-singleton",
+      "sideEffects": "none",
+      "transitions": [
+        {"outcome": "failure", "activityKey": "none-key", "attempt": 1, "inDoubt": false}
+      ],
+      "expectCount": 0,
+      "expectAttempt": null
+    },
+    {
+      "name": "idempotent-ambiguous-retries-coalesce-to-latest-attempt",
+      "sideEffects": "idempotent",
+      "transitions": [
+        {"outcome": "failure", "activityKey": "stable-key", "attempt": 1, "inDoubt": true},
+        {"outcome": "failure", "activityKey": "stable-key", "attempt": 2, "inDoubt": true}
+      ],
+      "expectCount": 1,
+      "expectAttempt": 2
+    },
+    {
+      "name": "idempotent-success-resolves-prior-ambiguous-attempt",
+      "sideEffects": "idempotent",
+      "transitions": [
+        {"outcome": "failure", "activityKey": "stable-key", "attempt": 1, "inDoubt": true},
+        {"outcome": "success", "activityKey": "stable-key", "attempt": 2}
+      ],
+      "expectCount": 0,
+      "expectAttempt": null
+    },
+    {
+      "name": "non-idempotent-ambiguous-failure-remains-singleton",
+      "sideEffects": "non-idempotent",
+      "transitions": [
+        {"outcome": "failure", "activityKey": "external-key", "attempt": 1, "inDoubt": true}
+      ],
+      "expectCount": 1,
+      "expectAttempt": 1
+    },
+    {
+      "name": "second-unresolved-external-key-is-invalid-history",
+      "sideEffects": "idempotent",
+      "transitions": [
+        {"outcome": "failure", "activityKey": "first-key", "attempt": 1, "inDoubt": true},
+        {"outcome": "failure", "activityKey": "second-key", "attempt": 1, "inDoubt": true}
+      ],
+      "expectCode": "GE_CYCLE_INVALID_HISTORY"
+    }
   ]
 }

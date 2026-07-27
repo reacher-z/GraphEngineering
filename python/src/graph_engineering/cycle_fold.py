@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any, Literal, cast
@@ -720,27 +721,59 @@ def fold_cycle_events(
     terminal = False
     terminal_result: JsonObject | None = None
     terminal_observation: JsonObject | None = None
-    terminal_in_doubt: list[JsonObject] = (
-        []
-        if inherited_state is None
-        else cast(
-            list[JsonObject],
-            capture_portable_json(inherited_state["inDoubtActivities"]),
-        )
+    terminal_in_doubt: list[JsonObject] = []
+    activity_projection_fields = (
+        "iteration",
+        "reservationId",
+        "phase",
+        "activityId",
+        "activityKey",
+        "attempt",
+        "sideEffects",
+        "inputHash",
     )
+
+    def _upsert_in_doubt(activity_value: object) -> None:
+        activity = _object(activity_value, "external in-doubt activity")
+        if set(activity) != set(activity_projection_fields):
+            raise _history_error("external in-doubt activity projection is not closed")
+        if activity["sideEffects"] == "none":
+            raise _history_error(
+                "side-effect-free activity cannot enter the external in-doubt projection"
+            )
+        projected = cast(
+            JsonObject,
+            capture_portable_json(
+                {field: activity[field] for field in activity_projection_fields}
+            ),
+        )
+        if not terminal_in_doubt:
+            terminal_in_doubt.append(projected)
+            return
+        current = terminal_in_doubt[0]
+        if len(terminal_in_doubt) != 1 or current["activityKey"] != projected["activityKey"]:
+            raise _history_error("multiple external in-doubt activity keys are invalid")
+        if cast(int, projected["attempt"]) < cast(int, current["attempt"]):
+            raise _history_error("external in-doubt activity attempt regressed")
+        terminal_in_doubt[0] = projected
+
+    def _resolve_in_doubt(activity_key_value: object) -> None:
+        if terminal_in_doubt and terminal_in_doubt[0]["activityKey"] == activity_key_value:
+            terminal_in_doubt.clear()
+
+    if inherited_state is not None:
+        for inherited_activity in _array(
+            inherited_state["inDoubtActivities"],
+            "inherited external in-doubt activities",
+        ):
+            _upsert_in_doubt(inherited_activity)
     if inherited_state is not None:
         assert parent_fold is not None
         inherited_open = inherited_state.get("openRound")
         if type(inherited_open) is dict and type(inherited_open.get("openActivity")) is dict:
             activity = cast(JsonObject, capture_portable_json(inherited_open["openActivity"]))
-            if (
-                activity["sideEffects"] == "non-idempotent"
-                and not any(
-                    item["activityKey"] == activity["activityKey"]
-                    for item in terminal_in_doubt
-                )
-            ):
-                terminal_in_doubt.append(activity)
+            if activity["sideEffects"] != "none":
+                _upsert_in_doubt(activity)
     committed_rounds: list[JsonObject] = (
         []
         if inherited_state is None
@@ -1031,18 +1064,40 @@ def fold_cycle_events(
             failure = _object(data["failure"], "activity failure")
             if set(failure) != {"phase", "code", "retryable", "inDoubt"}:
                 raise _history_error("activity failure is not closed")
-            if failure["phase"] != open_activity["phase"]:
-                raise _history_error("activity failure phase drifted")
+            phase = cast(str, open_activity["phase"])
+            binding = _binding(request, phase)
+            if (
+                failure["phase"] != phase
+                or type(failure["code"]) is not str
+                or re.fullmatch(r"GE_[A-Z0-9_]{3,64}", cast(str, failure["code"])) is None
+                or type(failure["retryable"]) is not bool
+                or type(failure["inDoubt"]) is not bool
+                or binding is None
+                or (
+                    binding.side_effects == "non-idempotent"
+                    and failure["inDoubt"] is not True
+                )
+                or (
+                    binding.side_effects == "none"
+                    and failure["inDoubt"] is not False
+                )
+            ):
+                raise _history_error("activity failure is malformed")
             usage = _budget(
                 {**_object(data["usage"], "failure usage"), "dynamicNodes": 0},
                 "failure usage",
             )
-            if usage["attempts"] != 1:
-                raise _history_error("activity failure usage must claim one attempt", counter=True)
+            if (
+                usage["attempts"] != 1
+                or cast(int | float, usage["costUsd"]) > binding.max_cost_usd_per_attempt
+            ):
+                raise _history_error("activity failure usage exceeds its claim", counter=True)
             unresolved_failure_activity = dict(open_activity)
             unresolved_failure = failure
             round_state["pendingSettlement"] = usage
             round_state["pendingPhase"] = open_activity["phase"]
+            if failure["inDoubt"] is True:
+                _upsert_in_doubt(open_activity)
             open_activity = None
             open_activity_settled = False
 
@@ -1088,6 +1143,7 @@ def fold_cycle_events(
             round_state["discovery"] = dict(data)
             round_state["pendingSettlement"] = usage
             round_state["pendingPhase"] = "finder"
+            _resolve_in_doubt(open_activity["activityKey"])
             open_activity = None
             open_activity_settled = False
             unresolved_failure = None
@@ -1131,6 +1187,7 @@ def fold_cycle_events(
             round_state["evaluation"] = dict(data)
             round_state["pendingSettlement"] = usage
             round_state["pendingPhase"] = "candidate-evaluator"
+            _resolve_in_doubt(open_activity["activityKey"])
             open_activity = None
             open_activity_settled = False
 
@@ -1162,6 +1219,7 @@ def fold_cycle_events(
                     raise _history_error("mode usage must claim one attempt", counter=True)
                 round_state["pendingSettlement"] = usage
                 round_state["pendingPhase"] = expected_phase
+                _resolve_in_doubt(open_activity["activityKey"])
                 open_activity = None
                 open_activity_settled = False
             new_duration = _integer(data["durationMs"], "mode duration")
@@ -1280,6 +1338,7 @@ def fold_cycle_events(
                     "decisionSequence": event.sequence,
                 }
             )
+            _resolve_in_doubt(open_activity["activityKey"])
             open_activity = None
             open_activity_settled = False
 
@@ -1540,28 +1599,8 @@ def fold_cycle_events(
             }
             if any(result.get(key) != value for key, value in expected_result_values.items()):
                 raise _history_error("terminal projection differs from fold", counter=True)
-            if open_activity is not None:
-                current_in_doubt = cast(
-                    JsonObject,
-                    capture_portable_json(
-                        {
-                            key: open_activity[key]
-                            for key in (
-                                "iteration",
-                                "reservationId",
-                                "phase",
-                                "activityId",
-                                "activityKey",
-                                "attempt",
-                                "sideEffects",
-                                "inputHash",
-                            )
-                        }
-                    ),
-                )
-                if terminal_in_doubt and terminal_in_doubt != [current_in_doubt]:
-                    raise _history_error("terminal state would contain multiple in-doubt claims")
-                terminal_in_doubt = [current_in_doubt]
+            if open_activity is not None and open_activity["sideEffects"] != "none":
+                _upsert_in_doubt(open_activity)
             terminal = True
             terminal_result = cast(JsonObject, capture_portable_json(result))
             terminal_observation = cast(JsonObject, capture_portable_json(observation))
