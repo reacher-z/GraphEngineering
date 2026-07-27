@@ -4094,3 +4094,227 @@ integration, evidence, documentation, migration, security review, usability,
 and release gates actually exist and pass. It does not mean the checklist was
 copied into a log, that an author reviewed their own work, or that a popularity
 number was reached.
+
+## 31.27 Append-only H05C hostile replay/restore execution contract (2026-07-27)
+
+This section was appended after sections 1-31.26 and does not supersede or edit
+any prior requirement. It converts the replay/restore portion of the existing
+D7-H05 production-claim gate into a concrete, independently reproducible
+milestone. At append time, the implementation and focused/cross-language gates
+described below have passed in the shared development tree; immutable commit,
+cold-worktree, and retained evidence identities remain required before this
+milestone may be cited as closed release evidence.
+
+### 31.27.1 Objective and non-negotiable boundary
+
+The objective is to ensure that a durable `PatchAccepted` or `PatchRejected`
+record cannot bypass any validation performed by a live GraphPatch application.
+Restore is a trust boundary, not a deserialization convenience. A syntactically
+valid, re-signed, or hash-shaped event is still hostile until all embedded
+evidence is rebound and the accepted graph is independently reconstructed.
+
+The implementation MUST satisfy all of the following simultaneously:
+
+- TypeScript and Python consume the same logical durable carrier and reach the
+  same portable outcome, error code, graph coordinate, decision cardinality,
+  dynamic-node cardinality, and graph-node cardinality;
+- the complete accepted and rejected seed carriers created by the public live
+  appliers are byte-identical across native runtimes before any mutation is
+  introduced;
+- carrier validation occurs before graph, coordinate, dynamic-node, or decided
+  patch-ID state changes;
+- accepted history is recompiled and checked against current runtime limits
+  rather than trusting a recorded resulting graph hash;
+- rejected history cannot claim accepted-only evidence, an empty diagnostic
+  set, a dynamic-node commit, or an unknown code;
+- stale-base rejection history remains recoverable after its winning accepted
+  sibling advanced the coordinate;
+- every non-stale new decision binds exactly to the currently reconstructed
+  coordinate;
+- exact duplicate history is a no-op even when later accepted revisions have
+  advanced beyond the duplicated decision's requested base;
+- a complete-evidence conflict under an already restored patch ID fails with
+  `GE_PATCH_IDEMPOTENCY_CONFLICT` and preserves the first record; and
+- no regular-expression-shaped but unknown diagnostic/error code is admitted
+  into durable state.
+
+### 31.27.2 Frozen corpus and independent vocabulary closure
+
+The retained fixture is
+`spec/conformance/graph-patch-hostile-restore.case.json`. Its immutable logical
+identity for this milestone is:
+
+- protocol ID: `graph-patch-hostile-restore-v1alpha1`;
+- total cases: 34;
+- hostile fail-before-mutation attacks: 27;
+- stateful restore/idempotency behaviors: 7;
+- canonical ordered-case byte count: 6,216 UTF-8 bytes; and
+- canonical ordered-case SHA-256:
+  `4e08a710822f20ad58e8ae563ebe21eeb9fdd98926e3c3c12fbafa575bd36372`.
+
+The 27 attack cases cover closed shape, patch identity, inline-payload
+canonicality and length, requested-base binding, planner/authority/policy
+binding, negative and unreconciled budgets, accepted node accounting,
+diagnostic outcome consistency, revision number/previous hash/patch hash/
+revision hash/graph hash lineage, cumulative dynamic-node and graph-node
+limits, rejected error-code vocabulary, and rejected budget accounting.
+
+The seven behavior cases cover one accepted restore, one rejected restore, a
+post-winner stale rejection, two accepted revisions in order, an immediate
+exact accepted duplicate, a historical accepted duplicate after a later
+revision, and a complete-evidence duplicate conflict.
+
+The repository fixture validator MUST enforce all of the following without
+delegating to either native runtime:
+
+1. exact fixture version and canonical diamond-graph reference;
+2. unique IDs and unique scenarios;
+3. exact 34-scenario closed vocabulary;
+4. exact per-category counts;
+5. exact accepted/rejected/mixed seed vocabulary;
+6. exact restored/duplicate-reused/restore-rejected outcome vocabulary;
+7. `expectCode` presence only for restore rejection;
+8. `GE_CYCLE_INVALID_HISTORY` for all 27 pre-state attacks;
+9. `GE_PATCH_IDEMPOTENCY_CONFLICT` only for the stateful conflicting duplicate;
+10. exact attack/behavior cardinality;
+11. exact ordered canonical byte count and SHA-256; and
+12. exact required-assertion vocabulary.
+
+### 31.27.3 TypeScript runtime obligations
+
+`NativeGraphPatchApplier.restoreRecorded` and its durable-decision validator
+MUST:
+
+- capture bounded portable JSON and require an exact accepted or rejected key
+  set;
+- decode and validate the closed inline payload, including disposition,
+  redaction claim, encoding, canonical JSON, byte length, and SHA-256;
+- revalidate the embedded GraphPatch shape and bind patch ID and canonical hash;
+- bind the embedded patch base to the separately recorded requested base;
+- validate all authority hashes and bind the proposer to an independently
+  folded planner activity key;
+- validate the policy snapshot hash and exact budget reconciliation;
+- admit only the nine stable GraphPatch public codes in diagnostics and
+  rejected outcomes;
+- validate diagnostic JSON Pointers and portable phases;
+- require accepted decisions to have no diagnostics, exact appended-node
+  accounting, and a valid one-step revision chain;
+- require rejected decisions to have at least one diagnostic and zero dynamic
+  node commitment;
+- evaluate exact duplicate/conflict evidence before current-coordinate lineage
+  checks;
+- permit a new stale rejection only when its requested base differs from the
+  current reconstructed coordinate;
+- require every other new decision to match that coordinate;
+- compile accepted candidates, compare the recorded graph/revision identities,
+  enforce graph limits, and enforce cumulative dynamic-node limits before
+  exposing state; and
+- return `GE_CYCLE_INVALID_HISTORY`, never a live stale-base decision code, when
+  stored lineage is internally inconsistent.
+
+### 31.27.4 Python runtime obligations
+
+`GraphPatchRuntime.restore` MUST apply the same trust boundary to complete
+`CycleEvent.data`, including the controller-only `iteration` and
+`plannerActivityKey` fields. It MUST normalize malformed carrier failures to
+`GE_CYCLE_INVALID_HISTORY`, while preserving the distinct complete-evidence
+duplicate conflict code.
+
+Python validation MUST explicitly close and validate:
+
+- the accepted/rejected event-data field sets and matching event outcome;
+- portable iteration and duration bounds;
+- inline payload fields, strict JSON decoding, canonical text, byte count, and
+  digest;
+- GraphPatch schema, patch identity, and requested coordinate;
+- nine-field authority snapshot, optional approval hash, planner binding, and
+  policy hash;
+- exact requested/committed/released three-axis budgets and reconciliation;
+- bounded diagnostics, known GraphPatch codes, phase range, and JSON Pointer;
+- accepted diagnostic/node/revision invariants;
+- rejected diagnostic/error/dynamic-node invariants;
+- graph recompilation and recorded graph-hash equality;
+- runtime graph-shape limits and cumulative dynamic-node lineage; and
+- complete duplicate equality across patch bytes, hash, outcome, base,
+  authority, policy, budget, diagnostics, resulting revision, error, and dry-run
+  state.
+
+### 31.27.5 Native and cross-language executable evidence
+
+The TypeScript campaign runner is
+`tools/conformance/graph_patch_hostile_restore.mjs`; the independent Python
+runner is
+`tools/conformance/python_graph_patch_hostile_restore_report.py`. Each runner
+MUST generate its own public-applier seed decisions, materialize every mutation,
+execute each case against a fresh target where required, and emit a deterministic
+JSON report.
+
+Every report case MUST include:
+
+- stable index, ID, category, scenario, and attack/behavior kind;
+- exact canonical input byte count and SHA-256;
+- observed restore outcome and public error code;
+- final graph coordinate;
+- final decided-ID count;
+- final cumulative dynamic-node count; and
+- final graph-node count.
+
+The report MUST also retain the complete four seed carriers with their exact
+canonical byte counts and SHA-256 values. `tools/conformance/run.mjs` MUST parse
+both reports and deep-compare the entire structures. Comparing only aggregate
+counts, accepting runtime-local snapshots, or discarding a field before the
+comparison does not satisfy this gate.
+
+### 31.27.6 Required verification sequence
+
+The milestone verification sequence is cumulative:
+
+1. parse the fixture and independently recompute its canonical byte count and
+   digest;
+2. run Python Ruff and Mypy over the changed runtime and campaign runner;
+3. run the focused Python GraphPatch runtime tests;
+4. run the TypeScript runtime tests including the 34-case corpus;
+5. run the independent repository fixture validator;
+6. build the core, persistence, runtime, and primitives packages;
+7. run the complete cross-language conformance suite and retain the line proving
+   34 restore cases, 27 attacks, and seven behaviors matched;
+8. run full TypeScript tests, lint, type checking, and builds;
+9. run full Python tests, Ruff, and Mypy;
+10. run documentation links, fixture validation, release-map, evidence-closure,
+    package-content, packed-install, artifact, and production-dependency gates;
+11. repeat the relevant gates from a detached clean worktree at the exact
+    implementation commit;
+12. write a retained evidence record containing commit/tree/parent identities,
+    fixture identity, four seed carrier identities, exact commands and results,
+    failures encountered, repair dispositions, dirty-worktree exclusions, and
+    cold-worktree proof; and
+13. commit the evidence record separately, verify exact author/committer and
+    empty message body, push, fetch, and prove local/remote zero divergence.
+
+No partial success may be collapsed into “H05 complete.” In particular, this
+milestone closes hostile GraphPatch replay/restore behavior only. The original
+D7 production-claim checklist still separately requires concurrency evidence,
+lineage-tree replay/fork corruption coverage, provider conformance, production
+stores, checkpoint equivalence, scheduler handoff, protected operator surfaces,
+property/state-machine testing, packaging, platform matrices, provenance, and
+independent review.
+
+### 31.27.7 Evidence-at-append-time snapshot and next dispatch
+
+At the moment this section was appended, the following development-tree gates
+had passed:
+
+- Python focused GraphPatch suite: 23 tests;
+- TypeScript runtime suite after corpus integration: 191 tests across eight
+  files in the invoked workspace filter;
+- independent fixture validation including all 34 H05C descriptors;
+- full cross-language conformance, including exact deep equality for the 34-case
+  H05C report; and
+- Ruff and Mypy for the changed Python runtime and runner.
+
+This snapshot is informative, not immutable release evidence. The next dispatch
+after H05C evidence closure MUST select the highest unblocked remaining item
+from sections 31.25-31.26, favoring replay/fork lineage corruption or the
+provider-neutral `CycleStore` contract because those gates unlock multiple
+downstream production-readiness rows. New discoveries MUST be appended after
+this section; earlier plan text and this historical snapshot remain unchanged.

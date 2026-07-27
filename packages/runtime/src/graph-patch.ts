@@ -37,6 +37,17 @@ interface DecidedPatch {
 }
 
 const HASH = /^[0-9a-f]{64}$/u;
+const GRAPH_PATCH_ERROR_CODES: ReadonlySet<string> = new Set([
+  "GE_PATCH_INVALID",
+  "GE_PATCH_STALE_BASE",
+  "GE_PATCH_IDEMPOTENCY_CONFLICT",
+  "GE_PATCH_DUPLICATE_ID",
+  "GE_PATCH_GRAPH_INVALID",
+  "GE_PATCH_AUTHORITY_EXPANSION",
+  "GE_PATCH_BUDGET_EXCEEDED",
+  "GE_PATCH_STATE_CONFLICT",
+  "GE_PATCH_UNSUPPORTED",
+]);
 const CONTEXT_KEYS = new Set([
   "dryRun", "cancelled", "runState", "allowPausedMutation", "authoritySnapshot",
   "policySnapshotHash", "reservationId", "reserved", "activityUsage", "durationMs",
@@ -278,7 +289,7 @@ function validateRecordedDecision(
     for (const diagnosticValue of diagnosticValues) {
       const item = plainRecord(diagnosticValue, "recorded patch diagnostic");
       if (Object.keys(item).sort(compareUnicodeCodePoints).join("\0") !== "code\0path\0phase"
-          || typeof item.code !== "string" || !/^GE_[A-Z0-9_]{3,64}$/u.test(item.code)
+          || typeof item.code !== "string" || !GRAPH_PATCH_ERROR_CODES.has(item.code)
           || !Number.isSafeInteger(item.phase) || (item.phase as number) < 1 || (item.phase as number) > 13
           || typeof item.path !== "string" || !/^(?:\/(?:[^~/]|~[01])*)*$/u.test(item.path)) {
         invalid("recorded patch diagnostic is invalid");
@@ -301,7 +312,7 @@ function validateRecordedDecision(
         invalid("recorded accepted revision chain is invalid");
       }
     } else if (diagnosticValues.length === 0 || committed.dynamicNodes !== 0
-        || typeof decision.errorCode !== "string" || !/^GE_PATCH_[A-Z0-9_]{3,64}$/u.test(decision.errorCode)) {
+        || typeof decision.errorCode !== "string" || !GRAPH_PATCH_ERROR_CODES.has(decision.errorCode)) {
       invalid("recorded rejected patch outcome is invalid");
     }
     return captured as unknown as GraphPatchDecision;
@@ -516,8 +527,13 @@ export class NativeGraphPatchApplier {
       }
       return;
     }
-    if (!sameCoordinate(decision.requestedBase, this.#coordinate)) {
-      throw new CycleControllerError("GE_PATCH_STALE_BASE", "graph-patch", "recorded patch lineage is stale");
+    const staleRejection = decision.outcome === "rejected"
+      && decision.errorCode === "GE_PATCH_STALE_BASE";
+    const baseMatches = sameCoordinate(decision.requestedBase, this.#coordinate);
+    if ((staleRejection && baseMatches) || (!staleRejection && !baseMatches)) {
+      throw new CycleControllerError(
+        "GE_CYCLE_INVALID_HISTORY", "graph-patch", "recorded patch lineage is inconsistent",
+      );
     }
     let application: GraphPatchApplication;
     if (decision.outcome === "accepted") {

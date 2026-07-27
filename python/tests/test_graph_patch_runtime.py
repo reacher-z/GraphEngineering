@@ -551,3 +551,57 @@ def test_closed_hostile_semantic_corpus_matches_native_runtime_decisions() -> No
     assert observations["decisionCount"] == 2
     assert observations["runtimeRevision"] == 2
     assert observations["dynamicNodes"] == 1
+
+
+def test_closed_hostile_restore_corpus_rejects_tampered_history() -> None:
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(
+                ROOT
+                / "tools"
+                / "conformance"
+                / "python_graph_patch_hostile_restore_report.py"
+            ),
+        ],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    report = json.loads(completed.stdout)
+
+    assert report["caseCount"] == 34
+    assert report["attackCaseCount"] == 27
+    assert report["behaviorCaseCount"] == 7
+    assert report["casesCanonicalUtf8Bytes"] == 6216
+    assert report["casesSha256"] == (
+        "4e08a710822f20ad58e8ae563ebe21eeb9fdd98926e3c3c12fbafa575bd36372"
+    )
+    attacks = [item for item in report["outcomes"] if item["kind"] == "attack"]
+    assert len(attacks) == 27
+    assert all(
+        item["outcome"] == "restore-rejected"
+        and item["errorCode"] == "GE_CYCLE_INVALID_HISTORY"
+        and item["coordinate"]["graphRevision"] == 1
+        and item["decisionCount"] == 0
+        and item["dynamicNodes"] == 0
+        and item["graphNodeCount"] == 4
+        for item in attacks
+    )
+    stale = next(
+        item
+        for item in report["outcomes"]
+        if item["id"] == "stale-rejection-after-accepted"
+    )
+    assert stale["outcome"] == "restored"
+    assert stale["coordinate"]["graphRevision"] == 2
+    assert stale["decisionCount"] == 2
+    assert stale["dynamicNodes"] == 1
+    conflict = next(
+        item
+        for item in report["outcomes"]
+        if item["id"] == "conflicting-duplicate"
+    )
+    assert conflict["errorCode"] == "GE_PATCH_IDEMPOTENCY_CONFLICT"
+    assert conflict["decisionCount"] == 1

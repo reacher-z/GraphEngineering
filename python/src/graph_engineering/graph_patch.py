@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import inspect
 import json
+import math
+import re
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal, NoReturn, TypeAlias, cast
@@ -35,6 +38,293 @@ from .models import (
 )
 
 DecisionRecorder: TypeAlias = Callable[["PatchDecision"], Awaitable[None] | None]
+
+_HASH = re.compile(r"^[0-9a-f]{64}$")
+_JSON_POINTER = re.compile(r"^(?:/(?:[^~/]|~[01])*)*$")
+_PATCH_ERROR_CODES = frozenset(
+    code.value for code in CycleErrorCode if code.name.startswith("PATCH_")
+)
+_AUTHORITY_FIELDS = frozenset(
+    {
+        "proposerActivityKey",
+        "principalHash",
+        "proposerGrantHash",
+        "runGrantHash",
+        "tenantGrantHash",
+        "deploymentGrantHash",
+        "effectiveGrantHash",
+        "policyHash",
+        "approvalHash",
+    }
+)
+_BUDGET_FIELDS = frozenset({"attempts", "costUsd", "dynamicNodes"})
+
+
+def _restore_invalid(message: str, *, cause: BaseException | None = None) -> NoReturn:
+    raise CycleRuntimeError(
+        CycleErrorCode.INVALID_HISTORY,
+        message,
+        cause=cause,
+    )
+
+
+def _restore_record(value: object, fields: frozenset[str], label: str) -> dict[str, Any]:
+    if type(value) is not dict or set(value) != fields:
+        _restore_invalid(f"stored {label} is not a closed object")
+    return cast(dict[str, Any], value)
+
+
+def _restore_hash(value: object, label: str) -> str:
+    if type(value) is not str or _HASH.fullmatch(value) is None:
+        _restore_invalid(f"stored {label} is not a lowercase SHA-256 digest")
+    return value
+
+
+def _restore_integer(value: object, minimum: int, maximum: int, label: str) -> int:
+    if type(value) is not int or value < minimum or value > maximum:
+        _restore_invalid(f"stored {label} is outside its portable integer range")
+    return value
+
+
+def _restore_budget(value: object, label: str) -> dict[str, int | float]:
+    record = _restore_record(value, _BUDGET_FIELDS, label)
+    attempts = _restore_integer(record["attempts"], 0, 2**53 - 1, f"{label}.attempts")
+    dynamic_nodes = _restore_integer(
+        record["dynamicNodes"], 0, 2**53 - 1, f"{label}.dynamicNodes"
+    )
+    cost = record["costUsd"]
+    if (
+        type(cost) not in {int, float}
+        or not math.isfinite(cost)
+        or cost < 0
+        or cost > 2**53 - 1
+    ):
+        _restore_invalid(f"stored {label}.costUsd is outside its portable range")
+    return {"attempts": attempts, "costUsd": cost, "dynamicNodes": dynamic_nodes}
+
+
+def _validate_restored_patch_event(
+    event: CycleEvent,
+) -> tuple[dict[str, Any], JsonObject, str, str]:
+    """Validate the complete durable GraphPatch carrier before state exposure."""
+
+    try:
+        captured = capture_portable_json(
+            event.data,
+            error_code=CycleErrorCode.INVALID_HISTORY,
+        )
+        accepted = event.type == "PatchAccepted"
+        if not accepted and event.type != "PatchRejected":
+            _restore_invalid("stored event is not a GraphPatch decision")
+        common_fields = {
+            "iteration",
+            "plannerActivityKey",
+            "patchId",
+            "patch",
+            "patchHash",
+            "requestedBase",
+            "authoritySnapshot",
+            "policySnapshotHash",
+            "budgetOutcome",
+            "diagnostics",
+            "decidedAtDurationMs",
+            "outcome",
+        }
+        fields = frozenset(
+            common_fields | ({"resultingRevision"} if accepted else {"errorCode"})
+        )
+        data = _restore_record(captured, fields, "GraphPatch decision")
+        _restore_integer(data["iteration"], 1, 2**53 - 1, "patch iteration")
+        planner_key = _restore_hash(data["plannerActivityKey"], "planner activity key")
+
+        payload = _restore_record(
+            data["patch"],
+            frozenset(
+                {
+                    "disposition",
+                    "redacted",
+                    "encoding",
+                    "canonicalJson",
+                    "utf8ByteLength",
+                    "sha256",
+                }
+            ),
+            "GraphPatch inline payload",
+        )
+        canonical = payload["canonicalJson"]
+        if (
+            payload["disposition"] != "inline-unredacted"
+            or payload["redacted"] is not False
+            or payload["encoding"] != "canonical-json/v1alpha1"
+            or type(canonical) is not str
+        ):
+            _restore_invalid("stored GraphPatch inline payload shape is invalid")
+        raw = canonical.encode("utf-8")
+        if (
+            len(raw) < 1
+            or len(raw) > 4_194_304
+            or _restore_integer(
+                payload["utf8ByteLength"],
+                1,
+                4_194_304,
+                "patch payload byte length",
+            )
+            != len(raw)
+            or _restore_hash(payload["sha256"], "patch payload hash")
+            != hashlib.sha256(raw).hexdigest()
+        ):
+            _restore_invalid("stored GraphPatch inline payload bytes drifted")
+        try:
+            decoded = json.loads(
+                canonical,
+                parse_constant=lambda token: (_restore_invalid(
+                    f"stored GraphPatch contains invalid JSON token {token}"
+                )),
+            )
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            _restore_invalid("stored GraphPatch canonical JSON cannot be decoded", cause=exc)
+        decoded_capture = capture_portable_json(
+            decoded,
+            error_code=CycleErrorCode.INVALID_HISTORY,
+        )
+        if canonical_json(decoded_capture) != canonical:
+            _restore_invalid("stored GraphPatch payload is not canonical JSON")
+        try:
+            document, patch_id, digest = validate_graph_patch_shape(decoded_capture)
+        except CycleRuntimeError as exc:
+            _restore_invalid("stored GraphPatch violates its closed schema", cause=exc)
+        if (
+            data["patchId"] != patch_id
+            or _restore_hash(data["patchHash"], "patch decision hash") != digest
+            or payload["sha256"] != digest
+        ):
+            _restore_invalid("stored GraphPatch bytes, hash, or ID drifted")
+
+        requested_base = _restore_record(
+            data["requestedBase"],
+            frozenset({"graphRevision", "graphHash", "revisionHash"}),
+            "requested GraphPatch base",
+        )
+        _restore_integer(
+            requested_base["graphRevision"],
+            1,
+            2**53 - 2,
+            "requested graph revision",
+        )
+        _restore_hash(requested_base["graphHash"], "requested graph hash")
+        _restore_hash(requested_base["revisionHash"], "requested revision hash")
+        if canonical_json(document["base"]) != canonical_json(requested_base):
+            _restore_invalid("stored GraphPatch document and requested base differ")
+
+        authority = _restore_record(
+            data["authoritySnapshot"], _AUTHORITY_FIELDS, "GraphPatch authority snapshot"
+        )
+        for field in _AUTHORITY_FIELDS:
+            if field == "approvalHash" and authority[field] is None:
+                continue
+            _restore_hash(authority[field], f"GraphPatch authority {field}")
+        if authority["proposerActivityKey"] != planner_key:
+            _restore_invalid("stored GraphPatch authority is detached from its planner claim")
+        _restore_hash(data["policySnapshotHash"], "GraphPatch policy snapshot hash")
+
+        budget = _restore_record(
+            data["budgetOutcome"],
+            frozenset({"reservationId", "requested", "committed", "released"}),
+            "GraphPatch budget outcome",
+        )
+        reservation_id = budget["reservationId"]
+        if type(reservation_id) is not str or not 1 <= len(reservation_id) <= 256:
+            _restore_invalid("stored GraphPatch reservation identity is invalid")
+        requested = _restore_budget(budget["requested"], "requested patch budget")
+        committed = _restore_budget(budget["committed"], "committed patch budget")
+        released = _restore_budget(budget["released"], "released patch budget")
+        if any(
+            requested[field] != committed[field] + released[field]
+            for field in _BUDGET_FIELDS
+        ):
+            _restore_invalid("stored GraphPatch budget does not reconcile")
+
+        diagnostics_value = data["diagnostics"]
+        if type(diagnostics_value) is not list or len(diagnostics_value) > 100_000:
+            _restore_invalid("stored GraphPatch diagnostics are not a bounded array")
+        for item in diagnostics_value:
+            diagnostic = _restore_record(
+                item, frozenset({"code", "phase", "path"}), "GraphPatch diagnostic"
+            )
+            if diagnostic["code"] not in _PATCH_ERROR_CODES:
+                _restore_invalid("stored GraphPatch diagnostic code is unknown")
+            _restore_integer(diagnostic["phase"], 1, 13, "GraphPatch diagnostic phase")
+            if (
+                type(diagnostic["path"]) is not str
+                or _JSON_POINTER.fullmatch(diagnostic["path"]) is None
+            ):
+                _restore_invalid("stored GraphPatch diagnostic path is invalid")
+        _restore_integer(
+            data["decidedAtDurationMs"],
+            0,
+            2_147_483_647,
+            "GraphPatch decision duration",
+        )
+
+        appended_nodes = len(cast(dict[str, Any], document["append"])["nodes"])
+        if accepted:
+            if data["outcome"] != "accepted" or diagnostics_value != []:
+                _restore_invalid("stored accepted GraphPatch outcome is invalid")
+            if committed["dynamicNodes"] != appended_nodes:
+                _restore_invalid("stored accepted GraphPatch node accounting drifted")
+            revision = _restore_record(
+                data["resultingRevision"],
+                frozenset({"body", "revisionHash"}),
+                "GraphPatch resulting revision",
+            )
+            body = _restore_record(
+                revision["body"],
+                frozenset(
+                    {
+                        "apiVersion",
+                        "kind",
+                        "graphRevision",
+                        "previousRevisionHash",
+                        "patchHash",
+                        "graphHash",
+                    }
+                ),
+                "GraphPatch revision body",
+            )
+            if (
+                body["apiVersion"]
+                != "graphengineering.reacher-z.github.io/graph-revisions/v1alpha1"
+                or body["kind"] != "GraphRevision"
+                or _restore_integer(
+                    body["graphRevision"], 2, 2**53 - 1, "resulting graph revision"
+                )
+                != requested_base["graphRevision"] + 1
+                or _restore_hash(
+                    body["previousRevisionHash"], "previous revision hash"
+                )
+                != requested_base["revisionHash"]
+                or _restore_hash(body["patchHash"], "revision patch hash") != digest
+                or _restore_hash(body["graphHash"], "resulting graph hash")
+                != body["graphHash"]
+                or _restore_hash(revision["revisionHash"], "resulting revision hash")
+                != revision_hash(body)
+            ):
+                _restore_invalid("stored accepted GraphPatch revision chain is invalid")
+        else:
+            if (
+                data["outcome"] != "rejected"
+                or not diagnostics_value
+                or committed["dynamicNodes"] != 0
+                or data["errorCode"] not in _PATCH_ERROR_CODES
+            ):
+                _restore_invalid("stored rejected GraphPatch outcome is invalid")
+        return data, document, patch_id, digest
+    except CycleRuntimeError as exc:
+        if exc.code is CycleErrorCode.INVALID_HISTORY:
+            raise
+        _restore_invalid("stored GraphPatch failed closed restore validation", cause=exc)
+    except (KeyError, TypeError, ValueError, OverflowError) as exc:
+        _restore_invalid("stored GraphPatch failed closed restore validation", cause=exc)
 
 
 @dataclass(frozen=True, slots=True)
@@ -359,23 +649,9 @@ class GraphPatchRuntime:
             for event in events:
                 if event.type not in {"PatchAccepted", "PatchRejected"}:
                     continue
-                data = cast(dict[str, Any], event.data)
+                data, document, patch_id, digest = _validate_restored_patch_event(event)
                 payload = cast(dict[str, Any], data["patch"])
                 canonical = cast(str, payload["canonicalJson"])
-                try:
-                    decoded = json.loads(canonical)
-                except (TypeError, ValueError) as exc:  # pragma: no cover - folded input guard
-                    raise CycleRuntimeError(
-                        CycleErrorCode.INVALID_HISTORY,
-                        "stored GraphPatch canonical JSON cannot be decoded",
-                        cause=exc,
-                    ) from exc
-                document, patch_id, digest = validate_graph_patch_shape(decoded)
-                if canonical_json(document) != canonical or digest != data["patchHash"]:
-                    raise CycleRuntimeError(
-                        CycleErrorCode.INVALID_HISTORY,
-                        "stored GraphPatch bytes or hash drifted during restore",
-                    )
                 prior = self._decisions.get(patch_id)
                 if prior is not None:
                     expected_outcome = (

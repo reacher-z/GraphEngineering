@@ -28,6 +28,10 @@ migration note.
   TypeScript/Python decision parity, cumulative dynamic-node enforcement,
   resource/config capability ceilings, exact retry and dry-run ID behavior,
   historical accepted replay, and one-winner same-base CAS coverage.
+- A closed 34-case hostile GraphPatch replay/restore corpus with byte-identical
+  native decision seeds, strict durable-carrier validation, fail-before-mutation
+  tamper rejection, stale-rejection lineage recovery, graph/dynamic limit gates,
+  and complete duplicate-decision conflict parity in TypeScript and Python.
 
 - Event-sourced durable start and resume APIs in TypeScript and Python. Runs bind
   graph, original input, and caller-supplied implementation identity; node

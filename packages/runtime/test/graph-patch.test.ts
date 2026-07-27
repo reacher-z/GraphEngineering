@@ -9,6 +9,7 @@ import {
 import { describe, expect, it } from "vitest";
 import { exerciseGraphPatchHostileShapeCampaign } from "../../../tools/conformance/graph_patch_hostile_shape.mjs";
 import { exerciseGraphPatchHostileSemanticCampaign } from "../../../tools/conformance/graph_patch_hostile_semantic.mjs";
+import { exerciseGraphPatchHostileRestoreCampaign } from "../../../tools/conformance/graph_patch_hostile_restore.mjs";
 import * as runtime from "../src/index.js";
 import {
   CycleControllerError,
@@ -467,6 +468,64 @@ describe("native GraphPatch applier", () => {
       decisionCount: 2,
       runtimeRevision: 2,
       dynamicNodes: 1,
+    });
+  });
+
+  it("executes the closed 34-case hostile restore and replay corpus", async () => {
+    const fixture = JSON.parse(readFileSync(
+      new URL("../../../spec/conformance/graph-patch-hostile-restore.case.json", import.meta.url),
+      "utf8",
+    ));
+    const baseGraph = JSON.parse(readFileSync(
+      new URL("../../../spec/conformance/diamond.graph.json", import.meta.url),
+      "utf8",
+    ));
+    const report = await exerciseGraphPatchHostileRestoreCampaign({
+      runtime,
+      core,
+      graph: baseGraph,
+      fixture,
+    });
+
+    expect(report.caseCount).toBe(34);
+    expect(report.attackCaseCount).toBe(27);
+    expect(report.behaviorCaseCount).toBe(7);
+    expect(report.casesCanonicalUtf8Bytes).toBe(6216);
+    expect(report.casesSha256).toBe(
+      "4e08a710822f20ad58e8ae563ebe21eeb9fdd98926e3c3c12fbafa575bd36372",
+    );
+    const attacks = report.outcomes.filter(({ kind }) => kind === "attack");
+    expect(attacks).toHaveLength(27);
+    expect(attacks.every((outcome) => (
+      outcome.outcome === "restore-rejected"
+      && outcome.errorCode === "GE_CYCLE_INVALID_HISTORY"
+      && outcome.coordinate.graphRevision === 1
+      && outcome.decisionCount === 0
+      && outcome.dynamicNodes === 0
+      && outcome.graphNodeCount === 4
+    ))).toBe(true);
+    expect(report.outcomes.find(({ id }) => id === "stale-rejection-after-accepted")).toMatchObject({
+      outcome: "restored",
+      errorCode: null,
+      coordinate: { graphRevision: 2 },
+      decisionCount: 2,
+      dynamicNodes: 1,
+      graphNodeCount: 5,
+    });
+    expect(report.outcomes.find(({ id }) => id === "sequential-accepted-history")).toMatchObject({
+      outcome: "restored",
+      coordinate: { graphRevision: 3 },
+      decisionCount: 2,
+      dynamicNodes: 2,
+      graphNodeCount: 6,
+    });
+    expect(report.outcomes.find(({ id }) => id === "conflicting-duplicate")).toMatchObject({
+      outcome: "restore-rejected",
+      errorCode: "GE_PATCH_IDEMPOTENCY_CONFLICT",
+      coordinate: { graphRevision: 2 },
+      decisionCount: 1,
+      dynamicNodes: 1,
+      graphNodeCount: 5,
     });
   });
 });

@@ -799,6 +799,49 @@ The independent fixture validator separately closes the scenario vocabulary,
 proves every generated patch passes the JSON Schema boundary, and verifies the
 ordered corpus digest before either native decision engine runs.
 
+### 10.3 Hostile durable replay and restore corpus
+
+The retained
+[`graph-patch-hostile-restore.case.json`](conformance/graph-patch-hostile-restore.case.json)
+fixture freezes 34 H05C cases at the durable decision boundary: 27 carrier or
+lineage attacks and seven stateful restore/idempotency behaviors. The ordered
+descriptors occupy 6,216 canonical UTF-8 bytes with SHA-256
+`4e08a710822f20ad58e8ae563ebe21eeb9fdd98926e3c3c12fbafa575bd36372`.
+
+The attack set closes the accepted and rejected decision shapes and binds the
+inline canonical patch bytes, byte length, SHA-256, patch ID, requested base,
+planner activity key, authority snapshot, policy snapshot hash, reservation,
+requested/committed/released budgets, diagnostics, outcome, error code, and
+accepted revision chain. It also proves that accepted history is recompiled
+against runtime graph and cumulative dynamic-node limits before the revision is
+exposed. Unknown diagnostic or rejected outcome codes are history corruption;
+matching a code-shaped regular expression is not sufficient.
+
+Every attack MUST fail with `GE_CYCLE_INVALID_HISTORY` before a graph,
+coordinate, dynamic-node counter, or decided-ID record changes. A conflicting
+second carrier for a completely restored patch ID is the distinct live
+idempotency error `GE_PATCH_IDEMPOTENCY_CONFLICT`; it MUST preserve the first
+complete decision and its already reconstructed graph state.
+
+The behavior set proves accepted and rejected restoration, two accepted
+revisions in sequence, exact immediate and historical duplicate reuse, complete
+duplicate conflict detection, and restoration of a stale-base rejection after
+its accepted winner. The stale rejection is the sole lineage case whose
+requested base MUST differ from the reconstructed current coordinate; requiring
+the old base to become current would make a legitimate one-winner history
+impossible to recover. All non-stale new decisions MUST match the current
+coordinate exactly. Duplicate detection runs before this lineage rule so an
+exact historical accepted decision remains a no-op after later revisions.
+
+TypeScript and Python independently create the four accepted, rejected,
+second-accepted, and post-winner-stale seed carriers through their public live
+appliers. Their complete canonical carrier bytes and SHA-256 values MUST match
+before mutation scenarios execute. For every scenario, both retained reports
+MUST then match the exact input byte count and hash, public outcome and code,
+reconstructed coordinate, decision count, dynamic-node count, and graph node
+count. This is replay/restore parity, not merely agreement that both sides threw
+some exception.
+
 ## 11. Dry run
 
 `dryRun: true` executes steps 1 through 11 of the patch transition against a

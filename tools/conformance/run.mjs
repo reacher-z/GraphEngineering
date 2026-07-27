@@ -14,6 +14,7 @@ import { exerciseCyclePatchVisibilityFaultCampaign } from "./cycle_patch_visibil
 import { exerciseCyclePatchCheckpointFaultCampaign } from "./cycle_patch_checkpoint_fault.mjs";
 import { exerciseGraphPatchHostileShapeCampaign } from "./graph_patch_hostile_shape.mjs";
 import { exerciseGraphPatchHostileSemanticCampaign } from "./graph_patch_hostile_semantic.mjs";
+import { exerciseGraphPatchHostileRestoreCampaign } from "./graph_patch_hostile_restore.mjs";
 
 const root = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 const fixtureRoot = join(root, "spec", "conformance");
@@ -1410,6 +1411,40 @@ assert.deepEqual(
 );
 process.stdout.write(
   `Cross-language hostile GraphPatch semantic conformance passed for ${tsGraphPatchHostileSemantic.caseCount} cases (${tsGraphPatchHostileSemantic.decisionCaseCount} decisions and ${tsGraphPatchHostileSemantic.behaviorCaseCount} behaviors).\n`,
+);
+const graphPatchHostileRestoreFixture = JSON.parse(
+  await readFile(join(fixtureRoot, "graph-patch-hostile-restore.case.json"), "utf8"),
+);
+const pythonGraphPatchHostileRestore = spawnSync(
+  "uv",
+  [
+    "run",
+    "--project",
+    "python",
+    "python",
+    "tools/conformance/python_graph_patch_hostile_restore_report.py",
+  ],
+  { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
+);
+if (pythonGraphPatchHostileRestore.status !== 0) {
+  throw new Error(
+    `Python hostile GraphPatch restore campaign failed:\n${pythonGraphPatchHostileRestore.stderr || pythonGraphPatchHostileRestore.stdout}`,
+  );
+}
+const pyGraphPatchHostileRestore = JSON.parse(pythonGraphPatchHostileRestore.stdout);
+const tsGraphPatchHostileRestore = await exerciseGraphPatchHostileRestoreCampaign({
+  runtime,
+  core,
+  graph: cycleGraph,
+  fixture: graphPatchHostileRestoreFixture,
+});
+assert.deepEqual(
+  tsGraphPatchHostileRestore,
+  pyGraphPatchHostileRestore,
+  "D7 hostile GraphPatch restore campaign reports differ",
+);
+process.stdout.write(
+  `Cross-language hostile GraphPatch restore conformance passed for ${tsGraphPatchHostileRestore.caseCount} cases (${tsGraphPatchHostileRestore.attackCaseCount} attacks and ${tsGraphPatchHostileRestore.behaviorCaseCount} behaviors).\n`,
 );
 const cycleRequestValue = JSON.parse(JSON.stringify(
   cycleContractFixture.validRequests[0].document,

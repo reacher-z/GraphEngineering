@@ -40,9 +40,9 @@ Strict JSON and safe YAML authoring, declaration-ordered builders, opt-in typed
 ports, and revision-1 compiled component identities are implemented in both
 languages. Equivalent JSON, YAML, and builder inputs are checked against shared
 golden graph/schema/component hashes rather than language-local snapshots.
-GraphPatch conformance also retains 54 hostile shape attacks and 24
-schema-valid semantic/idempotency cases, independently executed by both native
-runtimes before release evidence can close.
+GraphPatch conformance also retains 54 hostile shape attacks, 24 schema-valid
+semantic/idempotency cases, and 34 durable replay/restore cases independently
+executed by both native runtimes before release evidence can close.
 
 > **Source-only alpha:** npm and PyPI packages are not published yet. Clone this
 > repository to try the current release candidate; registry publication remains
