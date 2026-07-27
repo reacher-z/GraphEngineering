@@ -10,6 +10,7 @@ import { isDeepStrictEqual } from "node:util";
 
 import { exerciseCycleActivityInterruptionCampaign } from "./cycle_activity_interruption.mjs";
 import { exerciseCycleOperationInterruptionCampaign } from "./cycle_operation_interruption.mjs";
+import { exerciseCycleControllerLineageCampaign } from "./cycle_controller_lineage.mjs";
 import { exerciseCyclePatchVisibilityFaultCampaign } from "./cycle_patch_visibility_fault.mjs";
 import { exerciseCyclePatchCheckpointFaultCampaign } from "./cycle_patch_checkpoint_fault.mjs";
 import { exerciseGraphPatchHostileShapeCampaign } from "./graph_patch_hostile_shape.mjs";
@@ -1445,6 +1446,40 @@ assert.deepEqual(
 );
 process.stdout.write(
   `Cross-language hostile GraphPatch restore conformance passed for ${tsGraphPatchHostileRestore.caseCount} cases (${tsGraphPatchHostileRestore.attackCaseCount} attacks and ${tsGraphPatchHostileRestore.behaviorCaseCount} behaviors).\n`,
+);
+const cycleLineageFixture = JSON.parse(
+  await readFile(join(fixtureRoot, "cycle-controller-lineage.case.json"), "utf8"),
+);
+cycleLineageFixture.requestDocument = cycleContractFixture.validRequests[0].document;
+const pythonCycleLineage = spawnSync(
+  "uv",
+  [
+    "run",
+    "--project",
+    "python",
+    "python",
+    "tools/conformance/python_cycle_lineage_report.py",
+  ],
+  { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
+);
+if (pythonCycleLineage.status !== 0) {
+  throw new Error(
+    `Python cycle lineage campaign failed:\n${pythonCycleLineage.stderr || pythonCycleLineage.stdout}`,
+  );
+}
+const pyCycleLineage = JSON.parse(pythonCycleLineage.stdout);
+const tsCycleLineage = await exerciseCycleControllerLineageCampaign({
+  runtime,
+  core,
+  fixture: cycleLineageFixture,
+});
+assert.deepEqual(
+  tsCycleLineage,
+  pyCycleLineage,
+  "D7 cycle-controller lineage campaign reports differ",
+);
+process.stdout.write(
+  `Cross-language cycle-controller lineage conformance passed for ${tsCycleLineage.caseCount} cases (${tsCycleLineage.attackCaseCount} attacks and ${tsCycleLineage.behaviorCaseCount} behaviors).\n`,
 );
 const cycleRequestValue = JSON.parse(JSON.stringify(
   cycleContractFixture.validRequests[0].document,

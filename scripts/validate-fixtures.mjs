@@ -739,6 +739,7 @@ const d7SchemaNames = [
   "cycle-controller.schema.json",
   "cycle-controller-event.schema.json",
   "cycle-controller-checkpoint.schema.json",
+  "cycle-controller-lineage-manifest.schema.json",
 ];
 const d7Schemas = await Promise.all(
   d7SchemaNames.map(async (name) => JSON.parse(
@@ -761,6 +762,7 @@ const [
   validateCycleRequest,
   validateCycleEvent,
   validateCycleCheckpoint,
+  validateCycleLineageManifest,
 ] = d7Schemas.map((schema) => {
   const validator = d7SchemaEngine.getSchema(schema.$id);
   assert.ok(validator, `missing compiled D7 schema ${schema.$id}`);
@@ -962,6 +964,111 @@ const cyclePatchCheckpointCases = await loadJson(
   "cycle-controller-patch-checkpoint-fault.case.json",
 );
 assert.equal(cyclePatchCheckpointCases.schemaVersion, 1);
+const cycleLineageCases = await loadJson("cycle-controller-lineage.case.json");
+assert.equal(cycleLineageCases.schemaVersion, 1);
+assert.deepEqual(
+  Object.keys(cycleLineageCases).sort(compareUnicodeCodePoints),
+  [
+    "cases",
+    "expect",
+    "hashDomains",
+    "id",
+    "manifestSchema",
+    "requestFixture",
+    "requiredAssertions",
+    "schemaVersion",
+  ],
+  "D7 H06 lineage fixture is not closed",
+);
+assert.equal(cycleLineageCases.id, "cycle-controller-lineage-v1alpha1");
+assert.equal(cycleLineageCases.requestFixture, "cycle-controller.case.json");
+assert.equal(
+  cycleLineageCases.manifestSchema,
+  "spec/cycle-controller-lineage-manifest.schema.json",
+);
+assert.deepEqual(cycleLineageCases.hashDomains, {
+  manifest: "graph-engineering/cycle-lineage-manifest/v1alpha1\0",
+  event: "graph-engineering/cycle-event/v1alpha1\0",
+});
+const expectedLineageScenarios = new Set([
+  "grandchild-replay",
+  "sibling-isolation",
+  "distinct-parent-prefix",
+  "deterministic-revalidation",
+  "extra-field",
+  "api-version",
+  "limit-substitution",
+  "manifest-hash-drift",
+  "missing-root",
+  "duplicate-root",
+  "cycle-run-id",
+  "reordered-streams",
+  "parent-binding",
+  "parent-event-byte",
+  "truncated-prefix",
+  "target-binding",
+  "event-count",
+  "record-prefix-disagreement",
+  "stream-binding",
+  "stream-overflow",
+]);
+assert.deepEqual(
+  new Set(cycleLineageCases.cases.map(({ scenario }) => scenario)),
+  expectedLineageScenarios,
+  "D7 H06 lineage scenario vocabulary drifted",
+);
+assert.equal(
+  new Set(cycleLineageCases.cases.map(({ id }) => id)).size,
+  cycleLineageCases.cases.length,
+  "D7 H06 lineage case IDs are duplicated",
+);
+const lineageCategoryCounts = new Map();
+for (const item of cycleLineageCases.cases) {
+  assert.match(item.id, /^[a-z][a-z0-9-]{2,63}$/u);
+  assert.ok(Object.hasOwn(cycleLineageCases.expect.categoryCounts, item.category));
+  assert.ok(item.expectOutcome === "replayed" || item.expectOutcome === "rejected");
+  assert.deepEqual(
+    Object.keys(item).sort(compareUnicodeCodePoints),
+    (item.expectOutcome === "rejected"
+      ? ["category", "expectCode", "expectOutcome", "id", "scenario"]
+      : ["category", "expectOutcome", "id", "scenario"]),
+    `${item.id} lineage case is not closed`,
+  );
+  assert.equal(Object.hasOwn(item, "expectCode"), item.expectOutcome === "rejected");
+  if (item.expectOutcome === "rejected") {
+    assert.equal(item.expectCode, "GE_CYCLE_INVALID_HISTORY");
+  }
+  lineageCategoryCounts.set(
+    item.category,
+    (lineageCategoryCounts.get(item.category) ?? 0) + 1,
+  );
+}
+assert.equal(cycleLineageCases.cases.length, cycleLineageCases.expect.caseCount);
+assert.equal(
+  cycleLineageCases.cases.filter(({ expectOutcome }) => expectOutcome === "rejected").length,
+  cycleLineageCases.expect.attackCaseCount,
+);
+assert.equal(
+  cycleLineageCases.cases.filter(({ expectOutcome }) => expectOutcome === "replayed").length,
+  cycleLineageCases.expect.behaviorCaseCount,
+);
+assert.deepEqual(
+  Object.fromEntries([...lineageCategoryCounts].sort(([left], [right]) => (
+    compareUnicodeCodePoints(left, right)
+  ))),
+  cycleLineageCases.expect.categoryCounts,
+);
+const lineageCasesCanonical = JSON.stringify(canonicalize(cycleLineageCases.cases));
+assert.equal(
+  Buffer.byteLength(lineageCasesCanonical, "utf8"),
+  cycleLineageCases.expect.casesCanonicalUtf8Bytes,
+);
+assert.equal(hash(cycleLineageCases.cases), cycleLineageCases.expect.casesSha256);
+assert.equal(
+  new Set(cycleLineageCases.requiredAssertions).size,
+  cycleLineageCases.requiredAssertions.length,
+  "D7 H06 required assertions are duplicated",
+);
 assert.equal(
   cycleFaultMatrixCases.eventSchema,
   "spec/cycle-controller-event.schema.json",
@@ -2033,6 +2140,41 @@ for (const event of durableEvents) {
     `${event.sequence}:${event.type} valid cycle event does not conform: ${JSON.stringify(validateCycleEvent.errors)}`,
   );
 }
+const lineageBinding = {
+  controllerRunId: durableRequest.controllerRunId,
+  controllerId: durableRequest.controllerId,
+  hostRunId: durableRequest.hostRun.runId,
+  eventStreamId: durableRequest.eventStreamId,
+  throughSequence: durableEvents.length - 1,
+  recordHash: durableEvents.at(-1).recordHash,
+  historyPrefixHash: durableEvents.at(-1).recordHash,
+  requestHash: cycleControllerCases.validRequests[0].expectRequestHash,
+  controllerHash: cycleControllerCases.validRequests[0].expectControllerHash,
+};
+const lineageSchemaSample = {
+  apiVersion: "graphengineering.reacher-z.github.io/cycle-controller-lineage-manifests/v1alpha1",
+  kind: "CycleControllerLineageManifest",
+  contractVersion: "cycle-controller-lineage/v1alpha1",
+  payloadDisposition: "inline-unredacted",
+  redacted: false,
+  limits: { maxDepth: 32, maxStreams: 33, maxEvents: 1024, maxBytes: 16777216 },
+  target: lineageBinding,
+  streams: [{ ...lineageBinding, parent: null, events: durableEvents }],
+  eventCount: durableEvents.length,
+  manifestHash: "0".repeat(64),
+};
+assert.equal(
+  validateCycleLineageManifest(lineageSchemaSample),
+  true,
+  `D7 H06 lineage sample does not conform: ${JSON.stringify(validateCycleLineageManifest.errors)}`,
+);
+const hostileLineageSchemaSample = cloneJson(lineageSchemaSample);
+hostileLineageSchemaSample.streams[0].unexpected = true;
+assert.equal(
+  validateCycleLineageManifest(hostileLineageSchemaSample),
+  false,
+  "D7 H06 lineage schema accepted an open stream entry",
+);
 for (const testCase of cycleDurableCases.validStandaloneEventSchemaCases) {
   const event = cloneJson(durableEvents[testCase.baseEvent]);
   for (const mutation of testCase.mutations) applyJsonMutation(event, mutation);
@@ -3461,5 +3603,5 @@ assert.equal(new Set(diamond.nodes.map(({ id }) => id)).size, diamond.nodes.leng
 assert.equal(new Set(diamond.edges.map(({ id }) => id)).size, diamond.edges.length);
 
 process.stdout.write(
-  `Validated ${fixtureNames.length} JSON fixtures (${caseNames.length} case manifests), ${yamlNames.length} referenced YAML fixtures, ${Object.keys(expected.canonicalization).length} graph hash, ${Object.keys(expected.checkpoints ?? {}).length} checkpoint hash, ${durableJson.validCases.length} Durable JSON vectors, ${compiledIdentities.length} compiled identities, ${graphPatchCases.validCases.length + graphPatchCases.invalidCases.length} graph patch schema cases plus ${graphPatchCases.semanticCases.length} closed semantic vectors, ${hostileShapeCases.length} hostile GraphPatch shape attacks, ${hostileSemanticCases.length} schema-valid hostile GraphPatch semantic/behavior cases, ${hostileRestoreCases.length} hostile GraphPatch replay/restore cases, and 6 D7 controller/revision/event/checkpoint schemas with ${durableEvents.length} chained event goldens, ${cycleFaultMatrix.length} retained durable fault obligations, ${cycleInterruptionMatrix.length} activity interruption obligations, ${cycleOperationInterruptionMatrix.length} public-operation interruption obligations, ${cyclePatchVisibilityMatrix.length} patch-visibility fault obligations, ${cyclePatchCheckpointMatrix.length} patch-checkpoint fault obligations, ${cycleDurableCases.leaseTransitionCases.length} valid and ${cycleDurableCases.invalidLeaseTransitionCases.length} hostile lease transitions, ${cycleDurableCases.validInterruptedHistoryCases?.length ?? 0} interrupted terminal/checkpoint folds, ${cycleDurableCases.inDoubtProjectionCases.length} in-doubt singleton cases, ${resolutionProtocol.cases.length} terminal in-doubt resolution cases, ${cycleDurableCases.untilDryFoldCases.length} global-seen convergence fold, ${cycleDurableCases.hardStopFoldCases.length} hard-stop folds, ${cycleDurableCases.invalidEventHistoryCases.length} hostile histories, ${cycleDurableCases.invalidCheckpointSemanticCases.length} hostile checkpoint folds, plus ${cycleDurableCases.validStandaloneEventSchemaCases.length} standalone phase-event shapes; all ${expectedD7Tests.length} D7-CYCLE-SPEC-024 expected-test groups are mapped against meta-valid schemas.\n`,
+  `Validated ${fixtureNames.length} JSON fixtures (${caseNames.length} case manifests), ${yamlNames.length} referenced YAML fixtures, ${Object.keys(expected.canonicalization).length} graph hash, ${Object.keys(expected.checkpoints ?? {}).length} checkpoint hash, ${durableJson.validCases.length} Durable JSON vectors, ${compiledIdentities.length} compiled identities, ${graphPatchCases.validCases.length + graphPatchCases.invalidCases.length} graph patch schema cases plus ${graphPatchCases.semanticCases.length} closed semantic vectors, ${hostileShapeCases.length} hostile GraphPatch shape attacks, ${hostileSemanticCases.length} schema-valid hostile GraphPatch semantic/behavior cases, ${hostileRestoreCases.length} hostile GraphPatch replay/restore cases, and 7 D7 controller/revision/event/checkpoint/lineage schemas with ${durableEvents.length} chained event goldens, ${cycleLineageCases.cases.length} lineage replay/corruption cases, ${cycleFaultMatrix.length} retained durable fault obligations, ${cycleInterruptionMatrix.length} activity interruption obligations, ${cycleOperationInterruptionMatrix.length} public-operation interruption obligations, ${cyclePatchVisibilityMatrix.length} patch-visibility fault obligations, ${cyclePatchCheckpointMatrix.length} patch-checkpoint fault obligations, ${cycleDurableCases.leaseTransitionCases.length} valid and ${cycleDurableCases.invalidLeaseTransitionCases.length} hostile lease transitions, ${cycleDurableCases.validInterruptedHistoryCases?.length ?? 0} interrupted terminal/checkpoint folds, ${cycleDurableCases.inDoubtProjectionCases.length} in-doubt singleton cases, ${resolutionProtocol.cases.length} terminal in-doubt resolution cases, ${cycleDurableCases.untilDryFoldCases.length} global-seen convergence fold, ${cycleDurableCases.hardStopFoldCases.length} hard-stop folds, ${cycleDurableCases.invalidEventHistoryCases.length} hostile histories, ${cycleDurableCases.invalidCheckpointSemanticCases.length} hostile checkpoint folds, plus ${cycleDurableCases.validStandaloneEventSchemaCases.length} standalone phase-event shapes; all ${expectedD7Tests.length} D7-CYCLE-SPEC-024 expected-test groups are mapped against meta-valid schemas.\n`,
 );

@@ -4318,3 +4318,347 @@ from sections 31.25-31.26, favoring replay/fork lineage corruption or the
 provider-neutral `CycleStore` contract because those gates unlock multiple
 downstream production-readiness rows. New discoveries MUST be appended after
 this section; earlier plan text and this historical snapshot remain unchanged.
+
+## 31.28 D7-H06 multi-generation replay/fork lineage and offline manifest closure
+
+This section was appended after the H05C implementation/evidence push. It does
+not rewrite, narrow, reorder, or retroactively mark any earlier plan item. It
+turns the previously selected D7-H06 lineage priority into an executable
+contract and records the exact acceptance boundary for the implementation now
+under verification.
+
+### 31.28.1 Milestone outcome and non-claims
+
+H06 MUST replace single-parent replay assumptions with a bounded, independently
+verifiable root-to-target ancestry proof. A successful implementation provides:
+
+- a closed `cycle-controller-lineage/v1alpha1` carrier;
+- native TypeScript and Python exporters;
+- native store-free offline replay in both runtimes;
+- recursive fork-of-fork support rather than only start → child support;
+- a machine-readable Draft 2020-12 schema;
+- a generated root → child → grandchild topology;
+- sibling forks from the same immutable parent prefix;
+- a fork from a different valid prefix of the root;
+- checkpoint-refold versus full-event-fold equivalence at an intermediate
+  ancestor;
+- corruption, omission, duplication, reordering, cycle, identity, and bound
+  attacks that remain invalid even after the attacker recomputes the outer
+  manifest hash; and
+- complete TypeScript/Python canonical report equality.
+
+H06 does **not** claim that the process-local memory stores are production
+durable, that a lineage export authorizes ancestor garbage collection, that D9
+payload protection is complete, or that SQLite/PostgreSQL retention and legal
+hold behavior exists. It closes the replay/fork lineage proof row only. Store
+provider conformance, durable retention enforcement, production adapters,
+protected carriers, scheduler integration, release provenance, and independent
+review remain separate gates.
+
+### 31.28.2 Closed manifest envelope
+
+The machine carrier MUST contain exactly these top-level fields:
+
+1. `apiVersion` fixed to
+   `graphengineering.reacher-z.github.io/cycle-controller-lineage-manifests/v1alpha1`;
+2. `kind` fixed to `CycleControllerLineageManifest`;
+3. `contractVersion` fixed to `cycle-controller-lineage/v1alpha1`;
+4. truthful `payloadDisposition: inline-unredacted`;
+5. truthful `redacted: false`;
+6. the exact immutable `limits` object;
+7. one closed target binding;
+8. nonempty root-to-target `streams` in dependency order;
+9. exact aggregate `eventCount`; and
+10. `manifestHash`.
+
+Unknown fields are forbidden at the envelope, limits, target binding, stream,
+parent binding, event, request, and nested durable-payload levels. Validation
+MUST first detach exact portable JSON under a canonical byte bound. Proxies,
+accessors, hidden or symbol keys, sparse arrays, non-plain objects, cycles,
+unsafe integers, non-finite values, and constructed-depth/value explosions
+cannot cross the trust boundary.
+
+The fixed contract bounds are:
+
+- maximum ancestry depth: 32 parent edges;
+- maximum streams: 33;
+- maximum embedded events across the complete package: 1,024; and
+- maximum canonical manifest bytes: 16,777,216.
+
+These values are embedded in and authenticated by the manifest. A caller cannot
+substitute smaller or larger numbers, omit a field, or treat them as local
+configuration. Future bound changes require a versioned contract migration.
+
+### 31.28.3 Stream and parent binding
+
+Every stream entry MUST repeat a complete binding over:
+
+- `controllerRunId`;
+- `controllerId`;
+- `hostRunId`;
+- `eventStreamId`;
+- inclusive `throughSequence`;
+- terminal event `recordHash`;
+- folded `historyPrefixHash`;
+- `requestHash`; and
+- `controllerHash`.
+
+For the v1alpha1 event chain, `recordHash` and `historyPrefixHash` MUST be equal.
+The embedded event count MUST equal `throughSequence + 1`, begin at sequence
+zero with `ControllerCreated`, and survive complete event-integrity and semantic
+fold validation. Derived request/controller/host/stream/hash values MUST equal
+the repeated binding; repeated metadata is evidence to check, never an
+authority source that can override the fold.
+
+The first stream MUST have `origin=start` and `parent: null`. Every later stream
+MUST have `origin=fork`; its `parent` object MUST equal the immediately preceding
+stream binding byte-for-byte, and the child request's parent run ID, sequence,
+and history hash MUST match that predecessor. The target binding MUST equal the
+last stream binding. Run IDs and stream IDs MUST be unique throughout the
+package. Therefore a missing root, missing middle ancestor, duplicate ancestor,
+reordered list, self-reference, descendant-reference, or cycle fails before any
+target state is exposed.
+
+The physical target store key MUST equal the request's `eventStreamId`.
+Lineage-capable store resolution by controller run ID MUST return exactly one
+retained stream and exactly the requested inclusive prefix. A shorter prefix,
+longer prefix, ambiguous controller index, substituted stream, or wrong tail
+hash is invalid.
+
+### 31.28.4 Content address and validation order
+
+The manifest domain is exactly
+`graph-engineering/cycle-lineage-manifest/v1alpha1\0`. `manifestHash` is SHA-256
+over that UTF-8 domain separator followed immediately by canonical JSON for the
+complete envelope excluding only `manifestHash`.
+
+The validator order MUST be fail closed:
+
+1. capture bounded exact portable JSON;
+2. enforce the 16 MiB canonical byte maximum;
+3. enforce closed envelope and fixed identity literals;
+4. enforce the exact fixed limits;
+5. validate the declared digest shape;
+6. recompute and compare `manifestHash`;
+7. validate target and stream binding shapes;
+8. enforce stream, depth, event, and aggregate-count limits;
+9. reject duplicate run/stream identities before reuse;
+10. fold the root prefix;
+11. fold each child using only the immediately preceding verified fold;
+12. compare every derived binding to declared evidence;
+13. compare every declared parent to the derived predecessor;
+14. compare aggregate `eventCount`; and
+15. compare the final derived binding to `target`.
+
+Attack fixtures MUST recompute `manifestHash` after semantic mutation unless
+the test explicitly targets an unsealed digest drift. This prevents a shallow
+hash mismatch from hiding broken ancestry validation.
+
+### 31.28.5 Native TypeScript surface
+
+`@graph-engineering/runtime` MUST export:
+
+- `exportCycleControllerLineageManifest`;
+- `validateCycleControllerLineageManifest`;
+- `replayCycleControllerLineageManifest`;
+- `CYCLE_LINEAGE_MANIFEST_DOMAIN`;
+- all four published limit constants;
+- the manifest, stream, binding, limits, replay-result, and lineage-store
+  TypeScript interfaces.
+
+`CycleControllerLineageStore` extends the ordinary append/read event-store
+surface with `readByControllerRunId(controllerRunId, throughSequence)`.
+`MemoryCycleControllerEventStore` MUST implement this lookup deterministically,
+reject absent or ambiguous controller identities, enforce that the physical
+stream key equals the closed request stream ID on first append, and prevent one
+controller run ID from being indexed by another stream.
+
+`forkCycleController` MUST retain its direct fast path for an `origin=start`
+parent. When the parent is itself a fork, it MUST require a lineage-capable
+store, export/validate the complete ancestry through the requested parent
+prefix, and use only the verified target fold as inheritance authority. It MUST
+fail with `GE_CYCLE_INVALID_HISTORY` before child creation when the capability
+or any ancestor is missing. A caller-built or serialized projection is not
+trusted merely because it repeats a real history hash.
+
+### 31.28.6 Native Python surface
+
+`graph_engineering` MUST export:
+
+- `export_cycle_lineage_manifest`;
+- `validate_cycle_lineage_manifest`;
+- `replay_cycle_lineage_manifest`;
+- `CycleLineageReplayResult`;
+- the common domain and limit constants.
+
+Python's existing `CycleStore.read_by_controller_run_id` capability MUST be the
+ancestor resolver. `MemoryCycleStore` MUST enforce the request's physical
+stream key, retain one controller-to-stream index, reject ambiguous reuse, and
+return only the requested inclusive prefix. Recursive controller replay/fork
+resolution and manifest export MUST converge on the same depth and event
+bounds as TypeScript.
+
+The replay result MUST expose all root-to-target folds and a target property.
+It performs no store operation because the manifest owns every required event
+prefix. `require_terminal` may strengthen replay acceptance but cannot weaken
+any ancestry, hash, or bound check.
+
+### 31.28.7 Generated behavioral topology
+
+The retained native unit topology MUST be produced with real controller APIs,
+not handcrafted projection dictionaries:
+
+```text
+root prefix at terminal tail ──► fork A ──► fork B
+             │
+             ├───────────────► sibling fork
+             │
+             └─ root sequence 0 ─────────► early-prefix fork
+```
+
+Required observations:
+
+- fork B exports three streams in root/A/B order;
+- sibling and B exports contain byte-identical retained root entries;
+- sibling and B target identities differ;
+- root state is inherited by both branches;
+- sibling-only discoveries, verdicts, counters, and arrays never appear in B;
+- distinct-prefix export retains exactly the one root event named by sequence
+  zero rather than silently extending to the current root tail;
+- target, sibling, early-prefix, and root event bytes are unchanged by export
+  and offline replay;
+- intermediate fork A checkpoint validation produces a verified fold;
+- folding B from that checkpoint-verified A fold equals folding B from the full
+  event-derived A fold; and
+- isolating a child stream without its parent makes export fail.
+
+Existing open-activity fork tests remain required: an external idempotent or
+non-idempotent parent claim is coalesced into one child in-doubt projection and
+blocks child lease/dispatch under the current normative rule because the child
+cannot reuse the parent's stable activity key.
+
+### 31.28.8 Retained hostile campaign
+
+`spec/conformance/cycle-controller-lineage.case.json` MUST remain a closed,
+hashed 20-case vocabulary: four behaviors and 16 attacks.
+
+The four behaviors are:
+
+1. root → child → grandchild replay;
+2. sibling-prefix equality with isolated target identity;
+3. forks from root sequence zero versus root sequence one; and
+4. deterministic byte-identical revalidation.
+
+The 16 attacks cover:
+
+1. unknown envelope field;
+2. API-version substitution;
+3. fixed-limit substitution;
+4. unsealed event-count mutation;
+5. missing root ancestor;
+6. duplicate root ancestor;
+7. ancestry-cycle identity;
+8. reordered ancestors;
+9. parent request-hash substitution;
+10. parent event-byte corruption;
+11. truncated parent prefix;
+12. target controller-hash substitution;
+13. resealed aggregate event-count mismatch;
+14. record/prefix-hash disagreement;
+15. stream-ID substitution; and
+16. stream-count overflow.
+
+All 16 attacks MUST return `GE_CYCLE_INVALID_HISTORY`. The fixture validator
+MUST freeze the exact scenario set, unique IDs, allowed fields, category counts,
+four/16/20 totals, required-assertion uniqueness, and canonical case-list byte
+count/hash. The manifest schema MUST be independently meta-validated, compiled
+with the referenced event schema, exercised with a valid event package, and
+shown to reject an open stream entry.
+
+### 31.28.9 Independent cross-language proof
+
+The TypeScript runner is
+`tools/conformance/cycle_controller_lineage.mjs`; the Python runner is
+`tools/conformance/python_cycle_lineage_report.py`. Each MUST independently:
+
+- derive requests from the shared controller fixture;
+- calculate native request and controller hashes;
+- create root `ControllerCreated` and `LeaseAcquired` events;
+- create child, grandchild, sibling, and early-prefix creation events;
+- write those events through its native memory store;
+- export all three retained manifests;
+- execute all behavior and attack scenarios;
+- reseal semantic attacks with the native domain-hash implementation;
+- replay or reject every case; and
+- emit deterministic JSON containing the entire canonical grandchild manifest,
+  byte count, raw SHA-256, manifest hash, stream/event totals, category totals,
+  and ordered per-case results.
+
+`tools/conformance/run.mjs` MUST deep-compare the complete reports. H06 is not
+green if only counts, hashes, or selected fields match. The initial retained
+portable package identity is:
+
+- canonical manifest bytes: 18,392;
+- raw canonical SHA-256:
+  `67b436c51ea8395b380579453758ffed0273cecef6ac4f4a012981c18bc01084`;
+- domain-separated manifest hash:
+  `05f3503d99ba4918e6430843534ad739cd5dc0fe59a0fca4bd6ab33787df4d58`;
+- streams: three; and
+- embedded events: four.
+
+Any intentional carrier change MUST update the protocol version or append a
+documented migration with new fixture identities; silent golden regeneration
+is forbidden.
+
+### 31.28.10 Verification and immutable evidence sequence
+
+H06 verification MUST include, in order:
+
+1. TypeScript runtime strict type checking;
+2. focused TypeScript lineage/tree/controller tests;
+3. Python Ruff over runtime, store, tests, and independent runner;
+4. Python Mypy over all changed runtime source;
+5. focused Python lineage/controller tests;
+6. independent fixture/schema validation;
+7. documentation-link validation;
+8. full cross-language conformance with the explicit 20-case H06 success line;
+9. full TypeScript workspace tests, lint, type checking, and builds;
+10. full Python tests, Ruff, and Mypy;
+11. release-map, evidence-closure, package contents, packed-install, Python
+    wheel/sdist, and production dependency audit gates;
+12. a detached clean-worktree repeat at the exact implementation commit;
+13. a retained evidence record with commit/tree/parent, fixture/package hashes,
+    exact commands/counts, repairs, limitations, dirty-worktree exclusions, and
+    cold-worktree identity;
+14. a separate evidence commit; and
+15. push, fetch, author/committer/body audit, and local/remote zero-divergence
+    proof.
+
+At append time, the focused TypeScript three-test lineage group, focused Python
+two-test lineage group, schema/fixture validator, documentation links, strict
+type/lint checks, and full cross-language suite were green. The complete suite
+reported H06 parity for all 20 cases before continuing through the pre-existing
+132-event/855-obligation native-cycle join. This is a development snapshot;
+only the later immutable evidence record may be cited as commit-bound proof.
+
+### 31.28.11 Immediate next dispatch after H06
+
+After H06 immutable evidence is pushed, the next highest-leverage D7 item is
+`D7-S01 provider-neutral CycleStore conformance`. Work SHOULD fan out by
+independent ownership when agent capacity exists:
+
+- contract owner: provider interface, CAS/append/read/index/checkpoint/lease and
+  retention semantics;
+- TypeScript owner: reference model and conformance harness;
+- Python owner: independent reference model and differential report;
+- adversarial owner: linearizability, pagination, stale-owner, ambiguous commit,
+  duplicate request, truncation, corruption, and authorization cases;
+- main agent: schema/public API integration, cross-language comparison, plan/log
+  append-only integrity, full verification, cold proof, commits, and push.
+
+S01 MUST define the capability and failure taxonomy required by SQLite and
+PostgreSQL before either adapter is allowed to become the primary focus. It
+must not encode memory-store implementation details as the provider contract.
+Until additional agent slots recover, the main agent executes these workstreams
+sequentially while preserving their independent artifacts and comparison
+boundaries; quota failure does not justify weakening acceptance.

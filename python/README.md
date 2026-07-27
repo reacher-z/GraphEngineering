@@ -567,6 +567,33 @@ sequence and history hash, copies only the event-derived revision, seen/verdict
 categories, committed rounds, counters, decided patch IDs, and in-doubt status,
 and gives the child an independent stream and lease.
 
+Multi-generation ancestry and portable support replay use the closed lineage
+manifest API:
+
+```python
+from graph_engineering import (
+    export_cycle_lineage_manifest,
+    replay_cycle_lineage_manifest,
+)
+
+manifest = await export_cycle_lineage_manifest(
+    child_request["eventStreamId"],
+    store=store,
+)
+offline = replay_cycle_lineage_manifest(manifest)
+assert offline.target.request.model.controller_run_id == child_request["controllerRunId"]
+```
+
+The exporter recursively resolves every ancestor through
+`read_by_controller_run_id`. It binds controller/run/host/stream identity,
+sequence, record and prefix hashes, request/controller hashes, and complete
+event bytes under one domain-separated manifest hash. Fixed v1alpha1 bounds are
+32 parent edges, 33 streams, 1,024 total events, and 16 MiB canonical JSON.
+Offline replay performs no store, lease, clock, handler, plugin, or network
+operation. Missing, duplicate, cyclic, reordered, truncated, corrupt, or
+substituted ancestry fails with `GE_CYCLE_INVALID_HISTORY` even if an attacker
+recomputes the outer manifest hash.
+
 `pause_cycle` and `replay_cycle` accept a `CycleCancellation`, as do resume and
 fork. Before an operation's durable commit, cancellation raises stable
 `GE_CYCLE_OPERATION_CANCELLED` with exact `operation` and `boundary` details

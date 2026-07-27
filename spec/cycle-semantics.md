@@ -1458,11 +1458,72 @@ an open idempotent or non-idempotent external activity is coalesced into the
 child's singleton in-doubt projection and blocks child lease/dispatch because
 the child cannot retry under the parent's stable activity key.
 
+#### 13.5.1 Bounded offline lineage manifest
+
+`cycle-controller-lineage/v1alpha1` packages one exact root-to-target chain for
+support, migration, retention, and offline replay. Its schema is
+[`cycle-controller-lineage-manifest.schema.json`](cycle-controller-lineage-manifest.schema.json).
+It is an authoritative recovery carrier, not a graph visualization and not a
+replacement for the event store.
+
+The `streams` array is ordered root first and target last. Each entry contains
+one nonempty event prefix plus a closed binding over:
+
+- controller run ID, controller ID, host run ID, and event stream ID;
+- inclusive `throughSequence`;
+- terminal event `recordHash` and the equal folded `historyPrefixHash`;
+- request hash and controller identity hash; and
+- the complete binding of the immediately preceding parent, or `null` only for
+  an `origin=start` root.
+
+The final entry MUST equal the top-level `target`. `eventCount` MUST equal the
+sum of all embedded prefix lengths. Controller run IDs and event stream IDs are
+unique across the package. A non-root entry MUST have `origin=fork` and consume
+its immediate predecessor at exactly the run ID, sequence, and history hash in
+the child request. Folding each entry with only the preceding verified fold
+therefore proves controller/stream/request/controller-hash identity in addition
+to the request's direct parent tuple. Reordering an otherwise valid set of
+entries is invalid.
+
+The v1alpha1 limits are part of the hashed contract rather than caller hints:
+
+| Bound | Value |
+|---|---:|
+| ancestry depth | 32 parent edges |
+| streams | 33 |
+| embedded events across all streams | 1,024 |
+| canonical manifest bytes | 16,777,216 |
+
+Every manifest uses the domain
+`graph-engineering/cycle-lineage-manifest/v1alpha1\0`. `manifestHash` is the
+SHA-256 digest of that domain followed by canonical JSON for the complete
+envelope excluding `manifestHash`. The validator first enforces exact portable
+JSON, byte and closed-shape bounds, fixed limits, and this digest, then folds
+every event prefix. Recomputing the outer digest after an attack does not make
+a missing ancestor, duplicate ancestor, ancestry cycle, short/long prefix,
+parent substitution, event corruption, or target substitution valid.
+
+An exporter MUST fail when a durable parent run ID cannot resolve to exactly
+one retained stream or when the resolver returns anything other than the
+declared prefix. The target store key MUST equal the request's `eventStreamId`.
+A target whose parent has itself been forked requires recursive resolution all
+the way to an `origin=start` root. TypeScript stores advertise this capability
+with `readByControllerRunId`; Python `CycleStore` requires
+`read_by_controller_run_id`.
+
+Offline manifest replay performs no store read, append, lease acquisition,
+clock sample, random call, handler dispatch, compiler/plugin call, model call,
+or network access. It returns every verified root-to-target fold and the final
+target fold. Revalidating byte-identical input is deterministic. The manifest
+does not grant retention permission: an implementation MUST retain every
+ancestor prefix referenced by a live child until a verified export or another
+future retention protocol preserves equivalent recovery authority.
+
 ### 13.6 Payload protection and D9 boundary
 
 `cycle-controller-recovery/v1alpha1` deliberately stores authoritative
-objective, candidate, seen-key, verdict, and patch material inline. Every event
-and checkpoint therefore requires:
+objective, candidate, seen-key, verdict, and patch material inline. Every event,
+checkpoint, and lineage manifest therefore requires:
 
 ```json
 {
@@ -1483,7 +1544,7 @@ This truthfully specified alpha carrier does not satisfy D9, the default
 privacy profile, or stable release. It does not accept `ProtectedValueRef`,
 ciphertext, a redaction token, an opaque artifact, or `redacted: true` as an
 authoritative substitute. The future protected mapping requires a separately
-versioned controller request/event/checkpoint contract aligned with
+versioned controller request/event/checkpoint/lineage contract aligned with
 `redaction-semantics.md`, native guard/store/key implementation, and migration
 fixtures. It cannot silently change v1alpha1 hashes or omit recovery data.
 
@@ -1539,6 +1600,13 @@ freezes the 35-row H03C `PatchAccepted` event-visibility campaign.
 adds the 15 checkpoint-stage rows. Both native runtimes execute each retained
 row and the conformance join compares the full reports exactly.
 
+[`cycle-controller-lineage.case.json`](conformance/cycle-controller-lineage.case.json)
+freezes the H06 root → child → grandchild package, sibling and distinct-prefix
+exports, deterministic revalidation, and 16 hostile attacks. Both native
+runtimes independently construct all event/request/hash bytes, export and
+replay the manifests, then compare the complete 18,392-byte canonical package,
+manifest hash, event hashes, target projection, and every stable rejection.
+
 The native implementations MUST pass the shared fixtures without one runtime
 delegating execution or number formatting to the other language.
 
@@ -1557,8 +1625,9 @@ The runtime/product boundary remains open under `D7-TS-CYCLES-025`,
 `D7-PY-CYCLES-026`, and `D7-CYCLE-CONFORMANCE-027`. Native standalone
 controllers, checked dynamic patch appliers, local event-store joins, and an
 executable cross-language reporter now consume this contract, but the complete
-fault, cancellation, corrupt-checkpoint, lineage, competing-lease, and
-independent-review acceptance set is unfinished. Documentation and CLI output
+fault, cancellation, corrupt-checkpoint, competing-lease, and independent-review
+acceptance set is unfinished.
+Documentation and CLI output
 MUST therefore label bounded dynamic cycles and GraphPatch execution as alpha
 and local-store capability, not unavailable and not production durable.
 Accepting 024 and the current alpha milestones does not complete master-plan

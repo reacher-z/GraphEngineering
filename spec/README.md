@@ -34,6 +34,8 @@ Later revision lineage is closed by
 controller event and fold/checkpoint contracts are
 [cycle-controller-event.schema.json](cycle-controller-event.schema.json) and
 [cycle-controller-checkpoint.schema.json](cycle-controller-checkpoint.schema.json).
+Bounded root-to-target export for offline replay is closed by
+[cycle-controller-lineage-manifest.schema.json](cycle-controller-lineage-manifest.schema.json).
 These D7 schemas are protocol-frozen and consumed by the native TypeScript and
 Python standalone alpha controllers. Schema acceptance alone is not native or
 production evidence; executable conformance remains the capability gate. Their

@@ -67,6 +67,11 @@ import {
   type FoldCycleOptions,
 } from "./cycle-fold.js";
 import { runCycleFaultHook } from "./cycle-faults.js";
+import {
+  exportCycleControllerLineageManifest,
+  replayCycleControllerLineageManifest,
+  type CycleControllerLineageStore,
+} from "./cycle-lineage.js";
 import { NativeGraphPatchApplier } from "./graph-patch.js";
 import { snapshotJson } from "./json.js";
 import type { JsonValue } from "./types.js";
@@ -2520,7 +2525,39 @@ export async function forkCycleController(
       "fork parent prefix is outside history",
     );
   }
-  const parent = foldCycleControllerEvents(parentEvents.slice(0, parentSequence + 1));
+  const parentPrefix = parentEvents.slice(0, parentSequence + 1);
+  const parentRequestValue = parentPrefix[0]?.data.request;
+  let parentRequest: CycleControllerRequest;
+  try {
+    parentRequest = validateCycleControllerRequest(parentRequestValue);
+  } catch (error) {
+    throw new CycleControllerError(
+      "GE_CYCLE_INVALID_HISTORY",
+      childRequest.controllerRunId,
+      "fork parent prefix contains an invalid controller request",
+      { causeName: error instanceof Error ? error.name : typeof error },
+      { cause: error },
+    );
+  }
+  let parent: CycleControllerFold;
+  if (parentRequest.lineage.origin === "fork"
+      && typeof (parentStore as Partial<CycleControllerLineageStore>).readByControllerRunId
+        === "function") {
+    const manifest = await exportCycleControllerLineageManifest(
+      parentStore as CycleControllerLineageStore,
+      parentStreamId,
+      parentSequence,
+    );
+    parent = replayCycleControllerLineageManifest(manifest).target;
+  } else if (parentRequest.lineage.origin === "start") {
+    parent = foldCycleControllerEvents(parentPrefix);
+  } else {
+    throw new CycleControllerError(
+      "GE_CYCLE_INVALID_HISTORY",
+      childRequest.controllerRunId,
+      "forking a fork requires a lineage-capable parent store",
+    );
+  }
   await operationBoundary(
     "fork",
     "operation:fork:after-parent-fold",

@@ -1,0 +1,137 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/cycle-controller-lineage-manifest.schema.json",
+  "title": "Graph Engineering cycle-controller offline lineage manifest",
+  "description": "Closed, bounded, content-addressed root-to-target event prefixes for offline replay of cycle-controller-lineage/v1alpha1. This alpha carrier intentionally embeds inline-unredacted recovery events.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "contractVersion",
+    "payloadDisposition",
+    "redacted",
+    "limits",
+    "target",
+    "streams",
+    "eventCount",
+    "manifestHash"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "graphengineering.reacher-z.github.io/cycle-controller-lineage-manifests/v1alpha1"
+    },
+    "kind": { "const": "CycleControllerLineageManifest" },
+    "contractVersion": { "const": "cycle-controller-lineage/v1alpha1" },
+    "payloadDisposition": { "const": "inline-unredacted" },
+    "redacted": { "const": false },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["maxDepth", "maxStreams", "maxEvents", "maxBytes"],
+      "properties": {
+        "maxDepth": { "const": 32 },
+        "maxStreams": { "const": 33 },
+        "maxEvents": { "const": 1024 },
+        "maxBytes": { "const": 16777216 }
+      }
+    },
+    "target": { "$ref": "#/$defs/binding" },
+    "streams": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 33,
+      "items": { "$ref": "#/$defs/stream" }
+    },
+    "eventCount": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1024
+    },
+    "manifestHash": { "$ref": "#/$defs/hash" }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+      "not": { "enum": [".", ".."] }
+    },
+    "hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "counter": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "controllerRunId",
+        "controllerId",
+        "hostRunId",
+        "eventStreamId",
+        "throughSequence",
+        "recordHash",
+        "historyPrefixHash",
+        "requestHash",
+        "controllerHash"
+      ],
+      "properties": {
+        "controllerRunId": { "$ref": "#/$defs/identifier" },
+        "controllerId": { "$ref": "#/$defs/identifier" },
+        "hostRunId": { "$ref": "#/$defs/identifier" },
+        "eventStreamId": { "$ref": "#/$defs/identifier" },
+        "throughSequence": { "$ref": "#/$defs/counter" },
+        "recordHash": { "$ref": "#/$defs/hash" },
+        "historyPrefixHash": { "$ref": "#/$defs/hash" },
+        "requestHash": { "$ref": "#/$defs/hash" },
+        "controllerHash": { "$ref": "#/$defs/hash" }
+      }
+    },
+    "stream": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "controllerRunId",
+        "controllerId",
+        "hostRunId",
+        "eventStreamId",
+        "throughSequence",
+        "recordHash",
+        "historyPrefixHash",
+        "requestHash",
+        "controllerHash",
+        "parent",
+        "events"
+      ],
+      "properties": {
+        "controllerRunId": { "$ref": "#/$defs/identifier" },
+        "controllerId": { "$ref": "#/$defs/identifier" },
+        "hostRunId": { "$ref": "#/$defs/identifier" },
+        "eventStreamId": { "$ref": "#/$defs/identifier" },
+        "throughSequence": { "$ref": "#/$defs/counter" },
+        "recordHash": { "$ref": "#/$defs/hash" },
+        "historyPrefixHash": { "$ref": "#/$defs/hash" },
+        "requestHash": { "$ref": "#/$defs/hash" },
+        "controllerHash": { "$ref": "#/$defs/hash" },
+        "parent": {
+          "oneOf": [
+            { "$ref": "#/$defs/binding" },
+            { "type": "null" }
+          ]
+        },
+        "events": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1024,
+          "items": {
+            "$ref": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/cycle-controller-event.schema.json"
+          }
+        }
+      }
+    }
+  }
+}

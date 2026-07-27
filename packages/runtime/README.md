@@ -261,8 +261,10 @@ observation is hash chained and CAS appended.
 
 ```ts
 import {
+  exportCycleControllerLineageManifest,
   MemoryCycleControllerEventStore,
   pauseCycleController,
+  replayCycleControllerLineageManifest,
   renewCycleControllerLease,
   resumeCycleController,
   startCycleController,
@@ -308,6 +310,15 @@ const paused = await pauseCycleController(request, {
   expectedSequence: renewed.event.sequence,
   reason: "handoff",
 });
+
+// Package the exact root-to-target prefixes for store-free support replay.
+// The local store resolves every ancestor by controllerRunId.
+const manifest = await exportCycleControllerLineageManifest(
+  eventStore,
+  childRequest.eventStreamId,
+);
+const offline = replayCycleControllerLineageManifest(manifest);
+console.log(offline.target.historyPrefixHash);
 ```
 
 `replayCycleController` is read-only and dispatches no activity or clock;
@@ -391,11 +402,24 @@ planner and finishes with an exact terminal `-latest` checkpoint; Python and
 TypeScript compare checkpoint lag, write count, complete events, hashes, result,
 and final stored checkpoint.
 
-When replaying or resuming a fork in a fresh process, replay the exact parent
-event prefix locally and pass that verified fold as `parent`. A serialized or
-caller-constructed fold object is not accepted as inheritance authority: its
-history hash may name a real prefix while its copied counters or seen set lie
-about what that prefix contains.
+`exportCycleControllerLineageManifest` recursively packages an exact
+root-to-target chain through a lineage-capable store. Its fixed v1alpha1 bounds
+are 32 parent edges, 33 streams, 1,024 total events, and 16 MiB of canonical
+JSON. Every entry binds run/controller/host/stream identity, sequence, record
+and prefix hashes, request hash, controller hash, complete events, and the
+immediate parent binding. `replayCycleControllerLineageManifest` verifies the
+domain-separated package hash and folds every ancestor with no store, lease,
+clock, handler, plugin, or network call. A rehashed missing, duplicate, cyclic,
+reordered, truncated, corrupt, or substituted ancestry fails with
+`GE_CYCLE_INVALID_HISTORY`.
+
+`MemoryCycleControllerEventStore` implements the required
+`readByControllerRunId` lookup, so `forkCycleController` can now fork a parent
+that is itself a fork. Stores without that capability can still fork an
+`origin=start` parent but fail closed for nested ancestry. For the lower-level
+`replayCycleController` API, a serialized or caller-constructed fold object is
+not accepted as inheritance authority: its history hash may name a real prefix
+while copied counters or seen state lie about the prefix.
 
 `NativeGraphPatchApplier` accepts append-only nodes, edges, and outputs. It
 validates closed authority/budget context, stale-base CAS, capability ceilings,

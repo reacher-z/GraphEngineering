@@ -1538,6 +1538,47 @@ export class MemoryCycleControllerEventStore implements CycleControllerEventStor
         { expectedSequence, actualSequence: commitActual },
       );
     }
+    if (current.length === 0) {
+      const first = events[0];
+      if (first?.type !== "ControllerCreated") {
+        throw new CycleControllerError(
+          "GE_CYCLE_INVALID_HISTORY",
+          first?.controllerRunId ?? "unknown",
+          "new cycle stream must begin with ControllerCreated",
+        );
+      }
+      let request: CycleControllerRequest;
+      try {
+        request = validateCycleControllerRequest(first.data.request);
+      } catch (error) {
+        throw new CycleControllerError(
+          "GE_CYCLE_INVALID_HISTORY",
+          first.controllerRunId,
+          "new cycle stream contains an invalid controller request",
+          { causeName: error instanceof Error ? error.name : typeof error },
+          { cause: error },
+        );
+      }
+      if (request.eventStreamId !== streamId) {
+        throw new CycleControllerError(
+          "GE_CYCLE_INVALID_HISTORY",
+          first.controllerRunId,
+          "cycle store key differs from request eventStreamId",
+        );
+      }
+      const duplicateRun = [...this.#streams.entries()].find(
+        ([otherStreamId, other]) => otherStreamId !== streamId
+          && other[0]?.controllerRunId === first.controllerRunId,
+      );
+      if (duplicateRun !== undefined) {
+        throw new CycleControllerError(
+          "GE_CYCLE_RESUME_CONFLICT",
+          first.controllerRunId,
+          "controllerRunId is already indexed by another stream",
+          { existingStreamId: duplicateRun[0], requestedStreamId: streamId },
+        );
+      }
+    }
     this.#streams.set(streamId, [...current, ...events]);
     for (const event of events) {
       await runCycleFaultHook(
@@ -1550,6 +1591,33 @@ export class MemoryCycleControllerEventStore implements CycleControllerEventStor
 
   async *read(streamId: string, fromSequence = 0): AsyncIterable<CycleControllerEvent> {
     for (const event of (this.#streams.get(streamId) ?? []).slice(fromSequence)) yield event;
+  }
+
+  /** Resolve one unique stream by its durable controller identity for lineage export. */
+  async *readByControllerRunId(
+    controllerRunId: string,
+    throughSequence: number,
+  ): AsyncIterable<CycleControllerEvent> {
+    if (!Number.isSafeInteger(throughSequence) || throughSequence < 0) {
+      throw new CycleControllerError(
+        "GE_CYCLE_INVALID_HISTORY",
+        controllerRunId,
+        "lineage throughSequence must be a nonnegative safe integer",
+      );
+    }
+    const matches = [...this.#streams.values()].filter(
+      (events) => events[0]?.controllerRunId === controllerRunId,
+    );
+    if (matches.length !== 1) {
+      throw new CycleControllerError(
+        "GE_CYCLE_INVALID_HISTORY",
+        controllerRunId,
+        matches.length === 0
+          ? "controllerRunId does not resolve to a cycle stream"
+          : "controllerRunId resolves to multiple cycle streams",
+      );
+    }
+    for (const event of matches[0]!.slice(0, throughSequence + 1)) yield event;
   }
 
   snapshot(streamId: string): readonly CycleControllerEvent[] {

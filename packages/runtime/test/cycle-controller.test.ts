@@ -14,21 +14,28 @@ import {
   CYCLE_CONTROLLER_EVENT_TYPES,
   CYCLE_DURABLE_FAULT_STAGES,
   CYCLE_FAULT_KINDS,
+  CYCLE_LINEAGE_MANIFEST_DOMAIN,
   cycleDurableFaultBoundary,
+  createCycleControllerCheckpoint,
   createCycleInlinePayload,
   CycleActivityFailure,
   CycleControllerError,
+  exportCycleControllerLineageManifest,
+  foldCycleControllerEvents,
   forkCycleController,
+  hashWithDomain,
   MemoryCycleControllerCheckpointStore,
   MemoryCycleControllerEventStore,
   pauseCycleController,
   replayCycleController,
+  replayCycleControllerLineageManifest,
   renewCycleControllerLease,
   resolveCycleInDoubtActivity,
   resumeCycleController,
   sha256Utf8,
   startCycleController,
   validateCycleControllerRequest,
+  validateCycleControllerCheckpoint,
   type CycleActivityBinding,
   type CycleControllerActivities,
   type CycleControllerEvent,
@@ -1244,8 +1251,16 @@ describe("native bounded cycle controller", () => {
       lease: lease("open-resolution-source", 1),
       now: fixedNow(),
       activities: {
-        finder: () => ({ output: [] }),
-        candidateEvaluator: () => ({ output: [] }),
+        finder: () => ({
+          output: suffix === "sibling"
+            ? [{ key: "sibling-only", value: { source: "sibling" } }]
+            : [],
+        }),
+        candidateEvaluator: () => ({
+          output: suffix === "sibling"
+            ? [{ key: "sibling-only", verdict: "accept" as const }]
+            : [],
+        }),
       },
     })).rejects.toMatchObject({ code: "GE_CYCLE_STORE_FAILED" });
     const fold = await replayCycleController(store, item.eventStreamId);
@@ -1963,4 +1978,222 @@ describe("native bounded cycle controller", () => {
     });
     expect(dynamicResult).toMatchObject({ exitReason: "MAX_DYNAMIC_NODES", dynamicNodes: 1 });
   });
+});
+
+describe("cycle-controller lineage manifests", () => {
+  async function forkFrom(
+    store: MemoryCycleControllerEventStore,
+    parentRequest: CycleControllerRequest,
+    parentSequence: number,
+    parentHistoryHash: string,
+    suffix: string,
+    dryRounds: number,
+  ): Promise<CycleControllerRequest> {
+    const parentFold = await replayCycleController(
+      store,
+      parentRequest.eventStreamId,
+      parentSequence,
+      parentRequest.lineage.origin === "start"
+        ? {}
+        : { parent: (await replayCycleControllerLineageManifest(
+          await exportCycleControllerLineageManifest(store, parentRequest.eventStreamId),
+        )).folds.at(-2) },
+    );
+    const base = request("until-dry", {
+      maxIterations: Math.max(parentFold.nextIteration + 2, 4),
+      consecutiveDryRounds: dryRounds,
+    });
+    const child = validateCycleControllerRequest({
+      ...JSON.parse(JSON.stringify(base)),
+      controllerRunId: `${base.controllerRunId}-${suffix}`,
+      controllerId: `${base.controllerId}-${suffix}`,
+      eventStreamId: `${base.eventStreamId}-${suffix}`,
+      checkpointScope: `${base.checkpointScope}-${suffix}`,
+      initialGraph: parentFold.currentRevision,
+      lineage: {
+        origin: "fork",
+        parentControllerRunId: parentRequest.controllerRunId,
+        parentSequence,
+        parentHistoryHash,
+      },
+    });
+    const discoveryKey = suffix === "sibling" ? "sibling-only" : "root-seen";
+    await forkCycleController(store, parentRequest.eventStreamId, child, graph(), {
+      eventStore: store,
+      lease: lease(`lease-${suffix}`, 1),
+      now: fixedNow(),
+      activities: {
+        finder: () => ({ output: [{ key: discoveryKey, value: { source: suffix } }] }),
+        candidateEvaluator: () => ({ output: [{ key: discoveryKey, verdict: "accept" }] }),
+      },
+    });
+    return child;
+  }
+
+  async function lineageTree() {
+    const store = new MemoryCycleControllerEventStore();
+    const root = request("until-dry", { maxIterations: 1, consecutiveDryRounds: 2 });
+    await startCycleController(root, graph(), {
+      eventStore: store,
+      lease: lease("lineage-root", 1),
+      now: fixedNow(),
+      activities: {
+        finder: () => ({ output: [] }),
+        candidateEvaluator: () => ({ output: [] }),
+      },
+    });
+    const rootFold = await replayCycleController(store, root.eventStreamId);
+    const forkA = await forkFrom(
+      store,
+      root,
+      rootFold.lastSequence,
+      rootFold.historyPrefixHash,
+      "fork-a",
+      3,
+    );
+    const manifestA = await exportCycleControllerLineageManifest(store, forkA.eventStreamId);
+    const foldA = replayCycleControllerLineageManifest(manifestA).target;
+    const forkB = await forkFrom(
+      store,
+      forkA,
+      foldA.lastSequence,
+      foldA.historyPrefixHash,
+      "fork-b",
+      4,
+    );
+    const sibling = await forkFrom(
+      store,
+      root,
+      rootFold.lastSequence,
+      rootFold.historyPrefixHash,
+      "sibling",
+      3,
+    );
+    const early = await forkFrom(
+      store,
+      root,
+      0,
+      store.snapshot(root.eventStreamId)[0]!.recordHash,
+      "early-prefix",
+      2,
+    );
+    return { store, root, forkA, forkB, sibling, early };
+  }
+
+  function cloneManifest(value: unknown): Record<string, any> {
+    return JSON.parse(JSON.stringify(value)) as Record<string, any>;
+  }
+
+  function reseal(value: Record<string, any>): void {
+    const body = { ...value };
+    delete body.manifestHash;
+    value.manifestHash = hashWithDomain(CYCLE_LINEAGE_MANIFEST_DOMAIN, body);
+  }
+
+  it("exports and replays a root-to-grandchild tree with isolated siblings and prefixes", async () => {
+    const { store, root, forkB, sibling, early } = await lineageTree();
+    const before = canonicalSerialize({
+      root: store.snapshot(root.eventStreamId),
+      forkB: store.snapshot(forkB.eventStreamId),
+      sibling: store.snapshot(sibling.eventStreamId),
+      early: store.snapshot(early.eventStreamId),
+    });
+    const manifest = await exportCycleControllerLineageManifest(store, forkB.eventStreamId);
+    const siblingManifest = await exportCycleControllerLineageManifest(store, sibling.eventStreamId);
+    const earlyManifest = await exportCycleControllerLineageManifest(store, early.eventStreamId);
+    const replay = replayCycleControllerLineageManifest(manifest, { requireTerminal: true });
+
+    expect(manifest.streams).toHaveLength(3);
+    expect(replay.folds.map(({ request: item }) => item.controllerRunId)).toEqual([
+      root.controllerRunId,
+      manifest.streams[1]!.controllerRunId,
+      forkB.controllerRunId,
+    ]);
+    expect(replay.target.request.eventStreamId).toBe(forkB.eventStreamId);
+    const forkAEvents = store.snapshot(manifest.streams[1]!.eventStreamId);
+    const checkpoint = createCycleControllerCheckpoint(
+      forkAEvents,
+      "lineage-fork-a",
+      "2026-07-26T00:00:02Z",
+      { parent: replay.folds[0]! },
+    );
+    const restoredForkA = validateCycleControllerCheckpoint(
+      checkpoint,
+      forkAEvents,
+      { parent: replay.folds[0]! },
+    );
+    const checkpointChild = foldCycleControllerEvents(
+      store.snapshot(forkB.eventStreamId),
+      { parent: restoredForkA },
+    );
+    expect(canonicalSerialize(checkpointChild)).toBe(canonicalSerialize(replay.target));
+    expect(manifest.eventCount).toBe(
+      manifest.streams.reduce((total, stream) => total + stream.events.length, 0),
+    );
+    expect(canonicalSerialize(siblingManifest.streams[0])).toBe(
+      canonicalSerialize(manifest.streams[0]),
+    );
+    expect(siblingManifest.target.controllerRunId).not.toBe(manifest.target.controllerRunId);
+    const siblingReplay = replayCycleControllerLineageManifest(siblingManifest);
+    expect(siblingReplay.target.seenKeys).toContain("sibling-only");
+    expect(replay.target.seenKeys).not.toContain("sibling-only");
+    expect(replay.target.seenKeys).toContain("root-seen");
+    expect(siblingReplay.target.decidedPatches).not.toBe(replay.target.decidedPatches);
+    expect(earlyManifest.streams).toHaveLength(2);
+    expect(earlyManifest.streams[0]!.throughSequence).toBe(0);
+    expect(earlyManifest.streams[0]!.events).toHaveLength(1);
+    expect(canonicalSerialize({
+      root: store.snapshot(root.eventStreamId),
+      forkB: store.snapshot(forkB.eventStreamId),
+      sibling: store.snapshot(sibling.eventStreamId),
+      early: store.snapshot(early.eventStreamId),
+    })).toBe(before);
+  }, 20_000);
+
+  it("rejects rehashed missing, duplicate, cyclic, truncated, and substituted ancestry", async () => {
+    const { store, forkB } = await lineageTree();
+    const manifest = await exportCycleControllerLineageManifest(store, forkB.eventStreamId);
+    const attacks: Array<(value: Record<string, any>) => void> = [
+      (value) => { value.streams[0].events[0].timestamp = "2026-07-26T00:00:01Z"; },
+      (value) => {
+        const removed = value.streams.shift();
+        value.eventCount -= removed.events.length;
+      },
+      (value) => {
+        const duplicate = JSON.parse(JSON.stringify(value.streams[0]));
+        value.streams.splice(1, 0, duplicate);
+        value.eventCount += duplicate.events.length;
+      },
+      (value) => { value.streams[1].controllerRunId = value.streams[0].controllerRunId; },
+      (value) => { value.streams[1].parent.requestHash = "f".repeat(64); },
+      (value) => {
+        value.streams[0].events.pop();
+        value.eventCount -= 1;
+      },
+      (value) => { value.target.controllerHash = "e".repeat(64); },
+    ];
+    for (const attack of attacks) {
+      const hostile = cloneManifest(manifest);
+      attack(hostile);
+      reseal(hostile);
+      expect(() => replayCycleControllerLineageManifest(hostile)).toThrowError(
+        expect.objectContaining({ code: "GE_CYCLE_INVALID_HISTORY" }),
+      );
+    }
+    const unhashed = cloneManifest(manifest);
+    unhashed.eventCount += 1;
+    expect(() => replayCycleControllerLineageManifest(unhashed)).toThrowError(
+      expect.objectContaining({ code: "GE_CYCLE_INVALID_HISTORY" }),
+    );
+  }, 20_000);
+
+  it("refuses export when an exact retained ancestor is unavailable", async () => {
+    const { store, forkB } = await lineageTree();
+    const isolated = new MemoryCycleControllerEventStore();
+    const childEvents = store.snapshot(forkB.eventStreamId);
+    await isolated.append(forkB.eventStreamId, -1, childEvents);
+    await expect(
+      exportCycleControllerLineageManifest(isolated, forkB.eventStreamId),
+    ).rejects.toMatchObject({ code: "GE_CYCLE_INVALID_HISTORY" });
+  }, 20_000);
 });

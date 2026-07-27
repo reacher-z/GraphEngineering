@@ -71,6 +71,22 @@ export {
   validateCycleControllerCheckpoint,
   type FoldCycleOptions,
 } from "./cycle-fold.js";
+export {
+  CYCLE_LINEAGE_MANIFEST_DOMAIN,
+  MAX_CYCLE_LINEAGE_DEPTH,
+  MAX_CYCLE_LINEAGE_EVENTS,
+  MAX_CYCLE_LINEAGE_MANIFEST_BYTES,
+  MAX_CYCLE_LINEAGE_STREAMS,
+  exportCycleControllerLineageManifest,
+  replayCycleControllerLineageManifest,
+  validateCycleControllerLineageManifest,
+  type CycleControllerLineageManifest,
+  type CycleControllerLineageReplay,
+  type CycleControllerLineageStore,
+  type CycleLineageBinding,
+  type CycleLineageManifestLimits,
+  type CycleLineageManifestStream,
+} from "./cycle-lineage.js";
 export { NativeGraphPatchApplier } from "./graph-patch.js";
 export {
   CYCLE_ACTIVITY_INTERRUPTION_TRIGGERS,

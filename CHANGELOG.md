@@ -32,6 +32,11 @@ migration note.
   native decision seeds, strict durable-carrier validation, fail-before-mutation
   tamper rejection, stale-rejection lineage recovery, graph/dynamic limit gates,
   and complete duplicate-decision conflict parity in TypeScript and Python.
+- Bounded `cycle-controller-lineage/v1alpha1` manifests, native exporters and
+  zero-dispatch offline replay in TypeScript and Python. Multi-generation forks
+  now resolve complete ancestry; a 20-case cross-language campaign covers
+  grandchild, sibling and distinct-prefix behavior plus 16 rehashed hostile
+  missing/duplicate/cyclic/corrupt/boundary cases.
 
 - Event-sourced durable start and resume APIs in TypeScript and Python. Runs bind
   graph, original input, and caller-supplied implementation identity; node

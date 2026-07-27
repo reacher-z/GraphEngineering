@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "id": "cycle-controller-lineage-v1alpha1",
+  "requestFixture": "cycle-controller.case.json",
+  "manifestSchema": "spec/cycle-controller-lineage-manifest.schema.json",
+  "hashDomains": {
+    "manifest": "graph-engineering/cycle-lineage-manifest/v1alpha1\u0000",
+    "event": "graph-engineering/cycle-event/v1alpha1\u0000"
+  },
+  "cases": [
+    { "id": "grandchild-replay", "category": "behavior", "scenario": "grandchild-replay", "expectOutcome": "replayed" },
+    { "id": "sibling-isolation", "category": "behavior", "scenario": "sibling-isolation", "expectOutcome": "replayed" },
+    { "id": "distinct-parent-prefix", "category": "behavior", "scenario": "distinct-parent-prefix", "expectOutcome": "replayed" },
+    { "id": "deterministic-revalidation", "category": "behavior", "scenario": "deterministic-revalidation", "expectOutcome": "replayed" },
+    { "id": "closed-envelope-extra-field", "category": "shape", "scenario": "extra-field", "expectOutcome": "rejected", "expectCode": "GE_CYCLE_INVALID_HISTORY" },
+    { "id": "api-version-substitution", "category": "shape", "scenario": "api-version", "expectOutcome": "rejected", "expectCode": "GE_CYCLE_INVALID_HISTORY" },
+    { "id": "contract-limit-substitution", "category": "limit", "scenario": "limit-substitution", "expectOutcome": "rejected", "expectCode": "GE_CYCLE_INVALID_HISTORY" },
+    { "id": "unsealed-event-count", "category": "identity", "scenario": "manifest-hash-drift", "expectOutcome": "rejected", "expectCode": "GE_CYCLE_INVALID_HISTORY" },
+    { "id": "missing-root-ancestor", "category": "ancestry", "scenario": "missing-root", "expectOutcome": "rejected", "expectCode": "GE_CYCLE_INVALID_HISTORY" },
+    { "id": "duplicate-root-ancestor", "category": "ancestry", "scenario": "duplicate-root", "expectOutcome": "rejected", "expectCode": "GE_CYCLE_INVALID_HISTORY" },
+    { "id": "ancestry-cycle", "category": "ancestry", "scenario": "cycle-run-id", "expectOutcome": "rejected", "expectCode": "GE_CYCLE_INVALID_HISTORY" },
+    { "id": "reordered-ancestors", "category": "ancestry", "scenario": "reordered-streams", "expectOutcome": "rejected", "expectCode": "GE_CYCLE_INVALID_HISTORY" },
+    { "id": "parent-request-hash-substitution", "category": "binding", "scenario": "parent-binding", "expectOutcome": "rejected", "expectCode": "GE_CYCLE_INVALID_HISTORY" },
+    { "id": "parent-event-byte-corruption", "category": "corruption", "scenario": "parent-event-byte", "expectOutcome": "rejected", "expectCode": "GE_CYCLE_INVALID_HISTORY" },
+    { "id": "short-parent-prefix", "category": "corruption", "scenario": "truncated-prefix", "expectOutcome": "rejected", "expectCode": "GE_CYCLE_INVALID_HISTORY" },
+    { "id": "target-controller-substitution", "category": "binding", "scenario": "target-binding", "expectOutcome": "rejected", "expectCode": "GE_CYCLE_INVALID_HISTORY" },
+    { "id": "sealed-event-count-mismatch", "category": "identity", "scenario": "event-count", "expectOutcome": "rejected", "expectCode": "GE_CYCLE_INVALID_HISTORY" },
+    { "id": "record-prefix-hash-disagreement", "category": "binding", "scenario": "record-prefix-disagreement", "expectOutcome": "rejected", "expectCode": "GE_CYCLE_INVALID_HISTORY" },
+    { "id": "stream-id-substitution", "category": "binding", "scenario": "stream-binding", "expectOutcome": "rejected", "expectCode": "GE_CYCLE_INVALID_HISTORY" },
+    { "id": "stream-count-overflow", "category": "limit", "scenario": "stream-overflow", "expectOutcome": "rejected", "expectCode": "GE_CYCLE_INVALID_HISTORY" }
+  ],
+  "requiredAssertions": [
+    "root-to-grandchild-manifest-is-byte-identical-across-native-runtimes",
+    "manifest-binds-controller-run-controller-host-stream-request-and-controller-identities",
+    "every-stream-binds-exact-sequence-record-hash-history-prefix-and-events",
+    "manifest-is-root-to-target-ordered-and-every-child-consumes-its-predecessor",
+    "sibling-manifests-share-byte-identical-parent-prefixes-but-isolate-target-identities",
+    "forks-from-different-valid-parent-prefixes-export-only-the-declared-prefix",
+    "offline-replay-never-needs-store-lease-clock-handler-or-network-access",
+    "missing-duplicate-reordered-and-cyclic-ancestors-fail-after-valid-resealing",
+    "parent-event-corruption-and-prefix-truncation-fail-after-valid-resealing",
+    "closed-shape-fixed-limits-total-event-count-and-target-binding-are-enforced",
+    "all-hostile-cases-converge-on-the-stable-invalid-history-code",
+    "fixture-and-runner-scenario-vocabularies-are-closed"
+  ],
+  "expect": {
+    "caseCount": 20,
+    "attackCaseCount": 16,
+    "behaviorCaseCount": 4,
+    "categoryCounts": {
+      "behavior": 4,
+      "shape": 2,
+      "limit": 2,
+      "identity": 2,
+      "ancestry": 4,
+      "binding": 4,
+      "corruption": 2
+    },
+    "casesCanonicalUtf8Bytes": 2879,
+    "casesSha256": "4fc297589a67621570a067c1cfc072888632128c7ab794dcba88baac070d5713"
+  }
+}

@@ -88,6 +88,17 @@ from .cycle_fold import (
 from .cycle_fold import (
     validate_checkpoint as validate_cycle_checkpoint,
 )
+from .cycle_lineage import (
+    CYCLE_LINEAGE_MANIFEST_DOMAIN,
+    MAX_CYCLE_LINEAGE_DEPTH,
+    MAX_CYCLE_LINEAGE_EVENTS,
+    MAX_CYCLE_LINEAGE_MANIFEST_BYTES,
+    MAX_CYCLE_LINEAGE_STREAMS,
+    CycleLineageReplayResult,
+    export_cycle_lineage_manifest,
+    replay_cycle_lineage_manifest,
+    validate_cycle_lineage_manifest,
+)
 from .cycle_store import CycleStore, MemoryCycleStore
 from .durable import (
     DurableRunError,
@@ -196,8 +207,13 @@ __all__ = [
     "CYCLE_DURABLE_FAULT_STAGES",
     "CYCLE_EVENT_TYPES",
     "CYCLE_FAULT_KINDS",
+    "CYCLE_LINEAGE_MANIFEST_DOMAIN",
     "CYCLE_OPERATION_INTERRUPTION_BOUNDARIES",
     "CYCLE_PUBLIC_OPERATIONS",
+    "MAX_CYCLE_LINEAGE_DEPTH",
+    "MAX_CYCLE_LINEAGE_EVENTS",
+    "MAX_CYCLE_LINEAGE_MANIFEST_BYTES",
+    "MAX_CYCLE_LINEAGE_STREAMS",
     "TYPED_PORT_POLICY_API_VERSION",
     "TYPED_PORT_POLICY_KEY",
     "TYPED_PORT_POLICY_MODE",
@@ -222,6 +238,7 @@ __all__ = [
     "CycleInDoubtResolutionCommand",
     "CycleInDoubtResolutionResult",
     "CycleLeaseRenewalResult",
+    "CycleLineageReplayResult",
     "CycleOperationInterruptionMatrixEntry",
     "CyclePauseResult",
     "CycleReplayResult",
@@ -323,6 +340,7 @@ __all__ = [
     "encode_durable_json",
     "evaluate_route_selection",
     "evaluate_settled_barrier",
+    "export_cycle_lineage_manifest",
     "fold_cycle_events",
     "fork_cycle",
     "graph_builder",
@@ -330,6 +348,7 @@ __all__ = [
     "pause_cycle",
     "renew_cycle_lease",
     "replay_cycle",
+    "replay_cycle_lineage_manifest",
     "resolve_cycle_in_doubt_activity",
     "resume_cycle",
     "resume_graph_run",
@@ -342,6 +361,7 @@ __all__ = [
     "try_compile_graph",
     "validate_cycle_checkpoint",
     "validate_cycle_in_doubt_resolution",
+    "validate_cycle_lineage_manifest",
     "validate_cycle_policy",
     "validate_cycle_request",
     "validate_graph_patch_shape",

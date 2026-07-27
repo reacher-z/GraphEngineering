@@ -17,6 +17,7 @@ from graph_engineering.cycle_contract import (
     CycleErrorCode,
     CycleRuntimeError,
     GraphPatchLimits,
+    domain_hash,
 )
 from graph_engineering.cycle_controller import (
     CycleCancellation,
@@ -41,7 +42,12 @@ from graph_engineering.cycle_faults import (
     build_cycle_operation_interruption_matrix,
     cycle_durable_fault_boundary,
 )
-from graph_engineering.cycle_fold import validate_checkpoint
+from graph_engineering.cycle_fold import build_checkpoint, fold_cycle_events, validate_checkpoint
+from graph_engineering.cycle_lineage import (
+    CYCLE_LINEAGE_MANIFEST_DOMAIN,
+    export_cycle_lineage_manifest,
+    replay_cycle_lineage_manifest,
+)
 from graph_engineering.cycle_store import MemoryCycleStore
 from graph_engineering.graph_patch import GraphPatchRuntime, PatchAuthority, PatchReservation
 
@@ -123,6 +129,8 @@ def test_cycle_surface_is_exported_from_the_native_python_package() -> None:
     assert ge.pause_cycle is pause_cycle
     assert ge.renew_cycle_lease is renew_cycle_lease
     assert ge.resolve_cycle_in_doubt_activity is resolve_cycle_in_doubt_activity
+    assert ge.export_cycle_lineage_manifest is export_cycle_lineage_manifest
+    assert ge.replay_cycle_lineage_manifest is replay_cycle_lineage_manifest
     assert ge.MemoryCycleStore is MemoryCycleStore
     assert ge.GraphPatchRuntime is GraphPatchRuntime
     assert ge.CYCLE_EVENT_TYPES is CYCLE_EVENT_TYPES
@@ -2409,5 +2417,243 @@ def test_fork_open_external_claim_is_in_doubt_without_dispatch(side_effects: str
         assert in_doubt[0]["sideEffects"] == side_effects
         assert replayed.state["attemptsUsed"] == 0
         assert replayed.state["costUsd"] == 0
+
+    asyncio.run(run())
+
+
+def test_lineage_manifest_exports_grandchild_siblings_and_distinct_prefixes() -> None:
+    async def run() -> None:
+        store = MemoryCycleStore()
+        root = request_document(max_iterations=1, dry_rounds=2)
+        await start_cycle(
+            root,
+            CycleHandlers(
+                finder=lambda _: [{"key": "root-seen", "value": {"source": "root"}}],
+                candidate_evaluator=lambda _: [
+                    {"key": "root-seen", "verdict": "accept"}
+                ],
+            ),
+            store=store,
+            lease=lease(lease_id="lineage-root"),
+            clock=fixed_clock,
+        )
+        root_events = await store.read(root["eventStreamId"])
+
+        async def make_fork(
+            parent: dict[str, Any],
+            parent_events: tuple[Any, ...],
+            suffix: str,
+            *,
+            sequence: int | None = None,
+            dry_rounds: int = 3,
+        ) -> tuple[dict[str, Any], tuple[Any, ...]]:
+            parent_sequence = parent_events[-1].sequence if sequence is None else sequence
+            parent_hash = parent_events[parent_sequence].record_hash
+            child = fork_request(
+                parent,
+                parent_sequence=parent_sequence,
+                parent_history_hash=parent_hash,
+            )
+            child["controllerRunId"] = f"cycle-lineage-{suffix}"
+            child["controllerId"] = f"lineage-{suffix}"
+            child["eventStreamId"] = f"cycle-lineage-{suffix}.events"
+            child["checkpointScope"] = f"cycle-lineage-{suffix}.checkpoints"
+            child["policy"]["maxIterations"] = 8
+            child["policy"]["consecutiveDryRounds"] = dry_rounds
+            await fork_cycle(
+                child,
+                CycleHandlers(
+                    finder=lambda _: (
+                        [{"key": "sibling-only", "value": {"source": "sibling"}}]
+                        if suffix == "sibling"
+                        else []
+                    ),
+                    candidate_evaluator=lambda _: (
+                        [{"key": "sibling-only", "verdict": "accept"}]
+                        if suffix == "sibling"
+                        else []
+                    ),
+                ),
+                store=store,
+                lease=lease(lease_id=f"lease-{suffix}"),
+                parent_controller_run_id=parent["controllerRunId"],
+                parent_sequence=parent_sequence,
+                parent_history_hash=parent_hash,
+                clock=fixed_clock,
+            )
+            return child, cast(tuple[Any, ...], await store.read(child["eventStreamId"]))
+
+        fork_a, fork_a_events = await make_fork(root, root_events, "fork-a")
+        fork_b, fork_b_events = await make_fork(
+            fork_a, fork_a_events, "fork-b", dry_rounds=4
+        )
+        sibling, _ = await make_fork(root, root_events, "sibling")
+        early, _ = await make_fork(root, root_events, "early", sequence=0, dry_rounds=2)
+
+        before = canonical_json(
+            {
+                key: [event.model_dump(by_alias=True) for event in await store.read(stream)]
+                for key, stream in {
+                    "root": root["eventStreamId"],
+                    "forkB": fork_b["eventStreamId"],
+                    "sibling": sibling["eventStreamId"],
+                    "early": early["eventStreamId"],
+                }.items()
+            }
+        )
+        manifest = await export_cycle_lineage_manifest(fork_b["eventStreamId"], store=store)
+        sibling_manifest = await export_cycle_lineage_manifest(
+            sibling["eventStreamId"], store=store
+        )
+        early_manifest = await export_cycle_lineage_manifest(
+            early["eventStreamId"], store=store
+        )
+        appends_before_replay = store.append_count
+        replay = replay_cycle_lineage_manifest(manifest, require_terminal=True)
+
+        streams = cast(list[dict[str, Any]], manifest["streams"])
+        assert len(streams) == 3
+        assert [fold.request.model.controller_run_id for fold in replay.folds] == [
+            root["controllerRunId"],
+            fork_a["controllerRunId"],
+            fork_b["controllerRunId"],
+        ]
+        assert replay.target.request.model.event_stream_id == fork_b["eventStreamId"]
+        checkpoint = build_checkpoint(
+            replay.folds[1],
+            checkpoint_id="lineage-fork-a",
+            created_at="2026-07-26T00:00:02Z",
+        )
+        restored_fork_a = validate_checkpoint(
+            checkpoint,
+            fork_a_events,
+            parent_fold=replay.folds[0],
+        )
+        checkpoint_child = fold_cycle_events(
+            fork_b_events,
+            parent_fold=restored_fork_a,
+        )
+        assert canonical_json(checkpoint_child.state) == canonical_json(replay.target.state)
+        assert checkpoint_child.current_revision == replay.target.current_revision
+        assert checkpoint_child.terminal == replay.target.terminal
+        assert manifest["eventCount"] == sum(len(stream["events"]) for stream in streams)
+        sibling_streams = cast(list[dict[str, Any]], sibling_manifest["streams"])
+        assert canonical_json(sibling_streams[0]) == canonical_json(streams[0])
+        assert sibling_manifest["target"] != manifest["target"]
+        sibling_replay = replay_cycle_lineage_manifest(sibling_manifest)
+        assert "sibling-only" in sibling_replay.target.state["seenKeys"]
+        assert "sibling-only" not in replay.target.state["seenKeys"]
+        assert "root-seen" in replay.target.state["seenKeys"]
+        assert sibling_replay.target.state["decidedPatches"] is not replay.target.state[
+            "decidedPatches"
+        ]
+        early_streams = cast(list[dict[str, Any]], early_manifest["streams"])
+        assert len(early_streams) == 2
+        assert early_streams[0]["throughSequence"] == 0
+        assert len(early_streams[0]["events"]) == 1
+        assert store.append_count == appends_before_replay
+        after = canonical_json(
+            {
+                key: [event.model_dump(by_alias=True) for event in await store.read(stream)]
+                for key, stream in {
+                    "root": root["eventStreamId"],
+                    "forkB": fork_b["eventStreamId"],
+                    "sibling": sibling["eventStreamId"],
+                    "early": early["eventStreamId"],
+                }.items()
+            }
+        )
+        assert after == before
+
+    asyncio.run(run())
+
+
+def test_lineage_manifest_rejects_rehashed_ancestry_attacks_and_missing_store_parent() -> None:
+    async def run() -> None:
+        store = MemoryCycleStore()
+        root = request_document(max_iterations=1, dry_rounds=2)
+        await start_cycle(
+            root,
+            CycleHandlers(finder=lambda _: [], candidate_evaluator=lambda _: []),
+            store=store,
+            lease=lease(lease_id="lineage-attack-root"),
+            clock=fixed_clock,
+        )
+        root_events = await store.read(root["eventStreamId"])
+        root_tail = root_events[-1]
+        child = fork_request(
+            root,
+            parent_sequence=root_tail.sequence,
+            parent_history_hash=root_tail.record_hash,
+        )
+        child["controllerRunId"] = "cycle-lineage-attack-child"
+        child["controllerId"] = "lineage-attack-child"
+        child["eventStreamId"] = "cycle-lineage-attack-child.events"
+        child["checkpointScope"] = "cycle-lineage-attack-child.checkpoints"
+        child["policy"]["maxIterations"] = 4
+        child["policy"]["consecutiveDryRounds"] = 3
+        await fork_cycle(
+            child,
+            CycleHandlers(finder=lambda _: [], candidate_evaluator=lambda _: []),
+            store=store,
+            lease=lease(lease_id="lineage-attack-child"),
+            parent_controller_run_id=root["controllerRunId"],
+            parent_sequence=root_tail.sequence,
+            parent_history_hash=root_tail.record_hash,
+            clock=fixed_clock,
+        )
+        manifest = await export_cycle_lineage_manifest(child["eventStreamId"], store=store)
+
+        for scenario in (
+            "parent-byte",
+            "missing",
+            "duplicate",
+            "cycle",
+            "parent-binding",
+            "truncated",
+            "target",
+        ):
+            hostile = copy.deepcopy(manifest)
+            streams = cast(list[dict[str, Any]], hostile["streams"])
+            if scenario == "parent-byte":
+                streams[0]["events"][0]["timestamp"] = "2026-07-26T00:00:01Z"
+            elif scenario == "missing":
+                removed = streams.pop(0)
+                hostile["eventCount"] = cast(int, hostile["eventCount"]) - len(
+                    removed["events"]
+                )
+            elif scenario == "duplicate":
+                duplicate = copy.deepcopy(streams[0])
+                streams.insert(1, duplicate)
+                hostile["eventCount"] = cast(int, hostile["eventCount"]) + len(
+                    duplicate["events"]
+                )
+            elif scenario == "cycle":
+                streams[1]["controllerRunId"] = streams[0]["controllerRunId"]
+            elif scenario == "parent-binding":
+                streams[1]["parent"]["requestHash"] = "f" * 64
+            elif scenario == "truncated":
+                streams[0]["events"].pop()
+                hostile["eventCount"] = cast(int, hostile["eventCount"]) - 1
+            else:
+                cast(dict[str, Any], hostile["target"])["controllerHash"] = "e" * 64
+            body = {key: value for key, value in hostile.items() if key != "manifestHash"}
+            hostile["manifestHash"] = domain_hash(CYCLE_LINEAGE_MANIFEST_DOMAIN, body)
+            with pytest.raises(CycleRuntimeError) as raised:
+                replay_cycle_lineage_manifest(hostile)
+            assert raised.value.code is CycleErrorCode.INVALID_HISTORY
+
+        unhashed = copy.deepcopy(manifest)
+        unhashed["eventCount"] = cast(int, unhashed["eventCount"]) + 1
+        with pytest.raises(CycleRuntimeError) as raised:
+            replay_cycle_lineage_manifest(unhashed)
+        assert raised.value.code is CycleErrorCode.INVALID_HISTORY
+
+        isolated = MemoryCycleStore()
+        child_events = await store.read(child["eventStreamId"])
+        await isolated.append(child["eventStreamId"], -1, child_events)
+        with pytest.raises(CycleRuntimeError) as missing:
+            await export_cycle_lineage_manifest(child["eventStreamId"], store=isolated)
+        assert missing.value.code is CycleErrorCode.INVALID_HISTORY
 
     asyncio.run(run())

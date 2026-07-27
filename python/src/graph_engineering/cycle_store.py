@@ -20,6 +20,7 @@ from .cycle_contract import (
     capture_portable_json,
     cycle_event_document,
     validate_cycle_event,
+    validate_cycle_request,
 )
 from .models import JsonObject
 
@@ -185,6 +186,18 @@ class MemoryCycleStore:
                     raise CycleRuntimeError(
                         CycleErrorCode.STORE_FAILED,
                         "new cycle stream must begin with ControllerCreated",
+                    )
+                first_data = first["data"]
+                if type(first_data) is not dict:  # pragma: no cover - event model invariant
+                    raise CycleRuntimeError(
+                        CycleErrorCode.INVALID_HISTORY,
+                        "ControllerCreated data is not an object",
+                    )
+                request = validate_cycle_request(first_data["request"])
+                if request.model.event_stream_id != stream_id:
+                    raise CycleRuntimeError(
+                        CycleErrorCode.INVALID_HISTORY,
+                        "cycle store key differs from request eventStreamId",
                     )
                 run_id = str(first["controllerRunId"])
                 existing_stream = self._controller_streams.get(run_id)
