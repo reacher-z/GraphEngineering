@@ -140,6 +140,14 @@ export type CycleActivityPhase =
   | "optimizer-evaluator"
   | "patch-planner";
 
+export const CYCLE_ACTIVITY_PHASES = Object.freeze([
+  "finder",
+  "candidate-evaluator",
+  "condition",
+  "optimizer-evaluator",
+  "patch-planner",
+] as const satisfies readonly CycleActivityPhase[]);
+
 export interface CycleActivityReservation {
   readonly phase: CycleActivityPhase;
   readonly activityId: string;
@@ -452,6 +460,30 @@ export interface CycleDurableFaultMatrixEntry {
   readonly faultKind: CycleFaultKind;
   readonly boundary: CycleDurableFaultBoundary;
   readonly durability: CycleFaultDurability;
+}
+
+export const CYCLE_ACTIVITY_INTERRUPTION_TRIGGERS = Object.freeze([
+  "before-first-round",
+  "before-claim",
+  "during-handler",
+  "after-handler-before-outcome",
+  "after-outcome-before-next-dispatch",
+  "attempt-timeout",
+  "after-round-commit",
+  "repeated-cancellation",
+] as const);
+
+export type CycleActivityInterruptionTrigger =
+  typeof CYCLE_ACTIVITY_INTERRUPTION_TRIGGERS[number];
+
+export type CycleActivityInterruptionKind = "caller-cancellation" | "attempt-timeout";
+
+export interface CycleActivityInterruptionMatrixEntry {
+  readonly id: string;
+  readonly interruption: CycleActivityInterruptionKind;
+  readonly trigger: CycleActivityInterruptionTrigger;
+  readonly phase: CycleActivityPhase | null;
+  readonly sideEffects: CycleActivitySideEffects | null;
 }
 
 export interface CycleControllerEvent {

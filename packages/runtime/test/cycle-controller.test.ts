@@ -1,6 +1,7 @@
 import { compileGraph, type GraphSpec } from "@graph-engineering/core";
 import { describe, expect, it, vi } from "vitest";
 import {
+  buildCycleActivityInterruptionMatrix,
   buildCycleDurableFaultMatrix,
   CYCLE_CONTROLLER_EVENT_TYPES,
   CYCLE_DURABLE_FAULT_STAGES,
@@ -214,6 +215,24 @@ describe("native bounded cycle controller", () => {
       "ControllerCreated",
       "unknown" as never,
     )).toThrow("unknown durable fault stage");
+  });
+
+  it("derives all 68 activity interruption obligations without duplicate identities", () => {
+    const matrix = buildCycleActivityInterruptionMatrix();
+    expect(matrix).toHaveLength(68);
+    expect(new Set(matrix.map(({ id }) => id)).size).toBe(68);
+    expect(matrix.filter(({ interruption }) => interruption === "attempt-timeout")).toHaveLength(15);
+    expect(matrix.filter(({ trigger }) => trigger === "before-claim")).toHaveLength(5);
+    expect(matrix.filter(({ sideEffects }) => sideEffects === null)).toHaveLength(7);
+    expect(matrix.filter(({ phase }) => phase === "finder")).toHaveLength(14);
+    expect(matrix.at(0)).toEqual({
+      id: "before-first-round",
+      interruption: "caller-cancellation",
+      trigger: "before-first-round",
+      phase: null,
+      sideEffects: null,
+    });
+    expect(matrix.at(-1)?.id).toBe("finder:repeated-cancellation:none");
   });
 
   it.each([
@@ -1238,7 +1257,10 @@ describe("native bounded cycle controller", () => {
   });
 
   it("cancels a handler that swallows abort without committing its late result", async () => {
-    const item = request("until-dry", { maxIterations: 2 });
+    const base = request("until-dry", { maxIterations: 2 });
+    const mutable = JSON.parse(JSON.stringify(base)) as CycleControllerRequest;
+    (mutable.activities.finder as { maxCostUsdPerAttempt: number }).maxCostUsdPerAttempt = 0.25;
+    const item = validateCycleControllerRequest(mutable);
     const store = new MemoryCycleControllerEventStore();
     const abort = new AbortController();
     let entered!: () => void;
@@ -1255,13 +1277,66 @@ describe("native bounded cycle controller", () => {
     await started;
     abort.abort(new Error("stop"));
     const result = await running;
-    expect(result).toMatchObject({ exitReason: "CANCELLED", status: "cancelled" });
+    expect(result).toMatchObject({
+      exitReason: "CANCELLED", status: "cancelled", attemptsUsed: 1, costUsd: 0.25,
+    });
     expect(evaluator).not.toHaveBeenCalled();
     expect(events(store, item).map(({ type }) => type)).not.toContain("DiscoveryCommitted");
+    expect(events(store, item).map(({ type }) => type)).not.toContain("ActivityFailed");
     const fold = await replayCycleController(store, item.eventStreamId);
     expect(fold).toMatchObject({ terminalResult: { exitReason: "CANCELLED" } });
     expect(fold.inDoubtActivities).toEqual([]);
   });
+
+  it.each([
+    ["none", 2, 0.5, 0],
+    ["idempotent", 2, 0.5, 1],
+    ["non-idempotent", 1, 0.25, 1],
+  ] as const)(
+    "charges and retries timed-out %s activity claims exactly",
+    async (sideEffects, expectedAttempts, expectedCost, expectedInDoubt) => {
+      const base = request("until-dry", { maxIterations: 2 });
+      const mutable = JSON.parse(JSON.stringify(base)) as CycleControllerRequest;
+      const finderBinding = mutable.activities.finder as {
+        sideEffects: CycleActivityBinding["sideEffects"];
+        maxAttemptsPerRound: number;
+        maxCostUsdPerAttempt: number;
+        timeoutMs: number;
+      };
+      finderBinding.sideEffects = sideEffects;
+      finderBinding.maxAttemptsPerRound = 2;
+      finderBinding.maxCostUsdPerAttempt = 0.25;
+      finderBinding.timeoutMs = 1;
+      const item = validateCycleControllerRequest(mutable);
+      const store = new MemoryCycleControllerEventStore();
+      const finder = vi.fn(() => new Promise<{ output: readonly [] }>(() => undefined));
+
+      const result = await startCycleController(item, graph(), {
+        eventStore: store,
+        lease: lease(`lease-timeout-${sideEffects}`, 1),
+        now: fixedNow(),
+        activities: { finder, candidateEvaluator: () => ({ output: [] }) },
+      });
+      const failures = events(store, item).filter(({ type }) => type === "ActivityFailed");
+      const fold = await replayCycleController(store, item.eventStreamId);
+
+      expect(result).toMatchObject({
+        exitReason: "FAILED",
+        status: "failed",
+        attemptsUsed: expectedAttempts,
+        costUsd: expectedCost,
+      });
+      expect(finder).toHaveBeenCalledTimes(expectedAttempts);
+      expect(failures).toHaveLength(expectedAttempts);
+      expect(failures.every(({ data }) => (
+        data.failure.code === "GE_CYCLE_ACTIVITY_TIMEOUT"
+        && data.usage.costUsd === 0.25
+      ))).toBe(true);
+      expect(fold.inDoubtActivities).toHaveLength(expectedInDoubt);
+      expect(fold.terminalObservation?.failureCode).toBe("GE_CYCLE_ACTIVITY_TIMEOUT");
+      expect(fold.terminalResult).toEqual(result);
+    },
+  );
 
   it("rejects stale lease reacquisition before CAS and terminal resume dispatches nothing", async () => {
     const item = request("until-dry", { maxIterations: 1 });

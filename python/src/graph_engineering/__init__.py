@@ -61,9 +61,13 @@ from .cycle_controller import (
     start_cycle,
 )
 from .cycle_faults import (
+    CYCLE_ACTIVITY_INTERRUPTION_TRIGGERS,
+    CYCLE_ACTIVITY_PHASES,
     CYCLE_DURABLE_FAULT_STAGES,
     CYCLE_FAULT_KINDS,
+    CycleActivityInterruptionMatrixEntry,
     CycleDurableFaultMatrixEntry,
+    build_cycle_activity_interruption_matrix,
     build_cycle_durable_fault_matrix,
     cycle_durable_fault_boundary,
 )
@@ -183,6 +187,8 @@ from .typed_ports import (
 )
 
 __all__ = [
+    "CYCLE_ACTIVITY_INTERRUPTION_TRIGGERS",
+    "CYCLE_ACTIVITY_PHASES",
     "CYCLE_DURABLE_FAULT_STAGES",
     "CYCLE_EVENT_TYPES",
     "CYCLE_FAULT_KINDS",
@@ -199,6 +205,7 @@ __all__ = [
     "CompiledGraph",
     "CompiledGraphIdentity",
     "CycleActivityContext",
+    "CycleActivityInterruptionMatrixEntry",
     "CycleCancellation",
     "CycleDurableFaultMatrixEntry",
     "CycleErrorCode",
@@ -292,6 +299,7 @@ __all__ = [
     "UnsuccessfulSettledItem",
     "ValidatedCycleInDoubtResolution",
     "ValidatedCycleRequest",
+    "build_cycle_activity_interruption_matrix",
     "build_cycle_checkpoint",
     "build_cycle_durable_fault_matrix",
     "canonical_bytes",

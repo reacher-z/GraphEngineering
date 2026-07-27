@@ -33,6 +33,63 @@ CycleFaultDurability: TypeAlias = Literal[
     "event-and-checkpoint-committed",
     "terminal-event-committed",
 ]
+CycleActivityPhase: TypeAlias = Literal[
+    "finder",
+    "candidate-evaluator",
+    "condition",
+    "optimizer-evaluator",
+    "patch-planner",
+]
+CycleActivitySideEffects: TypeAlias = Literal[
+    "none",
+    "idempotent",
+    "non-idempotent",
+]
+CycleActivityInterruptionTrigger: TypeAlias = Literal[
+    "before-first-round",
+    "before-claim",
+    "during-handler",
+    "after-handler-before-outcome",
+    "after-outcome-before-next-dispatch",
+    "attempt-timeout",
+    "after-round-commit",
+    "repeated-cancellation",
+]
+CycleActivityInterruptionKind: TypeAlias = Literal[
+    "caller-cancellation",
+    "attempt-timeout",
+]
+
+CYCLE_ACTIVITY_PHASES: tuple[CycleActivityPhase, ...] = (
+    "finder",
+    "candidate-evaluator",
+    "condition",
+    "optimizer-evaluator",
+    "patch-planner",
+)
+CYCLE_ACTIVITY_INTERRUPTION_TRIGGERS: tuple[
+    CycleActivityInterruptionTrigger, ...
+] = (
+    "before-first-round",
+    "before-claim",
+    "during-handler",
+    "after-handler-before-outcome",
+    "after-outcome-before-next-dispatch",
+    "attempt-timeout",
+    "after-round-commit",
+    "repeated-cancellation",
+)
+_INTERRUPTION_SIDE_EFFECTS: tuple[CycleActivitySideEffects, ...] = (
+    "none",
+    "idempotent",
+    "non-idempotent",
+)
+_EXPANDED_INTERRUPTION_TRIGGERS: tuple[CycleActivityInterruptionTrigger, ...] = (
+    "during-handler",
+    "after-handler-before-outcome",
+    "after-outcome-before-next-dispatch",
+    "attempt-timeout",
+)
 
 CYCLE_DURABLE_FAULT_STAGES: tuple[CycleDurableFaultStage, ...] = (
     "before-event-construction",
@@ -71,6 +128,24 @@ class CycleDurableFaultMatrixEntry:
             "faultKind": self.fault_kind,
             "boundary": self.boundary,
             "durability": self.durability,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class CycleActivityInterruptionMatrixEntry:
+    id: str
+    interruption: CycleActivityInterruptionKind
+    trigger: CycleActivityInterruptionTrigger
+    phase: CycleActivityPhase | None
+    side_effects: CycleActivitySideEffects | None
+
+    def to_dict(self) -> dict[str, str | None]:
+        return {
+            "id": self.id,
+            "interruption": self.interruption,
+            "trigger": self.trigger,
+            "phase": self.phase,
+            "sideEffects": self.side_effects,
         }
 
 
@@ -145,13 +220,78 @@ def build_cycle_durable_fault_matrix() -> tuple[CycleDurableFaultMatrixEntry, ..
     return tuple(matrix)
 
 
+def build_cycle_activity_interruption_matrix() -> tuple[
+    CycleActivityInterruptionMatrixEntry, ...
+]:
+    """Build all 68 deterministic H03 activity interruption obligations."""
+
+    matrix = [
+        CycleActivityInterruptionMatrixEntry(
+            id="before-first-round",
+            interruption="caller-cancellation",
+            trigger="before-first-round",
+            phase=None,
+            side_effects=None,
+        )
+    ]
+    for phase in CYCLE_ACTIVITY_PHASES:
+        matrix.append(
+            CycleActivityInterruptionMatrixEntry(
+                id=f"{phase}:before-claim",
+                interruption="caller-cancellation",
+                trigger="before-claim",
+                phase=phase,
+                side_effects=None,
+            )
+        )
+    for trigger in _EXPANDED_INTERRUPTION_TRIGGERS:
+        for phase in CYCLE_ACTIVITY_PHASES:
+            for side_effects in _INTERRUPTION_SIDE_EFFECTS:
+                matrix.append(
+                    CycleActivityInterruptionMatrixEntry(
+                        id=f"{phase}:{trigger}:{side_effects}",
+                        interruption=(
+                            "attempt-timeout"
+                            if trigger == "attempt-timeout"
+                            else "caller-cancellation"
+                        ),
+                        trigger=trigger,
+                        phase=phase,
+                        side_effects=side_effects,
+                    )
+                )
+    matrix.extend(
+        (
+            CycleActivityInterruptionMatrixEntry(
+                id="after-round-commit",
+                interruption="caller-cancellation",
+                trigger="after-round-commit",
+                phase=None,
+                side_effects=None,
+            ),
+            CycleActivityInterruptionMatrixEntry(
+                id="finder:repeated-cancellation:none",
+                interruption="caller-cancellation",
+                trigger="repeated-cancellation",
+                phase="finder",
+                side_effects="none",
+            ),
+        )
+    )
+    return tuple(matrix)
+
+
 __all__ = [
+    "CYCLE_ACTIVITY_INTERRUPTION_TRIGGERS",
+    "CYCLE_ACTIVITY_PHASES",
     "CYCLE_DURABLE_FAULT_STAGES",
     "CYCLE_FAULT_KINDS",
+    "CycleActivityInterruptionMatrixEntry",
     "CycleDurableFaultMatrixEntry",
     "CycleDurableFaultStage",
     "CycleFaultDurability",
     "CycleFaultKind",
+    "build_cycle_activity_interruption_matrix",
     "build_cycle_durable_fault_matrix",
     "cycle_durable_fault_boundary",
 ]

@@ -1,0 +1,129 @@
+{
+  "schemaVersion": 1,
+  "id": "cycle-controller-activity-interruption-v1alpha1",
+  "activityPhases": [
+    "finder",
+    "candidate-evaluator",
+    "condition",
+    "optimizer-evaluator",
+    "patch-planner"
+  ],
+  "sideEffectClasses": [
+    "none",
+    "idempotent",
+    "non-idempotent"
+  ],
+  "triggerFamilies": [
+    {
+      "name": "before-first-round",
+      "interruption": "caller-cancellation",
+      "appliesTo": "controller",
+      "expandSideEffects": false
+    },
+    {
+      "name": "before-claim",
+      "interruption": "caller-cancellation",
+      "appliesTo": "all-activity-phases",
+      "expandSideEffects": false
+    },
+    {
+      "name": "during-handler",
+      "interruption": "caller-cancellation",
+      "appliesTo": "all-activity-phases",
+      "expandSideEffects": true
+    },
+    {
+      "name": "after-handler-before-outcome",
+      "interruption": "caller-cancellation",
+      "appliesTo": "all-activity-phases",
+      "expandSideEffects": true
+    },
+    {
+      "name": "after-outcome-before-next-dispatch",
+      "interruption": "caller-cancellation",
+      "appliesTo": "all-activity-phases",
+      "expandSideEffects": true
+    },
+    {
+      "name": "attempt-timeout",
+      "interruption": "attempt-timeout",
+      "appliesTo": "all-activity-phases",
+      "expandSideEffects": true
+    },
+    {
+      "name": "after-round-commit",
+      "interruption": "caller-cancellation",
+      "appliesTo": "controller",
+      "expandSideEffects": false
+    },
+    {
+      "name": "repeated-cancellation",
+      "interruption": "caller-cancellation",
+      "appliesTo": "finder-none",
+      "expandSideEffects": false
+    }
+  ],
+  "timeoutPolicy": {
+    "stableFailureCode": "GE_CYCLE_ACTIVITY_TIMEOUT",
+    "maxAttemptsPerRound": 2,
+    "maxCostUsdPerAttempt": 0.25,
+    "retryableSideEffects": [
+      "none",
+      "idempotent"
+    ],
+    "nonRetryableSideEffects": [
+      "non-idempotent"
+    ]
+  },
+  "requiredAssertions": [
+    "caller-cancellation-precedes-simultaneous-handler-success",
+    "no-handler-starts-after-observed-pre-claim-cancellation",
+    "late-handler-result-never-commits",
+    "cancelled-claim-settles-exactly-once",
+    "timeout-charges-request-bound-ceiling",
+    "timeout-retries-only-when-policy-and-side-effects-permit",
+    "none-side-effects-never-create-in-doubt-evidence",
+    "external-side-effects-retain-single-in-doubt-claim",
+    "committed-outcome-survives-later-cancellation",
+    "accepted-patch-revision-remains-visible-after-decision-commit",
+    "cancellation-does-not-invent-a-dry-round",
+    "round-commit-dry-counter-survives-later-cancellation",
+    "repeated-cancellation-is-idempotent",
+    "replay-performs-zero-handler-dispatch",
+    "terminal-resume-performs-zero-write-and-zero-handler-dispatch",
+    "typescript-python-canonical-reports-match"
+  ],
+  "expect": {
+    "matrixEntryCount": 68,
+    "interruptionCounts": {
+      "caller-cancellation": 53,
+      "attempt-timeout": 15
+    },
+    "triggerCounts": {
+      "before-first-round": 1,
+      "before-claim": 5,
+      "during-handler": 15,
+      "after-handler-before-outcome": 15,
+      "after-outcome-before-next-dispatch": 15,
+      "attempt-timeout": 15,
+      "after-round-commit": 1,
+      "repeated-cancellation": 1
+    },
+    "phaseCounts": {
+      "controller": 2,
+      "finder": 14,
+      "candidate-evaluator": 13,
+      "condition": 13,
+      "optimizer-evaluator": 13,
+      "patch-planner": 13
+    },
+    "sideEffectCounts": {
+      "not-applicable": 7,
+      "none": 21,
+      "idempotent": 20,
+      "non-idempotent": 20
+    },
+    "matrixCanonicalUtf8Bytes": 11890,
+    "matrixSha256": "9d0d99e3bfd12d58fbc527f290cde432da3ec8e9d9f267aa725c041f14ae07a7"
+  }
+}

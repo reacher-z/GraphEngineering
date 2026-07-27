@@ -8,6 +8,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 
+import { exerciseCycleActivityInterruptionCampaign } from "./cycle_activity_interruption.mjs";
+
 const root = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 const fixtureRoot = join(root, "spec", "conformance");
 const coreUrl = pathToFileURL(join(root, "packages", "core", "dist", "index.js"));
@@ -2367,6 +2369,44 @@ assert.deepEqual(
   pyCycleReport.leaseFaultCampaign,
   "D7 lease administration fault-campaign reports differ",
 );
+const cycleInterruptionFixture = JSON.parse(
+  await readFile(
+    join(fixtureRoot, "cycle-controller-activity-interruption.case.json"),
+    "utf8",
+  ),
+);
+const pythonCycleInterruption = spawnSync(
+  "uv",
+  [
+    "run",
+    "--project",
+    "python",
+    "python",
+    "tools/conformance/python_cycle_interruption_report.py",
+  ],
+  { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
+);
+if (pythonCycleInterruption.status !== 0) {
+  throw new Error(
+    `Python cycle activity interruption campaign failed:\n${pythonCycleInterruption.stderr || pythonCycleInterruption.stdout}`,
+  );
+}
+const pyCycleInterruption = JSON.parse(pythonCycleInterruption.stdout);
+const tsCycleInterruption = await exerciseCycleActivityInterruptionCampaign({
+  runtime,
+  core,
+  graph: cycleGraph,
+  graphHash: cycleCompilation.graphHash,
+  baseRequest: cycleRequestValue,
+  fixture: cycleInterruptionFixture,
+  startedAt: cycleStartedAt,
+  checkpointAt: cycleCheckpointAt,
+});
+assert.deepEqual(
+  tsCycleInterruption,
+  pyCycleInterruption,
+  "D7 activity cancellation/timeout campaign reports differ",
+);
 const tsModeEventCount = Object.values(tsModeReports)
   .reduce((total, report) => total + report.eventTypes.length, 0);
 const tsModeInputCount = Object.values(tsModeReports)
@@ -2378,7 +2418,7 @@ const tsInDoubtInputCount = Object.values(tsInDoubtReports)
 const tsResolutionEventCount = tsResolutionReport.eventTypes.length;
 const tsResolutionInputCount = tsResolutionReport.inputsCanonical.length;
 process.stdout.write(
-  `Cross-language native-cycle conformance passed for ${tsCycleEvents.length + tsPatchEvents.length + tsResumeEvents.length + tsModeEventCount + tsInDoubtEventCount + tsResolutionEventCount} exact baseline events, ${cycleInputs.length + patchInputs.length + resumeInputs.length + tsModeInputCount + tsInDoubtInputCount + tsResolutionInputCount} activity inputs, ${tsCycleFaultReport.matrix.length} durable fault obligations over ${cycleFaultFixture.expect.boundaryCount} boundaries, ${tsLeaseFaultCampaign.obligationCount} executable lease-renew/release fault recoveries, all three controller modes, two in-doubt recovery outcomes, one authority-bound terminal resolution, eight terminal results, one accepted GraphPatch/revision, one crash/takeover resume, and eight baseline checkpoints.\n`,
+  `Cross-language native-cycle conformance passed for ${tsCycleEvents.length + tsPatchEvents.length + tsResumeEvents.length + tsModeEventCount + tsInDoubtEventCount + tsResolutionEventCount} exact baseline events, ${cycleInputs.length + patchInputs.length + resumeInputs.length + tsModeInputCount + tsInDoubtInputCount + tsResolutionInputCount} activity inputs, ${tsCycleFaultReport.matrix.length} durable fault obligations over ${cycleFaultFixture.expect.boundaryCount} boundaries, ${tsLeaseFaultCampaign.obligationCount} executable lease-renew/release fault recoveries, ${tsCycleInterruption.obligationCount} exact activity cancellation/timeout recoveries, all three controller modes, two in-doubt recovery outcomes, one authority-bound terminal resolution, eight terminal results, one accepted GraphPatch/revision, one crash/takeover resume, and eight baseline checkpoints.\n`,
 );
 
 // Authoring conformance is intentionally expected-vs-TypeScript-vs-Python.

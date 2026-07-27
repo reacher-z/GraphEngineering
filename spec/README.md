@@ -34,7 +34,9 @@ Later revision lineage is closed by
 controller event and fold/checkpoint contracts are
 [cycle-controller-event.schema.json](cycle-controller-event.schema.json) and
 [cycle-controller-checkpoint.schema.json](cycle-controller-checkpoint.schema.json).
-These D7 schemas are protocol-frozen but not native runtime capability. Their
+These D7 schemas are protocol-frozen and consumed by the native TypeScript and
+Python standalone alpha controllers. Schema acceptance alone is not native or
+production evidence; executable conformance remains the capability gate. Their
 v1alpha1 authoritative payloads are explicitly inline-unredacted and therefore
 do not satisfy the still-open D9 protected-payload or stable-release gate.
 

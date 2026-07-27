@@ -423,6 +423,7 @@ async function invokeActivity<T>(
       "GE_CYCLE_ACTIVITY_TIMEOUT", `${context.phase} exceeded timeout`, {
         retryable: true,
         inDoubt: binding.sideEffects !== "none",
+        costUsd: binding.maxCostUsdPerAttempt,
       },
     ));
   }, binding.timeoutMs);
@@ -447,6 +448,10 @@ async function invokeActivity<T>(
   void call.catch(() => undefined);
   try {
     const result = await Promise.race([call, boundary, cancellation]);
+    // Cancellation has precedence even when the handler and caller settle in
+    // the same microtask turn. A late successful value never crosses the
+    // durable outcome boundary after caller cancellation was observed.
+    if (outerSignal?.aborted) throw signalFailure(outerSignal, context.phase, binding.sideEffects);
     const captured = snapshotJson(result) as unknown as CycleActivityExecution<T>;
     if (typeof captured !== "object" || captured === null || !("output" in captured)) {
       throw new CycleActivityFailure("GE_CYCLE_INVALID_ACTIVITY_OUTPUT", "activity returned no closed output");
@@ -747,6 +752,12 @@ async function executeActivity<T, U = T>(
       const failure = error instanceof CycleActivityFailure
         ? error
         : new CycleActivityFailure("GE_CYCLE_ACTIVITY_FAILED", `${phase} failed`, { cause: error });
+      // Caller cancellation is a terminal controller fact, not an activity
+      // failure. Leave the durable ActivityStarted claim open so terminate()
+      // can charge it exactly once and preserve only sound in-doubt evidence.
+      if (failure.code === "GE_CYCLE_ACTIVITY_CANCELLED") {
+        return Object.freeze({ failure });
+      }
       const remaining = journal.fold.liveReservations[0]?.remaining;
       const validCost = typeof failure.costUsd === "number" && Number.isFinite(failure.costUsd)
         && failure.costUsd >= 0 && failure.costUsd <= binding.maxCostUsdPerAttempt
@@ -910,14 +921,15 @@ async function terminate(
       event.type === "BudgetReservationSettled" && event.data.phase === openActivity.phase
     ));
     if (!charged) {
-      // Cancellation/controller failure after a durable claim still charges the
-      // attempt and retains the unmatched activity as in-doubt in the fold.
-      // An external call may have crossed its side-effect boundary before the
-      // process disappeared, so its unproven usage retains the complete
-      // per-attempt ceiling instead of becoming newly spendable credit.
-      const costUsd = openActivity.sideEffects === "none"
-        ? 0
-        : phaseBinding(journal.request, openActivity.phase).maxCostUsdPerAttempt;
+      // Cancellation/controller failure after a durable claim still charges
+      // the attempt exactly once. No lower usage crossed a durable outcome
+      // boundary, so sound reservation accounting consumes the complete
+      // request-bound ceiling; sideEffects independently controls whether the
+      // fold retains an in-doubt identity.
+      const costUsd = phaseBinding(
+        journal.request,
+        openActivity.phase,
+      ).maxCostUsdPerAttempt;
       await settle(journal, openActivity.phase, { attempts: 1, costUsd, dynamicNodes: 0 });
     }
   }
@@ -1177,6 +1189,9 @@ async function continueController(
           reason: hardStop(journal.fold, journal.clock.sample()) ?? "FAILED",
         });
       }
+      if (journal.options.signal?.aborted) {
+        return terminate(journal, { cancelled: true, reason: "CANCELLED" });
+      }
       const before = journal.fold;
       const classified = output.execution.output;
       const sample = journal.clock.sample();
@@ -1215,6 +1230,9 @@ async function continueController(
           failed: true, failureCode: output.failure.code,
           reason: hardStop(journal.fold, journal.clock.sample()) ?? "FAILED",
         });
+      }
+      if (journal.options.signal?.aborted) {
+        return terminate(journal, { cancelled: true, reason: "CANCELLED" });
       }
       const before = journal.fold;
       const classified = output.execution.output;
@@ -1288,6 +1306,9 @@ async function continueController(
             reason: hardStop(journal.fold, journal.clock.sample()) ?? "FAILED",
           });
         }
+        if (journal.options.signal?.aborted) {
+          return terminate(journal, { cancelled: true, reason: "CANCELLED" });
+        }
         const phase: CycleActivityPhase = journal.request.policy.mode === "while"
           ? "condition"
           : "optimizer-evaluator";
@@ -1343,6 +1364,9 @@ async function continueController(
           failed: true, failureCode: output.failure.code,
           reason: hardStop(journal.fold, journal.clock.sample()) ?? "FAILED",
         });
+      }
+      if (journal.options.signal?.aborted) {
+        return terminate(journal, { cancelled: true, reason: "CANCELLED" });
       }
       if (journal.options.patchContext.authoritySnapshot.proposerActivityKey !== output.activityKey) {
         await failClaimedActivity(

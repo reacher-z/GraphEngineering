@@ -32,6 +32,7 @@ export {
   startCycleController,
 } from "./cycle-controller.js";
 export {
+  buildCycleActivityInterruptionMatrix,
   buildCycleDurableFaultMatrix,
   cycleDurableFaultBoundary,
 } from "./cycle-faults.js";
@@ -71,6 +72,8 @@ export {
 } from "./cycle-fold.js";
 export { NativeGraphPatchApplier } from "./graph-patch.js";
 export {
+  CYCLE_ACTIVITY_INTERRUPTION_TRIGGERS,
+  CYCLE_ACTIVITY_PHASES,
   CYCLE_CONTROLLER_EVENT_TYPES,
   CYCLE_DURABLE_FAULT_STAGES,
   CYCLE_FAULT_KINDS,

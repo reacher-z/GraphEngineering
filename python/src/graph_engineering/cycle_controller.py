@@ -407,18 +407,10 @@ class _CycleController:
                     self.journal.events,
                     self.checkpoint_warning,
                 )
-            inherited_in_doubt = cast(
-                list[dict[str, Any]],
-                self.fold.state["inDoubtActivities"],
-            )
-            if any(
-                activity["sideEffects"] == "non-idempotent"
-                for activity in inherited_in_doubt
-            ):
-                raise CycleRuntimeError(
-                    CycleErrorCode.IN_DOUBT_SIDE_EFFECT,
-                    "controller inherited an in-doubt non-idempotent activity",
-                )
+            # Resume/fork reject inherited non-idempotent uncertainty before a
+            # controller is constructed. Uncertainty created by this live run
+            # must instead finish its durable settlement and terminal path.
+            # Rechecking it here would strand ActivityFailed before release.
             open_round = self.fold.state["openRound"]
             if open_round is not None:
                 await self._drive_open_round(cast(dict[str, Any], open_round))
@@ -622,18 +614,27 @@ class _CycleController:
         if phase == "failed":
             if pending is not None and pending.type == "ActivityFailed":
                 await self._settle_pending(pending)
+                reason = self._before_dispatch_reason()
+                if reason is not None:
+                    await self._terminate(reason)
                 return
             await self._after_failed_activity()
             return
         if phase == "discovered":
             if pending is not None and pending.type == "DiscoveryCommitted":
                 await self._settle_pending(pending)
+                reason = self._before_dispatch_reason()
+                if reason is not None:
+                    await self._terminate(reason)
             else:
                 await self._dispatch(ActivityPhase.CANDIDATE_EVALUATOR)
             return
         if phase == "evaluated":
             if pending is not None and pending.type == "CandidateEvaluationCommitted":
                 await self._settle_pending(pending)
+                reason = self._before_dispatch_reason()
+                if reason is not None:
+                    await self._terminate(reason)
             elif self.request.model.policy.mode == "until-dry":
                 await self.journal.append(
                     "ModeOutcomeCommitted",
@@ -657,6 +658,9 @@ class _CycleController:
                 and pending.data["activityKey"] is not None
             ):
                 await self._settle_pending(pending)
+                reason = self._before_dispatch_reason()
+                if reason is not None:
+                    await self._terminate(reason)
             elif (
                 self.patch_each_round
                 and cast(dict[str, Any], open_round["plan"])["patchPlanner"] is not None
@@ -668,6 +672,9 @@ class _CycleController:
         if phase == "patch-decided":
             if pending is not None and pending.type in {"PatchAccepted", "PatchRejected"}:
                 await self._settle_pending(pending)
+                reason = self._before_dispatch_reason()
+                if reason is not None:
+                    await self._terminate(reason)
             elif cast(dict[str, Any], open_round["patchDecision"])["outcome"] == "rejected":
                 await self._terminate("PATCH_REJECTED")
             else:
@@ -787,13 +794,29 @@ class _CycleController:
             input=input_value,
             cancellation=self.cancellation,
         )
-        invocation = await self._call_handler(handler, context, binding)
-        if invocation.cancelled or invocation.timed_out:
-            reason = "CANCELLED" if invocation.cancelled else "FAILED"
+        boundary_reason = self._before_dispatch_reason()
+        if boundary_reason is not None:
+            # The claim is durable, but no handler may start after cancellation
+            # or a hard boundary has been observed.
             await self._settle_open_claim()
-            await self._terminate(
-                reason,
-                failure_code=None if invocation.cancelled else "GE_ACTIVITY_TIMEOUT",
+            await self._terminate(boundary_reason)
+            return
+        invocation = await self._call_handler(handler, context, binding)
+        if invocation.cancelled:
+            await self._settle_open_claim()
+            await self._terminate("CANCELLED")
+            return
+        if invocation.timed_out:
+            await self._record_activity_failure(
+                phase,
+                key,
+                attempt,
+                binding,
+                CycleRuntimeError(
+                    CycleErrorCode.ACTIVITY_TIMEOUT,
+                    f"{phase.value} exceeded timeout",
+                ),
+                retryable=True,
             )
             return
         boundary_reason = self._before_dispatch_reason()
@@ -869,6 +892,16 @@ class _CycleController:
             timeout=timeout,
             return_when=asyncio.FIRST_COMPLETED,
         )
+        # Cancellation has precedence when a handler and the caller settle in
+        # the same event-loop turn. Observe and discard any late handler value.
+        if cancel_task in done or self.cancellation.cancelled:
+            if not task.done():
+                task.cancel()
+            task.add_done_callback(_consume_background_task)
+            if not cancel_task.done():
+                cancel_task.cancel()
+                await asyncio.gather(cancel_task, return_exceptions=True)
+            return _Invocation(cancelled=True)
         if task in done:
             cancel_task.cancel()
             try:
@@ -879,8 +912,6 @@ class _CycleController:
                 return _Invocation(error=exc)
         task.cancel()
         task.add_done_callback(_consume_background_task)
-        if cancel_task in done or self.cancellation.cancelled:
-            return _Invocation(cancelled=True)
         cancel_task.cancel()
         return _Invocation(timed_out=True)
 
@@ -1232,6 +1263,8 @@ class _CycleController:
         binding = self._binding(phase)
         if (
             details["retryable"] is True
+            and cast(int, failure.data["attempt"])
+            < binding.max_attempts_per_round
             and not (
                 details["inDoubt"] is True
                 and binding.side_effects == "non-idempotent"

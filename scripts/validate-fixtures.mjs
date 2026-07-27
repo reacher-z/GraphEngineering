@@ -473,6 +473,8 @@ const cycleControllerCases = await loadJson("cycle-controller.case.json");
 assert.equal(cycleControllerCases.schemaVersion, 1);
 const cycleFaultMatrixCases = await loadJson("cycle-controller-fault-matrix.case.json");
 assert.equal(cycleFaultMatrixCases.schemaVersion, 1);
+const cycleInterruptionCases = await loadJson("cycle-controller-activity-interruption.case.json");
+assert.equal(cycleInterruptionCases.schemaVersion, 1);
 assert.equal(
   cycleFaultMatrixCases.eventSchema,
   "spec/cycle-controller-event.schema.json",
@@ -631,6 +633,201 @@ for (const campaign of cycleFaultMatrixCases.retainedCampaigns) {
     `${campaign.id} seed boundary is not canonical`,
   );
 }
+assert.deepEqual(
+  Object.keys(cycleInterruptionCases).sort(compareUnicodeCodePoints),
+  [
+    "activityPhases",
+    "expect",
+    "id",
+    "requiredAssertions",
+    "schemaVersion",
+    "sideEffectClasses",
+    "timeoutPolicy",
+    "triggerFamilies",
+  ],
+  "D7 H03 activity interruption fixture is not closed",
+);
+assert.equal(
+  cycleInterruptionCases.id,
+  "cycle-controller-activity-interruption-v1alpha1",
+);
+assert.deepEqual(cycleInterruptionCases.activityPhases, [
+  "finder",
+  "candidate-evaluator",
+  "condition",
+  "optimizer-evaluator",
+  "patch-planner",
+]);
+assert.deepEqual(cycleInterruptionCases.sideEffectClasses, [
+  "none",
+  "idempotent",
+  "non-idempotent",
+]);
+const interruptionFamilies = new Map();
+for (const family of cycleInterruptionCases.triggerFamilies) {
+  assert.deepEqual(
+    Object.keys(family).sort(compareUnicodeCodePoints),
+    ["appliesTo", "expandSideEffects", "interruption", "name"],
+    `${family.name} interruption family is not closed`,
+  );
+  assert.equal(interruptionFamilies.has(family.name), false, `${family.name} is repeated`);
+  assert.ok(
+    family.interruption === "caller-cancellation" || family.interruption === "attempt-timeout",
+    `${family.name} has an unknown interruption kind`,
+  );
+  interruptionFamilies.set(family.name, family);
+}
+assert.deepEqual([...interruptionFamilies.keys()], [
+  "before-first-round",
+  "before-claim",
+  "during-handler",
+  "after-handler-before-outcome",
+  "after-outcome-before-next-dispatch",
+  "attempt-timeout",
+  "after-round-commit",
+  "repeated-cancellation",
+]);
+const cycleInterruptionMatrix = [{
+  id: "before-first-round",
+  interruption: "caller-cancellation",
+  trigger: "before-first-round",
+  phase: null,
+  sideEffects: null,
+}];
+for (const phase of cycleInterruptionCases.activityPhases) {
+  cycleInterruptionMatrix.push({
+    id: `${phase}:before-claim`,
+    interruption: "caller-cancellation",
+    trigger: "before-claim",
+    phase,
+    sideEffects: null,
+  });
+}
+for (const trigger of [
+  "during-handler",
+  "after-handler-before-outcome",
+  "after-outcome-before-next-dispatch",
+  "attempt-timeout",
+]) {
+  const family = interruptionFamilies.get(trigger);
+  assert.equal(family.expandSideEffects, true, `${trigger} must cross side-effect classes`);
+  assert.equal(family.appliesTo, "all-activity-phases", `${trigger} must cross all phases`);
+  for (const phase of cycleInterruptionCases.activityPhases) {
+    for (const sideEffects of cycleInterruptionCases.sideEffectClasses) {
+      cycleInterruptionMatrix.push({
+        id: `${phase}:${trigger}:${sideEffects}`,
+        interruption: family.interruption,
+        trigger,
+        phase,
+        sideEffects,
+      });
+    }
+  }
+}
+cycleInterruptionMatrix.push({
+  id: "after-round-commit",
+  interruption: "caller-cancellation",
+  trigger: "after-round-commit",
+  phase: null,
+  sideEffects: null,
+});
+cycleInterruptionMatrix.push({
+  id: "finder:repeated-cancellation:none",
+  interruption: "caller-cancellation",
+  trigger: "repeated-cancellation",
+  phase: "finder",
+  sideEffects: "none",
+});
+assert.equal(
+  cycleInterruptionMatrix.length,
+  cycleInterruptionCases.expect.matrixEntryCount,
+  "D7 H03 interruption count drifted",
+);
+assert.equal(
+  new Set(cycleInterruptionMatrix.map(({ id }) => id)).size,
+  cycleInterruptionMatrix.length,
+  "D7 H03 interruption IDs are not unique",
+);
+for (const [kind, count] of Object.entries(cycleInterruptionCases.expect.interruptionCounts)) {
+  assert.equal(
+    cycleInterruptionMatrix.filter(({ interruption }) => interruption === kind).length,
+    count,
+    `D7 H03 ${kind} count drifted`,
+  );
+}
+for (const [trigger, count] of Object.entries(cycleInterruptionCases.expect.triggerCounts)) {
+  assert.equal(
+    cycleInterruptionMatrix.filter((entry) => entry.trigger === trigger).length,
+    count,
+    `D7 H03 ${trigger} count drifted`,
+  );
+}
+for (const [phase, count] of Object.entries(cycleInterruptionCases.expect.phaseCounts)) {
+  assert.equal(
+    cycleInterruptionMatrix.filter((entry) => (entry.phase ?? "controller") === phase).length,
+    count,
+    `D7 H03 ${phase} phase count drifted`,
+  );
+}
+for (const [sideEffects, count] of Object.entries(cycleInterruptionCases.expect.sideEffectCounts)) {
+  assert.equal(
+    cycleInterruptionMatrix.filter((entry) => (
+      entry.sideEffects ?? "not-applicable"
+    ) === sideEffects).length,
+    count,
+    `D7 H03 ${sideEffects} side-effect count drifted`,
+  );
+}
+const cycleInterruptionCanonical = JSON.stringify(canonicalize(cycleInterruptionMatrix));
+assert.equal(
+  Buffer.byteLength(cycleInterruptionCanonical, "utf8"),
+  cycleInterruptionCases.expect.matrixCanonicalUtf8Bytes,
+  "D7 H03 interruption canonical byte count drifted",
+);
+assert.equal(
+  hash(cycleInterruptionMatrix),
+  cycleInterruptionCases.expect.matrixSha256,
+  "D7 H03 interruption canonical hash drifted",
+);
+assert.deepEqual(
+  Object.keys(cycleInterruptionCases.timeoutPolicy).sort(compareUnicodeCodePoints),
+  [
+    "maxAttemptsPerRound",
+    "maxCostUsdPerAttempt",
+    "nonRetryableSideEffects",
+    "retryableSideEffects",
+    "stableFailureCode",
+  ],
+  "D7 H03 timeout policy is not closed",
+);
+assert.equal(cycleInterruptionCases.timeoutPolicy.stableFailureCode, "GE_CYCLE_ACTIVITY_TIMEOUT");
+assert.equal(cycleInterruptionCases.timeoutPolicy.maxAttemptsPerRound, 2);
+assert.equal(cycleInterruptionCases.timeoutPolicy.maxCostUsdPerAttempt, 0.25);
+assert.deepEqual(cycleInterruptionCases.timeoutPolicy.retryableSideEffects, [
+  "none",
+  "idempotent",
+]);
+assert.deepEqual(cycleInterruptionCases.timeoutPolicy.nonRetryableSideEffects, [
+  "non-idempotent",
+]);
+assert.deepEqual(cycleInterruptionCases.requiredAssertions, [
+  "caller-cancellation-precedes-simultaneous-handler-success",
+  "no-handler-starts-after-observed-pre-claim-cancellation",
+  "late-handler-result-never-commits",
+  "cancelled-claim-settles-exactly-once",
+  "timeout-charges-request-bound-ceiling",
+  "timeout-retries-only-when-policy-and-side-effects-permit",
+  "none-side-effects-never-create-in-doubt-evidence",
+  "external-side-effects-retain-single-in-doubt-claim",
+  "committed-outcome-survives-later-cancellation",
+  "accepted-patch-revision-remains-visible-after-decision-commit",
+  "cancellation-does-not-invent-a-dry-round",
+  "round-commit-dry-counter-survives-later-cancellation",
+  "repeated-cancellation-is-idempotent",
+  "replay-performs-zero-handler-dispatch",
+  "terminal-resume-performs-zero-write-and-zero-handler-dispatch",
+  "typescript-python-canonical-reports-match",
+]);
 const validPoliciesByName = new Map();
 for (const testCase of cycleControllerCases.validPolicies) {
   assert.equal(
@@ -2335,5 +2532,5 @@ assert.equal(new Set(diamond.nodes.map(({ id }) => id)).size, diamond.nodes.leng
 assert.equal(new Set(diamond.edges.map(({ id }) => id)).size, diamond.edges.length);
 
 process.stdout.write(
-  `Validated ${fixtureNames.length} JSON fixtures (${caseNames.length} case manifests), ${yamlNames.length} referenced YAML fixtures, ${Object.keys(expected.canonicalization).length} graph hash, ${Object.keys(expected.checkpoints ?? {}).length} checkpoint hash, ${durableJson.validCases.length} Durable JSON vectors, ${compiledIdentities.length} compiled identities, ${graphPatchCases.validCases.length + graphPatchCases.invalidCases.length} graph patch schema cases plus ${graphPatchCases.semanticCases.length} closed semantic vectors, and 6 D7 controller/revision/event/checkpoint schemas with ${durableEvents.length} chained event goldens, ${cycleFaultMatrix.length} retained durable fault obligations, ${cycleDurableCases.leaseTransitionCases.length} valid and ${cycleDurableCases.invalidLeaseTransitionCases.length} hostile lease transitions, ${cycleDurableCases.validInterruptedHistoryCases?.length ?? 0} interrupted terminal/checkpoint folds, ${cycleDurableCases.inDoubtProjectionCases.length} in-doubt singleton cases, ${resolutionProtocol.cases.length} terminal in-doubt resolution cases, ${cycleDurableCases.untilDryFoldCases.length} global-seen convergence fold, ${cycleDurableCases.hardStopFoldCases.length} hard-stop folds, ${cycleDurableCases.invalidEventHistoryCases.length} hostile histories, ${cycleDurableCases.invalidCheckpointSemanticCases.length} hostile checkpoint folds, plus ${cycleDurableCases.validStandaloneEventSchemaCases.length} standalone phase-event shapes; all ${expectedD7Tests.length} D7-CYCLE-SPEC-024 expected-test groups are mapped against meta-valid schemas.\n`,
+  `Validated ${fixtureNames.length} JSON fixtures (${caseNames.length} case manifests), ${yamlNames.length} referenced YAML fixtures, ${Object.keys(expected.canonicalization).length} graph hash, ${Object.keys(expected.checkpoints ?? {}).length} checkpoint hash, ${durableJson.validCases.length} Durable JSON vectors, ${compiledIdentities.length} compiled identities, ${graphPatchCases.validCases.length + graphPatchCases.invalidCases.length} graph patch schema cases plus ${graphPatchCases.semanticCases.length} closed semantic vectors, and 6 D7 controller/revision/event/checkpoint schemas with ${durableEvents.length} chained event goldens, ${cycleFaultMatrix.length} retained durable fault obligations, ${cycleInterruptionMatrix.length} activity interruption obligations, ${cycleDurableCases.leaseTransitionCases.length} valid and ${cycleDurableCases.invalidLeaseTransitionCases.length} hostile lease transitions, ${cycleDurableCases.validInterruptedHistoryCases?.length ?? 0} interrupted terminal/checkpoint folds, ${cycleDurableCases.inDoubtProjectionCases.length} in-doubt singleton cases, ${resolutionProtocol.cases.length} terminal in-doubt resolution cases, ${cycleDurableCases.untilDryFoldCases.length} global-seen convergence fold, ${cycleDurableCases.hardStopFoldCases.length} hard-stop folds, ${cycleDurableCases.invalidEventHistoryCases.length} hostile histories, ${cycleDurableCases.invalidCheckpointSemanticCases.length} hostile checkpoint folds, plus ${cycleDurableCases.validStandaloneEventSchemaCases.length} standalone phase-event shapes; all ${expectedD7Tests.length} D7-CYCLE-SPEC-024 expected-test groups are mapped against meta-valid schemas.\n`,
 );

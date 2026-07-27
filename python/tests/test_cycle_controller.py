@@ -30,8 +30,11 @@ from graph_engineering.cycle_controller import (
     start_cycle,
 )
 from graph_engineering.cycle_faults import (
+    CYCLE_ACTIVITY_INTERRUPTION_TRIGGERS,
+    CYCLE_ACTIVITY_PHASES,
     CYCLE_DURABLE_FAULT_STAGES,
     CYCLE_FAULT_KINDS,
+    build_cycle_activity_interruption_matrix,
     build_cycle_durable_fault_matrix,
     cycle_durable_fault_boundary,
 )
@@ -122,6 +125,12 @@ def test_cycle_surface_is_exported_from_the_native_python_package() -> None:
     assert ge.CYCLE_EVENT_TYPES is CYCLE_EVENT_TYPES
     assert ge.CYCLE_DURABLE_FAULT_STAGES is CYCLE_DURABLE_FAULT_STAGES
     assert ge.CYCLE_FAULT_KINDS is CYCLE_FAULT_KINDS
+    assert ge.CYCLE_ACTIVITY_PHASES is CYCLE_ACTIVITY_PHASES
+    assert ge.CYCLE_ACTIVITY_INTERRUPTION_TRIGGERS is CYCLE_ACTIVITY_INTERRUPTION_TRIGGERS
+    assert (
+        ge.build_cycle_activity_interruption_matrix
+        is build_cycle_activity_interruption_matrix
+    )
     assert ge.build_cycle_durable_fault_matrix is build_cycle_durable_fault_matrix
 
 
@@ -692,6 +701,25 @@ def test_fault_matrix_is_derived_from_all_event_stage_kind_combinations() -> Non
         cycle_durable_fault_boundary(cast(Any, "Unknown"), "before-event-construction")
     with pytest.raises(ValueError, match="unknown durable fault stage"):
         cycle_durable_fault_boundary("ControllerCreated", cast(Any, "unknown"))
+
+
+def test_activity_interruption_matrix_is_closed_and_complete() -> None:
+    matrix = build_cycle_activity_interruption_matrix()
+
+    assert len(matrix) == 68
+    assert len({entry.id for entry in matrix}) == 68
+    assert sum(entry.interruption == "attempt-timeout" for entry in matrix) == 15
+    assert sum(entry.trigger == "before-claim" for entry in matrix) == 5
+    assert sum(entry.side_effects is None for entry in matrix) == 7
+    assert sum(entry.phase == "finder" for entry in matrix) == 14
+    assert matrix[0].to_dict() == {
+        "id": "before-first-round",
+        "interruption": "caller-cancellation",
+        "trigger": "before-first-round",
+        "phase": None,
+        "sideEffects": None,
+    }
+    assert matrix[-1].id == "finder:repeated-cancellation:none"
 
 
 @pytest.mark.parametrize(
@@ -1436,6 +1464,7 @@ def test_cancellation_racing_output_retains_only_external_claims(
         store = MemoryCycleStore()
         request = request_document(max_iterations=3)
         request["activities"]["finder"]["sideEffects"] = side_effects
+        request["activities"]["finder"]["maxCostUsdPerAttempt"] = 0.25
 
         async def finder(_: object) -> list[dict[str, object]]:
             cancellation.cancel()
@@ -1451,13 +1480,78 @@ def test_cancellation_racing_output_retains_only_external_claims(
         )
 
         assert result.result["exitReason"] == "CANCELLED"
+        assert result.result["attemptsUsed"] == 1
+        assert result.result["costUsd"] == 0.25
         assert result.result["seenCount"] == 0
         assert not any(event.type == "DiscoveryCommitted" for event in result.events)
+        assert not any(event.type == "ActivityFailed" for event in result.events)
         replayed = await replay_cycle(request["eventStreamId"], store=store)
         in_doubt = cast(list[dict[str, Any]], replayed.state["inDoubtActivities"])
         assert len(in_doubt) == expected_in_doubt
         if in_doubt:
             assert in_doubt[0]["sideEffects"] == "idempotent"
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize(
+    ("side_effects", "expected_attempts", "expected_cost", "expected_in_doubt"),
+    [
+        ("none", 2, 0.5, 0),
+        ("idempotent", 2, 0.5, 1),
+        ("non-idempotent", 1, 0.25, 1),
+    ],
+)
+def test_activity_timeout_charging_retry_and_failure_code_are_exact(
+    side_effects: str,
+    expected_attempts: int,
+    expected_cost: float,
+    expected_in_doubt: int,
+) -> None:
+    async def run() -> None:
+        store = MemoryCycleStore()
+        request = request_document(max_iterations=2)
+        finder_binding = request["activities"]["finder"]
+        finder_binding["sideEffects"] = side_effects
+        finder_binding["maxAttemptsPerRound"] = 2
+        finder_binding["maxCostUsdPerAttempt"] = 0.25
+        finder_binding["timeoutMs"] = 1
+        calls = 0
+
+        async def finder(_: object) -> list[object]:
+            nonlocal calls
+            calls += 1
+            await asyncio.Event().wait()
+            return []
+
+        result = await start_cycle(
+            request,
+            CycleHandlers(finder=finder, candidate_evaluator=lambda _: []),
+            store=store,
+            lease=lease(),
+            clock=fixed_clock,
+        )
+        failures = [event for event in result.events if event.type == "ActivityFailed"]
+        replayed = await replay_cycle(request["eventStreamId"], store=store)
+        in_doubt = cast(list[dict[str, Any]], replayed.state["inDoubtActivities"])
+
+        assert result.result["exitReason"] == "FAILED"
+        assert result.result["status"] == "failed"
+        assert result.result["attemptsUsed"] == expected_attempts
+        assert result.result["costUsd"] == expected_cost
+        assert calls == expected_attempts
+        assert len(failures) == expected_attempts
+        assert all(
+            event.data["failure"]["code"] == "GE_CYCLE_ACTIVITY_TIMEOUT"
+            and event.data["usage"]["costUsd"] == 0.25
+            for event in failures
+        )
+        assert len(in_doubt) == expected_in_doubt
+        terminal_observation = cast(
+            dict[str, Any], replayed.state["terminalObservation"]
+        )
+        assert terminal_observation["failureCode"] == "GE_CYCLE_ACTIVITY_TIMEOUT"
+        assert replayed.result == result.result
 
     asyncio.run(run())
 

@@ -1,11 +1,11 @@
 # Bounded cycle and dynamic graph-patch semantics v1alpha1
 
-Status: normative D7 protocol freeze; native implementation unavailable. This
-contract and its machine-readable schemas close the former controller-carrier
-and durable-controller contract gaps. They do not claim that the current
-schedulers execute cycles or patches. Native TypeScript/Python controllers and
-their executable cross-language conformance join remain release-blocking as
-described in section 15.
+Status: normative D7 protocol freeze with native TypeScript and Python alpha
+implementations under executable conformance expansion. This contract and its
+machine-readable schemas close the controller-carrier and durable-controller
+contract gaps. The in-repository standalone controllers execute bounded cycles
+and patches against local stores; production durability, protected payloads,
+and stable-release acceptance remain open as described in section 15.
 
 This document defines the only legal way to repeat or dynamically extend work
 in Graph Engineering. Ordinary `GraphSpec.edges` remain acyclic. A runtime MUST
@@ -1063,6 +1063,67 @@ The remaining matrix rows stay explicit open behavioral coverage;
 their presence in the 855-row lattice alone is not an exhaustive recovery
 claim.
 
+#### Activity-interruption fault lattice
+
+The retained
+[`cycle-controller-activity-interruption.case.json`](conformance/cycle-controller-activity-interruption.case.json)
+fixture freezes a second, independently generated lattice at the activity
+boundary rather than the event-store boundary. TypeScript and Python each
+derive the same 68 uniquely identified obligations from closed dimensions:
+
+- one cancellation before the first round;
+- one pre-claim cancellation for each of finder, candidate evaluator,
+  condition, optimizer evaluator, and patch planner;
+- caller cancellation during the handler, after handler return but before its
+  outcome, and after an outcome but before the next dispatch, crossed with all
+  five phases and `none`, `idempotent`, and `non-idempotent` side effects;
+- attempt timeout crossed with the same five phases and three side-effect
+  classes;
+- one cancellation after round commit; and
+- one repeated-cancellation idempotency row.
+
+That expansion contains 53 caller-cancellation rows and 15 timeout rows. Its
+canonical matrix is 11,890 UTF-8 bytes with SHA-256
+`9d0d99e3bfd12d58fbc527f290cde432da3ec8e9d9f267aa725c041f14ae07a7`.
+Fixture validation reconstructs the expansion independently rather than
+trusting either runtime's exported matrix.
+
+Caller cancellation linearizes at the first durable boundary that has already
+crossed. Before `ActivityStarted`, no handler is dispatched and no activity
+attempt is charged. Once `ActivityStarted` is durable, cancellation settles
+exactly one attempt at the request-bound per-attempt cost ceiling. The
+side-effect declaration controls uncertainty, not charging: `none` creates no
+in-doubt evidence, while an external `idempotent` or `non-idempotent` claim
+retains one in-doubt identity. Cancellation is a controller fact and MUST NOT
+append `ActivityFailed`. A handler value that races or follows cancellation is
+observed only for host cleanup; it MUST NOT commit discovery, evaluation,
+mode, or patch state. Repeating cancellation is idempotent.
+
+An outcome already committed before cancellation remains authoritative. Seen
+additions cannot disappear, rejected findings cannot become dry by omission,
+an accepted patch revision remains visible, and a committed round retains its
+dry counter. The controller cancels before the next dispatch and replay
+reconstructs the same result without invoking a handler. Resuming a terminal
+row performs zero writes, handler dispatches, or clock samples.
+
+Attempt timeout is distinct from caller cancellation and the controller's
+absolute `maxDurationMs`. It appends `ActivityFailed` with stable code
+`GE_CYCLE_ACTIVITY_TIMEOUT`, charges the full per-attempt ceiling, and may
+retry only while both the request attempt limit and side-effect policy permit.
+`none` and `idempotent` may retry with the same stable activity key;
+`non-idempotent` stops after its first ambiguous timeout. The retained timeout
+policy uses two maximum attempts and USD 0.25 per attempt. Tests control the
+boundary directly and use a bounded timer; they do not depend on arbitrary
+sleep ordering.
+
+For every row, native reports compare complete event canonical bytes and
+record hashes, result and checkpoint projections, activity paths, failure and
+settlement facts, in-doubt state, replay, and terminal resume behavior. This is
+the H03A activity-phase campaign. It does not yet claim interruption coverage
+inside the public pause, resume, replay, or fork operations themselves; that
+operation-level H03B lattice remains required before exhaustive cancellation
+or complete D7 conformance can be claimed.
+
 Fault hooks are deterministic test and simulation controls, not evidence that
 an in-memory adapter is crash durable. A production adapter must establish the
 same before/after-commit facts with its transaction and fsync contract. The
@@ -1237,6 +1298,12 @@ mutations, recovery boundaries, and fork-prefix observations. Its explicit
 coverage map binds all four `D7-CYCLE-SPEC-024` expected-test groups to named
 cases. These are protocol and offline validator evidence only.
 
+[`cycle-controller-activity-interruption.case.json`](conformance/cycle-controller-activity-interruption.case.json)
+freezes the 68-row H03A cancellation and attempt-timeout lattice described in
+section 13.4. Both native reporters execute every row and the conformance join
+compares their full reports without either implementation delegating execution
+to the other.
+
 The native implementations MUST pass the shared fixtures without one runtime
 delegating execution or number formatting to the other language.
 
@@ -1252,12 +1319,12 @@ payload boundary, and the four registry-named expected-test groups. Native
 execution is explicitly outside that task's artifact and test scope.
 
 The runtime/product boundary remains open under `D7-TS-CYCLES-025`,
-`D7-PY-CYCLES-026`, and `D7-CYCLE-CONFORMANCE-027`: public schedulers still
-execute immutable acyclic graphs, the TypeScript pattern package only
-statically unrolls a fixed loop, and no native controller, dynamic patch
-applier, durable store join, or executable cross-language reporter consumes
-this contract. Until those independent implementations pass the shared
-transition/recovery suite, documentation and CLI output MUST label bounded
-dynamic cycles and GraphPatch execution as unavailable. Accepting 024 therefore
-unblocks its native dependants but does not complete master-plan Day 7 or close
-release rows `T08`, `T15`, `T17`, `T18`, or `T21`.
+`D7-PY-CYCLES-026`, and `D7-CYCLE-CONFORMANCE-027`. Native standalone
+controllers, checked dynamic patch appliers, local event-store joins, and an
+executable cross-language reporter now consume this contract, but the complete
+fault, cancellation, corrupt-checkpoint, lineage, competing-lease, and
+independent-review acceptance set is unfinished. Documentation and CLI output
+MUST therefore label bounded dynamic cycles and GraphPatch execution as alpha
+and local-store capability, not unavailable and not production durable.
+Accepting 024 and the current alpha milestones does not complete master-plan
+Day 7 or close release rows `T08`, `T15`, `T17`, `T18`, or `T21`.
