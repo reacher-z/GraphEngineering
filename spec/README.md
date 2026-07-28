@@ -43,6 +43,14 @@ descriptor. Its 54-case native differential campaign covers append CAS,
 idempotency, snapshot pagination, disposable checkpoints, fencing, tenant
 authorization, governance, and migration exclusion without claiming that the
 memory oracle is durable.
+The SQLite operation-ledger v2 byte and replay protocol is fixed by
+[sqlite-operation-ledger-v2.md](sqlite-operation-ledger-v2.md). Its v1 source
+reconciliation boundary, FILE-backed TEMP requirements, stable `BLR_*` rules,
+safe diagnostics, and cursor-seal domains are fixed by
+[sqlite-baseline-reconciliation.md](sqlite-baseline-reconciliation.md) and the
+closed conformance registry under `conformance/`. These contracts retain
+`implementationClaim:false` until the native relation, cursor, migration,
+crash, replay, and exact-campaign gates are complete.
 These D7 schemas are protocol-frozen and consumed by the native TypeScript and
 Python standalone alpha controllers. Schema acceptance alone is not native or
 production evidence; executable conformance remains the capability gate. Their

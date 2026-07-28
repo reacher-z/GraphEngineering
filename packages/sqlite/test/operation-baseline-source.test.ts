@@ -96,6 +96,13 @@ describe("SQLite v1 baseline source summary", () => {
       expect(() => captureSQLiteV1BaselineSourceSummary(connection, APPLIED_AT_MS)).toThrow(
         CycleStoreProviderError,
       );
+      for (const begin of ["BEGIN", "BEGIN IMMEDIATE"] as const) {
+        connection.execTrusted(begin, "inspect-schema");
+        expect(() => captureSQLiteV1BaselineSourceSummary(connection, APPLIED_AT_MS)).toThrow(
+          /active EXCLUSIVE transaction/u,
+        );
+        connection.execTrusted("ROLLBACK", "inspect-schema");
+      }
       connection.execTrusted("BEGIN EXCLUSIVE", "inspect-schema");
       expect(() => captureSQLiteV1BaselineSourceSummary(connection, APPLIED_AT_MS - 1)).toThrow(
         CycleStoreProviderError,
@@ -204,6 +211,23 @@ describe("SQLite v1 baseline source summary", () => {
       expect(() => [...summary.entries()]).toThrow(/captured transaction changed/u);
       connection.execTrusted("ROLLBACK", "inspect-schema");
     } finally {
+      connection.close();
+    }
+  });
+
+  it("rejects prepared TEMP DDL after capture even when total_changes is unchanged", () => {
+    const connection = opened();
+    try {
+      connection.execTrusted("BEGIN EXCLUSIVE", "inspect-schema");
+      const summary = captureSQLiteV1BaselineSourceSummary(connection, APPLIED_AT_MS);
+      connection.prepare(
+        "CREATE TEMP TABLE hostile_stage(value INTEGER)",
+        "inspect-schema",
+      ).run();
+      expect(() => [...summary.entries()]).toThrow(/captured transaction changed/u);
+      connection.execTrusted("ROLLBACK", "inspect-schema");
+    } finally {
+      if (connection.isTransaction) connection.execTrusted("ROLLBACK", "inspect-schema");
       connection.close();
     }
   });

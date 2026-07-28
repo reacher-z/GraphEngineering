@@ -35,6 +35,7 @@ export interface SQLiteConnectionOptions {
 }
 
 export type SQLiteWalCheckpointMode = "PASSIVE" | "FULL" | "RESTART" | "TRUNCATE";
+export type SQLiteTransactionMode = "deferred" | "immediate" | "exclusive" | "unknown";
 
 export interface SQLiteWalCheckpointReport {
   readonly mode: SQLiteWalCheckpointMode;
@@ -136,6 +137,67 @@ function firstSQLiteToken(sql: string): string {
   return /^[A-Za-z]+/u.exec(sql.slice(offset))?.[0]?.toUpperCase() ?? "";
 }
 
+function withoutEmptySQLitePrefix(sql: string): string {
+  return sql.replace(
+    /^(?:(?:\s|;)+|--[^\n]*(?:\n|$)|\/\*[\s\S]*?\*\/)+/u,
+    "",
+  );
+}
+
+function beginTransactionMode(sql: string): SQLiteTransactionMode {
+  const withoutPrefix = withoutEmptySQLitePrefix(sql).replace(
+    /--[^\n]*(?:\n|$)|\/\*[\s\S]*?\*\//gu,
+    " ",
+  );
+  const match = /^BEGIN(?:\s+(DEFERRED|IMMEDIATE|EXCLUSIVE))?(?:\s+TRANSACTION)?\s*;?\s*$/iu
+    .exec(withoutPrefix);
+  if (match === null) return "unknown";
+  const mode = match[1]?.toLowerCase();
+  return mode === "immediate" || mode === "exclusive" ? mode : "deferred";
+}
+
+const PREPARED_OWNER_MUTATION_TOKENS = new Set([
+  "ALTER", "ANALYZE", "ATTACH", "CREATE", "DETACH", "DROP", "PRAGMA",
+  "REINDEX", "VACUUM",
+]);
+
+function preparedStatementMayMutateOwnerState(sql: string): boolean {
+  return PREPARED_OWNER_MUTATION_TOKENS.has(firstSQLiteToken(sql));
+}
+
+function ownerControlMayReplaceTransaction(sql: string, token: string): boolean {
+  if (token === "SAVEPOINT" || token === "RELEASE") return false;
+  if (token === "ROLLBACK") {
+    const normalized = withoutEmptySQLitePrefix(sql).replace(
+      /--[^\n]*(?:\n|$)|\/\*[\s\S]*?\*\//gu,
+      " ",
+    );
+    if (/^ROLLBACK(?:\s+TRANSACTION)?\s+TO(?:\s+SAVEPOINT)?\b/iu.test(normalized)) {
+      return false;
+    }
+  }
+  return ["BEGIN", "COMMIT", "END", "ROLLBACK"].includes(token);
+}
+
+function isForbiddenTempDirectoryPragma(sql: string): boolean {
+  const withoutPrefix = withoutEmptySQLitePrefix(sql);
+  // Reject every schema qualifier, quoted spelling, and multi-statement route.
+  // False positives inside a trusted PRAGMA value are acceptable because this
+  // deprecated global-directory control is never needed by the provider.
+  return /\bPRAGMA\b[\s\S]*\btemp_store_directory\b/iu.test(withoutPrefix);
+}
+
+function mayContainAdditionalStatement(sql: string): boolean {
+  const withoutPrefix = withoutEmptySQLitePrefix(sql).trimEnd();
+  const withoutOneTerminator = withoutPrefix.endsWith(";")
+    ? withoutPrefix.slice(0, -1).trimEnd()
+    : withoutPrefix;
+  // This is intentionally conservative: a semicolon in a quoted literal may
+  // discard an EXCLUSIVE proof, but can never create one. Trusted DDL needed
+  // during reconciliation is issued as one statement at a time.
+  return withoutOneTerminator.includes(";");
+}
+
 /** One hardened, synchronous, file-backed SQLite connection. */
 export class SQLiteConnection {
   readonly #database: DatabaseSync;
@@ -145,6 +207,7 @@ export class SQLiteConnection {
   readonly #maxBusyElapsedMs: number;
   #closed = false;
   #transactionEpoch = 0n;
+  #transactionMode: SQLiteTransactionMode | null = null;
 
   constructor(path: string, options: SQLiteConnectionOptions = {}) {
     this.#path = checkedPath(path);
@@ -214,6 +277,13 @@ export class SQLiteConnection {
   get transactionEpoch(): bigint {
     this.#assertOpen("inspect-schema");
     return this.#transactionEpoch;
+  }
+
+  /** Owner-observed mode for the active transaction, or null in autocommit. */
+  get transactionMode(): SQLiteTransactionMode | null {
+    this.#assertOpen("inspect-schema");
+    if (!this.#database.isTransaction) return null;
+    return this.#transactionMode ?? "unknown";
   }
 
   get location(): string {
@@ -296,6 +366,13 @@ export class SQLiteConnection {
 
   prepare(sql: string, operation: CycleStoreProviderOperation): StatementSync {
     this.#assertOpen(operation);
+    if (isForbiddenTempDirectoryPragma(sql)) {
+      throw new CycleStoreProviderError(
+        "GE_CYCLE_STORE_INVALID_ARGUMENT",
+        operation,
+        "SQLite temp_store_directory is forbidden",
+      );
+    }
     if (["BEGIN", "COMMIT", "END", "ROLLBACK", "SAVEPOINT", "RELEASE"].includes(
       firstSQLiteToken(sql),
     )) {
@@ -306,19 +383,59 @@ export class SQLiteConnection {
       );
     }
     try {
-      return hardenSQLiteStatement(this.#database.prepare(sql));
+      const statement = hardenSQLiteStatement(this.#database.prepare(sql));
+      return preparedStatementMayMutateOwnerState(sql)
+        ? this.#epochTrackedStatement(statement)
+        : statement;
     } catch (error) {
       throw translateSQLiteError(error, operation);
     }
   }
 
+  #epochTrackedStatement(statement: StatementSync): StatementSync {
+    const executionMethods = new Set<PropertyKey>(["all", "get", "iterate", "run"]);
+    return new Proxy(statement, {
+      get: (target, property) => {
+        const value = Reflect.get(target, property, target) as unknown;
+        if (typeof value !== "function") return value;
+        if (!executionMethods.has(property)) return value.bind(target) as unknown;
+        return (...parameters: unknown[]): unknown => {
+          this.#transactionEpoch += 1n;
+          return Reflect.apply(value, target, parameters);
+        };
+      },
+    }) as StatementSync;
+  }
+
   execTrusted(sql: string, operation: CycleStoreProviderOperation): void {
     this.#assertOpen(operation);
+    if (isForbiddenTempDirectoryPragma(sql)) {
+      throw new CycleStoreProviderError(
+        "GE_CYCLE_STORE_INVALID_ARGUMENT",
+        operation,
+        "SQLite temp_store_directory is forbidden",
+      );
+    }
+    const before = this.#database.isTransaction;
+    const token = firstSQLiteToken(sql);
     this.#transactionEpoch += 1n;
     try {
       this.#database.exec(sql);
     } catch (error) {
+      this.#transactionMode = this.#database.isTransaction ? "unknown" : null;
       throw translateSQLiteError(error, operation);
+    }
+    const after = this.#database.isTransaction;
+    if (!after) {
+      this.#transactionMode = null;
+    } else if (!before) {
+      this.#transactionMode = token === "BEGIN" ? beginTransactionMode(sql) : "unknown";
+    } else if (ownerControlMayReplaceTransaction(sql, token)
+        || mayContainAdditionalStatement(sql)) {
+      // A trusted script may end one transaction and open another while both
+      // the pre/post states are `isTransaction=true`. Never carry the old mode
+      // proof across that ambiguous generation boundary.
+      this.#transactionMode = "unknown";
     }
   }
 
@@ -339,6 +456,7 @@ export class SQLiteConnection {
       try {
         this.#database.exec("BEGIN IMMEDIATE");
         this.#transactionEpoch += 1n;
+        this.#transactionMode = "immediate";
         const result = action();
         if ((typeof result === "object" && result !== null && "then" in result)
             || (typeof result === "function" && "then" in result)) {
@@ -350,16 +468,22 @@ export class SQLiteConnection {
         }
         this.#database.exec("COMMIT");
         this.#transactionEpoch += 1n;
+        this.#transactionMode = null;
         return result;
       } catch (error) {
         if (this.#database.isTransaction) {
           try {
             this.#database.exec("ROLLBACK");
             this.#transactionEpoch += 1n;
+            this.#transactionMode = null;
           } catch {
             // The original safe error remains authoritative. A subsequent use
             // will fail its invariant checks if rollback did not restore state.
           }
+        } else {
+          // COMMIT may have completed before a lower-level error surfaced. Do
+          // not retain an owner proof once SQLite has returned to autocommit.
+          this.#transactionMode = null;
         }
         if (isRetryableSQLiteLockError(error)
             && attempt < this.#maxBusyAttempts
@@ -387,6 +511,7 @@ export class SQLiteConnection {
   close(): void {
     if (this.#closed) return;
     this.#closed = true;
+    this.#transactionMode = null;
     if (this.#database.isOpen) this.#database.close();
   }
 

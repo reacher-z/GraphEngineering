@@ -8,7 +8,7 @@ import sqlite3
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import cast
+from typing import Literal, cast
 
 from .canonical import canonical_bytes, canonical_sha256
 from .cycle_store_provider import CycleStoreProviderOperation, cycle_store_adapter_codec
@@ -35,35 +35,75 @@ class _IdentityIterationState:
 
 
 _TRANSACTION_TOKENS = frozenset({"BEGIN", "COMMIT", "END", "ROLLBACK", "SAVEPOINT", "RELEASE"})
+_EPOCH_MUTATING_TOKENS = _TRANSACTION_TOKENS | frozenset(
+    {
+        "ALTER",
+        "ANALYZE",
+        "ATTACH",
+        "CREATE",
+        "DETACH",
+        "DROP",
+        "PRAGMA",
+        "REINDEX",
+        "VACUUM",
+    }
+)
+SQLiteTransactionMode = Literal["deferred", "immediate", "exclusive", "unknown"]
+
+
+def _forbidden_temp_store_directory(sql: str) -> bool:
+    lowered = sql.lower()
+    # Conservative by design: this internal owner never needs the deprecated
+    # global directory PRAGMA, including in quoted/commented/script spellings.
+    return "pragma" in lowered and "temp_store_directory" in lowered
 
 
 def _first_sqlite_token(sql: str) -> str:
+    tokens = _leading_sqlite_tokens(sql, 1)
+    return tokens[0] if tokens else ""
+
+
+def _leading_sqlite_tokens(sql: str, limit: int) -> tuple[str, ...]:
     offset = 0
-    while offset < len(sql):
-        if sql[offset] == ";":
+    tokens: list[str] = []
+    while offset < len(sql) and len(tokens) < limit:
+        while offset < len(sql):
+            if sql[offset] == ";" and not tokens:
+                offset += 1
+                continue
+            if sql[offset].isspace():
+                offset += 1
+                continue
+            if sql.startswith("--", offset):
+                newline = sql.find("\n", offset + 2)
+                if newline < 0:
+                    return tuple(tokens)
+                offset = newline + 1
+                continue
+            if sql.startswith("/*", offset):
+                close = sql.find("*/", offset + 2)
+                if close < 0:
+                    return tuple(tokens)
+                offset = close + 2
+                continue
+            break
+        token: list[str] = []
+        while offset < len(sql) and sql[offset].isascii() and sql[offset].isalpha():
+            token.append(sql[offset])
             offset += 1
-            continue
-        if sql[offset].isspace():
-            offset += 1
-            continue
-        if sql.startswith("--", offset):
-            newline = sql.find("\n", offset + 2)
-            if newline < 0:
-                return ""
-            offset = newline + 1
-            continue
-        if sql.startswith("/*", offset):
-            close = sql.find("*/", offset + 2)
-            if close < 0:
-                return ""
-            offset = close + 2
-            continue
-        break
-    token: list[str] = []
-    while offset < len(sql) and sql[offset].isascii() and sql[offset].isalpha():
-        token.append(sql[offset])
-        offset += 1
-    return "".join(token).upper()
+        if not token:
+            break
+        tokens.append("".join(token).upper())
+    return tuple(tokens)
+
+
+def _begin_transaction_mode(sql: str) -> SQLiteTransactionMode:
+    tokens = _leading_sqlite_tokens(sql, 2)
+    if not tokens or tokens[0] != "BEGIN":
+        return "unknown"
+    if len(tokens) > 1 and tokens[1] in {"DEFERRED", "IMMEDIATE", "EXCLUSIVE"}:
+        return cast(SQLiteTransactionMode, tokens[1].lower())
+    return "deferred"
 
 
 class _SQLiteCursorCapability:
@@ -88,13 +128,14 @@ class _SQLiteCursorCapability:
 class SQLiteV1BaselineConnectionOwner:
     """Exclusive connection capability with an opaque transaction epoch."""
 
-    __slots__ = ("__connection", "__transaction_epoch")
+    __slots__ = ("__connection", "__transaction_epoch", "__transaction_mode")
 
     def __init__(self, location: str) -> None:
         if type(location) is not str or not location:
             raise TypeError("baseline owner requires one SQLite location")
         self.__connection = sqlite3.connect(location)
         self.__transaction_epoch = 0
+        self.__transaction_mode: SQLiteTransactionMode | None = None
 
     @property
     def in_transaction(self) -> bool:
@@ -108,32 +149,59 @@ class SQLiteV1BaselineConnectionOwner:
     def transaction_epoch(self) -> int:
         return self.__transaction_epoch
 
+    @property
+    def transaction_mode(self) -> SQLiteTransactionMode | None:
+        """Return the conservatively observed mode of the active transaction."""
+
+        return self.__transaction_mode if self.__connection.in_transaction else None
+
+    @property
+    def in_exclusive_transaction(self) -> bool:
+        """Whether the owner can prove that its current transaction is EXCLUSIVE."""
+
+        return self.__connection.in_transaction and self.__transaction_mode == "exclusive"
+
     def execute(
         self,
         sql: str,
         parameters: tuple[object, ...] = (),
     ) -> _SQLiteCursorCapability:
+        if _forbidden_temp_store_directory(sql):
+            raise ValueError("SQLite temp_store_directory is forbidden")
         before = self.__connection.in_transaction
         token = _first_sqlite_token(sql)
         cursor = self.__connection.execute(sql, parameters)
-        if token in _TRANSACTION_TOKENS or before != self.__connection.in_transaction:
+        after = self.__connection.in_transaction
+        if not after:
+            self.__transaction_mode = None
+        elif not before:
+            self.__transaction_mode = (
+                _begin_transaction_mode(sql) if token == "BEGIN" else "deferred"
+            )
+        elif self.__transaction_mode is None:
+            self.__transaction_mode = "unknown"
+        if token in _EPOCH_MUTATING_TOKENS or before != after:
             self.__transaction_epoch += 1
         return _SQLiteCursorCapability(cursor)
 
     def executescript(self, sql: str) -> None:
-        before = self.__connection.in_transaction
-        self.__connection.executescript(sql)
-        if before != self.__connection.in_transaction or any(
-            token in sql.upper() for token in _TRANSACTION_TOKENS
-        ):
+        if _forbidden_temp_store_directory(sql):
+            raise ValueError("SQLite temp_store_directory is forbidden")
+        try:
+            self.__connection.executescript(sql)
+        finally:
+            after = self.__connection.in_transaction
+            self.__transaction_mode = "unknown" if after else None
             self.__transaction_epoch += 1
 
     def commit(self) -> None:
         self.__connection.commit()
+        self.__transaction_mode = None
         self.__transaction_epoch += 1
 
     def rollback(self) -> None:
         self.__connection.rollback()
+        self.__transaction_mode = None
         self.__transaction_epoch += 1
 
     def close(self) -> None:
@@ -274,8 +342,8 @@ class SQLiteV1BaselineSourceSummary:
                 raise ValueError(f"SQLite v1 baseline {kind} count changed during capture")
 
     def _assert_capture_transaction(self) -> None:
-        if not self._connection.in_transaction:
-            raise ValueError("SQLite v1 baseline requires the captured transaction")
+        if not self._connection.in_exclusive_transaction:
+            raise ValueError("SQLite v1 baseline requires the captured EXCLUSIVE transaction")
         if (
             self._connection.transaction_epoch != self._captured_transaction_epoch
             or self._connection.total_changes != self._source_total_changes
@@ -868,8 +936,8 @@ def capture_sqlite_v1_baseline_source_summary(
 ) -> SQLiteV1BaselineSourceSummary:
     """Capture source identity and exact family counts without ending the transaction."""
 
-    if not connection.in_transaction:
-        raise ValueError("SQLite v1 baseline capture requires an active transaction")
+    if not connection.in_exclusive_transaction:
+        raise ValueError("SQLite v1 baseline capture requires an active EXCLUSIVE transaction")
     captured = _integer(captured_at_ms, "capture time")
     application_row = connection.execute("PRAGMA application_id").fetchone()
     if application_row is None or _integer(application_row[0], "application ID") != 1_195_724_359:

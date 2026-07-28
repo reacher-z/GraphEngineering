@@ -8377,3 +8377,106 @@ SIGKILL, request bytes, sequence CAS, deterministic replay, bidirectional
 physical reconciliation, backup/restore identity, exact 96 implementation
 evidence, artifact installation, and active-manifest switching remain separate
 subsequent gates.
+
+### 31.34.18 Reconciliation registry and owner/TEMP preparation checkpoint
+
+The first §31.34.17 implementation slice is now protocol-backed in both native
+runtimes without creating a relation table or executing 0002.
+
+The cross-language reconciliation registry freezes 53 ordered `BLR_*` IDs and
+their phases, the twelve baseline kind ranks, an executable three-field safe
+diagnostic envelope, FILE-backed TEMP defaults and bounds, and the preliminary
+cursor-seal domains and immutable field inventory. Registry status is
+`registry-frozen`, not complete cursor protocol. `implementationClaim`,
+`releaseGate`, `productionThroughputClaim`, and `cursorSeal.protocolClaim` are
+all false. The empty cursor root remains explicitly deferred until independent
+TypeScript and Python derivations agree.
+
+Diagnostic validation is executable rather than declarative. A diagnostic has
+exactly `ruleId`, `violationCount`, and `diagnosticsTruncated`; the rule must be
+registered; the configured limit is a safe integer from 1 through 64; emitted
+count equals `min(actualViolationCount, configuredLimit)`; truncation is true
+if and only if actual count exceeds the configured limit. Unknown fields,
+tenant/payload fields, wrong scalar types, negative counts, false truncation,
+rule omission/duplication/reordering, phase drift, domain drift, memory TEMP,
+and accidental release claims are hostile-test failures.
+
+Both owners now distinguish deferred, immediate, exclusive, and unknown
+transaction modes. Baseline source capture and every iterator boundary require
+an owner-observed EXCLUSIVE transaction. A multi-statement commit/rebegin swap,
+including a swap followed by a failing statement, cannot carry an old
+EXCLUSIVE proof. TypeScript transaction scripts conservatively discard mode
+when transaction control or an additional statement makes generation
+ambiguous. Python `executescript` always advances the epoch and reports an
+active result as unknown. Savepoint-only transactions never acquire an
+EXCLUSIVE proof.
+
+`temp_store_directory` is rejected before execution by both owners, including
+unqualified, `main.`/`temp.` qualified, quoted, bracketed, commented,
+case-varied, prefixed-semicolon, and later-statement spellings. False-positive
+denial is permitted because the provider never needs this deprecated global
+directory control. TEMP configuration occurs only in autocommit and reads back:
+
+- `temp_store=FILE`;
+- negative KiB `temp.cache_size`, default 8,192 and bounded 1,024..65,536; and
+- unqualified `cache_spill=ON` with nonzero readback.
+
+TypeScript exposes an internal frozen EXCLUSIVE proof containing mode and
+transaction epoch. Python exposes the same conservative owner state. Neither
+stage module is publicly exported and neither accepts a directory path.
+
+The public source iterator retains its no-write contract. TypeScript already
+advances the epoch for every trusted execution. Python now advances its epoch
+for transaction control plus `ALTER`, `ANALYZE`, `ATTACH`, `CREATE`, `DETACH`,
+`DROP`, `PRAGMA`, `REINDEX`, and `VACUUM`; DML remains independently caught by
+`total_changes`. Hostile tests prove that capture followed by TEMP DDL, whole-
+database `ANALYZE`, or table-specific `ANALYZE` cannot stream entries. The
+future private reconciler must replace this blanket rule with an exact
+allowlisted TEMP-write delta; it must not weaken this public iterator.
+
+Hostile review found and closed two TypeScript HIGH issues: EXCLUSIVE mode
+survived a transaction swap, and directory PRAGMA filtering inspected only an
+insufficient prefix. It also found and closed Python protocol drift in the
+cache default/bounds, a directory PRAGMA bypass, missing cache selection,
+qualified spill readback, and unexplained DDL/ANALYZE writes. Registry review
+closed phase, actual-diagnostic, and cursor non-claim gaps. The remaining
+Python raw sqlite exception surface is internal and LOW; relation code must
+continue to collapse tenant-controlled failures into the safe `BLR_*`
+envelope before exposure.
+
+Current checkpoint evidence is TypeScript SQLite 15 files / 128 tests plus
+typecheck, lint, and build; reconciliation registry 5 tests; complete SQLite
+ledger-contract command 19 tests; 286 documentation links; Python focused
+source/stage 46 tests plus Ruff and strict MyPy. The last complete Python run
+before the two added `ANALYZE` parameter cases was 1,211 passes; a final full
+run is required before this slice is published.
+
+The next implementation slice is the common STRICT/WITHOUT ROWID TEMP stage,
+twelve normalized relation DDL definitions, exact module-private write deltas,
+bidirectional stage/relation key coverage, deterministic disposal, and no-
+collection tests. Relational anti-joins, cursor-chain roots, 100K evidence,
+0002, publication, crash recovery, replay, and the 96-case implementation
+switch remain open.
+
+### 31.34.19 Owner write-fence and final-evidence correction
+
+The final cross-language review found that a prepared TypeScript DDL statement
+could bypass the owner epoch even though trusted scripts and Python were
+closed. `SQLiteConnection.prepare` now wraps every prepared schema/PRAGMA
+statement and advances the owner epoch before `all`, `get`, `iterate`, or
+`run`. A capture followed by prepared `CREATE TEMP TABLE` therefore fails the
+same transaction-change guard as trusted DDL. TEMP profile readback now also
+rejects any active TypeScript transaction, matching Python and the registry.
+
+The owner parser now accepts valid inline/trailing comments in
+`BEGIN EXCLUSIVE`. Single SAVEPOINT, `ROLLBACK TO`, and RELEASE preserve the
+outer EXCLUSIVE mode while advancing the epoch, so an old proof is invalid but
+a new proof correctly describes the unchanged outer transaction. Ambiguous
+multi-statement control still degrades to unknown.
+
+Final evidence superseding the pending counts in §31.34.18 is TypeScript
+SQLite 15 files / 129 tests plus typecheck, lint, and build; Python 1,213 full
+tests, 46 focused source/stage tests, Ruff, and strict MyPy; reconciliation
+registry 5 tests; full SQLite ledger-contract 19 tests; and 286 documentation
+links. `git diff --check` is clean. This correction changes no relation,
+cursor-root, migration, release, or popularity claim.

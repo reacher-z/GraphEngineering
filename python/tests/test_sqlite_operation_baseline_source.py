@@ -1066,8 +1066,16 @@ def test_capture_rejects_pragma_or_frozen_source_anchor_drift(tamper: str) -> No
 def test_requires_transaction_and_rejects_capture_or_clock_drift() -> None:
     connection = database()
     try:
-        with pytest.raises(ValueError, match="active transaction"):
+        with pytest.raises(ValueError, match="active EXCLUSIVE transaction"):
             capture_sqlite_v1_baseline_source_summary(connection, captured_at_ms=NOW)
+        connection.execute("BEGIN")
+        with pytest.raises(ValueError, match="active EXCLUSIVE transaction"):
+            capture_sqlite_v1_baseline_source_summary(connection, captured_at_ms=NOW)
+        connection.rollback()
+        connection.execute("BEGIN IMMEDIATE")
+        with pytest.raises(ValueError, match="active EXCLUSIVE transaction"):
+            capture_sqlite_v1_baseline_source_summary(connection, captured_at_ms=NOW)
+        connection.rollback()
         connection.execute("BEGIN EXCLUSIVE")
         with pytest.raises(ValueError, match="capture predates"):
             capture_sqlite_v1_baseline_source_summary(connection, captured_at_ms=NOW - 1)
@@ -1076,5 +1084,28 @@ def test_requires_transaction_and_rejects_capture_or_clock_drift() -> None:
         )
         with pytest.raises(ValueError, match="high-water predates"):
             capture_sqlite_v1_baseline_source_summary(connection, captured_at_ms=NOW + 2)
+    finally:
+        connection.close()
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "CREATE TEMP TABLE hostile_stage(value INTEGER)",
+        "ANALYZE",
+        "ANALYZE ge_cycle_records",
+    ],
+)
+def test_capture_rejects_unexplained_schema_write_after_summary(mutation: str) -> None:
+    connection = database()
+    try:
+        connection.execute("BEGIN EXCLUSIVE")
+        summary = capture_sqlite_v1_baseline_source_summary(
+            connection,
+            captured_at_ms=NOW,
+        )
+        connection.execute(mutation).close()
+        with pytest.raises(ValueError, match="captured transaction changed"):
+            tuple(summary.iter_identity_entries())
     finally:
         connection.close()

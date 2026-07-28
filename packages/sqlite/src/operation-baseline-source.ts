@@ -220,8 +220,8 @@ function requireCaptureTransaction(
   connection: SQLiteConnection,
   guard: SQLiteV1BaselineTransactionGuard,
 ): void {
-  if (!connection.isTransaction) {
-    return fail("SQLite v1 baseline iteration requires the captured transaction");
+  if (!connection.isTransaction || connection.transactionMode !== "exclusive") {
+    return fail("SQLite v1 baseline iteration requires the captured EXCLUSIVE transaction");
   }
   if (connection.transactionEpoch !== guard.transactionEpoch
       || totalChanges(connection) !== guard.totalChanges) {
@@ -776,7 +776,9 @@ export function captureSQLiteV1BaselineSourceSummary(
   connection: SQLiteConnection,
   capturedAtMs: number,
 ): SQLiteV1BaselineSourceSummary {
-  if (!connection.isTransaction) return fail("SQLite v1 baseline capture requires an active transaction");
+  if (!connection.isTransaction || connection.transactionMode !== "exclusive") {
+    return fail("SQLite v1 baseline capture requires an active EXCLUSIVE transaction");
+  }
   const captured = capturedAt(capturedAtMs);
   const applicationId = sqliteSafeInteger(
     sqliteRow(connection.prepare("PRAGMA application_id", OPERATION).get(), 1, OPERATION, "application ID")[0],
