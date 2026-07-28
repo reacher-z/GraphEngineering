@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/sqlite-cycle-store-backup-manifest.schema.json",
+  "title": "Graph Engineering SQLite CycleStore backup manifest",
+  "description": "Closed, content-addressed identity for one semantically audited SQLite online backup. Runtime validation additionally recomputes manifestSha256 with the graph-engineering/sqlite-cycle-store-backup-manifest/v1 domain.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "formatVersion",
+    "hashAlgorithm",
+    "file",
+    "provider",
+    "semantic",
+    "manifestSha256"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "graphengineering.reacher-z.github.io/sqlite-cycle-store-backup-manifests/v1alpha1"
+    },
+    "kind": { "const": "SQLiteCycleStoreBackupManifest" },
+    "formatVersion": { "const": 1 },
+    "hashAlgorithm": { "const": "sha256" },
+    "file": { "$ref": "#/$defs/file" },
+    "provider": { "$ref": "#/$defs/provider" },
+    "semantic": { "$ref": "#/$defs/semantic" },
+    "manifestSha256": { "$ref": "#/$defs/hash" }
+  },
+  "$defs": {
+    "hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "count": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bytes", "sha256"],
+      "properties": {
+        "bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "sha256": { "$ref": "#/$defs/hash" }
+      }
+    },
+    "provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "applicationId",
+        "schemaVersion",
+        "schemaIdentitySha256",
+        "descriptorHash",
+        "catalogSha256",
+        "lineageId",
+        "lineageSha256"
+      ],
+      "properties": {
+        "applicationId": { "const": 1195724359 },
+        "schemaVersion": { "const": 1 },
+        "schemaIdentitySha256": {
+          "const": "f3d961d4d96e93a7fab13a91b374c27ff877a93332ff7ed7426f1fff982baff4"
+        },
+        "descriptorHash": {
+          "const": "4071e4e5e2cddad01af4f87e4df45fa55bbc4e238674174ce40eca765d2c03fe"
+        },
+        "catalogSha256": {
+          "const": "8fab5049e2c9de5d114abc0c682934f1bc6fb5abd2e4c2e3ae55ef329c3e7264"
+        },
+        "lineageId": {
+          "enum": ["fresh-v1-baseline", "alpha-v0-to-v1"]
+        },
+        "lineageSha256": { "$ref": "#/$defs/hash" }
+      }
+    },
+    "semantic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sha256", "counters"],
+      "properties": {
+        "sha256": { "$ref": "#/$defs/hash" },
+        "counters": { "$ref": "#/$defs/counters" }
+      }
+    },
+    "counters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "streams",
+        "records",
+        "operations",
+        "checkpoints",
+        "checkpointRevisions",
+        "leases",
+        "usedLeaseIds",
+        "legalHolds",
+        "cursors",
+        "openCursors",
+        "usedMigrationLockIds"
+      ],
+      "properties": {
+        "streams": { "$ref": "#/$defs/count" },
+        "records": { "$ref": "#/$defs/count" },
+        "operations": { "$ref": "#/$defs/count" },
+        "checkpoints": { "$ref": "#/$defs/count" },
+        "checkpointRevisions": { "$ref": "#/$defs/count" },
+        "leases": { "$ref": "#/$defs/count" },
+        "usedLeaseIds": { "$ref": "#/$defs/count" },
+        "legalHolds": { "$ref": "#/$defs/count" },
+        "cursors": { "$ref": "#/$defs/count" },
+        "openCursors": { "$ref": "#/$defs/count" },
+        "usedMigrationLockIds": { "$ref": "#/$defs/count" }
+      }
+    }
+  }
+}

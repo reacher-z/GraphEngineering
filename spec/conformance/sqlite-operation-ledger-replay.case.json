@@ -1,0 +1,686 @@
+{
+  "schemaVersion": 1,
+  "id": "sqlite-operation-ledger-replay-v1",
+  "status": "contract-frozen",
+  "expect": {
+    "caseCount": 96,
+    "behaviorCaseCount": 48,
+    "attackCaseCount": 48,
+    "casesCanonicalUtf8Bytes": 81996,
+    "casesSha256": "0e6b481368c774ac870b593bd8f86af1b97d0bdc6ab0df23c82f1d88d4a30f38"
+  },
+  "cases": [
+    {
+      "id": "OL-R01", "category": "behavior", "slug": "ts-all-request-vectors", "title": "TypeScript All Request Vectors",
+      "objective": "TypeScript encodes all nine canonical mutation requests and matches every frozen fixture byte string and SHA-256 identity.",
+      "minimumAssertions": ["All nine operation names appear once in canonical order.", "Every emitted request byte string and request hash equals the frozen vector."],
+      "runtimeRequirements": ["typescript-native"],
+      "expected": {"outcome": "accepted", "typedResult": "canonical-request-vector-set", "typedFailures": [], "requiresZeroUnintendedMutation": false, "requiresExactTransactionCleanup": false, "requiresLeakSentinelScan": true, "barrier": "none"}
+    },
+    {
+      "id": "OL-R02", "category": "behavior", "slug": "python-all-request-vectors", "title": "Python All Request Vectors",
+      "objective": "Python encodes all nine canonical mutation requests to byte-identical fixture vectors and SHA-256 identities.",
+      "minimumAssertions": ["All nine Python request encodings are present in canonical order.", "Every Python byte string and hash exactly equals its TypeScript-independent frozen vector."],
+      "runtimeRequirements": ["python-native"],
+      "expected": {"outcome": "accepted", "typedResult": "canonical-request-vector-set", "typedFailures": [], "requiresZeroUnintendedMutation": false, "requiresExactTransactionCleanup": false, "requiresLeakSentinelScan": true, "barrier": "none"}
+    },
+    {
+      "id": "OL-R03", "category": "behavior", "slug": "decode-encode-roundtrip", "title": "Decode Encode Round Trip",
+      "objective": "Both runtimes decode and re-encode every canonical request without changing one byte or its identity hash.",
+      "minimumAssertions": ["Each runtime accepts all nine closed request shapes.", "Decode followed by encode returns the exact original canonical bytes and hashes."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact"],
+      "expected": {"outcome": "accepted", "typedResult": "canonical-request-roundtrip", "typedFailures": [], "requiresZeroUnintendedMutation": false, "requiresExactTransactionCleanup": false, "requiresLeakSentinelScan": true, "barrier": "none"}
+    },
+    {
+      "id": "OL-R04", "category": "behavior", "slug": "legal-boundary-request-sizes", "title": "Legal Boundary Request Sizes",
+      "objective": "Exact maximum identifiers, value carriers, and the 64-record append remain accepted within every declared bound.",
+      "minimumAssertions": ["Every exact upper-bound carrier is accepted by both native codecs.", "The maximum append contains exactly 64 records and remains within canonical byte bounds."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact"],
+      "expected": {"outcome": "accepted", "typedResult": "canonical-request-boundary-report", "typedFailures": [], "requiresZeroUnintendedMutation": false, "requiresExactTransactionCleanup": false, "requiresLeakSentinelScan": true, "barrier": "none"}
+    },
+    {
+      "id": "OL-R05", "category": "behavior", "slug": "exact-retry-request-identity", "title": "Exact Retry Request Identity",
+      "objective": "An exact operation retry after close and reopen matches stored request and result bytes without allocating a new sequence.",
+      "minimumAssertions": ["The retried result is byte-identical to the first committed result.", "Ledger row count, maximum sequence, and singleton last sequence do not advance."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "accepted", "typedResult": "canonical-idempotent-result", "typedFailures": [], "requiresZeroUnintendedMutation": false, "requiresExactTransactionCleanup": false, "requiresLeakSentinelScan": true, "barrier": "none"}
+    },
+    {
+      "id": "OL-R06", "category": "behavior", "slug": "captured-before-authorization", "title": "Captured Before Authorization",
+      "objective": "Caller mutation before and after the authorization await cannot alter the detached canonical request stored by the provider.",
+      "minimumAssertions": ["The provider captures a detached request before invoking authorization.", "Mutating every caller-owned carrier around the await leaves stored request bytes unchanged."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path", "fault-injection"],
+      "expected": {"outcome": "accepted", "typedResult": "canonical-capture-report", "typedFailures": [], "requiresZeroUnintendedMutation": false, "requiresExactTransactionCleanup": false, "requiresLeakSentinelScan": true, "barrier": "authorization-await"}
+    },
+    {
+      "id": "OL-R07", "category": "attack", "slug": "invalid-request-utf8", "title": "Invalid Request UTF-8",
+      "objective": "A malformed UTF-8 request BLOB is rejected as corruption without disclosing hostile payload bytes.",
+      "minimumAssertions": ["Semantic audit rejects the first invalid UTF-8 byte sequence.", "Records, ledger, sequence singleton, and transaction state remain unchanged."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "rejected", "typedResult": null, "typedFailures": [{"name": "CycleStoreProviderError", "code": "GE_CYCLE_STORE_CORRUPTION", "operation": "inspect-schema", "retryable": false}], "requiresZeroUnintendedMutation": true, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "none"}
+    },
+    {
+      "id": "OL-R08", "category": "attack", "slug": "noncanonical-request-json", "title": "Noncanonical Request JSON",
+      "objective": "Valid JSON with noncanonical key order, escaping, or insignificant syntax is rejected by exact byte round-trip validation.",
+      "minimumAssertions": ["Decoded content equivalence cannot excuse byte-level noncanonical JSON.", "Audit rejects each order and escaping mutation without repairing the database."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "rejected", "typedResult": null, "typedFailures": [{"name": "CycleStoreProviderError", "code": "GE_CYCLE_STORE_CORRUPTION", "operation": "inspect-schema", "retryable": false}], "requiresZeroUnintendedMutation": true, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "none"}
+    },
+    {
+      "id": "OL-R09", "category": "attack", "slug": "request-shape-drift", "title": "Request Shape Drift",
+      "objective": "Missing required fields and unknown fields are rejected under the closed operation-specific request codec.",
+      "minimumAssertions": ["Every operation codec rejects a representative missing required field.", "Every operation codec rejects an unknown field and persists no normalized substitute."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "rejected", "typedResult": null, "typedFailures": [{"name": "CycleStoreProviderError", "code": "GE_CYCLE_STORE_CORRUPTION", "operation": "inspect-schema", "retryable": false}], "requiresZeroUnintendedMutation": true, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "none"}
+    },
+    {
+      "id": "OL-R10", "category": "attack", "slug": "request-number-domain", "title": "Request Number Domain",
+      "objective": "Floats, unsafe integers, negative bounded values, and forbidden numeric carriers fail closed in both runtimes.",
+      "minimumAssertions": ["Every forbidden numeric representative is rejected before replay.", "No runtime-specific coercion changes the typed failure or durable state."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "rejected", "typedResult": null, "typedFailures": [{"name": "CycleStoreProviderError", "code": "GE_CYCLE_STORE_CORRUPTION", "operation": "inspect-schema", "retryable": false}], "requiresZeroUnintendedMutation": true, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "none"}
+    },
+    {
+      "id": "OL-R11", "category": "attack", "slug": "request-size-depth-exhaustion", "title": "Request Size and Depth Exhaustion",
+      "objective": "One-above byte, nesting-depth, and collection bounds fail before unbounded allocation or durable mutation.",
+      "minimumAssertions": ["Byte and collection excesses return the exact quota failure.", "Forbidden nesting returns the exact invalid-argument failure under bounded parsing."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "rejected", "typedResult": null, "typedFailures": [{"name": "CycleStoreProviderError", "code": "GE_CYCLE_STORE_QUOTA_EXCEEDED", "operation": "append", "retryable": false}, {"name": "CycleStoreProviderError", "code": "GE_CYCLE_STORE_INVALID_ARGUMENT", "operation": "append", "retryable": false}], "requiresZeroUnintendedMutation": true, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "none"}
+    },
+    {
+      "id": "OL-R12", "category": "attack", "slug": "request-hash-only-drift", "title": "Request Hash Only Drift",
+      "objective": "Changing request_hash while retaining the original request BLOB is detected as semantic corruption.",
+      "minimumAssertions": ["Audit recomputes the request hash from canonical stored bytes.", "A one-nibble hash mutation fails without changing any other row."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "rejected", "typedResult": null, "typedFailures": [{"name": "CycleStoreProviderError", "code": "GE_CYCLE_STORE_CORRUPTION", "operation": "inspect-schema", "retryable": false}], "requiresZeroUnintendedMutation": true, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "none"}
+    },
+    {
+      "id": "OL-R13", "category": "attack", "slug": "coherent-request-hash-row-mismatch", "title": "Coherent Request Hash Row Mismatch",
+      "objective": "A coherently changed request BLOB and hash are rejected when their decoded context differs from row tenant or operation identity.",
+      "minimumAssertions": ["Audit binds decoded tenant and operation context to primary-key columns.", "A self-consistent hostile BLOB and hash cannot migrate identity between rows."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "rejected", "typedResult": null, "typedFailures": [{"name": "CycleStoreProviderError", "code": "GE_CYCLE_STORE_CORRUPTION", "operation": "inspect-schema", "retryable": false}], "requiresZeroUnintendedMutation": true, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "none"}
+    },
+    {
+      "id": "OL-R14", "category": "attack", "slug": "swapped-request-blobs", "title": "Swapped Request BLOBs",
+      "objective": "Two same-operation ledger rows cannot exchange otherwise valid request BLOB and hash pairs.",
+      "minimumAssertions": ["Each request remains bound to its exact operation ID and row context.", "Swapping both BLOB and matching hash between rows is detected during replay."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "rejected", "typedResult": null, "typedFailures": [{"name": "CycleStoreProviderError", "code": "GE_CYCLE_STORE_CORRUPTION", "operation": "inspect-schema", "retryable": false}], "requiresZeroUnintendedMutation": true, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "none"}
+    },
+    {
+      "id": "OL-R15", "category": "attack", "slug": "operation-name-request-confusion", "title": "Operation Name Request Confusion",
+      "objective": "Changing operation_name or decoding canonical request bytes under another operation codec fails closed.",
+      "minimumAssertions": ["The ledger operation name selects exactly one closed request codec.", "Cross-operation request confusion is rejected before state projection."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "rejected", "typedResult": null, "typedFailures": [{"name": "CycleStoreProviderError", "code": "GE_CYCLE_STORE_CORRUPTION", "operation": "inspect-schema", "retryable": false}], "requiresZeroUnintendedMutation": true, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "none"}
+    },
+    {
+      "id": "OL-R16", "category": "attack", "slug": "request-error-leak", "title": "Request Error Leak",
+      "objective": "Hostile request content and leak sentinels never enter structured errors, logs, diagnostics, or serialized campaign reports.",
+      "minimumAssertions": ["Every serialized failure surface passes the complete leak-sentinel scan.", "Raw request bytes, paths, SQL, and hostile values are absent from output."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "fault-injection", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "rejected", "typedResult": null, "typedFailures": [{"name": "CycleStoreProviderError", "code": "GE_CYCLE_STORE_CORRUPTION", "operation": "inspect-schema", "retryable": false}], "requiresZeroUnintendedMutation": true, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "fault-boundary"}
+    },
+    {
+      "id": "OL-R17", "category": "behavior", "slug": "first-sequence-is-one", "title": "First Sequence Is One",
+      "objective": "The first new mutation stores global commit sequence one and advances the singleton last sequence to exactly one.",
+      "minimumAssertions": ["The first committed ledger row has commit_sequence equal to one.", "Ledger count, maximum sequence, and singleton last sequence all equal one."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "accepted", "typedResult": "canonical-sequence-state", "typedFailures": [], "requiresZeroUnintendedMutation": false, "requiresExactTransactionCleanup": false, "requiresLeakSentinelScan": true, "barrier": "none"}
+    },
+    {
+      "id": "OL-R18", "category": "behavior", "slug": "all-operation-global-order", "title": "All Operation Global Order",
+      "objective": "Every mutation operation across tenants shares one globally unique, gap-free, contiguous commit order.",
+      "minimumAssertions": ["All nine mutation operation names contribute to one global sequence.", "Sequences are unique and equal the integer interval from one through the row count."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "accepted", "typedResult": "canonical-sequence-state", "typedFailures": [], "requiresZeroUnintendedMutation": false, "requiresExactTransactionCleanup": false, "requiresLeakSentinelScan": true, "barrier": "commit-order"}
+    },
+    {
+      "id": "OL-R19", "category": "behavior", "slug": "equal-timestamp-order", "title": "Equal Timestamp Order",
+      "objective": "Mutations committed in the same provider millisecond remain deterministically ordered by global sequence.",
+      "minimumAssertions": ["At least two committed rows retain the same provider timestamp.", "Replay order follows commit_sequence and never uses timestamp as a tie breaker."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path", "fault-injection"],
+      "expected": {"outcome": "accepted", "typedResult": "canonical-sequence-state", "typedFailures": [], "requiresZeroUnintendedMutation": false, "requiresExactTransactionCleanup": false, "requiresLeakSentinelScan": true, "barrier": "commit-order"}
+    },
+    {
+      "id": "OL-R20", "category": "behavior", "slug": "retry-does-not-advance", "title": "Retry Does Not Advance",
+      "objective": "Repeated exact retry before and after restart leaves sequence count, maximum, and singleton unchanged.",
+      "minimumAssertions": ["Every retry returns the originally stored canonical result.", "No retry inserts a ledger row or advances the global sequence singleton."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "accepted", "typedResult": "canonical-idempotent-result", "typedFailures": [], "requiresZeroUnintendedMutation": false, "requiresExactTransactionCleanup": false, "requiresLeakSentinelScan": true, "barrier": "none"}
+    },
+    {
+      "id": "OL-R21", "category": "behavior", "slug": "failed-decision-no-gap", "title": "Failed Decision Creates No Gap",
+      "objective": "Conflict, stale fence, legal hold, and invalid request decisions allocate no ledger row and no sequence value.",
+      "minimumAssertions": ["Each rejection returns its exact code, operation, and retryability tuple.", "Sequence count, maximum, singleton, and every protected state family remain unchanged."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "accepted", "typedResult": "canonical-sequence-state", "typedFailures": [{"name": "CycleStoreProviderError", "code": "GE_CYCLE_STORE_CONFLICT", "operation": "append", "retryable": true}, {"name": "CycleStoreProviderError", "code": "GE_CYCLE_STORE_STALE_FENCE", "operation": "append", "retryable": true}, {"name": "CycleStoreProviderError", "code": "GE_CYCLE_STORE_LEGAL_HOLD", "operation": "delete-checkpoint", "retryable": false}, {"name": "CycleStoreProviderError", "code": "GE_CYCLE_STORE_INVALID_ARGUMENT", "operation": "append", "retryable": false}], "requiresZeroUnintendedMutation": true, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "none"}
+    },
+    {
+      "id": "OL-R22", "category": "behavior", "slug": "busy-retry-one-sequence", "title": "Busy Retry Uses One Sequence",
+      "objective": "A bounded whole-transaction SQLite BUSY retry eventually commits exactly one mutation and one global sequence.",
+      "minimumAssertions": ["The retry loop restarts the complete transaction only after the competing writer releases.", "Successful completion persists one ledger row, one physical effect, and one sequence."],
+      "runtimeRequirements": ["typescript-native", "python-native", "mixed-process", "fault-injection", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "accepted", "typedResult": "canonical-sequence-state", "typedFailures": [], "requiresZeroUnintendedMutation": false, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "busy-transaction"}
+    },
+    {
+      "id": "OL-R23", "category": "behavior", "slug": "mixed-process-contiguous", "title": "Mixed Process Contiguous Sequences",
+      "objective": "Concurrent TypeScript and Python writers produce unique contiguous sequences in observed commit order.",
+      "minimumAssertions": ["At least one native process from each runtime commits against the same explicit database.", "The final ledger has no duplicate, gap, or runtime-partitioned sequence range."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "mixed-process", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "accepted", "typedResult": "canonical-cross-language-report", "typedFailures": [], "requiresZeroUnintendedMutation": false, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "commit-order"}
+    },
+    {
+      "id": "OL-R24", "category": "behavior", "slug": "safe-last-sequence", "title": "Safe Last Sequence",
+      "objective": "A fixture staged at MAX_SAFE_INTEGER minus one may commit MAX_SAFE_INTEGER exactly and retain safe carriers.",
+      "minimumAssertions": ["The staged singleton and matching ledger inventory are valid before the final mutation.", "The final commit stores exactly 9007199254740991 without rounding in either runtime."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "accepted", "typedResult": "canonical-sequence-state", "typedFailures": [], "requiresZeroUnintendedMutation": false, "requiresExactTransactionCleanup": false, "requiresLeakSentinelScan": true, "barrier": "none"}
+    },
+    {
+      "id": "OL-R25", "category": "attack", "slug": "zero-sequence", "title": "Zero Sequence",
+      "objective": "A format-2 operation-ledger row with commit sequence zero is rejected as semantic corruption.",
+      "minimumAssertions": ["The structural or semantic audit rejects sequence zero.", "No audit path treats zero as a legacy or unsequenced format-2 row."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "rejected", "typedResult": null, "typedFailures": [{"name": "CycleStoreProviderError", "code": "GE_CYCLE_STORE_CORRUPTION", "operation": "inspect-schema", "retryable": false}], "requiresZeroUnintendedMutation": true, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "none"}
+    },
+    {
+      "id": "OL-R26", "category": "attack", "slug": "negative-sequence", "title": "Negative Sequence",
+      "objective": "A negative global sequence is rejected structurally or semantically without numeric coercion.",
+      "minimumAssertions": ["Both native SQLite carrier paths reject the same negative sequence.", "The singleton and all valid rows remain byte-identical after rejection."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "rejected", "typedResult": null, "typedFailures": [{"name": "CycleStoreProviderError", "code": "GE_CYCLE_STORE_CORRUPTION", "operation": "inspect-schema", "retryable": false}], "requiresZeroUnintendedMutation": true, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "none"}
+    },
+    {
+      "id": "OL-R27", "category": "attack", "slug": "duplicate-sequence", "title": "Duplicate Sequence",
+      "objective": "A duplicate global sequence cannot bypass uniqueness enforcement, index verification, or semantic audit.",
+      "minimumAssertions": ["The hostile fixture attempts both constraint-level and post-constraint duplicate forms.", "At least one mandatory layer rejects before a replay result is accepted."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "rejected", "typedResult": null, "typedFailures": [{"name": "CycleStoreProviderError", "code": "GE_CYCLE_STORE_CORRUPTION", "operation": "inspect-schema", "retryable": false}], "requiresZeroUnintendedMutation": true, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "none"}
+    },
+    {
+      "id": "OL-R28", "category": "attack", "slug": "sequence-gap", "title": "Sequence Gap",
+      "objective": "Ledger sequences one and three without sequence two fail exact global contiguity validation.",
+      "minimumAssertions": ["Audit compares count, minimum, maximum, and singleton continuity.", "A coherent singleton value of three cannot hide the missing sequence."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "rejected", "typedResult": null, "typedFailures": [{"name": "CycleStoreProviderError", "code": "GE_CYCLE_STORE_CORRUPTION", "operation": "inspect-schema", "retryable": false}], "requiresZeroUnintendedMutation": true, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "none"}
+    },
+    {
+      "id": "OL-R29", "category": "attack", "slug": "reordered-sequence-effects", "title": "Reordered Sequence Effects",
+      "objective": "Swapping sequences on two individually valid rows fails ordered replay preconditions or result derivation.",
+      "minimumAssertions": ["Request, result, and row hashes remain internally canonical during the swap attack.", "Replay detects that the new order cannot produce the retained physical state and results."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "rejected", "typedResult": null, "typedFailures": [{"name": "CycleStoreProviderError", "code": "GE_CYCLE_STORE_CORRUPTION", "operation": "inspect-schema", "retryable": false}], "requiresZeroUnintendedMutation": true, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "none"}
+    },
+    {
+      "id": "OL-R30", "category": "attack", "slug": "singleton-row-drift", "title": "Singleton Row Drift",
+      "objective": "A sequence singleton lower or higher than ledger count and maximum is rejected as corruption.",
+      "minimumAssertions": ["The lower-than-maximum singleton mutation fails.", "The higher-than-maximum singleton mutation fails without allocating missing rows."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "rejected", "typedResult": null, "typedFailures": [{"name": "CycleStoreProviderError", "code": "GE_CYCLE_STORE_CORRUPTION", "operation": "inspect-schema", "retryable": false}], "requiresZeroUnintendedMutation": true, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "none"}
+    },
+    {
+      "id": "OL-R31", "category": "attack", "slug": "sequence-overflow", "title": "Sequence Overflow",
+      "objective": "Allocation beyond MAX_SAFE_INTEGER returns quota exceeded before any durable state or sequence mutation.",
+      "minimumAssertions": ["Both runtimes reject the same staged overflow boundary without numeric rounding.", "Ledger count, maximum, singleton, and target physical state remain unchanged."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "rejected", "typedResult": null, "typedFailures": [{"name": "CycleStoreProviderError", "code": "GE_CYCLE_STORE_QUOTA_EXCEEDED", "operation": "append", "retryable": false}], "requiresZeroUnintendedMutation": true, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "none"}
+    },
+    {
+      "id": "OL-R32", "category": "attack", "slug": "post-baseline-legacy-insertion", "title": "Post-Baseline Legacy Insertion",
+      "objective": "An additional format-1 ledger row inserted after the sealed baseline fails exact count, root, and legacy inventory binding.",
+      "minimumAssertions": ["The baseline binds the complete legacy operation inventory at publication.", "A later canonical-looking legacy row cannot enter replay or change public state."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "rejected", "typedResult": null, "typedFailures": [{"name": "CycleStoreProviderError", "code": "GE_CYCLE_STORE_CORRUPTION", "operation": "inspect-schema", "retryable": false}], "requiresZeroUnintendedMutation": true, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "none"}
+    },
+    {
+      "id": "OL-R33", "category": "behavior", "slug": "empty-v1-baseline", "title": "Empty V1 Baseline",
+      "objective": "An empty v1 database upgrades with deterministic baseline metadata and global sequence zero.",
+      "minimumAssertions": ["The published baseline represents an exact empty physical projection.", "No synthetic operation row is created and the sequence singleton remains zero."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path", "migration-v1"],
+      "expected": {"outcome": "accepted", "typedResult": "canonical-baseline-report", "typedFailures": [], "requiresZeroUnintendedMutation": false, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "migration-publication"}
+    },
+    {
+      "id": "OL-R34", "category": "behavior", "slug": "golden-v0-to-v2", "title": "Golden V0 to V2 Migration",
+      "objective": "The immutable v0 golden fixture traverses both migration edges and preserves every public value exactly.",
+      "minimumAssertions": ["The v0 source identity is verified before either migration executes.", "The final v2 baseline, ledger, sequence, and public projections match frozen expectations."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path", "migration-v0", "migration-v1"],
+      "expected": {"outcome": "accepted", "typedResult": "canonical-migration-state", "typedFailures": [], "requiresZeroUnintendedMutation": false, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "migration-publication"}
+    },
+    {
+      "id": "OL-R35", "category": "behavior", "slug": "golden-v1-to-v2", "title": "Golden V1 to V2 Migration",
+      "objective": "A representative immutable v1 fixture produces the exact frozen baseline bytes, root, and sequence state.",
+      "minimumAssertions": ["Every expected baseline entry has exact ordinal, key, state bytes, and chained hash.", "Header count, projection hash, final root, and legacy inventory match frozen values."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path", "migration-v1"],
+      "expected": {"outcome": "accepted", "typedResult": "canonical-baseline-report", "typedFailures": [], "requiresZeroUnintendedMutation": false, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "migration-publication"}
+    },
+    {
+      "id": "OL-R36", "category": "behavior", "slug": "large-streamed-baseline", "title": "Large Streamed Baseline",
+      "objective": "A 100000-record identity inventory is baselined and audited with bounded memory and fixed-size batch reads.",
+      "minimumAssertions": ["Instrumentation proves enumeration uses bounded batches rather than whole-table materialization.", "Final entry count, projection hash, root, and public state reconcile exactly."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path", "migration-v1", "benchmark-characterization"],
+      "expected": {"outcome": "accepted", "typedResult": "canonical-baseline-report", "typedFailures": [], "requiresZeroUnintendedMutation": false, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "migration-publication"}
+    },
+    {
+      "id": "OL-R37", "category": "behavior", "slug": "no-legacy-operations", "title": "No Legacy Operations",
+      "objective": "State families that have no legacy ledger rows still seed an exact replay baseline.",
+      "minimumAssertions": ["Records, checkpoints, leases, holds, migration state, and cursor tails are inventoried independently of legacy operations.", "Replay begins from the sealed baseline without reconstructing nonexistent requests."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path", "migration-v1"],
+      "expected": {"outcome": "accepted", "typedResult": "canonical-baseline-report", "typedFailures": [], "requiresZeroUnintendedMutation": false, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "migration-publication"}
+    },
+    {
+      "id": "OL-R38", "category": "behavior", "slug": "all-legacy-result-shapes", "title": "All Legacy Result Shapes",
+      "objective": "The baseline retains canonical legacy results for all nine mutation operation names without claiming reconstructed requests.",
+      "minimumAssertions": ["Every legacy operation result decodes and re-encodes to canonical bytes.", "Legacy rows are bound into the baseline inventory while request_blob remains absent by format contract."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path", "migration-v1"],
+      "expected": {"outcome": "accepted", "typedResult": "canonical-baseline-report", "typedFailures": [], "requiresZeroUnintendedMutation": false, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "migration-publication"}
+    },
+    {
+      "id": "OL-R39", "category": "behavior", "slug": "ts-migrate-python-audit", "title": "TypeScript Migrate Python Audit",
+      "objective": "Python accepts and independently audits the exact baseline bytes and root produced by TypeScript migration.",
+      "minimumAssertions": ["TypeScript alone performs the migration against an explicit fixture copy.", "Python independently recomputes every identity and produces an exact report match."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path", "migration-v1"],
+      "expected": {"outcome": "accepted", "typedResult": "canonical-cross-language-report", "typedFailures": [], "requiresZeroUnintendedMutation": false, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "migration-publication"}
+    },
+    {
+      "id": "OL-R40", "category": "behavior", "slug": "python-migrate-ts-audit", "title": "Python Migrate TypeScript Audit",
+      "objective": "TypeScript accepts and independently audits the exact baseline bytes and root produced by Python migration.",
+      "minimumAssertions": ["Python alone performs the migration against an explicit fixture copy.", "TypeScript independently recomputes every identity and produces an exact report match."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path", "migration-v1"],
+      "expected": {"outcome": "accepted", "typedResult": "canonical-cross-language-report", "typedFailures": [], "requiresZeroUnintendedMutation": false, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "migration-publication"}
+    },
+    {
+      "id": "OL-R41", "category": "attack", "slug": "baseline-header-root-drift", "title": "Baseline Header Root Drift",
+      "objective": "Changing the sealed baseline final root or projection hash fails semantic integrity validation.",
+      "minimumAssertions": ["A final-root-only mutation is rejected.", "A projection-hash-only mutation is rejected without regenerating metadata."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path", "migration-v1"],
+      "expected": {"outcome": "rejected", "typedResult": null, "typedFailures": [{"name": "CycleStoreProviderError", "code": "GE_CYCLE_STORE_CORRUPTION", "operation": "inspect-schema", "retryable": false}], "requiresZeroUnintendedMutation": true, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "none"}
+    },
+    {
+      "id": "OL-R42", "category": "attack", "slug": "baseline-entry-blob-drift", "title": "Baseline Entry BLOB Drift",
+      "objective": "Changing a baseline key or state BLOB while retaining its original hash fails canonical and hash validation.",
+      "minimumAssertions": ["Key BLOB mutation fails canonical decoding or identity binding.", "State BLOB mutation fails its entry hash before projection acceptance."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path", "migration-v1"],
+      "expected": {"outcome": "rejected", "typedResult": null, "typedFailures": [{"name": "CycleStoreProviderError", "code": "GE_CYCLE_STORE_CORRUPTION", "operation": "inspect-schema", "retryable": false}], "requiresZeroUnintendedMutation": true, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "none"}
+    },
+    {
+      "id": "OL-R43", "category": "attack", "slug": "baseline-order-drift", "title": "Baseline Order Drift",
+      "objective": "An ordinal gap, entry reorder, or previous-hash chain break fails baseline validation.",
+      "minimumAssertions": ["Every ordinal is exactly contiguous in canonical entry order.", "Every previous hash and entry hash is recomputed through the final root."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path", "migration-v1"],
+      "expected": {"outcome": "rejected", "typedResult": null, "typedFailures": [{"name": "CycleStoreProviderError", "code": "GE_CYCLE_STORE_CORRUPTION", "operation": "inspect-schema", "retryable": false}], "requiresZeroUnintendedMutation": true, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "none"}
+    },
+    {
+      "id": "OL-R44", "category": "attack", "slug": "baseline-entry-deletion", "title": "Baseline Entry Deletion",
+      "objective": "Deleting one baseline entry fails count, root, and retained physical projection reconciliation.",
+      "minimumAssertions": ["The header count and chain root cannot be repaired implicitly.", "Even coherently rewritten metadata fails exact physical inventory reconciliation."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path", "migration-v1"],
+      "expected": {"outcome": "rejected", "typedResult": null, "typedFailures": [{"name": "CycleStoreProviderError", "code": "GE_CYCLE_STORE_CORRUPTION", "operation": "inspect-schema", "retryable": false}], "requiresZeroUnintendedMutation": true, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "none"}
+    },
+    {
+      "id": "OL-R45", "category": "attack", "slug": "baseline-entry-insertion", "title": "Baseline Entry Insertion",
+      "objective": "A duplicate or extra baseline entry fails exact inventory, count, and root validation.",
+      "minimumAssertions": ["Duplicate canonical keys cannot appear at different ordinals.", "A novel extra entry fails reconciliation even with a coherently recomputed chain."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path", "migration-v1"],
+      "expected": {"outcome": "rejected", "typedResult": null, "typedFailures": [{"name": "CycleStoreProviderError", "code": "GE_CYCLE_STORE_CORRUPTION", "operation": "inspect-schema", "retryable": false}], "requiresZeroUnintendedMutation": true, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "none"}
+    },
+    {
+      "id": "OL-R46", "category": "attack", "slug": "legacy-operation-drift", "title": "Legacy Operation Drift",
+      "objective": "Deleting, inserting, renaming, retiming, or changing a legacy result row fails sealed baseline binding.",
+      "minimumAssertions": ["Every legacy row identity and canonical result is represented in baseline metadata.", "All five mutation classes fail even when surrounding physical state remains plausible."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path", "migration-v1"],
+      "expected": {"outcome": "rejected", "typedResult": null, "typedFailures": [{"name": "CycleStoreProviderError", "code": "GE_CYCLE_STORE_CORRUPTION", "operation": "inspect-schema", "retryable": false}], "requiresZeroUnintendedMutation": true, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "none"}
+    },
+    {
+      "id": "OL-R47", "category": "attack", "slug": "malformed-source-rollback", "title": "Malformed Source Rollback",
+      "objective": "A corrupt v0 or v1 source refuses migration while preserving original application ID, user version, schema, and bytes.",
+      "minimumAssertions": ["Both malformed source versions fail before candidate publication.", "A byte comparison proves the original source and all version metadata remain unchanged."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path", "migration-v0", "migration-v1"],
+      "expected": {"outcome": "rejected", "typedResult": null, "typedFailures": [{"name": "CycleStoreProviderError", "code": "GE_CYCLE_STORE_CORRUPTION", "operation": "inspect-schema", "retryable": false}], "requiresZeroUnintendedMutation": true, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "migration-publication"}
+    },
+    {
+      "id": "OL-R48", "category": "attack", "slug": "killed-baseline-publication", "title": "Killed Baseline Publication",
+      "objective": "Process death during enumeration or after entry staging leaves no accepted partial v2 database and retry completes exactly once.",
+      "minimumAssertions": ["Nonce-acknowledged barriers kill separately during enumeration and after staging.", "Reopen rejects or rolls back partial publication, then deterministic retry publishes one complete baseline."],
+      "runtimeRequirements": ["typescript-native", "python-native", "mixed-process", "process-kill", "fault-injection", "destructive-database", "fresh-temporary-root", "explicit-database-path", "migration-v1"],
+      "expected": {"outcome": "rejected", "typedResult": null, "typedFailures": [{"name": "CycleStoreProviderError", "code": "GE_CYCLE_STORE_UNAVAILABLE", "operation": "inspect-schema", "retryable": true}], "requiresZeroUnintendedMutation": true, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "migration-publication"}
+    },
+    {
+      "id": "OL-R49", "category": "behavior", "slug": "append-replay", "title": "Append Replay",
+      "objective": "The canonical append request reconstructs every record identity, stream head, appended count, and exact public result.",
+      "minimumAssertions": ["Replay validates the complete record chain and tenant-wide record identity set.", "The independently derived result BLOB exactly equals the stored append result BLOB."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "accepted", "typedResult": "canonical-replay-state", "typedFailures": [], "requiresZeroUnintendedMutation": false, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "none"}
+    },
+    {
+      "id": "OL-R50", "category": "behavior", "slug": "historical-append-after-advance", "title": "Historical Append After Advance",
+      "objective": "An early append remains exactly replayable after later operations advance the authoritative stream tail.",
+      "minimumAssertions": ["Replay derives the early result at its original commit sequence.", "Later tail advancement neither overwrites nor reinterprets the historical request and result."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "accepted", "typedResult": "canonical-replay-state", "typedFailures": [], "requiresZeroUnintendedMutation": false, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "commit-order"}
+    },
+    {
+      "id": "OL-R51", "category": "behavior", "slug": "save-checkpoint-replay", "title": "Save Checkpoint Replay",
+      "objective": "Replay reconstructs the exact checkpoint, revision allocation, current summary, and public save result.",
+      "minimumAssertions": ["The checkpoint bound record and canonical value identities are independently verified.", "Current state and immutable revision history reconcile bidirectionally."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "accepted", "typedResult": "canonical-replay-state", "typedFailures": [], "requiresZeroUnintendedMutation": false, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "none"}
+    },
+    {
+      "id": "OL-R52", "category": "behavior", "slug": "delete-present-and-absent", "title": "Delete Present and Absent",
+      "objective": "Ordered replay independently derives both present-checkpoint deletion and absent-checkpoint no-op results.",
+      "minimumAssertions": ["A real delete validates expected value hash and allocates exactly one delete revision.", "An absent delete returns false without allocating a revision or changing physical state."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "accepted", "typedResult": "canonical-replay-state", "typedFailures": [], "requiresZeroUnintendedMutation": false, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "none"}
+    },
+    {
+      "id": "OL-R53", "category": "behavior", "slug": "acquire-lease-replay", "title": "Acquire Lease Replay",
+      "objective": "Lease acquisition replay reconciles counters, used identity, expiry arithmetic, active state, and exact result.",
+      "minimumAssertions": ["Expected fence and non-reuse decisions are evaluated at the committed provider time.", "Epoch, fence, used ID, expiry, and public lease bytes all match physical state."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "accepted", "typedResult": "canonical-replay-state", "typedFailures": [], "requiresZeroUnintendedMutation": false, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "none"}
+    },
+    {
+      "id": "OL-R54", "category": "behavior", "slug": "renew-lease-replay", "title": "Renew Lease Replay",
+      "objective": "Lease renewal replay preserves acquisition identity while deriving one strictly extended safe expiry.",
+      "minimumAssertions": ["The request binding matches the exact active lease and unexpired committed-time state.", "Only expiry and update time change; epoch, fence, holder, and lease ID remain exact."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "accepted", "typedResult": "canonical-replay-state", "typedFailures": [], "requiresZeroUnintendedMutation": false, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "none"}
+    },
+    {
+      "id": "OL-R55", "category": "behavior", "slug": "release-lease-replay", "title": "Release Lease Replay",
+      "objective": "Lease release replay clears active identity while retaining monotonic counters, used IDs, and exact inspection result.",
+      "minimumAssertions": ["The release request binds the exact live lease ID, holder, and fence.", "Physical released state and derived inspection bytes reconcile without losing non-reuse history."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "accepted", "typedResult": "canonical-replay-state", "typedFailures": [], "requiresZeroUnintendedMutation": false, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "none"}
+    },
+    {
+      "id": "OL-R56", "category": "behavior", "slug": "expired-takeover-replay", "title": "Expired Takeover Replay",
+      "objective": "The committed provider time proves takeover eligibility and yields one monotonic lease epoch and fence transition.",
+      "minimumAssertions": ["The prior active lease is expired at the takeover commit time.", "The new unique lease ID, epoch, fence, and result reconcile exactly across runtimes."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "accepted", "typedResult": "canonical-replay-state", "typedFailures": [], "requiresZeroUnintendedMutation": false, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "commit-order"}
+    },
+    {
+      "id": "OL-R57", "category": "behavior", "slug": "legal-hold-replay", "title": "Legal Hold Replay",
+      "objective": "Legal-hold replay derives idempotent place and release transitions plus the exact sorted governance result.",
+      "minimumAssertions": ["Repeated placement preserves the original placed time and creates no duplicate hold.", "Release and final canonical ordering match the physical hold inventory exactly."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "accepted", "typedResult": "canonical-replay-state", "typedFailures": [], "requiresZeroUnintendedMutation": false, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "none"}
+    },
+    {
+      "id": "OL-R58", "category": "behavior", "slug": "migration-lock-replay", "title": "Migration Lock Replay",
+      "objective": "Migration-lock acquire, takeover, and release replay with exact counters, used IDs, expiry, and null release result.",
+      "minimumAssertions": ["Source and target versions, expected fence, time, and lock-ID non-reuse are replayed.", "Active and released physical states plus every public result byte reconcile exactly."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "accepted", "typedResult": "canonical-replay-state", "typedFailures": [], "requiresZeroUnintendedMutation": false, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "none"}
+    },
+    {
+      "id": "OL-R59", "category": "behavior", "slug": "all-nine-alternating-history", "title": "All Nine Alternating History",
+      "objective": "One coherent ordered history contains every mutation operation and replays to one exact reconciled final state.",
+      "minimumAssertions": ["All nine mutation names occur at least once in global sequence order.", "Every derived intermediate result and every final physical state family reconciles."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "accepted", "typedResult": "canonical-replay-state", "typedFailures": [], "requiresZeroUnintendedMutation": false, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "commit-order"}
+    },
+    {
+      "id": "OL-R60", "category": "behavior", "slug": "equal-final-hold-histories", "title": "Equal Final Hold Histories",
+      "objective": "Distinct place and release histories ending in the same hold set replay correctly and remain cryptographically distinguishable.",
+      "minimumAssertions": ["Both histories derive the same final governance inventory.", "Their request sequences and operation roots remain different and individually verifiable."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "accepted", "typedResult": "canonical-replay-state", "typedFailures": [], "requiresZeroUnintendedMutation": false, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "commit-order"}
+    },
+    {
+      "id": "OL-R61", "category": "behavior", "slug": "checkpoint-delete-recreate-history", "title": "Checkpoint Delete Recreate History",
+      "objective": "Allowed checkpoint save, delete, and recreate transitions retain exact immutable revision chronology.",
+      "minimumAssertions": ["Each real transition allocates the exact next scope revision.", "Current checkpoint revision points to its exact retained put revision after replay."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "accepted", "typedResult": "canonical-replay-state", "typedFailures": [], "requiresZeroUnintendedMutation": false, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "commit-order"}
+    },
+    {
+      "id": "OL-R62", "category": "attack", "slug": "historical-lease-result-forgery", "title": "Historical Lease Result Forgery",
+      "objective": "A coherently changed historical acquire, renew, or release result and hash fails even after a later takeover.",
+      "minimumAssertions": ["Replay derives each historical lease result at its original sequence.", "Later valid state cannot conceal a forged earlier canonical result."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "rejected", "typedResult": null, "typedFailures": [{"name": "CycleStoreProviderError", "code": "GE_CYCLE_STORE_CORRUPTION", "operation": "inspect-schema", "retryable": false}], "requiresZeroUnintendedMutation": true, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "none"}
+    },
+    {
+      "id": "OL-R63", "category": "attack", "slug": "append-result-tail-forgery", "title": "Append Result Tail Forgery",
+      "objective": "A changed append tail and coherently recomputed result hash fail against the request-derived immutable tail.",
+      "minimumAssertions": ["Stored result bytes remain canonical during the attack.", "Replay independently derives and byte-compares the correct final batch tail."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "rejected", "typedResult": null, "typedFailures": [{"name": "CycleStoreProviderError", "code": "GE_CYCLE_STORE_CORRUPTION", "operation": "inspect-schema", "retryable": false}], "requiresZeroUnintendedMutation": true, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "none"}
+    },
+    {
+      "id": "OL-R64", "category": "attack", "slug": "append-valid-other-tail", "title": "Append Valid Other Tail",
+      "objective": "An append result hash that names another valid record or stream still fails exact request and stream binding.",
+      "minimumAssertions": ["The substituted hash resolves to a real immutable record elsewhere.", "Replay rejects it because tenant, stream, sequence, and request-derived record identity differ."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "rejected", "typedResult": null, "typedFailures": [{"name": "CycleStoreProviderError", "code": "GE_CYCLE_STORE_CORRUPTION", "operation": "inspect-schema", "retryable": false}], "requiresZeroUnintendedMutation": true, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "none"}
+    },
+    {
+      "id": "OL-R65", "category": "attack", "slug": "append-count-forgery", "title": "Append Count Forgery",
+      "objective": "A changed appended-record count and matching result hash fail against the exact request batch length.",
+      "minimumAssertions": ["The hostile result is canonically encoded and internally hashed.", "Replay derives appendedRecords only from the validated stored request batch."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "rejected", "typedResult": null, "typedFailures": [{"name": "CycleStoreProviderError", "code": "GE_CYCLE_STORE_CORRUPTION", "operation": "inspect-schema", "retryable": false}], "requiresZeroUnintendedMutation": true, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "none"}
+    },
+    {
+      "id": "OL-R66", "category": "attack", "slug": "checkpoint-result-forgery", "title": "Checkpoint Result Forgery",
+      "objective": "Another canonical checkpoint summary fails exact request, value, record-bound, and revision binding.",
+      "minimumAssertions": ["The substituted summary is independently valid for another checkpoint.", "Replay rejects its scope, identity, revision, or value mismatch for this operation."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "rejected", "typedResult": null, "typedFailures": [{"name": "CycleStoreProviderError", "code": "GE_CYCLE_STORE_CORRUPTION", "operation": "inspect-schema", "retryable": false}], "requiresZeroUnintendedMutation": true, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "none"}
+    },
+    {
+      "id": "OL-R67", "category": "attack", "slug": "delete-result-forgery", "title": "Delete Result Forgery",
+      "objective": "Flipping the canonical deleted boolean and recomputing its result hash fails ordered checkpoint replay.",
+      "minimumAssertions": ["Replay determines presence from shadow checkpoint state before the operation.", "The forged boolean cannot change revision allocation or physical reconciliation."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "rejected", "typedResult": null, "typedFailures": [{"name": "CycleStoreProviderError", "code": "GE_CYCLE_STORE_CORRUPTION", "operation": "inspect-schema", "retryable": false}], "requiresZeroUnintendedMutation": true, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "none"}
+    },
+    {
+      "id": "OL-R68", "category": "attack", "slug": "lease-result-forgery", "title": "Lease Result Forgery",
+      "objective": "Changed lease identity, holder, epoch, fence, or time plus a matching result hash fails deterministic replay.",
+      "minimumAssertions": ["Every public lease result field is independently derived from request and shadow state.", "Each single-field and coherent multi-field mutation is rejected."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "rejected", "typedResult": null, "typedFailures": [{"name": "CycleStoreProviderError", "code": "GE_CYCLE_STORE_CORRUPTION", "operation": "inspect-schema", "retryable": false}], "requiresZeroUnintendedMutation": true, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "none"}
+    },
+    {
+      "id": "OL-R69", "category": "attack", "slug": "governance-result-forgery", "title": "Governance Result Forgery",
+      "objective": "A changed legal-hold inventory and coherent hash fail against the ordered shadow hold set.",
+      "minimumAssertions": ["Replay derives the sorted hold inventory after every place or release.", "A plausible result from another sequence or stream cannot be substituted."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "rejected", "typedResult": null, "typedFailures": [{"name": "CycleStoreProviderError", "code": "GE_CYCLE_STORE_CORRUPTION", "operation": "inspect-schema", "retryable": false}], "requiresZeroUnintendedMutation": true, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "none"}
+    },
+    {
+      "id": "OL-R70", "category": "attack", "slug": "migration-result-forgery", "title": "Migration Result Forgery",
+      "objective": "Forged migration-lock result fields or a non-null release result fail exact replay and physical reconciliation.",
+      "minimumAssertions": ["Acquire and takeover results are derived from sequence-time lock state.", "Release-migration-lock accepts only the exact canonical null result."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "rejected", "typedResult": null, "typedFailures": [{"name": "CycleStoreProviderError", "code": "GE_CYCLE_STORE_CORRUPTION", "operation": "inspect-schema", "retryable": false}], "requiresZeroUnintendedMutation": true, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "none"}
+    },
+    {
+      "id": "OL-R71", "category": "attack", "slug": "mutation-without-ledger", "title": "Mutation Without Ledger",
+      "objective": "A physical append, checkpoint, lease, hold, or migration change absent from replay fails final-state reconciliation.",
+      "minimumAssertions": ["Each authoritative state family is compared bidirectionally with the replay projection.", "An extra physical row or changed physical field is never ignored."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "rejected", "typedResult": null, "typedFailures": [{"name": "CycleStoreProviderError", "code": "GE_CYCLE_STORE_CORRUPTION", "operation": "inspect-schema", "retryable": false}], "requiresZeroUnintendedMutation": true, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "none"}
+    },
+    {
+      "id": "OL-R72", "category": "attack", "slug": "ledger-without-mutation", "title": "Ledger Without Mutation",
+      "objective": "A canonical request and result row without its required physical effect fails final-state reconciliation.",
+      "minimumAssertions": ["Replay applies the request and derives the missing projected state.", "The physical-state absence is reported as corruption without synthesizing or repairing rows."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "rejected", "typedResult": null, "typedFailures": [{"name": "CycleStoreProviderError", "code": "GE_CYCLE_STORE_CORRUPTION", "operation": "inspect-schema", "retryable": false}], "requiresZeroUnintendedMutation": true, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "none"}
+    },
+    {
+      "id": "OL-R73", "category": "behavior", "slug": "ts-all-families-python-continue", "title": "TypeScript All Families Python Continue",
+      "objective": "TypeScript creates every state and ledger family, then Python audits every byte and continues at the next sequence.",
+      "minimumAssertions": ["Python independently recomputes all baseline, request, result, sequence, and state roots.", "Its next committed mutation uses exactly the prior global sequence plus one."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "mixed-process", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "accepted", "typedResult": "canonical-cross-language-report", "typedFailures": [], "requiresZeroUnintendedMutation": false, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "mixed-runtime-race"}
+    },
+    {
+      "id": "OL-R74", "category": "behavior", "slug": "python-all-families-ts-continue", "title": "Python All Families TypeScript Continue",
+      "objective": "Python creates every state and ledger family, then TypeScript audits every byte and continues at the next sequence.",
+      "minimumAssertions": ["TypeScript independently recomputes all portable identities.", "Its next committed mutation is contiguous and remains Python-auditable."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "mixed-process", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "accepted", "typedResult": "canonical-cross-language-report", "typedFailures": [], "requiresZeroUnintendedMutation": false, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "mixed-runtime-race"}
+    },
+    {
+      "id": "OL-R75", "category": "behavior", "slug": "ts-event-snapshot-python-append", "title": "TypeScript Event Snapshot Python Append",
+      "objective": "A Python append gains one global sequence while an existing TypeScript event snapshot excludes it exactly.",
+      "minimumAssertions": ["The TypeScript cursor continues without skip or duplicate at its frozen tail.", "Live state and replay include the Python append at the exact next sequence."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "mixed-process", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "accepted", "typedResult": "canonical-cross-language-report", "typedFailures": [], "requiresZeroUnintendedMutation": false, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "snapshot-interleave"}
+    },
+    {
+      "id": "OL-R76", "category": "behavior", "slug": "python-checkpoint-snapshot-ts-mutate", "title": "Python Checkpoint Snapshot TypeScript Mutate",
+      "objective": "A Python checkpoint continuation has no skip or duplicate after TypeScript mutates the live checkpoint set.",
+      "minimumAssertions": ["The snapshot yields the exact original ordered checkpoint identities.", "Replay and live state include the TypeScript save or delete at its global sequence."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "mixed-process", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "accepted", "typedResult": "canonical-cross-language-report", "typedFailures": [], "requiresZeroUnintendedMutation": false, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "snapshot-interleave"}
+    },
+    {
+      "id": "OL-R77", "category": "behavior", "slug": "mixed-empty-tail-race", "title": "Mixed Empty Tail Race",
+      "objective": "Separate TypeScript and Python processes racing one empty tail yield one append winner and one global sequence.",
+      "minimumAssertions": ["Exactly one process commits and the other receives the exact typed tail conflict.", "Records, ledger count, distinct sequence count, and singleton last sequence all equal one."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "mixed-process", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "accepted", "typedResult": "canonical-cross-language-report", "typedFailures": [{"name": "CycleStoreProviderError", "code": "GE_CYCLE_STORE_CONFLICT", "operation": "append", "retryable": true}], "requiresZeroUnintendedMutation": false, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "mixed-runtime-race"}
+    },
+    {
+      "id": "OL-R78", "category": "behavior", "slug": "mixed-lease-takeover", "title": "Mixed Lease Takeover",
+      "objective": "One runtime takes over an expired lease and the other runtime's stale writer fails without allocating a sequence.",
+      "minimumAssertions": ["Takeover commits one monotonic epoch, fence, used ID, and sequence.", "The stale mutation changes neither physical state nor sequence singleton."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "mixed-process", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "accepted", "typedResult": "canonical-cross-language-report", "typedFailures": [{"name": "CycleStoreProviderError", "code": "GE_CYCLE_STORE_STALE_FENCE", "operation": "append", "retryable": true}], "requiresZeroUnintendedMutation": false, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "mixed-runtime-race"}
+    },
+    {
+      "id": "OL-R79", "category": "behavior", "slug": "python-backup-ts-restore", "title": "Python Backup TypeScript Restore",
+      "objective": "TypeScript restores a Python backup, replays baseline and sequences, then continues with exactly sequence N plus one.",
+      "minimumAssertions": ["Backup and manifest bind every v2 identity before restore publication.", "Restored semantic root and next sequence remain exact after TypeScript continuation."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "backup-restore", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "accepted", "typedResult": "canonical-backup-restore-report", "typedFailures": [], "requiresZeroUnintendedMutation": false, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "restore-publication"}
+    },
+    {
+      "id": "OL-R80", "category": "behavior", "slug": "ts-backup-python-restore", "title": "TypeScript Backup Python Restore",
+      "objective": "Python restores a TypeScript backup, replays baseline and sequences, then continues with exactly sequence N plus one.",
+      "minimumAssertions": ["Python validates the TypeScript file and manifest before destination publication.", "Restored semantic root and continued global sequence are byte-identical."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "backup-restore", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "accepted", "typedResult": "canonical-backup-restore-report", "typedFailures": [], "requiresZeroUnintendedMutation": false, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "restore-publication"}
+    },
+    {
+      "id": "OL-R81", "category": "behavior", "slug": "all-identity-equivalence", "title": "All Identity Equivalence",
+      "objective": "Both runtimes produce identical descriptor, schema, migration, baseline, request, result, manifest, and semantic roots.",
+      "minimumAssertions": ["Every portable byte carrier and domain-separated digest is compared exactly.", "Only explicitly nonsemantic runtime metadata may differ."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "accepted", "typedResult": "canonical-cross-language-report", "typedFailures": [], "requiresZeroUnintendedMutation": false, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "none"}
+    },
+    {
+      "id": "OL-R82", "category": "behavior", "slug": "alternating-runtime-all-operations", "title": "Alternating Runtime All Operations",
+      "objective": "TypeScript and Python alternate every sequence across all nine mutation operations and replay one identical final model.",
+      "minimumAssertions": ["Global sequence ownership alternates by runtime without gaps or partitions.", "Both replay engines derive the same intermediate results and final physical root."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "mixed-process", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "accepted", "typedResult": "canonical-cross-language-report", "typedFailures": [], "requiresZeroUnintendedMutation": false, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "commit-order"}
+    },
+    {
+      "id": "OL-R83", "category": "attack", "slug": "cross-runtime-request-byte-drift", "title": "Cross Runtime Request Byte Drift",
+      "objective": "A request carrier accepted by only one runtime is rejected as a conformance failure in both retained implementations.",
+      "minimumAssertions": ["Hostile numeric, Unicode, order, and boundary carriers are evaluated by both codecs.", "No runtime-specific normalization produces a durable request row."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "rejected", "typedResult": null, "typedFailures": [{"name": "CycleStoreProviderError", "code": "GE_CYCLE_STORE_CORRUPTION", "operation": "inspect-schema", "retryable": false}], "requiresZeroUnintendedMutation": true, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "none"}
+    },
+    {
+      "id": "OL-R84", "category": "attack", "slug": "old-artifact-new-schema-refusal", "title": "Old Artifact New Schema Refusal",
+      "objective": "An installed artifact without schema-v2 support safely refuses a v2 file before any read-write mutation.",
+      "minimumAssertions": ["The old artifact returns the exact unsupported-version failure.", "File, WAL, SHM, schema, baseline, operations, and sequence remain byte-identical."],
+      "runtimeRequirements": ["typescript-native", "python-native", "installed-npm", "installed-wheel", "installed-sdist", "artifact-boundary", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "rejected", "typedResult": null, "typedFailures": [{"name": "CycleStoreProviderError", "code": "GE_CYCLE_STORE_UNSUPPORTED_VERSION", "operation": "inspect-schema", "retryable": false}], "requiresZeroUnintendedMutation": true, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "none"}
+    },
+    {
+      "id": "OL-R85", "category": "behavior", "slug": "installed-npm-lifecycle", "title": "Installed NPM Lifecycle",
+      "objective": "A packed npm install creates or migrates, appends, reopens, exact-retries, audits, backs up, restores, and continues.",
+      "minimumAssertions": ["Every lifecycle call imports only from installed public exports and packaged assets.", "Request, result, baseline, sequence, backup, and restored identities remain exact."],
+      "runtimeRequirements": ["typescript-native", "installed-npm", "artifact-boundary", "backup-restore", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "accepted", "typedResult": "canonical-artifact-lifecycle-report", "typedFailures": [], "requiresZeroUnintendedMutation": false, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "restore-publication"}
+    },
+    {
+      "id": "OL-R86", "category": "behavior", "slug": "installed-wheel-sdist-lifecycle", "title": "Installed Wheel and Sdist Lifecycle",
+      "objective": "Isolated wheel and sdist installations each repeat the complete critical v2 provider lifecycle smoke.",
+      "minimumAssertions": ["Both artifacts contain byte-identical canonical migration resources and public codec exports.", "Each isolated environment completes create or migrate through restore and continuation."],
+      "runtimeRequirements": ["python-native", "installed-wheel", "installed-sdist", "artifact-boundary", "backup-restore", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "accepted", "typedResult": "canonical-artifact-lifecycle-report", "typedFailures": [], "requiresZeroUnintendedMutation": false, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "restore-publication"}
+    },
+    {
+      "id": "OL-R87", "category": "behavior", "slug": "bounded-replay-characterization", "title": "Bounded Replay Characterization",
+      "objective": "Ten-thousand and one-hundred-thousand-operation replay records raw time, memory, and query plans without a throughput claim.",
+      "minimumAssertions": ["Raw samples, percentiles, record counts, database sizes, runtime versions, and plans are retained.", "The report declares no release threshold, production throughput, or cross-language speed winner."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "benchmark-characterization", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "accepted", "typedResult": "canonical-benchmark-characterization", "typedFailures": [], "requiresZeroUnintendedMutation": false, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "none"}
+    },
+    {
+      "id": "OL-R88", "category": "attack", "slug": "cancellation-hidden-commit", "title": "Cancellation Hidden Commit",
+      "objective": "Python task cancellation may hide a committed sequence, but exact operation-ID retry returns it without allocating N plus one.",
+      "minimumAssertions": ["Cancellation is injected after commit and before acknowledgement at an exact barrier.", "Retry after reopen returns stored result and leaves physical state and sequence count unchanged."],
+      "runtimeRequirements": ["python-native", "process-kill", "fault-injection", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "rejected", "typedResult": null, "typedFailures": [{"name": "CycleStoreProviderError", "code": "GE_CYCLE_STORE_UNAVAILABLE", "operation": "append", "retryable": true}], "requiresZeroUnintendedMutation": false, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "cancellation-acknowledgement"}
+    },
+    {
+      "id": "OL-R89", "category": "attack", "slug": "busy-full-io-failure", "title": "Busy Full and IO Failure",
+      "objective": "Bounded BUSY, FULL, IOERR, and read-only failures retain sequence and state atomicity with safe error classes.",
+      "minimumAssertions": ["Each real or injected SQLite base code maps to its exact closed provider failure.", "No failed transaction leaves a sequence gap, ledger-only row, mutation-only row, or active transaction."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "mixed-process", "fault-injection", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "rejected", "typedResult": null, "typedFailures": [{"name": "CycleStoreProviderError", "code": "GE_CYCLE_STORE_UNAVAILABLE", "operation": "append", "retryable": true}], "requiresZeroUnintendedMutation": true, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "fault-boundary"}
+    },
+    {
+      "id": "OL-R90", "category": "attack", "slug": "path-and-symlink-substitution", "title": "Path and Symlink Substitution",
+      "objective": "Migration, backup, and restore source or target substitution cannot redirect, alias, or overwrite trusted state.",
+      "minimumAssertions": ["Resolved source, destination, alias, hard-link, and symlink identities are checked before publication.", "Every refusal preserves source and removes unpublished temporary targets."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "backup-restore", "fault-injection", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "rejected", "typedResult": null, "typedFailures": [{"name": "CycleStoreProviderError", "code": "GE_CYCLE_STORE_INVALID_ARGUMENT", "operation": "inspect-schema", "retryable": false}], "requiresZeroUnintendedMutation": true, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "restore-publication"}
+    },
+    {
+      "id": "OL-R91", "category": "attack", "slug": "sql-error-payload-leak", "title": "SQL Error Payload Leak",
+      "objective": "Raw SQL, expanded statements, paths, request and result bytes, and hostile sentinels never escape safe errors or reports.",
+      "minimumAssertions": ["Every structured and textual failure surface is scanned against all retained sentinels.", "SQLite causes and statements remain unavailable outside the private adapter boundary."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "fault-injection", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "rejected", "typedResult": null, "typedFailures": [{"name": "CycleStoreProviderError", "code": "GE_CYCLE_STORE_CORRUPTION", "operation": "inspect-schema", "retryable": false}], "requiresZeroUnintendedMutation": true, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "fault-boundary"}
+    },
+    {
+      "id": "OL-R92", "category": "attack", "slug": "event-cursor-tail-forgery", "title": "Event Cursor Tail Forgery",
+      "objective": "A coherent event snapshot tail hash and BLOB change without one matching immutable record fails semantic audit.",
+      "minimumAssertions": ["Cursor tenant, stream, tail sequence, and tail hash bind to an exact record row.", "Rehashing the cursor snapshot cannot manufacture a valid immutable tail."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "rejected", "typedResult": null, "typedFailures": [{"name": "CycleStoreProviderError", "code": "GE_CYCLE_STORE_CORRUPTION", "operation": "inspect-schema", "retryable": false}], "requiresZeroUnintendedMutation": true, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "none"}
+    },
+    {
+      "id": "OL-R93", "category": "attack", "slug": "checkpoint-revision-forgery", "title": "Checkpoint Revision Forgery",
+      "objective": "A current checkpoint revision changed to a nonexistent or wrong retained revision fails semantic reconciliation.",
+      "minimumAssertions": ["Current checkpoint revision names its exact immutable put revision.", "Changing a canonical current row and its summary together cannot bypass revision history."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "rejected", "typedResult": null, "typedFailures": [{"name": "CycleStoreProviderError", "code": "GE_CYCLE_STORE_CORRUPTION", "operation": "inspect-schema", "retryable": false}], "requiresZeroUnintendedMutation": true, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "none"}
+    },
+    {
+      "id": "OL-R94", "category": "attack", "slug": "backup-baseline-manifest-forgery", "title": "Backup Baseline Manifest Forgery",
+      "objective": "Changed baseline or sequence identity in a backup or sidecar manifest blocks restore and removes unpublished targets.",
+      "minimumAssertions": ["Source file bytes, semantic identities, and manifest domain hash are all verified before restore.", "Every mismatch leaves the explicit destination and hidden publication paths absent."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "backup-restore", "fault-injection", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "rejected", "typedResult": null, "typedFailures": [{"name": "CycleStoreProviderError", "code": "GE_CYCLE_STORE_CORRUPTION", "operation": "inspect-schema", "retryable": false}], "requiresZeroUnintendedMutation": true, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "restore-publication"}
+    },
+    {
+      "id": "OL-R95", "category": "attack", "slug": "migration-asset-byte-drift", "title": "Migration Asset Byte Drift",
+      "objective": "One changed schema-v2 SQL, identity, manifest, fixture, or mirrored asset byte fails before migration execution.",
+      "minimumAssertions": ["Compiled trust anchors reject coordinated as well as single-copy replacement.", "Source database application ID, user version, schema, and bytes remain unchanged."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "artifact-boundary", "migration-v1", "fault-injection", "destructive-database", "fresh-temporary-root", "explicit-database-path"],
+      "expected": {"outcome": "rejected", "typedResult": null, "typedFailures": [{"name": "CycleStoreProviderError", "code": "GE_CYCLE_STORE_CORRUPTION", "operation": "inspect-schema", "retryable": false}], "requiresZeroUnintendedMutation": true, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "migration-publication"}
+    },
+    {
+      "id": "OL-R96", "category": "attack", "slug": "evidence-and-nonclaim-sentinel", "title": "Evidence and Nonclaim Sentinel",
+      "objective": "Evidence validation rejects incomplete results, mutable references, missing cold gates, and unauthorized release or popularity claims.",
+      "minimumAssertions": ["Pending, skipped, expected-failure, waiver, mutable-ref, and missing-gate mutations all fail closed.", "Release-ready, distributed-safety, production-throughput, Star-count, and popularity language are rejected."],
+      "runtimeRequirements": ["typescript-native", "python-native", "cross-language-exact", "artifact-boundary"],
+      "expected": {"outcome": "rejected", "typedResult": null, "typedFailures": [{"name": "CycleStoreProviderError", "code": "GE_CYCLE_STORE_INVALID_ARGUMENT", "operation": "inspect-schema", "retryable": false}], "requiresZeroUnintendedMutation": true, "requiresExactTransactionCleanup": true, "requiresLeakSentinelScan": true, "barrier": "none"}
+    }
+  ]
+}

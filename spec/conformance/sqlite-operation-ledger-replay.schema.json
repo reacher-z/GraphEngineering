@@ -1,0 +1,213 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/conformance/sqlite-operation-ledger-replay-v1.schema.json",
+  "title": "SQLite operation-ledger replay conformance campaign contract",
+  "description": "Closed, contract-frozen catalog for the ordered OL-R01 through OL-R96 campaign. This schema describes required evidence and does not claim that any runtime implementation passes it.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "id", "status", "expect", "cases"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "id": { "const": "sqlite-operation-ledger-replay-v1" },
+    "status": { "const": "contract-frozen" },
+    "expect": { "$ref": "#/$defs/expect" },
+    "cases": {
+      "type": "array",
+      "minItems": 96,
+      "maxItems": 96,
+      "items": { "$ref": "#/$defs/case" }
+    }
+  },
+  "$defs": {
+    "expect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "caseCount",
+        "behaviorCaseCount",
+        "attackCaseCount",
+        "casesCanonicalUtf8Bytes",
+        "casesSha256"
+      ],
+      "properties": {
+        "caseCount": { "const": 96 },
+        "behaviorCaseCount": { "const": 48 },
+        "attackCaseCount": { "const": 48 },
+        "casesCanonicalUtf8Bytes": { "type": "integer", "minimum": 1 },
+        "casesSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "case": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "category",
+        "slug",
+        "title",
+        "objective",
+        "minimumAssertions",
+        "runtimeRequirements",
+        "expected"
+      ],
+      "properties": {
+        "id": { "type": "string", "pattern": "^OL-R(?:0[1-9]|[1-8][0-9]|9[0-6])$" },
+        "category": { "enum": ["behavior", "attack"] },
+        "slug": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$", "minLength": 3, "maxLength": 96 },
+        "title": { "$ref": "#/$defs/substantiveText" },
+        "objective": { "$ref": "#/$defs/substantiveText" },
+        "minimumAssertions": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 12,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/substantiveText" }
+        },
+        "runtimeRequirements": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "typescript-native",
+              "python-native",
+              "cross-language-exact",
+              "mixed-process",
+              "process-kill",
+              "fault-injection",
+              "destructive-database",
+              "fresh-temporary-root",
+              "explicit-database-path",
+              "migration-v0",
+              "migration-v1",
+              "backup-restore",
+              "installed-npm",
+              "installed-wheel",
+              "installed-sdist",
+              "benchmark-characterization",
+              "artifact-boundary"
+            ]
+          }
+        },
+        "expected": { "$ref": "#/$defs/expected" }
+      }
+    },
+    "expected": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "outcome",
+        "typedResult",
+        "typedFailures",
+        "requiresZeroUnintendedMutation",
+        "requiresExactTransactionCleanup",
+        "requiresLeakSentinelScan",
+        "barrier"
+      ],
+      "properties": {
+        "outcome": { "enum": ["accepted", "rejected"] },
+        "typedResult": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "enum": [
+                "canonical-request-vector-set",
+                "canonical-request-roundtrip",
+                "canonical-request-boundary-report",
+                "canonical-idempotent-result",
+                "canonical-capture-report",
+                "canonical-sequence-state",
+                "canonical-migration-state",
+                "canonical-baseline-report",
+                "canonical-replay-state",
+                "canonical-cross-language-report",
+                "canonical-backup-restore-report",
+                "canonical-artifact-lifecycle-report",
+                "canonical-benchmark-characterization"
+              ]
+            }
+          ]
+        },
+        "typedFailures": {
+          "type": "array",
+          "maxItems": 8,
+          "items": { "$ref": "#/$defs/typedFailure" }
+        },
+        "requiresZeroUnintendedMutation": { "type": "boolean" },
+        "requiresExactTransactionCleanup": { "type": "boolean" },
+        "requiresLeakSentinelScan": { "const": true },
+        "barrier": {
+          "enum": [
+            "none",
+            "authorization-await",
+            "busy-transaction",
+            "commit-order",
+            "migration-publication",
+            "snapshot-interleave",
+            "mixed-runtime-race",
+            "cancellation-acknowledgement",
+            "fault-boundary",
+            "restore-publication"
+          ]
+        }
+      }
+    },
+    "typedFailure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "code", "operation", "retryable"],
+      "properties": {
+        "name": { "const": "CycleStoreProviderError" },
+        "code": {
+          "enum": [
+            "GE_CYCLE_STORE_INVALID_ARGUMENT",
+            "GE_CYCLE_STORE_INVALID_CURSOR",
+            "GE_CYCLE_STORE_NOT_FOUND",
+            "GE_CYCLE_STORE_CONFLICT",
+            "GE_CYCLE_STORE_IDEMPOTENCY_CONFLICT",
+            "GE_CYCLE_STORE_LEASE_CONFLICT",
+            "GE_CYCLE_STORE_STALE_FENCE",
+            "GE_CYCLE_STORE_UNAVAILABLE",
+            "GE_CYCLE_STORE_CORRUPTION",
+            "GE_CYCLE_STORE_QUOTA_EXCEEDED",
+            "GE_CYCLE_STORE_PERMISSION_DENIED",
+            "GE_CYCLE_STORE_UNSUPPORTED_VERSION",
+            "GE_CYCLE_STORE_LEGAL_HOLD",
+            "GE_CYCLE_STORE_MIGRATION_LOCKED",
+            "GE_CYCLE_STORE_INTERNAL"
+          ]
+        },
+        "operation": {
+          "enum": [
+            "describe",
+            "inspect-schema",
+            "read-tail",
+            "append",
+            "read-event-page",
+            "save-checkpoint",
+            "load-checkpoint",
+            "list-checkpoints",
+            "delete-checkpoint",
+            "acquire-lease",
+            "renew-lease",
+            "release-lease",
+            "inspect-lease",
+            "set-legal-hold",
+            "inspect-governance",
+            "acquire-migration-lock",
+            "inspect-migration-lock",
+            "release-migration-lock"
+          ]
+        },
+        "retryable": { "type": "boolean" }
+      }
+    },
+    "substantiveText": {
+      "type": "string",
+      "minLength": 12,
+      "maxLength": 512,
+      "pattern": "\\S"
+    }
+  }
+}

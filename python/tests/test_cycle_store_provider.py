@@ -9,17 +9,20 @@ from typing import Any
 
 import pytest
 
-from graph_engineering import canonical_json
+from graph_engineering import canonical_bytes, canonical_json
 from graph_engineering.cycle_store_provider import (
+    CYCLE_STORE_OPERATION_DOMAIN,
     CYCLE_STORE_PROVIDER_CONTRACT_VERSION,
     CYCLE_STORE_PROVIDER_DESCRIPTOR_DOMAIN,
     MAX_CYCLE_STORE_APPEND_RECORDS,
     MAX_CYCLE_STORE_PAGE_SIZE,
+    CycleStoreProviderAdapterCodec,
     CycleStoreProviderError,
     MemoryCycleStoreProvider,
     create_cycle_store_checkpoint,
     create_cycle_store_record,
     create_reference_cycle_store_provider_descriptor,
+    cycle_store_adapter_codec,
     validate_cycle_store_provider_descriptor,
 )
 
@@ -101,7 +104,9 @@ def test_provider_surface_is_exported_and_all_groups_remain_sorted() -> None:
     import graph_engineering as ge
 
     assert ge.MemoryCycleStoreProvider is MemoryCycleStoreProvider
+    assert ge.CycleStoreProviderAdapterCodec is CycleStoreProviderAdapterCodec
     assert ge.CycleStoreProviderError is CycleStoreProviderError
+    assert ge.cycle_store_adapter_codec is cycle_store_adapter_codec
     assert ge.create_cycle_store_record is create_cycle_store_record
     assert ge.create_cycle_store_checkpoint is create_cycle_store_checkpoint
     assert (
@@ -114,6 +119,170 @@ def test_provider_surface_is_exported_and_all_groups_remain_sorted() -> None:
     assert uppercase == sorted(uppercase)
     assert pascal == sorted(pascal)
     assert lowercase == sorted(lowercase)
+
+
+def test_adapter_codec_builds_closed_detached_stronger_descriptors() -> None:
+    reference = create_reference_cycle_store_provider_descriptor()
+    profile = {
+        "providerId": "sqlite-local",
+        "schemaVersion": reference["schemaVersion"],
+        "compatibility": copy.deepcopy(reference["compatibility"]),
+        "limits": copy.deepcopy(reference["limits"]),
+        "capabilities": copy.deepcopy(reference["capabilities"]),
+        "protection": copy.deepcopy(reference["protection"]),
+        "governance": copy.deepcopy(reference["governance"]),
+    }
+    profile["capabilities"].update(
+        {
+            "durability": "durable",
+            "distributedFencing": False,
+            "legalHold": "enforced",
+            "backupRestore": "enforced",
+        }
+    )
+    profile["protection"]["encryptionAtRest"] = "external"
+
+    descriptor = cycle_store_adapter_codec.create_descriptor(profile)
+    assert descriptor["providerId"] == "sqlite-local"
+    assert descriptor["capabilities"]["durability"] == "durable"
+    assert descriptor["capabilities"]["distributedFencing"] is False
+    assert descriptor["protection"]["encryptionAtRest"] == "external"
+    assert validate_cycle_store_provider_descriptor(descriptor) == descriptor
+
+    profile["capabilities"]["durability"] = "process-local"
+    assert descriptor["capabilities"]["durability"] == "durable"
+
+    opened = {
+        **profile,
+        "unknown": True,
+    }
+    with pytest.raises(CycleStoreProviderError) as error:
+        cycle_store_adapter_codec.create_descriptor(opened)
+    assert error.value.code == "GE_CYCLE_STORE_INVALID_ARGUMENT"
+    assert str(error.value) == "provider profile must be closed"
+
+
+def test_adapter_codec_captures_requests_and_operation_hashes() -> None:
+    descriptor = create_reference_cycle_store_provider_descriptor()
+    batch = records(1, "adapter")
+    request = {
+        "context": mutation("adapter-append"),
+        "streamId": "stream-a",
+        "expectedTail": MISSING,
+        "lease": None,
+        "records": batch,
+    }
+    captured = cycle_store_adapter_codec.capture_request("append", request, descriptor)
+    expected_hash = hashlib.sha256(
+        (
+            CYCLE_STORE_OPERATION_DOMAIN
+            + canonical_json({"operation": "append", "request": captured})
+        ).encode()
+    ).hexdigest()
+    assert (
+        cycle_store_adapter_codec.operation_request_hash("append", captured)
+        == expected_hash
+    )
+
+    request["context"]["operationId"] = "mutated"
+    request["records"][0]["value"]["source"] = "mutated"
+    assert captured["context"]["operationId"] == "adapter-append"
+    assert captured["records"][0]["value"]["source"] == "adapter"
+    assert cycle_store_adapter_codec.capture_request(
+        "inspect-schema", AUTH, descriptor
+    ) == {"context": AUTH}
+
+    invalid = {
+        "context": {"tenantId": "tenant-a"},
+        "streamId": "stream-a",
+        "leaseId": "lease-a",
+        "holderId": "holder-a",
+        "ttlMs": 1_000,
+        "mode": "invalid",
+        "expectedFencingToken": 0,
+    }
+    with pytest.raises(CycleStoreProviderError) as error:
+        cycle_store_adapter_codec.capture_request("acquire-lease", invalid, descriptor)
+    assert str(error.value) == "mutation context must be closed"
+
+
+def test_adapter_codec_parses_canonical_storage_and_rejects_drift() -> None:
+    record = records(1, "stored")[0]
+    record_bytes = canonical_bytes(record)
+    assert (
+        cycle_store_adapter_codec.parse_stored_record(record_bytes, "read-event-page")
+        == record
+    )
+
+    checkpoint = create_cycle_store_checkpoint(
+        checkpoint_scope="scope-a",
+        checkpoint_id="checkpoint-a",
+        stream_id="stream-a",
+        bound_sequence=0,
+        bound_record_hash=str(record["recordHash"]),
+        created_at="2026-07-27T00:00:00Z",
+        value={"state": "ready"},
+    )
+    checkpoint_bytes = canonical_bytes(checkpoint)
+    assert (
+        cycle_store_adapter_codec.parse_stored_checkpoint(
+            checkpoint_bytes,
+            "load-checkpoint",
+        )
+        == checkpoint
+    )
+
+    for value, operation, parser in (
+        (b" " + record_bytes, "read-event-page", cycle_store_adapter_codec.parse_stored_record),
+        (
+            canonical_bytes({**checkpoint, "unknown": True}),
+            "load-checkpoint",
+            cycle_store_adapter_codec.parse_stored_checkpoint,
+        ),
+    ):
+        with pytest.raises(CycleStoreProviderError) as error:
+            parser(value, operation)
+        assert error.value.code == "GE_CYCLE_STORE_CORRUPTION"
+        assert error.value.operation == operation
+
+
+def test_adapter_codec_round_trips_only_closed_canonical_ledger_results() -> None:
+    record = records(1, "ledger")[0]
+    result = {
+        "tail": {
+            "exists": True,
+            "sequence": 0,
+            "recordHash": record["recordHash"],
+        },
+        "appendedRecords": 1,
+    }
+    encoded = cycle_store_adapter_codec.encode_ledger_result("append", result)
+    assert encoded == canonical_bytes(result)
+    assert cycle_store_adapter_codec.decode_ledger_result("append", encoded) == result
+    assert cycle_store_adapter_codec.encode_ledger_result(
+        "release-migration-lock", None
+    ) == b"null"
+    assert (
+        cycle_store_adapter_codec.decode_ledger_result(
+            "release-migration-lock",
+            b"null",
+        )
+        is None
+    )
+
+    with pytest.raises(CycleStoreProviderError) as encode_error:
+        cycle_store_adapter_codec.encode_ledger_result(
+            "append",
+            {**result, "unknown": True},
+        )
+    assert encode_error.value.code == "GE_CYCLE_STORE_INVALID_ARGUMENT"
+
+    with pytest.raises(CycleStoreProviderError) as decode_error:
+        cycle_store_adapter_codec.decode_ledger_result(
+            "append",
+            canonical_bytes({**result, "unknown": True}),
+        )
+    assert decode_error.value.code == "GE_CYCLE_STORE_CORRUPTION"
 
 
 def test_descriptor_is_closed_extensible_and_cross_language_content_addressed() -> None:

@@ -5165,3 +5165,2236 @@ S01 acceptance MUST run, in order:
 
 The next dispatch after S01 evidence is S02 SQLite, unless a newly discovered
 provider-contract defect requires an append-only S01 remediation section.
+
+## 31.30 D7-S02 single-host durable SQLite CycleStore adapter
+
+This section is appended after the immutable S01 implementation and evidence
+were pushed. It does not rewrite, reorder, narrow, or mark complete any prior
+plan text. It turns the provider-neutral contract into the first real durable
+adapter while preserving the explicit boundary that SQLite is a local,
+single-host database and not a distributed ownership service.
+
+### 31.30.1 Outcome and non-claims
+
+S02 MUST deliver independently implemented TypeScript and Python SQLite
+adapters that satisfy the exact S01 provider interface and the complete 54-case
+provider campaign. The same database file MUST be readable, writable, audited,
+backed up, and restored by either runtime without an inter-language shell-out.
+
+The bounded outcome includes:
+
+- durable event records, stream heads, operation ledger, checkpoints, leases,
+  legal holds, migration lock, cursors, and schema metadata;
+- atomic compare-and-swap under real SQLite transactions;
+- process restart and operating-system process crash recovery;
+- same-host multi-process stale-writer exclusion through database-serialized
+  fence checks;
+- online backup through the SQLite backup API rather than raw file copying;
+- integrity, foreign-key, canonical-byte, hash-chain, head, ledger, checkpoint,
+  lease, and migration-fence audits;
+- migration from the immediately previous repository-defined alpha schema;
+- native and cross-language concurrency/crash/backup evidence; and
+- installable npm and Python artifacts with the adapter and migration bytes.
+
+S02 MUST NOT claim:
+
+- multi-host or network-filesystem fencing;
+- PostgreSQL-equivalent availability, failover, row-level concurrency, or
+  point-in-time recovery;
+- transparent encryption at rest from stock SQLite;
+- asynchronous nonblocking database I/O merely because the provider methods
+  return promises or coroutines;
+- legal deletion, compaction, or archival that has no implemented API;
+- checkpoint authority;
+- protection of raw event payloads that were not protected before storage;
+- safe raw copying of a live WAL database;
+- release readiness, D7 completion, or any Star/popularity result.
+
+### 31.30.2 Package topology and runtime floors
+
+The TypeScript adapter MUST live in a new leaf package:
+
+`packages/sqlite` → `@graph-engineering/sqlite`
+
+It may depend on the public roots of `@graph-engineering/runtime` and
+`@graph-engineering/core`. It MUST NOT import another package's `src/`,
+`dist/`, private symbol, or filesystem-relative internal path. Runtime already
+depends on persistence, so placing the SQLite adapter in persistence and then
+depending on runtime would create a dependency cycle. The new leaf package
+keeps the existing core/runtime/persistence Node floor unchanged.
+
+The SQLite package MUST declare Node `>=22.16.0` because its implementation
+uses the built-in `node:sqlite` online backup API and the 22.16 transaction and
+statement surface. It MUST use only APIs present at that floor even when the
+development `@types/node` is newer. CI MUST include the real floor and the
+current supported 22.x line. The package README and root support matrix MUST
+call out the active-development status of `node:sqlite` on Node 22.
+
+Python MUST use the standard-library `sqlite3` module and retain the project
+floor of Python 3.11. It MUST have explicit compatibility tests for Python 3.11
+legacy transaction control and Python 3.12+ `autocommit` behavior.
+
+### 31.30.3 Exact owned paths and forbidden shared paths
+
+Primary S02 owned paths are:
+
+- `packages/sqlite/package.json`;
+- `packages/sqlite/tsconfig.json`;
+- `packages/sqlite/LICENSE`;
+- `packages/sqlite/README.md`;
+- `packages/sqlite/src/index.ts`;
+- `packages/sqlite/src/sqlite-cycle-store.ts`;
+- `packages/sqlite/src/sqlite-codec.ts` if a package-private database codec is
+  still required after the shared adapter kit;
+- `packages/sqlite/src/migrations.ts`;
+- `packages/sqlite/src/backup.ts`;
+- `packages/sqlite/src/integrity.ts`;
+- `packages/sqlite/test/sqlite-cycle-store.test.ts`;
+- `packages/sqlite/test/sqlite-concurrency.test.ts`;
+- `packages/sqlite/test/sqlite-backup.test.ts`;
+- `packages/sqlite/test/sqlite-migration.test.ts`;
+- `packages/sqlite/test/helpers/**` for bounded child-process workers only;
+- `python/src/graph_engineering/sqlite_cycle_store.py`;
+- `python/tests/test_sqlite_cycle_store.py`;
+- `python/tests/test_sqlite_concurrency.py`;
+- `python/tests/test_sqlite_backup.py`;
+- `python/tests/test_sqlite_migration.py`;
+- `spec/migrations/sqlite/**`;
+- `spec/conformance/sqlite-cycle-store.case.json`;
+- `tools/conformance/sqlite_cycle_store.mjs`;
+- `tools/conformance/python_sqlite_cycle_store_report.py`;
+- `tools/conformance/sqlite_interop.mjs`;
+- `tools/conformance/sqlite_crash_harness.mjs`;
+- `docs/SQLITE.md`;
+- package/root/Python README and changelog integration;
+- fixture, package, artifact, and conformance runners only where required; and
+- S02 daily/review evidence files.
+
+S02 MUST NOT absorb, stage, rewrite, or claim unrelated D4, D9, D10, budget,
+redaction, protected-value, capture, subgraph-edge, task-registry, security
+plan, or progress-scanner work already present in the shared worktree.
+
+### 31.30.4 Adapter authoring kit remediation
+
+S01 intentionally exposed the provider interface and value constructors but
+left request capture/parsing helpers private to the memory oracle. S02 MUST not
+solve this by copying hundreds of lines of subtly divergent validation into
+each database adapter.
+
+Add a bounded adapter-authoring kit in both languages. It MUST:
+
+- capture every request before the first await;
+- enforce closed objects, exact identifiers, hashes, integer bounds,
+  timestamps, portable JSON, and descriptor-specific limits;
+- return detached canonical typed requests;
+- validate stored records and checkpoints by recomputing their canonical
+  identities;
+- compute the exact domain-separated operation request hash;
+- create descriptors from a closed stronger-capability profile;
+- parse stored canonical results without accepting unknown fields;
+- expose no database-specific state or mutable parser internals; and
+- be exercised by the memory provider itself or exact parity tests so it cannot
+  silently drift from the oracle.
+
+Prefer one frozen `cycleStoreAdapterCodec`/`cycle_store_adapter_codec` public
+surface over many unrelated low-level exports. Public API additions MUST be
+documented and package-tested. Private source imports are forbidden.
+
+### 31.30.5 Truthful SQLite descriptor
+
+Both adapters MUST independently produce the same descriptor bytes and hash
+for provider ID `sqlite-local`. The initial profile MUST declare:
+
+- schema version and compatibility interval: 1 only;
+- durability: `durable`, but only after crash/restart evidence passes;
+- distributed fencing: `false`;
+- snapshot pagination and checkpoint CRUD: true;
+- legal hold: `enforced` for persisted hold state and any implemented
+  deletion boundary;
+- backup/restore: `enforced` only after verified online backup/restore passes;
+- compaction: `logical-history-preserving` with no physical compactor claim;
+- payload protection: `external`;
+- encryption at rest: `external`;
+- retention and archival: `descriptor-only`;
+- raw payload observability: false; and
+- the exact safe observability field list from S01.
+
+The descriptor MUST state through docs, not an invented enum, that WAL and
+SQLite file locks require all writers to use the same local filesystem. A
+database client on a file share MUST not be presented as distributed fencing.
+
+### 31.30.6 Canonical migration inventory
+
+Migration bytes MUST be reviewed repository artifacts, never assembled from
+caller data. Define:
+
+- a previous-alpha fixture representing schema version 0;
+- the authoritative migration to version 1;
+- a migration manifest containing version, previous version, SQL SHA-256,
+  schema identity, reversibility classification, and required postconditions;
+- byte-identical copies in the npm and Python artifacts; and
+- validators that compare every packaged copy with the canonical spec bytes.
+
+Migrations MUST run under an exclusive fenced migration decision. Unknown
+future versions, missing intermediate versions, changed applied-migration
+hashes, partial DDL, or a live incompatible migration MUST fail closed. A
+failed migration MUST leave both schema and `user_version` unchanged.
+
+Development downgrade guidance may rebuild a new database from a verified
+backup. S02 MUST not claim an in-place destructive downgrade where no lossless
+inverse exists.
+
+### 31.30.7 Version-1 relational schema
+
+Use `STRICT` tables and explicit indexes where supported by the declared
+SQLite floor. The logical inventory MUST include:
+
+1. `ge_cycle_schema`
+   - singleton schema identity;
+   - current version and compatible reader/writer interval;
+   - applied migration hash and timestamp;
+   - provider descriptor hash;
+   - no caller-controlled SQL.
+2. `ge_cycle_streams`
+   - primary key `(tenant_id, stream_id)`;
+   - exact tail sequence and record hash;
+   - creation/update provider timestamps;
+   - checks for missing versus nonempty-tail consistency.
+3. `ge_cycle_records`
+   - primary key `(tenant_id, stream_id, sequence)`;
+   - tenant-wide unique `(tenant_id, record_id)`;
+   - tenant-wide unique record hash where the schema contract requires it;
+   - previous hash, value hash, value byte count, authoritative canonical BLOB,
+     complete authoritative record BLOB, and commit timestamp;
+   - foreign key to stream identity;
+   - constraints on sequence, byte count, and hash text length.
+4. `ge_cycle_operations`
+   - primary key `(tenant_id, operation_id)`;
+   - exact operation name and request hash;
+   - canonical result BLOB, result hash, and commit timestamp;
+   - written in the same transaction as the mutation.
+5. `ge_cycle_checkpoints`
+   - primary key `(tenant_id, checkpoint_scope, checkpoint_id)`;
+   - bound stream, sequence, and record hash;
+   - canonical checkpoint BLOB and summary fields;
+   - content hash/byte count and deterministic ordering columns.
+6. `ge_cycle_leases`
+   - primary key `(tenant_id, stream_id)`;
+   - optional active lease identity;
+   - persisted last epoch and last fencing token even after release;
+   - provider-millisecond acquisition and expiry values;
+   - checks that active fields are jointly null or jointly populated.
+7. `ge_cycle_legal_holds`
+   - primary key `(tenant_id, stream_id, hold_id)`;
+   - foreign key to an existing stream;
+   - provider timestamp.
+8. `ge_cycle_migration_lock`
+   - singleton active lock plus last epoch/fence;
+   - source/target versions, owner/lock identity, and provider times;
+   - preserved last fence after release.
+9. `ge_cycle_cursors`
+   - opaque random token hash, never an authorization-bearing plaintext token;
+   - kind, tenant and authorization binding, request scope, snapshot bounds,
+     page position, descriptor/schema identity, snapshot BLOB, and expiry;
+   - single-use transactional consume semantics.
+
+Authoritative canonical carriers MUST be BLOBs. TEXT is permitted only for
+safe identifiers, hashes, fixed enums, and timestamps/diagnostics. Neither
+runtime may rely on `text_factory`, locale collation, implicit number
+conversion, `SELECT *`, duplicate aliases, or property enumeration order.
+
+### 31.30.8 Connection initialization and invariant checks
+
+Every connection MUST explicitly establish and read back:
+
+- `PRAGMA foreign_keys = ON` outside a transaction;
+- `PRAGMA journal_mode = WAL` for writable file-backed databases;
+- bounded `busy_timeout`;
+- documented `synchronous` level, defaulting to `FULL` for the durability
+  claim unless a weaker caller-selected mode changes the descriptor/nonclaim;
+- trusted schema behavior appropriate to the supported SQLite version;
+- extension loading disabled;
+- double-quoted string literals disabled in Node;
+- no writable-schema mode;
+- a bounded WAL autocheckpoint policy; and
+- the expected `application_id`, `user_version`, and schema manifest.
+
+If a required setting cannot be applied or read back exactly, construction
+fails before serving operations. Foreign-key enforcement MUST never be toggled
+inside a transaction, where SQLite may silently ignore the request.
+
+### 31.30.9 Transaction discipline
+
+All mutations MUST execute as one complete synchronous database transaction:
+
+1. no transaction is active;
+2. `BEGIN IMMEDIATE` acquires the writer reservation;
+3. exact operation ledger lookup occurs first;
+4. current migration lock is checked;
+5. current tail/lease/fence/governance state is read;
+6. mutation-specific CAS and validation run;
+7. authoritative rows and operation result are written;
+8. fault boundary `before-commit` fires;
+9. SQL `COMMIT` completes;
+10. fault boundary `after-commit-before-return` fires; and
+11. the detached canonical result returns.
+
+Any exception while a transaction remains active MUST attempt explicit SQL
+`ROLLBACK` in a `finally` path. SQLite does not automatically roll back the
+earlier successful statements when a later statement fails. Nested public
+transactions are forbidden.
+
+Do not use a deferred read transaction and then upgrade it to a writer. Under
+WAL, that path can fail immediately with `SQLITE_BUSY_SNAPSHOT` even when the
+busy timeout is nonzero. Every mutation begins with `BEGIN IMMEDIATE` before
+reading its decision state.
+
+Python 3.12+ MUST use one documented transaction mode. If construction uses
+`autocommit=True` plus manual SQL `BEGIN IMMEDIATE`, `Connection.commit()` and
+`rollback()` MUST NOT be used because they can be no-ops for the manual
+transaction. Use SQL `COMMIT` and `ROLLBACK` uniformly on every Python version.
+
+### 31.30.10 Bounded busy retry and cancellation
+
+Connection busy timeout is necessary but insufficient. Add a bounded whole-
+transaction retry policy with explicit maximum attempts and elapsed-time cap.
+Only SQLite BUSY/LOCKED base codes may retry. CAS loss, constraints, malformed
+requests, corruption, permission, full disk, read-only media, and unsupported
+schema MUST not enter the busy retry loop.
+
+Each retry MUST restart from ledger lookup under a new `BEGIN IMMEDIATE`.
+Never resume halfway through a failed transaction. Final lock exhaustion maps
+to typed `GE_CYCLE_STORE_UNAVAILABLE` with safe bounded retry details and no
+raw SQLite string.
+
+Python `asyncio.to_thread` cancellation does not stop a running SQLite call.
+The thread may commit after the awaiting task is cancelled. Documentation and
+tests MUST require retry with the same operation ID, making cancellation an
+ambiguous-outcome recovery rather than proof of rollback.
+
+Node's `DatabaseSync` is synchronous and may block the event loop for the
+configured timeout. The package MUST publish this limitation, cap busy time,
+measure event-loop delay in tests, and avoid an unsupported nonblocking claim.
+
+### 31.30.11 Atomic append and SQL CAS
+
+Append MUST validate and capture the complete batch before opening a write
+transaction. Inside the transaction:
+
+- replay the exact operation ledger first;
+- read the current stream head under the writer reservation;
+- compare both expected sequence and expected hash;
+- verify current active lease/fence when the stream has entered leased
+  ownership;
+- verify every sequence, previous hash, record hash, value hash, byte count,
+  tenant-wide record ID, and batch-local uniqueness;
+- insert every record;
+- update or create the stream head with an exact conditional decision; and
+- insert the operation result before commit.
+
+One bad record MUST roll back the complete batch. `changes`/`rowcount`, not
+`lastInsertRowid`, determines conditional-update success. A zero-row head CAS
+is `GE_CYCLE_STORE_CONFLICT`. A constraint must be translated according to the
+known statement and invariant, never by exposing or string-matching the raw SQL
+message.
+
+### 31.30.12 Durable idempotency ledger
+
+The `(tenant_id, operation_id)` ledger is global across mutation operation
+types. It stores operation name, domain-separated request hash, canonical
+result bytes, and result hash.
+
+An exact retry MUST return the first result even after restart, lease expiry,
+tail advance, checkpoint deletion, legal-hold change, migration start, backup,
+or restore. Same ID with any changed byte or operation name returns
+`GE_CYCLE_STORE_IDEMPOTENCY_CONFLICT` without mutation.
+
+The crash harness MUST prove:
+
+- kill before commit leaves neither mutation nor ledger;
+- kill after commit but before acknowledgement retains both;
+- retry after either outcome converges without duplicates; and
+- no state exists where only the ledger or only the mutation committed.
+
+### 31.30.13 Snapshot event and checkpoint pagination
+
+Event pagination MUST bind the exact snapshot tail. Initial page creation and
+cursor persistence occur transactionally. Later appends are excluded by the
+stored tail sequence/hash. Continuations transactionally consume the old
+cursor and create at most one successor.
+
+Checkpoint pagination MUST persist the exact ordered summary snapshot, not
+rerun a live query on each page. A save/delete between pages cannot introduce
+a skip or duplicate. Ordering remains descending bound sequence, descending
+created-at text, then ascending checkpoint ID.
+
+Cursors MUST survive adapter close/reopen and a verified backup/restore. They
+remain bounded, expiring, single-use, tenant/auth/scope/page-size/descriptor/
+schema bound, and payload-free. Expiry cleanup MUST be bounded per operation;
+an attacker cannot force an unbounded full-table sweep.
+
+### 31.30.14 Checkpoints remain disposable
+
+Checkpoint save validates the current exact event tail and live lease/fence in
+the same write transaction. Immutable ID conflicts, stale tail, changed
+content, or malformed canonical bytes commit nothing. Load MUST recompute the
+canonical checkpoint identity and map drift to `GE_CYCLE_STORE_CORRUPTION`.
+
+Database foreign keys and integrity checks do not replace application-level
+hash validation. S04 will implement controller fallback to full fold; S02 must
+surface typed corruption and never silently reinterpret a bad checkpoint.
+
+### 31.30.15 Lease and fence persistence
+
+Lease acquire, renew, release, inspect, and takeover decisions MUST use
+provider time read within the database decision boundary or an explicitly
+test-only deterministic clock.
+
+Persist last epoch and last fencing token after release and expiry. Every
+successful new ownership interval increments both monotonically. Reject
+overflow before state change. A stale owner that resumes after another process
+takes over cannot append or save a checkpoint.
+
+SQLite file locking serializes same-host decisions but does not justify
+`distributedFencing: true`. Multi-process tests MUST use distinct connections
+and operating-system processes, not only multiple async tasks sharing one
+object.
+
+### 31.30.16 Governance and migration fencing
+
+Legal holds MUST persist across restart, interop, backup, and restore. Hold
+placement requires an existing stream and exact operation idempotency.
+
+The migration lock retains its last epoch/fence when inactive. It follows the
+same acquire/takeover/release/expiry rules as S01. While an incompatible live
+migration exists, online mutations fail after exact idempotency replay and
+before state change.
+
+Schema migration itself MUST verify the held lock identity and fencing token
+before each version transition. A stale migrator cannot publish a new schema
+version after takeover.
+
+### 31.30.17 Provider time and monotonicity
+
+Default provider milliseconds SHOULD be derived by SQLite inside the
+transaction using a version-compatible UTC expression, not a caller-supplied
+timestamp. The adapter MUST remember the last observed provider millisecond
+where needed and fail closed on a backward observation rather than reviving an
+expired lease.
+
+Tests may inject a deterministic clock, but the descriptor and docs MUST make
+that hook test-only. TS and Python fake clocks start at the same retained epoch
+so portable reports match exactly.
+
+### 31.30.18 Error translation and leak resistance
+
+Node SQLite errors are not a stable public provider taxonomy. Guard-narrow an
+unknown exception and inspect numeric `errcode` only when present. Base-code
+classification uses `errcode & 0xff`; at minimum test BUSY/LOCKED, READONLY,
+IOERR, CORRUPT, FULL, CANTOPEN, CONSTRAINT, and NOTADB. Do not depend on message
+text, `expandedSQL`, table names, column names, paths, or bound values.
+
+Python MUST inspect `sqlite_errorcode`/`sqlite_errorname` when available and
+retain compatible guarded fallbacks for Python 3.11. Translation is based on
+operation context plus numeric class, never raw message projection.
+
+Required mappings include:
+
+- exhausted BUSY/LOCKED → `GE_CYCLE_STORE_UNAVAILABLE`;
+- full/quota condition → `GE_CYCLE_STORE_QUOTA_EXCEEDED`;
+- corrupt/not-a-database/hash drift → `GE_CYCLE_STORE_CORRUPTION`;
+- read-only/permission/open denial → safe permission or unavailable class per
+  exact operation policy;
+- known conditional/unique invariant → exact conflict class; and
+- unknown internal database failure → `GE_CYCLE_STORE_INTERNAL`.
+
+Serialized errors MUST not contain raw SQL, schema names, file paths,
+authorization context, payload bytes, SQLite messages, exception causes,
+stacks, or expanded statements.
+
+### 31.30.19 Authorization, payload protection, and observability
+
+Request capture and authorization occur before existence-revealing database
+queries. Authorization hooks may await, but no transaction is held while they
+do. Once authorized, the complete database decision contains no awaits except
+the outer thread/operation boundary.
+
+Tenant ID is part of every primary/unique key that can reveal or mutate tenant
+state. Same stream, record, checkpoint, operation, lease, hold, or cursor IDs in
+different tenants MUST remain independent.
+
+Canonical values are stored exactly as submitted after provider validation.
+The adapter does not inspect or redact application payloads. Metrics and logs
+use only S01 safe fields, hashed tenant identity, fixed result classes, byte
+counts, page counts, duration buckets, and retry class.
+
+### 31.30.20 Lifecycle and connection ownership
+
+Each adapter instance owns exactly one connection unless an explicit bounded
+pool is later added. `close()` MUST be idempotent at the adapter level even
+though underlying Node close calls are not. Operations after close fail with a
+typed safe unavailable/internal lifecycle error.
+
+Prepared statements MUST use placeholders for every caller value. Node bare
+named parameters and unknown named parameters SHOULD be explicitly disabled
+when the floor supports it; otherwise use prefixed exact bindings. Never log
+`expandedSQL`. Never pass caller text to `exec`.
+
+Trusted migration `exec` may contain multiple statements. Tests MUST guard the
+Node trap where `prepare()` silently compiles only the first statement of a
+multi-statement string.
+
+Python connection creation/close and complete transactions run in the worker
+thread strategy selected by the adapter. A connection with
+`check_same_thread=False` is not thereby transaction-safe; a per-instance
+async lock and one complete transaction function MUST prevent a second thread
+from committing another thread's transaction.
+
+### 31.30.21 Backup, restore, and publication
+
+Never copy the live main `.db` file. In WAL mode it can silently omit committed
+records still present only in `-wal`.
+
+Backup MUST:
+
+1. require a file-backed open source and a new unique temporary destination;
+2. refuse a caller target that already exists or resolves to the source;
+3. call the native SQLite online backup API;
+4. bound page rate, progress calls, elapsed time, and cancellation behavior;
+5. close and reopen the temporary backup;
+6. run quick/integrity, foreign-key, schema-manifest, canonical-byte,
+   hash-chain, stream-head, operation-ledger, checkpoint, lease, hold, cursor,
+   and migration-fence audits;
+7. compute a content SHA-256 and manifest over the completed closed file;
+8. sync the file and containing directory where the platform supports it; and
+9. atomically publish to the final destination only after every check passes.
+
+Restore MUST target a new empty path, verify the backup manifest before open,
+run the complete audit after open, and refuse schema/capability incompatibility.
+It MUST never overwrite a live store in place. Operator rollback is pointer/
+rename selection of a separately verified database, not mutation of the failed
+source.
+
+Checkpointing APIs MUST inspect returned status rows. A WAL checkpoint that
+returns `busy: 1` is not successful merely because it did not throw.
+
+### 31.30.22 Integrity audit levels
+
+Expose bounded explicit audit modes:
+
+- `quick`: schema identity, connection settings, quick check, foreign keys,
+  and counts;
+- `structural`: full SQLite integrity plus indexes and constraints;
+- `semantic`: every authoritative canonical BLOB, value hash, record hash,
+  previous-hash chain, stream head, checkpoint binding, ledger result hash,
+  lease/hold/migration invariants, and cursor bounds.
+
+`PRAGMA integrity_check` alone is insufficient: it does not detect foreign-key
+violations and cannot detect a canonical payload whose application hash was
+maliciously changed consistently at the storage page level. Every evidence
+backup/restore drill MUST run semantic mode.
+
+### 31.30.23 Immediately previous alpha migration
+
+The repository-defined v0 fixture MUST contain representative:
+
+- two tenants with colliding public IDs;
+- a multi-record hash chain;
+- one checkpoint;
+- released and active lease histories;
+- one legal hold;
+- idempotency results;
+- no future/unknown columns; and
+- a retained fixture identity.
+
+The v0→v1 migration MUST preserve every canonical value and public result,
+reconstruct/verify stream heads and indexes, retain monotonic fences, add the
+final cursor/schema/manifest structures, and be idempotent on reopen. A
+malformed v0 fixture or changed migration hash fails without partial upgrade.
+
+### 31.30.24 Shared 54-case provider conformance
+
+Refactor the existing campaign around an explicit async provider factory and
+test-harness capability rather than copying the 54 scenarios. The default
+factory remains the memory oracle. SQLite factories create an isolated file
+per scenario and close it in `finally`.
+
+The harness contract may expose test-only:
+
+- deterministic clock advance;
+- before/after-commit fault injection;
+- safe state counters derived from SQL;
+- bounded corruption injection; and
+- deterministic cleanup.
+
+Production consumers MUST not need or accidentally receive unsafe test hooks
+through the minimal provider interface.
+
+Run and retain these complete reports:
+
+- TypeScript memory;
+- Python memory;
+- TypeScript SQLite;
+- Python SQLite.
+
+Memory reports compare completely across languages. SQLite reports compare
+completely across languages. A declared normalization may differ only for the
+truthful descriptor profile and nonsemantic provider-variable timing/token
+fields. Every ordered case result, code, operation, retryability, observation,
+zero-mutation proof, final counter, probe identity, and leak scan remains
+exact.
+
+### 31.30.25 SQLite-specific 36-case campaign
+
+Add exactly 36 ordered unique cases with 18 behaviors and 18 attacks:
+
+- bootstrap/descriptor/connection settings: 5;
+- restart and durable state: 6;
+- concurrent writer and busy handling: 6;
+- crash and idempotency recovery: 6;
+- backup/restore/WAL publication: 5;
+- migration and integrity audit: 5; and
+- lifecycle/error/close behavior: 3.
+
+The required inventory includes:
+
+- fresh creation and exact descriptor;
+- repeated open with byte-identical schema identity;
+- unsupported future version refusal;
+- settings readback refusal;
+- restart retention of every state family;
+- same-file TS→Python and Python→TS read/continue;
+- two-process empty-tail append with one exact winner;
+- same-operation concurrent retry with one mutation and two same results;
+- changed request under one operation ID;
+- busy timeout then bounded success and bounded exhaustion;
+- deliberate deferred-upgrade `BUSY_SNAPSHOT` regression proof outside the
+  production path;
+- kill before commit;
+- kill after commit before acknowledgement;
+- atomic 64-record append and one-bad-record rollback;
+- stale owner write after takeover in another process;
+- live-WAL online backup containing uncheckpointed commits;
+- concurrent writes during backup;
+- target-exists/source-alias refusal;
+- restored ledger/fence/cursor identities;
+- v0→v1 migration success;
+- migration failure rollback;
+- SQLite structural corruption;
+- application canonical/hash corruption;
+- foreign-key corruption found separately from integrity check;
+- WAL checkpoint busy-row handling;
+- close/double-close/use-after-close; and
+- safe classification of read-only/full/open failures.
+
+Each attack asserts exact typed code, zero unintended semantic mutation,
+transaction cleanup, and leak-sentinel absence. Each behavior asserts exact
+row/counter/head/fence/schema/backup identities.
+
+### 31.30.26 Process crash and concurrency harness
+
+Use real `child_process`/`multiprocessing` workers with explicit JSON control
+messages and timeouts. No shell interpolation of IDs, paths, or payloads.
+
+Required barriers are:
+
+- opened;
+- transaction reserved;
+- decision state read;
+- records staged;
+- ledger staged;
+- before commit;
+- commit returned;
+- before acknowledgement; and
+- closed.
+
+The parent may terminate only the explicit child PID it created. Every case
+uses a fresh `mkdtemp` directory and an explicit database path. Cleanup occurs
+after artifact retention and never targets a repository, home directory, root,
+or unresolved variable.
+
+Concurrency evidence MUST include separate runtime processes racing the same
+file. Async tasks alone do not prove SQLite file-lock behavior.
+
+### 31.30.27 Cross-language file interoperability
+
+Interop MUST prove both directions and mixed races:
+
+1. TS creates records, checkpoint, lease history, hold, cursor, and ledger;
+   Python opens and validates every byte.
+2. Python creates the same families; TS opens and validates every byte.
+3. TS starts a snapshot; Python appends; TS continuation excludes the append.
+4. Python starts a checkpoint snapshot; TS mutates live checkpoints; Python
+   continuation has no skip/duplicate.
+5. TS and Python race the same empty tail; exactly one commits.
+6. One runtime acquires/takes over a lease; the other's stale writer fails.
+7. One runtime creates a backup; the other restores and continues.
+8. Both compute identical descriptor, migration, schema, record, operation,
+   backup-manifest, and semantic-audit identities.
+
+### 31.30.28 Native unit and hostile tests
+
+Both runtimes MUST separately test:
+
+- caller mutation before/after authorization await;
+- returned-row detachment;
+- exact and one-above every bound;
+- BLOB byte round-trip and invalid UTF-8/JSON refusal;
+- safe-integer conversion, including Node `BigInt` reads before public number
+  conversion;
+- row alias/type validation without `SELECT *`;
+- transaction-active cleanup after every injected statement failure;
+- unique/FK/check/base-code error translation by statement context;
+- busy timeout/retry count/elapsed cap;
+- connection initialization setting drift;
+- process restart and double open;
+- cursor expiry cleanup bounds;
+- monotonic lease/migration fence overflow;
+- semantic audit of tampered records/checkpoints/ledger/heads;
+- backup target collision and source aliasing;
+- WAL checkpoint returned-busy handling;
+- idempotent adapter close and use-after-close;
+- authorization before existence lookup;
+- no raw SQLite value in serialized errors or logs; and
+- public exports, types, package assets, and sorted Python `__all__`.
+
+### 31.30.29 Performance characterization without false thresholds
+
+Add reproducible raw benchmarks for:
+
+- single-record append;
+- 64-record append;
+- one/two/four local writer contention;
+- tail read;
+- 256-record page;
+- checkpoint save/load;
+- lease renew;
+- 10K/100K record semantic audit;
+- online backup; and
+- restore verification.
+
+Record Node/Python/SQLite versions, filesystem, journal/synchronous settings,
+database/WAL sizes, transaction retries, p50/p95/p99, and raw samples. Initial
+alpha CI uses generous regression guardrails only after stable baselines exist;
+it MUST not claim production throughput from one developer machine.
+
+Use `EXPLAIN QUERY PLAN` assertions for hot lookups and ensure expected indexes
+serve tenant/stream tail, record range, operation ID, checkpoint order, lease,
+hold, cursor, and migration queries.
+
+### 31.30.30 Documentation and operator runbook
+
+`docs/SQLITE.md` and package/Python READMEs MUST document:
+
+- installation and runtime floors;
+- local-file and single-host scope;
+- event-loop/thread blocking characteristics;
+- safe constructor and close patterns;
+- WAL, synchronous, busy timeout, retries, and checkpoint policy;
+- expected database sidecar files;
+- prohibition on network filesystems and live raw copies;
+- online backup, manifest, audit, restore-to-new-path, and rollback steps;
+- schema inspection and migration-lock operation;
+- crash/ambiguous-commit retry with the same operation ID;
+- corruption response and S04 checkpoint fallback boundary;
+- payload protection/encryption responsibilities;
+- safe metrics and forbidden logs;
+- Node `node:sqlite` stability status;
+- Python transaction compatibility; and
+- explicit remaining PostgreSQL, S04, scheduler integration, and release
+  blockers.
+
+Every command snippet MUST run in documentation tests or a retained smoke
+script. Examples use temporary paths and contain no destructive wildcard.
+
+### 31.30.31 Supply-chain and artifact requirements
+
+The new npm package MUST:
+
+- be public MIT, side-effect free, and version-aligned;
+- contain compiled JS, declarations, maps as policy allows, README, LICENSE,
+  and exact migration assets;
+- exclude tests, raw TypeScript, logs, plans, fixtures not required at runtime,
+  databases, WAL/SHM files, backups, and environment data;
+- install from its tarball with runtime/core dependencies rewritten correctly;
+- import and open a temporary database at Node 22.16 and current 22.x; and
+- expose no accidental runtime internals.
+
+Python wheel and sdist audits MUST require:
+
+- `sqlite_cycle_store.py`;
+- the exact migration/manifest assets;
+- public imports;
+- an isolated temporary-database open/append/restart/read smoke;
+- no test database/WAL/SHM/backup leakage; and
+- wheel/sdist byte inventories recorded in evidence.
+
+### 31.30.32 Threat model and misuse tests
+
+Test and document defenses against:
+
+- SQL injection through IDs, paths, JSON, and migration inputs;
+- path traversal and symlink target substitution for source/backup/restore;
+- backup source=destination and target overwrite;
+- authorization probing across tenants;
+- operation-ID ledger poisoning;
+- cursor theft/replay/substitution;
+- stale lease owner resurrection;
+- migration lock theft;
+- malicious canonical BLOB size/depth/UTF-8/hash drift;
+- corrupted or replaced database header;
+- read-only/full-disk/IO failure;
+- long-held reader causing WAL growth/checkpoint starvation;
+- lock denial of service;
+- cancellation after hidden commit;
+- raw SQL/error/expanded statement leakage;
+- untrusted PRAGMA or ATTACH execution; and
+- extension loading.
+
+No caller-controlled identifier may become a SQL identifier. No extension,
+ATTACH path, writable schema, or arbitrary PRAGMA API is exposed.
+
+### 31.30.33 Parallel execution lanes
+
+Use maximum safe disjoint-path concurrency after this appended contract is
+frozen:
+
+- lane A: adapter kit and campaign factory refactor;
+- lane B: TypeScript package, schema executor, and native tests;
+- lane C: Python adapter and native tests;
+- lane D: canonical migration/manifest and validator;
+- lane E: crash/concurrency workers;
+- lane F: backup/restore/integrity and interop;
+- lane G: documentation, package audits, and benchmark harness;
+- lane H: independent hostile review and immutable evidence.
+
+Only one lane owns each file. Shared runner/schema decisions are frozen before
+parallel writers start. Package and artifact writers run serially. If agents
+are quota unavailable, the root executes the same lanes sequentially without
+lowering acceptance.
+
+### 31.30.34 Required verification order
+
+S02 acceptance MUST run:
+
+1. migration manifest/schema validator and byte-identity checks;
+2. adapter-kit memory parity tests;
+3. focused TS SQLite tests;
+4. focused Python SQLite tests;
+5. TS lint/typecheck/build and Python Ruff/Mypy;
+6. shared 54-case reports for both SQLite adapters and complete differential
+   comparison;
+7. exact SQLite-specific 36-case campaign;
+8. process restart, true multi-process races, and crash boundaries;
+9. cross-language same-file interoperability;
+10. online backup, semantic audit, restore, and continue-writing drill;
+11. v0→v1 migration and failed-migration rollback drill;
+12. fixture and documentation validation;
+13. full workspace TS and Python suites;
+14. complete retained cross-language conformance;
+15. release-map and evidence-closure audits without claiming release weight;
+16. workspace build;
+17. npm package contents and packed-install, serialized;
+18. fresh Python wheel/sdist and isolated installed-artifact smokes;
+19. production dependency audit, secret scan, and exact diff check;
+20. exact owned-path staging and unrelated-dirty-file exclusion audit;
+21. implementation commit(s) with the required identity, empty body, and no
+    coauthor trailer;
+22. push/fetch/local-remote equality;
+23. detached worktree at the immutable implementation tip;
+24. locked dependency install including explicit Python `dev` extra;
+25. repeat all material native/database/crash/backup/package gates at that
+    exact tree;
+26. retain commit/tree/parent, migration/schema/descriptor/campaign/source/
+    package/backup hashes, counts, timings, failed-first repairs, agent limits,
+    and nonclaims;
+27. separate evidence commit and push; and
+28. fetch plus zero-divergence proof.
+
+### 31.30.35 Commit and recovery discipline
+
+Prefer reviewable commits in this order:
+
+1. adapter kit and migration contract;
+2. native SQLite adapters and focused tests;
+3. conformance/crash/backup/interop harnesses;
+4. documentation and package audits;
+5. any gate-driven repair; and
+6. immutable S02 evidence.
+
+Every effective commit uses `reacher-z <mtrxcop@gmail.com>` for author and
+committer, an empty body, and no coauthor. Do not amend already pushed
+evidence. A failed cold gate creates a new repair commit and a new candidate.
+
+Recovery always uses explicit paths. Temporary databases are created under
+`mkdtemp`; backup/restore never overwrites the source; repository or home
+directories are never recursive-delete targets; and unrelated shared edits
+remain untouched.
+
+### 31.30.36 Exit criteria and next dependency
+
+S02 is complete only when:
+
+- both adapters satisfy all provider operations and exact descriptors;
+- all 54 provider cases and 36 SQLite cases pass natively and differentially;
+- restart, crash, concurrent writer, stale fence, migration, backup, restore,
+  and corruption drills pass;
+- the same file interoperates in both directions;
+- installed npm/wheel/sdist artifacts repeat the critical smoke;
+- the detached immutable candidate is green;
+- evidence is pushed with zero remote divergence; and
+- remaining nonclaims stay explicit.
+
+After S02 evidence, S03 PostgreSQL and S04 checkpoint acceleration may proceed
+in parallel where their paths are disjoint. S02 success does not authorize
+distributed-fencing, checkpoint-authority, scheduler-integration, release, or
+popularity claims.
+
+## 31.31 D7-S02 SQLite Operation-Ledger Semantic Closure Remediation
+
+This section is an append-only acceptance amendment to 31.30. It does not
+replace, weaken, or rewrite any earlier requirement. Where the older text
+describes schema version 1 as the final SQLite shape, this later, more specific
+remediation requires a manifest-bound version-2 migration before D7-S02 may be
+called complete. The existing v0-to-v1 migration evidence remains required and
+becomes the first edge of the v0-to-v2 chain.
+
+The normative architecture companion is:
+
+- codex_plans/architecture/sqlite-operation-ledger-replay.md.
+
+No implementation or migration edit begins from this subsection until the
+current TypeScript/Python defect-closing lanes have handed off their files and
+the canonical version-2 field/order decision is frozen.
+
+### 31.31.1 Why this remediation is release-blocking
+
+The existing durable ledger proves request-hash identity and canonical result
+integrity, but not that the result is the one produced by the physical
+mutation. A coherent replacement of result_blob and result_hash can remain
+canonical while disagreeing with stream records, checkpoint state, lease
+state, legal holds, or the migration lock.
+
+The hostile audit retained concrete failures:
+
+- a forged canonical append result plus its matching result hash passed
+  semantic audit while the real stream tail was unchanged;
+- an event cursor whose tail hash and canonical snapshot BLOB were changed
+  together passed semantic audit despite no matching immutable record; and
+- a current checkpoint row with checkpoint_revision changed from 1 to 2 passed
+  semantic audit despite no revision 2 row.
+
+The latter two are repaired in the general semantic-integrity lane, but they
+remain regression gates beside operation replay because final-state
+reconciliation must not inherit blind spots.
+
+The operation-ledger repair is complete only when an audit can:
+
+1. decode the exact stored request;
+2. prove its row identity and request hash;
+3. place it in a total commit order;
+4. replay its deterministic state transition;
+5. independently derive its expected result;
+6. compare that result with the stored result bytes; and
+7. compare the replayed final state with every authoritative physical table.
+
+### 31.31.2 Decision: formal schema v2, never inferred legacy requests
+
+Adopt the architecture decision exactly:
+
+- keep the existing result_blob encoding unchanged;
+- add canonical request_blob for all new operations;
+- add one global contiguous commit_sequence for all new mutation types and
+  tenants;
+- add an immutable canonical baseline for upgraded legacy state;
+- leave legacy request hashes opaque;
+- replay only post-baseline requests; and
+- reconcile the replay result with baseline-covered and post-baseline physical
+  state.
+
+Do not hide a storage envelope inside result_blob. That would overload a
+shared public codec and still could not recover arbitrary legacy request
+identifiers.
+
+Do not reconstruct legacy requests from current state. Controlled inference
+from the present v0 fixture is not a general migration algorithm. It cannot
+uniquely recover delete-checkpoint, repeated legal-hold, lease renewal/release,
+or release-migration-lock requests after later state changes.
+
+Rigor takes precedence over avoiding a canonical schema change.
+
+### 31.31.3 Exact delivery inventory
+
+The remediation is expected to add or update, subject to final ownership
+handoff:
+
+- spec/migrations/sqlite/schema-v2.sql;
+- spec/migrations/sqlite/0002-v1-to-v2-operation-replay.sql;
+- spec/migrations/sqlite/schema-v2.identity.json;
+- spec/migrations/sqlite/manifest.json;
+- spec/migrations/sqlite/manifest.schema.json only if its closed version graph
+  cannot represent the second edge;
+- a frozen pre-replay-v1 fixture and expected report;
+- retained v0-to-v2 and v1-to-v2 migration reports;
+- a canonical operation-request vector fixture covering all nine mutations;
+- a canonical baseline-entry vector fixture covering every entry kind;
+- a fixed 96-case replay/hostile fixture defined below;
+- TypeScript migration, runtime, replay, and integrity code;
+- Python migration, runtime, replay, and integrity code;
+- cross-language same-file replay workers;
+- backup/restore and packed-artifact updates;
+- docs/SQLITE.md and both package READMEs;
+- benchmark/query-plan additions;
+- CI/package scripts;
+- immutable candidate evidence; and
+- explicit nonclaims.
+
+The canonical spec lane decides file names and exact schema order once. Both
+runtime lanes consume that decision; neither creates a private variant.
+
+### 31.31.4 Version-2 operation row contract
+
+ge_cycle_operations retains the version-1 primary key and fields and adds:
+
+- ledger_format_version;
+- request_blob; and
+- commit_sequence.
+
+Two and only two row forms are valid:
+
+1. Legacy form:
+   - ledger_format_version = 1;
+   - request_blob IS NULL;
+   - commit_sequence IS NULL;
+   - row exists in the sealed baseline legacy-operation inventory.
+2. Replayable form:
+   - ledger_format_version = 2;
+   - request_blob is a bounded non-empty BLOB;
+   - commit_sequence is a safe integer from 1 through MAX_SAFE_INTEGER;
+   - request bytes and result bytes satisfy the closed codecs.
+
+Add a unique partial index over format-2 commit_sequence and a bounded ordered
+replay access path. Preserve the tenant/operation primary key so idempotency
+lookup remains exact.
+
+Every replayable row MUST satisfy:
+
+- request_blob decodes under operation_name;
+- re-encoding produces byte-identical request_blob;
+- the domain-separated operation request hash equals request_hash;
+- request.context.tenantId equals tenant_id;
+- request.context.operationId equals operation_id;
+- result_blob decodes under operation_name;
+- re-encoding produces byte-identical result_blob;
+- the canonical result hash equals result_hash;
+- committed_at_ms is not before the prior sequence time or baseline time; and
+- operation_name is one of the exact nine mutation operations.
+
+The maximum request BLOB bound MUST be derived from the closed provider bounds
+and include the largest legal 64-record append without allowing an unbounded
+allocation.
+
+### 31.31.5 Global sequence contract
+
+Add one ge_cycle_operation_sequence singleton containing:
+
+- singleton = 1;
+- baseline_id;
+- last_commit_sequence;
+- baseline_captured_at_ms; and
+- updated_at_ms.
+
+Sequence allocation occurs after all mutation decisions succeed but before the
+ledger insert, within the same BEGIN IMMEDIATE transaction:
+
+1. ledger replay lookup;
+2. decision reads;
+3. physical mutation staging;
+4. safe last_commit_sequence + 1 calculation;
+5. exact singleton CAS;
+6. ledger insert with that sequence;
+7. ledger-staged barrier;
+8. before-commit barrier;
+9. COMMIT.
+
+The invariants are:
+
+- zero post-baseline rows means singleton last = 0;
+- N post-baseline rows means count = min sequence = 1, max sequence = N, and
+  distinct sequence count = N;
+- singleton last = N;
+- exact retry does not update the singleton;
+- any rollback preserves the prior singleton;
+- a kill before commit leaves neither the sequence, mutation, nor ledger;
+- a kill after commit retains all three;
+- same-millisecond commits remain ordered by sequence;
+- cross-tenant commits use the same order; and
+- overflow fails before any physical mutation becomes durable.
+
+Sequence order is not lastInsertRowid, wall-clock order, operation-ID order, or
+tenant-local order.
+
+### 31.31.6 Canonical request storage
+
+The shared adapter codec gains a storage-facing request byte operation without
+changing public provider request shapes:
+
+- encodeCanonicalMutationRequest(operation, canonicalRequest);
+- decodeCanonicalMutationRequest(operation, bytes);
+- operationRequestHash(operation, canonicalRequest).
+
+The TypeScript and Python implementations MUST:
+
+- reject invalid UTF-8;
+- reject invalid or non-canonical JSON bytes;
+- reject unknown, missing, or reordered semantic fields after canonical
+  round-trip;
+- reject floats and integers outside the shared safe range where the contract
+  forbids them;
+- enforce exact nesting, string, batch, and BLOB limits;
+- preserve null versus missing distinctions;
+- detach all caller-owned values before authorization await;
+- store no bearer token or raw credential;
+- produce byte-identical output for all nine operations; and
+- return only safe typed corruption on stored-byte failure.
+
+Incoming exact retry still compares the domain-separated request hash first.
+Semantic audit independently decodes the stored request and recomputes it; it
+does not trust the row hash merely because an incoming request matches it.
+
+### 31.31.7 Baseline schema and chain
+
+Add:
+
+- ge_cycle_operation_baselines;
+- ge_cycle_operation_baseline_entries; and
+- the sequence singleton bound to the active baseline ID.
+
+The baseline header contains:
+
+- baseline ID and format version;
+- source application/user versions;
+- source schema identity;
+- source lineage ID and migration hash;
+- source descriptor hash;
+- captured_at_ms;
+- legacy operation count;
+- entry count;
+- first/final entry hashes;
+- projection SHA-256; and
+- canonical policy BLOB.
+
+The normalized entry table contains:
+
+- baseline ID;
+- contiguous zero-based ordinal;
+- fixed entry kind;
+- canonical key BLOB;
+- canonical state BLOB;
+- previous entry hash; and
+- current entry hash.
+
+The fixed kind order is:
+
+1. schema-envelope;
+2. migration-lineage;
+3. stream-head;
+4. record-identity;
+5. checkpoint-current;
+6. checkpoint-revision;
+7. lease-current;
+8. used-lease-identity;
+9. legal-hold;
+10. migration-lock-current;
+11. used-migration-lock-identity;
+12. legacy-operation.
+
+Entry ordering uses kind rank and canonical key bytes. Ordinals cannot gap.
+Entry hashes use an explicit domain separator, baseline ID, ordinal, kind,
+key, state, and previous hash. A fixed empty root represents zero entries.
+
+No one-BLOB whole-database snapshot is allowed. Baseline creation and audit
+stream bounded rows so a 100K-record store does not require a second full
+in-memory copy.
+
+### 31.31.8 Baseline projection content
+
+The baseline seeds every state item required for future replay:
+
+- stream head identities;
+- every pre-baseline record ID, sequence, hashes, value byte count, and commit
+  time without duplicating user payload bytes;
+- current checkpoint summaries, value identities, checkpoint_revision, and
+  commit time;
+- all checkpoint revision rows;
+- active/released lease rows and all used lease IDs;
+- every legal hold;
+- active/released migration-lock state and all used lock IDs; and
+- exact legacy operation identities, hashes, times, and result-byte hashes.
+
+Before entries are written, migration validates every source canonical BLOB,
+record chain, head, checkpoint, revision, fence, hold, cursor, migration row,
+and legacy result. Baseline is not a mechanism for blessing corrupt source
+state.
+
+Payload BLOBs remain in authoritative tables. Their hashes and identities
+enter the projection and every semantic audit independently decodes the
+physical BLOBs.
+
+Cursors are excluded from operation replay because pagination reads create and
+consume them without operation-ledger rows. They remain part of the separate
+cursor semantic audit and backup/restore contract.
+
+### 31.31.9 Migration chain and fixtures
+
+Never rewrite the already reviewed schema-v1.sql or
+0001-alpha-v0-to-v1.sql bytes. Add a second manifest-bound edge.
+
+Required migration inputs:
+
+- existing canonical v0 fixture, unchanged;
+- a new canonical pre-replay-v1 fixture;
+- a fresh empty v1 database;
+- a v1 database with no operations but every other state family;
+- a v1 database with representative legacy operations for every mutation
+  result shape;
+- a v1 database containing ambiguous same-tenant, same-fence, multi-stream
+  histories that prove request inference is not used; and
+- malformed/future variants for rollback/refusal.
+
+Required flows:
+
+- fresh creation directly at v2;
+- v0 to v1 to v2;
+- v1 to v2;
+- reopen v2 without migration;
+- failed v0 first edge with zero partial state;
+- failed v1 second edge with zero partial state;
+- crash during baseline enumeration;
+- crash after baseline entries but before version publication; and
+- retry after every failure.
+
+Preferred migration runs the full chain inside one exclusive transaction. If a
+platform implementation must retain an intermediate v1 commit, v1 remains a
+fully supported re-openable state and deterministic resume to v2 is proven.
+No half-baseline is accepted.
+
+### 31.31.10 Deterministic replay engine
+
+The replay engine is deterministic plumbing, not a provider operation and not
+a model node. It receives:
+
+- validated baseline entries;
+- format-2 rows ordered by commit_sequence;
+- fixed descriptor limits;
+- canonical codecs; and
+- no ambient mutable context.
+
+It MUST NOT:
+
+- call authorization;
+- read the current clock;
+- use randomness;
+- invoke a model;
+- perform network/filesystem side effects;
+- silently ignore an unsupported row; or
+- substitute null for failure.
+
+For each row it:
+
+1. requires the exact next sequence;
+2. validates request bytes, request hash, and row context;
+3. validates result bytes and result hash;
+4. requires nondecreasing committed_at_ms;
+5. applies the operation-specific transition to shadow state;
+6. derives the expected public result independently;
+7. canonicalizes that result; and
+8. compares expected and stored result BLOBs byte-for-byte.
+
+Replay output includes only bounded counters and a semantic root unless a
+test-only harness explicitly requests a safe projection.
+
+### 31.31.11 append replay
+
+For append, replay MUST:
+
+- bind tenant, stream, operation ID, expected tail, lease, and records from
+  request_blob;
+- require reconstructed expected tail equality by existence, sequence, and
+  hash;
+- enforce lease/fence and expiry at committed_at_ms;
+- validate a non-empty bounded batch;
+- validate every record sequence, previous hash, record hash, value hash, and
+  value byte count;
+- enforce batch-local record-ID uniqueness;
+- enforce tenant-wide uniqueness against baseline and replayed records;
+- refuse sequence overflow;
+- add immutable record identities to shadow state;
+- update the shadow stream head;
+- derive appendedRecords from the request length; and
+- derive the exact result tail from the final record.
+
+An earlier append remains verifiable after later appends because request_blob
+retains the complete batch and commit_sequence preserves history.
+
+### 31.31.12 checkpoint replay
+
+save-checkpoint replay MUST:
+
+- require exact bound record sequence/hash existence;
+- enforce live lease/fence when applicable;
+- validate canonical value identity;
+- apply immutable checkpoint-ID behavior;
+- allocate the next exact scope revision;
+- retain a put revision;
+- update current checkpoint state; and
+- derive the exact summary result.
+
+delete-checkpoint replay MUST:
+
+- resolve exact scope/ID from request_blob;
+- return deleted false only when the checkpoint was absent;
+- require non-null matching expectedValueHash for a real delete;
+- block deletion when any legal hold exists on its stream;
+- allocate one delete revision only for a real delete;
+- remove current state; and
+- derive the exact deleted result.
+
+Final reconciliation additionally requires each current
+checkpoint_revision to name its exact retained put revision. A coherent
+revision-number tamper must fail even when all canonical checkpoint BLOBs are
+unchanged.
+
+### 31.31.13 lease replay
+
+acquire-lease replay MUST:
+
+- require stream existence;
+- compare expected fencing token;
+- distinguish acquire from expired takeover at committed_at_ms;
+- reject reused lease IDs;
+- validate safe epoch/fence increment;
+- validate safe expiry arithmetic;
+- update current and used-ID shadow state; and
+- derive the complete lease result.
+
+renew-lease replay MUST:
+
+- match active lease ID, holder, and fence;
+- reject an expired binding;
+- require strictly later safe expiry;
+- preserve acquire identity/counters; and
+- derive the exact renewed lease.
+
+release-lease replay MUST:
+
+- match the exact active binding;
+- reject expired/stale release;
+- clear active fields;
+- retain last epoch/fence and used-ID history; and
+- derive the exact released inspection.
+
+Historical acquire/renew/release/takeover results remain verifiable even when
+the final row is released or owned by a later lease.
+
+### 31.31.14 legal-hold and migration replay
+
+set-legal-hold replay MUST:
+
+- require stream existence;
+- apply idempotent place/release;
+- preserve original placed time for an already present hold;
+- keep the shadow hold set canonically sorted; and
+- derive the exact governance inspection.
+
+Two different histories ending in the same hold set remain distinguishable by
+their request BLOBs and sequences.
+
+acquire-migration-lock replay MUST:
+
+- validate source and target versions;
+- compare expected fence;
+- distinguish acquire/takeover using expiry at committed_at_ms;
+- prevent lock-ID reuse;
+- use safe monotonic counters and expiry arithmetic;
+- update current and used-ID shadow state; and
+- derive the exact lock result.
+
+release-migration-lock replay MUST bind the exact lock ID, owner, and fence,
+clear only active fields, retain counters/history, and require the stored
+result to be canonical null.
+
+### 31.31.15 Physical final-state reconciliation
+
+Replay success alone is insufficient. Semantic audit independently reads and
+compares:
+
+- every stream;
+- every record identity plus canonical value_blob and record_blob;
+- every current checkpoint, checkpoint_revision, checkpoint/value/summary
+  BLOB, and revision row;
+- every lease and used lease ID;
+- every legal hold;
+- migration-lock singleton and every used lock ID;
+- every operation row and BLOB;
+- baseline header and entries;
+- sequence singleton; and
+- schema/migration/catalog identities.
+
+Comparison is bidirectional:
+
+- a replayed row missing physically is corruption;
+- a physical row missing from replay is corruption;
+- a changed field is corruption;
+- an extra row is corruption; and
+- an order/count/root mismatch is corruption.
+
+The audit digest includes the baseline root, operation sequence/root, and
+reconciled state root with explicit domains. It never includes raw payloads in
+its public report.
+
+Event cursor audit MUST bind a non-empty snapshot tail to the exact immutable
+record row for tenant/stream/sequence/hash. The synthetic empty-tail case must
+obey the provider's durable stream semantics. Checkpoint cursor snapshots stay
+historical snapshots and are validated canonically rather than compared with a
+changed live checkpoint set.
+
+### 31.31.16 Quick, structural, and semantic audit behavior
+
+Retain the three audit levels but close their contracts:
+
+- quick:
+  - application/user/schema/descriptor identity;
+  - explicit hardened connection setting readback;
+  - quick_check;
+  - foreign keys;
+  - baseline/sequence/operation counts.
+- structural:
+  - everything in quick;
+  - integrity_check;
+  - exact catalog/index/constraint identity.
+- semantic:
+  - everything in structural;
+  - every canonical authoritative BLOB;
+  - baseline chain;
+  - ordered operation replay;
+  - final-state reconciliation;
+  - cursor tail binding;
+  - checkpoint revision binding;
+  - fences, holds, migration, and clock watermark.
+
+All levels are bounded and return structured safe failures. Backup and restore
+evidence always runs semantic.
+
+### 31.31.17 Cross-language wire parity
+
+Retain exact canonical vectors for:
+
+- each of nine mutation request BLOBs;
+- each operation request hash;
+- each of twelve baseline entry kinds;
+- empty and non-empty baseline roots;
+- each operation result BLOB/hash;
+- commit-sequence projection;
+- replay semantic digest; and
+- safe failure JSON.
+
+Required same-file flows include:
+
+- TypeScript creates v2, Python audits and continues;
+- Python creates v2, TypeScript audits and continues;
+- TypeScript migrates v0/v1, Python verifies baseline bytes;
+- Python migrates v0/v1, TypeScript verifies baseline bytes;
+- alternating TS/Python writes across all nine mutations;
+- same-file mixed-process append race with contiguous sequence;
+- cross-runtime lease takeover and stale writer;
+- cross-runtime checkpoint/hold/migration histories;
+- backup in one runtime, restore/replay/continue in the other; and
+- exact identity comparison after every handoff.
+
+Normalization may differ only for explicitly nonsemantic runtime version
+metadata. Request, baseline, operation, result, and semantic bytes never
+normalize away.
+
+### 31.31.18 Schema, hash, and artifact ripple
+
+The version change requires deliberate updates to:
+
+- migration manifest hash and manifest self-hash;
+- schema SQL hash;
+- schema identity document/hash;
+- catalog hash;
+- current schema version constants;
+- provider descriptor schemaVersion and descriptor hash;
+- cursor descriptor/schema bindings;
+- backup manifest schema and semantic identities;
+- migration-lock source/target validation;
+- shared 54-case expected SQLite descriptor profile;
+- exact-36 campaign manifest/descriptor identities;
+- benchmark query plans for sequence-order replay;
+- TypeScript migration asset imports/copies;
+- Python importlib resource assets/copies;
+- npm files inventory;
+- wheel and sdist inventory;
+- installed-artifact smokes;
+- docs and changelog; and
+- retained evidence.
+
+All canonical assets remain byte-identical across spec, npm, wheel, and sdist.
+No generated runtime copy may become the source of truth.
+
+### 31.31.19 Nine-stage process barrier is a retained closed regression gate
+
+The earlier hostile review correctly rejected one-way stage markers. The
+current remediation evidence has since been strengthened and must be
+preserved:
+
+- the child emits each stage with a unique nonce;
+- the child synchronously waits for a parent-created nonce ACK file;
+- the parent success path acknowledges all nine stages;
+- nine separate kill paths stop at each exact stage;
+- every kill asserts the exact observed prefix and no result message;
+- pre-commit kills retain zero records and zero ledger rows;
+- post-commit kills retain one record and one ledger row;
+- exact retry converges without a second mutation; and
+- the decision-state-read barrier occurs after tail and lease decision state.
+
+The stages remain exactly:
+
+1. opened;
+2. transaction reserved;
+3. decision state read;
+4. records staged;
+5. ledger staged;
+6. before commit;
+7. commit returned;
+8. before acknowledgement;
+9. closed.
+
+Current non-release evidence reports ten real processes passing in about 3.2
+seconds. This is useful current evidence, not a substitute for repeating the
+gate at the immutable candidate. The sequence remediation extends the same
+assertions to sequence singleton state:
+
+- stages 1 through 6 killed before successful COMMIT retain last sequence 0;
+- stages 7 and 8 killed after COMMIT retain last sequence 1;
+- closed success retains last sequence 1; and
+- retry at every kill point leaves last sequence exactly 1.
+
+### 31.31.20 Exact 96-case ledger replay campaign
+
+Add one canonical fixture with exactly 96 ordered unique cases:
+
+- 48 behavior cases;
+- 48 attack cases;
+- no skip, pending, expected-failure, platform waiver, or catch-all case;
+- one fresh temporary root and explicit database path per destructive case;
+- exact typed code/operation/retryability for every rejection;
+- zero unintended mutation and exact transaction cleanup for every attack;
+- leak-sentinel scan on every serialized report;
+- TS-native and Python-native execution;
+- exact cross-language comparison where specified; and
+- a canonical report byte count and SHA-256.
+
+The fixture IDs and minimum assertions are fixed below. Implementations may add
+native tests outside the fixture but may not rename, merge, or silently weaken
+these cases.
+
+#### 31.31.20.1 Canonical request cases 01-16
+
+1. OL-R01, behavior, ts-all-request-vectors:
+   TypeScript encodes all nine canonical requests and matches exact fixture
+   bytes and hashes.
+2. OL-R02, behavior, python-all-request-vectors:
+   Python produces byte-identical vectors and hashes.
+3. OL-R03, behavior, decode-encode-roundtrip:
+   both runtimes decode and re-encode every request exactly.
+4. OL-R04, behavior, legal-boundary-request-sizes:
+   exact maximum identifiers, values, and 64-record append remain accepted and
+   bounded.
+5. OL-R05, behavior, exact-retry-request-identity:
+   close/reopen exact retry matches stored request/result and allocates no new
+   sequence.
+6. OL-R06, behavior, captured-before-authorization:
+   hostile caller mutation before/after authorization await cannot change
+   stored request bytes.
+7. OL-R07, attack, invalid-request-utf8:
+   malformed UTF-8 request_blob is corruption with no payload leak.
+8. OL-R08, attack, noncanonical-request-json:
+   valid JSON with noncanonical bytes/order/escaping fails byte round-trip.
+9. OL-R09, attack, request-shape-drift:
+   missing and unknown fields fail under the closed operation codec.
+10. OL-R10, attack, request-number-domain:
+    float, unsafe integer, negative bound, and forbidden numeric carrier fail.
+11. OL-R11, attack, request-size-depth-exhaustion:
+    one-above byte/depth/collection bounds fail without unbounded allocation.
+12. OL-R12, attack, request-hash-only-drift:
+    changed request_hash with unchanged BLOB fails.
+13. OL-R13, attack, coherent-request-hash-row-mismatch:
+    changed request BLOB/hash whose context differs from tenant/operation
+    primary key fails.
+14. OL-R14, attack, swapped-request-blobs:
+    two same-operation rows cannot exchange request BLOB/hash pairs.
+15. OL-R15, attack, operation-name-request-confusion:
+    changing operation_name or decoding request bytes under another operation
+    fails.
+16. OL-R16, attack, request-error-leak:
+    hostile byte content and leak sentinels never enter error JSON, logs, or
+    report text.
+
+#### 31.31.20.2 Sequence and atomicity cases 17-32
+
+17. OL-R17, behavior, first-sequence-is-one:
+    first new mutation stores sequence 1 and singleton last 1.
+18. OL-R18, behavior, all-operation-global-order:
+    every mutation type across tenants shares one exact contiguous order.
+19. OL-R19, behavior, equal-timestamp-order:
+    same-millisecond commits remain deterministic by sequence.
+20. OL-R20, behavior, retry-does-not-advance:
+    repeated exact retry before/after restart leaves count/max/singleton
+    unchanged.
+21. OL-R21, behavior, failed-decision-no-gap:
+    conflict, stale fence, legal hold, and invalid request allocate nothing.
+22. OL-R22, behavior, busy-retry-one-sequence:
+    bounded whole-transaction BUSY retry eventually commits one sequence only.
+23. OL-R23, behavior, mixed-process-contiguous:
+    concurrent TS/Python writers produce unique contiguous sequences in actual
+    commit order.
+24. OL-R24, behavior, safe-last-sequence:
+    MAX_SAFE_INTEGER minus one may commit MAX_SAFE_INTEGER exactly where the
+    fixture safely stages the state.
+25. OL-R25, attack, zero-sequence:
+    a format-2 row with sequence zero is rejected.
+26. OL-R26, attack, negative-sequence:
+    negative sequence is rejected structurally or semantically.
+27. OL-R27, attack, duplicate-sequence:
+    duplicate global sequence cannot bypass unique/index/audit checks.
+28. OL-R28, attack, sequence-gap:
+    rows 1 and 3 without 2 fail contiguity.
+29. OL-R29, attack, reordered-sequence-effects:
+    swapping sequences on two valid rows fails replay preconditions/results.
+30. OL-R30, attack, singleton-row-drift:
+    singleton last lower or higher than count/max fails.
+31. OL-R31, attack, sequence-overflow:
+    allocation beyond MAX_SAFE_INTEGER returns quota exceeded before durable
+    mutation.
+32. OL-R32, attack, post-baseline-legacy-insertion:
+    an extra format-1 row after the sealed baseline fails count/root/inventory.
+
+#### 31.31.20.3 Baseline and migration cases 33-48
+
+33. OL-R33, behavior, empty-v1-baseline:
+    empty v1 upgrades with a deterministic empty/nonempty metadata baseline and
+    sequence zero.
+34. OL-R34, behavior, golden-v0-to-v2:
+    unchanged v0 fixture traverses both edges and preserves every public value.
+35. OL-R35, behavior, golden-v1-to-v2:
+    representative v1 fixture produces exact baseline bytes/root.
+36. OL-R36, behavior, large-streamed-baseline:
+    100K record identities baseline and audit with bounded memory and batch
+    reads.
+37. OL-R37, behavior, no-legacy-operations:
+    state families without legacy ledger rows still seed replay exactly.
+38. OL-R38, behavior, all-legacy-result-shapes:
+    baseline retains canonical legacy results for all nine operation names
+    without request reconstruction claims.
+39. OL-R39, behavior, ts-migrate-python-audit:
+    TypeScript migration bytes/root are accepted exactly by Python.
+40. OL-R40, behavior, python-migrate-ts-audit:
+    Python migration bytes/root are accepted exactly by TypeScript.
+41. OL-R41, attack, baseline-header-root-drift:
+    changed final root or projection hash fails.
+42. OL-R42, attack, baseline-entry-blob-drift:
+    changed key/state BLOB with unchanged hash fails canonical/hash validation.
+43. OL-R43, attack, baseline-order-drift:
+    ordinal gap, reorder, or previous-hash break fails.
+44. OL-R44, attack, baseline-entry-deletion:
+    missing entry fails count/root and physical reconciliation.
+45. OL-R45, attack, baseline-entry-insertion:
+    duplicate or extra entry fails exact inventory.
+46. OL-R46, attack, legacy-operation-drift:
+    delete, insert, result change, operation-name change, or time change in a
+    legacy row fails baseline binding.
+47. OL-R47, attack, malformed-source-rollback:
+    corrupt v0/v1 source refuses migration with original application/version/
+    schema bytes intact.
+48. OL-R48, attack, killed-baseline-publication:
+    kill during enumeration or after entry staging leaves no accepted partial
+    v2 and deterministic retry completes once.
+
+#### 31.31.20.4 Operation replay cases 49-72
+
+49. OL-R49, behavior, append-replay:
+    request batch reconstructs records, head, count, and exact result.
+50. OL-R50, behavior, historical-append-after-advance:
+    an early append remains valid after later tail advances.
+51. OL-R51, behavior, save-checkpoint-replay:
+    exact checkpoint/revision/result state is reconstructed.
+52. OL-R52, behavior, delete-present-and-absent:
+    both deleted outcomes are derived from ordered state.
+53. OL-R53, behavior, acquire-lease-replay:
+    counters, used ID, expiry, and result reconcile.
+54. OL-R54, behavior, renew-lease-replay:
+    strictly extended expiry and stable identity reconcile.
+55. OL-R55, behavior, release-lease-replay:
+    released state/result and retained counters reconcile.
+56. OL-R56, behavior, expired-takeover-replay:
+    committed time establishes takeover eligibility and monotonic fence.
+57. OL-R57, behavior, legal-hold-replay:
+    idempotent place/release and sorted inspection reconcile.
+58. OL-R58, behavior, migration-lock-replay:
+    acquire/takeover/release and null result reconcile.
+59. OL-R59, behavior, all-nine-alternating-history:
+    one coherent history contains every mutation operation.
+60. OL-R60, behavior, equal-final-hold-histories:
+    distinct place/release sequences ending in the same set both replay
+    correctly and remain distinguishable.
+61. OL-R61, behavior, checkpoint-delete-recreate-history:
+    allowed lifecycle transitions preserve exact revision chronology.
+62. OL-R62, attack, historical-lease-result-forgery:
+    coherently changed old acquire/renew/release result and hash fails replay
+    even after later takeover.
+63. OL-R63, attack, append-result-tail-forgery:
+    changed append result/hash fails against request-derived tail.
+64. OL-R64, attack, append-valid-other-tail:
+    a hash naming another valid record/stream still fails.
+65. OL-R65, attack, append-count-forgery:
+    changed appendedRecords and matching result hash fails.
+66. OL-R66, attack, checkpoint-result-forgery:
+    another canonical checkpoint summary fails request/revision binding.
+67. OL-R67, attack, delete-result-forgery:
+    flipped deleted boolean plus result hash fails replay.
+68. OL-R68, attack, lease-result-forgery:
+    changed lease ID/holder/epoch/fence/time plus hash fails.
+69. OL-R69, attack, governance-result-forgery:
+    changed legal-hold inventory plus hash fails ordered shadow state.
+70. OL-R70, attack, migration-result-forgery:
+    forged lock fields or non-null release result fails.
+71. OL-R71, attack, mutation-without-ledger:
+    physical append/checkpoint/lease/hold/migration change absent from replay
+    fails final-state reconciliation.
+72. OL-R72, attack, ledger-without-mutation:
+    otherwise canonical request/result row without its physical effect fails.
+
+#### 31.31.20.5 Cross-language, backup, and artifact cases 73-84
+
+73. OL-R73, behavior, ts-all-families-python-continue:
+    TS creates all state families and ledger forms; Python audits every byte and
+    continues.
+74. OL-R74, behavior, python-all-families-ts-continue:
+    reverse direction is exact.
+75. OL-R75, behavior, ts-event-snapshot-python-append:
+    Python append gains a sequence while the TS snapshot excludes it.
+76. OL-R76, behavior, python-checkpoint-snapshot-ts-mutate:
+    Python continuation has no skip/duplicate after TS live mutation.
+77. OL-R77, behavior, mixed-empty-tail-race:
+    separate TS/Python processes produce one append winner and one exact global
+    sequence.
+78. OL-R78, behavior, mixed-lease-takeover:
+    one runtime takes over and the other's stale writer fails without sequence.
+79. OL-R79, behavior, python-backup-ts-restore:
+    restored baseline/requests/sequences audit and continued write uses N+1.
+80. OL-R80, behavior, ts-backup-python-restore:
+    reverse direction is exact.
+81. OL-R81, behavior, all-identity-equivalence:
+    descriptor, schema, migration, baseline, request, result, backup manifest,
+    and semantic roots are identical.
+82. OL-R82, behavior, alternating-runtime-all-operations:
+    TS/Python alternate every sequence and both replay the same final model.
+83. OL-R83, attack, cross-runtime-request-byte-drift:
+    a request carrier accepted by only one runtime is a conformance failure;
+    the retained fixture must reject it in both.
+84. OL-R84, attack, old-artifact-new-schema-refusal:
+    an artifact without v2 support refuses safely and cannot mutate a v2 file.
+
+#### 31.31.20.6 Threat, lifecycle, and evidence cases 85-96
+
+85. OL-R85, behavior, installed-npm-lifecycle:
+    tarball install creates/migrates, appends, reopens, exact-retries, audits,
+    backs up, restores, and continues.
+86. OL-R86, behavior, installed-wheel-sdist-lifecycle:
+    isolated wheel and sdist each repeat the complete critical smoke.
+87. OL-R87, behavior, bounded-replay-characterization:
+    10K/100K replay reports raw time/memory/query plans with no throughput
+    claim.
+88. OL-R88, attack, cancellation-hidden-commit:
+    Python task cancellation may hide a committed sequence; exact operation-ID
+    retry returns it and never allocates N+1.
+89. OL-R89, attack, busy-full-io-failure:
+    bounded BUSY, FULL, IOERR, and read-only failures retain sequence/state
+    atomicity and safe numeric class.
+90. OL-R90, attack, path-and-symlink-substitution:
+    migration/backup/restore source and target path attacks cannot redirect or
+    overwrite trusted state.
+91. OL-R91, attack, sql-error-payload-leak:
+    raw SQL, expanded statements, paths, request/result bytes, and sentinels do
+    not escape.
+92. OL-R92, attack, event-cursor-tail-forgery:
+    coherent snapshot tail hash/BLOB change without matching record fails
+    semantic audit.
+93. OL-R93, attack, checkpoint-revision-forgery:
+    current revision changed to a nonexistent or wrong retained revision fails.
+94. OL-R94, attack, backup-baseline-manifest-forgery:
+    changed baseline/sequence identity in backup or manifest blocks restore and
+    removes unpublished target.
+95. OL-R95, attack, migration-asset-byte-drift:
+    one changed v2 SQL/identity/manifest byte fails before execution.
+96. OL-R96, attack, evidence-and-nonclaim-sentinel:
+    report/evidence validation rejects pending/skipped results, mutable refs,
+    missing cold gates, release-ready language, distributed claims, or
+    popularity claims.
+
+### 31.31.21 Native unit tests outside the 96 cases
+
+Both runtime suites also retain focused tests for:
+
+- exact row aliases and SQLite carrier types without SELECT star;
+- BigInt/safe-number conversion in Node;
+- Python sqlite numeric extended/base-code mapping;
+- canonical BLOB invalid UTF-8/JSON/depth handling;
+- every prepared-statement failure point and transaction cleanup;
+- connection setting readback refusal;
+- busy attempt and elapsed-time hard bounds;
+- sequence singleton CAS loss;
+- baseline streaming batch bounds;
+- returned-result detachment;
+- caller mutation around authorization await;
+- async fault-hook rejection before transaction await can escape;
+- Python one-worker connection ownership;
+- Python cancellation ambiguity;
+- close/double-close/use-after-close;
+- semantic audit after open and after live tamper;
+- cursor cleanup bound;
+- lease/migration timestamp and counter overflow;
+- backup target/source identity and publication rollback;
+- WAL returned-busy status;
+- public exports and globally sorted Python __all__;
+- package asset presence; and
+- no raw SQLite value in errors/logs.
+
+All nine operation transition functions receive direct deterministic unit
+vectors in addition to end-to-end database tests.
+
+### 31.31.22 Backup and restore remediation
+
+Backup publication now treats these as one semantic identity set:
+
+- schema v2 identity;
+- migration lineage;
+- baseline ID/root/count;
+- operation count/sequence root;
+- sequence singleton;
+- reconciled state root;
+- backup content hash; and
+- manifest self-hash.
+
+The source backup flow:
+
+1. verifies no source/target alias;
+2. takes one online SQLite backup;
+3. opens the completed temporary copy read-only;
+4. runs quick, structural, and semantic replay audit;
+5. reads every required identity into a canonical manifest;
+6. hashes/syncs the closed database and manifest;
+7. publishes atomically; and
+8. never reports success on a WAL busy status.
+
+Restore:
+
+1. requires a new absent path;
+2. verifies manifest self-hash and database content before open;
+3. validates schema/descriptor compatibility;
+4. runs complete replay audit;
+5. verifies baseline/sequence/semantic identities against manifest;
+6. closes and syncs;
+7. publishes only after all checks; and
+8. removes temporary output on failure.
+
+One runtime's backup MUST restore in the other and the next committed
+operation MUST receive prior max sequence plus one.
+
+### 31.31.23 Performance and boundedness
+
+Extend raw SQLite characterization with:
+
+- v1-to-v2 baseline migration at 10K and 100K records;
+- v0-to-v2 representative migration;
+- request encode/hash for one and 64 records;
+- replay audit at 10K and 100K operations where practical;
+- replay audit at 10K and 100K records;
+- baseline entry streaming memory high-water;
+- one/two/four process sequence allocation contention;
+- semantic backup/restore with baseline;
+- TypeScript event-loop blocking duration; and
+- Python owner-worker/cancellation timing.
+
+Record:
+
+- Node, Python, and SQLite versions;
+- CPU/filesystem/platform;
+- WAL/synchronous/busy settings;
+- source and destination sizes;
+- baseline/operation/record counts;
+- raw samples and p50/p95/p99;
+- peak resident memory where portable;
+- transaction attempts/exhaustions exposed safely;
+- database/WAL/SHM sizes; and
+- EXPLAIN QUERY PLAN details.
+
+Expected indexed access paths include:
+
+- operation primary-key replay lookup;
+- commit_sequence ordered scan;
+- sequence singleton;
+- baseline ordinal chain scan;
+- baseline legacy-operation identity;
+- stream/record range;
+- checkpoint order/revision;
+- lease/used ID;
+- legal hold;
+- cursor;
+- migration/used lock.
+
+No benchmark is a release gate until a reviewed stable baseline exists. No
+single-machine result becomes a production throughput claim.
+
+### 31.31.24 Maximum-safe parallel implementation lanes
+
+After the schema and wire decision is frozen, use disjoint ownership:
+
+- lane OL-A, canonical protocol:
+  - owns spec/migrations/sqlite, new fixtures, schemas, validators, and exact
+    hashes;
+  - freezes field order, baseline domains, and migration graph.
+- lane OL-B, shared TypeScript codec:
+  - owns packages/runtime request byte codec/types/tests;
+  - does not edit SQLite migration assets.
+- lane OL-C, TypeScript SQLite:
+  - owns packages/sqlite runtime, replay, audit, migration executor, and native
+    tests.
+- lane OL-D, Python SQLite:
+  - owns python/src/graph_engineering/sqlite_cycle_store.py, public exports,
+    resources, and native tests.
+- lane OL-E, interop/process:
+  - owns tools/conformance replay fixture runner, workers, mixed-process races,
+    and nine-stage regression.
+- lane OL-F, backup/artifacts:
+  - owns backup/restore gates, npm/wheel/sdist installed smokes, and inventory
+    checks.
+- lane OL-G, docs/bench:
+  - owns docs/SQLITE.md, package READMEs, examples, docs smoke, benchmark, and
+    query-plan assertions.
+- lane OL-H, hostile acceptance:
+  - read-only audits all lanes, reruns coherent tamper reproducers, and writes
+    retained review evidence only after fixes land.
+- root/integration:
+  - owns package scripts, CI, lockfile, root docs, plan/log/evidence registry,
+    staging, commits, push, and detached-candidate verification.
+
+Only one lane edits each file. A lane needing another owner sends an explicit
+handoff. Package and artifact builds run serially after source convergence.
+No subagent stages, commits, or pushes unless root assigns that exact action.
+
+### 31.31.25 Implementation decomposition
+
+Execute these work packages in dependency order:
+
+1. OL-00 freeze:
+   - record current v0/v1 asset hashes;
+   - freeze architecture decision;
+   - assign file ownership;
+   - capture existing red/green baseline.
+2. OL-01 canonical model:
+   - specify fields, constraints, domains, entry kinds/order, and exact
+     canonical examples.
+3. OL-02 migration graph:
+   - add v2 schema and v1-to-v2 SQL/manifest/identity;
+   - keep old migration bytes immutable.
+4. OL-03 fixtures:
+   - add pre-replay v1, v0-to-v2, v1-to-v2, request vectors, baseline vectors,
+     and 96-case fixture.
+5. OL-04 validators:
+   - compile schemas;
+   - validate hashes, catalogs, migration graph, entry chain, and reports.
+6. OL-05 shared request codec:
+   - implement TS canonical encode/decode/hash vectors;
+   - align Python byte-for-byte.
+7. OL-06 baseline builders:
+   - implement bounded TS and Python enumerators;
+   - differential-test every entry/root.
+8. OL-07 migration execution:
+   - atomic fresh/v0/v1 open paths;
+   - rollback/crash/retry drills.
+9. OL-08 sequence allocation:
+   - update both mutation transactions;
+   - exact replay/no-gap/overflow/concurrency tests.
+10. OL-09 replay core:
+    - implement deterministic shadow state and common row validation in both
+      runtimes.
+11. OL-10 operation transitions:
+    - append;
+    - checkpoint save/delete;
+    - lease acquire/renew/release;
+    - legal hold;
+    - migration acquire/release.
+12. OL-11 reconciliation:
+    - all physical tables;
+    - event cursor immutable-tail binding;
+    - checkpoint current-revision binding.
+13. OL-12 native hostile coverage:
+    - run every coherent single/multi-field corruption in both runtimes.
+14. OL-13 exact 96:
+    - retain native reports and differential comparison.
+15. OL-14 mixed runtime:
+    - all-family handoffs, races, takeover, snapshots, alternating history.
+16. OL-15 backup/restore:
+    - identity set, cross-runtime restore, sequence continuation.
+17. OL-16 artifact supply chain:
+    - canonical assets, tarball/wheel/sdist inventory and installed lifecycle.
+18. OL-17 docs/benchmark:
+    - runbook, examples, limitations, raw bounded characterization.
+19. OL-18 workspace integration:
+    - package scripts, CI matrix, lockfile, root support table/changelog.
+20. OL-19 hostile review:
+    - independent source audit and retained failed-first reproducers.
+21. OL-20 immutable candidate:
+    - exact staging, commits, push/fetch equality, detached cold verification.
+22. OL-21 evidence:
+    - candidate hashes/counts/timings/nonclaims, separate evidence commit/push.
+
+No later package starts before its required predecessor artifacts are frozen,
+but independent runtime implementations and docs/hostile preparation run in
+parallel after OL-04.
+
+### 31.31.26 Required verification sequence
+
+Run gates in this order, stopping on the first red result:
+
+1. git diff --check on owned paths;
+2. canonical migration/manifest/schema validators;
+3. old asset immutability hash check;
+4. request vector validation;
+5. baseline vector/chain validation;
+6. v0-to-v2 fixture migration;
+7. v1-to-v2 fixture migration;
+8. failed migration rollback cases;
+9. TypeScript runtime unit/type/lint/build;
+10. Python Ruff/Mypy/native unit suite;
+11. TypeScript SQLite focused suite;
+12. Python SQLite focused suite;
+13. shared 54-case TypeScript SQLite;
+14. shared 54-case Python SQLite;
+15. exact full report comparison;
+16. exact SQLite 36 campaign;
+17. nine-stage success plus nine kill paths;
+18. exact 96 replay campaign in TypeScript;
+19. exact 96 replay campaign in Python;
+20. exact 96 differential report comparison;
+21. complete eight-scenario same-file interoperability;
+22. mixed-process race/takeover/cancellation;
+23. backup/restore/replay/continue both directions;
+24. docs snippet smoke;
+25. benchmark quick/query-plan gate;
+26. full workspace TypeScript suite/build;
+27. full Python suite;
+28. production dependency and secret scan;
+29. npm pack inventory and installed lifecycle;
+30. wheel and sdist inventory and installed lifecycle;
+31. exact diff/numstat/unrelated-dirty-file audit;
+32. implementation commit(s) with required identity and no coauthor;
+33. push/fetch/local-remote equality;
+34. detached worktree at immutable candidate;
+35. locked cold dependency install including Python dev extra;
+36. repeat all material migration/native/96/interop/backup/artifact gates;
+37. record immutable candidate evidence;
+38. evidence-only commit and push;
+39. final fetch/zero-divergence; and
+40. independent exit-criteria audit.
+
+Proposed stable command entry points:
+
+- pnpm check:sqlite-migrations;
+- pnpm test:sqlite-ledger-replay;
+- pnpm test:sqlite-campaign;
+- pnpm test:conformance;
+- pnpm check:sqlite-artifacts;
+- pnpm test:sqlite-docs;
+- pnpm test:sqlite-benchmark;
+- focused Python pytest paths for SQLite/replay/backup;
+- Python Ruff and Mypy on every changed provider/test/tool file.
+
+The exact package manager spelling may follow repository convention, but one
+top-level command MUST make each material gate discoverable.
+
+### 31.31.27 CI requirements
+
+CI MUST include:
+
+- Node 22.16 minimum and current supported 22.x for SQLite artifact open;
+- supported Python floor/current matrix;
+- canonical migration and hash checks;
+- old migration-byte immutability;
+- focused TS/Python replay tests;
+- shared 54 and exact 36;
+- exact 96 native/differential;
+- nine-stage barriers;
+- retained mixed-runtime interop;
+- backup/restore;
+- docs and quick benchmark/query plans;
+- npm artifact lifecycle;
+- wheel and sdist lifecycle; and
+- full workspace gates.
+
+Expensive 100K characterization may remain scheduled/manual raw evidence, but
+bounded quick coverage and index assertions run on every candidate.
+
+No CI job may pass by detecting a missing Node build and skipping cross-runtime
+tests. Build prerequisites explicitly precede them.
+
+### 31.31.28 Evidence record
+
+Retain:
+
+- candidate commit/tree/parent and remote ref;
+- exact author/committer identity;
+- old v0/v1 and new v2 schema/migration/manifest/catalog hashes;
+- descriptor and backup schema identities;
+- request vector fixture bytes/hash;
+- baseline vector fixture bytes/hash;
+- v0/v1 fixture bytes/hashes;
+- exact-54, exact-36, exact-96 report bytes/hashes/counts;
+- nine-stage success/kill process counts and timings;
+- TS/Python interop identities;
+- backup/restore manifest/content/semantic roots;
+- npm/wheel/sdist names, sizes, inventories, and installed smoke results;
+- benchmark environment/raw samples;
+- test/lint/type/build command, exit code, count, duration;
+- failed-first hostile reproductions and repair commit;
+- unrelated dirty-file exclusions;
+- detached worktree path and cold-install proof;
+- push/fetch equality; and
+- nonclaims.
+
+Evidence contains no raw tenant payload, request BLOB, result BLOB, cursor
+token, secret, environment value, or absolute private path.
+
+### 31.31.29 Commit and push discipline
+
+This planning task performs no commit or push.
+
+When implementation is ready, root uses reviewable commits:
+
+1. canonical v2 schema/migration/fixtures;
+2. shared request codec;
+3. TypeScript/Python runtime and replay;
+4. conformance/interop/backup/artifacts;
+5. docs/bench/CI;
+6. gate-driven repair commits; and
+7. evidence-only commit.
+
+Every commit uses:
+
+- author and committer: reacher-z <mtrxcop@gmail.com>;
+- empty commit body;
+- no Co-authored-by trailer;
+- exact owned-path staging;
+- no unrelated shared worktree changes; and
+- no amend of already pushed evidence.
+
+A red cold gate creates a new repair commit and a new immutable candidate.
+
+### 31.31.30 Recovery and rollout
+
+Before migration:
+
+- take a verified online backup;
+- retain source identity and manifest;
+- stop incompatible old writers;
+- verify local filesystem and available capacity; and
+- run source semantic audit.
+
+Migration failure leaves the old file unchanged or a complete supported
+intermediate version. Never repair a partial baseline manually.
+
+Rollback selects a separately verified pre-migration database by explicit
+operator pointer/rename. It never mutates the failed live file in place.
+
+An old runtime encountering v2 refuses unsupported version before mutation.
+Mixed old/new writers are prohibited during rollout.
+
+No recursive cleanup target may be a repository root, home directory,
+unresolved variable, glob, or source database. Temporary roots use mkdtemp and
+are deleted only after explicit path validation.
+
+### 31.31.31 Required documentation
+
+Update operator and package docs with:
+
+- why result hash alone was insufficient;
+- request_blob contents and privacy boundary;
+- global commit sequence semantics;
+- legacy baseline meaning and limitations;
+- v0/v1-to-v2 upgrade and backup requirement;
+- exact-retry behavior after cancellation/crash;
+- semantic audit/replay commands and expected safe output;
+- backup/restore and cross-runtime compatibility;
+- old-runtime refusal;
+- local-file/single-host limitation;
+- Node event-loop and Python worker/cancellation behavior;
+- payload encryption responsibility;
+- corruption response;
+- performance characterization nonclaims; and
+- explicit remaining PostgreSQL/S04/scheduler/release blockers.
+
+Every command snippet runs in retained docs smoke using temporary paths.
+
+### 31.31.32 Explicit nonclaims
+
+Completion does not claim:
+
+- recovered request bytes for legacy operations;
+- detection when an attacker coherently rewrites the database and every
+  external trust anchor;
+- distributed consensus or fencing;
+- safety on network filesystems;
+- protection from a compromised writer process;
+- built-in encryption at rest;
+- authoritative checkpoints;
+- PostgreSQL parity;
+- scheduler/controller integration;
+- release readiness;
+- production throughput;
+- a security certification;
+- 5K/6K stars; or
+- guaranteed popularity.
+
+Popularity remains an outcome influenced by adoption, documentation,
+community, integrations, maintenance, and time. It cannot be established by a
+test fixture or plan.
+
+### 31.31.33 Final exit criteria
+
+This remediation is complete only when:
+
+- schema v2 and its migration graph are canonical, reviewed, and
+  byte-identical in every artifact;
+- arbitrary legacy request reconstruction is absent;
+- baseline creation is atomic, immutable, canonical, and bounded;
+- every new operation stores exact canonical request bytes;
+- global commit sequences are contiguous and atomic across all mutation types
+  and tenants;
+- deterministic replay derives every stored result;
+- replay and physical state reconcile bidirectionally;
+- coherent ledger, cursor-tail, and checkpoint-revision forgeries fail in both
+  runtimes;
+- shared 54, SQLite 36, replay 96, and nine-stage gates are green;
+- all eight cross-language same-file scenarios are retained and green;
+- backup/restore and installed npm/wheel/sdist smokes preserve replay
+  identities;
+- the complete workspace is green;
+- an independently audited detached immutable candidate is green;
+- implementation and evidence commits are pushed with zero divergence; and
+- all nonclaims remain explicit.
+
+Until every item is proven, D7-S02 may be described only as active
+implementation/remediation work, never complete or release-ready.

@@ -43,6 +43,25 @@ migration note.
   pagination, disposable checkpoints, provider-clock lease fencing, tenant
   authorization, safe errors, legal holds, and migration exclusion while
   retaining explicit nonclaims for durability and distributed fencing.
+- Same-host durable SQLite CycleStore adapters in TypeScript and Python with one
+  owned connection, WAL/`FULL` durability policy, bounded writer retries,
+  persistent leases and migration fences, single-use snapshot cursors,
+  canonical v0-to-v1 migration assets, semantic integrity audits, native online
+  backup, manifest-bound restore to a new path, and cross-language file access.
+  The adapters are held to the shared 54-case provider campaign and a separate
+  36-case SQLite durability/attack campaign. Eight retained same-file
+  TypeScript/Python interop scenarios cover both ownership directions,
+  snapshot isolation, writer races, lease takeover, and bidirectional
+  backup/restore. They do not claim multi-host fencing, network-filesystem
+  safety, scheduler checkpoint authority, or operation-ledger replay closure.
+- A contract-frozen 96-case SQLite operation-ledger replay campaign (48
+  behavior, 48 attack) and a closed TypeScript storage codec for all nine
+  canonical mutation requests. These freeze the schema-v2 remediation inputs;
+  they do not claim that baseline migration or deterministic replay is already
+  implemented.
+- Native Node and Python SQLite characterization harnesses covering the same
+  append, contention, read, checkpoint, lease, semantic-audit, backup, and
+  restore workload inventory with raw samples and explicit nonclaims.
 
 - Event-sourced durable start and resume APIs in TypeScript and Python. Runs bind
   graph, original input, and caller-supplied implementation identity; node
@@ -65,9 +84,9 @@ migration note.
 
 ### In progress
 
-- Scheduler checkpoint acceleration, replay/fork, and distributed lease/fencing
-  providers. Recovery correctness currently comes from the complete event
-  stream; checkpoint files are not wired into the scheduler.
+- Scheduler checkpoint acceleration and distributed/multi-host lease providers.
+  Recovery correctness currently comes from the complete event stream; the
+  SQLite CycleStore is not yet wired into scheduler checkpoint recovery.
 - Graph IR stream-edge lowering and durable item recovery, conditional edge
   lowering, verifier panels, and bounded runtime loops. The new standalone
   pipeline deliberately does not claim these graph/durability semantics.

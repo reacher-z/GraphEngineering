@@ -1,0 +1,72 @@
+{
+  "$schema": "./manifest.schema.json",
+  "formatVersion": 1,
+  "engine": "sqlite",
+  "applicationId": 1195724359,
+  "latestVersion": 1,
+  "hashAlgorithm": "sha256",
+  "byteEncoding": "utf-8-lf",
+  "schema": {
+    "version": 1,
+    "bootstrapId": "fresh-v1-baseline",
+    "sqlPath": "schema-v1.sql",
+    "sqlSha256": "ddf524d8d0fcdde2a862c168c90698538b9197fa24216f0f249b6ea789c48e1c",
+    "identityPath": "schema-v1.identity.json",
+    "identityDocumentSha256": "4fcbe9872605011356e0655e2b9f9c3210e2bddbb131ddc87f08a93f0a1b9682",
+    "schemaIdentitySha256": "f3d961d4d96e93a7fab13a91b374c27ff877a93332ff7ed7426f1fff982baff4",
+    "reversibility": "rebuild-from-verified-backup-only"
+  },
+  "migrations": [
+    {
+      "id": "alpha-v0-to-v1",
+      "fromVersion": 0,
+      "toVersion": 1,
+      "sqlPath": "0001-alpha-v0-to-v1.sql",
+      "sqlSha256": "a8e9de4d1bae81f8405ef611fca1298bef024ad1df5e905d1d5a9357d1e8cb9c",
+      "targetSchemaIdentitySha256": "f3d961d4d96e93a7fab13a91b374c27ff877a93332ff7ed7426f1fff982baff4",
+      "reversibility": "rebuild-from-verified-backup-only",
+      "transactionMode": "caller-begin-exclusive",
+      "finalization": "manifest-bound-prepared-statements-before-commit",
+      "requiredPostconditions": [
+        "application-id-matches",
+        "user-version-is-1",
+        "schema-singleton-is-manifest-bound",
+        "migration-ledger-row-is-manifest-bound",
+        "all-canonical-tables-are-strict",
+        "logical-schema-identity-matches-fresh-v1",
+        "foreign-key-check-is-empty",
+        "integrity-check-is-ok",
+        "alpha-row-counts-are-preserved",
+        "stream-heads-match-record-tails",
+        "canonical-blobs-and-hashes-are-preserved",
+        "checkpoint-revisions-are-seeded",
+        "lease-and-migration-fences-are-monotonic",
+        "no-v0-or-placeholder-state-remains"
+      ]
+    }
+  ],
+  "fixtures": [
+    {
+      "id": "alpha-v0-representative",
+      "schemaVersion": 0,
+      "sqlPath": "fixtures/alpha-v0.sql",
+      "sqlSha256": "a57f063f52554aeb564dfbd90dc184146ce48160acd138e69ad02f76f9074eb6",
+      "expectationPath": "fixtures/alpha-v0.expected.json",
+      "expectationSha256": "e40ab4c5b4459704160a66a119306488722c889bbccce7355b46c2201158b5c2",
+      "fixtureIdentitySha256": "fe0f2bb74eab8ccfabd3a856dbe6c6dbcae40695a48d76eaf585e8e0c0ea9941"
+    }
+  ],
+  "requiredArtifactCopies": [
+    "npm:@graph-engineering/sqlite/migrations",
+    "python:graph_engineering/_sqlite_migrations"
+  ],
+  "sqlPolicy": {
+    "transactionOwner": "adapter",
+    "migrationTransaction": "begin-exclusive",
+    "callerControlledSql": false,
+    "extensions": false,
+    "attach": false,
+    "writableSchema": false,
+    "downgrade": "rebuild-from-verified-backup-only"
+  }
+}

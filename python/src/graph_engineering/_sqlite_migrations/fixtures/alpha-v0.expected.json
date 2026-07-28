@@ -1,0 +1,74 @@
+{
+  "formatVersion": 1,
+  "applicationId": 1195724359,
+  "userVersion": 0,
+  "counts": {
+    "ge_cycle_checkpoints": 1,
+    "ge_cycle_leases": 2,
+    "ge_cycle_legal_holds": 1,
+    "ge_cycle_migration_lock": 1,
+    "ge_cycle_operations": 2,
+    "ge_cycle_records": 3,
+    "ge_cycle_schema": 1,
+    "ge_cycle_streams": 2,
+    "ge_cycle_used_lease_ids": 3,
+    "ge_cycle_used_migration_lock_ids": 2
+  },
+  "collidingPublicIds": {
+    "recordId": "record-0",
+    "streamId": "shared-stream",
+    "tenants": ["tenant-alpha", "tenant-beta"]
+  },
+  "streams": [
+    {
+      "tenantId": "tenant-alpha",
+      "streamId": "shared-stream",
+      "tailSequence": 1,
+      "tailRecordHash": "048ea18fe2375813d839da0d56c1cf13d5f2295b5723bef02926fa2c8438c855"
+    },
+    {
+      "tenantId": "tenant-beta",
+      "streamId": "shared-stream",
+      "tailSequence": 0,
+      "tailRecordHash": "ee165eea3b071de6fe4e42b915287f65a628d89362285e486e7ec02d8b1128f7"
+    }
+  ],
+  "checkpoint": {
+    "tenantId": "tenant-alpha",
+    "checkpointScope": "controller",
+    "checkpointId": "checkpoint-1",
+    "boundSequence": 1,
+    "valueHash": "b82e5270697cd8b2b02b336e4fe53e24fc03891fdd756074917e48648c89e34d",
+    "valueBytes": 85
+  },
+  "leaseHistory": {
+    "active": {
+      "tenantId": "tenant-alpha",
+      "leaseId": "lease-alpha-2",
+      "lastLeaseEpoch": 2,
+      "lastFencingToken": 2
+    },
+    "released": {
+      "tenantId": "tenant-beta",
+      "lastLeaseEpoch": 1,
+      "lastFencingToken": 1
+    }
+  },
+  "migrationFence": {
+    "lastLockEpoch": 2,
+    "lastFencingToken": 2,
+    "usedLockIds": ["migration-alpha-1", "migration-alpha-2"]
+  },
+  "ledger": [
+    {
+      "tenantId": "tenant-alpha",
+      "operationId": "append-operation-1",
+      "resultHash": "bba3368c42cea2b7093228b98dd3d44d5a72c078fcced8ebc86d096b56ef8e43"
+    },
+    {
+      "tenantId": "tenant-beta",
+      "operationId": "release-operation-1",
+      "resultHash": "7d84e46c9d96e96f6f85c2d9a8fc3080e46ada67091cc08a39c35e71471409f4"
+    }
+  ]
+}

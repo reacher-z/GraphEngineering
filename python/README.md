@@ -15,6 +15,43 @@ uv sync --extra dev
 uv run pytest
 ```
 
+## Durable local SQLite CycleStore
+
+`SQLiteCycleStoreProvider` is the native Python implementation of the shared
+CycleStore provider contract. It uses the standard-library `sqlite3` module and
+one dedicated worker-thread-owned connection per adapter instance. The database
+is durable and interoperable with `@graph-engineering/sqlite`, but it is scoped
+to one host and a local filesystem; SQLite file locks are not distributed
+fencing and network filesystems are unsupported.
+
+```python
+import asyncio
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+from graph_engineering import SQLiteCycleStoreProvider
+
+
+async def main() -> None:
+    with TemporaryDirectory() as root:
+        async with SQLiteCycleStoreProvider(Path(root) / "cycle-store.db") as provider:
+            descriptor = await provider.describe()
+            assert descriptor["providerId"] == "sqlite-local"
+
+
+asyncio.run(main())
+```
+
+Provider calls are async so they compose with the runtime, while complete
+SQLite operations execute serially on the connection's dedicated worker.
+Cancelling an awaiting task does not prove that its database transaction was
+rolled back; retry the exact canonical request with the same `operationId`.
+Use the native online `backup()` and manifest-verified `restore_backup()` APIs,
+never a raw copy of a live WAL database. The full safety and recovery procedure
+is in the [SQLite operator runbook](../docs/SQLITE.md), and a temporary-path
+executable example is retained at
+[`examples/sqlite/python_quickstart.py`](../examples/sqlite/python_quickstart.py).
+
 ## Native Python CLI
 
 Installing the Python distribution provides both `graph` and the compatibility

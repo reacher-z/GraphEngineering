@@ -105,9 +105,13 @@ export {
   MAX_CYCLE_STORE_RECORD_BYTES,
   CycleStoreProviderError,
   MemoryCycleStoreProvider,
+  cycleStoreAdapterCodec,
   createCycleStoreCheckpoint,
   createCycleStoreRecord,
   createReferenceCycleStoreProviderDescriptor,
+  decodeCanonicalMutationRequest,
+  encodeCanonicalMutationRequest,
+  operationRequestHash,
   validateCycleStoreProviderDescriptor,
 } from "./cycle-store-provider.js";
 export type * from "./cycle-store-provider.js";

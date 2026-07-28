@@ -34,6 +34,11 @@ runtimes also provide event-sourced durable start/resume: committed successes
 are reused after process loss and unsafe ambiguous effects fail closed.
 The standalone cycle controllers now provide read-only replay, multi-generation
 fork, and bounded content-addressed lineage export for offline replay.
+The provider-neutral CycleStore contract also has same-host durable SQLite
+implementations in TypeScript and Python, including WAL-safe online backup,
+manifest-bound restore, semantic integrity audit, migration fencing, and exact
+cross-language file interoperability. SQLite remains a local-filesystem adapter;
+it is not distributed fencing or scheduler checkpoint integration.
 Scheduler checkpoint acceleration, production controller stores/distributed
 leases, Graph IR stream execution, and the broader v1 surface remain under
 active development; the repository does not silently mock unfinished capabilities.
@@ -51,6 +56,11 @@ rehashed corruption, missing-ancestor, duplicate, cycle, binding, and bound atta
 > **Source-only alpha:** npm and PyPI packages are not published yet. Clone this
 > repository to try the current release candidate; registry publication remains
 > gated on trusted publishing and package-specific security review.
+
+The core TypeScript workspace retains Node.js 20 support. The optional
+`@graph-engineering/sqlite` package requires Node.js 22.16.0 or newer because it
+uses the built-in, active-development `node:sqlite` backup API. The native Python
+adapter requires Python 3.11 or newer and the standard-library `sqlite3` module.
 
 ## Quickstart
 
@@ -118,6 +128,7 @@ uv run --project python pytest python/tests
 | Safe Mermaid/DOT visualization | Yes, through the CLI | Same portable Graph IR |
 | Local event/checkpoint stores | Yes | Yes |
 | Event-sourced scheduler start/resume | Yes | Yes |
+| Same-host durable SQLite CycleStore | Node.js >=22.16.0 | Python >=3.11 |
 | Scheduler checkpoint acceleration | Not yet | Not yet |
 | Standalone bounded-cycle/GraphPatch controller | Alpha, local store | Alpha, local store |
 | Read-only validation/planning MCP | Yes | Uses the same portable IR |
@@ -147,8 +158,16 @@ corepack pnpm typecheck
 corepack pnpm lint
 corepack pnpm test
 corepack pnpm test:conformance
+corepack pnpm check:sqlite-migrations
+corepack pnpm test:sqlite-campaign
+corepack pnpm test:sqlite-interop
+corepack pnpm test:sqlite-docs
+corepack pnpm test:sqlite-benchmark
+corepack pnpm test:sqlite-python-benchmark
+corepack pnpm test:sqlite-ledger-contract
 corepack pnpm check:packages
 corepack pnpm check:packed-install
+corepack pnpm check:sqlite-artifacts
 corepack pnpm audit:prod
 uv run --project python ruff check python/src python/tests
 uv run --project python mypy --config-file python/pyproject.toml python/src
@@ -169,6 +188,7 @@ python3 scripts/check-python-artifacts.py
 - [Runtime semantics](spec/runtime-semantics.md)
 - [Persistence semantics](spec/persistence-semantics.md)
 - [CycleStore provider semantics](spec/cycle-store-provider-semantics.md)
+- [SQLite CycleStore operator runbook](docs/SQLITE.md)
 - [Durable recovery semantics](spec/durable-recovery-semantics.md)
 - [Bounded pipeline semantics](spec/pipeline-semantics.md)
 - [Primitive semantics](spec/primitives-semantics.md)

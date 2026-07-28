@@ -1,0 +1,49 @@
+{
+  "name": "@graph-engineering/sqlite",
+  "version": "0.1.0-alpha.1",
+  "description": "Same-host durable SQLite CycleStore provider for Graph Engineering",
+  "keywords": ["ai", "agents", "graph", "workflow", "sqlite", "persistence", "cycle-store"],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/reacher-z/GraphEngineering.git",
+    "directory": "packages/sqlite"
+  },
+  "homepage": "https://github.com/reacher-z/GraphEngineering#readme",
+  "bugs": { "url": "https://github.com/reacher-z/GraphEngineering/issues" },
+  "publishConfig": { "access": "public" },
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "migrations",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=22.16.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "@graph-engineering/core": "workspace:*",
+    "@graph-engineering/runtime": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.8.0",
+    "vitest": "^4.0.0"
+  },
+  "license": "MIT"
+}

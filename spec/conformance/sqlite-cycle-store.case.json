@@ -1,0 +1,354 @@
+{
+  "schemaVersion": 1,
+  "id": "sqlite-cycle-store-v1",
+  "providerContractVersion": "cycle-store-provider/v1alpha1",
+  "migrationManifest": "spec/migrations/sqlite/manifest.json",
+  "expect": {
+    "caseCount": 36,
+    "behaviorCaseCount": 18,
+    "attackCaseCount": 18,
+    "categoryCounts": {
+      "backup-restore": 5,
+      "bootstrap": 5,
+      "concurrency": 6,
+      "crash-recovery": 6,
+      "lifecycle-error": 3,
+      "migration-integrity": 5,
+      "restart-interop": 6
+    },
+    "casesCanonicalUtf8Bytes": 10297,
+    "casesSha256": "b16e2b96a842e2596a10d6719df0958b9faf0297312b3b41311a1815c5185a45"
+  },
+  "cases": [
+    {
+      "id": "sqlite-fresh-creation",
+      "category": "bootstrap",
+      "polarity": "behavior",
+      "scenario": "fresh-creation",
+      "expectOutcome": "accepted",
+      "expectCode": null,
+      "assertion": "a new file applies the immutable v1 schema and manifest finalization once"
+    },
+    {
+      "id": "sqlite-exact-descriptor",
+      "category": "bootstrap",
+      "polarity": "behavior",
+      "scenario": "exact-descriptor",
+      "expectOutcome": "accepted",
+      "expectCode": null,
+      "assertion": "TypeScript and Python publish the exact sqlite-local descriptor identity"
+    },
+    {
+      "id": "sqlite-repeat-open-schema-identity",
+      "category": "bootstrap",
+      "polarity": "behavior",
+      "scenario": "repeat-open-schema-identity",
+      "expectOutcome": "accepted",
+      "expectCode": null,
+      "assertion": "reopen leaves schema bytes migration rows and logical identity unchanged"
+    },
+    {
+      "id": "sqlite-future-version-refusal",
+      "category": "bootstrap",
+      "polarity": "attack",
+      "scenario": "future-version-refusal",
+      "expectOutcome": "rejected",
+      "expectCode": "GE_CYCLE_STORE_UNSUPPORTED_VERSION",
+      "assertion": "an unknown future user version fails before serving reads or writes"
+    },
+    {
+      "id": "sqlite-setting-drift-refusal",
+      "category": "bootstrap",
+      "polarity": "attack",
+      "scenario": "setting-drift-refusal",
+      "expectOutcome": "rejected",
+      "expectCode": "GE_CYCLE_STORE_UNAVAILABLE",
+      "assertion": "a required connection setting that cannot be established fails closed"
+    },
+
+    {
+      "id": "sqlite-restart-all-state-families",
+      "category": "restart-interop",
+      "polarity": "behavior",
+      "scenario": "restart-all-state-families",
+      "expectOutcome": "accepted",
+      "expectCode": null,
+      "assertion": "records checkpoints leases holds ledger cursors and migration fence survive restart"
+    },
+    {
+      "id": "sqlite-typescript-to-python-continue",
+      "category": "restart-interop",
+      "polarity": "behavior",
+      "scenario": "typescript-to-python-continue",
+      "expectOutcome": "accepted",
+      "expectCode": null,
+      "assertion": "Python reads a TypeScript file and appends the exact next canonical record"
+    },
+    {
+      "id": "sqlite-python-to-typescript-continue",
+      "category": "restart-interop",
+      "polarity": "behavior",
+      "scenario": "python-to-typescript-continue",
+      "expectOutcome": "accepted",
+      "expectCode": null,
+      "assertion": "TypeScript reads a Python file and appends the exact next canonical record"
+    },
+    {
+      "id": "sqlite-restart-cursor-continuation",
+      "category": "restart-interop",
+      "polarity": "behavior",
+      "scenario": "restart-cursor-continuation",
+      "expectOutcome": "accepted",
+      "expectCode": null,
+      "assertion": "an unexpired cursor continues once after close and reopen without skip or duplicate"
+    },
+    {
+      "id": "sqlite-restart-ledger-retry",
+      "category": "restart-interop",
+      "polarity": "behavior",
+      "scenario": "restart-ledger-retry",
+      "expectOutcome": "accepted",
+      "expectCode": null,
+      "assertion": "an exact operation retry after restart returns the first canonical result"
+    },
+    {
+      "id": "sqlite-truncated-reopen-refusal",
+      "category": "restart-interop",
+      "polarity": "attack",
+      "scenario": "truncated-reopen-refusal",
+      "expectOutcome": "rejected",
+      "expectCode": "GE_CYCLE_STORE_CORRUPTION",
+      "assertion": "a truncated database fails without exposing its path or native SQLite message"
+    },
+
+    {
+      "id": "sqlite-concurrent-empty-tail-one-winner",
+      "category": "concurrency",
+      "polarity": "behavior",
+      "scenario": "concurrent-empty-tail-one-winner",
+      "expectOutcome": "accepted",
+      "expectCode": null,
+      "assertion": "two processes race one empty tail and commit exactly one winner"
+    },
+    {
+      "id": "sqlite-concurrent-exact-operation-retry",
+      "category": "concurrency",
+      "polarity": "behavior",
+      "scenario": "concurrent-exact-operation-retry",
+      "expectOutcome": "accepted",
+      "expectCode": null,
+      "assertion": "two identical operation IDs produce one mutation and two equal results"
+    },
+    {
+      "id": "sqlite-busy-release-then-success",
+      "category": "concurrency",
+      "polarity": "behavior",
+      "scenario": "busy-release-then-success",
+      "expectOutcome": "accepted",
+      "expectCode": null,
+      "assertion": "a bounded whole-transaction retry succeeds after the competing writer releases"
+    },
+    {
+      "id": "sqlite-concurrent-operation-request-drift",
+      "category": "concurrency",
+      "polarity": "attack",
+      "scenario": "concurrent-operation-request-drift",
+      "expectOutcome": "rejected",
+      "expectCode": "GE_CYCLE_STORE_IDEMPOTENCY_CONFLICT",
+      "assertion": "concurrent changed bytes under one operation ID commit no second mutation"
+    },
+    {
+      "id": "sqlite-busy-budget-exhaustion",
+      "category": "concurrency",
+      "polarity": "attack",
+      "scenario": "busy-budget-exhaustion",
+      "expectOutcome": "rejected",
+      "expectCode": "GE_CYCLE_STORE_UNAVAILABLE",
+      "assertion": "a held writer beyond the retry budget returns one safe unavailable error"
+    },
+    {
+      "id": "sqlite-deferred-upgrade-busy-snapshot",
+      "category": "concurrency",
+      "polarity": "attack",
+      "scenario": "deferred-upgrade-busy-snapshot",
+      "expectOutcome": "rejected",
+      "expectCode": "GE_CYCLE_STORE_UNAVAILABLE",
+      "assertion": "the known deferred read-to-write BUSY_SNAPSHOT trap is reproduced outside production"
+    },
+
+    {
+      "id": "sqlite-kill-before-commit-retry",
+      "category": "crash-recovery",
+      "polarity": "behavior",
+      "scenario": "kill-before-commit-retry",
+      "expectOutcome": "accepted",
+      "expectCode": null,
+      "assertion": "process death before commit leaves neither mutation nor ledger and exact retry commits once"
+    },
+    {
+      "id": "sqlite-kill-after-commit-before-ack-retry",
+      "category": "crash-recovery",
+      "polarity": "behavior",
+      "scenario": "kill-after-commit-before-ack-retry",
+      "expectOutcome": "accepted",
+      "expectCode": null,
+      "assertion": "process death after commit retains mutation and ledger and exact retry returns it"
+    },
+    {
+      "id": "sqlite-atomic-maximum-record-batch",
+      "category": "crash-recovery",
+      "polarity": "behavior",
+      "scenario": "atomic-maximum-record-batch",
+      "expectOutcome": "accepted",
+      "expectCode": null,
+      "assertion": "the maximum 64-record append commits one contiguous head and one ledger result"
+    },
+    {
+      "id": "sqlite-one-bad-record-batch-rollback",
+      "category": "crash-recovery",
+      "polarity": "attack",
+      "scenario": "one-bad-record-batch-rollback",
+      "expectOutcome": "rejected",
+      "expectCode": "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "assertion": "one invalid record rejects before commit and persists no batch prefix or ledger"
+    },
+    {
+      "id": "sqlite-stale-owner-after-process-takeover",
+      "category": "crash-recovery",
+      "polarity": "attack",
+      "scenario": "stale-owner-after-process-takeover",
+      "expectOutcome": "rejected",
+      "expectCode": "GE_CYCLE_STORE_STALE_FENCE",
+      "assertion": "an old process cannot write after another process takes over its expired lease"
+    },
+    {
+      "id": "sqlite-ledger-mutation-split-corruption",
+      "category": "crash-recovery",
+      "polarity": "attack",
+      "scenario": "ledger-mutation-split-corruption",
+      "expectOutcome": "rejected",
+      "expectCode": "GE_CYCLE_STORE_CORRUPTION",
+      "assertion": "a manually split mutation and ledger state fails semantic audit instead of replaying"
+    },
+
+    {
+      "id": "sqlite-live-wal-online-backup",
+      "category": "backup-restore",
+      "polarity": "behavior",
+      "scenario": "live-wal-online-backup",
+      "expectOutcome": "accepted",
+      "expectCode": null,
+      "assertion": "online backup includes committed rows that have not been checkpointed from WAL"
+    },
+    {
+      "id": "sqlite-concurrent-write-backup-checkpoint-busy",
+      "category": "backup-restore",
+      "polarity": "behavior",
+      "scenario": "concurrent-write-backup-checkpoint-busy",
+      "expectOutcome": "accepted",
+      "expectCode": null,
+      "assertion": "backup remains valid during bounded writes and a busy checkpoint row is handled explicitly"
+    },
+    {
+      "id": "sqlite-restored-ledger-fence-cursor-identities",
+      "category": "backup-restore",
+      "polarity": "behavior",
+      "scenario": "restored-ledger-fence-cursor-identities",
+      "expectOutcome": "accepted",
+      "expectCode": null,
+      "assertion": "restore preserves exact ledger fence cursor descriptor and schema identities"
+    },
+    {
+      "id": "sqlite-backup-existing-target-refusal",
+      "category": "backup-restore",
+      "polarity": "attack",
+      "scenario": "backup-existing-target-refusal",
+      "expectOutcome": "rejected",
+      "expectCode": "GE_CYCLE_STORE_CONFLICT",
+      "assertion": "backup never overwrites a destination that already exists or appears during publish"
+    },
+    {
+      "id": "sqlite-backup-source-alias-refusal",
+      "category": "backup-restore",
+      "polarity": "attack",
+      "scenario": "backup-source-alias-refusal",
+      "expectOutcome": "rejected",
+      "expectCode": "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "assertion": "backup rejects the source path and aliases resolving to the source"
+    },
+
+    {
+      "id": "sqlite-alpha-v0-to-v1-migration",
+      "category": "migration-integrity",
+      "polarity": "behavior",
+      "scenario": "alpha-v0-to-v1-migration",
+      "expectOutcome": "accepted",
+      "expectCode": null,
+      "assertion": "the representative v0 fixture migrates atomically with rows hashes and fences preserved"
+    },
+    {
+      "id": "sqlite-migration-finalization-rollback",
+      "category": "migration-integrity",
+      "polarity": "attack",
+      "scenario": "migration-finalization-rollback",
+      "expectOutcome": "rejected",
+      "expectCode": "GE_CYCLE_STORE_INTERNAL",
+      "assertion": "a failure before migration finalization restores the exact v0 schema and user version"
+    },
+    {
+      "id": "sqlite-structural-corruption-audit",
+      "category": "migration-integrity",
+      "polarity": "attack",
+      "scenario": "structural-corruption-audit",
+      "expectOutcome": "rejected",
+      "expectCode": "GE_CYCLE_STORE_CORRUPTION",
+      "assertion": "truncated or byte-flipped pages fail the structural integrity audit"
+    },
+    {
+      "id": "sqlite-canonical-hash-corruption-audit",
+      "category": "migration-integrity",
+      "polarity": "attack",
+      "scenario": "canonical-hash-corruption-audit",
+      "expectOutcome": "rejected",
+      "expectCode": "GE_CYCLE_STORE_CORRUPTION",
+      "assertion": "valid SQLite pages containing changed canonical bytes or hashes fail semantic audit"
+    },
+    {
+      "id": "sqlite-foreign-key-corruption-audit",
+      "category": "migration-integrity",
+      "polarity": "attack",
+      "scenario": "foreign-key-corruption-audit",
+      "expectOutcome": "rejected",
+      "expectCode": "GE_CYCLE_STORE_CORRUPTION",
+      "assertion": "foreign-key corruption is detected separately even when integrity_check says ok"
+    },
+
+    {
+      "id": "sqlite-close-double-close-use-after-close",
+      "category": "lifecycle-error",
+      "polarity": "attack",
+      "scenario": "close-double-close-use-after-close",
+      "expectOutcome": "rejected",
+      "expectCode": "GE_CYCLE_STORE_UNAVAILABLE",
+      "assertion": "double close is harmless and every later operation returns one typed lifecycle error"
+    },
+    {
+      "id": "sqlite-readonly-open-failure-redaction",
+      "category": "lifecycle-error",
+      "polarity": "attack",
+      "scenario": "readonly-open-failure-redaction",
+      "expectOutcome": "rejected",
+      "expectCode": "GE_CYCLE_STORE_PERMISSION_DENIED",
+      "assertion": "read-only and denied-open failures redact paths SQL payloads causes stacks and driver text"
+    },
+    {
+      "id": "sqlite-full-quota-classification",
+      "category": "lifecycle-error",
+      "polarity": "attack",
+      "scenario": "full-quota-classification",
+      "expectOutcome": "rejected",
+      "expectCode": "GE_CYCLE_STORE_QUOTA_EXCEEDED",
+      "assertion": "a deterministic max-page full condition maps to quota without message matching or partial commit"
+    }
+  ]
+}

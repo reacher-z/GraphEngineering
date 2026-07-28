@@ -5,6 +5,9 @@ import { dirname, isAbsolute, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import Ajv2020 from "ajv/dist/2020.js";
 
+import { validateCanonicalOperationLedgerReplayFixture } from
+  "../spec/conformance/sqlite-operation-ledger-replay.validate.mjs";
+
 const repositoryRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const fixtureRoot = join(repositoryRoot, "spec", "conformance");
 
@@ -95,6 +98,7 @@ const fixtureNameSet = new Set(allFixtureNames);
 const fixtureNames = allFixtureNames.filter((name) => name.endsWith(".json"));
 const caseNames = fixtureNames.filter((name) => name.endsWith(".case.json"));
 const yamlNames = allFixtureNames.filter((name) => /\.ya?ml$/u.test(name));
+const operationLedgerReplayCampaign = validateCanonicalOperationLedgerReplayFixture();
 
 for (const name of fixtureNames) {
   await loadJson(name);
@@ -1360,6 +1364,91 @@ assert.equal(
   false,
   "CycleStore provider schema accepted an advertised limit above the contract ceiling",
 );
+
+const sqliteCycleStoreCases = await loadJson("sqlite-cycle-store.case.json");
+assert.deepEqual(
+  Object.keys(sqliteCycleStoreCases).sort(compareUnicodeCodePoints),
+  ["cases", "expect", "id", "migrationManifest", "providerContractVersion", "schemaVersion"],
+  "D7 S02 SQLite CycleStore fixture is not closed",
+);
+assert.equal(sqliteCycleStoreCases.schemaVersion, 1);
+assert.equal(sqliteCycleStoreCases.id, "sqlite-cycle-store-v1");
+assert.equal(sqliteCycleStoreCases.providerContractVersion, "cycle-store-provider/v1alpha1");
+assert.equal(sqliteCycleStoreCases.migrationManifest, "spec/migrations/sqlite/manifest.json");
+assert.deepEqual(
+  Object.keys(sqliteCycleStoreCases.expect).sort(compareUnicodeCodePoints),
+  [
+    "attackCaseCount",
+    "behaviorCaseCount",
+    "caseCount",
+    "casesCanonicalUtf8Bytes",
+    "casesSha256",
+    "categoryCounts",
+  ],
+  "D7 S02 SQLite CycleStore expectations are not closed",
+);
+const sqliteCycleStoreCategories = new Set([
+  "backup-restore",
+  "bootstrap",
+  "concurrency",
+  "crash-recovery",
+  "lifecycle-error",
+  "migration-integrity",
+  "restart-interop",
+]);
+const sqliteCycleStoreCategoryCounts = new Map();
+for (const item of sqliteCycleStoreCases.cases) {
+  assert.deepEqual(
+    Object.keys(item).sort(compareUnicodeCodePoints),
+    ["assertion", "category", "expectCode", "expectOutcome", "id", "polarity", "scenario"],
+    `${item.id} SQLite CycleStore case is not closed`,
+  );
+  assert.match(item.id, /^sqlite-[a-z0-9-]{3,72}$/u);
+  assert.match(item.scenario, /^[a-z][a-z0-9-]{2,72}$/u);
+  assert.ok(sqliteCycleStoreCategories.has(item.category), `${item.id} has an unknown category`);
+  assert.ok(item.polarity === "behavior" || item.polarity === "attack");
+  assert.equal(typeof item.assertion, "string");
+  assert.ok(item.assertion.length >= 40 && item.assertion.length <= 180);
+  if (item.polarity === "attack") {
+    assert.equal(item.expectOutcome, "rejected");
+    assert.ok(cycleStoreErrorCodes.includes(item.expectCode));
+  } else {
+    assert.equal(item.expectOutcome, "accepted");
+    assert.equal(item.expectCode, null);
+  }
+  sqliteCycleStoreCategoryCounts.set(
+    item.category,
+    (sqliteCycleStoreCategoryCounts.get(item.category) ?? 0) + 1,
+  );
+}
+assert.equal(new Set(sqliteCycleStoreCases.cases.map(({ id }) => id)).size, 36);
+assert.equal(new Set(sqliteCycleStoreCases.cases.map(({ scenario }) => scenario)).size, 36);
+assert.equal(new Set(sqliteCycleStoreCases.cases.map(({ assertion }) => assertion)).size, 36);
+assert.equal(sqliteCycleStoreCases.cases.length, 36);
+assert.equal(sqliteCycleStoreCases.expect.caseCount, 36);
+assert.equal(
+  sqliteCycleStoreCases.cases.filter(({ polarity }) => polarity === "behavior").length,
+  18,
+);
+assert.equal(sqliteCycleStoreCases.expect.behaviorCaseCount, 18);
+assert.equal(
+  sqliteCycleStoreCases.cases.filter(({ polarity }) => polarity === "attack").length,
+  18,
+);
+assert.equal(sqliteCycleStoreCases.expect.attackCaseCount, 18);
+assert.deepEqual(
+  Object.fromEntries([...sqliteCycleStoreCategoryCounts].sort(([left], [right]) => (
+    compareUnicodeCodePoints(left, right)
+  ))),
+  sqliteCycleStoreCases.expect.categoryCounts,
+);
+const sqliteCycleStoreCasesCanonical = JSON.stringify(canonicalize(sqliteCycleStoreCases.cases));
+assert.equal(
+  Buffer.byteLength(sqliteCycleStoreCasesCanonical, "utf8"),
+  sqliteCycleStoreCases.expect.casesCanonicalUtf8Bytes,
+);
+assert.equal(hash(sqliteCycleStoreCases.cases), sqliteCycleStoreCases.expect.casesSha256);
+
 assert.equal(
   cycleFaultMatrixCases.eventSchema,
   "spec/cycle-controller-event.schema.json",
@@ -3894,5 +3983,5 @@ assert.equal(new Set(diamond.nodes.map(({ id }) => id)).size, diamond.nodes.leng
 assert.equal(new Set(diamond.edges.map(({ id }) => id)).size, diamond.edges.length);
 
 process.stdout.write(
-  `Validated ${fixtureNames.length} JSON fixtures (${caseNames.length} case manifests), ${yamlNames.length} referenced YAML fixtures, ${Object.keys(expected.canonicalization).length} graph hash, ${Object.keys(expected.checkpoints ?? {}).length} checkpoint hash, ${durableJson.validCases.length} Durable JSON vectors, ${compiledIdentities.length} compiled identities, ${graphPatchCases.validCases.length + graphPatchCases.invalidCases.length} graph patch schema cases plus ${graphPatchCases.semanticCases.length} closed semantic vectors, ${hostileShapeCases.length} hostile GraphPatch shape attacks, ${hostileSemanticCases.length} schema-valid hostile GraphPatch semantic/behavior cases, ${hostileRestoreCases.length} hostile GraphPatch replay/restore cases, 1 CycleStore provider descriptor schema with ${cycleStoreProviderCases.cases.length} closed cases, and 7 D7 controller/revision/event/checkpoint/lineage schemas with ${durableEvents.length} chained event goldens, ${cycleLineageCases.cases.length} lineage replay/corruption cases, ${cycleFaultMatrix.length} retained durable fault obligations, ${cycleInterruptionMatrix.length} activity interruption obligations, ${cycleOperationInterruptionMatrix.length} public-operation interruption obligations, ${cyclePatchVisibilityMatrix.length} patch-visibility fault obligations, ${cyclePatchCheckpointMatrix.length} patch-checkpoint fault obligations, ${cycleDurableCases.leaseTransitionCases.length} valid and ${cycleDurableCases.invalidLeaseTransitionCases.length} hostile lease transitions, ${cycleDurableCases.validInterruptedHistoryCases?.length ?? 0} interrupted terminal/checkpoint folds, ${cycleDurableCases.inDoubtProjectionCases.length} in-doubt singleton cases, ${resolutionProtocol.cases.length} terminal in-doubt resolution cases, ${cycleDurableCases.untilDryFoldCases.length} global-seen convergence fold, ${cycleDurableCases.hardStopFoldCases.length} hard-stop folds, ${cycleDurableCases.invalidEventHistoryCases.length} hostile histories, ${cycleDurableCases.invalidCheckpointSemanticCases.length} hostile checkpoint folds, plus ${cycleDurableCases.validStandaloneEventSchemaCases.length} standalone phase-event shapes; all ${expectedD7Tests.length} D7-CYCLE-SPEC-024 expected-test groups are mapped against meta-valid schemas.\n`,
+  `Validated ${fixtureNames.length} JSON fixtures (${caseNames.length} case manifests), ${yamlNames.length} referenced YAML fixtures, ${Object.keys(expected.canonicalization).length} graph hash, ${Object.keys(expected.checkpoints ?? {}).length} checkpoint hash, ${durableJson.validCases.length} Durable JSON vectors, ${compiledIdentities.length} compiled identities, ${graphPatchCases.validCases.length + graphPatchCases.invalidCases.length} graph patch schema cases plus ${graphPatchCases.semanticCases.length} closed semantic vectors, ${hostileShapeCases.length} hostile GraphPatch shape attacks, ${hostileSemanticCases.length} schema-valid hostile GraphPatch semantic/behavior cases, ${hostileRestoreCases.length} hostile GraphPatch replay/restore cases, 1 CycleStore provider descriptor schema with ${cycleStoreProviderCases.cases.length} closed cases plus ${sqliteCycleStoreCases.cases.length} SQLite durability cases and ${operationLedgerReplayCampaign.caseCount} contract-frozen SQLite operation-ledger replay cases (${operationLedgerReplayCampaign.behaviorCaseCount}/${operationLedgerReplayCampaign.attackCaseCount}), and 7 D7 controller/revision/event/checkpoint/lineage schemas with ${durableEvents.length} chained event goldens, ${cycleLineageCases.cases.length} lineage replay/corruption cases, ${cycleFaultMatrix.length} retained durable fault obligations, ${cycleInterruptionMatrix.length} activity interruption obligations, ${cycleOperationInterruptionMatrix.length} public-operation interruption obligations, ${cyclePatchVisibilityMatrix.length} patch-visibility fault obligations, ${cyclePatchCheckpointMatrix.length} patch-checkpoint fault obligations, ${cycleDurableCases.leaseTransitionCases.length} valid and ${cycleDurableCases.invalidLeaseTransitionCases.length} hostile lease transitions, ${cycleDurableCases.validInterruptedHistoryCases?.length ?? 0} interrupted terminal/checkpoint folds, ${cycleDurableCases.inDoubtProjectionCases.length} in-doubt singleton cases, ${resolutionProtocol.cases.length} terminal in-doubt resolution cases, ${cycleDurableCases.untilDryFoldCases.length} global-seen convergence fold, ${cycleDurableCases.hardStopFoldCases.length} hard-stop folds, ${cycleDurableCases.invalidEventHistoryCases.length} hostile histories, ${cycleDurableCases.invalidCheckpointSemanticCases.length} hostile checkpoint folds, plus ${cycleDurableCases.validStandaloneEventSchemaCases.length} standalone phase-event shapes; all ${expectedD7Tests.length} D7-CYCLE-SPEC-024 expected-test groups are mapped against meta-valid schemas.\n`,
 );

@@ -122,11 +122,72 @@ function aggregateStates(caseResults) {
   ]));
 }
 
-async function exerciseScenario(item, runtime, core) {
-  let provider = new runtime.MemoryCycleStoreProvider();
-  let attackBefore = provider.unsafeStateCountersForTest();
+export function createMemoryCycleStoreConformanceHarness(runtime) {
+  return Object.freeze({
+    async createProvider(options = {}) {
+      const provider = new runtime.MemoryCycleStoreProvider(options);
+      return {
+        provider,
+        controls: {
+          stateCounters: () => provider.unsafeStateCountersForTest(),
+          advanceClock: (milliseconds) => provider.unsafeAdvanceClockForTest(milliseconds),
+          corruptCheckpoint: (...arguments_) => provider.unsafeCorruptCheckpointForTest(...arguments_),
+          setLeaseCounters: (...arguments_) => provider.unsafeSetLeaseCountersForTest(...arguments_),
+          injectFailure: (...arguments_) => provider.unsafeInjectFailureForTest(...arguments_),
+        },
+        cleanup: async () => undefined,
+      };
+    },
+  });
+}
+
+async function createHarnessInstance(harness, options = {}) {
+  assert.equal(typeof harness?.createProvider, "function", "provider harness factory is required");
+  const instance = await harness.createProvider(options);
+  assert.ok(instance !== null && typeof instance === "object", "provider harness instance is invalid");
+  assert.ok(instance.provider !== null && typeof instance.provider === "object", "provider is missing");
+  const cleanup = typeof instance.cleanup === "function"
+    ? instance.cleanup
+    : async () => {
+      if (typeof instance.provider.close === "function") await instance.provider.close();
+    };
+  try {
+    const requiredControls = [
+      "stateCounters",
+      "advanceClock",
+      "corruptCheckpoint",
+      "setLeaseCounters",
+      "injectFailure",
+    ];
+    for (const name of requiredControls) {
+      assert.equal(typeof instance.controls?.[name], "function", `provider test control ${name} is missing`);
+    }
+  } catch (error) {
+    await cleanup();
+    throw error;
+  }
+  return {
+    provider: instance.provider,
+    controls: instance.controls,
+    cleanup,
+  };
+}
+
+async function exerciseScenario(item, runtime, core, harness) {
+  let instance = await createHarnessInstance(harness);
+  let provider = instance.provider;
+  let controls = instance.controls;
+  const replaceProvider = async (options = {}) => {
+    await instance.cleanup();
+    instance = null;
+    instance = await createHarnessInstance(harness, options);
+    provider = instance.provider;
+    controls = instance.controls;
+  };
+  let attackBefore = await controls.stateCounters();
   let observation = {};
   try {
+    try {
     const scenario = item.scenario;
     if (scenario === "descriptor-reference") {
       const descriptor = await provider.describe();
@@ -177,12 +238,12 @@ async function exerciseScenario(item, runtime, core) {
     } else if (scenario === "descriptor-unknown-field") {
       const descriptor = clone(await provider.describe());
       descriptor.unknown = true;
-      attackBefore = provider.unsafeStateCountersForTest();
+      attackBefore = await controls.stateCounters();
       runtime.validateCycleStoreProviderDescriptor(descriptor);
     } else if (scenario === "descriptor-limit-overflow") {
       const descriptor = clone(await provider.describe());
       descriptor.limits.maxPageSize = 257;
-      attackBefore = provider.unsafeStateCountersForTest();
+      attackBefore = await controls.stateCounters();
       runtime.validateCycleStoreProviderDescriptor(descriptor);
     } else if (scenario === "empty-tail") {
       observation = await provider.readTail({ context: AUTH, streamId: "missing" });
@@ -199,10 +260,10 @@ async function exerciseScenario(item, runtime, core) {
       };
       const first = await provider.append(request);
       const second = await provider.append(request);
-      observation = { first, second, recordCount: provider.unsafeStateCountersForTest().records };
+      observation = { first, second, recordCount: (await controls.stateCounters()).records };
     } else if (scenario === "append-commit-then-throw") {
       let armed = true;
-      provider = new runtime.MemoryCycleStoreProvider({
+      await replaceProvider({
         faultHook: (boundary) => {
           if (armed && boundary === "provider:append:after-commit-before-return") {
             armed = false;
@@ -220,7 +281,7 @@ async function exerciseScenario(item, runtime, core) {
         firstCode = error.code;
       }
       const recovered = await provider.append(request);
-      observation = { firstCode, recovered, recordCount: provider.unsafeStateCountersForTest().records };
+      observation = { firstCode, recovered, recordCount: (await controls.stateCounters()).records };
     } else if (scenario.startsWith("append-")) {
       const initial = await createStream(runtime, provider);
       const next = runtime.createCycleStoreRecord({
@@ -230,13 +291,13 @@ async function exerciseScenario(item, runtime, core) {
         value: { next: true },
       });
       if (scenario === "append-cas-loss") {
-        attackBefore = provider.unsafeStateCountersForTest();
+        attackBefore = await controls.stateCounters();
         await provider.append({
           context: mutation("cas-loss"), streamId: "stream-a", expectedTail: MISSING,
           lease: null, records: [next],
         });
       } else if (scenario === "append-expected-hash-drift") {
-        attackBefore = provider.unsafeStateCountersForTest();
+        attackBefore = await controls.stateCounters();
         await provider.append({
           context: mutation("hash-drift"), streamId: "stream-a",
           expectedTail: { exists: true, sequence: 0, recordHash: "f".repeat(64) },
@@ -247,7 +308,7 @@ async function exerciseScenario(item, runtime, core) {
           recordId: "broken", sequence: 1, previousRecordHash: "e".repeat(64),
           value: { broken: true },
         });
-        attackBefore = provider.unsafeStateCountersForTest();
+        attackBefore = await controls.stateCounters();
         await provider.append({
           context: mutation("broken"), streamId: "stream-a", expectedTail: tailFor(initial),
           lease: null, records: [broken],
@@ -257,7 +318,7 @@ async function exerciseScenario(item, runtime, core) {
           recordId: initial[0].recordId, sequence: 1, previousRecordHash: initial[0].recordHash,
           value: { duplicate: true },
         });
-        attackBefore = provider.unsafeStateCountersForTest();
+        attackBefore = await controls.stateCounters();
         await provider.append({
           context: mutation("duplicate"), streamId: "stream-a", expectedTail: tailFor(initial),
           lease: null, records: [duplicate],
@@ -268,7 +329,7 @@ async function exerciseScenario(item, runtime, core) {
           lease: null, records: records(runtime, 1, "original"),
         };
         await provider.append(originalRequest);
-        attackBefore = provider.unsafeStateCountersForTest();
+        attackBefore = await controls.stateCounters();
         await provider.append({ ...originalRequest, records: records(runtime, 1, "changed") });
       } else if (scenario === "append-operation-name-reuse") {
         const request = {
@@ -276,14 +337,14 @@ async function exerciseScenario(item, runtime, core) {
           lease: null, records: records(runtime, 1, "cross"),
         };
         await provider.append(request);
-        attackBefore = provider.unsafeStateCountersForTest();
+        attackBefore = await controls.stateCounters();
         await provider.deleteCheckpoint({
           context: mutation("cross-operation"), checkpointScope: "scope-a",
           checkpointId: "missing", expectedValueHash: null,
         });
       } else if (scenario === "append-count-overflow") {
-        provider = new runtime.MemoryCycleStoreProvider();
-        attackBefore = provider.unsafeStateCountersForTest();
+        await replaceProvider();
+        attackBefore = await controls.stateCounters();
         await provider.append({
           context: mutation("overflow"), streamId: "stream-a", expectedTail: MISSING,
           lease: null, records: records(runtime, 65, "overflow"),
@@ -346,7 +407,7 @@ async function exerciseScenario(item, runtime, core) {
       const first = await provider.readEventPage({
         context: AUTH, streamId: "stream-a", fromSequence: 0, pageSize: 1, cursor: null,
       });
-      attackBefore = provider.unsafeStateCountersForTest();
+      attackBefore = await controls.stateCounters();
       if (scenario === "event-cursor-tenant-scope") {
         await provider.readEventPage({
           context: AUTH_B, streamId: "stream-a", fromSequence: null, pageSize: 1,
@@ -410,24 +471,24 @@ async function exerciseScenario(item, runtime, core) {
         observation = { first, second };
       } else if (scenario === "checkpoint-stale-tail") {
         const stale = checkpoint(runtime, [batch[0]], { checkpointId: "stale" });
-        attackBefore = provider.unsafeStateCountersForTest();
+        attackBefore = await controls.stateCounters();
         await provider.saveCheckpoint({ context: mutation("stale"), checkpoint: stale, lease: null });
       } else if (scenario === "checkpoint-content-hash-drift") {
         const drifted = clone(base);
         drifted.value = { state: "PAYLOAD_SENTINEL" };
-        attackBefore = provider.unsafeStateCountersForTest();
+        attackBefore = await controls.stateCounters();
         await provider.saveCheckpoint({ context: mutation("drift"), checkpoint: drifted, lease: null });
       } else if (scenario === "checkpoint-immutable-id") {
         await provider.saveCheckpoint({ context: mutation("save"), checkpoint: base, lease: null });
         const changed = checkpoint(runtime, batch, { value: { state: "changed" } });
-        attackBefore = provider.unsafeStateCountersForTest();
+        attackBefore = await controls.stateCounters();
         await provider.saveCheckpoint({ context: mutation("changed"), checkpoint: changed, lease: null });
       } else if (scenario === "checkpoint-corrupt-load") {
         await provider.saveCheckpoint({ context: mutation("save"), checkpoint: base, lease: null });
-        provider.unsafeCorruptCheckpointForTest("tenant-a", "scope-a", "checkpoint-a", {
+        await controls.corruptCheckpoint("tenant-a", "scope-a", "checkpoint-a", {
           ...base, value: { state: "PAYLOAD_SENTINEL" },
         });
-        attackBefore = provider.unsafeStateCountersForTest();
+        attackBefore = await controls.stateCounters();
         await provider.loadCheckpoint({
           context: AUTH, checkpointScope: "scope-a", checkpointId: "checkpoint-a",
         });
@@ -439,7 +500,7 @@ async function exerciseScenario(item, runtime, core) {
         observation = await provider.acquireLease(firstRequest);
       } else if (scenario === "lease-renew") {
         const first = await provider.acquireLease(firstRequest);
-        provider.unsafeAdvanceClockForTest(10);
+        await controls.advanceClock(10);
         observation = await provider.renewLease({
           context: mutation("renew"), streamId: "stream-a", lease: binding(first), ttlMs: 200,
         });
@@ -454,14 +515,14 @@ async function exerciseScenario(item, runtime, core) {
         observation = { released, second };
       } else if (scenario === "lease-expired-takeover") {
         const first = await provider.acquireLease(firstRequest);
-        provider.unsafeAdvanceClockForTest(100);
+        await controls.advanceClock(100);
         const second = await provider.acquireLease(leaseRequest("takeover", {
           leaseId: "lease-2", holderId: "holder-b", mode: "takeover", expectedFencingToken: 1,
         }));
         observation = { firstFence: first.fencingToken, second };
       } else if (scenario === "lease-exact-retry") {
         const first = await provider.acquireLease(firstRequest);
-        provider.unsafeAdvanceClockForTest(1_000);
+        await controls.advanceClock(1_000);
         const second = await provider.acquireLease(firstRequest);
         observation = { first, second };
       } else {
@@ -471,45 +532,45 @@ async function exerciseScenario(item, runtime, core) {
           value: { next: true },
         });
         if (scenario === "lease-active-owner-conflict") {
-          attackBefore = provider.unsafeStateCountersForTest();
+          attackBefore = await controls.stateCounters();
           await provider.acquireLease(leaseRequest("second", {
             leaseId: "lease-2", holderId: "holder-b", expectedFencingToken: 1,
           }));
         } else if (scenario === "lease-early-takeover") {
-          attackBefore = provider.unsafeStateCountersForTest();
+          attackBefore = await controls.stateCounters();
           await provider.acquireLease(leaseRequest("early", {
             leaseId: "lease-2", holderId: "holder-b", mode: "takeover", expectedFencingToken: 1,
           }));
         } else if (scenario === "lease-stale-renew") {
-          attackBefore = provider.unsafeStateCountersForTest();
+          attackBefore = await controls.stateCounters();
           await provider.renewLease({
             context: mutation("stale-renew"), streamId: "stream-a",
             lease: { ...binding(first), holderId: "substituted" }, ttlMs: 200,
           });
         } else if (scenario === "lease-stale-release") {
-          provider.unsafeAdvanceClockForTest(100);
-          attackBefore = provider.unsafeStateCountersForTest();
+          await controls.advanceClock(100);
+          attackBefore = await controls.stateCounters();
           await provider.releaseLease({
             context: mutation("stale-release"), streamId: "stream-a", lease: binding(first),
           });
         } else if (scenario === "lease-stale-write") {
-          attackBefore = provider.unsafeStateCountersForTest();
+          attackBefore = await controls.stateCounters();
           await provider.append({
             context: mutation("stale-write"), streamId: "stream-a", expectedTail: tailFor(initial),
             lease: null, records: [next],
           });
         } else if (scenario === "lease-expired-write") {
-          provider.unsafeAdvanceClockForTest(100);
-          attackBefore = provider.unsafeStateCountersForTest();
+          await controls.advanceClock(100);
+          attackBefore = await controls.stateCounters();
           await provider.append({
             context: mutation("expired-write"), streamId: "stream-a", expectedTail: tailFor(initial),
             lease: binding(first), records: [next],
           });
         } else if (scenario === "lease-fence-overflow") {
-          provider.unsafeSetLeaseCountersForTest(
+          await controls.setLeaseCounters(
             "tenant-a", "stream-a", Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER,
           );
-          attackBefore = provider.unsafeStateCountersForTest();
+          attackBefore = await controls.stateCounters();
           await provider.acquireLease(leaseRequest("overflow", {
             leaseId: "overflow", expectedFencingToken: Number.MAX_SAFE_INTEGER,
           }));
@@ -535,7 +596,7 @@ async function exerciseScenario(item, runtime, core) {
         tenantB: await provider.readTail({ context: AUTH_B, streamId: "shared" }),
       };
     } else if (scenario === "safe-error-envelope") {
-      provider.unsafeInjectFailureForTest("read-tail", "GE_CYCLE_STORE_UNAVAILABLE");
+      await controls.injectFailure("read-tail", "GE_CYCLE_STORE_UNAVAILABLE");
       let serialized = null;
       try {
         await provider.readTail({ context: AUTH, streamId: "PAYLOAD_SENTINEL" });
@@ -549,23 +610,23 @@ async function exerciseScenario(item, runtime, core) {
       assert.equal(text.includes("PAYLOAD_SENTINEL"), false);
       observation = serialized;
     } else if (scenario === "authorization-denied-lookup") {
-      provider = new runtime.MemoryCycleStoreProvider({ authorize: () => false });
-      attackBefore = provider.unsafeStateCountersForTest();
+      await replaceProvider({ authorize: () => false });
+      attackBefore = await controls.stateCounters();
       await provider.readTail({
         context: { ...AUTH, authorizationHash: "f".repeat(64) }, streamId: "PAYLOAD_SENTINEL",
       });
     } else if (scenario === "injected-error-classification") {
       const caughtCodes = [];
       for (const code of ["GE_CYCLE_STORE_UNAVAILABLE", "GE_CYCLE_STORE_CORRUPTION"]) {
-        provider.unsafeInjectFailureForTest("read-tail", code);
+        await controls.injectFailure("read-tail", code);
         try { await provider.readTail({ context: AUTH, streamId: "stream-a" }); } catch (error) {
           assert.ok(error instanceof runtime.CycleStoreProviderError);
           caughtCodes.push(error.code);
         }
       }
       observation = { caughtCodes };
-      provider.unsafeInjectFailureForTest("read-tail", "GE_CYCLE_STORE_QUOTA_EXCEEDED");
-      attackBefore = provider.unsafeStateCountersForTest();
+      await controls.injectFailure("read-tail", "GE_CYCLE_STORE_QUOTA_EXCEEDED");
+      attackBefore = await controls.stateCounters();
       await provider.readTail({ context: AUTH, streamId: "stream-a" });
     } else if (scenario === "governance-hold-declarations") {
       await createStream(runtime, provider);
@@ -581,14 +642,14 @@ async function exerciseScenario(item, runtime, core) {
       const request = migrationRequest();
       const first = await provider.acquireMigrationLock(request);
       const retry = await provider.acquireMigrationLock(request);
-      provider.unsafeAdvanceClockForTest(100);
+      await controls.advanceClock(100);
       const takeover = await provider.acquireMigrationLock(migrationRequest("migration-2", {
         lockId: "migration-2", ownerId: "owner-b", mode: "takeover", expectedFencingToken: 1,
       }));
       observation = { first, retry, takeover };
     } else if (scenario === "migration-live-lock-conflict") {
       await provider.acquireMigrationLock(migrationRequest());
-      attackBefore = provider.unsafeStateCountersForTest();
+      attackBefore = await controls.stateCounters();
       await provider.acquireMigrationLock(migrationRequest("migration-2", {
         lockId: "migration-2", ownerId: "owner-b", expectedFencingToken: 1,
       }));
@@ -599,7 +660,7 @@ async function exerciseScenario(item, runtime, core) {
         recordId: "blocked", sequence: 1, previousRecordHash: initial[0].recordHash,
         value: { secret: "PAYLOAD_SENTINEL" },
       });
-      attackBefore = provider.unsafeStateCountersForTest();
+      attackBefore = await controls.stateCounters();
       await provider.append({
         context: mutation("blocked"), streamId: "stream-a", expectedTail: tailFor(initial),
         lease: null, records: [next],
@@ -607,7 +668,7 @@ async function exerciseScenario(item, runtime, core) {
     } else throw new TypeError(`unknown CycleStore provider scenario ${String(scenario)}`);
 
     assert.notEqual(item.polarity, "attack", `${item.id}: attack unexpectedly succeeded`);
-    const finalState = provider.unsafeStateCountersForTest();
+    const finalState = await controls.stateCounters();
     return {
       id: item.id,
       category: item.category,
@@ -627,7 +688,7 @@ async function exerciseScenario(item, runtime, core) {
       `${item.id}: generic exceptions cannot satisfy provider conformance`,
     );
     assert.equal(error.code, item.expectCode, `${item.id}: exact provider code drifted`);
-    const finalState = provider.unsafeStateCountersForTest();
+    const finalState = await controls.stateCounters();
     assert.deepEqual(finalState, attackBefore, `${item.id}: rejected operation mutated state`);
     const serialized = error.toJSON();
     const serializedText = core.canonicalSerialize(serialized);
@@ -646,10 +707,14 @@ async function exerciseScenario(item, runtime, core) {
       observation,
       finalState,
     };
+    }
+  } finally {
+    if (instance !== null) await instance.cleanup();
   }
 }
 
-export async function exerciseCycleStoreProviderCampaign({ runtime, core, fixture }) {
+export async function exerciseCycleStoreProviderCampaign({ runtime, core, fixture, harness }) {
+  const providerHarness = harness ?? createMemoryCycleStoreConformanceHarness(runtime);
   assert.deepEqual(Object.keys(fixture).sort(), [
     "cases",
     "contractVersion",
@@ -679,7 +744,7 @@ export async function exerciseCycleStoreProviderCampaign({ runtime, core, fixtur
   }
   const caseResults = [];
   for (const item of fixture.cases) {
-    caseResults.push(await exerciseScenario(item, runtime, core));
+    caseResults.push(await exerciseScenario(item, runtime, core, providerHarness));
   }
   const attackCaseCount = fixture.cases.filter(({ polarity }) => polarity === "attack").length;
   const behaviorCaseCount = fixture.cases.filter(({ polarity }) => polarity === "behavior").length;
@@ -707,7 +772,8 @@ export async function exerciseCycleStoreProviderCampaign({ runtime, core, fixtur
   const report = {
     campaign: fixture.id,
     contractVersion: fixture.contractVersion,
-    descriptorHash: runtime.createReferenceCycleStoreProviderDescriptor().descriptorHash,
+    descriptorHash: caseResults.find(({ id }) => id === "descriptor-reference")
+      ?.observation.descriptorHash,
     caseCount: fixture.cases.length,
     attackCaseCount,
     behaviorCaseCount,

@@ -1,4 +1,5 @@
 import { Buffer } from "node:buffer";
+import { TextDecoder } from "node:util";
 import {
   canonicalHash,
   canonicalSerialize,
@@ -438,13 +439,120 @@ export interface CycleStoreProvider {
   releaseMigrationLock(request: CycleStoreReleaseMigrationLockRequest): Promise<CycleStoreMigrationLock | null>;
 }
 
+/**
+ * Closed descriptor inputs that an adapter may strengthen without changing
+ * the contract's fixed guarantees or safe-observability declaration.
+ */
+export interface CycleStoreProviderProfile {
+  readonly providerId: string;
+  readonly schemaVersion: number;
+  readonly compatibility: CycleStoreProviderDescriptor["compatibility"];
+  readonly limits: CycleStoreProviderLimits;
+  readonly capabilities: CycleStoreProviderDescriptor["capabilities"];
+  readonly protection: CycleStoreProviderDescriptor["protection"];
+  readonly governance: CycleStoreProviderDescriptor["governance"];
+}
+
+export type CycleStoreAdapterRequestOperation = Exclude<
+  CycleStoreProviderOperation,
+  "describe"
+>;
+
+/** Canonical, detached request shapes returned by the adapter codec. */
+export interface CycleStoreCanonicalRequestByOperation {
+  readonly "inspect-schema": Readonly<{ context: CycleStoreAuthorizationContext }>;
+  readonly "read-tail": CycleStoreReadTailRequest;
+  readonly append: CycleStoreAppendRequest;
+  readonly "read-event-page": CycleStoreReadEventPageRequest;
+  readonly "save-checkpoint": CycleStoreSaveCheckpointRequest;
+  readonly "load-checkpoint": CycleStoreLoadCheckpointRequest;
+  readonly "list-checkpoints": CycleStoreListCheckpointsRequest;
+  readonly "delete-checkpoint": CycleStoreDeleteCheckpointRequest;
+  readonly "acquire-lease": CycleStoreAcquireLeaseRequest;
+  readonly "renew-lease": CycleStoreRenewLeaseRequest;
+  readonly "release-lease": CycleStoreReleaseLeaseRequest;
+  readonly "inspect-lease": CycleStoreInspectLeaseRequest;
+  readonly "set-legal-hold": CycleStoreLegalHoldRequest;
+  readonly "inspect-governance": CycleStoreReadTailRequest;
+  readonly "acquire-migration-lock": CycleStoreAcquireMigrationLockRequest;
+  readonly "inspect-migration-lock": Readonly<{ context: CycleStoreAuthorizationContext }>;
+  readonly "release-migration-lock": CycleStoreReleaseMigrationLockRequest;
+}
+
+export type CycleStoreMutationOperation =
+  | "append"
+  | "save-checkpoint"
+  | "delete-checkpoint"
+  | "acquire-lease"
+  | "renew-lease"
+  | "release-lease"
+  | "set-legal-hold"
+  | "acquire-migration-lock"
+  | "release-migration-lock";
+
+/** Closed operation-ledger result shapes. */
+export interface CycleStoreLedgerResultByOperation {
+  readonly append: CycleStoreAppendResult;
+  readonly "save-checkpoint": CycleStoreCheckpointSummary;
+  readonly "delete-checkpoint": CycleStoreDeleteCheckpointResult;
+  readonly "acquire-lease": CycleStoreLease;
+  readonly "renew-lease": CycleStoreLease;
+  readonly "release-lease": CycleStoreLeaseInspection;
+  readonly "set-legal-hold": CycleStoreGovernanceInspection;
+  readonly "acquire-migration-lock": CycleStoreMigrationLock;
+  readonly "release-migration-lock": null;
+}
+
+export interface CycleStoreAdapterCodec {
+  createDescriptor(profile: CycleStoreProviderProfile): CycleStoreProviderDescriptor;
+  captureRequest<K extends CycleStoreAdapterRequestOperation>(
+    operation: K,
+    value: unknown,
+    descriptor: CycleStoreProviderDescriptor,
+  ): CycleStoreCanonicalRequestByOperation[K];
+  operationRequestHash(
+    operation: CycleStoreMutationOperation,
+    canonicalRequest: CycleStoreCanonicalRequestByOperation[CycleStoreMutationOperation],
+  ): string;
+  encodeCanonicalMutationRequest<K extends CycleStoreMutationOperation>(
+    operation: K,
+    canonicalRequest: CycleStoreCanonicalRequestByOperation[K],
+  ): Uint8Array;
+  decodeCanonicalMutationRequest<K extends CycleStoreMutationOperation>(
+    operation: K,
+    bytes: Uint8Array,
+  ): CycleStoreCanonicalRequestByOperation[K];
+  parseStoredRecord(
+    value: unknown,
+    operation: CycleStoreProviderOperation,
+  ): CycleStoreRecord;
+  parseStoredCheckpoint(
+    value: unknown,
+    operation: CycleStoreProviderOperation,
+    details?: Readonly<Record<string, unknown>>,
+  ): CycleStoreCheckpoint;
+  encodeLedgerResult<K extends CycleStoreMutationOperation>(
+    operation: K,
+    result: CycleStoreLedgerResultByOperation[K],
+  ): Uint8Array;
+  decodeLedgerResult<K extends CycleStoreMutationOperation>(
+    operation: K,
+    bytes: Uint8Array,
+  ): CycleStoreLedgerResultByOperation[K];
+}
+
 export type CycleStoreAuthorizationHook = (
   context: CycleStoreAuthorizationContext,
   operation: CycleStoreProviderOperation,
 ) => boolean | Promise<boolean>;
 
 export type CycleStoreProviderFaultHook = (
-  boundary: `provider:${CycleStoreProviderOperation}:before-commit`
+  boundary: `provider:${CycleStoreProviderOperation}:transaction-reserved`
+    | `provider:${CycleStoreProviderOperation}:decision-state-read`
+    | "provider:append:records-staged"
+    | `provider:${CycleStoreProviderOperation}:ledger-staged`
+    | `provider:${CycleStoreProviderOperation}:before-commit`
+    | `provider:${CycleStoreProviderOperation}:commit-returned`
     | `provider:${CycleStoreProviderOperation}:after-commit-before-return`,
 ) => void | Promise<void>;
 
@@ -679,27 +787,8 @@ function parseRecord(value: unknown, operation: CycleStoreProviderOperation): Cy
   return expected;
 }
 
-function descriptorBody(providerId: string) {
+function fixedDescriptorSections() {
   return {
-    apiVersion: CYCLE_STORE_PROVIDER_API_VERSION,
-    kind: "CycleStoreProviderDescriptor" as const,
-    contractVersion: CYCLE_STORE_PROVIDER_CONTRACT_VERSION,
-    providerId,
-    schemaVersion: 1,
-    compatibility: {
-      minReaderVersion: 1,
-      maxReaderVersion: 1,
-      minWriterVersion: 1,
-      maxWriterVersion: 1,
-    },
-    limits: {
-      maxAppendRecords: MAX_CYCLE_STORE_APPEND_RECORDS,
-      maxRecordBytes: MAX_CYCLE_STORE_RECORD_BYTES,
-      maxAppendBytes: MAX_CYCLE_STORE_APPEND_BYTES,
-      maxPageSize: MAX_CYCLE_STORE_PAGE_SIZE,
-      maxCheckpointBytes: MAX_CYCLE_STORE_CHECKPOINT_BYTES,
-      maxLeaseTtlMs: MAX_CYCLE_STORE_LEASE_TTL_MS,
-    },
     guarantees: {
       appendAtomicity: "all-or-nothing" as const,
       tailConsistency: "strong" as const,
@@ -708,27 +797,6 @@ function descriptorBody(providerId: string) {
       idempotency: "operation-id-canonical-request" as const,
       leaseClock: "provider-authoritative" as const,
       tenantIsolation: "mandatory" as const,
-    },
-    capabilities: {
-      durability: "process-local" as const,
-      distributedFencing: false,
-      snapshotPagination: true as const,
-      checkpointCrud: true as const,
-      legalHold: "reference-state-machine" as const,
-      backupRestore: "declared" as const,
-      compaction: "logical-history-preserving" as const,
-    },
-    protection: {
-      payloadProtection: "external" as const,
-      encryptionAtRest: "none" as const,
-      rawPayloadObservability: false as const,
-    },
-    governance: {
-      retention: "descriptor-only" as const,
-      archival: "descriptor-only" as const,
-      legalHoldBlocksDeletion: true as const,
-      migrationLock: "exclusive-fenced" as const,
-      backupIdentity: "content-addressed" as const,
     },
     observability: {
       safeFields: [
@@ -748,15 +816,98 @@ function descriptorBody(providerId: string) {
   };
 }
 
-export function createReferenceCycleStoreProviderDescriptor(
-  providerId = "memory-reference",
-): CycleStoreProviderDescriptor {
-  const safeProviderId = identifier(providerId, "describe", "providerId");
-  const body = descriptorBody(safeProviderId);
+function referenceProviderProfile(providerId: string): CycleStoreProviderProfile {
+  return {
+    providerId,
+    schemaVersion: 1,
+    compatibility: {
+      minReaderVersion: 1,
+      maxReaderVersion: 1,
+      minWriterVersion: 1,
+      maxWriterVersion: 1,
+    },
+    limits: {
+      maxAppendRecords: MAX_CYCLE_STORE_APPEND_RECORDS,
+      maxRecordBytes: MAX_CYCLE_STORE_RECORD_BYTES,
+      maxAppendBytes: MAX_CYCLE_STORE_APPEND_BYTES,
+      maxPageSize: MAX_CYCLE_STORE_PAGE_SIZE,
+      maxCheckpointBytes: MAX_CYCLE_STORE_CHECKPOINT_BYTES,
+      maxLeaseTtlMs: MAX_CYCLE_STORE_LEASE_TTL_MS,
+    },
+    capabilities: {
+      durability: "process-local",
+      distributedFencing: false,
+      snapshotPagination: true,
+      checkpointCrud: true,
+      legalHold: "reference-state-machine",
+      backupRestore: "declared",
+      compaction: "logical-history-preserving",
+    },
+    protection: {
+      payloadProtection: "external",
+      encryptionAtRest: "none",
+      rawPayloadObservability: false,
+    },
+    governance: {
+      retention: "descriptor-only",
+      archival: "descriptor-only",
+      legalHoldBlocksDeletion: true,
+      migrationLock: "exclusive-fenced",
+      backupIdentity: "content-addressed",
+    },
+  };
+}
+
+function descriptorBody(profile: CycleStoreProviderProfile) {
+  return {
+    apiVersion: CYCLE_STORE_PROVIDER_API_VERSION,
+    kind: "CycleStoreProviderDescriptor" as const,
+    contractVersion: CYCLE_STORE_PROVIDER_CONTRACT_VERSION,
+    providerId: profile.providerId,
+    schemaVersion: profile.schemaVersion,
+    compatibility: profile.compatibility,
+    limits: profile.limits,
+    ...fixedDescriptorSections(),
+    capabilities: profile.capabilities,
+    protection: profile.protection,
+    governance: profile.governance,
+  };
+}
+
+function createDescriptorFromProfile(profileValue: unknown): CycleStoreProviderDescriptor {
+  const operation: CycleStoreProviderOperation = "describe";
+  const profile = captureObject(
+    profileValue,
+    operation,
+    "provider profile",
+    MAX_CYCLE_STORE_RECORD_BYTES,
+  );
+  exactKeys(
+    profile,
+    [
+      "providerId",
+      "schemaVersion",
+      "compatibility",
+      "limits",
+      "capabilities",
+      "protection",
+      "governance",
+    ],
+    operation,
+    "provider profile",
+  );
+  const body = descriptorBody(profile as unknown as CycleStoreProviderProfile);
   return validateCycleStoreProviderDescriptor({
     ...body,
     descriptorHash: hashWithDomain(CYCLE_STORE_PROVIDER_DESCRIPTOR_DOMAIN, body),
   });
+}
+
+export function createReferenceCycleStoreProviderDescriptor(
+  providerId = "memory-reference",
+): CycleStoreProviderDescriptor {
+  const safeProviderId = identifier(providerId, "describe", "providerId");
+  return createDescriptorFromProfile(referenceProviderProfile(safeProviderId));
 }
 
 export function validateCycleStoreProviderDescriptor(
@@ -772,7 +923,7 @@ export function validateCycleStoreProviderDescriptor(
       "provider descriptor version is unsupported",
     );
   }
-  const referenceKeys = Object.keys(descriptorBody("memory-reference"));
+  const referenceKeys = Object.keys(descriptorBody(referenceProviderProfile("memory-reference")));
   exactKeys(raw, [...referenceKeys, "descriptorHash"], operation, "provider descriptor");
   if (raw.kind !== "CycleStoreProviderDescriptor") {
     providerError("GE_CYCLE_STORE_INVALID_ARGUMENT", operation, "provider descriptor kind is invalid");
@@ -878,7 +1029,7 @@ export function validateCycleStoreProviderDescriptor(
     ),
   };
 
-  const expectedGuarantees = descriptorBody(providerId).guarantees;
+  const expectedGuarantees = fixedDescriptorSections().guarantees;
   const guaranteesRaw = section(raw.guarantees, Object.keys(expectedGuarantees), "guarantees");
   if (!same(guaranteesRaw, expectedGuarantees)) {
     providerError("GE_CYCLE_STORE_INVALID_ARGUMENT", operation, "provider guarantees are invalid");
@@ -947,7 +1098,7 @@ export function validateCycleStoreProviderDescriptor(
     backupIdentity: choice(governanceRaw.backupIdentity, ["content-addressed"], "backupIdentity"),
   };
 
-  const expectedObservability = descriptorBody(providerId).observability;
+  const expectedObservability = fixedDescriptorSections().observability;
   const observabilityRaw = section(
     raw.observability,
     Object.keys(expectedObservability),
@@ -1046,10 +1197,919 @@ function parseCheckpoint(
   return expected;
 }
 
+const MAX_CYCLE_STORE_LEDGER_RESULT_BYTES = MAX_CYCLE_STORE_CHECKPOINT_BYTES
+  + MAX_CYCLE_STORE_RECORD_BYTES;
+
+function parseCanonicalStoredValue(
+  value: unknown,
+  operation: CycleStoreProviderOperation,
+  label: string,
+  maximumBytes: number,
+): unknown {
+  if (!(value instanceof Uint8Array)) return value;
+  if (value.byteLength === 0 || value.byteLength > maximumBytes) {
+    providerError("GE_CYCLE_STORE_CORRUPTION", operation, `${label} bytes are corrupt`);
+  }
+  const bytes = Uint8Array.from(value);
+  if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
+    providerError("GE_CYCLE_STORE_CORRUPTION", operation, `${label} bytes are corrupt`);
+  }
+  try {
+    const canonicalJson = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    const parsed = JSON.parse(canonicalJson) as unknown;
+    const captured = captureBoundedJson(parsed, maximumBytes);
+    if (captured.canonicalJson !== canonicalJson) {
+      providerError("GE_CYCLE_STORE_CORRUPTION", operation, `${label} bytes are corrupt`);
+    }
+    return captured.value;
+  } catch (error) {
+    if (error instanceof CycleStoreProviderError) throw error;
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_CORRUPTION",
+      operation,
+      `${label} bytes are corrupt`,
+    );
+  }
+}
+
+function parseStoredRecordValue(
+  value: unknown,
+  operation: CycleStoreProviderOperation,
+): CycleStoreRecord {
+  try {
+    return parseRecord(
+      parseCanonicalStoredValue(value, operation, "record", MAX_CYCLE_STORE_RECORD_BYTES * 2),
+      operation,
+    );
+  } catch (error) {
+    if (error instanceof CycleStoreProviderError && error.code === "GE_CYCLE_STORE_CORRUPTION") {
+      throw error;
+    }
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_CORRUPTION",
+      operation,
+      "record bytes are corrupt",
+    );
+  }
+}
+
+function parseStoredCheckpointValue(
+  value: unknown,
+  operation: CycleStoreProviderOperation,
+  details: Readonly<Record<string, unknown>> = {},
+): CycleStoreCheckpoint {
+  try {
+    return parseCheckpoint(
+      parseCanonicalStoredValue(
+        value,
+        operation,
+        "checkpoint",
+        MAX_CYCLE_STORE_CHECKPOINT_BYTES + MAX_CYCLE_STORE_RECORD_BYTES,
+      ),
+      operation,
+    );
+  } catch (error) {
+    if (error instanceof CycleStoreProviderError && error.code === "GE_CYCLE_STORE_CORRUPTION") {
+      throw new CycleStoreProviderError(
+        "GE_CYCLE_STORE_CORRUPTION",
+        operation,
+        "checkpoint bytes are corrupt",
+        details,
+      );
+    }
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_CORRUPTION",
+      operation,
+      "checkpoint bytes are corrupt",
+      details,
+    );
+  }
+}
+
+type CycleStoreRequestValidationContract = Pick<
+  CycleStoreProviderDescriptor,
+  "schemaVersion" | "limits"
+>;
+
+function captureProviderRequest<K extends CycleStoreAdapterRequestOperation>(
+  operation: K,
+  value: unknown,
+  descriptor: CycleStoreRequestValidationContract,
+): CycleStoreCanonicalRequestByOperation[K] {
+  let canonicalRequest: unknown;
+  switch (operation) {
+    case "inspect-schema": {
+      const request = captureObject({ context: value }, operation, "schema request");
+      exactKeys(request, ["context"], operation, "schema request");
+      canonicalRequest = { context: parseAuthorizationContext(request.context, operation) };
+      break;
+    }
+    case "read-tail": {
+      const request = captureObject(value, operation, "tail request");
+      exactKeys(request, ["context", "streamId"], operation, "tail request");
+      canonicalRequest = {
+        context: parseAuthorizationContext(request.context, operation),
+        streamId: identifier(request.streamId, operation, "streamId"),
+      };
+      break;
+    }
+    case "append": {
+      const request = captureObject(value, operation, "append request");
+      exactKeys(
+        request,
+        ["context", "streamId", "expectedTail", "lease", "records"],
+        operation,
+        "append request",
+      );
+      const context = parseMutationContext(request.context, operation);
+      const streamId = identifier(request.streamId, operation, "streamId");
+      const expectedTail = parseTail(request.expectedTail, operation, "expectedTail");
+      const lease = request.lease === null ? null : parseLeaseBinding(request.lease, operation);
+      if (!Array.isArray(request.records) || request.records.length === 0) {
+        providerError("GE_CYCLE_STORE_INVALID_ARGUMENT", operation, "append records must be nonempty");
+      }
+      if (request.records.length > descriptor.limits.maxAppendRecords) {
+        providerError(
+          "GE_CYCLE_STORE_QUOTA_EXCEEDED",
+          operation,
+          "append record count exceeds provider limit",
+        );
+      }
+      const records = request.records.map((record) => parseRecord(record, operation));
+      let batchBytes = 0;
+      for (const record of records) {
+        const bytes = Buffer.byteLength(canonicalSerialize(record), "utf8");
+        if (bytes > descriptor.limits.maxRecordBytes) {
+          providerError("GE_CYCLE_STORE_QUOTA_EXCEEDED", operation, "record exceeds provider byte limit");
+        }
+        batchBytes += bytes;
+        if (batchBytes > descriptor.limits.maxAppendBytes) {
+          providerError("GE_CYCLE_STORE_QUOTA_EXCEEDED", operation, "append exceeds provider byte limit");
+        }
+      }
+      canonicalRequest = { context, streamId, expectedTail, lease, records };
+      break;
+    }
+    case "read-event-page": {
+      const request = captureObject(value, operation, "event page request");
+      exactKeys(
+        request,
+        ["context", "streamId", "fromSequence", "pageSize", "cursor"],
+        operation,
+        "event page request",
+      );
+      const context = parseAuthorizationContext(request.context, operation);
+      const streamId = identifier(request.streamId, operation, "streamId");
+      const pageSize = integer(
+        request.pageSize,
+        1,
+        descriptor.limits.maxPageSize,
+        operation,
+        "pageSize",
+      );
+      const cursor = request.cursor === null ? null : parseCursorToken(request.cursor, operation);
+      const fromSequence = request.fromSequence === null
+        ? null
+        : integer(request.fromSequence, 0, Number.MAX_SAFE_INTEGER, operation, "fromSequence");
+      if ((cursor === null) === (fromSequence === null)) {
+        providerError(
+          "GE_CYCLE_STORE_INVALID_CURSOR",
+          operation,
+          "exactly one of cursor and fromSequence is required",
+        );
+      }
+      canonicalRequest = { context, streamId, fromSequence, pageSize, cursor };
+      break;
+    }
+    case "save-checkpoint": {
+      const request = captureObject(
+        value,
+        operation,
+        "save checkpoint request",
+        MAX_CYCLE_STORE_CHECKPOINT_BYTES + MAX_CYCLE_STORE_RECORD_BYTES,
+      );
+      exactKeys(request, ["context", "checkpoint", "lease"], operation, "save checkpoint request");
+      const context = parseMutationContext(request.context, operation);
+      const checkpoint = parseCheckpoint(request.checkpoint, operation);
+      if (checkpoint.valueBytes > descriptor.limits.maxCheckpointBytes) {
+        providerError(
+          "GE_CYCLE_STORE_QUOTA_EXCEEDED",
+          operation,
+          "checkpoint exceeds provider byte limit",
+        );
+      }
+      const lease = request.lease === null ? null : parseLeaseBinding(request.lease, operation);
+      canonicalRequest = { context, checkpoint, lease };
+      break;
+    }
+    case "load-checkpoint": {
+      const request = captureObject(value, operation, "load checkpoint request");
+      exactKeys(
+        request,
+        ["context", "checkpointScope", "checkpointId"],
+        operation,
+        "load checkpoint request",
+      );
+      canonicalRequest = {
+        context: parseAuthorizationContext(request.context, operation),
+        checkpointScope: identifier(request.checkpointScope, operation, "checkpointScope"),
+        checkpointId: identifier(request.checkpointId, operation, "checkpointId"),
+      };
+      break;
+    }
+    case "list-checkpoints": {
+      const request = captureObject(value, operation, "list checkpoint request");
+      exactKeys(
+        request,
+        ["context", "checkpointScope", "pageSize", "cursor"],
+        operation,
+        "list checkpoint request",
+      );
+      canonicalRequest = {
+        context: parseAuthorizationContext(request.context, operation),
+        checkpointScope: identifier(request.checkpointScope, operation, "checkpointScope"),
+        pageSize: integer(
+          request.pageSize,
+          1,
+          descriptor.limits.maxPageSize,
+          operation,
+          "pageSize",
+        ),
+        cursor: request.cursor === null ? null : parseCursorToken(request.cursor, operation),
+      };
+      break;
+    }
+    case "delete-checkpoint": {
+      const request = captureObject(value, operation, "delete checkpoint request");
+      exactKeys(
+        request,
+        ["context", "checkpointScope", "checkpointId", "expectedValueHash"],
+        operation,
+        "delete checkpoint request",
+      );
+      canonicalRequest = {
+        context: parseMutationContext(request.context, operation),
+        checkpointScope: identifier(request.checkpointScope, operation, "checkpointScope"),
+        checkpointId: identifier(request.checkpointId, operation, "checkpointId"),
+        expectedValueHash: request.expectedValueHash === null
+          ? null
+          : hash(request.expectedValueHash, operation, "expectedValueHash"),
+      };
+      break;
+    }
+    case "acquire-lease": {
+      const request = captureObject(value, operation, "acquire lease request");
+      exactKeys(
+        request,
+        ["context", "streamId", "leaseId", "holderId", "ttlMs", "mode", "expectedFencingToken"],
+        operation,
+        "acquire lease request",
+      );
+      const context = parseMutationContext(request.context, operation);
+      const streamId = identifier(request.streamId, operation, "streamId");
+      const leaseId = identifier(request.leaseId, operation, "leaseId");
+      const holderId = identifier(request.holderId, operation, "holderId");
+      const ttlMs = integer(
+        request.ttlMs,
+        1,
+        descriptor.limits.maxLeaseTtlMs,
+        operation,
+        "ttlMs",
+      );
+      if (request.mode !== "acquire" && request.mode !== "takeover") {
+        providerError("GE_CYCLE_STORE_INVALID_ARGUMENT", operation, "lease mode is invalid");
+      }
+      const mode = request.mode;
+      const expectedFencingToken = integer(
+        request.expectedFencingToken,
+        0,
+        Number.MAX_SAFE_INTEGER,
+        operation,
+        "expectedFencingToken",
+      );
+      canonicalRequest = {
+        context,
+        streamId,
+        leaseId,
+        holderId,
+        ttlMs,
+        mode,
+        expectedFencingToken,
+      };
+      break;
+    }
+    case "renew-lease": {
+      const request = captureObject(value, operation, "renew lease request");
+      exactKeys(request, ["context", "streamId", "lease", "ttlMs"], operation, "renew lease request");
+      canonicalRequest = {
+        context: parseMutationContext(request.context, operation),
+        streamId: identifier(request.streamId, operation, "streamId"),
+        lease: parseLeaseBinding(request.lease, operation),
+        ttlMs: integer(request.ttlMs, 1, descriptor.limits.maxLeaseTtlMs, operation, "ttlMs"),
+      };
+      break;
+    }
+    case "release-lease": {
+      const request = captureObject(value, operation, "release lease request");
+      exactKeys(request, ["context", "streamId", "lease"], operation, "release lease request");
+      canonicalRequest = {
+        context: parseMutationContext(request.context, operation),
+        streamId: identifier(request.streamId, operation, "streamId"),
+        lease: parseLeaseBinding(request.lease, operation),
+      };
+      break;
+    }
+    case "inspect-lease": {
+      const request = captureObject(value, operation, "inspect lease request");
+      exactKeys(request, ["context", "streamId"], operation, "inspect lease request");
+      canonicalRequest = {
+        context: parseAuthorizationContext(request.context, operation),
+        streamId: identifier(request.streamId, operation, "streamId"),
+      };
+      break;
+    }
+    case "set-legal-hold": {
+      const request = captureObject(value, operation, "legal hold request");
+      exactKeys(request, ["context", "streamId", "holdId", "action"], operation, "legal hold request");
+      const context = parseMutationContext(request.context, operation);
+      const streamId = identifier(request.streamId, operation, "streamId");
+      const holdId = identifier(request.holdId, operation, "holdId");
+      if (request.action !== "place" && request.action !== "release") {
+        providerError("GE_CYCLE_STORE_INVALID_ARGUMENT", operation, "legal hold action is invalid");
+      }
+      const action = request.action;
+      canonicalRequest = {
+        context,
+        streamId,
+        holdId,
+        action,
+      };
+      break;
+    }
+    case "inspect-governance": {
+      const request = captureObject(value, operation, "governance request");
+      exactKeys(request, ["context", "streamId"], operation, "governance request");
+      canonicalRequest = {
+        context: parseAuthorizationContext(request.context, operation),
+        streamId: identifier(request.streamId, operation, "streamId"),
+      };
+      break;
+    }
+    case "acquire-migration-lock": {
+      const request = captureObject(value, operation, "migration lock request");
+      exactKeys(
+        request,
+        [
+          "context",
+          "lockId",
+          "ownerId",
+          "sourceSchemaVersion",
+          "targetSchemaVersion",
+          "ttlMs",
+          "mode",
+          "expectedFencingToken",
+        ],
+        operation,
+        "migration lock request",
+      );
+      const context = parseMutationContext(request.context, operation);
+      const lockId = identifier(request.lockId, operation, "lockId");
+      const ownerId = identifier(request.ownerId, operation, "ownerId");
+      const sourceSchemaVersion = integer(
+        request.sourceSchemaVersion,
+        1,
+        Number.MAX_SAFE_INTEGER,
+        operation,
+        "sourceSchemaVersion",
+      );
+      const targetSchemaVersion = integer(
+        request.targetSchemaVersion,
+        1,
+        Number.MAX_SAFE_INTEGER,
+        operation,
+        "targetSchemaVersion",
+      );
+      if (sourceSchemaVersion !== descriptor.schemaVersion
+          || targetSchemaVersion <= sourceSchemaVersion) {
+        providerError(
+          "GE_CYCLE_STORE_UNSUPPORTED_VERSION",
+          operation,
+          "migration schema interval is unsupported",
+        );
+      }
+      const ttlMs = integer(
+        request.ttlMs,
+        1,
+        descriptor.limits.maxLeaseTtlMs,
+        operation,
+        "ttlMs",
+      );
+      if (request.mode !== "acquire" && request.mode !== "takeover") {
+        providerError("GE_CYCLE_STORE_INVALID_ARGUMENT", operation, "migration lock mode is invalid");
+      }
+      const mode = request.mode;
+      const expectedFencingToken = integer(
+        request.expectedFencingToken,
+        0,
+        Number.MAX_SAFE_INTEGER,
+        operation,
+        "expectedFencingToken",
+      );
+      canonicalRequest = {
+        context,
+        lockId,
+        ownerId,
+        sourceSchemaVersion,
+        targetSchemaVersion,
+        ttlMs,
+        mode,
+        expectedFencingToken,
+      };
+      break;
+    }
+    case "inspect-migration-lock": {
+      const request = captureObject({ context: value }, operation, "migration inspection request");
+      exactKeys(request, ["context"], operation, "migration inspection request");
+      canonicalRequest = { context: parseAuthorizationContext(request.context, operation) };
+      break;
+    }
+    case "release-migration-lock": {
+      const request = captureObject(value, operation, "migration release request");
+      exactKeys(
+        request,
+        ["context", "lockId", "ownerId", "fencingToken"],
+        operation,
+        "migration release request",
+      );
+      canonicalRequest = {
+        context: parseMutationContext(request.context, operation),
+        lockId: identifier(request.lockId, operation, "lockId"),
+        ownerId: identifier(request.ownerId, operation, "ownerId"),
+        fencingToken: integer(
+          request.fencingToken,
+          1,
+          Number.MAX_SAFE_INTEGER,
+          operation,
+          "fencingToken",
+        ),
+      };
+      break;
+    }
+  }
+  return clone(canonicalRequest) as CycleStoreCanonicalRequestByOperation[K];
+}
+
+function parseCheckpointSummary(
+  value: unknown,
+  operation: CycleStoreProviderOperation,
+): CycleStoreCheckpointSummary {
+  const summary = isRecord(value)
+    ? value
+    : providerError("GE_CYCLE_STORE_INVALID_ARGUMENT", operation, "checkpoint summary must be an object");
+  exactKeys(
+    summary,
+    [
+      "checkpointScope",
+      "checkpointId",
+      "streamId",
+      "boundSequence",
+      "boundRecordHash",
+      "createdAt",
+      "valueHash",
+      "valueBytes",
+    ],
+    operation,
+    "checkpoint summary",
+  );
+  return Object.freeze({
+    checkpointScope: identifier(summary.checkpointScope, operation, "checkpointScope"),
+    checkpointId: identifier(summary.checkpointId, operation, "checkpointId"),
+    streamId: identifier(summary.streamId, operation, "streamId"),
+    boundSequence: integer(
+      summary.boundSequence,
+      0,
+      Number.MAX_SAFE_INTEGER,
+      operation,
+      "boundSequence",
+    ),
+    boundRecordHash: hash(summary.boundRecordHash, operation, "boundRecordHash"),
+    createdAt: timestamp(summary.createdAt, operation, "createdAt"),
+    valueHash: hash(summary.valueHash, operation, "valueHash"),
+    valueBytes: integer(
+      summary.valueBytes,
+      0,
+      MAX_CYCLE_STORE_CHECKPOINT_BYTES,
+      operation,
+      "valueBytes",
+    ),
+  });
+}
+
+function parseLease(
+  value: unknown,
+  operation: CycleStoreProviderOperation,
+): CycleStoreLease {
+  const lease = isRecord(value)
+    ? value
+    : providerError("GE_CYCLE_STORE_INVALID_ARGUMENT", operation, "lease must be an object");
+  exactKeys(
+    lease,
+    ["leaseId", "holderId", "leaseEpoch", "fencingToken", "acquiredAt", "expiresAt"],
+    operation,
+    "lease",
+  );
+  const result: CycleStoreLease = {
+    leaseId: identifier(lease.leaseId, operation, "leaseId"),
+    holderId: identifier(lease.holderId, operation, "holderId"),
+    leaseEpoch: integer(lease.leaseEpoch, 1, Number.MAX_SAFE_INTEGER, operation, "leaseEpoch"),
+    fencingToken: integer(
+      lease.fencingToken,
+      1,
+      Number.MAX_SAFE_INTEGER,
+      operation,
+      "fencingToken",
+    ),
+    acquiredAt: timestamp(lease.acquiredAt, operation, "acquiredAt"),
+    expiresAt: timestamp(lease.expiresAt, operation, "expiresAt"),
+  };
+  if (Date.parse(result.expiresAt) <= Date.parse(result.acquiredAt)) {
+    providerError("GE_CYCLE_STORE_INVALID_ARGUMENT", operation, "lease expiry is invalid");
+  }
+  return Object.freeze(result);
+}
+
+function parseLeaseInspection(
+  value: unknown,
+  operation: CycleStoreProviderOperation,
+): CycleStoreLeaseInspection {
+  const inspection = isRecord(value)
+    ? value
+    : providerError("GE_CYCLE_STORE_INVALID_ARGUMENT", operation, "lease inspection must be an object");
+  exactKeys(
+    inspection,
+    ["status", "lease", "lastLeaseEpoch", "lastFencingToken"],
+    operation,
+    "lease inspection",
+  );
+  if (inspection.status !== "none" && inspection.status !== "active"
+      && inspection.status !== "expired" && inspection.status !== "released") {
+    providerError("GE_CYCLE_STORE_INVALID_ARGUMENT", operation, "lease inspection status is invalid");
+  }
+  const status = inspection.status;
+  const lease = inspection.lease === null ? null : parseLease(inspection.lease, operation);
+  const lastLeaseEpoch = integer(
+    inspection.lastLeaseEpoch,
+    0,
+    Number.MAX_SAFE_INTEGER,
+    operation,
+    "lastLeaseEpoch",
+  );
+  const lastFencingToken = integer(
+    inspection.lastFencingToken,
+    0,
+    Number.MAX_SAFE_INTEGER,
+    operation,
+    "lastFencingToken",
+  );
+  if ((status === "none" && (lease !== null || lastLeaseEpoch !== 0 || lastFencingToken !== 0))
+      || (status === "released" && lease !== null)
+      || ((status === "active" || status === "expired") && lease === null)) {
+    providerError("GE_CYCLE_STORE_INVALID_ARGUMENT", operation, "lease inspection is inconsistent");
+  }
+  return Object.freeze({ status, lease, lastLeaseEpoch, lastFencingToken });
+}
+
+function parseGovernanceInspection(
+  value: unknown,
+  operation: CycleStoreProviderOperation,
+): CycleStoreGovernanceInspection {
+  const inspection = isRecord(value)
+    ? value
+    : providerError(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      operation,
+      "governance inspection must be an object",
+    );
+  exactKeys(
+    inspection,
+    ["legalHoldIds", "retentionMode", "archiveMode", "compactionMode"],
+    operation,
+    "governance inspection",
+  );
+  if (!Array.isArray(inspection.legalHoldIds)) {
+    providerError("GE_CYCLE_STORE_INVALID_ARGUMENT", operation, "legalHoldIds must be an array");
+  }
+  const legalHoldIds = inspection.legalHoldIds.map((holdId) => identifier(
+    holdId,
+    operation,
+    "holdId",
+  ));
+  if (legalHoldIds.some((holdId, index) => index > 0 && legalHoldIds[index - 1]! >= holdId)) {
+    providerError("GE_CYCLE_STORE_INVALID_ARGUMENT", operation, "legalHoldIds must be sorted and unique");
+  }
+  if (inspection.retentionMode !== "retain-authoritative-history"
+      || inspection.archiveMode !== "lossless-before-delete"
+      || inspection.compactionMode !== "logical-history-preserving") {
+    providerError("GE_CYCLE_STORE_INVALID_ARGUMENT", operation, "governance inspection is invalid");
+  }
+  return Object.freeze({
+    legalHoldIds: Object.freeze(legalHoldIds),
+    retentionMode: inspection.retentionMode,
+    archiveMode: inspection.archiveMode,
+    compactionMode: inspection.compactionMode,
+  });
+}
+
+function parseMigrationLock(
+  value: unknown,
+  operation: CycleStoreProviderOperation,
+): CycleStoreMigrationLock {
+  const lock = isRecord(value)
+    ? value
+    : providerError("GE_CYCLE_STORE_INVALID_ARGUMENT", operation, "migration lock must be an object");
+  exactKeys(
+    lock,
+    [
+      "lockId",
+      "ownerId",
+      "sourceSchemaVersion",
+      "targetSchemaVersion",
+      "lockEpoch",
+      "fencingToken",
+      "acquiredAt",
+      "expiresAt",
+    ],
+    operation,
+    "migration lock",
+  );
+  const result: CycleStoreMigrationLock = {
+    lockId: identifier(lock.lockId, operation, "lockId"),
+    ownerId: identifier(lock.ownerId, operation, "ownerId"),
+    sourceSchemaVersion: integer(
+      lock.sourceSchemaVersion,
+      1,
+      Number.MAX_SAFE_INTEGER,
+      operation,
+      "sourceSchemaVersion",
+    ),
+    targetSchemaVersion: integer(
+      lock.targetSchemaVersion,
+      1,
+      Number.MAX_SAFE_INTEGER,
+      operation,
+      "targetSchemaVersion",
+    ),
+    lockEpoch: integer(lock.lockEpoch, 1, Number.MAX_SAFE_INTEGER, operation, "lockEpoch"),
+    fencingToken: integer(
+      lock.fencingToken,
+      1,
+      Number.MAX_SAFE_INTEGER,
+      operation,
+      "fencingToken",
+    ),
+    acquiredAt: timestamp(lock.acquiredAt, operation, "acquiredAt"),
+    expiresAt: timestamp(lock.expiresAt, operation, "expiresAt"),
+  };
+  if (result.targetSchemaVersion <= result.sourceSchemaVersion
+      || Date.parse(result.expiresAt) <= Date.parse(result.acquiredAt)) {
+    providerError("GE_CYCLE_STORE_INVALID_ARGUMENT", operation, "migration lock is inconsistent");
+  }
+  return Object.freeze(result);
+}
+
+function parseLedgerResult<K extends CycleStoreMutationOperation>(
+  operation: K,
+  value: unknown,
+): CycleStoreLedgerResultByOperation[K] {
+  let result: unknown;
+  switch (operation) {
+    case "append": {
+      const append = isRecord(value)
+        ? value
+        : providerError("GE_CYCLE_STORE_INVALID_ARGUMENT", operation, "append result must be an object");
+      exactKeys(append, ["tail", "appendedRecords"], operation, "append result");
+      const tail = parseTail(append.tail, operation, "tail");
+      result = {
+        tail,
+        appendedRecords: integer(
+          append.appendedRecords,
+          1,
+          MAX_CYCLE_STORE_APPEND_RECORDS,
+          operation,
+          "appendedRecords",
+        ),
+      };
+      break;
+    }
+    case "save-checkpoint":
+      result = parseCheckpointSummary(value, operation);
+      break;
+    case "delete-checkpoint": {
+      const deletion = isRecord(value)
+        ? value
+        : providerError("GE_CYCLE_STORE_INVALID_ARGUMENT", operation, "delete result must be an object");
+      exactKeys(deletion, ["deleted"], operation, "delete result");
+      if (typeof deletion.deleted !== "boolean") {
+        providerError("GE_CYCLE_STORE_INVALID_ARGUMENT", operation, "deleted is invalid");
+      }
+      result = { deleted: deletion.deleted };
+      break;
+    }
+    case "acquire-lease":
+    case "renew-lease":
+      result = parseLease(value, operation);
+      break;
+    case "release-lease": {
+      const inspection = parseLeaseInspection(value, operation);
+      if (inspection.status !== "released") {
+        providerError("GE_CYCLE_STORE_INVALID_ARGUMENT", operation, "lease release result is inconsistent");
+      }
+      result = inspection;
+      break;
+    }
+    case "set-legal-hold":
+      result = parseGovernanceInspection(value, operation);
+      break;
+    case "acquire-migration-lock":
+      result = parseMigrationLock(value, operation);
+      break;
+    case "release-migration-lock":
+      if (value !== null) {
+        providerError("GE_CYCLE_STORE_INVALID_ARGUMENT", operation, "migration release result must be null");
+      }
+      result = null;
+      break;
+  }
+  return clone(result) as CycleStoreLedgerResultByOperation[K];
+}
+
+function encodeLedgerResult<K extends CycleStoreMutationOperation>(
+  operation: K,
+  result: CycleStoreLedgerResultByOperation[K],
+): Uint8Array {
+  const canonical = canonicalSerialize(parseLedgerResult(operation, result));
+  return Uint8Array.from(Buffer.from(canonical, "utf8"));
+}
+
+function decodeLedgerResult<K extends CycleStoreMutationOperation>(
+  operation: K,
+  bytes: Uint8Array,
+): CycleStoreLedgerResultByOperation[K] {
+  try {
+    if (!(bytes instanceof Uint8Array)) {
+      providerError(
+        "GE_CYCLE_STORE_CORRUPTION",
+        operation,
+        "operation ledger result bytes are corrupt",
+      );
+    }
+    const value = parseCanonicalStoredValue(
+      bytes,
+      operation,
+      "operation ledger result",
+      MAX_CYCLE_STORE_LEDGER_RESULT_BYTES,
+    );
+    return parseLedgerResult(operation, value);
+  } catch (error) {
+    if (error instanceof CycleStoreProviderError && error.code === "GE_CYCLE_STORE_CORRUPTION") {
+      throw error;
+    }
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_CORRUPTION",
+      operation,
+      "operation ledger result bytes are corrupt",
+    );
+  }
+}
+
+function mutationRequestMaximumBytes(operation: CycleStoreMutationOperation): number {
+  return operation === "save-checkpoint"
+    ? MAX_CYCLE_STORE_CHECKPOINT_BYTES + MAX_CYCLE_STORE_RECORD_BYTES
+    : MAX_CYCLE_STORE_APPEND_BYTES;
+}
+
+const MUTATION_STORAGE_LIMITS: CycleStoreProviderLimits = Object.freeze({
+  maxAppendRecords: MAX_CYCLE_STORE_APPEND_RECORDS,
+  maxRecordBytes: MAX_CYCLE_STORE_RECORD_BYTES,
+  maxAppendBytes: MAX_CYCLE_STORE_APPEND_BYTES,
+  maxPageSize: MAX_CYCLE_STORE_PAGE_SIZE,
+  maxCheckpointBytes: MAX_CYCLE_STORE_CHECKPOINT_BYTES,
+  maxLeaseTtlMs: MAX_CYCLE_STORE_LEASE_TTL_MS,
+});
+
+function mutationStorageValidationContract(
+  operation: CycleStoreMutationOperation,
+  value: Readonly<Record<string, unknown>>,
+): CycleStoreRequestValidationContract {
+  const sourceSchemaVersion = value.sourceSchemaVersion;
+  return {
+    schemaVersion: operation === "acquire-migration-lock"
+      && Number.isSafeInteger(sourceSchemaVersion)
+      && (sourceSchemaVersion as number) >= 1
+      ? sourceSchemaVersion as number
+      : 1,
+    limits: MUTATION_STORAGE_LIMITS,
+  };
+}
+
+function captureCanonicalMutationRequest<K extends CycleStoreMutationOperation>(
+  operation: K,
+  value: unknown,
+): CycleStoreCanonicalRequestByOperation[K] {
+  const detached = captureObject(
+    value,
+    operation,
+    "canonical mutation request",
+    mutationRequestMaximumBytes(operation),
+  );
+  return captureProviderRequest(
+    operation,
+    detached,
+    mutationStorageValidationContract(operation, detached),
+  );
+}
+
+/** Encode one closed mutation request as detached canonical UTF-8 JSON bytes. */
+export function encodeCanonicalMutationRequest<K extends CycleStoreMutationOperation>(
+  operation: K,
+  canonicalRequest: CycleStoreCanonicalRequestByOperation[K],
+): Uint8Array {
+  const request = captureCanonicalMutationRequest(operation, canonicalRequest);
+  return Uint8Array.from(Buffer.from(canonicalSerialize(request), "utf8"));
+}
+
+/**
+ * Decode hostile stored request bytes through the public closed request
+ * contract. Failures deliberately expose neither source bytes nor parser
+ * diagnostics.
+ */
+export function decodeCanonicalMutationRequest<K extends CycleStoreMutationOperation>(
+  operation: K,
+  bytes: Uint8Array,
+): CycleStoreCanonicalRequestByOperation[K] {
+  try {
+    if (!(bytes instanceof Uint8Array)) {
+      providerError(
+        "GE_CYCLE_STORE_CORRUPTION",
+        operation,
+        "operation ledger request bytes are corrupt",
+      );
+    }
+    const detachedBytes = Uint8Array.from(bytes);
+    const value = parseCanonicalStoredValue(
+      detachedBytes,
+      operation,
+      "operation ledger request",
+      mutationRequestMaximumBytes(operation),
+    );
+    const request = captureCanonicalMutationRequest(operation, value);
+    const encoded = encodeCanonicalMutationRequest(operation, request);
+    if (!Buffer.from(encoded).equals(Buffer.from(detachedBytes))) {
+      providerError(
+        "GE_CYCLE_STORE_CORRUPTION",
+        operation,
+        "operation ledger request bytes are corrupt",
+      );
+    }
+    return request;
+  } catch {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_CORRUPTION",
+      operation,
+      "operation ledger request bytes are corrupt",
+    );
+  }
+}
+
+export function operationRequestHash(
+  operation: CycleStoreMutationOperation,
+  canonicalRequest: CycleStoreCanonicalRequestByOperation[CycleStoreMutationOperation],
+): string {
+  const request = captureCanonicalMutationRequest(operation, canonicalRequest);
+  return hashWithDomain(CYCLE_STORE_OPERATION_DOMAIN, { operation, request });
+}
+
+/**
+ * Frozen provider-neutral authoring surface for durable CycleStore adapters.
+ * It owns caller capture, canonical identities, and hostile stored-byte checks;
+ * adapters retain only transaction, authorization, and persistence policy.
+ */
+export const cycleStoreAdapterCodec: CycleStoreAdapterCodec = Object.freeze({
+  createDescriptor: createDescriptorFromProfile,
+  captureRequest: captureProviderRequest,
+  operationRequestHash,
+  encodeCanonicalMutationRequest,
+  decodeCanonicalMutationRequest,
+  parseStoredRecord: parseStoredRecordValue,
+  parseStoredCheckpoint: parseStoredCheckpointValue,
+  encodeLedgerResult,
+  decodeLedgerResult,
+});
+
 interface IdempotencyEntry {
-  readonly operation: CycleStoreProviderOperation;
+  readonly operation: CycleStoreMutationOperation;
   readonly requestHash: string;
-  readonly result: JsonValue;
+  readonly resultBytes: Uint8Array;
 }
 
 interface LeaseState {
@@ -1255,20 +2315,17 @@ export class MemoryCycleStoreProvider implements CycleStoreProvider {
     }
   }
 
-  async #mutate<T>(
-    operation: CycleStoreProviderOperation,
+  async #mutate<K extends CycleStoreMutationOperation>(
+    operation: K,
     context: CycleStoreMutationContext,
-    canonicalRequest: unknown,
-    action: () => T,
-  ): Promise<T> {
+    canonicalRequest: CycleStoreCanonicalRequestByOperation[K],
+    action: () => CycleStoreLedgerResultByOperation[K],
+  ): Promise<CycleStoreLedgerResultByOperation[K]> {
     await this.#authorize(context, operation);
     return this.#locked(async () => {
       this.#maybeFail(operation);
       const ledgerKey = `${context.tenantId}\0${context.operationId}`;
-      const requestHash = hashWithDomain(CYCLE_STORE_OPERATION_DOMAIN, {
-        operation,
-        request: canonicalRequest,
-      });
+      const requestHash = cycleStoreAdapterCodec.operationRequestHash(operation, canonicalRequest);
       const existing = this.#idempotency.get(ledgerKey);
       if (existing !== undefined) {
         if (existing.operation !== operation || existing.requestHash !== requestHash) {
@@ -1278,18 +2335,18 @@ export class MemoryCycleStoreProvider implements CycleStoreProvider {
             "operationId was reused with a different canonical request",
           );
         }
-        return clone(existing.result) as T;
+        return cycleStoreAdapterCodec.decodeLedgerResult(operation, existing.resultBytes);
       }
       await this.#runFault(`provider:${operation}:before-commit`, operation);
       const result = action();
-      const capturedResult = snapshotJson(result);
+      const resultBytes = cycleStoreAdapterCodec.encodeLedgerResult(operation, result);
       this.#idempotency.set(ledgerKey, {
         operation,
         requestHash,
-        result: capturedResult,
+        resultBytes,
       });
       await this.#runFault(`provider:${operation}:after-commit-before-return`, operation);
-      return clone(capturedResult) as T;
+      return cycleStoreAdapterCodec.decodeLedgerResult(operation, resultBytes);
     });
   }
 
@@ -1372,9 +2429,11 @@ export class MemoryCycleStoreProvider implements CycleStoreProvider {
     contextValue: CycleStoreAuthorizationContext,
   ): Promise<CycleStoreSchemaInspection> {
     const operation: CycleStoreProviderOperation = "inspect-schema";
-    const captured = captureObject({ context: contextValue }, operation, "schema request");
-    exactKeys(captured, ["context"], operation, "schema request");
-    const context = parseAuthorizationContext(captured.context, operation);
+    const { context } = cycleStoreAdapterCodec.captureRequest(
+      operation,
+      contextValue,
+      this.#descriptor,
+    );
     await this.#authorize(context, operation);
     return this.#locked(() => {
       this.#maybeFail(operation);
@@ -1393,10 +2452,11 @@ export class MemoryCycleStoreProvider implements CycleStoreProvider {
 
   async readTail(requestValue: CycleStoreReadTailRequest): Promise<CycleStoreTail> {
     const operation: CycleStoreProviderOperation = "read-tail";
-    const request = captureObject(requestValue, operation, "tail request");
-    exactKeys(request, ["context", "streamId"], operation, "tail request");
-    const context = parseAuthorizationContext(request.context, operation);
-    const streamId = identifier(request.streamId, operation, "streamId");
+    const { context, streamId } = cycleStoreAdapterCodec.captureRequest(
+      operation,
+      requestValue,
+      this.#descriptor,
+    );
     await this.#authorize(context, operation);
     return this.#locked(() => {
       this.#maybeFail(operation);
@@ -1406,36 +2466,12 @@ export class MemoryCycleStoreProvider implements CycleStoreProvider {
 
   async append(requestValue: CycleStoreAppendRequest): Promise<CycleStoreAppendResult> {
     const operation: CycleStoreProviderOperation = "append";
-    const request = captureObject(requestValue, operation, "append request");
-    exactKeys(
-      request,
-      ["context", "streamId", "expectedTail", "lease", "records"],
+    const canonicalRequest = cycleStoreAdapterCodec.captureRequest(
       operation,
-      "append request",
+      requestValue,
+      this.#descriptor,
     );
-    const context = parseMutationContext(request.context, operation);
-    const streamId = identifier(request.streamId, operation, "streamId");
-    const expectedTail = parseTail(request.expectedTail, operation, "expectedTail");
-    const lease = request.lease === null ? null : parseLeaseBinding(request.lease, operation);
-    if (!Array.isArray(request.records) || request.records.length === 0) {
-      providerError("GE_CYCLE_STORE_INVALID_ARGUMENT", operation, "append records must be nonempty");
-    }
-    if (request.records.length > this.#descriptor.limits.maxAppendRecords) {
-      providerError("GE_CYCLE_STORE_QUOTA_EXCEEDED", operation, "append record count exceeds provider limit");
-    }
-    const records = request.records.map((record) => parseRecord(record, operation));
-    let batchBytes = 0;
-    for (const record of records) {
-      const bytes = Buffer.byteLength(canonicalSerialize(record), "utf8");
-      if (bytes > this.#descriptor.limits.maxRecordBytes) {
-        providerError("GE_CYCLE_STORE_QUOTA_EXCEEDED", operation, "record exceeds provider byte limit");
-      }
-      batchBytes += bytes;
-      if (batchBytes > this.#descriptor.limits.maxAppendBytes) {
-        providerError("GE_CYCLE_STORE_QUOTA_EXCEEDED", operation, "append exceeds provider byte limit");
-      }
-    }
-    const canonicalRequest = clone({ context, streamId, expectedTail, lease, records });
+    const { context, streamId, expectedTail, lease, records } = canonicalRequest;
     return this.#mutate(operation, context, canonicalRequest, () => {
       this.#assertOnlineWriterCompatible(operation);
       const streamKey = this.#streamKey(context.tenantId, streamId);
@@ -1478,35 +2514,8 @@ export class MemoryCycleStoreProvider implements CycleStoreProvider {
 
   async readEventPage(requestValue: CycleStoreReadEventPageRequest): Promise<CycleStoreEventPage> {
     const operation: CycleStoreProviderOperation = "read-event-page";
-    const request = captureObject(requestValue, operation, "event page request");
-    exactKeys(
-      request,
-      ["context", "streamId", "fromSequence", "pageSize", "cursor"],
-      operation,
-      "event page request",
-    );
-    const context = parseAuthorizationContext(request.context, operation);
-    const streamId = identifier(request.streamId, operation, "streamId");
-    const pageSize = integer(
-      request.pageSize,
-      1,
-      this.#descriptor.limits.maxPageSize,
-      operation,
-      "pageSize",
-    );
-    const cursor = request.cursor === null
-      ? null
-      : parseCursorToken(request.cursor, operation);
-    const fromSequence = request.fromSequence === null
-      ? null
-      : integer(request.fromSequence, 0, Number.MAX_SAFE_INTEGER, operation, "fromSequence");
-    if ((cursor === null) === (fromSequence === null)) {
-      providerError(
-        "GE_CYCLE_STORE_INVALID_CURSOR",
-        operation,
-        "exactly one of cursor and fromSequence is required",
-      );
-    }
+    const { context, streamId, pageSize, cursor, fromSequence } =
+      cycleStoreAdapterCodec.captureRequest(operation, requestValue, this.#descriptor);
     await this.#authorize(context, operation);
     return this.#locked(() => {
       this.#maybeFail(operation);
@@ -1570,17 +2579,12 @@ export class MemoryCycleStoreProvider implements CycleStoreProvider {
     requestValue: CycleStoreSaveCheckpointRequest,
   ): Promise<CycleStoreCheckpointSummary> {
     const operation: CycleStoreProviderOperation = "save-checkpoint";
-    const request = captureObject(
-      requestValue,
+    const canonicalRequest = cycleStoreAdapterCodec.captureRequest(
       operation,
-      "save checkpoint request",
-      MAX_CYCLE_STORE_CHECKPOINT_BYTES + MAX_CYCLE_STORE_RECORD_BYTES,
+      requestValue,
+      this.#descriptor,
     );
-    exactKeys(request, ["context", "checkpoint", "lease"], operation, "save checkpoint request");
-    const context = parseMutationContext(request.context, operation);
-    const checkpoint = parseCheckpoint(request.checkpoint, operation);
-    const lease = request.lease === null ? null : parseLeaseBinding(request.lease, operation);
-    const canonicalRequest = clone({ context, checkpoint, lease });
+    const { context, checkpoint, lease } = canonicalRequest;
     return this.#mutate(operation, context, canonicalRequest, () => {
       this.#assertOnlineWriterCompatible(operation);
       const records = this.#records.get(
@@ -1622,36 +2626,23 @@ export class MemoryCycleStoreProvider implements CycleStoreProvider {
     requestValue: CycleStoreLoadCheckpointRequest,
   ): Promise<CycleStoreCheckpoint | null> {
     const operation: CycleStoreProviderOperation = "load-checkpoint";
-    const request = captureObject(requestValue, operation, "load checkpoint request");
-    exactKeys(
-      request,
-      ["context", "checkpointScope", "checkpointId"],
+    const { context, checkpointScope, checkpointId } = cycleStoreAdapterCodec.captureRequest(
       operation,
-      "load checkpoint request",
+      requestValue,
+      this.#descriptor,
     );
-    const context = parseAuthorizationContext(request.context, operation);
-    const scope = identifier(request.checkpointScope, operation, "checkpointScope");
-    const checkpointId = identifier(request.checkpointId, operation, "checkpointId");
     await this.#authorize(context, operation);
     return this.#locked(() => {
       this.#maybeFail(operation);
       const checkpoint = this.#checkpoints.get(
-        this.#checkpointKey(context.tenantId, scope, checkpointId),
+        this.#checkpointKey(context.tenantId, checkpointScope, checkpointId),
       );
       if (checkpoint === undefined) return null;
-      try {
-        return clone(parseCheckpoint(checkpoint, operation));
-      } catch (error) {
-        if (error instanceof CycleStoreProviderError) {
-          throw new CycleStoreProviderError(
-            "GE_CYCLE_STORE_CORRUPTION",
-            operation,
-            "checkpoint bytes are corrupt",
-            { checkpointId },
-          );
-        }
-        throw error;
-      }
+      return cycleStoreAdapterCodec.parseStoredCheckpoint(
+        checkpoint,
+        operation,
+        { checkpointId },
+      );
     });
   }
 
@@ -1659,29 +2650,8 @@ export class MemoryCycleStoreProvider implements CycleStoreProvider {
     requestValue: CycleStoreListCheckpointsRequest,
   ): Promise<CycleStoreCheckpointPage> {
     const operation: CycleStoreProviderOperation = "list-checkpoints";
-    const request = captureObject(requestValue, operation, "list checkpoint request");
-    exactKeys(
-      request,
-      ["context", "checkpointScope", "pageSize", "cursor"],
-      operation,
-      "list checkpoint request",
-    );
-    const context = parseAuthorizationContext(request.context, operation);
-    const checkpointScope = identifier(
-      request.checkpointScope,
-      operation,
-      "checkpointScope",
-    );
-    const pageSize = integer(
-      request.pageSize,
-      1,
-      this.#descriptor.limits.maxPageSize,
-      operation,
-      "pageSize",
-    );
-    const cursor = request.cursor === null
-      ? null
-      : parseCursorToken(request.cursor, operation);
+    const { context, checkpointScope, pageSize, cursor } =
+      cycleStoreAdapterCodec.captureRequest(operation, requestValue, this.#descriptor);
     await this.#authorize(context, operation);
     return this.#locked(() => {
       this.#maybeFail(operation);
@@ -1756,23 +2726,15 @@ export class MemoryCycleStoreProvider implements CycleStoreProvider {
     requestValue: CycleStoreDeleteCheckpointRequest,
   ): Promise<CycleStoreDeleteCheckpointResult> {
     const operation: CycleStoreProviderOperation = "delete-checkpoint";
-    const request = captureObject(requestValue, operation, "delete checkpoint request");
-    exactKeys(
-      request,
-      ["context", "checkpointScope", "checkpointId", "expectedValueHash"],
+    const canonicalRequest = cycleStoreAdapterCodec.captureRequest(
       operation,
-      "delete checkpoint request",
+      requestValue,
+      this.#descriptor,
     );
-    const context = parseMutationContext(request.context, operation);
-    const scope = identifier(request.checkpointScope, operation, "checkpointScope");
-    const checkpointId = identifier(request.checkpointId, operation, "checkpointId");
-    const expectedValueHash = request.expectedValueHash === null
-      ? null
-      : hash(request.expectedValueHash, operation, "expectedValueHash");
-    const canonicalRequest = clone({ context, checkpointScope: scope, checkpointId, expectedValueHash });
+    const { context, checkpointScope, checkpointId, expectedValueHash } = canonicalRequest;
     return this.#mutate(operation, context, canonicalRequest, () => {
       this.#assertOnlineWriterCompatible(operation);
-      const key = this.#checkpointKey(context.tenantId, scope, checkpointId);
+      const key = this.#checkpointKey(context.tenantId, checkpointScope, checkpointId);
       const existing = this.#checkpoints.get(key);
       if (existing === undefined) return Object.freeze({ deleted: false });
       if (expectedValueHash === null || existing.valueHash !== expectedValueHash) {
@@ -1809,44 +2771,12 @@ export class MemoryCycleStoreProvider implements CycleStoreProvider {
 
   async acquireLease(requestValue: CycleStoreAcquireLeaseRequest): Promise<CycleStoreLease> {
     const operation: CycleStoreProviderOperation = "acquire-lease";
-    const request = captureObject(requestValue, operation, "acquire lease request");
-    exactKeys(
-      request,
-      [
-        "context",
-        "streamId",
-        "leaseId",
-        "holderId",
-        "ttlMs",
-        "mode",
-        "expectedFencingToken",
-      ],
+    const canonicalRequest = cycleStoreAdapterCodec.captureRequest(
       operation,
-      "acquire lease request",
+      requestValue,
+      this.#descriptor,
     );
-    const context = parseMutationContext(request.context, operation);
-    const streamId = identifier(request.streamId, operation, "streamId");
-    const leaseId = identifier(request.leaseId, operation, "leaseId");
-    const holderId = identifier(request.holderId, operation, "holderId");
-    const ttlMs = integer(
-      request.ttlMs,
-      1,
-      this.#descriptor.limits.maxLeaseTtlMs,
-      operation,
-      "ttlMs",
-    );
-    if (request.mode !== "acquire" && request.mode !== "takeover") {
-      providerError("GE_CYCLE_STORE_INVALID_ARGUMENT", operation, "lease mode is invalid");
-    }
-    const mode = request.mode;
-    const expectedFencingToken = integer(
-      request.expectedFencingToken,
-      0,
-      Number.MAX_SAFE_INTEGER,
-      operation,
-      "expectedFencingToken",
-    );
-    const canonicalRequest = clone({
+    const {
       context,
       streamId,
       leaseId,
@@ -1854,7 +2784,7 @@ export class MemoryCycleStoreProvider implements CycleStoreProvider {
       ttlMs,
       mode,
       expectedFencingToken,
-    });
+    } = canonicalRequest;
     return this.#mutate(operation, context, canonicalRequest, () => {
       this.#assertOnlineWriterCompatible(operation);
       const records = this.#records.get(this.#streamKey(context.tenantId, streamId)) ?? [];
@@ -1913,19 +2843,12 @@ export class MemoryCycleStoreProvider implements CycleStoreProvider {
 
   async renewLease(requestValue: CycleStoreRenewLeaseRequest): Promise<CycleStoreLease> {
     const operation: CycleStoreProviderOperation = "renew-lease";
-    const request = captureObject(requestValue, operation, "renew lease request");
-    exactKeys(request, ["context", "streamId", "lease", "ttlMs"], operation, "renew lease request");
-    const context = parseMutationContext(request.context, operation);
-    const streamId = identifier(request.streamId, operation, "streamId");
-    const leaseBinding = parseLeaseBinding(request.lease, operation);
-    const ttlMs = integer(
-      request.ttlMs,
-      1,
-      this.#descriptor.limits.maxLeaseTtlMs,
+    const canonicalRequest = cycleStoreAdapterCodec.captureRequest(
       operation,
-      "ttlMs",
+      requestValue,
+      this.#descriptor,
     );
-    const canonicalRequest = clone({ context, streamId, lease: leaseBinding, ttlMs });
+    const { context, streamId, lease: leaseBinding, ttlMs } = canonicalRequest;
     return this.#mutate(operation, context, canonicalRequest, () => {
       this.#assertOnlineWriterCompatible(operation);
       const state = this.#leaseState(context.tenantId, streamId);
@@ -1963,12 +2886,12 @@ export class MemoryCycleStoreProvider implements CycleStoreProvider {
     requestValue: CycleStoreReleaseLeaseRequest,
   ): Promise<CycleStoreLeaseInspection> {
     const operation: CycleStoreProviderOperation = "release-lease";
-    const request = captureObject(requestValue, operation, "release lease request");
-    exactKeys(request, ["context", "streamId", "lease"], operation, "release lease request");
-    const context = parseMutationContext(request.context, operation);
-    const streamId = identifier(request.streamId, operation, "streamId");
-    const leaseBinding = parseLeaseBinding(request.lease, operation);
-    const canonicalRequest = clone({ context, streamId, lease: leaseBinding });
+    const canonicalRequest = cycleStoreAdapterCodec.captureRequest(
+      operation,
+      requestValue,
+      this.#descriptor,
+    );
+    const { context, streamId, lease: leaseBinding } = canonicalRequest;
     return this.#mutate(operation, context, canonicalRequest, () => {
       this.#assertOnlineWriterCompatible(operation);
       const state = this.#leaseState(context.tenantId, streamId);
@@ -1998,10 +2921,11 @@ export class MemoryCycleStoreProvider implements CycleStoreProvider {
     requestValue: CycleStoreInspectLeaseRequest,
   ): Promise<CycleStoreLeaseInspection> {
     const operation: CycleStoreProviderOperation = "inspect-lease";
-    const request = captureObject(requestValue, operation, "inspect lease request");
-    exactKeys(request, ["context", "streamId"], operation, "inspect lease request");
-    const context = parseAuthorizationContext(request.context, operation);
-    const streamId = identifier(request.streamId, operation, "streamId");
+    const { context, streamId } = cycleStoreAdapterCodec.captureRequest(
+      operation,
+      requestValue,
+      this.#descriptor,
+    );
     await this.#authorize(context, operation);
     return this.#locked(() => {
       this.#maybeFail(operation);
@@ -2024,16 +2948,12 @@ export class MemoryCycleStoreProvider implements CycleStoreProvider {
     requestValue: CycleStoreLegalHoldRequest,
   ): Promise<CycleStoreGovernanceInspection> {
     const operation: CycleStoreProviderOperation = "set-legal-hold";
-    const request = captureObject(requestValue, operation, "legal hold request");
-    exactKeys(request, ["context", "streamId", "holdId", "action"], operation, "legal hold request");
-    const context = parseMutationContext(request.context, operation);
-    const streamId = identifier(request.streamId, operation, "streamId");
-    const holdId = identifier(request.holdId, operation, "holdId");
-    if (request.action !== "place" && request.action !== "release") {
-      providerError("GE_CYCLE_STORE_INVALID_ARGUMENT", operation, "legal hold action is invalid");
-    }
-    const action = request.action;
-    const canonicalRequest = clone({ context, streamId, holdId, action });
+    const canonicalRequest = cycleStoreAdapterCodec.captureRequest(
+      operation,
+      requestValue,
+      this.#descriptor,
+    );
+    const { context, streamId, holdId, action } = canonicalRequest;
     return this.#mutate(operation, context, canonicalRequest, () => {
       this.#assertOnlineWriterCompatible(operation);
       const key = this.#streamKey(context.tenantId, streamId);
@@ -2052,10 +2972,11 @@ export class MemoryCycleStoreProvider implements CycleStoreProvider {
     requestValue: CycleStoreReadTailRequest,
   ): Promise<CycleStoreGovernanceInspection> {
     const operation: CycleStoreProviderOperation = "inspect-governance";
-    const request = captureObject(requestValue, operation, "governance request");
-    exactKeys(request, ["context", "streamId"], operation, "governance request");
-    const context = parseAuthorizationContext(request.context, operation);
-    const streamId = identifier(request.streamId, operation, "streamId");
+    const { context, streamId } = cycleStoreAdapterCodec.captureRequest(
+      operation,
+      requestValue,
+      this.#descriptor,
+    );
     await this.#authorize(context, operation);
     return this.#locked(() => {
       this.#maybeFail(operation);
@@ -2071,66 +2992,12 @@ export class MemoryCycleStoreProvider implements CycleStoreProvider {
     requestValue: CycleStoreAcquireMigrationLockRequest,
   ): Promise<CycleStoreMigrationLock> {
     const operation: CycleStoreProviderOperation = "acquire-migration-lock";
-    const request = captureObject(requestValue, operation, "migration lock request");
-    exactKeys(
-      request,
-      [
-        "context",
-        "lockId",
-        "ownerId",
-        "sourceSchemaVersion",
-        "targetSchemaVersion",
-        "ttlMs",
-        "mode",
-        "expectedFencingToken",
-      ],
+    const canonicalRequest = cycleStoreAdapterCodec.captureRequest(
       operation,
-      "migration lock request",
+      requestValue,
+      this.#descriptor,
     );
-    const context = parseMutationContext(request.context, operation);
-    const lockId = identifier(request.lockId, operation, "lockId");
-    const ownerId = identifier(request.ownerId, operation, "ownerId");
-    const sourceSchemaVersion = integer(
-      request.sourceSchemaVersion,
-      1,
-      Number.MAX_SAFE_INTEGER,
-      operation,
-      "sourceSchemaVersion",
-    );
-    const targetSchemaVersion = integer(
-      request.targetSchemaVersion,
-      1,
-      Number.MAX_SAFE_INTEGER,
-      operation,
-      "targetSchemaVersion",
-    );
-    if (sourceSchemaVersion !== this.#descriptor.schemaVersion
-        || targetSchemaVersion <= sourceSchemaVersion) {
-      providerError(
-        "GE_CYCLE_STORE_UNSUPPORTED_VERSION",
-        operation,
-        "migration schema interval is unsupported",
-      );
-    }
-    const ttlMs = integer(
-      request.ttlMs,
-      1,
-      this.#descriptor.limits.maxLeaseTtlMs,
-      operation,
-      "ttlMs",
-    );
-    if (request.mode !== "acquire" && request.mode !== "takeover") {
-      providerError("GE_CYCLE_STORE_INVALID_ARGUMENT", operation, "migration lock mode is invalid");
-    }
-    const mode = request.mode;
-    const expectedFencingToken = integer(
-      request.expectedFencingToken,
-      0,
-      Number.MAX_SAFE_INTEGER,
-      operation,
-      "expectedFencingToken",
-    );
-    const canonicalRequest = clone({
+    const {
       context,
       lockId,
       ownerId,
@@ -2139,7 +3006,7 @@ export class MemoryCycleStoreProvider implements CycleStoreProvider {
       ttlMs,
       mode,
       expectedFencingToken,
-    });
+    } = canonicalRequest;
     return this.#mutate(operation, context, canonicalRequest, () => {
       const state = this.#migration;
       if (expectedFencingToken !== state.lastFencingToken) {
@@ -2195,9 +3062,11 @@ export class MemoryCycleStoreProvider implements CycleStoreProvider {
     contextValue: CycleStoreAuthorizationContext,
   ): Promise<CycleStoreMigrationLock | null> {
     const operation: CycleStoreProviderOperation = "inspect-migration-lock";
-    const request = captureObject({ context: contextValue }, operation, "migration inspection request");
-    exactKeys(request, ["context"], operation, "migration inspection request");
-    const context = parseAuthorizationContext(request.context, operation);
+    const { context } = cycleStoreAdapterCodec.captureRequest(
+      operation,
+      contextValue,
+      this.#descriptor,
+    );
     await this.#authorize(context, operation);
     return this.#locked(() => {
       this.#maybeFail(operation);
@@ -2209,24 +3078,12 @@ export class MemoryCycleStoreProvider implements CycleStoreProvider {
     requestValue: CycleStoreReleaseMigrationLockRequest,
   ): Promise<CycleStoreMigrationLock | null> {
     const operation: CycleStoreProviderOperation = "release-migration-lock";
-    const request = captureObject(requestValue, operation, "migration release request");
-    exactKeys(
-      request,
-      ["context", "lockId", "ownerId", "fencingToken"],
+    const canonicalRequest = cycleStoreAdapterCodec.captureRequest(
       operation,
-      "migration release request",
+      requestValue,
+      this.#descriptor,
     );
-    const context = parseMutationContext(request.context, operation);
-    const lockId = identifier(request.lockId, operation, "lockId");
-    const ownerId = identifier(request.ownerId, operation, "ownerId");
-    const fencingToken = integer(
-      request.fencingToken,
-      1,
-      Number.MAX_SAFE_INTEGER,
-      operation,
-      "fencingToken",
-    );
-    const canonicalRequest = clone({ context, lockId, ownerId, fencingToken });
+    const { context, lockId, ownerId, fencingToken } = canonicalRequest;
     return this.#mutate(operation, context, canonicalRequest, () => {
       const active = this.#migration.active;
       if (active === null || active.lockId !== lockId || active.ownerId !== ownerId
@@ -2327,7 +3184,9 @@ export class MemoryCycleStoreProvider implements CycleStoreProvider {
         scopeHash: canonicalHash(scope),
         operation: entry.operation,
         requestHash: entry.requestHash,
-        resultHash: canonicalHash(entry.result),
+        resultHash: canonicalHash(
+          cycleStoreAdapterCodec.decodeLedgerResult(entry.operation, entry.resultBytes),
+        ),
       }))
       .sort((left, right) => left.scopeHash.localeCompare(right.scopeHash));
     return snapshotJson({

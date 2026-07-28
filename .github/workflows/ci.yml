@@ -31,7 +31,9 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm validate:fixtures
+      - run: pnpm test:sqlite-ledger-contract
       - run: pnpm check:docs
+      - run: pnpm check:sqlite-migrations
       - run: pnpm check:release-map
       - run: pnpm check:evidence-closure
 
@@ -42,7 +44,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: ["20", "22"]
+        include:
+          - node: "20"
+            sqlite: false
+          - node: "22.16.0"
+            sqlite: true
+          - node: "22"
+            sqlite: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -56,12 +64,26 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm build
+      - if: matrix.sqlite
+        run: pnpm build
+      - if: ${{ !matrix.sqlite }}
+        run: pnpm --filter '!@graph-engineering/sqlite' --recursive build
       - run: node examples/quickstart/run.mjs
       - run: node examples/patterns/showcase.mjs
-      - run: pnpm typecheck
-      - run: pnpm lint
-      - run: pnpm test
+      - if: matrix.sqlite
+        run: pnpm typecheck
+      - if: ${{ !matrix.sqlite }}
+        run: pnpm --filter '!@graph-engineering/sqlite' --recursive typecheck
+      - if: matrix.sqlite
+        run: pnpm lint
+      - if: ${{ !matrix.sqlite }}
+        run: pnpm --filter '!@graph-engineering/sqlite' --recursive lint
+      - if: matrix.sqlite
+        run: pnpm test
+      - if: ${{ !matrix.sqlite }}
+        run: pnpm --filter '!@graph-engineering/sqlite' --recursive test
+      - if: matrix.node == '22.16.0'
+        run: pnpm test:sqlite-benchmark
 
   package-artifacts:
     name: npm package artifacts
@@ -79,10 +101,15 @@ jobs:
         with:
           node-version: "22"
           cache: pnpm
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.11.11"
+          enable-cache: true
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: pnpm check:packages
       - run: pnpm check:packed-install
+      - run: pnpm check:sqlite-artifacts
       - run: pnpm audit:prod
 
   python:
@@ -144,4 +171,6 @@ jobs:
           enable-cache: true
       - run: pnpm install --frozen-lockfile
       - run: uv sync --project python --extra dev --python 3.13 --locked
+      - run: pnpm test:sqlite-docs
+      - run: pnpm test:sqlite-python-benchmark
       - run: pnpm test:conformance

@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import inspect
+import json
 import re
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
@@ -138,6 +139,8 @@ _RETRYABLE_CODES: frozenset[CycleStoreProviderErrorCode] = frozenset(
 )
 
 CycleStoreProviderDescriptor: TypeAlias = JsonObject
+CycleStoreProviderProfile: TypeAlias = JsonObject
+CycleStoreProviderCanonicalRequest: TypeAlias = JsonObject
 CycleStoreAuthorizationContext: TypeAlias = JsonObject
 CycleStoreMutationContext: TypeAlias = JsonObject
 CycleStoreTail: TypeAlias = JsonObject
@@ -536,9 +539,10 @@ def _descriptor_limit(value: object, ceiling: int, label: str) -> int:
 def validate_cycle_store_provider_descriptor(value: object) -> CycleStoreProviderDescriptor:
     operation: CycleStoreProviderOperation = "describe"
     raw = _capture_object(value, operation, "provider descriptor", MAX_CYCLE_STORE_RECORD_BYTES)
-    if raw.get("apiVersion") != CYCLE_STORE_PROVIDER_API_VERSION or raw.get(
-        "contractVersion"
-    ) != CYCLE_STORE_PROVIDER_CONTRACT_VERSION:
+    if (
+        raw.get("apiVersion") != CYCLE_STORE_PROVIDER_API_VERSION
+        or raw.get("contractVersion") != CYCLE_STORE_PROVIDER_CONTRACT_VERSION
+    ):
         _fail(
             "GE_CYCLE_STORE_UNSUPPORTED_VERSION",
             operation,
@@ -641,11 +645,11 @@ def validate_cycle_store_provider_descriptor(value: object) -> CycleStoreProvide
         ("payloadProtection", "encryptionAtRest", "rawPayloadObservability"),
         "protection",
     )
-    if protection["payloadProtection"] not in ("external", "provider-managed") or protection[
-        "encryptionAtRest"
-    ] not in ("none", "provider-managed", "external") or protection[
-        "rawPayloadObservability"
-    ] is not False:
+    if (
+        protection["payloadProtection"] not in ("external", "provider-managed")
+        or protection["encryptionAtRest"] not in ("none", "provider-managed", "external")
+        or protection["rawPayloadObservability"] is not False
+    ):
         _fail("GE_CYCLE_STORE_INVALID_ARGUMENT", operation, "protection declaration is invalid")
 
     governance = _section(
@@ -682,8 +686,16 @@ def create_reference_cycle_store_provider_descriptor(
 ) -> CycleStoreProviderDescriptor:
     safe_provider_id = _identifier(provider_id, "describe", "providerId")
     body = _descriptor_body(safe_provider_id)
-    return validate_cycle_store_provider_descriptor(
-        {**body, "descriptorHash": _domain_hash(CYCLE_STORE_PROVIDER_DESCRIPTOR_DOMAIN, body)}
+    return cycle_store_adapter_codec.create_descriptor(
+        {
+            "providerId": safe_provider_id,
+            "schemaVersion": body["schemaVersion"],
+            "compatibility": body["compatibility"],
+            "limits": body["limits"],
+            "capabilities": body["capabilities"],
+            "protection": body["protection"],
+            "governance": body["governance"],
+        }
     )
 
 
@@ -768,11 +780,1060 @@ def _checkpoint_summary(checkpoint: CycleStoreCheckpoint) -> CycleStoreCheckpoin
     return cast(JsonObject, {key: value for key, value in checkpoint.items() if key != "value"})
 
 
+def _cursor_token(value: object, operation: CycleStoreProviderOperation) -> str:
+    if type(value) is not str or _IDENTIFIER.fullmatch(value) is None:
+        _fail("GE_CYCLE_STORE_INVALID_CURSOR", operation, "cursor token is malformed")
+    return value
+
+
+def _lease_binding(
+    value: object,
+    operation: CycleStoreProviderOperation,
+) -> CycleStoreLeaseBinding:
+    binding = _capture_object(value, operation, "lease binding")
+    _exact_keys(binding, ("leaseId", "holderId", "fencingToken"), operation, "lease binding")
+    return cast(
+        JsonObject,
+        {
+            "leaseId": _identifier(binding["leaseId"], operation, "leaseId"),
+            "holderId": _identifier(binding["holderId"], operation, "holderId"),
+            "fencingToken": _integer(
+                binding["fencingToken"], 1, MAX_SAFE_INTEGER, operation, "fencingToken"
+            ),
+        },
+    )
+
+
+def _parse_checkpoint_summary(
+    value: object,
+    operation: CycleStoreProviderOperation,
+) -> CycleStoreCheckpointSummary:
+    summary = _capture_object(value, operation, "checkpoint summary")
+    _exact_keys(
+        summary,
+        (
+            "checkpointScope",
+            "checkpointId",
+            "streamId",
+            "boundSequence",
+            "boundRecordHash",
+            "createdAt",
+            "valueHash",
+            "valueBytes",
+        ),
+        operation,
+        "checkpoint summary",
+    )
+    return cast(
+        JsonObject,
+        {
+            "checkpointScope": _identifier(
+                summary["checkpointScope"], operation, "checkpointScope"
+            ),
+            "checkpointId": _identifier(summary["checkpointId"], operation, "checkpointId"),
+            "streamId": _identifier(summary["streamId"], operation, "streamId"),
+            "boundSequence": _integer(
+                summary["boundSequence"], 0, MAX_SAFE_INTEGER, operation, "boundSequence"
+            ),
+            "boundRecordHash": _hash(summary["boundRecordHash"], operation, "boundRecordHash"),
+            "createdAt": _timestamp(summary["createdAt"], operation, "createdAt"),
+            "valueHash": _hash(summary["valueHash"], operation, "valueHash"),
+            "valueBytes": _integer(
+                summary["valueBytes"],
+                0,
+                MAX_CYCLE_STORE_CHECKPOINT_BYTES,
+                operation,
+                "valueBytes",
+            ),
+        },
+    )
+
+
+def _parse_lease(value: object, operation: CycleStoreProviderOperation) -> CycleStoreLease:
+    lease = _capture_object(value, operation, "lease")
+    _exact_keys(
+        lease,
+        (
+            "leaseId",
+            "holderId",
+            "leaseEpoch",
+            "fencingToken",
+            "acquiredAt",
+            "expiresAt",
+        ),
+        operation,
+        "lease",
+    )
+    captured = cast(
+        JsonObject,
+        {
+            "leaseId": _identifier(lease["leaseId"], operation, "leaseId"),
+            "holderId": _identifier(lease["holderId"], operation, "holderId"),
+            "leaseEpoch": _integer(
+                lease["leaseEpoch"], 1, MAX_SAFE_INTEGER, operation, "leaseEpoch"
+            ),
+            "fencingToken": _integer(
+                lease["fencingToken"], 1, MAX_SAFE_INTEGER, operation, "fencingToken"
+            ),
+            "acquiredAt": _timestamp(lease["acquiredAt"], operation, "acquiredAt"),
+            "expiresAt": _timestamp(lease["expiresAt"], operation, "expiresAt"),
+        },
+    )
+    if datetime.fromisoformat(cast(str, captured["expiresAt"]).replace("Z", "+00:00")) <= (
+        datetime.fromisoformat(cast(str, captured["acquiredAt"]).replace("Z", "+00:00"))
+    ):
+        _fail("GE_CYCLE_STORE_INVALID_ARGUMENT", operation, "lease interval is invalid")
+    return captured
+
+
+def _parse_lease_inspection(
+    value: object,
+    operation: CycleStoreProviderOperation,
+) -> CycleStoreLeaseInspection:
+    inspection = _capture_object(value, operation, "lease inspection")
+    _exact_keys(
+        inspection,
+        ("status", "lease", "lastLeaseEpoch", "lastFencingToken"),
+        operation,
+        "lease inspection",
+    )
+    status = inspection["status"]
+    if status not in ("none", "active", "expired", "released"):
+        _fail("GE_CYCLE_STORE_INVALID_ARGUMENT", operation, "lease status is invalid")
+    lease = None if inspection["lease"] is None else _parse_lease(inspection["lease"], operation)
+    last_epoch = _integer(
+        inspection["lastLeaseEpoch"], 0, MAX_SAFE_INTEGER, operation, "lastLeaseEpoch"
+    )
+    last_fence = _integer(
+        inspection["lastFencingToken"],
+        0,
+        MAX_SAFE_INTEGER,
+        operation,
+        "lastFencingToken",
+    )
+    if (
+        (status == "none" and (lease is not None or last_epoch != 0 or last_fence != 0))
+        or (status in ("active", "expired") and lease is None)
+        or (status == "released" and lease is not None)
+    ):
+        _fail("GE_CYCLE_STORE_INVALID_ARGUMENT", operation, "lease inspection is inconsistent")
+    return cast(
+        JsonObject,
+        {
+            "status": status,
+            "lease": lease,
+            "lastLeaseEpoch": last_epoch,
+            "lastFencingToken": last_fence,
+        },
+    )
+
+
+def _parse_governance_inspection(
+    value: object,
+    operation: CycleStoreProviderOperation,
+) -> CycleStoreGovernanceInspection:
+    inspection = _capture_object(value, operation, "governance inspection")
+    _exact_keys(
+        inspection,
+        ("legalHoldIds", "retentionMode", "archiveMode", "compactionMode"),
+        operation,
+        "governance inspection",
+    )
+    raw_hold_ids = inspection["legalHoldIds"]
+    if type(raw_hold_ids) is not list:
+        _fail("GE_CYCLE_STORE_INVALID_ARGUMENT", operation, "legalHoldIds must be an array")
+    hold_ids = [_identifier(item, operation, "legalHoldId") for item in raw_hold_ids]
+    if hold_ids != sorted(set(hold_ids)):
+        _fail("GE_CYCLE_STORE_INVALID_ARGUMENT", operation, "legalHoldIds are not canonical")
+    if (
+        inspection["retentionMode"] != "retain-authoritative-history"
+        or inspection["archiveMode"] != "lossless-before-delete"
+        or inspection["compactionMode"] != "logical-history-preserving"
+    ):
+        _fail("GE_CYCLE_STORE_INVALID_ARGUMENT", operation, "governance modes are invalid")
+    return cast(
+        JsonObject,
+        {
+            "legalHoldIds": hold_ids,
+            "retentionMode": "retain-authoritative-history",
+            "archiveMode": "lossless-before-delete",
+            "compactionMode": "logical-history-preserving",
+        },
+    )
+
+
+def _parse_migration_lock(
+    value: object,
+    operation: CycleStoreProviderOperation,
+) -> CycleStoreMigrationLock:
+    lock = _capture_object(value, operation, "migration lock")
+    _exact_keys(
+        lock,
+        (
+            "lockId",
+            "ownerId",
+            "sourceSchemaVersion",
+            "targetSchemaVersion",
+            "lockEpoch",
+            "fencingToken",
+            "acquiredAt",
+            "expiresAt",
+        ),
+        operation,
+        "migration lock",
+    )
+    source_version = _integer(
+        lock["sourceSchemaVersion"], 1, MAX_SAFE_INTEGER, operation, "sourceSchemaVersion"
+    )
+    target_version = _integer(
+        lock["targetSchemaVersion"], 1, MAX_SAFE_INTEGER, operation, "targetSchemaVersion"
+    )
+    if target_version <= source_version:
+        _fail("GE_CYCLE_STORE_INVALID_ARGUMENT", operation, "migration interval is invalid")
+    captured = cast(
+        JsonObject,
+        {
+            "lockId": _identifier(lock["lockId"], operation, "lockId"),
+            "ownerId": _identifier(lock["ownerId"], operation, "ownerId"),
+            "sourceSchemaVersion": source_version,
+            "targetSchemaVersion": target_version,
+            "lockEpoch": _integer(lock["lockEpoch"], 1, MAX_SAFE_INTEGER, operation, "lockEpoch"),
+            "fencingToken": _integer(
+                lock["fencingToken"], 1, MAX_SAFE_INTEGER, operation, "fencingToken"
+            ),
+            "acquiredAt": _timestamp(lock["acquiredAt"], operation, "acquiredAt"),
+            "expiresAt": _timestamp(lock["expiresAt"], operation, "expiresAt"),
+        },
+    )
+    if datetime.fromisoformat(cast(str, captured["expiresAt"]).replace("Z", "+00:00")) <= (
+        datetime.fromisoformat(cast(str, captured["acquiredAt"]).replace("Z", "+00:00"))
+    ):
+        _fail("GE_CYCLE_STORE_INVALID_ARGUMENT", operation, "migration lock interval is invalid")
+    return captured
+
+
+def _reject_duplicate_object(pairs: list[tuple[str, JsonValue]]) -> JsonObject:
+    result: JsonObject = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate JSON object key")
+        result[key] = value
+    return result
+
+
+def _reject_json_constant(token: str) -> Never:
+    raise ValueError(f"invalid JSON constant: {token}")
+
+
+def _decode_canonical_blob(
+    value: bytes,
+    operation: CycleStoreProviderOperation,
+    label: str,
+    maximum_bytes: int,
+) -> JsonValue:
+    try:
+        if type(value) is not bytes or len(value) > maximum_bytes:
+            raise ValueError("canonical blob is outside bounds")
+        decoded = json.loads(
+            value.decode("utf-8"),
+            object_pairs_hook=_reject_duplicate_object,
+            parse_constant=_reject_json_constant,
+        )
+        captured = portable_json_snapshot(decoded)
+        if canonical_bytes(captured) != value:
+            raise ValueError("canonical blob identity drifted")
+        return captured
+    except Exception:
+        _fail("GE_CYCLE_STORE_CORRUPTION", operation, f"{label} bytes are corrupt")
+
+
+_MUTATING_CYCLE_STORE_OPERATIONS: frozenset[CycleStoreProviderOperation] = frozenset(
+    {
+        "append",
+        "save-checkpoint",
+        "delete-checkpoint",
+        "acquire-lease",
+        "renew-lease",
+        "release-lease",
+        "set-legal-hold",
+        "acquire-migration-lock",
+        "release-migration-lock",
+    }
+)
+
+
+def _canonical_mutation_request_maximum_bytes(
+    operation: CycleStoreProviderOperation,
+) -> int:
+    return (
+        MAX_CYCLE_STORE_CHECKPOINT_BYTES + MAX_CYCLE_STORE_RECORD_BYTES
+        if operation == "save-checkpoint"
+        else MAX_CYCLE_STORE_APPEND_BYTES
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class CycleStoreProviderAdapterCodec:
+    """Bounded, provider-neutral adapter authoring surface.
+
+    Adapters call :meth:`capture_request` synchronously before their first
+    await, then persist the returned detached request and its operation hash.
+    Stored authoritative values and idempotency results cross canonical byte
+    boundaries through this codec so database implementations cannot invent a
+    second serialization or validation contract.
+    """
+
+    def create_descriptor(self, profile_value: object) -> CycleStoreProviderDescriptor:
+        """Build and validate a descriptor from one exact closed provider profile."""
+
+        operation: CycleStoreProviderOperation = "describe"
+        profile = _capture_object(
+            profile_value,
+            operation,
+            "provider profile",
+            MAX_CYCLE_STORE_RECORD_BYTES,
+        )
+        _exact_keys(
+            profile,
+            (
+                "providerId",
+                "schemaVersion",
+                "compatibility",
+                "limits",
+                "capabilities",
+                "protection",
+                "governance",
+            ),
+            operation,
+            "provider profile",
+        )
+        provider_id = _identifier(profile["providerId"], operation, "providerId")
+        reference = _descriptor_body(provider_id)
+        body = cast(
+            JsonObject,
+            {
+                **reference,
+                "schemaVersion": profile["schemaVersion"],
+                "compatibility": profile["compatibility"],
+                "limits": profile["limits"],
+                "capabilities": profile["capabilities"],
+                "protection": profile["protection"],
+                "governance": profile["governance"],
+            },
+        )
+        return validate_cycle_store_provider_descriptor(
+            {
+                **body,
+                "descriptorHash": _domain_hash(CYCLE_STORE_PROVIDER_DESCRIPTOR_DOMAIN, body),
+            }
+        )
+
+    def capture_request(
+        self,
+        operation: CycleStoreProviderOperation,
+        request_value: object,
+        descriptor_value: object,
+    ) -> CycleStoreProviderCanonicalRequest:
+        """Synchronously capture one detached, closed, operation-specific request."""
+
+        if operation not in CYCLE_STORE_PROVIDER_OPERATIONS or operation == "describe":
+            raise TypeError("operation does not accept a provider request")
+        descriptor = validate_cycle_store_provider_descriptor(descriptor_value)
+        limits = cast(JsonObject, descriptor["limits"])
+
+        def limit(name: str) -> int:
+            return cast(int, limits[name])
+
+        if operation in ("inspect-schema", "inspect-migration-lock"):
+            return cast(
+                JsonObject,
+                {"context": _authorization_context(request_value, operation)},
+            )
+
+        if operation in ("read-tail", "inspect-lease", "inspect-governance"):
+            labels = {
+                "read-tail": "tail request",
+                "inspect-lease": "inspect lease request",
+                "inspect-governance": "governance request",
+            }
+            label = labels[operation]
+            request = _capture_object(request_value, operation, label)
+            _exact_keys(request, ("context", "streamId"), operation, label)
+            return cast(
+                JsonObject,
+                {
+                    "context": _authorization_context(request["context"], operation),
+                    "streamId": _identifier(request["streamId"], operation, "streamId"),
+                },
+            )
+
+        if operation == "append":
+            request = _capture_object(request_value, operation, "append request")
+            _exact_keys(
+                request,
+                ("context", "streamId", "expectedTail", "lease", "records"),
+                operation,
+                "append request",
+            )
+            context = _mutation_context(request["context"], operation)
+            stream_id = _identifier(request["streamId"], operation, "streamId")
+            expected_tail = _parse_tail(request["expectedTail"], operation, "expectedTail")
+            lease = (
+                None if request["lease"] is None else _lease_binding(request["lease"], operation)
+            )
+            raw_records = request["records"]
+            if type(raw_records) is not list or not raw_records:
+                _fail(
+                    "GE_CYCLE_STORE_INVALID_ARGUMENT",
+                    operation,
+                    "append records must be nonempty",
+                )
+            if len(raw_records) > limit("maxAppendRecords"):
+                _fail(
+                    "GE_CYCLE_STORE_QUOTA_EXCEEDED",
+                    operation,
+                    "append record count exceeds provider limit",
+                )
+            records = tuple(_parse_record(item, operation) for item in raw_records)
+            batch_bytes = 0
+            for record in records:
+                record_bytes = len(canonical_bytes(record))
+                if record_bytes > limit("maxRecordBytes"):
+                    _fail(
+                        "GE_CYCLE_STORE_QUOTA_EXCEEDED",
+                        operation,
+                        "record exceeds provider byte limit",
+                    )
+                batch_bytes += record_bytes
+                if batch_bytes > limit("maxAppendBytes"):
+                    _fail(
+                        "GE_CYCLE_STORE_QUOTA_EXCEEDED",
+                        operation,
+                        "append exceeds provider byte limit",
+                    )
+            return cast(
+                JsonObject,
+                _clone(
+                    {
+                        "context": context,
+                        "streamId": stream_id,
+                        "expectedTail": expected_tail,
+                        "lease": lease,
+                        "records": list(records),
+                    }
+                ),
+            )
+
+        if operation == "read-event-page":
+            request = _capture_object(request_value, operation, "event page request")
+            _exact_keys(
+                request,
+                ("context", "streamId", "fromSequence", "pageSize", "cursor"),
+                operation,
+                "event page request",
+            )
+            context = _authorization_context(request["context"], operation)
+            stream_id = _identifier(request["streamId"], operation, "streamId")
+            page_size = _integer(
+                request["pageSize"], 1, limit("maxPageSize"), operation, "pageSize"
+            )
+            cursor = (
+                None if request["cursor"] is None else _cursor_token(request["cursor"], operation)
+            )
+            from_sequence = (
+                None
+                if request["fromSequence"] is None
+                else _integer(
+                    request["fromSequence"], 0, MAX_SAFE_INTEGER, operation, "fromSequence"
+                )
+            )
+            if (cursor is None) == (from_sequence is None):
+                _fail(
+                    "GE_CYCLE_STORE_INVALID_CURSOR",
+                    operation,
+                    "exactly one of cursor and fromSequence is required",
+                )
+            return cast(
+                JsonObject,
+                {
+                    "context": context,
+                    "streamId": stream_id,
+                    "fromSequence": from_sequence,
+                    "pageSize": page_size,
+                    "cursor": cursor,
+                },
+            )
+
+        if operation == "save-checkpoint":
+            request = _capture_object(
+                request_value,
+                operation,
+                "save checkpoint request",
+                MAX_CYCLE_STORE_CHECKPOINT_BYTES + MAX_CYCLE_STORE_RECORD_BYTES,
+            )
+            _exact_keys(
+                request,
+                ("context", "checkpoint", "lease"),
+                operation,
+                "save checkpoint request",
+            )
+            return cast(
+                JsonObject,
+                _clone(
+                    {
+                        "context": _mutation_context(request["context"], operation),
+                        "checkpoint": _parse_checkpoint(request["checkpoint"], operation),
+                        "lease": (
+                            None
+                            if request["lease"] is None
+                            else _lease_binding(request["lease"], operation)
+                        ),
+                    }
+                ),
+            )
+
+        if operation == "load-checkpoint":
+            request = _capture_object(request_value, operation, "load checkpoint request")
+            _exact_keys(
+                request,
+                ("context", "checkpointScope", "checkpointId"),
+                operation,
+                "load checkpoint request",
+            )
+            return cast(
+                JsonObject,
+                {
+                    "context": _authorization_context(request["context"], operation),
+                    "checkpointScope": _identifier(
+                        request["checkpointScope"], operation, "checkpointScope"
+                    ),
+                    "checkpointId": _identifier(request["checkpointId"], operation, "checkpointId"),
+                },
+            )
+
+        if operation == "list-checkpoints":
+            request = _capture_object(request_value, operation, "list checkpoint request")
+            _exact_keys(
+                request,
+                ("context", "checkpointScope", "pageSize", "cursor"),
+                operation,
+                "list checkpoint request",
+            )
+            return cast(
+                JsonObject,
+                {
+                    "context": _authorization_context(request["context"], operation),
+                    "checkpointScope": _identifier(
+                        request["checkpointScope"], operation, "checkpointScope"
+                    ),
+                    "pageSize": _integer(
+                        request["pageSize"], 1, limit("maxPageSize"), operation, "pageSize"
+                    ),
+                    "cursor": (
+                        None
+                        if request["cursor"] is None
+                        else _cursor_token(request["cursor"], operation)
+                    ),
+                },
+            )
+
+        if operation == "delete-checkpoint":
+            request = _capture_object(request_value, operation, "delete checkpoint request")
+            _exact_keys(
+                request,
+                ("context", "checkpointScope", "checkpointId", "expectedValueHash"),
+                operation,
+                "delete checkpoint request",
+            )
+            return cast(
+                JsonObject,
+                {
+                    "context": _mutation_context(request["context"], operation),
+                    "checkpointScope": _identifier(
+                        request["checkpointScope"], operation, "checkpointScope"
+                    ),
+                    "checkpointId": _identifier(request["checkpointId"], operation, "checkpointId"),
+                    "expectedValueHash": (
+                        None
+                        if request["expectedValueHash"] is None
+                        else _hash(request["expectedValueHash"], operation, "expectedValueHash")
+                    ),
+                },
+            )
+
+        if operation == "acquire-lease":
+            request = _capture_object(request_value, operation, "acquire lease request")
+            _exact_keys(
+                request,
+                (
+                    "context",
+                    "streamId",
+                    "leaseId",
+                    "holderId",
+                    "ttlMs",
+                    "mode",
+                    "expectedFencingToken",
+                ),
+                operation,
+                "acquire lease request",
+            )
+            context = _mutation_context(request["context"], operation)
+            stream_id = _identifier(request["streamId"], operation, "streamId")
+            lease_id = _identifier(request["leaseId"], operation, "leaseId")
+            holder_id = _identifier(request["holderId"], operation, "holderId")
+            ttl_ms = _integer(request["ttlMs"], 1, limit("maxLeaseTtlMs"), operation, "ttlMs")
+            mode = request["mode"]
+            if mode not in ("acquire", "takeover"):
+                _fail("GE_CYCLE_STORE_INVALID_ARGUMENT", operation, "lease mode is invalid")
+            expected_fencing_token = _integer(
+                request["expectedFencingToken"],
+                0,
+                MAX_SAFE_INTEGER,
+                operation,
+                "expectedFencingToken",
+            )
+            return cast(
+                JsonObject,
+                {
+                    "context": context,
+                    "streamId": stream_id,
+                    "leaseId": lease_id,
+                    "holderId": holder_id,
+                    "ttlMs": ttl_ms,
+                    "mode": mode,
+                    "expectedFencingToken": expected_fencing_token,
+                },
+            )
+
+        if operation == "renew-lease":
+            request = _capture_object(request_value, operation, "renew lease request")
+            _exact_keys(
+                request,
+                ("context", "streamId", "lease", "ttlMs"),
+                operation,
+                "renew lease request",
+            )
+            return cast(
+                JsonObject,
+                {
+                    "context": _mutation_context(request["context"], operation),
+                    "streamId": _identifier(request["streamId"], operation, "streamId"),
+                    "lease": _lease_binding(request["lease"], operation),
+                    "ttlMs": _integer(
+                        request["ttlMs"], 1, limit("maxLeaseTtlMs"), operation, "ttlMs"
+                    ),
+                },
+            )
+
+        if operation == "release-lease":
+            request = _capture_object(request_value, operation, "release lease request")
+            _exact_keys(
+                request,
+                ("context", "streamId", "lease"),
+                operation,
+                "release lease request",
+            )
+            return cast(
+                JsonObject,
+                {
+                    "context": _mutation_context(request["context"], operation),
+                    "streamId": _identifier(request["streamId"], operation, "streamId"),
+                    "lease": _lease_binding(request["lease"], operation),
+                },
+            )
+
+        if operation == "set-legal-hold":
+            request = _capture_object(request_value, operation, "legal hold request")
+            _exact_keys(
+                request,
+                ("context", "streamId", "holdId", "action"),
+                operation,
+                "legal hold request",
+            )
+            context = _mutation_context(request["context"], operation)
+            stream_id = _identifier(request["streamId"], operation, "streamId")
+            hold_id = _identifier(request["holdId"], operation, "holdId")
+            action = request["action"]
+            if action not in ("place", "release"):
+                _fail(
+                    "GE_CYCLE_STORE_INVALID_ARGUMENT",
+                    operation,
+                    "legal hold action is invalid",
+                )
+            return cast(
+                JsonObject,
+                {
+                    "context": context,
+                    "streamId": stream_id,
+                    "holdId": hold_id,
+                    "action": action,
+                },
+            )
+
+        if operation == "acquire-migration-lock":
+            request = _capture_object(request_value, operation, "migration lock request")
+            _exact_keys(
+                request,
+                (
+                    "context",
+                    "lockId",
+                    "ownerId",
+                    "sourceSchemaVersion",
+                    "targetSchemaVersion",
+                    "ttlMs",
+                    "mode",
+                    "expectedFencingToken",
+                ),
+                operation,
+                "migration lock request",
+            )
+            context = _mutation_context(request["context"], operation)
+            lock_id = _identifier(request["lockId"], operation, "lockId")
+            owner_id = _identifier(request["ownerId"], operation, "ownerId")
+            source_version = _integer(
+                request["sourceSchemaVersion"],
+                1,
+                MAX_SAFE_INTEGER,
+                operation,
+                "sourceSchemaVersion",
+            )
+            target_version = _integer(
+                request["targetSchemaVersion"],
+                1,
+                MAX_SAFE_INTEGER,
+                operation,
+                "targetSchemaVersion",
+            )
+            if source_version != descriptor["schemaVersion"] or target_version <= source_version:
+                _fail(
+                    "GE_CYCLE_STORE_UNSUPPORTED_VERSION",
+                    operation,
+                    "migration schema interval is unsupported",
+                )
+            ttl_ms = _integer(request["ttlMs"], 1, limit("maxLeaseTtlMs"), operation, "ttlMs")
+            mode = request["mode"]
+            if mode not in ("acquire", "takeover"):
+                _fail(
+                    "GE_CYCLE_STORE_INVALID_ARGUMENT",
+                    operation,
+                    "migration lock mode is invalid",
+                )
+            expected_fencing_token = _integer(
+                request["expectedFencingToken"],
+                0,
+                MAX_SAFE_INTEGER,
+                operation,
+                "expectedFencingToken",
+            )
+            return cast(
+                JsonObject,
+                {
+                    "context": context,
+                    "lockId": lock_id,
+                    "ownerId": owner_id,
+                    "sourceSchemaVersion": source_version,
+                    "targetSchemaVersion": target_version,
+                    "ttlMs": ttl_ms,
+                    "mode": mode,
+                    "expectedFencingToken": expected_fencing_token,
+                },
+            )
+
+        if operation == "release-migration-lock":
+            request = _capture_object(request_value, operation, "migration release request")
+            _exact_keys(
+                request,
+                ("context", "lockId", "ownerId", "fencingToken"),
+                operation,
+                "migration release request",
+            )
+            return cast(
+                JsonObject,
+                {
+                    "context": _mutation_context(request["context"], operation),
+                    "lockId": _identifier(request["lockId"], operation, "lockId"),
+                    "ownerId": _identifier(request["ownerId"], operation, "ownerId"),
+                    "fencingToken": _integer(
+                        request["fencingToken"],
+                        1,
+                        MAX_SAFE_INTEGER,
+                        operation,
+                        "fencingToken",
+                    ),
+                },
+            )
+
+        raise AssertionError(f"unhandled provider operation: {operation}")
+
+    def operation_request_hash(
+        self,
+        operation: CycleStoreProviderOperation,
+        canonical_request: object,
+    ) -> str:
+        """Hash a captured mutation request under the portable operation domain."""
+
+        if operation not in _MUTATING_CYCLE_STORE_OPERATIONS:
+            raise TypeError("operation does not use the idempotency ledger")
+        request = self._capture_canonical_mutation_request(operation, canonical_request)
+        return _domain_hash(
+            CYCLE_STORE_OPERATION_DOMAIN,
+            {"operation": operation, "request": request},
+        )
+
+    def encode_canonical_mutation_request(
+        self,
+        operation: CycleStoreProviderOperation,
+        canonical_request: object,
+    ) -> bytes:
+        """Encode one closed mutation request as detached canonical UTF-8 bytes."""
+
+        request = self._capture_canonical_mutation_request(operation, canonical_request)
+        return canonical_bytes(request)
+
+    def decode_canonical_mutation_request(
+        self,
+        operation: CycleStoreProviderOperation,
+        request_bytes: bytes,
+    ) -> CycleStoreProviderCanonicalRequest:
+        """Decode hostile stored request bytes without exposing parser diagnostics."""
+
+        if operation not in _MUTATING_CYCLE_STORE_OPERATIONS:
+            raise TypeError("operation does not use the idempotency ledger")
+        try:
+            maximum_bytes = _canonical_mutation_request_maximum_bytes(operation)
+            decoded = _decode_canonical_blob(
+                request_bytes,
+                operation,
+                "operation ledger request",
+                maximum_bytes,
+            )
+            request = self._capture_canonical_mutation_request(operation, decoded)
+            if canonical_bytes(request) != request_bytes:
+                raise ValueError("canonical request byte identity drifted")
+            return request
+        except Exception:
+            _fail(
+                "GE_CYCLE_STORE_CORRUPTION",
+                operation,
+                "operation ledger request bytes are corrupt",
+            )
+
+    def _capture_canonical_mutation_request(
+        self,
+        operation: CycleStoreProviderOperation,
+        request_value: object,
+    ) -> CycleStoreProviderCanonicalRequest:
+        if operation not in _MUTATING_CYCLE_STORE_OPERATIONS:
+            raise TypeError("operation does not use the idempotency ledger")
+        request = _capture_object(
+            request_value,
+            operation,
+            "canonical mutation request",
+            _canonical_mutation_request_maximum_bytes(operation),
+        )
+        source_version = request.get("sourceSchemaVersion")
+        schema_version = (
+            source_version
+            if operation == "acquire-migration-lock"
+            and type(source_version) is int
+            and source_version >= 1
+            else 1
+        )
+        reference = create_reference_cycle_store_provider_descriptor("canonical-storage-codec")
+        descriptor = self.create_descriptor(
+            {
+                "providerId": reference["providerId"],
+                "schemaVersion": schema_version,
+                "compatibility": {
+                    "minReaderVersion": schema_version,
+                    "maxReaderVersion": schema_version,
+                    "minWriterVersion": schema_version,
+                    "maxWriterVersion": schema_version,
+                },
+                "limits": reference["limits"],
+                "capabilities": reference["capabilities"],
+                "protection": reference["protection"],
+                "governance": reference["governance"],
+            }
+        )
+        return self.capture_request(operation, request, descriptor)
+
+    def parse_stored_record(
+        self,
+        value: object,
+        operation: CycleStoreProviderOperation,
+    ) -> CycleStoreRecord:
+        """Revalidate one stored record object or exact canonical UTF-8 byte string."""
+
+        try:
+            decoded = (
+                _decode_canonical_blob(
+                    value,
+                    operation,
+                    "record",
+                    MAX_CYCLE_STORE_RECORD_BYTES * 2,
+                )
+                if type(value) is bytes
+                else value
+            )
+            return _parse_record(decoded, operation)
+        except CycleStoreProviderError as error:
+            if error.code == "GE_CYCLE_STORE_CORRUPTION" and error.operation == operation:
+                raise
+            _fail("GE_CYCLE_STORE_CORRUPTION", operation, "record bytes are corrupt")
+        except Exception:
+            _fail("GE_CYCLE_STORE_CORRUPTION", operation, "record bytes are corrupt")
+
+    def parse_stored_checkpoint(
+        self,
+        value: object,
+        operation: CycleStoreProviderOperation,
+    ) -> CycleStoreCheckpoint:
+        """Revalidate one stored checkpoint object or exact canonical byte string."""
+
+        maximum_bytes = MAX_CYCLE_STORE_CHECKPOINT_BYTES + MAX_CYCLE_STORE_RECORD_BYTES
+        try:
+            decoded = (
+                _decode_canonical_blob(value, operation, "checkpoint", maximum_bytes)
+                if type(value) is bytes
+                else value
+            )
+            return _parse_checkpoint(decoded, operation)
+        except CycleStoreProviderError as error:
+            if error.code == "GE_CYCLE_STORE_CORRUPTION" and error.operation == operation:
+                raise
+            _fail("GE_CYCLE_STORE_CORRUPTION", operation, "checkpoint bytes are corrupt")
+        except Exception:
+            _fail("GE_CYCLE_STORE_CORRUPTION", operation, "checkpoint bytes are corrupt")
+
+    def encode_ledger_result(
+        self,
+        operation: CycleStoreProviderOperation,
+        result_value: object,
+    ) -> bytes:
+        """Validate and encode one mutation result as exact canonical UTF-8 bytes."""
+
+        return canonical_bytes(self._capture_ledger_result(operation, result_value))
+
+    def decode_ledger_result(
+        self,
+        operation: CycleStoreProviderOperation,
+        result_bytes: bytes,
+    ) -> JsonValue:
+        """Decode one canonical ledger result and reject schema or byte drift."""
+
+        if operation not in _MUTATING_CYCLE_STORE_OPERATIONS:
+            raise TypeError("operation does not use the idempotency ledger")
+        try:
+            decoded = _decode_canonical_blob(
+                result_bytes,
+                operation,
+                "idempotency result",
+                MAX_CYCLE_STORE_CHECKPOINT_BYTES + MAX_CYCLE_STORE_RECORD_BYTES,
+            )
+            return self._capture_ledger_result(operation, decoded)
+        except CycleStoreProviderError as error:
+            if error.code == "GE_CYCLE_STORE_CORRUPTION" and error.operation == operation:
+                raise
+            _fail(
+                "GE_CYCLE_STORE_CORRUPTION",
+                operation,
+                "idempotency result bytes are corrupt",
+            )
+        except Exception:
+            _fail(
+                "GE_CYCLE_STORE_CORRUPTION",
+                operation,
+                "idempotency result bytes are corrupt",
+            )
+
+    @staticmethod
+    def _capture_ledger_result(
+        operation: CycleStoreProviderOperation,
+        result_value: object,
+    ) -> JsonValue:
+        if operation not in _MUTATING_CYCLE_STORE_OPERATIONS:
+            raise TypeError("operation does not use the idempotency ledger")
+        if operation == "release-migration-lock":
+            if result_value is not None:
+                _fail(
+                    "GE_CYCLE_STORE_INVALID_ARGUMENT",
+                    operation,
+                    "migration release result must be null",
+                )
+            return None
+        if operation == "append":
+            result = _capture_object(result_value, operation, "append result")
+            _exact_keys(result, ("tail", "appendedRecords"), operation, "append result")
+            return cast(
+                JsonObject,
+                {
+                    "tail": _parse_tail(result["tail"], operation, "tail"),
+                    "appendedRecords": _integer(
+                        result["appendedRecords"],
+                        1,
+                        MAX_CYCLE_STORE_APPEND_RECORDS,
+                        operation,
+                        "appendedRecords",
+                    ),
+                },
+            )
+        if operation == "save-checkpoint":
+            return _parse_checkpoint_summary(result_value, operation)
+        if operation == "delete-checkpoint":
+            result = _capture_object(result_value, operation, "checkpoint deletion result")
+            _exact_keys(result, ("deleted",), operation, "checkpoint deletion result")
+            if type(result["deleted"]) is not bool:
+                _fail(
+                    "GE_CYCLE_STORE_INVALID_ARGUMENT",
+                    operation,
+                    "deleted must be a boolean",
+                )
+            return cast(JsonObject, {"deleted": result["deleted"]})
+        if operation in ("acquire-lease", "renew-lease"):
+            return _parse_lease(result_value, operation)
+        if operation == "release-lease":
+            inspection = _parse_lease_inspection(result_value, operation)
+            if inspection["status"] != "released":
+                _fail(
+                    "GE_CYCLE_STORE_INVALID_ARGUMENT",
+                    operation,
+                    "lease release result is inconsistent",
+                )
+            return inspection
+        if operation == "set-legal-hold":
+            return _parse_governance_inspection(result_value, operation)
+        if operation == "acquire-migration-lock":
+            return _parse_migration_lock(result_value, operation)
+        raise AssertionError(f"unhandled ledger operation: {operation}")
+
+
+cycle_store_adapter_codec = CycleStoreProviderAdapterCodec()
+
+
+def decode_canonical_mutation_request(
+    operation: CycleStoreProviderOperation,
+    request_bytes: bytes,
+) -> CycleStoreProviderCanonicalRequest:
+    """Decode one exact stored mutation request through the shared codec."""
+
+    return cycle_store_adapter_codec.decode_canonical_mutation_request(operation, request_bytes)
+
+
+def encode_canonical_mutation_request(
+    operation: CycleStoreProviderOperation,
+    canonical_request: object,
+) -> bytes:
+    """Encode one exact stored mutation request through the shared codec."""
+
+    return cycle_store_adapter_codec.encode_canonical_mutation_request(operation, canonical_request)
+
+
 @dataclass(slots=True)
 class _IdempotencyEntry:
     operation: CycleStoreProviderOperation
     request_hash: str
-    result: JsonValue
+    result_bytes: bytes
 
 
 @dataclass(slots=True)
@@ -899,13 +1960,7 @@ class MemoryCycleStoreProvider:
         self._cursor_counter = 0
         self._legal_holds: dict[str, set[str]] = {}
         self._migration = _MigrationState()
-        self._injected_failures: dict[
-            CycleStoreProviderOperation, CycleStoreProviderErrorCode
-        ] = {}
-
-    def _limit(self, key: str) -> int:
-        limits = cast(JsonObject, self._descriptor["limits"])
-        return cast(int, limits[key])
+        self._injected_failures: dict[CycleStoreProviderOperation, CycleStoreProviderErrorCode] = {}
 
     def _now(self, operation: CycleStoreProviderOperation) -> int:
         if self._external_now is None:
@@ -1001,9 +2056,9 @@ class MemoryCycleStoreProvider:
         async with self._lock:
             self._maybe_fail(operation)
             ledger_key = f"{context['tenantId']}\0{context['operationId']}"
-            request_hash = _domain_hash(
-                CYCLE_STORE_OPERATION_DOMAIN,
-                {"operation": operation, "request": canonical_request},
+            request_hash = cycle_store_adapter_codec.operation_request_hash(
+                operation,
+                canonical_request,
             )
             existing = self._idempotency.get(ledger_key)
             if existing is not None:
@@ -1013,19 +2068,22 @@ class MemoryCycleStoreProvider:
                         operation,
                         "operationId was reused with a different canonical request",
                     )
-                return _clone(existing.result)
+                return cycle_store_adapter_codec.decode_ledger_result(
+                    operation,
+                    existing.result_bytes,
+                )
             await self._run_fault(f"provider:{operation}:before-commit", operation)
-            result = _clone(action())
+            result_bytes = cycle_store_adapter_codec.encode_ledger_result(operation, action())
             self._idempotency[ledger_key] = _IdempotencyEntry(
                 operation=operation,
                 request_hash=request_hash,
-                result=result,
+                result_bytes=result_bytes,
             )
             await self._run_fault(
                 f"provider:{operation}:after-commit-before-return",
                 operation,
             )
-            return _clone(result)
+            return cycle_store_adapter_codec.decode_ledger_result(operation, result_bytes)
 
     @staticmethod
     def _stream_key(tenant_id: str, stream_id: str) -> str:
@@ -1102,36 +2160,17 @@ class MemoryCycleStoreProvider:
         self._cursors[token] = state
         return token
 
-    @staticmethod
-    def _cursor_token(value: object, operation: CycleStoreProviderOperation) -> str:
-        if type(value) is not str or _IDENTIFIER.fullmatch(value) is None:
-            _fail("GE_CYCLE_STORE_INVALID_CURSOR", operation, "cursor token is malformed")
-        return value
-
-    @staticmethod
-    def _lease_binding(
-        value: object,
-        operation: CycleStoreProviderOperation,
-    ) -> CycleStoreLeaseBinding:
-        binding = _capture_object(value, operation, "lease binding")
-        _exact_keys(binding, ("leaseId", "holderId", "fencingToken"), operation, "lease binding")
-        return cast(
-            JsonObject,
-            {
-                "leaseId": _identifier(binding["leaseId"], operation, "leaseId"),
-                "holderId": _identifier(binding["holderId"], operation, "holderId"),
-                "fencingToken": _integer(
-                    binding["fencingToken"], 1, MAX_SAFE_INTEGER, operation, "fencingToken"
-                ),
-            },
-        )
-
     async def describe(self) -> CycleStoreProviderDescriptor:
         return cast(JsonObject, _clone(self._descriptor))
 
     async def inspect_schema(self, context_value: object) -> CycleStoreSchemaInspection:
         operation: CycleStoreProviderOperation = "inspect-schema"
-        context = _authorization_context(context_value, operation)
+        request = cycle_store_adapter_codec.capture_request(
+            operation,
+            context_value,
+            self._descriptor,
+        )
+        context = cast(JsonObject, request["context"])
         await self._authorize(context, operation)
         async with self._lock:
             self._maybe_fail(operation)
@@ -1153,10 +2192,13 @@ class MemoryCycleStoreProvider:
 
     async def read_tail(self, request_value: object) -> CycleStoreTail:
         operation: CycleStoreProviderOperation = "read-tail"
-        request = _capture_object(request_value, operation, "tail request")
-        _exact_keys(request, ("context", "streamId"), operation, "tail request")
-        context = _authorization_context(request["context"], operation)
-        stream_id = _identifier(request["streamId"], operation, "streamId")
+        request = cycle_store_adapter_codec.capture_request(
+            operation,
+            request_value,
+            self._descriptor,
+        )
+        context = cast(JsonObject, request["context"])
+        stream_id = cast(str, request["streamId"])
         await self._authorize(context, operation)
         async with self._lock:
             self._maybe_fail(operation)
@@ -1167,62 +2209,18 @@ class MemoryCycleStoreProvider:
 
     async def append(self, request_value: object) -> JsonObject:
         operation: CycleStoreProviderOperation = "append"
-        request = _capture_object(request_value, operation, "append request")
-        _exact_keys(
-            request,
-            ("context", "streamId", "expectedTail", "lease", "records"),
+        request = cycle_store_adapter_codec.capture_request(
             operation,
-            "append request",
+            request_value,
+            self._descriptor,
         )
-        context = _mutation_context(request["context"], operation)
+        context = cast(JsonObject, request["context"])
         tenant_id = cast(str, context["tenantId"])
-        stream_id = _identifier(request["streamId"], operation, "streamId")
-        expected_tail = _parse_tail(request["expectedTail"], operation, "expectedTail")
-        lease = (
-            None if request["lease"] is None else self._lease_binding(request["lease"], operation)
-        )
-        raw_records = request["records"]
-        if type(raw_records) is not list or not raw_records:
-            _fail(
-                "GE_CYCLE_STORE_INVALID_ARGUMENT",
-                operation,
-                "append records must be nonempty",
-            )
-        if len(raw_records) > self._limit("maxAppendRecords"):
-            _fail(
-                "GE_CYCLE_STORE_QUOTA_EXCEEDED",
-                operation,
-                "append record count exceeds provider limit",
-            )
-        records = tuple(_parse_record(item, operation) for item in raw_records)
-        batch_bytes = 0
-        for record in records:
-            record_bytes = len(canonical_bytes(record))
-            if record_bytes > self._limit("maxRecordBytes"):
-                _fail(
-                    "GE_CYCLE_STORE_QUOTA_EXCEEDED",
-                    operation,
-                    "record exceeds provider byte limit",
-                )
-            batch_bytes += record_bytes
-            if batch_bytes > self._limit("maxAppendBytes"):
-                _fail(
-                    "GE_CYCLE_STORE_QUOTA_EXCEEDED",
-                    operation,
-                    "append exceeds provider byte limit",
-                )
-        canonical_request = cast(
-            JsonObject,
-            _clone(
-                {
-                    "context": context,
-                    "streamId": stream_id,
-                    "expectedTail": expected_tail,
-                    "lease": lease,
-                    "records": list(records),
-                }
-            ),
-        )
+        stream_id = cast(str, request["streamId"])
+        expected_tail = cast(JsonObject, request["expectedTail"])
+        lease = cast(CycleStoreLeaseBinding | None, request["lease"])
+        records = tuple(cast(list[CycleStoreRecord], request["records"]))
+        canonical_request = request
 
         def commit() -> JsonValue:
             self._assert_online_writer_compatible(operation)
@@ -1248,9 +2246,10 @@ class MemoryCycleStoreProvider:
             batch_ids: set[str] = set()
             for record in records:
                 record_id = cast(str, record["recordId"])
-                if record["sequence"] != next_sequence or record[
-                    "previousRecordHash"
-                ] != previous_hash:
+                if (
+                    record["sequence"] != next_sequence
+                    or record["previousRecordHash"] != previous_hash
+                ):
                     _fail(
                         "GE_CYCLE_STORE_CONFLICT",
                         operation,
@@ -1284,37 +2283,17 @@ class MemoryCycleStoreProvider:
 
     async def read_event_page(self, request_value: object) -> CycleStoreEventPage:
         operation: CycleStoreProviderOperation = "read-event-page"
-        request = _capture_object(request_value, operation, "event page request")
-        _exact_keys(
-            request,
-            ("context", "streamId", "fromSequence", "pageSize", "cursor"),
+        request = cycle_store_adapter_codec.capture_request(
             operation,
-            "event page request",
+            request_value,
+            self._descriptor,
         )
-        context = _authorization_context(request["context"], operation)
+        context = cast(JsonObject, request["context"])
         tenant_id = cast(str, context["tenantId"])
-        stream_id = _identifier(request["streamId"], operation, "streamId")
-        page_size = _integer(
-            request["pageSize"], 1, self._limit("maxPageSize"), operation, "pageSize"
-        )
-        cursor = (
-            None
-            if request["cursor"] is None
-            else self._cursor_token(request["cursor"], operation)
-        )
-        from_sequence = (
-            None
-            if request["fromSequence"] is None
-            else _integer(
-                request["fromSequence"], 0, MAX_SAFE_INTEGER, operation, "fromSequence"
-            )
-        )
-        if (cursor is None) == (from_sequence is None):
-            _fail(
-                "GE_CYCLE_STORE_INVALID_CURSOR",
-                operation,
-                "exactly one of cursor and fromSequence is required",
-            )
+        stream_id = cast(str, request["streamId"])
+        page_size = cast(int, request["pageSize"])
+        cursor = cast(str | None, request["cursor"])
+        from_sequence = cast(int | None, request["fromSequence"])
         await self._authorize(context, operation)
         async with self._lock:
             self._maybe_fail(operation)
@@ -1356,7 +2335,7 @@ class MemoryCycleStoreProvider:
             )
             page_end = min(state.next_sequence + page_size, final_exclusive)
             page_records = [
-                cast(JsonObject, _clone(record))
+                cycle_store_adapter_codec.parse_stored_record(record, operation)
                 for record in stream_records[state.next_sequence : page_end]
             ]
             next_cursor = (
@@ -1387,28 +2366,16 @@ class MemoryCycleStoreProvider:
 
     async def save_checkpoint(self, request_value: object) -> CycleStoreCheckpointSummary:
         operation: CycleStoreProviderOperation = "save-checkpoint"
-        request = _capture_object(
+        request = cycle_store_adapter_codec.capture_request(
+            operation,
             request_value,
-            operation,
-            "save checkpoint request",
-            MAX_CYCLE_STORE_CHECKPOINT_BYTES + MAX_CYCLE_STORE_RECORD_BYTES,
+            self._descriptor,
         )
-        _exact_keys(
-            request,
-            ("context", "checkpoint", "lease"),
-            operation,
-            "save checkpoint request",
-        )
-        context = _mutation_context(request["context"], operation)
+        context = cast(JsonObject, request["context"])
         tenant_id = cast(str, context["tenantId"])
-        checkpoint = _parse_checkpoint(request["checkpoint"], operation)
-        lease = (
-            None if request["lease"] is None else self._lease_binding(request["lease"], operation)
-        )
-        canonical_request = cast(
-            JsonObject,
-            _clone({"context": context, "checkpoint": checkpoint, "lease": lease}),
-        )
+        checkpoint = cast(JsonObject, request["checkpoint"])
+        lease = cast(CycleStoreLeaseBinding | None, request["lease"])
+        canonical_request = request
 
         def commit() -> JsonValue:
             self._assert_online_writer_compatible(operation)
@@ -1454,16 +2421,14 @@ class MemoryCycleStoreProvider:
 
     async def load_checkpoint(self, request_value: object) -> CycleStoreCheckpoint | None:
         operation: CycleStoreProviderOperation = "load-checkpoint"
-        request = _capture_object(request_value, operation, "load checkpoint request")
-        _exact_keys(
-            request,
-            ("context", "checkpointScope", "checkpointId"),
+        request = cycle_store_adapter_codec.capture_request(
             operation,
-            "load checkpoint request",
+            request_value,
+            self._descriptor,
         )
-        context = _authorization_context(request["context"], operation)
-        scope = _identifier(request["checkpointScope"], operation, "checkpointScope")
-        checkpoint_id = _identifier(request["checkpointId"], operation, "checkpointId")
+        context = cast(JsonObject, request["context"])
+        scope = cast(str, request["checkpointScope"])
+        checkpoint_id = cast(str, request["checkpointId"])
         await self._authorize(context, operation)
         async with self._lock:
             self._maybe_fail(operation)
@@ -1473,8 +2438,8 @@ class MemoryCycleStoreProvider:
             if checkpoint is None:
                 return None
             try:
-                return cast(JsonObject, _clone(_parse_checkpoint(checkpoint, operation)))
-            except Exception:
+                return cycle_store_adapter_codec.parse_stored_checkpoint(checkpoint, operation)
+            except CycleStoreProviderError:
                 _fail(
                     "GE_CYCLE_STORE_CORRUPTION",
                     operation,
@@ -1484,26 +2449,16 @@ class MemoryCycleStoreProvider:
 
     async def list_checkpoints(self, request_value: object) -> CycleStoreCheckpointPage:
         operation: CycleStoreProviderOperation = "list-checkpoints"
-        request = _capture_object(request_value, operation, "list checkpoint request")
-        _exact_keys(
-            request,
-            ("context", "checkpointScope", "pageSize", "cursor"),
+        request = cycle_store_adapter_codec.capture_request(
             operation,
-            "list checkpoint request",
+            request_value,
+            self._descriptor,
         )
-        context = _authorization_context(request["context"], operation)
+        context = cast(JsonObject, request["context"])
         tenant_id = cast(str, context["tenantId"])
-        checkpoint_scope = _identifier(
-            request["checkpointScope"], operation, "checkpointScope"
-        )
-        page_size = _integer(
-            request["pageSize"], 1, self._limit("maxPageSize"), operation, "pageSize"
-        )
-        cursor = (
-            None
-            if request["cursor"] is None
-            else self._cursor_token(request["cursor"], operation)
-        )
+        checkpoint_scope = cast(str, request["checkpointScope"])
+        page_size = cast(int, request["pageSize"])
+        cursor = cast(str | None, request["cursor"])
         await self._authorize(context, operation)
         async with self._lock:
             self._maybe_fail(operation)
@@ -1571,35 +2526,17 @@ class MemoryCycleStoreProvider:
 
     async def delete_checkpoint(self, request_value: object) -> JsonObject:
         operation: CycleStoreProviderOperation = "delete-checkpoint"
-        request = _capture_object(request_value, operation, "delete checkpoint request")
-        _exact_keys(
-            request,
-            ("context", "checkpointScope", "checkpointId", "expectedValueHash"),
+        request = cycle_store_adapter_codec.capture_request(
             operation,
-            "delete checkpoint request",
+            request_value,
+            self._descriptor,
         )
-        context = _mutation_context(request["context"], operation)
+        context = cast(JsonObject, request["context"])
         tenant_id = cast(str, context["tenantId"])
-        checkpoint_scope = _identifier(
-            request["checkpointScope"], operation, "checkpointScope"
-        )
-        checkpoint_id = _identifier(request["checkpointId"], operation, "checkpointId")
-        expected_hash = (
-            None
-            if request["expectedValueHash"] is None
-            else _hash(request["expectedValueHash"], operation, "expectedValueHash")
-        )
-        canonical_request = cast(
-            JsonObject,
-            _clone(
-                {
-                    "context": context,
-                    "checkpointScope": checkpoint_scope,
-                    "checkpointId": checkpoint_id,
-                    "expectedValueHash": expected_hash,
-                }
-            ),
-        )
+        checkpoint_scope = cast(str, request["checkpointScope"])
+        checkpoint_id = cast(str, request["checkpointId"])
+        expected_hash = cast(str | None, request["expectedValueHash"])
+        canonical_request = request
 
         def commit() -> JsonValue:
             self._assert_online_writer_compatible(operation)
@@ -1645,54 +2582,20 @@ class MemoryCycleStoreProvider:
 
     async def acquire_lease(self, request_value: object) -> CycleStoreLease:
         operation: CycleStoreProviderOperation = "acquire-lease"
-        request = _capture_object(request_value, operation, "acquire lease request")
-        _exact_keys(
-            request,
-            (
-                "context",
-                "streamId",
-                "leaseId",
-                "holderId",
-                "ttlMs",
-                "mode",
-                "expectedFencingToken",
-            ),
+        request = cycle_store_adapter_codec.capture_request(
             operation,
-            "acquire lease request",
+            request_value,
+            self._descriptor,
         )
-        context = _mutation_context(request["context"], operation)
+        context = cast(JsonObject, request["context"])
         tenant_id = cast(str, context["tenantId"])
-        stream_id = _identifier(request["streamId"], operation, "streamId")
-        lease_id = _identifier(request["leaseId"], operation, "leaseId")
-        holder_id = _identifier(request["holderId"], operation, "holderId")
-        ttl_ms = _integer(
-            request["ttlMs"], 1, self._limit("maxLeaseTtlMs"), operation, "ttlMs"
-        )
-        mode_value = request["mode"]
-        if mode_value not in ("acquire", "takeover"):
-            _fail("GE_CYCLE_STORE_INVALID_ARGUMENT", operation, "lease mode is invalid")
-        mode = cast(Literal["acquire", "takeover"], mode_value)
-        expected_fencing_token = _integer(
-            request["expectedFencingToken"],
-            0,
-            MAX_SAFE_INTEGER,
-            operation,
-            "expectedFencingToken",
-        )
-        canonical_request = cast(
-            JsonObject,
-            _clone(
-                {
-                    "context": context,
-                    "streamId": stream_id,
-                    "leaseId": lease_id,
-                    "holderId": holder_id,
-                    "ttlMs": ttl_ms,
-                    "mode": mode,
-                    "expectedFencingToken": expected_fencing_token,
-                }
-            ),
-        )
+        stream_id = cast(str, request["streamId"])
+        lease_id = cast(str, request["leaseId"])
+        holder_id = cast(str, request["holderId"])
+        ttl_ms = cast(int, request["ttlMs"])
+        mode = cast(Literal["acquire", "takeover"], request["mode"])
+        expected_fencing_token = cast(int, request["expectedFencingToken"])
+        canonical_request = request
 
         def commit() -> JsonValue:
             self._assert_online_writer_compatible(operation)
@@ -1708,9 +2611,10 @@ class MemoryCycleStoreProvider:
                     cast(JsonObject, {"lastFencingToken": state.last_fencing_token}),
                 )
             now_ms = self._now(operation)
-            active_expired = state.active is not None and self._parse_time(
-                cast(str, state.active["expiresAt"])
-            ) <= now_ms
+            active_expired = (
+                state.active is not None
+                and self._parse_time(cast(str, state.active["expiresAt"])) <= now_ms
+            )
             if mode == "takeover":
                 if state.active is None or not active_expired:
                     _fail(
@@ -1762,31 +2666,17 @@ class MemoryCycleStoreProvider:
 
     async def renew_lease(self, request_value: object) -> CycleStoreLease:
         operation: CycleStoreProviderOperation = "renew-lease"
-        request = _capture_object(request_value, operation, "renew lease request")
-        _exact_keys(
-            request,
-            ("context", "streamId", "lease", "ttlMs"),
+        request = cycle_store_adapter_codec.capture_request(
             operation,
-            "renew lease request",
+            request_value,
+            self._descriptor,
         )
-        context = _mutation_context(request["context"], operation)
+        context = cast(JsonObject, request["context"])
         tenant_id = cast(str, context["tenantId"])
-        stream_id = _identifier(request["streamId"], operation, "streamId")
-        binding = self._lease_binding(request["lease"], operation)
-        ttl_ms = _integer(
-            request["ttlMs"], 1, self._limit("maxLeaseTtlMs"), operation, "ttlMs"
-        )
-        canonical_request = cast(
-            JsonObject,
-            _clone(
-                {
-                    "context": context,
-                    "streamId": stream_id,
-                    "lease": binding,
-                    "ttlMs": ttl_ms,
-                }
-            ),
-        )
+        stream_id = cast(str, request["streamId"])
+        binding = cast(JsonObject, request["lease"])
+        ttl_ms = cast(int, request["ttlMs"])
+        canonical_request = request
 
         def commit() -> JsonValue:
             self._assert_online_writer_compatible(operation)
@@ -1826,21 +2716,16 @@ class MemoryCycleStoreProvider:
 
     async def release_lease(self, request_value: object) -> CycleStoreLeaseInspection:
         operation: CycleStoreProviderOperation = "release-lease"
-        request = _capture_object(request_value, operation, "release lease request")
-        _exact_keys(
-            request,
-            ("context", "streamId", "lease"),
+        request = cycle_store_adapter_codec.capture_request(
             operation,
-            "release lease request",
+            request_value,
+            self._descriptor,
         )
-        context = _mutation_context(request["context"], operation)
+        context = cast(JsonObject, request["context"])
         tenant_id = cast(str, context["tenantId"])
-        stream_id = _identifier(request["streamId"], operation, "streamId")
-        binding = self._lease_binding(request["lease"], operation)
-        canonical_request = cast(
-            JsonObject,
-            _clone({"context": context, "streamId": stream_id, "lease": binding}),
-        )
+        stream_id = cast(str, request["streamId"])
+        binding = cast(JsonObject, request["lease"])
+        canonical_request = request
 
         def commit() -> JsonValue:
             self._assert_online_writer_compatible(operation)
@@ -1879,19 +2764,20 @@ class MemoryCycleStoreProvider:
 
     async def inspect_lease(self, request_value: object) -> CycleStoreLeaseInspection:
         operation: CycleStoreProviderOperation = "inspect-lease"
-        request = _capture_object(request_value, operation, "inspect lease request")
-        _exact_keys(request, ("context", "streamId"), operation, "inspect lease request")
-        context = _authorization_context(request["context"], operation)
-        stream_id = _identifier(request["streamId"], operation, "streamId")
+        request = cycle_store_adapter_codec.capture_request(
+            operation,
+            request_value,
+            self._descriptor,
+        )
+        context = cast(JsonObject, request["context"])
+        stream_id = cast(str, request["streamId"])
         await self._authorize(context, operation)
         async with self._lock:
             self._maybe_fail(operation)
             return cast(
                 JsonObject,
                 _clone(
-                    self._lease_inspection(
-                        cast(str, context["tenantId"]), stream_id, operation
-                    )
+                    self._lease_inspection(cast(str, context["tenantId"]), stream_id, operation)
                 ),
             )
 
@@ -1913,36 +2799,17 @@ class MemoryCycleStoreProvider:
 
     async def set_legal_hold(self, request_value: object) -> CycleStoreGovernanceInspection:
         operation: CycleStoreProviderOperation = "set-legal-hold"
-        request = _capture_object(request_value, operation, "legal hold request")
-        _exact_keys(
-            request,
-            ("context", "streamId", "holdId", "action"),
+        request = cycle_store_adapter_codec.capture_request(
             operation,
-            "legal hold request",
+            request_value,
+            self._descriptor,
         )
-        context = _mutation_context(request["context"], operation)
+        context = cast(JsonObject, request["context"])
         tenant_id = cast(str, context["tenantId"])
-        stream_id = _identifier(request["streamId"], operation, "streamId")
-        hold_id = _identifier(request["holdId"], operation, "holdId")
-        action_value = request["action"]
-        if action_value not in ("place", "release"):
-            _fail(
-                "GE_CYCLE_STORE_INVALID_ARGUMENT",
-                operation,
-                "legal hold action is invalid",
-            )
-        action = cast(Literal["place", "release"], action_value)
-        canonical_request = cast(
-            JsonObject,
-            _clone(
-                {
-                    "context": context,
-                    "streamId": stream_id,
-                    "holdId": hold_id,
-                    "action": action,
-                }
-            ),
-        )
+        stream_id = cast(str, request["streamId"])
+        hold_id = cast(str, request["holdId"])
+        action = cast(Literal["place", "release"], request["action"])
+        canonical_request = request
 
         def commit() -> JsonValue:
             self._assert_online_writer_compatible(operation)
@@ -1968,11 +2835,14 @@ class MemoryCycleStoreProvider:
         request_value: object,
     ) -> CycleStoreGovernanceInspection:
         operation: CycleStoreProviderOperation = "inspect-governance"
-        request = _capture_object(request_value, operation, "governance request")
-        _exact_keys(request, ("context", "streamId"), operation, "governance request")
-        context = _authorization_context(request["context"], operation)
+        request = cycle_store_adapter_codec.capture_request(
+            operation,
+            request_value,
+            self._descriptor,
+        )
+        context = cast(JsonObject, request["context"])
         tenant_id = cast(str, context["tenantId"])
-        stream_id = _identifier(request["streamId"], operation, "streamId")
+        stream_id = cast(str, request["streamId"])
         await self._authorize(context, operation)
         async with self._lock:
             self._maybe_fail(operation)
@@ -1989,79 +2859,20 @@ class MemoryCycleStoreProvider:
 
     async def acquire_migration_lock(self, request_value: object) -> CycleStoreMigrationLock:
         operation: CycleStoreProviderOperation = "acquire-migration-lock"
-        request = _capture_object(request_value, operation, "migration lock request")
-        _exact_keys(
-            request,
-            (
-                "context",
-                "lockId",
-                "ownerId",
-                "sourceSchemaVersion",
-                "targetSchemaVersion",
-                "ttlMs",
-                "mode",
-                "expectedFencingToken",
-            ),
+        request = cycle_store_adapter_codec.capture_request(
             operation,
-            "migration lock request",
+            request_value,
+            self._descriptor,
         )
-        context = _mutation_context(request["context"], operation)
-        lock_id = _identifier(request["lockId"], operation, "lockId")
-        owner_id = _identifier(request["ownerId"], operation, "ownerId")
-        source_version = _integer(
-            request["sourceSchemaVersion"],
-            1,
-            MAX_SAFE_INTEGER,
-            operation,
-            "sourceSchemaVersion",
-        )
-        target_version = _integer(
-            request["targetSchemaVersion"],
-            1,
-            MAX_SAFE_INTEGER,
-            operation,
-            "targetSchemaVersion",
-        )
-        schema_version = cast(int, self._descriptor["schemaVersion"])
-        if source_version != schema_version or target_version <= source_version:
-            _fail(
-                "GE_CYCLE_STORE_UNSUPPORTED_VERSION",
-                operation,
-                "migration schema interval is unsupported",
-            )
-        ttl_ms = _integer(
-            request["ttlMs"], 1, self._limit("maxLeaseTtlMs"), operation, "ttlMs"
-        )
-        mode_value = request["mode"]
-        if mode_value not in ("acquire", "takeover"):
-            _fail(
-                "GE_CYCLE_STORE_INVALID_ARGUMENT",
-                operation,
-                "migration lock mode is invalid",
-            )
-        mode = cast(Literal["acquire", "takeover"], mode_value)
-        expected_fencing_token = _integer(
-            request["expectedFencingToken"],
-            0,
-            MAX_SAFE_INTEGER,
-            operation,
-            "expectedFencingToken",
-        )
-        canonical_request = cast(
-            JsonObject,
-            _clone(
-                {
-                    "context": context,
-                    "lockId": lock_id,
-                    "ownerId": owner_id,
-                    "sourceSchemaVersion": source_version,
-                    "targetSchemaVersion": target_version,
-                    "ttlMs": ttl_ms,
-                    "mode": mode,
-                    "expectedFencingToken": expected_fencing_token,
-                }
-            ),
-        )
+        context = cast(JsonObject, request["context"])
+        lock_id = cast(str, request["lockId"])
+        owner_id = cast(str, request["ownerId"])
+        source_version = cast(int, request["sourceSchemaVersion"])
+        target_version = cast(int, request["targetSchemaVersion"])
+        ttl_ms = cast(int, request["ttlMs"])
+        mode = cast(Literal["acquire", "takeover"], request["mode"])
+        expected_fencing_token = cast(int, request["expectedFencingToken"])
+        canonical_request = request
 
         def commit() -> JsonValue:
             state = self._migration
@@ -2073,9 +2884,10 @@ class MemoryCycleStoreProvider:
                     cast(JsonObject, {"lastFencingToken": state.last_fencing_token}),
                 )
             now_ms = self._now(operation)
-            active_expired = state.active is not None and self._parse_time(
-                cast(str, state.active["expiresAt"])
-            ) <= now_ms
+            active_expired = (
+                state.active is not None
+                and self._parse_time(cast(str, state.active["expiresAt"])) <= now_ms
+            )
             if mode == "takeover":
                 if state.active is None or not active_expired:
                     _fail(
@@ -2130,7 +2942,12 @@ class MemoryCycleStoreProvider:
 
     async def inspect_migration_lock(self, context_value: object) -> CycleStoreMigrationLock | None:
         operation: CycleStoreProviderOperation = "inspect-migration-lock"
-        context = _authorization_context(context_value, operation)
+        request = cycle_store_adapter_codec.capture_request(
+            operation,
+            context_value,
+            self._descriptor,
+        )
+        context = cast(JsonObject, request["context"])
         await self._authorize(context, operation)
         async with self._lock:
             self._maybe_fail(operation)
@@ -2145,30 +2962,16 @@ class MemoryCycleStoreProvider:
         request_value: object,
     ) -> CycleStoreMigrationLock | None:
         operation: CycleStoreProviderOperation = "release-migration-lock"
-        request = _capture_object(request_value, operation, "migration release request")
-        _exact_keys(
-            request,
-            ("context", "lockId", "ownerId", "fencingToken"),
+        request = cycle_store_adapter_codec.capture_request(
             operation,
-            "migration release request",
+            request_value,
+            self._descriptor,
         )
-        context = _mutation_context(request["context"], operation)
-        lock_id = _identifier(request["lockId"], operation, "lockId")
-        owner_id = _identifier(request["ownerId"], operation, "ownerId")
-        fencing_token = _integer(
-            request["fencingToken"], 1, MAX_SAFE_INTEGER, operation, "fencingToken"
-        )
-        canonical_request = cast(
-            JsonObject,
-            _clone(
-                {
-                    "context": context,
-                    "lockId": lock_id,
-                    "ownerId": owner_id,
-                    "fencingToken": fencing_token,
-                }
-            ),
-        )
+        context = cast(JsonObject, request["context"])
+        lock_id = cast(str, request["lockId"])
+        owner_id = cast(str, request["ownerId"])
+        fencing_token = cast(int, request["fencingToken"])
+        canonical_request = request
 
         def commit() -> JsonValue:
             active = self._migration.active
@@ -2318,7 +3121,7 @@ class MemoryCycleStoreProvider:
                     "scopeHash": canonical_sha256(scope),
                     "operation": entry.operation,
                     "requestHash": entry.request_hash,
-                    "resultHash": canonical_sha256(entry.result),
+                    "resultHash": hashlib.sha256(entry.result_bytes).hexdigest(),
                 }
                 for scope, entry in self._idempotency.items()
             ),
@@ -2336,9 +3139,7 @@ class MemoryCycleStoreProvider:
                     "leases": leases,
                     "operations": operations,
                     "cursorCount": len(self._cursors),
-                    "legalHoldCount": sum(
-                        len(holds) for holds in self._legal_holds.values()
-                    ),
+                    "legalHoldCount": sum(len(holds) for holds in self._legal_holds.values()),
                     "migration": {
                         "lastEpoch": self._migration.last_epoch,
                         "lastFencingToken": self._migration.last_fencing_token,
@@ -2346,12 +3147,8 @@ class MemoryCycleStoreProvider:
                             None
                             if active_migration is None
                             else {
-                                "sourceSchemaVersion": active_migration[
-                                    "sourceSchemaVersion"
-                                ],
-                                "targetSchemaVersion": active_migration[
-                                    "targetSchemaVersion"
-                                ],
+                                "sourceSchemaVersion": active_migration["sourceSchemaVersion"],
+                                "targetSchemaVersion": active_migration["targetSchemaVersion"],
                                 "lockEpoch": active_migration["lockEpoch"],
                                 "fencingToken": active_migration["fencingToken"],
                                 "expiresAt": active_migration["expiresAt"],
