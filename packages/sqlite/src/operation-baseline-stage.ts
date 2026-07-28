@@ -1,15 +1,28 @@
 import { Buffer } from "node:buffer";
+import { createHash } from "node:crypto";
 
-import { CycleStoreProviderError } from "@graph-engineering/runtime";
+import { canonicalHash } from "@graph-engineering/core";
+import {
+  CycleStoreProviderError,
+  cycleStoreAdapterCodec,
+  type CycleStoreLedgerResultByOperation,
+  type CycleStoreMutationOperation,
+} from "@graph-engineering/runtime";
 
 import {
   BASELINE_ENTRY_KINDS,
   MAX_BASELINE_KEY_BYTES,
   MAX_BASELINE_STATE_BYTES,
+  decodeOperationBaselineCanonicalBytes,
   type OperationBaselineEntryKind,
   validateOperationBaselineEntryBytes,
 } from "./operation-baseline.js";
-import { sqliteRow, sqliteSafeInteger, sqliteText } from "./sqlite-codec.js";
+import {
+  sqliteBlob,
+  sqliteRow,
+  sqliteSafeInteger,
+  sqliteText,
+} from "./sqlite-codec.js";
 import { SQLiteConnection } from "./sqlite-connection.js";
 
 const OPERATION = "inspect-schema" as const;
@@ -39,6 +52,12 @@ export type SQLiteBaselineTempStageState = "open" | "poisoned" | "disposed";
 export type SQLiteBaselineExpectedCounts = Readonly<
   Record<OperationBaselineEntryKind, number>
 >;
+
+export interface SQLiteBaselineStageEntry {
+  readonly entryKind: OperationBaselineEntryKind;
+  readonly keyBytes: Uint8Array;
+  readonly stateBytes: Uint8Array;
+}
 
 const EXCLUSIVE_PROOF_OWNER = Symbol("SQLiteExclusiveBaselineTransactionProof.owner");
 const ACTIVE_STAGES = new WeakMap<SQLiteConnection, SQLiteBaselineTempStage>();
@@ -665,6 +684,378 @@ function validateBaselineTempCatalog(connection: SQLiteConnection): void {
   }
 }
 
+type CanonicalRecord = Readonly<Record<string, unknown>>;
+type RelationValue = string | number | null | Buffer;
+
+interface PreparedStageEntry {
+  readonly entryKind: OperationBaselineEntryKind;
+  readonly key: CanonicalRecord;
+  readonly keyBytes: Buffer;
+  readonly rank: number;
+  readonly state: CanonicalRecord;
+  readonly stateBytes: Buffer;
+}
+
+interface RelationInsert {
+  readonly sql: string;
+  readonly values: readonly RelationValue[];
+}
+
+const LEGACY_OPERATIONS = new Set<CycleStoreMutationOperation>([
+  "append",
+  "save-checkpoint",
+  "delete-checkpoint",
+  "acquire-lease",
+  "renew-lease",
+  "release-lease",
+  "set-legal-hold",
+  "acquire-migration-lock",
+  "release-migration-lock",
+]);
+
+function canonicalRecord(bytes: Buffer, maximum: number): CanonicalRecord {
+  return decodeOperationBaselineCanonicalBytes(bytes, maximum) as CanonicalRecord;
+}
+
+function relationValue(
+  record: CanonicalRecord,
+  field: string,
+): string | number | null {
+  return record[field] as string | number | null;
+}
+
+function relationRecord(record: CanonicalRecord, field: string): CanonicalRecord {
+  return record[field] as CanonicalRecord;
+}
+
+function projectRelationInsert(entry: PreparedStageEntry): RelationInsert {
+  const { entryKind, keyBytes, state } = entry;
+  const value = (field: string) => relationValue(state, field);
+  switch (entryKind) {
+    case "schema-envelope":
+      return {
+        sql: `INSERT INTO temp.ge_blr_schema
+          (key_blob, singleton, current_version, min_reader_version,
+           max_reader_version, min_writer_version, max_writer_version,
+           schema_identity_sha256, latest_migration_sha256,
+           provider_descriptor_hash, latest_migration_applied_at_ms,
+           created_at_ms, updated_at_ms)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        values: [
+          keyBytes, 1, value("currentVersion"), value("minReaderVersion"),
+          value("maxReaderVersion"), value("minWriterVersion"),
+          value("maxWriterVersion"), value("schemaIdentitySha256"),
+          value("latestMigrationSha256"), value("providerDescriptorHash"),
+          value("latestMigrationAppliedAtMs"), value("createdAtMs"),
+          value("updatedAtMs"),
+        ],
+      };
+    case "migration-lineage":
+      return {
+        sql: `INSERT INTO temp.ge_blr_migrations
+          (key_blob, version, previous_version, migration_id, sql_sha256,
+           schema_identity_sha256, applied_at_ms)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        values: [
+          keyBytes, value("version"), value("previousVersion"),
+          value("migrationId"), value("sqlSha256"),
+          value("schemaIdentitySha256"), value("appliedAtMs"),
+        ],
+      };
+    case "stream-head":
+      return {
+        sql: `INSERT INTO temp.ge_blr_streams
+          (key_blob, tenant_id, stream_id, tail_sequence, tail_record_hash,
+           created_at_ms, updated_at_ms)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        values: [
+          keyBytes, value("tenantId"), value("streamId"),
+          value("tailSequence"), value("tailRecordHash"),
+          value("createdAtMs"), value("updatedAtMs"),
+        ],
+      };
+    case "record-identity":
+      return {
+        sql: `INSERT INTO temp.ge_blr_records
+          (key_blob, tenant_id, stream_id, record_id, sequence,
+           previous_record_hash, record_hash, value_hash, value_bytes,
+           committed_at_ms)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        values: [
+          keyBytes, value("tenantId"), value("streamId"), value("recordId"),
+          value("sequence"), value("previousRecordHash"), value("recordHash"),
+          value("valueHash"), value("valueBytes"), value("committedAtMs"),
+        ],
+      };
+    case "checkpoint-current":
+      return {
+        sql: `INSERT INTO temp.ge_blr_checkpoint_current
+          (key_blob, tenant_id, checkpoint_scope, checkpoint_id, stream_id,
+           bound_sequence, bound_record_hash, checkpoint_revision,
+           checkpoint_created_at, value_hash, value_bytes, committed_at_ms)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        values: [
+          keyBytes, value("tenantId"), value("checkpointScope"),
+          value("checkpointId"), value("streamId"), value("boundSequence"),
+          value("boundRecordHash"), value("checkpointRevision"),
+          value("createdAt"), value("valueHash"), value("valueBytes"),
+          value("committedAtMs"),
+        ],
+      };
+    case "checkpoint-revision": {
+      const summary = state.action === "put"
+        ? relationRecord(state, "summary")
+        : undefined;
+      return {
+        sql: `INSERT INTO temp.ge_blr_checkpoint_revisions
+          (key_blob, tenant_id, checkpoint_scope, revision, checkpoint_id,
+           action, stream_id, bound_sequence, bound_record_hash,
+           checkpoint_created_at, value_hash, value_bytes, recorded_at_ms)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        values: [
+          keyBytes, value("tenantId"), value("checkpointScope"),
+          value("revision"), value("checkpointId"), value("action"),
+          summary === undefined ? null : relationValue(summary, "streamId"),
+          value("boundSequence"), value("boundRecordHash"),
+          value("checkpointCreatedAt"), value("valueHash"),
+          value("valueBytes"), value("recordedAtMs"),
+        ],
+      };
+    }
+    case "lease-current":
+      return {
+        sql: `INSERT INTO temp.ge_blr_leases
+          (key_blob, tenant_id, stream_id, active_lease_id, active_holder_id,
+           active_lease_epoch, active_fencing_token, active_acquired_at_ms,
+           active_expires_at_ms, last_lease_epoch, last_fencing_token,
+           updated_at_ms)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        values: [
+          keyBytes, value("tenantId"), value("streamId"),
+          value("activeLeaseId"), value("activeHolderId"),
+          value("activeLeaseEpoch"), value("activeFencingToken"),
+          value("activeAcquiredAtMs"), value("activeExpiresAtMs"),
+          value("lastLeaseEpoch"), value("lastFencingToken"),
+          value("updatedAtMs"),
+        ],
+      };
+    case "used-lease-identity":
+      return {
+        sql: `INSERT INTO temp.ge_blr_used_leases
+          (key_blob, tenant_id, stream_id, lease_id, lease_epoch,
+           fencing_token, first_used_at_ms)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        values: [
+          keyBytes, value("tenantId"), value("streamId"), value("leaseId"),
+          value("leaseEpoch"), value("fencingToken"), value("firstUsedAtMs"),
+        ],
+      };
+    case "legal-hold":
+      return {
+        sql: `INSERT INTO temp.ge_blr_holds
+          (key_blob, tenant_id, stream_id, hold_id, placed_at_ms)
+         VALUES (?, ?, ?, ?, ?)`,
+        values: [
+          keyBytes, value("tenantId"), value("streamId"), value("holdId"),
+          value("placedAtMs"),
+        ],
+      };
+    case "migration-lock-current":
+      return {
+        sql: `INSERT INTO temp.ge_blr_migration_lock
+          (key_blob, singleton, active_lock_id, active_owner_id,
+           active_source_version, active_target_version, active_lock_epoch,
+           active_fencing_token, active_acquired_at_ms, active_expires_at_ms,
+           last_lock_epoch, last_fencing_token, updated_at_ms)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        values: [
+          keyBytes, value("singleton"), value("activeLockId"),
+          value("activeOwnerId"), value("activeSourceVersion"),
+          value("activeTargetVersion"), value("activeLockEpoch"),
+          value("activeFencingToken"), value("activeAcquiredAtMs"),
+          value("activeExpiresAtMs"), value("lastLockEpoch"),
+          value("lastFencingToken"), value("updatedAtMs"),
+        ],
+      };
+    case "used-migration-lock-identity":
+      return {
+        sql: `INSERT INTO temp.ge_blr_used_migration_locks
+          (key_blob, lock_id, lock_epoch, fencing_token, first_used_at_ms)
+         VALUES (?, ?, ?, ?, ?)`,
+        values: [
+          keyBytes, value("lockId"), value("lockEpoch"),
+          value("fencingToken"), value("firstUsedAtMs"),
+        ],
+      };
+    case "legacy-operation":
+      return invalid(
+        "SQLite legacy baseline relation loading requires source carrier validation",
+      );
+  }
+}
+
+function exactEpochMilliseconds(value: string): number {
+  const fractional = /\.(\d+)(?:Z|[+-]\d\d:\d\d)$/u.exec(value)?.[1] ?? "";
+  if (fractional.slice(3).replace(/0/gu, "").length !== 0) {
+    return invalid("SQLite legacy baseline timestamp is not an exact epoch millisecond");
+  }
+  const milliseconds = Date.parse(value);
+  if (!Number.isSafeInteger(milliseconds) || milliseconds < 0) {
+    return invalid("SQLite legacy baseline timestamp is outside epoch bounds");
+  }
+  return milliseconds;
+}
+
+function legacyDerivedValues(
+  operation: CycleStoreMutationOperation,
+  decoded: CycleStoreLedgerResultByOperation[CycleStoreMutationOperation],
+): readonly RelationValue[] {
+  const values: RelationValue[] = Array.from({ length: 30 }, () => null);
+  switch (operation) {
+    case "append": {
+      const result = decoded as CycleStoreLedgerResultByOperation["append"];
+      if (!result.tail.exists || result.tail.recordHash === null
+          || result.tail.sequence < 0 || result.appendedRecords < 1) {
+        return invalid("SQLite legacy append result cannot populate its relation carrier");
+      }
+      values[0] = 1;
+      values[1] = result.tail.sequence;
+      values[2] = result.tail.recordHash;
+      values[3] = result.appendedRecords;
+      break;
+    }
+    case "save-checkpoint": {
+      const result = decoded as CycleStoreLedgerResultByOperation["save-checkpoint"];
+      values[4] = result.checkpointScope;
+      values[5] = result.checkpointId;
+      values[6] = result.streamId;
+      values[7] = result.boundSequence;
+      values[8] = result.boundRecordHash;
+      values[9] = result.createdAt;
+      values[10] = result.valueHash;
+      values[11] = result.valueBytes;
+      break;
+    }
+    case "delete-checkpoint": {
+      const result = decoded as CycleStoreLedgerResultByOperation["delete-checkpoint"];
+      values[12] = result.deleted ? 1 : 0;
+      break;
+    }
+    case "acquire-lease":
+    case "renew-lease": {
+      const result = decoded as CycleStoreLedgerResultByOperation["acquire-lease"];
+      if (result.leaseEpoch !== result.fencingToken) {
+        return invalid("SQLite legacy lease result cannot populate its relation carrier");
+      }
+      values[13] = result.leaseId;
+      values[14] = result.holderId;
+      values[15] = result.leaseEpoch;
+      values[16] = result.fencingToken;
+      values[17] = exactEpochMilliseconds(result.acquiredAt);
+      values[18] = exactEpochMilliseconds(result.expiresAt);
+      break;
+    }
+    case "release-lease": {
+      const result = decoded as CycleStoreLedgerResultByOperation["release-lease"];
+      if (result.status !== "released"
+          || result.lease !== null
+          || result.lastLeaseEpoch !== result.lastFencingToken) {
+        return invalid("SQLite legacy release result cannot populate its relation carrier");
+      }
+      values[19] = result.status;
+      values[20] = result.lastLeaseEpoch;
+      values[21] = result.lastFencingToken;
+      break;
+    }
+    case "set-legal-hold":
+      break;
+    case "acquire-migration-lock": {
+      const result = decoded as CycleStoreLedgerResultByOperation["acquire-migration-lock"];
+      if (result.lockEpoch !== result.fencingToken
+          || result.targetSchemaVersion <= result.sourceSchemaVersion) {
+        return invalid("SQLite legacy migration lock cannot populate its relation carrier");
+      }
+      values[22] = result.lockId;
+      values[23] = result.ownerId;
+      values[24] = result.sourceSchemaVersion;
+      values[25] = result.targetSchemaVersion;
+      values[26] = result.lockEpoch;
+      values[27] = result.fencingToken;
+      values[28] = exactEpochMilliseconds(result.acquiredAt);
+      values[29] = exactEpochMilliseconds(result.expiresAt);
+      break;
+    }
+    case "release-migration-lock":
+      if (decoded !== null) {
+        return invalid("SQLite legacy migration lock release carrier is invalid");
+      }
+      break;
+  }
+  return values;
+}
+
+function projectLegacyRelationInsert(
+  connection: SQLiteConnection,
+  entry: PreparedStageEntry,
+): RelationInsert {
+  const tenantId = relationValue(entry.key, "tenantId");
+  const operationId = relationValue(entry.key, "operationId");
+  const raw = connection.prepare(
+    `SELECT operation_name, request_hash, result_blob, result_hash, committed_at_ms
+       FROM main.ge_cycle_operations
+      WHERE tenant_id = ? AND operation_id = ?`,
+    OPERATION,
+  ).get(tenantId, operationId);
+  const row = sqliteRow(raw, 5, OPERATION, "legacy operation relation source");
+  const operationName = sqliteText(row[0], OPERATION, "legacy operation name");
+  if (!LEGACY_OPERATIONS.has(operationName as CycleStoreMutationOperation)) {
+    return invalid("SQLite legacy baseline operation name is invalid");
+  }
+  const operation = operationName as CycleStoreMutationOperation;
+  const requestHash = sqliteText(row[1], OPERATION, "legacy operation request hash");
+  const resultBlob = sqliteBlob(row[2], OPERATION, "legacy operation result carrier");
+  const resultHash = sqliteText(row[3], OPERATION, "legacy operation result hash");
+  const committedAtMs = sqliteSafeInteger(
+    row[4], 0, Number.MAX_SAFE_INTEGER, OPERATION, "legacy operation commit time",
+  );
+  if (operation !== relationValue(entry.state, "operationName")
+      || requestHash !== relationValue(entry.state, "requestHash")
+      || resultHash !== relationValue(entry.state, "resultHash")
+      || committedAtMs !== relationValue(entry.state, "committedAtMs")
+      || resultBlob.byteLength < 2
+      || resultBlob.byteLength > 16_777_216
+      || createHash("sha256").update(resultBlob).digest("hex")
+        !== relationValue(entry.state, "resultBlobSha256")) {
+    return invalid("SQLite legacy baseline source carrier changed before staging");
+  }
+  const decoded = cycleStoreAdapterCodec.decodeLedgerResult(operation, resultBlob);
+  const reencoded = Buffer.from(cycleStoreAdapterCodec.encodeLedgerResult(operation, decoded));
+  if (!reencoded.equals(resultBlob) || canonicalHash(decoded) !== resultHash) {
+    return invalid("SQLite legacy baseline result carrier is invalid");
+  }
+  return {
+    sql: `INSERT INTO temp.ge_blr_legacy_operations
+      (key_blob, tenant_id, operation_id, operation_name, request_hash,
+       result_hash, result_blob_sha256, committed_at_ms, tail_exists,
+       tail_sequence, tail_record_hash, appended_records, checkpoint_scope,
+       checkpoint_id, checkpoint_stream_id, checkpoint_bound_sequence,
+       checkpoint_bound_record_hash, checkpoint_created_at,
+       checkpoint_value_hash, checkpoint_value_bytes, checkpoint_deleted,
+       lease_id, lease_holder_id, lease_epoch, lease_fencing_token,
+       lease_acquired_at_ms, lease_expires_at_ms, lease_status,
+       last_lease_epoch, last_lease_fencing_token, lock_id, lock_owner_id,
+       lock_source_version, lock_target_version, lock_epoch,
+       lock_fencing_token, lock_acquired_at_ms, lock_expires_at_ms)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+             ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    values: [
+      entry.keyBytes, tenantId, operationId, operation, requestHash, resultHash,
+      relationValue(entry.state, "resultBlobSha256"), committedAtMs,
+      ...legacyDerivedValues(operation, decoded),
+    ],
+  };
+}
+
 /**
  * Transaction-bound owner for the common TEMP stage and relation catalog.
  *
@@ -702,35 +1093,36 @@ export class SQLiteBaselineTempStage {
     keyBytes: Uint8Array,
     stateBytes: Uint8Array,
   ): void {
-    this.#requireOpenOwner();
-    const rank = KIND_RANK.get(entryKind);
-    if (rank === undefined) return invalid("SQLite baseline entry kind is invalid");
-    let key: Buffer;
-    let state: Buffer;
+    const prepared = this.#prepareEntry(entryKind, keyBytes, stateBytes);
+    this.#insertCommonPrepared(prepared);
+  }
+
+  /**
+   * Insert one canonical common row and its rank-matched relation row.
+   *
+   * Legacy v1 operations re-read and fully validate their exact raw result
+   * carrier before either write; no decoded result is retained afterward.
+   */
+  insertEntryWithRelation(entry: SQLiteBaselineStageEntry): void {
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+      return invalid("SQLite baseline staged entry is invalid");
+    }
+    const prepared = this.#prepareEntry(
+      entry.entryKind,
+      entry.keyBytes,
+      entry.stateBytes,
+    );
+    this.#requireAllowedChanges();
+    let relation: RelationInsert;
     try {
-      validateOperationBaselineEntryBytes(entryKind, keyBytes, stateBytes);
-      key = Buffer.from(keyBytes);
-      state = Buffer.from(stateBytes);
+      relation = prepared.entryKind === "legacy-operation"
+        ? projectLegacyRelationInsert(this.#connection, prepared)
+        : projectRelationInsert(prepared);
     } catch {
-      return this.#poison("SQLite baseline common-stage entry bytes are invalid");
+      return this.#poison("SQLite baseline relation projection failed");
     }
-    const before = this.#requireAllowedChanges();
-    let statementChanges: unknown;
-    try {
-      statementChanges = this.#connection.prepare(
-        `INSERT INTO temp.${STAGE_TABLE}
-           (kind_rank, entry_kind, key_blob, state_blob)
-         VALUES (?, ?, ?, ?)`,
-        OPERATION,
-      ).run(rank, entryKind, key, state).changes;
-    } catch {
-      return this.#poison("SQLite baseline common-stage insert failed");
-    }
-    const after = totalChanges(this.#connection);
-    if ((statementChanges !== 1 && statementChanges !== 1n) || after !== before + 1) {
-      return this.#poison("SQLite baseline common-stage write count is invalid");
-    }
-    this.#allowedTotalChanges = after;
+    this.#insertCommonPrepared(prepared);
+    this.#insertOneRelation(relation);
   }
 
   /** Prove exact grouped and total common-stage counts for all twelve kinds. */
@@ -770,9 +1162,11 @@ export class SQLiteBaselineTempStage {
       `SELECT count(*) FROM temp.${STAGE_TABLE}`,
       "TEMP stage total count",
     );
+    this.#requireAllowedChanges();
     if (actualTotal !== expectedTotal) {
       return this.#poison("SQLite baseline common-stage total count is invalid");
     }
+    this.#requireAllowedChanges();
   }
 
   /** Prove bidirectional key coverage once normalized relation rows exist. */
@@ -799,9 +1193,11 @@ export class SQLiteBaselineTempStage {
         WHERE stage.key_blob IS NULL`,
       "TEMP stage extra relation count",
     );
+    this.#requireAllowedChanges();
     if (missing !== 0 || extra !== 0) {
       return this.#poison("SQLite baseline stage/relation key coverage is invalid");
     }
+    this.#requireAllowedChanges();
   }
 
   /** Drop every owned TEMP object in reverse creation order. */
@@ -880,11 +1276,87 @@ export class SQLiteBaselineTempStage {
   }
 
   #requireAllowedChanges(): number {
-    const actual = totalChanges(this.#connection);
+    let actual: number;
+    try {
+      actual = totalChanges(this.#connection);
+    } catch {
+      return this.#poison("SQLite baseline TEMP stage change counter is invalid");
+    }
     if (actual !== this.#allowedTotalChanges) {
       return this.#poison("SQLite baseline TEMP stage observed an unexplained write");
     }
     return actual;
+  }
+
+  #prepareEntry(
+    entryKind: OperationBaselineEntryKind,
+    keyBytes: Uint8Array,
+    stateBytes: Uint8Array,
+  ): PreparedStageEntry {
+    this.#requireOpenOwner();
+    const rank = KIND_RANK.get(entryKind);
+    if (rank === undefined) return invalid("SQLite baseline entry kind is invalid");
+    try {
+      const key = Buffer.from(keyBytes);
+      const state = Buffer.from(stateBytes);
+      validateOperationBaselineEntryBytes(entryKind, key, state);
+      return {
+        entryKind,
+        key: canonicalRecord(key, MAX_BASELINE_KEY_BYTES),
+        keyBytes: key,
+        rank,
+        state: canonicalRecord(state, MAX_BASELINE_STATE_BYTES),
+        stateBytes: state,
+      };
+    } catch {
+      return this.#poison("SQLite baseline common-stage entry bytes are invalid");
+    }
+  }
+
+  #insertCommonPrepared(entry: PreparedStageEntry): void {
+    this.#insertExactlyOne(
+      `INSERT INTO temp.${STAGE_TABLE}
+         (kind_rank, entry_kind, key_blob, state_blob)
+       VALUES (?, ?, ?, ?)`,
+      [entry.rank, entry.entryKind, entry.keyBytes, entry.stateBytes],
+      "SQLite baseline common-stage insert failed",
+      "SQLite baseline common-stage write count is invalid",
+    );
+  }
+
+  #insertOneRelation(insert: RelationInsert): void {
+    this.#insertExactlyOne(
+      insert.sql,
+      insert.values,
+      "SQLite baseline relation insert failed",
+      "SQLite baseline relation write count is invalid",
+    );
+  }
+
+  #insertExactlyOne(
+    sql: string,
+    values: readonly RelationValue[],
+    insertFailure: string,
+    countFailure: string,
+  ): void {
+    this.#requireOpenOwner();
+    const before = this.#requireAllowedChanges();
+    let statementChanges: unknown;
+    try {
+      statementChanges = this.#connection.prepare(sql, OPERATION).run(...values).changes;
+    } catch {
+      return this.#poison(insertFailure);
+    }
+    let after: number;
+    try {
+      after = totalChanges(this.#connection);
+    } catch {
+      return this.#poison(countFailure);
+    }
+    if ((statementChanges !== 1 && statementChanges !== 1n) || after !== before + 1) {
+      return this.#poison(countFailure);
+    }
+    this.#allowedTotalChanges = after;
   }
 
   #poison(message: string): never {

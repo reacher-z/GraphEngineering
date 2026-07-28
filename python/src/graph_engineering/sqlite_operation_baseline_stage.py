@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import hashlib
 import sqlite3
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from types import TracebackType
-from typing import Literal, Never
+from typing import Literal, Never, cast
 
+from .canonical import canonical_sha256
+from .cycle_store_provider import CycleStoreProviderOperation, cycle_store_adapter_codec
 from .models import MAX_SAFE_INTEGER
 from .sqlite_operation_baseline import (
     BASELINE_ENTRY_KINDS,
@@ -495,6 +499,380 @@ _TEMP_RELATION_KEYS_VIEW_DDL = f"""CREATE TEMP VIEW {SQLITE_V1_BASELINE_RELATION
  UNION ALL SELECT 11, key_blob FROM ge_blr_legacy_operations"""
 
 
+@dataclass(frozen=True, slots=True)
+class _RelationInsert:
+    """One closed, module-owned relation statement and its bound values."""
+
+    sql: str
+    parameters: tuple[object, ...]
+
+
+_SCHEMA_RELATION_INSERT = """INSERT INTO temp.ge_blr_schema (
+ key_blob, singleton, current_version, min_reader_version, max_reader_version,
+ min_writer_version, max_writer_version, schema_identity_sha256,
+ latest_migration_sha256, provider_descriptor_hash,
+ latest_migration_applied_at_ms, created_at_ms, updated_at_ms
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
+
+_MIGRATION_RELATION_INSERT = """INSERT INTO temp.ge_blr_migrations (
+ key_blob, version, previous_version, migration_id, sql_sha256,
+ schema_identity_sha256, applied_at_ms
+) VALUES (?, ?, ?, ?, ?, ?, ?)"""
+
+_STREAM_RELATION_INSERT = """INSERT INTO temp.ge_blr_streams (
+ key_blob, tenant_id, stream_id, tail_sequence, tail_record_hash,
+ created_at_ms, updated_at_ms
+) VALUES (?, ?, ?, ?, ?, ?, ?)"""
+
+_RECORD_RELATION_INSERT = """INSERT INTO temp.ge_blr_records (
+ key_blob, tenant_id, stream_id, record_id, sequence, previous_record_hash,
+ record_hash, value_hash, value_bytes, committed_at_ms
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
+
+_CHECKPOINT_CURRENT_RELATION_INSERT = """INSERT INTO temp.ge_blr_checkpoint_current (
+ key_blob, tenant_id, checkpoint_scope, checkpoint_id, stream_id,
+ bound_sequence, bound_record_hash, checkpoint_revision, checkpoint_created_at,
+ value_hash, value_bytes, committed_at_ms
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
+
+_CHECKPOINT_REVISION_RELATION_INSERT = """INSERT INTO temp.ge_blr_checkpoint_revisions (
+ key_blob, tenant_id, checkpoint_scope, revision, checkpoint_id, action,
+ stream_id, bound_sequence, bound_record_hash, checkpoint_created_at,
+ value_hash, value_bytes, recorded_at_ms
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
+
+_LEASE_RELATION_INSERT = """INSERT INTO temp.ge_blr_leases (
+ key_blob, tenant_id, stream_id, active_lease_id, active_holder_id,
+ active_lease_epoch, active_fencing_token, active_acquired_at_ms,
+ active_expires_at_ms, last_lease_epoch, last_fencing_token, updated_at_ms
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
+
+_USED_LEASE_RELATION_INSERT = """INSERT INTO temp.ge_blr_used_leases (
+ key_blob, tenant_id, stream_id, lease_id, lease_epoch, fencing_token,
+ first_used_at_ms
+) VALUES (?, ?, ?, ?, ?, ?, ?)"""
+
+_HOLD_RELATION_INSERT = """INSERT INTO temp.ge_blr_holds (
+ key_blob, tenant_id, stream_id, hold_id, placed_at_ms
+) VALUES (?, ?, ?, ?, ?)"""
+
+_MIGRATION_LOCK_RELATION_INSERT = """INSERT INTO temp.ge_blr_migration_lock (
+ key_blob, singleton, active_lock_id, active_owner_id, active_source_version,
+ active_target_version, active_lock_epoch, active_fencing_token,
+ active_acquired_at_ms, active_expires_at_ms, last_lock_epoch,
+ last_fencing_token, updated_at_ms
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
+
+_USED_MIGRATION_LOCK_RELATION_INSERT = """INSERT INTO temp.ge_blr_used_migration_locks (
+ key_blob, lock_id, lock_epoch, fencing_token, first_used_at_ms
+) VALUES (?, ?, ?, ?, ?)"""
+
+_LEGACY_RELATION_INSERT = """INSERT INTO temp.ge_blr_legacy_operations (
+ key_blob, tenant_id, operation_id, operation_name, request_hash, result_hash,
+ result_blob_sha256, committed_at_ms, tail_exists, tail_sequence,
+ tail_record_hash, appended_records, checkpoint_scope, checkpoint_id,
+ checkpoint_stream_id, checkpoint_bound_sequence, checkpoint_bound_record_hash,
+ checkpoint_created_at, checkpoint_value_hash, checkpoint_value_bytes,
+ checkpoint_deleted, lease_id, lease_holder_id, lease_epoch,
+ lease_fencing_token, lease_acquired_at_ms, lease_expires_at_ms, lease_status,
+ last_lease_epoch, last_lease_fencing_token, lock_id, lock_owner_id,
+ lock_source_version, lock_target_version, lock_epoch, lock_fencing_token,
+ lock_acquired_at_ms, lock_expires_at_ms
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+ ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
+
+_LEGACY_RESULT_SELECT = """SELECT operation_name, request_hash, result_blob,
+ result_hash, committed_at_ms
+ FROM main.ge_cycle_operations
+ WHERE tenant_id = ? AND operation_id = ?"""
+
+
+def _relation_insert_for(entry: BaselineEntryInput) -> _RelationInsert:
+    """Project one recaptured entry into exactly one fixed relation statement."""
+
+    state = entry.state
+    key_blob = entry.key_bytes
+    kind = entry.entry_kind
+    if kind == "schema-envelope":
+        return _RelationInsert(
+            _SCHEMA_RELATION_INSERT,
+            (
+                key_blob,
+                1,
+                state["currentVersion"],
+                state["minReaderVersion"],
+                state["maxReaderVersion"],
+                state["minWriterVersion"],
+                state["maxWriterVersion"],
+                state["schemaIdentitySha256"],
+                state["latestMigrationSha256"],
+                state["providerDescriptorHash"],
+                state["latestMigrationAppliedAtMs"],
+                state["createdAtMs"],
+                state["updatedAtMs"],
+            ),
+        )
+    if kind == "migration-lineage":
+        return _RelationInsert(
+            _MIGRATION_RELATION_INSERT,
+            (
+                key_blob,
+                state["version"],
+                state["previousVersion"],
+                state["migrationId"],
+                state["sqlSha256"],
+                state["schemaIdentitySha256"],
+                state["appliedAtMs"],
+            ),
+        )
+    if kind == "stream-head":
+        return _RelationInsert(
+            _STREAM_RELATION_INSERT,
+            (
+                key_blob,
+                state["tenantId"],
+                state["streamId"],
+                state["tailSequence"],
+                state["tailRecordHash"],
+                state["createdAtMs"],
+                state["updatedAtMs"],
+            ),
+        )
+    if kind == "record-identity":
+        return _RelationInsert(
+            _RECORD_RELATION_INSERT,
+            (
+                key_blob,
+                state["tenantId"],
+                state["streamId"],
+                state["recordId"],
+                state["sequence"],
+                state["previousRecordHash"],
+                state["recordHash"],
+                state["valueHash"],
+                state["valueBytes"],
+                state["committedAtMs"],
+            ),
+        )
+    if kind == "checkpoint-current":
+        return _RelationInsert(
+            _CHECKPOINT_CURRENT_RELATION_INSERT,
+            (
+                key_blob,
+                state["tenantId"],
+                state["checkpointScope"],
+                state["checkpointId"],
+                state["streamId"],
+                state["boundSequence"],
+                state["boundRecordHash"],
+                state["checkpointRevision"],
+                state["createdAt"],
+                state["valueHash"],
+                state["valueBytes"],
+                state["committedAtMs"],
+            ),
+        )
+    if kind == "checkpoint-revision":
+        summary = state["summary"]
+        stream_id = summary["streamId"] if isinstance(summary, dict) else None
+        return _RelationInsert(
+            _CHECKPOINT_REVISION_RELATION_INSERT,
+            (
+                key_blob,
+                state["tenantId"],
+                state["checkpointScope"],
+                state["revision"],
+                state["checkpointId"],
+                state["action"],
+                stream_id,
+                state["boundSequence"],
+                state["boundRecordHash"],
+                state["checkpointCreatedAt"],
+                state["valueHash"],
+                state["valueBytes"],
+                state["recordedAtMs"],
+            ),
+        )
+    if kind == "lease-current":
+        return _RelationInsert(
+            _LEASE_RELATION_INSERT,
+            (
+                key_blob,
+                state["tenantId"],
+                state["streamId"],
+                state["activeLeaseId"],
+                state["activeHolderId"],
+                state["activeLeaseEpoch"],
+                state["activeFencingToken"],
+                state["activeAcquiredAtMs"],
+                state["activeExpiresAtMs"],
+                state["lastLeaseEpoch"],
+                state["lastFencingToken"],
+                state["updatedAtMs"],
+            ),
+        )
+    if kind == "used-lease-identity":
+        return _RelationInsert(
+            _USED_LEASE_RELATION_INSERT,
+            (
+                key_blob,
+                state["tenantId"],
+                state["streamId"],
+                state["leaseId"],
+                state["leaseEpoch"],
+                state["fencingToken"],
+                state["firstUsedAtMs"],
+            ),
+        )
+    if kind == "legal-hold":
+        return _RelationInsert(
+            _HOLD_RELATION_INSERT,
+            (
+                key_blob,
+                state["tenantId"],
+                state["streamId"],
+                state["holdId"],
+                state["placedAtMs"],
+            ),
+        )
+    if kind == "migration-lock-current":
+        return _RelationInsert(
+            _MIGRATION_LOCK_RELATION_INSERT,
+            (
+                key_blob,
+                state["singleton"],
+                state["activeLockId"],
+                state["activeOwnerId"],
+                state["activeSourceVersion"],
+                state["activeTargetVersion"],
+                state["activeLockEpoch"],
+                state["activeFencingToken"],
+                state["activeAcquiredAtMs"],
+                state["activeExpiresAtMs"],
+                state["lastLockEpoch"],
+                state["lastFencingToken"],
+                state["updatedAtMs"],
+            ),
+        )
+    if kind == "used-migration-lock-identity":
+        return _RelationInsert(
+            _USED_MIGRATION_LOCK_RELATION_INSERT,
+            (
+                key_blob,
+                state["lockId"],
+                state["lockEpoch"],
+                state["fencingToken"],
+                state["firstUsedAtMs"],
+            ),
+        )
+    raise ValueError("legacy operation projection requires its source carrier")
+
+
+def _exact_epoch_milliseconds(value: object) -> int:
+    if type(value) is not str:
+        raise ValueError("legacy result timestamp is invalid")
+    time_part = value[value.find("T") + 1 :]
+    zone_offset = (
+        len(time_part) - 1
+        if time_part.endswith("Z")
+        else max(time_part.rfind("+"), time_part.rfind("-"))
+    )
+    clock = time_part[:zone_offset]
+    fraction = clock.partition(".")[2]
+    if len(fraction) > 3 and any(digit != "0" for digit in fraction[3:]):
+        raise ValueError("legacy result timestamp is not exact milliseconds")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        raise ValueError("legacy result timestamp is invalid") from None
+    if parsed.tzinfo is None or parsed.microsecond % 1_000 != 0:
+        raise ValueError("legacy result timestamp is not exact milliseconds")
+    epoch = datetime(1970, 1, 1, tzinfo=UTC)
+    delta = parsed.astimezone(UTC) - epoch
+    milliseconds = (
+        delta.days * 86_400_000
+        + delta.seconds * 1_000
+        + delta.microseconds // 1_000
+    )
+    if milliseconds < 0 or milliseconds > MAX_SAFE_INTEGER:
+        raise ValueError("legacy result timestamp is outside bounds")
+    return milliseconds
+
+
+def _legacy_result_projection(
+    operation: CycleStoreProviderOperation,
+    decoded: object,
+) -> tuple[object, ...]:
+    """Return all nullable legacy columns in their single selected group."""
+
+    empty: tuple[object, ...] = (None,) * 30
+    if operation == "append":
+        result = cast(dict[str, object], decoded)
+        tail = cast(dict[str, object], result["tail"])
+        return (
+            int(cast(bool, tail["exists"])),
+            tail["sequence"],
+            tail["recordHash"],
+            result["appendedRecords"],
+            *empty[4:],
+        )
+    if operation == "save-checkpoint":
+        result = cast(dict[str, object], decoded)
+        return (
+            *empty[:4],
+            result["checkpointScope"],
+            result["checkpointId"],
+            result["streamId"],
+            result["boundSequence"],
+            result["boundRecordHash"],
+            result["createdAt"],
+            result["valueHash"],
+            result["valueBytes"],
+            *empty[12:],
+        )
+    if operation == "delete-checkpoint":
+        result = cast(dict[str, object], decoded)
+        return (*empty[:12], int(cast(bool, result["deleted"])), *empty[13:])
+    if operation in ("acquire-lease", "renew-lease"):
+        result = cast(dict[str, object], decoded)
+        return (
+            *empty[:13],
+            result["leaseId"],
+            result["holderId"],
+            result["leaseEpoch"],
+            result["fencingToken"],
+            _exact_epoch_milliseconds(result["acquiredAt"]),
+            _exact_epoch_milliseconds(result["expiresAt"]),
+            *empty[19:],
+        )
+    if operation == "release-lease":
+        result = cast(dict[str, object], decoded)
+        return (
+            *empty[:19],
+            result["status"],
+            result["lastLeaseEpoch"],
+            result["lastFencingToken"],
+            *empty[22:],
+        )
+    if operation == "acquire-migration-lock":
+        result = cast(dict[str, object], decoded)
+        return (
+            *empty[:22],
+            result["lockId"],
+            result["ownerId"],
+            result["sourceSchemaVersion"],
+            result["targetSchemaVersion"],
+            result["lockEpoch"],
+            result["fencingToken"],
+            _exact_epoch_milliseconds(result["acquiredAt"]),
+            _exact_epoch_milliseconds(result["expiresAt"]),
+        )
+    # set-legal-hold and release-migration-lock intentionally claim no
+    # result-specific scalar because their recoverable legacy state has no
+    # corresponding normalized column.
+    return empty
+
+
 def _validate_baseline_temp_catalog(connection: SQLiteV1BaselineConnectionOwner) -> None:
     expected_objects = {
         *[("table", name) for name, _sql in _TEMP_TABLE_DDL],
@@ -778,6 +1156,122 @@ class SQLiteV1BaselineTempStage:
             self._poison("BLR_STAGE_WRITE_COUNT: common TEMP stage insert changed the wrong count")
         self._allowed_total_changes = after
         self._assert_open_and_bound()
+
+    def insert_entry_with_relation(self, entry: BaselineEntryInput) -> None:
+        """Insert one canonical common row and its fixed normalized projection.
+
+        Legacy operation projection re-reads its one exact retained v1 result
+        carrier by canonical identity, then verifies, decodes, re-encodes, and
+        hashes it before either paired write. No request bytes are claimed.
+        """
+
+        self._assert_open_and_bound()
+        try:
+            if not isinstance(entry, BaselineEntryInput):
+                raise TypeError("baseline relation entry has the wrong type")
+            canonical = capture_baseline_entry(entry.entry_kind, entry.key, entry.state)
+            if (
+                canonical.key_bytes != entry.key_bytes
+                or canonical.state_bytes != entry.state_bytes
+            ):
+                raise ValueError("baseline relation entry bytes are not canonical")
+            relation_insert = (
+                self._legacy_relation_insert_for(canonical)
+                if canonical.entry_kind == "legacy-operation"
+                else _relation_insert_for(canonical)
+            )
+        except (KeyError, TypeError, ValueError) as error:
+            self._poison(str(error))
+
+        pair_before = self._connection.total_changes
+        self.insert_common_entry(canonical)
+        self._assert_open_and_bound()
+        before = self._connection.total_changes
+        try:
+            cursor = self._connection.execute(
+                relation_insert.sql,
+                relation_insert.parameters,
+            )
+            try:
+                affected_rows = cursor.rowcount
+            finally:
+                cursor.close()
+        except sqlite3.IntegrityError:
+            self._poison(
+                "BLR_STAGE_KEY_DUPLICATE: normalized TEMP relation key is duplicated"
+            )
+        except Exception:
+            self._poison("BLR_STAGE_WRITE_COUNT: normalized TEMP relation insert failed")
+
+        after = self._connection.total_changes
+        if affected_rows != 1 or after != before + 1 or after != pair_before + 2:
+            self._poison(
+                "BLR_STAGE_WRITE_COUNT: paired TEMP stage insert changed the wrong count"
+            )
+        self._allowed_total_changes = after
+        self._assert_open_and_bound()
+
+    def _legacy_relation_insert_for(
+        self,
+        entry: BaselineEntryInput,
+    ) -> _RelationInsert:
+        """Re-read and prove the exact retained v1 result before either write."""
+
+        self._assert_open_and_bound()
+        key = entry.key
+        state = entry.state
+        try:
+            cursor = self._connection.execute(
+                _LEGACY_RESULT_SELECT,
+                (key["tenantId"], key["operationId"]),
+            )
+            try:
+                rows = cursor.fetchmany(2)
+            finally:
+                cursor.close()
+        except Exception:
+            self._poison("SQLite v1 legacy result carrier query failed")
+        self._assert_open_and_bound()
+        if len(rows) != 1 or len(rows[0]) != 5:
+            self._poison("SQLite v1 legacy result carrier identity is missing")
+        operation_name, request_hash, result_blob, result_hash, committed_at_ms = rows[0]
+        if (
+            operation_name != state["operationName"]
+            or request_hash != state["requestHash"]
+            or result_hash != state["resultHash"]
+            or committed_at_ms != state["committedAtMs"]
+            or type(operation_name) is not str
+            or type(result_blob) is not bytes
+            or not 2 <= len(result_blob) <= 16_777_216
+            or hashlib.sha256(result_blob).hexdigest() != state["resultBlobSha256"]
+        ):
+            self._poison("SQLite v1 legacy result carrier identity drifted")
+        try:
+            operation = cast(CycleStoreProviderOperation, operation_name)
+            decoded = cycle_store_adapter_codec.decode_ledger_result(operation, result_blob)
+            if (
+                cycle_store_adapter_codec.encode_ledger_result(operation, decoded)
+                != result_blob
+                or canonical_sha256(decoded) != result_hash
+            ):
+                raise ValueError("legacy result canonical identity drifted")
+            derived = _legacy_result_projection(operation, decoded)
+        except Exception:
+            self._poison("SQLite v1 legacy result carrier is invalid")
+        return _RelationInsert(
+            _LEGACY_RELATION_INSERT,
+            (
+                entry.key_bytes,
+                state["tenantId"],
+                state["operationId"],
+                operation_name,
+                request_hash,
+                result_hash,
+                state["resultBlobSha256"],
+                committed_at_ms,
+                *derived,
+            ),
+        )
 
     def assert_common_counts(
         self,

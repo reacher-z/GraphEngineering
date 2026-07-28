@@ -8686,3 +8686,106 @@ record indexes. Freeze shared happy/hostile fixtures and exact safe diagnostic
 outputs so TypeScript and Python are deeply equal. Subsequent checkpoint,
 lease, lock, hold, legacy, cursor, migration, crash, and scale campaigns remain
 separate append-only checkpoints.
+
+### 31.34.24 Twelve-family paired relation-writer checkpoint
+
+The controlled writer portion of §31.34.21 is now implemented in both native
+runtimes as an internal stage capability. For one recaptured canonical entry,
+the writer projects exactly one frozen relation tuple, inserts the common row,
+inserts the rank-matched relation row, and proves each statement changed
+exactly one row. The resulting allowed `total_changes` advance is therefore
+exactly two. There is no dynamic table/column input, UPSERT, replace, ignore,
+trigger, caller SQL, compensating delete, retry, transaction boundary, 0002
+execution, or permanent baseline write.
+
+All eleven directly recoverable kinds use closed named statements and exact
+column tuples. Checkpoint revision `stream_id` is taken from the validated put
+summary and remains null for delete. Structured migration postconditions,
+checkpoint summaries, and other non-relational state remain bound by the
+canonical common-state BLOB without being duplicated into unneeded columns.
+
+Legacy operation loading is also complete without expanding the public
+baseline state. Before either paired write, the stage executes one fixed,
+main-schema-qualified lookup by canonical `(tenant_id,operation_id)` against
+`main.ge_cycle_operations`. It requires exactly one retained row, rechecks
+operation name, request hash, result hash, commit time, 2..16 MiB raw bounds,
+and raw SHA-256, then decodes and byte-identically re-encodes through the
+operation codec and recomputes the logical canonical hash. TEMP-table shadowing
+cannot substitute the source carrier.
+
+The nine legacy results map into one closed 30-column nullable discriminator:
+
+- append binds existing tail sequence/hash and appended count;
+- save-checkpoint binds its eight summary scalars;
+- delete-checkpoint binds the exact boolean;
+- acquire/renew lease bind identity, equal epoch/fence and exact acquired/
+  expiry epoch milliseconds;
+- release lease binds released status and equal high-water epoch/fence;
+- acquire migration lock binds identity, forward versions, equal epoch/fence
+  and exact acquired/expiry milliseconds; and
+- set-legal-hold and release-migration-lock intentionally leave all derived
+  columns null because their full results have no normalized recoverable
+  carrier and remain bound only by the verified hashes.
+
+Timestamp conversion rejects negative or unsafe epoch values and lexically
+rejects any nonzero precision beyond milliseconds before the host date parser
+can truncate it. Both runtimes test all nine complete 38-column legacy rows,
+all thirty selected/null derived positions, offset/millisecond values,
+all-null branches, main-vs-TEMP shadowing, missing/corrupt carriers, and
+sub-millisecond attacks.
+
+The paired lifecycle is fail-closed. Projection and legacy source proof happen
+before the common write. If common insertion fails the stage poisons with no
+relation row. If the relation insertion fails, the already successful common
+row is retained as evidence, the stage becomes permanently poisoned, and the
+caller must roll back. External DML between the two owned writes, duplicate
+common/relation/natural identities, wrong relation routing, spoofed zero-row
+effects, and retry-after-poison are hostile failures. Count and bidirectional
+coverage barriers now recheck the write fence after their final read so DML
+injected during the last SELECT cannot escape until a later call.
+
+Checkpoint evidence is TypeScript SQLite 15 files / 155 tests, with 33 focused
+stage tests plus typecheck, lint and build; Python 1,263 full tests, with 54
+focused stage tests plus Ruff and strict MyPy over the changed modules/tests;
+the complete SQLite ledger/reconciliation/migration contract remains 19 tests;
+documentation links remain 286; and scoped `git diff --check` is clean. Final
+cross-runtime hostile review reported HIGH 0, MEDIUM 0, and LOW 0 for this
+bounded standalone stage/writer slice.
+
+This checkpoint is not source-to-stage integration evidence. No production
+scanner or reconciler invokes the paired API. The existing source generator
+intentionally freezes `total_changes`; after one owned TEMP pair advances it by
+two, a naive generator resume rejects the change. That guard remains unchanged
+and must not be globally weakened.
+
+### 31.34.25 Cooperative streaming allowance design gate
+
+Before implementing §31.34.22, freeze one module-private cooperation contract
+between the source reader and stage owner. It must satisfy all of the following:
+
+1. The source owns statement order, one-row fetch bounds, family counts,
+   initial EXCLUSIVE epoch and its last accepted total-change value.
+2. The stage owns the only relation-write capability and returns an
+   unforgeable receipt containing the same connection identity, transaction
+   epoch, source item identity, before count, exact `+2` after count, and a
+   single-use sequence number. No public raw connection or arbitrary delta is
+   accepted.
+3. The source may advance its expected count only by consuming the next exact
+   receipt immediately after yielding/handing off that same item. Wrong
+   connection, epoch, item, sequence, before/after count, reuse, omission,
+   reordering, or delta other than two poisons both sides.
+4. Caller DML before common, between common/relation, after relation/before
+   receipt, during receipt validation, and between source fetches remains
+   distinguishable from the two owned writes and fails closed.
+5. Source statement finalization happens on normal completion, writer failure,
+   caller exception, early abandonment and disposal. The contract may retain
+   only the current entry/receipt; it cannot accumulate source entries or
+   receipts.
+
+Implement this first with 12 and 1,024 mixed-kind rows, then adversarially
+review it before connecting the full source iterator. Required attacks include
+forged delta, skipped receipt, duplicate receipt, receipt from another stage,
+rollback/rebegin, savepoint epoch, prepared/trusted DDL, injected DML at every
+boundary, relation failure after common, early generator close, and legacy
+carrier mutation between capture and paired projection. Only after this gate
+is green may §31.34.22 claim a real nonempty source-to-stage stream.
