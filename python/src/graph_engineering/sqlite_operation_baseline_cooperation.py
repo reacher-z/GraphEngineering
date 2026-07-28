@@ -55,7 +55,7 @@ def _stream_sqlite_v1_baseline_source_into_temp_stage(
                 break
         if written != summary.expected_entry_count:
             raise ValueError("BLR_COOP_SEQUENCE: cooperative source count drifted")
-        stage._finish_cooperative_stream(source_session, written)
+        stage._finish_cooperative_stream(source_session, written, summary)
         stage.assert_common_counts(summary.counts_by_kind)
         stage.assert_relation_key_coverage()
         return written

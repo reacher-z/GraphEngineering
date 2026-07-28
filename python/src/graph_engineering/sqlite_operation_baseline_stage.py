@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import sqlite3
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from types import TracebackType
@@ -17,13 +19,16 @@ from .sqlite_operation_baseline import (
     BASELINE_ENTRY_KINDS,
     BaselineEntryInput,
     BaselineEntryKind,
+    baseline_entry_sort_key,
     capture_baseline_entry,
 )
 from .sqlite_operation_baseline_source import (
     SQLiteV1BaselineConnectionOwner,
+    SQLiteV1BaselineSourceSummary,
     _CooperativeSourceItem,
     _CooperativeWriteReceipt,
     _issue_cooperative_write_receipt,
+    _SQLiteCursorCapability,
 )
 
 DEFAULT_SQLITE_V1_BASELINE_TEMP_CACHE_KIB = 8_192
@@ -912,6 +917,134 @@ def _validate_baseline_temp_catalog(connection: SQLiteV1BaselineConnectionOwner)
         raise ValueError("BLR_STAGE_WRITE_COUNT: baseline TEMP table shape drifted")
 
 
+def _recapture_ordered_stage_row(row: tuple[object, ...]) -> BaselineEntryInput:
+    """Revalidate one exact common-stage row without trusting stored JSON bytes."""
+
+    if len(row) != 4:
+        raise ValueError("BLR_HANDOFF_ROW: ordered TEMP stage row shape is invalid")
+    kind_rank, entry_kind, key_blob, state_blob = row
+    if (
+        type(kind_rank) is not int
+        or kind_rank < 0
+        or kind_rank >= len(BASELINE_ENTRY_KINDS)
+        or type(entry_kind) is not str
+        or entry_kind != BASELINE_ENTRY_KINDS[kind_rank]
+        or type(key_blob) is not bytes
+        or type(state_blob) is not bytes
+    ):
+        raise ValueError("BLR_HANDOFF_ROW: ordered TEMP stage kind or bytes are invalid")
+    try:
+        key = json.loads(key_blob)
+        state = json.loads(state_blob)
+        captured = capture_baseline_entry(BASELINE_ENTRY_KINDS[kind_rank], key, state)
+    except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError):
+        raise ValueError("BLR_HANDOFF_ROW: ordered TEMP stage JSON is invalid") from None
+    if captured.key_bytes != key_blob or captured.state_bytes != state_blob:
+        raise ValueError("BLR_HANDOFF_ROW: ordered TEMP stage bytes are not canonical")
+    if baseline_entry_sort_key(captured) != (kind_rank, key_blob):
+        raise ValueError("BLR_HANDOFF_ROW: ordered TEMP stage rank recapture drifted")
+    return captured
+
+
+class _SQLiteV1BaselineOrderedStageReader:
+    """Private one-shot, one-row-at-a-time cursor over the verified common stage."""
+
+    __slots__ = (
+        "_closed",
+        "_counts_by_rank",
+        "_cursor",
+        "_eof",
+        "_expected_total_changes",
+        "_iterated",
+        "_observed_count",
+        "_stage",
+    )
+
+    def __init__(
+        self,
+        stage: SQLiteV1BaselineTempStage,
+        cursor: _SQLiteCursorCapability,
+        expected_total_changes: int,
+    ) -> None:
+        self._stage = stage
+        self._cursor = cursor
+        self._expected_total_changes = expected_total_changes
+        self._observed_count = 0
+        self._counts_by_rank = [0] * len(BASELINE_ENTRY_KINDS)
+        self._iterated = False
+        self._eof = False
+        self._closed = False
+
+    @property
+    def observed_count(self) -> int:
+        return self._observed_count
+
+    @property
+    def reached_eof(self) -> bool:
+        return self._eof
+
+    @property
+    def counts_by_rank(self) -> tuple[int, ...]:
+        return tuple(self._counts_by_rank)
+
+    def __iter__(self) -> Iterator[BaselineEntryInput]:
+        if self._iterated:
+            self._fail("BLR_HANDOFF_ONESHOT: ordered TEMP stage reader was iterated twice")
+        self._iterated = True
+        return self
+
+    def __next__(self) -> BaselineEntryInput:
+        if self._closed:
+            if self._eof:
+                raise StopIteration
+            self._fail("BLR_HANDOFF_EARLY_CLOSE: ordered TEMP stage reader is closed")
+        self._stage._assert_ordered_handoff_fence(self._expected_total_changes)
+        try:
+            row = self._cursor.fetchone()
+        except BaseException:
+            self._fail("BLR_HANDOFF_READ: ordered TEMP stage fetch failed")
+        self._stage._assert_ordered_handoff_fence(self._expected_total_changes)
+        if row is None:
+            self._eof = True
+            try:
+                self._close_cursor_only()
+            except BaseException:
+                self._fail("BLR_HANDOFF_READ: ordered TEMP stage cursor close failed")
+            raise StopIteration
+        try:
+            captured = _recapture_ordered_stage_row(row)
+        except (TypeError, ValueError):
+            self._fail("BLR_HANDOFF_ROW: ordered TEMP stage row failed recapture")
+        self._observed_count += 1
+        rank, _key_blob = baseline_entry_sort_key(captured)
+        self._counts_by_rank[rank] += 1
+        self._stage._assert_ordered_handoff_fence(self._expected_total_changes)
+        return captured
+
+    def close(self) -> None:
+        """Close immediately; an incomplete read permanently poisons the handoff."""
+
+        if self._closed:
+            return
+        try:
+            self._close_cursor_only()
+        except BaseException:
+            self._fail("BLR_HANDOFF_READ: ordered TEMP stage cursor close failed")
+        if not self._eof:
+            self._fail("BLR_HANDOFF_EARLY_CLOSE: ordered TEMP stage reader closed early")
+
+    def _close_cursor_only(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        self._cursor.close()
+
+    def _fail(self, message: str) -> Never:
+        with suppress(BaseException):
+            self._close_cursor_only()
+        self._stage._poison(message)
+
+
 @dataclass(frozen=True, slots=True)
 class SQLiteV1BaselineTempStorageConfiguration:
     """Read-back evidence for the bounded FILE-backed TEMP configuration."""
@@ -1030,10 +1163,15 @@ class SQLiteV1BaselineTempStage:
         "_cooperative_pending_receipt",
         "_cooperative_source_session",
         "_cooperative_stage_session",
+        "_cooperative_stream_finished",
+        "_cooperative_summary",
         "_cooperative_write_active",
         "_created_indexes",
         "_created_tables",
         "_created_view",
+        "_ordered_handoff_completed",
+        "_ordered_handoff_reader",
+        "_ordered_handoff_started",
         "_state",
         "_transaction_epoch",
     )
@@ -1049,8 +1187,13 @@ class SQLiteV1BaselineTempStage:
         self._cooperative_next_sequence = 0
         self._cooperative_pending_receipt: _CooperativeWriteReceipt | None = None
         self._cooperative_source_session: object | None = None
+        self._cooperative_summary: SQLiteV1BaselineSourceSummary | None = None
         self._cooperative_stage_session = object()
+        self._cooperative_stream_finished = False
         self._cooperative_write_active = False
+        self._ordered_handoff_started = False
+        self._ordered_handoff_completed = False
+        self._ordered_handoff_reader: _SQLiteV1BaselineOrderedStageReader | None = None
         if not connection.in_exclusive_transaction:
             self._state = "disposed"
             raise ValueError(
@@ -1280,7 +1423,12 @@ class SQLiteV1BaselineTempStage:
         self._cooperative_next_sequence += 1
         return receipt
 
-    def _finish_cooperative_stream(self, source_session: object, expected_count: int) -> None:
+    def _finish_cooperative_stream(
+        self,
+        source_session: object,
+        expected_count: int,
+        summary: SQLiteV1BaselineSourceSummary,
+    ) -> None:
         """Prove that the final receipt was burned and the sequence is exact."""
 
         self._assert_open_and_bound()
@@ -1292,9 +1440,14 @@ class SQLiteV1BaselineTempStage:
             or self._cooperative_next_sequence != expected_count
             or pending is None
             or not pending._consumed
+            or type(summary) is not SQLiteV1BaselineSourceSummary
+            or summary._connection is not self._connection
+            or summary.expected_entry_count != expected_count
         ):
             self._poison("BLR_COOP_SEQUENCE: cooperative stream completion is invalid")
         self._cooperative_pending_receipt = None
+        self._cooperative_summary = summary
+        self._cooperative_stream_finished = True
         self._assert_open_and_bound()
 
     def _abort_cooperative_stream(self) -> Never:
@@ -1307,6 +1460,196 @@ class SQLiteV1BaselineTempStage:
 
         self._state = "poisoned"
         self._cooperative_pending_receipt = None
+        self._cooperative_summary = None
+        self._cooperative_stream_finished = False
+
+    def _open_ordered_projection_reader(
+        self,
+        summary: SQLiteV1BaselineSourceSummary,
+    ) -> _SQLiteV1BaselineOrderedStageReader:
+        """Open the sole ordered reader after a completed cooperative load."""
+
+        if type(summary) is not SQLiteV1BaselineSourceSummary:
+            self._poison("BLR_HANDOFF_BINDING: source summary has the wrong type")
+        if self._ordered_handoff_started:
+            self._poison("BLR_HANDOFF_ONESHOT: ordered TEMP stage handoff already started")
+        self._ordered_handoff_started = True
+        expected_total_changes = self._allowed_total_changes
+        source_state = summary._identity_iteration_state
+        if (
+            self._state != "open"
+            or summary._connection is not self._connection
+            or not source_state.started
+            or not source_state.completed
+            or source_state.poisoned
+            or not self._cooperative_stream_finished
+            or self._cooperative_summary is not summary
+            or self._cooperative_source_session is None
+            or self._cooperative_pending_receipt is not None
+            or self._cooperative_next_sequence != summary.expected_entry_count
+            or summary._captured_transaction_epoch != self._transaction_epoch
+            or summary._captured_transaction_epoch != self._connection.transaction_epoch
+            or summary._source_total_changes + 2 * summary.expected_entry_count
+            != expected_total_changes
+        ):
+            self._poison("BLR_HANDOFF_BINDING: source and verified TEMP stage are not bound")
+        self._assert_ordered_handoff_fence(expected_total_changes)
+        self.assert_common_counts(summary.counts_by_kind)
+        self.assert_relation_key_coverage()
+        self._assert_ordered_handoff_catalog(expected_total_changes)
+        self._assert_ordered_handoff_fence(expected_total_changes)
+        try:
+            cursor = self._connection.execute(
+                f"SELECT kind_rank, entry_kind, key_blob, state_blob "
+                f"FROM temp.{SQLITE_V1_BASELINE_COMMON_STAGE_TABLE} "
+                "ORDER BY kind_rank ASC, key_blob ASC"
+            )
+        except BaseException:
+            self._poison("BLR_HANDOFF_READ: ordered TEMP stage cursor open failed")
+        self._assert_ordered_handoff_fence(expected_total_changes)
+        reader = _SQLiteV1BaselineOrderedStageReader(
+            self,
+            cursor,
+            expected_total_changes,
+        )
+        self._ordered_handoff_reader = reader
+        return reader
+
+    def _finish_ordered_projection_reader(
+        self,
+        summary: SQLiteV1BaselineSourceSummary,
+        reader: _SQLiteV1BaselineOrderedStageReader,
+    ) -> None:
+        """Seal the handoff only after EOF, exact counts, coverage, and catalog gates."""
+
+        expected_total_changes = self._allowed_total_changes
+        if (
+            self._ordered_handoff_reader is not reader
+            or not self._ordered_handoff_started
+            or self._ordered_handoff_completed
+            or not reader.reached_eof
+            or reader.observed_count != summary.expected_entry_count
+            or not self._cooperative_stream_finished
+            or self._cooperative_summary is not summary
+        ):
+            self._poison("BLR_HANDOFF_COUNT: ordered TEMP stage completion is invalid")
+        if any(
+            reader.counts_by_rank[rank] != summary.counts_by_kind[kind]
+            for rank, kind in enumerate(BASELINE_ENTRY_KINDS)
+        ):
+            self._poison("BLR_HANDOFF_COUNT: ordered TEMP stage kind counts drifted")
+        self._assert_ordered_handoff_fence(expected_total_changes)
+        self.assert_common_counts(summary.counts_by_kind)
+        self.assert_relation_key_coverage()
+        self._assert_ordered_handoff_catalog(expected_total_changes)
+        self._assert_ordered_handoff_fence(expected_total_changes)
+
+    def _complete_ordered_projection_reader(
+        self,
+        reader: _SQLiteV1BaselineOrderedStageReader,
+    ) -> None:
+        """Publish success only after the coordinator sealed and fenced the root."""
+
+        if (
+            self._ordered_handoff_reader is not reader
+            or not reader.reached_eof
+            or self._ordered_handoff_completed
+        ):
+            self._poison("BLR_HANDOFF_COMPLETION: ordered TEMP stage completion drifted")
+        self._assert_ordered_handoff_fence(self._allowed_total_changes)
+        self._ordered_handoff_reader = None
+        self._ordered_handoff_completed = True
+
+    def _assert_ordered_handoff_fence(self, expected_total_changes: int) -> None:
+        self._assert_open_and_bound()
+        if (
+            type(expected_total_changes) is not int
+            or expected_total_changes != self._allowed_total_changes
+            or expected_total_changes != self._connection.total_changes
+        ):
+            self._poison("BLR_UNEXPLAINED_WRITE: ordered TEMP handoff write fence changed")
+
+    def _assert_ordered_handoff_catalog(self, expected_total_changes: int) -> None:
+        """Re-prove reserved objects and STRICT/WITHOUT ROWID shape without epoch mutation."""
+
+        expected_objects = {
+            *[("table", name) for name, _sql in _TEMP_TABLE_DDL],
+            *[("index", name) for name in _TEMP_INDEX_NAMES],
+            ("view", SQLITE_V1_BASELINE_RELATION_KEYS_VIEW),
+        }
+        actual_objects: set[tuple[object, object]] = set()
+        cursor: _SQLiteCursorCapability | None = None
+        catalog_failure: BaseException | None = None
+        try:
+            cursor = self._connection.execute(
+                "SELECT type, name FROM temp.sqlite_schema "
+                "WHERE substr(lower(name), 1, 7) = 'ge_blr_' ORDER BY type, name"
+            )
+            while True:
+                self._assert_ordered_handoff_fence(expected_total_changes)
+                row = cursor.fetchone()
+                self._assert_ordered_handoff_fence(expected_total_changes)
+                if row is None:
+                    break
+                if len(row) != 2 or type(row[0]) is not str or type(row[1]) is not str:
+                    self._poison("BLR_HANDOFF_CATALOG: TEMP catalog row is invalid")
+                actual_objects.add((row[0], row[1]))
+        except BaseException as error:
+            catalog_failure = error
+        finally:
+            if cursor is not None:
+                try:
+                    cursor.close()
+                except BaseException as error:
+                    if catalog_failure is None:
+                        catalog_failure = error
+        if catalog_failure is not None:
+            if isinstance(catalog_failure, ValueError) and str(catalog_failure).startswith(
+                "BLR_"
+            ):
+                raise catalog_failure
+            self._poison("BLR_HANDOFF_CATALOG: TEMP catalog identity query failed")
+        if actual_objects != expected_objects:
+            self._poison("BLR_HANDOFF_CATALOG: TEMP catalog identity drifted")
+
+        expected_shapes = {(name, "table", 1, 1) for name, _sql in _TEMP_TABLE_DDL}
+        expected_shapes.add((SQLITE_V1_BASELINE_RELATION_KEYS_VIEW, "view", 0, 0))
+        actual_shapes: set[tuple[object, object, object, object]] = set()
+        cursor = None
+        catalog_failure = None
+        try:
+            cursor = self._connection.execute(
+                "SELECT name, type, wr, strict FROM pragma_table_list "
+                "WHERE schema = 'temp' AND substr(lower(name), 1, 7) = 'ge_blr_' "
+                "ORDER BY name"
+            )
+            while True:
+                self._assert_ordered_handoff_fence(expected_total_changes)
+                row = cursor.fetchone()
+                self._assert_ordered_handoff_fence(expected_total_changes)
+                if row is None:
+                    break
+                if len(row) != 4:
+                    self._poison("BLR_HANDOFF_CATALOG: TEMP table shape row is invalid")
+                actual_shapes.add((row[0], row[1], row[2], row[3]))
+        except BaseException as error:
+            catalog_failure = error
+        finally:
+            if cursor is not None:
+                try:
+                    cursor.close()
+                except BaseException as error:
+                    if catalog_failure is None:
+                        catalog_failure = error
+        if catalog_failure is not None:
+            if isinstance(catalog_failure, ValueError) and str(catalog_failure).startswith(
+                "BLR_"
+            ):
+                raise catalog_failure
+            self._poison("BLR_HANDOFF_CATALOG: TEMP table shape query failed")
+        if actual_shapes != expected_shapes:
+            self._poison("BLR_HANDOFF_CATALOG: TEMP table shape drifted")
+        self._assert_ordered_handoff_fence(expected_total_changes)
 
     def _legacy_relation_insert_for(
         self,
@@ -1447,14 +1790,36 @@ class SQLiteV1BaselineTempStage:
 
         if self._state == "disposed":
             return
+        active_reader = self._ordered_handoff_reader
+        reader_close_failure: BaseException | None = None
+        if active_reader is not None:
+            try:
+                active_reader._close_cursor_only()
+            except BaseException as error:
+                reader_close_failure = error
+            self._ordered_handoff_reader = None
         if (
             not self._connection.in_exclusive_transaction
             or self._connection.transaction_epoch != self._transaction_epoch
         ):
-            self._state = "disposed"
             self._clear_created_objects()
+            if reader_close_failure is not None:
+                self._state = "poisoned"
+                raise ValueError(
+                    "BLR_HANDOFF_CLEANUP: ordered TEMP stage cursor cleanup failed"
+                ) from reader_close_failure
+            self._state = "disposed"
             return
-        self._drop_created_objects()
+        try:
+            self._drop_created_objects()
+        except BaseException:
+            if reader_close_failure is None:
+                raise
+        if reader_close_failure is not None:
+            self._state = "poisoned"
+            raise ValueError(
+                "BLR_HANDOFF_CLEANUP: ordered TEMP stage cursor cleanup failed"
+            ) from reader_close_failure
         self._state = "disposed"
 
     def __enter__(self) -> SQLiteV1BaselineTempStage:
@@ -1512,8 +1877,15 @@ class SQLiteV1BaselineTempStage:
         return row[0]
 
     def _poison(self, message: str) -> Never:
+        active_reader = self._ordered_handoff_reader
+        if active_reader is not None:
+            with suppress(BaseException):
+                active_reader._close_cursor_only()
+            self._ordered_handoff_reader = None
         self._state = "poisoned"
         self._cooperative_pending_receipt = None
+        self._cooperative_summary = None
+        self._cooperative_stream_finished = False
         raise ValueError(message)
 
     def _drop_created_objects(self) -> None:

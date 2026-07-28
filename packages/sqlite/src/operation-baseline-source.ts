@@ -25,8 +25,12 @@ import {
   SQLITE_BASELINE_COOPERATIVE_POISON,
   SQLITE_BASELINE_CONSUME_OWNED_WRITE,
   SQLITE_BASELINE_FINISH_COOPERATIVE_WRITES,
+  SQLITE_BASELINE_ABORT_ORDERED_HANDOFF,
+  SQLITE_BASELINE_ORDERED_HANDOFF_SOURCE,
   type SQLiteBaselineCooperativeStage,
   type SQLiteBaselineOwnedWriteReceipt,
+  type SQLiteBaselineOrderedHandoffSourceBinding,
+  type SQLiteBaselineOrderedHandoffStage,
 } from "./operation-baseline-cooperation.js";
 import {
   sqliteBlob,
@@ -896,6 +900,9 @@ export function captureSQLiteV1BaselineSourceSummary(
   requireCaptureTransaction(connection, transactionGuard);
   const frozenEnvelope = Object.freeze(sourceEnvelope);
   let entriesTaken = false;
+  let cooperativeHandoffStage: object | undefined;
+  let cooperativeHandoffTotalChanges: number | undefined;
+  let cooperativeStreamCompleted = false;
   const takeEntries = (guard: SQLiteV1BaselineTransactionGuard): Generator<
     OperationBaselineEntryInput,
     void,
@@ -1004,6 +1011,9 @@ export function captureSQLiteV1BaselineSourceSummary(
           totalChanges(connection),
           cooperativeGuard.transactionEpoch,
         );
+        cooperativeHandoffStage = stage;
+        cooperativeHandoffTotalChanges = cooperativeGuard.totalChanges;
+        cooperativeStreamCompleted = true;
         completed = true;
       } catch (error) {
         primaryFailure = error;
@@ -1033,6 +1043,31 @@ export function captureSQLiteV1BaselineSourceSummary(
       }
     })();
   };
+  const orderedHandoffSource = (
+    requestedConnection: SQLiteConnection,
+    stage: SQLiteBaselineOrderedHandoffStage,
+  ): SQLiteBaselineOrderedHandoffSourceBinding => {
+    if (requestedConnection !== connection
+        || !cooperativeStreamCompleted
+        || cooperativeHandoffStage !== stage
+        || cooperativeHandoffTotalChanges === undefined
+        || !connection.isTransaction
+        || connection.transactionMode !== "exclusive"
+        || connection.transactionEpoch !== transactionGuard.transactionEpoch
+        || totalChanges(connection) !== cooperativeHandoffTotalChanges) {
+      return stage[SQLITE_BASELINE_ABORT_ORDERED_HANDOFF](
+        undefined,
+        "SQLite baseline ordered handoff source binding is invalid",
+      );
+    }
+    return Object.freeze({
+      countsByKind,
+      expectedEntryCount: Number(total),
+      sourceEnvelope: frozenEnvelope,
+      totalChanges: cooperativeHandoffTotalChanges,
+      transactionEpoch: transactionGuard.transactionEpoch,
+    });
+  };
   return Object.freeze({
     sourceEnvelope: frozenEnvelope,
     countsByKind,
@@ -1040,5 +1075,6 @@ export function captureSQLiteV1BaselineSourceSummary(
     maximumObservedAtMs,
     entries,
     [SQLITE_BASELINE_COOPERATIVE_ENTRIES]: cooperativeEntries,
+    [SQLITE_BASELINE_ORDERED_HANDOFF_SOURCE]: orderedHandoffSource,
   });
 }

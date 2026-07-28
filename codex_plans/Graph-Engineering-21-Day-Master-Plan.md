@@ -8889,3 +8889,120 @@ use, diagnostics must use registered safe `BLR_*` IDs, and TypeScript/Python
 fixtures and outcomes must remain deeply equal. Migration `0002`, permanent
 publication, cursor rebind, later invariant families, 100K, crash/replay,
 release and adoption remain later append-only checkpoints.
+
+### 31.34.28 Verified ordered TEMP handoff checkpoint
+
+The ordered handoff portion of §31.34.27 is now implemented and independently
+closed in TypeScript and Python. After a successful cooperative source load,
+one private stage-owned capability reads the verified common TEMP table in
+exact `kind_rank ASC, key_blob ASC` order. Rank is numeric and the key is a
+SQLite BLOB, so the ordering is unsigned binary byte order; decoded JSON,
+text collation, kind spelling, cast order and caller-provided order are never
+trusted.
+
+The handoff is bound to the exact cooperative completion, source summary
+object, stage session, owner connection, `EXCLUSIVE` epoch, expected write
+counter, expected entry count, empty pending receipt, complete twelve-kind
+count vector and validated common/relation catalog. A stage cannot begin the
+reader before the cooperative stream's terminal receipt has been consumed.
+Another summary with identical scalar fields, a stage from another connection,
+a second reader, a second handoff, standalone writes, rollback/rebegin,
+SAVEPOINT, prepared/trusted DDL or catalog replacement is terminal.
+
+The row stream is constant-space. It owns one cursor, one current row, the
+existing constant-memory accumulator, the preceding sort key and twelve fixed
+integer counters. TypeScript uses the synchronous SQLite iterator; Python uses
+only `fetchone()` and explicitly rejects any need for `fetchmany()` or a row
+collection. For every row, both runtimes fence owner/epoch/write count before
+and after the fetch, validate the exact four-column shape, require rank/kind
+agreement, decode the key and state, re-encode them canonically, require exact
+byte identity, append them to the accumulator, discard the returned entry and
+fence again before requesting the next row.
+
+EOF is not success by itself. The observed total and all twelve consumed kind
+counts must equal the exact source summary. Grouped common counts,
+bidirectional relation-key coverage, reserved catalog identity and
+STRICT/WITHOUT ROWID table shape are re-proved. The accumulator then seals the
+projection identity, a post-root write fence runs, and only then may the stage
+publish handoff completion. The returned value contains only the frozen
+baseline/projection identity; no entry array, source row or raw payload is
+returned or retained.
+
+Cursor lifecycle is fail-closed. Normal EOF, recapture failure, ordering or
+count failure, early reader close, caller exception, stage disposal and owner
+transaction failure synchronously finalize the active cursor. Cleanup cannot
+mask an authoritative read/root failure. When no primary error exists, a row
+cursor or catalog cursor close failure is surfaced and poisons the stage.
+Disposal still performs best-effort reverse TEMP cleanup and reports its first
+authoritative cleanup failure; a stale stage never deletes replacement
+objects from a later epoch.
+
+The hostile matrix covers missing, extra, duplicate, reordered, rank/kind
+swapped, noncanonical and equal-total cross-kind substituted rows;
+count-preserving real DML; DML after fetch, validation, accumulator append,
+EOF, terminal catalog proof, root seal and completion; wrong source/summary /
+stage/connection; exact-shape summary replacement; catalog and transaction
+replacement; direct early close; repeated iteration; active-reader disposal;
+cursor-close failure with and without a primary; and cleanup-primary
+preservation. Exact twelve-kind and 1,024-entry streams match the existing
+materializing builder. Both runtimes also match one literal pristine
+three-entry golden: baseline `v2-57ddf582...f3612`, first entry
+`bfb3045f...5928`, final entry `1ad91f22...2e06`, projection
+`7d9dc721...e245`, count three and legacy count zero.
+
+Checkpoint evidence is TypeScript SQLite 16 files / 199 tests, with 44 focused
+cooperation/handoff tests, typecheck, lint and build; Python 1,317 full tests,
+with 28 focused handoff and 150 combined source/stage/cooperation/handoff
+tests, plus full Ruff and strict MyPy; ledger/reconciliation/migration
+contract 19; documentation links 286; scoped diff checks clean. Final
+cross-runtime audit reports HIGH 0, MEDIUM 0 and LOW 0.
+
+This checkpoint proves a projection identity/root in TEMP but does not persist
+that root, create a cursor seal, run a registered relational invariant, execute
+`0002`, write a permanent v2 baseline row, publish schema v2, prove 100,000
+entries, perform crash recovery/replay, select a release candidate, or establish
+adoption/star outcomes. Every such claim remains false.
+
+### 31.34.29 Stream/record relational invariant campaign implementation gate
+
+The next slice shall implement only the first registered invariant family over
+the verified normalized TEMP relations. Before coding, resolve the exact
+existing `BLR_*` registry IDs for stream existence, empty-stream sentinel,
+record sequence, predecessor, tail and hash/value identity; if a required
+diagnostic does not exist, append it to the frozen registry and regenerate its
+contract evidence before runtime use. No runtime branch may invent a free-form
+or tenant-bearing error.
+
+Queries must be fixed, bounded and index-audited. The campaign shall prove:
+
+1. every record references exactly one normalized stream in the same tenant;
+2. a persisted empty stream has tail sequence `-1` and null tail hash, while a
+   nonempty stream has a nonnegative tail and nonnull hash;
+3. record sequences start at zero and form a contiguous range per
+   `(tenant_id,stream_id)` without gaps or duplicates;
+4. sequence zero has a null predecessor and each later record's predecessor
+   equals the prior sequence's record hash;
+5. the stream tail sequence/hash equals its final record exactly;
+6. normalized record identity, natural tenant/hash uniqueness and stored
+   canonical state remain mutually consistent; and
+7. no orphan, cross-tenant alias, count-preserving replacement or relation /
+   common disagreement survives the final barrier.
+
+Each query must have a capped witness count or existence result, safe stable
+diagnostic output and pre/post owner/write/catalog fences. `EXPLAIN QUERY PLAN`
+tests must prove use of the named record tenant-hash, stream-sequence and
+stream-position indexes; an accidental full scan of the record carrier is a
+test failure unless the query is the explicitly bounded global aggregate.
+TypeScript and Python must share exact happy/hostile fixtures, diagnostic IDs,
+rule order and outcome counts. Required attacks include missing stream,
+foreign-tenant stream, persisted empty-stream record, first sequence not zero,
+interior and terminal gaps, null/nonnull predecessor inversion, predecessor
+hash mismatch, stale tail, wrong tail hash, duplicate tenant/hash identity,
+common-only/relation-only rows, DML during every rule boundary, catalog
+replacement, early abort and cleanup failure.
+
+The campaign remains read-only over TEMP and returns a bounded frozen rule
+report tied to the already sealed projection identity. It cannot update,
+delete, repair, quarantine or compensate a finding. Checkpoint/lease/lock /
+hold/legacy rules, cursor seal and persistence, `0002`, crash/replay, 100K,
+release and adoption remain separate later slices.

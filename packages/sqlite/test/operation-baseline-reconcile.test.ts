@@ -16,7 +16,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ensureSQLiteCycleStoreSchema } from "../src/migrations.js";
 import {
   SQLITE_BASELINE_COOPERATIVE_ENTRIES,
+  SQLITE_BASELINE_BEGIN_ORDERED_HANDOFF,
   SQLITE_BASELINE_CONSUME_OWNED_WRITE,
+  SQLITE_BASELINE_FENCE_ORDERED_HANDOFF,
   SQLITE_BASELINE_OWNED_WRITE,
   type SQLiteBaselineCooperativeSource,
   type SQLiteBaselineCooperativeStage,
@@ -24,6 +26,15 @@ import {
 } from "../src/operation-baseline-cooperation.js";
 import { stageSQLiteV1BaselineSourceIntoTempStage } from "../src/operation-baseline-reconcile.js";
 import {
+  SQLiteV1BaselineOrderedTempReader,
+  readSQLiteV1BaselineOrderedTempProjection,
+} from "../src/operation-baseline-handoff.js";
+import {
+  MAX_BASELINE_KEY_BYTES,
+  MAX_BASELINE_STATE_BYTES,
+  buildOperationBaseline,
+  createOperationBaselineId,
+  decodeOperationBaselineCanonicalBytes,
   encodeOperationBaselineKey,
   encodeOperationBaselineState,
   type OperationBaselineEntryInput,
@@ -44,12 +55,12 @@ import { createSQLiteCycleStoreDescriptor } from "../src/sqlite-profile.js";
 const roots: string[] = [];
 const NOW = 1_785_110_405_000;
 
-function opened(): SQLiteConnection {
+function opened(appliedAtMs = NOW): SQLiteConnection {
   const root = mkdtempSync(join(tmpdir(), "graph-engineering-baseline-reconcile-"));
   roots.push(root);
   const connection = new SQLiteConnection(join(root, "cycle-store.db"));
   ensureSQLiteCycleStoreSchema(connection, createSQLiteCycleStoreDescriptor(), {
-    appliedAtMs: NOW,
+    appliedAtMs,
   });
   configureSQLiteBaselineTempStorage(connection);
   return connection;
@@ -285,6 +296,26 @@ function close(start: Started): void {
     }
     start.connection.close();
   }
+}
+
+function materializedTempIdentity(run: Started) {
+  const entries = run.connection.prepare(
+    `SELECT entry_kind, key_blob, state_blob
+       FROM temp.ge_blr_stage
+      ORDER BY kind_rank ASC, key_blob ASC`,
+    "inspect-schema",
+  ).all().map((raw) => {
+    const row = raw as unknown as readonly [string, Uint8Array, Uint8Array];
+    return {
+      entryKind: row[0] as OperationBaselineEntryInput["entryKind"],
+      key: decodeOperationBaselineCanonicalBytes(row[1], MAX_BASELINE_KEY_BYTES),
+      state: decodeOperationBaselineCanonicalBytes(row[2], MAX_BASELINE_STATE_BYTES),
+    };
+  });
+  return buildOperationBaseline(
+    createOperationBaselineId(run.source.sourceEnvelope),
+    entries,
+  );
 }
 
 afterEach(() => {
@@ -874,6 +905,415 @@ describe("SQLite v1 cooperative source/stage reconciliation", () => {
       expect(run.stage.state).toBe("poisoned");
     } finally {
       prepare.mockRestore();
+      close(run);
+    }
+  });
+
+  it("hands off all twelve kinds in exact TEMP order with materializer-identical identity", () => {
+    const run = started(true);
+    try {
+      stageSQLiteV1BaselineSourceIntoTempStage(run.connection, run.source, run.stage);
+      const expected = materializedTempIdentity(run);
+      const identity = readSQLiteV1BaselineOrderedTempProjection(
+        run.connection,
+        run.source,
+        run.stage,
+      );
+      expect(identity).toEqual({
+        baselineId: expected.baselineId,
+        entryCount: expected.entryCount,
+        finalEntryHash: expected.finalEntryHash,
+        firstEntryHash: expected.firstEntryHash,
+        legacyOperationCount: expected.legacyOperationCount,
+        projectionSha256: expected.projectionSha256,
+      });
+      expect(identity.entryCount).toBe(12);
+      expect(Object.isFrozen(identity)).toBe(true);
+      expect(() => readSQLiteV1BaselineOrderedTempProjection(
+        run.connection,
+        run.source,
+        run.stage,
+      )).toThrow(/one-shot|binding|session/u);
+      expect(run.stage.state).toBe("poisoned");
+    } finally {
+      close(run);
+    }
+  });
+
+  it("matches the frozen cross-runtime pristine three-entry projection golden", () => {
+    const connection = opened(1_000);
+    connection.execTrusted("BEGIN EXCLUSIVE", "inspect-schema");
+    const stage = createSQLiteBaselineTempStage(
+      connection,
+      proveSQLiteExclusiveBaselineTransaction(connection),
+    );
+    const source = captureSQLiteV1BaselineSourceSummary(connection, 1_000);
+    try {
+      stageSQLiteV1BaselineSourceIntoTempStage(connection, source, stage);
+      expect(readSQLiteV1BaselineOrderedTempProjection(connection, source, stage)).toEqual({
+        baselineId: "v2-57ddf5826fc8d0a7b30a8dbcc961a66953e1604d73e2e43b8e4d229c0b9f3612",
+        entryCount: 3,
+        finalEntryHash: "1ad91f22d750f258b129d5dbd9e6deef8f04368b95e3497a5a9a268319f62e06",
+        firstEntryHash: "bfb3045f4b4e17ed490877a6030fc4b0151fbbb892290e476369040d065d5928",
+        legacyOperationCount: 0,
+        projectionSha256: "7d9dc721b57bfd9272887e8f2b991c53d344e12921b2aaddef88b978ac0de245",
+      });
+    } finally {
+      stage.dispose();
+      connection.execTrusted("ROLLBACK", "inspect-schema");
+      connection.close();
+    }
+  });
+
+  it("hands off 1,024 mixed rows with the exact constant-memory projection identity", () => {
+    const connection = opened();
+    seedMixed1024(connection);
+    connection.execTrusted("BEGIN EXCLUSIVE", "inspect-schema");
+    const stage = createSQLiteBaselineTempStage(
+      connection,
+      proveSQLiteExclusiveBaselineTransaction(connection),
+    ) as SQLiteBaselineTempStage & SQLiteBaselineCooperativeStage;
+    const source = captureSQLiteV1BaselineSourceSummary(
+      connection,
+      NOW,
+    ) as SQLiteV1BaselineSourceSummary & SQLiteBaselineCooperativeSource;
+    const run = { connection, source, stage };
+    try {
+      stageSQLiteV1BaselineSourceIntoTempStage(connection, source, stage);
+      const expected = materializedTempIdentity(run);
+      const identity = readSQLiteV1BaselineOrderedTempProjection(connection, source, stage);
+      expect(identity).toMatchObject({
+        baselineId: expected.baselineId,
+        entryCount: 1_024,
+        finalEntryHash: expected.finalEntryHash,
+        firstEntryHash: expected.firstEntryHash,
+        legacyOperationCount: 340,
+        projectionSha256: expected.projectionSha256,
+      });
+    } finally {
+      close(run);
+    }
+  });
+
+  it("poisons an ordered reader abandoned before its one allowed read", () => {
+    const run = started();
+    try {
+      stageSQLiteV1BaselineSourceIntoTempStage(run.connection, run.source, run.stage);
+      const reader = new SQLiteV1BaselineOrderedTempReader(
+        run.connection,
+        run.source,
+        run.stage,
+      );
+      expect(() => reader.dispose()).toThrow(/was abandoned/u);
+      expect(reader.state).toBe("poisoned");
+      expect(run.stage.state).toBe("poisoned");
+    } finally {
+      close(run);
+    }
+  });
+
+  it.each(["missing", "extra", "replaced", "catalog", "savepoint", "rollback"] as const)(
+    "rejects %s state before ordered handoff",
+    (attack) => {
+      const run = started();
+      try {
+        stageSQLiteV1BaselineSourceIntoTempStage(run.connection, run.source, run.stage);
+        if (attack === "missing") {
+          run.connection.prepare(
+            "DELETE FROM temp.ge_blr_stage WHERE entry_kind = 'schema-envelope'",
+            "inspect-schema",
+          ).run();
+        } else if (attack === "extra") {
+          run.connection.prepare(
+            `INSERT INTO temp.ge_blr_stage(kind_rank, entry_kind, key_blob, state_blob)
+             SELECT kind_rank, entry_kind, CAST(key_blob || x'00' AS BLOB), state_blob
+               FROM temp.ge_blr_stage WHERE entry_kind = 'schema-envelope'`,
+            "inspect-schema",
+          ).run();
+        } else if (attack === "replaced") {
+          run.connection.prepare(
+            "UPDATE temp.ge_blr_stage SET state_blob = state_blob WHERE entry_kind = 'schema-envelope'",
+            "inspect-schema",
+          ).run();
+        } else if (attack === "catalog") {
+          run.connection.execTrusted("CREATE TEMP TABLE ge_blr_hostile(value INTEGER)", "inspect-schema");
+        } else if (attack === "savepoint") {
+          run.connection.execTrusted("SAVEPOINT hostile_handoff", "inspect-schema");
+        } else {
+          run.connection.execTrusted("ROLLBACK", "inspect-schema");
+          run.connection.execTrusted("BEGIN EXCLUSIVE", "inspect-schema");
+        }
+        expect(() => readSQLiteV1BaselineOrderedTempProjection(
+          run.connection,
+          run.source,
+          run.stage,
+        )).toThrow();
+        expect(run.stage.state).toBe("poisoned");
+      } finally {
+        close(run);
+      }
+    },
+  );
+
+  it.each([
+    ["pre-query", 1],
+    ["pre-fetch", 3],
+    ["post-fetch", 4],
+    ["post-append", 5],
+    ["terminal-counts", 15],
+    ["post-root", 16],
+    ["complete", 17],
+  ] as const)(
+    "rejects DML at ordered handoff %s boundary",
+    (_boundary, targetFence) => {
+      const run = startedWithCallerProbe();
+      try {
+        stageSQLiteV1BaselineSourceIntoTempStage(run.connection, run.source, run.stage);
+        const originalFence = run.stage[SQLITE_BASELINE_FENCE_ORDERED_HANDOFF]
+          .bind(run.stage);
+        let fences = 0;
+        const fence = vi.spyOn(
+          run.stage,
+          SQLITE_BASELINE_FENCE_ORDERED_HANDOFF,
+        ).mockImplementation((session) => {
+          fences += 1;
+          if (fences === targetFence) {
+            run.connection.prepare(
+              "INSERT INTO caller_probe(value) VALUES (1)",
+              "inspect-schema",
+            ).run();
+          }
+          return originalFence(session);
+        });
+        try {
+          expect(() => readSQLiteV1BaselineOrderedTempProjection(
+            run.connection,
+            run.source,
+            run.stage,
+          )).toThrow(/unexplained write|binding/u);
+        } finally {
+          fence.mockRestore();
+        }
+        expect(run.stage.state).toBe("poisoned");
+      } finally {
+        close(run);
+      }
+    },
+  );
+
+  it.each(["missing", "extra", "reordered", "rank-kind", "noncanonical"] as const)(
+    "rejects a counter-preserving mocked %s ordered row stream",
+    (attack) => {
+      const run = started();
+      try {
+        stageSQLiteV1BaselineSourceIntoTempStage(run.connection, run.source, run.stage);
+        const sql = `SELECT kind_rank, entry_kind, key_blob, state_blob
+           FROM temp.ge_blr_stage
+          ORDER BY kind_rank ASC, key_blob ASC`;
+        const originalPrepare = run.connection.prepare.bind(run.connection);
+        const rows = originalPrepare(sql, "inspect-schema").all().map((raw) => [
+          ...(raw as unknown as readonly unknown[]),
+        ]);
+        const reader = new SQLiteV1BaselineOrderedTempReader(
+          run.connection,
+          run.source,
+          run.stage,
+        );
+        let hostile = rows.map((row) => [...row]);
+        if (attack === "missing") {
+          hostile = hostile.slice(0, -1);
+        } else if (attack === "extra") {
+          hostile.push([...hostile[0]!]);
+        } else if (attack === "reordered") {
+          [hostile[0], hostile[1]] = [hostile[1]!, hostile[0]!];
+        } else if (attack === "rank-kind") {
+          hostile[0]![0] = 1n;
+        } else {
+          hostile[0]![3] = Buffer.from("{}", "utf8");
+        }
+        const prepare = vi.spyOn(run.connection, "prepare").mockImplementation(
+          (statementSql, operation) => statementSql === sql
+            ? ({ iterate: () => hostile } as unknown as ReturnType<SQLiteConnection["prototype"]["prepare"]>)
+            : originalPrepare(statementSql, operation),
+        );
+        try {
+          expect(() => reader.read()).toThrow(/ordered handoff/u);
+        } finally {
+          prepare.mockRestore();
+        }
+        expect(reader.state).toBe("poisoned");
+        expect(run.stage.state).toBe("poisoned");
+      } finally {
+        close(run);
+      }
+    },
+  );
+
+  it("rejects a wrong summary/stage pair and a wrong connection", () => {
+    const left = started();
+    const right = started();
+    try {
+      stageSQLiteV1BaselineSourceIntoTempStage(left.connection, left.source, left.stage);
+      stageSQLiteV1BaselineSourceIntoTempStage(right.connection, right.source, right.stage);
+      expect(() => new SQLiteV1BaselineOrderedTempReader(
+        left.connection,
+        left.source,
+        right.stage,
+      )).toThrow(/source binding/u);
+      expect(right.stage.state).toBe("poisoned");
+      expect(() => new SQLiteV1BaselineOrderedTempReader(
+        right.connection,
+        left.source,
+        left.stage,
+      )).toThrow(/source binding/u);
+      expect(left.stage.state).toBe("poisoned");
+    } finally {
+      close(left);
+      close(right);
+    }
+  });
+
+  it("stage disposal terminalizes an active ordered reader before catalog drop", () => {
+    const run = started();
+    try {
+      stageSQLiteV1BaselineSourceIntoTempStage(run.connection, run.source, run.stage);
+      const reader = new SQLiteV1BaselineOrderedTempReader(
+        run.connection,
+        run.source,
+        run.stage,
+      );
+      run.stage.dispose();
+      expect(reader.state).toBe("poisoned");
+      expect(run.stage.state).toBe("disposed");
+      expect(() => reader.read()).toThrow();
+    } finally {
+      if (run.connection.isTransaction) {
+        run.connection.execTrusted("ROLLBACK", "inspect-schema");
+      }
+      run.connection.close();
+    }
+  });
+
+  it("private ordered BEGIN rejects a gap before cooperative finish", () => {
+    const run = started();
+    try {
+      const iterator = run.source[SQLITE_BASELINE_COOPERATIVE_ENTRIES](
+        run.connection,
+        run.stage,
+      );
+      const first = iterator.next().value!;
+      const receipt = run.stage[SQLITE_BASELINE_OWNED_WRITE](
+        run.connection,
+        first,
+        0,
+      );
+      expect(iterator.next(receipt).done).toBe(false);
+      expect(() => run.stage[SQLITE_BASELINE_BEGIN_ORDERED_HANDOFF](
+        run.connection,
+        1,
+        totalChanges(run.connection),
+        run.connection.transactionEpoch,
+      )).toThrow(/binding is invalid/u);
+      expect(run.stage.state).toBe("poisoned");
+      try {
+        iterator.return();
+      } catch {
+        // The explicit incomplete-finish rejection remains authoritative.
+      }
+    } finally {
+      close(run);
+    }
+  });
+
+  it("finalizes the active row iterator when stage disposal occurs during fetch", () => {
+    const run = started();
+    try {
+      stageSQLiteV1BaselineSourceIntoTempStage(run.connection, run.source, run.stage);
+      const sql = `SELECT kind_rank, entry_kind, key_blob, state_blob
+           FROM temp.ge_blr_stage
+          ORDER BY kind_rank ASC, key_blob ASC`;
+      const originalPrepare = run.connection.prepare.bind(run.connection);
+      const row = originalPrepare(sql, "inspect-schema").get();
+      const reader = new SQLiteV1BaselineOrderedTempReader(
+        run.connection,
+        run.source,
+        run.stage,
+      );
+      let closed = 0;
+      let fetched = false;
+      const hostileIterator: Iterator<unknown> & Iterable<unknown> = {
+        [Symbol.iterator]() { return this; },
+        next: () => {
+          if (fetched) return { done: true, value: undefined };
+          fetched = true;
+          run.stage.dispose();
+          return { done: false, value: row };
+        },
+        return: () => {
+          closed += 1;
+          return { done: true, value: undefined };
+        },
+      };
+      const prepare = vi.spyOn(run.connection, "prepare").mockImplementation(
+        (statementSql, operation) => statementSql === sql
+          ? ({ iterate: () => hostileIterator } as unknown as ReturnType<SQLiteConnection["prototype"]["prepare"]>)
+          : originalPrepare(statementSql, operation),
+      );
+      try {
+        expect(() => reader.read()).toThrow();
+      } finally {
+        prepare.mockRestore();
+      }
+      expect(closed).toBe(1);
+      expect(reader.state).toBe("poisoned");
+      expect(run.connection.prepare(
+        "SELECT count(*) FROM temp.sqlite_schema WHERE name LIKE 'ge_blr_%'",
+        "inspect-schema",
+      ).get()).toEqual([0n]);
+    } finally {
+      if (run.connection.isTransaction) {
+        run.connection.execTrusted("ROLLBACK", "inspect-schema");
+      }
+      run.connection.close();
+    }
+  });
+
+  it("active iterator cleanup failure cannot mask the ordered read failure", () => {
+    const run = started();
+    try {
+      stageSQLiteV1BaselineSourceIntoTempStage(run.connection, run.source, run.stage);
+      const sql = `SELECT kind_rank, entry_kind, key_blob, state_blob
+           FROM temp.ge_blr_stage
+          ORDER BY kind_rank ASC, key_blob ASC`;
+      const originalPrepare = run.connection.prepare.bind(run.connection);
+      const reader = new SQLiteV1BaselineOrderedTempReader(
+        run.connection,
+        run.source,
+        run.stage,
+      );
+      let returns = 0;
+      const hostileIterator: Iterator<unknown> & Iterable<unknown> = {
+        [Symbol.iterator]() { return this; },
+        next: () => { throw new Error("authoritative ordered fetch failure"); },
+        return: () => {
+          returns += 1;
+          throw new Error("secondary ordered cleanup failure");
+        },
+      };
+      const prepare = vi.spyOn(run.connection, "prepare").mockImplementation(
+        (statementSql, operation) => statementSql === sql
+          ? ({ iterate: () => hostileIterator } as unknown as ReturnType<SQLiteConnection["prototype"]["prepare"]>)
+          : originalPrepare(statementSql, operation),
+      );
+      try {
+        expect(() => reader.read()).toThrowError("SQLite baseline ordered handoff failed");
+      } finally {
+        prepare.mockRestore();
+      }
+      expect(returns).toBe(1);
+      expect(reader.state).toBe("poisoned");
+      expect(run.stage.state).toBe("poisoned");
+    } finally {
       close(run);
     }
   });

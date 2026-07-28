@@ -22,9 +22,14 @@ import {
 } from "./operation-baseline.js";
 import {
   SQLITE_BASELINE_COOPERATIVE_POISON,
+  SQLITE_BASELINE_ABORT_ORDERED_HANDOFF,
+  SQLITE_BASELINE_BEGIN_ORDERED_HANDOFF,
+  SQLITE_BASELINE_COMPLETE_ORDERED_HANDOFF,
   SQLITE_BASELINE_CONSUME_OWNED_WRITE,
+  SQLITE_BASELINE_FENCE_ORDERED_HANDOFF,
   SQLITE_BASELINE_FINISH_COOPERATIVE_WRITES,
   SQLITE_BASELINE_OWNED_WRITE,
+  SQLITE_BASELINE_REGISTER_ORDERED_HANDOFF_CLEANUP,
   type SQLiteBaselineOwnedWriteReceipt,
 } from "./operation-baseline-cooperation.js";
 import {
@@ -1090,6 +1095,10 @@ export class SQLiteBaselineTempStage {
   #nextOwnedWriteSequence = 0;
   #pendingOwnedWrite: PendingOwnedWriteReceipt | undefined;
   #writeLane: "unset" | "standalone" | "cooperative" = "unset";
+  #orderedHandoffState: "unused" | "active" | "complete" | "poisoned" = "unused";
+  #orderedHandoffSession: object | undefined;
+  #orderedHandoffCleanup: (() => void) | undefined;
+  #cooperativeWritesFinished = false;
 
   constructor(
     connection: SQLiteConnection,
@@ -1120,6 +1129,12 @@ export class SQLiteBaselineTempStage {
     sequence: number,
   ): SQLiteBaselineOwnedWriteReceipt {
     this.#requireOpenOwner();
+    if (this.#orderedHandoffState !== "unused") {
+      return this.#poison("SQLite baseline cooperative writes cannot enter an ordered handoff");
+    }
+    if (this.#cooperativeWritesFinished) {
+      return this.#poison("SQLite baseline cooperative writes are already finished");
+    }
     if (connection !== this.#connection) {
       return this.#poison("SQLite baseline cooperative writer connection is invalid");
     }
@@ -1249,6 +1264,121 @@ export class SQLiteBaselineTempStage {
       return this.#poison("SQLite baseline cooperative writer did not finish exactly");
     }
     this.#requireAllowedChanges();
+    this.#cooperativeWritesFinished = true;
+  }
+
+  /** Begin the one package-private, transaction-bound ordered TEMP handoff. */
+  [SQLITE_BASELINE_BEGIN_ORDERED_HANDOFF](
+    connection: SQLiteConnection,
+    expectedEntryCount: number,
+    expectedTotalChanges: number,
+    transactionEpoch: bigint,
+  ): object {
+    this.#requireOpenOwner();
+    const actualTotalChanges = this.#requireAllowedChanges();
+    if (this.#orderedHandoffState !== "unused"
+        || connection !== this.#connection
+        || this.#writeLane !== "cooperative"
+        || !this.#cooperativeWritesFinished
+        || this.#pendingOwnedWrite !== undefined
+        || !Number.isSafeInteger(expectedEntryCount)
+        || expectedEntryCount < 0
+        || expectedEntryCount !== this.#nextOwnedWriteSequence
+        || expectedTotalChanges !== actualTotalChanges
+        || transactionEpoch !== this.#transactionEpoch
+        || scalarCount(
+          this.#connection,
+          `SELECT count(*) FROM temp.${STAGE_TABLE}`,
+          "TEMP ordered handoff common count",
+        ) !== expectedEntryCount
+        || scalarCount(
+          this.#connection,
+          `SELECT count(*) FROM temp.${RELATION_VIEW}`,
+          "TEMP ordered handoff relation count",
+        ) !== expectedEntryCount) {
+      return this.#poison("SQLite baseline ordered handoff binding is invalid");
+    }
+    const catalogEpoch = this.#connection.transactionEpoch;
+    validateBaselineTempCatalog(this.#connection);
+    if (this.#connection.transactionEpoch !== catalogEpoch
+        || reservedCatalogCount(this.#connection) !== EXPECTED_RESERVED_OBJECT_COUNT) {
+      return this.#poison("SQLite baseline ordered handoff catalog is invalid");
+    }
+    this.#transactionEpoch = this.#connection.transactionEpoch;
+    this.#requireAllowedChanges();
+    const session = Object.freeze(Object.create(null)) as object;
+    this.#orderedHandoffSession = session;
+    this.#orderedHandoffState = "active";
+    return session;
+  }
+
+  /** Revalidate exact owner, epoch and write fence around every handoff step. */
+  [SQLITE_BASELINE_FENCE_ORDERED_HANDOFF](session: object): number {
+    this.#requireOpenOwner();
+    if (this.#orderedHandoffState !== "active"
+        || session !== this.#orderedHandoffSession) {
+      return this.#poison("SQLite baseline ordered handoff session is invalid");
+    }
+    const actual = this.#requireAllowedChanges();
+    if (this.#requireAllowedChanges() !== actual) {
+      return this.#poison("SQLite baseline ordered handoff observed an unexplained write");
+    }
+    return actual;
+  }
+
+  /** Register only the current SQLite row iterator finalizer. */
+  [SQLITE_BASELINE_REGISTER_ORDERED_HANDOFF_CLEANUP](
+    session: object,
+    cleanup: (() => void) | undefined,
+  ): void {
+    this[SQLITE_BASELINE_FENCE_ORDERED_HANDOFF](session);
+    if (cleanup !== undefined && this.#orderedHandoffCleanup !== undefined) {
+      return this.#poison("SQLite baseline ordered handoff cleanup is already registered");
+    }
+    this.#orderedHandoffCleanup = cleanup;
+  }
+
+  /** Seal the exact one-shot handoff after every terminal barrier passes. */
+  [SQLITE_BASELINE_COMPLETE_ORDERED_HANDOFF](
+    session: object,
+    actualEntryCount: number,
+  ): void {
+    this[SQLITE_BASELINE_FENCE_ORDERED_HANDOFF](session);
+    if (!Number.isSafeInteger(actualEntryCount)
+        || actualEntryCount !== this.#nextOwnedWriteSequence
+        || this.#orderedHandoffCleanup !== undefined) {
+      return this.#poison("SQLite baseline ordered handoff completion is invalid");
+    }
+    const catalogEpoch = this.#connection.transactionEpoch;
+    validateBaselineTempCatalog(this.#connection);
+    if (this.#connection.transactionEpoch !== catalogEpoch
+        || reservedCatalogCount(this.#connection) !== EXPECTED_RESERVED_OBJECT_COUNT) {
+      return this.#poison("SQLite baseline ordered handoff catalog is invalid");
+    }
+    this.#transactionEpoch = this.#connection.transactionEpoch;
+    this.#requireAllowedChanges();
+    this.#orderedHandoffSession = undefined;
+    this.#orderedHandoffState = "complete";
+  }
+
+  /** Finalize the current statement and poison every incomplete handoff. */
+  [SQLITE_BASELINE_ABORT_ORDERED_HANDOFF](
+    session: object | undefined,
+    message: string,
+  ): never {
+    const cleanup = this.#orderedHandoffCleanup;
+    this.#orderedHandoffCleanup = undefined;
+    try {
+      cleanup?.();
+    } catch {
+      // The authoritative handoff failure remains primary.
+    }
+    if (session !== undefined && session !== this.#orderedHandoffSession) {
+      message = "SQLite baseline ordered handoff session is invalid";
+    }
+    this.#orderedHandoffSession = undefined;
+    this.#orderedHandoffState = "poisoned";
+    return this.#poison(message);
   }
 
   /** Package-private fail-closed bridge used when source receipt checks fail. */
@@ -1384,6 +1514,17 @@ export class SQLiteBaselineTempStage {
   dispose(): void {
     if (this.#state === "disposed") return;
     this.#pendingOwnedWrite = undefined;
+    let handoffCleanupFailure: unknown;
+    if (this.#orderedHandoffState === "active") {
+      try {
+        this.#orderedHandoffCleanup?.();
+      } catch (error) {
+        handoffCleanupFailure = error;
+      }
+      this.#orderedHandoffCleanup = undefined;
+      this.#orderedHandoffSession = undefined;
+      this.#orderedHandoffState = "poisoned";
+    }
     if (!this.#connection.isOpen) {
       this.#state = "disposed";
       ACTIVE_STAGES.delete(this.#connection);
@@ -1416,7 +1557,7 @@ export class SQLiteBaselineTempStage {
         "TEMP reserved catalog name",
       )),
     );
-    let firstFailure: unknown;
+    let firstFailure: unknown = handoffCleanupFailure;
     for (const sql of drops) {
       const name = sql.slice(sql.lastIndexOf(".") + 1);
       if (!existing.has(name)) continue;
@@ -1550,6 +1691,9 @@ export class SQLiteBaselineTempStage {
 
   #poison(message: string): never {
     this.#pendingOwnedWrite = undefined;
+    this.#orderedHandoffCleanup = undefined;
+    this.#orderedHandoffSession = undefined;
+    if (this.#orderedHandoffState === "active") this.#orderedHandoffState = "poisoned";
     this.#state = "poisoned";
     throw new CycleStoreProviderError(
       "GE_CYCLE_STORE_CORRUPTION",
