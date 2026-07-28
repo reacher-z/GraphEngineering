@@ -10,6 +10,7 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Literal, cast
+from weakref import ReferenceType, ref
 
 from .canonical import canonical_bytes, canonical_sha256
 from .cycle_store_provider import CycleStoreProviderOperation, cycle_store_adapter_codec
@@ -325,7 +326,7 @@ class SQLiteV1BaselineClockEvidence:
     provider_high_water_at_ms: int
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, weakref_slot=True)
 class SQLiteV1BaselineSourceSummary:
     """Frozen source summary plus the first bounded family iterator.
 
@@ -648,6 +649,36 @@ class SQLiteV1BaselineSourceSummary:
             or state["appliedAtMs"] != self._latest_migration_applied_at_ms
         ):
             raise ValueError("captured migration lineage identity drifted")
+
+
+_CAPTURED_SOURCE_SUMMARIES: dict[int, ReferenceType[SQLiteV1BaselineSourceSummary]] = {}
+
+
+def _register_sqlite_v1_baseline_source_summary(
+    summary: SQLiteV1BaselineSourceSummary,
+) -> None:
+    """Retain only weak, exact-identity evidence of module capture."""
+
+    identity = id(summary)
+
+    def discard(reference: ReferenceType[SQLiteV1BaselineSourceSummary]) -> None:
+        if _CAPTURED_SOURCE_SUMMARIES.get(identity) is reference:
+            _CAPTURED_SOURCE_SUMMARIES.pop(identity, None)
+
+    _CAPTURED_SOURCE_SUMMARIES[identity] = ref(summary, discard)
+
+
+def _assert_sqlite_v1_baseline_source_summary_provenance(
+    summary: SQLiteV1BaselineSourceSummary,
+) -> SQLiteV1BaselineSourceSummary:
+    """Reject structurally equal summaries not returned by the capture function."""
+
+    if type(summary) is not SQLiteV1BaselineSourceSummary:
+        raise TypeError("SQLite v1 baseline captured source summary has the wrong type")
+    reference = _CAPTURED_SOURCE_SUMMARIES.get(id(summary))
+    if reference is None or reference() is not summary:
+        raise ValueError("SQLite v1 baseline captured source summary provenance is invalid")
+    return summary
 
 
 _TABLES: tuple[tuple[BaselineEntryKind, str], ...] = (
@@ -1349,4 +1380,5 @@ def capture_sqlite_v1_baseline_source_summary(
         connection.transaction_epoch,
     )
     summary._assert_capture_transaction()
+    _register_sqlite_v1_baseline_source_summary(summary)
     return summary

@@ -10716,3 +10716,146 @@ database campaign, then recompute the A1 seal from the TEMP-ordered projection
 and compare it with the original receipt before any rebind. The next Cursor
 implementation slice is the captured-source connection provenance fence and
 pre-TEMP campaign constructor; no database/TEMP/rebind claim is made here.
+
+### 31.35.9 Cursor Slice B0a captured-source connection provenance acceptance
+
+The first database-ownership half of Cursor Slice B B0 is complete in
+TypeScript and Python. This accepted tranche is named **B0a** to prevent the
+source/connection proof from being confused with the still-open stage/campaign
+ownership transfer. B0a adds no cursor query and creates no cursor-specific
+TEMP object. Its sole purpose is to turn the database-independent A2b receipt
+into a repeatably checked proof that the retained source summary was captured
+from the exact live SQLite connection and the exact still-active EXCLUSIVE
+transaction generation.
+
+The package-private B0a entrypoints accept exactly `(connection, receipt)`.
+They always execute the existing non-consuming A2b receipt-provenance fence
+first. The source summary and clock evidence are derived only from that retained
+A2b object graph; callers cannot supply parallel copies of the summary, clock,
+projection, session or capability values. Only after A2b succeeds does B0a
+consult module-owned captured-source provenance and live connection state.
+
+TypeScript registers the exact frozen summary returned by
+`captureSQLiteV1BaselineSourceSummary` as a `WeakMap` key. The registry value
+contains only the exact `SQLiteConnection` and immutable capture epoch. A
+structurally equal frozen object, a synthetic summary carrying the same clock
+and envelope objects, and a genuine summary presented to another connection
+all fail. The returned connection witness is a frozen null-prototype object
+with no own keys and is itself backed by a private weak identity registry. Its
+repeatable assertion requires the exact A2b receipt and reruns both A2b and the
+live source/connection proof.
+
+The first TypeScript implementation used the public overridable connection
+getters. Independent attack review reproduced a HIGH-severity race with an
+exact captured `SQLiteConnection` subclass: its `transactionEpoch` getter
+returned the old epoch while executing a real epoch-tracked PRAGMA, so the
+first fence accepted a witness although the base connection had advanced from
+epoch 12 to 13. The accepted correction moves owner observation into
+`sqlite-connection.ts`. A module-private symbol method reads the class-private
+database transaction state, transaction mode and epoch before and after one
+synchronous snapshot. The cross-module wrapper invokes a captured copy of the
+base-class intrinsic with `Reflect.apply`, so subclass accessors and later
+prototype replacement cannot intercept it. The source fence takes two of these
+private snapshots, and the A2b/connection fence repeats the complete proof
+immediately before publishing the witness.
+
+The hostile TypeScript regression proves both sides of the boundary. While the
+connection is stable, arming the subclass getter and invoking B0a does not call
+that getter or mutate the connection. If the hostile getter is invoked directly
+and advances the real private epoch, both a fresh B0a attempt and a previously
+accepted retained witness fail. Rollback followed by a new `BEGIN EXCLUSIVE`
+also fails and cannot refresh the historical receipt.
+
+Python adds `weakref_slot=True` to the frozen source summary and records each
+successful capture in an `id -> weakref` registry. Acceptance requires both the
+integer identity and `reference() is summary`; cleanup removes only its own
+still-current reference, so object-ID reuse and stale callbacks cannot grant or
+delete provenance. Direct dataclass construction and `dataclasses.replace`
+summary clones fail even when they retain the exact live connection, clock and
+epoch.
+
+The first Python connection witness was token-guarded but cloneable:
+`dataclasses.replace(witness)` copied the real token and all retained fields,
+and the clone could revalidate. The accepted correction makes the witness
+weak-referenceable with identity equality and registers the exact object in a
+module-private `WeakKeyDictionary`. Every revalidation performs A2b first,
+requires the exact registered witness type and identity, compares every
+registered retained reference and epoch, then reruns source/clock/connection/
+EXCLUSIVE/epoch checks. `dataclasses.replace`, `copy.copy`, direct construction
+with the real copied token, and subclass attempts all fail while the original
+witness remains valid. Deep copy and pickle cannot recreate the retained
+SQLite connection. Weak-lifecycle tests prove that neither source nor witness
+registries retain dead objects.
+
+Python also normalizes closed-connection observations into the B0a-owned
+deterministic `ValueError` vocabulary instead of leaking
+`sqlite3.ProgrammingError`. Receipt ordering remains authoritative: a forged
+receipt against that same closed connection fails A2b before any connection
+property is touched, while a valid receipt reaches the normalized closed-owner
+failure. Retained-witness revalidation has the same behavior.
+
+B0a deliberately does **not** compare the source capture's historical
+`total_changes` value with the live count. The already accepted baseline TEMP
+handoff advances that count through owner-authorized DML. The exact live
+allowance belongs to the adjacent `SQLiteBaselineTempStage` fence. Both
+languages retain integration evidence after the real baseline TEMP catalog,
+cooperative source/relation handoff, ordered projection and clean stream/
+record, checkpoint, lease/lock/hold and legacy campaigns. Capture epoch remains
+unchanged through that predecessor chain, total changes advance, and B0a
+remains valid. An unexplained later TEMP DML still passes the source-only proof
+but is rejected by the stage's allowed-change fence, proving that the two
+responsibilities are separate rather than silently weakened.
+
+The accepted post-correction verification is:
+
+- TypeScript B0a focused suite: 7/7;
+- TypeScript SQLite suite: 19 files and 433/433 tests;
+- TypeScript SQLite typecheck, lint/type gate and build: green;
+- Python B0a focused suite: 13/13;
+- Python adjacent source/stage/cooperation/handoff/cursor suite: 224/224;
+- Python full suite: 1,762/1,762 plus two nested subtests;
+- Python Ruff, scoped formatting and strict MyPy over 50 source files: green;
+- documentation links, strict diff checks and package-root non-export checks:
+  green; and
+- final independent language-swapped reviews: HIGH 0 / MEDIUM 0 / LOW 0.
+
+Claude Code 2.1.220 with Opus was used as an additional read-only review lane.
+It independently identified the missing TypeScript post-handoff lifecycle
+test, the historical-epoch/first-cursor-DDL ownership transition, dead
+TypeScript provenance state and the raw Python closed-connection error. Its
+review did not modify the repository. The stronger sub-agent attack audit
+additionally reproduced the TypeScript live PRAGMA getter bypass and Python
+witness clone; both were fixed and regression-tested before acceptance.
+
+Evidence is recorded in:
+
+- `codex_logs/reviews/SQLITE-CURSOR-SLICE-B-TS-SOURCE-PROVENANCE-2026-07-28.md`;
+- `codex_logs/reviews/SQLITE-CURSOR-SLICE-B-PY-SOURCE-FENCE-2026-07-28.md`;
+- `codex_logs/reviews/SQLITE-CURSOR-SLICE-B-CROSS-RUNTIME-SEVERITY-AUDIT-2026-07-28.md`;
+- `codex_logs/reviews/SQLITE-CURSOR-SLICE-B-TS-FINAL-CORRECTION-AUDIT-2026-07-28.md`;
+  and
+- `codex_logs/reviews/SQLITE-CURSOR-SLICE-B-PY-SOURCE-FENCE-FINAL-AUDIT-2026-07-28.md`.
+
+B0a does not complete B0 or Slice B. Before the first cursor-specific
+`CREATE TEMP`, B0b must atomically mint a one-way source-to-stage/campaign
+ownership transfer that binds the exact receipt, source, connection, clock,
+projection, completed legacy state, current stage epoch and current allowed
+change count. The historical capture epoch must never be rewritten. After the
+transfer, only the stage/campaign owner may adopt exact expected cursor-DDL
+epoch transitions, with both source identity and A2b provenance still frozen.
+Second begin, stage clone, projection clone, incomplete predecessor campaign,
+stale allowed count, wrong connection, rollback/rebegin and any pre-transfer
+drift must reject before cursor TEMP DDL.
+
+After B0b, the Slice B queue remains B1 TEMP catalog and pristine capture/seal,
+B2 bounded rules 1-10 and A1 root reproduction, then the separately reviewed
+publication/rebind and post-rebind work. No cursor scan, rule diagnostic,
+rebind, migration `0002`, v2 persistence, scale, crash/replay, release,
+adoption or star-count claim is made by B0a.
+
+The implementation-level B0b handoff is frozen in
+`codex_logs/reviews/SQLITE-CURSOR-SLICE-B-B0-STAGE-OWNER-BRIDGE-DESIGN-2026-07-28.md`.
+Its 624-line brief defines the closed TypeScript/Python coordinator surfaces,
+one-way epoch transfer, exact first-DDL `+1` seam, 34 primary hostile scenarios
+with mirrored parity cases, verification gates and parallel implementation
+lanes. It is design evidence only and changes none of the B0a nonclaims.

@@ -39,7 +39,10 @@ import {
   sqliteSafeInteger,
   sqliteText,
 } from "./sqlite-codec.js";
-import { SQLiteConnection } from "./sqlite-connection.js";
+import {
+  SQLiteConnection,
+  readSQLiteConnectionOwnerSnapshot,
+} from "./sqlite-connection.js";
 import {
   SQLITE_ALPHA_V0_TO_V1_SQL_SHA256,
   SQLITE_SCHEMA_IDENTITY_SHA256,
@@ -89,6 +92,14 @@ export interface SQLiteV1BaselineSourceSummary {
    */
   readonly entries: () => Generator<OperationBaselineEntryInput, void, undefined>;
 }
+
+/** Private registry state for one exact summary returned by this module. */
+interface SQLiteV1BaselineCapturedSourceState {
+  readonly connection: SQLiteConnection;
+  readonly transactionEpoch: bigint;
+}
+
+const CAPTURED_CURSOR_SOURCES = new WeakMap<object, SQLiteV1BaselineCapturedSourceState>();
 
 interface SQLiteV1BaselineTransactionGuard {
   totalChanges: number;
@@ -1110,7 +1121,7 @@ export function captureSQLiteV1BaselineSourceSummary(
       transactionEpoch: transactionGuard.transactionEpoch,
     });
   };
-  return Object.freeze({
+  const summary = Object.freeze({
     sourceEnvelope: frozenEnvelope,
     countsByKind,
     expectedEntryCount: Number(total),
@@ -1119,4 +1130,47 @@ export function captureSQLiteV1BaselineSourceSummary(
     [SQLITE_BASELINE_COOPERATIVE_ENTRIES]: cooperativeEntries,
     [SQLITE_BASELINE_ORDERED_HANDOFF_SOURCE]: orderedHandoffSource,
   });
+  CAPTURED_CURSOR_SOURCES.set(summary, Object.freeze({
+    connection,
+    transactionEpoch: transactionGuard.transactionEpoch,
+  }));
+  return summary;
+}
+
+/**
+ * Fence a genuinely captured source against its exact live connection.
+ *
+ * This performs no SQL and deliberately does not compare the capture-time
+ * `total_changes()`: once accepted, the existing TEMP stage owns all allowed
+ * write-counter movement. Every invocation does synchronously re-prove the
+ * active EXCLUSIVE mode and the original pre-TEMP transaction epoch.
+ */
+export function assertSQLiteV1BaselineCursorSourceProvenance(
+  sourceSummary: SQLiteV1BaselineSourceSummary,
+  connection: SQLiteConnection,
+): void {
+  const state = sourceSummary !== null && typeof sourceSummary === "object"
+    ? CAPTURED_CURSOR_SOURCES.get(sourceSummary as object)
+    : undefined;
+  if (state === undefined
+      || state.connection !== connection) {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      OPERATION,
+      "SQLite v1 baseline captured source provenance is invalid",
+    );
+  }
+  const first = readSQLiteConnectionOwnerSnapshot(connection);
+  if (!first.isTransaction
+      || first.transactionMode !== "exclusive"
+      || first.transactionEpoch !== state.transactionEpoch) {
+    return fail("SQLite v1 baseline captured transaction changed");
+  }
+  const final = readSQLiteConnectionOwnerSnapshot(connection);
+  if (!final.isTransaction
+      || final.transactionMode !== "exclusive"
+      || final.transactionEpoch !== state.transactionEpoch
+      || final.transactionEpoch !== first.transactionEpoch) {
+    return fail("SQLite v1 baseline captured transaction changed");
+  }
 }

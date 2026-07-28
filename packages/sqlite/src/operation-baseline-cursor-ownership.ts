@@ -18,10 +18,12 @@ import {
   SQLITE_CURSOR_SEAL_SOURCE_COLUMNS,
   type SQLiteCursorSealReceipt,
 } from "./operation-baseline-cursor-invariants.js";
-import type {
-  SQLiteV1BaselineClockEvidence,
-  SQLiteV1BaselineSourceSummary,
+import {
+  assertSQLiteV1BaselineCursorSourceProvenance,
+  type SQLiteV1BaselineClockEvidence,
+  type SQLiteV1BaselineSourceSummary,
 } from "./operation-baseline-source.js";
+import type { SQLiteConnection } from "./sqlite-connection.js";
 
 const OPERATION = "inspect-schema" as const;
 const HASH = /^[0-9a-f]{64}$/u;
@@ -303,12 +305,20 @@ export interface SQLiteCursorPreRebindIssueInput {
 export interface SQLiteCursorPreRebindReceipt {
   readonly __sqliteCursorPreRebindReceipt: never;
 }
+/** Opaque pre-TEMP binding of one A2b receipt to its exact captured connection. */
+export interface SQLiteCursorPreRebindConnectionProvenance {
+  readonly __sqliteCursorPreRebindConnectionProvenance: never;
+}
 interface ReceiptState {
   readonly binding: Readonly<SQLiteCursorPreRebindIssueInput>;
   readonly payload: Readonly<Record<string, string | number>>;
   readonly root: string;
 }
 const RECEIPTS = new WeakMap<object, ReceiptState>();
+interface ConnectionProvenanceState {
+  readonly receipt: SQLiteCursorPreRebindReceipt;
+}
+const CONNECTION_PROVENANCE = new WeakMap<object, ConnectionProvenanceState>();
 
 const ISSUE_FIELDS = Object.freeze([
   "campaignOwnership", "clockEvidence", "connectionOwnership", "projectionIdentity",
@@ -485,4 +495,59 @@ export function assertSQLiteCursorPreRebindReceiptProvenance(
     projectionReferenceSha256:
       (PROJECTIONS.get(state.binding.projectionReference) as ProjectionState).root,
   });
+}
+
+/**
+ * First Slice B owner fence. A2b provenance is always checked before the live
+ * connection is touched, and the source summary is derived only from A2b's
+ * retained witness rather than accepted again from the caller.
+ *
+ * The returned handle is opaque. The future TEMP-stage tranche will retain it
+ * while the stage assumes ownership of later DDL epochs and allowed writes.
+ */
+export function assertSQLiteCursorPreRebindConnectionProvenance(
+  connection: SQLiteConnection,
+  receipt: SQLiteCursorPreRebindReceipt,
+): SQLiteCursorPreRebindConnectionProvenance {
+  const receiptWitness = assertSQLiteCursorPreRebindReceiptProvenance(receipt);
+  assertSQLiteV1BaselineCursorSourceProvenance(
+    receiptWitness.sourceSummary,
+    connection,
+  );
+  const provenance = Object.freeze(
+    Object.create(null),
+  ) as SQLiteCursorPreRebindConnectionProvenance;
+  // Repeat the module-owned private snapshot immediately before the witness is
+  // registered and becomes observable to the caller.
+  assertSQLiteV1BaselineCursorSourceProvenance(
+    receiptWitness.sourceSummary,
+    connection,
+  );
+  CONNECTION_PROVENANCE.set(provenance as object, Object.freeze({
+    receipt,
+  }));
+  return provenance;
+}
+
+/** Revalidate until B0 performs its one-way stage/campaign ownership transfer. */
+export function assertSQLiteCursorPreRebindConnectionProvenanceWitness(
+  connection: SQLiteConnection,
+  receipt: SQLiteCursorPreRebindReceipt,
+  provenance: SQLiteCursorPreRebindConnectionProvenance,
+): SQLiteCursorPreRebindConnectionProvenance {
+  // Keep A2b authoritative and first, including when the connection is closed
+  // or the presented connection witness is forged.
+  const freshReceiptWitness = assertSQLiteCursorPreRebindReceiptProvenance(receipt);
+  const state = provenance !== null && typeof provenance === "object"
+    ? CONNECTION_PROVENANCE.get(provenance as object)
+    : undefined;
+  if (state === undefined
+      || state.receipt !== receipt) {
+    return fail("connection provenance witness", true);
+  }
+  assertSQLiteV1BaselineCursorSourceProvenance(
+    freshReceiptWitness.sourceSummary,
+    connection,
+  );
+  return provenance;
 }

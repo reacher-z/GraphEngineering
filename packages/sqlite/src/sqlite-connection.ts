@@ -44,6 +44,13 @@ export interface SQLiteWalCheckpointReport {
   readonly checkpointedPages: number;
 }
 
+/** Package-private, class-private-field-backed owner observation. */
+export interface SQLiteConnectionOwnerSnapshot {
+  readonly isTransaction: boolean;
+  readonly transactionEpoch: bigint;
+  readonly transactionMode: SQLiteTransactionMode | null;
+}
+
 function invalid(message: string): never {
   throw new CycleStoreProviderError(
     "GE_CYCLE_STORE_INVALID_ARGUMENT",
@@ -198,6 +205,8 @@ function mayContainAdditionalStatement(sql: string): boolean {
   return withoutOneTerminator.includes(";");
 }
 
+const SQLITE_CONNECTION_OWNER_SNAPSHOT = Symbol("SQLiteConnection.ownerSnapshot");
+
 /** One hardened, synchronous, file-backed SQLite connection. */
 export class SQLiteConnection {
   readonly #database: DatabaseSync;
@@ -266,6 +275,34 @@ export class SQLiteConnection {
 
   get isOpen(): boolean {
     return !this.#closed && this.#database.isOpen;
+  }
+
+  [SQLITE_CONNECTION_OWNER_SNAPSHOT](): SQLiteConnectionOwnerSnapshot {
+    const epochBefore = this.#transactionEpoch;
+    const transactionBefore = this.#database.isTransaction;
+    const open = !this.#closed && this.#database.isOpen;
+    const mode = transactionBefore ? (this.#transactionMode ?? "unknown") : null;
+    const transactionAfter = this.#database.isTransaction;
+    const epochAfter = this.#transactionEpoch;
+    if (!open) {
+      throw new CycleStoreProviderError(
+        "GE_CYCLE_STORE_UNAVAILABLE",
+        "inspect-schema",
+        "SQLite provider is closed",
+      );
+    }
+    if (epochBefore !== epochAfter || transactionBefore !== transactionAfter) {
+      throw new CycleStoreProviderError(
+        "GE_CYCLE_STORE_CORRUPTION",
+        "inspect-schema",
+        "SQLite owner state changed during its private snapshot",
+      );
+    }
+    return Object.freeze({
+      isTransaction: transactionAfter,
+      transactionEpoch: epochAfter,
+      transactionMode: mode,
+    });
   }
 
   get isTransaction(): boolean {
@@ -608,4 +645,17 @@ export class SQLiteConnection {
       );
     }
   }
+}
+
+const sqliteConnectionOwnerSnapshotIntrinsic =
+  SQLiteConnection.prototype[SQLITE_CONNECTION_OWNER_SNAPSHOT];
+
+/**
+ * Read exact owner state through the captured base-class intrinsic.
+ * Subclass accessors and prototype replacement cannot intercept this call.
+ */
+export function readSQLiteConnectionOwnerSnapshot(
+  connection: SQLiteConnection,
+): SQLiteConnectionOwnerSnapshot {
+  return Reflect.apply(sqliteConnectionOwnerSnapshotIntrinsic, connection, []);
 }
