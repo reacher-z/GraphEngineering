@@ -5,7 +5,8 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Generator, Iterator, Mapping
+from contextlib import suppress
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Literal, cast
@@ -32,6 +33,107 @@ from .sqlite_operation_baseline import (
 @dataclass(slots=True)
 class _IdentityIterationState:
     started: bool = False
+    poisoned: bool = False
+    completed: bool = False
+
+
+_COOPERATIVE_CONSTRUCTION_TOKEN = object()
+
+
+class _CooperativeSourceItem:
+    """Opaque, one-at-a-time source handoff for the internal stage protocol."""
+
+    __slots__ = (
+        "_before_total_changes",
+        "_connection",
+        "_entry",
+        "_item_nonce",
+        "_sequence",
+        "_source_session",
+        "_stage_session",
+        "_transaction_epoch",
+    )
+
+    def __init__(
+        self,
+        entry: BaselineEntryInput,
+        connection: SQLiteV1BaselineConnectionOwner,
+        transaction_epoch: int,
+        source_session: object,
+        stage_session: object,
+        sequence: int,
+        before_total_changes: int,
+        item_nonce: object,
+        construction_token: object,
+    ) -> None:
+        if construction_token is not _COOPERATIVE_CONSTRUCTION_TOKEN:
+            raise TypeError("cooperative source items are module-private")
+        self._entry = entry
+        self._connection = connection
+        self._transaction_epoch = transaction_epoch
+        self._source_session = source_session
+        self._stage_session = stage_session
+        self._sequence = sequence
+        self._before_total_changes = before_total_changes
+        self._item_nonce = item_nonce
+
+
+class _CooperativeWriteReceipt:
+    """Opaque exact-+2 receipt; consumption mutates only this current receipt."""
+
+    __slots__ = (
+        "_after_total_changes",
+        "_before_total_changes",
+        "_connection",
+        "_consumed",
+        "_entry",
+        "_item",
+        "_item_nonce",
+        "_sequence",
+        "_source_session",
+        "_stage_session",
+        "_transaction_epoch",
+    )
+
+    def __init__(
+        self,
+        item: _CooperativeSourceItem,
+        stage_session: object,
+        after_total_changes: int,
+        construction_token: object,
+    ) -> None:
+        if construction_token is not _COOPERATIVE_CONSTRUCTION_TOKEN:
+            raise TypeError("cooperative write receipts are module-private")
+        self._item = item
+        self._entry = item._entry
+        self._connection = item._connection
+        self._transaction_epoch = item._transaction_epoch
+        self._source_session = item._source_session
+        self._stage_session = stage_session
+        self._sequence = item._sequence
+        self._before_total_changes = item._before_total_changes
+        self._after_total_changes = after_total_changes
+        self._item_nonce = item._item_nonce
+        self._consumed = False
+
+
+def _issue_cooperative_write_receipt(
+    item: _CooperativeSourceItem,
+    stage_session: object,
+    after_total_changes: int,
+) -> _CooperativeWriteReceipt:
+    """Issue a receipt only from the private source/stage cooperation lane."""
+
+    if type(item) is not _CooperativeSourceItem or type(after_total_changes) is not int:
+        raise TypeError("cooperative write receipt inputs are invalid")
+    if stage_session is not item._stage_session:
+        raise ValueError("cooperative write receipt stage binding is invalid")
+    return _CooperativeWriteReceipt(
+        item,
+        stage_session,
+        after_total_changes,
+        _COOPERATIVE_CONSTRUCTION_TOKEN,
+    )
 
 
 _TRANSACTION_TOKENS = frozenset({"BEGIN", "COMMIT", "END", "ROLLBACK", "SAVEPOINT", "RELEASE"})
@@ -280,6 +382,55 @@ class SQLiteV1BaselineSourceSummary:
         self._identity_iteration_state.started = True
         return self._iterate_identity_entries()
 
+    def _cooperative_identity_entries(
+        self,
+        stage_session: object,
+        abort_stage: Callable[[], None],
+    ) -> Generator[_CooperativeSourceItem, _CooperativeWriteReceipt, None]:
+        """Open the private single-item source-to-stage handoff.
+
+        Unlike the public iterator, this walker accepts only the exact +2
+        receipt for the item it most recently yielded. Its accepted
+        ``total_changes`` value is local to this generator and never weakens
+        the frozen public capture guard.
+        """
+
+        if self._identity_iteration_state.started:
+            raise ValueError("SQLite v1 baseline identity iterator is already consumed")
+        self._assert_capture_transaction()
+        self._require_implemented_families()
+        self._identity_iteration_state.started = True
+        return self._iterate_cooperative_identity_entries(stage_session, abort_stage)
+
+    def _require_implemented_families(self) -> None:
+        implemented = {
+            "schema-envelope",
+            "migration-lineage",
+            "stream-head",
+            "record-identity",
+            "checkpoint-current",
+            "checkpoint-revision",
+            "lease-current",
+            "used-lease-identity",
+            "legal-hold",
+            "migration-lock-current",
+            "used-migration-lock-identity",
+            "legacy-operation",
+        }
+        if (
+            self.counts_by_kind["schema-envelope"] != 1
+            or self.counts_by_kind["migration-lineage"] != 1
+            or self.counts_by_kind["migration-lock-current"] != 1
+            or any(
+                self.counts_by_kind[kind] != 0
+                for kind in BASELINE_ENTRY_KINDS
+                if kind not in implemented
+            )
+        ):
+            raise ValueError(
+                "SQLite v1 baseline iterator cannot cover unimplemented source families"
+            )
+
     def _iterate_identity_entries(self) -> Iterator[BaselineEntryInput]:
         self._assert_capture_transaction()
         families: tuple[
@@ -346,6 +497,117 @@ class SQLiteV1BaselineSourceSummary:
             self._assert_capture_transaction()
             if emitted != self.counts_by_kind[kind]:
                 raise ValueError(f"SQLite v1 baseline {kind} count changed during capture")
+
+    def _iterate_cooperative_identity_entries(
+        self,
+        stage_session: object,
+        abort_stage: Callable[[], None],
+    ) -> Generator[_CooperativeSourceItem, _CooperativeWriteReceipt, None]:
+        expected_total_changes = self._source_total_changes
+        source_session = object()
+        sequence = 0
+        envelope = self.source_envelope
+        completed = False
+        try:
+            for kind, sql, capture, _fetch_size in _identity_families():
+                self._assert_cooperative_transaction(expected_total_changes)
+                cursor = self._connection.execute(sql)
+                emitted = 0
+                try:
+                    while True:
+                        self._assert_cooperative_transaction(expected_total_changes)
+                        row = cursor.fetchone()
+                        if row is None:
+                            break
+                        self._assert_cooperative_transaction(expected_total_changes)
+                        emitted += 1
+                        try:
+                            entry = capture(row)
+                            self._reconcile_identity_entry(entry, envelope)
+                        except Exception as error:
+                            raise ValueError(
+                                f"SQLite v1 baseline {kind} source row is invalid"
+                            ) from error
+                        item = _CooperativeSourceItem(
+                            entry,
+                            self._connection,
+                            self._captured_transaction_epoch,
+                            source_session,
+                            stage_session,
+                            sequence,
+                            expected_total_changes,
+                            object(),
+                            _COOPERATIVE_CONSTRUCTION_TOKEN,
+                        )
+                        receipt = yield item
+                        expected_total_changes = self._consume_cooperative_receipt(
+                            item,
+                            receipt,
+                            expected_total_changes,
+                        )
+                        sequence += 1
+                        del item, receipt
+                finally:
+                    cursor.close()
+                self._assert_cooperative_transaction(expected_total_changes)
+                if emitted != self.counts_by_kind[kind]:
+                    raise ValueError(f"SQLite v1 baseline {kind} count changed during capture")
+            if sequence != self.expected_entry_count:
+                raise ValueError("SQLite v1 baseline cooperative source count drifted")
+            completed = True
+            self._identity_iteration_state.completed = True
+        finally:
+            if not completed:
+                self._identity_iteration_state.poisoned = True
+                with suppress(BaseException):
+                    abort_stage()
+
+    def _consume_cooperative_receipt(
+        self,
+        item: _CooperativeSourceItem,
+        receipt: _CooperativeWriteReceipt,
+        expected_total_changes: int,
+    ) -> int:
+        if (
+            expected_total_changes < 0
+            or expected_total_changes > MAX_SAFE_INTEGER - 2
+            or type(receipt) is not _CooperativeWriteReceipt
+            or receipt._consumed
+            or receipt._item is not item
+            or receipt._entry is not item._entry
+            or receipt._connection is not self._connection
+            or receipt._transaction_epoch != self._captured_transaction_epoch
+            or receipt._source_session is not item._source_session
+            or receipt._stage_session is not item._stage_session
+            or receipt._item_nonce is not item._item_nonce
+            or receipt._sequence != item._sequence
+            or receipt._before_total_changes != expected_total_changes
+            or receipt._after_total_changes != expected_total_changes + 2
+        ):
+            self._identity_iteration_state.poisoned = True
+            raise ValueError("BLR_COOP_RECEIPT: cooperative write receipt is invalid")
+        self._assert_cooperative_transaction(expected_total_changes + 2)
+        self._assert_cooperative_transaction(receipt._after_total_changes)
+        receipt._consumed = True
+        self._assert_cooperative_transaction(receipt._after_total_changes)
+        return receipt._after_total_changes
+
+    def _poison_cooperative_state(self) -> None:
+        """Close the one-shot cooperation lane after any handshake failure."""
+
+        self._identity_iteration_state.started = True
+        self._identity_iteration_state.poisoned = True
+
+    def _assert_cooperative_transaction(self, expected_total_changes: int) -> None:
+        if not self._connection.in_exclusive_transaction:
+            self._identity_iteration_state.poisoned = True
+            raise ValueError("SQLite v1 baseline requires the captured EXCLUSIVE transaction")
+        if (
+            self._connection.transaction_epoch != self._captured_transaction_epoch
+            or self._connection.total_changes != expected_total_changes
+        ):
+            self._identity_iteration_state.poisoned = True
+            raise ValueError("BLR_COOP_SOURCE_CHANGED: cooperative source transaction changed")
 
     def _assert_capture_transaction(self) -> None:
         if not self._connection.in_exclusive_transaction:
@@ -488,6 +750,46 @@ _LEGACY_OPERATION_ENTRY_SQL = """SELECT tenant_id, operation_id,
  operation_name, request_hash, result_blob, result_hash, committed_at_ms
  FROM ge_cycle_operations
  ORDER BY operation_id COLLATE BINARY, tenant_id COLLATE BINARY"""
+
+
+def _identity_families() -> tuple[
+    tuple[BaselineEntryKind, str, Callable[[object], BaselineEntryInput], int],
+    ...,
+]:
+    return (
+        ("schema-envelope", _SCHEMA_ENTRY_SQL, _schema_entry, 256),
+        ("migration-lineage", _MIGRATION_ENTRY_SQL, _migration_entry, 256),
+        ("stream-head", _STREAM_ENTRY_SQL, _stream_entry, 256),
+        ("record-identity", _RECORD_ENTRY_SQL, _record_entry, 1),
+        ("checkpoint-current", _CHECKPOINT_CURRENT_ENTRY_SQL, _checkpoint_current_entry, 1),
+        (
+            "checkpoint-revision",
+            _CHECKPOINT_REVISION_ENTRY_SQL,
+            _checkpoint_revision_entry,
+            1,
+        ),
+        ("lease-current", _LEASE_CURRENT_ENTRY_SQL, _lease_current_entry, 256),
+        (
+            "used-lease-identity",
+            _USED_LEASE_IDENTITY_ENTRY_SQL,
+            _used_lease_identity_entry,
+            256,
+        ),
+        ("legal-hold", _LEGAL_HOLD_ENTRY_SQL, _legal_hold_entry, 256),
+        (
+            "migration-lock-current",
+            _MIGRATION_LOCK_ENTRY_SQL,
+            _migration_lock_entry,
+            256,
+        ),
+        (
+            "used-migration-lock-identity",
+            _USED_MIGRATION_LOCK_IDENTITY_ENTRY_SQL,
+            _used_migration_lock_identity_entry,
+            256,
+        ),
+        ("legacy-operation", _LEGACY_OPERATION_ENTRY_SQL, _legacy_operation_entry, 1),
+    )
 
 _LEGACY_OPERATION_NAMES = frozenset(
     {
@@ -945,10 +1247,18 @@ def capture_sqlite_v1_baseline_source_summary(
     if not connection.in_exclusive_transaction:
         raise ValueError("SQLite v1 baseline capture requires an active EXCLUSIVE transaction")
     captured = _integer(captured_at_ms, "capture time")
-    application_row = connection.execute("PRAGMA application_id").fetchone()
+    application_cursor = connection.execute("SELECT application_id FROM pragma_application_id")
+    try:
+        application_row = application_cursor.fetchone()
+    finally:
+        application_cursor.close()
     if application_row is None or _integer(application_row[0], "application ID") != 1_195_724_359:
         raise ValueError("SQLite v1 baseline application identity is invalid")
-    user_version_row = connection.execute("PRAGMA user_version").fetchone()
+    user_version_cursor = connection.execute("SELECT user_version FROM pragma_user_version")
+    try:
+        user_version_row = user_version_cursor.fetchone()
+    finally:
+        user_version_cursor.close()
     if user_version_row is None or _integer(user_version_row[0], "user version", 1) != 1:
         raise ValueError("SQLite v1 baseline user version is invalid")
     source = connection.execute(

@@ -21,6 +21,14 @@ import {
   encodeOperationBaselineState,
 } from "./operation-baseline.js";
 import {
+  SQLITE_BASELINE_COOPERATIVE_ENTRIES,
+  SQLITE_BASELINE_COOPERATIVE_POISON,
+  SQLITE_BASELINE_CONSUME_OWNED_WRITE,
+  SQLITE_BASELINE_FINISH_COOPERATIVE_WRITES,
+  type SQLiteBaselineCooperativeStage,
+  type SQLiteBaselineOwnedWriteReceipt,
+} from "./operation-baseline-cooperation.js";
+import {
   sqliteBlob,
   sqliteNullableText,
   sqliteRow,
@@ -53,7 +61,7 @@ export interface SQLiteV1BaselineSourceSummary {
 }
 
 interface SQLiteV1BaselineTransactionGuard {
-  readonly totalChanges: number;
+  totalChanges: number;
   readonly transactionEpoch: bigint;
 }
 
@@ -781,14 +789,30 @@ export function captureSQLiteV1BaselineSourceSummary(
   }
   const captured = capturedAt(capturedAtMs);
   const applicationId = sqliteSafeInteger(
-    sqliteRow(connection.prepare("PRAGMA application_id", OPERATION).get(), 1, OPERATION, "application ID")[0],
+    sqliteRow(
+      connection.prepare(
+        "SELECT application_id FROM pragma_application_id",
+        OPERATION,
+      ).get(),
+      1,
+      OPERATION,
+      "application ID",
+    )[0],
     1195724359,
     1195724359,
     OPERATION,
     "application ID",
   );
   const pragmaUserVersion = sqliteSafeInteger(
-    sqliteRow(connection.prepare("PRAGMA user_version", OPERATION).get(), 1, OPERATION, "user version")[0],
+    sqliteRow(
+      connection.prepare(
+        "SELECT user_version FROM pragma_user_version",
+        OPERATION,
+      ).get(),
+      1,
+      OPERATION,
+      "user version",
+    )[0],
     1,
     1,
     OPERATION,
@@ -865,14 +889,18 @@ export function captureSQLiteV1BaselineSourceSummary(
   );
   if (lockHighWater < maximumObservedAtMs) return fail("SQLite v1 provider clock high-water predates source state");
   if (captured < lockHighWater) return fail("SQLite v1 baseline capture predates provider clock high-water");
-  const transactionGuard = Object.freeze({
+  const transactionGuard: SQLiteV1BaselineTransactionGuard = Object.freeze({
     totalChanges: totalChanges(connection),
     transactionEpoch: connection.transactionEpoch,
   });
   requireCaptureTransaction(connection, transactionGuard);
   const frozenEnvelope = Object.freeze(sourceEnvelope);
   let entriesTaken = false;
-  const entries = (): Generator<OperationBaselineEntryInput, void, undefined> => {
+  const takeEntries = (guard: SQLiteV1BaselineTransactionGuard): Generator<
+    OperationBaselineEntryInput,
+    void,
+    undefined
+  > => {
     const implementedKinds = new Set<OperationBaselineEntryKind>([
       "schema-envelope",
       "migration-lineage",
@@ -887,7 +915,7 @@ export function captureSQLiteV1BaselineSourceSummary(
       "used-migration-lock-identity",
       "legacy-operation",
     ]);
-    requireCaptureTransaction(connection, transactionGuard);
+    requireCaptureTransaction(connection, guard);
     if (countsByKind["schema-envelope"] !== 1
         || countsByKind["migration-lineage"] !== 1
         || countsByKind["migration-lock-current"] !== 1
@@ -900,9 +928,110 @@ export function captureSQLiteV1BaselineSourceSummary(
       connection,
       frozenEnvelope,
       countsByKind,
-      transactionGuard,
+      guard,
       expectedMigrationAppliedAtMs,
     );
+  };
+  const entries = (): Generator<OperationBaselineEntryInput, void, undefined> =>
+    takeEntries(transactionGuard);
+  const cooperativeEntries = (
+    requestedConnection: SQLiteConnection,
+    stage: SQLiteBaselineCooperativeStage,
+  ): Generator<
+    OperationBaselineEntryInput,
+    void,
+    SQLiteBaselineOwnedWriteReceipt | undefined
+  > => {
+    const cooperativeGuard: SQLiteV1BaselineTransactionGuard = {
+      totalChanges: transactionGuard.totalChanges,
+      transactionEpoch: transactionGuard.transactionEpoch,
+    };
+    return (function* cooperativeSourceGenerator() {
+      let completed = false;
+      let pending = false;
+      let primaryFailure: unknown;
+      let sequence = 0;
+      let upstream: Generator<OperationBaselineEntryInput, void, undefined> | undefined;
+      try {
+        if (requestedConnection !== connection) {
+          fail("SQLite v1 baseline cooperative source connection is invalid");
+        }
+        upstream = takeEntries(cooperativeGuard);
+        let next = upstream.next();
+        while (!next.done) {
+          const entry = next.value;
+          pending = true;
+          const receipt: SQLiteBaselineOwnedWriteReceipt | undefined = yield entry;
+          if (!connection.isTransaction
+              || connection.transactionMode !== "exclusive"
+              || connection.transactionEpoch !== cooperativeGuard.transactionEpoch) {
+            stage[SQLITE_BASELINE_COOPERATIVE_POISON](
+              "SQLite baseline cooperative source transaction changed",
+            );
+          }
+          // This is intentionally the last operation before stage consumption.
+          const currentTotalChanges = totalChanges(connection);
+          const acceptedTotalChanges = stage[SQLITE_BASELINE_CONSUME_OWNED_WRITE](
+            connection,
+            entry,
+            receipt,
+            sequence,
+            cooperativeGuard.totalChanges,
+            currentTotalChanges,
+            cooperativeGuard.transactionEpoch,
+          );
+          // Independently fence DML injected during receipt validation.
+          if (totalChanges(connection) !== acceptedTotalChanges) {
+            stage[SQLITE_BASELINE_COOPERATIVE_POISON](
+              "SQLite baseline cooperative receipt validation observed an unexplained write",
+            );
+          }
+          cooperativeGuard.totalChanges = acceptedTotalChanges;
+          requireCaptureTransaction(connection, cooperativeGuard);
+          pending = false;
+          sequence += 1;
+          next = upstream.next();
+        }
+        if (sequence !== Number(total)) {
+          stage[SQLITE_BASELINE_COOPERATIVE_POISON](
+            "SQLite baseline cooperative source count is invalid",
+          );
+        }
+        stage[SQLITE_BASELINE_FINISH_COOPERATIVE_WRITES](
+          connection,
+          sequence,
+          cooperativeGuard.totalChanges,
+          totalChanges(connection),
+          cooperativeGuard.transactionEpoch,
+        );
+        completed = true;
+      } catch (error) {
+        primaryFailure = error;
+        try {
+          stage[SQLITE_BASELINE_COOPERATIVE_POISON](
+            "SQLite baseline cooperative source stream failed",
+          );
+        } catch {
+          // Preserve the exact source, receipt, or writer failure.
+        }
+      } finally {
+        try {
+          upstream?.return?.();
+        } catch (error) {
+          primaryFailure ??= error;
+        }
+        if (!completed && pending) {
+          try {
+            stage[SQLITE_BASELINE_COOPERATIVE_POISON](
+              "SQLite baseline cooperative source receipt was skipped",
+            );
+          } catch (error) {
+            primaryFailure ??= error;
+          }
+        }
+        if (primaryFailure !== undefined) throw primaryFailure;
+      }
+    })();
   };
   return Object.freeze({
     sourceEnvelope: frozenEnvelope,
@@ -910,5 +1039,6 @@ export function captureSQLiteV1BaselineSourceSummary(
     expectedEntryCount: Number(total),
     maximumObservedAtMs,
     entries,
+    [SQLITE_BASELINE_COOPERATIVE_ENTRIES]: cooperativeEntries,
   });
 }

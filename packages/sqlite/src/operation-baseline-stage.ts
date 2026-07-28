@@ -14,9 +14,19 @@ import {
   MAX_BASELINE_KEY_BYTES,
   MAX_BASELINE_STATE_BYTES,
   decodeOperationBaselineCanonicalBytes,
+  encodeOperationBaselineKey,
+  encodeOperationBaselineState,
+  type OperationBaselineEntryInput,
   type OperationBaselineEntryKind,
   validateOperationBaselineEntryBytes,
 } from "./operation-baseline.js";
+import {
+  SQLITE_BASELINE_COOPERATIVE_POISON,
+  SQLITE_BASELINE_CONSUME_OWNED_WRITE,
+  SQLITE_BASELINE_FINISH_COOPERATIVE_WRITES,
+  SQLITE_BASELINE_OWNED_WRITE,
+  type SQLiteBaselineOwnedWriteReceipt,
+} from "./operation-baseline-cooperation.js";
 import {
   sqliteBlob,
   sqliteRow,
@@ -701,6 +711,15 @@ interface RelationInsert {
   readonly values: readonly RelationValue[];
 }
 
+interface PendingOwnedWriteReceipt {
+  readonly afterTotalChanges: number;
+  readonly beforeTotalChanges: number;
+  readonly entry: OperationBaselineEntryInput;
+  readonly receipt: SQLiteBaselineOwnedWriteReceipt;
+  readonly sequence: number;
+  readonly transactionEpoch: bigint;
+}
+
 const LEGACY_OPERATIONS = new Set<CycleStoreMutationOperation>([
   "append",
   "save-checkpoint",
@@ -1068,6 +1087,9 @@ export class SQLiteBaselineTempStage {
   #state: SQLiteBaselineTempStageState = "open";
   #transactionEpoch: bigint;
   #allowedTotalChanges: number;
+  #nextOwnedWriteSequence = 0;
+  #pendingOwnedWrite: PendingOwnedWriteReceipt | undefined;
+  #writeLane: "unset" | "standalone" | "cooperative" = "unset";
 
   constructor(
     connection: SQLiteConnection,
@@ -1087,12 +1109,165 @@ export class SQLiteBaselineTempStage {
     return this.#state;
   }
 
+  /**
+   * Package-private cooperative source write. The symbol is deliberately not
+   * re-exported from the package and the returned object is bound by private
+   * pending-object identity.
+   */
+  [SQLITE_BASELINE_OWNED_WRITE](
+    connection: SQLiteConnection,
+    entry: OperationBaselineEntryInput,
+    sequence: number,
+  ): SQLiteBaselineOwnedWriteReceipt {
+    this.#requireOpenOwner();
+    if (connection !== this.#connection) {
+      return this.#poison("SQLite baseline cooperative writer connection is invalid");
+    }
+    if (!Number.isSafeInteger(sequence) || sequence < 0) {
+      return this.#poison("SQLite baseline cooperative writer sequence is invalid");
+    }
+    if (sequence !== this.#nextOwnedWriteSequence
+        || this.#pendingOwnedWrite !== undefined) {
+      return this.#poison("SQLite baseline cooperative writer order is invalid");
+    }
+    if (this.#writeLane === "standalone") {
+      return this.#poison("SQLite baseline cooperative and standalone writes cannot be mixed");
+    }
+    if (this.#writeLane === "unset") {
+      if (sequence !== 0
+          || scalarCount(
+            this.#connection,
+            `SELECT count(*) FROM temp.${STAGE_TABLE}`,
+            "TEMP cooperative initial common count",
+          ) !== 0
+          || scalarCount(
+            this.#connection,
+            `SELECT count(*) FROM temp.${RELATION_VIEW}`,
+            "TEMP cooperative initial relation count",
+          ) !== 0) {
+        return this.#poison("SQLite baseline cooperative writer did not start from an empty stage");
+      }
+      this.#requireAllowedChanges();
+      this.#writeLane = "cooperative";
+    }
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+      return this.#poison("SQLite baseline cooperative source entry is invalid");
+    }
+    const before = this.#requireAllowedChanges();
+    let keyBytes: Buffer;
+    let stateBytes: Buffer;
+    try {
+      keyBytes = encodeOperationBaselineKey(entry.entryKind, entry.key);
+      stateBytes = encodeOperationBaselineState(entry.entryKind, entry.state);
+    } catch {
+      return this.#poison("SQLite baseline cooperative source entry is invalid");
+    }
+    this.#insertEntryWithRelation({ entryKind: entry.entryKind, keyBytes, stateBytes });
+    const after = this.#requireAllowedChanges();
+    // A second read is a terminal fence against DML injected during the first
+    // post-write counter read.
+    if (this.#requireAllowedChanges() !== after || after !== before + 2) {
+      return this.#poison("SQLite baseline cooperative write delta is invalid");
+    }
+    if (!Number.isSafeInteger(after)) {
+      return this.#poison("SQLite baseline cooperative write delta is invalid");
+    }
+    const receipt = Object.freeze(Object.create(null, {
+      kind: {
+        enumerable: true,
+        value: "sqlite-baseline-owned-write-receipt",
+      },
+    })) as SQLiteBaselineOwnedWriteReceipt;
+    this.#pendingOwnedWrite = {
+      afterTotalChanges: after,
+      beforeTotalChanges: before,
+      entry,
+      receipt,
+      sequence,
+      transactionEpoch: this.#transactionEpoch,
+    };
+    return receipt;
+  }
+
+  /** Consume and burn the exact pending receipt before another write may run. */
+  [SQLITE_BASELINE_CONSUME_OWNED_WRITE](
+    connection: SQLiteConnection,
+    entry: OperationBaselineEntryInput,
+    receipt: SQLiteBaselineOwnedWriteReceipt | undefined,
+    sequence: number,
+    beforeTotalChanges: number,
+    currentTotalChanges: number,
+    transactionEpoch: bigint,
+  ): number {
+    this.#requireOpenOwner();
+    const actualTotalChanges = this.#requireAllowedChanges();
+    const pending = this.#pendingOwnedWrite;
+    // Burn private pending state on every presentation. A wrong or forged
+    // receipt can never be followed by a retry with the real object.
+    this.#pendingOwnedWrite = undefined;
+    if (pending === undefined
+        || connection !== this.#connection
+        || receipt !== pending.receipt
+        || entry !== pending.entry
+        || sequence !== pending.sequence
+        || sequence !== this.#nextOwnedWriteSequence
+        || beforeTotalChanges !== pending.beforeTotalChanges
+        || currentTotalChanges !== actualTotalChanges
+        || actualTotalChanges !== pending.afterTotalChanges
+        || pending.afterTotalChanges !== pending.beforeTotalChanges + 2
+        || transactionEpoch !== pending.transactionEpoch
+        || this.#transactionEpoch !== pending.transactionEpoch) {
+      return this.#poison(
+        "SQLite baseline owned-write receipt binding does not match the source item",
+      );
+    }
+    if (this.#requireAllowedChanges() !== pending.afterTotalChanges) {
+      return this.#poison("SQLite baseline owned-write receipt observed an unexplained write");
+    }
+    this.#nextOwnedWriteSequence += 1;
+    return pending.afterTotalChanges;
+  }
+
+  /** Prove that the source consumed every issued receipt exactly once. */
+  [SQLITE_BASELINE_FINISH_COOPERATIVE_WRITES](
+    connection: SQLiteConnection,
+    expectedSequence: number,
+    expectedTotalChanges: number,
+    currentTotalChanges: number,
+    transactionEpoch: bigint,
+  ): void {
+    this.#requireOpenOwner();
+    const actualTotalChanges = this.#requireAllowedChanges();
+    if (this.#writeLane !== "cooperative"
+        || connection !== this.#connection
+        || this.#pendingOwnedWrite !== undefined
+        || !Number.isSafeInteger(expectedSequence)
+        || expectedSequence !== this.#nextOwnedWriteSequence
+        || expectedTotalChanges !== actualTotalChanges
+        || currentTotalChanges !== actualTotalChanges
+        || transactionEpoch !== this.#transactionEpoch) {
+      return this.#poison("SQLite baseline cooperative writer did not finish exactly");
+    }
+    this.#requireAllowedChanges();
+  }
+
+  /** Package-private fail-closed bridge used when source receipt checks fail. */
+  [SQLITE_BASELINE_COOPERATIVE_POISON](message: string): never {
+    if (this.#state === "open") return this.#poison(message);
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_CORRUPTION",
+      OPERATION,
+      message,
+    );
+  }
+
   /** Insert one already-canonical entry with an exact one-row write delta. */
   insertCommon(
     entryKind: OperationBaselineEntryKind,
     keyBytes: Uint8Array,
     stateBytes: Uint8Array,
   ): void {
+    this.#requireStandaloneWriteLane();
     const prepared = this.#prepareEntry(entryKind, keyBytes, stateBytes);
     this.#insertCommonPrepared(prepared);
   }
@@ -1104,6 +1279,11 @@ export class SQLiteBaselineTempStage {
    * carrier before either write; no decoded result is retained afterward.
    */
   insertEntryWithRelation(entry: SQLiteBaselineStageEntry): void {
+    this.#requireStandaloneWriteLane();
+    this.#insertEntryWithRelation(entry);
+  }
+
+  #insertEntryWithRelation(entry: SQLiteBaselineStageEntry): void {
     if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
       return invalid("SQLite baseline staged entry is invalid");
     }
@@ -1203,6 +1383,7 @@ export class SQLiteBaselineTempStage {
   /** Drop every owned TEMP object in reverse creation order. */
   dispose(): void {
     if (this.#state === "disposed") return;
+    this.#pendingOwnedWrite = undefined;
     if (!this.#connection.isOpen) {
       this.#state = "disposed";
       ACTIVE_STAGES.delete(this.#connection);
@@ -1273,6 +1454,14 @@ export class SQLiteBaselineTempStage {
         || this.#connection.transactionEpoch !== this.#transactionEpoch) {
       return this.#poison("SQLite baseline TEMP stage transaction changed");
     }
+  }
+
+  #requireStandaloneWriteLane(): void {
+    this.#requireOpenOwner();
+    if (this.#writeLane === "cooperative") {
+      return this.#poison("SQLite baseline cooperative and standalone writes cannot be mixed");
+    }
+    this.#writeLane = "standalone";
   }
 
   #requireAllowedChanges(): number {
@@ -1360,6 +1549,7 @@ export class SQLiteBaselineTempStage {
   }
 
   #poison(message: string): never {
+    this.#pendingOwnedWrite = undefined;
     this.#state = "poisoned";
     throw new CycleStoreProviderError(
       "GE_CYCLE_STORE_CORRUPTION",

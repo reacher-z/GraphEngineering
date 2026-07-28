@@ -19,7 +19,12 @@ from .sqlite_operation_baseline import (
     BaselineEntryKind,
     capture_baseline_entry,
 )
-from .sqlite_operation_baseline_source import SQLiteV1BaselineConnectionOwner
+from .sqlite_operation_baseline_source import (
+    SQLiteV1BaselineConnectionOwner,
+    _CooperativeSourceItem,
+    _CooperativeWriteReceipt,
+    _issue_cooperative_write_receipt,
+)
 
 DEFAULT_SQLITE_V1_BASELINE_TEMP_CACHE_KIB = 8_192
 MIN_SQLITE_V1_BASELINE_TEMP_CACHE_KIB = 1_024
@@ -1021,6 +1026,11 @@ class SQLiteV1BaselineTempStage:
     __slots__ = (
         "_allowed_total_changes",
         "_connection",
+        "_cooperative_next_sequence",
+        "_cooperative_pending_receipt",
+        "_cooperative_source_session",
+        "_cooperative_stage_session",
+        "_cooperative_write_active",
         "_created_indexes",
         "_created_tables",
         "_created_view",
@@ -1036,6 +1046,11 @@ class SQLiteV1BaselineTempStage:
         self._state: SQLiteV1BaselineTempStageState = "open"
         self._transaction_epoch = connection.transaction_epoch
         self._allowed_total_changes = connection.total_changes
+        self._cooperative_next_sequence = 0
+        self._cooperative_pending_receipt: _CooperativeWriteReceipt | None = None
+        self._cooperative_source_session: object | None = None
+        self._cooperative_stage_session = object()
+        self._cooperative_write_active = False
         if not connection.in_exclusive_transaction:
             self._state = "disposed"
             raise ValueError(
@@ -1125,6 +1140,10 @@ class SQLiteV1BaselineTempStage:
         """Insert one exact canonical entry and require a one-row write delta."""
 
         self._assert_open_and_bound()
+        if self._cooperative_source_session is not None and not self._cooperative_write_active:
+            self._poison(
+                "BLR_COOP_SEQUENCE: direct common writes cannot enter a cooperative stream"
+            )
         try:
             if not isinstance(entry, BaselineEntryInput):
                 raise TypeError("baseline common-stage entry has the wrong type")
@@ -1166,6 +1185,10 @@ class SQLiteV1BaselineTempStage:
         """
 
         self._assert_open_and_bound()
+        if self._cooperative_source_session is not None and not self._cooperative_write_active:
+            self._poison(
+                "BLR_COOP_SEQUENCE: direct paired writes cannot enter a cooperative stream"
+            )
         try:
             if not isinstance(entry, BaselineEntryInput):
                 raise TypeError("baseline relation entry has the wrong type")
@@ -1210,6 +1233,80 @@ class SQLiteV1BaselineTempStage:
             )
         self._allowed_total_changes = after
         self._assert_open_and_bound()
+
+    def _insert_cooperative_entry(
+        self,
+        item: _CooperativeSourceItem,
+    ) -> _CooperativeWriteReceipt:
+        """Synchronously pair one authentic source item and issue its sole receipt."""
+
+        self._assert_open_and_bound()
+        pending = self._cooperative_pending_receipt
+        if pending is not None:
+            if not pending._consumed:
+                self._poison("BLR_COOP_RECEIPT: prior cooperative receipt was not consumed")
+            self._cooperative_pending_receipt = None
+        if type(item) is not _CooperativeSourceItem:
+            self._poison("BLR_COOP_ITEM: cooperative source item is invalid")
+        if self._cooperative_source_session is None:
+            self._cooperative_source_session = item._source_session
+        if (
+            item._connection is not self._connection
+            or item._transaction_epoch != self._transaction_epoch
+            or item._source_session is not self._cooperative_source_session
+            or item._stage_session is not self._cooperative_stage_session
+            or item._sequence != self._cooperative_next_sequence
+            or item._before_total_changes != self._allowed_total_changes
+            or item._before_total_changes != self._connection.total_changes
+        ):
+            self._poison("BLR_COOP_ITEM: cooperative source item binding is invalid")
+
+        before = self._connection.total_changes
+        self._cooperative_write_active = True
+        try:
+            self.insert_entry_with_relation(item._entry)
+        finally:
+            self._cooperative_write_active = False
+        after = self._connection.total_changes
+        if after != before + 2 or after != self._allowed_total_changes:
+            self._poison("BLR_COOP_DELTA: cooperative paired write did not change exactly two rows")
+        receipt = _issue_cooperative_write_receipt(
+            item,
+            self._cooperative_stage_session,
+            after,
+        )
+        self._assert_open_and_bound()
+        self._cooperative_pending_receipt = receipt
+        self._cooperative_next_sequence += 1
+        return receipt
+
+    def _finish_cooperative_stream(self, source_session: object, expected_count: int) -> None:
+        """Prove that the final receipt was burned and the sequence is exact."""
+
+        self._assert_open_and_bound()
+        pending = self._cooperative_pending_receipt
+        if (
+            self._cooperative_source_session is not source_session
+            or type(expected_count) is not int
+            or expected_count < 0
+            or self._cooperative_next_sequence != expected_count
+            or pending is None
+            or not pending._consumed
+        ):
+            self._poison("BLR_COOP_SEQUENCE: cooperative stream completion is invalid")
+        self._cooperative_pending_receipt = None
+        self._assert_open_and_bound()
+
+    def _abort_cooperative_stream(self) -> Never:
+        """Permanently poison a stage whose source/receipt handshake failed."""
+
+        self._poison("BLR_COOP_ABORTED: cooperative source-to-stage stream failed")
+
+    def _poison_cooperative_state(self) -> None:
+        """Poison without replacing the authoritative cooperation error."""
+
+        self._state = "poisoned"
+        self._cooperative_pending_receipt = None
 
     def _legacy_relation_insert_for(
         self,
@@ -1416,6 +1513,7 @@ class SQLiteV1BaselineTempStage:
 
     def _poison(self, message: str) -> Never:
         self._state = "poisoned"
+        self._cooperative_pending_receipt = None
         raise ValueError(message)
 
     def _drop_created_objects(self) -> None:

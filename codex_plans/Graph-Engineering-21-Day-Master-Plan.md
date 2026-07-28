@@ -8789,3 +8789,103 @@ rollback/rebegin, savepoint epoch, prepared/trusted DDL, injected DML at every
 boundary, relation failure after common, early generator close, and legacy
 carrier mutation between capture and paired projection. Only after this gate
 is green may §31.34.22 claim a real nonempty source-to-stage stream.
+
+### 31.34.26 Cooperative source-to-stage streaming checkpoint
+
+The §31.34.25 gate is now implemented and adversarially closed in both native
+runtimes. The production v1 source iterator can stream directly into the
+paired FILE-backed TEMP relation stage without materializing the source set
+and without relaxing the public iterator's frozen `total_changes` guard. This
+is the first checkpoint that may claim a real nonempty source-to-stage stream;
+it remains an internal pre-migration primitive and is not exported from the
+TypeScript or Python package root.
+
+The required lifecycle is enforced in this exact order:
+
+1. configure and read back the bounded FILE-backed TEMP profile outside a
+   transaction;
+2. begin one caller-owned `EXCLUSIVE` transaction;
+3. create and validate the empty TEMP common/relation catalog;
+4. capture the v1 source summary after stage DDL establishes its final epoch;
+5. bind one lane to the exact connection, epoch, initial total-change value,
+   empty common and relation counts, sequence zero, unused source iterator,
+   open stage and absent pending receipt;
+6. repeat one-row source fetch, canonical validation, common `+1`, matched
+   relation `+1`, receipt issue, receipt consumption and independent source
+   fence; and
+7. prove terminal sequence/count equality, grouped common counts and
+   bidirectional key coverage.
+
+Each handoff retains only the current canonical source item and one opaque
+receipt. The receipt is bound to the exact connection object, transaction
+epoch, source item identity, stage-private session or pending-object identity,
+monotonic sequence, before count and safe exact `after = before + 2` count. A
+real receipt is single-use. Missing, forged, replayed, skipped, cross-stage,
+wrong-entry, wrong-sequence, wrong-before, wrong-after or wrong-epoch evidence
+is terminal; pending evidence is burned and cannot be retried. Standalone
+common or paired writes cannot enter a cooperative lane while a receipt is
+pending or after the stream completes.
+
+The source advances its private expected write count only after the stage has
+independently re-read its write fence, consumed the exact pending receipt and
+returned the accepted count. The source independently re-reads
+`total_changes` before fetching another row. DML before common, between common
+and relation, after relation and before receipt, during receipt validation, or
+between source fetches cannot be mistaken for either owned write. A relation
+failure retains the successful common `+1` as rollback evidence and poisons
+the lane. Legacy projection still re-reads the exact main-schema carrier
+before either write, so a mutation after source yield is rejected without a
+legacy TEMP relation row.
+
+Completion, writer or receipt failure, caller exception, early generator
+close, rollback/rebegin, savepoint or DDL epoch change all finalize the active
+source statement and poison incomplete owners. Cleanup is best-effort but may
+not replace the authoritative failure. TypeScript handles the special
+`Generator.return()` rule by raising skipped-receipt failure from `finally`;
+Python suppresses secondary cursor/source/stage cleanup failures before a bare
+re-raise of the primary error.
+
+The hostile matrix explicitly covers lifecycle reversal; nonempty stage and
+lane mixing; wrong connection, epoch, item, stage, sequence, before and after
+bindings; missing, forged, replayed, skipped and foreign receipts; rollback /
+rebegin; SAVEPOINT; prepared and trusted DDL; all five external-DML timing
+boundaries; relation failure with exact `+1` evidence; legacy carrier
+mutation; early close and cursor finalization; and cleanup that must not mask
+the primary failure. One real fixture exercises all twelve source kinds. A
+second streams exactly 1,024 mixed entries with exactly 2,048 TEMP row changes
+and bounded one-row source fetches.
+
+Checkpoint evidence is TypeScript SQLite 16 files / 172 tests, including 17
+focused reconciliation tests, plus typecheck, lint and build; Python 1,289
+full tests, including 26 focused cooperation tests and 122 combined source /
+stage / cooperation tests, plus Ruff and strict MyPy; the SQLite ledger /
+reconciliation / migration contract remains 19 tests and reports
+`implementationClaim:false`; documentation link validation remains 286;
+scoped diff checks are clean. Final independent review reported HIGH 0,
+MEDIUM 0 and LOW 0.
+
+This checkpoint does not execute migration `0002`, write permanent v2 rows,
+run a relational invariant rule, create or rebind a cursor, seal a projection
+root, publish runtime schema v2, prove 100,000-entry behavior, perform crash
+recovery/replay, select a release candidate, or establish adoption/star
+outcomes. Those claims remain false.
+
+### 31.34.27 Ordered TEMP handoff and first invariant campaign next slice
+
+The next slice shall add the one-shot ordered reader over the verified TEMP
+stage. It must read `ORDER BY kind_rank,key_blob`, revalidate canonical bytes
+and epoch at every boundary, append into the constant-memory accumulator,
+prove the exact projection identity/root, and finalize on success, error,
+early close or stage disposal. A second iteration, missing/extra/reordered
+row, catalog replacement, unexplained DML, source/stage count mismatch or
+post-coverage mutation must poison the handoff and require rollback.
+
+Only after that ordered handoff is green may the first stream/record invariant
+campaign execute. It must cover missing stream ownership, persisted-empty
+sentinel violations, sequence gaps, predecessor mismatch, tail mismatch,
+record hash/value carrier drift and duplicate natural hashes using bounded
+indexed existence/count queries. Query plans must prove named relation-index
+use, diagnostics must use registered safe `BLR_*` IDs, and TypeScript/Python
+fixtures and outcomes must remain deeply equal. Migration `0002`, permanent
+publication, cursor rebind, later invariant families, 100K, crash/replay,
+release and adoption remain later append-only checkpoints.
