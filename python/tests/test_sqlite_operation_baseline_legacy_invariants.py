@@ -1137,6 +1137,30 @@ def test_inventory_raw_scalar_drift_is_one_unit(column: str, value: object) -> N
         _cleanup(connection, stage)
 
 
+@pytest.mark.parametrize(
+    ("path", "value"),
+    [
+        ("$.resultBlobSha256", "f" * 64),
+        ("$.operationName", "release-migration-lock"),
+    ],
+)
+def test_inventory_common_state_drift_is_one_unit(path: str, value: object) -> None:
+    connection, _summary, stage, _identity = _prepare_legacy(
+        lambda owner: _populate_shared_legacy_fixture(owner, hostile=False)
+    )
+    try:
+        connection.execute(
+            """UPDATE temp.ge_blr_stage
+                  SET state_blob = CAST(json_set(CAST(state_blob AS TEXT), ?, ?) AS BLOB)
+                WHERE kind_rank = 11
+                  AND json_extract(CAST(key_blob AS TEXT), '$.operationId') = 'operation-a'""",
+            (path, value),
+        ).close()
+        assert _raw_inventory_count(connection) == 1
+    finally:
+        _cleanup(connection, stage)
+
+
 def test_one_corrupt_operation_can_cross_rules_but_only_once_per_rule() -> None:
     connection, _summary, stage, _identity = _prepare_legacy(
         lambda owner: _populate_shared_legacy_fixture(owner, hostile=False)
@@ -1161,6 +1185,16 @@ def test_registry_is_closed_ordered_marker_only_and_never_reads_result_blob() ->
         "BLR_LEGACY_CHECKPOINT_BINDING",
         "BLR_LEGACY_LEASE_BINDING",
         "BLR_LEGACY_LOCK_BINDING",
+    )
+    assert tuple(rule.required_indexes for rule in SQLITE_LEGACY_RULES) == (
+        (),
+        (
+            "ge_blr_records_tenant_hash_uidx",
+            "ge_blr_records_stream_sequence_uidx",
+        ),
+        ("ge_blr_checkpoint_revisions_latest_idx",),
+        ("ge_blr_used_leases_epoch_uidx",),
+        (),
     )
     for rule in SQLITE_LEGACY_RULES:
         assert "LIMIT ?" in rule.sql

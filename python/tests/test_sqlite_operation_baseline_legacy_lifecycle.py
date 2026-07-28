@@ -594,3 +594,49 @@ def test_exact_shape_main_blob_swap_during_active_cursor_is_terminal(
         assert stage.state == "poisoned"
     finally:
         _cleanup(connection, stage)
+
+
+def test_exact_shape_main_blob_swap_at_completion_barrier_is_terminal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connection, summary, stage, identity = _prepare_legacy(_populate_exact_shape_shadow)
+    campaign = SQLiteV1LegacyInvariantCampaign(summary, identity, stage)
+    original_coverage = SQLiteV1BaselineTempStage.assert_relation_key_coverage
+    original_execute = SQLiteV1BaselineConnectionOwner.execute
+    original_close = _SQLiteCursorCapability.close
+    injected = False
+
+    def assert_relation_key_coverage(owner: SQLiteV1BaselineTempStage) -> None:
+        nonlocal injected
+        original_coverage(owner)
+        if owner is not stage or injected:
+            return
+        injected = True
+        total_changes = connection.total_changes
+        first = original_execute(
+            connection,
+            "ALTER TABLE main.ge_cycle_operations RENAME TO old_operations",
+        )
+        original_close(first)
+        second = original_execute(
+            connection,
+            "ALTER TABLE main.ge_cycle_operations_shadow RENAME TO ge_cycle_operations",
+        )
+        original_close(second)
+        assert connection.total_changes == total_changes
+
+    monkeypatch.setattr(
+        SQLiteV1BaselineTempStage,
+        "assert_relation_key_coverage",
+        assert_relation_key_coverage,
+    )
+    try:
+        with pytest.raises(
+            ValueError,
+            match=r"BLR_(?:LEGACY_INVENTORY|TRANSACTION_CHANGED)",
+        ):
+            campaign.run()
+        assert injected
+        assert stage.state == "poisoned"
+    finally:
+        _cleanup(connection, stage)

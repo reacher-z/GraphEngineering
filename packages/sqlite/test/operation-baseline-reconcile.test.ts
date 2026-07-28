@@ -4659,6 +4659,13 @@ describe("SQLite legacy invariant campaign", () => {
       "BLR_LEGACY_LEASE_BINDING",
       "BLR_LEGACY_LOCK_BINDING",
     ]);
+    expect(SQLITE_LEGACY_RULES.map((rule) => rule.requiredIndexes)).toEqual([
+      [],
+      ["ge_blr_records_tenant_hash_uidx", "ge_blr_records_stream_sequence_uidx"],
+      ["ge_blr_checkpoint_revisions_latest_idx"],
+      ["ge_blr_used_leases_epoch_uidx"],
+      [],
+    ]);
     for (const rule of SQLITE_LEGACY_RULES) {
       expect(rule.sql.trimStart().startsWith("SELECT 1")).toBe(true);
       expect(rule.sql).toMatch(/LIMIT \?$/);

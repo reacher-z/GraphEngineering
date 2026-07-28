@@ -10216,3 +10216,157 @@ green. Python legacy focused is 89/89 and the canonical full suite is
 closure still adds no public export or permanent index, does not execute
 `0002`, does not persist a v2 row or seal, and makes no release, adoption,
 performance or star-count claim.
+
+### 31.34.47 Second external audit closure and query-shape correction
+
+A second external Claude Code read-only audit rechecked the live legacy
+campaign after §31.34.46. It confirmed both former HIGH findings and all five
+former MEDIUM findings closed, then reported three LOW residuals. Those
+residuals are closed here without weakening any prior fence or recoverability
+ceiling.
+
+Python now attacks the rank-eleven common carrier directly for both
+`resultBlobSha256` and a legal operation-name substitution, in addition to its
+existing normalized-relation attacks. Each mutation targets one exact decoded
+operation identity and produces one inventory unit. TypeScript and Python also
+freeze the complete five-entry `requiredIndexes` topology as literal ordered
+tuples/arrays, so a one-runtime metadata change fails even if that runtime's
+local EQP happens to continue using the edited index.
+
+Python legacy completion now reproves the main operations catalog receipt
+after terminal common-count, relation-coverage and TEMP-catalog barriers, then
+rechecks the write/transaction fence before marking completion. A prebuilt
+exact-shape blob-only shadow swapped at that final boundary is terminal even
+when `total_changes()` remains unchanged. Depending on which stronger fence
+observes the DDL first, the safe failure is catalog inventory drift or
+transaction-epoch drift; completion is unreachable in either case.
+
+The physical query-shape wording is corrected again: acquire/renew lease is
+not a direct used-ID key lookup because the retained result does not contain
+the request stream and `ge_blr_used_leases_epoch_uidx` begins with
+`(tenant_id, stream_id, lease_epoch)`. Acquire, renew and release therefore all
+perform bounded tenant-prefix history traversal; release additionally joins
+the matching used row back through its own stream to the lease high-water.
+Delete-true similarly performs a tenant-prefix checkpoint-history existence
+search because the result omits the requested scope/checkpoint. These are
+semantic necessities, not 10K/100K performance proof, and remain scheduled
+scale debt.
+
+Focused closure evidence is TypeScript legacy 232/232 and Python legacy
+92/92, with Ruff/format/strict-MyPy and TypeScript static checks green. The
+second audit's residual severity is therefore HIGH 0 / MEDIUM 0 / LOW 0. This
+append changes no registry claim, public export, permanent object, migration,
+v2 persistence, release or popularity assertion.
+
+### 31.34.48 Cursor immutable-seal A1 cross-runtime implementation checkpoint
+
+This checkpoint freezes and implements the smallest safe sub-slice of Slice A
+from §31.34.45: private, database-independent cursor-row decoding and a
+constant-space immutable seal. It intentionally stops before the source-clock
+capture, projection receipt, TEMP campaign integration, post-rebind checks or
+any permanent migration work described by Slice A2 and Slice B. The split is a
+delivery boundary, not a relaxation of the later acceptance criteria. No
+registry completion bit may change until all remaining cursor and provider-
+clock work has its own cross-runtime evidence.
+
+The physical decoder consumes exactly the eighteen v1 `ge_cycle_cursors`
+columns in the frozen order: tenant, token hash, kind, principal hash,
+authorization hash, stream, checkpoint scope, request-scope BLOB, page size,
+next position, snapshot tail sequence/hash, descriptor hash, schema identity,
+snapshot BLOB and the three lifecycle clocks. It rejects wrong arity, nullable
+violations, noncanonical or duplicate-key JSON, invalid UTF-8, nonportable JSON,
+unsafe integers, oversized BLOBs, invalid identifiers and hashes, inconsistent
+event/checkpoint scope shapes, invalid tail pairs and invalid clock intervals.
+The decoder retains no raw BLOB after deriving a bounded SHA-256/byte-length
+identity, and mutable descriptor/schema identities are carried beside rather
+than mixed into the immutable carrier.
+
+The closed carrier has exactly eighteen contributions in canonical JSON key
+order: authorization hash, checkpoint scope, consumed/created/expires clocks,
+kind, next position, page size, principal hash, request-scope digest/length,
+snapshot digest/length, snapshot-tail hash/sequence, stream, tenant and token.
+Rows are supplied in unsigned UTF-8 token-hash order with tenant bytes as the
+tie-breaker. Duplicate or descending keys are terminal. The row digest is
+`SHA256(rowDomain || u64be(carrierByteLength) || canonicalCarrierBytes)`, where
+`rowDomain` is `graph-engineering/sqlite-cursor-seal-row/v1\0`. The genesis is
+`SHA256(sealDomain || 0x00)`; row ordinal `n` advances to
+`SHA256(sealDomain || 0x01 || priorState || u64be(n) || rowDigest)`; and the
+terminal root is
+`SHA256(sealDomain || 0x02 || u64be(cursorCount) || terminalState)`, where
+`sealDomain` is `graph-engineering/sqlite-cursor-seal/v1\0`. Every rejected
+append computes and validates its candidate before changing count, state or
+sort key, and `finish` succeeds exactly once only at the declared count.
+
+Both runtime accumulators now require the expected cursor count plus the
+frozen source descriptor and schema-identity hashes. Every decoded physical
+row must match both identities. The frozen A1 receipt contains only cursor
+count, immutable-root SHA-256 and those two source identities; the algorithm
+version remains a module constant. The type is deliberately named
+`SQLiteCursorImmutableSealReceipt`, not a pre-rebind receipt, because the
+future opaque pre-rebind receipt must additionally bind exact projection,
+provider high-water, capture clock/session and campaign ownership. Neither
+source identity enters the immutable root, so later controlled rebinding does
+not falsify the closed carrier while source substitution still fails before a
+receipt can be issued.
+
+Claude Code authored the initial TypeScript implementation and its adversarial
+tests in an isolated worktree. The main integration lane independently built
+and then reconciled the Python implementation. A cross-runtime audit required
+four contract corrections before acceptance: TypeScript source identities were
+added to the accumulator and receipt, Python now fully revalidates hand-built
+carriers at append, both runtimes reject a second `finish`, and both expose the
+same canonical carrier-key order and receipt semantics. Shared literal event,
+checkpoint and pair fixtures are now recomputed by both implementations rather
+than inferred from runtime-local examples.
+
+The frozen shared roots are: empty
+`587bd52db10d2d03c9f7b8bbcecee9c6f83d0c076b17846883e6885e10e2b47f`,
+event `1445422fdd2e7e6f93458c6d5e4cf35c53ebac8596cf117595c1f926086681ea`,
+checkpoint `4fefb119ba4e71217c64470627ce9b07388ffdd29cf0b3549b7127b06436f5f6`
+and ordered pair
+`3ee9a67ea7d1d961af54178d1df8c3cdf32dddfd4d7c5dcae03aca31efad84d1`.
+Characterization streams 128 and 1,024 carriers through a one-pass iterable,
+proves the accumulator keeps only count, one 32-byte state and one prior sort
+key, and statically rejects proportional capture helpers. This is bounded
+functional evidence only; it is not the still-required 10K/100K RSS,
+throughput, crash/replay or production-scale proof.
+
+Acceptance for this A1 checkpoint requires the focused TypeScript and Python
+suites, the full SQLite and canonical Python suites, TypeScript typecheck/lint/
+build, Ruff/format/strict MyPy, legacy regression suites, contract/registry/docs
+checks, clean scoped diffs and a fresh independent severity-zero review. The
+module remains private with no package export. This checkpoint executes no
+database statement, changes no permanent or TEMP object, does not run `0002`,
+does not rebind a cursor, persists no seal or v2 state, does not claim cursor or
+provider-clock completion, and makes no release, adoption or star-count claim.
+
+### 31.34.49 Cursor immutable-seal A1 final acceptance evidence
+
+The post-reconciliation independent audit re-read the current main-worktree
+TypeScript and Python modules, their adversarial suites and the boundaries in
+§31.34.45 and §31.34.48. It reports HIGH 0 / MEDIUM 0 / LOW 0. In particular,
+the final Python accumulator now accepts the complete decoded seal row, binds
+descriptor and schema identity before any state advance and matches the
+TypeScript fail-closed boundary. Both runtimes assert an exact four-field
+immutable-seal receipt, revalidate hand-built carriers, keep rejected appends
+atomic and reject finish reuse. The audit independently confirmed identical
+domains, carrier keys, byte order, framing, recurrence, terminal formula and
+the four frozen roots recorded in §31.34.48.
+
+Final main-thread evidence is TypeScript cursor focused 21/21 and SQLite 17
+files / 408 tests, with package typecheck, lint and build green. Python cursor
+focused is 31/31, legacy regression is 92/92 and the canonical full suite is
+1,674/1,674, with full Ruff check, strict MyPy across 48 source files and
+scoped format checks green. The SQLite ledger/reconciliation/migration contract
+is 19/19; the baseline registry remains exactly 54 rules with
+`implementationClaim:false`; documentation validation checks 286 local links;
+and full/scoped diff checks are clean. The master-plan and daily-log changes
+are append-only relative to the prior commit.
+
+This acceptance closes only immutable-seal A1. Full Slice A still requires the
+source-clock split, exact projection/provider-high-water capture and opaque
+pre-rebind ownership receipt. Slice B still requires the TEMP cursor campaign,
+registered rule execution, lifecycle/fault evidence and controlled pre-rebind
+completion. No database integration, `0002`, permanent v2 write, post-rebind
+verification, 10K/100K performance, crash/replay, release, adoption or star
+claim follows from this checkpoint.

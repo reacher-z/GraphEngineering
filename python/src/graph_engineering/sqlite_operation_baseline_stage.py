@@ -1522,6 +1522,7 @@ class SQLiteV1BaselineTempStage:
         self.assert_common_counts(summary.counts_by_kind)
         self.assert_relation_key_coverage()
         self._assert_ordered_handoff_catalog(expected_total_changes)
+        self._assert_legacy_main_catalog()
         self._assert_ordered_handoff_fence(expected_total_changes)
         try:
             cursor = self._connection.execute(
