@@ -7919,3 +7919,28 @@ underflow, and post-finish append without corrupting the next valid hash. The
 materializing convenience builders now feed these accumulators so only one
 chain/projection algorithm remains. This checkpoint still does not claim the
 database source iterator, relation stage, 100K evidence, or runtime v2.
+
+### 31.34.7 Source summary foundation checkpoint
+
+The first database-facing slice is implemented in both runtimes without
+switching the active schema. A caller-owned active transaction can now capture
+one validated v1 source envelope, twelve exact family counts, a safe total
+expected entry count, and the maximum observed provider time. TypeScript reads
+all SQLite integers as BigInt, sums in BigInt, bounds the total, and only then
+converts to Number. Python sums arbitrary-precision integers and enforces the
+same maximum. Both reject foreign application identity, non-v1 source
+identity, missing singleton/lineage, absent transaction, unsafe capture time,
+capture before the migration-lock clock, and a migration-lock clock that
+predates any represented source or cursor observation.
+
+The provider-time query includes schema creation/update/latest application,
+migration application, stream creation/update, record and operation commit,
+checkpoint commit, revision record time, lease update, used lease first-use,
+hold placement, cursor creation/consumption, used migration-lock first-use, and
+migration-lock update. It intentionally excludes expiry and user RFC3339
+checkpoint time. Cursors remain excluded from all twelve entry counts.
+
+This is a bounded metadata/count foundation, not the entry iterator or relation
+reconciler. The next slice must add one-shot canonical source iteration into a
+FILE-backed TEMP stage, finalize every source statement before 0002 DDL, and
+then run the §31.34 anti-join rules. `implementationClaim` remains false.
