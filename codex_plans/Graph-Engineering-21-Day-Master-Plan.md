@@ -7944,3 +7944,23 @@ This is a bounded metadata/count foundation, not the entry iterator or relation
 reconciler. The next slice must add one-shot canonical source iteration into a
 FILE-backed TEMP stage, finalize every source statement before 0002 DDL, and
 then run the §31.34 anti-join rules. `implementationClaim` remains false.
+
+### 31.34.8 Three-family identity iterator checkpoint
+
+The source summary now exposes a fail-closed one-shot iterator for the three
+families that completely describe an otherwise empty v1 database:
+`schema-envelope`, `migration-lineage`, and `migration-lock-current`. Both
+runtimes require the original transaction at iterator acquisition, before each
+family, and during each bounded batch. A rollback after the first yield makes
+the next read fail rather than mixing snapshots.
+
+The iterator is deliberately unavailable when any remaining family is
+nonempty or any identity-family cardinality differs from one. Migration
+postconditions are fatal-decoded, duplicate-key/canonical-byte checked, and
+compared to the exact fourteen frozen clauses. Schema identity, descriptor,
+fresh/alpha lineage pair, user version, migration time, source envelope, and
+clock anchors are bound at capture and rechecked during iteration. Returned
+nested postconditions cannot be mutated before accumulator append.
+
+This checkpoint proves empty-v1 identity capture only. The nine data families,
+TEMP staging, relation anti-joins, cursor seal, and 100K path remain open.

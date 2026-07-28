@@ -1,13 +1,24 @@
+import { canonicalSerialize } from "@graph-engineering/core";
 import { CycleStoreProviderError } from "@graph-engineering/runtime";
 
 import {
   BASELINE_ENTRY_KINDS,
+  type OperationBaselineEntryInput,
   type OperationBaselineEntryKind,
   type OperationBaselineSourceEnvelope,
+  decodeOperationBaselineCanonicalBytes,
+  encodeOperationBaselineKey,
   encodeOperationBaselineSourceEnvelope,
+  encodeOperationBaselineState,
 } from "./operation-baseline.js";
-import { sqliteRow, sqliteSafeInteger, sqliteText } from "./sqlite-codec.js";
+import { sqliteBlob, sqliteRow, sqliteSafeInteger, sqliteText } from "./sqlite-codec.js";
 import { SQLiteConnection } from "./sqlite-connection.js";
+import {
+  SQLITE_ALPHA_V0_TO_V1_SQL_SHA256,
+  SQLITE_SCHEMA_IDENTITY_SHA256,
+  SQLITE_SCHEMA_SQL_SHA256,
+} from "./migrations.js";
+import { SQLITE_CYCLE_STORE_DESCRIPTOR_HASH } from "./sqlite-profile.js";
 
 const OPERATION = "inspect-schema" as const;
 const MAX_SAFE_BIGINT = BigInt(Number.MAX_SAFE_INTEGER);
@@ -19,7 +30,33 @@ export interface SQLiteV1BaselineSourceSummary {
   readonly countsByKind: SQLiteV1BaselineCounts;
   readonly expectedEntryCount: number;
   readonly maximumObservedAtMs: number;
+  /**
+   * Streams the three v1 identity families implemented by this foundation.
+   * The iterator is deliberately one-shot and remains transaction-scoped.
+   */
+  readonly entries: () => Generator<OperationBaselineEntryInput, void, undefined>;
 }
+
+const REQUIRED_POSTCONDITIONS = Object.freeze([
+  "application-id-matches",
+  "user-version-is-1",
+  "schema-singleton-is-manifest-bound",
+  "migration-ledger-row-is-manifest-bound",
+  "all-canonical-tables-are-strict",
+  "logical-schema-identity-matches-fresh-v1",
+  "foreign-key-check-is-empty",
+  "integrity-check-is-ok",
+  "alpha-row-counts-are-preserved",
+  "stream-heads-match-record-tails",
+  "canonical-blobs-and-hashes-are-preserved",
+  "checkpoint-revisions-are-seeded",
+  "lease-and-migration-fences-are-monotonic",
+  "no-v0-or-placeholder-state-remains",
+] as const);
+const FROZEN_POSTCONDITIONS = Object.freeze({
+  requiredPostconditions: REQUIRED_POSTCONDITIONS,
+});
+const EXPECTED_POSTCONDITIONS = canonicalSerialize(FROZEN_POSTCONDITIONS);
 
 function fail(message: string): never {
   throw new CycleStoreProviderError("GE_CYCLE_STORE_CORRUPTION", OPERATION, message);
@@ -41,6 +78,155 @@ function capturedAt(value: unknown): number {
     );
   }
   return value as number;
+}
+
+function validatedEntry(
+  entryKind: OperationBaselineEntryKind,
+  key: Readonly<Record<string, unknown>>,
+  state: Readonly<Record<string, unknown>>,
+): OperationBaselineEntryInput {
+  try {
+    encodeOperationBaselineKey(entryKind, key);
+    encodeOperationBaselineState(entryKind, state);
+  } catch {
+    return fail(`SQLite v1 baseline ${entryKind} row is invalid`);
+  }
+  return Object.freeze({ entryKind, key: Object.freeze(key), state: Object.freeze(state) });
+}
+
+function exactlyOne(
+  connection: SQLiteConnection,
+  sql: string,
+  length: number,
+  label: string,
+): readonly unknown[] {
+  let result: readonly unknown[] | undefined;
+  let count = 0;
+  for (const raw of connection.prepare(sql, OPERATION).iterate()) {
+    count += 1;
+    if (count > 1) return fail(`SQLite v1 baseline ${label} cardinality is invalid`);
+    result = sqliteRow(raw, length, OPERATION, label);
+  }
+  if (count !== 1 || result === undefined) {
+    return fail(`SQLite v1 baseline ${label} cardinality is invalid`);
+  }
+  return result;
+}
+
+function nullableInteger(value: unknown, minimum: number, label: string): number | null {
+  return value === null
+    ? null
+    : sqliteSafeInteger(value, minimum, Number.MAX_SAFE_INTEGER, OPERATION, label);
+}
+
+function nullableText(value: unknown, label: string): string | null {
+  return value === null ? null : sqliteText(value, OPERATION, label);
+}
+
+function* streamIdentityEntries(
+  connection: SQLiteConnection,
+  sourceEnvelope: OperationBaselineSourceEnvelope,
+  expectedMigrationAppliedAtMs: number,
+): Generator<OperationBaselineEntryInput, void, undefined> {
+  if (!connection.isTransaction) return fail("SQLite v1 baseline iteration requires an active transaction");
+
+  const schema = exactlyOne(connection, `
+    SELECT current_version, min_reader_version, max_reader_version,
+           min_writer_version, max_writer_version, schema_identity_sha256,
+           latest_migration_sha256, latest_migration_applied_at_ms,
+           provider_descriptor_hash, created_at_ms, updated_at_ms
+      FROM ge_cycle_schema WHERE singleton = 1
+  `, 11, "schema singleton");
+  const schemaState = {
+    createdAtMs: sqliteSafeInteger(schema[9], 0, Number.MAX_SAFE_INTEGER, OPERATION, "schema creation time"),
+    currentVersion: sqliteSafeInteger(schema[0], 1, 1, OPERATION, "schema version"),
+    latestMigrationAppliedAtMs: sqliteSafeInteger(schema[7], 0, Number.MAX_SAFE_INTEGER, OPERATION, "latest migration time"),
+    latestMigrationSha256: sqliteText(schema[6], OPERATION, "latest migration hash"),
+    maxReaderVersion: sqliteSafeInteger(schema[2], 1, 1, OPERATION, "maximum reader version"),
+    maxWriterVersion: sqliteSafeInteger(schema[4], 1, 1, OPERATION, "maximum writer version"),
+    minReaderVersion: sqliteSafeInteger(schema[1], 1, 1, OPERATION, "minimum reader version"),
+    minWriterVersion: sqliteSafeInteger(schema[3], 1, 1, OPERATION, "minimum writer version"),
+    providerDescriptorHash: sqliteText(schema[8], OPERATION, "provider descriptor hash"),
+    schemaIdentitySha256: sqliteText(schema[5], OPERATION, "schema identity"),
+    updatedAtMs: sqliteSafeInteger(schema[10], 0, Number.MAX_SAFE_INTEGER, OPERATION, "schema update time"),
+  };
+  if (schemaState.providerDescriptorHash !== sourceEnvelope.sourceDescriptorHash
+      || schemaState.schemaIdentitySha256 !== sourceEnvelope.sourceSchemaIdentitySha256
+      || schemaState.latestMigrationSha256 !== sourceEnvelope.sourceMigrationLineageSha256
+      || schemaState.latestMigrationAppliedAtMs !== expectedMigrationAppliedAtMs) {
+    return fail("SQLite v1 baseline schema envelope identity drifted");
+  }
+  yield validatedEntry("schema-envelope", { scope: "cycle-store" }, schemaState);
+
+  if (!connection.isTransaction) return fail("SQLite v1 baseline iteration requires an active transaction");
+  const migration = exactlyOne(connection, `
+    SELECT version, previous_version, migration_id, sql_sha256,
+           schema_identity_sha256, applied_at_ms, reversibility,
+           postconditions_blob
+      FROM ge_cycle_migrations
+     ORDER BY CAST(version AS TEXT) COLLATE BINARY
+  `, 8, "migration lineage");
+  const postconditionsBlob = sqliteBlob(migration[7], OPERATION, "migration postconditions");
+  let postconditions: unknown;
+  try {
+    postconditions = decodeOperationBaselineCanonicalBytes(postconditionsBlob, 1_048_576);
+  } catch {
+    return fail("SQLite v1 baseline migration postconditions are invalid");
+  }
+  if (canonicalSerialize(postconditions) !== EXPECTED_POSTCONDITIONS) {
+    return fail("SQLite v1 baseline migration postconditions drifted");
+  }
+  const migrationState = {
+    appliedAtMs: sqliteSafeInteger(migration[5], 0, Number.MAX_SAFE_INTEGER, OPERATION, "migration time"),
+    migrationId: sqliteText(migration[2], OPERATION, "migration ID"),
+    postconditions: FROZEN_POSTCONDITIONS,
+    previousVersion: sqliteSafeInteger(migration[1], 0, 0, OPERATION, "previous migration version"),
+    reversibility: sqliteText(migration[6], OPERATION, "migration reversibility"),
+    schemaIdentitySha256: sqliteText(migration[4], OPERATION, "migration schema identity"),
+    sqlSha256: sqliteText(migration[3], OPERATION, "migration SQL hash"),
+    version: sqliteSafeInteger(migration[0], 1, 1, OPERATION, "migration version"),
+  };
+  if (migrationState.migrationId !== sourceEnvelope.sourceMigrationLineageId
+      || migrationState.sqlSha256 !== sourceEnvelope.sourceMigrationLineageSha256
+      || migrationState.schemaIdentitySha256 !== sourceEnvelope.sourceSchemaIdentitySha256
+      || migrationState.appliedAtMs !== expectedMigrationAppliedAtMs
+      || migrationState.appliedAtMs !== schemaState.latestMigrationAppliedAtMs) {
+    return fail("SQLite v1 baseline migration lineage identity drifted");
+  }
+  const frozenLineage = (migrationState.migrationId === "fresh-v1-baseline"
+      && migrationState.sqlSha256 === SQLITE_SCHEMA_SQL_SHA256)
+    || (migrationState.migrationId === "alpha-v0-to-v1"
+      && migrationState.sqlSha256 === SQLITE_ALPHA_V0_TO_V1_SQL_SHA256);
+  if (!frozenLineage
+      || schemaState.schemaIdentitySha256 !== SQLITE_SCHEMA_IDENTITY_SHA256
+      || schemaState.providerDescriptorHash !== SQLITE_CYCLE_STORE_DESCRIPTOR_HASH) {
+    return fail("SQLite v1 baseline frozen source identity drifted");
+  }
+  yield validatedEntry("migration-lineage", { version: migrationState.version }, migrationState);
+
+  if (!connection.isTransaction) return fail("SQLite v1 baseline iteration requires an active transaction");
+  const lock = exactlyOne(connection, `
+    SELECT singleton, active_lock_id, active_owner_id, active_source_version,
+           active_target_version, active_lock_epoch, active_fencing_token,
+           active_acquired_at_ms, active_expires_at_ms, last_lock_epoch,
+           last_fencing_token, updated_at_ms
+      FROM ge_cycle_migration_lock WHERE singleton = 1
+  `, 12, "migration lock singleton");
+  const lockState = {
+    activeAcquiredAtMs: nullableInteger(lock[7], 0, "active migration acquisition time"),
+    activeExpiresAtMs: nullableInteger(lock[8], 0, "active migration expiry time"),
+    activeFencingToken: nullableInteger(lock[6], 1, "active migration fencing token"),
+    activeLockEpoch: nullableInteger(lock[5], 1, "active migration lock epoch"),
+    activeLockId: nullableText(lock[1], "active migration lock ID"),
+    activeOwnerId: nullableText(lock[2], "active migration owner ID"),
+    activeSourceVersion: nullableInteger(lock[3], 1, "active migration source version"),
+    activeTargetVersion: nullableInteger(lock[4], 2, "active migration target version"),
+    lastFencingToken: sqliteSafeInteger(lock[10], 0, Number.MAX_SAFE_INTEGER, OPERATION, "last migration fencing token"),
+    lastLockEpoch: sqliteSafeInteger(lock[9], 0, Number.MAX_SAFE_INTEGER, OPERATION, "last migration lock epoch"),
+    singleton: sqliteSafeInteger(lock[0], 1, 1, OPERATION, "migration lock singleton"),
+    updatedAtMs: sqliteSafeInteger(lock[11], 0, Number.MAX_SAFE_INTEGER, OPERATION, "migration lock update time"),
+  };
+  yield validatedEntry("migration-lock-current", { singleton: 1 }, lockState);
 }
 
 const COUNT_SQL = `SELECT
@@ -91,16 +277,44 @@ export function captureSQLiteV1BaselineSourceSummary(
     OPERATION,
     "application ID",
   );
+  const pragmaUserVersion = sqliteSafeInteger(
+    sqliteRow(connection.prepare("PRAGMA user_version", OPERATION).get(), 1, OPERATION, "user version")[0],
+    1,
+    1,
+    OPERATION,
+    "user version",
+  );
   const source = sqliteRow(connection.prepare(`
     SELECT schema_row.current_version, schema_row.schema_identity_sha256,
            schema_row.provider_descriptor_hash, migration.migration_id,
-           migration.sql_sha256
+           migration.sql_sha256, schema_row.latest_migration_applied_at_ms,
+           migration.applied_at_ms
       FROM ge_cycle_schema AS schema_row
       JOIN ge_cycle_migrations AS migration
         ON migration.version = schema_row.current_version
      WHERE schema_row.singleton = 1
-  `, OPERATION).get(), 5, OPERATION, "v1 source identity");
+  `, OPERATION).get(), 7, OPERATION, "v1 source identity");
   const sourceUserVersion = sqliteSafeInteger(source[0], 1, 1, OPERATION, "source version");
+  if (sourceUserVersion !== pragmaUserVersion) {
+    return fail("SQLite v1 baseline schema and PRAGMA versions differ");
+  }
+  const expectedMigrationAppliedAtMs = sqliteSafeInteger(
+    source[5],
+    0,
+    Number.MAX_SAFE_INTEGER,
+    OPERATION,
+    "schema latest migration time",
+  );
+  const capturedMigrationAppliedAtMs = sqliteSafeInteger(
+    source[6],
+    0,
+    Number.MAX_SAFE_INTEGER,
+    OPERATION,
+    "migration application time",
+  );
+  if (expectedMigrationAppliedAtMs !== capturedMigrationAppliedAtMs) {
+    return fail("SQLite v1 baseline migration application times differ");
+  }
   const sourceEnvelope: OperationBaselineSourceEnvelope = {
     capturedAtMs: captured,
     sourceApplicationId: applicationId as 1195724359,
@@ -141,5 +355,25 @@ export function captureSQLiteV1BaselineSourceSummary(
   );
   if (lockHighWater < maximumObservedAtMs) return fail("SQLite v1 provider clock high-water predates source state");
   if (captured < lockHighWater) return fail("SQLite v1 baseline capture predates provider clock high-water");
-  return Object.freeze({ sourceEnvelope: Object.freeze(sourceEnvelope), countsByKind, expectedEntryCount: Number(total), maximumObservedAtMs });
+  const frozenEnvelope = Object.freeze(sourceEnvelope);
+  let entriesTaken = false;
+  const entries = (): Generator<OperationBaselineEntryInput, void, undefined> => {
+    if (countsByKind["schema-envelope"] !== 1
+        || countsByKind["migration-lineage"] !== 1
+        || countsByKind["migration-lock-current"] !== 1
+        || total !== 3n) {
+      return fail("SQLite v1 baseline identity-only iterator cannot cover non-identity source rows");
+    }
+    if (entriesTaken) return fail("SQLite v1 baseline source entries are one-shot");
+    if (!connection.isTransaction) return fail("SQLite v1 baseline iteration requires an active transaction");
+    entriesTaken = true;
+    return streamIdentityEntries(connection, frozenEnvelope, expectedMigrationAppliedAtMs);
+  };
+  return Object.freeze({
+    sourceEnvelope: frozenEnvelope,
+    countsByKind,
+    expectedEntryCount: Number(total),
+    maximumObservedAtMs,
+    entries,
+  });
 }
