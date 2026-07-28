@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/conformance/sqlite-operation-baseline-v2.schema.json",
+  "title": "SQLite operation-ledger v2 canonical baseline vectors",
+  "description": "Closed byte vectors for all twelve baseline entry kinds plus executable hostile mutations. Shape validity alone is insufficient; the companion validator recomputes every canonical byte sequence and hash.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "id", "status", "implementationClaim", "domains", "sourceEnvelope", "baselineId", "policyVector", "entryVectors", "projection", "attackVectors"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "id": { "const": "sqlite-operation-baseline-v2-vectors-v1" },
+    "status": { "const": "contract-frozen" },
+    "implementationClaim": { "const": false },
+    "domains": { "$ref": "#/$defs/domains" },
+    "sourceEnvelope": { "$ref": "#/$defs/sourceEnvelope" },
+    "baselineId": { "type": "string", "pattern": "^v2-[0-9a-f]{64}$" },
+    "policyVector": { "$ref": "#/$defs/blobVector" },
+    "entryVectors": {
+      "type": "array",
+      "minItems": 12,
+      "maxItems": 12,
+      "items": { "$ref": "#/$defs/entryVector" }
+    },
+    "projection": { "$ref": "#/$defs/projection" },
+    "attackVectors": {
+      "type": "array",
+      "minItems": 12,
+      "maxItems": 12,
+      "items": { "$ref": "#/$defs/attackVector" }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "safeInteger": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+    "closedObject": { "type": "object" },
+    "domains": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["baselineId", "entry", "projection", "genesis", "empty", "genesisHash", "emptyRoot"],
+      "properties": {
+        "baselineId": { "const": "graph-engineering/sqlite-operation-baseline-id/v1\u0000" },
+        "entry": { "const": "graph-engineering/sqlite-operation-baseline-entry/v1\u0000" },
+        "projection": { "const": "graph-engineering/sqlite-operation-baseline-projection/v1\u0000" },
+        "genesis": { "const": "graph-engineering/sqlite-operation-baseline-genesis/v1\u0000" },
+        "empty": { "const": "graph-engineering/sqlite-operation-baseline-empty/v1\u0000" },
+        "genesisHash": { "const": "5311dba7ae8b844fc3efccd55dd90c3f78e02a7f7e222d7a0a513fd1aff9ec96" },
+        "emptyRoot": { "const": "66a081bbc7369b674fa093cb2e3e1d269a1eb506698e24dfc2899074bf06b82a" }
+      }
+    },
+    "sourceEnvelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["capturedAtMs", "sourceApplicationId", "sourceDescriptorHash", "sourceMigrationLineageId", "sourceMigrationLineageSha256", "sourceSchemaIdentitySha256", "sourceUserVersion"],
+      "properties": {
+        "capturedAtMs": { "$ref": "#/$defs/safeInteger" },
+        "sourceApplicationId": { "const": 1195724359 },
+        "sourceDescriptorHash": { "$ref": "#/$defs/sha256" },
+        "sourceMigrationLineageId": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$", "minLength": 3, "maxLength": 128 },
+        "sourceMigrationLineageSha256": { "$ref": "#/$defs/sha256" },
+        "sourceSchemaIdentitySha256": { "$ref": "#/$defs/sha256" },
+        "sourceUserVersion": { "const": 1 }
+      }
+    },
+    "blobVector": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "canonicalUtf8", "canonicalHex", "byteLength", "sha256"],
+      "properties": {
+        "value": { "$ref": "#/$defs/closedObject" },
+        "canonicalUtf8": { "type": "string", "minLength": 2 },
+        "canonicalHex": { "type": "string", "pattern": "^(?:[0-9a-f]{2})+$" },
+        "byteLength": { "type": "integer", "minimum": 2, "maximum": 2097152 },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "entryVector": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["vectorId", "category", "entryKind", "ordinal", "key", "state", "previousEntryHash", "entryHash"],
+      "properties": {
+        "vectorId": { "type": "string", "pattern": "^BL-V(?:0[1-9]|1[0-2])$" },
+        "category": { "const": "behavior" },
+        "entryKind": { "enum": ["schema-envelope", "migration-lineage", "stream-head", "record-identity", "checkpoint-current", "checkpoint-revision", "lease-current", "used-lease-identity", "legal-hold", "migration-lock-current", "used-migration-lock-identity", "legacy-operation"] },
+        "ordinal": { "type": "integer", "minimum": 0, "maximum": 11 },
+        "key": { "$ref": "#/$defs/blobVector" },
+        "state": { "$ref": "#/$defs/blobVector" },
+        "previousEntryHash": { "$ref": "#/$defs/sha256" },
+        "entryHash": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "projection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entryCount", "legacyOperationCount", "firstEntryHash", "finalEntryHash", "canonicalValue", "canonicalUtf8", "canonicalHex", "byteLength", "sha256"],
+      "properties": {
+        "entryCount": { "const": 12 },
+        "legacyOperationCount": { "const": 1 },
+        "firstEntryHash": { "$ref": "#/$defs/sha256" },
+        "finalEntryHash": { "$ref": "#/$defs/sha256" },
+        "canonicalValue": { "$ref": "#/$defs/closedObject" },
+        "canonicalUtf8": { "type": "string", "minLength": 2 },
+        "canonicalHex": { "type": "string", "pattern": "^(?:[0-9a-f]{2})+$" },
+        "byteLength": { "type": "integer", "minimum": 2 },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "attackVector": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "category", "mutation", "targetOrdinal", "expectedCode"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^BL-A(?:0[1-9]|1[0-2])$" },
+        "category": { "const": "attack" },
+        "mutation": { "enum": ["key-noncanonical-order", "key-unknown-field", "state-missing-field", "duplicate-kind-key", "ordinal-gap", "previous-hash-drift", "key-invalid-utf8", "state-invalid-utf8", "entry-hash-drift", "first-root-drift", "final-root-drift", "projection-hash-drift"] },
+        "targetOrdinal": { "type": "integer", "minimum": 0, "maximum": 11 },
+        "expectedCode": { "enum": ["GE_BASELINE_CANONICAL_BYTES", "GE_BASELINE_ENTRY_SHAPE", "GE_BASELINE_DUPLICATE", "GE_BASELINE_ORDER", "GE_BASELINE_CHAIN", "GE_BASELINE_ENTRY_HASH", "GE_BASELINE_PROJECTION"] }
+      }
+    }
+  }
+}

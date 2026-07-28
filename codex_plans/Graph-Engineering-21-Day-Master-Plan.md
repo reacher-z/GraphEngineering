@@ -7584,3 +7584,171 @@ the exact 96 implementation campaign, artifact parity, release readiness,
 PostgreSQL parity, scheduler integration, production throughput, or any GitHub
 star outcome. All §31.31 exit criteria remain open until their retained gates
 pass.
+
+## 31.33 Cross-language baseline byte implementation and production integration queue (append-only)
+
+This section records the implementation that follows the §31.32 contract
+freeze. It does not modify or weaken any earlier requirement. The protocol is
+now implemented in both languages, but `implementationClaim` remains `false`
+because provider migration, persistence, replay, reconciliation, artifact
+parity, and the exact 96 runtime campaign are not complete.
+
+### 31.33.1 Implemented and independently audited byte layer
+
+The shared behavior fixture contains exactly twelve entries in frozen kind
+rank, one legal source-v1 row for every baseline kind. Every vector retains its
+canonical value, canonical UTF-8 text, exact hex, byte length, byte SHA-256,
+ordinal, previous hash, and entry hash. The fixture also retains twelve hostile
+mutations covering noncanonical bytes, unknown/missing fields, duplicate keys,
+ordinal and predecessor drift, invalid UTF-8, entry/root drift, and projection
+drift. Its current exact file SHA-256 is
+`ae000ea64a6ab2bf8a0c9bcffaba36ea06d7f8b489021d4f4afdd7e3caea5610`.
+
+The golden source originally exposed an invalid clock relationship during an
+independent hostile review: the migration-lock clock high-water preceded the
+last retained legacy operation commit. That fixture was rejected rather than
+grandfathered. `migration-lock-current.updatedAtMs` is now
+`1735689601000`; BL-V10 through BL-V12 and the projection were regenerated.
+The retained final root is
+`b9948b7fa96c6d45f0fac10a52792ce88a4e243741dccf1e364311aeaba7dc86`
+and the projection hash is
+`2a15f26152e5328917066f94df3f1911101cfca324045c3e9e012b8dc1d0f00a`.
+The validator independently rejects a clock watermark below any represented
+source observation, a capture before that watermark, and a source lineage ID
+that differs from the migration row.
+
+TypeScript and Python now share the following byte-layer behavior:
+
+1. six domain-separated SHA-256 constants, genesis/empty roots, a closed
+   policy object, bounded source envelope, and source-derived baseline ID;
+2. all twelve closed key and state shapes with safe-integer, identifier, hash,
+   byte-size, RFC3339 calendar, timestamp-order, predecessor, revision,
+   lease, migration-lock, operation-name, and nullable-action constraints;
+3. exact checkpoint summary/outer-state identity, including the direct
+   TypeScript state encoder rather than only the aggregate builder;
+4. kind-rank then unsigned canonical key-byte ordering, duplicate rejection,
+   contiguous ordinals, predecessor chain, legacy count, first/final root, and
+   projection identity;
+5. fatal UTF-8 decoding, duplicate JSON-key rejection through canonical
+   round-trip identity, byte bounds, and safe non-leaking failures; and
+6. detached results: TypeScript returns cloned buffers on every access and
+   Python decodes fresh key/state objects from immutable bytes, so a caller
+   cannot mutate data after its hash has been published.
+
+The independent hostile reviewer reproduced and then verified repairs for
+four TS/Python acceptance-domain divergences: schema timestamp order,
+migration continuity/postconditions/reversibility, record-zero predecessor,
+and migration-lock source/target direction. The reviewer also verified the
+calendar-date repair, direct checkpoint-summary enforcement, result mutation
+isolation, corrected clock fixture, hashes, sorting, duplicate behavior, and
+empty root. No HIGH or MEDIUM byte-protocol finding remains at this checkpoint.
+
+### 31.33.2 Required streaming accumulator before provider integration
+
+The current convenience builders intentionally materialize and sort a complete
+input. They are suitable for small fixtures and differential tests only. They
+MUST NOT be used as the production 10K/100K migration path. Before provider
+integration, both runtimes must add a constant-retained-memory accumulator
+that receives already canonical-order entries and requires an exact expected
+entry count.
+
+The TypeScript API must provide an `OperationBaselineAccumulator` whose
+constructor accepts a validated baseline ID and safe nonnegative expected
+count; `append` validates and detaches one input, enforces monotonic kind/key
+order, rejects duplicates and count overflow without advancing state, derives
+one immutable canonical entry, and retains only the previous rank/key and hash
+summary; `finish` rejects truncation, computes the exact existing projection,
+seals the object, and is idempotent. The Python `BaselineAccumulator` must have
+the same state machine and return immutable dataclasses and bytes.
+
+Accumulator acceptance requires, in both languages:
+
+- the shared twelve-kind fixture streamed one entry at a time with exact bytes,
+  ordinals, predecessors, roots, counts, and projection;
+- empty expected-count zero behavior with the frozen empty root;
+- kind regression, same-kind byte regression, duplicate, and numeric lexical
+  ordering attacks, including revision order `1,10,2` rather than `1,2,10`;
+- constructor negative/unsafe counts, append overflow, finish underflow,
+  append-after-finish, and idempotent finish;
+- failure atomicity proving every rejected append leaves count, tail, and
+  subsequent accepted hash identical to a clean accumulator;
+- source and return-value mutation attacks; and
+- a 100K streamed scheduled gate that does not first construct a 100K array or
+  tuple, reports actual count/root, and retains no pending or skipped outcome.
+
+### 31.33.3 Atomic runtime implementation order
+
+After the streaming accumulator is green, implementation proceeds in the
+following dependency order. Each item is incomplete until both native
+runtimes and cross-language file handoff pass.
+
+1. Add database-facing baseline-store modules instead of expanding the
+   migration monoliths. Split same-connection source-v1 semantic audit from
+   path-opening public audit so the migration never deadlocks its own exclusive
+   lock.
+2. Add named-column source iterators for all twelve families. Queries execute
+   in frozen kind order and canonical key-byte order. Numeric JSON keys require
+   lexical canonical-number ordering; the accumulator remains the final
+   authority and rejects any query-order drift.
+3. Count all source families inside the same exclusive transaction and pass
+   the exact total to the accumulator. Every appended entry is inserted
+   immediately and released. Header and sequence singleton are published only
+   after `finish` succeeds.
+4. Implement fresh-v2 bootstrap from the specified hypothetical empty v1
+   identity; implement v1→v2 capture; and refactor v0 so 0001 and 0002 share
+   one exclusive transaction. No externally visible committed v1 midpoint is
+   allowed.
+5. Rebind retained cursor descriptor/schema hashes only after their full v1
+   authorization, scope, snapshot, tail, and time audit. Preserve every other
+   cursor byte and row identity.
+6. Publish v2 lineage, schema identity, descriptor, and user version only
+   after baseline header/entries and sequence zero exist. Run catalog,
+   foreign-key, integrity, baseline, cursor, and physical reconciliation gates
+   before the one commit.
+7. Integrate exact stored request bytes and one sequence CAS into all nine
+   mutations. Retry reads and validates retained evidence but allocates no
+   sequence. New success advances exactly once; overflow/CAS loss/BUSY/error
+   rolls back physical state, ledger row, and high-water together.
+8. Add pure deterministic replay transitions seeded from the validated
+   baseline, then bidirectional physical reconciliation. Cursor validation is
+   independent but included in the final audit report.
+9. Extend backup/restore identity with baseline root/count, legacy count,
+   sequence high-water, and replay digest. Restore must replay and reconcile
+   before atomic publication, then prove the next write is N+1.
+10. Switch the active manifest and v2 descriptor only after both installed
+    npm and wheel/sdist artifacts contain and validate all six immutable
+    schema/migration assets and every native/cross-language gate passes.
+
+### 31.33.4 Mandatory crash and scale evidence
+
+Failure injection must cover exclusive reservation, source audit, post-0001,
+post-0002, first/middle/last baseline entry, header, sequence, cursor rebind,
+lineage, metadata publication, postconditions, pre-commit, and commit-returned.
+Every pre-commit throw or process kill must reopen as the exact old logical
+image with no v2 partials. A kill after commit-returned must reopen as one
+complete v2 image. In-process hooks are not sufficient; retained subprocess
+SIGKILL evidence is required.
+
+The quick accumulator/migration benchmark uses bounded generators at 128 and
+1,024 entries. Scheduled evidence uses 10K and exact 100K, records warmups and
+raw samples plus p50/p95/p99, database/WAL/SHM sizes, source/baseline counts,
+fetch batch, transaction attempts, query plans, and peak RSS. It must say
+`releaseGate:false` and `productionThroughputClaim:false` until reviewed
+thresholds and stable runners exist. Structural bounded-fetch, exact-count,
+contiguous-chain, and root-parity assertions are gates immediately; RSS is
+reported before it becomes a stable threshold.
+
+### 31.33.5 Current verification boundary
+
+At this checkpoint the shared fixture validator, TypeScript SQLite package,
+Python focused suite, strict type checks, Ruff, MyPy, and whitespace checks are
+green. The complete serial Python suite is rerun before the implementation
+commit is published because a previous concurrent all-workspace run produced
+one nonreproducible controller timing failure; the isolated case and all 62
+controller cases passed immediately afterward.
+
+This section records no runtime-v2, 100K bounded-memory, exact-96 execution,
+release, production throughput, or popularity claim. GitHub stars are an
+external adoption outcome, not a testable engineering invariant; the project
+will target adoption through correctness evidence, documentation, examples,
+compatibility, and reliable releases without claiming a guaranteed count.

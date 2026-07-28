@@ -1,0 +1,621 @@
+{
+  "schemaVersion": 1,
+  "id": "sqlite-operation-baseline-v2-vectors-v1",
+  "status": "contract-frozen",
+  "implementationClaim": false,
+  "domains": {
+    "baselineId": "graph-engineering/sqlite-operation-baseline-id/v1\u0000",
+    "entry": "graph-engineering/sqlite-operation-baseline-entry/v1\u0000",
+    "projection": "graph-engineering/sqlite-operation-baseline-projection/v1\u0000",
+    "genesis": "graph-engineering/sqlite-operation-baseline-genesis/v1\u0000",
+    "empty": "graph-engineering/sqlite-operation-baseline-empty/v1\u0000",
+    "genesisHash": "5311dba7ae8b844fc3efccd55dd90c3f78e02a7f7e222d7a0a513fd1aff9ec96",
+    "emptyRoot": "66a081bbc7369b674fa093cb2e3e1d269a1eb506698e24dfc2899074bf06b82a"
+  },
+  "sourceEnvelope": {
+    "capturedAtMs": 1735689601234,
+    "sourceApplicationId": 1195724359,
+    "sourceDescriptorHash": "4071e4e5e2cddad01af4f87e4df45fa55bbc4e238674174ce40eca765d2c03fe",
+    "sourceMigrationLineageId": "alpha-v0-to-v1",
+    "sourceMigrationLineageSha256": "a8e9de4d1bae81f8405ef611fca1298bef024ad1df5e905d1d5a9357d1e8cb9c",
+    "sourceSchemaIdentitySha256": "f3d961d4d96e93a7fab13a91b374c27ff877a93332ff7ed7426f1fff982baff4",
+    "sourceUserVersion": 1
+  },
+  "baselineId": "v2-e43886d3883954231f8101d31b7d43cb4f70e0bca9c7cb25b2f34ce51256609d",
+  "policyVector": {
+    "value": {
+      "baselineFormatVersion": 1,
+      "canonicalEncoding": "graph-engineering/canonical-json/v1",
+      "cursorReplay": "independent-semantic-audit",
+      "emptyRoot": "66a081bbc7369b674fa093cb2e3e1d269a1eb506698e24dfc2899074bf06b82a",
+      "entryHashDomain": "graph-engineering/sqlite-operation-baseline-entry/v1\u0000",
+      "entryKinds": [
+        "schema-envelope",
+        "migration-lineage",
+        "stream-head",
+        "record-identity",
+        "checkpoint-current",
+        "checkpoint-revision",
+        "lease-current",
+        "used-lease-identity",
+        "legal-hold",
+        "migration-lock-current",
+        "used-migration-lock-identity",
+        "legacy-operation"
+      ],
+      "genesisHash": "5311dba7ae8b844fc3efccd55dd90c3f78e02a7f7e222d7a0a513fd1aff9ec96",
+      "legacyRequestRecovery": false,
+      "maxEntryKeyBytes": 4096,
+      "maxEntryStateBytes": 2097152,
+      "payloadOmissions": [
+        "checkpoint-value",
+        "record-blob",
+        "record-value"
+      ],
+      "projectionHashDomain": "graph-engineering/sqlite-operation-baseline-projection/v1\u0000",
+      "replayStartsAtCommitSequence": 1,
+      "sort": [
+        "entry-kind-rank",
+        "entry-key-utf8-bytes"
+      ]
+    },
+    "canonicalUtf8": "{\"baselineFormatVersion\":1,\"canonicalEncoding\":\"graph-engineering/canonical-json/v1\",\"cursorReplay\":\"independent-semantic-audit\",\"emptyRoot\":\"66a081bbc7369b674fa093cb2e3e1d269a1eb506698e24dfc2899074bf06b82a\",\"entryHashDomain\":\"graph-engineering/sqlite-operation-baseline-entry/v1\\u0000\",\"entryKinds\":[\"schema-envelope\",\"migration-lineage\",\"stream-head\",\"record-identity\",\"checkpoint-current\",\"checkpoint-revision\",\"lease-current\",\"used-lease-identity\",\"legal-hold\",\"migration-lock-current\",\"used-migration-lock-identity\",\"legacy-operation\"],\"genesisHash\":\"5311dba7ae8b844fc3efccd55dd90c3f78e02a7f7e222d7a0a513fd1aff9ec96\",\"legacyRequestRecovery\":false,\"maxEntryKeyBytes\":4096,\"maxEntryStateBytes\":2097152,\"payloadOmissions\":[\"checkpoint-value\",\"record-blob\",\"record-value\"],\"projectionHashDomain\":\"graph-engineering/sqlite-operation-baseline-projection/v1\\u0000\",\"replayStartsAtCommitSequence\":1,\"sort\":[\"entry-kind-rank\",\"entry-key-utf8-bytes\"]}",
+    "canonicalHex": "7b22626173656c696e65466f726d617456657273696f6e223a312c2263616e6f6e6963616c456e636f64696e67223a2267726170682d656e67696e656572696e672f63616e6f6e6963616c2d6a736f6e2f7631222c22637572736f725265706c6179223a22696e646570656e64656e742d73656d616e7469632d6175646974222c22656d707479526f6f74223a2236366130383162626337333639623637346661303933636232653365316432363961316562353036363938653234646663323839393037346266303662383261222c22656e74727948617368446f6d61696e223a2267726170682d656e67696e656572696e672f73716c6974652d6f7065726174696f6e2d626173656c696e652d656e7472792f76315c7530303030222c22656e7472794b696e6473223a5b22736368656d612d656e76656c6f7065222c226d6967726174696f6e2d6c696e65616765222c2273747265616d2d68656164222c227265636f72642d6964656e74697479222c22636865636b706f696e742d63757272656e74222c22636865636b706f696e742d7265766973696f6e222c226c656173652d63757272656e74222c22757365642d6c656173652d6964656e74697479222c226c6567616c2d686f6c64222c226d6967726174696f6e2d6c6f636b2d63757272656e74222c22757365642d6d6967726174696f6e2d6c6f636b2d6964656e74697479222c226c65676163792d6f7065726174696f6e225d2c2267656e6573697348617368223a2235333131646261376165386238343466633365666363643535646439306333663738653032613766376532323264376130613531336664316166663965633936222c226c6567616379526571756573745265636f76657279223a66616c73652c226d6178456e7472794b65794279746573223a343039362c226d6178456e74727953746174654279746573223a323039373135322c227061796c6f61644f6d697373696f6e73223a5b22636865636b706f696e742d76616c7565222c227265636f72642d626c6f62222c227265636f72642d76616c7565225d2c2270726f6a656374696f6e48617368446f6d61696e223a2267726170682d656e67696e656572696e672f73716c6974652d6f7065726174696f6e2d626173656c696e652d70726f6a656374696f6e2f76315c7530303030222c227265706c61795374617274734174436f6d6d697453657175656e6365223a312c22736f7274223a5b22656e7472792d6b696e642d72616e6b222c22656e7472792d6b65792d757466382d6279746573225d7d",
+    "byteLength": 946,
+    "sha256": "67cbe0ac8bf04f28061d50f8b7089312cc1e1f9a9520ede95deec0d1f4ec5eb0"
+  },
+  "entryVectors": [
+    {
+      "vectorId": "BL-V01",
+      "category": "behavior",
+      "entryKind": "schema-envelope",
+      "ordinal": 0,
+      "key": {
+        "value": {
+          "scope": "cycle-store"
+        },
+        "canonicalUtf8": "{\"scope\":\"cycle-store\"}",
+        "canonicalHex": "7b2273636f7065223a226379636c652d73746f7265227d",
+        "byteLength": 23,
+        "sha256": "503bcea070592cf775430eae910c4ea8d602fafb27bb6a27e439c89f84935ff3"
+      },
+      "state": {
+        "value": {
+          "createdAtMs": 1735689600000,
+          "currentVersion": 1,
+          "latestMigrationAppliedAtMs": 1735689600100,
+          "latestMigrationSha256": "a8e9de4d1bae81f8405ef611fca1298bef024ad1df5e905d1d5a9357d1e8cb9c",
+          "maxReaderVersion": 1,
+          "maxWriterVersion": 1,
+          "minReaderVersion": 1,
+          "minWriterVersion": 1,
+          "providerDescriptorHash": "4071e4e5e2cddad01af4f87e4df45fa55bbc4e238674174ce40eca765d2c03fe",
+          "schemaIdentitySha256": "f3d961d4d96e93a7fab13a91b374c27ff877a93332ff7ed7426f1fff982baff4",
+          "updatedAtMs": 1735689600100
+        },
+        "canonicalUtf8": "{\"createdAtMs\":1735689600000,\"currentVersion\":1,\"latestMigrationAppliedAtMs\":1735689600100,\"latestMigrationSha256\":\"a8e9de4d1bae81f8405ef611fca1298bef024ad1df5e905d1d5a9357d1e8cb9c\",\"maxReaderVersion\":1,\"maxWriterVersion\":1,\"minReaderVersion\":1,\"minWriterVersion\":1,\"providerDescriptorHash\":\"4071e4e5e2cddad01af4f87e4df45fa55bbc4e238674174ce40eca765d2c03fe\",\"schemaIdentitySha256\":\"f3d961d4d96e93a7fab13a91b374c27ff877a93332ff7ed7426f1fff982baff4\",\"updatedAtMs\":1735689600100}",
+        "canonicalHex": "7b226372656174656441744d73223a313733353638393630303030302c2263757272656e7456657273696f6e223a312c226c61746573744d6967726174696f6e4170706c69656441744d73223a313733353638393630303130302c226c61746573744d6967726174696f6e536861323536223a2261386539646534643162616538316638343035656636313166636131323938626566303234616431646635653930356431643561393335376431653863623963222c226d617852656164657256657273696f6e223a312c226d617857726974657256657273696f6e223a312c226d696e52656164657256657273696f6e223a312c226d696e57726974657256657273696f6e223a312c2270726f766964657244657363726970746f7248617368223a2234303731653465356532636464616430316166346638376534646634356661353562626334653233383637343137346365343065636137363564326330336665222c22736368656d614964656e74697479536861323536223a2266336439363164346439366539336137666162313361393162333734633237666638373761393333333266663765643734323666316666663938326261666634222c227570646174656441744d73223a313733353638393630303130307d",
+        "byteLength": 476,
+        "sha256": "f53fbef49bc51a0f8eaa911f12c0374edb1e3cb27eb83697e2a8c26cc79a8f62"
+      },
+      "previousEntryHash": "5311dba7ae8b844fc3efccd55dd90c3f78e02a7f7e222d7a0a513fd1aff9ec96",
+      "entryHash": "87d4a5e99f9ef10f87314c0d1b38d76dac592b3934b55bf607560d9f6872760f"
+    },
+    {
+      "vectorId": "BL-V02",
+      "category": "behavior",
+      "entryKind": "migration-lineage",
+      "ordinal": 1,
+      "key": {
+        "value": {
+          "version": 1
+        },
+        "canonicalUtf8": "{\"version\":1}",
+        "canonicalHex": "7b2276657273696f6e223a317d",
+        "byteLength": 13,
+        "sha256": "2430f1a2ad2982d0067885488a4c89e21ad1d7c83b115ba8f1b20acc88dfaea8"
+      },
+      "state": {
+        "value": {
+          "appliedAtMs": 1735689600100,
+          "migrationId": "alpha-v0-to-v1",
+          "postconditions": {
+            "requiredPostconditions": [
+              "application-id-matches",
+              "user-version-is-1",
+              "schema-singleton-is-manifest-bound",
+              "migration-ledger-row-is-manifest-bound",
+              "all-canonical-tables-are-strict",
+              "logical-schema-identity-matches-fresh-v1",
+              "foreign-key-check-is-empty",
+              "integrity-check-is-ok",
+              "alpha-row-counts-are-preserved",
+              "stream-heads-match-record-tails",
+              "canonical-blobs-and-hashes-are-preserved",
+              "checkpoint-revisions-are-seeded",
+              "lease-and-migration-fences-are-monotonic",
+              "no-v0-or-placeholder-state-remains"
+            ]
+          },
+          "previousVersion": 0,
+          "reversibility": "rebuild-from-verified-backup-only",
+          "schemaIdentitySha256": "f3d961d4d96e93a7fab13a91b374c27ff877a93332ff7ed7426f1fff982baff4",
+          "sqlSha256": "a8e9de4d1bae81f8405ef611fca1298bef024ad1df5e905d1d5a9357d1e8cb9c",
+          "version": 1
+        },
+        "canonicalUtf8": "{\"appliedAtMs\":1735689600100,\"migrationId\":\"alpha-v0-to-v1\",\"postconditions\":{\"requiredPostconditions\":[\"application-id-matches\",\"user-version-is-1\",\"schema-singleton-is-manifest-bound\",\"migration-ledger-row-is-manifest-bound\",\"all-canonical-tables-are-strict\",\"logical-schema-identity-matches-fresh-v1\",\"foreign-key-check-is-empty\",\"integrity-check-is-ok\",\"alpha-row-counts-are-preserved\",\"stream-heads-match-record-tails\",\"canonical-blobs-and-hashes-are-preserved\",\"checkpoint-revisions-are-seeded\",\"lease-and-migration-fences-are-monotonic\",\"no-v0-or-placeholder-state-remains\"]},\"previousVersion\":0,\"reversibility\":\"rebuild-from-verified-backup-only\",\"schemaIdentitySha256\":\"f3d961d4d96e93a7fab13a91b374c27ff877a93332ff7ed7426f1fff982baff4\",\"sqlSha256\":\"a8e9de4d1bae81f8405ef611fca1298bef024ad1df5e905d1d5a9357d1e8cb9c\",\"version\":1}",
+        "canonicalHex": "7b226170706c69656441744d73223a313733353638393630303130302c226d6967726174696f6e4964223a22616c7068612d76302d746f2d7631222c22706f7374636f6e646974696f6e73223a7b227265717569726564506f7374636f6e646974696f6e73223a5b226170706c69636174696f6e2d69642d6d617463686573222c22757365722d76657273696f6e2d69732d31222c22736368656d612d73696e676c65746f6e2d69732d6d616e69666573742d626f756e64222c226d6967726174696f6e2d6c65646765722d726f772d69732d6d616e69666573742d626f756e64222c22616c6c2d63616e6f6e6963616c2d7461626c65732d6172652d737472696374222c226c6f676963616c2d736368656d612d6964656e746974792d6d6174636865732d66726573682d7631222c22666f726569676e2d6b65792d636865636b2d69732d656d707479222c22696e746567726974792d636865636b2d69732d6f6b222c22616c7068612d726f772d636f756e74732d6172652d707265736572766564222c2273747265616d2d68656164732d6d617463682d7265636f72642d7461696c73222c2263616e6f6e6963616c2d626c6f62732d616e642d6861736865732d6172652d707265736572766564222c22636865636b706f696e742d7265766973696f6e732d6172652d736565646564222c226c656173652d616e642d6d6967726174696f6e2d66656e6365732d6172652d6d6f6e6f746f6e6963222c226e6f2d76302d6f722d706c616365686f6c6465722d73746174652d72656d61696e73225d7d2c2270726576696f757356657273696f6e223a302c227265766572736962696c697479223a2272656275696c642d66726f6d2d76657269666965642d6261636b75702d6f6e6c79222c22736368656d614964656e74697479536861323536223a2266336439363164346439366539336137666162313361393162333734633237666638373761393333333266663765643734323666316666663938326261666634222c2273716c536861323536223a2261386539646534643162616538316638343035656636313166636131323938626566303234616431646635653930356431643561393335376431653863623963222c2276657273696f6e223a317d",
+        "byteLength": 836,
+        "sha256": "774ee4516d35afa89751208b9618b1259f352354cf2d3b03b0d88bb17615d959"
+      },
+      "previousEntryHash": "87d4a5e99f9ef10f87314c0d1b38d76dac592b3934b55bf607560d9f6872760f",
+      "entryHash": "9c9d0f1d697a10fcf1de7ade613c120e6649d253307af1208084e93efa09582d"
+    },
+    {
+      "vectorId": "BL-V03",
+      "category": "behavior",
+      "entryKind": "stream-head",
+      "ordinal": 2,
+      "key": {
+        "value": {
+          "streamId": "stream-main",
+          "tenantId": "tenant-alpha"
+        },
+        "canonicalUtf8": "{\"streamId\":\"stream-main\",\"tenantId\":\"tenant-alpha\"}",
+        "canonicalHex": "7b2273747265616d4964223a2273747265616d2d6d61696e222c2274656e616e744964223a2274656e616e742d616c706861227d",
+        "byteLength": 52,
+        "sha256": "84f07840bf3108622ce2cc0646d4150d96ca94f307af9b3ad62693380e795f41"
+      },
+      "state": {
+        "value": {
+          "createdAtMs": 1735689600200,
+          "streamId": "stream-main",
+          "tailRecordHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "tailSequence": 0,
+          "tenantId": "tenant-alpha",
+          "updatedAtMs": 1735689600400
+        },
+        "canonicalUtf8": "{\"createdAtMs\":1735689600200,\"streamId\":\"stream-main\",\"tailRecordHash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"tailSequence\":0,\"tenantId\":\"tenant-alpha\",\"updatedAtMs\":1735689600400}",
+        "canonicalHex": "7b226372656174656441744d73223a313733353638393630303230302c2273747265616d4964223a2273747265616d2d6d61696e222c227461696c5265636f726448617368223a2261616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161222c227461696c53657175656e6365223a302c2274656e616e744964223a2274656e616e742d616c706861222c227570646174656441744d73223a313733353638393630303430307d",
+        "byteLength": 209,
+        "sha256": "35799ecb82657a5641546d62059d718e204b02f387cd8a781fc331941263df95"
+      },
+      "previousEntryHash": "9c9d0f1d697a10fcf1de7ade613c120e6649d253307af1208084e93efa09582d",
+      "entryHash": "8b7a30c6d4e771d46c5917b487d5d39c93a47835ef7e98b74d45fab8ea5bef9f"
+    },
+    {
+      "vectorId": "BL-V04",
+      "category": "behavior",
+      "entryKind": "record-identity",
+      "ordinal": 3,
+      "key": {
+        "value": {
+          "recordId": "record-0001",
+          "tenantId": "tenant-alpha"
+        },
+        "canonicalUtf8": "{\"recordId\":\"record-0001\",\"tenantId\":\"tenant-alpha\"}",
+        "canonicalHex": "7b227265636f72644964223a227265636f72642d30303031222c2274656e616e744964223a2274656e616e742d616c706861227d",
+        "byteLength": 52,
+        "sha256": "7c11f18ae071af3a2c2cbae62514b876a1197ff12a9b90976ea56c546f31fdf2"
+      },
+      "state": {
+        "value": {
+          "committedAtMs": 1735689600300,
+          "previousRecordHash": null,
+          "recordHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "recordId": "record-0001",
+          "sequence": 0,
+          "streamId": "stream-main",
+          "tenantId": "tenant-alpha",
+          "valueBytes": 17,
+          "valueHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "canonicalUtf8": "{\"committedAtMs\":1735689600300,\"previousRecordHash\":null,\"recordHash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"recordId\":\"record-0001\",\"sequence\":0,\"streamId\":\"stream-main\",\"tenantId\":\"tenant-alpha\",\"valueBytes\":17,\"valueHash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}",
+        "canonicalHex": "7b22636f6d6d697474656441744d73223a313733353638393630303330302c2270726576696f75735265636f726448617368223a6e756c6c2c227265636f726448617368223a2261616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161222c227265636f72644964223a227265636f72642d30303031222c2273657175656e6365223a302c2273747265616d4964223a2273747265616d2d6d61696e222c2274656e616e744964223a2274656e616e742d616c706861222c2276616c75654279746573223a31372c2276616c756548617368223a2262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262227d",
+        "byteLength": 321,
+        "sha256": "dbdd6e992844853d25e433ea0c8f933f1dc4e395f528299ab7c89953fafc9a82"
+      },
+      "previousEntryHash": "8b7a30c6d4e771d46c5917b487d5d39c93a47835ef7e98b74d45fab8ea5bef9f",
+      "entryHash": "9d3348065cf5883ffb067cb207dcd2acae020022d621c7424215aa1ffd0c3d9c"
+    },
+    {
+      "vectorId": "BL-V05",
+      "category": "behavior",
+      "entryKind": "checkpoint-current",
+      "ordinal": 4,
+      "key": {
+        "value": {
+          "checkpointId": "checkpoint-0001",
+          "checkpointScope": "primary",
+          "tenantId": "tenant-alpha"
+        },
+        "canonicalUtf8": "{\"checkpointId\":\"checkpoint-0001\",\"checkpointScope\":\"primary\",\"tenantId\":\"tenant-alpha\"}",
+        "canonicalHex": "7b22636865636b706f696e744964223a22636865636b706f696e742d30303031222c22636865636b706f696e7453636f7065223a227072696d617279222c2274656e616e744964223a2274656e616e742d616c706861227d",
+        "byteLength": 88,
+        "sha256": "7a0ea2fa43ad4fe107849451aee1ab4faa232183dbd8b1f6168a235111888ee4"
+      },
+      "state": {
+        "value": {
+          "boundRecordHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "boundSequence": 0,
+          "checkpointId": "checkpoint-0001",
+          "checkpointRevision": 1,
+          "checkpointScope": "primary",
+          "committedAtMs": 1735689600500,
+          "createdAt": "2025-01-01T00:00:00.000Z",
+          "streamId": "stream-main",
+          "summary": {
+            "boundRecordHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "boundSequence": 0,
+            "checkpointId": "checkpoint-0001",
+            "checkpointScope": "primary",
+            "createdAt": "2025-01-01T00:00:00.000Z",
+            "streamId": "stream-main",
+            "valueBytes": 23,
+            "valueHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+          },
+          "tenantId": "tenant-alpha",
+          "valueBytes": 23,
+          "valueHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        },
+        "canonicalUtf8": "{\"boundRecordHash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"boundSequence\":0,\"checkpointId\":\"checkpoint-0001\",\"checkpointRevision\":1,\"checkpointScope\":\"primary\",\"committedAtMs\":1735689600500,\"createdAt\":\"2025-01-01T00:00:00.000Z\",\"streamId\":\"stream-main\",\"summary\":{\"boundRecordHash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"boundSequence\":0,\"checkpointId\":\"checkpoint-0001\",\"checkpointScope\":\"primary\",\"createdAt\":\"2025-01-01T00:00:00.000Z\",\"streamId\":\"stream-main\",\"valueBytes\":23,\"valueHash\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"},\"tenantId\":\"tenant-alpha\",\"valueBytes\":23,\"valueHash\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"}",
+        "canonicalHex": "7b22626f756e645265636f726448617368223a2261616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161222c22626f756e6453657175656e6365223a302c22636865636b706f696e744964223a22636865636b706f696e742d30303031222c22636865636b706f696e745265766973696f6e223a312c22636865636b706f696e7453636f7065223a227072696d617279222c22636f6d6d697474656441744d73223a313733353638393630303530302c22637265617465644174223a22323032352d30312d30315430303a30303a30302e3030305a222c2273747265616d4964223a2273747265616d2d6d61696e222c2273756d6d617279223a7b22626f756e645265636f726448617368223a2261616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161222c22626f756e6453657175656e6365223a302c22636865636b706f696e744964223a22636865636b706f696e742d30303031222c22636865636b706f696e7453636f7065223a227072696d617279222c22637265617465644174223a22323032352d30312d30315430303a30303a30302e3030305a222c2273747265616d4964223a2273747265616d2d6d61696e222c2276616c75654279746573223a32332c2276616c756548617368223a2263636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363227d2c2274656e616e744964223a2274656e616e742d616c706861222c2276616c75654279746573223a32332c2276616c756548617368223a2263636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363227d",
+        "byteLength": 738,
+        "sha256": "69b9d8786c955d65a4b712d9d79f8b3fdec2b7b50d2cb334f27664029f3cbd9d"
+      },
+      "previousEntryHash": "9d3348065cf5883ffb067cb207dcd2acae020022d621c7424215aa1ffd0c3d9c",
+      "entryHash": "8980cc32fe2109c3ee8261f60cac1535eaffcea4d3d3f02c5a4b02a2d9422753"
+    },
+    {
+      "vectorId": "BL-V06",
+      "category": "behavior",
+      "entryKind": "checkpoint-revision",
+      "ordinal": 5,
+      "key": {
+        "value": {
+          "checkpointScope": "primary",
+          "revision": 1,
+          "tenantId": "tenant-alpha"
+        },
+        "canonicalUtf8": "{\"checkpointScope\":\"primary\",\"revision\":1,\"tenantId\":\"tenant-alpha\"}",
+        "canonicalHex": "7b22636865636b706f696e7453636f7065223a227072696d617279222c227265766973696f6e223a312c2274656e616e744964223a2274656e616e742d616c706861227d",
+        "byteLength": 68,
+        "sha256": "4ad52627550a7708bccf35147db02cd1d6770477e2183d9868349353a3dcafb8"
+      },
+      "state": {
+        "value": {
+          "action": "put",
+          "boundRecordHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "boundSequence": 0,
+          "checkpointCreatedAt": "2025-01-01T00:00:00.000Z",
+          "checkpointId": "checkpoint-0001",
+          "checkpointScope": "primary",
+          "recordedAtMs": 1735689600500,
+          "revision": 1,
+          "summary": {
+            "boundRecordHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "boundSequence": 0,
+            "checkpointId": "checkpoint-0001",
+            "checkpointScope": "primary",
+            "createdAt": "2025-01-01T00:00:00.000Z",
+            "streamId": "stream-main",
+            "valueBytes": 23,
+            "valueHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+          },
+          "tenantId": "tenant-alpha",
+          "valueBytes": 23,
+          "valueHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        },
+        "canonicalUtf8": "{\"action\":\"put\",\"boundRecordHash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"boundSequence\":0,\"checkpointCreatedAt\":\"2025-01-01T00:00:00.000Z\",\"checkpointId\":\"checkpoint-0001\",\"checkpointScope\":\"primary\",\"recordedAtMs\":1735689600500,\"revision\":1,\"summary\":{\"boundRecordHash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"boundSequence\":0,\"checkpointId\":\"checkpoint-0001\",\"checkpointScope\":\"primary\",\"createdAt\":\"2025-01-01T00:00:00.000Z\",\"streamId\":\"stream-main\",\"valueBytes\":23,\"valueHash\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"},\"tenantId\":\"tenant-alpha\",\"valueBytes\":23,\"valueHash\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"}",
+        "canonicalHex": "7b22616374696f6e223a22707574222c22626f756e645265636f726448617368223a2261616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161222c22626f756e6453657175656e6365223a302c22636865636b706f696e74437265617465644174223a22323032352d30312d30315430303a30303a30302e3030305a222c22636865636b706f696e744964223a22636865636b706f696e742d30303031222c22636865636b706f696e7453636f7065223a227072696d617279222c227265636f7264656441744d73223a313733353638393630303530302c227265766973696f6e223a312c2273756d6d617279223a7b22626f756e645265636f726448617368223a2261616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161222c22626f756e6453657175656e6365223a302c22636865636b706f696e744964223a22636865636b706f696e742d30303031222c22636865636b706f696e7453636f7065223a227072696d617279222c22637265617465644174223a22323032352d30312d30315430303a30303a30302e3030305a222c2273747265616d4964223a2273747265616d2d6d61696e222c2276616c75654279746573223a32332c2276616c756548617368223a2263636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363227d2c2274656e616e744964223a2274656e616e742d616c706861222c2276616c75654279746573223a32332c2276616c756548617368223a2263636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363227d",
+        "byteLength": 727,
+        "sha256": "076779c20059d240d2312665addf56848016119f5e5c6c5bfc8abba70c4021bd"
+      },
+      "previousEntryHash": "8980cc32fe2109c3ee8261f60cac1535eaffcea4d3d3f02c5a4b02a2d9422753",
+      "entryHash": "21340e6005e24a21ac9dcfb05c8efc13f77835d3633ef02be27e167ae0e5b63a"
+    },
+    {
+      "vectorId": "BL-V07",
+      "category": "behavior",
+      "entryKind": "lease-current",
+      "ordinal": 6,
+      "key": {
+        "value": {
+          "streamId": "stream-main",
+          "tenantId": "tenant-alpha"
+        },
+        "canonicalUtf8": "{\"streamId\":\"stream-main\",\"tenantId\":\"tenant-alpha\"}",
+        "canonicalHex": "7b2273747265616d4964223a2273747265616d2d6d61696e222c2274656e616e744964223a2274656e616e742d616c706861227d",
+        "byteLength": 52,
+        "sha256": "84f07840bf3108622ce2cc0646d4150d96ca94f307af9b3ad62693380e795f41"
+      },
+      "state": {
+        "value": {
+          "activeAcquiredAtMs": 1735689600700,
+          "activeExpiresAtMs": 1735689660700,
+          "activeFencingToken": 1,
+          "activeHolderId": "worker-a",
+          "activeLeaseEpoch": 1,
+          "activeLeaseId": "lease-live",
+          "lastFencingToken": 1,
+          "lastLeaseEpoch": 1,
+          "streamId": "stream-main",
+          "tenantId": "tenant-alpha",
+          "updatedAtMs": 1735689600700
+        },
+        "canonicalUtf8": "{\"activeAcquiredAtMs\":1735689600700,\"activeExpiresAtMs\":1735689660700,\"activeFencingToken\":1,\"activeHolderId\":\"worker-a\",\"activeLeaseEpoch\":1,\"activeLeaseId\":\"lease-live\",\"lastFencingToken\":1,\"lastLeaseEpoch\":1,\"streamId\":\"stream-main\",\"tenantId\":\"tenant-alpha\",\"updatedAtMs\":1735689600700}",
+        "canonicalHex": "7b22616374697665416371756972656441744d73223a313733353638393630303730302c226163746976654578706972657341744d73223a313733353638393636303730302c2261637469766546656e63696e67546f6b656e223a312c22616374697665486f6c6465724964223a22776f726b65722d61222c226163746976654c6561736545706f6368223a312c226163746976654c656173654964223a226c656173652d6c697665222c226c61737446656e63696e67546f6b656e223a312c226c6173744c6561736545706f6368223a312c2273747265616d4964223a2273747265616d2d6d61696e222c2274656e616e744964223a2274656e616e742d616c706861222c227570646174656441744d73223a313733353638393630303730307d",
+        "byteLength": 290,
+        "sha256": "747a8f991233490dfa695dbe28fc35831c2654ce8db2881e4530627e6e1ddad7"
+      },
+      "previousEntryHash": "21340e6005e24a21ac9dcfb05c8efc13f77835d3633ef02be27e167ae0e5b63a",
+      "entryHash": "8ceefda18ded1ab1bff4b85701515c446273780fc4da625cf380a4a7dd609d99"
+    },
+    {
+      "vectorId": "BL-V08",
+      "category": "behavior",
+      "entryKind": "used-lease-identity",
+      "ordinal": 7,
+      "key": {
+        "value": {
+          "leaseId": "lease-live",
+          "streamId": "stream-main",
+          "tenantId": "tenant-alpha"
+        },
+        "canonicalUtf8": "{\"leaseId\":\"lease-live\",\"streamId\":\"stream-main\",\"tenantId\":\"tenant-alpha\"}",
+        "canonicalHex": "7b226c656173654964223a226c656173652d6c697665222c2273747265616d4964223a2273747265616d2d6d61696e222c2274656e616e744964223a2274656e616e742d616c706861227d",
+        "byteLength": 75,
+        "sha256": "2dd606a5035a2843acef4c0ad754e7213447419f365cb29fb841262d6e10e456"
+      },
+      "state": {
+        "value": {
+          "fencingToken": 1,
+          "firstUsedAtMs": 1735689600700,
+          "leaseEpoch": 1,
+          "leaseId": "lease-live",
+          "streamId": "stream-main",
+          "tenantId": "tenant-alpha"
+        },
+        "canonicalUtf8": "{\"fencingToken\":1,\"firstUsedAtMs\":1735689600700,\"leaseEpoch\":1,\"leaseId\":\"lease-live\",\"streamId\":\"stream-main\",\"tenantId\":\"tenant-alpha\"}",
+        "canonicalHex": "7b2266656e63696e67546f6b656e223a312c2266697273745573656441744d73223a313733353638393630303730302c226c6561736545706f6368223a312c226c656173654964223a226c656173652d6c697665222c2273747265616d4964223a2273747265616d2d6d61696e222c2274656e616e744964223a2274656e616e742d616c706861227d",
+        "byteLength": 137,
+        "sha256": "d1172abaec95bc29a9cb22443ea94b09354b3002e01c02e8b073d467044f2c33"
+      },
+      "previousEntryHash": "8ceefda18ded1ab1bff4b85701515c446273780fc4da625cf380a4a7dd609d99",
+      "entryHash": "a5406cadca6fcd229d592a1dba1ee664b02133d874dad3eaef53d680eeb5f62d"
+    },
+    {
+      "vectorId": "BL-V09",
+      "category": "behavior",
+      "entryKind": "legal-hold",
+      "ordinal": 8,
+      "key": {
+        "value": {
+          "holdId": "hold-0001",
+          "streamId": "stream-main",
+          "tenantId": "tenant-alpha"
+        },
+        "canonicalUtf8": "{\"holdId\":\"hold-0001\",\"streamId\":\"stream-main\",\"tenantId\":\"tenant-alpha\"}",
+        "canonicalHex": "7b22686f6c644964223a22686f6c642d30303031222c2273747265616d4964223a2273747265616d2d6d61696e222c2274656e616e744964223a2274656e616e742d616c706861227d",
+        "byteLength": 73,
+        "sha256": "d3a9ec1687cf5c999887348653917d0d6fb05c82542205164ef5049bc34f863c"
+      },
+      "state": {
+        "value": {
+          "holdId": "hold-0001",
+          "placedAtMs": 1735689600800,
+          "streamId": "stream-main",
+          "tenantId": "tenant-alpha"
+        },
+        "canonicalUtf8": "{\"holdId\":\"hold-0001\",\"placedAtMs\":1735689600800,\"streamId\":\"stream-main\",\"tenantId\":\"tenant-alpha\"}",
+        "canonicalHex": "7b22686f6c644964223a22686f6c642d30303031222c22706c6163656441744d73223a313733353638393630303830302c2273747265616d4964223a2273747265616d2d6d61696e222c2274656e616e744964223a2274656e616e742d616c706861227d",
+        "byteLength": 100,
+        "sha256": "25784006ef988e37222bf23cb6c6988f233c76d5d92ebb37731e5a18bb7f1d2b"
+      },
+      "previousEntryHash": "a5406cadca6fcd229d592a1dba1ee664b02133d874dad3eaef53d680eeb5f62d",
+      "entryHash": "61cdbf0a5d3bd7dcf647909653dff0a3303a68831efad86af0ad1f2841c60a22"
+    },
+    {
+      "vectorId": "BL-V10",
+      "category": "behavior",
+      "entryKind": "migration-lock-current",
+      "ordinal": 9,
+      "key": {
+        "value": {
+          "singleton": 1
+        },
+        "canonicalUtf8": "{\"singleton\":1}",
+        "canonicalHex": "7b2273696e676c65746f6e223a317d",
+        "byteLength": 15,
+        "sha256": "d1fd9b9074c00428609673cde84c4dd661bc93c292f142401e51860b4b4e2423"
+      },
+      "state": {
+        "value": {
+          "activeAcquiredAtMs": null,
+          "activeExpiresAtMs": null,
+          "activeFencingToken": null,
+          "activeLockEpoch": null,
+          "activeLockId": null,
+          "activeOwnerId": null,
+          "activeSourceVersion": null,
+          "activeTargetVersion": null,
+          "lastFencingToken": 1,
+          "lastLockEpoch": 1,
+          "singleton": 1,
+          "updatedAtMs": 1735689601000
+        },
+        "canonicalUtf8": "{\"activeAcquiredAtMs\":null,\"activeExpiresAtMs\":null,\"activeFencingToken\":null,\"activeLockEpoch\":null,\"activeLockId\":null,\"activeOwnerId\":null,\"activeSourceVersion\":null,\"activeTargetVersion\":null,\"lastFencingToken\":1,\"lastLockEpoch\":1,\"singleton\":1,\"updatedAtMs\":1735689601000}",
+        "canonicalHex": "7b22616374697665416371756972656441744d73223a6e756c6c2c226163746976654578706972657341744d73223a6e756c6c2c2261637469766546656e63696e67546f6b656e223a6e756c6c2c226163746976654c6f636b45706f6368223a6e756c6c2c226163746976654c6f636b4964223a6e756c6c2c226163746976654f776e65724964223a6e756c6c2c22616374697665536f7572636556657273696f6e223a6e756c6c2c2261637469766554617267657456657273696f6e223a6e756c6c2c226c61737446656e63696e67546f6b656e223a312c226c6173744c6f636b45706f6368223a312c2273696e676c65746f6e223a312c227570646174656441744d73223a313733353638393630313030307d",
+        "byteLength": 277,
+        "sha256": "d848337c0e8d469158658ddec6c18c710ecd9fb521edde5b859ba3458a09f522"
+      },
+      "previousEntryHash": "61cdbf0a5d3bd7dcf647909653dff0a3303a68831efad86af0ad1f2841c60a22",
+      "entryHash": "14eb3032e75ae302d9e3e12285de92b0deee3ca2e762639d2c7551b9d3864a6e"
+    },
+    {
+      "vectorId": "BL-V11",
+      "category": "behavior",
+      "entryKind": "used-migration-lock-identity",
+      "ordinal": 10,
+      "key": {
+        "value": {
+          "lockId": "migration-lock-retired"
+        },
+        "canonicalUtf8": "{\"lockId\":\"migration-lock-retired\"}",
+        "canonicalHex": "7b226c6f636b4964223a226d6967726174696f6e2d6c6f636b2d72657469726564227d",
+        "byteLength": 35,
+        "sha256": "fb2927b4f0bab5c342caad8af41559ea7b91d3783933a6e0e10d57a4e1a4272f"
+      },
+      "state": {
+        "value": {
+          "fencingToken": 1,
+          "firstUsedAtMs": 1735689400000,
+          "lockEpoch": 1,
+          "lockId": "migration-lock-retired"
+        },
+        "canonicalUtf8": "{\"fencingToken\":1,\"firstUsedAtMs\":1735689400000,\"lockEpoch\":1,\"lockId\":\"migration-lock-retired\"}",
+        "canonicalHex": "7b2266656e63696e67546f6b656e223a312c2266697273745573656441744d73223a313733353638393430303030302c226c6f636b45706f6368223a312c226c6f636b4964223a226d6967726174696f6e2d6c6f636b2d72657469726564227d",
+        "byteLength": 96,
+        "sha256": "43fb6ee4e5e66bc6180dfd5fa90d908192d1ca4f51a1926251a7eb62b92407ed"
+      },
+      "previousEntryHash": "14eb3032e75ae302d9e3e12285de92b0deee3ca2e762639d2c7551b9d3864a6e",
+      "entryHash": "c3d98b4a1c8d70eed94ad12743f8abd178f74ebe91a80864dfb5ba7773b4ea15"
+    },
+    {
+      "vectorId": "BL-V12",
+      "category": "behavior",
+      "entryKind": "legacy-operation",
+      "ordinal": 11,
+      "key": {
+        "value": {
+          "operationId": "operation-legacy-0001",
+          "tenantId": "tenant-alpha"
+        },
+        "canonicalUtf8": "{\"operationId\":\"operation-legacy-0001\",\"tenantId\":\"tenant-alpha\"}",
+        "canonicalHex": "7b226f7065726174696f6e4964223a226f7065726174696f6e2d6c65676163792d30303031222c2274656e616e744964223a2274656e616e742d616c706861227d",
+        "byteLength": 65,
+        "sha256": "4cf8f620c8440dbfba1097f70f2bb91858c45828f9ab94d99991d3edefa25333"
+      },
+      "state": {
+        "value": {
+          "committedAtMs": 1735689601000,
+          "operationId": "operation-legacy-0001",
+          "operationName": "append",
+          "requestHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "resultBlobSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "resultHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "tenantId": "tenant-alpha"
+        },
+        "canonicalUtf8": "{\"committedAtMs\":1735689601000,\"operationId\":\"operation-legacy-0001\",\"operationName\":\"append\",\"requestHash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"resultBlobSha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"resultHash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"tenantId\":\"tenant-alpha\"}",
+        "canonicalHex": "7b22636f6d6d697474656441744d73223a313733353638393630313030302c226f7065726174696f6e4964223a226f7065726174696f6e2d6c65676163792d30303031222c226f7065726174696f6e4e616d65223a22617070656e64222c227265717565737448617368223a2262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262222c22726573756c74426c6f62536861323536223a2263636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363636363222c22726573756c7448617368223a2261616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161222c2274656e616e744964223a2274656e616e742d616c706861227d",
+        "byteLength": 367,
+        "sha256": "ca002ebc047e27ca6dd7440387b10e2b91e49e383a534f75140f2a596a25b002"
+      },
+      "previousEntryHash": "c3d98b4a1c8d70eed94ad12743f8abd178f74ebe91a80864dfb5ba7773b4ea15",
+      "entryHash": "b9948b7fa96c6d45f0fac10a52792ce88a4e243741dccf1e364311aeaba7dc86"
+    }
+  ],
+  "projection": {
+    "entryCount": 12,
+    "legacyOperationCount": 1,
+    "firstEntryHash": "87d4a5e99f9ef10f87314c0d1b38d76dac592b3934b55bf607560d9f6872760f",
+    "finalEntryHash": "b9948b7fa96c6d45f0fac10a52792ce88a4e243741dccf1e364311aeaba7dc86",
+    "canonicalValue": {
+      "baselineId": "v2-e43886d3883954231f8101d31b7d43cb4f70e0bca9c7cb25b2f34ce51256609d",
+      "entryCount": 12,
+      "finalEntryHash": "b9948b7fa96c6d45f0fac10a52792ce88a4e243741dccf1e364311aeaba7dc86",
+      "firstEntryHash": "87d4a5e99f9ef10f87314c0d1b38d76dac592b3934b55bf607560d9f6872760f",
+      "legacyOperationCount": 1
+    },
+    "canonicalUtf8": "{\"baselineId\":\"v2-e43886d3883954231f8101d31b7d43cb4f70e0bca9c7cb25b2f34ce51256609d\",\"entryCount\":12,\"finalEntryHash\":\"b9948b7fa96c6d45f0fac10a52792ce88a4e243741dccf1e364311aeaba7dc86\",\"firstEntryHash\":\"87d4a5e99f9ef10f87314c0d1b38d76dac592b3934b55bf607560d9f6872760f\",\"legacyOperationCount\":1}",
+    "canonicalHex": "7b22626173656c696e654964223a2276322d65343338383664333838333935343233316638313031643331623764343363623466373065306263613963376362323562326633346365353132353636303964222c22656e747279436f756e74223a31322c2266696e616c456e74727948617368223a2262393934386237666139366336643435663066616331306135323739326365383861346532343337343164636366316533363433313161656162613764633836222c226669727374456e74727948617368223a2238376434613565393966396566313066383733313463306431623338643736646163353932623339333462353562663630373536306439663638373237363066222c226c65676163794f7065726174696f6e436f756e74223a317d",
+    "byteLength": 293,
+    "sha256": "2a15f26152e5328917066f94df3f1911101cfca324045c3e9e012b8dc1d0f00a"
+  },
+  "attackVectors": [
+    {
+      "id": "BL-A01",
+      "category": "attack",
+      "mutation": "key-noncanonical-order",
+      "targetOrdinal": 2,
+      "expectedCode": "GE_BASELINE_CANONICAL_BYTES"
+    },
+    {
+      "id": "BL-A02",
+      "category": "attack",
+      "mutation": "key-unknown-field",
+      "targetOrdinal": 3,
+      "expectedCode": "GE_BASELINE_ENTRY_SHAPE"
+    },
+    {
+      "id": "BL-A03",
+      "category": "attack",
+      "mutation": "state-missing-field",
+      "targetOrdinal": 4,
+      "expectedCode": "GE_BASELINE_ENTRY_SHAPE"
+    },
+    {
+      "id": "BL-A04",
+      "category": "attack",
+      "mutation": "duplicate-kind-key",
+      "targetOrdinal": 3,
+      "expectedCode": "GE_BASELINE_DUPLICATE"
+    },
+    {
+      "id": "BL-A05",
+      "category": "attack",
+      "mutation": "ordinal-gap",
+      "targetOrdinal": 4,
+      "expectedCode": "GE_BASELINE_ORDER"
+    },
+    {
+      "id": "BL-A06",
+      "category": "attack",
+      "mutation": "previous-hash-drift",
+      "targetOrdinal": 5,
+      "expectedCode": "GE_BASELINE_CHAIN"
+    },
+    {
+      "id": "BL-A07",
+      "category": "attack",
+      "mutation": "key-invalid-utf8",
+      "targetOrdinal": 6,
+      "expectedCode": "GE_BASELINE_CANONICAL_BYTES"
+    },
+    {
+      "id": "BL-A08",
+      "category": "attack",
+      "mutation": "state-invalid-utf8",
+      "targetOrdinal": 7,
+      "expectedCode": "GE_BASELINE_CANONICAL_BYTES"
+    },
+    {
+      "id": "BL-A09",
+      "category": "attack",
+      "mutation": "entry-hash-drift",
+      "targetOrdinal": 8,
+      "expectedCode": "GE_BASELINE_ENTRY_HASH"
+    },
+    {
+      "id": "BL-A10",
+      "category": "attack",
+      "mutation": "first-root-drift",
+      "targetOrdinal": 9,
+      "expectedCode": "GE_BASELINE_PROJECTION"
+    },
+    {
+      "id": "BL-A11",
+      "category": "attack",
+      "mutation": "final-root-drift",
+      "targetOrdinal": 10,
+      "expectedCode": "GE_BASELINE_PROJECTION"
+    },
+    {
+      "id": "BL-A12",
+      "category": "attack",
+      "mutation": "projection-hash-drift",
+      "targetOrdinal": 11,
+      "expectedCode": "GE_BASELINE_PROJECTION"
+    }
+  ]
+}
