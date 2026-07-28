@@ -53,6 +53,21 @@ export const SQLITE_BASELINE_COMPLETE_STREAM_RECORD_CAMPAIGN = Symbol(
 export const SQLITE_BASELINE_ABORT_STREAM_RECORD_CAMPAIGN = Symbol(
   "SQLiteBaselineTempStage.abortStreamRecordCampaign",
 );
+export const SQLITE_BASELINE_BEGIN_CHECKPOINT_CAMPAIGN = Symbol(
+  "SQLiteBaselineTempStage.beginCheckpointCampaign",
+);
+export const SQLITE_BASELINE_FENCE_CHECKPOINT_CAMPAIGN = Symbol(
+  "SQLiteBaselineTempStage.fenceCheckpointCampaign",
+);
+export const SQLITE_BASELINE_REGISTER_CHECKPOINT_CLEANUP = Symbol(
+  "SQLiteBaselineTempStage.registerCheckpointCleanup",
+);
+export const SQLITE_BASELINE_COMPLETE_CHECKPOINT_CAMPAIGN = Symbol(
+  "SQLiteBaselineTempStage.completeCheckpointCampaign",
+);
+export const SQLITE_BASELINE_ABORT_CHECKPOINT_CAMPAIGN = Symbol(
+  "SQLiteBaselineTempStage.abortCheckpointCampaign",
+);
 
 /** Opaque evidence bound to one stage-private pending write pair. */
 export interface SQLiteBaselineOwnedWriteReceipt {
@@ -142,6 +157,23 @@ export interface SQLiteBaselineStreamRecordCampaignStage {
   ): void;
   [SQLITE_BASELINE_COMPLETE_STREAM_RECORD_CAMPAIGN](session: object): void;
   [SQLITE_BASELINE_ABORT_STREAM_RECORD_CAMPAIGN](
+    session: object | undefined,
+    message: string,
+  ): never;
+}
+
+export interface SQLiteBaselineCheckpointCampaignStage {
+  [SQLITE_BASELINE_BEGIN_CHECKPOINT_CAMPAIGN](
+    connection: SQLiteConnection,
+    projectionIdentity: OperationBaselineProjectionIdentity,
+  ): object;
+  [SQLITE_BASELINE_FENCE_CHECKPOINT_CAMPAIGN](session: object): void;
+  [SQLITE_BASELINE_REGISTER_CHECKPOINT_CLEANUP](
+    session: object,
+    cleanup: (() => void) | undefined,
+  ): void;
+  [SQLITE_BASELINE_COMPLETE_CHECKPOINT_CAMPAIGN](session: object): void;
+  [SQLITE_BASELINE_ABORT_CHECKPOINT_CAMPAIGN](
     session: object | undefined,
     message: string,
   ): never;

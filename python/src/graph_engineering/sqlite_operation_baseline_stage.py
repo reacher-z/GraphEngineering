@@ -1159,6 +1159,10 @@ class SQLiteV1BaselineTempStage:
 
     __slots__ = (
         "_allowed_total_changes",
+        "_checkpoint_campaign_completed",
+        "_checkpoint_campaign_cursor",
+        "_checkpoint_campaign_session",
+        "_checkpoint_campaign_started",
         "_connection",
         "_cooperative_next_sequence",
         "_cooperative_pending_receipt",
@@ -1184,6 +1188,10 @@ class SQLiteV1BaselineTempStage:
 
     def __init__(self, connection: SQLiteV1BaselineConnectionOwner) -> None:
         self._connection = connection
+        self._checkpoint_campaign_started = False
+        self._checkpoint_campaign_completed = False
+        self._checkpoint_campaign_cursor: _SQLiteCursorCapability | None = None
+        self._checkpoint_campaign_session: object | None = None
         self._created_tables: list[str] = []
         self._created_indexes: list[str] = []
         self._created_view = False
@@ -1700,6 +1708,121 @@ class SQLiteV1BaselineTempStage:
         self._stream_record_campaign_session = None
         self._poison("BLR_STAGE_ITERATOR_INCOMPLETE: stream/record campaign aborted")
 
+    def _begin_checkpoint_campaign(
+        self,
+        summary: SQLiteV1BaselineSourceSummary,
+        identity: BaselineProjectionIdentity,
+    ) -> tuple[int, object]:
+        """Bind the checkpoint campaign after the stream/record phase completed."""
+
+        if self._checkpoint_campaign_started:
+            self._poison("BLR_STAGE_ITERATOR_INCOMPLETE: checkpoint campaign already started")
+        self._checkpoint_campaign_started = True
+        if (
+            type(summary) is not SQLiteV1BaselineSourceSummary
+            or type(identity) is not BaselineProjectionIdentity
+            or not self._ordered_handoff_completed
+            or not self._stream_record_campaign_completed
+            or self._ordered_handoff_reader is not None
+            or self._ordered_projection_identity is not identity
+            or self._cooperative_summary is not summary
+            or identity.entry_count != summary.expected_entry_count
+            or self._state != "open"
+        ):
+            self._poison(
+                "BLR_STAGE_ITERATOR_INCOMPLETE: checkpoint campaign binding is invalid"
+            )
+        expected_total_changes = self._allowed_total_changes
+        self._assert_ordered_handoff_fence(expected_total_changes)
+        self.assert_common_counts(summary.counts_by_kind)
+        self.assert_relation_key_coverage()
+        self._assert_ordered_handoff_catalog(expected_total_changes)
+        self._assert_ordered_handoff_fence(expected_total_changes)
+        session = object()
+        self._checkpoint_campaign_session = session
+        return expected_total_changes, session
+
+    def _assert_checkpoint_campaign_fence(
+        self,
+        session: object,
+        expected_total_changes: int,
+    ) -> None:
+        if (
+            self._checkpoint_campaign_session is not session
+            or not self._checkpoint_campaign_started
+            or self._checkpoint_campaign_completed
+        ):
+            self._poison("BLR_STAGE_ITERATOR_INCOMPLETE: checkpoint campaign session is invalid")
+        self._assert_ordered_handoff_fence(expected_total_changes)
+        self._assert_ordered_handoff_catalog(expected_total_changes)
+        self._assert_ordered_handoff_fence(expected_total_changes)
+
+    def _register_checkpoint_campaign_cursor(
+        self,
+        session: object,
+        cursor: _SQLiteCursorCapability,
+        expected_total_changes: int,
+    ) -> None:
+        self._assert_checkpoint_campaign_fence(session, expected_total_changes)
+        if (
+            type(cursor) is not _SQLiteCursorCapability
+            or self._checkpoint_campaign_cursor is not None
+        ):
+            self._poison("BLR_STAGE_ITERATOR_INCOMPLETE: checkpoint rule cursor is invalid")
+        self._checkpoint_campaign_cursor = cursor
+        self._assert_checkpoint_campaign_fence(session, expected_total_changes)
+
+    def _release_checkpoint_campaign_cursor(
+        self,
+        session: object,
+        cursor: _SQLiteCursorCapability,
+        expected_total_changes: int,
+    ) -> None:
+        if self._checkpoint_campaign_cursor is not cursor:
+            self._poison(
+                "BLR_STAGE_ITERATOR_INCOMPLETE: checkpoint rule cursor binding drifted"
+            )
+        self._checkpoint_campaign_cursor = None
+        self._assert_checkpoint_campaign_fence(session, expected_total_changes)
+
+    def _complete_checkpoint_campaign(
+        self,
+        identity: BaselineProjectionIdentity,
+        expected_total_changes: int,
+        session: object,
+    ) -> None:
+        if (
+            not self._checkpoint_campaign_started
+            or self._checkpoint_campaign_completed
+            or self._ordered_projection_identity is not identity
+            or self._checkpoint_campaign_session is not session
+            or self._checkpoint_campaign_cursor is not None
+        ):
+            self._poison(
+                "BLR_STAGE_ITERATOR_INCOMPLETE: checkpoint campaign completion is invalid"
+            )
+        self._assert_checkpoint_campaign_fence(session, expected_total_changes)
+        summary = self._cooperative_summary
+        if summary is None:
+            self._poison("BLR_STAGE_ITERATOR_INCOMPLETE: checkpoint source binding is absent")
+        self.assert_common_counts(summary.counts_by_kind)
+        self.assert_relation_key_coverage()
+        self._assert_ordered_handoff_catalog(expected_total_changes)
+        self._assert_ordered_handoff_fence(expected_total_changes)
+        self._checkpoint_campaign_completed = True
+        self._checkpoint_campaign_session = None
+
+    def _abort_checkpoint_campaign(self, session: object | None) -> Never:
+        cursor = self._checkpoint_campaign_cursor
+        self._checkpoint_campaign_cursor = None
+        if cursor is not None:
+            with suppress(BaseException):
+                cursor.close()
+        if session is not None and session is not self._checkpoint_campaign_session:
+            self._poison("BLR_STAGE_ITERATOR_INCOMPLETE: checkpoint campaign session drifted")
+        self._checkpoint_campaign_session = None
+        self._poison("BLR_STAGE_ITERATOR_INCOMPLETE: checkpoint campaign aborted")
+
     def _assert_ordered_handoff_fence(self, expected_total_changes: int) -> None:
         self._assert_open_and_bound()
         if (
@@ -1950,6 +2073,17 @@ class SQLiteV1BaselineTempStage:
                         "BLR_STAGE_ITERATOR_INCOMPLETE: TEMP campaign cursor cleanup failed"
                     )
             self._stream_record_campaign_cursor = None
+        checkpoint_cursor = self._checkpoint_campaign_cursor
+        if checkpoint_cursor is not None:
+            try:
+                checkpoint_cursor.close()
+            except BaseException as error:
+                if cursor_close_failure is None:
+                    cursor_close_failure = error
+                    cursor_cleanup_message = (
+                        "BLR_STAGE_ITERATOR_INCOMPLETE: TEMP checkpoint cursor cleanup failed"
+                    )
+            self._checkpoint_campaign_cursor = None
         if (
             not self._connection.in_exclusive_transaction
             or self._connection.transaction_epoch != self._transaction_epoch
@@ -2035,6 +2169,11 @@ class SQLiteV1BaselineTempStage:
             with suppress(BaseException):
                 campaign_cursor.close()
             self._stream_record_campaign_cursor = None
+        checkpoint_cursor = self._checkpoint_campaign_cursor
+        if checkpoint_cursor is not None:
+            with suppress(BaseException):
+                checkpoint_cursor.close()
+            self._checkpoint_campaign_cursor = None
         self._state = "poisoned"
         self._cooperative_pending_receipt = None
         self._cooperative_summary = None

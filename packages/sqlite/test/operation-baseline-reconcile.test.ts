@@ -15,17 +15,24 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ensureSQLiteCycleStoreSchema } from "../src/migrations.js";
 import {
+  SQLITE_BASELINE_COMPLETE_CHECKPOINT_CAMPAIGN,
   SQLITE_BASELINE_COOPERATIVE_ENTRIES,
   SQLITE_BASELINE_BEGIN_ORDERED_HANDOFF,
   SQLITE_BASELINE_COMPLETE_STREAM_RECORD_CAMPAIGN,
   SQLITE_BASELINE_CONSUME_OWNED_WRITE,
   SQLITE_BASELINE_FENCE_ORDERED_HANDOFF,
+  SQLITE_BASELINE_FENCE_CHECKPOINT_CAMPAIGN,
   SQLITE_BASELINE_FENCE_STREAM_RECORD_CAMPAIGN,
   SQLITE_BASELINE_OWNED_WRITE,
   type SQLiteBaselineCooperativeSource,
   type SQLiteBaselineCooperativeStage,
   type SQLiteBaselineOwnedWriteReceipt,
 } from "../src/operation-baseline-cooperation.js";
+import {
+  SQLITE_CHECKPOINT_RULES,
+  SQLiteCheckpointInvariantCampaign,
+  runSQLiteCheckpointInvariantCampaign,
+} from "../src/operation-baseline-checkpoint-invariants.js";
 import { stageSQLiteV1BaselineSourceIntoTempStage } from "../src/operation-baseline-reconcile.js";
 import {
   SQLiteV1BaselineOrderedTempReader,
@@ -1967,5 +1974,874 @@ describe("SQLite stream/record invariant campaign", () => {
       }
       run.connection.close();
     }
+  });
+});
+
+type Checkpoint = ReturnType<typeof createCycleStoreCheckpoint>;
+
+function insertInvariantCheckpointCurrent(
+  connection: SQLiteConnection,
+  tenantId: string,
+  checkpoint: Checkpoint,
+  revision: number,
+  committedAtMs: number,
+): void {
+  const { value: _value, ...summary } = checkpoint;
+  connection.prepare(`INSERT INTO ge_cycle_checkpoints
+    (tenant_id, checkpoint_scope, checkpoint_id, stream_id, bound_sequence,
+     bound_record_hash, created_at, value_hash, value_bytes, value_blob,
+     checkpoint_blob, summary_blob, checkpoint_revision, committed_at_ms)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, "inspect-schema").run(
+    tenantId, checkpoint.checkpointScope, checkpoint.checkpointId,
+    checkpoint.streamId, checkpoint.boundSequence, checkpoint.boundRecordHash,
+    checkpoint.createdAt, checkpoint.valueHash, checkpoint.valueBytes,
+    Buffer.from(canonicalSerialize(checkpoint.value), "utf8"),
+    Buffer.from(canonicalSerialize(checkpoint), "utf8"),
+    Buffer.from(cycleStoreAdapterCodec.encodeLedgerResult("save-checkpoint", summary)),
+    revision, committedAtMs,
+  );
+}
+
+function insertInvariantCheckpointRevision(
+  connection: SQLiteConnection,
+  tenantId: string,
+  checkpointScope: string,
+  revision: number,
+  checkpointId: string,
+  recordedAtMs: number,
+  checkpoint?: Checkpoint,
+): void {
+  if (checkpoint === undefined) {
+    connection.prepare(`INSERT INTO ge_cycle_checkpoint_revisions
+      (tenant_id, checkpoint_scope, revision, checkpoint_id, action,
+       summary_blob, bound_sequence, bound_record_hash, checkpoint_created_at,
+       value_hash, value_bytes, recorded_at_ms)
+      VALUES (?, ?, ?, ?, 'delete', NULL, NULL, NULL, NULL, NULL, NULL, ?)`,
+    "inspect-schema").run(
+      tenantId, checkpointScope, revision, checkpointId, recordedAtMs,
+    );
+    return;
+  }
+  const { value: _value, ...summary } = checkpoint;
+  connection.prepare(`INSERT INTO ge_cycle_checkpoint_revisions
+    (tenant_id, checkpoint_scope, revision, checkpoint_id, action,
+     summary_blob, bound_sequence, bound_record_hash, checkpoint_created_at,
+     value_hash, value_bytes, recorded_at_ms)
+    VALUES (?, ?, ?, ?, 'put', ?, ?, ?, ?, ?, ?, ?)`, "inspect-schema").run(
+    tenantId, checkpointScope, revision, checkpointId,
+    Buffer.from(cycleStoreAdapterCodec.encodeLedgerResult("save-checkpoint", summary)),
+    checkpoint.boundSequence, checkpoint.boundRecordHash, checkpoint.createdAt,
+    checkpoint.valueHash, checkpoint.valueBytes, recordedAtMs,
+  );
+}
+
+function checkpoint(
+  checkpointScope: string,
+  checkpointId: string,
+  streamId: string,
+  boundRecordHash: string,
+  value: unknown = `value-${checkpointId}`,
+  createdAt = "2026-07-28T00:00:00Z",
+): Checkpoint {
+  return createCycleStoreCheckpoint({
+    boundRecordHash,
+    boundSequence: 0,
+    checkpointId,
+    checkpointScope,
+    createdAt,
+    streamId,
+    value,
+  });
+}
+
+function sealedHostileCheckpointFixture(): Sealed {
+  const connection = opened(NOW);
+  connection.execTrusted("PRAGMA foreign_keys = OFF", "inspect-schema");
+  const addRecord = (tenantId: string, streamId: string, recordId: string): string => {
+    const hash = insertInvariantRecord(
+      connection, tenantId, streamId, recordId, 0, null, NOW,
+    );
+    insertInvariantStream(connection, tenantId, streamId, 0, hash, NOW);
+    return hash;
+  };
+
+  const crossHash = addRecord("tenant-foreign", "stream-cross", "record-cross-0");
+  const cross = checkpoint("scope-cross", "checkpoint-cross", "stream-cross", crossHash);
+  insertInvariantCheckpointRevision(
+    connection, "tenant-cross", "scope-cross", 1, "checkpoint-cross", NOW, cross,
+  );
+  insertInvariantCheckpointRevision(
+    connection, "tenant-cross", "scope-cross", 2, "checkpoint-cross", NOW,
+  );
+
+  addRecord("tenant-wrong", "stream-wrong", "record-wrong-0");
+  const wrong = checkpoint(
+    "scope-wrong", "checkpoint-wrong", "stream-wrong", "c".repeat(64),
+  );
+  insertInvariantCheckpointRevision(
+    connection, "tenant-wrong", "scope-wrong", 1, "checkpoint-wrong", NOW, wrong,
+  );
+  insertInvariantCheckpointCurrent(connection, "tenant-wrong", wrong, 1, NOW);
+
+  const startHash = addRecord("tenant-start", "stream-start", "record-start-0");
+  const start = checkpoint("scope-start", "checkpoint-start", "stream-start", startHash);
+  insertInvariantCheckpointRevision(
+    connection, "tenant-start", "scope-start", 2, "checkpoint-start", NOW, start,
+  );
+
+  const mixedHash = addRecord("tenant-mixed", "stream-mixed", "record-mixed-0");
+  const mixedA = checkpoint("scope-mixed", "checkpoint-a", "stream-mixed", mixedHash);
+  const mixedB = checkpoint("scope-mixed", "checkpoint-b", "stream-mixed", mixedHash);
+  insertInvariantCheckpointRevision(
+    connection, "tenant-mixed", "scope-mixed", 1, "checkpoint-a", NOW, mixedA,
+  );
+  insertInvariantCheckpointRevision(
+    connection, "tenant-mixed", "scope-mixed", 2, "checkpoint-b", NOW, mixedB,
+  );
+  insertInvariantCheckpointCurrent(connection, "tenant-mixed", mixedB, 2, NOW);
+
+  const deleteHash = addRecord("tenant-delete", "stream-delete", "record-delete-0");
+  const deleted = checkpoint(
+    "scope-delete", "checkpoint-delete", "stream-delete", deleteHash,
+  );
+  insertInvariantCheckpointRevision(
+    connection, "tenant-delete", "scope-delete", 1, "checkpoint-delete", NOW, deleted,
+  );
+  insertInvariantCheckpointRevision(
+    connection, "tenant-delete", "scope-delete", 2, "checkpoint-delete", NOW,
+  );
+  insertInvariantCheckpointCurrent(connection, "tenant-delete", deleted, 1, NOW);
+
+  const zeroHash = addRecord("tenant-zero", "stream-zero", "record-zero-0");
+  const zero = checkpoint("scope-zero", "checkpoint-zero", "stream-zero", zeroHash);
+  insertInvariantCheckpointCurrent(connection, "tenant-zero", zero, 1, NOW);
+
+  const interleavedHash = addRecord(
+    "tenant-interleaved", "stream-interleaved", "record-interleaved-0",
+  );
+  const interleavedA = checkpoint(
+    "scope-interleaved", "checkpoint-a", "stream-interleaved", interleavedHash,
+  );
+  const interleavedB = checkpoint(
+    "scope-interleaved", "checkpoint-b", "stream-interleaved", interleavedHash,
+  );
+  insertInvariantCheckpointRevision(
+    connection, "tenant-interleaved", "scope-interleaved", 1,
+    "checkpoint-a", NOW, interleavedA,
+  );
+  insertInvariantCheckpointRevision(
+    connection, "tenant-interleaved", "scope-interleaved", 2,
+    "checkpoint-b", NOW, interleavedB,
+  );
+  insertInvariantCheckpointRevision(
+    connection, "tenant-interleaved", "scope-interleaved", 3,
+    "checkpoint-a", NOW, interleavedA,
+  );
+  insertInvariantCheckpointCurrent(connection, "tenant-interleaved", interleavedA, 1, NOW);
+  insertInvariantCheckpointCurrent(connection, "tenant-interleaved", interleavedB, 2, NOW);
+
+  const bindingHash = addRecord("tenant-binding", "stream-binding", "record-binding-0");
+  const bindingRevision = checkpoint(
+    "scope-binding", "checkpoint-binding", "stream-binding", bindingHash,
+    "binding-revision",
+  );
+  const bindingCurrent = checkpoint(
+    "scope-binding", "checkpoint-binding", "stream-binding", bindingHash,
+    "binding-current", "2026-07-29T00:00:00Z",
+  );
+  insertInvariantCheckpointRevision(
+    connection, "tenant-binding", "scope-binding", 1,
+    "checkpoint-binding", NOW - 1, bindingRevision,
+  );
+  insertInvariantCheckpointCurrent(connection, "tenant-binding", bindingCurrent, 1, NOW);
+
+  const interiorHash = addRecord(
+    "tenant-interior", "stream-interior", "record-interior-0",
+  );
+  const interior = checkpoint(
+    "scope-interior", "checkpoint-interior", "stream-interior", interiorHash,
+  );
+  insertInvariantCheckpointRevision(
+    connection, "tenant-interior", "scope-interior", 1,
+    "checkpoint-interior", NOW, interior,
+  );
+  insertInvariantCheckpointRevision(
+    connection, "tenant-interior", "scope-interior", 3,
+    "checkpoint-interior", NOW, interior,
+  );
+  insertInvariantCheckpointCurrent(connection, "tenant-interior", interior, 3, NOW);
+
+  connection.execTrusted("BEGIN EXCLUSIVE", "inspect-schema");
+  const stage = createSQLiteBaselineTempStage(
+    connection, proveSQLiteExclusiveBaselineTransaction(connection),
+  ) as SQLiteBaselineTempStage & SQLiteBaselineCooperativeStage;
+  const source = captureSQLiteV1BaselineSourceSummary(
+    connection, NOW,
+  ) as SQLiteV1BaselineSourceSummary & SQLiteBaselineCooperativeSource;
+  stageSQLiteV1BaselineSourceIntoTempStage(connection, source, stage);
+  const projectionIdentity = readSQLiteV1BaselineOrderedTempProjection(
+    connection, source, stage,
+  );
+  runSQLiteStreamRecordInvariantCampaign(connection, projectionIdentity, stage);
+  return { connection, source, stage, projectionIdentity };
+}
+
+function sealedForCheckpoint(seed = true): Sealed {
+  const run = sealed(seed);
+  runSQLiteStreamRecordInvariantCampaign(
+    run.connection, run.projectionIdentity, run.stage,
+  );
+  return run;
+}
+
+describe("SQLite checkpoint invariant campaign", () => {
+  it("reports the exact shared hostile checkpoint vector", () => {
+    const run = sealedHostileCheckpointFixture();
+    try {
+      expect(run.projectionIdentity).toEqual({
+        baselineId: "v2-fa4f8ccf6009797f4204ecbb8c85cc1d753ce219ce25630ef8af21558326f2af",
+        entryCount: 43,
+        legacyOperationCount: 0,
+        firstEntryHash: "f061b7d1fd823d623dc13ab12c78806cf6457e2f6e2f054b235d26d8abee787c",
+        finalEntryHash: "c4585a6a22dd0859d5d671f75ff143a6c5eae088cc3d87a2addc97ce9c21144c",
+        projectionSha256: "264a8ba16682d78368f5318e67b2c938167a28549ccf8fbb1ca685d2f79f497e",
+      });
+      expect(runSQLiteCheckpointInvariantCampaign(
+        run.connection, run.projectionIdentity, run.stage,
+      ).diagnostics).toEqual([
+        { ruleId: "BLR_CHECKPOINT_REVISION_GAP", violationCount: 2, diagnosticsTruncated: false },
+        { ruleId: "BLR_CHECKPOINT_RECORD_MISSING", violationCount: 3, diagnosticsTruncated: false },
+        { ruleId: "BLR_CHECKPOINT_CURRENT_MISSING", violationCount: 2, diagnosticsTruncated: false },
+        { ruleId: "BLR_CHECKPOINT_CURRENT_UNEXPECTED", violationCount: 2, diagnosticsTruncated: false },
+        { ruleId: "BLR_CHECKPOINT_CURRENT_STALE", violationCount: 1, diagnosticsTruncated: false },
+        { ruleId: "BLR_CHECKPOINT_CURRENT_BINDING", violationCount: 1, diagnosticsTruncated: false },
+      ]);
+    } finally {
+      close(run);
+    }
+  });
+
+  it("returns a deeply frozen safe empty report bound to the exact projection", () => {
+    const run = sealedForCheckpoint();
+    try {
+      const report = runSQLiteCheckpointInvariantCampaign(
+        run.connection, run.projectionIdentity, run.stage,
+      );
+      expect(report).toEqual({ projectionIdentity: run.projectionIdentity, diagnostics: [] });
+      expect(report.projectionIdentity).toBe(run.projectionIdentity);
+      expect(Object.isFrozen(report)).toBe(true);
+      expect(Object.isFrozen(report.diagnostics)).toBe(true);
+      expect(Object.keys(report)).toEqual(["projectionIdentity", "diagnostics"]);
+    } finally {
+      close(run);
+    }
+  });
+
+  it("re-proves exact common counts and relation coverage before opening a session", () => {
+    const run = sealedForCheckpoint();
+    const common = vi.spyOn(run.stage, "assertCommonCounts");
+    const coverage = vi.spyOn(run.stage, "assertRelationKeyCoverage");
+    try {
+      expect(runSQLiteCheckpointInvariantCampaign(
+        run.connection, run.projectionIdentity, run.stage,
+      ).diagnostics).toEqual([]);
+      expect(common).toHaveBeenCalledTimes(2);
+      expect(coverage).toHaveBeenCalledTimes(2);
+    } finally {
+      coverage.mockRestore();
+      common.mockRestore();
+      close(run);
+    }
+  });
+
+  it("keeps the exact six-rule order and deeply freezes fixed bounded SQL", () => {
+    expect(SQLITE_CHECKPOINT_RULES.map((rule) => rule.ruleId)).toEqual([
+      "BLR_CHECKPOINT_REVISION_GAP",
+      "BLR_CHECKPOINT_RECORD_MISSING",
+      "BLR_CHECKPOINT_CURRENT_MISSING",
+      "BLR_CHECKPOINT_CURRENT_UNEXPECTED",
+      "BLR_CHECKPOINT_CURRENT_STALE",
+      "BLR_CHECKPOINT_CURRENT_BINDING",
+    ]);
+    expect(Object.isFrozen(SQLITE_CHECKPOINT_RULES)).toBe(true);
+    expect(SQLITE_CHECKPOINT_RULES.every(Object.isFrozen)).toBe(true);
+    expect(SQLITE_CHECKPOINT_RULES.every((rule) => rule.sql.endsWith("LIMIT ?"))).toBe(true);
+    expect(SQLITE_CHECKPOINT_RULES.every((rule) => rule.sql.startsWith("SELECT 1")
+      || rule.sql.startsWith("SELECT violation"))).toBe(true);
+  });
+
+  it("proves every checkpoint query uses its frozen named relation indexes", () => {
+    const run = sealedForCheckpoint();
+    const expected = new Map<string, readonly string[]>([
+      ["BLR_CHECKPOINT_REVISION_GAP", ["ge_blr_checkpoint_revisions_latest_idx"]],
+      ["BLR_CHECKPOINT_RECORD_MISSING", [
+        "ge_blr_checkpoint_current_record_idx",
+        "ge_blr_checkpoint_revisions_record_idx",
+        "ge_blr_records_stream_position_idx",
+      ]],
+      ["BLR_CHECKPOINT_CURRENT_MISSING", ["ge_blr_checkpoint_revisions_latest_idx"]],
+      ["BLR_CHECKPOINT_CURRENT_UNEXPECTED", ["ge_blr_checkpoint_revisions_latest_idx"]],
+      ["BLR_CHECKPOINT_CURRENT_STALE", ["ge_blr_checkpoint_revisions_latest_idx"]],
+      ["BLR_CHECKPOINT_CURRENT_BINDING", ["ge_blr_checkpoint_revisions_latest_idx"]],
+    ]);
+    try {
+      for (const rule of SQLITE_CHECKPOINT_RULES) {
+        const plan = run.connection.prepare(
+          `EXPLAIN QUERY PLAN ${rule.sql}`, "inspect-schema",
+        ).all(17).map((row) => String((row as unknown as readonly unknown[])[3])).join("\n");
+        for (const index of expected.get(rule.ruleId) ?? []) expect(plan).toContain(index);
+      }
+    } finally {
+      close(run);
+    }
+  });
+
+  it("rejects checkpoint execution before the predecessor campaign completes", () => {
+    const run = sealed();
+    try {
+      expect(() => runSQLiteCheckpointInvariantCampaign(
+        run.connection, run.projectionIdentity, run.stage,
+      )).toThrow(/binding/u);
+      expect(run.stage.state).toBe("poisoned");
+    } finally {
+      close(run);
+    }
+  });
+
+  it.each([1, 16, 64])(
+    "distinguishes exact checkpoint limit from limit+1 at %i",
+    (limit) => {
+      for (const extra of [0, 1]) {
+        const run = sealedForCheckpoint();
+        const target = SQLITE_CHECKPOINT_RULES[5];
+        const originalPrepare = run.connection.prepare.bind(run.connection);
+        const prepare = vi.spyOn(run.connection, "prepare").mockImplementation(
+          (sql, operation) => sql === target.sql
+            ? ({
+              iterate: () => Array.from({ length: limit + extra }, () => [1n]).values(),
+            } as never)
+            : originalPrepare(sql, operation),
+        );
+        try {
+          expect(runSQLiteCheckpointInvariantCampaign(
+            run.connection, run.projectionIdentity, run.stage, { diagnosticLimit: limit },
+          ).diagnostics).toEqual([{
+            ruleId: "BLR_CHECKPOINT_CURRENT_BINDING",
+            violationCount: limit,
+            diagnosticsTruncated: extra === 1,
+          }]);
+        } finally {
+          prepare.mockRestore();
+          close(run);
+        }
+      }
+    },
+  );
+
+  it("rejects malformed checkpoint witness rows without leaking identity", () => {
+    for (const hostileRow of [[0n], [2n], ["tenant-secret"], [1n, "tenant-secret"]]) {
+      const run = sealedForCheckpoint();
+      const target = SQLITE_CHECKPOINT_RULES[0];
+      const originalPrepare = run.connection.prepare.bind(run.connection);
+      const prepare = vi.spyOn(run.connection, "prepare").mockImplementation(
+        (sql, operation) => sql === target.sql
+          ? ({ iterate: () => [hostileRow].values() } as never)
+          : originalPrepare(sql, operation),
+      );
+      try {
+        expect(() => runSQLiteCheckpointInvariantCampaign(
+          run.connection, run.projectionIdentity, run.stage,
+        )).toThrow(CycleStoreProviderError);
+        expect(run.stage.state).toBe("poisoned");
+      } finally {
+        prepare.mockRestore();
+        close(run);
+      }
+    }
+  });
+
+  it.each(SQLITE_CHECKPOINT_RULES)(
+    "detects DML during $ruleId fetch and finalizes exactly once",
+    (target) => {
+      const run = sealedForCheckpoint();
+      const originalPrepare = run.connection.prepare.bind(run.connection);
+      let returns = 0;
+      const iterator: Iterator<unknown> & Iterable<unknown> = {
+        [Symbol.iterator]() { return this; },
+        next: () => {
+          run.connection.prepare(
+            "UPDATE temp.ge_blr_stage SET state_blob = state_blob WHERE kind_rank = 0",
+            "inspect-schema",
+          ).run();
+          return { done: true, value: undefined };
+        },
+        return: () => { returns += 1; return { done: true, value: undefined }; },
+      };
+      const prepare = vi.spyOn(run.connection, "prepare").mockImplementation(
+        (sql, operation) => sql === target.sql
+          ? ({ iterate: () => iterator } as never)
+          : originalPrepare(sql, operation),
+      );
+      try {
+        expect(() => runSQLiteCheckpointInvariantCampaign(
+          run.connection, run.projectionIdentity, run.stage,
+        )).toThrow(/unexplained write/u);
+        expect(returns).toBe(1);
+        expect(run.stage.state).toBe("poisoned");
+      } finally {
+        prepare.mockRestore();
+        close(run);
+      }
+    },
+  );
+
+  it.each(SQLITE_CHECKPOINT_RULES)(
+    "detects DML after $ruleId cursor creation and before first fetch",
+    (target) => {
+      const run = sealedForCheckpoint();
+      const originalPrepare = run.connection.prepare.bind(run.connection);
+      let returns = 0;
+      const iterator: Iterator<unknown> & Iterable<unknown> = {
+        [Symbol.iterator]() { return this; },
+        next: () => ({ done: true, value: undefined }),
+        return: () => { returns += 1; return { done: true, value: undefined }; },
+      };
+      const prepare = vi.spyOn(run.connection, "prepare").mockImplementation(
+        (sql, operation) => sql === target.sql
+          ? ({
+            iterate: () => {
+              run.connection.prepare(
+                "UPDATE temp.ge_blr_stage SET state_blob = state_blob WHERE kind_rank = 0",
+                "inspect-schema",
+              ).run();
+              return iterator;
+            },
+          } as never)
+          : originalPrepare(sql, operation),
+      );
+      try {
+        expect(() => runSQLiteCheckpointInvariantCampaign(
+          run.connection, run.projectionIdentity, run.stage,
+        )).toThrow(/unexplained write/u);
+        expect(returns).toBe(1);
+        expect(run.stage.state).toBe("poisoned");
+      } finally {
+        prepare.mockRestore();
+        close(run);
+      }
+    },
+  );
+
+  it("preserves a primary checkpoint fetch failure over cleanup failure", () => {
+    const run = sealedForCheckpoint();
+    const target = SQLITE_CHECKPOINT_RULES[0];
+    const originalPrepare = run.connection.prepare.bind(run.connection);
+    let returns = 0;
+    const iterator: Iterator<unknown> & Iterable<unknown> = {
+      [Symbol.iterator]() { return this; },
+      next: () => { throw new Error("authoritative checkpoint failure"); },
+      return: () => { returns += 1; throw new Error("secondary cleanup failure"); },
+    };
+    const prepare = vi.spyOn(run.connection, "prepare").mockImplementation(
+      (sql, operation) => sql === target.sql
+        ? ({ iterate: () => iterator } as never)
+        : originalPrepare(sql, operation),
+    );
+    try {
+      expect(() => runSQLiteCheckpointInvariantCampaign(
+        run.connection, run.projectionIdentity, run.stage,
+      )).toThrowError("SQLite baseline checkpoint campaign failed");
+      expect(returns).toBe(1);
+      expect(run.stage.state).toBe("poisoned");
+    } finally {
+      prepare.mockRestore();
+      close(run);
+    }
+  });
+
+  it("detects DML at terminal checkpoint completion", () => {
+    const run = sealedForCheckpoint();
+    const originalComplete = run.stage[SQLITE_BASELINE_COMPLETE_CHECKPOINT_CAMPAIGN]
+      .bind(run.stage);
+    const complete = vi.spyOn(
+      run.stage, SQLITE_BASELINE_COMPLETE_CHECKPOINT_CAMPAIGN,
+    ).mockImplementation((session) => {
+      run.connection.prepare(
+        "UPDATE temp.ge_blr_stage SET state_blob = state_blob WHERE kind_rank = 0",
+        "inspect-schema",
+      ).run();
+      originalComplete(session);
+    });
+    try {
+      expect(() => runSQLiteCheckpointInvariantCampaign(
+        run.connection, run.projectionIdentity, run.stage,
+      )).toThrow(/unexplained write/u);
+      expect(run.stage.state).toBe("poisoned");
+    } finally {
+      complete.mockRestore();
+      close(run);
+    }
+  });
+
+  it.each([null, [], false, { diagnosticLimit: null }, { diagnosticLimit: 0 },
+    { diagnosticLimit: 65 }, { unknown: 1 }])(
+    "rejects hostile checkpoint options without consuming the stage: %j",
+    (options) => {
+      const run = sealedForCheckpoint();
+      try {
+        expect(() => new SQLiteCheckpointInvariantCampaign(
+          run.connection, run.projectionIdentity, run.stage, options as never,
+        )).toThrow(CycleStoreProviderError);
+        expect(runSQLiteCheckpointInvariantCampaign(
+          run.connection, run.projectionIdentity, run.stage,
+        ).diagnostics).toEqual([]);
+      } finally {
+        close(run);
+      }
+    },
+  );
+
+  it("rejects hidden, symbol and accessor checkpoint options without invoking getters", () => {
+    const hidden = {};
+    Object.defineProperty(hidden, "hidden", { value: 1 });
+    let getterCalls = 0;
+    const accessor = {};
+    Object.defineProperty(accessor, "diagnosticLimit", {
+      enumerable: true,
+      get: () => { getterCalls += 1; return 16; },
+    });
+    for (const options of [hidden, { [Symbol("hidden")]: 1 }, accessor]) {
+      const run = sealedForCheckpoint();
+      try {
+        expect(() => new SQLiteCheckpointInvariantCampaign(
+          run.connection, run.projectionIdentity, run.stage, options,
+        )).toThrow(CycleStoreProviderError);
+        expect(runSQLiteCheckpointInvariantCampaign(
+          run.connection, run.projectionIdentity, run.stage,
+        ).diagnostics).toEqual([]);
+      } finally {
+        close(run);
+      }
+    }
+    expect(getterCalls).toBe(0);
+  });
+
+  it("rejects an equal-content projection clone and burns the sealed stage", () => {
+    const run = sealedForCheckpoint();
+    try {
+      expect(() => runSQLiteCheckpointInvariantCampaign(
+        run.connection, Object.freeze({ ...run.projectionIdentity }), run.stage,
+      )).toThrow(/binding/u);
+      expect(run.stage.state).toBe("poisoned");
+    } finally {
+      close(run);
+    }
+  });
+
+  it("is one-shot after success and abandonment is terminal", () => {
+    const completed = sealedForCheckpoint();
+    try {
+      const campaign = new SQLiteCheckpointInvariantCampaign(
+        completed.connection, completed.projectionIdentity, completed.stage,
+      );
+      expect(campaign.run().diagnostics).toEqual([]);
+      expect(campaign.state).toBe("complete");
+      expect(() => campaign.run()).toThrow(/one-shot/u);
+      expect(completed.stage.state).toBe("poisoned");
+    } finally {
+      close(completed);
+    }
+
+    const abandoned = sealedForCheckpoint();
+    try {
+      const campaign = new SQLiteCheckpointInvariantCampaign(
+        abandoned.connection, abandoned.projectionIdentity, abandoned.stage,
+      );
+      expect(() => campaign.dispose()).toThrow(/abandoned/u);
+      expect(campaign.state).toBe("poisoned");
+      expect(abandoned.stage.state).toBe("poisoned");
+    } finally {
+      close(abandoned);
+    }
+  });
+
+  it("rejects equal-count common mutation before checkpoint query preparation", () => {
+    const run = sealedForCheckpoint();
+    const originalPrepare = run.connection.prepare.bind(run.connection);
+    const prepare = vi.spyOn(run.connection, "prepare");
+    try {
+      originalPrepare(
+        "UPDATE temp.ge_blr_stage SET state_blob = state_blob WHERE kind_rank = 4",
+        "inspect-schema",
+      ).run();
+      expect(() => runSQLiteCheckpointInvariantCampaign(
+        run.connection, run.projectionIdentity, run.stage,
+      )).toThrow(/unexplained write/u);
+      expect(prepare.mock.calls.some(([sql]) => SQLITE_CHECKPOINT_RULES
+        .some((rule) => rule.sql === sql))).toBe(false);
+    } finally {
+      prepare.mockRestore();
+      close(run);
+    }
+  });
+
+  it("rejects delete/recreate catalog substitution before checkpoint execution", () => {
+    const run = sealedForCheckpoint();
+    try {
+      run.connection.execTrusted(
+        "DROP INDEX temp.ge_blr_checkpoint_revisions_latest_idx",
+        "inspect-schema",
+      );
+      run.connection.execTrusted(
+        "CREATE INDEX ge_blr_checkpoint_revisions_latest_idx ON ge_blr_checkpoint_revisions(tenant_id)",
+        "inspect-schema",
+      );
+      expect(() => runSQLiteCheckpointInvariantCampaign(
+        run.connection, run.projectionIdentity, run.stage,
+      )).toThrow(/transaction changed|catalog|unexplained write/u);
+      expect(run.stage.state).toBe("poisoned");
+    } finally {
+      close(run);
+    }
+  });
+
+  it("detects DML from checkpoint iterator close after EOF", () => {
+    const run = sealedForCheckpoint();
+    const target = SQLITE_CHECKPOINT_RULES[0];
+    const originalPrepare = run.connection.prepare.bind(run.connection);
+    let returns = 0;
+    const iterator: Iterator<unknown> & Iterable<unknown> = {
+      [Symbol.iterator]() { return this; },
+      next: () => ({ done: true, value: undefined }),
+      return: () => {
+        returns += 1;
+        run.connection.prepare(
+          "UPDATE temp.ge_blr_stage SET state_blob = state_blob WHERE kind_rank = 0",
+          "inspect-schema",
+        ).run();
+        return { done: true, value: undefined };
+      },
+    };
+    const prepare = vi.spyOn(run.connection, "prepare").mockImplementation(
+      (sql, operation) => sql === target.sql
+        ? ({ iterate: () => iterator } as never)
+        : originalPrepare(sql, operation),
+    );
+    try {
+      expect(() => runSQLiteCheckpointInvariantCampaign(
+        run.connection, run.projectionIdentity, run.stage,
+      )).toThrow(/unexplained write/u);
+      expect(returns).toBe(1);
+    } finally {
+      prepare.mockRestore();
+      close(run);
+    }
+  });
+
+  it("detects mid-rule checkpoint catalog replacement at the post-fetch fence", () => {
+    const run = sealedForCheckpoint();
+    const target = SQLITE_CHECKPOINT_RULES[2];
+    const originalPrepare = run.connection.prepare.bind(run.connection);
+    let returns = 0;
+    const iterator: Iterator<unknown> & Iterable<unknown> = {
+      [Symbol.iterator]() { return this; },
+      next: () => {
+        run.connection.execTrusted(
+          "DROP INDEX temp.ge_blr_checkpoint_current_record_idx", "inspect-schema",
+        );
+        return { done: true, value: undefined };
+      },
+      return: () => { returns += 1; return { done: true, value: undefined }; },
+    };
+    const prepare = vi.spyOn(run.connection, "prepare").mockImplementation(
+      (sql, operation) => sql === target.sql
+        ? ({ iterate: () => iterator } as never)
+        : originalPrepare(sql, operation),
+    );
+    try {
+      expect(() => runSQLiteCheckpointInvariantCampaign(
+        run.connection, run.projectionIdentity, run.stage,
+      )).toThrow(/transaction changed|catalog/u);
+      expect(returns).toBe(1);
+      expect(run.stage.state).toBe("poisoned");
+    } finally {
+      prepare.mockRestore();
+      close(run);
+    }
+  });
+
+  it("detects DML after a checkpoint diagnostic and before rule transition", () => {
+    const run = sealedForCheckpoint();
+    const target = SQLITE_CHECKPOINT_RULES[0];
+    const originalPrepare = run.connection.prepare.bind(run.connection);
+    const originalFence = run.stage[SQLITE_BASELINE_FENCE_CHECKPOINT_CAMPAIGN]
+      .bind(run.stage);
+    let closed = false;
+    let closedFences = 0;
+    let emitted = false;
+    const iterator: Iterator<unknown> & Iterable<unknown> = {
+      [Symbol.iterator]() { return this; },
+      next: () => emitted
+        ? { done: true, value: undefined }
+        : (emitted = true, { done: false, value: [1n] }),
+      return: () => { closed = true; return { done: true, value: undefined }; },
+    };
+    const prepare = vi.spyOn(run.connection, "prepare").mockImplementation(
+      (sql, operation) => sql === target.sql
+        ? ({ iterate: () => iterator } as never)
+        : originalPrepare(sql, operation),
+    );
+    const fence = vi.spyOn(
+      run.stage, SQLITE_BASELINE_FENCE_CHECKPOINT_CAMPAIGN,
+    ).mockImplementation((session) => {
+      if (closed) {
+        closedFences += 1;
+        if (closedFences === 3) {
+          run.connection.prepare(
+            "UPDATE temp.ge_blr_stage SET state_blob = state_blob WHERE kind_rank = 0",
+            "inspect-schema",
+          ).run();
+        }
+      }
+      originalFence(session);
+    });
+    try {
+      expect(() => runSQLiteCheckpointInvariantCampaign(
+        run.connection, run.projectionIdentity, run.stage,
+      )).toThrow(/unexplained write/u);
+      expect(closedFences).toBe(3);
+    } finally {
+      fence.mockRestore();
+      prepare.mockRestore();
+      close(run);
+    }
+  });
+
+  it("stage disposal runs active checkpoint cleanup once and removes owned TEMP objects", () => {
+    const run = sealedForCheckpoint();
+    const target = SQLITE_CHECKPOINT_RULES[0];
+    const originalPrepare = run.connection.prepare.bind(run.connection);
+    let returns = 0;
+    const iterator: Iterator<unknown> & Iterable<unknown> = {
+      [Symbol.iterator]() { return this; },
+      next: () => {
+        run.stage.dispose();
+        return { done: true, value: undefined };
+      },
+      return: () => {
+        returns += 1;
+        throw new Error("active checkpoint cleanup failure");
+      },
+    };
+    const prepare = vi.spyOn(run.connection, "prepare").mockImplementation(
+      (sql, operation) => sql === target.sql
+        ? ({ iterate: () => iterator } as never)
+        : originalPrepare(sql, operation),
+    );
+    try {
+      expect(() => runSQLiteCheckpointInvariantCampaign(
+        run.connection, run.projectionIdentity, run.stage,
+      )).toThrowError("SQLite baseline checkpoint campaign failed");
+      expect(returns).toBe(1);
+      expect(run.connection.prepare(
+        "SELECT count(*) FROM temp.sqlite_schema WHERE substr(lower(name), 1, 7) = 'ge_blr_'",
+        "inspect-schema",
+      ).get()).toEqual([0n]);
+      expect(run.stage.state).toBe("poisoned");
+    } finally {
+      prepare.mockRestore();
+      if (run.connection.isTransaction) run.connection.execTrusted("ROLLBACK", "inspect-schema");
+      run.connection.close();
+    }
+  });
+
+  it("stage disposal closes an active checkpoint cursor normally and removes the catalog", () => {
+    const run = sealedForCheckpoint();
+    const target = SQLITE_CHECKPOINT_RULES[0];
+    const originalPrepare = run.connection.prepare.bind(run.connection);
+    let returns = 0;
+    const iterator: Iterator<unknown> & Iterable<unknown> = {
+      [Symbol.iterator]() { return this; },
+      next: () => {
+        run.stage.dispose();
+        return { done: true, value: undefined };
+      },
+      return: () => { returns += 1; return { done: true, value: undefined }; },
+    };
+    const prepare = vi.spyOn(run.connection, "prepare").mockImplementation(
+      (sql, operation) => sql === target.sql
+        ? ({ iterate: () => iterator } as never)
+        : originalPrepare(sql, operation),
+    );
+    try {
+      expect(() => runSQLiteCheckpointInvariantCampaign(
+        run.connection, run.projectionIdentity, run.stage,
+      )).toThrow(CycleStoreProviderError);
+      expect(returns).toBe(1);
+      expect(run.connection.prepare(
+        "SELECT count(*) FROM temp.sqlite_schema WHERE substr(lower(name), 1, 7) = 'ge_blr_'",
+        "inspect-schema",
+      ).get()).toEqual([0n]);
+    } finally {
+      prepare.mockRestore();
+      if (run.connection.isTransaction) run.connection.execTrusted("ROLLBACK", "inspect-schema");
+      run.connection.close();
+    }
+  });
+
+  it.each([
+    [4, "$.summary.valueHash", "d".repeat(64)],
+    [5, "$.summary.streamId", "substituted-rank5-stream"],
+  ] as const)(
+    "defensively detects rank %i nested canonical summary substitution",
+    (kindRank, path, value) => {
+      const run = sealedForCheckpoint();
+      try {
+        run.connection.prepare(
+          `UPDATE temp.ge_blr_stage
+              SET state_blob = CAST(json_set(CAST(state_blob AS TEXT), ?, ?) AS BLOB)
+            WHERE kind_rank = ?`,
+          "inspect-schema",
+        ).run(path, value, kindRank);
+        const witnesses = run.connection.prepare(
+          SQLITE_CHECKPOINT_RULES[5].sql, "inspect-schema",
+        ).all(17);
+        expect(witnesses).toEqual([[1n]]);
+      } finally {
+        if (run.connection.isTransaction) run.connection.execTrusted("ROLLBACK", "inspect-schema");
+        run.connection.close();
+      }
+    },
+  );
+
+  it("defensively rejects a delete revision whose canonical summary null was substituted", () => {
+    const run = sealedHostileCheckpointFixture();
+    try {
+      const rule = SQLITE_CHECKPOINT_RULES[5];
+      expect(run.connection.prepare(rule.sql, "inspect-schema").all(17)).toEqual([[1n]]);
+      run.connection.prepare(
+        `UPDATE temp.ge_blr_stage
+            SET state_blob = CAST(json_set(CAST(state_blob AS TEXT), '$.summary', json('{}')) AS BLOB)
+          WHERE kind_rank = 5
+            AND json_extract(CAST(state_blob AS TEXT), '$.action') = 'delete'
+            AND json_extract(CAST(state_blob AS TEXT), '$.tenantId') = 'tenant-cross'`,
+        "inspect-schema",
+      ).run();
+      expect(run.connection.prepare(rule.sql, "inspect-schema").all(17)).toEqual([[1n], [1n]]);
+    } finally {
+      if (run.connection.isTransaction) run.connection.execTrusted("ROLLBACK", "inspect-schema");
+      run.connection.close();
+    }
+  });
+
+  it("freezes all normalized and nested checkpoint binding paths", () => {
+    const sql = SQLITE_CHECKPOINT_RULES[5].sql;
+    for (const path of [
+      "$.summary.checkpointScope", "$.summary.checkpointId", "$.summary.streamId",
+      "$.summary.boundSequence", "$.summary.boundRecordHash", "$.summary.createdAt",
+      "$.summary.valueHash", "$.summary.valueBytes", "$.committedAtMs", "$.recordedAtMs",
+    ]) expect(sql).toContain(path);
+    expect(sql).toContain("current.committed_at_ms IS NOT latest.recorded_at_ms");
+    expect(sql).toContain("json_type(CAST(common.state_blob AS TEXT), '$.summary') IS NOT 'null'");
   });
 });

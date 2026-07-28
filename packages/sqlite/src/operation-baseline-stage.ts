@@ -22,19 +22,24 @@ import {
   validateOperationBaselineEntryBytes,
 } from "./operation-baseline.js";
 import {
+  SQLITE_BASELINE_ABORT_CHECKPOINT_CAMPAIGN,
   SQLITE_BASELINE_ABORT_STREAM_RECORD_CAMPAIGN,
   SQLITE_BASELINE_COOPERATIVE_POISON,
   SQLITE_BASELINE_ABORT_ORDERED_HANDOFF,
   SQLITE_BASELINE_BEGIN_ORDERED_HANDOFF,
+  SQLITE_BASELINE_BEGIN_CHECKPOINT_CAMPAIGN,
   SQLITE_BASELINE_BEGIN_STREAM_RECORD_CAMPAIGN,
   SQLITE_BASELINE_COMPLETE_ORDERED_HANDOFF,
+  SQLITE_BASELINE_COMPLETE_CHECKPOINT_CAMPAIGN,
   SQLITE_BASELINE_COMPLETE_STREAM_RECORD_CAMPAIGN,
   SQLITE_BASELINE_CONSUME_OWNED_WRITE,
   SQLITE_BASELINE_FENCE_ORDERED_HANDOFF,
+  SQLITE_BASELINE_FENCE_CHECKPOINT_CAMPAIGN,
   SQLITE_BASELINE_FENCE_STREAM_RECORD_CAMPAIGN,
   SQLITE_BASELINE_FINISH_COOPERATIVE_WRITES,
   SQLITE_BASELINE_OWNED_WRITE,
   SQLITE_BASELINE_REGISTER_ORDERED_HANDOFF_CLEANUP,
+  SQLITE_BASELINE_REGISTER_CHECKPOINT_CLEANUP,
   SQLITE_BASELINE_REGISTER_STREAM_RECORD_CLEANUP,
   type SQLiteBaselineOwnedWriteReceipt,
 } from "./operation-baseline-cooperation.js";
@@ -1109,6 +1114,9 @@ export class SQLiteBaselineTempStage {
   #streamRecordCampaignState: "unused" | "active" | "complete" | "poisoned" = "unused";
   #streamRecordCampaignSession: object | undefined;
   #streamRecordCampaignCleanup: (() => void) | undefined;
+  #checkpointCampaignState: "unused" | "active" | "complete" | "poisoned" = "unused";
+  #checkpointCampaignSession: object | undefined;
+  #checkpointCampaignCleanup: (() => void) | undefined;
   #cooperativeWritesFinished = false;
 
   constructor(
@@ -1490,6 +1498,101 @@ export class SQLiteBaselineTempStage {
     return this.#poison(message);
   }
 
+  /** Continue the sealed relational campaign with the checkpoint rule family. */
+  [SQLITE_BASELINE_BEGIN_CHECKPOINT_CAMPAIGN](
+    connection: SQLiteConnection,
+    projectionIdentity: OperationBaselineProjectionIdentity,
+  ): object {
+    this.#requireOpenOwner();
+    if (this.#checkpointCampaignState !== "unused"
+        || this.#streamRecordCampaignState !== "complete"
+        || connection !== this.#connection
+        || projectionIdentity !== this.#orderedProjectionIdentity
+        || projectionIdentity.entryCount !== this.#nextOwnedWriteSequence
+        || this.#orderedExpectedCounts === undefined) {
+      return this.#poison("SQLite baseline checkpoint campaign binding is invalid");
+    }
+    this.#assertExactBaselineCatalog("checkpoint campaign begin");
+    this.assertCommonCounts(this.#orderedExpectedCounts);
+    this.assertRelationKeyCoverage();
+    this.#assertExactBaselineCatalog("checkpoint campaign begin coverage");
+    const campaignSession = Object.freeze(Object.create(null)) as object;
+    this.#checkpointCampaignSession = campaignSession;
+    this.#checkpointCampaignState = "active";
+    return campaignSession;
+  }
+
+  /** Reuse the sealed owner, write, epoch and exact-catalog fence. */
+  [SQLITE_BASELINE_FENCE_CHECKPOINT_CAMPAIGN](session: object): void {
+    this.#requireOpenOwner();
+    if (this.#checkpointCampaignState !== "active"
+        || session !== this.#checkpointCampaignSession) {
+      return this.#poison("SQLite baseline checkpoint campaign session is invalid");
+    }
+    this.#requireAllowedChanges();
+    this.#assertExactBaselineCatalog("checkpoint campaign fence");
+    this.#requireAllowedChanges();
+  }
+
+  /** Own exactly one bounded checkpoint witness iterator finalizer. */
+  [SQLITE_BASELINE_REGISTER_CHECKPOINT_CLEANUP](
+    session: object,
+    cleanup: (() => void) | undefined,
+  ): void {
+    this[SQLITE_BASELINE_FENCE_CHECKPOINT_CAMPAIGN](session);
+    if (cleanup !== undefined && this.#checkpointCampaignCleanup !== undefined) {
+      return this.#poison("SQLite baseline checkpoint cleanup is already registered");
+    }
+    this.#checkpointCampaignCleanup = cleanup;
+  }
+
+  /** Seal the checkpoint phase only after coverage and terminal fences pass. */
+  [SQLITE_BASELINE_COMPLETE_CHECKPOINT_CAMPAIGN](session: object): void {
+    this[SQLITE_BASELINE_FENCE_CHECKPOINT_CAMPAIGN](session);
+    const projectionIdentity = this.#orderedProjectionIdentity;
+    const expectedCounts = this.#orderedExpectedCounts;
+    if (this.#checkpointCampaignCleanup !== undefined
+        || projectionIdentity === undefined
+        || expectedCounts === undefined
+        || scalarCount(
+          this.#connection,
+          `SELECT count(*) FROM temp.${STAGE_TABLE}`,
+          "TEMP checkpoint campaign common count",
+        ) !== projectionIdentity.entryCount
+        || scalarCount(
+          this.#connection,
+          `SELECT count(*) FROM temp.${RELATION_VIEW}`,
+          "TEMP checkpoint campaign relation count",
+        ) !== projectionIdentity.entryCount) {
+      return this.#poison("SQLite baseline checkpoint completion is invalid");
+    }
+    this.assertCommonCounts(expectedCounts);
+    this.assertRelationKeyCoverage();
+    this[SQLITE_BASELINE_FENCE_CHECKPOINT_CAMPAIGN](session);
+    this.#checkpointCampaignSession = undefined;
+    this.#checkpointCampaignState = "complete";
+  }
+
+  /** Finalize the current checkpoint witness while keeping the primary failure. */
+  [SQLITE_BASELINE_ABORT_CHECKPOINT_CAMPAIGN](
+    session: object | undefined,
+    message: string,
+  ): never {
+    const campaignCleanup = this.#checkpointCampaignCleanup;
+    this.#checkpointCampaignCleanup = undefined;
+    try {
+      campaignCleanup?.();
+    } catch {
+      // The authoritative rule or fence failure remains primary.
+    }
+    if (session !== undefined && session !== this.#checkpointCampaignSession) {
+      message = "SQLite baseline checkpoint campaign session is invalid";
+    }
+    this.#checkpointCampaignSession = undefined;
+    this.#checkpointCampaignState = "poisoned";
+    return this.#poison(message);
+  }
+
   /** Package-private fail-closed bridge used when source receipt checks fail. */
   [SQLITE_BASELINE_COOPERATIVE_POISON](message: string): never {
     if (this.#state === "open") return this.#poison(message);
@@ -1643,6 +1746,16 @@ export class SQLiteBaselineTempStage {
       this.#streamRecordCampaignCleanup = undefined;
       this.#streamRecordCampaignSession = undefined;
       this.#streamRecordCampaignState = "poisoned";
+    }
+    if (this.#checkpointCampaignState === "active") {
+      try {
+        this.#checkpointCampaignCleanup?.();
+      } catch (error) {
+        handoffCleanupFailure ??= error;
+      }
+      this.#checkpointCampaignCleanup = undefined;
+      this.#checkpointCampaignSession = undefined;
+      this.#checkpointCampaignState = "poisoned";
     }
     if (!this.#connection.isOpen) {
       this.#state = "disposed";
@@ -1833,6 +1946,11 @@ export class SQLiteBaselineTempStage {
     this.#streamRecordCampaignSession = undefined;
     if (this.#streamRecordCampaignState === "active") {
       this.#streamRecordCampaignState = "poisoned";
+    }
+    this.#checkpointCampaignCleanup = undefined;
+    this.#checkpointCampaignSession = undefined;
+    if (this.#checkpointCampaignState === "active") {
+      this.#checkpointCampaignState = "poisoned";
     }
     this.#state = "poisoned";
     throw new CycleStoreProviderError(
