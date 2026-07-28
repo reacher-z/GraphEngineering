@@ -24,27 +24,32 @@ import {
 import {
   SQLITE_BASELINE_ABORT_CHECKPOINT_CAMPAIGN,
   SQLITE_BASELINE_ABORT_LEASE_LOCK_HOLD_CAMPAIGN,
+  SQLITE_BASELINE_ABORT_LEGACY_CAMPAIGN,
   SQLITE_BASELINE_ABORT_STREAM_RECORD_CAMPAIGN,
   SQLITE_BASELINE_COOPERATIVE_POISON,
   SQLITE_BASELINE_ABORT_ORDERED_HANDOFF,
   SQLITE_BASELINE_BEGIN_ORDERED_HANDOFF,
   SQLITE_BASELINE_BEGIN_CHECKPOINT_CAMPAIGN,
   SQLITE_BASELINE_BEGIN_LEASE_LOCK_HOLD_CAMPAIGN,
+  SQLITE_BASELINE_BEGIN_LEGACY_CAMPAIGN,
   SQLITE_BASELINE_BEGIN_STREAM_RECORD_CAMPAIGN,
   SQLITE_BASELINE_COMPLETE_ORDERED_HANDOFF,
   SQLITE_BASELINE_COMPLETE_CHECKPOINT_CAMPAIGN,
   SQLITE_BASELINE_COMPLETE_LEASE_LOCK_HOLD_CAMPAIGN,
+  SQLITE_BASELINE_COMPLETE_LEGACY_CAMPAIGN,
   SQLITE_BASELINE_COMPLETE_STREAM_RECORD_CAMPAIGN,
   SQLITE_BASELINE_CONSUME_OWNED_WRITE,
   SQLITE_BASELINE_FENCE_ORDERED_HANDOFF,
   SQLITE_BASELINE_FENCE_CHECKPOINT_CAMPAIGN,
   SQLITE_BASELINE_FENCE_LEASE_LOCK_HOLD_CAMPAIGN,
+  SQLITE_BASELINE_FENCE_LEGACY_CAMPAIGN,
   SQLITE_BASELINE_FENCE_STREAM_RECORD_CAMPAIGN,
   SQLITE_BASELINE_FINISH_COOPERATIVE_WRITES,
   SQLITE_BASELINE_OWNED_WRITE,
   SQLITE_BASELINE_REGISTER_ORDERED_HANDOFF_CLEANUP,
   SQLITE_BASELINE_REGISTER_CHECKPOINT_CLEANUP,
   SQLITE_BASELINE_REGISTER_LEASE_LOCK_HOLD_CLEANUP,
+  SQLITE_BASELINE_REGISTER_LEGACY_CLEANUP,
   SQLITE_BASELINE_REGISTER_STREAM_RECORD_CLEANUP,
   type SQLiteBaselineOwnedWriteReceipt,
 } from "./operation-baseline-cooperation.js";
@@ -651,6 +656,48 @@ function reservedCatalogCount(connection: SQLiteConnection): number {
   );
 }
 
+interface SQLiteMainOperationsCatalogIdentity {
+  readonly rootpage: number | null;
+  readonly schemaVersion: number;
+  readonly sql: string | null;
+}
+
+function mainOperationsCatalogIdentity(
+  connection: SQLiteConnection,
+): SQLiteMainOperationsCatalogIdentity {
+  const schemaVersion = sqliteSafeInteger(
+    sqliteRow(
+      connection.prepare(
+        "SELECT schema_version FROM pragma_schema_version", OPERATION,
+      ).get(),
+      1, OPERATION, "main schema version",
+    )[0],
+    0, Number.MAX_SAFE_INTEGER, OPERATION, "main schema version",
+  );
+  const raw = connection.prepare(
+      `SELECT type, name, tbl_name, rootpage, sql
+         FROM main.sqlite_schema
+        WHERE type = 'table' AND name = 'ge_cycle_operations'`,
+      OPERATION,
+    ).get();
+  if (raw === undefined) {
+    return Object.freeze({ rootpage: null, schemaVersion, sql: null });
+  }
+  const row = sqliteRow(raw, 5, OPERATION, "main operation catalog identity");
+  if (sqliteText(row[0], OPERATION, "main operation object type") !== "table"
+      || sqliteText(row[1], OPERATION, "main operation object name") !== "ge_cycle_operations"
+      || sqliteText(row[2], OPERATION, "main operation table name") !== "ge_cycle_operations") {
+    return invalid("SQLite baseline main operation catalog is invalid");
+  }
+  return Object.freeze({
+    rootpage: sqliteSafeInteger(
+      row[3], 1, Number.MAX_SAFE_INTEGER, OPERATION, "main operation rootpage",
+    ),
+    schemaVersion,
+    sql: sqliteText(row[4], OPERATION, "main operation table SQL"),
+  });
+}
+
 function validateBaselineTempCatalog(connection: SQLiteConnection): void {
   const expectedObjects = new Set<string>([
     `table:${STAGE_TABLE}`,
@@ -1125,6 +1172,10 @@ export class SQLiteBaselineTempStage {
   #leaseLockHoldCampaignState: "unused" | "active" | "complete" | "poisoned" = "unused";
   #leaseLockHoldCampaignSession: object | undefined;
   #leaseLockHoldCampaignCleanup: (() => void) | undefined;
+  #legacyCampaignState: "unused" | "active" | "complete" | "poisoned" = "unused";
+  #legacyCampaignSession: object | undefined;
+  #legacyCampaignCleanup: (() => void) | undefined;
+  readonly #mainOperationsCatalogIdentity: SQLiteMainOperationsCatalogIdentity;
   #cooperativeWritesFinished = false;
 
   constructor(
@@ -1132,10 +1183,12 @@ export class SQLiteBaselineTempStage {
     proof: SQLiteExclusiveBaselineTransactionProof,
     transactionEpoch: bigint,
     allowedTotalChanges: number,
+    mainCatalogIdentity: SQLiteMainOperationsCatalogIdentity,
   ) {
     this.#connection = connection;
     this.#transactionEpoch = transactionEpoch;
     this.#allowedTotalChanges = allowedTotalChanges;
+    this.#mainOperationsCatalogIdentity = mainCatalogIdentity;
     if (proof[EXCLUSIVE_PROOF_OWNER] !== connection) {
       invalid("SQLite baseline EXCLUSIVE proof belongs to another connection");
     }
@@ -1692,6 +1745,101 @@ export class SQLiteBaselineTempStage {
     return this.#poison(message);
   }
 
+  /** Finish the sealed chain with recoverable legacy-operation bindings. */
+  [SQLITE_BASELINE_BEGIN_LEGACY_CAMPAIGN](
+    connection: SQLiteConnection,
+    projectionIdentity: OperationBaselineProjectionIdentity,
+  ): object {
+    this.#requireOpenOwner();
+    if (this.#legacyCampaignState !== "unused"
+        || this.#leaseLockHoldCampaignState !== "complete"
+        || connection !== this.#connection
+        || projectionIdentity !== this.#orderedProjectionIdentity
+        || projectionIdentity.entryCount !== this.#nextOwnedWriteSequence
+        || this.#orderedExpectedCounts === undefined) {
+      return this.#poison("SQLite baseline legacy campaign binding is invalid");
+    }
+    this.#requireAllowedChanges();
+    this.#assertExactBaselineCatalog("legacy campaign begin");
+    this.#assertMainOperationsCatalog("legacy campaign begin");
+    this.assertCommonCounts(this.#orderedExpectedCounts);
+    this.assertRelationKeyCoverage();
+    this.#assertExactBaselineCatalog("legacy campaign begin coverage");
+    this.#requireAllowedChanges();
+    const campaignSession = Object.freeze(Object.create(null)) as object;
+    this.#legacyCampaignSession = campaignSession;
+    this.#legacyCampaignState = "active";
+    return campaignSession;
+  }
+
+  [SQLITE_BASELINE_FENCE_LEGACY_CAMPAIGN](session: object): void {
+    this.#requireOpenOwner();
+    if (this.#legacyCampaignState !== "active"
+        || session !== this.#legacyCampaignSession) {
+      return this.#poison("SQLite baseline legacy campaign session is invalid");
+    }
+    this.#requireAllowedChanges();
+    this.#assertExactBaselineCatalog("legacy campaign fence");
+    this.#assertMainOperationsCatalog("legacy campaign fence");
+    this.#requireAllowedChanges();
+  }
+
+  [SQLITE_BASELINE_REGISTER_LEGACY_CLEANUP](
+    session: object,
+    cleanup: (() => void) | undefined,
+  ): void {
+    this[SQLITE_BASELINE_FENCE_LEGACY_CAMPAIGN](session);
+    if (cleanup !== undefined && this.#legacyCampaignCleanup !== undefined) {
+      return this.#poison("SQLite baseline legacy cleanup is already registered");
+    }
+    this.#legacyCampaignCleanup = cleanup;
+  }
+
+  [SQLITE_BASELINE_COMPLETE_LEGACY_CAMPAIGN](session: object): void {
+    this[SQLITE_BASELINE_FENCE_LEGACY_CAMPAIGN](session);
+    const projectionIdentity = this.#orderedProjectionIdentity;
+    const expectedCounts = this.#orderedExpectedCounts;
+    if (this.#legacyCampaignCleanup !== undefined
+        || projectionIdentity === undefined
+        || expectedCounts === undefined
+        || scalarCount(
+          this.#connection,
+          `SELECT count(*) FROM temp.${STAGE_TABLE}`,
+          "TEMP legacy campaign common count",
+        ) !== projectionIdentity.entryCount
+        || scalarCount(
+          this.#connection,
+          `SELECT count(*) FROM temp.${RELATION_VIEW}`,
+          "TEMP legacy campaign relation count",
+        ) !== projectionIdentity.entryCount) {
+      return this.#poison("SQLite baseline legacy completion is invalid");
+    }
+    this.assertCommonCounts(expectedCounts);
+    this.assertRelationKeyCoverage();
+    this[SQLITE_BASELINE_FENCE_LEGACY_CAMPAIGN](session);
+    this.#legacyCampaignSession = undefined;
+    this.#legacyCampaignState = "complete";
+  }
+
+  [SQLITE_BASELINE_ABORT_LEGACY_CAMPAIGN](
+    session: object | undefined,
+    message: string,
+  ): never {
+    const cleanup = this.#legacyCampaignCleanup;
+    this.#legacyCampaignCleanup = undefined;
+    try {
+      cleanup?.();
+    } catch {
+      // Preserve the authoritative rule or fence failure.
+    }
+    if (session !== undefined && session !== this.#legacyCampaignSession) {
+      message = "SQLite baseline legacy campaign session is invalid";
+    }
+    this.#legacyCampaignSession = undefined;
+    this.#legacyCampaignState = "poisoned";
+    return this.#poison(message);
+  }
+
   /** Package-private fail-closed bridge used when source receipt checks fail. */
   [SQLITE_BASELINE_COOPERATIVE_POISON](message: string): never {
     if (this.#state === "open") return this.#poison(message);
@@ -1865,6 +2013,16 @@ export class SQLiteBaselineTempStage {
       this.#leaseLockHoldCampaignCleanup = undefined;
       this.#leaseLockHoldCampaignSession = undefined;
       this.#leaseLockHoldCampaignState = "poisoned";
+    }
+    if (this.#legacyCampaignState === "active") {
+      try {
+        this.#legacyCampaignCleanup?.();
+      } catch (error) {
+        handoffCleanupFailure ??= error;
+      }
+      this.#legacyCampaignCleanup = undefined;
+      this.#legacyCampaignSession = undefined;
+      this.#legacyCampaignState = "poisoned";
     }
     if (!this.#connection.isOpen) {
       this.#state = "disposed";
@@ -2046,6 +2204,23 @@ export class SQLiteBaselineTempStage {
     this.#transactionEpoch = this.#connection.transactionEpoch;
   }
 
+  #assertMainOperationsCatalog(label: string): void {
+    let actual: SQLiteMainOperationsCatalogIdentity;
+    try {
+      actual = mainOperationsCatalogIdentity(this.#connection);
+    } catch {
+      return this.#poison(`SQLite baseline ${label} main operation catalog is invalid`);
+    }
+    const expected = this.#mainOperationsCatalogIdentity;
+    if (expected.rootpage === null
+        || expected.sql === null
+        || actual.schemaVersion !== expected.schemaVersion
+        || actual.rootpage !== expected.rootpage
+        || actual.sql !== expected.sql) {
+      return this.#poison(`SQLite baseline ${label} main operation catalog is invalid`);
+    }
+  }
+
   #poison(message: string): never {
     this.#pendingOwnedWrite = undefined;
     this.#orderedHandoffCleanup = undefined;
@@ -2065,6 +2240,11 @@ export class SQLiteBaselineTempStage {
     this.#leaseLockHoldCampaignSession = undefined;
     if (this.#leaseLockHoldCampaignState === "active") {
       this.#leaseLockHoldCampaignState = "poisoned";
+    }
+    this.#legacyCampaignCleanup = undefined;
+    this.#legacyCampaignSession = undefined;
+    if (this.#legacyCampaignState === "active") {
+      this.#legacyCampaignState = "poisoned";
     }
     this.#state = "poisoned";
     throw new CycleStoreProviderError(
@@ -2100,6 +2280,7 @@ export function createSQLiteBaselineTempStage(
   const createdIndexes: string[] = [];
   let createdView = false;
   const allowedTotalChanges = totalChanges(connection);
+  const mainCatalogIdentity = mainOperationsCatalogIdentity(connection);
   try {
     for (let index = 0; index < TABLE_DDL.length; index += 1) {
       connection.execTrusted(TABLE_DDL[index] ?? "", OPERATION);
@@ -2156,6 +2337,7 @@ export function createSQLiteBaselineTempStage(
     proof,
     connection.transactionEpoch,
     allowedTotalChanges,
+    mainCatalogIdentity,
   );
   ACTIVE_STAGES.set(connection, stage);
   return stage;

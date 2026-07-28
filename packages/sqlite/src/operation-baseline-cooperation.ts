@@ -83,6 +83,21 @@ export const SQLITE_BASELINE_COMPLETE_LEASE_LOCK_HOLD_CAMPAIGN = Symbol(
 export const SQLITE_BASELINE_ABORT_LEASE_LOCK_HOLD_CAMPAIGN = Symbol(
   "SQLiteBaselineTempStage.abortLeaseLockHoldCampaign",
 );
+export const SQLITE_BASELINE_BEGIN_LEGACY_CAMPAIGN = Symbol(
+  "SQLiteBaselineTempStage.beginLegacyCampaign",
+);
+export const SQLITE_BASELINE_FENCE_LEGACY_CAMPAIGN = Symbol(
+  "SQLiteBaselineTempStage.fenceLegacyCampaign",
+);
+export const SQLITE_BASELINE_REGISTER_LEGACY_CLEANUP = Symbol(
+  "SQLiteBaselineTempStage.registerLegacyCleanup",
+);
+export const SQLITE_BASELINE_COMPLETE_LEGACY_CAMPAIGN = Symbol(
+  "SQLiteBaselineTempStage.completeLegacyCampaign",
+);
+export const SQLITE_BASELINE_ABORT_LEGACY_CAMPAIGN = Symbol(
+  "SQLiteBaselineTempStage.abortLegacyCampaign",
+);
 
 /** Opaque evidence bound to one stage-private pending write pair. */
 export interface SQLiteBaselineOwnedWriteReceipt {
@@ -206,6 +221,23 @@ export interface SQLiteBaselineLeaseLockHoldCampaignStage {
   ): void;
   [SQLITE_BASELINE_COMPLETE_LEASE_LOCK_HOLD_CAMPAIGN](session: object): void;
   [SQLITE_BASELINE_ABORT_LEASE_LOCK_HOLD_CAMPAIGN](
+    session: object | undefined,
+    message: string,
+  ): never;
+}
+
+export interface SQLiteBaselineLegacyCampaignStage {
+  [SQLITE_BASELINE_BEGIN_LEGACY_CAMPAIGN](
+    connection: SQLiteConnection,
+    projectionIdentity: OperationBaselineProjectionIdentity,
+  ): object;
+  [SQLITE_BASELINE_FENCE_LEGACY_CAMPAIGN](session: object): void;
+  [SQLITE_BASELINE_REGISTER_LEGACY_CLEANUP](
+    session: object,
+    cleanup: (() => void) | undefined,
+  ): void;
+  [SQLITE_BASELINE_COMPLETE_LEGACY_CAMPAIGN](session: object): void;
+  [SQLITE_BASELINE_ABORT_LEGACY_CAMPAIGN](
     session: object | undefined,
     message: string,
   ): never;

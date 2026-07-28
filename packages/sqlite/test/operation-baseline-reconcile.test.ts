@@ -10,6 +10,8 @@ import {
   createCycleStoreCheckpoint,
   createCycleStoreRecord,
   cycleStoreAdapterCodec,
+  type CycleStoreLedgerResultByOperation,
+  type CycleStoreMutationOperation,
 } from "@graph-engineering/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -41,6 +43,11 @@ import {
   runSQLiteLeaseLockHoldInvariantCampaign,
   type SQLiteLeaseLockHoldRuleId,
 } from "../src/operation-baseline-lease-lock-hold-invariants.js";
+import {
+  SQLITE_LEGACY_RULES,
+  SQLiteLegacyInvariantCampaign,
+  runSQLiteLegacyInvariantCampaign,
+} from "../src/operation-baseline-legacy-invariants.js";
 import { stageSQLiteV1BaselineSourceIntoTempStage } from "../src/operation-baseline-reconcile.js";
 import {
   SQLiteV1BaselineOrderedTempReader,
@@ -227,6 +234,129 @@ function seedEverySourceFamily(connection: SQLiteConnection): void {
     canonicalHash(legacyResult),
     NOW,
   );
+}
+
+function insertLegacyOperation<K extends CycleStoreMutationOperation>(
+  connection: SQLiteConnection,
+  operationId: string,
+  operation: K,
+  result: CycleStoreLedgerResultByOperation[K],
+  tenantId = "tenant-a",
+): void {
+  const resultBlob = Buffer.from(cycleStoreAdapterCodec.encodeLedgerResult(operation, result));
+  connection.prepare(`INSERT INTO ge_cycle_operations
+    (tenant_id, operation_id, operation_name, request_hash,
+     result_blob, result_hash, committed_at_ms)
+    VALUES (?, ?, ?, ?, ?, ?, ?)`, "inspect-schema").run(
+    tenantId,
+    operationId,
+    operation,
+    createHash("sha256").update(`request:${operationId}`).digest("hex"),
+    resultBlob,
+    canonicalHash(result),
+    NOW,
+  );
+}
+
+function activatePristineMigrationLock(connection: SQLiteConnection): void {
+  connection.prepare(`UPDATE ge_cycle_migration_lock SET
+    active_lock_id = 'lock-a', active_owner_id = 'owner-a',
+    active_source_version = 1, active_target_version = 2,
+    active_lock_epoch = 1, active_fencing_token = 1,
+    active_acquired_at_ms = ?, active_expires_at_ms = ?,
+    last_lock_epoch = 1, last_fencing_token = 1, updated_at_ms = ?
+    WHERE singleton = 1`, "inspect-schema").run(NOW, NOW + 1, NOW);
+}
+
+function seedAllLegacyOperationResults(connection: SQLiteConnection): void {
+  seedEverySourceFamily(connection);
+  const record = createCycleStoreRecord({
+    previousRecordHash: null, recordId: "record-a", sequence: 0, value: 7,
+  });
+  const checkpoint = createCycleStoreCheckpoint({
+    boundRecordHash: record.recordHash,
+    boundSequence: 0,
+    checkpointId: "checkpoint-a",
+    checkpointScope: "scope-a",
+    createdAt: "2026-07-28T00:00:00.123Z",
+    streamId: "stream-a",
+    value: 9,
+  });
+  const { value: _value, ...checkpointSummary } = checkpoint;
+  const acquiredAt = new Date(NOW).toISOString();
+  const expiresAt = new Date(NOW + 1).toISOString();
+  const lease = {
+    acquiredAt, expiresAt, fencingToken: 1, holderId: "holder-a",
+    leaseEpoch: 1, leaseId: "lease-a",
+  } as const;
+  insertLegacyOperation(connection, "legacy-append", "append", {
+    appendedRecords: 1,
+    tail: { exists: true, sequence: 0, recordHash: record.recordHash },
+  });
+  insertLegacyOperation(connection, "legacy-checkpoint-save", "save-checkpoint", checkpointSummary);
+  insertLegacyOperation(connection, "legacy-checkpoint-delete", "delete-checkpoint", { deleted: false });
+  insertLegacyOperation(connection, "legacy-lease-acquire", "acquire-lease", lease);
+  insertLegacyOperation(connection, "legacy-lease-renew", "renew-lease", lease);
+  insertLegacyOperation(connection, "legacy-lease-release", "release-lease", {
+    status: "released", lease: null, lastLeaseEpoch: 1, lastFencingToken: 1,
+  });
+  insertLegacyOperation(connection, "legacy-lock-acquire", "acquire-migration-lock", {
+    acquiredAt, expiresAt, fencingToken: 1, lockEpoch: 1, lockId: "lock-a",
+    ownerId: "owner-a", sourceSchemaVersion: 1, targetSchemaVersion: 2,
+  });
+  insertLegacyOperation(connection, "legacy-lock-release", "release-migration-lock", null);
+  activatePristineMigrationLock(connection);
+}
+
+function seedHostileLegacyOperationResults(connection: SQLiteConnection): void {
+  seedAllLegacyOperationResults(connection);
+  const record = createCycleStoreRecord({
+    previousRecordHash: null, recordId: "record-a", sequence: 0, value: 7,
+  });
+  const acquiredAt = new Date(NOW).toISOString();
+  const expiresAt = new Date(NOW + 1_000).toISOString();
+  insertLegacyOperation(connection, "hostile-append-missing", "append", {
+    appendedRecords: 1,
+    tail: { exists: true, sequence: 0, recordHash: "f".repeat(64) },
+  });
+  insertLegacyOperation(connection, "hostile-append-range", "append", {
+    appendedRecords: 2,
+    tail: { exists: true, sequence: 0, recordHash: record.recordHash },
+  });
+  insertLegacyOperation(connection, "hostile-checkpoint-save", "save-checkpoint", {
+    boundRecordHash: record.recordHash, boundSequence: 0,
+    checkpointId: "checkpoint-missing", checkpointScope: "scope-a",
+    createdAt: "2026-07-28T00:00:00.123Z", streamId: "stream-a",
+    valueBytes: 1, valueHash: "e".repeat(64),
+  });
+  insertLegacyOperation(connection, "hostile-checkpoint-delete", "delete-checkpoint", {
+    deleted: true,
+  });
+  insertLegacyOperation(connection, "hostile-lease-acquire", "acquire-lease", {
+    acquiredAt: new Date(NOW + 10).toISOString(), expiresAt,
+    fencingToken: 2, holderId: "holder-missing-a", leaseEpoch: 2,
+    leaseId: "lease-missing-a",
+  });
+  insertLegacyOperation(connection, "hostile-lease-renew", "renew-lease", {
+    acquiredAt: new Date(NOW + 20).toISOString(), expiresAt,
+    fencingToken: 3, holderId: "holder-missing-b", leaseEpoch: 3,
+    leaseId: "lease-missing-b",
+  });
+  insertLegacyOperation(connection, "hostile-lease-release", "release-lease", {
+    status: "released", lease: null, lastLeaseEpoch: 4, lastFencingToken: 4,
+  });
+  insertLegacyOperation(connection, "hostile-lock-acquire", "acquire-migration-lock", {
+    acquiredAt: new Date(NOW + 30).toISOString(), expiresAt,
+    fencingToken: 2, lockEpoch: 2, lockId: "lock-missing", ownerId: "owner-missing",
+    sourceSchemaVersion: 1, targetSchemaVersion: 2,
+  });
+  connection.prepare(`UPDATE ge_cycle_migration_lock SET
+    active_lock_id = 'lock-a', active_owner_id = 'owner-physical',
+    active_source_version = 1, active_target_version = 2,
+    active_lock_epoch = 1, active_fencing_token = 1,
+    active_acquired_at_ms = ?, active_expires_at_ms = ?,
+    last_lock_epoch = 1, last_fencing_token = 1, updated_at_ms = ?
+    WHERE singleton = 1`, "inspect-schema").run(NOW, NOW + 1, NOW);
 }
 
 function seedMixed1024(connection: SQLiteConnection): void {
@@ -4356,6 +4486,1363 @@ describe("SQLite lease/lock/hold invariant campaign", () => {
       prepare.mockRestore();
       if (run.connection.isTransaction) run.connection.execTrusted("ROLLBACK", "inspect-schema");
       run.connection.close();
+    }
+  });
+});
+
+function sealedLegacySource(
+  populate?: (connection: SQLiteConnection) => void,
+  allowPredecessorDiagnostics = false,
+): Sealed {
+  const connection = opened(NOW);
+  populate?.(connection);
+  connection.execTrusted("BEGIN EXCLUSIVE", "inspect-schema");
+  const stage = createSQLiteBaselineTempStage(
+    connection, proveSQLiteExclusiveBaselineTransaction(connection),
+  ) as SQLiteBaselineTempStage & SQLiteBaselineCooperativeStage;
+  const source = captureSQLiteV1BaselineSourceSummary(
+    connection, NOW,
+  ) as SQLiteV1BaselineSourceSummary & SQLiteBaselineCooperativeSource;
+  stageSQLiteV1BaselineSourceIntoTempStage(connection, source, stage);
+  const projectionIdentity = readSQLiteV1BaselineOrderedTempProjection(
+    connection, source, stage,
+  );
+  runSQLiteStreamRecordInvariantCampaign(connection, projectionIdentity, stage);
+  runSQLiteCheckpointInvariantCampaign(connection, projectionIdentity, stage);
+  const predecessor = runSQLiteLeaseLockHoldInvariantCampaign(
+    connection, projectionIdentity, stage,
+  );
+  if (!allowPredecessorDiagnostics) {
+    expect(predecessor.diagnostics).toEqual([]);
+  }
+  return { connection, source, stage, projectionIdentity };
+}
+
+function sealedForLegacy(withLegacy = true): Sealed {
+  return sealedLegacySource(withLegacy ? (connection) => {
+    seedEverySourceFamily(connection);
+    activatePristineMigrationLock(connection);
+  } : undefined);
+}
+
+type LegacySafeEvolution =
+  | "append-later-head"
+  | "checkpoint-delete-recreate"
+  | "lease-later-acquisition"
+  | "lease-same-tenant-ambiguous"
+  | "lease-current-nonbinding"
+  | "lock-later-acquisition";
+
+function seedLegacySafeEvolution(
+  connection: SQLiteConnection,
+  evolution: LegacySafeEvolution,
+): void {
+  seedAllLegacyOperationResults(connection);
+  switch (evolution) {
+    case "append-later-head": {
+      const [previousRecordHash] = connection.prepare(`SELECT record_hash
+        FROM ge_cycle_records
+        WHERE tenant_id = 'tenant-a' AND stream_id = 'stream-a' AND sequence = 0`,
+      "inspect-schema").get() as unknown as readonly [string];
+      const recordHash = insertInvariantRecord(
+        connection, "tenant-a", "stream-a", "record-a-1", 1, previousRecordHash,
+      );
+      connection.prepare(`UPDATE ge_cycle_streams
+        SET tail_sequence = 1, tail_record_hash = ?
+        WHERE tenant_id = 'tenant-a' AND stream_id = 'stream-a'`,
+      "inspect-schema").run(recordHash);
+      break;
+    }
+    case "checkpoint-delete-recreate":
+      insertInvariantCheckpointRevision(
+        connection, "tenant-a", "scope-a", 2, "checkpoint-a", NOW,
+      );
+      connection.prepare(`INSERT INTO ge_cycle_checkpoint_revisions
+        SELECT tenant_id, checkpoint_scope, 3, checkpoint_id, action,
+               summary_blob, bound_sequence, bound_record_hash,
+               checkpoint_created_at, value_hash, value_bytes, recorded_at_ms
+        FROM ge_cycle_checkpoint_revisions
+        WHERE tenant_id = 'tenant-a' AND checkpoint_scope = 'scope-a'
+          AND revision = 1`, "inspect-schema").run();
+      connection.prepare(`UPDATE ge_cycle_checkpoints
+        SET checkpoint_revision = 3
+        WHERE tenant_id = 'tenant-a' AND checkpoint_scope = 'scope-a'
+          AND checkpoint_id = 'checkpoint-a'`, "inspect-schema").run();
+      break;
+    case "lease-later-acquisition":
+      insertInvariantUsedLease(
+        connection, "tenant-a", "stream-a", "lease-later", 2, NOW,
+      );
+      connection.prepare(`UPDATE ge_cycle_leases
+        SET active_lease_id = 'lease-later', active_holder_id = 'holder-later',
+            active_lease_epoch = 2, active_fencing_token = 2,
+            active_acquired_at_ms = ?, active_expires_at_ms = ?,
+            last_lease_epoch = 2, last_fencing_token = 2, updated_at_ms = ?
+        WHERE tenant_id = 'tenant-a' AND stream_id = 'stream-a'`,
+      "inspect-schema").run(NOW, NOW + 2_000, NOW);
+      break;
+    case "lease-same-tenant-ambiguous": {
+      insertInvariantStream(connection, "tenant-a", "stream-b", -1, null);
+      const recordHash = insertInvariantRecord(
+        connection, "tenant-a", "stream-b", "record-b-0", 0, null,
+      );
+      connection.prepare(`UPDATE ge_cycle_streams
+        SET tail_sequence = 0, tail_record_hash = ?
+        WHERE tenant_id = 'tenant-a' AND stream_id = 'stream-b'`,
+      "inspect-schema").run(recordHash);
+      insertInvariantLease(connection, "tenant-a", "stream-b", 1, {
+        leaseId: "lease-a",
+        holderId: "holder-other",
+        acquiredAtMs: NOW,
+        expiresAtMs: NOW + 5_000,
+      });
+      insertInvariantUsedLease(
+        connection, "tenant-a", "stream-b", "lease-a", 1, NOW,
+      );
+      break;
+    }
+    case "lease-current-nonbinding":
+      connection.prepare(`UPDATE ge_cycle_leases
+        SET active_holder_id = 'holder-renewed', active_expires_at_ms = ?
+        WHERE tenant_id = 'tenant-a' AND stream_id = 'stream-a'`,
+      "inspect-schema").run(NOW + 5_000);
+      break;
+    case "lock-later-acquisition":
+      connection.prepare(`INSERT INTO ge_cycle_used_migration_lock_ids
+        (lock_id, lock_epoch, fencing_token, first_used_at_ms)
+        VALUES ('lock-later', 2, 2, ?)`, "inspect-schema").run(NOW);
+      connection.prepare(`UPDATE ge_cycle_migration_lock
+        SET active_lock_id = 'lock-later', active_owner_id = 'owner-later',
+            active_source_version = 2, active_target_version = 3,
+            active_lock_epoch = 2, active_fencing_token = 2,
+            active_acquired_at_ms = ?, active_expires_at_ms = ?,
+            last_lock_epoch = 2, last_fencing_token = 2, updated_at_ms = ?
+        WHERE singleton = 1`, "inspect-schema").run(NOW, NOW + 2_000, NOW);
+      break;
+  }
+}
+
+describe("SQLite legacy invariant campaign", () => {
+  it("reports the exact shared hostile legacy vector and projection identity", () => {
+    const run = sealedLegacySource(seedHostileLegacyOperationResults);
+    try {
+      expect(run.projectionIdentity).toEqual({
+        baselineId: "v2-fa4f8ccf6009797f4204ecbb8c85cc1d753ce219ce25630ef8af21558326f2af",
+        entryCount: 28,
+        legacyOperationCount: 17,
+        firstEntryHash: "f061b7d1fd823d623dc13ab12c78806cf6457e2f6e2f054b235d26d8abee787c",
+        finalEntryHash: "85cc900b39b8631815f5631aa13711a9ef152f88e91793bb771f0be85b1a55e2",
+        projectionSha256: "a23da0ae704c5d1414fd55950ff1f306eeffb8d5408340dbe713e2fa02b72647",
+      });
+      const report = runSQLiteLegacyInvariantCampaign(
+        run.connection, run.projectionIdentity, run.stage,
+      );
+      expect(report.diagnostics).toEqual([
+        { ruleId: "BLR_LEGACY_APPEND_BINDING", violationCount: 2, diagnosticsTruncated: false },
+        { ruleId: "BLR_LEGACY_CHECKPOINT_BINDING", violationCount: 2, diagnosticsTruncated: false },
+        { ruleId: "BLR_LEGACY_LEASE_BINDING", violationCount: 3, diagnosticsTruncated: false },
+        { ruleId: "BLR_LEGACY_LOCK_BINDING", violationCount: 2, diagnosticsTruncated: false },
+      ]);
+      expect(SQLITE_LEGACY_RULES.map((rule) =>
+        report.diagnostics.find((item) => item.ruleId === rule.ruleId)?.violationCount ?? 0,
+      )).toEqual([0, 2, 2, 3, 2]);
+    } finally {
+      close(run);
+    }
+  });
+
+  it("keeps the frozen five-rule order and marker-only SQL surface", () => {
+    expect(SQLITE_LEGACY_RULES.map((rule) => rule.ruleId)).toEqual([
+      "BLR_LEGACY_INVENTORY",
+      "BLR_LEGACY_APPEND_BINDING",
+      "BLR_LEGACY_CHECKPOINT_BINDING",
+      "BLR_LEGACY_LEASE_BINDING",
+      "BLR_LEGACY_LOCK_BINDING",
+    ]);
+    for (const rule of SQLITE_LEGACY_RULES) {
+      expect(rule.sql.trimStart().startsWith("SELECT 1")).toBe(true);
+      expect(rule.sql).toMatch(/LIMIT \?$/);
+      expect(rule.sql).not.toMatch(/\b(?:source\.)?result_blob\b/i);
+      expect(rule.sql).not.toMatch(/json_extract\([^)]*result/i);
+    }
+    expect(SQLITE_LEGACY_RULES.map((rule) => createHash("sha256")
+      .update(rule.sql.replace(/\s+/gu, " ").trim())
+      .digest("hex"))).toEqual([
+      "47955bd3ba75cbfd515d95cff82dd28213d956818e06a597e07a7376a7874f46",
+      "c18ddc48822f41fa3e6dcafcbdfbb26aed83f9ebcb135c959d5bf32fd0c3b055",
+      "46a86173db67c4a6e573d68c5bfdf4a8b886862f16857a1c538cbe953ab1ca4d",
+      "619daa1f02963c6a4ef58331db5157ed2f8a95aa0f99cc3add27e2063f541212",
+      "14ac5f2c3bf01c7b3ac6744b209bded53e7e3001ab94084431a1b92f0f782247",
+    ]);
+  });
+
+  it("accepts a staged legacy inventory operation without inventing a hold target", () => {
+    const run = sealedForLegacy(true);
+    try {
+      expect(run.projectionIdentity.legacyOperationCount).toBe(1);
+      expect(runSQLiteLegacyInvariantCampaign(
+        run.connection, run.projectionIdentity, run.stage,
+      )).toEqual({ projectionIdentity: run.projectionIdentity, diagnostics: [] });
+    } finally {
+      close(run);
+    }
+  });
+
+  it("accepts the complete nine-operation recoverability matrix", () => {
+    const run = sealedLegacySource(seedAllLegacyOperationResults);
+    try {
+      expect(run.projectionIdentity).toEqual({
+        baselineId: "v2-fa4f8ccf6009797f4204ecbb8c85cc1d753ce219ce25630ef8af21558326f2af",
+        entryCount: 20,
+        legacyOperationCount: 9,
+        firstEntryHash: "f061b7d1fd823d623dc13ab12c78806cf6457e2f6e2f054b235d26d8abee787c",
+        finalEntryHash: "7438000be18c081b0fd1eff96b3f4c9736dca1b6873285de6f2140d1f2e3bf46",
+        projectionSha256: "459ecad40c2ed54c59c38bb3fecbabfc71694bdf4f59f1eebbdae749fbb9dd62",
+      });
+      expect(runSQLiteLegacyInvariantCampaign(
+        run.connection, run.projectionIdentity, run.stage,
+      ).diagnostics).toEqual([]);
+    } finally {
+      close(run);
+    }
+  });
+
+  it.each([
+    "append-later-head",
+    "checkpoint-delete-recreate",
+    "lease-later-acquisition",
+    "lease-same-tenant-ambiguous",
+    "lease-current-nonbinding",
+    "lock-later-acquisition",
+  ] as const)("does not strengthen safe historical recoverability for %s", (evolution) => {
+    const run = sealedLegacySource((connection) => {
+      seedLegacySafeEvolution(connection, evolution);
+    });
+    try {
+      expect(runSQLiteLegacyInvariantCampaign(
+        run.connection, run.projectionIdentity, run.stage,
+      ).diagnostics).toEqual([]);
+    } finally {
+      close(run);
+    }
+  });
+
+  it("executes every recoverability rule against real staged operations", () => {
+    const hashA = "a".repeat(64);
+    const hashB = "b".repeat(64);
+    const acquiredAt = new Date(NOW).toISOString();
+    const expiresAt = new Date(NOW + 1_000).toISOString();
+    const cases: readonly [
+      "BLR_LEGACY_APPEND_BINDING"
+        | "BLR_LEGACY_CHECKPOINT_BINDING"
+        | "BLR_LEGACY_LEASE_BINDING"
+        | "BLR_LEGACY_LOCK_BINDING",
+      (connection: SQLiteConnection) => void,
+    ][] = [
+      ["BLR_LEGACY_APPEND_BINDING", (connection) => {
+        insertLegacyOperation(connection, "missing-append", "append", {
+          appendedRecords: 1,
+          tail: { exists: true, sequence: 0, recordHash: hashA },
+        });
+      }],
+      ["BLR_LEGACY_CHECKPOINT_BINDING", (connection) => {
+        insertLegacyOperation(connection, "missing-save", "save-checkpoint", {
+          boundRecordHash: hashA, boundSequence: 0,
+          checkpointId: "checkpoint-missing", checkpointScope: "scope-missing",
+          createdAt: acquiredAt, streamId: "stream-missing",
+          valueBytes: 2, valueHash: hashB,
+        });
+      }],
+      ["BLR_LEGACY_CHECKPOINT_BINDING", (connection) => {
+        insertLegacyOperation(connection, "missing-delete", "delete-checkpoint", { deleted: true });
+      }],
+      ["BLR_LEGACY_LEASE_BINDING", (connection) => {
+        insertLegacyOperation(connection, "missing-acquire", "acquire-lease", {
+          acquiredAt, expiresAt, fencingToken: 1, holderId: "holder-missing",
+          leaseEpoch: 1, leaseId: "lease-missing",
+        });
+      }],
+      ["BLR_LEGACY_LEASE_BINDING", (connection) => {
+        insertLegacyOperation(connection, "missing-release", "release-lease", {
+          status: "released", lease: null, lastLeaseEpoch: 1, lastFencingToken: 1,
+        });
+      }],
+      ["BLR_LEGACY_LOCK_BINDING", (connection) => {
+        insertLegacyOperation(connection, "missing-lock", "acquire-migration-lock", {
+          acquiredAt, expiresAt, fencingToken: 1, lockEpoch: 1,
+          lockId: "lock-missing", ownerId: "owner-missing",
+          sourceSchemaVersion: 1, targetSchemaVersion: 2,
+        });
+      }],
+    ];
+    for (const [ruleId, populate] of cases) {
+      const run = sealedLegacySource(populate);
+      try {
+        expect(runSQLiteLegacyInvariantCampaign(
+          run.connection, run.projectionIdentity, run.stage,
+        ).diagnostics).toEqual([{
+          ruleId, violationCount: 1, diagnosticsTruncated: false,
+        }]);
+      } finally {
+        close(run);
+      }
+    }
+  });
+
+  it("detects relation-only, common-only, and main-only inventory units", () => {
+    for (const orphan of ["relation", "common", "main"] as const) {
+      const run = sealedForLegacy(true);
+      try {
+        if (orphan !== "relation") {
+          run.connection.prepare(
+            "DELETE FROM temp.ge_blr_legacy_operations WHERE operation_id = 'operation-a'",
+            "inspect-schema",
+          ).run();
+        }
+        if (orphan !== "common") {
+          run.connection.prepare(
+            "DELETE FROM temp.ge_blr_stage WHERE kind_rank = 11",
+            "inspect-schema",
+          ).run();
+        }
+        if (orphan !== "main") {
+          run.connection.prepare(
+            "DELETE FROM main.ge_cycle_operations WHERE operation_id = 'operation-a'",
+            "inspect-schema",
+          ).run();
+        }
+        expect(run.connection.prepare(
+          SQLITE_LEGACY_RULES[0].sql, "inspect-schema",
+        ).all(17)).toEqual([[1n]]);
+      } finally {
+        close(run);
+      }
+    }
+  });
+
+  it("counts a relation key substitution as one inventory unit", () => {
+    const run = sealedForLegacy(true);
+    try {
+      run.connection.prepare(`UPDATE temp.ge_blr_legacy_operations
+        SET key_blob = CAST(json_set(CAST(key_blob AS TEXT),
+            '$.operationId', 'operation-substituted') AS BLOB)
+        WHERE operation_id = 'operation-a'`, "inspect-schema").run();
+      expect(run.connection.prepare(
+        SQLITE_LEGACY_RULES[0].sql, "inspect-schema",
+      ).all(17)).toEqual([[1n]]);
+    } finally {
+      close(run);
+    }
+  });
+
+  it("truncates by operation units without collecting application rows", () => {
+    const run = sealedLegacySource((connection) => {
+      for (let index = 0; index < 3; index += 1) {
+        insertLegacyOperation(connection, `missing-append-${index}`, "append", {
+          appendedRecords: 1,
+          tail: { exists: true, sequence: index, recordHash: `${index + 1}`.repeat(64) },
+        });
+      }
+    });
+    try {
+      expect(runSQLiteLegacyInvariantCampaign(
+        run.connection, run.projectionIdentity, run.stage, { diagnosticLimit: 2 },
+      ).diagnostics).toEqual([{
+        ruleId: "BLR_LEGACY_APPEND_BINDING",
+        violationCount: 2,
+        diagnosticsTruncated: true,
+      }]);
+    } finally {
+      close(run);
+    }
+  });
+
+  it.each([1, 16, 64])(
+    "distinguishes exact and limit+1 witness counts at limit %i",
+    (limit) => {
+      for (const extra of [0, 1]) {
+        const run = sealedForLegacy(false);
+        const target = SQLITE_LEGACY_RULES[4];
+        const originalPrepare = run.connection.prepare.bind(run.connection);
+        const prepare = vi.spyOn(run.connection, "prepare").mockImplementation(
+          (sql, operation) => sql === target.sql
+            ? ({ iterate: () => Array.from({ length: limit + extra }, () => [1n]).values() } as never)
+            : originalPrepare(sql, operation),
+        );
+        try {
+          expect(runSQLiteLegacyInvariantCampaign(
+            run.connection, run.projectionIdentity, run.stage, { diagnosticLimit: limit },
+          ).diagnostics).toEqual([{
+            ruleId: target.ruleId,
+            violationCount: limit,
+            diagnosticsTruncated: extra === 1,
+          }]);
+        } finally {
+          prepare.mockRestore();
+          close(run);
+        }
+      }
+    },
+  );
+
+  it("keeps every frozen SQL plan free of automatic indexes and materialization", () => {
+    const run = sealedLegacySource(seedAllLegacyOperationResults);
+    try {
+      for (const rule of SQLITE_LEGACY_RULES) {
+        expect(Object.isFrozen(rule.requiredIndexes)).toBe(true);
+        const details = run.connection.prepare(
+          `EXPLAIN QUERY PLAN ${rule.sql}`, "inspect-schema",
+        ).all(17).map((raw) => String((raw as unknown as readonly unknown[])[3]));
+        const joined = details.join("\n");
+        expect(joined, rule.ruleId).not.toMatch(/AUTOMATIC|MATERIALIZE|TEMP B-TREE/i);
+        for (const indexName of rule.requiredIndexes) {
+          expect(joined, `${rule.ruleId}:${indexName}`).toContain(indexName);
+        }
+      }
+    } finally {
+      close(run);
+    }
+  });
+
+  it("finalizes the active witness exactly once on a malformed marker", () => {
+    const run = sealedForLegacy(false);
+    const target = SQLITE_LEGACY_RULES[0];
+    const originalPrepare = run.connection.prepare.bind(run.connection);
+    let returns = 0;
+    let emitted = false;
+    const iterator: Iterator<unknown> & Iterable<unknown> = {
+      [Symbol.iterator]() { return this; },
+      next: () => emitted
+        ? { done: true, value: undefined }
+        : (emitted = true, { done: false, value: [2n] }),
+      return: () => { returns += 1; return { done: true, value: undefined }; },
+    };
+    const prepare = vi.spyOn(run.connection, "prepare").mockImplementation(
+      (sql, operation) => sql === target.sql
+        ? ({ iterate: () => iterator } as never)
+        : originalPrepare(sql, operation),
+    );
+    try {
+      expect(() => runSQLiteLegacyInvariantCampaign(
+        run.connection, run.projectionIdentity, run.stage,
+      )).toThrow(CycleStoreProviderError);
+      expect(returns).toBe(1);
+      expect(run.stage.state).toBe("poisoned");
+    } finally {
+      prepare.mockRestore();
+      close(run);
+    }
+  });
+
+  it("fences hostile catalog changes and closes the current witness", () => {
+    const run = sealedForLegacy(false);
+    const target = SQLITE_LEGACY_RULES[0];
+    const originalPrepare = run.connection.prepare.bind(run.connection);
+    let returns = 0;
+    const iterator: Iterator<unknown> & Iterable<unknown> = {
+      [Symbol.iterator]() { return this; },
+      next: () => {
+        run.connection.execTrusted(
+          "CREATE TEMP TABLE ge_blr_hostile(value INTEGER)", "inspect-schema",
+        );
+        return { done: true, value: undefined };
+      },
+      return: () => { returns += 1; return { done: true, value: undefined }; },
+    };
+    const prepare = vi.spyOn(run.connection, "prepare").mockImplementation(
+      (sql, operation) => sql === target.sql
+        ? ({ iterate: () => iterator } as never)
+        : originalPrepare(sql, operation),
+    );
+    try {
+      expect(() => runSQLiteLegacyInvariantCampaign(
+        run.connection, run.projectionIdentity, run.stage,
+      )).toThrow(CycleStoreProviderError);
+      expect(returns).toBe(1);
+      expect(run.stage.state).toBe("poisoned");
+    } finally {
+      prepare.mockRestore();
+      run.connection.execTrusted("DROP TABLE temp.ge_blr_hostile", "inspect-schema");
+      close(run);
+    }
+  });
+
+  it("creates, fetches, and closes one bounded witness per frozen rule", () => {
+    for (const target of SQLITE_LEGACY_RULES) {
+      const run = sealedForLegacy(false);
+      const originalPrepare = run.connection.prepare.bind(run.connection);
+      let creates = 0;
+      let fetches = 0;
+      let closes = 0;
+      const prepare = vi.spyOn(run.connection, "prepare").mockImplementation(
+        (sql, operation) => {
+          const statement = originalPrepare(sql, operation);
+          if (sql !== target.sql) return statement;
+          creates += 1;
+          return {
+            iterate: (...values: readonly unknown[]) => {
+              const inner = statement.iterate(...values)[Symbol.iterator]();
+              const wrapper: Iterator<unknown> & Iterable<unknown> = {
+                [Symbol.iterator]() { return this; },
+                next: () => { fetches += 1; return inner.next(); },
+                return: () => {
+                  closes += 1;
+                  return inner.return?.() ?? { done: true, value: undefined };
+                },
+              };
+              return wrapper;
+            },
+          } as never;
+        },
+      );
+      try {
+        expect(runSQLiteLegacyInvariantCampaign(
+          run.connection, run.projectionIdentity, run.stage,
+        ).diagnostics).toEqual([]);
+        expect({ creates, closes }).toEqual({ creates: 1, closes: 1 });
+        expect(fetches).toBeGreaterThanOrEqual(1);
+      } finally {
+        prepare.mockRestore();
+        close(run);
+      }
+    }
+  });
+
+  it("closes a diagnostic witness before entering the next rule", () => {
+    const run = sealedForLegacy(false);
+    const first = SQLITE_LEGACY_RULES[0];
+    const second = SQLITE_LEGACY_RULES[1];
+    const originalPrepare = run.connection.prepare.bind(run.connection);
+    let firstClosed = false;
+    const prepare = vi.spyOn(run.connection, "prepare").mockImplementation(
+      (sql, operation) => {
+        if (sql === second.sql) expect(firstClosed).toBe(true);
+        if (sql !== first.sql) return originalPrepare(sql, operation);
+        let emitted = false;
+        return { iterate: () => ({
+          [Symbol.iterator]() { return this; },
+          next: () => emitted
+            ? { done: true, value: undefined }
+            : (emitted = true, { done: false, value: [1n] }),
+          return: () => { firstClosed = true; return { done: true, value: undefined }; },
+        }) } as never;
+      },
+    );
+    try {
+      expect(runSQLiteLegacyInvariantCampaign(
+        run.connection, run.projectionIdentity, run.stage,
+      ).diagnostics).toEqual([{
+        ruleId: first.ruleId, violationCount: 1, diagnosticsTruncated: false,
+      }]);
+      expect(firstClosed).toBe(true);
+    } finally {
+      prepare.mockRestore();
+      close(run);
+    }
+  });
+
+  it("rejects an equal-content projection clone by reference", () => {
+    const run = sealedForLegacy(false);
+    try {
+      expect(() => new SQLiteLegacyInvariantCampaign(
+        run.connection, Object.freeze({ ...run.projectionIdentity }), run.stage,
+      )).toThrow(CycleStoreProviderError);
+      expect(run.stage.state).toBe("poisoned");
+    } finally {
+      close(run);
+    }
+  });
+
+  it("rejects an equal-count TEMP write at legacy begin before rule preparation", () => {
+    const run = sealedForLegacy(true);
+    const prepare = vi.spyOn(run.connection, "prepare");
+    try {
+      run.connection.prepare(
+        "UPDATE temp.ge_blr_stage SET state_blob = state_blob WHERE kind_rank = 11",
+        "inspect-schema",
+      ).run();
+      expect(() => new SQLiteLegacyInvariantCampaign(
+        run.connection, run.projectionIdentity, run.stage,
+      )).toThrow(CycleStoreProviderError);
+      expect(prepare.mock.calls.some(([sql]) =>
+        SQLITE_LEGACY_RULES.some((rule) => rule.sql === sql),
+      )).toBe(false);
+      expect(run.stage.state).toBe("poisoned");
+    } finally {
+      prepare.mockRestore();
+      close(run);
+    }
+  });
+
+  it("detects an equal-count main inventory replacement in raw rule evidence", () => {
+    const run = sealedForLegacy(true);
+    try {
+      const result = {
+        archiveMode: "lossless-before-delete",
+        compactionMode: "logical-history-preserving",
+        legalHoldIds: ["hold-a"],
+        retentionMode: "retain-authoritative-history",
+      } as const;
+      run.connection.prepare(
+        "DELETE FROM main.ge_cycle_operations WHERE operation_id = 'operation-a'",
+        "inspect-schema",
+      ).run();
+      insertLegacyOperation(run.connection, "operation-replacement", "set-legal-hold", result);
+      expect(run.connection.prepare(
+        SQLITE_LEGACY_RULES[0].sql, "inspect-schema",
+      ).all(17)).toHaveLength(2);
+    } finally {
+      close(run);
+    }
+  });
+
+  it("fails before fetching when main storage mutates after capture", () => {
+    const run = sealedForLegacy(true);
+    const prepare = vi.spyOn(run.connection, "prepare");
+    try {
+      run.connection.prepare(
+        "UPDATE main.ge_cycle_operations SET committed_at_ms = committed_at_ms + 1",
+        "inspect-schema",
+      ).run();
+      expect(() => runSQLiteLegacyInvariantCampaign(
+        run.connection, run.projectionIdentity, run.stage,
+      )).toThrow(CycleStoreProviderError);
+      expect(prepare.mock.calls.some(([sql]) => sql === SQLITE_LEGACY_RULES[0].sql)).toBe(false);
+    } finally {
+      prepare.mockRestore();
+      close(run);
+    }
+  });
+
+  it("rejects a blob-only exact-shape main table swap with unchanged row changes", () => {
+    const connection = opened(NOW);
+    seedEverySourceFamily(connection);
+    const sourceSql = String((connection.prepare(
+      "SELECT sql FROM main.sqlite_schema WHERE type = 'table' AND name = 'ge_cycle_operations'",
+      "inspect-schema",
+    ).get() as unknown as readonly [string])[0]);
+    connection.execTrusted(
+      sourceSql.replace("ge_cycle_operations", "ge_cycle_operations_shadow"),
+      "inspect-schema",
+    );
+    connection.prepare(`INSERT INTO main.ge_cycle_operations_shadow
+      (tenant_id, operation_id, operation_name, request_hash,
+       result_blob, result_hash, committed_at_ms)
+      SELECT tenant_id, operation_id, operation_name, request_hash,
+             X'7b7d', result_hash, committed_at_ms
+        FROM main.ge_cycle_operations`, "inspect-schema").run();
+    connection.execTrusted("BEGIN EXCLUSIVE", "inspect-schema");
+    const stage = createSQLiteBaselineTempStage(
+      connection, proveSQLiteExclusiveBaselineTransaction(connection),
+    ) as SQLiteBaselineTempStage & SQLiteBaselineCooperativeStage;
+    const source = captureSQLiteV1BaselineSourceSummary(
+      connection, NOW,
+    ) as SQLiteV1BaselineSourceSummary & SQLiteBaselineCooperativeSource;
+    stageSQLiteV1BaselineSourceIntoTempStage(connection, source, stage);
+    const projectionIdentity = readSQLiteV1BaselineOrderedTempProjection(
+      connection, source, stage,
+    );
+    runSQLiteStreamRecordInvariantCampaign(connection, projectionIdentity, stage);
+    runSQLiteCheckpointInvariantCampaign(connection, projectionIdentity, stage);
+    runSQLiteLeaseLockHoldInvariantCampaign(connection, projectionIdentity, stage);
+    const beforeChanges = totalChanges(connection);
+    try {
+      connection.execTrusted(
+        "ALTER TABLE main.ge_cycle_operations RENAME TO ge_cycle_operations_original",
+        "inspect-schema",
+      );
+      connection.execTrusted(
+        "ALTER TABLE main.ge_cycle_operations_shadow RENAME TO ge_cycle_operations",
+        "inspect-schema",
+      );
+      expect(totalChanges(connection)).toBe(beforeChanges);
+      expect(() => runSQLiteLegacyInvariantCampaign(
+        connection, projectionIdentity, stage,
+      )).toThrow(CycleStoreProviderError);
+      expect(stage.state).toBe("poisoned");
+    } finally {
+      close({ connection, source, stage });
+    }
+  });
+
+  it("rejects an exact-shape main swap during an active witness and closes it once", () => {
+    const connection = opened(NOW);
+    seedEverySourceFamily(connection);
+    const sourceSql = String((connection.prepare(
+      "SELECT sql FROM main.sqlite_schema WHERE type = 'table' AND name = 'ge_cycle_operations'",
+      "inspect-schema",
+    ).get() as unknown as readonly [string])[0]);
+    connection.execTrusted(
+      sourceSql.replace("ge_cycle_operations", "ge_cycle_operations_shadow"),
+      "inspect-schema",
+    );
+    connection.prepare(`INSERT INTO main.ge_cycle_operations_shadow
+      (tenant_id, operation_id, operation_name, request_hash,
+       result_blob, result_hash, committed_at_ms)
+      SELECT tenant_id, operation_id, operation_name, request_hash,
+             X'7b7d', result_hash, committed_at_ms
+        FROM main.ge_cycle_operations`, "inspect-schema").run();
+    connection.execTrusted("BEGIN EXCLUSIVE", "inspect-schema");
+    const stage = createSQLiteBaselineTempStage(
+      connection, proveSQLiteExclusiveBaselineTransaction(connection),
+    ) as SQLiteBaselineTempStage & SQLiteBaselineCooperativeStage;
+    const source = captureSQLiteV1BaselineSourceSummary(
+      connection, NOW,
+    ) as SQLiteV1BaselineSourceSummary & SQLiteBaselineCooperativeSource;
+    stageSQLiteV1BaselineSourceIntoTempStage(connection, source, stage);
+    const projectionIdentity = readSQLiteV1BaselineOrderedTempProjection(
+      connection, source, stage,
+    );
+    runSQLiteStreamRecordInvariantCampaign(connection, projectionIdentity, stage);
+    runSQLiteCheckpointInvariantCampaign(connection, projectionIdentity, stage);
+    runSQLiteLeaseLockHoldInvariantCampaign(connection, projectionIdentity, stage);
+    const beforeChanges = totalChanges(connection);
+    const target = SQLITE_LEGACY_RULES[0];
+    const originalPrepare = connection.prepare.bind(connection);
+    let returns = 0;
+    const iterator: Iterator<unknown> & Iterable<unknown> = {
+      [Symbol.iterator]() { return this; },
+      next: () => {
+        connection.execTrusted(
+          "ALTER TABLE main.ge_cycle_operations RENAME TO ge_cycle_operations_original",
+          "inspect-schema",
+        );
+        connection.execTrusted(
+          "ALTER TABLE main.ge_cycle_operations_shadow RENAME TO ge_cycle_operations",
+          "inspect-schema",
+        );
+        expect(totalChanges(connection)).toBe(beforeChanges);
+        return { done: true, value: undefined };
+      },
+      return: () => { returns += 1; return { done: true, value: undefined }; },
+    };
+    const prepare = vi.spyOn(connection, "prepare").mockImplementation(
+      (sql, operation) => sql === target.sql
+        ? ({ iterate: () => iterator } as never)
+        : originalPrepare(sql, operation),
+    );
+    try {
+      expect(() => runSQLiteLegacyInvariantCampaign(
+        connection, projectionIdentity, stage,
+      )).toThrow(CycleStoreProviderError);
+      expect(returns).toBe(1);
+      expect(stage.state).toBe("poisoned");
+    } finally {
+      prepare.mockRestore();
+      close({ connection, source, stage });
+    }
+  });
+
+  it("rejects same-name TEMP table and index replacements during an active cursor", () => {
+    for (const replacement of ["table", "index"] as const) {
+      const run = sealedForLegacy(false);
+      const target = SQLITE_LEGACY_RULES[0];
+      const originalPrepare = run.connection.prepare.bind(run.connection);
+      let returns = 0;
+      const iterator: Iterator<unknown> & Iterable<unknown> = {
+        [Symbol.iterator]() { return this; },
+        next: () => {
+          if (replacement === "index") {
+            run.connection.execTrusted(
+              "DROP INDEX temp.ge_blr_records_tenant_hash_uidx", "inspect-schema",
+            );
+            run.connection.execTrusted(
+              "CREATE UNIQUE INDEX temp.ge_blr_records_tenant_hash_uidx ON ge_blr_records(record_hash, tenant_id)",
+              "inspect-schema",
+            );
+          } else {
+            run.connection.execTrusted(
+              "DROP TABLE temp.ge_blr_legacy_operations", "inspect-schema",
+            );
+            run.connection.execTrusted(
+              "CREATE TEMP TABLE ge_blr_legacy_operations(value INTEGER) STRICT",
+              "inspect-schema",
+            );
+          }
+          return { done: true, value: undefined };
+        },
+        return: () => { returns += 1; return { done: true, value: undefined }; },
+      };
+      const prepare = vi.spyOn(run.connection, "prepare").mockImplementation(
+        (sql, operation) => sql === target.sql
+          ? ({ iterate: () => iterator } as never)
+          : originalPrepare(sql, operation),
+      );
+      try {
+        expect(() => runSQLiteLegacyInvariantCampaign(
+          run.connection, run.projectionIdentity, run.stage,
+        )).toThrow(CycleStoreProviderError);
+        expect(returns).toBe(1);
+        expect(run.stage.state).toBe("poisoned");
+      } finally {
+        prepare.mockRestore();
+        close(run);
+      }
+    }
+  });
+
+  it("active stage disposal closes the witness and removes the fixed TEMP catalog", () => {
+    const run = sealedForLegacy(false);
+    const target = SQLITE_LEGACY_RULES[0];
+    const originalPrepare = run.connection.prepare.bind(run.connection);
+    let returns = 0;
+    const iterator: Iterator<unknown> & Iterable<unknown> = {
+      [Symbol.iterator]() { return this; },
+      next: () => {
+        run.stage.dispose();
+        return { done: true, value: undefined };
+      },
+      return: () => { returns += 1; return { done: true, value: undefined }; },
+    };
+    const prepare = vi.spyOn(run.connection, "prepare").mockImplementation(
+      (sql, operation) => sql === target.sql
+        ? ({ iterate: () => iterator } as never)
+        : originalPrepare(sql, operation),
+    );
+    try {
+      expect(() => runSQLiteLegacyInvariantCampaign(
+        run.connection, run.projectionIdentity, run.stage,
+      )).toThrow(CycleStoreProviderError);
+      expect(returns).toBe(1);
+      expect(run.connection.prepare(
+        "SELECT count(*) FROM temp.sqlite_schema WHERE substr(lower(name), 1, 7) = 'ge_blr_'",
+        "inspect-schema",
+      ).get()).toEqual([0n]);
+    } finally {
+      prepare.mockRestore();
+      if (run.connection.isTransaction) run.connection.execTrusted("ROLLBACK", "inspect-schema");
+      run.connection.close();
+    }
+  });
+
+  it("closes the active witness when the owner transaction terminates", () => {
+    const run = sealedForLegacy(false);
+    const target = SQLITE_LEGACY_RULES[0];
+    const originalPrepare = run.connection.prepare.bind(run.connection);
+    let returns = 0;
+    const iterator: Iterator<unknown> & Iterable<unknown> = {
+      [Symbol.iterator]() { return this; },
+      next: () => {
+        run.connection.execTrusted("COMMIT", "inspect-schema");
+        return { done: true, value: undefined };
+      },
+      return: () => { returns += 1; return { done: true, value: undefined }; },
+    };
+    const prepare = vi.spyOn(run.connection, "prepare").mockImplementation(
+      (sql, operation) => sql === target.sql
+        ? ({ iterate: () => iterator } as never)
+        : originalPrepare(sql, operation),
+    );
+    try {
+      expect(() => runSQLiteLegacyInvariantCampaign(
+        run.connection, run.projectionIdentity, run.stage,
+      )).toThrow(CycleStoreProviderError);
+      expect(returns).toBe(1);
+      expect(run.stage.state).toBe("poisoned");
+    } finally {
+      prepare.mockRestore();
+      close(run);
+    }
+  });
+
+  it("keeps the primary fetch failure authoritative over cleanup failure", () => {
+    const run = sealedForLegacy(false);
+    const target = SQLITE_LEGACY_RULES[0];
+    const originalPrepare = run.connection.prepare.bind(run.connection);
+    let returns = 0;
+    const iterator: Iterator<unknown> & Iterable<unknown> = {
+      [Symbol.iterator]() { return this; },
+      next: () => { throw new Error("primary fetch failure"); },
+      return: () => { returns += 1; throw new Error("secondary cleanup failure"); },
+    };
+    const prepare = vi.spyOn(run.connection, "prepare").mockImplementation(
+      (sql, operation) => sql === target.sql
+        ? ({ iterate: () => iterator } as never)
+        : originalPrepare(sql, operation),
+    );
+    try {
+      expect(() => runSQLiteLegacyInvariantCampaign(
+        run.connection, run.projectionIdentity, run.stage,
+      )).toThrowError("SQLite baseline legacy campaign failed");
+      expect(returns).toBe(1);
+    } finally {
+      prepare.mockRestore();
+      close(run);
+    }
+  });
+
+  it("surfaces a cleanup-only failure and poisons the stage", () => {
+    const run = sealedForLegacy(false);
+    const target = SQLITE_LEGACY_RULES[0];
+    const originalPrepare = run.connection.prepare.bind(run.connection);
+    let returns = 0;
+    const iterator: Iterator<unknown> & Iterable<unknown> = {
+      [Symbol.iterator]() { return this; },
+      next: () => ({ done: true, value: undefined }),
+      return: () => { returns += 1; throw new Error("cleanup-only failure"); },
+    };
+    const prepare = vi.spyOn(run.connection, "prepare").mockImplementation(
+      (sql, operation) => sql === target.sql
+        ? ({ iterate: () => iterator } as never)
+        : originalPrepare(sql, operation),
+    );
+    try {
+      expect(() => runSQLiteLegacyInvariantCampaign(
+        run.connection, run.projectionIdentity, run.stage,
+      )).toThrowError("SQLite baseline legacy campaign failed");
+      expect(returns).toBe(1);
+      expect(run.stage.state).toBe("poisoned");
+    } finally {
+      prepare.mockRestore();
+      close(run);
+    }
+  });
+
+  it("accepts an empty legacy inventory and completes one-shot", () => {
+    const run = sealedForLegacy(false);
+    try {
+      const campaign = new SQLiteLegacyInvariantCampaign(
+        run.connection, run.projectionIdentity, run.stage,
+      );
+      expect(campaign.state).toBe("open");
+      expect(campaign.run().diagnostics).toEqual([]);
+      expect(campaign.state).toBe("complete");
+      expect(() => campaign.run()).toThrow(CycleStoreProviderError);
+      expect(run.stage.state).toBe("poisoned");
+    } finally {
+      close(run);
+    }
+  });
+
+  it("requires successful completion of every preceding campaign", () => {
+    const run = sealedForLeaseLockHold();
+    try {
+      expect(() => runSQLiteLegacyInvariantCampaign(
+        run.connection, run.projectionIdentity, run.stage,
+      )).toThrow(CycleStoreProviderError);
+      expect(run.stage.state).toBe("poisoned");
+    } finally {
+      close(run);
+    }
+  });
+
+  it("validates the exact diagnostic-limit option surface before stage binding", () => {
+    const run = sealedForLegacy(false);
+    try {
+      for (const options of [
+        { diagnosticLimit: 0 }, { diagnosticLimit: 65 },
+        { diagnosticLimit: 1.5 }, { extra: true }, null,
+      ]) {
+        expect(() => new SQLiteLegacyInvariantCampaign(
+          run.connection, run.projectionIdentity, run.stage, options as never,
+        )).toThrow(CycleStoreProviderError);
+        expect(run.stage.state).toBe("open");
+      }
+      expect(runSQLiteLegacyInvariantCampaign(
+        run.connection, run.projectionIdentity, run.stage, { diagnosticLimit: 1 },
+      ).diagnostics).toEqual([]);
+    } finally {
+      close(run);
+    }
+  });
+
+  it("rejects hostile option prototypes, accessors, symbols, arrays, and proxies", () => {
+    const hidden = {};
+    Object.defineProperty(hidden, "hidden", { value: true });
+    const symbol = { [Symbol("hidden")]: true };
+    let getterCalls = 0;
+    const accessor = {};
+    Object.defineProperty(accessor, "diagnosticLimit", {
+      enumerable: true,
+      get: () => { getterCalls += 1; return 16; },
+    });
+    const nullPrototype = Object.create(null) as Record<string, unknown>;
+    nullPrototype.diagnosticLimit = 16;
+    const proxy = new Proxy({}, {
+      ownKeys: () => { throw new Error("hostile ownKeys"); },
+    });
+    for (const options of [
+      hidden, symbol, accessor, nullPrototype, [], proxy,
+    ]) {
+      const run = sealedForLegacy(false);
+      try {
+        expect(() => new SQLiteLegacyInvariantCampaign(
+          run.connection, run.projectionIdentity, run.stage, options as never,
+        )).toThrow(CycleStoreProviderError);
+        expect(run.stage.state).toBe("open");
+        expect(runSQLiteLegacyInvariantCampaign(
+          run.connection, run.projectionIdentity, run.stage,
+        ).diagnostics).toEqual([]);
+      } finally {
+        close(run);
+      }
+    }
+    expect(getterCalls).toBe(0);
+  });
+
+  it.each([1, 16, 64])(
+    "uses genuine fixed SQL for exact and limit+1 append units at %i",
+    (limit) => {
+      for (const extra of [0, 1]) {
+        const run = sealedLegacySource((connection) => {
+          for (let index = 0; index < limit + extra; index += 1) {
+            insertLegacyOperation(
+              connection,
+              `genuine-boundary-${limit}-${extra}-${index}`,
+              "append",
+              {
+                appendedRecords: 1,
+                tail: {
+                  exists: true,
+                  sequence: index,
+                  recordHash: createHash("sha256")
+                    .update(`missing:${limit}:${extra}:${index}`).digest("hex"),
+                },
+              },
+            );
+          }
+        });
+        try {
+          expect(runSQLiteLegacyInvariantCampaign(
+            run.connection, run.projectionIdentity, run.stage,
+            { diagnosticLimit: limit },
+          ).diagnostics).toEqual([{
+            ruleId: "BLR_LEGACY_APPEND_BINDING",
+            violationCount: limit,
+            diagnosticsTruncated: extra === 1,
+          }]);
+        } finally {
+          close(run);
+        }
+      }
+    },
+  );
+
+  it("rejects append, checkpoint, and lease witnesses that exist only in another tenant", () => {
+    const acquiredAt = new Date(NOW).toISOString();
+    const expiresAt = new Date(NOW + 100).toISOString();
+    const cases: readonly [string, (connection: SQLiteConnection) => void][] = [
+      ["BLR_LEGACY_APPEND_BINDING", (connection) => {
+        insertInvariantStream(connection, "tenant-b", "stream-alias", -1, null);
+        const hash = insertInvariantRecord(
+          connection, "tenant-b", "stream-alias", "record-alias", 0, null,
+        );
+        connection.prepare(`UPDATE ge_cycle_streams
+          SET tail_sequence = 0, tail_record_hash = ?
+          WHERE tenant_id = 'tenant-b' AND stream_id = 'stream-alias'`,
+        "inspect-schema").run(hash);
+        insertLegacyOperation(connection, "cross-tenant-append", "append", {
+          appendedRecords: 1,
+          tail: { exists: true, sequence: 0, recordHash: hash },
+        });
+      }],
+      ["BLR_LEGACY_CHECKPOINT_BINDING", (connection) => {
+        insertInvariantStream(
+          connection, "tenant-b", "stream-checkpoint-alias", -1, null,
+        );
+        const hash = insertInvariantRecord(
+          connection, "tenant-b", "stream-checkpoint-alias", "record-checkpoint-alias",
+          0, null,
+        );
+        connection.prepare(`UPDATE ge_cycle_streams
+          SET tail_sequence = 0, tail_record_hash = ?
+          WHERE tenant_id = 'tenant-b' AND stream_id = 'stream-checkpoint-alias'`,
+        "inspect-schema").run(hash);
+        const value = createCycleStoreCheckpoint({
+          boundRecordHash: hash, boundSequence: 0,
+          checkpointId: "checkpoint-alias", checkpointScope: "scope-alias",
+          createdAt: acquiredAt, streamId: "stream-checkpoint-alias", value: 1,
+        });
+        insertInvariantCheckpointRevision(
+          connection, "tenant-b", "scope-alias", 1, "checkpoint-alias", NOW, value,
+        );
+        const { value: _value, ...summary } = value;
+        insertLegacyOperation(
+          connection, "cross-tenant-checkpoint", "save-checkpoint", summary,
+        );
+      }],
+      ["BLR_LEGACY_LEASE_BINDING", (connection) => {
+        insertInvariantStream(connection, "tenant-b", "stream-lease-alias", -1, null);
+        const hash = insertInvariantRecord(
+          connection, "tenant-b", "stream-lease-alias", "record-lease-alias", 0, null,
+        );
+        connection.prepare(`UPDATE ge_cycle_streams
+          SET tail_sequence = 0, tail_record_hash = ?
+          WHERE tenant_id = 'tenant-b' AND stream_id = 'stream-lease-alias'`,
+        "inspect-schema").run(hash);
+        insertInvariantLease(connection, "tenant-b", "stream-lease-alias", 1, {
+          acquiredAtMs: NOW, expiresAtMs: NOW + 100,
+          holderId: "holder-alias", leaseId: "lease-alias",
+        });
+        insertInvariantUsedLease(
+          connection, "tenant-b", "stream-lease-alias", "lease-alias", 1, NOW,
+        );
+        insertLegacyOperation(connection, "cross-tenant-lease", "acquire-lease", {
+          acquiredAt, expiresAt, fencingToken: 1, holderId: "holder-alias",
+          leaseEpoch: 1, leaseId: "lease-alias",
+        });
+      }],
+    ];
+    for (const [ruleId, populate] of cases) {
+      const run = sealedLegacySource(populate);
+      try {
+        expect(runSQLiteLegacyInvariantCampaign(
+          run.connection, run.projectionIdentity, run.stage,
+        ).diagnostics).toEqual([{
+          ruleId, violationCount: 1, diagnosticsTruncated: false,
+        }]);
+      } finally {
+        close(run);
+      }
+    }
+  });
+
+  it("accepts delete:true when any delete revision exists in the same tenant", () => {
+    const run = sealedLegacySource((connection) => {
+      insertInvariantCheckpointRevision(
+        connection, "tenant-a", "unrecoverable-scope", 1,
+        "unrecoverable-checkpoint", NOW,
+      );
+      insertLegacyOperation(
+        connection, "recoverable-delete", "delete-checkpoint", { deleted: true },
+      );
+    });
+    try {
+      expect(runSQLiteLegacyInvariantCampaign(
+        run.connection, run.projectionIdentity, run.stage,
+      ).diagnostics).toEqual([]);
+    } finally {
+      close(run);
+    }
+  });
+
+  it("rejects release when the exact used pair and highwater belong to different domains", () => {
+    const populate = (connection: SQLiteConnection): void => {
+      for (const streamId of ["stream-used-pair", "stream-highwater"]) {
+        insertInvariantStream(connection, "tenant-a", streamId, -1, null);
+        const hash = insertInvariantRecord(
+          connection, "tenant-a", streamId, `record-${streamId}`, 0, null,
+        );
+        connection.prepare(`UPDATE ge_cycle_streams
+          SET tail_sequence = 0, tail_record_hash = ?
+          WHERE tenant_id = 'tenant-a' AND stream_id = ?`,
+        "inspect-schema").run(hash, streamId);
+      }
+      insertInvariantLease(connection, "tenant-a", "stream-used-pair", 1);
+      insertInvariantUsedLease(
+        connection, "tenant-a", "stream-used-pair", "lease-pair", 2, NOW,
+      );
+      insertInvariantLease(connection, "tenant-a", "stream-highwater", 2);
+      insertLegacyOperation(connection, "split-release", "release-lease", {
+        status: "released", lease: null, lastLeaseEpoch: 2, lastFencingToken: 2,
+      });
+    };
+    const run = sealedLegacySource(populate, true);
+    try {
+      expect(runSQLiteLegacyInvariantCampaign(
+        run.connection, run.projectionIdentity, run.stage,
+      ).diagnostics).toEqual([{
+        ruleId: "BLR_LEGACY_LEASE_BINDING",
+        violationCount: 1,
+        diagnosticsTruncated: false,
+      }]);
+    } finally {
+      close(run);
+    }
+  });
+
+  it.each([
+    ["owner", "active_owner_id = 'owner-drift'"],
+    ["target-version", "active_target_version = 3"],
+    ["acquired-clock", `active_acquired_at_ms = ${NOW - 1}`],
+    ["expiry-clock", `active_expires_at_ms = ${NOW + 2}`],
+  ] as const)("rejects active migration-lock %s drift", (_label, assignment) => {
+    const run = sealedLegacySource((connection) => {
+      seedAllLegacyOperationResults(connection);
+      connection.prepare(
+        `UPDATE ge_cycle_migration_lock SET ${assignment} WHERE singleton = 1`,
+        "inspect-schema",
+      ).run();
+    }, true);
+    try {
+      expect(runSQLiteLegacyInvariantCampaign(
+        run.connection, run.projectionIdentity, run.stage,
+      ).diagnostics).toContainEqual({
+        ruleId: "BLR_LEGACY_LOCK_BINDING",
+        violationCount: 1,
+        diagnosticsTruncated: false,
+      });
+    } finally {
+      close(run);
+    }
+  });
+
+  it("rejects active migration-lock source-version and epoch/fence drift", () => {
+    const variants: readonly ((connection: SQLiteConnection) => void)[] = [
+      (connection) => {
+        connection.prepare(
+          "DELETE FROM ge_cycle_operations WHERE operation_id = 'legacy-lock-acquire'",
+          "inspect-schema",
+        ).run();
+        insertLegacyOperation(connection, "legacy-lock-acquire", "acquire-migration-lock", {
+          acquiredAt: new Date(NOW).toISOString(), expiresAt: new Date(NOW + 1).toISOString(),
+          fencingToken: 1, lockEpoch: 1, lockId: "lock-a", ownerId: "owner-a",
+          sourceSchemaVersion: 2, targetSchemaVersion: 3,
+        });
+        connection.prepare(
+          "UPDATE ge_cycle_migration_lock SET active_target_version = 3 WHERE singleton = 1",
+          "inspect-schema",
+        ).run();
+      },
+      (connection) => {
+        connection.prepare(
+          "DELETE FROM ge_cycle_operations WHERE operation_id = 'legacy-lock-acquire'",
+          "inspect-schema",
+        ).run();
+        connection.prepare(
+          "DELETE FROM ge_cycle_used_migration_lock_ids WHERE lock_id = 'lock-a'",
+          "inspect-schema",
+        ).run();
+        connection.prepare(`INSERT INTO ge_cycle_used_migration_lock_ids
+          (lock_id, lock_epoch, fencing_token, first_used_at_ms)
+          VALUES ('lock-a', 2, 2, ?)`, "inspect-schema").run(NOW);
+        insertLegacyOperation(connection, "legacy-lock-acquire", "acquire-migration-lock", {
+          acquiredAt: new Date(NOW).toISOString(), expiresAt: new Date(NOW + 1).toISOString(),
+          fencingToken: 2, lockEpoch: 2, lockId: "lock-a", ownerId: "owner-a",
+          sourceSchemaVersion: 1, targetSchemaVersion: 2,
+        });
+      },
+    ];
+    for (const mutate of variants) {
+      const run = sealedLegacySource((connection) => {
+        seedAllLegacyOperationResults(connection);
+        mutate(connection);
+      }, true);
+      try {
+        expect(runSQLiteLegacyInvariantCampaign(
+          run.connection, run.projectionIdentity, run.stage,
+        ).diagnostics).toContainEqual({
+          ruleId: "BLR_LEGACY_LOCK_BINDING",
+          violationCount: 1,
+          diagnosticsTruncated: false,
+        });
+      } finally {
+        close(run);
+      }
+    }
+    expect(SQLITE_LEGACY_RULES[4].sql).toContain(
+      "lock.active_lock_epoch IS NOT legacy.lock_epoch",
+    );
+    expect(SQLITE_LEGACY_RULES[4].sql).toContain(
+      "lock.active_fencing_token IS NOT legacy.lock_fencing_token",
+    );
+  });
+
+  it("detects every recoverable inventory scalar drift as one operation unit", () => {
+    const attacks = [
+      "tenant_id = 'tenant-drift'",
+      "operation_id = 'operation-drift'",
+      `request_hash = '${"a".repeat(64)}'`,
+      `result_hash = '${"b".repeat(64)}'`,
+      `result_blob_sha256 = '${"c".repeat(64)}'`,
+      "operation_name = 'release-migration-lock'",
+      `committed_at_ms = ${NOW + 1}`,
+    ];
+    for (const assignment of attacks) {
+      const run = sealedForLegacy(true);
+      try {
+        run.connection.prepare(
+          `UPDATE temp.ge_blr_legacy_operations SET ${assignment}
+            WHERE operation_id = 'operation-a'`, "inspect-schema",
+        ).run();
+        expect(run.connection.prepare(
+          SQLITE_LEGACY_RULES[0].sql, "inspect-schema",
+        ).all(17)).toEqual([[1n]]);
+      } finally {
+        close(run);
+      }
+    }
+  });
+
+  it.each([
+    ["$.resultBlobSha256", "c".repeat(64)],
+    ["$.operationName", "release-migration-lock"],
+  ])("detects common inventory drift at %s as one operation unit", (path, value) => {
+    const run = sealedForLegacy(true);
+    try {
+      run.connection.prepare(`UPDATE temp.ge_blr_stage
+        SET state_blob = CAST(json_set(CAST(state_blob AS TEXT), ?, ?) AS BLOB)
+        WHERE kind_rank = 11`, "inspect-schema").run(path, value);
+      expect(run.connection.prepare(
+        SQLITE_LEGACY_RULES[0].sql, "inspect-schema",
+      ).all(17)).toEqual([[1n]]);
+    } finally {
+      close(run);
+    }
+  });
+
+  it("caps one corrupt operation at one unit in each affected rule", () => {
+    const run = sealedLegacySource(seedAllLegacyOperationResults);
+    try {
+      run.connection.prepare(`UPDATE temp.ge_blr_legacy_operations
+        SET request_hash = ?, tail_record_hash = ?
+        WHERE operation_id = 'legacy-append'`, "inspect-schema").run(
+        "a".repeat(64), "f".repeat(64),
+      );
+      const vector = SQLITE_LEGACY_RULES.map((rule) =>
+        run.connection.prepare(rule.sql, "inspect-schema").all(17).length,
+      );
+      expect(vector).toEqual([1, 1, 0, 0, 0]);
+      expect(vector.every((count) => count <= 1)).toBe(true);
+    } finally {
+      close(run);
+    }
+  });
+
+  it("fences genuine DML after a real diagnostic and before the next rule", () => {
+    const run = sealedLegacySource((connection) => {
+      insertLegacyOperation(connection, "transition-append", "append", {
+        appendedRecords: 1,
+        tail: { exists: true, sequence: 0, recordHash: "f".repeat(64) },
+      });
+    });
+    const originalPrepare = run.connection.prepare.bind(run.connection);
+    let injected = false;
+    const prepare = vi.spyOn(run.connection, "prepare").mockImplementation(
+      (sql, operation) => {
+        if (!injected && sql === SQLITE_LEGACY_RULES[2].sql) {
+          injected = true;
+          originalPrepare(
+            "UPDATE temp.ge_blr_stage SET state_blob = state_blob WHERE kind_rank = 0",
+            "inspect-schema",
+          ).run();
+        }
+        return originalPrepare(sql, operation);
+      },
+    );
+    try {
+      expect(() => runSQLiteLegacyInvariantCampaign(
+        run.connection, run.projectionIdentity, run.stage,
+      )).toThrow(CycleStoreProviderError);
+      expect(injected).toBe(true);
+      expect(run.stage.state).toBe("poisoned");
+    } finally {
+      prepare.mockRestore();
+      close(run);
+    }
+  });
+
+  it("abandons an open campaign fail-closed", () => {
+    const run = sealedForLegacy(false);
+    try {
+      const campaign = new SQLiteLegacyInvariantCampaign(
+        run.connection, run.projectionIdentity, run.stage,
+      );
+      expect(() => campaign.dispose()).toThrow(CycleStoreProviderError);
+      expect(campaign.state).toBe("poisoned");
+      expect(run.stage.state).toBe("poisoned");
+    } finally {
+      close(run);
     }
   });
 });

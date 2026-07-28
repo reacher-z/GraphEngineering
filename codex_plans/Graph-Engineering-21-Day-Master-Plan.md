@@ -9610,3 +9610,609 @@ used during an auxiliary audit and must not be cited as the repository full
 suite. Ruff and strict MyPy including the new test remain green. This corrects
 evidence counting only; implementation, identities, diagnostics, review
 severity and all nonclaims are unchanged.
+
+### 31.34.39 Legacy gate recoverability correction
+
+This append-only correction refines §31.34.35 before legacy implementation.
+The closed mutation set contains nine operation names, not eight: append;
+save/delete checkpoint; acquire/renew/release lease; set legal hold; and
+acquire/release migration lock. The shared fixture and recoverability table
+must cover all nine.
+
+For append, tenant plus the result's tail sequence and record hash uniquely
+locate the physical tail record under the already verified tenant/hash
+constraint. The rule may then prove that the same physical stream contains
+exactly `appendedRecords` positions in the inclusive range ending at that
+sequence. It still must not require that this older result equals the current
+stream head.
+
+For acquire/renew lease, the only universally safe physical binding is a
+tenant-scoped existential used identity with exact lease ID, epoch, fencing
+token and `firstUsedAtMs == acquiredAt`. The request stream is unavailable;
+different streams in one tenant may reuse the same ID/epoch-shaped values, and
+a later valid renewal may extend the active expiry. Therefore §31.34.35's
+phrase about equal holder/expiry/current state is superseded: the legacy rule
+must not bind those current fields or select a guessed candidate stream.
+Release results may prove only that some tenant lease domain has high-water at
+least the returned epoch/fence; the preceding history campaign supplies the
+complete used-identity guarantee.
+
+These corrections narrow claims to recoverable facts and introduce no
+implementation, migration, release or popularity claim.
+
+### 31.34.40 Release-lease recoverability evidence correction
+
+This append-only correction supersedes only the final release-lease sentence
+of §31.34.39. Direct inspection of both production mutation paths proves that
+every successful lease acquisition unconditionally inserts a durable
+`ge_cycle_used_lease_ids` row at acquisition time. The row is not deferred
+until the lease is used by append. A successful release therefore always has
+a predecessor used-identity row for its returned epoch and fencing token.
+
+The release binding must require a tenant-scoped used-lease row whose epoch and
+fencing token exactly equal the returned `lastLeaseEpoch` and
+`lastFencingToken`, join that row's tenant and stream to the corresponding
+lease domain, and require both domain high-waters to be at least the returned
+values. The result does not expose a stream ID or lease ID, so the rule must
+not reconstruct or bind either one. This exact historical witness is stronger
+than an arbitrary tenant high-water while remaining valid for acquire-then-
+release flows with no intervening append.
+
+The fixed TEMP catalog and index set remain unchanged for this gate. The
+existing tenant-prefix traversal is bounded by the sealed TEMP projection and
+must be covered by EQP/non-materialization evidence. This correction changes
+no migration, public API, release, adoption or popularity claim.
+
+### 31.34.41 Main operation-catalog identity fence correction
+
+The legacy campaign cannot rely on transaction epoch, `total_changes()` and
+the TEMP catalog alone to protect the result-blob digest captured during
+staging. SQLite main-schema DDL changes `schema_version` without incrementing
+`total_changes()`. An exact-shape shadow `ge_cycle_operations` table can be
+prepared before capture and swapped into the canonical name with two renames
+after staging; if every scalar and digest field except `result_blob` is copied,
+an inventory query that intentionally does not reload the blob would otherwise
+accept a source object different from the one that supplied the staged digest.
+
+The TEMP-stage owner must therefore capture an immutable main-catalog receipt
+before source staging. The receipt includes `main.schema_version` and the exact
+`main.sqlite_schema` identity of `ge_cycle_operations`, including its table
+type, canonical name, root page and stored SQL. Legacy begin and every legacy
+fence around statement creation, marker fetch, close and rule transition must
+reprove that receipt in addition to all prior transaction, write, projection,
+counts, coverage and TEMP-catalog fences. A mismatch poisons the stage before
+the result is accepted; the campaign still must not select, retain or decode
+`result_blob`.
+
+Both runtimes require an exact-shape shadow-swap hostile test whose replacement
+preserves tenant, operation ID/name, request hash, result hash and commit clock
+but substitutes the blob. The swap must leave `total_changes()` unchanged and
+must nevertheless fail through the new main-catalog identity fence. Equivalent
+table replacement during an active cursor and cleanup precedence remain part
+of the lifecycle matrix. This correction adds no permanent schema object,
+migration execution, public API, release, scale or popularity claim.
+
+### 31.34.42 Frozen nine-operation legacy recoverability table
+
+This append-only table completes the pre-implementation analysis required by
+§31.34.35 and incorporates the corrections in §§31.34.39–31.34.41. Every
+row states the strongest fact derivable from the canonical result without
+recovering an unavailable request. An implementation that binds more strongly
+than this table is invalid even if a convenient pristine fixture passes.
+
+| Operation | Canonical result facts retained by rank eleven | Permitted physical proof | Explicitly unrecoverable or forbidden binding |
+| --- | --- | --- | --- |
+| `append` | tail exists, tail sequence, tail record hash, appended-record count | tenant plus record hash uniquely locates the physical tail record under the verified tenant/hash uniqueness constraint; its sequence must match; the same recovered stream must contain exactly the returned count in the inclusive contiguous range ending at the returned sequence | request stream, expected-tail precondition, record bodies and equality to the later current stream head |
+| `save-checkpoint` | scope, checkpoint ID, stream ID, bound sequence/hash, creation clock, value hash/bytes | tenant-scoped existence of any exact `put` revision matching every retained result field | revision number, later current-checkpoint identity and an assumption that no valid delete/recreate followed |
+| `delete-checkpoint` with `false` | only `deleted:false` | inventory and canonical result-shape proof; no physical absence fact is implied | requested scope/checkpoint target and global absence of checkpoints or revisions |
+| `delete-checkpoint` with `true` | only `deleted:true` | tenant-scoped existence of at least one delete revision | requested scope/checkpoint target, exact deleted revision and current absence |
+| `acquire-lease` | lease ID, holder, epoch, fence, acquired/expiry clocks | tenant-scoped used identity with exact lease ID, epoch, fence and first-used clock equal to acquired clock | request stream and binding holder/expiry to later current state |
+| `renew-lease` | lease ID, holder, epoch, fence, original acquired clock, renewed expiry clock | the same exact tenant-scoped used identity proof as acquisition | request stream and historical proof of the returned renewed expiry after later renewal/release |
+| `release-lease` | released status and last epoch/fence | tenant-scoped used row with exact returned epoch/fence joined through its own stream to a lease domain whose two high-waters are at least the result | lease ID, holder, request stream and selecting an arbitrary target stream from the result |
+| `set-legal-hold` | canonical governance result retained in common state but no derived target column in the normalized relation | exact operation inventory only | request stream/hold target and reconstructing historical hold placement from the later snapshot |
+| `acquire-migration-lock` | lock ID, owner, source/target versions, epoch, fence, acquired/expiry clocks | global used-lock identity exact on ID, epoch, fence and first-used/acquired clock; if and only if the current singleton still has the same active lock ID, every retained active field must also match | requiring current-active equality for a retired lock or treating later acquisition as corruption |
+| `release-migration-lock` | canonical `null` | exact operation inventory only | prior lock ID, owner, versions, clocks or any inferred release target |
+
+Inventory is separately bidirectional across the rank-eleven common carrier,
+the normalized relation and the exact main operation row. Its three query
+branches are mutually exclusive: relation-led disagreement, common-without-
+relation, and exact-nine main row without either relation or matching common
+key. The branches use `UNION ALL`; a distinct `UNION` and its TEMP B-tree are
+forbidden. One tenant/operation identity can contribute at most one witness to
+one rule, while independent rule families may each diagnose the same corrupt
+operation when their contracts are independently violated.
+
+### 31.34.43 Verified legacy recoverable-binding checkpoint
+
+The bounded legacy gate in §§31.34.35 and 31.34.39–31.34.42 is now
+implemented and independently verified in both runtimes. The implementation
+is private: neither the TypeScript package index nor the Python package root
+exports the campaign. It adds no permanent table or index, executes no
+migration, writes no v2 row and persists no projection or cursor seal.
+
+The one-shot campaign starts only after the ordered handoff, stream/record,
+checkpoint and lease/lock/hold campaigns have completed. Five rules execute in
+registry order: `BLR_LEGACY_INVENTORY`, `BLR_LEGACY_APPEND_BINDING`,
+`BLR_LEGACY_CHECKPOINT_BINDING`, `BLR_LEGACY_LEASE_BINDING` and
+`BLR_LEGACY_LOCK_BINDING`. Every rule is fixed marker-only SQL with a bound
+`diagnosticLimit + 1`; the executor streams at most 65 marker rows, closes each
+owned cursor exactly once and preserves the authoritative creation, fetch,
+fence or rule failure over a secondary cleanup failure.
+
+Inventory uses three mutually exclusive `UNION ALL` branches: relation-led
+disagreement, common-without-relation and exact-nine main operation without a
+relation or matching common key. It binds tenant, operation ID/name, request
+hash, result hash and commit clock in both directions while retaining the
+staged result-blob digest without selecting or decoding `result_blob` again.
+The other four rules implement exactly the recoverability ceiling frozen in
+§31.34.42. Cross-tenant aliases, same-tenant ambiguity, older saves, later
+delete/recreate, later lease/lock acquisition, current-state drift, split
+release identity/high-water domains and inventory field substitution are all
+covered by production-SQL attacks.
+
+The TEMP-stage owner captures `main.schema_version` and the exact
+`ge_cycle_operations` `type`, `name`, `tbl_name`, root page and stored SQL before
+source staging. Generic stages may retain an absent-table sentinel, but legacy
+begin and every legacy fence reject it. Begin, statement creation, every marker
+fetch, the sole close, rule transition and completion reprove the receipt plus
+the EXCLUSIVE owner/epoch, `total_changes()`, projection reference, common
+counts, relation coverage and fixed TEMP catalog. Both runtimes reject a
+prebuilt exact-DDL shadow whose six scalar fields are preserved while only the
+blob changes; two rename statements leave `total_changes()` unchanged, so the
+catalog receipt rather than the ordinary DML fence proves the rejection.
+
+The shared capture time is `1785110405000`. The pristine fixture has baseline
+ID `v2-fa4f8ccf6009797f4204ecbb8c85cc1d753ce219ce25630ef8af21558326f2af`,
+20 entries, nine legacy operations, first entry
+`f061b7d1fd823d623dc13ab12c78806cf6457e2f6e2f054b235d26d8abee787c`,
+final entry `7438000be18c081b0fd1eff96b3f4c9736dca1b6873285de6f2140d1f2e3bf46`
+and projection
+`459ecad40c2ed54c59c38bb3fecbabfc71694bdf4f59f1eebbdae749fbb9dd62`.
+The hostile fixture has 28 entries and 17 legacy operations, the same baseline
+and first entry, final entry
+`85cc900b39b8631815f5631aa13711a9ef152f88e91793bb771f0be85b1a55e2`,
+projection `a23da0ae704c5d1414fd55950ff1f306eeffb8d5408340dbe713e2fa02b72647`
+and explicit five-rule vector `(0, 2, 2, 3, 2)`.
+
+Whitespace-normalized TypeScript and Python rule SQL has exact five-of-five
+SHA-256 parity:
+
+1. inventory: `e2604ff607c5e3034f4b1b1c7fa87c2cd034244ebe11a17289ff5100f54586ef`;
+2. append: `c18ddc48822f41fa3e6dcafcbdfbb26aed83f9ebcb135c959d5bf32fd0c3b055`;
+3. checkpoint: `46a86173db67c4a6e573d68c5bfdf4a8b886862f16857a1c538cbe953ab1ca4d`;
+4. lease: `619daa1f02963c6a4ef58331db5157ed2f8a95aa0f99cc3add27e2063f541212`;
+5. migration lock: `14ac5f2c3bf01c7b3ac6744b209bded53e7e3001ab94084431a1b92f0f782247`.
+
+Final main-thread evidence is TypeScript legacy focused 222/222, generic stage
+33/33 and SQLite package 16 files / 377 tests, with typecheck, lint and build
+green. Python legacy focused is 86/86, adjacent operation-baseline is 485/485
+and the canonical repository command `cd python && uv run pytest -q` is
+1,637/1,637, with full Ruff, scoped Ruff format and strict MyPy green. The
+SQLite contract is 19/19, the reconciliation registry remains 54 rules with
+`implementationClaim:false`, migration preview remains non-executing, and the
+documentation gate resolves 286 local links. Relevant and full diff checks are
+green. Final independent review is HIGH 0 / MEDIUM 0 / LOW 0.
+
+This checkpoint does not claim legacy 10K/100K performance. Release-lease and
+delete-true necessarily use bounded tenant-prefix existential traversal because
+their results omit the request target, and every marker fence rechecks catalog
+identity. No permanent index was added. The scheduled scale gate must measure
+these paths and catalog-fence overhead at 10K/100K before a throughput claim.
+This checkpoint also does not execute `0002`, persist v2 baseline state, prove
+crash/replay, complete cursor/publication rules, select a release candidate or
+establish adoption, 5K/6K stars or popularity.
+
+### 31.34.44 Cursor and provider-clock invariant campaign gate
+
+The next bounded SQLite slice starts only from the explicit legacy-complete
+phase. It shall implement the twelve cursor rules in registry order and no
+publication rule:
+
+1. `BLR_CURSOR_AUTHORIZATION`;
+2. `BLR_CURSOR_SCOPE`;
+3. `BLR_CURSOR_BLOB_CANONICAL`;
+4. `BLR_CURSOR_POSITION`;
+5. `BLR_CURSOR_EXPIRY_CONSUMPTION`;
+6. `BLR_CURSOR_CATALOG_BINDING`;
+7. `BLR_CURSOR_SEAL_COUNT`;
+8. `BLR_CURSOR_SHAPE`;
+9. `BLR_CURSOR_EVENT_BINDING`;
+10. `BLR_CURSOR_CHECKPOINT_BINDING`;
+11. `BLR_CURSOR_REBIND_COUNT`; and
+12. `BLR_CURSOR_SEAL_MISMATCH`.
+
+Before coding, freeze a field-to-rule matrix for all sixteen persisted cursor
+columns: tenant, token hash, kind, stream, checkpoint scope, request-scope blob,
+page size, next position, optional tail sequence/hash, descriptor hash, schema
+identity, snapshot blob, creation, expiry and optional consumption clocks. The
+matrix must separate raw shape, canonical decoding, request authorization,
+event/checkpoint semantics, physical history binding and seal contribution so
+one rule does not silently replace another. Token plaintext is unavailable and
+must never be reconstructed or logged.
+
+The clock proof is cross-cutting but must not invent a new diagnostic ID.
+`BLR_CURSOR_EXPIRY_CONSUMPTION` proves safe-integer clocks, expiry strictly
+after creation and consumption absent or no earlier than creation. The phase
+must separately prove that the provider clock high-water captured from the
+migration-lock singleton is not behind any provider-owned cursor clock and
+that the reconciliation capture clock is not behind that high-water. User
+checkpoint RFC3339 timestamps and lease/lock future expiries are not provider
+observation clocks and must remain excluded from that aggregate.
+
+Authorization and scope rules must prove that event cursors have exactly one
+stream and no checkpoint scope, while checkpoint cursors have exactly one
+checkpoint scope and no stream. The decoded request-scope object must equal the
+closed contract-version/kind/page-size/target tuple. Descriptor and schema
+identity hashes bind to the frozen provider assets, never to caller input.
+Canonical-blob rules must bound both blobs before decoding, require exact
+canonical re-encoding and keep tenant-controlled content out of diagnostics.
+
+Event binding must prove an existing retained tail for the exact tenant,
+stream, sequence and hash, enforce the empty/nonempty tail tuple and constrain
+`next_position` to the frozen snapshot. Checkpoint binding must prove every
+snapshot summary against an exact tenant/scope/checkpoint `put` revision and
+the frozen descending sequence/creation/ID order, while allowing later current
+checkpoint mutation. Position and rebinding rules must distinguish consumed,
+expired, replayed and newly rebound tokens without inferring unavailable token
+plaintext.
+
+Seal design must be written before implementation. It shall stream cursors in
+canonical tenant/token-hash byte order and domain-separate each row. Every
+immutable scalar, both blob lengths and both blob SHA-256 values contribute;
+descriptor/schema identities remain independently checked. `SEAL_COUNT`,
+`SHAPE`, `REBIND_COUNT` and `SEAL_MISMATCH` must have non-overlapping diagnostic
+units and must not collect all cursor rows or decoded snapshots in application
+memory. Fixed SQL, named-index/EQP review and a bounded canonical decoder are
+mandatory.
+
+The phase inherits the exact projection reference, owner transaction, write,
+main-catalog, TEMP-catalog, common-count, relation-coverage and exact-once cursor
+cleanup fences proven above. It adds one private cursor/clock-complete state
+required by publication. Tests repeat per-twelve creation/fetch/close, options,
+limits, malformed markers, post-diagnostic mutation, rule transition, catalog
+replacement, transaction terminal, active disposal and cleanup precedence.
+Shared fixtures cover event/checkpoint, active/consumed/expired, boundary page
+sizes, empty/nonempty snapshots, retained/missing tails, reordered checkpoints,
+descriptor/schema drift, blob noncanonicality, clock regression and seal/count
+attacks with literal identities and an exact twelve-number vector.
+
+Fast evidence must include 128 and 1,024 cursors with bounded marker streaming.
+The scheduled performance gate, not this fast gate, owns 10K/100K RSS,
+p50/p95/p99 and tenant-prefix/catalog-fence cost. Completion again requires
+TypeScript/Python normalized SQL and fixture parity, focused/adjacent/full
+suites, static checks, contract/registry/docs gates and independent HIGH 0 /
+MEDIUM 0 / LOW 0 review. It still may not execute `0002`, publish v2 rows,
+persist the final seal, implement the three publication rules or claim release,
+adoption or stars.
+
+### 31.34.45 Cursor/provider-clock pre-implementation clarification
+
+This append-only clarification supersedes only the ambiguous cursor field
+count, seal order and phase-completion wording in §31.34.44. It does not alter
+any already implemented baseline, relation or legacy behavior. No cursor
+campaign implementation may begin until the matrix and two-phase ownership
+defined here are treated as frozen inputs.
+
+#### 31.34.45.1 Exact physical field inventory and seal boundary
+
+The schema-v1 `ge_cycle_cursors` row has eighteen persisted columns, not
+sixteen. The sixteen-field count in §31.34.44 accidentally omitted
+`principal_hash` and `authorization_hash` while counting the two fields which
+are intentionally mutable during v2 rebinding. The corrected partition is:
+
+- sixteen immutable seal fields: `tenant_id`, `token_hash`, `kind`,
+  `principal_hash`, `authorization_hash`, `stream_id`, `checkpoint_scope`,
+  `request_scope_blob`, `page_size`, `next_position`,
+  `snapshot_tail_sequence`, `snapshot_tail_record_hash`, `snapshot_blob`,
+  `created_at_ms`, `expires_at_ms` and `consumed_at_ms`; and
+- two separately validated mutable rebind fields: `descriptor_hash` and
+  `schema_identity_sha256`.
+
+The immutable seal does not place either raw BLOB in a native-language row
+object retained beyond the current cursor. For each BLOB it substitutes the
+exact byte length and lowercase SHA-256. Consequently the canonical immutable
+seal value has eighteen logical contributions: fourteen non-BLOB scalar
+values plus `requestScopeByteLength`, `requestScopeBlobSha256`,
+`snapshotByteLength` and `snapshotBlobSha256`. The descriptor and schema
+identity contribute to `BLR_CURSOR_CATALOG_BINDING`, the pre-rebind receipt and
+the post-rebind identity check, but never to the immutable seal root. Changing
+only those two fields must leave the immutable root unchanged; changing any of
+the sixteen immutable physical fields, either BLOB length or either BLOB byte
+sequence must change it.
+
+The closed field-to-rule allocation is:
+
+| Physical field or derived evidence | Primary rule | Required proof | Must not be substituted by |
+| --- | --- | --- | --- |
+| `tenant_id`, `token_hash` | `BLR_CURSOR_AUTHORIZATION` | bounded canonical identifiers; token is represented only by its lowercase SHA-256 hash | token plaintext reconstruction, logging or lookup outside the sealed owner transaction |
+| `principal_hash`, `authorization_hash` | `BLR_CURSOR_AUTHORIZATION` | both exact lowercase 64-hex authorization carriers are present and enter the immutable seal | request-scope equality or descriptor equality |
+| `kind`, `stream_id`, `checkpoint_scope` | `BLR_CURSOR_SCOPE` | event has exactly one stream and null checkpoint scope; checkpoint has exactly one scope and null stream | raw table `CHECK` success alone |
+| decoded `request_scope_blob` | `BLR_CURSOR_SCOPE` | exact contract-version/kind/page-size/target object matching the scalar tuple | canonical-byte proof alone |
+| both raw BLOB bounds, UTF-8/JSON decoding, duplicate-key rejection and exact canonical re-encoding | `BLR_CURSOR_BLOB_CANONICAL` | bounded one-row decode and byte-for-byte canonical round trip | event/checkpoint semantic acceptance |
+| `page_size`, `next_position` | `BLR_CURSOR_POSITION` | safe integer ranges and position valid for the frozen event or checkpoint snapshot | expiry/consumption status |
+| `created_at_ms`, `expires_at_ms`, `consumed_at_ms` | `BLR_CURSOR_EXPIRY_CONSUMPTION` | safe integers; expiry strictly after creation; consumption absent or at/after creation; provider clock and capture-clock aggregate described below | lease/lock expiry or user checkpoint timestamp aggregation |
+| `descriptor_hash`, `schema_identity_sha256` | `BLR_CURSOR_CATALOG_BINDING` | exact source identities before rebind and exact final identities after the future publication-owned rebind | caller input or immutable seal contribution |
+| main cursor count and TEMP seal-stage count | `BLR_CURSOR_SEAL_COUNT` | exact equality at the pre-rebind barrier | `SHAPE` or post-rebind update count |
+| complete eighteen-column row arity, SQLite storage classes, nullable groups and hash/identifier lexical bounds not already assigned to semantic rules | `BLR_CURSOR_SHAPE` | one physical row maps to exactly one closed seal carrier | authorization, scope, clock, event or checkpoint semantic rules |
+| event tail scalar tuple plus decoded event snapshot | `BLR_CURSOR_EVENT_BINDING` | exact tenant/stream/sequence/hash retained record, exact empty/nonempty tuple and frozen snapshot agreement | current stream-head equality after later append |
+| decoded checkpoint snapshot entries | `BLR_CURSOR_CHECKPOINT_BINDING` | each summary has an exact tenant/scope/checkpoint `put` revision and strict frozen descending sequence/creation/ID order | current checkpoint equality after later mutation |
+| publication-owned update result | `BLR_CURSOR_REBIND_COUNT` | exactly the pre-rebind receipt row count was rebound once | a new scan root, `total_changes()` alone or seal count |
+| post-rebind row count and immutable seal | `BLR_CURSOR_SEAL_MISMATCH` | count and root equal the pre-rebind receipt while every mutable identity equals the final target | descriptor/schema inclusion in the immutable root |
+
+One malformed row may independently violate more than one rule, but each rule
+emits at most one marker for that cursor identity. `SHAPE`, `SEAL_COUNT`,
+`REBIND_COUNT` and `SEAL_MISMATCH` retain distinct units: physical row,
+pre-rebind inventory delta, publication update delta and post-rebind immutable
+receipt mismatch respectively. A rule must not hide a violation merely because
+another rule would also diagnose the row.
+
+#### 31.34.45.2 Canonical order and private TEMP seal stage
+
+The canonical immutable seal order is `token_hash` unsigned UTF-8 bytes first,
+then `tenant_id` unsigned UTF-8 bytes. This matches the existing normative
+registry value `token-hash-utf8-bytes, tenant-id-utf8-bytes` and supersedes the
+reversed tenant/token wording in §31.34.44. TypeScript and Python must compare
+the same raw UTF-8 byte order and may not rely on locale, host string collation
+or insertion order.
+
+The schema-v1 main-table primary key is `(tenant_id, token_hash)`. Asking
+SQLite to read the two potentially large cursor BLOBs directly in canonical
+token/tenant order would require an unowned sort and can produce `USE TEMP
+B-TREE`; adding a permanent source index is forbidden. The implementation must
+therefore use a private STRICT, WITHOUT ROWID TEMP cursor-seal stage whose
+primary key is `(token_hash COLLATE BINARY, tenant_id COLLATE BINARY)`.
+
+The source walker reads `main.ge_cycle_cursors` in its existing
+`tenant_id,token_hash` primary-key order, exactly one row at a time. It validates
+and decodes the current row, computes both BLOB lengths and SHA-256 digests,
+inserts only the closed immutable scalar/digest carrier into the TEMP seal
+stage, proves the exact one-row write delta, and releases both BLOBs before
+advancing. The TEMP stage never stores request-scope bytes, snapshot bytes,
+decoded snapshot arrays, token plaintext or tenant-controlled diagnostic text.
+After capture, the seal accumulator streams the small carriers from the TEMP
+primary key in canonical token/tenant order without a sort or application-level
+collection.
+
+The TEMP object name, complete DDL, domain-separated row encoding, genesis or
+empty root and terminal seal encoding must be frozen in both runtimes before a
+root is claimed. The two fixed domains remain:
+
+```text
+graph-engineering/sqlite-cursor-seal-row/v1\0
+graph-engineering/sqlite-cursor-seal/v1\0
+```
+
+Every source query, insert, ordered seal fetch and rule marker query requires
+an EQP assertion. No plan may contain an automatic index, materialized
+subquery, unbounded sorter or TEMP B-tree. The main-catalog receipt must cover
+every source object read by cursor rules, including the cursor table, retained
+records, checkpoint revisions, migration-lock singleton and schema identity
+source. Same-name or exact-shape DDL replacement between capture, decode,
+digest, insert, seal and rule boundaries poisons the stage even when
+`total_changes()` does not move.
+
+#### 31.34.45.3 Provider-clock ownership correction
+
+The completed source foundation already compares the migration-lock
+`updated_at_ms` high-water with provider-owned observation clocks. Cursor
+creation and consumption clocks are presently included in that broad maximum,
+which means a cursor-only regression can fail before a cursor rule is able to
+emit `BLR_CURSOR_EXPIRY_CONSUMPTION`. The cursor phase must own its diagnostic
+without weakening the final clock invariant.
+
+Source capture must retain immutable evidence for the caller-supplied capture
+clock, the migration-lock provider high-water and the maximum non-cursor
+provider observation. It continues to fail immediately if the high-water is
+behind any non-cursor provider observation or if capture predates the
+high-water. Cursor creation and non-null consumption clocks are then checked
+separately by the cursor campaign against the same frozen high-water. A cursor
+clock ahead of it is one `BLR_CURSOR_EXPIRY_CONSUMPTION` unit, not a generic
+source failure. Campaign completion reproves that the capture clock is not
+behind the high-water and that the high-water is not behind either the
+non-cursor maximum or any cursor creation/consumption clock.
+
+Lease and migration-lock future expiry clocks and checkpoint RFC3339 creation
+timestamps remain excluded. Cursor `expires_at_ms` participates in the local
+strict-after-creation rule but not in the provider observation maximum. This
+split changes diagnostic ownership only; it must produce the same final valid
+clock ordering as the earlier combined query.
+
+#### 31.34.45.4 Two-phase rule ownership and completion state
+
+Rules one through ten are pre-rebind rules. Under the exact legacy-complete
+stage, they validate and stage all cursors, prove the provider clock, compute
+the immutable seal and return a frozen pre-rebind receipt containing at least
+the exact cursor count, immutable root, source descriptor identity, source
+schema identity, captured provider high-water and the exact projection
+reference. This action is read-only for main and permanent state. It may write
+only the owned TEMP seal stage with exact accounted deltas.
+
+Rules eleven and twelve are not pre-rebind diagnostics. They belong to a
+future publication-owned post-rebind verifier. That verifier accepts only the
+exact pre-rebind receipt, the exact publication session and the exact affected
+row count returned by the publication owner's single bounded cursor rebind. It
+requires `BLR_CURSOR_REBIND_COUNT` equality, streams a second immutable seal,
+requires `BLR_CURSOR_SEAL_MISMATCH` count/root equality, and proves every row's
+two mutable identities equal the final manifest-bound v2 targets.
+
+The pre-rebind campaign may enter `pre-rebind-complete` and hand out its opaque
+receipt. It must not enter `cursor/clock-complete`. Only the future post-rebind
+verifier can transition the same private stage session to
+`cursor/clock-complete`, and publication rules may later require that exact
+state. Abandonment, receipt substitution, projection clone, publication
+session mismatch, second verification, partial rebind, extra/missing cursor or
+immutable drift poisons the owner and finalizes the active cursor exactly once.
+
+This phase separation resolves the apparent requirement to run all twelve
+rules while simultaneously forbidding v2 publication. The current development
+slice implements and verifies the pre-rebind half only. It may define the
+private verifier contract and test it with deterministic isolated fixtures,
+but it must not invoke a real v2 rebind, execute `0002`, claim the final two
+rules as integrated, or claim `cursor/clock-complete`.
+
+#### 31.34.45.5 Minimum implementation slice A: seal and clock primitives
+
+The first independently reviewable slice contains no stage lifecycle change
+and no permanent database write:
+
+1. add one private TypeScript cursor invariant module and one private Python
+   counterpart; neither package index exports them;
+2. implement the closed eighteen-column row reader, bounded canonical decoder,
+   immutable sixteen-field-to-eighteen-contribution seal carrier and
+   constant-space domain-separated accumulator;
+3. implement frozen pre-rebind receipt types with defensive copies or immutable
+   bytes and one-shot finish behavior;
+4. split source clock evidence into capture clock, provider high-water,
+   non-cursor maximum and later cursor maximum ownership without changing valid
+   source projections; and
+5. freeze exact cross-language field names, byte encoding, null encoding,
+   genesis/empty behavior and literal roots before integration.
+
+Slice A tests start with empty, one event and one checkpoint carrier; two rows
+whose tenant and token orders disagree; all sixteen single-field immutable
+mutations; the two allowed mutable-identity mutations; both BLOB length and
+same-length content attacks; page sizes 1 and 256; safe-integer clock edges;
+invalid UTF-8, BOM, duplicate JSON keys, noncanonical whitespace/key order and
+oversized carriers; checkpoint snapshot order; and accumulator underflow,
+overflow, duplicate, order regression, second finish and post-finish append.
+Every literal root is derived independently in TypeScript and Python before it
+is appended as evidence.
+
+Slice A fast characterization covers 128 and 1,024 synthetic carriers through
+one-row iteration. Tests prohibit `.all()`, `fetchall()`, `Array.from`, list or
+tuple capture proportional to cursor count, decoded-snapshot retention and raw
+BLOB retention. They record maximum simultaneously live carrier count and
+prove it remains constant. This is characterization, not a 10K/100K or
+production-throughput claim.
+
+#### 31.34.45.6 Minimum implementation slice B: pre-rebind campaign integration
+
+After Slice A has exact TypeScript/Python root parity, Slice B may extend the
+private stage chain after legacy completion:
+
+1. create and catalog-bind the private TEMP cursor-seal table;
+2. add exact begin, fence, cursor registration, cursor release, pre-rebind
+   completion, abort and disposal capabilities in both runtimes;
+3. implement rules one through ten in registry order with fixed marker-only SQL
+   where deterministic SQL is sufficient and bounded one-row decoding where
+   canonical or checkpoint semantics require judgment-free code;
+4. bind event snapshots to retained record history and checkpoint snapshots to
+   exact historical `put` revisions without binding later current state;
+5. return the opaque pre-rebind receipt while keeping the final
+   cursor/clock-complete state unreachable; and
+6. define, but do not integrate with migration, the exact private inputs that a
+   future post-rebind verifier will require for rules eleven and twelve.
+
+Slice B tests require a literal pristine fixture and a literal hostile fixture
+with exact counts, projection identity, pre-rebind seal and ten-number
+pre-rebind diagnostic vector. Attacks cover every rule independently, same
+token hash across tenants, tenant/token cross-order, event empty/nonempty
+snapshots, missing or later retained tails, checkpoint later mutation,
+missing/reordered put history, authorization substitution, descriptor/schema
+substitution, cursor insert/delete with equal count, provider-clock regression
+and source-object DDL replacement.
+
+Lifecycle tests repeat per-ten statement creation, marker fetch and close;
+limits 1, 16 and 64 with genuine fixed SQL at exact and plus-one boundaries;
+malformed marker; mutation after a real diagnostic; mutation at rule
+transition; table/index/catalog replacement; transaction end; active disposal;
+cleanup-only failure; primary failure plus cleanup failure; receipt clone;
+second run; abandonment; and attempted start before exact legacy completion.
+The cursor walker and seal walker each have one owner, one active cursor and
+one exact close on every exit path.
+
+#### 31.34.45.7 Cross-language gates and non-claims
+
+Slice A and Slice B each require normalized TypeScript/Python SQL parity where
+SQL exists, byte-for-byte seal carrier parity, identical count/root receipts,
+identical safe diagnostics and matching fixture clocks. Focused and adjacent
+tests run after every change. Completion evidence also requires the full
+TypeScript SQLite suite, typecheck, lint and build; the canonical full Python
+suite, Ruff and strict MyPy; SQLite contract and 54-rule registry checks; docs
+links; scoped and full diff checks; and a new independent HIGH 0 / MEDIUM 0 /
+LOW 0 review.
+
+The main integration agent owns the plan, root configuration, spec and final
+cross-language evidence. TypeScript and Python runtime lanes own only their
+assigned files. No formatter may rewrite another lane. Shared fixtures must be
+literal and independently recomputed rather than copied from one runtime into
+the other.
+
+This clarification and both minimum slices do not execute or modify `0002`,
+alter a permanent v1 table/index, write a v2 row, rebind a real cursor, persist
+the immutable seal, implement publication rules, mark the registry
+`implementationClaim:true`, prove 10K/100K memory behavior, prove crash/replay,
+select a release candidate, or establish adoption, star count or popularity.
+Until a future publication-owned rebind and rules eleven/twelve pass, the only
+truthful terminal claim is a verified private pre-rebind cursor receipt; the
+project must not claim cursor completion or cursor/clock completion.
+
+### 31.34.46 Post-audit legacy recoverability closure and superseding evidence
+
+An external read-only Claude Code audit of the live implementation found two
+release-blocking gaps after the first completion checkpoint in §31.34.43: the
+TypeScript suite did not yet prove that the four binding rules accept all six
+safe later-history evolutions, and a count-preserving rank-eleven relation-key
+substitution could produce both a relation-led and common-led inventory marker
+for one tenant/operation identity. Five supporting evidence gaps were also
+reported around result-blob-digest drift, the TypeScript begin write fence,
+equal-count TEMP mutation, cross-runtime index metadata and the actual
+non-key-lookup query shapes. This section supersedes only the affected evidence
+and hash/count statements in §31.34.43; all earlier plan bytes remain intact.
+
+The inventory SQL now excludes the common-led branch whenever the normalized
+relation still contains the same decoded tenant/operation identity, even when
+the two key blobs disagree. The relation-led branch therefore owns that
+identity and the three `UNION ALL` branches remain mutually exclusive without a
+distinct operation or TEMP B-tree. Both runtimes execute a real key-blob
+substitution and freeze the resulting inventory count at one. The new
+whitespace-normalized inventory SQL SHA-256 is
+`47955bd3ba75cbfd515d95cff82dd28213d956818e06a597e07a7376a7874f46` in
+both TypeScript and Python; it supersedes only the former inventory digest.
+The append, checkpoint, lease and migration-lock hashes remain unchanged.
+
+TypeScript now proves the same six permitted evolutions already required in
+Python: a later append head, checkpoint delete/recreate, later lease
+acquisition, same-tenant ambiguous lease history, later current lease
+holder/expiry state and a later migration-lock acquisition. Every case returns
+an empty diagnostic report, proving that the implementation does not bind more
+strongly than §31.34.42. Both runtimes additionally exercise relation and
+common `resultBlobSha256`/`result_blob_sha256` drift plus a legal operation-name
+substitution. No campaign query selects, retains or decodes the main
+`result_blob` column.
+
+The TypeScript legacy constructor now checks `total_changes()` immediately
+before catalog/count/coverage proof and again after it. A real equal-count TEMP
+no-op update therefore fails at begin before any rule statement is prepared,
+matching Python. TypeScript rule descriptors now carry frozen
+`requiredIndexes` arrays equal to the Python tuples, and both EQP tests run on
+the shared pristine nine-operation fixture. The tests require every named
+index and reject `AUTOMATIC`, `MATERIALIZE` and `TEMP B-TREE` plan nodes.
+
+The rules intentionally contain more than one bounded non-direct lookup, so
+the singular wording in §31.34.35 is corrected here. Append performs a
+tenant/hash tail lookup plus a stream-sequence range count. Save/delete
+checkpoint recovery uses a tenant-prefix history search because a delete
+result omits its request target. Acquire/renew lease uses an exact used-ID
+domain, while release performs a tenant-prefix used-ID traversal joined back to
+its own lease stream because the result omits the stream and lease ID. Main
+inventory recovery scans only the closed nine operation names and checks for a
+matching staged identity. These paths are fixed, bounded by marker limit and
+covered by named-index/EQP evidence, but they are not claimed performant at
+10K/100K; that remains scheduled performance debt.
+
+Two append defensive guards (`tail_exists IS NOT 1` and
+`appended_records < 1`) are unreachable after the stricter staging table
+checks, while the negative range-start and missing/short physical range
+branches remain directly hostile-tested. Keeping the unreachable predicates is
+defense in depth, not evidence that malformed staged rows can bypass the TEMP
+contract. Python now owns its local strict 1..64 diagnostic-limit validator
+rather than importing another campaign's bound.
+
+Superseding main-thread evidence after these corrections is TypeScript legacy
+focused 232/232 and SQLite 16 files / 387 tests, with typecheck, lint and build
+green. Python legacy focused is 89/89 and the canonical full suite is
+1,640/1,640, with Ruff and strict MyPy green. `git diff --check` is clean. This
+closure still adds no public export or permanent index, does not execute
+`0002`, does not persist a v2 row or seal, and makes no release, adoption,
+performance or star-count claim.

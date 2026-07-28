@@ -57,8 +57,7 @@ SQLiteV1BaselineTempStageState = Literal["open", "poisoned", "disposed"]
 
 _KIND_RANK = {kind: rank for rank, kind in enumerate(BASELINE_ENTRY_KINDS)}
 _KEY_BLOB = (
-    "BLOB NOT NULL CHECK "
-    "(typeof(key_blob) = 'blob' AND length(key_blob) BETWEEN 2 AND 4096)"
+    "BLOB NOT NULL CHECK (typeof(key_blob) = 'blob' AND length(key_blob) BETWEEN 2 AND 4096)"
 )
 
 
@@ -166,16 +165,14 @@ _LEGACY_OPERATION_CHECK = " OR\n  ".join(
         "AND last_lease_epoch IS NOT NULL AND last_lease_fencing_token IS NOT NULL "
         "AND last_lease_epoch = last_lease_fencing_token AND "
         f"{_all_null_sql(_other_legacy_fields(_LEGACY_RELEASE_FIELDS))})",
-        "(operation_name = 'set-legal-hold' AND "
-        f"{_all_null_sql(_LEGACY_DERIVED_FIELDS)})",
+        f"(operation_name = 'set-legal-hold' AND {_all_null_sql(_LEGACY_DERIVED_FIELDS)})",
         "(operation_name = 'acquire-migration-lock' AND "
         f"{_all_present_sql(_LEGACY_LOCK_FIELDS)} "
         "AND lock_epoch = lock_fencing_token "
         "AND lock_target_version > lock_source_version "
         "AND lock_expires_at_ms > lock_acquired_at_ms AND "
         f"{_all_null_sql(_other_legacy_fields(_LEGACY_LOCK_FIELDS))})",
-        "(operation_name = 'release-migration-lock' AND "
-        f"{_all_null_sql(_LEGACY_DERIVED_FIELDS)})",
+        f"(operation_name = 'release-migration-lock' AND {_all_null_sql(_LEGACY_DERIVED_FIELDS)})",
     )
 )
 
@@ -800,11 +797,7 @@ def _exact_epoch_milliseconds(value: object) -> int:
         raise ValueError("legacy result timestamp is not exact milliseconds")
     epoch = datetime(1970, 1, 1, tzinfo=UTC)
     delta = parsed.astimezone(UTC) - epoch
-    milliseconds = (
-        delta.days * 86_400_000
-        + delta.seconds * 1_000
-        + delta.microseconds // 1_000
-    )
+    milliseconds = delta.days * 86_400_000 + delta.seconds * 1_000 + delta.microseconds // 1_000
     if milliseconds < 0 or milliseconds > MAX_SAFE_INTEGER:
         raise ValueError("legacy result timestamp is outside bounds")
     return milliseconds
@@ -1088,8 +1081,7 @@ def _checked_cache_kib(value: object) -> int:
 
 def _has_baseline_temp_object(connection: SQLiteV1BaselineConnectionOwner) -> bool:
     cursor = connection.execute(
-        "SELECT 1 FROM temp.sqlite_schema "
-        "WHERE substr(lower(name), 1, 7) = 'ge_blr_' LIMIT 1"
+        "SELECT 1 FROM temp.sqlite_schema WHERE substr(lower(name), 1, 7) = 'ge_blr_' LIMIT 1"
     )
     try:
         return cursor.fetchone() is not None
@@ -1178,6 +1170,12 @@ class SQLiteV1BaselineTempStage:
         "_lease_lock_hold_campaign_cursor",
         "_lease_lock_hold_campaign_session",
         "_lease_lock_hold_campaign_started",
+        "_legacy_campaign_completed",
+        "_legacy_campaign_cursor",
+        "_legacy_campaign_session",
+        "_legacy_campaign_started",
+        "_legacy_main_operation_catalog",
+        "_legacy_main_schema_version",
         "_ordered_handoff_completed",
         "_ordered_handoff_reader",
         "_ordered_handoff_started",
@@ -1203,6 +1201,12 @@ class SQLiteV1BaselineTempStage:
         self._lease_lock_hold_campaign_completed = False
         self._lease_lock_hold_campaign_cursor: _SQLiteCursorCapability | None = None
         self._lease_lock_hold_campaign_session: object | None = None
+        self._legacy_campaign_started = False
+        self._legacy_campaign_completed = False
+        self._legacy_campaign_cursor: _SQLiteCursorCapability | None = None
+        self._legacy_campaign_session: object | None = None
+        self._legacy_main_schema_version = -1
+        self._legacy_main_operation_catalog: tuple[object, ...] = ()
         self._state: SQLiteV1BaselineTempStageState = "open"
         self._transaction_epoch = connection.transaction_epoch
         self._allowed_total_changes = connection.total_changes
@@ -1229,9 +1233,10 @@ class SQLiteV1BaselineTempStage:
             )
         if _has_baseline_temp_object(connection):
             self._state = "disposed"
-            raise ValueError(
-                "BLR_STAGE_WRITE_COUNT: baseline TEMP namespace is not empty"
-            )
+            raise ValueError("BLR_STAGE_WRITE_COUNT: baseline TEMP namespace is not empty")
+        self._legacy_main_schema_version, self._legacy_main_operation_catalog = (
+            self._read_legacy_main_catalog()
+        )
         try:
             _read_sqlite_v1_baseline_temp_storage(connection)
         except ValueError:
@@ -1363,10 +1368,7 @@ class SQLiteV1BaselineTempStage:
             if not isinstance(entry, BaselineEntryInput):
                 raise TypeError("baseline relation entry has the wrong type")
             canonical = capture_baseline_entry(entry.entry_kind, entry.key, entry.state)
-            if (
-                canonical.key_bytes != entry.key_bytes
-                or canonical.state_bytes != entry.state_bytes
-            ):
+            if canonical.key_bytes != entry.key_bytes or canonical.state_bytes != entry.state_bytes:
                 raise ValueError("baseline relation entry bytes are not canonical")
             relation_insert = (
                 self._legacy_relation_insert_for(canonical)
@@ -1390,17 +1392,13 @@ class SQLiteV1BaselineTempStage:
             finally:
                 cursor.close()
         except sqlite3.IntegrityError:
-            self._poison(
-                "BLR_STAGE_KEY_DUPLICATE: normalized TEMP relation key is duplicated"
-            )
+            self._poison("BLR_STAGE_KEY_DUPLICATE: normalized TEMP relation key is duplicated")
         except Exception:
             self._poison("BLR_STAGE_WRITE_COUNT: normalized TEMP relation insert failed")
 
         after = self._connection.total_changes
         if affected_rows != 1 or after != before + 1 or after != pair_before + 2:
-            self._poison(
-                "BLR_STAGE_WRITE_COUNT: paired TEMP stage insert changed the wrong count"
-            )
+            self._poison("BLR_STAGE_WRITE_COUNT: paired TEMP stage insert changed the wrong count")
         self._allowed_total_changes = after
         self._assert_open_and_bound()
 
@@ -1610,9 +1608,7 @@ class SQLiteV1BaselineTempStage:
             or identity.entry_count != summary.expected_entry_count
             or self._state != "open"
         ):
-            self._poison(
-                "BLR_STAGE_ITERATOR_INCOMPLETE: stream/record campaign binding is invalid"
-            )
+            self._poison("BLR_STAGE_ITERATOR_INCOMPLETE: stream/record campaign binding is invalid")
         expected_total_changes = self._allowed_total_changes
         self._assert_ordered_handoff_fence(expected_total_changes)
         self.assert_common_counts(summary.counts_by_kind)
@@ -1633,9 +1629,7 @@ class SQLiteV1BaselineTempStage:
             or not self._stream_record_campaign_started
             or self._stream_record_campaign_completed
         ):
-            self._poison(
-                "BLR_STAGE_ITERATOR_INCOMPLETE: stream/record campaign session is invalid"
-            )
+            self._poison("BLR_STAGE_ITERATOR_INCOMPLETE: stream/record campaign session is invalid")
         self._assert_ordered_handoff_fence(expected_total_changes)
         self._assert_ordered_handoff_catalog(expected_total_changes)
         self._assert_ordered_handoff_fence(expected_total_changes)
@@ -1651,9 +1645,7 @@ class SQLiteV1BaselineTempStage:
             type(cursor) is not _SQLiteCursorCapability
             or self._stream_record_campaign_cursor is not None
         ):
-            self._poison(
-                "BLR_STAGE_ITERATOR_INCOMPLETE: stream/record rule cursor is invalid"
-            )
+            self._poison("BLR_STAGE_ITERATOR_INCOMPLETE: stream/record rule cursor is invalid")
         self._stream_record_campaign_cursor = cursor
         self._assert_stream_record_campaign_fence(session, expected_total_changes)
 
@@ -1664,9 +1656,7 @@ class SQLiteV1BaselineTempStage:
         expected_total_changes: int,
     ) -> None:
         if self._stream_record_campaign_cursor is not cursor:
-            self._poison(
-                "BLR_STAGE_ITERATOR_INCOMPLETE: stream/record rule cursor binding drifted"
-            )
+            self._poison("BLR_STAGE_ITERATOR_INCOMPLETE: stream/record rule cursor binding drifted")
         self._stream_record_campaign_cursor = None
         self._assert_stream_record_campaign_fence(session, expected_total_changes)
 
@@ -1691,9 +1681,7 @@ class SQLiteV1BaselineTempStage:
         self._assert_ordered_handoff_fence(expected_total_changes)
         summary = self._cooperative_summary
         if summary is None:
-            self._poison(
-                "BLR_STAGE_ITERATOR_INCOMPLETE: stream/record source binding is absent"
-            )
+            self._poison("BLR_STAGE_ITERATOR_INCOMPLETE: stream/record source binding is absent")
         self.assert_common_counts(summary.counts_by_kind)
         self.assert_relation_key_coverage()
         self._assert_ordered_handoff_catalog(expected_total_changes)
@@ -1710,9 +1698,7 @@ class SQLiteV1BaselineTempStage:
             with suppress(BaseException):
                 cursor.close()
         if session is not None and session is not self._stream_record_campaign_session:
-            self._poison(
-                "BLR_STAGE_ITERATOR_INCOMPLETE: stream/record campaign session drifted"
-            )
+            self._poison("BLR_STAGE_ITERATOR_INCOMPLETE: stream/record campaign session drifted")
         self._stream_record_campaign_session = None
         self._poison("BLR_STAGE_ITERATOR_INCOMPLETE: stream/record campaign aborted")
 
@@ -1737,9 +1723,7 @@ class SQLiteV1BaselineTempStage:
             or identity.entry_count != summary.expected_entry_count
             or self._state != "open"
         ):
-            self._poison(
-                "BLR_STAGE_ITERATOR_INCOMPLETE: checkpoint campaign binding is invalid"
-            )
+            self._poison("BLR_STAGE_ITERATOR_INCOMPLETE: checkpoint campaign binding is invalid")
         expected_total_changes = self._allowed_total_changes
         self._assert_ordered_handoff_fence(expected_total_changes)
         self.assert_common_counts(summary.counts_by_kind)
@@ -1787,9 +1771,7 @@ class SQLiteV1BaselineTempStage:
         expected_total_changes: int,
     ) -> None:
         if self._checkpoint_campaign_cursor is not cursor:
-            self._poison(
-                "BLR_STAGE_ITERATOR_INCOMPLETE: checkpoint rule cursor binding drifted"
-            )
+            self._poison("BLR_STAGE_ITERATOR_INCOMPLETE: checkpoint rule cursor binding drifted")
         self._checkpoint_campaign_cursor = None
         self._assert_checkpoint_campaign_fence(session, expected_total_changes)
 
@@ -1806,9 +1788,7 @@ class SQLiteV1BaselineTempStage:
             or self._checkpoint_campaign_session is not session
             or self._checkpoint_campaign_cursor is not None
         ):
-            self._poison(
-                "BLR_STAGE_ITERATOR_INCOMPLETE: checkpoint campaign completion is invalid"
-            )
+            self._poison("BLR_STAGE_ITERATOR_INCOMPLETE: checkpoint campaign completion is invalid")
         self._assert_checkpoint_campaign_fence(session, expected_total_changes)
         summary = self._cooperative_summary
         if summary is None:
@@ -1839,9 +1819,7 @@ class SQLiteV1BaselineTempStage:
         """Bind the lease/lock/hold campaign after checkpoint completion."""
 
         if self._lease_lock_hold_campaign_started:
-            self._poison(
-                "BLR_STAGE_ITERATOR_INCOMPLETE: lease/lock/hold campaign already started"
-            )
+            self._poison("BLR_STAGE_ITERATOR_INCOMPLETE: lease/lock/hold campaign already started")
         self._lease_lock_hold_campaign_started = True
         if (
             type(summary) is not SQLiteV1BaselineSourceSummary
@@ -1896,9 +1874,7 @@ class SQLiteV1BaselineTempStage:
             type(cursor) is not _SQLiteCursorCapability
             or self._lease_lock_hold_campaign_cursor is not None
         ):
-            self._poison(
-                "BLR_STAGE_ITERATOR_INCOMPLETE: lease/lock/hold rule cursor is invalid"
-            )
+            self._poison("BLR_STAGE_ITERATOR_INCOMPLETE: lease/lock/hold rule cursor is invalid")
         self._lease_lock_hold_campaign_cursor = cursor
         self._assert_lease_lock_hold_campaign_fence(session, expected_total_changes)
 
@@ -1934,9 +1910,7 @@ class SQLiteV1BaselineTempStage:
         self._assert_lease_lock_hold_campaign_fence(session, expected_total_changes)
         summary = self._cooperative_summary
         if summary is None:
-            self._poison(
-                "BLR_STAGE_ITERATOR_INCOMPLETE: lease/lock/hold source binding is absent"
-            )
+            self._poison("BLR_STAGE_ITERATOR_INCOMPLETE: lease/lock/hold source binding is absent")
         self.assert_common_counts(summary.counts_by_kind)
         self.assert_relation_key_coverage()
         self._assert_ordered_handoff_catalog(expected_total_changes)
@@ -1951,11 +1925,196 @@ class SQLiteV1BaselineTempStage:
             with suppress(BaseException):
                 cursor.close()
         if session is not None and session is not self._lease_lock_hold_campaign_session:
-            self._poison(
-                "BLR_STAGE_ITERATOR_INCOMPLETE: lease/lock/hold campaign session drifted"
-            )
+            self._poison("BLR_STAGE_ITERATOR_INCOMPLETE: lease/lock/hold campaign session drifted")
         self._lease_lock_hold_campaign_session = None
         self._poison("BLR_STAGE_ITERATOR_INCOMPLETE: lease/lock/hold campaign aborted")
+
+    def _begin_legacy_campaign(
+        self,
+        summary: SQLiteV1BaselineSourceSummary,
+        identity: BaselineProjectionIdentity,
+    ) -> tuple[int, object]:
+        """Bind the sole legacy campaign after lease/lock/hold completion."""
+
+        if self._legacy_campaign_started:
+            self._poison("BLR_STAGE_ITERATOR_INCOMPLETE: legacy campaign already started")
+        self._legacy_campaign_started = True
+        if (
+            type(summary) is not SQLiteV1BaselineSourceSummary
+            or type(identity) is not BaselineProjectionIdentity
+            or not self._ordered_handoff_completed
+            or not self._stream_record_campaign_completed
+            or not self._checkpoint_campaign_completed
+            or not self._lease_lock_hold_campaign_completed
+            or self._ordered_handoff_reader is not None
+            or self._ordered_projection_identity is not identity
+            or self._cooperative_summary is not summary
+            or identity.entry_count != summary.expected_entry_count
+            or self._state != "open"
+        ):
+            self._poison("BLR_STAGE_ITERATOR_INCOMPLETE: legacy campaign binding is invalid")
+        expected_total_changes = self._allowed_total_changes
+        self._assert_legacy_main_catalog()
+        self._assert_ordered_handoff_fence(expected_total_changes)
+        self.assert_common_counts(summary.counts_by_kind)
+        self.assert_relation_key_coverage()
+        self._assert_ordered_handoff_catalog(expected_total_changes)
+        self._assert_ordered_handoff_fence(expected_total_changes)
+        session = object()
+        self._legacy_campaign_session = session
+        return expected_total_changes, session
+
+    def _assert_legacy_campaign_fence(
+        self,
+        session: object,
+        expected_total_changes: int,
+    ) -> None:
+        if (
+            self._legacy_campaign_session is not session
+            or not self._legacy_campaign_started
+            or self._legacy_campaign_completed
+        ):
+            self._poison("BLR_STAGE_ITERATOR_INCOMPLETE: legacy campaign session is invalid")
+        self._assert_legacy_main_catalog()
+        self._assert_ordered_handoff_fence(expected_total_changes)
+        self._assert_ordered_handoff_catalog(expected_total_changes)
+        self._assert_ordered_handoff_fence(expected_total_changes)
+
+    def _register_legacy_campaign_cursor(
+        self,
+        session: object,
+        cursor: _SQLiteCursorCapability,
+        expected_total_changes: int,
+    ) -> None:
+        self._assert_legacy_campaign_fence(session, expected_total_changes)
+        if type(cursor) is not _SQLiteCursorCapability or self._legacy_campaign_cursor is not None:
+            self._poison("BLR_STAGE_ITERATOR_INCOMPLETE: legacy rule cursor is invalid")
+        self._legacy_campaign_cursor = cursor
+
+    def _finalize_legacy_campaign_cursor(
+        self,
+        session: object,
+        cursor: _SQLiteCursorCapability,
+        expected_total_changes: int,
+        *,
+        preserve_primary: bool,
+    ) -> None:
+        """Clear cursor ownership before its sole close on every exit path."""
+
+        if self._legacy_campaign_cursor is not cursor:
+            self._poison("BLR_STAGE_ITERATOR_INCOMPLETE: legacy rule cursor binding drifted")
+        self._legacy_campaign_cursor = None
+        if preserve_primary:
+            cursor.close()
+            return
+        primary: BaseException | None = None
+        try:
+            self._assert_legacy_campaign_fence(session, expected_total_changes)
+        except BaseException as error:
+            primary = error
+        try:
+            cursor.close()
+        except BaseException as error:
+            if primary is None:
+                primary = error
+        if primary is not None:
+            raise primary
+        self._assert_legacy_campaign_fence(session, expected_total_changes)
+
+    def _complete_legacy_campaign(
+        self,
+        identity: BaselineProjectionIdentity,
+        expected_total_changes: int,
+        session: object,
+    ) -> None:
+        if (
+            not self._legacy_campaign_started
+            or self._legacy_campaign_completed
+            or self._ordered_projection_identity is not identity
+            or self._legacy_campaign_session is not session
+            or self._legacy_campaign_cursor is not None
+        ):
+            self._poison("BLR_STAGE_ITERATOR_INCOMPLETE: legacy campaign completion is invalid")
+        self._assert_legacy_campaign_fence(session, expected_total_changes)
+        summary = self._cooperative_summary
+        if summary is None:
+            self._poison("BLR_STAGE_ITERATOR_INCOMPLETE: legacy source binding is absent")
+        self.assert_common_counts(summary.counts_by_kind)
+        self.assert_relation_key_coverage()
+        self._assert_ordered_handoff_catalog(expected_total_changes)
+        self._assert_ordered_handoff_fence(expected_total_changes)
+        self._legacy_campaign_completed = True
+        self._legacy_campaign_session = None
+
+    def _abort_legacy_campaign(self, session: object | None) -> Never:
+        cursor = self._legacy_campaign_cursor
+        self._legacy_campaign_cursor = None
+        if cursor is not None:
+            with suppress(BaseException):
+                cursor.close()
+        if session is not None and session is not self._legacy_campaign_session:
+            self._poison("BLR_STAGE_ITERATOR_INCOMPLETE: legacy campaign session drifted")
+        self._legacy_campaign_session = None
+        self._poison("BLR_STAGE_ITERATOR_INCOMPLETE: legacy campaign aborted")
+
+    def _read_legacy_main_catalog(self) -> tuple[int, tuple[object, ...]]:
+        schema_cursor: _SQLiteCursorCapability | None = None
+        catalog_cursor: _SQLiteCursorCapability | None = None
+        try:
+            schema_cursor = self._connection.execute(
+                "SELECT schema_version FROM pragma_schema_version"
+            )
+            schema_row = schema_cursor.fetchone()
+            schema_extra = schema_cursor.fetchone()
+            owned_schema_cursor = schema_cursor
+            schema_cursor = None
+            owned_schema_cursor.close()
+            catalog_cursor = self._connection.execute(
+                "SELECT type, name, tbl_name, rootpage, sql FROM main.sqlite_schema "
+                "WHERE type = 'table' AND name = 'ge_cycle_operations'"
+            )
+            catalog_row = catalog_cursor.fetchone()
+            catalog_extra = catalog_cursor.fetchone()
+            owned_catalog_cursor = catalog_cursor
+            catalog_cursor = None
+            owned_catalog_cursor.close()
+        except BaseException:
+            if schema_cursor is not None:
+                with suppress(BaseException):
+                    schema_cursor.close()
+            if catalog_cursor is not None:
+                with suppress(BaseException):
+                    catalog_cursor.close()
+            self._poison("BLR_LEGACY_INVENTORY: main operation catalog read failed")
+        if (
+            schema_row is None
+            or schema_extra is not None
+            or len(schema_row) != 1
+            or type(schema_row[0]) is not int
+            or catalog_extra is not None
+        ):
+            self._poison("BLR_LEGACY_INVENTORY: main operation catalog is invalid")
+        if catalog_row is None:
+            return schema_row[0], ()
+        if (
+            len(catalog_row) != 5
+            or catalog_row[0] != "table"
+            or catalog_row[1] != "ge_cycle_operations"
+            or catalog_row[2] != "ge_cycle_operations"
+            or type(catalog_row[3]) is not int
+            or catalog_row[3] < 1
+            or type(catalog_row[4]) is not str
+        ):
+            self._poison("BLR_LEGACY_INVENTORY: main operation catalog is invalid")
+        return schema_row[0], tuple(catalog_row)
+
+    def _assert_legacy_main_catalog(self) -> None:
+        schema_version, operation_catalog = self._read_legacy_main_catalog()
+        if (
+            schema_version != self._legacy_main_schema_version
+            or operation_catalog != self._legacy_main_operation_catalog
+        ):
+            self._poison("BLR_LEGACY_INVENTORY: main operation catalog drifted")
 
     def _assert_ordered_handoff_fence(self, expected_total_changes: int) -> None:
         self._assert_open_and_bound()
@@ -2001,9 +2160,7 @@ class SQLiteV1BaselineTempStage:
                     if catalog_failure is None:
                         catalog_failure = error
         if catalog_failure is not None:
-            if isinstance(catalog_failure, ValueError) and str(catalog_failure).startswith(
-                "BLR_"
-            ):
+            if isinstance(catalog_failure, ValueError) and str(catalog_failure).startswith("BLR_"):
                 raise catalog_failure
             self._poison("BLR_HANDOFF_CATALOG: TEMP catalog identity query failed")
         if actual_objects != expected_objects:
@@ -2039,9 +2196,7 @@ class SQLiteV1BaselineTempStage:
                     if catalog_failure is None:
                         catalog_failure = error
         if catalog_failure is not None:
-            if isinstance(catalog_failure, ValueError) and str(catalog_failure).startswith(
-                "BLR_"
-            ):
+            if isinstance(catalog_failure, ValueError) and str(catalog_failure).startswith("BLR_"):
                 raise catalog_failure
             self._poison("BLR_HANDOFF_CATALOG: TEMP table shape query failed")
         if actual_shapes != expected_shapes:
@@ -2087,8 +2242,7 @@ class SQLiteV1BaselineTempStage:
             operation = cast(CycleStoreProviderOperation, operation_name)
             decoded = cycle_store_adapter_codec.decode_ledger_result(operation, result_blob)
             if (
-                cycle_store_adapter_codec.encode_ledger_result(operation, decoded)
-                != result_blob
+                cycle_store_adapter_codec.encode_ledger_result(operation, decoded) != result_blob
                 or canonical_sha256(decoded) != result_hash
             ):
                 raise ValueError("legacy result canonical identity drifted")
@@ -2226,10 +2380,20 @@ class SQLiteV1BaselineTempStage:
                 if cursor_close_failure is None:
                     cursor_close_failure = error
                     cursor_cleanup_message = (
-                        "BLR_STAGE_ITERATOR_INCOMPLETE: TEMP lease/lock/hold cursor "
-                        "cleanup failed"
+                        "BLR_STAGE_ITERATOR_INCOMPLETE: TEMP lease/lock/hold cursor cleanup failed"
                     )
             self._lease_lock_hold_campaign_cursor = None
+        legacy_cursor = self._legacy_campaign_cursor
+        if legacy_cursor is not None:
+            self._legacy_campaign_cursor = None
+            try:
+                legacy_cursor.close()
+            except BaseException as error:
+                if cursor_close_failure is None:
+                    cursor_close_failure = error
+                    cursor_cleanup_message = (
+                        "BLR_STAGE_ITERATOR_INCOMPLETE: TEMP legacy cursor cleanup failed"
+                    )
         if (
             not self._connection.in_exclusive_transaction
             or self._connection.transaction_epoch != self._transaction_epoch
@@ -2325,6 +2489,11 @@ class SQLiteV1BaselineTempStage:
             with suppress(BaseException):
                 lease_lock_hold_cursor.close()
             self._lease_lock_hold_campaign_cursor = None
+        legacy_cursor = self._legacy_campaign_cursor
+        if legacy_cursor is not None:
+            self._legacy_campaign_cursor = None
+            with suppress(BaseException):
+                legacy_cursor.close()
         self._state = "poisoned"
         self._cooperative_pending_receipt = None
         self._cooperative_summary = None
