@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import hashlib
-from dataclasses import FrozenInstanceError
+import sqlite3
+from dataclasses import FrozenInstanceError, fields
 from pathlib import Path
 from typing import cast
 
@@ -14,7 +15,7 @@ from graph_engineering.cycle_store_provider import (
     create_cycle_store_record,
     cycle_store_adapter_codec,
 )
-from graph_engineering.models import JsonObject
+from graph_engineering.models import MAX_SAFE_INTEGER, JsonObject
 from graph_engineering.sqlite_cycle_store import (
     _REQUIRED_MIGRATION_POSTCONDITIONS,
     SQLITE_CYCLE_STORE_DESCRIPTOR_HASH,
@@ -25,7 +26,12 @@ from graph_engineering.sqlite_operation_baseline import (
     BaselineAccumulator,
     create_baseline_id,
 )
+from graph_engineering.sqlite_operation_baseline_cursor_invariants import (
+    decode_sqlite_v1_cursor_seal_row,
+)
 from graph_engineering.sqlite_operation_baseline_source import (
+    _MAXIMUM_NON_CURSOR_OBSERVED_SQL,
+    SQLiteV1BaselineClockEvidence,
     SQLiteV1BaselineConnectionOwner,
     _SQLiteCursorCapability,
     capture_sqlite_v1_baseline_source_summary,
@@ -36,6 +42,8 @@ H1 = "1" * 64
 H2 = "2" * 64
 H3 = "3" * 64
 NOW = 1_000
+CLOCK_APPLIED_AT_MS = 1_785_110_405_000
+CLOCK_AHEAD_AT_MS = CLOCK_APPLIED_AT_MS + 60_000
 SOURCE_ASSETS = _load_migration_assets()
 
 
@@ -175,6 +183,128 @@ def add_checkpoint_history(
         ),
     )
     return checkpoint
+
+
+_CURSOR_CLOCK_COLUMNS = """tenant_id, token_hash, kind, principal_hash,
+ authorization_hash, stream_id, checkpoint_scope, request_scope_blob,
+ page_size, next_position, snapshot_tail_sequence,
+ snapshot_tail_record_hash, descriptor_hash, schema_identity_sha256,
+ snapshot_blob, created_at_ms, expires_at_ms, consumed_at_ms"""
+
+
+def _insert_clock_probe_cursor(
+    connection: SQLiteV1BaselineConnectionOwner,
+    *,
+    created_at_ms: object,
+    expires_at_ms: object,
+    consumed_at_ms: object,
+) -> None:
+    request_scope = canonical_bytes(
+        {
+            "contractVersion": "cycle-store-provider/v1alpha1",
+            "pageSize": 16,
+            "streamId": "stream-a",
+        }
+    )
+    snapshot = canonical_bytes(
+        {
+            "exists": False,
+            "recordHash": None,
+            "sequence": -1,
+        }
+    )
+    connection.execute(
+        f"""INSERT INTO ge_cycle_cursors ({_CURSOR_CLOCK_COLUMNS})
+            VALUES ('tenant-a', ?, 'event', ?, ?, 'stream-a', NULL, ?, 16, 0,
+                    -1, NULL, ?, ?, ?, ?, ?, ?)""",
+        (
+            H1,
+            H2,
+            H3,
+            request_scope,
+            SQLITE_CYCLE_STORE_DESCRIPTOR_HASH,
+            SQLITE_CYCLE_STORE_SCHEMA_IDENTITY_SHA256,
+            snapshot,
+            created_at_ms,
+            expires_at_ms,
+            consumed_at_ms,
+        ),
+    ).close()
+
+
+def _seed_clock_probe_database() -> SQLiteV1BaselineConnectionOwner:
+    connection = database()
+    add_checkpoint_history(connection)
+    connection.execute(
+        """INSERT INTO ge_cycle_leases
+           (tenant_id, stream_id, active_lease_id, active_holder_id,
+            active_lease_epoch, active_fencing_token, active_acquired_at_ms,
+            active_expires_at_ms, last_lease_epoch, last_fencing_token,
+            updated_at_ms)
+           VALUES ('tenant-a', 'stream-a', 'lease-a', 'holder-a',
+                   1, 1, ?, ?, 1, 1, ?)""",
+        (NOW, NOW + 1, NOW),
+    ).close()
+    connection.execute(
+        """INSERT INTO ge_cycle_used_lease_ids
+           (tenant_id, stream_id, lease_id, lease_epoch, fencing_token,
+            first_used_at_ms)
+           VALUES ('tenant-a', 'stream-a', 'lease-a', 1, 1, ?)""",
+        (NOW,),
+    ).close()
+    connection.execute(
+        """INSERT INTO ge_cycle_legal_holds
+           (tenant_id, stream_id, hold_id, placed_at_ms)
+           VALUES ('tenant-a', 'stream-a', 'hold-a', ?)""",
+        (NOW,),
+    ).close()
+    connection.execute(
+        """INSERT INTO ge_cycle_used_migration_lock_ids
+           (lock_id, lock_epoch, fencing_token, first_used_at_ms)
+           VALUES ('lock-a', 1, 1, ?)""",
+        (NOW,),
+    ).close()
+    insert_legacy_operation(connection, committed_at_ms=NOW)
+    _insert_clock_probe_cursor(
+        connection,
+        created_at_ms=NOW,
+        expires_at_ms=NOW + 1,
+        consumed_at_ms=NOW,
+    )
+    connection.execute(
+        """UPDATE ge_cycle_schema
+              SET latest_migration_applied_at_ms = ?,
+                  created_at_ms = ?, updated_at_ms = ?""",
+        (CLOCK_APPLIED_AT_MS, CLOCK_APPLIED_AT_MS, CLOCK_APPLIED_AT_MS),
+    ).close()
+    connection.execute(
+        "UPDATE ge_cycle_migrations SET applied_at_ms = ?",
+        (CLOCK_APPLIED_AT_MS,),
+    ).close()
+    for statement in (
+        "UPDATE ge_cycle_streams SET created_at_ms = ?, updated_at_ms = ?",
+        "UPDATE ge_cycle_records SET committed_at_ms = ?",
+        "UPDATE ge_cycle_operations SET committed_at_ms = ?",
+        "UPDATE ge_cycle_checkpoints SET committed_at_ms = ?",
+        "UPDATE ge_cycle_checkpoint_revisions SET recorded_at_ms = ?",
+        "UPDATE ge_cycle_leases SET updated_at_ms = ?",
+        "UPDATE ge_cycle_used_lease_ids SET first_used_at_ms = ?",
+        "UPDATE ge_cycle_legal_holds SET placed_at_ms = ?",
+        "UPDATE ge_cycle_used_migration_lock_ids SET first_used_at_ms = ?",
+        "UPDATE ge_cycle_migration_lock SET updated_at_ms = ?",
+    ):
+        parameter_count = statement.count("?")
+        connection.execute(
+            statement,
+            (CLOCK_APPLIED_AT_MS,) * parameter_count,
+        ).close()
+    connection.execute(
+        """UPDATE ge_cycle_cursors
+              SET created_at_ms = ?, consumed_at_ms = ?, expires_at_ms = ?""",
+        (CLOCK_APPLIED_AT_MS, CLOCK_APPLIED_AT_MS, CLOCK_APPLIED_AT_MS + 1),
+    ).close()
+    connection.commit()
+    return connection
 
 
 def add_scalar_source_families(connection: SQLiteV1BaselineConnectionOwner) -> None:
@@ -377,7 +507,18 @@ def test_captures_frozen_v1_envelope_counts_and_watermark_inside_transaction() -
         assert summary.counts_by_kind["migration-lineage"] == 1
         assert summary.counts_by_kind["migration-lock-current"] == 1
         assert summary.expected_entry_count == 3
-        assert summary.maximum_observed_at_ms == NOW
+        assert summary.clock_evidence == SQLiteV1BaselineClockEvidence(
+            captured_at_ms=NOW,
+            maximum_non_cursor_observed_at_ms=NOW,
+            provider_high_water_at_ms=NOW,
+        )
+        assert [item.name for item in fields(SQLiteV1BaselineClockEvidence)] == [
+            "captured_at_ms",
+            "maximum_non_cursor_observed_at_ms",
+            "provider_high_water_at_ms",
+        ]
+        with pytest.raises(FrozenInstanceError):
+            summary.clock_evidence.provider_high_water_at_ms = NOW + 1  # type: ignore[misc]
     finally:
         connection.close()
 
@@ -1077,6 +1218,12 @@ def test_requires_transaction_and_rejects_capture_or_clock_drift() -> None:
             capture_sqlite_v1_baseline_source_summary(connection, captured_at_ms=NOW)
         connection.rollback()
         connection.execute("BEGIN EXCLUSIVE")
+        for unsafe_capture in (-1, True, 1.5, MAX_SAFE_INTEGER + 1):
+            with pytest.raises(ValueError, match="capture time"):
+                capture_sqlite_v1_baseline_source_summary(
+                    connection,
+                    captured_at_ms=unsafe_capture,  # type: ignore[arg-type]
+                )
         with pytest.raises(ValueError, match="capture predates"):
             capture_sqlite_v1_baseline_source_summary(connection, captured_at_ms=NOW - 1)
         connection.execute(
@@ -1084,6 +1231,239 @@ def test_requires_transaction_and_rejects_capture_or_clock_drift() -> None:
         )
         with pytest.raises(ValueError, match="high-water predates"):
             capture_sqlite_v1_baseline_source_summary(connection, captured_at_ms=NOW + 2)
+    finally:
+        connection.close()
+
+
+def test_cursor_clocks_ahead_of_high_water_are_deferred_to_cursor_campaign() -> None:
+    connection = _seed_clock_probe_database()
+    try:
+        connection.execute("BEGIN EXCLUSIVE")
+        connection.execute(
+            """UPDATE ge_cycle_cursors
+                  SET created_at_ms = ?, consumed_at_ms = ?, expires_at_ms = ?""",
+            (CLOCK_AHEAD_AT_MS, CLOCK_AHEAD_AT_MS + 60_000, CLOCK_AHEAD_AT_MS + 120_000),
+        ).close()
+        cursor = connection.execute(f"SELECT {_CURSOR_CLOCK_COLUMNS} FROM ge_cycle_cursors")
+        try:
+            physical = cursor.fetchone()
+        finally:
+            cursor.close()
+        assert physical is not None
+        decoded = decode_sqlite_v1_cursor_seal_row(physical)
+        assert decoded.carrier.created_at_ms == CLOCK_AHEAD_AT_MS
+        assert decoded.carrier.consumed_at_ms == CLOCK_AHEAD_AT_MS + 60_000
+        assert decoded.descriptor_hash == SQLITE_CYCLE_STORE_DESCRIPTOR_HASH
+        assert decoded.schema_identity_sha256 == SQLITE_CYCLE_STORE_SCHEMA_IDENTITY_SHA256
+        summary = capture_sqlite_v1_baseline_source_summary(
+            connection,
+            captured_at_ms=CLOCK_APPLIED_AT_MS,
+        )
+        assert summary.clock_evidence == SQLiteV1BaselineClockEvidence(
+            captured_at_ms=CLOCK_APPLIED_AT_MS,
+            maximum_non_cursor_observed_at_ms=CLOCK_APPLIED_AT_MS,
+            provider_high_water_at_ms=CLOCK_APPLIED_AT_MS,
+        )
+        assert summary.clock_evidence.captured_at_ms == summary.source_envelope["capturedAtMs"]
+        connection.execute(
+            "UPDATE ge_cycle_streams SET updated_at_ms = ? WHERE stream_id = 'stream-a'",
+            (CLOCK_AHEAD_AT_MS,),
+        ).close()
+        with pytest.raises(ValueError, match="high-water predates non-cursor source state"):
+            capture_sqlite_v1_baseline_source_summary(
+                connection,
+                captured_at_ms=CLOCK_APPLIED_AT_MS,
+            )
+    finally:
+        connection.close()
+
+
+def test_non_cursor_clock_query_has_frozen_cross_runtime_identity() -> None:
+    normalized = " ".join(_MAXIMUM_NON_CURSOR_OBSERVED_SQL.split())
+    assert hashlib.sha256(normalized.encode()).hexdigest() == (
+        "c85e9836aadf613752aa9ba078c00248a4aa5cc3faafda916409b1ddf3201e1b"
+    )
+    assert "ge_cycle_cursors" not in normalized
+    assert "expires_at_ms" not in normalized
+    assert normalized.count("UNION ALL SELECT") == 14
+
+
+def test_every_retained_non_cursor_clock_keeps_source_failure_ownership() -> None:
+    connection = _seed_clock_probe_database()
+    probes = (
+        ("schema created", ("UPDATE ge_cycle_schema SET created_at_ms = ?",)),
+        ("schema updated", ("UPDATE ge_cycle_schema SET updated_at_ms = ?",)),
+        (
+            "migration applied pair",
+            (
+                "UPDATE ge_cycle_schema SET latest_migration_applied_at_ms = ?",
+                "UPDATE ge_cycle_migrations SET applied_at_ms = ?",
+            ),
+        ),
+        ("stream created", ("UPDATE ge_cycle_streams SET created_at_ms = ?",)),
+        ("stream updated", ("UPDATE ge_cycle_streams SET updated_at_ms = ?",)),
+        ("record committed", ("UPDATE ge_cycle_records SET committed_at_ms = ?",)),
+        ("operation committed", ("UPDATE ge_cycle_operations SET committed_at_ms = ?",)),
+        (
+            "checkpoint committed",
+            ("UPDATE ge_cycle_checkpoints SET committed_at_ms = ?",),
+        ),
+        (
+            "checkpoint revision recorded",
+            ("UPDATE ge_cycle_checkpoint_revisions SET recorded_at_ms = ?",),
+        ),
+        ("lease updated", ("UPDATE ge_cycle_leases SET updated_at_ms = ?",)),
+        (
+            "used lease first-use",
+            ("UPDATE ge_cycle_used_lease_ids SET first_used_at_ms = ?",),
+        ),
+        ("legal hold placed", ("UPDATE ge_cycle_legal_holds SET placed_at_ms = ?",)),
+        (
+            "used lock first-use",
+            ("UPDATE ge_cycle_used_migration_lock_ids SET first_used_at_ms = ?",),
+        ),
+    )
+    try:
+        connection.execute("PRAGMA ignore_check_constraints = ON").close()
+        for label, statements in probes:
+            connection.execute("BEGIN EXCLUSIVE").close()
+            for statement in statements:
+                connection.execute(statement, (CLOCK_AHEAD_AT_MS,)).close()
+            with pytest.raises(
+                ValueError,
+                match="high-water predates non-cursor source state",
+            ) as failure:
+                capture_sqlite_v1_baseline_source_summary(
+                    connection,
+                    captured_at_ms=CLOCK_APPLIED_AT_MS,
+                )
+            assert label
+            assert "non-cursor" in str(failure.value)
+            connection.rollback()
+
+        connection.execute("BEGIN EXCLUSIVE").close()
+        connection.execute(
+            "UPDATE ge_cycle_migration_lock SET updated_at_ms = ? WHERE singleton = 1",
+            (CLOCK_AHEAD_AT_MS,),
+        ).close()
+        with pytest.raises(ValueError, match="capture predates provider clock high-water"):
+            capture_sqlite_v1_baseline_source_summary(
+                connection,
+                captured_at_ms=CLOCK_APPLIED_AT_MS,
+            )
+        connection.rollback()
+    finally:
+        connection.close()
+
+
+def test_all_explicitly_excluded_clocks_leave_source_evidence_unchanged() -> None:
+    connection = _seed_clock_probe_database()
+    exact = SQLiteV1BaselineClockEvidence(
+        captured_at_ms=CLOCK_APPLIED_AT_MS,
+        maximum_non_cursor_observed_at_ms=CLOCK_APPLIED_AT_MS,
+        provider_high_water_at_ms=CLOCK_APPLIED_AT_MS,
+    )
+    probes: tuple[tuple[str, str, tuple[object, ...]], ...] = (
+        (
+            "cursor provider clocks and expiry",
+            """UPDATE ge_cycle_cursors
+                  SET created_at_ms = ?, consumed_at_ms = ?, expires_at_ms = ?""",
+            (CLOCK_AHEAD_AT_MS, CLOCK_AHEAD_AT_MS + 1_000, CLOCK_AHEAD_AT_MS + 2_000),
+        ),
+        (
+            "lease future expiry",
+            "UPDATE ge_cycle_leases SET active_expires_at_ms = ?",
+            (CLOCK_AHEAD_AT_MS,),
+        ),
+        (
+            "migration-lock future expiry",
+            "UPDATE ge_cycle_migration_lock SET active_expires_at_ms = ?",
+            (CLOCK_AHEAD_AT_MS,),
+        ),
+        (
+            "checkpoint RFC3339 creation",
+            "UPDATE ge_cycle_checkpoints SET created_at = ?",
+            ("2099-01-01T00:00:00Z",),
+        ),
+        (
+            "checkpoint-revision RFC3339 creation",
+            "UPDATE ge_cycle_checkpoint_revisions SET checkpoint_created_at = ?",
+            ("2099-01-01T00:00:00Z",),
+        ),
+    )
+    try:
+        connection.execute("PRAGMA ignore_check_constraints = ON").close()
+        for label, statement, parameters in probes:
+            connection.execute("BEGIN EXCLUSIVE").close()
+            connection.execute(statement, parameters).close()
+            summary = capture_sqlite_v1_baseline_source_summary(
+                connection,
+                captured_at_ms=CLOCK_APPLIED_AT_MS,
+            )
+            assert summary.clock_evidence == exact, label
+            connection.rollback()
+    finally:
+        connection.close()
+
+
+def test_persisted_clock_evidence_safe_integer_edges_match_typescript() -> None:
+    connection = database()
+    try:
+        connection.execute("BEGIN EXCLUSIVE").close()
+        maximum_capture = capture_sqlite_v1_baseline_source_summary(
+            connection,
+            captured_at_ms=MAX_SAFE_INTEGER,
+        )
+        assert maximum_capture.clock_evidence == SQLiteV1BaselineClockEvidence(
+            captured_at_ms=MAX_SAFE_INTEGER,
+            maximum_non_cursor_observed_at_ms=NOW,
+            provider_high_water_at_ms=NOW,
+        )
+        connection.execute(
+            "UPDATE ge_cycle_migration_lock SET updated_at_ms = ? WHERE singleton = 1",
+            (MAX_SAFE_INTEGER,),
+        ).close()
+        high_water_edge = capture_sqlite_v1_baseline_source_summary(
+            connection,
+            captured_at_ms=MAX_SAFE_INTEGER,
+        )
+        assert high_water_edge.clock_evidence == SQLiteV1BaselineClockEvidence(
+            captured_at_ms=MAX_SAFE_INTEGER,
+            maximum_non_cursor_observed_at_ms=MAX_SAFE_INTEGER,
+            provider_high_water_at_ms=MAX_SAFE_INTEGER,
+        )
+        connection.rollback()
+
+        connection.execute("PRAGMA ignore_check_constraints = ON").close()
+        connection.execute("BEGIN EXCLUSIVE").close()
+        connection.execute(
+            "UPDATE ge_cycle_schema SET updated_at_ms = ? WHERE singleton = 1",
+            (MAX_SAFE_INTEGER + 1,),
+        ).close()
+        with pytest.raises(ValueError, match="maximum non-cursor observed time"):
+            capture_sqlite_v1_baseline_source_summary(
+                connection,
+                captured_at_ms=MAX_SAFE_INTEGER,
+            )
+        connection.rollback()
+
+        connection.execute("BEGIN EXCLUSIVE").close()
+        connection.execute(
+            "UPDATE ge_cycle_migration_lock SET updated_at_ms = -1 WHERE singleton = 1"
+        ).close()
+        with pytest.raises(ValueError, match="provider clock high-water"):
+            capture_sqlite_v1_baseline_source_summary(
+                connection,
+                captured_at_ms=MAX_SAFE_INTEGER,
+            )
+        connection.rollback()
+
+        connection.execute("BEGIN EXCLUSIVE").close()
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                "UPDATE ge_cycle_schema SET updated_at_ms = 1000.5 WHERE singleton = 1"
+            )
+        connection.rollback()
     finally:
         connection.close()
 

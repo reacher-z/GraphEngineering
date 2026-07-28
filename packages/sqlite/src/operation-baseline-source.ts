@@ -52,11 +52,37 @@ const MAX_SAFE_BIGINT = BigInt(Number.MAX_SAFE_INTEGER);
 
 export type SQLiteV1BaselineCounts = Readonly<Record<OperationBaselineEntryKind, number>>;
 
+/**
+ * The frozen, exactly three-key source clock evidence.
+ *
+ * `capturedAtMs` is the caller-supplied capture clock, `providerHighWaterAtMs`
+ * is the migration-lock high-water, and `maximumNonCursorObservedAtMs` is the
+ * maximum provider-owned observation of every source family except
+ * `ge_cycle_cursors`. Capture keeps the two orderings it always enforced: the
+ * high-water may not be behind non-cursor state, and the capture clock may not
+ * be behind the high-water.
+ *
+ * Cursor creation and consumption clocks are deliberately absent. They will be
+ * checked by the future Slice B cursor campaign against this same frozen
+ * high-water, so a cursor-only regression will become one
+ * `BLR_CURSOR_EXPIRY_CONSUMPTION` unit instead of a generic source failure.
+ * This splits diagnostic ownership only: a valid
+ * database still ends up with the same clock ordering as the earlier combined
+ * maximum. Lease and migration-lock future expiry clocks and checkpoint RFC3339
+ * creation timestamps stay outside the observation maximum as before, as does
+ * cursor `expires_at_ms`, which only has to be strictly after its creation.
+ */
+export interface SQLiteV1BaselineClockEvidence {
+  readonly capturedAtMs: number;
+  readonly maximumNonCursorObservedAtMs: number;
+  readonly providerHighWaterAtMs: number;
+}
+
 export interface SQLiteV1BaselineSourceSummary {
   readonly sourceEnvelope: OperationBaselineSourceEnvelope;
   readonly countsByKind: SQLiteV1BaselineCounts;
   readonly expectedEntryCount: number;
-  readonly maximumObservedAtMs: number;
+  readonly clockEvidence: SQLiteV1BaselineClockEvidence;
   /**
    * Streams all twelve v1 source families implemented by this foundation.
    * The iterator is deliberately one-shot and remains transaction-scoped.
@@ -763,7 +789,16 @@ const COUNT_SQL = `SELECT
   (SELECT count(*) FROM ge_cycle_used_migration_lock_ids),
   (SELECT count(*) FROM ge_cycle_operations)`;
 
-const MAXIMUM_OBSERVED_SQL = `SELECT max(observed_at_ms) FROM (
+/**
+ * Every provider-owned observation clock except the two owned by cursors.
+ *
+ * `ge_cycle_cursors.created_at_ms` and its non-null `consumed_at_ms` are the
+ * only branches removed from the earlier combined maximum: the future Slice B
+ * cursor campaign will compare them with the same high-water and own their
+ * diagnostic. Every other
+ * previously covered observation is retained here unchanged.
+ */
+export const SQLITE_V1_BASELINE_MAXIMUM_NON_CURSOR_OBSERVED_SQL = `SELECT max(observed_at_ms) FROM (
   SELECT created_at_ms AS observed_at_ms FROM ge_cycle_schema
   UNION ALL SELECT updated_at_ms FROM ge_cycle_schema
   UNION ALL SELECT latest_migration_applied_at_ms FROM ge_cycle_schema
@@ -777,8 +812,6 @@ const MAXIMUM_OBSERVED_SQL = `SELECT max(observed_at_ms) FROM (
   UNION ALL SELECT updated_at_ms FROM ge_cycle_leases
   UNION ALL SELECT first_used_at_ms FROM ge_cycle_used_lease_ids
   UNION ALL SELECT placed_at_ms FROM ge_cycle_legal_holds
-  UNION ALL SELECT created_at_ms FROM ge_cycle_cursors
-  UNION ALL SELECT consumed_at_ms FROM ge_cycle_cursors WHERE consumed_at_ms IS NOT NULL
   UNION ALL SELECT first_used_at_ms FROM ge_cycle_used_migration_lock_ids
   UNION ALL SELECT updated_at_ms FROM ge_cycle_migration_lock
 )`;
@@ -877,22 +910,31 @@ export function captureSQLiteV1BaselineSourceSummary(
     BASELINE_ENTRY_KINDS.map((kind, index) => [kind, Number(bigintCounts[index])]),
   )) as SQLiteV1BaselineCounts;
 
-  const maximumObservedAtMs = sqliteSafeInteger(
-    sqliteRow(connection.prepare(MAXIMUM_OBSERVED_SQL, OPERATION).get(), 1, OPERATION, "provider clock high-water")[0],
+  const maximumNonCursorObservedAtMs = sqliteSafeInteger(
+    sqliteRow(connection.prepare(SQLITE_V1_BASELINE_MAXIMUM_NON_CURSOR_OBSERVED_SQL, OPERATION).get(), 1, OPERATION, "non-cursor provider clock")[0],
     0,
     Number.MAX_SAFE_INTEGER,
     OPERATION,
-    "provider clock high-water",
+    "non-cursor provider clock",
   );
-  const lockHighWater = sqliteSafeInteger(
+  const providerHighWaterAtMs = sqliteSafeInteger(
     sqliteRow(connection.prepare("SELECT updated_at_ms FROM ge_cycle_migration_lock WHERE singleton = 1", OPERATION).get(), 1, OPERATION, "migration lock high-water")[0],
     0,
     Number.MAX_SAFE_INTEGER,
     OPERATION,
     "migration lock high-water",
   );
-  if (lockHighWater < maximumObservedAtMs) return fail("SQLite v1 provider clock high-water predates source state");
-  if (captured < lockHighWater) return fail("SQLite v1 baseline capture predates provider clock high-water");
+  if (providerHighWaterAtMs < maximumNonCursorObservedAtMs) {
+    return fail("SQLite v1 provider clock high-water predates non-cursor source state");
+  }
+  if (captured < providerHighWaterAtMs) {
+    return fail("SQLite v1 baseline capture predates provider clock high-water");
+  }
+  const clockEvidence: SQLiteV1BaselineClockEvidence = Object.freeze({
+    capturedAtMs: captured,
+    maximumNonCursorObservedAtMs,
+    providerHighWaterAtMs,
+  });
   const transactionGuard: SQLiteV1BaselineTransactionGuard = Object.freeze({
     totalChanges: totalChanges(connection),
     transactionEpoch: connection.transactionEpoch,
@@ -1072,7 +1114,7 @@ export function captureSQLiteV1BaselineSourceSummary(
     sourceEnvelope: frozenEnvelope,
     countsByKind,
     expectedEntryCount: Number(total),
-    maximumObservedAtMs,
+    clockEvidence,
     entries,
     [SQLITE_BASELINE_COOPERATIVE_ENTRIES]: cooperativeEntries,
     [SQLITE_BASELINE_ORDERED_HANDOFF_SOURCE]: orderedHandoffSource,

@@ -10370,3 +10370,171 @@ registered rule execution, lifecycle/fault evidence and controlled pre-rebind
 completion. No database integration, `0002`, permanent v2 write, post-rebind
 verification, 10K/100K performance, crash/replay, release, adoption or star
 claim follows from this checkpoint.
+
+## 31.35 Master-plan completion audit and cursor source-clock A2a checkpoint
+
+### 31.35.1 Completion truth and execution boundary
+
+The 2026-07-28 full-plan audit re-read this plan from beginning to end and
+cross-checked it against the task registry, evidence registry, source tree,
+tests, release artifacts and public repository state. The plan is not complete.
+At the audit snapshot the task registry contains 107 records: 41 completed,
+seven in progress and 59 planned. The evidence scan contains 77 required
+entries, of which 13 are satisfied and 64 remain open. The release checklist
+still contains 178 open leaf requirements. These counts are planning evidence,
+not a substitute for source-and-test verification, and must be recomputed at
+every future completion audit.
+
+The detailed domain matrix is recorded in
+`codex_logs/reviews/MASTER-PLAN-COMPLETION-AUDIT-2026-07-28.md`. Its critical
+path confirms that authoring, compiler, scheduler, pipeline integration,
+router/barrier runtime execution, durable production backends, native cycles,
+pattern catalog, CLI/MCP breadth, provider adapters, budget enforcement,
+observability, Explorer, course material, release engineering and growth work
+all retain open obligations. The repository must not be described as complete,
+production-ready, stable, 5K/6K-star, or more popular than Loop Engineering
+until the matching objective evidence exists.
+
+### 31.35.2 Accepted A2a source-clock ownership
+
+Cursor Slice A2 is now split into a narrow accepted A2a checkpoint and the
+still-open A2b receipt checkpoint. A2a replaces the ambiguous combined maximum
+clock with a frozen three-clock source envelope in both runtimes:
+
+1. capture clock (`capturedAtMs` / `captured_at_ms`);
+2. maximum non-cursor observed clock
+   (`maximumNonCursorObservedAtMs` /
+   `maximum_non_cursor_observed_at_ms`);
+3. provider high-water clock (`providerHighWaterAtMs` /
+   `provider_high_water_at_ms`).
+
+The SQL maximum deliberately excludes cursor `created_at_ms`, cursor
+`consumed_at_ms`, cursor expiry, lease expiry, migration-lock expiry and
+checkpoint RFC3339 current/revision timestamps. It retains the fifteen
+non-cursor clock-bearing branches needed to establish the source boundary.
+Both runtimes enforce provider high-water greater than or equal to the
+non-cursor maximum and capture clock greater than or equal to provider
+high-water. The normalized shared SQL is frozen at SHA-256
+`c85e9836aadf613752aa9ba078c00248a4aa5cc3faafda916409b1ddf3201e1b`.
+
+Claude Code 2.1.220 with Opus authored the initial TypeScript A2a change and
+adversarial suite in an isolated worktree. The integration lane reviewed and
+ported the change through `apply_patch`, independently implemented the Python
+counterpart and expanded cross-runtime evidence. This use of Claude Code does
+not transfer release authority: every generated change remains subject to the
+same local tests, independent review and scoped-diff controls as human-authored
+code.
+
+The accepted tests prove the same shared clock fixture in both runtimes, all
+retained branches, all excluded cursor/expiry/timestamp branches, persisted
+safe-integer boundaries, negative and fractional rejection, source-envelope
+capture equality and exact SQL parity. The handoff clone follows the new exact
+shape. Final focused evidence is TypeScript 13/13 and Python source/handoff/
+cursor 106/106. Full evidence is TypeScript SQLite 17 files / 412 tests and
+Python 1,679/1,679, with TypeScript typecheck/lint/build and Python Ruff,
+format/strict MyPy green. The final independent TypeScript, Python and
+cross-runtime reviews each report HIGH 0 / MEDIUM 0 / LOW 0.
+
+### 31.35.3 A2b pre-rebind ownership receipt — next blocking implementation
+
+A2a does not issue a pre-rebind receipt and therefore does not complete A2.
+A2b must be implemented in this exact order, with TypeScript and Python kept in
+lockstep and no public package export until all gates pass:
+
+1. Freeze an exact projection reference that commits to the immutable cursor
+   projection, physical column order, normalized query identity and the A1 seal
+   algorithm/version.
+2. Define a capture-session identity with explicit tenant, source-stage,
+   campaign and connection ownership. It must be opaque to downstream callers,
+   immutable after construction and unsuitable for reconstruction from public
+   scalar fields.
+3. Bind source descriptor hash, schema identity hash, exact projection
+   reference, A1 cursor count/root, capture clock, maximum non-cursor observed
+   clock and provider high-water into one substitution-resistant receipt.
+4. Enforce one successful issuance. A failed candidate must not consume the
+   issuer; a successful issuance must make every later call fail closed.
+5. Reject mixed source stages, sessions, campaigns, descriptors, schemas,
+   projections, high-waters, cursor roots or counts before producing any
+   receipt-shaped value.
+6. Use domain-separated canonical framing with explicit byte lengths and
+   frozen key order. Do not depend on object insertion order, locale comparison,
+   platform integer width or implementation-specific JSON formatting.
+7. Add shared literal fixtures and frozen cross-runtime receipt roots for empty,
+   one-row, multi-row and hostile-boundary cases. Each runtime must recompute,
+   not import, the other runtime's expected value.
+8. Add mutation tests for every contribution and pairwise substitution tests
+   for session, stage, campaign, projection and provider high-water identities.
+9. Prove failed issue attempts are atomic, post-success reuse is rejected and
+   mutable input buffers cannot alter the receipt after issuance.
+10. Preserve the private-module boundary. No database command, migration,
+    cursor update, permanent state write or registry implementation claim is
+    permitted in A2b.
+
+A2b acceptance requires focused suites, full TypeScript/Python suites,
+typecheck/lint/build, Ruff/format/strict MyPy, normalized SQL and framing parity,
+shared-root recomputation, diff checks and a fresh independent severity-zero
+review. Only then may the A2 receipt become the sole input to Slice B.
+
+### 31.35.4 Slice B cursor campaign — implementation queue after A2b
+
+Slice B remains a database-integrated campaign and must not be simulated with
+in-memory helpers. The implementation queue is:
+
+1. open the exact owned SQLite connection and verify the A2b session/source
+   receipt before creating any TEMP object;
+2. establish a bounded TEMP cursor campaign keyed by the opaque receipt,
+   source descriptor, schema identity and provider high-water;
+3. stream the exact cursor projection without retaining request/snapshot BLOBs,
+   with deterministic token-hash then tenant-byte ordering;
+4. execute every registered cursor rule against the campaign with bounded
+   `diagnosticLimit + 1` reads, exact truncation behavior and cursor close
+   precedence;
+5. keep cursor creation and consumption clocks out of the provider source
+   maximum while separately proving their lifecycle order and capture-window
+   ownership;
+6. re-prove A1 count/root and A2b ownership immediately before controlled
+   rebinding; reject every mismatch before the first permanent write;
+7. perform rebinding only inside the specified transaction/lock boundary and
+   require exact affected-row counts for every mutation;
+8. inject faults before TEMP creation, during scan, after scan, before first
+   update, between updates and before commit; prove rollback and retry semantics
+   for each point;
+9. prove cancellation, busy/locked, statement failure, malformed-row and
+   connection-loss cleanup without leaked cursor, statement, TEMP object or
+   transaction state;
+10. add 10K and 100K cursor campaigns with RSS, throughput and query-plan
+    evidence, then crash/replay verification and a clean-repository rerun;
+11. keep migration `0002`, v2 persistence and post-rebind verification as
+    separately reviewed checkpoints rather than silently folding them into the
+    first integration change;
+12. change the rule registry's implementation claim only after every mandatory
+    rule and lifecycle gate is evidenced in both runtimes.
+
+### 31.35.5 Parallel product lane after the cursor blocker
+
+The next product-critical item whose declared dependencies are already closed
+is `D6-ROUTER-BARRIER-023`. It should proceed in parallel with A2b when safe
+worktree isolation is available. The lane must convert existing pure router and
+barrier evaluators into compiler/runtime-integrated graph semantics, including
+typed branch outputs, skipped-node terminal state, deterministic join policy,
+timeout and partial-input behavior, replay/checkpoint compatibility, trace
+events, CLI visibility and cross-runtime conformance. It is not complete merely
+because a standalone evaluator test passes.
+
+After D6, the scheduler/pipeline lane must remove unnecessary global barriers,
+add bounded streaming backpressure and demonstrate that independent items can
+occupy different pipeline stages concurrently. The durable lane must then add
+a real production backend and recovery evidence. These lanes must continually
+update the audit matrix, but may mark a requirement closed only with a source,
+test, documentation or release artifact that directly proves it.
+
+### 31.35.6 Commit and reporting discipline
+
+Every milestone commit must stage only the intended paths, pass `git diff
+--check`, record exact gate counts and use `reacher-z <mtrxcop@gmail.com>` as
+both author and committer with no co-author trailer. Push success must be
+verified by comparing local HEAD, upstream and remote branch OIDs. Development
+logs must name Claude Code and sub-agent contributions, review findings,
+corrections, failed experiments and explicit nonclaims. Star targets remain a
+growth objective, never an engineering acceptance result; no exact star count
+is promised because adoption is external and cannot be guaranteed by code.

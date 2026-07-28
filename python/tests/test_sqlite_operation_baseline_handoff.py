@@ -134,8 +134,7 @@ class _CursorProxy:
             if should_inject:
                 self.injected = True
                 self.connection.execute(
-                    "UPDATE temp.ge_blr_stage SET state_blob = state_blob "
-                    "WHERE kind_rank = 0"
+                    "UPDATE temp.ge_blr_stage SET state_blob = state_blob WHERE kind_rank = 0"
                 ).close()
         return row
 
@@ -192,9 +191,7 @@ def test_pristine_three_entry_projection_matches_shared_cross_runtime_golden() -
     try:
         assert _project_ordered_sqlite_v1_baseline_temp_stage(summary, stage) == (
             BaselineProjectionIdentity(
-                baseline_id=(
-                    "v2-57ddf5826fc8d0a7b30a8dbcc961a66953e1604d73e2e43b8e4d229c0b9f3612"
-                ),
+                baseline_id=("v2-57ddf5826fc8d0a7b30a8dbcc961a66953e1604d73e2e43b8e4d229c0b9f3612"),
                 entry_count=3,
                 legacy_operation_count=0,
                 first_entry_hash=(
@@ -439,7 +436,7 @@ def test_finish_rejects_exact_shape_summary_replacement() -> None:
             summary._source_envelope_bytes,
             summary.counts_by_kind,
             summary.expected_entry_count,
-            summary.maximum_observed_at_ms,
+            summary.clock_evidence,
             summary._connection,
             summary._latest_migration_applied_at_ms,
             summary._source_total_changes,
@@ -483,8 +480,7 @@ def test_dispose_surfaces_active_reader_close_failure_after_catalog_cleanup(
             stage.dispose()
         assert proxies[0].closed
         cursor = connection.execute(
-            "SELECT count(*) FROM temp.sqlite_schema "
-            "WHERE substr(lower(name), 1, 7) = 'ge_blr_'"
+            "SELECT count(*) FROM temp.sqlite_schema WHERE substr(lower(name), 1, 7) = 'ge_blr_'"
         )
         try:
             assert cursor.fetchone() == (0,)

@@ -317,6 +317,15 @@ class SQLiteV1BaselineConnectionOwner:
 
 
 @dataclass(frozen=True, slots=True)
+class SQLiteV1BaselineClockEvidence:
+    """Frozen source-owned clock evidence before cursor diagnostics run."""
+
+    captured_at_ms: int
+    maximum_non_cursor_observed_at_ms: int
+    provider_high_water_at_ms: int
+
+
+@dataclass(frozen=True, slots=True)
 class SQLiteV1BaselineSourceSummary:
     """Frozen source summary plus the first bounded family iterator.
 
@@ -328,7 +337,7 @@ class SQLiteV1BaselineSourceSummary:
     _source_envelope_bytes: bytes = field(repr=False)
     counts_by_kind: Mapping[BaselineEntryKind, int]
     expected_entry_count: int
-    maximum_observed_at_ms: int
+    clock_evidence: SQLiteV1BaselineClockEvidence
     _connection: SQLiteV1BaselineConnectionOwner = field(repr=False)
     _latest_migration_applied_at_ms: int = field(repr=False)
     _source_total_changes: int = field(repr=False)
@@ -658,7 +667,7 @@ _TABLES: tuple[tuple[BaselineEntryKind, str], ...] = (
 
 _SOURCE_ASSETS = _load_migration_assets()
 
-_MAXIMUM_OBSERVED_SQL = """SELECT max(observed_at_ms) FROM (
+_MAXIMUM_NON_CURSOR_OBSERVED_SQL = """SELECT max(observed_at_ms) FROM (
  SELECT created_at_ms AS observed_at_ms FROM ge_cycle_schema
  UNION ALL SELECT updated_at_ms FROM ge_cycle_schema
  UNION ALL SELECT latest_migration_applied_at_ms FROM ge_cycle_schema
@@ -672,8 +681,6 @@ _MAXIMUM_OBSERVED_SQL = """SELECT max(observed_at_ms) FROM (
  UNION ALL SELECT updated_at_ms FROM ge_cycle_leases
  UNION ALL SELECT first_used_at_ms FROM ge_cycle_used_lease_ids
  UNION ALL SELECT placed_at_ms FROM ge_cycle_legal_holds
- UNION ALL SELECT created_at_ms FROM ge_cycle_cursors
- UNION ALL SELECT consumed_at_ms FROM ge_cycle_cursors WHERE consumed_at_ms IS NOT NULL
  UNION ALL SELECT first_used_at_ms FROM ge_cycle_used_migration_lock_ids
  UNION ALL SELECT updated_at_ms FROM ge_cycle_migration_lock
 )"""
@@ -790,6 +797,7 @@ def _identity_families() -> tuple[
         ),
         ("legacy-operation", _LEGACY_OPERATION_ENTRY_SQL, _legacy_operation_entry, 1),
     )
+
 
 _LEGACY_OPERATION_NAMES = frozenset(
     {
@@ -1313,23 +1321,28 @@ def capture_sqlite_v1_baseline_source_summary(
     if tuple(counts) != BASELINE_ENTRY_KINDS:
         raise AssertionError("baseline source family order drifted")
 
-    maximum_row = connection.execute(_MAXIMUM_OBSERVED_SQL).fetchone()
+    maximum_row = connection.execute(_MAXIMUM_NON_CURSOR_OBSERVED_SQL).fetchone()
     lock_row = connection.execute(
         "SELECT updated_at_ms FROM ge_cycle_migration_lock WHERE singleton = 1"
     ).fetchone()
     if maximum_row is None or lock_row is None:
         raise ValueError("SQLite v1 baseline provider clock is missing")
-    maximum = _integer(maximum_row[0], "maximum observed time")
+    maximum_non_cursor = _integer(maximum_row[0], "maximum non-cursor observed time")
     lock_high_water = _integer(lock_row[0], "provider clock high-water")
-    if lock_high_water < maximum:
-        raise ValueError("SQLite v1 provider clock high-water predates source state")
+    if lock_high_water < maximum_non_cursor:
+        raise ValueError("SQLite v1 provider clock high-water predates non-cursor source state")
     if captured < lock_high_water:
         raise ValueError("SQLite v1 baseline capture predates provider clock high-water")
+    clock_evidence = SQLiteV1BaselineClockEvidence(
+        captured_at_ms=captured,
+        maximum_non_cursor_observed_at_ms=maximum_non_cursor,
+        provider_high_water_at_ms=lock_high_water,
+    )
     summary = SQLiteV1BaselineSourceSummary(
         canonical_bytes(envelope),
         MappingProxyType(counts),
         total,
-        maximum,
+        clock_evidence,
         connection,
         latest_migration_applied_at_ms,
         connection.total_changes,
