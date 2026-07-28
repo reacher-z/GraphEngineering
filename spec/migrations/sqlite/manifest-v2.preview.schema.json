@@ -1,0 +1,267 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/sqlite-migration-manifest.schema.json",
+  "title": "Graph Engineering SQLite migration manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "formatVersion",
+    "engine",
+    "applicationId",
+    "latestVersion",
+    "hashAlgorithm",
+    "byteEncoding",
+    "schema",
+    "migrations",
+    "fixtures",
+    "requiredArtifactCopies",
+    "sqlPolicy"
+  ],
+  "properties": {
+    "$schema": { "type": "string", "const": "./manifest-v2.preview.schema.json" },
+    "formatVersion": { "const": 1 },
+    "engine": { "const": "sqlite" },
+    "applicationId": { "const": 1195724359 },
+    "latestVersion": { "const": 2 },
+    "hashAlgorithm": { "const": "sha256" },
+    "byteEncoding": { "const": "utf-8-lf" },
+    "schema": { "$ref": "#/$defs/schemaAsset" },
+    "migrations": {
+      "type": "array",
+      "prefixItems": [
+        { "$ref": "#/$defs/migrationV0V1" },
+        { "$ref": "#/$defs/migrationV1V2" }
+      ],
+      "items": false,
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "fixtures": {
+      "type": "array",
+      "prefixItems": [
+        { "$ref": "#/$defs/alphaFixture" },
+        { "$ref": "#/$defs/preReplayV1Fixture" }
+      ],
+      "items": false,
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "requiredArtifactCopies": {
+      "type": "array",
+      "prefixItems": [
+        { "const": "npm:@graph-engineering/sqlite/migrations" },
+        { "const": "python:graph_engineering/_sqlite_migrations" }
+      ],
+      "items": false,
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "sqlPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "transactionOwner",
+        "migrationTransaction",
+        "callerControlledSql",
+        "extensions",
+        "attach",
+        "writableSchema",
+        "downgrade"
+      ],
+      "properties": {
+        "transactionOwner": { "const": "adapter" },
+        "migrationTransaction": { "const": "begin-exclusive" },
+        "callerControlledSql": { "const": false },
+        "extensions": { "const": false },
+        "attach": { "const": false },
+        "writableSchema": { "const": false },
+        "downgrade": { "const": "rebuild-from-verified-backup-only" }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "path": {
+      "type": "string",
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9][A-Za-z0-9._/-]{0,255}$"
+    },
+    "schemaAsset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "bootstrapId",
+        "sqlPath",
+        "sqlSha256",
+        "identityPath",
+        "identityDocumentSha256",
+        "schemaIdentitySha256",
+        "reversibility"
+      ],
+      "properties": {
+        "version": { "const": 2 },
+        "bootstrapId": { "const": "fresh-v2-operation-replay" },
+        "sqlPath": { "const": "schema-v2.sql" },
+        "sqlSha256": { "$ref": "#/$defs/sha256" },
+        "identityPath": { "const": "schema-v2.identity.json" },
+        "identityDocumentSha256": { "$ref": "#/$defs/sha256" },
+        "schemaIdentitySha256": { "$ref": "#/$defs/sha256" },
+        "reversibility": { "const": "rebuild-from-verified-backup-only" }
+      }
+    },
+    "migrationV0V1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "fromVersion",
+        "toVersion",
+        "sqlPath",
+        "sqlSha256",
+        "targetSchemaIdentitySha256",
+        "reversibility",
+        "transactionMode",
+        "finalization",
+        "requiredPostconditions"
+      ],
+      "properties": {
+        "id": { "const": "alpha-v0-to-v1" },
+        "fromVersion": { "const": 0 },
+        "toVersion": { "const": 1 },
+        "sqlPath": { "const": "0001-alpha-v0-to-v1.sql" },
+        "sqlSha256": { "$ref": "#/$defs/sha256" },
+        "targetSchemaIdentitySha256": { "$ref": "#/$defs/sha256" },
+        "reversibility": { "const": "rebuild-from-verified-backup-only" },
+        "transactionMode": { "const": "caller-begin-exclusive" },
+        "finalization": { "const": "manifest-bound-prepared-statements-before-commit" },
+        "requiredPostconditions": {
+          "type": "array",
+          "prefixItems": [
+            { "const": "application-id-matches" },
+            { "const": "user-version-is-1" },
+            { "const": "schema-singleton-is-manifest-bound" },
+            { "const": "migration-ledger-row-is-manifest-bound" },
+            { "const": "all-canonical-tables-are-strict" },
+            { "const": "logical-schema-identity-matches-fresh-v1" },
+            { "const": "foreign-key-check-is-empty" },
+            { "const": "integrity-check-is-ok" },
+            { "const": "alpha-row-counts-are-preserved" },
+            { "const": "stream-heads-match-record-tails" },
+            { "const": "canonical-blobs-and-hashes-are-preserved" },
+            { "const": "checkpoint-revisions-are-seeded" },
+            { "const": "lease-and-migration-fences-are-monotonic" },
+            { "const": "no-v0-or-placeholder-state-remains" }
+          ],
+          "items": false,
+          "minItems": 14,
+          "maxItems": 14
+        }
+      }
+    },
+    "migrationV1V2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "fromVersion",
+        "toVersion",
+        "sqlPath",
+        "sqlSha256",
+        "targetSchemaIdentitySha256",
+        "reversibility",
+        "transactionMode",
+        "finalization",
+        "requiredPostconditions"
+      ],
+      "properties": {
+        "id": { "const": "v1-to-v2-operation-replay" },
+        "fromVersion": { "const": 1 },
+        "toVersion": { "const": 2 },
+        "sqlPath": { "const": "0002-v1-to-v2-operation-replay.sql" },
+        "sqlSha256": { "$ref": "#/$defs/sha256" },
+        "targetSchemaIdentitySha256": { "$ref": "#/$defs/sha256" },
+        "reversibility": { "const": "rebuild-from-verified-backup-only" },
+        "transactionMode": { "const": "caller-begin-exclusive" },
+        "finalization": { "const": "manifest-bound-prepared-statements-before-commit" },
+        "requiredPostconditions": {
+          "type": "array",
+          "prefixItems": [
+            { "const": "application-id-matches" },
+            { "const": "user-version-is-2" },
+            { "const": "schema-singleton-is-manifest-bound" },
+            { "const": "migration-ledger-row-is-manifest-bound" },
+            { "const": "all-canonical-tables-are-strict" },
+            { "const": "logical-schema-identity-matches-fresh-v2" },
+            { "const": "foreign-key-check-is-empty" },
+            { "const": "integrity-check-is-ok" },
+            { "const": "source-v1-state-was-semantically-valid" },
+            { "const": "legacy-operation-rows-are-format-1" },
+            { "const": "baseline-singleton-is-present" },
+            { "const": "baseline-header-is-manifest-bound" },
+            { "const": "baseline-entries-are-canonical-contiguous-and-hash-chained" },
+            { "const": "baseline-root-and-projection-match" },
+            { "const": "legacy-operation-count-and-inventory-match" },
+            { "const": "baseline-covers-authoritative-source-state" },
+            { "const": "operation-sequence-singleton-is-zero" },
+            { "const": "no-format-2-row-exists-at-publication" },
+            { "const": "operation-ledger-sequence-shape-is-valid" },
+            { "const": "new-operation-indexes-are-present" },
+            { "const": "cursor-schema-and-descriptor-bindings-match-v2" },
+            { "const": "migration-and-clock-watermarks-are-monotonic" },
+            { "const": "no-v1-temporary-or-placeholder-state-remains" }
+          ],
+          "items": false,
+          "minItems": 23,
+          "maxItems": 23
+        }
+      }
+    },
+    "alphaFixture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "schemaVersion",
+        "sqlPath",
+        "sqlSha256",
+        "expectationPath",
+        "expectationSha256",
+        "fixtureIdentitySha256"
+      ],
+      "properties": {
+        "id": { "const": "alpha-v0-representative" },
+        "schemaVersion": { "const": 0 },
+        "sqlPath": { "const": "fixtures/alpha-v0.sql" },
+        "sqlSha256": { "$ref": "#/$defs/sha256" },
+        "expectationPath": { "const": "fixtures/alpha-v0.expected.json" },
+        "expectationSha256": { "$ref": "#/$defs/sha256" },
+        "fixtureIdentitySha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "preReplayV1Fixture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "schemaVersion",
+        "sqlPath",
+        "sqlSha256",
+        "expectationPath",
+        "expectationSha256",
+        "fixtureIdentitySha256"
+      ],
+      "properties": {
+        "id": { "const": "pre-replay-v1-empty" },
+        "schemaVersion": { "const": 1 },
+        "sqlPath": { "const": "fixtures/pre-replay-v1-empty.sql" },
+        "sqlSha256": { "$ref": "#/$defs/sha256" },
+        "expectationPath": { "const": "fixtures/pre-replay-v1-empty.expected.json" },
+        "expectationSha256": { "$ref": "#/$defs/sha256" },
+        "fixtureIdentitySha256": { "$ref": "#/$defs/sha256" }
+      }
+    }
+  }
+}

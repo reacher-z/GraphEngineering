@@ -1,0 +1,28 @@
+{
+  "formatVersion": 1,
+  "applicationId": 1195724359,
+  "userVersion": 1,
+  "schemaIdentitySha256": "f3d961d4d96e93a7fab13a91b374c27ff877a93332ff7ed7426f1fff982baff4",
+  "providerDescriptorHash": "4071e4e5e2cddad01af4f87e4df45fa55bbc4e238674174ce40eca765d2c03fe",
+  "lineage": {
+    "version": 1,
+    "previousVersion": 0,
+    "migrationId": "fresh-v1-baseline",
+    "sqlSha256": "ddf524d8d0fcdde2a862c168c90698538b9197fa24216f0f249b6ea789c48e1c"
+  },
+  "counts": {
+    "ge_cycle_checkpoint_revisions": 0,
+    "ge_cycle_checkpoints": 0,
+    "ge_cycle_cursors": 0,
+    "ge_cycle_leases": 0,
+    "ge_cycle_legal_holds": 0,
+    "ge_cycle_migration_lock": 1,
+    "ge_cycle_migrations": 1,
+    "ge_cycle_operations": 0,
+    "ge_cycle_records": 0,
+    "ge_cycle_schema": 1,
+    "ge_cycle_streams": 0,
+    "ge_cycle_used_lease_ids": 0,
+    "ge_cycle_used_migration_lock_ids": 0
+  }
+}

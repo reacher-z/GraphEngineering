@@ -7398,3 +7398,189 @@ This remediation is complete only when:
 
 Until every item is proven, D7-S02 may be described only as active
 implementation/remediation work, never complete or release-ready.
+
+## 31.32 D7-S02 schema-v2 protocol-freeze execution checkpoint and next-build queue
+
+This section was appended on 2026-07-27. It does not replace, weaken, edit, or
+mark complete any preceding requirement. Section 31.31 remains the controlling
+exit contract. This checkpoint records a reviewable foundation and the exact
+remaining dependency order so implementation can continue without TypeScript
+and Python inventing incompatible baseline bytes.
+
+### 31.32.1 Effective foundation now implemented
+
+The canonical lane now contains a schema-v2 protocol foundation with these
+concrete properties:
+
+- schema-v1.sql, schema-v1.identity.json, and 0001-alpha-v0-to-v1.sql retain
+  their exact predecessor SHA-256 values;
+- schema-v2.sql defines 16 strict canonical tables and 18 explicit indexes;
+- ge_cycle_operations has two disjoint legacy/replayable forms, a bounded
+  canonical request carrier, and global replay sequence access paths;
+- ge_cycle_operation_baselines, ge_cycle_operation_baseline_entries, and
+  ge_cycle_operation_sequence have closed carriers, safe-integer limits,
+  immutable identity structure, and deferred in-transaction ownership links;
+- 0002-v1-to-v2-operation-replay.sql rebuilds the version-constrained schema
+  singleton and operation table without guessing legacy request bytes;
+- fresh-v2, v1-to-v2, and v0-to-v1-to-v2 executions produce the same explicit
+  normalized SQLite catalog signature;
+- a frozen empty-but-published v1 source fixture exercises the second edge;
+- schema-v2.identity.json freezes table field order, index inventory, BLOB
+  inventory, and global/tenant ownership;
+- sqlite-operation-ledger-v2.md freezes request bounds, hash domains, fixed
+  roots, baseline ID, policy bytes, the twelve entry key/state shapes, legacy
+  retry language, cursor rebinding, and publication behavior;
+- manifest-v2.preview.json and its closed schema freeze the intended two-edge,
+  two-fixture graph without switching the active runtime manifest early; and
+- validate-v2-preview.mjs executes both migration edges, asserts catalog
+  equivalence and rollback, validates every asset hash, and rejects drift in
+  both immutable predecessors and new self-reporting assets.
+
+The active manifest deliberately remains version 1 until the runtime lanes can
+consume version 2 atomically. A manifest-only switch would make existing
+TypeScript and Python packages reject their own assets and is therefore not a
+valid progress shortcut. The preview is a frozen integration input, not a
+runtime release claim.
+
+### 31.32.2 Frozen v2 identities at this checkpoint
+
+These identities are integration inputs. If a reviewed protocol correction
+changes one, all dependent previews, tests, mirrors, and evidence MUST move in
+one explicit repair commit rather than silently normalizing drift:
+
+- schema-v2.sql SHA-256:
+  5a0923462f7fa5eb1627955292aa3657253258fc5832e365257dc913740866a5;
+- schema-v2.identity.json document SHA-256:
+  c6a2df3422eadf60a814c55f9c266dffde52e9da021cc554ea19a6785669cec2;
+- schema-v2 logical identity SHA-256:
+  9fcd96c331999ffb0aca0d9d63ad2b9af073db80012471108c5437a77116f634;
+- 0002-v1-to-v2-operation-replay.sql SHA-256:
+  1bf03d68eed45366bc7b34ccc329faa51ea389362db59f6a4307b3033d37a96d;
+- pre-replay-v1-empty.sql SHA-256:
+  89c616b843dd4b1967cb57e0e823edb3bb6c9dbfc6e0ff19874a6202415150b2;
+- pre-replay-v1-empty.expected.json SHA-256:
+  6f546e51fca95e7dd10c88def43839935152bc3a28b2691643811ee291d7bdea;
+- pre-replay fixture identity:
+  4861d354e55357a2a28490036fa0c45f347e6f9ffdc05150bd802e5ce64644d7;
+- baseline genesis hash:
+  5311dba7ae8b844fc3efccd55dd90c3f78e02a7f7e222d7a0a513fd1aff9ec96;
+  and
+- baseline empty root:
+  66a081bbc7369b674fa093cb2e3e1d269a1eb506698e24dfc2899074bf06b82a.
+
+### 31.32.3 Immediate TypeScript implementation queue
+
+Execute this queue in order while keeping the active manifest on v1 until the
+atomic-switch item:
+
+1. Add baseline protocol constants and closed key/state encoders in one new
+   SQLite-owned module. Unit-test all twelve kinds before database writes.
+2. Add exact vector fixtures containing canonical key bytes, state bytes,
+   predecessor hashes, entry hashes, first/final roots, policy bytes, baseline
+   ID, and projection SHA. Python consumes these vectors unchanged.
+3. Implement a bounded source-v1 enumerator. Each query names columns, orders
+   by the canonical key, and emits one entry at a time. It validates every
+   authoritative BLOB before emitting an identity-only projection.
+4. Split current validateV1 into a frozen source validator and a new v2
+   validator. The v1 trust anchors remain compiled constants after the switch.
+5. Add v2 assets to the checksum loader without removing the v1 identity and
+   0001 anchors. Verify both ordered migration edges and both fixture domains.
+6. Implement direct fresh-v2 bootstrap using the specified empty canonical v1
+   source identity, final baseline, sequence zero, migration-lock singleton,
+   and one version-2 fresh lineage row.
+7. Implement v1-to-v2 inside one exclusive transaction: source semantic audit,
+   0002 execution, streaming entries, final header, cursor identity rebind,
+   sequence zero, lineage append, metadata publication, catalog/postcondition
+   validation, and one commit.
+8. Refactor v0 open so 0001 and 0002 execute under one managed upgrade session
+   with no externally accepted half-baseline.
+9. Change the SQLite provider descriptor to schema version 2 and retain the
+   old descriptor hash only for validating/rebinding a v1 source.
+10. Extend mutation replay lookup to validate row format, request bytes/hash,
+    primary-key context, result bytes/hash, sequence, and time before deciding
+    exact retry or idempotency conflict.
+11. Add the sequence singleton exact CAS after mutation decisions. Overflow,
+    CAS loss, BUSY rollback, and every pre-commit failure retain the old
+    high-water and physical state.
+12. Store format-2 request bytes and commit sequence for all nine mutation
+    names. Exact retry never updates the singleton.
+13. Add baseline/sequence/common-row semantic audits before operation-specific
+    deterministic replay. Unknown format maps to unsupported version; invalid
+    stored bytes map to corruption without carrier leakage.
+14. Implement nine pure transition functions, then exact bidirectional
+    physical reconciliation. No transition reads a clock, invokes
+    authorization, or performs I/O.
+15. Extend backup identity and restore publication with baseline root/count,
+    request rows, sequence high-water, and replay/reconciliation digest.
+16. Only after focused fresh/migration/mutation/audit/backup tests are green,
+    replace the active manifest with the reviewed v2 preview, vendor all assets
+    into the npm package, update release hashes, and rerun the previous v1 gate
+    as an immutable regression.
+
+### 31.32.4 Immediate Python implementation queue
+
+Python starts from the same byte vectors and follows the same dependency
+order. It MUST NOT translate names, choose a different baseline ID, omit nulls,
+or normalize runtime evidence into semantic hashes.
+
+1. Mirror public protocol constants and implement the twelve key/state encoders
+   against the shared vector fixture.
+2. Keep the owner-worker connection model; baseline iteration, 0002, cursor
+   rebinding, header/sequence publication, and metadata finalization all run in
+   the single exclusive owner task.
+3. Preserve frozen v1 source constants alongside new v2 constants. Asset
+   loading validates schema-v1, identity-v1, 0001, schema-v2, identity-v2, and
+   0002 independently.
+4. Implement fresh, v0, v1, v2, future, and foreign-application open branches
+   with the same accepted lineage shapes as TypeScript.
+5. Encode request bytes once outside the synchronous transaction block from
+   the already detached request. Compare stored bytes on replay and allocate
+   the sequence by exact singleton CAS only for a new successful mutation.
+6. Preserve cancellation ambiguity semantics: a cancelled caller may have a
+   hidden committed sequence, and exact operation-ID retry must recover that
+   row without allocating the next sequence.
+7. Implement the same nine deterministic shadow transitions and exact final
+   reconciliation from the same vectors.
+8. Extend backup/restore and public inspection counters only after the report
+   schema is frozen in the canonical lane.
+9. Run Ruff, Mypy, focused pytest, full pytest, and wheel/sdist installed
+   lifecycles before parity is claimed.
+
+### 31.32.5 Conformance and hostile queue
+
+The current exact-96 file is a frozen activity contract, not proof that 96
+runtime behaviors exist. Convert it into executable evidence without merging
+cases:
+
+- add twelve-kind baseline byte vectors before OL-R33 through OL-R48 execute;
+- preserve 48 behavior and 48 attack cases with no pending/skip/xfail path;
+- run each destructive case in a fresh validated temporary root;
+- include exact typed error code, operation, retryability, transaction state,
+  row counts, sequence high-water, and leak-sentinel result;
+- alternate TypeScript and Python on one physical file for the specified
+  cross-language cases;
+- extend every nine-stage kill assertion with sequence singleton state;
+- forge request/blob/hash/context combinations, baseline chains, coherent
+  historical results, and unledgered physical rows independently; and
+- compare native report canonical bytes and hashes, not only pass counts.
+
+### 31.32.6 Verification checkpoint recorded now
+
+The protocol-freeze gate currently proves:
+
+- seven Node tests pass: four exact-96 contract tests and three executable v2
+  preview tests;
+- the exact-96 fixture remains 96 ordered cases, 48 behavior and 48 attack,
+  with canonical case SHA
+  0e6b481368c774ac870b593bd8f86af1b97d0bdc6ab0df23c82f1d88d4a30f38;
+- the active v1 validator still passes fresh, migration, reopen, rollback, and
+  five native tests;
+- the preview validator executes both edges and reports 16 tables, 18
+  explicit indexes, two migrations, and two fixtures; and
+- git diff whitespace validation and immutable predecessor hashes are green.
+
+This checkpoint does not prove runtime v2 persistence, deterministic replay,
+the exact 96 implementation campaign, artifact parity, release readiness,
+PostgreSQL parity, scheduler integration, production throughput, or any GitHub
+star outcome. All §31.31 exit criteria remain open until their retained gates
+pass.
