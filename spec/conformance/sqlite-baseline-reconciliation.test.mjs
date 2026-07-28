@@ -26,7 +26,7 @@ test("freezes all reconciliation rules and all twelve baseline kinds", () => {
   assert.equal(validateReconciliationRegistry(registry), registry);
   assert.deepEqual(registry.entryKinds, BLR_ENTRY_KINDS);
   assert.deepEqual(registry.rules.map((rule) => rule.ruleId), BLR_RULE_IDS);
-  assert.equal(new Set(BLR_RULE_IDS).size, 53);
+  assert.equal(new Set(BLR_RULE_IDS).size, 54);
   assert.equal(registry.implementationClaim, false);
 });
 
@@ -58,6 +58,12 @@ test("diagnostic envelope cannot carry tenant-controlled identities or payloads"
     diagnosticsTruncated: false,
   };
   assert.equal(validateReconciliationDiagnostic(complete, 3), complete);
+  const recordBinding = {
+    ruleId: "BLR_RECORD_BINDING",
+    violationCount: 1,
+    diagnosticsTruncated: false,
+  };
+  assert.equal(validateReconciliationDiagnostic(recordBinding, 1), recordBinding);
   const truncated = {
     ruleId: "BLR_RECORD_GAP",
     violationCount: 16,

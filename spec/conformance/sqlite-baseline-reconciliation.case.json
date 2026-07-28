@@ -70,6 +70,7 @@
     { "ruleId": "BLR_RECORD_PREDECESSOR", "phase": "stream-record" },
     { "ruleId": "BLR_STREAM_TAIL", "phase": "stream-record" },
     { "ruleId": "BLR_RECORD_HASH_DUPLICATE", "phase": "stream-record" },
+    { "ruleId": "BLR_RECORD_BINDING", "phase": "stream-record" },
     { "ruleId": "BLR_CHECKPOINT_REVISION_GAP", "phase": "checkpoint" },
     { "ruleId": "BLR_CHECKPOINT_RECORD_MISSING", "phase": "checkpoint" },
     { "ruleId": "BLR_CHECKPOINT_CURRENT_MISSING", "phase": "checkpoint" },

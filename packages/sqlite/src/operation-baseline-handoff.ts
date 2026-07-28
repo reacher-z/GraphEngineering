@@ -70,6 +70,7 @@ export class SQLiteV1BaselineOrderedTempReader {
     this.#session = this.#stage[SQLITE_BASELINE_BEGIN_ORDERED_HANDOFF](
       connection,
       this.#binding.expectedEntryCount,
+      this.#binding.countsByKind,
       this.#binding.totalChanges,
       this.#binding.transactionEpoch,
     );
@@ -181,7 +182,7 @@ export class SQLiteV1BaselineOrderedTempReader {
       this.#stage[SQLITE_BASELINE_FENCE_ORDERED_HANDOFF](this.#session);
       this.#stage[SQLITE_BASELINE_COMPLETE_ORDERED_HANDOFF](
         this.#session,
-        accumulator.entryCount,
+        identity,
       );
       this.#state = "complete";
       return identity;

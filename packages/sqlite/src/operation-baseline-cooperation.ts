@@ -1,4 +1,7 @@
-import type { OperationBaselineEntryInput } from "./operation-baseline.js";
+import type {
+  OperationBaselineEntryInput,
+  OperationBaselineProjectionIdentity,
+} from "./operation-baseline.js";
 import type { SQLiteConnection } from "./sqlite-connection.js";
 
 /** Package-private source/stage hooks. Neither symbol is exported by index.ts. */
@@ -34,6 +37,21 @@ export const SQLITE_BASELINE_COMPLETE_ORDERED_HANDOFF = Symbol(
 );
 export const SQLITE_BASELINE_ABORT_ORDERED_HANDOFF = Symbol(
   "SQLiteBaselineTempStage.abortOrderedHandoff",
+);
+export const SQLITE_BASELINE_BEGIN_STREAM_RECORD_CAMPAIGN = Symbol(
+  "SQLiteBaselineTempStage.beginStreamRecordCampaign",
+);
+export const SQLITE_BASELINE_FENCE_STREAM_RECORD_CAMPAIGN = Symbol(
+  "SQLiteBaselineTempStage.fenceStreamRecordCampaign",
+);
+export const SQLITE_BASELINE_REGISTER_STREAM_RECORD_CLEANUP = Symbol(
+  "SQLiteBaselineTempStage.registerStreamRecordCleanup",
+);
+export const SQLITE_BASELINE_COMPLETE_STREAM_RECORD_CAMPAIGN = Symbol(
+  "SQLiteBaselineTempStage.completeStreamRecordCampaign",
+);
+export const SQLITE_BASELINE_ABORT_STREAM_RECORD_CAMPAIGN = Symbol(
+  "SQLiteBaselineTempStage.abortStreamRecordCampaign",
 );
 
 /** Opaque evidence bound to one stage-private pending write pair. */
@@ -96,6 +114,7 @@ export interface SQLiteBaselineOrderedHandoffStage {
   [SQLITE_BASELINE_BEGIN_ORDERED_HANDOFF](
     connection: SQLiteConnection,
     expectedEntryCount: number,
+    expectedCounts: Readonly<Record<OperationBaselineEntryInput["entryKind"], number>>,
     totalChanges: number,
     transactionEpoch: bigint,
   ): object;
@@ -106,7 +125,24 @@ export interface SQLiteBaselineOrderedHandoffStage {
   ): void;
   [SQLITE_BASELINE_COMPLETE_ORDERED_HANDOFF](
     session: object,
-    actualEntryCount: number,
+    projectionIdentity: OperationBaselineProjectionIdentity,
   ): void;
   [SQLITE_BASELINE_ABORT_ORDERED_HANDOFF](session: object | undefined, message: string): never;
+}
+
+export interface SQLiteBaselineStreamRecordCampaignStage {
+  [SQLITE_BASELINE_BEGIN_STREAM_RECORD_CAMPAIGN](
+    connection: SQLiteConnection,
+    projectionIdentity: OperationBaselineProjectionIdentity,
+  ): object;
+  [SQLITE_BASELINE_FENCE_STREAM_RECORD_CAMPAIGN](session: object): void;
+  [SQLITE_BASELINE_REGISTER_STREAM_RECORD_CLEANUP](
+    session: object,
+    cleanup: (() => void) | undefined,
+  ): void;
+  [SQLITE_BASELINE_COMPLETE_STREAM_RECORD_CAMPAIGN](session: object): void;
+  [SQLITE_BASELINE_ABORT_STREAM_RECORD_CAMPAIGN](
+    session: object | undefined,
+    message: string,
+  ): never;
 }

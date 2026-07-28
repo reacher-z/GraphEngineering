@@ -9006,3 +9006,170 @@ report tied to the already sealed projection identity. It cannot update,
 delete, repair, quarantine or compensate a finding. Checkpoint/lease/lock /
 hold/legacy rules, cursor seal and persistence, `0002`, crash/replay, 100K,
 release and adoption remain separate later slices.
+
+### 31.34.30 Verified stream/record relational invariant checkpoint
+
+The first registered relational campaign from §31.34.29 is now implemented,
+cross-runtime matched and independently adversarially closed. It remains a
+module-private pre-migration capability. It can begin only after the exact
+cooperative source stream and ordered TEMP handoff have completed, and it
+returns only a frozen report tied by object identity to that already sealed
+projection. No package-root API, migration, repair path or permanent write was
+introduced.
+
+The reconciliation registry now contains 54 ordered rules. The stream/record
+phase contains these exact seven IDs in this exact order:
+
+1. `BLR_RECORD_STREAM_MISSING`;
+2. `BLR_STREAM_EMPTY`;
+3. `BLR_RECORD_GAP`;
+4. `BLR_RECORD_PREDECESSOR`;
+5. `BLR_STREAM_TAIL`;
+6. `BLR_RECORD_HASH_DUPLICATE`; and
+7. `BLR_RECORD_BINDING`.
+
+`BLR_RECORD_BINDING` was added because natural-hash duplication and canonical
+common/relation disagreement are different failure domains. The new rule
+binds both directions of the rank-three common-stage carrier to the normalized
+record relation and compares tenant, stream, record ID, sequence,
+predecessor/record/value hashes, value length and committed clock. It does not
+overload `BLR_RECORD_HASH_DUPLICATE`, and no implementation branch invents a
+free-form diagnostic ID.
+
+All seven queries are fixed source constants rather than caller-composed SQL.
+They return only the integer witness marker `1`, accept exactly one bounded
+`LIMIT` binding and consume at most `diagnosticLimit + 1` rows. The default
+limit is 16, the maximum is 64, and exact-limit versus limit-plus-one behavior
+is tested at 1, 16 and 64. Only nonzero rules enter the report. A diagnostic
+contains exactly `ruleId`, capped `violationCount` and
+`diagnosticsTruncated`; it contains no SQL, tenant, stream, record, key BLOB,
+state BLOB, witness, message or payload.
+
+Query topology is frozen and plan-audited. Record ownership and gap scans use
+`ge_blr_records_stream_sequence_uidx`; predecessor joins and exact/later-tail
+lookups use `ge_blr_records_stream_position_idx`; natural-hash and binding
+scans use `ge_blr_records_tenant_hash_uidx`. The persisted-empty query scans
+only streams and cannot accidentally scan the record carrier. The tail rule
+checks the declared position/hash and also rejects a matching but stale tail
+when any later sequence exists. This latter branch was retained after an
+independent audit constructed records `0/A,1/B` with a declared `0/A` tail,
+which would otherwise evade the gap, predecessor and exact-position checks.
+
+The campaign capability is bound to the exact owner connection, live
+`EXCLUSIVE` epoch, sealed projection object, ordered-handoff session, entry
+count, twelve-kind expected-count vector, write counter and reserved TEMP
+catalog. An equal-content projection clone is not authority. Every prepare,
+cursor registration, fetch, close, diagnostic append, rule transition and
+terminal completion has pre/post owner, write, epoch and catalog fences. The
+terminal barrier re-proves total common/relation counts, all twelve per-kind
+common counts, bidirectional relation-key coverage and exact catalog shape
+before publishing success.
+
+The report is one-shot. A second run, an equal-shape identity replacement,
+early abandonment, DML, rollback/rebegin, savepoint/DDL epoch drift, catalog
+replacement or incomplete cleanup permanently poisons the lane and requires
+caller rollback. The active witness cursor is stage-owned while a rule is
+open. Normal EOF, witness validation failure, query failure, campaign abort,
+stage disposal and catalog/transaction failure all finalize it exactly once.
+A cleanup error cannot replace an authoritative query/fence failure; when no
+primary exists, cursor cleanup failure is surfaced after best-effort removal
+of every owned TEMP object.
+
+The shared TypeScript/Python hostile fixture is literal, not mocked. Both
+runtimes use captured time `1785110405000`, produce the same 21-entry
+projection (`baselineId` prefix `v2-fa4f8ccf`, first hash `f061b7d1`, final
+hash `f1210fc0`, projection hash `8ad73854`) and return ordered counts
+`1/2/2/1/3` for missing stream, persisted empty stream, first/interior gaps,
+predecessor drift and stale/missing/wrong tail. It includes a foreign-tenant
+same-stream alias, an explicit empty stream, first-sequence and interior gaps,
+a wrong predecessor, a matching-but-behind tail, a missing tail position and
+a wrong tail hash. Binding replacement, common-only/relation-only coverage,
+defensive duplicate-hash witness, malformed witness marker and exact safe
+envelope behavior are separately tested.
+
+The hostile lifecycle matrix injects DML after cursor creation for every one
+of the seven rules, during fetch, during close, after diagnostic append and at
+terminal completion. It also replaces the catalog during a rule, exercises
+closed options including null/array/accessor/non-enumerable/symbol carriers,
+proves hostile accessors are never evaluated, disposes an active campaign and
+combines fetch-primary with cleanup-secondary failures. The two runtime test
+suites assert the same rule order, SQL limits, named-index plans, literal
+projection identity and diagnostic outcome.
+
+Checkpoint evidence is TypeScript SQLite 16 files / 232 tests, including 77
+focused reconciliation tests, plus typecheck, lint and build; Python 1,356
+full tests, including 39 focused campaign tests and 204 related source/stage /
+cooperation/handoff/campaign tests, plus Ruff and strict MyPy; the complete
+SQLite ledger/reconciliation/migration contract remains 19 tests and the
+registry validator reports 54 rules with `implementationClaim:false`;
+documentation links remain 286; diff checks are clean. Final independent
+review reports HIGH 0, MEDIUM 0 and LOW 0.
+
+This checkpoint does not run checkpoint, lease, lock, hold or legacy
+relational campaigns; create or persist a cursor seal/root; execute migration
+`0002`; publish runtime schema v2; prove 100,000-entry behavior; perform
+crash/replay recovery; select a release candidate; or establish adoption or
+star outcomes. All such claims remain false.
+
+### 31.34.31 Checkpoint relational invariant campaign implementation gate
+
+The next bounded slice shall implement only the six registered checkpoint
+rules over the already verified TEMP relations. It must reuse the exact sealed
+projection/session/cursor ownership machinery established by §31.34.30 rather
+than create a parallel unbound reader. Before implementation, freeze one
+shared TypeScript/Python query table in this exact registry order:
+
+1. `BLR_CHECKPOINT_REVISION_GAP`;
+2. `BLR_CHECKPOINT_RECORD_MISSING`;
+3. `BLR_CHECKPOINT_CURRENT_MISSING`;
+4. `BLR_CHECKPOINT_CURRENT_UNEXPECTED`;
+5. `BLR_CHECKPOINT_CURRENT_STALE`; and
+6. `BLR_CHECKPOINT_CURRENT_BINDING`.
+
+The revision-gap rule shall group by tenant and checkpoint scope, require a
+contiguous revision domain beginning at one, and reject duplicate or missing
+positions without collecting revision histories. Put revisions must bind to
+one exact record by tenant, stream, sequence and record hash. The latest
+revision per `(tenant,scope,checkpointId)` must deterministically drive current
+state: latest put requires exactly one equal current row; latest delete
+requires current absence; a non-latest put/delete must never override a later
+revision. The binding rule must compare normalized current/revision scalars to
+their canonical rank-four/rank-five common-stage key and state carriers in both
+directions.
+
+Each query must use a fixed `LIMIT diagnosticLimit + 1` witness boundary and
+return only marker rows. `EXPLAIN QUERY PLAN` tests must prove the named
+checkpoint-current record index, checkpoint-revision latest index and
+checkpoint-revision record index wherever applicable. Any unavoidable grouped
+revision scan must be explicitly named in the test and must not introduce a
+per-checkpoint query, an N+1 loop, `.all()`, `fetchall()` or an unbounded
+history collection.
+
+The first shared hostile fixture must include: revision starting at two;
+interior revision loss; two checkpoint IDs interleaved in one scope; put bound
+to a missing record; put bound to the right sequence but wrong hash; latest put
+with missing current; latest delete with unexpected current; current row from
+an older put; current row with substituted checkpoint ID, stream, revision,
+created timestamp, value hash, value length or committed clock; common-only
+and relation-only rank-four/rank-five rows; and a cross-tenant record alias.
+Both runtimes must hard-code one identical projection identity and one exact
+ordered diagnostic count vector from that fixture.
+
+The lifecycle matrix must repeat all seven boundary classes already closed for
+stream/record rules: per-rule cursor creation, fetch, close, post-diagnostic,
+rule transition, mid-rule catalog replacement and terminal barrier. Add
+latest-revision-specific attacks for equal-count row substitution, delete /
+recreate, ambiguous maxima, stale index replacement and current mutation after
+the latest row was read. Exact-limit and limit-plus-one tests remain required
+at 1, 16 and 64; malformed markers and cleanup-primary precedence remain
+release blockers.
+
+The slice is complete only when TypeScript/Python queries, plans, fixture
+identity, diagnostic order/counts and poison behavior are equal; focused and
+full suites, typecheck, lint, build, Ruff, strict MyPy, the 19-test SQLite
+contract, 54-rule registry validation, documentation links and diff checks all
+pass; and an independent adversarial review reports HIGH 0 / MEDIUM 0 / LOW 0.
+It must then append a truthful completion checkpoint and the next
+lease/lock/hold gate. It still may not create permanent v2 rows, run `0002`,
+persist a cursor seal/root, claim 100K/crash/release closure or claim adoption
+or star results.

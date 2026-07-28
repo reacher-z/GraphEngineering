@@ -19,6 +19,7 @@ from .sqlite_operation_baseline import (
     BASELINE_ENTRY_KINDS,
     BaselineEntryInput,
     BaselineEntryKind,
+    BaselineProjectionIdentity,
     baseline_entry_sort_key,
     capture_baseline_entry,
 )
@@ -1172,7 +1173,12 @@ class SQLiteV1BaselineTempStage:
         "_ordered_handoff_completed",
         "_ordered_handoff_reader",
         "_ordered_handoff_started",
+        "_ordered_projection_identity",
         "_state",
+        "_stream_record_campaign_completed",
+        "_stream_record_campaign_cursor",
+        "_stream_record_campaign_session",
+        "_stream_record_campaign_started",
         "_transaction_epoch",
     )
 
@@ -1194,6 +1200,11 @@ class SQLiteV1BaselineTempStage:
         self._ordered_handoff_started = False
         self._ordered_handoff_completed = False
         self._ordered_handoff_reader: _SQLiteV1BaselineOrderedStageReader | None = None
+        self._ordered_projection_identity: BaselineProjectionIdentity | None = None
+        self._stream_record_campaign_started = False
+        self._stream_record_campaign_completed = False
+        self._stream_record_campaign_cursor: _SQLiteCursorCapability | None = None
+        self._stream_record_campaign_session: object | None = None
         if not connection.in_exclusive_transaction:
             self._state = "disposed"
             raise ValueError(
@@ -1547,6 +1558,7 @@ class SQLiteV1BaselineTempStage:
     def _complete_ordered_projection_reader(
         self,
         reader: _SQLiteV1BaselineOrderedStageReader,
+        identity: BaselineProjectionIdentity,
     ) -> None:
         """Publish success only after the coordinator sealed and fenced the root."""
 
@@ -1554,11 +1566,139 @@ class SQLiteV1BaselineTempStage:
             self._ordered_handoff_reader is not reader
             or not reader.reached_eof
             or self._ordered_handoff_completed
+            or type(identity) is not BaselineProjectionIdentity
         ):
             self._poison("BLR_HANDOFF_COMPLETION: ordered TEMP stage completion drifted")
         self._assert_ordered_handoff_fence(self._allowed_total_changes)
         self._ordered_handoff_reader = None
+        self._ordered_projection_identity = identity
         self._ordered_handoff_completed = True
+
+    def _begin_stream_record_campaign(
+        self,
+        summary: SQLiteV1BaselineSourceSummary,
+        identity: BaselineProjectionIdentity,
+    ) -> tuple[int, object]:
+        """Bind the sole stream/record campaign to the exact completed handoff."""
+
+        if self._stream_record_campaign_started:
+            self._poison("BLR_STAGE_ITERATOR_INCOMPLETE: stream/record campaign already started")
+        self._stream_record_campaign_started = True
+        if (
+            type(summary) is not SQLiteV1BaselineSourceSummary
+            or type(identity) is not BaselineProjectionIdentity
+            or not self._ordered_handoff_completed
+            or self._ordered_handoff_reader is not None
+            or self._ordered_projection_identity is not identity
+            or self._cooperative_summary is not summary
+            or identity.entry_count != summary.expected_entry_count
+            or self._state != "open"
+        ):
+            self._poison(
+                "BLR_STAGE_ITERATOR_INCOMPLETE: stream/record campaign binding is invalid"
+            )
+        expected_total_changes = self._allowed_total_changes
+        self._assert_ordered_handoff_fence(expected_total_changes)
+        self.assert_common_counts(summary.counts_by_kind)
+        self.assert_relation_key_coverage()
+        self._assert_ordered_handoff_catalog(expected_total_changes)
+        self._assert_ordered_handoff_fence(expected_total_changes)
+        session = object()
+        self._stream_record_campaign_session = session
+        return expected_total_changes, session
+
+    def _assert_stream_record_campaign_fence(
+        self,
+        session: object,
+        expected_total_changes: int,
+    ) -> None:
+        if (
+            self._stream_record_campaign_session is not session
+            or not self._stream_record_campaign_started
+            or self._stream_record_campaign_completed
+        ):
+            self._poison(
+                "BLR_STAGE_ITERATOR_INCOMPLETE: stream/record campaign session is invalid"
+            )
+        self._assert_ordered_handoff_fence(expected_total_changes)
+        self._assert_ordered_handoff_catalog(expected_total_changes)
+        self._assert_ordered_handoff_fence(expected_total_changes)
+
+    def _register_stream_record_campaign_cursor(
+        self,
+        session: object,
+        cursor: _SQLiteCursorCapability,
+        expected_total_changes: int,
+    ) -> None:
+        self._assert_stream_record_campaign_fence(session, expected_total_changes)
+        if (
+            type(cursor) is not _SQLiteCursorCapability
+            or self._stream_record_campaign_cursor is not None
+        ):
+            self._poison(
+                "BLR_STAGE_ITERATOR_INCOMPLETE: stream/record rule cursor is invalid"
+            )
+        self._stream_record_campaign_cursor = cursor
+        self._assert_stream_record_campaign_fence(session, expected_total_changes)
+
+    def _release_stream_record_campaign_cursor(
+        self,
+        session: object,
+        cursor: _SQLiteCursorCapability,
+        expected_total_changes: int,
+    ) -> None:
+        if self._stream_record_campaign_cursor is not cursor:
+            self._poison(
+                "BLR_STAGE_ITERATOR_INCOMPLETE: stream/record rule cursor binding drifted"
+            )
+        self._stream_record_campaign_cursor = None
+        self._assert_stream_record_campaign_fence(session, expected_total_changes)
+
+    def _complete_stream_record_campaign(
+        self,
+        identity: BaselineProjectionIdentity,
+        expected_total_changes: int,
+        session: object,
+    ) -> None:
+        """Publish campaign completion only after its final common/catalog barrier."""
+
+        if (
+            not self._stream_record_campaign_started
+            or self._stream_record_campaign_completed
+            or self._ordered_projection_identity is not identity
+            or self._stream_record_campaign_session is not session
+            or self._stream_record_campaign_cursor is not None
+        ):
+            self._poison(
+                "BLR_STAGE_ITERATOR_INCOMPLETE: stream/record campaign completion is invalid"
+            )
+        self._assert_ordered_handoff_fence(expected_total_changes)
+        summary = self._cooperative_summary
+        if summary is None:
+            self._poison(
+                "BLR_STAGE_ITERATOR_INCOMPLETE: stream/record source binding is absent"
+            )
+        self.assert_common_counts(summary.counts_by_kind)
+        self.assert_relation_key_coverage()
+        self._assert_ordered_handoff_catalog(expected_total_changes)
+        self._assert_ordered_handoff_fence(expected_total_changes)
+        self._stream_record_campaign_completed = True
+        self._stream_record_campaign_session = None
+
+    def _abort_stream_record_campaign(self, session: object | None) -> Never:
+        """Finalize the active rule cursor and permanently poison the campaign lane."""
+
+        cursor = self._stream_record_campaign_cursor
+        self._stream_record_campaign_cursor = None
+        if cursor is not None:
+            with suppress(BaseException):
+                cursor.close()
+        if session is not None and session is not self._stream_record_campaign_session:
+            self._poison(
+                "BLR_STAGE_ITERATOR_INCOMPLETE: stream/record campaign session drifted"
+            )
+        self._stream_record_campaign_session = None
+        self._poison("BLR_STAGE_ITERATOR_INCOMPLETE: stream/record campaign aborted")
 
     def _assert_ordered_handoff_fence(self, expected_total_changes: int) -> None:
         self._assert_open_and_bound()
@@ -1791,35 +1931,43 @@ class SQLiteV1BaselineTempStage:
         if self._state == "disposed":
             return
         active_reader = self._ordered_handoff_reader
-        reader_close_failure: BaseException | None = None
+        cursor_close_failure: BaseException | None = None
+        cursor_cleanup_message = "BLR_HANDOFF_CLEANUP: ordered TEMP stage cursor cleanup failed"
         if active_reader is not None:
             try:
                 active_reader._close_cursor_only()
             except BaseException as error:
-                reader_close_failure = error
+                cursor_close_failure = error
             self._ordered_handoff_reader = None
+        campaign_cursor = self._stream_record_campaign_cursor
+        if campaign_cursor is not None:
+            try:
+                campaign_cursor.close()
+            except BaseException as error:
+                if cursor_close_failure is None:
+                    cursor_close_failure = error
+                    cursor_cleanup_message = (
+                        "BLR_STAGE_ITERATOR_INCOMPLETE: TEMP campaign cursor cleanup failed"
+                    )
+            self._stream_record_campaign_cursor = None
         if (
             not self._connection.in_exclusive_transaction
             or self._connection.transaction_epoch != self._transaction_epoch
         ):
             self._clear_created_objects()
-            if reader_close_failure is not None:
+            if cursor_close_failure is not None:
                 self._state = "poisoned"
-                raise ValueError(
-                    "BLR_HANDOFF_CLEANUP: ordered TEMP stage cursor cleanup failed"
-                ) from reader_close_failure
+                raise ValueError(cursor_cleanup_message) from cursor_close_failure
             self._state = "disposed"
             return
         try:
             self._drop_created_objects()
         except BaseException:
-            if reader_close_failure is None:
+            if cursor_close_failure is None:
                 raise
-        if reader_close_failure is not None:
+        if cursor_close_failure is not None:
             self._state = "poisoned"
-            raise ValueError(
-                "BLR_HANDOFF_CLEANUP: ordered TEMP stage cursor cleanup failed"
-            ) from reader_close_failure
+            raise ValueError(cursor_cleanup_message) from cursor_close_failure
         self._state = "disposed"
 
     def __enter__(self) -> SQLiteV1BaselineTempStage:
@@ -1882,10 +2030,16 @@ class SQLiteV1BaselineTempStage:
             with suppress(BaseException):
                 active_reader._close_cursor_only()
             self._ordered_handoff_reader = None
+        campaign_cursor = self._stream_record_campaign_cursor
+        if campaign_cursor is not None:
+            with suppress(BaseException):
+                campaign_cursor.close()
+            self._stream_record_campaign_cursor = None
         self._state = "poisoned"
         self._cooperative_pending_receipt = None
         self._cooperative_summary = None
         self._cooperative_stream_finished = False
+        self._ordered_projection_identity = None
         raise ValueError(message)
 
     def _drop_created_objects(self) -> None:

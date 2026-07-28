@@ -87,7 +87,13 @@ registry `ruleId`; messages are not protocol identity.
 - Source rules bind schema/migration singletons, lineage, descriptor, capture
   clock, transaction ownership, and expected counts.
 - Stream/record rules reject orphans, persisted empty streams, position gaps,
-  predecessor drift, tail drift, and tenant-wide hash duplication.
+  predecessor drift, tail drift, tenant-wide hash duplication, and any drift
+  between a normalized record relation and its canonical common-stage key and
+  state. `BLR_STREAM_EMPTY` means that any persisted stream whose
+  `tail_sequence` is `-1` is a violation, even when its null tail hash is a
+  well-formed empty sentinel. `BLR_RECORD_BINDING` is the distinct scalar,
+  hash, value-length, clock, and canonical common-state binding rule; it must
+  not be reported as `BLR_RECORD_HASH_DUPLICATE`.
 - Checkpoint rules require contiguous scope revisions, exact put-record
   identity, latest put/current equality, latest delete/current absence, and
   complete scalar/summary agreement.

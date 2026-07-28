@@ -42,8 +42,8 @@
     "cursorSeal": { "$ref": "#/$defs/cursorSeal" },
     "rules": {
       "type": "array",
-      "minItems": 53,
-      "maxItems": 53,
+      "minItems": 54,
+      "maxItems": 54,
       "items": { "$ref": "#/$defs/rule" }
     }
   },

@@ -17,8 +17,10 @@ import { ensureSQLiteCycleStoreSchema } from "../src/migrations.js";
 import {
   SQLITE_BASELINE_COOPERATIVE_ENTRIES,
   SQLITE_BASELINE_BEGIN_ORDERED_HANDOFF,
+  SQLITE_BASELINE_COMPLETE_STREAM_RECORD_CAMPAIGN,
   SQLITE_BASELINE_CONSUME_OWNED_WRITE,
   SQLITE_BASELINE_FENCE_ORDERED_HANDOFF,
+  SQLITE_BASELINE_FENCE_STREAM_RECORD_CAMPAIGN,
   SQLITE_BASELINE_OWNED_WRITE,
   type SQLiteBaselineCooperativeSource,
   type SQLiteBaselineCooperativeStage,
@@ -30,6 +32,11 @@ import {
   readSQLiteV1BaselineOrderedTempProjection,
 } from "../src/operation-baseline-handoff.js";
 import {
+  SQLITE_STREAM_RECORD_RULES,
+  SQLiteStreamRecordInvariantCampaign,
+  runSQLiteStreamRecordInvariantCampaign,
+} from "../src/operation-baseline-stream-record-invariants.js";
+import {
   MAX_BASELINE_KEY_BYTES,
   MAX_BASELINE_STATE_BYTES,
   buildOperationBaseline,
@@ -38,6 +45,7 @@ import {
   encodeOperationBaselineKey,
   encodeOperationBaselineState,
   type OperationBaselineEntryInput,
+  type OperationBaselineProjectionIdentity,
 } from "../src/operation-baseline.js";
 import {
   captureSQLiteV1BaselineSourceSummary,
@@ -1315,6 +1323,649 @@ describe("SQLite v1 cooperative source/stage reconciliation", () => {
       expect(run.stage.state).toBe("poisoned");
     } finally {
       close(run);
+    }
+  });
+});
+
+interface Sealed extends Started {
+  readonly projectionIdentity: OperationBaselineProjectionIdentity;
+}
+
+function sealed(seed = true): Sealed {
+  const run = started(seed);
+  stageSQLiteV1BaselineSourceIntoTempStage(run.connection, run.source, run.stage);
+  const projectionIdentity = readSQLiteV1BaselineOrderedTempProjection(
+    run.connection,
+    run.source,
+    run.stage,
+  );
+  return { ...run, projectionIdentity };
+}
+
+function insertInvariantStream(
+  connection: SQLiteConnection,
+  tenantId: string,
+  streamId: string,
+  tailSequence: number,
+  tailRecordHash: string | null,
+  observedAtMs = NOW,
+): void {
+  connection.prepare(`INSERT INTO ge_cycle_streams
+    (tenant_id, stream_id, tail_sequence, tail_record_hash, created_at_ms, updated_at_ms)
+    VALUES (?, ?, ?, ?, ?, ?)`, "inspect-schema").run(
+    tenantId, streamId, tailSequence, tailRecordHash, observedAtMs, observedAtMs,
+  );
+}
+
+function insertInvariantRecord(
+  connection: SQLiteConnection,
+  tenantId: string,
+  streamId: string,
+  recordId: string,
+  sequence: number,
+  previousRecordHash: string | null,
+  committedAtMs = NOW,
+): string {
+  const record = createCycleStoreRecord({
+    previousRecordHash,
+    recordId,
+    sequence,
+    value: `${tenantId}:${streamId}:${sequence}`,
+  });
+  const valueBlob = Buffer.from(canonicalSerialize(record.value), "utf8");
+  const recordBlob = Buffer.from(canonicalSerialize(record), "utf8");
+  connection.prepare(`INSERT INTO ge_cycle_records
+    (tenant_id, stream_id, sequence, record_id, previous_record_hash,
+     value_hash, value_bytes, value_blob, record_hash, record_blob, committed_at_ms)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, "inspect-schema").run(
+    tenantId, streamId, sequence, recordId, previousRecordHash,
+    record.valueHash, record.valueBytes, valueBlob, record.recordHash, recordBlob, committedAtMs,
+  );
+  return record.recordHash;
+}
+
+function sealedHostileStreamRecordFixture(): Sealed {
+  const sharedNow = NOW;
+  const connection = opened(sharedNow);
+  connection.execTrusted("PRAGMA foreign_keys = OFF", "inspect-schema");
+  connection.execTrusted("BEGIN EXCLUSIVE", "inspect-schema");
+  const addStream = (
+    tenantId: string,
+    streamId: string,
+    tailSequence: number,
+    tailRecordHash: string | null,
+  ) => insertInvariantStream(
+    connection, tenantId, streamId, tailSequence, tailRecordHash, sharedNow,
+  );
+  const addRecord = (
+    tenantId: string,
+    streamId: string,
+    recordId: string,
+    sequence: number,
+    previousRecordHash: string | null,
+  ) => insertInvariantRecord(
+    connection, tenantId, streamId, recordId, sequence, previousRecordHash, sharedNow,
+  );
+
+  addStream("tenant-foreign", "stream-orphan", -1, null);
+  addRecord("tenant-orphan", "stream-orphan", "orphan-0", 0, null);
+  addStream("tenant-empty", "stream-empty", -1, null);
+
+  const missingPredecessor = "a".repeat(64);
+  const gapTail = addRecord(
+    "tenant-gap", "stream-gap", "gap-1", 1, missingPredecessor,
+  );
+  addStream("tenant-gap", "stream-gap", 1, gapTail);
+
+  const interiorZero = addRecord(
+    "tenant-interior", "stream-interior", "interior-0", 0, null,
+  );
+  const interiorTwo = addRecord(
+    "tenant-interior", "stream-interior", "interior-2", 2, interiorZero,
+  );
+  addStream("tenant-interior", "stream-interior", 2, interiorTwo);
+
+  const predecessorZero = addRecord(
+    "tenant-pred", "stream-pred", "pred-0", 0, null,
+  );
+  const wrongPredecessor = "b".repeat(64);
+  const predecessorOne = addRecord(
+    "tenant-pred", "stream-pred", "pred-1", 1, wrongPredecessor,
+  );
+  addStream("tenant-pred", "stream-pred", 1, predecessorOne);
+  expect(predecessorZero).not.toBe(wrongPredecessor);
+
+  const staleZero = addRecord(
+    "tenant-tail", "stream-tail", "tail-0", 0, null,
+  );
+  addRecord(
+    "tenant-tail", "stream-tail", "tail-1", 1, staleZero,
+  );
+  addStream("tenant-tail", "stream-tail", 0, staleZero);
+
+  addRecord(
+    "tenant-missing-tail", "stream-missing-tail", "missing-tail-0", 0, null,
+  );
+  addStream(
+    "tenant-missing-tail", "stream-missing-tail", 1, "c".repeat(64),
+  );
+  addRecord(
+    "tenant-wrong-tail", "stream-wrong-tail", "wrong-tail-0", 0, null,
+  );
+  addStream(
+    "tenant-wrong-tail", "stream-wrong-tail", 0, "d".repeat(64),
+  );
+
+  const stage = createSQLiteBaselineTempStage(
+    connection,
+    proveSQLiteExclusiveBaselineTransaction(connection),
+  ) as SQLiteBaselineTempStage & SQLiteBaselineCooperativeStage;
+  const source = captureSQLiteV1BaselineSourceSummary(
+    connection,
+    sharedNow,
+  ) as SQLiteV1BaselineSourceSummary & SQLiteBaselineCooperativeSource;
+  stageSQLiteV1BaselineSourceIntoTempStage(connection, source, stage);
+  const projectionIdentity = readSQLiteV1BaselineOrderedTempProjection(
+    connection, source, stage,
+  );
+  return { connection, source, stage, projectionIdentity };
+}
+
+describe("SQLite stream/record invariant campaign", () => {
+  it("reports the exact ordered real-source missing/empty/gap/predecessor/stale-tail campaign", () => {
+    const run = sealedHostileStreamRecordFixture();
+    try {
+      expect(run.projectionIdentity).toEqual({
+        baselineId: "v2-fa4f8ccf6009797f4204ecbb8c85cc1d753ce219ce25630ef8af21558326f2af",
+        entryCount: 21,
+        legacyOperationCount: 0,
+        firstEntryHash: "f061b7d1fd823d623dc13ab12c78806cf6457e2f6e2f054b235d26d8abee787c",
+        finalEntryHash: "f1210fc05e988ad147f859d3eda8eab51e3a1006ef6f4414f66b338bc1ddcd5e",
+        projectionSha256: "8ad7385488da4cba4475e4037671384962cd2d9d24cecd82d08962af0031a6b8",
+      });
+      expect(runSQLiteStreamRecordInvariantCampaign(
+        run.connection, run.projectionIdentity, run.stage,
+      ).diagnostics).toEqual([
+        { ruleId: "BLR_RECORD_STREAM_MISSING", violationCount: 1, diagnosticsTruncated: false },
+        { ruleId: "BLR_STREAM_EMPTY", violationCount: 2, diagnosticsTruncated: false },
+        { ruleId: "BLR_RECORD_GAP", violationCount: 2, diagnosticsTruncated: false },
+        { ruleId: "BLR_RECORD_PREDECESSOR", violationCount: 1, diagnosticsTruncated: false },
+        { ruleId: "BLR_STREAM_TAIL", violationCount: 3, diagnosticsTruncated: false },
+      ]);
+    } finally {
+      close(run);
+    }
+  });
+  it("returns one deeply frozen safe empty report bound to the exact projection identity", () => {
+    const run = sealed();
+    try {
+      const report = runSQLiteStreamRecordInvariantCampaign(
+        run.connection, run.projectionIdentity, run.stage,
+      );
+      expect(report).toEqual({ projectionIdentity: run.projectionIdentity, diagnostics: [] });
+      expect(report.projectionIdentity).toBe(run.projectionIdentity);
+      expect(Object.isFrozen(report)).toBe(true);
+      expect(Object.isFrozen(report.diagnostics)).toBe(true);
+      expect(Object.keys(report)).toEqual(["projectionIdentity", "diagnostics"]);
+    } finally {
+      close(run);
+    }
+  });
+
+  it("keeps the exact seven-rule registry order and deeply freezes every query", () => {
+    expect(SQLITE_STREAM_RECORD_RULES.map((rule) => rule.ruleId)).toEqual([
+      "BLR_RECORD_STREAM_MISSING", "BLR_STREAM_EMPTY", "BLR_RECORD_GAP",
+      "BLR_RECORD_PREDECESSOR", "BLR_STREAM_TAIL", "BLR_RECORD_HASH_DUPLICATE",
+      "BLR_RECORD_BINDING",
+    ]);
+    expect(Object.isFrozen(SQLITE_STREAM_RECORD_RULES)).toBe(true);
+    expect(SQLITE_STREAM_RECORD_RULES.every(Object.isFrozen)).toBe(true);
+    expect(SQLITE_STREAM_RECORD_RULES.every((rule) => rule.sql.endsWith("LIMIT ?"))).toBe(true);
+  });
+
+  it("proves every record-bearing query uses its frozen named relation index", () => {
+    const run = sealed();
+    const expected = new Map<string, readonly string[]>([
+      ["BLR_RECORD_STREAM_MISSING", ["ge_blr_records_stream_sequence_uidx"]],
+      ["BLR_RECORD_GAP", ["ge_blr_records_stream_sequence_uidx"]],
+      ["BLR_RECORD_PREDECESSOR", [
+        "ge_blr_records_stream_sequence_uidx", "ge_blr_records_stream_position_idx",
+      ]],
+      ["BLR_STREAM_TAIL", ["ge_blr_records_stream_position_idx"]],
+      ["BLR_RECORD_HASH_DUPLICATE", ["ge_blr_records_tenant_hash_uidx"]],
+      ["BLR_RECORD_BINDING", ["ge_blr_records_tenant_hash_uidx"]],
+    ]);
+    try {
+      for (const rule of SQLITE_STREAM_RECORD_RULES) {
+        const plan = run.connection.prepare(
+          `EXPLAIN QUERY PLAN ${rule.sql}`, "inspect-schema",
+        ).all(17).map((row) => String((row as unknown as readonly unknown[])[3])).join("\n");
+        for (const index of expected.get(rule.ruleId) ?? []) expect(plan).toContain(index);
+      }
+    } finally {
+      close(run);
+    }
+  });
+
+  it("caps a hostile rule at limit+1 witnesses and returns only safe fields", () => {
+    const run = sealed();
+    const target = SQLITE_STREAM_RECORD_RULES[5];
+    const originalPrepare = run.connection.prepare.bind(run.connection);
+    const prepare = vi.spyOn(run.connection, "prepare").mockImplementation(
+      (sql, operation) => sql === target.sql
+        ? ({ iterate: () => Array.from({ length: 4 }, () => [1n]).values() } as never)
+        : originalPrepare(sql, operation),
+    );
+    try {
+      const report = runSQLiteStreamRecordInvariantCampaign(
+        run.connection, run.projectionIdentity, run.stage, { diagnosticLimit: 3 },
+      );
+      expect(report.diagnostics).toEqual([{
+        ruleId: "BLR_RECORD_HASH_DUPLICATE",
+        violationCount: 3,
+        diagnosticsTruncated: true,
+      }]);
+      expect(Object.keys(report.diagnostics[0]!)).toEqual([
+        "ruleId", "violationCount", "diagnosticsTruncated",
+      ]);
+      expect(Object.isFrozen(report.diagnostics[0])).toBe(true);
+    } finally {
+      prepare.mockRestore();
+      close(run);
+    }
+  });
+
+  it.each([1, 16, 64])(
+    "distinguishes an exact limit from limit+1 at the %i boundary",
+    (limit) => {
+      for (const extra of [0, 1]) {
+        const run = sealed();
+        const target = SQLITE_STREAM_RECORD_RULES[6];
+        const originalPrepare = run.connection.prepare.bind(run.connection);
+        const prepare = vi.spyOn(run.connection, "prepare").mockImplementation(
+          (sql, operation) => sql === target.sql
+            ? ({
+              iterate: () => Array.from({ length: limit + extra }, () => [1n]).values(),
+            } as never)
+            : originalPrepare(sql, operation),
+        );
+        try {
+          expect(runSQLiteStreamRecordInvariantCampaign(
+            run.connection, run.projectionIdentity, run.stage, { diagnosticLimit: limit },
+          ).diagnostics).toEqual([{
+            ruleId: "BLR_RECORD_BINDING",
+            violationCount: limit,
+            diagnosticsTruncated: extra === 1,
+          }]);
+        } finally {
+          prepare.mockRestore();
+          close(run);
+        }
+      }
+    },
+  );
+
+  it("rejects a malformed or identity-bearing witness row", () => {
+    for (const hostileRow of [[0n], [2n], ["tenant-secret"], [1n, "tenant-secret"]]) {
+      const run = sealed();
+      const target = SQLITE_STREAM_RECORD_RULES[0];
+      const originalPrepare = run.connection.prepare.bind(run.connection);
+      const prepare = vi.spyOn(run.connection, "prepare").mockImplementation(
+        (sql, operation) => sql === target.sql
+          ? ({ iterate: () => [hostileRow].values() } as never)
+          : originalPrepare(sql, operation),
+      );
+      try {
+        expect(() => runSQLiteStreamRecordInvariantCampaign(
+          run.connection, run.projectionIdentity, run.stage,
+        )).toThrow(CycleStoreProviderError);
+        expect(run.stage.state).toBe("poisoned");
+      } finally {
+        prepare.mockRestore();
+        close(run);
+      }
+    }
+  });
+
+  it.each([null, [], false, { diagnosticLimit: null }, { diagnosticLimit: 0 },
+    { diagnosticLimit: 65 }, { unknown: 1 }])(
+    "rejects hostile options before burning the stage: %j",
+    (options) => {
+      const run = sealed();
+      try {
+        expect(() => new SQLiteStreamRecordInvariantCampaign(
+          run.connection, run.projectionIdentity, run.stage, options as never,
+        )).toThrow(CycleStoreProviderError);
+        expect(runSQLiteStreamRecordInvariantCampaign(
+          run.connection, run.projectionIdentity, run.stage,
+        ).diagnostics).toEqual([]);
+      } finally {
+        close(run);
+      }
+    },
+  );
+
+  it("rejects non-enumerable, symbol and accessor options without evaluating hostile getters", () => {
+    const hostile: unknown[] = [];
+    const hidden = {};
+    Object.defineProperty(hidden, "hidden", { value: 1 });
+    hostile.push(hidden, { [Symbol("hidden")]: 1 });
+    let getterCalls = 0;
+    const accessor = {};
+    Object.defineProperty(accessor, "diagnosticLimit", {
+      enumerable: true,
+      get: () => { getterCalls += 1; return 16; },
+    });
+    hostile.push(accessor);
+    for (const options of hostile) {
+      const run = sealed();
+      try {
+        expect(() => new SQLiteStreamRecordInvariantCampaign(
+          run.connection, run.projectionIdentity, run.stage, options as never,
+        )).toThrow(CycleStoreProviderError);
+        expect(runSQLiteStreamRecordInvariantCampaign(
+          run.connection, run.projectionIdentity, run.stage,
+        ).diagnostics).toEqual([]);
+      } finally {
+        close(run);
+      }
+    }
+    expect(getterCalls).toBe(0);
+  });
+
+  it("rejects an equal-content projection clone and burns the exact stage", () => {
+    const run = sealed();
+    try {
+      expect(() => runSQLiteStreamRecordInvariantCampaign(
+        run.connection, Object.freeze({ ...run.projectionIdentity }), run.stage,
+      )).toThrow(/binding/u);
+      expect(run.stage.state).toBe("poisoned");
+    } finally {
+      close(run);
+    }
+  });
+
+  it("is one-shot after success and early abandonment is terminal", () => {
+    const completed = sealed();
+    try {
+      const campaign = new SQLiteStreamRecordInvariantCampaign(
+        completed.connection, completed.projectionIdentity, completed.stage,
+      );
+      expect(campaign.run().diagnostics).toEqual([]);
+      expect(campaign.state).toBe("complete");
+      expect(() => campaign.run()).toThrow(/one-shot/u);
+      expect(completed.stage.state).toBe("poisoned");
+    } finally {
+      close(completed);
+    }
+
+    const abandoned = sealed();
+    try {
+      const campaign = new SQLiteStreamRecordInvariantCampaign(
+        abandoned.connection, abandoned.projectionIdentity, abandoned.stage,
+      );
+      expect(() => campaign.dispose()).toThrow(/abandoned/u);
+      expect(campaign.state).toBe("poisoned");
+      expect(abandoned.stage.state).toBe("poisoned");
+    } finally {
+      close(abandoned);
+    }
+  });
+
+  it("rejects catalog replacement before the campaign can prepare a rule", () => {
+    const run = sealed();
+    try {
+      run.connection.execTrusted(
+        "DROP INDEX temp.ge_blr_records_stream_position_idx",
+        "inspect-schema",
+      );
+      expect(() => runSQLiteStreamRecordInvariantCampaign(
+        run.connection, run.projectionIdentity, run.stage,
+      )).toThrow(/transaction changed|catalog/u);
+      expect(run.stage.state).toBe("poisoned");
+    } finally {
+      close(run);
+    }
+  });
+
+  it.each(SQLITE_STREAM_RECORD_RULES)(
+    "detects DML during $ruleId next() and finalizes exactly once",
+    (target) => {
+    const run = sealed();
+    const originalPrepare = run.connection.prepare.bind(run.connection);
+    let returns = 0;
+    const iterator: Iterator<unknown> & Iterable<unknown> = {
+      [Symbol.iterator]() { return this; },
+      next: () => {
+        run.connection.prepare(
+          "UPDATE temp.ge_blr_stage SET state_blob = state_blob WHERE kind_rank = 0",
+          "inspect-schema",
+        ).run();
+        return { done: true, value: undefined };
+      },
+      return: () => { returns += 1; return { done: true, value: undefined }; },
+    };
+    const prepare = vi.spyOn(run.connection, "prepare").mockImplementation(
+      (sql, operation) => sql === target.sql
+        ? ({ iterate: () => iterator } as never)
+        : originalPrepare(sql, operation),
+    );
+    try {
+      expect(() => runSQLiteStreamRecordInvariantCampaign(
+        run.connection, run.projectionIdentity, run.stage,
+      )).toThrow(/unexplained write/u);
+      expect(returns).toBe(1);
+      expect(run.stage.state).toBe("poisoned");
+    } finally {
+      prepare.mockRestore();
+      close(run);
+    }
+    },
+  );
+
+  it("detects DML from iterator close after EOF", () => {
+    const run = sealed();
+    const target = SQLITE_STREAM_RECORD_RULES[0];
+    const originalPrepare = run.connection.prepare.bind(run.connection);
+    let returns = 0;
+    const iterator: Iterator<unknown> & Iterable<unknown> = {
+      [Symbol.iterator]() { return this; },
+      next: () => ({ done: true, value: undefined }),
+      return: () => {
+        returns += 1;
+        run.connection.prepare(
+          "UPDATE temp.ge_blr_stage SET state_blob = state_blob WHERE kind_rank = 0",
+          "inspect-schema",
+        ).run();
+        return { done: true, value: undefined };
+      },
+    };
+    const prepare = vi.spyOn(run.connection, "prepare").mockImplementation(
+      (sql, operation) => sql === target.sql
+        ? ({ iterate: () => iterator } as never)
+        : originalPrepare(sql, operation),
+    );
+    try {
+      expect(() => runSQLiteStreamRecordInvariantCampaign(
+        run.connection, run.projectionIdentity, run.stage,
+      )).toThrow(/unexplained write/u);
+      expect(returns).toBe(1);
+    } finally {
+      prepare.mockRestore();
+      close(run);
+    }
+  });
+
+  it("detects mid-rule catalog replacement at the post-fetch fence", () => {
+    const run = sealed();
+    const target = SQLITE_STREAM_RECORD_RULES[2];
+    const originalPrepare = run.connection.prepare.bind(run.connection);
+    let returns = 0;
+    const iterator: Iterator<unknown> & Iterable<unknown> = {
+      [Symbol.iterator]() { return this; },
+      next: () => {
+        run.connection.execTrusted(
+          "DROP INDEX temp.ge_blr_records_stream_position_idx",
+          "inspect-schema",
+        );
+        return { done: true, value: undefined };
+      },
+      return: () => { returns += 1; return { done: true, value: undefined }; },
+    };
+    const prepare = vi.spyOn(run.connection, "prepare").mockImplementation(
+      (sql, operation) => sql === target.sql
+        ? ({ iterate: () => iterator } as never)
+        : originalPrepare(sql, operation),
+    );
+    try {
+      expect(() => runSQLiteStreamRecordInvariantCampaign(
+        run.connection, run.projectionIdentity, run.stage,
+      )).toThrow(/transaction changed|catalog/u);
+      expect(returns).toBe(1);
+      expect(run.stage.state).toBe("poisoned");
+    } finally {
+      prepare.mockRestore();
+      close(run);
+    }
+  });
+
+  it("detects DML after a diagnostic append but before the next rule", () => {
+    const run = sealed();
+    const target = SQLITE_STREAM_RECORD_RULES[0];
+    const originalPrepare = run.connection.prepare.bind(run.connection);
+    const originalFence = run.stage[SQLITE_BASELINE_FENCE_STREAM_RECORD_CAMPAIGN]
+      .bind(run.stage);
+    let closed = false;
+    let closedFences = 0;
+    let emitted = false;
+    const iterator: Iterator<unknown> & Iterable<unknown> = {
+      [Symbol.iterator]() { return this; },
+      next: () => emitted
+        ? { done: true, value: undefined }
+        : (emitted = true, { done: false, value: [1n] }),
+      return: () => { closed = true; return { done: true, value: undefined }; },
+    };
+    const prepare = vi.spyOn(run.connection, "prepare").mockImplementation(
+      (sql, operation) => sql === target.sql
+        ? ({ iterate: () => iterator } as never)
+        : originalPrepare(sql, operation),
+    );
+    const fence = vi.spyOn(
+      run.stage,
+      SQLITE_BASELINE_FENCE_STREAM_RECORD_CAMPAIGN,
+    ).mockImplementation((session) => {
+      if (closed) {
+        closedFences += 1;
+        if (closedFences === 3) {
+          run.connection.prepare(
+            "UPDATE temp.ge_blr_stage SET state_blob = state_blob WHERE kind_rank = 0",
+            "inspect-schema",
+          ).run();
+        }
+      }
+      originalFence(session);
+    });
+    try {
+      expect(() => runSQLiteStreamRecordInvariantCampaign(
+        run.connection, run.projectionIdentity, run.stage,
+      )).toThrow(/unexplained write/u);
+      expect(closedFences).toBe(3);
+    } finally {
+      fence.mockRestore();
+      prepare.mockRestore();
+      close(run);
+    }
+  });
+
+  it("detects DML at terminal campaign completion", () => {
+    const run = sealed();
+    const originalComplete = run.stage[SQLITE_BASELINE_COMPLETE_STREAM_RECORD_CAMPAIGN]
+      .bind(run.stage);
+    const complete = vi.spyOn(
+      run.stage,
+      SQLITE_BASELINE_COMPLETE_STREAM_RECORD_CAMPAIGN,
+    ).mockImplementation((session) => {
+      run.connection.prepare(
+        "UPDATE temp.ge_blr_stage SET state_blob = state_blob WHERE kind_rank = 0",
+        "inspect-schema",
+      ).run();
+      originalComplete(session);
+    });
+    try {
+      expect(() => runSQLiteStreamRecordInvariantCampaign(
+        run.connection, run.projectionIdentity, run.stage,
+      )).toThrow(/unexplained write/u);
+      expect(run.stage.state).toBe("poisoned");
+    } finally {
+      complete.mockRestore();
+      close(run);
+    }
+  });
+
+  it("preserves a primary query failure over iterator cleanup failure", () => {
+    const run = sealed();
+    const target = SQLITE_STREAM_RECORD_RULES[0];
+    const originalPrepare = run.connection.prepare.bind(run.connection);
+    let returns = 0;
+    const iterator: Iterator<unknown> & Iterable<unknown> = {
+      [Symbol.iterator]() { return this; },
+      next: () => { throw new Error("authoritative invariant read failure"); },
+      return: () => { returns += 1; throw new Error("secondary cleanup failure"); },
+    };
+    const prepare = vi.spyOn(run.connection, "prepare").mockImplementation(
+      (sql, operation) => sql === target.sql
+        ? ({ iterate: () => iterator } as never)
+        : originalPrepare(sql, operation),
+    );
+    try {
+      expect(() => runSQLiteStreamRecordInvariantCampaign(
+        run.connection, run.projectionIdentity, run.stage,
+      )).toThrowError("SQLite baseline stream/record campaign failed");
+      expect(returns).toBe(1);
+      expect(run.stage.state).toBe("poisoned");
+    } finally {
+      prepare.mockRestore();
+      close(run);
+    }
+  });
+
+  it("stage disposal surfaces an active cursor cleanup failure after removing owned TEMP objects", () => {
+    const run = sealed();
+    const target = SQLITE_STREAM_RECORD_RULES[0];
+    const originalPrepare = run.connection.prepare.bind(run.connection);
+    let returns = 0;
+    const iterator: Iterator<unknown> & Iterable<unknown> = {
+      [Symbol.iterator]() { return this; },
+      next: () => {
+        run.stage.dispose();
+        return { done: true, value: undefined };
+      },
+      return: () => {
+        returns += 1;
+        throw new Error("active campaign cleanup failure");
+      },
+    };
+    const prepare = vi.spyOn(run.connection, "prepare").mockImplementation(
+      (sql, operation) => sql === target.sql
+        ? ({ iterate: () => iterator } as never)
+        : originalPrepare(sql, operation),
+    );
+    try {
+      expect(() => runSQLiteStreamRecordInvariantCampaign(
+        run.connection, run.projectionIdentity, run.stage,
+      )).toThrowError("SQLite baseline stream/record campaign failed");
+      expect(returns).toBe(1);
+      expect(run.connection.prepare(
+        "SELECT count(*) FROM temp.sqlite_schema WHERE substr(lower(name), 1, 7) = 'ge_blr_'",
+        "inspect-schema",
+      ).get()).toEqual([0n]);
+      expect(run.stage.state).toBe("poisoned");
+    } finally {
+      prepare.mockRestore();
+      if (run.connection.isTransaction) {
+        run.connection.execTrusted("ROLLBACK", "inspect-schema");
+      }
+      run.connection.close();
     }
   });
 });

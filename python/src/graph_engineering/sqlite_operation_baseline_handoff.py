@@ -41,7 +41,7 @@ def _project_ordered_sqlite_v1_baseline_temp_stage(
         if identity.entry_count != summary.expected_entry_count:
             raise ValueError("BLR_HANDOFF_COUNT: projection identity count drifted")
         stage._assert_ordered_handoff_fence(stage._allowed_total_changes)
-        stage._complete_ordered_projection_reader(reader)
+        stage._complete_ordered_projection_reader(reader, identity)
         return identity
     except BaseException:
         if reader is not None:

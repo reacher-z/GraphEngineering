@@ -371,9 +371,13 @@ def test_dml_at_post_fetch_boundaries_is_rejected(
     else:
         original_complete = SQLiteV1BaselineTempStage._complete_ordered_projection_reader
 
-        def complete(stage_value: SQLiteV1BaselineTempStage, reader: object) -> None:
+        def complete(
+            stage_value: SQLiteV1BaselineTempStage,
+            reader: object,
+            identity: BaselineProjectionIdentity,
+        ) -> None:
             inject_once()
-            original_complete(stage_value, reader)  # type: ignore[arg-type]
+            original_complete(stage_value, reader, identity)  # type: ignore[arg-type]
 
         monkeypatch.setattr(
             SQLiteV1BaselineTempStage,

@@ -18,18 +18,24 @@ import {
   encodeOperationBaselineState,
   type OperationBaselineEntryInput,
   type OperationBaselineEntryKind,
+  type OperationBaselineProjectionIdentity,
   validateOperationBaselineEntryBytes,
 } from "./operation-baseline.js";
 import {
+  SQLITE_BASELINE_ABORT_STREAM_RECORD_CAMPAIGN,
   SQLITE_BASELINE_COOPERATIVE_POISON,
   SQLITE_BASELINE_ABORT_ORDERED_HANDOFF,
   SQLITE_BASELINE_BEGIN_ORDERED_HANDOFF,
+  SQLITE_BASELINE_BEGIN_STREAM_RECORD_CAMPAIGN,
   SQLITE_BASELINE_COMPLETE_ORDERED_HANDOFF,
+  SQLITE_BASELINE_COMPLETE_STREAM_RECORD_CAMPAIGN,
   SQLITE_BASELINE_CONSUME_OWNED_WRITE,
   SQLITE_BASELINE_FENCE_ORDERED_HANDOFF,
+  SQLITE_BASELINE_FENCE_STREAM_RECORD_CAMPAIGN,
   SQLITE_BASELINE_FINISH_COOPERATIVE_WRITES,
   SQLITE_BASELINE_OWNED_WRITE,
   SQLITE_BASELINE_REGISTER_ORDERED_HANDOFF_CLEANUP,
+  SQLITE_BASELINE_REGISTER_STREAM_RECORD_CLEANUP,
   type SQLiteBaselineOwnedWriteReceipt,
 } from "./operation-baseline-cooperation.js";
 import {
@@ -1098,6 +1104,11 @@ export class SQLiteBaselineTempStage {
   #orderedHandoffState: "unused" | "active" | "complete" | "poisoned" = "unused";
   #orderedHandoffSession: object | undefined;
   #orderedHandoffCleanup: (() => void) | undefined;
+  #orderedProjectionIdentity: OperationBaselineProjectionIdentity | undefined;
+  #orderedExpectedCounts: Readonly<Record<OperationBaselineEntryKind, number>> | undefined;
+  #streamRecordCampaignState: "unused" | "active" | "complete" | "poisoned" = "unused";
+  #streamRecordCampaignSession: object | undefined;
+  #streamRecordCampaignCleanup: (() => void) | undefined;
   #cooperativeWritesFinished = false;
 
   constructor(
@@ -1271,6 +1282,7 @@ export class SQLiteBaselineTempStage {
   [SQLITE_BASELINE_BEGIN_ORDERED_HANDOFF](
     connection: SQLiteConnection,
     expectedEntryCount: number,
+    expectedCounts: Readonly<Record<OperationBaselineEntryKind, number>>,
     expectedTotalChanges: number,
     transactionEpoch: bigint,
   ): object {
@@ -1298,6 +1310,7 @@ export class SQLiteBaselineTempStage {
         ) !== expectedEntryCount) {
       return this.#poison("SQLite baseline ordered handoff binding is invalid");
     }
+    this.assertCommonCounts(expectedCounts);
     const catalogEpoch = this.#connection.transactionEpoch;
     validateBaselineTempCatalog(this.#connection);
     if (this.#connection.transactionEpoch !== catalogEpoch
@@ -1308,6 +1321,7 @@ export class SQLiteBaselineTempStage {
     this.#requireAllowedChanges();
     const session = Object.freeze(Object.create(null)) as object;
     this.#orderedHandoffSession = session;
+    this.#orderedExpectedCounts = Object.freeze({ ...expectedCounts });
     this.#orderedHandoffState = "active";
     return session;
   }
@@ -1341,11 +1355,14 @@ export class SQLiteBaselineTempStage {
   /** Seal the exact one-shot handoff after every terminal barrier passes. */
   [SQLITE_BASELINE_COMPLETE_ORDERED_HANDOFF](
     session: object,
-    actualEntryCount: number,
+    projectionIdentity: OperationBaselineProjectionIdentity,
   ): void {
     this[SQLITE_BASELINE_FENCE_ORDERED_HANDOFF](session);
-    if (!Number.isSafeInteger(actualEntryCount)
-        || actualEntryCount !== this.#nextOwnedWriteSequence
+    if (projectionIdentity === null
+        || typeof projectionIdentity !== "object"
+        || !Object.isFrozen(projectionIdentity)
+        || !Number.isSafeInteger(projectionIdentity.entryCount)
+        || projectionIdentity.entryCount !== this.#nextOwnedWriteSequence
         || this.#orderedHandoffCleanup !== undefined) {
       return this.#poison("SQLite baseline ordered handoff completion is invalid");
     }
@@ -1359,6 +1376,7 @@ export class SQLiteBaselineTempStage {
     this.#requireAllowedChanges();
     this.#orderedHandoffSession = undefined;
     this.#orderedHandoffState = "complete";
+    this.#orderedProjectionIdentity = projectionIdentity;
   }
 
   /** Finalize the current statement and poison every incomplete handoff. */
@@ -1378,6 +1396,97 @@ export class SQLiteBaselineTempStage {
     }
     this.#orderedHandoffSession = undefined;
     this.#orderedHandoffState = "poisoned";
+    return this.#poison(message);
+  }
+
+  /** Bind the first relational campaign to the exact sealed handoff identity. */
+  [SQLITE_BASELINE_BEGIN_STREAM_RECORD_CAMPAIGN](
+    connection: SQLiteConnection,
+    projectionIdentity: OperationBaselineProjectionIdentity,
+  ): object {
+    this.#requireOpenOwner();
+    if (this.#streamRecordCampaignState !== "unused"
+        || this.#orderedHandoffState !== "complete"
+        || connection !== this.#connection
+        || projectionIdentity !== this.#orderedProjectionIdentity
+        || projectionIdentity.entryCount !== this.#nextOwnedWriteSequence) {
+      return this.#poison("SQLite baseline stream/record campaign binding is invalid");
+    }
+    this.#assertExactBaselineCatalog("stream/record campaign begin");
+    const campaignSession = Object.freeze(Object.create(null)) as object;
+    this.#streamRecordCampaignSession = campaignSession;
+    this.#streamRecordCampaignState = "active";
+    return campaignSession;
+  }
+
+  /** Re-prove owner, write counter, transaction epoch and exact TEMP catalog. */
+  [SQLITE_BASELINE_FENCE_STREAM_RECORD_CAMPAIGN](session: object): void {
+    this.#requireOpenOwner();
+    if (this.#streamRecordCampaignState !== "active"
+        || session !== this.#streamRecordCampaignSession) {
+      return this.#poison("SQLite baseline stream/record campaign session is invalid");
+    }
+    this.#requireAllowedChanges();
+    this.#assertExactBaselineCatalog("stream/record campaign fence");
+    this.#requireAllowedChanges();
+  }
+
+  /** Register only the current bounded witness iterator finalizer. */
+  [SQLITE_BASELINE_REGISTER_STREAM_RECORD_CLEANUP](
+    session: object,
+    cleanup: (() => void) | undefined,
+  ): void {
+    this[SQLITE_BASELINE_FENCE_STREAM_RECORD_CAMPAIGN](session);
+    if (cleanup !== undefined && this.#streamRecordCampaignCleanup !== undefined) {
+      return this.#poison("SQLite baseline stream/record cleanup is already registered");
+    }
+    this.#streamRecordCampaignCleanup = cleanup;
+  }
+
+  /** Seal the one-shot campaign only after every rule and terminal fence passes. */
+  [SQLITE_BASELINE_COMPLETE_STREAM_RECORD_CAMPAIGN](session: object): void {
+    this[SQLITE_BASELINE_FENCE_STREAM_RECORD_CAMPAIGN](session);
+    const projectionIdentity = this.#orderedProjectionIdentity;
+    const expectedCounts = this.#orderedExpectedCounts;
+    if (this.#streamRecordCampaignCleanup !== undefined
+        || projectionIdentity === undefined
+        || expectedCounts === undefined
+        || scalarCount(
+          this.#connection,
+          `SELECT count(*) FROM temp.${STAGE_TABLE}`,
+          "TEMP stream/record campaign common count",
+        ) !== projectionIdentity.entryCount
+        || scalarCount(
+          this.#connection,
+          `SELECT count(*) FROM temp.${RELATION_VIEW}`,
+          "TEMP stream/record campaign relation count",
+        ) !== projectionIdentity.entryCount) {
+      return this.#poison("SQLite baseline stream/record completion is invalid");
+    }
+    this.assertCommonCounts(expectedCounts);
+    this.assertRelationKeyCoverage();
+    this[SQLITE_BASELINE_FENCE_STREAM_RECORD_CAMPAIGN](session);
+    this.#streamRecordCampaignSession = undefined;
+    this.#streamRecordCampaignState = "complete";
+  }
+
+  /** Finalize the current witness iterator while preserving its primary failure. */
+  [SQLITE_BASELINE_ABORT_STREAM_RECORD_CAMPAIGN](
+    session: object | undefined,
+    message: string,
+  ): never {
+    const campaignCleanup = this.#streamRecordCampaignCleanup;
+    this.#streamRecordCampaignCleanup = undefined;
+    try {
+      campaignCleanup?.();
+    } catch {
+      // The authoritative rule or fence failure remains primary.
+    }
+    if (session !== undefined && session !== this.#streamRecordCampaignSession) {
+      message = "SQLite baseline stream/record campaign session is invalid";
+    }
+    this.#streamRecordCampaignSession = undefined;
+    this.#streamRecordCampaignState = "poisoned";
     return this.#poison(message);
   }
 
@@ -1525,9 +1634,20 @@ export class SQLiteBaselineTempStage {
       this.#orderedHandoffSession = undefined;
       this.#orderedHandoffState = "poisoned";
     }
+    if (this.#streamRecordCampaignState === "active") {
+      try {
+        this.#streamRecordCampaignCleanup?.();
+      } catch (error) {
+        handoffCleanupFailure ??= error;
+      }
+      this.#streamRecordCampaignCleanup = undefined;
+      this.#streamRecordCampaignSession = undefined;
+      this.#streamRecordCampaignState = "poisoned";
+    }
     if (!this.#connection.isOpen) {
       this.#state = "disposed";
       ACTIVE_STAGES.delete(this.#connection);
+      if (handoffCleanupFailure !== undefined) throw handoffCleanupFailure;
       return;
     }
     if (!this.#connection.isTransaction
@@ -1537,6 +1657,7 @@ export class SQLiteBaselineTempStage {
       // fixed names. A stale stage must never delete those replacement objects.
       this.#state = "disposed";
       ACTIVE_STAGES.delete(this.#connection);
+      if (handoffCleanupFailure !== undefined) throw handoffCleanupFailure;
       return;
     }
     const drops = [
@@ -1689,11 +1810,30 @@ export class SQLiteBaselineTempStage {
     this.#allowedTotalChanges = after;
   }
 
+  #assertExactBaselineCatalog(label: string): void {
+    const catalogEpoch = this.#connection.transactionEpoch;
+    try {
+      validateBaselineTempCatalog(this.#connection);
+    } catch {
+      return this.#poison(`SQLite baseline ${label} catalog is invalid`);
+    }
+    if (this.#connection.transactionEpoch !== catalogEpoch
+        || reservedCatalogCount(this.#connection) !== EXPECTED_RESERVED_OBJECT_COUNT) {
+      return this.#poison(`SQLite baseline ${label} catalog is invalid`);
+    }
+    this.#transactionEpoch = this.#connection.transactionEpoch;
+  }
+
   #poison(message: string): never {
     this.#pendingOwnedWrite = undefined;
     this.#orderedHandoffCleanup = undefined;
     this.#orderedHandoffSession = undefined;
     if (this.#orderedHandoffState === "active") this.#orderedHandoffState = "poisoned";
+    this.#streamRecordCampaignCleanup = undefined;
+    this.#streamRecordCampaignSession = undefined;
+    if (this.#streamRecordCampaignState === "active") {
+      this.#streamRecordCampaignState = "poisoned";
+    }
     this.#state = "poisoned";
     throw new CycleStoreProviderError(
       "GE_CYCLE_STORE_CORRUPTION",
