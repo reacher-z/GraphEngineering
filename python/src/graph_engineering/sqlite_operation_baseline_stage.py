@@ -2,14 +2,531 @@
 
 from __future__ import annotations
 
+import sqlite3
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Literal
+from types import TracebackType
+from typing import Literal, Never
 
+from .models import MAX_SAFE_INTEGER
+from .sqlite_operation_baseline import (
+    BASELINE_ENTRY_KINDS,
+    BaselineEntryInput,
+    BaselineEntryKind,
+    capture_baseline_entry,
+)
 from .sqlite_operation_baseline_source import SQLiteV1BaselineConnectionOwner
 
 DEFAULT_SQLITE_V1_BASELINE_TEMP_CACHE_KIB = 8_192
 MIN_SQLITE_V1_BASELINE_TEMP_CACHE_KIB = 1_024
 MAX_SQLITE_V1_BASELINE_TEMP_CACHE_KIB = 65_536
+
+SQLITE_V1_BASELINE_COMMON_STAGE_TABLE = "ge_blr_stage"
+SQLITE_V1_BASELINE_RELATION_KEYS_VIEW = "ge_blr_relation_keys"
+SQLITE_V1_BASELINE_RELATION_TABLES: tuple[str, ...] = (
+    "ge_blr_schema",
+    "ge_blr_migrations",
+    "ge_blr_streams",
+    "ge_blr_records",
+    "ge_blr_checkpoint_current",
+    "ge_blr_checkpoint_revisions",
+    "ge_blr_leases",
+    "ge_blr_used_leases",
+    "ge_blr_holds",
+    "ge_blr_migration_lock",
+    "ge_blr_used_migration_locks",
+    "ge_blr_legacy_operations",
+)
+
+SQLiteV1BaselineTempStageState = Literal["open", "poisoned", "disposed"]
+
+_KIND_RANK = {kind: rank for rank, kind in enumerate(BASELINE_ENTRY_KINDS)}
+_KEY_BLOB = (
+    "BLOB NOT NULL CHECK "
+    "(typeof(key_blob) = 'blob' AND length(key_blob) BETWEEN 2 AND 4096)"
+)
+
+
+def _relation_table(name: str, columns: str, primary_key: str) -> str:
+    return f"""CREATE TEMP TABLE {name} (
+ key_blob {_KEY_BLOB},
+ {columns},
+ PRIMARY KEY ({primary_key}),
+ UNIQUE (key_blob)
+) STRICT, WITHOUT ROWID"""
+
+
+_COMMON_KIND_CHECK = " OR\n  ".join(
+    f"(kind_rank = {rank} AND entry_kind = '{kind}')"
+    for rank, kind in enumerate(BASELINE_ENTRY_KINDS)
+)
+
+_LEGACY_TAIL_FIELDS = (
+    "tail_exists",
+    "tail_sequence",
+    "tail_record_hash",
+    "appended_records",
+)
+_LEGACY_CHECKPOINT_FIELDS = (
+    "checkpoint_scope",
+    "checkpoint_id",
+    "checkpoint_stream_id",
+    "checkpoint_bound_sequence",
+    "checkpoint_bound_record_hash",
+    "checkpoint_created_at",
+    "checkpoint_value_hash",
+    "checkpoint_value_bytes",
+)
+_LEGACY_DELETE_FIELDS = ("checkpoint_deleted",)
+_LEGACY_LEASE_FIELDS = (
+    "lease_id",
+    "lease_holder_id",
+    "lease_epoch",
+    "lease_fencing_token",
+    "lease_acquired_at_ms",
+    "lease_expires_at_ms",
+)
+_LEGACY_RELEASE_FIELDS = (
+    "lease_status",
+    "last_lease_epoch",
+    "last_lease_fencing_token",
+)
+_LEGACY_LOCK_FIELDS = (
+    "lock_id",
+    "lock_owner_id",
+    "lock_source_version",
+    "lock_target_version",
+    "lock_epoch",
+    "lock_fencing_token",
+    "lock_acquired_at_ms",
+    "lock_expires_at_ms",
+)
+_LEGACY_DERIVED_FIELDS = (
+    *_LEGACY_TAIL_FIELDS,
+    *_LEGACY_CHECKPOINT_FIELDS,
+    *_LEGACY_DELETE_FIELDS,
+    *_LEGACY_LEASE_FIELDS,
+    *_LEGACY_RELEASE_FIELDS,
+    *_LEGACY_LOCK_FIELDS,
+)
+
+
+def _all_null_sql(fields: tuple[str, ...]) -> str:
+    return " AND ".join(f"{field} IS NULL" for field in fields)
+
+
+def _all_present_sql(fields: tuple[str, ...]) -> str:
+    return " AND ".join(f"{field} IS NOT NULL" for field in fields)
+
+
+def _other_legacy_fields(*retained: tuple[str, ...]) -> tuple[str, ...]:
+    keep = {field for fields in retained for field in fields}
+    return tuple(field for field in _LEGACY_DERIVED_FIELDS if field not in keep)
+
+
+_LEGACY_OPERATION_CHECK = " OR\n  ".join(
+    (
+        "(operation_name = 'append' "
+        f"AND {_all_present_sql(_LEGACY_TAIL_FIELDS)} "
+        "AND tail_exists = 1 AND tail_sequence >= 0 AND tail_record_hash IS NOT NULL "
+        "AND appended_records > 0 AND "
+        f"{_all_null_sql(_other_legacy_fields(_LEGACY_TAIL_FIELDS))})",
+        "(operation_name = 'save-checkpoint' AND "
+        f"{_all_present_sql(_LEGACY_CHECKPOINT_FIELDS)} AND "
+        f"{_all_null_sql(_other_legacy_fields(_LEGACY_CHECKPOINT_FIELDS))})",
+        "(operation_name = 'delete-checkpoint' AND checkpoint_deleted IS NOT NULL "
+        "AND checkpoint_deleted IN (0, 1) AND "
+        f"{_all_null_sql(_other_legacy_fields(_LEGACY_DELETE_FIELDS))})",
+        "(operation_name = 'acquire-lease' AND "
+        f"{_all_present_sql(_LEGACY_LEASE_FIELDS)} "
+        "AND lease_epoch = lease_fencing_token "
+        "AND lease_expires_at_ms > lease_acquired_at_ms AND "
+        f"{_all_null_sql(_other_legacy_fields(_LEGACY_LEASE_FIELDS))})",
+        "(operation_name = 'renew-lease' AND "
+        f"{_all_present_sql(_LEGACY_LEASE_FIELDS)} "
+        "AND lease_epoch = lease_fencing_token "
+        "AND lease_expires_at_ms > lease_acquired_at_ms AND "
+        f"{_all_null_sql(_other_legacy_fields(_LEGACY_LEASE_FIELDS))})",
+        "(operation_name = 'release-lease' AND lease_status = 'released' "
+        "AND last_lease_epoch IS NOT NULL AND last_lease_fencing_token IS NOT NULL "
+        "AND last_lease_epoch = last_lease_fencing_token AND "
+        f"{_all_null_sql(_other_legacy_fields(_LEGACY_RELEASE_FIELDS))})",
+        "(operation_name = 'set-legal-hold' AND "
+        f"{_all_null_sql(_LEGACY_DERIVED_FIELDS)})",
+        "(operation_name = 'acquire-migration-lock' AND "
+        f"{_all_present_sql(_LEGACY_LOCK_FIELDS)} "
+        "AND lock_epoch = lock_fencing_token "
+        "AND lock_target_version > lock_source_version "
+        "AND lock_expires_at_ms > lock_acquired_at_ms AND "
+        f"{_all_null_sql(_other_legacy_fields(_LEGACY_LOCK_FIELDS))})",
+        "(operation_name = 'release-migration-lock' AND "
+        f"{_all_null_sql(_LEGACY_DERIVED_FIELDS)})",
+    )
+)
+
+_TEMP_TABLE_DDL: tuple[tuple[str, str], ...] = (
+    (
+        SQLITE_V1_BASELINE_COMMON_STAGE_TABLE,
+        f"""CREATE TEMP TABLE {SQLITE_V1_BASELINE_COMMON_STAGE_TABLE} (
+ kind_rank INTEGER NOT NULL CHECK (typeof(kind_rank) = 'integer' AND kind_rank BETWEEN 0 AND 11),
+ entry_kind TEXT NOT NULL CHECK (typeof(entry_kind) = 'text'),
+ key_blob {_KEY_BLOB},
+ state_blob BLOB NOT NULL
+   CHECK (typeof(state_blob) = 'blob' AND length(state_blob) BETWEEN 2 AND 2097152),
+ PRIMARY KEY (kind_rank, key_blob),
+ UNIQUE (entry_kind, key_blob),
+ CHECK ({_COMMON_KIND_CHECK})
+) STRICT, WITHOUT ROWID""",
+    ),
+    (
+        "ge_blr_schema",
+        _relation_table(
+            "ge_blr_schema",
+            """singleton INTEGER NOT NULL CHECK (singleton = 1),
+ current_version INTEGER NOT NULL,
+ min_reader_version INTEGER NOT NULL,
+ max_reader_version INTEGER NOT NULL,
+ min_writer_version INTEGER NOT NULL,
+ max_writer_version INTEGER NOT NULL,
+ schema_identity_sha256 TEXT NOT NULL COLLATE BINARY,
+ latest_migration_sha256 TEXT NOT NULL COLLATE BINARY,
+ provider_descriptor_hash TEXT NOT NULL COLLATE BINARY,
+ latest_migration_applied_at_ms INTEGER NOT NULL,
+ created_at_ms INTEGER NOT NULL,
+ updated_at_ms INTEGER NOT NULL,
+ CHECK (updated_at_ms >= created_at_ms)""",
+            "singleton",
+        ),
+    ),
+    (
+        "ge_blr_migrations",
+        _relation_table(
+            "ge_blr_migrations",
+            """version INTEGER NOT NULL,
+ previous_version INTEGER NOT NULL,
+ migration_id TEXT NOT NULL COLLATE BINARY,
+ sql_sha256 TEXT NOT NULL COLLATE BINARY,
+ schema_identity_sha256 TEXT NOT NULL COLLATE BINARY,
+ applied_at_ms INTEGER NOT NULL""",
+            "version",
+        ),
+    ),
+    (
+        "ge_blr_streams",
+        _relation_table(
+            "ge_blr_streams",
+            """tenant_id TEXT NOT NULL COLLATE BINARY,
+ stream_id TEXT NOT NULL COLLATE BINARY,
+ tail_sequence INTEGER NOT NULL,
+ tail_record_hash TEXT,
+ created_at_ms INTEGER NOT NULL,
+ updated_at_ms INTEGER NOT NULL,
+ CHECK (tail_sequence >= -1),
+ CHECK ((tail_sequence = -1 AND tail_record_hash IS NULL)
+   OR (tail_sequence >= 0 AND tail_record_hash IS NOT NULL)),
+ CHECK (updated_at_ms >= created_at_ms)""",
+            "tenant_id, stream_id",
+        ),
+    ),
+    (
+        "ge_blr_records",
+        _relation_table(
+            "ge_blr_records",
+            """tenant_id TEXT NOT NULL COLLATE BINARY,
+ stream_id TEXT NOT NULL COLLATE BINARY,
+ record_id TEXT NOT NULL COLLATE BINARY,
+ sequence INTEGER NOT NULL,
+ previous_record_hash TEXT,
+ record_hash TEXT NOT NULL COLLATE BINARY,
+ value_hash TEXT NOT NULL COLLATE BINARY,
+ value_bytes INTEGER NOT NULL,
+ committed_at_ms INTEGER NOT NULL,
+ CHECK (sequence >= 0),
+ CHECK ((sequence = 0 AND previous_record_hash IS NULL)
+   OR (sequence > 0 AND previous_record_hash IS NOT NULL)),
+ CHECK (value_bytes >= 1)""",
+            "tenant_id, record_id",
+        ),
+    ),
+    (
+        "ge_blr_checkpoint_current",
+        _relation_table(
+            "ge_blr_checkpoint_current",
+            """tenant_id TEXT NOT NULL COLLATE BINARY,
+ checkpoint_scope TEXT NOT NULL COLLATE BINARY,
+ checkpoint_id TEXT NOT NULL COLLATE BINARY,
+ stream_id TEXT NOT NULL COLLATE BINARY,
+ bound_sequence INTEGER NOT NULL,
+ bound_record_hash TEXT NOT NULL COLLATE BINARY,
+ checkpoint_revision INTEGER NOT NULL,
+ checkpoint_created_at TEXT NOT NULL COLLATE BINARY,
+ value_hash TEXT NOT NULL COLLATE BINARY,
+ value_bytes INTEGER NOT NULL,
+ committed_at_ms INTEGER NOT NULL""",
+            "tenant_id, checkpoint_scope, checkpoint_id",
+        ),
+    ),
+    (
+        "ge_blr_checkpoint_revisions",
+        _relation_table(
+            "ge_blr_checkpoint_revisions",
+            """tenant_id TEXT NOT NULL COLLATE BINARY,
+ checkpoint_scope TEXT NOT NULL COLLATE BINARY,
+ revision INTEGER NOT NULL,
+ checkpoint_id TEXT NOT NULL COLLATE BINARY,
+ action TEXT NOT NULL CHECK (action IN ('put', 'delete')),
+ stream_id TEXT,
+ bound_sequence INTEGER,
+ bound_record_hash TEXT,
+ checkpoint_created_at TEXT,
+ value_hash TEXT,
+ value_bytes INTEGER,
+ recorded_at_ms INTEGER NOT NULL,
+ CHECK (
+   (action = 'put' AND stream_id IS NOT NULL AND bound_sequence IS NOT NULL
+    AND bound_record_hash IS NOT NULL AND checkpoint_created_at IS NOT NULL
+    AND value_hash IS NOT NULL AND value_bytes IS NOT NULL)
+   OR
+   (action = 'delete' AND stream_id IS NULL AND bound_sequence IS NULL
+    AND bound_record_hash IS NULL AND checkpoint_created_at IS NULL
+    AND value_hash IS NULL AND value_bytes IS NULL)
+ )""",
+            "tenant_id, checkpoint_scope, revision",
+        ),
+    ),
+    (
+        "ge_blr_leases",
+        _relation_table(
+            "ge_blr_leases",
+            """tenant_id TEXT NOT NULL COLLATE BINARY,
+ stream_id TEXT NOT NULL COLLATE BINARY,
+ active_lease_id TEXT,
+ active_holder_id TEXT,
+ active_lease_epoch INTEGER,
+ active_fencing_token INTEGER,
+ active_acquired_at_ms INTEGER,
+ active_expires_at_ms INTEGER,
+ last_lease_epoch INTEGER NOT NULL,
+ last_fencing_token INTEGER NOT NULL,
+ updated_at_ms INTEGER NOT NULL,
+ CHECK (last_lease_epoch = last_fencing_token AND last_lease_epoch >= 0),
+ CHECK (
+   (active_lease_id IS NULL AND active_holder_id IS NULL
+    AND active_lease_epoch IS NULL AND active_fencing_token IS NULL
+    AND active_acquired_at_ms IS NULL AND active_expires_at_ms IS NULL)
+   OR
+   (active_lease_id IS NOT NULL AND active_holder_id IS NOT NULL
+    AND active_lease_epoch IS NOT NULL AND active_fencing_token IS NOT NULL
+    AND active_acquired_at_ms IS NOT NULL AND active_expires_at_ms IS NOT NULL
+    AND active_lease_epoch = active_fencing_token
+    AND active_lease_epoch = last_lease_epoch
+    AND active_expires_at_ms > active_acquired_at_ms)
+ )""",
+            "tenant_id, stream_id",
+        ),
+    ),
+    (
+        "ge_blr_used_leases",
+        _relation_table(
+            "ge_blr_used_leases",
+            """tenant_id TEXT NOT NULL COLLATE BINARY,
+ stream_id TEXT NOT NULL COLLATE BINARY,
+ lease_id TEXT NOT NULL COLLATE BINARY,
+ lease_epoch INTEGER NOT NULL,
+ fencing_token INTEGER NOT NULL,
+ first_used_at_ms INTEGER NOT NULL,
+ CHECK (lease_epoch = fencing_token AND lease_epoch >= 1)""",
+            "tenant_id, stream_id, lease_id",
+        ),
+    ),
+    (
+        "ge_blr_holds",
+        _relation_table(
+            "ge_blr_holds",
+            """tenant_id TEXT NOT NULL COLLATE BINARY,
+ stream_id TEXT NOT NULL COLLATE BINARY,
+ hold_id TEXT NOT NULL COLLATE BINARY,
+ placed_at_ms INTEGER NOT NULL""",
+            "tenant_id, stream_id, hold_id",
+        ),
+    ),
+    (
+        "ge_blr_migration_lock",
+        _relation_table(
+            "ge_blr_migration_lock",
+            """singleton INTEGER NOT NULL CHECK (singleton = 1),
+ active_lock_id TEXT,
+ active_owner_id TEXT,
+ active_source_version INTEGER,
+ active_target_version INTEGER,
+ active_lock_epoch INTEGER,
+ active_fencing_token INTEGER,
+ active_acquired_at_ms INTEGER,
+ active_expires_at_ms INTEGER,
+ last_lock_epoch INTEGER NOT NULL,
+ last_fencing_token INTEGER NOT NULL,
+ updated_at_ms INTEGER NOT NULL,
+ CHECK (last_lock_epoch = last_fencing_token AND last_lock_epoch >= 0),
+ CHECK (
+   (active_lock_id IS NULL AND active_owner_id IS NULL
+    AND active_source_version IS NULL AND active_target_version IS NULL
+    AND active_lock_epoch IS NULL AND active_fencing_token IS NULL
+    AND active_acquired_at_ms IS NULL AND active_expires_at_ms IS NULL)
+   OR
+   (active_lock_id IS NOT NULL AND active_owner_id IS NOT NULL
+    AND active_source_version IS NOT NULL AND active_target_version IS NOT NULL
+    AND active_lock_epoch IS NOT NULL AND active_fencing_token IS NOT NULL
+    AND active_acquired_at_ms IS NOT NULL AND active_expires_at_ms IS NOT NULL
+    AND active_target_version > active_source_version
+    AND active_lock_epoch = active_fencing_token
+    AND active_lock_epoch = last_lock_epoch
+    AND active_expires_at_ms > active_acquired_at_ms)
+ )""",
+            "singleton",
+        ),
+    ),
+    (
+        "ge_blr_used_migration_locks",
+        _relation_table(
+            "ge_blr_used_migration_locks",
+            """lock_id TEXT NOT NULL COLLATE BINARY,
+ lock_epoch INTEGER NOT NULL,
+ fencing_token INTEGER NOT NULL,
+ first_used_at_ms INTEGER NOT NULL,
+ CHECK (lock_epoch = fencing_token AND lock_epoch >= 1)""",
+            "lock_id",
+        ),
+    ),
+    (
+        "ge_blr_legacy_operations",
+        _relation_table(
+            "ge_blr_legacy_operations",
+            f"""tenant_id TEXT NOT NULL COLLATE BINARY,
+ operation_id TEXT NOT NULL COLLATE BINARY,
+ operation_name TEXT NOT NULL COLLATE BINARY,
+ request_hash TEXT NOT NULL COLLATE BINARY,
+ result_hash TEXT NOT NULL COLLATE BINARY,
+ result_blob_sha256 TEXT NOT NULL COLLATE BINARY,
+ committed_at_ms INTEGER NOT NULL,
+ tail_exists INTEGER,
+ tail_sequence INTEGER,
+ tail_record_hash TEXT,
+ appended_records INTEGER,
+ checkpoint_scope TEXT,
+ checkpoint_id TEXT,
+ checkpoint_stream_id TEXT,
+ checkpoint_bound_sequence INTEGER,
+ checkpoint_bound_record_hash TEXT,
+ checkpoint_created_at TEXT,
+ checkpoint_value_hash TEXT,
+ checkpoint_value_bytes INTEGER,
+ checkpoint_deleted INTEGER,
+ lease_id TEXT,
+ lease_holder_id TEXT,
+ lease_epoch INTEGER,
+ lease_fencing_token INTEGER,
+ lease_acquired_at_ms INTEGER,
+ lease_expires_at_ms INTEGER,
+ lease_status TEXT,
+ last_lease_epoch INTEGER,
+ last_lease_fencing_token INTEGER,
+ lock_id TEXT,
+ lock_owner_id TEXT,
+ lock_source_version INTEGER,
+ lock_target_version INTEGER,
+ lock_epoch INTEGER,
+ lock_fencing_token INTEGER,
+ lock_acquired_at_ms INTEGER,
+ lock_expires_at_ms INTEGER,
+ CHECK ({_LEGACY_OPERATION_CHECK})""",
+            "tenant_id, operation_id",
+        ),
+    ),
+)
+
+_TEMP_INDEX_DDL: tuple[str, ...] = (
+    "CREATE UNIQUE INDEX ge_blr_records_tenant_hash_uidx ON ge_blr_records "
+    "(tenant_id, record_hash)",
+    "CREATE UNIQUE INDEX ge_blr_records_stream_sequence_uidx ON ge_blr_records "
+    "(tenant_id, stream_id, sequence)",
+    "CREATE INDEX ge_blr_records_stream_position_idx ON ge_blr_records "
+    "(tenant_id, stream_id, sequence, record_hash)",
+    "CREATE INDEX ge_blr_checkpoint_current_record_idx ON ge_blr_checkpoint_current "
+    "(tenant_id, stream_id, bound_sequence, bound_record_hash)",
+    "CREATE INDEX ge_blr_checkpoint_revisions_latest_idx ON ge_blr_checkpoint_revisions "
+    "(tenant_id, checkpoint_scope, checkpoint_id, revision DESC)",
+    "CREATE INDEX ge_blr_checkpoint_revisions_record_idx ON ge_blr_checkpoint_revisions "
+    "(tenant_id, stream_id, bound_sequence, bound_record_hash)",
+    "CREATE UNIQUE INDEX ge_blr_used_leases_epoch_uidx ON ge_blr_used_leases "
+    "(tenant_id, stream_id, lease_epoch)",
+    "CREATE UNIQUE INDEX ge_blr_used_leases_fencing_uidx ON ge_blr_used_leases "
+    "(tenant_id, stream_id, fencing_token)",
+    "CREATE UNIQUE INDEX ge_blr_used_migration_locks_epoch_uidx "
+    "ON ge_blr_used_migration_locks (lock_epoch)",
+    "CREATE UNIQUE INDEX ge_blr_used_migration_locks_fencing_uidx "
+    "ON ge_blr_used_migration_locks (fencing_token)",
+)
+
+_TEMP_INDEX_NAMES: tuple[str, ...] = (
+    "ge_blr_records_tenant_hash_uidx",
+    "ge_blr_records_stream_sequence_uidx",
+    "ge_blr_records_stream_position_idx",
+    "ge_blr_checkpoint_current_record_idx",
+    "ge_blr_checkpoint_revisions_latest_idx",
+    "ge_blr_checkpoint_revisions_record_idx",
+    "ge_blr_used_leases_epoch_uidx",
+    "ge_blr_used_leases_fencing_uidx",
+    "ge_blr_used_migration_locks_epoch_uidx",
+    "ge_blr_used_migration_locks_fencing_uidx",
+)
+
+_TEMP_RELATION_KEYS_VIEW_DDL = f"""CREATE TEMP VIEW {SQLITE_V1_BASELINE_RELATION_KEYS_VIEW} AS
+ SELECT 0 AS kind_rank, key_blob FROM ge_blr_schema
+ UNION ALL SELECT 1, key_blob FROM ge_blr_migrations
+ UNION ALL SELECT 2, key_blob FROM ge_blr_streams
+ UNION ALL SELECT 3, key_blob FROM ge_blr_records
+ UNION ALL SELECT 4, key_blob FROM ge_blr_checkpoint_current
+ UNION ALL SELECT 5, key_blob FROM ge_blr_checkpoint_revisions
+ UNION ALL SELECT 6, key_blob FROM ge_blr_leases
+ UNION ALL SELECT 7, key_blob FROM ge_blr_used_leases
+ UNION ALL SELECT 8, key_blob FROM ge_blr_holds
+ UNION ALL SELECT 9, key_blob FROM ge_blr_migration_lock
+ UNION ALL SELECT 10, key_blob FROM ge_blr_used_migration_locks
+ UNION ALL SELECT 11, key_blob FROM ge_blr_legacy_operations"""
+
+
+def _validate_baseline_temp_catalog(connection: SQLiteV1BaselineConnectionOwner) -> None:
+    expected_objects = {
+        *[("table", name) for name, _sql in _TEMP_TABLE_DDL],
+        *[("index", name) for name in _TEMP_INDEX_NAMES],
+        ("view", SQLITE_V1_BASELINE_RELATION_KEYS_VIEW),
+    }
+    cursor = connection.execute(
+        "SELECT type, name FROM temp.sqlite_schema "
+        "WHERE substr(lower(name), 1, 7) = 'ge_blr_' ORDER BY type, name"
+    )
+    try:
+        object_rows = cursor.fetchmany(len(expected_objects) + 1)
+    finally:
+        cursor.close()
+    if (
+        len(object_rows) != len(expected_objects)
+        or {(row[0], row[1]) for row in object_rows if len(row) == 2} != expected_objects
+    ):
+        raise ValueError("BLR_STAGE_WRITE_COUNT: baseline TEMP catalog identity drifted")
+
+    cursor = connection.execute("PRAGMA temp.table_list")
+    try:
+        table_rows = cursor.fetchmany(len(_TEMP_TABLE_DDL) + 16)
+    finally:
+        cursor.close()
+    catalog = {
+        row[1]: (row[4], row[5])
+        for row in table_rows
+        if len(row) == 6 and row[1] in {name for name, _sql in _TEMP_TABLE_DDL}
+    }
+    if catalog != {name: (1, 1) for name, _sql in _TEMP_TABLE_DDL}:
+        raise ValueError("BLR_STAGE_WRITE_COUNT: baseline TEMP table shape drifted")
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,12 +569,31 @@ def _checked_cache_kib(value: object) -> int:
     return value
 
 
+def _has_baseline_temp_object(connection: SQLiteV1BaselineConnectionOwner) -> bool:
+    cursor = connection.execute(
+        "SELECT 1 FROM temp.sqlite_schema "
+        "WHERE substr(lower(name), 1, 7) = 'ge_blr_' LIMIT 1"
+    )
+    try:
+        return cursor.fetchone() is not None
+    finally:
+        cursor.close()
+
+
 def read_sqlite_v1_baseline_temp_storage(
     connection: SQLiteV1BaselineConnectionOwner,
 ) -> SQLiteV1BaselineTempStorageConfiguration:
     """Read and validate the exact baseline TEMP configuration outside a transaction."""
 
     _require_outside_transaction(connection)
+    return _read_sqlite_v1_baseline_temp_storage(connection)
+
+
+def _read_sqlite_v1_baseline_temp_storage(
+    connection: SQLiteV1BaselineConnectionOwner,
+) -> SQLiteV1BaselineTempStorageConfiguration:
+    """Read the exact TEMP profile without changing transaction ownership."""
+
     temp_store = _read_pragma_integer(connection, "PRAGMA temp_store")
     temp_cache_size = _read_pragma_integer(connection, "PRAGMA temp.cache_size")
     cache_spill_threshold = _read_pragma_integer(connection, "PRAGMA cache_spill")
@@ -95,3 +631,357 @@ def configure_sqlite_v1_baseline_temp_storage(
     if profile.cache_kib != checked_cache_kib:
         raise ValueError("SQLite v1 baseline TEMP cache size read-back drifted")
     return profile
+
+
+class SQLiteV1BaselineTempStage:
+    """EXCLUSIVE-owner-bound TEMP catalog for one baseline reconciliation.
+
+    The stage never owns the transaction.  It neither commits nor rolls back,
+    and disposal only drops the TEMP objects created by this instance.
+    """
+
+    __slots__ = (
+        "_allowed_total_changes",
+        "_connection",
+        "_created_indexes",
+        "_created_tables",
+        "_created_view",
+        "_state",
+        "_transaction_epoch",
+    )
+
+    def __init__(self, connection: SQLiteV1BaselineConnectionOwner) -> None:
+        self._connection = connection
+        self._created_tables: list[str] = []
+        self._created_indexes: list[str] = []
+        self._created_view = False
+        self._state: SQLiteV1BaselineTempStageState = "open"
+        self._transaction_epoch = connection.transaction_epoch
+        self._allowed_total_changes = connection.total_changes
+        if not connection.in_exclusive_transaction:
+            self._state = "disposed"
+            raise ValueError(
+                "BLR_EXCLUSIVE_TRANSACTION_REQUIRED: baseline TEMP stage requires "
+                "the owner EXCLUSIVE transaction"
+            )
+        if _has_baseline_temp_object(connection):
+            self._state = "disposed"
+            raise ValueError(
+                "BLR_STAGE_WRITE_COUNT: baseline TEMP namespace is not empty"
+            )
+        try:
+            _read_sqlite_v1_baseline_temp_storage(connection)
+        except ValueError:
+            self._state = "disposed"
+            raise ValueError(
+                "BLR_TEMP_STORAGE_REQUIRED: baseline TEMP stage requires the "
+                "bounded FILE-backed TEMP profile"
+            ) from None
+        try:
+            for name, sql in _TEMP_TABLE_DDL:
+                _execute_pragma(connection, sql)
+                self._created_tables.append(name)
+                self._transaction_epoch = connection.transaction_epoch
+            for name, sql in zip(_TEMP_INDEX_NAMES, _TEMP_INDEX_DDL, strict=True):
+                _execute_pragma(connection, sql)
+                self._created_indexes.append(name)
+                self._transaction_epoch = connection.transaction_epoch
+            _execute_pragma(connection, _TEMP_RELATION_KEYS_VIEW_DDL)
+            self._created_view = True
+            self._transaction_epoch = connection.transaction_epoch
+            catalog_epoch = connection.transaction_epoch
+            try:
+                _validate_baseline_temp_catalog(connection)
+            finally:
+                # The validator's one PRAGMA table_list read advances the
+                # owner epoch even when shape validation raises. Adopt only
+                # that exact internal read, never an arbitrary caller change.
+                if (
+                    connection.in_exclusive_transaction
+                    and connection.transaction_epoch == catalog_epoch + 1
+                ):
+                    self._transaction_epoch = connection.transaction_epoch
+            if not connection.in_exclusive_transaction:
+                raise ValueError(
+                    "BLR_EXCLUSIVE_TRANSACTION_REQUIRED: baseline TEMP stage lost "
+                    "the owner EXCLUSIVE transaction"
+                )
+            if connection.total_changes != self._allowed_total_changes:
+                raise ValueError(
+                    "BLR_UNEXPLAINED_WRITE: baseline TEMP catalog creation changed rows"
+                )
+            self._transaction_epoch = connection.transaction_epoch
+        except Exception as error:
+            self._state = "disposed"
+            self._drop_created_objects()
+            if isinstance(error, ValueError) and str(error).startswith("BLR_"):
+                raise
+            raise ValueError(
+                "BLR_STAGE_WRITE_COUNT: baseline TEMP catalog creation failed"
+            ) from None
+
+    @property
+    def state(self) -> SQLiteV1BaselineTempStageState:
+        """Return the explicit lifecycle state without touching SQLite."""
+
+        return self._state
+
+    @property
+    def common_entry_count(self) -> int:
+        """Return the exact current common-stage row count."""
+
+        self._assert_open_and_bound()
+        cursor = self._connection.execute(
+            f"SELECT count(*) FROM {SQLITE_V1_BASELINE_COMMON_STAGE_TABLE}"
+        )
+        try:
+            row = cursor.fetchone()
+        finally:
+            cursor.close()
+        self._assert_open_and_bound()
+        if row is None or len(row) != 1 or type(row[0]) is not int or row[0] < 0:
+            self._poison("BLR_STAGE_COUNT: common TEMP stage count is invalid")
+        return row[0]
+
+    def insert_common_entry(self, entry: BaselineEntryInput) -> None:
+        """Insert one exact canonical entry and require a one-row write delta."""
+
+        self._assert_open_and_bound()
+        try:
+            if not isinstance(entry, BaselineEntryInput):
+                raise TypeError("baseline common-stage entry has the wrong type")
+            canonical = capture_baseline_entry(entry.entry_kind, entry.key, entry.state)
+            if canonical.key_bytes != entry.key_bytes or canonical.state_bytes != entry.state_bytes:
+                raise ValueError("baseline common-stage entry bytes are not canonical")
+            kind_rank = _KIND_RANK[entry.entry_kind]
+        except (KeyError, TypeError, ValueError):
+            self._poison("BLR_STAGE_WRITE_COUNT: common TEMP stage entry is invalid")
+
+        before = self._connection.total_changes
+        try:
+            cursor = self._connection.execute(
+                f"INSERT INTO {SQLITE_V1_BASELINE_COMMON_STAGE_TABLE} "
+                "(kind_rank, entry_kind, key_blob, state_blob) VALUES (?, ?, ?, ?)",
+                (kind_rank, entry.entry_kind, entry.key_bytes, entry.state_bytes),
+            )
+            try:
+                affected_rows = cursor.rowcount
+            finally:
+                cursor.close()
+        except sqlite3.IntegrityError:
+            self._poison("BLR_STAGE_KEY_DUPLICATE: common TEMP stage key is duplicated")
+        except Exception:
+            self._poison("BLR_STAGE_WRITE_COUNT: common TEMP stage insert failed")
+
+        after = self._connection.total_changes
+        if affected_rows != 1 or after != before + 1:
+            self._poison("BLR_STAGE_WRITE_COUNT: common TEMP stage insert changed the wrong count")
+        self._allowed_total_changes = after
+        self._assert_open_and_bound()
+
+    def assert_common_counts(
+        self,
+        expected: Mapping[BaselineEntryKind, int],
+    ) -> None:
+        """Prove exact grouped and total common-stage counts for all twelve kinds."""
+
+        self._assert_open_and_bound()
+        if not isinstance(expected, Mapping) or set(expected) != set(BASELINE_ENTRY_KINDS):
+            raise ValueError(
+                "BLR_STAGE_COUNT_EXPECTATION: expected counts must contain exactly "
+                "the twelve baseline entry kinds"
+            )
+
+        expected_total = 0
+        for kind_rank, entry_kind in enumerate(BASELINE_ENTRY_KINDS):
+            expected_count = expected[entry_kind]
+            if (
+                type(expected_count) is not int
+                or expected_count < 0
+                or expected_count > MAX_SAFE_INTEGER
+            ):
+                raise ValueError(
+                    "BLR_STAGE_COUNT_EXPECTATION: expected stage count is outside bounds"
+                )
+            expected_total += expected_count
+            if expected_total > MAX_SAFE_INTEGER:
+                raise ValueError(
+                    "BLR_STAGE_COUNT_EXPECTATION: expected stage total is outside bounds"
+                )
+            actual_count = self._read_safe_count(
+                f"SELECT count(*) FROM temp.{SQLITE_V1_BASELINE_COMMON_STAGE_TABLE} "
+                "WHERE kind_rank = ? AND entry_kind = ?",
+                (kind_rank, entry_kind),
+                label="common TEMP stage kind count",
+            )
+            if actual_count != expected_count:
+                self._poison("BLR_STAGE_COUNT: common TEMP stage count drifted")
+
+        actual_total = self._read_safe_count(
+            f"SELECT count(*) FROM temp.{SQLITE_V1_BASELINE_COMMON_STAGE_TABLE}",
+            label="common TEMP stage total count",
+        )
+        if actual_total != expected_total:
+            self._poison("BLR_STAGE_COUNT: common TEMP stage total count drifted")
+        self._assert_open_and_bound()
+
+    def assert_relation_key_coverage(self) -> None:
+        """Prove bidirectional key-and-rank coverage across common and relation stages."""
+
+        self._assert_open_and_bound()
+        missing_count = self._read_safe_count(
+            f"SELECT count(*) "
+            f"FROM temp.{SQLITE_V1_BASELINE_COMMON_STAGE_TABLE} AS stage "
+            f"LEFT JOIN temp.{SQLITE_V1_BASELINE_RELATION_KEYS_VIEW} AS relation "
+            "ON relation.kind_rank = stage.kind_rank "
+            "AND relation.key_blob = stage.key_blob "
+            "WHERE relation.key_blob IS NULL",
+            label="common TEMP stage missing relation count",
+        )
+        extra_count = self._read_safe_count(
+            f"SELECT count(*) "
+            f"FROM temp.{SQLITE_V1_BASELINE_RELATION_KEYS_VIEW} AS relation "
+            f"LEFT JOIN temp.{SQLITE_V1_BASELINE_COMMON_STAGE_TABLE} AS stage "
+            "ON stage.kind_rank = relation.kind_rank "
+            "AND stage.key_blob = relation.key_blob "
+            "WHERE stage.key_blob IS NULL",
+            label="common TEMP stage extra relation count",
+        )
+        self._assert_open_and_bound()
+        if missing_count != 0 or extra_count != 0:
+            self._poison("BLR_STAGE_KEY_COVERAGE: baseline stage/relation key coverage drifted")
+
+    def dispose(self) -> None:
+        """Idempotently drop owned TEMP tables in reverse creation order."""
+
+        if self._state == "disposed":
+            return
+        if (
+            not self._connection.in_exclusive_transaction
+            or self._connection.transaction_epoch != self._transaction_epoch
+        ):
+            self._state = "disposed"
+            self._clear_created_objects()
+            return
+        self._drop_created_objects()
+        self._state = "disposed"
+
+    def __enter__(self) -> SQLiteV1BaselineTempStage:
+        self._assert_open_and_bound()
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> Literal[False]:
+        del exc_type, exc_value, traceback
+        self.dispose()
+        return False
+
+    def _assert_open_and_bound(self) -> None:
+        if self._state == "disposed":
+            raise ValueError("baseline TEMP stage is disposed")
+        if self._state == "poisoned":
+            raise ValueError("baseline TEMP stage is poisoned; only dispose is allowed")
+        if not self._connection.in_exclusive_transaction:
+            self._poison(
+                "BLR_EXCLUSIVE_TRANSACTION_REQUIRED: baseline TEMP stage requires "
+                "the captured owner EXCLUSIVE transaction"
+            )
+        if self._connection.transaction_epoch != self._transaction_epoch:
+            self._poison("BLR_TRANSACTION_CHANGED: baseline TEMP stage transaction changed")
+        if self._connection.total_changes != self._allowed_total_changes:
+            self._poison("BLR_UNEXPLAINED_WRITE: baseline TEMP stage observed an external write")
+
+    def _read_safe_count(
+        self,
+        sql: str,
+        parameters: tuple[object, ...] = (),
+        *,
+        label: str,
+    ) -> int:
+        try:
+            cursor = self._connection.execute(sql, parameters)
+            try:
+                row = cursor.fetchone()
+            finally:
+                cursor.close()
+        except Exception:
+            self._poison(f"BLR_STAGE_COUNT: {label} query failed")
+        if (
+            row is None
+            or len(row) != 1
+            or type(row[0]) is not int
+            or row[0] < 0
+            or row[0] > MAX_SAFE_INTEGER
+        ):
+            self._poison(f"BLR_STAGE_COUNT: {label} is invalid")
+        return row[0]
+
+    def _poison(self, message: str) -> Never:
+        self._state = "poisoned"
+        raise ValueError(message)
+
+    def _drop_created_objects(self) -> None:
+        if (
+            not self._connection.in_exclusive_transaction
+            or self._connection.transaction_epoch != self._transaction_epoch
+        ):
+            self._clear_created_objects()
+            return
+        first_failure: Exception | None = None
+        if self._created_view:
+            try:
+                cursor = self._connection.execute(
+                    f"DROP VIEW temp.{SQLITE_V1_BASELINE_RELATION_KEYS_VIEW}"
+                )
+                cursor.close()
+                self._transaction_epoch = self._connection.transaction_epoch
+            except Exception as error:
+                first_failure = error
+        for name in reversed(self._created_indexes):
+            try:
+                cursor = self._connection.execute(f"DROP INDEX temp.{name}")
+                cursor.close()
+                self._transaction_epoch = self._connection.transaction_epoch
+            except Exception as error:
+                if first_failure is None:
+                    first_failure = error
+        for name in reversed(self._created_tables):
+            try:
+                cursor = self._connection.execute(f"DROP TABLE temp.{name}")
+                cursor.close()
+                self._transaction_epoch = self._connection.transaction_epoch
+            except Exception as error:
+                if first_failure is None:
+                    first_failure = error
+
+        try:
+            has_residue = _has_baseline_temp_object(self._connection)
+        except Exception as error:
+            has_residue = True
+            if first_failure is None:
+                first_failure = error
+        if has_residue and first_failure is None:
+            first_failure = ValueError("baseline TEMP stage disposal left reserved objects")
+        if first_failure is not None:
+            self._state = "poisoned"
+            raise ValueError(
+                "BLR_STAGE_DISPOSE: baseline TEMP stage cleanup failed or left residue"
+            ) from first_failure
+        self._clear_created_objects()
+
+    def _clear_created_objects(self) -> None:
+        self._created_view = False
+        self._created_indexes.clear()
+        self._created_tables.clear()
+
+
+def create_sqlite_v1_baseline_temp_stage(
+    connection: SQLiteV1BaselineConnectionOwner,
+) -> SQLiteV1BaselineTempStage:
+    """Create the fixed TEMP catalog inside the caller's EXCLUSIVE transaction."""
+
+    return SQLiteV1BaselineTempStage(connection)

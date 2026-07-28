@@ -121,6 +121,12 @@ class _SQLiteCursorCapability:
     def fetchmany(self, size: int) -> list[tuple[object, ...]]:
         return [tuple(cast(tuple[object, ...], row)) for row in self.__cursor.fetchmany(size)]
 
+    @property
+    def rowcount(self) -> int:
+        """Expose only SQLite's affected-row count, never the owner handle."""
+
+        return self.__cursor.rowcount
+
     def close(self) -> None:
         self.__cursor.close()
 

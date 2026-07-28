@@ -446,6 +446,24 @@ export function decodeOperationBaselineCanonicalBytes(bytes: Uint8Array, maximum
   }
 }
 
+/**
+ * Revalidate canonical entry bytes against the selected kind and its
+ * key/state identity contract. This is intentionally not re-exported from the
+ * package root; transaction-bound staging uses it as a module-internal gate.
+ */
+export function validateOperationBaselineEntryBytes(
+  entryKind: OperationBaselineEntryKind,
+  keyBytes: Uint8Array,
+  stateBytes: Uint8Array,
+): void {
+  const key = decodeOperationBaselineCanonicalBytes(keyBytes, MAX_BASELINE_KEY_BYTES);
+  const state = decodeOperationBaselineCanonicalBytes(stateBytes, MAX_BASELINE_STATE_BYTES);
+  const prepared = prepareOperationBaselineEntry({ entryKind, key, state });
+  if (!prepared.keyBytes.equals(keyBytes) || !prepared.stateBytes.equals(stateBytes)) {
+    invalid("entry canonical bytes");
+  }
+}
+
 interface PreparedOperationBaselineEntry {
   readonly entryKind: OperationBaselineEntryKind;
   readonly rank: number;

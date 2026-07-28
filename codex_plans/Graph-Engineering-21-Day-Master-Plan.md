@@ -8480,3 +8480,209 @@ tests, 46 focused source/stage tests, Ruff, and strict MyPy; reconciliation
 registry 5 tests; full SQLite ledger-contract 19 tests; and 286 documentation
 links. `git diff --check` is clean. This correction changes no relation,
 cursor-root, migration, release, or popularity claim.
+
+### 31.34.20 FILE-backed common stage and normalized carrier checkpoint
+
+The second §31.34.17 implementation slice now has a transaction-bound TEMP
+catalog foundation in both native runtimes. This checkpoint deliberately does
+not claim that the twelve source families are loaded into their relation
+tables. It proves the catalog, common-row write fence, lifecycle, empty and
+hostile coverage machinery needed by that next step.
+
+Both implementations require the bounded FILE TEMP profile to be retained
+before they create any object. Stage construction occurs only under the exact
+owner-observed EXCLUSIVE transaction. A stale proof, deferred/immediate/
+unknown transaction, missing FILE profile, memory TEMP, cache outside
+1,024..65,536 KiB, disabled spill, pre-existing reserved object, repeated
+stage, transaction swap, unexplained row write, or caller schema mutation
+fails closed. Reserved-name discovery is case-insensitive because SQLite
+identifiers are case-insensitive; uppercase and mixed-case `GE_BLR_*` residue
+cannot bypass the owner fence.
+
+The fixed catalog consists of:
+
+- `ge_blr_stage`, with exact kind-rank discrimination, canonical key/state
+  size bounds, composite primary key, and unique kind/key identity;
+- twelve `STRICT, WITHOUT ROWID` normalized carrier tables in frozen baseline
+  rank order;
+- ten named indexes, including record hash/position, checkpoint binding and
+  latest-revision paths, and separate epoch/fence uniqueness for used lease
+  and migration-lock identities; and
+- `ge_blr_relation_keys`, a twelve-arm `UNION ALL` key-only view carrying
+  exactly `(kind_rank,key_blob)`.
+
+The relation DDL now carries every scalar required by the planned anti-joins.
+Schema envelope includes compatibility versions and creation/update clocks.
+Streams enforce the `-1`/null empty-tail sentinel. Records enforce sequence
+zero/null predecessor and positive-sequence/non-null predecessor. Checkpoint
+revisions enforce all-present put carriers and all-null delete carriers.
+Active lease and migration-lock rows enforce all-null/all-present identities,
+epoch/fence/high-water equality, expiry ordering, and forward migration
+targets. Used identities enforce positive equal epoch/fence values. Legacy
+operations reserve the exact decoded A/C/D/L/R/M scalar groups and use a
+closed nine-operation discriminator so one result cannot smuggle fields from
+another operation.
+
+Catalog creation freezes `total_changes` before the first DDL and proves no
+row write occurred. Post-creation validation checks the exact reserved
+type/name set and all thirteen table `STRICT`/`WITHOUT ROWID` flags. Common
+insertion revalidates canonical bytes against the selected entry kind and the
+key/state shared-identity contract, then requires both statement-local
+`changes == 1` and global `total_changes == before + 1`. Duplicate keys,
+wrong-kind bytes, cross-identity bytes, zero/multi-row effects, and external
+DML permanently poison the stage.
+
+Both runtimes expose exact twelve-kind grouped/total common-count assertions
+and bidirectional common-to-relation/relation-to-common key anti-joins. The
+current tests exercise empty coverage and hostile missing/extra/rank/count
+paths. Python hostile tests use an explicitly test-only adoption hook to place
+synthetic relation rows because the production controlled relation writers
+remain open; that hook is not implementation evidence for per-source paired
+writes.
+
+Disposal is idempotent and never commits or rolls back. When ownership is
+still current it drops view, indexes, relation tables, and common stage in
+strict reverse order, continues after individual drop failures, verifies the
+reserved namespace is empty, and reports a poisoned failure if cleanup is
+incomplete. When rollback/rebegin or another epoch change makes ownership
+stale, disposal performs no named database operation, preventing an old stage
+from deleting caller replacement objects. Repeated creation is rejected
+before profile PRAGMA readback can invalidate the live stage.
+
+Checkpoint evidence is TypeScript SQLite 15 files / 144 tests plus typecheck,
+lint, and build; Python 1,237 full tests and 28 focused stage tests plus Ruff
+and strict MyPy over the changed implementation/tests; complete SQLite ledger,
+reconciliation, and migration contract 19 tests; and clean scoped
+`git diff --check`. The final independent hostile review reported HIGH 0,
+MEDIUM 0, and LOW 0 after closing repeated-create epoch invalidation,
+case-insensitive namespace bypass, legacy NULL smuggling, exact count-map
+shape, and failure-after-catalog-PRAGMA cleanup residue.
+
+No production relation decoder/writer, non-test common+relation paired write,
+full source consumer, one-shot ordered staged output, relational invariant
+rule, cursor seal/root, 10K/100K evidence, 0002 execution, permanent baseline
+publication, crash/replay proof, release gate, production-throughput claim,
+or popularity outcome is completed by this checkpoint.
+
+### 31.34.21 Controlled relation loading and real coverage execution plan
+
+This is the immediate next implementation slice and must finish before any
+§31.34.17.3 relational rule begins. Run TypeScript and Python lanes in
+parallel, but require one shared fixture and a final cross-runtime audit before
+integration.
+
+#### 31.34.21.1 Module-private write capability
+
+Add a module-private relation writer bound to one live stage. It accepts no
+SQL, table name, column name, directory, transaction command, or raw owner
+handle from callers. The only public-to-module input is one already validated
+baseline source entry plus the exact decoded physical carrier produced by its
+source-family adapter.
+
+For every source item, execute exactly two static parameterized writes:
+
+1. insert `(kind_rank,entry_kind,key_blob,state_blob)` into `ge_blr_stage`;
+2. insert the closed scalar projection and identical `key_blob` into exactly
+   one rank-matched relation table.
+
+Before each statement require open state, unchanged EXCLUSIVE epoch, and
+`actual_total_changes == allowed_total_changes`. After each statement require
+statement-local `changes == 1` and global delta exactly one, then increment
+the private allowance. No `OR IGNORE`, `OR REPLACE`, UPSERT, trigger,
+`RETURNING`, dynamic identifier, multi-statement script, or caller-provided SQL
+is permitted. If the first insert succeeds and the relation insert fails, the
+stage becomes permanently poisoned and the caller must roll back; the writer
+must never delete or retry the common row to simulate atomicity.
+
+#### 31.34.21.2 Twelve closed decoders
+
+Implement one bounded decoder/projector per frozen kind. Each projector must
+recapture the canonical entry and prove all key/state shared fields before
+returning its closed parameter tuple.
+
+- Schema copies singleton, compatibility versions, three hashes, migration
+  time, and creation/update clocks.
+- Migration lineage copies the version edge, migration ID, SQL/schema hashes,
+  and applied time; structured postconditions and reversibility remain in the
+  canonical state BLOB and are checked by the source codec.
+- Stream and record copy exact tenant/stream/record identities, sequence,
+  predecessor/tail hashes, value hash/length, and clocks.
+- Checkpoint current and revision copy the full scalar binding, including
+  checkpoint creation time; delete revisions bind no put carrier.
+- Lease and migration-lock current rows copy exact active/high-water state;
+  used identities copy only fields present in the baseline protocol, never
+  invented holder/owner/version values.
+- Legal holds copy tenant/stream/hold identity and placement time.
+- Legacy operation loading must decode and byte-reencode the raw v1 result,
+  prove logical result hash and independent raw BLOB SHA-256, populate only
+  the operation-selected nullable group, convert lease/lock timestamps to
+  exact epoch milliseconds, and leave non-recoverable request/governance
+  details unclaimed.
+
+All large carriers remain one-row reads. The decoders may retain one entry and
+one result carrier only; they may not call `.all()`, `fetchall()`, or build a
+cross-source collection.
+
+#### 31.34.21.3 Real count and bidirectional coverage barrier
+
+Maintain a twelve-element source count vector while streaming. After all
+source cursors are finalized, require for every rank:
+
+- source count equals common-stage count;
+- source count equals its relation-table count;
+- grouped rank/kind common count equals the same value; and
+- the sum equals source summary total and common/relation view totals.
+
+Then run both anti-joins on `(kind_rank,key_blob)` and reject the first capped
+batch of missing/extra identities through safe registered diagnostics. No key,
+tenant, payload, SQL text, or BLOB is exposed in the diagnostic. Stable IDs for
+this barrier must be added to the frozen registry before implementation uses
+them; do not overload an unrelated `BLR_*` ID.
+
+#### 31.34.21.4 Hostile and scale matrix
+
+Add isolated tests for every kind plus cross-kind attacks: duplicate canonical
+key, relation duplicate, wrong relation, wrong rank, changed relation key,
+missing relation row, extra relation row, count-preserving replacement,
+partially null carrier, legacy cross-operation column smuggling, timestamp
+off by one millisecond, external DML between common and relation writes,
+prepared DDL/PRAGMA, rollback/rebegin, repeated creation, early source
+abandonment, write-count spoofing, cleanup failure, and poison reuse.
+
+The fast gate streams exact 128 and 1,024 mixed-kind rows with bounded fetches
+and no collection. It records exact source/common/relation counts and proves
+the view count equals the sum of twelve relations. This gate is correctness
+evidence only, not a production-throughput claim.
+
+#### 31.34.21.5 Completion gate
+
+This slice completes only when both runtimes pass focused tests, complete
+SQLite/Python suites, typecheck/lint/build, Ruff, strict MyPy on changed
+modules, ledger/reconciliation contracts, scoped diff check, and two hostile
+reviews with no unresolved HIGH or MEDIUM. The plan/log must record exact
+counts and explicitly keep 0002, permanent writes, cursor root/rebind, 100K,
+crash recovery, replay, release, and adoption claims false.
+
+### 31.34.22 Source consumer and ordered handoff backlog
+
+After §31.34.21, add a private reconciler that invokes the twelve source
+families in frozen rank order, finalizes every statement on success/failure/
+early abandonment, loads the paired stage rows, executes the coverage barrier,
+and exposes a one-shot iterator over
+`ORDER BY kind_rank,key_blob`. The iterator revalidates transaction epoch and
+allowed write count at every boundary, round-trips canonical bytes, advances
+the constant-memory accumulator, and poisons on a second iteration or early
+external mutation. Disposal must close the active iterator before the reverse
+catalog drop. This slice still executes no 0002 and writes no permanent v2
+row.
+
+### 31.34.23 First relational invariant campaign backlog
+
+Only after real paired loading and ordered handoff are green, implement the
+stream/record campaign first: missing stream, forbidden persisted empty
+stream, sequence gap, predecessor mismatch, tail mismatch, and duplicate hash.
+Use bounded count/existence queries and prove the query planner uses the named
+record indexes. Freeze shared happy/hostile fixtures and exact safe diagnostic
+outputs so TypeScript and Python are deeply equal. Subsequent checkpoint,
+lease, lock, hold, legacy, cursor, migration, crash, and scale campaigns remain
+separate append-only checkpoints.
