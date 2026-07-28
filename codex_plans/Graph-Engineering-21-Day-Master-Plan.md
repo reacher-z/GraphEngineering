@@ -8119,3 +8119,62 @@ TypeScript SQLite 14 files / 119 tests and Python source/baseline 29 tests, plus
 both strict typecheck/lint paths. Full-plan completion remains false: the seven
 remaining families, stage/relation/cursor/100K/atomic-v2/runtime gates listed
 above are unchanged.
+
+### 31.34.13 Checkpoint current and revision carrier checkpoint
+
+The v1 iterator now covers seven protocol families in both runtimes by adding
+`checkpoint-current` and `checkpoint-revision` between record identity and
+migration-lock current. Five families remain unimplemented:
+`lease-current`, `used-lease-identity`, `legal-hold`,
+`used-migration-lock-identity`, and `legacy-operation`. Any nonempty remaining
+family still prevents iterator acquisition.
+
+Checkpoint-current reads exactly fourteen columns, one row/carrier at a time,
+and orders by checkpoint ID, checkpoint scope, and tenant with binary
+collation so database order equals canonical key-byte order. Before omitting
+the checkpoint payload, the iterator independently proves:
+
+1. value bytes are 1..16 MiB and exactly equal the declared length;
+2. scalar, array, and object values are accepted through the shared checkpoint
+   codec rather than an object-only baseline decoder;
+3. checkpoint BLOB size is between value size and 17,825,792 bytes, fatal
+   decodes, and byte-equals its canonical re-encoding;
+4. embedded value bytes and recomputed canonical hash equal their columns;
+5. every duplicated scope/ID/stream/record/time/hash/length scalar matches;
+6. summary BLOB is 2..1 MiB, shared-ledger decodes, byte-equals the shared
+   encoder output, and exactly equals the checkpoint with only value removed;
+7. revision/commit integers are safe and the final baseline key/state passes
+   the closed cross-language validator.
+
+Checkpoint revisions read twelve columns and order by scope, decimal revision
+text, and tenant. This intentionally produces `1,10,2`, matching canonical JSON
+key bytes instead of numeric business order. Put rows require all six payload
+columns, validate the shared summary codec and every outer identity, and bound
+revision/value/time fields. Delete rows require those same six columns to be
+explicit NULL and emit six explicit null state fields. Unknown or partially
+null actions fail before hashing.
+
+Native tests cover a one-byte scalar checkpoint, exact seven-family rank,
+revision `1,10,2`, put and delete states, mismatch in current summary, mismatch
+in revision summary, partial-delete payload hidden behind disabled CHECK
+constraints, value/checkpoint/summary carrier mutations, and outer identity
+drift. TypeScript package evidence remains 14 files / 119 tests plus
+typecheck/lint/build; Python focused baseline/source evidence is 36 tests plus
+Ruff and strict MyPy. A read-only hostile audit reports no local HIGH/MEDIUM.
+
+This checkpoint is carrier-local only. It does not permit migration
+consumption until the FILE-backed relation stage proves exact record binding,
+contiguous revision histories, current-to-latest-put equality, absence of
+current after latest delete, bidirectional source/stage coverage, stable
+`BLR_CHECKPOINT_CURRENT_MISSING` diagnostics, and deterministic source cursor
+finalization before 0002 DDL.
+
+### 31.34.14 Revision row-width closure
+
+Independent Python hostile review found that a 256-row revision batch could
+materialize more than 256 MiB because every legal put may contain a 1 MiB
+summary. Checkpoint revisions now use `fetchmany(1)`, matching current, record,
+and TypeScript one-row carrier behavior. A monkeypatched cursor-capability test
+asserts the entire family fetch sequence, including four one-row calls for
+three revision rows plus exhaustion, so the bound cannot silently regress.
+The re-review reports HIGH 0 / MEDIUM 0 for this carrier-local slice.

@@ -33,9 +33,7 @@ class _IdentityIterationState:
     started: bool = False
 
 
-_TRANSACTION_TOKENS = frozenset(
-    {"BEGIN", "COMMIT", "END", "ROLLBACK", "SAVEPOINT", "RELEASE"}
-)
+_TRANSACTION_TOKENS = frozenset({"BEGIN", "COMMIT", "END", "ROLLBACK", "SAVEPOINT", "RELEASE"})
 
 
 def _first_sqlite_token(sql: str) -> str:
@@ -182,6 +180,8 @@ class SQLiteV1BaselineSourceSummary:
             "migration-lineage",
             "stream-head",
             "record-identity",
+            "checkpoint-current",
+            "checkpoint-revision",
             "migration-lock-current",
         }
         if (
@@ -210,6 +210,13 @@ class SQLiteV1BaselineSourceSummary:
             ("migration-lineage", _MIGRATION_ENTRY_SQL, _migration_entry, 256),
             ("stream-head", _STREAM_ENTRY_SQL, _stream_entry, 256),
             ("record-identity", _RECORD_ENTRY_SQL, _record_entry, 1),
+            ("checkpoint-current", _CHECKPOINT_CURRENT_ENTRY_SQL, _checkpoint_current_entry, 1),
+            (
+                "checkpoint-revision",
+                _CHECKPOINT_REVISION_ENTRY_SQL,
+                _checkpoint_revision_entry,
+                1,
+            ),
             (
                 "migration-lock-current",
                 _MIGRATION_LOCK_ENTRY_SQL,
@@ -264,21 +271,15 @@ class SQLiteV1BaselineSourceSummary:
             if (
                 state["schemaIdentitySha256"] != envelope["sourceSchemaIdentitySha256"]
                 or state["providerDescriptorHash"] != envelope["sourceDescriptorHash"]
-                or state["latestMigrationSha256"]
-                != envelope["sourceMigrationLineageSha256"]
-                or state["latestMigrationAppliedAtMs"]
-                != self._latest_migration_applied_at_ms
+                or state["latestMigrationSha256"] != envelope["sourceMigrationLineageSha256"]
+                or state["latestMigrationAppliedAtMs"] != self._latest_migration_applied_at_ms
             ):
                 raise ValueError("captured schema envelope identity drifted")
-        elif (
-            entry.entry_kind == "migration-lineage"
-            and (
-                state["migrationId"] != envelope["sourceMigrationLineageId"]
-                or state["sqlSha256"] != envelope["sourceMigrationLineageSha256"]
-                or state["schemaIdentitySha256"]
-                != envelope["sourceSchemaIdentitySha256"]
-                or state["appliedAtMs"] != self._latest_migration_applied_at_ms
-            )
+        elif entry.entry_kind == "migration-lineage" and (
+            state["migrationId"] != envelope["sourceMigrationLineageId"]
+            or state["sqlSha256"] != envelope["sourceMigrationLineageSha256"]
+            or state["schemaIdentitySha256"] != envelope["sourceSchemaIdentitySha256"]
+            or state["appliedAtMs"] != self._latest_migration_applied_at_ms
         ):
             raise ValueError("captured migration lineage identity drifted")
 
@@ -343,6 +344,22 @@ _RECORD_ENTRY_SQL = """SELECT tenant_id, stream_id, sequence, record_id,
  FROM ge_cycle_records
  ORDER BY record_id COLLATE BINARY, tenant_id COLLATE BINARY"""
 
+_CHECKPOINT_CURRENT_ENTRY_SQL = """SELECT tenant_id, checkpoint_scope,
+ checkpoint_id, stream_id, bound_sequence, bound_record_hash, created_at,
+ value_hash, value_bytes, value_blob, checkpoint_blob, summary_blob,
+ checkpoint_revision, committed_at_ms
+ FROM ge_cycle_checkpoints
+ ORDER BY checkpoint_id COLLATE BINARY, checkpoint_scope COLLATE BINARY,
+ tenant_id COLLATE BINARY"""
+
+_CHECKPOINT_REVISION_ENTRY_SQL = """SELECT tenant_id, checkpoint_scope,
+ revision, checkpoint_id, action, summary_blob, bound_sequence,
+ bound_record_hash, checkpoint_created_at, value_hash, value_bytes,
+ recorded_at_ms
+ FROM ge_cycle_checkpoint_revisions
+ ORDER BY checkpoint_scope COLLATE BINARY,
+ CAST(revision AS TEXT) COLLATE BINARY, tenant_id COLLATE BINARY"""
+
 _MIGRATION_LOCK_ENTRY_SQL = """SELECT singleton, active_lock_id, active_owner_id,
  active_source_version, active_target_version, active_lock_epoch,
  active_fencing_token, active_acquired_at_ms, active_expires_at_ms,
@@ -405,9 +422,7 @@ def _migration_entry(row: object) -> BaselineEntryInput:
     if len(values) != 8:
         raise ValueError("migration lineage shape drifted")
     postconditions = _canonical_object_blob(values[7])
-    if postconditions != {
-        "requiredPostconditions": list(_REQUIRED_MIGRATION_POSTCONDITIONS)
-    }:
+    if postconditions != {"requiredPostconditions": list(_REQUIRED_MIGRATION_POSTCONDITIONS)}:
         raise ValueError("migration postconditions drifted")
     return capture_baseline_entry(
         "migration-lineage",
@@ -487,6 +502,159 @@ def _record_entry(row: object) -> BaselineEntryInput:
     )
 
 
+def _checkpoint_current_entry(row: object) -> BaselineEntryInput:
+    values = tuple(cast(tuple[object, ...], row))
+    if len(values) != 14:
+        raise ValueError("checkpoint current shape drifted")
+    value_bytes = _integer(values[8], "checkpoint value bytes", 1)
+    checkpoint_revision = _integer(values[12], "checkpoint revision", 1)
+    committed_at_ms = _integer(values[13], "checkpoint commit time")
+    value_blob = values[9]
+    checkpoint_blob = values[10]
+    summary_blob = values[11]
+    if (
+        value_bytes > 16_777_216
+        or type(value_blob) is not bytes
+        or type(checkpoint_blob) is not bytes
+        or type(summary_blob) is not bytes
+        or len(value_blob) != value_bytes
+        or not value_bytes <= len(checkpoint_blob) <= 17_825_792
+        or not 2 <= len(summary_blob) <= 1_048_576
+    ):
+        raise ValueError("checkpoint current carrier bounds drifted")
+    checkpoint = cycle_store_adapter_codec.parse_stored_checkpoint(
+        checkpoint_blob,
+        "inspect-schema",
+    )
+    summary = cycle_store_adapter_codec.decode_ledger_result(
+        "save-checkpoint",
+        summary_blob,
+    )
+    expected_summary = cast(
+        JsonObject,
+        {key: value for key, value in checkpoint.items() if key != "value"},
+    )
+    if (
+        canonical_bytes(checkpoint) != checkpoint_blob
+        or canonical_bytes(checkpoint["value"]) != value_blob
+        or canonical_sha256(checkpoint["value"]) != values[7]
+        or cycle_store_adapter_codec.encode_ledger_result(
+            "save-checkpoint",
+            summary,
+        )
+        != summary_blob
+        or summary != expected_summary
+        or checkpoint["checkpointScope"] != values[1]
+        or checkpoint["checkpointId"] != values[2]
+        or checkpoint["streamId"] != values[3]
+        or checkpoint["boundSequence"] != values[4]
+        or checkpoint["boundRecordHash"] != values[5]
+        or checkpoint["createdAt"] != values[6]
+        or checkpoint["valueHash"] != values[7]
+        or checkpoint["valueBytes"] != value_bytes
+    ):
+        raise ValueError("checkpoint current carrier identity drifted")
+    return capture_baseline_entry(
+        "checkpoint-current",
+        {
+            "checkpointId": values[2],
+            "checkpointScope": values[1],
+            "tenantId": values[0],
+        },
+        {
+            "boundRecordHash": values[5],
+            "boundSequence": values[4],
+            "checkpointId": values[2],
+            "checkpointRevision": checkpoint_revision,
+            "checkpointScope": values[1],
+            "committedAtMs": committed_at_ms,
+            "createdAt": values[6],
+            "streamId": values[3],
+            "summary": summary,
+            "tenantId": values[0],
+            "valueBytes": value_bytes,
+            "valueHash": values[7],
+        },
+    )
+
+
+def _checkpoint_revision_entry(row: object) -> BaselineEntryInput:
+    values = tuple(cast(tuple[object, ...], row))
+    if len(values) != 12:
+        raise ValueError("checkpoint revision shape drifted")
+    revision = _integer(values[2], "checkpoint revision", 1)
+    recorded_at_ms = _integer(values[11], "checkpoint revision time")
+    action = values[4]
+    payload = values[5:11]
+    if action == "put":
+        if any(value is None for value in payload):
+            raise ValueError("checkpoint put revision payload is incomplete")
+        summary_blob = values[5]
+        bound_sequence = _integer(values[6], "checkpoint revision sequence")
+        value_bytes = _integer(values[10], "checkpoint revision value bytes", 1)
+        if (
+            type(summary_blob) is not bytes
+            or not 2 <= len(summary_blob) <= 1_048_576
+            or value_bytes > 16_777_216
+        ):
+            raise ValueError("checkpoint put revision carrier bounds drifted")
+        summary = cast(
+            JsonObject,
+            cycle_store_adapter_codec.decode_ledger_result(
+                "save-checkpoint",
+                summary_blob,
+            ),
+        )
+        if (
+            cycle_store_adapter_codec.encode_ledger_result(
+                "save-checkpoint",
+                summary,
+            )
+            != summary_blob
+            or summary["checkpointScope"] != values[1]
+            or summary["checkpointId"] != values[3]
+            or summary["boundSequence"] != bound_sequence
+            or summary["boundRecordHash"] != values[7]
+            or summary["createdAt"] != values[8]
+            or summary["valueHash"] != values[9]
+            or summary["valueBytes"] != value_bytes
+        ):
+            raise ValueError("checkpoint put revision carrier identity drifted")
+        state_summary: object = summary
+        state_bound_sequence: object = bound_sequence
+        state_value_bytes: object = value_bytes
+    elif action == "delete":
+        if any(value is not None for value in payload):
+            raise ValueError("checkpoint delete revision payload is not null")
+        state_summary = None
+        state_bound_sequence = None
+        state_value_bytes = None
+    else:
+        raise ValueError("checkpoint revision action is invalid")
+    return capture_baseline_entry(
+        "checkpoint-revision",
+        {
+            "checkpointScope": values[1],
+            "revision": revision,
+            "tenantId": values[0],
+        },
+        {
+            "action": action,
+            "boundRecordHash": values[7],
+            "boundSequence": state_bound_sequence,
+            "checkpointCreatedAt": values[8],
+            "checkpointId": values[3],
+            "checkpointScope": values[1],
+            "recordedAtMs": recorded_at_ms,
+            "revision": revision,
+            "summary": state_summary,
+            "tenantId": values[0],
+            "valueBytes": state_value_bytes,
+            "valueHash": values[9],
+        },
+    )
+
+
 def _migration_lock_entry(row: object) -> BaselineEntryInput:
     values = tuple(cast(tuple[object, ...], row))
     if len(values) != 12:
@@ -531,10 +699,7 @@ def capture_sqlite_v1_baseline_source_summary(
     if application_row is None or _integer(application_row[0], "application ID") != 1_195_724_359:
         raise ValueError("SQLite v1 baseline application identity is invalid")
     user_version_row = connection.execute("PRAGMA user_version").fetchone()
-    if (
-        user_version_row is None
-        or _integer(user_version_row[0], "user version", 1) != 1
-    ):
+    if user_version_row is None or _integer(user_version_row[0], "user version", 1) != 1:
         raise ValueError("SQLite v1 baseline user version is invalid")
     source = connection.execute(
         """SELECT s.current_version, s.schema_identity_sha256,
@@ -562,9 +727,7 @@ def capture_sqlite_v1_baseline_source_summary(
         }
     ):
         raise ValueError("SQLite v1 baseline frozen source identity is invalid")
-    latest_migration_applied_at_ms = _integer(
-        source[5], "latest migration applied time"
-    )
+    latest_migration_applied_at_ms = _integer(source[5], "latest migration applied time")
     envelope = validate_baseline_source_envelope(
         {
             "capturedAtMs": captured,

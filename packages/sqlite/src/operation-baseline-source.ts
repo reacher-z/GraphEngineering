@@ -1,7 +1,12 @@
 import { Buffer } from "node:buffer";
 
 import { canonicalHash, canonicalSerialize } from "@graph-engineering/core";
-import { CycleStoreProviderError, cycleStoreAdapterCodec } from "@graph-engineering/runtime";
+import {
+  CycleStoreProviderError,
+  cycleStoreAdapterCodec,
+  type CycleStoreCheckpoint,
+  type CycleStoreCheckpointSummary,
+} from "@graph-engineering/runtime";
 
 import {
   BASELINE_ENTRY_KINDS,
@@ -39,7 +44,7 @@ export interface SQLiteV1BaselineSourceSummary {
   readonly expectedEntryCount: number;
   readonly maximumObservedAtMs: number;
   /**
-   * Streams the five v1 source families implemented by this foundation.
+   * Streams the seven v1 source families implemented by this foundation.
    * The iterator is deliberately one-shot and remains transaction-scoped.
    */
   readonly entries: () => Generator<OperationBaselineEntryInput, void, undefined>;
@@ -105,6 +110,24 @@ function validatedEntry(
     return fail(`SQLite v1 baseline ${entryKind} row is invalid`);
   }
   return Object.freeze({ entryKind, key: Object.freeze(key), state: Object.freeze(state) });
+}
+
+function decodedCheckpointSummary(blob: Buffer): Readonly<Record<string, unknown>> {
+  if (blob.byteLength < 2 || blob.byteLength > 1_048_576) {
+    return fail("SQLite v1 baseline checkpoint summary carrier is outside bounds");
+  }
+  let summary: CycleStoreCheckpointSummary;
+  try {
+    summary = cycleStoreAdapterCodec.decodeLedgerResult("save-checkpoint", blob);
+  } catch {
+    return fail("SQLite v1 baseline checkpoint summary carrier is invalid");
+  }
+  if (!blob.equals(Buffer.from(
+    cycleStoreAdapterCodec.encodeLedgerResult("save-checkpoint", summary),
+  ))) {
+    return fail("SQLite v1 baseline checkpoint summary carrier is noncanonical");
+  }
+  return Object.freeze({ ...summary });
 }
 
 function exactlyOne(
@@ -345,6 +368,153 @@ function* streamV1Entries(
     return fail("SQLite v1 baseline record-identity count changed during capture");
   }
 
+  let checkpointCount = 0;
+  for (const raw of transactionRows(connection, guard, `
+    SELECT tenant_id, checkpoint_scope, checkpoint_id, stream_id,
+           bound_sequence, bound_record_hash, created_at, value_hash,
+           value_bytes, value_blob, checkpoint_blob, summary_blob,
+           checkpoint_revision, committed_at_ms
+      FROM ge_cycle_checkpoints
+     ORDER BY checkpoint_id COLLATE BINARY,
+              checkpoint_scope COLLATE BINARY,
+              tenant_id COLLATE BINARY
+  `)) {
+    checkpointCount += 1;
+    const row = sqliteRow(raw, 14, OPERATION, "checkpoint current");
+    const tenantId = sqliteText(row[0], OPERATION, "checkpoint tenant ID");
+    const checkpointScope = sqliteText(row[1], OPERATION, "checkpoint scope");
+    const checkpointId = sqliteText(row[2], OPERATION, "checkpoint ID");
+    const streamId = sqliteText(row[3], OPERATION, "checkpoint stream ID");
+    const boundSequence = sqliteSafeInteger(row[4], 0, Number.MAX_SAFE_INTEGER, OPERATION, "checkpoint sequence");
+    const boundRecordHash = sqliteText(row[5], OPERATION, "checkpoint record hash");
+    const createdAt = sqliteText(row[6], OPERATION, "checkpoint creation time");
+    const valueHash = sqliteText(row[7], OPERATION, "checkpoint value hash");
+    const valueBytes = sqliteSafeInteger(row[8], 1, 16_777_216, OPERATION, "checkpoint value bytes");
+    const valueBlob = sqliteBlob(row[9], OPERATION, "checkpoint value blob");
+    const checkpointBlob = sqliteBlob(row[10], OPERATION, "checkpoint blob");
+    const summaryBlob = sqliteBlob(row[11], OPERATION, "checkpoint summary blob");
+    const checkpointRevision = sqliteSafeInteger(row[12], 1, Number.MAX_SAFE_INTEGER, OPERATION, "checkpoint revision");
+    const committedAtMs = sqliteSafeInteger(row[13], 0, Number.MAX_SAFE_INTEGER, OPERATION, "checkpoint commit time");
+    let checkpoint: CycleStoreCheckpoint;
+    try {
+      checkpoint = cycleStoreAdapterCodec.parseStoredCheckpoint(checkpointBlob, OPERATION);
+    } catch {
+      return fail("SQLite v1 baseline checkpoint carrier is invalid");
+    }
+    const { value: _value, ...expectedSummary } = checkpoint;
+    const summary = decodedCheckpointSummary(summaryBlob);
+    if (checkpointBlob.byteLength < valueBytes
+        || checkpointBlob.byteLength > 17_825_792
+        || valueBlob.byteLength !== valueBytes
+        || checkpoint.checkpointScope !== checkpointScope
+        || checkpoint.checkpointId !== checkpointId
+        || checkpoint.streamId !== streamId
+        || checkpoint.boundSequence !== boundSequence
+        || checkpoint.boundRecordHash !== boundRecordHash
+        || checkpoint.createdAt !== createdAt
+        || checkpoint.valueHash !== valueHash
+        || checkpoint.valueBytes !== valueBytes
+        || !checkpointBlob.equals(Buffer.from(canonicalSerialize(checkpoint), "utf8"))
+        || !valueBlob.equals(Buffer.from(canonicalSerialize(checkpoint.value), "utf8"))
+        || canonicalHash(checkpoint.value) !== valueHash
+        || canonicalSerialize(summary) !== canonicalSerialize(expectedSummary)) {
+      return fail("SQLite v1 baseline checkpoint carrier identity drifted");
+    }
+    const state = {
+      boundRecordHash,
+      boundSequence,
+      checkpointId,
+      checkpointRevision,
+      checkpointScope,
+      committedAtMs,
+      createdAt,
+      streamId,
+      summary,
+      tenantId,
+      valueBytes,
+      valueHash,
+    };
+    yield validatedEntry(
+      "checkpoint-current",
+      { checkpointId, checkpointScope, tenantId },
+      state,
+    );
+  }
+  if (checkpointCount !== countsByKind["checkpoint-current"]) {
+    return fail("SQLite v1 baseline checkpoint-current count changed during capture");
+  }
+
+  let revisionCount = 0;
+  for (const raw of transactionRows(connection, guard, `
+    SELECT tenant_id, checkpoint_scope, revision, checkpoint_id, action,
+           summary_blob, bound_sequence, bound_record_hash,
+           checkpoint_created_at, value_hash, value_bytes, recorded_at_ms
+      FROM ge_cycle_checkpoint_revisions
+     ORDER BY checkpoint_scope COLLATE BINARY,
+              CAST(revision AS TEXT) COLLATE BINARY,
+              tenant_id COLLATE BINARY
+  `)) {
+    revisionCount += 1;
+    const row = sqliteRow(raw, 12, OPERATION, "checkpoint revision");
+    const tenantId = sqliteText(row[0], OPERATION, "revision tenant ID");
+    const checkpointScope = sqliteText(row[1], OPERATION, "revision scope");
+    const revision = sqliteSafeInteger(row[2], 1, Number.MAX_SAFE_INTEGER, OPERATION, "revision number");
+    const checkpointId = sqliteText(row[3], OPERATION, "revision checkpoint ID");
+    const action = sqliteText(row[4], OPERATION, "revision action");
+    const recordedAtMs = sqliteSafeInteger(row[11], 0, Number.MAX_SAFE_INTEGER, OPERATION, "revision record time");
+    let summary: Readonly<Record<string, unknown>> | null = null;
+    let boundSequence: number | null = null;
+    let boundRecordHash: string | null = null;
+    let checkpointCreatedAt: string | null = null;
+    let valueHash: string | null = null;
+    let valueBytes: number | null = null;
+    if (action === "put") {
+      summary = decodedCheckpointSummary(sqliteBlob(row[5], OPERATION, "revision summary blob"));
+      boundSequence = sqliteSafeInteger(row[6], 0, Number.MAX_SAFE_INTEGER, OPERATION, "revision sequence");
+      boundRecordHash = sqliteText(row[7], OPERATION, "revision record hash");
+      checkpointCreatedAt = sqliteText(row[8], OPERATION, "revision checkpoint time");
+      valueHash = sqliteText(row[9], OPERATION, "revision value hash");
+      valueBytes = sqliteSafeInteger(row[10], 1, 16_777_216, OPERATION, "revision value bytes");
+      if (summary.checkpointScope !== checkpointScope
+          || summary.checkpointId !== checkpointId
+          || summary.boundSequence !== boundSequence
+          || summary.boundRecordHash !== boundRecordHash
+          || summary.createdAt !== checkpointCreatedAt
+          || summary.valueHash !== valueHash
+          || summary.valueBytes !== valueBytes) {
+        return fail("SQLite v1 baseline checkpoint revision identity drifted");
+      }
+    } else if (action === "delete") {
+      if (row.slice(5, 11).some((value) => value !== null)) {
+        return fail("SQLite v1 baseline checkpoint delete revision is invalid");
+      }
+    } else {
+      return fail("SQLite v1 baseline checkpoint revision action is invalid");
+    }
+    const state = {
+      action,
+      boundRecordHash,
+      boundSequence,
+      checkpointCreatedAt,
+      checkpointId,
+      checkpointScope,
+      recordedAtMs,
+      revision,
+      summary,
+      tenantId,
+      valueBytes,
+      valueHash,
+    };
+    yield validatedEntry(
+      "checkpoint-revision",
+      { checkpointScope, revision, tenantId },
+      state,
+    );
+  }
+  if (revisionCount !== countsByKind["checkpoint-revision"]) {
+    return fail("SQLite v1 baseline checkpoint-revision count changed during capture");
+  }
+
   requireCaptureTransaction(connection, guard);
   const lock = exactlyOne(connection, `
     SELECT singleton, active_lock_id, active_owner_id, active_source_version,
@@ -509,6 +679,8 @@ export function captureSQLiteV1BaselineSourceSummary(
       "migration-lineage",
       "stream-head",
       "record-identity",
+      "checkpoint-current",
+      "checkpoint-revision",
       "migration-lock-current",
     ]);
     requireCaptureTransaction(connection, transactionGuard);

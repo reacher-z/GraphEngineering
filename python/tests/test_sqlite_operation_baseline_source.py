@@ -2,11 +2,17 @@ from __future__ import annotations
 
 from dataclasses import FrozenInstanceError
 from pathlib import Path
+from typing import cast
 
 import pytest
 
 from graph_engineering.canonical import canonical_bytes
-from graph_engineering.cycle_store_provider import create_cycle_store_record
+from graph_engineering.cycle_store_provider import (
+    create_cycle_store_checkpoint,
+    create_cycle_store_record,
+    cycle_store_adapter_codec,
+)
+from graph_engineering.models import JsonObject
 from graph_engineering.sqlite_cycle_store import (
     _REQUIRED_MIGRATION_POSTCONDITIONS,
     SQLITE_CYCLE_STORE_DESCRIPTOR_HASH,
@@ -19,6 +25,7 @@ from graph_engineering.sqlite_operation_baseline import (
 )
 from graph_engineering.sqlite_operation_baseline_source import (
     SQLiteV1BaselineConnectionOwner,
+    _SQLiteCursorCapability,
     capture_sqlite_v1_baseline_source_summary,
 )
 
@@ -32,9 +39,7 @@ SOURCE_ASSETS = _load_migration_assets()
 
 def database() -> SQLiteV1BaselineConnectionOwner:
     connection = SQLiteV1BaselineConnectionOwner(":memory:")
-    schema = (
-        ROOT / "python/src/graph_engineering/_sqlite_migrations/schema-v1.sql"
-    ).read_text()
+    schema = (ROOT / "python/src/graph_engineering/_sqlite_migrations/schema-v1.sql").read_text()
     connection.executescript(schema)
     connection.execute(
         """INSERT INTO ge_cycle_schema VALUES
@@ -56,13 +61,7 @@ def database() -> SQLiteV1BaselineConnectionOwner:
             SOURCE_ASSETS.schema_sql_hash,
             SQLITE_CYCLE_STORE_SCHEMA_IDENTITY_SHA256,
             NOW,
-            canonical_bytes(
-                {
-                    "requiredPostconditions": list(
-                        _REQUIRED_MIGRATION_POSTCONDITIONS
-                    )
-                }
-            ),
+            canonical_bytes({"requiredPostconditions": list(_REQUIRED_MIGRATION_POSTCONDITIONS)}),
         ),
     )
     connection.execute(
@@ -72,6 +71,108 @@ def database() -> SQLiteV1BaselineConnectionOwner:
     )
     connection.commit()
     return connection
+
+
+def add_checkpoint_history(
+    connection: SQLiteV1BaselineConnectionOwner,
+    *,
+    value: object = 7,
+) -> JsonObject:
+    record = create_cycle_store_record(
+        record_id="record-a",
+        sequence=0,
+        previous_record_hash=None,
+        value={"checkpoint-anchor": True},
+    )
+    checkpoint = create_cycle_store_checkpoint(
+        checkpoint_scope="scope-a",
+        checkpoint_id="checkpoint-a",
+        stream_id="stream-a",
+        bound_sequence=cast(int, record["sequence"]),
+        bound_record_hash=cast(str, record["recordHash"]),
+        created_at="2026-07-28T00:00:00Z",
+        value=value,
+    )
+    summary = {key: item for key, item in checkpoint.items() if key != "value"}
+    summary_blob = cycle_store_adapter_codec.encode_ledger_result(
+        "save-checkpoint",
+        summary,
+    )
+    connection.execute(
+        """INSERT INTO ge_cycle_streams
+           (tenant_id, stream_id, tail_sequence, tail_record_hash,
+            created_at_ms, updated_at_ms)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        ("tenant-a", "stream-a", 0, record["recordHash"], NOW, NOW),
+    )
+    connection.execute(
+        """INSERT INTO ge_cycle_records
+           (tenant_id, stream_id, sequence, record_id, previous_record_hash,
+            value_hash, value_bytes, value_blob, record_hash, record_blob,
+            committed_at_ms)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            "tenant-a",
+            "stream-a",
+            record["sequence"],
+            record["recordId"],
+            record["previousRecordHash"],
+            record["valueHash"],
+            record["valueBytes"],
+            canonical_bytes(record["value"]),
+            record["recordHash"],
+            canonical_bytes(record),
+            NOW,
+        ),
+    )
+    for revision, action in ((1, "put"), (2, "delete"), (10, "put")):
+        put = action == "put"
+        connection.execute(
+            """INSERT INTO ge_cycle_checkpoint_revisions
+               (tenant_id, checkpoint_scope, revision, checkpoint_id, action,
+                summary_blob, bound_sequence, bound_record_hash,
+                checkpoint_created_at, value_hash, value_bytes, recorded_at_ms)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                "tenant-a",
+                checkpoint["checkpointScope"],
+                revision,
+                checkpoint["checkpointId"],
+                action,
+                summary_blob if put else None,
+                checkpoint["boundSequence"] if put else None,
+                checkpoint["boundRecordHash"] if put else None,
+                checkpoint["createdAt"] if put else None,
+                checkpoint["valueHash"] if put else None,
+                checkpoint["valueBytes"] if put else None,
+                NOW,
+            ),
+        )
+    connection.execute(
+        """INSERT INTO ge_cycle_checkpoints
+           (tenant_id, checkpoint_scope, checkpoint_id, stream_id,
+            bound_sequence, bound_record_hash, created_at, value_hash,
+            value_bytes, value_blob, checkpoint_blob, summary_blob,
+            checkpoint_revision, committed_at_ms)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            "tenant-a",
+            checkpoint["checkpointScope"],
+            checkpoint["checkpointId"],
+            checkpoint["streamId"],
+            checkpoint["boundSequence"],
+            checkpoint["boundRecordHash"],
+            checkpoint["createdAt"],
+            checkpoint["valueHash"],
+            checkpoint["valueBytes"],
+            canonical_bytes(checkpoint["value"]),
+            canonical_bytes(checkpoint),
+            summary_blob,
+            10,
+            NOW,
+        ),
+    )
+    return checkpoint
 
 
 def test_captures_frozen_v1_envelope_counts_and_watermark_inside_transaction() -> None:
@@ -335,6 +436,135 @@ def test_stream_and_scalar_record_carriers_are_streamed_and_verified() -> None:
         connection.close()
 
 
+def test_checkpoint_current_and_revisions_stream_canonical_scalar_carriers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connection = database()
+    try:
+        fetch_sizes: list[int] = []
+        original_fetchmany = _SQLiteCursorCapability.fetchmany
+
+        def observed_fetchmany(
+            cursor: _SQLiteCursorCapability,
+            size: int,
+        ) -> list[tuple[object, ...]]:
+            fetch_sizes.append(size)
+            return original_fetchmany(cursor, size)
+
+        monkeypatch.setattr(_SQLiteCursorCapability, "fetchmany", observed_fetchmany)
+        connection.execute("BEGIN EXCLUSIVE")
+        checkpoint = add_checkpoint_history(connection, value=7)
+        summary = capture_sqlite_v1_baseline_source_summary(
+            connection,
+            captured_at_ms=NOW,
+        )
+        assert summary.expected_entry_count == 9
+        entries = tuple(summary.iter_identity_entries())
+        assert [entry.entry_kind for entry in entries] == [
+            "schema-envelope",
+            "migration-lineage",
+            "stream-head",
+            "record-identity",
+            "checkpoint-current",
+            "checkpoint-revision",
+            "checkpoint-revision",
+            "checkpoint-revision",
+            "migration-lock-current",
+        ]
+        current = entries[4]
+        assert current.key == {
+            "checkpointId": "checkpoint-a",
+            "checkpointScope": "scope-a",
+            "tenantId": "tenant-a",
+        }
+        assert current.state["valueBytes"] == 1
+        assert current.state["valueHash"] == checkpoint["valueHash"]
+        assert current.state["checkpointRevision"] == 10
+        revisions = entries[5:8]
+        assert [entry.key["revision"] for entry in revisions] == [1, 10, 2]
+        assert revisions[0].state["action"] == "put"
+        assert revisions[1].state["summary"] == current.state["summary"]
+        assert revisions[2].state["action"] == "delete"
+        assert all(
+            revisions[2].state[field] is None
+            for field in (
+                "boundRecordHash",
+                "boundSequence",
+                "checkpointCreatedAt",
+                "summary",
+                "valueBytes",
+                "valueHash",
+            )
+        )
+        accumulator = BaselineAccumulator(
+            create_baseline_id(summary.source_envelope),
+            summary.expected_entry_count,
+        )
+        for entry in entries:
+            accumulator.append(entry)
+        assert accumulator.finish().entry_count == summary.expected_entry_count
+        assert fetch_sizes == [256] * 6 + [1] * 8 + [256] * 2
+    finally:
+        connection.close()
+
+
+@pytest.mark.parametrize(
+    ("column", "replacement"),
+    [
+        ("value_blob", b"8"),
+        ("checkpoint_blob", b"{}"),
+        ("summary_blob", b"{}"),
+    ],
+)
+def test_checkpoint_current_rejects_hostile_carrier_drift(
+    column: str,
+    replacement: bytes,
+) -> None:
+    connection = database()
+    try:
+        connection.execute("BEGIN EXCLUSIVE")
+        add_checkpoint_history(connection)
+        connection.execute(
+            f"UPDATE ge_cycle_checkpoints SET {column} = ? WHERE checkpoint_id = ?",
+            (replacement, "checkpoint-a"),
+        )
+        summary = capture_sqlite_v1_baseline_source_summary(
+            connection,
+            captured_at_ms=NOW,
+        )
+        with pytest.raises(ValueError, match="checkpoint-current source row is invalid"):
+            tuple(summary.iter_identity_entries())
+    finally:
+        connection.close()
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "UPDATE ge_cycle_checkpoint_revisions SET summary_blob = NULL WHERE revision = 1",
+        "UPDATE ge_cycle_checkpoint_revisions SET bound_sequence = 0 WHERE revision = 2",
+        "UPDATE ge_cycle_checkpoint_revisions SET bound_sequence = 1 WHERE revision = 10",
+    ],
+)
+def test_checkpoint_revision_rejects_nullable_and_outer_identity_drift(
+    mutation: str,
+) -> None:
+    connection = database()
+    try:
+        connection.execute("PRAGMA ignore_check_constraints = ON")
+        connection.execute("BEGIN EXCLUSIVE")
+        add_checkpoint_history(connection)
+        connection.execute(mutation)
+        summary = capture_sqlite_v1_baseline_source_summary(
+            connection,
+            captured_at_ms=NOW,
+        )
+        with pytest.raises(ValueError, match="checkpoint-revision source row is invalid"):
+            tuple(summary.iter_identity_entries())
+    finally:
+        connection.close()
+
+
 def test_partial_identity_iterator_rejects_any_nonempty_unimplemented_family() -> None:
     connection = database()
     try:
@@ -368,9 +598,7 @@ def test_capture_rejects_pragma_or_frozen_source_anchor_drift(tamper: str) -> No
                 (H1,),
             )
         else:
-            connection.execute(
-                "UPDATE ge_cycle_migrations SET migration_id = 'forged-v1'"
-            )
+            connection.execute("UPDATE ge_cycle_migrations SET migration_id = 'forged-v1'")
         connection.commit()
         connection.execute("BEGIN EXCLUSIVE")
         with pytest.raises(ValueError, match=r"version|frozen source identity"):

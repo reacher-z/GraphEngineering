@@ -3,7 +3,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { canonicalSerialize } from "@graph-engineering/core";
-import { CycleStoreProviderError, createCycleStoreRecord } from "@graph-engineering/runtime";
+import {
+  CycleStoreProviderError,
+  createCycleStoreCheckpoint,
+  createCycleStoreRecord,
+  cycleStoreAdapterCodec,
+} from "@graph-engineering/runtime";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { ensureSQLiteCycleStoreSchema } from "../src/migrations.js";
@@ -239,20 +244,177 @@ describe("SQLite v1 baseline source summary", () => {
          WHERE tenant_id = ? AND stream_id = ?
       `, "inspect-schema").run(record.sequence, record.recordHash, "tenant-a", "stream-a");
 
+      const checkpoint = createCycleStoreCheckpoint({
+        checkpointScope: "scope-a",
+        checkpointId: "checkpoint-a",
+        streamId: "stream-a",
+        boundSequence: record.sequence,
+        boundRecordHash: record.recordHash,
+        createdAt: "2026-07-28T00:00:00Z",
+        value: 0,
+      });
+      const { value: _value, ...checkpointSummary } = checkpoint;
+      const summaryBlob = Buffer.from(
+        cycleStoreAdapterCodec.encodeLedgerResult("save-checkpoint", checkpointSummary),
+      );
+      connection.prepare(`
+        INSERT INTO ge_cycle_checkpoints
+          (tenant_id, checkpoint_scope, checkpoint_id, stream_id, bound_sequence,
+           bound_record_hash, created_at, value_hash, value_bytes, value_blob,
+           checkpoint_blob, summary_blob, checkpoint_revision, committed_at_ms)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+      `, "inspect-schema").run(
+        "tenant-a",
+        checkpoint.checkpointScope,
+        checkpoint.checkpointId,
+        checkpoint.streamId,
+        checkpoint.boundSequence,
+        checkpoint.boundRecordHash,
+        checkpoint.createdAt,
+        checkpoint.valueHash,
+        checkpoint.valueBytes,
+        Buffer.from(canonicalSerialize(checkpoint.value), "utf8"),
+        Buffer.from(canonicalSerialize(checkpoint), "utf8"),
+        summaryBlob,
+        APPLIED_AT_MS,
+      );
+      connection.prepare(`
+        INSERT INTO ge_cycle_checkpoint_revisions
+          (tenant_id, checkpoint_scope, revision, checkpoint_id, action,
+           summary_blob, bound_sequence, bound_record_hash,
+           checkpoint_created_at, value_hash, value_bytes, recorded_at_ms)
+        VALUES (?, ?, 1, ?, 'put', ?, ?, ?, ?, ?, ?, ?)
+      `, "inspect-schema").run(
+        "tenant-a",
+        checkpoint.checkpointScope,
+        checkpoint.checkpointId,
+        summaryBlob,
+        checkpoint.boundSequence,
+        checkpoint.boundRecordHash,
+        checkpoint.createdAt,
+        checkpoint.valueHash,
+        checkpoint.valueBytes,
+        APPLIED_AT_MS,
+      );
+      connection.prepare(`
+        INSERT INTO ge_cycle_checkpoint_revisions
+          (tenant_id, checkpoint_scope, revision, checkpoint_id, action,
+           summary_blob, bound_sequence, bound_record_hash,
+           checkpoint_created_at, value_hash, value_bytes, recorded_at_ms)
+        VALUES (?, ?, 2, ?, 'delete', NULL, NULL, NULL, NULL, NULL, NULL, ?)
+      `, "inspect-schema").run(
+        "tenant-a",
+        checkpoint.checkpointScope,
+        checkpoint.checkpointId,
+        APPLIED_AT_MS,
+      );
+      connection.prepare(`
+        INSERT INTO ge_cycle_checkpoint_revisions
+          (tenant_id, checkpoint_scope, revision, checkpoint_id, action,
+           summary_blob, bound_sequence, bound_record_hash,
+           checkpoint_created_at, value_hash, value_bytes, recorded_at_ms)
+        VALUES (?, ?, 10, ?, 'delete', NULL, NULL, NULL, NULL, NULL, NULL, ?)
+      `, "inspect-schema").run(
+        "tenant-a",
+        checkpoint.checkpointScope,
+        checkpoint.checkpointId,
+        APPLIED_AT_MS,
+      );
+
       const summary = captureSQLiteV1BaselineSourceSummary(connection, APPLIED_AT_MS);
-      expect(summary.expectedEntryCount).toBe(5);
+      expect(summary.expectedEntryCount).toBe(9);
       const entries = [...summary.entries()];
       expect(entries.map((entry) => entry.entryKind)).toEqual([
         "schema-envelope",
         "migration-lineage",
         "stream-head",
         "record-identity",
+        "checkpoint-current",
+        "checkpoint-revision",
+        "checkpoint-revision",
+        "checkpoint-revision",
         "migration-lock-current",
       ]);
       expect(entries[3]).toMatchObject({
         key: { recordId: "record-a", tenantId: "tenant-a" },
         state: { valueBytes: 1, valueHash: record.valueHash, recordHash: record.recordHash },
       });
+      expect(entries[4]).toMatchObject({
+        key: {
+          checkpointId: checkpoint.checkpointId,
+          checkpointScope: checkpoint.checkpointScope,
+          tenantId: "tenant-a",
+        },
+        state: { valueBytes: 1, valueHash: checkpoint.valueHash },
+      });
+      expect(entries[5]).toMatchObject({ state: { action: "put", revision: 1 } });
+      expect(entries[6]).toMatchObject({
+        state: { action: "delete", revision: 10 },
+      });
+      expect(entries[7]).toMatchObject({
+        state: {
+          action: "delete",
+          boundRecordHash: null,
+          boundSequence: null,
+          checkpointCreatedAt: null,
+          revision: 2,
+          summary: null,
+          valueBytes: null,
+          valueHash: null,
+        },
+      });
+
+      const mismatchedSummary = Buffer.from(cycleStoreAdapterCodec.encodeLedgerResult(
+        "save-checkpoint",
+        { ...checkpointSummary, checkpointId: "checkpoint-b" },
+      ));
+      connection.prepare(
+        "UPDATE ge_cycle_checkpoints SET summary_blob = ? WHERE checkpoint_id = ?",
+        "inspect-schema",
+      ).run(mismatchedSummary, checkpoint.checkpointId);
+      const corruptedCheckpoint = captureSQLiteV1BaselineSourceSummary(
+        connection,
+        APPLIED_AT_MS,
+      );
+      expect(() => [...corruptedCheckpoint.entries()]).toThrow(
+        /checkpoint carrier identity drifted/u,
+      );
+      connection.prepare(
+        "UPDATE ge_cycle_checkpoints SET summary_blob = ? WHERE checkpoint_id = ?",
+        "inspect-schema",
+      ).run(summaryBlob, checkpoint.checkpointId);
+      connection.prepare(`
+        UPDATE ge_cycle_checkpoint_revisions
+           SET summary_blob = ?
+         WHERE checkpoint_scope = ? AND revision = 1
+      `, "inspect-schema").run(mismatchedSummary, checkpoint.checkpointScope);
+      const corruptedRevision = captureSQLiteV1BaselineSourceSummary(
+        connection,
+        APPLIED_AT_MS,
+      );
+      expect(() => [...corruptedRevision.entries()]).toThrow(
+        /checkpoint revision identity drifted/u,
+      );
+      connection.prepare(`
+        UPDATE ge_cycle_checkpoint_revisions
+           SET summary_blob = ?
+         WHERE checkpoint_scope = ? AND revision = 1
+      `, "inspect-schema").run(summaryBlob, checkpoint.checkpointScope);
+
+      connection.execTrusted("PRAGMA ignore_check_constraints = ON", "inspect-schema");
+      connection.prepare(`
+        UPDATE ge_cycle_checkpoint_revisions
+           SET value_hash = ?
+         WHERE checkpoint_scope = ? AND revision = 2
+      `, "inspect-schema").run(checkpoint.valueHash, checkpoint.checkpointScope);
+      const partialDelete = captureSQLiteV1BaselineSourceSummary(connection, APPLIED_AT_MS);
+      expect(() => [...partialDelete.entries()]).toThrow(/delete revision is invalid/u);
+      connection.prepare(`
+        UPDATE ge_cycle_checkpoint_revisions
+           SET value_hash = NULL
+         WHERE checkpoint_scope = ? AND revision = 2
+      `, "inspect-schema").run(checkpoint.checkpointScope);
+      connection.execTrusted("PRAGMA ignore_check_constraints = OFF", "inspect-schema");
 
       connection.prepare(
         "UPDATE ge_cycle_records SET value_blob = ? WHERE record_id = ?",
