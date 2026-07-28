@@ -23,6 +23,12 @@ from .portable_json import portable_json_snapshot
 SQLITE_CURSOR_SEAL_ALGORITHM_VERSION = "sqlite-cursor-seal/v1"
 SQLITE_CURSOR_SEAL_ROW_DOMAIN = b"graph-engineering/sqlite-cursor-seal-row/v1\0"
 SQLITE_CURSOR_SEAL_DOMAIN = b"graph-engineering/sqlite-cursor-seal/v1\0"
+SQLITE_CURSOR_SEAL_EMPTY_ROOT = hashlib.sha256(
+    SQLITE_CURSOR_SEAL_DOMAIN
+    + b"\x02"
+    + (0).to_bytes(8, "big")
+    + hashlib.sha256(SQLITE_CURSOR_SEAL_DOMAIN + b"\x00").digest()
+).hexdigest()
 SQLITE_CURSOR_REQUEST_SCOPE_MAX_BYTES = 1_048_576
 SQLITE_CURSOR_SNAPSHOT_MAX_BYTES = 16_777_216
 SQLITE_CURSOR_MAX_COUNT = MAX_SAFE_INTEGER

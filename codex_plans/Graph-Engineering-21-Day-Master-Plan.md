@@ -10538,3 +10538,59 @@ logs must name Claude Code and sub-agent contributions, review findings,
 corrections, failed experiments and explicit nonclaims. Star targets remain a
 growth objective, never an engineering acceptance result; no exact star count
 is promised because adoption is external and cannot be guaranteed by code.
+
+### 31.35.7 Cursor A2b opaque ownership receipt acceptance
+
+Cursor A2b is complete as a pure private primitive in TypeScript and Python.
+It freezes the tenant-then-token physical source query, the sixteen immutable
+and eighteen total physical fields, the A1 seal algorithm, the actual six-field
+baseline projection identity, four module-minted ownership capabilities, one
+capture session and the exact A1/A2a evidence into a thirteen-contribution
+pre-rebind receipt. Projection references and receipts are opaque identity
+objects backed by module-private provenance stores; scalar copies cannot be
+used as capabilities.
+
+The exact query SHA-256 is
+`dda30c873dcae965e1cac3f6478549b98e2414e982c1287997b93a2c09d760a4` and
+the static projection-contract root is
+`82bbb4c486590745fb6363151418bb8f50a1c56c4438c8b535b60f01fca7f8b9`.
+Both runtimes use identical NUL-terminated contribution, capture-session,
+static-projection, baseline-projection-reference and pre-rebind-receipt domains.
+All canonical documents are framed as domain plus unsigned 64-bit byte length
+plus canonical UTF-8 bytes.
+
+Four real cross-runtime vectors now pass through actual fresh-v1 source capture,
+the actual baseline accumulator, the actual A1 physical decoder/sealer and the
+A2b issuer in each runtime. Their receipt roots are empty
+`e63c0eed6c3cb3aee2f8d12e1562395ff577af4c4721b59397111cae6bc032ad`,
+one event `cb710d7ec15c2e5c729ee813d5f0b03dcfdf795203df8a4ecf5a174b063743f6`,
+event plus checkpoint
+`f0571ef81f6864bccc2bedbe81f586363bb3d8ca2ff38b3545f95bfbe808b6c7`
+and MAX_SAFE/1,024 hostile fleet
+`e319abeed2696190770ff3a54669afeb24eff4810dae6072cb3a8141766037fa`.
+Each runtime recomputes rather than imports the other runtime's result.
+
+The one-shot issuer snapshots the exact source summary, clock evidence, A1
+receipt, baseline projection, projection reference, session and four ownership
+handles. Failed validation is atomic and leaves the issuer usable; successful
+issuance consumes it only after the opaque receipt and its provenance are
+recorded. The repeatable package-private fence accepts only the original receipt
+and returns the frozen exact-context witness without consuming or transitioning
+it. Tests cover equal-value clones, mutable input buffers, same-byte/new-object
+capabilities, unsafe and MAX_SAFE integers, every receipt contribution,
+insertion-order independence, source/count/schema drift, pairwise A/B mixed
+provenance, hidden fields, accessors/proxies and private-boundary attacks.
+
+The accepted final evidence is TypeScript A2b 14/14, adjacent 280/280 and
+SQLite 18 files / 426 tests with typecheck, lint and build green. Python A2b is
+25/25, adjacent 131/131 and full 1,704/1,704 with Ruff, scoped formatting and
+strict MyPy over 49 source files green. The final independent cross-runtime
+audit reports HIGH 0 / MEDIUM 0 / LOW 0. Detailed evidence is in
+`codex_logs/reviews/SQLITE-CURSOR-A2B-OWNERSHIP-AUDIT-2026-07-28.md`.
+
+This closes only A2b. It does not execute the main cursor query, create the TEMP
+seal stage, run cursor rules one through ten, reach `pre-rebind-complete`, run
+`0002`, publish/rebind cursors, run post-rebind rules eleven/twelve, reach
+`cursor/clock-complete`, change the registry, prove scale/crash recovery or make
+any release, adoption or star claim. Slice B in §31.35.4 is the next cursor
+blocker; D6 router/barrier integration remains the parallel product lane.
