@@ -7964,3 +7964,158 @@ nested postconditions cannot be mutated before accumulator append.
 
 This checkpoint proves empty-v1 identity capture only. The nine data families,
 TEMP staging, relation anti-joins, cursor seal, and 100K path remain open.
+
+### 31.34.9 Stream-head and record-identity carrier checkpoint
+
+The next dependency-ordered source slice is now implemented symmetrically in
+TypeScript and Python. The one-shot v1 iterator covers five entry families in
+their protocol rank order: `schema-envelope`, `migration-lineage`,
+`stream-head`, `record-identity`, and `migration-lock-current`. A source is
+still rejected before iteration if any of the seven not-yet-implemented entry
+families is nonempty. Exact counts captured by the source summary are compared
+again after each streamed data family so insert/delete cardinality drift cannot
+silently change the baseline.
+
+Stream keys are selected in canonical key-byte order (`stream_id` then
+`tenant_id`, both binary) and record keys in canonical key-byte order
+(`record_id` then `tenant_id`, both binary). Rows are consumed through native
+iterators/fixed `fetchmany(256)` batches rather than `.all()`, `fetchall()`, or
+an application collection. Transaction liveness is tested before every native
+step and again before every yielded/batched row; ending the caller transaction
+between two yields is fatal even when Python already has more rows in the same
+bounded batch.
+
+The record payload omissions are now earned rather than assumed. Before a
+`record-identity` entry can omit `value_blob` and `record_blob`, both runtimes:
+
+1. bound and type-check every selected carrier;
+2. fatal-decode the complete record through the runtime storage codec;
+3. require every duplicated scalar column to equal the decoded record;
+4. require the full record BLOB to equal the canonical re-encoding;
+5. require the value BLOB to equal the canonical re-encoding of the embedded
+   value, including valid one-byte scalar JSON values;
+6. require declared value bytes to equal the actual value BLOB length; and
+7. recompute and compare the canonical value hash before emitting only the
+   bounded identity state.
+
+Native hostile tests build a real one-byte scalar record, prove exact family
+ordering and identity output, then mutate only `value_blob` and require the
+source iterator to fail closed. Current evidence is TypeScript 14 test files /
+117 tests plus package typecheck and lint; Python source and baseline 27 tests,
+Ruff, and strict MyPy. This checkpoint does **not** claim stream/record relation
+reconciliation: contiguous chains, predecessor hashes, exact tails, global
+record-ID uniqueness, and source-to-TEMP bidirectional anti-joins remain
+mandatory in §31.34.3.
+
+Seven entry families remain before full source coverage:
+`checkpoint-current`, `checkpoint-revision`, `lease-current`,
+`used-lease-identity`, `legal-hold`, `used-migration-lock-identity`, and
+`legacy-operation`. After those iterators land, the next gates remain the
+FILE-backed TEMP relation stage, cursor seal/rebind proof, 100K constant-memory
+run, atomic 0002 execution/publish, crash-boundary rollback matrix, and the
+exact 96-case implementation-claim switch.
+
+### 31.34.10 Capture-transaction continuity and bounded-carrier closure
+
+The first hostile review of §31.34.9 found three release-blocking gaps. The
+five-family iterator checked only whether some transaction was active, so a
+rollback followed by a new begin could resume an old capture; exact family
+counts did not catch count-preserving updates; and Python fetched 256 record
+rows even though each row may carry roughly three MiB of omitted payload.
+
+Both runtimes now establish a transaction-generation sentinel by enabling
+transaction-local `defer_foreign_keys`, freeze the same-connection
+`total_changes()` counter after the summary is captured, and validate both
+sentinels at iterator acquisition, before every family, before and after each
+native step, before every buffered row/yield, and at family completion. A
+commit or rollback resets the transaction-local sentinel. Any main or TEMP
+write after capture changes the frozen counter. Therefore an old iterator
+cannot continue accidentally in a replacement transaction and an update or
+delete-plus-insert cannot retain the same baseline identity while changing
+entry bytes.
+
+This source-only API deliberately forbids all writes between summary capture
+and complete iterator consumption. The future FILE-backed TEMP staging API
+must consume source rows internally and advance a private allowed-write guard,
+or finish each source statement into the stage before exposing control. It
+must not weaken the public capture guard or treat arbitrary caller writes as
+staging. Explicit rollback-plus-rebegin and same-count stream-renaming attacks
+now fail in both runtimes.
+
+Python family metadata now carries a fetch size. Metadata-only families and
+stream heads retain bounded 256-row batches, while every record row is fetched
+alone because it contains both `value_blob` and `record_blob`. Checkpoint
+current and legacy-operation rows must also use fetch size one when added;
+checkpoint revisions and bounded scalar families may use a larger fixed batch
+only after their maximum row width is calculated and documented.
+
+Updated evidence after these repairs: TypeScript SQLite 14 test files / 118
+tests plus typecheck; Python focused source/baseline 28 tests, Ruff, and strict
+MyPy. The previously recorded 117/27 counts remain an immutable historical
+checkpoint rather than being edited in place. Relation reconciliation,
+deterministic early-abandon disposal, shared `BLR_*` diagnostics, multi-row
+cross-language byte fixtures, and the seven remaining source families are
+still open and must close before migration code may consume this iterator.
+
+### 31.34.11 Non-replayable transaction epoch correction
+
+A second hostile review proved that the transaction-local PRAGMA sentinel in
+§31.34.10 was only a reset signal, not an identity: a caller could rollback,
+begin again, set the public bit back to one, and continue. The implementation
+therefore removes that PRAGMA write entirely; source capture no longer changes
+foreign-key deferral or any caller-visible constraint failure boundary.
+
+TypeScript now obtains a monotonic epoch from `SQLiteConnection`. Every trusted
+transaction/control execution and every owner-managed begin, commit, or
+rollback advances the epoch. Prepared transaction-control statements are
+rejected so they cannot bypass the owner counter. A capture freezes the epoch
+and every iterator boundary compares it. Python installs an allow-all SQLite
+authorizer only after the read-only summary succeeds; the authorizer increments
+an opaque state object for every SQLite transaction or savepoint action. The
+summary freezes that epoch and rejects any later difference. Neither mechanism
+is derived from writable database state or a replayable PRAGMA value.
+
+Hostile tests now execute `rollback -> begin -> defer_foreign_keys=ON -> next`
+and still fail in both runtimes. The same-connection `total_changes()` seal is
+retained for this source-only iterator and independently blocks count-preserving
+DML. It is not the final staging architecture: a future module-owned
+source-to-TEMP consumer must distinguish its own expected TEMP writes from
+unauthorized source writes while retaining the transaction epoch. Until that
+internal consumer exists, arbitrary writes between capture and completion are
+intentionally rejected.
+
+This correction supersedes only the PRAGMA-generation mechanism described in
+§31.34.10; the historical finding, record fetch-size repair, tests, remaining
+relation work, and non-claim boundary remain valid.
+
+### 31.34.12 Exclusive owner and raw-handle closure
+
+Further hostile review found two bypasses in the first epoch implementation.
+SQLite accepts empty statements before a real statement, so `; BEGIN` and
+`;;/*comment*/ ROLLBACK` bypassed a tokenizer that skipped only whitespace and
+comments. Python also returned a native cursor whose public `.connection`
+attribute leaked the raw handle around the owner epoch.
+
+Both SQL tokenizers now skip any interleaving of empty semicolon statements,
+whitespace, line comments, and block comments before classifying the first
+real token. TypeScript rejects prepared BEGIN, COMMIT/END, ROLLBACK, SAVEPOINT,
+and RELEASE after every such prefix. Tests execute block-comment, line-comment,
+single-semicolon, multiple-semicolon, and mixed-comment attacks. Python uses
+the same classification for its transaction/savepoint epoch and additionally
+tests a prefixed `ROLLBACK TO` against a savepoint created before capture.
+
+Python no longer accepts an externally created raw connection. The baseline
+connection owner opens its database location internally and never returns the
+native connection. `execute` returns a minimal cursor capability exposing only
+`fetchone`, bounded `fetchmany`, and `close`; it has no `.connection`,
+transaction, authorizer, or arbitrary statement surface. This is an internal
+ownership and accidental-misuse boundary, not a sandbox against malicious
+Python reflection. Future provider integration must adopt this owner from
+connection creation and must not open a second connection for migration.
+
+The fourth read-only hostile pass reports no remaining HIGH or MEDIUM finding
+for this five-family source-only milestone. Current focused evidence is
+TypeScript SQLite 14 files / 119 tests and Python source/baseline 29 tests, plus
+both strict typecheck/lint paths. Full-plan completion remains false: the seven
+remaining families, stage/relation/cursor/100K/atomic-v2/runtime gates listed
+above are unchanged.

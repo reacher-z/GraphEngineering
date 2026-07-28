@@ -9,7 +9,8 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import cast
 
-from .canonical import canonical_bytes
+from .canonical import canonical_bytes, canonical_sha256
+from .cycle_store_provider import cycle_store_adapter_codec
 from .models import MAX_SAFE_INTEGER, JsonObject, JsonValue
 from .portable_json import portable_json_snapshot
 from .sqlite_cycle_store import (
@@ -32,6 +33,114 @@ class _IdentityIterationState:
     started: bool = False
 
 
+_TRANSACTION_TOKENS = frozenset(
+    {"BEGIN", "COMMIT", "END", "ROLLBACK", "SAVEPOINT", "RELEASE"}
+)
+
+
+def _first_sqlite_token(sql: str) -> str:
+    offset = 0
+    while offset < len(sql):
+        if sql[offset] == ";":
+            offset += 1
+            continue
+        if sql[offset].isspace():
+            offset += 1
+            continue
+        if sql.startswith("--", offset):
+            newline = sql.find("\n", offset + 2)
+            if newline < 0:
+                return ""
+            offset = newline + 1
+            continue
+        if sql.startswith("/*", offset):
+            close = sql.find("*/", offset + 2)
+            if close < 0:
+                return ""
+            offset = close + 2
+            continue
+        break
+    token: list[str] = []
+    while offset < len(sql) and sql[offset].isascii() and sql[offset].isalpha():
+        token.append(sql[offset])
+        offset += 1
+    return "".join(token).upper()
+
+
+class _SQLiteCursorCapability:
+    """Minimal cursor surface that never exposes the owned connection."""
+
+    __slots__ = ("__cursor",)
+
+    def __init__(self, cursor: sqlite3.Cursor) -> None:
+        self.__cursor = cursor
+
+    def fetchone(self) -> tuple[object, ...] | None:
+        row = self.__cursor.fetchone()
+        return None if row is None else tuple(cast(tuple[object, ...], row))
+
+    def fetchmany(self, size: int) -> list[tuple[object, ...]]:
+        return [tuple(cast(tuple[object, ...], row)) for row in self.__cursor.fetchmany(size)]
+
+    def close(self) -> None:
+        self.__cursor.close()
+
+
+class SQLiteV1BaselineConnectionOwner:
+    """Exclusive connection capability with an opaque transaction epoch."""
+
+    __slots__ = ("__connection", "__transaction_epoch")
+
+    def __init__(self, location: str) -> None:
+        if type(location) is not str or not location:
+            raise TypeError("baseline owner requires one SQLite location")
+        self.__connection = sqlite3.connect(location)
+        self.__transaction_epoch = 0
+
+    @property
+    def in_transaction(self) -> bool:
+        return self.__connection.in_transaction
+
+    @property
+    def total_changes(self) -> int:
+        return self.__connection.total_changes
+
+    @property
+    def transaction_epoch(self) -> int:
+        return self.__transaction_epoch
+
+    def execute(
+        self,
+        sql: str,
+        parameters: tuple[object, ...] = (),
+    ) -> _SQLiteCursorCapability:
+        before = self.__connection.in_transaction
+        token = _first_sqlite_token(sql)
+        cursor = self.__connection.execute(sql, parameters)
+        if token in _TRANSACTION_TOKENS or before != self.__connection.in_transaction:
+            self.__transaction_epoch += 1
+        return _SQLiteCursorCapability(cursor)
+
+    def executescript(self, sql: str) -> None:
+        before = self.__connection.in_transaction
+        self.__connection.executescript(sql)
+        if before != self.__connection.in_transaction or any(
+            token in sql.upper() for token in _TRANSACTION_TOKENS
+        ):
+            self.__transaction_epoch += 1
+
+    def commit(self) -> None:
+        self.__connection.commit()
+        self.__transaction_epoch += 1
+
+    def rollback(self) -> None:
+        self.__connection.rollback()
+        self.__transaction_epoch += 1
+
+    def close(self) -> None:
+        self.__connection.close()
+
+
 @dataclass(frozen=True, slots=True)
 class SQLiteV1BaselineSourceSummary:
     """Frozen source summary plus the first bounded family iterator.
@@ -45,8 +154,10 @@ class SQLiteV1BaselineSourceSummary:
     counts_by_kind: Mapping[BaselineEntryKind, int]
     expected_entry_count: int
     maximum_observed_at_ms: int
-    _connection: sqlite3.Connection = field(repr=False)
+    _connection: SQLiteV1BaselineConnectionOwner = field(repr=False)
     _latest_migration_applied_at_ms: int = field(repr=False)
+    _source_total_changes: int = field(repr=False)
+    _captured_transaction_epoch: int = field(repr=False)
     _identity_iteration_state: _IdentityIterationState = field(
         default_factory=_IdentityIterationState,
         init=False,
@@ -61,55 +172,64 @@ class SQLiteV1BaselineSourceSummary:
         return cast(JsonObject, json.loads(self._source_envelope_bytes))
 
     def iter_identity_entries(self) -> Iterator[BaselineEntryInput]:
-        """Yield schema, migration-lineage, and migration-lock entries once."""
+        """Yield every currently implemented v1 source family once."""
 
         if self._identity_iteration_state.started:
             raise ValueError("SQLite v1 baseline identity iterator is already consumed")
-        if not self._connection.in_transaction:
-            raise ValueError("SQLite v1 baseline capture requires an active transaction")
-        identity_counts = {
-            "schema-envelope": 1,
-            "migration-lineage": 1,
-            "migration-lock-current": 1,
+        self._assert_capture_transaction()
+        implemented = {
+            "schema-envelope",
+            "migration-lineage",
+            "stream-head",
+            "record-identity",
+            "migration-lock-current",
         }
         if (
-            self.expected_entry_count != 3
-            or any(self.counts_by_kind[kind] != identity_counts.get(kind, 0)
-                   for kind in BASELINE_ENTRY_KINDS)
+            self.counts_by_kind["schema-envelope"] != 1
+            or self.counts_by_kind["migration-lineage"] != 1
+            or self.counts_by_kind["migration-lock-current"] != 1
+            or any(
+                self.counts_by_kind[kind] != 0
+                for kind in BASELINE_ENTRY_KINDS
+                if kind not in implemented
+            )
         ):
             raise ValueError(
-                "SQLite v1 baseline identity iterator is an incomplete foundation "
-                "for a nonempty source"
+                "SQLite v1 baseline iterator cannot cover unimplemented source families"
             )
         self._identity_iteration_state.started = True
         return self._iterate_identity_entries()
 
     def _iterate_identity_entries(self) -> Iterator[BaselineEntryInput]:
-        if not self._connection.in_transaction:
-            raise ValueError("SQLite v1 baseline capture requires an active transaction")
+        self._assert_capture_transaction()
         families: tuple[
-            tuple[BaselineEntryKind, str, Callable[[object], BaselineEntryInput]], ...
+            tuple[BaselineEntryKind, str, Callable[[object], BaselineEntryInput], int],
+            ...,
         ] = (
-            ("schema-envelope", _SCHEMA_ENTRY_SQL, _schema_entry),
-            ("migration-lineage", _MIGRATION_ENTRY_SQL, _migration_entry),
-            ("migration-lock-current", _MIGRATION_LOCK_ENTRY_SQL, _migration_lock_entry),
+            ("schema-envelope", _SCHEMA_ENTRY_SQL, _schema_entry, 256),
+            ("migration-lineage", _MIGRATION_ENTRY_SQL, _migration_entry, 256),
+            ("stream-head", _STREAM_ENTRY_SQL, _stream_entry, 256),
+            ("record-identity", _RECORD_ENTRY_SQL, _record_entry, 1),
+            (
+                "migration-lock-current",
+                _MIGRATION_LOCK_ENTRY_SQL,
+                _migration_lock_entry,
+                256,
+            ),
         )
         envelope = self.source_envelope
-        for kind, sql, capture in families:
-            if not self._connection.in_transaction:
-                raise ValueError("SQLite v1 baseline capture requires an active transaction")
+        for kind, sql, capture, fetch_size in families:
+            self._assert_capture_transaction()
             cursor = self._connection.execute(sql)
             emitted = 0
             try:
                 while True:
-                    if not self._connection.in_transaction:
-                        raise ValueError(
-                            "SQLite v1 baseline capture requires an active transaction"
-                        )
-                    rows = cursor.fetchmany(256)
+                    self._assert_capture_transaction()
+                    rows = cursor.fetchmany(fetch_size)
                     if not rows:
                         break
                     for row in rows:
+                        self._assert_capture_transaction()
                         emitted += 1
                         try:
                             entry = capture(row)
@@ -121,8 +241,18 @@ class SQLiteV1BaselineSourceSummary:
                             ) from error
             finally:
                 cursor.close()
+            self._assert_capture_transaction()
             if emitted != self.counts_by_kind[kind]:
                 raise ValueError(f"SQLite v1 baseline {kind} count changed during capture")
+
+    def _assert_capture_transaction(self) -> None:
+        if not self._connection.in_transaction:
+            raise ValueError("SQLite v1 baseline requires the captured transaction")
+        if (
+            self._connection.transaction_epoch != self._captured_transaction_epoch
+            or self._connection.total_changes != self._source_total_changes
+        ):
+            raise ValueError("SQLite v1 baseline captured transaction changed")
 
     def _reconcile_identity_entry(
         self,
@@ -201,6 +331,17 @@ _MIGRATION_ENTRY_SQL = """SELECT version, previous_version, migration_id,
  sql_sha256, schema_identity_sha256, applied_at_ms, reversibility,
  postconditions_blob
  FROM ge_cycle_migrations ORDER BY CAST(version AS TEXT) COLLATE BINARY"""
+
+_STREAM_ENTRY_SQL = """SELECT tenant_id, stream_id, tail_sequence,
+ tail_record_hash, created_at_ms, updated_at_ms
+ FROM ge_cycle_streams
+ ORDER BY stream_id COLLATE BINARY, tenant_id COLLATE BINARY"""
+
+_RECORD_ENTRY_SQL = """SELECT tenant_id, stream_id, sequence, record_id,
+ previous_record_hash, value_hash, value_bytes, value_blob, record_hash,
+ record_blob, committed_at_ms
+ FROM ge_cycle_records
+ ORDER BY record_id COLLATE BINARY, tenant_id COLLATE BINARY"""
 
 _MIGRATION_LOCK_ENTRY_SQL = """SELECT singleton, active_lock_id, active_owner_id,
  active_source_version, active_target_version, active_lock_epoch,
@@ -284,6 +425,68 @@ def _migration_entry(row: object) -> BaselineEntryInput:
     )
 
 
+def _stream_entry(row: object) -> BaselineEntryInput:
+    values = tuple(cast(tuple[object, ...], row))
+    if len(values) != 6:
+        raise ValueError("stream head shape drifted")
+    return capture_baseline_entry(
+        "stream-head",
+        {"streamId": values[1], "tenantId": values[0]},
+        {
+            "createdAtMs": values[4],
+            "streamId": values[1],
+            "tailRecordHash": values[3],
+            "tailSequence": values[2],
+            "tenantId": values[0],
+            "updatedAtMs": values[5],
+        },
+    )
+
+
+def _record_entry(row: object) -> BaselineEntryInput:
+    values = tuple(cast(tuple[object, ...], row))
+    if len(values) != 11:
+        raise ValueError("record identity shape drifted")
+    value_blob = values[7]
+    record_blob = values[9]
+    if (
+        type(value_blob) is not bytes
+        or type(record_blob) is not bytes
+        or not 1 <= len(value_blob) <= 1_048_576
+        or not len(value_blob) <= len(record_blob) <= 2_097_152
+    ):
+        raise ValueError("record carrier bounds drifted")
+    record = cycle_store_adapter_codec.parse_stored_record(record_blob, "inspect-schema")
+    if (
+        record["recordId"] != values[3]
+        or record["sequence"] != values[2]
+        or record["previousRecordHash"] != values[4]
+        or record["valueHash"] != values[5]
+        or record["valueBytes"] != values[6]
+        or record["recordHash"] != values[8]
+        or len(value_blob) != values[6]
+        or canonical_bytes(record) != record_blob
+        or canonical_bytes(record["value"]) != value_blob
+        or canonical_sha256(record["value"]) != values[5]
+    ):
+        raise ValueError("record carrier identity drifted")
+    return capture_baseline_entry(
+        "record-identity",
+        {"recordId": values[3], "tenantId": values[0]},
+        {
+            "committedAtMs": values[10],
+            "previousRecordHash": values[4],
+            "recordHash": values[8],
+            "recordId": values[3],
+            "sequence": values[2],
+            "streamId": values[1],
+            "tenantId": values[0],
+            "valueBytes": values[6],
+            "valueHash": values[5],
+        },
+    )
+
+
 def _migration_lock_entry(row: object) -> BaselineEntryInput:
     values = tuple(cast(tuple[object, ...], row))
     if len(values) != 12:
@@ -315,7 +518,7 @@ def _integer(value: object, label: str, minimum: int = 0) -> int:
 
 
 def capture_sqlite_v1_baseline_source_summary(
-    connection: sqlite3.Connection,
+    connection: SQLiteV1BaselineConnectionOwner,
     *,
     captured_at_ms: int,
 ) -> SQLiteV1BaselineSourceSummary:
@@ -399,11 +602,15 @@ def capture_sqlite_v1_baseline_source_summary(
         raise ValueError("SQLite v1 provider clock high-water predates source state")
     if captured < lock_high_water:
         raise ValueError("SQLite v1 baseline capture predates provider clock high-water")
-    return SQLiteV1BaselineSourceSummary(
+    summary = SQLiteV1BaselineSourceSummary(
         canonical_bytes(envelope),
         MappingProxyType(counts),
         total,
         maximum,
         connection,
         latest_migration_applied_at_ms,
+        connection.total_changes,
+        connection.transaction_epoch,
     )
+    summary._assert_capture_transaction()
+    return summary

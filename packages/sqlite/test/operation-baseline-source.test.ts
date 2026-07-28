@@ -2,7 +2,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { CycleStoreProviderError } from "@graph-engineering/runtime";
+import { canonicalSerialize } from "@graph-engineering/core";
+import { CycleStoreProviderError, createCycleStoreRecord } from "@graph-engineering/runtime";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { ensureSQLiteCycleStoreSchema } from "../src/migrations.js";
@@ -126,7 +127,7 @@ describe("SQLite v1 baseline source summary", () => {
         "inspect-schema",
       ).run(APPLIED_AT_MS + 1);
       expect(() => [...capturedBeforeAppliedAtDrift.entries()]).toThrow(
-        /schema envelope identity drifted/u,
+        /captured transaction changed/u,
       );
       connection.execTrusted("ROLLBACK", "inspect-schema");
 
@@ -138,7 +139,12 @@ describe("SQLite v1 baseline source summary", () => {
       `, "inspect-schema").run(APPLIED_AT_MS, APPLIED_AT_MS);
       const nonIdentity = captureSQLiteV1BaselineSourceSummary(connection, APPLIED_AT_MS);
       expect(nonIdentity.expectedEntryCount).toBe(4);
-      expect(() => nonIdentity.entries()).toThrow(/identity-only iterator/u);
+      expect([...nonIdentity.entries()].map((entry) => entry.entryKind)).toEqual([
+        "schema-envelope",
+        "migration-lineage",
+        "stream-head",
+        "migration-lock-current",
+      ]);
       connection.execTrusted("ROLLBACK", "inspect-schema");
 
       connection.execTrusted("BEGIN EXCLUSIVE", "inspect-schema");
@@ -164,7 +170,97 @@ describe("SQLite v1 baseline source summary", () => {
       ).entries();
       expect(iterator.next().value?.entryKind).toBe("schema-envelope");
       connection.execTrusted("ROLLBACK", "inspect-schema");
-      expect(() => iterator.next()).toThrow(/active transaction/u);
+      connection.execTrusted("BEGIN EXCLUSIVE", "inspect-schema");
+      connection.execTrusted("PRAGMA defer_foreign_keys = ON", "inspect-schema");
+      expect(() => iterator.next()).toThrow(/captured transaction changed/u);
+      connection.execTrusted("ROLLBACK", "inspect-schema");
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("rejects a count-preserving source mutation after capture", () => {
+    const connection = opened();
+    try {
+      connection.execTrusted("BEGIN EXCLUSIVE", "inspect-schema");
+      connection.prepare(`
+        INSERT INTO ge_cycle_streams
+          (tenant_id, stream_id, tail_sequence, tail_record_hash, created_at_ms, updated_at_ms)
+        VALUES ('tenant-a', 'stream-a', -1, NULL, ?, ?)
+      `, "inspect-schema").run(APPLIED_AT_MS, APPLIED_AT_MS);
+      const summary = captureSQLiteV1BaselineSourceSummary(connection, APPLIED_AT_MS);
+      connection.prepare(
+        "UPDATE ge_cycle_streams SET stream_id = 'stream-b' WHERE stream_id = 'stream-a'",
+        "inspect-schema",
+      ).run();
+      expect(() => [...summary.entries()]).toThrow(/captured transaction changed/u);
+      connection.execTrusted("ROLLBACK", "inspect-schema");
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("validates scalar record carriers before omitting their payload bytes", () => {
+    const connection = opened();
+    try {
+      const record = createCycleStoreRecord({
+        recordId: "record-a",
+        sequence: 0,
+        previousRecordHash: null,
+        value: 7,
+      });
+      connection.execTrusted("BEGIN EXCLUSIVE", "inspect-schema");
+      connection.prepare(`
+        INSERT INTO ge_cycle_streams
+          (tenant_id, stream_id, tail_sequence, tail_record_hash, created_at_ms, updated_at_ms)
+        VALUES (?, ?, -1, NULL, ?, ?)
+      `, "inspect-schema").run("tenant-a", "stream-a", APPLIED_AT_MS, APPLIED_AT_MS);
+      connection.prepare(`
+        INSERT INTO ge_cycle_records
+          (tenant_id, stream_id, sequence, record_id, previous_record_hash,
+           value_hash, value_bytes, value_blob, record_hash, record_blob, committed_at_ms)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `, "inspect-schema").run(
+        "tenant-a",
+        "stream-a",
+        record.sequence,
+        record.recordId,
+        record.previousRecordHash,
+        record.valueHash,
+        record.valueBytes,
+        Buffer.from(canonicalSerialize(record.value), "utf8"),
+        record.recordHash,
+        Buffer.from(canonicalSerialize(record), "utf8"),
+        APPLIED_AT_MS,
+      );
+      connection.prepare(`
+        UPDATE ge_cycle_streams
+           SET tail_sequence = ?, tail_record_hash = ?
+         WHERE tenant_id = ? AND stream_id = ?
+      `, "inspect-schema").run(record.sequence, record.recordHash, "tenant-a", "stream-a");
+
+      const summary = captureSQLiteV1BaselineSourceSummary(connection, APPLIED_AT_MS);
+      expect(summary.expectedEntryCount).toBe(5);
+      const entries = [...summary.entries()];
+      expect(entries.map((entry) => entry.entryKind)).toEqual([
+        "schema-envelope",
+        "migration-lineage",
+        "stream-head",
+        "record-identity",
+        "migration-lock-current",
+      ]);
+      expect(entries[3]).toMatchObject({
+        key: { recordId: "record-a", tenantId: "tenant-a" },
+        state: { valueBytes: 1, valueHash: record.valueHash, recordHash: record.recordHash },
+      });
+
+      connection.prepare(
+        "UPDATE ge_cycle_records SET value_blob = ? WHERE record_id = ?",
+        "inspect-schema",
+      ).run(Buffer.from("8", "utf8"), record.recordId);
+      const corrupted = captureSQLiteV1BaselineSourceSummary(connection, APPLIED_AT_MS);
+      expect(() => [...corrupted.entries()]).toThrow(/record carrier identity drifted/u);
+      connection.execTrusted("ROLLBACK", "inspect-schema");
     } finally {
       connection.close();
     }

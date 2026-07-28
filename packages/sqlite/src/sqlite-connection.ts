@@ -107,6 +107,35 @@ function versionAtLeast(
   return true;
 }
 
+function firstSQLiteToken(sql: string): string {
+  let offset = 0;
+  while (offset < sql.length) {
+    if (sql[offset] === ";") {
+      offset += 1;
+      continue;
+    }
+    const whitespace = /^\s+/u.exec(sql.slice(offset));
+    if (whitespace !== null) {
+      offset += whitespace[0].length;
+      continue;
+    }
+    if (sql.startsWith("--", offset)) {
+      const newline = sql.indexOf("\n", offset + 2);
+      if (newline < 0) return "";
+      offset = newline + 1;
+      continue;
+    }
+    if (sql.startsWith("/*", offset)) {
+      const close = sql.indexOf("*/", offset + 2);
+      if (close < 0) return "";
+      offset = close + 2;
+      continue;
+    }
+    break;
+  }
+  return /^[A-Za-z]+/u.exec(sql.slice(offset))?.[0]?.toUpperCase() ?? "";
+}
+
 /** One hardened, synchronous, file-backed SQLite connection. */
 export class SQLiteConnection {
   readonly #database: DatabaseSync;
@@ -115,6 +144,7 @@ export class SQLiteConnection {
   readonly #maxBusyAttempts: number;
   readonly #maxBusyElapsedMs: number;
   #closed = false;
+  #transactionEpoch = 0n;
 
   constructor(path: string, options: SQLiteConnectionOptions = {}) {
     this.#path = checkedPath(path);
@@ -178,6 +208,12 @@ export class SQLiteConnection {
   get isTransaction(): boolean {
     this.#assertOpen("inspect-schema");
     return this.#database.isTransaction;
+  }
+
+  /** Monotonic owner-observed transaction/control boundary generation. */
+  get transactionEpoch(): bigint {
+    this.#assertOpen("inspect-schema");
+    return this.#transactionEpoch;
   }
 
   get location(): string {
@@ -260,6 +296,15 @@ export class SQLiteConnection {
 
   prepare(sql: string, operation: CycleStoreProviderOperation): StatementSync {
     this.#assertOpen(operation);
+    if (["BEGIN", "COMMIT", "END", "ROLLBACK", "SAVEPOINT", "RELEASE"].includes(
+      firstSQLiteToken(sql),
+    )) {
+      throw new CycleStoreProviderError(
+        "GE_CYCLE_STORE_INVALID_ARGUMENT",
+        operation,
+        "SQLite transaction control must use the connection owner",
+      );
+    }
     try {
       return hardenSQLiteStatement(this.#database.prepare(sql));
     } catch (error) {
@@ -269,6 +314,7 @@ export class SQLiteConnection {
 
   execTrusted(sql: string, operation: CycleStoreProviderOperation): void {
     this.#assertOpen(operation);
+    this.#transactionEpoch += 1n;
     try {
       this.#database.exec(sql);
     } catch (error) {
@@ -292,6 +338,7 @@ export class SQLiteConnection {
     for (let attempt = 1; attempt <= this.#maxBusyAttempts; attempt += 1) {
       try {
         this.#database.exec("BEGIN IMMEDIATE");
+        this.#transactionEpoch += 1n;
         const result = action();
         if ((typeof result === "object" && result !== null && "then" in result)
             || (typeof result === "function" && "then" in result)) {
@@ -302,11 +349,13 @@ export class SQLiteConnection {
           );
         }
         this.#database.exec("COMMIT");
+        this.#transactionEpoch += 1n;
         return result;
       } catch (error) {
         if (this.#database.isTransaction) {
           try {
             this.#database.exec("ROLLBACK");
+            this.#transactionEpoch += 1n;
           } catch {
             // The original safe error remains authoritative. A subsequent use
             // will fail its invariant checks if rollback did not restore state.

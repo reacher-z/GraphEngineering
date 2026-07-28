@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import sqlite3
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 
 import pytest
 
 from graph_engineering.canonical import canonical_bytes
+from graph_engineering.cycle_store_provider import create_cycle_store_record
 from graph_engineering.sqlite_cycle_store import (
     _REQUIRED_MIGRATION_POSTCONDITIONS,
     SQLITE_CYCLE_STORE_DESCRIPTOR_HASH,
@@ -18,6 +18,7 @@ from graph_engineering.sqlite_operation_baseline import (
     create_baseline_id,
 )
 from graph_engineering.sqlite_operation_baseline_source import (
+    SQLiteV1BaselineConnectionOwner,
     capture_sqlite_v1_baseline_source_summary,
 )
 
@@ -29,8 +30,8 @@ NOW = 1_000
 SOURCE_ASSETS = _load_migration_assets()
 
 
-def database() -> sqlite3.Connection:
-    connection = sqlite3.connect(":memory:")
+def database() -> SQLiteV1BaselineConnectionOwner:
+    connection = SQLiteV1BaselineConnectionOwner(":memory:")
     schema = (
         ROOT / "python/src/graph_engineering/_sqlite_migrations/schema-v1.sql"
     ).read_text()
@@ -173,7 +174,7 @@ def test_identity_iterator_reconciles_captured_schema_and_migration_identity() -
             "UPDATE ge_cycle_schema SET provider_descriptor_hash = ? WHERE singleton = 1",
             (H1,),
         )
-        with pytest.raises(ValueError, match="schema-envelope source row is invalid"):
+        with pytest.raises(ValueError, match="captured transaction changed"):
             next(summary.iter_identity_entries())
     finally:
         connection.close()
@@ -191,7 +192,7 @@ def test_identity_iterator_reconciles_captured_schema_and_migration_identity() -
             "UPDATE ge_cycle_migrations SET applied_at_ms = ? WHERE version = 1",
             (NOW - 1,),
         )
-        with pytest.raises(ValueError, match="migration-lineage source row is invalid"):
+        with pytest.raises(ValueError, match="captured transaction changed"):
             next(iterator)
     finally:
         connection.close()
@@ -205,11 +206,131 @@ def test_identity_iterator_fails_if_transaction_ends_after_first_yield() -> None
             connection,
             captured_at_ms=NOW,
         )
+        cursor_capability = connection.execute("SELECT 1")
+        assert not hasattr(cursor_capability, "connection")
+        cursor_capability.close()
         iterator = summary.iter_identity_entries()
         assert next(iterator).entry_kind == "schema-envelope"
-        connection.rollback()
-        with pytest.raises(ValueError, match="active transaction"):
+        assert not hasattr(connection, "set_authorizer")
+        connection.execute(";;/* hostile */ ROLLBACK")
+        connection.execute(";-- hostile\nBEGIN EXCLUSIVE")
+        connection.execute("PRAGMA defer_foreign_keys = ON")
+        with pytest.raises(ValueError, match="captured transaction changed"):
             next(iterator)
+    finally:
+        connection.close()
+
+
+def test_leading_empty_statement_cannot_hide_savepoint_rollback() -> None:
+    connection = database()
+    try:
+        connection.execute("BEGIN EXCLUSIVE")
+        connection.execute("SAVEPOINT before_capture")
+        summary = capture_sqlite_v1_baseline_source_summary(
+            connection,
+            captured_at_ms=NOW,
+        )
+        iterator = summary.iter_identity_entries()
+        assert next(iterator).entry_kind == "schema-envelope"
+        connection.execute(";;/* hostile */ ROLLBACK TO before_capture")
+        with pytest.raises(ValueError, match="captured transaction changed"):
+            next(iterator)
+    finally:
+        connection.close()
+
+
+def test_count_preserving_source_mutation_after_capture_is_rejected() -> None:
+    connection = database()
+    try:
+        connection.execute("BEGIN EXCLUSIVE")
+        connection.execute(
+            """INSERT INTO ge_cycle_streams
+               (tenant_id, stream_id, tail_sequence, tail_record_hash,
+                created_at_ms, updated_at_ms)
+               VALUES ('tenant-a', 'stream-a', -1, NULL, ?, ?)""",
+            (NOW, NOW),
+        )
+        summary = capture_sqlite_v1_baseline_source_summary(
+            connection,
+            captured_at_ms=NOW,
+        )
+        connection.execute(
+            "UPDATE ge_cycle_streams SET stream_id = 'stream-b' WHERE stream_id = 'stream-a'"
+        )
+        with pytest.raises(ValueError, match="captured transaction changed"):
+            tuple(summary.iter_identity_entries())
+    finally:
+        connection.close()
+
+
+def test_stream_and_scalar_record_carriers_are_streamed_and_verified() -> None:
+    connection = database()
+    try:
+        record = create_cycle_store_record(
+            record_id="record-a",
+            sequence=0,
+            previous_record_hash=None,
+            value=7,
+        )
+        connection.execute("BEGIN EXCLUSIVE")
+        connection.execute(
+            """INSERT INTO ge_cycle_streams
+               (tenant_id, stream_id, tail_sequence, tail_record_hash,
+                created_at_ms, updated_at_ms)
+               VALUES (?, ?, -1, NULL, ?, ?)""",
+            ("tenant-a", "stream-a", NOW, NOW),
+        )
+        connection.execute(
+            """INSERT INTO ge_cycle_records
+               (tenant_id, stream_id, sequence, record_id, previous_record_hash,
+                value_hash, value_bytes, value_blob, record_hash, record_blob,
+                committed_at_ms)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                "tenant-a",
+                "stream-a",
+                record["sequence"],
+                record["recordId"],
+                record["previousRecordHash"],
+                record["valueHash"],
+                record["valueBytes"],
+                canonical_bytes(record["value"]),
+                record["recordHash"],
+                canonical_bytes(record),
+                NOW,
+            ),
+        )
+        connection.execute(
+            """UPDATE ge_cycle_streams
+                  SET tail_sequence = ?, tail_record_hash = ?
+                WHERE tenant_id = ? AND stream_id = ?""",
+            (record["sequence"], record["recordHash"], "tenant-a", "stream-a"),
+        )
+        summary = capture_sqlite_v1_baseline_source_summary(
+            connection,
+            captured_at_ms=NOW,
+        )
+        entries = tuple(summary.iter_identity_entries())
+        assert [entry.entry_kind for entry in entries] == [
+            "schema-envelope",
+            "migration-lineage",
+            "stream-head",
+            "record-identity",
+            "migration-lock-current",
+        ]
+        assert entries[3].state["valueBytes"] == 1
+        assert entries[3].state["recordHash"] == record["recordHash"]
+
+        connection.execute(
+            "UPDATE ge_cycle_records SET value_blob = ? WHERE record_id = ?",
+            (b"8", record["recordId"]),
+        )
+        corrupted = capture_sqlite_v1_baseline_source_summary(
+            connection,
+            captured_at_ms=NOW,
+        )
+        with pytest.raises(ValueError, match="record-identity source row is invalid"):
+            tuple(corrupted.iter_identity_entries())
     finally:
         connection.close()
 
@@ -229,7 +350,7 @@ def test_partial_identity_iterator_rejects_any_nonempty_unimplemented_family() -
             captured_at_ms=NOW,
         )
         assert summary.expected_entry_count == 4
-        with pytest.raises(ValueError, match="incomplete foundation"):
+        with pytest.raises(ValueError, match="unimplemented source families"):
             summary.iter_identity_entries()
     finally:
         connection.close()

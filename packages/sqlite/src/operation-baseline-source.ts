@@ -1,5 +1,7 @@
-import { canonicalSerialize } from "@graph-engineering/core";
-import { CycleStoreProviderError } from "@graph-engineering/runtime";
+import { Buffer } from "node:buffer";
+
+import { canonicalHash, canonicalSerialize } from "@graph-engineering/core";
+import { CycleStoreProviderError, cycleStoreAdapterCodec } from "@graph-engineering/runtime";
 
 import {
   BASELINE_ENTRY_KINDS,
@@ -11,7 +13,13 @@ import {
   encodeOperationBaselineSourceEnvelope,
   encodeOperationBaselineState,
 } from "./operation-baseline.js";
-import { sqliteBlob, sqliteRow, sqliteSafeInteger, sqliteText } from "./sqlite-codec.js";
+import {
+  sqliteBlob,
+  sqliteNullableText,
+  sqliteRow,
+  sqliteSafeInteger,
+  sqliteText,
+} from "./sqlite-codec.js";
 import { SQLiteConnection } from "./sqlite-connection.js";
 import {
   SQLITE_ALPHA_V0_TO_V1_SQL_SHA256,
@@ -31,10 +39,15 @@ export interface SQLiteV1BaselineSourceSummary {
   readonly expectedEntryCount: number;
   readonly maximumObservedAtMs: number;
   /**
-   * Streams the three v1 identity families implemented by this foundation.
+   * Streams the five v1 source families implemented by this foundation.
    * The iterator is deliberately one-shot and remains transaction-scoped.
    */
   readonly entries: () => Generator<OperationBaselineEntryInput, void, undefined>;
+}
+
+interface SQLiteV1BaselineTransactionGuard {
+  readonly totalChanges: number;
+  readonly transactionEpoch: bigint;
 }
 
 const REQUIRED_POSTCONDITIONS = Object.freeze([
@@ -123,12 +136,61 @@ function nullableText(value: unknown, label: string): string | null {
   return value === null ? null : sqliteText(value, OPERATION, label);
 }
 
-function* streamIdentityEntries(
+function totalChanges(connection: SQLiteConnection): number {
+  return sqliteSafeInteger(
+    sqliteRow(
+      connection.prepare("SELECT total_changes()", OPERATION).get(),
+      1,
+      OPERATION,
+      "transaction change counter",
+    )[0],
+    0,
+    Number.MAX_SAFE_INTEGER,
+    OPERATION,
+    "transaction change counter",
+  );
+}
+
+function requireCaptureTransaction(
+  connection: SQLiteConnection,
+  guard: SQLiteV1BaselineTransactionGuard,
+): void {
+  if (!connection.isTransaction) {
+    return fail("SQLite v1 baseline iteration requires the captured transaction");
+  }
+  if (connection.transactionEpoch !== guard.transactionEpoch
+      || totalChanges(connection) !== guard.totalChanges) {
+    return fail("SQLite v1 baseline captured transaction changed");
+  }
+}
+
+function* transactionRows(
+  connection: SQLiteConnection,
+  guard: SQLiteV1BaselineTransactionGuard,
+  sql: string,
+): Generator<unknown, void, undefined> {
+  const iterator = connection.prepare(sql, OPERATION).iterate()[Symbol.iterator]();
+  try {
+    while (true) {
+      requireCaptureTransaction(connection, guard);
+      const next = iterator.next();
+      if (next.done) return;
+      requireCaptureTransaction(connection, guard);
+      yield next.value;
+    }
+  } finally {
+    iterator.return?.();
+  }
+}
+
+function* streamV1Entries(
   connection: SQLiteConnection,
   sourceEnvelope: OperationBaselineSourceEnvelope,
+  countsByKind: SQLiteV1BaselineCounts,
+  guard: SQLiteV1BaselineTransactionGuard,
   expectedMigrationAppliedAtMs: number,
 ): Generator<OperationBaselineEntryInput, void, undefined> {
-  if (!connection.isTransaction) return fail("SQLite v1 baseline iteration requires an active transaction");
+  requireCaptureTransaction(connection, guard);
 
   const schema = exactlyOne(connection, `
     SELECT current_version, min_reader_version, max_reader_version,
@@ -158,7 +220,7 @@ function* streamIdentityEntries(
   }
   yield validatedEntry("schema-envelope", { scope: "cycle-store" }, schemaState);
 
-  if (!connection.isTransaction) return fail("SQLite v1 baseline iteration requires an active transaction");
+  requireCaptureTransaction(connection, guard);
   const migration = exactlyOne(connection, `
     SELECT version, previous_version, migration_id, sql_sha256,
            schema_identity_sha256, applied_at_ms, reversibility,
@@ -204,7 +266,86 @@ function* streamIdentityEntries(
   }
   yield validatedEntry("migration-lineage", { version: migrationState.version }, migrationState);
 
-  if (!connection.isTransaction) return fail("SQLite v1 baseline iteration requires an active transaction");
+  let streamCount = 0;
+  for (const raw of transactionRows(connection, guard, `
+    SELECT tenant_id, stream_id, tail_sequence, tail_record_hash,
+           created_at_ms, updated_at_ms
+      FROM ge_cycle_streams
+     ORDER BY stream_id COLLATE BINARY, tenant_id COLLATE BINARY
+  `)) {
+    streamCount += 1;
+    const row = sqliteRow(raw, 6, OPERATION, "stream head");
+    const state = {
+      createdAtMs: sqliteSafeInteger(row[4], 0, Number.MAX_SAFE_INTEGER, OPERATION, "stream creation time"),
+      streamId: sqliteText(row[1], OPERATION, "stream ID"),
+      tailRecordHash: sqliteNullableText(row[3], OPERATION, "stream tail record hash"),
+      tailSequence: sqliteSafeInteger(row[2], -1, Number.MAX_SAFE_INTEGER, OPERATION, "stream tail sequence"),
+      tenantId: sqliteText(row[0], OPERATION, "stream tenant ID"),
+      updatedAtMs: sqliteSafeInteger(row[5], 0, Number.MAX_SAFE_INTEGER, OPERATION, "stream update time"),
+    };
+    yield validatedEntry(
+      "stream-head",
+      { streamId: state.streamId, tenantId: state.tenantId },
+      state,
+    );
+  }
+  if (streamCount !== countsByKind["stream-head"]) {
+    return fail("SQLite v1 baseline stream-head count changed during capture");
+  }
+
+  let recordCount = 0;
+  for (const raw of transactionRows(connection, guard, `
+    SELECT tenant_id, stream_id, sequence, record_id, previous_record_hash,
+           value_hash, value_bytes, value_blob, record_hash, record_blob,
+           committed_at_ms
+      FROM ge_cycle_records
+     ORDER BY record_id COLLATE BINARY, tenant_id COLLATE BINARY
+  `)) {
+    recordCount += 1;
+    const row = sqliteRow(raw, 11, OPERATION, "record identity");
+    const tenantId = sqliteText(row[0], OPERATION, "record tenant ID");
+    const streamId = sqliteText(row[1], OPERATION, "record stream ID");
+    const sequence = sqliteSafeInteger(row[2], 0, Number.MAX_SAFE_INTEGER, OPERATION, "record sequence");
+    const recordId = sqliteText(row[3], OPERATION, "record ID");
+    const previousRecordHash = sqliteNullableText(row[4], OPERATION, "previous record hash");
+    const valueHash = sqliteText(row[5], OPERATION, "record value hash");
+    const valueBytes = sqliteSafeInteger(row[6], 1, 1_048_576, OPERATION, "record value bytes");
+    const valueBlob = sqliteBlob(row[7], OPERATION, "record value blob");
+    const recordHash = sqliteText(row[8], OPERATION, "record hash");
+    const recordBlob = sqliteBlob(row[9], OPERATION, "record blob");
+    const record = cycleStoreAdapterCodec.parseStoredRecord(recordBlob, OPERATION);
+    if (recordBlob.byteLength < valueBytes
+        || recordBlob.byteLength > 2_097_152
+        || valueBlob.byteLength !== valueBytes
+        || record.recordId !== recordId
+        || record.sequence !== sequence
+        || record.previousRecordHash !== previousRecordHash
+        || record.valueHash !== valueHash
+        || record.valueBytes !== valueBytes
+        || record.recordHash !== recordHash
+        || !recordBlob.equals(Buffer.from(canonicalSerialize(record), "utf8"))
+        || !valueBlob.equals(Buffer.from(canonicalSerialize(record.value), "utf8"))
+        || canonicalHash(record.value) !== valueHash) {
+      return fail("SQLite v1 baseline record carrier identity drifted");
+    }
+    const state = {
+      committedAtMs: sqliteSafeInteger(row[10], 0, Number.MAX_SAFE_INTEGER, OPERATION, "record commit time"),
+      previousRecordHash,
+      recordHash,
+      recordId,
+      sequence,
+      streamId,
+      tenantId,
+      valueBytes,
+      valueHash,
+    };
+    yield validatedEntry("record-identity", { recordId, tenantId }, state);
+  }
+  if (recordCount !== countsByKind["record-identity"]) {
+    return fail("SQLite v1 baseline record-identity count changed during capture");
+  }
+
+  requireCaptureTransaction(connection, guard);
   const lock = exactlyOne(connection, `
     SELECT singleton, active_lock_id, active_owner_id, active_source_version,
            active_target_version, active_lock_epoch, active_fencing_token,
@@ -355,19 +496,37 @@ export function captureSQLiteV1BaselineSourceSummary(
   );
   if (lockHighWater < maximumObservedAtMs) return fail("SQLite v1 provider clock high-water predates source state");
   if (captured < lockHighWater) return fail("SQLite v1 baseline capture predates provider clock high-water");
+  const transactionGuard = Object.freeze({
+    totalChanges: totalChanges(connection),
+    transactionEpoch: connection.transactionEpoch,
+  });
+  requireCaptureTransaction(connection, transactionGuard);
   const frozenEnvelope = Object.freeze(sourceEnvelope);
   let entriesTaken = false;
   const entries = (): Generator<OperationBaselineEntryInput, void, undefined> => {
+    const implementedKinds = new Set<OperationBaselineEntryKind>([
+      "schema-envelope",
+      "migration-lineage",
+      "stream-head",
+      "record-identity",
+      "migration-lock-current",
+    ]);
+    requireCaptureTransaction(connection, transactionGuard);
     if (countsByKind["schema-envelope"] !== 1
         || countsByKind["migration-lineage"] !== 1
         || countsByKind["migration-lock-current"] !== 1
-        || total !== 3n) {
-      return fail("SQLite v1 baseline identity-only iterator cannot cover non-identity source rows");
+        || BASELINE_ENTRY_KINDS.some((kind) => !implementedKinds.has(kind) && countsByKind[kind] !== 0)) {
+      return fail("SQLite v1 baseline iterator cannot cover unimplemented source families");
     }
     if (entriesTaken) return fail("SQLite v1 baseline source entries are one-shot");
-    if (!connection.isTransaction) return fail("SQLite v1 baseline iteration requires an active transaction");
     entriesTaken = true;
-    return streamIdentityEntries(connection, frozenEnvelope, expectedMigrationAppliedAtMs);
+    return streamV1Entries(
+      connection,
+      frozenEnvelope,
+      countsByKind,
+      transactionGuard,
+      expectedMigrationAppliedAtMs,
+    );
   };
   return Object.freeze({
     sourceEnvelope: frozenEnvelope,

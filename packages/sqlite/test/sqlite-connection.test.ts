@@ -102,6 +102,28 @@ describe("SQLiteConnection", () => {
     }
   });
 
+  it("rejects prepared transaction control after SQL comments", () => {
+    const connection = new SQLiteConnection(databasePath());
+    try {
+      for (const sql of [
+        "/* hostile */ BEGIN EXCLUSIVE",
+        "-- hostile\nROLLBACK",
+        " \n/* one */ -- two\nSAVEPOINT hidden",
+        "/* hostile */ RELEASE hidden",
+        "; BEGIN EXCLUSIVE",
+        ";;/* hostile */ ROLLBACK",
+        "; -- hostile\nSAVEPOINT hidden",
+      ]) {
+        expect(() => connection.prepare(sql, "inspect-schema")).toThrowError(
+          expect.objectContaining({ code: "GE_CYCLE_STORE_INVALID_ARGUMENT" }),
+        );
+      }
+      expect(connection.isTransaction).toBe(false);
+    } finally {
+      connection.close();
+    }
+  });
+
   it("rolls back every earlier statement when an action fails", () => {
     const connection = new SQLiteConnection(databasePath());
     try {
