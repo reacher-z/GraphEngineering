@@ -1,13 +1,16 @@
 import { mkdtempSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { canonicalSerialize } from "@graph-engineering/core";
+import { canonicalHash, canonicalSerialize } from "@graph-engineering/core";
 import {
   CycleStoreProviderError,
   createCycleStoreCheckpoint,
   createCycleStoreRecord,
   cycleStoreAdapterCodec,
+  type CycleStoreLedgerResultByOperation,
+  type CycleStoreMutationOperation,
 } from "@graph-engineering/runtime";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -422,6 +425,186 @@ describe("SQLite v1 baseline source summary", () => {
       ).run(Buffer.from("8", "utf8"), record.recordId);
       const corrupted = captureSQLiteV1BaselineSourceSummary(connection, APPLIED_AT_MS);
       expect(() => [...corrupted.entries()]).toThrow(/record carrier identity drifted/u);
+      connection.execTrusted("ROLLBACK", "inspect-schema");
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("streams lease, used identity, and legal-hold scalar families", () => {
+    const connection = opened();
+    try {
+      connection.execTrusted("BEGIN EXCLUSIVE", "inspect-schema");
+      connection.prepare(`
+        INSERT INTO ge_cycle_streams
+          (tenant_id, stream_id, tail_sequence, tail_record_hash, created_at_ms, updated_at_ms)
+        VALUES ('tenant-a', 'stream-a', -1, NULL, ?, ?)
+      `, "inspect-schema").run(APPLIED_AT_MS, APPLIED_AT_MS);
+      connection.prepare(`
+        INSERT INTO ge_cycle_leases
+          (tenant_id, stream_id, active_lease_id, active_holder_id,
+           active_lease_epoch, active_fencing_token, active_acquired_at_ms,
+           active_expires_at_ms, last_lease_epoch, last_fencing_token,
+           updated_at_ms)
+        VALUES ('tenant-a', 'stream-a', 'lease-a', 'holder-a', 1, 1, ?, ?, 1, 1, ?)
+      `, "inspect-schema").run(APPLIED_AT_MS, APPLIED_AT_MS + 1, APPLIED_AT_MS);
+      connection.prepare(`
+        INSERT INTO ge_cycle_used_lease_ids
+          (tenant_id, stream_id, lease_id, lease_epoch, fencing_token, first_used_at_ms)
+        VALUES ('tenant-a', 'stream-a', 'lease-a', 1, 1, ?)
+      `, "inspect-schema").run(APPLIED_AT_MS);
+      connection.prepare(`
+        INSERT INTO ge_cycle_legal_holds
+          (tenant_id, stream_id, hold_id, placed_at_ms)
+        VALUES ('tenant-a', 'stream-a', 'hold-a', ?)
+      `, "inspect-schema").run(APPLIED_AT_MS);
+      connection.prepare(`
+        INSERT INTO ge_cycle_used_migration_lock_ids
+          (lock_id, lock_epoch, fencing_token, first_used_at_ms)
+        VALUES ('lock-a', 1, 1, ?)
+      `, "inspect-schema").run(APPLIED_AT_MS);
+
+      const summary = captureSQLiteV1BaselineSourceSummary(connection, APPLIED_AT_MS);
+      expect(summary.expectedEntryCount).toBe(8);
+      const entries = [...summary.entries()];
+      expect(entries.map((entry) => entry.entryKind)).toEqual([
+        "schema-envelope",
+        "migration-lineage",
+        "stream-head",
+        "lease-current",
+        "used-lease-identity",
+        "legal-hold",
+        "migration-lock-current",
+        "used-migration-lock-identity",
+      ]);
+      expect(entries[3]).toMatchObject({
+        state: { activeLeaseId: "lease-a", activeLeaseEpoch: 1, lastLeaseEpoch: 1 },
+      });
+      expect(entries[4]).toMatchObject({ state: { leaseId: "lease-a", fencingToken: 1 } });
+      expect(entries[5]).toMatchObject({ state: { holdId: "hold-a" } });
+      expect(entries[7]).toMatchObject({ state: { lockId: "lock-a", lockEpoch: 1 } });
+
+      connection.execTrusted("PRAGMA ignore_check_constraints = ON", "inspect-schema");
+      connection.prepare(
+        "UPDATE ge_cycle_leases SET active_holder_id = NULL WHERE active_lease_id = 'lease-a'",
+        "inspect-schema",
+      ).run();
+      const partialActive = captureSQLiteV1BaselineSourceSummary(connection, APPLIED_AT_MS);
+      expect(() => [...partialActive.entries()]).toThrow(/lease-current row is invalid/u);
+      connection.prepare(
+        "UPDATE ge_cycle_leases SET active_holder_id = 'holder-a' WHERE active_lease_id = 'lease-a'",
+        "inspect-schema",
+      ).run();
+      connection.prepare(
+        "UPDATE ge_cycle_used_lease_ids SET fencing_token = 2 WHERE lease_id = 'lease-a'",
+        "inspect-schema",
+      ).run();
+      const driftedFence = captureSQLiteV1BaselineSourceSummary(connection, APPLIED_AT_MS);
+      expect(() => [...driftedFence.entries()]).toThrow(
+        /used-lease-identity row is invalid/u,
+      );
+      connection.execTrusted("ROLLBACK", "inspect-schema");
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("streams all nine legacy operation result carriers without recovering requests", () => {
+    const connection = opened();
+    try {
+      connection.execTrusted("PRAGMA ignore_check_constraints = ON", "inspect-schema");
+      connection.execTrusted("BEGIN EXCLUSIVE", "inspect-schema");
+      const inserted = new Map<string, Buffer>();
+      const insert = <K extends CycleStoreMutationOperation>(
+        operationId: string,
+        operation: K,
+        result: CycleStoreLedgerResultByOperation[K],
+      ): void => {
+        const resultBlob = Buffer.from(cycleStoreAdapterCodec.encodeLedgerResult(operation, result));
+        inserted.set(operationId, resultBlob);
+        connection.prepare(`
+          INSERT INTO ge_cycle_operations
+            (tenant_id, operation_id, operation_name, request_hash,
+             result_blob, result_hash, committed_at_ms)
+          VALUES ('tenant-a', ?, ?, ?, ?, ?, ?)
+        `, "inspect-schema").run(
+          operationId,
+          operation,
+          createHash("sha256").update(`request:${operationId}`, "utf8").digest("hex"),
+          resultBlob,
+          canonicalHash(result),
+          APPLIED_AT_MS,
+        );
+      };
+      const tail = { exists: true, sequence: 0, recordHash: "c".repeat(64) } as const;
+      const lease = {
+        leaseId: "lease-a", holderId: "holder-a", leaseEpoch: 1, fencingToken: 1,
+        acquiredAt: "2026-07-28T00:00:00Z", expiresAt: "2026-07-28T00:00:01Z",
+      } as const;
+      insert("op-1", "append", { tail, appendedRecords: 1 });
+      insert("op-10", "save-checkpoint", {
+        checkpointScope: "scope-a", checkpointId: "checkpoint-a", streamId: "stream-a",
+        boundSequence: 0, boundRecordHash: tail.recordHash,
+        createdAt: "2026-07-28T00:00:01Z", valueHash: "d".repeat(64), valueBytes: 1,
+      });
+      insert("op-2", "delete-checkpoint", { deleted: false });
+      insert("op-3", "acquire-lease", lease);
+      insert("op-4", "renew-lease", lease);
+      insert("op-5", "release-lease", {
+        status: "released", lease: null, lastLeaseEpoch: 1, lastFencingToken: 1,
+      });
+      insert("op-6", "set-legal-hold", {
+        legalHoldIds: ["hold-a"],
+        retentionMode: "retain-authoritative-history",
+        archiveMode: "lossless-before-delete",
+        compactionMode: "logical-history-preserving",
+      });
+      insert("op-7", "acquire-migration-lock", {
+        lockId: "lock-a", ownerId: "owner-a", sourceSchemaVersion: 1,
+        targetSchemaVersion: 2, lockEpoch: 1, fencingToken: 1,
+        acquiredAt: "2026-07-28T00:00:00Z", expiresAt: "2026-07-28T00:00:01Z",
+      });
+      insert("op-8", "release-migration-lock", null);
+
+      const summary = captureSQLiteV1BaselineSourceSummary(connection, APPLIED_AT_MS);
+      expect(summary.expectedEntryCount).toBe(12);
+      const entries = [...summary.entries()];
+      const legacy = entries.slice(3);
+      expect(legacy.map((entry) => (entry.key as { operationId: string }).operationId)).toEqual([
+        "op-1", "op-10", "op-2", "op-3", "op-4", "op-5", "op-6", "op-7", "op-8",
+      ]);
+      expect(legacy.map((entry) => (entry.state as { operationName: string }).operationName)).toEqual([
+        "append", "save-checkpoint", "delete-checkpoint", "acquire-lease", "renew-lease",
+        "release-lease", "set-legal-hold", "acquire-migration-lock", "release-migration-lock",
+      ]);
+      for (const entry of legacy) {
+        const key = entry.key as { operationId: string };
+        const state = entry.state as { resultBlobSha256: string };
+        expect(state.resultBlobSha256).toBe(
+          createHash("sha256").update(inserted.get(key.operationId)!).digest("hex"),
+        );
+      }
+
+      connection.prepare(
+        "UPDATE ge_cycle_operations SET result_blob = ? WHERE operation_id = 'op-1'",
+        "inspect-schema",
+      ).run(Buffer.from("PAYLOAD_SENTINEL", "utf8"));
+      const malformed = captureSQLiteV1BaselineSourceSummary(connection, APPLIED_AT_MS);
+      try {
+        [...malformed.entries()];
+        throw new Error("expected malformed legacy carrier rejection");
+      } catch (error) {
+        expect(error).toBeInstanceOf(CycleStoreProviderError);
+        expect(JSON.stringify((error as CycleStoreProviderError).toJSON())).not.toContain(
+          "PAYLOAD_SENTINEL",
+        );
+      }
+      connection.prepare(
+        "UPDATE ge_cycle_operations SET result_blob = ?, operation_name = 'Append' WHERE operation_id = 'op-1'",
+        "inspect-schema",
+      ).run(inserted.get("op-1")!);
+      const unknownOperation = captureSQLiteV1BaselineSourceSummary(connection, APPLIED_AT_MS);
+      expect(() => [...unknownOperation.entries()]).toThrow(/legacy operation name is invalid/u);
       connection.execTrusted("ROLLBACK", "inspect-schema");
     } finally {
       connection.close();

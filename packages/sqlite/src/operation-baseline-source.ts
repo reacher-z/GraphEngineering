@@ -1,4 +1,5 @@
 import { Buffer } from "node:buffer";
+import { createHash } from "node:crypto";
 
 import { canonicalHash, canonicalSerialize } from "@graph-engineering/core";
 import {
@@ -6,6 +7,7 @@ import {
   cycleStoreAdapterCodec,
   type CycleStoreCheckpoint,
   type CycleStoreCheckpointSummary,
+  type CycleStoreMutationOperation,
 } from "@graph-engineering/runtime";
 
 import {
@@ -44,7 +46,7 @@ export interface SQLiteV1BaselineSourceSummary {
   readonly expectedEntryCount: number;
   readonly maximumObservedAtMs: number;
   /**
-   * Streams the seven v1 source families implemented by this foundation.
+   * Streams all twelve v1 source families implemented by this foundation.
    * The iterator is deliberately one-shot and remains transaction-scoped.
    */
   readonly entries: () => Generator<OperationBaselineEntryInput, void, undefined>;
@@ -128,6 +130,46 @@ function decodedCheckpointSummary(blob: Buffer): Readonly<Record<string, unknown
     return fail("SQLite v1 baseline checkpoint summary carrier is noncanonical");
   }
   return Object.freeze({ ...summary });
+}
+
+const LEGACY_OPERATIONS = new Set<CycleStoreMutationOperation>([
+  "append",
+  "save-checkpoint",
+  "delete-checkpoint",
+  "acquire-lease",
+  "renew-lease",
+  "release-lease",
+  "set-legal-hold",
+  "acquire-migration-lock",
+  "release-migration-lock",
+]);
+
+function legacyOperation(value: unknown): CycleStoreMutationOperation {
+  const operation = sqliteText(value, OPERATION, "legacy operation name");
+  if (!LEGACY_OPERATIONS.has(operation as CycleStoreMutationOperation)) {
+    return fail("SQLite v1 baseline legacy operation name is invalid");
+  }
+  return operation as CycleStoreMutationOperation;
+}
+
+function legacyResultBlobSha256(
+  operation: CycleStoreMutationOperation,
+  blob: Buffer,
+  resultHash: string,
+): string {
+  if (blob.byteLength < 2 || blob.byteLength > 16_777_216) {
+    return fail("SQLite v1 baseline legacy operation result carrier is outside bounds");
+  }
+  try {
+    const decoded = cycleStoreAdapterCodec.decodeLedgerResult(operation, blob);
+    const reencoded = Buffer.from(cycleStoreAdapterCodec.encodeLedgerResult(operation, decoded));
+    if (!reencoded.equals(blob) || canonicalHash(decoded) !== resultHash) {
+      return fail("SQLite v1 baseline legacy operation result carrier is invalid");
+    }
+    return createHash("sha256").update(blob).digest("hex");
+  } catch {
+    return fail("SQLite v1 baseline legacy operation result carrier is invalid");
+  }
 }
 
 function exactlyOne(
@@ -515,6 +557,98 @@ function* streamV1Entries(
     return fail("SQLite v1 baseline checkpoint-revision count changed during capture");
   }
 
+  let leaseCount = 0;
+  for (const raw of transactionRows(connection, guard, `
+    SELECT tenant_id, stream_id, active_lease_id, active_holder_id,
+           active_lease_epoch, active_fencing_token, active_acquired_at_ms,
+           active_expires_at_ms, last_lease_epoch, last_fencing_token,
+           updated_at_ms
+      FROM ge_cycle_leases
+     ORDER BY stream_id COLLATE BINARY, tenant_id COLLATE BINARY
+  `)) {
+    leaseCount += 1;
+    const row = sqliteRow(raw, 11, OPERATION, "lease current");
+    const tenantId = sqliteText(row[0], OPERATION, "lease tenant ID");
+    const streamId = sqliteText(row[1], OPERATION, "lease stream ID");
+    yield validatedEntry(
+      "lease-current",
+      { streamId, tenantId },
+      {
+        activeAcquiredAtMs: nullableInteger(row[6], 0, "lease acquisition time"),
+        activeExpiresAtMs: nullableInteger(row[7], 0, "lease expiry time"),
+        activeFencingToken: nullableInteger(row[5], 1, "lease fencing token"),
+        activeHolderId: nullableText(row[3], "lease holder ID"),
+        activeLeaseEpoch: nullableInteger(row[4], 1, "lease epoch"),
+        activeLeaseId: nullableText(row[2], "lease ID"),
+        lastFencingToken: sqliteSafeInteger(row[9], 0, Number.MAX_SAFE_INTEGER, OPERATION, "last lease fencing token"),
+        lastLeaseEpoch: sqliteSafeInteger(row[8], 0, Number.MAX_SAFE_INTEGER, OPERATION, "last lease epoch"),
+        streamId,
+        tenantId,
+        updatedAtMs: sqliteSafeInteger(row[10], 0, Number.MAX_SAFE_INTEGER, OPERATION, "lease update time"),
+      },
+    );
+  }
+  if (leaseCount !== countsByKind["lease-current"]) {
+    return fail("SQLite v1 baseline lease-current count changed during capture");
+  }
+
+  let usedLeaseCount = 0;
+  for (const raw of transactionRows(connection, guard, `
+    SELECT tenant_id, stream_id, lease_id, lease_epoch, fencing_token,
+           first_used_at_ms
+      FROM ge_cycle_used_lease_ids
+     ORDER BY lease_id COLLATE BINARY, stream_id COLLATE BINARY,
+              tenant_id COLLATE BINARY
+  `)) {
+    usedLeaseCount += 1;
+    const row = sqliteRow(raw, 6, OPERATION, "used lease identity");
+    const tenantId = sqliteText(row[0], OPERATION, "used lease tenant ID");
+    const streamId = sqliteText(row[1], OPERATION, "used lease stream ID");
+    const leaseId = sqliteText(row[2], OPERATION, "used lease ID");
+    yield validatedEntry(
+      "used-lease-identity",
+      { leaseId, streamId, tenantId },
+      {
+        fencingToken: sqliteSafeInteger(row[4], 1, Number.MAX_SAFE_INTEGER, OPERATION, "used lease fencing token"),
+        firstUsedAtMs: sqliteSafeInteger(row[5], 0, Number.MAX_SAFE_INTEGER, OPERATION, "used lease first-use time"),
+        leaseEpoch: sqliteSafeInteger(row[3], 1, Number.MAX_SAFE_INTEGER, OPERATION, "used lease epoch"),
+        leaseId,
+        streamId,
+        tenantId,
+      },
+    );
+  }
+  if (usedLeaseCount !== countsByKind["used-lease-identity"]) {
+    return fail("SQLite v1 baseline used-lease-identity count changed during capture");
+  }
+
+  let holdCount = 0;
+  for (const raw of transactionRows(connection, guard, `
+    SELECT tenant_id, stream_id, hold_id, placed_at_ms
+      FROM ge_cycle_legal_holds
+     ORDER BY hold_id COLLATE BINARY, stream_id COLLATE BINARY,
+              tenant_id COLLATE BINARY
+  `)) {
+    holdCount += 1;
+    const row = sqliteRow(raw, 4, OPERATION, "legal hold");
+    const tenantId = sqliteText(row[0], OPERATION, "hold tenant ID");
+    const streamId = sqliteText(row[1], OPERATION, "hold stream ID");
+    const holdId = sqliteText(row[2], OPERATION, "hold ID");
+    yield validatedEntry(
+      "legal-hold",
+      { holdId, streamId, tenantId },
+      {
+        holdId,
+        placedAtMs: sqliteSafeInteger(row[3], 0, Number.MAX_SAFE_INTEGER, OPERATION, "hold placement time"),
+        streamId,
+        tenantId,
+      },
+    );
+  }
+  if (holdCount !== countsByKind["legal-hold"]) {
+    return fail("SQLite v1 baseline legal-hold count changed during capture");
+  }
+
   requireCaptureTransaction(connection, guard);
   const lock = exactlyOne(connection, `
     SELECT singleton, active_lock_id, active_owner_id, active_source_version,
@@ -538,6 +672,69 @@ function* streamV1Entries(
     updatedAtMs: sqliteSafeInteger(lock[11], 0, Number.MAX_SAFE_INTEGER, OPERATION, "migration lock update time"),
   };
   yield validatedEntry("migration-lock-current", { singleton: 1 }, lockState);
+
+  let usedLockCount = 0;
+  for (const raw of transactionRows(connection, guard, `
+    SELECT lock_id, lock_epoch, fencing_token, first_used_at_ms
+      FROM ge_cycle_used_migration_lock_ids
+     ORDER BY lock_id COLLATE BINARY
+  `)) {
+    usedLockCount += 1;
+    const row = sqliteRow(raw, 4, OPERATION, "used migration lock identity");
+    const lockId = sqliteText(row[0], OPERATION, "used migration lock ID");
+    yield validatedEntry(
+      "used-migration-lock-identity",
+      { lockId },
+      {
+        fencingToken: sqliteSafeInteger(row[2], 1, Number.MAX_SAFE_INTEGER, OPERATION, "used migration lock fencing token"),
+        firstUsedAtMs: sqliteSafeInteger(row[3], 0, Number.MAX_SAFE_INTEGER, OPERATION, "used migration lock first-use time"),
+        lockEpoch: sqliteSafeInteger(row[1], 1, Number.MAX_SAFE_INTEGER, OPERATION, "used migration lock epoch"),
+        lockId,
+      },
+    );
+  }
+  if (usedLockCount !== countsByKind["used-migration-lock-identity"]) {
+    return fail("SQLite v1 baseline used-migration-lock-identity count changed during capture");
+  }
+
+  let legacyCount = 0;
+  for (const raw of transactionRows(connection, guard, `
+    SELECT tenant_id, operation_id, operation_name, request_hash,
+           result_blob, result_hash, committed_at_ms
+      FROM ge_cycle_operations
+     ORDER BY operation_id COLLATE BINARY, tenant_id COLLATE BINARY
+  `)) {
+    legacyCount += 1;
+    const row = sqliteRow(raw, 7, OPERATION, "legacy operation");
+    const tenantId = sqliteText(row[0], OPERATION, "legacy operation tenant ID");
+    const operationId = sqliteText(row[1], OPERATION, "legacy operation ID");
+    const operationName = legacyOperation(row[2]);
+    const requestHash = sqliteText(row[3], OPERATION, "legacy operation request hash");
+    const resultBlob = sqliteBlob(row[4], OPERATION, "legacy operation result blob");
+    const resultHash = sqliteText(row[5], OPERATION, "legacy operation result hash");
+    yield validatedEntry(
+      "legacy-operation",
+      { operationId, tenantId },
+      {
+        committedAtMs: sqliteSafeInteger(
+          row[6],
+          0,
+          Number.MAX_SAFE_INTEGER,
+          OPERATION,
+          "legacy operation commit time",
+        ),
+        operationId,
+        operationName,
+        requestHash,
+        resultBlobSha256: legacyResultBlobSha256(operationName, resultBlob, resultHash),
+        resultHash,
+        tenantId,
+      },
+    );
+  }
+  if (legacyCount !== countsByKind["legacy-operation"]) {
+    return fail("SQLite v1 baseline legacy-operation count changed during capture");
+  }
 }
 
 const COUNT_SQL = `SELECT
@@ -681,7 +878,12 @@ export function captureSQLiteV1BaselineSourceSummary(
       "record-identity",
       "checkpoint-current",
       "checkpoint-revision",
+      "lease-current",
+      "used-lease-identity",
+      "legal-hold",
       "migration-lock-current",
+      "used-migration-lock-identity",
+      "legacy-operation",
     ]);
     requireCaptureTransaction(connection, transactionGuard);
     if (countsByKind["schema-envelope"] !== 1

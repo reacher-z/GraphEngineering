@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import hashlib
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 from typing import cast
 
 import pytest
 
-from graph_engineering.canonical import canonical_bytes
+from graph_engineering.canonical import canonical_bytes, canonical_sha256
 from graph_engineering.cycle_store_provider import (
+    CycleStoreProviderOperation,
     create_cycle_store_checkpoint,
     create_cycle_store_record,
     cycle_store_adapter_codec,
@@ -173,6 +175,191 @@ def add_checkpoint_history(
         ),
     )
     return checkpoint
+
+
+def add_scalar_source_families(connection: SQLiteV1BaselineConnectionOwner) -> None:
+    connection.execute(
+        """INSERT INTO ge_cycle_streams
+           (tenant_id, stream_id, tail_sequence, tail_record_hash,
+            created_at_ms, updated_at_ms)
+           VALUES ('tenant-a', 'stream-0', -1, NULL, ?, ?)""",
+        (NOW, NOW),
+    )
+    connection.execute(
+        """INSERT INTO ge_cycle_streams
+           (tenant_id, stream_id, tail_sequence, tail_record_hash,
+            created_at_ms, updated_at_ms)
+           VALUES ('tenant-a', 'stream-a', -1, NULL, ?, ?)""",
+        (NOW, NOW),
+    )
+    connection.execute(
+        """INSERT INTO ge_cycle_leases
+           (tenant_id, stream_id, active_lease_id, active_holder_id,
+            active_lease_epoch, active_fencing_token, active_acquired_at_ms,
+            active_expires_at_ms, last_lease_epoch, last_fencing_token,
+            updated_at_ms)
+           VALUES ('tenant-a', 'stream-a', 'lease-2', 'holder-a',
+                   2, 2, 900, 1100, 2, 2, ?)""",
+        (NOW,),
+    )
+    connection.execute(
+        """INSERT INTO ge_cycle_leases
+           (tenant_id, stream_id, active_lease_id, active_holder_id,
+            active_lease_epoch, active_fencing_token, active_acquired_at_ms,
+            active_expires_at_ms, last_lease_epoch, last_fencing_token,
+            updated_at_ms)
+           VALUES ('tenant-a', 'stream-0', NULL, NULL, NULL, NULL, NULL, NULL,
+                   0, 0, ?)""",
+        (NOW,),
+    )
+    for lease_id, epoch, first_used_at_ms in (
+        ("lease-2", 2, NOW),
+        ("lease-10", 1, 900),
+    ):
+        connection.execute(
+            """INSERT INTO ge_cycle_used_lease_ids
+               (tenant_id, stream_id, lease_id, lease_epoch, fencing_token,
+                first_used_at_ms)
+               VALUES ('tenant-a', 'stream-a', ?, ?, ?, ?)""",
+            (lease_id, epoch, epoch, first_used_at_ms),
+        )
+    for hold_id, placed_at_ms in (("hold-2", NOW), ("hold-10", 900)):
+        connection.execute(
+            """INSERT INTO ge_cycle_legal_holds
+               (tenant_id, stream_id, hold_id, placed_at_ms)
+               VALUES ('tenant-a', 'stream-a', ?, ?)""",
+            (hold_id, placed_at_ms),
+        )
+    connection.execute(
+        """UPDATE ge_cycle_migration_lock
+              SET last_lock_epoch = 2, last_fencing_token = 2
+            WHERE singleton = 1"""
+    )
+    for lock_id, epoch, first_used_at_ms in (
+        ("lock-2", 2, NOW),
+        ("lock-10", 1, 900),
+    ):
+        connection.execute(
+            """INSERT INTO ge_cycle_used_migration_lock_ids
+               (lock_id, lock_epoch, fencing_token, first_used_at_ms)
+               VALUES (?, ?, ?, ?)""",
+            (lock_id, epoch, epoch, first_used_at_ms),
+        )
+
+
+def legacy_result_rows() -> list[tuple[str, str, CycleStoreProviderOperation, object]]:
+    tail = {"exists": True, "sequence": 0, "recordHash": H3}
+    lease = {
+        "leaseId": "lease-a",
+        "holderId": "holder-a",
+        "leaseEpoch": 1,
+        "fencingToken": 1,
+        "acquiredAt": "2026-07-28T00:00:00Z",
+        "expiresAt": "2026-07-28T00:00:01Z",
+    }
+    return [
+        ("tenant-b", "operation-1", "release-migration-lock", None),
+        ("tenant-a", "operation-1", "delete-checkpoint", {"deleted": False}),
+        (
+            "tenant-a",
+            "operation-10",
+            "save-checkpoint",
+            {
+                "checkpointScope": "scope-a",
+                "checkpointId": "checkpoint-a",
+                "streamId": "stream-a",
+                "boundSequence": 0,
+                "boundRecordHash": H3,
+                "createdAt": "2026-07-28T00:00:00Z",
+                "valueHash": H2,
+                "valueBytes": 2,
+            },
+        ),
+        ("tenant-a", "operation-2", "append", {"tail": tail, "appendedRecords": 1}),
+        ("tenant-a", "operation-3", "acquire-lease", lease),
+        ("tenant-a", "operation-4", "renew-lease", lease),
+        (
+            "tenant-a",
+            "operation-5",
+            "release-lease",
+            {
+                "status": "released",
+                "lease": None,
+                "lastLeaseEpoch": 1,
+                "lastFencingToken": 1,
+            },
+        ),
+        (
+            "tenant-a",
+            "operation-6",
+            "set-legal-hold",
+            {
+                "legalHoldIds": ["hold-a", "hold-b"],
+                "retentionMode": "retain-authoritative-history",
+                "archiveMode": "lossless-before-delete",
+                "compactionMode": "logical-history-preserving",
+            },
+        ),
+        (
+            "tenant-a",
+            "operation-7",
+            "acquire-migration-lock",
+            {
+                "lockId": "lock-a",
+                "ownerId": "owner-a",
+                "sourceSchemaVersion": 1,
+                "targetSchemaVersion": 2,
+                "lockEpoch": 1,
+                "fencingToken": 1,
+                "acquiredAt": "2026-07-28T00:00:00Z",
+                "expiresAt": "2026-07-28T00:00:01Z",
+            },
+        ),
+        ("tenant-a", "operation-8", "release-migration-lock", None),
+    ]
+
+
+def insert_legacy_operation(
+    connection: SQLiteV1BaselineConnectionOwner,
+    *,
+    tenant_id: object = "tenant-a",
+    operation_id: object = "operation-a",
+    operation_name: object = "delete-checkpoint",
+    result: object = None,
+    result_blob: object | None = None,
+    request_hash: object = H1,
+    result_hash: object | None = None,
+    committed_at_ms: object = NOW,
+) -> bytes:
+    encoded = (
+        cycle_store_adapter_codec.encode_ledger_result(
+            cast(CycleStoreProviderOperation, operation_name),
+            {"deleted": True} if result is None else result,
+        )
+        if result_blob is None
+        else cast(bytes, result_blob)
+    )
+    logical_hash = (
+        canonical_sha256({"deleted": True} if result is None else result)
+        if result_hash is None
+        else result_hash
+    )
+    connection.execute(
+        """INSERT INTO ge_cycle_operations
+           (tenant_id, operation_id, operation_name, request_hash,
+            result_blob, result_hash, committed_at_ms)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (
+            tenant_id,
+            operation_id,
+            operation_name,
+            request_hash,
+            encoded,
+            logical_hash,
+            committed_at_ms,
+        ),
+    )
+    return encoded
 
 
 def test_captures_frozen_v1_envelope_counts_and_watermark_inside_transaction() -> None:
@@ -503,7 +690,7 @@ def test_checkpoint_current_and_revisions_stream_canonical_scalar_carriers(
         for entry in entries:
             accumulator.append(entry)
         assert accumulator.finish().entry_count == summary.expected_entry_count
-        assert fetch_sizes == [256] * 6 + [1] * 8 + [256] * 2
+        assert fetch_sizes == [256] * 6 + [1] * 8 + [256] * 6 + [1]
     finally:
         connection.close()
 
@@ -565,23 +752,289 @@ def test_checkpoint_revision_rejects_nullable_and_outer_identity_drift(
         connection.close()
 
 
-def test_partial_identity_iterator_rejects_any_nonempty_unimplemented_family() -> None:
+def test_scalar_source_families_stream_closed_state_in_canonical_order() -> None:
     connection = database()
     try:
-        connection.execute(
-            """INSERT INTO ge_cycle_operations VALUES
-               ('tenant-a', 'operation-a', 'release-lease', ?, ?, ?, ?)""",
-            (H1, b"null", H2, NOW),
-        )
-        connection.commit()
         connection.execute("BEGIN EXCLUSIVE")
+        add_scalar_source_families(connection)
+        summary = capture_sqlite_v1_baseline_source_summary(
+            connection,
+            captured_at_ms=NOW,
+        )
+        assert summary.expected_entry_count == 13
+        entries = tuple(summary.iter_identity_entries())
+        assert [entry.entry_kind for entry in entries] == [
+            "schema-envelope",
+            "migration-lineage",
+            "stream-head",
+            "stream-head",
+            "lease-current",
+            "lease-current",
+            "used-lease-identity",
+            "used-lease-identity",
+            "legal-hold",
+            "legal-hold",
+            "migration-lock-current",
+            "used-migration-lock-identity",
+            "used-migration-lock-identity",
+        ]
+        inactive_lease = entries[4]
+        lease = entries[5]
+        assert inactive_lease.key == {"streamId": "stream-0", "tenantId": "tenant-a"}
+        assert all(
+            inactive_lease.state[field] is None
+            for field in (
+                "activeAcquiredAtMs",
+                "activeExpiresAtMs",
+                "activeFencingToken",
+                "activeHolderId",
+                "activeLeaseEpoch",
+                "activeLeaseId",
+            )
+        )
+        assert lease.key == {"streamId": "stream-a", "tenantId": "tenant-a"}
+        assert lease.state["activeLeaseId"] == "lease-2"
+        assert lease.state["activeLeaseEpoch"] == lease.state["activeFencingToken"] == 2
+        assert lease.state["lastLeaseEpoch"] == lease.state["lastFencingToken"] == 2
+        assert [entry.key["leaseId"] for entry in entries[6:8]] == [
+            "lease-10",
+            "lease-2",
+        ]
+        assert [entry.key["holdId"] for entry in entries[8:10]] == [
+            "hold-10",
+            "hold-2",
+        ]
+        assert [entry.key["lockId"] for entry in entries[11:13]] == [
+            "lock-10",
+            "lock-2",
+        ]
+        accumulator = BaselineAccumulator(
+            create_baseline_id(summary.source_envelope),
+            summary.expected_entry_count,
+        )
+        for entry in entries:
+            accumulator.append(entry)
+        assert accumulator.finish().entry_count == summary.expected_entry_count
+    finally:
+        connection.close()
+
+
+@pytest.mark.parametrize(
+    ("mutation", "family"),
+    [
+        (
+            "UPDATE ge_cycle_leases SET active_holder_id = NULL",
+            "lease-current",
+        ),
+        (
+            "UPDATE ge_cycle_leases SET last_fencing_token = 3",
+            "lease-current",
+        ),
+        (
+            "UPDATE ge_cycle_leases SET active_lease_epoch = 1",
+            "lease-current",
+        ),
+        (
+            "UPDATE ge_cycle_used_lease_ids SET fencing_token = 3 WHERE lease_id = 'lease-2'",
+            "used-lease-identity",
+        ),
+        (
+            "UPDATE ge_cycle_legal_holds SET hold_id = '' WHERE hold_id = 'hold-2'",
+            "legal-hold",
+        ),
+        (
+            "UPDATE ge_cycle_used_migration_lock_ids SET fencing_token = 3 "
+            "WHERE lock_id = 'lock-2'",
+            "used-migration-lock-identity",
+        ),
+    ],
+)
+def test_scalar_source_families_reject_partial_active_and_epoch_drift(
+    mutation: str,
+    family: str,
+) -> None:
+    connection = database()
+    try:
+        connection.execute("PRAGMA ignore_check_constraints = ON")
+        connection.execute("BEGIN EXCLUSIVE")
+        add_scalar_source_families(connection)
+        connection.execute(mutation)
+        summary = capture_sqlite_v1_baseline_source_summary(
+            connection,
+            captured_at_ms=NOW,
+        )
+        with pytest.raises(ValueError, match=rf"{family} source row is invalid"):
+            tuple(summary.iter_identity_entries())
+    finally:
+        connection.close()
+
+
+def test_legacy_operations_stream_all_closed_results_in_canonical_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connection = database()
+    try:
+        fetch_sizes: list[int] = []
+        original_fetchmany = _SQLiteCursorCapability.fetchmany
+
+        def observed_fetchmany(
+            cursor: _SQLiteCursorCapability,
+            size: int,
+        ) -> list[tuple[object, ...]]:
+            fetch_sizes.append(size)
+            return original_fetchmany(cursor, size)
+
+        monkeypatch.setattr(_SQLiteCursorCapability, "fetchmany", observed_fetchmany)
+        connection.execute("BEGIN EXCLUSIVE")
+        rows = legacy_result_rows()
+        expected: dict[tuple[str, str], tuple[bytes, str]] = {}
+        for tenant_id, operation_id, operation_name, result in rows:
+            result_blob = cycle_store_adapter_codec.encode_ledger_result(
+                operation_name,
+                result,
+            )
+            result_hash = canonical_sha256(result)
+            connection.execute(
+                """INSERT INTO ge_cycle_operations
+                   (tenant_id, operation_id, operation_name, request_hash,
+                    result_blob, result_hash, committed_at_ms)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    tenant_id,
+                    operation_id,
+                    operation_name,
+                    H1,
+                    result_blob,
+                    result_hash,
+                    NOW,
+                ),
+            )
+            expected[(operation_id, tenant_id)] = (result_blob, result_hash)
+
+        summary = capture_sqlite_v1_baseline_source_summary(
+            connection,
+            captured_at_ms=NOW,
+        )
+        assert summary.expected_entry_count == 13
+        entries = tuple(summary.iter_identity_entries())
+        legacy = entries[3:]
+        assert [entry.entry_kind for entry in entries[:3]] == [
+            "schema-envelope",
+            "migration-lineage",
+            "migration-lock-current",
+        ]
+        assert [(entry.key["operationId"], entry.key["tenantId"]) for entry in legacy] == [
+            ("operation-1", "tenant-a"),
+            ("operation-1", "tenant-b"),
+            ("operation-10", "tenant-a"),
+            ("operation-2", "tenant-a"),
+            ("operation-3", "tenant-a"),
+            ("operation-4", "tenant-a"),
+            ("operation-5", "tenant-a"),
+            ("operation-6", "tenant-a"),
+            ("operation-7", "tenant-a"),
+            ("operation-8", "tenant-a"),
+        ]
+        assert {entry.state["operationName"] for entry in legacy} == {
+            "append",
+            "save-checkpoint",
+            "delete-checkpoint",
+            "acquire-lease",
+            "renew-lease",
+            "release-lease",
+            "set-legal-hold",
+            "acquire-migration-lock",
+            "release-migration-lock",
+        }
+        for entry in legacy:
+            identity = (cast(str, entry.key["operationId"]), cast(str, entry.key["tenantId"]))
+            result_blob, result_hash = expected[identity]
+            assert entry.state["resultBlobSha256"] == hashlib.sha256(result_blob).hexdigest()
+            assert entry.state["resultHash"] == result_hash
+            assert entry.state["requestHash"] == H1
+            assert entry.state["committedAtMs"] == NOW
+        assert fetch_sizes[-11:] == [1] * 11
+    finally:
+        connection.close()
+
+
+@pytest.mark.parametrize(
+    "tamper",
+    [
+        "unknown-operation",
+        "noncanonical",
+        "wrong-operation-shape",
+        "result-hash",
+        "one-byte",
+        "oversized",
+        "tenant-id",
+        "operation-id",
+        "request-hash",
+        "committed-at",
+        "payload-marker",
+    ],
+)
+def test_legacy_operation_rejects_hostile_row_and_never_leaks_blob(tamper: str) -> None:
+    connection = database()
+    marker = "MUST_NOT_LEAK_LEGACY_RESULT_7f9238"
+    try:
+        connection.execute("PRAGMA ignore_check_constraints = ON")
+        connection.execute("BEGIN EXCLUSIVE")
+        operation_name: object = "delete-checkpoint"
+        result_blob: object | None = None
+        result_hash: object | None = None
+        tenant_id: object = "tenant-a"
+        operation_id: object = "operation-a"
+        request_hash: object = H1
+        committed_at_ms: object = NOW
+        if tamper == "unknown-operation":
+            operation_name = "DELETE-CHECKPOINT"
+            result_blob = canonical_bytes({"deleted": True})
+        elif tamper == "noncanonical":
+            result_blob = b'{ "deleted":true}'
+        elif tamper == "wrong-operation-shape":
+            operation_name = "append"
+            result_blob = canonical_bytes({"deleted": True})
+        elif tamper == "result-hash":
+            result_hash = H2
+        elif tamper == "one-byte":
+            result_blob = b"0"
+        elif tamper == "oversized":
+            result_blob = b"0" * 16_777_217
+        elif tamper == "tenant-id":
+            tenant_id = ""
+        elif tamper == "operation-id":
+            operation_id = ".."
+        elif tamper == "request-hash":
+            request_hash = "A" * 64
+        elif tamper == "committed-at":
+            committed_at_ms = -1
+        else:
+            result_blob = canonical_bytes({"deleted": True, "secret": marker})
+
+        insert_legacy_operation(
+            connection,
+            tenant_id=tenant_id,
+            operation_id=operation_id,
+            operation_name=operation_name,
+            result_blob=result_blob,
+            request_hash=request_hash,
+            result_hash=result_hash,
+            committed_at_ms=committed_at_ms,
+        )
         summary = capture_sqlite_v1_baseline_source_summary(
             connection,
             captured_at_ms=NOW,
         )
         assert summary.expected_entry_count == 4
-        with pytest.raises(ValueError, match="unimplemented source families"):
-            summary.iter_identity_entries()
+        with pytest.raises(ValueError, match="legacy-operation source row is invalid") as raised:
+            tuple(summary.iter_identity_entries())
+        error: BaseException | None = raised.value
+        messages: list[str] = []
+        while error is not None:
+            messages.append(str(error))
+            error = error.__cause__
+        assert marker not in " ".join(messages)
     finally:
         connection.close()
 

@@ -8178,3 +8178,202 @@ and TypeScript one-row carrier behavior. A monkeypatched cursor-capability test
 asserts the entire family fetch sequence, including four one-row calls for
 three revision rows plus exhaustion, so the bound cannot silently regress.
 The re-review reports HIGH 0 / MEDIUM 0 for this carrier-local slice.
+
+### 31.34.15 Scalar lease, hold, and used-identity carrier checkpoint
+
+The source iterator now covers eleven of the twelve frozen entry kinds in both
+native runtimes. `lease-current`, `used-lease-identity`, `legal-hold`, and
+`used-migration-lock-identity` are streamed after checkpoint revisions and in
+their frozen kind-rank positions around the migration-lock singleton. Their
+SQL order is the exact canonical key-byte order: stream then tenant for the
+lease singleton; lease ID, stream, then tenant for used lease identities; hold
+ID, stream, then tenant for holds; and lock ID for used migration-lock
+identities.
+
+All four families pass through the closed baseline key/state validator. An
+active lease is either entirely absent or has all six active fields; its epoch
+and fence equal each other and the retained high-water; expiry is after
+acquisition. Every used lease and migration-lock identity has equal epoch and
+fence. Identifiers, safe timestamps, key/state duplication, and family counts
+are validated before the entry can reach an accumulator. Bounded scalar
+families use fixed 256-row Python batches; TypeScript advances the native
+iterator one row at a time.
+
+Native hostile coverage includes inactive and active leases, partial-active
+nulls, active/high-water drift, used-identity fence drift, invalid hold IDs,
+canonical lexical ordering with `-10` and `-2`, and accumulator acceptance.
+Independent TypeScript review found no HIGH or MEDIUM implementation issue.
+This checkpoint proves only each row's local carrier. Complete used-epoch
+histories, exact stream ownership, active-to-final-used identity, and hold
+stream membership remain mandatory TEMP relation rules.
+
+### 31.34.16 Twelve-family source closure and legacy-result boundary
+
+`legacy-operation` completes the twelve-family source iterator in TypeScript
+and Python. It selects exactly seven columns and orders by operation ID then
+tenant with binary collation. Each row is advanced alone because a legal v1
+result carrier may be 16 MiB. The operation name is checked against the closed
+nine-mutation set before codec dispatch. The result BLOB must be bytes between
+2 and 16,777,216 bytes, decode under the operation-specific shared codec,
+re-encode byte-for-byte identically, and hash logically to the stored result
+hash. A separate SHA-256 over the original BLOB bytes becomes
+`resultBlobSha256`; it is not copied from or substituted for the logical hash.
+
+The baseline state retains only committed time, operation ID/name, request
+hash, result BLOB SHA-256, logical result hash, and tenant. It never retains or
+logs result bytes. Codec and validation failures collapse to fixed safe error
+messages; Python suppresses the decoder exception chain. Tests cover all nine
+closed result shapes, including JSON null, false, nested append/lease/lock
+objects, canonical operation/tenant tie ordering, raw and logical hash
+separation, unknown operation, wrong-operation shape, noncanonical bytes,
+one-byte and over-16-MiB carriers, identity/hash/time drift, and a marker that
+must not appear anywhere in the surfaced error chain.
+
+The v1 request hash is retained but cannot be recomputed because v1 never
+stored request bytes. `legacyRequestRecovery:false` remains normative. This
+source closure must never be described as request recovery, replay closure, or
+runtime-v2 completion. The relation stage must still prove the physical
+bindings that v1 results can support: append tail and retained span;
+save-checkpoint exact put revision; acquire/renew lease exact used identity;
+and acquire-migration-lock exact used identity. Delete, release, and hold
+results cannot reconstruct an absent historical request and must not be given
+invented bindings.
+
+The carrier-local evidence at this checkpoint is TypeScript SQLite 14 files /
+121 tests plus typecheck, lint, and build; Python source 39 tests plus Ruff and
+strict MyPy over both implementation and tests. A complete Python run reported
+1,206 passes before the final type-annotation-only test repair. The frozen
+ledger contract remains 14/14 with `implementationClaim:false`. Independent
+audits report no remaining HIGH or MEDIUM carrier finding after the strict
+MyPy correction.
+
+### 31.34.17 FILE-backed TEMP reconciliation execution backlog
+
+The next implementation is deliberately split so carrier closure cannot be
+mistaken for migration closure. Every boundary below requires TypeScript and
+Python parity, native hostile tests, bounded diagnostic output, and no active
+schema switch.
+
+#### 31.34.17.1 Protocol and owner capability slice
+
+1. Freeze a shared `BLR_*` rule registry, diagnostic envelope, cursor-seal row
+   domain, cursor-seal chain domain, empty root, and cross-language fixture.
+2. Add an owner-only TEMP configuration API. Outside any transaction it sets
+   and reads back `temp_store=FILE`, a bounded negative TEMP cache size, and
+   cache spill. It must never set `temp_store_directory`.
+3. Extend the owned connection state so reconciliation proves the current
+   transaction was begun as `EXCLUSIVE`, not merely that some transaction is
+   active. Prepared or raw transaction-control bypasses remain forbidden.
+4. Add a module-private exact-write capability. Each expected TEMP insert must
+   change exactly one row and advance a private allowed `total_changes`
+   counter. Any unexplained main- or TEMP-database write poisons capture.
+5. Keep the existing public source iterator read-only. Do not weaken its
+   frozen `total_changes` contract; the private reconciler consumes the shared
+   row decoder through a separate controlled path.
+
+Acceptance attacks include TEMP configuration inside a transaction,
+non-FILE readback, non-exclusive capture, zero-row/duplicate/replace/ignore
+stage writes, caller DML between rows, rollback/rebegin, prefixed transaction
+control, owner-handle escape, and errors containing tenant-controlled data.
+
+#### 31.34.17.2 Common stage and normalized relations
+
+Create a STRICT, WITHOUT ROWID TEMP common stage keyed by
+`(kind_rank,key_blob)` with exact canonical key/state BLOB bounds and a unique
+`(entry_kind,key_blob)` identity. Create twelve normalized relation tables,
+each carrying the entry key BLOB plus only the indexed scalars required for
+reconciliation:
+
+- schema singleton and migration lineage;
+- streams and record identities with unique tenant/hash and
+  tenant/stream/sequence indexes;
+- current checkpoints and revisions with checkpoint-ID/latest-revision and
+  exact record-binding indexes;
+- leases, used leases, holds, migration-lock singleton, and used lock IDs with
+  epoch/fence uniqueness;
+- legacy operations with only decoded result-binding scalars, never the
+  result BLOB.
+
+For each source row, decode and validate the carrier, encode the canonical
+entry, insert one common-stage row, insert one relation row, verify both exact
+write deltas, then release the source row before advancing. Record,
+checkpoint-current, checkpoint-revision, and legacy carriers remain one-row
+reads. Every statement is finalized before anti-joins or future 0002 DDL.
+
+Build a union relation-key view and prove common-stage to relation and relation
+to common-stage coverage in both directions. Compare grouped rank counts to
+all twelve captured source counts. Duplicate canonical keys, missing relation
+rows, extra relation rows, rank/kind mismatch, count drift, early iterator
+abandonment, poison-after-failure, and idempotent deterministic disposal are
+release-blocking tests.
+
+#### 31.34.17.3 Relational invariant slice
+
+Implement bounded count/anti-join rules with stable IDs and no raw identities
+in messages:
+
+- `BLR_RECORD_STREAM_MISSING`, `BLR_STREAM_EMPTY`, `BLR_RECORD_GAP`,
+  `BLR_RECORD_PREDECESSOR`, and `BLR_STREAM_TAIL` prove exact durable record
+  histories and reject persisted empty streams.
+- `BLR_CHECKPOINT_REVISION_GAP`, `BLR_CHECKPOINT_RECORD_MISSING`,
+  `BLR_CHECKPOINT_CURRENT_MISSING`, `BLR_CHECKPOINT_CURRENT_UNEXPECTED`,
+  `BLR_CHECKPOINT_CURRENT_STALE`, and `BLR_CHECKPOINT_CURRENT_BINDING` prove
+  revision continuity, put-record identity, latest put/delete semantics, and
+  exact current state.
+- `BLR_LEASE_HISTORY_INCOMPLETE`, `BLR_LEASE_ACTIVE_BINDING`,
+  `BLR_MIGRATION_LOCK_HISTORY_INCOMPLETE`, and
+  `BLR_MIGRATION_LOCK_ACTIVE_BINDING` prove complete `1..highWater` histories,
+  epoch/fence equality, final active identity, acquisition time, expiry, and
+  forward-only migration targets.
+- `BLR_HOLD_STREAM_MISSING` proves every hold belongs to an exact stream.
+- `BLR_LEGACY_INVENTORY`, `BLR_LEGACY_APPEND_BINDING`,
+  `BLR_LEGACY_CHECKPOINT_BINDING`, `BLR_LEGACY_LEASE_BINDING`, and
+  `BLR_LEGACY_LOCK_BINDING` prove the recoverable result-to-physical
+  relationships without inventing legacy requests.
+
+Each rule gets a happy case plus isolated orphan, gap, predecessor, tail,
+interleaved revision, delete/recreate, stale current, missing epoch, extra
+epoch, substituted active ID, forged result, and count-preserving mutation
+attacks. Diagnostics report only rule ID, capped violation count, and
+truncation status.
+
+#### 31.34.17.4 Cursor seal and staged output slice
+
+Scan cursors one row at a time in canonical token/tenant order. Validate the
+authorization, request scope, canonical scope and snapshot BLOBs, position,
+expiry, consumption, descriptor/schema identity, event-tail binding, and
+checkpoint-revision binding. The immutable seal row includes every scalar
+that 0002 is forbidden to alter plus each BLOB length and SHA-256; descriptor
+and schema identity are validated separately because they are the only fields
+later rebound.
+
+After staging, expose a one-shot iterator over
+`ORDER BY kind_rank,key_blob`. It round-trips exact key/state bytes, checks the
+same transaction epoch, and feeds the streaming accumulator without a full
+collection. Disposal closes any active iterator and drops the cursor seal,
+relation view/tables, and common stage in reverse order without committing or
+rolling back the caller transaction.
+
+Cursor tests cover empty/event/checkpoint forms, principal or authorization
+drift, bad canonical BLOBs, missing tail, missing historical put, bad snapshot
+order, row insert/delete, partial rebind, wrong update count, immutable byte
+drift, and TypeScript/Python seal-root parity.
+
+#### 31.34.17.5 Scale and handoff gates
+
+The fast gate uses 128 and 1,024 generated rows. Scheduled gates use exact 10K
+and 100K source rows without `.all()`, `fetchall()`, a 100K array, tuple, map,
+or dictionary. Evidence records source/stage/relation counts, root parity,
+fetch sizes, query plans and index use, TEMP page count, database/WAL/SHM
+sizes, raw latency samples, p50/p95/p99, and peak RSS. RSS is initially
+reported, not converted into an unstable threshold. `releaseGate:false`,
+`productionThroughputClaim:false`, and `implementationClaim:false` remain set.
+
+Only after these slices pass may the migration orchestrator execute 0002,
+stream stage rows into permanent baseline entries, publish header and sequence
+zero, rebind cursors, publish lineage/schema/descriptor, run the
+post-publication verifier, and commit once. Crash injection, subprocess
+SIGKILL, request bytes, sequence CAS, deterministic replay, bidirectional
+physical reconciliation, backup/restore identity, exact 96 implementation
+evidence, artifact installation, and active-manifest switching remain separate
+subsequent gates.

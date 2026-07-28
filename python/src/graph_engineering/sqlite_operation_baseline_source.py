@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 from collections.abc import Callable, Iterator, Mapping
@@ -10,7 +11,7 @@ from types import MappingProxyType
 from typing import cast
 
 from .canonical import canonical_bytes, canonical_sha256
-from .cycle_store_provider import cycle_store_adapter_codec
+from .cycle_store_provider import CycleStoreProviderOperation, cycle_store_adapter_codec
 from .models import MAX_SAFE_INTEGER, JsonObject, JsonValue
 from .portable_json import portable_json_snapshot
 from .sqlite_cycle_store import (
@@ -182,7 +183,12 @@ class SQLiteV1BaselineSourceSummary:
             "record-identity",
             "checkpoint-current",
             "checkpoint-revision",
+            "lease-current",
+            "used-lease-identity",
+            "legal-hold",
             "migration-lock-current",
+            "used-migration-lock-identity",
+            "legacy-operation",
         }
         if (
             self.counts_by_kind["schema-envelope"] != 1
@@ -217,12 +223,27 @@ class SQLiteV1BaselineSourceSummary:
                 _checkpoint_revision_entry,
                 1,
             ),
+            ("lease-current", _LEASE_CURRENT_ENTRY_SQL, _lease_current_entry, 256),
+            (
+                "used-lease-identity",
+                _USED_LEASE_IDENTITY_ENTRY_SQL,
+                _used_lease_identity_entry,
+                256,
+            ),
+            ("legal-hold", _LEGAL_HOLD_ENTRY_SQL, _legal_hold_entry, 256),
             (
                 "migration-lock-current",
                 _MIGRATION_LOCK_ENTRY_SQL,
                 _migration_lock_entry,
                 256,
             ),
+            (
+                "used-migration-lock-identity",
+                _USED_MIGRATION_LOCK_IDENTITY_ENTRY_SQL,
+                _used_migration_lock_identity_entry,
+                256,
+            ),
+            ("legacy-operation", _LEGACY_OPERATION_ENTRY_SQL, _legacy_operation_entry, 1),
         )
         envelope = self.source_envelope
         for kind, sql, capture, fetch_size in families:
@@ -360,11 +381,54 @@ _CHECKPOINT_REVISION_ENTRY_SQL = """SELECT tenant_id, checkpoint_scope,
  ORDER BY checkpoint_scope COLLATE BINARY,
  CAST(revision AS TEXT) COLLATE BINARY, tenant_id COLLATE BINARY"""
 
+_LEASE_CURRENT_ENTRY_SQL = """SELECT tenant_id, stream_id, active_lease_id,
+ active_holder_id, active_lease_epoch, active_fencing_token,
+ active_acquired_at_ms, active_expires_at_ms, last_lease_epoch,
+ last_fencing_token, updated_at_ms
+ FROM ge_cycle_leases
+ ORDER BY stream_id COLLATE BINARY, tenant_id COLLATE BINARY"""
+
+_USED_LEASE_IDENTITY_ENTRY_SQL = """SELECT tenant_id, stream_id, lease_id,
+ lease_epoch, fencing_token, first_used_at_ms
+ FROM ge_cycle_used_lease_ids
+ ORDER BY lease_id COLLATE BINARY, stream_id COLLATE BINARY,
+ tenant_id COLLATE BINARY"""
+
+_LEGAL_HOLD_ENTRY_SQL = """SELECT tenant_id, stream_id, hold_id, placed_at_ms
+ FROM ge_cycle_legal_holds
+ ORDER BY hold_id COLLATE BINARY, stream_id COLLATE BINARY,
+ tenant_id COLLATE BINARY"""
+
 _MIGRATION_LOCK_ENTRY_SQL = """SELECT singleton, active_lock_id, active_owner_id,
  active_source_version, active_target_version, active_lock_epoch,
  active_fencing_token, active_acquired_at_ms, active_expires_at_ms,
  last_lock_epoch, last_fencing_token, updated_at_ms
  FROM ge_cycle_migration_lock WHERE singleton = 1"""
+
+_USED_MIGRATION_LOCK_IDENTITY_ENTRY_SQL = """SELECT lock_id, lock_epoch,
+ fencing_token, first_used_at_ms
+ FROM ge_cycle_used_migration_lock_ids
+ ORDER BY lock_id COLLATE BINARY"""
+
+_LEGACY_OPERATION_ENTRY_SQL = """SELECT tenant_id, operation_id,
+ operation_name, request_hash, result_blob, result_hash, committed_at_ms
+ FROM ge_cycle_operations
+ ORDER BY operation_id COLLATE BINARY, tenant_id COLLATE BINARY"""
+
+_LEGACY_OPERATION_NAMES = frozenset(
+    {
+        "append",
+        "save-checkpoint",
+        "delete-checkpoint",
+        "acquire-lease",
+        "renew-lease",
+        "release-lease",
+        "set-legal-hold",
+        "acquire-migration-lock",
+        "release-migration-lock",
+    }
+)
+_MAX_LEGACY_RESULT_BYTES = 16_777_216
 
 
 def _strict_object(pairs: list[tuple[str, JsonValue]]) -> JsonObject:
@@ -655,6 +719,63 @@ def _checkpoint_revision_entry(row: object) -> BaselineEntryInput:
     )
 
 
+def _lease_current_entry(row: object) -> BaselineEntryInput:
+    values = tuple(cast(tuple[object, ...], row))
+    if len(values) != 11:
+        raise ValueError("lease current shape drifted")
+    return capture_baseline_entry(
+        "lease-current",
+        {"streamId": values[1], "tenantId": values[0]},
+        {
+            "activeAcquiredAtMs": values[6],
+            "activeExpiresAtMs": values[7],
+            "activeFencingToken": values[5],
+            "activeHolderId": values[3],
+            "activeLeaseEpoch": values[4],
+            "activeLeaseId": values[2],
+            "lastFencingToken": values[9],
+            "lastLeaseEpoch": values[8],
+            "streamId": values[1],
+            "tenantId": values[0],
+            "updatedAtMs": values[10],
+        },
+    )
+
+
+def _used_lease_identity_entry(row: object) -> BaselineEntryInput:
+    values = tuple(cast(tuple[object, ...], row))
+    if len(values) != 6:
+        raise ValueError("used lease identity shape drifted")
+    return capture_baseline_entry(
+        "used-lease-identity",
+        {"leaseId": values[2], "streamId": values[1], "tenantId": values[0]},
+        {
+            "fencingToken": values[4],
+            "firstUsedAtMs": values[5],
+            "leaseEpoch": values[3],
+            "leaseId": values[2],
+            "streamId": values[1],
+            "tenantId": values[0],
+        },
+    )
+
+
+def _legal_hold_entry(row: object) -> BaselineEntryInput:
+    values = tuple(cast(tuple[object, ...], row))
+    if len(values) != 4:
+        raise ValueError("legal hold shape drifted")
+    return capture_baseline_entry(
+        "legal-hold",
+        {"holdId": values[2], "streamId": values[1], "tenantId": values[0]},
+        {
+            "holdId": values[2],
+            "placedAtMs": values[3],
+            "streamId": values[1],
+            "tenantId": values[0],
+        },
+    )
+
+
 def _migration_lock_entry(row: object) -> BaselineEntryInput:
     values = tuple(cast(tuple[object, ...], row))
     if len(values) != 12:
@@ -675,6 +796,61 @@ def _migration_lock_entry(row: object) -> BaselineEntryInput:
             "lastLockEpoch": values[9],
             "singleton": values[0],
             "updatedAtMs": values[11],
+        },
+    )
+
+
+def _used_migration_lock_identity_entry(row: object) -> BaselineEntryInput:
+    values = tuple(cast(tuple[object, ...], row))
+    if len(values) != 4:
+        raise ValueError("used migration lock identity shape drifted")
+    return capture_baseline_entry(
+        "used-migration-lock-identity",
+        {"lockId": values[0]},
+        {
+            "fencingToken": values[2],
+            "firstUsedAtMs": values[3],
+            "lockEpoch": values[1],
+            "lockId": values[0],
+        },
+    )
+
+
+def _legacy_operation_entry(row: object) -> BaselineEntryInput:
+    values = tuple(cast(tuple[object, ...], row))
+    if len(values) != 7:
+        raise ValueError("legacy operation shape drifted")
+    operation_name = values[2]
+    if type(operation_name) is not str or operation_name not in _LEGACY_OPERATION_NAMES:
+        raise ValueError("legacy operation name is invalid")
+    result_blob = values[4]
+    if (
+        type(result_blob) is not bytes
+        or len(result_blob) < 2
+        or len(result_blob) > _MAX_LEGACY_RESULT_BYTES
+    ):
+        raise ValueError("legacy operation result carrier is outside bounds")
+    operation = cast(CycleStoreProviderOperation, operation_name)
+    try:
+        decoded = cycle_store_adapter_codec.decode_ledger_result(operation, result_blob)
+        reencoded = cycle_store_adapter_codec.encode_ledger_result(operation, decoded)
+    except Exception:
+        raise ValueError("legacy operation result carrier is invalid") from None
+    if reencoded != result_blob or canonical_sha256(decoded) != values[5]:
+        raise ValueError("legacy operation result carrier identity drifted")
+    tenant_id = values[0]
+    operation_id = values[1]
+    return capture_baseline_entry(
+        "legacy-operation",
+        {"operationId": operation_id, "tenantId": tenant_id},
+        {
+            "committedAtMs": values[6],
+            "operationId": operation_id,
+            "operationName": operation_name,
+            "requestHash": values[3],
+            "resultBlobSha256": hashlib.sha256(result_blob).hexdigest(),
+            "resultHash": values[5],
+            "tenantId": tenant_id,
         },
     )
 
