@@ -38,8 +38,13 @@ from .scheduler import (
     NodeStatus,
     RunResult,
     RunStatus,
+    _active_incoming_edges,
     _AttemptIdentity,
     _BindingError,
+    _InvalidRouteSelectionError,
+    _selected_routes,
+    _unsupported_condition_sources,
+    _UnsupportedEdgeConditionError,
 )
 
 _CONTRACT_VERSION = "scheduler-recovery/v1alpha1"
@@ -365,11 +370,13 @@ class _DurableJournal:
                 attempt=attempt,
             )
         )
-        await self.append(drafts)
+        events = await self.append(drafts)
+        scheduled_ordinal = events[0].sequence if drafts[0].type == "NodeScheduled" else None
         return _AttemptIdentity(
             run_id=self.run_id,
             attempt_id=f"{self.run_id}/{node.id}/{attempt}",
             activity_key=activity_key,
+            scheduled_ordinal=scheduled_ordinal,
         )
 
     async def attempt_failed(
@@ -651,7 +658,11 @@ def _decode_node_result(value: object, run_id: str, context: str) -> NodeResult:
             raise _invalid_history(run_id, f"{context} failure identity is inconsistent")
         if failure.code is FailureCode.OUTPUT_BINDING_FAILED:
             raise _invalid_history(run_id, f"{context} contains an output failure as a node result")
-        skipped_codes = {FailureCode.UPSTREAM_FAILED, FailureCode.NODE_CANCELLED}
+        skipped_codes = {
+            FailureCode.UPSTREAM_FAILED,
+            FailureCode.NODE_CANCELLED,
+            FailureCode.ROUTE_NOT_SELECTED,
+        }
         if status is NodeStatus.SKIPPED and failure.code not in skipped_codes:
             raise _invalid_history(run_id, f"{context} has an invalid skipped-node failure")
         if status is NodeStatus.FAILED and failure.code is FailureCode.UPSTREAM_FAILED:
@@ -893,7 +904,12 @@ def _validate_terminal_result(
     ):
         raise _invalid_history(run_id, "terminal output contradicts committed node outputs")
     expected_failures = (
-        tuple(result.failure for result in expected_nodes.values() if result.failure is not None)
+        tuple(
+            result.failure
+            for result in expected_nodes.values()
+            if result.failure is not None
+            and result.failure.code is not FailureCode.ROUTE_NOT_SELECTED
+        )
         + output_failures
     )
     if not _same_failure_sequence(terminal.failures, expected_failures):
@@ -915,7 +931,11 @@ def _validate_terminal_result(
     succeeded = (
         not expected_failures
         and expected_outputs is not None
-        and all(item.status is NodeStatus.SUCCEEDED for item in expected_nodes.values())
+        and all(
+            item.status is NodeStatus.SUCCEEDED
+            or (item.failure is not None and item.failure.code is FailureCode.ROUTE_NOT_SELECTED)
+            for item in expected_nodes.values()
+        )
     )
     if terminal.status is RunStatus.SUCCEEDED and not succeeded:
         raise _invalid_history(run_id, "terminal status contradicts reconstructed graph result")
@@ -946,13 +966,41 @@ def _bound_input_from_history(
     projections: Mapping[str, _NodeProjection],
     run_id: str,
 ) -> JsonValue:
-    incoming = sorted(graph.incoming[node_id], key=lambda edge: edge.id)
-    if not incoming:
+    structural_incoming = graph.incoming[node_id]
+    if not structural_incoming:
         return portable_json_snapshot(graph_input)
+    committed: dict[str, NodeResult] = {}
+    for edge in structural_incoming:
+        source = projections[edge.source.node].result
+        if source is None:
+            raise _invalid_history(
+                run_id,
+                "NodeScheduled was emitted before every dependency settled",
+                nodeId=node_id,
+                sourceNodeId=edge.source.node,
+            )
+        committed[edge.source.node] = source
+    try:
+        incoming = sorted(
+            _active_incoming_edges(graph, node_id, committed),
+            key=lambda edge: edge.id,
+        )
+    except _BindingError as exc:
+        raise _invalid_history(
+            run_id,
+            "NodeScheduled has invalid conditional input",
+            nodeId=node_id,
+        ) from exc
+    if not incoming:
+        raise _invalid_history(
+            run_id,
+            "NodeScheduled was emitted for an unselected route",
+            nodeId=node_id,
+        )
     values: dict[str, JsonValue] = {}
     for edge in incoming:
-        source = projections[edge.source.node].result
-        if source is None or source.status is not NodeStatus.SUCCEEDED:
+        source = committed[edge.source.node]
+        if source.status is not NodeStatus.SUCCEEDED:
             raise _invalid_history(
                 run_id,
                 "NodeScheduled was emitted before every dependency succeeded",
@@ -1025,19 +1073,88 @@ def _validate_settled_without_attempt(
             nodeId=node_id,
             unresolvedUpstreamNodeIds=unresolved,
         )
-    failed_upstream = tuple(
-        sorted(
-            {
-                edge.source.node
-                for edge in incoming
-                if committed[edge.source.node].status is not NodeStatus.SUCCEEDED
-            }
+    active_incoming = None
+    active_input_error: _BindingError | None = None
+    try:
+        active_incoming = _active_incoming_edges(
+            graph,
+            node_id,
+            cast(Mapping[str, NodeResult], committed),
         )
+    except _BindingError as exc:
+        active_input_error = exc
+    failed_upstream = (
+        tuple(
+            sorted(
+                {
+                    edge.source.node
+                    for edge in active_incoming
+                    if committed[edge.source.node].status is not NodeStatus.SUCCEEDED
+                }
+            )
+        )
+        if active_incoming is not None
+        else ()
     )
 
     expected: NodeResult | None = None
     failure = result.failure
-    if failure.code is FailureCode.NODE_CANCELLED:
+    unsupported_conditions = _unsupported_condition_sources(graph)
+    if node_id in unsupported_conditions:
+        expected = NodeResult(
+            node_id=node_id,
+            sequence=sequence,
+            status=NodeStatus.FAILED,
+            attempts=projection.attempts,
+            failure=NodeFailure(
+                FailureCode.UNSUPPORTED_EDGE_CONDITION,
+                unsupported_conditions[node_id],
+                node_id,
+                projection.attempts,
+            ),
+            input_bound=False,
+        )
+    elif active_input_error is not None:
+        failure_code = (
+            FailureCode.UNSUPPORTED_EDGE_CONDITION
+            if isinstance(active_input_error, _UnsupportedEdgeConditionError)
+            else FailureCode.INVALID_ROUTE_SELECTION
+            if isinstance(active_input_error, _InvalidRouteSelectionError)
+            else FailureCode.INPUT_BINDING_FAILED
+        )
+        expected = NodeResult(
+            node_id=node_id,
+            sequence=sequence,
+            status=NodeStatus.FAILED,
+            attempts=projection.attempts,
+            failure=NodeFailure(
+                failure_code,
+                str(active_input_error),
+                node_id,
+                projection.attempts,
+                exception_type=(
+                    "InvalidRouteSelectionError"
+                    if failure_code is FailureCode.INVALID_ROUTE_SELECTION
+                    else None
+                ),
+            ),
+            input_bound=False,
+        )
+    elif incoming and not active_incoming:
+        expected = NodeResult(
+            node_id=node_id,
+            sequence=sequence,
+            status=NodeStatus.SKIPPED,
+            attempts=projection.attempts,
+            failure=NodeFailure(
+                FailureCode.ROUTE_NOT_SELECTED,
+                f"Node {node_id!r} did not start because no incoming route was selected",
+                node_id,
+                projection.attempts,
+            ),
+            input_bound=False,
+        )
+    elif failure.code is FailureCode.NODE_CANCELLED:
         if result.status is NodeStatus.SKIPPED:
             expected = NodeResult(
                 node_id=node_id,
@@ -1053,12 +1170,19 @@ def _validate_settled_without_attempt(
                 input_bound=False,
             )
         else:
+            if active_incoming is None:
+                raise _invalid_history(
+                    run_id,
+                    "cancelled node did not have a valid conditional input",
+                    nodeId=node_id,
+                )
             try:
                 node_input = AsyncScheduler._bind_input(
                     graph,
                     node_id,
                     graph_input,
                     cast(Mapping[str, NodeResult], committed),
+                    active_incoming,
                 )
             except _BindingError as exc:
                 raise _invalid_history(
@@ -1101,6 +1225,7 @@ def _validate_settled_without_attempt(
                 node_id,
                 graph_input,
                 cast(Mapping[str, NodeResult], committed),
+                active_incoming,
             )
         except _BindingError as exc:
             expected = NodeResult(
@@ -1195,6 +1320,7 @@ def _fold_history(
     expected_edges: list[tuple[str, str, int, str]] = []
     expected_retry: tuple[str, int, str] | None = None
     declaration_order = {node_id: index for index, node_id in enumerate(graph.nodes)}
+    unsupported_conditions = _unsupported_condition_sources(graph)
     event_ids: set[str] = set()
 
     for index, event in enumerate(events):
@@ -1250,6 +1376,20 @@ def _fold_history(
             raise _invalid_history(
                 run_id,
                 "NodeSettledWithoutAttempt has an attempt identity",
+            )
+        if event.node_id in unsupported_conditions and event.type in {
+            "NodeScheduled",
+            "NodeStarted",
+            "NodeSucceeded",
+            "NodeAttemptFailed",
+            "NodeRetried",
+            "EdgeEmitted",
+        }:
+            raise _invalid_history(
+                run_id,
+                "unsupported-condition source has an attempt-bearing history",
+                nodeId=event.node_id,
+                eventType=event.type,
             )
 
         if expected_edges:
@@ -1643,6 +1783,19 @@ def _fold_history(
             output_hash = _string(event.data["outputHash"], run_id, "outputHash")
             if durable_json_hash(output) != output_hash:
                 raise _invalid_history(run_id, "NodeSucceeded outputHash is invalid")
+            if graph.nodes[node_id].kind == "router":
+                try:
+                    if not projection.input_bound:
+                        raise _InvalidRouteSelectionError(
+                            f"router {node_id!r} result has no authoritative input"
+                        )
+                    _selected_routes(output, graph.nodes[node_id], projection.input)
+                except _InvalidRouteSelectionError as exc:
+                    raise _invalid_history(
+                        run_id,
+                        "NodeSucceeded contains an invalid route decision",
+                        nodeId=node_id,
+                    ) from exc
             projection.output_hash = output_hash
             projection.open_attempt = None
             active.discard(node_id)
@@ -1686,6 +1839,7 @@ def _fold_history(
                 FailureCode.NODE_TIMEOUT,
                 FailureCode.NODE_CANCELLED,
                 FailureCode.INVALID_OUTPUT,
+                FailureCode.INVALID_ROUTE_SELECTION,
                 FailureCode.NODE_EXECUTION_INTERRUPTED,
             }
             if failure.code not in allowed_attempt_codes:

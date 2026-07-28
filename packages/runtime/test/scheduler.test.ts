@@ -112,6 +112,356 @@ function testJournal(overrides: Partial<SchedulerJournal> = {}): SchedulerJourna
 }
 
 describe("runGraph", () => {
+  it("executes RouteEquals edges, propagates inactive control flow, and binds only the selected branch", async () => {
+    const quick = vi.fn(() => ({ reviewed: "quick" }));
+    const quickPost = vi.fn(({ input }) => input);
+    const audit = vi.fn(() => ({ reviewed: "audit" }));
+    const result = await runGraph(
+      graph({
+        outputs: { result: { node: "merge" } },
+        nodes: [
+          node("route", {
+            kind: "router",
+            config: { kind: "single", allowedRoutes: ["quick", "audit"] },
+          }),
+          node("quick"),
+          node("quick-post"),
+          node("audit"),
+          node("merge", { kind: "barrier" }),
+        ],
+        entrypoints: ["route"],
+        edges: [
+          {
+            id: "route-quick",
+            from: { node: "route" },
+            to: { node: "quick" },
+            condition: {
+              apiVersion: "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1",
+              kind: "RouteEquals",
+              routeKey: "quick",
+            },
+          },
+          {
+            id: "route-audit",
+            from: { node: "route" },
+            to: { node: "audit" },
+            condition: {
+              apiVersion: "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1",
+              kind: "RouteEquals",
+              routeKey: "audit",
+            },
+          },
+          { id: "quick-post", from: { node: "quick" }, to: { node: "quick-post" } },
+          { id: "quick-merge", from: { node: "quick-post" }, to: { node: "merge", port: "quick" } },
+          { id: "audit-merge", from: { node: "audit" }, to: { node: "merge", port: "audit" } },
+        ],
+      }),
+      { requestedRoutes: ["audit"] },
+      { nodeExecutors: { quick, "quick-post": quickPost, audit } },
+    );
+
+    expect(result.status).toBe("succeeded");
+    expect(result.output).toEqual({ result: { audit: { reviewed: "audit" } } });
+    expect(result.failures).toEqual([]);
+    expect(result.nodes.find(({ nodeId }) => nodeId === "quick")).toMatchObject({
+      status: "skipped",
+      attempts: 0,
+      failure: { code: "ROUTE_NOT_SELECTED" },
+    });
+    expect(result.nodes.find(({ nodeId }) => nodeId === "quick-post")).toMatchObject({
+      status: "skipped",
+      attempts: 0,
+      failure: { code: "ROUTE_NOT_SELECTED" },
+    });
+    expect(quick).not.toHaveBeenCalled();
+    expect(quickPost).not.toHaveBeenCalled();
+    expect(audit).toHaveBeenCalledOnce();
+  });
+
+  it("settles every zero-match branch without executing it", async () => {
+    const branch = vi.fn();
+    const result = await runGraph(
+      graph({
+        outputs: { decision: { node: "route" } },
+        nodes: [
+          node("route", {
+            kind: "router",
+            config: { kind: "single", allowedRoutes: ["known"] },
+          }),
+          node("branch"),
+        ],
+        entrypoints: ["route"],
+        edges: [{
+          id: "route-branch",
+          from: { node: "route" },
+          to: { node: "branch" },
+          condition: {
+            apiVersion: "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1",
+            kind: "RouteEquals",
+            routeKey: "known",
+          },
+        }],
+      }),
+      { requestedRoutes: ["unknown"] },
+      { nodeExecutors: { branch } },
+    );
+
+    expect(result.status).toBe("succeeded");
+    expect(result.output).toMatchObject({ decision: { routed: false, reasonCode: "UNKNOWN_ROUTE" } });
+    expect(result.nodes.find(({ nodeId }) => nodeId === "branch")?.failure?.code)
+      .toBe("ROUTE_NOT_SELECTED");
+    expect(result.failures).toEqual([]);
+    expect(branch).not.toHaveBeenCalled();
+  });
+
+  it("routes a low-confidence decision only to its configured escalation branch", async () => {
+    const quick = vi.fn();
+    const human = vi.fn(() => ({ reviewed: "human" }));
+    const result = await runGraph(
+      graph({
+        outputs: { decision: { node: "route" } },
+        nodes: [
+          node("route", {
+            kind: "router",
+            config: {
+              kind: "single",
+              allowedRoutes: ["quick", "human"],
+              confidence: { minimumBasisPoints: 7000, escalationRoute: "human" },
+            },
+          }),
+          node("quick"),
+          node("human"),
+        ],
+        entrypoints: ["route"],
+        edges: ["quick", "human"].map((routeKey) => ({
+          id: `route-${routeKey}`,
+          from: { node: "route" },
+          to: { node: routeKey },
+          condition: {
+            apiVersion: "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1",
+            kind: "RouteEquals",
+            routeKey,
+          },
+        })),
+      }),
+      { requestedRoutes: ["quick"], confidenceBasisPoints: 6999 },
+      { nodeExecutors: { quick, human } },
+    );
+
+    expect(result.output).toMatchObject({
+      decision: {
+        selectedRoutes: ["human"],
+        reasonCode: "ESCALATION_SELECTED_LOW_CONFIDENCE",
+        escalated: true,
+      },
+    });
+    expect(quick).not.toHaveBeenCalled();
+    expect(human).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ["duplicate selected route", ["quick", "quick"]],
+    ["non-string selected route", [1]],
+  ])("rejects a router output with a %s", async (_name, selectedRoutes) => {
+    const result = await runGraph(
+      graph({
+        outputs: { decision: { node: "root" } },
+        nodes: [node("root", {
+          kind: "router",
+          config: { kind: "single", allowedRoutes: ["quick"] },
+        })],
+      }),
+      { requestedRoutes: ["quick"] },
+      {
+        nodeExecutors: {
+          root: () => ({
+            routed: true,
+            reasonCode: "REQUESTED_ROUTES_SELECTED",
+            requestedRoutes: ["quick"],
+            selectedRoutes,
+            unknownRoutes: [],
+            confidenceBasisPoints: null,
+            usedDefault: false,
+            escalated: false,
+          }),
+        },
+      },
+    );
+    expect(result.nodes[0]?.failure).toMatchObject({
+      code: "INVALID_ROUTE_SELECTION",
+      retryable: false,
+    });
+  });
+
+  it.each([
+    ["malformed request", {}, { kind: "single", allowedRoutes: ["quick"] }],
+    ["invalid policy", { requestedRoutes: ["quick"] }, {
+      kind: "multi",
+      allowedRoutes: ["quick"],
+    }],
+  ])("does not retry an INVALID_ROUTE_SELECTION from a %s", async (_name, input, config) => {
+    const attemptFailed = vi.fn(async () => undefined);
+    const result = await runGraphWithJournal(
+      graph({
+        nodes: [node("root", { kind: "router", config, retry: { maxAttempts: 3 } })],
+      }),
+      input,
+      { journal: testJournal({ attemptFailed }) },
+    );
+    expect(result.nodes[0]).toMatchObject({
+      status: "failed",
+      attempts: 1,
+      failure: { code: "INVALID_ROUTE_SELECTION", retryable: false },
+    });
+    expect(result.totalAttempts).toBe(1);
+    expect(attemptFailed).toHaveBeenCalledOnce();
+    expect(attemptFailed.mock.calls[0]?.[0]).toMatchObject({
+      willRetry: false,
+      retryDelayMs: 0,
+      failure: { code: "INVALID_ROUTE_SELECTION", retryable: false },
+    });
+  });
+
+  it("fails a forged router decision before emitting a successful router result", async () => {
+    const branch = vi.fn();
+    const router = vi.fn(() => ({
+      routed: true,
+      reasonCode: "REQUESTED_ROUTES_SELECTED",
+      requestedRoutes: ["audit"],
+      selectedRoutes: ["audit"],
+      unknownRoutes: [],
+      confidenceBasisPoints: null,
+      usedDefault: false,
+      escalated: false,
+    }));
+    const result = await runGraph(
+      graph({
+        outputs: { decision: { node: "route" } },
+        nodes: [
+          node("route", {
+            kind: "router",
+            config: { kind: "single", allowedRoutes: ["quick", "audit"] },
+            retry: { maxAttempts: 3 },
+          }),
+          node("branch"),
+        ],
+        entrypoints: ["route"],
+        edges: [{
+          id: "route-branch",
+          from: { node: "route" },
+          to: { node: "branch" },
+          condition: {
+            apiVersion: "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1",
+            kind: "RouteEquals",
+            routeKey: "audit",
+          },
+        }],
+      }),
+      { requestedRoutes: ["quick"] },
+      {
+        nodeExecutors: {
+          route: router,
+          branch,
+        },
+      },
+    );
+
+    expect(result.status).toBe("failed");
+    expect(result.nodes[0]).toMatchObject({
+      status: "failed",
+      attempts: 1,
+      failure: { code: "INVALID_ROUTE_SELECTION", causeName: "InvalidRouteSelectionError" },
+    });
+    expect(result.nodes[1]).toMatchObject({
+      status: "skipped",
+      failure: { code: "UPSTREAM_FAILED" },
+    });
+    expect(result.totalAttempts).toBe(1);
+    expect(router).toHaveBeenCalledOnce();
+    expect(branch).not.toHaveBeenCalled();
+  });
+
+  it("rejects a forged restored router success before reconstructing edge activation", async () => {
+    const routed = graph({
+      outputs: { decision: { node: "route" } },
+      nodes: [
+        node("route", {
+          kind: "router",
+          config: { kind: "single", allowedRoutes: ["quick", "audit"] },
+        }),
+        node("branch"),
+      ],
+      entrypoints: ["route"],
+      edges: [{
+        id: "route-branch",
+        from: { node: "route" },
+        to: { node: "branch" },
+        condition: {
+          apiVersion: "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1",
+          kind: "RouteEquals",
+          routeKey: "audit",
+        },
+      }],
+    });
+    const initialResults = new Map([[
+      "route",
+      {
+        nodeId: "route",
+        sequence: 0,
+        status: "succeeded" as const,
+        attempts: 1,
+        input: { requestedRoutes: ["quick"] },
+        output: {
+          routed: true,
+          reasonCode: "REQUESTED_ROUTES_SELECTED",
+          requestedRoutes: ["audit"],
+          selectedRoutes: ["audit"],
+          unknownRoutes: [],
+          confidenceBasisPoints: null,
+          usedDefault: false,
+          escalated: false,
+        },
+      },
+    ]]);
+
+    await expect(runGraphWithJournal(routed, {}, { initialResults }))
+      .rejects.toThrow("initialResults contains an invalid successful router decision for 'route'");
+  });
+
+  it.each([
+    ["malformed", node("route", { kind: "router" }), { kind: "RouteEquals", routeKey: "x" }],
+    ["unsupported", node("route", { kind: "router" }), {
+      apiVersion: "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1",
+      kind: "Other",
+      routeKey: "x",
+    }],
+    ["non-router", node("route"), {
+      apiVersion: "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1",
+      kind: "RouteEquals",
+      routeKey: "x",
+    }],
+  ])("fails closed for a %s conditional edge before source execution", async (_name, source, condition) => {
+    const sourceExecutor = vi.fn(() => ({ selectedRoutes: ["x"] }));
+    const result = await runGraph(
+      graph({
+        outputs: { decision: { node: "route" } },
+        nodes: [source, node("branch")],
+        entrypoints: ["route"],
+        edges: [{ id: "conditional", from: { node: "route" }, to: { node: "branch" }, condition }],
+      }),
+      {},
+      { nodeExecutors: { route: sourceExecutor } },
+    );
+
+    expect(result.status).toBe("failed");
+    expect(result.nodes[0]).toMatchObject({
+      status: "failed",
+      attempts: 0,
+      failure: { code: "UNSUPPORTED_EDGE_CONDITION" },
+    });
+    expect(sourceExecutor).not.toHaveBeenCalled();
+  });
+
   it("executes a diamond concurrently and binds fan-in ports", async () => {
     let activeBranches = 0;
     let maximumBranches = 0;

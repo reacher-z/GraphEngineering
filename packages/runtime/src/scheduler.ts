@@ -1,4 +1,5 @@
 import {
+  canonicalSerialize,
   compileGraph,
   compareUnicodeCodePoints,
   type EdgeSpec,
@@ -18,6 +19,13 @@ import type {
   SchedulerOptions,
 } from "./types.js";
 import { snapshotJson } from "./json.js";
+import {
+  assertExactRouteSelection,
+  edgeConditionError,
+  edgeIsActive,
+  InvalidRouteSelectionError,
+  routeSelectionExecutor,
+} from "./router-runtime.js";
 
 const identityExecutor: NodeExecutor = ({ input }) => input;
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
@@ -104,6 +112,26 @@ function runtimeFailure(
 ): NodeRunFailure {
   const { retryable = false, ...rest } = fields;
   return { phase: "execute", nodeId, code, message, attempt, retryable, ...rest };
+}
+
+function unsupportedConditionResult(
+  nodeId: string,
+  sequence: number,
+  attempts: number,
+  messages: readonly string[],
+): NodeRunResult {
+  return {
+    nodeId,
+    sequence,
+    status: "failed",
+    attempts,
+    failure: runtimeFailure(
+      nodeId,
+      "UNSUPPORTED_EDGE_CONDITION",
+      messages.join("; "),
+      attempts,
+    ),
+  };
 }
 
 function errorName(error: unknown): string {
@@ -460,6 +488,17 @@ async function executeNode(options: ExecuteNodeOptions): Promise<NodeRunResult> 
         context,
         node.timeoutMs,
       );
+      if (outcome.succeeded && node.kind === "router") {
+        try {
+          assertExactRouteSelection(node, input, outcome.output);
+        } catch (error) {
+          outcome = {
+            succeeded: false,
+            code: "INVALID_ROUTE_SELECTION",
+            error,
+          };
+        }
+      }
       if (outcome.succeeded && journal !== undefined && identity !== undefined && journalEnabled()) {
         await journal.nodeSucceeded({
           graph,
@@ -471,8 +510,13 @@ async function executeNode(options: ExecuteNodeOptions): Promise<NodeRunResult> 
           outgoingEdges,
         });
       } else if (!outcome.succeeded) {
-        const code = outcome.code ?? "NODE_EXECUTION_FAILED";
-        mayRetry = attempts < maxAttempts && code !== "NODE_CANCELLED" && reserveRetry(node.id);
+        const code = outcome.error instanceof InvalidRouteSelectionError
+          ? "INVALID_ROUTE_SELECTION"
+          : outcome.code ?? "NODE_EXECUTION_FAILED";
+        mayRetry = attempts < maxAttempts &&
+          code !== "NODE_CANCELLED" &&
+          code !== "INVALID_ROUTE_SELECTION" &&
+          reserveRetry(node.id);
         lastFailure = runtimeFailure(
           node.id,
           code,
@@ -643,6 +687,8 @@ export async function runGraphWithJournal(
   const incoming = new Map(graph.nodes.map((node) => [node.id, [] as EdgeSpec[]]));
   const outgoing = new Map(graph.nodes.map((node) => [node.id, [] as EdgeSpec[]]));
   const remaining = new Map(graph.nodes.map((node) => [node.id, 0]));
+  const activeEdges = new Map<string, boolean>();
+  const conditionFailures = new Map<string, string[]>();
   for (const edge of graph.edges) {
     incoming.get(edge.to.node)?.push(edge);
     outgoing.get(edge.from.node)?.push(edge);
@@ -654,6 +700,14 @@ export async function runGraphWithJournal(
   for (const edges of outgoing.values()) {
     edges.sort((left, right) => compareUnicodeCodePoints(left.id, right.id));
   }
+  for (const [nodeId, edges] of outgoing) {
+    const source = nodesById.get(nodeId) as NodeSpec;
+    const messages = edges.flatMap((edge) => {
+      const issue = edgeConditionError(edge, source);
+      return issue === undefined ? [] : [issue];
+    });
+    if (messages.length > 0) conditionFailures.set(nodeId, messages);
+  }
 
   const orderedNodeIds = compilation.topologicalLayers.flatMap((layer) => layer);
   const sequence = new Map(orderedNodeIds.map((nodeId, index) => [nodeId, index]));
@@ -662,14 +716,48 @@ export async function runGraphWithJournal(
     compareUnicodeCodePoints(left, right);
 
   const restoredResults = new Map(options.initialResults ?? []);
-  for (const nodeId of restoredResults.keys()) {
+  for (const [nodeId, restored] of restoredResults) {
     if (!nodesById.has(nodeId)) {
       throw new TypeError(`initialResults contains unknown node '${nodeId}'`);
+    }
+    const restoredConditionFailures = conditionFailures.get(nodeId);
+    if (restoredConditionFailures !== undefined) {
+      const expected = unsupportedConditionResult(
+        nodeId,
+        sequence.get(nodeId) as number,
+        options.attemptOffsets?.get(nodeId) ?? 0,
+        restoredConditionFailures,
+      );
+      if (canonicalSerialize(restored) !== canonicalSerialize(expected)) {
+        throw new TypeError(
+          `initialResults contains an invalid unsupported-condition settlement for '${nodeId}'`,
+        );
+      }
+      continue;
+    }
+    const restoredNode = nodesById.get(nodeId) as NodeSpec;
+    if (restoredNode.kind === "router" && restored.status === "succeeded") {
+      try {
+        if (restored.input === undefined) {
+          throw new InvalidRouteSelectionError("restored router success is missing its input");
+        }
+        assertExactRouteSelection(
+          restoredNode,
+          restored.input,
+          restored.output as JsonValue,
+        );
+      } catch (cause) {
+        throw new TypeError(
+          `initialResults contains an invalid successful router decision for '${nodeId}'`,
+          { cause },
+        );
+      }
     }
   }
   for (const nodeId of orderedNodeIds) {
     if (!restoredResults.has(nodeId)) continue;
     for (const edge of outgoing.get(nodeId) ?? []) {
+      activeEdges.set(edge.id, edgeIsActive(edge, restoredResults.get(nodeId) as NodeRunResult));
       remaining.set(edge.to.node, (remaining.get(edge.to.node) ?? 0) - 1);
     }
   }
@@ -745,6 +833,7 @@ export async function runGraphWithJournal(
     results.set(nodeId, result);
     completionOrder.push(nodeId);
     for (const edge of outgoing.get(nodeId) ?? []) {
+      activeEdges.set(edge.id, edgeIsActive(edge, result));
       const next = (remaining.get(edge.to.node) ?? 0) - 1;
       remaining.set(edge.to.node, next);
       if (next === 0 && !results.has(edge.to.node)) {
@@ -772,8 +861,35 @@ export async function runGraphWithJournal(
       const node = nodesById.get(nodeId) as NodeSpec;
       const attemptOffset = options.attemptOffsets?.get(nodeId) ?? 0;
       const nodeIncoming = incoming.get(nodeId) ?? [];
+      const activeIncoming = nodeIncoming.filter((edge) => activeEdges.get(edge.id) !== false);
+      const conditionFailure = conditionFailures.get(nodeId);
+      if (conditionFailure !== undefined) {
+        await settleWithoutAttempt(node, unsupportedConditionResult(
+          nodeId,
+          sequence.get(nodeId) as number,
+          attemptOffset,
+          conditionFailure,
+        ));
+        continue;
+      }
+      if (nodeIncoming.length > 0 && activeIncoming.length === 0) {
+        const failure = runtimeFailure(
+          nodeId,
+          "ROUTE_NOT_SELECTED",
+          `Node '${nodeId}' did not start because no incoming route was selected`,
+          attemptOffset,
+        );
+        await settleWithoutAttempt(node, {
+          nodeId,
+          sequence: sequence.get(nodeId) as number,
+          status: "skipped",
+          attempts: attemptOffset,
+          failure,
+        });
+        continue;
+      }
       const failedUpstream = [...new Set(
-        nodeIncoming
+        activeIncoming
           .map((edge) => edge.from.node)
           .filter((upstreamId) => results.get(upstreamId)?.status !== "succeeded"),
       )].sort(compareUnicodeCodePoints);
@@ -801,7 +917,7 @@ export async function runGraphWithJournal(
 
       let nodeInput: JsonValue;
       try {
-        nodeInput = bindNodeInput(node, nodeIncoming, graphInput, results);
+        nodeInput = bindNodeInput(node, activeIncoming, graphInput, results);
       } catch (error) {
         const failure = runtimeFailure(
           nodeId,
@@ -829,7 +945,11 @@ export async function runGraphWithJournal(
         ? options.executors[node.kind]
         : undefined;
       const executor = nodeExecutor ?? kindExecutor ??
-        (node.kind === "transform" || node.kind === "barrier" ? identityExecutor : undefined);
+        (node.kind === "router"
+          ? routeSelectionExecutor
+          : node.kind === "transform" || node.kind === "barrier"
+            ? identityExecutor
+            : undefined);
       const task = executeNode({
         graph,
         node,
@@ -878,7 +998,9 @@ export async function runGraphWithJournal(
 
   const nodeResults = orderedNodeIds.map((nodeId) => results.get(nodeId) as NodeRunResult);
   const failures: GraphRunFailure[] = nodeResults.flatMap((result) =>
-    result.failure === undefined ? [] : [result.failure],
+    result.failure === undefined || result.failure.code === "ROUTE_NOT_SELECTED"
+      ? []
+      : [result.failure],
   );
   const output = Object.create(null) as Record<string, JsonValue>;
   let outputsComplete = true;

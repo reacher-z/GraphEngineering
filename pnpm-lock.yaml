@@ -114,6 +114,9 @@ importers:
       '@graph-engineering/persistence':
         specifier: workspace:*
         version: link:../persistence
+      '@graph-engineering/primitives':
+        specifier: workspace:*
+        version: link:../primitives
     devDependencies:
       '@types/node':
         specifier: ^22.0.0

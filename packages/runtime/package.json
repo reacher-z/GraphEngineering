@@ -37,7 +37,8 @@
   },
   "dependencies": {
     "@graph-engineering/core": "workspace:*",
-    "@graph-engineering/persistence": "workspace:*"
+    "@graph-engineering/persistence": "workspace:*",
+    "@graph-engineering/primitives": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

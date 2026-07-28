@@ -10594,3 +10594,125 @@ seal stage, run cursor rules one through ten, reach `pre-rebind-complete`, run
 `cursor/clock-complete`, change the registry, prove scale/crash recovery or make
 any release, adoption or star claim. Slice B in §31.35.4 is the next cursor
 blocker; D6 router/barrier integration remains the parallel product lane.
+
+### 31.35.8 D6 conditional-routing runtime tranche acceptance
+
+The first scheduler-integrated part of `D6-ROUTER-BARRIER-023` is complete in
+TypeScript and Python. This is a source milestone for conditional routing, not
+completion of D6. Both native schedulers now execute the exact package-owned
+condition document emitted by `routedBranches`:
+
+```json
+{
+  "apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1",
+  "kind": "RouteEquals",
+  "routeKey": "security"
+}
+```
+
+A router without an override executor applies the pre-existing deterministic
+route-selection primitive to its bound input using `node.config` as the policy.
+A custom executor may participate only by returning the exact eight-field
+`RouteSelectionResult`. The runtime does not trust the result's self-reported
+request: it recomputes the decision from the authoritative bound node input and
+the immutable compiled policy, then requires exact canonical equality before a
+success can be journaled. Malformed input, invalid policy, forged request,
+forged selected routes and contradictory reason/default/escalation fields fail
+as non-retryable `INVALID_ROUTE_SELECTION` after one attempt.
+
+Every structural dependency still waits for its source to reach a terminal
+state, but only active edges participate in input binding. A non-selected branch
+settles as `skipped` with `ROUTE_NOT_SELECTED` and zero attempts. An
+inactive-only descendant inherits that control-flow terminal. A node with both
+active and inactive incoming paths executes with only the active bindings, so
+the `routedBranches` merge receives the selected branch rather than waiting for
+or fabricating values from pruned work. `ROUTE_NOT_SELECTED` remains recorded on
+the node for inspection but is excluded from graph-level failures; a named graph
+output that points to inactive work remains incomplete and therefore makes the
+run fail without inventing a second failure.
+
+The runtime performs a fail-closed pre-dispatch check for unsupported,
+malformed or non-router `edge.condition` documents. The exact source node
+settles with `UNSUPPORTED_EDGE_CONDITION`, zero attempts and the sorted aggregate
+of offending edge messages. No source executor runs. This runtime guard does
+not replace the still-open compiler diagnostic and exhaustiveness contract.
+
+Durable start, fold and resume preserve the same semantics. Successful router
+history is revalidated against the committed scheduled input and current
+compiled policy before a terminal result is returned or a run resumes. Exact
+zero-attempt unsupported-condition settlements survive a process loss, while
+attempt-bearing or successful history for such a source is invalid. Inactive
+branches cannot be forged into `NodeScheduled`, `NodeStarted` or
+`NodeSucceeded` events. Structural-but-inactive inputs never fall back to graph
+input. Real event-first scheduled order is retained across interleaved branches;
+folding no longer topologically re-sorts the history. Replayed runs reuse the
+recorded validated node result and do not invoke the router executor again.
+
+The adversarial review found and closed the following defects before
+acceptance:
+
+1. an inactive named output produced inconsistent scheduler and durable terminal
+   failure projections;
+2. Python durable fold reordered real interleaved scheduling events and rejected
+   valid terminal history;
+3. exact unsupported-condition zero-attempt history could not resume after a
+   crash;
+4. terminal forged history could execute a source that should have failed its
+   condition contract before dispatch;
+5. router output was internally self-consistent but not bound to authoritative
+   node input, allowing request substitution;
+6. TypeScript classified invalid built-in router input/policy as retryable
+   execution failure;
+7. TypeScript durable input reconstruction confused a true graph root with a
+   node whose structural inputs were all inactive; and
+8. Python lacked the symmetric resigned-history regression for an attempted
+   inactive branch.
+
+Final evidence is TypeScript runtime 11 files / 243 tests, with the focused
+scheduler/durable set 85/85 and runtime typecheck, lint and build green. Adjacent
+TypeScript patterns are 93/93 and primitives 147/147. Python focused
+scheduler/durable is 94/94 and the final post-parity full Python rerun is
+1,749/1,749 plus two nested subtests, with Ruff, scoped
+formatting and strict MyPy green. Documentation links and scoped diff checks are
+green. The final independent cross-runtime review reports HIGH 0 / MEDIUM 0 /
+LOW 0. Evidence is recorded in:
+
+- `codex_logs/reviews/D6-TS-ROUTER-RUNTIME-TRANCHE-2026-07-28.md`;
+- `codex_logs/reviews/D6-PY-ROUTER-RUNTIME-AUDIT-2026-07-28.md`; and
+- `codex_logs/reviews/D6-CONDITIONAL-ROUTING-CROSS-RUNTIME-AUDIT-2026-07-28.md`.
+
+Claude Code 2.1.220 with Opus was also run in an isolated D6 contract worktree.
+Its draft changed the already published `RouteEquals` annotation and router
+configuration shapes, contained duplicate fields and did not match the current
+patterns/runtime boundary. The primary review stopped it and integrated none of
+its output. The accepted code and tests came from the two native runtime lanes
+under independent cross-runtime review.
+
+`D6-ROUTER-BARRIER-023` remains open. The next D6 tranches must, in order:
+
+1. freeze a shared integrated-router/barrier semantics document and literal
+   cross-runtime conformance corpus without changing the published
+   `RouteEquals` carrier;
+2. add compiler diagnostics for exact router config, route membership,
+   duplicate route targets, exhaustive single/multicast coverage and explicit
+   default/no-match behavior before any executor can run;
+3. add a dedicated durable `RouteSelected` decision identity/event and prove
+   zero evaluator/provider calls on replay, corrupted partitions fail closed and
+   selected/pruned edge IDs are an exact disjoint partition;
+4. integrate all/minimum/percentage barriers with complete success, failure,
+   missing and timed-out statistics;
+5. add quorum voting, abstain/unknown evidence, deterministic deadlines, late
+   arrivals, cancellation and insufficient-quorum escalation without implicit
+   pass;
+6. compare TypeScript/Python decision bytes, terminal results, event order,
+   provider-call counts and deadlines using the shared corpus; and
+7. add trace and CLI visibility before changing the registry task to complete.
+
+The parallel Cursor Slice B design audit is recorded in
+`codex_logs/reviews/SQLITE-CURSOR-SLICE-B-DESIGN-AUDIT-2026-07-28.md`. It keeps
+the accepted plan order: verify the input A2b receipt before TEMP creation, bind
+the receipt to the exact live captured-source connection, execute the real
+database campaign, then recompute the A1 seal from the TEMP-ordered projection
+and compare it with the original receipt before any rebind. The next Cursor
+implementation slice is the captured-source connection provenance fence and
+pre-TEMP campaign constructor; no database/TEMP/rebind claim is made here.

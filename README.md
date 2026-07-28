@@ -22,7 +22,8 @@ Instead of paying model tokens to coordinate a linear conversation, describe
 work as typed nodes and data-carrying edges. The runtime fans independent jobs
 out, contains failures, and converges named outputs without placing the whole job
 in one model context. Pure barrier and router evaluators provide deterministic
-decisions while scheduler-level conditional routing remains an explicit v1 goal.
+decisions, and the native schedulers execute the pattern package's versioned
+`RouteEquals` conditional edges with explicit skipped-branch terminals.
 
 The project is an early alpha. The DAG compiler, ready-queue schedulers, safe project
 initializer, machine-readable CLI, structured failure handling, retries,
@@ -124,6 +125,7 @@ uv run --project python pytest python/tests
 | Failure isolation and named ports | Yes | Yes |
 | Shared compiler/runtime conformance | Yes | Yes |
 | Settled barrier and route selection | Pure deterministic evaluators | Pure deterministic evaluators |
+| Scheduler-applied `RouteEquals` routing | Alpha | Alpha |
 | Diamond/verifier pattern constructors | Yes | Consumes the portable Graph IR |
 | Safe Mermaid/DOT visualization | Yes, through the CLI | Same portable Graph IR |
 | Local event/checkpoint stores | Yes | Yes |
@@ -132,7 +134,7 @@ uv run --project python pytest python/tests
 | Scheduler checkpoint acceleration | Not yet | Not yet |
 | Standalone bounded-cycle/GraphPatch controller | Alpha, local store | Alpha, local store |
 | Read-only validation/planning MCP | Yes | Uses the same portable IR |
-| Graph IR streaming and scheduler-applied routers/verifier panels/loops | Target v1 | Target v1 |
+| Graph IR streaming, threshold barriers, verifier panels, and loops | Target v1 | Target v1 |
 
 ## Design commitments
 

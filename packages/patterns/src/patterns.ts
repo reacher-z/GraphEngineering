@@ -97,14 +97,11 @@ export function diamond(options: DiamondOptions): PatternGraph {
 }
 
 /**
- * **DECLARATIVE-ONLY WITH THE V1ALPHA1 SCHEDULER.**
- *
  * Build classify → condition-annotated branches → merge. Each classifier edge
  * carries a package-owned, versioned `RouteEquals` annotation; callers cannot
- * supply or replace it. The current v1alpha1 scheduler does not evaluate
- * `edge.condition`, so it executes every branch. A future/lowering runtime must
- * provide the metadata-declared `edge-condition-routing/v1alpha1` capability to
- * execute this graph as an actual route.
+ * supply or replace it. Native runtimes advertising the metadata-declared
+ * `edge-condition-routing/v1alpha1` capability execute the selected route and
+ * settle inactive branches without attempts.
  */
 export function routedBranches(options: RoutedBranchesOptions): PatternGraph {
   const input = snapshotOptions(options, fields("classify", "branches", "merge"));

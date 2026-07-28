@@ -83,6 +83,124 @@ def graph(
     return compile_graph(document)
 
 
+def durable_routed_graph(*, router_retry: bool = False) -> Any:
+    condition_version = "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1"
+    router: dict[str, Any] = {
+        "id": "classify",
+        "kind": "router",
+        "inputSchema": {},
+        "outputSchema": {},
+        "config": {"kind": "single", "allowedRoutes": ["quick", "security"]},
+    }
+    if router_retry:
+        router["retry"] = {"maxAttempts": 3}
+    return compile_graph(
+        {
+            "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+            "kind": "Graph",
+            "metadata": {"name": "durable-router", "version": "1"},
+            "inputSchema": {},
+            "outputSchema": {},
+            "entrypoints": ["classify"],
+            "outputs": {"result": {"node": "merge"}},
+            "nodes": [
+                router,
+                {
+                    "id": "quick",
+                    "kind": "agent",
+                    "inputSchema": {},
+                    "outputSchema": {},
+                    "config": {},
+                },
+                {
+                    "id": "security",
+                    "kind": "agent",
+                    "inputSchema": {},
+                    "outputSchema": {},
+                    "config": {},
+                },
+                {
+                    "id": "merge",
+                    "kind": "barrier",
+                    "inputSchema": {},
+                    "outputSchema": {},
+                    "config": {},
+                },
+            ],
+            "edges": [
+                {
+                    "id": "route-quick",
+                    "from": {"node": "classify"},
+                    "to": {"node": "quick"},
+                    "condition": {
+                        "apiVersion": condition_version,
+                        "kind": "RouteEquals",
+                        "routeKey": "quick",
+                    },
+                },
+                {
+                    "id": "route-security",
+                    "from": {"node": "classify"},
+                    "to": {"node": "security"},
+                    "condition": {
+                        "apiVersion": condition_version,
+                        "kind": "RouteEquals",
+                        "routeKey": "security",
+                    },
+                },
+                {
+                    "id": "quick-merge",
+                    "from": {"node": "quick"},
+                    "to": {"node": "merge", "port": "quick"},
+                },
+                {
+                    "id": "security-merge",
+                    "from": {"node": "security"},
+                    "to": {"node": "merge", "port": "security"},
+                },
+            ],
+        }
+    )
+
+
+def unsupported_condition_graph() -> Any:
+    return compile_graph(
+        {
+            "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+            "kind": "Graph",
+            "metadata": {"name": "unsupported-condition", "version": "1"},
+            "inputSchema": {},
+            "outputSchema": {},
+            "entrypoints": ["root"],
+            "outputs": {"result": {"node": "child"}},
+            "nodes": [
+                {
+                    "id": "root",
+                    "kind": "router",
+                    "inputSchema": {},
+                    "outputSchema": {},
+                    "config": {"kind": "single", "allowedRoutes": ["quick"]},
+                },
+                {
+                    "id": "child",
+                    "kind": "agent",
+                    "inputSchema": {},
+                    "outputSchema": {},
+                    "config": {},
+                },
+            ],
+            "edges": [
+                {
+                    "id": "unsupported",
+                    "from": {"node": "root"},
+                    "to": {"node": "child"},
+                    "condition": {"kind": "Unknown"},
+                }
+            ],
+        }
+    )
+
+
 async def events(store: EventStore, run_id: str) -> tuple[GraphEvent, ...]:
     return await store.read(run_id)
 
@@ -210,6 +328,425 @@ def test_start_commits_claim_before_handler_and_terminal_resume_is_idempotent() 
                 clock=fixed_clock,
             )
         assert duplicate.value.code is DurableRunErrorCode.RUN_ALREADY_EXISTS
+
+    asyncio.run(scenario())
+
+
+def test_durable_route_skip_and_active_join_resume_without_reexecution() -> None:
+    async def scenario() -> None:
+        store = MemoryEventStore()
+        compiled = durable_routed_graph()
+        result = await start_graph_run(
+            compiled,
+            {"requestedRoutes": ["quick"]},
+            {"quick": lambda _: {"branch": "quick"}},
+            run_id="durable-route",
+            implementation_id="router@1",
+            event_store=store,
+            clock=fixed_clock,
+        )
+
+        assert result.status is RunStatus.SUCCEEDED
+        assert result.failures == ()
+        assert dict(result.outputs or {}) == {"result": {"quick": {"branch": "quick"}}}
+        assert result.nodes["security"].failure is not None
+        assert result.nodes["security"].failure.code is FailureCode.ROUTE_NOT_SELECTED
+        history = await store.read("durable-route")
+        settled = [item for item in history if item.type == "NodeSettledWithoutAttempt"]
+        assert [item.node_id for item in settled] == ["security"]
+
+        resumed = await resume_graph_run(
+            compiled,
+            {"*": lambda _: (_ for _ in ()).throw(AssertionError("must not run"))},
+            run_id="durable-route",
+            implementation_id="router@1",
+            event_store=store,
+            clock=fixed_clock,
+        )
+        assert resumed == result
+
+    asyncio.run(scenario())
+
+
+def test_invalid_durable_route_result_never_commits_success_and_never_retries() -> None:
+    async def scenario() -> None:
+        store = MemoryEventStore()
+        compiled = durable_routed_graph(router_retry=True)
+        invalid = {
+            "routed": True,
+            "reasonCode": "REQUESTED_ROUTES_SELECTED",
+            "requestedRoutes": ["quick"],
+            "selectedRoutes": ["security"],
+            "unknownRoutes": [],
+            "confidenceBasisPoints": None,
+            "usedDefault": False,
+            "escalated": False,
+        }
+        result = await start_graph_run(
+            compiled,
+            {"requestedRoutes": ["quick"]},
+            {"classify": lambda _: invalid},
+            run_id="durable-invalid-route",
+            implementation_id="router@1",
+            event_store=store,
+            clock=fixed_clock,
+        )
+
+        assert result.status is RunStatus.FAILED
+        assert result.total_attempts == 1
+        assert result.nodes["classify"].failure is not None
+        assert result.nodes["classify"].failure.code is FailureCode.INVALID_ROUTE_SELECTION
+        history = await store.read("durable-invalid-route")
+        assert not any(
+            item.type == "NodeSucceeded" and item.node_id == "classify" for item in history
+        )
+        failures = [
+            item
+            for item in history
+            if item.type == "NodeAttemptFailed" and item.node_id == "classify"
+        ]
+        assert len(failures) == 1
+        assert failures[0].data["terminal"] is True
+
+        resumed = await resume_graph_run(
+            compiled,
+            run_id="durable-invalid-route",
+            implementation_id="router@1",
+            event_store=store,
+            clock=fixed_clock,
+        )
+        assert resumed == result
+
+    asyncio.run(scenario())
+
+
+def test_durable_router_success_is_bound_to_its_committed_input() -> None:
+    async def scenario() -> None:
+        compiled = durable_routed_graph()
+        source = MemoryEventStore()
+        await start_graph_run(
+            compiled,
+            {"requestedRoutes": ["quick"]},
+            {"quick": lambda _: "quick"},
+            run_id="durable-authoritative-route-input",
+            implementation_id="router@1",
+            event_store=source,
+            clock=fixed_clock,
+        )
+        history = list(await source.read("durable-authoritative-route-input"))
+        forged_output = {
+            "routed": True,
+            "reasonCode": "REQUESTED_ROUTES_SELECTED",
+            "requestedRoutes": ["security"],
+            "selectedRoutes": ["security"],
+            "unknownRoutes": [],
+            "confidenceBasisPoints": None,
+            "usedDefault": False,
+            "escalated": False,
+        }
+        for index, event in enumerate(history):
+            if event.type == "NodeSucceeded" and event.node_id == "classify":
+                data = dict(event.data)
+                data["output"] = encode_durable_json(forged_output)
+                data["outputHash"] = durable_json_hash(forged_output)
+                history[index] = resign(event, data)
+                break
+        forged = MemoryEventStore()
+        await forged.append(
+            "durable-authoritative-route-input",
+            -1,
+            tuple(history),
+        )
+
+        with pytest.raises(DurableRunError) as error:
+            await resume_graph_run(
+                compiled,
+                run_id="durable-authoritative-route-input",
+                implementation_id="router@1",
+                event_store=forged,
+            )
+        assert error.value.code is DurableRunErrorCode.INVALID_RUN_HISTORY
+
+    asyncio.run(scenario())
+
+
+def test_durable_history_rejects_scheduling_an_inactive_route_branch() -> None:
+    async def scenario() -> None:
+        compiled = durable_routed_graph()
+        source = MemoryEventStore()
+        await start_graph_run(
+            compiled,
+            {"requestedRoutes": ["quick"]},
+            {"quick": lambda _: "quick"},
+            run_id="forged-inactive-route-schedule",
+            implementation_id="router@1",
+            event_store=source,
+            clock=fixed_clock,
+        )
+        history = list(await source.read("forged-inactive-route-schedule"))
+        inactive = next(
+            event
+            for event in history
+            if event.type == "NodeSettledWithoutAttempt" and event.node_id == "security"
+        )
+        forged_data = {
+            "input": encode_durable_json({}),
+            "inputHash": durable_json_hash({}),
+            "activityKey": durable_json_hash(
+                [
+                    "activity/v1alpha1",
+                    "forged-inactive-route-schedule",
+                    1,
+                    "security",
+                    durable_json_hash({}),
+                ]
+            ),
+            "sideEffects": "none",
+        }
+        forged_scheduled = inactive.model_copy(
+            update={
+                "type": "NodeScheduled",
+                "attempt": 1,
+                "data": forged_data,
+                "payload_hash": canonical_sha256(forged_data),
+            }
+        )
+        inactive_index = history.index(inactive)
+        forged = MemoryEventStore()
+        await forged.append(
+            "forged-inactive-route-schedule",
+            -1,
+            tuple([*history[:inactive_index], forged_scheduled]),
+        )
+
+        with pytest.raises(DurableRunError) as error:
+            await resume_graph_run(
+                compiled,
+                run_id="forged-inactive-route-schedule",
+                implementation_id="router@1",
+                event_store=forged,
+            )
+        assert error.value.code is DurableRunErrorCode.INVALID_RUN_HISTORY
+        assert "unselected route" in str(error.value)
+
+    asyncio.run(scenario())
+
+
+def test_resume_continues_after_committed_unsupported_condition_settlement() -> None:
+    class CommitThenLoseProcess:
+        def __init__(self) -> None:
+            self.delegate = MemoryEventStore()
+            self.failed = False
+
+        async def read(self, run_id: str, from_sequence: int = 0) -> tuple[GraphEvent, ...]:
+            return await self.delegate.read(run_id, from_sequence)
+
+        async def append(
+            self,
+            run_id: str,
+            expected_version: int,
+            values: Sequence[GraphEvent],
+        ) -> int:
+            version = await self.delegate.append(run_id, expected_version, values)
+            if (
+                not self.failed
+                and values[0].type == "NodeSettledWithoutAttempt"
+                and values[0].node_id == "root"
+            ):
+                self.failed = True
+                raise ProcessLost
+            return version
+
+    async def scenario() -> None:
+        compiled = unsupported_condition_graph()
+        interrupted = CommitThenLoseProcess()
+        with pytest.raises(ProcessLost):
+            await start_graph_run(
+                compiled,
+                {},
+                {"*": lambda _: (_ for _ in ()).throw(AssertionError("must not run"))},
+                run_id="unsupported-condition-crash",
+                implementation_id="router@1",
+                event_store=interrupted,
+                clock=fixed_clock,
+            )
+
+        partial = await interrupted.delegate.read("unsupported-condition-crash")
+        root_settlements = [
+            event
+            for event in partial
+            if event.type == "NodeSettledWithoutAttempt" and event.node_id == "root"
+        ]
+        assert len(root_settlements) == 1
+        result = await resume_graph_run(
+            compiled,
+            {"*": lambda _: (_ for _ in ()).throw(AssertionError("must not run"))},
+            run_id="unsupported-condition-crash",
+            implementation_id="router@1",
+            event_store=interrupted.delegate,
+            clock=fixed_clock,
+        )
+
+        assert result.status is RunStatus.FAILED
+        assert result.total_attempts == 0
+        assert result.nodes["root"].failure is not None
+        assert result.nodes["root"].failure.code is FailureCode.UNSUPPORTED_EDGE_CONDITION
+        assert result.nodes["child"].failure is not None
+        assert result.nodes["child"].failure.code is FailureCode.UPSTREAM_FAILED
+        assert (
+            await resume_graph_run(
+                compiled,
+                run_id="unsupported-condition-crash",
+                implementation_id="router@1",
+                event_store=interrupted.delegate,
+            )
+            == result
+        )
+
+    asyncio.run(scenario())
+
+
+def test_unsupported_condition_source_rejects_attempt_bearing_history() -> None:
+    async def scenario() -> None:
+        compiled = unsupported_condition_graph()
+        source = MemoryEventStore()
+        await start_graph_run(
+            compiled,
+            {},
+            run_id="unsupported-condition-forgery",
+            implementation_id="router@1",
+            event_store=source,
+            clock=fixed_clock,
+        )
+        history = list(await source.read("unsupported-condition-forgery"))
+        root_settlement = next(
+            event
+            for event in history
+            if event.type == "NodeSettledWithoutAttempt" and event.node_id == "root"
+        )
+        forged_scheduled = root_settlement.model_copy(
+            update={
+                "type": "NodeScheduled",
+                "attempt": 1,
+                "data": {
+                    "input": encode_durable_json({}),
+                    "inputHash": durable_json_hash({}),
+                    "activityKey": durable_json_hash(
+                        [
+                            "activity/v1alpha1",
+                            "unsupported-condition-forgery",
+                            1,
+                            "root",
+                            durable_json_hash({}),
+                        ]
+                    ),
+                    "sideEffects": "none",
+                },
+            }
+        )
+        forged_scheduled = forged_scheduled.model_copy(
+            update={"payload_hash": canonical_sha256(forged_scheduled.data)}
+        )
+        root_index = history.index(root_settlement)
+        forged = MemoryEventStore()
+        await forged.append(
+            "unsupported-condition-forgery",
+            -1,
+            tuple([*history[:root_index], forged_scheduled]),
+        )
+
+        with pytest.raises(DurableRunError) as error:
+            await resume_graph_run(
+                compiled,
+                run_id="unsupported-condition-forgery",
+                implementation_id="router@1",
+                event_store=forged,
+            )
+        assert error.value.code is DurableRunErrorCode.INVALID_RUN_HISTORY
+
+    asyncio.run(scenario())
+
+
+def test_durable_scheduled_order_preserves_interleaved_first_event_order() -> None:
+    compiled = compile_graph(
+        {
+            "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+            "kind": "Graph",
+            "metadata": {"name": "durable-interleaving", "version": "1"},
+            "inputSchema": {},
+            "outputSchema": {},
+            "entrypoints": ["a", "b"],
+            "outputs": {"result": {"node": "b-child"}},
+            "nodes": [
+                {
+                    "id": node_id,
+                    "kind": "agent",
+                    "inputSchema": {},
+                    "outputSchema": {},
+                    "config": {},
+                }
+                for node_id in ("a", "b", "a-child", "b-child")
+            ],
+            "edges": [
+                {"id": "a-child", "from": {"node": "a"}, "to": {"node": "a-child"}},
+                {"id": "b-child", "from": {"node": "b"}, "to": {"node": "b-child"}},
+            ],
+        }
+    )
+
+    async def scenario() -> None:
+        store = MemoryEventStore()
+        a_started = asyncio.Event()
+        release_a = asyncio.Event()
+
+        async def slow_a(_: NodeContext) -> Any:
+            a_started.set()
+            await release_a.wait()
+            raise RuntimeError("a failed after b-child ran")
+
+        async def fast_b(_: NodeContext) -> Any:
+            await a_started.wait()
+            return "b"
+
+        def b_child(_: NodeContext) -> Any:
+            release_a.set()
+            return "b-child"
+
+        result = await start_graph_run(
+            compiled,
+            {},
+            {
+                "a": slow_a,
+                "b": fast_b,
+                "a-child": lambda _: (_ for _ in ()).throw(
+                    AssertionError("failed descendant must not run")
+                ),
+                "b-child": b_child,
+            },
+            run_id="durable-interleaving",
+            implementation_id="interleaving@1",
+            event_store=store,
+            clock=fixed_clock,
+        )
+
+        assert result.status is RunStatus.FAILED
+        assert result.scheduled_order == ("a", "b", "b-child", "a-child")
+        history = await store.read("durable-interleaving")
+        first_seen = tuple(
+            event.node_id
+            for event in history
+            if event.type in {"NodeScheduled", "NodeSettledWithoutAttempt"}
+        )
+        assert first_seen == result.scheduled_order
+
+        resumed = await resume_graph_run(
+            compiled,
+            run_id="durable-interleaving",
+            implementation_id="interleaving@1",
+            event_store=store,
+            clock=fixed_clock,
+        )
+        assert resumed == result
 
     asyncio.run(scenario())
 
@@ -1797,10 +2334,7 @@ def test_durable_journal_failure_does_not_wait_for_handler_ignoring_cancellation
             expected_version: int,
             values: Sequence[GraphEvent],
         ) -> int:
-            if any(
-                event.type == "NodeSucceeded" and event.node_id == "a"
-                for event in values
-            ):
+            if any(event.type == "NodeSucceeded" and event.node_id == "a" for event in values):
                 raise RuntimeError("store unavailable")
             return await self.delegate.append(run_id, expected_version, values)
 

@@ -393,6 +393,19 @@ camelCase TypeScript shape and fresh containers. Validation uses the shared
 `PrimitiveValidationError` envelope with the route-specific message
 `Route selection input is invalid`.
 
+The native scheduler uses this primitive for a `router` node without an
+override handler: the bound node input is the request and `node.config` is the
+policy. It executes the fixed versioned `RouteEquals` annotation emitted by the
+TypeScript patterns package. Unselected branches settle with
+`ROUTE_NOT_SELECTED` and zero attempts, inactive-only descendants stay inactive,
+and joins bind only active inputs. A custom router result is accepted only when
+its exact eight-field decision can be recomputed from the request evidence and
+policy; durable resume repeats that integrity check.
+
+This is an alpha conditional-routing slice. Compiler exhaustiveness/default
+diagnostics, dedicated `RouteSelected` events, arbitrary condition expressions,
+and scheduler-integrated quorum/deadline barriers remain follow-up work.
+
 ## Portable runtime JSON
 
 Graph input, bound node input, every retry attempt, and executor output cross a

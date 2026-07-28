@@ -21,6 +21,33 @@ const result = await runGraph(graph, { query: "graph engineering" }, {
 `runGraph` does not persist progress. Use the separate durable operations when a
 run must continue from committed scheduler history after process loss.
 
+### Integrated `RouteEquals` routing
+
+A `router` node without an override executor applies the deterministic route
+selection primitive to its bound input using `node.config` as the selection
+policy. Outgoing conditional edges use the closed annotation emitted by
+`@graph-engineering/patterns`:
+
+```json
+{
+  "apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1",
+  "kind": "RouteEquals",
+  "routeKey": "security"
+}
+```
+
+Only selected edges carry values. An inactive branch and its inactive-only
+descendants settle as `skipped` with `ROUTE_NOT_SELECTED` and zero attempts;
+that control-flow terminal is retained on the node but is not a graph failure.
+A join with at least one active input runs with only those active bindings.
+Custom router executors must return the exact eight-field `RouteSelectionResult`;
+the scheduler recomputes it from its request evidence and policy before a
+success can be journaled. Durable resume performs the same integrity check.
+
+This alpha slice does not provide compiler exhaustiveness/default diagnostics,
+a separate `RouteSelected` event identity, arbitrary condition expressions, or
+quorum/deadline barrier scheduling.
+
 ## Standalone bounded pipeline
 
 `runPipeline` moves independent portable-JSON items through the same ordered
@@ -514,9 +541,12 @@ for the exact portability boundary.
   `[-(2^53-1), 2^53-1]`, cycles, sparse arrays, symbol keys, and class instances
   produce a structured `INVALID_OUTPUT` node failure and participate in the
   configured bounded retry policy. Finite non-integer doubles remain valid;
-- transform and barrier nodes default to deterministic identity executors.
+- transform and barrier nodes default to deterministic identity executors;
+- router nodes default to deterministic route selection and the scheduler
+  executes only the fixed versioned `RouteEquals` edge condition.
 
-Edge `condition`/`map`, JSON Schema I/O validation, Graph IR streaming edges,
+Edge `map`, condition expressions other than `RouteEquals`, JSON Schema I/O
+validation, Graph IR streaming edges,
 scheduler checkpoint acceleration, distributed workers, and distributed leases
 are intentionally scheduled for later alphas. The standalone bounded-pipeline
 API above does not silently implement those graph or durable-stream surfaces.

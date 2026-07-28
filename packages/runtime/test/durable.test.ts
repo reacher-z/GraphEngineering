@@ -215,6 +215,324 @@ describe("durable graph scheduler", () => {
     expect((await history(store, "start-basic")).length).toBe(events.length);
   });
 
+  it("rejects a self-consistent forged router success before appending RunResumed", async () => {
+    const routed = graph({
+      entrypoints: ["route"],
+      outputs: { decision: { node: "route" } },
+      nodes: [
+        node("route", {
+          kind: "router",
+          config: { kind: "single", allowedRoutes: ["quick", "audit"] },
+        }),
+        node("audit"),
+      ],
+      edges: [{
+        id: "route-audit",
+        from: { node: "route" },
+        to: { node: "audit" },
+        condition: {
+          apiVersion: "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1",
+          kind: "RouteEquals",
+          routeKey: "audit",
+        },
+      }],
+    });
+    const source = new MemoryEventStore();
+    const crash = new CommitThenThrowStore(
+      source,
+      (batch) => batch.some((event) => event.type === "NodeSucceeded" && event.nodeId === "route"),
+    );
+    await expect(startDurableGraphRun(routed, { requestedRoutes: ["quick"] }, {
+      runId: "forged-router-success",
+      implementationId: "v1",
+      eventStore: crash,
+      now: fixedNow,
+    })).rejects.toMatchObject({ code: "DURABILITY_STORE_FAILED" });
+
+    const events = await history(source, "forged-router-success");
+    const successIndex = events.findIndex((event) => event.type === "NodeSucceeded");
+    const success = events[successIndex] as GraphEvent;
+    const output = JSON.parse(JSON.stringify(decodeDurableJson(success.data.output))) as Record<string, unknown>;
+    output.requestedRoutes = ["audit"];
+    output.selectedRoutes = ["audit"];
+    const outputHash = durableJsonHash(output);
+    const changed = [...events];
+    changed[successIndex] = resign(success, {
+      ...success.data,
+      output: encodeDurableJson(output),
+      outputHash,
+    });
+    const emittedIndex = events.findIndex((event) => event.type === "EdgeEmitted");
+    changed[emittedIndex] = resign(events[emittedIndex] as GraphEvent, { outputHash });
+    const forged = await copyHistory("forged-router-success", changed);
+    const before = (await history(forged, "forged-router-success")).length;
+
+    await expect(resumeDurableGraphRun(routed, {
+      runId: "forged-router-success",
+      implementationId: "v1",
+      eventStore: forged,
+      now: fixedNow,
+    })).rejects.toMatchObject({ code: "INVALID_RUN_HISTORY" });
+    expect((await history(forged, "forged-router-success")).length).toBe(before);
+  });
+
+  it("replays selected and inactive router branches without rejudging the decision", async () => {
+    const condition = (routeKey: string) => ({
+      apiVersion: "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1",
+      kind: "RouteEquals",
+      routeKey,
+    });
+    const routed = graph({
+      entrypoints: ["route"],
+      outputs: { decision: { node: "route" } },
+      nodes: [
+        node("route", {
+          kind: "router",
+          config: { kind: "single", allowedRoutes: ["quick", "audit"] },
+        }),
+        node("quick"),
+        node("audit"),
+      ],
+      edges: [
+        { id: "route-quick", from: { node: "route" }, to: { node: "quick" }, condition: condition("quick") },
+        { id: "route-audit", from: { node: "route" }, to: { node: "audit" }, condition: condition("audit") },
+      ],
+    });
+    const store = new MemoryEventStore();
+    const quick = vi.fn(() => "must-not-run");
+    const audit = vi.fn(() => ({ reviewed: true }));
+    const first = await startDurableGraphRun(routed, { requestedRoutes: ["audit"] }, {
+      runId: "durable-route-replay",
+      implementationId: "v1",
+      eventStore: store,
+      now: fixedNow,
+      nodeExecutors: { quick, audit },
+    });
+
+    expect(first.status).toBe("succeeded");
+    expect(first.nodes.find((item) => item.nodeId === "quick")?.failure?.code)
+      .toBe("ROUTE_NOT_SELECTED");
+    expect(first.failures).toEqual([]);
+    expect(quick).not.toHaveBeenCalled();
+    expect(audit).toHaveBeenCalledOnce();
+
+    const mustNotRun = vi.fn(() => { throw new Error("terminal route replay executed work"); });
+    const resumed = await resumeDurableGraphRun(routed, {
+      runId: "durable-route-replay",
+      implementationId: "v1",
+      eventStore: store,
+      now: fixedNow,
+      nodeExecutors: { route: mustNotRun, quick: mustNotRun, audit: mustNotRun },
+    });
+    assert.deepStrictEqual(resumed, first);
+    expect(mustNotRun).not.toHaveBeenCalled();
+  });
+
+  it("replays an inactive named output as a control skip with no graph failure", async () => {
+    const routed = graph({
+      entrypoints: ["route"],
+      outputs: { result: { node: "branch" } },
+      nodes: [
+        node("route", {
+          kind: "router",
+          config: { kind: "single", allowedRoutes: ["known"] },
+        }),
+        node("branch"),
+      ],
+      edges: [{
+        id: "route-branch",
+        from: { node: "route" },
+        to: { node: "branch" },
+        condition: {
+          apiVersion: "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1",
+          kind: "RouteEquals",
+          routeKey: "known",
+        },
+      }],
+    });
+    const store = new MemoryEventStore();
+    const branch = vi.fn();
+    const first = await startDurableGraphRun(routed, { requestedRoutes: ["unknown"] }, {
+      runId: "inactive-route-output",
+      implementationId: "v1",
+      eventStore: store,
+      now: fixedNow,
+      nodeExecutors: { branch },
+    });
+    expect(first).toMatchObject({ status: "failed", failures: [] });
+    expect(first.output).toBeUndefined();
+    expect(first.nodes[1]?.failure?.code).toBe("ROUTE_NOT_SELECTED");
+    expect(branch).not.toHaveBeenCalled();
+
+    const resumed = await resumeDurableGraphRun(routed, {
+      runId: "inactive-route-output",
+      implementationId: "v1",
+      eventStore: store,
+      now: fixedNow,
+      nodeExecutors: { branch },
+    });
+    assert.deepStrictEqual(resumed, first);
+    expect(branch).not.toHaveBeenCalled();
+  });
+
+  it("resumes after an unsupported-condition source settlement committed before process loss", async () => {
+    const unsupported = graph({
+      entrypoints: ["route"],
+      outputs: { decision: { node: "route" } },
+      nodes: [node("route", { kind: "router" }), node("child")],
+      edges: [{
+        id: "unsupported",
+        from: { node: "route" },
+        to: { node: "child" },
+        condition: { kind: "RouteEquals", routeKey: "quick" },
+      }],
+    });
+    const source = new MemoryEventStore();
+    const crash = new CommitThenThrowStore(
+      source,
+      (batch) => batch.some((event) =>
+        event.type === "NodeSettledWithoutAttempt" && event.nodeId === "route"),
+    );
+    const route = vi.fn();
+    const child = vi.fn();
+    await expect(startDurableGraphRun(unsupported, {}, {
+      runId: "unsupported-settlement-crash",
+      implementationId: "v1",
+      eventStore: crash,
+      now: fixedNow,
+      nodeExecutors: { route, child },
+    })).rejects.toMatchObject({ code: "DURABILITY_STORE_FAILED" });
+    expect(route).not.toHaveBeenCalled();
+    expect(child).not.toHaveBeenCalled();
+
+    const resumed = await resumeDurableGraphRun(unsupported, {
+      runId: "unsupported-settlement-crash",
+      implementationId: "v1",
+      eventStore: crash,
+      now: fixedNow,
+      nodeExecutors: { route, child },
+    });
+    expect(resumed).toMatchObject({ status: "failed", totalAttempts: 0 });
+    expect(resumed.nodes[0]?.failure?.code).toBe("UNSUPPORTED_EDGE_CONDITION");
+    expect(resumed.nodes[1]?.failure?.code).toBe("UPSTREAM_FAILED");
+    expect(route).not.toHaveBeenCalled();
+    expect(child).not.toHaveBeenCalled();
+
+    const terminal = await resumeDurableGraphRun(unsupported, {
+      runId: "unsupported-settlement-crash",
+      implementationId: "v1",
+      eventStore: crash,
+      now: fixedNow,
+      nodeExecutors: { route, child },
+    });
+    assert.deepStrictEqual(terminal, resumed);
+  });
+
+  it("rejects resigned terminal history that attempted an unsupported-condition source", async () => {
+    const supported = graph({
+      entrypoints: ["route"],
+      outputs: { decision: { node: "route" } },
+      nodes: [
+        node("route", {
+          kind: "router",
+          config: { kind: "single", allowedRoutes: ["quick"] },
+        }),
+        node("child"),
+      ],
+      edges: [{
+        id: "conditional",
+        from: { node: "route" },
+        to: { node: "child" },
+        condition: {
+          apiVersion: "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1",
+          kind: "RouteEquals",
+          routeKey: "quick",
+        },
+      }],
+    });
+    const unsupported = JSON.parse(JSON.stringify(supported)) as GraphSpec;
+    unsupported.edges[0]!.condition = { kind: "RouteEquals", routeKey: "quick" };
+    const source = new MemoryEventStore();
+    await startDurableGraphRun(supported, { requestedRoutes: ["quick"] }, {
+      runId: "attempted-unsupported-condition",
+      implementationId: "v1",
+      eventStore: source,
+      now: fixedNow,
+      nodeExecutors: { child: () => ({ done: true }) },
+    });
+    const events = await history(source, "attempted-unsupported-condition");
+    const created = events[0] as GraphEvent;
+    const resigned = [...events];
+    resigned[0] = resign(created, {
+      ...created.data,
+      graphHash: canonicalHash(unsupported),
+    });
+    const forged = await copyHistory("attempted-unsupported-condition", resigned);
+    const before = (await history(forged, "attempted-unsupported-condition")).length;
+
+    await expect(resumeDurableGraphRun(unsupported, {
+      runId: "attempted-unsupported-condition",
+      implementationId: "v1",
+      eventStore: forged,
+      now: fixedNow,
+    })).rejects.toMatchObject({ code: "INVALID_RUN_HISTORY" });
+    expect(await history(forged, "attempted-unsupported-condition")).toHaveLength(before);
+  });
+
+  it("rejects resigned history that attempted a now-inactive routed branch", async () => {
+    const active = graph({
+      entrypoints: ["route"],
+      outputs: { decision: { node: "route" } },
+      nodes: [
+        node("route", {
+          kind: "router",
+          config: { kind: "single", allowedRoutes: ["quick"] },
+        }),
+        node("child"),
+      ],
+      edges: [{
+        id: "conditional",
+        from: { node: "route" },
+        to: { node: "child" },
+        condition: {
+          apiVersion: "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1",
+          kind: "RouteEquals",
+          routeKey: "quick",
+        },
+      }],
+    });
+    const inactiveDocument = JSON.parse(JSON.stringify(active)) as {
+      edges: Array<{ condition: Record<string, unknown> }>;
+    };
+    inactiveDocument.edges[0]!.condition.routeKey = "audit";
+    const inactive = inactiveDocument as unknown as GraphSpec;
+    const source = new MemoryEventStore();
+    await startDurableGraphRun(active, { requestedRoutes: ["quick"] }, {
+      runId: "attempted-inactive-branch",
+      implementationId: "v1",
+      eventStore: source,
+      now: fixedNow,
+      nodeExecutors: { child: () => ({ done: true }) },
+    });
+    const events = await history(source, "attempted-inactive-branch");
+    const created = events[0] as GraphEvent;
+    const resigned = [...events];
+    resigned[0] = resign(created, {
+      ...created.data,
+      graphHash: canonicalHash(inactive),
+    });
+    const forged = await copyHistory("attempted-inactive-branch", resigned);
+    const before = (await history(forged, "attempted-inactive-branch")).length;
+
+    await expect(resumeDurableGraphRun(inactive, {
+      runId: "attempted-inactive-branch",
+      implementationId: "v1",
+      eventStore: forged,
+      now: fixedNow,
+    })).rejects.toMatchObject({ code: "INVALID_RUN_HISTORY" });
+    expect(await history(forged, "attempted-inactive-branch")).toHaveLength(before);
+  });
+
   it("passes the shared resume fixture and reuses committed work", async () => {
     const fixturePath = fileURLToPath(
       new URL("../../../spec/conformance/durable-resume.case.json", import.meta.url),

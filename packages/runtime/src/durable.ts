@@ -33,6 +33,11 @@ import {
   type DurableSchedulerOptions,
 } from "./durable-types.js";
 import { snapshotJson } from "./json.js";
+import {
+  assertExactRouteSelection,
+  edgeConditionError,
+  edgeIsActive,
+} from "./router-runtime.js";
 import type {
   GraphRunFailure,
   GraphRunResult,
@@ -330,8 +335,15 @@ function bindInput(
   graphInput: JsonValue,
   results: ReadonlyMap<string, NodeRunResult>,
 ): JsonValue {
-  const incoming = compiled.incoming.get(nodeId) ?? [];
-  if (incoming.length === 0) return snapshotJson(graphInput);
+  const structuralIncoming = compiled.incoming.get(nodeId) ?? [];
+  const incoming = structuralIncoming.filter((edge) => {
+    const source = results.get(edge.from.node);
+    return source === undefined || edgeIsActive(edge, source);
+  });
+  if (structuralIncoming.length === 0) return snapshotJson(graphInput);
+  if (incoming.length === 0) {
+    throw new Error(`Node '${nodeId}' has no active incoming route`);
+  }
   const input = Object.create(null) as Record<string, JsonValue>;
   for (const edge of incoming) {
     const producer = results.get(edge.from.node);
@@ -647,6 +659,9 @@ const RUNTIME_FAILURE_CODES = new Set<NodeRunFailure["code"]>([
   "NODE_TIMEOUT",
   "NODE_CANCELLED",
   "INVALID_OUTPUT",
+  "INVALID_ROUTE_SELECTION",
+  "UNSUPPORTED_EDGE_CONDITION",
+  "ROUTE_NOT_SELECTED",
   "UPSTREAM_FAILED",
   "INPUT_BINDING_FAILED",
   "ATTEMPT_BUDGET_EXHAUSTED",
@@ -1024,7 +1039,7 @@ function validateTerminalResult(fields: {
   const failures: GraphRunFailure[] = [];
   for (const nodeId of compiled.orderedNodeIds) {
     const failure = expectedNodes.get(nodeId)?.failure;
-    if (failure !== undefined) failures.push(failure);
+    if (failure !== undefined && failure.code !== "ROUTE_NOT_SELECTED") failures.push(failure);
   }
   const output = Object.create(null) as Record<string, JsonValue>;
   let outputsComplete = true;
@@ -1063,7 +1078,8 @@ function validateTerminalResult(fields: {
     throw invalidHistory(runId, "terminal node orders contradict event order");
   }
   const succeeded = failures.length === 0 && outputsComplete &&
-    [...expectedNodes.values()].every((item) => item.status === "succeeded");
+    [...expectedNodes.values()].every((item) =>
+      item.status === "succeeded" || item.failure?.code === "ROUTE_NOT_SELECTED");
   if ((terminal.status === "succeeded") !== succeeded && terminal.status !== "cancelled") {
     throw invalidHistory(runId, "terminal status contradicts reconstructed graph result");
   }
@@ -1108,13 +1124,46 @@ function validateSettledWithoutAttempt(fields: {
       { nodeId, unresolvedUpstreamNodeIds: unresolvedUpstream },
     );
   }
-  const failedUpstream = [...new Set(incoming
+  const activeIncoming = incoming.filter((edge) =>
+    edgeIsActive(edge, committed.get(edge.from.node) as NodeRunResult));
+  const failedUpstream = [...new Set(activeIncoming
     .map((edge) => edge.from.node)
     .filter((upstreamId) => committed.get(upstreamId)?.status !== "succeeded"))]
     .sort(compareUnicodeCodePoints);
 
   let expected: NodeRunResult | undefined;
-  if (result.failure.code === "NODE_CANCELLED") {
+  const conditionIssues = (compiled.outgoing.get(nodeId) ?? [])
+    .flatMap((edge) => {
+      const issue = edgeConditionError(edge, node);
+      return issue === undefined ? [] : [issue];
+    });
+  if (conditionIssues.length > 0) {
+    expected = {
+      nodeId,
+      sequence: compiled.sequence.get(nodeId) as number,
+      status: "failed",
+      attempts: projection.attempts,
+      failure: runtimeFailure(
+        nodeId,
+        "UNSUPPORTED_EDGE_CONDITION",
+        conditionIssues.join("; "),
+        projection.attempts,
+      ),
+    };
+  } else if (incoming.length > 0 && activeIncoming.length === 0) {
+    expected = {
+      nodeId,
+      sequence: compiled.sequence.get(nodeId) as number,
+      status: "skipped",
+      attempts: projection.attempts,
+      failure: runtimeFailure(
+        nodeId,
+        "ROUTE_NOT_SELECTED",
+        `Node '${nodeId}' did not start because no incoming route was selected`,
+        projection.attempts,
+      ),
+    };
+  } else if (result.failure.code === "NODE_CANCELLED") {
     if (result.status === "skipped") {
       expected = {
         nodeId,
@@ -1713,6 +1762,7 @@ function foldHistory(
         "NODE_TIMEOUT",
         "NODE_CANCELLED",
         "INVALID_OUTPUT",
+        "INVALID_ROUTE_SELECTION",
         "NODE_EXECUTION_INTERRUPTED",
       ]);
       if (!allowedAttemptCodes.has(failure.code)) {
@@ -1979,6 +2029,64 @@ export async function resumeDurableGraphRun(
     runId: options.runId,
     implementationHash: implementation,
   });
+  for (const [nodeId, projection] of folded.projections) {
+    const node = compiled.nodesById.get(nodeId) as NodeSpec;
+    const conditionIssues = (compiled.outgoing.get(nodeId) ?? []).flatMap((edge) => {
+      const issue = edgeConditionError(edge, node);
+      return issue === undefined ? [] : [issue];
+    });
+    if (conditionIssues.length > 0) {
+      if (projection.attempts !== 0 || projection.scheduledAttempt !== undefined ||
+          projection.openAttempt !== undefined || projection.retryAttempt !== undefined ||
+          projection.input !== undefined || projection.inputHash !== undefined ||
+          projection.activityKey !== undefined) {
+        throw invalidHistory(
+          options.runId,
+          `unsupported-condition source '${nodeId}' has attempt-bearing history`,
+          { nodeId },
+        );
+      }
+      if (projection.result === undefined) continue;
+      const expected: NodeRunResult = {
+        nodeId,
+        sequence: compiled.sequence.get(nodeId) as number,
+        status: "failed",
+        attempts: 0,
+        failure: runtimeFailure(
+          nodeId,
+          "UNSUPPORTED_EDGE_CONDITION",
+          conditionIssues.join("; "),
+          0,
+        ),
+      };
+      if (!sameJson(projection.result, expected)) {
+        throw invalidHistory(
+          options.runId,
+          `unsupported-condition source '${nodeId}' has an invalid settlement`,
+          { nodeId },
+        );
+      }
+      continue;
+    }
+    if (node.kind !== "router" || projection.result?.status !== "succeeded") continue;
+    try {
+      if (projection.result.input === undefined) {
+        throw new TypeError("successful router history is missing its scheduled input");
+      }
+      assertExactRouteSelection(
+        node,
+        projection.result.input,
+        projection.result.output as JsonValue,
+      );
+    } catch (cause) {
+      throw invalidHistory(
+        options.runId,
+        `successful router decision for '${nodeId}' is invalid`,
+        { nodeId },
+        { cause },
+      );
+    }
+  }
   if (folded.terminalResult !== undefined) {
     return publicResult(folded.terminalResult);
   }

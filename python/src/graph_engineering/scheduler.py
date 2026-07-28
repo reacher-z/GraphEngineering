@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import re
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import suppress
 from dataclasses import dataclass
@@ -12,8 +13,37 @@ from types import MappingProxyType
 from typing import Protocol
 
 from .compiler import CompiledGraph, compile_graph
-from .models import MAX_SAFE_INTEGER, Endpoint, GraphSpec, JsonValue, NodeSpec
+from .models import MAX_SAFE_INTEGER, EdgeSpec, Endpoint, GraphSpec, JsonValue, NodeSpec
 from .portable_json import PortableJsonError, portable_json_snapshot
+from .primitives.router import evaluate_route_selection
+
+_ROUTE_CONDITION_API_VERSION = "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1"
+_ROUTE_CONDITION_FIELDS = frozenset({"apiVersion", "kind", "routeKey"})
+_ROUTE_RESULT_FIELDS = frozenset(
+    {
+        "routed",
+        "reasonCode",
+        "requestedRoutes",
+        "selectedRoutes",
+        "unknownRoutes",
+        "confidenceBasisPoints",
+        "usedDefault",
+        "escalated",
+    }
+)
+_ROUTE_REASON_CODES = frozenset(
+    {
+        "REQUESTED_ROUTES_SELECTED",
+        "DEFAULT_SELECTED_NO_REQUEST",
+        "DEFAULT_SELECTED_UNKNOWN_ROUTE",
+        "ESCALATION_SELECTED_LOW_CONFIDENCE",
+        "NO_REQUESTED_ROUTE",
+        "UNKNOWN_ROUTE",
+        "MULTIPLE_ROUTES_FOR_SINGLE",
+        "MULTICAST_LIMIT_EXCEEDED",
+    }
+)
+_SAFE_ROUTE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 
 class NodeStatus(StrEnum):
@@ -39,6 +69,9 @@ class FailureCode(StrEnum):
     OUTPUT_BINDING_FAILED = "OUTPUT_BINDING_FAILED"
     ATTEMPT_BUDGET_EXHAUSTED = "ATTEMPT_BUDGET_EXHAUSTED"
     NODE_EXECUTION_INTERRUPTED = "NODE_EXECUTION_INTERRUPTED"
+    INVALID_ROUTE_SELECTION = "INVALID_ROUTE_SELECTION"
+    UNSUPPORTED_EDGE_CONDITION = "UNSUPPORTED_EDGE_CONDITION"
+    ROUTE_NOT_SELECTED = "ROUTE_NOT_SELECTED"
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,6 +167,7 @@ class _AttemptIdentity:
     run_id: str
     attempt_id: str
     activity_key: str
+    scheduled_ordinal: int | None = None
 
 
 class _SchedulerJournal(Protocol):
@@ -170,6 +204,14 @@ class _SchedulerJournal(Protocol):
 
 
 class _BindingError(ValueError):
+    pass
+
+
+class _InvalidRouteSelectionError(_BindingError):
+    pass
+
+
+class _UnsupportedEdgeConditionError(_BindingError):
     pass
 
 
@@ -224,6 +266,171 @@ async def _resolve_node_output(value: Awaitable[JsonValue]) -> JsonValue:
 
 def _identity_handler(context: NodeContext) -> JsonValue:
     return context.input
+
+
+def _router_handler(context: NodeContext) -> JsonValue:
+    """Apply the pure route evaluator when a router has no custom executor."""
+
+    try:
+        return evaluate_route_selection(context.input, context.node.config).to_dict()
+    except Exception as exc:
+        raise _InvalidRouteSelectionError("router input or policy is invalid") from exc
+
+
+def _is_route_skip(result: NodeResult) -> bool:
+    return (
+        result.status is NodeStatus.SKIPPED
+        and result.failure is not None
+        and result.failure.code is FailureCode.ROUTE_NOT_SELECTED
+    )
+
+
+def _route_key(edge: EdgeSpec, graph: CompiledGraph) -> str | None:
+    condition = edge.condition
+    if condition is None:
+        return None
+    if type(condition) is not dict or set(condition) != _ROUTE_CONDITION_FIELDS:
+        raise _UnsupportedEdgeConditionError(
+            f"Edge {edge.id!r} has an unsupported or malformed condition"
+        )
+    if (
+        condition.get("apiVersion") != _ROUTE_CONDITION_API_VERSION
+        or condition.get("kind") != "RouteEquals"
+    ):
+        raise _UnsupportedEdgeConditionError(
+            f"Edge {edge.id!r} has an unsupported or malformed condition"
+        )
+    route_key = condition.get("routeKey")
+    if (
+        not isinstance(route_key, str)
+        or type(route_key) is not str
+        or _SAFE_ROUTE_ID.fullmatch(route_key) is None
+        or route_key in {".", ".."}
+    ):
+        raise _UnsupportedEdgeConditionError(
+            f"Edge {edge.id!r} has an unsupported or malformed condition"
+        )
+    if graph.nodes[edge.source.node].kind != "router":
+        raise _UnsupportedEdgeConditionError(
+            f"Edge {edge.id!r} uses RouteEquals but source {edge.source.node!r} is not a router"
+        )
+    return route_key
+
+
+def _route_array(output: dict[str, JsonValue], name: str, node_id: str) -> list[str]:
+    value = output[name]
+    if type(value) is not list:
+        raise _InvalidRouteSelectionError(f"router {node_id!r} output has invalid {name}")
+    routes: list[str] = []
+    for item in value:
+        if (
+            not isinstance(item, str)
+            or type(item) is not str
+            or _SAFE_ROUTE_ID.fullmatch(item) is None
+            or item in {".", ".."}
+        ):
+            raise _InvalidRouteSelectionError(f"router {node_id!r} output has invalid {name}")
+        routes.append(item)
+    if len(routes) != len(set(routes)):
+        raise _InvalidRouteSelectionError(f"router {node_id!r} output has duplicate {name}")
+    return routes
+
+
+def _selected_routes(
+    value: JsonValue,
+    node: NodeSpec,
+    authoritative_request: JsonValue,
+) -> frozenset[str]:
+    node_id = node.id
+    if type(value) is not dict or set(value) != _ROUTE_RESULT_FIELDS:
+        raise _InvalidRouteSelectionError(
+            f"router {node_id!r} output is not an exact RouteSelectionResult"
+        )
+    requested = _route_array(value, "requestedRoutes", node_id)
+    selected = _route_array(value, "selectedRoutes", node_id)
+    unknown = _route_array(value, "unknownRoutes", node_id)
+    if any(route not in requested for route in unknown):
+        raise _InvalidRouteSelectionError(
+            f"router {node_id!r} output has unknownRoutes outside requestedRoutes"
+        )
+    confidence = value["confidenceBasisPoints"]
+    if confidence is not None and (
+        type(confidence) is not int or confidence < 0 or confidence > 10_000
+    ):
+        raise _InvalidRouteSelectionError(
+            f"router {node_id!r} output has invalid confidenceBasisPoints"
+        )
+    routed = value["routed"]
+    used_default = value["usedDefault"]
+    escalated = value["escalated"]
+    if type(routed) is not bool or type(used_default) is not bool or type(escalated) is not bool:
+        raise _InvalidRouteSelectionError(f"router {node_id!r} output has invalid decision flags")
+    if routed is not bool(selected):
+        raise _InvalidRouteSelectionError(
+            f"router {node_id!r} output violates routed/selectedRoutes invariance"
+        )
+    reason = value["reasonCode"]
+    if type(reason) is not str or reason not in _ROUTE_REASON_CODES:
+        raise _InvalidRouteSelectionError(f"router {node_id!r} output has invalid reasonCode")
+    try:
+        expected = evaluate_route_selection(authoritative_request, node.config).to_dict()
+    except Exception as exc:
+        raise _InvalidRouteSelectionError(
+            f"router {node_id!r} output cannot be verified against its policy"
+        ) from exc
+    if value != expected:
+        raise _InvalidRouteSelectionError(
+            f"router {node_id!r} output contradicts its deterministic policy decision"
+        )
+    return frozenset(selected)
+
+
+def _active_incoming_edges(
+    graph: CompiledGraph,
+    node_id: str,
+    results: Mapping[str, NodeResult],
+) -> tuple[EdgeSpec, ...]:
+    """Return the dependencies selected by recorded router node outputs."""
+
+    active: list[EdgeSpec] = []
+    for edge in graph.incoming[node_id]:
+        source = results[edge.source.node]
+        if (
+            source.failure is not None
+            and source.failure.code is FailureCode.UNSUPPORTED_EDGE_CONDITION
+        ):
+            active.append(edge)
+            continue
+        route_key = _route_key(edge, graph)
+        if route_key is None:
+            if not _is_route_skip(source):
+                active.append(edge)
+            continue
+        if source.status is not NodeStatus.SUCCEEDED:
+            active.append(edge)
+            continue
+        if not source.input_bound:
+            raise _InvalidRouteSelectionError(
+                f"router {edge.source.node!r} result has no authoritative input"
+            )
+        selected = _selected_routes(
+            source.value,
+            graph.nodes[edge.source.node],
+            source.input,
+        )
+        if route_key in selected:
+            active.append(edge)
+    return tuple(active)
+
+
+def _unsupported_condition_sources(graph: CompiledGraph) -> dict[str, str]:
+    messages: dict[str, list[str]] = {}
+    for edge in sorted(graph.spec.edges, key=lambda item: item.id):
+        try:
+            _route_key(edge, graph)
+        except _UnsupportedEdgeConditionError as exc:
+            messages.setdefault(edge.source.node, []).append(str(exc))
+    return {node_id: "; ".join(items) for node_id, items in messages.items()}
 
 
 def _endpoint_value(endpoint: Endpoint, value: JsonValue) -> JsonValue:
@@ -346,6 +553,8 @@ class AsyncScheduler:
         )
         if handler is None and node.kind in {"transform", "barrier"}:
             return _identity_handler
+        if handler is None and node.kind == "router":
+            return _router_handler
         return handler
 
     @staticmethod
@@ -354,8 +563,12 @@ class AsyncScheduler:
         node_id: str,
         graph_input: JsonValue,
         results: Mapping[str, NodeResult],
+        incoming_edges: tuple[EdgeSpec, ...] | None = None,
     ) -> JsonValue:
-        incoming = sorted(graph.incoming[node_id], key=lambda edge: edge.id)
+        incoming = sorted(
+            graph.incoming[node_id] if incoming_edges is None else incoming_edges,
+            key=lambda edge: edge.id,
+        )
         if not incoming:
             return portable_json_snapshot(graph_input)
 
@@ -443,6 +656,7 @@ class AsyncScheduler:
         attempt_semaphore: asyncio.Semaphore,
         on_attempt_started: Callable[[], None],
         on_attempt_finished: Callable[[], None],
+        on_node_scheduled: Callable[[str, int], None],
         on_outcome_committed: Callable[[str, int], None],
         *,
         attempt_offset: int = 0,
@@ -455,6 +669,7 @@ class AsyncScheduler:
         async def settled_without_attempt(result: NodeResult) -> NodeResult:
             if journal is not None:
                 ordinal = await journal.node_settled_without_attempt(node, result)
+                on_node_scheduled(node_id, ordinal)
                 on_outcome_committed(node_id, ordinal)
             release_retry_reservation(node_id)
             return result
@@ -578,6 +793,8 @@ class AsyncScheduler:
                     if journal is not None
                     else None
                 )
+                if identity is not None and identity.scheduled_ordinal is not None:
+                    on_node_scheduled(node_id, identity.scheduled_ordinal)
                 on_attempt_started()
                 attempt_counted = True
                 attempt_input = portable_json_snapshot(node_input)
@@ -608,6 +825,8 @@ class AsyncScheduler:
                 )
                 try:
                     value = await self._attempt(handler, context)
+                    if node.kind == "router":
+                        _selected_routes(value, node, node_input)
                 except _NodeCancelled:
                     code = FailureCode.NODE_CANCELLED
                     message = f"node {node_id!r} was cancelled"
@@ -626,6 +845,10 @@ class AsyncScheduler:
                     code = FailureCode.INVALID_OUTPUT
                     message = str(exc)
                     exception_type = "InvalidOutputError"
+                except _InvalidRouteSelectionError as exc:
+                    code = FailureCode.INVALID_ROUTE_SELECTION
+                    message = str(exc)
+                    exception_type = "InvalidRouteSelectionError"
                 except Exception as exc:
                     code = (
                         FailureCode.NODE_CANCELLED
@@ -658,7 +881,11 @@ class AsyncScheduler:
 
                 may_retry = (
                     attempts < max_attempts
-                    and code is not FailureCode.NODE_CANCELLED
+                    and code
+                    not in {
+                        FailureCode.NODE_CANCELLED,
+                        FailureCode.INVALID_ROUTE_SELECTION,
+                    }
                     and reserve_retry(node_id)
                 )
                 last_failure = NodeFailure(
@@ -737,6 +964,42 @@ class AsyncScheduler:
         restored_results = dict(initial_results or {})
         if not set(restored_results).issubset(graph.nodes):
             raise ValueError("initial_results contains a node outside the compiled graph")
+        unsupported_conditions = _unsupported_condition_sources(graph)
+        for node_id, restored in restored_results.items():
+            if node_id in unsupported_conditions:
+                attempt_offset = (attempt_offsets or {}).get(node_id, 0)
+                expected = NodeResult(
+                    node_id=node_id,
+                    sequence=sequence[node_id],
+                    status=NodeStatus.FAILED,
+                    attempts=attempt_offset,
+                    input_bound=False,
+                    failure=NodeFailure(
+                        FailureCode.UNSUPPORTED_EDGE_CONDITION,
+                        unsupported_conditions[node_id],
+                        node_id,
+                        attempt_offset,
+                    ),
+                )
+                if restored != expected:
+                    raise TypeError(
+                        f"initial_results contains an invalid unsupported-condition "
+                        f"settlement for {node_id!r}"
+                    )
+                continue
+            node = graph.nodes[node_id]
+            if node.kind == "router" and restored.status is NodeStatus.SUCCEEDED:
+                try:
+                    if not restored.input_bound:
+                        raise _InvalidRouteSelectionError(
+                            f"router {node_id!r} result has no authoritative input"
+                        )
+                    _selected_routes(restored.value, node, restored.input)
+                except _InvalidRouteSelectionError as exc:
+                    raise TypeError(
+                        f"initial_results contains an invalid successful router decision "
+                        f"for {node_id!r}"
+                    ) from exc
         remaining = {node_id: len(graph.incoming[node_id]) for node_id in graph.nodes}
         for restored_node_id in graph.topological_order:
             if restored_node_id not in restored_results:
@@ -756,6 +1019,8 @@ class AsyncScheduler:
         scheduled: list[str] = list(initial_scheduled_order)
         completion: list[str] = list(initial_completion_order)
         durable_completion_prefix = tuple(initial_completion_order)
+        durable_scheduled_prefix = tuple(initial_scheduled_order)
+        scheduled_ordinals: dict[str, int] = {}
         completion_ordinals: dict[str, int] = {}
         concurrency = self._effective_concurrency(graph)
         attempt_limit = (
@@ -820,6 +1085,10 @@ class AsyncScheduler:
                 raise RuntimeError(f"node {node_id!r} committed more than one terminal outcome")
             completion_ordinals[node_id] = ordinal
 
+        def on_node_scheduled(node_id: str, ordinal: int) -> None:
+            if node_id not in durable_scheduled_prefix:
+                scheduled_ordinals.setdefault(node_id, ordinal)
+
         def settle(node_id: str, result: NodeResult) -> None:
             results[node_id] = result
             completion.append(node_id)
@@ -833,6 +1102,7 @@ class AsyncScheduler:
         async def settle_without_attempt(node_id: str, result: NodeResult) -> None:
             if journal is not None:
                 ordinal = await journal.node_settled_without_attempt(graph.nodes[node_id], result)
+                on_node_scheduled(node_id, ordinal)
                 on_outcome_committed(node_id, ordinal)
             release_retry_reservation(node_id)
             settle(node_id, result)
@@ -843,6 +1113,72 @@ class AsyncScheduler:
                 attempt_offset = (attempt_offsets or {}).get(node_id, 0)
                 if node_id not in scheduled:
                     scheduled.append(node_id)
+                if node_id in unsupported_conditions:
+                    await settle_without_attempt(
+                        node_id,
+                        NodeResult(
+                            node_id=node_id,
+                            sequence=sequence[node_id],
+                            status=NodeStatus.FAILED,
+                            attempts=attempt_offset,
+                            input_bound=False,
+                            failure=NodeFailure(
+                                FailureCode.UNSUPPORTED_EDGE_CONDITION,
+                                unsupported_conditions[node_id],
+                                node_id,
+                                attempt_offset,
+                            ),
+                        ),
+                    )
+                    continue
+
+                try:
+                    active_incoming = _active_incoming_edges(graph, node_id, results)
+                except (_UnsupportedEdgeConditionError, _InvalidRouteSelectionError) as exc:
+                    code = (
+                        FailureCode.UNSUPPORTED_EDGE_CONDITION
+                        if isinstance(exc, _UnsupportedEdgeConditionError)
+                        else FailureCode.INVALID_ROUTE_SELECTION
+                    )
+                    await settle_without_attempt(
+                        node_id,
+                        NodeResult(
+                            node_id=node_id,
+                            sequence=sequence[node_id],
+                            status=NodeStatus.FAILED,
+                            attempts=attempt_offset,
+                            input_bound=False,
+                            failure=NodeFailure(
+                                code,
+                                str(exc),
+                                node_id,
+                                attempt_offset,
+                                exception_type=type(exc).__name__,
+                            ),
+                        ),
+                    )
+                    continue
+                if graph.incoming[node_id] and not active_incoming:
+                    await settle_without_attempt(
+                        node_id,
+                        NodeResult(
+                            node_id=node_id,
+                            sequence=sequence[node_id],
+                            status=NodeStatus.SKIPPED,
+                            attempts=attempt_offset,
+                            input_bound=False,
+                            failure=NodeFailure(
+                                FailureCode.ROUTE_NOT_SELECTED,
+                                (
+                                    f"Node {node_id!r} did not start because "
+                                    "no incoming route was selected"
+                                ),
+                                node_id,
+                                attempt_offset,
+                            ),
+                        ),
+                    )
+                    continue
                 if cancellation.cancelled:
                     await settle_without_attempt(
                         node_id,
@@ -859,7 +1195,7 @@ class AsyncScheduler:
                     sorted(
                         {
                             edge.source.node
-                            for edge in graph.incoming[node_id]
+                            for edge in active_incoming
                             if results[edge.source.node].status is not NodeStatus.SUCCEEDED
                         }
                     )
@@ -890,6 +1226,7 @@ class AsyncScheduler:
                         node_id,
                         graph_input_snapshot,
                         results,
+                        active_incoming,
                     )
                 except _BindingError as exc:
                     await settle_without_attempt(
@@ -933,6 +1270,7 @@ class AsyncScheduler:
                         attempt_semaphore,
                         on_attempt_started,
                         on_attempt_finished,
+                        on_node_scheduled,
                         on_outcome_committed,
                         attempt_offset=attempt_offset,
                         journal=journal,
@@ -967,7 +1305,10 @@ class AsyncScheduler:
 
         ordered_results = {node_id: results[node_id] for node_id in graph.topological_order}
         failures = [
-            result.failure for result in ordered_results.values() if result.failure is not None
+            result.failure
+            for result in ordered_results.values()
+            if result.failure is not None
+            and result.failure.code is not FailureCode.ROUTE_NOT_SELECTED
         ]
         output_values: dict[str, JsonValue] = {}
         outputs_complete = True
@@ -1003,7 +1344,23 @@ class AsyncScheduler:
             status = RunStatus.FAILED
         outputs = MappingProxyType(output_values) if outputs_complete else None
         completion_order = tuple(completion)
+        scheduled_order = tuple(scheduled)
         if journal is not None:
+            committed_scheduled_suffix = tuple(
+                node_id
+                for node_id, _ in sorted(
+                    scheduled_ordinals.items(),
+                    key=lambda item: item[1],
+                )
+            )
+            missing_scheduled = tuple(
+                node_id
+                for node_id in scheduled
+                if node_id not in durable_scheduled_prefix and node_id not in scheduled_ordinals
+            )
+            scheduled_order = (
+                durable_scheduled_prefix + committed_scheduled_suffix + missing_scheduled
+            )
             committed_suffix = tuple(
                 node_id
                 for node_id, _ in sorted(
@@ -1013,6 +1370,8 @@ class AsyncScheduler:
                 if node_id not in durable_completion_prefix
             )
             completion_order = durable_completion_prefix + committed_suffix
+            if len(scheduled_order) != len(results) or set(scheduled_order) != set(results):
+                raise RuntimeError("durable run is missing an explicit scheduled node outcome")
             if len(completion_order) != len(results) or set(completion_order) != set(results):
                 raise RuntimeError("durable run is missing an explicit committed node outcome")
         run_result = RunResult(
@@ -1021,7 +1380,7 @@ class AsyncScheduler:
             nodes=MappingProxyType(ordered_results),
             outputs=outputs,
             failures=tuple(failures),
-            scheduled_order=tuple(scheduled),
+            scheduled_order=scheduled_order,
             completion_order=completion_order,
             max_observed_concurrency=max_observed_concurrency,
             total_attempts=total_attempts,

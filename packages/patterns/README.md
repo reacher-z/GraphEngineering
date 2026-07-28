@@ -1,11 +1,9 @@
 # `@graph-engineering/patterns`
 
-> **Important — declarative-only with the v1alpha1 scheduler:**
-> `routedBranches` and `loopUntilDry` emit fixed, versioned
-> `edge.condition` annotations. The current v1alpha1 runtime scheduler does not
-> evaluate conditions, route branches, skip nodes, or stop early. It executes
-> every statically reachable node. Use these two graphs as portable blueprints,
-> or lower them with a runtime implementing the capability declared in metadata.
+> **Runtime boundary:** `routedBranches` emits the fixed, versioned
+> `RouteEquals` annotation executed by the current TypeScript and Python
+> schedulers. `loopUntilDry` remains declarative-only: its verdict annotations
+> do not yet stop later rounds early.
 
 Zero-side-effect TypeScript constructors for deterministic, canonical Graph
 Engineering Graph IR. Every result is detached from caller input, recursively
@@ -43,9 +41,8 @@ const graph = diamond({
 
 ### `routedBranches`
 
-**Declarative-only with the v1alpha1 scheduler.** Builds
-`classify → branches → merge`. Classifier-to-branch edges carry this package-owned
-annotation; callers cannot replace or extend it:
+Builds `classify → branches → merge`. Classifier-to-branch edges carry this
+package-owned annotation; callers cannot replace or extend it:
 
 ```json
 {
@@ -56,8 +53,10 @@ annotation; callers cannot replace or extend it:
 ```
 
 Branch outputs reach unique merge ports. Metadata declares required capability
-`edge-condition-routing/v1alpha1`. Without a lowering/runtime that implements
-that capability, the v1alpha1 scheduler runs all branches.
+`edge-condition-routing/v1alpha1`. The native schedulers execute only selected
+branches, settle inactive paths without attempts, and bind the merge from active
+branch outputs. Compiler exhaustiveness and dedicated route-decision events are
+still follow-up work.
 
 ### `verifiedFanout`
 

@@ -206,13 +206,20 @@ classify risk -> { low: quick review, high: parallel audit, unknown: human }
 ```
 
 The classification may be model-produced, but route selection should be
-deterministic code over a validated enum. Target v1 requires exhaustive routes or
-an explicit fallback, records the chosen edge, and reuses the recorded decision
-during replay. The native primitive APIs now resolve strict single/multi route
-requests, explicit defaults, confidence escalation, and multicast limits with a
-shared deterministic corpus. They do not execute an edge: although `router` is a
-node kind in Graph IR, conditional edge execution and replayed `RouteSelected`
-events are not implemented by the current runtime.
+deterministic code over a validated enum. The native primitive APIs resolve
+strict single/multi route requests, explicit defaults, confidence escalation,
+and multicast limits with a shared deterministic corpus. The native schedulers
+also execute the pattern package's closed, versioned `RouteEquals` edge
+annotation: only selected branches run, unselected branches settle with
+`ROUTE_NOT_SELECTED` and zero attempts, and a merge binds only active inputs.
+Router results are recomputed from their request evidence and node policy before
+they can be committed, including during durable recovery.
+
+This is the first integrated routing slice, not the complete target-v1 router.
+Compiler-time exhaustiveness/default diagnostics, a dedicated durable
+`RouteSelected` event, replay identity separate from the recorded node result,
+general condition expressions, and scheduler-integrated quorum/deadline
+barriers remain open.
 
 ### Verifier
 
