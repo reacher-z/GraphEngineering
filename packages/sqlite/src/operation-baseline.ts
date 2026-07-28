@@ -82,14 +82,17 @@ export interface CanonicalOperationBaselineEntry {
   readonly entryHash: string;
 }
 
-export interface OperationBaselineProjection {
+export interface OperationBaselineProjectionIdentity {
   readonly baselineId: string;
-  readonly entries: readonly CanonicalOperationBaselineEntry[];
   readonly entryCount: number;
   readonly firstEntryHash: string;
   readonly finalEntryHash: string;
   readonly legacyOperationCount: number;
   readonly projectionSha256: string;
+}
+
+export interface OperationBaselineProjection extends OperationBaselineProjectionIdentity {
+  readonly entries: readonly CanonicalOperationBaselineEntry[];
 }
 
 export class OperationBaselineError extends TypeError {
@@ -443,57 +446,182 @@ export function decodeOperationBaselineCanonicalBytes(bytes: Uint8Array, maximum
   }
 }
 
+interface PreparedOperationBaselineEntry {
+  readonly entryKind: OperationBaselineEntryKind;
+  readonly rank: number;
+  readonly key: Record<string, unknown>;
+  readonly keyBytes: Buffer;
+  readonly state: Record<string, unknown>;
+  readonly stateBytes: Buffer;
+}
+
+function validateBaselineId(baselineId: string): void {
+  if (!/^v2-[0-9a-f]{64}$/u.test(baselineId)) invalid("baseline ID");
+}
+
+function prepareOperationBaselineEntry(input: OperationBaselineEntryInput): PreparedOperationBaselineEntry {
+  if (input === null || typeof input !== "object" || Array.isArray(input)) return invalid("entry");
+  const rank = KIND_RANK.get(input.entryKind);
+  if (rank === undefined) return invalid("entry kind");
+  const key = validateKey(input.entryKind, input.key);
+  const state = validateState(input.entryKind, input.state);
+  validateEntryIdentity(input.entryKind, key, state);
+  return {
+    entryKind: input.entryKind,
+    rank,
+    key,
+    keyBytes: canonicalBytes(key, 2, MAX_BASELINE_KEY_BYTES, `${input.entryKind} key`),
+    state,
+    stateBytes: canonicalBytes(state, 2, MAX_BASELINE_STATE_BYTES, `${input.entryKind} state`),
+  };
+}
+
+function immutableCanonicalEntry(
+  baselineId: string,
+  entry: PreparedOperationBaselineEntry,
+  ordinal: number,
+  previousEntryHash: string,
+): CanonicalOperationBaselineEntry {
+  const entryHash = operationBaselineDomainHash(BASELINE_ENTRY_DOMAIN, {
+    baselineId,
+    entryKeySha256: sha256(entry.keyBytes),
+    entryKind: entry.entryKind,
+    entryStateSha256: sha256(entry.stateBytes),
+    ordinal,
+    previousEntryHash,
+  });
+  const keyBytes = Buffer.from(entry.keyBytes);
+  const stateBytes = Buffer.from(entry.stateBytes);
+  return Object.freeze({
+    baselineId,
+    entryKind: entry.entryKind,
+    ordinal,
+    get keyBytes(): Buffer { return Buffer.from(keyBytes); },
+    get stateBytes(): Buffer { return Buffer.from(stateBytes); },
+    previousEntryHash,
+    entryHash,
+  });
+}
+
+/**
+ * Incrementally derives an operation-baseline identity from entries that are
+ * already ordered by kind rank and unsigned canonical key bytes.
+ *
+ * The accumulator retains only its hash/count summary and the immediately
+ * preceding key. Callers own persistence of each immutable entry returned by
+ * {@link append}.
+ */
+export class OperationBaselineAccumulator {
+  readonly #baselineId: string;
+  readonly #expectedEntryCount: number;
+  #acceptedCount = 0;
+  #legacyCount = 0;
+  #firstHash = BASELINE_EMPTY_ROOT;
+  #finalHash = BASELINE_EMPTY_ROOT;
+  #previousRank: number | undefined;
+  #previousKeyBytes: Buffer | undefined;
+  #sealedIdentity: OperationBaselineProjectionIdentity | undefined;
+
+  constructor(baselineId: string, expectedEntryCount: number) {
+    validateBaselineId(baselineId);
+    if (!Number.isSafeInteger(expectedEntryCount) || expectedEntryCount < 0) {
+      invalid("expected entry count");
+    }
+    this.#baselineId = baselineId;
+    this.#expectedEntryCount = expectedEntryCount;
+  }
+
+  get baselineId(): string {
+    return this.#baselineId;
+  }
+
+  get expectedEntryCount(): number {
+    return this.#expectedEntryCount;
+  }
+
+  get entryCount(): number {
+    return this.#acceptedCount;
+  }
+
+  get isFinished(): boolean {
+    return this.#sealedIdentity !== undefined;
+  }
+
+  append(input: OperationBaselineEntryInput): CanonicalOperationBaselineEntry {
+    if (this.#sealedIdentity !== undefined) invalid("append after finish");
+    if (this.#acceptedCount >= this.#expectedEntryCount) invalid("entry count overflow");
+
+    // All potentially throwing work happens before any accumulator field is
+    // advanced, making rejected appends observationally atomic.
+    const prepared = prepareOperationBaselineEntry(input);
+    if (this.#previousRank !== undefined) {
+      if (prepared.rank < this.#previousRank) invalid("entry kind order");
+      if (prepared.rank === this.#previousRank) {
+        const order = Buffer.compare(prepared.keyBytes, this.#previousKeyBytes!);
+        if (order === 0) invalid("duplicate entry key");
+        if (order < 0) invalid("entry key order");
+      }
+    }
+    const previousEntryHash = this.#acceptedCount === 0
+      ? BASELINE_GENESIS_HASH
+      : this.#finalHash;
+    const result = immutableCanonicalEntry(
+      this.#baselineId,
+      prepared,
+      this.#acceptedCount,
+      previousEntryHash,
+    );
+    const nextKeyBytes = Buffer.from(prepared.keyBytes);
+
+    this.#acceptedCount += 1;
+    this.#legacyCount += prepared.entryKind === "legacy-operation" ? 1 : 0;
+    if (result.ordinal === 0) this.#firstHash = result.entryHash;
+    this.#finalHash = result.entryHash;
+    this.#previousRank = prepared.rank;
+    this.#previousKeyBytes = nextKeyBytes;
+    return result;
+  }
+
+  finish(): OperationBaselineProjectionIdentity {
+    if (this.#sealedIdentity !== undefined) return this.#sealedIdentity;
+    if (this.#acceptedCount !== this.#expectedEntryCount) invalid("entry count truncation");
+    const identity = Object.freeze({
+      baselineId: this.#baselineId,
+      entryCount: this.#acceptedCount,
+      firstEntryHash: this.#firstHash,
+      finalEntryHash: this.#finalHash,
+      legacyOperationCount: this.#legacyCount,
+      projectionSha256: operationBaselineDomainHash(BASELINE_PROJECTION_DOMAIN, {
+        baselineId: this.#baselineId,
+        entryCount: this.#acceptedCount,
+        finalEntryHash: this.#finalHash,
+        firstEntryHash: this.#firstHash,
+        legacyOperationCount: this.#legacyCount,
+      }),
+    });
+    this.#sealedIdentity = identity;
+    return identity;
+  }
+}
+
 export function buildOperationBaseline(
   baselineId: string,
   inputs: readonly OperationBaselineEntryInput[],
 ): OperationBaselineProjection {
-  if (!/^v2-[0-9a-f]{64}$/u.test(baselineId)) return invalid("baseline ID");
+  validateBaselineId(baselineId);
   if (!Array.isArray(inputs) || inputs.length > Number.MAX_SAFE_INTEGER) return invalid("entries");
-  const prepared = inputs.map((input) => {
-    if (input === null || typeof input !== "object" || Array.isArray(input)) return invalid("entry");
-    const rank = KIND_RANK.get(input.entryKind);
-    if (rank === undefined) return invalid("entry kind");
-    const key = validateKey(input.entryKind, input.key);
-    const state = validateState(input.entryKind, input.state);
-    validateEntryIdentity(input.entryKind, key, state);
-    return {
-      entryKind: input.entryKind,
-      rank,
-      keyBytes: canonicalBytes(key, 2, MAX_BASELINE_KEY_BYTES, `${input.entryKind} key`),
-      stateBytes: canonicalBytes(state, 2, MAX_BASELINE_STATE_BYTES, `${input.entryKind} state`),
-    };
-  }).sort((left, right) => left.rank - right.rank || Buffer.compare(left.keyBytes, right.keyBytes));
+  const prepared = inputs.map(prepareOperationBaselineEntry)
+    .sort((left, right) => left.rank - right.rank || Buffer.compare(left.keyBytes, right.keyBytes));
 
-  const entries: CanonicalOperationBaselineEntry[] = [];
-  for (const [ordinal, entry] of prepared.entries()) {
-    const prior = prepared[ordinal - 1];
-    if (prior !== undefined
-      && prior.entryKind === entry.entryKind
-      && prior.keyBytes.equals(entry.keyBytes)) return invalid("duplicate entry key");
-    const previousEntryHash = ordinal === 0 ? BASELINE_GENESIS_HASH : entries[ordinal - 1]!.entryHash;
-    const entryHash = operationBaselineDomainHash(BASELINE_ENTRY_DOMAIN, {
-      baselineId,
-      entryKeySha256: sha256(entry.keyBytes),
-      entryKind: entry.entryKind,
-      entryStateSha256: sha256(entry.stateBytes),
-      ordinal,
-      previousEntryHash,
-    });
-    const keyBytes = Buffer.from(entry.keyBytes);
-    const stateBytes = Buffer.from(entry.stateBytes);
-    entries.push(Object.freeze({
-      baselineId,
-      entryKind: entry.entryKind,
-      ordinal,
-      get keyBytes(): Buffer { return Buffer.from(keyBytes); },
-      get stateBytes(): Buffer { return Buffer.from(stateBytes); },
-      previousEntryHash,
-      entryHash,
-    }));
-  }
-  const firstEntryHash = entries[0]?.entryHash ?? BASELINE_EMPTY_ROOT;
-  const finalEntryHash = entries.at(-1)?.entryHash ?? BASELINE_EMPTY_ROOT;
-  const legacyOperationCount = entries.filter((entry) => entry.entryKind === "legacy-operation").length;
-  const projectionSha256 = operationBaselineDomainHash(BASELINE_PROJECTION_DOMAIN, { baselineId, entryCount: entries.length, finalEntryHash, firstEntryHash, legacyOperationCount });
-  return Object.freeze({ baselineId, entries: Object.freeze(entries), entryCount: entries.length, firstEntryHash, finalEntryHash, legacyOperationCount, projectionSha256 });
+  // Only clean, detached canonical values reach the accumulator. Re-encoding
+  // them there intentionally proves the materializing and streaming paths are
+  // byte-compatible and leaves one chain/projection implementation.
+  const accumulator = new OperationBaselineAccumulator(baselineId, prepared.length);
+  const entries = prepared.map((entry) => accumulator.append({
+    entryKind: entry.entryKind,
+    key: entry.key,
+    state: entry.state,
+  }));
+  const identity = accumulator.finish();
+  return Object.freeze({ ...identity, entries: Object.freeze(entries) });
 }

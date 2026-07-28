@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import replace
+from dataclasses import FrozenInstanceError, replace
 from itertools import pairwise
 from pathlib import Path
 from typing import Any
@@ -19,7 +19,9 @@ from graph_engineering.sqlite_operation_baseline import (
     BASELINE_PROJECTION_DOMAIN,
     MAX_BASELINE_KEY_BYTES,
     MAX_BASELINE_STATE_BYTES,
+    BaselineAccumulator,
     BaselineEntryInput,
+    BaselineEntryKind,
     baseline_entry_sort_key,
     baseline_policy_matches,
     baseline_projection_document,
@@ -52,7 +54,7 @@ def source_envelope() -> dict[str, Any]:
     }
 
 
-def entry_values() -> list[tuple[str, dict[str, Any], dict[str, Any]]]:
+def entry_values() -> list[tuple[BaselineEntryKind, dict[str, Any], dict[str, Any]]]:
     checkpoint_summary = {
         "boundRecordHash": H1,
         "boundSequence": 0,
@@ -393,12 +395,13 @@ def test_semantic_invariants_and_hostile_values_fail_without_value_leaks() -> No
 def test_postconditions_checkpoint_summary_timestamps_and_payload_bounds_are_exact() -> None:
     values = entry_values()
     migration_kind, migration_key, migration_state = values[1]
-    for postconditions in (
+    postcondition_cases: tuple[dict[str, Any], ...] = (
         {},
         {"requiredPostconditions": []},
         {"requiredPostconditions": [""]},
         {"requiredPostconditions": ["ok"], "unknown": True},
-    ):
+    )
+    for postconditions in postcondition_cases:
         with pytest.raises(ValueError):
             capture_baseline_entry(
                 migration_kind,
@@ -507,3 +510,169 @@ def test_python_matches_the_shared_cross_language_baseline_fixture_byte_for_byte
     expected = fixture["projection"]
     assert baseline_projection_document(projection) == expected["canonicalValue"]
     assert projection.projection_sha256 == expected["sha256"]
+
+
+def test_streaming_accumulator_matches_every_shared_fixture_byte_and_projection() -> None:
+    fixture = json.loads(
+        (ROOT / "spec/conformance/sqlite-operation-baseline-v2.case.json").read_text()
+    )
+    accumulator = BaselineAccumulator(fixture["baselineId"], len(fixture["entryVectors"]))
+    streamed = []
+    for vector in fixture["entryVectors"]:
+        captured = capture_baseline_entry(
+            vector["entryKind"],
+            vector["key"]["value"],
+            vector["state"]["value"],
+        )
+        entry = accumulator.append(captured)
+        streamed.append(entry)
+        assert entry.key_bytes.hex() == vector["key"]["canonicalHex"]
+        assert entry.state_bytes.hex() == vector["state"]["canonicalHex"]
+        assert entry.ordinal == vector["ordinal"]
+        assert entry.previous_entry_hash == vector["previousEntryHash"]
+        assert entry.entry_hash == vector["entryHash"]
+
+    completed = accumulator.finish()
+    expected = fixture["projection"]["canonicalValue"]
+    assert completed.baseline_id == expected["baselineId"]
+    assert completed.entry_count == expected["entryCount"]
+    assert completed.legacy_operation_count == expected["legacyOperationCount"]
+    assert completed.first_entry_hash == expected["firstEntryHash"]
+    assert completed.final_entry_hash == expected["finalEntryHash"]
+    assert completed.projection_sha256 == fixture["projection"]["sha256"]
+    assert baseline_projection_document(completed) == expected
+    assert accumulator.entry_count == len(streamed)
+    assert accumulator.previous_entry_hash == streamed[-1].entry_hash
+
+
+def test_streaming_accumulator_empty_finish_is_sealed_idempotent_and_immutable() -> None:
+    accumulator = BaselineAccumulator(create_baseline_id(source_envelope()), 0)
+    completed = accumulator.finish()
+    assert accumulator.finish() is completed
+    assert accumulator.is_finished
+    assert completed.entry_count == completed.legacy_operation_count == 0
+    assert completed.first_entry_hash == completed.final_entry_hash == BASELINE_EMPTY_ROOT
+    with pytest.raises(FrozenInstanceError):
+        completed.entry_count = 1  # type: ignore[misc]
+    with pytest.raises(ValueError, match="finished"):
+        accumulator.append(capture_all()[0])
+
+
+def test_streaming_accumulator_requires_exact_safe_count_and_rejects_overflow() -> None:
+    baseline_id = create_baseline_id(source_envelope())
+    for invalid in (-1, 2**53, True, 1.0):
+        with pytest.raises(ValueError, match="outside bounds"):
+            BaselineAccumulator(baseline_id, invalid)  # type: ignore[arg-type]
+
+    accumulator = BaselineAccumulator(baseline_id, 1)
+    with pytest.raises(ValueError, match="below expected"):
+        accumulator.finish()
+    assert not accumulator.is_finished
+    entry = accumulator.append(capture_all()[0])
+    snapshot = (accumulator.entry_count, accumulator.previous_entry_hash)
+    with pytest.raises(ValueError, match="exceeds expected"):
+        accumulator.append(capture_all()[1])
+    assert (accumulator.entry_count, accumulator.previous_entry_hash) == snapshot
+    assert accumulator.finish().final_entry_hash == entry.entry_hash
+
+
+def test_streaming_accumulator_uses_canonical_numeric_key_byte_order() -> None:
+    kind, key, state = entry_values()[5]
+
+    def revision(value: int) -> BaselineEntryInput:
+        return capture_baseline_entry(
+            kind,
+            {**key, "revision": value},
+            {**state, "revision": value},
+        )
+
+    lexical = [revision(value) for value in (1, 10, 2)]
+    assert [item.key["revision"] for item in sort_baseline_entries(lexical)] == [1, 10, 2]
+    accumulator = BaselineAccumulator(create_baseline_id(source_envelope()), 3)
+    assert [accumulator.append(item).ordinal for item in lexical] == [0, 1, 2]
+    assert accumulator.finish().entry_count == 3
+
+    regressing = BaselineAccumulator(create_baseline_id(source_envelope()), 3)
+    regressing.append(revision(1))
+    regressing.append(revision(2))
+    snapshot = (regressing.entry_count, regressing.previous_entry_hash, regressing.last_sort_key)
+    with pytest.raises(ValueError, match="canonical order"):
+        regressing.append(revision(10))
+    assert (
+        regressing.entry_count,
+        regressing.previous_entry_hash,
+        regressing.last_sort_key,
+    ) == snapshot
+
+
+def test_streaming_rejections_are_atomic_and_clean_chain_can_continue() -> None:
+    kind, _key, state = entry_values()[2]
+
+    def stream(stream_id: str) -> BaselineEntryInput:
+        return capture_baseline_entry(
+            kind,
+            {"streamId": stream_id, "tenantId": "tenant-a"},
+            {**state, "streamId": stream_id},
+        )
+
+    baseline_id = create_baseline_id(source_envelope())
+    accepted_a, accepted_b = stream("a"), stream("b")
+    accumulator = BaselineAccumulator(baseline_id, 2)
+    clean = BaselineAccumulator(baseline_id, 2)
+    assert accumulator.append(accepted_a) == clean.append(accepted_a)
+
+    snapshot = (
+        accumulator.entry_count,
+        accumulator.legacy_operation_count,
+        accumulator.previous_entry_hash,
+        accumulator.last_sort_key,
+    )
+    rejected = [accepted_a, stream("0"), capture_all()[0]]
+    messages = ["duplicate", "canonical order", "canonical order"]
+    for item, message in zip(rejected, messages, strict=True):
+        with pytest.raises(ValueError, match=message):
+            accumulator.append(item)
+        assert (
+            accumulator.entry_count,
+            accumulator.legacy_operation_count,
+            accumulator.previous_entry_hash,
+            accumulator.last_sort_key,
+        ) == snapshot
+
+    forged = replace(accepted_b, state_bytes=b"{}")
+    with pytest.raises(ValueError, match="canonical bytes drifted"):
+        accumulator.append(forged)
+    assert (
+        accumulator.entry_count,
+        accumulator.legacy_operation_count,
+        accumulator.previous_entry_hash,
+        accumulator.last_sort_key,
+    ) == snapshot
+
+    actual_b = accumulator.append(accepted_b)
+    clean_b = clean.append(accepted_b)
+    assert actual_b == clean_b
+    assert accumulator.finish() == clean.finish()
+
+
+def test_streaming_accumulator_recaptures_inputs_and_retains_no_entry_collection() -> None:
+    captured = capture_all()[0]
+    captured.key["scope"] = "mutated"
+    accumulator = BaselineAccumulator(create_baseline_id(source_envelope()), 1)
+    with pytest.raises(ValueError):
+        accumulator.append(captured)
+    assert accumulator.entry_count == 0
+    assert accumulator.previous_entry_hash == BASELINE_GENESIS_HASH
+    assert accumulator.last_sort_key is None
+
+    valid = capture_all()[0]
+    returned = accumulator.append(valid)
+    valid.key["scope"] = "mutated-after-append"
+    valid.state["currentVersion"] = 2
+    assert returned.key["scope"] == "cycle-store"
+    assert returned.state["currentVersion"] == 1
+    with pytest.raises(FrozenInstanceError):
+        returned.ordinal = 2  # type: ignore[misc]
+    retained = [getattr(accumulator, slot) for slot in accumulator.__slots__]
+    assert not any(isinstance(value, (list, tuple)) for value in retained)
+    assert len(accumulator.last_sort_key[1]) <= MAX_BASELINE_KEY_BYTES  # type: ignore[index]

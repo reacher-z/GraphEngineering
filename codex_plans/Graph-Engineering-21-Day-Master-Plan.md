@@ -7752,3 +7752,170 @@ release, production throughput, or popularity claim. GitHub stars are an
 external adoption outcome, not a testable engineering invariant; the project
 will target adoption through correctness evidence, documentation, examples,
 compatibility, and reliable releases without claiming a guaranteed count.
+
+## 31.34 SQLite-backed baseline relation reconciliation (append-only)
+
+The constant-memory accumulators complete the byte-chain primitive, but a
+chain proves only that its entries are ordered and unchanged. Production
+migration also has to prove that all entries describe one coherent source-v1
+database. This section freezes the next implementation layer without altering
+any prior requirement.
+
+### 31.34.1 Transaction-scoped capture API
+
+Add one internal capture/reconciliation API per runtime. It receives the
+already-open provider connection, an observed `capturedAtMs`, and a bounded
+diagnostic limit. It requires the migration owner to hold `BEGIN EXCLUSIVE`.
+It MUST NOT begin, commit, roll back, open a second connection, or continue
+after corruption. Its opaque result exposes only the validated source
+envelope, exact expected entry count, per-kind counts, maximum observed
+provider time, a one-shot canonical entry iterator, a post-publication verifier,
+and deterministic disposal.
+
+The TypeScript entry point is
+`captureAndReconcileSQLiteV1BaselineSource(connection, options)`. Python uses
+`capture_and_reconcile_sqlite_v1_baseline_source(connection, *,
+captured_at_ms, diagnostic_limit=16)`. Both implementations have identical
+rule IDs and safe diagnostics; no BLOB contents, credentials, request payloads,
+or tenant-controlled values enter an error message.
+
+Production must not retain 100K source rows in JavaScript objects, Python
+dictionaries, maps, lists, or tuples. Configure bounded FILE-backed SQLite
+TEMP behavior before the exclusive transaction, then populate normalized TEMP
+relations and a common stage keyed by `(kind_rank, key_blob)`. The common stage
+contains exact canonical key/state bytes; relation tables contain only the
+minimal indexed identity fields needed for anti-joins and grouped invariants.
+
+### 31.34.2 Normalized relation indexes
+
+The TEMP relation model must include:
+
+- streams keyed by `(tenant, stream)`;
+- records keyed by `(tenant, record_id)`, unique by `(tenant, record_hash)` and
+  `(tenant, stream, sequence)`, with a stream-position index;
+- current checkpoints keyed by `(tenant, scope, checkpoint_id)`;
+- revisions keyed by `(tenant, scope, revision)` and indexed by
+  `(tenant, scope, checkpoint_id, revision DESC)`;
+- leases keyed by `(tenant, stream)`;
+- used lease IDs keyed by `(tenant, stream, lease_id)` and unique by
+  `(tenant, stream, lease_epoch)`;
+- holds keyed by `(tenant, stream, hold_id)`;
+- the migration-lock singleton and used migration locks keyed by ID and unique
+  by epoch;
+- migrations keyed by version; and
+- legacy operations keyed by `(tenant, operation_id)`.
+
+Authoritative record values, checkpoint values, cursor state/snapshot BLOBs,
+and legacy result BLOBs remain one-row streamed carriers. Validate and hash
+them, but never copy them wholesale into the normalized relation stage.
+
+### 31.34.3 Required bidirectional source rules
+
+Schema/source rules:
+
+1. exactly one schema and migration-lock singleton exist;
+2. source-v1 contains exactly migration version 1 with previous version 0,
+   frozen ID, SQL hash, schema identity, postconditions, and applied time;
+3. schema latest-migration fields match that row exactly;
+4. source envelope descriptor, schema, lineage ID/hash, application ID, and
+   version match the same source; and
+5. capture time is at or after the provider clock high-water.
+
+Stream/record rules:
+
+1. every record has exactly one stream;
+2. durable positions per stream are exactly `0..tailSequence`, without gap or
+   duplicate;
+3. position zero has no predecessor and every later row names the exact prior
+   position hash;
+4. stream tail sequence/hash names its exact final record;
+5. record hashes remain tenant-wide unique; and
+6. persisted empty streams are rejected because the provider cannot produce
+   them as durable state even though the table admits the transient shape.
+
+Checkpoint/revision rules:
+
+1. revision numbers are contiguous from 1 per tenant/scope;
+2. every put binds an exact record and has exact summary/outer-state identity;
+3. for each checkpoint ID, latest put requires one exact current row and latest
+   delete requires no current row;
+4. current `checkpointRevision` is the latest revision for that ID, never an
+   arbitrary older put; and
+5. current/revision binding, summary, value identity, and time agree exactly.
+
+Lease and migration-lock rules:
+
+1. each lease belongs to a stream and each used identity belongs to its lease;
+2. epoch and fence high-waters agree;
+3. retained used epochs are exactly `1..highWater`, proven by count, minimum,
+   maximum, distinct count, and anti-joins;
+4. every used epoch equals its fence;
+5. active fields are all null or all present;
+6. active ID, epoch, fence, and acquisition time match the exact final used
+   identity and expiry exceeds acquisition; and
+7. migration-lock source/target is forward-only and its global history obeys
+   the same complete-epoch rules.
+
+Hold and operation rules:
+
+1. every hold has an exact stream and no source/baseline side has an extra;
+2. baseline legacy count equals staged entry count and physical format-1 row
+   count;
+3. legacy keys and states compare bidirectionally;
+4. every result BLOB decodes and re-encodes canonically and matches both result
+   hash and raw BLOB SHA-256; and
+5. append, checkpoint-save, lease acquire/renew, and migration-lock acquire
+   results retain their physical semantic bindings. Request bytes that did not
+   exist in v1 are never invented.
+
+### 31.34.4 Clock and cursor seals
+
+Migration-lock `updatedAtMs` is the provider clock high-water. It must be no
+earlier than schema creation/update/latest application, migration application,
+stream creation/update, record and operation commit, checkpoint commit,
+revision recording, lease update, used-ID first use, hold placement,
+migration-lock used-ID first use, and cursor creation/consumption. Lease/lock
+expiry and user checkpoint RFC3339 timestamps are not provider clock inputs.
+
+Cursors remain outside baseline entries. Before 0002, validate authorization,
+scope, canonical BLOBs, positions, expiry, immutable snapshot relations, event
+tail binding, and checkpoint revision binding. Stream an ordered cursor seal
+over every immutable scalar plus both BLOB SHA-256 values. After updating only
+descriptor and schema identity, require the exact update count, identical seal
+and row count, and a full v2 cursor audit. Migration never deletes expired or
+consumed cursors and never rewrites snapshot bytes.
+
+### 31.34.5 Exact execution order and hostile matrix
+
+Inside one exclusive owner transaction: validate v1 catalog/manifest/FK/full
+integrity; observe capture time; stream and stage source plus cursor seal; run
+all grouped rules and anti-joins; execute 0002; stream stage order through the
+accumulator and insert each entry; publish final header and sequence zero;
+rebind cursors; publish lineage/schema/descriptor; verify stored chain, legacy
+inventory, cursor seal, catalog, FK, physical and semantic reconciliation; then
+commit once. Any failure rolls back every step.
+
+Hostile tests must independently cover record gaps/predecessors/tails/orphans,
+checkpoint interleaving/delete/recreate/missing-current/older-put binding,
+missing or extra lease/lock epochs and active-ID substitution, lineage/envelope
+and capture-watermark drift, legacy insert/delete/result/name/time drift,
+cursor insert/delete/immutable drift/partial rebind/bad tail/missing revision,
+and exact 100K one-row iteration with no `.all()` or full collection. Stable
+rule IDs include `BLR_RECORD_GAP`, `BLR_CHECKPOINT_CURRENT_MISSING`, and
+`BLR_LEASE_HISTORY_INCOMPLETE`; diagnostics are capped at the configured limit.
+
+### 31.34.6 Accumulator implementation checkpoint
+
+Both runtimes now implement the expected-count streaming accumulator. The
+TypeScript implementation uses ECMAScript `#` private mutable state, cloned
+entry buffers, and a frozen projection identity. A hostile test injects public
+properties with every internal-looking name and proves count, chain, seal, and
+finish remain unchanged. Python uses bounded `__slots__`, immutable bytes,
+frozen result dataclasses, full recapture, and no retained collection.
+
+Both accept canonical numeric revision order `1,10,2`, reject `1,2,10`, kind
+regression, key regression, duplicate, invalid row, unsafe count, overflow,
+underflow, and post-finish append without corrupting the next valid hash. The
+materializing convenience builders now feed these accumulators so only one
+chain/projection algorithm remains. This checkpoint still does not claim the
+database source iterator, relation stage, 100K evidence, or runtime v2.

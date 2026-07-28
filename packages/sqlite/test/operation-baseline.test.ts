@@ -11,6 +11,7 @@ import {
   BASELINE_ID_DOMAIN,
   BASELINE_PROJECTION_DOMAIN,
   OPERATION_BASELINE_POLICY,
+  OperationBaselineAccumulator,
   OperationBaselineError,
   buildOperationBaseline,
   createOperationBaselineId,
@@ -209,5 +210,233 @@ describe("SQLite operation baseline byte protocol", () => {
       legacyOperationCount: fixture.projection.canonicalValue.legacyOperationCount,
       projectionSha256: fixture.projection.sha256,
     });
+  });
+});
+
+describe("OperationBaselineAccumulator", () => {
+  const baselineId = createOperationBaselineId(source);
+  const streamState = (streamId: string) => ({
+    createdAtMs: 1,
+    streamId,
+    tailRecordHash: null,
+    tailSequence: -1,
+    tenantId: "t",
+    updatedAtMs: 2,
+  });
+  const streamInput = (streamId: string) => ({
+    entryKind: "stream-head" as const,
+    key: { streamId, tenantId: "t" },
+    state: streamState(streamId),
+  });
+  const revisionInput = (revision: number) => ({
+    entryKind: "checkpoint-revision" as const,
+    key: { checkpointScope: "scope", revision, tenantId: "t" },
+    state: {
+      action: "delete",
+      boundRecordHash: null,
+      boundSequence: null,
+      checkpointCreatedAt: null,
+      checkpointId: `cp-${revision}`,
+      checkpointScope: "scope",
+      recordedAtMs: revision,
+      revision,
+      summary: null,
+      tenantId: "t",
+      valueBytes: null,
+      valueHash: null,
+    },
+  });
+
+  it("streams the shared twelve-kind fixture with the exact frozen projection", () => {
+    const fixture = JSON.parse(readFileSync(
+      new URL("../../../spec/conformance/sqlite-operation-baseline-v2.case.json", import.meta.url),
+      "utf8",
+    )) as {
+      readonly baselineId: string;
+      readonly entryVectors: readonly {
+        readonly entryKind: (typeof BASELINE_ENTRY_KINDS)[number];
+        readonly key: { readonly value: unknown; readonly canonicalHex: string };
+        readonly state: { readonly value: unknown; readonly canonicalHex: string };
+        readonly previousEntryHash: string;
+        readonly entryHash: string;
+      }[];
+      readonly projection: {
+        readonly canonicalValue: {
+          readonly entryCount: number;
+          readonly firstEntryHash: string;
+          readonly finalEntryHash: string;
+          readonly legacyOperationCount: number;
+        };
+        readonly sha256: string;
+      };
+    };
+    const accumulator = new OperationBaselineAccumulator(
+      fixture.baselineId,
+      fixture.entryVectors.length,
+    );
+    const entries = fixture.entryVectors.map((vector) => accumulator.append({
+      entryKind: vector.entryKind,
+      key: vector.key.value,
+      state: vector.state.value,
+    }));
+    expect(entries.map((entry) => entry.ordinal)).toEqual(
+      fixture.entryVectors.map((_, ordinal) => ordinal),
+    );
+    expect(entries.map((entry) => entry.keyBytes.toString("hex"))).toEqual(
+      fixture.entryVectors.map((vector) => vector.key.canonicalHex),
+    );
+    expect(entries.map((entry) => entry.stateBytes.toString("hex"))).toEqual(
+      fixture.entryVectors.map((vector) => vector.state.canonicalHex),
+    );
+    expect(entries.map((entry) => entry.previousEntryHash)).toEqual(
+      fixture.entryVectors.map((vector) => vector.previousEntryHash),
+    );
+    expect(entries.map((entry) => entry.entryHash)).toEqual(
+      fixture.entryVectors.map((vector) => vector.entryHash),
+    );
+    expect(accumulator.finish()).toEqual({
+      baselineId: fixture.baselineId,
+      entryCount: fixture.projection.canonicalValue.entryCount,
+      firstEntryHash: fixture.projection.canonicalValue.firstEntryHash,
+      finalEntryHash: fixture.projection.canonicalValue.finalEntryHash,
+      legacyOperationCount: fixture.projection.canonicalValue.legacyOperationCount,
+      projectionSha256: fixture.projection.sha256,
+    });
+  });
+
+  it("finishes an empty baseline with the frozen empty root and seals idempotently", () => {
+    const accumulator = new OperationBaselineAccumulator(baselineId, 0);
+    const first = accumulator.finish();
+    expect(first).toMatchObject({
+      baselineId,
+      entryCount: 0,
+      firstEntryHash: BASELINE_EMPTY_ROOT,
+      finalEntryHash: BASELINE_EMPTY_ROOT,
+      legacyOperationCount: 0,
+    });
+    expect(Object.isFrozen(first)).toBe(true);
+    expect(accumulator.finish()).toBe(first);
+    expect(accumulator.isFinished).toBe(true);
+    expect(() => accumulator.append(streamInput("a"))).toThrow(OperationBaselineError);
+  });
+
+  it("rejects unsafe counts, overflow, and truncation without prematurely sealing", () => {
+    for (const count of [-1, 0.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1]) {
+      expect(() => new OperationBaselineAccumulator(baselineId, count)).toThrow(
+        OperationBaselineError,
+      );
+    }
+    const overflow = new OperationBaselineAccumulator(baselineId, 1);
+    overflow.append(streamInput("a"));
+    expect(() => overflow.append(streamInput("b"))).toThrow(OperationBaselineError);
+    expect(overflow.entryCount).toBe(1);
+
+    const truncated = new OperationBaselineAccumulator(baselineId, 2);
+    truncated.append(streamInput("a"));
+    expect(() => truncated.finish()).toThrow(OperationBaselineError);
+    expect(truncated.isFinished).toBe(false);
+    truncated.append(streamInput("b"));
+    expect(truncated.finish().entryCount).toBe(2);
+  });
+
+  it("enforces kind rank and unsigned canonical key-byte monotonicity", () => {
+    const kindRegression = new OperationBaselineAccumulator(baselineId, 2);
+    kindRegression.append(streamInput("a"));
+    const schema = {
+      entryKind: "schema-envelope" as const,
+      key: { scope: "cycle-store" },
+      state: {
+        createdAtMs: 1,
+        currentVersion: 1,
+        latestMigrationAppliedAtMs: 1,
+        latestMigrationSha256: H,
+        maxReaderVersion: 1,
+        maxWriterVersion: 1,
+        minReaderVersion: 1,
+        minWriterVersion: 1,
+        providerDescriptorHash: H2,
+        schemaIdentitySha256: H,
+        updatedAtMs: 2,
+      },
+    };
+    expect(() => kindRegression.append(schema)).toThrow(OperationBaselineError);
+    expect(kindRegression.entryCount).toBe(1);
+
+    const keyRegression = new OperationBaselineAccumulator(baselineId, 2);
+    keyRegression.append(streamInput("z"));
+    expect(() => keyRegression.append(streamInput("a"))).toThrow(OperationBaselineError);
+    expect(() => keyRegression.append(streamInput("z"))).toThrow(OperationBaselineError);
+    expect(keyRegression.entryCount).toBe(1);
+  });
+
+  it("uses unsigned lexical bytes for numeric keys, accepting 1,10,2 but not 1,2,10", () => {
+    const canonical = new OperationBaselineAccumulator(baselineId, 3);
+    const entries = [1, 10, 2].map((revision) => canonical.append(revisionInput(revision)));
+    expect(entries.map((entry) => entry.keyBytes.toString())).toEqual([
+      '{"checkpointScope":"scope","revision":1,"tenantId":"t"}',
+      '{"checkpointScope":"scope","revision":10,"tenantId":"t"}',
+      '{"checkpointScope":"scope","revision":2,"tenantId":"t"}',
+    ]);
+    expect(canonical.finish().entryCount).toBe(3);
+
+    const numericRegression = new OperationBaselineAccumulator(baselineId, 3);
+    numericRegression.append(revisionInput(1));
+    numericRegression.append(revisionInput(2));
+    expect(() => numericRegression.append(revisionInput(10))).toThrow(OperationBaselineError);
+    expect(numericRegression.entryCount).toBe(2);
+  });
+
+  it("rolls back every failed append and produces the same next hash as a clean accumulator", () => {
+    const clean = new OperationBaselineAccumulator(baselineId, 2);
+    const expectedFirst = clean.append(streamInput("a"));
+    const expectedSecond = clean.append(streamInput("b"));
+
+    const attacked = new OperationBaselineAccumulator(baselineId, 2);
+    expect(attacked.append(streamInput("a"))).toEqual(expectedFirst);
+    const badState = streamInput("b");
+    badState.state.tailSequence = 0;
+    for (const rejected of [badState, streamInput("0"), streamInput("a")]) {
+      expect(() => attacked.append(rejected)).toThrow(OperationBaselineError);
+      expect(attacked.entryCount).toBe(1);
+    }
+    expect(attacked.append(streamInput("b"))).toEqual(expectedSecond);
+    expect(attacked.finish()).toEqual(clean.finish());
+  });
+
+  it("detaches source values and clones immutable returned entry buffers", () => {
+    const input = streamInput("a");
+    const accumulator = new OperationBaselineAccumulator(baselineId, 1);
+    const entry = accumulator.append(input);
+    const keyHex = entry.keyBytes.toString("hex");
+    const stateHex = entry.stateBytes.toString("hex");
+    input.key.streamId = "mutated";
+    input.state.streamId = "mutated";
+    entry.keyBytes.fill(0);
+    entry.stateBytes.fill(0);
+    expect(Object.isFrozen(entry)).toBe(true);
+    expect(entry.keyBytes.toString("hex")).toBe(keyHex);
+    expect(entry.stateBytes.toString("hex")).toBe(stateHex);
+    expect(accumulator.finish().finalEntryHash).toBe(entry.entryHash);
+  });
+
+  it("ignores hostile ordinary properties that shadow its true private state", () => {
+    const clean = new OperationBaselineAccumulator(baselineId, 1);
+    clean.append(streamInput("a"));
+
+    const attacked = new OperationBaselineAccumulator(baselineId, 1);
+    const injected = attacked as unknown as Record<string, unknown>;
+    injected.acceptedCount = Number.MAX_SAFE_INTEGER;
+    injected.legacyCount = 99;
+    injected.firstHash = H2;
+    injected.finalHash = H2;
+    injected.previousRank = 99;
+    injected.previousKeyBytes = Buffer.from("hostile", "utf8");
+    injected.sealedIdentity = Object.freeze({ poisoned: true });
+
+    expect(attacked.entryCount).toBe(0);
+    expect(attacked.isFinished).toBe(false);
+    attacked.append(streamInput("a"));
+    expect(attacked.entryCount).toBe(1);
+    expect(attacked.finish()).toEqual(clean.finish());
   });
 });

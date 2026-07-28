@@ -279,6 +279,18 @@ class BaselineProjection:
     projection_sha256: str
 
 
+@dataclass(frozen=True, slots=True)
+class BaselineProjectionIdentity:
+    """Immutable identity of a completed constant-memory baseline stream."""
+
+    baseline_id: str
+    entry_count: int
+    legacy_operation_count: int
+    first_entry_hash: str
+    final_entry_hash: str
+    projection_sha256: str
+
+
 def _domain_hash(domain: str, value: object) -> str:
     digest = hashlib.sha256()
     digest.update(domain.encode("utf-8"))
@@ -288,6 +300,12 @@ def _domain_hash(domain: str, value: object) -> str:
 
 def _sha256(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
+
+
+def _validate_baseline_id(value: object) -> str:
+    if type(value) is not str or _BASELINE_ID.fullmatch(value) is None:
+        raise ValueError("baselineId is invalid")
+    return value
 
 
 def _object(value: object, fields: Sequence[str], label: str) -> JsonObject:
@@ -721,65 +739,194 @@ def sort_baseline_entries(entries: Iterable[BaselineEntryInput]) -> tuple[Baseli
     return ordered
 
 
+class BaselineAccumulator:
+    """Hash an already ordered baseline while retaining constant-sized state.
+
+    ``append`` returns each immutable entry to its caller immediately.  The
+    accumulator deliberately does not retain returned entries or state bytes;
+    a database migration can therefore persist and release each row before
+    requesting the next one.
+    """
+
+    __slots__ = (
+        "_baseline_id",
+        "_count",
+        "_expected_entry_count",
+        "_finished_result",
+        "_first_entry_hash",
+        "_last_key_bytes",
+        "_last_rank",
+        "_legacy_operation_count",
+        "_previous_entry_hash",
+    )
+
+    def __init__(self, baseline_id: str, expected_entry_count: int) -> None:
+        self._baseline_id = _validate_baseline_id(baseline_id)
+        if (
+            type(expected_entry_count) is not int
+            or expected_entry_count < 0
+            or expected_entry_count > MAX_SAFE_INTEGER
+        ):
+            raise ValueError("expected baseline entry count is outside bounds")
+        self._expected_entry_count = expected_entry_count
+        self._count = 0
+        self._legacy_operation_count = 0
+        self._first_entry_hash: str | None = None
+        self._previous_entry_hash = BASELINE_GENESIS_HASH
+        self._last_rank: int | None = None
+        self._last_key_bytes: bytes | None = None
+        self._finished_result: BaselineProjectionIdentity | None = None
+
+    @property
+    def baseline_id(self) -> str:
+        """Return the validated baseline identity."""
+
+        return self._baseline_id
+
+    @property
+    def expected_entry_count(self) -> int:
+        """Return the exact count declared before streaming starts."""
+
+        return self._expected_entry_count
+
+    @property
+    def entry_count(self) -> int:
+        """Return the number of successfully appended entries."""
+
+        return self._count
+
+    @property
+    def legacy_operation_count(self) -> int:
+        """Return the number of successfully appended legacy operations."""
+
+        return self._legacy_operation_count
+
+    @property
+    def previous_entry_hash(self) -> str:
+        """Return the current chain tail, or the genesis hash before entry zero."""
+
+        return self._previous_entry_hash
+
+    @property
+    def last_sort_key(self) -> tuple[int, bytes] | None:
+        """Return a detached diagnostic copy of the last accepted sort key."""
+
+        if self._last_rank is None or self._last_key_bytes is None:
+            return None
+        return self._last_rank, bytes(self._last_key_bytes)
+
+    @property
+    def is_finished(self) -> bool:
+        """Report whether a successful ``finish`` sealed this accumulator."""
+
+        return self._finished_result is not None
+
+    def append(self, item: BaselineEntryInput) -> BaselineEntry:
+        """Validate and hash one preordered entry without retaining its state."""
+
+        if self._finished_result is not None:
+            raise ValueError("baseline accumulator is already finished")
+        if self._count >= self._expected_entry_count:
+            raise ValueError("baseline entry count exceeds expected count")
+        if type(item) is not BaselineEntryInput:
+            raise TypeError("baseline entry input is invalid")
+
+        # Build every candidate value before mutating accumulator state.  This
+        # makes validation, ordering, duplicate, and hashing failures atomic.
+        validated = capture_baseline_entry(item.entry_kind, item.key, item.state)
+        if validated.key_bytes != item.key_bytes or validated.state_bytes != item.state_bytes:
+            raise ValueError("baseline entry canonical bytes drifted")
+        rank, key_bytes = baseline_entry_sort_key(validated)
+        if self._last_rank is not None and self._last_key_bytes is not None:
+            if rank < self._last_rank or (
+                rank == self._last_rank and key_bytes < self._last_key_bytes
+            ):
+                raise ValueError("baseline entries are not in canonical order")
+            if rank == self._last_rank and key_bytes == self._last_key_bytes:
+                raise ValueError("duplicate baseline entry key")
+
+        ordinal = self._count
+        previous_hash = self._previous_entry_hash
+        entry_hash = _domain_hash(
+            BASELINE_ENTRY_DOMAIN,
+            {
+                "baselineId": self._baseline_id,
+                "entryKeySha256": _sha256(key_bytes),
+                "entryKind": validated.entry_kind,
+                "entryStateSha256": _sha256(validated.state_bytes),
+                "ordinal": ordinal,
+                "previousEntryHash": previous_hash,
+            },
+        )
+        result = BaselineEntry(
+            self._baseline_id,
+            validated.entry_kind,
+            ordinal,
+            bytes(key_bytes),
+            bytes(validated.state_bytes),
+            previous_hash,
+            entry_hash,
+        )
+
+        self._count = ordinal + 1
+        self._legacy_operation_count += validated.entry_kind == "legacy-operation"
+        if self._first_entry_hash is None:
+            self._first_entry_hash = entry_hash
+        self._previous_entry_hash = entry_hash
+        self._last_rank = rank
+        self._last_key_bytes = bytes(key_bytes)
+        return result
+
+    def finish(self) -> BaselineProjectionIdentity:
+        """Seal a complete stream and return its exact projection identity."""
+
+        if self._finished_result is not None:
+            return self._finished_result
+        if self._count != self._expected_entry_count:
+            raise ValueError("baseline entry count is below expected count")
+        first_hash = self._first_entry_hash or BASELINE_EMPTY_ROOT
+        final_hash = self._previous_entry_hash if self._count else BASELINE_EMPTY_ROOT
+        projection_sha256 = _domain_hash(
+            BASELINE_PROJECTION_DOMAIN,
+            {
+                "baselineId": self._baseline_id,
+                "entryCount": self._count,
+                "finalEntryHash": final_hash,
+                "firstEntryHash": first_hash,
+                "legacyOperationCount": self._legacy_operation_count,
+            },
+        )
+        result = BaselineProjectionIdentity(
+            self._baseline_id,
+            self._count,
+            self._legacy_operation_count,
+            first_hash,
+            final_hash,
+            projection_sha256,
+        )
+        self._finished_result = result
+        return result
+
+
 def build_baseline_projection(
     baseline_id: str,
     entries: Iterable[BaselineEntryInput],
 ) -> BaselineProjection:
     """Sort, assign contiguous ordinals, build the hash chain, and project identity."""
 
-    if type(baseline_id) is not str or _BASELINE_ID.fullmatch(baseline_id) is None:
-        raise ValueError("baselineId is invalid")
+    _validate_baseline_id(baseline_id)
     ordered = sort_baseline_entries(entries)
-    if len(ordered) > MAX_SAFE_INTEGER:
-        raise ValueError("baseline entry count exceeds the safe integer range")
-    chained: list[BaselineEntry] = []
-    previous_hash = BASELINE_GENESIS_HASH
-    legacy_count = 0
-    for ordinal, item in enumerate(ordered):
-        entry_hash = _domain_hash(
-            BASELINE_ENTRY_DOMAIN,
-            {
-                "baselineId": baseline_id,
-                "entryKeySha256": _sha256(item.key_bytes),
-                "entryKind": item.entry_kind,
-                "entryStateSha256": _sha256(item.state_bytes),
-                "ordinal": ordinal,
-                "previousEntryHash": previous_hash,
-            },
-        )
-        chained.append(
-            BaselineEntry(
-                baseline_id,
-                item.entry_kind,
-                ordinal,
-                item.key_bytes,
-                item.state_bytes,
-                previous_hash,
-                entry_hash,
-            )
-        )
-        previous_hash = entry_hash
-        legacy_count += item.entry_kind == "legacy-operation"
-    first_hash = chained[0].entry_hash if chained else BASELINE_EMPTY_ROOT
-    final_hash = chained[-1].entry_hash if chained else BASELINE_EMPTY_ROOT
-    projection_sha256 = _domain_hash(
-        BASELINE_PROJECTION_DOMAIN,
-        {
-            "baselineId": baseline_id,
-            "entryCount": len(chained),
-            "finalEntryHash": final_hash,
-            "firstEntryHash": first_hash,
-            "legacyOperationCount": legacy_count,
-        },
-    )
+    accumulator = BaselineAccumulator(baseline_id, len(ordered))
+    chained = tuple(accumulator.append(item) for item in ordered)
+    completed = accumulator.finish()
     return BaselineProjection(
-        baseline_id,
-        tuple(chained),
-        len(chained),
-        legacy_count,
-        first_hash,
-        final_hash,
-        projection_sha256,
+        completed.baseline_id,
+        chained,
+        completed.entry_count,
+        completed.legacy_operation_count,
+        completed.first_entry_hash,
+        completed.final_entry_hash,
+        completed.projection_sha256,
     )
 
 
@@ -789,7 +936,9 @@ def baseline_entry_sort_key(entry: BaselineEntryInput) -> tuple[int, bytes]:
     return _KIND_RANK[entry.entry_kind], entry.key_bytes
 
 
-def baseline_projection_document(projection: BaselineProjection) -> JsonObject:
+def baseline_projection_document(
+    projection: BaselineProjection | BaselineProjectionIdentity,
+) -> JsonObject:
     """Return the exact closed object hashed as the projection identity."""
 
     return cast(
