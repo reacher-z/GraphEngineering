@@ -1174,6 +1174,10 @@ class SQLiteV1BaselineTempStage:
         "_created_indexes",
         "_created_tables",
         "_created_view",
+        "_lease_lock_hold_campaign_completed",
+        "_lease_lock_hold_campaign_cursor",
+        "_lease_lock_hold_campaign_session",
+        "_lease_lock_hold_campaign_started",
         "_ordered_handoff_completed",
         "_ordered_handoff_reader",
         "_ordered_handoff_started",
@@ -1195,6 +1199,10 @@ class SQLiteV1BaselineTempStage:
         self._created_tables: list[str] = []
         self._created_indexes: list[str] = []
         self._created_view = False
+        self._lease_lock_hold_campaign_started = False
+        self._lease_lock_hold_campaign_completed = False
+        self._lease_lock_hold_campaign_cursor: _SQLiteCursorCapability | None = None
+        self._lease_lock_hold_campaign_session: object | None = None
         self._state: SQLiteV1BaselineTempStageState = "open"
         self._transaction_epoch = connection.transaction_epoch
         self._allowed_total_changes = connection.total_changes
@@ -1823,6 +1831,132 @@ class SQLiteV1BaselineTempStage:
         self._checkpoint_campaign_session = None
         self._poison("BLR_STAGE_ITERATOR_INCOMPLETE: checkpoint campaign aborted")
 
+    def _begin_lease_lock_hold_campaign(
+        self,
+        summary: SQLiteV1BaselineSourceSummary,
+        identity: BaselineProjectionIdentity,
+    ) -> tuple[int, object]:
+        """Bind the lease/lock/hold campaign after checkpoint completion."""
+
+        if self._lease_lock_hold_campaign_started:
+            self._poison(
+                "BLR_STAGE_ITERATOR_INCOMPLETE: lease/lock/hold campaign already started"
+            )
+        self._lease_lock_hold_campaign_started = True
+        if (
+            type(summary) is not SQLiteV1BaselineSourceSummary
+            or type(identity) is not BaselineProjectionIdentity
+            or not self._ordered_handoff_completed
+            or not self._stream_record_campaign_completed
+            or not self._checkpoint_campaign_completed
+            or self._ordered_handoff_reader is not None
+            or self._ordered_projection_identity is not identity
+            or self._cooperative_summary is not summary
+            or identity.entry_count != summary.expected_entry_count
+            or self._state != "open"
+        ):
+            self._poison(
+                "BLR_STAGE_ITERATOR_INCOMPLETE: lease/lock/hold campaign binding is invalid"
+            )
+        expected_total_changes = self._allowed_total_changes
+        self._assert_ordered_handoff_fence(expected_total_changes)
+        self.assert_common_counts(summary.counts_by_kind)
+        self.assert_relation_key_coverage()
+        self._assert_ordered_handoff_catalog(expected_total_changes)
+        self._assert_ordered_handoff_fence(expected_total_changes)
+        session = object()
+        self._lease_lock_hold_campaign_session = session
+        return expected_total_changes, session
+
+    def _assert_lease_lock_hold_campaign_fence(
+        self,
+        session: object,
+        expected_total_changes: int,
+    ) -> None:
+        if (
+            self._lease_lock_hold_campaign_session is not session
+            or not self._lease_lock_hold_campaign_started
+            or self._lease_lock_hold_campaign_completed
+        ):
+            self._poison(
+                "BLR_STAGE_ITERATOR_INCOMPLETE: lease/lock/hold campaign session is invalid"
+            )
+        self._assert_ordered_handoff_fence(expected_total_changes)
+        self._assert_ordered_handoff_catalog(expected_total_changes)
+        self._assert_ordered_handoff_fence(expected_total_changes)
+
+    def _register_lease_lock_hold_campaign_cursor(
+        self,
+        session: object,
+        cursor: _SQLiteCursorCapability,
+        expected_total_changes: int,
+    ) -> None:
+        self._assert_lease_lock_hold_campaign_fence(session, expected_total_changes)
+        if (
+            type(cursor) is not _SQLiteCursorCapability
+            or self._lease_lock_hold_campaign_cursor is not None
+        ):
+            self._poison(
+                "BLR_STAGE_ITERATOR_INCOMPLETE: lease/lock/hold rule cursor is invalid"
+            )
+        self._lease_lock_hold_campaign_cursor = cursor
+        self._assert_lease_lock_hold_campaign_fence(session, expected_total_changes)
+
+    def _release_lease_lock_hold_campaign_cursor(
+        self,
+        session: object,
+        cursor: _SQLiteCursorCapability,
+        expected_total_changes: int,
+    ) -> None:
+        if self._lease_lock_hold_campaign_cursor is not cursor:
+            self._poison(
+                "BLR_STAGE_ITERATOR_INCOMPLETE: lease/lock/hold rule cursor binding drifted"
+            )
+        self._lease_lock_hold_campaign_cursor = None
+        self._assert_lease_lock_hold_campaign_fence(session, expected_total_changes)
+
+    def _complete_lease_lock_hold_campaign(
+        self,
+        identity: BaselineProjectionIdentity,
+        expected_total_changes: int,
+        session: object,
+    ) -> None:
+        if (
+            not self._lease_lock_hold_campaign_started
+            or self._lease_lock_hold_campaign_completed
+            or self._ordered_projection_identity is not identity
+            or self._lease_lock_hold_campaign_session is not session
+            or self._lease_lock_hold_campaign_cursor is not None
+        ):
+            self._poison(
+                "BLR_STAGE_ITERATOR_INCOMPLETE: lease/lock/hold campaign completion is invalid"
+            )
+        self._assert_lease_lock_hold_campaign_fence(session, expected_total_changes)
+        summary = self._cooperative_summary
+        if summary is None:
+            self._poison(
+                "BLR_STAGE_ITERATOR_INCOMPLETE: lease/lock/hold source binding is absent"
+            )
+        self.assert_common_counts(summary.counts_by_kind)
+        self.assert_relation_key_coverage()
+        self._assert_ordered_handoff_catalog(expected_total_changes)
+        self._assert_ordered_handoff_fence(expected_total_changes)
+        self._lease_lock_hold_campaign_completed = True
+        self._lease_lock_hold_campaign_session = None
+
+    def _abort_lease_lock_hold_campaign(self, session: object | None) -> Never:
+        cursor = self._lease_lock_hold_campaign_cursor
+        self._lease_lock_hold_campaign_cursor = None
+        if cursor is not None:
+            with suppress(BaseException):
+                cursor.close()
+        if session is not None and session is not self._lease_lock_hold_campaign_session:
+            self._poison(
+                "BLR_STAGE_ITERATOR_INCOMPLETE: lease/lock/hold campaign session drifted"
+            )
+        self._lease_lock_hold_campaign_session = None
+        self._poison("BLR_STAGE_ITERATOR_INCOMPLETE: lease/lock/hold campaign aborted")
+
     def _assert_ordered_handoff_fence(self, expected_total_changes: int) -> None:
         self._assert_open_and_bound()
         if (
@@ -2084,6 +2218,18 @@ class SQLiteV1BaselineTempStage:
                         "BLR_STAGE_ITERATOR_INCOMPLETE: TEMP checkpoint cursor cleanup failed"
                     )
             self._checkpoint_campaign_cursor = None
+        lease_lock_hold_cursor = self._lease_lock_hold_campaign_cursor
+        if lease_lock_hold_cursor is not None:
+            try:
+                lease_lock_hold_cursor.close()
+            except BaseException as error:
+                if cursor_close_failure is None:
+                    cursor_close_failure = error
+                    cursor_cleanup_message = (
+                        "BLR_STAGE_ITERATOR_INCOMPLETE: TEMP lease/lock/hold cursor "
+                        "cleanup failed"
+                    )
+            self._lease_lock_hold_campaign_cursor = None
         if (
             not self._connection.in_exclusive_transaction
             or self._connection.transaction_epoch != self._transaction_epoch
@@ -2174,6 +2320,11 @@ class SQLiteV1BaselineTempStage:
             with suppress(BaseException):
                 checkpoint_cursor.close()
             self._checkpoint_campaign_cursor = None
+        lease_lock_hold_cursor = self._lease_lock_hold_campaign_cursor
+        if lease_lock_hold_cursor is not None:
+            with suppress(BaseException):
+                lease_lock_hold_cursor.close()
+            self._lease_lock_hold_campaign_cursor = None
         self._state = "poisoned"
         self._cooperative_pending_receipt = None
         self._cooperative_summary = None

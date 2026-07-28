@@ -68,6 +68,21 @@ export const SQLITE_BASELINE_COMPLETE_CHECKPOINT_CAMPAIGN = Symbol(
 export const SQLITE_BASELINE_ABORT_CHECKPOINT_CAMPAIGN = Symbol(
   "SQLiteBaselineTempStage.abortCheckpointCampaign",
 );
+export const SQLITE_BASELINE_BEGIN_LEASE_LOCK_HOLD_CAMPAIGN = Symbol(
+  "SQLiteBaselineTempStage.beginLeaseLockHoldCampaign",
+);
+export const SQLITE_BASELINE_FENCE_LEASE_LOCK_HOLD_CAMPAIGN = Symbol(
+  "SQLiteBaselineTempStage.fenceLeaseLockHoldCampaign",
+);
+export const SQLITE_BASELINE_REGISTER_LEASE_LOCK_HOLD_CLEANUP = Symbol(
+  "SQLiteBaselineTempStage.registerLeaseLockHoldCleanup",
+);
+export const SQLITE_BASELINE_COMPLETE_LEASE_LOCK_HOLD_CAMPAIGN = Symbol(
+  "SQLiteBaselineTempStage.completeLeaseLockHoldCampaign",
+);
+export const SQLITE_BASELINE_ABORT_LEASE_LOCK_HOLD_CAMPAIGN = Symbol(
+  "SQLiteBaselineTempStage.abortLeaseLockHoldCampaign",
+);
 
 /** Opaque evidence bound to one stage-private pending write pair. */
 export interface SQLiteBaselineOwnedWriteReceipt {
@@ -174,6 +189,23 @@ export interface SQLiteBaselineCheckpointCampaignStage {
   ): void;
   [SQLITE_BASELINE_COMPLETE_CHECKPOINT_CAMPAIGN](session: object): void;
   [SQLITE_BASELINE_ABORT_CHECKPOINT_CAMPAIGN](
+    session: object | undefined,
+    message: string,
+  ): never;
+}
+
+export interface SQLiteBaselineLeaseLockHoldCampaignStage {
+  [SQLITE_BASELINE_BEGIN_LEASE_LOCK_HOLD_CAMPAIGN](
+    connection: SQLiteConnection,
+    projectionIdentity: OperationBaselineProjectionIdentity,
+  ): object;
+  [SQLITE_BASELINE_FENCE_LEASE_LOCK_HOLD_CAMPAIGN](session: object): void;
+  [SQLITE_BASELINE_REGISTER_LEASE_LOCK_HOLD_CLEANUP](
+    session: object,
+    cleanup: (() => void) | undefined,
+  ): void;
+  [SQLITE_BASELINE_COMPLETE_LEASE_LOCK_HOLD_CAMPAIGN](session: object): void;
+  [SQLITE_BASELINE_ABORT_LEASE_LOCK_HOLD_CAMPAIGN](
     session: object | undefined,
     message: string,
   ): never;

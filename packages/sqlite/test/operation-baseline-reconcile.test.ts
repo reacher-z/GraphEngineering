@@ -16,12 +16,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ensureSQLiteCycleStoreSchema } from "../src/migrations.js";
 import {
   SQLITE_BASELINE_COMPLETE_CHECKPOINT_CAMPAIGN,
+  SQLITE_BASELINE_COMPLETE_LEASE_LOCK_HOLD_CAMPAIGN,
   SQLITE_BASELINE_COOPERATIVE_ENTRIES,
   SQLITE_BASELINE_BEGIN_ORDERED_HANDOFF,
   SQLITE_BASELINE_COMPLETE_STREAM_RECORD_CAMPAIGN,
   SQLITE_BASELINE_CONSUME_OWNED_WRITE,
   SQLITE_BASELINE_FENCE_ORDERED_HANDOFF,
   SQLITE_BASELINE_FENCE_CHECKPOINT_CAMPAIGN,
+  SQLITE_BASELINE_FENCE_LEASE_LOCK_HOLD_CAMPAIGN,
   SQLITE_BASELINE_FENCE_STREAM_RECORD_CAMPAIGN,
   SQLITE_BASELINE_OWNED_WRITE,
   type SQLiteBaselineCooperativeSource,
@@ -33,6 +35,12 @@ import {
   SQLiteCheckpointInvariantCampaign,
   runSQLiteCheckpointInvariantCampaign,
 } from "../src/operation-baseline-checkpoint-invariants.js";
+import {
+  SQLITE_LEASE_LOCK_HOLD_RULES,
+  SQLiteLeaseLockHoldInvariantCampaign,
+  runSQLiteLeaseLockHoldInvariantCampaign,
+  type SQLiteLeaseLockHoldRuleId,
+} from "../src/operation-baseline-lease-lock-hold-invariants.js";
 import { stageSQLiteV1BaselineSourceIntoTempStage } from "../src/operation-baseline-reconcile.js";
 import {
   SQLiteV1BaselineOrderedTempReader,
@@ -2843,5 +2851,1511 @@ describe("SQLite checkpoint invariant campaign", () => {
     ]) expect(sql).toContain(path);
     expect(sql).toContain("current.committed_at_ms IS NOT latest.recorded_at_ms");
     expect(sql).toContain("json_type(CAST(common.state_blob AS TEXT), '$.summary') IS NOT 'null'");
+  });
+});
+
+function insertInvariantLease(
+  connection: SQLiteConnection,
+  tenantId: string,
+  streamId: string,
+  lastEpoch: number,
+  active?: Readonly<{
+    leaseId: string;
+    holderId: string;
+    acquiredAtMs: number;
+    expiresAtMs: number;
+  }>,
+): void {
+  connection.prepare(`INSERT INTO ge_cycle_leases
+    (tenant_id, stream_id, active_lease_id, active_holder_id,
+     active_lease_epoch, active_fencing_token, active_acquired_at_ms,
+     active_expires_at_ms, last_lease_epoch, last_fencing_token, updated_at_ms)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, "inspect-schema").run(
+    tenantId, streamId, active?.leaseId ?? null, active?.holderId ?? null,
+    active === undefined ? null : lastEpoch, active === undefined ? null : lastEpoch,
+    active?.acquiredAtMs ?? null, active?.expiresAtMs ?? null,
+    lastEpoch, lastEpoch, NOW,
+  );
+}
+
+function insertInvariantUsedLease(
+  connection: SQLiteConnection,
+  tenantId: string,
+  streamId: string,
+  leaseId: string,
+  epoch: number,
+  firstUsedAtMs: number,
+): void {
+  connection.prepare(`INSERT INTO ge_cycle_used_lease_ids
+    (tenant_id, stream_id, lease_id, lease_epoch, fencing_token, first_used_at_ms)
+    VALUES (?, ?, ?, ?, ?, ?)`, "inspect-schema").run(
+    tenantId, streamId, leaseId, epoch, epoch, firstUsedAtMs,
+  );
+}
+
+function insertInvariantHold(
+  connection: SQLiteConnection,
+  tenantId: string,
+  streamId: string,
+  holdId: string,
+): void {
+  connection.prepare(`INSERT INTO ge_cycle_legal_holds
+    (tenant_id, stream_id, hold_id, placed_at_ms) VALUES (?, ?, ?, ?)`,
+  "inspect-schema").run(tenantId, streamId, holdId, NOW);
+}
+
+function sealedHostileLeaseLockHoldFixture(): Sealed {
+  const connection = opened(NOW);
+  connection.execTrusted("PRAGMA foreign_keys = OFF", "inspect-schema");
+  const addStream = (tenantId: string, streamId: string, recordId: string): void => {
+    const hash = insertInvariantRecord(
+      connection, tenantId, streamId, recordId, 0, null, NOW,
+    );
+    insertInvariantStream(connection, tenantId, streamId, 0, hash, NOW);
+  };
+
+  addStream("tenant-foreign", "stream-orphan", "record-stream-orphan-0");
+  insertInvariantLease(connection, "tenant-lease-orphan", "stream-orphan", 0);
+  insertInvariantHold(connection, "tenant-hold-orphan", "stream-orphan", "hold-orphan");
+
+  addStream("tenant-start", "stream-start", "record-stream-start-0");
+  insertInvariantLease(connection, "tenant-start", "stream-start", 2);
+  insertInvariantUsedLease(
+    connection, "tenant-start", "stream-start", "lease-start-2", 2, NOW - 100,
+  );
+
+  addStream("tenant-interior", "stream-interior", "record-stream-interior-0");
+  insertInvariantLease(connection, "tenant-interior", "stream-interior", 3);
+  insertInvariantUsedLease(
+    connection, "tenant-interior", "stream-interior", "lease-interior-1", 1, NOW - 100,
+  );
+  insertInvariantUsedLease(
+    connection, "tenant-interior", "stream-interior", "lease-interior-3", 3, NOW - 100,
+  );
+
+  addStream("tenant-extra", "stream-extra", "record-stream-extra-0");
+  insertInvariantLease(connection, "tenant-extra", "stream-extra", 2);
+  for (const epoch of [1, 2, 3]) {
+    insertInvariantUsedLease(
+      connection, "tenant-extra", "stream-extra", `lease-extra-${epoch}`,
+      epoch, NOW - 100,
+    );
+  }
+
+  addStream("tenant-active-id", "stream-active-id", "record-stream-active-id-0");
+  insertInvariantLease(connection, "tenant-active-id", "stream-active-id", 1, {
+    leaseId: "lease-active-wrong", holderId: "holder-active-id",
+    acquiredAtMs: NOW - 100, expiresAtMs: NOW + 100,
+  });
+  insertInvariantUsedLease(
+    connection, "tenant-active-id", "stream-active-id", "lease-active-terminal", 1, NOW - 100,
+  );
+
+  addStream("tenant-active-clock", "stream-active-clock", "record-stream-active-clock-0");
+  insertInvariantLease(connection, "tenant-active-clock", "stream-active-clock", 1, {
+    leaseId: "lease-active-clock", holderId: "holder-active-clock",
+    acquiredAtMs: NOW - 100, expiresAtMs: NOW + 100,
+  });
+  insertInvariantUsedLease(
+    connection, "tenant-active-clock", "stream-active-clock", "lease-active-clock", 1, NOW - 101,
+  );
+
+  addStream("tenant-zero", "stream-zero", "record-stream-zero-0");
+  insertInvariantLease(connection, "tenant-zero", "stream-zero", 0);
+
+  addStream("tenant-retired", "stream-retired", "record-stream-retired-0");
+  insertInvariantLease(connection, "tenant-retired", "stream-retired", 2);
+  insertInvariantUsedLease(
+    connection, "tenant-retired", "stream-retired", "lease-retired-1", 1, NOW - 100,
+  );
+  insertInvariantUsedLease(
+    connection, "tenant-retired", "stream-retired", "lease-retired-2", 2, NOW - 100,
+  );
+
+  addStream("tenant-active-valid", "stream-active-valid", "record-stream-active-valid-0");
+  insertInvariantLease(connection, "tenant-active-valid", "stream-active-valid", 1, {
+    leaseId: "lease-active-valid", holderId: "holder-active-valid",
+    acquiredAtMs: NOW - 100, expiresAtMs: NOW + 100,
+  });
+  insertInvariantUsedLease(
+    connection, "tenant-active-valid", "stream-active-valid", "lease-active-valid", 1, NOW - 100,
+  );
+
+  insertInvariantHold(connection, "tenant-active-clock", "stream-active-clock", "hold-valid-a");
+  insertInvariantHold(connection, "tenant-active-clock", "stream-active-clock", "hold-valid-b");
+
+  connection.prepare(`UPDATE ge_cycle_migration_lock SET
+    active_lock_id = 'lock-active-wrong', active_owner_id = 'owner-active',
+    active_source_version = 1, active_target_version = 2,
+    active_lock_epoch = 3, active_fencing_token = 3,
+    active_acquired_at_ms = ?, active_expires_at_ms = ?,
+    last_lock_epoch = 3, last_fencing_token = 3, updated_at_ms = ?
+    WHERE singleton = 1`, "inspect-schema").run(NOW - 200, NOW + 200, NOW);
+  connection.prepare(`INSERT INTO ge_cycle_used_migration_lock_ids
+    (lock_id, lock_epoch, fencing_token, first_used_at_ms)
+    VALUES ('lock-history-2', 2, 2, ?), ('lock-terminal-3', 3, 3, ?)`,
+  "inspect-schema").run(NOW - 201, NOW - 201);
+
+  connection.execTrusted("BEGIN EXCLUSIVE", "inspect-schema");
+  const stage = createSQLiteBaselineTempStage(
+    connection, proveSQLiteExclusiveBaselineTransaction(connection),
+  ) as SQLiteBaselineTempStage & SQLiteBaselineCooperativeStage;
+  const source = captureSQLiteV1BaselineSourceSummary(
+    connection, NOW,
+  ) as SQLiteV1BaselineSourceSummary & SQLiteBaselineCooperativeSource;
+  stageSQLiteV1BaselineSourceIntoTempStage(connection, source, stage);
+  const projectionIdentity = readSQLiteV1BaselineOrderedTempProjection(
+    connection, source, stage,
+  );
+  runSQLiteStreamRecordInvariantCampaign(connection, projectionIdentity, stage);
+  runSQLiteCheckpointInvariantCampaign(connection, projectionIdentity, stage);
+  return { connection, source, stage, projectionIdentity };
+}
+
+function sealedLeaseLockHoldSource(
+  populate: (connection: SQLiteConnection) => void,
+): Sealed {
+  const connection = opened(NOW);
+  connection.execTrusted("PRAGMA foreign_keys = OFF", "inspect-schema");
+  populate(connection);
+  connection.execTrusted("BEGIN EXCLUSIVE", "inspect-schema");
+  const stage = createSQLiteBaselineTempStage(
+    connection, proveSQLiteExclusiveBaselineTransaction(connection),
+  ) as SQLiteBaselineTempStage & SQLiteBaselineCooperativeStage;
+  const source = captureSQLiteV1BaselineSourceSummary(
+    connection, NOW,
+  ) as SQLiteV1BaselineSourceSummary & SQLiteBaselineCooperativeSource;
+  stageSQLiteV1BaselineSourceIntoTempStage(connection, source, stage);
+  const projectionIdentity = readSQLiteV1BaselineOrderedTempProjection(
+    connection, source, stage,
+  );
+  runSQLiteStreamRecordInvariantCampaign(connection, projectionIdentity, stage);
+  runSQLiteCheckpointInvariantCampaign(connection, projectionIdentity, stage);
+  return { connection, source, stage, projectionIdentity };
+}
+
+function sealedForLeaseLockHold(): Sealed {
+  const run = sealedForCheckpoint(false);
+  runSQLiteCheckpointInvariantCampaign(
+    run.connection, run.projectionIdentity, run.stage,
+  );
+  return run;
+}
+
+describe("SQLite lease/lock/hold invariant campaign", () => {
+  it("reports the exact shared hostile lease/lock/hold vector and identity", () => {
+    const run = sealedHostileLeaseLockHoldFixture();
+    try {
+      expect(run.projectionIdentity).toEqual({
+        baselineId: "v2-fa4f8ccf6009797f4204ecbb8c85cc1d753ce219ce25630ef8af21558326f2af",
+        entryCount: 46,
+        legacyOperationCount: 0,
+        firstEntryHash: "f061b7d1fd823d623dc13ab12c78806cf6457e2f6e2f054b235d26d8abee787c",
+        finalEntryHash: "6b929039b709ef0a09818896df9d0366564389219e7fbec1866648bd67684638",
+        projectionSha256: "ebc3aab7adc7062aee8067e2bbada04d14f0502802f1241dd62b2a790eb9e755",
+      });
+      expect(runSQLiteLeaseLockHoldInvariantCampaign(
+        run.connection, run.projectionIdentity, run.stage,
+      ).diagnostics).toEqual([
+        { ruleId: "BLR_LEASE_STREAM_MISSING", violationCount: 1, diagnosticsTruncated: false },
+        { ruleId: "BLR_LEASE_HISTORY_INCOMPLETE", violationCount: 3, diagnosticsTruncated: false },
+        { ruleId: "BLR_LEASE_ACTIVE_BINDING", violationCount: 2, diagnosticsTruncated: false },
+        { ruleId: "BLR_MIGRATION_LOCK_HISTORY_INCOMPLETE", violationCount: 1, diagnosticsTruncated: false },
+        { ruleId: "BLR_MIGRATION_LOCK_ACTIVE_BINDING", violationCount: 1, diagnosticsTruncated: false },
+        { ruleId: "BLR_HOLD_STREAM_MISSING", violationCount: 1, diagnosticsTruncated: false },
+      ]);
+    } finally {
+      close(run);
+    }
+  });
+
+  it("executes every rule against an isolated real-source witness", () => {
+    const addStream = (connection: SQLiteConnection, tenant: string, stream: string): void => {
+      const hash = insertInvariantRecord(
+        connection, tenant, stream, `record-${stream}-0`, 0, null, NOW,
+      );
+      insertInvariantStream(connection, tenant, stream, 0, hash, NOW);
+    };
+    const cases: readonly [
+      SQLiteLeaseLockHoldRuleId,
+      (connection: SQLiteConnection) => void,
+    ][] = [
+      ["BLR_LEASE_STREAM_MISSING", (connection) => {
+        insertInvariantLease(connection, "tenant-orphan", "stream-orphan", 0);
+      }],
+      ["BLR_LEASE_HISTORY_INCOMPLETE", (connection) => {
+        addStream(connection, "tenant-gap", "stream-gap");
+        insertInvariantLease(connection, "tenant-gap", "stream-gap", 2);
+        insertInvariantUsedLease(
+          connection, "tenant-gap", "stream-gap", "lease-gap-2", 2, NOW - 100,
+        );
+      }],
+      ["BLR_LEASE_ACTIVE_BINDING", (connection) => {
+        addStream(connection, "tenant-active", "stream-active");
+        insertInvariantLease(connection, "tenant-active", "stream-active", 1, {
+          leaseId: "lease-active", holderId: "holder-active",
+          acquiredAtMs: NOW - 100, expiresAtMs: NOW + 100,
+        });
+        insertInvariantUsedLease(
+          connection, "tenant-active", "stream-active", "lease-other", 1, NOW - 100,
+        );
+      }],
+      ["BLR_MIGRATION_LOCK_HISTORY_INCOMPLETE", (connection) => {
+        connection.prepare(`UPDATE ge_cycle_migration_lock SET
+          last_lock_epoch = 2, last_fencing_token = 2, updated_at_ms = ?
+          WHERE singleton = 1`, "inspect-schema").run(NOW);
+        connection.prepare(`INSERT INTO ge_cycle_used_migration_lock_ids
+          (lock_id, lock_epoch, fencing_token, first_used_at_ms)
+          VALUES ('lock-gap-2', 2, 2, ?)`, "inspect-schema").run(NOW - 100);
+      }],
+      ["BLR_MIGRATION_LOCK_ACTIVE_BINDING", (connection) => {
+        connection.prepare(`UPDATE ge_cycle_migration_lock SET
+          active_lock_id = 'lock-active', active_owner_id = 'owner-active',
+          active_source_version = 1, active_target_version = 2,
+          active_lock_epoch = 1, active_fencing_token = 1,
+          active_acquired_at_ms = ?, active_expires_at_ms = ?,
+          last_lock_epoch = 1, last_fencing_token = 1, updated_at_ms = ?
+          WHERE singleton = 1`, "inspect-schema").run(NOW - 100, NOW + 100, NOW);
+        connection.prepare(`INSERT INTO ge_cycle_used_migration_lock_ids
+          (lock_id, lock_epoch, fencing_token, first_used_at_ms)
+          VALUES ('lock-other', 1, 1, ?)`, "inspect-schema").run(NOW - 100);
+      }],
+      ["BLR_HOLD_STREAM_MISSING", (connection) => {
+        insertInvariantHold(connection, "tenant-hold", "stream-hold", "hold-orphan");
+      }],
+    ];
+    for (const [ruleId, populate] of cases) {
+      const run = sealedLeaseLockHoldSource(populate);
+      try {
+        expect(runSQLiteLeaseLockHoldInvariantCampaign(
+          run.connection, run.projectionIdentity, run.stage,
+        ).diagnostics).toEqual([{ ruleId, violationCount: 1, diagnosticsTruncated: false }]);
+      } finally {
+        close(run);
+      }
+    }
+  });
+
+  it("rejects retired active-ID reuse without double-counting complete history", () => {
+    const run = sealedLeaseLockHoldSource((connection) => {
+      const hash = insertInvariantRecord(
+        connection, "tenant-reuse", "stream-reuse", "record-stream-reuse-0",
+        0, null, NOW,
+      );
+      insertInvariantStream(connection, "tenant-reuse", "stream-reuse", 0, hash, NOW);
+      insertInvariantLease(connection, "tenant-reuse", "stream-reuse", 2, {
+        leaseId: "lease-reused", holderId: "holder-reuse",
+        acquiredAtMs: NOW - 100, expiresAtMs: NOW + 100,
+      });
+      insertInvariantUsedLease(
+        connection, "tenant-reuse", "stream-reuse", "lease-reused", 1, NOW - 200,
+      );
+      insertInvariantUsedLease(
+        connection, "tenant-reuse", "stream-reuse", "lease-terminal-2", 2, NOW - 100,
+      );
+    });
+    try {
+      expect(runSQLiteLeaseLockHoldInvariantCampaign(
+        run.connection, run.projectionIdentity, run.stage,
+      ).diagnostics).toEqual([{
+        ruleId: "BLR_LEASE_ACTIVE_BINDING",
+        violationCount: 1,
+        diagnosticsTruncated: false,
+      }]);
+    } finally {
+      close(run);
+    }
+  });
+
+  it("rejects duplicate lease/lock epochs and multiple singleton candidates early", () => {
+    const connection = opened(NOW);
+    connection.execTrusted("PRAGMA foreign_keys = OFF", "inspect-schema");
+    const hash = insertInvariantRecord(
+      connection, "tenant-duplicate", "stream-duplicate", "record-stream-duplicate-0",
+      0, null, NOW,
+    );
+    insertInvariantStream(connection, "tenant-duplicate", "stream-duplicate", 0, hash, NOW);
+    insertInvariantLease(connection, "tenant-duplicate", "stream-duplicate", 2);
+    insertInvariantUsedLease(
+      connection, "tenant-duplicate", "stream-duplicate", "lease-duplicate-a", 1, NOW,
+    );
+    expect(() => insertInvariantUsedLease(
+      connection, "tenant-duplicate", "stream-duplicate", "lease-duplicate-b", 1, NOW,
+    )).toThrow();
+    connection.prepare(`INSERT INTO ge_cycle_used_migration_lock_ids
+      (lock_id, lock_epoch, fencing_token, first_used_at_ms)
+      VALUES ('lock-duplicate-a', 1, 1, ?)`, "inspect-schema").run(NOW);
+    expect(() => connection.prepare(`INSERT INTO ge_cycle_used_migration_lock_ids
+      (lock_id, lock_epoch, fencing_token, first_used_at_ms)
+      VALUES ('lock-duplicate-b', 1, 1, ?)`, "inspect-schema").run(NOW))
+      .toThrow();
+    expect(() => connection.prepare(`INSERT INTO ge_cycle_migration_lock
+      (singleton, active_lock_id, active_owner_id, active_source_version,
+       active_target_version, active_lock_epoch, active_fencing_token,
+       active_acquired_at_ms, active_expires_at_ms, last_lock_epoch,
+       last_fencing_token, updated_at_ms)
+      VALUES (2, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0, 0, ?)`,
+    "inspect-schema").run(NOW)).toThrow();
+    connection.close();
+
+    const run = sealedForLeaseLockHold();
+    try {
+      run.connection.prepare(
+        `INSERT INTO temp.ge_blr_stage(kind_rank, entry_kind, key_blob, state_blob)
+         SELECT kind_rank, entry_kind,
+                CAST(json_set(CAST(key_blob AS TEXT), '$.singleton', 2) AS BLOB),
+                state_blob
+           FROM temp.ge_blr_stage WHERE kind_rank = 9`,
+        "inspect-schema",
+      ).run();
+      expect(() => runSQLiteLeaseLockHoldInvariantCampaign(
+        run.connection, run.projectionIdentity, run.stage,
+      )).toThrow(/unexplained write|count|coverage/u);
+    } finally {
+      close(run);
+    }
+  });
+
+  it("predecessor campaign reports an empty stream before lease evaluation", () => {
+    const connection = opened(NOW);
+    insertInvariantStream(connection, "tenant-empty-control", "stream-empty-control", -1, null, NOW);
+    insertInvariantLease(connection, "tenant-empty-control", "stream-empty-control", 0);
+    insertInvariantHold(connection, "tenant-empty-control", "stream-empty-control", "hold-empty-a");
+    insertInvariantHold(connection, "tenant-empty-control", "stream-empty-control", "hold-empty-b");
+    connection.execTrusted("BEGIN EXCLUSIVE", "inspect-schema");
+    const stage = createSQLiteBaselineTempStage(
+      connection, proveSQLiteExclusiveBaselineTransaction(connection),
+    ) as SQLiteBaselineTempStage & SQLiteBaselineCooperativeStage;
+    const source = captureSQLiteV1BaselineSourceSummary(
+      connection, NOW,
+    ) as SQLiteV1BaselineSourceSummary & SQLiteBaselineCooperativeSource;
+    try {
+      stageSQLiteV1BaselineSourceIntoTempStage(connection, source, stage);
+      const identity = readSQLiteV1BaselineOrderedTempProjection(connection, source, stage);
+      expect(runSQLiteStreamRecordInvariantCampaign(
+        connection, identity, stage,
+      ).diagnostics).toContainEqual({
+        ruleId: "BLR_STREAM_EMPTY", violationCount: 1, diagnosticsTruncated: false,
+      });
+      expect(runSQLiteCheckpointInvariantCampaign(
+        connection, identity, stage,
+      ).diagnostics).toEqual([]);
+      expect(runSQLiteLeaseLockHoldInvariantCampaign(
+        connection, identity, stage,
+      ).diagnostics).toEqual([]);
+    } finally {
+      stage.dispose();
+      connection.execTrusted("ROLLBACK", "inspect-schema");
+      connection.close();
+    }
+  });
+
+  it("defensively executes rank 6-10 canonical common-binding branches", () => {
+    const addStream = (connection: SQLiteConnection, tenant: string, stream: string): void => {
+      const hash = insertInvariantRecord(
+        connection, tenant, stream, `record-${stream}-0`, 0, null, NOW,
+      );
+      insertInvariantStream(connection, tenant, stream, 0, hash, NOW);
+    };
+    const cases: readonly [
+      number,
+      number,
+      string,
+      unknown,
+      (connection: SQLiteConnection) => void,
+    ][] = [
+      [6, 2, "$.activeHolderId", "substituted-holder", (connection) => {
+        addStream(connection, "tenant-rank6", "stream-rank6");
+        insertInvariantLease(connection, "tenant-rank6", "stream-rank6", 1, {
+          leaseId: "lease-rank6", holderId: "holder-rank6",
+          acquiredAtMs: NOW - 100, expiresAtMs: NOW + 100,
+        });
+        insertInvariantUsedLease(
+          connection, "tenant-rank6", "stream-rank6", "lease-rank6", 1, NOW - 100,
+        );
+      }],
+      [7, 1, "$.firstUsedAtMs", NOW - 99, (connection) => {
+        addStream(connection, "tenant-rank7", "stream-rank7");
+        insertInvariantLease(connection, "tenant-rank7", "stream-rank7", 1);
+        insertInvariantUsedLease(
+          connection, "tenant-rank7", "stream-rank7", "lease-rank7", 1, NOW - 100,
+        );
+      }],
+      [8, 5, "$.placedAtMs", NOW - 1, (connection) => {
+        addStream(connection, "tenant-rank8", "stream-rank8");
+        insertInvariantHold(connection, "tenant-rank8", "stream-rank8", "hold-rank8");
+      }],
+      [9, 4, "$.updatedAtMs", NOW - 1, () => {}],
+      [10, 3, "$.firstUsedAtMs", NOW - 99, (connection) => {
+        connection.prepare(`UPDATE ge_cycle_migration_lock SET
+          last_lock_epoch = 1, last_fencing_token = 1, updated_at_ms = ?
+          WHERE singleton = 1`, "inspect-schema").run(NOW);
+        connection.prepare(`INSERT INTO ge_cycle_used_migration_lock_ids
+          (lock_id, lock_epoch, fencing_token, first_used_at_ms)
+          VALUES ('lock-rank10', 1, 1, ?)`, "inspect-schema").run(NOW - 100);
+      }],
+    ];
+    for (const [kindRank, ruleIndex, path, value, populate] of cases) {
+      const run = sealedLeaseLockHoldSource(populate);
+      try {
+        expect(run.connection.prepare(
+          SQLITE_LEASE_LOCK_HOLD_RULES[ruleIndex]!.sql, "inspect-schema",
+        ).all(17)).toEqual([]);
+        run.connection.prepare(
+          `UPDATE temp.ge_blr_stage
+              SET state_blob = CAST(json_set(CAST(state_blob AS TEXT), ?, ?) AS BLOB)
+            WHERE kind_rank = ?`,
+          "inspect-schema",
+        ).run(path, value, kindRank);
+        expect(run.connection.prepare(
+          SQLITE_LEASE_LOCK_HOLD_RULES[ruleIndex]!.sql, "inspect-schema",
+        ).all(17)).toEqual([[1n]]);
+      } finally {
+        if (run.connection.isTransaction) run.connection.execTrusted("ROLLBACK", "inspect-schema");
+        run.connection.close();
+      }
+    }
+  });
+
+  it("defensively detects clock-only active binding and lock version reversal", () => {
+    const leaseRun = sealedLeaseLockHoldSource((connection) => {
+      const hash = insertInvariantRecord(
+        connection, "tenant-clock", "stream-clock", "record-stream-clock-0",
+        0, null, NOW,
+      );
+      insertInvariantStream(connection, "tenant-clock", "stream-clock", 0, hash, NOW);
+      insertInvariantLease(connection, "tenant-clock", "stream-clock", 1, {
+        leaseId: "lease-clock", holderId: "holder-clock",
+        acquiredAtMs: NOW - 100, expiresAtMs: NOW + 100,
+      });
+      insertInvariantUsedLease(
+        connection, "tenant-clock", "stream-clock", "lease-clock", 1, NOW - 100,
+      );
+    });
+    try {
+      leaseRun.connection.prepare(
+        "UPDATE temp.ge_blr_leases SET active_acquired_at_ms = ?",
+        "inspect-schema",
+      ).run(NOW - 99);
+      leaseRun.connection.prepare(
+        `UPDATE temp.ge_blr_stage
+            SET state_blob = CAST(json_set(CAST(state_blob AS TEXT), '$.activeAcquiredAtMs', ?) AS BLOB)
+          WHERE kind_rank = 6`,
+        "inspect-schema",
+      ).run(NOW - 99);
+      expect(leaseRun.connection.prepare(
+        SQLITE_LEASE_LOCK_HOLD_RULES[2].sql, "inspect-schema",
+      ).all(17)).toEqual([[1n]]);
+    } finally {
+      leaseRun.connection.execTrusted("ROLLBACK", "inspect-schema");
+      leaseRun.connection.close();
+    }
+
+    const lockRun = sealedLeaseLockHoldSource((connection) => {
+      connection.prepare(`UPDATE ge_cycle_migration_lock SET
+        active_lock_id = 'lock-active', active_owner_id = 'owner-active',
+        active_source_version = 1, active_target_version = 2,
+        active_lock_epoch = 1, active_fencing_token = 1,
+        active_acquired_at_ms = ?, active_expires_at_ms = ?,
+        last_lock_epoch = 1, last_fencing_token = 1, updated_at_ms = ?
+        WHERE singleton = 1`, "inspect-schema").run(NOW - 100, NOW + 100, NOW);
+      connection.prepare(`INSERT INTO ge_cycle_used_migration_lock_ids
+        (lock_id, lock_epoch, fencing_token, first_used_at_ms)
+        VALUES ('lock-active', 1, 1, ?)`, "inspect-schema").run(NOW - 100);
+    });
+    try {
+      lockRun.connection.execTrusted("PRAGMA ignore_check_constraints = ON", "inspect-schema");
+      lockRun.connection.prepare(
+        "UPDATE temp.ge_blr_migration_lock SET active_source_version = 3",
+        "inspect-schema",
+      ).run();
+      lockRun.connection.prepare(
+        `UPDATE temp.ge_blr_stage
+            SET state_blob = CAST(json_set(CAST(state_blob AS TEXT), '$.activeSourceVersion', 3) AS BLOB)
+          WHERE kind_rank = 9`,
+        "inspect-schema",
+      ).run();
+      expect(lockRun.connection.prepare(
+        SQLITE_LEASE_LOCK_HOLD_RULES[4].sql, "inspect-schema",
+      ).all(17)).toEqual([[1n]]);
+    } finally {
+      lockRun.connection.execTrusted("ROLLBACK", "inspect-schema");
+      lockRun.connection.close();
+    }
+  });
+
+  it("kills every active lease null, expiry inversion and negative high-water", () => {
+    const run = sealedLeaseLockHoldSource((connection) => {
+      const hash = insertInvariantRecord(
+        connection, "tenant-tuple", "stream-tuple", "record-stream-tuple-0",
+        0, null, NOW,
+      );
+      insertInvariantStream(connection, "tenant-tuple", "stream-tuple", 0, hash, NOW);
+      insertInvariantLease(connection, "tenant-tuple", "stream-tuple", 1, {
+        leaseId: "lease-tuple", holderId: "holder-tuple",
+        acquiredAtMs: NOW - 100, expiresAtMs: NOW + 100,
+      });
+      insertInvariantUsedLease(
+        connection, "tenant-tuple", "stream-tuple", "lease-tuple", 1, NOW - 100,
+      );
+    });
+    const columns = [
+      ["active_lease_id", "activeLeaseId", "lease-tuple"],
+      ["active_holder_id", "activeHolderId", "holder-tuple"],
+      ["active_lease_epoch", "activeLeaseEpoch", 1],
+      ["active_fencing_token", "activeFencingToken", 1],
+      ["active_acquired_at_ms", "activeAcquiredAtMs", NOW - 100],
+      ["active_expires_at_ms", "activeExpiresAtMs", NOW + 100],
+    ] as const;
+    try {
+      run.connection.execTrusted("PRAGMA ignore_check_constraints = ON", "inspect-schema");
+      for (const [column, stateField, original] of columns) {
+        run.connection.prepare(
+          `UPDATE temp.ge_blr_leases SET ${column} = NULL`, "inspect-schema",
+        ).run();
+        run.connection.prepare(
+          `UPDATE temp.ge_blr_stage
+              SET state_blob = CAST(json_set(CAST(state_blob AS TEXT), ?, NULL) AS BLOB)
+            WHERE kind_rank = 6`,
+          "inspect-schema",
+        ).run(`$.${stateField}`);
+        expect(run.connection.prepare(
+          SQLITE_LEASE_LOCK_HOLD_RULES[2].sql, "inspect-schema",
+        ).all(17)).toEqual([[1n]]);
+        run.connection.prepare(
+          `UPDATE temp.ge_blr_leases SET ${column} = ?`, "inspect-schema",
+        ).run(original);
+        run.connection.prepare(
+          `UPDATE temp.ge_blr_stage
+              SET state_blob = CAST(json_set(CAST(state_blob AS TEXT), ?, ?) AS BLOB)
+            WHERE kind_rank = 6`,
+          "inspect-schema",
+        ).run(`$.${stateField}`, original);
+      }
+      run.connection.prepare(
+        "UPDATE temp.ge_blr_leases SET active_expires_at_ms = active_acquired_at_ms",
+        "inspect-schema",
+      ).run();
+      run.connection.prepare(
+        `UPDATE temp.ge_blr_stage
+            SET state_blob = CAST(json_set(CAST(state_blob AS TEXT), '$.activeExpiresAtMs', ?) AS BLOB)
+          WHERE kind_rank = 6`,
+        "inspect-schema",
+      ).run(NOW - 100);
+      expect(run.connection.prepare(
+        SQLITE_LEASE_LOCK_HOLD_RULES[2].sql, "inspect-schema",
+      ).all(17)).toEqual([[1n]]);
+      run.connection.prepare(
+        `UPDATE temp.ge_blr_leases
+            SET active_expires_at_ms = ?, last_lease_epoch = -1, last_fencing_token = -1`,
+        "inspect-schema",
+      ).run(NOW + 100);
+      run.connection.prepare(
+        `UPDATE temp.ge_blr_stage
+            SET state_blob = CAST(json_set(
+              json_set(json_set(CAST(state_blob AS TEXT), '$.activeExpiresAtMs', ?),
+                       '$.lastLeaseEpoch', -1), '$.lastFencingToken', -1
+            ) AS BLOB)
+          WHERE kind_rank = 6`,
+        "inspect-schema",
+      ).run(NOW + 100);
+      expect(run.connection.prepare(
+        SQLITE_LEASE_LOCK_HOLD_RULES[2].sql, "inspect-schema",
+      ).all(17)).toEqual([[1n]]);
+    } finally {
+      run.connection.execTrusted("ROLLBACK", "inspect-schema");
+      run.connection.close();
+    }
+  });
+
+  it("rejects retired migration lock ID reuse with complete history", () => {
+    const run = sealedLeaseLockHoldSource((connection) => {
+      connection.prepare(`UPDATE ge_cycle_migration_lock SET
+        active_lock_id = 'lock-reused', active_owner_id = 'owner-reuse',
+        active_source_version = 1, active_target_version = 2,
+        active_lock_epoch = 2, active_fencing_token = 2,
+        active_acquired_at_ms = ?, active_expires_at_ms = ?,
+        last_lock_epoch = 2, last_fencing_token = 2, updated_at_ms = ?
+        WHERE singleton = 1`, "inspect-schema").run(NOW - 100, NOW + 100, NOW);
+      connection.prepare(`INSERT INTO ge_cycle_used_migration_lock_ids
+        (lock_id, lock_epoch, fencing_token, first_used_at_ms)
+        VALUES ('lock-reused', 1, 1, ?), ('lock-terminal-2', 2, 2, ?)`,
+      "inspect-schema").run(NOW - 200, NOW - 100);
+    });
+    try {
+      expect(runSQLiteLeaseLockHoldInvariantCampaign(
+        run.connection, run.projectionIdentity, run.stage,
+      ).diagnostics).toEqual([{
+        ruleId: "BLR_MIGRATION_LOCK_ACTIVE_BINDING",
+        violationCount: 1,
+        diagnosticsTruncated: false,
+      }]);
+    } finally {
+      close(run);
+    }
+  });
+
+  it("kills every active migration-lock field null with synchronized common drift", () => {
+    const run = sealedLeaseLockHoldSource((connection) => {
+      connection.prepare(`UPDATE ge_cycle_migration_lock SET
+        active_lock_id = 'lock-null', active_owner_id = 'owner-null',
+        active_source_version = 1, active_target_version = 2,
+        active_lock_epoch = 1, active_fencing_token = 1,
+        active_acquired_at_ms = ?, active_expires_at_ms = ?,
+        last_lock_epoch = 1, last_fencing_token = 1, updated_at_ms = ?
+        WHERE singleton = 1`, "inspect-schema").run(NOW - 100, NOW + 100, NOW);
+      connection.prepare(`INSERT INTO ge_cycle_used_migration_lock_ids
+        (lock_id, lock_epoch, fencing_token, first_used_at_ms)
+        VALUES ('lock-null', 1, 1, ?)`, "inspect-schema").run(NOW - 100);
+    });
+    const columns = [
+      ["active_lock_id", "activeLockId", "lock-null"],
+      ["active_owner_id", "activeOwnerId", "owner-null"],
+      ["active_source_version", "activeSourceVersion", 1],
+      ["active_target_version", "activeTargetVersion", 2],
+      ["active_lock_epoch", "activeLockEpoch", 1],
+      ["active_fencing_token", "activeFencingToken", 1],
+      ["active_acquired_at_ms", "activeAcquiredAtMs", NOW - 100],
+      ["active_expires_at_ms", "activeExpiresAtMs", NOW + 100],
+    ] as const;
+    try {
+      run.connection.execTrusted("PRAGMA ignore_check_constraints = ON", "inspect-schema");
+      for (const [column, stateField, original] of columns) {
+        run.connection.prepare(
+          `UPDATE temp.ge_blr_migration_lock SET ${column} = NULL`, "inspect-schema",
+        ).run();
+        run.connection.prepare(
+          `UPDATE temp.ge_blr_stage
+              SET state_blob = CAST(json_set(CAST(state_blob AS TEXT), ?, NULL) AS BLOB)
+            WHERE kind_rank = 9`,
+          "inspect-schema",
+        ).run(`$.${stateField}`);
+        expect(run.connection.prepare(
+          SQLITE_LEASE_LOCK_HOLD_RULES[4].sql, "inspect-schema",
+        ).all(17)).toEqual([[1n]]);
+        run.connection.prepare(
+          `UPDATE temp.ge_blr_migration_lock SET ${column} = ?`, "inspect-schema",
+        ).run(original);
+        run.connection.prepare(
+          `UPDATE temp.ge_blr_stage
+              SET state_blob = CAST(json_set(CAST(state_blob AS TEXT), ?, ?) AS BLOB)
+            WHERE kind_rank = 9`,
+          "inspect-schema",
+        ).run(`$.${stateField}`, original);
+      }
+      run.connection.prepare(
+        "UPDATE temp.ge_blr_migration_lock SET active_expires_at_ms = active_acquired_at_ms",
+        "inspect-schema",
+      ).run();
+      run.connection.prepare(
+        `UPDATE temp.ge_blr_stage
+            SET state_blob = CAST(json_set(CAST(state_blob AS TEXT), '$.activeExpiresAtMs', ?) AS BLOB)
+          WHERE kind_rank = 9`,
+        "inspect-schema",
+      ).run(NOW - 100);
+      expect(run.connection.prepare(
+        SQLITE_LEASE_LOCK_HOLD_RULES[4].sql, "inspect-schema",
+      ).all(17)).toEqual([[1n]]);
+
+      run.connection.prepare(
+        `UPDATE temp.ge_blr_migration_lock
+            SET active_expires_at_ms = ?, last_lock_epoch = -1, last_fencing_token = -1`,
+        "inspect-schema",
+      ).run(NOW + 100);
+      run.connection.prepare(
+        `UPDATE temp.ge_blr_stage
+            SET state_blob = CAST(json_set(
+              json_set(json_set(CAST(state_blob AS TEXT), '$.activeExpiresAtMs', ?),
+                       '$.lastLockEpoch', -1), '$.lastFencingToken', -1
+            ) AS BLOB)
+          WHERE kind_rank = 9`,
+        "inspect-schema",
+      ).run(NOW + 100);
+      expect(run.connection.prepare(
+        SQLITE_LEASE_LOCK_HOLD_RULES[4].sql, "inspect-schema",
+      ).all(17)).toEqual([[1n]]);
+    } finally {
+      run.connection.execTrusted("ROLLBACK", "inspect-schema");
+      run.connection.close();
+    }
+  });
+
+  it("kills every rank 6-10 canonical state and key substitution with real SQL", () => {
+    const run = sealedLeaseLockHoldSource((connection) => {
+      const hash = insertInvariantRecord(
+        connection, "tenant-canonical", "stream-canonical", "record-stream-canonical-0",
+        0, null, NOW,
+      );
+      insertInvariantStream(connection, "tenant-canonical", "stream-canonical", 0, hash, NOW);
+      insertInvariantLease(connection, "tenant-canonical", "stream-canonical", 1, {
+        leaseId: "lease-canonical", holderId: "holder-canonical",
+        acquiredAtMs: NOW - 100, expiresAtMs: NOW + 100,
+      });
+      insertInvariantUsedLease(
+        connection, "tenant-canonical", "stream-canonical", "lease-canonical", 1, NOW - 100,
+      );
+      insertInvariantHold(
+        connection, "tenant-canonical", "stream-canonical", "hold-canonical",
+      );
+      connection.prepare(`UPDATE ge_cycle_migration_lock SET
+        active_lock_id = 'lock-canonical', active_owner_id = 'owner-canonical',
+        active_source_version = 1, active_target_version = 2,
+        active_lock_epoch = 1, active_fencing_token = 1,
+        active_acquired_at_ms = ?, active_expires_at_ms = ?,
+        last_lock_epoch = 1, last_fencing_token = 1, updated_at_ms = ?
+        WHERE singleton = 1`, "inspect-schema").run(NOW - 100, NOW + 100, NOW);
+      connection.prepare(`INSERT INTO ge_cycle_used_migration_lock_ids
+        (lock_id, lock_epoch, fencing_token, first_used_at_ms)
+        VALUES ('lock-canonical', 1, 1, ?)`, "inspect-schema").run(NOW - 100);
+    });
+    const stateCases = new Map<number, readonly string[]>([
+      [6, ["activeAcquiredAtMs", "activeExpiresAtMs", "activeFencingToken",
+        "activeHolderId", "activeLeaseEpoch", "activeLeaseId", "lastFencingToken",
+        "lastLeaseEpoch", "streamId", "tenantId", "updatedAtMs"]],
+      [7, ["fencingToken", "firstUsedAtMs", "leaseEpoch", "leaseId", "streamId", "tenantId"]],
+      [8, ["holdId", "placedAtMs", "streamId", "tenantId"]],
+      [9, ["activeAcquiredAtMs", "activeExpiresAtMs", "activeFencingToken",
+        "activeLockEpoch", "activeLockId", "activeOwnerId", "activeSourceVersion",
+        "activeTargetVersion", "lastFencingToken", "lastLockEpoch", "singleton", "updatedAtMs"]],
+      [10, ["fencingToken", "firstUsedAtMs", "lockEpoch", "lockId"]],
+    ]);
+    const keyCases = new Map<number, readonly string[]>([
+      [6, ["tenantId", "streamId"]],
+      [7, ["tenantId", "streamId", "leaseId"]],
+      [8, ["tenantId", "streamId", "holdId"]],
+      [9, ["singleton"]],
+      [10, ["lockId"]],
+    ]);
+    const ruleByRank = new Map([[6, 2], [7, 1], [8, 5], [9, 4], [10, 3]]);
+    try {
+      for (const [kindRank, fields] of stateCases) {
+        const rule = SQLITE_LEASE_LOCK_HOLD_RULES[ruleByRank.get(kindRank)!]!;
+        const original = run.connection.prepare(
+          "SELECT state_blob FROM temp.ge_blr_stage WHERE kind_rank = ? LIMIT 1",
+          "inspect-schema",
+        ).get(kindRank) as unknown as readonly [Uint8Array];
+        for (const field of fields) {
+          run.connection.prepare(
+            `UPDATE temp.ge_blr_stage
+                SET state_blob = CAST(json_set(CAST(state_blob AS TEXT), ?, ?) AS BLOB)
+              WHERE kind_rank = ?`,
+            "inspect-schema",
+          ).run(`$.${field}`, field.includes("Id") ? `substituted-${field}` : 7, kindRank);
+          const rows = run.connection.prepare(rule.sql, "inspect-schema").all(17);
+          expect(rows.length).toBeGreaterThan(0);
+          expect(rows.every((row) => (row as unknown as readonly unknown[])[0] === 1n)).toBe(true);
+          run.connection.prepare(
+            "UPDATE temp.ge_blr_stage SET state_blob = ? WHERE kind_rank = ?",
+            "inspect-schema",
+          ).run(original[0], kindRank);
+        }
+      }
+      for (const [kindRank, fields] of keyCases) {
+        const rule = SQLITE_LEASE_LOCK_HOLD_RULES[ruleByRank.get(kindRank)!]!;
+        const original = run.connection.prepare(
+          "SELECT key_blob FROM temp.ge_blr_stage WHERE kind_rank = ? LIMIT 1",
+          "inspect-schema",
+        ).get(kindRank) as unknown as readonly [Uint8Array];
+        for (const field of fields) {
+          run.connection.prepare(
+            `UPDATE temp.ge_blr_stage
+                SET key_blob = CAST(json_set(CAST(key_blob AS TEXT), ?, ?) AS BLOB)
+              WHERE kind_rank = ?`,
+            "inspect-schema",
+          ).run(`$.${field}`, field === "singleton" ? 2 : `substituted-${field}`, kindRank);
+          expect(run.connection.prepare(rule.sql, "inspect-schema").all(17).length)
+            .toBeGreaterThan(0);
+          run.connection.prepare(
+            "UPDATE temp.ge_blr_stage SET key_blob = ? WHERE kind_rank = ?",
+            "inspect-schema",
+          ).run(original[0], kindRank);
+        }
+      }
+      run.connection.prepare(
+        `UPDATE temp.ge_blr_stage
+            SET state_blob = CAST(json_set(
+              json_set(CAST(state_blob AS TEXT), '$.activeHolderId', 'multi-holder'),
+              '$.updatedAtMs', 7
+            ) AS BLOB)
+          WHERE kind_rank = 6`,
+        "inspect-schema",
+      ).run();
+      expect(run.connection.prepare(
+        SQLITE_LEASE_LOCK_HOLD_RULES[2].sql, "inspect-schema",
+      ).all(17)).toEqual([[1n]]);
+    } finally {
+      if (run.connection.isTransaction) run.connection.execTrusted("ROLLBACK", "inspect-schema");
+      run.connection.close();
+    }
+  });
+
+  it("defends partial inactive tuples, missing singleton and one-unit domain collapse", () => {
+    const partial = sealedLeaseLockHoldSource((connection) => {
+      const hash = insertInvariantRecord(
+        connection, "tenant-inactive", "stream-inactive", "record-stream-inactive-0",
+        0, null, NOW,
+      );
+      insertInvariantStream(connection, "tenant-inactive", "stream-inactive", 0, hash, NOW);
+      insertInvariantLease(connection, "tenant-inactive", "stream-inactive", 0);
+    });
+    try {
+      partial.connection.execTrusted("PRAGMA ignore_check_constraints = ON", "inspect-schema");
+      partial.connection.prepare(
+        "UPDATE temp.ge_blr_leases SET active_holder_id = 'partial-holder'",
+        "inspect-schema",
+      ).run();
+      partial.connection.prepare(
+        `UPDATE temp.ge_blr_stage
+            SET state_blob = CAST(json_set(CAST(state_blob AS TEXT), '$.activeHolderId', 'partial-holder') AS BLOB)
+          WHERE kind_rank = 6`,
+        "inspect-schema",
+      ).run();
+      expect(partial.connection.prepare(
+        SQLITE_LEASE_LOCK_HOLD_RULES[2].sql, "inspect-schema",
+      ).all(17)).toEqual([[1n]]);
+    } finally {
+      partial.connection.execTrusted("ROLLBACK", "inspect-schema");
+      partial.connection.close();
+    }
+
+    const missing = sealedForLeaseLockHold();
+    try {
+      missing.connection.prepare(
+        "DELETE FROM temp.ge_blr_migration_lock", "inspect-schema",
+      ).run();
+      missing.connection.prepare(
+        "DELETE FROM temp.ge_blr_stage WHERE kind_rank = 9", "inspect-schema",
+      ).run();
+      expect(missing.connection.prepare(
+        SQLITE_LEASE_LOCK_HOLD_RULES[3].sql, "inspect-schema",
+      ).all(17)).toEqual([[1n]]);
+      expect(missing.connection.prepare(
+        SQLITE_LEASE_LOCK_HOLD_RULES[4].sql, "inspect-schema",
+      ).all(17)).toEqual([[1n]]);
+    } finally {
+      missing.connection.execTrusted("ROLLBACK", "inspect-schema");
+      missing.connection.close();
+    }
+
+    const collapsed = sealedLeaseLockHoldSource((connection) => {
+      const hash = insertInvariantRecord(
+        connection, "tenant-collapse", "stream-collapse", "record-stream-collapse-0",
+        0, null, NOW,
+      );
+      insertInvariantStream(connection, "tenant-collapse", "stream-collapse", 0, hash, NOW);
+      insertInvariantLease(connection, "tenant-collapse", "stream-collapse", 2);
+      insertInvariantUsedLease(
+        connection, "tenant-collapse", "stream-collapse", "lease-collapse-1", 1, NOW - 100,
+      );
+      insertInvariantUsedLease(
+        connection, "tenant-collapse", "stream-collapse", "lease-collapse-2", 2, NOW - 100,
+      );
+    });
+    try {
+      collapsed.connection.prepare(
+        `UPDATE temp.ge_blr_stage
+            SET state_blob = CAST(json_set(CAST(state_blob AS TEXT), '$.firstUsedAtMs', 7) AS BLOB)
+          WHERE kind_rank = 7`,
+        "inspect-schema",
+      ).run();
+      expect(collapsed.connection.prepare(
+        SQLITE_LEASE_LOCK_HOLD_RULES[1].sql, "inspect-schema",
+      ).all(17)).toEqual([[1n]]);
+    } finally {
+      collapsed.connection.execTrusted("ROLLBACK", "inspect-schema");
+      collapsed.connection.close();
+    }
+  });
+
+  it("returns a deeply frozen empty report for the valid zero-history state", () => {
+    const run = sealedForLeaseLockHold();
+    try {
+      const report = runSQLiteLeaseLockHoldInvariantCampaign(
+        run.connection, run.projectionIdentity, run.stage,
+      );
+      expect(report).toEqual({ projectionIdentity: run.projectionIdentity, diagnostics: [] });
+      expect(report.projectionIdentity).toBe(run.projectionIdentity);
+      expect(Object.isFrozen(report)).toBe(true);
+      expect(Object.isFrozen(report.diagnostics)).toBe(true);
+      expect(Object.keys(report)).toEqual(["projectionIdentity", "diagnostics"]);
+    } finally {
+      close(run);
+    }
+  });
+
+  it("keeps the exact six-rule registry order and bounded marker SQL", () => {
+    expect(SQLITE_LEASE_LOCK_HOLD_RULES.map((rule) => rule.ruleId)).toEqual([
+      "BLR_LEASE_STREAM_MISSING",
+      "BLR_LEASE_HISTORY_INCOMPLETE",
+      "BLR_LEASE_ACTIVE_BINDING",
+      "BLR_MIGRATION_LOCK_HISTORY_INCOMPLETE",
+      "BLR_MIGRATION_LOCK_ACTIVE_BINDING",
+      "BLR_HOLD_STREAM_MISSING",
+    ]);
+    expect(Object.isFrozen(SQLITE_LEASE_LOCK_HOLD_RULES)).toBe(true);
+    expect(SQLITE_LEASE_LOCK_HOLD_RULES.every(Object.isFrozen)).toBe(true);
+    expect(SQLITE_LEASE_LOCK_HOLD_RULES.every((rule) => rule.sql.endsWith("LIMIT ?"))).toBe(true);
+  });
+
+  it("uses every frozen epoch index with only the allowed lease-domain GROUP", () => {
+    const run = sealedForLeaseLockHold();
+    try {
+      const plans = new Map(SQLITE_LEASE_LOCK_HOLD_RULES.map((rule) => [
+        rule.ruleId,
+        run.connection.prepare(
+          `EXPLAIN QUERY PLAN ${rule.sql}`, "inspect-schema",
+        ).all(17).map((row) => String((row as unknown as readonly unknown[])[3])),
+      ]));
+      for (const ruleId of [
+        "BLR_LEASE_HISTORY_INCOMPLETE", "BLR_LEASE_ACTIVE_BINDING",
+      ]) expect(plans.get(ruleId)?.join("\n")).toContain("ge_blr_used_leases_epoch_uidx");
+      for (const ruleId of [
+        "BLR_MIGRATION_LOCK_HISTORY_INCOMPLETE", "BLR_MIGRATION_LOCK_ACTIVE_BINDING",
+      ]) expect(plans.get(ruleId)?.join("\n"))
+        .toContain("ge_blr_used_migration_locks_epoch_uidx");
+      const allPlanDetails = [...plans.values()].flat();
+      expect(allPlanDetails.some((detail) => detail.includes("MATERIALIZE"))).toBe(false);
+      expect(allPlanDetails.some((detail) => detail.includes("AUTOMATIC"))).toBe(false);
+      expect(plans.get("BLR_LEASE_HISTORY_INCOMPLETE")
+        ?.filter((detail) => detail.includes("USE TEMP B-TREE"))).toEqual([
+        "USE TEMP B-TREE FOR GROUP BY",
+      ]);
+      for (const ruleId of [
+        "BLR_LEASE_STREAM_MISSING", "BLR_LEASE_ACTIVE_BINDING",
+        "BLR_MIGRATION_LOCK_HISTORY_INCOMPLETE", "BLR_MIGRATION_LOCK_ACTIVE_BINDING",
+        "BLR_HOLD_STREAM_MISSING",
+      ]) expect(plans.get(ruleId)?.some((detail) => detail.includes("USE TEMP B-TREE")))
+        .toBe(false);
+    } finally {
+      close(run);
+    }
+  });
+
+  it("requires successful checkpoint completion before opening the campaign", () => {
+    const run = sealedForCheckpoint(false);
+    try {
+      expect(() => runSQLiteLeaseLockHoldInvariantCampaign(
+        run.connection, run.projectionIdentity, run.stage,
+      )).toThrow(/binding/u);
+      expect(run.stage.state).toBe("poisoned");
+    } finally {
+      close(run);
+    }
+  });
+
+  it("rejects count-preserving mutation and index delete/recreate at begin", () => {
+    const mutated = sealedForLeaseLockHold();
+    try {
+      mutated.connection.prepare(
+        "UPDATE temp.ge_blr_stage SET state_blob = state_blob WHERE kind_rank = 9",
+        "inspect-schema",
+      ).run();
+      expect(() => runSQLiteLeaseLockHoldInvariantCampaign(
+        mutated.connection, mutated.projectionIdentity, mutated.stage,
+      )).toThrow(/unexplained write/u);
+    } finally {
+      close(mutated);
+    }
+
+    const replaced = sealedForLeaseLockHold();
+    try {
+      replaced.connection.execTrusted(
+        "DROP INDEX temp.ge_blr_used_leases_epoch_uidx", "inspect-schema",
+      );
+      replaced.connection.execTrusted(
+        "CREATE UNIQUE INDEX ge_blr_used_leases_epoch_uidx ON ge_blr_used_leases(tenant_id, stream_id, lease_id)",
+        "inspect-schema",
+      );
+      expect(() => runSQLiteLeaseLockHoldInvariantCampaign(
+        replaced.connection, replaced.projectionIdentity, replaced.stage,
+      )).toThrow(/transaction changed|catalog|unexplained write/u);
+    } finally {
+      close(replaced);
+    }
+
+    const tableReplaced = sealedForLeaseLockHold();
+    try {
+      tableReplaced.connection.execTrusted(
+        "DROP TABLE temp.ge_blr_holds", "inspect-schema",
+      );
+      tableReplaced.connection.execTrusted(
+        "CREATE TEMP TABLE ge_blr_holds(key_blob BLOB)", "inspect-schema",
+      );
+      expect(() => runSQLiteLeaseLockHoldInvariantCampaign(
+        tableReplaced.connection, tableReplaced.projectionIdentity, tableReplaced.stage,
+      )).toThrow(/transaction changed|catalog|unexplained write/u);
+    } finally {
+      close(tableReplaced);
+    }
+  });
+
+  it("re-proves common counts and relation coverage at begin and completion", () => {
+    const run = sealedForLeaseLockHold();
+    const common = vi.spyOn(run.stage, "assertCommonCounts");
+    const coverage = vi.spyOn(run.stage, "assertRelationKeyCoverage");
+    try {
+      expect(runSQLiteLeaseLockHoldInvariantCampaign(
+        run.connection, run.projectionIdentity, run.stage,
+      ).diagnostics).toEqual([]);
+      expect(common).toHaveBeenCalledTimes(2);
+      expect(coverage).toHaveBeenCalledTimes(2);
+    } finally {
+      coverage.mockRestore();
+      common.mockRestore();
+      close(run);
+    }
+  });
+
+  it.each([1, 16, 64])(
+    "distinguishes exact lease/lock/hold limit from limit+1 at %i",
+    (limit) => {
+      for (const extra of [0, 1]) {
+        const run = sealedForLeaseLockHold();
+        const target = SQLITE_LEASE_LOCK_HOLD_RULES[5];
+        const originalPrepare = run.connection.prepare.bind(run.connection);
+        const prepare = vi.spyOn(run.connection, "prepare").mockImplementation(
+          (sql, operation) => sql === target.sql
+            ? ({
+              iterate: () => Array.from({ length: limit + extra }, () => [1n]).values(),
+            } as never)
+            : originalPrepare(sql, operation),
+        );
+        try {
+          expect(runSQLiteLeaseLockHoldInvariantCampaign(
+            run.connection, run.projectionIdentity, run.stage, { diagnosticLimit: limit },
+          ).diagnostics).toEqual([{
+            ruleId: "BLR_HOLD_STREAM_MISSING",
+            violationCount: limit,
+            diagnosticsTruncated: extra === 1,
+          }]);
+        } finally {
+          prepare.mockRestore();
+          close(run);
+        }
+      }
+    },
+  );
+
+  it.each([null, [], false, { diagnosticLimit: null }, { diagnosticLimit: 0 },
+    { diagnosticLimit: 65 }, { unknown: 1 }])(
+    "rejects hostile lease/lock/hold options before ownership burn: %j",
+    (options) => {
+      const run = sealedForLeaseLockHold();
+      try {
+        expect(() => new SQLiteLeaseLockHoldInvariantCampaign(
+          run.connection, run.projectionIdentity, run.stage, options as never,
+        )).toThrow(CycleStoreProviderError);
+        expect(runSQLiteLeaseLockHoldInvariantCampaign(
+          run.connection, run.projectionIdentity, run.stage,
+        ).diagnostics).toEqual([]);
+      } finally {
+        close(run);
+      }
+    },
+  );
+
+  it("rejects hidden, symbol and accessor options without invoking getters", () => {
+    const hidden = {};
+    Object.defineProperty(hidden, "hidden", { value: 1 });
+    let getterCalls = 0;
+    const accessor = {};
+    Object.defineProperty(accessor, "diagnosticLimit", {
+      enumerable: true,
+      get: () => { getterCalls += 1; return 16; },
+    });
+    for (const options of [hidden, { [Symbol("hidden")]: 1 }, accessor]) {
+      const run = sealedForLeaseLockHold();
+      try {
+        expect(() => new SQLiteLeaseLockHoldInvariantCampaign(
+          run.connection, run.projectionIdentity, run.stage, options,
+        )).toThrow(CycleStoreProviderError);
+        expect(runSQLiteLeaseLockHoldInvariantCampaign(
+          run.connection, run.projectionIdentity, run.stage,
+        ).diagnostics).toEqual([]);
+      } finally {
+        close(run);
+      }
+    }
+    expect(getterCalls).toBe(0);
+  });
+
+  it("rejects malformed marker rows without retaining identity", () => {
+    for (const hostileRow of [[0n], [2n], ["tenant-secret"], [1n, "tenant-secret"]]) {
+      const run = sealedForLeaseLockHold();
+      const target = SQLITE_LEASE_LOCK_HOLD_RULES[0];
+      const originalPrepare = run.connection.prepare.bind(run.connection);
+      const prepare = vi.spyOn(run.connection, "prepare").mockImplementation(
+        (sql, operation) => sql === target.sql
+          ? ({ iterate: () => [hostileRow].values() } as never)
+          : originalPrepare(sql, operation),
+      );
+      try {
+        expect(() => runSQLiteLeaseLockHoldInvariantCampaign(
+          run.connection, run.projectionIdentity, run.stage,
+        )).toThrow(CycleStoreProviderError);
+        expect(run.stage.state).toBe("poisoned");
+      } finally {
+        prepare.mockRestore();
+        close(run);
+      }
+    }
+  });
+
+  it("rejects an equal-content identity clone, second run and abandonment", () => {
+    const clone = sealedForLeaseLockHold();
+    try {
+      expect(() => runSQLiteLeaseLockHoldInvariantCampaign(
+        clone.connection, Object.freeze({ ...clone.projectionIdentity }), clone.stage,
+      )).toThrow(/binding/u);
+      expect(clone.stage.state).toBe("poisoned");
+    } finally {
+      close(clone);
+    }
+
+    const completed = sealedForLeaseLockHold();
+    try {
+      const campaign = new SQLiteLeaseLockHoldInvariantCampaign(
+        completed.connection, completed.projectionIdentity, completed.stage,
+      );
+      expect(campaign.run().diagnostics).toEqual([]);
+      expect(() => campaign.run()).toThrow(/one-shot/u);
+    } finally {
+      close(completed);
+    }
+
+    const abandoned = sealedForLeaseLockHold();
+    try {
+      const campaign = new SQLiteLeaseLockHoldInvariantCampaign(
+        abandoned.connection, abandoned.projectionIdentity, abandoned.stage,
+      );
+      expect(() => campaign.dispose()).toThrow(/abandoned/u);
+      expect(campaign.state).toBe("poisoned");
+    } finally {
+      close(abandoned);
+    }
+  });
+
+  it.each(SQLITE_LEASE_LOCK_HOLD_RULES)(
+    "detects DML after $ruleId cursor creation before first fetch",
+    (target) => {
+      const run = sealedForLeaseLockHold();
+      const originalPrepare = run.connection.prepare.bind(run.connection);
+      let returns = 0;
+      const iterator: Iterator<unknown> & Iterable<unknown> = {
+        [Symbol.iterator]() { return this; },
+        next: () => ({ done: true, value: undefined }),
+        return: () => { returns += 1; return { done: true, value: undefined }; },
+      };
+      const prepare = vi.spyOn(run.connection, "prepare").mockImplementation(
+        (sql, operation) => sql === target.sql
+          ? ({
+            iterate: () => {
+              run.connection.prepare(
+                "UPDATE temp.ge_blr_stage SET state_blob = state_blob WHERE kind_rank = 0",
+                "inspect-schema",
+              ).run();
+              return iterator;
+            },
+          } as never)
+          : originalPrepare(sql, operation),
+      );
+      try {
+        expect(() => runSQLiteLeaseLockHoldInvariantCampaign(
+          run.connection, run.projectionIdentity, run.stage,
+        )).toThrow(/unexplained write/u);
+        expect(returns).toBe(1);
+      } finally {
+        prepare.mockRestore();
+        close(run);
+      }
+    },
+  );
+
+  it.each(SQLITE_LEASE_LOCK_HOLD_RULES)(
+    "detects DML during $ruleId marker fetch and finalizes once",
+    (target) => {
+      const run = sealedForLeaseLockHold();
+      const originalPrepare = run.connection.prepare.bind(run.connection);
+      let returns = 0;
+      const iterator: Iterator<unknown> & Iterable<unknown> = {
+        [Symbol.iterator]() { return this; },
+        next: () => {
+          run.connection.prepare(
+            "UPDATE temp.ge_blr_stage SET state_blob = state_blob WHERE kind_rank = 0",
+            "inspect-schema",
+          ).run();
+          return { done: true, value: undefined };
+        },
+        return: () => { returns += 1; return { done: true, value: undefined }; },
+      };
+      const prepare = vi.spyOn(run.connection, "prepare").mockImplementation(
+        (sql, operation) => sql === target.sql
+          ? ({ iterate: () => iterator } as never)
+          : originalPrepare(sql, operation),
+      );
+      try {
+        expect(() => runSQLiteLeaseLockHoldInvariantCampaign(
+          run.connection, run.projectionIdentity, run.stage,
+        )).toThrow(/unexplained write/u);
+        expect(returns).toBe(1);
+      } finally {
+        prepare.mockRestore();
+        close(run);
+      }
+    },
+  );
+
+  it.each(SQLITE_LEASE_LOCK_HOLD_RULES)("detects DML during $ruleId cursor close", (target) => {
+    const run = sealedForLeaseLockHold();
+    const originalPrepare = run.connection.prepare.bind(run.connection);
+    let returns = 0;
+    const iterator: Iterator<unknown> & Iterable<unknown> = {
+      [Symbol.iterator]() { return this; },
+      next: () => ({ done: true, value: undefined }),
+      return: () => {
+        returns += 1;
+        run.connection.prepare(
+          "UPDATE temp.ge_blr_stage SET state_blob = state_blob WHERE kind_rank = 0",
+          "inspect-schema",
+        ).run();
+        return { done: true, value: undefined };
+      },
+    };
+    const prepare = vi.spyOn(run.connection, "prepare").mockImplementation(
+      (sql, operation) => sql === target.sql
+        ? ({ iterate: () => iterator } as never)
+        : originalPrepare(sql, operation),
+    );
+    try {
+      expect(() => runSQLiteLeaseLockHoldInvariantCampaign(
+        run.connection, run.projectionIdentity, run.stage,
+      )).toThrow(/unexplained write/u);
+      expect(returns).toBe(1);
+    } finally {
+      prepare.mockRestore();
+      close(run);
+    }
+  });
+
+  it("detects catalog replacement during grouped history evaluation", () => {
+    const run = sealedForLeaseLockHold();
+    const target = SQLITE_LEASE_LOCK_HOLD_RULES[1];
+    const originalPrepare = run.connection.prepare.bind(run.connection);
+    let returns = 0;
+    const iterator: Iterator<unknown> & Iterable<unknown> = {
+      [Symbol.iterator]() { return this; },
+      next: () => {
+        run.connection.execTrusted(
+          "DROP INDEX temp.ge_blr_used_leases_epoch_uidx", "inspect-schema",
+        );
+        return { done: true, value: undefined };
+      },
+      return: () => { returns += 1; return { done: true, value: undefined }; },
+    };
+    const prepare = vi.spyOn(run.connection, "prepare").mockImplementation(
+      (sql, operation) => sql === target.sql
+        ? ({ iterate: () => iterator } as never)
+        : originalPrepare(sql, operation),
+    );
+    try {
+      expect(() => runSQLiteLeaseLockHoldInvariantCampaign(
+        run.connection, run.projectionIdentity, run.stage,
+      )).toThrow(/transaction changed|catalog/u);
+      expect(returns).toBe(1);
+    } finally {
+      prepare.mockRestore();
+      close(run);
+    }
+  });
+
+  it("detects DML after diagnostic emission and before the next rule", () => {
+    const run = sealedForLeaseLockHold();
+    const target = SQLITE_LEASE_LOCK_HOLD_RULES[0];
+    const originalPrepare = run.connection.prepare.bind(run.connection);
+    const originalFence = run.stage[SQLITE_BASELINE_FENCE_LEASE_LOCK_HOLD_CAMPAIGN]
+      .bind(run.stage);
+    let closed = false;
+    let closedFences = 0;
+    let emitted = false;
+    const iterator: Iterator<unknown> & Iterable<unknown> = {
+      [Symbol.iterator]() { return this; },
+      next: () => emitted
+        ? { done: true, value: undefined }
+        : (emitted = true, { done: false, value: [1n] }),
+      return: () => { closed = true; return { done: true, value: undefined }; },
+    };
+    const prepare = vi.spyOn(run.connection, "prepare").mockImplementation(
+      (sql, operation) => sql === target.sql
+        ? ({ iterate: () => iterator } as never)
+        : originalPrepare(sql, operation),
+    );
+    const fence = vi.spyOn(
+      run.stage, SQLITE_BASELINE_FENCE_LEASE_LOCK_HOLD_CAMPAIGN,
+    ).mockImplementation((session) => {
+      if (closed) {
+        closedFences += 1;
+        if (closedFences === 3) {
+          run.connection.prepare(
+            "UPDATE temp.ge_blr_stage SET state_blob = state_blob WHERE kind_rank = 0",
+            "inspect-schema",
+          ).run();
+        }
+      }
+      originalFence(session);
+    });
+    try {
+      expect(() => runSQLiteLeaseLockHoldInvariantCampaign(
+        run.connection, run.projectionIdentity, run.stage,
+      )).toThrow(/unexplained write/u);
+      expect(closedFences).toBe(3);
+    } finally {
+      fence.mockRestore();
+      prepare.mockRestore();
+      close(run);
+    }
+  });
+
+  it("detects DML at terminal completion", () => {
+    const run = sealedForLeaseLockHold();
+    const originalComplete = run.stage[SQLITE_BASELINE_COMPLETE_LEASE_LOCK_HOLD_CAMPAIGN]
+      .bind(run.stage);
+    const complete = vi.spyOn(
+      run.stage, SQLITE_BASELINE_COMPLETE_LEASE_LOCK_HOLD_CAMPAIGN,
+    ).mockImplementation((session) => {
+      run.connection.prepare(
+        "UPDATE temp.ge_blr_stage SET state_blob = state_blob WHERE kind_rank = 0",
+        "inspect-schema",
+      ).run();
+      originalComplete(session);
+    });
+    try {
+      expect(() => runSQLiteLeaseLockHoldInvariantCampaign(
+        run.connection, run.projectionIdentity, run.stage,
+      )).toThrow(/unexplained write/u);
+    } finally {
+      complete.mockRestore();
+      close(run);
+    }
+  });
+
+  it("preserves primary failure over cleanup failure", () => {
+    const run = sealedForLeaseLockHold();
+    const target = SQLITE_LEASE_LOCK_HOLD_RULES[0];
+    const originalPrepare = run.connection.prepare.bind(run.connection);
+    let returns = 0;
+    const iterator: Iterator<unknown> & Iterable<unknown> = {
+      [Symbol.iterator]() { return this; },
+      next: () => { throw new Error("authoritative lease failure"); },
+      return: () => { returns += 1; throw new Error("secondary cleanup failure"); },
+    };
+    const prepare = vi.spyOn(run.connection, "prepare").mockImplementation(
+      (sql, operation) => sql === target.sql
+        ? ({ iterate: () => iterator } as never)
+        : originalPrepare(sql, operation),
+    );
+    try {
+      expect(() => runSQLiteLeaseLockHoldInvariantCampaign(
+        run.connection, run.projectionIdentity, run.stage,
+      )).toThrowError("SQLite baseline lease/lock/hold campaign failed");
+      expect(returns).toBe(1);
+    } finally {
+      prepare.mockRestore();
+      close(run);
+    }
+  });
+
+  it("surfaces cleanup-only iterator close failure", () => {
+    const run = sealedForLeaseLockHold();
+    const target = SQLITE_LEASE_LOCK_HOLD_RULES[0];
+    const originalPrepare = run.connection.prepare.bind(run.connection);
+    let returns = 0;
+    const iterator: Iterator<unknown> & Iterable<unknown> = {
+      [Symbol.iterator]() { return this; },
+      next: () => ({ done: true, value: undefined }),
+      return: () => { returns += 1; throw new Error("cleanup-only failure"); },
+    };
+    const prepare = vi.spyOn(run.connection, "prepare").mockImplementation(
+      (sql, operation) => sql === target.sql
+        ? ({ iterate: () => iterator } as never)
+        : originalPrepare(sql, operation),
+    );
+    try {
+      expect(() => runSQLiteLeaseLockHoldInvariantCampaign(
+        run.connection, run.projectionIdentity, run.stage,
+      )).toThrowError("SQLite baseline lease/lock/hold campaign failed");
+      expect(returns).toBe(1);
+      expect(run.stage.state).toBe("poisoned");
+    } finally {
+      prepare.mockRestore();
+      close(run);
+    }
+  });
+
+  it("active stage disposal finalizes the cursor once and removes every TEMP object", () => {
+    const run = sealedForLeaseLockHold();
+    const target = SQLITE_LEASE_LOCK_HOLD_RULES[0];
+    const originalPrepare = run.connection.prepare.bind(run.connection);
+    let returns = 0;
+    const iterator: Iterator<unknown> & Iterable<unknown> = {
+      [Symbol.iterator]() { return this; },
+      next: () => {
+        run.stage.dispose();
+        return { done: true, value: undefined };
+      },
+      return: () => { returns += 1; return { done: true, value: undefined }; },
+    };
+    const prepare = vi.spyOn(run.connection, "prepare").mockImplementation(
+      (sql, operation) => sql === target.sql
+        ? ({ iterate: () => iterator } as never)
+        : originalPrepare(sql, operation),
+    );
+    try {
+      expect(() => runSQLiteLeaseLockHoldInvariantCampaign(
+        run.connection, run.projectionIdentity, run.stage,
+      )).toThrow(CycleStoreProviderError);
+      expect(returns).toBe(1);
+      expect(run.connection.prepare(
+        "SELECT count(*) FROM temp.sqlite_schema WHERE substr(lower(name), 1, 7) = 'ge_blr_'",
+        "inspect-schema",
+      ).get()).toEqual([0n]);
+    } finally {
+      prepare.mockRestore();
+      if (run.connection.isTransaction) run.connection.execTrusted("ROLLBACK", "inspect-schema");
+      run.connection.close();
+    }
+  });
+
+  it("active stage disposal surfaces its cursor cleanup failure after catalog removal", () => {
+    const run = sealedForLeaseLockHold();
+    const target = SQLITE_LEASE_LOCK_HOLD_RULES[0];
+    const originalPrepare = run.connection.prepare.bind(run.connection);
+    let returns = 0;
+    const iterator: Iterator<unknown> & Iterable<unknown> = {
+      [Symbol.iterator]() { return this; },
+      next: () => {
+        run.stage.dispose();
+        return { done: true, value: undefined };
+      },
+      return: () => { returns += 1; throw new Error("active cleanup failure"); },
+    };
+    const prepare = vi.spyOn(run.connection, "prepare").mockImplementation(
+      (sql, operation) => sql === target.sql
+        ? ({ iterate: () => iterator } as never)
+        : originalPrepare(sql, operation),
+    );
+    try {
+      expect(() => runSQLiteLeaseLockHoldInvariantCampaign(
+        run.connection, run.projectionIdentity, run.stage,
+      )).toThrowError("SQLite baseline lease/lock/hold campaign failed");
+      expect(returns).toBe(1);
+      expect(run.connection.prepare(
+        "SELECT count(*) FROM temp.sqlite_schema WHERE substr(lower(name), 1, 7) = 'ge_blr_'",
+        "inspect-schema",
+      ).get()).toEqual([0n]);
+    } finally {
+      prepare.mockRestore();
+      if (run.connection.isTransaction) run.connection.execTrusted("ROLLBACK", "inspect-schema");
+      run.connection.close();
+    }
   });
 });

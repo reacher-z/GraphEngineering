@@ -9357,3 +9357,256 @@ checkpoint must truthfully enumerate evidence and append a separate legacy
 campaign gate. It still may not run `0002`, write permanent v2 state, persist
 cursor/projection seals, claim the clock or cursor phases, claim 100K/crash /
 release closure, or claim adoption and star outcomes.
+
+### 31.34.34 Verified lease, migration-lock and legal-hold checkpoint
+
+The six-rule `lease-lock-hold` campaign required by §31.34.33 is now
+implemented in both native runtimes. It is package-private, one-shot and
+available only after the exact checkpoint campaign session has completed. Its
+entry and terminal barriers retain the same projection-reference, source
+summary, connection owner, exclusive epoch, write counter, twelve-kind count,
+bidirectional common/relation coverage and exact TEMP catalog proofs. No public
+package export or parallel reader path was introduced.
+
+The fixed registry order is lease stream missing, lease history incomplete,
+lease active binding, migration-lock history incomplete, migration-lock active
+binding and hold stream missing. The TypeScript and Python rule tables are
+whitespace-normalized token-for-token equal. Every rule returns marker rows
+only, uses the same closed safe diagnostic envelope, and applies a fixed
+`diagnosticLimit + 1` boundary with default 16 and maximum 64. Production code
+performs single-row iteration, never `.all()`, `fetchall()` or application-side
+history collection, and owns at most one cursor through the TEMP stage.
+
+Lease histories are proved solely by the used-lease relation: for each exact
+tenant/stream domain, count, minimum and maximum epochs plus explicit
+epoch/fencing equality establish the complete `1..lastLeaseEpoch` domain under
+the already catalog-verified unique epoch and fencing indexes. An active lease
+does not add a second history epoch; instead, active binding requires the
+terminal used identity to match tenant, stream, lease ID, epoch, fencing token
+and acquisition/first-use clock. This closes the design ambiguity discovered
+during adversarial review and matches the actual provider acquisition write.
+Missing terminal history is counted only by the history rule; a present
+terminal carrier with substituted ID or clock is counted only by active
+binding.
+
+Migration-lock history applies the same proof to the mandatory singleton and
+global used-lock identities. Active binding additionally requires the exact
+lock ID, owner, source/target versions, epoch, fence, acquisition, expiry and
+first-use clock; target must advance source. Lease and lock active tuples are
+explicitly all-null or all-present, epoch/fence/high-water equality is checked
+even under ignored CHECK constraints, expiry must follow acquisition and
+negative high-water values are rejected.
+
+Because the registry has no separate rank-seven, rank-eight or rank-ten
+binding IDs, the campaign closes those carriers within the existing six
+rules. Lease history binds every used-lease key and six state fields to
+rank-seven common entries in both directions; lock history binds every
+used-lock key and four state fields to rank ten; hold stream missing binds
+every hold key and four state fields to rank eight while also requiring the
+exact tenant/stream to exist. Active binding similarly checks every rank-six
+and rank-nine key/state field in both directions. One lease-history diagnostic
+unit is one tenant/stream domain even if several carriers drift, and each lock
+history/active rule emits at most one singleton witness.
+
+The final query topology has no `MATERIALIZE`, automatic index or
+`count(DISTINCT)` history barrier. Correlated aggregates use the named lease or
+lock epoch indexes. Migration-lock rules require no TEMP sort; lease history
+has exactly one FILE-backed outer group to normalize all anomaly branches to
+one tenant/stream unit. Query-plan tests freeze those facts and reject any
+additional TEMP B-tree. No new schema object was required.
+
+Both runtimes share one literal 46-entry hostile fixture at capture time
+`1785110405000`. It includes complete valid zero, retired and active lease
+controls; nonempty stream/record tails; two valid holds on one stream; a
+cross-tenant alias; start, interior and extra lease-history faults; wrong
+active ID and first-use clock; one active lock with history and terminal
+binding faults; and an orphan hold. Its baseline, first-entry, final-entry and
+projection identities are respectively
+`v2-fa4f8ccf6009797f4204ecbb8c85cc1d753ce219ce25630ef8af21558326f2af`,
+`f061b7d1fd823d623dc13ab12c78806cf6457e2f6e2f054b235d26d8abee787c`,
+`6b929039b709ef0a09818896df9d0366564389219e7fbec1866648bd67684638`
+and `ebc3aab7adc7062aee8067e2bbada04d14f0502802f1241dd62b2a790eb9e755`.
+The exact ordered diagnostic vector is `1/3/2/1/1/1`.
+
+The hostile matrix executes all rank-six through rank-ten key fields and 37
+state fields against production SQL, including multiple simultaneous drift,
+first-use clocks, active-present and inactive null tuples, expiry inversion,
+negative high-water, version reversal, singleton absence and domain collapse.
+It also proves limits 1/16/64, malformed markers, identity clones, one-shot and
+abandoned runs, per-rule creation/fetch/close mutations, post-diagnostic and
+rule-transition mutation, grouped-history and active-witness boundaries,
+terminal completion, active disposal, cleanup-only failure and primary-over-
+cleanup precedence. Table and index drop/recreate, count-preserving coverage
+mutation, retired-ID reuse, duplicate epoch/fence ownership, multiple
+singleton/common candidates and empty-stream behavior are explicitly tested.
+
+Some attacks cannot enter a successful campaign: UNIQUE/PK/CHECK constraints
+reject duplicate identities, partial active tuples and multiple singletons;
+the exact coverage fence rejects common-only/relation-only candidates; and the
+stream campaign rejects an empty persisted stream before lease/hold rules.
+Those cases have explicit early-rejection tests plus direct production-SQL
+defense where applicable. The singleton cannot be validly active and inactive
+in one snapshot, so the shared fixture uses the active control while a separate
+minimal fixture proves the inactive state. No safety fence was weakened to
+manufacture a diagnostic.
+
+Final evidence is TypeScript lease/lock/hold-focused 56 tests and SQLite 16
+files / 333 tests, plus typecheck, lint and build; Python focused 138 tests,
+399 adjacent baseline tests and 1,551 full tests, plus Ruff and strict MyPy
+including the new test module; the SQLite contract is 19/19, registry
+validation remains exactly 54 rules with `implementationClaim:false`, docs
+check 286 links and diff checks are clean. Independent adversarial review and
+main-thread reruns report HIGH 0, MEDIUM 0 and LOW 0.
+
+This checkpoint does not implement legacy, cursor or clock campaigns; execute
+migration `0002`; write permanent schema-v2 state; persist a projection root or
+cursor seal; prove 100,000-entry behavior; prove crash/replay recovery; select
+a release candidate; or establish adoption or star outcomes. Those claims
+remain false.
+
+### 31.34.35 Legacy recoverable-binding invariant campaign gate
+
+The next bounded slice shall implement only the five rules in registry order:
+
+1. `BLR_LEGACY_INVENTORY`;
+2. `BLR_LEGACY_APPEND_BINDING`;
+3. `BLR_LEGACY_CHECKPOINT_BINDING`;
+4. `BLR_LEGACY_LEASE_BINDING`; and
+5. `BLR_LEGACY_LOCK_BINDING`.
+
+The private one-shot chain must begin only after successful lease/lock/hold
+completion and inherit every exact identity, owner, transaction, write,
+counts, coverage, catalog and cursor-cleanup fence. Completion must leave an
+explicit legacy-complete phase required by the later cursor/clock work. It may
+read only the already normalized rank-eleven relation/common carriers and
+fixed physical v1 relations needed for recoverable result binding; it may not
+decode result blobs again, retain them, reconstruct unavailable requests or
+guess a stream/checkpoint/lease target not present in the captured result.
+
+Before implementation, write a cross-runtime recoverability table for all
+eight legacy mutation names: append, save/delete checkpoint, acquire/renew /
+release lease, set legal hold, and acquire/release migration lock. For every
+derived scalar, mark whether it is present in the canonical result, uniquely
+bindable to physical state, only existentially bindable within the tenant, or
+not recoverable. A rule must never strengthen an existential fact into a
+fabricated identity. The table, not an informal prompt assumption, shall be
+the source for fixed SQL and hostile expected counts.
+
+`BLR_LEGACY_INVENTORY` shall bind each rank-eleven common key/state carrier and
+normalized legacy relation in both directions, then bind tenant, operation ID,
+operation name, request hash, result hash and commit clock to the exact v1
+operation row. The result-blob SHA-256 was computed during bounded source
+staging and is protected by the same write fence; this campaign must not load
+the blob merely to recompute it. Inventory units are exact tenant/operation
+identities and must detect operation insert/delete, name/hash/time drift,
+common-only/relation-only rows and count-preserving key substitution.
+
+`BLR_LEGACY_APPEND_BINDING` shall use only the append result's recoverable tail
+existence, sequence, record hash and appended count. It must prove the exact
+tenant-scoped physical tail/record facts that are uniquely derivable, document
+and test any intentionally existential stream match, reject a missing or
+foreign-tenant tail and never infer the original request stream. Multiple
+candidate streams with the same recoverable result must follow one frozen,
+safe diagnostic unit rather than nondeterministic selection.
+
+`BLR_LEGACY_CHECKPOINT_BINDING` shall bind save-checkpoint results to the exact
+tenant/scope/checkpoint/stream/sequence/hash/timestamp/value metadata carried
+by the result. Delete results expose only the boolean and therefore must be
+validated without inventing the deleted checkpoint request; `deleted:false`
+and `deleted:true` need separate physical/recoverability tests. Older saves,
+later deletes, cross-tenant aliases and recreated current checkpoints are
+required attacks.
+
+`BLR_LEGACY_LEASE_BINDING` shall bind acquire/renew results to the exact
+tenant-scoped used lease identity by lease ID, epoch, fence and acquisition
+clock and, only when still active, to equal holder/expiry/current state.
+Release results carry status and high-water values but no recoverable stream
+request; their rule must freeze the strongest tenant-scoped fact that can be
+proved without guessing a stream. Retired IDs, later acquisitions, renewals,
+same-tenant ambiguous histories and cross-tenant aliases must be isolated.
+
+`BLR_LEGACY_LOCK_BINDING` shall bind acquire results to the global used-lock
+identity and, when still active, its owner, source/target versions, epoch,
+fence, acquisition and expiry state. Release-lock results are canonical null
+and must not be assigned a fabricated prior lock ID. Tests must separate an
+older retired lock from the current singleton, later acquisitions, release
+after acquire, ID substitution, clock drift and version reversal.
+
+All five rules must use fixed marker-only SQL with `diagnosticLimit + 1`, safe
+three-field diagnostics, identical TypeScript/Python rule topology and no
+result/request carrier in diagnostics. Query plans must use stable primary or
+named indexes, contain no automatic index, unbounded materialization or
+application collection, and explicitly justify the one grouped or existential
+operation that cannot be a direct key lookup. Cross-rule branches must freeze
+whether one corrupt legacy row may yield several rule diagnostics while never
+yielding more than one witness per row per rule.
+
+Build one literal shared fixture containing every legacy operation result plus
+pristine and hostile physical states, hard-code one capture time, entry count,
+four projection identities and exact five-number diagnostic vector, and add
+minimal direct SQL fixtures for every branch. Repeat closed options, limits
+1/16/64, malformed marker, exact projection reference, one-shot/abandonment,
+per-five creation/fetch/close, post-diagnostic, rule transition, table/index
+replacement, terminal, active disposal, cleanup-only and primary precedence.
+Equal-count inventory mutation and main operation mutation after capture are
+release blockers.
+
+Completion requires focused, adjacent and full TypeScript/Python suites;
+typecheck, lint, build, Ruff and strict MyPy including new tests; the 19-test
+SQLite contract, 54-rule registry and docs/diff checks; exact normalized SQL,
+fixture identity/vector and lifecycle parity; and a fresh independent review
+at HIGH 0 / MEDIUM 0 / LOW 0. It must append a truthful completion checkpoint
+and a separate cursor/clock gate. It still may not execute `0002`, write
+permanent v2 state, persist seals, claim 100K/crash/release closure, or claim
+adoption and star outcomes.
+
+### 31.34.36 Evidence-precision correction for §31.34.34
+
+This append-only note supersedes two overly broad evidence phrases in
+§31.34.34 without changing the implementation or the §31.34.35 gate.
+
+First, cursor-creation mutation is parameterized across all six rules in both
+runtimes. Marker-fetch and cursor-close mutation are proven at representative
+rules through the same shared executor loop; TypeScript additionally
+parameterizes fetch across all six. The verified evidence must therefore be
+read as “per-rule cursor creation, plus marker-fetch and close mutations,” not
+as a claim that both fetch and close are separately parameterized over every
+rule in both languages. The rule SQL, cursor owner and pre/post fences are
+identical code paths after creation.
+
+Second, a persisted empty stream is diagnosed by the preceding stream/record
+campaign as `BLR_STREAM_EMPTY`, but that diagnostic report completes normally
+and does not poison the stage. The subsequent checkpoint and lease/lock/hold
+campaigns can therefore run. Lease and hold existence rules correctly treat
+the empty stream row as present and do not duplicate the earlier diagnostic as
+`*_STREAM_MISSING`. The empty-stream test proves this report-and-continue
+behavior; it is not an early-rejection test. UNIQUE/PK/CHECK violations,
+coverage disagreement and catalog replacement remain fail-closed predecessor
+or physical-constraint rejections as originally stated.
+
+After this evidence correction, the implementation/test review remains HIGH
+0, MEDIUM 0 and LOW 0. No additional runtime, migration, release or popularity
+claim is introduced.
+
+### 31.34.37 Final Python suite-count correction
+
+This append-only correction supersedes the Python full-suite count recorded in
+§31.34.34. Seventeen final hostile tests were added after the earlier 1,551
+snapshot. The final campaign-focused count is 138, the adjacent baseline count
+is 399, and the complete Python suite is 1,568 tests plus two collected
+subtests, all passing. Ruff and strict MyPy, including the new test module,
+remain green. This is an evidence-count correction only; it does not change
+the implementation, diagnostic vector, review severity or any nonclaim.
+
+### 31.34.38 Canonical Python full-suite invocation correction
+
+This final append-only correction supersedes §31.34.37. The authoritative
+repository gate is exactly `cd python && uv run pytest -q`, with no repeated
+path, overlapping selection or alternate subtest accounting. A main-thread
+rerun after every staged implementation and test change reports exactly 1,551
+passed tests. Focused remains 138 and adjacent baseline remains 399. The 1,568
+plus two-subtest figure came from a noncanonical collection/accounting command
+used during an auxiliary audit and must not be cited as the repository full
+suite. Ruff and strict MyPy including the new test remain green. This corrects
+evidence counting only; implementation, identities, diagnostics, review
+severity and all nonclaims are unchanged.

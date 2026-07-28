@@ -23,23 +23,28 @@ import {
 } from "./operation-baseline.js";
 import {
   SQLITE_BASELINE_ABORT_CHECKPOINT_CAMPAIGN,
+  SQLITE_BASELINE_ABORT_LEASE_LOCK_HOLD_CAMPAIGN,
   SQLITE_BASELINE_ABORT_STREAM_RECORD_CAMPAIGN,
   SQLITE_BASELINE_COOPERATIVE_POISON,
   SQLITE_BASELINE_ABORT_ORDERED_HANDOFF,
   SQLITE_BASELINE_BEGIN_ORDERED_HANDOFF,
   SQLITE_BASELINE_BEGIN_CHECKPOINT_CAMPAIGN,
+  SQLITE_BASELINE_BEGIN_LEASE_LOCK_HOLD_CAMPAIGN,
   SQLITE_BASELINE_BEGIN_STREAM_RECORD_CAMPAIGN,
   SQLITE_BASELINE_COMPLETE_ORDERED_HANDOFF,
   SQLITE_BASELINE_COMPLETE_CHECKPOINT_CAMPAIGN,
+  SQLITE_BASELINE_COMPLETE_LEASE_LOCK_HOLD_CAMPAIGN,
   SQLITE_BASELINE_COMPLETE_STREAM_RECORD_CAMPAIGN,
   SQLITE_BASELINE_CONSUME_OWNED_WRITE,
   SQLITE_BASELINE_FENCE_ORDERED_HANDOFF,
   SQLITE_BASELINE_FENCE_CHECKPOINT_CAMPAIGN,
+  SQLITE_BASELINE_FENCE_LEASE_LOCK_HOLD_CAMPAIGN,
   SQLITE_BASELINE_FENCE_STREAM_RECORD_CAMPAIGN,
   SQLITE_BASELINE_FINISH_COOPERATIVE_WRITES,
   SQLITE_BASELINE_OWNED_WRITE,
   SQLITE_BASELINE_REGISTER_ORDERED_HANDOFF_CLEANUP,
   SQLITE_BASELINE_REGISTER_CHECKPOINT_CLEANUP,
+  SQLITE_BASELINE_REGISTER_LEASE_LOCK_HOLD_CLEANUP,
   SQLITE_BASELINE_REGISTER_STREAM_RECORD_CLEANUP,
   type SQLiteBaselineOwnedWriteReceipt,
 } from "./operation-baseline-cooperation.js";
@@ -1117,6 +1122,9 @@ export class SQLiteBaselineTempStage {
   #checkpointCampaignState: "unused" | "active" | "complete" | "poisoned" = "unused";
   #checkpointCampaignSession: object | undefined;
   #checkpointCampaignCleanup: (() => void) | undefined;
+  #leaseLockHoldCampaignState: "unused" | "active" | "complete" | "poisoned" = "unused";
+  #leaseLockHoldCampaignSession: object | undefined;
+  #leaseLockHoldCampaignCleanup: (() => void) | undefined;
   #cooperativeWritesFinished = false;
 
   constructor(
@@ -1593,6 +1601,97 @@ export class SQLiteBaselineTempStage {
     return this.#poison(message);
   }
 
+  /** Continue the sealed chain with lease, lock and hold invariants. */
+  [SQLITE_BASELINE_BEGIN_LEASE_LOCK_HOLD_CAMPAIGN](
+    connection: SQLiteConnection,
+    projectionIdentity: OperationBaselineProjectionIdentity,
+  ): object {
+    this.#requireOpenOwner();
+    if (this.#leaseLockHoldCampaignState !== "unused"
+        || this.#checkpointCampaignState !== "complete"
+        || connection !== this.#connection
+        || projectionIdentity !== this.#orderedProjectionIdentity
+        || projectionIdentity.entryCount !== this.#nextOwnedWriteSequence
+        || this.#orderedExpectedCounts === undefined) {
+      return this.#poison("SQLite baseline lease/lock/hold campaign binding is invalid");
+    }
+    this.#assertExactBaselineCatalog("lease/lock/hold campaign begin");
+    this.assertCommonCounts(this.#orderedExpectedCounts);
+    this.assertRelationKeyCoverage();
+    this.#assertExactBaselineCatalog("lease/lock/hold campaign begin coverage");
+    const campaignSession = Object.freeze(Object.create(null)) as object;
+    this.#leaseLockHoldCampaignSession = campaignSession;
+    this.#leaseLockHoldCampaignState = "active";
+    return campaignSession;
+  }
+
+  [SQLITE_BASELINE_FENCE_LEASE_LOCK_HOLD_CAMPAIGN](session: object): void {
+    this.#requireOpenOwner();
+    if (this.#leaseLockHoldCampaignState !== "active"
+        || session !== this.#leaseLockHoldCampaignSession) {
+      return this.#poison("SQLite baseline lease/lock/hold campaign session is invalid");
+    }
+    this.#requireAllowedChanges();
+    this.#assertExactBaselineCatalog("lease/lock/hold campaign fence");
+    this.#requireAllowedChanges();
+  }
+
+  [SQLITE_BASELINE_REGISTER_LEASE_LOCK_HOLD_CLEANUP](
+    session: object,
+    cleanup: (() => void) | undefined,
+  ): void {
+    this[SQLITE_BASELINE_FENCE_LEASE_LOCK_HOLD_CAMPAIGN](session);
+    if (cleanup !== undefined && this.#leaseLockHoldCampaignCleanup !== undefined) {
+      return this.#poison("SQLite baseline lease/lock/hold cleanup is already registered");
+    }
+    this.#leaseLockHoldCampaignCleanup = cleanup;
+  }
+
+  [SQLITE_BASELINE_COMPLETE_LEASE_LOCK_HOLD_CAMPAIGN](session: object): void {
+    this[SQLITE_BASELINE_FENCE_LEASE_LOCK_HOLD_CAMPAIGN](session);
+    const projectionIdentity = this.#orderedProjectionIdentity;
+    const expectedCounts = this.#orderedExpectedCounts;
+    if (this.#leaseLockHoldCampaignCleanup !== undefined
+        || projectionIdentity === undefined
+        || expectedCounts === undefined
+        || scalarCount(
+          this.#connection,
+          `SELECT count(*) FROM temp.${STAGE_TABLE}`,
+          "TEMP lease/lock/hold campaign common count",
+        ) !== projectionIdentity.entryCount
+        || scalarCount(
+          this.#connection,
+          `SELECT count(*) FROM temp.${RELATION_VIEW}`,
+          "TEMP lease/lock/hold campaign relation count",
+        ) !== projectionIdentity.entryCount) {
+      return this.#poison("SQLite baseline lease/lock/hold completion is invalid");
+    }
+    this.assertCommonCounts(expectedCounts);
+    this.assertRelationKeyCoverage();
+    this[SQLITE_BASELINE_FENCE_LEASE_LOCK_HOLD_CAMPAIGN](session);
+    this.#leaseLockHoldCampaignSession = undefined;
+    this.#leaseLockHoldCampaignState = "complete";
+  }
+
+  [SQLITE_BASELINE_ABORT_LEASE_LOCK_HOLD_CAMPAIGN](
+    session: object | undefined,
+    message: string,
+  ): never {
+    const campaignCleanup = this.#leaseLockHoldCampaignCleanup;
+    this.#leaseLockHoldCampaignCleanup = undefined;
+    try {
+      campaignCleanup?.();
+    } catch {
+      // The authoritative rule or fence failure remains primary.
+    }
+    if (session !== undefined && session !== this.#leaseLockHoldCampaignSession) {
+      message = "SQLite baseline lease/lock/hold campaign session is invalid";
+    }
+    this.#leaseLockHoldCampaignSession = undefined;
+    this.#leaseLockHoldCampaignState = "poisoned";
+    return this.#poison(message);
+  }
+
   /** Package-private fail-closed bridge used when source receipt checks fail. */
   [SQLITE_BASELINE_COOPERATIVE_POISON](message: string): never {
     if (this.#state === "open") return this.#poison(message);
@@ -1756,6 +1855,16 @@ export class SQLiteBaselineTempStage {
       this.#checkpointCampaignCleanup = undefined;
       this.#checkpointCampaignSession = undefined;
       this.#checkpointCampaignState = "poisoned";
+    }
+    if (this.#leaseLockHoldCampaignState === "active") {
+      try {
+        this.#leaseLockHoldCampaignCleanup?.();
+      } catch (error) {
+        handoffCleanupFailure ??= error;
+      }
+      this.#leaseLockHoldCampaignCleanup = undefined;
+      this.#leaseLockHoldCampaignSession = undefined;
+      this.#leaseLockHoldCampaignState = "poisoned";
     }
     if (!this.#connection.isOpen) {
       this.#state = "disposed";
@@ -1951,6 +2060,11 @@ export class SQLiteBaselineTempStage {
     this.#checkpointCampaignSession = undefined;
     if (this.#checkpointCampaignState === "active") {
       this.#checkpointCampaignState = "poisoned";
+    }
+    this.#leaseLockHoldCampaignCleanup = undefined;
+    this.#leaseLockHoldCampaignSession = undefined;
+    if (this.#leaseLockHoldCampaignState === "active") {
+      this.#leaseLockHoldCampaignState = "poisoned";
     }
     this.#state = "poisoned";
     throw new CycleStoreProviderError(
