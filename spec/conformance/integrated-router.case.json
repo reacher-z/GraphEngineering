@@ -1,0 +1,914 @@
+{
+  "contract": "graphengineering.reacher-z.github.io/integrated-router/v1alpha1",
+  "conditionApiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1",
+  "diagnosticProjection": {
+    "fieldsInOrder": ["code", "path", "nodeIds", "edgeId"],
+    "absentFieldBehavior": "omit",
+    "preserveDiagnosticOrder": true,
+    "preserveNodeIdOrder": true
+  },
+  "invalidExecutionGate": {
+    "typescript": {"surface": "runGraph(document, input, options)", "expectStatus": "failed", "expectNodeCount": 0, "expectExecutorCalls": 0},
+    "python": {"surface": "try_compile_graph(document)", "expectValid": false, "compiledGraphAvailable": false, "expectPreparedHandlerCalls": 0}
+  },
+  "patternLowering": {
+    "optionName": "routePolicy",
+    "legacyEmptyClassifierConfig": {"kind": "single", "allowedRoutesSource": "normalizedBranchKeys"},
+    "preconfiguredPolicyBehavior": "preserve-only-when-ordered-allowedRoutes-equal-normalizedBranchKeys",
+    "conflictBehavior": "throw-before-returning-graph",
+    "routeConditionCarrier": "RouteEquals"
+  },
+  "patternLoweringCases": [
+    {
+      "name": "legacy-empty-config-synthesizes-single-policy",
+      "normalizedBranchKeys": ["quick", "audit"],
+      "classifierConfig": {},
+      "expect": {"result": "graph", "classifierConfig": {"kind": "single", "allowedRoutes": ["quick", "audit"]}, "compilerValidIn": ["typescript", "python"]}
+    },
+    {
+      "name": "supplied-policy-is-lowered-directly",
+      "normalizedBranchKeys": ["quick", "audit"],
+      "classifierConfig": {},
+      "routePolicy": {"kind": "multi", "allowedRoutes": ["quick", "audit"], "defaultRoute": "quick", "maxMulticast": 2},
+      "expect": {"result": "graph", "classifierConfig": {"kind": "multi", "allowedRoutes": ["quick", "audit"], "defaultRoute": "quick", "maxMulticast": 2}, "compilerValidIn": ["typescript", "python"]}
+    },
+    {
+      "name": "matching-preconfigured-policy-is-preserved",
+      "normalizedBranchKeys": ["quick", "audit"],
+      "classifierConfig": {"kind": "single", "allowedRoutes": ["quick", "audit"], "defaultRoute": "quick"},
+      "expect": {"result": "graph", "classifierConfig": {"kind": "single", "allowedRoutes": ["quick", "audit"], "defaultRoute": "quick"}, "compilerValidIn": ["typescript", "python"]}
+    },
+    {
+      "name": "option-conflicts-with-nonempty-classifier-config",
+      "normalizedBranchKeys": ["quick"],
+      "classifierConfig": {"kind": "single", "allowedRoutes": ["quick"]},
+      "routePolicy": {"kind": "single", "allowedRoutes": ["quick"]},
+      "expect": {"result": "error", "reason": "routePolicy-conflicts-with-preconfigured-classifier"}
+    },
+    {
+      "name": "policy-routes-must-match-branch-order",
+      "normalizedBranchKeys": ["quick", "audit"],
+      "classifierConfig": {},
+      "routePolicy": {"kind": "single", "allowedRoutes": ["audit", "quick"]},
+      "expect": {"result": "error", "reason": "allowedRoutes-must-equal-normalized-branch-keys"}
+    },
+    {
+      "name": "invalid-supplied-policy-fails-before-graph-return",
+      "normalizedBranchKeys": ["quick"],
+      "classifierConfig": {},
+      "routePolicy": {"kind": "multi", "allowedRoutes": ["quick"]},
+      "expect": {"result": "error", "reason": "routePolicy-is-not-exact"}
+    }
+  ],
+  "conditionRegistry": [
+    {"apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1", "kind": "RouteEquals", "owner": "integrated-router", "validation": "exact"},
+    {"apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1", "kind": "LoopContinue", "owner": "loop-pattern", "validation": "opaque-to-d6"},
+    {"apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1", "kind": "LoopDryVerdict", "owner": "loop-pattern", "validation": "opaque-to-d6"},
+    {"apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1", "kind": "LoopVerdictAtBound", "owner": "loop-pattern", "validation": "opaque-to-d6"}
+  ],
+  "policyValidationCases": [
+    {"name": "single-minimal", "value": {"kind": "single", "allowedRoutes": ["quick"]}, "expect": {"valid": true}},
+    {"name": "single-default-confidence", "value": {"kind": "single", "allowedRoutes": ["quick", "human"], "defaultRoute": "quick", "confidence": {"minimumBasisPoints": 7000, "escalationRoute": "human"}}, "expect": {"valid": true}},
+    {"name": "multi-mathematical-integer-one-point-zero", "value": {"kind": "multi", "allowedRoutes": ["quick"], "maxMulticast": 1.0}, "expect": {"valid": true}},
+    {"name": "portable-null-router-config", "value": null, "expect": {"valid": false, "code": "GE1401_INVALID_ROUTER_POLICY", "relativePath": ""}},
+    {"name": "portable-scalar-router-config", "value": 1, "expect": {"valid": false, "code": "GE1401_INVALID_ROUTER_POLICY", "relativePath": ""}},
+    {"name": "portable-array-router-config", "value": [], "expect": {"valid": false, "code": "GE1401_INVALID_ROUTER_POLICY", "relativePath": ""}},
+    {"name": "missing-kind", "value": {"allowedRoutes": ["quick"]}, "expect": {"valid": false, "code": "GE1401_INVALID_ROUTER_POLICY", "relativePath": "/kind"}},
+    {"name": "unknown-kind", "value": {"kind": "broadcast", "allowedRoutes": ["quick"]}, "expect": {"valid": false, "code": "GE1401_INVALID_ROUTER_POLICY", "relativePath": "/kind"}},
+    {"name": "missing-allowed-routes", "value": {"kind": "single"}, "expect": {"valid": false, "code": "GE1401_INVALID_ROUTER_POLICY", "relativePath": "/allowedRoutes"}},
+    {"name": "allowed-routes-must-be-array", "value": {"kind": "single", "allowedRoutes": "quick"}, "expect": {"valid": false, "code": "GE1401_INVALID_ROUTER_POLICY", "relativePath": "/allowedRoutes"}},
+    {"name": "allowed-route-must-be-string", "value": {"kind": "single", "allowedRoutes": [1]}, "expect": {"valid": false, "code": "GE1401_INVALID_ROUTER_POLICY", "relativePath": "/allowedRoutes/0"}},
+    {"name": "wrapper-is-not-direct", "value": {"policy": {"kind": "single", "allowedRoutes": ["quick"]}}, "expect": {"valid": false, "code": "GE1401_INVALID_ROUTER_POLICY", "relativePath": "/policy"}},
+    {"name": "empty-routes", "value": {"kind": "single", "allowedRoutes": []}, "expect": {"valid": false, "code": "GE1401_INVALID_ROUTER_POLICY", "relativePath": "/allowedRoutes"}},
+    {"name": "duplicate-route", "value": {"kind": "single", "allowedRoutes": ["quick", "quick"]}, "expect": {"valid": false, "code": "GE1401_INVALID_ROUTER_POLICY", "relativePath": "/allowedRoutes/1"}},
+    {"name": "unsafe-route-dot", "value": {"kind": "single", "allowedRoutes": ["."]}, "expect": {"valid": false, "code": "GE1401_INVALID_ROUTER_POLICY", "relativePath": "/allowedRoutes/0"}},
+    {"name": "unknown-policy-field", "value": {"kind": "single", "allowedRoutes": ["quick"], "extra": true}, "expect": {"valid": false, "code": "GE1401_INVALID_ROUTER_POLICY", "relativePath": "/extra"}},
+    {"name": "explicit-null-default", "value": {"kind": "single", "allowedRoutes": ["quick"], "defaultRoute": null}, "expect": {"valid": false, "code": "GE1401_INVALID_ROUTER_POLICY", "relativePath": "/defaultRoute"}},
+    {"name": "default-not-member", "value": {"kind": "single", "allowedRoutes": ["quick"], "defaultRoute": "audit"}, "expect": {"valid": false, "code": "GE1401_INVALID_ROUTER_POLICY", "relativePath": "/defaultRoute"}},
+    {"name": "single-forbids-max", "value": {"kind": "single", "allowedRoutes": ["quick"], "maxMulticast": 1}, "expect": {"valid": false, "code": "GE1401_INVALID_ROUTER_POLICY", "relativePath": "/maxMulticast"}},
+    {"name": "multi-requires-max", "value": {"kind": "multi", "allowedRoutes": ["quick"]}, "expect": {"valid": false, "code": "GE1401_INVALID_ROUTER_POLICY", "relativePath": "/maxMulticast"}},
+    {"name": "multi-max-too-large", "value": {"kind": "multi", "allowedRoutes": ["quick"], "maxMulticast": 2}, "expect": {"valid": false, "code": "GE1401_INVALID_ROUTER_POLICY", "relativePath": "/maxMulticast"}},
+    {"name": "multi-max-zero", "value": {"kind": "multi", "allowedRoutes": ["quick"], "maxMulticast": 0}, "expect": {"valid": false, "code": "GE1401_INVALID_ROUTER_POLICY", "relativePath": "/maxMulticast"}},
+    {"name": "multi-max-boolean-is-not-integer", "value": {"kind": "multi", "allowedRoutes": ["quick"], "maxMulticast": true}, "expect": {"valid": false, "code": "GE1401_INVALID_ROUTER_POLICY", "relativePath": "/maxMulticast"}},
+    {"name": "explicit-null-confidence", "value": {"kind": "single", "allowedRoutes": ["quick"], "confidence": null}, "expect": {"valid": false, "code": "GE1401_INVALID_ROUTER_POLICY", "relativePath": "/confidence"}},
+    {"name": "confidence-missing-minimum", "value": {"kind": "single", "allowedRoutes": ["quick"], "confidence": {"escalationRoute": "quick"}}, "expect": {"valid": false, "code": "GE1401_INVALID_ROUTER_POLICY", "relativePath": "/confidence/minimumBasisPoints"}},
+    {"name": "confidence-missing-escalation", "value": {"kind": "single", "allowedRoutes": ["quick"], "confidence": {"minimumBasisPoints": 7000}}, "expect": {"valid": false, "code": "GE1401_INVALID_ROUTER_POLICY", "relativePath": "/confidence/escalationRoute"}},
+    {"name": "confidence-minimum-zero", "value": {"kind": "single", "allowedRoutes": ["quick"], "confidence": {"minimumBasisPoints": 0, "escalationRoute": "quick"}}, "expect": {"valid": false, "code": "GE1401_INVALID_ROUTER_POLICY", "relativePath": "/confidence/minimumBasisPoints"}},
+    {"name": "confidence-escalation-not-member", "value": {"kind": "single", "allowedRoutes": ["quick"], "confidence": {"minimumBasisPoints": 7000, "escalationRoute": "human"}}, "expect": {"valid": false, "code": "GE1401_INVALID_ROUTER_POLICY", "relativePath": "/confidence/escalationRoute"}},
+    {"name": "confidence-unknown-field", "value": {"kind": "single", "allowedRoutes": ["quick"], "confidence": {"minimumBasisPoints": 7000, "escalationRoute": "quick", "extra": true}}, "expect": {"valid": false, "code": "GE1401_INVALID_ROUTER_POLICY", "relativePath": "/confidence/extra"}}
+  ],
+  "conditionValidationCases": [
+    {"name": "route-equals-exact", "value": {"apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1", "kind": "RouteEquals", "routeKey": "quick"}, "expect": {"valid": true, "owner": "integrated-router"}},
+    {"name": "registered-loop-continue", "value": {"apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1", "kind": "LoopContinue", "maxRounds": 3, "round": 0, "roundKey": "r0"}, "expect": {"valid": true, "owner": "loop-pattern"}},
+    {"name": "registered-loop-dry", "value": {"apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1", "kind": "LoopDryVerdict", "maxRounds": 3, "round": 1, "roundKey": "r1"}, "expect": {"valid": true, "owner": "loop-pattern"}},
+    {"name": "registered-loop-bound", "value": {"apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1", "kind": "LoopVerdictAtBound", "maxRounds": 3, "round": 2, "roundKey": "r2"}, "expect": {"valid": true, "owner": "loop-pattern"}},
+    {"name": "missing-api-version", "value": {"kind": "RouteEquals", "routeKey": "quick"}, "expect": {"valid": false, "code": "GE1402_UNSUPPORTED_EDGE_CONDITION", "relativePath": "/apiVersion"}},
+    {"name": "missing-kind", "value": {"apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1", "routeKey": "quick"}, "expect": {"valid": false, "code": "GE1402_UNSUPPORTED_EDGE_CONDITION", "relativePath": "/kind"}},
+    {"name": "non-string-api-version", "value": {"apiVersion": 1, "kind": "RouteEquals", "routeKey": "quick"}, "expect": {"valid": false, "code": "GE1402_UNSUPPORTED_EDGE_CONDITION", "relativePath": "/apiVersion"}},
+    {"name": "non-string-kind", "value": {"apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1", "kind": 1, "routeKey": "quick"}, "expect": {"valid": false, "code": "GE1402_UNSUPPORTED_EDGE_CONDITION", "relativePath": "/kind"}},
+    {"name": "wrong-version", "value": {"apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v9", "kind": "RouteEquals", "routeKey": "quick"}, "expect": {"valid": false, "code": "GE1402_UNSUPPORTED_EDGE_CONDITION", "relativePath": "/apiVersion"}},
+    {"name": "unknown-kind", "value": {"apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1", "kind": "Other", "routeKey": "quick"}, "expect": {"valid": false, "code": "GE1402_UNSUPPORTED_EDGE_CONDITION", "relativePath": "/kind"}},
+    {"name": "route-equals-missing-route-key", "value": {"apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1", "kind": "RouteEquals"}, "expect": {"valid": false, "code": "GE1402_UNSUPPORTED_EDGE_CONDITION", "relativePath": "/routeKey"}},
+    {"name": "route-equals-non-string-route-key", "value": {"apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1", "kind": "RouteEquals", "routeKey": 1}, "expect": {"valid": false, "code": "GE1402_UNSUPPORTED_EDGE_CONDITION", "relativePath": "/routeKey"}},
+    {"name": "route-equals-unsafe-route-key", "value": {"apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1", "kind": "RouteEquals", "routeKey": ".."}, "expect": {"valid": false, "code": "GE1402_UNSUPPORTED_EDGE_CONDITION", "relativePath": "/routeKey"}},
+    {"name": "route-equals-extra-field", "value": {"apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1", "kind": "RouteEquals", "routeKey": "quick", "otherwise": true}, "expect": {"valid": false, "code": "GE1402_UNSUPPORTED_EDGE_CONDITION", "relativePath": "/otherwise"}}
+  ],
+  "envelopeGateCases": [
+    {"name": "null-edge-condition", "target": "#/edges/0/condition", "value": null, "expectCode": "GE1007_INVALID_GRAPH"},
+    {"name": "scalar-edge-condition", "target": "#/edges/0/condition", "value": 1, "expectCode": "GE1007_INVALID_GRAPH"}
+  ],
+  "hostConstructedEnvelopeCases": [
+    {"name": "accessor-config", "owner": "capture", "expectCode": "GE1007_INVALID_GRAPH"},
+    {"name": "proxy-condition", "owner": "capture", "expectCode": "GE1007_INVALID_GRAPH"},
+    {"name": "sparse-allowed-routes", "owner": "capture", "expectCode": "GE1007_INVALID_GRAPH"},
+    {"name": "non-portable-policy-number", "owner": "capture", "expectCode": "GE1007_INVALID_GRAPH"}
+  ],
+  "compilerCases": [
+    {
+      "name": "complete-single-with-omitted-default-is-valid",
+      "expectedGraphHash": "f3cf06d35deffa2a8be647c18f3104441685198e1a5a20fefc3e38f2fd911ab0",
+      "graph": {
+        "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+        "kind": "Graph",
+        "metadata": {"name": "complete-single", "version": "1"},
+        "inputSchema": {},
+        "outputSchema": {},
+        "entrypoints": ["route"],
+        "outputs": {"decision": {"node": "route"}},
+        "nodes": [
+          {"id": "route", "kind": "router", "inputSchema": {}, "outputSchema": {}, "config": {"kind": "single", "allowedRoutes": ["quick", "audit"]}},
+          {"id": "quick", "kind": "transform", "inputSchema": {}, "outputSchema": {}, "config": {}},
+          {"id": "audit", "kind": "transform", "inputSchema": {}, "outputSchema": {}, "config": {}}
+        ],
+        "edges": [
+          {"id": "route-quick", "from": {"node": "route"}, "to": {"node": "quick"}, "condition": {"apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1", "kind": "RouteEquals", "routeKey": "quick"}},
+          {"id": "route-audit", "from": {"node": "route"}, "to": {"node": "audit"}, "condition": {"apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1", "kind": "RouteEquals", "routeKey": "audit"}}
+        ]
+      },
+      "expect": {"valid": true, "diagnostics": []}
+    },
+    {
+      "name": "complete-multicast-with-enumerated-default-is-valid",
+      "expectedGraphHash": "4dc7ec87b4a300f38a6f3ab8cca5e2cf52279a51f8b9bf421f325d0f3e229761",
+      "graph": {
+        "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+        "kind": "Graph",
+        "metadata": {"name": "complete-multi-default", "version": "1"},
+        "inputSchema": {},
+        "outputSchema": {},
+        "entrypoints": ["route"],
+        "outputs": {"decision": {"node": "route"}},
+        "nodes": [
+          {"id": "route", "kind": "router", "inputSchema": {}, "outputSchema": {}, "config": {"kind": "multi", "allowedRoutes": ["quick", "audit"], "defaultRoute": "quick", "maxMulticast": 2}},
+          {"id": "quick", "kind": "transform", "inputSchema": {}, "outputSchema": {}, "config": {}},
+          {"id": "audit", "kind": "transform", "inputSchema": {}, "outputSchema": {}, "config": {}}
+        ],
+        "edges": [
+          {"id": "route-quick", "from": {"node": "route"}, "to": {"node": "quick"}, "condition": {"apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1", "kind": "RouteEquals", "routeKey": "quick"}},
+          {"id": "route-audit", "from": {"node": "route"}, "to": {"node": "audit"}, "condition": {"apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1", "kind": "RouteEquals", "routeKey": "audit"}}
+        ]
+      },
+      "expect": {"valid": true, "diagnostics": []}
+    },
+    {
+      "name": "router-config-is-direct-route-selection-policy",
+      "expectedGraphHash": "c63eb1e3d7a47b4958ca735d556781579cee03448584c591d79c65244de7ac48",
+      "graph": {
+        "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+        "kind": "Graph",
+        "metadata": {"name": "invalid-wrapper-policy", "version": "1"},
+        "inputSchema": {},
+        "outputSchema": {},
+        "entrypoints": ["route"],
+        "outputs": {"decision": {"node": "route"}},
+        "nodes": [
+          {"id": "route", "kind": "router", "inputSchema": {}, "outputSchema": {}, "config": {"policy": {"kind": "single", "allowedRoutes": ["quick"]}}},
+          {"id": "quick", "kind": "transform", "inputSchema": {}, "outputSchema": {}, "config": {}}
+        ],
+        "edges": [
+          {"id": "route-quick", "from": {"node": "route"}, "to": {"node": "quick"}, "condition": {"apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1", "kind": "RouteEquals", "routeKey": "quick"}}
+        ]
+      },
+      "expect": {"valid": false, "diagnostics": [{"code": "GE1401_INVALID_ROUTER_POLICY", "path": "#/nodes/0/config/policy", "nodeIds": ["route"]}]}
+    },
+    {
+      "name": "unsupported-condition-version-precedes-source-and-coverage",
+      "expectedGraphHash": "075e79e06423de79610f95e0dbb8fe964efbcb566d8a84acbfba312c0218c9b9",
+      "graph": {
+        "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+        "kind": "Graph",
+        "metadata": {"name": "unsupported-condition", "version": "1"},
+        "inputSchema": {},
+        "outputSchema": {},
+        "entrypoints": ["route"],
+        "outputs": {"decision": {"node": "route"}},
+        "nodes": [
+          {"id": "route", "kind": "router", "inputSchema": {}, "outputSchema": {}, "config": {"kind": "single", "allowedRoutes": ["quick"]}},
+          {"id": "quick", "kind": "transform", "inputSchema": {}, "outputSchema": {}, "config": {}}
+        ],
+        "edges": [
+          {"id": "route-quick", "from": {"node": "route"}, "to": {"node": "quick"}, "condition": {"apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v9", "kind": "RouteEquals", "routeKey": "quick"}}
+        ]
+      },
+      "expect": {"valid": false, "diagnostics": [{"code": "GE1402_UNSUPPORTED_EDGE_CONDITION", "path": "#/edges/0/condition/apiVersion", "nodeIds": ["route"], "edgeId": "route-quick"}]}
+    },
+    {
+      "name": "condition-with-an-extra-field-is-unsupported",
+      "expectedGraphHash": "6f86775745bf04e23319efc0296d2838e12ff1ccef74431b6a142c420a20c99f",
+      "graph": {
+        "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+        "kind": "Graph",
+        "metadata": {"name": "condition-extra-field", "version": "1"},
+        "inputSchema": {},
+        "outputSchema": {},
+        "entrypoints": ["route"],
+        "outputs": {"decision": {"node": "route"}},
+        "nodes": [
+          {"id": "route", "kind": "router", "inputSchema": {}, "outputSchema": {}, "config": {"kind": "single", "allowedRoutes": ["quick"]}},
+          {"id": "quick", "kind": "transform", "inputSchema": {}, "outputSchema": {}, "config": {}}
+        ],
+        "edges": [
+          {"id": "route-quick", "from": {"node": "route"}, "to": {"node": "quick"}, "condition": {"apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1", "kind": "RouteEquals", "routeKey": "quick", "otherwise": true}}
+        ]
+      },
+      "expect": {"valid": false, "diagnostics": [{"code": "GE1402_UNSUPPORTED_EDGE_CONDITION", "path": "#/edges/0/condition/otherwise", "nodeIds": ["route"], "edgeId": "route-quick"}]}
+    },
+    {
+      "name": "route-equals-source-must-be-router",
+      "expectedGraphHash": "a9b5acf56df1378ff704b55b719b2c4d0d4826229bbc411d8e6d4ed7f17a5008",
+      "graph": {
+        "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+        "kind": "Graph",
+        "metadata": {"name": "non-router-condition", "version": "1"},
+        "inputSchema": {},
+        "outputSchema": {},
+        "entrypoints": ["source"],
+        "outputs": {"result": {"node": "target"}},
+        "nodes": [
+          {"id": "source", "kind": "transform", "inputSchema": {}, "outputSchema": {}, "config": {}},
+          {"id": "target", "kind": "transform", "inputSchema": {}, "outputSchema": {}, "config": {}}
+        ],
+        "edges": [
+          {"id": "conditional", "from": {"node": "source"}, "to": {"node": "target"}, "condition": {"apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1", "kind": "RouteEquals", "routeKey": "quick"}}
+        ]
+      },
+      "expect": {"valid": false, "diagnostics": [{"code": "GE1403_CONDITION_SOURCE_NOT_ROUTER", "path": "#/edges/0/condition", "nodeIds": ["source"], "edgeId": "conditional"}]}
+    },
+    {
+      "name": "condition-route-must-be-allowed",
+      "expectedGraphHash": "5abc6a0cadc1947e95fcd6b850ee5d18d754997d543fe3b733f7016543253cf2",
+      "graph": {
+        "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+        "kind": "Graph",
+        "metadata": {"name": "route-not-allowed", "version": "1"},
+        "inputSchema": {},
+        "outputSchema": {},
+        "entrypoints": ["route"],
+        "outputs": {"decision": {"node": "route"}},
+        "nodes": [
+          {"id": "route", "kind": "router", "inputSchema": {}, "outputSchema": {}, "config": {"kind": "single", "allowedRoutes": ["quick"]}},
+          {"id": "audit", "kind": "transform", "inputSchema": {}, "outputSchema": {}, "config": {}}
+        ],
+        "edges": [
+          {"id": "route-audit", "from": {"node": "route"}, "to": {"node": "audit"}, "condition": {"apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1", "kind": "RouteEquals", "routeKey": "audit"}}
+        ]
+      },
+      "expect": {"valid": false, "diagnostics": [{"code": "GE1404_ROUTE_NOT_ALLOWED", "path": "#/edges/0/condition/routeKey", "nodeIds": ["route"], "edgeId": "route-audit"}]}
+    },
+    {
+      "name": "duplicate-route-key-points-at-the-later-edge",
+      "expectedGraphHash": "2612ff21a3dc2df837420d5d3cb7c6a40068e40e0f17aa924e8eef2a18dfbb7d",
+      "graph": {
+        "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+        "kind": "Graph",
+        "metadata": {"name": "duplicate-route-case", "version": "1"},
+        "inputSchema": {},
+        "outputSchema": {},
+        "entrypoints": ["route"],
+        "outputs": {"decision": {"node": "route"}},
+        "nodes": [
+          {"id": "route", "kind": "router", "inputSchema": {}, "outputSchema": {}, "config": {"kind": "single", "allowedRoutes": ["quick"]}},
+          {"id": "quick-a", "kind": "transform", "inputSchema": {}, "outputSchema": {}, "config": {}},
+          {"id": "quick-b", "kind": "transform", "inputSchema": {}, "outputSchema": {}, "config": {}}
+        ],
+        "edges": [
+          {"id": "route-quick-a", "from": {"node": "route"}, "to": {"node": "quick-a"}, "condition": {"apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1", "kind": "RouteEquals", "routeKey": "quick"}},
+          {"id": "route-quick-b", "from": {"node": "route"}, "to": {"node": "quick-b"}, "condition": {"apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1", "kind": "RouteEquals", "routeKey": "quick"}}
+        ]
+      },
+      "expect": {"valid": false, "diagnostics": [{"code": "GE1405_DUPLICATE_ROUTE_CASE", "path": "#/edges/1/condition/routeKey", "nodeIds": ["route"], "edgeId": "route-quick-b"}]}
+    },
+    {
+      "name": "distinct-route-cases-must-not-share-a-target-node",
+      "expectedGraphHash": "744e078174d7bcc1fff20671090815223dd0b42c4d2759bd362e621e4b967d5c",
+      "graph": {
+        "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+        "kind": "Graph",
+        "metadata": {"name": "duplicate-route-target", "version": "1"},
+        "inputSchema": {},
+        "outputSchema": {},
+        "entrypoints": ["route"],
+        "outputs": {"decision": {"node": "route"}},
+        "nodes": [
+          {"id": "route", "kind": "router", "inputSchema": {}, "outputSchema": {}, "config": {"kind": "multi", "allowedRoutes": ["quick", "audit"], "maxMulticast": 2}},
+          {"id": "shared", "kind": "transform", "inputSchema": {}, "outputSchema": {}, "config": {}}
+        ],
+        "edges": [
+          {"id": "route-quick", "from": {"node": "route"}, "to": {"node": "shared", "port": "quick"}, "condition": {"apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1", "kind": "RouteEquals", "routeKey": "quick"}},
+          {"id": "route-audit", "from": {"node": "route"}, "to": {"node": "shared", "port": "audit"}, "condition": {"apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1", "kind": "RouteEquals", "routeKey": "audit"}}
+        ]
+      },
+      "expect": {"valid": false, "diagnostics": [{"code": "GE1406_DUPLICATE_ROUTE_TARGET", "path": "#/edges/1/to/node", "nodeIds": ["route", "shared"], "edgeId": "route-audit"}]}
+    },
+    {
+      "name": "single-router-requires-every-allowed-route",
+      "expectedGraphHash": "45554bd8e553e17c97f2da599f7b254efe1b40c6c26eef318c822d4f193fb51f",
+      "graph": {
+        "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+        "kind": "Graph",
+        "metadata": {"name": "incomplete-single", "version": "1"},
+        "inputSchema": {},
+        "outputSchema": {},
+        "entrypoints": ["route"],
+        "outputs": {"decision": {"node": "route"}},
+        "nodes": [
+          {"id": "route", "kind": "router", "inputSchema": {}, "outputSchema": {}, "config": {"kind": "single", "allowedRoutes": ["quick", "audit"]}},
+          {"id": "quick", "kind": "transform", "inputSchema": {}, "outputSchema": {}, "config": {}}
+        ],
+        "edges": [
+          {"id": "route-quick", "from": {"node": "route"}, "to": {"node": "quick"}, "condition": {"apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1", "kind": "RouteEquals", "routeKey": "quick"}}
+        ]
+      },
+      "expect": {"valid": false, "missingRoutes": ["audit"], "diagnostics": [{"code": "GE1407_INCOMPLETE_ROUTE_COVERAGE", "path": "#/nodes/0/config/allowedRoutes", "nodeIds": ["route"]}]}
+    },
+    {
+      "name": "default-route-does-not-repair-a-missing-known-route-case",
+      "expectedGraphHash": "fcca65b4479a99bcc47013ad5ac8e45c14fca44de81929a49387a89993351d32",
+      "graph": {
+        "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+        "kind": "Graph",
+        "metadata": {"name": "incomplete-default", "version": "1"},
+        "inputSchema": {},
+        "outputSchema": {},
+        "entrypoints": ["route"],
+        "outputs": {"decision": {"node": "route"}},
+        "nodes": [
+          {"id": "route", "kind": "router", "inputSchema": {}, "outputSchema": {}, "config": {"kind": "single", "allowedRoutes": ["quick", "audit"], "defaultRoute": "quick"}},
+          {"id": "quick", "kind": "transform", "inputSchema": {}, "outputSchema": {}, "config": {}}
+        ],
+        "edges": [
+          {"id": "route-quick", "from": {"node": "route"}, "to": {"node": "quick"}, "condition": {"apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1", "kind": "RouteEquals", "routeKey": "quick"}}
+        ]
+      },
+      "expect": {"valid": false, "missingRoutes": ["audit"], "diagnostics": [{"code": "GE1407_INCOMPLETE_ROUTE_COVERAGE", "path": "#/nodes/0/config/allowedRoutes", "nodeIds": ["route"]}]}
+    },
+    {
+      "name": "multicast-router-also-requires-every-allowed-route",
+      "expectedGraphHash": "b4b2b8356244824c06e9e2e39609166a416acde6353deb6938ad5a374d2d029e",
+      "graph": {
+        "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+        "kind": "Graph",
+        "metadata": {"name": "incomplete-multi", "version": "1"},
+        "inputSchema": {},
+        "outputSchema": {},
+        "entrypoints": ["route"],
+        "outputs": {"decision": {"node": "route"}},
+        "nodes": [
+          {"id": "route", "kind": "router", "inputSchema": {}, "outputSchema": {}, "config": {"kind": "multi", "allowedRoutes": ["quick", "audit", "security"], "maxMulticast": 2}},
+          {"id": "quick", "kind": "transform", "inputSchema": {}, "outputSchema": {}, "config": {}},
+          {"id": "audit", "kind": "transform", "inputSchema": {}, "outputSchema": {}, "config": {}}
+        ],
+        "edges": [
+          {"id": "route-quick", "from": {"node": "route"}, "to": {"node": "quick"}, "condition": {"apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1", "kind": "RouteEquals", "routeKey": "quick"}},
+          {"id": "route-audit", "from": {"node": "route"}, "to": {"node": "audit"}, "condition": {"apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1", "kind": "RouteEquals", "routeKey": "audit"}}
+        ]
+      },
+      "expect": {"valid": false, "missingRoutes": ["security"], "diagnostics": [{"code": "GE1407_INCOMPLETE_ROUTE_COVERAGE", "path": "#/nodes/0/config/allowedRoutes", "nodeIds": ["route"]}]}
+    },
+    {
+      "name": "registered-loop-condition-families-remain-compiler-valid",
+      "expectedGraphHash": "aea871c8b20d2197dd04cffdb50414e62bfa10e02dfb555f33a4219d87bdc816",
+      "graph": {
+        "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+        "kind": "Graph",
+        "metadata": {"name": "registered-loop-conditions", "version": "1"},
+        "inputSchema": {},
+        "outputSchema": {},
+        "entrypoints": ["source"],
+        "outputs": {"result": {"node": "source"}},
+        "nodes": [
+          {"id": "source", "kind": "transform", "inputSchema": {}, "outputSchema": {}, "config": {}},
+          {"id": "continue", "kind": "transform", "inputSchema": {}, "outputSchema": {}, "config": {}},
+          {"id": "dry", "kind": "transform", "inputSchema": {}, "outputSchema": {}, "config": {}},
+          {"id": "bound", "kind": "transform", "inputSchema": {}, "outputSchema": {}, "config": {}}
+        ],
+        "edges": [
+          {"id": "to-continue", "from": {"node": "source"}, "to": {"node": "continue"}, "condition": {"apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1", "kind": "LoopContinue", "maxRounds": 3, "round": 0, "roundKey": "r0"}},
+          {"id": "to-dry", "from": {"node": "source"}, "to": {"node": "dry"}, "condition": {"apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1", "kind": "LoopDryVerdict", "maxRounds": 3, "round": 1, "roundKey": "r1"}},
+          {"id": "to-bound", "from": {"node": "source"}, "to": {"node": "bound"}, "condition": {"apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1", "kind": "LoopVerdictAtBound", "maxRounds": 3, "round": 2, "roundKey": "r2"}}
+        ]
+      },
+      "expect": {"valid": true, "diagnostics": []}
+    },
+    {
+      "name": "invalid-policy-and-independent-unsupported-condition-coexist-without-coverage-cascade",
+      "expectedGraphHash": "16ae761e22097f45ece39ef3eb973e913314a0b70b1b09741173d4eab9ba6f12",
+      "graph": {
+        "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+        "kind": "Graph",
+        "metadata": {"name": "policy-condition-cascade", "version": "1"},
+        "inputSchema": {},
+        "outputSchema": {},
+        "entrypoints": ["route"],
+        "outputs": {"decision": {"node": "route"}},
+        "nodes": [
+          {"id": "route", "kind": "router", "inputSchema": {}, "outputSchema": {}, "config": {"policy": {"kind": "single", "allowedRoutes": ["quick"]}}},
+          {"id": "quick", "kind": "transform", "inputSchema": {}, "outputSchema": {}, "config": {}}
+        ],
+        "edges": [
+          {"id": "route-quick", "from": {"node": "route"}, "to": {"node": "quick"}, "condition": {"apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v9", "kind": "RouteEquals", "routeKey": "quick"}}
+        ]
+      },
+      "expect": {"valid": false, "diagnostics": [
+        {"code": "GE1401_INVALID_ROUTER_POLICY", "path": "#/nodes/0/config/policy", "nodeIds": ["route"]},
+        {"code": "GE1402_UNSUPPORTED_EDGE_CONDITION", "path": "#/edges/0/condition/apiVersion", "nodeIds": ["route"], "edgeId": "route-quick"}
+      ]}
+    },
+    {
+      "name": "router-categories-order-by-category-and-suppress-incomplete-cascade",
+      "expectedGraphHash": "f42aaf196192fe51147899fb451bc8b9fdcce5b5b777670d5b9c75d5287e0109",
+      "graph": {
+        "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+        "kind": "Graph",
+        "metadata": {"name": "router-diagnostic-order", "version": "1"},
+        "inputSchema": {},
+        "outputSchema": {},
+        "entrypoints": ["route"],
+        "outputs": {"decision": {"node": "route"}},
+        "nodes": [
+          {"id": "route", "kind": "router", "inputSchema": {}, "outputSchema": {}, "config": {"kind": "multi", "allowedRoutes": ["quick", "audit", "security"], "maxMulticast": 2}},
+          {"id": "bad-version", "kind": "transform", "inputSchema": {}, "outputSchema": {}, "config": {}},
+          {"id": "other", "kind": "transform", "inputSchema": {}, "outputSchema": {}, "config": {}},
+          {"id": "quick", "kind": "transform", "inputSchema": {}, "outputSchema": {}, "config": {}},
+          {"id": "quick-copy", "kind": "transform", "inputSchema": {}, "outputSchema": {}, "config": {}}
+        ],
+        "edges": [
+          {"id": "bad-version", "from": {"node": "route"}, "to": {"node": "bad-version"}, "condition": {"apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v9", "kind": "RouteEquals", "routeKey": "security"}},
+          {"id": "not-member", "from": {"node": "route"}, "to": {"node": "other"}, "condition": {"apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1", "kind": "RouteEquals", "routeKey": "other"}},
+          {"id": "quick-first", "from": {"node": "route"}, "to": {"node": "quick"}, "condition": {"apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1", "kind": "RouteEquals", "routeKey": "quick"}},
+          {"id": "quick-later", "from": {"node": "route"}, "to": {"node": "quick-copy"}, "condition": {"apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1", "kind": "RouteEquals", "routeKey": "quick"}},
+          {"id": "audit-shared", "from": {"node": "route"}, "to": {"node": "quick"}, "condition": {"apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1", "kind": "RouteEquals", "routeKey": "audit"}}
+        ]
+      },
+      "expect": {"valid": false, "diagnostics": [
+        {"code": "GE1402_UNSUPPORTED_EDGE_CONDITION", "path": "#/edges/0/condition/apiVersion", "nodeIds": ["route"], "edgeId": "bad-version"},
+        {"code": "GE1404_ROUTE_NOT_ALLOWED", "path": "#/edges/1/condition/routeKey", "nodeIds": ["route"], "edgeId": "not-member"},
+        {"code": "GE1405_DUPLICATE_ROUTE_CASE", "path": "#/edges/3/condition/routeKey", "nodeIds": ["route"], "edgeId": "quick-later"},
+        {"code": "GE1406_DUPLICATE_ROUTE_TARGET", "path": "#/edges/4/to/node", "nodeIds": ["route", "quick"], "edgeId": "audit-shared"}
+      ]}
+    },
+    {
+      "name": "router-diagnostic-precedes-independent-typed-port-diagnostic",
+      "expectedGraphHash": "f77cf3fa6c4fa94f199037740d0e251483a832409fb9cb98cc2888ec053ea35f",
+      "graph": {
+        "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+        "kind": "Graph",
+        "metadata": {"name": "router-before-typed", "version": "1"},
+        "inputSchema": {},
+        "outputSchema": {"type": "object", "properties": {"decision": {}}, "required": ["decision"], "additionalProperties": false},
+        "entrypoints": ["route"],
+        "outputs": {"decision": {"node": "route", "port": "decision"}},
+        "nodes": [
+          {"id": "route", "kind": "router", "inputSchema": {}, "outputSchema": {"type": "object", "properties": {"quick": {}, "decision": {}}, "required": ["quick", "decision"], "additionalProperties": false}, "config": {"kind": "single", "allowedRoutes": ["quick", "audit"]}},
+          {"id": "quick", "kind": "transform", "inputSchema": {"type": "object", "properties": {"quick": {}}, "required": ["quick"], "additionalProperties": false}, "outputSchema": {}, "config": {}}
+        ],
+        "edges": [
+          {"id": "route-quick", "from": {"node": "route", "port": "quick"}, "to": {"node": "quick", "port": "missing"}, "schema": {}, "condition": {"apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1", "kind": "RouteEquals", "routeKey": "quick"}}
+        ],
+        "policies": {"graphengineering.reacher-z.github.io/typed-ports": {"apiVersion": "graphengineering.reacher-z.github.io/typed-ports/v1alpha1", "mode": "strict-exact"}}
+      },
+      "expect": {"valid": false, "missingRoutes": ["audit"], "diagnostics": [
+        {"code": "GE1407_INCOMPLETE_ROUTE_COVERAGE", "path": "#/nodes/0/config/allowedRoutes", "nodeIds": ["route"]},
+        {"code": "GE1202_MISSING_TARGET_PORT", "path": "#/edges/0/to/port", "nodeIds": ["quick"], "edgeId": "route-quick"}
+      ]}
+    },
+    {
+      "name": "multiple-invalid-router-policies-follow-node-declaration-order",
+      "expectedGraphHash": "5256e96b8c9cc3f2312e18ce4ad6a584c3de4570bc84f367a97856a057f90df5",
+      "graph": {
+        "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+        "kind": "Graph",
+        "metadata": {"name": "two-invalid-router-policies", "version": "1"},
+        "inputSchema": {},
+        "outputSchema": {},
+        "entrypoints": ["route-z", "route-a"],
+        "outputs": {"decision": {"node": "route-z"}},
+        "nodes": [
+          {"id": "route-z", "kind": "router", "inputSchema": {}, "outputSchema": {}, "config": {"policy": {"kind": "single", "allowedRoutes": ["quick-z"]}}},
+          {"id": "target-z", "kind": "transform", "inputSchema": {}, "outputSchema": {}, "config": {}},
+          {"id": "route-a", "kind": "router", "inputSchema": {}, "outputSchema": {}, "config": {"policy": {"kind": "single", "allowedRoutes": ["quick-a"]}}},
+          {"id": "target-a", "kind": "transform", "inputSchema": {}, "outputSchema": {}, "config": {}}
+        ],
+        "edges": [
+          {"id": "route-z-quick", "from": {"node": "route-z"}, "to": {"node": "target-z"}, "condition": {"apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1", "kind": "RouteEquals", "routeKey": "quick-z"}},
+          {"id": "route-a-quick", "from": {"node": "route-a"}, "to": {"node": "target-a"}, "condition": {"apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1", "kind": "RouteEquals", "routeKey": "quick-a"}}
+        ]
+      },
+      "expect": {"valid": false, "diagnostics": [
+        {"code": "GE1401_INVALID_ROUTER_POLICY", "path": "#/nodes/0/config/policy", "nodeIds": ["route-z"]},
+        {"code": "GE1401_INVALID_ROUTER_POLICY", "path": "#/nodes/2/config/policy", "nodeIds": ["route-a"]}
+      ]}
+    },
+    {
+      "name": "multiple-unsupported-conditions-follow-edge-declaration-order-across-routers",
+      "expectedGraphHash": "37bbc9da23963b9c91a52e97dad37b7ed63a669433348332742a2349c8d80fd0",
+      "graph": {
+        "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+        "kind": "Graph",
+        "metadata": {"name": "two-unsupported-router-conditions", "version": "1"},
+        "inputSchema": {},
+        "outputSchema": {},
+        "entrypoints": ["route-a", "route-z"],
+        "outputs": {"decision": {"node": "route-a"}},
+        "nodes": [
+          {"id": "route-a", "kind": "router", "inputSchema": {}, "outputSchema": {}, "config": {"kind": "single", "allowedRoutes": ["quick-a"]}},
+          {"id": "target-a", "kind": "transform", "inputSchema": {}, "outputSchema": {}, "config": {}},
+          {"id": "route-z", "kind": "router", "inputSchema": {}, "outputSchema": {}, "config": {"kind": "single", "allowedRoutes": ["quick-z"]}},
+          {"id": "target-z", "kind": "transform", "inputSchema": {}, "outputSchema": {}, "config": {}}
+        ],
+        "edges": [
+          {"id": "z-first", "from": {"node": "route-z"}, "to": {"node": "target-z"}, "condition": {"apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v9", "kind": "RouteEquals", "routeKey": "quick-z"}},
+          {"id": "a-second", "from": {"node": "route-a"}, "to": {"node": "target-a"}, "condition": {"apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v9", "kind": "RouteEquals", "routeKey": "quick-a"}}
+        ]
+      },
+      "expect": {"valid": false, "diagnostics": [
+        {"code": "GE1402_UNSUPPORTED_EDGE_CONDITION", "path": "#/edges/0/condition/apiVersion", "nodeIds": ["route-z"], "edgeId": "z-first"},
+        {"code": "GE1402_UNSUPPORTED_EDGE_CONDITION", "path": "#/edges/1/condition/apiVersion", "nodeIds": ["route-a"], "edgeId": "a-second"}
+      ]}
+    }
+  ],
+  "runtimeGraphs": {
+    "diamond": {
+      "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+      "kind": "Graph",
+      "metadata": {"name": "router-diamond", "version": "1"},
+      "inputSchema": {},
+      "outputSchema": {},
+      "entrypoints": ["route"],
+      "outputs": {"result": {"node": "merge"}},
+      "nodes": [
+        {"id": "route", "kind": "router", "inputSchema": {}, "outputSchema": {}, "config": {"kind": "single", "allowedRoutes": ["quick", "audit"]}},
+        {"id": "quick", "kind": "transform", "inputSchema": {}, "outputSchema": {}, "config": {}},
+        {"id": "audit", "kind": "transform", "inputSchema": {}, "outputSchema": {}, "config": {}},
+        {"id": "merge", "kind": "barrier", "inputSchema": {}, "outputSchema": {}, "config": {}}
+      ],
+      "edges": [
+        {"id": "route-quick", "from": {"node": "route"}, "to": {"node": "quick"}, "condition": {"apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1", "kind": "RouteEquals", "routeKey": "quick"}},
+        {"id": "route-audit", "from": {"node": "route"}, "to": {"node": "audit"}, "condition": {"apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1", "kind": "RouteEquals", "routeKey": "audit"}},
+        {"id": "quick-merge", "from": {"node": "quick"}, "to": {"node": "merge", "port": "quick"}},
+        {"id": "audit-merge", "from": {"node": "audit"}, "to": {"node": "merge", "port": "audit"}}
+      ]
+    },
+    "no-match": {
+      "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+      "kind": "Graph",
+      "metadata": {"name": "router-no-match", "version": "1"},
+      "inputSchema": {},
+      "outputSchema": {},
+      "entrypoints": ["route"],
+      "outputs": {"decision": {"node": "route"}},
+      "nodes": [
+        {"id": "route", "kind": "router", "inputSchema": {}, "outputSchema": {}, "config": {"kind": "single", "allowedRoutes": ["known"]}},
+        {"id": "known", "kind": "transform", "inputSchema": {}, "outputSchema": {}, "config": {}}
+      ],
+      "edges": [
+        {"id": "route-known", "from": {"node": "route"}, "to": {"node": "known"}, "condition": {"apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1", "kind": "RouteEquals", "routeKey": "known"}}
+      ]
+    },
+    "default": {
+      "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+      "kind": "Graph",
+      "metadata": {"name": "router-default", "version": "1"},
+      "inputSchema": {},
+      "outputSchema": {},
+      "entrypoints": ["route"],
+      "outputs": {"decision": {"node": "route"}},
+      "nodes": [
+        {"id": "route", "kind": "router", "inputSchema": {}, "outputSchema": {}, "config": {"kind": "single", "allowedRoutes": ["quick", "audit"], "defaultRoute": "quick"}},
+        {"id": "quick", "kind": "transform", "inputSchema": {}, "outputSchema": {}, "config": {}},
+        {"id": "audit", "kind": "transform", "inputSchema": {}, "outputSchema": {}, "config": {}}
+      ],
+      "edges": [
+        {"id": "route-quick", "from": {"node": "route"}, "to": {"node": "quick"}, "condition": {"apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1", "kind": "RouteEquals", "routeKey": "quick"}},
+        {"id": "route-audit", "from": {"node": "route"}, "to": {"node": "audit"}, "condition": {"apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1", "kind": "RouteEquals", "routeKey": "audit"}}
+      ]
+    },
+    "confidence": {
+      "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+      "kind": "Graph",
+      "metadata": {"name": "router-confidence", "version": "1"},
+      "inputSchema": {},
+      "outputSchema": {},
+      "entrypoints": ["route"],
+      "outputs": {"decision": {"node": "route"}},
+      "nodes": [
+        {"id": "route", "kind": "router", "inputSchema": {}, "outputSchema": {}, "config": {"kind": "single", "allowedRoutes": ["quick", "human"], "confidence": {"minimumBasisPoints": 7000, "escalationRoute": "human"}}},
+        {"id": "quick", "kind": "transform", "inputSchema": {}, "outputSchema": {}, "config": {}},
+        {"id": "human", "kind": "transform", "inputSchema": {}, "outputSchema": {}, "config": {}}
+      ],
+      "edges": [
+        {"id": "route-quick", "from": {"node": "route"}, "to": {"node": "quick"}, "condition": {"apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1", "kind": "RouteEquals", "routeKey": "quick"}},
+        {"id": "route-human", "from": {"node": "route"}, "to": {"node": "human"}, "condition": {"apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1", "kind": "RouteEquals", "routeKey": "human"}}
+      ]
+    },
+    "multi": {
+      "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+      "kind": "Graph",
+      "metadata": {"name": "router-multi", "version": "1"},
+      "inputSchema": {},
+      "outputSchema": {},
+      "entrypoints": ["route"],
+      "outputs": {"decision": {"node": "route"}},
+      "nodes": [
+        {"id": "route", "kind": "router", "inputSchema": {}, "outputSchema": {}, "config": {"kind": "multi", "allowedRoutes": ["quick", "audit", "security"], "maxMulticast": 2}},
+        {"id": "quick", "kind": "transform", "inputSchema": {}, "outputSchema": {}, "config": {}},
+        {"id": "audit", "kind": "transform", "inputSchema": {}, "outputSchema": {}, "config": {}},
+        {"id": "security", "kind": "transform", "inputSchema": {}, "outputSchema": {}, "config": {}}
+      ],
+      "edges": [
+        {"id": "route-quick", "from": {"node": "route"}, "to": {"node": "quick"}, "condition": {"apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1", "kind": "RouteEquals", "routeKey": "quick"}},
+        {"id": "route-audit", "from": {"node": "route"}, "to": {"node": "audit"}, "condition": {"apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1", "kind": "RouteEquals", "routeKey": "audit"}},
+        {"id": "route-security", "from": {"node": "route"}, "to": {"node": "security"}, "condition": {"apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1", "kind": "RouteEquals", "routeKey": "security"}}
+      ]
+    },
+    "descendant": {
+      "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+      "kind": "Graph",
+      "metadata": {"name": "router-inactive-descendant", "version": "1"},
+      "inputSchema": {},
+      "outputSchema": {},
+      "entrypoints": ["route"],
+      "outputs": {"decision": {"node": "route"}},
+      "nodes": [
+        {"id": "route", "kind": "router", "inputSchema": {}, "outputSchema": {}, "config": {"kind": "single", "allowedRoutes": ["quick", "audit"]}},
+        {"id": "quick", "kind": "transform", "inputSchema": {}, "outputSchema": {}, "config": {}},
+        {"id": "audit", "kind": "transform", "inputSchema": {}, "outputSchema": {}, "config": {}},
+        {"id": "quick-post", "kind": "transform", "inputSchema": {}, "outputSchema": {}, "config": {}}
+      ],
+      "edges": [
+        {"id": "route-quick", "from": {"node": "route"}, "to": {"node": "quick"}, "condition": {"apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1", "kind": "RouteEquals", "routeKey": "quick"}},
+        {"id": "quick-post", "from": {"node": "quick"}, "to": {"node": "quick-post"}},
+        {"id": "route-audit", "from": {"node": "route"}, "to": {"node": "audit"}, "condition": {"apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1", "kind": "RouteEquals", "routeKey": "audit"}}
+      ]
+    },
+    "inactive-output": {
+      "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+      "kind": "Graph",
+      "metadata": {"name": "router-inactive-output", "version": "1"},
+      "inputSchema": {},
+      "outputSchema": {},
+      "entrypoints": ["route"],
+      "outputs": {"result": {"node": "quick"}},
+      "nodes": [
+        {"id": "route", "kind": "router", "inputSchema": {}, "outputSchema": {}, "config": {"kind": "single", "allowedRoutes": ["quick", "audit"]}},
+        {"id": "quick", "kind": "transform", "inputSchema": {}, "outputSchema": {}, "config": {}},
+        {"id": "audit", "kind": "transform", "inputSchema": {}, "outputSchema": {}, "config": {}}
+      ],
+      "edges": [
+        {"id": "route-quick", "from": {"node": "route"}, "to": {"node": "quick"}, "condition": {"apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1", "kind": "RouteEquals", "routeKey": "quick"}},
+        {"id": "route-audit", "from": {"node": "route"}, "to": {"node": "audit"}, "condition": {"apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1", "kind": "RouteEquals", "routeKey": "audit"}}
+      ]
+    }
+  },
+  "hashContract": {
+    "canonicalGraph": "existing-canonical-json-serialization-of-captured-graph",
+    "graphHash": "lowercase-hex-sha256-of-utf8-canonicalGraph",
+    "crossRuntimeRequirement": "canonicalGraph-bytes-and-graphHash-must-both-match-literals"
+  },
+  "runtimeGraphHashes": {
+    "diamond": "6ac6bb97f48f403b85ebd57a116e9b94ba389afd9e3f4986895ef29cb14cae7c",
+    "no-match": "7fc85186645408035a5414e2d994b9fcf7887734d7e9b6e4fdb5a5a6b219b510",
+    "default": "03442f3155adb734ab1f9f4bc6e8bddd8fbcffda57b3dba4ac4def1eea970821",
+    "confidence": "92b092299ddb99bd1f36c6254ed71def59ad4b571470b82041c28e41380dc140",
+    "multi": "1b3db58dc36d445a23ed9d5845cf17793360c3c624b56ad36252d3bb7c2c4005",
+    "descendant": "216ccc2c9002f545604c42034282e0a17a164eb272d5ec378e5648b2c3c32664",
+    "inactive-output": "e212e8307231e3109f6aa8af5c54524d5caf3112bc2bf64066b8e8b093ef5169"
+  },
+  "runtimeCases": [
+    {
+      "name": "selected-route-prunes-the-other-branch-and-merges-only-active-input",
+      "graphRef": "diamond",
+      "graphInput": {"requestedRoutes": ["audit"]},
+      "executors": {"quick": {"return": {"reviewed": "quick"}}, "audit": {"return": {"reviewed": "audit"}}},
+      "expect": {
+        "status": "succeeded",
+        "totalAttempts": 3,
+        "output": {"result": {"audit": {"reviewed": "audit"}}},
+        "graphFailureCodes": [],
+        "executorCalls": {"quick": 0, "audit": 1},
+        "nodes": [
+          {"nodeId": "route", "status": "succeeded", "attempts": 1, "output": {"routed": true, "reasonCode": "REQUESTED_ROUTES_SELECTED", "requestedRoutes": ["audit"], "selectedRoutes": ["audit"], "unknownRoutes": [], "confidenceBasisPoints": null, "usedDefault": false, "escalated": false}},
+          {"nodeId": "quick", "status": "skipped", "attempts": 0, "failure": {"code": "ROUTE_NOT_SELECTED", "retryable": false}},
+          {"nodeId": "audit", "status": "succeeded", "attempts": 1, "output": {"reviewed": "audit"}},
+          {"nodeId": "merge", "status": "succeeded", "attempts": 1, "output": {"audit": {"reviewed": "audit"}}}
+        ]
+      }
+    },
+    {
+      "name": "omitted-default-produces-successful-no-match-and-pruned-branch",
+      "graphRef": "no-match",
+      "graphInput": {"requestedRoutes": ["unknown"]},
+      "executors": {"known": {"return": {"unexpected": true}}},
+      "expect": {
+        "status": "succeeded",
+        "totalAttempts": 1,
+        "output": {"decision": {"routed": false, "reasonCode": "UNKNOWN_ROUTE", "requestedRoutes": ["unknown"], "selectedRoutes": [], "unknownRoutes": ["unknown"], "confidenceBasisPoints": null, "usedDefault": false, "escalated": false}},
+        "graphFailureCodes": [],
+        "executorCalls": {"known": 0},
+        "nodes": [
+          {"nodeId": "route", "status": "succeeded", "attempts": 1, "output": {"routed": false, "reasonCode": "UNKNOWN_ROUTE", "requestedRoutes": ["unknown"], "selectedRoutes": [], "unknownRoutes": ["unknown"], "confidenceBasisPoints": null, "usedDefault": false, "escalated": false}},
+          {"nodeId": "known", "status": "skipped", "attempts": 0, "failure": {"code": "ROUTE_NOT_SELECTED", "retryable": false}}
+        ]
+      }
+    },
+    {
+      "name": "empty-request-selects-the-enumerated-default",
+      "graphRef": "default",
+      "graphInput": {"requestedRoutes": []},
+      "executors": {"quick": {"return": {"reviewed": "quick"}}, "audit": {"return": {"reviewed": "audit"}}},
+      "expect": {
+        "status": "succeeded",
+        "totalAttempts": 2,
+        "output": {"decision": {"routed": true, "reasonCode": "DEFAULT_SELECTED_NO_REQUEST", "requestedRoutes": [], "selectedRoutes": ["quick"], "unknownRoutes": [], "confidenceBasisPoints": null, "usedDefault": true, "escalated": false}},
+        "graphFailureCodes": [],
+        "executorCalls": {"quick": 1, "audit": 0},
+        "nodes": [
+          {"nodeId": "route", "status": "succeeded", "attempts": 1, "output": {"routed": true, "reasonCode": "DEFAULT_SELECTED_NO_REQUEST", "requestedRoutes": [], "selectedRoutes": ["quick"], "unknownRoutes": [], "confidenceBasisPoints": null, "usedDefault": true, "escalated": false}},
+          {"nodeId": "quick", "status": "succeeded", "attempts": 1, "output": {"reviewed": "quick"}},
+          {"nodeId": "audit", "status": "skipped", "attempts": 0, "failure": {"code": "ROUTE_NOT_SELECTED", "retryable": false}}
+        ]
+      }
+    },
+    {
+      "name": "low-confidence-selection-activates-only-the-escalation-route",
+      "graphRef": "confidence",
+      "graphInput": {"requestedRoutes": ["quick"], "confidenceBasisPoints": 6999},
+      "executors": {"quick": {"return": {"reviewed": "quick"}}, "human": {"return": {"reviewed": "human"}}},
+      "expect": {
+        "status": "succeeded",
+        "totalAttempts": 2,
+        "output": {"decision": {"routed": true, "reasonCode": "ESCALATION_SELECTED_LOW_CONFIDENCE", "requestedRoutes": ["quick"], "selectedRoutes": ["human"], "unknownRoutes": [], "confidenceBasisPoints": 6999, "usedDefault": false, "escalated": true}},
+        "graphFailureCodes": [],
+        "executorCalls": {"quick": 0, "human": 1},
+        "nodes": [
+          {"nodeId": "route", "status": "succeeded", "attempts": 1, "output": {"routed": true, "reasonCode": "ESCALATION_SELECTED_LOW_CONFIDENCE", "requestedRoutes": ["quick"], "selectedRoutes": ["human"], "unknownRoutes": [], "confidenceBasisPoints": 6999, "usedDefault": false, "escalated": true}},
+          {"nodeId": "quick", "status": "skipped", "attempts": 0, "failure": {"code": "ROUTE_NOT_SELECTED", "retryable": false}},
+          {"nodeId": "human", "status": "succeeded", "attempts": 1, "output": {"reviewed": "human"}}
+        ]
+      }
+    },
+    {
+      "name": "custom-router-output-is-recomputed-from-authoritative-input",
+      "graphRef": "diamond",
+      "graphInput": {"requestedRoutes": ["quick"]},
+      "executors": {
+        "route": {"return": {"routed": true, "reasonCode": "REQUESTED_ROUTES_SELECTED", "requestedRoutes": ["audit"], "selectedRoutes": ["audit"], "unknownRoutes": [], "confidenceBasisPoints": null, "usedDefault": false, "escalated": false}},
+        "quick": {"return": {"reviewed": "quick"}},
+        "audit": {"return": {"reviewed": "audit"}}
+      },
+      "expect": {
+        "status": "failed",
+        "totalAttempts": 1,
+        "outputAbsent": true,
+        "graphFailureCodes": ["INVALID_ROUTE_SELECTION", "UPSTREAM_FAILED", "UPSTREAM_FAILED", "UPSTREAM_FAILED"],
+        "executorCalls": {"route": 1, "quick": 0, "audit": 0},
+        "nodes": [
+          {"nodeId": "route", "status": "failed", "attempts": 1, "failure": {"code": "INVALID_ROUTE_SELECTION", "retryable": false}},
+          {"nodeId": "quick", "status": "skipped", "attempts": 0, "failure": {"code": "UPSTREAM_FAILED", "retryable": false}},
+          {"nodeId": "audit", "status": "skipped", "attempts": 0, "failure": {"code": "UPSTREAM_FAILED", "retryable": false}},
+          {"nodeId": "merge", "status": "skipped", "attempts": 0, "failure": {"code": "UPSTREAM_FAILED", "retryable": false}}
+        ]
+      }
+    },
+    {
+      "name": "multicast-activates-requested-routes-in-policy-order",
+      "graphRef": "multi",
+      "graphInput": {"requestedRoutes": ["audit", "quick"]},
+      "executors": {"quick": {"return": {"reviewed": "quick"}}, "audit": {"return": {"reviewed": "audit"}}, "security": {"return": {"reviewed": "security"}}},
+      "expect": {
+        "status": "succeeded",
+        "totalAttempts": 3,
+        "output": {"decision": {"routed": true, "reasonCode": "REQUESTED_ROUTES_SELECTED", "requestedRoutes": ["audit", "quick"], "selectedRoutes": ["quick", "audit"], "unknownRoutes": [], "confidenceBasisPoints": null, "usedDefault": false, "escalated": false}},
+        "graphFailureCodes": [],
+        "executorCalls": {"quick": 1, "audit": 1, "security": 0},
+        "nodes": [
+          {"nodeId": "route", "status": "succeeded", "attempts": 1, "output": {"routed": true, "reasonCode": "REQUESTED_ROUTES_SELECTED", "requestedRoutes": ["audit", "quick"], "selectedRoutes": ["quick", "audit"], "unknownRoutes": [], "confidenceBasisPoints": null, "usedDefault": false, "escalated": false}},
+          {"nodeId": "quick", "status": "succeeded", "attempts": 1, "output": {"reviewed": "quick"}},
+          {"nodeId": "audit", "status": "succeeded", "attempts": 1, "output": {"reviewed": "audit"}},
+          {"nodeId": "security", "status": "skipped", "attempts": 0, "failure": {"code": "ROUTE_NOT_SELECTED", "retryable": false}}
+        ]
+      }
+    },
+    {
+      "name": "multicast-limit-yields-successful-non-routed-decision",
+      "graphRef": "multi",
+      "graphInput": {"requestedRoutes": ["security", "quick", "audit"]},
+      "executors": {"quick": {"return": {"unexpected": true}}, "audit": {"return": {"unexpected": true}}, "security": {"return": {"unexpected": true}}},
+      "expect": {
+        "status": "succeeded",
+        "totalAttempts": 1,
+        "output": {"decision": {"routed": false, "reasonCode": "MULTICAST_LIMIT_EXCEEDED", "requestedRoutes": ["security", "quick", "audit"], "selectedRoutes": [], "unknownRoutes": [], "confidenceBasisPoints": null, "usedDefault": false, "escalated": false}},
+        "graphFailureCodes": [],
+        "executorCalls": {"quick": 0, "audit": 0, "security": 0},
+        "nodes": [
+          {"nodeId": "route", "status": "succeeded", "attempts": 1, "output": {"routed": false, "reasonCode": "MULTICAST_LIMIT_EXCEEDED", "requestedRoutes": ["security", "quick", "audit"], "selectedRoutes": [], "unknownRoutes": [], "confidenceBasisPoints": null, "usedDefault": false, "escalated": false}},
+          {"nodeId": "quick", "status": "skipped", "attempts": 0, "failure": {"code": "ROUTE_NOT_SELECTED", "retryable": false}},
+          {"nodeId": "audit", "status": "skipped", "attempts": 0, "failure": {"code": "ROUTE_NOT_SELECTED", "retryable": false}},
+          {"nodeId": "security", "status": "skipped", "attempts": 0, "failure": {"code": "ROUTE_NOT_SELECTED", "retryable": false}}
+        ]
+      }
+    },
+    {
+      "name": "inactive-descendant-inherits-route-not-selected",
+      "graphRef": "descendant",
+      "graphInput": {"requestedRoutes": ["audit"]},
+      "executors": {"quick": {"return": {"unexpected": true}}, "quick-post": {"return": {"unexpected": true}}, "audit": {"return": {"reviewed": "audit"}}},
+      "expect": {
+        "status": "succeeded",
+        "totalAttempts": 2,
+        "output": {"decision": {"routed": true, "reasonCode": "REQUESTED_ROUTES_SELECTED", "requestedRoutes": ["audit"], "selectedRoutes": ["audit"], "unknownRoutes": [], "confidenceBasisPoints": null, "usedDefault": false, "escalated": false}},
+        "graphFailureCodes": [],
+        "executorCalls": {"quick": 0, "quick-post": 0, "audit": 1},
+        "nodes": [
+          {"nodeId": "route", "status": "succeeded", "attempts": 1, "output": {"routed": true, "reasonCode": "REQUESTED_ROUTES_SELECTED", "requestedRoutes": ["audit"], "selectedRoutes": ["audit"], "unknownRoutes": [], "confidenceBasisPoints": null, "usedDefault": false, "escalated": false}},
+          {"nodeId": "quick", "status": "skipped", "attempts": 0, "failure": {"code": "ROUTE_NOT_SELECTED", "retryable": false}},
+          {"nodeId": "audit", "status": "succeeded", "attempts": 1, "output": {"reviewed": "audit"}},
+          {"nodeId": "quick-post", "status": "skipped", "attempts": 0, "failure": {"code": "ROUTE_NOT_SELECTED", "retryable": false}}
+        ]
+      }
+    },
+    {
+      "name": "active-failure-controls-mixed-join-despite-inactive-sibling",
+      "graphRef": "diamond",
+      "graphInput": {"requestedRoutes": ["audit"]},
+      "executors": {"quick": {"return": {"unexpected": true}}, "audit": {"throw": "audit failed"}},
+      "expect": {
+        "status": "failed",
+        "totalAttempts": 2,
+        "outputAbsent": true,
+        "graphFailureCodes": ["NODE_EXECUTION_FAILED", "UPSTREAM_FAILED"],
+        "executorCalls": {"quick": 0, "audit": 1},
+        "nodes": [
+          {"nodeId": "route", "status": "succeeded", "attempts": 1, "output": {"routed": true, "reasonCode": "REQUESTED_ROUTES_SELECTED", "requestedRoutes": ["audit"], "selectedRoutes": ["audit"], "unknownRoutes": [], "confidenceBasisPoints": null, "usedDefault": false, "escalated": false}},
+          {"nodeId": "quick", "status": "skipped", "attempts": 0, "failure": {"code": "ROUTE_NOT_SELECTED", "retryable": false}},
+          {"nodeId": "audit", "status": "failed", "attempts": 1, "failure": {"code": "NODE_EXECUTION_FAILED", "retryable": false}},
+          {"nodeId": "merge", "status": "skipped", "attempts": 0, "failure": {"code": "UPSTREAM_FAILED", "retryable": false}}
+        ]
+      }
+    },
+    {
+      "name": "inactive-named-output-fails-binding-without-invented-node-failure",
+      "graphRef": "inactive-output",
+      "graphInput": {"requestedRoutes": ["audit"]},
+      "executors": {"quick": {"return": {"unexpected": true}}, "audit": {"return": {"reviewed": "audit"}}},
+      "expect": {
+        "status": "failed",
+        "totalAttempts": 2,
+        "outputAbsent": true,
+        "graphFailureCodes": [],
+        "executorCalls": {"quick": 0, "audit": 1},
+        "nodes": [
+          {"nodeId": "route", "status": "succeeded", "attempts": 1, "output": {"routed": true, "reasonCode": "REQUESTED_ROUTES_SELECTED", "requestedRoutes": ["audit"], "selectedRoutes": ["audit"], "unknownRoutes": [], "confidenceBasisPoints": null, "usedDefault": false, "escalated": false}},
+          {"nodeId": "quick", "status": "skipped", "attempts": 0, "failure": {"code": "ROUTE_NOT_SELECTED", "retryable": false}},
+          {"nodeId": "audit", "status": "succeeded", "attempts": 1, "output": {"reviewed": "audit"}}
+        ]
+      }
+    },
+    {
+      "name": "unknown-request-selects-enumerated-default",
+      "graphRef": "default",
+      "graphInput": {"requestedRoutes": ["unknown"]},
+      "executors": {"quick": {"return": {"reviewed": "quick"}}, "audit": {"return": {"unexpected": true}}},
+      "expect": {
+        "status": "succeeded",
+        "totalAttempts": 2,
+        "output": {"decision": {"routed": true, "reasonCode": "DEFAULT_SELECTED_UNKNOWN_ROUTE", "requestedRoutes": ["unknown"], "selectedRoutes": ["quick"], "unknownRoutes": ["unknown"], "confidenceBasisPoints": null, "usedDefault": true, "escalated": false}},
+        "graphFailureCodes": [],
+        "executorCalls": {"quick": 1, "audit": 0},
+        "nodes": [
+          {"nodeId": "route", "status": "succeeded", "attempts": 1, "output": {"routed": true, "reasonCode": "DEFAULT_SELECTED_UNKNOWN_ROUTE", "requestedRoutes": ["unknown"], "selectedRoutes": ["quick"], "unknownRoutes": ["unknown"], "confidenceBasisPoints": null, "usedDefault": true, "escalated": false}},
+          {"nodeId": "quick", "status": "succeeded", "attempts": 1, "output": {"reviewed": "quick"}},
+          {"nodeId": "audit", "status": "skipped", "attempts": 0, "failure": {"code": "ROUTE_NOT_SELECTED", "retryable": false}}
+        ]
+      }
+    }
+  ],
+  "future": {
+    "durableRouteSelectedEvent": false,
+    "integratedBarrierSettlement": false,
+    "quorumVoting": false,
+    "deadlineAndLateArrivalStatistics": false,
+    "humanEscalationEvent": false,
+    "catchAllCondition": false
+  }
+}

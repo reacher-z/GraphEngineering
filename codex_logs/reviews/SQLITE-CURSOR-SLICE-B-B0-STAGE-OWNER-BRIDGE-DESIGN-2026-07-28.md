@@ -181,19 +181,19 @@ const SQLITE_BASELINE_FENCE_CURSOR_STAGE_TRANSFER = Symbol(...);
 const SQLITE_BASELINE_ABORT_CURSOR_STAGE_TRANSFER = Symbol(...);
 
 interface SQLiteBaselineCursorStageTransferOwner {
-  [SQLITE_BASELINE_BEGIN_CURSOR_STAGE_TRANSFER](
+  [SQLITE_BASELINE_BEGIN_CURSOR_STAGE_TRANSFER] (
     connection: SQLiteConnection,
     receipt: SQLiteCursorPreRebindReceipt,
     preTransferWitness: SQLiteCursorPreRebindConnectionProvenance,
   ): object;
 
-  [SQLITE_BASELINE_FENCE_CURSOR_STAGE_TRANSFER](
+  [SQLITE_BASELINE_FENCE_CURSOR_STAGE_TRANSFER] (
     connection: SQLiteConnection,
     receipt: SQLiteCursorPreRebindReceipt,
     session: object,
   ): void;
 
-  [SQLITE_BASELINE_ABORT_CURSOR_STAGE_TRANSFER](
+  [SQLITE_BASELINE_ABORT_CURSOR_STAGE_TRANSFER] (
     session: object | undefined,
     message: string,
   ): never;

@@ -10859,3 +10859,119 @@ Its 624-line brief defines the closed TypeScript/Python coordinator surfaces,
 one-way epoch transfer, exact first-DDL `+1` seam, 34 primary hostile scenarios
 with mirrored parity cases, verification gates and parallel implementation
 lanes. It is design evidence only and changes none of the B0a nonclaims.
+
+### 31.35.10 D6 integrated-router compiler contract revision 2 acceptance
+
+The shared compiler/runtime contract for the next D6 implementation tranche is
+frozen in `spec/integrated-router-semantics.md` and
+`spec/conformance/integrated-router.case.json`. This is a contract milestone,
+not production evidence for the seven new compiler diagnostics. The accepted
+revision preserves the exact published three-field `RouteEquals` condition and
+direct `node.config` route policy while closing every incompatibility found in
+the first contract draft.
+
+The first draft was rejected with HIGH 3 / MEDIUM 4 / LOW 1. It would have
+invalidated the existing `routedBranches` constructor because that pattern
+preserved an empty classifier config; it treated `RouteEquals` as the only
+condition family and would have rejected the three published loop conditions;
+and it retained a `lowerLevelRuntimeOnly` unsupported-condition case even
+though neither scheduler exposes a safe compiler bypass. It also under-specified
+Graph-envelope diagnostic ownership, policy/condition matrices, cross-pass and
+within-category order, several runtime terminals and absent-field projection.
+
+Revision 2 makes patterns and compiler enforcement one atomic tranche.
+`RoutedBranchesOptions` gains an optional exact `routePolicy`. A supplied policy
+is lowered directly only when its ordered `allowedRoutes` equals normalized
+branch keys and the classifier config is exactly empty. A legacy empty config
+without an option synthesizes a direct single-route policy from those ordered
+keys. A matching preconfigured direct policy is preserved. A supplied option
+plus non-empty config, invalid policy or branch mismatch fails before returning
+a graph. The compiler never infers a policy from edges or metadata.
+
+Conditional ownership is now an explicit registry keyed by exact API version
+and kind. D6 owns and validates `RouteEquals`; `LoopContinue`,
+`LoopDryVerdict` and `LoopVerdictAtBound` remain registered to the loop pattern
+and opaque to this pass. An unregistered version/kind or malformed claimed
+`RouteEquals` is `GE1402`. Registered foreign conditions do not count as route
+cases or repair route coverage. The corpus retains one currently compiler-valid
+graph containing all three loop kinds.
+
+Diagnostic ownership follows the existing envelope. Portable router config
+null, scalar or array values are admitted by Graph IR and become
+`GE1401_INVALID_ROUTER_POLICY` at the config root. Capture-hostile accessors,
+proxies, sparse arrays, cycles and non-portable values remain
+`GE1007_INVALID_GRAPH`. Edge condition null or scalar is already rejected by
+the Graph envelope as GE1007. The router pass does not relabel earlier failures.
+
+The seven frozen diagnostics are:
+
+- `GE1401_INVALID_ROUTER_POLICY`;
+- `GE1402_UNSUPPORTED_EDGE_CONDITION`;
+- `GE1403_CONDITION_SOURCE_NOT_ROUTER`;
+- `GE1404_ROUTE_NOT_ALLOWED`;
+- `GE1405_DUPLICATE_ROUTE_CASE`;
+- `GE1406_DUPLICATE_ROUTE_TARGET`; and
+- `GE1407_INCOMPLETE_ROUTE_COVERAGE`.
+
+The pass order is canonical capture/envelope; identity/reference gates;
+cycle/topology; entrypoint/reachability; graph policies; integrated router;
+then strict typed ports. Within the router pass, categories are ordered GE1401
+through GE1407 and each category preserves declaration order. Projection
+objects visit `code`, `path`, `nodeIds`, `edgeId` and omit absent fields rather
+than serializing null. Suppression is local to the invalid router/condition and
+does not hide independent routers or later compiler passes.
+
+An independent revision-2 audit found one remaining MEDIUM after the main
+remediation: prose specified within-category order, but no literal graph had
+multiple routers or two diagnostics in the same GE140x category. The final
+corpus adds two deliberately non-lexical multi-router graphs. One declares
+`route-z` before `route-a` and freezes two GE1401 projections in node order.
+The other declares edge `z-first` before `a-second` across distinct routers and
+freezes two GE1402 projections in edge order. Their literal hashes are
+`5256e96b8c9cc3f2312e18ce4ad6a584c3de4570bc84f367a97856a057f90df5`
+and
+`37bbc9da23963b9c91a52e97dad37b7ed63a669433348332742a2349c8d80fd0`.
+
+The final shared corpus contains:
+
+- 6 pattern-lowering cases;
+- 29 exact policy cases, matched against both authoritative primitive
+  validators including mathematical JSON `1.0` and boolean rejection;
+- 14 condition-registry cases;
+- 2 literal JSON-envelope cases and 4 host-constructed capture cases;
+- 18 full compiler graphs with exact diagnostic projections and literal hashes;
+- 7 runtime graphs with literal hashes; and
+- 11 reachable runtime cases covering selection, no-match, default,
+  confidence escalation, forged output, multicast ordering and limit,
+  inactive descendants, mixed-join active failure, inactive named output and
+  unknown-request default behavior.
+
+The unsupported-condition scheduler guard remains historical defense in depth,
+but it is no longer represented as an impossible post-compiler execution
+surface. TypeScript's zero-call public gate is `runGraph(document, ...)`.
+Python first proves `try_compile_graph(document)` returns no `CompiledGraph`,
+so no handler can be passed to `run_graph`. No validation bypass is introduced.
+
+Accepted evidence is strict duplicate-key JSON and corpus invariants; exact
+TypeScript/Python canonical bytes and literal graph hashes 25/25; current public
+runtime projections 11/11 in each language; policy paths 29/29 in each
+language; condition registry 14/14; TypeScript core/runtime/primitives builds;
+patterns 93/93; Python primitive plus scheduler 188/188; 286 documentation
+links; and scoped diff checks. The final independent hostile review is HIGH 0 /
+MEDIUM 0 / LOW 0.
+
+The review history is retained rather than rewritten in:
+
+- `codex_logs/reviews/D6-INTEGRATED-ROUTER-COMPILER-CONTRACT-2026-07-28.md`;
+- `codex_logs/reviews/D6-INTEGRATED-ROUTER-IMPLEMENTABILITY-PARITY-AUDIT-2026-07-28.md`;
+  and
+- `codex_logs/reviews/D6-INTEGRATED-ROUTER-REV2-FINAL-AUDIT-2026-07-28.md`.
+
+The next D6 source tranche must atomically implement the TypeScript/Python
+compiler passes and both pattern lowerings against this corpus, prove every
+compiler-invalid public run has zero executor calls, and retain all existing
+core/pattern/primitives/runtime/durable suites. Contract acceptance does not
+implement `RouteSelected`, durable decision identity, zero-rejudge replay,
+integrated all/minimum/percentage barriers, quorum, abstention, deadlines,
+late arrivals, cancellation, trace or CLI visibility. `D6-ROUTER-BARRIER-023`
+therefore remains open.
