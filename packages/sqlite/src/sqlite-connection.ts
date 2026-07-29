@@ -51,6 +51,12 @@ export interface SQLiteConnectionOwnerSnapshot {
   readonly transactionMode: SQLiteTransactionMode | null;
 }
 
+/** Package-private, base-intrinsic row-change observation. */
+export interface SQLiteConnectionTotalChangesSnapshot {
+  readonly totalChanges: number;
+  readonly transactionEpoch: bigint;
+}
+
 function invalid(message: string): never {
   throw new CycleStoreProviderError(
     "GE_CYCLE_STORE_INVALID_ARGUMENT",
@@ -206,6 +212,9 @@ function mayContainAdditionalStatement(sql: string): boolean {
 }
 
 const SQLITE_CONNECTION_OWNER_SNAPSHOT = Symbol("SQLiteConnection.ownerSnapshot");
+const SQLITE_CONNECTION_TOTAL_CHANGES_SNAPSHOT = Symbol(
+  "SQLiteConnection.totalChangesSnapshot",
+);
 
 /** One hardened, synchronous, file-backed SQLite connection. */
 export class SQLiteConnection {
@@ -302,6 +311,47 @@ export class SQLiteConnection {
       isTransaction: transactionAfter,
       transactionEpoch: epochAfter,
       transactionMode: mode,
+    });
+  }
+
+  [SQLITE_CONNECTION_TOTAL_CHANGES_SNAPSHOT](): SQLiteConnectionTotalChangesSnapshot {
+    const epochBefore = this.#transactionEpoch;
+    const transactionBefore = this.#database.isTransaction;
+    if (this.#closed || !this.#database.isOpen) {
+      throw new CycleStoreProviderError(
+        "GE_CYCLE_STORE_UNAVAILABLE",
+        "inspect-schema",
+        "SQLite provider is closed",
+      );
+    }
+    const read = (): number => sqliteSafeInteger(
+      sqliteRow(
+        hardenSQLiteStatement(this.#database.prepare("SELECT total_changes()")).get(),
+        1,
+        "inspect-schema",
+        "private SQLite change counter",
+      )[0],
+      0,
+      Number.MAX_SAFE_INTEGER,
+      "inspect-schema",
+      "private SQLite change counter",
+    );
+    const before = read();
+    const after = read();
+    const transactionAfter = this.#database.isTransaction;
+    const epochAfter = this.#transactionEpoch;
+    if (before !== after
+        || epochBefore !== epochAfter
+        || transactionBefore !== transactionAfter) {
+      throw new CycleStoreProviderError(
+        "GE_CYCLE_STORE_CORRUPTION",
+        "inspect-schema",
+        "SQLite change counter changed during its private snapshot",
+      );
+    }
+    return Object.freeze({
+      totalChanges: after,
+      transactionEpoch: epochAfter,
     });
   }
 
@@ -649,6 +699,10 @@ export class SQLiteConnection {
 
 const sqliteConnectionOwnerSnapshotIntrinsic =
   SQLiteConnection.prototype[SQLITE_CONNECTION_OWNER_SNAPSHOT];
+const sqliteConnectionTotalChangesSnapshotIntrinsic =
+  SQLiteConnection.prototype[SQLITE_CONNECTION_TOTAL_CHANGES_SNAPSHOT];
+const sqliteConnectionExecTrustedIntrinsic = SQLiteConnection.prototype.execTrusted;
+const sqliteConnectionPrepareIntrinsic = SQLiteConnection.prototype.prepare;
 
 /**
  * Read exact owner state through the captured base-class intrinsic.
@@ -658,4 +712,29 @@ export function readSQLiteConnectionOwnerSnapshot(
   connection: SQLiteConnection,
 ): SQLiteConnectionOwnerSnapshot {
   return Reflect.apply(sqliteConnectionOwnerSnapshotIntrinsic, connection, []);
+}
+
+/** Read the real counter without subclass `prepare` or getter interposition. */
+export function readSQLiteConnectionTotalChangesSnapshot(
+  connection: SQLiteConnection,
+): SQLiteConnectionTotalChangesSnapshot {
+  return Reflect.apply(sqliteConnectionTotalChangesSnapshotIntrinsic, connection, []);
+}
+
+/** Execute one fixed package-owned statement through the captured base intrinsic. */
+export function execSQLiteConnectionTrustedIntrinsic(
+  connection: SQLiteConnection,
+  sql: string,
+  operation: CycleStoreProviderOperation,
+): void {
+  Reflect.apply(sqliteConnectionExecTrustedIntrinsic, connection, [sql, operation]);
+}
+
+/** Prepare one fixed package-owned statement through the captured base intrinsic. */
+export function prepareSQLiteConnectionIntrinsic(
+  connection: SQLiteConnection,
+  sql: string,
+  operation: CycleStoreProviderOperation,
+): StatementSync {
+  return Reflect.apply(sqliteConnectionPrepareIntrinsic, connection, [sql, operation]);
 }

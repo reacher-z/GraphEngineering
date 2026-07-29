@@ -23,6 +23,7 @@ import {
 } from "./operation-baseline.js";
 import {
   SQLITE_BASELINE_ABORT_CHECKPOINT_CAMPAIGN,
+  SQLITE_BASELINE_ABORT_CURSOR_STAGE_TRANSFER,
   SQLITE_BASELINE_ABORT_LEASE_LOCK_HOLD_CAMPAIGN,
   SQLITE_BASELINE_ABORT_LEGACY_CAMPAIGN,
   SQLITE_BASELINE_ABORT_STREAM_RECORD_CAMPAIGN,
@@ -30,6 +31,7 @@ import {
   SQLITE_BASELINE_ABORT_ORDERED_HANDOFF,
   SQLITE_BASELINE_BEGIN_ORDERED_HANDOFF,
   SQLITE_BASELINE_BEGIN_CHECKPOINT_CAMPAIGN,
+  SQLITE_BASELINE_BEGIN_CURSOR_STAGE_TRANSFER,
   SQLITE_BASELINE_BEGIN_LEASE_LOCK_HOLD_CAMPAIGN,
   SQLITE_BASELINE_BEGIN_LEGACY_CAMPAIGN,
   SQLITE_BASELINE_BEGIN_STREAM_RECORD_CAMPAIGN,
@@ -39,8 +41,10 @@ import {
   SQLITE_BASELINE_COMPLETE_LEGACY_CAMPAIGN,
   SQLITE_BASELINE_COMPLETE_STREAM_RECORD_CAMPAIGN,
   SQLITE_BASELINE_CONSUME_OWNED_WRITE,
+  SQLITE_BASELINE_CREATE_CURSOR_SEAL_TEMP_TABLE,
   SQLITE_BASELINE_FENCE_ORDERED_HANDOFF,
   SQLITE_BASELINE_FENCE_CHECKPOINT_CAMPAIGN,
+  SQLITE_BASELINE_FENCE_CURSOR_STAGE_TRANSFER,
   SQLITE_BASELINE_FENCE_LEASE_LOCK_HOLD_CAMPAIGN,
   SQLITE_BASELINE_FENCE_LEGACY_CAMPAIGN,
   SQLITE_BASELINE_FENCE_STREAM_RECORD_CAMPAIGN,
@@ -54,12 +58,32 @@ import {
   type SQLiteBaselineOwnedWriteReceipt,
 } from "./operation-baseline-cooperation.js";
 import {
+  SQLITE_CURSOR_SEAL_SCHEMA_SQL,
+  SQLITE_CURSOR_SEAL_TABLE_LIST,
+  SQLITE_CURSOR_SEAL_TEMP_TABLE_DDL,
+  SQLITE_CURSOR_SEAL_TEMP_TABLE_NAME,
+  SQLITE_CURSOR_SEAL_XINFO,
+} from "./cursor-seal-temp-table-contract.js";
+import {
+  assertSQLiteCursorPreRebindConnectionProvenanceWitness,
+  assertSQLiteCursorPreRebindReceiptProvenance,
+  type SQLiteCursorPreRebindConnectionProvenance,
+  type SQLiteCursorPreRebindReceipt,
+} from "./operation-baseline-cursor-ownership.js";
+import {
   sqliteBlob,
   sqliteRow,
   sqliteSafeInteger,
   sqliteText,
 } from "./sqlite-codec.js";
-import { SQLiteConnection } from "./sqlite-connection.js";
+import {
+  SQLiteConnection,
+  execSQLiteConnectionTrustedIntrinsic,
+  prepareSQLiteConnectionIntrinsic,
+  readSQLiteConnectionOwnerSnapshot,
+  readSQLiteConnectionTotalChangesSnapshot,
+  type SQLiteConnectionOwnerSnapshot,
+} from "./sqlite-connection.js";
 
 const OPERATION = "inspect-schema" as const;
 
@@ -97,6 +121,25 @@ export interface SQLiteBaselineStageEntry {
 
 const EXCLUSIVE_PROOF_OWNER = Symbol("SQLiteExclusiveBaselineTransactionProof.owner");
 const ACTIVE_STAGES = new WeakMap<SQLiteConnection, SQLiteBaselineTempStage>();
+const weakMapGetIntrinsic = WeakMap.prototype.get;
+const weakMapSetIntrinsic = WeakMap.prototype.set;
+const weakMapDeleteIntrinsic = WeakMap.prototype.delete;
+
+function activeStage(connection: SQLiteConnection): SQLiteBaselineTempStage | undefined {
+  return Reflect.apply(weakMapGetIntrinsic, ACTIVE_STAGES, [connection]) as
+    SQLiteBaselineTempStage | undefined;
+}
+
+function publishActiveStage(
+  connection: SQLiteConnection,
+  stage: SQLiteBaselineTempStage,
+): void {
+  Reflect.apply(weakMapSetIntrinsic, ACTIVE_STAGES, [connection, stage]);
+}
+
+function deleteActiveStage(connection: SQLiteConnection): void {
+  Reflect.apply(weakMapDeleteIntrinsic, ACTIVE_STAGES, [connection]);
+}
 const KIND_RANK = new Map(
   BASELINE_ENTRY_KINDS.map((entryKind, rank) => [entryKind, rank] as const),
 );
@@ -698,12 +741,154 @@ function mainOperationsCatalogIdentity(
   });
 }
 
-function validateBaselineTempCatalog(connection: SQLiteConnection): void {
+function validateCursorSealTempCatalog(connection: SQLiteConnection): number {
+  const schemaRows = connection.prepare(
+    `SELECT type, name, tbl_name, rootpage, sql
+       FROM temp.sqlite_schema
+      WHERE name = '${SQLITE_CURSOR_SEAL_TEMP_TABLE_NAME}'`,
+    OPERATION,
+  ).all();
+  if (schemaRows.length !== 1) {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_CORRUPTION", OPERATION,
+      "SQLite cursor seal TEMP schema identity is invalid",
+    );
+  }
+  const schema = sqliteRow(schemaRows[0], 5, OPERATION, "cursor seal TEMP schema");
+  const rootpage = sqliteSafeInteger(
+    schema[3], 1, Number.MAX_SAFE_INTEGER, OPERATION, "cursor seal TEMP rootpage",
+  );
+  if (sqliteText(schema[0], OPERATION, "cursor seal TEMP object type") !== "table"
+      || sqliteText(schema[1], OPERATION, "cursor seal TEMP object name")
+        !== SQLITE_CURSOR_SEAL_TEMP_TABLE_NAME
+      || sqliteText(schema[2], OPERATION, "cursor seal TEMP table name")
+        !== SQLITE_CURSOR_SEAL_TEMP_TABLE_NAME
+      || sqliteText(schema[4], OPERATION, "cursor seal TEMP schema SQL")
+        !== SQLITE_CURSOR_SEAL_SCHEMA_SQL) {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_CORRUPTION", OPERATION,
+      "SQLite cursor seal TEMP schema identity is invalid",
+    );
+  }
+
+  const listRows = connection.prepare(
+    `SELECT name, type, ncol, wr, strict
+       FROM pragma_table_list
+      WHERE schema = 'temp' AND name = '${SQLITE_CURSOR_SEAL_TEMP_TABLE_NAME}'`,
+    OPERATION,
+  ).all();
+  if (listRows.length !== 1) {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_CORRUPTION", OPERATION,
+      "SQLite cursor seal TEMP table shape is invalid",
+    );
+  }
+  const list = sqliteRow(listRows[0], 5, OPERATION, "cursor seal TEMP table list");
+  if (sqliteText(list[0], OPERATION, "cursor seal TEMP table-list name")
+        !== SQLITE_CURSOR_SEAL_TABLE_LIST.name
+      || sqliteText(list[1], OPERATION, "cursor seal TEMP table-list type")
+        !== SQLITE_CURSOR_SEAL_TABLE_LIST.type
+      || sqliteSafeInteger(list[2], 0, Number.MAX_SAFE_INTEGER, OPERATION,
+        "cursor seal TEMP column count") !== SQLITE_CURSOR_SEAL_TABLE_LIST.ncol
+      || sqliteSafeInteger(list[3], 0, 1, OPERATION,
+        "cursor seal TEMP WITHOUT ROWID flag") !== SQLITE_CURSOR_SEAL_TABLE_LIST.wr
+      || sqliteSafeInteger(list[4], 0, 1, OPERATION,
+        "cursor seal TEMP STRICT flag") !== SQLITE_CURSOR_SEAL_TABLE_LIST.strict) {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_CORRUPTION", OPERATION,
+      "SQLite cursor seal TEMP table shape is invalid",
+    );
+  }
+
+  const xinfoRows = connection.prepare(
+    `SELECT cid, name, type, "notnull", dflt_value, pk, hidden
+       FROM pragma_table_xinfo('${SQLITE_CURSOR_SEAL_TEMP_TABLE_NAME}', 'temp')
+      ORDER BY cid`,
+    OPERATION,
+  ).all();
+  if (xinfoRows.length !== SQLITE_CURSOR_SEAL_XINFO.length) {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_CORRUPTION", OPERATION,
+      "SQLite cursor seal TEMP column shape is invalid",
+    );
+  }
+  for (let index = 0; index < SQLITE_CURSOR_SEAL_XINFO.length; index += 1) {
+    const expected = SQLITE_CURSOR_SEAL_XINFO[index];
+    const actual = sqliteRow(
+      xinfoRows[index], 7, OPERATION, "cursor seal TEMP column shape",
+    );
+    if (expected === undefined
+        || sqliteSafeInteger(actual[0], 0, 29, OPERATION, "cursor seal TEMP cid")
+          !== expected.cid
+        || sqliteText(actual[1], OPERATION, "cursor seal TEMP column name")
+          !== expected.name
+        || sqliteText(actual[2], OPERATION, "cursor seal TEMP column type")
+          !== expected.type
+        || sqliteSafeInteger(actual[3], 0, 1, OPERATION,
+          "cursor seal TEMP NOT NULL flag") !== expected.notnull
+        || actual[4] !== expected.dfltValue
+        || sqliteSafeInteger(actual[5], 0, 2, OPERATION,
+          "cursor seal TEMP primary-key position") !== expected.pk
+        || sqliteSafeInteger(actual[6], 0, 0, OPERATION,
+          "cursor seal TEMP hidden flag") !== expected.hidden) {
+      throw new CycleStoreProviderError(
+        "GE_CYCLE_STORE_CORRUPTION", OPERATION,
+        "SQLite cursor seal TEMP column shape is invalid",
+      );
+    }
+  }
+  return rootpage;
+}
+
+interface SQLiteCursorSealAttemptIdentity {
+  readonly rootpage: number;
+  readonly sql: string;
+}
+
+/** Bind the just-created object without any replaceable instance/prototype hook. */
+function cursorSealAttemptIdentityIntrinsic(
+  connection: SQLiteConnection,
+): SQLiteCursorSealAttemptIdentity {
+  const raw = prepareSQLiteConnectionIntrinsic(
+    connection,
+    `SELECT type, name, tbl_name, rootpage, sql
+       FROM temp.sqlite_schema
+      WHERE name = '${SQLITE_CURSOR_SEAL_TEMP_TABLE_NAME}'`,
+    OPERATION,
+  ).get();
+  const row = sqliteRow(raw, 5, OPERATION, "cursor seal owned attempt identity");
+  const identity = Object.freeze({
+    rootpage: sqliteSafeInteger(
+      row[3], 1, Number.MAX_SAFE_INTEGER, OPERATION, "cursor seal owned rootpage",
+    ),
+    sql: sqliteText(row[4], OPERATION, "cursor seal owned schema SQL"),
+  });
+  if (sqliteText(row[0], OPERATION, "cursor seal owned object type") !== "table"
+      || sqliteText(row[1], OPERATION, "cursor seal owned object name")
+        !== SQLITE_CURSOR_SEAL_TEMP_TABLE_NAME
+      || sqliteText(row[2], OPERATION, "cursor seal owned table name")
+        !== SQLITE_CURSOR_SEAL_TEMP_TABLE_NAME
+      || identity.sql !== SQLITE_CURSOR_SEAL_SCHEMA_SQL) {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_CORRUPTION", OPERATION,
+      "SQLite cursor seal owned attempt identity is invalid",
+    );
+  }
+  return identity;
+}
+
+function validateBaselineTempCatalog(
+  connection: SQLiteConnection,
+  cursorSealExpected = false,
+): number | undefined {
   const expectedObjects = new Set<string>([
     `table:${STAGE_TABLE}`,
     ...RELATION_TABLES.map((name) => `table:${name}`),
     ...INDEXES.map((name) => `index:${name}`),
     `view:${RELATION_VIEW}`,
+    ...(cursorSealExpected
+      ? [`table:${SQLITE_CURSOR_SEAL_TEMP_TABLE_NAME}`]
+      : []),
   ]);
   const rows = connection.prepare(
     `SELECT type, name
@@ -727,7 +912,11 @@ function validateBaselineTempCatalog(connection: SQLiteConnection): void {
     );
   }
 
-  const expectedTables = new Set<string>([STAGE_TABLE, ...RELATION_TABLES]);
+  const expectedTables = new Set<string>([
+    STAGE_TABLE,
+    ...RELATION_TABLES,
+    ...(cursorSealExpected ? [SQLITE_CURSOR_SEAL_TEMP_TABLE_NAME] : []),
+  ]);
   const tableRows = connection.prepare(
     `SELECT name, type, wr, strict
        FROM pragma_table_list
@@ -760,6 +949,7 @@ function validateBaselineTempCatalog(connection: SQLiteConnection): void {
       "SQLite baseline TEMP table shape is invalid",
     );
   }
+  return cursorSealExpected ? validateCursorSealTempCatalog(connection) : undefined;
 }
 
 type CanonicalRecord = Readonly<Record<string, unknown>>;
@@ -1175,6 +1365,15 @@ export class SQLiteBaselineTempStage {
   #legacyCampaignState: "unused" | "active" | "complete" | "poisoned" = "unused";
   #legacyCampaignSession: object | undefined;
   #legacyCampaignCleanup: (() => void) | undefined;
+  #cursorTransferState: "unused" | "active" | "poisoned" = "unused";
+  #cursorTransferSession: object | undefined;
+  #cursorTransferReceipt: SQLiteCursorPreRebindReceipt | undefined;
+  #cursorTransferProjection: OperationBaselineProjectionIdentity | undefined;
+  #cursorTransferCaptureEpoch: bigint | undefined;
+  #cursorTransferStageEpoch: bigint | undefined;
+  #cursorTransferAllowedTotalChanges: number | undefined;
+  #cursorSealState: "absent" | "creating" | "present" | "poisoned" = "absent";
+  #cursorSealRootpage: number | undefined;
   readonly #mainOperationsCatalogIdentity: SQLiteMainOperationsCatalogIdentity;
   #cooperativeWritesFinished = false;
 
@@ -1840,6 +2039,320 @@ export class SQLiteBaselineTempStage {
     return this.#poison(message);
   }
 
+  /**
+   * Atomically burn B0a and transfer historical capture ownership to this
+   * exact completed stage. This hook executes no cursor SQL and creates no
+   * cursor TEMP object.
+   */
+  [SQLITE_BASELINE_BEGIN_CURSOR_STAGE_TRANSFER](
+    connection: SQLiteConnection,
+    receipt: SQLiteCursorPreRebindReceipt,
+    provenance: SQLiteCursorPreRebindConnectionProvenance,
+  ): object {
+    // A2b must remain authoritative even for direct package-private calls.
+    const receiptWitness = assertSQLiteCursorPreRebindReceiptProvenance(receipt);
+    assertSQLiteCursorPreRebindConnectionProvenanceWitness(
+      connection,
+      receipt,
+      provenance,
+    );
+    const session = Object.freeze(Object.create(null)) as object;
+    if (this.#cursorTransferState !== "unused"
+        || connection !== this.#connection
+        || activeStage(connection) !== this
+        || this.#orderedHandoffState !== "complete"
+        || this.#orderedHandoffSession !== undefined
+        || this.#orderedHandoffCleanup !== undefined
+        || this.#streamRecordCampaignState !== "complete"
+        || this.#streamRecordCampaignSession !== undefined
+        || this.#streamRecordCampaignCleanup !== undefined
+        || this.#checkpointCampaignState !== "complete"
+        || this.#checkpointCampaignSession !== undefined
+        || this.#checkpointCampaignCleanup !== undefined
+        || this.#leaseLockHoldCampaignState !== "complete"
+        || this.#leaseLockHoldCampaignSession !== undefined
+        || this.#leaseLockHoldCampaignCleanup !== undefined
+        || this.#legacyCampaignState !== "complete"
+        || this.#legacyCampaignSession !== undefined
+        || this.#legacyCampaignCleanup !== undefined
+        || receiptWitness.projectionIdentity !== this.#orderedProjectionIdentity
+        || receiptWitness.sourceSummary.expectedEntryCount !== this.#nextOwnedWriteSequence
+        || receiptWitness.projectionIdentity.entryCount !== this.#nextOwnedWriteSequence
+        || this.#orderedExpectedCounts === undefined) {
+      return this.#poison("SQLite cursor stage ownership transfer binding is invalid");
+    }
+    this.#requireOpenOwner();
+    const expectedTotalChanges = this.#requireAllowedChanges();
+    this.#assertExactBaselineCatalog("cursor transfer begin");
+    this.#assertMainOperationsCatalog("cursor transfer begin");
+    this.assertCommonCounts(this.#orderedExpectedCounts);
+    this.assertRelationKeyCoverage();
+    this.#assertExactBaselineCatalog("cursor transfer begin coverage");
+    const finalTotalChanges = this.#requireAllowedChanges();
+    if (finalTotalChanges !== expectedTotalChanges
+        || finalTotalChanges !== this.#allowedTotalChanges) {
+      return this.#poison("SQLite cursor stage ownership transfer write fence changed");
+    }
+    const owner = readSQLiteConnectionOwnerSnapshot(connection);
+    const privateChanges = readSQLiteConnectionTotalChangesSnapshot(connection);
+    if (!owner.isTransaction
+        || owner.transactionMode !== "exclusive"
+        || owner.transactionEpoch !== this.#transactionEpoch
+        || privateChanges.transactionEpoch !== owner.transactionEpoch
+        || privateChanges.totalChanges !== finalTotalChanges) {
+      return this.#poison("SQLite cursor stage ownership transfer epoch is invalid");
+    }
+    // This is the last fallible operation. It repeats A2b and the private live
+    // source/connection fence before the stage assumes one-way live ownership.
+    try {
+      assertSQLiteCursorPreRebindConnectionProvenanceWitness(
+        connection,
+        receipt,
+        provenance,
+      );
+    } catch {
+      return this.#poison(
+        "SQLite cursor stage ownership transfer source provenance changed during begin",
+      );
+    }
+    this.#cursorTransferSession = session;
+    this.#cursorTransferReceipt = receipt;
+    this.#cursorTransferProjection = receiptWitness.projectionIdentity;
+    this.#cursorTransferCaptureEpoch = owner.transactionEpoch;
+    this.#cursorTransferStageEpoch = owner.transactionEpoch;
+    this.#cursorTransferAllowedTotalChanges = finalTotalChanges;
+    this.#cursorTransferState = "active";
+    return session;
+  }
+
+  /** Revalidate the live B0b stage/session owner without replaying capture epoch. */
+  [SQLITE_BASELINE_FENCE_CURSOR_STAGE_TRANSFER](
+    connection: SQLiteConnection,
+    receipt: SQLiteCursorPreRebindReceipt,
+    session: object,
+  ): void {
+    this.#fenceCursorStageTransfer(connection, receipt, session);
+  }
+
+  #fenceCursorStageTransfer(
+    connection: SQLiteConnection,
+    receipt: SQLiteCursorPreRebindReceipt,
+    session: object,
+  ): void {
+    const receiptWitness = assertSQLiteCursorPreRebindReceiptProvenance(receipt);
+    if (this.#cursorTransferState !== "active"
+        || connection !== this.#connection
+        || receipt !== this.#cursorTransferReceipt
+        || session !== this.#cursorTransferSession
+        || receiptWitness.projectionIdentity !== this.#cursorTransferProjection
+        || this.#cursorTransferProjection !== this.#orderedProjectionIdentity
+        || this.#cursorTransferCaptureEpoch === undefined
+        || this.#cursorTransferStageEpoch !== this.#transactionEpoch
+        || this.#cursorTransferAllowedTotalChanges !== this.#allowedTotalChanges
+        || activeStage(connection) !== this
+        || this.#orderedHandoffState !== "complete"
+        || this.#orderedHandoffSession !== undefined
+        || this.#orderedHandoffCleanup !== undefined
+        || this.#streamRecordCampaignState !== "complete"
+        || this.#streamRecordCampaignSession !== undefined
+        || this.#streamRecordCampaignCleanup !== undefined
+        || this.#checkpointCampaignState !== "complete"
+        || this.#checkpointCampaignSession !== undefined
+        || this.#checkpointCampaignCleanup !== undefined
+        || this.#leaseLockHoldCampaignState !== "complete"
+        || this.#leaseLockHoldCampaignSession !== undefined
+        || this.#leaseLockHoldCampaignCleanup !== undefined
+        || this.#legacyCampaignState !== "complete"
+        || this.#legacyCampaignSession !== undefined
+        || this.#legacyCampaignCleanup !== undefined) {
+      return this.#poison("SQLite cursor stage ownership transfer session is invalid");
+    }
+    const ownerBefore = readSQLiteConnectionOwnerSnapshot(connection);
+    const changesBefore = readSQLiteConnectionTotalChangesSnapshot(connection);
+    if (!ownerBefore.isTransaction
+        || ownerBefore.transactionMode !== "exclusive"
+        || ownerBefore.transactionEpoch !== this.#cursorTransferStageEpoch
+        || changesBefore.transactionEpoch !== ownerBefore.transactionEpoch
+        || changesBefore.totalChanges !== this.#cursorTransferAllowedTotalChanges) {
+      return this.#poison("SQLite cursor stage ownership transfer owner fence changed");
+    }
+    this.#requireOpenOwner();
+    this.#requireAllowedChanges();
+    this.#assertExactBaselineCatalog("cursor transfer fence");
+    this.#assertMainOperationsCatalog("cursor transfer fence");
+    this.#requireAllowedChanges();
+    const ownerAfter = readSQLiteConnectionOwnerSnapshot(connection);
+    const changesAfter = readSQLiteConnectionTotalChangesSnapshot(connection);
+    let reportedEpoch: bigint;
+    try {
+      reportedEpoch = connection.transactionEpoch;
+    } catch {
+      return this.#poison("SQLite cursor stage ownership transfer owner fence changed");
+    }
+    const ownerFinal = readSQLiteConnectionOwnerSnapshot(connection);
+    if (!ownerAfter.isTransaction
+        || ownerAfter.transactionMode !== "exclusive"
+        || ownerAfter.transactionEpoch !== this.#cursorTransferStageEpoch
+        || ownerAfter.transactionEpoch !== ownerBefore.transactionEpoch
+        || this.#transactionEpoch !== this.#cursorTransferStageEpoch
+        || changesAfter.transactionEpoch !== ownerAfter.transactionEpoch
+        || changesAfter.totalChanges !== this.#cursorTransferAllowedTotalChanges
+        || changesAfter.totalChanges !== changesBefore.totalChanges
+        || !ownerFinal.isTransaction
+        || ownerFinal.transactionMode !== "exclusive"
+        || ownerFinal.transactionEpoch !== ownerAfter.transactionEpoch
+        || reportedEpoch !== ownerFinal.transactionEpoch) {
+      return this.#poison("SQLite cursor stage ownership transfer owner fence changed");
+    }
+  }
+
+  /** Execute and adopt the sole exact stage-owned B1 DDL transition. */
+  [SQLITE_BASELINE_CREATE_CURSOR_SEAL_TEMP_TABLE](
+    connection: SQLiteConnection,
+    receipt: SQLiteCursorPreRebindReceipt,
+    session: object,
+  ): void {
+    // A2b remains first even when this package-private hook is called directly.
+    assertSQLiteCursorPreRebindReceiptProvenance(receipt);
+    this.#fenceCursorStageTransfer(connection, receipt, session);
+    if (this.#cursorSealState !== "absent"
+        || this.#cursorSealRootpage !== undefined
+        || this.#cursorTransferCaptureEpoch === undefined
+        || this.#cursorTransferStageEpoch === undefined
+        || this.#cursorTransferAllowedTotalChanges === undefined) {
+      return this.#poison("SQLite cursor seal TEMP table creation is already started");
+    }
+
+    const ownerBefore = readSQLiteConnectionOwnerSnapshot(connection);
+    const changesBefore = readSQLiteConnectionTotalChangesSnapshot(connection);
+    if (!ownerBefore.isTransaction
+        || ownerBefore.transactionMode !== "exclusive"
+        || ownerBefore.transactionEpoch !== this.#transactionEpoch
+        || ownerBefore.transactionEpoch !== this.#cursorTransferStageEpoch
+        || changesBefore.transactionEpoch !== ownerBefore.transactionEpoch
+        || changesBefore.totalChanges !== this.#allowedTotalChanges
+        || changesBefore.totalChanges !== this.#cursorTransferAllowedTotalChanges) {
+      return this.#poison("SQLite cursor seal TEMP table owner fence changed");
+    }
+
+    this.#cursorSealState = "creating";
+    let attemptIdentity: SQLiteCursorSealAttemptIdentity | undefined;
+    let ownerAfterCreate: SQLiteConnectionOwnerSnapshot | undefined;
+    try {
+      execSQLiteConnectionTrustedIntrinsic(
+        connection,
+        SQLITE_CURSOR_SEAL_TEMP_TABLE_DDL,
+        OPERATION,
+      );
+      ownerAfterCreate = readSQLiteConnectionOwnerSnapshot(connection);
+      const changesAfterCreate = readSQLiteConnectionTotalChangesSnapshot(connection);
+      if (!ownerAfterCreate.isTransaction
+          || ownerAfterCreate.transactionMode !== "exclusive"
+          || ownerAfterCreate.transactionEpoch !== ownerBefore.transactionEpoch + 1n
+          || changesAfterCreate.transactionEpoch !== ownerAfterCreate.transactionEpoch
+          || changesAfterCreate.totalChanges !== changesBefore.totalChanges) {
+        throw new CycleStoreProviderError(
+          "GE_CYCLE_STORE_CORRUPTION",
+          OPERATION,
+          "SQLite cursor seal TEMP table DDL delta is invalid",
+        );
+      }
+      attemptIdentity = cursorSealAttemptIdentityIntrinsic(connection);
+
+      const rootpage = validateBaselineTempCatalog(connection, true);
+      this.#assertMainOperationsCatalog("cursor seal create");
+      const ownerAfterValidation = readSQLiteConnectionOwnerSnapshot(connection);
+      const changesAfterValidation = readSQLiteConnectionTotalChangesSnapshot(connection);
+      if (rootpage === undefined
+          || rootpage !== attemptIdentity.rootpage
+          || !ownerAfterValidation.isTransaction
+          || ownerAfterValidation.transactionMode !== "exclusive"
+          || ownerAfterValidation.transactionEpoch !== ownerAfterCreate.transactionEpoch
+          || changesAfterValidation.transactionEpoch !== ownerAfterValidation.transactionEpoch
+          || changesAfterValidation.totalChanges !== changesBefore.totalChanges
+          || reservedCatalogCount(connection) !== EXPECTED_RESERVED_OBJECT_COUNT + 1) {
+        throw new CycleStoreProviderError(
+          "GE_CYCLE_STORE_CORRUPTION",
+          OPERATION,
+          "SQLite cursor seal TEMP table adoption fence is invalid",
+        );
+      }
+
+      // Capture epoch is intentionally immutable. Only the live stage epoch is
+      // advanced across the one exact package-owned DDL statement.
+      this.#transactionEpoch = ownerAfterValidation.transactionEpoch;
+      this.#cursorTransferStageEpoch = ownerAfterValidation.transactionEpoch;
+      this.#cursorSealRootpage = rootpage;
+      this.#cursorSealState = "present";
+    } catch (error) {
+      // The name was proven absent immediately before the owned attempt, so a
+      // best-effort drop can only target this transition's object. Preserve the
+      // authoritative creation/adoption error even if cleanup or poison fails.
+      let cleanedExactAttempt = false;
+      if (attemptIdentity !== undefined && ownerAfterCreate !== undefined) {
+        try {
+          const cleanupOwner = readSQLiteConnectionOwnerSnapshot(connection);
+          const cleanupChanges = readSQLiteConnectionTotalChangesSnapshot(connection);
+          const currentIdentity = cursorSealAttemptIdentityIntrinsic(connection);
+          if (cleanupOwner.isTransaction
+              && cleanupOwner.transactionMode === "exclusive"
+              && cleanupOwner.transactionEpoch === ownerAfterCreate.transactionEpoch
+              && cleanupChanges.transactionEpoch === cleanupOwner.transactionEpoch
+              && cleanupChanges.totalChanges === changesBefore.totalChanges
+              && currentIdentity.rootpage === attemptIdentity.rootpage
+              && currentIdentity.sql === attemptIdentity.sql) {
+            execSQLiteConnectionTrustedIntrinsic(
+              connection,
+              `DROP TABLE temp.${SQLITE_CURSOR_SEAL_TEMP_TABLE_NAME}`,
+              OPERATION,
+            );
+            cleanedExactAttempt = true;
+          }
+        } catch {
+          // Unknown generation/identity must never be deleted by name.
+        }
+      }
+      if (cleanedExactAttempt) {
+        try {
+          const ownerAfterCleanup = readSQLiteConnectionOwnerSnapshot(connection);
+          if (ownerAfterCleanup.isTransaction
+              && ownerAfterCleanup.transactionMode === "exclusive") {
+            this.#transactionEpoch = ownerAfterCleanup.transactionEpoch;
+            this.#cursorTransferStageEpoch = ownerAfterCleanup.transactionEpoch;
+          }
+        } catch {
+          // A closed/replaced owner is secondary to the primary B1 failure.
+        }
+      }
+      this.#cursorSealRootpage = undefined;
+      this.#cursorSealState = "poisoned";
+      try {
+        this.#poison("SQLite cursor seal TEMP table creation failed");
+      } catch {
+        // Preserve the exact primary exception.
+      }
+      throw error;
+    }
+  }
+
+  /** Burn the B0b session while preserving the authoritative caller failure. */
+  [SQLITE_BASELINE_ABORT_CURSOR_STAGE_TRANSFER](
+    session: object | undefined,
+    message: string,
+  ): never {
+    if (session !== undefined && session !== this.#cursorTransferSession) {
+      message = "SQLite cursor stage ownership transfer session is invalid";
+    }
+    this.#cursorTransferSession = undefined;
+    this.#cursorTransferReceipt = undefined;
+    this.#cursorTransferProjection = undefined;
+    this.#cursorTransferStageEpoch = undefined;
+    this.#cursorTransferAllowedTotalChanges = undefined;
+    if (this.#cursorSealState !== "absent") this.#cursorSealState = "poisoned";
+    if (this.#cursorTransferState === "active") this.#cursorTransferState = "poisoned";
+    return this.#poison(message);
+  }
+
   /** Package-private fail-closed bridge used when source receipt checks fail. */
   [SQLITE_BASELINE_COOPERATIVE_POISON](message: string): never {
     if (this.#state === "open") return this.#poison(message);
@@ -2024,9 +2537,16 @@ export class SQLiteBaselineTempStage {
       this.#legacyCampaignSession = undefined;
       this.#legacyCampaignState = "poisoned";
     }
+    if (this.#cursorTransferState === "active") this.#cursorTransferState = "poisoned";
+    if (this.#cursorSealState !== "absent") this.#cursorSealState = "poisoned";
+    this.#cursorTransferSession = undefined;
+    this.#cursorTransferReceipt = undefined;
+    this.#cursorTransferProjection = undefined;
+    this.#cursorTransferStageEpoch = undefined;
+    this.#cursorTransferAllowedTotalChanges = undefined;
     if (!this.#connection.isOpen) {
       this.#state = "disposed";
-      ACTIVE_STAGES.delete(this.#connection);
+      deleteActiveStage(this.#connection);
       if (handoffCleanupFailure !== undefined) throw handoffCleanupFailure;
       return;
     }
@@ -2036,11 +2556,12 @@ export class SQLiteBaselineTempStage {
       // A rollback/rebegin may let the caller create new objects with the same
       // fixed names. A stale stage must never delete those replacement objects.
       this.#state = "disposed";
-      ACTIVE_STAGES.delete(this.#connection);
+      deleteActiveStage(this.#connection);
       if (handoffCleanupFailure !== undefined) throw handoffCleanupFailure;
       return;
     }
     const drops = [
+      `DROP TABLE temp.${SQLITE_CURSOR_SEAL_TEMP_TABLE_NAME}`,
       `DROP VIEW temp.${RELATION_VIEW}`,
       ...[...INDEXES].reverse().map((name) => `DROP INDEX temp.${name}`),
       ...[STAGE_TABLE, ...RELATION_TABLES]
@@ -2063,7 +2584,11 @@ export class SQLiteBaselineTempStage {
       const name = sql.slice(sql.lastIndexOf(".") + 1);
       if (!existing.has(name)) continue;
       try {
-        this.#connection.execTrusted(sql, OPERATION);
+        if (name === SQLITE_CURSOR_SEAL_TEMP_TABLE_NAME) {
+          execSQLiteConnectionTrustedIntrinsic(this.#connection, sql, OPERATION);
+        } else {
+          this.#connection.execTrusted(sql, OPERATION);
+        }
         this.#transactionEpoch = this.#connection.transactionEpoch;
       } catch (error) {
         firstFailure ??= error;
@@ -2081,7 +2606,7 @@ export class SQLiteBaselineTempStage {
       throw firstFailure;
     }
     this.#state = "disposed";
-    ACTIVE_STAGES.delete(this.#connection);
+    deleteActiveStage(this.#connection);
   }
 
   #requireOpenOwner(): void {
@@ -2191,17 +2716,32 @@ export class SQLiteBaselineTempStage {
   }
 
   #assertExactBaselineCatalog(label: string): void {
-    const catalogEpoch = this.#connection.transactionEpoch;
+    const ownerBefore = readSQLiteConnectionOwnerSnapshot(this.#connection);
+    if (!ownerBefore.isTransaction
+        || ownerBefore.transactionMode !== "exclusive"
+        || ownerBefore.transactionEpoch !== this.#transactionEpoch) {
+      return this.#poison(`SQLite baseline ${label} catalog is invalid`);
+    }
+    const cursorSealExpected = this.#cursorSealState === "present";
+    let cursorSealRootpage: number | undefined;
     try {
-      validateBaselineTempCatalog(this.#connection);
+      cursorSealRootpage = validateBaselineTempCatalog(
+        this.#connection,
+        cursorSealExpected,
+      );
     } catch {
       return this.#poison(`SQLite baseline ${label} catalog is invalid`);
     }
-    if (this.#connection.transactionEpoch !== catalogEpoch
-        || reservedCatalogCount(this.#connection) !== EXPECTED_RESERVED_OBJECT_COUNT) {
+    const ownerAfter = readSQLiteConnectionOwnerSnapshot(this.#connection);
+    if (!ownerAfter.isTransaction
+        || ownerAfter.transactionMode !== "exclusive"
+        || ownerAfter.transactionEpoch !== ownerBefore.transactionEpoch
+        || ownerAfter.transactionEpoch !== this.#transactionEpoch
+        || reservedCatalogCount(this.#connection)
+          !== EXPECTED_RESERVED_OBJECT_COUNT + (cursorSealExpected ? 1 : 0)
+        || (cursorSealExpected && cursorSealRootpage !== this.#cursorSealRootpage)) {
       return this.#poison(`SQLite baseline ${label} catalog is invalid`);
     }
-    this.#transactionEpoch = this.#connection.transactionEpoch;
   }
 
   #assertMainOperationsCatalog(label: string): void {
@@ -2246,6 +2786,13 @@ export class SQLiteBaselineTempStage {
     if (this.#legacyCampaignState === "active") {
       this.#legacyCampaignState = "poisoned";
     }
+    if (this.#cursorTransferState === "active") this.#cursorTransferState = "poisoned";
+    if (this.#cursorSealState !== "absent") this.#cursorSealState = "poisoned";
+    this.#cursorTransferSession = undefined;
+    this.#cursorTransferReceipt = undefined;
+    this.#cursorTransferProjection = undefined;
+    this.#cursorTransferStageEpoch = undefined;
+    this.#cursorTransferAllowedTotalChanges = undefined;
     this.#state = "poisoned";
     throw new CycleStoreProviderError(
       "GE_CYCLE_STORE_CORRUPTION",
@@ -2253,6 +2800,69 @@ export class SQLiteBaselineTempStage {
       message,
     );
   }
+}
+
+const sqliteBaselineBeginCursorStageTransferIntrinsic =
+  SQLiteBaselineTempStage.prototype[SQLITE_BASELINE_BEGIN_CURSOR_STAGE_TRANSFER];
+const sqliteBaselineFenceCursorStageTransferIntrinsic =
+  SQLiteBaselineTempStage.prototype[SQLITE_BASELINE_FENCE_CURSOR_STAGE_TRANSFER];
+const sqliteBaselineAbortCursorStageTransferIntrinsic =
+  SQLiteBaselineTempStage.prototype[SQLITE_BASELINE_ABORT_CURSOR_STAGE_TRANSFER];
+const sqliteBaselineCreateCursorSealTempTableIntrinsic =
+  SQLiteBaselineTempStage.prototype[SQLITE_BASELINE_CREATE_CURSOR_SEAL_TEMP_TABLE];
+
+/** Invoke the captured exact B0b begin hook despite later prototype replacement. */
+export function beginSQLiteBaselineCursorStageTransferIntrinsic(
+  stage: SQLiteBaselineTempStage,
+  connection: SQLiteConnection,
+  receipt: SQLiteCursorPreRebindReceipt,
+  provenance: SQLiteCursorPreRebindConnectionProvenance,
+): object {
+  return Reflect.apply(sqliteBaselineBeginCursorStageTransferIntrinsic, stage, [
+    connection,
+    receipt,
+    provenance,
+  ]);
+}
+
+/** Invoke the captured exact B0b retained fence. */
+export function fenceSQLiteBaselineCursorStageTransferIntrinsic(
+  stage: SQLiteBaselineTempStage,
+  connection: SQLiteConnection,
+  receipt: SQLiteCursorPreRebindReceipt,
+  session: object,
+): void {
+  Reflect.apply(sqliteBaselineFenceCursorStageTransferIntrinsic, stage, [
+    connection,
+    receipt,
+    session,
+  ]);
+}
+
+/** Invoke the captured exact B0b abort hook while preserving caller precedence. */
+export function abortSQLiteBaselineCursorStageTransferIntrinsic(
+  stage: SQLiteBaselineTempStage,
+  session: object | undefined,
+  message: string,
+): never {
+  return Reflect.apply(sqliteBaselineAbortCursorStageTransferIntrinsic, stage, [
+    session,
+    message,
+  ]) as never;
+}
+
+/** Invoke the captured exact B1 DDL hook despite later prototype replacement. */
+export function createSQLiteBaselineCursorSealTempTableIntrinsic(
+  stage: SQLiteBaselineTempStage,
+  connection: SQLiteConnection,
+  receipt: SQLiteCursorPreRebindReceipt,
+  session: object,
+): void {
+  Reflect.apply(sqliteBaselineCreateCursorSealTempTableIntrinsic, stage, [
+    connection,
+    receipt,
+    session,
+  ]);
 }
 
 /** Create the fixed TEMP catalog under one exact owner EXCLUSIVE proof. */
@@ -2267,7 +2877,7 @@ export function createSQLiteBaselineTempStage(
       || connection.transactionEpoch !== proof.transactionEpoch) {
     return invalid("SQLite baseline TEMP stage requires its current owner EXCLUSIVE proof");
   }
-  const active = ACTIVE_STAGES.get(connection);
+  const active = activeStage(connection);
   if (active !== undefined && active.state !== "disposed") {
     return invalid("SQLite baseline TEMP stage already exists on this connection");
   }
@@ -2339,6 +2949,16 @@ export function createSQLiteBaselineTempStage(
     allowedTotalChanges,
     mainCatalogIdentity,
   );
-  ACTIVE_STAGES.set(connection, stage);
+  publishActiveStage(connection, stage);
   return stage;
+}
+
+/** Package-private exact-identity fence for the B0b stage owner. */
+export function assertSQLiteBaselineTempStageIdentity(
+  connection: SQLiteConnection,
+  stage: SQLiteBaselineTempStage,
+): void {
+  if (activeStage(connection) !== stage) {
+    return invalid("SQLite baseline TEMP stage identity is invalid");
+  }
 }

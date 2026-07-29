@@ -5,12 +5,13 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from types import TracebackType
 from typing import Literal, Never, cast
+from weakref import WeakKeyDictionary
 
 from .canonical import canonical_sha256
 from .cycle_store_provider import CycleStoreProviderOperation, cycle_store_adapter_codec
@@ -22,6 +23,14 @@ from .sqlite_operation_baseline import (
     BaselineProjectionIdentity,
     baseline_entry_sort_key,
     capture_baseline_entry,
+)
+from .sqlite_operation_baseline_cursor_ownership import (
+    SQLiteCursorPreRebindReceipt,
+    assert_sqlite_cursor_pre_rebind_receipt_provenance,
+)
+from .sqlite_operation_baseline_cursor_source_fence import (
+    _assert_registered_witness,
+    _SQLiteCursorCapturedSourceConnectionWitness,
 )
 from .sqlite_operation_baseline_source import (
     SQLiteV1BaselineConnectionOwner,
@@ -53,7 +62,139 @@ SQLITE_V1_BASELINE_RELATION_TABLES: tuple[str, ...] = (
     "ge_blr_legacy_operations",
 )
 
+SQLITE_V1_CURSOR_SEAL_TEMP_TABLE = "ge_blr_cursor_seal"
+SQLITE_V1_CURSOR_SEAL_TEMP_TABLE_DDL = """CREATE TEMP TABLE ge_blr_cursor_seal (
+  token_hash TEXT NOT NULL COLLATE BINARY,
+  tenant_id TEXT NOT NULL COLLATE BINARY,
+  kind TEXT NOT NULL,
+  principal_hash TEXT NOT NULL,
+  authorization_hash TEXT NOT NULL,
+  stream_id TEXT,
+  checkpoint_scope TEXT,
+  request_scope_byte_length INTEGER NOT NULL,
+  request_scope_blob_sha256 TEXT NOT NULL,
+  page_size INTEGER NOT NULL,
+  next_position INTEGER NOT NULL,
+  snapshot_tail_sequence INTEGER,
+  snapshot_tail_record_hash TEXT,
+  snapshot_byte_length INTEGER NOT NULL,
+  snapshot_blob_sha256 TEXT NOT NULL,
+  created_at_ms INTEGER NOT NULL,
+  expires_at_ms INTEGER NOT NULL,
+  consumed_at_ms INTEGER,
+  descriptor_hash TEXT NOT NULL,
+  schema_identity_sha256 TEXT NOT NULL,
+  authorization_ok INTEGER NOT NULL CHECK (authorization_ok IN (0, 1)),
+  scope_ok INTEGER NOT NULL CHECK (scope_ok IN (0, 1)),
+  blobs_canonical_ok INTEGER NOT NULL CHECK (blobs_canonical_ok IN (0, 1)),
+  position_ok INTEGER NOT NULL CHECK (position_ok IN (0, 1)),
+  clock_ok INTEGER NOT NULL CHECK (clock_ok IN (0, 1)),
+  catalog_ok INTEGER NOT NULL CHECK (catalog_ok IN (0, 1)),
+  shape_ok INTEGER NOT NULL CHECK (shape_ok IN (0, 1)),
+  event_binding_ok INTEGER NOT NULL CHECK (event_binding_ok IN (0, 1)),
+  checkpoint_binding_ok INTEGER NOT NULL CHECK (checkpoint_binding_ok IN (0, 1)),
+  seal_eligible INTEGER NOT NULL CHECK (seal_eligible IN (0, 1)),
+  PRIMARY KEY (token_hash, tenant_id)
+) STRICT, WITHOUT ROWID"""
+SQLITE_V1_CURSOR_SEAL_TEMP_TABLE_DDL_SHA256 = (
+    "032db65e1e8c11d90ed27fc6a6e2cab130d1bf33c7d688381f5666379c52b84a"
+)
+SQLITE_V1_CURSOR_SEAL_SQLITE_SCHEMA_SQL = SQLITE_V1_CURSOR_SEAL_TEMP_TABLE_DDL.replace(
+    "CREATE TEMP TABLE", "CREATE TABLE", 1
+)
+if (
+    hashlib.sha256(SQLITE_V1_CURSOR_SEAL_TEMP_TABLE_DDL.encode()).hexdigest()
+    != SQLITE_V1_CURSOR_SEAL_TEMP_TABLE_DDL_SHA256
+):
+    raise AssertionError("SQLite cursor seal TEMP DDL bytes drifted")
+
+_SQLITE_V1_CURSOR_SEAL_XINFO: tuple[tuple[object, ...], ...] = (
+    (0, "token_hash", "TEXT", 1, None, 1, 0),
+    (1, "tenant_id", "TEXT", 1, None, 2, 0),
+    (2, "kind", "TEXT", 1, None, 0, 0),
+    (3, "principal_hash", "TEXT", 1, None, 0, 0),
+    (4, "authorization_hash", "TEXT", 1, None, 0, 0),
+    (5, "stream_id", "TEXT", 0, None, 0, 0),
+    (6, "checkpoint_scope", "TEXT", 0, None, 0, 0),
+    (7, "request_scope_byte_length", "INTEGER", 1, None, 0, 0),
+    (8, "request_scope_blob_sha256", "TEXT", 1, None, 0, 0),
+    (9, "page_size", "INTEGER", 1, None, 0, 0),
+    (10, "next_position", "INTEGER", 1, None, 0, 0),
+    (11, "snapshot_tail_sequence", "INTEGER", 0, None, 0, 0),
+    (12, "snapshot_tail_record_hash", "TEXT", 0, None, 0, 0),
+    (13, "snapshot_byte_length", "INTEGER", 1, None, 0, 0),
+    (14, "snapshot_blob_sha256", "TEXT", 1, None, 0, 0),
+    (15, "created_at_ms", "INTEGER", 1, None, 0, 0),
+    (16, "expires_at_ms", "INTEGER", 1, None, 0, 0),
+    (17, "consumed_at_ms", "INTEGER", 0, None, 0, 0),
+    (18, "descriptor_hash", "TEXT", 1, None, 0, 0),
+    (19, "schema_identity_sha256", "TEXT", 1, None, 0, 0),
+    (20, "authorization_ok", "INTEGER", 1, None, 0, 0),
+    (21, "scope_ok", "INTEGER", 1, None, 0, 0),
+    (22, "blobs_canonical_ok", "INTEGER", 1, None, 0, 0),
+    (23, "position_ok", "INTEGER", 1, None, 0, 0),
+    (24, "clock_ok", "INTEGER", 1, None, 0, 0),
+    (25, "catalog_ok", "INTEGER", 1, None, 0, 0),
+    (26, "shape_ok", "INTEGER", 1, None, 0, 0),
+    (27, "event_binding_ok", "INTEGER", 1, None, 0, 0),
+    (28, "checkpoint_binding_ok", "INTEGER", 1, None, 0, 0),
+    (29, "seal_eligible", "INTEGER", 1, None, 0, 0),
+)
+
 SQLiteV1BaselineTempStageState = Literal["open", "poisoned", "disposed"]
+_SQLiteCursorStageTransferState = Literal["unused", "active", "complete", "poisoned"]
+
+# Freeze the owner observations used by the cursor handoff.  Calling the
+# captured property functions directly prevents a later class-level descriptor
+# replacement from hiding a real PRAGMA, DDL, or DML epoch/change transition.
+_OWNER_TRANSACTION_EPOCH_GETTER = cast(
+    "Callable[[SQLiteV1BaselineConnectionOwner], int]",
+    cast(property, SQLiteV1BaselineConnectionOwner.__dict__["transaction_epoch"]).fget,
+)
+_OWNER_TOTAL_CHANGES_GETTER = cast(
+    "Callable[[SQLiteV1BaselineConnectionOwner], int]",
+    cast(property, SQLiteV1BaselineConnectionOwner.__dict__["total_changes"]).fget,
+)
+_OWNER_EXCLUSIVE_TRANSACTION_GETTER = cast(
+    "Callable[[SQLiteV1BaselineConnectionOwner], bool]",
+    cast(property, SQLiteV1BaselineConnectionOwner.__dict__["in_exclusive_transaction"]).fget,
+)
+_OWNER_EXECUTE = SQLiteV1BaselineConnectionOwner.execute
+_CURSOR_FETCHONE = _SQLiteCursorCapability.fetchone
+_CURSOR_CLOSE = _SQLiteCursorCapability.close
+_CURSOR_INTERNAL_CLOSE = _SQLiteCursorCapability.close
+
+
+def _read_exact_cursor_seal_table_identity(
+    connection: SQLiteV1BaselineConnectionOwner,
+) -> tuple[int, str] | None:
+    """Read the exact seal table identity without mutable class dispatch."""
+
+    cursor = _OWNER_EXECUTE(
+        connection,
+        "SELECT type, name, tbl_name, rootpage, sql FROM temp.sqlite_schema WHERE name = ?",
+        (SQLITE_V1_CURSOR_SEAL_TEMP_TABLE,),
+    )
+    try:
+        row = _CURSOR_FETCHONE(cursor)
+        extra = _CURSOR_FETCHONE(cursor)
+    finally:
+        _CURSOR_INTERNAL_CLOSE(cursor)
+    if row is None:
+        return None
+    if (
+        extra is not None
+        or len(row) != 5
+        or row[0] != "table"
+        or row[1] != SQLITE_V1_CURSOR_SEAL_TEMP_TABLE
+        or row[2] != SQLITE_V1_CURSOR_SEAL_TEMP_TABLE
+        or type(row[3]) is not int
+        or row[3] < 1
+        or row[4] != SQLITE_V1_CURSOR_SEAL_SQLITE_SCHEMA_SQL
+    ):
+        raise ValueError("BLR_CURSOR_STAGE_CATALOG: cursor seal sqlite_schema drifted")
+    return row[3], row[4]
+
 
 _KIND_RANK = {kind: rank for rank, kind in enumerate(BASELINE_ENTRY_KINDS)}
 _KEY_BLOB = (
@@ -1150,6 +1291,7 @@ class SQLiteV1BaselineTempStage:
     """
 
     __slots__ = (
+        "__weakref__",
         "_allowed_total_changes",
         "_checkpoint_campaign_completed",
         "_checkpoint_campaign_cursor",
@@ -1166,6 +1308,15 @@ class SQLiteV1BaselineTempStage:
         "_created_indexes",
         "_created_tables",
         "_created_view",
+        "_cursor_transfer_allowed_total_changes",
+        "_cursor_transfer_capture_epoch",
+        "_cursor_transfer_catalog_created",
+        "_cursor_transfer_catalog_rootpage",
+        "_cursor_transfer_projection",
+        "_cursor_transfer_receipt",
+        "_cursor_transfer_session",
+        "_cursor_transfer_stage_epoch",
+        "_cursor_transfer_state",
         "_lease_lock_hold_campaign_completed",
         "_lease_lock_hold_campaign_cursor",
         "_lease_lock_hold_campaign_session",
@@ -1217,6 +1368,15 @@ class SQLiteV1BaselineTempStage:
         self._cooperative_stage_session = object()
         self._cooperative_stream_finished = False
         self._cooperative_write_active = False
+        self._cursor_transfer_state: _SQLiteCursorStageTransferState = "unused"
+        self._cursor_transfer_session: object | None = None
+        self._cursor_transfer_receipt: SQLiteCursorPreRebindReceipt | None = None
+        self._cursor_transfer_projection: BaselineProjectionIdentity | None = None
+        self._cursor_transfer_capture_epoch: int | None = None
+        self._cursor_transfer_stage_epoch: int | None = None
+        self._cursor_transfer_allowed_total_changes: int | None = None
+        self._cursor_transfer_catalog_created = False
+        self._cursor_transfer_catalog_rootpage: int | None = None
         self._ordered_handoff_started = False
         self._ordered_handoff_completed = False
         self._ordered_handoff_reader: _SQLiteV1BaselineOrderedStageReader | None = None
@@ -2058,6 +2218,486 @@ class SQLiteV1BaselineTempStage:
         self._legacy_campaign_session = None
         self._poison("BLR_STAGE_ITERATOR_INCOMPLETE: legacy campaign aborted")
 
+    def _begin_cursor_stage_transfer(
+        self,
+        connection: SQLiteV1BaselineConnectionOwner,
+        receipt: SQLiteCursorPreRebindReceipt,
+        witness: _SQLiteCursorCapturedSourceConnectionWitness,
+    ) -> object:
+        """Atomically transfer exact A2b/B0a authority to this completed stage."""
+
+        # A2b is deliberately first, before stage registration or state.
+        provenance = assert_sqlite_cursor_pre_rebind_receipt_provenance(receipt)
+        witness_metadata = _assert_registered_witness(witness)
+        if (
+            type(connection) is not SQLiteV1BaselineConnectionOwner
+            or type(self) is not SQLiteV1BaselineTempStage
+            or type(witness) is not _SQLiteCursorCapturedSourceConnectionWitness
+            or witness_metadata.connection is not connection
+            or witness_metadata.receipt is not receipt
+            or witness_metadata.provenance is not provenance
+            or witness_metadata.source_summary is not provenance.source_summary
+            or witness_metadata.clock_evidence is not provenance.clock_evidence
+        ):
+            raise ValueError("BLR_CURSOR_STAGE_AUTHORITY: cursor source authority is invalid")
+        # Registration is intentionally inside the post-source terminal zone.
+        # The coordinator will poison even a wrong exact stage if this check
+        # fails after the A2b/B0a source authority has already been accepted.
+        _assert_registered_sqlite_v1_baseline_temp_stage(self, connection)
+
+        # Allocate the only prospective session before burning the one-shot latch.
+        session = object()
+        if self._cursor_transfer_state != "unused":
+            self._abort_cursor_stage_transfer(
+                self._cursor_transfer_session,
+                "BLR_CURSOR_STAGE_ALREADY_STARTED: cursor stage transfer already started",
+            )
+        self._cursor_transfer_state = "poisoned"
+
+        summary = provenance.source_summary
+        projection = provenance.projection_identity
+        if (
+            self._state != "open"
+            or self._connection is not connection
+            or self._cooperative_summary is not summary
+            or self._ordered_projection_identity is not projection
+            or not self._cooperative_stream_finished
+            or self._cooperative_pending_receipt is not None
+            or self._cooperative_write_active
+            or not self._ordered_handoff_started
+            or not self._ordered_handoff_completed
+            or self._ordered_handoff_reader is not None
+            or not self._stream_record_campaign_started
+            or not self._stream_record_campaign_completed
+            or self._stream_record_campaign_session is not None
+            or self._stream_record_campaign_cursor is not None
+            or not self._checkpoint_campaign_started
+            or not self._checkpoint_campaign_completed
+            or self._checkpoint_campaign_session is not None
+            or self._checkpoint_campaign_cursor is not None
+            or not self._lease_lock_hold_campaign_started
+            or not self._lease_lock_hold_campaign_completed
+            or self._lease_lock_hold_campaign_session is not None
+            or self._lease_lock_hold_campaign_cursor is not None
+            or not self._legacy_campaign_started
+            or not self._legacy_campaign_completed
+            or self._legacy_campaign_session is not None
+            or self._legacy_campaign_cursor is not None
+            or projection.entry_count != summary.expected_entry_count
+            or projection.entry_count != self._cooperative_next_sequence
+        ):
+            self._abort_cursor_stage_transfer(
+                session,
+                "BLR_CURSOR_STAGE_INCOMPLETE: cursor stage predecessors are incomplete",
+            )
+
+        expected_epoch = self._transaction_epoch
+        expected_total_changes = self._allowed_total_changes
+        self._assert_open_and_bound()
+        if (
+            _OWNER_TRANSACTION_EPOCH_GETTER(connection) != expected_epoch
+            or _OWNER_TOTAL_CHANGES_GETTER(connection) != expected_total_changes
+        ):
+            self._abort_cursor_stage_transfer(
+                session,
+                "BLR_CURSOR_STAGE_FENCE: cursor stage owner fence changed",
+            )
+        self._assert_legacy_main_catalog()
+        self._assert_ordered_handoff_fence(expected_total_changes)
+        self.assert_common_counts(summary.counts_by_kind)
+        self.assert_relation_key_coverage()
+        self._assert_ordered_handoff_catalog(expected_total_changes)
+        self._assert_ordered_handoff_fence(expected_total_changes)
+        if (
+            self._transaction_epoch != expected_epoch
+            or _OWNER_TRANSACTION_EPOCH_GETTER(connection) != expected_epoch
+            or self._allowed_total_changes != expected_total_changes
+            or _OWNER_TOTAL_CHANGES_GETTER(connection) != expected_total_changes
+            or self._cooperative_summary is not summary
+            or self._ordered_projection_identity is not projection
+        ):
+            self._abort_cursor_stage_transfer(
+                session,
+                "BLR_CURSOR_STAGE_FENCE: cursor stage owner fence changed",
+            )
+
+        # Repeat the exact registered B0a proof with frozen owner intrinsics.
+        # The historical capture epoch is deliberately checked here and will
+        # become stale after the owned B1 DDL; retained B0b validation uses the
+        # separately adopted live stage epoch instead.
+        provenance = assert_sqlite_cursor_pre_rebind_receipt_provenance(receipt)
+        witness_metadata = _assert_registered_witness(witness)
+        try:
+            source_epoch = _OWNER_TRANSACTION_EPOCH_GETTER(connection)
+            source_exclusive = _OWNER_EXCLUSIVE_TRANSACTION_GETTER(connection)
+            confirmed_source_epoch = _OWNER_TRANSACTION_EPOCH_GETTER(connection)
+        except Exception:
+            self._abort_cursor_stage_transfer(
+                session,
+                ValueError("cursor captured-source connection is closed or unavailable"),
+            )
+        if (
+            witness_metadata.connection is not connection
+            or witness_metadata.receipt is not receipt
+            or witness_metadata.provenance is not provenance
+            or witness_metadata.source_summary is not provenance.source_summary
+            or witness_metadata.clock_evidence is not provenance.clock_evidence
+            or witness_metadata.transaction_epoch != source_epoch
+            or provenance.source_summary._captured_transaction_epoch != source_epoch
+            or confirmed_source_epoch != source_epoch
+            or not source_exclusive
+        ):
+            self._abort_cursor_stage_transfer(
+                session,
+                ValueError("cursor captured-source connection witness drifted"),
+            )
+        self._cursor_transfer_receipt = receipt
+        self._cursor_transfer_projection = projection
+        self._cursor_transfer_session = session
+        self._cursor_transfer_capture_epoch = witness_metadata.transaction_epoch
+        self._cursor_transfer_stage_epoch = expected_epoch
+        self._cursor_transfer_allowed_total_changes = expected_total_changes
+        self._cursor_transfer_state = "active"
+        return session
+
+    def _assert_cursor_seal_temp_catalog(
+        self,
+        expected_epoch: int,
+        expected_total_changes: int,
+        expected_rootpage: int | None,
+    ) -> int:
+        """Validate the complete cursor-phase catalog against the frozen fixture."""
+
+        def assert_fence() -> None:
+            if (
+                not _OWNER_EXCLUSIVE_TRANSACTION_GETTER(self._connection)
+                or _OWNER_TRANSACTION_EPOCH_GETTER(self._connection) != expected_epoch
+                or _OWNER_TOTAL_CHANGES_GETTER(self._connection) != expected_total_changes
+            ):
+                raise ValueError("BLR_CURSOR_STAGE_FENCE: cursor stage owner fence changed")
+
+        expected_objects = {
+            *[("table", name) for name, _sql in _TEMP_TABLE_DDL],
+            *[("index", name) for name in _TEMP_INDEX_NAMES],
+            ("view", SQLITE_V1_BASELINE_RELATION_KEYS_VIEW),
+            ("table", SQLITE_V1_CURSOR_SEAL_TEMP_TABLE),
+        }
+        cursor = _OWNER_EXECUTE(
+            self._connection,
+            "SELECT type, name, tbl_name, rootpage, sql FROM temp.sqlite_schema "
+            "WHERE substr(lower(name), 1, 7) = 'ge_blr_' ORDER BY type, name",
+        )
+        rows: list[tuple[object, ...]] = []
+        try:
+            while True:
+                assert_fence()
+                row = _CURSOR_FETCHONE(cursor)
+                assert_fence()
+                if row is None:
+                    break
+                rows.append(row)
+        finally:
+            _CURSOR_CLOSE(cursor)
+        if {(row[0], row[1]) for row in rows if len(row) == 5} != expected_objects:
+            raise ValueError("BLR_CURSOR_STAGE_CATALOG: TEMP catalog identity drifted")
+        seal_rows = [
+            row for row in rows if len(row) == 5 and row[1] == SQLITE_V1_CURSOR_SEAL_TEMP_TABLE
+        ]
+        if len(seal_rows) != 1:
+            raise ValueError("BLR_CURSOR_STAGE_CATALOG: cursor seal table identity drifted")
+        seal_row = seal_rows[0]
+        rootpage = seal_row[3]
+        if (
+            seal_row[0] != "table"
+            or seal_row[2] != SQLITE_V1_CURSOR_SEAL_TEMP_TABLE
+            or type(rootpage) is not int
+            or rootpage < 1
+            or seal_row[4] != SQLITE_V1_CURSOR_SEAL_SQLITE_SCHEMA_SQL
+            or (expected_rootpage is not None and rootpage != expected_rootpage)
+        ):
+            raise ValueError("BLR_CURSOR_STAGE_CATALOG: cursor seal sqlite_schema drifted")
+
+        cursor = _OWNER_EXECUTE(
+            self._connection,
+            "SELECT name, type, ncol, wr, strict FROM pragma_table_list "
+            "WHERE schema = 'temp' AND substr(lower(name), 1, 7) = 'ge_blr_' "
+            "ORDER BY name",
+        )
+        table_rows: list[tuple[object, ...]] = []
+        try:
+            while True:
+                assert_fence()
+                row = _CURSOR_FETCHONE(cursor)
+                assert_fence()
+                if row is None:
+                    break
+                table_rows.append(row)
+        finally:
+            _CURSOR_CLOSE(cursor)
+        by_name = {row[0]: row for row in table_rows if len(row) == 5}
+        expected_names = {name for _type, name in expected_objects if _type in {"table", "view"}}
+        if set(by_name) != expected_names:
+            raise ValueError("BLR_CURSOR_STAGE_CATALOG: TEMP table-list identity drifted")
+        if by_name.get(SQLITE_V1_CURSOR_SEAL_TEMP_TABLE) != (
+            SQLITE_V1_CURSOR_SEAL_TEMP_TABLE,
+            "table",
+            30,
+            1,
+            1,
+        ):
+            raise ValueError("BLR_CURSOR_STAGE_CATALOG: cursor seal table-list shape drifted")
+        for name, _sql in _TEMP_TABLE_DDL:
+            row = by_name.get(name)
+            if row is None or row[1] != "table" or row[3:] != (1, 1):
+                raise ValueError("BLR_CURSOR_STAGE_CATALOG: baseline table shape drifted")
+        relation_row = by_name.get(SQLITE_V1_BASELINE_RELATION_KEYS_VIEW)
+        if relation_row is None or relation_row[1] != "view" or relation_row[3:] != (0, 0):
+            raise ValueError("BLR_CURSOR_STAGE_CATALOG: baseline view shape drifted")
+
+        cursor = _OWNER_EXECUTE(
+            self._connection,
+            'SELECT cid, name, type, "notnull", dflt_value, pk, hidden '
+            "FROM pragma_table_xinfo(?) ORDER BY cid",
+            (SQLITE_V1_CURSOR_SEAL_TEMP_TABLE,),
+        )
+        xinfo: list[tuple[object, ...]] = []
+        try:
+            while True:
+                assert_fence()
+                row = _CURSOR_FETCHONE(cursor)
+                assert_fence()
+                if row is None:
+                    break
+                xinfo.append(row)
+        finally:
+            _CURSOR_CLOSE(cursor)
+        if tuple(xinfo) != _SQLITE_V1_CURSOR_SEAL_XINFO:
+            raise ValueError("BLR_CURSOR_STAGE_CATALOG: cursor seal xinfo drifted")
+        assert_fence()
+        return rootpage
+
+    def _create_cursor_seal_temp_table(
+        self,
+        connection: SQLiteV1BaselineConnectionOwner,
+        receipt: SQLiteCursorPreRebindReceipt,
+        session: object,
+    ) -> None:
+        """Execute B1's one exact owned DDL and adopt only its adjacent epoch."""
+
+        _CURSOR_STAGE_ASSERT_TRANSFER(self, connection, receipt, session)
+        if self._cursor_transfer_catalog_created:
+            self._abort_cursor_stage_transfer(
+                session,
+                "BLR_CURSOR_STAGE_ALREADY_STARTED: cursor seal TEMP table already created",
+            )
+        before_epoch = self._cursor_transfer_stage_epoch
+        before_changes = self._cursor_transfer_allowed_total_changes
+        if type(before_epoch) is not int or type(before_changes) is not int:
+            self._abort_cursor_stage_transfer(
+                session,
+                "BLR_CURSOR_STAGE_AUTHORITY: cursor stage transfer snapshot is invalid",
+            )
+        created = False
+        attempt_identity: tuple[int, str] | None = None
+        after_epoch: int | None = None
+        cursor: _SQLiteCursorCapability | None = None
+        try:
+            cursor = _OWNER_EXECUTE(
+                connection,
+                SQLITE_V1_CURSOR_SEAL_TEMP_TABLE_DDL,
+            )
+            # Execute returning transfers ownership even if closing the DDL
+            # cursor fails.  Track the exact object before that first close so
+            # every post-execute failure path can remove only this attempt.
+            created = True
+            self._created_tables.append(SQLITE_V1_CURSOR_SEAL_TEMP_TABLE)
+            self._cursor_transfer_catalog_created = True
+            attempt_identity = _read_exact_cursor_seal_table_identity(connection)
+            if attempt_identity is None:
+                raise ValueError(
+                    "BLR_CURSOR_STAGE_CATALOG: owned cursor seal table identity is absent"
+                )
+            after_epoch = _OWNER_TRANSACTION_EPOCH_GETTER(connection)
+            after_changes = _OWNER_TOTAL_CHANGES_GETTER(connection)
+            _CURSOR_CLOSE(cursor)
+            cursor = None
+            if (
+                not _OWNER_EXCLUSIVE_TRANSACTION_GETTER(connection)
+                or after_epoch != before_epoch + 1
+                or after_changes != before_changes
+            ):
+                raise ValueError(
+                    "BLR_CURSOR_STAGE_DDL: cursor seal TEMP DDL did not produce "
+                    "exact +1 epoch/+0 changes"
+                )
+            rootpage = _CURSOR_STAGE_ASSERT_SEAL_CATALOG(
+                self,
+                after_epoch,
+                before_changes,
+                None,
+            )
+        except BaseException as primary:
+            if cursor is not None:
+                with suppress(BaseException):
+                    _CURSOR_CLOSE(cursor)
+            cleanup_authorized = False
+            if created and attempt_identity is not None and type(after_epoch) is int:
+                with suppress(BaseException):
+                    cleanup_authorized = (
+                        _OWNER_EXCLUSIVE_TRANSACTION_GETTER(connection)
+                        and _OWNER_TRANSACTION_EPOCH_GETTER(connection) == after_epoch
+                        and _OWNER_TOTAL_CHANGES_GETTER(connection) == before_changes
+                        and _read_exact_cursor_seal_table_identity(connection) == attempt_identity
+                    )
+            if cleanup_authorized:
+                cleanup_executed = False
+                with suppress(BaseException):
+                    cleanup = _OWNER_EXECUTE(
+                        connection,
+                        f"DROP TABLE temp.{SQLITE_V1_CURSOR_SEAL_TEMP_TABLE}",
+                    )
+                    cleanup_executed = True
+                    _CURSOR_CLOSE(cleanup)
+                if cleanup_executed:
+                    with suppress(BaseException):
+                        cleanup_epoch = _OWNER_TRANSACTION_EPOCH_GETTER(connection)
+                        cleanup_changes = _OWNER_TOTAL_CHANGES_GETTER(connection)
+                        if (
+                            _OWNER_EXCLUSIVE_TRANSACTION_GETTER(connection)
+                            and cleanup_epoch == cast(int, after_epoch) + 1
+                            and cleanup_changes == before_changes
+                            and _read_exact_cursor_seal_table_identity(connection) is None
+                        ):
+                            self._transaction_epoch = cleanup_epoch
+                            self._cursor_transfer_stage_epoch = cleanup_epoch
+                            self._created_tables.remove(SQLITE_V1_CURSOR_SEAL_TEMP_TABLE)
+                            self._cursor_transfer_catalog_created = False
+                            self._cursor_transfer_catalog_rootpage = None
+            self._abort_cursor_stage_transfer(session, primary)
+
+        # Publication is deliberately adjacent and occurs only after every
+        # exact catalog proof succeeds.  The historical capture epoch remains
+        # immutable; only the live stage epochs adopt the owned +1 transition.
+        self._cursor_transfer_catalog_rootpage = rootpage
+        self._transaction_epoch = after_epoch
+        self._cursor_transfer_stage_epoch = after_epoch
+
+    def _assert_cursor_stage_transfer(
+        self,
+        connection: SQLiteV1BaselineConnectionOwner,
+        receipt: SQLiteCursorPreRebindReceipt,
+        session: object,
+    ) -> None:
+        """Revalidate the live stage owner without reusing historical epoch evidence."""
+
+        provenance = assert_sqlite_cursor_pre_rebind_receipt_provenance(receipt)
+        _assert_registered_sqlite_v1_baseline_temp_stage(self, connection)
+        if self._state == "disposed":
+            raise ValueError("baseline TEMP stage is disposed")
+        if (
+            type(connection) is not SQLiteV1BaselineConnectionOwner
+            or type(self) is not SQLiteV1BaselineTempStage
+            or self._connection is not connection
+            or self._cursor_transfer_state != "active"
+            or self._cursor_transfer_receipt is not receipt
+            or self._cursor_transfer_session is not session
+            or self._cursor_transfer_projection is not provenance.projection_identity
+            or self._cursor_transfer_capture_epoch
+            != provenance.source_summary._captured_transaction_epoch
+            or self._cooperative_summary is not provenance.source_summary
+            or not self._cooperative_stream_finished
+            or self._cooperative_pending_receipt is not None
+            or self._cooperative_write_active
+            or self._ordered_projection_identity is not provenance.projection_identity
+            or not self._ordered_handoff_started
+            or not self._ordered_handoff_completed
+            or self._ordered_handoff_reader is not None
+            or not self._stream_record_campaign_started
+            or not self._stream_record_campaign_completed
+            or self._stream_record_campaign_session is not None
+            or self._stream_record_campaign_cursor is not None
+            or not self._checkpoint_campaign_started
+            or not self._checkpoint_campaign_completed
+            or self._checkpoint_campaign_session is not None
+            or self._checkpoint_campaign_cursor is not None
+            or not self._lease_lock_hold_campaign_started
+            or not self._lease_lock_hold_campaign_completed
+            or self._lease_lock_hold_campaign_session is not None
+            or self._lease_lock_hold_campaign_cursor is not None
+            or not self._legacy_campaign_started
+            or not self._legacy_campaign_completed
+            or self._legacy_campaign_session is not None
+            or self._legacy_campaign_cursor is not None
+        ):
+            self._abort_cursor_stage_transfer(
+                session,
+                "BLR_CURSOR_STAGE_AUTHORITY: cursor stage transfer binding drifted",
+            )
+        expected_epoch = self._cursor_transfer_stage_epoch
+        expected_total_changes = self._cursor_transfer_allowed_total_changes
+        if type(expected_epoch) is not int or type(expected_total_changes) is not int:
+            self._abort_cursor_stage_transfer(
+                session,
+                "BLR_CURSOR_STAGE_AUTHORITY: cursor stage transfer snapshot is invalid",
+            )
+        self._assert_open_and_bound()
+        self._assert_legacy_main_catalog()
+        self._assert_ordered_handoff_fence(expected_total_changes)
+        self.assert_common_counts(provenance.source_summary.counts_by_kind)
+        self.assert_relation_key_coverage()
+        if self._cursor_transfer_catalog_created:
+            try:
+                _CURSOR_STAGE_ASSERT_SEAL_CATALOG(
+                    self,
+                    expected_epoch,
+                    expected_total_changes,
+                    self._cursor_transfer_catalog_rootpage,
+                )
+            except BaseException as primary:
+                self._abort_cursor_stage_transfer(session, primary)
+        else:
+            self._assert_ordered_handoff_catalog(expected_total_changes)
+        self._assert_ordered_handoff_fence(expected_total_changes)
+        if (
+            self._transaction_epoch != expected_epoch
+            or _OWNER_TRANSACTION_EPOCH_GETTER(connection) != expected_epoch
+            or self._allowed_total_changes != expected_total_changes
+            or _OWNER_TOTAL_CHANGES_GETTER(connection) != expected_total_changes
+        ):
+            self._abort_cursor_stage_transfer(
+                session,
+                "BLR_CURSOR_STAGE_FENCE: cursor stage owner fence changed",
+            )
+
+    def _abort_cursor_stage_transfer(
+        self,
+        session: object | None,
+        error: BaseException | str,
+    ) -> Never:
+        """Burn the one-shot cursor transfer and preserve the authoritative error."""
+
+        primary = error if isinstance(error, BaseException) else None
+        message = str(error)
+        if (
+            self._cursor_transfer_session is not None
+            and session is not self._cursor_transfer_session
+            and primary is None
+        ):
+            message = "BLR_CURSOR_STAGE_AUTHORITY: cursor stage session drifted"
+        self._cursor_transfer_session = None
+        self._cursor_transfer_receipt = None
+        self._cursor_transfer_projection = None
+        self._cursor_transfer_stage_epoch = None
+        self._cursor_transfer_allowed_total_changes = None
+        # Historical capture epoch is intentionally never rewritten after publish.
+        self._cursor_transfer_state = "poisoned"
+        if primary is None:
+            self._poison(message)
+        try:
+            self._poison(message)
+        except BaseException:
+            raise primary from None
+
     def _read_legacy_main_catalog(self) -> tuple[int, tuple[object, ...]]:
         schema_cursor: _SQLiteCursorCapability | None = None
         catalog_cursor: _SQLiteCursorCapability | None = None
@@ -2342,6 +2982,13 @@ class SQLiteV1BaselineTempStage:
 
         if self._state == "disposed":
             return
+        self._cursor_transfer_session = None
+        self._cursor_transfer_receipt = None
+        self._cursor_transfer_projection = None
+        self._cursor_transfer_stage_epoch = None
+        self._cursor_transfer_allowed_total_changes = None
+        if self._cursor_transfer_state == "active":
+            self._cursor_transfer_state = "complete"
         active_reader = self._ordered_handoff_reader
         cursor_close_failure: BaseException | None = None
         cursor_cleanup_message = "BLR_HANDOFF_CLEANUP: ordered TEMP stage cursor cleanup failed"
@@ -2399,6 +3046,17 @@ class SQLiteV1BaselineTempStage:
             not self._connection.in_exclusive_transaction
             or self._connection.transaction_epoch != self._transaction_epoch
         ):
+            if self._cursor_transfer_catalog_created:
+                try:
+                    cursor_residue = _has_baseline_temp_object(self._connection)
+                except BaseException:
+                    cursor_residue = True
+                if cursor_residue:
+                    self._state = "poisoned"
+                    raise ValueError(
+                        "BLR_STAGE_DISPOSE: cursor TEMP ownership cannot be discarded "
+                        "while reserved objects remain"
+                    )
             self._clear_created_objects()
             if cursor_close_failure is not None:
                 self._state = "poisoned"
@@ -2496,6 +3154,12 @@ class SQLiteV1BaselineTempStage:
             with suppress(BaseException):
                 legacy_cursor.close()
         self._state = "poisoned"
+        self._cursor_transfer_state = "poisoned"
+        self._cursor_transfer_session = None
+        self._cursor_transfer_receipt = None
+        self._cursor_transfer_projection = None
+        self._cursor_transfer_stage_epoch = None
+        self._cursor_transfer_allowed_total_changes = None
         self._cooperative_pending_receipt = None
         self._cooperative_summary = None
         self._cooperative_stream_finished = False
@@ -2557,9 +3221,34 @@ class SQLiteV1BaselineTempStage:
         self._created_tables.clear()
 
 
+_REGISTERED_SQLITE_V1_BASELINE_TEMP_STAGES: WeakKeyDictionary[
+    SQLiteV1BaselineTempStage, SQLiteV1BaselineConnectionOwner
+] = WeakKeyDictionary()
+
+# Freeze the B1 entry fence and phase-catalog validator after class creation.
+# Internal calls use these exact functions rather than mutable class lookup.
+_CURSOR_STAGE_ASSERT_TRANSFER = SQLiteV1BaselineTempStage._assert_cursor_stage_transfer
+_CURSOR_STAGE_ASSERT_SEAL_CATALOG = SQLiteV1BaselineTempStage._assert_cursor_seal_temp_catalog
+
+
+def _assert_registered_sqlite_v1_baseline_temp_stage(
+    stage: SQLiteV1BaselineTempStage,
+    connection: SQLiteV1BaselineConnectionOwner,
+) -> None:
+    """Reject copied/direct/subclassed stages and stale weak-registry identities."""
+
+    if type(stage) is not SQLiteV1BaselineTempStage:
+        raise TypeError("BLR_CURSOR_STAGE_AUTHORITY: cursor stage has the wrong type")
+    registered_connection = _REGISTERED_SQLITE_V1_BASELINE_TEMP_STAGES.get(stage)
+    if registered_connection is not connection or stage._connection is not connection:
+        raise ValueError("BLR_CURSOR_STAGE_AUTHORITY: cursor stage provenance is invalid")
+
+
 def create_sqlite_v1_baseline_temp_stage(
     connection: SQLiteV1BaselineConnectionOwner,
 ) -> SQLiteV1BaselineTempStage:
     """Create the fixed TEMP catalog inside the caller's EXCLUSIVE transaction."""
 
-    return SQLiteV1BaselineTempStage(connection)
+    stage = SQLiteV1BaselineTempStage(connection)
+    _REGISTERED_SQLITE_V1_BASELINE_TEMP_STAGES[stage] = connection
+    return stage

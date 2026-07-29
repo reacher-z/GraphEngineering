@@ -10975,3 +10975,146 @@ implement `RouteSelected`, durable decision identity, zero-rejudge replay,
 integrated all/minimum/percentage barriers, quorum, abstention, deadlines,
 late arrivals, cancellation, trace or CLI visibility. `D6-ROUTER-BARRIER-023`
 therefore remains open.
+
+### 31.35.11 Cursor Slice B B0b/B1 stage-owner transfer and exact TEMP seal acceptance
+
+Cursor Slice B now has its first complete, independently accepted database-
+owning bridge. B0b consumes the already accepted B0a captured-source witness
+exactly once and transfers authority to the exact live baseline TEMP stage;
+B1 uses that authority for one, and only one, fixed cursor-seal TEMP DDL. This
+is an implementation milestone in both TypeScript and Python, not a design-
+only freeze.
+
+The implementation preserves the division of responsibility established by
+B0a. The immutable capture epoch continues to describe the historical source
+observation. It is never rewritten after capture and is never reused as the
+post-DDL live owner epoch. B0b instead creates a private stage/session owner
+whose live epoch can adopt the single verified B1 transition. The source
+receipt remains the sole explicit source, projection and ownership authority;
+the new transfer handle adds no reconstructable scalar authority.
+
+The accepted B0b begin path is deliberately closed and ordered:
+
+1. validate the real A2b receipt before reading the connection or stage;
+2. recover only registry-owned captured-source provenance;
+3. bind the exact receipt, source summary, projection identity and connection;
+4. require the exact registered baseline TEMP stage on that connection;
+5. require ordered handoff plus stream/record, checkpoint, lease/lock/hold and
+   legacy campaigns to have completed with no live cursor, session or cleanup;
+6. prove the baseline-only TEMP catalog and main operation identity;
+7. prove the current stage epoch and allowed `total_changes` counter through
+   private/captured owner observations;
+8. prove `ge_blr_cursor_seal` is absent;
+9. burn the stage's one-shot transfer latch; and
+10. publish only a frozen, null-prototype, empty-own-key, exact-identity handle
+    backed by a private weak registry.
+
+B0b itself performs no cursor SQL, creates no cursor object, changes no main or
+TEMP row, does not advance the owner epoch and does not change the allowed row
+counter. Repeated retained assertions are allowed only for the exact active
+connection/stage/receipt/handle/session tuple. A second begin, a clone, a
+spread/copy/prototype forgery, a handle from another run, a projection clone,
+a receipt from a distinct issuer, a wrong connection, a wrong stage or any
+incomplete predecessor state cannot join the transfer. After source authority
+has been accepted, an invalid stage attempt is terminal and burns the reserved
+stage latch rather than allowing argument-by-argument probing and retry.
+
+B1 owns one constant statement whose SHA-256 is
+`032db65e1e8c11d90ed27fc6a6e2cab130d1bf33c7d688381f5666379c52b84a`.
+The statement creates only `temp.ge_blr_cursor_seal`, with 30 exact columns,
+STRICT and WITHOUT ROWID flags, exact stored `sqlite_schema.sql`, an exact
+`pragma_table_list` shape and an exact 30-row `pragma_table_xinfo` projection.
+The production hook revalidates A2b and the exact active transfer first,
+requires baseline-only catalog state, executes through a captured owner
+intrinsic and accepts only an adjacent `epoch + 1` and `total_changes + 0`.
+Only after the exact phase-aware catalog, main catalog, reserved-object count
+and repeated owner observations pass does the stage publish the seal rootpage,
+mark the seal present and adopt the new live epoch.
+
+All package-private entry hooks are captured after class construction and are
+invoked as exact unbound intrinsics. Later class/prototype method replacement
+cannot replace the B0b begin/fence/abort or B1 create path. TypeScript owner
+epoch and row-count observations use private captured base-class snapshots;
+Python uses captured exact-type owner property functions and unbound stage
+helpers. The package-root APIs intentionally export none of the transfer,
+session, create or assertion runtime functions.
+
+Failure semantics were tightened through several rejected intermediate
+implementations. The first cross-runtime audit rejected the candidate at HIGH
+2 / MEDIUM 4 / LOW 1 because the exact B1 DDL was missing, dynamic class or
+prototype hooks were replaceable, Python could lose the primary exception,
+some wrong-stage attempts were not terminal, the TypeScript witness consumed
+different semantics, and required hostile gates were absent. Those defects
+were fixed before integration.
+
+The revision-2 audit then found two further Python HIGH defects. A failure of
+the first DDL cursor close happened after SQLite had created the table but
+before the implementation recorded ownership, so cleanup could leak the seal
+and the baseline reserved objects. The accepted implementation records attempt
+ownership immediately after execute returns, before close; preserves the exact
+primary error; removes the owned attempt; synchronizes only a proven cleanup
+epoch; and refuses to report disposed while reserved objects remain. The
+second defect dynamically called `self._assert_cursor_stage_transfer`, so a
+later class descriptor replacement could admit a fake receipt/session. The B1
+hook now invokes the module-captured exact fence, and the forged call rejects
+before DDL with epoch `+0` and no seal.
+
+Both initial remediations exposed a final cross-runtime identity problem:
+after the owned CREATE, an injected rollback/rebegin could create a different
+table under the same fixed name, while an unconditional catch-path DROP would
+delete that replacement. The accepted cleanup is therefore generation- and
+identity-bound. Immediately after CREATE it captures the exact EXCLUSIVE owner
+generation, unchanged row count, positive rootpage and exact stored SQL through
+captured intrinsics. A catch-path DROP is permitted only if the owner is still
+the same generation with the same row count and the live table still has that
+rootpage and SQL. Transaction replacement or object replacement causes cleanup
+to skip the DROP, poison the stage and preserve the replacement. Disposal sees
+the epoch mismatch and also refuses to delete it. Dedicated tests in both
+languages perform a real owned CREATE, rollback, begin a new EXCLUSIVE
+transaction, create a same-name marker replacement, throw the primary error
+and prove the marker survives both catch and dispose.
+
+The shared conformance fixture
+`spec/conformance/sqlite-cursor-stage-ownership.case.json` freezes nine
+top-level fields, the exact contract text, rootpage rule, eight outcome names,
+17 common scenario names/outcomes, DDL/hash/stored SQL, table-list tuple and all
+30 xinfo rows. Both language suites consume the normative fields rather than
+merely loading the file. The scenarios cover B0 acceptance, B1 acceptance,
+wrong connection/stage/receipt/session, same/different second begin, `+0`,
+`+2`, unexplained writes, transaction replacement, caller DDL, catalog drift,
+historical witness staleness with retained stage authority, capture-epoch
+immutability and disposal behavior.
+
+Accepted verification evidence is:
+
+- TypeScript focused B0b/B1 suite: 31/31;
+- TypeScript full SQLite package: 20 files and 464/464 tests;
+- TypeScript SQLite typecheck, lint/type gate and build: green;
+- Python focused B0b/B1 suite: 44/44;
+- Python adjacent baseline campaign set: 609/609;
+- isolated B0b/B1-only Python full suite from commit `93fbd71` plus only this
+  tranche's files: 1,804 passed, two skipped and two nested subtests passed;
+- current combined Python tree after the adjacent D6 compiler work: 1,815
+  tests plus two nested subtests passed;
+- scoped Ruff lint and formatting: green;
+- strict MyPy: green over the complete current Python source set;
+- shared DDL hash/cardinality and package-root non-export checks: green;
+- 286 local documentation links and strict diff checks: green; and
+- final independent consolidated review: HIGH 0 / MEDIUM 0 / LOW 0.
+
+The immutable audit history is recorded in:
+
+- `codex_logs/reviews/SQLITE-CURSOR-SLICE-B-B0-STAGE-OWNER-BRIDGE-DESIGN-2026-07-28.md`;
+- `codex_logs/reviews/SQLITE-CURSOR-SLICE-B-TS-B0B-STAGE-OWNER-BRIDGE-2026-07-28.md`;
+  and
+- `codex_logs/reviews/SQLITE-CURSOR-SLICE-B-B0B-B1-FINAL-CONSOLIDATED-AUDIT-2026-07-28.md`.
+
+This acceptance completes B0 and B1 only. It does not implement the bounded
+cursor rules 1-10, cursor paging, diagnostic publication, rebind, migration
+`0002`, v2 persistence, crash/replay, scale campaigns, CLI visibility,
+release readiness, adoption or any star-count outcome. Cursor Slice B remains
+open. The next implementation tranche is B2: execute the bounded cursor rules
+against the pristine sealed snapshot, prove the A1 root from production rows,
+freeze deterministic pagination and error ordering, and retain the exact B0b
+stage/session owner through every read. Publication and rebind remain a
+separately reviewed later boundary.

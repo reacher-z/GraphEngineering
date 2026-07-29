@@ -2,6 +2,10 @@ import type {
   OperationBaselineEntryInput,
   OperationBaselineProjectionIdentity,
 } from "./operation-baseline.js";
+import type {
+  SQLiteCursorPreRebindConnectionProvenance,
+  SQLiteCursorPreRebindReceipt,
+} from "./operation-baseline-cursor-ownership.js";
 import type { SQLiteConnection } from "./sqlite-connection.js";
 
 /** Package-private source/stage hooks. Neither symbol is exported by index.ts. */
@@ -97,6 +101,18 @@ export const SQLITE_BASELINE_COMPLETE_LEGACY_CAMPAIGN = Symbol(
 );
 export const SQLITE_BASELINE_ABORT_LEGACY_CAMPAIGN = Symbol(
   "SQLiteBaselineTempStage.abortLegacyCampaign",
+);
+export const SQLITE_BASELINE_BEGIN_CURSOR_STAGE_TRANSFER = Symbol(
+  "SQLiteBaselineTempStage.beginCursorStageTransfer",
+);
+export const SQLITE_BASELINE_FENCE_CURSOR_STAGE_TRANSFER = Symbol(
+  "SQLiteBaselineTempStage.fenceCursorStageTransfer",
+);
+export const SQLITE_BASELINE_ABORT_CURSOR_STAGE_TRANSFER = Symbol(
+  "SQLiteBaselineTempStage.abortCursorStageTransfer",
+);
+export const SQLITE_BASELINE_CREATE_CURSOR_SEAL_TEMP_TABLE = Symbol(
+  "SQLiteBaselineTempStage.createCursorSealTempTable",
 );
 
 /** Opaque evidence bound to one stage-private pending write pair. */
@@ -241,4 +257,27 @@ export interface SQLiteBaselineLegacyCampaignStage {
     session: object | undefined,
     message: string,
   ): never;
+}
+
+/** Closed B0b owner surface; no hook executes cursor SQL or TEMP DDL. */
+export interface SQLiteBaselineCursorStageTransferOwner {
+  [SQLITE_BASELINE_BEGIN_CURSOR_STAGE_TRANSFER](
+    connection: SQLiteConnection,
+    receipt: SQLiteCursorPreRebindReceipt,
+    provenance: SQLiteCursorPreRebindConnectionProvenance,
+  ): object;
+  [SQLITE_BASELINE_FENCE_CURSOR_STAGE_TRANSFER](
+    connection: SQLiteConnection,
+    receipt: SQLiteCursorPreRebindReceipt,
+    session: object,
+  ): void;
+  [SQLITE_BASELINE_ABORT_CURSOR_STAGE_TRANSFER](
+    session: object | undefined,
+    message: string,
+  ): never;
+  [SQLITE_BASELINE_CREATE_CURSOR_SEAL_TEMP_TABLE](
+    connection: SQLiteConnection,
+    receipt: SQLiteCursorPreRebindReceipt,
+    session: object,
+  ): void;
 }

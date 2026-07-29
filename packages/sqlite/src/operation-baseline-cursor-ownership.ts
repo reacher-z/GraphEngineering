@@ -83,6 +83,16 @@ interface SessionState {
 }
 const CAPABILITIES = new WeakMap<object, CapabilityState>();
 const SESSIONS = new WeakMap<object, SessionState>();
+const weakMapGetIntrinsic = WeakMap.prototype.get;
+const weakMapSetIntrinsic = WeakMap.prototype.set;
+
+function weakMapGet<K extends object, V>(map: WeakMap<K, V>, key: K): V | undefined {
+  return Reflect.apply(weakMapGetIntrinsic, map, [key]) as V | undefined;
+}
+
+function weakMapSet<K extends object, V>(map: WeakMap<K, V>, key: K, value: V): void {
+  Reflect.apply(weakMapSetIntrinsic, map, [key, value]);
+}
 
 function fail(label: string, invalid = false): never {
   throw new CycleStoreProviderError(
@@ -172,7 +182,8 @@ export function createSQLiteCursorOwnershipCapability(
     return fail("ownership kind", true);
   }
   const handle = Object.freeze(Object.create(null)) as SQLiteCursorOwnershipCapability;
-  CAPABILITIES.set(handle as object, Object.freeze({ kind, commitment: contribution(kind, reference) }));
+  weakMapSet(CAPABILITIES, handle as object,
+    Object.freeze({ kind, commitment: contribution(kind, reference) }));
   return handle;
 }
 
@@ -184,7 +195,7 @@ export interface SQLiteCursorCaptureSessionInput {
   readonly tenantOwnership: SQLiteCursorOwnershipCapability;
 }
 function capability(value: SQLiteCursorOwnershipCapability, kind: SQLiteCursorOwnershipKind): CapabilityState {
-  const state = CAPABILITIES.get(value as object);
+  const state = weakMapGet(CAPABILITIES, value as object);
   if (state?.kind !== kind) return fail(`${kind} ownership`, true);
   return state;
 }
@@ -213,7 +224,7 @@ export function createSQLiteCursorCaptureSession(input: SQLiteCursorCaptureSessi
     tenantOwnershipSha256: tenant.commitment,
   });
   const session = Object.freeze(Object.create(null)) as SQLiteCursorCaptureSession;
-  SESSIONS.set(session as object, Object.freeze({
+  weakMapSet(SESSIONS, session as object, Object.freeze({
     campaign: snapshot.campaignOwnership, connection: snapshot.connectionOwnership,
     sourceStage: snapshot.sourceStageOwnership, tenant: snapshot.tenantOwnership,
     payload, sessionSha256: framed(SQLITE_CURSOR_CAPTURE_SESSION_DOMAIN, payload),
@@ -283,7 +294,7 @@ export function createSQLiteCursorExactProjectionReference(
     projectionSha256: identitySnapshot.projectionSha256,
   });
   const reference = Object.freeze(Object.create(null)) as SQLiteCursorExactProjectionReference;
-  PROJECTIONS.set(reference as object, Object.freeze({
+  weakMapSet(PROJECTIONS, reference as object, Object.freeze({
     document: payload, identity: projection, identitySnapshot,
     root: framed(SQLITE_CURSOR_BASELINE_PROJECTION_REFERENCE_DOMAIN, payload),
   }));
@@ -376,12 +387,13 @@ function validateBinding(input: SQLiteCursorPreRebindIssueInput): ValidatedBindi
   }
   const expectedEntryCount = integer(summaryFields.expectedEntryCount, "expected entry count");
   if (total !== expectedEntryCount) return fail("source count total");
-  const session = SESSIONS.get(input.session as object); if (!session) return fail("session", true);
+  const session = weakMapGet(SESSIONS, input.session as object);
+  if (!session) return fail("session", true);
   if (session.campaign !== input.campaignOwnership || session.connection !== input.connectionOwnership
       || session.sourceStage !== input.sourceStageOwnership || session.tenant !== input.tenantOwnership) {
     return fail("session ownership", true);
   }
-  const projectionState = PROJECTIONS.get(input.projectionReference);
+  const projectionState = weakMapGet(PROJECTIONS, input.projectionReference);
   if (projectionState?.identity !== input.projectionIdentity) {
     return fail("source or projection ownership", true);
   }
@@ -468,7 +480,7 @@ export class SQLiteCursorPreRebindReceiptIssuer {
     });
     exactDataObject(payload, SQLITE_CURSOR_PRE_REBIND_RECEIPT_FIELDS, "receipt payload");
     const receipt = Object.freeze(Object.create(null)) as SQLiteCursorPreRebindReceipt;
-    RECEIPTS.set(receipt as object, Object.freeze({
+    weakMapSet(RECEIPTS, receipt as object, Object.freeze({
       binding: candidateSnapshot, payload,
       root: framed(SQLITE_CURSOR_PRE_REBIND_RECEIPT_DOMAIN, payload),
     }));
@@ -484,7 +496,8 @@ export function assertSQLiteCursorPreRebindReceiptProvenance(
   receiptSha256: string;
   projectionReferenceSha256: string;
 }> {
-  const state = RECEIPTS.get(receipt as object); if (!state) return fail("receipt provenance", true);
+  const state = weakMapGet(RECEIPTS, receipt as object);
+  if (!state) return fail("receipt provenance", true);
   validateBinding(state.binding);
   if (state.root !== framed(SQLITE_CURSOR_PRE_REBIND_RECEIPT_DOMAIN, state.payload)) {
     return fail("receipt mutation");
@@ -493,7 +506,7 @@ export function assertSQLiteCursorPreRebindReceiptProvenance(
     ...state.binding,
     receiptSha256: state.root,
     projectionReferenceSha256:
-      (PROJECTIONS.get(state.binding.projectionReference) as ProjectionState).root,
+      (weakMapGet(PROJECTIONS, state.binding.projectionReference) as ProjectionState).root,
   });
 }
 
@@ -523,7 +536,7 @@ export function assertSQLiteCursorPreRebindConnectionProvenance(
     receiptWitness.sourceSummary,
     connection,
   );
-  CONNECTION_PROVENANCE.set(provenance as object, Object.freeze({
+  weakMapSet(CONNECTION_PROVENANCE, provenance as object, Object.freeze({
     receipt,
   }));
   return provenance;
@@ -539,7 +552,7 @@ export function assertSQLiteCursorPreRebindConnectionProvenanceWitness(
   // or the presented connection witness is forged.
   const freshReceiptWitness = assertSQLiteCursorPreRebindReceiptProvenance(receipt);
   const state = provenance !== null && typeof provenance === "object"
-    ? CONNECTION_PROVENANCE.get(provenance as object)
+    ? weakMapGet(CONNECTION_PROVENANCE, provenance as object)
     : undefined;
   if (state === undefined
       || state.receipt !== receipt) {
