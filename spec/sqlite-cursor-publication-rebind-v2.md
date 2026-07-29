@@ -59,6 +59,149 @@ expected target catalog and the outer migration write ledger. It authorizes
 `0002` and the baseline writes but explicitly does not authorize cursor
 rebind.
 
+The authority graph contains exactly 34 opaque objects, and object identity is
+part of the contract. They are the B2 pre-rebind receipt, projection reference,
+stage ownership transfer and baseline TEMP stage; the SQLite connection;
+migration-lock and provider-clock capabilities; outer, pre-rebind,
+pre-verification and pre-commit clock evidence; the outer publication
+authority and its outer-clock consumed tombstone; the post-DDL catalog fence
+and publication reader lease; four initial-write receipts and their four
+consumed tombstones; the stage-adoption receipt; the publication session and
+cursor-clock capability; lineage and schema/descriptor publication receipts;
+publication-rules, fresh-v2-catalog and physical/semantic-postcondition
+receipts; and the pre-retirement, retirement and final-commit fence receipts.
+A clone, reconstructed value, serialized round trip or object from another run
+cannot stand in for any member of this graph even when every visible field is
+equal.
+
+Minting the outer authority has an explicit atomic boundary. The intrinsic
+first validates the complete object graph and registers an inactive authority;
+it has not consumed the outer clock receipt at this point. A presentation
+failure or cancellation before the atomic tail consumes nothing, and the same
+exact evidence may be presented again. The non-interruptible tail then, in
+order, consumes the outer clock evidence once, mints its consumed tombstone,
+publishes the B2 transfer's prepared state and activates the authority. Fault
+injection is forbidden after that tail begins. An invariant failure in the
+tail poisons the graph and requires rollback plus a fresh graph; it is never
+reported as a retryable unused authority. The active authority is minted once,
+is non-transferable, may be reused only inside its exact authority graph, is
+not consumed by a write or adoption, and is retired by commit-returned,
+rollback, poison or disposal.
+
+## Initial publication writes
+
+The first outer-authority write is one logical execution of the exact repository
+asset `spec/migrations/sqlite/0002-v1-to-v2-operation-replay.sql`, whose SHA-256 is
+`1bf03d68eed45366bc7b34ccc329faa51ea389362db59f6a4307b3033d37a96d`.
+The asset is exactly 20 fixed SQLite statements. The logical asset execution
+count is one even when an adapter exposes those statements through multiple
+calls; adapter API-call counts are deliberately excluded from cross-runtime
+parity. The runtime must retain ownership of the existing `BEGIN EXCLUSIVE`.
+In particular, Python must not use `sqlite3.Connection.executescript()` for
+this asset because that API can implicitly commit a pending transaction. It
+must execute the validated 20-statement asset through an implementation that
+does not issue, replace or commit the outer transaction. Partial execution or
+a second logical execution poisons the migration.
+
+Four opaque, module-minted, single-use receipts form the initial publication
+chain, in this exact order:
+
+1. `migration-0002-catalog-rebuild-receipt`, whose predecessor is the outer
+   publication authority;
+2. `baseline-entries-publication-receipt`, whose predecessors are the `0002`
+   receipt and post-DDL catalog fence;
+3. `baseline-header-publication-receipt`, whose predecessor is the entries
+   receipt; and
+4. `operation-sequence-zero-publication-receipt`, whose predecessor is the
+   header receipt.
+
+Every receipt binds its write kind, fixed SQL or repository-asset bytes and
+SHA-256, canonical parameter and result digests, exact predecessor object,
+connection, unchanged transaction lineage, outer authority, prepare/execute
+counts, affected rows, `total_changes` before/after/delta and all three outer
+ledger dimensions. Those dimensions are: logical-write sequence,
+fixed-statement execution count and affected-row watermark. The exact deltas
+are:
+
+| Receipt | Logical-write delta | Fixed-statement delta | Affected rows and `total_changes` delta |
+| --- | ---: | ---: | ---: |
+| `0002` catalog rebuild | 1 | 20 | `1 + projection.legacyOperationCount` |
+| baseline entries | 1 | `projection.entryCount` | `projection.entryCount` |
+| baseline header | 1 | 1 | 1 |
+| operation sequence zero | 1 | 1 | 1 |
+
+The `0002` receipt additionally binds exact repository bytes, preview-manifest
+identities, one schema-copy row, the legacy-operation copy count, application
+and user versions, and pre/post physical catalog digests. The entries writer
+prepares exactly once and executes its fixed insert once per projection entry.
+Its ordered source read is:
+
+```sql
+SELECT kind_rank, entry_kind, key_blob, state_blob
+FROM temp.ge_blr_stage
+ORDER BY kind_rank ASC, key_blob ASC
+```
+
+The source-read SHA-256 is
+`adae52750ecd70a75090b52de7d60763eea144c1383cf4739df9d8e8a6b2357f`;
+the fixed seven-parameter entry-insert SHA-256 is
+`b522e3ee2bb4599d74b32c8602242b1b74c3f804dd9129a8eb5a0f529cdca88b`,
+with parameters `baselineId`, `ordinal`, `entryKind`, `entryKeyBlob`,
+`entryStateBlob`, `previousEntryHash`, `entryHash`. The stream must rederive
+the exact ordinal and hash chain, first hash and final projection root.
+
+The header insert SHA-256 is
+`b1a32ec385dd78f9727a63b9c303a9cb95c9525910010984d09b7f0fd868e79a`.
+It executes exactly once and binds the baseline and projection identities,
+entry and legacy-operation counts, first/final hashes, policy bytes and stable
+runtime identity. Those identities are
+`graph-engineering-typescript@0.1.0-alpha.1` and
+`graph-engineering-python@0.1.0a1`; caller labels and ambient interpreter
+versions are forbidden. The sequence-zero insert SHA-256 is
+`a9afde17c90fcc7381eefa3fa81823752d6f1bc29c9eced2de8b31176cc1dd85`.
+It executes exactly once with `baselineId`, B2's `baselineCapturedAtMs` and a
+provider-authoritative `updatedAtMs`, and it writes `last_commit_sequence = 0`.
+
+Parameter and result identities use a single cross-runtime codec. Parameters
+hash SHA-256 over the UTF-8 domain
+`graph-engineering/sqlite-initial-write-parameters/v1\0` followed by canonical
+JSON under `graph-engineering/canonical-json/v1alpha1-unicode-code-point-key-order`
+for an execution-order array whose elements are parameter-order arrays of
+tagged scalars. Even one execution retains both array levels; one execution
+with no parameters is therefore `[[]]`, while no executions is `[]`. The
+domain bytes are concatenated
+directly with the canonical UTF-8 JSON bytes with no delimiter. Text is exactly
+`{"type":"text","value":"…"}` and preserves Unicode scalar values without
+normalization; integers use `{"type":"integer","value":"…"}` with canonical
+decimal and negative zero forbidden; BLOBs use
+`{"type":"blob","value":"…"}` with unpadded RFC 4648 section 5 base64url;
+null is exactly `{"type":"null"}`. Results use the UTF-8 domain
+`graph-engineering/sqlite-initial-write-result/v1\0` followed by canonical JSON
+with the sole shape `{"affectedRows":"…"}`. The value is the complete logical
+receipt's aggregate affected-row count as a non-negative canonical decimal
+string, not a per-execution result array.
+`lastInsertRowid` is not part of the result digest.
+
+Seven golden vectors prevent the runtimes from agreeing on the same wrong
+codec. Parameter `[[]]` hashes to
+`8acdf04fe02395192d1c7d704cf8ecf52e29513ccd77024ff4f9cc9e230da80a`;
+one mixed text/integer/BLOB/null execution hashes to
+`8fcf64e97e9fda027b287997e43efc5226b596207dfc56ed161e46859027c271`;
+and the frozen two-execution vector hashes to
+`379049937f6797daade28d4b963dcc865f51afa5fa3422b90f4e505deaad838e`.
+The signed 64-bit minimum and maximum integer vectors hash to
+`d3d9b55872b8b14e2ec8a3c2b5ca27db179993b97ce9e47845efd2923eef4460`
+and
+`be263941652b27aa8254e518d3de8853c3071e7b7310449a7af13fb8bd2765ce`.
+Integer lexemes must match `^(?:0|-[1-9][0-9]*|[1-9][0-9]*)$` and fall in
+`[-9223372036854775808, 9223372036854775807]`; leading plus/zero, whitespace,
+negative zero and out-of-range values fail before hashing.
+Results `{"affectedRows":"0"}` and `{"affectedRows":"3"}` hash to
+`7d4e42c580be36f078371942187c0bdf048da4ffa35556c3f219f5930c5abd62`
+and
+`9c4a39646a7cb26c3ba53e91941b6fe0f4435355a06d2138156d1fd9551ba417`
+respectively after their result-domain prefix.
+
 After `0002`, the owner captures and validates a new post-DDL catalog fence.
 It then consumes module-minted receipts for the exact `0002`, baseline-entry,
 baseline-header and sequence-zero writes. A package-private intrinsic validates
@@ -71,6 +214,48 @@ entire four-receipt bundle before consuming anything; a missing, reordered,
 cloned or substituted bundle consumes zero receipts and the same exact valid
 bundle may be retried. Success consumes all four exactly once and mints four
 consumed-receipt tombstones together with the one-shot stage-adoption receipt.
+
+The post-DDL fence is an independently minted, reusable proof inside this exact
+authority graph, not the B2 v1 fence and not a final semantic-v2 proof. It is
+minted after `0002` and before baseline DML and binds the connection, unchanged
+transaction lineage, outer authority, exact `0002` receipt, runtime-private
+epoch, `total_changes` and outer-ledger watermarks, canonical `sqlite_schema`
+digest, application/user versions and complete expected target physical
+catalog inventory. It consumes no write receipt. Catalog drift after mint is a
+hard failure.
+
+Baseline entry publication receives a separate post-DDL reader lease. The
+opaque, module-minted lease permits only the fixed ordered TEMP select above,
+has no permanent-write or adoption authority, and may have at most one live
+reader. Its cursor closes exactly once, including before cleanup after
+cancellation. The read must independently rederive the ordinal and entry-hash
+chain equal to the exact B2 projection; only read-proof watermarks may be
+adopted. The lease cannot mint a stage-adoption receipt, and adoption is
+forbidden while its reader is active. Its state is exactly `minted-unused`,
+`reader-active`, `reader-closed`, `retired` or `poisoned`. Prepare/execute
+failure before cursor ownership requires zero closes; after ownership starts,
+success, cancellation and primary failure each require one close attempt.
+Successful close retires the one-shot lease, while close failure poisons the
+graph and requires rollback. Row decode/hash proof remains primary, close
+failure follows it, cancellation follows the required close attempt, and outer
+cleanup is last. The terminal retired/closed proof is not ambient state: its
+opaque identity and exact close evidence are committed by the baseline-entry
+publication receipt, presented by the adoption bundle and copied into the
+stage-adoption receipt. Adoption rejects a missing, active, substituted,
+replayed or failed-close terminal proof before receipt consumption.
+
+Initial stage adoption validates the complete ordered four-receipt bundle and
+all predecessor, authority, transaction, fence, `total_changes` and three-
+dimensional ledger commitments before it consumes any receipt. Missing,
+reordered, duplicate, cloned, substituted or cross-run receipts consume zero.
+A presentation failure may retry only with a corrected complete bundle; a
+cancellation before atomic consumption likewise leaves the exact valid bundle
+retryable. After consumption begins, fault injection is forbidden. The
+non-interruptible adoption consumes all four receipts, mints their four exact
+tombstones, updates the stage watermarks, retires only B2's old v1
+catalog/change fence, preserves the post-DDL fence and mints one stage-adoption
+receipt. Authority, lineage, lock, catalog or ledger corruption poisons the
+owner and requires rollback rather than retry.
 
 Only after that adoption may the owner derive the one-shot cursor publication
 session from the outer authority. That session binds the opaque pre-rebind receipt, projection
@@ -200,8 +385,8 @@ Rule failure poisons the owner and requires caller rollback; a diagnosed result
 does not disclose a receipt or immutable root. Both rule failures use one
 aggregate diagnostic unit. Rule 12 does not fabricate a cursor-row identity
 when count/root drift, deletion or equal-count replacement cannot be localized.
-The literal also freezes 20 cancellation labels, 16 prepare/execute/fetch/
-ownership-retirement boundaries, seven cleanup failures and exact-once cursor/
+The literal also freezes 25 cancellation labels, 19 prepare/execute/fetch/
+ownership-retirement boundaries, eight cleanup failures and exact-once cursor/
 statement ownership closure. Cancellation labels request cancellation; they are
 not unconditional throw sites. Once a rebind or row operation starts, its
 statement/row primary proof and immediate cursor close occur before cancellation
@@ -228,7 +413,110 @@ Fault injection spans authority, `0002`, first/middle/last baseline entries,
 header, sequence, rebind, both rules, lineage, metadata, publication rules,
 pre-commit and commit-returned. Subprocess termination, BUSY/LOCKED, connection
 loss, cleanup failure and fresh-authority retry are mandatory integration
-tests. A retry never reuses the prior receipt, stage, session or transaction.
+tests. A rollback-level migration retry never reuses the prior receipt, stage,
+session or transaction; this does not prohibit the explicitly frozen
+pre-atomic-tail retries that consume no receipt and keep the transaction live.
+
+The literal freezes exactly 145 unique hostile obligations. In addition to the
+cursor and retirement attacks, they cover outer-authority clone, substitution,
+cross-run replay, use after retirement and accidental write consumption;
+outer-clock atomic-mint failures; exact `0002` byte/hash drift, partial or
+second execution and disagreement among affected rows, `total_changes` and all
+three ledger dimensions; parameter/result digest domain, scalar-type and
+aggregation drift; early, cloned, substituted, replayed or drifted
+post-DDL fences; reader-lease clone, substitution, replay, SQL/order/projection
+drift and leaked or failed-close readers; missing, reordered, duplicate,
+cloned, substituted, cross-run or wrong-predecessor initial receipts; baseline
+partial writes and caller-controlled runtime identity or timestamps; and
+stage-adoption cancellation, replay and forbidden injection inside the atomic
+consume tail; malformed four-write parity arrays; exact catalog-query and
+inventory drift; and missing reader-terminal proof. Each obligation has one
+ordered execution record containing its injection hook, mutation, stable error
+code, counter profile and semantic outcome. The ordered registry is locked by
+SHA-256
+`4e08dbd783213483692c0a2c36d4b8a3732f9b6b3e1a3f0e8bda24861b816e58`;
+the fully expanded expectations are independently locked by SHA-256
+`6bd821819215291851f2342b41beb565288e7c095de07fc066f47511cc232f95`.
+Both runtimes must execute all 145 records with no skip, not merely report a
+matching count or copy expected output.
+
+Each record names its phase, exact child failure boundary, parent precedence
+bucket and retry-evidence mode. Its semantic fields combine with one of 25
+fully specified 20-counter profiles to produce the complete ordered 28-field
+output. Invalid presentations allow only a corrected complete bundle; a valid
+bundle cancelled before the atomic tail permits the same exact valid bundle;
+post-mutation poison requires rollback and a fresh authority graph. The
+execution requirement is normative, while runtime execution evidence remains
+explicitly unclaimed until both native campaigns exist.
+
+The post-DDL fence reads every explicitly declared object in the owned
+`ge_cycle_*` namespace using the exact ordered `sqlite_schema` query frozen in
+the fixture. Its predicate is `lower(name) GLOB 'ge_cycle_*'`: SQLite treats
+ASCII identifier case as insignificant, so a case-sensitive name predicate
+would otherwise miss hostile uppercase or mixed-case objects. It intentionally
+does not filter object type, so an injected view or trigger cannot hide from
+the fence. The 34-row, 5,785-byte canonical
+inventory is domain-separated by
+`graph-engineering/sqlite-target-physical-catalog/v1\0` and has SHA-256
+`ca85cf266267fa3eb5443bdf6d957b4b03c795cd6e0232a28c52773f1041fadf`.
+The query itself has SHA-256
+`bd9a24c0e8307f473f6160b940effdfb77007144fbeea83628f0b7664df1410c`.
+`rootpage` is excluded because it is allocator state rather than schema
+identity; exact `type`, `name`, `tableName` and SQL-text hashes remain included.
+
+The complete fixture is hashed as SHA-256 over the UTF-8 domain
+`graph-engineering/sqlite-cursor-publication-rebind-v2-fixture/v1\0` followed
+immediately by canonical JSON after replacing only
+`parityGates.fixtureCanonicalSha256` with 64 lowercase zeroes. Its accepted
+digest is
+`32ebd363838ac9aa5c0d3573aa31b1f45244ca469ec248f7c906ff08d3c08993`.
+The schema retains reusable shape definitions and also references a recursively
+exact frozen-instance tree: object keys are required and closed, arrays use
+exact `prefixItems`, and all 4,959 primitive leaves are constants. This avoids
+object-`const` incompatibility with the duplicate-safe null-prototype parser
+while making schema-only mutation, reordering and extension fail closed.
+
+## Initial-publication parity record
+
+Initial-publication conformance emits one normalized record with exactly these
+28 ordered fields:
+
+1. `caseId`
+2. `outcome`
+3. `failureBoundary`
+4. `state`
+5. `poisoned`
+6. `providerClockReadCount`
+7. `clockEvidenceConsumeCount`
+8. `outerAuthorityMintCount`
+9. `perWritePrepareCounts`
+10. `perWriteExecuteCounts`
+11. `perWriteAffectedRowCounts`
+12. `perWriteTotalChangesDeltas`
+13. `outerLedgerLogicalWriteSequence`
+14. `outerLedgerFixedStatementCount`
+15. `outerLedgerAffectedRowsWatermark`
+16. `postDdlCatalogFenceMintCount`
+17. `readerLeaseMintCount`
+18. `readerLeaseCloseCount`
+19. `initialWriteReceiptMintCount`
+20. `initialWriteReceiptConsumeCount`
+21. `initialWriteReceiptTombstoneCount`
+22. `stageAdoptionReceiptMintCount`
+23. `bundleRetryable`
+24. `sameTransactionLineage`
+25. `catalogFenceMatches`
+26. `cursorRebindPrepareCount`
+27. `cursorRebindExecuteCount`
+28. `commitCount`
+
+The counters must come from real hooks. A self-probe must first demonstrate
+one provider-clock read, one clock-evidence consumption and one outer-authority
+mint so an unwired all-zero implementation cannot pass. Opaque addresses,
+runtime-private epoch values and adapter API-call counts are excluded from
+cross-runtime comparison. Every initial-publication case that stops before
+rebind must report zero cursor-rebind prepares, zero cursor-rebind executes and
+zero commits.
 
 ## Implementation order
 

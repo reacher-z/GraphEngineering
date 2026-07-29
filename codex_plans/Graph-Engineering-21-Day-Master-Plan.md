@@ -12925,3 +12925,810 @@ commit. It does not close the overall master plan or full B3. The next required
 implementation leaf is exact private B2 transfer adoption plus outer
 publication authority and the four initial write receipts, stopping again
 before fixed cursor rebind until its own hostile and parity gates pass.
+
+#### 31.37.19 Initial-publication contract correction before runtime implementation
+
+Parallel read-only design of the next B3 leaf found that the high-level stage
+order is frozen but the initial publication lane is not yet deterministic
+enough for two runtimes to implement independently. Production implementation
+must pause until a narrow append-compatible contract correction freezes the
+following literal semantics and receives a new canonical digest.
+
+The corrected authority contract must replace the ambiguous
+`outerPublicationAuthority.singleUse` label. The outer clock evidence is
+consumed exactly once while minting the authority; the authority itself is
+minted once, non-transferable and reusable only as an identity commitment by
+the four initial writes, post-DDL fence, initial adoption, publication session
+and later final fences in the same exact graph. It is retired only by rollback,
+poison/disposal or the successful outer atomic commit. No write or adoption
+step consumes the authority object.
+
+Add a dedicated `initialOuterWriteReceiptContract` for the exact ordered
+receipts:
+
+1. migration `0002` physical-catalog rebuild;
+2. baseline-entry publication;
+3. baseline-header publication; and
+4. operation-sequence-zero publication.
+
+Every receipt is opaque, module-minted, exact-identity, clone/cross-run/
+substitution/replay rejected and bound to its exact predecessor. Common
+commitments include write kind, fixed normalized SQL or repository-asset
+identity and SHA-256, exact parameter/result identity, exact connection,
+unchanged BEGIN lineage, outer authority identity, prepare/execute count,
+affected rows, `total_changes` before/after/delta and outer-ledger
+before/after/sequence/delta.
+
+The migration receipt additionally commits the exact immutable `0002` bytes,
+migration/preview-manifest identities, one execution, copied schema-row count,
+copied legacy-operation count, application ID, user version, pre/post physical
+catalog digests and the pre-publication metadata state. The entries receipt
+commits baseline ID, entry count, one affected row per ordinal, continuous
+ordinal/hash chain, first/final entry hash and projection identity. The header
+receipt commits one affected row plus baseline ID, counts, projection hash,
+first/final hashes, runtime identity and policy blob identity. The sequence
+receipt commits one affected row, the same baseline ID, commit sequence zero,
+captured/updated timestamps and exact predecessor.
+
+Add an independent `postDdlCatalogFence` contract. The fence is opaque,
+module-minted once after the exact `0002` receipt and before baseline DML,
+clone/substitution/replay rejected and reusable only as an exact identity
+proof. It binds the connection, unchanged BEGIN lineage, outer authority,
+`0002` receipt, current private mutation epoch, `total_changes` and ledger
+watermarks, physical `sqlite_schema` digest, application/user versions and
+the complete expected v2 table/index/column/constraint inventory. Its proof
+scope is the physical post-`0002` catalog before final metadata publication;
+it must not falsely claim final fresh-v2 semantic equivalence.
+
+Add an independent `stageAdoptionReceipt` contract. Successful initial
+adoption validates the complete four-receipt bundle before consuming anything,
+then performs one non-interruptible state mutation that consumes all four,
+mints four ordered exact tombstones, updates the stage's current private epoch,
+allowed `total_changes`, outer-ledger watermark and v2 main-catalog identity,
+retires only the old B2 v1 catalog/change fence, and mints one opaque adoption
+receipt. The receipt binds the exact B2 receipt/projection/transfer/stage,
+connection/lineage, outer authority, post-DDL fence, four original receipts,
+four tombstones, target catalog digest and all adopted watermarks. The
+post-DDL fence remains live for publication-session and later receipt checks.
+
+Validation-only bundle failures consume zero receipts, do not mutate stage or
+ledger state and permit the original valid receipt objects to be presented in
+a corrected complete bundle. Missing, reordered, duplicate, cloned,
+substituted, cross-run or wrong-predecessor presentations are validation-only.
+Authority, transaction-lineage, live-lock, catalog, unexplained-write,
+affected-count, `total_changes` or ledger corruption poisons the owner and
+requires rollback. After atomic consumption begins there is no injectable
+failure or cancellation boundary.
+
+Add leaf-local failure precedence for outer-authority mint, before `0002`,
+after `0002` before fence, before entries, before header, before sequence-zero,
+initial-adoption validation and initial-adoption atomic consumption. Before a
+statement starts the order is state, B2 provenance, exact graph, authority/
+receipt identity, connection/lineage, live lock/clock, catalog/fence,
+statement/parameter/ledger commitments, cancellation, prepare and execute.
+After execution begins, SQLite/result primary failure precedes affected-count,
+`total_changes`, ledger, cancellation and cleanup.
+
+The correction must add malicious re-sign tests for every new Boolean,
+commitment list, predecessor relation, ledger rule and proof-scope field. It
+must also add hostile obligations for cloned/substituted/cross-run authority,
+`0002` byte/hash drift and partial/second execution, early/cloned/substituted
+post-DDL fence, catalog drift after fence, missing/reordered/duplicate/cloned
+initial receipts, wrong authority/lineage/predecessor, header/sequence replay,
+stage-adoption clone/replay and cancellation immediately before atomic
+consumption.
+
+Only after schema, validator, malicious tests, documentation, fixture digest,
+cross-runtime parity matrix and three independent reviews agree at severity
+zero may TypeScript/Python runtime code begin. The runtime parity report will
+compare normalized outcomes, failure boundary, state/poison flag, clock reads,
+authority/fence/receipt/tombstone/adoption counts, four per-write prepare/
+execute/affected/`total_changes` counters, outer-ledger sequence, bundle
+retryability, same-lineage/catalog-fence relations and real zero cursor-rebind/
+commit counts. Opaque addresses and private epoch values remain incomparable.
+
+#### 31.37.20 B3 initial-publication contract correction accepted for runtime implementation
+
+The contract-first correction required by section 31.37.19 is complete. The
+previous provider-clock checkpoint digest
+`b92d8d9c05d16f3a230e479ee161acd26e265654e0a44ff14dfe5652328ef7f0`
+is superseded by the reviewed canonical fixture digest
+`c2ffa4100e73f823de0cfba8ae4b379ef00736b104d41988753b588b5d082eb8`.
+This is a normative contract revision, not runtime-delivery evidence. The
+fixture still declares implementation, release, active-manifest, protocol-
+completion and production-throughput claims false. No cursor rebind, commit,
+manifest switch or accepted v2 database is authorized by this checkpoint.
+
+The corrected authority graph freezes exactly 34 opaque objects. Exact object
+identity is semantic: reconstruction, serialization round-trip, cloning,
+structural equality, substitution and cross-run reuse cannot satisfy an edge.
+The graph distinguishes the B2 receipt/projection/transfer/stage quartet, live
+connection, migration-lock and provider-clock capabilities, four boundary
+clock receipts, outer publication authority and its consumed-clock tombstone,
+post-DDL catalog fence, post-DDL reader lease, four initial-write receipts and
+four consumed tombstones, stage-adoption receipt, publication session and
+cursor clock, later publication/audit receipts, pre-retirement fence,
+retirement receipt and final commit fence.
+
+The outer publication authority is minted once, non-transferable and reusable
+only as an identity commitment inside its exact graph. It is not consumed by
+the initial writes, catalog fence or adoption. It is retired only on commit-
+returned, rollback, poison or disposal. Minting is a validation-first
+intrinsic followed by one non-interruptible tail: consume the outer clock
+evidence once, mint its exact tombstone, publish the prepared B2 transfer and
+activate the authority. A presentation failure or cancellation before the
+tail consumes nothing and may retry with the same evidence. Fault injection
+is forbidden after the tail begins; an invariant failure there poisons the
+graph and requires rollback plus a fresh graph.
+
+The initial permanent-write chain is literal and closed:
+
+1. execute the exact immutable migration `0002` repository asset once;
+2. mint and validate the post-DDL physical-catalog fence;
+3. acquire the exact publication reader lease and publish ordered baseline
+   entries from the B2 TEMP stage;
+4. publish one final baseline header with stable runtime identity;
+5. publish operation-sequence zero with provider-authoritative time; and
+6. validate, consume and adopt the complete four-receipt bundle atomically.
+
+Each initial receipt binds its exact write kind, normalized SQL or immutable
+repository-asset bytes and SHA-256, canonical parameter and result digests,
+exact predecessor objects, connection, unchanged `BEGIN EXCLUSIVE` lineage,
+outer authority, prepare/execute counts, affected rows, `total_changes`
+before/after/delta and all outer-ledger before/after values. The ledger has
+three independently checked dimensions: logical-write sequence, fixed-
+statement execution count and affected-row watermark. Migration `0002`
+advances those dimensions by `1`, `20` and
+`1 + projection.legacyOperationCount`; baseline entries advance them by `1`,
+`projection.entryCount` and `projection.entryCount`; the header and sequence-
+zero writes each advance them by `1`, `1` and `1`.
+
+Parameter and result identities use one cross-runtime digest codec rather
+than adapter serialization. Parameter hashes cover a domain-separated,
+canonical JSON exact-order array of typed scalars. Unicode is not normalized,
+integers use canonical decimal with negative zero forbidden, BLOBs use
+unpadded RFC 4648 section 5 base64url, and null carries an explicit tag.
+Result hashes use a different domain and canonical JSON with affected rows as
+a non-negative canonical-decimal string; `lastInsertRowid` is excluded. Both
+runtimes must implement this codec from the same fixture and prove known-answer
+vectors before any receipt is trusted.
+
+The post-DDL fence is an independent, module-minted proof created once after
+the exact `0002` receipt and before baseline DML. It binds connection,
+transaction lineage, authority, migration receipt, current mutation epoch,
+`total_changes`, all three outer-ledger watermarks, physical `sqlite_schema`
+digest, application/user versions and the complete expected v2 object
+inventory. Its proof scope is deliberately narrow: the physical post-`0002`
+catalog before baseline publication. It does not claim final fresh-v2 semantic
+equivalence and it remains live after the initial stage adoption.
+
+The post-DDL publication reader lease closes the source-read race. Only this
+package-private lease may run the exact ordered TEMP-stage read that feeds the
+baseline-entry writer. It binds the exact stage, projection, connection,
+lineage, authority, post-DDL fence, normalized SQL and canonical projection.
+It must close before adoption. Clone, substitution, replay, wrong-run use,
+SQL/order/projection drift, cursor leakage and cancellation-close failure are
+contract failures with explicit precedence and cleanup behavior.
+
+Initial stage adoption validates the complete ordered receipt bundle before
+consuming any member. Missing, reordered, duplicate, cloned, substituted,
+cross-run or wrong-predecessor presentations consume nothing and permit the
+same original receipt objects to be retried inside a corrected complete
+bundle. Once the non-interruptible adoption tail starts, it consumes all four
+receipts, mints four exact tombstones, updates the private stage watermarks,
+retires only the old B2 v1 catalog/change fence, preserves the post-DDL fence
+and mints one exact stage-adoption receipt. No cancellation or fault injection
+is legal inside that tail. Authority, transaction-lineage, live-lock,
+catalog, unexplained-write, affected-count, `total_changes` or ledger
+corruption poisons the owner and requires rollback rather than retry.
+
+The executable failure model now freezes exactly 12 boundary-precedence
+objects, 25 cancellation labels, 19 statement/ownership boundaries and eight
+cleanup faults. It covers outer-authority validation and atomic mint, before
+and after each initial permanent write, reader acquisition/read/close,
+adoption validation and atomic consumption, before cursor rebind, started-
+statement failure and post-commit interpretation. After statement start, the
+literal keeps SQLite error or result-shape failure primary, followed by
+affected-row count, `total_changes`, permanent-write ledger, cancellation and
+cleanup. Implementations must preserve this local ordering rather than route
+all failures through a generic exception path.
+
+The hostile registry now contains exactly 141 unique obligations. New coverage
+includes authority clone/substitution/cross-run/use-after-retirement and atomic-
+mint attacks; exact `0002` bytes/hash/partial/second-execution and three-ledger-
+dimension disagreements; early, cloned, substituted, replayed or drifted
+catalog fences; reader-lease identity, query, order, projection, leak and
+close failures; missing, reordered, duplicate, cloned, substituted, cross-run
+and wrong-predecessor receipts; baseline partial execution; ambient/caller
+runtime identity and caller timestamp substitution; precise before/after-
+statement cancellation; and stage-adoption replay, cancellation and forbidden
+in-tail injection. Both runtimes must execute the registry; checking only the
+count is insufficient.
+
+Initial-publication parity freezes exactly 28 ordered normalized fields:
+case/outcome/boundary/state/poison status; real provider-clock read, evidence-
+consume and authority-mint counters; four per-write prepare, execute, affected-
+row and `total_changes` vectors; all three outer-ledger dimensions; catalog-
+fence and reader-lease mint/close counts; receipt mint/consume/tombstone and
+adoption counts; retryability and same-lineage/catalog relations; and cursor-
+rebind prepare/execute plus commit counts. Instrumentation must first self-
+probe clock-read/evidence-consume/authority-mint as `1/1/1`, preventing an
+unwired all-zero implementation from passing. Every initial-publication case
+must then prove real cursor-rebind prepare/execute/commit `0/0/0`. Opaque
+addresses, runtime-private epoch numbers and adapter API-call counts are
+excluded from cross-runtime comparison.
+
+The accepted executable closure is the normative fixture, strict JSON schema,
+trusted-digest validator, malicious re-sign suite and protocol narrative
+agreeing on digest
+`c2ffa4100e73f823de0cfba8ae4b379ef00736b104d41988753b588b5d082eb8`,
+23 ordered stages, two verification rules, 34 exact objects, 12 precedence
+objects, 141 hostile obligations, 20 fault boundaries, 25 cancellation labels,
+19 statement boundaries, eight cleanup faults and 28 parity fields. The strict
+validator accepts the fixture with implementation and active-manifest claims
+false. Any subsequent contract edit requires an intentional new digest,
+malicious mutation coverage, documentation reconciliation and another
+severity-zero review before implementation can consume it.
+
+Production implementation now proceeds in bounded leaves, with no cursor-
+rebind work mixed into the first leaf:
+
+1. TypeScript implements package-private authority, clock tombstone, exact
+   four-receipt chain, digest codec, post-DDL fence, reader lease, four
+   consumed tombstones and stage-adoption receipt objects and registries.
+2. TypeScript implements validation-first atomic mint/adoption intrinsics,
+   fixed asset/SQL execution accounting, outer ledger, retry/poison split and
+   hostile tests, stopping before cursor rebind and commit.
+3. Python independently implements semantic parity and must not use
+   `sqlite3.Connection.executescript()` for migration `0002`, because that API
+   can implicitly commit the caller-owned transaction.
+4. Both runtimes expose real measurement hooks and produce byte-stable
+   normalized parity for success, retryable presentation failure, statement
+   failure, catalog/count/ledger drift, cancellation and atomic-tail poison.
+5. Verification includes focused hostile suites, full SQLite and Python
+   regressions, fixture/schema/docs gates, exact packaged-asset byte checks,
+   workspace lint/typecheck, Ruff/mypy, repeated flake-sensitive runs and
+   independent severity-zero review.
+6. Only after that evidence is complete may a separate leaf implement the
+   derived publication session, one-shot cursor rebind and rules 11/12.
+
+The active manifest remains unchanged until fresh-v2, v1-to-v2,
+v0-to-v1-to-v2, cross-runtime upgrade/reopen, pre/post-commit crash recovery
+and npm/wheel/sdist asset parity all pass. Contract acceptance therefore
+unblocks the next private implementation leaf while preserving the hard
+non-publication boundary.
+
+#### 31.37.21 Append-only superseding B3 initial-publication closure and executable delivery lanes
+
+The acceptance recorded in section 31.37.20 is preserved byte-for-byte as
+history, but its `c2ffa410...` digest and 141-obligation registry are
+superseded. A final independent implementation-readiness review proved that
+six areas were still underspecified: multi-execution digest framing, terminal
+reader proof ownership, per-hostile-case executable expectations, complete
+normalized-output typing and vectors, physical-catalog serialization, and the
+exact retry identity permitted for presentation failure versus cancellation.
+No runtime implementation may cite section 31.37.20 as its contract anchor.
+
+The sole accepted fixture anchor for the next production leaf is
+`54b24cd31bcf221d0eff57dc0fa5e11e423f3b59bd0d7f6c29939e4027174fc7`.
+It freezes exactly 145 unique hostile obligations and 145 corresponding
+structured execution records with ordinals 1 through 145. The execution
+registry digest is
+`a241a3cb35bc88a29bf4662acc585ea3a7bcba5a61f5ea5d752dd267ad4c3936`
+and the digest after expansion of every counter and semantic expectation is
+`c268ad7bc583cf0cdfe9a2dfaee42bfd8af98491f3de1fa84362bdbcd5444d67`.
+The contract remains `contract-frozen`, while implementation, protocol
+completion, active manifest, production throughput and release claims remain
+false.
+
+##### 31.37.21.1 Exact portable initial-write digest codec
+
+Both runtimes must implement one shared codec before any receipt type is
+implemented. Parameter payloads are an outer execution-order array containing
+inner parameter-order arrays. This two-dimensional framing is never elided:
+zero executions is `[]`; one zero-parameter execution is `[[]]`; one
+parameterized execution is `[[...]]`; multiple executions retain one inner
+array per execution. Receipt code must not hash driver bind objects, Python
+tuples, JavaScript objects, adapter call results or debug serialization.
+
+Each scalar is tagged. Text is `{type:"text",value:string}` with no Unicode
+normalization. Integer is `{type:"integer",value:canonical-decimal-string}`;
+negative zero, exponent notation, leading plus and redundant leading zero are
+rejected. BLOB is `{type:"blob",value:unpadded-base64url}`. Null is exactly
+`{type:"null"}`. Booleans, floats, arrays, maps, undefined values and
+runtime-specific integers outside the accepted range are rejected before
+hashing. Object keys follow the project's Unicode-code-point canonical JSON
+profile, arrays retain order, UTF-8 is strict and the domain bytes are joined
+directly to the canonical JSON bytes without a delimiter.
+
+The parameter domain is
+`graph-engineering/sqlite-initial-write-parameters/v1\0`. The result domain is
+`graph-engineering/sqlite-initial-write-result/v1\0`, and the sole result
+shape is `{affectedRows:"canonical-nonnegative-decimal"}` for the complete
+logical receipt. It is not an array of driver results. `lastInsertRowid`,
+adapter-call count and statement-handle identity are excluded. The following
+five vectors are mandatory in TypeScript and Python unit tests:
+
+1. `[[]]` parameter digest
+   `8acdf04fe02395192d1c7d704cf8ecf52e29513ccd77024ff4f9cc9e230da80a`;
+2. mixed Unicode text, negative integer, BLOB and null digest
+   `8fcf64e97e9fda027b287997e43efc5226b596207dfc56ed161e46859027c271`;
+3. two-execution digest
+   `379049937f6797daade28d4b963dcc865f51afa5fa3422b90f4e505deaad838e`;
+4. zero affected rows result digest
+   `7d4e42c580be36f078371942187c0bdf048da4ffa35556c3f219f5930c5abd62`;
+5. three affected rows result digest
+   `9c4a39646a7cb26c3ba53e91941b6fe0f4435355a06d2138156d1fd9551ba417`.
+
+The codec tranche must include duplicate/corrupt UTF-8 rejection, scalar tag
+substitution, array-level deletion, execution reordering, parameter
+reordering, NFC/NFD distinction, padded/standard-base64 rejection,
+integer/text confusion, result aggregation drift and domain substitution.
+Differential output is compared byte-for-byte before receipt code is allowed
+to consume the codec.
+
+##### 31.37.21.2 Exact post-DDL catalog-fence implementation
+
+After the single logical execution of migration asset `0002`, and before any
+baseline DML, the outer owner executes exactly:
+
+`SELECT type, name, tbl_name AS tableName, sql FROM main.sqlite_schema WHERE name GLOB 'ge_cycle_*' AND sql IS NOT NULL ORDER BY type COLLATE BINARY, name COLLATE BINARY`
+
+The query digest is
+`eb165659622f52a9be19858cc96d781c38aa6899e2b21e282bef4eb0d4e2b155`.
+Implementations must not add a table/index filter: an owned-prefix view or
+trigger is an attack and must change the observed inventory. Every row binds
+exact `type`, `name`, `tableName` and SHA-256 of SQLite's exact UTF-8 SQL text.
+Rows are encoded as a canonical JSON array; per-row object keys are `name`,
+`sqlSha256`, `tableName`, `type`. The domain is
+`graph-engineering/sqlite-target-physical-catalog/v1\0`.
+
+The only valid inventory contains 34 explicit objects, encoded in 5,785 bytes,
+with digest
+`ca85cf266267fa3eb5443bdf6d957b4b03c795cd6e0232a28c52773f1041fadf`,
+`application_id = 1195724359` and `user_version = 2`. The proof must agree for
+fresh v2 and v1-to-v2 construction in both SQLite bindings. `rootpage` remains
+excluded because allocator history changes it; autoindexes with null SQL are
+excluded because their defining uniqueness remains committed by owning-table
+SQL. Extra, missing, duplicate, renamed, equal-count-replaced or SQL-mutated
+owned objects fail.
+
+The post-DDL fence is opaque, module-minted, connection- and transaction-
+lineage-bound and reusable only inside the same live outer authority graph.
+It is not the retired B2 v1 fence, not a final semantic proof and not a write
+receipt. Clone, substitution, replay, watermark drift or catalog drift poisons
+the transaction once permanent work has begun.
+
+##### 31.37.21.3 Reader lease and terminal proof implementation
+
+The baseline-entry reader gets one package-private lease with exactly five
+states: minted-unused, reader-active, reader-closed, retired and poisoned. It
+may execute only the frozen ordered TEMP-stage SELECT, may have at most one
+active cursor, grants no permanent-write or adoption authority and must
+rederive ordinal, entry hash, first hash and final root from the exact B2
+projection. The implementation records prepare, ownership acquisition,
+execute/fetch and close attempts separately.
+
+Failure before cursor ownership requires zero closes. Once ownership begins,
+success, cancellation and primary failure require exactly one immediate close
+attempt. A successful close produces an opaque retired/closed terminal proof;
+a close failure poisons the authority and requires outer rollback. Primary row
+decode/hash error wins over close error, close error wins over cancellation,
+and all reader cleanup precedes TEMP and outer cleanup.
+
+The terminal proof must be structurally unavoidable. The baseline-entry
+receipt binds its object identity and close evidence; the ordered four-receipt
+adoption bridge presents the same object; the stage-adoption receipt copies
+that identity. Active, missing, cloned, substituted, replayed, cross-run,
+wrong-lineage and failed-close proofs are rejected before any receipt is
+consumed. Unit tests must show the lease cannot be reused after retirement,
+cannot open a second reader and cannot mint an adoption receipt.
+
+##### 31.37.21.4 Four initial receipts and outer ledger
+
+The TypeScript tranche first introduces package-private types and registries
+without wiring cursor rebind. It then implements one validation-first write
+intrinsic for each ordered receipt: migration `0002`, baseline entries,
+baseline header and sequence zero. Each receipt commits connection identity,
+unchanged BEGIN EXCLUSIVE lineage, outer-authority identity, exact predecessor,
+SQL/asset identity, parameter/result digests, prepare/execute/affected counts,
+`total_changes` before/after/delta, and the three outer-ledger dimensions.
+
+Migration `0002` is one logical asset execution containing 20 fixed statements;
+adapter call count is non-normative. Its ledger delta is logical writes 1,
+fixed statements 20 and affected rows `1 + legacyOperationCount`. Baseline
+entries prepare once and execute once per entry. Header and sequence zero each
+prepare/execute once and affect exactly one row. After E entries and L legacy
+operations the complete ledger is logical writes 4, fixed statements
+`22 + E`, and affected rows `4 + E + L`.
+
+The frozen success probe uses E=12 and L=1, therefore its exact ledger is
+`4/34/16`. Its four-write arrays are prepares `[20,1,1,1]`, executes
+`[1,12,1,1]`, affected rows `[2,12,1,1]` and `total_changes` deltas
+`[2,12,1,1]`. Provider clock read, clock evidence consume and authority mint
+are `1/1/1`; post-DDL fence mint is one; reader mint/close is `1/1`; receipt
+mint/consume/tombstone is `4/4/4`; adoption receipt mint is one; rebind prepare,
+rebind execute and commit are `0/0/0`.
+
+Python implements the same objects independently after the TypeScript seam is
+reviewed, but consumes the same fixture and emits the same normalized wire
+record. Python must not use `sqlite3.Connection.executescript()` for `0002`
+because it may violate caller-owned transaction control. Both runtimes must
+prove exact asset bytes from source and packaged artifacts before publication
+code can reference them.
+
+##### 31.37.21.5 Atomic adoption retry/poison boundary
+
+Initial adoption validates the complete ordered four-receipt bundle, all
+predecessors, outer authority, lock, connection, transaction, post-DDL fence,
+reader terminal proof, counts, `total_changes` and all ledger watermarks before
+consuming any receipt. Presentation errors—missing, duplicate, reordered or
+wrong-shape bundle members—consume zero and permit retry only with a corrected
+complete bundle. Cancellation before the atomic tail consumes zero and permits
+retry of the same untouched exact valid bundle.
+
+Authority, lineage, lock, catalog, count, result-digest or ledger corruption is
+not a retryable presentation error. It poisons the owner and requires rollback.
+Once consumption begins, no cancellation or test fault may be injected. The
+non-interruptible tail consumes all four receipts, mints four tombstones,
+updates stage watermarks, retires only B2's old v1 catalog/change fence,
+preserves the post-DDL fence and mints one stage-adoption receipt. Any API shape
+that can expose a half-consumed bundle is forbidden.
+
+Tests must distinguish corrected-bundle retry, same-valid-bundle cancellation
+retry, replay after successful consumption, tombstone substitution,
+cross-transaction replay and rollback/rebegin. No test may simulate success by
+directly constructing opaque receipt objects or mutating a registry behind the
+intrinsic.
+
+##### 31.37.21.6 Hostile registry execution and parity evidence
+
+Every hostile record is executable data, not a documentation label. The two
+runtimes iterate ordinals 1 through 145 in fixture order, register each exact
+hook, perform the specified mutation, assert the stable error code derived
+from frozen boundary precedence and compare all semantic expectations. A run
+with a skipped ID, duplicate ID, unavailable hook, copied expected output,
+unobserved counter or registry-order drift fails before summary generation.
+
+Counter profiles are expanded into the complete 28-field normalized record
+before comparison. The output schema fixes the type of every field and exact
+four-element arrays. At minimum, byte-stable parity covers successful initial
+publication, invalid-adoption retry and post-`0002` catalog poison. The
+self-probe must deliberately produce non-zero clock/authority/write/fence/
+reader/receipt/adoption observations so an unwired zero-valued recorder cannot
+pass. All cases stopping before rebind must retain rebind prepare, rebind
+execute and commit at zero.
+
+The hostile runner must capture actual hook registration and activation
+counts, not only assertion counts. Atomic-tail obligations prove that no hook
+can be registered inside the tail; they must not introduce an interruption
+point that contradicts the protocol. TypeScript/Python result serialization is
+canonical JSON and comparison rejects extra, missing, reordered or mistyped
+fields.
+
+##### 31.37.21.7 Parallel implementation sequence
+
+The maximum safe development topology is four coordinated lanes with
+non-overlapping ownership:
+
+1. contract/fixture guardian owns only the immutable fixture, schema,
+   validator, malicious mutations and protocol narrative;
+2. TypeScript owner builds private authority/receipt/fence/reader/adoption
+   primitives and focused tests;
+3. Python owner independently builds the same private semantics and focused
+   tests; and
+4. evidence owner builds differential runners, artifact-byte probes, hostile
+   coverage accounting and release-truth checks.
+
+The main Agent serializes shared fixture changes, watches every lane for scope
+drift, reruns cross-lane gates after each handoff and records command, result,
+digest and unresolved risk in `codex_logs`. Agents may not concurrently edit
+the same file. A lane that uncovers a contract ambiguity stops implementation,
+reports the exact path and resumes only after the fixture guardian produces a
+new reviewed digest. Progress scanning is evidence-based: unchanged commits
+are not considered slow if a long full regression is running, while a lane
+without file/test evidence receives a bounded follow-up task.
+
+Implementation remains split into independently reviewable commits:
+
+1. portable codec plus golden vectors;
+2. private B2 transfer/adoption seam and outer authority objects;
+3. TypeScript post-DDL fence and reader terminal proof;
+4. TypeScript four-write receipt ledger and atomic adoption;
+5. Python independent parity implementation;
+6. executable 145-case cross-runtime hostile campaign;
+7. artifact/crash/reopen evidence for this pre-rebind boundary; and only then
+8. a separate publication-session, cursor-rebind and rules 11/12 leaf.
+
+No commit combines contract correction with production behavior. Each commit
+uses author and committer `reacher-z <mtrxcop@gmail.com>`, has no co-author
+trailers, stages only owned files, passes `git diff --check` and pushes only
+after local/upstream/remote hashes are proven equal.
+
+##### 31.37.21.8 Required verification and acceptance gates
+
+Contract acceptance requires strict JSON parsing, JSON Schema compilation,
+canonical digest verification, malicious re-sign resistance, registry and
+expanded-expectation hash checks, catalog recomputation in Node and Python,
+fixture validation, link validation, descriptor parity, full SQLite contract
+tests, workspace lint/typecheck and two independent severity-zero reviews.
+
+Runtime acceptance adds focused unit tests for each lifecycle transition,
+exact SQLite integration tests, all 145 hostile records in both runtimes,
+byte-for-byte normalized parity, repeated cancellation/cleanup runs, complete
+SQLite package regression, complete Python regression, Ruff format/lint,
+strict mypy, npm/wheel/sdist asset parity, source versus packaged import tests
+and negative public-export probes. Tests must use real SQLite transaction and
+cursor objects wherever the contract claims real hooks.
+
+Crash evidence remains bounded to this leaf: process termination before outer
+commit must reopen as v1 with no accepted v2 publication; no test may claim
+post-commit v2 recovery until rebind, rules 11/12, retirement and commit are
+implemented. The active manifest and accepted-database path remain unchanged.
+
+The leaf is accepted only when all of the following are simultaneously true:
+
+- trusted fixture digest is the exact `54b24c...` value above;
+- hostile obligations/records/unique IDs are 145/145/145;
+- registry and expanded hashes recompute exactly;
+- catalog inventory/count/bytes/digest and query digest recompute exactly;
+- all three 28-field vectors validate with no extra properties;
+- implementation and release claims remain false;
+- scoped and full gates are green without unexplained skips or timeouts;
+- plan HEAD prefix comparison succeeds and its diff has additions only;
+- two final independent audits report HIGH 0 / MEDIUM 0 / LOW 0; and
+- the scoped commit is pushed and the remote object matches local HEAD.
+
+Passing this section does not complete Graph Engineering, B3 or the 21-day
+master plan. It authorizes the first private pre-rebind runtime tranche only.
+Cursor publication, rules 11/12, TEMP retirement, final commit, crash/reopen
+v2 acceptance, scale/throughput evidence, manifest activation, stable release
+and community-growth work remain explicit downstream deliverables.
+
+#### 31.37.22 Append-only executable-oracle correction after adversarial schema review
+
+Section 31.37.21 remains historical plan evidence, but its `54b24c...`,
+`a241...`, `c268...` and `eb165...` anchors must not be implemented. Two
+independent read-only audits proved that the first structured hostile registry
+still used a non-executable template: 102 poisoned cases shared a generic
+boundary, four counter profile names had no definitions, retry identity was
+not per-record, and the catalog predicate missed ASCII case variants of
+SQLite identifiers. Production implementation remained paused, and this
+section supersedes those literals without modifying the earlier plan text.
+
+The accepted contract anchors are now:
+
+- domain-separated, zero-self fixture SHA-256
+  `2d5a6287525753dda71d220d91c56da00b27a9c6e9c58a882fa12028fcb32205`;
+- ordered 145-record registry SHA-256
+  `4e08dbd783213483692c0a2c36d4b8a3732f9b6b3e1a3f0e8bda24861b816e58`;
+- fully resolved 145 by 28 expectation SHA-256
+  `6bd821819215291851f2342b41beb565288e7c095de07fc066f47511cc232f95`;
+- case-insensitive owned-catalog query SHA-256
+  `bd9a24c0e8307f473f6160b940effdfb77007144fbeea83628f0b7664df1410c`;
+- unchanged valid 34-object catalog SHA-256
+  `ca85cf266267fa3eb5443bdf6d957b4b03c795cd6e0232a28c52773f1041fadf`.
+
+##### 31.37.22.1 Executable per-record oracle
+
+The runtime campaign is driven by 145 ordered records, not by free-text
+obligation names. Every record contains ordinal, stable ID, category, phase,
+child boundary, parent precedence bucket, exact hook, exact mutation, stable
+error code, counter-profile reference, retry-evidence mode, semantic profile
+and seven semantic result fields. Ordinal, ID, hook and mutation are identity-
+locked and remain in the same order as `hostileObligations`.
+
+Twenty-five counter profiles are all referenced and each contains exactly the
+20 counter fields that combine with `caseId` and seven semantic fields into
+the frozen 28-field normalized record. No counter may be reported as
+"observed at failure" without a concrete value. The representative progress
+watermarks are:
+
+1. before outer authority: every counter zero;
+2. outer pre-tail: provider read one, evidence consume zero, authority mint
+   zero;
+3. outer active: provider/consume/authority `1/1/1`;
+4. partial `0002` after fixed statement ten: prepare ten, execute one logical
+   asset, fixed-ledger ten, no receipt;
+5. complete `0002`: `[20,0,0,0]` prepares, `[1,0,0,0]` executes,
+   `[2,0,0,0]` affected/delta, ledger `1/20/2`, one receipt;
+6. post-DDL fence: previous counters plus one fence mint;
+7. reader before ownership: mint one, close zero;
+8. reader terminal: mint/close `1/1`;
+9. partial baseline entries at six: ledger `1/26/8`, no entries receipt;
+10. complete entries: ledger `2/32/14`, two total receipts;
+11. complete header: ledger `3/33/15`, three receipts;
+12. complete sequence: ledger `4/34/16`, four receipts;
+13. partial adoption examples explicitly expose one consumed/no tombstone and
+    four consumed/three tombstones as forbidden poisoned states;
+14. complete adoption: consume/tombstone `4/4`, adoption mint one;
+15. pre-rebind evidence rejected: provider/consume `2/1`;
+16. pre-rebind evidence accepted: `2/2`;
+17. rebind executed: `2/2`, rebind prepare/execute `1/1`;
+18. pre-verification evidence rejected: `3/2`;
+19. verification audits complete: `3/3`;
+20. final pre-commit fence: `4/4` and commit zero;
+21. forbidden fifth clock observation: `5/4`; and
+22. commit-returned control: `4/4` and commit one.
+
+Reader SQL/order/provenance cases use the reader-lifecycle parent bucket.
+Permanent baseline INSERT failures use the after-statement parent bucket.
+Outer-authority and stage-adoption atomic tails have separate boundaries, and
+forbidden injection is rejected before entry rather than simulated as a
+partial atomic state. Post-`0002` catalog drift uses the same exact profile and
+boundary as its full parity control.
+
+Retry mode is explicit per record. `corrected-complete-bundle` applies to
+invalid adoption presentation and forbids replaying the invalid bundle.
+`same-exact-valid-bundle` applies only to a valid bundle cancelled or rejected
+before the non-interruptible tail. Equivalent outer-authority pre-tail cases
+use exact valid authority evidence. Poisoned mutation requires
+`fresh-authority-graph`; non-mutating provenance rejection is not represented
+as bundle retry.
+
+##### 31.37.22.2 Catalog namespace closure
+
+The exact catalog query is now:
+
+`SELECT type, name, tbl_name AS tableName, sql FROM main.sqlite_schema WHERE lower(name) GLOB 'ge_cycle_*' AND sql IS NOT NULL ORDER BY type COLLATE BINARY, name COLLATE BINARY`
+
+SQLite compares ASCII identifiers without case distinction, while `GLOB`
+normally compares case-sensitively. Applying `lower()` to the name before the
+literal-prefix glob closes the gap without relying on connection PRAGMAs.
+The query continues to include every SQL-bearing type, not only tables and
+indexes, so hostile views and triggers remain visible.
+
+Independent Node/Python, fresh/migrated evidence must retain 34 rows, 5,785
+canonical bytes and the `ca85...` digest. The hostile gate creates uppercase
+and mixed-case views and triggers in the owned namespace and proves each one
+changes the inventory and digest. It then creates unrelated objects and proves
+they do not change the owned projection. The exact hostile cumulative digests
+are evidence fixtures, not replacements for computing the result through real
+SQLite.
+
+##### 31.37.22.3 Signed-integer digest closure
+
+The parameter codec accepts integer tagged values only in the SQLite signed
+64-bit range. Lexemes match
+`^(?:0|-[1-9][0-9]*|[1-9][0-9]*)$`; `+1`, `01`, `-0`, surrounding whitespace
+and values outside `[-9223372036854775808, 9223372036854775807]` fail before
+canonical hashing. The minimum and maximum golden digests are
+`d3d9b55872b8b14e2ec8a3c2b5ca27db179993b97ce9e47845efd2923eef4460`
+and
+`be263941652b27aa8254e518d3de8853c3071e7b7310449a7af13fb8bd2765ce`.
+Together with the previous five vectors, both runtimes now have seven positive
+goldens plus required rejection vectors.
+
+##### 31.37.22.4 Exact schema and hash separation
+
+The frozen case uses three independent domains and preimages. The registry
+hash covers the exact ordered records array. The expanded hash covers 145
+resolved 28-field records in registry order. The fixture hash covers the
+entire fixture with only its own digest field replaced by 64 lowercase zeroes.
+All three prepend their declared UTF-8 domain directly to canonical JSON.
+Plain SHA-256 without the fixture domain is invalid even if every JSON byte is
+otherwise correct.
+
+The JSON Schema continues to expose reusable shape definitions, then adds a
+root `exactFrozenFixture` constraint generated without object `const`.
+Duplicate-safe parsing deliberately creates null-prototype objects; Ajv object
+`const` deep comparison is therefore unsafe. The exact tree instead uses
+closed required object properties, exact array `prefixItems`/length and scalar
+constants for all 4,725 primitive leaves. Empty arrays omit `prefixItems` and
+use exact zero length. Acceptance probes must reject every generated scalar
+mutation, array shrink/grow/reorder and object extension while still compiling
+under strict Ajv and accepting the null-prototype canonical case.
+
+##### 31.37.22.5 Revised acceptance sequence
+
+Before the first runtime leaf begins, the main Agent must complete these gates
+in order:
+
+1. synchronize validator constants and all three domain-separated hash
+   algorithms;
+2. validate the 25 exact counter profiles, 145 parent/child/retry mappings and
+   full expansion algorithm;
+3. independently recompute seven codec goldens and the catalog query hash;
+4. run real Node SQLite uppercase/mixed-case view/trigger probes;
+5. adapt malicious re-sign tests so schema-exact rejection and semantic
+   trusted-anchor rejection are both tested intentionally;
+6. pass the focused validator and hostile tests;
+7. pass the complete SQLite ledger-contract suite;
+8. pass fixture, documentation-link, descriptor-parity, lint and typecheck
+   gates;
+9. run two independent final reviews against the exact final working-tree
+   bytes and require HIGH 0 / MEDIUM 0 / LOW 0;
+10. verify the entire HEAD plan byte prefix and additions-only plan diff; and
+11. stage only the eight B3 contract/log/plan files, commit as
+    `reacher-z <mtrxcop@gmail.com>` without co-author trailers, push and prove
+    local/upstream/remote object equality.
+
+Only then may the next commit introduce package-private TypeScript behavior.
+It still stops before cursor rebind and commit, follows the tranche order in
+31.37.21, retains every implementation/release/manifest claim as false, and
+does not imply that the complete 21-day plan or GitHub adoption objective has
+been achieved.
+
+#### 31.37.23 Append-only state-domain, validator-surface and canonical-order closure
+
+Section 31.37.22 remains immutable historical planning evidence, but its
+`2d5a6287...` fixture anchor and 4,725-leaf count are superseded by this
+section. A final adversarial pass found that the reusable normalized-record
+schema still admitted the stale state `cursor-published` even though the
+authoritative state machine had replaced it with `publication-active` and
+`cursor/clock-complete`. The same pass found that a test-oriented exported
+semantic validator could be imported without first enforcing the exact JSON
+Schema, and that the JavaScript canonicalizer used the platform's UTF-16
+default key ordering while the protocol promises Unicode code-point ordering.
+No runtime implementation may begin until all three contradictions are closed.
+
+The final normalized state type literal is
+`enum-state-machine-states`. Every normalized record state is a member of the
+exact ordered state domain:
+
+1. `pre-rebind-complete`;
+2. `publication-active`;
+3. `cursor/clock-complete`;
+4. `poisoned`; and
+5. `disposed`.
+
+The reusable record schema, exact frozen fixture tree, semantic validator and
+hostile expansion must all enforce that same set. No `cursor-published` alias,
+legacy spelling, implicit compatibility value or unconstrained string is
+accepted. The remaining semantic fields are equally explicit: `caseId` is a
+non-empty stable string, `outcome` is exactly `success`, `rejected` or
+`poisoned`, and `failureBoundary` is either null or a non-empty stable slug.
+All four-element counter arrays, nonnegative safe-integer counters and Boolean
+fields retain their previous exact validation.
+
+The public validator surface is schema-first without exception. Tests may not
+export, import or call a semantic-only entry point. A malicious object with an
+extra member, including a member whose value would disappear during JSON
+serialization, must fail exact schema validation before any trusted semantic
+anchor is considered. Tests for maliciously re-signed data exercise the public
+entry point and prove fail-closed `GE_CURSOR_B3_SCHEMA` behavior. The private
+semantic implementation remains reachable only through that schema-first
+entry and through canonical validation with asset verification enabled.
+
+Canonical JSON key ordering is implemented by Unicode scalar value, not by
+JavaScript's default UTF-16 code-unit order. The conformance suite includes a
+non-ASCII regression that orders U+E000 before U+1F600 (`😀`), matching numeric
+code-point order even though UTF-16 would reverse them. Fixture, ordered
+registry and expanded-expectation hash implementations use the same comparator
+and reject lone surrogate keys or values through the canonical Unicode-scalar
+rules already frozen by the serialization contract.
+
+After the state correction, the accepted domain-separated zero-self fixture
+SHA-256 is
+`32ebd363838ac9aa5c0d3573aa31b1f45244ca469ec248f7c906ff08d3c08993`.
+The state-only correction does not alter the ordered registry SHA-256
+`4e08dbd783213483692c0a2c36d4b8a3732f9b6b3e1a3f0e8bda24861b816e58`
+or the 145 by 28 expanded expectation SHA-256
+`6bd821819215291851f2342b41beb565288e7c095de07fc066f47511cc232f95`.
+The exact schema tree now contains 4,959 scalar leaves; mutation acceptance
+requires rejection of all 4,959 scalar substitutions, 222 array-length
+mutations, 195 valid array reorderings and 416 object extensions.
+
+Final B3 contract acceptance therefore requires, on one stable byte set:
+
+1. direct canonical validator success with real asset verification;
+2. focused tests proving schema-first public validation, complete normalized
+   field typing and Unicode code-point ordering;
+3. the complete SQLite ledger-contract test suite;
+4. all fixture, documentation-link and cross-runtime descriptor-parity gates;
+5. workspace lint and typecheck across every package;
+6. an additions-only master-plan diff whose entire HEAD byte prefix is exact;
+7. two independent final audits reporting HIGH 0 / MEDIUM 0 / LOW 0;
+8. an explicit eight-path index with no unrelated user or parallel-lane file;
+9. a commit authored and committed by `reacher-z <mtrxcop@gmail.com>` without
+   co-author trailers; and
+10. equality of local HEAD, configured upstream and the remote branch object.
+
+This correction authorizes only the next package-private TypeScript B2
+transfer/adoption seam after the B3 contract commit is pushed. That runtime
+tranche must preserve one connection and transaction lineage, consume each
+initial write receipt exactly once, mint the adoption receipt atomically, and
+stop in `pre-rebind-complete`. It must not execute cursor rebind, rules 11/12,
+TEMP retirement or commit; those remain separate reviewed tranches with their
+own hostile and crash/reopen evidence. Graph Engineering delivery, production
+claims, active-manifest support and community-growth targets remain open.

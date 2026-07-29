@@ -13,7 +13,35 @@ const ROOT = dirname(fileURLToPath(import.meta.url));
 const REPOSITORY_ROOT = dirname(dirname(ROOT));
 const FIXTURE_PATH = join(ROOT, "sqlite-cursor-publication-rebind-v2.case.json");
 const SCHEMA_PATH = join(ROOT, "sqlite-cursor-publication-rebind-v2.schema.json");
-const TRUSTED_FIXTURE_SHA256 = "b92d8d9c05d16f3a230e479ee161acd26e265654e0a44ff14dfe5652328ef7f0";
+const TRUSTED_FIXTURE_SHA256 = "32ebd363838ac9aa5c0d3573aa31b1f45244ca469ec248f7c906ff08d3c08993";
+const TRUSTED_INITIAL_WRITE_CONTRACT_SHA256 =
+  "3bcd8b69ec5ab63b38fa5bcbbd2c13b4c54120f7b7ba46af8649d1187cad2320";
+const TRUSTED_POST_DDL_CATALOG_FENCE_SHA256 =
+  "57957d645e510e66601f70a59a40298bad26bf057ec2b9d7d3e3370f7545cd56";
+const TRUSTED_POST_DDL_READER_LEASE_SHA256 =
+  "60542f336c2ad5b59c29caaf87d5aa10beccb4b6873122456acc589f07aedbce";
+const TRUSTED_STAGE_ADOPTION_RECEIPT_SHA256 =
+  "7f4da0e4423b4155a9210d6cd5c0a61424448cdfb9e369ef0c94483db5d54fda";
+const TRUSTED_STAGE_ADOPTION_BRIDGE_SHA256 =
+  "b979278ad623140947718e8f6b7d01c6668f674fe0e4c15be61392226365de31";
+const TRUSTED_HOSTILE_EXECUTION_CONTRACT_SHA256 =
+  "1eab5f82e5d2ccca53196320703a3a67df517a982d9b18d69d1b11e03a3d3b4a";
+const TRUSTED_HOSTILE_REGISTRY_SHA256 =
+  "4e08dbd783213483692c0a2c36d4b8a3732f9b6b3e1a3f0e8bda24861b816e58";
+const TRUSTED_HOSTILE_EXPANDED_SHA256 =
+  "6bd821819215291851f2342b41beb565288e7c095de07fc066f47511cc232f95";
+const TRUSTED_INITIAL_PUBLICATION_PARITY_SHA256 =
+  "0675a45ba4d3943bd199a1387bb0f1f542b597461778056b614fda980201650d";
+const TRUSTED_CATALOG_QUERY_SHA256 =
+  "bd9a24c0e8307f473f6160b940effdfb77007144fbeea83628f0b7664df1410c";
+const TRUSTED_CATALOG_DIGEST_SHA256 =
+  "ca85cf266267fa3eb5443bdf6d957b4b03c795cd6e0232a28c52773f1041fadf";
+const TRUSTED_FIXTURE_DOMAIN =
+  "graph-engineering/sqlite-cursor-publication-rebind-v2-fixture/v1\0";
+const TRUSTED_HOSTILE_REGISTRY_DOMAIN =
+  "graph-engineering/sqlite-b3-hostile-registry/v1\0";
+const TRUSTED_HOSTILE_EXPANDED_DOMAIN =
+  "graph-engineering/sqlite-b3-expanded-hostile-expectations/v1\0";
 
 const EXACT_IDENTITIES = Object.freeze({
   sourceDescriptorHash: "4071e4e5e2cddad01af4f87e4df45fa55bbc4e238674174ce40eca765d2c03fe",
@@ -63,13 +91,42 @@ const EXACT_RULES = Object.freeze([
     violationCountOnFailure: 1, successRequiredForNextRule: true }),
 ]);
 const EXACT_PRECEDENCE = Object.freeze({
-  beforeFirstPermanentWrite: Object.freeze(["b2-receipt-provenance", "exact-object-graph",
-    "outer-publication-authority", "migration-lock-capability", "transaction-generation",
-    "expected-target-catalog", "cancellation"]),
+  outerAuthorityMint: Object.freeze(["b2-receipt-provenance", "exact-object-graph",
+    "migration-lock-capability", "transaction-generation", "expected-target-catalog",
+    "outer-clock-evidence", "cancellation"]),
+  beforeMigration0002: Object.freeze(["outer-publication-authority",
+    "migration-lock-freshness", "transaction-generation",
+    "expected-source-and-target-identities", "migration-0002-repository-asset",
+    "outer-write-ledger", "cancellation"]),
+  afterMigration0002BeforeFence: Object.freeze(["migration-0002-statement-result",
+    "migration-0002-affected-row-count", "migration-0002-total-changes-delta",
+    "migration-0002-outer-ledger-delta", "post-0002-physical-catalog", "cancellation",
+    "cleanup"]),
+  beforeBaselineEntries: Object.freeze(["post-ddl-catalog-fence",
+    "migration-0002-receipt-predecessor", "baseline-entries-parameters",
+    "outer-write-ledger", "cancellation"]),
+  baselineEntriesReaderLifecycle: Object.freeze(["reader-lease-authority-and-provenance",
+    "fixed-source-read-sql-and-order", "reader-prepare-or-execute",
+    "row-fetch-decode-order-and-projection-proof", "reader-close-failure", "cancellation",
+    "temp-or-outer-cleanup-failure"]),
+  beforeBaselineHeader: Object.freeze(["baseline-entries-publication-receipt",
+    "baseline-header-parameters", "stable-runtime-identity-and-version",
+    "outer-write-ledger", "cancellation"]),
+  beforeSequenceZero: Object.freeze(["baseline-header-publication-receipt",
+    "operation-sequence-zero-parameters", "provider-authoritative-outer-clock-evidence",
+    "outer-write-ledger", "cancellation"]),
+  initialStageAdoptionValidation: Object.freeze(["outer-publication-authority",
+    "b2-exact-object-graph", "transaction-generation", "post-ddl-catalog-fence",
+    "initial-write-receipt-order-and-predecessors",
+    "total-changes-and-outer-ledger-watermarks", "cancellation"]),
+  initialStageAdoptionAtomicConsume: Object.freeze(["complete-bundle-validation",
+    "four-receipt-atomic-consumption", "four-consumed-receipt-tombstones",
+    "update-stage-watermarks-and-retire-old-b2-fence", "stage-adoption-receipt-mint"]),
   beforeCursorRebind: Object.freeze(["publication-session", "migration-lock-freshness",
     "transaction-generation", "post-0002-catalog-fence", "cancellation"]),
-  afterStatementStarted: Object.freeze(["permanent-write-ledger", "statement-result-shape",
-    "rule-11-count", "rule-12-seal", "cancellation", "cleanup"]),
+  afterStatementStarted: Object.freeze(["sqlite-error-or-statement-result-shape",
+    "affected-row-count", "total-changes-delta", "permanent-write-ledger-delta",
+    "cancellation", "cleanup"]),
   afterCommitReturned: Object.freeze(["complete-v2-reopen-audit", "cleanup"]),
 });
 const EXACT_MUTABLE_FIELDS = Object.freeze(["descriptor_hash", "schema_identity_sha256"]);
@@ -94,7 +151,14 @@ const EXACT_AUTHORITY_OBJECTS = Object.freeze([
   "baselineTempStage", "sqliteConnection", "migrationLockCapability",
   "providerClockCapability", "outerClockEvidence", "preRebindClockEvidence",
   "preVerificationClockEvidence", "preCommitClockEvidence",
-  "outerPublicationAuthority", "postDdlCatalogFence", "stageAdoptionReceipt",
+  "outerPublicationAuthority", "outerClockEvidenceConsumedTombstone", "postDdlCatalogFence",
+  "postDdlPublicationReaderLease",
+  "migration0002CatalogRebuildReceipt", "baselineEntriesPublicationReceipt",
+  "baselineHeaderPublicationReceipt", "operationSequenceZeroPublicationReceipt",
+  "migration0002CatalogRebuildConsumedTombstone",
+  "baselineEntriesPublicationConsumedTombstone",
+  "baselineHeaderPublicationConsumedTombstone",
+  "operationSequenceZeroPublicationConsumedTombstone", "stageAdoptionReceipt",
   "publicationSession", "cursorClockCapability", "migrationLineagePublicationReceipt",
   "schemaDescriptorMetadataPublicationReceipt", "publicationRulesReceipt",
   "freshV2CatalogReceipt", "physicalSemanticPostconditionsReceipt",
@@ -103,14 +167,335 @@ const EXACT_AUTHORITY_OBJECTS = Object.freeze([
 const EXACT_OUTER_COMMITMENTS = Object.freeze([
   "b2-exact-object-graph", "migration-lock-capability-object-identity",
   "migration-lock-active-expires-at-ms", "provider-clock-capability-object-identity",
-  "outer-clock-evidence-object-identity", "outer-provider-now-ms",
+  "outer-clock-evidence-object-identity",
+  "outer-clock-evidence-consumed-tombstone-object-identity", "outer-provider-now-ms",
+  "sqlite-connection-object-identity", "unchanged-begin-exclusive-transaction-lineage",
   "transaction-generation", "source-identities",
   "expected-target-identities", "expected-target-catalog", "outer-write-ledger",
 ]);
+const EXACT_OUTER_AUTHORITY = Object.freeze({
+  opaque: true,
+  moduleMinted: true,
+  mintedOnce: true,
+  nonTransferable: true,
+  cloneRejected: true,
+  crossRunSubstitutionRejected: true,
+  reusableWithinExactAuthorityGraph: true,
+  notConsumedByWritesOrAdoption: true,
+  retiredBy: Object.freeze(["commit-returned", "rollback", "poison", "disposal"]),
+  authorizesExpectedTargetCatalog: true,
+  ownsOuterMigrationWriteLedger: true,
+  doesNotAuthorizeCursorRebind: true,
+  consumesOuterClockEvidenceReceiptExactlyOnce: true,
+  requiredCommitments: EXACT_OUTER_COMMITMENTS,
+  mintLifecycle: Object.freeze({
+    validatesAndRegistersInactiveAuthorityBeforeAnyReceiptConsumption: true,
+    presentationFailureConsumesAnyReceipt: false,
+    presentationFailureMayRetryWithSameExactEvidence: true,
+    nonInterruptibleAtomicTail: Object.freeze([
+      "consume-outer-clock-evidence-once",
+      "mint-outer-clock-evidence-consumed-tombstone",
+      "publish-b2-stage-transfer-prepared-state",
+      "activate-outer-publication-authority",
+    ]),
+    faultInjectionForbiddenAfterAtomicTailBegins: true,
+    failureAfterAtomicTailBeginsPoisonsAndRequiresRollbackAndFreshGraph: true,
+  }),
+});
 const EXACT_ADOPTION_RECEIPTS = Object.freeze([
   "migration-0002-catalog-rebuild-receipt", "baseline-entries-publication-receipt",
   "baseline-header-publication-receipt", "operation-sequence-zero-publication-receipt",
 ]);
+const EXACT_INITIAL_WRITE_RECEIPT_COMMON_COMMITMENTS = Object.freeze([
+  "write-kind", "normalized-sql-or-repository-asset-sha256",
+  "canonical-parameter-digest-with-domain-separation",
+  "canonical-result-digest-with-domain-separation", "predecessor-receipt-object-identity",
+  "sqlite-connection-object-identity", "unchanged-begin-exclusive-transaction-lineage",
+  "outer-publication-authority-object-identity", "prepare-count", "execute-count",
+  "affected-row-count", "total-changes-before-after-delta",
+  "outer-ledger-logical-write-sequence-before-after-and-delta",
+  "outer-ledger-fixed-statement-count-before-after-and-delta",
+  "outer-ledger-affected-rows-watermark-before-after-and-delta",
+]);
+const EXACT_INITIAL_WRITE_RECEIPT_CONTRACT = Object.freeze({
+  opaqueModuleMintedSingleUse: true,
+  cloneRejected: true,
+  substitutionRejected: true,
+  crossRunReplayRejected: true,
+  order: EXACT_ADOPTION_RECEIPTS,
+  requiredCommonCommitments: EXACT_INITIAL_WRITE_RECEIPT_COMMON_COMMITMENTS,
+  canonicalDigestCodec: Object.freeze({
+    parameterDomainUtf8: "graph-engineering/sqlite-initial-write-parameters/v1\0",
+    resultDomainUtf8: "graph-engineering/sqlite-initial-write-result/v1\0",
+    algorithm: "sha256-domain-utf8-plus-canonical-json-utf8",
+    canonicalJsonProfile:
+      "graph-engineering/canonical-json/v1alpha1-unicode-code-point-key-order",
+    domainConcatenation:
+      "domain-utf8-bytes-followed-immediately-by-canonical-json-utf8-no-delimiter",
+    parameterPayload: "exact-order-array-of-tagged-scalars",
+    allowedScalarEncodings: Object.freeze([
+      "text-utf8", "integer-decimal", "blob-base64url", "null",
+    ]),
+    textEncoding: "tagged-object-type-text-utf8-unchanged-unicode-scalars-no-normalization",
+    integerEncoding: "tagged-object-type-integer-decimal-canonical-minus-zero-forbidden",
+    blobEncoding: "tagged-object-type-blob-unpadded-rfc4648-section-5-base64url",
+    nullEncoding: "tagged-object-type-null-no-value-field",
+    taggedScalarShapes: Object.freeze({
+      text: Object.freeze({
+        exactKeysInCanonicalOrder: Object.freeze(["type", "value"]),
+        typeLiteral: "text",
+        valueEncoding: "unchanged-unicode-scalar-string",
+      }),
+      integer: Object.freeze({
+        exactKeysInCanonicalOrder: Object.freeze(["type", "value"]),
+        typeLiteral: "integer",
+        valueEncoding: "canonical-decimal-string-negative-zero-forbidden",
+      }),
+      blob: Object.freeze({
+        exactKeysInCanonicalOrder: Object.freeze(["type", "value"]),
+        typeLiteral: "blob",
+        valueEncoding: "unpadded-rfc4648-section-5-base64url",
+      }),
+      null: Object.freeze({
+        exactKeysInCanonicalOrder: Object.freeze(["type"]),
+        typeLiteral: "null",
+        valueMemberForbidden: true,
+      }),
+    }),
+    parameterArrayOrder: "exact-parameter-order",
+    resultPayload: "affected-rows-decimal-string",
+    resultObjectShape: Object.freeze({
+      exactKeysInCanonicalOrder: Object.freeze(["affectedRows"]),
+      affectedRowsEncoding: "canonical-nonnegative-decimal-string",
+      aggregation: "complete-logical-receipt-aggregate-not-per-execution-array",
+    }),
+    affectedRowsDecimalPattern: "^(0|[1-9][0-9]*)$",
+    lastInsertRowidIncluded: false,
+  }),
+  runtimeIdentityByRuntime: Object.freeze({
+    typescript: Object.freeze({
+      creationRuntime: "graph-engineering-typescript",
+      creationRuntimeVersion: "0.1.0-alpha.1",
+    }),
+    python: Object.freeze({
+      creationRuntime: "graph-engineering-python",
+      creationRuntimeVersion: "0.1.0a1",
+    }),
+  }),
+  predecessorChain: Object.freeze({
+    migration0002CatalogRebuildReceipt: "outer-publication-authority",
+    baselineEntriesPublicationReceipt:
+      "migration-0002-catalog-rebuild-receipt-and-post-ddl-catalog-fence",
+    baselineHeaderPublicationReceipt: "baseline-entries-publication-receipt",
+    operationSequenceZeroPublicationReceipt: "baseline-header-publication-receipt",
+  }),
+  migration0002CatalogRebuildReceipt: Object.freeze({
+    repositoryAssetSha256: EXACT_IDENTITIES.migrationSqlSha256,
+    logicalAssetExecutionCount: 1,
+    logicalPrepareCount: 20,
+    logicalPrepareCountSemantics:
+      "one-logical-prepare-per-fixed-asset-statement-independent-of-adapter-api-call-count",
+    fixedAssetStatementCount: 20,
+    adapterApiCallCountCrossRuntimeEqualityRequired: false,
+    schemaCopyRowCountFormula: "1",
+    legacyOperationCopyRowCountFormula: "projection.legacyOperationCount",
+    affectedRowCountFormula: "1 + projection.legacyOperationCount",
+    totalChangesDeltaFormula: "affected-row-count",
+    outerLedgerLogicalWriteSequenceDelta: 1,
+    outerLedgerFixedStatementCountDelta: 20,
+    outerLedgerAffectedRowsDeltaFormula: "1 + projection.legacyOperationCount",
+    requiredCommitments: Object.freeze([
+      "exact-repository-asset-bytes-and-sha256",
+      "preview-manifest-object-and-sha256-identities", "schema-copy-row-count",
+      "legacy-operation-copy-row-count", "application-id-before-and-after",
+      "user-version-before-and-after", "pre-ddl-physical-catalog-digest",
+      "post-ddl-physical-catalog-digest",
+    ]),
+  }),
+  baselineEntriesPublicationReceipt: Object.freeze({
+    sourceReadSql: "SELECT kind_rank, entry_kind, key_blob, state_blob FROM temp.ge_blr_stage ORDER BY kind_rank ASC, key_blob ASC",
+    sourceReadSqlSha256: "adae52750ecd70a75090b52de7d60763eea144c1383cf4739df9d8e8a6b2357f",
+    sourceReadParameterOrder: Object.freeze([]),
+    sourceReadRowShape: Object.freeze(["kindRank", "entryKind", "keyBlob", "stateBlob"]),
+    insertSql: "INSERT INTO main.ge_cycle_operation_baseline_entries (baseline_id, ordinal, entry_kind, entry_key_blob, entry_state_blob, previous_entry_hash, entry_hash) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    insertSqlSha256: "b522e3ee2bb4599d74b32c8602242b1b74c3f804dd9129a8eb5a0f529cdca88b",
+    parameterOrder: Object.freeze([
+      "baselineId", "ordinal", "entryKind", "entryKeyBlob", "entryStateBlob",
+      "previousEntryHash", "entryHash",
+    ]),
+    resultShape: "sqlite-run-changes-exactly-one-no-returning-rows",
+    prepareCount: 1,
+    executeCountFormula: "projection.entryCount",
+    affectedRowCountFormula: "projection.entryCount",
+    totalChangesDeltaFormula: "projection.entryCount",
+    outerLedgerLogicalWriteSequenceDelta: 1,
+    outerLedgerFixedStatementCountDeltaFormula: "projection.entryCount",
+    outerLedgerAffectedRowsDeltaFormula: "projection.entryCount",
+    requiredCommitments: Object.freeze([
+      "baseline-id", "entry-count", "ordered-temp-stage-scan-sql-identity-and-sha256",
+      "fixed-baseline-entry-insert-sql-identity-and-sha256",
+      "ordinal-and-entry-hash-continuity", "first-entry-hash", "final-root-hash",
+      "projection-reference-object-identity",
+    ]),
+  }),
+  baselineHeaderPublicationReceipt: Object.freeze({
+    insertSql: "INSERT INTO main.ge_cycle_operation_baselines (baseline_id, baseline_format_version, source_application_id, source_user_version, source_schema_identity_sha256, source_migration_lineage_id, source_migration_lineage_sha256, source_descriptor_hash, captured_at_ms, legacy_operation_count, entry_count, first_entry_hash, final_entry_hash, canonical_projection_sha256, creation_runtime, creation_runtime_version, policy_blob) VALUES (?, 1, 1195724359, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    insertSqlSha256: "b1a32ec385dd78f9727a63b9c303a9cb95c9525910010984d09b7f0fd868e79a",
+    parameterOrder: Object.freeze([
+      "baselineId", "sourceSchemaIdentitySha256", "sourceMigrationLineageId",
+      "sourceMigrationLineageSha256", "sourceDescriptorHash", "capturedAtMs",
+      "legacyOperationCount", "entryCount", "firstEntryHash", "finalEntryHash",
+      "canonicalProjectionSha256", "creationRuntime", "creationRuntimeVersion", "policyBlob",
+    ]),
+    resultShape: "sqlite-run-changes-exactly-one-no-returning-rows",
+    prepareCount: 1,
+    executeCount: 1,
+    affectedRowCountFormula: "1",
+    totalChangesDeltaFormula: "1",
+    outerLedgerLogicalWriteSequenceDelta: 1,
+    outerLedgerFixedStatementCountDelta: 1,
+    outerLedgerAffectedRowsDelta: 1,
+    creationRuntimeSource: "runtime-owned-stable-runtime-identity",
+    creationRuntimeVersionSource: "runtime-owned-stable-runtime-version",
+    callerOrAmbientInterpreterIdentityAllowed: false,
+    requiredCommitments: Object.freeze([
+      "baseline-id", "entry-count", "legacy-operation-count",
+      "projection-reference-object-identity", "first-entry-hash", "final-root-hash",
+      "creation-runtime", "creation-runtime-version", "policy-blob-bytes-and-sha256",
+    ]),
+  }),
+  operationSequenceZeroPublicationReceipt: Object.freeze({
+    insertSql: "INSERT INTO main.ge_cycle_operation_sequence (singleton, baseline_id, last_commit_sequence, baseline_captured_at_ms, updated_at_ms) VALUES (1, ?, 0, ?, ?)",
+    insertSqlSha256: "a9afde17c90fcc7381eefa3fa81823752d6f1bc29c9eced2de8b31176cc1dd85",
+    parameterOrder: Object.freeze(["baselineId", "baselineCapturedAtMs", "updatedAtMs"]),
+    resultShape: "sqlite-run-changes-exactly-one-no-returning-rows",
+    prepareCount: 1,
+    executeCount: 1,
+    affectedRowCountFormula: "1",
+    totalChangesDeltaFormula: "1",
+    outerLedgerLogicalWriteSequenceDelta: 1,
+    outerLedgerFixedStatementCountDelta: 1,
+    outerLedgerAffectedRowsDelta: 1,
+    updatedAtMsSource: "provider-authoritative-outer-clock-evidence",
+    requiredLastCommitSequence: 0,
+    requiredCommitments: Object.freeze([
+      "baseline-id", "last-commit-sequence-zero",
+      "baseline-captured-at-ms-from-b2-projection", "updated-at-ms",
+      "outer-clock-evidence-receipt-object-identity", "outer-provider-now-ms",
+    ]),
+  }),
+});
+const EXACT_POST_DDL_CATALOG_FENCE = Object.freeze({
+  opaque: true,
+  moduleMinted: true,
+  mintedOnce: true,
+  cloneRejected: true,
+  substitutionRejected: true,
+  crossRunOrPostRetirementReplayRejected: true,
+  repeatedExactPresentationWithinLiveAuthorityGraphAllowed: true,
+  reusableAsExactProofWithinAuthorityGraph: true,
+  consumesAnyWriteReceipt: false,
+  proofScope: "post-0002-physical-target-catalog-before-baseline-publication",
+  mintedAfterMigration0002BeforeBaselineDml: true,
+  isFinalV2SemanticProof: false,
+  requiredCommitments: Object.freeze([
+    "sqlite-connection-object-identity", "unchanged-begin-exclusive-transaction-lineage",
+    "outer-publication-authority-object-identity",
+    "migration-0002-catalog-rebuild-receipt-object-identity",
+    "current-runtime-private-internal-epoch", "total-changes-watermark",
+    "outer-write-ledger-watermark", "sqlite-schema-canonical-digest", "application-id",
+    "user-version", "expected-complete-target-physical-catalog-inventory",
+  ]),
+});
+const EXACT_POST_DDL_PUBLICATION_READER_LEASE = Object.freeze({
+  opaque: true,
+  moduleMinted: true,
+  mintedOnce: true,
+  cloneRejected: true,
+  substitutionRejected: true,
+  replayRejected: true,
+  permitsOnlyFixedOrderedTempSelect: true,
+  permanentWriteAuthority: false,
+  consumesAnyWriteReceipt: false,
+  maximumConcurrentReaders: 1,
+  exactCursorCloseCountAfterOwnershipBegins: 1,
+  cancellationClosesCursorBeforeCleanup: true,
+  rederivesOrdinalAndEntryHashChainEqualExactProjection: true,
+  mayAdoptOnlyReadProofWatermarks: true,
+  mayMintStageAdoptionReceipt: false,
+  activeReaderForbiddenAtStageAdoption: true,
+  readerLifecycle: Object.freeze({
+    states: Object.freeze([
+      "minted-unused", "reader-active", "reader-closed", "retired", "poisoned",
+    ]),
+    cursorOwnershipBeginsAt: "successful-fixed-source-read-execute-return",
+    prepareOrExecuteFailureBeforeCursorOwnershipCloseCount: 0,
+    normalCancellationOrPrimaryFailureAfterOwnershipCloseCount: 1,
+    successfulCloseRetiresLease: true,
+    secondReaderOpenRejected: true,
+    reuseAfterCloseRejected: true,
+    closeFailurePoisonsAndRequiresRollback: true,
+    primaryFailurePrecedesCloseFailure: true,
+    closeFailurePrecedesCancellationAndOuterCleanup: true,
+    cancellationObservedAfterRequiredCloseAttempt: true,
+  }),
+  requiredCommitments: Object.freeze([
+    "b2-exact-object-graph", "outer-publication-authority-object-identity",
+    "migration-0002-catalog-rebuild-receipt-object-identity",
+    "post-ddl-catalog-fence-object-identity", "sqlite-connection-object-identity",
+    "unchanged-begin-exclusive-transaction-lineage",
+    "fixed-source-read-sql-identity-and-sha256", "current-runtime-private-read-proof-epoch",
+    "total-changes-and-outer-write-ledger-read-watermarks",
+    "exact-projection-reference-object-identity",
+  ]),
+});
+const EXACT_STAGE_ADOPTION_RECEIPT = Object.freeze({
+  opaque: true,
+  moduleMinted: true,
+  mintedOnce: true,
+  cloneRejected: true,
+  substitutionRejected: true,
+  crossRunOrPostRetirementReplayRejected: true,
+  repeatedExactPresentationWithinLiveAuthorityGraphAllowed: true,
+  reusableAsExactProofWithinAuthorityGraph: true,
+  requiredCommitments: Object.freeze([
+    "b2-pre-rebind-receipt-object-identity", "b2-projection-reference-object-identity",
+    "b2-stage-ownership-transfer-object-identity", "b2-baseline-temp-stage-object-identity",
+    "sqlite-connection-object-identity", "unchanged-begin-exclusive-transaction-lineage",
+    "outer-publication-authority-object-identity", "post-ddl-catalog-fence-object-identity",
+    "four-original-initial-write-receipt-object-identities",
+    "four-consumed-initial-write-receipt-tombstone-identities",
+    "current-adopted-runtime-private-internal-epoch",
+    "total-changes-and-outer-write-ledger-watermarks", "target-physical-catalog-digest",
+    "retired-b2-v1-catalog-and-change-fence-object-identity",
+  ]),
+});
+const EXACT_INITIAL_STAGE_ADOPTION_SEMANTICS = Object.freeze({
+  packagePrivateIntrinsic: true,
+  callerConstructedReceiptsAllowed: false,
+  adoptsAfterOuterWrites: true,
+  requiredOuterWriteReceipts: EXACT_ADOPTION_RECEIPTS,
+  requiresExactOuterPublicationAuthority: true,
+  requiresExactPostDdlCatalogFence: true,
+  requiresStatementIdentityAndAffectedCountLedger: true,
+  requiresTotalChangesDeltaEquality: true,
+  retiresOnlyB2V1CatalogAndChangeFence: true,
+  preservesPostDdlCatalogFence: true,
+  mintsStageAdoptionReceiptOnce: true,
+  consumesRequiredOuterWriteReceiptsExactlyOnce: true,
+  validatesCompleteBundleBeforeAnyConsumption: true,
+  faultInjectionForbiddenAfterAtomicConsumptionBegins: true,
+  failedBundleValidationConsumesAnyReceipt: false,
+  failedBundleMayRetryWithSameExactBundle: true,
+  presentationFailureRetryRequiresCorrectedCompleteBundle: true,
+  authorityLineageLockCatalogOrLedgerFailurePoisonsAndRollsBack: true,
+  mintsConsumedReceiptTombstones: Object.freeze([
+    "migration-0002-catalog-rebuild-consumed-tombstone",
+    "baseline-entries-publication-consumed-tombstone",
+    "baseline-header-publication-consumed-tombstone",
+    "operation-sequence-zero-publication-consumed-tombstone",
+  ]),
+});
 const EXACT_COMMITMENTS = Object.freeze([
   "receipt-object-identity", "projection-object-identity", "stage-object-identity",
   "connection-object-identity", "transaction-generation", "migration-lock-id",
@@ -154,9 +539,55 @@ const EXACT_HOSTILE = Object.freeze([
   "audit-receipt-second-consumption", "missing-consumed-audit-tombstone",
   "outer-write-receipt-second-consumption", "missing-consumed-outer-write-tombstone",
   "outer-clock-evidence-receipt-unconsumed",
+  "outer-clock-consumed-tombstone-missing",
+  "cancellation-before-outer-authority-atomic-tail",
+  "fault-injection-during-outer-authority-atomic-tail",
   "initial-write-receipt-second-consumption",
   "initial-write-receipt-partial-consumption-on-failed-bundle",
   "missing-initial-write-consumed-tombstone",
+  "outer-publication-authority-clone", "outer-publication-authority-substitution",
+  "outer-publication-authority-cross-run-replay",
+  "outer-publication-authority-use-after-retirement",
+  "outer-publication-authority-consumed-by-write",
+  "migration-0002-repository-asset-byte-drift",
+  "migration-0002-repository-asset-hash-drift", "migration-0002-partial-execution",
+  "migration-0002-second-execution", "migration-0002-affected-row-formula-disagreement",
+  "migration-0002-total-changes-formula-disagreement",
+  "migration-0002-outer-ledger-formula-disagreement", "post-ddl-catalog-fence-clone",
+  "post-ddl-catalog-fence-substitution", "post-ddl-catalog-fence-early-mint",
+  "post-ddl-catalog-fence-digest-disagreement",
+  "post-ddl-catalog-query-row-encoding-or-inventory-drift", "initial-write-receipt-missing",
+  "initial-write-receipt-reordered", "initial-write-receipt-duplicate",
+  "initial-write-receipt-clone", "initial-write-receipt-wrong-predecessor",
+  "initial-write-receipt-wrong-authority", "initial-write-receipt-wrong-lineage",
+  "initial-write-receipt-wrong-connection", "initial-write-parameter-digest-drift",
+  "baseline-entry-parameter-execution-framing-drift", "initial-write-result-digest-drift",
+  "baseline-header-duplicate-execution", "baseline-header-caller-runtime-identity",
+  "baseline-header-ambient-interpreter-version",
+  "operation-sequence-zero-duplicate-execution",
+  "operation-sequence-zero-caller-timestamp", "stage-adoption-receipt-clone",
+  "stage-adoption-receipt-cross-run-or-post-retirement-replay",
+  "stage-adoption-receipt-substitution", "cancellation-before-stage-adoption-atomic-consume",
+  "fault-injection-during-stage-adoption-atomic-consume",
+  "initial-write-receipt-substitution", "initial-write-receipt-cross-run-replay",
+  "post-ddl-catalog-fence-cross-run-or-post-retirement-replay",
+  "post-ddl-publication-reader-lease-clone",
+  "post-ddl-publication-reader-lease-substitution",
+  "post-ddl-publication-reader-lease-cross-run-replay",
+  "post-ddl-publication-reader-lease-sql-drift",
+  "post-ddl-publication-reader-lease-order-drift",
+  "post-ddl-publication-reader-lease-projection-mismatch",
+  "post-ddl-publication-reader-second-open",
+  "post-ddl-publication-reader-cursor-leak-at-adoption",
+  "post-ddl-publication-reader-cancellation-close-failure",
+  "post-ddl-publication-reader-prepare-failure-close-count-drift",
+  "post-ddl-publication-reader-close-failure-not-poisoned",
+  "post-ddl-publication-reader-reuse-after-close",
+  "stage-adoption-reader-lease-terminal-proof-missing",
+  "baseline-entry-insert-sql-hash-drift", "baseline-entry-partial-execution",
+  "initial-publication-parity-array-wrong-length",
+  "initial-publication-parity-array-order-swapped",
+  "initial-publication-parity-array-non-integer",
   "rollback-and-rebegin",
   "post-0002-catalog-drift", "unexplained-permanent-write", "affected-count-minus-one",
   "affected-count-plus-one", "total-changes-disagreement", "write-ledger-disagreement",
@@ -174,6 +605,51 @@ const EXACT_PARITY = Object.freeze([
   "npm-wheel-sdist-asset-byte-parity", "pre-commit-crash-reopens-v1",
   "post-commit-crash-reopens-v2",
 ]);
+const EXACT_INITIAL_PUBLICATION_PARITY_OUTPUT = Object.freeze({
+  orderedFields: Object.freeze([
+    "caseId", "outcome", "failureBoundary", "state", "poisoned",
+    "providerClockReadCount", "clockEvidenceConsumeCount", "outerAuthorityMintCount",
+    "perWritePrepareCounts", "perWriteExecuteCounts", "perWriteAffectedRowCounts",
+    "perWriteTotalChangesDeltas", "outerLedgerLogicalWriteSequence",
+    "outerLedgerFixedStatementCount", "outerLedgerAffectedRowsWatermark",
+    "postDdlCatalogFenceMintCount", "readerLeaseMintCount", "readerLeaseCloseCount",
+    "initialWriteReceiptMintCount", "initialWriteReceiptConsumeCount",
+    "initialWriteReceiptTombstoneCount", "stageAdoptionReceiptMintCount",
+    "bundleRetryable", "sameTransactionLineage", "catalogFenceMatches",
+    "cursorRebindPrepareCount", "cursorRebindExecuteCount", "commitCount",
+  ]),
+  excludedFields: Object.freeze([
+    "opaqueObjectAddresses", "runtimePrivateInternalEpochValues", "adapterApiCallCounts",
+  ]),
+  requiresRealHookInstrumentation: true,
+  counterSelfProbe: Object.freeze({
+    providerClockReadCount: 1,
+    clockEvidenceConsumeCount: 1,
+    outerAuthorityMintCount: 1,
+  }),
+  fourWriteArrayContract: Object.freeze({
+    exactOrder: EXACT_ADOPTION_RECEIPTS,
+    exactLength: 4,
+    elementType: "nonnegative-safe-integer",
+    coveredFields: Object.freeze([
+      "perWritePrepareCounts", "perWriteExecuteCounts", "perWriteAffectedRowCounts",
+      "perWriteTotalChangesDeltas",
+    ]),
+    successfulPrepareCounts: Object.freeze([20, 1, 1, 1]),
+    successfulExecuteCountFormulas: Object.freeze([
+      "1", "projection.entryCount", "1", "1",
+    ]),
+    successfulAffectedRowCountFormulas: Object.freeze([
+      "1 + projection.legacyOperationCount", "projection.entryCount", "1", "1",
+    ]),
+    successfulTotalChangesDeltaFormulas: Object.freeze([
+      "1 + projection.legacyOperationCount", "projection.entryCount", "1", "1",
+    ]),
+    failureCaseEncoding:
+      "actual-real-hook-counts-for-all-four-slots-with-unreached-slots-zero",
+  }),
+  preRebindCasesRequireZeroCursorRebindAndCommitCounts: true,
+});
 const EXACT_FAULTS = Object.freeze([
   "before-outer-publication-authority", "after-outer-publication-authority", "after-0002",
   "after-baseline-first-entry", "after-baseline-middle-entry", "after-baseline-last-entry",
@@ -185,7 +661,10 @@ const EXACT_FAULTS = Object.freeze([
 ]);
 const EXACT_CANCELLATION_LABELS = Object.freeze([
   "before-outer-authority", "before-0002", "after-post-ddl-fence",
-  "before-cursor-session", "before-rebind-prepare", "before-rebind-execute",
+  "before-baseline-reader-prepare", "before-baseline-reader-first-fetch",
+  "before-baseline-reader-next-fetch", "before-baseline-reader-finish",
+  "before-initial-stage-adoption", "before-cursor-session", "before-rebind-prepare",
+  "before-rebind-execute",
   "after-rebind-execute", "before-rule-11", "before-main-key-count-prepare",
   "before-main-key-count-first-fetch", "before-main-key-count-next-fetch",
   "before-main-key-count-finish", "before-key-driver-prepare",
@@ -194,6 +673,7 @@ const EXACT_CANCELLATION_LABELS = Object.freeze([
   "after-point-lookup-fetch", "before-rule-12-finish", "before-cursor-clock-complete",
 ]);
 const EXACT_STATEMENT_BOUNDARIES = Object.freeze([
+  "baseline-reader-prepare", "baseline-reader-fetch", "baseline-reader-finalize",
   "rebind-prepare", "rebind-execute", "rebind-finalize", "changes-prepare",
   "changes-fetch", "changes-finalize", "main-key-count-prepare", "main-key-count-fetch",
   "main-key-count-finalize",
@@ -201,7 +681,8 @@ const EXACT_STATEMENT_BOUNDARIES = Object.freeze([
   "point-lookup-execute", "point-lookup-fetch", "point-lookup-finalize",
 ]);
 const EXACT_CLEANUP_FAULTS = Object.freeze([
-  "rebind-finalize-failure", "changes-finalize-failure", "main-key-count-finalize-failure",
+  "baseline-reader-finalize-failure", "rebind-finalize-failure",
+  "changes-finalize-failure", "main-key-count-finalize-failure",
   "key-driver-finalize-failure", "point-lookup-finalize-failure",
   "temp-carrier-disposal-failure", "primary-plus-cleanup-failure",
 ]);
@@ -226,6 +707,23 @@ const EXACT_CANCELLATION_SEMANTICS = Object.freeze({
   rebindStartedPrimaryBeforeCancellation: Object.freeze([
     "statement-release", "changes-result", "write-ledger", "rule-11",
   ]),
+  baselineReaderRowStartedPrimaryBeforeCancellation: Object.freeze([
+    "decode-current-baseline-row", "validate-order-and-projection",
+    "advance-rederived-hash-chain",
+  ]),
+  baselineReaderBeforeFetchCancellation: Object.freeze([
+    "close-baseline-reader-cursor", "clear-baseline-reader-ownership",
+    "observe-cancellation",
+  ]),
+  baselineReaderTerminalPrimaryBeforeCancellation: Object.freeze([
+    "prove-terminal-row-count", "prove-final-entry-root", "close-baseline-reader-cursor",
+    "clear-baseline-reader-ownership",
+  ]),
+  baselineReaderCloseFailurePrecedence: Object.freeze([
+    "earlier-prepare-fetch-decode-order-projection-or-terminal-primary",
+    "baseline-reader-close-failure", "cancellation", "temp-or-outer-cleanup-failure",
+  ]),
+  baselineReaderCancellationClosesCursorBeforeTempCleanup: true,
   mainKeyCountRowStartedPrimaryBeforeCancellation: Object.freeze([
     "decode-current-main-key", "validate-current-main-key", "increment-main-key-count",
   ]),
@@ -270,20 +768,270 @@ export class CursorPublicationContractError extends Error {
 function fail(code, message) { throw new CursorPublicationContractError(code, message); }
 function sha256(value) { return createHash("sha256").update(value).digest("hex"); }
 export function normalizeSql(sql) { return sql.trim().replace(/[\t\n\v\f\r ]+/gu, " "); }
-function canonicalize(value) {
-  if (Array.isArray(value)) return value.map(canonicalize);
-  if (value !== null && typeof value === "object") {
-    return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonicalize(value[key])]));
+function assertUnicodeScalarString(value) {
+  for (let index = 0; index < value.length; index += 1) {
+    const codeUnit = value.charCodeAt(index);
+    if (codeUnit >= 0xD800 && codeUnit <= 0xDBFF) {
+      const next = value.charCodeAt(index + 1);
+      if (!(next >= 0xDC00 && next <= 0xDFFF)) {
+        fail("GE_CURSOR_B3_CANONICAL_UNICODE", "canonical JSON contains an unpaired high surrogate");
+      }
+      index += 1;
+    } else if (codeUnit >= 0xDC00 && codeUnit <= 0xDFFF) {
+      fail("GE_CURSOR_B3_CANONICAL_UNICODE", "canonical JSON contains an unpaired low surrogate");
+    }
   }
   return value;
 }
+function compareUnicodeCodePointSequences(left, right) {
+  const leftIterator = left[Symbol.iterator]();
+  const rightIterator = right[Symbol.iterator]();
+  while (true) {
+    const leftEntry = leftIterator.next();
+    const rightEntry = rightIterator.next();
+    if (leftEntry.done || rightEntry.done) {
+      if (leftEntry.done && rightEntry.done) return 0;
+      return leftEntry.done ? -1 : 1;
+    }
+    const difference = leftEntry.value.codePointAt(0) - rightEntry.value.codePointAt(0);
+    if (difference !== 0) return difference;
+  }
+}
+function canonicalize(value) {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (value !== null && typeof value === "object") {
+    const keys = Object.keys(value);
+    for (const key of keys) assertUnicodeScalarString(key);
+    return Object.fromEntries(keys.sort(compareUnicodeCodePointSequences)
+      .map((key) => [key, canonicalize(value[key])]));
+  }
+  if (typeof value === "string") return assertUnicodeScalarString(value);
+  return value;
+}
+assert.equal(
+  JSON.stringify(canonicalize({ "😀": "non-bmp", "": "bmp-private-use" })),
+  "{\"\":\"bmp-private-use\",\"😀\":\"non-bmp\"}",
+  "canonical JSON keys must be ordered by Unicode code point",
+);
+assert.throws(
+  () => canonicalize({ "\uD800": "unpaired-key" }),
+  (error) => error instanceof CursorPublicationContractError
+    && error.code === "GE_CURSOR_B3_CANONICAL_UNICODE",
+  "canonical JSON must reject unpaired surrogate keys",
+);
+assert.throws(
+  () => canonicalize("\uDC00"),
+  (error) => error instanceof CursorPublicationContractError
+    && error.code === "GE_CURSOR_B3_CANONICAL_UNICODE",
+  "canonical JSON must reject unpaired surrogate values",
+);
 function fixtureDigest(value) {
   const copy = structuredClone(value);
   copy.parityGates.fixtureCanonicalSha256 = "0".repeat(64);
-  return sha256(JSON.stringify(canonicalize(copy)));
+  return domainSeparatedCanonicalDigest(TRUSTED_FIXTURE_DOMAIN, copy);
+}
+function canonicalObjectDigest(value) {
+  return sha256(JSON.stringify(canonicalize(value)));
+}
+function domainSeparatedCanonicalDigest(domain, value) {
+  return sha256(Buffer.concat([
+    Buffer.from(domain, "utf8"),
+    Buffer.from(JSON.stringify(canonicalize(value)), "utf8"),
+  ]));
 }
 function exact(actual, expected, code, message) {
   if (JSON.stringify(actual) !== JSON.stringify(expected)) fail(code, message);
+}
+function exactDigest(actual, expectedDigest, code, message) {
+  if (canonicalObjectDigest(actual) !== expectedDigest) fail(code, message);
+}
+
+function validateGoldenDigestVectors(codec) {
+  const expectedIds = [
+    "one-empty-execution", "one-mixed-execution", "two-executions",
+    "integer-signed-64-minimum", "integer-signed-64-maximum",
+    "result-zero", "result-three",
+  ];
+  exact(codec.goldenVectors.map(({ id }) => id), expectedIds,
+    "GE_CURSOR_B3_INITIAL_WRITE_RECEIPTS", "canonical digest vector order drifted");
+  for (const vector of codec.goldenVectors) {
+    const domain = vector.kind === "parameters" ? codec.parameterDomainUtf8 : codec.resultDomainUtf8;
+    if (sha256(Buffer.concat([
+      Buffer.from(domain, "utf8"), Buffer.from(vector.canonicalJson, "utf8"),
+    ])) !== vector.sha256) {
+      fail("GE_CURSOR_B3_INITIAL_WRITE_RECEIPTS", `${vector.id} digest vector drifted`);
+    }
+    const decoded = parseStrictJson(vector.canonicalJson);
+    if (JSON.stringify(canonicalize(decoded)) !== vector.canonicalJson) {
+      fail("GE_CURSOR_B3_INITIAL_WRITE_RECEIPTS", `${vector.id} is not canonical JSON`);
+    }
+    if (vector.kind === "parameters") {
+      for (const execution of decoded) {
+        for (const scalar of execution) {
+          if (scalar.type === "integer") {
+            if (!/^(?:0|-[1-9][0-9]*|[1-9][0-9]*)$/u.test(scalar.value)) {
+              fail("GE_CURSOR_B3_INITIAL_WRITE_RECEIPTS",
+                `${vector.id} has a noncanonical integer lexeme`);
+            }
+            const integer = BigInt(scalar.value);
+            if (integer < -9223372036854775808n || integer > 9223372036854775807n) {
+              fail("GE_CURSOR_B3_INITIAL_WRITE_RECEIPTS",
+                `${vector.id} exceeds the signed 64-bit range`);
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+function validateInitialPublicationParity(parity, states) {
+  if (parity.orderedFields.length !== 28
+      || Object.keys(parity.fieldTypes).length !== 28) {
+    fail("GE_CURSOR_B3_PARITY_OUTPUT", "normalized parity output must freeze 28 fields");
+  }
+  exact(Object.keys(parity.fieldTypes), parity.orderedFields,
+    "GE_CURSOR_B3_PARITY_OUTPUT", "normalized parity field types are not ordered exactly");
+  const arrayFields = new Set(parity.fourWriteArrayContract.coveredFields);
+  const outcomes = new Set(["success", "rejected", "poisoned"]);
+  const stateSet = new Set(states);
+  for (const record of parity.expectedRecords) {
+    exact(Object.keys(record), parity.orderedFields,
+      "GE_CURSOR_B3_PARITY_OUTPUT", `${record.caseId} normalized output shape drifted`);
+    for (const field of parity.orderedFields) {
+      const type = parity.fieldTypes[field];
+      const fieldValue = record[field];
+      if (type === "non-empty-string") {
+        if (field !== "caseId" || typeof fieldValue !== "string" || fieldValue.length === 0) {
+          fail("GE_CURSOR_B3_PARITY_OUTPUT", `${record.caseId}.${field} is not a non-empty string`);
+        }
+      } else if (type === "enum-success-rejected-poisoned") {
+        if (field !== "outcome" || !outcomes.has(fieldValue)) {
+          fail("GE_CURSOR_B3_PARITY_OUTPUT", `${record.caseId}.${field} is not a valid outcome`);
+        }
+      } else if (type === "slug-or-null") {
+        if (field !== "failureBoundary"
+            || (fieldValue !== null
+              && (typeof fieldValue !== "string"
+                || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(fieldValue)))) {
+          fail("GE_CURSOR_B3_PARITY_OUTPUT", `${record.caseId}.${field} is not null or a valid slug`);
+        }
+      } else if (type === "enum-state-machine-states") {
+        if (field !== "state" || typeof fieldValue !== "string" || !stateSet.has(fieldValue)) {
+          fail("GE_CURSOR_B3_PARITY_OUTPUT", `${record.caseId}.${field} is not a state-machine state`);
+        }
+      } else if (type === "exact-four-nonnegative-safe-integers") {
+        if (!arrayFields.has(field)) {
+          fail("GE_CURSOR_B3_PARITY_OUTPUT", `${record.caseId}.${field} is not declared as a four-write field`);
+        }
+        if (!Array.isArray(fieldValue) || fieldValue.length !== 4
+            || fieldValue.some((entry) => !Number.isSafeInteger(entry) || entry < 0)) {
+          fail("GE_CURSOR_B3_PARITY_OUTPUT", `${record.caseId}.${field} is not an exact four-counter array`);
+        }
+      } else if (type === "nonnegative-safe-integer") {
+        if (!Number.isSafeInteger(fieldValue) || fieldValue < 0) {
+          fail("GE_CURSOR_B3_PARITY_OUTPUT", `${record.caseId}.${field} is not a nonnegative safe integer`);
+        }
+      } else if (type === "boolean") {
+        if (typeof fieldValue !== "boolean") {
+          fail("GE_CURSOR_B3_PARITY_OUTPUT", `${record.caseId}.${field} is not Boolean`);
+        }
+      } else {
+        fail("GE_CURSOR_B3_PARITY_OUTPUT", `${record.caseId}.${field} has an unknown field type`);
+      }
+    }
+    if (parity.preRebindCasesRequireZeroCursorRebindAndCommitCounts
+        && (record.cursorRebindPrepareCount !== 0 || record.cursorRebindExecuteCount !== 0
+          || record.commitCount !== 0)) {
+      fail("GE_CURSOR_B3_PARITY_OUTPUT", `${record.caseId} crossed the pre-rebind boundary`);
+    }
+  }
+}
+
+function validateHostileExecutionContract(value) {
+  const contract = value.hostileExecutionContract;
+  const parity = value.parityGates.initialPublicationNormalizedOutput;
+  const semanticFields = new Set([
+    "caseId", "outcome", "failureBoundary", "state", "poisoned", "bundleRetryable",
+    "sameTransactionLineage", "catalogFenceMatches",
+  ]);
+  const counterFields = parity.orderedFields.filter((field) => !semanticFields.has(field));
+  if (contract.records.length !== 145 || value.hostileObligations.length !== 145) {
+    fail("GE_CURSOR_B3_HOSTILE_EXECUTION", "hostile registry must contain 145 records");
+  }
+  if (Object.keys(contract.counterProfiles).length !== 25) {
+    fail("GE_CURSOR_B3_HOSTILE_EXECUTION", "hostile registry must define 25 counter profiles");
+  }
+  for (const [profileId, counters] of Object.entries(contract.counterProfiles)) {
+    exact(Object.keys(counters), counterFields, "GE_CURSOR_B3_HOSTILE_EXECUTION",
+      `${profileId} counter profile fields drifted`);
+    for (const field of counterFields) {
+      const counter = counters[field];
+      if (Array.isArray(counter)) {
+        if (counter.length !== 4
+            || counter.some((entry) => !Number.isSafeInteger(entry) || entry < 0)) {
+          fail("GE_CURSOR_B3_HOSTILE_EXECUTION", `${profileId}.${field} counter drifted`);
+        }
+      } else if (!Number.isSafeInteger(counter) || counter < 0) {
+        fail("GE_CURSOR_B3_HOSTILE_EXECUTION", `${profileId}.${field} counter drifted`);
+      }
+    }
+  }
+  const expanded = [];
+  for (const [index, record] of contract.records.entries()) {
+    if (record.ordinal !== index + 1 || record.id !== value.hostileObligations[index]
+        || record.hook !== `hostile/${record.id}`) {
+      fail("GE_CURSOR_B3_HOSTILE_EXECUTION", `hostile record ${index + 1} identity drifted`);
+    }
+    const profile = contract.profiles[record.expectedProfile];
+    const counterProfile = contract.counterProfiles[record.expectedCounterProfile];
+    if (profile === undefined
+        || counterProfile === undefined
+        || profile.outcome !== record.expected.outcome
+        || profile.state !== record.expected.state
+        || profile.poisoned !== record.expected.poisoned
+        || profile.bundleRetryable !== record.expected.bundleRetryable
+        || profile.commitCount !== 0) {
+      fail("GE_CURSOR_B3_HOSTILE_EXECUTION", `${record.id} profile expansion drifted`);
+    }
+    const expectedRetryProfile = {
+      "not-retryable": new Set([
+        "diagnosed-input-rejected", "precondition-rejected", "disposed-use-rejected",
+      ]),
+      "fresh-authority-graph": new Set(["poisoned-rollback-required"]),
+      "same-exact-valid-authority-evidence": new Set(["precondition-rejected"]),
+      "corrected-complete-bundle": new Set(["retryable-presentation-rejected"]),
+      "same-exact-valid-bundle": new Set(["retryable-presentation-rejected"]),
+    }[record.retryEvidenceMode];
+    if (expectedRetryProfile === undefined || !expectedRetryProfile.has(record.expectedProfile)
+        || !(record.failureBoundaryParent in EXACT_PRECEDENCE)) {
+      fail("GE_CURSOR_B3_HOSTILE_EXECUTION", `${record.id} phase/parent/retry mode drifted`);
+    }
+    expanded.push(Object.fromEntries(parity.orderedFields.map((field) => [
+      field,
+      field === "caseId" ? record.id
+        : Object.hasOwn(record.expected, field) ? record.expected[field] : counterProfile[field],
+    ])));
+  }
+  validateInitialPublicationParity({
+    ...parity,
+    expectedRecords: expanded,
+    preRebindCasesRequireZeroCursorRebindAndCommitCounts: false,
+  }, value.stateMachine.states);
+  const registryDigest = domainSeparatedCanonicalDigest(
+    TRUSTED_HOSTILE_REGISTRY_DOMAIN, contract.records,
+  );
+  const expandedDigest = domainSeparatedCanonicalDigest(
+    TRUSTED_HOSTILE_EXPANDED_DOMAIN, expanded,
+  );
+  if (registryDigest !== TRUSTED_HOSTILE_REGISTRY_SHA256
+      || contract.trustedRegistrySha256 !== TRUSTED_HOSTILE_REGISTRY_SHA256
+      || expandedDigest !== TRUSTED_HOSTILE_EXPANDED_SHA256
+      || contract.expandedExpectationsSha256 !== TRUSTED_HOSTILE_EXPANDED_SHA256) {
+    fail("GE_CURSOR_B3_HOSTILE_EXECUTION", "hostile registry or expanded expectation hash drifted");
+  }
+  exactDigest(contract, TRUSTED_HOSTILE_EXECUTION_CONTRACT_SHA256,
+    "GE_CURSOR_B3_HOSTILE_EXECUTION", "hostile execution contract drifted");
 }
 
 export function parseStrictJson(text) {
@@ -354,8 +1102,7 @@ export function loadCursorPublicationFixture() {
   return parseStrictJson(readFileSync(FIXTURE_PATH, "utf8"));
 }
 
-export function validateCursorPublicationFixture(value, { verifyAssets = false } = {}) {
-  if (!validateShape(value)) fail("GE_CURSOR_B3_SCHEMA", JSON.stringify(validateShape.errors));
+function validateCursorPublicationFixtureSemantics(value, { verifyAssets = false } = {}) {
   const { source, target, migration } = value.identities;
   exact(
     [source.schemaVersion, source.descriptorHash, source.schemaIdentitySha256],
@@ -393,9 +1140,35 @@ export function validateCursorPublicationFixture(value, { verifyAssets = false }
     "GE_CURSOR_B3_TRANSITIONS", "success transitions drifted");
   exact(value.authority.requiredExactObjects, EXACT_AUTHORITY_OBJECTS,
     "GE_CURSOR_B3_AUTHORITY_GRAPH", "exact authority graph drifted");
+  exact(value.authority.outerPublicationAuthority, EXACT_OUTER_AUTHORITY,
+    "GE_CURSOR_B3_OUTER_AUTHORITY", "outer publication authority lifecycle drifted");
   exact(value.authority.outerPublicationAuthority.requiredCommitments,
     EXACT_OUTER_COMMITMENTS, "GE_CURSOR_B3_OUTER_COMMITMENTS",
     "outer publication commitments drifted");
+  validateGoldenDigestVectors(
+    value.authority.initialOuterWriteReceiptContract.canonicalDigestCodec,
+  );
+  exactDigest(value.authority.initialOuterWriteReceiptContract,
+    TRUSTED_INITIAL_WRITE_CONTRACT_SHA256, "GE_CURSOR_B3_INITIAL_WRITE_RECEIPTS",
+    "initial outer write receipt contract drifted");
+  exactDigest(value.authority.postDdlCatalogFence,
+    TRUSTED_POST_DDL_CATALOG_FENCE_SHA256, "GE_CURSOR_B3_POST_DDL_CATALOG_FENCE",
+    "post-DDL catalog fence contract drifted");
+  const catalogRead = value.authority.postDdlCatalogFence.catalogReadContract;
+  if (sha256(catalogRead.sql) !== TRUSTED_CATALOG_QUERY_SHA256
+      || catalogRead.querySha256 !== TRUSTED_CATALOG_QUERY_SHA256
+      || catalogRead.expectedDigestSha256 !== TRUSTED_CATALOG_DIGEST_SHA256) {
+    fail("GE_CURSOR_B3_POST_DDL_CATALOG_FENCE", "post-DDL physical catalog anchors drifted");
+  }
+  exactDigest(value.authority.postDdlPublicationReaderLease,
+    TRUSTED_POST_DDL_READER_LEASE_SHA256, "GE_CURSOR_B3_POST_DDL_READER_LEASE",
+    "post-DDL publication reader lease contract drifted");
+  exactDigest(value.authority.stageAdoptionReceipt,
+    TRUSTED_STAGE_ADOPTION_RECEIPT_SHA256, "GE_CURSOR_B3_STAGE_ADOPTION_RECEIPT",
+    "stage adoption receipt contract drifted");
+  exactDigest(value.authority.stageAdoptionBridge,
+    TRUSTED_STAGE_ADOPTION_BRIDGE_SHA256, "GE_CURSOR_B3_STAGE_ADOPTION",
+    "stage adoption semantics drifted");
   exact(value.authority.stageAdoptionBridge.requiredOuterWriteReceipts,
     EXACT_ADOPTION_RECEIPTS, "GE_CURSOR_B3_STAGE_ADOPTION",
     "stage adoption receipt order drifted");
@@ -405,6 +1178,14 @@ export function validateCursorPublicationFixture(value, { verifyAssets = false }
     "GE_CURSOR_B3_HOSTILE_MATRIX", "hostile obligations drifted");
   exact(value.parityGates.required, EXACT_PARITY,
     "GE_CURSOR_B3_PARITY_GATES", "parity gates drifted");
+  exactDigest(value.parityGates.initialPublicationNormalizedOutput,
+    TRUSTED_INITIAL_PUBLICATION_PARITY_SHA256, "GE_CURSOR_B3_PARITY_OUTPUT",
+    "initial publication normalized parity output drifted");
+  validateInitialPublicationParity(
+    value.parityGates.initialPublicationNormalizedOutput,
+    value.stateMachine.states,
+  );
+  validateHostileExecutionContract(value);
   exact(value.faultMatrix.boundaries, EXACT_FAULTS,
     "GE_CURSOR_B3_FAULT_MATRIX", "fault boundaries drifted");
   exact(value.lifecycleContract.cancellationLabels, EXACT_CANCELLATION_LABELS,
@@ -431,6 +1212,18 @@ export function validateCursorPublicationFixture(value, { verifyAssets = false }
       fail("GE_CURSOR_B3_SQL_HASH", `${name} SQL hash drifted`);
     }
   }
+  const initialReceipts = value.authority.initialOuterWriteReceiptContract;
+  const initialSqlPairs = [
+    [initialReceipts.baselineEntriesPublicationReceipt, "sourceReadSql", "sourceReadSqlSha256"],
+    [initialReceipts.baselineEntriesPublicationReceipt, "insertSql", "insertSqlSha256"],
+    [initialReceipts.baselineHeaderPublicationReceipt, "insertSql", "insertSqlSha256"],
+    [initialReceipts.operationSequenceZeroPublicationReceipt, "insertSql", "insertSqlSha256"],
+  ];
+  for (const [receipt, sqlField, hashField] of initialSqlPairs) {
+    if (sha256(normalizeSql(receipt[sqlField])) !== receipt[hashField]) {
+      fail("GE_CURSOR_B3_INITIAL_SQL_HASH", `${sqlField} hash drifted`);
+    }
+  }
   if (!/^UPDATE main\.ge_cycle_cursors SET descriptor_hash = \?, schema_identity_sha256 = \? WHERE descriptor_hash = \? AND schema_identity_sha256 = \?$/u
     .test(normalizeSql(value.sqlContract.rebind.sql))) {
     fail("GE_CURSOR_B3_REBIND_SQL", "rebind must update only the two manifest-bound identities");
@@ -446,7 +1239,8 @@ export function validateCursorPublicationFixture(value, { verifyAssets = false }
   if (!(sequenceIndex < updateIndex && updateIndex < metadataIndex && metadataIndex < commitIndex)) {
     fail("GE_CURSOR_B3_ATOMIC_ORDER", "rebind must remain inside the complete atomic migration");
   }
-  if (value.hostileObligations.length !== 83
+  if (value.hostileObligations.length !== 145
+      || value.hostileExecutionContract.records.length !== 145
       || value.faultMatrix.boundaries.at(-1) !== "commit-returned") {
     fail("GE_CURSOR_B3_MATRIX", "hostile or fault matrix drifted");
   }
@@ -470,6 +1264,60 @@ export function validateCursorPublicationFixture(value, { verifyAssets = false }
       database.exec(readFileSync(join(
         REPOSITORY_ROOT, "spec/migrations/sqlite/schema-v2.sql",
       ), "utf8"));
+      const catalogRead = value.authority.postDdlCatalogFence.catalogReadContract;
+      const catalogRows = database.prepare(catalogRead.sql).all().map((row) => ({
+        name: String(row.name),
+        sqlSha256: sha256(String(row.sql)),
+        tableName: String(row.tableName),
+        type: String(row.type),
+      }));
+      const canonicalCatalogJson = JSON.stringify(canonicalize(catalogRows));
+      const catalogInventory = catalogRows.map((row) =>
+        `${row.type}:${row.name}:${row.tableName}:${row.sqlSha256}`);
+      const catalogDigest = sha256(Buffer.concat([
+        Buffer.from(catalogRead.digestDomainUtf8, "utf8"),
+        Buffer.from(canonicalCatalogJson, "utf8"),
+      ]));
+      if (catalogRows.length !== catalogRead.expectedRowCount
+          || Buffer.byteLength(canonicalCatalogJson, "utf8")
+            !== catalogRead.expectedCanonicalRowBytes
+          || JSON.stringify(catalogInventory) !== JSON.stringify(catalogRead.expectedInventory)
+          || catalogDigest !== TRUSTED_CATALOG_DIGEST_SHA256
+          || catalogDigest !== catalogRead.expectedDigestSha256
+          || database.prepare("PRAGMA application_id").get().application_id
+            !== catalogRead.expectedApplicationId
+          || database.prepare("PRAGMA user_version").get().user_version
+            !== catalogRead.expectedUserVersion) {
+        fail("GE_CURSOR_B3_POST_DDL_CATALOG_FENCE",
+          "fresh v2 physical catalog does not match the complete trusted inventory");
+      }
+      database.exec(`
+        CREATE VIEW main.GE_CYCLE_Hostile_View AS SELECT 1 AS hostile_value;
+        CREATE TRIGGER main.Ge_CyClE_Hostile_Trigger
+        AFTER INSERT ON main.ge_cycle_schema BEGIN SELECT 1; END;
+      `);
+      const hostileCatalogRows = database.prepare(catalogRead.sql).all().map((row) => ({
+        name: String(row.name),
+        sqlSha256: sha256(String(row.sql)),
+        tableName: String(row.tableName),
+        type: String(row.type),
+      }));
+      const hostileNames = new Set(hostileCatalogRows.map(({ name }) => name));
+      const hostileCatalogDigest = sha256(Buffer.concat([
+        Buffer.from(catalogRead.digestDomainUtf8, "utf8"),
+        Buffer.from(JSON.stringify(canonicalize(hostileCatalogRows)), "utf8"),
+      ]));
+      if (!hostileNames.has("GE_CYCLE_Hostile_View")
+          || !hostileNames.has("Ge_CyClE_Hostile_Trigger")
+          || hostileCatalogRows.length !== catalogRead.expectedRowCount + 2
+          || hostileCatalogDigest === TRUSTED_CATALOG_DIGEST_SHA256) {
+        fail("GE_CURSOR_B3_POST_DDL_CATALOG_FENCE",
+          "case-insensitive catalog ownership probe failed to expose hostile view/trigger objects");
+      }
+      database.exec(`
+        DROP TRIGGER main.Ge_CyClE_Hostile_Trigger;
+        DROP VIEW main.GE_CYCLE_Hostile_View;
+      `);
       const ownershipFixture = parseStrictJson(readFileSync(join(
         REPOSITORY_ROOT, "spec/conformance/sqlite-cursor-stage-ownership.case.json",
       ), "utf8"));
@@ -506,6 +1354,7 @@ export function validateCursorPublicationFixture(value, { verifyAssets = false }
     stageCount: value.sequence.orderedStages.length,
     ruleCount: value.rules.length,
     hostileObligationCount: value.hostileObligations.length,
+    hostileExecutionRecordCount: value.hostileExecutionContract.records.length,
     faultBoundaryCount: value.faultMatrix.boundaries.length,
     targetDescriptorHash: value.identities.target.descriptorHash,
     targetSchemaIdentitySha256: value.identities.target.schemaIdentitySha256,
@@ -513,6 +1362,11 @@ export function validateCursorPublicationFixture(value, { verifyAssets = false }
     implementationClaim: value.claims.implementationClaim,
     activeManifestClaim: value.claims.activeManifestClaim,
   });
+}
+
+export function validateCursorPublicationFixture(value, { verifyAssets = false } = {}) {
+  if (!validateShape(value)) fail("GE_CURSOR_B3_SCHEMA", JSON.stringify(validateShape.errors));
+  return validateCursorPublicationFixtureSemantics(value, { verifyAssets });
 }
 
 export function validateCanonicalCursorPublicationFixture() {

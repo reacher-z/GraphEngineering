@@ -60,8 +60,18 @@ The post-B2 authority handoff, final v2 identities, single fixed cursor update,
 rules 11/12, crash split and prohibition on an independently committed rebind
 are frozen by
 [sqlite-cursor-publication-rebind-v2.md](sqlite-cursor-publication-rebind-v2.md).
-That B3 contract is a subprotocol inside the one-commit v1-to-v2 migration and
-also retains all implementation, active-manifest and release claims as false.
+That B3 contract is a subprotocol inside the one-commit v1-to-v2 migration. Its
+initial-publication boundary fixes a 34-object authority graph, atomic
+outer-authority mint, exact 20-statement `0002` execution without Python
+`executescript()`, four ordered write receipts with a three-dimensional ledger,
+a post-DDL reader lease, atomic retry-or-poison adoption, 145 hostile
+obligations and a 28-field TypeScript/Python parity record. It retains all
+implementation, protocol, production-throughput, active-manifest and release
+claims as false. The exact frozen fixture is domain-separated and anchored at
+SHA-256
+`32ebd363838ac9aa5c0d3573aa31b1f45244ca469ec248f7c906ff08d3c08993`;
+the JSON Schema also contains a recursively exact, null-prototype-safe frozen
+instance tree, so schema acceptance cannot be widened into semantic drift.
 These D7 schemas are protocol-frozen and consumed by the native TypeScript and
 Python standalone alpha controllers. Schema acceptance alone is not native or
 production evidence; executable conformance remains the capability gate. Their
