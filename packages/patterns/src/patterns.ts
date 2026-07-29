@@ -1,4 +1,9 @@
-import type { EdgeSpec, NodeSpec } from "@graph-engineering/core";
+import {
+  validateRouteSelectionPolicy,
+  type EdgeSpec,
+  type NodeSpec,
+  type RouteSelectionPolicySnapshot,
+} from "@graph-engineering/core";
 import { PatternInputError } from "./errors.js";
 import {
   MAX_PATTERN_ITEMS,
@@ -104,10 +109,61 @@ export function diamond(options: DiamondOptions): PatternGraph {
  * settle inactive branches without attempts.
  */
 export function routedBranches(options: RoutedBranchesOptions): PatternGraph {
-  const input = snapshotOptions(options, fields("classify", "branches", "merge"));
-  const classify = parseNode(input.classify, "#/classify");
+  const input = snapshotOptions(options, fields("classify", "branches", "merge", "routePolicy"));
+  const parsedClassify = parseNode(input.classify, "#/classify");
   const branches = parseKeyedNodes(input.branches, "#/branches");
   const merge = parseNode(input.merge, "#/merge");
+  const branchRoutes = branches.map((branch) => branch.key);
+  const configsEqualRoutes = (policy: RouteSelectionPolicySnapshot): boolean =>
+    policy.allowedRoutes.length === branchRoutes.length
+      && policy.allowedRoutes.every((route, index) => route === branchRoutes[index]);
+  const emptyClassifierConfig = expectRecord(parsedClassify.config, "#/classify/config");
+  let classifierConfig: unknown;
+  if (input.routePolicy !== undefined) {
+    if (Object.keys(emptyClassifierConfig).length !== 0) {
+      throw new PatternInputError(
+        "GE_PATTERN_INVALID_INPUT",
+        "routePolicy conflicts with a preconfigured classifier",
+        "#/routePolicy",
+      );
+    }
+    const validated = validateRouteSelectionPolicy(input.routePolicy);
+    if (!validated.valid) {
+      throw new PatternInputError(
+        "GE_PATTERN_INVALID_INPUT",
+        "routePolicy must be an exact route-selection policy",
+        `#/routePolicy${validated.relativePath}`,
+      );
+    }
+    if (!configsEqualRoutes(validated.policy)) {
+      throw new PatternInputError(
+        "GE_PATTERN_INVALID_INPUT",
+        "routePolicy.allowedRoutes must equal normalized branch keys",
+        "#/routePolicy/allowedRoutes",
+      );
+    }
+    classifierConfig = input.routePolicy;
+  } else if (Object.keys(emptyClassifierConfig).length === 0) {
+    classifierConfig = { kind: "single", allowedRoutes: branchRoutes };
+  } else {
+    const validated = validateRouteSelectionPolicy(emptyClassifierConfig);
+    if (!validated.valid) {
+      throw new PatternInputError(
+        "GE_PATTERN_INVALID_INPUT",
+        "classifier config must be an exact route-selection policy",
+        `#/classify/config${validated.relativePath}`,
+      );
+    }
+    if (!configsEqualRoutes(validated.policy)) {
+      throw new PatternInputError(
+        "GE_PATTERN_INVALID_INPUT",
+        "classifier allowedRoutes must equal normalized branch keys",
+        "#/classify/config/allowedRoutes",
+      );
+    }
+    classifierConfig = emptyClassifierConfig;
+  }
+  const classify = { ...parsedClassify, config: classifierConfig } as NodeSpec;
   assertUniqueNodeIds([
     nodeRef(classify, "#/classify"),
     ...branches.map((item) => nodeRef(item.node, item.path)),

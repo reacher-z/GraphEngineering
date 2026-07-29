@@ -44,9 +44,17 @@ Custom router executors must return the exact eight-field `RouteSelectionResult`
 the scheduler recomputes it from its request evidence and policy before a
 success can be journaled. Durable resume performs the same integrity check.
 
-This alpha slice does not provide compiler exhaustiveness/default diagnostics,
-a separate `RouteSelected` event identity, arbitrary condition expressions, or
-quorum/deadline barrier scheduling.
+The compiler validates exact router policies, registered condition ownership,
+allowed routes, duplicate cases and targets, and exhaustive route coverage with
+`GE1401` through `GE1407`. Registered loop-pattern conditions remain compiler-
+valid because the compiler registry does not claim their execution semantics.
+This runtime currently executes only `RouteEquals`; if a compiled graph contains
+a registered foreign condition, ordinary execution and durable start/resume fail
+the whole graph during capability preflight with zero node attempts and before
+any executor or durable-history read/write.
+
+This alpha slice does not provide a separate `RouteSelected` event identity,
+arbitrary condition expressions, or quorum/deadline barrier scheduling.
 
 ## Standalone bounded pipeline
 
@@ -545,8 +553,8 @@ for the exact portability boundary.
 - router nodes default to deterministic route selection and the scheduler
   executes only the fixed versioned `RouteEquals` edge condition.
 
-Edge `map`, condition expressions other than `RouteEquals`, JSON Schema I/O
-validation, Graph IR streaming edges,
+Edge `map`, execution of registered loop conditions or arbitrary condition
+expressions other than `RouteEquals`, JSON Schema I/O validation, Graph IR streaming edges,
 scheduler checkpoint acceleration, distributed workers, and distributed leases
 are intentionally scheduled for later alphas. The standalone bounded-pipeline
 API above does not silently implement those graph or durable-stream surfaces.

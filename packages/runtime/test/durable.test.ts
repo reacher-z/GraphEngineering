@@ -49,6 +49,18 @@ function graph(overrides: Partial<GraphSpec> = {}): GraphSpec {
   };
 }
 
+function registeredLoopConditionGraph(): GraphSpec {
+  const corpus = JSON.parse(readFileSync(
+    fileURLToPath(new URL("../../../spec/conformance/integrated-router.case.json", import.meta.url)),
+    "utf8",
+  )) as { compilerCases: Array<{ name: string; graph: GraphSpec }> };
+  const fixture = corpus.compilerCases.find(
+    (item) => item.name === "registered-loop-condition-families-remain-compiler-valid",
+  );
+  if (fixture === undefined) throw new Error("registered loop condition fixture is missing");
+  return fixture.graph;
+}
+
 async function history(store: EventStore, runId: string): Promise<GraphEvent[]> {
   const result: GraphEvent[] = [];
   for await (const event of store.read(runId)) result.push(event);
@@ -225,17 +237,30 @@ describe("durable graph scheduler", () => {
           config: { kind: "single", allowedRoutes: ["quick", "audit"] },
         }),
         node("audit"),
+        node("quick"),
       ],
-      edges: [{
-        id: "route-audit",
-        from: { node: "route" },
-        to: { node: "audit" },
-        condition: {
-          apiVersion: "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1",
-          kind: "RouteEquals",
-          routeKey: "audit",
+      edges: [
+        {
+          id: "route-audit",
+          from: { node: "route" },
+          to: { node: "audit" },
+          condition: {
+            apiVersion: "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1",
+            kind: "RouteEquals",
+            routeKey: "audit",
+          },
         },
-      }],
+        {
+          id: "route-quick",
+          from: { node: "route" },
+          to: { node: "quick" },
+          condition: {
+            apiVersion: "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1",
+            kind: "RouteEquals",
+            routeKey: "quick",
+          },
+        },
+      ],
     });
     const source = new MemoryEventStore();
     const crash = new CommitThenThrowStore(
@@ -375,11 +400,17 @@ describe("durable graph scheduler", () => {
     expect(branch).not.toHaveBeenCalled();
   });
 
-  it("resumes after an unsupported-condition source settlement committed before process loss", async () => {
+  it("rejects an unsupported condition before durable persistence or execution", async () => {
     const unsupported = graph({
       entrypoints: ["route"],
       outputs: { decision: { node: "route" } },
-      nodes: [node("route", { kind: "router" }), node("child")],
+      nodes: [
+        node("route", {
+          kind: "router",
+          config: { kind: "single", allowedRoutes: ["quick"] },
+        }),
+        node("child"),
+      ],
       edges: [{
         id: "unsupported",
         from: { node: "route" },
@@ -395,37 +426,62 @@ describe("durable graph scheduler", () => {
     );
     const route = vi.fn();
     const child = vi.fn();
-    await expect(startDurableGraphRun(unsupported, {}, {
-      runId: "unsupported-settlement-crash",
-      implementationId: "v1",
-      eventStore: crash,
-      now: fixedNow,
-      nodeExecutors: { route, child },
-    })).rejects.toMatchObject({ code: "DURABILITY_STORE_FAILED" });
-    expect(route).not.toHaveBeenCalled();
-    expect(child).not.toHaveBeenCalled();
-
-    const resumed = await resumeDurableGraphRun(unsupported, {
+    const result = await startDurableGraphRun(unsupported, {}, {
       runId: "unsupported-settlement-crash",
       implementationId: "v1",
       eventStore: crash,
       now: fixedNow,
       nodeExecutors: { route, child },
     });
-    expect(resumed).toMatchObject({ status: "failed", totalAttempts: 0 });
-    expect(resumed.nodes[0]?.failure?.code).toBe("UNSUPPORTED_EDGE_CONDITION");
-    expect(resumed.nodes[1]?.failure?.code).toBe("UPSTREAM_FAILED");
+    expect(result).toMatchObject({
+      status: "failed",
+      totalAttempts: 0,
+      nodes: [],
+      failures: [{ code: "GE1402_UNSUPPORTED_EDGE_CONDITION", phase: "compile" }],
+    });
     expect(route).not.toHaveBeenCalled();
     expect(child).not.toHaveBeenCalled();
+    expect(await history(source, "unsupported-settlement-crash")).toEqual([]);
+  });
 
-    const terminal = await resumeDurableGraphRun(unsupported, {
-      runId: "unsupported-settlement-crash",
-      implementationId: "v1",
-      eventStore: crash,
-      now: fixedNow,
-      nodeExecutors: { route, child },
+  it("preflights compiler-registered foreign conditions before durable start or resume", async () => {
+    const read = vi.fn((): AsyncIterable<GraphEvent> => {
+      throw new Error("condition preflight must not read durable history");
     });
-    assert.deepStrictEqual(terminal, resumed);
+    const append = vi.fn(async (): Promise<number> => {
+      throw new Error("condition preflight must not append durable history");
+    });
+    const store: EventStore = { read, append };
+    const sourceExecutor = vi.fn(() => ({ done: true }));
+    const options = {
+      runId: "registered-loop-preflight",
+      implementationId: "v1",
+      eventStore: store,
+      now: fixedNow,
+      nodeExecutors: { source: sourceExecutor },
+    };
+
+    const started = await startDurableGraphRun(registeredLoopConditionGraph(), {}, options);
+    expect(started).toMatchObject({
+      status: "failed",
+      totalAttempts: 0,
+      nodes: [],
+      failures: [{
+        phase: "execute",
+        code: "UNSUPPORTED_EDGE_CONDITION",
+        nodeId: "source",
+        attempt: 0,
+      }],
+    });
+    expect(read).not.toHaveBeenCalled();
+    expect(append).not.toHaveBeenCalled();
+    expect(sourceExecutor).not.toHaveBeenCalled();
+
+    const resumed = await resumeDurableGraphRun(registeredLoopConditionGraph(), options);
+    expect(resumed).toEqual(started);
+    expect(read).not.toHaveBeenCalled();
+    expect(append).not.toHaveBeenCalled();
+    expect(sourceExecutor).not.toHaveBeenCalled();
   });
 
   it("rejects resigned terminal history that attempted an unsupported-condition source", async () => {
@@ -470,12 +526,18 @@ describe("durable graph scheduler", () => {
     const forged = await copyHistory("attempted-unsupported-condition", resigned);
     const before = (await history(forged, "attempted-unsupported-condition")).length;
 
-    await expect(resumeDurableGraphRun(unsupported, {
+    const result = await resumeDurableGraphRun(unsupported, {
       runId: "attempted-unsupported-condition",
       implementationId: "v1",
       eventStore: forged,
       now: fixedNow,
-    })).rejects.toMatchObject({ code: "INVALID_RUN_HISTORY" });
+    });
+    expect(result).toMatchObject({
+      status: "failed",
+      totalAttempts: 0,
+      nodes: [],
+      failures: [{ code: "GE1402_UNSUPPORTED_EDGE_CONDITION", phase: "compile" }],
+    });
     expect(await history(forged, "attempted-unsupported-condition")).toHaveLength(before);
   });
 
@@ -524,12 +586,18 @@ describe("durable graph scheduler", () => {
     const forged = await copyHistory("attempted-inactive-branch", resigned);
     const before = (await history(forged, "attempted-inactive-branch")).length;
 
-    await expect(resumeDurableGraphRun(inactive, {
+    const result = await resumeDurableGraphRun(inactive, {
       runId: "attempted-inactive-branch",
       implementationId: "v1",
       eventStore: forged,
       now: fixedNow,
-    })).rejects.toMatchObject({ code: "INVALID_RUN_HISTORY" });
+    });
+    expect(result).toMatchObject({
+      status: "failed",
+      totalAttempts: 0,
+      nodes: [],
+      failures: [{ code: "GE1404_ROUTE_NOT_ALLOWED", phase: "compile" }],
+    });
     expect(await history(forged, "attempted-inactive-branch")).toHaveLength(before);
   });
 

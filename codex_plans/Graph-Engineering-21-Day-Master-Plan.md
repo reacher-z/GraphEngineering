@@ -11118,3 +11118,164 @@ against the pristine sealed snapshot, prove the A1 root from production rows,
 freeze deterministic pagination and error ordering, and retain the exact B0b
 stage/session owner through every read. Publication and rebind remain a
 separately reviewed later boundary.
+
+### 31.35.12 D6 integrated-router production compiler, lowering and runtime-gate acceptance
+
+The bounded integrated-router production tranche is now implemented and
+independently accepted in TypeScript and Python. This closes the implementation
+gap left by the revision-2 contract freeze: router policies and registered edge
+conditions are no longer runtime-only conventions, `routedBranches` now emits
+compiler-valid exact policy state, both compilers enforce the seven frozen
+diagnostics, and every shared runtime vector executes on the real public
+scheduler surfaces.
+
+The compiler pass is installed after canonical capture, identity/reference,
+topology, reachability and graph-policy validation, and before strict typed-
+port validation. It never infers a router policy from edges or metadata. Every
+router node must carry one exact direct policy in `node.config`; every claimed
+`RouteEquals` edge must use the exact three-field versioned carrier. Registered
+loop-pattern conditions remain opaque to D6 validation rather than being
+misclassified as malformed router conditions.
+
+The implemented diagnostic surface is:
+
+- `GE1401_INVALID_ROUTER_POLICY` for an invalid direct router policy;
+- `GE1402_UNSUPPORTED_EDGE_CONDITION` for an unregistered or malformed
+  condition claimed by this registry;
+- `GE1403_CONDITION_SOURCE_NOT_ROUTER` when `RouteEquals` originates from a
+  non-router;
+- `GE1404_ROUTE_NOT_ALLOWED` for a route case outside `allowedRoutes`;
+- `GE1405_DUPLICATE_ROUTE_CASE` for a repeated route key on one router;
+- `GE1406_DUPLICATE_ROUTE_TARGET` for two accepted cases targeting one node;
+  and
+- `GE1407_INCOMPLETE_ROUTE_COVERAGE` when a valid router is missing an allowed
+  route case without a higher-priority local suppression reason.
+
+Diagnostics are emitted by category in GE1401-through-GE1407 order. GE1401
+retains node declaration order; edge-owned categories retain the complete
+graph's edge declaration order, even when edges alternate between routers.
+Per-router `allowed`, seen-route, seen-target and accepted-route state remains
+independent, so global ordering does not merge router authority. Coverage
+suppression remains local: one malformed edge or invalid router does not hide
+independent diagnostics from another router or stop later typed-port passes.
+
+Both primitive validators use exact closed keys, portable safe integers,
+bounded identifiers, ordered unique routes, default/escalation membership,
+single-versus-multi field rules and exact condition registry ownership. The
+TypeScript package root now exports the discriminated result types and their
+members together with both validator functions, so downstream declarations do
+not expose an unnameable return union. The Python implementation retains the
+same discriminants, paths and policy snapshot semantics in its compiler module.
+
+The TypeScript `routedBranches` constructor now treats policy lowering as part
+of graph construction rather than a later inference:
+
+1. branch keys are normalized by the existing Unicode code-point order;
+2. legacy empty classifier config synthesizes an exact single policy from that
+   normalized order;
+3. an explicit exact `routePolicy` is copied directly only when its ordered
+   `allowedRoutes` equals all normalized branch keys;
+4. an already configured exact matching policy is preserved;
+5. an option plus non-empty config, invalid policy or ordered route mismatch
+   throws before any graph can be returned; and
+6. every generated `RouteEquals` edge remains package-owned and versioned.
+
+The production review discovered that the frozen pattern corpus itself had
+written `quick, audit` as a normalized order even though the existing canonical
+constructor correctly normalizes it to `audit, quick`. Changing production to
+input order would have broken the already published permutation determinism.
+The shared fixture was therefore atomically corrected: all six cases now use
+the real Unicode order, all successful policies/expectations match it and the
+deliberate mismatch case is reversed. A new corpus-driven suite consumes all
+six cases under both input permutations. Successful cases produce identical
+graphs and hashes and compile successfully; error cases throw at the exact
+path before graph return.
+
+Runtime capability handling is now explicit at the graph boundary. The
+compiler registry correctly accepts `LoopContinue`, `LoopDryVerdict` and
+`LoopVerdictAtBound`, but the ordinary scheduler in this tranche executes only
+`RouteEquals`. TypeScript ordinary execution plus durable start/resume, and
+Python ordinary execution plus durable start/resume, inspect the complete
+captured compiled graph before dispatch. A registered foreign condition fails
+the whole run with:
+
+- zero executor or handler calls;
+- zero node attempts;
+- an empty node-result projection;
+- zero scheduled/completed nodes and zero observed concurrency;
+- `UNSUPPORTED_EDGE_CONDITION` failures grouped in node declaration order;
+- multiple messages for one source in edge declaration order; and
+- no durable history read, append or other event-store side effect.
+
+This preflight is deliberately not a compiler rejection: registered foreign
+conditions belong to other graph features and must remain portable compiler
+input. It is also not the historical late scheduler guard, which could execute
+the source handler before discovering the unsupported edge. Multi-source
+ordinary and durable probes in both languages prove the new gate runs before
+all externally supplied work and that TypeScript/Python failure ordering is
+identical.
+
+The shared conformance coverage now consumes every normative area:
+
+- all 29 policy validation cases in both language compilers;
+- all 14 condition-registry cases in both language compilers;
+- both envelope cases and all four host-constructed capture cases;
+- all 18 compiler graphs with literal hashes and exact diagnostic projections;
+- all seven runtime graphs and their literal `runtimeGraphHashes` in both
+  compilers;
+- the three-field `hashContract` in both languages;
+- the language-specific `invalidExecutionGate` metadata and real public gate;
+- all six pattern-lowering cases under both branch permutations;
+- all 11 runtime cases on the TypeScript public runtime; and
+- all 11 runtime cases on Python's real `try_compile_graph` plus `run_graph`
+  surface, including every expected status, attempt total, output or absence,
+  ordered failure code, executor call count and node terminal projection.
+
+The first production audit rejected the tranche at HIGH 3 / MEDIUM 1 / LOW 1.
+HIGH-1 was the pattern normalization contradiction and unconsumed six-case
+matrix. HIGH-2 showed compiler-valid loop conditions executing a real handler
+before the old scheduler reported an unsupported edge. HIGH-3 showed
+TypeScript GE1404/GE1405/GE1406 grouping by router while Python retained global
+edge order. MEDIUM-1 identified normative runtime/hash/gate fields, especially
+all 11 Python runtime cases, that were not consumed literally. LOW-1 found the
+TypeScript root validator functions exported with non-exported union types.
+
+After those fixes, the final audit found one more documentation LOW: the
+TypeScript runtime and Python README files still described compiler
+exhaustiveness/default diagnostics as future work and did not document foreign-
+condition preflight. Both now describe GE1401-GE1407 and the zero-execution
+ordinary/durable capability gate. The documentation correction passed all 286
+local-link checks and was independently reread before final acceptance.
+
+Final accepted verification is:
+
+- TypeScript core: 7 files and 238/238 tests;
+- TypeScript patterns: 106/106 tests;
+- TypeScript runtime: 12 files and 257/257 tests;
+- TypeScript core/pattern/runtime typecheck, runtime build and package lint
+  gates: green;
+- Python D6 compiler focused suite: 14/14;
+- Python public runtime corpus: 12/12;
+- Python scheduler/durable/runtime-corpus related set: 109/109;
+- Python complete suite after all remediation: 1,835/1,835 plus two nested
+  subtests;
+- scoped Ruff lint and format checks: green;
+- project-standard strict MyPy: green over 54 source files;
+- 73 JSON fixture validation, 286 documentation links and strict diff checks:
+  green; and
+- final independent production review: HIGH 0 / MEDIUM 0 / LOW 0.
+
+The complete production audit is recorded in
+`codex_logs/reviews/D6-INTEGRATED-ROUTER-PRODUCTION-FINAL-AUDIT-2026-07-28.md`.
+It preserves the rejected findings, each remediation and the distinction
+between the accepted project-standard MyPy gate and one non-standard explicit-
+test invocation that was not counted as evidence.
+
+This milestone completes the bounded D6 integrated-router compiler, pattern
+lowering, ordinary execution and current durable integrity/preflight surface.
+It does not add a dedicated durable `RouteSelected` identity, zero-rejudge
+decision replay, integrated all/minimum/percentage barriers, quorum, abstention,
+deadlines, late-arrival policy, cancellation propagation, barrier trace/CLI
+visibility or distributed coordination. `D6-ROUTER-BARRIER-023` therefore
+remains open for the barrier and dedicated durable-decision tranches. No
+release, adoption or star-count outcome is claimed by this source milestone.

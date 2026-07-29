@@ -13,6 +13,18 @@ function fixture(name: string): GraphSpec {
   return JSON.parse(readFileSync(path, "utf8")) as GraphSpec;
 }
 
+function registeredLoopConditionGraph(): GraphSpec {
+  const corpus = JSON.parse(readFileSync(
+    fileURLToPath(new URL("../../../spec/conformance/integrated-router.case.json", import.meta.url)),
+    "utf8",
+  )) as { compilerCases: Array<{ name: string; graph: GraphSpec }> };
+  const fixture = corpus.compilerCases.find(
+    (item) => item.name === "registered-loop-condition-families-remain-compiler-valid",
+  );
+  if (fixture === undefined) throw new Error("registered loop condition fixture is missing");
+  return fixture.graph;
+}
+
 interface ReadyQueueCase {
   graph: GraphSpec;
   mock: {
@@ -266,10 +278,23 @@ describe("runGraph", () => {
     const result = await runGraph(
       graph({
         outputs: { decision: { node: "root" } },
-        nodes: [node("root", {
-          kind: "router",
-          config: { kind: "single", allowedRoutes: ["quick"] },
-        })],
+        nodes: [
+          node("root", {
+            kind: "router",
+            config: { kind: "single", allowedRoutes: ["quick"] },
+          }),
+          node("quick"),
+        ],
+        edges: [{
+          id: "root-quick",
+          from: { node: "root" },
+          to: { node: "quick" },
+          condition: {
+            apiVersion: "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1",
+            kind: "RouteEquals",
+            routeKey: "quick",
+          },
+        }],
       }),
       { requestedRoutes: ["quick"] },
       {
@@ -293,19 +318,30 @@ describe("runGraph", () => {
     });
   });
 
-  it.each([
-    ["malformed request", {}, { kind: "single", allowedRoutes: ["quick"] }],
-    ["invalid policy", { requestedRoutes: ["quick"] }, {
-      kind: "multi",
-      allowedRoutes: ["quick"],
-    }],
-  ])("does not retry an INVALID_ROUTE_SELECTION from a %s", async (_name, input, config) => {
+  it("does not retry an INVALID_ROUTE_SELECTION from a malformed request", async () => {
     const attemptFailed = vi.fn(async () => undefined);
     const result = await runGraphWithJournal(
       graph({
-        nodes: [node("root", { kind: "router", config, retry: { maxAttempts: 3 } })],
+        nodes: [
+          node("root", {
+            kind: "router",
+            config: { kind: "single", allowedRoutes: ["quick"] },
+            retry: { maxAttempts: 3 },
+          }),
+          node("quick"),
+        ],
+        edges: [{
+          id: "root-quick",
+          from: { node: "root" },
+          to: { node: "quick" },
+          condition: {
+            apiVersion: "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1",
+            kind: "RouteEquals",
+            routeKey: "quick",
+          },
+        }],
       }),
-      input,
+      {},
       { journal: testJournal({ attemptFailed }) },
     );
     expect(result.nodes[0]).toMatchObject({
@@ -320,6 +356,28 @@ describe("runGraph", () => {
       retryDelayMs: 0,
       failure: { code: "INVALID_ROUTE_SELECTION", retryable: false },
     });
+  });
+
+  it("rejects an invalid router policy at compile time without an attempt", async () => {
+    const attemptFailed = vi.fn(async () => undefined);
+    const result = await runGraphWithJournal(
+      graph({
+        nodes: [node("root", {
+          kind: "router",
+          config: { kind: "multi", allowedRoutes: ["quick"] },
+          retry: { maxAttempts: 3 },
+        })],
+      }),
+      { requestedRoutes: ["quick"] },
+      { journal: testJournal({ attemptFailed }) },
+    );
+    expect(result).toMatchObject({
+      status: "failed",
+      totalAttempts: 0,
+      nodes: [],
+      failures: [{ code: "GE1401_INVALID_ROUTER_POLICY", phase: "compile" }],
+    });
+    expect(attemptFailed).not.toHaveBeenCalled();
   });
 
   it("fails a forged router decision before emitting a successful router result", async () => {
@@ -344,18 +402,31 @@ describe("runGraph", () => {
             retry: { maxAttempts: 3 },
           }),
           node("branch"),
+          node("quick"),
         ],
         entrypoints: ["route"],
-        edges: [{
-          id: "route-branch",
-          from: { node: "route" },
-          to: { node: "branch" },
-          condition: {
-            apiVersion: "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1",
-            kind: "RouteEquals",
-            routeKey: "audit",
+        edges: [
+          {
+            id: "route-branch",
+            from: { node: "route" },
+            to: { node: "branch" },
+            condition: {
+              apiVersion: "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1",
+              kind: "RouteEquals",
+              routeKey: "audit",
+            },
           },
-        }],
+          {
+            id: "route-quick",
+            from: { node: "route" },
+            to: { node: "quick" },
+            condition: {
+              apiVersion: "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1",
+              kind: "RouteEquals",
+              routeKey: "quick",
+            },
+          },
+        ],
       }),
       { requestedRoutes: ["quick"] },
       {
@@ -390,18 +461,31 @@ describe("runGraph", () => {
           config: { kind: "single", allowedRoutes: ["quick", "audit"] },
         }),
         node("branch"),
+        node("quick"),
       ],
       entrypoints: ["route"],
-      edges: [{
-        id: "route-branch",
-        from: { node: "route" },
-        to: { node: "branch" },
-        condition: {
-          apiVersion: "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1",
-          kind: "RouteEquals",
-          routeKey: "audit",
+      edges: [
+        {
+          id: "route-branch",
+          from: { node: "route" },
+          to: { node: "branch" },
+          condition: {
+            apiVersion: "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1",
+            kind: "RouteEquals",
+            routeKey: "audit",
+          },
         },
-      }],
+        {
+          id: "route-quick",
+          from: { node: "route" },
+          to: { node: "quick" },
+          condition: {
+            apiVersion: "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1",
+            kind: "RouteEquals",
+            routeKey: "quick",
+          },
+        },
+      ],
     });
     const initialResults = new Map([[
       "route",
@@ -429,18 +513,29 @@ describe("runGraph", () => {
   });
 
   it.each([
-    ["malformed", node("route", { kind: "router" }), { kind: "RouteEquals", routeKey: "x" }],
-    ["unsupported", node("route", { kind: "router" }), {
+    ["malformed", node("route", {
+      kind: "router",
+      config: { kind: "single", allowedRoutes: ["x"] },
+    }), { kind: "RouteEquals", routeKey: "x" }, "GE1402_UNSUPPORTED_EDGE_CONDITION"],
+    ["unsupported", node("route", {
+      kind: "router",
+      config: { kind: "single", allowedRoutes: ["x"] },
+    }), {
       apiVersion: "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1",
       kind: "Other",
       routeKey: "x",
-    }],
+    }, "GE1402_UNSUPPORTED_EDGE_CONDITION"],
     ["non-router", node("route"), {
       apiVersion: "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1",
       kind: "RouteEquals",
       routeKey: "x",
-    }],
-  ])("fails closed for a %s conditional edge before source execution", async (_name, source, condition) => {
+    }, "GE1403_CONDITION_SOURCE_NOT_ROUTER"],
+  ])("fails closed for a %s conditional edge before source execution", async (
+    _name,
+    source,
+    condition,
+    expectedCode,
+  ) => {
     const sourceExecutor = vi.fn(() => ({ selectedRoutes: ["x"] }));
     const result = await runGraph(
       graph({
@@ -454,12 +549,81 @@ describe("runGraph", () => {
     );
 
     expect(result.status).toBe("failed");
-    expect(result.nodes[0]).toMatchObject({
-      status: "failed",
-      attempts: 0,
-      failure: { code: "UNSUPPORTED_EDGE_CONDITION" },
+    expect(result).toMatchObject({
+      totalAttempts: 0,
+      nodes: [],
+      failures: [{ code: expectedCode, phase: "compile" }],
     });
     expect(sourceExecutor).not.toHaveBeenCalled();
+  });
+
+  it("preflights compiler-registered foreign conditions across the whole graph", async () => {
+    const sourceExecutor = vi.fn(() => ({ done: true }));
+    const result = await runGraph(registeredLoopConditionGraph(), {}, {
+      nodeExecutors: { source: sourceExecutor },
+    });
+
+    expect(result).toMatchObject({
+      status: "failed",
+      totalAttempts: 0,
+      nodes: [],
+      failures: [{
+        phase: "execute",
+        code: "UNSUPPORTED_EDGE_CONDITION",
+        nodeId: "source",
+        attempt: 0,
+      }],
+    });
+    expect(result.failures[0]?.message).toContain("to-continue");
+    expect(result.failures[0]?.message).toContain("to-dry");
+    expect(result.failures[0]?.message).toContain("to-bound");
+    const message = result.failures[0]?.message ?? "";
+    expect(message.indexOf("to-continue")).toBeLessThan(message.indexOf("to-dry"));
+    expect(message.indexOf("to-dry")).toBeLessThan(message.indexOf("to-bound"));
+    expect(sourceExecutor).not.toHaveBeenCalled();
+  });
+
+  it("orders foreign-condition failures by node declaration and messages by edge declaration", async () => {
+    const zSource = vi.fn(() => ({ done: true }));
+    const aSource = vi.fn(() => ({ done: true }));
+    const foreign = (kind: string, round: number) => ({
+      apiVersion: "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1",
+      kind,
+      maxRounds: 3,
+      round,
+      roundKey: `r${round}`,
+    });
+    const result = await runGraph(graph({
+      entrypoints: ["z-source", "a-source"],
+      outputs: { z: { node: "z-target" }, a: { node: "a-target" } },
+      nodes: [node("z-source"), node("z-target"), node("a-source"), node("a-target")],
+      edges: [
+        {
+          id: "z-edge-declared-first",
+          from: { node: "a-source" },
+          to: { node: "a-target" },
+          condition: foreign("LoopDryVerdict", 1),
+        },
+        {
+          id: "a-edge-declared-second",
+          from: { node: "z-source" },
+          to: { node: "z-target" },
+          condition: foreign("LoopContinue", 0),
+        },
+      ],
+    }), {}, { nodeExecutors: { "z-source": zSource, "a-source": aSource } });
+
+    expect(result.nodes).toEqual([]);
+    expect(result.totalAttempts).toBe(0);
+    expect(result.failures.map((failure) => ({
+      nodeId: "nodeId" in failure ? failure.nodeId : undefined,
+      message: failure.message,
+    }))).toEqual([
+      { nodeId: "z-source", message: expect.stringContaining("a-edge-declared-second") },
+      { nodeId: "a-source", message: expect.stringContaining("z-edge-declared-first") },
+    ]);
+    expect(zSource).not.toHaveBeenCalled();
+    expect(aSource).not.toHaveBeenCalled();
   });
 
   it("executes a diamond concurrently and binds fan-in ports", async () => {

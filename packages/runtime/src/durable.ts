@@ -37,6 +37,7 @@ import {
   assertExactRouteSelection,
   edgeConditionError,
   edgeIsActive,
+  graphConditionCapabilityIssues,
 } from "./router-runtime.js";
 import type {
   GraphRunFailure,
@@ -143,6 +144,26 @@ function isCompilationFailure(
   value: CompiledDurableGraph | GraphRunResult,
 ): value is GraphRunResult {
   return "status" in value;
+}
+
+function conditionCapabilityFailure(
+  compiled: CompiledDurableGraph,
+): DurableGraphRunResult | undefined {
+  const issues = graphConditionCapabilityIssues(compiled.graph);
+  if (issues.length === 0) return undefined;
+  return {
+    status: "failed",
+    graphHash: compiled.graphHash,
+    nodes: [],
+    failures: issues.map(({ nodeId, messages }) => runtimeFailure(
+      nodeId,
+      "UNSUPPORTED_EDGE_CONDITION",
+      messages.join("; "),
+      0,
+    )),
+    maxObservedConcurrency: 0,
+    totalAttempts: 0,
+  };
 }
 
 function sideEffects(node: NodeSpec): "none" | "idempotent" | "non-idempotent" | "unspecified" {
@@ -1973,6 +1994,8 @@ export async function startDurableGraphRun(
   options = stableOptions(options);
   const compiled = compileDurableGraph(graph);
   if (isCompilationFailure(compiled)) return compiled;
+  const capabilityFailure = conditionCapabilityFailure(compiled);
+  if (capabilityFailure !== undefined) return capabilityFailure;
   assertDurableTimerBounds(compiled.graph);
   const implementation = implementationHash(options.implementationId);
   const inputSnapshot = snapshotJson(input);
@@ -2021,6 +2044,8 @@ export async function resumeDurableGraphRun(
   options = stableOptions(options);
   const compiled = compileDurableGraph(graph);
   if (isCompilationFailure(compiled)) return compiled;
+  const capabilityFailure = conditionCapabilityFailure(compiled);
+  if (capabilityFailure !== undefined) return capabilityFailure;
   assertDurableTimerBounds(compiled.graph);
   const implementation = implementationHash(options.implementationId);
   const events = await readHistory(options.eventStore, options.runId);

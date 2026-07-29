@@ -425,12 +425,47 @@ def _active_incoming_edges(
 
 def _unsupported_condition_sources(graph: CompiledGraph) -> dict[str, str]:
     messages: dict[str, list[str]] = {}
-    for edge in sorted(graph.spec.edges, key=lambda item: item.id):
+    for edge in graph.spec.edges:
         try:
             _route_key(edge, graph)
         except _UnsupportedEdgeConditionError as exc:
             messages.setdefault(edge.source.node, []).append(str(exc))
     return {node_id: "; ".join(items) for node_id, items in messages.items()}
+
+
+def _condition_capability_failure(graph: CompiledGraph) -> RunResult | None:
+    """Fail a whole graph before dispatch when it contains foreign conditions.
+
+    The compiler registry deliberately accepts conditions owned by other graph
+    features. This scheduler currently executes RouteEquals only, so every
+    unsupported source is projected as a graph-level execution failure without
+    creating a node result or consuming an attempt.
+    """
+
+    issues = _unsupported_condition_sources(graph)
+    if not issues:
+        return None
+    failures = tuple(
+        NodeFailure(
+            FailureCode.UNSUPPORTED_EDGE_CONDITION,
+            issues[node.id],
+            node.id,
+            0,
+        )
+        for node in graph.spec.nodes
+        if node.id in issues
+    )
+    return RunResult(
+        status=RunStatus.FAILED,
+        graph_hash=graph.graph_hash,
+        nodes=MappingProxyType({}),
+        outputs=None,
+        failures=failures,
+        scheduled_order=(),
+        completion_order=(),
+        max_observed_concurrency=0,
+        total_attempts=0,
+    )
 
 
 def _endpoint_value(endpoint: Endpoint, value: JsonValue) -> JsonValue:
@@ -952,6 +987,9 @@ class AsyncScheduler:
         """Run a compiled graph and return deterministic, structured results."""
 
         graph = _snapshot_compiled_graph(graph)
+        capability_failure = _condition_capability_failure(graph)
+        if capability_failure is not None:
+            return capability_failure
         try:
             graph_input_snapshot = portable_json_snapshot(graph_input)
         except PortableJsonError:

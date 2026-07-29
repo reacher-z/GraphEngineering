@@ -55,8 +55,13 @@ package-owned annotation; callers cannot replace or extend it:
 Branch outputs reach unique merge ports. Metadata declares required capability
 `edge-condition-routing/v1alpha1`. The native schedulers execute only selected
 branches, settle inactive paths without attempts, and bind the merge from active
-branch outputs. Compiler exhaustiveness and dedicated route-decision events are
-still follow-up work.
+branch outputs. The constructor lowers an empty legacy classifier config to an
+exact direct single-route policy whose ordered `allowedRoutes` match normalized
+branch keys. Authors may instead provide `routePolicy`, or retain an already
+configured exact policy, when its ordered routes match those keys. Conflicting,
+inexact, or mismatched policies fail before a graph is returned. The compiler
+enforces membership, unique cases and targets, and exhaustive coverage.
+Dedicated durable route-decision events remain follow-up work.
 
 ### `verifiedFanout`
 

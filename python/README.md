@@ -402,9 +402,17 @@ and joins bind only active inputs. A custom router result is accepted only when
 its exact eight-field decision can be recomputed from the request evidence and
 policy; durable resume repeats that integrity check.
 
-This is an alpha conditional-routing slice. Compiler exhaustiveness/default
-diagnostics, dedicated `RouteSelected` events, arbitrary condition expressions,
-and scheduler-integrated quorum/deadline barriers remain follow-up work.
+The compiler validates exact router policies, registered condition ownership,
+allowed routes, duplicate cases and targets, and exhaustive route coverage with
+`GE1401` through `GE1407`. Registered loop-pattern conditions remain compiler-
+valid because the compiler registry does not claim their execution semantics.
+The Python runtime currently executes only `RouteEquals`; if a compiled graph
+contains a registered foreign condition, ordinary execution and durable
+start/resume fail the whole graph during capability preflight with zero node
+attempts and before any handler or durable-history read/write.
+
+Dedicated `RouteSelected` events, arbitrary condition expressions, and
+scheduler-integrated quorum/deadline barriers remain follow-up work.
 
 ## Portable runtime JSON
 
@@ -789,8 +797,8 @@ This alpha deliberately focuses on deterministic DAG compilation and
 execution. It includes bounded concurrency, retry/backoff, per-attempt timeout,
 a graph-wide attempt budget, named source/input/output port binding, and
 event-sourced durable continuation, plus the separate bounded-cycle/GraphPatch
-surface described above. Edge `map` and `condition`, runtime JSON Schema
-validation, streams, checkpoint acceleration, dynamic mutation of the ordinary
+surface described above. Edge `map`, condition execution beyond the integrated
+`RouteEquals` surface, runtime JSON Schema validation, streams, checkpoint acceleration, dynamic mutation of the ordinary
 DAG scheduler, production cycle stores, distributed leases, non-idempotent
 recovery approval, and production provider adapters remain follow-up work. Accepted
 non-integer finite binary64 Graph IR values now

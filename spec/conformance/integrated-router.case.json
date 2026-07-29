@@ -21,42 +21,42 @@
   "patternLoweringCases": [
     {
       "name": "legacy-empty-config-synthesizes-single-policy",
-      "normalizedBranchKeys": ["quick", "audit"],
+      "normalizedBranchKeys": ["audit", "quick"],
       "classifierConfig": {},
-      "expect": {"result": "graph", "classifierConfig": {"kind": "single", "allowedRoutes": ["quick", "audit"]}, "compilerValidIn": ["typescript", "python"]}
+      "expect": {"result": "graph", "classifierConfig": {"kind": "single", "allowedRoutes": ["audit", "quick"]}, "compilerValidIn": ["typescript", "python"]}
     },
     {
       "name": "supplied-policy-is-lowered-directly",
-      "normalizedBranchKeys": ["quick", "audit"],
+      "normalizedBranchKeys": ["audit", "quick"],
       "classifierConfig": {},
-      "routePolicy": {"kind": "multi", "allowedRoutes": ["quick", "audit"], "defaultRoute": "quick", "maxMulticast": 2},
-      "expect": {"result": "graph", "classifierConfig": {"kind": "multi", "allowedRoutes": ["quick", "audit"], "defaultRoute": "quick", "maxMulticast": 2}, "compilerValidIn": ["typescript", "python"]}
+      "routePolicy": {"kind": "multi", "allowedRoutes": ["audit", "quick"], "defaultRoute": "quick", "maxMulticast": 2},
+      "expect": {"result": "graph", "classifierConfig": {"kind": "multi", "allowedRoutes": ["audit", "quick"], "defaultRoute": "quick", "maxMulticast": 2}, "compilerValidIn": ["typescript", "python"]}
     },
     {
       "name": "matching-preconfigured-policy-is-preserved",
-      "normalizedBranchKeys": ["quick", "audit"],
-      "classifierConfig": {"kind": "single", "allowedRoutes": ["quick", "audit"], "defaultRoute": "quick"},
-      "expect": {"result": "graph", "classifierConfig": {"kind": "single", "allowedRoutes": ["quick", "audit"], "defaultRoute": "quick"}, "compilerValidIn": ["typescript", "python"]}
+      "normalizedBranchKeys": ["audit", "quick"],
+      "classifierConfig": {"kind": "single", "allowedRoutes": ["audit", "quick"], "defaultRoute": "quick"},
+      "expect": {"result": "graph", "classifierConfig": {"kind": "single", "allowedRoutes": ["audit", "quick"], "defaultRoute": "quick"}, "compilerValidIn": ["typescript", "python"]}
     },
     {
       "name": "option-conflicts-with-nonempty-classifier-config",
-      "normalizedBranchKeys": ["quick"],
-      "classifierConfig": {"kind": "single", "allowedRoutes": ["quick"]},
-      "routePolicy": {"kind": "single", "allowedRoutes": ["quick"]},
+      "normalizedBranchKeys": ["audit", "quick"],
+      "classifierConfig": {"kind": "single", "allowedRoutes": ["audit", "quick"]},
+      "routePolicy": {"kind": "single", "allowedRoutes": ["audit", "quick"]},
       "expect": {"result": "error", "reason": "routePolicy-conflicts-with-preconfigured-classifier"}
     },
     {
       "name": "policy-routes-must-match-branch-order",
-      "normalizedBranchKeys": ["quick", "audit"],
+      "normalizedBranchKeys": ["audit", "quick"],
       "classifierConfig": {},
-      "routePolicy": {"kind": "single", "allowedRoutes": ["audit", "quick"]},
+      "routePolicy": {"kind": "single", "allowedRoutes": ["quick", "audit"]},
       "expect": {"result": "error", "reason": "allowedRoutes-must-equal-normalized-branch-keys"}
     },
     {
       "name": "invalid-supplied-policy-fails-before-graph-return",
-      "normalizedBranchKeys": ["quick"],
+      "normalizedBranchKeys": ["audit", "quick"],
       "classifierConfig": {},
-      "routePolicy": {"kind": "multi", "allowedRoutes": ["quick"]},
+      "routePolicy": {"kind": "multi", "allowedRoutes": ["audit", "quick"]},
       "expect": {"result": "error", "reason": "routePolicy-is-not-exact"}
     }
   ],

@@ -23,6 +23,7 @@ import {
   assertExactRouteSelection,
   edgeConditionError,
   edgeIsActive,
+  graphConditionCapabilityIssues,
   InvalidRouteSelectionError,
   routeSelectionExecutor,
 } from "./router-runtime.js";
@@ -681,6 +682,24 @@ export async function runGraphWithJournal(
   // prevents caller or executor mutation from changing live routing/config
   // after validation while leaving graphHash unchanged.
   graph = snapshotJson(JSON.parse(compilation.canonicalGraph)) as unknown as GraphSpec;
+  const capabilityIssues = graphConditionCapabilityIssues(graph);
+  if (capabilityIssues.length > 0) {
+    return {
+      status: "failed",
+      graphHash: compilation.graphHash,
+      nodes: [],
+      failures: capabilityIssues.map(({ nodeId, messages }) => runtimeFailure(
+        nodeId,
+        "UNSUPPORTED_EDGE_CONDITION",
+        messages.join("; "),
+        0,
+      )),
+      maxObservedConcurrency: 0,
+      totalAttempts: 0,
+      scheduledOrder: [],
+      completionOrder: [],
+    };
+  }
   assertTimerBounds(graph);
 
   const nodesById = new Map(graph.nodes.map((node) => [node.id, node]));

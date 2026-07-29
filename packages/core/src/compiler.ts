@@ -5,6 +5,7 @@ import {
   hashCanonicalSerialization,
 } from "./canonical.js";
 import { validateGraphDocument } from "./schema-validation.js";
+import { validateIntegratedRouterSnapshot } from "./integrated-router.js";
 import { validateStrictTypedPortsSnapshot } from "./typed-ports.js";
 import type { EdgeSpec, GraphSpec } from "./types.js";
 
@@ -33,7 +34,14 @@ export type DiagnosticCode =
   | "GE1208_UNSUPPORTED_TYPED_EDGE_MODE"
   | "GE1301_UNSUPPORTED_GRAPH_REVISION"
   | "GE1302_GRAPH_IDENTITY_MISMATCH"
-  | "GE1303_COMPONENT_IDENTITY_MISMATCH";
+  | "GE1303_COMPONENT_IDENTITY_MISMATCH"
+  | "GE1401_INVALID_ROUTER_POLICY"
+  | "GE1402_UNSUPPORTED_EDGE_CONDITION"
+  | "GE1403_CONDITION_SOURCE_NOT_ROUTER"
+  | "GE1404_ROUTE_NOT_ALLOWED"
+  | "GE1405_DUPLICATE_ROUTE_CASE"
+  | "GE1406_DUPLICATE_ROUTE_TARGET"
+  | "GE1407_INCOMPLETE_ROUTE_COVERAGE";
 
 export interface CompilerDiagnostic {
   code: DiagnosticCode;
@@ -324,6 +332,8 @@ export function compileGraph(document: GraphSpec | unknown): CompilationResult {
       ),
     );
   }
+
+  diagnostics.push(...validateIntegratedRouterSnapshot(graph));
 
   // Typed-port proof is deliberately opt-in. It runs only after the base
   // envelope, references, DAG, and graph policies are stable, so malformed

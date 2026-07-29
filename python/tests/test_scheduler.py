@@ -10,6 +10,7 @@ import pytest
 
 from graph_engineering import (
     AsyncScheduler,
+    DiagnosticCode,
     FailureCode,
     NodeContext,
     NodeResult,
@@ -17,6 +18,7 @@ from graph_engineering import (
     RunStatus,
     compile_graph,
     run_graph,
+    try_compile_graph,
 )
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -25,6 +27,16 @@ FIXTURES = ROOT / "spec/conformance"
 
 def load_json(name: str) -> dict[str, Any]:
     return json.loads((FIXTURES / name).read_text())
+
+
+def registered_loop_condition_graph() -> Any:
+    corpus = load_json("integrated-router.case.json")
+    fixture = next(
+        item
+        for item in corpus["compilerCases"]
+        if item["name"] == "registered-loop-condition-families-remain-compiler-valid"
+    )
+    return compile_graph(fixture["graph"])
 
 
 def make_node(node_id: str, **overrides: Any) -> dict[str, Any]:
@@ -244,23 +256,18 @@ def test_router_executes_only_selected_edge_and_merge_binds_only_active_branch()
     assert result.total_attempts == 3
 
 
-def test_selected_route_without_declared_edge_control_skips_entire_join() -> None:
-    result = asyncio.run(
-        run_graph(
-            compile_graph(routed_graph(allowed_routes=["quick", "security", "other"])),
-            {"requestedRoutes": ["other"]},
-            {"quick": lambda _: "must-not-run", "security": lambda _: "must-not-run"},
-        )
-    )
+def test_missing_declared_route_case_is_rejected_before_executor_access() -> None:
+    prepared_calls: list[str] = []
+    prepared = {
+        "quick": lambda _: prepared_calls.append("quick"),
+        "security": lambda _: prepared_calls.append("security"),
+    }
+    result = try_compile_graph(routed_graph(allowed_routes=["quick", "security", "other"]))
 
-    assert result.status is RunStatus.FAILED
-    assert result.outputs is None
-    assert result.failures == ()
-    assert result.total_attempts == 1
-    for node_id in ("quick", "security", "merge"):
-        assert result.nodes[node_id].status is NodeStatus.SKIPPED
-        assert result.nodes[node_id].failure is not None
-        assert result.nodes[node_id].failure.code is FailureCode.ROUTE_NOT_SELECTED
+    assert result.graph is None
+    assert [item.code for item in result.diagnostics] == [DiagnosticCode.INCOMPLETE_ROUTE_COVERAGE]
+    assert prepared
+    assert prepared_calls == []
 
 
 def test_custom_router_decision_is_recomputed_before_it_can_be_committed() -> None:
@@ -304,25 +311,17 @@ def test_custom_router_cannot_replace_the_authoritative_request_evidence() -> No
     assert result.total_attempts == 1
 
 
-def test_builtin_router_invalid_policy_is_non_retryable_invalid_selection() -> None:
+def test_invalid_builtin_router_policy_is_rejected_before_executor_access() -> None:
     document = routed_graph()
     document["nodes"][0]["config"] = {}
     document["nodes"][0]["retry"] = {"maxAttempts": 3}
 
-    result = asyncio.run(
-        run_graph(
-            compile_graph(document),
-            {"requestedRoutes": ["quick"]},
-        )
-    )
+    prepared_calls: list[str] = []
+    result = try_compile_graph(document)
 
-    router = result.nodes["classify"]
-    assert router.status is NodeStatus.FAILED
-    assert router.attempts == 1
-    assert router.failure is not None
-    assert router.failure.code is FailureCode.INVALID_ROUTE_SELECTION
-    assert router.failure.exception_type == "InvalidRouteSelectionError"
-    assert result.total_attempts == 1
+    assert result.graph is None
+    assert [item.code for item in result.diagnostics] == [DiagnosticCode.INVALID_ROUTER_POLICY]
+    assert prepared_calls == []
 
 
 def test_restored_successful_router_decision_is_revalidated_before_scheduling() -> None:
@@ -417,7 +416,7 @@ def test_malformed_route_result_is_a_structured_router_failure(mutation: str) ->
     assert all(result.nodes[node_id].attempts == 0 for node_id in ("quick", "security", "merge"))
 
 
-def test_unsupported_route_condition_fails_structurally_before_target_attempt() -> None:
+def test_unsupported_route_condition_is_rejected_before_executor_access() -> None:
     document = routed_graph()
     document["edges"][0]["condition"] = {
         "apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1",
@@ -425,24 +424,20 @@ def test_unsupported_route_condition_fails_structurally_before_target_attempt() 
         "routeKey": "quick",
     }
 
-    result = asyncio.run(
-        run_graph(
-            compile_graph(document),
-            {"requestedRoutes": ["quick"]},
-            {"quick": lambda _: "must-not-run", "security": lambda _: "not-selected"},
-        )
-    )
+    prepared_calls: list[str] = []
+    prepared = {
+        "quick": lambda _: prepared_calls.append("quick"),
+        "security": lambda _: prepared_calls.append("security"),
+    }
+    result = try_compile_graph(document)
 
-    assert result.nodes["classify"].status is NodeStatus.FAILED
-    assert result.nodes["classify"].attempts == 0
-    assert result.nodes["classify"].failure is not None
-    assert result.nodes["classify"].failure.code is FailureCode.UNSUPPORTED_EDGE_CONDITION
-    assert result.nodes["quick"].status is NodeStatus.SKIPPED
-    assert result.nodes["quick"].failure is not None
-    assert result.nodes["quick"].failure.code is FailureCode.UPSTREAM_FAILED
+    assert result.graph is None
+    assert [item.code for item in result.diagnostics] == [DiagnosticCode.UNSUPPORTED_EDGE_CONDITION]
+    assert prepared
+    assert prepared_calls == []
 
 
-def test_route_condition_from_non_router_source_is_rejected_before_target_attempt() -> None:
+def test_route_condition_from_non_router_source_is_rejected_at_compile_gate() -> None:
     document = make_graph(
         outputs={"result": {"node": "target"}},
         nodes=[make_node("root"), make_node("target", kind="agent")],
@@ -456,26 +451,22 @@ def test_route_condition_from_non_router_source_is_rejected_before_target_attemp
         ],
     )
 
-    result = asyncio.run(
-        run_graph(
-            compile_graph(document),
-            {},
-            {"root": lambda _: route_result("quick"), "target": lambda _: "must-not-run"},
-        )
-    )
+    prepared_calls: list[str] = []
+    prepared = {
+        "root": lambda _: prepared_calls.append("root"),
+        "target": lambda _: prepared_calls.append("target"),
+    }
+    result = try_compile_graph(document)
 
-    source = result.nodes["root"]
-    assert source.status is NodeStatus.FAILED
-    assert source.attempts == 0
-    assert source.failure is not None
-    assert source.failure.code is FailureCode.UNSUPPORTED_EDGE_CONDITION
-    target = result.nodes["target"]
-    assert target.status is NodeStatus.SKIPPED
-    assert target.failure is not None
-    assert target.failure.code is FailureCode.UPSTREAM_FAILED
+    assert result.graph is None
+    assert [item.code for item in result.diagnostics] == [
+        DiagnosticCode.CONDITION_SOURCE_NOT_ROUTER
+    ]
+    assert prepared
+    assert prepared_calls == []
 
 
-def test_unsupported_conditions_are_aggregated_by_edge_id_on_the_source() -> None:
+def test_unsupported_conditions_follow_edge_declaration_order_at_compile_gate() -> None:
     document = make_graph(
         outputs={"result": {"node": "left"}},
         nodes=[
@@ -499,16 +490,108 @@ def test_unsupported_conditions_are_aggregated_by_edge_id_on_the_source() -> Non
         ],
     )
 
-    result = asyncio.run(run_graph(compile_graph(document), {}, {}))
+    prepared_calls: list[str] = []
+    result = try_compile_graph(document)
 
-    source = result.nodes["root"]
-    assert source.failure is not None
-    assert source.failure.code is FailureCode.UNSUPPORTED_EDGE_CONDITION
-    assert source.failure.message == (
-        "Edge 'a-condition' has an unsupported or malformed condition; "
-        "Edge 'z-condition' has an unsupported or malformed condition"
+    assert result.graph is None
+    assert [item.code for item in result.diagnostics] == [
+        DiagnosticCode.INVALID_ROUTER_POLICY,
+        DiagnosticCode.UNSUPPORTED_EDGE_CONDITION,
+        DiagnosticCode.UNSUPPORTED_EDGE_CONDITION,
+    ]
+    assert [item.edge_id for item in result.diagnostics] == [
+        None,
+        "z-condition",
+        "a-condition",
+    ]
+    assert prepared_calls == []
+
+
+def test_registered_foreign_conditions_fail_whole_graph_before_handler_access() -> None:
+    handler_calls: list[str] = []
+
+    def source(_: NodeContext) -> dict[str, bool]:
+        handler_calls.append("source")
+        return {"done": True}
+
+    result = asyncio.run(run_graph(registered_loop_condition_graph(), {}, {"source": source}))
+
+    assert result.status is RunStatus.FAILED
+    assert result.total_attempts == 0
+    assert dict(result.nodes) == {}
+    assert result.scheduled_order == ()
+    assert result.completion_order == ()
+    assert len(result.failures) == 1
+    failure = result.failures[0]
+    assert failure.code is FailureCode.UNSUPPORTED_EDGE_CONDITION
+    assert failure.node_id == "source"
+    assert failure.attempt == 0
+    assert "to-continue" in failure.message
+    assert "to-dry" in failure.message
+    assert "to-bound" in failure.message
+    assert failure.message.index("to-continue") < failure.message.index("to-dry")
+    assert failure.message.index("to-dry") < failure.message.index("to-bound")
+    assert handler_calls == []
+
+
+def test_foreign_condition_failure_order_uses_node_then_edge_declaration() -> None:
+    condition_version = "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1"
+    document = make_graph(
+        entrypoints=["z-source", "a-source"],
+        outputs={"z": {"node": "z-target"}, "a": {"node": "a-target"}},
+        nodes=[
+            make_node("z-source"),
+            make_node("z-target"),
+            make_node("a-source"),
+            make_node("a-target"),
+        ],
+        edges=[
+            {
+                "id": "z-edge-declared-first",
+                "from": {"node": "a-source"},
+                "to": {"node": "a-target"},
+                "condition": {
+                    "apiVersion": condition_version,
+                    "kind": "LoopDryVerdict",
+                    "maxRounds": 3,
+                    "round": 1,
+                    "roundKey": "r1",
+                },
+            },
+            {
+                "id": "a-edge-declared-second",
+                "from": {"node": "z-source"},
+                "to": {"node": "z-target"},
+                "condition": {
+                    "apiVersion": condition_version,
+                    "kind": "LoopContinue",
+                    "maxRounds": 3,
+                    "round": 0,
+                    "roundKey": "r0",
+                },
+            },
+        ],
     )
-    assert source.attempts == 0
+    handler_calls: list[str] = []
+
+    def handler(context: NodeContext) -> dict[str, str]:
+        handler_calls.append(context.node.id)
+        return {"node": context.node.id}
+
+    result = asyncio.run(
+        run_graph(
+            compile_graph(document),
+            {},
+            {"z-source": handler, "a-source": handler},
+        )
+    )
+
+    assert result.total_attempts == 0
+    assert dict(result.nodes) == {}
+    assert [failure.node_id for failure in result.failures] == ["z-source", "a-source"]
+    assert "a-edge-declared-second" in result.failures[0].message
+    assert "z-edge-declared-first" in result.failures[1].message
+    assert handler_calls == []
 
 
 def test_retry_succeeds_inside_node_and_global_attempt_budgets() -> None:

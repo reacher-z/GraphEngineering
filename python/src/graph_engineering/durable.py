@@ -41,6 +41,7 @@ from .scheduler import (
     _active_incoming_edges,
     _AttemptIdentity,
     _BindingError,
+    _condition_capability_failure,
     _InvalidRouteSelectionError,
     _selected_routes,
     _unsupported_condition_sources,
@@ -2056,6 +2057,9 @@ async def start_graph_run(
 
     handler_snapshot = dict(handlers or {})
     graph = _fresh_compiled_graph(graph)
+    capability_failure = _condition_capability_failure(graph)
+    if capability_failure is not None:
+        return capability_failure
     implementation_hash = _implementation_hash(implementation_id)
     try:
         input_snapshot = portable_json_snapshot(graph_input)
@@ -2118,6 +2122,9 @@ async def resume_graph_run(
 
     handler_snapshot = dict(handlers or {})
     graph = _fresh_compiled_graph(graph)
+    capability_failure = _condition_capability_failure(graph)
+    if capability_failure is not None:
+        return capability_failure
     implementation_hash = _implementation_hash(implementation_id)
     events = await _read_history(event_store, run_id)
     folded = _fold_history(

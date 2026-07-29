@@ -2,6 +2,7 @@ import {
   canonicalSerialize,
   compareUnicodeCodePoints,
   type EdgeSpec,
+  type GraphSpec,
   type NodeSpec,
 } from "@graph-engineering/core";
 import {
@@ -30,6 +31,11 @@ export class InvalidRouteSelectionError extends TypeError {
     super(message, options);
     this.name = "InvalidRouteSelectionError";
   }
+}
+
+export interface GraphConditionCapabilityIssue {
+  readonly nodeId: string;
+  readonly messages: readonly string[];
 }
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -70,6 +76,36 @@ export function edgeConditionError(
     return `Edge '${edge.id}' uses RouteEquals but source '${source.id}' is not a router`;
   }
   return undefined;
+}
+
+/**
+ * Inspect the complete compiled graph before dispatch and group every
+ * condition this scheduler cannot execute by source node. The compiler owns
+ * the cross-feature registry, while this runtime currently owns RouteEquals
+ * only; registered foreign conditions therefore remain compiler-valid but
+ * must fail closed before any node can run.
+ */
+export function graphConditionCapabilityIssues(
+  graph: GraphSpec,
+): readonly GraphConditionCapabilityIssue[] {
+  const nodes = new Map(graph.nodes.map((node) => [node.id, node]));
+  const grouped = new Map<string, string[]>();
+  for (const edge of graph.edges) {
+    const source = nodes.get(edge.from.node);
+    if (source === undefined) continue;
+    const issue = edgeConditionError(edge, source);
+    if (issue === undefined) continue;
+    const messages = grouped.get(source.id);
+    if (messages === undefined) grouped.set(source.id, [issue]);
+    else messages.push(issue);
+  }
+  return graph.nodes.flatMap((node) => {
+    const messages = grouped.get(node.id);
+    return messages === undefined ? [] : [{
+      nodeId: node.id,
+      messages: Object.freeze([...messages]),
+    }];
+  });
 }
 
 /** Recompute the decision from its request evidence and policy, rejecting forged results. */

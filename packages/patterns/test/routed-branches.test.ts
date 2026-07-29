@@ -45,6 +45,86 @@ test("routedBranches emits only the fixed versioned RouteEquals annotation", () 
   ]);
 });
 
+test("routedBranches synthesizes a direct single-route policy for legacy empty config", () => {
+  const graph = routedBranches(options());
+  assert.deepEqual(graph.nodes[0]?.config, {
+    kind: "single",
+    allowedRoutes: ["correctness", "security"],
+  });
+  assert.equal(compileGraph(graph).valid, true);
+});
+
+test("routedBranches lowers an exact supplied routePolicy directly", () => {
+  const value = options();
+  const graph = routedBranches({
+    ...value,
+    routePolicy: {
+      kind: "multi",
+      allowedRoutes: ["correctness", "security"],
+      defaultRoute: "correctness",
+      maxMulticast: 2,
+    },
+  });
+  assert.deepEqual(graph.nodes[0]?.config, {
+    kind: "multi",
+    allowedRoutes: ["correctness", "security"],
+    defaultRoute: "correctness",
+    maxMulticast: 2,
+  });
+});
+
+test("routedBranches preserves a matching preconfigured policy", () => {
+  const value = options();
+  value.classify.config = {
+    kind: "single",
+    allowedRoutes: ["correctness", "security"],
+    defaultRoute: "security",
+  };
+  const graph = routedBranches(value);
+  assert.deepEqual(graph.nodes[0]?.config, value.classify.config);
+});
+
+test("routedBranches rejects routePolicy with preconfigured classifier config", () => {
+  const value = options();
+  value.classify.config = {
+    kind: "single",
+    allowedRoutes: ["correctness", "security"],
+  };
+  expectPatternError(
+    () => routedBranches({ ...value, routePolicy: value.classify.config as never }),
+    "GE_PATTERN_INVALID_INPUT",
+    "#/routePolicy",
+  );
+});
+
+test("routedBranches rejects policy routes outside normalized branch order", () => {
+  expectPatternError(
+    () => routedBranches({
+      ...options(),
+      routePolicy: {
+        kind: "single",
+        allowedRoutes: ["security", "correctness"],
+      },
+    }),
+    "GE_PATTERN_INVALID_INPUT",
+    "#/routePolicy/allowedRoutes",
+  );
+});
+
+test("routedBranches rejects an inexact supplied routePolicy", () => {
+  expectPatternError(
+    () => routedBranches({
+      ...options(),
+      routePolicy: {
+        kind: "multi",
+        allowedRoutes: ["correctness", "security"],
+      } as never,
+    }),
+    "GE_PATTERN_INVALID_INPUT",
+    "#/routePolicy/maxMulticast",
+  );
+});
+
 test("routedBranches gives every branch one unique merge port", () => {
   const graph = routedBranches(options());
   assert.deepEqual(

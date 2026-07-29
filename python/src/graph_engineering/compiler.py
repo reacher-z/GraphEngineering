@@ -41,6 +41,13 @@ class DiagnosticCode(StrEnum):
     UNSUPPORTED_GRAPH_REVISION = "GE1301_UNSUPPORTED_GRAPH_REVISION"
     GRAPH_IDENTITY_MISMATCH = "GE1302_GRAPH_IDENTITY_MISMATCH"
     COMPONENT_IDENTITY_MISMATCH = "GE1303_COMPONENT_IDENTITY_MISMATCH"
+    INVALID_ROUTER_POLICY = "GE1401_INVALID_ROUTER_POLICY"
+    UNSUPPORTED_EDGE_CONDITION = "GE1402_UNSUPPORTED_EDGE_CONDITION"
+    CONDITION_SOURCE_NOT_ROUTER = "GE1403_CONDITION_SOURCE_NOT_ROUTER"
+    ROUTE_NOT_ALLOWED = "GE1404_ROUTE_NOT_ALLOWED"
+    DUPLICATE_ROUTE_CASE = "GE1405_DUPLICATE_ROUTE_CASE"
+    DUPLICATE_ROUTE_TARGET = "GE1406_DUPLICATE_ROUTE_TARGET"
+    INCOMPLETE_ROUTE_COVERAGE = "GE1407_INCOMPLETE_ROUTE_COVERAGE"
 
 
 @dataclass(frozen=True, slots=True)
@@ -315,10 +322,12 @@ def try_compile_graph(graph: GraphSpec | Mapping[str, Any]) -> CompilationResult
                 )
             )
 
-    # Import lazily because typed-port validation projects through this module's
-    # stable Diagnostic type.  The validator does not compile or mutate graphs.
+    # Import lazily because the validators project through this module's stable
+    # Diagnostic type. They do not compile or mutate graphs.
+    from .integrated_router import validate_integrated_router_snapshot
     from .typed_ports import validate_strict_typed_ports
 
+    diagnostics.extend(validate_integrated_router_snapshot(graph))
     diagnostics.extend(validate_strict_typed_ports(graph))
     if diagnostics:
         return CompilationResult(

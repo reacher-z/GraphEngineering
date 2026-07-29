@@ -4,6 +4,7 @@ import type {
   GraphSpec,
   JsonSchema,
   NodeSpec,
+  RouteSelectionPolicySnapshot,
 } from "@graph-engineering/core";
 
 export type DeepReadonly<T> =
@@ -42,6 +43,7 @@ export interface RoutedBranchesOptions extends PatternBaseOptions {
   classify: NodeSpec;
   branches: readonly KeyedNode[];
   merge: NodeSpec;
+  routePolicy?: RouteSelectionPolicySnapshot;
 }
 
 export interface VerifiedFanoutOptions extends PatternBaseOptions {

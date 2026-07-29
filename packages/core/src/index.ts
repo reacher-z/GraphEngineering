@@ -28,6 +28,19 @@ export type {
 } from "./component-identity.js";
 export { compileGraph } from "./compiler.js";
 export {
+  ROUTER_CONDITION_API_VERSION,
+  validateRegisteredEdgeCondition,
+  validateRouteSelectionPolicy,
+} from "./integrated-router.js";
+export type {
+  ConditionValidation,
+  InvalidRouterValue,
+  PolicyValidation,
+  RouteSelectionPolicySnapshot,
+  ValidRegisteredCondition,
+  ValidRouterPolicy,
+} from "./integrated-router.js";
+export {
   GraphSourceError,
   MAX_GRAPH_SOURCE_BYTES,
   MAX_GRAPH_SOURCE_DEPTH,

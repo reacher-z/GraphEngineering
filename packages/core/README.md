@@ -139,6 +139,22 @@ the whole-graph hash, and its component identity, all derived from the same
 single compiler capture. This TypeScript builder seals on its first `build()`
 attempt; later mutation or build calls fail with `GE_BUILDER_SEALED`.
 
+## Compile integrated routers
+
+A `router` node's `config` is a direct, exact single- or multi-route selection
+policy. Every allowed route must have one package-versioned `RouteEquals`
+outgoing edge, route keys and targets must be unique, and no edge may name a
+route outside the policy. `compileGraph` validates this before typed ports and
+returns ordered `GE1401` through `GE1407` diagnostics for policy shape,
+condition ownership, source kind, membership, duplicate cases or targets, and
+incomplete coverage.
+
+Registered `LoopContinue`, `LoopDryVerdict`, and `LoopVerdictAtBound`
+conditions remain owned by the loop pattern and pass this compiler stage
+unchanged. Malformed portable router values receive GE140x diagnostics;
+hostile or non-portable host values remain `GE1007_INVALID_GRAPH` at the
+earlier capture/envelope boundary.
+
 ## Opt in to strict typed ports
 
 Legacy graphs retain ordinary named-port runtime behavior. Static proof is
