@@ -136,6 +136,27 @@ export const SQLITE_BASELINE_DIAGNOSE_CURSOR_PRE_REBIND = Symbol(
 export const SQLITE_BASELINE_ABORT_CURSOR_PRE_REBIND = Symbol(
   "SQLiteBaselineTempStage.abortCursorPreRebind",
 );
+export const SQLITE_BASELINE_ASSERT_CURSOR_PRE_REBIND_COMPLETE = Symbol(
+  "SQLiteBaselineTempStage.assertCursorPreRebindComplete",
+);
+export const SQLITE_BASELINE_PREPARE_CURSOR_OUTER_PUBLICATION = Symbol(
+  "SQLiteBaselineTempStage.prepareCursorOuterPublication",
+);
+export const SQLITE_BASELINE_PUBLISH_CURSOR_OUTER_PUBLICATION = Symbol(
+  "SQLiteBaselineTempStage.publishCursorOuterPublication",
+);
+export const SQLITE_BASELINE_ASSERT_CURSOR_OUTER_PUBLICATION_OWNED = Symbol(
+  "SQLiteBaselineTempStage.assertCursorOuterPublicationOwned",
+);
+export const SQLITE_BASELINE_ASSERT_CURSOR_OUTER_PUBLICATION_ACTIVE = Symbol(
+  "SQLiteBaselineTempStage.assertCursorOuterPublicationActive",
+);
+export const SQLITE_BASELINE_RETIRE_CURSOR_OUTER_PUBLICATION = Symbol(
+  "SQLiteBaselineTempStage.retireCursorOuterPublication",
+);
+export const SQLITE_BASELINE_POISON_CURSOR_OUTER_PUBLICATION = Symbol(
+  "SQLiteBaselineTempStage.poisonCursorOuterPublication",
+);
 
 /** Opaque evidence bound to one stage-private pending write pair. */
 export interface SQLiteBaselineOwnedWriteReceipt {
@@ -324,6 +345,39 @@ export interface SQLiteBaselineCursorPreRebindStage {
   [SQLITE_BASELINE_DIAGNOSE_CURSOR_PRE_REBIND](session: object): void;
   [SQLITE_BASELINE_ABORT_CURSOR_PRE_REBIND](
     session: object | undefined,
+    message: string,
+  ): never;
+  [SQLITE_BASELINE_ASSERT_CURSOR_PRE_REBIND_COMPLETE](
+    connection: SQLiteConnection,
+    receipt: SQLiteCursorPreRebindReceipt,
+    projectionIdentity: OperationBaselineProjectionIdentity,
+    transferSession: object,
+  ): void;
+  [SQLITE_BASELINE_PREPARE_CURSOR_OUTER_PUBLICATION](
+    connection: SQLiteConnection,
+    receipt: SQLiteCursorPreRebindReceipt,
+    projectionIdentity: OperationBaselineProjectionIdentity,
+    transferSession: object,
+    authority: object,
+  ): void;
+  [SQLITE_BASELINE_PUBLISH_CURSOR_OUTER_PUBLICATION](authority: object): void;
+  [SQLITE_BASELINE_ASSERT_CURSOR_OUTER_PUBLICATION_OWNED](
+    connection: SQLiteConnection,
+    receipt: SQLiteCursorPreRebindReceipt,
+    projectionIdentity: OperationBaselineProjectionIdentity,
+    transferSession: object,
+    authority: object,
+  ): void;
+  [SQLITE_BASELINE_ASSERT_CURSOR_OUTER_PUBLICATION_ACTIVE](
+    connection: SQLiteConnection,
+    receipt: SQLiteCursorPreRebindReceipt,
+    projectionIdentity: OperationBaselineProjectionIdentity,
+    transferSession: object,
+    authority: object,
+  ): void;
+  [SQLITE_BASELINE_RETIRE_CURSOR_OUTER_PUBLICATION](): void;
+  [SQLITE_BASELINE_POISON_CURSOR_OUTER_PUBLICATION](
+    authority: object,
     message: string,
   ): never;
 }

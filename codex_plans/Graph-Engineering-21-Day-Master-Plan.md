@@ -13732,3 +13732,110 @@ stop in `pre-rebind-complete`. It must not execute cursor rebind, rules 11/12,
 TEMP retirement or commit; those remain separate reviewed tranches with their
 own hostile and crash/reopen evidence. Graph Engineering delivery, production
 claims, active-manifest support and community-growth targets remain open.
+
+#### 31.37.24 Append-only B3 outer-publication authority runtime acceptance
+
+The package-private TypeScript outer-publication authority seam is accepted on
+2026-07-29. This section only appends acceptance evidence and the next bounded
+implementation order; it does not alter or weaken any preceding B3 contract,
+release gate, nonclaim or hostile requirement.
+
+The accepted seam takes one exact completed B2 object graph and performs the
+smallest atomic ownership transition required before permanent migration work.
+Its bounded input is the exact connection, TEMP stage, pre-rebind receipt,
+projection identity, B2 ownership transfer, migration-lock capability,
+provider-clock capability and first-boundary clock evidence. Preparation binds
+those identities without consuming the evidence. Activation consumes that one
+evidence, retains its exact tombstone, publishes the already-prepared stage
+transfer through a private continuation and marks one reusable outer authority
+active. It performs no SQL and advances no database counter.
+
+The continuation is an opaque package-private object held only in WeakMap
+registries. The prepared assertion arms it after every fallible B2, owner,
+lineage, lock, clock and cancellation check. Publication first resolves the
+exact continuation and rejects missing, forged, retired or replayed values
+before entering its assignment-only tail. The tail then deletes the
+continuation, publishes the exact stage/authority identity and advances the
+transfer lifecycle. No caller can substitute an arbitrary transfer/authority
+pair at this boundary.
+
+Cancellation remains the sole retryable inactive exit. An already-cancelled
+valid signal fails before the continuation is armed and before clock evidence
+is consumed. The same exact authority and evidence may then be retried without
+minting a replacement graph. Invalid cancellation presentation is a caller
+error and cannot poison an unrelated registered authority.
+
+Every invariant failure after exact authority lookup is terminal. Loss or
+replacement of the transaction lineage, including rollback followed by a new
+EXCLUSIVE transaction, retires the authority and the stage/transfer graph.
+Clock-sequence drift, graph substitution, unexpected epoch/`total_changes`
+movement or another non-stale invariant failure poisons all three in-memory
+owners. A later provider-clock boundary therefore cannot leave an inactive
+ghost that can be retried. A retired or poisoned authority cannot be activated
+or asserted a second time.
+
+Evidence consumption is exception-safe at the one-way boundary. The
+implementation captures `Object.create` and `Object.freeze` at module load,
+constructs the opaque tombstone and immutable tombstone state, registers that
+state, and only then changes evidence to `consumed=true`. A construction or
+registration failure therefore leaves evidence unconsumed; successful
+consumption always has a retained exact tombstone. Ambient replacement of the
+two Object intrinsics after import cannot enter this tail.
+
+Retirement also burns any armed continuation before applying its
+assignment-only stage lifecycle transition. This ordering is mandatory: a
+captured tail from a prepared authority must never be able to republish a
+retired graph. The bridge-level adversarial oracle directly arms a tail,
+retires its exact pair, attempts publication twice and proves structured
+rejection plus absence of owned state. A companion oracle publishes once,
+rejects replay and proves the successful ownership remains intact.
+
+Active-authority assertion deliberately differs from activation preparation.
+Preparation retains the complete old B2 epoch and `total_changes` fence because
+no permanent write is yet authorized. Active assertion checks the stable stage,
+transfer, authority, receipt, projection, connection, transaction lineage,
+migration lock and clock tombstone graph, plus the outer authority's mutable
+current transaction-epoch and change-counter watermark. It does not call the
+obsolete pre-`0002` B2 fence. A later reviewed write-ledger implementation can
+atomically advance the current watermark together with its authenticated write
+receipt, while unauthorized movement remains detectable.
+
+The final adversarial suite contains fourteen focused outer-authority cases and
+eight focused clock-authority cases. It covers exact activation and snapshot,
+cancellation retry, clone and cross-run substitution, preconsumed evidence,
+unfinished and diagnosed B2 graphs, all identity substitutions, later-boundary
+poisoning, inactive and active rollback retirement, hostile ambient intrinsics,
+retired-tail burn, successful-tail replay, zero SQL/permanent write/transaction
+control, and runtime plus TypeScript root-export isolation. The package root is
+checked both as a runtime namespace and as source text so type-only private
+interfaces cannot escape unnoticed.
+
+Acceptance evidence on one final byte set is:
+
+1. outer-authority focused tests 14/14 passed;
+2. provider-clock focused tests 8/8 passed;
+3. the complete SQLite package suite passed 859/859 tests across 24 files;
+4. SQLite package typecheck and lint passed;
+5. workspace typecheck and lint passed across all eight implementation
+   packages;
+6. additions and whitespace validation passed;
+7. the final independent scope audit reported HIGH 0 / MEDIUM 0 / LOW 0; and
+8. the exact review record is
+   `codex_logs/reviews/SQLITE-CURSOR-B3-OUTER-AUTHORITY-2026-07-29.md`.
+
+This acceptance authorizes only the next smallest production leaf in the
+ordering already frozen by section 31.37.21.7: the package-private TypeScript
+portable initial-write digest codec plus its seven golden vectors and hostile
+rejection vectors. The codec leaf must be pure. It may implement tagged scalar
+encoding, two-dimensional execution framing, Unicode scalar-value canonical
+ordering, signed 64-bit integer bounds, unpadded base64url and the two
+domain-separated SHA-256 digests. It must not execute migration `0002`, write a
+permanent table, create the four-write receipt ledger, perform rebind, enforce
+rules 11/12, retire TEMP state or commit. Post-DDL fence/reader proof remains
+the following independently audited leaf.
+
+The accelerated three-day publication objective is a source-only alpha preview,
+not a formal release-candidate claim. Formal RC wording remains forbidden until
+the repository's evidence-closure overlay selects a real candidate and all
+required release-weight gates close. GitHub popularity and a 5K-star outcome
+remain product/community goals rather than testable delivery guarantees.

@@ -50,6 +50,9 @@ import {
   SQLITE_BASELINE_COMPLETE_CURSOR_PRE_REBIND,
   SQLITE_BASELINE_DIAGNOSE_CURSOR_PRE_REBIND,
   SQLITE_BASELINE_ABORT_CURSOR_PRE_REBIND,
+  SQLITE_BASELINE_ASSERT_CURSOR_OUTER_PUBLICATION_OWNED,
+  SQLITE_BASELINE_ASSERT_CURSOR_OUTER_PUBLICATION_ACTIVE,
+  SQLITE_BASELINE_ASSERT_CURSOR_PRE_REBIND_COMPLETE,
   SQLITE_BASELINE_FENCE_ORDERED_HANDOFF,
   SQLITE_BASELINE_FENCE_CHECKPOINT_CAMPAIGN,
   SQLITE_BASELINE_FENCE_CURSOR_STAGE_TRANSFER,
@@ -58,6 +61,10 @@ import {
   SQLITE_BASELINE_FENCE_STREAM_RECORD_CAMPAIGN,
   SQLITE_BASELINE_FINISH_COOPERATIVE_WRITES,
   SQLITE_BASELINE_OWNED_WRITE,
+  SQLITE_BASELINE_POISON_CURSOR_OUTER_PUBLICATION,
+  SQLITE_BASELINE_PREPARE_CURSOR_OUTER_PUBLICATION,
+  SQLITE_BASELINE_PUBLISH_CURSOR_OUTER_PUBLICATION,
+  SQLITE_BASELINE_RETIRE_CURSOR_OUTER_PUBLICATION,
   SQLITE_BASELINE_REGISTER_ORDERED_HANDOFF_CLEANUP,
   SQLITE_BASELINE_REGISTER_CHECKPOINT_CLEANUP,
   SQLITE_BASELINE_REGISTER_LEASE_LOCK_HOLD_CLEANUP,
@@ -93,6 +100,7 @@ import {
   readSQLiteConnectionOwnerSnapshot,
   readSQLiteConnectionTotalChangesSnapshot,
   type SQLiteConnectionOwnerSnapshot,
+  type SQLiteConnectionTransactionLineage,
 } from "./sqlite-connection.js";
 
 const OPERATION = "inspect-schema" as const;
@@ -134,6 +142,7 @@ const ACTIVE_STAGES = new WeakMap<SQLiteConnection, SQLiteBaselineTempStage>();
 const weakMapGetIntrinsic = WeakMap.prototype.get;
 const weakMapSetIntrinsic = WeakMap.prototype.set;
 const weakMapDeleteIntrinsic = WeakMap.prototype.delete;
+const reflectApplyIntrinsic = Reflect.apply;
 
 function activeStage(connection: SQLiteConnection): SQLiteBaselineTempStage | undefined {
   return Reflect.apply(weakMapGetIntrinsic, ACTIVE_STAGES, [connection]) as
@@ -1461,6 +1470,7 @@ export class SQLiteBaselineTempStage {
   #cursorTransferProjection: OperationBaselineProjectionIdentity | undefined;
   #cursorTransferCaptureEpoch: bigint | undefined;
   #cursorTransferStageEpoch: bigint | undefined;
+  #cursorTransferLineage: SQLiteConnectionTransactionLineage | undefined;
   #cursorTransferAllowedTotalChanges: number | undefined;
   #cursorSealState: "absent" | "creating" | "present" | "poisoned" = "absent";
   #cursorSealRootpage: number | undefined;
@@ -1470,6 +1480,12 @@ export class SQLiteBaselineTempStage {
   #cursorPreRebindSession: object | undefined;
   #cursorPreRebindCleanup: (() => void) | undefined;
   #cursorPreRebindInsertStatement: StatementSync | undefined;
+  #cursorOuterPublicationState:
+    "unused" | "prepared" | "published" | "retired" | "poisoned" = "unused";
+  #cursorOuterPublicationAuthority: object | undefined;
+  #cursorOuterPublicationEpoch: bigint | undefined;
+  #cursorOuterPublicationLineage: SQLiteConnectionTransactionLineage | undefined;
+  #cursorOuterPublicationAllowedTotalChanges: number | undefined;
   readonly #mainOperationsCatalogIdentity: SQLiteMainOperationsCatalogIdentity;
   #cooperativeWritesFinished = false;
 
@@ -2193,6 +2209,7 @@ export class SQLiteBaselineTempStage {
     const privateChanges = readSQLiteConnectionTotalChangesSnapshot(connection);
     if (!owner.isTransaction
         || owner.transactionMode !== "exclusive"
+        || owner.transactionLineage === null
         || owner.transactionEpoch !== this.#transactionEpoch
         || privateChanges.transactionEpoch !== owner.transactionEpoch
         || privateChanges.totalChanges !== finalTotalChanges) {
@@ -2216,6 +2233,7 @@ export class SQLiteBaselineTempStage {
     this.#cursorTransferProjection = receiptWitness.projectionIdentity;
     this.#cursorTransferCaptureEpoch = owner.transactionEpoch;
     this.#cursorTransferStageEpoch = owner.transactionEpoch;
+    this.#cursorTransferLineage = owner.transactionLineage;
     this.#cursorTransferAllowedTotalChanges = finalTotalChanges;
     this.#cursorTransferState = "active";
     return session;
@@ -2245,6 +2263,7 @@ export class SQLiteBaselineTempStage {
         || this.#cursorTransferProjection !== this.#orderedProjectionIdentity
         || this.#cursorTransferCaptureEpoch === undefined
         || this.#cursorTransferStageEpoch !== this.#transactionEpoch
+        || this.#cursorTransferLineage === undefined
         || this.#cursorTransferAllowedTotalChanges !== this.#allowedTotalChanges
         || activeStage(connection) !== this
         || this.#orderedHandoffState !== "complete"
@@ -2274,6 +2293,7 @@ export class SQLiteBaselineTempStage {
     const changesBefore = readSQLiteConnectionTotalChangesSnapshot(connection);
     if (!ownerBefore.isTransaction
         || ownerBefore.transactionMode !== "exclusive"
+        || ownerBefore.transactionLineage !== this.#cursorTransferLineage
         || ownerBefore.transactionEpoch !== this.#cursorTransferStageEpoch
         || changesBefore.transactionEpoch !== ownerBefore.transactionEpoch
         || changesBefore.totalChanges !== this.#cursorTransferAllowedTotalChanges) {
@@ -2295,6 +2315,7 @@ export class SQLiteBaselineTempStage {
     }
     if (!ownerAfter.isTransaction
         || ownerAfter.transactionMode !== "exclusive"
+        || ownerAfter.transactionLineage !== this.#cursorTransferLineage
         || ownerAfter.transactionEpoch !== this.#cursorTransferStageEpoch
         || ownerAfter.transactionEpoch !== ownerBefore.transactionEpoch
         || this.#transactionEpoch !== this.#cursorTransferStageEpoch
@@ -2303,6 +2324,7 @@ export class SQLiteBaselineTempStage {
         || changesAfter.totalChanges !== changesBefore.totalChanges
         || !ownerFinal.isTransaction
         || ownerFinal.transactionMode !== "exclusive"
+        || ownerFinal.transactionLineage !== this.#cursorTransferLineage
         || ownerFinal.transactionEpoch !== ownerAfter.transactionEpoch
         || reportedEpoch !== ownerFinal.transactionEpoch) {
       return this.#poison("SQLite cursor stage ownership transfer owner fence changed");
@@ -2596,6 +2618,171 @@ export class SQLiteBaselineTempStage {
     return this.#poison(message);
   }
 
+  /** Validate the exact B2 terminal graph without SQL or lifecycle mutation. */
+  #assertCursorPreRebindComplete(
+    connection: SQLiteConnection,
+    receipt: SQLiteCursorPreRebindReceipt,
+    projectionIdentity: OperationBaselineProjectionIdentity,
+    transferSession: object,
+  ): void {
+    const witness = assertSQLiteCursorPreRebindReceiptProvenance(receipt);
+    let owner: SQLiteConnectionOwnerSnapshot;
+    try {
+      owner = readSQLiteConnectionOwnerSnapshot(connection);
+    } catch (error) {
+      if (error instanceof CycleStoreProviderError) throw error;
+      return unavailable("SQLite provider is closed");
+    }
+    if (this.#state !== "open"
+        || connection !== this.#connection
+        || activeStage(connection) !== this
+        || this.#cursorTransferState !== "active"
+        || transferSession !== this.#cursorTransferSession
+        || receipt !== this.#cursorTransferReceipt
+        || projectionIdentity !== this.#cursorTransferProjection
+        || witness.projectionIdentity !== projectionIdentity
+        || this.#cursorTransferCaptureEpoch === undefined
+        || this.#cursorTransferStageEpoch === undefined
+        || this.#cursorTransferStageEpoch !== this.#transactionEpoch
+        || this.#cursorTransferLineage === undefined
+        || this.#cursorTransferAllowedTotalChanges === undefined
+        || this.#cursorTransferAllowedTotalChanges !== this.#allowedTotalChanges
+        || this.#cursorSealState !== "present"
+        || this.#cursorSealRootpage === undefined
+        || this.#cursorSealCatalogSnapshot === undefined
+        || this.#cursorPreRebindState !== "pre-rebind-complete"
+        || this.#cursorPreRebindSession !== undefined
+        || this.#cursorPreRebindCleanup !== undefined
+        || this.#cursorPreRebindInsertStatement !== undefined
+        || !owner.isTransaction
+        || owner.transactionMode !== "exclusive"
+        || owner.transactionLineage !== this.#cursorTransferLineage
+        || owner.transactionEpoch !== this.#cursorTransferStageEpoch) {
+      return invalid("SQLite cursor pre-rebind completed authority is invalid");
+    }
+  }
+
+  [SQLITE_BASELINE_ASSERT_CURSOR_PRE_REBIND_COMPLETE](
+    connection: SQLiteConnection,
+    receipt: SQLiteCursorPreRebindReceipt,
+    projectionIdentity: OperationBaselineProjectionIdentity,
+    transferSession: object,
+  ): void {
+    this.#assertCursorPreRebindComplete(
+      connection,
+      receipt,
+      projectionIdentity,
+      transferSession,
+    );
+  }
+
+  /** Bind one inactive outer authority after the complete B2 graph validates. */
+  [SQLITE_BASELINE_PREPARE_CURSOR_OUTER_PUBLICATION](
+    connection: SQLiteConnection,
+    receipt: SQLiteCursorPreRebindReceipt,
+    projectionIdentity: OperationBaselineProjectionIdentity,
+    transferSession: object,
+    authority: object,
+  ): void {
+    this.#assertCursorPreRebindComplete(
+      connection,
+      receipt,
+      projectionIdentity,
+      transferSession,
+    );
+    if (authority === null || typeof authority !== "object") {
+      return invalid("SQLite cursor outer publication authority is invalid");
+    }
+    if (this.#cursorOuterPublicationAuthority === authority
+        && (this.#cursorOuterPublicationState === "prepared"
+          || this.#cursorOuterPublicationState === "published")) {
+      return;
+    }
+    if (this.#cursorOuterPublicationState !== "unused"
+        || this.#cursorOuterPublicationAuthority !== undefined) {
+      return invalid("SQLite cursor outer publication preparation is invalid");
+    }
+    this.#cursorOuterPublicationAuthority = authority;
+    this.#cursorOuterPublicationEpoch = this.#cursorTransferStageEpoch;
+    this.#cursorOuterPublicationLineage = this.#cursorTransferLineage;
+    this.#cursorOuterPublicationAllowedTotalChanges = this.#cursorTransferAllowedTotalChanges;
+    this.#cursorOuterPublicationState = "prepared";
+  }
+
+  /** Atomic-tail hook: prior validation makes this an assignment-only transition. */
+  [SQLITE_BASELINE_PUBLISH_CURSOR_OUTER_PUBLICATION](authority: object): void {
+    this.#cursorOuterPublicationAuthority = authority;
+    this.#cursorOuterPublicationState = "published";
+  }
+
+  /** Revalidate an adopted outer owner without mutating the stage. */
+  [SQLITE_BASELINE_ASSERT_CURSOR_OUTER_PUBLICATION_OWNED](
+    connection: SQLiteConnection,
+    receipt: SQLiteCursorPreRebindReceipt,
+    projectionIdentity: OperationBaselineProjectionIdentity,
+    transferSession: object,
+    authority: object,
+  ): void {
+    this.#assertCursorPreRebindComplete(
+      connection,
+      receipt,
+      projectionIdentity,
+      transferSession,
+    );
+    if (this.#cursorOuterPublicationState !== "published"
+        || this.#cursorOuterPublicationAuthority !== authority
+        || this.#cursorOuterPublicationEpoch !== this.#cursorTransferStageEpoch
+        || this.#cursorOuterPublicationLineage !== this.#cursorTransferLineage
+        || this.#cursorOuterPublicationAllowedTotalChanges
+          !== this.#cursorTransferAllowedTotalChanges) {
+      return invalid("SQLite cursor outer publication ownership is invalid");
+    }
+  }
+
+  /**
+   * Revalidate only the stable in-memory owner graph after activation. Unlike
+   * the preparation fence this deliberately does not pin the pre-0002 epoch or
+   * total_changes watermark: later outer-authority writes own those advances.
+   */
+  [SQLITE_BASELINE_ASSERT_CURSOR_OUTER_PUBLICATION_ACTIVE](
+    connection: SQLiteConnection,
+    receipt: SQLiteCursorPreRebindReceipt,
+    projectionIdentity: OperationBaselineProjectionIdentity,
+    transferSession: object,
+    authority: object,
+  ): void {
+    if (this.#state !== "open"
+        || connection !== this.#connection
+        || activeStage(connection) !== this
+        || this.#cursorTransferState !== "active"
+        || transferSession !== this.#cursorTransferSession
+        || receipt !== this.#cursorTransferReceipt
+        || projectionIdentity !== this.#cursorTransferProjection
+        || this.#cursorPreRebindState !== "pre-rebind-complete"
+        || this.#cursorPreRebindSession !== undefined
+        || this.#cursorOuterPublicationState !== "published"
+        || this.#cursorOuterPublicationAuthority !== authority) {
+      return invalid("SQLite cursor active outer publication ownership is invalid");
+    }
+  }
+
+  /** Atomic lifecycle hook; exact-pair validation is completed by the bridge. */
+  [SQLITE_BASELINE_RETIRE_CURSOR_OUTER_PUBLICATION](): void {
+    this.#cursorOuterPublicationState = "retired";
+  }
+
+  /** Fail closed after an outer-authority invariant failure. */
+  [SQLITE_BASELINE_POISON_CURSOR_OUTER_PUBLICATION](
+    authority: object,
+    message: string,
+  ): never {
+    if (this.#cursorOuterPublicationAuthority !== authority) {
+      return invalid("SQLite cursor outer publication authority is invalid");
+    }
+    this.#cursorOuterPublicationState = "poisoned";
+    return this.#poison(message);
+  }
+
   /** Burn the B0b session while preserving the authoritative caller failure. */
   [SQLITE_BASELINE_ABORT_CURSOR_STAGE_TRANSFER](
     session: object | undefined,
@@ -2607,8 +2794,13 @@ export class SQLiteBaselineTempStage {
     this.#cursorTransferSession = undefined;
     this.#cursorTransferReceipt = undefined;
     this.#cursorTransferProjection = undefined;
+    this.#cursorTransferCaptureEpoch = undefined;
     this.#cursorTransferStageEpoch = undefined;
+    this.#cursorTransferLineage = undefined;
     this.#cursorTransferAllowedTotalChanges = undefined;
+    if (this.#cursorOuterPublicationState !== "unused") {
+      this.#cursorOuterPublicationState = "poisoned";
+    }
     if (this.#cursorSealState !== "absent") this.#cursorSealState = "poisoned";
     if (this.#cursorTransferState === "active") this.#cursorTransferState = "poisoned";
     return this.#poison(message);
@@ -2814,8 +3006,17 @@ export class SQLiteBaselineTempStage {
     this.#cursorTransferSession = undefined;
     this.#cursorTransferReceipt = undefined;
     this.#cursorTransferProjection = undefined;
+    this.#cursorTransferCaptureEpoch = undefined;
     this.#cursorTransferStageEpoch = undefined;
+    this.#cursorTransferLineage = undefined;
     this.#cursorTransferAllowedTotalChanges = undefined;
+    if (this.#cursorOuterPublicationState !== "unused") {
+      this.#cursorOuterPublicationState = "poisoned";
+    }
+    this.#cursorOuterPublicationAuthority = undefined;
+    this.#cursorOuterPublicationEpoch = undefined;
+    this.#cursorOuterPublicationLineage = undefined;
+    this.#cursorOuterPublicationAllowedTotalChanges = undefined;
     if (!this.#connection.isOpen) {
       this.#state = "disposed";
       deleteActiveStage(this.#connection);
@@ -3127,8 +3328,16 @@ export class SQLiteBaselineTempStage {
     this.#cursorTransferSession = undefined;
     this.#cursorTransferReceipt = undefined;
     this.#cursorTransferProjection = undefined;
+    this.#cursorTransferCaptureEpoch = undefined;
     this.#cursorTransferStageEpoch = undefined;
+    this.#cursorTransferLineage = undefined;
     this.#cursorTransferAllowedTotalChanges = undefined;
+    if (this.#cursorOuterPublicationState !== "unused") {
+      this.#cursorOuterPublicationState = "poisoned";
+    }
+    this.#cursorOuterPublicationEpoch = undefined;
+    this.#cursorOuterPublicationLineage = undefined;
+    this.#cursorOuterPublicationAllowedTotalChanges = undefined;
     // Disposal is an irreversible public lifecycle state.  A stale campaign
     // may still discover its invalidated private authority and fail closed,
     // but that later failure must not rewrite an already completed disposal.
@@ -3163,6 +3372,20 @@ const sqliteBaselineDiagnoseCursorPreRebindIntrinsic =
   SQLiteBaselineTempStage.prototype[SQLITE_BASELINE_DIAGNOSE_CURSOR_PRE_REBIND];
 const sqliteBaselineAbortCursorPreRebindIntrinsic =
   SQLiteBaselineTempStage.prototype[SQLITE_BASELINE_ABORT_CURSOR_PRE_REBIND];
+const sqliteBaselineAssertCursorPreRebindCompleteIntrinsic =
+  SQLiteBaselineTempStage.prototype[SQLITE_BASELINE_ASSERT_CURSOR_PRE_REBIND_COMPLETE];
+const sqliteBaselinePrepareCursorOuterPublicationIntrinsic =
+  SQLiteBaselineTempStage.prototype[SQLITE_BASELINE_PREPARE_CURSOR_OUTER_PUBLICATION];
+const sqliteBaselinePublishCursorOuterPublicationIntrinsic =
+  SQLiteBaselineTempStage.prototype[SQLITE_BASELINE_PUBLISH_CURSOR_OUTER_PUBLICATION];
+const sqliteBaselineAssertCursorOuterPublicationOwnedIntrinsic =
+  SQLiteBaselineTempStage.prototype[SQLITE_BASELINE_ASSERT_CURSOR_OUTER_PUBLICATION_OWNED];
+const sqliteBaselineAssertCursorOuterPublicationActiveIntrinsic =
+  SQLiteBaselineTempStage.prototype[SQLITE_BASELINE_ASSERT_CURSOR_OUTER_PUBLICATION_ACTIVE];
+const sqliteBaselineRetireCursorOuterPublicationIntrinsic =
+  SQLiteBaselineTempStage.prototype[SQLITE_BASELINE_RETIRE_CURSOR_OUTER_PUBLICATION];
+const sqliteBaselinePoisonCursorOuterPublicationIntrinsic =
+  SQLiteBaselineTempStage.prototype[SQLITE_BASELINE_POISON_CURSOR_OUTER_PUBLICATION];
 
 /** Invoke the captured exact B0b begin hook despite later prototype replacement. */
 export function beginSQLiteBaselineCursorStageTransferIntrinsic(
@@ -3273,6 +3496,83 @@ export function abortSQLiteBaselineCursorPreRebindIntrinsic(
 ): never {
   return Reflect.apply(sqliteBaselineAbortCursorPreRebindIntrinsic, stage, [
     session, message,
+  ]) as never;
+}
+
+export function assertSQLiteBaselineCursorPreRebindCompleteIntrinsic(
+  stage: SQLiteBaselineTempStage,
+  connection: SQLiteConnection,
+  receipt: SQLiteCursorPreRebindReceipt,
+  projectionIdentity: OperationBaselineProjectionIdentity,
+  transferSession: object,
+): void {
+  Reflect.apply(sqliteBaselineAssertCursorPreRebindCompleteIntrinsic, stage, [
+    connection, receipt, projectionIdentity, transferSession,
+  ]);
+}
+
+export function prepareSQLiteBaselineCursorOuterPublicationIntrinsic(
+  stage: SQLiteBaselineTempStage,
+  connection: SQLiteConnection,
+  receipt: SQLiteCursorPreRebindReceipt,
+  projectionIdentity: OperationBaselineProjectionIdentity,
+  transferSession: object,
+  authority: object,
+): void {
+  Reflect.apply(sqliteBaselinePrepareCursorOuterPublicationIntrinsic, stage, [
+    connection, receipt, projectionIdentity, transferSession, authority,
+  ]);
+}
+
+/** Atomic-tail primitive. Its captured stage hook performs assignments only. */
+export function publishSQLiteBaselineCursorOuterPublicationIntrinsic(
+  stage: SQLiteBaselineTempStage,
+  authority: object,
+): void {
+  reflectApplyIntrinsic(sqliteBaselinePublishCursorOuterPublicationIntrinsic, stage, [authority]);
+}
+
+export function assertSQLiteBaselineCursorOuterPublicationOwnedIntrinsic(
+  stage: SQLiteBaselineTempStage,
+  connection: SQLiteConnection,
+  receipt: SQLiteCursorPreRebindReceipt,
+  projectionIdentity: OperationBaselineProjectionIdentity,
+  transferSession: object,
+  authority: object,
+): void {
+  Reflect.apply(sqliteBaselineAssertCursorOuterPublicationOwnedIntrinsic, stage, [
+    connection, receipt, projectionIdentity, transferSession, authority,
+  ]);
+}
+
+/** Validate only stable object identity after outer publication activation. */
+export function assertSQLiteBaselineCursorOuterPublicationActiveIntrinsic(
+  stage: SQLiteBaselineTempStage,
+  connection: SQLiteConnection,
+  receipt: SQLiteCursorPreRebindReceipt,
+  projectionIdentity: OperationBaselineProjectionIdentity,
+  transferSession: object,
+  authority: object,
+): void {
+  Reflect.apply(sqliteBaselineAssertCursorOuterPublicationActiveIntrinsic, stage, [
+    connection, receipt, projectionIdentity, transferSession, authority,
+  ]);
+}
+
+/** Assignment-only retirement after the bridge validates the exact owner pair. */
+export function retireSQLiteBaselineCursorOuterPublicationIntrinsic(
+  stage: SQLiteBaselineTempStage,
+): void {
+  reflectApplyIntrinsic(sqliteBaselineRetireCursorOuterPublicationIntrinsic, stage, []);
+}
+
+export function poisonSQLiteBaselineCursorOuterPublicationIntrinsic(
+  stage: SQLiteBaselineTempStage,
+  authority: object,
+  message: string,
+): never {
+  return reflectApplyIntrinsic(sqliteBaselinePoisonCursorOuterPublicationIntrinsic, stage, [
+    authority, message,
   ]) as never;
 }
 

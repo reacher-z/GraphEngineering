@@ -112,6 +112,8 @@ const LOCK_CAPABILITIES = new WeakMap<object, MigrationLockCapabilityState>();
 const TOMBSTONES = new WeakMap<object, TombstoneState>();
 const weakMapGetIntrinsic = WeakMap.prototype.get;
 const weakMapSetIntrinsic = WeakMap.prototype.set;
+const objectCreateIntrinsic = Object.create;
+const objectFreezeIntrinsic = Object.freeze;
 const objectGetOwnPropertyDescriptorsIntrinsic = Object.getOwnPropertyDescriptors;
 
 function fail(
@@ -442,16 +444,82 @@ export function consumeSQLiteCursorProviderClockEvidenceIntrinsic(
   if (state.consumed) {
     return fail("GE_CYCLE_STORE_INVALID_ARGUMENT", "SQLite cursor clock evidence was consumed");
   }
-  state.consumed = true;
-  const tombstone = Object.freeze(
-    Object.create(null),
+  // Build and register every immutable tail object before committing the
+  // one-way evidence transition. If construction ever throws, the evidence
+  // remains unconsumed and no half-published graph can escape.
+  const tombstone = objectFreezeIntrinsic(
+    objectCreateIntrinsic(null),
   ) as SQLiteCursorProviderClockConsumedTombstone;
-  Reflect.apply(weakMapSetIntrinsic, TOMBSTONES, [tombstone as object, Object.freeze({
+  const tombstoneState = objectFreezeIntrinsic({
     capability,
     consumer,
     evidence,
-  } satisfies TombstoneState)]);
+  } satisfies TombstoneState);
+  Reflect.apply(weakMapSetIntrinsic, TOMBSTONES, [tombstone as object, tombstoneState]);
+  state.consumed = true;
   return tombstone;
+}
+
+/**
+ * Validate the exact first-boundary graph before an outer authority enters its
+ * non-interruptible activation tail. This function is deliberately read-only:
+ * callers must complete every fallible check here before consuming evidence.
+ */
+export function assertSQLiteCursorOuterClockAuthorityGraphIntrinsic(
+  connection: SQLiteConnection,
+  migrationLockCapability: SQLiteCursorMigrationLockCapability,
+  capability: SQLiteCursorProviderClockCapability,
+  evidence: SQLiteCursorProviderClockEvidence,
+): SQLiteCursorProviderClockEvidenceSnapshot {
+  const clock = capabilityState(capability);
+  const receipt = evidence !== null && typeof evidence === "object"
+    ? Reflect.apply(weakMapGetIntrinsic, EVIDENCE, [evidence as object]) as
+      EvidenceState | undefined
+    : undefined;
+  if (!(connection instanceof SQLiteConnection)
+      || clock.connection !== connection
+      || clock.migrationLockCapability !== migrationLockCapability
+      || clock.poisoned
+      || clock.nextBoundaryIndex !== 1
+      || clock.previousEvidence !== evidence
+      || receipt === undefined
+      || receipt.capability !== capability
+      || receipt.boundary !== "before-first-permanent-mutation"
+      || receipt.consumer !== "outer-publication-authority"
+      || receipt.previousEvidence !== undefined
+      || receipt.consumed) {
+    return fail(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "SQLite outer publication clock graph is invalid",
+    );
+  }
+  requireExclusiveLineage(connection, clock.transactionLineage);
+  const ownerBefore = readSQLiteConnectionOwnerSnapshot(connection);
+  const changesBefore = readSQLiteConnectionTotalChangesSnapshot(connection);
+  const lock = liveLock(connection);
+  const ownerAfter = readSQLiteConnectionOwnerSnapshot(connection);
+  const changesAfter = readSQLiteConnectionTotalChangesSnapshot(connection);
+  if (!sameLock(lock, clock.expectedLock)
+      || ownerBefore.transactionLineage !== clock.transactionLineage
+      || ownerAfter.transactionLineage !== clock.transactionLineage
+      || ownerAfter.transactionEpoch !== ownerBefore.transactionEpoch
+      || changesBefore.transactionEpoch !== ownerBefore.transactionEpoch
+      || changesAfter.transactionEpoch !== ownerAfter.transactionEpoch
+      || changesAfter.totalChanges !== changesBefore.totalChanges
+      || receipt.transactionLineage !== clock.transactionLineage) {
+    return fail(
+      "GE_CYCLE_STORE_STALE_FENCE",
+      "SQLite outer publication clock graph changed",
+    );
+  }
+  return Object.freeze({
+    activeExpiresAtMs: receipt.activeExpiresAtMs,
+    boundary: receipt.boundary,
+    consumer: receipt.consumer,
+    providerNowMs: receipt.providerNowMs,
+    transactionLineage: receipt.transactionLineage,
+    transactionEpoch: ownerAfter.transactionEpoch,
+  });
 }
 
 /** Package-private evidence inspection for downstream authority construction. */
@@ -512,4 +580,57 @@ export function assertSQLiteCursorProviderClockConsumedTombstoneIntrinsic(
     return fail("GE_CYCLE_STORE_INVALID_ARGUMENT", "SQLite cursor clock tombstone is invalid");
   }
   return tombstone;
+}
+
+/** Revalidate the consumed first-boundary edge retained by an active authority. */
+export function assertSQLiteCursorOuterClockAuthorityActiveGraphIntrinsic(
+  connection: SQLiteConnection,
+  migrationLockCapability: SQLiteCursorMigrationLockCapability,
+  capability: SQLiteCursorProviderClockCapability,
+  evidence: SQLiteCursorProviderClockEvidence,
+  tombstone: SQLiteCursorProviderClockConsumedTombstone,
+): SQLiteCursorProviderClockEvidenceSnapshot {
+  const clock = capabilityState(capability);
+  const receipt = evidence !== null && typeof evidence === "object"
+    ? Reflect.apply(weakMapGetIntrinsic, EVIDENCE, [evidence as object]) as
+      EvidenceState | undefined
+    : undefined;
+  const consumed = tombstone !== null && typeof tombstone === "object"
+    ? Reflect.apply(weakMapGetIntrinsic, TOMBSTONES, [tombstone as object]) as
+      TombstoneState | undefined
+    : undefined;
+  if (!(connection instanceof SQLiteConnection)
+      || clock.connection !== connection
+      || clock.migrationLockCapability !== migrationLockCapability
+      || clock.poisoned
+      || receipt === undefined
+      || receipt.capability !== capability
+      || receipt.boundary !== "before-first-permanent-mutation"
+      || receipt.consumer !== "outer-publication-authority"
+      || receipt.previousEvidence !== undefined
+      || !receipt.consumed
+      || consumed === undefined
+      || consumed.capability !== capability
+      || consumed.evidence !== evidence
+      || consumed.consumer !== "outer-publication-authority") {
+    return fail(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "SQLite active outer publication clock graph is invalid",
+    );
+  }
+  requireExclusiveLineage(connection, clock.transactionLineage);
+  if (!sameLock(liveLock(connection), clock.expectedLock)) {
+    return fail(
+      "GE_CYCLE_STORE_STALE_FENCE",
+      "SQLite active outer publication migration lock changed",
+    );
+  }
+  return Object.freeze({
+    activeExpiresAtMs: receipt.activeExpiresAtMs,
+    boundary: receipt.boundary,
+    consumer: receipt.consumer,
+    providerNowMs: receipt.providerNowMs,
+    transactionLineage: receipt.transactionLineage,
+    transactionEpoch: readSQLiteConnectionOwnerSnapshot(connection).transactionEpoch,
+  });
 }
