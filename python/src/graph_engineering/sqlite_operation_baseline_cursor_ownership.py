@@ -45,13 +45,13 @@ SQLITE_CURSOR_BASELINE_PROJECTION_REFERENCE_DOMAIN = (
 )
 SQLITE_CURSOR_PRE_REBIND_RECEIPT_DOMAIN = b"graph-engineering/sqlite-cursor-pre-rebind-receipt/v1\0"
 
-SQLITE_CURSOR_MAIN_PROJECTION_SQL = """SELECT tenant_id, token_hash, kind,
- principal_hash, authorization_hash, stream_id, checkpoint_scope,
- request_scope_blob, page_size, next_position, snapshot_tail_sequence,
- snapshot_tail_record_hash, descriptor_hash, schema_identity_sha256,
- snapshot_blob, created_at_ms, expires_at_ms, consumed_at_ms
- FROM main.ge_cycle_cursors
- ORDER BY tenant_id COLLATE BINARY, token_hash COLLATE BINARY"""
+SQLITE_CURSOR_MAIN_PROJECTION_SQL = (
+    "SELECT tenant_id, token_hash, kind, principal_hash, authorization_hash, stream_id, "
+    "checkpoint_scope, request_scope_blob, page_size, next_position, snapshot_tail_sequence, "
+    "snapshot_tail_record_hash, descriptor_hash, schema_identity_sha256, snapshot_blob, "
+    "created_at_ms, expires_at_ms, consumed_at_ms FROM main.ge_cycle_cursors "
+    "ORDER BY tenant_id COLLATE BINARY, token_hash COLLATE BINARY"
+)
 
 SQLITE_CURSOR_STATIC_CONTRACT_FIELDS: tuple[str, ...] = (
     "immutablePhysicalFields",

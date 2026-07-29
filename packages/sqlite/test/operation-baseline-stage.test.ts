@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 
 import { canonicalHash } from "@graph-engineering/core";
 import {
@@ -1455,9 +1456,11 @@ describe("SQLite operation baseline stage owner", () => {
     }
   });
 
-  it("invalidates on rollback/rebegin and disposes early in reverse order exactly once", () => {
+  it("invalidates on rollback/rebegin and disposes early through captured SQL exactly once", () => {
     const connection = opened();
     const exec = vi.spyOn(connection, "execTrusted");
+    const native = DatabaseSync.prototype as unknown as { exec(sql: string): void };
+    const originalNativeExec = native.exec;
     try {
       connection.execTrusted("BEGIN EXCLUSIVE", "inspect-schema");
       const stage = createSQLiteBaselineTempStage(
@@ -1479,19 +1482,73 @@ describe("SQLite operation baseline stage owner", () => {
         proveSQLiteExclusiveBaselineTransaction(connection),
       );
       const beforeCurrentDispose = exec.mock.calls.length;
+      const intrinsicSql: string[] = [];
+      native.exec = function (sql: string): void {
+        intrinsicSql.push(sql);
+        Reflect.apply(originalNativeExec, this, [sql]);
+      };
       current.dispose();
-      const drops = exec.mock.calls.slice(beforeCurrentDispose).map(([sql]) => sql);
-      expect(drops[0]).toBe("DROP VIEW temp.ge_blr_relation_keys");
-      expect(drops.at(-1)).toBe("DROP TABLE temp.ge_blr_stage");
-      expect(drops).toHaveLength(24);
-      expect(drops.some((sql) => /\b(?:COMMIT|ROLLBACK)\b/iu.test(sql))).toBe(false);
+      native.exec = originalNativeExec;
+      expect(exec.mock.calls).toHaveLength(beforeCurrentDispose);
+      expect(intrinsicSql[0]).toBe("DROP VIEW temp.ge_blr_relation_keys");
+      expect(intrinsicSql.at(-1)).toBe("DROP TABLE temp.ge_blr_stage");
+      expect(intrinsicSql).toHaveLength(24);
+      expect(intrinsicSql.some((sql) => /\b(?:COMMIT|ROLLBACK)\b/iu.test(sql))).toBe(false);
       expect(current.state).toBe("disposed");
       expect(baselineObjects(connection)).toEqual([]);
       current.dispose();
-      expect(exec.mock.calls.slice(beforeCurrentDispose).map(([sql]) => sql)).toEqual(drops);
+      expect(exec.mock.calls).toHaveLength(beforeCurrentDispose);
+      expect(intrinsicSql).toHaveLength(24);
       expect(connection.isTransaction).toBe(true);
     } finally {
+      native.exec = originalNativeExec;
       exec.mockRestore();
+      if (connection.isTransaction) connection.execTrusted("ROLLBACK", "inspect-schema");
+      connection.close();
+    }
+  });
+
+  it("cleans every owned object when foreign reserved objects crowd an unordered scan", () => {
+    const connection = opened();
+    try {
+      connection.execTrusted("BEGIN EXCLUSIVE", "inspect-schema");
+      const proof = proveSQLiteExclusiveBaselineTransaction(connection);
+      const originalPrepare = connection.prepare.bind(connection);
+      let totalChangeReads = 0;
+      const prepare = vi.spyOn(connection, "prepare").mockImplementation(
+        (sql, operation) => {
+          if (sql === "SELECT total_changes()" && ++totalChangeReads === 2) {
+            for (let index = 0; index < 40; index += 1) {
+              connection.execTrusted(
+                `CREATE TEMP TABLE ge_blr_hostile_${String(index).padStart(3, "0")}`
+                  + "(value INTEGER)",
+                operation,
+              );
+            }
+            connection.execTrusted(
+              "PRAGMA reverse_unordered_selects = ON",
+              operation,
+            );
+          }
+          return originalPrepare(sql, operation);
+        },
+      );
+      let stage;
+      try {
+        stage = createSQLiteBaselineTempStage(connection, proof);
+      } finally {
+        prepare.mockRestore();
+      }
+
+      expect(totalChangeReads).toBe(2);
+      expect(() => stage.dispose()).toThrowError(/disposal left reserved objects/u);
+      expect(stage.state).toBe("poisoned");
+      const remaining = baselineObjects(connection);
+      expect(remaining.filter(([, name]) =>
+        !String(name).startsWith("ge_blr_hostile_"))).toEqual([]);
+      expect(remaining.filter(([, name]) =>
+        String(name).startsWith("ge_blr_hostile_"))).toHaveLength(40);
+    } finally {
       if (connection.isTransaction) connection.execTrusted("ROLLBACK", "inspect-schema");
       connection.close();
     }

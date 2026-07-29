@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://graph-engineering.dev/spec/sqlite-cursor-pre-rebind-coverage-v2.schema.json",
+  "title": "SQLite cursor pre-rebind executable 70-case audit registry",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "fixture", "auditPolicy", "generatedAt", "cases"],
+  "properties": {
+    "schemaVersion": { "const": 2 },
+    "fixture": { "const": "spec/conformance/sqlite-cursor-pre-rebind-v1.case.json" },
+    "auditPolicy": { "type": "string", "minLength": 1 },
+    "generatedAt": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "cases": {
+      "type": "array",
+      "minItems": 70,
+      "maxItems": 70,
+      "items": { "$ref": "#/$defs/case" }
+    }
+  },
+  "$defs": {
+    "runtimeEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "file", "title", "asserts", "executionIds"],
+      "properties": {
+        "status": { "enum": ["EXACT", "OPEN"] },
+        "file": { "type": ["string", "null"] },
+        "title": { "type": ["string", "null"] },
+        "asserts": { "type": "string", "minLength": 1 },
+        "executionIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 3,
+            "pattern": "^[^*$\\r\\n]+::[^*$\\r\\n]+$"
+          },
+          "uniqueItems": true
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "EXACT" } } },
+          "then": {
+            "properties": {
+              "file": { "type": "string", "minLength": 1 },
+              "title": { "type": "string", "minLength": 1 },
+              "executionIds": { "type": "array", "minItems": 1 }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "status": { "const": "OPEN" } } },
+          "then": {
+            "properties": {
+              "file": { "type": ["string", "null"] },
+              "title": { "type": ["string", "null"] },
+              "executionIds": { "type": "array", "maxItems": 0 }
+            }
+          }
+        }
+      ]
+    },
+    "case": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["group", "caseId", "typescript", "python"],
+      "properties": {
+        "group": { "enum": ["pristine", "hostile", "lifecycle"] },
+        "caseId": { "type": "string", "minLength": 1 },
+        "typescript": { "$ref": "#/$defs/runtimeEvidence" },
+        "python": { "$ref": "#/$defs/runtimeEvidence" }
+      }
+    }
+  }
+}

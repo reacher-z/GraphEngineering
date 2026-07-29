@@ -11279,3 +11279,458 @@ deadlines, late-arrival policy, cancellation propagation, barrier trace/CLI
 visibility or distributed coordination. `D6-ROUTER-BARRIER-023` therefore
 remains open for the barrier and dedicated durable-decision tranches. No
 release, adoption or star-count outcome is claimed by this source milestone.
+
+### 31.35.13 Cursor Slice B B2 production inspection, ten-rule diagnostics and clean pre-rebind completion execution plan
+
+This append-only checkpoint converts the accepted B0b/B1 owner transfer and
+exact TEMP-catalog foundation into the B2 implementation tranche. Its status is
+`implementation-in-progress`; none of the completion, release, throughput,
+adoption or popularity claims below may be inferred before every gate in this
+section has passed and an independent severity-zero audit has been recorded.
+The detailed cross-runtime contract is frozen in
+`codex_logs/reviews/SQLITE-CURSOR-SLICE-B-B2-CROSS-RUNTIME-CONTRACT-DESIGN-2026-07-28.md`.
+
+#### 31.35.13.1 Authority boundary and non-negotiable invariants
+
+B2 begins only from the exact live B0b transfer object, its exact opaque A2b
+receipt, the exact completed stage, the same captured connection, and the B1
+`temp.ge_blr_cursor_seal` object whose rootpage, DDL, xinfo, owner epoch and
+zero-row-change transition have already been proven. It does not accept a
+structurally equal receipt, copied projection, reconstructed transfer, replaced
+stage, new connection, stale transaction generation or caller-created same-name
+TEMP relation.
+
+The canonical authority order for every entry point is:
+
+1. validate the opaque A2b receipt and its module-minted provenance;
+2. validate the exact transfer/session/stage/connection identity graph;
+3. prove the owner is still in the same live EXCLUSIVE transaction generation;
+4. prove the exact main, stage, relation and B1 TEMP catalogs and rootpage;
+5. prove the allowed total-change fence;
+6. check cancellation at the documented boundary;
+7. prepare, register, fetch and close at most one campaign cursor; and
+8. publish only a fully validated terminal outcome.
+
+B2 owns no transaction command, commit, rollback, migration 0002 execution,
+permanent write, cursor rebind, rules 11/12, publication verifier, CLI or public
+API. The reconciliation registry's `implementationClaim`, `releaseGate`,
+`productionThroughputClaim` and `cursorSeal.protocolClaim` remain false. The
+registry's deferred whole-protocol empty-root status is intentionally not
+rewritten merely because private A1 roots are already accepted.
+
+#### 31.35.13.2 Cross-runtime conformance artifact lane
+
+The main/spec lane adds a closed
+`spec/conformance/sqlite-cursor-pre-rebind-v1.case.json`, its closed JSON Schema,
+an executable validator and hostile `node:test` suite. The fixture freezes:
+
+- claims and explicit nonclaims;
+- diagnostic bounds 1 through 64 with default 16;
+- one-row source and seal fetch discipline;
+- BLOB bounds, safe-integer bounds and page-size bounds;
+- exact rule order `BLR_CURSOR_AUTHORIZATION` through
+  `BLR_CURSOR_CHECKPOINT_BINDING`;
+- the accepted A1 domains, canonical carrier order and literal empty, event,
+  checkpoint and cross-order roots;
+- normalized source, insert, seal and ten marker SQL strings plus literal
+  lowercase SHA-256 values;
+- portable EQP acceptance and forbidden-plan predicates;
+- closed clean and diagnosed outcomes;
+- pristine, isolated hostile, aggregate hostile, lifecycle and limit-boundary
+  cases; and
+- exact TypeScript/Python parity gates.
+
+Unknown fields, duplicate JSON keys, reordered normative arrays, wrong hashes,
+computed rather than literal expectations, unsafe integers, over-limit bounds,
+tenant-controlled diagnostic fields, receipt/root placeholders in diagnosed
+outcomes, accidental release claims and mutation of the existing whole-protocol
+registry are validator failures.
+
+The fixture must be immutable input to both runtime lanes. Runtime code cannot
+edit the fixture to match an implementation. If either runtime contradicts a
+literal, the runtime or a separately reviewed fixture erratum must be fixed
+atomically; silently weakening the validator is forbidden.
+
+#### 31.35.13.3 Bounded permissive inspection layer
+
+The strict A1 physical decoder remains unchanged as the seal primitive, but it
+must not run first on hostile production rows because doing so would steal
+rule-owned diagnostics. Each runtime therefore adds a closed permissive B2
+inspection result with:
+
+- twenty sanitized scalar/digest/identity TEMP values;
+- the nine per-row flags `authorization_ok`, `scope_ok`,
+  `blobs_canonical_ok`, `position_ok`, `clock_ok`, `catalog_ok`, `shape_ok`,
+  `event_binding_ok` and `checkpoint_binding_ok`;
+- `seal_eligible`, true only when every A1 precondition and every applicable
+  per-row flag is true; and
+- an optional already-validated A1 row/carrier retained only until its TEMP
+  insert completes.
+
+The inspector first validates 18-column physical arity and SQLite storage
+classes without coercion. Both raw BLOBs are byte-length-bounded before fatal
+UTF-8/JSON decoding; BOM, duplicate object keys, nonportable constants, unknown
+closed-object fields and noncanonical byte representations are rejected. It
+retains only safe lengths and lowercase SHA-256 digests in TEMP. Raw BLOB bytes,
+decoded JSON and tenant-controlled fragments are released before the next
+source fetch and never appear in exceptions or diagnostics.
+
+Representable hostile rows are staged with fixed module-private sentinels and
+their owning flags false so later independent rules remain observable. A row
+without a unique bounded tenant/token stage key increments bounded pre-stage
+rule-1/rule-8 evidence and makes the run terminal diagnosed; it is never
+silently dropped, converted to null or included in the seal.
+
+Peak live application state is bounded to one physical source row, one decoded
+scope, one decoded snapshot, one inspection result, one TEMP insert parameter
+tuple and constant-sized counters/accumulator state. `.all()`, `fetchall()`,
+`Array.from`, proportional list/tuple/map retention, application sorting and
+decoded snapshot retention are forbidden by review and scale probes.
+
+#### 31.35.13.4 Source scan and exact TEMP insertion
+
+The source scan uses the already frozen exact 18-column projection in main
+primary-key order `tenant_id COLLATE BINARY, token_hash COLLATE BINARY`. It is a
+single forward cursor with no OFFSET and no collection materialization. Before
+and after prepare, every fetch, inspect, insert and close boundary, the campaign
+re-proves its registered cursor ownership, transaction epoch, EXCLUSIVE mode,
+catalog identity and permitted change count.
+
+One representable source row produces exactly one 30-column insert in B1 xinfo
+order. Each insert must report exactly one row change, advance connection
+`total_changes` by exactly one and advance the stage-owned allowance by exactly
+one. Zero, multiple, hidden-trigger, caller DML or unaccounted TEMP/main changes
+poison the campaign. Prepare/bind/execute/reset/close failures retain the first
+authoritative exception and execute only identity-safe cleanup.
+
+Counters separately retain captured-main count, walked-source count, staged
+TEMP count and the accepted A2b expected count. Rule 7 owns only inventory
+loss/duplication between main/source/TEMP counts. It does not count
+`seal_eligible` rows, because malformed rows are already owned by their field
+rules. Equal-count delete/insert substitution is detected later by exact A1
+root/authority comparison and is terminal stale authority, not mislabeled rule
+7 or future rule 12.
+
+#### 31.35.13.5 Exact ten-rule execution
+
+Rules execute unconditionally in frozen registry order after the source cursor
+has been finalized and its ownership cleared. Each row rule prepares fixed SQL,
+binds exactly `diagnosticLimit + 1`, registers the sole active cursor, validates
+each marker as the one-column integer tuple `(1)`, counts no more than the
+plus-one bound, clears stage ownership before the sole close, then performs the
+next owner/catalog/change fence.
+
+1. `BLR_CURSOR_AUTHORIZATION` owns invalid tenant/token identifiers and invalid
+   lowercase-64 principal/authorization hashes without token plaintext.
+2. `BLR_CURSOR_SCOPE` owns event/checkpoint null groups and exact decoded
+   request-scope tuple disagreement.
+3. `BLR_CURSOR_BLOB_CANONICAL` owns BLOB bounds, UTF-8/JSON, duplicate-key,
+   nonportable and canonical-byte violations.
+4. `BLR_CURSOR_POSITION` owns page/position bounds, event tail bounds and
+   checkpoint decoded-array bounds.
+5. `BLR_CURSOR_EXPIRY_CONSUMPTION` owns safe cursor clocks, strict expiry,
+   consumption ordering and frozen provider-high-water relations; expiry is
+   not itself a provider-observation high-water.
+6. `BLR_CURSOR_CATALOG_BINDING` owns per-row descriptor/schema disagreement;
+   actual DDL/catalog replacement remains terminal corruption.
+7. `BLR_CURSOR_SEAL_COUNT` emits exactly one inventory unit when captured main,
+   walked source and TEMP counts disagree.
+8. `BLR_CURSOR_SHAPE` owns physical arity/storage/null/lexical shape not already
+   assigned to a more specific semantic rule.
+9. `BLR_CURSOR_EVENT_BINDING` owns exact snapshot-tail mismatch and missing
+   retained `(tenant, stream, sequence, hash)` history while allowing later
+   valid appends.
+10. `BLR_CURSOR_CHECKPOINT_BINDING` owns missing/mismatched historical `put`
+    summaries and ordering other than sequence descending, creation descending,
+    checkpoint ID ascending while allowing later current mutation/deletion.
+
+Each row contributes at most once to a given rule but may contribute to several
+independent rules. Only nonzero diagnostics are returned, exactly as
+`{ruleId, violationCount, diagnosticsTruncated}` in registry order. The count is
+`min(actual, limit)` and truncation is true exactly when actual exceeds the
+limit. Diagnostic output cannot contain tenant, token, hash, SQL value, payload,
+snapshot, exception fragment or an unregistered field.
+
+#### 31.35.13.6 A1 reproduction and terminal outcome state machine
+
+The seal projection runs only when all ten diagnostics are zero. It selects the
+twenty sanitized carrier/identity columns with `seal_eligible = 1`, ordered by
+token hash then tenant using BINARY collation. Each row is reconstructed through
+the existing A1 carrier validation and appended to the existing constant-space
+accumulator; B2 must not implement a second serializer, row digest, chain or
+terminal hash.
+
+Clean completion requires, in order:
+
+1. source cursor final and unregistered;
+2. every insert and count fenced;
+3. all ten rule cursors final and unregistered;
+4. source/main/TEMP catalogs, rootpage, owner epoch and allowed changes re-proven;
+5. provider clock high-water re-read and exactly equal to A2a capture evidence;
+6. fresh A1 count/root exactly equal to the retained A2b receipt;
+7. exact source identities, projection reference, source-summary reference,
+   receipt, transfer and session object graph re-proven;
+8. the non-consuming A2b provenance fence repeated;
+9. the same receipt object stored without cloning or reissuing; and
+10. an atomic one-way transition from `active` to `pre-rebind-complete`.
+
+The private outcome union has only:
+
+- `pre-rebind-complete`: exact projection object, empty diagnostics and the
+  exact input receipt object; or
+- `diagnosed`: exact projection object, immutable safe diagnostics and the
+  literal ten-count vector, with no receipt, root, seal or null placeholder.
+
+The stage/campaign state machine is
+`unused -> active -> pre-rebind-complete | diagnosed | poisoned`. Diagnosed and
+clean outcomes are terminal. Second completion, second run, receipt
+substitution, transfer substitution, abandonment reuse, cancellation reuse or
+retry on the same stage is terminal. Retry begins from a new caller-owned
+transaction, source capture, A2b receipt, TEMP stage and campaign graph.
+
+#### 31.35.13.7 Resource ownership, cancellation and exception precedence
+
+At most one source, seal, rule or EQP cursor is registered at a time. Ownership
+is transferred immediately after prepare, verified around every fetch, cleared
+before the sole close and finalized by one shared idempotent path used by normal
+completion, abort, poison and dispose.
+
+A close error without an earlier primary becomes authoritative and poisons the
+stage. With an existing primary, close/drop failures are suppressed after
+best-effort exact-identity cleanup. Name-only cleanup is forbidden after owner
+generation, rootpage or exact SQL identity becomes uncertain. A closed
+TypeScript connection clears only in-memory ownership; connection teardown owns
+TEMP destruction. Python captures unbound class intrinsics and hardens property
+access so a closed connection cannot mask the initiating error.
+
+Cancellation is polled before begin; before/after source prepare and fetch;
+before/after inspect and insert; before/after every rule prepare/fetch/close;
+before seal prepare/fetch/close; and before terminal publication. Cancellation
+after a real diagnostic remains terminal and does not publish a partial/stale
+diagnosed outcome. The precedence is A2b authority, transfer/session, owner
+epoch/EXCLUSIVE mode, catalog, statement/EQP/marker shape, cancellation, then
+cleanup; diagnostic data is not an exception.
+
+#### 31.35.13.8 Query-plan and boundedness evidence
+
+Both runtimes normalize and hash the exact source, insert, seal and marker SQL.
+EQP acceptance requires the main cursor primary-key scan, the sole TEMP target
+write, TEMP WITHOUT ROWID primary-key scan, constant-row rule-7 plan, exact
+event-history covering lookup and exact bounded checkpoint-history lookup.
+Plans containing `AUTOMATIC`, `MATERIALIZE`, `USE TEMP B-TREE`, `CO-ROUTINE`, an
+unbounded sorter or an unexpected relation/index fail. No guessed
+`sqlite_autoindex_*` name is frozen.
+
+Fast characterization runs exact 128 and 1,024 cursor populations whose tenant
+and token orders conflict. Evidence records source/TEMP/seal counts and root,
+maximum live raw/decoded rows, fetch size, active cursor count, TEMP object/page
+counts and normalized EQPs. This gate proves bounded correctness only. Exact
+10K/100K scheduled stress, latency percentiles, RSS/TEMP-file behavior,
+subprocess crash/replay and `productionThroughputClaim:true` remain later
+checkpoints.
+
+#### 31.35.13.9 Parallel delivery lanes and merge order
+
+Four non-overlapping lanes run at maximum available concurrency:
+
+1. shared contract lane owns only the B2 fixture/schema/validator/test under
+   `spec/conformance`;
+2. TypeScript lane owns the private cursor campaign/inspection implementation,
+   narrowly required stage/cooperation hooks and focused/lifecycle tests under
+   `packages/sqlite`;
+3. Python lane owns the mirrored private implementation/hooks/tests under
+   `python`;
+4. main integration/audit lane owns this append-only plan, task log, cross-
+   runtime comparison, full gates, severity audit and commit/push discipline.
+
+Merge order is: fixture validator green; runtime fixture consumption initially
+red; TypeScript and Python independently green; exact cross-runtime parity;
+fault/lifecycle/scale gates; adjacent and full suites; static/package/docs
+gates; independent hostile review; remediation; final HIGH 0 / MEDIUM 0 / LOW
+0 acceptance. No lane commits independently and no lane edits another lane's
+files without explicit handoff.
+
+#### 31.35.13.10 Required red tests and final acceptance matrix
+
+Before claiming implementation, both runtimes must prove pristine empty, event,
+checkpoint, cross-order, duplicate-token-across-tenant, page boundaries,
+consumed, expired-but-valid, later-event-append and later-checkpoint-current
+mutation cases. Hostile tests isolate every rule, exercise every truncation
+boundary 1/2/16/17/64/65, combine all ten rules in nonlexical input order and
+attack equal-count substitution, catalog/index replacement and cloned authority.
+
+Lifecycle injection covers source/seal/rule statement creation; first, middle,
+final and terminal fetch; every close; decode-before-insert; insert zero/+2;
+post-row/pre-count; every rule transition; malformed marker; post-diagnostic
+mutation; transaction end; rollback/rebegin; active dispose; closed connection;
+every cancellation poll; cleanup-only; primary-plus-cleanup; second run and
+abandonment. Each injected failure asserts cursor ownership clearance, stage
+terminal state, primary-error precedence, unchanged permanent data and no
+receipt/root leakage.
+
+Acceptance requires all B2 fixture cases consumed literally by both runtimes;
+exact SQL/hash/root/vector/outcome parity; focused and adjacent SQLite/Python
+suites; complete SQLite and Python suites; TypeScript typecheck/lint/build;
+Ruff lint/format; project-standard strict MyPy; all conformance validators;
+54-rule registry nonclaim checks; documentation links; package-root nonexport
+checks; strict diff checks; clean ownership scoping; and an independent audit
+with no unresolved HIGH, MEDIUM or LOW finding.
+
+Only after those gates may this section receive a separate append-only
+acceptance checkpoint and a valid milestone commit/push by
+`reacher-z <mtrxcop@gmail.com>` with no coauthor trailer. Even then, B2 means
+only exact production v1 cursor inspection, rules 1-10, deterministic safe
+diagnostics and clean `pre-rebind-complete` evidence. B3 publication/rebind,
+rules 11/12, release hardening, performance/crash proof, community adoption and
+the 5K/6K-star objective remain open work rather than source-code claims.
+
+#### 31.35.13.11 B2 staging and rule-7 interpretation clarification
+
+This append-only clarification resolves the implementation-review ambiguity
+between a representable malformed row and a physically nonstageable row. An
+otherwise valid SQLite TEXT tenant/token value whose original text exceeds the
+bounded diagnostic key size is representable: both runtimes replace that value
+with a deterministic, source-ordinal-qualified internal sentinel, insert one
+unique TEMP row and attribute the semantic failure to rule 1 only. The sentinel
+is never emitted, sealed or exposed to a caller.
+
+A physical row whose arity, key storage class or key identity cannot yield a
+unique bounded stage key is nonstageable. It increments the bounded pre-stage
+rule-1 and/or rule-8 evidence, increments the walked-source count, performs no
+TEMP insert and therefore may independently trigger rule 7 because the real
+walked and real TEMP counts differ. The implementation must not add a logical
+pre-stage count to the physical TEMP count merely to suppress that evidence.
+The statement that an explained semantic failure must not manufacture rule 7
+applies to a row that was successfully staged with `seal_eligible = 0`; it does
+not redefine a nonstageable physical row as present in TEMP. A pure isolated
+rule-8 storage-class case must use a representable non-key field; a key-storage
+failure is expected to produce the applicable rule-1/rule-8 evidence plus the
+independent physical rule-7 count mismatch.
+
+#### 31.35.13.12 Cursor Slice B2 accepted implementation checkpoint
+
+The bounded internal Cursor Slice B2 production tranche is accepted for the
+scope frozen by sections 31.35.13.1 through 31.35.13.11. TypeScript and Python
+now implement the same private permissive physical-row inspector, exact
+stage-owner campaign, ten ordered diagnostic rules, bounded plus-one
+diagnostics, one-cursor ownership discipline, exact SQL/catalog/EQP fences,
+cancellation and failure precedence, A1 accumulator reuse, and the two closed
+terminal outcomes `pre-rebind-complete` and `diagnosed`.
+
+The canonical fixture is
+`spec/conformance/sqlite-cursor-pre-rebind-v1.case.json`. Its canonicalized
+contract SHA-256 is
+`6acb99d9593b37d6e29b6862531e3ade2dae051b21a628a26cc4e1d7e2fdb8bc`.
+This is the fixture's self-excluding canonical contract digest, not a claim
+about its raw file-byte hash. The fixture freezes ten rules, five semantic
+vectors, 15 exact SQL contracts and 70 execution obligations partitioned as
+12 pristine, 27 hostile and 31 lifecycle cases.
+
+The executable registry consumed all 70 cases literally in each runtime with
+no missing, unexpected, duplicate or OPEN evidence:
+
+- common sorted case-ID digest:
+  `bcf1f08d9bc53647466d8dcb7e7d5a6833447da01ad1cd08c2510ba82fd1d067`;
+- TypeScript: 70/70 cases and 261/261 exact execution IDs, digest
+  `0c85e3176c5b25a0cf973a0d92da536924f5a79efc2275e4f354b77af23a38aa`;
+- Python: 70/70 cases and 302/302 exact execution IDs, digest
+  `7e50c85e616e2371e38178be2bcddc4388050745491251ebb1408148cfb760f1`;
+- group digests: pristine
+  `2dd908834ac6df709656bf45a9be3c3586379145116b220a0ec3b653bde36dee`,
+  hostile
+  `f2d27053b760e7ad5fd9f116501fd8372e2f5a2c8957762bf68d3802f6d5e9c0`
+  and lifecycle
+  `914005cc51f337e3e556047fb169adff49896d04c795ddf9990d09bc7c28407d`;
+- final executable-coverage duration: 970233 ms; and
+- strict parity: `parityDifferences: []` and `remainingEvidence: []`.
+
+The deterministic cross-runtime harness separately compares five semantic
+roots, eleven isolated/aggregate hostile rule cases, two nonstageable pre-stage
+cases and one mixed storage/semantic case. It reports 19 executed harness
+cases, 24 representable stage tuples, two pre-stage tuples, five carrier row
+digests and zero TypeScript/Python difference. Harness-derived evidence remains
+separate from the 70-case executable registry and reports zero direct lifecycle
+cases rather than pretending to replace the 31 exact lifecycle obligations.
+
+Production characterization completed for conflicting tenant/token orders at
+128 and 1,024 rows. The exact A1 roots are respectively:
+
+- 128 rows:
+  `fc3699d41e2c4c9b0f45aa6c2afc1cfcbb7a89d1476420995427dd827bac9e32`;
+- 1,024 rows:
+  `9ad8d233c1f4d4717c126a9cf3aeb89675a3ddb15682e68b230c6fbec3e9e9a2`.
+
+Each characterization accepted all 15 EQP statements with provenance
+`in-campaign-registered-cursor`. Each runtime observed exactly one event and
+one checkpoint point lookup, maximum fetch/raw/decoded/carrier/registered-
+cursor/nested-point state of one, and zero final active cursor or retained
+application row. TEMP object evidence is no longer a constant: both campaigns
+measured `temp.sqlite_schema` at three lifecycle points under provenance
+`in-campaign-temp-schema-scalar`, observed current/final/maximum/external object
+count one, and matched the exact population in TEMP. TEMP page counts remain
+environment observations and are not frozen as cross-runtime identities.
+
+Independent audit history is preserved rather than rewritten as first-pass
+success. Earlier reviews found catalog-identity, lookup-marker, exception-
+precedence, ownership-registration, lifecycle, row-liveness and executable-
+coverage gaps. Later differential review found and closed mixed storage/
+semantic divergence, a valid-token/sentinel collision, dishonest pre-stage
+harness attribution and an ineffective timeout hierarchy. The final hostile
+passes additionally closed real TEMP measurement, captured Python close,
+outer-abort primary preservation against registry faults, diagnosed authority
+retirement, bounded catalog fetch, captured TypeScript SQL/owner/epoch fences,
+closed-connection error normalization and complete subprocess diagnostics plus
+process-tree cleanup on POSIX and Windows.
+
+One full-suite failure was intentionally retained in the audit trail: after
+diagnosed authority retirement, an old Python aggregate test still expected
+the obsolete stage-binding/poison behavior. The test was corrected to assert
+the actual closed contract: the retired transfer fails at the provenance
+boundary while the stage remains `open` with B2 terminal `diagnosed`. A
+TypeScript full-suite pass also exposed raw Node `ERR_INVALID_STATE` from a
+captured closed-connection snapshot; the runtime now preserves the structured
+`GE_CYCLE_STORE_UNAVAILABLE / inspect-schema / SQLite provider is closed`
+primary while campaign abort owns poison and cleanup.
+
+The strict-gate flake audit found that the 1,024-row TypeScript production test
+normally consumed roughly 24 seconds under a 30-second local budget. Its local
+budget is now 90 seconds, strict Vitest defaults to 30 seconds, and the nested
+20/35/60/90/120-minute child/coverage/step/job hierarchy remains bounded.
+Failure reports preserve status, signal, system error, stdout, stderr, failed
+test messages and file/suite messages. Timed-out children run in isolated
+process groups and receive process-tree cleanup, including Windows `taskkill
+/t /f` fallback.
+
+Section 31.35.13.7's phrase “Cancellation is polled before begin” is clarified
+append-only. “Begin” means the first B2 operational work boundary `run:start`,
+after mandatory A2b provenance, transfer/session, exact stage and owner-
+authority construction. It does not mean cancellation may preempt or mask
+constructor authority validation. Pre-requested cancellation is observed
+before source/EQP/work begins, while forged provenance, transfer, session,
+stage, owner epoch or catalog authority retains higher precedence.
+
+Final regression evidence is:
+
+- TypeScript SQLite: 22 files and 836/836 tests;
+- Python full tree: 2,234/2,234 tests;
+- workspace TypeScript build, typecheck and lint green;
+- Ruff lint over Python implementation/tests and the B2 plugin, B2 format
+  checks and strict MyPy over 54 Python source files green;
+- 75 JSON fixtures and 36 case manifests validated;
+- 286 documentation links validated;
+- SQLite ledger/contract gate 27/27;
+- package-content validation for eight npm packages;
+- Python artifact inventory/install smoke with 68 wheel entries and 69 sdist
+  entries; and
+- scoped diff/whitespace, package privacy and append-only plan checks green.
+
+The final independent post-remediation disposition is HIGH 0 / MEDIUM 0 / LOW
+0. This checkpoint authorizes a scoped milestone commit and push by
+`reacher-z <mtrxcop@gmail.com>` without a coauthor trailer.
+
+Acceptance remains deliberately narrow. B3 publication/rebind, rules 11 and
+12, migration `0002`, permanent v2 publication, 10K/100K scheduled stress,
+latency/RSS/TEMP-file proof, subprocess crash/replay, release hardening, stable
+release, community adoption and the 5K/6K-star objective remain open. No source
+change can guarantee a future star count, and this checkpoint makes no such
+claim.

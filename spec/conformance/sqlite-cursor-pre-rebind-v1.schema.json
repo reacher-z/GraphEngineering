@@ -1,0 +1,226 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/conformance/sqlite-cursor-pre-rebind-v1.schema.json",
+  "title": "SQLite cursor pre-rebind B2 cross-runtime contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "id", "status", "claims", "resourceLimits", "ruleOrder", "carrierContract", "literalRows", "semanticVectors", "sqlContract", "eqpContract", "outcomeContract", "pristineObligations", "hostileObligations", "lifecycleObligations", "parityGates"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "id": { "const": "sqlite-cursor-pre-rebind-v1" },
+    "status": { "const": "contract-frozen" },
+    "claims": { "$ref": "#/$defs/claims" },
+    "resourceLimits": { "$ref": "#/$defs/resourceLimits" },
+    "ruleOrder": { "$ref": "#/$defs/ruleOrder" },
+    "carrierContract": { "$ref": "#/$defs/carrierContract" },
+    "literalRows": {
+      "type": "object", "additionalProperties": false,
+      "required": ["eventEmpty", "eventNonempty", "checkpoint"],
+      "properties": { "eventEmpty": { "$ref": "#/$defs/sourceRow" }, "eventNonempty": { "$ref": "#/$defs/sourceRow" }, "checkpoint": { "$ref": "#/$defs/sourceRow" } }
+    },
+    "semanticVectors": { "type": "array", "minItems": 5, "maxItems": 5, "items": { "$ref": "#/$defs/semanticVector" } },
+    "sqlContract": { "$ref": "#/$defs/sqlContract" },
+    "eqpContract": { "$ref": "#/$defs/eqpContract" },
+    "outcomeContract": { "$ref": "#/$defs/outcomeContract" },
+    "pristineObligations": { "$ref": "#/$defs/pristineObligations" },
+    "hostileObligations": { "$ref": "#/$defs/hostileObligations" },
+    "lifecycleObligations": { "$ref": "#/$defs/lifecycleObligations" },
+    "parityGates": { "$ref": "#/$defs/parityGates" }
+  },
+  "$defs": {
+    "hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "slug": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+    "vector": {
+      "type": "array", "minItems": 10, "maxItems": 10,
+      "items": { "type": "integer", "minimum": 0, "maximum": 64 }
+    },
+    "claims": {
+      "type": "object", "additionalProperties": false,
+      "required": ["implementationClaim", "protocolClaim", "releaseGate", "productionThroughputClaim", "terminalState"],
+      "properties": {
+        "implementationClaim": { "const": false }, "protocolClaim": { "const": false },
+        "releaseGate": { "const": false }, "productionThroughputClaim": { "const": false },
+        "terminalState": { "const": "pre-rebind-complete" }
+      }
+    },
+    "resourceLimits": {
+      "type": "object", "additionalProperties": false,
+      "required": ["diagnosticDefault", "diagnosticMinimum", "diagnosticMaximum", "sourceFetchSize", "sealFetchSize", "pageSizeMinimum", "pageSizeMaximum", "safeIntegerMaximum", "requestScopeMinimumBytes", "requestScopeMaximumBytes", "snapshotMinimumBytes", "snapshotMaximumBytes", "maximumActiveCampaignCursors", "maximumLivePhysicalRows", "maximumLiveCarriers", "maximumLiveDecodedSnapshots", "markerFetchExpression", "prohibitedCollectionApis"],
+      "properties": {
+        "diagnosticDefault": { "const": 16 }, "diagnosticMinimum": { "const": 1 }, "diagnosticMaximum": { "const": 64 },
+        "sourceFetchSize": { "const": 1 }, "sealFetchSize": { "const": 1 },
+        "pageSizeMinimum": { "const": 1 }, "pageSizeMaximum": { "const": 256 },
+        "safeIntegerMaximum": { "const": 9007199254740991 },
+        "requestScopeMinimumBytes": { "const": 2 }, "requestScopeMaximumBytes": { "const": 1048576 },
+        "snapshotMinimumBytes": { "const": 2 }, "snapshotMaximumBytes": { "const": 16777216 },
+        "maximumActiveCampaignCursors": { "const": 1 }, "maximumLivePhysicalRows": { "const": 1 },
+        "maximumLiveCarriers": { "const": 1 }, "maximumLiveDecodedSnapshots": { "const": 1 },
+        "markerFetchExpression": { "const": "diagnosticLimit + 1" },
+        "prohibitedCollectionApis": { "type": "array", "minItems": 6, "maxItems": 6, "uniqueItems": true, "items": { "type": "string", "minLength": 5 } }
+      }
+    },
+    "ruleOrder": {
+      "type": "array", "minItems": 10, "maxItems": 10, "prefixItems": [
+        { "const": "BLR_CURSOR_AUTHORIZATION" }, { "const": "BLR_CURSOR_SCOPE" },
+        { "const": "BLR_CURSOR_BLOB_CANONICAL" }, { "const": "BLR_CURSOR_POSITION" },
+        { "const": "BLR_CURSOR_EXPIRY_CONSUMPTION" }, { "const": "BLR_CURSOR_CATALOG_BINDING" },
+        { "const": "BLR_CURSOR_SEAL_COUNT" }, { "const": "BLR_CURSOR_SHAPE" },
+        { "const": "BLR_CURSOR_EVENT_BINDING" }, { "const": "BLR_CURSOR_CHECKPOINT_BINDING" }
+      ], "items": false
+    },
+    "carrierContract": {
+      "type": "object", "additionalProperties": false,
+      "required": ["algorithmVersion", "rowDomain", "sealDomain", "sourceOrder", "sealOrder", "physicalColumnCount", "immutablePhysicalColumnCount", "mutableRebindFields", "carrierFields", "a1AlgorithmVectors", "a1VectorsAreB2SemanticClaims"],
+      "properties": {
+        "algorithmVersion": { "const": "sqlite-cursor-seal/v1" },
+        "rowDomain": { "const": "graph-engineering/sqlite-cursor-seal-row/v1\u0000" },
+        "sealDomain": { "const": "graph-engineering/sqlite-cursor-seal/v1\u0000" },
+        "sourceOrder": { "const": ["tenant-id-binary", "token-hash-binary"] },
+        "sealOrder": { "const": ["token-hash-utf8-bytes", "tenant-id-utf8-bytes"] },
+        "physicalColumnCount": { "const": 18 }, "immutablePhysicalColumnCount": { "const": 16 },
+        "mutableRebindFields": { "const": ["descriptor_hash", "schema_identity_sha256"] },
+        "carrierFields": { "type": "array", "minItems": 18, "maxItems": 18, "uniqueItems": true, "items": { "type": "string" } },
+        "a1AlgorithmVectors": {
+          "type": "object", "additionalProperties": false,
+          "required": ["empty", "event", "checkpoint", "crossOrderPair"],
+          "properties": { "empty": { "$ref": "#/$defs/hash" }, "event": { "$ref": "#/$defs/hash" }, "checkpoint": { "$ref": "#/$defs/hash" }, "crossOrderPair": { "$ref": "#/$defs/hash" } }
+        },
+        "a1VectorsAreB2SemanticClaims": { "const": false }
+      }
+    },
+    "sqlPair": {
+      "type": "object", "additionalProperties": false, "required": ["sql", "sha256"],
+      "properties": { "sql": { "type": "string", "minLength": 20 }, "sha256": { "$ref": "#/$defs/hash" } }
+    },
+    "rowMarker": {
+      "type": "object", "additionalProperties": false, "required": ["ruleId", "flag", "sha256"],
+      "properties": { "ruleId": { "type": "string", "pattern": "^BLR_CURSOR_[A-Z_]+$" }, "flag": { "type": "string", "pattern": "^[a-z_]+$" }, "sha256": { "$ref": "#/$defs/hash" } }
+    },
+    "sqlContract": {
+      "type": "object", "additionalProperties": false,
+      "required": ["normalization", "source", "insert", "seal", "countMarker", "eventLookup", "checkpointLookup", "rowMarkers"],
+      "properties": {
+        "normalization": { "const": "trim-and-collapse-ascii-whitespace" },
+        "source": { "$ref": "#/$defs/sqlPair" }, "insert": { "$ref": "#/$defs/sqlPair" },
+        "seal": { "$ref": "#/$defs/sqlPair" }, "countMarker": { "$ref": "#/$defs/sqlPair" },
+        "eventLookup": { "$ref": "#/$defs/sqlPair" }, "checkpointLookup": { "$ref": "#/$defs/sqlPair" },
+        "rowMarkers": { "type": "array", "minItems": 9, "maxItems": 9, "items": { "$ref": "#/$defs/rowMarker" } }
+      }
+    },
+    "eqpContract": {
+      "type": "object", "additionalProperties": false,
+      "required": ["required", "eventIndex", "checkpointIndex", "forbiddenDetailFragments", "forbidGuessedAutoindexName", "everyStatementRequiresEqp"],
+      "properties": {
+        "required": { "type": "array", "minItems": 6, "maxItems": 6, "uniqueItems": true, "items": { "$ref": "#/$defs/slug" } },
+        "eventIndex": { "const": "ge_cycle_records_stream_sequence_hash_uq" },
+        "checkpointIndex": { "const": "ge_cycle_checkpoint_revisions_lookup_idx" },
+        "forbiddenDetailFragments": { "const": ["AUTOMATIC", "MATERIALIZE", "USE TEMP B-TREE", "CO-ROUTINE"] },
+        "forbidGuessedAutoindexName": { "const": true }, "everyStatementRequiresEqp": { "const": true }
+      }
+    },
+    "outcomeContract": {
+      "type": "object", "additionalProperties": false,
+      "required": ["outcomes", "diagnosticFields", "diagnosedContainsReceipt", "diagnosedContainsRoot", "cleanReturnsExactInputReceipt", "failurePrecedence", "checkpointOrder"],
+      "properties": {
+        "outcomes": { "type": "array", "minItems": 11, "maxItems": 11, "uniqueItems": true, "items": { "type": "string" } },
+        "diagnosticFields": { "const": ["ruleId", "violationCount", "diagnosticsTruncated"] },
+        "diagnosedContainsReceipt": { "const": false }, "diagnosedContainsRoot": { "const": false },
+        "cleanReturnsExactInputReceipt": { "const": true },
+        "failurePrecedence": { "const": ["a2b-authority", "transfer-session", "owner-epoch", "catalog", "statement-marker", "cancellation", "cleanup"] },
+        "checkpointOrder": { "const": ["boundSequence-desc", "createdAt-desc", "checkpointId-asc"] }
+      }
+    },
+    "sourceRow": {
+      "type": "object", "additionalProperties": false,
+      "required": ["tenant_id", "token_hash", "kind", "principal_hash", "authorization_hash", "stream_id", "checkpoint_scope", "request_scope_blob_utf8", "page_size", "next_position", "snapshot_tail_sequence", "snapshot_tail_record_hash", "descriptor_hash", "schema_identity_sha256", "snapshot_blob_utf8", "created_at_ms", "expires_at_ms", "consumed_at_ms"],
+      "properties": {
+        "tenant_id": { "type": "string", "minLength": 1 }, "token_hash": { "$ref": "#/$defs/hash" },
+        "kind": { "enum": ["event", "checkpoint"] }, "principal_hash": { "$ref": "#/$defs/hash" },
+        "authorization_hash": { "$ref": "#/$defs/hash" }, "stream_id": { "type": ["string", "null"] },
+        "checkpoint_scope": { "type": ["string", "null"] }, "request_scope_blob_utf8": { "type": "string", "minLength": 2 },
+        "page_size": { "type": "integer", "minimum": 1, "maximum": 256 },
+        "next_position": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+        "snapshot_tail_sequence": { "type": ["integer", "null"], "minimum": -1, "maximum": 9007199254740991 },
+        "snapshot_tail_record_hash": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/hash" }] },
+        "descriptor_hash": { "$ref": "#/$defs/hash" }, "schema_identity_sha256": { "$ref": "#/$defs/hash" },
+        "snapshot_blob_utf8": { "type": "string", "minLength": 2 },
+        "created_at_ms": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+        "expires_at_ms": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+        "consumed_at_ms": { "type": ["integer", "null"], "minimum": 0, "maximum": 9007199254740991 }
+      }
+    },
+    "eventHistory": {
+      "type": "object", "additionalProperties": false, "required": ["tenant_id", "stream_id", "sequence", "record_hash"],
+      "properties": { "tenant_id": { "type": "string" }, "stream_id": { "type": "string" }, "sequence": { "type": "integer", "minimum": 0 }, "record_hash": { "$ref": "#/$defs/hash" } }
+    },
+    "checkpointHistory": {
+      "type": "object", "additionalProperties": false, "required": ["tenant_id", "checkpoint_scope", "checkpoint_id", "action", "summary_blob_utf8"],
+      "properties": { "tenant_id": { "type": "string" }, "checkpoint_scope": { "type": "string" }, "checkpoint_id": { "type": "string" }, "action": { "const": "put" }, "summary_blob_utf8": { "type": "string", "minLength": 2 } }
+    },
+    "semanticVector": {
+      "type": "object", "additionalProperties": false,
+      "required": ["name", "sourceRows", "eventHistory", "checkpointPutHistory", "clocks", "identities", "expected"],
+      "properties": {
+        "name": { "enum": ["empty", "event-empty", "event-nonempty", "checkpoint", "cross-order"] },
+        "sourceRows": { "type": "array", "maxItems": 2, "items": { "enum": ["eventEmpty", "eventNonempty", "checkpoint"] } },
+        "eventHistory": { "type": "array", "maxItems": 1, "items": { "$ref": "#/$defs/eventHistory" } },
+        "checkpointPutHistory": { "type": "array", "maxItems": 1, "items": { "$ref": "#/$defs/checkpointHistory" } },
+        "clocks": {
+          "type": "object", "additionalProperties": false, "required": ["capturedAtMs", "providerHighWaterAtMs", "maximumNonCursorObservedAtMs"],
+          "properties": { "capturedAtMs": { "type": "integer" }, "providerHighWaterAtMs": { "type": "integer" }, "maximumNonCursorObservedAtMs": { "type": "integer" } }
+        },
+        "identities": {
+          "type": "object", "additionalProperties": false, "required": ["descriptorHash", "schemaIdentitySha256"],
+          "properties": { "descriptorHash": { "$ref": "#/$defs/hash" }, "schemaIdentitySha256": { "$ref": "#/$defs/hash" } }
+        },
+        "expected": {
+          "type": "object", "additionalProperties": false, "required": ["cursorCount", "immutableRootSha256", "vector", "outcome"],
+          "properties": { "cursorCount": { "type": "integer", "minimum": 0, "maximum": 2 }, "immutableRootSha256": { "$ref": "#/$defs/hash" }, "vector": { "$ref": "#/$defs/vector" }, "outcome": { "const": "pre-rebind-complete" } }
+        }
+      }
+    },
+    "pristineCase": {
+      "oneOf": [
+        {
+          "type": "object", "additionalProperties": false, "required": ["name", "semanticVector", "vector"],
+          "properties": { "name": { "$ref": "#/$defs/slug" }, "semanticVector": { "enum": ["empty", "event-empty", "event-nonempty", "checkpoint", "cross-order"] }, "vector": { "$ref": "#/$defs/vector" } }
+        },
+        {
+          "type": "object", "additionalProperties": false, "required": ["name", "realDatabaseScenario", "vector"],
+          "properties": { "name": { "$ref": "#/$defs/slug" }, "realDatabaseScenario": { "$ref": "#/$defs/slug" }, "vector": { "$ref": "#/$defs/vector" } }
+        }
+      ]
+    },
+    "hostileCase": {
+      "type": "object", "additionalProperties": false, "required": ["name", "outcome", "vector"],
+      "properties": { "name": { "$ref": "#/$defs/slug" }, "outcome": { "enum": ["diagnosed", "stale-authority", "catalog-corruption"] }, "vector": { "$ref": "#/$defs/vector" } }
+    },
+    "lifecycleCase": {
+      "type": "object", "additionalProperties": false, "required": ["name", "outcome"],
+      "properties": { "name": { "$ref": "#/$defs/slug" }, "outcome": { "enum": ["statement-corruption", "unexplained-write", "stale-epoch", "disposed", "poisoned", "cancelled", "invalid-authority"] } }
+    },
+    "pristineObligations": {
+      "type": "object", "additionalProperties": false, "required": ["action", "scenarios"],
+      "properties": { "action": { "const": "execute-semantic-vector-or-real-database-scenario" }, "scenarios": { "type": "array", "minItems": 12, "maxItems": 12, "items": { "$ref": "#/$defs/pristineCase" } } }
+    },
+    "hostileObligations": {
+      "type": "object", "additionalProperties": false, "required": ["action", "scenarios"],
+      "properties": { "action": { "const": "mutate-real-database-or-owned-stage-at-declared-scenario" }, "scenarios": { "type": "array", "minItems": 27, "maxItems": 27, "items": { "$ref": "#/$defs/hostileCase" } } }
+    },
+    "lifecycleObligations": {
+      "type": "object", "additionalProperties": false, "required": ["action", "scenarios"],
+      "properties": { "action": { "const": "inject-at-declared-owner-boundary" }, "scenarios": { "type": "array", "minItems": 31, "maxItems": 31, "items": { "$ref": "#/$defs/lifecycleCase" } } }
+    },
+    "parityGates": {
+      "type": "object", "additionalProperties": false,
+      "required": ["runtimes", "fastCharacterizationCounts", "literalDiagnosticPopulations", "required", "fixtureCanonicalSha256"],
+      "properties": {
+        "runtimes": { "const": ["typescript", "python"] },
+        "fastCharacterizationCounts": { "const": [128, 1024] },
+        "literalDiagnosticPopulations": { "const": [1, 2, 16, 17, 64, 65] },
+        "required": { "type": "array", "minItems": 11, "maxItems": 11, "uniqueItems": true, "items": { "$ref": "#/$defs/slug" } },
+        "fixtureCanonicalSha256": { "$ref": "#/$defs/hash" }
+      }
+    }
+  }
+}

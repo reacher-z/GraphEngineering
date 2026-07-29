@@ -7,6 +7,7 @@ import type {
   SQLiteCursorPreRebindReceipt,
 } from "./operation-baseline-cursor-ownership.js";
 import type { SQLiteConnection } from "./sqlite-connection.js";
+import type { SQLiteCursorStageValue } from "./operation-baseline-cursor-inspection.js";
 
 /** Package-private source/stage hooks. Neither symbol is exported by index.ts. */
 export const SQLITE_BASELINE_COOPERATIVE_ENTRIES = Symbol(
@@ -113,6 +114,27 @@ export const SQLITE_BASELINE_ABORT_CURSOR_STAGE_TRANSFER = Symbol(
 );
 export const SQLITE_BASELINE_CREATE_CURSOR_SEAL_TEMP_TABLE = Symbol(
   "SQLiteBaselineTempStage.createCursorSealTempTable",
+);
+export const SQLITE_BASELINE_BEGIN_CURSOR_PRE_REBIND = Symbol(
+  "SQLiteBaselineTempStage.beginCursorPreRebind",
+);
+export const SQLITE_BASELINE_FENCE_CURSOR_PRE_REBIND = Symbol(
+  "SQLiteBaselineTempStage.fenceCursorPreRebind",
+);
+export const SQLITE_BASELINE_REGISTER_CURSOR_PRE_REBIND_CLEANUP = Symbol(
+  "SQLiteBaselineTempStage.registerCursorPreRebindCleanup",
+);
+export const SQLITE_BASELINE_INSERT_CURSOR_PRE_REBIND_ROW = Symbol(
+  "SQLiteBaselineTempStage.insertCursorPreRebindRow",
+);
+export const SQLITE_BASELINE_COMPLETE_CURSOR_PRE_REBIND = Symbol(
+  "SQLiteBaselineTempStage.completeCursorPreRebind",
+);
+export const SQLITE_BASELINE_DIAGNOSE_CURSOR_PRE_REBIND = Symbol(
+  "SQLiteBaselineTempStage.diagnoseCursorPreRebind",
+);
+export const SQLITE_BASELINE_ABORT_CURSOR_PRE_REBIND = Symbol(
+  "SQLiteBaselineTempStage.abortCursorPreRebind",
 );
 
 /** Opaque evidence bound to one stage-private pending write pair. */
@@ -280,4 +302,28 @@ export interface SQLiteBaselineCursorStageTransferOwner {
     receipt: SQLiteCursorPreRebindReceipt,
     session: object,
   ): void;
+}
+
+/** Closed B2 stage surface. SQL remains fixed inside the stage owner. */
+export interface SQLiteBaselineCursorPreRebindStage {
+  [SQLITE_BASELINE_BEGIN_CURSOR_PRE_REBIND](
+    connection: SQLiteConnection,
+    receipt: SQLiteCursorPreRebindReceipt,
+    transferSession: object,
+  ): object;
+  [SQLITE_BASELINE_FENCE_CURSOR_PRE_REBIND](session: object): void;
+  [SQLITE_BASELINE_REGISTER_CURSOR_PRE_REBIND_CLEANUP](
+    session: object,
+    cleanup: (() => void) | undefined,
+  ): void;
+  [SQLITE_BASELINE_INSERT_CURSOR_PRE_REBIND_ROW](
+    session: object,
+    values: readonly SQLiteCursorStageValue[],
+  ): void;
+  [SQLITE_BASELINE_COMPLETE_CURSOR_PRE_REBIND](session: object): void;
+  [SQLITE_BASELINE_DIAGNOSE_CURSOR_PRE_REBIND](session: object): void;
+  [SQLITE_BASELINE_ABORT_CURSOR_PRE_REBIND](
+    session: object | undefined,
+    message: string,
+  ): never;
 }

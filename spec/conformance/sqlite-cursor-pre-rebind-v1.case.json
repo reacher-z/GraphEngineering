@@ -1,0 +1,234 @@
+{
+  "schemaVersion": 1,
+  "id": "sqlite-cursor-pre-rebind-v1",
+  "status": "contract-frozen",
+  "claims": {
+    "implementationClaim": false,
+    "protocolClaim": false,
+    "releaseGate": false,
+    "productionThroughputClaim": false,
+    "terminalState": "pre-rebind-complete"
+  },
+  "resourceLimits": {
+    "diagnosticDefault": 16,
+    "diagnosticMinimum": 1,
+    "diagnosticMaximum": 64,
+    "sourceFetchSize": 1,
+    "sealFetchSize": 1,
+    "pageSizeMinimum": 1,
+    "pageSizeMaximum": 256,
+    "safeIntegerMaximum": 9007199254740991,
+    "requestScopeMinimumBytes": 2,
+    "requestScopeMaximumBytes": 1048576,
+    "snapshotMinimumBytes": 2,
+    "snapshotMaximumBytes": 16777216,
+    "maximumActiveCampaignCursors": 1,
+    "maximumLivePhysicalRows": 1,
+    "maximumLiveCarriers": 1,
+    "maximumLiveDecodedSnapshots": 1,
+    "markerFetchExpression": "diagnosticLimit + 1",
+    "prohibitedCollectionApis": [".all()", "fetchall()", "Array.from", "application-sort", "proportional-list", "proportional-map"]
+  },
+  "ruleOrder": [
+    "BLR_CURSOR_AUTHORIZATION",
+    "BLR_CURSOR_SCOPE",
+    "BLR_CURSOR_BLOB_CANONICAL",
+    "BLR_CURSOR_POSITION",
+    "BLR_CURSOR_EXPIRY_CONSUMPTION",
+    "BLR_CURSOR_CATALOG_BINDING",
+    "BLR_CURSOR_SEAL_COUNT",
+    "BLR_CURSOR_SHAPE",
+    "BLR_CURSOR_EVENT_BINDING",
+    "BLR_CURSOR_CHECKPOINT_BINDING"
+  ],
+  "carrierContract": {
+    "algorithmVersion": "sqlite-cursor-seal/v1",
+    "rowDomain": "graph-engineering/sqlite-cursor-seal-row/v1\u0000",
+    "sealDomain": "graph-engineering/sqlite-cursor-seal/v1\u0000",
+    "sourceOrder": ["tenant-id-binary", "token-hash-binary"],
+    "sealOrder": ["token-hash-utf8-bytes", "tenant-id-utf8-bytes"],
+    "physicalColumnCount": 18,
+    "immutablePhysicalColumnCount": 16,
+    "mutableRebindFields": ["descriptor_hash", "schema_identity_sha256"],
+    "carrierFields": [
+      "authorizationHash", "checkpointScope", "consumedAtMs", "createdAtMs",
+      "expiresAtMs", "kind", "nextPosition", "pageSize", "principalHash",
+      "requestScopeBlobSha256", "requestScopeByteLength", "snapshotBlobSha256",
+      "snapshotByteLength", "snapshotTailRecordHash", "snapshotTailSequence",
+      "streamId", "tenantId", "tokenHash"
+    ],
+    "a1AlgorithmVectors": {
+      "empty": "587bd52db10d2d03c9f7b8bbcecee9c6f83d0c076b17846883e6885e10e2b47f",
+      "event": "1445422fdd2e7e6f93458c6d5e4cf35c53ebac8596cf117595c1f926086681ea",
+      "checkpoint": "4fefb119ba4e71217c64470627ce9b07388ffdd29cf0b3549b7127b06436f5f6",
+      "crossOrderPair": "3ee9a67ea7d1d961af54178d1df8c3cdf32dddfd4d7c5dcae03aca31efad84d1"
+    },
+    "a1VectorsAreB2SemanticClaims": false
+  },
+  "literalRows": {
+    "eventEmpty": { "tenant_id": "tenant-z", "token_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "kind": "event", "principal_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "authorization_hash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "stream_id": "stream-alpha", "checkpoint_scope": null, "request_scope_blob_utf8": "{\"contractVersion\":\"cycle-store-provider/v1alpha1\",\"pageSize\":64,\"streamId\":\"stream-alpha\"}", "page_size": 64, "next_position": 0, "snapshot_tail_sequence": -1, "snapshot_tail_record_hash": null, "descriptor_hash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "schema_identity_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "snapshot_blob_utf8": "{\"exists\":false,\"recordHash\":null,\"sequence\":-1}", "created_at_ms": 1700000000000, "expires_at_ms": 1700000300000, "consumed_at_ms": null },
+    "eventNonempty": { "tenant_id": "tenant-z", "token_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "kind": "event", "principal_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "authorization_hash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "stream_id": "stream-alpha", "checkpoint_scope": null, "request_scope_blob_utf8": "{\"contractVersion\":\"cycle-store-provider/v1alpha1\",\"pageSize\":64,\"streamId\":\"stream-alpha\"}", "page_size": 64, "next_position": 6, "snapshot_tail_sequence": 6, "snapshot_tail_record_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "descriptor_hash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "schema_identity_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "snapshot_blob_utf8": "{\"exists\":true,\"recordHash\":\"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\",\"sequence\":6}", "created_at_ms": 1700000000000, "expires_at_ms": 1700000300000, "consumed_at_ms": null },
+    "checkpoint": { "tenant_id": "tenant-a", "token_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "kind": "checkpoint", "principal_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "authorization_hash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "stream_id": null, "checkpoint_scope": "checkpoint-scope", "request_scope_blob_utf8": "{\"checkpointScope\":\"checkpoint-scope\",\"contractVersion\":\"cycle-store-provider/v1alpha1\",\"pageSize\":16}", "page_size": 16, "next_position": 1, "snapshot_tail_sequence": null, "snapshot_tail_record_hash": null, "descriptor_hash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "schema_identity_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "snapshot_blob_utf8": "[{\"boundRecordHash\":\"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\",\"boundSequence\":6,\"checkpointId\":\"cp-a\",\"checkpointScope\":\"checkpoint-scope\",\"createdAt\":\"2026-07-28T00:00:00Z\",\"streamId\":\"stream-alpha\",\"valueBytes\":2,\"valueHash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}]", "created_at_ms": 1700000000000, "expires_at_ms": 1700000300000, "consumed_at_ms": null }
+  },
+  "semanticVectors": [
+    { "name": "empty", "sourceRows": [], "eventHistory": [], "checkpointPutHistory": [], "clocks": { "capturedAtMs": 1700000200000, "providerHighWaterAtMs": 1700000100000, "maximumNonCursorObservedAtMs": 1700000000000 }, "identities": { "descriptorHash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "schemaIdentitySha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff" }, "expected": { "cursorCount": 0, "immutableRootSha256": "587bd52db10d2d03c9f7b8bbcecee9c6f83d0c076b17846883e6885e10e2b47f", "vector": [0,0,0,0,0,0,0,0,0,0], "outcome": "pre-rebind-complete" } },
+    { "name": "event-empty", "sourceRows": ["eventEmpty"], "eventHistory": [], "checkpointPutHistory": [], "clocks": { "capturedAtMs": 1700000200000, "providerHighWaterAtMs": 1700000100000, "maximumNonCursorObservedAtMs": 1700000000000 }, "identities": { "descriptorHash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "schemaIdentitySha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff" }, "expected": { "cursorCount": 1, "immutableRootSha256": "4bea314ce987d9ebafad820be623b54faeb458d417b229358f52ac930003259d", "vector": [0,0,0,0,0,0,0,0,0,0], "outcome": "pre-rebind-complete" } },
+    { "name": "event-nonempty", "sourceRows": ["eventNonempty"], "eventHistory": [{ "tenant_id": "tenant-z", "stream_id": "stream-alpha", "sequence": 6, "record_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd" }], "checkpointPutHistory": [], "clocks": { "capturedAtMs": 1700000200000, "providerHighWaterAtMs": 1700000100000, "maximumNonCursorObservedAtMs": 1700000000000 }, "identities": { "descriptorHash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "schemaIdentitySha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff" }, "expected": { "cursorCount": 1, "immutableRootSha256": "69b13f4fe1468106f8598361600b53d850453eecf4a2bbf16269a69c113b965c", "vector": [0,0,0,0,0,0,0,0,0,0], "outcome": "pre-rebind-complete" } },
+    { "name": "checkpoint", "sourceRows": ["checkpoint"], "eventHistory": [], "checkpointPutHistory": [{ "tenant_id": "tenant-a", "checkpoint_scope": "checkpoint-scope", "checkpoint_id": "cp-a", "action": "put", "summary_blob_utf8": "{\"boundRecordHash\":\"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\",\"boundSequence\":6,\"checkpointId\":\"cp-a\",\"checkpointScope\":\"checkpoint-scope\",\"createdAt\":\"2026-07-28T00:00:00Z\",\"streamId\":\"stream-alpha\",\"valueBytes\":2,\"valueHash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}" }], "clocks": { "capturedAtMs": 1700000200000, "providerHighWaterAtMs": 1700000100000, "maximumNonCursorObservedAtMs": 1700000000000 }, "identities": { "descriptorHash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "schemaIdentitySha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff" }, "expected": { "cursorCount": 1, "immutableRootSha256": "d1af942b2d1ba99d1a3a8380cad84de0bddaf2270fd481c04ecfcf0e969d2207", "vector": [0,0,0,0,0,0,0,0,0,0], "outcome": "pre-rebind-complete" } },
+    { "name": "cross-order", "sourceRows": ["checkpoint", "eventNonempty"], "eventHistory": [{ "tenant_id": "tenant-z", "stream_id": "stream-alpha", "sequence": 6, "record_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd" }], "checkpointPutHistory": [{ "tenant_id": "tenant-a", "checkpoint_scope": "checkpoint-scope", "checkpoint_id": "cp-a", "action": "put", "summary_blob_utf8": "{\"boundRecordHash\":\"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\",\"boundSequence\":6,\"checkpointId\":\"cp-a\",\"checkpointScope\":\"checkpoint-scope\",\"createdAt\":\"2026-07-28T00:00:00Z\",\"streamId\":\"stream-alpha\",\"valueBytes\":2,\"valueHash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}" }], "clocks": { "capturedAtMs": 1700000200000, "providerHighWaterAtMs": 1700000100000, "maximumNonCursorObservedAtMs": 1700000000000 }, "identities": { "descriptorHash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "schemaIdentitySha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff" }, "expected": { "cursorCount": 2, "immutableRootSha256": "4903764f227958615dd11070201e159723f8751b67bd200a9b5a39ff3181f5db", "vector": [0,0,0,0,0,0,0,0,0,0], "outcome": "pre-rebind-complete" } }
+  ],
+  "sqlContract": {
+    "normalization": "trim-and-collapse-ascii-whitespace",
+    "source": {
+      "sql": "SELECT tenant_id, token_hash, kind, principal_hash, authorization_hash, stream_id, checkpoint_scope, request_scope_blob, page_size, next_position, snapshot_tail_sequence, snapshot_tail_record_hash, descriptor_hash, schema_identity_sha256, snapshot_blob, created_at_ms, expires_at_ms, consumed_at_ms FROM main.ge_cycle_cursors ORDER BY tenant_id COLLATE BINARY, token_hash COLLATE BINARY",
+      "sha256": "dda30c873dcae965e1cac3f6478549b98e2414e982c1287997b93a2c09d760a4"
+    },
+    "insert": {
+      "sql": "INSERT INTO temp.ge_blr_cursor_seal (token_hash, tenant_id, kind, principal_hash, authorization_hash, stream_id, checkpoint_scope, request_scope_byte_length, request_scope_blob_sha256, page_size, next_position, snapshot_tail_sequence, snapshot_tail_record_hash, snapshot_byte_length, snapshot_blob_sha256, created_at_ms, expires_at_ms, consumed_at_ms, descriptor_hash, schema_identity_sha256, authorization_ok, scope_ok, blobs_canonical_ok, position_ok, clock_ok, catalog_ok, shape_ok, event_binding_ok, checkpoint_binding_ok, seal_eligible) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "sha256": "fbcf5255335c392f4f18818d8f12e79abbcfc677f768579fbe05f317a7a4774b"
+    },
+    "seal": {
+      "sql": "SELECT tenant_id, token_hash, kind, principal_hash, authorization_hash, stream_id, checkpoint_scope, request_scope_byte_length, request_scope_blob_sha256, page_size, next_position, snapshot_tail_sequence, snapshot_tail_record_hash, snapshot_byte_length, snapshot_blob_sha256, created_at_ms, expires_at_ms, consumed_at_ms, descriptor_hash, schema_identity_sha256 FROM temp.ge_blr_cursor_seal WHERE seal_eligible = 1 ORDER BY token_hash COLLATE BINARY, tenant_id COLLATE BINARY",
+      "sha256": "c169d8478a327605640a031bc1129d699341165bc6f59bdf7151c3e33677458e"
+    },
+    "countMarker": {
+      "sql": "SELECT 1 AS violation_marker WHERE ? <> ? OR ? <> ? LIMIT ?",
+      "sha256": "d4fa6279ee8d237b0ec82d9aed1b70e804d45890dd6d02313ac9ffea6260c830"
+    },
+    "eventLookup": {
+      "sql": "SELECT 1 AS binding_marker FROM main.ge_cycle_records INDEXED BY ge_cycle_records_stream_sequence_hash_uq WHERE tenant_id = ? AND stream_id = ? AND sequence = ? AND record_hash = ? LIMIT 1",
+      "sha256": "86a336dc93fc818fc41b0e2fdf204256dc197515919f5431084e71adf45585d4"
+    },
+    "checkpointLookup": {
+      "sql": "SELECT 1 AS binding_marker FROM main.ge_cycle_checkpoint_revisions INDEXED BY ge_cycle_checkpoint_revisions_lookup_idx WHERE tenant_id = ? AND checkpoint_scope = ? AND checkpoint_id = ? AND action = 'put' AND summary_blob = ? LIMIT 1",
+      "sha256": "8b6322cee22b003a9d8ac33caafcde5272473e9da86dc7f8d21db3209523aba0"
+    },
+    "rowMarkers": [
+      { "ruleId": "BLR_CURSOR_AUTHORIZATION", "flag": "authorization_ok", "sha256": "4b05dede61e9303c06a459416e8d6da4eac6007dedbab602ae4f4b942e9fbebf" },
+      { "ruleId": "BLR_CURSOR_SCOPE", "flag": "scope_ok", "sha256": "9bf6d38c051294f87798839738e5f913c69a54e8ac81dd571e36eda33ea8b628" },
+      { "ruleId": "BLR_CURSOR_BLOB_CANONICAL", "flag": "blobs_canonical_ok", "sha256": "64b77f510a88d3091603b5d9c93d58a5eb69d65c20f67c081847654434e514b8" },
+      { "ruleId": "BLR_CURSOR_POSITION", "flag": "position_ok", "sha256": "aa3a0bbb0a07137a0e497c9140d359608358b5fd3bf1ac7e1ed15a34893678b3" },
+      { "ruleId": "BLR_CURSOR_EXPIRY_CONSUMPTION", "flag": "clock_ok", "sha256": "494b6ae97f33349cfb787afedc3bbf2ee69021a669abb4dd14273028d2117771" },
+      { "ruleId": "BLR_CURSOR_CATALOG_BINDING", "flag": "catalog_ok", "sha256": "6dec1fa0dc5aa8b48c9fa45c50ed2dba32cb2a01c83f934407484c1200460562" },
+      { "ruleId": "BLR_CURSOR_SHAPE", "flag": "shape_ok", "sha256": "2600c8112c8e55f814a0f57ea50b822eb14c91e13871bec99965e7aa6a91c8cd" },
+      { "ruleId": "BLR_CURSOR_EVENT_BINDING", "flag": "event_binding_ok", "sha256": "515c1832cfc0238339a838245b7afabc83ca319e7f74fdeabbad6904152e3909" },
+      { "ruleId": "BLR_CURSOR_CHECKPOINT_BINDING", "flag": "checkpoint_binding_ok", "sha256": "92315896aa7d1f1acab782dad89641687da88350f5843f9c34d32026f6a9c8ce" }
+    ]
+  },
+  "eqpContract": {
+    "required": [
+      "source-primary-key-tenant-token-scan",
+      "seal-primary-key-token-tenant-scan",
+      "row-marker-primary-key-token-tenant-scan",
+      "count-marker-constant-row",
+      "event-covering-record-identity-lookup",
+      "checkpoint-historical-put-lookup"
+    ],
+    "eventIndex": "ge_cycle_records_stream_sequence_hash_uq",
+    "checkpointIndex": "ge_cycle_checkpoint_revisions_lookup_idx",
+    "forbiddenDetailFragments": ["AUTOMATIC", "MATERIALIZE", "USE TEMP B-TREE", "CO-ROUTINE"],
+    "forbidGuessedAutoindexName": true,
+    "everyStatementRequiresEqp": true
+  },
+  "outcomeContract": {
+    "outcomes": ["pre-rebind-complete", "diagnosed", "invalid-authority", "stale-authority", "stale-epoch", "unexplained-write", "catalog-corruption", "statement-corruption", "cancelled", "poisoned", "disposed"],
+    "diagnosticFields": ["ruleId", "violationCount", "diagnosticsTruncated"],
+    "diagnosedContainsReceipt": false,
+    "diagnosedContainsRoot": false,
+    "cleanReturnsExactInputReceipt": true,
+    "failurePrecedence": ["a2b-authority", "transfer-session", "owner-epoch", "catalog", "statement-marker", "cancellation", "cleanup"],
+    "checkpointOrder": ["boundSequence-desc", "createdAt-desc", "checkpointId-asc"]
+  },
+  "pristineObligations": {
+    "action": "execute-semantic-vector-or-real-database-scenario",
+    "scenarios": [
+    { "name": "empty", "semanticVector": "empty", "vector": [0,0,0,0,0,0,0,0,0,0] },
+    { "name": "event-empty-tail", "semanticVector": "event-empty", "vector": [0,0,0,0,0,0,0,0,0,0] },
+    { "name": "event-nonempty-tail", "semanticVector": "event-nonempty", "vector": [0,0,0,0,0,0,0,0,0,0] },
+    { "name": "checkpoint-historical-put", "semanticVector": "checkpoint", "vector": [0,0,0,0,0,0,0,0,0,0] },
+    { "name": "event-checkpoint-cross-order", "semanticVector": "cross-order", "vector": [0,0,0,0,0,0,0,0,0,0] },
+    { "name": "same-token-two-tenants", "realDatabaseScenario": "same-token-two-tenants", "vector": [0,0,0,0,0,0,0,0,0,0] },
+    { "name": "page-size-one", "realDatabaseScenario": "page-size-one", "vector": [0,0,0,0,0,0,0,0,0,0] },
+    { "name": "page-size-256", "realDatabaseScenario": "page-size-256", "vector": [0,0,0,0,0,0,0,0,0,0] },
+    { "name": "consumed-clock-valid", "realDatabaseScenario": "consumed-clock-valid", "vector": [0,0,0,0,0,0,0,0,0,0] },
+    { "name": "expired-locally-valid", "realDatabaseScenario": "expired-locally-valid", "vector": [0,0,0,0,0,0,0,0,0,0] },
+    { "name": "later-event-append-allowed", "realDatabaseScenario": "later-event-append-allowed", "vector": [0,0,0,0,0,0,0,0,0,0] },
+    { "name": "later-current-checkpoint-mutation-allowed", "realDatabaseScenario": "later-current-checkpoint-mutation-allowed", "vector": [0,0,0,0,0,0,0,0,0,0] }
+    ]
+  },
+  "hostileObligations": {
+    "action": "mutate-real-database-or-owned-stage-at-declared-scenario",
+    "scenarios": [
+    { "name": "authorization-malformed", "outcome": "diagnosed", "vector": [1,0,0,0,0,0,0,0,0,0] },
+    { "name": "scope-null-group", "outcome": "diagnosed", "vector": [0,1,0,0,0,0,0,0,0,0] },
+    { "name": "blob-invalid-utf8", "outcome": "diagnosed", "vector": [0,0,1,0,0,0,0,0,0,0] },
+    { "name": "position-beyond-snapshot", "outcome": "diagnosed", "vector": [0,0,0,1,0,0,0,0,0,0] },
+    { "name": "provider-clock-regression", "outcome": "diagnosed", "vector": [0,0,0,0,1,0,0,0,0,0] },
+    { "name": "descriptor-substitution", "outcome": "diagnosed", "vector": [0,0,0,0,0,1,0,0,0,0] },
+    { "name": "source-stage-count-delta", "outcome": "diagnosed", "vector": [0,0,0,0,0,0,1,0,0,0] },
+    { "name": "storage-class-shape", "outcome": "diagnosed", "vector": [0,0,0,0,0,0,0,1,0,0] },
+    { "name": "event-missing-retained-tail", "outcome": "diagnosed", "vector": [0,0,0,0,0,0,0,0,1,0] },
+    { "name": "checkpoint-missing-put", "outcome": "diagnosed", "vector": [0,0,0,0,0,0,0,0,0,1] },
+    { "name": "request-extra-key", "outcome": "diagnosed", "vector": [0,1,0,0,0,0,0,0,0,0] },
+    { "name": "blob-bom", "outcome": "diagnosed", "vector": [0,0,1,0,0,0,0,0,0,0] },
+    { "name": "blob-duplicate-key", "outcome": "diagnosed", "vector": [0,0,1,0,0,0,0,0,0,0] },
+    { "name": "blob-noncanonical-order", "outcome": "diagnosed", "vector": [0,0,1,0,0,0,0,0,0,0] },
+    { "name": "blob-over-bound", "outcome": "diagnosed", "vector": [0,0,1,0,0,0,0,0,0,0] },
+    { "name": "page-zero", "outcome": "diagnosed", "vector": [0,0,0,1,0,0,0,0,0,0] },
+    { "name": "page-257", "outcome": "diagnosed", "vector": [0,0,0,1,0,0,0,0,0,0] },
+    { "name": "clock-consumed-before-created", "outcome": "diagnosed", "vector": [0,0,0,0,1,0,0,0,0,0] },
+    { "name": "schema-substitution", "outcome": "diagnosed", "vector": [0,0,0,0,0,1,0,0,0,0] },
+    { "name": "event-snapshot-mismatch", "outcome": "diagnosed", "vector": [0,0,0,0,0,0,0,0,1,0] },
+    { "name": "checkpoint-sequence-order", "outcome": "diagnosed", "vector": [0,0,0,0,0,0,0,0,0,1] },
+    { "name": "checkpoint-created-order", "outcome": "diagnosed", "vector": [0,0,0,0,0,0,0,0,0,1] },
+    { "name": "checkpoint-id-order", "outcome": "diagnosed", "vector": [0,0,0,0,0,0,0,0,0,1] },
+    { "name": "all-rules-nonlexical-input", "outcome": "diagnosed", "vector": [1,2,3,4,5,6,1,8,9,10] },
+    { "name": "equal-count-insert-delete", "outcome": "stale-authority", "vector": [0,0,0,0,0,0,0,0,0,0] },
+    { "name": "source-table-ddl-replacement", "outcome": "catalog-corruption", "vector": [0,0,0,0,0,0,0,0,0,0] },
+    { "name": "source-index-ddl-replacement", "outcome": "catalog-corruption", "vector": [0,0,0,0,0,0,0,0,0,0] }
+    ]
+  },
+  "lifecycleObligations": {
+    "action": "inject-at-declared-owner-boundary",
+    "scenarios": [
+    { "name": "source-prepare-failure", "outcome": "statement-corruption" },
+    { "name": "source-first-fetch-failure", "outcome": "statement-corruption" },
+    { "name": "source-middle-fetch-failure", "outcome": "statement-corruption" },
+    { "name": "source-final-fetch-failure", "outcome": "statement-corruption" },
+    { "name": "source-close-failure", "outcome": "statement-corruption" },
+    { "name": "decode-before-insert-failure", "outcome": "statement-corruption" },
+    { "name": "insert-zero-change", "outcome": "unexplained-write" },
+    { "name": "insert-two-changes", "outcome": "unexplained-write" },
+    { "name": "post-source-pre-barrier-mutation", "outcome": "unexplained-write" },
+    { "name": "marker-malformed-arity", "outcome": "statement-corruption" },
+    { "name": "marker-malformed-type", "outcome": "statement-corruption" },
+    { "name": "marker-malformed-value", "outcome": "statement-corruption" },
+    { "name": "post-diagnostic-mutation", "outcome": "unexplained-write" },
+    { "name": "rule-transition-mutation", "outcome": "unexplained-write" },
+    { "name": "transaction-end", "outcome": "stale-epoch" },
+    { "name": "rollback-rebegin", "outcome": "stale-epoch" },
+    { "name": "active-dispose", "outcome": "disposed" },
+    { "name": "closed-connection", "outcome": "poisoned" },
+    { "name": "cancel-at-begin", "outcome": "cancelled" },
+    { "name": "cancel-at-source", "outcome": "cancelled" },
+    { "name": "cancel-at-seal", "outcome": "cancelled" },
+    { "name": "cancel-at-rule", "outcome": "cancelled" },
+    { "name": "cancel-before-complete", "outcome": "cancelled" },
+    { "name": "cleanup-only-failure", "outcome": "poisoned" },
+    { "name": "primary-plus-cleanup", "outcome": "statement-corruption" },
+    { "name": "receipt-clone", "outcome": "invalid-authority" },
+    { "name": "projection-clone", "outcome": "invalid-authority" },
+    { "name": "transfer-clone", "outcome": "invalid-authority" },
+    { "name": "second-run", "outcome": "poisoned" },
+    { "name": "abandonment", "outcome": "poisoned" },
+    { "name": "before-legacy-complete", "outcome": "invalid-authority" }
+    ]
+  },
+  "parityGates": {
+    "runtimes": ["typescript", "python"],
+    "fastCharacterizationCounts": [128, 1024],
+    "literalDiagnosticPopulations": [1, 2, 16, 17, 64, 65],
+    "required": ["normalized-sql", "sql-sha256", "eqp-predicates", "carrier-bytes", "row-digests", "count-root", "ten-vector", "diagnostics", "outcomes", "clocks", "live-resource-counters"],
+    "fixtureCanonicalSha256": "6acb99d9593b37d6e29b6862531e3ade2dae051b21a628a26cc4e1d7e2fdb8bc"
+  }
+}

@@ -1,0 +1,1971 @@
+{
+  "schemaVersion": 2,
+  "fixture": "spec/conformance/sqlite-cursor-pre-rebind-v1.case.json",
+  "auditPolicy": "EXACT requires exclusive canonical executionIds emitted by a real passing runner. Every ID must be owned by one case only; Vitest fullName and pytest nodeid matching is byte-exact with no wildcard, prefix, normalization, title-source, or fallback matching.",
+  "generatedAt": "2026-07-28",
+  "cases": [
+    {
+      "group": "pristine",
+      "caseId": "empty",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/cursor-pre-rebind-contract.test.ts",
+        "title": "recomputes all five literal semantic vectors through inspector and A1 [empty]",
+      "asserts": "fixture-contract declares zero source rows and zero ten-vector; production seal accumulator finishes cursorCount=0 with the exact fixture A1 root",
+        "executionIds": [
+          "packages/sqlite/test/cursor-pre-rebind-contract.test.ts::SQLite cursor pre-rebind generated contract recomputes literal semantic vector empty [b2:empty]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_inspection.py",
+        "title": "test_shared_semantic_vectors_recompute_exact_a1_roots[empty]",
+      "asserts": "fixture-contract declares zero source rows; production seal accumulator finishes cursorCount=0 with the exact fixture A1 root",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_inspection.py::test_shared_semantic_vectors_recompute_exact_a1_roots[b2:empty]"
+        ]
+      }
+    },
+    {
+      "group": "pristine",
+      "caseId": "event-empty-tail",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/cursor-pre-rebind-contract.test.ts",
+        "title": "recomputes all five literal semantic vectors through inspector and A1 [event-empty]",
+      "asserts": "fixture-contract eventEmpty row is passed through the production inspector; its nine row flags are true; the production seal accumulator reproduces the exact fixture A1 root and the fixture declares a zero ten-vector",
+        "executionIds": [
+          "packages/sqlite/test/cursor-pre-rebind-contract.test.ts::SQLite cursor pre-rebind generated contract recomputes literal semantic vector event-empty [b2:event-empty-tail]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_inspection.py",
+        "title": "test_shared_semantic_vectors_recompute_exact_a1_roots[event-empty]",
+      "asserts": "fixture-contract eventEmpty row is passed through the production inspector; stageable/insert shapes and all nine row flags are checked; the production seal accumulator reproduces the exact fixture A1 root",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_inspection.py::test_shared_semantic_vectors_recompute_exact_a1_roots[b2:event-empty-tail]"
+        ]
+      }
+    },
+    {
+      "group": "pristine",
+      "caseId": "event-nonempty-tail",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/cursor-pre-rebind-contract.test.ts",
+        "title": "recomputes all five literal semantic vectors through inspector and A1 [event-nonempty]",
+      "asserts": "fixture-contract retained event tail row is passed through the production inspector with fixture history lookup; nine row flags are true and the production seal accumulator reproduces the exact fixture A1 root",
+        "executionIds": [
+          "packages/sqlite/test/cursor-pre-rebind-contract.test.ts::SQLite cursor pre-rebind generated contract recomputes literal semantic vector event-nonempty [b2:event-nonempty-tail]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_inspection.py",
+        "title": "test_shared_semantic_vectors_recompute_exact_a1_roots[event-nonempty]",
+      "asserts": "fixture-contract retained event tail row is passed through the production inspector with fixture history lookup; all nine row flags and the exact fixture A1 root are checked",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_inspection.py::test_shared_semantic_vectors_recompute_exact_a1_roots[b2:event-nonempty-tail]"
+        ]
+      }
+    },
+    {
+      "group": "pristine",
+      "caseId": "checkpoint-historical-put",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/cursor-pre-rebind-contract.test.ts",
+        "title": "recomputes all five literal semantic vectors through inspector and A1 [checkpoint]",
+      "asserts": "fixture-contract historical checkpoint put row is passed through the production inspector with exact summary bytes; nine row flags are true and the production seal accumulator reproduces the exact fixture A1 root",
+        "executionIds": [
+          "packages/sqlite/test/cursor-pre-rebind-contract.test.ts::SQLite cursor pre-rebind generated contract recomputes literal semantic vector checkpoint [b2:checkpoint-historical-put]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_inspection.py",
+        "title": "test_shared_semantic_vectors_recompute_exact_a1_roots[checkpoint]",
+      "asserts": "fixture-contract historical checkpoint put row is passed through the production inspector with exact summary bytes; all nine row flags and the exact fixture A1 root are checked",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_inspection.py::test_shared_semantic_vectors_recompute_exact_a1_roots[b2:checkpoint-historical-put]"
+        ]
+      }
+    },
+    {
+      "group": "pristine",
+      "caseId": "event-checkpoint-cross-order",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/cursor-pre-rebind-contract.test.ts",
+        "title": "recomputes all five literal semantic vectors through inspector and A1 [cross-order]",
+      "asserts": "fixture-contract checkpoint/event rows are passed through the production inspector then reduced in token/tenant order; all nine row flags per row and the exact fixture A1 root are checked",
+        "executionIds": [
+          "packages/sqlite/test/cursor-pre-rebind-contract.test.ts::SQLite cursor pre-rebind generated contract recomputes literal semantic vector cross-order [b2:event-checkpoint-cross-order]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_inspection.py",
+        "title": "test_shared_semantic_vectors_recompute_exact_a1_roots[cross-order]",
+      "asserts": "fixture-contract cross-order rows are passed through the production inspector then reduced in token/tenant order; all nine row flags per row and the exact fixture A1 root are checked",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_inspection.py::test_shared_semantic_vectors_recompute_exact_a1_roots[b2:event-checkpoint-cross-order]"
+        ]
+      }
+    },
+    {
+      "group": "pristine",
+      "caseId": "same-token-two-tenants",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "accepts the same token hash for two tenants through the composite TEMP key",
+        "asserts": "real DB campaign completes; TEMP order contains both tenant identities",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign accepts the same token hash for two tenants through the composite TEMP key [b2:same-token-two-tenants]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_campaign.py",
+        "title": "test_pristine_consumed_expired_page_and_composite_key_boundaries_complete[same-token]",
+        "asserts": "campaign completes; exact same-token tenant-1/tenant-2 rows and terminal EOF",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_pristine_consumed_expired_page_and_composite_key_boundaries_complete[b2:same-token-two-tenants]"
+        ]
+      }
+    },
+    {
+      "group": "pristine",
+      "caseId": "page-size-one",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "accepts consumed, expired-at-capture, and page-size boundary cursors",
+        "asserts": "real campaign includes page size 1 and completes with zero vector",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign accepts pristine boundary page-size-one [b2:page-size-one]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_campaign.py",
+      "title": "test_pristine_consumed_expired_page_and_composite_key_boundaries_complete[page-size-one]",
+      "asserts": "isolated real row is asserted as page_size=1, created=500, expires=1500, unconsumed; production campaign completes with the exact zero vector",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_pristine_consumed_expired_page_and_composite_key_boundaries_complete[b2:page-size-one]"
+        ]
+      }
+    },
+    {
+      "group": "pristine",
+      "caseId": "page-size-256",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "accepts consumed, expired-at-capture, and page-size boundary cursors",
+        "asserts": "real campaign includes page size 256 and completes with zero vector",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign accepts pristine boundary page-size-256 [b2:page-size-256]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_campaign.py",
+      "title": "test_pristine_consumed_expired_page_and_composite_key_boundaries_complete[page-size-256]",
+      "asserts": "isolated real row is asserted as page_size=256, created=500, expires=1500, unconsumed; production campaign completes with the exact zero vector",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_pristine_consumed_expired_page_and_composite_key_boundaries_complete[b2:page-size-256]"
+        ]
+      }
+    },
+    {
+      "group": "pristine",
+      "caseId": "consumed-clock-valid",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "accepts consumed, expired-at-capture, and page-size boundary cursors",
+        "asserts": "consumed_at equals created_at; campaign completes with zero vector",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign accepts pristine boundary consumed-clock-valid [b2:consumed-clock-valid]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_campaign.py",
+      "title": "test_pristine_consumed_expired_page_and_composite_key_boundaries_complete[consumed-clock-valid]",
+      "asserts": "isolated real row is asserted with consumed_at=created_at=500 and expires=1500; production campaign completes with the exact zero vector",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_pristine_consumed_expired_page_and_composite_key_boundaries_complete[b2:consumed-clock-valid]"
+        ]
+      }
+    },
+    {
+      "group": "pristine",
+      "caseId": "expired-locally-valid",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "accepts consumed, expired-at-capture, and page-size boundary cursors",
+        "asserts": "expiry before capture remains valid; campaign completes",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign accepts pristine boundary expired-locally-valid [b2:expired-locally-valid]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_campaign.py",
+      "title": "test_pristine_consumed_expired_page_and_composite_key_boundaries_complete[expired-locally-valid]",
+      "asserts": "isolated real row is asserted with expires_at=900 before the captured clock and no consumption; production campaign completes with the exact zero vector",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_pristine_consumed_expired_page_and_composite_key_boundaries_complete[b2:expired-locally-valid]"
+        ]
+      }
+    },
+    {
+      "group": "pristine",
+      "caseId": "later-event-append-allowed",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "completes real event+checkpoint cursors whose source and seal orders disagree",
+        "asserts": "later event appended after retained tail; campaign completes and TEMP rows preserve event/checkpoint",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign accepts later mutation later-event-append-allowed [b2:later-event-append-allowed]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_campaign.py",
+      "title": "test_retained_event_tail_and_checkpoint_put_survive_later_current_history[later-event-append-allowed]",
+      "asserts": "isolated real event cursor has current stream tail advanced to 1 while its retained tail remains historical; checkpoint current/max revision subqueries are both NULL and the only source kind is event; production campaign completes with the exact zero vector",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_retained_event_tail_and_checkpoint_put_survive_later_current_history[b2:later-event-append-allowed]"
+        ]
+      }
+    },
+    {
+      "group": "pristine",
+      "caseId": "later-current-checkpoint-mutation-allowed",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "completes real event+checkpoint cursors whose source and seal orders disagree",
+        "asserts": "later delete/save of current checkpoint does not invalidate historical put; campaign completes",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign accepts later mutation later-current-checkpoint-mutation-allowed [b2:later-current-checkpoint-mutation-allowed]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_campaign.py",
+      "title": "test_retained_event_tail_and_checkpoint_put_survive_later_current_history[later-current-checkpoint-mutation-allowed]",
+      "asserts": "isolated real checkpoint cursor observes stream tail 0 and current/max revision 12 while its historical put remains; the only source kind is checkpoint; production campaign completes with the exact zero vector",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_retained_event_tail_and_checkpoint_put_survive_later_current_history[b2:later-current-checkpoint-mutation-allowed]"
+        ]
+      }
+    },
+    {
+      "group": "hostile",
+      "caseId": "authorization-malformed",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "diagnoses rule 1 authorization in isolation through the real campaign [b2:authorization-malformed]",
+        "asserts": "malformed principal; diagnosed; one-hot rule 1; receipt absent",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign diagnoses rule 1 authorization in isolation through the real campaign [b2:authorization-malformed]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_campaign.py",
+        "title": "test_real_campaign_isolates_each_rule_as_one_hot_vector[0]",
+        "asserts": "malformed principal; diagnosed; exact one-hot rule 1 and diagnostic",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_real_campaign_isolates_each_rule_as_one_hot_vector[b2:authorization-malformed]"
+        ]
+      }
+    },
+    {
+      "group": "hostile",
+      "caseId": "scope-null-group",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "diagnoses scope-null-group exclusively as closed-scope rule 2",
+        "asserts": "real DB stream_id null; exact diagnosed one-hot rule 2; no receipt; stage remains open and permanent digest unchanged",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign diagnoses scope-null-group exclusively as closed-scope rule 2 [b2:scope-null-group]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_campaign.py",
+        "title": "test_exact_hostile_physical_row_cases_are_one_hot",
+        "asserts": "fixture-bound scope-null-group real row; exact diagnosed one-hot rule 2; receipt-free",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_exact_hostile_physical_row_cases_are_one_hot[b2:scope-null-group]"
+        ]
+      }
+    },
+    {
+      "group": "hostile",
+      "caseId": "blob-invalid-utf8",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "diagnoses rule 3 canonical blob in isolation through the real campaign [b2:blob-invalid-utf8]",
+        "asserts": "0xff/0xfe request bytes; diagnosed; one-hot rule 3",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign diagnoses rule 3 canonical blob in isolation through the real campaign [b2:blob-invalid-utf8]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_inspection.py",
+        "title": "test_malformed_request_blob_is_isolated_to_rule_three[b\\xff{}]",
+        "asserts": "invalid UTF-8 request; exact isolated rule-3 flags; seal row absent",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_inspection.py::test_malformed_request_blob_is_isolated_to_rule_three[b2:blob-invalid-utf8]"
+        ]
+      }
+    },
+    {
+      "group": "hostile",
+      "caseId": "position-beyond-snapshot",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "diagnoses rule 4 position in isolation through the real campaign [b2:position-beyond-snapshot]",
+        "asserts": "next_position exceeds empty snapshot; diagnosed; one-hot rule 4",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign diagnoses rule 4 position in isolation through the real campaign [b2:position-beyond-snapshot]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_campaign.py",
+        "title": "test_real_campaign_isolates_each_rule_as_one_hot_vector[3]",
+        "asserts": "next_position exceeds empty snapshot; exact one-hot rule 4",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_real_campaign_isolates_each_rule_as_one_hot_vector[b2:position-beyond-snapshot]"
+        ]
+      }
+    },
+    {
+      "group": "hostile",
+      "caseId": "provider-clock-regression",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "diagnoses rule 5 clock in isolation through the real campaign [b2:provider-clock-regression]",
+        "asserts": "created/expires after provider high-water; diagnosed; one-hot rule 5",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign diagnoses rule 5 clock in isolation through the real campaign [b2:provider-clock-regression]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_campaign.py",
+        "title": "test_real_campaign_isolates_each_rule_as_one_hot_vector[4]",
+        "asserts": "provider clock regression; exact one-hot rule 5",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_real_campaign_isolates_each_rule_as_one_hot_vector[b2:provider-clock-regression]"
+        ]
+      }
+    },
+    {
+      "group": "hostile",
+      "caseId": "descriptor-substitution",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "diagnoses rule 6 catalog binding in isolation through the real campaign [b2:descriptor-substitution]",
+        "asserts": "descriptor hash substituted; diagnosed; one-hot rule 6",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign diagnoses rule 6 catalog binding in isolation through the real campaign [b2:descriptor-substitution]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_campaign.py",
+        "title": "test_real_campaign_isolates_each_rule_as_one_hot_vector[5]",
+        "asserts": "descriptor hash substituted; exact one-hot rule 6",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_real_campaign_isolates_each_rule_as_one_hot_vector[b2:descriptor-substitution]"
+        ]
+      }
+    },
+    {
+      "group": "hostile",
+      "caseId": "source-stage-count-delta",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "diagnoses retained-A2b versus live source inventory only through rule 7",
+        "asserts": "retained count 0/live count 1; exact rule-7 one-hot diagnostic",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign diagnoses retained-A2b versus live source inventory only through rule 7 [b2:source-stage-count-delta]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_campaign.py",
+        "title": "test_real_campaign_isolates_each_rule_as_one_hot_vector[6]",
+        "asserts": "receipt row set empty/source row present; exact one-hot rule 7",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_real_campaign_isolates_each_rule_as_one_hot_vector[b2:source-stage-count-delta]"
+        ]
+      }
+    },
+    {
+      "group": "hostile",
+      "caseId": "storage-class-shape",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "diagnoses a representable unowned storage defect as isolated rule 8",
+        "asserts": "descriptor stored as 32-byte BLOB; diagnosed; exact one-hot rule 8",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign diagnoses a representable unowned storage defect as isolated rule 8 [b2:storage-class-shape]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_inspection.py",
+      "title": "test_representable_nonkey_storage_defect_is_rule_eight_only",
+      "asserts": "representable snapshot-tail-hash INTEGER preserves valid source key storage and remains stageable; production inspector returns the exact isolated rule-8 shape flag",
+      "executionIds": [
+        "python/tests/test_sqlite_operation_baseline_cursor_inspection.py::test_representable_nonkey_storage_defect_is_rule_eight_only[b2:storage-class-shape]"
+        ]
+      }
+    },
+    {
+      "group": "hostile",
+      "caseId": "event-missing-retained-tail",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "diagnoses rule 9 missing retained event tail in isolation through the real campaign [b2:event-missing-retained-tail]",
+        "asserts": "real database row runs through owned-stage production campaign; diagnosed with exact isolated one-hot rule 9 vector and one exact diagnostic; no receipt; permanent rows unchanged",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign diagnoses rule 9 missing retained event tail in isolation through the real campaign [b2:event-missing-retained-tail]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_inspection.py",
+        "title": "test_event_missing_history_is_isolated_to_rule_nine",
+        "asserts": "event lookup forced false; exact isolated rule-9 flags",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_inspection.py::test_event_missing_history_is_isolated_to_rule_nine[b2:event-missing-retained-tail]"
+        ]
+      }
+    },
+    {
+      "group": "hostile",
+      "caseId": "checkpoint-missing-put",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "diagnoses rule 10 missing historical checkpoint put in isolation through the real campaign [b2:checkpoint-missing-put]",
+        "asserts": "real database row runs through owned-stage production campaign; diagnosed with exact isolated one-hot rule 10 vector and one exact diagnostic; no receipt; permanent rows unchanged",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign diagnoses rule 10 missing historical checkpoint put in isolation through the real campaign [b2:checkpoint-missing-put]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_inspection.py",
+        "title": "test_checkpoint_missing_put_is_isolated_to_rule_ten",
+        "asserts": "checkpoint historical put lookup forced false; exact rule-10 flags",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_inspection.py::test_checkpoint_missing_put_is_isolated_to_rule_ten[b2:checkpoint-missing-put]"
+        ]
+      }
+    },
+    {
+      "group": "hostile",
+      "caseId": "request-extra-key",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "diagnoses rule 2 closed scope in isolation through the real campaign [b2:request-extra-key]",
+        "asserts": "canonical request includes extra=true; diagnosed; one-hot rule 2",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign diagnoses rule 2 closed scope in isolation through the real campaign [b2:request-extra-key]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_inspection.py",
+        "title": "test_canonical_request_extra_key_is_isolated_to_rule_two",
+        "asserts": "canonical request extra key; exact isolated rule-2 flags",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_inspection.py::test_canonical_request_extra_key_is_isolated_to_rule_two[b2:request-extra-key]"
+        ]
+      }
+    },
+    {
+      "group": "hostile",
+      "caseId": "blob-bom",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "diagnoses rule 3 BOM-prefixed blob in isolation through the real campaign [b2:blob-bom]",
+        "asserts": "real database row runs through owned-stage production campaign; diagnosed with exact isolated one-hot rule 3 vector and one exact diagnostic; no receipt; permanent rows unchanged",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign diagnoses rule 3 BOM-prefixed blob in isolation through the real campaign [b2:blob-bom]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_inspection.py",
+        "title": "test_malformed_request_blob_is_isolated_to_rule_three[BOM]",
+        "asserts": "BOM-prefixed request; exact isolated rule-3 flags",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_inspection.py::test_malformed_request_blob_is_isolated_to_rule_three[b2:blob-bom]"
+        ]
+      }
+    },
+    {
+      "group": "hostile",
+      "caseId": "blob-duplicate-key",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "diagnoses rule 3 duplicate-key blob in isolation through the real campaign [b2:blob-duplicate-key]",
+        "asserts": "real database row runs through owned-stage production campaign; diagnosed with exact isolated one-hot rule 3 vector and one exact diagnostic; no receipt; permanent rows unchanged",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign diagnoses rule 3 duplicate-key blob in isolation through the real campaign [b2:blob-duplicate-key]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_inspection.py",
+        "title": "test_malformed_request_blob_is_isolated_to_rule_three[duplicate-key]",
+        "asserts": "duplicate streamId key; exact isolated rule-3 flags",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_inspection.py::test_malformed_request_blob_is_isolated_to_rule_three[b2:blob-duplicate-key]"
+        ]
+      }
+    },
+    {
+      "group": "hostile",
+      "caseId": "blob-noncanonical-order",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "diagnoses rule 3 noncanonical-order blob in isolation through the real campaign [b2:blob-noncanonical-order]",
+        "asserts": "real database row runs through owned-stage production campaign; diagnosed with exact isolated one-hot rule 3 vector and one exact diagnostic; no receipt; permanent rows unchanged",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign diagnoses rule 3 noncanonical-order blob in isolation through the real campaign [b2:blob-noncanonical-order]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_inspection.py",
+        "title": "test_malformed_request_blob_is_isolated_to_rule_three[noncanonical]",
+        "asserts": "valid JSON with whitespace/order drift; exact isolated rule-3 flags",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_inspection.py::test_malformed_request_blob_is_isolated_to_rule_three[b2:blob-noncanonical-order]"
+        ]
+      }
+    },
+    {
+      "group": "hostile",
+      "caseId": "blob-over-bound",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "diagnoses rule 3 over-bound blob in isolation through the real campaign [b2:blob-over-bound]",
+        "asserts": "real database row runs through owned-stage production campaign; diagnosed with exact isolated one-hot rule 3 vector and one exact diagnostic; no receipt; permanent rows unchanged",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign diagnoses rule 3 over-bound blob in isolation through the real campaign [b2:blob-over-bound]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_campaign.py",
+        "title": "test_exact_hostile_physical_row_cases_are_one_hot",
+        "asserts": "1,048,577-byte real request BLOB; exact diagnosed one-hot rule 3; receipt-free",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_exact_hostile_physical_row_cases_are_one_hot[b2:blob-over-bound]"
+        ]
+      }
+    },
+    {
+      "group": "hostile",
+      "caseId": "page-zero",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "diagnoses rule 4 zero page size in isolation through the real campaign [b2:page-zero]",
+        "asserts": "real database row runs through owned-stage production campaign; diagnosed with exact isolated one-hot rule 4 vector and one exact diagnostic; no receipt; permanent rows unchanged",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign diagnoses rule 4 zero page size in isolation through the real campaign [b2:page-zero]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_inspection.py",
+        "title": "test_page_bounds_are_isolated_to_rule_four[0]",
+        "asserts": "page_size=0; exact isolated rule-4 flags",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_inspection.py::test_page_bounds_are_isolated_to_rule_four[b2:page-zero]"
+        ]
+      }
+    },
+    {
+      "group": "hostile",
+      "caseId": "page-257",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "diagnoses rule 4 page size 257 in isolation through the real campaign [b2:page-257]",
+        "asserts": "real database row runs through owned-stage production campaign; diagnosed with exact isolated one-hot rule 4 vector and one exact diagnostic; no receipt; permanent rows unchanged",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign diagnoses rule 4 page size 257 in isolation through the real campaign [b2:page-257]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_inspection.py",
+        "title": "test_page_bounds_are_isolated_to_rule_four[257]",
+        "asserts": "page_size=257; exact isolated rule-4 flags",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_inspection.py::test_page_bounds_are_isolated_to_rule_four[b2:page-257]"
+        ]
+      }
+    },
+    {
+      "group": "hostile",
+      "caseId": "clock-consumed-before-created",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "diagnoses rule 5 consumed-before-created clock in isolation through the real campaign [b2:clock-consumed-before-created]",
+        "asserts": "real database row runs through owned-stage production campaign; diagnosed with exact isolated one-hot rule 5 vector and one exact diagnostic; no receipt; permanent rows unchanged",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign diagnoses rule 5 consumed-before-created clock in isolation through the real campaign [b2:clock-consumed-before-created]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_campaign.py",
+        "title": "test_exact_hostile_physical_row_cases_are_one_hot",
+        "asserts": "consumed before created real row; exact diagnosed one-hot rule 5; receipt-free",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_exact_hostile_physical_row_cases_are_one_hot[b2:clock-consumed-before-created]"
+        ]
+      }
+    },
+    {
+      "group": "hostile",
+      "caseId": "schema-substitution",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "diagnoses rule 6 schema substitution in isolation through the real campaign [b2:schema-substitution]",
+        "asserts": "real database row runs through owned-stage production campaign; diagnosed with exact isolated one-hot rule 6 vector and one exact diagnostic; no receipt; permanent rows unchanged",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign diagnoses rule 6 schema substitution in isolation through the real campaign [b2:schema-substitution]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_campaign.py",
+        "title": "test_exact_hostile_physical_row_cases_are_one_hot",
+        "asserts": "schema identity substitution real row; exact diagnosed one-hot rule 6; receipt-free",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_exact_hostile_physical_row_cases_are_one_hot[b2:schema-substitution]"
+        ]
+      }
+    },
+    {
+      "group": "hostile",
+      "caseId": "event-snapshot-mismatch",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "diagnoses rule 9 event history binding in isolation through the real campaign [b2:event-snapshot-mismatch]",
+        "asserts": "snapshot says exists with null hash/-1; diagnosed; one-hot rule 9",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign diagnoses rule 9 event history binding in isolation through the real campaign [b2:event-snapshot-mismatch]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_campaign.py",
+        "title": "test_real_campaign_isolates_each_rule_as_one_hot_vector[8]",
+        "asserts": "same event snapshot mismatch; exact one-hot rule 9",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_real_campaign_isolates_each_rule_as_one_hot_vector[b2:event-snapshot-mismatch]"
+        ]
+      }
+    },
+    {
+      "group": "hostile",
+      "caseId": "checkpoint-sequence-order",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "diagnoses rule 10 ascending checkpoint sequence in isolation through the real campaign [b2:checkpoint-sequence-order]",
+        "asserts": "real database row runs through owned-stage production campaign; diagnosed with exact isolated one-hot rule 10 vector and one exact diagnostic; no receipt; permanent rows unchanged; both checkpoint lookups execute so the failure is ordering-only",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign diagnoses rule 10 ascending checkpoint sequence in isolation through the real campaign [b2:checkpoint-sequence-order]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_campaign.py",
+        "title": "test_exact_checkpoint_snapshot_ordering_cases_are_one_hot[checkpoint-sequence-order]",
+        "asserts": "real history; sequence-order-only defect; exact one-hot rule 10",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_exact_checkpoint_snapshot_ordering_cases_are_one_hot[b2:checkpoint-sequence-order]"
+        ]
+      }
+    },
+    {
+      "group": "hostile",
+      "caseId": "checkpoint-created-order",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "diagnoses rule 10 ascending checkpoint creation time in isolation through the real campaign [b2:checkpoint-created-order]",
+        "asserts": "real database row runs through owned-stage production campaign; diagnosed with exact isolated one-hot rule 10 vector and one exact diagnostic; no receipt; permanent rows unchanged; both checkpoint lookups execute so the failure is ordering-only",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign diagnoses rule 10 ascending checkpoint creation time in isolation through the real campaign [b2:checkpoint-created-order]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_campaign.py",
+        "title": "test_exact_checkpoint_snapshot_ordering_cases_are_one_hot[checkpoint-created-order]",
+        "asserts": "real history; createdAt-order-only defect; exact one-hot rule 10",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_exact_checkpoint_snapshot_ordering_cases_are_one_hot[b2:checkpoint-created-order]"
+        ]
+      }
+    },
+    {
+      "group": "hostile",
+      "caseId": "checkpoint-id-order",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "diagnoses rule 10 descending checkpoint id in isolation through the real campaign [b2:checkpoint-id-order]",
+        "asserts": "real database row runs through owned-stage production campaign; diagnosed with exact isolated one-hot rule 10 vector and one exact diagnostic; no receipt; permanent rows unchanged; both checkpoint lookups execute so the failure is ordering-only",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign diagnoses rule 10 descending checkpoint id in isolation through the real campaign [b2:checkpoint-id-order]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_campaign.py",
+        "title": "test_exact_checkpoint_snapshot_ordering_cases_are_one_hot[checkpoint-id-order]",
+        "asserts": "real history; checkpointId-order-only defect; exact one-hot rule 10",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_exact_checkpoint_snapshot_ordering_cases_are_one_hot[b2:checkpoint-id-order]"
+        ]
+      }
+    },
+    {
+      "group": "hostile",
+      "caseId": "all-rules-nonlexical-input",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "aggregates all ten rules in registry order without publishing authority",
+        "asserts": "nonlexical hostile population; exact [1,2,3,4,5,6,1,8,9,10]; registry order; no receipt",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign aggregates all ten rules in registry order without publishing authority [b2:all-rules-nonlexical-input]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_campaign.py",
+        "title": "test_fixture_nonlexical_aggregate_has_exact_population_vector_and_registry_order",
+        "asserts": "same exact vector and fixture rule order; no receipt; diagnosed then one-shot poison",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_fixture_nonlexical_aggregate_has_exact_population_vector_and_registry_order[b2:all-rules-nonlexical-input]"
+        ]
+      }
+    },
+    {
+      "group": "hostile",
+      "caseId": "equal-count-insert-delete",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+      "title": "rejects an equal-count substituted row through the terminal A1 root fence",
+      "asserts": "real delete plus insert preserves count but changes the sealed row; the predecessor write fence is synchronized so the terminal A1 immutable-root check yields stale-authority; stage is poisoned and no outcome publishes",
+      "executionIds": [
+        "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign rejects an equal-count substituted row through the terminal A1 root fence [b2:equal-count-insert-delete]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_campaign.py",
+        "title": "test_equal_count_insert_delete_is_detected_by_a1_root",
+        "asserts": "real DELETE+INSERT count=1; terminal A1 root stale-authority; poison and no publication",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_equal_count_insert_delete_is_detected_by_a1_root[b2:equal-count-insert-delete]"
+        ]
+      }
+    },
+    {
+      "group": "hostile",
+      "caseId": "source-table-ddl-replacement",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "rejects a pre-campaign source-table DDL replacement",
+        "asserts": "real DROP/recreate adds a CHECK while preserving name; exact corruption code/canonical-identity message; poison and cleanup",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign rejects a pre-campaign source-table DDL replacement [b2:source-table-ddl-replacement]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_campaign.py",
+        "title": "test_source_table_real_ddl_replacement_is_catalog_corruption",
+        "asserts": "real table ALTER/CREATE/DROP; B2 catalog identity drift; corruption and poison",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_source_table_real_ddl_replacement_is_catalog_corruption[b2:source-table-ddl-replacement]"
+        ]
+      }
+    },
+    {
+      "group": "hostile",
+      "caseId": "source-index-ddl-replacement",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "rejects a pre-campaign same-name canonical-index replacement",
+        "asserts": "drops/recreates canonical event index with changed SQL; canonical identity error; poison",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign rejects a pre-campaign same-name canonical-index replacement [b2:source-index-ddl-replacement]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_campaign.py",
+        "title": "test_initial_same_name_index_replacement_is_catalog_corruption",
+        "asserts": "real same-name index replacement; canonical identity error; poisoned",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_initial_same_name_index_replacement_is_catalog_corruption[b2:source-index-ddl-replacement]"
+        ]
+      }
+    },
+    {
+      "group": "lifecycle",
+      "caseId": "source-prepare-failure",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "poisons when source statement preparation fails",
+        "asserts": "exact source SQL prepare throws injected primary; identical primary observed; campaign poisoned; permanent rows unchanged",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign poisons when 'source' statement preparation fails' [b2:source-prepare-failure]'"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_campaign.py",
+        "title": "test_statement_lifecycle_faults_preserve_primary_and_cleanup_once[source-prepare]",
+        "asserts": "source execute throws exact primary; same object observed; no close; terminal postconditions",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_statement_lifecycle_faults_preserve_primary_and_cleanup_once[b2:source-prepare-failure]"
+        ]
+      }
+    },
+    {
+      "group": "lifecycle",
+      "caseId": "source-first-fetch-failure",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "poisons on the first source fetch",
+        "asserts": "faultAt=1; exact primary identity; fetch count 1; poison and cleanup postconditions",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign poisons on the 'first' source fetch' [b2:source-first-fetch-failure]'"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_campaign.py",
+        "title": "test_statement_lifecycle_faults_preserve_primary_and_cleanup_once[source-fetch]",
+        "asserts": "first source fetch throws exact primary; one registered close; terminal postconditions",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_statement_lifecycle_faults_preserve_primary_and_cleanup_once[b2:source-first-fetch-failure]"
+        ]
+      }
+    },
+    {
+      "group": "lifecycle",
+      "caseId": "source-middle-fetch-failure",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "poisons on the middle source fetch",
+        "asserts": "three-row source; faultAt=2; exact primary identity; poison and cleanup",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign poisons on the 'middle' source fetch' [b2:source-middle-fetch-failure]'"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_campaign.py",
+        "title": "test_source_positioned_fetch_failures_are_terminal_statement_corruption[source-middle-fetch-failure]",
+        "asserts": "fixture-bound statement-corruption case; three-row source fault at fetch 2; exact primary identity and terminal postconditions",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_source_positioned_fetch_failures_are_terminal_statement_corruption[b2:source-middle-fetch-failure]"
+        ]
+      }
+    },
+    {
+      "group": "lifecycle",
+      "caseId": "source-final-fetch-failure",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "poisons on the final source fetch",
+        "asserts": "three-row source; faultAt=3; exact primary identity; poison and cleanup",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign poisons on the 'final' source fetch' [b2:source-final-fetch-failure]'"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_campaign.py",
+        "title": "test_source_positioned_fetch_failures_are_terminal_statement_corruption[source-final-fetch-failure]",
+        "asserts": "fixture-bound statement-corruption case; three-row source fault at fetch 3; exact primary identity and terminal postconditions",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_source_positioned_fetch_failures_are_terminal_statement_corruption[b2:source-final-fetch-failure]"
+        ]
+      }
+    },
+    {
+      "group": "lifecycle",
+      "caseId": "source-close-failure",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "makes a source close failure authoritative after clearing cleanup ownership",
+        "asserts": "source return throws exact primary; observed identity; close exactly once even after cleanup",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign makes a source close failure authoritative after clearing cleanup ownership [b2:source-close-failure]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_campaign.py",
+        "title": "test_statement_lifecycle_faults_preserve_primary_and_cleanup_once[source-close]",
+        "asserts": "source close throws exact primary; close exactly once through dispose; terminal postconditions",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_statement_lifecycle_faults_preserve_primary_and_cleanup_once[b2:source-close-failure]"
+        ]
+      }
+    },
+    {
+      "group": "lifecycle",
+      "caseId": "decode-before-insert-failure",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "propagates an inspect/decode fault before any TEMP insert",
+        "asserts": "proxy read throws exact primary; zero insert calls; poison; TEMP seal absent",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign propagates an inspect/decode fault before any TEMP insert [b2:decode-before-insert-failure]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_campaign.py",
+        "title": "test_decode_before_insert_failure_is_terminal_statement_corruption",
+      "asserts": "fixture-bound statement-corruption case; inspector throws exact primary; zero insert calls and terminal postconditions",
+      "executionIds": [
+        "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_decode_before_insert_failure_is_terminal_statement_corruption[b2:decode-before-insert-failure]"
+      ]
+      }
+    },
+    {
+      "group": "lifecycle",
+      "caseId": "insert-zero-change",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "rejects an insert result reporting 0 changed rows",
+        "asserts": "run returns changes=0; stage-write-count error; poison; permanent rows unchanged",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign rejects an insert result reporting 0 changed rows [b2:insert-zero-change]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_campaign.py",
+        "title": "test_stage_insert_rejects_nonunit_reported_rowcount_without_permanent_mutation[0]",
+        "asserts": "rowcount=0 rejected; no permanent mutation; campaign poisoned",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_stage_insert_rejects_nonunit_reported_rowcount_without_permanent_mutation[b2:insert-zero-change]"
+        ]
+      }
+    },
+    {
+      "group": "lifecycle",
+      "caseId": "insert-two-changes",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "rejects an insert result reporting 2 changed rows",
+        "asserts": "run reports changes=2 after second TEMP write; stage-write-count error and poison",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign rejects an insert result reporting 2 changed rows [b2:insert-two-changes]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_campaign.py",
+        "title": "test_stage_insert_rejects_nonunit_reported_rowcount_without_permanent_mutation[2]",
+        "asserts": "rowcount=2 rejected; no permanent mutation; campaign poisoned",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_stage_insert_rejects_nonunit_reported_rowcount_without_permanent_mutation[b2:insert-two-changes]"
+        ]
+      }
+    },
+    {
+      "group": "lifecycle",
+      "caseId": "post-source-pre-barrier-mutation",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "rejects mutation after the final staged row and before inventory count",
+        "asserts": "real main DML after source close; exact corruption/unexplained-write; no outcome; poison and terminal cleanup postconditions",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign rejects mutation after the final staged row and before inventory count [b2:post-source-pre-barrier-mutation]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_campaign.py",
+        "title": "test_declared_campaign_phase_mutations_are_unexplained_writes[post-source-pre-barrier-mutation]",
+        "asserts": "real main DML at source/barrier boundary; BLR_UNEXPLAINED_WRITE; poison and cursor clear",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_declared_campaign_phase_mutations_are_unexplained_writes[b2:post-source-pre-barrier-mutation]"
+        ]
+      }
+    },
+    {
+      "group": "lifecycle",
+      "caseId": "marker-malformed-arity",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "rejects a malformed rule marker $name",
+        "asserts": "row/count empty arity injected; exact corruption/cursor-rule-marker message; poisoned and cleaned",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign rejects malformed rule marker count arity [b2:marker-malformed-arity] [variant:count arity]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign rejects malformed rule marker row arity [b2:marker-malformed-arity] [variant:row arity]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_campaign.py",
+        "title": "test_exact_sqlite_one_shape_precedes_cancellation[marker-empty]",
+        "asserts": "empty marker tuple; exact malformed marker message wins over cancellation; poisoned",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_exact_sqlite_one_shape_precedes_cancellation[b2:marker-malformed-arity:count]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_exact_sqlite_one_shape_precedes_cancellation[b2:marker-malformed-arity:row]"
+        ]
+      }
+    },
+    {
+      "group": "lifecycle",
+      "caseId": "marker-malformed-type",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "rejects a malformed rule marker $name",
+        "asserts": "row/count string storage injected; exact corruption/cursor-rule-marker message; poisoned and cleaned",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign rejects malformed rule marker count storage [b2:marker-malformed-type] [variant:count storage]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign rejects malformed rule marker row storage [b2:marker-malformed-type] [variant:row storage]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_campaign.py",
+        "title": "test_exact_sqlite_one_shape_precedes_cancellation[marker-string]",
+        "asserts": "string marker rejected with exact malformed marker message before cancellation",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_exact_sqlite_one_shape_precedes_cancellation[b2:marker-malformed-type:count]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_exact_sqlite_one_shape_precedes_cancellation[b2:marker-malformed-type:row]"
+        ]
+      }
+    },
+    {
+      "group": "lifecycle",
+      "caseId": "marker-malformed-value",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "rejects a malformed rule marker $name",
+        "asserts": "row/count zero value injected; exact corruption/cursor-rule-marker message; poisoned and cleaned",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign rejects malformed rule marker count value [b2:marker-malformed-value] [variant:count value]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign rejects malformed rule marker row value [b2:marker-malformed-value] [variant:row value]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_campaign.py",
+        "title": "test_exact_sqlite_one_shape_precedes_cancellation[marker-2]",
+        "asserts": "integer 2 marker rejected with exact malformed marker message before cancellation",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_exact_sqlite_one_shape_precedes_cancellation[b2:marker-malformed-value:count]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_exact_sqlite_one_shape_precedes_cancellation[b2:marker-malformed-value:row]"
+        ]
+      }
+    },
+    {
+      "group": "lifecycle",
+      "caseId": "post-diagnostic-mutation",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "rejects a post-diagnostic mutation before diagnosed publication",
+        "asserts": "real main DML after diagnostics; exact corruption/unexplained-write; no diagnosed outcome published; poison and cleanup",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign rejects a post-diagnostic mutation before diagnosed publication [b2:post-diagnostic-mutation]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_campaign.py",
+        "title": "test_declared_campaign_phase_mutations_are_unexplained_writes[post-diagnostic-mutation]",
+        "asserts": "real main DML post diagnostics; BLR_UNEXPLAINED_WRITE; poison and cursor clear",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_declared_campaign_phase_mutations_are_unexplained_writes[b2:post-diagnostic-mutation]"
+        ]
+      }
+    },
+    {
+      "group": "lifecycle",
+      "caseId": "rule-transition-mutation",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "rejects a write mutation between consecutive rule transitions",
+        "asserts": "real main DML after first rule cursor close; exact corruption/unexplained-write; no outcome; poison and cleanup",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign rejects a write mutation between consecutive rule transitions [b2:rule-transition-mutation]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_campaign.py",
+        "title": "test_declared_campaign_phase_mutations_are_unexplained_writes[rule-transition-mutation]",
+        "asserts": "real main DML between rules; BLR_UNEXPLAINED_WRITE; poison and cursor clear",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_declared_campaign_phase_mutations_are_unexplained_writes[b2:rule-transition-mutation]"
+        ]
+      }
+    },
+    {
+      "group": "lifecycle",
+      "caseId": "transaction-end",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "fails closed on $case during an active source fetch",
+        "asserts": "ROLLBACK injected during active source fetch; exact corruption/transaction-changed message; poison and cleanup",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed on transaction-end during an active source fetch [b2:transaction-end]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_campaign.py",
+        "title": "test_active_campaign_owner_lifecycle_faults_are_terminal[transaction-end]",
+        "asserts": "fixture binds stale-epoch; COMMIT injected on active source cursor; failure observed and campaign poisoned",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_active_campaign_owner_lifecycle_faults_are_terminal[b2:transaction-end]"
+        ]
+      }
+    },
+    {
+      "group": "lifecycle",
+      "caseId": "rollback-rebegin",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "fails closed on $case during an active source fetch",
+        "asserts": "ROLLBACK+BEGIN injected during active source fetch; exact corruption/transaction-changed message; poison and cleanup",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed on rollback-rebegin during an active source fetch [b2:rollback-rebegin]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_campaign.py",
+        "title": "test_active_campaign_owner_lifecycle_faults_are_terminal[rollback-rebegin]",
+        "asserts": "fixture binds stale-epoch; rollback+BEGIN injected on active source cursor; failure observed and campaign poisoned",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_active_campaign_owner_lifecycle_faults_are_terminal[b2:rollback-rebegin]"
+        ]
+      }
+    },
+    {
+      "group": "lifecycle",
+      "caseId": "active-dispose",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "fails closed on $case during an active source fetch",
+      "asserts": "stage disposal injected during active source fetch; exact session-invalid corruption is observed; disposed state is preserved and active cursor ownership is cleared",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed on active-dispose during an active source fetch [b2:active-dispose]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_campaign.py",
+        "title": "test_active_campaign_owner_lifecycle_faults_are_terminal[active-dispose]",
+        "asserts": "fixture binds disposed; stage.dispose injected on active source cursor; failure observed and disposed state preserved",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_active_campaign_owner_lifecycle_faults_are_terminal[b2:active-dispose]"
+        ]
+      }
+    },
+    {
+      "group": "lifecycle",
+      "caseId": "closed-connection",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "fails closed on $case during an active source fetch",
+        "asserts": "connection close injected during active source fetch; exact unavailable/provider-closed message; poison and cleanup",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed on closed-connection during an active source fetch [b2:closed-connection]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_campaign.py",
+        "title": "test_active_campaign_owner_lifecycle_faults_are_terminal[closed-connection]",
+        "asserts": "fixture binds poisoned; connection.close injected on active source cursor; failure observed and campaign poisoned",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_active_campaign_owner_lifecycle_faults_are_terminal[b2:closed-connection]"
+        ]
+      }
+    },
+    {
+      "group": "lifecycle",
+      "caseId": "cancel-at-begin",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "checks exact authority before options and supports closed cancellation",
+        "asserts": "pre-cancelled signal; cancelled error; stage poisoned",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign checks exact authority before options and supports closed cancellation [b2:cancel-at-begin]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_campaign.py",
+        "title": "test_cancelled_before_first_campaign_statement_is_terminal_and_poisoned",
+        "asserts": "pre-cancelled signal; exact SQLiteCursorCampaignCancelledError; poison",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-begin:campaign-after-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-begin:campaign-after-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-begin:campaign-after-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-begin:campaign-before-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-begin:campaign-before-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-begin:campaign-before-prepare]"
+        ]
+      }
+    },
+    {
+      "group": "lifecycle",
+      "caseId": "cancel-at-source",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "fails closed at deterministic campaign boundary source:*",
+        "asserts": "source boundary labels produce cancelled error, poison, cleanup and permanent-row invariance",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary checkpoint-lookup:after-prepare [b2:cancel-at-source] [variant:checkpoint-lookup:after-prepare]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary checkpoint-lookup:before-prepare [b2:cancel-at-source] [variant:checkpoint-lookup:before-prepare]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary event-lookup:after-prepare [b2:cancel-at-source] [variant:event-lookup:after-prepare]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary event-lookup:before-prepare [b2:cancel-at-source] [variant:event-lookup:before-prepare]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:checkpoint-lookup:after-close [b2:cancel-at-source] [variant:plan:checkpoint-lookup:after-close]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:checkpoint-lookup:after-fetch [b2:cancel-at-source] [variant:plan:checkpoint-lookup:after-fetch]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:checkpoint-lookup:after-prepare [b2:cancel-at-source] [variant:plan:checkpoint-lookup:after-prepare]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:checkpoint-lookup:before-close [b2:cancel-at-source] [variant:plan:checkpoint-lookup:before-close]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:checkpoint-lookup:before-fetch [b2:cancel-at-source] [variant:plan:checkpoint-lookup:before-fetch]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:checkpoint-lookup:before-prepare [b2:cancel-at-source] [variant:plan:checkpoint-lookup:before-prepare]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:event-lookup:after-close [b2:cancel-at-source] [variant:plan:event-lookup:after-close]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:event-lookup:after-fetch [b2:cancel-at-source] [variant:plan:event-lookup:after-fetch]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:event-lookup:after-prepare [b2:cancel-at-source] [variant:plan:event-lookup:after-prepare]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:event-lookup:before-close [b2:cancel-at-source] [variant:plan:event-lookup:before-close]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:event-lookup:before-fetch [b2:cancel-at-source] [variant:plan:event-lookup:before-fetch]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:event-lookup:before-prepare [b2:cancel-at-source] [variant:plan:event-lookup:before-prepare]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:source:after-close [b2:cancel-at-source] [variant:plan:source:after-close]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:source:after-fetch [b2:cancel-at-source] [variant:plan:source:after-fetch]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:source:after-prepare [b2:cancel-at-source] [variant:plan:source:after-prepare]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:source:before-close [b2:cancel-at-source] [variant:plan:source:before-close]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:source:before-fetch [b2:cancel-at-source] [variant:plan:source:before-fetch]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:source:before-prepare [b2:cancel-at-source] [variant:plan:source:before-prepare]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:stage-insert:after-close [b2:cancel-at-source] [variant:plan:stage-insert:after-close]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:stage-insert:after-fetch [b2:cancel-at-source] [variant:plan:stage-insert:after-fetch]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:stage-insert:after-prepare [b2:cancel-at-source] [variant:plan:stage-insert:after-prepare]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:stage-insert:before-close [b2:cancel-at-source] [variant:plan:stage-insert:before-close]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:stage-insert:before-fetch [b2:cancel-at-source] [variant:plan:stage-insert:before-fetch]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:stage-insert:before-prepare [b2:cancel-at-source] [variant:plan:stage-insert:before-prepare]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary run:start [b2:cancel-at-source] [variant:run:start]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary source:after-close [b2:cancel-at-source] [variant:source:after-close]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary source:after-fetch [b2:cancel-at-source] [variant:source:after-fetch]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary source:after-prepare [b2:cancel-at-source] [variant:source:after-prepare]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary source:before-close [b2:cancel-at-source] [variant:source:before-close]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary source:before-fetch [b2:cancel-at-source] [variant:source:before-fetch]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary source:before-prepare [b2:cancel-at-source] [variant:source:before-prepare]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_campaign.py",
+        "title": "test_every_closed_cancellation_boundary_is_reachable_and_terminal[source-*]",
+        "asserts": "each source label reached once; exact cancellation class/message; terminal postconditions",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:catalog-snapshot-after-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:catalog-snapshot-after-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:catalog-snapshot-after-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:catalog-snapshot-before-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:catalog-snapshot-before-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:catalog-snapshot-before-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:checkpoint-lookup-after-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:checkpoint-lookup-after-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:checkpoint-lookup-after-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:checkpoint-lookup-before-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:checkpoint-lookup-before-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:checkpoint-lookup-before-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:eqp-checkpoint-lookup-after-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:eqp-checkpoint-lookup-after-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:eqp-checkpoint-lookup-after-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:eqp-checkpoint-lookup-before-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:eqp-checkpoint-lookup-before-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:eqp-checkpoint-lookup-before-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:eqp-event-lookup-after-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:eqp-event-lookup-after-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:eqp-event-lookup-after-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:eqp-event-lookup-before-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:eqp-event-lookup-before-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:eqp-event-lookup-before-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:eqp-source-after-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:eqp-source-after-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:eqp-source-after-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:eqp-source-before-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:eqp-source-before-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:eqp-source-before-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:eqp-stage-insert-after-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:eqp-stage-insert-after-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:eqp-stage-insert-after-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:eqp-stage-insert-before-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:eqp-stage-insert-before-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:eqp-stage-insert-before-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:event-lookup-after-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:event-lookup-after-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:event-lookup-after-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:event-lookup-before-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:event-lookup-before-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:event-lookup-before-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:identity-after-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:identity-after-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:identity-after-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:identity-before-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:identity-before-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:identity-before-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:insert-after-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:insert-after-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:insert-after-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:insert-before-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:insert-before-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:insert-before-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:inspect-after-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:inspect-after-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:inspect-after-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:inspect-before-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:inspect-before-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:inspect-before-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:source-after-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:source-after-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:source-after-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:source-before-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:source-before-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:source-before-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:temp-count-after-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:temp-count-after-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:temp-count-after-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:temp-count-before-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:temp-count-before-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-source:temp-count-before-prepare]"
+        ]
+      }
+    },
+    {
+      "group": "lifecycle",
+      "caseId": "cancel-at-seal",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "fails closed at deterministic campaign boundary seal:*",
+        "asserts": "seal boundary labels produce cancelled error and cleanup postconditions",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:stage-seal:after-close [b2:cancel-at-seal] [variant:plan:stage-seal:after-close]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:stage-seal:after-fetch [b2:cancel-at-seal] [variant:plan:stage-seal:after-fetch]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:stage-seal:after-prepare [b2:cancel-at-seal] [variant:plan:stage-seal:after-prepare]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:stage-seal:before-close [b2:cancel-at-seal] [variant:plan:stage-seal:before-close]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:stage-seal:before-fetch [b2:cancel-at-seal] [variant:plan:stage-seal:before-fetch]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:stage-seal:before-prepare [b2:cancel-at-seal] [variant:plan:stage-seal:before-prepare]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary seal:after-close [b2:cancel-at-seal] [variant:seal:after-close]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary seal:after-fetch [b2:cancel-at-seal] [variant:seal:after-fetch]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary seal:after-prepare [b2:cancel-at-seal] [variant:seal:after-prepare]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary seal:before-close [b2:cancel-at-seal] [variant:seal:before-close]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary seal:before-fetch [b2:cancel-at-seal] [variant:seal:before-fetch]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary seal:before-prepare [b2:cancel-at-seal] [variant:seal:before-prepare]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_campaign.py",
+        "title": "test_every_closed_cancellation_boundary_is_reachable_and_terminal[seal-*]",
+        "asserts": "each seal label reached once; exact cancellation class/message; terminal postconditions",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-seal:eqp-stage-seal-after-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-seal:eqp-stage-seal-after-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-seal:eqp-stage-seal-after-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-seal:eqp-stage-seal-before-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-seal:eqp-stage-seal-before-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-seal:eqp-stage-seal-before-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-seal:seal-after-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-seal:seal-after-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-seal:seal-after-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-seal:seal-before-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-seal:seal-before-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-seal:seal-before-prepare]"
+        ]
+      }
+    },
+    {
+      "group": "lifecycle",
+      "caseId": "cancel-at-rule",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "polls cancellation at rule transition BLR_CURSOR_*",
+        "asserts": "each rule/count transition cancels; cancelled error; poison and cleanup",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:BLR_CURSOR_AUTHORIZATION:after-close [b2:cancel-at-rule] [variant:plan:BLR_CURSOR_AUTHORIZATION:after-close]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:BLR_CURSOR_AUTHORIZATION:after-fetch [b2:cancel-at-rule] [variant:plan:BLR_CURSOR_AUTHORIZATION:after-fetch]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:BLR_CURSOR_AUTHORIZATION:after-prepare [b2:cancel-at-rule] [variant:plan:BLR_CURSOR_AUTHORIZATION:after-prepare]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:BLR_CURSOR_AUTHORIZATION:before-close [b2:cancel-at-rule] [variant:plan:BLR_CURSOR_AUTHORIZATION:before-close]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:BLR_CURSOR_AUTHORIZATION:before-fetch [b2:cancel-at-rule] [variant:plan:BLR_CURSOR_AUTHORIZATION:before-fetch]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:BLR_CURSOR_AUTHORIZATION:before-prepare [b2:cancel-at-rule] [variant:plan:BLR_CURSOR_AUTHORIZATION:before-prepare]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:BLR_CURSOR_BLOB_CANONICAL:after-close [b2:cancel-at-rule] [variant:plan:BLR_CURSOR_BLOB_CANONICAL:after-close]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:BLR_CURSOR_BLOB_CANONICAL:after-fetch [b2:cancel-at-rule] [variant:plan:BLR_CURSOR_BLOB_CANONICAL:after-fetch]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:BLR_CURSOR_BLOB_CANONICAL:after-prepare [b2:cancel-at-rule] [variant:plan:BLR_CURSOR_BLOB_CANONICAL:after-prepare]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:BLR_CURSOR_BLOB_CANONICAL:before-close [b2:cancel-at-rule] [variant:plan:BLR_CURSOR_BLOB_CANONICAL:before-close]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:BLR_CURSOR_BLOB_CANONICAL:before-fetch [b2:cancel-at-rule] [variant:plan:BLR_CURSOR_BLOB_CANONICAL:before-fetch]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:BLR_CURSOR_BLOB_CANONICAL:before-prepare [b2:cancel-at-rule] [variant:plan:BLR_CURSOR_BLOB_CANONICAL:before-prepare]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:BLR_CURSOR_CATALOG_BINDING:after-close [b2:cancel-at-rule] [variant:plan:BLR_CURSOR_CATALOG_BINDING:after-close]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:BLR_CURSOR_CATALOG_BINDING:after-fetch [b2:cancel-at-rule] [variant:plan:BLR_CURSOR_CATALOG_BINDING:after-fetch]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:BLR_CURSOR_CATALOG_BINDING:after-prepare [b2:cancel-at-rule] [variant:plan:BLR_CURSOR_CATALOG_BINDING:after-prepare]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:BLR_CURSOR_CATALOG_BINDING:before-close [b2:cancel-at-rule] [variant:plan:BLR_CURSOR_CATALOG_BINDING:before-close]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:BLR_CURSOR_CATALOG_BINDING:before-fetch [b2:cancel-at-rule] [variant:plan:BLR_CURSOR_CATALOG_BINDING:before-fetch]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:BLR_CURSOR_CATALOG_BINDING:before-prepare [b2:cancel-at-rule] [variant:plan:BLR_CURSOR_CATALOG_BINDING:before-prepare]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:BLR_CURSOR_CHECKPOINT_BINDING:after-close [b2:cancel-at-rule] [variant:plan:BLR_CURSOR_CHECKPOINT_BINDING:after-close]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:BLR_CURSOR_CHECKPOINT_BINDING:after-fetch [b2:cancel-at-rule] [variant:plan:BLR_CURSOR_CHECKPOINT_BINDING:after-fetch]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:BLR_CURSOR_CHECKPOINT_BINDING:after-prepare [b2:cancel-at-rule] [variant:plan:BLR_CURSOR_CHECKPOINT_BINDING:after-prepare]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:BLR_CURSOR_CHECKPOINT_BINDING:before-close [b2:cancel-at-rule] [variant:plan:BLR_CURSOR_CHECKPOINT_BINDING:before-close]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:BLR_CURSOR_CHECKPOINT_BINDING:before-fetch [b2:cancel-at-rule] [variant:plan:BLR_CURSOR_CHECKPOINT_BINDING:before-fetch]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:BLR_CURSOR_CHECKPOINT_BINDING:before-prepare [b2:cancel-at-rule] [variant:plan:BLR_CURSOR_CHECKPOINT_BINDING:before-prepare]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:BLR_CURSOR_EVENT_BINDING:after-close [b2:cancel-at-rule] [variant:plan:BLR_CURSOR_EVENT_BINDING:after-close]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:BLR_CURSOR_EVENT_BINDING:after-fetch [b2:cancel-at-rule] [variant:plan:BLR_CURSOR_EVENT_BINDING:after-fetch]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:BLR_CURSOR_EVENT_BINDING:after-prepare [b2:cancel-at-rule] [variant:plan:BLR_CURSOR_EVENT_BINDING:after-prepare]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:BLR_CURSOR_EVENT_BINDING:before-close [b2:cancel-at-rule] [variant:plan:BLR_CURSOR_EVENT_BINDING:before-close]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:BLR_CURSOR_EVENT_BINDING:before-fetch [b2:cancel-at-rule] [variant:plan:BLR_CURSOR_EVENT_BINDING:before-fetch]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:BLR_CURSOR_EVENT_BINDING:before-prepare [b2:cancel-at-rule] [variant:plan:BLR_CURSOR_EVENT_BINDING:before-prepare]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:BLR_CURSOR_EXPIRY_CONSUMPTION:after-close [b2:cancel-at-rule] [variant:plan:BLR_CURSOR_EXPIRY_CONSUMPTION:after-close]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:BLR_CURSOR_EXPIRY_CONSUMPTION:after-fetch [b2:cancel-at-rule] [variant:plan:BLR_CURSOR_EXPIRY_CONSUMPTION:after-fetch]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:BLR_CURSOR_EXPIRY_CONSUMPTION:after-prepare [b2:cancel-at-rule] [variant:plan:BLR_CURSOR_EXPIRY_CONSUMPTION:after-prepare]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:BLR_CURSOR_EXPIRY_CONSUMPTION:before-close [b2:cancel-at-rule] [variant:plan:BLR_CURSOR_EXPIRY_CONSUMPTION:before-close]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:BLR_CURSOR_EXPIRY_CONSUMPTION:before-fetch [b2:cancel-at-rule] [variant:plan:BLR_CURSOR_EXPIRY_CONSUMPTION:before-fetch]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:BLR_CURSOR_EXPIRY_CONSUMPTION:before-prepare [b2:cancel-at-rule] [variant:plan:BLR_CURSOR_EXPIRY_CONSUMPTION:before-prepare]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:BLR_CURSOR_POSITION:after-close [b2:cancel-at-rule] [variant:plan:BLR_CURSOR_POSITION:after-close]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:BLR_CURSOR_POSITION:after-fetch [b2:cancel-at-rule] [variant:plan:BLR_CURSOR_POSITION:after-fetch]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:BLR_CURSOR_POSITION:after-prepare [b2:cancel-at-rule] [variant:plan:BLR_CURSOR_POSITION:after-prepare]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:BLR_CURSOR_POSITION:before-close [b2:cancel-at-rule] [variant:plan:BLR_CURSOR_POSITION:before-close]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:BLR_CURSOR_POSITION:before-fetch [b2:cancel-at-rule] [variant:plan:BLR_CURSOR_POSITION:before-fetch]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:BLR_CURSOR_POSITION:before-prepare [b2:cancel-at-rule] [variant:plan:BLR_CURSOR_POSITION:before-prepare]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:BLR_CURSOR_SCOPE:after-close [b2:cancel-at-rule] [variant:plan:BLR_CURSOR_SCOPE:after-close]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:BLR_CURSOR_SCOPE:after-fetch [b2:cancel-at-rule] [variant:plan:BLR_CURSOR_SCOPE:after-fetch]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:BLR_CURSOR_SCOPE:after-prepare [b2:cancel-at-rule] [variant:plan:BLR_CURSOR_SCOPE:after-prepare]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:BLR_CURSOR_SCOPE:before-close [b2:cancel-at-rule] [variant:plan:BLR_CURSOR_SCOPE:before-close]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:BLR_CURSOR_SCOPE:before-fetch [b2:cancel-at-rule] [variant:plan:BLR_CURSOR_SCOPE:before-fetch]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:BLR_CURSOR_SCOPE:before-prepare [b2:cancel-at-rule] [variant:plan:BLR_CURSOR_SCOPE:before-prepare]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:BLR_CURSOR_SEAL_COUNT:after-close [b2:cancel-at-rule] [variant:plan:BLR_CURSOR_SEAL_COUNT:after-close]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:BLR_CURSOR_SEAL_COUNT:after-fetch [b2:cancel-at-rule] [variant:plan:BLR_CURSOR_SEAL_COUNT:after-fetch]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:BLR_CURSOR_SEAL_COUNT:after-prepare [b2:cancel-at-rule] [variant:plan:BLR_CURSOR_SEAL_COUNT:after-prepare]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:BLR_CURSOR_SEAL_COUNT:before-close [b2:cancel-at-rule] [variant:plan:BLR_CURSOR_SEAL_COUNT:before-close]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:BLR_CURSOR_SEAL_COUNT:before-fetch [b2:cancel-at-rule] [variant:plan:BLR_CURSOR_SEAL_COUNT:before-fetch]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:BLR_CURSOR_SEAL_COUNT:before-prepare [b2:cancel-at-rule] [variant:plan:BLR_CURSOR_SEAL_COUNT:before-prepare]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:BLR_CURSOR_SHAPE:after-close [b2:cancel-at-rule] [variant:plan:BLR_CURSOR_SHAPE:after-close]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:BLR_CURSOR_SHAPE:after-fetch [b2:cancel-at-rule] [variant:plan:BLR_CURSOR_SHAPE:after-fetch]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:BLR_CURSOR_SHAPE:after-prepare [b2:cancel-at-rule] [variant:plan:BLR_CURSOR_SHAPE:after-prepare]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:BLR_CURSOR_SHAPE:before-close [b2:cancel-at-rule] [variant:plan:BLR_CURSOR_SHAPE:before-close]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:BLR_CURSOR_SHAPE:before-fetch [b2:cancel-at-rule] [variant:plan:BLR_CURSOR_SHAPE:before-fetch]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary plan:BLR_CURSOR_SHAPE:before-prepare [b2:cancel-at-rule] [variant:plan:BLR_CURSOR_SHAPE:before-prepare]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_AUTHORIZATION:after-close [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_AUTHORIZATION:after-close]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_AUTHORIZATION:after-fetch [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_AUTHORIZATION:after-fetch]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_AUTHORIZATION:after-prepare [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_AUTHORIZATION:after-prepare]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_AUTHORIZATION:before-close [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_AUTHORIZATION:before-close]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_AUTHORIZATION:before-fetch [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_AUTHORIZATION:before-fetch]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_AUTHORIZATION:before-prepare [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_AUTHORIZATION:before-prepare]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_AUTHORIZATION:start [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_AUTHORIZATION:start]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_BLOB_CANONICAL:after-close [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_BLOB_CANONICAL:after-close]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_BLOB_CANONICAL:after-fetch [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_BLOB_CANONICAL:after-fetch]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_BLOB_CANONICAL:after-prepare [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_BLOB_CANONICAL:after-prepare]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_BLOB_CANONICAL:before-close [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_BLOB_CANONICAL:before-close]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_BLOB_CANONICAL:before-fetch [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_BLOB_CANONICAL:before-fetch]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_BLOB_CANONICAL:before-prepare [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_BLOB_CANONICAL:before-prepare]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_BLOB_CANONICAL:start [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_BLOB_CANONICAL:start]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_CATALOG_BINDING:after-close [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_CATALOG_BINDING:after-close]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_CATALOG_BINDING:after-fetch [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_CATALOG_BINDING:after-fetch]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_CATALOG_BINDING:after-prepare [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_CATALOG_BINDING:after-prepare]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_CATALOG_BINDING:before-close [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_CATALOG_BINDING:before-close]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_CATALOG_BINDING:before-fetch [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_CATALOG_BINDING:before-fetch]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_CATALOG_BINDING:before-prepare [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_CATALOG_BINDING:before-prepare]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_CATALOG_BINDING:start [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_CATALOG_BINDING:start]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_CHECKPOINT_BINDING:after-close [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_CHECKPOINT_BINDING:after-close]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_CHECKPOINT_BINDING:after-fetch [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_CHECKPOINT_BINDING:after-fetch]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_CHECKPOINT_BINDING:after-prepare [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_CHECKPOINT_BINDING:after-prepare]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_CHECKPOINT_BINDING:before-close [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_CHECKPOINT_BINDING:before-close]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_CHECKPOINT_BINDING:before-fetch [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_CHECKPOINT_BINDING:before-fetch]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_CHECKPOINT_BINDING:before-prepare [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_CHECKPOINT_BINDING:before-prepare]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_CHECKPOINT_BINDING:start [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_CHECKPOINT_BINDING:start]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_EVENT_BINDING:after-close [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_EVENT_BINDING:after-close]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_EVENT_BINDING:after-fetch [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_EVENT_BINDING:after-fetch]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_EVENT_BINDING:after-prepare [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_EVENT_BINDING:after-prepare]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_EVENT_BINDING:before-close [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_EVENT_BINDING:before-close]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_EVENT_BINDING:before-fetch [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_EVENT_BINDING:before-fetch]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_EVENT_BINDING:before-prepare [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_EVENT_BINDING:before-prepare]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_EVENT_BINDING:start [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_EVENT_BINDING:start]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_EXPIRY_CONSUMPTION:after-close [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_EXPIRY_CONSUMPTION:after-close]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_EXPIRY_CONSUMPTION:after-fetch [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_EXPIRY_CONSUMPTION:after-fetch]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_EXPIRY_CONSUMPTION:after-prepare [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_EXPIRY_CONSUMPTION:after-prepare]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_EXPIRY_CONSUMPTION:before-close [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_EXPIRY_CONSUMPTION:before-close]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_EXPIRY_CONSUMPTION:before-fetch [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_EXPIRY_CONSUMPTION:before-fetch]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_EXPIRY_CONSUMPTION:before-prepare [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_EXPIRY_CONSUMPTION:before-prepare]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_EXPIRY_CONSUMPTION:start [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_EXPIRY_CONSUMPTION:start]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_POSITION:after-close [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_POSITION:after-close]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_POSITION:after-fetch [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_POSITION:after-fetch]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_POSITION:after-prepare [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_POSITION:after-prepare]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_POSITION:before-close [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_POSITION:before-close]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_POSITION:before-fetch [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_POSITION:before-fetch]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_POSITION:before-prepare [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_POSITION:before-prepare]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_POSITION:start [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_POSITION:start]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_SCOPE:after-close [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_SCOPE:after-close]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_SCOPE:after-fetch [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_SCOPE:after-fetch]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_SCOPE:after-prepare [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_SCOPE:after-prepare]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_SCOPE:before-close [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_SCOPE:before-close]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_SCOPE:before-fetch [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_SCOPE:before-fetch]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_SCOPE:before-prepare [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_SCOPE:before-prepare]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_SCOPE:start [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_SCOPE:start]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_SEAL_COUNT:after-close [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_SEAL_COUNT:after-close]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_SEAL_COUNT:after-fetch [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_SEAL_COUNT:after-fetch]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_SEAL_COUNT:after-prepare [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_SEAL_COUNT:after-prepare]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_SEAL_COUNT:before-close [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_SEAL_COUNT:before-close]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_SEAL_COUNT:before-fetch [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_SEAL_COUNT:before-fetch]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_SEAL_COUNT:before-prepare [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_SEAL_COUNT:before-prepare]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_SEAL_COUNT:start [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_SEAL_COUNT:start]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_SHAPE:after-close [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_SHAPE:after-close]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_SHAPE:after-fetch [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_SHAPE:after-fetch]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_SHAPE:after-prepare [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_SHAPE:after-prepare]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_SHAPE:before-close [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_SHAPE:before-close]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_SHAPE:before-fetch [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_SHAPE:before-fetch]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_SHAPE:before-prepare [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_SHAPE:before-prepare]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary rule:BLR_CURSOR_SHAPE:start [b2:cancel-at-rule] [variant:rule:BLR_CURSOR_SHAPE:start]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign polls cancellation at rule transition BLR_CURSOR_AUTHORIZATION [b2:cancel-at-rule] [variant:BLR_CURSOR_AUTHORIZATION-transition]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign polls cancellation at rule transition BLR_CURSOR_BLOB_CANONICAL [b2:cancel-at-rule] [variant:BLR_CURSOR_BLOB_CANONICAL-transition]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign polls cancellation at rule transition BLR_CURSOR_CATALOG_BINDING [b2:cancel-at-rule] [variant:BLR_CURSOR_CATALOG_BINDING-transition]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign polls cancellation at rule transition BLR_CURSOR_CHECKPOINT_BINDING [b2:cancel-at-rule] [variant:BLR_CURSOR_CHECKPOINT_BINDING-transition]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign polls cancellation at rule transition BLR_CURSOR_EVENT_BINDING [b2:cancel-at-rule] [variant:BLR_CURSOR_EVENT_BINDING-transition]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign polls cancellation at rule transition BLR_CURSOR_EXPIRY_CONSUMPTION [b2:cancel-at-rule] [variant:BLR_CURSOR_EXPIRY_CONSUMPTION-transition]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign polls cancellation at rule transition BLR_CURSOR_POSITION [b2:cancel-at-rule] [variant:BLR_CURSOR_POSITION-transition]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign polls cancellation at rule transition BLR_CURSOR_SCOPE [b2:cancel-at-rule] [variant:BLR_CURSOR_SCOPE-transition]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign polls cancellation at rule transition BLR_CURSOR_SEAL_COUNT [b2:cancel-at-rule] [variant:BLR_CURSOR_SEAL_COUNT-transition]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign polls cancellation at rule transition BLR_CURSOR_SHAPE [b2:cancel-at-rule] [variant:BLR_CURSOR_SHAPE-transition]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_campaign.py",
+        "title": "test_every_closed_cancellation_boundary_is_reachable_and_terminal[rule-*]",
+        "asserts": "each rule label reached once; exact cancellation class/message; terminal postconditions",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_cancellation_is_polled_at_every_rule_transition[b2:cancel-at-rule:transition-authorization]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_cancellation_is_polled_at_every_rule_transition[b2:cancel-at-rule:transition-blob-canonical]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_cancellation_is_polled_at_every_rule_transition[b2:cancel-at-rule:transition-catalog-binding]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_cancellation_is_polled_at_every_rule_transition[b2:cancel-at-rule:transition-checkpoint-binding]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_cancellation_is_polled_at_every_rule_transition[b2:cancel-at-rule:transition-event-binding]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_cancellation_is_polled_at_every_rule_transition[b2:cancel-at-rule:transition-expiry-consumption]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_cancellation_is_polled_at_every_rule_transition[b2:cancel-at-rule:transition-position]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_cancellation_is_polled_at_every_rule_transition[b2:cancel-at-rule:transition-scope]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_cancellation_is_polled_at_every_rule_transition[b2:cancel-at-rule:transition-seal-count]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_cancellation_is_polled_at_every_rule_transition[b2:cancel-at-rule:transition-shape]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:BLR_CURSOR_AUTHORIZATION-after-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:BLR_CURSOR_AUTHORIZATION-after-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:BLR_CURSOR_AUTHORIZATION-after-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:BLR_CURSOR_AUTHORIZATION-before-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:BLR_CURSOR_AUTHORIZATION-before-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:BLR_CURSOR_AUTHORIZATION-before-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:BLR_CURSOR_BLOB_CANONICAL-after-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:BLR_CURSOR_BLOB_CANONICAL-after-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:BLR_CURSOR_BLOB_CANONICAL-after-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:BLR_CURSOR_BLOB_CANONICAL-before-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:BLR_CURSOR_BLOB_CANONICAL-before-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:BLR_CURSOR_BLOB_CANONICAL-before-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:BLR_CURSOR_CATALOG_BINDING-after-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:BLR_CURSOR_CATALOG_BINDING-after-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:BLR_CURSOR_CATALOG_BINDING-after-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:BLR_CURSOR_CATALOG_BINDING-before-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:BLR_CURSOR_CATALOG_BINDING-before-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:BLR_CURSOR_CATALOG_BINDING-before-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:BLR_CURSOR_CHECKPOINT_BINDING-after-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:BLR_CURSOR_CHECKPOINT_BINDING-after-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:BLR_CURSOR_CHECKPOINT_BINDING-after-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:BLR_CURSOR_CHECKPOINT_BINDING-before-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:BLR_CURSOR_CHECKPOINT_BINDING-before-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:BLR_CURSOR_CHECKPOINT_BINDING-before-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:BLR_CURSOR_EVENT_BINDING-after-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:BLR_CURSOR_EVENT_BINDING-after-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:BLR_CURSOR_EVENT_BINDING-after-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:BLR_CURSOR_EVENT_BINDING-before-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:BLR_CURSOR_EVENT_BINDING-before-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:BLR_CURSOR_EVENT_BINDING-before-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:BLR_CURSOR_EXPIRY_CONSUMPTION-after-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:BLR_CURSOR_EXPIRY_CONSUMPTION-after-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:BLR_CURSOR_EXPIRY_CONSUMPTION-after-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:BLR_CURSOR_EXPIRY_CONSUMPTION-before-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:BLR_CURSOR_EXPIRY_CONSUMPTION-before-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:BLR_CURSOR_EXPIRY_CONSUMPTION-before-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:BLR_CURSOR_POSITION-after-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:BLR_CURSOR_POSITION-after-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:BLR_CURSOR_POSITION-after-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:BLR_CURSOR_POSITION-before-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:BLR_CURSOR_POSITION-before-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:BLR_CURSOR_POSITION-before-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:BLR_CURSOR_SCOPE-after-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:BLR_CURSOR_SCOPE-after-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:BLR_CURSOR_SCOPE-after-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:BLR_CURSOR_SCOPE-before-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:BLR_CURSOR_SCOPE-before-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:BLR_CURSOR_SCOPE-before-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:BLR_CURSOR_SEAL_COUNT-after-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:BLR_CURSOR_SEAL_COUNT-after-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:BLR_CURSOR_SEAL_COUNT-after-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:BLR_CURSOR_SEAL_COUNT-before-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:BLR_CURSOR_SEAL_COUNT-before-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:BLR_CURSOR_SEAL_COUNT-before-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:BLR_CURSOR_SHAPE-after-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:BLR_CURSOR_SHAPE-after-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:BLR_CURSOR_SHAPE-after-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:BLR_CURSOR_SHAPE-before-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:BLR_CURSOR_SHAPE-before-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:BLR_CURSOR_SHAPE-before-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:eqp-BLR_CURSOR_AUTHORIZATION-after-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:eqp-BLR_CURSOR_AUTHORIZATION-after-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:eqp-BLR_CURSOR_AUTHORIZATION-after-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:eqp-BLR_CURSOR_AUTHORIZATION-before-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:eqp-BLR_CURSOR_AUTHORIZATION-before-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:eqp-BLR_CURSOR_AUTHORIZATION-before-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:eqp-BLR_CURSOR_BLOB_CANONICAL-after-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:eqp-BLR_CURSOR_BLOB_CANONICAL-after-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:eqp-BLR_CURSOR_BLOB_CANONICAL-after-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:eqp-BLR_CURSOR_BLOB_CANONICAL-before-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:eqp-BLR_CURSOR_BLOB_CANONICAL-before-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:eqp-BLR_CURSOR_BLOB_CANONICAL-before-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:eqp-BLR_CURSOR_CATALOG_BINDING-after-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:eqp-BLR_CURSOR_CATALOG_BINDING-after-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:eqp-BLR_CURSOR_CATALOG_BINDING-after-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:eqp-BLR_CURSOR_CATALOG_BINDING-before-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:eqp-BLR_CURSOR_CATALOG_BINDING-before-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:eqp-BLR_CURSOR_CATALOG_BINDING-before-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:eqp-BLR_CURSOR_CHECKPOINT_BINDING-after-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:eqp-BLR_CURSOR_CHECKPOINT_BINDING-after-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:eqp-BLR_CURSOR_CHECKPOINT_BINDING-after-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:eqp-BLR_CURSOR_CHECKPOINT_BINDING-before-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:eqp-BLR_CURSOR_CHECKPOINT_BINDING-before-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:eqp-BLR_CURSOR_CHECKPOINT_BINDING-before-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:eqp-BLR_CURSOR_EVENT_BINDING-after-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:eqp-BLR_CURSOR_EVENT_BINDING-after-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:eqp-BLR_CURSOR_EVENT_BINDING-after-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:eqp-BLR_CURSOR_EVENT_BINDING-before-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:eqp-BLR_CURSOR_EVENT_BINDING-before-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:eqp-BLR_CURSOR_EVENT_BINDING-before-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:eqp-BLR_CURSOR_EXPIRY_CONSUMPTION-after-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:eqp-BLR_CURSOR_EXPIRY_CONSUMPTION-after-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:eqp-BLR_CURSOR_EXPIRY_CONSUMPTION-after-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:eqp-BLR_CURSOR_EXPIRY_CONSUMPTION-before-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:eqp-BLR_CURSOR_EXPIRY_CONSUMPTION-before-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:eqp-BLR_CURSOR_EXPIRY_CONSUMPTION-before-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:eqp-BLR_CURSOR_POSITION-after-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:eqp-BLR_CURSOR_POSITION-after-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:eqp-BLR_CURSOR_POSITION-after-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:eqp-BLR_CURSOR_POSITION-before-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:eqp-BLR_CURSOR_POSITION-before-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:eqp-BLR_CURSOR_POSITION-before-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:eqp-BLR_CURSOR_SCOPE-after-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:eqp-BLR_CURSOR_SCOPE-after-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:eqp-BLR_CURSOR_SCOPE-after-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:eqp-BLR_CURSOR_SCOPE-before-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:eqp-BLR_CURSOR_SCOPE-before-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:eqp-BLR_CURSOR_SCOPE-before-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:eqp-BLR_CURSOR_SHAPE-after-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:eqp-BLR_CURSOR_SHAPE-after-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:eqp-BLR_CURSOR_SHAPE-after-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:eqp-BLR_CURSOR_SHAPE-before-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:eqp-BLR_CURSOR_SHAPE-before-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:eqp-BLR_CURSOR_SHAPE-before-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:eqp-count-marker-after-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:eqp-count-marker-after-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:eqp-count-marker-after-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:eqp-count-marker-before-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:eqp-count-marker-before-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-at-rule:eqp-count-marker-before-prepare]"
+        ]
+      }
+    },
+    {
+      "group": "lifecycle",
+      "caseId": "cancel-before-complete",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "polls cancellation before clean publication",
+    "asserts": "cancellation injected at final identity read; cancelled; poisoned; permanent rows unchanged",
+      "executionIds": [
+        "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at deterministic campaign boundary publish:complete [b2:cancel-before-complete] [variant:publish:complete]",
+        "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign fails closed at the diagnosed publication boundary [b2:cancel-before-complete] [variant:diagnosed-publication]",
+        "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign polls cancellation before clean publication [b2:cancel-before-complete] [variant:clean-publication]"
+      ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_campaign.py",
+        "title": "test_every_closed_cancellation_boundary_is_reachable_and_terminal[complete-publish]",
+        "asserts": "final publication boundary reached once; exact cancellation class/message",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-before-complete:clean-publication-after-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-before-complete:clean-publication-after-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-before-complete:clean-publication-after-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-before-complete:clean-publication-before-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-before-complete:clean-publication-before-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-before-complete:clean-publication-before-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-before-complete:diagnosed-publication-after-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-before-complete:diagnosed-publication-after-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-before-complete:diagnosed-publication-after-prepare]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-before-complete:diagnosed-publication-before-close]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-before-complete:diagnosed-publication-before-fetch]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_every_closed_cancellation_boundary_is_reachable_and_terminal[b2:cancel-before-complete:diagnosed-publication-before-prepare]"
+        ]
+      }
+    },
+    {
+      "group": "lifecycle",
+      "caseId": "cleanup-only-failure",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "treats the sole source/rule/seal close failure as primary",
+        "asserts": "sole close throws exact primary; observed identity; close once; poison and cleanup",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign treats the sole EQP close failure as primary [b2:cleanup-only-failure] [variant:EQP]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign treats the sole rule close failure as primary [b2:cleanup-only-failure] [variant:rule]",
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign treats the sole seal close failure as primary [b2:cleanup-only-failure] [variant:seal]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_campaign.py",
+        "title": "test_statement_lifecycle_faults_preserve_primary_and_cleanup_once[*-close]",
+        "asserts": "sole registered close fault is exact primary; close exactly once; terminal postconditions",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_cleanup_only_failure_is_primary_for_each_cursor_family[b2:cleanup-only-failure:rule]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_cleanup_only_failure_is_primary_for_each_cursor_family[b2:cleanup-only-failure:seal]",
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_cleanup_only_failure_is_primary_for_each_cursor_family[b2:cleanup-only-failure:source]"
+        ]
+      }
+    },
+    {
+      "group": "lifecycle",
+      "caseId": "primary-plus-cleanup",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "preserves a source-fetch primary when registered cleanup close also fails",
+        "asserts": "fetch primary plus secondary return failure; exact primary retained; one close; poisoned",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign preserves a source-fetch primary when registered cleanup close also fails [b2:primary-plus-cleanup]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_campaign.py",
+        "title": "test_primary_plus_cleanup_preserves_primary_and_closes_exactly_once",
+        "asserts": "fixture-bound statement corruption; source fetch and close both fail; exact primary retained; close exactly once; terminal postconditions",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_primary_plus_cleanup_preserves_primary_and_closes_exactly_once[b2:primary-plus-cleanup]"
+        ]
+      }
+    },
+    {
+      "group": "lifecycle",
+      "caseId": "receipt-clone",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "rejects a cloned receipt before touching the valid B1 authority",
+        "asserts": "spread clone rejected by receipt provenance; exact original still completes",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign rejects a cloned receipt before touching the valid B1 authority [b2:receipt-clone]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_campaign.py",
+        "title": "test_receipt_clone_is_rejected_before_campaign_authority",
+        "asserts": "fixture-bound invalid-authority; copy clone has equal type but distinct identity; provenance rejects before campaign state changes",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_receipt_clone_is_rejected_before_campaign_authority[b2:receipt-clone]"
+        ]
+      }
+    },
+    {
+      "group": "lifecycle",
+      "caseId": "projection-clone",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "requires the exact stage-owned projection identity",
+        "asserts": "equal-value projection clone minted into receipt; transfer binding rejects and poisons",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B0b stage ownership transfer requires the exact stage-owned projection identity [b2:projection-clone]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_stage_ownership.py",
+        "title": "test_equal_value_projection_clone_cannot_bind_the_stage",
+        "asserts": "dataclass replace clone equals but is not identity; transfer rejects; poison; no cursor TEMP",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_stage_ownership.py::test_equal_value_projection_clone_cannot_bind_the_stage[b2:projection-clone]"
+        ]
+      }
+    },
+    {
+      "group": "lifecycle",
+      "caseId": "transfer-clone",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "rejects forged transfer clones and receipts from another exact issuer",
+        "asserts": "forged transfer object rejected by provenance",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B0b stage ownership transfer rejects forged transfer clones and receipts from another exact issuer [b2:transfer-clone]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_stage_ownership.py",
+        "title": "test_transfer_is_exact_registered_identity_and_registry_is_weak",
+        "asserts": "copy/deepcopy/direct/pickle clones rejected; weak registry releases exact transfer",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_stage_ownership.py::test_transfer_is_exact_registered_identity_and_registry_is_weak[b2:transfer-clone]"
+        ]
+      }
+    },
+    {
+      "group": "lifecycle",
+      "caseId": "second-run",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "reproduces the empty A1 authority and returns the exact input receipt",
+        "asserts": "first completes; second campaign.run throws one-shot; campaign poisoned",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign reproduces the empty A1 authority and returns the exact input receipt [b2:second-run]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_campaign.py",
+        "title": "test_empty_real_campaign_completes_with_exact_receipt_and_is_one_shot",
+        "asserts": "first completes; second run raises ValueError; stage poisoned",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_empty_real_campaign_completes_with_exact_receipt_and_is_one_shot[b2:second-run]"
+        ]
+      }
+    },
+    {
+      "group": "lifecycle",
+      "caseId": "abandonment",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "finalizes a never-run campaign abandonment through stage disposal",
+        "asserts": "campaign constructed and never run; deterministic owner disposal removes TEMP seal and preserves permanent digest",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B2 pre-rebind campaign finalizes a never-run campaign abandonment through stage disposal [b2:abandonment]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_campaign.py",
+        "title": "test_abandonment_dispose_terminates_unrun_authority_and_clears_temp",
+        "asserts": "begins B2 authority without run; stage disposal preserves disposed state, poisons campaign authority, clears active cursor/TEMP seal, and rejects authority reuse",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_campaign.py::test_abandonment_dispose_terminates_unrun_authority_and_clears_temp[b2:abandonment]"
+        ]
+      }
+    },
+    {
+      "group": "lifecycle",
+      "caseId": "before-legacy-complete",
+      "typescript": {
+        "status": "EXACT",
+        "file": "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts",
+        "title": "rejects before-legacy-complete predecessor state",
+        "asserts": "prepares only through lease; transfer binding rejects before B2; stage poisoned; no cursor TEMP objects",
+        "executionIds": [
+          "packages/sqlite/test/operation-baseline-cursor-stage-ownership.test.ts::SQLite Cursor Slice B0b stage ownership transfer rejects before-legacy-complete predecessor state [b2:before-legacy-complete]"
+        ]
+      },
+      "python": {
+        "status": "EXACT",
+        "file": "python/tests/test_sqlite_operation_baseline_cursor_stage_ownership.py",
+        "title": "test_each_incomplete_predecessor_campaign_burns_transfer[_legacy_campaign_completed]",
+        "asserts": "sets legacy completion false; exact predecessor-incomplete error; transfer/stage poisoned; no cursor TEMP",
+        "executionIds": [
+          "python/tests/test_sqlite_operation_baseline_cursor_stage_ownership.py::test_each_incomplete_predecessor_campaign_burns_transfer[b2:before-legacy-complete]"
+        ]
+      }
+    }
+  ]
+}

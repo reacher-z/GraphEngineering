@@ -115,7 +115,10 @@ jobs:
   python:
     name: Python ${{ matrix.python }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # The complete suite alone is currently close to 20 minutes on the
+    # reference runner. Leave bounded room for setup, static analysis,
+    # quickstart smoke, and the 3.13 artifact checks.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -174,3 +177,33 @@ jobs:
       - run: pnpm test:sqlite-docs
       - run: pnpm test:sqlite-python-benchmark
       - run: pnpm test:conformance
+
+  sqlite-cursor-pre-rebind-parity:
+    name: SQLite cursor pre-rebind parity
+    runs-on: ubuntu-latest
+    # The parity command owns a 90-minute execution budget below. Keep setup
+    # outside that budget and retain 30 minutes of explicit job-level margin.
+    # Its bounded children are sequential: coverage <= 60m, production <= 12m,
+    # Python report <= 5m, leaving 13m for builds and orchestration cleanup.
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        with:
+          version: 10.13.1
+          run_install: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: pnpm
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.11.11"
+          enable-cache: true
+      - run: pnpm install --frozen-lockfile
+      - run: uv sync --project python --extra dev --python 3.13 --locked
+      - name: Execute exact B2 coverage and cross-runtime parity
+        timeout-minutes: 90
+        run: pnpm test:sqlite-cursor-pre-rebind-parity

@@ -1,5 +1,6 @@
 import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
+import type { StatementSync } from "node:sqlite";
 
 import { canonicalHash } from "@graph-engineering/core";
 import {
@@ -42,6 +43,13 @@ import {
   SQLITE_BASELINE_COMPLETE_STREAM_RECORD_CAMPAIGN,
   SQLITE_BASELINE_CONSUME_OWNED_WRITE,
   SQLITE_BASELINE_CREATE_CURSOR_SEAL_TEMP_TABLE,
+  SQLITE_BASELINE_BEGIN_CURSOR_PRE_REBIND,
+  SQLITE_BASELINE_FENCE_CURSOR_PRE_REBIND,
+  SQLITE_BASELINE_REGISTER_CURSOR_PRE_REBIND_CLEANUP,
+  SQLITE_BASELINE_INSERT_CURSOR_PRE_REBIND_ROW,
+  SQLITE_BASELINE_COMPLETE_CURSOR_PRE_REBIND,
+  SQLITE_BASELINE_DIAGNOSE_CURSOR_PRE_REBIND,
+  SQLITE_BASELINE_ABORT_CURSOR_PRE_REBIND,
   SQLITE_BASELINE_FENCE_ORDERED_HANDOFF,
   SQLITE_BASELINE_FENCE_CHECKPOINT_CAMPAIGN,
   SQLITE_BASELINE_FENCE_CURSOR_STAGE_TRANSFER,
@@ -57,6 +65,8 @@ import {
   SQLITE_BASELINE_REGISTER_STREAM_RECORD_CLEANUP,
   type SQLiteBaselineOwnedWriteReceipt,
 } from "./operation-baseline-cooperation.js";
+import { SQLITE_CURSOR_STAGE_INSERT_SQL } from "./cursor-pre-rebind-contract.js";
+import type { SQLiteCursorStageValue } from "./operation-baseline-cursor-inspection.js";
 import {
   SQLITE_CURSOR_SEAL_SCHEMA_SQL,
   SQLITE_CURSOR_SEAL_TABLE_LIST,
@@ -674,6 +684,23 @@ function totalChanges(connection: SQLiteConnection): number {
   );
 }
 
+function totalChangesIntrinsic(connection: SQLiteConnection): number {
+  return sqliteSafeInteger(
+    sqliteRow(
+      prepareSQLiteConnectionIntrinsic(
+        connection, "SELECT total_changes()", OPERATION,
+      ).get(),
+      1,
+      OPERATION,
+      "TEMP stage change counter",
+    )[0],
+    0,
+    Number.MAX_SAFE_INTEGER,
+    OPERATION,
+    "TEMP stage change counter",
+  );
+}
+
 function checkedExpectedCount(value: unknown): number {
   if (!Number.isSafeInteger(value) || (value as number) < 0) {
     return invalid("SQLite baseline expected stage count is outside bounds");
@@ -699,6 +726,25 @@ function reservedCatalogCount(connection: SQLiteConnection): number {
   );
 }
 
+function reservedCatalogCountIntrinsic(connection: SQLiteConnection): number {
+  return sqliteSafeInteger(
+    sqliteRow(
+      prepareSQLiteConnectionIntrinsic(
+        connection,
+        "SELECT count(*) FROM temp.sqlite_schema WHERE substr(lower(name), 1, 7) = 'ge_blr_'",
+        OPERATION,
+      ).get(),
+      1,
+      OPERATION,
+      "TEMP reserved catalog count",
+    )[0],
+    0,
+    Number.MAX_SAFE_INTEGER,
+    OPERATION,
+    "TEMP reserved catalog count",
+  );
+}
+
 interface SQLiteMainOperationsCatalogIdentity {
   readonly rootpage: number | null;
   readonly schemaVersion: number;
@@ -707,21 +753,22 @@ interface SQLiteMainOperationsCatalogIdentity {
 
 function mainOperationsCatalogIdentity(
   connection: SQLiteConnection,
+  captured = false,
 ): SQLiteMainOperationsCatalogIdentity {
+  const prepare = (sql: string): StatementSync => captured
+    ? prepareSQLiteConnectionIntrinsic(connection, sql, OPERATION)
+    : connection.prepare(sql, OPERATION);
   const schemaVersion = sqliteSafeInteger(
     sqliteRow(
-      connection.prepare(
-        "SELECT schema_version FROM pragma_schema_version", OPERATION,
-      ).get(),
+      prepare("SELECT schema_version FROM pragma_schema_version").get(),
       1, OPERATION, "main schema version",
     )[0],
     0, Number.MAX_SAFE_INTEGER, OPERATION, "main schema version",
   );
-  const raw = connection.prepare(
+  const raw = prepare(
       `SELECT type, name, tbl_name, rootpage, sql
          FROM main.sqlite_schema
         WHERE type = 'table' AND name = 'ge_cycle_operations'`,
-      OPERATION,
     ).get();
   if (raw === undefined) {
     return Object.freeze({ rootpage: null, schemaVersion, sql: null });
@@ -742,19 +789,19 @@ function mainOperationsCatalogIdentity(
 }
 
 function validateCursorSealTempCatalog(connection: SQLiteConnection): number {
-  const schemaRows = connection.prepare(
+  const schemaRaw = connection.prepare(
     `SELECT type, name, tbl_name, rootpage, sql
        FROM temp.sqlite_schema
       WHERE name = '${SQLITE_CURSOR_SEAL_TEMP_TABLE_NAME}'`,
     OPERATION,
-  ).all();
-  if (schemaRows.length !== 1) {
+  ).get();
+  if (schemaRaw === undefined) {
     throw new CycleStoreProviderError(
       "GE_CYCLE_STORE_CORRUPTION", OPERATION,
       "SQLite cursor seal TEMP schema identity is invalid",
     );
   }
-  const schema = sqliteRow(schemaRows[0], 5, OPERATION, "cursor seal TEMP schema");
+  const schema = sqliteRow(schemaRaw, 5, OPERATION, "cursor seal TEMP schema");
   const rootpage = sqliteSafeInteger(
     schema[3], 1, Number.MAX_SAFE_INTEGER, OPERATION, "cursor seal TEMP rootpage",
   );
@@ -771,19 +818,19 @@ function validateCursorSealTempCatalog(connection: SQLiteConnection): number {
     );
   }
 
-  const listRows = connection.prepare(
+  const listRaw = connection.prepare(
     `SELECT name, type, ncol, wr, strict
        FROM pragma_table_list
       WHERE schema = 'temp' AND name = '${SQLITE_CURSOR_SEAL_TEMP_TABLE_NAME}'`,
     OPERATION,
-  ).all();
-  if (listRows.length !== 1) {
+  ).get();
+  if (listRaw === undefined) {
     throw new CycleStoreProviderError(
       "GE_CYCLE_STORE_CORRUPTION", OPERATION,
       "SQLite cursor seal TEMP table shape is invalid",
     );
   }
-  const list = sqliteRow(listRows[0], 5, OPERATION, "cursor seal TEMP table list");
+  const list = sqliteRow(listRaw, 5, OPERATION, "cursor seal TEMP table list");
   if (sqliteText(list[0], OPERATION, "cursor seal TEMP table-list name")
         !== SQLITE_CURSOR_SEAL_TABLE_LIST.name
       || sqliteText(list[1], OPERATION, "cursor seal TEMP table-list type")
@@ -800,13 +847,11 @@ function validateCursorSealTempCatalog(connection: SQLiteConnection): number {
     );
   }
 
-  const xinfoRows = connection.prepare(
-    `SELECT cid, name, type, "notnull", dflt_value, pk, hidden
-       FROM pragma_table_xinfo('${SQLITE_CURSOR_SEAL_TEMP_TABLE_NAME}', 'temp')
-      ORDER BY cid`,
-    OPERATION,
-  ).all();
-  if (xinfoRows.length !== SQLITE_CURSOR_SEAL_XINFO.length) {
+  const xinfoCount = scalarCount(connection,
+    `SELECT count(*)
+       FROM pragma_table_xinfo('${SQLITE_CURSOR_SEAL_TEMP_TABLE_NAME}', 'temp')`,
+    "cursor seal TEMP column count");
+  if (xinfoCount !== SQLITE_CURSOR_SEAL_XINFO.length) {
     throw new CycleStoreProviderError(
       "GE_CYCLE_STORE_CORRUPTION", OPERATION,
       "SQLite cursor seal TEMP column shape is invalid",
@@ -815,7 +860,13 @@ function validateCursorSealTempCatalog(connection: SQLiteConnection): number {
   for (let index = 0; index < SQLITE_CURSOR_SEAL_XINFO.length; index += 1) {
     const expected = SQLITE_CURSOR_SEAL_XINFO[index];
     const actual = sqliteRow(
-      xinfoRows[index], 7, OPERATION, "cursor seal TEMP column shape",
+      connection.prepare(
+        `SELECT cid, name, type, "notnull", dflt_value, pk, hidden
+           FROM pragma_table_xinfo('${SQLITE_CURSOR_SEAL_TEMP_TABLE_NAME}', 'temp')
+          WHERE cid = ?`,
+        OPERATION,
+      ).get(index),
+      7, OPERATION, "cursor seal TEMP column shape",
     );
     if (expected === undefined
         || sqliteSafeInteger(actual[0], 0, 29, OPERATION, "cursor seal TEMP cid")
@@ -890,26 +941,29 @@ function validateBaselineTempCatalog(
       ? [`table:${SQLITE_CURSOR_SEAL_TEMP_TABLE_NAME}`]
       : []),
   ]);
-  const rows = connection.prepare(
-    `SELECT type, name
-       FROM temp.sqlite_schema
-      WHERE substr(lower(name), 1, 7) = 'ge_blr_'
-      ORDER BY type, name`,
-    OPERATION,
-  ).all();
-  const actualObjects = new Set(rows.map((raw) => {
-    const row = sqliteRow(raw, 2, OPERATION, "TEMP catalog identity");
-    return `${sqliteText(row[0], OPERATION, "TEMP catalog object type")}:${
-      sqliteText(row[1], OPERATION, "TEMP catalog object name")}`;
-  }));
-  if (rows.length !== expectedObjects.size
-      || actualObjects.size !== expectedObjects.size
-      || [...expectedObjects].some((identity) => !actualObjects.has(identity))) {
+  if (reservedCatalogCount(connection) !== expectedObjects.size) {
     throw new CycleStoreProviderError(
       "GE_CYCLE_STORE_CORRUPTION",
       OPERATION,
       "SQLite baseline TEMP catalog identity is invalid",
     );
+  }
+  for (const identity of expectedObjects) {
+    const separator = identity.indexOf(":");
+    const expectedType = identity.slice(0, separator);
+    const expectedName = identity.slice(separator + 1);
+    const raw = connection.prepare(
+      "SELECT type,name FROM temp.sqlite_schema WHERE type = ? AND name = ?",
+      OPERATION,
+    ).get(expectedType, expectedName);
+    const row = sqliteRow(raw, 2, OPERATION, "TEMP catalog identity");
+    if (sqliteText(row[0], OPERATION, "TEMP catalog object type") !== expectedType
+        || sqliteText(row[1], OPERATION, "TEMP catalog object name") !== expectedName) {
+      throw new CycleStoreProviderError(
+        "GE_CYCLE_STORE_CORRUPTION", OPERATION,
+        "SQLite baseline TEMP catalog identity is invalid",
+      );
+    }
   }
 
   const expectedTables = new Set<string>([
@@ -917,15 +971,23 @@ function validateBaselineTempCatalog(
     ...RELATION_TABLES,
     ...(cursorSealExpected ? [SQLITE_CURSOR_SEAL_TEMP_TABLE_NAME] : []),
   ]);
-  const tableRows = connection.prepare(
-    `SELECT name, type, wr, strict
-       FROM pragma_table_list
+  const tableCount = scalarCount(connection,
+    `SELECT count(*) FROM pragma_table_list
       WHERE schema = 'temp' AND type = 'table'
         AND substr(lower(name), 1, 7) = 'ge_blr_'`,
-    OPERATION,
-  ).all();
-  const actualTables = new Set<string>();
-  for (const raw of tableRows) {
+    "TEMP table count");
+  if (tableCount !== expectedTables.size) {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_CORRUPTION", OPERATION,
+      "SQLite baseline TEMP table shape is invalid",
+    );
+  }
+  for (const expectedName of expectedTables) {
+    const raw = connection.prepare(
+      `SELECT name, type, wr, strict FROM pragma_table_list
+        WHERE schema = 'temp' AND type = 'table' AND name = ?`,
+      OPERATION,
+    ).get(expectedName);
     const row = sqliteRow(raw, 4, OPERATION, "TEMP table identity");
     const name = sqliteText(row[0], OPERATION, "TEMP table name");
     const type = sqliteText(row[1], OPERATION, "TEMP table type");
@@ -940,16 +1002,43 @@ function validateBaselineTempCatalog(
         "SQLite baseline TEMP table shape is invalid",
       );
     }
-    actualTables.add(name);
-  }
-  if (actualTables.size !== expectedTables.size) {
-    throw new CycleStoreProviderError(
-      "GE_CYCLE_STORE_CORRUPTION",
-      OPERATION,
-      "SQLite baseline TEMP table shape is invalid",
-    );
   }
   return cursorSealExpected ? validateCursorSealTempCatalog(connection) : undefined;
+}
+
+function baselineTempCatalogSnapshot(
+  connection: SQLiteConnection,
+  expectedCount: number,
+  captured = false,
+): string {
+  const statement = captured
+    ? prepareSQLiteConnectionIntrinsic(connection,
+      `SELECT count(*), group_concat(
+       hex(CAST(type AS BLOB)) || ',' || hex(CAST(name AS BLOB)) || ',' ||
+       hex(CAST(tbl_name AS BLOB)) || ',' || CAST(rootpage AS TEXT) || ',' ||
+       hex(CAST(coalesce(sql, '') AS BLOB)), ';') FROM (
+       SELECT type,name,tbl_name,rootpage,sql FROM temp.sqlite_schema
+       WHERE substr(lower(name), 1, 7) = 'ge_blr_'
+       ORDER BY type COLLATE BINARY, name COLLATE BINARY
+     )`, OPERATION)
+    : connection.prepare(
+    `SELECT count(*), group_concat(
+       hex(CAST(type AS BLOB)) || ',' || hex(CAST(name AS BLOB)) || ',' ||
+       hex(CAST(tbl_name AS BLOB)) || ',' || CAST(rootpage AS TEXT) || ',' ||
+       hex(CAST(coalesce(sql, '') AS BLOB)), ';') FROM (
+       SELECT type,name,tbl_name,rootpage,sql FROM temp.sqlite_schema
+       WHERE substr(lower(name), 1, 7) = 'ge_blr_'
+       ORDER BY type COLLATE BINARY, name COLLATE BINARY
+     )`, OPERATION);
+  const row = sqliteRow(statement.get(), 2, OPERATION, "TEMP catalog snapshot");
+  if (sqliteSafeInteger(row[0], 0, expectedCount + 1, OPERATION,
+    "TEMP catalog snapshot count") !== expectedCount) {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_CORRUPTION", OPERATION,
+      "SQLite baseline TEMP catalog snapshot is invalid",
+    );
+  }
+  return sqliteText(row[1], OPERATION, "TEMP catalog snapshot");
 }
 
 type CanonicalRecord = Readonly<Record<string, unknown>>;
@@ -1187,7 +1276,8 @@ function legacyDerivedValues(
   operation: CycleStoreMutationOperation,
   decoded: CycleStoreLedgerResultByOperation[CycleStoreMutationOperation],
 ): readonly RelationValue[] {
-  const values: RelationValue[] = Array.from({ length: 30 }, () => null);
+  const values: RelationValue[] = [];
+  for (let index = 0; index < 30; index += 1) values.push(null);
   switch (operation) {
     case "append": {
       const result = decoded as CycleStoreLedgerResultByOperation["append"];
@@ -1374,6 +1464,12 @@ export class SQLiteBaselineTempStage {
   #cursorTransferAllowedTotalChanges: number | undefined;
   #cursorSealState: "absent" | "creating" | "present" | "poisoned" = "absent";
   #cursorSealRootpage: number | undefined;
+  #cursorSealCatalogSnapshot: string | undefined;
+  #cursorPreRebindState:
+    "unused" | "active" | "pre-rebind-complete" | "diagnosed" | "poisoned" = "unused";
+  #cursorPreRebindSession: object | undefined;
+  #cursorPreRebindCleanup: (() => void) | undefined;
+  #cursorPreRebindInsertStatement: StatementSync | undefined;
   readonly #mainOperationsCatalogIdentity: SQLiteMainOperationsCatalogIdentity;
   #cooperativeWritesFinished = false;
 
@@ -2138,6 +2234,7 @@ export class SQLiteBaselineTempStage {
     connection: SQLiteConnection,
     receipt: SQLiteCursorPreRebindReceipt,
     session: object,
+    captured = false,
   ): void {
     const receiptWitness = assertSQLiteCursorPreRebindReceiptProvenance(receipt);
     if (this.#cursorTransferState !== "active"
@@ -2167,6 +2264,12 @@ export class SQLiteBaselineTempStage {
         || this.#legacyCampaignCleanup !== undefined) {
       return this.#poison("SQLite cursor stage ownership transfer session is invalid");
     }
+    // Prove the stage write fence before consulting the retained owner
+    // snapshots. Active B2 uses captured intrinsics throughout; a real,
+    // same-cardinality DELETE+INSERT must still be classified as an
+    // unexplained write rather than a generic owner-fence failure.
+    this.#requireOpenOwner(captured);
+    this.#requireAllowedChanges(captured);
     const ownerBefore = readSQLiteConnectionOwnerSnapshot(connection);
     const changesBefore = readSQLiteConnectionTotalChangesSnapshot(connection);
     if (!ownerBefore.isTransaction
@@ -2176,20 +2279,20 @@ export class SQLiteBaselineTempStage {
         || changesBefore.totalChanges !== this.#cursorTransferAllowedTotalChanges) {
       return this.#poison("SQLite cursor stage ownership transfer owner fence changed");
     }
-    this.#requireOpenOwner();
-    this.#requireAllowedChanges();
-    this.#assertExactBaselineCatalog("cursor transfer fence");
-    this.#assertMainOperationsCatalog("cursor transfer fence");
-    this.#requireAllowedChanges();
+    this.#assertExactBaselineCatalog("cursor transfer fence", captured);
+    this.#assertMainOperationsCatalog("cursor transfer fence", captured);
+    this.#requireAllowedChanges(captured);
     const ownerAfter = readSQLiteConnectionOwnerSnapshot(connection);
     const changesAfter = readSQLiteConnectionTotalChangesSnapshot(connection);
-    let reportedEpoch: bigint;
-    try {
-      reportedEpoch = connection.transactionEpoch;
-    } catch {
-      return this.#poison("SQLite cursor stage ownership transfer owner fence changed");
-    }
     const ownerFinal = readSQLiteConnectionOwnerSnapshot(connection);
+    let reportedEpoch = ownerFinal.transactionEpoch;
+    if (!captured) {
+      try {
+        reportedEpoch = connection.transactionEpoch;
+      } catch {
+        return this.#poison("SQLite cursor stage ownership transfer owner fence changed");
+      }
+    }
     if (!ownerAfter.isTransaction
         || ownerAfter.transactionMode !== "exclusive"
         || ownerAfter.transactionEpoch !== this.#cursorTransferStageEpoch
@@ -2283,6 +2386,9 @@ export class SQLiteBaselineTempStage {
       this.#transactionEpoch = ownerAfterValidation.transactionEpoch;
       this.#cursorTransferStageEpoch = ownerAfterValidation.transactionEpoch;
       this.#cursorSealRootpage = rootpage;
+      this.#cursorSealCatalogSnapshot = baselineTempCatalogSnapshot(
+        connection, EXPECTED_RESERVED_OBJECT_COUNT + 1,
+      );
       this.#cursorSealState = "present";
     } catch (error) {
       // The name was proven absent immediately before the owned attempt, so a
@@ -2325,6 +2431,7 @@ export class SQLiteBaselineTempStage {
         }
       }
       this.#cursorSealRootpage = undefined;
+      this.#cursorSealCatalogSnapshot = undefined;
       this.#cursorSealState = "poisoned";
       try {
         this.#poison("SQLite cursor seal TEMP table creation failed");
@@ -2333,6 +2440,160 @@ export class SQLiteBaselineTempStage {
       }
       throw error;
     }
+  }
+
+  /** Begin B2 only from the exact retained B0b session and adopted B1 table. */
+  [SQLITE_BASELINE_BEGIN_CURSOR_PRE_REBIND](
+    connection: SQLiteConnection,
+    receipt: SQLiteCursorPreRebindReceipt,
+    transferSession: object,
+  ): object {
+    assertSQLiteCursorPreRebindReceiptProvenance(receipt);
+    this.#fenceCursorStageTransfer(connection, receipt, transferSession);
+    if (this.#cursorSealState !== "present"
+        || this.#cursorPreRebindState !== "unused"
+        || this.#cursorPreRebindSession !== undefined
+        || this.#cursorPreRebindCleanup !== undefined) {
+      return this.#poison("SQLite cursor pre-rebind campaign authority is invalid");
+    }
+    let insertStatement: StatementSync;
+    try {
+      insertStatement = prepareSQLiteConnectionIntrinsic(
+        connection, SQLITE_CURSOR_STAGE_INSERT_SQL, OPERATION,
+      );
+    } catch (error) {
+      try {
+        this.#poison("SQLite cursor pre-rebind insert statement is invalid");
+      } catch {
+        // The exact statement preparation failure remains authoritative.
+      }
+      throw error;
+    }
+    const session = Object.freeze(Object.create(null)) as object;
+    this.#cursorPreRebindSession = session;
+    this.#cursorPreRebindInsertStatement = insertStatement;
+    this.#cursorPreRebindState = "active";
+    return session;
+  }
+
+  [SQLITE_BASELINE_FENCE_CURSOR_PRE_REBIND](session: object): void {
+    this.#fenceCursorPreRebind(session);
+  }
+
+  #fenceCursorPreRebind(session: object): void {
+    if (this.#cursorPreRebindState !== "active"
+        || session !== this.#cursorPreRebindSession
+        || this.#cursorTransferSession === undefined
+        || this.#cursorTransferReceipt === undefined) {
+      return this.#poison("SQLite cursor pre-rebind campaign session is invalid");
+    }
+    this.#fenceCursorStageTransfer(
+      this.#connection,
+      this.#cursorTransferReceipt,
+      this.#cursorTransferSession,
+      true,
+    );
+  }
+
+  [SQLITE_BASELINE_REGISTER_CURSOR_PRE_REBIND_CLEANUP](
+    session: object,
+    cleanup: (() => void) | undefined,
+  ): void {
+    this.#fenceCursorPreRebind(session);
+    if (cleanup !== undefined && this.#cursorPreRebindCleanup !== undefined) {
+      return this.#poison("SQLite cursor pre-rebind cleanup is already active");
+    }
+    this.#cursorPreRebindCleanup = cleanup;
+  }
+
+  [SQLITE_BASELINE_INSERT_CURSOR_PRE_REBIND_ROW](
+    session: object,
+    values: readonly SQLiteCursorStageValue[],
+  ): void {
+    this.#fenceCursorPreRebind(session);
+    if (!Array.isArray(values) || values.length !== 30) {
+      return this.#poison("SQLite cursor pre-rebind stage tuple is invalid");
+    }
+    const statement = this.#cursorPreRebindInsertStatement;
+    if (statement === undefined) {
+      return this.#poison("SQLite cursor pre-rebind insert statement is absent");
+    }
+    const before = this.#requireAllowedChanges(true);
+    let statementChanges: unknown;
+    try {
+      statementChanges = statement.run(...values).changes;
+    } catch (error) {
+      try {
+        this.#poison("SQLite cursor pre-rebind stage insert failed");
+      } catch {
+        // The exact statement execution failure remains authoritative.
+      }
+      throw error;
+    }
+    let after: number;
+    try {
+      after = totalChangesIntrinsic(this.#connection);
+    } catch {
+      return this.#poison("SQLite cursor pre-rebind stage write count is invalid");
+    }
+    if ((statementChanges !== 1 && statementChanges !== 1n) || after !== before + 1) {
+      return this.#poison("SQLite cursor pre-rebind stage write count is invalid");
+    }
+    this.#allowedTotalChanges = after;
+    this.#cursorTransferAllowedTotalChanges = this.#allowedTotalChanges;
+    this.#fenceCursorPreRebind(session);
+  }
+
+  [SQLITE_BASELINE_COMPLETE_CURSOR_PRE_REBIND](session: object): void {
+    this.#fenceCursorPreRebind(session);
+    if (this.#cursorPreRebindCleanup !== undefined) {
+      return this.#poison("SQLite cursor pre-rebind cleanup remains active");
+    }
+    this.#cursorPreRebindSession = undefined;
+    this.#cursorPreRebindInsertStatement = undefined;
+    this.#cursorPreRebindState = "pre-rebind-complete";
+  }
+
+  [SQLITE_BASELINE_DIAGNOSE_CURSOR_PRE_REBIND](session: object): void {
+    this.#fenceCursorPreRebind(session);
+    if (this.#cursorPreRebindCleanup !== undefined) {
+      return this.#poison("SQLite cursor pre-rebind cleanup remains active");
+    }
+    this.#cursorPreRebindSession = undefined;
+    this.#cursorPreRebindInsertStatement = undefined;
+    this.#cursorPreRebindState = "diagnosed";
+  }
+
+  [SQLITE_BASELINE_ABORT_CURSOR_PRE_REBIND](
+    session: object | undefined,
+    message: string,
+  ): never {
+    const cleanup = this.#cursorPreRebindCleanup;
+    const expectedSession = this.#cursorPreRebindSession;
+    this.#cursorPreRebindCleanup = undefined;
+    this.#cursorPreRebindSession = undefined;
+    this.#cursorPreRebindInsertStatement = undefined;
+    this.#cursorPreRebindState = "poisoned";
+    try {
+      cleanup?.();
+    } catch {
+      // Preserve the authoritative campaign failure.
+    }
+    if (session !== undefined && session !== expectedSession) {
+      message = "SQLite cursor pre-rebind campaign session is invalid";
+    }
+    // An explicit owner disposal is terminal in its own right.  The campaign
+    // still fails closed, but its best-effort abort must not rewrite the
+    // externally observable lifecycle from `disposed` to `poisoned` after
+    // disposal has already finalized the cursor and removed every TEMP object.
+    if (this.#state === "disposed") {
+      throw new CycleStoreProviderError(
+        "GE_CYCLE_STORE_CORRUPTION",
+        OPERATION,
+        message,
+      );
+    }
+    return this.#poison(message);
   }
 
   /** Burn the B0b session while preserving the authoritative caller failure. */
@@ -2414,10 +2675,9 @@ export class SQLiteBaselineTempStage {
     if (expected === null || typeof expected !== "object" || Array.isArray(expected)) {
       return invalid("SQLite baseline expected counts must contain exactly twelve kinds");
     }
-    const actualKinds = Object.keys(expected).sort();
-    const expectedKinds = [...BASELINE_ENTRY_KINDS].sort();
-    if (actualKinds.length !== expectedKinds.length
-        || actualKinds.some((entryKind, index) => entryKind !== expectedKinds[index])) {
+    const actualKinds = Object.keys(expected);
+    if (actualKinds.length !== BASELINE_ENTRY_KINDS.length
+        || BASELINE_ENTRY_KINDS.some((entryKind) => !Object.hasOwn(expected, entryKind))) {
       return invalid("SQLite baseline expected counts must contain exactly twelve kinds");
     }
     let expectedTotal = 0;
@@ -2537,6 +2797,18 @@ export class SQLiteBaselineTempStage {
       this.#legacyCampaignSession = undefined;
       this.#legacyCampaignState = "poisoned";
     }
+    if (this.#cursorPreRebindState === "active") {
+      const cleanup = this.#cursorPreRebindCleanup;
+      this.#cursorPreRebindCleanup = undefined;
+      this.#cursorPreRebindSession = undefined;
+      this.#cursorPreRebindInsertStatement = undefined;
+      this.#cursorPreRebindState = "poisoned";
+      try {
+        cleanup?.();
+      } catch (error) {
+        handoffCleanupFailure ??= error;
+      }
+    }
     if (this.#cursorTransferState === "active") this.#cursorTransferState = "poisoned";
     if (this.#cursorSealState !== "absent") this.#cursorSealState = "poisoned";
     this.#cursorTransferSession = undefined;
@@ -2568,38 +2840,77 @@ export class SQLiteBaselineTempStage {
         .reverse()
         .map((name) => `DROP TABLE temp.${name}`),
     ];
-    const existing = new Set(
-      this.#connection.prepare(
-        `SELECT name FROM temp.sqlite_schema
-          WHERE substr(lower(name), 1, 7) = 'ge_blr_'`,
-        OPERATION,
-      ).all().map((row) => sqliteText(
-        sqliteRow(row, 1, OPERATION, "TEMP reserved catalog name")[0],
-        OPERATION,
-        "TEMP reserved catalog name",
-      )),
+    const existing = new Set<string>();
+    const existingStatement = prepareSQLiteConnectionIntrinsic(
+      this.#connection,
+      "SELECT name FROM temp.sqlite_schema WHERE name = ?",
+      OPERATION,
     );
+    // Probe only the fixed package-owned allowlist.  A bounded prefix scan can
+    // be crowded out by foreign reserved objects when SQLite reverses an
+    // unordered catalog walk; captured preparation also prevents a replaceable
+    // public method from fabricating or suppressing disposal membership.
+    for (const sql of drops) {
+      const name = sql.slice(sql.lastIndexOf(".") + 1);
+      const raw = existingStatement.get(name);
+      if (raw === undefined) continue;
+      const actualName = sqliteText(
+        sqliteRow(raw, 1, OPERATION, "TEMP owned catalog name")[0],
+        OPERATION,
+        "TEMP owned catalog name",
+      );
+      if (actualName !== name) {
+        throw new CycleStoreProviderError(
+          "GE_CYCLE_STORE_CORRUPTION",
+          OPERATION,
+          "SQLite baseline TEMP stage disposal identity is invalid",
+        );
+      }
+      existing.add(actualName);
+    }
     let firstFailure: unknown = handoffCleanupFailure;
+    let cursorSealOwned = false;
+    if (existing.has(SQLITE_CURSOR_SEAL_TEMP_TABLE_NAME)) {
+      try {
+        const identity = cursorSealAttemptIdentityIntrinsic(this.#connection);
+        cursorSealOwned = this.#cursorSealRootpage !== undefined
+          && identity.rootpage === this.#cursorSealRootpage
+          && identity.sql === SQLITE_CURSOR_SEAL_SCHEMA_SQL;
+      } catch {
+        // A same-name object whose exact identity cannot be re-proven is not
+        // ours to delete, even while the original transaction is still live.
+      }
+      if (!cursorSealOwned) {
+        firstFailure ??= new CycleStoreProviderError(
+          "GE_CYCLE_STORE_CORRUPTION",
+          OPERATION,
+          "SQLite cursor seal TEMP table disposal identity is invalid",
+        );
+      }
+    }
     for (const sql of drops) {
       const name = sql.slice(sql.lastIndexOf(".") + 1);
       if (!existing.has(name)) continue;
+      if (name === SQLITE_CURSOR_SEAL_TEMP_TABLE_NAME && !cursorSealOwned) continue;
       try {
-        if (name === SQLITE_CURSOR_SEAL_TEMP_TABLE_NAME) {
-          execSQLiteConnectionTrustedIntrinsic(this.#connection, sql, OPERATION);
-        } else {
-          this.#connection.execTrusted(sql, OPERATION);
-        }
-        this.#transactionEpoch = this.#connection.transactionEpoch;
+        execSQLiteConnectionTrustedIntrinsic(this.#connection, sql, OPERATION);
+        this.#transactionEpoch = readSQLiteConnectionOwnerSnapshot(
+          this.#connection,
+        ).transactionEpoch;
       } catch (error) {
         firstFailure ??= error;
       }
     }
-    if (reservedCatalogCount(this.#connection) !== 0) {
-      firstFailure ??= new CycleStoreProviderError(
-        "GE_CYCLE_STORE_CORRUPTION",
-        OPERATION,
-        "SQLite baseline TEMP stage disposal left reserved objects",
-      );
+    try {
+      if (reservedCatalogCountIntrinsic(this.#connection) !== 0) {
+        firstFailure ??= new CycleStoreProviderError(
+          "GE_CYCLE_STORE_CORRUPTION",
+          OPERATION,
+          "SQLite baseline TEMP stage disposal left reserved objects",
+        );
+      }
+    } catch (error) {
+      firstFailure ??= error;
     }
     if (firstFailure !== undefined) {
       this.#state = "poisoned";
@@ -2609,16 +2920,28 @@ export class SQLiteBaselineTempStage {
     deleteActiveStage(this.#connection);
   }
 
-  #requireOpenOwner(): void {
+  #requireOpenOwner(captured = false): void {
     if (this.#state === "disposed") {
       return invalid("SQLite baseline TEMP stage is disposed");
     }
     if (this.#state === "poisoned") {
       return invalid("SQLite baseline TEMP stage is poisoned");
     }
-    if (!this.#connection.isTransaction
-        || this.#connection.transactionMode !== "exclusive"
-        || this.#connection.transactionEpoch !== this.#transactionEpoch) {
+    let owner: SQLiteConnectionOwnerSnapshot;
+    try {
+      owner = captured
+        ? readSQLiteConnectionOwnerSnapshot(this.#connection)
+        : {
+            isTransaction: this.#connection.isTransaction,
+            transactionMode: this.#connection.transactionMode,
+            transactionEpoch: this.#connection.transactionEpoch,
+          };
+    } catch {
+      return unavailable("SQLite provider is closed");
+    }
+    if (!owner.isTransaction
+        || owner.transactionMode !== "exclusive"
+        || owner.transactionEpoch !== this.#transactionEpoch) {
       return this.#poison("SQLite baseline TEMP stage transaction changed");
     }
   }
@@ -2631,10 +2954,12 @@ export class SQLiteBaselineTempStage {
     this.#writeLane = "standalone";
   }
 
-  #requireAllowedChanges(): number {
+  #requireAllowedChanges(captured = false): number {
     let actual: number;
     try {
-      actual = totalChanges(this.#connection);
+      actual = captured
+        ? totalChangesIntrinsic(this.#connection)
+        : totalChanges(this.#connection);
     } catch {
       return this.#poison("SQLite baseline TEMP stage change counter is invalid");
     }
@@ -2715,7 +3040,7 @@ export class SQLiteBaselineTempStage {
     this.#allowedTotalChanges = after;
   }
 
-  #assertExactBaselineCatalog(label: string): void {
+  #assertExactBaselineCatalog(label: string, captured = false): void {
     const ownerBefore = readSQLiteConnectionOwnerSnapshot(this.#connection);
     if (!ownerBefore.isTransaction
         || ownerBefore.transactionMode !== "exclusive"
@@ -2725,10 +3050,18 @@ export class SQLiteBaselineTempStage {
     const cursorSealExpected = this.#cursorSealState === "present";
     let cursorSealRootpage: number | undefined;
     try {
-      cursorSealRootpage = validateBaselineTempCatalog(
-        this.#connection,
-        cursorSealExpected,
-      );
+      if (cursorSealExpected) {
+        if (this.#cursorSealCatalogSnapshot === undefined
+            || baselineTempCatalogSnapshot(
+              this.#connection, EXPECTED_RESERVED_OBJECT_COUNT + 1,
+              captured,
+            ) !== this.#cursorSealCatalogSnapshot) {
+          throw new Error("cursor seal catalog snapshot changed");
+        }
+        cursorSealRootpage = cursorSealAttemptIdentityIntrinsic(this.#connection).rootpage;
+      } else {
+        cursorSealRootpage = validateBaselineTempCatalog(this.#connection, false);
+      }
     } catch {
       return this.#poison(`SQLite baseline ${label} catalog is invalid`);
     }
@@ -2737,17 +3070,19 @@ export class SQLiteBaselineTempStage {
         || ownerAfter.transactionMode !== "exclusive"
         || ownerAfter.transactionEpoch !== ownerBefore.transactionEpoch
         || ownerAfter.transactionEpoch !== this.#transactionEpoch
-        || reservedCatalogCount(this.#connection)
+        || (captured
+          ? reservedCatalogCountIntrinsic(this.#connection)
+          : reservedCatalogCount(this.#connection))
           !== EXPECTED_RESERVED_OBJECT_COUNT + (cursorSealExpected ? 1 : 0)
         || (cursorSealExpected && cursorSealRootpage !== this.#cursorSealRootpage)) {
       return this.#poison(`SQLite baseline ${label} catalog is invalid`);
     }
   }
 
-  #assertMainOperationsCatalog(label: string): void {
+  #assertMainOperationsCatalog(label: string, captured = false): void {
     let actual: SQLiteMainOperationsCatalogIdentity;
     try {
-      actual = mainOperationsCatalogIdentity(this.#connection);
+      actual = mainOperationsCatalogIdentity(this.#connection, captured);
     } catch {
       return this.#poison(`SQLite baseline ${label} main operation catalog is invalid`);
     }
@@ -2793,7 +3128,10 @@ export class SQLiteBaselineTempStage {
     this.#cursorTransferProjection = undefined;
     this.#cursorTransferStageEpoch = undefined;
     this.#cursorTransferAllowedTotalChanges = undefined;
-    this.#state = "poisoned";
+    // Disposal is an irreversible public lifecycle state.  A stale campaign
+    // may still discover its invalidated private authority and fail closed,
+    // but that later failure must not rewrite an already completed disposal.
+    if (this.#state !== "disposed") this.#state = "poisoned";
     throw new CycleStoreProviderError(
       "GE_CYCLE_STORE_CORRUPTION",
       OPERATION,
@@ -2810,6 +3148,20 @@ const sqliteBaselineAbortCursorStageTransferIntrinsic =
   SQLiteBaselineTempStage.prototype[SQLITE_BASELINE_ABORT_CURSOR_STAGE_TRANSFER];
 const sqliteBaselineCreateCursorSealTempTableIntrinsic =
   SQLiteBaselineTempStage.prototype[SQLITE_BASELINE_CREATE_CURSOR_SEAL_TEMP_TABLE];
+const sqliteBaselineBeginCursorPreRebindIntrinsic =
+  SQLiteBaselineTempStage.prototype[SQLITE_BASELINE_BEGIN_CURSOR_PRE_REBIND];
+const sqliteBaselineFenceCursorPreRebindIntrinsic =
+  SQLiteBaselineTempStage.prototype[SQLITE_BASELINE_FENCE_CURSOR_PRE_REBIND];
+const sqliteBaselineRegisterCursorPreRebindCleanupIntrinsic =
+  SQLiteBaselineTempStage.prototype[SQLITE_BASELINE_REGISTER_CURSOR_PRE_REBIND_CLEANUP];
+const sqliteBaselineInsertCursorPreRebindRowIntrinsic =
+  SQLiteBaselineTempStage.prototype[SQLITE_BASELINE_INSERT_CURSOR_PRE_REBIND_ROW];
+const sqliteBaselineCompleteCursorPreRebindIntrinsic =
+  SQLiteBaselineTempStage.prototype[SQLITE_BASELINE_COMPLETE_CURSOR_PRE_REBIND];
+const sqliteBaselineDiagnoseCursorPreRebindIntrinsic =
+  SQLiteBaselineTempStage.prototype[SQLITE_BASELINE_DIAGNOSE_CURSOR_PRE_REBIND];
+const sqliteBaselineAbortCursorPreRebindIntrinsic =
+  SQLiteBaselineTempStage.prototype[SQLITE_BASELINE_ABORT_CURSOR_PRE_REBIND];
 
 /** Invoke the captured exact B0b begin hook despite later prototype replacement. */
 export function beginSQLiteBaselineCursorStageTransferIntrinsic(
@@ -2863,6 +3215,64 @@ export function createSQLiteBaselineCursorSealTempTableIntrinsic(
     receipt,
     session,
   ]);
+}
+
+export function beginSQLiteBaselineCursorPreRebindIntrinsic(
+  stage: SQLiteBaselineTempStage,
+  connection: SQLiteConnection,
+  receipt: SQLiteCursorPreRebindReceipt,
+  transferSession: object,
+): object {
+  return Reflect.apply(sqliteBaselineBeginCursorPreRebindIntrinsic, stage, [
+    connection, receipt, transferSession,
+  ]) as object;
+}
+
+export function fenceSQLiteBaselineCursorPreRebindIntrinsic(
+  stage: SQLiteBaselineTempStage,
+  session: object,
+): void {
+  Reflect.apply(sqliteBaselineFenceCursorPreRebindIntrinsic, stage, [session]);
+}
+
+export function registerSQLiteBaselineCursorPreRebindCleanupIntrinsic(
+  stage: SQLiteBaselineTempStage,
+  session: object,
+  cleanup: (() => void) | undefined,
+): void {
+  Reflect.apply(sqliteBaselineRegisterCursorPreRebindCleanupIntrinsic, stage, [session, cleanup]);
+}
+
+export function insertSQLiteBaselineCursorPreRebindRowIntrinsic(
+  stage: SQLiteBaselineTempStage,
+  session: object,
+  values: readonly SQLiteCursorStageValue[],
+): void {
+  Reflect.apply(sqliteBaselineInsertCursorPreRebindRowIntrinsic, stage, [session, values]);
+}
+
+export function completeSQLiteBaselineCursorPreRebindIntrinsic(
+  stage: SQLiteBaselineTempStage,
+  session: object,
+): void {
+  Reflect.apply(sqliteBaselineCompleteCursorPreRebindIntrinsic, stage, [session]);
+}
+
+export function diagnoseSQLiteBaselineCursorPreRebindIntrinsic(
+  stage: SQLiteBaselineTempStage,
+  session: object,
+): void {
+  Reflect.apply(sqliteBaselineDiagnoseCursorPreRebindIntrinsic, stage, [session]);
+}
+
+export function abortSQLiteBaselineCursorPreRebindIntrinsic(
+  stage: SQLiteBaselineTempStage,
+  session: object | undefined,
+  message: string,
+): never {
+  return Reflect.apply(sqliteBaselineAbortCursorPreRebindIntrinsic, stage, [
+    session, message,
+  ]) as never;
 }
 
 /** Create the fixed TEMP catalog under one exact owner EXCLUSIVE proof. */

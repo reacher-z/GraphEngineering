@@ -143,6 +143,9 @@ _SQLITE_V1_CURSOR_SEAL_XINFO: tuple[tuple[object, ...], ...] = (
 
 SQLiteV1BaselineTempStageState = Literal["open", "poisoned", "disposed"]
 _SQLiteCursorStageTransferState = Literal["unused", "active", "complete", "poisoned"]
+_SQLiteCursorCampaignState = Literal[
+    "unused", "active", "pre-rebind-complete", "diagnosed", "poisoned"
+]
 
 # Freeze the owner observations used by the cursor handoff.  Calling the
 # captured property functions directly prevents a later class-level descriptor
@@ -1308,6 +1311,13 @@ class SQLiteV1BaselineTempStage:
         "_created_indexes",
         "_created_tables",
         "_created_view",
+        "_cursor_campaign_active_cursor",
+        "_cursor_campaign_active_role",
+        "_cursor_campaign_active_rule_index",
+        "_cursor_campaign_projection",
+        "_cursor_campaign_receipt",
+        "_cursor_campaign_session",
+        "_cursor_campaign_state",
         "_cursor_transfer_allowed_total_changes",
         "_cursor_transfer_capture_epoch",
         "_cursor_transfer_catalog_created",
@@ -1377,6 +1387,13 @@ class SQLiteV1BaselineTempStage:
         self._cursor_transfer_allowed_total_changes: int | None = None
         self._cursor_transfer_catalog_created = False
         self._cursor_transfer_catalog_rootpage: int | None = None
+        self._cursor_campaign_state: _SQLiteCursorCampaignState = "unused"
+        self._cursor_campaign_session: object | None = None
+        self._cursor_campaign_receipt: SQLiteCursorPreRebindReceipt | None = None
+        self._cursor_campaign_projection: BaselineProjectionIdentity | None = None
+        self._cursor_campaign_active_cursor: _SQLiteCursorCapability | None = None
+        self._cursor_campaign_active_role: str | None = None
+        self._cursor_campaign_active_rule_index: int | None = None
         self._ordered_handoff_started = False
         self._ordered_handoff_completed = False
         self._ordered_handoff_reader: _SQLiteV1BaselineOrderedStageReader | None = None
@@ -2389,7 +2406,11 @@ class SQLiteV1BaselineTempStage:
         )
         rows: list[tuple[object, ...]] = []
         try:
-            while True:
+            # Read at most the complete expected catalog plus one hostile
+            # witness.  The +1 row proves overpopulation without allowing a
+            # caller-created reserved namespace to turn every B2 fence into an
+            # unbounded catalog walk.
+            while len(rows) <= len(expected_objects):
                 assert_fence()
                 row = _CURSOR_FETCHONE(cursor)
                 assert_fence()
@@ -2668,6 +2689,229 @@ class SQLiteV1BaselineTempStage:
                 session,
                 "BLR_CURSOR_STAGE_FENCE: cursor stage owner fence changed",
             )
+
+    def _begin_cursor_pre_rebind_campaign(
+        self,
+        connection: SQLiteV1BaselineConnectionOwner,
+        receipt: SQLiteCursorPreRebindReceipt,
+        transfer_session: object,
+    ) -> object:
+        """Burn the B2 latch and bind one exact campaign to the B1 stage."""
+
+        _CURSOR_STAGE_ASSERT_TRANSFER(self, connection, receipt, transfer_session)
+        campaign_session = object()
+        if self._cursor_campaign_state != "unused":
+            self._abort_cursor_pre_rebind_campaign(
+                self._cursor_campaign_session,
+                "BLR_CURSOR_CAMPAIGN_ALREADY_STARTED: cursor campaign already started",
+            )
+        self._cursor_campaign_state = "poisoned"
+        provenance = assert_sqlite_cursor_pre_rebind_receipt_provenance(receipt)
+        if (
+            not self._cursor_transfer_catalog_created
+            or self._cursor_transfer_catalog_rootpage is None
+            or self._cursor_transfer_receipt is not receipt
+            or self._cursor_transfer_projection is not provenance.projection_identity
+            or self._cursor_campaign_active_cursor is not None
+        ):
+            self._abort_cursor_pre_rebind_campaign(
+                campaign_session,
+                "BLR_CURSOR_CAMPAIGN_AUTHORITY: cursor campaign binding is invalid",
+            )
+        self._cursor_campaign_session = campaign_session
+        self._cursor_campaign_receipt = receipt
+        self._cursor_campaign_projection = provenance.projection_identity
+        self._cursor_campaign_state = "active"
+        return campaign_session
+
+    def _assert_cursor_pre_rebind_campaign(
+        self,
+        connection: SQLiteV1BaselineConnectionOwner,
+        receipt: SQLiteCursorPreRebindReceipt,
+        transfer_session: object,
+        campaign_session: object,
+    ) -> None:
+        """Revalidate B2 authority and the live owner/catalog/change fence."""
+
+        _CURSOR_STAGE_ASSERT_TRANSFER(self, connection, receipt, transfer_session)
+        provenance = assert_sqlite_cursor_pre_rebind_receipt_provenance(receipt)
+        if (
+            self._cursor_campaign_state != "active"
+            or self._cursor_campaign_session is not campaign_session
+            or self._cursor_campaign_receipt is not receipt
+            or self._cursor_campaign_projection is not provenance.projection_identity
+        ):
+            self._abort_cursor_pre_rebind_campaign(
+                campaign_session,
+                "BLR_CURSOR_CAMPAIGN_AUTHORITY: cursor campaign binding drifted",
+            )
+
+    def _register_cursor_pre_rebind_campaign_cursor(
+        self,
+        connection: SQLiteV1BaselineConnectionOwner,
+        receipt: SQLiteCursorPreRebindReceipt,
+        transfer_session: object,
+        campaign_session: object,
+        cursor: _SQLiteCursorCapability,
+        role: str,
+        rule_index: int | None,
+    ) -> None:
+        self._assert_cursor_pre_rebind_campaign(
+            connection, receipt, transfer_session, campaign_session
+        )
+        if (
+            type(cursor) is not _SQLiteCursorCapability
+            or self._cursor_campaign_active_cursor is not None
+            or role not in {"eqp", "source", "marker", "seal"}
+            or (role == "marker") != (type(rule_index) is int and 0 <= rule_index < 10)
+            or (role != "marker" and rule_index is not None)
+        ):
+            self._abort_cursor_pre_rebind_campaign(
+                campaign_session,
+                "BLR_CURSOR_CAMPAIGN_CURSOR: cursor registration is invalid",
+            )
+        self._cursor_campaign_active_cursor = cursor
+        self._cursor_campaign_active_role = role
+        self._cursor_campaign_active_rule_index = rule_index
+
+    def _finalize_cursor_pre_rebind_campaign_cursor(
+        self,
+        connection: SQLiteV1BaselineConnectionOwner,
+        receipt: SQLiteCursorPreRebindReceipt,
+        transfer_session: object,
+        campaign_session: object,
+        cursor: _SQLiteCursorCapability,
+        *,
+        preserve_primary: bool,
+    ) -> None:
+        """Clear registered ownership before the cursor's sole close attempt."""
+
+        if self._cursor_campaign_active_cursor is not cursor:
+            self._abort_cursor_pre_rebind_campaign(
+                campaign_session,
+                "BLR_CURSOR_CAMPAIGN_CURSOR: cursor ownership drifted",
+            )
+        self._cursor_campaign_active_cursor = None
+        self._cursor_campaign_active_role = None
+        self._cursor_campaign_active_rule_index = None
+        if preserve_primary:
+            _CURSOR_CLOSE(cursor)
+            return
+        primary: BaseException | None = None
+        try:
+            self._assert_cursor_pre_rebind_campaign(
+                connection, receipt, transfer_session, campaign_session
+            )
+        except BaseException as error:
+            primary = error
+        try:
+            _CURSOR_CLOSE(cursor)
+        except BaseException as error:
+            if primary is None:
+                primary = error
+        if primary is not None:
+            raise primary
+        self._assert_cursor_pre_rebind_campaign(
+            connection, receipt, transfer_session, campaign_session
+        )
+
+    def _adopt_cursor_pre_rebind_insert(
+        self,
+        connection: SQLiteV1BaselineConnectionOwner,
+        receipt: SQLiteCursorPreRebindReceipt,
+        transfer_session: object,
+        campaign_session: object,
+        before_changes: int,
+        rowcount: int,
+    ) -> None:
+        """Adopt exactly one adjacent owned TEMP INSERT and no other write."""
+
+        if (
+            type(before_changes) is not int
+            or type(rowcount) is not int
+            or rowcount != 1
+            or self._cursor_transfer_allowed_total_changes != before_changes
+            or self._allowed_total_changes != before_changes
+            or _OWNER_TOTAL_CHANGES_GETTER(connection) != before_changes + 1
+        ):
+            self._abort_cursor_pre_rebind_campaign(
+                campaign_session,
+                "BLR_CURSOR_CAMPAIGN_WRITE: cursor insert change count is invalid",
+            )
+        self._allowed_total_changes = before_changes + 1
+        self._cursor_transfer_allowed_total_changes = before_changes + 1
+        self._assert_cursor_pre_rebind_campaign(
+            connection, receipt, transfer_session, campaign_session
+        )
+
+    def _complete_cursor_pre_rebind_campaign(
+        self,
+        connection: SQLiteV1BaselineConnectionOwner,
+        receipt: SQLiteCursorPreRebindReceipt,
+        transfer_session: object,
+        campaign_session: object,
+        outcome_kind: Literal["pre-rebind-complete", "diagnosed"],
+    ) -> None:
+        self._assert_cursor_pre_rebind_campaign(
+            connection, receipt, transfer_session, campaign_session
+        )
+        if (
+            outcome_kind not in {"pre-rebind-complete", "diagnosed"}
+            or self._cursor_campaign_active_cursor is not None
+        ):
+            self._abort_cursor_pre_rebind_campaign(
+                campaign_session,
+                "BLR_CURSOR_CAMPAIGN_COMPLETE: cursor campaign completion is invalid",
+            )
+        self._cursor_campaign_state = outcome_kind
+        if outcome_kind == "diagnosed":
+            self._cursor_campaign_session = None
+            self._cursor_campaign_receipt = None
+            self._cursor_campaign_projection = None
+            self._cursor_transfer_session = None
+            self._cursor_transfer_receipt = None
+            self._cursor_transfer_projection = None
+            self._cursor_transfer_stage_epoch = None
+            self._cursor_transfer_allowed_total_changes = None
+            self._cursor_transfer_state = "complete"
+
+    def _abort_cursor_pre_rebind_campaign(
+        self,
+        campaign_session: object | None,
+        error: BaseException | str,
+    ) -> Never:
+        """Burn B2 and retain the first primary across best-effort cursor close."""
+
+        primary = error if isinstance(error, BaseException) else None
+        message = str(error)
+        cursor = self._cursor_campaign_active_cursor
+        self._cursor_campaign_active_cursor = None
+        self._cursor_campaign_active_role = None
+        self._cursor_campaign_active_rule_index = None
+        if cursor is not None:
+            with suppress(BaseException):
+                _CURSOR_CLOSE(cursor)
+        if (
+            campaign_session is not None
+            and self._cursor_campaign_session is not None
+            and campaign_session is not self._cursor_campaign_session
+            and primary is None
+        ):
+            message = "BLR_CURSOR_CAMPAIGN_AUTHORITY: cursor campaign session drifted"
+        self._cursor_campaign_session = None
+        self._cursor_campaign_receipt = None
+        self._cursor_campaign_projection = None
+        self._cursor_campaign_state = "poisoned"
+        if self._state == "disposed":
+            if primary is not None:
+                raise primary
+            raise ValueError(message)
+        if primary is None:
+            self._poison(message)
+        try:
+            self._poison(message)
+        except BaseException:
+            raise primary from None
 
     def _abort_cursor_stage_transfer(
         self,
@@ -2982,6 +3226,15 @@ class SQLiteV1BaselineTempStage:
 
         if self._state == "disposed":
             return
+        self._cursor_campaign_session = None
+        self._cursor_campaign_receipt = None
+        self._cursor_campaign_projection = None
+        campaign_cursor = self._cursor_campaign_active_cursor
+        self._cursor_campaign_active_cursor = None
+        self._cursor_campaign_active_role = None
+        self._cursor_campaign_active_rule_index = None
+        if self._cursor_campaign_state == "active":
+            self._cursor_campaign_state = "poisoned"
         self._cursor_transfer_session = None
         self._cursor_transfer_receipt = None
         self._cursor_transfer_projection = None
@@ -2992,6 +3245,16 @@ class SQLiteV1BaselineTempStage:
         active_reader = self._ordered_handoff_reader
         cursor_close_failure: BaseException | None = None
         cursor_cleanup_message = "BLR_HANDOFF_CLEANUP: ordered TEMP stage cursor cleanup failed"
+        if campaign_cursor is not None:
+            try:
+                # B2 cursor ownership is package-private.  Dispose must not
+                # redispatch through a replaceable class-level close method.
+                _CURSOR_CLOSE(campaign_cursor)
+            except BaseException as error:
+                cursor_close_failure = error
+                cursor_cleanup_message = (
+                    "BLR_CURSOR_CAMPAIGN_CLEANUP: cursor campaign cleanup failed"
+                )
         if active_reader is not None:
             try:
                 active_reader._close_cursor_only()
@@ -3153,6 +3416,17 @@ class SQLiteV1BaselineTempStage:
             self._legacy_campaign_cursor = None
             with suppress(BaseException):
                 legacy_cursor.close()
+        cursor_campaign_cursor = self._cursor_campaign_active_cursor
+        self._cursor_campaign_active_cursor = None
+        self._cursor_campaign_active_role = None
+        self._cursor_campaign_active_rule_index = None
+        if cursor_campaign_cursor is not None:
+            with suppress(BaseException):
+                _CURSOR_CLOSE(cursor_campaign_cursor)
+        self._cursor_campaign_session = None
+        self._cursor_campaign_receipt = None
+        self._cursor_campaign_projection = None
+        self._cursor_campaign_state = "poisoned"
         self._state = "poisoned"
         self._cursor_transfer_state = "poisoned"
         self._cursor_transfer_session = None

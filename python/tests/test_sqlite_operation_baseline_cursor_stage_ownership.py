@@ -126,7 +126,10 @@ def test_complete_real_lifecycle_transfers_once_without_sql_epoch_or_change() ->
         _cleanup(connection, stage)
 
 
-def test_transfer_is_exact_registered_identity_and_registry_is_weak() -> None:
+@pytest.mark.parametrize("_b2_case", [None], ids=["b2:transfer-clone"])
+def test_transfer_is_exact_registered_identity_and_registry_is_weak(
+    _b2_case: None,
+) -> None:
     connection, _summary, stage, _identity, receipt = _prepared_fence()
     try:
         before = len(ownership._TRANSFERS)
@@ -202,7 +205,8 @@ def test_replaced_b0a_witness_is_rejected_before_stage_state() -> None:
         _cleanup(connection, stage)
 
 
-def test_equal_value_projection_clone_cannot_bind_the_stage() -> None:
+@pytest.mark.parametrize("_b2_case", [None], ids=["b2:projection-clone"])
+def test_equal_value_projection_clone_cannot_bind_the_stage(_b2_case: None) -> None:
     connection, summary, stage, identity, _receipt = _prepared_fence()
     try:
         cloned_identity = replace(identity)
@@ -229,6 +233,13 @@ def test_equal_value_projection_clone_cannot_bind_the_stage() -> None:
         "_checkpoint_campaign_completed",
         "_lease_lock_hold_campaign_completed",
         "_legacy_campaign_completed",
+    ],
+    ids=[
+        "ordered-handoff-incomplete",
+        "stream-record-campaign-incomplete",
+        "checkpoint-campaign-incomplete",
+        "lease-lock-hold-campaign-incomplete",
+        "b2:before-legacy-complete",
     ],
 )
 def test_each_incomplete_predecessor_campaign_burns_transfer(
