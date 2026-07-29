@@ -14524,3 +14524,172 @@ reader, closes exactly once, binds the fence and exact projection, and must be
 closed before any stage adoption. Baseline entries/header/sequence writes,
 four-receipt consumption, stage adoption, publication session, cursor rebind,
 rules 11/12, final audits, retirement and commit remain explicit nonclaims.
+
+### 31.37.30 Post-DDL publication reader lease and terminal-proof tranche (append-only execution plan, 2026-07-29)
+
+This tranche consumes only the authorization at the end of section 31.37.29.
+It implements the independent package-private reader that transfers the exact
+ordered B2 TEMP projection into privately retained canonical entries after the
+physical target catalog has been rebuilt and fenced. It does not edit or
+reinterpret any earlier plan line. It does not authorize a permanent baseline
+write, receipt consumption, stage adoption, cursor rebind, TEMP retirement or
+transaction commit.
+
+The reader source is one immutable, single-line, zero-parameter statement:
+
+`SELECT kind_rank, entry_kind, key_blob, state_blob FROM temp.ge_blr_stage ORDER BY kind_rank ASC, key_blob ASC`
+
+Its exact UTF-8 SHA-256 is
+`adae52750ecd70a75090b52de7d60763eea144c1383cf4739df9d8e8a6b2357f`.
+The connection layer selects this statement only from the closed-set internal
+kind `cursor-publication-post-ddl-baseline-source`. The outer reader recomputes
+the hash before prepare. Callers cannot provide SQL, parameters, a statement,
+an iterator, rows, a projection, hashes, counts or cleanup callbacks.
+
+The sole reader authority is a frozen null-prototype opaque lease registered
+in a private WeakMap. The lease is minted from exactly the live outer
+publication authority, its authentic migration-0002 receipt and its exact
+post-DDL physical-catalog fence. Everything else is derived from the private
+authority and pre-rebind receipt graph. In particular, the lease binds the
+real `SQLiteCursorExactProjectionReference` object retained by the B2 receipt;
+an equal projection-identity snapshot is not a substitute for that opaque
+reference.
+
+The lease binds all of the following identities and observations:
+
+- exact connection, outer authority, TEMP stage and stage-ownership transfer;
+- exact pre-rebind receipt projection identity and opaque projection reference;
+- authentic migration-0002 receipt and exact post-DDL catalog fence;
+- unchanged BEGIN EXCLUSIVE transaction lineage and read-proof epoch;
+- exact `total_changes` read watermark and all three outer-ledger dimensions;
+- exact source SQL, source SQL digest and zero-parameter contract;
+- prepare, execute, ownership-acquisition, fetch-attempt and close-attempt
+  counters as distinct observations; and
+- explicit negative authorities: no permanent-write power, no write-receipt
+  consumption and no stage-adoption receipt minting.
+
+Exactly five lifecycle labels exist: `minted-unused`, `reader-active`,
+`reader-closed`, `retired` and `poisoned`. The observable success path is
+`minted-unused -> reader-active -> reader-closed -> retired`.
+`reader-closed` is a synchronous intermediate state: downstream proof
+presentation accepts only `retired`, while future stage adoption additionally
+requires the same exact lease identity, one close attempt and a successful
+close. The lease itself is the terminal proof. No second terminal-proof token,
+serialized surrogate or caller-constructible snapshot is created.
+
+Prepare and ownership have a literal boundary. A prepare failure records no
+successful prepare and no close. An iterator-acquisition failure records the
+successful prepare but neither execute/ownership nor close. Ownership begins
+only after captured-native `iterate()` returns a real iterator. At that instant
+the implementation records execute and ownership once, enters
+`reader-active`, and registers the exact idempotent close callback with both
+the stage-ownership bridge and the TEMP stage's dedicated post-DDL cleanup
+slot.
+
+The new cleanup slot is independent from the already consumed B2 ordered-
+handoff cleanup. Direct stage disposal, stage poison, outer-authority poison
+and outer-authority retirement all encounter the new slot before TEMP cleanup.
+They may invoke the same callback through different nested paths, but the
+lease registry records the close attempt before native `return()` and makes
+every later invocation a no-op or a replay of the retained close error. A
+native iterator is therefore closed at most once and an owned iterator cannot
+survive TEMP disposal.
+
+Cancellation is deterministic. An invalid cancellation object is a
+non-poisoning presentation error. A valid already-cancelled signal is checked
+before prepare; the exact lease remains `minted-unused`, every reader counter
+remains zero and the same lease may be retried. Cancellation observed after
+ownership requires exactly one close attempt, cannot produce a terminal proof
+and poisons the graph. A second mint, a reentrant second open, execution replay
+after retirement and reuse after close are invariant failures that poison the
+exact graph without issuing a second reader SQL statement.
+
+Every fetched item must be an exact four-column SQLite row. Kind rank is a
+safe integer in the closed 0-through-11 range; entry kind is exact text and
+must match that rank; key and state are exact BLOBs within their frozen byte
+limits. Rank is monotonically increasing and keys within a rank are strictly
+increasing by unsigned byte comparison. Duplicate or reversed keys, an extra
+column, noncanonical JSON, invalid UTF-8, a kind/rank disagreement, an extra
+row or truncation is corruption.
+
+Each row is revalidated through `validateOperationBaselineEntryBytes`, decoded
+with the frozen canonical limits and appended to a fresh
+`OperationBaselineAccumulator`. Re-encoded key and state bytes must equal the
+SQLite BLOBs exactly. The completed accumulator must match the exact B2
+baseline ID, entry count, first entry hash, final entry hash, legacy-operation
+count and projection SHA-256. A successful derivation is retained for
+diagnostics even when subsequent cursor close fails, but canonical row objects
+are made available to the next private writer only after successful close,
+unchanged post-read watermarks and final retirement.
+
+The reader performs no DDL or DML. Before prepare and after close it reproves
+the live outer authority, exact post-DDL fence, unchanged lineage, epoch,
+`total_changes` and exact three-dimensional ledger. Mint, fetch, close and
+terminal-proof assertion do not advance logical-write sequence, fixed-
+statement count or affected-row watermark. The migration receipt and catalog
+fence remain unconsumed and reusable only within the same still-live graph.
+
+Failure precedence is literal:
+
+1. caller presentation and exact graph provenance are resolved before SQL;
+2. SQL/hash, fence, lineage and read-watermark invariants are resolved before
+   prepare;
+3. a row/fetch/decode/order/hash/projection primary failure outranks cleanup;
+4. after an otherwise valid read, native close failure outranks cancellation;
+5. cancellation after ownership outranks later TEMP or outer cleanup; and
+6. nested stage/outer cleanup never replaces an already selected primary.
+
+Close failure always records one attempted close with
+`closeSucceeded = false`, makes the lease ineligible as terminal proof,
+poisons the authority graph and requires rollback. A row primary plus close
+failure still throws the row primary while preserving the failed-close state.
+A cancellation plus close failure throws the close failure. A row primary,
+close failure and cancellation together still throw the row primary.
+
+Exact terminal-proof assertion is non-consuming and reusable before any
+misuse. It requires the same lease, authority, receipt and fence objects; one
+prepare, one execute, one ownership acquisition, one close attempt, successful
+close, retained canonical entries, a matching rederived projection, the exact
+opaque projection reference and a stage bridge in the terminal closed state.
+It then freshly reproves the post-DDL catalog fence. Executing the terminal
+lease again is not proof presentation: it is forbidden replay, poisons the
+graph and makes subsequent proof use inadmissible.
+
+Focused hostile evidence must cover at least:
+
+- successful reads with zero and nonzero legacy-operation counts;
+- exact SQL text, SHA-256, closed-set read kind and one prepare;
+- frozen null-prototype lease identity and authentic projection reference;
+- clone, structural snapshot, Proxy, revoked Proxy, substitution and cross-run
+  rejection without poisoning either untouched valid graph;
+- preownership cancellation followed by successful retry of the same lease;
+- prepare failure and iterator-acquisition failure with zero close attempts;
+- truncation/projection mismatch after ownership with one successful close;
+- row primary plus close failure, close-only failure, cancellation after
+  ownership, cancellation plus close failure and all-three precedence;
+- reentrant second open, second mint and replay after retirement poisoning;
+- terminal assertion before ownership, during ownership, after success and
+  after rollback/rebegin;
+- direct stage disposal during fetch with exactly one native close;
+- captured-native operation after hostile `StatementSync.prototype.iterate`
+  replacement; and
+- package-root negative-export checks for every reader capability and
+  intrinsic.
+
+The acceptance gate for this tranche is the reader-focused suite, combined
+reader/outer-authority/connection suite, complete SQLite package suite,
+workspace typecheck and lint, B3 schema/fixture/validator gates with
+`implementationClaim: false` and `activeManifestClaim: false`, source and
+package release-asset checks, `git diff --check`, append-only plan prefix
+verification and independent severity-zero static reviews. A durable review
+log records the exact commands and honest remaining nonclaims before commit.
+
+Passing this tranche authorizes exactly the baseline-entry publication receipt
+leaf. That successor must consume the private canonical entries from this
+exact terminal lease without another TEMP SELECT, execute the fixed one-
+prepare/E-run baseline-entry INSERT, advance the outer ledger from logical
+write one to two and mint one authentic non-consumed receipt. Baseline header,
+sequence zero, four-receipt atomic adoption, Python parity, the executable
+145-case hostile campaign, publication session, cursor rebind, validation
+rules 11/12, TEMP retirement, commit, manifest activation and release claims
+remain downstream work.

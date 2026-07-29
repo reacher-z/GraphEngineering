@@ -4,6 +4,13 @@ import { TextDecoder } from "node:util";
 
 import { canonicalSerialize } from "@graph-engineering/core";
 
+const bufferCompareIntrinsic = Buffer.compare;
+const bufferEqualsIntrinsic = Buffer.prototype.equals;
+const bufferFromIntrinsic = Buffer.from;
+const bufferToStringIntrinsic = Buffer.prototype.toString;
+const objectFreezeIntrinsic = Object.freeze;
+const reflectApplyIntrinsic = Reflect.apply;
+
 export const BASELINE_ID_DOMAIN = "graph-engineering/sqlite-operation-baseline-id/v1\0";
 export const BASELINE_ENTRY_DOMAIN = "graph-engineering/sqlite-operation-baseline-entry/v1\0";
 export const BASELINE_PROJECTION_DOMAIN =
@@ -22,7 +29,7 @@ export const MAX_BASELINE_KEY_BYTES = 4_096;
 export const MAX_BASELINE_STATE_BYTES = 2_097_152;
 export const MAX_BASELINE_POLICY_BYTES = 1_048_576;
 
-export const BASELINE_ENTRY_KINDS = Object.freeze([
+export const BASELINE_ENTRY_KINDS = objectFreezeIntrinsic([
   "schema-envelope",
   "migration-lineage",
   "stream-head",
@@ -39,7 +46,7 @@ export const BASELINE_ENTRY_KINDS = Object.freeze([
 
 export type OperationBaselineEntryKind = (typeof BASELINE_ENTRY_KINDS)[number];
 
-export const OPERATION_BASELINE_POLICY = Object.freeze({
+export const OPERATION_BASELINE_POLICY = objectFreezeIntrinsic({
   baselineFormatVersion: 1,
   canonicalEncoding: "graph-engineering/canonical-json/v1",
   cursorReplay: "independent-semantic-audit",
@@ -50,10 +57,10 @@ export const OPERATION_BASELINE_POLICY = Object.freeze({
   legacyRequestRecovery: false,
   maxEntryKeyBytes: MAX_BASELINE_KEY_BYTES,
   maxEntryStateBytes: MAX_BASELINE_STATE_BYTES,
-  payloadOmissions: Object.freeze(["checkpoint-value", "record-blob", "record-value"]),
+  payloadOmissions: objectFreezeIntrinsic(["checkpoint-value", "record-blob", "record-value"]),
   projectionHashDomain: BASELINE_PROJECTION_DOMAIN,
   replayStartsAtCommitSequence: 1,
-  sort: Object.freeze(["entry-kind-rank", "entry-key-utf8-bytes"]),
+  sort: objectFreezeIntrinsic(["entry-kind-rank", "entry-key-utf8-bytes"]),
 } as const);
 
 export interface OperationBaselineSourceEnvelope {
@@ -374,7 +381,7 @@ function validateCheckpointSummaryIdentity(
 
 function canonicalBytes(value: unknown, minimum: number, maximum: number, label: string): Buffer {
   let bytes: Buffer;
-  try { bytes = Buffer.from(canonicalSerialize(value), "utf8"); } catch { return invalid(label); }
+  try { bytes = bufferFromIntrinsic(canonicalSerialize(value), "utf8"); } catch { return invalid(label); }
   if (bytes.byteLength < minimum || bytes.byteLength > maximum) return invalid(`${label} byte length`);
   return bytes;
 }
@@ -415,11 +422,14 @@ export function encodeOperationBaselineSourceEnvelope(value: unknown): Buffer {
   integer(record, "sourceApplicationId", "source envelope", 1195724359, 1195724359);
   hash(record, "sourceDescriptorHash", "source envelope"); identifier(record, "sourceMigrationLineageId", "source envelope");
   hash(record, "sourceMigrationLineageSha256", "source envelope"); hash(record, "sourceSchemaIdentitySha256", "source envelope"); integer(record, "sourceUserVersion", "source envelope", 1, 1);
-  return Buffer.from(canonicalSerialize(record), "utf8");
+  return bufferFromIntrinsic(canonicalSerialize(record), "utf8");
 }
 
 export function createOperationBaselineId(value: unknown): string {
-  const envelope = JSON.parse(encodeOperationBaselineSourceEnvelope(value).toString("utf8")) as unknown;
+  const encoded = encodeOperationBaselineSourceEnvelope(value);
+  const envelope = JSON.parse(
+    reflectApplyIntrinsic(bufferToStringIntrinsic, encoded, ["utf8"]) as string,
+  ) as unknown;
   return `v2-${operationBaselineDomainHash(BASELINE_ID_DOMAIN, envelope)}`;
 }
 
@@ -459,7 +469,10 @@ export function validateOperationBaselineEntryBytes(
   const key = decodeOperationBaselineCanonicalBytes(keyBytes, MAX_BASELINE_KEY_BYTES);
   const state = decodeOperationBaselineCanonicalBytes(stateBytes, MAX_BASELINE_STATE_BYTES);
   const prepared = prepareOperationBaselineEntry({ entryKind, key, state });
-  if (!prepared.keyBytes.equals(keyBytes) || !prepared.stateBytes.equals(stateBytes)) {
+  if (!(reflectApplyIntrinsic(bufferEqualsIntrinsic, prepared.keyBytes, [keyBytes]) as boolean)
+      || !(reflectApplyIntrinsic(
+        bufferEqualsIntrinsic, prepared.stateBytes, [stateBytes],
+      ) as boolean)) {
     invalid("entry canonical bytes");
   }
 }
@@ -508,14 +521,14 @@ function immutableCanonicalEntry(
     ordinal,
     previousEntryHash,
   });
-  const keyBytes = Buffer.from(entry.keyBytes);
-  const stateBytes = Buffer.from(entry.stateBytes);
-  return Object.freeze({
+  const keyBytes = bufferFromIntrinsic(entry.keyBytes);
+  const stateBytes = bufferFromIntrinsic(entry.stateBytes);
+  return objectFreezeIntrinsic({
     baselineId,
     entryKind: entry.entryKind,
     ordinal,
-    get keyBytes(): Buffer { return Buffer.from(keyBytes); },
-    get stateBytes(): Buffer { return Buffer.from(stateBytes); },
+    get keyBytes(): Buffer { return bufferFromIntrinsic(keyBytes); },
+    get stateBytes(): Buffer { return bufferFromIntrinsic(stateBytes); },
     previousEntryHash,
     entryHash,
   });
@@ -575,7 +588,7 @@ export class OperationBaselineAccumulator {
     if (this.#previousRank !== undefined) {
       if (prepared.rank < this.#previousRank) invalid("entry kind order");
       if (prepared.rank === this.#previousRank) {
-        const order = Buffer.compare(prepared.keyBytes, this.#previousKeyBytes!);
+        const order = bufferCompareIntrinsic(prepared.keyBytes, this.#previousKeyBytes!);
         if (order === 0) invalid("duplicate entry key");
         if (order < 0) invalid("entry key order");
       }
@@ -589,7 +602,7 @@ export class OperationBaselineAccumulator {
       this.#acceptedCount,
       previousEntryHash,
     );
-    const nextKeyBytes = Buffer.from(prepared.keyBytes);
+    const nextKeyBytes = bufferFromIntrinsic(prepared.keyBytes);
 
     this.#acceptedCount += 1;
     this.#legacyCount += prepared.entryKind === "legacy-operation" ? 1 : 0;
@@ -603,7 +616,7 @@ export class OperationBaselineAccumulator {
   finish(): OperationBaselineProjectionIdentity {
     if (this.#sealedIdentity !== undefined) return this.#sealedIdentity;
     if (this.#acceptedCount !== this.#expectedEntryCount) invalid("entry count truncation");
-    const identity = Object.freeze({
+    const identity = objectFreezeIntrinsic({
       baselineId: this.#baselineId,
       entryCount: this.#acceptedCount,
       firstEntryHash: this.#firstHash,
@@ -629,7 +642,8 @@ export function buildOperationBaseline(
   validateBaselineId(baselineId);
   if (!Array.isArray(inputs) || inputs.length > Number.MAX_SAFE_INTEGER) return invalid("entries");
   const prepared = inputs.map(prepareOperationBaselineEntry)
-    .sort((left, right) => left.rank - right.rank || Buffer.compare(left.keyBytes, right.keyBytes));
+    .sort((left, right) => left.rank - right.rank
+      || bufferCompareIntrinsic(left.keyBytes, right.keyBytes));
 
   // Only clean, detached canonical values reach the accumulator. Re-encoding
   // them there intentionally proves the materializing and streaming paths are
@@ -641,5 +655,5 @@ export function buildOperationBaseline(
     state: entry.state,
   }));
   const identity = accumulator.finish();
-  return Object.freeze({ ...identity, entries: Object.freeze(entries) });
+  return objectFreezeIntrinsic({ ...identity, entries: objectFreezeIntrinsic(entries) });
 }

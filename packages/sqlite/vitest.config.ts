@@ -13,4 +13,9 @@ export default defineConfig({
       ),
     },
   },
+  test: {
+    // Full-package runs contend across several real-SQLite integration files.
+    // Keep the timeout above the single-file latency without disabling it.
+    testTimeout: 15_000,
+  },
 });

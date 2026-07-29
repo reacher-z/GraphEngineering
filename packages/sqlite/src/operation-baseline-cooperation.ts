@@ -151,6 +151,12 @@ export const SQLITE_BASELINE_ASSERT_CURSOR_OUTER_PUBLICATION_OWNED = Symbol(
 export const SQLITE_BASELINE_ASSERT_CURSOR_OUTER_PUBLICATION_ACTIVE = Symbol(
   "SQLiteBaselineTempStage.assertCursorOuterPublicationActive",
 );
+export const SQLITE_BASELINE_REGISTER_CURSOR_POST_DDL_READER_CLEANUP = Symbol(
+  "SQLiteBaselineTempStage.registerCursorPostDdlReaderCleanup",
+);
+export const SQLITE_BASELINE_CLEAR_CURSOR_POST_DDL_READER_CLEANUP = Symbol(
+  "SQLiteBaselineTempStage.clearCursorPostDdlReaderCleanup",
+);
 export const SQLITE_BASELINE_RETIRE_CURSOR_OUTER_PUBLICATION = Symbol(
   "SQLiteBaselineTempStage.retireCursorOuterPublication",
 );

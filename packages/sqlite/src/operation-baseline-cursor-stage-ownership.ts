@@ -16,6 +16,7 @@ import {
   beginSQLiteBaselineCursorPreRebindIntrinsic,
   completeSQLiteBaselineCursorPreRebindIntrinsic,
   createSQLiteBaselineCursorSealTempTableIntrinsic,
+  clearSQLiteBaselineCursorPostDdlReaderCleanupIntrinsic,
   diagnoseSQLiteBaselineCursorPreRebindIntrinsic,
   fenceSQLiteBaselineCursorStageTransferIntrinsic,
   fenceSQLiteBaselineCursorPreRebindIntrinsic,
@@ -23,6 +24,7 @@ import {
   poisonSQLiteBaselineCursorOuterPublicationIntrinsic,
   prepareSQLiteBaselineCursorOuterPublicationIntrinsic,
   publishSQLiteBaselineCursorOuterPublicationIntrinsic,
+  registerSQLiteBaselineCursorPostDdlReaderCleanupIntrinsic,
   registerSQLiteBaselineCursorPreRebindCleanupIntrinsic,
   retireSQLiteBaselineCursorOuterPublicationIntrinsic,
 } from "./operation-baseline-stage.js";
@@ -64,6 +66,9 @@ interface TransferState {
   readonly preTransferWitness: SQLiteCursorPreRebindConnectionProvenance;
   readonly projectionIdentity: OperationBaselineProjectionIdentity;
   readonly receipt: SQLiteCursorPreRebindReceipt;
+  postDdlReaderCleanup: (() => void) | undefined;
+  postDdlReaderLease: object | undefined;
+  postDdlReaderLifecycle: "unused" | "active" | "closed" | "poisoned";
   readonly session: object;
   readonly stage: SQLiteBaselineTempStage;
 }
@@ -189,6 +194,9 @@ export function beginSQLiteCursorStageOwnershipTransfer(
       outerTail: undefined,
       preTransferWitness,
       projectionIdentity: receiptWitness.projectionIdentity,
+      postDdlReaderCleanup: undefined,
+      postDdlReaderLease: undefined,
+      postDdlReaderLifecycle: "unused",
       receipt,
       session,
       stage,
@@ -531,6 +539,90 @@ export function assertSQLiteCursorStageOwnershipOuterPublicationOwnedIntrinsic(
   return transfer;
 }
 
+/** Register the exact post-DDL reader only after its native iterator exists. */
+export function registerSQLiteCursorStageOwnershipPostDdlReaderIntrinsic(
+  transfer: SQLiteCursorStageOwnershipTransfer,
+  authority: object,
+  lease: object,
+  cleanup: () => void,
+): void {
+  const state = readTransferState(transfer);
+  checkedOpaqueAuthority(authority);
+  if (state === undefined || state.lifecycle !== "outer-publication-owned"
+      || state.outerAuthority !== authority
+      || lease === null || typeof lease !== "object"
+      || typeof cleanup !== "function"
+      || state.postDdlReaderLifecycle !== "unused"
+      || state.postDdlReaderLease !== undefined
+      || state.postDdlReaderCleanup !== undefined) {
+    return invalid("SQLite post-DDL publication reader ownership is invalid");
+  }
+  registerSQLiteBaselineCursorPostDdlReaderCleanupIntrinsic(
+    state.stage, authority, lease, cleanup,
+  );
+  state.postDdlReaderLease = lease;
+  state.postDdlReaderCleanup = cleanup;
+  state.postDdlReaderLifecycle = "active";
+}
+
+/** Clear active cursor ownership after the one required close attempt. */
+export function completeSQLiteCursorStageOwnershipPostDdlReaderIntrinsic(
+  transfer: SQLiteCursorStageOwnershipTransfer,
+  authority: object,
+  lease: object,
+  closeSucceeded: boolean,
+): void {
+  const state = readTransferState(transfer);
+  if (state === undefined || state.lifecycle !== "outer-publication-owned"
+      || state.outerAuthority !== authority
+      || state.postDdlReaderLifecycle !== "active"
+      || state.postDdlReaderLease !== lease
+      || state.postDdlReaderCleanup === undefined) {
+    return invalid("SQLite post-DDL publication reader ownership is invalid");
+  }
+  clearSQLiteBaselineCursorPostDdlReaderCleanupIntrinsic(
+    state.stage, authority, lease,
+  );
+  state.postDdlReaderCleanup = undefined;
+  state.postDdlReaderLifecycle = closeSucceeded ? "closed" : "poisoned";
+}
+
+/** Future adoption gate: an exact lease must be closed and have no cleanup owner. */
+export function assertSQLiteCursorStageOwnershipPostDdlReaderTerminalIntrinsic(
+  transfer: SQLiteCursorStageOwnershipTransfer,
+  authority: object,
+  lease: object,
+): void {
+  const state = readTransferState(transfer);
+  if (state === undefined || state.lifecycle !== "outer-publication-owned"
+      || state.outerAuthority !== authority
+      || state.postDdlReaderLifecycle !== "closed"
+      || state.postDdlReaderLease !== lease
+      || state.postDdlReaderCleanup !== undefined) {
+    return invalid("SQLite post-DDL publication reader is not terminal");
+  }
+}
+
+function closeActivePostDdlReader(state: TransferState): void {
+  const cleanup = state.postDdlReaderCleanup;
+  state.postDdlReaderCleanup = undefined;
+  if (state.postDdlReaderLifecycle === "active") {
+    state.postDdlReaderLifecycle = "poisoned";
+    try {
+      clearSQLiteBaselineCursorPostDdlReaderCleanupIntrinsic(
+        state.stage, state.outerAuthority!, state.postDdlReaderLease!,
+      );
+    } catch {
+      // The close callback below is still mandatory and idempotent.
+    }
+    try {
+      cleanup?.();
+    } catch {
+      // Outer retirement/poison remains authoritative after the close attempt.
+    }
+  }
+}
+
 /** Retire the exact inactive/active pair without SQL or the pre-0002 fence. */
 export function retireSQLiteCursorStageOwnershipOuterPublicationIntrinsic(
   transfer: SQLiteCursorStageOwnershipTransfer,
@@ -547,6 +639,7 @@ export function retireSQLiteCursorStageOwnershipOuterPublicationIntrinsic(
       weakMapDeleteIntrinsic, OUTER_PUBLICATION_TAILS, [state.outerTail as object],
     );
   }
+  closeActivePostDdlReader(state);
   retireSQLiteBaselineCursorOuterPublicationIntrinsic(state.stage);
   state.lifecycle = "retired";
 }
@@ -565,6 +658,7 @@ export function poisonSQLiteCursorStageOwnershipOuterPublicationIntrinsic(
     return invalid("SQLite cursor outer publication authority is invalid");
   }
   state.lifecycle = "poisoned";
+  closeActivePostDdlReader(state);
   if (state.outerTail !== undefined) {
     reflectApplyIntrinsic(
       weakMapDeleteIntrinsic, OUTER_PUBLICATION_TAILS, [state.outerTail as object],

@@ -52,6 +52,7 @@ import {
   SQLITE_BASELINE_ABORT_CURSOR_PRE_REBIND,
   SQLITE_BASELINE_ASSERT_CURSOR_OUTER_PUBLICATION_OWNED,
   SQLITE_BASELINE_ASSERT_CURSOR_OUTER_PUBLICATION_ACTIVE,
+  SQLITE_BASELINE_CLEAR_CURSOR_POST_DDL_READER_CLEANUP,
   SQLITE_BASELINE_ASSERT_CURSOR_PRE_REBIND_COMPLETE,
   SQLITE_BASELINE_FENCE_ORDERED_HANDOFF,
   SQLITE_BASELINE_FENCE_CHECKPOINT_CAMPAIGN,
@@ -64,6 +65,7 @@ import {
   SQLITE_BASELINE_POISON_CURSOR_OUTER_PUBLICATION,
   SQLITE_BASELINE_PREPARE_CURSOR_OUTER_PUBLICATION,
   SQLITE_BASELINE_PUBLISH_CURSOR_OUTER_PUBLICATION,
+  SQLITE_BASELINE_REGISTER_CURSOR_POST_DDL_READER_CLEANUP,
   SQLITE_BASELINE_RETIRE_CURSOR_OUTER_PUBLICATION,
   SQLITE_BASELINE_REGISTER_ORDERED_HANDOFF_CLEANUP,
   SQLITE_BASELINE_REGISTER_CHECKPOINT_CLEANUP,
@@ -1486,6 +1488,10 @@ export class SQLiteBaselineTempStage {
   #cursorOuterPublicationEpoch: bigint | undefined;
   #cursorOuterPublicationLineage: SQLiteConnectionTransactionLineage | undefined;
   #cursorOuterPublicationAllowedTotalChanges: number | undefined;
+  #cursorPostDdlReaderState: "unused" | "active" | "closed" | "poisoned" = "unused";
+  #cursorPostDdlReaderAuthority: object | undefined;
+  #cursorPostDdlReaderLease: object | undefined;
+  #cursorPostDdlReaderCleanup: (() => void) | undefined;
   readonly #mainOperationsCatalogIdentity: SQLiteMainOperationsCatalogIdentity;
   #cooperativeWritesFinished = false;
 
@@ -2766,6 +2772,44 @@ export class SQLiteBaselineTempStage {
     }
   }
 
+  /** Own the native reader cleanup independently of the earlier B2 handoff. */
+  [SQLITE_BASELINE_REGISTER_CURSOR_POST_DDL_READER_CLEANUP](
+    authority: object,
+    lease: object,
+    cleanup: () => void,
+  ): void {
+    if (this.#state !== "open"
+        || this.#cursorOuterPublicationState !== "published"
+        || this.#cursorOuterPublicationAuthority !== authority
+        || lease === null || typeof lease !== "object"
+        || typeof cleanup !== "function"
+        || this.#cursorPostDdlReaderState !== "unused"
+        || this.#cursorPostDdlReaderAuthority !== undefined
+        || this.#cursorPostDdlReaderLease !== undefined
+        || this.#cursorPostDdlReaderCleanup !== undefined) {
+      return invalid("SQLite cursor post-DDL reader cleanup owner is invalid");
+    }
+    this.#cursorPostDdlReaderAuthority = authority;
+    this.#cursorPostDdlReaderLease = lease;
+    this.#cursorPostDdlReaderCleanup = cleanup;
+    this.#cursorPostDdlReaderState = "active";
+  }
+
+  /** Clear the stage cleanup only after the exact native reader was closed. */
+  [SQLITE_BASELINE_CLEAR_CURSOR_POST_DDL_READER_CLEANUP](
+    authority: object,
+    lease: object,
+  ): void {
+    if (this.#cursorPostDdlReaderState !== "active"
+        || this.#cursorPostDdlReaderAuthority !== authority
+        || this.#cursorPostDdlReaderLease !== lease
+        || this.#cursorPostDdlReaderCleanup === undefined) {
+      return invalid("SQLite cursor post-DDL reader cleanup owner is invalid");
+    }
+    this.#cursorPostDdlReaderCleanup = undefined;
+    this.#cursorPostDdlReaderState = "closed";
+  }
+
   /** Atomic lifecycle hook; exact-pair validation is completed by the bridge. */
   [SQLITE_BASELINE_RETIRE_CURSOR_OUTER_PUBLICATION](): void {
     this.#cursorOuterPublicationState = "retired";
@@ -2939,6 +2983,16 @@ export class SQLiteBaselineTempStage {
     if (this.#state === "disposed") return;
     this.#pendingOwnedWrite = undefined;
     let handoffCleanupFailure: unknown;
+    if (this.#cursorPostDdlReaderState === "active") {
+      const cleanup = this.#cursorPostDdlReaderCleanup;
+      this.#cursorPostDdlReaderCleanup = undefined;
+      this.#cursorPostDdlReaderState = "poisoned";
+      try {
+        cleanup?.();
+      } catch (error) {
+        handoffCleanupFailure = error;
+      }
+    }
     if (this.#orderedHandoffState === "active") {
       try {
         this.#orderedHandoffCleanup?.();
@@ -3017,6 +3071,8 @@ export class SQLiteBaselineTempStage {
     this.#cursorOuterPublicationEpoch = undefined;
     this.#cursorOuterPublicationLineage = undefined;
     this.#cursorOuterPublicationAllowedTotalChanges = undefined;
+    this.#cursorPostDdlReaderAuthority = undefined;
+    this.#cursorPostDdlReaderLease = undefined;
     if (!this.#connection.isOpen) {
       this.#state = "disposed";
       deleteActiveStage(this.#connection);
@@ -3299,6 +3355,16 @@ export class SQLiteBaselineTempStage {
   }
 
   #poison(message: string): never {
+    if (this.#cursorPostDdlReaderState === "active") {
+      const cleanup = this.#cursorPostDdlReaderCleanup;
+      this.#cursorPostDdlReaderCleanup = undefined;
+      this.#cursorPostDdlReaderState = "poisoned";
+      try {
+        cleanup?.();
+      } catch {
+        // The stage invariant failure remains the authoritative error.
+      }
+    }
     this.#pendingOwnedWrite = undefined;
     this.#orderedHandoffCleanup = undefined;
     this.#orderedHandoffSession = undefined;
@@ -3338,6 +3404,8 @@ export class SQLiteBaselineTempStage {
     this.#cursorOuterPublicationEpoch = undefined;
     this.#cursorOuterPublicationLineage = undefined;
     this.#cursorOuterPublicationAllowedTotalChanges = undefined;
+    this.#cursorPostDdlReaderAuthority = undefined;
+    this.#cursorPostDdlReaderLease = undefined;
     // Disposal is an irreversible public lifecycle state.  A stale campaign
     // may still discover its invalidated private authority and fail closed,
     // but that later failure must not rewrite an already completed disposal.
@@ -3382,6 +3450,10 @@ const sqliteBaselineAssertCursorOuterPublicationOwnedIntrinsic =
   SQLiteBaselineTempStage.prototype[SQLITE_BASELINE_ASSERT_CURSOR_OUTER_PUBLICATION_OWNED];
 const sqliteBaselineAssertCursorOuterPublicationActiveIntrinsic =
   SQLiteBaselineTempStage.prototype[SQLITE_BASELINE_ASSERT_CURSOR_OUTER_PUBLICATION_ACTIVE];
+const sqliteBaselineRegisterCursorPostDdlReaderCleanupIntrinsic =
+  SQLiteBaselineTempStage.prototype[SQLITE_BASELINE_REGISTER_CURSOR_POST_DDL_READER_CLEANUP];
+const sqliteBaselineClearCursorPostDdlReaderCleanupIntrinsic =
+  SQLiteBaselineTempStage.prototype[SQLITE_BASELINE_CLEAR_CURSOR_POST_DDL_READER_CLEANUP];
 const sqliteBaselineRetireCursorOuterPublicationIntrinsic =
   SQLiteBaselineTempStage.prototype[SQLITE_BASELINE_RETIRE_CURSOR_OUTER_PUBLICATION];
 const sqliteBaselinePoisonCursorOuterPublicationIntrinsic =
@@ -3556,6 +3628,27 @@ export function assertSQLiteBaselineCursorOuterPublicationActiveIntrinsic(
 ): void {
   Reflect.apply(sqliteBaselineAssertCursorOuterPublicationActiveIntrinsic, stage, [
     connection, receipt, projectionIdentity, transferSession, authority,
+  ]);
+}
+
+export function registerSQLiteBaselineCursorPostDdlReaderCleanupIntrinsic(
+  stage: SQLiteBaselineTempStage,
+  authority: object,
+  lease: object,
+  cleanup: () => void,
+): void {
+  reflectApplyIntrinsic(sqliteBaselineRegisterCursorPostDdlReaderCleanupIntrinsic, stage, [
+    authority, lease, cleanup,
+  ]);
+}
+
+export function clearSQLiteBaselineCursorPostDdlReaderCleanupIntrinsic(
+  stage: SQLiteBaselineTempStage,
+  authority: object,
+  lease: object,
+): void {
+  reflectApplyIntrinsic(sqliteBaselineClearCursorPostDdlReaderCleanupIntrinsic, stage, [
+    authority, lease,
   ]);
 }
 

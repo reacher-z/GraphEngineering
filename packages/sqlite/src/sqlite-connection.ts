@@ -135,6 +135,8 @@ export const SQLITE_CURSOR_PUBLICATION_CATALOG_NATIVE_QUERY_INTRINSIC =
   "SELECT type, name, tbl_name AS tableName, sql FROM main.sqlite_schema WHERE lower(name) GLOB 'ge_cycle_*' AND sql IS NOT NULL ORDER BY type COLLATE BINARY, name COLLATE BINARY" as const;
 export const SQLITE_CURSOR_PUBLICATION_METADATA_NATIVE_QUERY_INTRINSIC =
   "SELECT application_id, user_version FROM main.pragma_application_id(), main.pragma_user_version()" as const;
+export const SQLITE_CURSOR_POST_DDL_BASELINE_SOURCE_QUERY_INTRINSIC =
+  "SELECT kind_rank, entry_kind, key_blob, state_blob FROM temp.ge_blr_stage ORDER BY kind_rank ASC, key_blob ASC" as const;
 export const SQLITE_CURSOR_MIGRATION_0002_TEMP_CONFLICT_QUERY_INTRINSIC =
   "SELECT count(*) FROM temp.sqlite_schema WHERE lower(name) IN ("
   + "'ge_cycle_schema','ge_cycle_schema_v1','ge_cycle_operations',"
@@ -144,6 +146,7 @@ export const SQLITE_CURSOR_MIGRATION_0002_TEMP_CONFLICT_QUERY_INTRINSIC =
   + "'ge_cycle_operation_baseline_entries_key_uq',"
   + "'ge_cycle_operation_baseline_entries_hash_uq','ge_cycle_operation_sequence')";
 export type SQLiteConnectionNativeReadKind =
+  | "cursor-publication-post-ddl-baseline-source"
   | "cursor-publication-target-catalog"
   | "cursor-publication-target-metadata"
   | "cursor-publication-migration-0002-temp-conflicts";
@@ -787,7 +790,9 @@ export class SQLiteConnection {
     operation: CycleStoreProviderOperation,
   ): StatementSync {
     this.#assertOpen(operation);
-    const sql = kind === "cursor-publication-target-catalog"
+    const sql = kind === "cursor-publication-post-ddl-baseline-source"
+      ? SQLITE_CURSOR_POST_DDL_BASELINE_SOURCE_QUERY_INTRINSIC
+      : kind === "cursor-publication-target-catalog"
       ? SQLITE_CURSOR_PUBLICATION_CATALOG_NATIVE_QUERY_INTRINSIC
       : kind === "cursor-publication-target-metadata"
         ? SQLITE_CURSOR_PUBLICATION_METADATA_NATIVE_QUERY_INTRINSIC

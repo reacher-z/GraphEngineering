@@ -1,3 +1,6 @@
+import { Buffer } from "node:buffer";
+import { createHash } from "node:crypto";
+
 import { CycleStoreProviderError } from "@graph-engineering/runtime";
 
 import {
@@ -11,28 +14,46 @@ import {
 } from "./cursor-publication-clock-authority.js";
 import {
   assertSQLiteCursorPreRebindReceiptProvenance,
+  type SQLiteCursorExactProjectionReference,
   type SQLiteCursorPreRebindReceipt,
 } from "./operation-baseline-cursor-ownership.js";
 import {
   assertSQLiteCursorStageOwnershipOuterPublicationOwnedIntrinsic,
   assertSQLiteCursorStageOwnershipOuterPublicationPreparedIntrinsic,
+  assertSQLiteCursorStageOwnershipPostDdlReaderTerminalIntrinsic,
   assertSQLiteCursorStageOwnershipPreRebindCompleteIntrinsic,
+  completeSQLiteCursorStageOwnershipPostDdlReaderIntrinsic,
   mintSQLiteCursorStageOwnershipOuterPublicationAuthorityIntrinsic,
   poisonSQLiteCursorStageOwnershipOuterPublicationIntrinsic,
   publishSQLiteCursorStageOwnershipOuterPublicationIntrinsic,
+  registerSQLiteCursorStageOwnershipPostDdlReaderIntrinsic,
   retireSQLiteCursorStageOwnershipOuterPublicationIntrinsic,
   type SQLiteCursorStageOwnershipOuterPublicationTail,
   type SQLiteCursorStageOwnershipTransfer,
 } from "./operation-baseline-cursor-stage-ownership.js";
-import type { OperationBaselineProjectionIdentity } from "./operation-baseline.js";
+import {
+  BASELINE_ENTRY_KINDS,
+  MAX_BASELINE_KEY_BYTES,
+  MAX_BASELINE_STATE_BYTES,
+  OperationBaselineAccumulator,
+  decodeOperationBaselineCanonicalBytes,
+  validateOperationBaselineEntryBytes,
+  type CanonicalOperationBaselineEntry,
+  type OperationBaselineEntryKind,
+  type OperationBaselineProjectionIdentity,
+} from "./operation-baseline.js";
 import { SQLiteBaselineTempStage } from "./operation-baseline-stage.js";
 import {
   SQLiteConnection,
+  SQLITE_CURSOR_POST_DDL_BASELINE_SOURCE_QUERY_INTRINSIC,
   beginSQLiteConnectionMigration0002ExecutionIntrinsic,
   executeNextSQLiteConnectionMigration0002StatementIntrinsic,
   getSQLiteStatementNativeIntrinsic,
+  iterateSQLiteStatementNativeIntrinsic,
+  nextSQLiteStatementIteratorNativeIntrinsic,
   prepareSQLiteConnectionCursorPublicationReadIntrinsic,
   readSQLiteConnectionMigration0002ExecutionSnapshotIntrinsic,
+  returnSQLiteStatementIteratorNativeIntrinsic,
   type SQLiteConnectionTransactionLineage,
   readSQLiteConnectionOwnerSnapshot,
   readSQLiteConnectionTotalChangesSnapshot,
@@ -62,7 +83,7 @@ import {
   readValidatedSQLiteCursorPublicationTargetCatalogObservationIntrinsic,
   type SQLiteCursorPublicationTargetCatalogSnapshot,
 } from "./cursor-publication-target-catalog.js";
-import { sqliteRow, sqliteSafeInteger } from "./sqlite-codec.js";
+import { sqliteBlob, sqliteRow, sqliteSafeInteger, sqliteText } from "./sqlite-codec.js";
 import { translateSQLiteError } from "./sqlite-errors.js";
 
 const OPERATION = "inspect-schema" as const;
@@ -71,6 +92,19 @@ const objectCreateIntrinsic = Object.create;
 const reflectApplyIntrinsic = Reflect.apply;
 const numberIsSafeIntegerIntrinsic = Number.isSafeInteger;
 const maximumSafeIntegerIntrinsic = Number.MAX_SAFE_INTEGER;
+const bufferCompareIntrinsic = Buffer.compare;
+const bufferFromIntrinsic = Buffer.from;
+const createHashIntrinsic = createHash;
+const objectDefinePropertyIntrinsic = Object.defineProperty;
+const operationBaselineAccumulatorAppendIntrinsic =
+  OperationBaselineAccumulator.prototype.append;
+const operationBaselineAccumulatorFinishIntrinsic =
+  OperationBaselineAccumulator.prototype.finish;
+
+export const SQLITE_CURSOR_POST_DDL_PUBLICATION_READER_SOURCE_SQL =
+  SQLITE_CURSOR_POST_DDL_BASELINE_SOURCE_QUERY_INTRINSIC;
+export const SQLITE_CURSOR_POST_DDL_PUBLICATION_READER_SOURCE_SQL_SHA256 =
+  "adae52750ecd70a75090b52de7d60763eea144c1383cf4739df9d8e8a6b2357f" as const;
 
 export const SQLITE_CURSOR_PUBLICATION_TARGET = objectFreezeIntrinsic({
   applicationId: 1_195_724_359,
@@ -188,12 +222,59 @@ export interface SQLiteCursorPostDdlCatalogFenceSnapshot {
   readonly userVersion: 2;
 }
 
+export interface SQLiteCursorPostDdlPublicationReaderLease {
+  readonly __sqliteCursorPostDdlPublicationReaderLease: never;
+}
+
+export type SQLiteCursorPostDdlPublicationReaderLifecycle =
+  | "minted-unused"
+  | "reader-active"
+  | "reader-closed"
+  | "retired"
+  | "poisoned";
+
+export interface SQLiteCursorPostDdlPublicationReaderLeaseSnapshot {
+  readonly authority: SQLiteCursorOuterPublicationAuthority;
+  readonly closeAttemptCount: 0 | 1;
+  readonly closeSucceeded: boolean;
+  readonly connection: SQLiteConnection;
+  readonly consumesAnyWriteReceipt: false;
+  readonly readProofEpoch: bigint;
+  readonly executeCount: 0 | 1;
+  readonly fetchCount: number;
+  readonly lifecycle: SQLiteCursorPostDdlPublicationReaderLifecycle;
+  readonly mayMintStageAdoptionReceipt: false;
+  readonly migration0002Receipt: SQLiteMigration0002CatalogRebuildReceipt;
+  readonly mintCount: 1;
+  readonly outerLedgerReadWatermark: SQLiteCursorOuterPublicationLedgerSnapshot;
+  readonly ownershipAcquisitionCount: 0 | 1;
+  readonly permanentWriteAuthority: false;
+  readonly postDdlCatalogFence: SQLiteCursorPostDdlCatalogFence;
+  readonly prepareCount: 0 | 1;
+  readonly projectionIdentity: OperationBaselineProjectionIdentity;
+  readonly projectionReference: SQLiteCursorExactProjectionReference;
+  readonly rederivedEntryCount: number | undefined;
+  readonly rederivedFinalEntryHash: string | undefined;
+  readonly rederivedFirstEntryHash: string | undefined;
+  readonly rederivedLegacyOperationCount: number | undefined;
+  readonly rederivedProjectionSha256: string | undefined;
+  readonly sourceReadSql: typeof SQLITE_CURSOR_POST_DDL_PUBLICATION_READER_SOURCE_SQL;
+  readonly sourceReadSqlSha256:
+    typeof SQLITE_CURSOR_POST_DDL_PUBLICATION_READER_SOURCE_SQL_SHA256;
+  readonly stage: SQLiteBaselineTempStage;
+  readonly totalChangesReadWatermark: number;
+  readonly transactionLineage: SQLiteConnectionTransactionLineage;
+  readonly transactionEpoch: bigint;
+  readonly transfer: SQLiteCursorStageOwnershipTransfer;
+}
+
 export interface SQLiteCursorOuterPublicationAuthoritySnapshot {
   readonly lifecycle: SQLiteCursorOuterPublicationAuthorityLifecycle;
   readonly connection: SQLiteConnection;
   readonly stage: SQLiteBaselineTempStage;
   readonly receipt: SQLiteCursorPreRebindReceipt;
   readonly projectionIdentity: OperationBaselineProjectionIdentity;
+  readonly projectionReference: SQLiteCursorExactProjectionReference;
   readonly transfer: SQLiteCursorStageOwnershipTransfer;
   readonly migrationLockCapability: SQLiteCursorMigrationLockCapability;
   readonly providerClockCapability: SQLiteCursorProviderClockCapability;
@@ -214,6 +295,10 @@ export interface SQLiteCursorOuterPublicationAuthoritySnapshot {
   readonly migration0002Receipt: SQLiteMigration0002CatalogRebuildReceipt | undefined;
   readonly postDdlCatalogFence: SQLiteCursorPostDdlCatalogFence | undefined;
   readonly postDdlCatalogFenceMintCount: 0 | 1;
+  readonly postDdlPublicationReaderLease:
+    SQLiteCursorPostDdlPublicationReaderLease | undefined;
+  readonly postDdlPublicationReaderLeaseCloseCount: 0 | 1;
+  readonly postDdlPublicationReaderLeaseMintCount: 0 | 1;
   readonly writePhase: SQLiteCursorOuterPublicationWritePhase;
 }
 
@@ -222,6 +307,7 @@ interface AuthorityState {
   readonly stage: SQLiteBaselineTempStage;
   readonly receipt: SQLiteCursorPreRebindReceipt;
   readonly projectionIdentity: OperationBaselineProjectionIdentity;
+  readonly projectionReference: SQLiteCursorExactProjectionReference;
   readonly transfer: SQLiteCursorStageOwnershipTransfer;
   readonly migrationLockCapability: SQLiteCursorMigrationLockCapability;
   readonly providerClockCapability: SQLiteCursorProviderClockCapability;
@@ -245,6 +331,9 @@ interface AuthorityState {
   migration0002Receipt: SQLiteMigration0002CatalogRebuildReceipt | undefined;
   postDdlCatalogFence: SQLiteCursorPostDdlCatalogFence | undefined;
   postDdlCatalogFenceMintCount: 0 | 1;
+  postDdlPublicationReaderLease: SQLiteCursorPostDdlPublicationReaderLease | undefined;
+  postDdlPublicationReaderLeaseCloseCount: 0 | 1;
+  postDdlPublicationReaderLeaseMintCount: 0 | 1;
   writePhase: SQLiteCursorOuterPublicationWritePhase;
 }
 
@@ -265,6 +354,30 @@ interface PostDdlCatalogFenceState {
   readonly snapshot: SQLiteCursorPostDdlCatalogFenceSnapshot;
 }
 
+interface PostDdlPublicationReaderLeaseState {
+  readonly authority: SQLiteCursorOuterPublicationAuthority;
+  closeAttemptCount: 0 | 1;
+  closeSucceeded: boolean;
+  readonly connection: SQLiteConnection;
+  executeCount: 0 | 1;
+  readonly fence: SQLiteCursorPostDdlCatalogFence;
+  fetchCount: number;
+  lifecycle: SQLiteCursorPostDdlPublicationReaderLifecycle;
+  readonly migration0002Receipt: SQLiteMigration0002CatalogRebuildReceipt;
+  readonly outerLedgerReadWatermark: SQLiteCursorOuterPublicationLedgerSnapshot;
+  ownershipAcquisitionCount: 0 | 1;
+  prepareCount: 0 | 1;
+  readonly projectionIdentity: OperationBaselineProjectionIdentity;
+  readonly projectionReference: SQLiteCursorExactProjectionReference;
+  rederivedProjection: OperationBaselineProjectionIdentity | undefined;
+  retainedEntries: readonly CanonicalOperationBaselineEntry[] | undefined;
+  readonly stage: SQLiteBaselineTempStage;
+  readonly totalChangesReadWatermark: number;
+  readonly transactionEpoch: bigint;
+  readonly transactionLineage: SQLiteConnectionTransactionLineage;
+  readonly transfer: SQLiteCursorStageOwnershipTransfer;
+}
+
 interface CancellationState { cancelled: boolean }
 
 const AUTHORITIES = new WeakMap<object, AuthorityState>();
@@ -273,6 +386,8 @@ const AUTHORITY_BY_TRANSFER = new WeakMap<object, SQLiteCursorOuterPublicationAu
 const CANCELLATIONS = new WeakMap<object, CancellationState>();
 const MIGRATION_0002_RECEIPTS = new WeakMap<object, Migration0002ReceiptState>();
 const POST_DDL_CATALOG_FENCES = new WeakMap<object, PostDdlCatalogFenceState>();
+const POST_DDL_PUBLICATION_READER_LEASES =
+  new WeakMap<object, PostDdlPublicationReaderLeaseState>();
 const weakMapGetIntrinsic = WeakMap.prototype.get;
 const weakMapSetIntrinsic = WeakMap.prototype.set;
 
@@ -490,10 +605,14 @@ export function prepareSQLiteCursorOuterPublicationAuthorityIntrinsic(
     migration0002Receipt: undefined,
     postDdlCatalogFence: undefined,
     postDdlCatalogFenceMintCount: 0,
+    postDdlPublicationReaderLease: undefined,
+    postDdlPublicationReaderLeaseCloseCount: 0,
+    postDdlPublicationReaderLeaseMintCount: 0,
     outerClockConsumedTombstone: undefined,
     outerClockEvidence,
     outerPublicationTail: mint.tail,
     projectionIdentity,
+    projectionReference: receiptWitness.projectionReference,
     providerClockCapability,
     receipt,
     sourceDescriptorHash: receiptWitness.sealReceipt.sourceDescriptorHash,
@@ -921,6 +1040,108 @@ function exactLedger(
     && left.affectedRowsWatermark === right.affectedRowsWatermark;
 }
 
+function postDdlPublicationReaderLeaseState(
+  lease: SQLiteCursorPostDdlPublicationReaderLease,
+): PostDdlPublicationReaderLeaseState {
+  const state = lease !== null && typeof lease === "object"
+    ? reflectApplyIntrinsic(
+      weakMapGetIntrinsic,
+      POST_DDL_PUBLICATION_READER_LEASES,
+      [lease as object],
+    ) as PostDdlPublicationReaderLeaseState | undefined
+    : undefined;
+  if (state === undefined) {
+    return fail(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "SQLite post-DDL publication reader lease is invalid",
+    );
+  }
+  return state;
+}
+
+function postDdlPublicationReaderCancellationState(
+  cancellation: SQLiteCursorOuterPublicationCancellationSignal | undefined,
+): CancellationState | undefined {
+  if (cancellation === undefined) return undefined;
+  const state = cancellation !== null && typeof cancellation === "object"
+    ? reflectApplyIntrinsic(weakMapGetIntrinsic, CANCELLATIONS, [cancellation as object]) as
+      CancellationState | undefined
+    : undefined;
+  if (state === undefined) {
+    return fail(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "SQLite post-DDL publication reader cancellation is invalid",
+    );
+  }
+  return state;
+}
+
+function sameProjectionIdentity(
+  left: OperationBaselineProjectionIdentity,
+  right: OperationBaselineProjectionIdentity,
+): boolean {
+  return left.baselineId === right.baselineId
+    && left.entryCount === right.entryCount
+    && left.firstEntryHash === right.firstEntryHash
+    && left.finalEntryHash === right.finalEntryHash
+    && left.legacyOperationCount === right.legacyOperationCount
+    && left.projectionSha256 === right.projectionSha256;
+}
+
+function postDdlPublicationReaderCorruption(message: string): CycleStoreProviderError {
+  return new CycleStoreProviderError(
+    "GE_CYCLE_STORE_CORRUPTION",
+    OPERATION,
+    message,
+  );
+}
+
+function postDdlPublicationReaderUnavailable(message: string): CycleStoreProviderError {
+  return new CycleStoreProviderError(
+    "GE_CYCLE_STORE_UNAVAILABLE",
+    OPERATION,
+    message,
+  );
+}
+
+function postDdlPublicationReaderSnapshot(
+  state: PostDdlPublicationReaderLeaseState,
+): SQLiteCursorPostDdlPublicationReaderLeaseSnapshot {
+  return objectFreezeIntrinsic({
+    authority: state.authority,
+    closeAttemptCount: state.closeAttemptCount,
+    closeSucceeded: state.closeSucceeded,
+    connection: state.connection,
+    consumesAnyWriteReceipt: false as const,
+    executeCount: state.executeCount,
+    fetchCount: state.fetchCount,
+    lifecycle: state.lifecycle,
+    mayMintStageAdoptionReceipt: false as const,
+    migration0002Receipt: state.migration0002Receipt,
+    mintCount: 1 as const,
+    outerLedgerReadWatermark: state.outerLedgerReadWatermark,
+    ownershipAcquisitionCount: state.ownershipAcquisitionCount,
+    permanentWriteAuthority: false as const,
+    postDdlCatalogFence: state.fence,
+    prepareCount: state.prepareCount,
+    projectionIdentity: state.projectionIdentity,
+    projectionReference: state.projectionReference,
+    readProofEpoch: state.transactionEpoch,
+    rederivedEntryCount: state.rederivedProjection?.entryCount,
+    rederivedFinalEntryHash: state.rederivedProjection?.finalEntryHash,
+    rederivedFirstEntryHash: state.rederivedProjection?.firstEntryHash,
+    rederivedLegacyOperationCount: state.rederivedProjection?.legacyOperationCount,
+    rederivedProjectionSha256: state.rederivedProjection?.projectionSha256,
+    sourceReadSql: SQLITE_CURSOR_POST_DDL_PUBLICATION_READER_SOURCE_SQL,
+    sourceReadSqlSha256: SQLITE_CURSOR_POST_DDL_PUBLICATION_READER_SOURCE_SQL_SHA256,
+    stage: state.stage,
+    totalChangesReadWatermark: state.totalChangesReadWatermark,
+    transactionEpoch: state.transactionEpoch,
+    transactionLineage: state.transactionLineage,
+    transfer: state.transfer,
+  });
+}
+
 /**
  * Mint the one post-0002 physical-catalog proof from a fresh authority-owned
  * read. The migration receipt is retained, not consumed.
@@ -1116,6 +1337,615 @@ export function readSQLiteCursorPostDdlCatalogFenceSnapshotIntrinsic(
   return state.snapshot;
 }
 
+/** Mint the one-shot capability for the fixed ordered post-DDL TEMP read. */
+export function mintSQLiteCursorPostDdlPublicationReaderLeaseIntrinsic(
+  authority: SQLiteCursorOuterPublicationAuthority,
+  migration0002Receipt: SQLiteMigration0002CatalogRebuildReceipt,
+  fence: SQLiteCursorPostDdlCatalogFence,
+): SQLiteCursorPostDdlPublicationReaderLease {
+  const authorityRecord = authorityState(authority);
+  const fenceRecord = postDdlCatalogFenceState(fence);
+  if (fenceRecord.authority !== authority
+      || fenceRecord.migration0002Receipt !== migration0002Receipt
+      || authorityRecord.migration0002Receipt !== migration0002Receipt
+      || authorityRecord.postDdlCatalogFence !== fence) {
+    return fail(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "SQLite post-DDL publication reader graph is invalid",
+    );
+  }
+  if (authorityRecord.postDdlPublicationReaderLease !== undefined
+      || authorityRecord.postDdlPublicationReaderLeaseMintCount !== 0) {
+    poisonAuthorityGraph(
+      authorityRecord,
+      authority,
+      "SQLite post-DDL publication reader lease mint was reused",
+    );
+    return fail(
+      "GE_CYCLE_STORE_CORRUPTION",
+      "SQLite post-DDL publication reader lease mint was reused",
+    );
+  }
+  if (authorityRecord.writePhase !== "post-ddl-catalog-fence") {
+    poisonAuthorityGraph(
+      authorityRecord,
+      authority,
+      "SQLite post-DDL publication reader lease mint is premature",
+    );
+    return fail(
+      "GE_CYCLE_STORE_CORRUPTION",
+      "SQLite post-DDL publication reader lease mint is premature",
+    );
+  }
+
+  try {
+    assertSQLiteCursorPostDdlCatalogFenceIntrinsic(
+      authority, migration0002Receipt, fence,
+    );
+    const sourceSqlSha256 = createHashIntrinsic("sha256")
+      .update(SQLITE_CURSOR_POST_DDL_PUBLICATION_READER_SOURCE_SQL, "utf8")
+      .digest("hex");
+    if (SQLITE_CURSOR_POST_DDL_PUBLICATION_READER_SOURCE_SQL
+          !== SQLITE_CURSOR_POST_DDL_BASELINE_SOURCE_QUERY_INTRINSIC
+        || sourceSqlSha256
+          !== SQLITE_CURSOR_POST_DDL_PUBLICATION_READER_SOURCE_SQL_SHA256) {
+      fail(
+        "GE_CYCLE_STORE_CORRUPTION",
+        "SQLite post-DDL publication reader source SQL identity drifted",
+      );
+    }
+    const witness = assertSQLiteCursorPreRebindReceiptProvenance(authorityRecord.receipt);
+    const ledger = outerLedgerSnapshot(authorityRecord);
+    if (witness.projectionIdentity !== authorityRecord.projectionIdentity
+        || witness.projectionReference !== authorityRecord.projectionReference
+        || authorityRecord.transactionLineage !== fenceRecord.snapshot.transactionLineage
+        || authorityRecord.currentTransactionEpoch !== fenceRecord.snapshot.transactionEpoch
+        || authorityRecord.currentTotalChanges !== fenceRecord.snapshot.totalChangesWatermark
+        || !exactLedger(ledger, fenceRecord.snapshot.outerLedgerWatermark)) {
+      fail(
+        "GE_CYCLE_STORE_CORRUPTION",
+        "SQLite post-DDL publication reader lease watermark drifted",
+      );
+    }
+    const lease = objectFreezeIntrinsic(
+      reflectApplyIntrinsic(objectCreateIntrinsic, Object, [null]),
+    ) as SQLiteCursorPostDdlPublicationReaderLease;
+    const state: PostDdlPublicationReaderLeaseState = {
+      authority,
+      closeAttemptCount: 0,
+      closeSucceeded: false,
+      connection: authorityRecord.connection,
+      executeCount: 0,
+      fence,
+      fetchCount: 0,
+      lifecycle: "minted-unused",
+      migration0002Receipt,
+      outerLedgerReadWatermark: ledger,
+      ownershipAcquisitionCount: 0,
+      prepareCount: 0,
+      projectionIdentity: authorityRecord.projectionIdentity,
+      projectionReference: authorityRecord.projectionReference,
+      rederivedProjection: undefined,
+      retainedEntries: undefined,
+      stage: authorityRecord.stage,
+      totalChangesReadWatermark: authorityRecord.currentTotalChanges,
+      transactionEpoch: authorityRecord.currentTransactionEpoch,
+      transactionLineage: authorityRecord.transactionLineage,
+      transfer: authorityRecord.transfer,
+    };
+    reflectApplyIntrinsic(weakMapSetIntrinsic, POST_DDL_PUBLICATION_READER_LEASES, [
+      lease as object,
+      state,
+    ]);
+    authorityRecord.postDdlPublicationReaderLease = lease;
+    authorityRecord.postDdlPublicationReaderLeaseMintCount = 1;
+    return lease;
+  } catch (error) {
+    terminateAfterInvariantFailure(
+      authorityRecord,
+      authority,
+      error,
+      "SQLite post-DDL publication reader lease mint failed",
+    );
+    throw error;
+  }
+}
+
+/** Read lifecycle diagnostics from the exact opaque lease registry. */
+export function readSQLiteCursorPostDdlPublicationReaderLeaseSnapshotIntrinsic(
+  lease: SQLiteCursorPostDdlPublicationReaderLease,
+): SQLiteCursorPostDdlPublicationReaderLeaseSnapshot {
+  return postDdlPublicationReaderSnapshot(postDdlPublicationReaderLeaseState(lease));
+}
+
+/** Execute and retain the exact fixed TEMP source read under one-shot ownership. */
+export function executeSQLiteCursorPostDdlPublicationReaderIntrinsic(
+  authority: SQLiteCursorOuterPublicationAuthority,
+  migration0002Receipt: SQLiteMigration0002CatalogRebuildReceipt,
+  fence: SQLiteCursorPostDdlCatalogFence,
+  lease: SQLiteCursorPostDdlPublicationReaderLease,
+  cancellation?: SQLiteCursorOuterPublicationCancellationSignal,
+): SQLiteCursorPostDdlPublicationReaderLease {
+  const leaseRecord = postDdlPublicationReaderLeaseState(lease);
+  if (leaseRecord.authority !== authority
+      || leaseRecord.migration0002Receipt !== migration0002Receipt
+      || leaseRecord.fence !== fence) {
+    return fail(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "SQLite post-DDL publication reader lease graph is invalid",
+    );
+  }
+  const authorityRecord = authorityState(authority);
+  if (authorityRecord.postDdlPublicationReaderLease !== lease
+      || authorityRecord.postDdlPublicationReaderLeaseMintCount !== 1
+      || authorityRecord.projectionReference !== leaseRecord.projectionReference) {
+    return fail(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "SQLite post-DDL publication reader lease graph is invalid",
+    );
+  }
+  if (leaseRecord.lifecycle !== "minted-unused") {
+    poisonAuthorityGraph(
+      authorityRecord,
+      authority,
+      "SQLite post-DDL publication reader lease was reused",
+    );
+    return fail(
+      "GE_CYCLE_STORE_CORRUPTION",
+      "SQLite post-DDL publication reader lease was reused",
+    );
+  }
+
+  // Presentation and pre-cancellation are resolved before prepare. A valid
+  // pre-cancelled lease remains unused and may be retried exactly once later.
+  const cancellationRecord = postDdlPublicationReaderCancellationState(cancellation);
+
+  try {
+    assertSQLiteCursorPostDdlCatalogFenceIntrinsic(
+      authority, migration0002Receipt, fence,
+    );
+    const sourceSqlSha256 = createHashIntrinsic("sha256")
+      .update(SQLITE_CURSOR_POST_DDL_PUBLICATION_READER_SOURCE_SQL, "utf8")
+      .digest("hex");
+    if (SQLITE_CURSOR_POST_DDL_PUBLICATION_READER_SOURCE_SQL
+          !== SQLITE_CURSOR_POST_DDL_BASELINE_SOURCE_QUERY_INTRINSIC
+        || sourceSqlSha256
+          !== SQLITE_CURSOR_POST_DDL_PUBLICATION_READER_SOURCE_SQL_SHA256) {
+      fail(
+        "GE_CYCLE_STORE_CORRUPTION",
+        "SQLite post-DDL publication reader source SQL identity drifted before prepare",
+      );
+    }
+    if (authorityRecord.currentTransactionEpoch !== leaseRecord.transactionEpoch
+        || authorityRecord.currentTotalChanges !== leaseRecord.totalChangesReadWatermark
+        || !exactLedger(
+          outerLedgerSnapshot(authorityRecord),
+          leaseRecord.outerLedgerReadWatermark,
+        )) {
+      fail(
+        "GE_CYCLE_STORE_CORRUPTION",
+        "SQLite post-DDL publication reader watermark drifted before prepare",
+      );
+    }
+  } catch (error) {
+    leaseRecord.lifecycle = "poisoned";
+    terminateAfterInvariantFailure(
+      authorityRecord,
+      authority,
+      error,
+      "SQLite post-DDL publication reader pre-prepare validation failed",
+    );
+    throw error;
+  }
+
+  // Allocate every potentially throwing proof accumulator before native
+  // iterator ownership begins, making the close boundary structurally total.
+  let accumulator: OperationBaselineAccumulator;
+  let retainedEntries: CanonicalOperationBaselineEntry[];
+  try {
+    accumulator = new OperationBaselineAccumulator(
+      leaseRecord.projectionIdentity.baselineId,
+      leaseRecord.projectionIdentity.entryCount,
+    );
+    retainedEntries = [];
+  } catch {
+    leaseRecord.lifecycle = "poisoned";
+    poisonAuthorityGraph(
+      authorityRecord,
+      authority,
+      "SQLite post-DDL publication reader accumulator construction failed",
+    );
+    throw postDdlPublicationReaderCorruption(
+      "SQLite post-DDL publication reader accumulator construction failed",
+    );
+  }
+  if (cancellationRecord?.cancelled) {
+    throw postDdlPublicationReaderUnavailable(
+      "SQLite post-DDL publication reader was cancelled before ownership",
+    );
+  }
+
+  let statement: ReturnType<typeof prepareSQLiteConnectionCursorPublicationReadIntrinsic>;
+  try {
+    statement = prepareSQLiteConnectionCursorPublicationReadIntrinsic(
+      leaseRecord.connection,
+      "cursor-publication-post-ddl-baseline-source",
+      OPERATION,
+    );
+    leaseRecord.prepareCount = 1;
+  } catch (error) {
+    leaseRecord.lifecycle = "poisoned";
+    const translated = translateSQLiteError(error, OPERATION);
+    poisonAuthorityGraph(
+      authorityRecord,
+      authority,
+      "SQLite post-DDL publication reader prepare failed",
+    );
+    throw translated;
+  }
+
+  let iterator: ReturnType<typeof iterateSQLiteStatementNativeIntrinsic>;
+  try {
+    iterator = iterateSQLiteStatementNativeIntrinsic(statement);
+  } catch (error) {
+    leaseRecord.lifecycle = "poisoned";
+    const translated = translateSQLiteError(error, OPERATION);
+    poisonAuthorityGraph(
+      authorityRecord,
+      authority,
+      "SQLite post-DDL publication reader execute failed before ownership",
+    );
+    throw translated;
+  }
+
+  leaseRecord.executeCount = 1;
+  leaseRecord.ownershipAcquisitionCount = 1;
+  leaseRecord.lifecycle = "reader-active";
+  let closeFailure: CycleStoreProviderError | undefined;
+  const closeOwnedReader = (): void => {
+    if (leaseRecord.closeAttemptCount === 1) {
+      if (closeFailure !== undefined) throw closeFailure;
+      return;
+    }
+    leaseRecord.closeAttemptCount = 1;
+    authorityRecord.postDdlPublicationReaderLeaseCloseCount = 1;
+    try {
+      returnSQLiteStatementIteratorNativeIntrinsic(iterator);
+      leaseRecord.closeSucceeded = true;
+    } catch (error) {
+      closeFailure = translateSQLiteError(error, OPERATION);
+      throw closeFailure;
+    }
+  };
+  const cleanupOwnedReader = (): void => {
+    leaseRecord.lifecycle = "poisoned";
+    closeOwnedReader();
+  };
+
+  let registered = false;
+  let primaryFailure: CycleStoreProviderError | undefined;
+  try {
+    registerSQLiteCursorStageOwnershipPostDdlReaderIntrinsic(
+      leaseRecord.transfer,
+      authority,
+      lease,
+      cleanupOwnedReader,
+    );
+    registered = true;
+  } catch {
+    primaryFailure = postDdlPublicationReaderCorruption(
+      "SQLite post-DDL publication reader cleanup ownership failed",
+    );
+  }
+
+  let cancellationObserved = false;
+  let terminalObserved = false;
+  let retainedEntryCount = 0;
+  let previousRank: number | undefined;
+  let previousKey: Buffer | undefined;
+
+  while (primaryFailure === undefined && !cancellationObserved) {
+    if (cancellationRecord?.cancelled) {
+      cancellationObserved = true;
+      break;
+    }
+    let result: IteratorResult<unknown>;
+    try {
+      leaseRecord.fetchCount += 1;
+      result = nextSQLiteStatementIteratorNativeIntrinsic(iterator);
+    } catch (error) {
+      primaryFailure = translateSQLiteError(error, OPERATION);
+      break;
+    }
+    try {
+      if (result === null || typeof result !== "object") {
+        throw postDdlPublicationReaderCorruption(
+          "SQLite post-DDL publication reader iterator result is invalid",
+        );
+      }
+      if (result.done === true) {
+        terminalObserved = true;
+      } else {
+        if (result.done !== false) {
+          throw postDdlPublicationReaderCorruption(
+            "SQLite post-DDL publication reader iterator terminal is invalid",
+          );
+        }
+        const row = sqliteRow(result.value, 4, OPERATION, "post-DDL baseline source row");
+        const rank = sqliteSafeInteger(
+          row[0],
+          0,
+          BASELINE_ENTRY_KINDS.length - 1,
+          OPERATION,
+          "post-DDL baseline source kind rank",
+        );
+        const entryKind = sqliteText(
+          row[1], OPERATION, "post-DDL baseline source entry kind",
+        );
+        if (BASELINE_ENTRY_KINDS[rank] !== entryKind) {
+          throw postDdlPublicationReaderCorruption(
+            "SQLite post-DDL publication reader kind rank drifted",
+          );
+        }
+        const keyBytes = sqliteBlob(
+          row[2], OPERATION, "post-DDL baseline source key",
+        );
+        const stateBytes = sqliteBlob(
+          row[3], OPERATION, "post-DDL baseline source state",
+        );
+        if (previousRank !== undefined
+            && (rank < previousRank
+              || (rank === previousRank
+                && bufferCompareIntrinsic(keyBytes, previousKey!) <= 0))) {
+          throw postDdlPublicationReaderCorruption(
+            "SQLite post-DDL publication reader source order drifted",
+          );
+        }
+        validateOperationBaselineEntryBytes(
+          entryKind as OperationBaselineEntryKind,
+          keyBytes,
+          stateBytes,
+        );
+        const canonical = reflectApplyIntrinsic(
+          operationBaselineAccumulatorAppendIntrinsic,
+          accumulator,
+          [{
+            entryKind: entryKind as OperationBaselineEntryKind,
+            key: decodeOperationBaselineCanonicalBytes(keyBytes, MAX_BASELINE_KEY_BYTES),
+            state: decodeOperationBaselineCanonicalBytes(stateBytes, MAX_BASELINE_STATE_BYTES),
+          }],
+        ) as CanonicalOperationBaselineEntry;
+        if (bufferCompareIntrinsic(canonical.keyBytes, keyBytes) !== 0
+            || bufferCompareIntrinsic(canonical.stateBytes, stateBytes) !== 0) {
+          throw postDdlPublicationReaderCorruption(
+            "SQLite post-DDL publication reader canonical bytes drifted",
+          );
+        }
+        reflectApplyIntrinsic(objectDefinePropertyIntrinsic, Object, [
+          retainedEntries,
+          retainedEntryCount,
+          {
+            configurable: false,
+            enumerable: true,
+            value: canonical,
+            writable: false,
+          },
+        ]);
+        retainedEntryCount += 1;
+        previousRank = rank;
+        previousKey = bufferFromIntrinsic(keyBytes);
+      }
+    } catch (error) {
+      primaryFailure = error instanceof CycleStoreProviderError
+        ? error
+        : postDdlPublicationReaderCorruption(
+          "SQLite post-DDL publication reader row proof failed",
+        );
+    }
+    if (primaryFailure === undefined && terminalObserved) break;
+    if (primaryFailure === undefined && cancellationRecord?.cancelled) {
+      cancellationObserved = true;
+    }
+  }
+
+  let rederived: OperationBaselineProjectionIdentity | undefined;
+  if (primaryFailure === undefined && terminalObserved) {
+    try {
+      rederived = reflectApplyIntrinsic(
+        operationBaselineAccumulatorFinishIntrinsic,
+        accumulator,
+        [],
+      ) as OperationBaselineProjectionIdentity;
+      if (!sameProjectionIdentity(rederived, leaseRecord.projectionIdentity)) {
+        throw postDdlPublicationReaderCorruption(
+          "SQLite post-DDL publication reader projection disagreed with B2",
+        );
+      }
+    } catch (error) {
+      primaryFailure = error instanceof CycleStoreProviderError
+        ? error
+        : postDdlPublicationReaderCorruption(
+          "SQLite post-DDL publication reader terminal proof failed",
+        );
+    }
+  }
+  if (rederived !== undefined) {
+    leaseRecord.rederivedProjection = rederived;
+  }
+
+  try {
+    closeOwnedReader();
+  } catch {
+    // Error precedence is resolved below after the mandatory close attempt.
+  }
+  if (leaseRecord.closeSucceeded
+      && (leaseRecord.lifecycle as SQLiteCursorPostDdlPublicationReaderLifecycle)
+        !== "poisoned") {
+    leaseRecord.lifecycle = "reader-closed";
+  }
+  if (registered) {
+    try {
+      completeSQLiteCursorStageOwnershipPostDdlReaderIntrinsic(
+        leaseRecord.transfer,
+        authority,
+        lease,
+        leaseRecord.closeSucceeded,
+      );
+    } catch {
+      primaryFailure ??= postDdlPublicationReaderCorruption(
+        "SQLite post-DDL publication reader cleanup completion failed",
+      );
+    }
+  }
+  if (primaryFailure === undefined
+      && terminalObserved
+      && cancellationRecord?.cancelled) {
+    cancellationObserved = true;
+  }
+
+  if (primaryFailure !== undefined) {
+    leaseRecord.lifecycle = "poisoned";
+    poisonAuthorityGraph(
+      authorityRecord,
+      authority,
+      "SQLite post-DDL publication reader primary proof failed",
+    );
+    throw primaryFailure;
+  }
+  if (closeFailure !== undefined || !leaseRecord.closeSucceeded) {
+    leaseRecord.lifecycle = "poisoned";
+    poisonAuthorityGraph(
+      authorityRecord,
+      authority,
+      "SQLite post-DDL publication reader close failed",
+    );
+    throw closeFailure ?? postDdlPublicationReaderCorruption(
+      "SQLite post-DDL publication reader did not close",
+    );
+  }
+  if ((leaseRecord.lifecycle as SQLiteCursorPostDdlPublicationReaderLifecycle)
+        === "poisoned") {
+    poisonAuthorityGraph(
+      authorityRecord,
+      authority,
+      "SQLite post-DDL publication reader owner was cleaned up during read",
+    );
+    throw postDdlPublicationReaderCorruption(
+      "SQLite post-DDL publication reader owner was cleaned up during read",
+    );
+  }
+
+  try {
+    assertSQLiteCursorPostDdlCatalogFenceIntrinsic(
+      authority, migration0002Receipt, fence,
+    );
+    assertSQLiteCursorOuterPublicationAuthorityIntrinsic(authority);
+    if (authorityRecord.currentTransactionEpoch !== leaseRecord.transactionEpoch
+        || authorityRecord.currentTotalChanges !== leaseRecord.totalChangesReadWatermark
+        || !exactLedger(
+          outerLedgerSnapshot(authorityRecord),
+          leaseRecord.outerLedgerReadWatermark,
+        )) {
+      fail(
+        "GE_CYCLE_STORE_CORRUPTION",
+        "SQLite post-DDL publication reader watermark drifted after read",
+      );
+    }
+  } catch (error) {
+    leaseRecord.lifecycle = "poisoned";
+    terminateAfterInvariantFailure(
+      authorityRecord,
+      authority,
+      error,
+      "SQLite post-DDL publication reader post-read fence failed",
+    );
+    throw error;
+  }
+  if (cancellationObserved || cancellationRecord?.cancelled) {
+    leaseRecord.lifecycle = "poisoned";
+    poisonAuthorityGraph(
+      authorityRecord,
+      authority,
+      "SQLite post-DDL publication reader was cancelled after ownership",
+    );
+    throw postDdlPublicationReaderUnavailable(
+      "SQLite post-DDL publication reader was cancelled after ownership",
+    );
+  }
+  if (rederived === undefined
+      || retainedEntryCount !== leaseRecord.projectionIdentity.entryCount
+      || retainedEntries.length !== retainedEntryCount) {
+    leaseRecord.lifecycle = "poisoned";
+    poisonAuthorityGraph(
+      authorityRecord,
+      authority,
+      "SQLite post-DDL publication reader retained proof is incomplete",
+    );
+    throw postDdlPublicationReaderCorruption(
+      "SQLite post-DDL publication reader retained proof is incomplete",
+    );
+  }
+  leaseRecord.retainedEntries = objectFreezeIntrinsic(retainedEntries);
+  leaseRecord.lifecycle = "retired";
+  return lease;
+}
+
+/** Reusable presentation of the exact retired/closed reader proof. */
+export function assertSQLiteCursorPostDdlPublicationReaderTerminalProofIntrinsic(
+  authority: SQLiteCursorOuterPublicationAuthority,
+  migration0002Receipt: SQLiteMigration0002CatalogRebuildReceipt,
+  fence: SQLiteCursorPostDdlCatalogFence,
+  lease: SQLiteCursorPostDdlPublicationReaderLease,
+): SQLiteCursorPostDdlPublicationReaderLease {
+  const state = postDdlPublicationReaderLeaseState(lease);
+  if (state.authority !== authority
+      || state.migration0002Receipt !== migration0002Receipt
+      || state.fence !== fence) {
+    return fail(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "SQLite post-DDL publication reader terminal graph is invalid",
+    );
+  }
+  if (state.lifecycle !== "retired"
+      || state.prepareCount !== 1
+      || state.executeCount !== 1
+      || state.ownershipAcquisitionCount !== 1
+      || state.closeAttemptCount !== 1
+      || !state.closeSucceeded
+      || state.rederivedProjection === undefined
+      || state.retainedEntries === undefined
+      || state.retainedEntries.length !== state.projectionIdentity.entryCount
+      || state.rederivedProjection.entryCount !== state.projectionIdentity.entryCount) {
+    return fail(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "SQLite post-DDL publication reader lease is not terminal",
+    );
+  }
+  const authorityRecord = authorityState(authority);
+  if (authorityRecord.postDdlPublicationReaderLease !== lease
+      || authorityRecord.postDdlPublicationReaderLeaseMintCount !== 1
+      || authorityRecord.postDdlPublicationReaderLeaseCloseCount !== 1
+      || authorityRecord.projectionReference !== state.projectionReference) {
+    return fail(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "SQLite post-DDL publication reader terminal graph is invalid",
+    );
+  }
+  assertSQLiteCursorStageOwnershipPostDdlReaderTerminalIntrinsic(
+    state.transfer, authority, lease,
+  );
+  assertSQLiteCursorPostDdlCatalogFenceIntrinsic(
+    authority, migration0002Receipt, fence,
+  );
+  if (!sameProjectionIdentity(state.rederivedProjection, state.projectionIdentity)) {
+    return fail(
+      "GE_CYCLE_STORE_CORRUPTION",
+      "SQLite post-DDL publication reader projection proof drifted",
+    );
+  }
+  return lease;
+}
+
 /** Package-private identity snapshot for downstream receipt construction and tests. */
 export function readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(
   authority: SQLiteCursorOuterPublicationAuthority,
@@ -1134,6 +1964,7 @@ export function readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(
       logicalWriteSequence: state.logicalWriteSequence,
     }),
     projectionIdentity: state.projectionIdentity,
+    projectionReference: state.projectionReference,
     providerClockCapability: state.providerClockCapability,
     receipt: state.receipt,
     sourceDescriptorHash: state.sourceDescriptorHash,
@@ -1150,6 +1981,11 @@ export function readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(
     migration0002Receipt: state.migration0002Receipt,
     postDdlCatalogFence: state.postDdlCatalogFence,
     postDdlCatalogFenceMintCount: state.postDdlCatalogFenceMintCount,
+    postDdlPublicationReaderLease: state.postDdlPublicationReaderLease,
+    postDdlPublicationReaderLeaseCloseCount:
+      state.postDdlPublicationReaderLeaseCloseCount,
+    postDdlPublicationReaderLeaseMintCount:
+      state.postDdlPublicationReaderLeaseMintCount,
     writePhase: state.writePhase,
   });
 }
