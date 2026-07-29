@@ -13839,3 +13839,109 @@ not a formal release-candidate claim. Formal RC wording remains forbidden until
 the repository's evidence-closure overlay selects a real candidate and all
 required release-weight gates close. GitHub popularity and a 5K-star outcome
 remain product/community goals rather than testable delivery guarantees.
+
+#### 31.37.25 Append-only portable initial-write digest codec acceptance
+
+The first production leaf authorized by section 31.37.24 is accepted on
+2026-07-29. This acceptance covers only a package-private, pure TypeScript
+codec and its executable oracle. It does not authorize SQL, migration `0002`,
+permanent writes, receipt minting, post-DDL proofs, cursor rebind, TEMP
+retirement or transaction completion.
+
+The accepted parameter carrier is strictly two-dimensional. Its outer array
+preserves logical execution order and every inner array preserves parameter
+order for that execution. Zero executions encode as `[]`; one execution with
+zero parameters encodes as `[[]]`. Neither dimension may be flattened,
+inferred or omitted. Reordering an execution or parameter is a different valid
+carrier with a different digest, while deleting a level or presenting a sparse
+or non-array frame is a structured rejection.
+
+The accepted scalar union contains exactly four tagged shapes. Text is an
+exact `{type:"text",value:string}` carrier, preserves Unicode scalars byte for
+byte and performs no NFC/NFD normalization. Integer is an exact
+`{type:"integer",value:string}` carrier with canonical signed 64-bit decimal
+syntax and bounds. BLOB is exact `{type:"blob",value:string}` using canonical
+unpadded RFC 4648 section 5 base64url. Null is exact `{type:"null"}` and must
+not carry a value. Boolean, number, bigint, undefined, function, collection,
+date, nested array and unknown tag presentations are rejected.
+
+The result carrier is exactly `{affectedRows:string}`. It represents the
+complete logical receipt aggregate rather than a per-execution driver result
+array. Its value is canonical nonnegative decimal: zero is `0`, positive
+values have no plus sign or redundant leading zero, and negative, exponent,
+fractional or whitespace forms are forbidden. Because the frozen contract does
+not declare a maximum, this leaf deliberately treats the result as an
+unbounded lexical decimal instead of imposing JavaScript safe-integer, uint64
+or signed-int64 limits. `lastInsertRowid`, adapter-call counts and statement
+identity remain excluded.
+
+This implementation boundary accepts structured runtime values only. It does
+not expose a second raw JSON or raw UTF-8 byte decoder. Duplicate JSON keys and
+corrupt UTF-8 are therefore enforced by the already frozen strict fixture and
+parser gates, where those attacks are representable, rather than guessed in a
+runtime value API where they are not. A later raw-byte API would require its
+own append-only contract, fatal UTF-8 decoder and duplicate-safe parser before
+implementation.
+
+The BLOB boundary follows canonical RFC encoding by round trip. Empty string is
+the accepted canonical representation of zero bytes. Padding, `+` or `/`,
+whitespace, length congruent to one modulo four, and two- or three-character
+aliases with non-zero unused pad bits are rejected. These choices are identical
+for the future Python implementation and cannot be delegated to the differing
+leniency of default runtime decoders.
+
+The digest preimages use the exact fixed NUL-terminated domains:
+
+- `graph-engineering/sqlite-initial-write-parameters/v1\0`; and
+- `graph-engineering/sqlite-initial-write-result/v1\0`.
+
+Each lowercase SHA-256 is computed over domain UTF-8 bytes immediately followed
+by canonical JSON UTF-8 bytes, with no extra delimiter, length prefix, newline
+or adapter serialization. The seven current case/schema vectors, including
+signed-int64 minimum and maximum, are the sole known-answer set. The historical
+dead one-dimensional constant still present in the validator source is not a
+live validation dependency and must not be copied by either runtime; fixture-
+guardian cleanup of that constant remains a separate contract-maintenance
+change.
+
+Runtime validation is descriptor-safe and fail-closed. Ordinary dense arrays,
+plain objects and null-prototype exact objects are accepted. Live or revoked
+proxies, accessors, inherited carriers, symbol keys, non-enumerable extras,
+sparse arrays and extra properties are rejected without invoking caller traps
+or getters. Errors are structured provider invalid-argument failures and occur
+before hashing.
+
+The serializer is local and fixed-shape. This avoids allowing ambient driver,
+debug or generic object serialization to reinterpret a protocol carrier. It
+captures the required descriptor/prototype, JSON string, character, Buffer,
+Reflect and Hash intrinsics at module initialization and uses explicit loops.
+Hostile replacement after import of `Object.keys`, array map/sort/some,
+`RegExp.prototype.test`, `Object.freeze`, global `BigInt` and `Buffer.from`
+cannot alter acceptance or any of the seven known-answer outputs.
+
+Integer validation performs sign and leading-digit checks, rejects magnitudes
+longer than the signed-int64 boundary before scanning caller-sized content, and
+uses bounded lexicographic comparison for the two 19-digit limits. It never
+constructs an attacker-sized BigInt. The hostile oracle includes a 100,000-
+digit input that is rejected by the length fence.
+
+Acceptance evidence on one final byte set is:
+
+1. all seven frozen canonical JSON and digest vectors matched exactly;
+2. the focused codec suite passed 13/13;
+3. the B3 schema/fixture conformance suite passed 34/34;
+4. the complete SQLite package suite passed 872/872 tests across 25 files;
+5. workspace typecheck and lint passed across all eight implementation
+   packages;
+6. whitespace and additions checks passed;
+7. independent final production/test audit reported HIGH 0 / MEDIUM 0 / LOW 0;
+   and
+8. the durable review record is
+   `codex_logs/reviews/SQLITE-CURSOR-B3-INITIAL-WRITE-DIGEST-CODEC-2026-07-29.md`.
+
+The next independently reviewed production leaf is the TypeScript post-DDL
+physical-catalog fence plus publication reader lease and terminal proof. It
+must continue to stop before the four-write receipt ledger, stage adoption,
+cursor rebind, rules 11/12, TEMP retirement and commit. The three-day public
+preview acceleration does not weaken this dependency order or convert these
+nonclaims into release evidence.
