@@ -35,6 +35,13 @@ export const SQLITE_RELEASE_ASSETS = Object.freeze([
   "schema-v1.identity.json",
 ]);
 
+// Preview assets are mirrored and packaged byte-for-byte without activating
+// schema version 2 in the current production manifest.
+export const SQLITE_PREVIEW_ASSETS = Object.freeze([
+  "0002-v1-to-v2-operation-replay.sql",
+  "manifest-v2.preview.json",
+]);
+
 export const SQLITE_PYTHON_SUPPORT_ASSETS = Object.freeze([
   "manifest.schema.json",
   "fixtures/alpha-v0.sql",
@@ -52,6 +59,8 @@ export const SQLITE_RELEASE_DIGESTS = Object.freeze({
   fixtureSql: "a57f063f52554aeb564dfbd90dc184146ce48160acd138e69ad02f76f9074eb6",
   fixtureExpectation: "e40ab4c5b4459704160a66a119306488722c889bbccce7355b46c2201158b5c2",
   fixtureIdentity: "fe0f2bb74eab8ccfabd3a856dbe6c6dbcae40695a48d76eaf585e8e0c0ea9941",
+  previewManifest: "f1d447b5b4e925151d04a952376a1386da9196538f18f0be17c56da01d31deaf",
+  migration0002Sql: "1bf03d68eed45366bc7b34ccc329faa51ea389362db59f6a4307b3033d37a96d",
 });
 
 const MODULE_PATH = fileURLToPath(import.meta.url);
@@ -189,6 +198,42 @@ export function validateSQLiteMigrationReleaseSources({ root = REPOSITORY_ROOT }
     canonical.set(path, authoritative);
   }
 
+  const preview = new Map();
+  for (const path of SQLITE_PREVIEW_ASSETS) {
+    const authoritative = readRegularAsset(roots.canonical, path, `spec/${path}`);
+    const npm = readRegularAsset(roots.npm, path, `npm/${path}`);
+    const python = readRegularAsset(roots.python, path, `python/${path}`);
+    assert.equal(
+      npm.bytes.equals(authoritative.bytes),
+      true,
+      `npm/${path} differs byte-for-byte from spec`,
+    );
+    assert.equal(
+      python.bytes.equals(authoritative.bytes),
+      true,
+      `python/${path} differs byte-for-byte from spec`,
+    );
+    preview.set(path, authoritative);
+  }
+  assert.equal(
+    preview.get("0002-v1-to-v2-operation-replay.sql").sha256,
+    SQLITE_RELEASE_DIGESTS.migration0002Sql,
+    "canonical SQLite migration 0002 changed without updating its compiled preview trust anchor",
+  );
+  assert.equal(
+    preview.get("manifest-v2.preview.json").sha256,
+    SQLITE_RELEASE_DIGESTS.previewManifest,
+    "canonical SQLite v2 preview manifest changed without updating its compiled trust anchor",
+  );
+  const previewManifest = JSON.parse(preview.get("manifest-v2.preview.json").text);
+  assert.equal(previewManifest.latestVersion, 2);
+  assert.equal(previewManifest.migrations.length, 2);
+  assert.equal(previewManifest.migrations[1].id, "v1-to-v2-operation-replay");
+  assert.equal(
+    previewManifest.migrations[1].sqlSha256,
+    SQLITE_RELEASE_DIGESTS.migration0002Sql,
+  );
+
   for (const path of SQLITE_PYTHON_SUPPORT_ASSETS) {
     const authoritative = readRegularAsset(roots.canonical, path, `spec/${path}`);
     const python = readRegularAsset(roots.python, path, `python/${path}`);
@@ -242,6 +287,8 @@ export function validateSQLiteMigrationReleaseSources({ root = REPOSITORY_ROOT }
     ok: true,
     releaseAssetCount: SQLITE_RELEASE_ASSETS.length,
     mirroredCopyCount: SQLITE_RELEASE_ASSETS.length * 2,
+    previewAssetCount: SQLITE_PREVIEW_ASSETS.length,
+    previewMirroredCopyCount: SQLITE_PREVIEW_ASSETS.length * 2,
     pythonSupportAssetCount: SQLITE_PYTHON_SUPPORT_ASSETS.length,
     tableCount: canonicalValidation.tableCount,
     indexCount: canonicalValidation.indexCount,
@@ -355,7 +402,7 @@ export async function validateSQLiteNpmReleaseArtifact({ root = REPOSITORY_ROOT 
 
     const installedRoot = join(consumerRoot, "node_modules", "@graph-engineering", "sqlite");
     const canonicalRoot = sourceRoots(repositoryRoot).canonical;
-    for (const path of SQLITE_RELEASE_ASSETS) {
+    for (const path of [...SQLITE_RELEASE_ASSETS, ...SQLITE_PREVIEW_ASSETS]) {
       const installed = readRegularAsset(installedRoot, `migrations/${path}`, `installed npm/${path}`);
       const canonical = readRegularAsset(canonicalRoot, path, `spec/${path}`);
       assert.equal(installed.bytes.equals(canonical.bytes), true, `installed npm/${path} differs from spec`);
@@ -441,6 +488,7 @@ export async function validateSQLiteNpmReleaseArtifact({ root = REPOSITORY_ROOT 
       ok: true,
       packageCount: NPM_PACKAGE_NAMES.length,
       releaseAssetCount: SQLITE_RELEASE_ASSETS.length,
+      previewAssetCount: SQLITE_PREVIEW_ASSETS.length,
       installedLoader: "dist/migrations.js",
       installedRuntimeSmoke: "open-append-close-reopen-read-replay",
       tarball: basename(sqliteTarball),

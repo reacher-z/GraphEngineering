@@ -1,8 +1,9 @@
 import { Buffer } from "node:buffer";
+import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, StatementSync } from "node:sqlite";
 
 import { CycleStoreProviderError } from "@graph-engineering/runtime";
 import { afterEach, describe, expect, it } from "vitest";
@@ -12,10 +13,23 @@ import {
   activateSQLiteCursorOuterPublicationAuthorityIntrinsic,
   assertSQLiteCursorOuterPublicationAuthorityIntrinsic,
   createSQLiteCursorOuterPublicationCancellationControllerIntrinsic,
+  executeSQLiteCursorMigration0002CatalogRebuildIntrinsic,
   prepareSQLiteCursorOuterPublicationAuthorityIntrinsic,
+  readSQLiteMigration0002CatalogRebuildReceiptSnapshotIntrinsic,
   readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic,
+  type SQLiteMigration0002CatalogRebuildReceipt,
   type SQLiteCursorOuterPublicationAuthority,
 } from "../src/cursor-publication-outer-authority.js";
+import {
+  SQLITE_CURSOR_MIGRATION_0002_ASSET_SHA256,
+  SQLITE_CURSOR_MIGRATION_0002_ASSET_UTF8_BYTES,
+  loadSQLiteCursorMigration0002AssetIntrinsic,
+  readSQLiteCursorMigration0002AssetSnapshotIntrinsic,
+  type SQLiteCursorMigration0002Asset,
+} from "../src/cursor-publication-migration-0002-asset.js";
+import {
+  readSQLiteCursorPublicationTargetCatalogObservationIntrinsic,
+} from "../src/cursor-publication-target-catalog.js";
 import {
   assertSQLiteCursorProviderClockConsumedTombstoneIntrinsic,
   consumeSQLiteCursorProviderClockEvidenceIntrinsic,
@@ -200,8 +214,33 @@ function mintReceipt(
   return new SQLiteCursorPreRebindReceiptIssuer(input).issue(input);
 }
 
-function cleanGraph(mode: "clean" | "unfinished" | "diagnosed" = "clean"): CleanGraph {
+function cleanGraph(
+  mode: "clean" | "unfinished" | "diagnosed" = "clean",
+  legacyOperationCount = 0,
+): CleanGraph {
   const connection = openConnection();
+  const governanceResult = Buffer.from(
+    "{\"archiveMode\":\"lossless-before-delete\","
+      + "\"compactionMode\":\"logical-history-preserving\",\"legalHoldIds\":[],"
+      + "\"retentionMode\":\"retain-authoritative-history\"}",
+    "utf8",
+  );
+  const governanceResultHash = createHash("sha256").update(governanceResult).digest("hex");
+  for (let index = 0; index < legacyOperationCount; index += 1) {
+    connection.prepare(`
+      INSERT INTO main.ge_cycle_operations
+        (tenant_id, operation_id, operation_name, request_hash,
+         result_blob, result_hash, committed_at_ms)
+      VALUES (?, ?, 'set-legal-hold', ?, ?, ?, ?)
+    `, "inspect-schema").run(
+      `tenant-legacy-${index}`,
+      `operation-legacy-${index}`,
+      `${index + 1}`.padStart(64, "0"),
+      governanceResult,
+      governanceResultHash,
+      CAPTURED_AT_MS - 10 + index,
+    );
+  }
   const stage = createSQLiteBaselineTempStage(
     connection,
     proveSQLiteExclusiveBaselineTransaction(connection),
@@ -641,6 +680,257 @@ describe("SQLite B3 outer publication authority", () => {
     )).toBe(graph.transfer);
   });
 
+  it("loads only the exact packaged migration 0002 asset and rejects a clone", () => {
+    const asset = loadSQLiteCursorMigration0002AssetIntrinsic();
+    const snapshot = readSQLiteCursorMigration0002AssetSnapshotIntrinsic(asset);
+    expect(Object.isFrozen(asset)).toBe(true);
+    expect(Object.getPrototypeOf(asset)).toBeNull();
+    expect(snapshot).toMatchObject({
+      assetSha256: SQLITE_CURSOR_MIGRATION_0002_ASSET_SHA256,
+      assetUtf8Bytes: SQLITE_CURSOR_MIGRATION_0002_ASSET_UTF8_BYTES,
+      fixedStatementCount: 20,
+      previewManifestIdentity: snapshot.previewManifestIdentity,
+      previewManifestSha256:
+        "f1d447b5b4e925151d04a952376a1386da9196538f18f0be17c56da01d31deaf",
+      schemaSqlSha256:
+        "5a0923462f7fa5eb1627955292aa3657253258fc5832e365257dc913740866a5",
+    });
+    expect(snapshot.statements).toHaveLength(20);
+    expect(Object.isFrozen(snapshot.previewManifestIdentity)).toBe(true);
+    expect(Object.getPrototypeOf(snapshot.previewManifestIdentity)).toBeNull();
+    expect(snapshot.statements[0]).toContain("PRAGMA defer_foreign_keys = ON;");
+    expect(snapshot.statements[19]).toBe("PRAGMA user_version = 2;");
+    expect(readFileSync(new URL(
+      "../migrations/0002-v1-to-v2-operation-replay.sql",
+      import.meta.url,
+    ))).toEqual(readFileSync(new URL(
+      "../../../spec/migrations/sqlite/0002-v1-to-v2-operation-replay.sql",
+      import.meta.url,
+    )));
+    expect(() => readSQLiteCursorMigration0002AssetSnapshotIntrinsic(
+      Object.freeze(Object.create(null)) as SQLiteCursorMigration0002Asset,
+    )).toThrow(/asset proof is invalid/u);
+  });
+
+  it("executes exact 0002 once, advances the three-dimensional ledger, and mints a receipt", () => {
+    const graph = cleanGraph();
+    const authority = prepare(graph);
+    activateSQLiteCursorOuterPublicationAuthorityIntrinsic(authority);
+    const ownerBefore = readSQLiteConnectionOwnerSnapshot(graph.connection);
+    const changesBefore = readSQLiteConnectionTotalChangesSnapshot(graph.connection);
+
+    const receipt = executeSQLiteCursorMigration0002CatalogRebuildIntrinsic(authority);
+    const ownerAfter = readSQLiteConnectionOwnerSnapshot(graph.connection);
+    const changesAfter = readSQLiteConnectionTotalChangesSnapshot(graph.connection);
+    const snapshot = readSQLiteMigration0002CatalogRebuildReceiptSnapshotIntrinsic(receipt);
+
+    expect(Object.isFrozen(receipt)).toBe(true);
+    expect(Object.getPrototypeOf(receipt)).toBeNull();
+    expect(ownerAfter.isTransaction).toBe(true);
+    expect(ownerAfter.transactionMode).toBe("exclusive");
+    expect(ownerAfter.transactionLineage).toBe(ownerBefore.transactionLineage);
+    expect(ownerAfter.transactionEpoch).toBe(ownerBefore.transactionEpoch + 20n);
+    expect(changesAfter.totalChanges - changesBefore.totalChanges).toBe(1);
+    expect(snapshot).toMatchObject({
+      affectedRows: 1,
+      applicationIdAfter: 1_195_724_359,
+      applicationIdBefore: 1_195_724_359,
+      assetSha256: SQLITE_CURSOR_MIGRATION_0002_ASSET_SHA256,
+      executeCount: 1,
+      fixedStatementCount: 20,
+      legacyOperationCopyRowCount: 0,
+      outerLedgerAfter: {
+        affectedRowsWatermark: 1,
+        fixedStatementCount: 20,
+        logicalWriteSequence: 1,
+      },
+      outerLedgerBefore: {
+        affectedRowsWatermark: 0,
+        fixedStatementCount: 0,
+        logicalWriteSequence: 0,
+      },
+      outerLedgerDelta: {
+        affectedRowsWatermark: 1,
+        fixedStatementCount: 20,
+        logicalWriteSequence: 1,
+      },
+      parameterSha256:
+        "8acdf04fe02395192d1c7d704cf8ecf52e29513ccd77024ff4f9cc9e230da80a",
+      postDdlCatalogSha256:
+        "ca85cf266267fa3eb5443bdf6d957b4b03c795cd6e0232a28c52773f1041fadf",
+      prepareCount: 20,
+      resultSha256:
+        "2475973b53ba5659827cf78fca83b7a040172ae04e0c03d7de1cd7a297f1a96e",
+      schemaCopyRowCount: 1,
+      totalChangesDelta: 1,
+      userVersionAfter: 2,
+      userVersionBefore: 1,
+      writeKind: "migration-0002-catalog-rebuild",
+    });
+    expect(snapshot.statementAffectedRows).toEqual([
+      0, 0, 0, 1, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    ]);
+    expect(snapshot.transactionLineage).toBe(ownerBefore.transactionLineage);
+    expect(readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(authority)).toMatchObject({
+      lifecycle: "active",
+      migration0002LogicalExecutionCount: 1,
+      migration0002PreparedStatementCount: 20,
+      migration0002Receipt: receipt,
+      outerLedger: {
+        affectedRowsWatermark: 1,
+        fixedStatementCount: 20,
+        logicalWriteSequence: 1,
+      },
+      writePhase: "0002-complete",
+    });
+    expect(assertSQLiteCursorOuterPublicationAuthorityIntrinsic(authority)).toBe(authority);
+  });
+
+  it("copies non-empty legacy operations and binds the 1 + L result formula", () => {
+    const graph = cleanGraph("clean", 2);
+    expect(graph.projectionIdentity.legacyOperationCount).toBe(2);
+    const authority = prepare(graph);
+    activateSQLiteCursorOuterPublicationAuthorityIntrinsic(authority);
+    const before = readSQLiteConnectionTotalChangesSnapshot(graph.connection);
+
+    const receipt = executeSQLiteCursorMigration0002CatalogRebuildIntrinsic(authority);
+    const snapshot = readSQLiteMigration0002CatalogRebuildReceiptSnapshotIntrinsic(receipt);
+    expect(snapshot).toMatchObject({
+      affectedRows: 3,
+      legacyOperationCopyRowCount: 2,
+      outerLedgerAfter: {
+        affectedRowsWatermark: 3,
+        fixedStatementCount: 20,
+        logicalWriteSequence: 1,
+      },
+      resultSha256:
+        "9c4a39646a7cb26c3ba53e91941b6fe0f4435355a06d2138156d1fd9551ba417",
+      schemaCopyRowCount: 1,
+      totalChangesDelta: 3,
+    });
+    expect(snapshot.statementAffectedRows).toEqual([
+      0, 0, 0, 1, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 2, 0, 0, 0,
+    ]);
+    expect(readSQLiteConnectionTotalChangesSnapshot(graph.connection).totalChanges
+      - before.totalChanges).toBe(3);
+    expect(graph.connection.prepare(`
+      SELECT ledger_format_version, request_blob, commit_sequence
+        FROM main.ge_cycle_operations
+       ORDER BY tenant_id COLLATE BINARY, operation_id COLLATE BINARY
+    `, "inspect-schema").all()).toEqual([
+      [1n, null, null],
+      [1n, null, null],
+    ]);
+  });
+
+  it("poisons a second logical 0002 execution without running another statement", () => {
+    const graph = cleanGraph();
+    const authority = prepare(graph);
+    activateSQLiteCursorOuterPublicationAuthorityIntrinsic(authority);
+    executeSQLiteCursorMigration0002CatalogRebuildIntrinsic(authority);
+    const ownerBefore = readSQLiteConnectionOwnerSnapshot(graph.connection);
+    const changesBefore = readSQLiteConnectionTotalChangesSnapshot(graph.connection);
+
+    expect(() => executeSQLiteCursorMigration0002CatalogRebuildIntrinsic(authority))
+      .toThrow(/executed more than once|execution was reused/u);
+    const ownerAfter = readSQLiteConnectionOwnerSnapshot(graph.connection);
+    const changesAfter = readSQLiteConnectionTotalChangesSnapshot(graph.connection);
+    expect(ownerAfter.transactionEpoch).toBe(ownerBefore.transactionEpoch);
+    expect(ownerAfter.transactionLineage).toBe(ownerBefore.transactionLineage);
+    expect(changesAfter.totalChanges).toBe(changesBefore.totalChanges);
+    expect(readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(authority)).toMatchObject({
+      lifecycle: "poisoned",
+      outerLedger: {
+        affectedRowsWatermark: 1,
+        fixedStatementCount: 20,
+        logicalWriteSequence: 1,
+      },
+      writePhase: "poisoned",
+    });
+  });
+
+  it("leaves commit ownership outside the leaf and rolls back to the exact pre-DDL catalog", () => {
+    const graph = cleanGraph();
+    const authority = prepare(graph);
+    activateSQLiteCursorOuterPublicationAuthorityIntrinsic(authority);
+    const receipt = executeSQLiteCursorMigration0002CatalogRebuildIntrinsic(authority);
+    const receiptSnapshot =
+      readSQLiteMigration0002CatalogRebuildReceiptSnapshotIntrinsic(receipt);
+    expect(graph.connection.isTransaction).toBe(true);
+
+    graph.connection.execTrusted("ROLLBACK", "inspect-schema");
+    expect(graph.connection.isTransaction).toBe(false);
+    const restored = readSQLiteCursorPublicationTargetCatalogObservationIntrinsic(
+      graph.connection,
+    );
+    expect(restored.applicationId).toBe(receiptSnapshot.applicationIdBefore);
+    expect(restored.userVersion).toBe(receiptSnapshot.userVersionBefore);
+    expect(restored.catalogSha256).toBe(receiptSnapshot.preDdlCatalogSha256);
+    expect(restored.catalogSha256).not.toBe(receiptSnapshot.postDdlCatalogSha256);
+    expect(() => readSQLiteMigration0002CatalogRebuildReceiptSnapshotIntrinsic(receipt))
+      .toThrow();
+    expect(readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(authority).lifecycle)
+      .toBe("retired");
+  });
+
+  it("uses the captured native run intrinsic after StatementSync prototype replacement", () => {
+    const graph = cleanGraph();
+    const authority = prepare(graph);
+    activateSQLiteCursorOuterPublicationAuthorityIntrinsic(authority);
+    const runDescriptor = Object.getOwnPropertyDescriptor(StatementSync.prototype, "run")!;
+    try {
+      Object.defineProperty(StatementSync.prototype, "run", {
+        ...runDescriptor,
+        value: (): never => { throw new Error("hostile StatementSync.run"); },
+      });
+      const receipt = executeSQLiteCursorMigration0002CatalogRebuildIntrinsic(authority);
+      expect(readSQLiteMigration0002CatalogRebuildReceiptSnapshotIntrinsic(receipt))
+        .toMatchObject({ affectedRows: 1, fixedStatementCount: 20 });
+    } finally {
+      Object.defineProperty(StatementSync.prototype, "run", runDescriptor);
+    }
+    expect(assertSQLiteCursorOuterPublicationAuthorityIntrinsic(authority)).toBe(authority);
+  });
+
+  it("fails closed before 0002 if an upstream authority read prototype is replaced", () => {
+    const graph = cleanGraph();
+    const authority = prepare(graph);
+    activateSQLiteCursorOuterPublicationAuthorityIntrinsic(authority);
+    const before = readSQLiteConnectionTotalChangesSnapshot(graph.connection);
+    const prepareDescriptor = Object.getOwnPropertyDescriptor(
+      DatabaseSync.prototype,
+      "prepare",
+    )!;
+    try {
+      Object.defineProperty(DatabaseSync.prototype, "prepare", {
+        ...prepareDescriptor,
+        value: (): never => { throw new Error("hostile DatabaseSync.prepare"); },
+      });
+      expect(() => executeSQLiteCursorMigration0002CatalogRebuildIntrinsic(authority)).toThrow();
+    } finally {
+      Object.defineProperty(DatabaseSync.prototype, "prepare", prepareDescriptor);
+    }
+    expect(readSQLiteConnectionTotalChangesSnapshot(graph.connection).totalChanges)
+      .toBe(before.totalChanges);
+    expect(readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(authority)).toMatchObject({
+      lifecycle: "poisoned",
+      migration0002PreparedStatementCount: 0,
+      outerLedger: {
+        affectedRowsWatermark: 0,
+        fixedStatementCount: 0,
+        logicalWriteSequence: 0,
+      },
+    });
+  });
+
+  it("rejects a forged migration 0002 receipt", () => {
+    expect(() => readSQLiteMigration0002CatalogRebuildReceiptSnapshotIntrinsic(
+      Object.freeze(Object.create(null)) as SQLiteMigration0002CatalogRebuildReceipt,
+    )).toThrow(/receipt is invalid/u);
+  });
+
   it("does not execute 0002, cursor rebind, transaction control, or any permanent write", () => {
     const graph = cleanGraph();
     const ownerBefore = readSQLiteConnectionOwnerSnapshot(graph.connection);
@@ -696,6 +986,11 @@ describe("SQLite B3 outer publication authority", () => {
       "activateSQLiteCursorOuterPublicationAuthorityIntrinsic",
       "assertSQLiteCursorOuterPublicationAuthorityIntrinsic",
       "readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic",
+      "executeSQLiteCursorMigration0002CatalogRebuildIntrinsic",
+      "readSQLiteMigration0002CatalogRebuildReceiptSnapshotIntrinsic",
+      "SQLiteMigration0002CatalogRebuildReceipt",
+      "loadSQLiteCursorMigration0002AssetIntrinsic",
+      "readSQLiteCursorMigration0002AssetSnapshotIntrinsic",
       "assertSQLiteCursorOuterClockAuthorityGraphIntrinsic",
       "assertSQLiteCursorOuterClockAuthorityActiveGraphIntrinsic",
       "SQLiteCursorStageOwnershipOuterPublicationTail",

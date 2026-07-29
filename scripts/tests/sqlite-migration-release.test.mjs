@@ -51,12 +51,31 @@ test("canonical, npm, and Python SQLite migration resources close over fixed rel
     ok: true,
     releaseAssetCount: 4,
     mirroredCopyCount: 8,
+    previewAssetCount: 2,
+    previewMirroredCopyCount: 4,
     pythonSupportAssetCount: 3,
     tableCount: 13,
     indexCount: 14,
     fixtureRecordCount: 3,
     digests: SQLITE_RELEASE_DIGESTS,
   });
+});
+
+test("one changed preview migration byte is rejected before packaging", () => {
+  const root = temporaryRepository();
+  try {
+    const target = join(
+      root,
+      "python/src/graph_engineering/_sqlite_migrations/0002-v1-to-v2-operation-replay.sql",
+    );
+    writeFileSync(target, `${readFileSync(target, "utf8")}-- drift\n`);
+    assert.throws(
+      () => validateSQLiteMigrationReleaseSources({ root }),
+      /python\/0002-v1-to-v2-operation-replay\.sql differs byte-for-byte from spec/u,
+    );
+  } finally {
+    cleanup(root);
+  }
 });
 
 test("one changed npm migration byte is rejected before packaging", () => {

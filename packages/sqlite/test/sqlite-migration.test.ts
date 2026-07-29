@@ -88,12 +88,19 @@ describe("SQLite migration assets", () => {
       "schema-v1.identity.json",
       "schema-v1.sql",
       "0001-alpha-v0-to-v1.sql",
+      "0002-v1-to-v2-operation-replay.sql",
+      "manifest-v2.preview.json",
     ]) {
       const packaged = readFileSync(new URL(`../migrations/${name}`, import.meta.url));
+      const python = readFileSync(new URL(
+        `../../../python/src/graph_engineering/_sqlite_migrations/${name}`,
+        import.meta.url,
+      ));
       const canonical = readFileSync(
         new URL(`../../../spec/migrations/sqlite/${name}`, import.meta.url),
       );
       expect(packaged.equals(canonical), name).toBe(true);
+      expect(python.equals(canonical), `python/${name}`).toBe(true);
     }
   });
 

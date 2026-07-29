@@ -14172,3 +14172,236 @@ watermark and ledger. It may not accept this diagnostic snapshot or any caller
 supplied equivalent. Reader lease/terminal proof, baseline entries/header/
 sequence receipts, four-receipt adoption, cursor rebind, rules 11/12, TEMP
 retirement and commit remain explicit nonclaims.
+
+### 31.37.28 Exact migration 0002 execution, permanent-write accounting and authentic receipt closure (append-only execution record, 2026-07-29)
+
+This append-only tranche turns the previously observed v2 target catalog into
+an exact, connection-owned migration operation. It does not amend, reinterpret
+or weaken any earlier requirement in this plan. Every line above the start of
+this section remains the immutable planning baseline. The purpose of this
+section is to record the additional implementation and acceptance work needed
+between target-catalog observation and the later post-DDL fence.
+
+The migration asset closure MUST contain four byte-identical packaged copies:
+
+1. the npm-source migration at
+   `packages/sqlite/migrations/0002-v1-to-v2-operation-replay.sql`;
+2. the npm-source preview manifest at
+   `packages/sqlite/migrations/manifest-v2.preview.json`;
+3. the Python-package migration mirror at
+   `python/src/graph_engineering/_sqlite_migrations/0002-v1-to-v2-operation-replay.sql`;
+4. the Python-package preview-manifest mirror at
+   `python/src/graph_engineering/_sqlite_migrations/manifest-v2.preview.json`.
+
+The SQL asset identity is fixed at 9,523 bytes and SHA-256
+`1bf03d68eed45366bc7b34ccc329faa51ea389362db59f6a4307b3033d37a96d`.
+The preview-manifest identity is fixed at 4,908 bytes and SHA-256
+`f1d447b5b4e925151d04a952376a1386da9196538f18f0be17c56da01d31deaf`.
+Loading either asset MUST fail closed for a missing/non-regular file, wrong
+length, wrong digest, BOM, CR, invalid UTF-8, malformed JSON, unexpected schema
+version, migration-entry drift or target-catalog identity drift. The preview
+manifest is deliberately not the active release manifest. Its presence proves
+the pending migration closure without falsely advertising a publicly active v2
+database release.
+
+The TypeScript asset loader MUST expose no forgeable plain-object credential.
+It owns frozen, null-prototype proof values backed by private weak identity,
+captures the filesystem/hash/Buffer/string/JSON/Object/Reflect intrinsics used
+by verification, parses exactly twenty non-empty SQL statements, and verifies
+that the parsed preview manifest binds the same migration filename, bytes,
+digest, target application id, target user version and target schema SQL
+identity as the runtime migration contract. A caller-supplied lookalike, copied
+object or prototype-mutated value MUST NOT pass as an authentic asset or
+manifest proof.
+
+The connection bridge MUST remain a closed-set capability rather than a raw SQL
+executor. Migration 0002 receives an opaque session issued only to the exact
+activated connection. Session issuance MUST reject closed databases, wrong
+connections, wrong transaction lineages, missing outer transactions and any of
+the twelve TEMP catalog names that could shadow an unqualified migration table
+or index. The preflight is itself a fixed package-owned query. Callers cannot
+substitute query text, names, parameters or statement order.
+
+Execution MUST be strictly sequential and next-only:
+
+1. prepare statement 1 with the captured native prepare;
+2. configure it with captured hardening setters;
+3. advance the connection transaction epoch immediately before native run;
+4. execute native run exactly once;
+5. record irreversible completion before any later counter observation;
+6. read the package-owned `total_changes()` counter;
+7. validate the statement-local change count and cumulative delta;
+8. proceed to statement 2 only after statement 1 is completely accounted;
+9. repeat through statement 20 without pre-preparing later statements; and
+10. permanently retire the session on success or any error.
+
+This ordering is an authority requirement, not an implementation detail. If
+native `run()` changes SQLite state and a subsequent `total_changes()` read
+fails, the snapshot MUST still show that statement as completed and its epoch
+as consumed. The counter read failure remains the primary surfaced failure,
+while best-effort synchronization is permitted only to improve internal
+evidence. No failure after a native write may roll the authority counters back
+to their pre-statement values.
+
+SQLite's `StatementSync.run().changes` can represent the most recent write in
+ways that are unsafe as a standalone migration ledger. Therefore the executor
+MUST reconcile the safely decoded own `changes` field with captured
+`total_changes()` deltas on the two data-writing statements. For a legacy
+operation count `L`, the exact statement affected-row vector is:
+
+`[0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,L,0,0,0]`.
+
+Statement 4 writes exactly one schema row. Statement 17 copies exactly `L`
+legacy operation rows. Every other statement has a zero permanent-row delta.
+The aggregate permanent-write delta is exactly `1 + L`. Before starting,
+`L` and `1 + L` MUST be proven safe integers. A disagreement between native
+run evidence, total-change evidence, the expected statement ordinal and the
+legacy-source count poisons the graph.
+
+The outer authority MUST maintain three independent monotonic dimensions:
+
+- transaction epoch: every attempted native statement execution;
+- total-changes watermark: SQLite's observed permanent-write counter; and
+- permanent-write ledger: logical write sequence, fixed statement count and
+  affected-row watermark.
+
+The ledger before/after/delta values MUST be recorded explicitly rather than
+left only as arithmetic that downstream code could recompute differently. On a
+successful 0002 execution, logical write sequence advances by one, fixed
+statement count advances by twenty, affected rows advance by `1 + L`, and
+transaction epoch advances by twenty. The authority's synchronized progress
+MUST be updated after every statement so a partial failure cannot be mistaken
+for a pristine retry point.
+
+The authority write-phase state machine MUST distinguish at least
+`ready-0002`, `executing-0002`, `0002-complete`, `poisoned` and `retired`.
+The sole execution entry point accepts only the active exact outer authority.
+Calling it twice, invoking it through a forged authority, observing unexpected
+catalog/source metadata, detecting TEMP conflicts, receiving a statement
+failure or encountering an accounting mismatch MUST fail closed. A second
+execution attempt after success MUST not emit new SQL and MUST poison the
+authority, because migration 0002 is a single-use authority transition rather
+than an idempotent public utility.
+
+The authentic `migration0002CatalogRebuildReceipt` MUST be a frozen,
+null-prototype, weak-identity-backed capability. At minimum it binds:
+
+- the exact outer authority predecessor and exact connection;
+- transaction lineage and transaction epoch;
+- pre/post `total_changes()` values and exact delta;
+- explicit three-dimensional ledger before, after and delta snapshots;
+- the exact SQL asset proof, SHA-256 and byte count;
+- the exact preview-manifest proof identity and digest;
+- the target schema SQL digest;
+- pre-DDL and post-DDL catalog digests;
+- source and target application/user versions;
+- schema-row and legacy-operation source counts;
+- all twenty per-statement affected-row deltas;
+- canonical parameter digest `8acdfd6d6db0a16086d0bb5d07e6d316e1d6a9f5ef819c6caac2d39cd61b80a`;
+- canonical result digest for `{affectedRows:"1+L"}`; and
+- the exact successful authority phase and logical migration count.
+
+Receipt reading is not merely an object lookup. Every read MUST freshly
+revalidate that the authority is still active, owns the same connection and
+lineage, has not fallen behind any receipt watermark, and still retains the
+same asset/manifest identities. Rollback, close, poison, transaction restart or
+connection replacement MUST invalidate the old success receipt. A copied,
+serialized, reconstructed, proxy-wrapped or prototype-similar value MUST never
+be accepted as authentic.
+
+The success-path evidence matrix MUST cover both boundary shapes:
+
+- `L = 0`: statement 4 contributes one row, statement 17 contributes zero,
+  aggregate delta one, and the exact twenty-entry vector is asserted;
+- `L = 2`: statement 4 contributes one row, statement 17 contributes two,
+  aggregate delta three, both operations survive with canonical payloads, and
+  the exact twenty-entry vector is asserted.
+
+Additional hostile evidence MUST include exact asset/manifest proof, byte-copy
+parity, forged receipt rejection, second-execution poisoning with zero extra
+SQL, rollback restoring the exact pre-DDL catalog, stale receipt rejection
+after rollback, public prepare replacement resistance and upstream native
+prepare failure containment. The next hostile-campaign tranche MUST add a
+production-safe deterministic probe for failure after statement 10, per-name
+TEMP shadow attempts, broader native/prototype poisoning and repeated partial
+failure scheduling. That probe MUST NOT be implemented as a public arbitrary
+fault callback or caller-controlled SQL seam.
+
+Release automation MUST verify the preview closure without changing active
+release claims. Source checks compare spec/npm/Python bytes and compiled trust
+anchors. npm pack/install checks verify that both preview assets survive the
+published package boundary. Python wheel/sdist/install checks verify that both
+mirrors survive every Python artifact boundary. Release reports separately
+state active asset counts and preview asset counts so a green v1 release check
+cannot conceal missing v2 preview material.
+
+The tranche acceptance gate is all of the following, with uncontended runs
+used for timing-sensitive evidence:
+
+1. focused outer-authority, migration and target-catalog tests pass;
+2. the complete SQLite package test suite passes;
+3. SQLite and workspace typecheck pass;
+4. workspace lint and diff hygiene pass;
+5. source-only migration release verification passes;
+6. release-checker self-tests, including preview drift rejection, pass;
+7. Python release-script lint and artifact verification pass;
+8. B3 conformance remains green while retaining
+   `implementationClaim: false` and `activeManifestClaim: false`;
+9. independent static audits report no unresolved high or medium defect in the
+   implemented scope; and
+10. a durable review log records commands, findings, remediations and honest
+    nonclaims.
+
+Passing this gate authorizes only the next dependency-DAG leaf: a post-DDL
+catalog fence that performs a fresh connection-owned observation and binds the
+authentic 0002 receipt, authority, lineage, epoch, total-change watermark and
+three-dimensional ledger. The fence MUST not trust the receipt's stored target
+snapshot as a substitute for a fresh read. It MUST retire or poison on drift
+and remain unusable after rollback/restart.
+
+The following remain explicit nonclaims after this tranche: Python-native 0002
+execution, public activation of manifest v2, reader lease/terminal proof,
+baseline entries/header/sequence receipts, cursor-state migration, four-receipt
+adoption, cursor rebind, validation rules 11/12, TEMP retirement and outer
+commit. Python execution is a separate parity leaf: it must reproduce exact
+statement order, source counts, counter evidence, rollback semantics and
+artifact identities in the Python provider rather than merely copying assets.
+No README, release note or package metadata may imply those later leaves are
+complete before their own acceptance records exist.
+
+Parallel execution plan for the next three development days:
+
+- lane A implements and hostile-tests the fresh post-DDL catalog fence;
+- lane B designs the non-public deterministic partial-execution harness and
+  verifies the statement-10 recovery/poison model;
+- lane C implements Python provider parity for packaged asset loading and exact
+  sequential 0002 execution behind an internal experimental authority;
+- lane D expands npm/Python artifact matrices, Windows/newline portability and
+  release-report evidence;
+- the primary agent owns integration, immutable-plan hashing, full-suite
+  serialization, audit reconciliation, commit identity and remote verification.
+
+Every lane MUST work on a bounded leaf with explicit input/output contracts.
+Parallel agents may inspect and implement independent files, but full package
+tests, artifact builds and release gates are serialized to avoid false timing
+failures and shared-build interference. Integration occurs only after static
+diff review, targeted tests and authority-boundary review. Meaningful green
+leaves are committed and pushed with `reacher-z <mtrxcop@gmail.com>` and no
+co-author trailers; unrelated dirty-worktree files remain outside the commit.
+
+#### 31.37.28.1 Append-only correction to the canonical parameter-digest line
+
+The canonical empty-parameter digest written earlier in section 31.37.28 as
+`8acdfd6d6db0a16086d0bb5d07e6d316e1d6a9f5ef819c6caac2d39cd61b80a`
+contains a transcription error and is superseded by this append-only
+correction. The frozen conformance fixture and production implementation define
+the authoritative value as
+`8acdf04fe02395192d1c7d704cf8ecf52e29513ccd77024ff4f9cc9e230da80a`.
+No earlier plan text was edited to apply this correction.
+
+The result binding `{affectedRows:"1+L"}` describes the formula, not a literal
+string payload. For each execution, the canonical result digest is calculated
+over the decimal string of the actual safe-integer result: `"1"` when `L=0`,
+`"3"` when `L=2`, and generally `String(1 + L)`. This makes receipts from
+different source cardinalities cryptographically distinct while retaining the
+exact formula invariant.

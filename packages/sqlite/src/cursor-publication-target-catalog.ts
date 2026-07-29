@@ -375,6 +375,12 @@ export function validateSQLiteCursorPublicationTargetCatalogObservationIntrinsic
   input: unknown,
 ): SQLiteCursorPublicationTargetCatalogSnapshot {
   const snapshot = snapshotSQLiteCursorPublicationTargetCatalogObservationIntrinsic(input);
+  return assertExpectedTargetCatalogSnapshot(snapshot);
+}
+
+function assertExpectedTargetCatalogSnapshot(
+  snapshot: SQLiteCursorPublicationTargetCatalogSnapshot,
+): SQLiteCursorPublicationTargetCatalogSnapshot {
   let inventoryMatches = snapshot.inventory.length
     === SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_EXPECTED_INVENTORY.length;
   for (let index = 0; inventoryMatches && index < snapshot.inventory.length; index += 1) {
@@ -475,4 +481,13 @@ export function readSQLiteCursorPublicationTargetCatalogObservationIntrinsic(
       metadata[1], 0, 0x7fff_ffff, OPERATION, "target catalog user version",
     ),
   });
+}
+
+/** Read from the captured connection and require the complete frozen target. */
+export function readValidatedSQLiteCursorPublicationTargetCatalogObservationIntrinsic(
+  connection: SQLiteConnection,
+): SQLiteCursorPublicationTargetCatalogSnapshot {
+  return assertExpectedTargetCatalogSnapshot(
+    readSQLiteCursorPublicationTargetCatalogObservationIntrinsic(connection),
+  );
 }

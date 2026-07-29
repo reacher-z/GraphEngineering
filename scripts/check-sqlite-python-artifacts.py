@@ -26,12 +26,17 @@ PYTHON_ROOT = ROOT / "python"
 CANONICAL_ROOT = ROOT / "spec" / "migrations" / "sqlite"
 PACKAGE_ROOT = PurePosixPath("graph_engineering/_sqlite_migrations")
 
-RELEASE_ASSETS = (
+ACTIVE_RELEASE_ASSETS = (
     "schema-v1.sql",
     "0001-alpha-v0-to-v1.sql",
     "manifest.json",
     "schema-v1.identity.json",
 )
+PREVIEW_ASSETS = (
+    "0002-v1-to-v2-operation-replay.sql",
+    "manifest-v2.preview.json",
+)
+RELEASE_ASSETS = (*ACTIVE_RELEASE_ASSETS, *PREVIEW_ASSETS)
 SUPPORT_ASSETS = (
     "manifest.schema.json",
     "fixtures/alpha-v0.sql",
@@ -49,6 +54,12 @@ EXPECTED_ASSET_DIGESTS = {
     "schema-v1.sql": EXPECTED_DIGESTS["schema_sql"],
     "schema-v1.identity.json": EXPECTED_DIGESTS["identity_document"],
     "0001-alpha-v0-to-v1.sql": EXPECTED_DIGESTS["migration_sql"],
+    "0002-v1-to-v2-operation-replay.sql": (
+        "1bf03d68eed45366bc7b34ccc329faa51ea389362db59f6a4307b3033d37a96d"
+    ),
+    "manifest-v2.preview.json": (
+        "f1d447b5b4e925151d04a952376a1386da9196538f18f0be17c56da01d31deaf"
+    ),
 }
 
 
@@ -191,6 +202,7 @@ from graph_engineering import (
 from graph_engineering.sqlite_cycle_store import _load_migration_assets
 
 expected = json.loads(sys.argv[1])
+expected_asset_digests = expected["asset_digests"]
 assets = _load_migration_assets()
 actual = {
     "schema_sql": assets.schema_sql_hash,
@@ -211,6 +223,8 @@ for path in (
     "0001-alpha-v0-to-v1.sql",
     "manifest.json",
     "schema-v1.identity.json",
+    "0002-v1-to-v2-operation-replay.sql",
+    "manifest-v2.preview.json",
     "manifest.schema.json",
     "fixtures/alpha-v0.sql",
     "fixtures/alpha-v0.expected.json",
@@ -218,6 +232,9 @@ for path in (
     value = root.joinpath(*path.split("/")).read_bytes()
     if not value:
         raise SystemExit(f"installed migration resource is empty: {path}")
+    expected_digest = expected_asset_digests.get(path)
+    if expected_digest is not None and hashlib.sha256(value).hexdigest() != expected_digest:
+        raise SystemExit(f"installed migration resource digest mismatch: {path}")
 
 if len(graph_engineering.__all__) != len(set(graph_engineering.__all__)):
     raise SystemExit("installed public __all__ contains duplicates")
@@ -327,7 +344,7 @@ def isolated_install_smoke(
             "-I",
             "-c",
             INSTALLED_PROVIDER_SMOKE,
-            json.dumps(EXPECTED_DIGESTS),
+            json.dumps({**EXPECTED_DIGESTS, "asset_digests": EXPECTED_ASSET_DIGESTS}),
         ],
         cwd=root,
         timeout=60,
@@ -389,7 +406,8 @@ def main() -> None:
                 {
                     "ok": True,
                     "version": version,
-                    "releaseAssetCount": len(RELEASE_ASSETS),
+                    "releaseAssetCount": len(ACTIVE_RELEASE_ASSETS),
+                    "previewAssetCount": len(PREVIEW_ASSETS),
                     "supportAssetCount": len(SUPPORT_ASSETS),
                     "wheelEntries": wheel_entries,
                     "sdistEntries": sdist_entries,

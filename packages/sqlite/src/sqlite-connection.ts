@@ -19,16 +19,24 @@ import {
   sqliteText,
 } from "./sqlite-codec.js";
 import { isRetryableSQLiteLockError, translateSQLiteError } from "./sqlite-errors.js";
+import {
+  readSQLiteCursorMigration0002AssetSnapshotIntrinsic,
+  type SQLiteCursorMigration0002Asset,
+  type SQLiteCursorMigration0002AssetSnapshot,
+} from "./cursor-publication-migration-0002-asset.js";
 
 const databasePrepareIntrinsic = DatabaseSync.prototype.prepare;
 const databaseCloseIntrinsic = DatabaseSync.prototype.close;
 const reflectApplyIntrinsic = Reflect.apply;
 const objectFreezeIntrinsic = Object.freeze;
+const objectCreateIntrinsic = Object.create;
 const objectGetOwnPropertyDescriptorIntrinsic = Object.getOwnPropertyDescriptor;
 const objectGetPrototypeOfIntrinsic = Object.getPrototypeOf;
 const functionToStringIntrinsic = Function.prototype.toString;
+const numberIsSafeIntegerIntrinsic = Number.isSafeInteger;
 const statementGetIntrinsic = StatementSync.prototype.get;
 const statementIterateIntrinsic = StatementSync.prototype.iterate;
+const statementRunIntrinsic = StatementSync.prototype.run;
 const statementSetAllowBareNamedParametersIntrinsic =
   StatementSync.prototype.setAllowBareNamedParameters;
 const statementSetAllowUnknownNamedParametersIntrinsic =
@@ -127,9 +135,18 @@ export const SQLITE_CURSOR_PUBLICATION_CATALOG_NATIVE_QUERY_INTRINSIC =
   "SELECT type, name, tbl_name AS tableName, sql FROM main.sqlite_schema WHERE lower(name) GLOB 'ge_cycle_*' AND sql IS NOT NULL ORDER BY type COLLATE BINARY, name COLLATE BINARY" as const;
 export const SQLITE_CURSOR_PUBLICATION_METADATA_NATIVE_QUERY_INTRINSIC =
   "SELECT application_id, user_version FROM main.pragma_application_id(), main.pragma_user_version()" as const;
+export const SQLITE_CURSOR_MIGRATION_0002_TEMP_CONFLICT_QUERY_INTRINSIC =
+  "SELECT count(*) FROM temp.sqlite_schema WHERE lower(name) IN ("
+  + "'ge_cycle_schema','ge_cycle_schema_v1','ge_cycle_operations',"
+  + "'ge_cycle_operations_v1','ge_cycle_operations_commit_idx',"
+  + "'ge_cycle_operations_sequence_uq','ge_cycle_operations_replay_idx',"
+  + "'ge_cycle_operation_baselines','ge_cycle_operation_baseline_entries',"
+  + "'ge_cycle_operation_baseline_entries_key_uq',"
+  + "'ge_cycle_operation_baseline_entries_hash_uq','ge_cycle_operation_sequence')";
 export type SQLiteConnectionNativeReadKind =
   | "cursor-publication-target-catalog"
-  | "cursor-publication-target-metadata";
+  | "cursor-publication-target-metadata"
+  | "cursor-publication-migration-0002-temp-conflicts";
 
 export const DEFAULT_SQLITE_BUSY_TIMEOUT_MS = 250;
 export const MAX_SQLITE_BUSY_TIMEOUT_MS = 5_000;
@@ -174,6 +191,50 @@ export interface SQLiteConnectionTotalChangesSnapshot {
   readonly totalChanges: number;
   readonly transactionEpoch: bigint;
 }
+
+/** Opaque, connection-owned sequential execution session for migration 0002. */
+export interface SQLiteConnectionMigration0002Execution {
+  readonly __sqliteConnectionMigration0002Execution: never;
+}
+
+export interface SQLiteConnectionMigration0002StepSnapshot {
+  readonly affectedRowsDelta: number;
+  readonly completedStatementCount: number;
+  readonly fixedStatementOrdinal: number;
+  readonly preparedStatementCount: number;
+  readonly totalChanges: number;
+  readonly transactionEpoch: bigint;
+  readonly transactionLineage: SQLiteConnectionTransactionLineage;
+}
+
+export interface SQLiteConnectionMigration0002ExecutionSnapshot {
+  readonly affectedRows: number;
+  readonly completedStatementCount: number;
+  readonly lifecycle: "active" | "completed" | "poisoned";
+  readonly nextStatementOrdinal: number;
+  readonly preparedStatementCount: number;
+  readonly totalChanges: number;
+  readonly transactionEpoch: bigint;
+  readonly transactionLineage: SQLiteConnectionTransactionLineage;
+}
+
+interface Migration0002ExecutionState {
+  readonly asset: SQLiteCursorMigration0002Asset;
+  readonly assetSnapshot: SQLiteCursorMigration0002AssetSnapshot;
+  readonly connection: SQLiteConnection;
+  readonly transactionLineage: SQLiteConnectionTransactionLineage;
+  affectedRows: number;
+  completedStatementCount: number;
+  lifecycle: "active" | "completed" | "poisoned";
+  nextStatementOrdinal: number;
+  preparedStatementCount: number;
+  totalChanges: number;
+  transactionEpoch: bigint;
+}
+
+const MIGRATION_0002_EXECUTIONS = new WeakMap<object, Migration0002ExecutionState>();
+const weakMapGetIntrinsic = WeakMap.prototype.get;
+const weakMapSetIntrinsic = WeakMap.prototype.set;
 
 function invalid(message: string): never {
   throw new CycleStoreProviderError(
@@ -421,6 +482,12 @@ const SQLITE_CONNECTION_TOTAL_CHANGES_SNAPSHOT = Symbol(
 const SQLITE_CONNECTION_PREPARE_NATIVE_READ = Symbol(
   "SQLiteConnection.prepareNativeRead",
 );
+const SQLITE_CONNECTION_BEGIN_MIGRATION_0002 = Symbol(
+  "SQLiteConnection.beginMigration0002",
+);
+const SQLITE_CONNECTION_EXECUTE_MIGRATION_0002_NEXT = Symbol(
+  "SQLiteConnection.executeMigration0002Next",
+);
 
 /** One hardened, synchronous, file-backed SQLite connection. */
 export class SQLiteConnection {
@@ -548,20 +615,8 @@ export class SQLiteConnection {
         "SQLite provider is closed",
       );
     }
-    const read = (): number => sqliteSafeInteger(
-      sqliteRow(
-        hardenSQLiteStatement(this.#database.prepare("SELECT total_changes()")).get(),
-        1,
-        "inspect-schema",
-        "private SQLite change counter",
-      )[0],
-      0,
-      Number.MAX_SAFE_INTEGER,
-      "inspect-schema",
-      "private SQLite change counter",
-    );
-    const before = read();
-    const after = read();
+    const before = this.#readTotalChangesCounter();
+    const after = this.#readTotalChangesCounter();
     const transactionAfter = this.#database.isTransaction;
     const epochAfter = this.#transactionEpoch;
     if (before !== after
@@ -577,6 +632,24 @@ export class SQLiteConnection {
       totalChanges: after,
       transactionEpoch: epochAfter,
     });
+  }
+
+  #readTotalChangesCounter(): number {
+    const statement = hardenSQLiteNativeStatementIntrinsic(reflectApplyIntrinsic(
+      databasePrepareIntrinsic, this.#database, ["SELECT total_changes()"],
+    ) as StatementSync);
+    return sqliteSafeInteger(
+      sqliteRow(
+        reflectApplyIntrinsic(statementGetIntrinsic, statement, []),
+        1,
+        "inspect-schema",
+        "private SQLite change counter",
+      )[0],
+      0,
+      Number.MAX_SAFE_INTEGER,
+      "inspect-schema",
+      "private SQLite change counter",
+    );
   }
 
   get isTransaction(): boolean {
@@ -718,7 +791,9 @@ export class SQLiteConnection {
       ? SQLITE_CURSOR_PUBLICATION_CATALOG_NATIVE_QUERY_INTRINSIC
       : kind === "cursor-publication-target-metadata"
         ? SQLITE_CURSOR_PUBLICATION_METADATA_NATIVE_QUERY_INTRINSIC
-        : undefined;
+        : kind === "cursor-publication-migration-0002-temp-conflicts"
+          ? SQLITE_CURSOR_MIGRATION_0002_TEMP_CONFLICT_QUERY_INTRINSIC
+          : undefined;
     if (sql === undefined) {
       throw new CycleStoreProviderError(
         "GE_CYCLE_STORE_INVALID_ARGUMENT",
@@ -732,6 +807,206 @@ export class SQLiteConnection {
       ) as StatementSync);
     } catch (error) {
       throw translateSQLiteError(error, operation);
+    }
+  }
+
+  [SQLITE_CONNECTION_BEGIN_MIGRATION_0002](
+    asset: SQLiteCursorMigration0002Asset,
+  ): SQLiteConnectionMigration0002Execution {
+    this.#assertOpen("inspect-schema");
+    const assetSnapshot = readSQLiteCursorMigration0002AssetSnapshotIntrinsic(asset);
+    if (!this.#database.isTransaction || this.#transactionMode !== "exclusive"
+        || this.#transactionLineage === null) {
+      throw new CycleStoreProviderError(
+        "GE_CYCLE_STORE_STALE_FENCE",
+        "inspect-schema",
+        "SQLite migration 0002 requires the active BEGIN EXCLUSIVE owner",
+      );
+    }
+    const execution = objectFreezeIntrinsic(
+      reflectApplyIntrinsic(objectCreateIntrinsic, Object, [null]),
+    ) as SQLiteConnectionMigration0002Execution;
+    const state: Migration0002ExecutionState = {
+      affectedRows: 0,
+      asset,
+      assetSnapshot,
+      completedStatementCount: 0,
+      connection: this,
+      lifecycle: "active",
+      nextStatementOrdinal: 1,
+      preparedStatementCount: 0,
+      totalChanges: this.#readTotalChangesCounter(),
+      transactionEpoch: this.#transactionEpoch,
+      transactionLineage: this.#transactionLineage,
+    };
+    reflectApplyIntrinsic(weakMapSetIntrinsic, MIGRATION_0002_EXECUTIONS, [
+      execution as object,
+      state,
+    ]);
+    return execution;
+  }
+
+  [SQLITE_CONNECTION_EXECUTE_MIGRATION_0002_NEXT](
+    execution: SQLiteConnectionMigration0002Execution,
+  ): SQLiteConnectionMigration0002StepSnapshot {
+    const state = execution !== null && typeof execution === "object" && !isProxy(execution)
+      ? reflectApplyIntrinsic(weakMapGetIntrinsic, MIGRATION_0002_EXECUTIONS, [
+        execution as object,
+      ]) as Migration0002ExecutionState | undefined
+      : undefined;
+    if (state === undefined || state.connection !== this) {
+      throw new CycleStoreProviderError(
+        "GE_CYCLE_STORE_INVALID_ARGUMENT",
+        "inspect-schema",
+        "SQLite migration 0002 execution is invalid",
+      );
+    }
+    if (state.lifecycle !== "active") {
+      throw new CycleStoreProviderError(
+        "GE_CYCLE_STORE_CORRUPTION",
+        "inspect-schema",
+        "SQLite migration 0002 execution is terminal",
+      );
+    }
+    if (state.nextStatementOrdinal > state.assetSnapshot.fixedStatementCount) {
+      state.lifecycle = "poisoned";
+      throw new CycleStoreProviderError(
+        "GE_CYCLE_STORE_CORRUPTION",
+        "inspect-schema",
+        "SQLite migration 0002 execution was reused",
+      );
+    }
+    try {
+      this.#assertOpen("inspect-schema");
+      if (!this.#database.isTransaction || this.#transactionMode !== "exclusive"
+          || this.#transactionLineage !== state.transactionLineage
+          || this.#transactionEpoch !== state.transactionEpoch
+          || this.#readTotalChangesCounter() !== state.totalChanges) {
+        throw new CycleStoreProviderError(
+          "GE_CYCLE_STORE_CORRUPTION",
+          "inspect-schema",
+          "SQLite migration 0002 execution owner drifted",
+        );
+      }
+    } catch (error) {
+      state.lifecycle = "poisoned";
+      throw translateSQLiteError(error, "inspect-schema");
+    }
+
+    const ordinal = state.nextStatementOrdinal;
+    const sql = state.assetSnapshot.statements[ordinal - 1];
+    if (sql === undefined) {
+      state.lifecycle = "poisoned";
+      throw new CycleStoreProviderError(
+        "GE_CYCLE_STORE_CORRUPTION",
+        "inspect-schema",
+        "SQLite migration 0002 statement plan is incomplete",
+      );
+    }
+    let statement: StatementSync;
+    let rawResult: unknown;
+    try {
+      statement = hardenSQLiteNativeStatementIntrinsic(reflectApplyIntrinsic(
+        databasePrepareIntrinsic, this.#database, [sql],
+      ) as StatementSync);
+      state.preparedStatementCount += 1;
+      this.#transactionEpoch += 1n;
+      rawResult = reflectApplyIntrinsic(statementRunIntrinsic, statement, []);
+    } catch (error) {
+      state.transactionEpoch = this.#transactionEpoch;
+      this.#synchronizeMigration0002CounterAfterFailure(state);
+      state.lifecycle = "poisoned";
+      throw translateSQLiteError(error, "inspect-schema");
+    }
+
+    // Native run returning is the irreversible statement-completed boundary.
+    // Record it before any later result/counter observation can fail.
+    state.completedStatementCount += 1;
+    state.nextStatementOrdinal += 1;
+    state.transactionEpoch = this.#transactionEpoch;
+    try {
+      if (rawResult === null || typeof rawResult !== "object" || isProxy(rawResult)) {
+        throw new CycleStoreProviderError(
+          "GE_CYCLE_STORE_CORRUPTION",
+          "inspect-schema",
+          "SQLite migration 0002 statement result is invalid",
+        );
+      }
+      const changesDescriptor = reflectApplyIntrinsic(
+        objectGetOwnPropertyDescriptorIntrinsic,
+        Object,
+        [rawResult, "changes"],
+      ) as PropertyDescriptor | undefined;
+      if (changesDescriptor === undefined || !("value" in changesDescriptor)) {
+        throw new CycleStoreProviderError(
+          "GE_CYCLE_STORE_CORRUPTION",
+          "inspect-schema",
+          "SQLite migration 0002 statement result is invalid",
+        );
+      }
+      const runChanges = typeof changesDescriptor.value === "bigint"
+        && changesDescriptor.value >= 0n
+        && changesDescriptor.value <= BigInt(Number.MAX_SAFE_INTEGER)
+        ? Number(changesDescriptor.value)
+        : numberIsSafeIntegerIntrinsic(changesDescriptor.value)
+            && (changesDescriptor.value as number) >= 0
+          ? changesDescriptor.value as number
+          : undefined;
+      if (runChanges === undefined) {
+        throw new CycleStoreProviderError(
+          "GE_CYCLE_STORE_CORRUPTION",
+          "inspect-schema",
+          "SQLite migration 0002 statement changes are invalid",
+        );
+      }
+      const totalChanges = this.#readTotalChangesCounter();
+      const delta = totalChanges - state.totalChanges;
+      if (!numberIsSafeIntegerIntrinsic(delta) || delta < 0) {
+        throw new CycleStoreProviderError(
+          "GE_CYCLE_STORE_CORRUPTION",
+          "inspect-schema",
+          "SQLite migration 0002 total_changes regressed",
+        );
+      }
+      if ((ordinal === 4 || ordinal === 17) && runChanges !== delta) {
+        throw new CycleStoreProviderError(
+          "GE_CYCLE_STORE_CORRUPTION",
+          "inspect-schema",
+          "SQLite migration 0002 statement result disagreed with total_changes",
+        );
+      }
+      state.affectedRows += delta;
+      state.totalChanges = totalChanges;
+      if (state.completedStatementCount === state.assetSnapshot.fixedStatementCount) {
+        state.lifecycle = "completed";
+      }
+      return objectFreezeIntrinsic({
+        affectedRowsDelta: delta,
+        completedStatementCount: state.completedStatementCount,
+        fixedStatementOrdinal: ordinal,
+        preparedStatementCount: state.preparedStatementCount,
+        totalChanges,
+        transactionEpoch: state.transactionEpoch,
+        transactionLineage: state.transactionLineage,
+      });
+    } catch (error) {
+      this.#synchronizeMigration0002CounterAfterFailure(state);
+      state.lifecycle = "poisoned";
+      throw translateSQLiteError(error, "inspect-schema");
+    }
+  }
+
+  #synchronizeMigration0002CounterAfterFailure(state: Migration0002ExecutionState): void {
+    try {
+      if (this.#database.isOpen && this.#database.isTransaction
+          && this.#transactionLineage === state.transactionLineage) {
+        const afterFailure = this.#readTotalChangesCounter();
+        const delta = afterFailure - state.totalChanges;
+        if (numberIsSafeIntegerIntrinsic(delta) && delta >= 0) state.affectedRows += delta;
+        state.totalChanges = afterFailure;
+      }
+    } catch {
+      // The statement/result failure remains primary; the owner poisons and rolls back.
     }
   }
 
@@ -985,6 +1260,10 @@ const sqliteConnectionTotalChangesSnapshotIntrinsic =
   SQLiteConnection.prototype[SQLITE_CONNECTION_TOTAL_CHANGES_SNAPSHOT];
 const sqliteConnectionPrepareNativeReadIntrinsic =
   SQLiteConnection.prototype[SQLITE_CONNECTION_PREPARE_NATIVE_READ];
+const sqliteConnectionBeginMigration0002Intrinsic =
+  SQLiteConnection.prototype[SQLITE_CONNECTION_BEGIN_MIGRATION_0002];
+const sqliteConnectionExecuteMigration0002NextIntrinsic =
+  SQLiteConnection.prototype[SQLITE_CONNECTION_EXECUTE_MIGRATION_0002_NEXT];
 const sqliteConnectionExecTrustedIntrinsic = SQLiteConnection.prototype.execTrusted;
 const sqliteConnectionPrepareIntrinsic = SQLiteConnection.prototype.prepare;
 
@@ -1032,6 +1311,55 @@ export function prepareSQLiteConnectionCursorPublicationReadIntrinsic(
   return reflectApplyIntrinsic(
     sqliteConnectionPrepareNativeReadIntrinsic, connection, [kind, operation],
   );
+}
+
+/** Open one exact, zero-parameter, strict-order migration 0002 execution. */
+export function beginSQLiteConnectionMigration0002ExecutionIntrinsic(
+  connection: SQLiteConnection,
+  asset: SQLiteCursorMigration0002Asset,
+): SQLiteConnectionMigration0002Execution {
+  return reflectApplyIntrinsic(
+    sqliteConnectionBeginMigration0002Intrinsic, connection, [asset],
+  );
+}
+
+/** Prepare and execute only the next fixed migration 0002 statement. */
+export function executeNextSQLiteConnectionMigration0002StatementIntrinsic(
+  connection: SQLiteConnection,
+  execution: SQLiteConnectionMigration0002Execution,
+): SQLiteConnectionMigration0002StepSnapshot {
+  return reflectApplyIntrinsic(
+    sqliteConnectionExecuteMigration0002NextIntrinsic, connection, [execution],
+  );
+}
+
+/** Read real completed progress, including after a failed prepare or run. */
+export function readSQLiteConnectionMigration0002ExecutionSnapshotIntrinsic(
+  connection: SQLiteConnection,
+  execution: SQLiteConnectionMigration0002Execution,
+): SQLiteConnectionMigration0002ExecutionSnapshot {
+  const state = execution !== null && typeof execution === "object" && !isProxy(execution)
+    ? reflectApplyIntrinsic(weakMapGetIntrinsic, MIGRATION_0002_EXECUTIONS, [
+      execution as object,
+    ]) as Migration0002ExecutionState | undefined
+    : undefined;
+  if (state === undefined || state.connection !== connection) {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "inspect-schema",
+      "SQLite migration 0002 execution is invalid",
+    );
+  }
+  return objectFreezeIntrinsic({
+    affectedRows: state.affectedRows,
+    completedStatementCount: state.completedStatementCount,
+    lifecycle: state.lifecycle,
+    nextStatementOrdinal: state.nextStatementOrdinal,
+    preparedStatementCount: state.preparedStatementCount,
+    totalChanges: state.totalChanges,
+    transactionEpoch: state.transactionEpoch,
+    transactionLineage: state.transactionLineage,
+  });
 }
 
 /** Execute a statement read through the captured native StatementSync getter. */
