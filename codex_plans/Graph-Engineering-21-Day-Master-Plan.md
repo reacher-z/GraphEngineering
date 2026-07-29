@@ -13945,3 +13945,110 @@ must continue to stop before the four-write receipt ledger, stage adoption,
 cursor rebind, rules 11/12, TEMP retirement and commit. The three-day public
 preview acceleration does not weaken this dependency order or convert these
 nonclaims into release evidence.
+
+#### 31.37.26 Append-only post-DDL dependency-DAG correction
+
+The delivery batch order in section 31.37.21.7 is corrected before further
+production behavior is written. The protocol object graph itself is acyclic,
+but grouping the post-DDL fence and reader into item 3 while grouping all four
+initial write receipts into item 4 created a batch-level cycle. The fence is
+required to bind the exact migration-`0002` receipt, while the later three
+write receipts are required to bind the fence and reader terminal proof. It is
+therefore impossible to implement those two old batch items in their written
+order without inventing a placeholder authority.
+
+The sole valid object and implementation order is now:
+
+1. active outer publication authority and portable initial-write digest codec;
+2. a pure, non-authorizing target physical-catalog observation codec;
+3. vendored and verified migration `0002` execution, atomic outer authority
+   epoch/`total_changes`/three-ledger watermark advancement, and authentic
+   `migration0002CatalogRebuildReceipt` mint;
+4. exact physical-catalog observation after that receipt followed by
+   receipt-bound post-DDL fence mint;
+5. post-DDL publication reader lease, exact-one cleanup and terminal proof;
+6. baseline-entry receipt using that terminal proof;
+7. baseline-header and operation-sequence-zero receipts; and
+8. validation-first atomic consumption/adoption of the exact four-receipt
+   bundle.
+
+No structural placeholder, test-only registry insertion, caller-supplied
+receipt, fresh-v2 observation, cloned object or type assertion may replace the
+authentic migration receipt at steps 3 and 4. Fence/reader tests that require
+receipt identity remain blocked until the real executor and receipt exist.
+
+The current outer authority reinforces this dependency. It owns mutable
+current transaction epoch and `total_changes` watermarks but exposes no
+unauthenticated advance operation; its snapshot ledger remains zero. Executing
+`0002` without the atomic ledger/receipt transition would make the next active
+assertion correctly classify the database movement as unexplained drift and
+poison the graph. The fix is the authenticated step-3 write transition, not a
+weaker authority assertion.
+
+The current authoritative physical-catalog query supersedes the old query text
+and hash in section 31.37.21.2. It is exactly:
+
+`SELECT type, name, tbl_name AS tableName, sql FROM main.sqlite_schema WHERE lower(name) GLOB 'ge_cycle_*' AND sql IS NOT NULL ORDER BY type COLLATE BINARY, name COLLATE BINARY`
+
+Its SHA-256 is
+`bd9a24c0e8307f473f6160b940effdfb77007144fbeea83628f0b7664df1410c`.
+The `lower(name)` predicate is mandatory. Uppercase and mixed-case owned-prefix
+views and triggers are hostile catalog members and must alter the observation;
+the former case-sensitive `name GLOB` query and `eb165659...` digest are
+historical and forbidden for implementation.
+
+The target observation contract is exact: 34 ordered rows, 5,785 canonical
+UTF-8 bytes, application ID `1195724359`, user version `2`, domain
+`graph-engineering/sqlite-target-physical-catalog/v1\0`, and final digest
+`ca85cf266267fa3eb5443bdf6d957b4b03c795cd6e0232a28c52773f1041fadf`.
+Each row is serialized with keys `name`, `sqlSha256`, `tableName`, `type`.
+`sqlSha256` hashes SQLite's exact SQL text bytes without whitespace
+normalization. Null-SQL autoindexes are excluded by the query, and unrelated
+non-owned objects do not enter the projection.
+
+Before the migration receipt exists, the next authorized production leaf is
+only `cursor-publication-target-catalog.ts`, a package-private and
+non-authorizing observation codec. It may freeze the query/domain/target
+constants and 34-entry inventory, strictly decode exact four-column rows,
+compute per-row SQL hashes, produce the canonical row serialization, verify
+count/bytes/digest/inventory/application/user version, and return a plain
+diagnostic snapshot for internal tests and future fence construction.
+
+That observation result must not be opaque, named as a fence, registered as an
+authority, accepted by a writer/adoption bridge or treated as proof that
+`0002` executed. The module must not import or execute the migration asset,
+advance the authority, run DML, mint a reader lease, read the TEMP projection,
+rebind a cursor or control a transaction. Runtime tests must enforce this
+negative boundary through package-root export checks and a static/dynamic SQL
+allowlist.
+
+Existing catalog utilities cannot be reused blindly. The v1 migration and
+semantic-integrity catalog hashes select a different object set and normalize
+SQL whitespace; both violate the physical fence contract. Existing captured
+connection prepare/owner/change intrinsics may be reused. The old pre-B2
+ordered TEMP handoff reader also cannot become the post-DDL reader: it binds the
+old epoch/change fence, is already consumed, and uses a differently formatted
+SQL literal whose byte digest is not the frozen reader query digest.
+
+The future reader must own a new exact single-line TEMP SELECT constant with
+the frozen digest, even when it reuses the old row decoder, accumulator and
+iterator-cleanup algorithms. It also requires a dedicated cleanup bridge from
+the reader lifecycle into the stage/outer-authority lifecycle. Cleanup must
+close an acquired cursor exactly once before TEMP disposal or authority poison;
+a close failure has the frozen precedence and requires rollback. The completed
+old handoff cleanup slot may not be reused.
+
+The immediate acceptance gates for the pure target-catalog leaf are exact
+constant/query hashing, all 34 inventory entries, exact canonical length and
+digest, strict row/Unicode/text handling, case-insensitive owned-prefix hostile
+objects, unrelated-object exclusion, root export isolation, read-only SQL
+allowlisting, complete SQLite regression, conformance locks, workspace
+typecheck/lint and independent HIGH 0 / MEDIUM 0 / LOW 0 review. Passing that
+leaf authorizes the authentic migration executor/receipt tranche only; it does
+not authorize a fence or reader.
+
+The durable dependency review is recorded in
+`codex_logs/reviews/SQLITE-CURSOR-B3-POST-DDL-DEPENDENCY-AUDIT-2026-07-29.md`.
+This append-only correction preserves the three-day source-preview objective
+without manufacturing completion evidence or weakening any publication,
+crash/reopen, active-manifest or release gate.
