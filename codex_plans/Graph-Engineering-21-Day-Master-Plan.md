@@ -12005,3 +12005,731 @@ This checkpoint authorizes one scoped milestone commit and push by
 a whole-plan, release, schema-validation, specialized-barrier, verifier,
 isolation, adoption or star claim. The next queue remains B3 plus D6 contract
 work as specified above.
+
+### 31.37 SQLite Cursor B3 atomic publication/rebind contract freeze and execution expansion
+
+This section is append-only and does not alter any preceding requirement. It
+resolves the ambiguity discovered after the accepted capability-truth tranche
+and turns `SQLITE-CURSOR-B3-PUBLICATION-REBIND` into an executable, hostile-
+validated contract before either runtime receives permission to mutate a v1
+database permanently. Its current development status is `contract-frozen,
+runtime-not-implemented`. It makes no active-manifest, implementation,
+protocol, release, throughput, adoption, popularity or star-count claim.
+
+#### 31.37.1 Evidence-based boundary correction
+
+Three earlier readings of the work queue could have produced incompatible
+implementations: cursor rebind before `0002`, a standalone B3 migration that
+executes and commits `0002`, or cursor rebind as a subprotocol of the complete
+one-commit v1-to-v2 migration. Only the third interpretation preserves the
+already-frozen atomicity and reopen requirements.
+
+B3 is therefore a private cursor subprotocol inside the outer v1-to-v2 atomic
+migration. It owns neither `BEGIN EXCLUSIVE`, `COMMIT`, `ROLLBACK`, migration
+`0002`, baseline entry/header/sequence publication, lineage, schema metadata,
+descriptor metadata nor the final publication audit. It cannot produce an
+accepted permanent intermediate state. The outer migration owns one live
+exclusive transaction generation and exactly one successful commit.
+
+The normative sequence has nineteen ordered stages:
+
+1. prove the source v1 database is semantically valid;
+2. complete B2 and retain its exact opaque receipt and private stage;
+3. mint the outer publication authority;
+4. execute the manifest-bound `0002` catalog rebuild;
+5. capture and adopt the exact post-`0002` catalog fence;
+6. stream permanent baseline entries;
+7. publish the final baseline header;
+8. publish the operation-sequence singleton at zero;
+9. derive the cursor publication session;
+10. execute the single fixed cursor rebind once;
+11. accept `BLR_CURSOR_REBIND_COUNT`;
+12. accept `BLR_CURSOR_SEAL_MISMATCH` against fresh main-table evidence;
+13. transition the exact private stage to `cursor/clock-complete`;
+14. publish migration lineage;
+15. publish final schema and descriptor metadata;
+16. accept the three publication rules;
+17. prove catalog equality with a fresh v2 database;
+18. accept every physical and semantic postcondition; and
+19. commit once.
+
+Every injected failure before step 19 must reopen as the exact source v1
+logical and physical state. Once commit returns, reopening must observe only a
+complete target v2 and run the complete-v2 audit. A commit-returned path may not
+claim rollback merely because later process cleanup fails.
+
+#### 31.37.2 Frozen source, target and migration identities
+
+The source identity tuple is:
+
+- schema version `1`;
+- provider descriptor
+  `4071e4e5e2cddad01af4f87e4df45fa55bbc4e238674174ce40eca765d2c03fe`;
+- schema identity
+  `f3d961d4d96e93a7fab13a91b374c27ff877a93332ff7ed7426f1fff982baff4`.
+
+The target tuple is independently derived with the TypeScript and Python
+provider codecs. Only schema version and all four reader/writer compatibility
+versions move from one to two; limits, capabilities, protection, governance,
+guarantees and observability remain byte-for-byte equivalent to the current
+SQLite profile. The frozen outputs are:
+
+- schema version `2`;
+- provider descriptor
+  `f632104c823e7559dbbb889b08ac3adb0cf0b6dc528cdb9179c9521ce72cff92`;
+- raw canonical descriptor-body SHA-256
+  `7bb784e57922facd28034dfdd504b37bd60c89e6c09fcd0d3f9adabb8456e214`;
+- complete canonical descriptor SHA-256
+  `27cfd73833b3a8ff29f0b33d2a73a51d1409b40a07e62c96ec4d9910a705a7d9`;
+- schema identity
+  `9fcd96c331999ffb0aca0d9d63ad2b9af073db80012471108c5437a77116f634`.
+
+The descriptor domain is the 59-byte UTF-8 value
+`graph-engineering/cycle-store-provider-descriptor/v1alpha1\0`. The canonical
+body is 1,451 bytes, the domain-separated input is 1,510 bytes and the complete
+descriptor is 1,535 canonical bytes. Both runtimes first reproduce the current
+v1 descriptor and then derive the v2 descriptor; a repeated constant alone is
+not parity evidence.
+
+The frozen migration assets remain preview-only:
+
+- `0002-v1-to-v2-operation-replay.sql` SHA-256
+  `1bf03d68eed45366bc7b34ccc329faa51ea389362db59f6a4307b3033d37a96d`;
+- `schema-v2.sql` SHA-256
+  `5a0923462f7fa5eb1627955292aa3657253258fc5832e365257dc913740866a5`;
+- current preview-manifest SHA-256
+  `f1d447b5b4e925151d04a952376a1386da9196538f18f0be17c56da01d31deaf`.
+
+Freezing these identities does not activate them. The preview manifest may be
+replaced by an active manifest only after both runtimes, all migration paths,
+installed package assets, cross-language reopen and crash/recovery gates pass.
+
+#### 31.37.3 Two-phase unforgeable authority
+
+A single session cannot truthfully commit to a post-DDL catalog fence before
+`0002` creates that fence. B3 therefore uses two module-minted, one-shot
+capabilities with separate write-ledger windows.
+
+The outer publication authority is minted before the first permanent write. It
+binds the exact B2 receipt, projection, stage transfer, baseline TEMP stage,
+SQLite connection, transaction generation, migration-lock capability, source
+identities, expected target identities and expected target catalog. It owns the
+outer migration write ledger for `0002`, baseline publication, lineage and
+metadata. It explicitly does not authorize cursor rebind.
+
+After `0002`, the outer owner validates the observed target catalog and mints a
+private post-DDL catalog fence. Only then may it derive the cursor publication
+session. That session binds all eight exact objects:
+
+1. pre-rebind receipt;
+2. projection reference;
+3. stage ownership transfer;
+4. baseline TEMP stage;
+5. SQLite connection;
+6. outer publication authority;
+7. post-DDL catalog fence; and
+8. cursor publication session.
+
+It also commits to the transaction generation, migration-lock ID, owner, epoch,
+fencing token, source version, target version, active expiry, provider-clock
+evidence, source descriptor/schema and target descriptor/schema. The lock epoch
+must equal its fencing token. The active owner must match both authority phases.
+The active expiry must be strictly after the provider-authoritative observation
+clock. Lock freshness, transaction generation and catalog fence are reproved
+before the first outer permanent write, immediately before cursor rebind,
+before post-rebind verification and immediately before commit.
+
+WeakMap in TypeScript and WeakKeyDictionary/private identity registries in
+Python must back both capabilities. A dataclass, interface, frozen object or
+structurally equal reconstruction is not authority. Clone, serialization round
+trip, value substitution, new connection, rollback/rebegin, second begin,
+second verification, abandoned-session reuse and disposed-stage reuse fail
+before permanent mutation.
+
+#### 31.37.4 Cursor write-ledger window and fixed rebind
+
+The cursor write ledger opens at `cursor-publication-session-minted` and closes
+after `rule-12-main-table-seal-accepted`. Outer migration writes are excluded
+because the separate outer authority owns and accounts for them. Inside the
+cursor window the only allowed permanent statement is:
+
+```sql
+UPDATE main.ge_cycle_cursors
+SET descriptor_hash = ?, schema_identity_sha256 = ?
+WHERE descriptor_hash = ? AND schema_identity_sha256 = ?
+```
+
+The parameters are target descriptor, target schema, source descriptor and
+source schema. The normalized SQL SHA-256 is
+`6fc61b515e758a1e84745af28783f4e9dcee5e76f80f314aa25a08980d2fef91`.
+It is module-owned, prepared once, executed once and finalized once. Caller SQL,
+triggers, a same-value replay, a second execution or any other permanent write
+poisons the cursor owner.
+
+Rule 11 accepts only when all four observations equal the exact cursor count in
+the original B2 receipt:
+
+- native statement affected-row count;
+- `SELECT changes() AS affected_rows` result;
+- `total_changes` delta for the cursor window; and
+- cursor publication write-ledger delta.
+
+The fixed `changes()` SQL has SHA-256
+`a6ab435eb54879f942436129997f231de19504b11028b55b014fddc2bb42e112`.
+A newly counted table, TEMP row count or post-rebind count cannot replace the
+receipt count. A rule-11 failure contributes one aggregate count-mismatch unit,
+poisons the owner and requires caller rollback.
+
+#### 31.37.5 Constant-space, sorter-free rule-12 proof
+
+An initial proposed direct main scan ordered by `(token_hash, tenant_id)` was
+rejected by hostile review because v2 has only a `(tenant_id, token_hash)` main
+primary key. Real EQP produced `USE TEMP B-TREE FOR ORDER BY`, which violates
+the no-sorter and bounded-resource requirements even when application fetch
+size is one.
+
+The accepted design reuses the exact owner-fenced B2 TEMP seal table only as an
+ordered key driver. Its `WITHOUT ROWID` primary key is
+`(token_hash, tenant_id)`, so the fixed key query requires no sorter:
+
+```sql
+SELECT tenant_id, token_hash
+FROM temp.ge_blr_cursor_seal
+ORDER BY token_hash COLLATE BINARY, tenant_id COLLATE BINARY
+```
+
+Its normalized SHA-256 is
+`1694ab6fe938203b0d8f6cb72cf82238e89234c21086ff5d224c7de4db7b1266`.
+For each key, the verifier executes a fresh main primary-key point lookup:
+
+```sql
+SELECT tenant_id, token_hash, kind, principal_hash, authorization_hash,
+       stream_id, checkpoint_scope, request_scope_blob, page_size,
+       next_position, snapshot_tail_sequence, snapshot_tail_record_hash,
+       descriptor_hash, schema_identity_sha256, snapshot_blob, created_at_ms,
+       expires_at_ms, consumed_at_ms
+FROM main.ge_cycle_cursors
+WHERE tenant_id = ? AND token_hash = ?
+LIMIT 1
+```
+
+Its normalized SHA-256 is
+`bd056ee55f2bd27eee3277ed7bfee8ae7b7db935edc3cf0937fc8167e2eac342`.
+The TEMP row never supplies post-rebind physical evidence. The fresh 18-column
+main row supplies the identities, immutable fields and BLOB evidence. A
+separate fixed main count, SHA-256
+`60a469fbd75f9851c978b7a5b7ca1ac89ef446d3bd91f6cc1efa7e0611974383`,
+detects extra rows. Missing lookups detect deletions. Equal count plus one
+successful lookup for every original key closes equal-count replacement.
+
+Actual EQP is part of fixture validation. The driver must scan the exact TEMP
+primary-key order; every point lookup must report the main primary key with
+`tenant_id=? AND token_hash=?`. `AUTOMATIC`, `MATERIALIZE`, `USE TEMP B-TREE`
+and `CO-ROUTINE` are forbidden. No guessed SQLite autoindex name is required.
+
+Each driver fetch, point lookup and seal append holds at most one raw main row,
+one decoded carrier and one active point operation. Cancellation is polled per
+row. The accepted `sqlite-cursor-seal/v1` row and seal domains remain unchanged.
+The recomputed main count and immutable root must equal the exact B2 receipt;
+every main row's two mutable identities must equal the frozen target tuple.
+
+Rule 12 emits one aggregate `post-rebind-receipt-mismatch` unit. It does not
+invent a cursor-row diagnostic for deletion, count drift, equal-count
+replacement or a root mismatch that cannot be localized from the receipt.
+Success alone performs the one-way
+`publication-active -> cursor/clock-complete` transition. That capability is a
+later publication-rule prerequisite, not permission to commit.
+
+#### 31.37.6 Trusted literal, validator and parser hardening
+
+The canonical contract consists of:
+
+- `spec/conformance/sqlite-cursor-publication-rebind-v2.case.json`;
+- its closed Draft 2020-12 schema;
+- its executable validator;
+- sixteen hostile `node:test` cases;
+- `spec/sqlite-cursor-publication-rebind-v2.md`;
+- a Python descriptor derivation report; and
+- a TypeScript/Python parity test.
+
+The fixture's trusted canonical SHA-256 is
+`2585c7ebf5b36fad74e4a12cb17076bc2cc1d164cb1d9ecfbf719913feeb97a7`.
+The validator contains that independent trusted anchor; it does not accept a
+semantic mutation merely because an input updates its own digest. It also
+hardcodes exact SQL literals, SQL hashes, identities, rules, authority objects,
+session commitments, stage order, state transitions, boundary-local failure
+precedence, hostile obligations, crash boundaries, cancellation labels,
+statement lifecycle boundaries, cleanup faults and parity gates.
+
+Hostile tests mutate and maliciously re-sign commitments, affected-count SQL,
+rule semantics, obligation inventories and parity gates. All remain rejected.
+The strict JSON parser constructs null-prototype objects, records every key as
+an own data property and rejects duplicate keys, trailing content,
+`__proto__` and `constructor` unknown-field attacks. Closed schema validation
+and the trusted digest run before a contract can become evidence.
+
+#### 31.37.7 Boundary-local failure and lifecycle order
+
+A single flat failure list cannot express cancellation safely across an atomic
+migration. The contract freezes four local orders:
+
+1. before the first permanent write: receipt provenance, exact object graph,
+   outer authority, lock, transaction and expected catalog outrank
+   cancellation;
+2. before cursor rebind: derived session, fresh lock, transaction and post-DDL
+   fence outrank cancellation, after which cancellation may stop before the
+   update;
+3. after a statement starts: write-ledger, statement-shape and rules 11/12
+   primary failures outrank later cancellation, and cleanup is last; and
+4. after commit returns: complete-v2 reopen audit outranks cleanup, with no
+   rollback claim.
+
+The literal freezes sixteen cancellation labels covering outer authority,
+`0002`, post-DDL fence, session mint, rebind prepare/execute, rule 11, key-driver
+prepare/fetch, point-lookup prepare/execute/fetch, rule-12 finish and completion.
+It freezes sixteen statement lifecycle boundaries and seven cleanup faults.
+Every statement finalizes exactly once, every cursor closes exactly once, rule
+12 polls cancellation per row, primary failure outranks cleanup failure and a
+poisoned result exposes neither receipt nor root.
+
+#### 31.37.8 Scheduled B2 evidence is a distinct prerequisite lane
+
+Fast B2 characterization remains exactly 128 and 1,024 rows. It must not be
+silently relabeled as 10K/100K evidence. A measured full 1,024-row two-runtime
+run on 2026-07-29 required approximately three minutes and peaked near 112 MiB
+RSS. Independent measured components were approximately 24 seconds for
+TypeScript and 148 seconds for Python at 1,024 rows. The accepted cross-runtime
+roots remain:
+
+- 128 rows:
+  `fc3699d41e2c4c9b0f45aa6c2afc1cfcbb7a89d1476420995427dd827bac9e32`;
+- 1,024 rows:
+  `9ad8d233c1f4d4717c126a9cf3aeb89675a3ddb15682e68b230c6fbec3e9e9a2`.
+
+The existing Python evidence generator is not eligible for 100K: it constructs
+a population-sized `rows` list and uses an in-memory database. Removing an
+allow-list is not evidence. A separate scheduled lane must use a real disk
+database, constant-live-row generation, one population/sample per subprocess
+and parent-observed barriers.
+
+On Linux, FILE-backed SQLite TEMP storage commonly appears as an unlinked
+`/var/tmp/etilqs_* (deleted)` file descriptor and has no usable path in
+`PRAGMA database_list`. The live worker must expose a before-cleanup barrier so
+the parent can inspect `/proc/<pid>/fd`, use `fstat`, record TEMP backing bytes,
+sample RSS and record database/WAL/SHM sizes. TEMP pages and page size remain
+SQLite-level corroboration, not a substitute for file evidence.
+
+The scheduled lane must freeze before execution:
+
+- exact populations 10,000 and 100,000;
+- warmup and measured sample counts;
+- raw phase timing fields;
+- nearest-rank or another exact percentile algorithm;
+- p50, p95 and p99 derivation;
+- RSS sampling interval and peak definition;
+- TEMP-fd discovery and ambiguity handling;
+- DB/WAL/SHM missing-file semantics;
+- `seed-complete`, `campaign-start`, `campaign-complete` and `before-cleanup`
+  worker barriers;
+- root, count, 15-EQP and constant-live-resource assertions;
+- per-runtime timeouts and cancellation cleanup;
+- TS/Python root parity;
+- retained raw artifacts and environment metadata; and
+- conservative `implementationClaim:false`, `releaseGate:false` and
+  `productionThroughputClaim:false` regardless of measured speed.
+
+Initial one-sample budgets based on measured scaling are 15/90 minutes for
+TypeScript 10K/100K and 60 minutes/6 hours for Python 10K/100K. Runtime and
+population jobs should be a CI/manual matrix with artifact fan-in rather than a
+serial developer gate. Repeated samples may require a dedicated scheduled
+runner; wall-clock cost must be reported, never hidden.
+
+#### 31.37.9 B2 subprocess crash/replay prerequisite
+
+Cooperative cancellation tests do not prove process-crash behavior. A new B2
+worker mode must reuse the existing ACK/barrier/SIGKILL process harness and
+pause at source capture, TEMP stage creation, first/middle/last cursor row,
+rule transitions, seal completion and pre-rebind completion.
+
+After every forced kill, reopen must prove:
+
+- exact old logical image and v1 identities;
+- no permanent B2 or v2 partial state;
+- disappearance of connection-local TEMP objects;
+- clean catalog, foreign-key and integrity checks;
+- no leaked migration authority; and
+- a new transaction, source capture, receipt, TEMP stage and campaign converge
+  on the same cursor count/root.
+
+No cross-process test may pretend to reuse an opaque receipt object. Retry is
+always a fresh authority graph. BUSY/LOCKED, process loss during TEMP file use,
+cleanup-only failure and primary-plus-cleanup precedence remain explicit.
+
+#### 31.37.10 Next implementation slices and merge ownership
+
+The next maximum-parallel development queue is intentionally split into files
+with disjoint owners:
+
+1. `B2-SCHEDULED-EVIDENCE-CONTRACT`: shared schema, exact worker protocol,
+   quantile algorithm, artifact schema and hostile validator;
+2. `B2-SCHEDULED-TS`: disk-backed constant-space TypeScript worker with live
+   barrier metrics;
+3. `B2-SCHEDULED-PY`: disk-backed generator with no population-sized Python
+   collection and the same barrier report;
+4. `B2-CRASH-REPLAY`: new process worker modes and reopen proof;
+5. `B3-AUTHORITY-BRIDGE-TS`: package-private outer authority, post-DDL fence,
+   derived cursor session and write-ledger window, without permanent mutation;
+6. `B3-AUTHORITY-BRIDGE-PY`: exact mirrored private capability chain;
+7. `V2-ASSET-LOADER-TS`: vendor and validate v2 preview assets without changing
+   the active v1 manifest;
+8. `V2-ASSET-LOADER-PY`: identical wheel/sdist source assets and checksums,
+   still refusing active v2;
+9. `B3-REDBAR-TS` and `B3-REDBAR-PY`: fixture-consuming tests for all 33
+   hostile obligations, 20 fault boundaries and lifecycle labels;
+10. `B3-REBind-TS` and `B3-REBind-PY`: fixed update, exact affected counts,
+    point-lookup seal and one-way completion behind package-private interfaces;
+11. `V1-V2-ATOMIC-ORCHESTRATOR`: one owner integrates `0002`, permanent
+    baseline, sequence, B3, lineage, metadata, publication rules and commit;
+12. `V2-REOPEN-INTEROP`: fresh-v2, v1-to-v2, v0-to-v1-to-v2, existing-v2,
+    future/foreign refusal and both cross-runtime directions;
+13. `V2-FAULT-CRASH`: every pre-commit fault reopens v1, commit-returned reopens
+    complete v2 and fresh retry completes once;
+14. `V2-LEDGER-REPLAY`: format-2 request bytes, nine mutation families, global
+    contiguous sequence, CAS, retry and bidirectional physical reconciliation;
+15. `V2-BACKUP-ARTIFACT`: backup/restore/continue plus npm, wheel and sdist byte
+    parity; and
+16. `B3-FINAL-AUDIT`: full focused/adjacent/runtime suites, fixture/docs/package
+    gates and independent HIGH/MEDIUM/LOW zero review before active-manifest
+    switch.
+
+`operation-baseline-stage.ts` and its large ownership test remain single-owner
+files. The Python stage/campaign mirrors also remain single-owner. Spec lanes
+must never bulk-format or clean the existing unrelated D4, D9, budget,
+redaction, subgraph or progress-scanner worktree. `codex_logs/task-registry.json`
+and the existing daily log already contain unrelated edits and are excluded
+from this slice.
+
+#### 31.37.11 Explicit nonclaims and delivery meaning
+
+This contract tranche closes design ambiguity and establishes executable
+rejection gates. It does not implement the authority bridge, permanent cursor
+update, rules 11/12 in either runtime, `0002` runtime execution, permanent
+baseline publication, v2 ledger, active v2 reopen, crash recovery, backup,
+artifact parity, 10K/100K scheduled evidence or a stable release.
+
+It also cannot guarantee a GitHub star count. The 5K/6K objective remains a
+product and community target requiring documentation, demos, integrations,
+external users, maintainers, releases and sustained outreach after technical
+delivery. Forecasts and aspirations must remain distinct from executable
+capability evidence.
+
+No future checkpoint may claim the plan is complete merely because this B3
+contract is frozen. Completion requires implementing and verifying every
+preceding and appended acceptance leaf, recording exact evidence, resolving
+all independent audit findings and preserving the existing append-only plan.
+
+#### 31.37.12 Append-only post-review correction: authority adoption, cancellation and TEMP retirement
+
+This subsection supersedes only the conflicting details inside appended
+section 31.37; it does not delete or rewrite them. Final implementation must use
+the stricter requirements here.
+
+The outer atomic sequence contains 22 stages, not 19. After sequence zero, a
+package-private stage-adoption intrinsic consumes exact module-minted receipts
+for migration `0002`, baseline entries, baseline header and sequence zero. It
+validates statement identity, affected counts and aggregate `total_changes`,
+adopts the exact post-DDL catalog fence, retires the old v1 catalog/change fence
+and mints a one-shot stage-adoption receipt. Only then may the cursor
+publication session be derived.
+
+The transaction promise is same `BEGIN EXCLUSIVE` lineage, not an unchanged
+internal epoch number. TypeScript and Python may advance private mutation epochs
+differently; cross-runtime epoch equality is false. Only the trusted bridge may
+adopt an internal epoch. Caller-created receipts, unexplained DDL/DML and
+partially accounted outer writes fail closed.
+
+The exact object graph now additionally includes the opaque migration-lock
+capability, exact provider-clock evidence and stage-adoption receipt. Both
+authority phases commit to the capability and clock object identities, active
+expiry and provider-now value. The strict validity condition is
+`providerNowMs < activeExpiresAtMs`; equality is expired. Cloned lock
+capability, substituted clock evidence, expiry before/equal now and expiry drift
+after session mint are mandatory hostile cases.
+
+Rule 12 does not use aggregate `SELECT count(*)`. It performs a cancellable,
+one-row main-primary-key scan in `(tenant_id, token_hash)` order to count main
+keys and detect extras, while the TEMP `(token_hash, tenant_id)` driver feeds
+fresh main point lookups for the immutable seal. All three queries require real
+sorter-free primary-key EQP. The main-key scan normalized SHA-256 is
+`09d1ce669070093fbbf0dfd8ce7e2a7bbfde96d051b3ce9341be85495479ec32`.
+
+Rule 12 may hold at most two active cursors: one long-lived driver and one point
+cursor. Every point cursor closes before the next driver fetch. Cleanup order
+is point, driver, TEMP stage and outer cleanup. TypeScript promises logical
+statement-ownership retirement, not a nonexistent native
+`StatementSync.finalize()` method.
+
+Cancellation labels are request-injection points, not unconditional immediate
+throws. Once rebind begins, statement release, changes result, write ledger and
+rule 11 primary proof occur before cancellation observation. Once a rule-12 row
+begins, that row is decoded/validated and its point cursor closes before
+cancellation. After the last row, accumulator finish and count/root/target-
+identity comparisons occur before cancellation. Cleanup remains last.
+
+After publication rules, the outer owner runs fresh-v2 catalog equality and all
+physical/semantic postconditions, then retires/drops the exact TEMP stage, then
+reproves the final migration-lock/transaction fence, then commits. A cleanup-
+only TEMP retirement failure prevents commit. If an earlier primary exists,
+retirement failure never replaces it.
+
+The final frozen fixture has 22 ordered stages, 38 hostile obligations, 20
+fault boundaries, 20 cancellation labels, 16 statement lifecycle boundaries,
+seven cleanup faults and trusted canonical SHA-256
+`b19d754dd68f78f8197532cee23488941e7ab8e054886de15b3c6f2349783c67`.
+All implementation and release claims remain false until the runtime bridge,
+rebind, atomic orchestrator, crash/reopen, scale and artifact gates pass.
+
+#### 31.37.13 Append-only final contract correction: fresh clock chain and exact retirement authority
+
+This subsection supersedes only the counts and authority details in appended
+sections 31.37 through 31.37.12. It preserves every original-plan byte and
+records the stricter candidate produced by the final independent reviews.
+
+The atomic sequence contains 23 ordered stages. The new stage is
+`pre-retirement-stage-fence-adopted`, ordered after publication rules,
+fresh-v2 catalog equivalence and physical/semantic postconditions, and before
+`cursor-temp-stage-retired`. The final frozen candidate contains 63 hostile
+obligations and trusted canonical SHA-256
+`047dae82864b72fda1e2877be4e2a149ca3c7adefbd3394bfbfffbe7b66436ef`.
+The 20 fault boundaries, 20 cancellation labels, 16 statement lifecycle
+boundaries and seven cleanup faults remain unchanged. All implementation,
+release, production-throughput and active-manifest claims remain false.
+
+##### 31.37.13.1 Provider-clock capability and four fresh receipts
+
+Runtime implementation must mint one opaque, package-private, non-cloneable
+provider-clock capability bound to the exact provider clock source, SQLite
+connection, live `BEGIN EXCLUSIVE` lineage, migration-lock capability and
+outer publication authority. Callers cannot supply `providerNowMs`.
+
+The capability is a closed four-boundary state machine and must mint four
+different opaque object identities in exact order:
+
+1. `outerClockEvidence` before the first permanent mutation;
+2. `preRebindClockEvidence` before cursor rebind;
+3. `preVerificationClockEvidence` before publication verification;
+4. `preCommitClockEvidence` after TEMP retirement and before commit.
+
+At every boundary it must reread the live lock row, read the bound provider
+clock again, validate a safe integer, prove the exact lock ID, owner, epoch,
+fencing token, source/target versions and unchanged committed expiry, prove
+`epoch == fencingToken`, prove provider time is nondecreasing and enforce the
+strict inequality `freshProviderNowMs < committedActiveExpiresAtMs`. Numeric
+timestamp equality does not prove evidence freshness. Every receipt binds its
+boundary ordinal, capability identity, connection, transaction lineage, lock
+capability, live lock tuple, provider time, active expiry and the preceding
+receipt identity. Each receipt is consumed exactly once by its intended owner.
+
+Skipped, repeated, reordered or fifth observations fail. A previous-boundary
+receipt cannot be replayed, even when the numeric timestamp is unchanged. A
+clock that advances past an unchanged expiry after session mint, after rule 12
+or after TEMP retirement prevents verification or commit. Clock/lock authority
+failure at a boundary outranks simultaneous cancellation.
+
+##### 31.37.13.2 Post-cursor outer-write receipts and second adoption
+
+After `cursor/clock-complete`, migration lineage publication and
+schema/descriptor metadata publication remain exactly two outer-authority
+permanent writes. Each write mints a module-owned, opaque, one-shot receipt
+binding normalized SQL identity, parameters/results, affected count,
+`total_changes` before/after/delta, outer-ledger sequence/delta, exact
+connection, transaction lineage, outer authority and post-DDL catalog fence.
+
+The package-private pre-retirement adoption intrinsic runs only after the
+following exact objects exist and are successful:
+
+- cursor/clock completion capability;
+- original stage-adoption receipt;
+- lineage publication receipt;
+- schema/descriptor metadata publication receipt;
+- publication-rules receipt;
+- fresh-v2 catalog-equivalence receipt;
+- physical/semantic-postconditions receipt; and
+- pre-verification clock receipt.
+
+It proves the two writes occurred exactly once and in order; all SQL identities,
+affected counts, `total_changes` and outer-ledger deltas agree; no unexplained
+permanent write occurred after initial adoption; all three audits produced zero
+permanent-write delta; the exact target catalog remains live; the same
+`BEGIN EXCLUSIVE` lineage remains active; and no cursor, statement or cleanup
+owner is unaccounted. Only then may it adopt the runtime-private current epoch
+and mint one opaque `preRetirementStageFenceReceipt`. It never mints a second
+initial adoption receipt. After the pre-retirement receipt is minted, every
+permanent write is forbidden.
+
+##### 31.37.13.3 Exact TEMP retirement
+
+The retirement intrinsic consumes the exact pre-retirement receipt once. It
+requires zero active main-key-count, key-driver and point cursors and no live
+statement owner. The receipt-bound TEMP inventory identifies every object by
+type, name, table name, root page or runtime generation, normalized SQL digest
+and stage ownership generation. Name-only matching is insufficient.
+
+Before each reverse-ownership-order drop, runtime code must recheck exact
+identity. It must drop every owned object, preserve unrelated caller TEMP
+objects, prove all exact objects absent, prove reserved owned-prefix residue
+count zero and prove cursor/outer permanent ledgers plus `total_changes` did
+not move. Partial retirement, identity substitution, same-name replacement,
+extra prefix residue or cleanup failure cannot mint success and cannot permit
+commit. Successful retirement mints one opaque `stageRetirementReceipt`.
+
+##### 31.37.13.4 Final commit fence
+
+The final fence consumes the exact retirement receipt, fresh pre-commit clock
+receipt, publication-rules receipt, fresh-v2 catalog receipt and physical/
+semantic postconditions receipt. It freshly proves the live transaction
+lineage, exact lock tuple and strict expiry, target catalog, outer and cursor
+write ledgers, `total_changes`, zero owned TEMP residue, absence of permanent
+writes after pre-retirement adoption and absence of unexplained internal-epoch
+adoption. Success mints a one-shot `finalCommitFenceReceipt`; only the atomic
+migration commit intrinsic may consume it, exactly once. A boolean result,
+structurally equal object, clone or serialized reconstruction grants no commit
+authority.
+
+##### 31.37.13.5 Main-key count cancellation and phase cleanup
+
+The sorter-free main-primary-key scan owns at most one cursor and one live key
+row. A started row completes fetch-result validation, arity/storage validation,
+strict key ordering and checked safe-count increment before cancellation is
+observed. Cancellation before a fetch closes and clears the cursor before it is
+exposed. Terminal fetch proves the terminal iterator result, closes and clears
+ownership, freezes the count and only then observes cancellation. The count
+cursor must be closed before key-driver preparation.
+
+Cleanup is phase-specific, never a fictitious three-cursor stack:
+
+- count phase: main-key-count cursor, TEMP stage, outer cleanup;
+- seal phase: point cursor, key-driver cursor, TEMP stage, outer cleanup.
+
+Earlier row/fetch/decode/order/count primary failure outranks count-cursor close
+failure; close failure outranks cancellation; cancellation outranks later TEMP
+or outer cleanup failure. Every acquired cursor closes and clears ownership
+exactly once. The global live-cursor maximum remains two during the seal phase.
+
+##### 31.37.13.6 Required implementation leaves
+
+- `B3-CLOCK-01`: four boundary evidence object identities are distinct and ordered.
+- `B3-CLOCK-02`: every evidence receipt is consumed exactly once and stale replay fails.
+- `B3-CLOCK-03`: every boundary rereads the live lock and provider clock.
+- `B3-CLOCK-04`: regression, equality/past expiry and fifth observation fail closed.
+- `B3-CLOCK-05`: post-session clock advance beyond expiry blocks verify/commit.
+- `B3-CLOCK-06`: clock/lock authority failure precedes simultaneous cancellation.
+- `B3-ADOPT-01`: lineage and metadata writes emit exact outer-authority receipts.
+- `B3-ADOPT-02`: pre-retirement adoption closes SQL/count/ledger/catalog/audit evidence.
+- `B3-ADOPT-03`: its receipt is opaque, single-use and forbids later permanent writes.
+- `B3-RETIRE-01`: TEMP retirement uses full identity rather than names alone.
+- `B3-RETIRE-02`: zero owned residue is proved and unrelated TEMP objects survive.
+- `B3-RETIRE-03`: partial/cleanup failure cannot mint a retirement receipt or commit.
+- `B3-RETIRE-04`: final fence consumes the exact retirement receipt once.
+- `B3-FENCE-01`: final fence freshly reproves clock, lock, transaction, catalog and ledgers.
+- `B3-FENCE-02`: a one-shot final receipt is the only commit authority.
+- `B3-FENCE-03`: any permanent write after retirement prevents commit.
+- `B3-COUNT-01`: count scan is one-row, sorter-free, ordered and overflow checked.
+- `B3-COUNT-02`: count cursor closes before driver preparation.
+- `B3-COUNT-03`: count and seal cleanup orders remain separate.
+- `B3-COUNT-04`: started-row primary proof precedes cancellation observation.
+- `B3-COUNT-05`: cursor-close failure precedence is exact and hostile-tested.
+- `B3-COUNT-06`: cancellation/failure paths close and clear ownership exactly once.
+- `B3-COUNT-07`: resource evidence proves no count+driver+point three-cursor overlap.
+
+No B3 implementation leaf may be checked until both TypeScript and Python
+runtime behavior, hostile tests, crash/reopen matrices and artifact parity
+demonstrate these requirements. A contract-only commit is allowed only after a
+fresh independent review reports HIGH 0 / MEDIUM 0 / LOW 0.
+
+#### 31.37.14 Append-only authority-chain correction after root-page reuse test
+
+This subsection supersedes only the candidate digest/count and the ambiguous
+receipt/retirement details in appended section 31.37.13. A real SQLite test
+proved that dropping and recreating the same TEMP table with identical DDL may
+reuse the same `rootpage`; root page is therefore diagnostic only and can never
+be sufficient object identity.
+
+The stable contract candidate retains 23 stages and now freezes 80 hostile
+obligations with trusted canonical SHA-256
+`9ed27de3dadb8989b51da9864b2109f0b760043bea52b3c73234013150e74ef3`.
+
+Every owned TEMP object must carry an unforgeable module-minted runtime object
+generation nonce plus the guarded connection's TEMP-catalog mutation epoch.
+Every TEMP DDL advances that epoch. Pre-retirement adoption binds the starting
+epoch; retirement owns the only authorized mutation chain, and each exact
+owned drop consumes the prior epoch receipt and mints the next. Unexplained
+DDL, a same-name/same-DDL replacement, root-page reuse, missing links or an
+unaccounted extra object break the chain and prevent a retirement receipt.
+
+Clock evidence consumption is now explicit and symmetric:
+
+- outer publication authority consumes `outerClockEvidence` exactly once;
+- publication session consumes `preRebindClockEvidence` exactly once;
+- cursor-clock capability consumes `preVerificationClockEvidence` exactly once;
+- final fence consumes `preCommitClockEvidence` exactly once.
+
+The cursor-clock capability is itself opaque, module-minted, single-use and
+clone-rejected, and binds the exact clock/lock/connection/transaction/session
+tuple plus rules 11/12 success receipts. Post-cursor adoption verifies its
+consumed-evidence tombstone without consuming the pre-verification receipt a
+second time.
+
+Lineage, metadata and all three audit receipts are consumed exactly once by
+pre-retirement adoption, which mints five consumed-receipt tombstones. The
+opaque pre-retirement receipt commits original receipt identities, tombstones,
+connection/transaction/catalog authority, ledger/changes watermarks, TEMP
+inventory and mutation epoch. The opaque retirement receipt transitively
+commits that object plus the authorized TEMP-drop epoch chain and zero residue.
+The opaque final commit-fence receipt consumes only the retirement receipt and
+fresh pre-commit clock receipt; it relies on the retirement receipt's
+transitive consumed-audit tombstones rather than re-consuming audit receipts.
+All three receipts are module-minted, single-use and clone-rejected with exact
+commitment inventories.
+
+Main-key count cleanup is branch-specific. Success closes and clears the count
+cursor before preparing the driver. Failure/cancellation closes count then
+TEMP/outer cleanup; seal failure/cancellation closes point then driver then
+TEMP/outer cleanup. Terminal cancellation is observed only after terminal
+proof, cursor closure/ownership clear and frozen count. Fetch, decode, order,
+count or terminal primary failure outranks close failure; close failure outranks
+cancellation; cancellation outranks later TEMP/outer cleanup failure.
+
+The additional implementation leaves are:
+
+- `B3-TEMP-ID-01`: same-name/same-DDL/rootpage-reuse replacement is rejected.
+- `B3-TEMP-ID-02`: every TEMP DDL advances a guarded mutation epoch.
+- `B3-TEMP-ID-03`: multi-object retirement has a complete authorized epoch chain.
+- `B3-RECEIPT-01`: all four clock evidence receipts have one explicit consumer.
+- `B3-RECEIPT-02`: cursor-clock authority commits the consumed verification receipt.
+- `B3-RECEIPT-03`: outer-write/audit receipt consumption mints exact tombstones.
+- `B3-RECEIPT-04`: three transitive authority receipts reject clone and drift.
+- `B3-RECEIPT-05`: final fence never re-consumes single-use audit receipts.
+
+This still freezes design only. Runtime implementation, hostile execution,
+crash/reopen, scale, cross-runtime artifact parity and active-manifest switch
+remain pending and may not be claimed by this contract milestone.
+
+#### 31.37.15 Append-only contract-freeze acceptance checkpoint
+
+The exact candidate in section 31.37.14 passed three independent reviews, each
+reporting HIGH 0 / MEDIUM 0 / LOW 0 against digest
+`9ed27de3dadb8989b51da9864b2109f0b760043bea52b3c73234013150e74ef3`.
+Focused B3 tests passed 19/19, the combined SQLite ledger contract passed
+46/46, TypeScript/Python descriptor parity passed 1/1, all 79 JSON fixtures and
+38 case manifests validated, 288 documentation links passed, all eight
+workspace packages passed lint/typecheck, and the Python derivation report
+passed Ruff lint/format.
+
+This checks only the `B3-CONTRACT-FREEZE` leaf and authorizes its isolated
+milestone commit. Every runtime, migration, crash/reopen, scheduled scale,
+artifact parity, active-manifest, release, adoption and star-growth leaf remains
+open. The immediate next implementation slice is `B3-AUTHORITY-BRIDGE`: add
+red tests and package-private TypeScript/Python objects for the provider-clock
+capability, initial stage adoption and post-cursor/pre-retirement authority
+chain without executing permanent v2 publication or switching the manifest.

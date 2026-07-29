@@ -1,0 +1,824 @@
+{
+  "schemaVersion": 1,
+  "id": "sqlite-cursor-publication-rebind-v2",
+  "status": "contract-frozen",
+  "claims": {
+    "implementationClaim": false,
+    "protocolClaim": false,
+    "releaseGate": false,
+    "productionThroughputClaim": false,
+    "activeManifestClaim": false
+  },
+  "boundary": {
+    "stableTaskId": "SQLITE-CURSOR-B3-PUBLICATION-REBIND",
+    "role": "cursor-subprotocol-within-atomic-v1-to-v2-migration",
+    "standaloneCommitAllowed": false,
+    "ownsTransactionCommands": false,
+    "ownsMigration0002": false,
+    "ownsBaselinePublication": false,
+    "ownsMetadataPublication": false,
+    "firstPermanentMutationRequiresAllAuthorityChecks": true,
+    "singleAtomicMigrationCommit": true,
+    "acceptedPermanentIntermediateStates": [],
+    "requiredPredecessorState": "pre-rebind-complete",
+    "successfulState": "cursor/clock-complete"
+  },
+  "identities": {
+    "source": {
+      "schemaVersion": 1,
+      "descriptorHash": "4071e4e5e2cddad01af4f87e4df45fa55bbc4e238674174ce40eca765d2c03fe",
+      "schemaIdentitySha256": "f3d961d4d96e93a7fab13a91b374c27ff877a93332ff7ed7426f1fff982baff4"
+    },
+    "target": {
+      "schemaVersion": 2,
+      "descriptorHash": "f632104c823e7559dbbb889b08ac3adb0cf0b6dc528cdb9179c9521ce72cff92",
+      "descriptorBodySha256": "7bb784e57922facd28034dfdd504b37bd60c89e6c09fcd0d3f9adabb8456e214",
+      "descriptorCanonicalSha256": "27cfd73833b3a8ff29f0b33d2a73a51d1409b40a07e62c96ec4d9910a705a7d9",
+      "schemaIdentitySha256": "9fcd96c331999ffb0aca0d9d63ad2b9af073db80012471108c5437a77116f634"
+    },
+    "migration": {
+      "id": "v1-to-v2-operation-replay",
+      "sqlSha256": "1bf03d68eed45366bc7b34ccc329faa51ea389362db59f6a4307b3033d37a96d",
+      "schemaSqlSha256": "5a0923462f7fa5eb1627955292aa3657253258fc5832e365257dc913740866a5",
+      "previewManifestSha256": "f1d447b5b4e925151d04a952376a1386da9196538f18f0be17c56da01d31deaf",
+      "previewOnly": true
+    }
+  },
+  "authority": {
+    "requiredExactObjects": [
+      "preRebindReceipt",
+      "projectionReference",
+      "stageOwnershipTransfer",
+      "baselineTempStage",
+      "sqliteConnection",
+      "migrationLockCapability",
+      "providerClockCapability",
+      "outerClockEvidence",
+      "preRebindClockEvidence",
+      "preVerificationClockEvidence",
+      "preCommitClockEvidence",
+      "outerPublicationAuthority",
+      "postDdlCatalogFence",
+      "stageAdoptionReceipt",
+      "publicationSession",
+      "cursorClockCapability",
+      "migrationLineagePublicationReceipt",
+      "schemaDescriptorMetadataPublicationReceipt",
+      "publicationRulesReceipt",
+      "freshV2CatalogReceipt",
+      "physicalSemanticPostconditionsReceipt",
+      "preRetirementStageFenceReceipt",
+      "stageRetirementReceipt",
+      "finalCommitFenceReceipt"
+    ],
+    "outerPublicationAuthority": {
+      "opaque": true,
+      "moduleMinted": true,
+      "singleUse": true,
+      "authorizesExpectedTargetCatalog": true,
+      "ownsOuterMigrationWriteLedger": true,
+      "doesNotAuthorizeCursorRebind": true,
+      "consumesOuterClockEvidenceReceiptExactlyOnce": true,
+      "requiredCommitments": [
+        "b2-exact-object-graph",
+        "migration-lock-capability-object-identity",
+        "migration-lock-active-expires-at-ms",
+        "provider-clock-capability-object-identity",
+        "outer-clock-evidence-object-identity",
+        "outer-provider-now-ms",
+        "transaction-generation",
+        "source-identities",
+        "expected-target-identities",
+        "expected-target-catalog",
+        "outer-write-ledger"
+      ]
+    },
+    "stageAdoptionBridge": {
+      "packagePrivateIntrinsic": true,
+      "callerConstructedReceiptsAllowed": false,
+      "adoptsAfterOuterWrites": true,
+      "requiredOuterWriteReceipts": [
+        "migration-0002-catalog-rebuild-receipt",
+        "baseline-entries-publication-receipt",
+        "baseline-header-publication-receipt",
+        "operation-sequence-zero-publication-receipt"
+      ],
+      "requiresExactOuterPublicationAuthority": true,
+      "requiresExactPostDdlCatalogFence": true,
+      "requiresStatementIdentityAndAffectedCountLedger": true,
+      "requiresTotalChangesDeltaEquality": true,
+      "retiresV1CatalogAndChangeFence": true,
+      "mintsStageAdoptionReceiptOnce": true,
+      "postCursorAdoption": {
+        "packagePrivateIntrinsic": true,
+        "requiredOuterWriteReceipts": [
+          "migration-lineage-publication-receipt",
+          "schema-and-descriptor-metadata-publication-receipt"
+        ],
+        "requiresCursorClockCapability": true,
+        "requiresOriginalStageAdoptionReceipt": true,
+        "requiresExactOuterPublicationAuthority": true,
+        "requiresSameTransactionGeneration": true,
+        "requiresExactPostDdlCatalogFence": true,
+        "requiresStatementIdentityAndAffectedCountLedger": true,
+        "requiresTotalChangesAndOuterLedgerEquality": true,
+        "requiredAuditReceipts": [
+          "publication-rules-receipt",
+          "fresh-v2-catalog-receipt",
+          "physical-and-semantic-postconditions-receipt"
+        ],
+        "consumesOuterWriteReceiptsExactlyOnce": true,
+        "consumesAuditReceiptsExactlyOnce": true,
+        "mintsConsumedReceiptTombstones": [
+          "lineage-publication-consumed-tombstone",
+          "metadata-publication-consumed-tombstone",
+          "publication-rules-consumed-tombstone",
+          "fresh-v2-catalog-consumed-tombstone",
+          "physical-semantic-postconditions-consumed-tombstone"
+        ],
+        "requiresCursorClockCapabilityWithConsumedPreVerificationReceiptIdentity": true,
+        "preVerificationClockReceiptReconsumed": false,
+        "auditsRequireZeroPermanentWriteDelta": true,
+        "adoptsCurrentInternalEpochWithoutCrossRuntimeEquality": true,
+        "doesNotMintSecondStageAdoptionReceipt": true,
+        "mintsPreRetirementStageFenceReceiptOnce": true,
+        "permanentWritesForbiddenAfterReceipt": true
+      },
+      "stageRetirementBridge": {
+        "packagePrivateIntrinsic": true,
+        "consumesPreRetirementStageFenceReceiptExactlyOnce": true,
+        "requiresZeroActiveCountDriverPointCursors": true,
+        "tempIdentityFields": [
+          "type",
+          "name",
+          "table-name",
+          "runtime-object-generation-nonce",
+          "connection-temp-catalog-mutation-epoch",
+          "normalized-sql-sha256",
+          "stage-ownership-generation"
+        ],
+        "rootPageDiagnosticOnly": true,
+        "runtimeGenerationModuleMintedUnforgeable": true,
+        "everyTempDdlAdvancesConnectionMutationEpoch": true,
+        "receiptBindsConnectionMutationEpoch": true,
+        "retirementIntrinsicOwnsAuthorizedTempDdlEpochChain": true,
+        "eachAuthorizedDropConsumesPriorAndMintsNextMutationEpochReceipt": true,
+        "retirementRequiresUninterruptedAuthorizedMutationEpochChain": true,
+        "rechecksExactIdentityBeforeEveryDrop": true,
+        "dropsInReverseOwnershipOrder": true,
+        "dropsEveryOwnedTempObject": true,
+        "preservesUnrelatedTempObjects": true,
+        "verifiesZeroOwnedTempResidue": true,
+        "permanentLedgersAndTotalChangesUnchanged": true,
+        "mintsStageRetirementReceiptOnce": true,
+        "retirementReceiptRequiredByFinalFence": true
+      }
+    },
+    "providerClock": {
+      "capabilityOpaque": true,
+      "capabilityModuleMinted": true,
+      "capabilityCloneRejected": true,
+      "callerProvidedNowAllowed": false,
+      "receiptLabels": [
+        "outer-clock-evidence-receipt",
+        "pre-rebind-clock-evidence-receipt",
+        "pre-verification-clock-evidence-receipt",
+        "pre-commit-clock-evidence-receipt"
+      ],
+      "receiptsOpaqueModuleMintedSingleUse": true,
+      "receiptObjectIdentitiesMustBeDistinct": true,
+      "receiptBindsPreviousReceiptIdentity": true,
+      "liveLockRowRereadAtEveryBoundary": true,
+      "providerClockReadAtEveryBoundary": true,
+      "safeIntegerProviderNowRequired": true,
+      "providerNowMonotonicNondecreasing": true,
+      "boundaryOrderExact": true,
+      "eachReceiptConsumedExactlyOnce": true,
+      "fifthObservationRejected": true
+    },
+    "publicationSession": {
+      "opaque": true,
+      "moduleMinted": true,
+      "singleUse": true,
+      "cloneRejected": true,
+      "mintedAfterPostDdlCatalogFence": true,
+      "derivedFromOuterPublicationAuthority": true,
+      "requiredCommitments": [
+        "receipt-object-identity",
+        "projection-object-identity",
+        "stage-object-identity",
+        "connection-object-identity",
+        "transaction-generation",
+        "migration-lock-id",
+        "migration-lock-owner-id",
+        "migration-lock-epoch",
+        "migration-lock-fencing-token",
+        "migration-lock-capability-object-identity",
+        "migration-lock-active-expires-at-ms",
+        "migration-source-version",
+        "migration-target-version",
+        "provider-clock-capability-object-identity",
+        "pre-rebind-clock-evidence-receipt-object-identity",
+        "pre-rebind-provider-now-ms",
+        "post-0002-catalog-fence",
+        "stage-adoption-receipt",
+        "source-descriptor-hash",
+        "source-schema-identity",
+        "target-descriptor-hash",
+        "target-schema-identity"
+      ],
+      "consumesPreRebindClockEvidenceReceiptExactlyOnce": true
+    },
+    "cursorClock": {
+      "opaque": true,
+      "moduleMinted": true,
+      "singleUse": true,
+      "cloneRejected": true,
+      "consumesPreVerificationClockEvidenceReceiptExactlyOnce": true,
+      "requiredCommitments": [
+        "pre-verification-clock-evidence-receipt-object-identity",
+        "pre-verification-provider-now-ms",
+        "provider-clock-capability-object-identity",
+        "migration-lock-capability-object-identity",
+        "sqlite-connection-object-identity",
+        "begin-exclusive-transaction-lineage",
+        "live-migration-lock-tuple",
+        "publication-session-object-identity",
+        "rule-11-success-receipt-object-identity",
+        "rule-12-success-receipt-object-identity"
+      ]
+    },
+    "outerWriteReceiptContract": {
+      "opaqueModuleMintedSingleUse": true,
+      "cloneRejected": true,
+      "order": [
+        "migration-lineage-publication-receipt",
+        "schema-and-descriptor-metadata-publication-receipt"
+      ],
+      "requiredCommitments": [
+        "normalized-sql-identity-and-sha256",
+        "parameter-and-result-identity",
+        "affected-row-count",
+        "total-changes-before-after-delta",
+        "outer-ledger-sequence-and-delta",
+        "sqlite-connection-object-identity",
+        "begin-exclusive-transaction-lineage",
+        "outer-publication-authority-object-identity",
+        "post-ddl-catalog-fence-object-identity"
+      ]
+    },
+    "receiptChain": {
+      "preRetirementStageFenceReceipt": {
+        "opaqueModuleMintedSingleUse": true,
+        "cloneRejected": true,
+        "requiredCommitments": [
+          "outer-publication-authority-object-identity",
+          "sqlite-connection-object-identity",
+          "begin-exclusive-transaction-lineage",
+          "post-ddl-catalog-fence-object-identity",
+          "initial-stage-adoption-receipt-object-identity",
+          "cursor-clock-capability-object-identity",
+          "lineage-publication-receipt-object-identity",
+          "metadata-publication-receipt-object-identity",
+          "publication-rules-receipt-object-identity",
+          "fresh-v2-catalog-receipt-object-identity",
+          "physical-semantic-postconditions-receipt-object-identity",
+          "consumed-outer-write-and-audit-receipt-tombstone-identities",
+          "pre-verification-clock-consumed-tombstone-identity",
+          "current-runtime-private-internal-epoch",
+          "outer-and-cursor-ledger-watermarks",
+          "total-changes-watermark",
+          "target-catalog-digest",
+          "owned-temp-inventory-digest-and-count",
+          "connection-temp-catalog-mutation-epoch"
+        ]
+      },
+      "stageRetirementReceipt": {
+        "opaqueModuleMintedSingleUse": true,
+        "cloneRejected": true,
+        "requiredCommitments": [
+          "pre-retirement-stage-fence-receipt-object-identity",
+          "retired-temp-inventory-digest-and-count",
+          "zero-owned-temp-residue-proof",
+          "begin-exclusive-transaction-lineage",
+          "current-runtime-private-internal-epoch",
+          "unchanged-outer-and-cursor-ledger-watermarks",
+          "unchanged-total-changes-watermark",
+          "outer-and-cursor-authority-object-identities",
+          "authorized-temp-drop-mutation-epoch-receipt-chain"
+        ]
+      },
+      "finalCommitFenceReceipt": {
+        "opaqueModuleMintedSingleUse": true,
+        "cloneRejected": true,
+        "requiredCommitments": [
+          "stage-retirement-receipt-object-identity",
+          "pre-commit-clock-evidence-receipt-object-identity",
+          "outer-publication-authority-object-identity",
+          "cursor-clock-capability-object-identity",
+          "stage-retirement-transitive-consumed-audit-tombstones",
+          "sqlite-connection-object-identity",
+          "begin-exclusive-transaction-lineage",
+          "migration-lock-capability-object-identity",
+          "target-catalog-and-ledger-fence",
+          "zero-owned-temp-residue-proof"
+        ]
+      }
+    },
+    "migrationLock": {
+      "mustBeActive": true,
+      "sourceSchemaVersion": 1,
+      "targetSchemaVersion": 2,
+      "epochEqualsFencingToken": true,
+      "ownerMustMatchOuterPublicationAuthority": true,
+      "ownerMustMatchCursorPublicationSession": true,
+      "mustBeUnexpiredAtProviderClock": true,
+      "activeExpiresAtMsCommitted": true,
+      "providerClockCapabilityCommitted": true,
+      "clockEvidenceReceiptsOpaque": true,
+      "clockEvidenceReceiptsSingleUse": true,
+      "clockReproofBoundaries": [
+        "before-first-permanent-mutation",
+        "before-cursor-rebind",
+        "before-verification",
+        "before-commit"
+      ],
+      "freshEvidenceRequiredAtEveryBoundary": true,
+      "providerNowMonotonicNondecreasing": true,
+      "expiryComparison": "providerNowMs < activeExpiresAtMs",
+      "equalExpiryIsExpired": true,
+      "finalReproofOwner": "outer-and-cursor-publication-authorities",
+      "mustBeReprovedBeforeFirstPermanentMutation": true,
+      "mustBeReprovedBeforeVerification": true,
+      "mustBeReprovedBeforeCommit": true
+    },
+    "finalFence": {
+      "requiredExactReceipts": [
+        "stage-retirement-receipt",
+        "pre-commit-clock-evidence-receipt"
+      ],
+      "stageRetirementReceiptTransitivelyCommitsConsumedAuditTombstones": true,
+      "reprovesLiveBeginExclusiveLineage": true,
+      "reprovesLockTupleAndStrictExpiry": true,
+      "reprovesTargetCatalogAndWriteLedgers": true,
+      "reprovesZeroOwnedTempResidue": true,
+      "rejectsPermanentWriteAfterRetirement": true,
+      "mintsFinalCommitFenceReceiptOnce": true,
+      "commitConsumesFinalFenceReceiptExactlyOnce": true
+    },
+    "transaction": {
+      "mode": "BEGIN EXCLUSIVE",
+      "sameBeginExclusiveLineageAsB2": true,
+      "internalEpochAdoptionAllowedOnlyByBridge": true,
+      "crossRuntimeEpochEqualityRequired": false,
+      "postDdlFenceAdoptionRequired": true,
+      "rollbackRebeginRejected": true,
+      "connectionSubstitutionRejected": true
+    }
+  },
+  "sequence": {
+    "orderedStages": [
+      "source-v1-semantically-valid",
+      "b2-pre-rebind-complete",
+      "outer-publication-authority-minted",
+      "migration-0002-catalog-rebuild",
+      "post-0002-catalog-fence-adopted",
+      "baseline-entries-published",
+      "baseline-header-published",
+      "operation-sequence-zero-published",
+      "post-ddl-stage-authority-adopted",
+      "cursor-publication-session-minted",
+      "cursor-rebind-executed-once",
+      "rule-11-rebind-count-accepted",
+      "rule-12-main-table-seal-accepted",
+      "cursor-clock-complete",
+      "migration-lineage-published",
+      "schema-and-descriptor-metadata-published",
+      "publication-rules-accepted",
+      "fresh-v2-catalog-equivalence-accepted",
+      "physical-and-semantic-postconditions-accepted",
+      "pre-retirement-stage-fence-adopted",
+      "cursor-temp-stage-retired",
+      "final-migration-lock-transaction-fence-accepted",
+      "single-atomic-commit"
+    ],
+    "cursorSubprotocolStartsAt": "cursor-publication-session-minted",
+    "cursorSubprotocolEndsAt": "cursor-clock-complete",
+    "commitOwnedBy": "v1-to-v2-atomic-migration-orchestrator"
+  },
+  "sqlContract": {
+    "normalization": "trim-and-collapse-ascii-whitespace",
+    "rebind": {
+      "sql": "UPDATE main.ge_cycle_cursors SET descriptor_hash = ?, schema_identity_sha256 = ? WHERE descriptor_hash = ? AND schema_identity_sha256 = ?",
+      "sha256": "6fc61b515e758a1e84745af28783f4e9dcee5e76f80f314aa25a08980d2fef91",
+      "parameterOrder": [
+        "targetDescriptorHash",
+        "targetSchemaIdentitySha256",
+        "sourceDescriptorHash",
+        "sourceSchemaIdentitySha256"
+      ],
+      "executionLimit": 1
+    },
+    "affectedCount": {
+      "sql": "SELECT changes() AS affected_rows",
+      "sha256": "a6ab435eb54879f942436129997f231de19504b11028b55b014fddc2bb42e112"
+    },
+    "postRebindMainKeyCountScan": {
+      "sql": "SELECT tenant_id, token_hash FROM main.ge_cycle_cursors ORDER BY tenant_id COLLATE BINARY, token_hash COLLATE BINARY",
+      "sha256": "09d1ce669070093fbbf0dfd8ce7e2a7bbfde96d051b3ce9341be85495479ec32"
+    },
+    "postRebindKeyDriver": {
+      "sql": "SELECT tenant_id, token_hash FROM temp.ge_blr_cursor_seal ORDER BY token_hash COLLATE BINARY, tenant_id COLLATE BINARY",
+      "sha256": "1694ab6fe938203b0d8f6cb72cf82238e89234c21086ff5d224c7de4db7b1266"
+    },
+    "postRebindPointLookup": {
+      "sql": "SELECT tenant_id, token_hash, kind, principal_hash, authorization_hash, stream_id, checkpoint_scope, request_scope_blob, page_size, next_position, snapshot_tail_sequence, snapshot_tail_record_hash, descriptor_hash, schema_identity_sha256, snapshot_blob, created_at_ms, expires_at_ms, consumed_at_ms FROM main.ge_cycle_cursors WHERE tenant_id = ? AND token_hash = ? LIMIT 1",
+      "sha256": "bd056ee55f2bd27eee3277ed7bfee8ae7b7db935edc3cf0937fc8167e2eac342"
+    },
+    "eqpRequired": [
+      "temp-driver-primary-key-order-without-sort",
+      "main-cursor-primary-key-count-order-without-sort",
+      "main-cursor-primary-key-point-lookup"
+    ],
+    "eqpForbiddenDetailFragments": ["AUTOMATIC", "MATERIALIZE", "USE TEMP B-TREE", "CO-ROUTINE"],
+    "callerControlledSql": false,
+    "triggersAllowed": false,
+    "statementOwnershipRetiredExactlyOnce": true
+  },
+  "writeLedger": {
+    "owner": "publication-session",
+    "allowedPermanentStatements": ["cursor-rebind"],
+    "windowStartsAt": "cursor-publication-session-minted",
+    "windowEndsAt": "rule-12-main-table-seal-accepted",
+    "outerMigrationWritesOwnedBy": "outer-publication-authority",
+    "expectedStatementCount": 1,
+    "expectedAffectedRowsSource": "pre-rebind-receipt.cursorCount",
+    "requiresStatementChangesEquality": true,
+    "requiresTotalChangesDeltaEquality": true,
+    "requiresLedgerDeltaEquality": true,
+    "sameValueReplayAllowed": false,
+    "secondExecutionAllowed": false,
+    "unexplainedPermanentWritePoisons": true
+  },
+  "rules": [
+    {
+      "position": 11,
+      "id": "BLR_CURSOR_REBIND_COUNT",
+      "input": "publication-owned-statement-affected-count",
+      "expected": "equals-pre-rebind-receipt-cursor-count",
+      "diagnosticUnit": "count-mismatch",
+      "violationCountOnFailure": 1,
+      "successRequiredForNextRule": true
+    },
+    {
+      "position": 12,
+      "id": "BLR_CURSOR_SEAL_MISMATCH",
+      "input": "fresh-main-table-point-lookup-stream",
+      "expected": "count-and-immutable-root-equal-receipt-and-every-mutable-identity-equals-target",
+      "diagnosticUnit": "post-rebind-receipt-mismatch",
+      "violationCountOnFailure": 1,
+      "successRequiredForNextRule": true
+    }
+  ],
+  "sealContract": {
+    "algorithmVersion": "sqlite-cursor-seal/v1",
+    "rowDomain": "graph-engineering/sqlite-cursor-seal-row/v1\u0000",
+    "sealDomain": "graph-engineering/sqlite-cursor-seal/v1\u0000",
+    "order": ["token-hash-utf8-bytes", "tenant-id-utf8-bytes"],
+    "source": "fresh-main-table-point-lookups-driven-by-owned-b2-key-carrier",
+    "fetchSize": 1,
+    "maximumLivePhysicalRows": 1,
+    "maximumLiveCarriers": 1,
+    "mutableFields": ["descriptor_hash", "schema_identity_sha256"],
+    "immutablePhysicalFields": [
+      "tenant_id",
+      "token_hash",
+      "kind",
+      "principal_hash",
+      "authorization_hash",
+      "stream_id",
+      "checkpoint_scope",
+      "request_scope_blob",
+      "page_size",
+      "next_position",
+      "snapshot_tail_sequence",
+      "snapshot_tail_record_hash",
+      "snapshot_blob",
+      "created_at_ms",
+      "expires_at_ms",
+      "consumed_at_ms"
+    ],
+    "blobEvidence": [
+      "request-scope-byte-length",
+      "request-scope-sha256",
+      "snapshot-byte-length",
+      "snapshot-sha256"
+    ],
+    "requiresReceiptCountEquality": true,
+    "requiresReceiptRootEquality": true,
+    "requiresEveryTargetIdentity": true,
+    "separateMainKeyScanDetectsExtraRows": true,
+    "maximumActiveCursors": 2,
+    "driverCursorLifetime": "entire-post-rebind-proof",
+    "maximumConcurrentPointLookupCursors": 1,
+    "pointCursorClosedBeforeNextDriverFetch": true,
+    "mainKeyCountCursorLifetime": "main-key-count-scan-only",
+    "mainKeyCountCursorClosedBeforeDriverPrepare": true,
+    "phaseCleanupOrder": {
+      "mainKeyCountSuccess": ["close-main-key-count-cursor", "clear-main-key-count-ownership", "prepare-key-driver"],
+      "mainKeyCountFailureOrCancellation": ["main-key-count-cursor", "temp-stage", "outer-cleanup"],
+      "sealFailureOrCancellation": ["point-cursor", "driver-cursor", "temp-stage", "outer-cleanup"]
+    }
+  },
+  "stateMachine": {
+    "states": [
+      "pre-rebind-complete",
+      "publication-active",
+      "cursor/clock-complete",
+      "poisoned",
+      "disposed"
+    ],
+    "successTransitions": [
+      "pre-rebind-complete->publication-active",
+      "publication-active->cursor/clock-complete"
+    ],
+    "terminalFailureState": "poisoned",
+    "secondBeginRejected": true,
+    "secondVerificationRejected": true,
+    "authoritySubstitutionRejected": true,
+    "disposedReuseRejected": true,
+    "diagnosedB2EntryRejected": true
+  },
+  "failureContract": {
+    "boundaryPrecedence": {
+      "beforeFirstPermanentWrite": [
+        "b2-receipt-provenance",
+        "exact-object-graph",
+        "outer-publication-authority",
+        "migration-lock-capability",
+        "transaction-generation",
+        "expected-target-catalog",
+        "cancellation"
+      ],
+      "beforeCursorRebind": [
+        "publication-session",
+        "migration-lock-freshness",
+        "transaction-generation",
+        "post-0002-catalog-fence",
+        "cancellation"
+      ],
+      "afterStatementStarted": [
+        "permanent-write-ledger",
+        "statement-result-shape",
+        "rule-11-count",
+        "rule-12-seal",
+        "cancellation",
+        "cleanup"
+      ],
+      "afterCommitReturned": [
+        "complete-v2-reopen-audit",
+        "cleanup"
+      ]
+    },
+    "authorityFailureBeforeCancellation": true,
+    "primaryFailureBeforeCleanup": true,
+    "ruleFailurePoisonsOwner": true,
+    "callerMustRollbackAfterPoison": true,
+    "diagnosticFields": ["ruleId", "violationCount", "diagnosticsTruncated"],
+    "diagnosticDefault": 16,
+    "diagnosticMinimum": 1,
+    "diagnosticMaximum": 64,
+    "diagnosedContainsReceipt": false,
+    "diagnosedContainsRoot": false
+  },
+  "lifecycleContract": {
+    "cancellationLabels": [
+      "before-outer-authority",
+      "before-0002",
+      "after-post-ddl-fence",
+      "before-cursor-session",
+      "before-rebind-prepare",
+      "before-rebind-execute",
+      "after-rebind-execute",
+      "before-rule-11",
+      "before-main-key-count-prepare",
+      "before-main-key-count-first-fetch",
+      "before-main-key-count-next-fetch",
+      "before-main-key-count-finish",
+      "before-key-driver-prepare",
+      "before-key-driver-first-fetch",
+      "before-key-driver-next-fetch",
+      "before-point-lookup-prepare",
+      "before-point-lookup-execute",
+      "after-point-lookup-fetch",
+      "before-rule-12-finish",
+      "before-cursor-clock-complete"
+    ],
+    "statementBoundaries": [
+      "rebind-prepare",
+      "rebind-execute",
+      "rebind-finalize",
+      "changes-prepare",
+      "changes-fetch",
+      "changes-finalize",
+      "main-key-count-prepare",
+      "main-key-count-fetch",
+      "main-key-count-finalize",
+      "key-driver-prepare",
+      "key-driver-fetch",
+      "key-driver-finalize",
+      "point-lookup-prepare",
+      "point-lookup-execute",
+      "point-lookup-fetch",
+      "point-lookup-finalize"
+    ],
+    "cleanupFaults": [
+      "rebind-finalize-failure",
+      "changes-finalize-failure",
+      "main-key-count-finalize-failure",
+      "key-driver-finalize-failure",
+      "point-lookup-finalize-failure",
+      "temp-carrier-disposal-failure",
+      "primary-plus-cleanup-failure"
+    ],
+    "longScanChecksCancellationPerRow": true,
+    "everyStatementOwnershipRetiredExactlyOnce": true,
+    "everyCursorClosedExactlyOnce": true,
+    "cancellationSemantics": {
+      "labelsAreRequestInjectionPoints": true,
+      "rebindStartedPrimaryBeforeCancellation": [
+        "statement-release",
+        "changes-result",
+        "write-ledger",
+        "rule-11"
+      ],
+      "mainKeyCountRowStartedPrimaryBeforeCancellation": [
+        "decode-current-main-key",
+        "validate-current-main-key",
+        "increment-main-key-count"
+      ],
+      "mainKeyCountBeforeFetchCancellation": [
+        "close-main-key-count-cursor",
+        "clear-main-key-count-ownership",
+        "observe-cancellation"
+      ],
+      "mainKeyCountTerminalPrimaryBeforeCancellation": [
+        "prove-terminal-result",
+        "close-main-key-count-cursor",
+        "clear-main-key-count-ownership",
+        "freeze-main-key-count"
+      ],
+      "mainKeyCountTerminalCancellationObservedAfterFrozenCount": true,
+      "mainKeyCountCloseFailurePrecedence": [
+        "earlier-fetch-decode-order-count-or-terminal-primary",
+        "main-key-count-close-failure",
+        "cancellation",
+        "temp-or-outer-cleanup-failure"
+      ],
+      "mainKeyCountCancellationClosesCursorBeforeTempCleanup": true,
+      "rule12RowStartedPrimaryBeforeCancellation": [
+        "decode-current-main-row",
+        "validate-current-main-row",
+        "close-point-cursor"
+      ],
+      "rule12FinalPrimaryBeforeCancellation": [
+        "finish-accumulator",
+        "compare-main-key-count",
+        "compare-receipt-count-root",
+        "compare-target-identities"
+      ],
+      "cleanupAlwaysLast": true
+    }
+  },
+  "faultMatrix": {
+    "boundaries": [
+      "before-outer-publication-authority",
+      "after-outer-publication-authority",
+      "after-0002",
+      "after-baseline-first-entry",
+      "after-baseline-middle-entry",
+      "after-baseline-last-entry",
+      "after-baseline-header",
+      "after-sequence-zero",
+      "before-cursor-rebind",
+      "after-cursor-rebind",
+      "after-rule-11",
+      "during-rule-12-first-row",
+      "during-rule-12-middle-row",
+      "during-rule-12-last-row",
+      "after-rule-12",
+      "after-lineage",
+      "after-metadata",
+      "after-publication-rules",
+      "before-commit",
+      "commit-returned"
+    ],
+    "preCommitReopenState": "exact-source-v1",
+    "postCommitReopenState": "complete-target-v2",
+    "retryRequiresFreshAuthorityGraph": true,
+    "subprocessKillRequired": true,
+    "busyLockedRequired": true,
+    "connectionLossRequired": true
+  },
+  "hostileObligations": [
+    "diagnosed-b2-outcome",
+    "cloned-receipt",
+    "cloned-projection",
+    "wrong-stage",
+    "wrong-transfer",
+    "wrong-connection",
+    "wrong-publication-session",
+    "inactive-migration-lock",
+    "wrong-lock-owner",
+    "wrong-lock-epoch",
+    "wrong-lock-fence",
+    "wrong-lock-source-version",
+    "wrong-lock-target-version",
+    "cloned-migration-lock-capability",
+    "provider-clock-evidence-substitution",
+    "lock-expiry-before-provider-now",
+    "lock-expiry-equal-provider-now",
+    "lock-expiry-changed-after-session-mint",
+    "provider-clock-advanced-past-expiry-after-session-mint",
+    "stale-provider-clock-evidence-replay",
+    "missing-post-cursor-lineage-receipt",
+    "missing-post-cursor-metadata-receipt",
+    "pre-retirement-stage-fence-substitution",
+    "stage-retirement-receipt-substitution",
+    "owned-temp-residue-after-retirement",
+    "provider-clock-receipt-clone",
+    "provider-clock-boundary-reordered",
+    "provider-clock-boundary-skipped",
+    "provider-clock-regression",
+    "provider-clock-fifth-observation",
+    "post-cursor-receipt-order-swapped",
+    "post-cursor-unexplained-write",
+    "pre-retirement-adoption-before-audits",
+    "pre-retirement-adoption-reuse",
+    "temp-same-name-identity-substitution",
+    "unrelated-temp-object-dropped",
+    "active-main-key-count-cursor-at-retirement",
+    "active-key-driver-cursor-at-retirement",
+    "active-point-cursor-at-retirement",
+    "permanent-write-after-retirement",
+    "final-commit-fence-reuse",
+    "main-key-count-cancellation-close-failure",
+    "main-key-count-driver-prepare-before-close",
+    "same-ddl-rootpage-reuse-after-temp-recreate",
+    "pre-verification-clock-receipt-second-consumption",
+    "pre-rebind-clock-receipt-unconsumed",
+    "pre-rebind-clock-receipt-substitution",
+    "cursor-clock-capability-clone",
+    "cursor-clock-preverification-unconsumed",
+    "lineage-publication-receipt-substitution",
+    "metadata-publication-receipt-substitution",
+    "pre-retirement-receipt-commitment-drift",
+    "retirement-receipt-commitment-drift",
+    "final-commit-receipt-commitment-drift",
+    "outer-write-receipt-order-swapped",
+    "audit-receipt-second-consumption",
+    "missing-consumed-audit-tombstone",
+    "outer-write-receipt-second-consumption",
+    "missing-consumed-outer-write-tombstone",
+    "outer-clock-evidence-receipt-unconsumed",
+    "rollback-and-rebegin",
+    "post-0002-catalog-drift",
+    "unexplained-permanent-write",
+    "affected-count-minus-one",
+    "affected-count-plus-one",
+    "total-changes-disagreement",
+    "write-ledger-disagreement",
+    "second-rebind",
+    "partial-rebind",
+    "mixed-source-target-identities",
+    "third-party-identities",
+    "immutable-field-drift",
+    "same-length-request-blob-drift",
+    "same-length-snapshot-blob-drift",
+    "cursor-insert",
+    "cursor-delete",
+    "equal-count-insert-delete",
+    "root-preserving-count-drift",
+    "second-verification",
+    "disposed-reuse"
+  ],
+  "parityGates": {
+    "runtimes": ["typescript", "python"],
+    "required": [
+      "literal-fixture-consumed-by-both-runtimes",
+      "exact-sql-and-hash-parity",
+      "exact-target-identity-parity",
+      "exact-state-transition-parity",
+      "exact-failure-precedence-parity",
+      "exact-count-root-parity",
+      "fresh-v2-path",
+      "v1-to-v2-path",
+      "v0-to-v1-to-v2-path",
+      "cross-runtime-upgrade-and-reopen",
+      "npm-wheel-sdist-asset-byte-parity",
+      "pre-commit-crash-reopens-v1",
+      "post-commit-crash-reopens-v2"
+    ],
+    "fixtureCanonicalSha256": "9ed27de3dadb8989b51da9864b2109f0b760043bea52b3c73234013150e74ef3"
+  }
+}

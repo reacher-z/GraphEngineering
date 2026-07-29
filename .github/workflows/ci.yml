@@ -207,3 +207,6 @@ jobs:
       - name: Execute exact B2 coverage and cross-runtime parity
         timeout-minutes: 90
         run: pnpm test:sqlite-cursor-pre-rebind-parity
+      - name: Verify B3 source and target descriptor parity
+        timeout-minutes: 5
+        run: pnpm test:sqlite-cursor-publication-contract-parity

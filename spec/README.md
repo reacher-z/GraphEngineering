@@ -56,6 +56,12 @@ safe diagnostics, and cursor-seal domains are fixed by
 closed conformance registry under `conformance/`. These contracts retain
 `implementationClaim:false` until the native relation, cursor, migration,
 crash, replay, and exact-campaign gates are complete.
+The post-B2 authority handoff, final v2 identities, single fixed cursor update,
+rules 11/12, crash split and prohibition on an independently committed rebind
+are frozen by
+[sqlite-cursor-publication-rebind-v2.md](sqlite-cursor-publication-rebind-v2.md).
+That B3 contract is a subprotocol inside the one-commit v1-to-v2 migration and
+also retains all implementation, active-manifest and release claims as false.
 These D7 schemas are protocol-frozen and consumed by the native TypeScript and
 Python standalone alpha controllers. Schema acceptance alone is not native or
 production evidence; executable conformance remains the capability gate. Their

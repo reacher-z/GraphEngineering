@@ -1,0 +1,498 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/conformance/sqlite-cursor-publication-rebind-v2.schema.json",
+  "title": "SQLite cursor B3 publication/rebind contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion", "id", "status", "claims", "boundary", "identities",
+    "authority", "sequence", "sqlContract", "writeLedger", "rules",
+    "sealContract", "stateMachine", "failureContract", "lifecycleContract", "faultMatrix",
+    "hostileObligations", "parityGates"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "id": { "const": "sqlite-cursor-publication-rebind-v2" },
+    "status": { "const": "contract-frozen" },
+    "claims": { "$ref": "#/$defs/claims" },
+    "boundary": { "$ref": "#/$defs/boundary" },
+    "identities": { "$ref": "#/$defs/identities" },
+    "authority": { "$ref": "#/$defs/authority" },
+    "sequence": { "$ref": "#/$defs/sequence" },
+    "sqlContract": { "$ref": "#/$defs/sqlContract" },
+    "writeLedger": { "$ref": "#/$defs/writeLedger" },
+    "rules": { "$ref": "#/$defs/rules" },
+    "sealContract": { "$ref": "#/$defs/sealContract" },
+    "stateMachine": { "$ref": "#/$defs/stateMachine" },
+    "failureContract": { "$ref": "#/$defs/failureContract" },
+    "lifecycleContract": { "$ref": "#/$defs/lifecycleContract" },
+    "faultMatrix": { "$ref": "#/$defs/faultMatrix" },
+    "hostileObligations": {
+      "type": "array", "minItems": 80, "maxItems": 80, "uniqueItems": true,
+      "items": { "$ref": "#/$defs/slug" }
+    },
+    "parityGates": { "$ref": "#/$defs/parityGates" }
+  },
+  "$defs": {
+    "hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "slug": { "type": "string", "pattern": "^[a-z0-9]+(?:[/-][a-z0-9]+)*$" },
+    "nonEmptyStringArray": {
+      "type": "array", "minItems": 1, "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "preRetirementReceipt": {
+      "type": "object", "additionalProperties": false,
+      "required": ["opaqueModuleMintedSingleUse", "cloneRejected", "requiredCommitments"],
+      "properties": {
+        "opaqueModuleMintedSingleUse": { "const": true }, "cloneRejected": { "const": true },
+        "requiredCommitments": { "const": ["outer-publication-authority-object-identity", "sqlite-connection-object-identity", "begin-exclusive-transaction-lineage", "post-ddl-catalog-fence-object-identity", "initial-stage-adoption-receipt-object-identity", "cursor-clock-capability-object-identity", "lineage-publication-receipt-object-identity", "metadata-publication-receipt-object-identity", "publication-rules-receipt-object-identity", "fresh-v2-catalog-receipt-object-identity", "physical-semantic-postconditions-receipt-object-identity", "consumed-outer-write-and-audit-receipt-tombstone-identities", "pre-verification-clock-consumed-tombstone-identity", "current-runtime-private-internal-epoch", "outer-and-cursor-ledger-watermarks", "total-changes-watermark", "target-catalog-digest", "owned-temp-inventory-digest-and-count", "connection-temp-catalog-mutation-epoch"] }
+      }
+    },
+    "stageRetirementReceipt": {
+      "type": "object", "additionalProperties": false,
+      "required": ["opaqueModuleMintedSingleUse", "cloneRejected", "requiredCommitments"],
+      "properties": {
+        "opaqueModuleMintedSingleUse": { "const": true }, "cloneRejected": { "const": true },
+        "requiredCommitments": { "const": ["pre-retirement-stage-fence-receipt-object-identity", "retired-temp-inventory-digest-and-count", "zero-owned-temp-residue-proof", "begin-exclusive-transaction-lineage", "current-runtime-private-internal-epoch", "unchanged-outer-and-cursor-ledger-watermarks", "unchanged-total-changes-watermark", "outer-and-cursor-authority-object-identities", "authorized-temp-drop-mutation-epoch-receipt-chain"] }
+      }
+    },
+    "finalCommitReceipt": {
+      "type": "object", "additionalProperties": false,
+      "required": ["opaqueModuleMintedSingleUse", "cloneRejected", "requiredCommitments"],
+      "properties": {
+        "opaqueModuleMintedSingleUse": { "const": true }, "cloneRejected": { "const": true },
+        "requiredCommitments": { "const": ["stage-retirement-receipt-object-identity", "pre-commit-clock-evidence-receipt-object-identity", "outer-publication-authority-object-identity", "cursor-clock-capability-object-identity", "stage-retirement-transitive-consumed-audit-tombstones", "sqlite-connection-object-identity", "begin-exclusive-transaction-lineage", "migration-lock-capability-object-identity", "target-catalog-and-ledger-fence", "zero-owned-temp-residue-proof"] }
+      }
+    },
+    "claims": {
+      "type": "object", "additionalProperties": false,
+      "required": ["implementationClaim", "protocolClaim", "releaseGate", "productionThroughputClaim", "activeManifestClaim"],
+      "properties": {
+        "implementationClaim": { "const": false },
+        "protocolClaim": { "const": false },
+        "releaseGate": { "const": false },
+        "productionThroughputClaim": { "const": false },
+        "activeManifestClaim": { "const": false }
+      }
+    },
+    "boundary": {
+      "type": "object", "additionalProperties": false,
+      "required": ["stableTaskId", "role", "standaloneCommitAllowed", "ownsTransactionCommands", "ownsMigration0002", "ownsBaselinePublication", "ownsMetadataPublication", "firstPermanentMutationRequiresAllAuthorityChecks", "singleAtomicMigrationCommit", "acceptedPermanentIntermediateStates", "requiredPredecessorState", "successfulState"],
+      "properties": {
+        "stableTaskId": { "const": "SQLITE-CURSOR-B3-PUBLICATION-REBIND" },
+        "role": { "const": "cursor-subprotocol-within-atomic-v1-to-v2-migration" },
+        "standaloneCommitAllowed": { "const": false },
+        "ownsTransactionCommands": { "const": false },
+        "ownsMigration0002": { "const": false },
+        "ownsBaselinePublication": { "const": false },
+        "ownsMetadataPublication": { "const": false },
+        "firstPermanentMutationRequiresAllAuthorityChecks": { "const": true },
+        "singleAtomicMigrationCommit": { "const": true },
+        "acceptedPermanentIntermediateStates": { "const": [] },
+        "requiredPredecessorState": { "const": "pre-rebind-complete" },
+        "successfulState": { "const": "cursor/clock-complete" }
+      }
+    },
+    "identity": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schemaVersion", "descriptorHash", "schemaIdentitySha256"],
+      "properties": {
+        "schemaVersion": { "type": "integer", "minimum": 1, "maximum": 2 },
+        "descriptorHash": { "$ref": "#/$defs/hash" },
+        "schemaIdentitySha256": { "$ref": "#/$defs/hash" },
+        "descriptorBodySha256": { "$ref": "#/$defs/hash" },
+        "descriptorCanonicalSha256": { "$ref": "#/$defs/hash" }
+      }
+    },
+    "identities": {
+      "type": "object", "additionalProperties": false,
+      "required": ["source", "target", "migration"],
+      "properties": {
+        "source": { "$ref": "#/$defs/identity" },
+        "target": { "$ref": "#/$defs/identity" },
+        "migration": {
+          "type": "object", "additionalProperties": false,
+          "required": ["id", "sqlSha256", "schemaSqlSha256", "previewManifestSha256", "previewOnly"],
+          "properties": {
+            "id": { "const": "v1-to-v2-operation-replay" },
+            "sqlSha256": { "$ref": "#/$defs/hash" },
+            "schemaSqlSha256": { "$ref": "#/$defs/hash" },
+            "previewManifestSha256": { "$ref": "#/$defs/hash" },
+            "previewOnly": { "const": true }
+          }
+        }
+      }
+    },
+    "authority": {
+      "type": "object", "additionalProperties": false,
+      "required": ["requiredExactObjects", "outerPublicationAuthority", "stageAdoptionBridge", "providerClock", "publicationSession", "cursorClock", "outerWriteReceiptContract", "receiptChain", "migrationLock", "finalFence", "transaction"],
+      "properties": {
+        "requiredExactObjects": { "type": "array", "minItems": 24, "maxItems": 24, "uniqueItems": true, "items": { "type": "string" } },
+        "outerPublicationAuthority": {
+          "type": "object", "additionalProperties": false,
+          "required": ["opaque", "moduleMinted", "singleUse", "authorizesExpectedTargetCatalog", "ownsOuterMigrationWriteLedger", "doesNotAuthorizeCursorRebind", "consumesOuterClockEvidenceReceiptExactlyOnce", "requiredCommitments"],
+          "properties": {
+            "opaque": { "const": true }, "moduleMinted": { "const": true },
+            "singleUse": { "const": true }, "authorizesExpectedTargetCatalog": { "const": true },
+            "ownsOuterMigrationWriteLedger": { "const": true }, "doesNotAuthorizeCursorRebind": { "const": true },
+            "consumesOuterClockEvidenceReceiptExactlyOnce": { "const": true },
+            "requiredCommitments": { "type": "array", "minItems": 11, "maxItems": 11, "uniqueItems": true, "items": { "$ref": "#/$defs/slug" } }
+          }
+        },
+        "stageAdoptionBridge": {
+          "type": "object", "additionalProperties": false,
+          "required": ["packagePrivateIntrinsic", "callerConstructedReceiptsAllowed", "adoptsAfterOuterWrites", "requiredOuterWriteReceipts", "requiresExactOuterPublicationAuthority", "requiresExactPostDdlCatalogFence", "requiresStatementIdentityAndAffectedCountLedger", "requiresTotalChangesDeltaEquality", "retiresV1CatalogAndChangeFence", "mintsStageAdoptionReceiptOnce", "postCursorAdoption", "stageRetirementBridge"],
+          "properties": {
+            "packagePrivateIntrinsic": { "const": true },
+            "callerConstructedReceiptsAllowed": { "const": false },
+            "adoptsAfterOuterWrites": { "const": true },
+            "requiredOuterWriteReceipts": { "type": "array", "minItems": 4, "maxItems": 4, "uniqueItems": true, "items": { "$ref": "#/$defs/slug" } },
+            "requiresExactOuterPublicationAuthority": { "const": true },
+            "requiresExactPostDdlCatalogFence": { "const": true },
+            "requiresStatementIdentityAndAffectedCountLedger": { "const": true },
+            "requiresTotalChangesDeltaEquality": { "const": true },
+            "retiresV1CatalogAndChangeFence": { "const": true },
+            "mintsStageAdoptionReceiptOnce": { "const": true },
+            "postCursorAdoption": {
+              "type": "object", "additionalProperties": false,
+              "required": ["packagePrivateIntrinsic", "requiredOuterWriteReceipts", "requiresCursorClockCapability", "requiresOriginalStageAdoptionReceipt", "requiresExactOuterPublicationAuthority", "requiresSameTransactionGeneration", "requiresExactPostDdlCatalogFence", "requiresStatementIdentityAndAffectedCountLedger", "requiresTotalChangesAndOuterLedgerEquality", "requiredAuditReceipts", "consumesOuterWriteReceiptsExactlyOnce", "consumesAuditReceiptsExactlyOnce", "mintsConsumedReceiptTombstones", "requiresCursorClockCapabilityWithConsumedPreVerificationReceiptIdentity", "preVerificationClockReceiptReconsumed", "auditsRequireZeroPermanentWriteDelta", "adoptsCurrentInternalEpochWithoutCrossRuntimeEquality", "doesNotMintSecondStageAdoptionReceipt", "mintsPreRetirementStageFenceReceiptOnce", "permanentWritesForbiddenAfterReceipt"],
+              "properties": {
+                "packagePrivateIntrinsic": { "const": true },
+                "requiredOuterWriteReceipts": { "const": ["migration-lineage-publication-receipt", "schema-and-descriptor-metadata-publication-receipt"] },
+                "requiresCursorClockCapability": { "const": true },
+                "requiresOriginalStageAdoptionReceipt": { "const": true },
+                "requiresExactOuterPublicationAuthority": { "const": true },
+                "requiresSameTransactionGeneration": { "const": true },
+                "requiresExactPostDdlCatalogFence": { "const": true },
+                "requiresStatementIdentityAndAffectedCountLedger": { "const": true },
+                "requiresTotalChangesAndOuterLedgerEquality": { "const": true },
+                "requiredAuditReceipts": { "const": ["publication-rules-receipt", "fresh-v2-catalog-receipt", "physical-and-semantic-postconditions-receipt"] },
+                "consumesOuterWriteReceiptsExactlyOnce": { "const": true },
+                "consumesAuditReceiptsExactlyOnce": { "const": true },
+                "mintsConsumedReceiptTombstones": { "const": ["lineage-publication-consumed-tombstone", "metadata-publication-consumed-tombstone", "publication-rules-consumed-tombstone", "fresh-v2-catalog-consumed-tombstone", "physical-semantic-postconditions-consumed-tombstone"] },
+                "requiresCursorClockCapabilityWithConsumedPreVerificationReceiptIdentity": { "const": true },
+                "preVerificationClockReceiptReconsumed": { "const": false },
+                "auditsRequireZeroPermanentWriteDelta": { "const": true },
+                "adoptsCurrentInternalEpochWithoutCrossRuntimeEquality": { "const": true },
+                "doesNotMintSecondStageAdoptionReceipt": { "const": true },
+                "mintsPreRetirementStageFenceReceiptOnce": { "const": true },
+                "permanentWritesForbiddenAfterReceipt": { "const": true }
+              }
+            },
+            "stageRetirementBridge": {
+              "type": "object", "additionalProperties": false,
+              "required": ["packagePrivateIntrinsic", "consumesPreRetirementStageFenceReceiptExactlyOnce", "requiresZeroActiveCountDriverPointCursors", "tempIdentityFields", "rootPageDiagnosticOnly", "runtimeGenerationModuleMintedUnforgeable", "everyTempDdlAdvancesConnectionMutationEpoch", "receiptBindsConnectionMutationEpoch", "retirementIntrinsicOwnsAuthorizedTempDdlEpochChain", "eachAuthorizedDropConsumesPriorAndMintsNextMutationEpochReceipt", "retirementRequiresUninterruptedAuthorizedMutationEpochChain", "rechecksExactIdentityBeforeEveryDrop", "dropsInReverseOwnershipOrder", "dropsEveryOwnedTempObject", "preservesUnrelatedTempObjects", "verifiesZeroOwnedTempResidue", "permanentLedgersAndTotalChangesUnchanged", "mintsStageRetirementReceiptOnce", "retirementReceiptRequiredByFinalFence"],
+              "properties": {
+                "packagePrivateIntrinsic": { "const": true },
+                "consumesPreRetirementStageFenceReceiptExactlyOnce": { "const": true },
+                "requiresZeroActiveCountDriverPointCursors": { "const": true },
+                "tempIdentityFields": { "const": ["type", "name", "table-name", "runtime-object-generation-nonce", "connection-temp-catalog-mutation-epoch", "normalized-sql-sha256", "stage-ownership-generation"] },
+                "rootPageDiagnosticOnly": { "const": true },
+                "runtimeGenerationModuleMintedUnforgeable": { "const": true },
+                "everyTempDdlAdvancesConnectionMutationEpoch": { "const": true },
+                "receiptBindsConnectionMutationEpoch": { "const": true },
+                "retirementIntrinsicOwnsAuthorizedTempDdlEpochChain": { "const": true },
+                "eachAuthorizedDropConsumesPriorAndMintsNextMutationEpochReceipt": { "const": true },
+                "retirementRequiresUninterruptedAuthorizedMutationEpochChain": { "const": true },
+                "rechecksExactIdentityBeforeEveryDrop": { "const": true },
+                "dropsInReverseOwnershipOrder": { "const": true },
+                "dropsEveryOwnedTempObject": { "const": true },
+                "preservesUnrelatedTempObjects": { "const": true },
+                "verifiesZeroOwnedTempResidue": { "const": true },
+                "permanentLedgersAndTotalChangesUnchanged": { "const": true },
+                "mintsStageRetirementReceiptOnce": { "const": true },
+                "retirementReceiptRequiredByFinalFence": { "const": true }
+              }
+            }
+          }
+        },
+        "providerClock": {
+          "type": "object", "additionalProperties": false,
+          "required": ["capabilityOpaque", "capabilityModuleMinted", "capabilityCloneRejected", "callerProvidedNowAllowed", "receiptLabels", "receiptsOpaqueModuleMintedSingleUse", "receiptObjectIdentitiesMustBeDistinct", "receiptBindsPreviousReceiptIdentity", "liveLockRowRereadAtEveryBoundary", "providerClockReadAtEveryBoundary", "safeIntegerProviderNowRequired", "providerNowMonotonicNondecreasing", "boundaryOrderExact", "eachReceiptConsumedExactlyOnce", "fifthObservationRejected"],
+          "properties": {
+            "capabilityOpaque": { "const": true }, "capabilityModuleMinted": { "const": true },
+            "capabilityCloneRejected": { "const": true }, "callerProvidedNowAllowed": { "const": false },
+            "receiptLabels": { "const": ["outer-clock-evidence-receipt", "pre-rebind-clock-evidence-receipt", "pre-verification-clock-evidence-receipt", "pre-commit-clock-evidence-receipt"] },
+            "receiptsOpaqueModuleMintedSingleUse": { "const": true },
+            "receiptObjectIdentitiesMustBeDistinct": { "const": true },
+            "receiptBindsPreviousReceiptIdentity": { "const": true },
+            "liveLockRowRereadAtEveryBoundary": { "const": true },
+            "providerClockReadAtEveryBoundary": { "const": true },
+            "safeIntegerProviderNowRequired": { "const": true },
+            "providerNowMonotonicNondecreasing": { "const": true },
+            "boundaryOrderExact": { "const": true },
+            "eachReceiptConsumedExactlyOnce": { "const": true },
+            "fifthObservationRejected": { "const": true }
+          }
+        },
+        "publicationSession": {
+          "type": "object", "additionalProperties": false,
+          "required": ["opaque", "moduleMinted", "singleUse", "cloneRejected", "mintedAfterPostDdlCatalogFence", "derivedFromOuterPublicationAuthority", "requiredCommitments", "consumesPreRebindClockEvidenceReceiptExactlyOnce"],
+          "properties": {
+            "opaque": { "const": true }, "moduleMinted": { "const": true },
+            "singleUse": { "const": true }, "cloneRejected": { "const": true },
+            "mintedAfterPostDdlCatalogFence": { "const": true },
+            "derivedFromOuterPublicationAuthority": { "const": true },
+            "requiredCommitments": { "type": "array", "minItems": 22, "maxItems": 22, "uniqueItems": true, "items": { "$ref": "#/$defs/slug" } },
+            "consumesPreRebindClockEvidenceReceiptExactlyOnce": { "const": true }
+          }
+        },
+        "cursorClock": {
+          "type": "object", "additionalProperties": false,
+          "required": ["opaque", "moduleMinted", "singleUse", "cloneRejected", "consumesPreVerificationClockEvidenceReceiptExactlyOnce", "requiredCommitments"],
+          "properties": {
+            "opaque": { "const": true }, "moduleMinted": { "const": true },
+            "singleUse": { "const": true }, "cloneRejected": { "const": true },
+            "consumesPreVerificationClockEvidenceReceiptExactlyOnce": { "const": true },
+            "requiredCommitments": { "const": ["pre-verification-clock-evidence-receipt-object-identity", "pre-verification-provider-now-ms", "provider-clock-capability-object-identity", "migration-lock-capability-object-identity", "sqlite-connection-object-identity", "begin-exclusive-transaction-lineage", "live-migration-lock-tuple", "publication-session-object-identity", "rule-11-success-receipt-object-identity", "rule-12-success-receipt-object-identity"] }
+          }
+        },
+        "outerWriteReceiptContract": {
+          "type": "object", "additionalProperties": false,
+          "required": ["opaqueModuleMintedSingleUse", "cloneRejected", "order", "requiredCommitments"],
+          "properties": {
+            "opaqueModuleMintedSingleUse": { "const": true }, "cloneRejected": { "const": true },
+            "order": { "const": ["migration-lineage-publication-receipt", "schema-and-descriptor-metadata-publication-receipt"] },
+            "requiredCommitments": { "const": ["normalized-sql-identity-and-sha256", "parameter-and-result-identity", "affected-row-count", "total-changes-before-after-delta", "outer-ledger-sequence-and-delta", "sqlite-connection-object-identity", "begin-exclusive-transaction-lineage", "outer-publication-authority-object-identity", "post-ddl-catalog-fence-object-identity"] }
+          }
+        },
+        "receiptChain": {
+          "type": "object", "additionalProperties": false,
+          "required": ["preRetirementStageFenceReceipt", "stageRetirementReceipt", "finalCommitFenceReceipt"],
+          "properties": {
+            "preRetirementStageFenceReceipt": { "$ref": "#/$defs/preRetirementReceipt" },
+            "stageRetirementReceipt": { "$ref": "#/$defs/stageRetirementReceipt" },
+            "finalCommitFenceReceipt": { "$ref": "#/$defs/finalCommitReceipt" }
+          }
+        },
+        "migrationLock": {
+          "type": "object", "additionalProperties": false,
+          "required": ["mustBeActive", "sourceSchemaVersion", "targetSchemaVersion", "epochEqualsFencingToken", "ownerMustMatchOuterPublicationAuthority", "ownerMustMatchCursorPublicationSession", "mustBeUnexpiredAtProviderClock", "activeExpiresAtMsCommitted", "providerClockCapabilityCommitted", "clockEvidenceReceiptsOpaque", "clockEvidenceReceiptsSingleUse", "clockReproofBoundaries", "freshEvidenceRequiredAtEveryBoundary", "providerNowMonotonicNondecreasing", "expiryComparison", "equalExpiryIsExpired", "finalReproofOwner", "mustBeReprovedBeforeFirstPermanentMutation", "mustBeReprovedBeforeVerification", "mustBeReprovedBeforeCommit"],
+          "properties": {
+            "mustBeActive": { "const": true }, "sourceSchemaVersion": { "const": 1 },
+            "targetSchemaVersion": { "const": 2 }, "epochEqualsFencingToken": { "const": true },
+            "ownerMustMatchOuterPublicationAuthority": { "const": true },
+            "ownerMustMatchCursorPublicationSession": { "const": true },
+            "mustBeUnexpiredAtProviderClock": { "const": true },
+            "activeExpiresAtMsCommitted": { "const": true },
+            "providerClockCapabilityCommitted": { "const": true },
+            "clockEvidenceReceiptsOpaque": { "const": true },
+            "clockEvidenceReceiptsSingleUse": { "const": true },
+            "clockReproofBoundaries": { "const": ["before-first-permanent-mutation", "before-cursor-rebind", "before-verification", "before-commit"] },
+            "freshEvidenceRequiredAtEveryBoundary": { "const": true },
+            "providerNowMonotonicNondecreasing": { "const": true },
+            "expiryComparison": { "const": "providerNowMs < activeExpiresAtMs" },
+            "equalExpiryIsExpired": { "const": true },
+            "finalReproofOwner": { "const": "outer-and-cursor-publication-authorities" },
+            "mustBeReprovedBeforeFirstPermanentMutation": { "const": true },
+            "mustBeReprovedBeforeVerification": { "const": true },
+            "mustBeReprovedBeforeCommit": { "const": true }
+          }
+        },
+        "finalFence": {
+          "type": "object", "additionalProperties": false,
+          "required": ["requiredExactReceipts", "stageRetirementReceiptTransitivelyCommitsConsumedAuditTombstones", "reprovesLiveBeginExclusiveLineage", "reprovesLockTupleAndStrictExpiry", "reprovesTargetCatalogAndWriteLedgers", "reprovesZeroOwnedTempResidue", "rejectsPermanentWriteAfterRetirement", "mintsFinalCommitFenceReceiptOnce", "commitConsumesFinalFenceReceiptExactlyOnce"],
+          "properties": {
+            "requiredExactReceipts": { "const": ["stage-retirement-receipt", "pre-commit-clock-evidence-receipt"] },
+            "stageRetirementReceiptTransitivelyCommitsConsumedAuditTombstones": { "const": true },
+            "reprovesLiveBeginExclusiveLineage": { "const": true },
+            "reprovesLockTupleAndStrictExpiry": { "const": true },
+            "reprovesTargetCatalogAndWriteLedgers": { "const": true },
+            "reprovesZeroOwnedTempResidue": { "const": true },
+            "rejectsPermanentWriteAfterRetirement": { "const": true },
+            "mintsFinalCommitFenceReceiptOnce": { "const": true },
+            "commitConsumesFinalFenceReceiptExactlyOnce": { "const": true }
+          }
+        },
+        "transaction": {
+          "type": "object", "additionalProperties": false,
+          "required": ["mode", "sameBeginExclusiveLineageAsB2", "internalEpochAdoptionAllowedOnlyByBridge", "crossRuntimeEpochEqualityRequired", "postDdlFenceAdoptionRequired", "rollbackRebeginRejected", "connectionSubstitutionRejected"],
+          "properties": {
+            "mode": { "const": "BEGIN EXCLUSIVE" },
+            "sameBeginExclusiveLineageAsB2": { "const": true },
+            "internalEpochAdoptionAllowedOnlyByBridge": { "const": true },
+            "crossRuntimeEpochEqualityRequired": { "const": false },
+            "postDdlFenceAdoptionRequired": { "const": true }, "rollbackRebeginRejected": { "const": true },
+            "connectionSubstitutionRejected": { "const": true }
+          }
+        }
+      }
+    },
+    "sequence": {
+      "type": "object", "additionalProperties": false,
+      "required": ["orderedStages", "cursorSubprotocolStartsAt", "cursorSubprotocolEndsAt", "commitOwnedBy"],
+      "properties": {
+        "orderedStages": { "type": "array", "minItems": 23, "maxItems": 23, "uniqueItems": true, "items": { "$ref": "#/$defs/slug" } },
+        "cursorSubprotocolStartsAt": { "const": "cursor-publication-session-minted" },
+        "cursorSubprotocolEndsAt": { "const": "cursor-clock-complete" },
+        "commitOwnedBy": { "const": "v1-to-v2-atomic-migration-orchestrator" }
+      }
+    },
+    "sqlPair": {
+      "type": "object", "additionalProperties": false, "required": ["sql", "sha256"],
+      "properties": { "sql": { "type": "string", "minLength": 20 }, "sha256": { "$ref": "#/$defs/hash" } }
+    },
+    "sqlContract": {
+      "type": "object", "additionalProperties": false,
+      "required": ["normalization", "rebind", "affectedCount", "postRebindMainKeyCountScan", "postRebindKeyDriver", "postRebindPointLookup", "eqpRequired", "eqpForbiddenDetailFragments", "callerControlledSql", "triggersAllowed", "statementOwnershipRetiredExactlyOnce"],
+      "properties": {
+        "normalization": { "const": "trim-and-collapse-ascii-whitespace" },
+        "rebind": {
+          "type": "object", "additionalProperties": false,
+          "required": ["sql", "sha256", "parameterOrder", "executionLimit"],
+          "properties": {
+            "sql": { "type": "string", "minLength": 20 }, "sha256": { "$ref": "#/$defs/hash" },
+            "parameterOrder": { "type": "array", "minItems": 4, "maxItems": 4, "uniqueItems": true, "items": { "type": "string" } },
+            "executionLimit": { "const": 1 }
+          }
+        },
+        "affectedCount": { "$ref": "#/$defs/sqlPair" },
+        "postRebindMainKeyCountScan": { "$ref": "#/$defs/sqlPair" },
+        "postRebindKeyDriver": { "$ref": "#/$defs/sqlPair" },
+        "postRebindPointLookup": { "$ref": "#/$defs/sqlPair" },
+        "eqpRequired": { "type": "array", "minItems": 3, "maxItems": 3, "uniqueItems": true, "items": { "$ref": "#/$defs/slug" } },
+        "eqpForbiddenDetailFragments": { "const": ["AUTOMATIC", "MATERIALIZE", "USE TEMP B-TREE", "CO-ROUTINE"] },
+        "callerControlledSql": { "const": false }, "triggersAllowed": { "const": false },
+        "statementOwnershipRetiredExactlyOnce": { "const": true }
+      }
+    },
+    "writeLedger": {
+      "type": "object", "additionalProperties": false,
+      "required": ["owner", "allowedPermanentStatements", "windowStartsAt", "windowEndsAt", "outerMigrationWritesOwnedBy", "expectedStatementCount", "expectedAffectedRowsSource", "requiresStatementChangesEquality", "requiresTotalChangesDeltaEquality", "requiresLedgerDeltaEquality", "sameValueReplayAllowed", "secondExecutionAllowed", "unexplainedPermanentWritePoisons"],
+      "properties": {
+        "owner": { "const": "publication-session" }, "allowedPermanentStatements": { "const": ["cursor-rebind"] },
+        "windowStartsAt": { "const": "cursor-publication-session-minted" },
+        "windowEndsAt": { "const": "rule-12-main-table-seal-accepted" },
+        "outerMigrationWritesOwnedBy": { "const": "outer-publication-authority" },
+        "expectedStatementCount": { "const": 1 }, "expectedAffectedRowsSource": { "const": "pre-rebind-receipt.cursorCount" },
+        "requiresStatementChangesEquality": { "const": true }, "requiresTotalChangesDeltaEquality": { "const": true },
+        "requiresLedgerDeltaEquality": { "const": true }, "sameValueReplayAllowed": { "const": false },
+        "secondExecutionAllowed": { "const": false }, "unexplainedPermanentWritePoisons": { "const": true }
+      }
+    },
+    "rule": {
+      "type": "object", "additionalProperties": false,
+      "required": ["position", "id", "input", "expected", "diagnosticUnit", "violationCountOnFailure", "successRequiredForNextRule"],
+      "properties": {
+        "position": { "enum": [11, 12] }, "id": { "enum": ["BLR_CURSOR_REBIND_COUNT", "BLR_CURSOR_SEAL_MISMATCH"] },
+        "input": { "type": "string" }, "expected": { "type": "string" }, "diagnosticUnit": { "type": "string" },
+        "violationCountOnFailure": { "const": 1 },
+        "successRequiredForNextRule": { "const": true }
+      }
+    },
+    "rules": { "type": "array", "minItems": 2, "maxItems": 2, "items": { "$ref": "#/$defs/rule" } },
+    "sealContract": {
+      "type": "object", "additionalProperties": false,
+      "required": ["algorithmVersion", "rowDomain", "sealDomain", "order", "source", "fetchSize", "maximumLivePhysicalRows", "maximumLiveCarriers", "mutableFields", "immutablePhysicalFields", "blobEvidence", "requiresReceiptCountEquality", "requiresReceiptRootEquality", "requiresEveryTargetIdentity", "separateMainKeyScanDetectsExtraRows", "maximumActiveCursors", "driverCursorLifetime", "maximumConcurrentPointLookupCursors", "pointCursorClosedBeforeNextDriverFetch", "mainKeyCountCursorLifetime", "mainKeyCountCursorClosedBeforeDriverPrepare", "phaseCleanupOrder"],
+      "properties": {
+        "algorithmVersion": { "const": "sqlite-cursor-seal/v1" },
+        "rowDomain": { "const": "graph-engineering/sqlite-cursor-seal-row/v1\u0000" },
+        "sealDomain": { "const": "graph-engineering/sqlite-cursor-seal/v1\u0000" },
+        "order": { "const": ["token-hash-utf8-bytes", "tenant-id-utf8-bytes"] },
+        "source": { "const": "fresh-main-table-point-lookups-driven-by-owned-b2-key-carrier" },
+        "fetchSize": { "const": 1 }, "maximumLivePhysicalRows": { "const": 1 }, "maximumLiveCarriers": { "const": 1 },
+        "mutableFields": { "const": ["descriptor_hash", "schema_identity_sha256"] },
+        "immutablePhysicalFields": { "type": "array", "minItems": 16, "maxItems": 16, "uniqueItems": true, "items": { "type": "string" } },
+        "blobEvidence": { "type": "array", "minItems": 4, "maxItems": 4, "uniqueItems": true, "items": { "$ref": "#/$defs/slug" } },
+        "requiresReceiptCountEquality": { "const": true }, "requiresReceiptRootEquality": { "const": true },
+        "requiresEveryTargetIdentity": { "const": true },
+        "separateMainKeyScanDetectsExtraRows": { "const": true },
+        "maximumActiveCursors": { "const": 2 },
+        "driverCursorLifetime": { "const": "entire-post-rebind-proof" },
+        "maximumConcurrentPointLookupCursors": { "const": 1 },
+        "pointCursorClosedBeforeNextDriverFetch": { "const": true },
+        "mainKeyCountCursorLifetime": { "const": "main-key-count-scan-only" },
+        "mainKeyCountCursorClosedBeforeDriverPrepare": { "const": true },
+        "phaseCleanupOrder": {
+          "type": "object", "additionalProperties": false,
+          "required": ["mainKeyCountSuccess", "mainKeyCountFailureOrCancellation", "sealFailureOrCancellation"],
+          "properties": {
+            "mainKeyCountSuccess": { "const": ["close-main-key-count-cursor", "clear-main-key-count-ownership", "prepare-key-driver"] },
+            "mainKeyCountFailureOrCancellation": { "const": ["main-key-count-cursor", "temp-stage", "outer-cleanup"] },
+            "sealFailureOrCancellation": { "const": ["point-cursor", "driver-cursor", "temp-stage", "outer-cleanup"] }
+          }
+        }
+      }
+    },
+    "stateMachine": {
+      "type": "object", "additionalProperties": false,
+      "required": ["states", "successTransitions", "terminalFailureState", "secondBeginRejected", "secondVerificationRejected", "authoritySubstitutionRejected", "disposedReuseRejected", "diagnosedB2EntryRejected"],
+      "properties": {
+        "states": { "type": "array", "minItems": 5, "maxItems": 5, "uniqueItems": true, "items": { "type": "string" } },
+        "successTransitions": { "type": "array", "minItems": 2, "maxItems": 2, "uniqueItems": true, "items": { "type": "string" } },
+        "terminalFailureState": { "const": "poisoned" }, "secondBeginRejected": { "const": true },
+        "secondVerificationRejected": { "const": true }, "authoritySubstitutionRejected": { "const": true },
+        "disposedReuseRejected": { "const": true }, "diagnosedB2EntryRejected": { "const": true }
+      }
+    },
+    "failureContract": {
+      "type": "object", "additionalProperties": false,
+      "required": ["boundaryPrecedence", "authorityFailureBeforeCancellation", "primaryFailureBeforeCleanup", "ruleFailurePoisonsOwner", "callerMustRollbackAfterPoison", "diagnosticFields", "diagnosticDefault", "diagnosticMinimum", "diagnosticMaximum", "diagnosedContainsReceipt", "diagnosedContainsRoot"],
+      "properties": {
+        "boundaryPrecedence": {
+          "type": "object", "additionalProperties": false,
+          "required": ["beforeFirstPermanentWrite", "beforeCursorRebind", "afterStatementStarted", "afterCommitReturned"],
+          "properties": {
+            "beforeFirstPermanentWrite": { "type": "array", "minItems": 7, "maxItems": 7, "uniqueItems": true, "items": { "$ref": "#/$defs/slug" } },
+            "beforeCursorRebind": { "type": "array", "minItems": 5, "maxItems": 5, "uniqueItems": true, "items": { "$ref": "#/$defs/slug" } },
+            "afterStatementStarted": { "type": "array", "minItems": 6, "maxItems": 6, "uniqueItems": true, "items": { "$ref": "#/$defs/slug" } },
+            "afterCommitReturned": { "type": "array", "minItems": 2, "maxItems": 2, "uniqueItems": true, "items": { "$ref": "#/$defs/slug" } }
+          }
+        },
+        "authorityFailureBeforeCancellation": { "const": true }, "primaryFailureBeforeCleanup": { "const": true },
+        "ruleFailurePoisonsOwner": { "const": true }, "callerMustRollbackAfterPoison": { "const": true },
+        "diagnosticFields": { "const": ["ruleId", "violationCount", "diagnosticsTruncated"] },
+        "diagnosticDefault": { "const": 16 }, "diagnosticMinimum": { "const": 1 }, "diagnosticMaximum": { "const": 64 },
+        "diagnosedContainsReceipt": { "const": false }, "diagnosedContainsRoot": { "const": false }
+      }
+    },
+    "lifecycleContract": {
+      "type": "object", "additionalProperties": false,
+      "required": ["cancellationLabels", "statementBoundaries", "cleanupFaults", "longScanChecksCancellationPerRow", "everyStatementOwnershipRetiredExactlyOnce", "everyCursorClosedExactlyOnce", "cancellationSemantics"],
+      "properties": {
+        "cancellationLabels": { "type": "array", "minItems": 20, "maxItems": 20, "uniqueItems": true, "items": { "$ref": "#/$defs/slug" } },
+        "statementBoundaries": { "type": "array", "minItems": 16, "maxItems": 16, "uniqueItems": true, "items": { "$ref": "#/$defs/slug" } },
+        "cleanupFaults": { "type": "array", "minItems": 7, "maxItems": 7, "uniqueItems": true, "items": { "$ref": "#/$defs/slug" } },
+        "longScanChecksCancellationPerRow": { "const": true },
+        "everyStatementOwnershipRetiredExactlyOnce": { "const": true },
+        "everyCursorClosedExactlyOnce": { "const": true },
+        "cancellationSemantics": {
+          "type": "object", "additionalProperties": false,
+          "required": ["labelsAreRequestInjectionPoints", "rebindStartedPrimaryBeforeCancellation", "mainKeyCountRowStartedPrimaryBeforeCancellation", "mainKeyCountBeforeFetchCancellation", "mainKeyCountTerminalPrimaryBeforeCancellation", "mainKeyCountTerminalCancellationObservedAfterFrozenCount", "mainKeyCountCloseFailurePrecedence", "mainKeyCountCancellationClosesCursorBeforeTempCleanup", "rule12RowStartedPrimaryBeforeCancellation", "rule12FinalPrimaryBeforeCancellation", "cleanupAlwaysLast"],
+          "properties": {
+            "labelsAreRequestInjectionPoints": { "const": true },
+            "rebindStartedPrimaryBeforeCancellation": { "type": "array", "minItems": 4, "maxItems": 4, "uniqueItems": true, "items": { "$ref": "#/$defs/slug" } },
+            "mainKeyCountRowStartedPrimaryBeforeCancellation": { "const": ["decode-current-main-key", "validate-current-main-key", "increment-main-key-count"] },
+            "mainKeyCountBeforeFetchCancellation": { "const": ["close-main-key-count-cursor", "clear-main-key-count-ownership", "observe-cancellation"] },
+            "mainKeyCountTerminalPrimaryBeforeCancellation": { "const": ["prove-terminal-result", "close-main-key-count-cursor", "clear-main-key-count-ownership", "freeze-main-key-count"] },
+            "mainKeyCountTerminalCancellationObservedAfterFrozenCount": { "const": true },
+            "mainKeyCountCloseFailurePrecedence": { "const": ["earlier-fetch-decode-order-count-or-terminal-primary", "main-key-count-close-failure", "cancellation", "temp-or-outer-cleanup-failure"] },
+            "mainKeyCountCancellationClosesCursorBeforeTempCleanup": { "const": true },
+            "rule12RowStartedPrimaryBeforeCancellation": { "type": "array", "minItems": 3, "maxItems": 3, "uniqueItems": true, "items": { "$ref": "#/$defs/slug" } },
+            "rule12FinalPrimaryBeforeCancellation": { "type": "array", "minItems": 4, "maxItems": 4, "uniqueItems": true, "items": { "$ref": "#/$defs/slug" } },
+            "cleanupAlwaysLast": { "const": true }
+          }
+        }
+      }
+    },
+    "faultMatrix": {
+      "type": "object", "additionalProperties": false,
+      "required": ["boundaries", "preCommitReopenState", "postCommitReopenState", "retryRequiresFreshAuthorityGraph", "subprocessKillRequired", "busyLockedRequired", "connectionLossRequired"],
+      "properties": {
+        "boundaries": { "type": "array", "minItems": 20, "maxItems": 20, "uniqueItems": true, "items": { "$ref": "#/$defs/slug" } },
+        "preCommitReopenState": { "const": "exact-source-v1" }, "postCommitReopenState": { "const": "complete-target-v2" },
+        "retryRequiresFreshAuthorityGraph": { "const": true }, "subprocessKillRequired": { "const": true },
+        "busyLockedRequired": { "const": true }, "connectionLossRequired": { "const": true }
+      }
+    },
+    "parityGates": {
+      "type": "object", "additionalProperties": false,
+      "required": ["runtimes", "required", "fixtureCanonicalSha256"],
+      "properties": {
+        "runtimes": { "const": ["typescript", "python"] },
+        "required": { "type": "array", "minItems": 13, "maxItems": 13, "uniqueItems": true, "items": { "$ref": "#/$defs/slug" } },
+        "fixtureCanonicalSha256": { "$ref": "#/$defs/hash" }
+      }
+    }
+  }
+}
