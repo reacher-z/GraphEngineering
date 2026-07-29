@@ -158,6 +158,19 @@ function assertKeyedPermutation(name, left, right) {
   return { equal: true, graphHash: leftHash };
 }
 
+function replaceNodeKindsForExecution(graph, replacements) {
+  const projected = structuredClone(graph);
+  projected.nodes = projected.nodes.map((current) => ({
+    ...current,
+    kind: replacements.get(current.id) ?? current.kind,
+  }));
+  const compilation = compileGraph(projected);
+  assert.equal(compilation.valid, true, "execution projection must compile");
+  assert.deepEqual(compilation.diagnostics, []);
+  assert.equal(typeof compilation.graphHash, "string");
+  return { graph: projected, graphHash: compilation.graphHash };
+}
+
 function assertDeepFrozen(value, seen = new Set()) {
   if (typeof value !== "object" || value === null || seen.has(value)) return;
   seen.add(value);
@@ -300,7 +313,13 @@ async function executeDag(name, graph, input, options) {
   assert.ok(executablePatterns.has(name));
   assert.equal(graph.metadata.labels?.[CAPABILITY_LABEL], DAG_CAPABILITY);
   runtimeExecuted.push(name);
-  return runGraph(graph, input, options);
+  const result = await runGraph(graph, input, options);
+  assert.equal(
+    result.status,
+    "succeeded",
+    `${name} execution failed: ${JSON.stringify(result.failures)}`,
+  );
+  return result;
 }
 
 const diamondOverlap = controlledOverlap(["diamond-code", "diamond-docs"]);
@@ -375,9 +394,28 @@ const verifiedExpectedOutput = {
     lenses: ["correctness", "reproducibility", "security"],
   },
 };
+const validatorGate = await runGraph(verifiedGraph, { claim });
+assert.equal(validatorGate.status, "failed");
+assert.equal(validatorGate.totalAttempts, 0);
+assert.deepEqual(
+  validatorGate.failures.map(({ code, nodeId }) => ({ code, nodeId })),
+  [
+    { code: "UNSUPPORTED_RUNTIME_CAPABILITY", nodeId: "verify-correctness" },
+    { code: "UNSUPPORTED_RUNTIME_CAPABILITY", nodeId: "verify-reproducibility" },
+    { code: "UNSUPPORTED_RUNTIME_CAPABILITY", nodeId: "verify-security" },
+  ],
+);
+const verifiedExecution = replaceNodeKindsForExecution(
+  verifiedGraph,
+  new Map([
+    ["verify-correctness", "transform"],
+    ["verify-reproducibility", "transform"],
+    ["verify-security", "transform"],
+  ]),
+);
 const verifiedRun = await executeDag(
   "verifiedFanout",
-  verifiedGraph,
+  verifiedExecution.graph,
   { claim },
   {
     concurrency: 3,
@@ -416,13 +454,14 @@ const verifiedRun = await executeDag(
 );
 verifierOverlap.assertComplete();
 assert.equal(verifiedRun.status, "succeeded");
-assert.equal(verifiedRun.graphHash, summaryByName.verifiedFanout.graphHash);
+assert.equal(verifiedRun.graphHash, verifiedExecution.graphHash);
 assert.equal(verifiedRun.maxObservedConcurrency, 3);
 assert.deepEqual(verifiedRun.output, verifiedExpectedOutput);
 
-// Deliberately do not pass routedGraph or loopGraph to runGraph. The current
-// scheduler ignores edge conditions; running them would execute every branch
-// and every round, which would falsely suggest routing or early-stop support.
+// This script deliberately does not pass routedGraph or loopGraph to runGraph.
+// RouteEquals is executable elsewhere; this showcase simply keeps its runtime
+// demonstrations focused on fan-out. Loop early-stop remains outside the Graph
+// IR scheduler.
 assert.deepEqual(runtimeExecuted, ["diamond", "verifiedFanout"]);
 assert.equal(runtimeExecuted.includes("routedBranches"), false);
 assert.equal(runtimeExecuted.includes("loopUntilDry"), false);
@@ -439,6 +478,13 @@ const report = {
     },
     verifiedFanout: {
       status: verifiedRun.status,
+      declarationGraphHash: summaryByName.verifiedFanout.graphHash,
+      executionGraphHash: verifiedExecution.graphHash,
+      specializedValidatorGate: {
+        status: validatorGate.status,
+        totalAttempts: validatorGate.totalAttempts,
+        failureCodes: validatorGate.failures.map((failure) => failure.code),
+      },
       maxObservedConcurrency: verifiedRun.maxObservedConcurrency,
       totalAttempts: verifiedRun.totalAttempts,
       output: verifiedRun.output,
@@ -450,14 +496,16 @@ const report = {
     recursivelyFrozen: true,
     mutationRejected,
     runtimeExecuted,
-    declarativeOnly: {
+    notExecutedByShowcase: {
       routedBranches: {
         capability: summaryByName.routedBranches.capability,
         executed: false,
+        runtimeCapabilityAvailable: true,
       },
       loopUntilDry: {
         capability: summaryByName.loopUntilDry.capability,
         executed: false,
+        runtimeCapabilityAvailable: false,
       },
     },
   },

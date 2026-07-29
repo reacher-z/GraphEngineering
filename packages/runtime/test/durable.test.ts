@@ -18,6 +18,10 @@ import {
   startDurableGraphRun,
   type DurableNodeExecutionContext,
 } from "../src/index.js";
+import {
+  projectedRuntimeCapabilityFailures,
+  runtimeCapabilityCorpus,
+} from "./runtime-capability-fixtures.js";
 
 const FIXED_TIME = "2026-07-26T12:00:00.000Z";
 const fixedNow = (): Date => new Date(FIXED_TIME);
@@ -187,6 +191,164 @@ class BlockingSuccessStore implements EventStore {
 }
 
 describe("durable graph scheduler", () => {
+  it("consumes the runtime-capability corpus for durable start and resume before persistence", async () => {
+    const corpus = runtimeCapabilityCorpus();
+
+    for (const testCase of corpus.cases) {
+      for (const entrypoint of ["start", "resume"] as const) {
+        const executor = vi.fn(({ input }) => input);
+        const nodeExecutors = Object.fromEntries(
+          testCase.graph.nodes
+            .filter((current) => current.kind !== "barrier")
+            .map((current) => [current.id, executor]),
+        );
+
+        if (testCase.expect.supported) {
+          const store = new MemoryEventStore();
+          const options = {
+            runId: `capability-${entrypoint}`,
+            implementationId: "v1",
+            eventStore: store,
+            nodeExecutors,
+          };
+          if (entrypoint === "resume") {
+            const seeded = await startDurableGraphRun(testCase.graph, {}, options);
+            expect(seeded.status, `${testCase.name}:resume-seed`).toBe("succeeded");
+            executor.mockClear();
+          }
+          const result = entrypoint === "start"
+            ? await startDurableGraphRun(testCase.graph, {}, options)
+            : await resumeDurableGraphRun(testCase.graph, options);
+          expect(
+            result.status,
+            `${testCase.name}:${entrypoint}: ${JSON.stringify(result)}`,
+          ).toBe("succeeded");
+          expect(result.failures, `${testCase.name}:${entrypoint}`).toEqual([]);
+          expect(executor, `${testCase.name}:${entrypoint}`).toHaveBeenCalledTimes(
+            entrypoint === "start" ? 1 : 0,
+          );
+          continue;
+        }
+
+        const read = vi.fn((): AsyncIterable<GraphEvent> => {
+          throw new Error("event store read must not run during capability preflight");
+        });
+        const append = vi.fn(async (): Promise<number> => {
+          throw new Error("event store append must not run during capability preflight");
+        });
+        const store: EventStore = { read, append };
+        const options = {
+          runId: `capability-${entrypoint}`,
+          implementationId: "v1",
+          eventStore: store,
+          nodeExecutors,
+        };
+        const result = entrypoint === "start"
+          ? await startDurableGraphRun(testCase.graph, {}, options)
+          : await resumeDurableGraphRun(testCase.graph, options);
+
+        expect(result, `${testCase.name}:${entrypoint}`).toMatchObject({
+          status: corpus.failureProjection.status,
+          nodes: [],
+          failures: projectedRuntimeCapabilityFailures(testCase),
+          maxObservedConcurrency: 0,
+          totalAttempts: corpus.failureProjection.totalAttempts,
+        });
+        expect(result.graphHash).toEqual(expect.any(String));
+        expect(read).toHaveBeenCalledTimes(corpus.failureProjection.durableReadCalls);
+        expect(append).toHaveBeenCalledTimes(corpus.failureProjection.durableAppendCalls);
+        expect(executor).toHaveBeenCalledTimes(corpus.failureProjection.executorCalls);
+      }
+    }
+  });
+
+  it("reports runtime issues before foreign conditions without durable reads or appends", async () => {
+    const combined: GraphSpec = {
+      ...registeredLoopConditionGraph(),
+      stateSchema: {},
+    };
+    const read = vi.fn((): AsyncIterable<GraphEvent> => {
+      throw new Error("event store read must not run during capability preflight");
+    });
+    const append = vi.fn(async (): Promise<number> => {
+      throw new Error("event store append must not run during capability preflight");
+    });
+    const executor = vi.fn(() => "never");
+    const options = {
+      runId: "combined-capabilities",
+      implementationId: "v1",
+      eventStore: { read, append } satisfies EventStore,
+      nodeExecutors: { source: executor },
+    };
+
+    const started = await startDurableGraphRun(combined, {}, options);
+    const resumed = await resumeDurableGraphRun(combined, options);
+
+    for (const result of [started, resumed]) {
+      expect(result).toMatchObject({
+        status: "failed",
+        nodes: [],
+        totalAttempts: 0,
+        failures: [
+          {
+            code: "UNSUPPORTED_RUNTIME_CAPABILITY",
+            nodeId: "source",
+            message: "Runtime capability 'graph-state' at '#/stateSchema' is not implemented by runtime-capability/v1alpha1",
+            attempt: 0,
+          },
+          {
+            code: "UNSUPPORTED_EDGE_CONDITION",
+            nodeId: "source",
+            attempt: 0,
+          },
+        ],
+      });
+    }
+    expect(started).toEqual(resumed);
+    expect(read).not.toHaveBeenCalled();
+    expect(append).not.toHaveBeenCalled();
+    expect(executor).not.toHaveBeenCalled();
+  });
+
+  it("rejects unsupported barrier configuration before durable start or resume persistence", async () => {
+    const unsupported = graph({
+      nodes: [node("root", { kind: "barrier", config: { condition: "any" } })],
+    });
+    const read = vi.fn((): AsyncIterable<GraphEvent> => {
+      throw new Error("unexpected durable read");
+    });
+    const append = vi.fn(async (): Promise<number> => {
+      throw new Error("unexpected durable append");
+    });
+    const executor = vi.fn(() => "never");
+    const options = {
+      runId: "unsupported-barrier-config",
+      implementationId: "v1",
+      eventStore: { read, append } satisfies EventStore,
+      nodeExecutors: { root: executor },
+    };
+
+    for (const result of [
+      await startDurableGraphRun(unsupported, {}, options),
+      await resumeDurableGraphRun(unsupported, options),
+    ]) {
+      expect(result).toMatchObject({
+        status: "failed",
+        nodes: [],
+        totalAttempts: 0,
+        failures: [{
+          code: "UNSUPPORTED_RUNTIME_CAPABILITY",
+          nodeId: "root",
+          message: "Runtime capability 'node-config:barrier' at '#/nodes/0/config' is not implemented by runtime-capability/v1alpha1",
+          attempt: 0,
+        }],
+      });
+    }
+    expect(read).not.toHaveBeenCalled();
+    expect(append).not.toHaveBeenCalled();
+    expect(executor).not.toHaveBeenCalled();
+  });
+
   it("commits every claim before execution and terminal resume is deeply identical", async () => {
     const store = new MemoryEventStore();
     let identity: readonly string[] | undefined;
@@ -1695,7 +1857,6 @@ describe("durable graph scheduler", () => {
         timeoutMs: maximum,
         retry: { maxAttempts: 2, initialDelayMs: maximum, maxDelayMs: maximum },
       })],
-      policies: { maxDurationMs: maximum },
     });
     const accepted = await startDurableGraphRun(atLimit, {}, {
       runId: "timer-limit",

@@ -14,6 +14,7 @@ scope
 Validate and inspect it from the repository root:
 
 ```bash
+corepack pnpm --filter @graph-engineering/cli build
 node packages/cli/dist/src/cli.js validate examples/quickstart/research-diamond.graph.json
 node packages/cli/dist/src/cli.js plan examples/quickstart/research-diamond.graph.json
 node packages/cli/dist/src/cli.js visualize examples/quickstart/research-diamond.graph.json

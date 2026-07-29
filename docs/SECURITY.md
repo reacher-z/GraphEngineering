@@ -21,9 +21,11 @@ In particular, today:
 - a Python node handler runs inside the host Python process;
 - executor code can inherit the process environment, filesystem, network, and
   subprocess authority;
-- Graph IR `resources` and `isolation` fields are descriptive; `sideEffects` is
-  a trusted declaration used to gate durable retry, not verified capability or
-  idempotency enforcement;
+- Graph IR `resources` and `isolation` fields are descriptive protocol
+  vocabulary, not enforced controls; the ordinary and durable schedulers fail
+  closed before work/store I/O when either field is present rather than silently
+  ignoring it; `sideEffects` is a trusted declaration used to gate durable
+  retry, not verified capability or idempotency enforcement;
 - timeout and cancellation are cooperative controls, not containment boundaries;
 - worktree, process, and container isolation providers are target-v1 work;
 - scoped secret injection, payload redaction, human approval, authenticated

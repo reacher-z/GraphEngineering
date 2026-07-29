@@ -11734,3 +11734,274 @@ latency/RSS/TEMP-file proof, subprocess crash/replay, release hardening, stable
 release, community adoption and the 5K/6K-star objective remain open. No source
 change can guarantee a future star count, and this checkpoint makes no such
 claim.
+
+### 31.36 Runtime capability truth, public compatibility and next execution queue
+
+This append-only section records the highest-priority tranche selected after
+Cursor Slice B2. It does not revise or weaken any prior obligation. It closes a
+dangerous execution ambiguity in the wider Graph IR, records the compatibility
+work needed to land the boundary honestly, and fixes the next parallel order.
+
+#### 31.36.1 Whole-plan truth snapshot and explicit non-completion
+
+The new full-plan scan counted 107 registered tasks: 41 complete, seven in
+progress and 59 planned. The evidence scanner found 13 of 77 evidence groups
+satisfied and 64 open. All 178 release leaves are mapped but all 178 remain
+open; the release-candidate overlay is 0 of 93. These counts are a planning
+snapshot, not a release or product-completeness claim.
+
+The 21-day plan, release candidate, stable release, community adoption and
+5K/6K-star objectives remain incomplete. Source quality can improve adoption
+probability but cannot guarantee a future GitHub star count. The goal stays
+active.
+
+Major open domains remain the complete compiler/kernel; D6 barrier settlement
+and durable route-decision identity; D7 scheduler/controller integration; D4
+subgraph/state/artifact/stream/trace; D9 runtime redaction; budgets, model
+routing and providers; verifier/judge/citation and isolation; complete CLI/MCP,
+OTel and Explorer; ten executable patterns; the fourteen-step course; release
+provenance/usability/community work; and SQLite B3, rules 11/12, migration
+`0002` and permanent v2 publication.
+
+#### 31.36.2 Failure that made this tranche mandatory
+
+Graph IR recognizes vocabulary ahead of the first native DAG scheduler. Before
+this tranche, a compiler-valid document could request state, subgraph,
+verifier, human, streaming, artifact, mapping, resource, isolation, jitter,
+dynamic-growth, deadline, cost or extension-policy behavior and then reach a
+scheduler that treated it as ordinary DAG value flow. A generic executor could
+make an unsupported node appear successful without its specialized semantics.
+
+Compilation success is not an execution claim. A runtime must execute the exact
+declaration or reject it before work. Silent semantic downgrade is forbidden.
+The `runtime-capability/v1alpha1` boundary therefore applies identically to
+ordinary execution, durable start and durable resume in TypeScript and Python.
+
+#### 31.36.3 Closed supported subset
+
+The schedulers may execute only:
+
+1. `agent`, `model`, `tool`, `transform` and compiler-validated integrated
+   `router` nodes;
+2. static all-success `barrier` nodes with exactly `{}` or exactly
+   `{ "condition": "all" }` config;
+3. omitted or explicit `value` edge mode;
+4. retry jitter absent or false;
+5. `maxConcurrency`, `maxDepth`, `maxFanOut` and `maxTotalAttempts`; and
+6. the compile-only `graphengineering.reacher-z.github.io/typed-ports`
+   extension.
+
+Graph, node and edge schemas remain compiler contracts. Their presence does
+not claim runtime validation of graph inputs, node inputs/outputs, edge values
+or graph outputs.
+
+#### 31.36.4 Closed rejected subset and stable labels
+
+Every present unsupported declaration produces one failure:
+
+- `stateSchema` -> `graph-state`;
+- `subgraph`, `validator`, `human` -> `node-kind:<kind>`;
+- non-static-all barrier config -> `node-config:barrier`;
+- cache -> `node-cache`;
+- resources -> `resource-admission`;
+- isolation -> `isolation-provider`;
+- true jitter -> `retry-jitter`;
+- edge map -> `edge-map`;
+- stream/artifact-reference mode -> `edge-mode:<mode>`;
+- `maxDynamicNodes` -> `dynamic-graph-patch`;
+- `maxDurationMs` -> `graph-deadline`;
+- `maxCostUsd` -> `cost-budget`; and
+- remaining policy keys -> `policy:<key>`.
+
+Presence is authoritative for cache, resources, isolation and map, even when
+the value is `{}`. Empty and non-empty schemas remain compile-only and do not
+create capability failures.
+
+#### 31.36.5 Deterministic zero-side-effect failure contract
+
+The exact code is `UNSUPPORTED_RUNTIME_CAPABILITY`. The exact message is:
+
+```text
+Runtime capability '<capability>' at '<path>' is not implemented by runtime-capability/v1alpha1
+```
+
+Paths are RFC 6901 JSON Pointers. Dynamic segments escape `~` as `~0` and `/`
+as `~1`. Graph/policy failures are attributed to the first entrypoint, node
+failures to that node and edge failures to the source. Attribution never creates
+a node result.
+
+Order is graph state; nodes in declaration order with kind, barrier config,
+cache, resources, isolation and jitter order; edges in declaration order with
+map before mode; known dynamic/deadline/cost policies; then remaining policy
+keys in Unicode code-point order. Runtime-capability failures precede existing
+`UNSUPPORTED_EDGE_CONDITION` failures when both occur.
+
+Unsupported graphs return `failed`, zero nodes, zero attempts, zero observed
+concurrency, no output and empty scheduled/completion orders. No executor or
+ordinary journal hook runs. Durable start/resume perform zero store reads and
+writes. Ordinary preflight happens before graph-input inspection, so a hostile
+input cannot mask or bypass the graph capability result.
+
+#### 31.36.6 Literal conformance corpus and validator
+
+`spec/conformance/runtime-capability.case.json` is the single source consumed
+literally by both runtime suites. Its schema, semantic validator, Node test and
+prose contract freeze seven cases:
+
+1. supported core plus a two-level static all-success barrier;
+2. state rejection while non-empty graph schemas are accepted;
+3. unsupported subgraph/validator/human kinds;
+4. unsupported barrier policy;
+5. cache/resource/isolation/jitter rejection while node schemas are accepted;
+6. map/stream/artifact-ref rejection while edge schema is accepted; and
+7. known and unknown policy rejection.
+
+The policy case freezes empty key, `__proto__`, `constructor`, ASCII, accented
+Unicode and supplementary emoji ordering plus slash/tilde pointer escaping.
+The seven cases contain exactly 22 expected failures.
+
+The validator independently checks unique node identity, entrypoint/output/edge
+endpoints, entrypoint incoming-edge prohibition, reachability, acyclicity,
+longest-path depth and fan-out bounds. This closes the audit-proven blind spot
+where a two-level graph with `maxDepth: 1` passed schema validation but failed
+both native compilers. Both literal runtime suites still compile every case as
+redundant compiler-semantic evidence.
+
+#### 31.36.7 Public compatibility and truthful showcase policy
+
+The canonical quickstart, TypeScript CLI template and Python bundled template
+remove `maxDynamicNodes: 0`, remain byte-identical and compile to
+`f9aaeffc991e6cec223c959dbf7737a8fff96e1eb1ea433343f45fe663697b50`.
+Python CLI doctor/init use that exact hash. Fresh-clone documentation builds the
+ignored TypeScript CLI `dist` before invoking validate/plan/visualize.
+
+The pattern showcase preserves the original `verifiedFanout` graph, first proves
+that its three specialized validator nodes fail closed with zero attempts, then
+builds a topology-equivalent execution projection changing only those kinds to
+`transform`. It records distinct declaration/execution hashes, proves three-way
+overlap and exact adjudication, and therefore demonstrates mechanics without
+claiming verifier semantics.
+
+The report uses `notExecutedByShowcase`, not `declarativeOnly`. It records
+`runtimeCapabilityAvailable: true` for `routedBranches` because `RouteEquals` is
+integrated, and false for loop early-stop. ROADMAP, concepts, failure modes,
+security, both runtime READMEs and pattern docs must distinguish static joins
+from quorum/deadline barriers, RouteEquals from arbitrary/durable decisions,
+compile-only schemas from runtime validation, and fail-closed resource/isolation
+declarations from actual isolation.
+
+#### 31.36.8 Parallel delivery and audit history
+
+Four non-overlapping lanes operate at maximum available concurrency:
+
+1. main/spec owns shared contract, corpus, public compatibility, append-only
+   plan/log and integration;
+2. TypeScript owns runtime preflight, ordinary/durable wiring and tests;
+3. Python owns mirrored runtime wiring, literal tests, template identity and
+   Python gates; and
+4. hostile read-only audit attacks ordering, zero I/O, compiler validity,
+   quickstarts, showcase and documentation truth.
+
+Agents do not commit independently. Main monitors findings and sends every
+boundary correction back to both implementations. The audit history is kept:
+initial schema/barrier over-rejection, combined-condition drift, hostile-input
+precedence, invalid fixture depth, template/hash drift, generic verifier
+execution, stale route/security wording, missing fresh-clone CLI build and the
+semantic-validator blind spot were all found, repaired and retested.
+
+#### 31.36.9 Acceptance gates
+
+Acceptance requires the shared 7-case/22-failure validator and test; literal
+ordinary/durable consumption in both runtimes; combined-condition and hostile-
+input precedence; zero executor/journal/store effects; TS runtime full tests,
+build/typecheck/lint; Python focused and full tests, Ruff format/lint and strict
+MyPy; CLI tests and template/hash/doctor/init parity; fresh-clone CLI commands;
+JS/Python quickstarts with concurrency two; pattern showcase with validator
+gate plus transform projection and concurrency three; all fixtures; doc links;
+scoped diff checks; and independent HIGH 0 / MEDIUM 0 / LOW 0 disposition.
+
+Only after every gate is green may a separate append-only checkpoint authorize
+a scoped commit/push by `reacher-z <mtrxcop@gmail.com>` without coauthor.
+
+#### 31.36.10 Explicit non-claims
+
+This tranche does not implement runtime schema validation, state reducers,
+subgraphs, validators, human approval, settled/minimum/percentage/quorum/
+deadline barriers, cache, admission, isolation, jitter, edge maps, streams,
+artifacts, dynamic patches, deadlines, cost accounting or arbitrary extensions.
+It prevents those declarations from silently executing as weaker behavior.
+
+It also does not complete durable `RouteSelected`, B3, rules 11/12, migration
+`0002`, stable release, community adoption or any star objective.
+
+#### 31.36.11 Next maximum-parallel execution queue
+
+After this checkpoint:
+
+1. return to SQLite B3 publication/rebind and rules 11/12, then migration
+   `0002` and permanent v2 state with crash/cancellation/replay proof;
+2. in parallel where ownership permits, freeze D6 settled-barrier and durable
+   `RouteSelected` event/checkpoint/replay identity;
+3. integrate the standalone D7 controller only after revision/lease/patch
+   visibility/recovery authority is closed;
+4. implement D4 subgraph/state/artifact/stream/trace one contract at a time;
+5. implement D9 redaction/protected persistence/sink gates before safe capture
+   or observability claims;
+6. close provider/model/budget/verifier/isolation/CLI/MCP/OTel/Explorer families
+   under the same fail-closed rule;
+7. expand the ten patterns and fourteen-step course only from earned runtime
+   evidence; and
+8. run release, install, usability, external-user and community programs without
+   converting forecasts into completion claims.
+
+Each future feature removes only its own rejection after versioned contract,
+TypeScript and Python behavior, durable recovery, hostile tests, public docs and
+independent audit are accepted. Compiler validity alone never authorizes an
+allow-list expansion.
+
+#### 31.36.12 Runtime capability truth accepted implementation checkpoint
+
+The `runtime-capability/v1alpha1` tranche is accepted for its deliberately
+narrow scope. TypeScript and Python now reject every frozen unsupported
+declaration before ordinary work or durable store I/O, preserve the current
+static all-success barrier and integrated RouteEquals behavior, accept schemas
+only as compile-time contracts, and emit the exact same owners, paths, messages
+and order.
+
+The final shared corpus contains seven cases and 22 exact failures. It includes
+empty, prototype-named, constructor-named, accented and supplementary-plane
+policy keys plus RFC 6901 escaping. The semantic validator has a direct red test
+proving that the former `maxDepth: 1` regression is rejected. Both runtimes
+consume the literal JSON for ordinary and durable execution; combined runtime
+and foreign-condition failures preserve runtime-first ordering; unsupported
+durable start/resume perform zero reads and appends.
+
+Public compatibility is closed. The three quickstart graph copies are byte-
+identical and use canonical hash
+`f9aaeffc991e6cec223c959dbf7737a8fff96e1eb1ea433343f45fe663697b50`.
+Fresh-clone CLI build/validate/plan/visualize passes. JavaScript and Python
+quickstarts both succeed with observed concurrency two. The pattern showcase
+proves specialized validator rejection before running its explicit transform
+projection, records distinct hashes, and succeeds with observed concurrency
+three. Routing is no longer mislabeled declarative-only.
+
+Final executable evidence is:
+
+- TypeScript runtime: 12 files, 265/265 tests;
+- Python: 2,185/2,185 non-CLI tests plus 52/52 CLI tests, 2,237 unique tests;
+- Python focused runtime/capability regression: 170/170;
+- TypeScript workspace build, typecheck and lint over eight packages;
+- Python Ruff format/lint and strict MyPy over 56 source files;
+- TypeScript CLI: 147/147 tests;
+- fixtures: 77 JSON files, 37 case manifests and all seven capability cases;
+- documentation: 287 local links;
+- npm package-content validation: eight packages;
+- JavaScript/Python quickstarts and pattern showcase;
+- scoped diff/whitespace and append-only plan checks; and
+- final independent disposition HIGH 0 / MEDIUM 0 / LOW 0.
+
+This checkpoint authorizes one scoped milestone commit and push by
+`reacher-z <mtrxcop@gmail.com>` without a coauthor trailer. It does not authorize
+a whole-plan, release, schema-validation, specialized-barrier, verifier,
+isolation, adoption or star claim. The next queue remains B3 plus D6 contract
+work as specified above.

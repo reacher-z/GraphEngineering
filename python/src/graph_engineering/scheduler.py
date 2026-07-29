@@ -71,6 +71,7 @@ class FailureCode(StrEnum):
     NODE_EXECUTION_INTERRUPTED = "NODE_EXECUTION_INTERRUPTED"
     INVALID_ROUTE_SELECTION = "INVALID_ROUTE_SELECTION"
     UNSUPPORTED_EDGE_CONDITION = "UNSUPPORTED_EDGE_CONDITION"
+    UNSUPPORTED_RUNTIME_CAPABILITY = "UNSUPPORTED_RUNTIME_CAPABILITY"
     ROUTE_NOT_SELECTED = "ROUTE_NOT_SELECTED"
 
 
@@ -433,27 +434,133 @@ def _unsupported_condition_sources(graph: CompiledGraph) -> dict[str, str]:
     return {node_id: "; ".join(items) for node_id, items in messages.items()}
 
 
-def _condition_capability_failure(graph: CompiledGraph) -> RunResult | None:
-    """Fail a whole graph before dispatch when it contains foreign conditions.
+_RUNTIME_CAPABILITY_CONTRACT = "runtime-capability/v1alpha1"
+_SUPPORTED_NODE_KINDS = frozenset({"agent", "model", "tool", "transform", "router", "barrier"})
+_SUPPORTED_POLICY_KEYS = frozenset(
+    {
+        "maxConcurrency",
+        "maxDepth",
+        "maxFanOut",
+        "maxTotalAttempts",
+        "graphengineering.reacher-z.github.io/typed-ports",
+    }
+)
 
-    The compiler registry deliberately accepts conditions owned by other graph
-    features. This scheduler currently executes RouteEquals only, so every
-    unsupported source is projected as a graph-level execution failure without
-    creating a node result or consuming an attempt.
+
+@dataclass(frozen=True, slots=True)
+class _RuntimeCapabilityIssue:
+    owner_node_id: str
+    capability: str
+    path: str
+
+
+def _json_pointer_segment(value: str) -> str:
+    return value.replace("~", "~0").replace("/", "~1")
+
+
+def _runtime_capability_issues(graph: CompiledGraph) -> tuple[_RuntimeCapabilityIssue, ...]:
+    """Return every unsupported executable declaration in stable document order.
+
+    Graph IR intentionally contains vocabulary ahead of the native scheduler.
+    Accepting that vocabulary must never silently weaken it into ordinary value
+    execution. This inventory is therefore checked before handlers, durable
+    history reads, or durable appends.
     """
 
-    issues = _unsupported_condition_sources(graph)
-    if not issues:
+    spec = graph.spec
+    graph_owner = spec.entrypoints[0]
+    issues: list[_RuntimeCapabilityIssue] = []
+
+    def add(owner_node_id: str, capability: str, path: str) -> None:
+        issues.append(_RuntimeCapabilityIssue(owner_node_id, capability, path))
+
+    if spec.state_schema is not None:
+        add(graph_owner, "graph-state", "#/stateSchema")
+
+    for index, node in enumerate(spec.nodes):
+        path = f"#/nodes/{index}"
+        if node.kind not in _SUPPORTED_NODE_KINDS:
+            add(node.id, f"node-kind:{node.kind}", f"{path}/kind")
+        if node.kind == "barrier" and node.config not in ({}, {"condition": "all"}):
+            add(node.id, "node-config:barrier", f"{path}/config")
+        if node.cache is not None:
+            add(node.id, "node-cache", f"{path}/cache")
+        if node.resources is not None:
+            add(node.id, "resource-admission", f"{path}/resources")
+        if node.isolation is not None:
+            add(node.id, "isolation-provider", f"{path}/isolation")
+        if node.retry is not None and node.retry.jitter is True:
+            add(node.id, "retry-jitter", f"{path}/retry/jitter")
+
+    for index, edge in enumerate(spec.edges):
+        path = f"#/edges/{index}"
+        if edge.mapping is not None:
+            add(edge.source.node, "edge-map", f"{path}/map")
+        if edge.mode in {"stream", "artifact-ref"}:
+            add(edge.source.node, f"edge-mode:{edge.mode}", f"{path}/mode")
+
+    policies = spec.policies
+    if policies is not None:
+        if policies.max_dynamic_nodes is not None:
+            add(graph_owner, "dynamic-graph-patch", "#/policies/maxDynamicNodes")
+        if policies.max_duration_ms is not None:
+            add(graph_owner, "graph-deadline", "#/policies/maxDurationMs")
+        if policies.max_cost_usd is not None:
+            add(graph_owner, "cost-budget", "#/policies/maxCostUsd")
+        policy_values = policies.model_extra or {}
+        unknown_keys = sorted(
+            set(policy_values)
+            - _SUPPORTED_POLICY_KEYS
+            - {
+                "maxDynamicNodes",
+                "maxDurationMs",
+                "maxCostUsd",
+            }
+        )
+        for key in unknown_keys:
+            add(
+                graph_owner,
+                f"policy:{key}",
+                f"#/policies/{_json_pointer_segment(key)}",
+            )
+
+    return tuple(issues)
+
+
+def _condition_capability_failure(graph: CompiledGraph) -> RunResult | None:
+    """Fail before dispatch for unsupported runtime declarations or conditions.
+
+    The compiler registry deliberately accepts conditions owned by other graph
+    features, and the Graph IR contains additional forward vocabulary. This
+    scheduler executes only its closed capability subset, so every unsupported
+    declaration is projected as a graph-level execution failure without creating
+    a node result or consuming an attempt.
+    """
+
+    runtime_issues = _runtime_capability_issues(graph)
+    condition_issues = _unsupported_condition_sources(graph)
+    if not runtime_issues and not condition_issues:
         return None
     failures = tuple(
         NodeFailure(
+            FailureCode.UNSUPPORTED_RUNTIME_CAPABILITY,
+            (
+                f"Runtime capability '{issue.capability}' at '{issue.path}' "
+                f"is not implemented by {_RUNTIME_CAPABILITY_CONTRACT}"
+            ),
+            issue.owner_node_id,
+            0,
+        )
+        for issue in runtime_issues
+    ) + tuple(
+        NodeFailure(
             FailureCode.UNSUPPORTED_EDGE_CONDITION,
-            issues[node.id],
+            condition_issues[node.id],
             node.id,
             0,
         )
         for node in graph.spec.nodes
-        if node.id in issues
+        if node.id in condition_issues
     )
     return RunResult(
         status=RunStatus.FAILED,

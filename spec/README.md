@@ -15,6 +15,11 @@ local event/checkpoint behavior is fixed by
 behavior is fixed by [primitives-semantics.md](primitives-semantics.md).
 Scheduler-integrated continuation for one immutable DAG is fixed by
 [durable-recovery-semantics.md](durable-recovery-semantics.md).
+The authoring-to-execution capability boundary is fixed by
+[runtime-capability-semantics.md](runtime-capability-semantics.md). It requires
+ordinary and durable runtimes to reject every currently unimplemented Graph IR
+semantic before dispatch or persistence instead of treating it as a plain DAG
+value.
 Standalone per-item streaming, bounded buffers, source backpressure, structured
 failure policies, and cancellation are fixed by
 [pipeline-semantics.md](pipeline-semantics.md). This standalone contract does

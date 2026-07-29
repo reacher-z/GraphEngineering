@@ -118,14 +118,14 @@ from pathlib import Path
 
 from graph_engineering import NodeContext, compile_graph, run_graph
 
-document = json.loads(Path("../spec/conformance/diamond.graph.json").read_text())
+document = json.loads(Path("../examples/quickstart/research-diamond.graph.json").read_text())
 graph = compile_graph(document)
 
 
 async def passthrough(context: NodeContext):
-    if context.node.id == "split":
+    if context.node.id == "scope":
         return context.graph_input
-    if context.node.id == "merge":
+    if context.node.id == "synthesize":
         return dict(context.inputs)
     return {"branch": context.node.id}
 
@@ -140,6 +140,26 @@ Every handler receives only explicit graph input, incoming edge values, and a
 read-only snapshot of completed values. A failure is returned as a typed
 `NodeFailure`; independent siblings finish, while descendants are marked
 `UPSTREAM_FAILED`.
+
+Execution is capability-truthful. Before any handler call, attempt, durable
+history read, or durable append, the scheduler scans the complete compiled graph
+and fails closed with `UNSUPPORTED_RUNTIME_CAPABILITY` for executable vocabulary
+it does not yet implement. Each unsupported declaration produces one ordered
+failure with attempt zero and a stable JSON Pointer path; the result has no node
+records or scheduled work.
+
+The executable alpha subset is `agent`, `model`, `tool`, `transform`, `router`,
+and static all-success `barrier` nodes; absent or `value` edges; and
+`maxConcurrency`, `maxDepth`, `maxFanOut`, and `maxTotalAttempts`. A barrier's
+config must be `{}` or `{"condition": "all"}`. Schemas and the strict typed-port
+policy remain compile-time contracts; this runtime does not claim value
+validation. Runtime execution rejects `stateSchema`; `subgraph`, `validator`,
+and `human` nodes; other barrier configs; cache/resource/isolation declarations;
+retry jitter when true; edge maps, `stream`, and `artifact-ref`; graph
+dynamic-node, deadline, and cost policies; and unknown policy keys. Explicit
+`mode: "value"`, edge schemas, and `jitter: false` are accepted. This prevents
+forward Graph IR vocabulary from silently degrading into weaker value-edge or
+identity behavior.
 
 ## Safe authoring, builders, and revision-1 identity
 
@@ -407,9 +427,10 @@ allowed routes, duplicate cases and targets, and exhaustive route coverage with
 `GE1401` through `GE1407`. Registered loop-pattern conditions remain compiler-
 valid because the compiler registry does not claim their execution semantics.
 The Python runtime currently executes only `RouteEquals`; if a compiled graph
-contains a registered foreign condition, ordinary execution and durable
-start/resume fail the whole graph during capability preflight with zero node
-attempts and before any handler or durable-history read/write.
+contains a registered foreign condition or any other unsupported runtime
+declaration, ordinary execution and durable start/resume fail the whole graph
+during capability preflight with zero node attempts and before any handler or
+durable-history read/write.
 
 Dedicated `RouteSelected` events, arbitrary condition expressions, and
 scheduler-integrated quorum/deadline barriers remain follow-up work.

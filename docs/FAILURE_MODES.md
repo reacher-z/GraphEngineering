@@ -23,9 +23,13 @@ consumed attempt budgets, and make terminal resume side-effect free. Standalone
 checkpoint stores exist, but scheduler checkpoint acceleration does not. Replay,
 fork, and append-only dynamic patches exist only on the standalone controller;
 production controller stores/fencing, ordinary-scheduler dynamic revision
-integration, Graph IR-integrated or durable item streaming, conditional
-routing, verifier panels, provider rate limiting, worktree isolation, and
-general capability enforcement remain future work. The current pipeline is a
+integration, Graph IR-integrated or durable item streaming, arbitrary condition
+expressions, durable route-decision identity, verifier panels, provider rate
+limiting, and worktree isolation remain future work. The current schedulers do
+execute the closed compiler-validated `RouteEquals` condition and apply a
+fail-closed `runtime-capability/v1alpha1` preflight before ordinary work or
+durable store I/O. That gate prevents unimplemented Graph IR vocabulary from
+silently degrading; it is not a complete capability/security policy engine. The current pipeline is a
 lazy single-consumer in-memory API, not durable graph streaming. Sections marked
 **target v1** are operational requirements, not current claims.
 
@@ -52,6 +56,8 @@ Current execution failures include:
 | `INPUT_BINDING_FAILED` | A selected source port is absent or two edges collide on an input key | Fix edge endpoints/ports; do not retry unchanged |
 | `ATTEMPT_BUDGET_EXHAUSTED` | The run-wide attempt budget was consumed | Raise a reviewed budget or reduce retries/work; never loop automatically |
 | `OUTPUT_BINDING_FAILED` | A named graph output or output port cannot be assembled | Fix the output contract or producer result |
+| `UNSUPPORTED_RUNTIME_CAPABILITY` | Compiler-valid Graph IR requests runtime behavior outside the closed alpha subset | Remove the declaration or use a runtime that implements its exact contract; no node was attempted |
+| `UNSUPPORTED_EDGE_CONDITION` | A registered condition other than the integrated `RouteEquals` family reached this scheduler | Use the supported routing family or a controller that owns the condition; no node was attempted |
 
 Compiler failures are returned before executors run. Stable codes cover invalid
 Graph IR, duplicate IDs, missing endpoints, cycles, unreachable nodes, invalid

@@ -7,6 +7,10 @@ import {
   runGraphWithJournal,
   type SchedulerJournal,
 } from "../src/scheduler.js";
+import {
+  projectedRuntimeCapabilityFailures,
+  runtimeCapabilityCorpus,
+} from "./runtime-capability-fixtures.js";
 
 function fixture(name: string): GraphSpec {
   const path = fileURLToPath(new URL(`../../../spec/conformance/${name}`, import.meta.url));
@@ -124,6 +128,193 @@ function testJournal(overrides: Partial<SchedulerJournal> = {}): SchedulerJourna
 }
 
 describe("runGraph", () => {
+  it("consumes the runtime-capability corpus literally with stable failures and zero side effects", async () => {
+    const corpus = runtimeCapabilityCorpus();
+    expect(corpus.contract).toBe("runtime-capability/v1alpha1");
+
+    for (const testCase of corpus.cases) {
+      const executor = vi.fn(({ input }) => input);
+      const journal = testJournal({
+        beforeAttempt: vi.fn(),
+        attemptFailed: vi.fn(),
+        nodeSucceeded: vi.fn(),
+        nodeSettledWithoutAttempt: vi.fn(),
+        runTerminal: vi.fn(),
+      });
+      const nodeExecutors = Object.fromEntries(
+        testCase.graph.nodes
+          .filter((current) => current.kind !== "barrier")
+          .map((current) => [current.id, executor]),
+      );
+      const result = await runGraphWithJournal(
+        testCase.graph,
+        {},
+        { nodeExecutors, journal },
+      );
+
+      if (testCase.expect.supported) {
+        expect(result.status, `${testCase.name}: ${JSON.stringify(result)}`).toBe("succeeded");
+        expect(result.failures, testCase.name).toEqual([]);
+        expect(executor, testCase.name).toHaveBeenCalledTimes(1);
+        continue;
+      }
+
+      expect(result, testCase.name).toMatchObject({
+        status: corpus.failureProjection.status,
+        nodes: [],
+        failures: projectedRuntimeCapabilityFailures(testCase),
+        maxObservedConcurrency: 0,
+        totalAttempts: corpus.failureProjection.totalAttempts,
+        scheduledOrder: corpus.failureProjection.scheduledOrder,
+        completionOrder: corpus.failureProjection.completionOrder,
+      });
+      expect(executor, testCase.name).toHaveBeenCalledTimes(
+        corpus.failureProjection.executorCalls,
+      );
+      const journalCalls = [
+        journal.beforeAttempt,
+        journal.attemptFailed,
+        journal.nodeSucceeded,
+        journal.nodeSettledWithoutAttempt,
+        journal.runTerminal,
+      ].reduce((total, callback) => total + vi.mocked(callback).mock.calls.length, 0);
+      expect(journalCalls, testCase.name).toBe(corpus.failureProjection.ordinaryJournalCalls);
+    }
+  });
+
+  it("reports runtime issues before foreign conditions without inspecting hostile graph input", async () => {
+    const combined: GraphSpec = {
+      ...registeredLoopConditionGraph(),
+      stateSchema: {},
+    };
+    const hostileInput = new Proxy({}, {
+      ownKeys: () => {
+        throw new Error("graph input must not be inspected during capability preflight");
+      },
+    });
+    const executor = vi.fn(() => "never");
+
+    const result = await runGraph(combined, hostileInput, {
+      nodeExecutors: { source: executor },
+    });
+
+    expect(result).toMatchObject({
+      status: "failed",
+      nodes: [],
+      totalAttempts: 0,
+      failures: [
+        {
+          code: "UNSUPPORTED_RUNTIME_CAPABILITY",
+          nodeId: "source",
+          message: "Runtime capability 'graph-state' at '#/stateSchema' is not implemented by runtime-capability/v1alpha1",
+          attempt: 0,
+        },
+        {
+          code: "UNSUPPORTED_EDGE_CONDITION",
+          nodeId: "source",
+          attempt: 0,
+        },
+      ],
+    });
+    expect(executor).not.toHaveBeenCalled();
+  });
+
+  it("allows implemented node kinds, empty schemas, value edges, false jitter, and supported policies", async () => {
+    const supported = graph({
+      entrypoints: ["agent", "model", "tool", "transform", "barrier"],
+      outputs: { result: { node: "barrier" } },
+      nodes: [
+        node("agent", { kind: "agent", retry: { maxAttempts: 1, jitter: false } }),
+        node("model", { kind: "model" }),
+        node("tool", { kind: "tool" }),
+        node("transform", { kind: "transform" }),
+        node("barrier", { kind: "barrier", config: { condition: "all" } }),
+      ],
+      edges: [],
+      policies: {
+        maxConcurrency: 5,
+        maxDepth: 1,
+        maxFanOut: 1,
+        maxTotalAttempts: 5,
+      },
+    });
+    const executor = vi.fn(({ input }) => input);
+
+    const result = await runGraph(
+      supported,
+      {},
+      {
+        nodeExecutors: {
+          agent: executor,
+          model: executor,
+          tool: executor,
+          transform: executor,
+        },
+      },
+    );
+
+    expect(result.status, JSON.stringify(result)).toBe("succeeded");
+    expect(result.failures).toEqual([]);
+    expect(result.totalAttempts).toBe(5);
+    expect(executor).toHaveBeenCalledTimes(4);
+  });
+
+  it("rejects barrier configurations beyond the captured static all-success join", async () => {
+    const executor = vi.fn(() => "never");
+    const result = await runGraph(graph({
+      nodes: [node("root", { kind: "barrier", config: { condition: "any" } })],
+    }), {}, { nodeExecutors: { root: executor } });
+
+    expect(result).toMatchObject({
+      status: "failed",
+      nodes: [],
+      totalAttempts: 0,
+      failures: [{
+        code: "UNSUPPORTED_RUNTIME_CAPABILITY",
+        nodeId: "root",
+        message: "Runtime capability 'node-config:barrier' at '#/nodes/0/config' is not implemented by runtime-capability/v1alpha1",
+        attempt: 0,
+      }],
+    });
+    expect(executor).not.toHaveBeenCalled();
+  });
+
+  it("accepts compiler-valid typed-port schemas without rejecting the policy at runtime", async () => {
+    const objectSchema = {
+      type: "object",
+      additionalProperties: false,
+      properties: {},
+      required: [],
+    } as const;
+    const result = await runGraph(graph({
+      inputSchema: objectSchema,
+      outputSchema: {
+        type: "object",
+        additionalProperties: false,
+        properties: { result: { type: "string" } },
+        required: ["result"],
+      },
+      nodes: [node("root", {
+        inputSchema: objectSchema,
+        outputSchema: { type: "string" },
+      })],
+      policies: {
+        maxConcurrency: 1,
+        maxDepth: 1,
+        maxFanOut: 1,
+        maxTotalAttempts: 1,
+        "graphengineering.reacher-z.github.io/typed-ports": {
+          apiVersion: "graphengineering.reacher-z.github.io/typed-ports/v1alpha1",
+          mode: "strict-exact",
+        },
+      },
+    }), {}, { nodeExecutors: { root: () => "ok" } });
+
+    expect(result.status, JSON.stringify(result)).toBe("succeeded");
+    expect(result.output).toEqual({ result: "ok" });
+    expect(result.failures).toEqual([]);
+  });
+
   it("executes RouteEquals edges, propagates inactive control flow, and binds only the selected branch", async () => {
     const quick = vi.fn(() => ({ reviewed: "quick" }));
     const quickPost = vi.fn(({ input }) => input);
@@ -637,7 +828,17 @@ describe("runGraph", () => {
       return { value: (input as { split: { value: number } }).split.value + increment };
     };
 
-    const result = await runGraph(fixture("diamond.graph.json"), { seed: 2 }, {
+    const diamond = fixture("diamond.graph.json");
+    const executableDiamond: GraphSpec = {
+      ...diamond,
+      policies: {
+        maxConcurrency: 2,
+        maxDepth: 8,
+        maxFanOut: 4,
+        maxTotalAttempts: 8,
+      },
+    };
+    const result = await runGraph(executableDiamond, { seed: 2 }, {
       nodeExecutors: {
         split: ({ input }) => ({ value: (input as { seed: number }).seed }),
         left: branch(10, 20),

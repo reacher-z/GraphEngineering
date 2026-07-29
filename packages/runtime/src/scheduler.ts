@@ -20,6 +20,10 @@ import type {
 } from "./types.js";
 import { snapshotJson } from "./json.js";
 import {
+  graphRuntimeCapabilityIssues,
+  runtimeCapabilityMessage,
+} from "./runtime-capabilities.js";
+import {
   assertExactRouteSelection,
   edgeConditionError,
   edgeIsActive,
@@ -658,7 +662,6 @@ export async function runGraphWithJournal(
   input: unknown,
   options: SchedulerInternalOptions = {},
 ): Promise<SchedulerRunResult> {
-  const graphInput = snapshotGraphInput(input);
   const compilation = compileGraph(graph);
   if (!compilation.valid) {
     const failures: GraphRunFailure[] = compilation.diagnostics
@@ -682,24 +685,34 @@ export async function runGraphWithJournal(
   // prevents caller or executor mutation from changing live routing/config
   // after validation while leaving graphHash unchanged.
   graph = snapshotJson(JSON.parse(compilation.canonicalGraph)) as unknown as GraphSpec;
+  const runtimeCapabilityIssues = graphRuntimeCapabilityIssues(graph);
   const capabilityIssues = graphConditionCapabilityIssues(graph);
-  if (capabilityIssues.length > 0) {
+  if (runtimeCapabilityIssues.length > 0 || capabilityIssues.length > 0) {
     return {
       status: "failed",
       graphHash: compilation.graphHash,
       nodes: [],
-      failures: capabilityIssues.map(({ nodeId, messages }) => runtimeFailure(
-        nodeId,
-        "UNSUPPORTED_EDGE_CONDITION",
-        messages.join("; "),
-        0,
-      )),
+      failures: [
+        ...runtimeCapabilityIssues.map((issue) => runtimeFailure(
+          issue.ownerNodeId,
+          "UNSUPPORTED_RUNTIME_CAPABILITY",
+          runtimeCapabilityMessage(issue),
+          0,
+        )),
+        ...capabilityIssues.map(({ nodeId, messages }) => runtimeFailure(
+          nodeId,
+          "UNSUPPORTED_EDGE_CONDITION",
+          messages.join("; "),
+          0,
+        )),
+      ],
       maxObservedConcurrency: 0,
       totalAttempts: 0,
       scheduledOrder: [],
       completionOrder: [],
     };
   }
+  const graphInput = snapshotGraphInput(input);
   assertTimerBounds(graph);
 
   const nodesById = new Map(graph.nodes.map((node) => [node.id, node]));

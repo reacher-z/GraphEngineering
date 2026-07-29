@@ -34,6 +34,10 @@ import {
 } from "./durable-types.js";
 import { snapshotJson } from "./json.js";
 import {
+  graphRuntimeCapabilityIssues,
+  runtimeCapabilityMessage,
+} from "./runtime-capabilities.js";
+import {
   assertExactRouteSelection,
   edgeConditionError,
   edgeIsActive,
@@ -146,21 +150,30 @@ function isCompilationFailure(
   return "status" in value;
 }
 
-function conditionCapabilityFailure(
+function capabilityFailure(
   compiled: CompiledDurableGraph,
 ): DurableGraphRunResult | undefined {
-  const issues = graphConditionCapabilityIssues(compiled.graph);
-  if (issues.length === 0) return undefined;
+  const runtimeIssues = graphRuntimeCapabilityIssues(compiled.graph);
+  const conditionIssues = graphConditionCapabilityIssues(compiled.graph);
+  if (runtimeIssues.length === 0 && conditionIssues.length === 0) return undefined;
   return {
     status: "failed",
     graphHash: compiled.graphHash,
     nodes: [],
-    failures: issues.map(({ nodeId, messages }) => runtimeFailure(
-      nodeId,
-      "UNSUPPORTED_EDGE_CONDITION",
-      messages.join("; "),
-      0,
-    )),
+    failures: [
+      ...runtimeIssues.map((issue) => runtimeFailure(
+        issue.ownerNodeId,
+        "UNSUPPORTED_RUNTIME_CAPABILITY",
+        runtimeCapabilityMessage(issue),
+        0,
+      )),
+      ...conditionIssues.map(({ nodeId, messages }) => runtimeFailure(
+        nodeId,
+        "UNSUPPORTED_EDGE_CONDITION",
+        messages.join("; "),
+        0,
+      )),
+    ],
     maxObservedConcurrency: 0,
     totalAttempts: 0,
   };
@@ -1994,8 +2007,8 @@ export async function startDurableGraphRun(
   options = stableOptions(options);
   const compiled = compileDurableGraph(graph);
   if (isCompilationFailure(compiled)) return compiled;
-  const capabilityFailure = conditionCapabilityFailure(compiled);
-  if (capabilityFailure !== undefined) return capabilityFailure;
+  const unsupported = capabilityFailure(compiled);
+  if (unsupported !== undefined) return unsupported;
   assertDurableTimerBounds(compiled.graph);
   const implementation = implementationHash(options.implementationId);
   const inputSnapshot = snapshotJson(input);
@@ -2044,8 +2057,8 @@ export async function resumeDurableGraphRun(
   options = stableOptions(options);
   const compiled = compileDurableGraph(graph);
   if (isCompilationFailure(compiled)) return compiled;
-  const capabilityFailure = conditionCapabilityFailure(compiled);
-  if (capabilityFailure !== undefined) return capabilityFailure;
+  const unsupported = capabilityFailure(compiled);
+  if (unsupported !== undefined) return unsupported;
   assertDurableTimerBounds(compiled.graph);
   const implementation = implementationHash(options.implementationId);
   const events = await readHistory(options.eventStore, options.runId);

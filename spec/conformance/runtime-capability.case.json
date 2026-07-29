@@ -1,0 +1,353 @@
+{
+  "contract": "runtime-capability/v1alpha1",
+  "failureCode": "UNSUPPORTED_RUNTIME_CAPABILITY",
+  "messageTemplate": "Runtime capability '<capability>' at '<path>' is not implemented by runtime-capability/v1alpha1",
+  "failureProjection": {
+    "status": "failed",
+    "nodeCount": 0,
+    "totalAttempts": 0,
+    "scheduledOrder": [],
+    "completionOrder": [],
+    "executorCalls": 0,
+    "ordinaryJournalCalls": 0,
+    "durableReadCalls": 0,
+    "durableAppendCalls": 0
+  },
+  "cases": [
+    {
+      "name": "supported-core-capabilities",
+      "graph": {
+        "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+        "kind": "Graph",
+        "metadata": {"name": "capability-supported", "version": "1"},
+        "inputSchema": {},
+        "outputSchema": {},
+        "entrypoints": ["root"],
+        "outputs": {"result": {"node": "join"}},
+        "nodes": [
+          {
+            "id": "root",
+            "kind": "transform",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {},
+            "retry": {"maxAttempts": 1, "jitter": false},
+            "sideEffects": "none"
+          },
+          {
+            "id": "join",
+            "kind": "barrier",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {"condition": "all"},
+            "sideEffects": "none"
+          }
+        ],
+        "edges": [
+          {"id": "root-join", "from": {"node": "root"}, "to": {"node": "join"}, "mode": "value"}
+        ],
+        "policies": {
+          "maxConcurrency": 1,
+          "maxDepth": 2,
+          "maxFanOut": 1,
+          "maxTotalAttempts": 2
+        }
+      },
+      "expect": {"supported": true, "failures": []}
+    },
+    {
+      "name": "graph-contracts-fail-closed",
+      "graph": {
+        "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+        "kind": "Graph",
+        "metadata": {"name": "capability-graph-contracts", "version": "1"},
+        "inputSchema": {"type": "object"},
+        "outputSchema": {"type": "object"},
+        "stateSchema": {"type": "object"},
+        "entrypoints": ["root"],
+        "outputs": {"result": {"node": "root"}},
+        "nodes": [
+          {"id": "root", "kind": "transform", "inputSchema": {}, "outputSchema": {}, "config": {}}
+        ],
+        "edges": []
+      },
+      "expect": {
+        "supported": false,
+        "failures": [
+          {
+            "code": "UNSUPPORTED_RUNTIME_CAPABILITY",
+            "nodeId": "root",
+            "message": "Runtime capability 'graph-state' at '#/stateSchema' is not implemented by runtime-capability/v1alpha1"
+          }
+        ]
+      }
+    },
+    {
+      "name": "specialized-node-kinds-fail-closed",
+      "graph": {
+        "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+        "kind": "Graph",
+        "metadata": {"name": "capability-node-kinds", "version": "1"},
+        "inputSchema": {},
+        "outputSchema": {},
+        "entrypoints": ["sub"],
+        "outputs": {"result": {"node": "approval"}},
+        "nodes": [
+          {"id": "sub", "kind": "subgraph", "inputSchema": {}, "outputSchema": {}, "config": {}},
+          {"id": "verify", "kind": "validator", "inputSchema": {}, "outputSchema": {}, "config": {}},
+          {"id": "approval", "kind": "human", "inputSchema": {}, "outputSchema": {}, "config": {}}
+        ],
+        "edges": [
+          {"id": "sub-verify", "from": {"node": "sub"}, "to": {"node": "verify"}},
+          {"id": "verify-approval", "from": {"node": "verify"}, "to": {"node": "approval"}}
+        ]
+      },
+      "expect": {
+        "supported": false,
+        "failures": [
+          {
+            "code": "UNSUPPORTED_RUNTIME_CAPABILITY",
+            "nodeId": "sub",
+            "message": "Runtime capability 'node-kind:subgraph' at '#/nodes/0/kind' is not implemented by runtime-capability/v1alpha1"
+          },
+          {
+            "code": "UNSUPPORTED_RUNTIME_CAPABILITY",
+            "nodeId": "verify",
+            "message": "Runtime capability 'node-kind:validator' at '#/nodes/1/kind' is not implemented by runtime-capability/v1alpha1"
+          },
+          {
+            "code": "UNSUPPORTED_RUNTIME_CAPABILITY",
+            "nodeId": "approval",
+            "message": "Runtime capability 'node-kind:human' at '#/nodes/2/kind' is not implemented by runtime-capability/v1alpha1"
+          }
+        ]
+      }
+    },
+    {
+      "name": "unsupported-barrier-policy-fails-closed",
+      "graph": {
+        "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+        "kind": "Graph",
+        "metadata": {"name": "capability-barrier-policy", "version": "1"},
+        "inputSchema": {},
+        "outputSchema": {},
+        "entrypoints": ["root"],
+        "outputs": {"result": {"node": "join"}},
+        "nodes": [
+          {"id": "root", "kind": "transform", "inputSchema": {}, "outputSchema": {}, "config": {}},
+          {
+            "id": "join",
+            "kind": "barrier",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {"condition": "minimum", "minimum": 1}
+          }
+        ],
+        "edges": [
+          {"id": "root-join", "from": {"node": "root"}, "to": {"node": "join"}}
+        ]
+      },
+      "expect": {
+        "supported": false,
+        "failures": [
+          {
+            "code": "UNSUPPORTED_RUNTIME_CAPABILITY",
+            "nodeId": "join",
+            "message": "Runtime capability 'node-config:barrier' at '#/nodes/1/config' is not implemented by runtime-capability/v1alpha1"
+          }
+        ]
+      }
+    },
+    {
+      "name": "node-execution-contracts-fail-closed",
+      "graph": {
+        "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+        "kind": "Graph",
+        "metadata": {"name": "capability-node-contracts", "version": "1"},
+        "inputSchema": {},
+        "outputSchema": {},
+        "entrypoints": ["root"],
+        "outputs": {"result": {"node": "root"}},
+        "nodes": [
+          {
+            "id": "root",
+            "kind": "transform",
+            "inputSchema": {"type": "object"},
+            "outputSchema": {"type": "object"},
+            "config": {},
+            "retry": {"jitter": true},
+            "cache": {},
+            "resources": {},
+            "isolation": {}
+          }
+        ],
+        "edges": []
+      },
+      "expect": {
+        "supported": false,
+        "failures": [
+          {
+            "code": "UNSUPPORTED_RUNTIME_CAPABILITY",
+            "nodeId": "root",
+            "message": "Runtime capability 'node-cache' at '#/nodes/0/cache' is not implemented by runtime-capability/v1alpha1"
+          },
+          {
+            "code": "UNSUPPORTED_RUNTIME_CAPABILITY",
+            "nodeId": "root",
+            "message": "Runtime capability 'resource-admission' at '#/nodes/0/resources' is not implemented by runtime-capability/v1alpha1"
+          },
+          {
+            "code": "UNSUPPORTED_RUNTIME_CAPABILITY",
+            "nodeId": "root",
+            "message": "Runtime capability 'isolation-provider' at '#/nodes/0/isolation' is not implemented by runtime-capability/v1alpha1"
+          },
+          {
+            "code": "UNSUPPORTED_RUNTIME_CAPABILITY",
+            "nodeId": "root",
+            "message": "Runtime capability 'retry-jitter' at '#/nodes/0/retry/jitter' is not implemented by runtime-capability/v1alpha1"
+          }
+        ]
+      }
+    },
+    {
+      "name": "edge-execution-contracts-fail-closed",
+      "graph": {
+        "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+        "kind": "Graph",
+        "metadata": {"name": "capability-edge-contracts", "version": "1"},
+        "inputSchema": {},
+        "outputSchema": {},
+        "entrypoints": ["root"],
+        "outputs": {"result": {"node": "sink"}},
+        "nodes": [
+          {"id": "root", "kind": "transform", "inputSchema": {}, "outputSchema": {}, "config": {}},
+          {"id": "middle", "kind": "transform", "inputSchema": {}, "outputSchema": {}, "config": {}},
+          {"id": "sink", "kind": "transform", "inputSchema": {}, "outputSchema": {}, "config": {}}
+        ],
+        "edges": [
+          {
+            "id": "root-middle",
+            "from": {"node": "root"},
+            "to": {"node": "middle"},
+            "map": {},
+            "mode": "stream",
+            "schema": {}
+          },
+          {
+            "id": "middle-sink",
+            "from": {"node": "middle"},
+            "to": {"node": "sink"},
+            "mode": "artifact-ref"
+          }
+        ]
+      },
+      "expect": {
+        "supported": false,
+        "failures": [
+          {
+            "code": "UNSUPPORTED_RUNTIME_CAPABILITY",
+            "nodeId": "root",
+            "message": "Runtime capability 'edge-map' at '#/edges/0/map' is not implemented by runtime-capability/v1alpha1"
+          },
+          {
+            "code": "UNSUPPORTED_RUNTIME_CAPABILITY",
+            "nodeId": "root",
+            "message": "Runtime capability 'edge-mode:stream' at '#/edges/0/mode' is not implemented by runtime-capability/v1alpha1"
+          },
+          {
+            "code": "UNSUPPORTED_RUNTIME_CAPABILITY",
+            "nodeId": "middle",
+            "message": "Runtime capability 'edge-mode:artifact-ref' at '#/edges/1/mode' is not implemented by runtime-capability/v1alpha1"
+          }
+        ]
+      }
+    },
+    {
+      "name": "policy-execution-contracts-fail-closed",
+      "graph": {
+        "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+        "kind": "Graph",
+        "metadata": {"name": "capability-policy-contracts", "version": "1"},
+        "inputSchema": {},
+        "outputSchema": {},
+        "entrypoints": ["root"],
+        "outputs": {"result": {"node": "root"}},
+        "nodes": [
+          {"id": "root", "kind": "transform", "inputSchema": {}, "outputSchema": {}, "config": {}}
+        ],
+        "edges": [],
+        "policies": {
+          "maxConcurrency": 1,
+          "maxDynamicNodes": 0,
+          "maxDepth": 1,
+          "maxFanOut": 1,
+          "maxTotalAttempts": 1,
+          "maxDurationMs": 1,
+          "maxCostUsd": 0,
+          "": true,
+          "__proto__": true,
+          "constructor": true,
+          "zeta": true,
+          "a/b~c": true,
+          "éclair": true,
+          "😀/x~y": true
+        }
+      },
+      "expect": {
+        "supported": false,
+        "failures": [
+          {
+            "code": "UNSUPPORTED_RUNTIME_CAPABILITY",
+            "nodeId": "root",
+            "message": "Runtime capability 'dynamic-graph-patch' at '#/policies/maxDynamicNodes' is not implemented by runtime-capability/v1alpha1"
+          },
+          {
+            "code": "UNSUPPORTED_RUNTIME_CAPABILITY",
+            "nodeId": "root",
+            "message": "Runtime capability 'graph-deadline' at '#/policies/maxDurationMs' is not implemented by runtime-capability/v1alpha1"
+          },
+          {
+            "code": "UNSUPPORTED_RUNTIME_CAPABILITY",
+            "nodeId": "root",
+            "message": "Runtime capability 'cost-budget' at '#/policies/maxCostUsd' is not implemented by runtime-capability/v1alpha1"
+          },
+          {
+            "code": "UNSUPPORTED_RUNTIME_CAPABILITY",
+            "nodeId": "root",
+            "message": "Runtime capability 'policy:' at '#/policies/' is not implemented by runtime-capability/v1alpha1"
+          },
+          {
+            "code": "UNSUPPORTED_RUNTIME_CAPABILITY",
+            "nodeId": "root",
+            "message": "Runtime capability 'policy:__proto__' at '#/policies/__proto__' is not implemented by runtime-capability/v1alpha1"
+          },
+          {
+            "code": "UNSUPPORTED_RUNTIME_CAPABILITY",
+            "nodeId": "root",
+            "message": "Runtime capability 'policy:a/b~c' at '#/policies/a~1b~0c' is not implemented by runtime-capability/v1alpha1"
+          },
+          {
+            "code": "UNSUPPORTED_RUNTIME_CAPABILITY",
+            "nodeId": "root",
+            "message": "Runtime capability 'policy:constructor' at '#/policies/constructor' is not implemented by runtime-capability/v1alpha1"
+          },
+          {
+            "code": "UNSUPPORTED_RUNTIME_CAPABILITY",
+            "nodeId": "root",
+            "message": "Runtime capability 'policy:zeta' at '#/policies/zeta' is not implemented by runtime-capability/v1alpha1"
+          },
+          {
+            "code": "UNSUPPORTED_RUNTIME_CAPABILITY",
+            "nodeId": "root",
+            "message": "Runtime capability 'policy:éclair' at '#/policies/éclair' is not implemented by runtime-capability/v1alpha1"
+          },
+          {
+            "code": "UNSUPPORTED_RUNTIME_CAPABILITY",
+            "nodeId": "root",
+            "message": "Runtime capability 'policy:😀/x~y' at '#/policies/😀~1x~0y' is not implemented by runtime-capability/v1alpha1"
+          }
+        ]
+      }
+    }
+  ]
+}

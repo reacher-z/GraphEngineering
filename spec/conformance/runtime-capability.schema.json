@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/conformance/runtime-capability.schema.json",
+  "title": "Runtime capability truth conformance corpus",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "failureCode", "messageTemplate", "failureProjection", "cases"],
+  "properties": {
+    "contract": {"const": "runtime-capability/v1alpha1"},
+    "failureCode": {"const": "UNSUPPORTED_RUNTIME_CAPABILITY"},
+    "messageTemplate": {
+      "const": "Runtime capability '<capability>' at '<path>' is not implemented by runtime-capability/v1alpha1"
+    },
+    "failureProjection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status", "nodeCount", "totalAttempts", "scheduledOrder", "completionOrder",
+        "executorCalls", "ordinaryJournalCalls", "durableReadCalls", "durableAppendCalls"
+      ],
+      "properties": {
+        "status": {"const": "failed"},
+        "nodeCount": {"const": 0},
+        "totalAttempts": {"const": 0},
+        "scheduledOrder": {"type": "array", "maxItems": 0},
+        "completionOrder": {"type": "array", "maxItems": 0},
+        "executorCalls": {"const": 0},
+        "ordinaryJournalCalls": {"const": 0},
+        "durableReadCalls": {"const": 0},
+        "durableAppendCalls": {"const": 0}
+      }
+    },
+    "cases": {
+      "type": "array",
+      "minItems": 7,
+      "maxItems": 7,
+      "items": {"$ref": "#/$defs/case"}
+    }
+  },
+  "$defs": {
+    "case": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "graph", "expect"],
+      "properties": {
+        "name": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,127}$"},
+        "graph": {
+          "$ref": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/graph.schema.json"
+        },
+        "expect": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["supported", "failures"],
+          "properties": {
+            "supported": {"type": "boolean"},
+            "failures": {
+              "type": "array",
+              "items": {"$ref": "#/$defs/failure"}
+            }
+          },
+          "allOf": [
+            {
+              "if": {"properties": {"supported": {"const": true}}, "required": ["supported"]},
+              "then": {"properties": {"failures": {"type": "array", "maxItems": 0}}},
+              "else": {"properties": {"failures": {"type": "array", "minItems": 1}}}
+            }
+          ]
+        }
+      }
+    },
+    "failure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "nodeId", "message"],
+      "properties": {
+        "code": {"const": "UNSUPPORTED_RUNTIME_CAPABILITY"},
+        "nodeId": {"type": "string", "minLength": 1},
+        "message": {
+          "type": "string",
+          "pattern": "^Runtime capability '.+' at '#/.+' is not implemented by runtime-capability/v1alpha1$"
+        }
+      }
+    }
+  }
+}

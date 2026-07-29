@@ -83,7 +83,6 @@
   ],
   "policies": {
     "maxConcurrency": 2,
-    "maxDynamicNodes": 0,
     "maxDepth": 8,
     "maxFanOut": 4,
     "maxTotalAttempts": 8

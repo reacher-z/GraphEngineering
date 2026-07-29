@@ -56,6 +56,30 @@ any executor or durable-history read/write.
 This alpha slice does not provide a separate `RouteSelected` event identity,
 arbitrary condition expressions, or quorum/deadline barrier scheduling.
 
+### Fail-closed runtime capabilities
+
+`runGraph`, durable start, and durable resume apply the same
+`runtime-capability/v1alpha1` preflight after compilation and before inspecting
+graph input, invoking an executor/journal hook, or reading/appending durable
+history. Unsupported features produce ordered
+`UNSUPPORTED_RUNTIME_CAPABILITY` failures with zero attempts and no partial
+execution. If registered foreign edge conditions are also present, their
+existing `UNSUPPORTED_EDGE_CONDITION` failures follow all runtime-capability
+failures in the same result.
+
+The captured execution slice supports `agent`, `model`, `tool`, `transform`,
+and `router` nodes. It also supports a static all-success `barrier` only when
+its config is exactly `{}` or `{ "condition": "all" }`. Subgraphs, validators,
+human nodes, other barrier configurations, node cache/resource/isolation
+directives, retry jitter, edge maps, stream/artifact-reference edge modes,
+dynamic-node/deadline/cost policies, and unknown policy extensions fail closed.
+Explicit value edges, absent or false jitter, and the bounded concurrency,
+depth, fan-out, total-attempt, and typed-port policies remain supported.
+
+Graph, node, and edge schemas remain compiler contracts and are accepted by
+this preflight. This runtime does not yet claim per-value JSON Schema validation
+of graph inputs, node inputs/outputs, edge payloads, or graph outputs.
+
 ## Standalone bounded pipeline
 
 `runPipeline` moves independent portable-JSON items through the same ordered

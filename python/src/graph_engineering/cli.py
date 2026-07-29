@@ -33,7 +33,7 @@ CLI_VERSION: Final = "0.1.0-alpha.1"
 MACHINE_SCHEMA_VERSION: Final = "graph-engineering.cli/v1alpha1"
 QUICKSTART_TEMPLATE: Final = "quickstart/research-diamond.graph.json"
 QUICKSTART_RESOURCE: Final = "data/research-diamond.graph.json"
-QUICKSTART_HASH: Final = "65aa17c158a140758eed0affdc6e4c3cbb7c3209f8431d314d623345b83bd127"
+QUICKSTART_HASH: Final = "f9aaeffc991e6cec223c959dbf7737a8fff96e1eb1ea433343f45fe663697b50"
 
 CommandName = Literal["validate", "plan", "compile", "visualize", "doctor", "init"]
 GraphInputFormat = Literal["json", "yaml", "auto"]

@@ -155,7 +155,11 @@ def test_ready_queue_conformance_has_no_implicit_layer_barrier() -> None:
 
 
 def test_diamond_binds_named_inputs_and_respects_concurrency_cap() -> None:
-    graph = compile_graph(load_json("diamond.graph.json"))
+    graph_document = load_json("diamond.graph.json")
+    # This test isolates ready-queue fan-out/fan-in. Dynamic graph patching is
+    # forward vocabulary and now fails the execution capability preflight.
+    del graph_document["policies"]["maxDynamicNodes"]
+    graph = compile_graph(graph_document)
     active = 0
     peak = 0
 
