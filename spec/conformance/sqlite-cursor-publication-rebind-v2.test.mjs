@@ -40,11 +40,11 @@ test("B3 freezes an unimplemented cursor subprotocol inside one atomic v1-to-v2 
     taskId: "SQLITE-CURSOR-B3-PUBLICATION-REBIND",
     stageCount: 23,
     ruleCount: 2,
-    hostileObligationCount: 80,
+    hostileObligationCount: 83,
     faultBoundaryCount: 20,
     targetDescriptorHash: "f632104c823e7559dbbb889b08ac3adb0cf0b6dc528cdb9179c9521ce72cff92",
     targetSchemaIdentitySha256: "9fcd96c331999ffb0aca0d9d63ad2b9af073db80012471108c5437a77116f634",
-    fixtureCanonicalSha256: "9ed27de3dadb8989b51da9864b2109f0b760043bea52b3c73234013150e74ef3",
+    fixtureCanonicalSha256: "b92d8d9c05d16f3a230e479ee161acd26e265654e0a44ff14dfe5652328ef7f0",
     implementationClaim: false,
     activeManifestClaim: false,
   });
@@ -143,6 +143,10 @@ test("B3 separates count-scan cleanup from seal-stream cleanup", () => {
 test("B3 rejects re-signed weakening of the transitive authority chain", () => {
   const mutations = [
     (fixture) => { fixture.authority.outerPublicationAuthority.consumesOuterClockEvidenceReceiptExactlyOnce = false; },
+    (fixture) => { fixture.authority.stageAdoptionBridge.consumesRequiredOuterWriteReceiptsExactlyOnce = false; },
+    (fixture) => { fixture.authority.stageAdoptionBridge.failedBundleValidationConsumesAnyReceipt = true; },
+    (fixture) => { fixture.authority.stageAdoptionBridge.failedBundleMayRetryWithSameExactBundle = false; },
+    (fixture) => { fixture.authority.stageAdoptionBridge.mintsConsumedReceiptTombstones = false; },
     (fixture) => { fixture.authority.publicationSession.consumesPreRebindClockEvidenceReceiptExactlyOnce = false; },
     (fixture) => { fixture.authority.cursorClock.requiredCommitments[0] = "attacker-clock-receipt"; },
     (fixture) => { fixture.authority.receiptChain.preRetirementStageFenceReceipt.requiredCommitments.pop(); },

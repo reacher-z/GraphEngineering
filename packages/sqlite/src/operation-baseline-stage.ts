@@ -2933,6 +2933,7 @@ export class SQLiteBaselineTempStage {
         ? readSQLiteConnectionOwnerSnapshot(this.#connection)
         : {
             isTransaction: this.#connection.isTransaction,
+            transactionLineage: this.#connection.transactionLineage,
             transactionMode: this.#connection.transactionMode,
             transactionEpoch: this.#connection.transactionEpoch,
           };

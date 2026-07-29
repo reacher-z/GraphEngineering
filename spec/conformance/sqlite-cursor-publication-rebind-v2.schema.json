@@ -28,7 +28,7 @@
     "lifecycleContract": { "$ref": "#/$defs/lifecycleContract" },
     "faultMatrix": { "$ref": "#/$defs/faultMatrix" },
     "hostileObligations": {
-      "type": "array", "minItems": 80, "maxItems": 80, "uniqueItems": true,
+      "type": "array", "minItems": 83, "maxItems": 83, "uniqueItems": true,
       "items": { "$ref": "#/$defs/slug" }
     },
     "parityGates": { "$ref": "#/$defs/parityGates" }
@@ -141,7 +141,7 @@
         },
         "stageAdoptionBridge": {
           "type": "object", "additionalProperties": false,
-          "required": ["packagePrivateIntrinsic", "callerConstructedReceiptsAllowed", "adoptsAfterOuterWrites", "requiredOuterWriteReceipts", "requiresExactOuterPublicationAuthority", "requiresExactPostDdlCatalogFence", "requiresStatementIdentityAndAffectedCountLedger", "requiresTotalChangesDeltaEquality", "retiresV1CatalogAndChangeFence", "mintsStageAdoptionReceiptOnce", "postCursorAdoption", "stageRetirementBridge"],
+          "required": ["packagePrivateIntrinsic", "callerConstructedReceiptsAllowed", "adoptsAfterOuterWrites", "requiredOuterWriteReceipts", "requiresExactOuterPublicationAuthority", "requiresExactPostDdlCatalogFence", "requiresStatementIdentityAndAffectedCountLedger", "requiresTotalChangesDeltaEquality", "retiresV1CatalogAndChangeFence", "mintsStageAdoptionReceiptOnce", "consumesRequiredOuterWriteReceiptsExactlyOnce", "failedBundleValidationConsumesAnyReceipt", "failedBundleMayRetryWithSameExactBundle", "mintsConsumedReceiptTombstones", "postCursorAdoption", "stageRetirementBridge"],
           "properties": {
             "packagePrivateIntrinsic": { "const": true },
             "callerConstructedReceiptsAllowed": { "const": false },
@@ -153,6 +153,10 @@
             "requiresTotalChangesDeltaEquality": { "const": true },
             "retiresV1CatalogAndChangeFence": { "const": true },
             "mintsStageAdoptionReceiptOnce": { "const": true },
+            "consumesRequiredOuterWriteReceiptsExactlyOnce": { "const": true },
+            "failedBundleValidationConsumesAnyReceipt": { "const": false },
+            "failedBundleMayRetryWithSameExactBundle": { "const": true },
+            "mintsConsumedReceiptTombstones": { "const": ["migration-0002-catalog-rebuild-consumed-tombstone", "baseline-entries-publication-consumed-tombstone", "baseline-header-publication-consumed-tombstone", "operation-sequence-zero-publication-consumed-tombstone"] },
             "postCursorAdoption": {
               "type": "object", "additionalProperties": false,
               "required": ["packagePrivateIntrinsic", "requiredOuterWriteReceipts", "requiresCursorClockCapability", "requiresOriginalStageAdoptionReceipt", "requiresExactOuterPublicationAuthority", "requiresSameTransactionGeneration", "requiresExactPostDdlCatalogFence", "requiresStatementIdentityAndAffectedCountLedger", "requiresTotalChangesAndOuterLedgerEquality", "requiredAuditReceipts", "consumesOuterWriteReceiptsExactlyOnce", "consumesAuditReceiptsExactlyOnce", "mintsConsumedReceiptTombstones", "requiresCursorClockCapabilityWithConsumedPreVerificationReceiptIdentity", "preVerificationClockReceiptReconsumed", "auditsRequireZeroPermanentWriteDelta", "adoptsCurrentInternalEpochWithoutCrossRuntimeEquality", "doesNotMintSecondStageAdoptionReceipt", "mintsPreRetirementStageFenceReceiptOnce", "permanentWritesForbiddenAfterReceipt"],

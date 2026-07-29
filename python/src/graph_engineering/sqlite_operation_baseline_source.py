@@ -235,15 +235,21 @@ class _SQLiteCursorCapability:
 
 
 class SQLiteV1BaselineConnectionOwner:
-    """Exclusive connection capability with an opaque transaction epoch."""
+    """Exclusive connection capability with separate lineage and mutation epoch."""
 
-    __slots__ = ("__connection", "__transaction_epoch", "__transaction_mode")
+    __slots__ = (
+        "__connection",
+        "__transaction_epoch",
+        "__transaction_generation",
+        "__transaction_mode",
+    )
 
     def __init__(self, location: str) -> None:
         if type(location) is not str or not location:
             raise TypeError("baseline owner requires one SQLite location")
         self.__connection = sqlite3.connect(location)
         self.__transaction_epoch = 0
+        self.__transaction_generation: object | None = None
         self.__transaction_mode: SQLiteTransactionMode | None = None
 
     @property
@@ -257,6 +263,12 @@ class SQLiteV1BaselineConnectionOwner:
     @property
     def transaction_epoch(self) -> int:
         return self.__transaction_epoch
+
+    @property
+    def _transaction_generation(self) -> object | None:
+        """Return the exact private identity of the active transaction lineage."""
+
+        return self.__transaction_generation if self.__connection.in_transaction else None
 
     @property
     def transaction_mode(self) -> SQLiteTransactionMode | None:
@@ -281,6 +293,10 @@ class SQLiteV1BaselineConnectionOwner:
         token = _first_sqlite_token(sql)
         cursor = self.__connection.execute(sql, parameters)
         after = self.__connection.in_transaction
+        if not before and after:
+            self.__transaction_generation = object()
+        elif not after:
+            self.__transaction_generation = None
         if not after:
             self.__transaction_mode = None
         elif not before:
@@ -300,21 +316,25 @@ class SQLiteV1BaselineConnectionOwner:
             self.__connection.executescript(sql)
         finally:
             after = self.__connection.in_transaction
+            self.__transaction_generation = object() if after else None
             self.__transaction_mode = "unknown" if after else None
             self.__transaction_epoch += 1
 
     def commit(self) -> None:
         self.__connection.commit()
+        self.__transaction_generation = None
         self.__transaction_mode = None
         self.__transaction_epoch += 1
 
     def rollback(self) -> None:
         self.__connection.rollback()
+        self.__transaction_generation = None
         self.__transaction_mode = None
         self.__transaction_epoch += 1
 
     def close(self) -> None:
         self.__connection.close()
+        self.__transaction_generation = None
 
 
 @dataclass(frozen=True, slots=True)

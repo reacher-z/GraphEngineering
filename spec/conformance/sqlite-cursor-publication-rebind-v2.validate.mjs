@@ -13,7 +13,7 @@ const ROOT = dirname(fileURLToPath(import.meta.url));
 const REPOSITORY_ROOT = dirname(dirname(ROOT));
 const FIXTURE_PATH = join(ROOT, "sqlite-cursor-publication-rebind-v2.case.json");
 const SCHEMA_PATH = join(ROOT, "sqlite-cursor-publication-rebind-v2.schema.json");
-const TRUSTED_FIXTURE_SHA256 = "9ed27de3dadb8989b51da9864b2109f0b760043bea52b3c73234013150e74ef3";
+const TRUSTED_FIXTURE_SHA256 = "b92d8d9c05d16f3a230e479ee161acd26e265654e0a44ff14dfe5652328ef7f0";
 
 const EXACT_IDENTITIES = Object.freeze({
   sourceDescriptorHash: "4071e4e5e2cddad01af4f87e4df45fa55bbc4e238674174ce40eca765d2c03fe",
@@ -154,6 +154,9 @@ const EXACT_HOSTILE = Object.freeze([
   "audit-receipt-second-consumption", "missing-consumed-audit-tombstone",
   "outer-write-receipt-second-consumption", "missing-consumed-outer-write-tombstone",
   "outer-clock-evidence-receipt-unconsumed",
+  "initial-write-receipt-second-consumption",
+  "initial-write-receipt-partial-consumption-on-failed-bundle",
+  "missing-initial-write-consumed-tombstone",
   "rollback-and-rebegin",
   "post-0002-catalog-drift", "unexplained-permanent-write", "affected-count-minus-one",
   "affected-count-plus-one", "total-changes-disagreement", "write-ledger-disagreement",
@@ -443,7 +446,7 @@ export function validateCursorPublicationFixture(value, { verifyAssets = false }
   if (!(sequenceIndex < updateIndex && updateIndex < metadataIndex && metadataIndex < commitIndex)) {
     fail("GE_CURSOR_B3_ATOMIC_ORDER", "rebind must remain inside the complete atomic migration");
   }
-  if (value.hostileObligations.length !== 80
+  if (value.hostileObligations.length !== 83
       || value.faultMatrix.boundaries.at(-1) !== "commit-returned") {
     fail("GE_CURSOR_B3_MATRIX", "hostile or fault matrix drifted");
   }

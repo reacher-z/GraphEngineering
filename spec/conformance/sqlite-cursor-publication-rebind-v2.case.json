@@ -109,6 +109,15 @@
       "requiresTotalChangesDeltaEquality": true,
       "retiresV1CatalogAndChangeFence": true,
       "mintsStageAdoptionReceiptOnce": true,
+      "consumesRequiredOuterWriteReceiptsExactlyOnce": true,
+      "failedBundleValidationConsumesAnyReceipt": false,
+      "failedBundleMayRetryWithSameExactBundle": true,
+      "mintsConsumedReceiptTombstones": [
+        "migration-0002-catalog-rebuild-consumed-tombstone",
+        "baseline-entries-publication-consumed-tombstone",
+        "baseline-header-publication-consumed-tombstone",
+        "operation-sequence-zero-publication-consumed-tombstone"
+      ],
       "postCursorAdoption": {
         "packagePrivateIntrinsic": true,
         "requiredOuterWriteReceipts": [
@@ -781,6 +790,9 @@
     "outer-write-receipt-second-consumption",
     "missing-consumed-outer-write-tombstone",
     "outer-clock-evidence-receipt-unconsumed",
+    "initial-write-receipt-second-consumption",
+    "initial-write-receipt-partial-consumption-on-failed-bundle",
+    "missing-initial-write-consumed-tombstone",
     "rollback-and-rebegin",
     "post-0002-catalog-drift",
     "unexplained-permanent-write",
@@ -819,6 +831,6 @@
       "pre-commit-crash-reopens-v1",
       "post-commit-crash-reopens-v2"
     ],
-    "fixtureCanonicalSha256": "9ed27de3dadb8989b51da9864b2109f0b760043bea52b3c73234013150e74ef3"
+    "fixtureCanonicalSha256": "b92d8d9c05d16f3a230e479ee161acd26e265654e0a44ff14dfe5652328ef7f0"
   }
 }

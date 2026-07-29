@@ -37,6 +37,11 @@ export interface SQLiteConnectionOptions {
 export type SQLiteWalCheckpointMode = "PASSIVE" | "FULL" | "RESTART" | "TRUNCATE";
 export type SQLiteTransactionMode = "deferred" | "immediate" | "exclusive" | "unknown";
 
+/** Package-private, object-identity-stable token for one transaction lineage. */
+export interface SQLiteConnectionTransactionLineage {
+  readonly __sqliteConnectionTransactionLineage: never;
+}
+
 export interface SQLiteWalCheckpointReport {
   readonly mode: SQLiteWalCheckpointMode;
   readonly busy: 0;
@@ -47,6 +52,7 @@ export interface SQLiteWalCheckpointReport {
 /** Package-private, class-private-field-backed owner observation. */
 export interface SQLiteConnectionOwnerSnapshot {
   readonly isTransaction: boolean;
+  readonly transactionLineage: SQLiteConnectionTransactionLineage | null;
   readonly transactionEpoch: bigint;
   readonly transactionMode: SQLiteTransactionMode | null;
 }
@@ -211,6 +217,91 @@ function mayContainAdditionalStatement(sql: string): boolean {
   return withoutOneTerminator.includes(";");
 }
 
+function containsOwnerTransactionControl(sql: string): boolean {
+  const controls = new Set(["BEGIN", "COMMIT", "END", "ROLLBACK"]);
+  let index = 0;
+  let atStatementStart = true;
+  let createPrefix = false;
+  let inTrigger = false;
+  let triggerCaseDepth = 0;
+  let triggerEndPending = false;
+  let lastWord = "";
+  while (index < sql.length) {
+    const current = sql[index]!;
+    const next = sql[index + 1];
+    if (current === "-" && next === "-") {
+      const newline = sql.indexOf("\n", index + 2);
+      index = newline < 0 ? sql.length : newline + 1;
+      continue;
+    }
+    if (current === "/" && next === "*") {
+      const close = sql.indexOf("*/", index + 2);
+      index = close < 0 ? sql.length : close + 2;
+      continue;
+    }
+    if (current === "'" || current === '"' || current === "`" || current === "[") {
+      const close = current === "[" ? "]" : current;
+      index += 1;
+      while (index < sql.length) {
+        if (sql[index] !== close) {
+          index += 1;
+          continue;
+        }
+        if (close !== "]" && sql[index + 1] === close) {
+          index += 2;
+          continue;
+        }
+        index += 1;
+        break;
+      }
+      continue;
+    }
+    if (/[A-Za-z]/u.test(current)) {
+      const word = /^[A-Za-z]+/u.exec(sql.slice(index))![0]!.toUpperCase();
+      if (inTrigger) {
+        if (word === "CASE") {
+          triggerCaseDepth += 1;
+          triggerEndPending = false;
+        } else if (word === "END" && triggerCaseDepth > 0) {
+          triggerCaseDepth -= 1;
+          triggerEndPending = false;
+        } else {
+          triggerEndPending = word === "END";
+        }
+        lastWord = word;
+      } else if (atStatementStart) {
+        if (controls.has(word)) return true;
+        atStatementStart = false;
+        createPrefix = word === "CREATE";
+        lastWord = word;
+      } else if (createPrefix) {
+        if (word === "TRIGGER") {
+          inTrigger = true;
+        } else if (word !== "TEMP" && word !== "TEMPORARY") {
+          createPrefix = false;
+        }
+        lastWord = word;
+      } else {
+        lastWord = word;
+      }
+      index += word.length;
+      continue;
+    }
+    if (current === ";") {
+      if (!inTrigger || (lastWord === "END" && triggerEndPending)) {
+        inTrigger = false;
+        triggerCaseDepth = 0;
+        triggerEndPending = false;
+        atStatementStart = true;
+        createPrefix = false;
+      }
+      lastWord = "";
+    }
+    index += 1;
+  }
+  return false;
+}
+
 const SQLITE_CONNECTION_OWNER_SNAPSHOT = Symbol("SQLiteConnection.ownerSnapshot");
 const SQLITE_CONNECTION_TOTAL_CHANGES_SNAPSHOT = Symbol(
   "SQLiteConnection.totalChangesSnapshot",
@@ -224,6 +315,7 @@ export class SQLiteConnection {
   readonly #maxBusyAttempts: number;
   readonly #maxBusyElapsedMs: number;
   #closed = false;
+  #transactionLineage: SQLiteConnectionTransactionLineage | null = null;
   #transactionEpoch = 0n;
   #transactionMode: SQLiteTransactionMode | null = null;
 
@@ -288,11 +380,13 @@ export class SQLiteConnection {
 
   [SQLITE_CONNECTION_OWNER_SNAPSHOT](): SQLiteConnectionOwnerSnapshot {
     const epochBefore = this.#transactionEpoch;
+    const lineageBefore = this.#transactionLineage;
     const transactionBefore = this.#database.isTransaction;
     const open = !this.#closed && this.#database.isOpen;
     const mode = transactionBefore ? (this.#transactionMode ?? "unknown") : null;
     const transactionAfter = this.#database.isTransaction;
     const epochAfter = this.#transactionEpoch;
+    const lineageAfter = this.#transactionLineage;
     if (!open) {
       throw new CycleStoreProviderError(
         "GE_CYCLE_STORE_UNAVAILABLE",
@@ -300,7 +394,10 @@ export class SQLiteConnection {
         "SQLite provider is closed",
       );
     }
-    if (epochBefore !== epochAfter || transactionBefore !== transactionAfter) {
+    if (epochBefore !== epochAfter || lineageBefore !== lineageAfter
+        || transactionBefore !== transactionAfter
+        || (transactionAfter && lineageAfter === null)
+        || (!transactionAfter && lineageAfter !== null)) {
       throw new CycleStoreProviderError(
         "GE_CYCLE_STORE_CORRUPTION",
         "inspect-schema",
@@ -309,6 +406,7 @@ export class SQLiteConnection {
     }
     return Object.freeze({
       isTransaction: transactionAfter,
+      transactionLineage: lineageAfter,
       transactionEpoch: epochAfter,
       transactionMode: mode,
     });
@@ -364,6 +462,12 @@ export class SQLiteConnection {
   get transactionEpoch(): bigint {
     this.#assertOpen("inspect-schema");
     return this.#transactionEpoch;
+  }
+
+  /** Object-identity-stable lineage for the current transaction generation. */
+  get transactionLineage(): SQLiteConnectionTransactionLineage | null {
+    this.#assertOpen("inspect-schema");
+    return this.#database.isTransaction ? this.#transactionLineage : null;
   }
 
   /** Owner-observed mode for the active transaction, or null in autocommit. */
@@ -505,20 +609,36 @@ export class SQLiteConnection {
     }
     const before = this.#database.isTransaction;
     const token = firstSQLiteToken(sql);
+    const mayReplaceLineage = ownerControlMayReplaceTransaction(sql, token)
+      || (mayContainAdditionalStatement(sql) && containsOwnerTransactionControl(sql));
     this.#transactionEpoch += 1n;
     try {
       this.#database.exec(sql);
     } catch (error) {
-      this.#transactionMode = this.#database.isTransaction ? "unknown" : null;
+      const afterFailure = this.#database.isTransaction;
+      if ((!before && afterFailure) || (before && afterFailure && mayReplaceLineage)) {
+        this.#transactionLineage = Object.freeze(
+          Object.create(null),
+        ) as SQLiteConnectionTransactionLineage;
+      } else if (!afterFailure) {
+        this.#transactionLineage = null;
+      }
+      this.#transactionMode = afterFailure ? "unknown" : null;
       throw translateSQLiteError(error, operation);
     }
     const after = this.#database.isTransaction;
+    if ((!before && after) || (before && after && mayReplaceLineage)) {
+      this.#transactionLineage = Object.freeze(
+        Object.create(null),
+      ) as SQLiteConnectionTransactionLineage;
+    } else if (!after) {
+      this.#transactionLineage = null;
+    }
     if (!after) {
       this.#transactionMode = null;
     } else if (!before) {
       this.#transactionMode = token === "BEGIN" ? beginTransactionMode(sql) : "unknown";
-    } else if (ownerControlMayReplaceTransaction(sql, token)
-        || mayContainAdditionalStatement(sql)) {
+    } else if (mayReplaceLineage) {
       // A trusted script may end one transaction and open another while both
       // the pre/post states are `isTransaction=true`. Never carry the old mode
       // proof across that ambiguous generation boundary.
@@ -543,6 +663,9 @@ export class SQLiteConnection {
       try {
         this.#database.exec("BEGIN IMMEDIATE");
         this.#transactionEpoch += 1n;
+        this.#transactionLineage = Object.freeze(
+          Object.create(null),
+        ) as SQLiteConnectionTransactionLineage;
         this.#transactionMode = "immediate";
         const result = action();
         if ((typeof result === "object" && result !== null && "then" in result)
@@ -555,6 +678,7 @@ export class SQLiteConnection {
         }
         this.#database.exec("COMMIT");
         this.#transactionEpoch += 1n;
+        this.#transactionLineage = null;
         this.#transactionMode = null;
         return result;
       } catch (error) {
@@ -562,14 +686,17 @@ export class SQLiteConnection {
           try {
             this.#database.exec("ROLLBACK");
             this.#transactionEpoch += 1n;
+            this.#transactionLineage = null;
             this.#transactionMode = null;
           } catch {
             // The original safe error remains authoritative. A subsequent use
             // will fail its invariant checks if rollback did not restore state.
+            this.#transactionMode = "unknown";
           }
         } else {
           // COMMIT may have completed before a lower-level error surfaced. Do
           // not retain an owner proof once SQLite has returned to autocommit.
+          this.#transactionLineage = null;
           this.#transactionMode = null;
         }
         if (isRetryableSQLiteLockError(error)
@@ -598,6 +725,7 @@ export class SQLiteConnection {
   close(): void {
     if (this.#closed) return;
     this.#closed = true;
+    this.#transactionLineage = null;
     this.#transactionMode = null;
     if (this.#database.isOpen) this.#database.close();
   }

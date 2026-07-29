@@ -66,7 +66,11 @@ their statement identities, affected counts and aggregate `total_changes`,
 retires the old v1 catalog/change fence and adopts the stage into the same
 `BEGIN EXCLUSIVE` lineage. Internal epoch values may advance differently in the
 two runtimes and are never compared across runtimes; only the bridge may adopt
-them. Caller-constructed receipts are forbidden.
+them. Caller-constructed receipts are forbidden. The bridge validates the
+entire four-receipt bundle before consuming anything; a missing, reordered,
+cloned or substituted bundle consumes zero receipts and the same exact valid
+bundle may be retried. Success consumes all four exactly once and mints four
+consumed-receipt tombstones together with the one-shot stage-adoption receipt.
 
 Only after that adoption may the owner derive the one-shot cursor publication
 session from the outer authority. That session binds the opaque pre-rebind receipt, projection

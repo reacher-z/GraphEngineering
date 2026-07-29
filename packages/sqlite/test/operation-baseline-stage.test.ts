@@ -29,7 +29,10 @@ import {
   readSQLiteBaselineTempStorage,
   type SQLiteBaselineExpectedCounts,
 } from "../src/operation-baseline-stage.js";
-import { SQLiteConnection } from "../src/sqlite-connection.js";
+import {
+  SQLiteConnection,
+  readSQLiteConnectionOwnerSnapshot,
+} from "../src/sqlite-connection.js";
 
 const temporaryRoots: string[] = [];
 const H1 = "1".repeat(64);
@@ -568,8 +571,46 @@ describe("SQLite operation baseline stage owner", () => {
         /requires an owner EXCLUSIVE transaction/u,
       );
       connection.execTrusted("ROLLBACK", "inspect-schema");
+
+      expect(() => connection.execTrusted(
+        "BEGIN EXCLUSIVE; SELECT * FROM definitely_missing_table",
+        "inspect-schema",
+      )).toThrow();
+      const failedBegin = readSQLiteConnectionOwnerSnapshot(connection);
+      expect(failedBegin.isTransaction).toBe(true);
+      expect(failedBegin.transactionLineage).not.toBeNull();
+      expect(failedBegin.transactionMode).toBe("unknown");
+      connection.execTrusted("ROLLBACK", "inspect-schema");
     } finally {
       if (connection.isTransaction) connection.execTrusted("ROLLBACK", "inspect-schema");
+      connection.close();
+    }
+  });
+
+  it("tracks and retires the private lineage of immediate transactions", () => {
+    const connection = opened();
+    try {
+      const returned = connection.immediate("inspect-schema", () => {
+        const owner = readSQLiteConnectionOwnerSnapshot(connection);
+        expect(owner.isTransaction).toBe(true);
+        expect(owner.transactionMode).toBe("immediate");
+        expect(owner.transactionLineage).not.toBeNull();
+        return "committed";
+      });
+      expect(returned).toBe("committed");
+      expect(readSQLiteConnectionOwnerSnapshot(connection)).toMatchObject({
+        isTransaction: false,
+        transactionLineage: null,
+        transactionMode: null,
+      });
+
+      expect(() => connection.immediate("inspect-schema", () => {
+        expect(readSQLiteConnectionOwnerSnapshot(connection).transactionLineage)
+          .not.toBeNull();
+        throw new Error("rollback");
+      })).toThrowError(/failed safely/u);
+      expect(readSQLiteConnectionOwnerSnapshot(connection).transactionLineage).toBeNull();
+    } finally {
       connection.close();
     }
   });

@@ -12733,3 +12733,195 @@ open. The immediate next implementation slice is `B3-AUTHORITY-BRIDGE`: add
 red tests and package-private TypeScript/Python objects for the provider-clock
 capability, initial stage adoption and post-cursor/pre-retirement authority
 chain without executing permanent v2 publication or switching the manifest.
+
+#### 31.37.16 Append-only initial-adoption atomic-consumption correction and bridge tranche
+
+The first authority-bridge implementation review found one contract ambiguity
+that section 31.37.15 did not close: the initial bridge listed four required
+outer-write receipts but did not literally freeze exact-once consumption,
+all-or-nothing bundle validation or consumed tombstones. This subsection
+supersedes only that omission and the candidate digest/count.
+
+The contract candidate now has 23 stages, 83 hostile obligations and trusted
+canonical SHA-256
+`b92d8d9c05d16f3a230e479ee161acd26e265654e0a44ff14dfe5652328ef7f0`.
+Before initial adoption, the package-private bridge validates the complete
+ordered bundle of migration `0002`, baseline entries, baseline header and
+sequence-zero receipts. Missing, reordered, cloned, substituted, replayed or
+inconsistent bundles consume zero receipts and mint no authority. The same
+exact valid bundle remains retryable after validation-only failure. Success
+atomically consumes all four exactly once and mints four exact consumed
+tombstones plus the one-shot stage-adoption receipt.
+
+The first runtime tranche is intentionally narrower than full B3. It may add:
+
+- an opaque connection transaction-lineage token that is stable for one real
+  `BEGIN EXCLUSIVE` generation, survives DDL mutation-epoch advances, and is
+  replaced/cleared by rollback, commit, close or transaction replacement;
+- an opaque migration-lock capability bound to the exact live lock tuple,
+  connection and transaction lineage;
+- an opaque provider-clock source minted by package-owned provider code;
+- an opaque four-boundary provider-clock capability;
+- distinct evidence receipts that bind exact previous-receipt identity,
+  boundary, consumer, live lock, fresh provider time, current mutation epoch
+  and stable transaction lineage; and
+- exact-once consumed-evidence tombstones.
+
+This tranche must not prepare or execute the cursor UPDATE, run rule 11/12,
+execute migration `0002`, publish baseline/metadata rows, retire TEMP objects,
+commit, activate schema v2 or change any capability claim. Its TypeScript red
+and hostile tests must prove:
+
+1. exactly four ordered observations and a rejected fifth;
+2. exact previous receipt identity for every observation;
+3. one fixed consumer and one consumption per receipt;
+4. clone, cross-run and capability substitution rejection;
+5. safe/nonnegative/nondecreasing fresh provider time;
+6. strict `providerNowMs < activeExpiresAtMs` including equality rejection;
+7. live lock reread before and after every provider-clock call;
+8. zero lock/connection/`total_changes` mutation by the clock source;
+9. DDL mutation epoch may advance while the same BEGIN lineage remains valid;
+10. rollback/rebegin invalidates every old capability despite an equal lock row;
+11. public package exports remain unchanged; and
+12. permanent rebind prepare/execute and commit counts remain zero.
+
+The matching Python tranche must use an opaque object-identity transaction
+generation token rather than its mutable statement epoch, consume the real
+private B2 transfer rather than the publicly constructible clean-outcome
+dataclass, and stop before rebind. Cross-runtime parity compares normalized
+outcomes and counters only; opaque token bytes or language-specific epoch
+values must never be serialized or compared.
+
+#### 31.37.17 Provider-clock authority hostile-state-machine closure
+
+Independent executable review of the first provider-clock candidate found
+three authority failures that ordinary happy-path tests did not expose. This
+subsection makes their remediation and evidence mandatory before a milestone
+commit. It does not expand the tranche into cursor publication.
+
+First, an observation is a one-way state machine, not a retryable function.
+Before the provider callback runs, the capability enters an internal
+`observing` state. Recursive observation of the same capability is forbidden,
+poisons the authority and cannot mint either the inner or outer evidence
+receipt, even when the hostile callback catches the inner structured error.
+Any provider exception, invalid provider time, post-callback lineage change,
+mutation-epoch change, `total_changes` change, live-lock drift, clock
+regression or expiry failure after observation begins also poisons the
+capability. A later call at the same boundary must fail without invoking the
+provider again. The surrounding `BEGIN EXCLUSIVE` transaction remains subject
+to mandatory rollback by the eventual B3 owner.
+
+Second, transaction lineage follows real transaction generations rather than
+SQL formatting. The TypeScript owner must:
+
+- retain the exact lineage across the frozen multi-statement `0002` DDL;
+- retain it across ordinary multi-statement DDL;
+- retain it across `CREATE TRIGGER ... BEGIN ... END` bodies;
+- replace it when a script actually ends and begins a transaction;
+- mint and expose a non-null lineage inside `immediate()` actions;
+- clear it after successful commit, rollback and close; and
+- reconcile non-null lineage with SQLite state when a multi-statement script
+  begins a transaction and then throws.
+
+The lexical transaction-control detector must ignore comments, quoted strings,
+quoted identifiers and Trigger body `BEGIN`/`END`. Conservative false positives
+are allowed only where they cannot invalidate the frozen `0002` path or normal
+DDL. They must never permit a real `COMMIT`, `ROLLBACK`, `END` or new `BEGIN`
+to carry the preceding lineage.
+
+Third, hostile migration-lock shapes must always fail through the structured
+provider error surface. Null, undefined, missing data properties, accessor
+properties and throwing Proxy traps may not leak raw TypeError or attacker
+exceptions. Required lock fields are captured from exact own data-property
+descriptors before validation; no attacker getter may be invoked. The captured
+lock must still satisfy source/target versions, equal positive epoch/fence,
+bounded expiry, identifiers and exact live-row equality.
+
+The cross-runtime evidence report is expanded to include these explicit zero
+counters for every scenario:
+
+- `cursorRebindPrepareCount`;
+- `cursorRebindExecuteCount`; and
+- `commitCount`.
+
+A static gate also rejects the fixed cursor UPDATE or transaction-finalization
+path from either package-private clock module. The normalized parity matrix
+must remain exact for control, rollback/rebegin, skipped boundary, regression,
+expiry equality, invalid clock and lock drift. Public-export flags must remain
+false in both runtimes.
+
+Required executable acceptance before committing this tranche:
+
+1. TypeScript clock, connection and stage-focused tests pass, including exact
+   frozen `0002`, Trigger DDL, immediate lineage, reentrancy poison, side-effect
+   poison-and-retry rejection and hostile lock descriptors.
+2. Python clock, source and stage-ownership tests pass with the same
+   reentrancy and poison semantics.
+3. TypeScript build/typecheck and Python strict mypy, Ruff lint and Ruff format
+   gates pass without ignores added for production code.
+4. Cross-runtime parity passes every normalized field and all three explicit
+   no-publication counters.
+5. The B3 contract remains 23 stages, 83 hostile obligations, false
+   implementation/manifest claims and digest
+   `b92d8d9c05d16f3a230e479ee161acd26e265654e0a44ff14dfe5652328ef7f0`.
+6. Malicious re-sign tests directly reject weakening
+   `failedBundleMayRetryWithSameExactBundle` and
+   `mintsConsumedReceiptTombstones`.
+7. Full SQLite tests are rerun without competing long-lived test processes and
+   with sufficient deterministic per-test timeout; timeout-only failures under
+   artificial concurrent saturation are not reported as correctness failures.
+8. Three independent final reviews examine the exact working-tree digest and
+   report HIGH 0 / MEDIUM 0 / LOW 0 before the scoped commit.
+
+Even after this subsection passes, the following remain open and must be built
+in later leaves: exact private B2 transfer consumption, outer publication
+authority, migration `0002` receipt, four permanent-write receipts, atomic
+initial stage adoption, publication session, fixed rebind execution, rule 11,
+rule 12, cursor-clock authority, post-cursor adoption, TEMP retirement,
+pre-commit fence, commit-returned state, crash/reopen matrix, scale proof,
+artifact parity and active-manifest activation. No success statement for this
+clock tranche may imply those downstream capabilities exist.
+
+#### 31.37.18 Provider-clock tranche acceptance checkpoint
+
+The implementation defined in sections 31.37.16 and 31.37.17 has passed its
+scoped acceptance gates. TypeScript and Python now share the same private
+four-boundary provider-clock authority, stable real-transaction lineage,
+chained opaque evidence, exact consumers, consumed tombstones, one-way poison
+semantics and non-publication boundary.
+
+Final executable evidence:
+
+- frozen B3 contract: 19/19 tests, 23 stages, 83 hostile obligations, 20 fault
+  boundaries, false implementation/active-manifest claims and canonical digest
+  `b92d8d9c05d16f3a230e479ee161acd26e265654e0a44ff14dfe5652328ef7f0`;
+- TypeScript focused clock/connection/stage tests: 62/62;
+- Python focused clock/source/stage-ownership tests: 103/103;
+- latest Python clock-only tests after final poison changes: 12/12;
+- cross-runtime normalized parity and no-publication gates: 2/2;
+- SQLite package full serial regression: 23/23 files and 845/845 tests;
+- Python full regression: 2,248/2,248 tests, plus the latest separately
+  collected clock-only additions;
+- workspace lint and typecheck: all eight packages;
+- fixture validation: 79 JSON fixtures and 38 case manifests;
+- documentation links: 288/288;
+- Python Ruff lint, both 88- and 100-column Ruff format checks, and strict
+  mypy: passed; and
+- master-plan integrity: the complete pre-existing HEAD byte prefix is
+  unchanged and all current plan text is appended at true EOF.
+
+The runtime measurement hooks were self-tested rather than trusted as literal
+zeros. In both runtimes an isolated no-op probe records cursor-rebind
+prepare/execute/commit as `1/1/1`; all seven real authority cases record
+`0/0/0`. Public-export probes are false for both packages.
+
+Independent final review reached HIGH 0 / MEDIUM 0 / LOW 0 for the strict
+state-machine and evidence lanes. The release-quality lane's two presentation
+LOWs were corrected before commit: ternary indentation was normalized and the
+append-only log received the completed serial-regression evidence.
+
+This checkpoint authorizes only a scoped provider-clock authority milestone
+commit. It does not close the overall master plan or full B3. The next required
+implementation leaf is exact private B2 transfer adoption plus outer
+publication authority and the four initial write receipts, stopping again
+before fixed cursor rebind until its own hostile and parity gates pass.
