@@ -6,18 +6,22 @@ import { join } from "node:path";
 import { DatabaseSync, StatementSync } from "node:sqlite";
 
 import { CycleStoreProviderError } from "@graph-engineering/runtime";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import * as sqliteRoot from "../src/index.js";
 import {
   activateSQLiteCursorOuterPublicationAuthorityIntrinsic,
+  assertSQLiteCursorPostDdlCatalogFenceIntrinsic,
   assertSQLiteCursorOuterPublicationAuthorityIntrinsic,
   createSQLiteCursorOuterPublicationCancellationControllerIntrinsic,
   executeSQLiteCursorMigration0002CatalogRebuildIntrinsic,
+  mintSQLiteCursorPostDdlCatalogFenceIntrinsic,
   prepareSQLiteCursorOuterPublicationAuthorityIntrinsic,
   readSQLiteMigration0002CatalogRebuildReceiptSnapshotIntrinsic,
+  readSQLiteCursorPostDdlCatalogFenceSnapshotIntrinsic,
   readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic,
   type SQLiteMigration0002CatalogRebuildReceipt,
+  type SQLiteCursorPostDdlCatalogFence,
   type SQLiteCursorOuterPublicationAuthority,
 } from "../src/cursor-publication-outer-authority.js";
 import {
@@ -28,8 +32,12 @@ import {
   type SQLiteCursorMigration0002Asset,
 } from "../src/cursor-publication-migration-0002-asset.js";
 import {
+  SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_DOMAIN_UTF8,
+  SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_EXPECTED_INVENTORY,
+  SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_QUERY,
   readSQLiteCursorPublicationTargetCatalogObservationIntrinsic,
 } from "../src/cursor-publication-target-catalog.js";
+import * as targetCatalogModule from "../src/cursor-publication-target-catalog.js";
 import {
   assertSQLiteCursorProviderClockConsumedTombstoneIntrinsic,
   consumeSQLiteCursorProviderClockEvidenceIntrinsic,
@@ -875,6 +883,322 @@ describe("SQLite B3 outer publication authority", () => {
       .toBe("retired");
   });
 
+  it("mints one reusable fresh post-DDL fence without changing any write watermark", () => {
+    const graph = cleanGraph("clean", 2);
+    const authority = prepare(graph);
+    activateSQLiteCursorOuterPublicationAuthorityIntrinsic(authority);
+    const receipt = executeSQLiteCursorMigration0002CatalogRebuildIntrinsic(authority);
+    const ownerBefore = readSQLiteConnectionOwnerSnapshot(graph.connection);
+    const changesBefore = readSQLiteConnectionTotalChangesSnapshot(graph.connection);
+    const ledgerBefore = readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(
+      authority,
+    ).outerLedger;
+
+    const fence = mintSQLiteCursorPostDdlCatalogFenceIntrinsic(authority, receipt);
+    const snapshot = readSQLiteCursorPostDdlCatalogFenceSnapshotIntrinsic(fence);
+    expect(Object.isFrozen(fence)).toBe(true);
+    expect(Object.getPrototypeOf(fence)).toBeNull();
+    expect(snapshot).toMatchObject({
+      applicationId: 1_195_724_359,
+      authority,
+      catalogCanonicalUtf8Bytes: 5_785,
+      catalogRowCount: 34,
+      catalogSha256:
+        "ca85cf266267fa3eb5443bdf6d957b4b03c795cd6e0232a28c52773f1041fadf",
+      connection: graph.connection,
+      consumesAnyWriteReceipt: false,
+      isFinalV2SemanticProof: false,
+      migration0002Receipt: receipt,
+      mintCount: 1,
+      outerLedgerWatermark: {
+        affectedRowsWatermark: 3,
+        fixedStatementCount: 20,
+        logicalWriteSequence: 1,
+      },
+      proofScope: "post-0002-physical-target-catalog-before-baseline-publication",
+      userVersion: 2,
+    });
+    expect(snapshot.catalogInventory).toHaveLength(34);
+    expect(snapshot.catalogInventory)
+      .toEqual(SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_EXPECTED_INVENTORY);
+    expect(snapshot.catalogQuery).toBe(SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_QUERY);
+    expect(snapshot.catalogDigestDomainUtf8)
+      .toBe(SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_DOMAIN_UTF8);
+    expect(snapshot.catalogQuerySha256)
+      .toBe("bd9a24c0e8307f473f6160b940effdfb77007144fbeea83628f0b7664df1410c");
+    expect(snapshot.transactionEpoch).toBe(ownerBefore.transactionEpoch);
+    expect(snapshot.transactionLineage).toBe(ownerBefore.transactionLineage);
+    expect(snapshot.totalChangesWatermark).toBe(changesBefore.totalChanges);
+    expect(assertSQLiteCursorPostDdlCatalogFenceIntrinsic(authority, receipt, fence))
+      .toBe(fence);
+    expect(assertSQLiteCursorPostDdlCatalogFenceIntrinsic(authority, receipt, fence))
+      .toBe(fence);
+    expect(readSQLiteMigration0002CatalogRebuildReceiptSnapshotIntrinsic(receipt))
+      .toBeDefined();
+    expect(readSQLiteConnectionOwnerSnapshot(graph.connection)).toEqual(ownerBefore);
+    expect(readSQLiteConnectionTotalChangesSnapshot(graph.connection)).toEqual(changesBefore);
+    expect(readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(authority)).toMatchObject({
+      lifecycle: "active",
+      outerLedger: ledgerBefore,
+      postDdlCatalogFence: fence,
+      postDdlCatalogFenceMintCount: 1,
+      writePhase: "post-ddl-catalog-fence",
+    });
+  });
+
+  it("rejects substituted 0002 receipt presentation and permits exact corrected mint", () => {
+    const graph = cleanGraph();
+    const other = cleanGraph();
+    const authority = prepare(graph);
+    const otherAuthority = prepare(other);
+    activateSQLiteCursorOuterPublicationAuthorityIntrinsic(authority);
+    activateSQLiteCursorOuterPublicationAuthorityIntrinsic(otherAuthority);
+    const receipt = executeSQLiteCursorMigration0002CatalogRebuildIntrinsic(authority);
+    const otherReceipt = executeSQLiteCursorMigration0002CatalogRebuildIntrinsic(otherAuthority);
+
+    expectProviderError(
+      () => mintSQLiteCursorPostDdlCatalogFenceIntrinsic(authority, otherReceipt),
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      /receipt is invalid/u,
+    );
+    expect(readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(authority)).toMatchObject({
+      lifecycle: "active",
+      postDdlCatalogFenceMintCount: 0,
+      writePhase: "0002-complete",
+    });
+    expect(mintSQLiteCursorPostDdlCatalogFenceIntrinsic(authority, receipt)).toBeDefined();
+  });
+
+  it("rejects forged and cross-run fence presentation without poisoning valid graphs", () => {
+    const graph = cleanGraph();
+    const other = cleanGraph();
+    const authority = prepare(graph);
+    const otherAuthority = prepare(other);
+    activateSQLiteCursorOuterPublicationAuthorityIntrinsic(authority);
+    activateSQLiteCursorOuterPublicationAuthorityIntrinsic(otherAuthority);
+    const receipt = executeSQLiteCursorMigration0002CatalogRebuildIntrinsic(authority);
+    const otherReceipt = executeSQLiteCursorMigration0002CatalogRebuildIntrinsic(otherAuthority);
+    const fence = mintSQLiteCursorPostDdlCatalogFenceIntrinsic(authority, receipt);
+    const otherFence = mintSQLiteCursorPostDdlCatalogFenceIntrinsic(
+      otherAuthority,
+      otherReceipt,
+    );
+
+    expectProviderError(
+      () => assertSQLiteCursorPostDdlCatalogFenceIntrinsic(authority, receipt, otherFence),
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      /graph is invalid/u,
+    );
+    expectProviderError(
+      () => assertSQLiteCursorPostDdlCatalogFenceIntrinsic(
+        authority,
+        receipt,
+        Object.freeze(Object.create(null)) as SQLiteCursorPostDdlCatalogFence,
+      ),
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      /fence is invalid/u,
+    );
+    const revoked = Proxy.revocable(fence, {});
+    const invalidFences = [
+      Object.freeze({ ...readSQLiteCursorPostDdlCatalogFenceSnapshotIntrinsic(fence) }),
+      new Proxy(fence, {}),
+      revoked.proxy,
+    ] as readonly unknown[];
+    revoked.revoke();
+    for (const invalidFence of invalidFences) {
+      expectProviderError(
+        () => assertSQLiteCursorPostDdlCatalogFenceIntrinsic(
+          authority,
+          receipt,
+          invalidFence as SQLiteCursorPostDdlCatalogFence,
+        ),
+        "GE_CYCLE_STORE_INVALID_ARGUMENT",
+        /fence is invalid/u,
+      );
+    }
+    expect(assertSQLiteCursorPostDdlCatalogFenceIntrinsic(authority, receipt, fence))
+      .toBe(fence);
+    expect(assertSQLiteCursorPostDdlCatalogFenceIntrinsic(
+      otherAuthority,
+      otherReceipt,
+      otherFence,
+    )).toBe(otherFence);
+    expect(readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(authority).lifecycle)
+      .toBe("active");
+    expect(readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(otherAuthority).lifecycle)
+      .toBe("active");
+  });
+
+  it("poisons premature and repeated fence mint attempts without changing the ledger", () => {
+    const earlyGraph = cleanGraph();
+    const earlyAuthority = prepare(earlyGraph);
+    activateSQLiteCursorOuterPublicationAuthorityIntrinsic(earlyAuthority);
+    const forgedReceipt = Object.freeze(Object.create(null)) as
+      SQLiteMigration0002CatalogRebuildReceipt;
+    expectProviderError(
+      () => mintSQLiteCursorPostDdlCatalogFenceIntrinsic(earlyAuthority, forgedReceipt),
+      "GE_CYCLE_STORE_CORRUPTION",
+      /premature/u,
+    );
+    expect(readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(earlyAuthority))
+      .toMatchObject({
+        lifecycle: "poisoned",
+        outerLedger: {
+          affectedRowsWatermark: 0,
+          fixedStatementCount: 0,
+          logicalWriteSequence: 0,
+        },
+        postDdlCatalogFenceMintCount: 0,
+      });
+
+    const graph = cleanGraph();
+    const authority = prepare(graph);
+    activateSQLiteCursorOuterPublicationAuthorityIntrinsic(authority);
+    const receipt = executeSQLiteCursorMigration0002CatalogRebuildIntrinsic(authority);
+    const fence = mintSQLiteCursorPostDdlCatalogFenceIntrinsic(authority, receipt);
+    const ownerBefore = readSQLiteConnectionOwnerSnapshot(graph.connection);
+    const changesBefore = readSQLiteConnectionTotalChangesSnapshot(graph.connection);
+    expectProviderError(
+      () => mintSQLiteCursorPostDdlCatalogFenceIntrinsic(authority, receipt),
+      "GE_CYCLE_STORE_CORRUPTION",
+      /reused/u,
+    );
+    expect(readSQLiteConnectionOwnerSnapshot(graph.connection)).toEqual(ownerBefore);
+    expect(readSQLiteConnectionTotalChangesSnapshot(graph.connection)).toEqual(changesBefore);
+    expect(readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(authority)).toMatchObject({
+      lifecycle: "poisoned",
+      outerLedger: {
+        affectedRowsWatermark: 1,
+        fixedStatementCount: 20,
+        logicalWriteSequence: 1,
+      },
+      postDdlCatalogFenceMintCount: 1,
+    });
+    expect(() => assertSQLiteCursorPostDdlCatalogFenceIntrinsic(authority, receipt, fence))
+      .toThrow();
+    expect(readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(authority).lifecycle)
+      .toBe("poisoned");
+  });
+
+  it("rejects forged fences and retires an authentic fence after rollback and rebegin", () => {
+    expect(() => readSQLiteCursorPostDdlCatalogFenceSnapshotIntrinsic(
+      Object.freeze(Object.create(null)) as SQLiteCursorPostDdlCatalogFence,
+    )).toThrow(/fence is invalid/u);
+
+    const graph = cleanGraph();
+    const authority = prepare(graph);
+    activateSQLiteCursorOuterPublicationAuthorityIntrinsic(authority);
+    const receipt = executeSQLiteCursorMigration0002CatalogRebuildIntrinsic(authority);
+    const fence = mintSQLiteCursorPostDdlCatalogFenceIntrinsic(authority, receipt);
+    graph.connection.execTrusted("ROLLBACK", "inspect-schema");
+    graph.connection.execTrusted("BEGIN EXCLUSIVE", "inspect-schema");
+    expect(() => readSQLiteCursorPostDdlCatalogFenceSnapshotIntrinsic(fence)).toThrow();
+    expect(readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(authority).lifecycle)
+      .toBe("retired");
+    expect(() => readSQLiteCursorPostDdlCatalogFenceSnapshotIntrinsic(fence)).toThrow();
+    expect(readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(authority).lifecycle)
+      .toBe("retired");
+  });
+
+  it("poisons a minted fence after connection close and keeps later presentation terminal", () => {
+    const graph = cleanGraph();
+    const authority = prepare(graph);
+    activateSQLiteCursorOuterPublicationAuthorityIntrinsic(authority);
+    const receipt = executeSQLiteCursorMigration0002CatalogRebuildIntrinsic(authority);
+    const fence = mintSQLiteCursorPostDdlCatalogFenceIntrinsic(authority, receipt);
+    graph.connection.close();
+    expectProviderError(
+      () => readSQLiteCursorPostDdlCatalogFenceSnapshotIntrinsic(fence),
+      "GE_CYCLE_STORE_UNAVAILABLE",
+      /closed/u,
+    );
+    expect(readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(authority).lifecycle)
+      .toBe("poisoned");
+    expect(() => readSQLiteCursorPostDdlCatalogFenceSnapshotIntrinsic(fence)).toThrow();
+    expect(readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(authority).lifecycle)
+      .toBe("poisoned");
+  });
+
+  it("poisons a live fence when the physical catalog changes after mint", () => {
+    const graph = cleanGraph();
+    const authority = prepare(graph);
+    activateSQLiteCursorOuterPublicationAuthorityIntrinsic(authority);
+    const receipt = executeSQLiteCursorMigration0002CatalogRebuildIntrinsic(authority);
+    const fence = mintSQLiteCursorPostDdlCatalogFenceIntrinsic(authority, receipt);
+    graph.connection.execTrusted(
+      "CREATE VIEW main.GE_CYCLE_HOSTILE_VIEW AS SELECT 1 AS value",
+      "inspect-schema",
+    );
+    expectProviderError(
+      () => assertSQLiteCursorPostDdlCatalogFenceIntrinsic(authority, receipt, fence),
+      "GE_CYCLE_STORE_CORRUPTION",
+      /clock graph|ledger drifted|catalog fence/u,
+    );
+    expect(readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(authority).lifecycle)
+      .toBe("poisoned");
+  });
+
+  it("requires an independent fresh catalog read at mint and every exact revalidation", () => {
+    const mintGraph = cleanGraph();
+    const mintAuthority = prepare(mintGraph);
+    activateSQLiteCursorOuterPublicationAuthorityIntrinsic(mintAuthority);
+    const mintReceipt = executeSQLiteCursorMigration0002CatalogRebuildIntrinsic(mintAuthority);
+    const mintRead = vi.spyOn(
+      targetCatalogModule,
+      "readValidatedSQLiteCursorPublicationTargetCatalogObservationIntrinsic",
+    ).mockImplementationOnce(() => {
+      throw new CycleStoreProviderError(
+        "GE_CYCLE_STORE_CORRUPTION",
+        "inspect-schema",
+        "forced fresh catalog mint failure",
+      );
+    });
+    try {
+      expectProviderError(
+        () => mintSQLiteCursorPostDdlCatalogFenceIntrinsic(mintAuthority, mintReceipt),
+        "GE_CYCLE_STORE_CORRUPTION",
+        /forced fresh catalog mint failure/u,
+      );
+      expect(mintRead).toHaveBeenCalledTimes(1);
+    } finally {
+      mintRead.mockRestore();
+    }
+    expect(readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(mintAuthority))
+      .toMatchObject({ lifecycle: "poisoned", postDdlCatalogFenceMintCount: 0 });
+
+    const assertGraph = cleanGraph();
+    const assertAuthority = prepare(assertGraph);
+    activateSQLiteCursorOuterPublicationAuthorityIntrinsic(assertAuthority);
+    const assertReceipt = executeSQLiteCursorMigration0002CatalogRebuildIntrinsic(assertAuthority);
+    const fence = mintSQLiteCursorPostDdlCatalogFenceIntrinsic(assertAuthority, assertReceipt);
+    const assertRead = vi.spyOn(
+      targetCatalogModule,
+      "readValidatedSQLiteCursorPublicationTargetCatalogObservationIntrinsic",
+    ).mockImplementationOnce(() => {
+      throw new CycleStoreProviderError(
+        "GE_CYCLE_STORE_CORRUPTION",
+        "inspect-schema",
+        "forced fresh catalog assertion failure",
+      );
+    });
+    try {
+      expectProviderError(
+        () => assertSQLiteCursorPostDdlCatalogFenceIntrinsic(
+          assertAuthority,
+          assertReceipt,
+          fence,
+        ),
+        "GE_CYCLE_STORE_CORRUPTION",
+        /forced fresh catalog assertion failure/u,
+      );
+      expect(assertRead).toHaveBeenCalledTimes(1);
+    } finally {
+      assertRead.mockRestore();
+    }
+    expect(readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(assertAuthority).lifecycle)
+      .toBe("poisoned");
+  });
+
   it("uses the captured native run intrinsic after StatementSync prototype replacement", () => {
     const graph = cleanGraph();
     const authority = prepare(graph);
@@ -989,6 +1313,11 @@ describe("SQLite B3 outer publication authority", () => {
       "executeSQLiteCursorMigration0002CatalogRebuildIntrinsic",
       "readSQLiteMigration0002CatalogRebuildReceiptSnapshotIntrinsic",
       "SQLiteMigration0002CatalogRebuildReceipt",
+      "SQLiteCursorPostDdlCatalogFence",
+      "SQLiteCursorPostDdlCatalogFenceSnapshot",
+      "mintSQLiteCursorPostDdlCatalogFenceIntrinsic",
+      "assertSQLiteCursorPostDdlCatalogFenceIntrinsic",
+      "readSQLiteCursorPostDdlCatalogFenceSnapshotIntrinsic",
       "loadSQLiteCursorMigration0002AssetIntrinsic",
       "readSQLiteCursorMigration0002AssetSnapshotIntrinsic",
       "assertSQLiteCursorOuterClockAuthorityGraphIntrinsic",

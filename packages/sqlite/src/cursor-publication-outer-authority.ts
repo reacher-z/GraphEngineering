@@ -54,11 +54,16 @@ import {
   type SQLiteInitialWriteSha256,
 } from "./cursor-publication-initial-write-digest.js";
 import {
+  SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_DOMAIN_UTF8,
+  SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_EXPECTED_INVENTORY,
+  SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_QUERY,
+  SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_QUERY_SHA256,
   readSQLiteCursorPublicationTargetCatalogObservationIntrinsic,
   readValidatedSQLiteCursorPublicationTargetCatalogObservationIntrinsic,
   type SQLiteCursorPublicationTargetCatalogSnapshot,
 } from "./cursor-publication-target-catalog.js";
 import { sqliteRow, sqliteSafeInteger } from "./sqlite-codec.js";
+import { translateSQLiteError } from "./sqlite-errors.js";
 
 const OPERATION = "inspect-schema" as const;
 const objectFreezeIntrinsic = Object.freeze;
@@ -108,6 +113,7 @@ export type SQLiteCursorOuterPublicationWritePhase =
   | "ready-0002"
   | "executing-0002"
   | "0002-complete"
+  | "post-ddl-catalog-fence"
   | "poisoned"
   | "retired";
 
@@ -155,6 +161,33 @@ export interface SQLiteCursorOuterPublicationLedgerSnapshot {
   readonly affectedRowsWatermark: number;
 }
 
+export interface SQLiteCursorPostDdlCatalogFence {
+  readonly __sqliteCursorPostDdlCatalogFence: never;
+}
+
+export interface SQLiteCursorPostDdlCatalogFenceSnapshot {
+  readonly applicationId: 1_195_724_359;
+  readonly authority: SQLiteCursorOuterPublicationAuthority;
+  readonly catalogCanonicalUtf8Bytes: 5_785;
+  readonly catalogInventory: typeof SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_EXPECTED_INVENTORY;
+  readonly catalogQuery: typeof SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_QUERY;
+  readonly catalogQuerySha256: typeof SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_QUERY_SHA256;
+  readonly catalogRowCount: 34;
+  readonly catalogSha256: "ca85cf266267fa3eb5443bdf6d957b4b03c795cd6e0232a28c52773f1041fadf";
+  readonly catalogDigestDomainUtf8: typeof SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_DOMAIN_UTF8;
+  readonly connection: SQLiteConnection;
+  readonly consumesAnyWriteReceipt: false;
+  readonly isFinalV2SemanticProof: false;
+  readonly migration0002Receipt: SQLiteMigration0002CatalogRebuildReceipt;
+  readonly mintCount: 1;
+  readonly outerLedgerWatermark: SQLiteCursorOuterPublicationLedgerSnapshot;
+  readonly proofScope: "post-0002-physical-target-catalog-before-baseline-publication";
+  readonly totalChangesWatermark: number;
+  readonly transactionEpoch: bigint;
+  readonly transactionLineage: SQLiteConnectionTransactionLineage;
+  readonly userVersion: 2;
+}
+
 export interface SQLiteCursorOuterPublicationAuthoritySnapshot {
   readonly lifecycle: SQLiteCursorOuterPublicationAuthorityLifecycle;
   readonly connection: SQLiteConnection;
@@ -179,6 +212,8 @@ export interface SQLiteCursorOuterPublicationAuthoritySnapshot {
   readonly migration0002LogicalExecutionCount: 0 | 1;
   readonly migration0002PreparedStatementCount: number;
   readonly migration0002Receipt: SQLiteMigration0002CatalogRebuildReceipt | undefined;
+  readonly postDdlCatalogFence: SQLiteCursorPostDdlCatalogFence | undefined;
+  readonly postDdlCatalogFenceMintCount: 0 | 1;
   readonly writePhase: SQLiteCursorOuterPublicationWritePhase;
 }
 
@@ -208,6 +243,8 @@ interface AuthorityState {
   migration0002LogicalExecutionCount: 0 | 1;
   migration0002PreparedStatementCount: number;
   migration0002Receipt: SQLiteMigration0002CatalogRebuildReceipt | undefined;
+  postDdlCatalogFence: SQLiteCursorPostDdlCatalogFence | undefined;
+  postDdlCatalogFenceMintCount: 0 | 1;
   writePhase: SQLiteCursorOuterPublicationWritePhase;
 }
 
@@ -220,6 +257,14 @@ interface Migration0002ReceiptState {
   readonly snapshot: SQLiteMigration0002CatalogRebuildReceiptSnapshot;
 }
 
+interface PostDdlCatalogFenceState {
+  readonly authority: SQLiteCursorOuterPublicationAuthority;
+  readonly catalog: SQLiteCursorPublicationTargetCatalogSnapshot;
+  readonly connection: SQLiteConnection;
+  readonly migration0002Receipt: SQLiteMigration0002CatalogRebuildReceipt;
+  readonly snapshot: SQLiteCursorPostDdlCatalogFenceSnapshot;
+}
+
 interface CancellationState { cancelled: boolean }
 
 const AUTHORITIES = new WeakMap<object, AuthorityState>();
@@ -227,6 +272,7 @@ const AUTHORITY_BY_EVIDENCE = new WeakMap<object, SQLiteCursorOuterPublicationAu
 const AUTHORITY_BY_TRANSFER = new WeakMap<object, SQLiteCursorOuterPublicationAuthority>();
 const CANCELLATIONS = new WeakMap<object, CancellationState>();
 const MIGRATION_0002_RECEIPTS = new WeakMap<object, Migration0002ReceiptState>();
+const POST_DDL_CATALOG_FENCES = new WeakMap<object, PostDdlCatalogFenceState>();
 const weakMapGetIntrinsic = WeakMap.prototype.get;
 const weakMapSetIntrinsic = WeakMap.prototype.set;
 
@@ -259,6 +305,7 @@ function poisonAuthorityGraph(
   authority: SQLiteCursorOuterPublicationAuthority,
   message: string,
 ): void {
+  if (state.lifecycle === "retired" || state.lifecycle === "poisoned") return;
   state.lifecycle = "poisoned";
   state.writePhase = "poisoned";
   try {
@@ -275,6 +322,7 @@ function retireAuthorityGraph(
   state: AuthorityState,
   authority: SQLiteCursorOuterPublicationAuthority,
 ): void {
+  if (state.lifecycle === "retired" || state.lifecycle === "poisoned") return;
   state.lifecycle = "retired";
   state.writePhase = "retired";
   try {
@@ -440,6 +488,8 @@ export function prepareSQLiteCursorOuterPublicationAuthorityIntrinsic(
     migration0002LogicalExecutionCount: 0,
     migration0002PreparedStatementCount: 0,
     migration0002Receipt: undefined,
+    postDdlCatalogFence: undefined,
+    postDdlCatalogFenceMintCount: 0,
     outerClockConsumedTombstone: undefined,
     outerClockEvidence,
     outerPublicationTail: mint.tail,
@@ -570,10 +620,11 @@ export function assertSQLiteCursorOuterPublicationAuthorityIntrinsic(
     }
     return authority;
   } catch (error) {
+    const translated = translateSQLiteError(error, OPERATION);
     terminateAfterInvariantFailure(
-      state, authority, error, "SQLite active outer publication invariant failed",
+      state, authority, translated, "SQLite active outer publication invariant failed",
     );
-    throw error;
+    throw translated;
   }
 }
 
@@ -848,6 +899,223 @@ export function readSQLiteMigration0002CatalogRebuildReceiptSnapshotIntrinsic(
   return state.snapshot;
 }
 
+function postDdlCatalogFenceState(
+  fence: SQLiteCursorPostDdlCatalogFence,
+): PostDdlCatalogFenceState {
+  const state = fence !== null && typeof fence === "object"
+    ? reflectApplyIntrinsic(weakMapGetIntrinsic, POST_DDL_CATALOG_FENCES, [fence as object]) as
+      PostDdlCatalogFenceState | undefined
+    : undefined;
+  if (state === undefined) {
+    return fail("GE_CYCLE_STORE_INVALID_ARGUMENT", "SQLite post-DDL catalog fence is invalid");
+  }
+  return state;
+}
+
+function exactLedger(
+  left: SQLiteCursorOuterPublicationLedgerSnapshot,
+  right: SQLiteCursorOuterPublicationLedgerSnapshot,
+): boolean {
+  return left.logicalWriteSequence === right.logicalWriteSequence
+    && left.fixedStatementCount === right.fixedStatementCount
+    && left.affectedRowsWatermark === right.affectedRowsWatermark;
+}
+
+/**
+ * Mint the one post-0002 physical-catalog proof from a fresh authority-owned
+ * read. The migration receipt is retained, not consumed.
+ */
+export function mintSQLiteCursorPostDdlCatalogFenceIntrinsic(
+  authority: SQLiteCursorOuterPublicationAuthority,
+  migration0002Receipt: SQLiteMigration0002CatalogRebuildReceipt,
+): SQLiteCursorPostDdlCatalogFence {
+  const authorityRecord = authorityState(authority);
+  if (authorityRecord.postDdlCatalogFence !== undefined
+      || authorityRecord.postDdlCatalogFenceMintCount !== 0) {
+    poisonAuthorityGraph(
+      authorityRecord,
+      authority,
+      "SQLite post-DDL catalog fence was minted more than once",
+    );
+    return fail("GE_CYCLE_STORE_CORRUPTION", "SQLite post-DDL catalog fence mint was reused");
+  }
+  if (authorityRecord.writePhase !== "0002-complete"
+      || authorityRecord.migration0002LogicalExecutionCount !== 1
+      || authorityRecord.migration0002PreparedStatementCount
+        !== SQLITE_CURSOR_MIGRATION_0002_FIXED_STATEMENT_COUNT
+      || authorityRecord.migration0002Receipt === undefined) {
+    poisonAuthorityGraph(
+      authorityRecord,
+      authority,
+      "SQLite post-DDL catalog fence was requested before migration 0002 completed",
+    );
+    return fail("GE_CYCLE_STORE_CORRUPTION", "SQLite post-DDL catalog fence is premature");
+  }
+
+  const receiptRecord = migration0002Receipt !== null
+      && typeof migration0002Receipt === "object"
+    ? reflectApplyIntrinsic(weakMapGetIntrinsic, MIGRATION_0002_RECEIPTS, [
+      migration0002Receipt as object,
+    ]) as Migration0002ReceiptState | undefined
+    : undefined;
+  if (receiptRecord === undefined || receiptRecord.authority !== authority
+      || receiptRecord.connection !== authorityRecord.connection
+      || authorityRecord.migration0002Receipt !== migration0002Receipt) {
+    return fail(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "SQLite post-DDL catalog fence migration receipt is invalid",
+    );
+  }
+  // Presentation identity is validated before any live SQLite read so a
+  // forged/cross-run receipt cannot poison an otherwise valid graph.
+  assertSQLiteCursorOuterPublicationAuthorityIntrinsic(authority);
+
+  try {
+    const migration = readSQLiteMigration0002CatalogRebuildReceiptSnapshotIntrinsic(
+      migration0002Receipt,
+    );
+    const currentLedger = outerLedgerSnapshot(authorityRecord);
+    if (authorityRecord.currentTransactionEpoch !== migration.transactionEpochAfter
+        || authorityRecord.currentTotalChanges !== migration.totalChangesAfter
+        || !exactLedger(currentLedger, migration.outerLedgerAfter)) {
+      fail("GE_CYCLE_STORE_CORRUPTION", "SQLite post-DDL catalog fence watermark drifted");
+    }
+
+    // This must be a new read. The catalog retained in the 0002 receipt is
+    // comparison evidence only and can never be supplied as mint authority.
+    const catalog =
+      readValidatedSQLiteCursorPublicationTargetCatalogObservationIntrinsic(
+        authorityRecord.connection,
+      );
+    assertSQLiteCursorOuterPublicationAuthorityIntrinsic(authority);
+    if (catalog.catalogSha256 !== migration.postDdlCatalogSha256
+        || catalog.catalogSha256 !== receiptRecord.postDdlCatalog.catalogSha256
+        || catalog.canonicalUtf8Bytes !== receiptRecord.postDdlCatalog.canonicalUtf8Bytes
+        || catalog.rowCount !== receiptRecord.postDdlCatalog.rowCount
+        || catalog.applicationId !== migration.applicationIdAfter
+        || catalog.userVersion !== migration.userVersionAfter) {
+      fail("GE_CYCLE_STORE_CORRUPTION", "SQLite post-DDL catalog fence disagreed with 0002");
+    }
+
+    const snapshot = objectFreezeIntrinsic({
+      applicationId: catalog.applicationId as 1_195_724_359,
+      authority,
+      catalogCanonicalUtf8Bytes: catalog.canonicalUtf8Bytes as 5_785,
+      catalogDigestDomainUtf8: SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_DOMAIN_UTF8,
+      catalogInventory: catalog.inventory as
+        unknown as typeof SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_EXPECTED_INVENTORY,
+      catalogQuery: SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_QUERY,
+      catalogQuerySha256: SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_QUERY_SHA256,
+      catalogRowCount: catalog.rowCount as 34,
+      catalogSha256: catalog.catalogSha256 as
+        "ca85cf266267fa3eb5443bdf6d957b4b03c795cd6e0232a28c52773f1041fadf",
+      connection: authorityRecord.connection,
+      consumesAnyWriteReceipt: false as const,
+      isFinalV2SemanticProof: false as const,
+      migration0002Receipt,
+      mintCount: 1 as const,
+      outerLedgerWatermark: currentLedger,
+      proofScope: "post-0002-physical-target-catalog-before-baseline-publication" as const,
+      totalChangesWatermark: authorityRecord.currentTotalChanges,
+      transactionEpoch: authorityRecord.currentTransactionEpoch,
+      transactionLineage: authorityRecord.transactionLineage,
+      userVersion: catalog.userVersion as 2,
+    } satisfies SQLiteCursorPostDdlCatalogFenceSnapshot);
+    const fence = objectFreezeIntrinsic(
+      reflectApplyIntrinsic(objectCreateIntrinsic, Object, [null]),
+    ) as SQLiteCursorPostDdlCatalogFence;
+    reflectApplyIntrinsic(weakMapSetIntrinsic, POST_DDL_CATALOG_FENCES, [
+      fence as object,
+      objectFreezeIntrinsic({
+        authority,
+        catalog,
+        connection: authorityRecord.connection,
+        migration0002Receipt,
+        snapshot,
+      } satisfies PostDdlCatalogFenceState),
+    ]);
+    authorityRecord.postDdlCatalogFence = fence;
+    authorityRecord.postDdlCatalogFenceMintCount = 1;
+    authorityRecord.writePhase = "post-ddl-catalog-fence";
+    return fence;
+  } catch (error) {
+    terminateAfterInvariantFailure(
+      authorityRecord,
+      authority,
+      error,
+      "SQLite post-DDL catalog fence validation failed",
+    );
+    throw error;
+  }
+}
+
+/** Reprove one exact live fence with a new physical-catalog read. */
+export function assertSQLiteCursorPostDdlCatalogFenceIntrinsic(
+  authority: SQLiteCursorOuterPublicationAuthority,
+  migration0002Receipt: SQLiteMigration0002CatalogRebuildReceipt,
+  fence: SQLiteCursorPostDdlCatalogFence,
+): SQLiteCursorPostDdlCatalogFence {
+  const fenceRecord = postDdlCatalogFenceState(fence);
+  if (fenceRecord.authority !== authority
+      || fenceRecord.migration0002Receipt !== migration0002Receipt) {
+    return fail("GE_CYCLE_STORE_INVALID_ARGUMENT", "SQLite post-DDL catalog fence graph is invalid");
+  }
+  const authorityRecord = authorityState(authority);
+  if (authorityRecord.postDdlCatalogFence !== fence
+      || authorityRecord.postDdlCatalogFenceMintCount !== 1
+      || authorityRecord.migration0002Receipt !== migration0002Receipt
+      || fenceRecord.connection !== authorityRecord.connection) {
+    return fail("GE_CYCLE_STORE_INVALID_ARGUMENT", "SQLite post-DDL catalog fence graph is invalid");
+  }
+
+  try {
+    assertSQLiteCursorOuterPublicationAuthorityIntrinsic(authority);
+    readSQLiteMigration0002CatalogRebuildReceiptSnapshotIntrinsic(migration0002Receipt);
+    const watermark = fenceRecord.snapshot.outerLedgerWatermark;
+    if (authorityRecord.transactionLineage !== fenceRecord.snapshot.transactionLineage
+        || authorityRecord.currentTransactionEpoch < fenceRecord.snapshot.transactionEpoch
+        || authorityRecord.currentTotalChanges < fenceRecord.snapshot.totalChangesWatermark
+        || authorityRecord.logicalWriteSequence < watermark.logicalWriteSequence
+        || authorityRecord.fixedStatementCount < watermark.fixedStatementCount
+        || authorityRecord.affectedRowsWatermark < watermark.affectedRowsWatermark) {
+      fail("GE_CYCLE_STORE_CORRUPTION", "SQLite post-DDL catalog fence watermark regressed");
+    }
+    const catalog =
+      readValidatedSQLiteCursorPublicationTargetCatalogObservationIntrinsic(
+        authorityRecord.connection,
+      );
+    assertSQLiteCursorOuterPublicationAuthorityIntrinsic(authority);
+    if (catalog.catalogSha256 !== fenceRecord.snapshot.catalogSha256
+        || catalog.canonicalUtf8Bytes !== fenceRecord.snapshot.catalogCanonicalUtf8Bytes
+        || catalog.rowCount !== fenceRecord.snapshot.catalogRowCount
+        || catalog.applicationId !== fenceRecord.snapshot.applicationId
+        || catalog.userVersion !== fenceRecord.snapshot.userVersion) {
+      fail("GE_CYCLE_STORE_CORRUPTION", "SQLite post-DDL catalog fence drifted");
+    }
+    return fence;
+  } catch (error) {
+    terminateAfterInvariantFailure(
+      authorityRecord,
+      authority,
+      error,
+      "SQLite post-DDL catalog fence revalidation failed",
+    );
+    throw error;
+  }
+}
+
+export function readSQLiteCursorPostDdlCatalogFenceSnapshotIntrinsic(
+  fence: SQLiteCursorPostDdlCatalogFence,
+): SQLiteCursorPostDdlCatalogFenceSnapshot {
+  const state = postDdlCatalogFenceState(fence);
+  assertSQLiteCursorPostDdlCatalogFenceIntrinsic(
+    state.authority,
+    state.migration0002Receipt,
+    fence,
+  );
+  return state.snapshot;
+}
+
 /** Package-private identity snapshot for downstream receipt construction and tests. */
 export function readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(
   authority: SQLiteCursorOuterPublicationAuthority,
@@ -880,6 +1148,8 @@ export function readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(
     migration0002LogicalExecutionCount: state.migration0002LogicalExecutionCount,
     migration0002PreparedStatementCount: state.migration0002PreparedStatementCount,
     migration0002Receipt: state.migration0002Receipt,
+    postDdlCatalogFence: state.postDdlCatalogFence,
+    postDdlCatalogFenceMintCount: state.postDdlCatalogFenceMintCount,
     writePhase: state.writePhase,
   });
 }

@@ -14405,3 +14405,122 @@ over the decimal string of the actual safe-integer result: `"1"` when `L=0`,
 `"3"` when `L=2`, and generally `String(1 + L)`. This makes receipts from
 different source cardinalities cryptographically distinct while retaining the
 exact formula invariant.
+
+### 31.37.29 Fresh post-DDL physical-catalog fence implementation tranche (append-only execution plan, 2026-07-29)
+
+This tranche consumes the authorization granted at the end of section
+31.37.28 and implements only the fresh post-`0002` physical-catalog fence. It
+does not modify any earlier plan line and does not widen the leaf into baseline
+publication, reader leasing, adoption, cursor rebind or commit.
+
+The production mint API accepts exactly two authority-bearing inputs: the
+module-minted outer publication authority and its authentic migration-0002
+catalog-rebuild receipt. Connection, catalog rows, catalog digest, inventory,
+epoch, counters and ledger values are never caller parameters. The mint
+function derives all of them from private exact-object registries and the
+authority-owned connection.
+
+Validation order is frozen as follows:
+
+1. detect an already minted fence before any SQLite access and terminally
+   reject a second mint;
+2. reject an early mint from any phase before exact 0002 completion;
+3. authenticate receipt WeakMap provenance and exact authority/connection
+   identity before any live SQL, so forged or cross-run presentation cannot
+   poison a healthy graph;
+4. revalidate the live active outer authority and unchanged BEGIN EXCLUSIVE
+   lineage;
+5. require exact equality with the 0002 receipt-after transaction epoch,
+   `total_changes` watermark and all three outer-ledger dimensions;
+6. perform a new connection-owned physical-catalog read rather than trusting
+   the catalog retained as receipt evidence;
+7. validate the complete expected target projection and cross-check its digest,
+   versions and sizes against the 0002 receipt; and
+8. mint the opaque fence in one non-interruptible in-memory tail.
+
+The sole catalog query remains the exact package-owned SQL using
+`lower(name) GLOB 'ge_cycle_*'`, `sql IS NOT NULL`, and binary type/name order.
+Its SHA-256 is
+`bd9a24c0e8307f473f6160b940effdfb77007144fbeea83628f0b7664df1410c`.
+The catalog proof binds exactly 34 rows, 5,785 canonical UTF-8 bytes, the full
+34-entry ordered inventory, application ID 1,195,724,359, user version 2 and
+catalog digest
+`ca85cf266267fa3eb5443bdf6d957b4b03c795cd6e0232a28c52773f1041fadf`.
+SQL text is hashed exactly as SQLite stores it. Column and constraint identity
+is transitively bound by the table SQL hashes; equal-count object replacement,
+case-variant owned objects and whitespace-only DDL changes cannot pass.
+
+The resulting fence is a frozen null-prototype token authenticated by a
+private WeakMap. Its snapshot binds:
+
+- exact connection, authority and 0002 receipt object identities;
+- unchanged transaction lineage and the mint-time private epoch;
+- mint-time `total_changes` and three-dimensional ledger watermarks;
+- exact catalog query, query hash and digest domain;
+- complete ordered catalog inventory, row count and canonical byte count;
+- catalog digest, application ID and user version;
+- mint count one and zero receipt consumption; and
+- proof scope
+  `post-0002-physical-target-catalog-before-baseline-publication` with
+  `isFinalV2SemanticProof: false`.
+
+Minting changes no SQLite row, transaction epoch, `total_changes` value or
+outer-ledger dimension. It does not consume the 0002 receipt and does not mint
+a tombstone. It only records the fence pointer, changes the private write phase
+to `post-ddl-catalog-fence`, and advances the fence mint count from zero to one.
+
+Exact presentation is reusable inside the same live graph. Every assertion
+first rejects clone, Proxy, revoked Proxy, substituted receipt, cross-run fence
+or wrong authority without poisoning either valid graph. It then revalidates
+the authority, receipt, lineage and non-regressing watermarks and performs a
+new physical-catalog read. The mint-time fence remains compatible with later
+authorized DML, so future assertions use lower-bound watermark checks; every
+increment still must be explained by the authority's receipt chain.
+
+Terminal lifecycle is monotonic. Rollback/rebegin retires the graph and later
+presentation cannot turn retired into poisoned. A real invariant failure
+poisons the graph and later calls cannot turn poisoned into retired. Connection
+close surfaces a structured unavailable error, poisons the live authority and
+leaves every subsequent presentation terminal. This requires owner snapshot
+code to check the real connection-open state before reading native transaction
+accessors, because closed native objects may otherwise throw unclassified
+driver errors.
+
+Catalog iterator failure precedence is also part of this leaf. Row/fetch
+primary failure outranks iterator close. When row iteration itself succeeds,
+the reader records a close error but defers it through metadata decoding,
+canonical snapshot construction and full expected-target validation. Catalog,
+metadata, digest or inventory corruption therefore outranks cleanup; only a
+fully valid catalog may surface the deferred close failure. The iterator close
+attempt still occurs exactly once.
+
+Required hostile evidence includes:
+
+- `L=2` success with ledger 1/20/3 and zero mint-side counter movement;
+- exact repeated assertion with mint count remaining one;
+- forged/cross-run 0002 receipt rejection followed by corrected exact mint;
+- forged, cloned, Proxy, revoked Proxy and cross-run fence rejection while both
+  valid graphs remain active;
+- early mint poisoning and second-mint poisoning before live SQLite reads;
+- old fence rejection after double-mint poison;
+- rollback/rebegin followed by repeated presentation that remains retired;
+- connection-close structured unavailable classification and terminal replay;
+- catalog/epoch drift poisoning;
+- explicit spies proving mint and assertion each invoke the independent fresh
+  validated catalog reader; and
+- exact query, domain, inventory, epoch, lineage and total-change snapshot
+  commitments.
+
+Acceptance requires SQLite typecheck, the combined authority/target/migration/
+connection focused suite, the complete SQLite package suite, workspace
+typecheck/lint, frozen B3 conformance with false implementation/active-manifest
+claims, diff hygiene and three independent final static reviews at H=0/M=0.
+Only after those gates may this leaf be committed and pushed.
+
+Passing this tranche authorizes the next leaf: the independent post-DDL
+publication reader lease and its terminal proof. That future lease may read
+only the fixed ordered B2 TEMP-stage projection, permits at most one owned
+reader, closes exactly once, binds the fence and exact projection, and must be
+closed before any stage adoption. Baseline entries/header/sequence writes,
+four-receipt consumption, stage adoption, publication session, cursor rebind,
+rules 11/12, final audits, retirement and commit remain explicit nonclaims.

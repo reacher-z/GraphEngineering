@@ -401,9 +401,15 @@ function assertExpectedTargetCatalogSnapshot(
   return snapshot;
 }
 
-export function readSQLiteCursorPublicationTargetCatalogObservationIntrinsic(
+interface DeferredCatalogRead {
+  readonly closeError: unknown;
+  readonly hasCloseError: boolean;
+  readonly snapshot: SQLiteCursorPublicationTargetCatalogSnapshot;
+}
+
+function readSQLiteCursorPublicationTargetCatalogWithDeferredCloseIntrinsic(
   connection: SQLiteConnection,
-): SQLiteCursorPublicationTargetCatalogSnapshot {
+): DeferredCatalogRead {
   let statement;
   try {
     statement = prepareSQLiteConnectionCursorPublicationReadIntrinsic(
@@ -454,13 +460,14 @@ export function readSQLiteCursorPublicationTargetCatalogObservationIntrinsic(
     primaryError = translateSQLiteError(error, OPERATION);
   }
   let closeError: unknown;
+  let hasCloseError = false;
   try {
     returnSQLiteStatementIteratorNativeIntrinsic(iterator);
   } catch (error) {
+    hasCloseError = true;
     closeError = translateSQLiteError(error, OPERATION);
   }
   if (hasPrimaryError) throw primaryError;
-  if (closeError !== undefined) throw closeError;
 
   let metadataValue: unknown;
   try {
@@ -472,22 +479,35 @@ export function readSQLiteCursorPublicationTargetCatalogObservationIntrinsic(
     throw translateSQLiteError(error, OPERATION);
   }
   const metadata = sqliteRow(metadataValue, 2, OPERATION, "target physical catalog metadata");
-  return snapshotSQLiteCursorPublicationTargetCatalogObservationIntrinsic({
-    applicationId: sqliteSafeInteger(
-      metadata[0], 0, 0x7fff_ffff, OPERATION, "target catalog application ID",
-    ),
-    rows,
-    userVersion: sqliteSafeInteger(
-      metadata[1], 0, 0x7fff_ffff, OPERATION, "target catalog user version",
-    ),
-  });
+  return {
+    closeError,
+    hasCloseError,
+    snapshot: snapshotSQLiteCursorPublicationTargetCatalogObservationIntrinsic({
+      applicationId: sqliteSafeInteger(
+        metadata[0], 0, 0x7fff_ffff, OPERATION, "target catalog application ID",
+      ),
+      rows,
+      userVersion: sqliteSafeInteger(
+        metadata[1], 0, 0x7fff_ffff, OPERATION, "target catalog user version",
+      ),
+    }),
+  };
+}
+
+export function readSQLiteCursorPublicationTargetCatalogObservationIntrinsic(
+  connection: SQLiteConnection,
+): SQLiteCursorPublicationTargetCatalogSnapshot {
+  const read = readSQLiteCursorPublicationTargetCatalogWithDeferredCloseIntrinsic(connection);
+  if (read.hasCloseError) throw read.closeError;
+  return read.snapshot;
 }
 
 /** Read from the captured connection and require the complete frozen target. */
 export function readValidatedSQLiteCursorPublicationTargetCatalogObservationIntrinsic(
   connection: SQLiteConnection,
 ): SQLiteCursorPublicationTargetCatalogSnapshot {
-  return assertExpectedTargetCatalogSnapshot(
-    readSQLiteCursorPublicationTargetCatalogObservationIntrinsic(connection),
-  );
+  const read = readSQLiteCursorPublicationTargetCatalogWithDeferredCloseIntrinsic(connection);
+  const snapshot = assertExpectedTargetCatalogSnapshot(read.snapshot);
+  if (read.hasCloseError) throw read.closeError;
+  return snapshot;
 }

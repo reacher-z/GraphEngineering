@@ -574,12 +574,7 @@ export class SQLiteConnection {
   [SQLITE_CONNECTION_OWNER_SNAPSHOT](): SQLiteConnectionOwnerSnapshot {
     const epochBefore = this.#transactionEpoch;
     const lineageBefore = this.#transactionLineage;
-    const transactionBefore = this.#database.isTransaction;
     const open = !this.#closed && this.#database.isOpen;
-    const mode = transactionBefore ? (this.#transactionMode ?? "unknown") : null;
-    const transactionAfter = this.#database.isTransaction;
-    const epochAfter = this.#transactionEpoch;
-    const lineageAfter = this.#transactionLineage;
     if (!open) {
       throw new CycleStoreProviderError(
         "GE_CYCLE_STORE_UNAVAILABLE",
@@ -587,6 +582,11 @@ export class SQLiteConnection {
         "SQLite provider is closed",
       );
     }
+    const transactionBefore = this.#database.isTransaction;
+    const mode = transactionBefore ? (this.#transactionMode ?? "unknown") : null;
+    const transactionAfter = this.#database.isTransaction;
+    const epochAfter = this.#transactionEpoch;
+    const lineageAfter = this.#transactionLineage;
     if (epochBefore !== epochAfter || lineageBefore !== lineageAfter
         || transactionBefore !== transactionAfter
         || (transactionAfter && lineageAfter === null)
