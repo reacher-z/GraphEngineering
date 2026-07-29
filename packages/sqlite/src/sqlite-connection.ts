@@ -1,10 +1,11 @@
 import {
   DatabaseSync,
+  StatementSync,
   backup,
   type BackupProgressInfo,
-  type StatementSync,
 } from "node:sqlite";
 import { performance } from "node:perf_hooks";
+import { isProxy } from "node:util/types";
 
 import {
   CycleStoreProviderError,
@@ -18,6 +19,117 @@ import {
   sqliteText,
 } from "./sqlite-codec.js";
 import { isRetryableSQLiteLockError, translateSQLiteError } from "./sqlite-errors.js";
+
+const databasePrepareIntrinsic = DatabaseSync.prototype.prepare;
+const databaseCloseIntrinsic = DatabaseSync.prototype.close;
+const reflectApplyIntrinsic = Reflect.apply;
+const objectFreezeIntrinsic = Object.freeze;
+const objectGetOwnPropertyDescriptorIntrinsic = Object.getOwnPropertyDescriptor;
+const objectGetPrototypeOfIntrinsic = Object.getPrototypeOf;
+const functionToStringIntrinsic = Function.prototype.toString;
+const statementGetIntrinsic = StatementSync.prototype.get;
+const statementIterateIntrinsic = StatementSync.prototype.iterate;
+const statementSetAllowBareNamedParametersIntrinsic =
+  StatementSync.prototype.setAllowBareNamedParameters;
+const statementSetAllowUnknownNamedParametersIntrinsic =
+  StatementSync.prototype.setAllowUnknownNamedParameters;
+const statementSetReadBigIntsIntrinsic = StatementSync.prototype.setReadBigInts;
+const statementSetReturnArraysIntrinsic = StatementSync.prototype.setReturnArrays;
+
+function hardenSQLiteNativeStatementIntrinsic(statement: StatementSync): StatementSync {
+  reflectApplyIntrinsic(statementSetAllowBareNamedParametersIntrinsic, statement, [false]);
+  reflectApplyIntrinsic(statementSetAllowUnknownNamedParametersIntrinsic, statement, [false]);
+  reflectApplyIntrinsic(statementSetReadBigIntsIntrinsic, statement, [true]);
+  reflectApplyIntrinsic(statementSetReturnArraysIntrinsic, statement, [true]);
+  return statement;
+}
+
+export interface SQLiteNativeStatementIterator {
+  next(): IteratorResult<unknown>;
+  return(): IteratorResult<unknown>;
+}
+
+function checkedSQLiteNativeIteratorMethod(
+  value: unknown,
+  label: string,
+): (...parameters: readonly unknown[]) => unknown {
+  if (typeof value !== "function" || isProxy(value)) {
+    throw new Error(`SQLite statement iterator ${label} intrinsic is unavailable`);
+  }
+  const source = reflectApplyIntrinsic(functionToStringIntrinsic, value, []) as string;
+  if (source !== `function ${label}() { [native code] }`) {
+    throw new Error(`SQLite statement iterator ${label} intrinsic is not native`);
+  }
+  return value as (...parameters: readonly unknown[]) => unknown;
+}
+
+function captureSQLiteNativeStatementIteratorIntrinsics(
+  database: DatabaseSync,
+): Readonly<{
+  next: SQLiteNativeStatementIterator["next"];
+  return: SQLiteNativeStatementIterator["return"];
+}> {
+  let iterator: SQLiteNativeStatementIterator | undefined;
+  let capturedReturn: SQLiteNativeStatementIterator["return"] | undefined;
+  try {
+    const statement = reflectApplyIntrinsic(
+      databasePrepareIntrinsic, database, ["SELECT 1"],
+    ) as StatementSync;
+    iterator = reflectApplyIntrinsic(statementIterateIntrinsic, statement, []) as
+      SQLiteNativeStatementIterator;
+    let next: unknown;
+    let returnMethod: unknown;
+    let current: object | null = objectGetPrototypeOfIntrinsic(iterator) as object | null;
+    while (current !== null && (next === undefined || returnMethod === undefined)) {
+      const nextDescriptor = reflectApplyIntrinsic(
+        objectGetOwnPropertyDescriptorIntrinsic, Object, [current, "next"],
+      ) as PropertyDescriptor | undefined;
+      const returnDescriptor = reflectApplyIntrinsic(
+        objectGetOwnPropertyDescriptorIntrinsic, Object, [current, "return"],
+      ) as PropertyDescriptor | undefined;
+      if (next === undefined && nextDescriptor !== undefined && "value" in nextDescriptor) {
+        next = nextDescriptor.value;
+      }
+      if (returnMethod === undefined && returnDescriptor !== undefined
+          && "value" in returnDescriptor) {
+        returnMethod = returnDescriptor.value;
+      }
+      current = objectGetPrototypeOfIntrinsic(current) as object | null;
+    }
+    const checkedNext = checkedSQLiteNativeIteratorMethod(next, "next");
+    capturedReturn = checkedSQLiteNativeIteratorMethod(
+      returnMethod, "return",
+    ) as SQLiteNativeStatementIterator["return"];
+    const first = reflectApplyIntrinsic(checkedNext, iterator, []) as
+      Readonly<{ done?: unknown }>;
+    const terminal = reflectApplyIntrinsic(checkedNext, iterator, []) as
+      Readonly<{ done?: unknown }>;
+    if (first === null || typeof first !== "object" || first.done !== false
+        || terminal === null || typeof terminal !== "object" || terminal.done !== true) {
+      throw new Error("SQLite statement iterator next intrinsic failed its native probe");
+    }
+    return objectFreezeIntrinsic({
+      next: checkedNext as SQLiteNativeStatementIterator["next"],
+      return: capturedReturn,
+    });
+  } finally {
+    if (iterator !== undefined && capturedReturn !== undefined) {
+      reflectApplyIntrinsic(capturedReturn, iterator, []);
+    }
+  }
+}
+
+let sqliteNativeStatementIteratorIntrinsics: ReturnType<
+  typeof captureSQLiteNativeStatementIteratorIntrinsics
+> | undefined;
+
+export const SQLITE_CURSOR_PUBLICATION_CATALOG_NATIVE_QUERY_INTRINSIC =
+  "SELECT type, name, tbl_name AS tableName, sql FROM main.sqlite_schema WHERE lower(name) GLOB 'ge_cycle_*' AND sql IS NOT NULL ORDER BY type COLLATE BINARY, name COLLATE BINARY" as const;
+export const SQLITE_CURSOR_PUBLICATION_METADATA_NATIVE_QUERY_INTRINSIC =
+  "SELECT application_id, user_version FROM main.pragma_application_id(), main.pragma_user_version()" as const;
+export type SQLiteConnectionNativeReadKind =
+  | "cursor-publication-target-catalog"
+  | "cursor-publication-target-metadata";
 
 export const DEFAULT_SQLITE_BUSY_TIMEOUT_MS = 250;
 export const MAX_SQLITE_BUSY_TIMEOUT_MS = 5_000;
@@ -306,6 +418,9 @@ const SQLITE_CONNECTION_OWNER_SNAPSHOT = Symbol("SQLiteConnection.ownerSnapshot"
 const SQLITE_CONNECTION_TOTAL_CHANGES_SNAPSHOT = Symbol(
   "SQLiteConnection.totalChangesSnapshot",
 );
+const SQLITE_CONNECTION_PREPARE_NATIVE_READ = Symbol(
+  "SQLiteConnection.prepareNativeRead",
+);
 
 /** One hardened, synchronous, file-backed SQLite connection. */
 export class SQLiteConnection {
@@ -351,10 +466,21 @@ export class SQLiteConnection {
         timeout: this.#busyTimeoutMs,
       });
       this.#database = database;
+      sqliteNativeStatementIteratorIntrinsics ??=
+        captureSQLiteNativeStatementIteratorIntrinsics(database);
       this.#configure();
     } catch (error) {
-      if (database?.isOpen === true) database.close();
-      throw translateSQLiteError(error, "inspect-schema");
+      const primary = translateSQLiteError(error, "inspect-schema");
+      if (database !== undefined) {
+        try {
+          if (database.isOpen) {
+            reflectApplyIntrinsic(databaseCloseIntrinsic, database, []);
+          }
+        } catch {
+          // Constructor failure remains primary; the native owner was asked to close.
+        }
+      }
+      throw primary;
     }
   }
 
@@ -583,6 +709,32 @@ export class SQLiteConnection {
     }
   }
 
+  [SQLITE_CONNECTION_PREPARE_NATIVE_READ](
+    kind: SQLiteConnectionNativeReadKind,
+    operation: CycleStoreProviderOperation,
+  ): StatementSync {
+    this.#assertOpen(operation);
+    const sql = kind === "cursor-publication-target-catalog"
+      ? SQLITE_CURSOR_PUBLICATION_CATALOG_NATIVE_QUERY_INTRINSIC
+      : kind === "cursor-publication-target-metadata"
+        ? SQLITE_CURSOR_PUBLICATION_METADATA_NATIVE_QUERY_INTRINSIC
+        : undefined;
+    if (sql === undefined) {
+      throw new CycleStoreProviderError(
+        "GE_CYCLE_STORE_INVALID_ARGUMENT",
+        operation,
+        "captured SQLite native read kind is invalid",
+      );
+    }
+    try {
+      return hardenSQLiteNativeStatementIntrinsic(reflectApplyIntrinsic(
+        databasePrepareIntrinsic, this.#database, [sql],
+      ) as StatementSync);
+    } catch (error) {
+      throw translateSQLiteError(error, operation);
+    }
+  }
+
   #epochTrackedStatement(statement: StatementSync): StatementSync {
     const executionMethods = new Set<PropertyKey>(["all", "get", "iterate", "run"]);
     return new Proxy(statement, {
@@ -592,7 +744,7 @@ export class SQLiteConnection {
         if (!executionMethods.has(property)) return value.bind(target) as unknown;
         return (...parameters: unknown[]): unknown => {
           this.#transactionEpoch += 1n;
-          return Reflect.apply(value, target, parameters);
+          return reflectApplyIntrinsic(value, target, parameters);
         };
       },
     }) as StatementSync;
@@ -727,7 +879,9 @@ export class SQLiteConnection {
     this.#closed = true;
     this.#transactionLineage = null;
     this.#transactionMode = null;
-    if (this.#database.isOpen) this.#database.close();
+    if (this.#database.isOpen) {
+      reflectApplyIntrinsic(databaseCloseIntrinsic, this.#database, []);
+    }
   }
 
   #assertOpen(operation: CycleStoreProviderOperation): void {
@@ -829,6 +983,8 @@ const sqliteConnectionOwnerSnapshotIntrinsic =
   SQLiteConnection.prototype[SQLITE_CONNECTION_OWNER_SNAPSHOT];
 const sqliteConnectionTotalChangesSnapshotIntrinsic =
   SQLiteConnection.prototype[SQLITE_CONNECTION_TOTAL_CHANGES_SNAPSHOT];
+const sqliteConnectionPrepareNativeReadIntrinsic =
+  SQLiteConnection.prototype[SQLITE_CONNECTION_PREPARE_NATIVE_READ];
 const sqliteConnectionExecTrustedIntrinsic = SQLiteConnection.prototype.execTrusted;
 const sqliteConnectionPrepareIntrinsic = SQLiteConnection.prototype.prepare;
 
@@ -839,14 +995,14 @@ const sqliteConnectionPrepareIntrinsic = SQLiteConnection.prototype.prepare;
 export function readSQLiteConnectionOwnerSnapshot(
   connection: SQLiteConnection,
 ): SQLiteConnectionOwnerSnapshot {
-  return Reflect.apply(sqliteConnectionOwnerSnapshotIntrinsic, connection, []);
+  return reflectApplyIntrinsic(sqliteConnectionOwnerSnapshotIntrinsic, connection, []);
 }
 
 /** Read the real counter without subclass `prepare` or getter interposition. */
 export function readSQLiteConnectionTotalChangesSnapshot(
   connection: SQLiteConnection,
 ): SQLiteConnectionTotalChangesSnapshot {
-  return Reflect.apply(sqliteConnectionTotalChangesSnapshotIntrinsic, connection, []);
+  return reflectApplyIntrinsic(sqliteConnectionTotalChangesSnapshotIntrinsic, connection, []);
 }
 
 /** Execute one fixed package-owned statement through the captured base intrinsic. */
@@ -855,7 +1011,7 @@ export function execSQLiteConnectionTrustedIntrinsic(
   sql: string,
   operation: CycleStoreProviderOperation,
 ): void {
-  Reflect.apply(sqliteConnectionExecTrustedIntrinsic, connection, [sql, operation]);
+  reflectApplyIntrinsic(sqliteConnectionExecTrustedIntrinsic, connection, [sql, operation]);
 }
 
 /** Prepare one fixed package-owned statement through the captured base intrinsic. */
@@ -864,5 +1020,58 @@ export function prepareSQLiteConnectionIntrinsic(
   sql: string,
   operation: CycleStoreProviderOperation,
 ): StatementSync {
-  return Reflect.apply(sqliteConnectionPrepareIntrinsic, connection, [sql, operation]);
+  return reflectApplyIntrinsic(sqliteConnectionPrepareIntrinsic, connection, [sql, operation]);
+}
+
+/** Prepare one closed-set publication read through captured native SQLite code. */
+export function prepareSQLiteConnectionCursorPublicationReadIntrinsic(
+  connection: SQLiteConnection,
+  kind: SQLiteConnectionNativeReadKind,
+  operation: CycleStoreProviderOperation,
+): StatementSync {
+  return reflectApplyIntrinsic(
+    sqliteConnectionPrepareNativeReadIntrinsic, connection, [kind, operation],
+  );
+}
+
+/** Execute a statement read through the captured native StatementSync getter. */
+export function getSQLiteStatementNativeIntrinsic(statement: StatementSync): unknown {
+  return reflectApplyIntrinsic(statementGetIntrinsic, statement, []);
+}
+
+/** Acquire a native SQLite row iterator without consulting a mutable prototype. */
+export function iterateSQLiteStatementNativeIntrinsic(
+  statement: StatementSync,
+): SQLiteNativeStatementIterator {
+  return reflectApplyIntrinsic(statementIterateIntrinsic, statement, []) as
+    SQLiteNativeStatementIterator;
+}
+
+function nativeStatementIteratorIntrinsics(): NonNullable<
+  typeof sqliteNativeStatementIteratorIntrinsics
+> {
+  if (sqliteNativeStatementIteratorIntrinsics === undefined) {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_INTERNAL",
+      "inspect-schema",
+      "SQLite native statement iterator intrinsics are unavailable",
+    );
+  }
+  return sqliteNativeStatementIteratorIntrinsics;
+}
+
+/** Advance a native SQLite row iterator through its connection-initialization intrinsic. */
+export function nextSQLiteStatementIteratorNativeIntrinsic(
+  iterator: SQLiteNativeStatementIterator,
+): IteratorResult<unknown> {
+  return reflectApplyIntrinsic(nativeStatementIteratorIntrinsics().next, iterator, []) as
+    IteratorResult<unknown>;
+}
+
+/** Close a native SQLite row iterator through its connection-initialization intrinsic. */
+export function returnSQLiteStatementIteratorNativeIntrinsic(
+  iterator: SQLiteNativeStatementIterator,
+): IteratorResult<unknown> {
+  return reflectApplyIntrinsic(nativeStatementIteratorIntrinsics().return, iterator, []) as
+    IteratorResult<unknown>;
 }

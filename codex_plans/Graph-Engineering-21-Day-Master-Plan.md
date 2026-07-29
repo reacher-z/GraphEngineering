@@ -14052,3 +14052,123 @@ The durable dependency review is recorded in
 This append-only correction preserves the three-day source-preview objective
 without manufacturing completion evidence or weakening any publication,
 crash/reopen, active-manifest or release gate.
+
+#### 31.37.27 Append-only target physical-catalog observation acceptance
+
+The pure, non-authorizing target physical-catalog observation leaf authorized
+by section 31.37.26 is implemented and independently accepted. The production
+surface consists of
+`packages/sqlite/src/cursor-publication-target-catalog.ts` plus a closed-set
+captured-native read bridge owned by `packages/sqlite/src/sqlite-connection.ts`.
+Neither the observation API nor its connection intrinsics are exported from
+the SQLite package root.
+
+The accepted catalog identity is unchanged from the correction above. The
+sole catalog SELECT is the exact `main.sqlite_schema` query with
+`lower(name) GLOB 'ge_cycle_*'`, binary type/name ordering and non-null SQL.
+Its query hash remains `bd9a24c0e8307f473f6160b940effdfb77007144fbeea83628f0b7664df1410c`.
+The accepted target remains 34 ordered rows, 5,785 canonical UTF-8 bytes,
+catalog digest
+`ca85cf266267fa3eb5443bdf6d957b4b03c795cd6e0232a28c52773f1041fadf`,
+application ID `1195724359` and user version `2`. All 34 full inventory
+identities are frozen in production and compared individually; aggregate
+digest equality cannot conceal a missing, duplicate, renamed, reordered or
+equal-count replacement object.
+
+The canonical carrier is a JSON array whose row keys are emitted only in the
+order `name`, `sqlSha256`, `tableName`, `type`. `sqlSha256` covers the exact
+SQLite SQL text UTF-8 bytes. The implementation performs no SQL-text
+normalization and no runtime sort. Uppercase and mixed-case owned-prefix views
+and triggers enter the projection; unrelated objects do not. Null-SQL
+autoindexes remain excluded by the fixed query.
+
+Observation and authorization are deliberately separate. A snapshot is an
+ordinary, detached, deeply frozen structural value that may describe a
+non-target catalog. It is not registered, branded, opaque or identity-bearing.
+Only the explicit validator applies the expected versions, count, bytes,
+query hash, inventory and aggregate digest. Malformed caller carriers fail as
+invalid arguments; well-formed physical drift fails as corruption. No writer,
+adoption bridge, authority, receipt, fence or lease accepts the snapshot.
+
+The database read is bounded to 35 rows, one more than the exact target. It
+never materializes an unbounded `.all()` result. Every acquired native iterator
+is returned exactly once. Fetch/row failure stays primary over close failure,
+and raw driver failures are translated into the provider error taxonomy. The
+metadata read is a second fixed SELECT over
+`main.pragma_application_id()` and `main.pragma_user_version()`. Explicit
+`main` qualification and function-call syntax prevent hostile TEMP tables from
+shadowing either table-valued pragma.
+
+The connection read bridge is not a generic SELECT escape hatch. Its runtime
+input is a closed two-value kind whose branches select the two package-owned
+SQL constants; arbitrary SQL, DML, PRAGMA, stacked statements and caller
+strings cannot reach the captured native prepare path. The target module
+aliases the connection-owned catalog constant, so declared and executed query
+text have one source rather than duplicate literals.
+
+The native trust root captures `DatabaseSync.prepare` and `close`, the four
+StatementSync hardening setters, StatementSync `get` and `iterate`, and
+`Reflect.apply`. It does not allocate a database at module import. The first
+real connection initializes native iterator `next` and `return` from an owned
+probe. Capture walks the prototype chain, rejects Proxy and non-native/bound
+wrappers, checks the exact native function source, executes a two-step
+row-then-terminal brand probe, and closes the probe through the captured
+return. A failed capture is not cached. Constructor cleanup uses captured
+native close and preserves the already translated primary failure.
+
+This trust-root strengthening is required by the observation contract, not a
+new public connection feature. A public `SQLiteConnection.prepare` override,
+a forged prototype-only connection, post-import replacement of
+DatabaseSync/StatementSync/iterator methods, replacement of `Reflect.apply`,
+an Array numeric-index setter and a same-name foreign native iterator `next`
+all fail to intercept or forge the read. A closed real connection retains its
+structured unavailable classification.
+
+Input decoding follows the captured-descriptor standard used by the portable
+initial-write codec. Only ordinary dense arrays and exact plain/null-prototype
+row objects are accepted. Proxies, revoked proxies, accessors, sparse or
+subclass arrays, symbols, inherited/extra fields, wrong scalar types and lone
+surrogates are rejected without calling traps or getters. Explicit indexed
+loops and captured `Object.defineProperty` avoid ambient array iteration,
+`includes`, `push`, `join` and numeric prototype setter interference.
+
+Acceptance evidence on the completed leaf is:
+
+1. target catalog focused tests passed 19/19;
+2. target catalog plus connection tests passed 38/38;
+3. the frozen B3 conformance suite passed 34/34 and its validator retained
+   `implementationClaim: false` and `activeManifestClaim: false`;
+4. the complete uncontended SQLite suite passed 26 files and 891/891 tests;
+5. workspace typecheck passed across all eight implementation packages;
+6. workspace lint passed across all eight implementation packages;
+7. whitespace/additions checks passed;
+8. repeated, randomized and forced-concurrency focused runs found no flake;
+9. independent final production/test audits reported HIGH 0 / MEDIUM 0 /
+   LOW 0; and
+10. the durable acceptance record is
+    `codex_logs/reviews/SQLITE-CURSOR-B3-TARGET-CATALOG-OBSERVATION-2026-07-29.md`.
+
+One earlier complete-suite attempt was intentionally excluded from acceptance:
+it overlapped workspace typecheck and lint, and two pre-existing five-second
+tests timed out under CPU contention. Those two files immediately passed
+246/246 without contention, followed by the accepted complete run above.
+This preserves an honest evidence chain rather than hiding or misclassifying
+the failed timing run.
+
+Passing this leaf authorizes only the next dependency-DAG tranche: vendor and
+verify the exact 20-statement migration `0002` asset, execute it sequentially
+inside the already-owned outer transaction, bind actual parameter/result
+digests, atomically advance the outer authority transaction epoch,
+`total_changes` watermark and three-field permanent-write ledger, and mint the
+authentic single-use `migration0002CatalogRebuildReceipt`. That tranche must
+define exact statement and affected-row evidence, cancellation/failure
+precedence, retry behavior, receipt provenance, graph poisoning and rollback
+requirements before production execution is enabled.
+
+A post-DDL catalog fence remains forbidden until the authentic receipt exists.
+The future fence must perform its own fresh read from the exact connection and
+bind receipt identity, outer authority, transaction lineage, epoch, change
+watermark and ledger. It may not accept this diagnostic snapshot or any caller
+supplied equivalent. Reader lease/terminal proof, baseline entries/header/
+sequence receipts, four-receipt adoption, cursor rebind, rules 11/12, TEMP
+retirement and commit remain explicit nonclaims.
