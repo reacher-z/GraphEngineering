@@ -299,6 +299,13 @@ document. Without this member the one-record-per-entry requirement would be
 unsatisfiable, and an implementation would be forced either to drop entries
 from the census or to invent a ballot nobody cast.
 
+A `not-cast` record's key set MUST be exactly `sourceNodeId` and `verdict`. It
+MUST NOT carry `confidenceBasisPoints` and MUST NOT carry `evidenceHash`,
+because there is no ballot from which either could be derived; materializing
+one would be inventing the ballot the member exists to deny. Conversely, a
+`missing` or `timed_out` disposition MUST be recorded as `not-cast` and never as
+a cast verdict, and a cast disposition MUST NEVER be recorded as `not-cast`.
+
 `BarrierVoteRecord.confidenceBasisPoints` is optional with the range
 `1..10000`, while `RouteDecision.confidenceBasisPoints` is required with the
 range `0..10000` or `null`. The asymmetry is intentional: a vote signals
