@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha2/protected-blob.schema.json",
+  "title": "Graph Engineering Protected Blob",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "algorithm", "nonce", "ciphertext", "tag"],
+  "properties": {
+    "apiVersion": {
+      "const": "graphengineering.reacher-z.github.io/protected-blob/v1alpha1"
+    },
+    "algorithm": { "const": "A256GCM" },
+    "nonce": { "type": "string", "pattern": "^[A-Za-z0-9_-]{16}$" },
+    "ciphertext": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 89478486,
+      "pattern": "^[A-Za-z0-9_-]+$"
+    },
+    "tag": { "type": "string", "pattern": "^[A-Za-z0-9_-]{22}$" }
+  }
+}

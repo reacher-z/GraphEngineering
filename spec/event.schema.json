@@ -35,7 +35,10 @@
     "attempt": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
     "payloadHash": { "type": "string" },
     "artifactRef": { "type": "string" },
-    "redacted": { "type": "boolean", "default": true },
+    "redacted": {
+      "description": "Whether this event's payload was transformed by a redaction sink before it was written. There is deliberately no default: absence means the writer made no claim, and a reader MUST NOT infer that an absent flag means the payload was redacted. Asserting true while writing raw inline `data` is the exact defect D9-REDACTION-039 exists to eliminate, so this flag is trustworthy only when the writer set it explicitly. See redaction-semantics.md.",
+      "type": "boolean"
+    },
     "data": { "type": "object" }
   }
 }

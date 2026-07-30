@@ -1,0 +1,159 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha2/capture-policy.schema.json",
+  "title": "Graph Engineering Effective Capture Policy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "durableValues",
+    "checkpointValues",
+    "events",
+    "artifacts",
+    "errors",
+    "logs",
+    "traces",
+    "metrics",
+    "prompts",
+    "responses",
+    "tools",
+    "mcp",
+    "plugins",
+    "isolationOutputs",
+    "database",
+    "exports",
+    "supportBundles",
+    "testArtifacts",
+    "identifiers",
+    "maxDiagnosticUtf8Bytes",
+    "redactionTransform",
+    "transformImplementationHash",
+    "ruleRegistryVersion",
+    "ruleRegistryHash",
+    "redactionRules",
+    "keyRef"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "graphengineering.reacher-z.github.io/capture-policy/v1alpha2"
+    },
+    "durableValues": { "enum": ["protected", "inline-unredacted"] },
+    "checkpointValues": { "enum": ["protected", "inline-unredacted"] },
+    "events": {
+      "enum": ["metadata-or-protected", "allow-redacted", "inline-unredacted"]
+    },
+    "artifacts": {
+      "enum": ["off", "metadata-only", "redacted", "protected", "inline-unredacted"]
+    },
+    "errors": {
+      "enum": [
+        "codes-only",
+        "codes-and-sanitized-message",
+        "redacted",
+        "protected-evidence",
+        "inline-unredacted"
+      ]
+    },
+    "logs": {
+      "enum": ["off", "metadata-only", "redacted", "protected", "inline-unredacted"]
+    },
+    "traces": {
+      "enum": ["off", "metadata-only", "redacted", "protected", "inline-unredacted"]
+    },
+    "metrics": {
+      "enum": ["off", "metadata-only", "redacted", "protected", "inline-unredacted"]
+    },
+    "prompts": {
+      "enum": ["off", "metadata-only", "redacted", "protected", "inline-unredacted"]
+    },
+    "responses": {
+      "enum": ["off", "metadata-only", "redacted", "protected", "inline-unredacted"]
+    },
+    "tools": {
+      "enum": ["off", "metadata-only", "redacted", "protected", "inline-unredacted"]
+    },
+    "mcp": {
+      "enum": ["off", "metadata-only", "redacted", "protected", "inline-unredacted"]
+    },
+    "plugins": {
+      "enum": ["off", "metadata-only", "redacted", "protected", "inline-unredacted"]
+    },
+    "isolationOutputs": {
+      "enum": ["off", "metadata-only", "redacted", "protected", "inline-unredacted"]
+    },
+    "database": {
+      "enum": ["off", "metadata-only", "redacted", "protected", "inline-unredacted"]
+    },
+    "exports": {
+      "enum": ["off", "metadata-only", "redacted", "protected", "inline-unredacted"]
+    },
+    "supportBundles": {
+      "enum": ["off", "metadata-only", "redacted", "protected", "inline-unredacted"]
+    },
+    "testArtifacts": {
+      "enum": ["off", "metadata-only", "redacted", "protected", "inline-unredacted"]
+    },
+    "identifiers": {
+      "enum": ["generated-opaque-only", "protected", "inline-unredacted"]
+    },
+    "maxDiagnosticUtf8Bytes": { "type": "integer", "minimum": 0, "maximum": 1024 },
+    "redactionTransform": { "const": "json-pointer-rules/v1alpha2" },
+    "transformImplementationHash": { "$ref": "#/$defs/sha256" },
+    "ruleRegistryVersion": { "$ref": "#/$defs/safePositiveInteger" },
+    "ruleRegistryHash": { "$ref": "#/$defs/sha256" },
+    "redactionRules": {
+      "type": "array",
+      "maxItems": 54,
+      "items": { "$ref": "redaction-rule.schema.json" }
+    },
+    "keyRef": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$"
+    },
+    "inlineRiskAuthorizationHash": { "$ref": "#/$defs/sha256" }
+  },
+  "allOf": [
+    {
+      "if": {
+        "anyOf": [
+          { "properties": { "durableValues": { "const": "inline-unredacted" } }, "required": ["durableValues"] },
+          { "properties": { "checkpointValues": { "const": "inline-unredacted" } }, "required": ["checkpointValues"] },
+          { "properties": { "events": { "const": "inline-unredacted" } }, "required": ["events"] },
+          { "properties": { "artifacts": { "const": "inline-unredacted" } }, "required": ["artifacts"] },
+          { "properties": { "errors": { "const": "inline-unredacted" } }, "required": ["errors"] },
+          { "properties": { "logs": { "const": "inline-unredacted" } }, "required": ["logs"] },
+          { "properties": { "traces": { "const": "inline-unredacted" } }, "required": ["traces"] },
+          { "properties": { "metrics": { "const": "inline-unredacted" } }, "required": ["metrics"] },
+          { "properties": { "prompts": { "const": "inline-unredacted" } }, "required": ["prompts"] },
+          { "properties": { "responses": { "const": "inline-unredacted" } }, "required": ["responses"] },
+          { "properties": { "tools": { "const": "inline-unredacted" } }, "required": ["tools"] },
+          { "properties": { "mcp": { "const": "inline-unredacted" } }, "required": ["mcp"] },
+          { "properties": { "plugins": { "const": "inline-unredacted" } }, "required": ["plugins"] },
+          { "properties": { "isolationOutputs": { "const": "inline-unredacted" } }, "required": ["isolationOutputs"] },
+          { "properties": { "database": { "const": "inline-unredacted" } }, "required": ["database"] },
+          { "properties": { "exports": { "const": "inline-unredacted" } }, "required": ["exports"] },
+          { "properties": { "supportBundles": { "const": "inline-unredacted" } }, "required": ["supportBundles"] },
+          { "properties": { "testArtifacts": { "const": "inline-unredacted" } }, "required": ["testArtifacts"] },
+          { "properties": { "identifiers": { "const": "inline-unredacted" } }, "required": ["identifiers"] }
+        ]
+      },
+      "then": {
+        "properties": {
+          "inlineRiskAuthorizationHash": { "$ref": "#/$defs/sha256" }
+        },
+        "required": ["inlineRiskAuthorizationHash"]
+      },
+      "else": { "properties": { "inlineRiskAuthorizationHash": false } }
+    }
+  ],
+  "$defs": {
+    "safePositiveInteger": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+  }
+}

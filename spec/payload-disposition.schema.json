@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha2/payload-disposition.schema.json",
+  "title": "Graph Engineering Payload Disposition Facts",
+  "oneOf": [
+    { "$ref": "#/$defs/metadataOnly" },
+    { "$ref": "#/$defs/protectedRef" },
+    { "$ref": "#/$defs/redacted" },
+    { "$ref": "#/$defs/inlineUnredacted" }
+  ],
+  "$defs": {
+    "metadataOnly": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["payloadDisposition", "redacted"],
+      "properties": {
+        "payloadDisposition": { "const": "metadata-only" },
+        "redacted": { "const": false }
+      }
+    },
+    "protectedRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["payloadDisposition", "redacted"],
+      "properties": {
+        "payloadDisposition": { "const": "protected-ref" },
+        "redacted": { "const": false }
+      }
+    },
+    "redacted": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["payloadDisposition", "redacted", "redactionReceipt"],
+      "properties": {
+        "payloadDisposition": { "const": "redacted" },
+        "redacted": { "const": true },
+        "redactionReceipt": { "$ref": "redaction-receipt.schema.json" }
+      }
+    },
+    "inlineUnredacted": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["payloadDisposition", "redacted"],
+      "properties": {
+        "payloadDisposition": { "const": "inline-unredacted" },
+        "redacted": { "const": false }
+      }
+    }
+  }
+}

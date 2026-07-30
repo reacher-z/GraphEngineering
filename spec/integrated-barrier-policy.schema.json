@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/integrated-barrier-policy.schema.json",
+  "title": "Graph Engineering integrated barrier policy",
+  "description": "Direct config of a Graph IR node whose kind is 'barrier'. There is no config.policy wrapper and no inference from edges or metadata. onUnsatisfied and lateArrival are required for every kind and have no default, because a silently defaulted unsatisfied barrier is the implicit pass this contract exists to forbid. Each kind declares exactly its own threshold member; unevaluatedProperties therefore rejects a threshold that belongs to a different kind.",
+  "type": "object",
+  "required": ["kind", "onUnsatisfied", "lateArrival"],
+  "properties": {
+    "kind": {
+      "enum": ["all", "minimum", "percentage", "quorum"]
+    },
+    "onUnsatisfied": {
+      "description": "Resolution applied when the policy is not satisfied. None of the three members is a pass.",
+      "enum": ["fail", "unknown", "human"]
+    },
+    "lateArrival": {
+      "description": "Behavior when an upstream settles after the decision is committed.",
+      "enum": ["ignore", "reject"]
+    },
+    "deadline": {
+      "description": "Optional for every kind. Evaluated only against the injected monotonic clock at scheduler quiescence points; no wall clock and no timer participates.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["afterMs"],
+      "properties": {
+        "afterMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      }
+    }
+  },
+  "oneOf": [
+    {
+      "title": "all",
+      "properties": {
+        "kind": { "const": "all" }
+      },
+      "required": ["kind"]
+    },
+    {
+      "title": "minimum",
+      "properties": {
+        "kind": { "const": "minimum" },
+        "minimum": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": ["kind", "minimum"]
+    },
+    {
+      "title": "percentage",
+      "properties": {
+        "kind": { "const": "percentage" },
+        "basisPoints": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000
+        }
+      },
+      "required": ["kind", "basisPoints"]
+    },
+    {
+      "title": "quorum",
+      "properties": {
+        "kind": { "const": "quorum" },
+        "quorum": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["accepts", "countAbstainAsParticipant"],
+          "properties": {
+            "accepts": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "countAbstainAsParticipant": {
+              "description": "When false, abstentions are removed from the participant denominator. An unknown vote always remains a participant and never becomes an accept.",
+              "type": "boolean"
+            }
+          }
+        }
+      },
+      "required": ["kind", "quorum"]
+    }
+  ],
+  "unevaluatedProperties": false
+}

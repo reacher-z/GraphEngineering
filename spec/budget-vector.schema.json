@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/budget-vector.schema.json",
+  "title": "Graph Engineering Portable Budget Vector",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "contractVersion",
+    "currency",
+    "minorUnitExponent",
+    "quantities",
+    "providerSpecific"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "graphengineering.reacher-z.github.io/budget-vectors/v1alpha1"
+    },
+    "kind": { "const": "BudgetVector" },
+    "contractVersion": { "const": "portable-budget/v1alpha1" },
+    "currency": {
+      "type": "string",
+      "pattern": "^[A-Z]{3}$"
+    },
+    "minorUnitExponent": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 6
+    },
+    "quantities": {
+      "type": "array",
+      "maxItems": 25,
+      "items": { "$ref": "#/$defs/quantity" }
+    },
+    "providerSpecific": {
+      "type": "array",
+      "maxItems": 64,
+      "items": { "$ref": "#/$defs/providerQuantity" }
+    }
+  },
+  "$defs": {
+    "safePositiveInteger": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "versionedIdentity": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,254}/v[0-9]+(?:alpha[0-9]+|beta[0-9]+)?$"
+    },
+    "quantity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["resource", "unit", "aggregation", "amount"],
+      "properties": {
+        "resource": {
+          "enum": [
+            "artifact-bytes",
+            "artifacts",
+            "attempts",
+            "audio-units",
+            "cached-input-units",
+            "candidates",
+            "concurrent-activities",
+            "depth",
+            "disk-bytes",
+            "dynamic-nodes",
+            "elapsed-ms",
+            "fan-out",
+            "graph-edges",
+            "graph-nodes",
+            "image-units",
+            "in-flight-bytes",
+            "input-units",
+            "memory-bytes",
+            "money-nano-minor",
+            "node-dispatches",
+            "output-units",
+            "provider-calls",
+            "reasoning-units",
+            "tool-calls",
+            "transport-bytes"
+          ]
+        },
+        "unit": {
+          "enum": ["byte", "count", "millisecond", "nano-minor", "usage-unit"]
+        },
+        "aggregation": { "enum": ["sum", "maximum"] },
+        "amount": { "$ref": "#/$defs/safePositiveInteger" }
+      }
+    },
+    "providerQuantity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["metricId", "unitId", "aggregation", "amount"],
+      "properties": {
+        "metricId": { "$ref": "#/$defs/versionedIdentity" },
+        "unitId": { "$ref": "#/$defs/versionedIdentity" },
+        "aggregation": { "enum": ["sum", "maximum"] },
+        "amount": { "$ref": "#/$defs/safePositiveInteger" }
+      }
+    }
+  }
+}

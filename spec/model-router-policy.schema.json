@@ -1,0 +1,140 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/model-router-policy.schema.json",
+  "title": "Graph Engineering Deterministic Model Router Policy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "contractVersion",
+    "policyId",
+    "authorityBindingHash",
+    "allowedAuthorityGrantHashes",
+    "pricingSnapshotHash",
+    "classificationPolicyHash",
+    "inheritance",
+    "selection",
+    "fallback",
+    "health",
+    "replay",
+    "candidates"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "graphengineering.reacher-z.github.io/model-router-policies/v1alpha1"
+    },
+    "kind": { "const": "ModelRouterPolicy" },
+    "contractVersion": { "const": "model-router/v1alpha1" },
+    "policyId": { "$ref": "#/$defs/identifier" },
+    "authorityBindingHash": { "$ref": "#/$defs/hash" },
+    "allowedAuthorityGrantHashes": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1024,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/hash" }
+    },
+    "pricingSnapshotHash": { "$ref": "#/$defs/hash" },
+    "classificationPolicyHash": { "$ref": "#/$defs/hash" },
+    "inheritance": { "const": "resolve-session-and-default-before-persist" },
+    "selection": { "const": "first-eligible-by-quality-then-fallback-rank-then-candidate-id" },
+    "fallback": { "const": "may-narrow-never-bypass-authority-privacy-approval-budget-or-capability" },
+    "health": { "const": "recorded-snapshot-input-no-live-lookup-during-replay" },
+    "replay": { "const": "reuse-exact-recorded-decision-with-zero-provider-rediscovery" },
+    "candidates": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1024,
+      "items": { "$ref": "#/$defs/candidate" }
+    }
+  },
+  "$defs": {
+    "safePositiveInteger": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$"
+    },
+    "subjectIdentifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,254}$"
+    },
+    "capability": {
+      "enum": [
+        "audio-input",
+        "audio-output",
+        "image-input",
+        "json-schema-output",
+        "reasoning",
+        "streaming",
+        "text-input",
+        "text-output",
+        "tool-calling"
+      ]
+    },
+    "dataClass": {
+      "enum": ["confidential", "internal", "public", "restricted", "secret"]
+    },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "candidateId",
+        "providerId",
+        "modelId",
+        "accountClass",
+        "region",
+        "qualityTier",
+        "fallbackRank",
+        "capabilities",
+        "allowedDataClasses",
+        "pricingEntryId",
+        "maxInputUnits",
+        "maxOutputUnits",
+        "maxContextUnits",
+        "maxDurationMs",
+        "requiresApproval",
+        "authorityGrantHash"
+      ],
+      "properties": {
+        "candidateId": { "$ref": "#/$defs/identifier" },
+        "providerId": { "$ref": "#/$defs/identifier" },
+        "modelId": { "$ref": "#/$defs/subjectIdentifier" },
+        "accountClass": { "$ref": "#/$defs/identifier" },
+        "region": { "$ref": "#/$defs/identifier" },
+        "qualityTier": { "enum": ["economy", "judge", "premium", "standard"] },
+        "fallbackRank": { "type": "integer", "minimum": 0, "maximum": 1023 },
+        "capabilities": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 9,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/capability" }
+        },
+        "allowedDataClasses": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 5,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/dataClass" }
+        },
+        "pricingEntryId": { "$ref": "#/$defs/identifier" },
+        "maxInputUnits": { "$ref": "#/$defs/safePositiveInteger" },
+        "maxOutputUnits": { "$ref": "#/$defs/safePositiveInteger" },
+        "maxContextUnits": { "$ref": "#/$defs/safePositiveInteger" },
+        "maxDurationMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        },
+        "requiresApproval": { "type": "boolean" },
+        "authorityGrantHash": { "$ref": "#/$defs/hash" }
+      }
+    }
+  }
+}

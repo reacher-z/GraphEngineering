@@ -1,0 +1,128 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha2/protected-store-envelope.schema.json",
+  "title": "Graph Engineering Protected Store Operation Envelope",
+  "description": "Closed in-process request shape for the guarded protected store. It never contains a logical plaintext value, key, nonce source, or raw provider error.",
+  "oneOf": [
+    { "$ref": "#/$defs/put" },
+    { "$ref": "#/$defs/get" },
+    { "$ref": "#/$defs/delete" }
+  ],
+  "$defs": {
+    "commonProperties": {
+      "type": "object",
+      "properties": {
+        "apiVersion": {
+          "const": "graphengineering.reacher-z.github.io/protected-store-envelope/v1alpha1"
+        },
+        "operationId": { "$ref": "#/$defs/identifier" },
+        "operation": { "enum": ["put", "get", "delete"] },
+        "runId": { "$ref": "#/$defs/identifier" },
+        "capturePolicyHash": { "$ref": "#/$defs/sha256" },
+        "keyRefHash": { "$ref": "#/$defs/sha256" },
+        "authorityBindingHash": { "$ref": "#/$defs/sha256" },
+        "tenantScopeHash": { "$ref": "#/$defs/sha256" },
+        "protectedValue": { "$ref": "protected-value.schema.json" },
+        "aad": { "$ref": "protected-aad.schema.json" },
+        "blob": { "$ref": "protected-blob.schema.json" },
+        "deleteReason": {
+          "enum": ["safe-orphan-cleanup", "retention", "migration", "operator-authorized"]
+        }
+      }
+    },
+    "put": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "apiVersion",
+        "operationId",
+        "operation",
+        "runId",
+        "capturePolicyHash",
+        "keyRefHash",
+        "authorityBindingHash",
+        "tenantScopeHash",
+        "protectedValue",
+        "aad",
+        "blob"
+      ],
+      "properties": {
+        "apiVersion": { "$ref": "#/$defs/commonProperties/properties/apiVersion" },
+        "operationId": { "$ref": "#/$defs/commonProperties/properties/operationId" },
+        "operation": { "const": "put" },
+        "runId": { "$ref": "#/$defs/commonProperties/properties/runId" },
+        "capturePolicyHash": { "$ref": "#/$defs/commonProperties/properties/capturePolicyHash" },
+        "keyRefHash": { "$ref": "#/$defs/commonProperties/properties/keyRefHash" },
+        "authorityBindingHash": { "$ref": "#/$defs/commonProperties/properties/authorityBindingHash" },
+        "tenantScopeHash": { "$ref": "#/$defs/commonProperties/properties/tenantScopeHash" },
+        "protectedValue": { "$ref": "#/$defs/commonProperties/properties/protectedValue" },
+        "aad": { "$ref": "#/$defs/commonProperties/properties/aad" },
+        "blob": { "$ref": "#/$defs/commonProperties/properties/blob" }
+      }
+    },
+    "get": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "apiVersion",
+        "operationId",
+        "operation",
+        "runId",
+        "capturePolicyHash",
+        "keyRefHash",
+        "authorityBindingHash",
+        "tenantScopeHash",
+        "protectedValue",
+        "aad"
+      ],
+      "properties": {
+        "apiVersion": { "$ref": "#/$defs/commonProperties/properties/apiVersion" },
+        "operationId": { "$ref": "#/$defs/commonProperties/properties/operationId" },
+        "operation": { "const": "get" },
+        "runId": { "$ref": "#/$defs/commonProperties/properties/runId" },
+        "capturePolicyHash": { "$ref": "#/$defs/commonProperties/properties/capturePolicyHash" },
+        "keyRefHash": { "$ref": "#/$defs/commonProperties/properties/keyRefHash" },
+        "authorityBindingHash": { "$ref": "#/$defs/commonProperties/properties/authorityBindingHash" },
+        "tenantScopeHash": { "$ref": "#/$defs/commonProperties/properties/tenantScopeHash" },
+        "protectedValue": { "$ref": "#/$defs/commonProperties/properties/protectedValue" },
+        "aad": { "$ref": "#/$defs/commonProperties/properties/aad" }
+      }
+    },
+    "delete": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "apiVersion",
+        "operationId",
+        "operation",
+        "runId",
+        "capturePolicyHash",
+        "keyRefHash",
+        "authorityBindingHash",
+        "tenantScopeHash",
+        "protectedValue",
+        "aad",
+        "deleteReason"
+      ],
+      "properties": {
+        "apiVersion": { "$ref": "#/$defs/commonProperties/properties/apiVersion" },
+        "operationId": { "$ref": "#/$defs/commonProperties/properties/operationId" },
+        "operation": { "const": "delete" },
+        "runId": { "$ref": "#/$defs/commonProperties/properties/runId" },
+        "capturePolicyHash": { "$ref": "#/$defs/commonProperties/properties/capturePolicyHash" },
+        "keyRefHash": { "$ref": "#/$defs/commonProperties/properties/keyRefHash" },
+        "authorityBindingHash": { "$ref": "#/$defs/commonProperties/properties/authorityBindingHash" },
+        "tenantScopeHash": { "$ref": "#/$defs/commonProperties/properties/tenantScopeHash" },
+        "protectedValue": { "$ref": "#/$defs/commonProperties/properties/protectedValue" },
+        "aad": { "$ref": "#/$defs/commonProperties/properties/aad" },
+        "deleteReason": { "$ref": "#/$defs/commonProperties/properties/deleteReason" }
+      }
+    },
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+      "not": { "enum": [".", ".."] }
+    },
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+  }
+}

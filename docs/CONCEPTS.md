@@ -197,6 +197,21 @@ with null. This is not yet a scheduler barrier: waiting for partial arrivals,
 durable barrier state, deadlines, quorum voting, and cancellation remain target
 v1 runtime work.
 
+Read that limit literally before you rely on it. The scheduler currently
+classifies a `barrier` node together with `transform`, so a barrier node that
+carries a threshold, quorum, or deadline policy in its `config` is executed as
+an ordinary identity node and its policy is never evaluated — an unsatisfied
+barrier would pass silently. Do not encode a real threshold in a `barrier` node
+today; express the join with ordinary dependencies, or evaluate the settled
+policy yourself with the primitive API and branch on its result. The target
+behavior, including quorum, abstention, deadlines, the closed non-pass
+resolution set, late arrival, cancellation propagation, and durable zero-rejudge
+decision replay, is frozen as a contract candidate in
+[integrated barrier semantics](../spec/integrated-barrier-semantics.md) with
+`implementationClaim: false`. Its first required deliverable is a pre-dispatch
+rejection of exactly this case, so that the silent pass becomes a refusal rather
+than a wrong answer.
+
 ### Router
 
 A router separates judgment from control flow:

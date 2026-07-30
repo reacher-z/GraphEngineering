@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/route-decision.schema.json",
+  "title": "Graph Engineering durable route decision",
+  "description": "Frozen 'data' payload of a RouteSelected event. It wraps the already published eight-field RouteSelectionResult without altering it, and adds the durable identity required for zero-rejudge replay.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "routerNodeId",
+    "policyHash",
+    "decisionId",
+    "routed",
+    "reasonCode",
+    "requestedRoutes",
+    "selectedRoutes",
+    "unknownRoutes",
+    "confidenceBasisPoints",
+    "usedDefault",
+    "escalated"
+  ],
+  "properties": {
+    "routerNodeId": { "$ref": "#/$defs/safeId" },
+    "policyHash": { "$ref": "#/$defs/sha256" },
+    "decisionId": { "$ref": "#/$defs/sha256" },
+    "routed": { "type": "boolean" },
+    "reasonCode": {
+      "description": "The already published RouteSelectionReasonCode. This enum mirrors packages/primitives RouteSelectionReasonCode and python/src/graph_engineering/primitives/router.py exactly; it must not diverge.",
+      "enum": [
+        "REQUESTED_ROUTES_SELECTED",
+        "DEFAULT_SELECTED_NO_REQUEST",
+        "DEFAULT_SELECTED_UNKNOWN_ROUTE",
+        "ESCALATION_SELECTED_LOW_CONFIDENCE",
+        "NO_REQUESTED_ROUTE",
+        "UNKNOWN_ROUTE",
+        "MULTIPLE_ROUTES_FOR_SINGLE",
+        "MULTICAST_LIMIT_EXCEEDED"
+      ]
+    },
+    "requestedRoutes": { "$ref": "#/$defs/routeList" },
+    "selectedRoutes": { "$ref": "#/$defs/routeList" },
+    "unknownRoutes": { "$ref": "#/$defs/routeList" },
+    "confidenceBasisPoints": {
+      "description": "Explicit null when the request carried no confidence. This is the one member of the published eight-field RouteSelectionResult whose absence is represented as null rather than omission, because the field is always present in the result object.",
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "maximum": 10000
+    },
+    "usedDefault": { "type": "boolean" },
+    "escalated": { "type": "boolean" }
+  },
+  "$defs": {
+    "safeId": {
+      "description": "A Graph IR node identifier, using the node-ID pattern from graph.schema.json. Route keys use the wider safeRouteId pattern instead, because SafeRouteId admits a leading digit while a node ID does not.",
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$"
+    },
+    "safeRouteId": {
+      "description": "A SafeRouteId as frozen by integrated-router-semantics.md. Unlike a node ID it may begin with a digit, and it is never '.' or '..'.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+      "not": { "enum": [".", ".."] }
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "routeList": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/safeRouteId" }
+    }
+  }
+}

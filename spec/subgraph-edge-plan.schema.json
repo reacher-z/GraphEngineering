@@ -1,0 +1,923 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/subgraph-edge-plan.schema.json",
+  "title": "Graph Engineering Subgraph and Edge Execution Plan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "contractVersion",
+    "planId",
+    "activation",
+    "namespaceCodec",
+    "rootGraphKey",
+    "requiredCapabilities",
+    "policies",
+    "authority",
+    "budget",
+    "recovery",
+    "trace",
+    "graphs",
+    "calls",
+    "reducers",
+    "artifactEdges",
+    "streamEdges"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "graphengineering.reacher-z.github.io/subgraph-edge-plans/v1alpha1"
+    },
+    "kind": { "const": "SubgraphEdgePlan" },
+    "contractVersion": { "const": "subgraph-edge/v1alpha1" },
+    "planId": { "$ref": "#/$defs/identifier" },
+    "activation": { "const": "requires-capability-negotiation" },
+    "namespaceCodec": { "const": "rfc6901-segments/v1alpha1" },
+    "rootGraphKey": { "$ref": "#/$defs/graphKey" },
+    "requiredCapabilities": {
+      "type": "array",
+      "minItems": 6,
+      "maxItems": 6,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "artifact-store/v1alpha1",
+          "durable-stream-edge/v1alpha1",
+          "nested-subgraph/v1alpha1",
+          "state-reducer/v1alpha1",
+          "subgraph-edge/v1alpha1",
+          "trace-checkpoint-lineage/v1alpha1"
+        ]
+      }
+    },
+    "policies": { "$ref": "#/$defs/policies" },
+    "authority": { "$ref": "#/$defs/authorityCeiling" },
+    "budget": { "$ref": "#/$defs/rootBudget" },
+    "recovery": { "$ref": "#/$defs/recoveryPolicy" },
+    "trace": { "$ref": "#/$defs/tracePolicy" },
+    "graphs": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1024,
+      "items": { "$ref": "#/$defs/graphBinding" }
+    },
+    "calls": {
+      "type": "array",
+      "maxItems": 4096,
+      "items": { "$ref": "#/$defs/callBinding" }
+    },
+    "reducers": {
+      "type": "array",
+      "maxItems": 4096,
+      "items": { "$ref": "#/$defs/reducerBinding" }
+    },
+    "artifactEdges": {
+      "type": "array",
+      "maxItems": 4096,
+      "items": { "$ref": "#/$defs/artifactEdge" }
+    },
+    "streamEdges": {
+      "type": "array",
+      "maxItems": 4096,
+      "items": { "$ref": "#/$defs/streamEdge" }
+    }
+  },
+  "$defs": {
+    "safeNonNegativeInteger": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "safePositiveInteger": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "timerPositiveInteger": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 2147483647
+    },
+    "hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$"
+    },
+    "graphKey": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,62}$"
+    },
+    "jsonPointer": {
+      "type": "string",
+      "maxLength": 4096,
+      "pattern": "^(?:|(?:/(?:[^~/]|~[01])*)+)$"
+    },
+    "nonRootJsonPointer": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096,
+      "pattern": "^(?:/(?:[^~/]|~[01])*)+$"
+    },
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "policies": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "maxNestingDepth",
+        "maxRecursiveDepth",
+        "maxTotalInvocations",
+        "maxConcurrentInvocations",
+        "maxStateBytes",
+        "maxReducerWrites",
+        "maxArtifacts",
+        "maxArtifactBytes",
+        "maxTotalArtifactBytes",
+        "maxStreamEdges",
+        "maxStreamItemsPerEdge",
+        "maxTotalStreamItems",
+        "maxStreamInFlightBytes",
+        "maxNamespaceBytes",
+        "maxDurationMs",
+        "unreducedStateWrites"
+      ],
+      "properties": {
+        "maxNestingDepth": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64
+        },
+        "maxRecursiveDepth": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 32
+        },
+        "maxTotalInvocations": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "maxConcurrentInvocations": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65536
+        },
+        "maxStateBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 67108864
+        },
+        "maxReducerWrites": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "maxArtifacts": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "maxArtifactBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 67108864
+        },
+        "maxTotalArtifactBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1073741824
+        },
+        "maxStreamEdges": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4096
+        },
+        "maxStreamItemsPerEdge": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "maxTotalStreamItems": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000000
+        },
+        "maxStreamInFlightBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1073741824
+        },
+        "maxNamespaceBytes": {
+          "type": "integer",
+          "minimum": 128,
+          "maximum": 65536
+        },
+        "maxDurationMs": { "$ref": "#/$defs/timerPositiveInteger" },
+        "unreducedStateWrites": { "const": "compile-error" }
+      }
+    },
+    "capability": {
+      "enum": [
+        "artifact:delete",
+        "artifact:list",
+        "artifact:read",
+        "artifact:write",
+        "stream:consume",
+        "stream:produce"
+      ]
+    },
+    "authorityCeiling": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "policyId", "ceiling"],
+      "properties": {
+        "mode": { "const": "deny-by-default" },
+        "policyId": { "$ref": "#/$defs/identifier" },
+        "ceiling": {
+          "type": "array",
+          "maxItems": 6,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/capability" }
+        }
+      }
+    },
+    "rootBudget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "maxAttempts",
+        "maxDurationMs",
+        "maxStateBytes",
+        "maxArtifactBytes",
+        "maxStreamItems",
+        "maxStreamInFlightBytes"
+      ],
+      "properties": {
+        "mode": { "const": "hard-reservation-before-dispatch" },
+        "maxAttempts": { "$ref": "#/$defs/safePositiveInteger" },
+        "maxDurationMs": { "$ref": "#/$defs/timerPositiveInteger" },
+        "maxStateBytes": { "$ref": "#/$defs/safePositiveInteger" },
+        "maxArtifactBytes": { "$ref": "#/$defs/safePositiveInteger" },
+        "maxStreamItems": { "$ref": "#/$defs/safePositiveInteger" },
+        "maxStreamInFlightBytes": { "$ref": "#/$defs/safePositiveInteger" }
+      }
+    },
+    "recoveryPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["resume", "replay", "fork", "successfulChildReuse"],
+      "properties": {
+        "resume": { "const": "fold-authoritative-events-before-dispatch" },
+        "replay": { "const": "read-only-exact-prefix-no-dispatch" },
+        "fork": { "const": "new-run-new-scope-reauthorize" },
+        "successfulChildReuse": {
+          "const": "exact-graph-plan-input-policy-and-committed-terminal-only"
+        }
+      }
+    },
+    "tracePolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contractVersion",
+        "capture",
+        "externalExport",
+        "clock",
+        "maxSpans",
+        "maxLinks",
+        "maxBytes",
+        "criticalPathInputs"
+      ],
+      "properties": {
+        "contractVersion": { "const": "normalized-trace/v1alpha1" },
+        "capture": { "const": "metadata-only" },
+        "externalExport": { "const": "off-by-default" },
+        "clock": { "const": "recorded-wall-plus-run-monotonic-offset" },
+        "maxSpans": { "type": "integer", "minimum": 1, "maximum": 1000000 },
+        "maxLinks": { "type": "integer", "minimum": 0, "maximum": 1000000 },
+        "maxBytes": { "type": "integer", "minimum": 1, "maximum": 1073741824 },
+        "criticalPathInputs": { "const": "causal-links-state-and-wait-durations" }
+      }
+    },
+    "nodeBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "kind": {
+          "enum": [
+            "agent",
+            "model",
+            "tool",
+            "transform",
+            "subgraph",
+            "router",
+            "barrier",
+            "validator",
+            "human"
+          ]
+        }
+      }
+    },
+    "edgeBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "fromNode", "toNode", "mode"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "fromNode": { "$ref": "#/$defs/identifier" },
+        "toNode": { "$ref": "#/$defs/identifier" },
+        "mode": { "enum": ["value", "stream", "artifact-ref"] }
+      }
+    },
+    "graphBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "graphHash",
+        "compiledPlanHash",
+        "graphRevision",
+        "stateSchemaHash",
+        "nodes",
+        "edges",
+        "entrypoints",
+        "outputs"
+      ],
+      "properties": {
+        "key": { "$ref": "#/$defs/graphKey" },
+        "graphHash": { "$ref": "#/$defs/hash" },
+        "compiledPlanHash": { "$ref": "#/$defs/hash" },
+        "graphRevision": { "const": 1 },
+        "stateSchemaHash": {
+          "oneOf": [
+            { "$ref": "#/$defs/hash" },
+            { "type": "null" }
+          ]
+        },
+        "nodes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100000,
+          "items": { "$ref": "#/$defs/nodeBinding" }
+        },
+        "edges": {
+          "type": "array",
+          "maxItems": 1000000,
+          "items": { "$ref": "#/$defs/edgeBinding" }
+        },
+        "entrypoints": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100000,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/identifier" }
+        },
+        "outputs": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100000,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/nonEmptyString" }
+        }
+      }
+    },
+    "projectionField": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sourcePointer", "targetKey", "required"],
+      "properties": {
+        "sourcePointer": { "$ref": "#/$defs/jsonPointer" },
+        "targetKey": { "$ref": "#/$defs/nonEmptyString" },
+        "required": { "type": "boolean" }
+      }
+    },
+    "inputProjection": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode"],
+          "properties": { "mode": { "const": "whole" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "fields"],
+          "properties": {
+            "mode": { "const": "object" },
+            "fields": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 1024,
+              "items": { "$ref": "#/$defs/projectionField" }
+            }
+          }
+        }
+      ]
+    },
+    "outputProjectionField": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sourceOutput", "sourcePointer", "targetKey", "required"],
+      "properties": {
+        "sourceOutput": { "$ref": "#/$defs/nonEmptyString" },
+        "sourcePointer": { "$ref": "#/$defs/jsonPointer" },
+        "targetKey": { "$ref": "#/$defs/nonEmptyString" },
+        "required": { "type": "boolean" }
+      }
+    },
+    "outputProjection": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode"],
+          "properties": { "mode": { "const": "whole" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "fields"],
+          "properties": {
+            "mode": { "const": "object" },
+            "fields": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 1024,
+              "items": { "$ref": "#/$defs/outputProjectionField" }
+            }
+          }
+        }
+      ]
+    },
+    "recursionPolicy": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode"],
+          "properties": { "mode": { "const": "forbid" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "group", "maxDepth", "onLimit"],
+          "properties": {
+            "mode": { "const": "bounded" },
+            "group": { "$ref": "#/$defs/identifier" },
+            "maxDepth": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 32
+            },
+            "onLimit": { "const": "structured-failure" }
+          }
+        }
+      ]
+    },
+    "callAuthority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "requested", "effective"],
+      "properties": {
+        "mode": { "const": "intersect-parent-ceiling" },
+        "requested": {
+          "type": "array",
+          "maxItems": 6,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/capability" }
+        },
+        "effective": {
+          "type": "array",
+          "maxItems": 6,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/capability" }
+        }
+      }
+    },
+    "callBudget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "maxAttempts",
+        "maxDurationMs",
+        "maxStateBytes",
+        "maxArtifactBytes",
+        "maxStreamItems",
+        "maxStreamInFlightBytes"
+      ],
+      "properties": {
+        "mode": { "const": "reserve-before-invocation-created" },
+        "maxAttempts": { "$ref": "#/$defs/safePositiveInteger" },
+        "maxDurationMs": { "$ref": "#/$defs/timerPositiveInteger" },
+        "maxStateBytes": { "$ref": "#/$defs/safePositiveInteger" },
+        "maxArtifactBytes": { "$ref": "#/$defs/safePositiveInteger" },
+        "maxStreamItems": { "$ref": "#/$defs/safePositiveInteger" },
+        "maxStreamInFlightBytes": { "$ref": "#/$defs/safePositiveInteger" }
+      }
+    },
+    "callPropagation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "parentCancellation",
+        "childFailure",
+        "childCancellation",
+        "nonCooperativeChild",
+        "parentFailureAfterChildCommit"
+      ],
+      "properties": {
+        "parentCancellation": { "const": "cancel-child-before-next-commit" },
+        "childFailure": { "const": "fail-call-edge-with-structured-failure" },
+        "childCancellation": { "const": "cancel-call-edge" },
+        "nonCooperativeChild": { "const": "retain-in-doubt-no-downstream-release" },
+        "parentFailureAfterChildCommit": { "const": "retain-child-history-no-implicit-reuse" }
+      }
+    },
+    "callRecovery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["resume", "replay", "fork", "successfulReuse"],
+      "properties": {
+        "resume": { "const": "continue-isolated-child-scope-from-events" },
+        "replay": { "const": "project-child-history-with-zero-dispatch" },
+        "fork": { "const": "new-child-scope-and-authority-decision" },
+        "successfulReuse": {
+          "const": "exact-input-graph-plan-policy-and-committed-terminal"
+        }
+      }
+    },
+    "boundaryTransfer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifacts", "streams"],
+      "properties": {
+        "artifacts": { "const": "explicit-authorized-artifact-ref-only" },
+        "streams": { "const": "new-descriptor-no-credit-ack-or-write-authority-inheritance" }
+      }
+    },
+    "callBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "ownerGraphKey",
+        "nodeId",
+        "childGraphKey",
+        "checkpointScope",
+        "maxCallsPerParent",
+        "inputProjection",
+        "outputProjection",
+        "recursion",
+        "authority",
+        "budget",
+        "propagation",
+        "recovery",
+        "boundaryTransfer"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "ownerGraphKey": { "$ref": "#/$defs/graphKey" },
+        "nodeId": { "$ref": "#/$defs/identifier" },
+        "childGraphKey": { "$ref": "#/$defs/graphKey" },
+        "checkpointScope": { "const": "isolated" },
+        "maxCallsPerParent": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "inputProjection": { "$ref": "#/$defs/inputProjection" },
+        "outputProjection": { "$ref": "#/$defs/outputProjection" },
+        "recursion": { "$ref": "#/$defs/recursionPolicy" },
+        "authority": { "$ref": "#/$defs/callAuthority" },
+        "budget": { "$ref": "#/$defs/callBudget" },
+        "propagation": { "$ref": "#/$defs/callPropagation" },
+        "recovery": { "$ref": "#/$defs/callRecovery" },
+        "boundaryTransfer": { "$ref": "#/$defs/boundaryTransfer" }
+      }
+    },
+    "contributor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["nodeId", "outputPointer", "required"],
+      "properties": {
+        "nodeId": { "$ref": "#/$defs/identifier" },
+        "outputPointer": { "$ref": "#/$defs/jsonPointer" },
+        "required": { "type": "boolean" }
+      }
+    },
+    "reducerInitialState": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode"],
+          "properties": { "mode": { "const": "required-invocation-state" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "value", "valueHash"],
+          "properties": {
+            "mode": { "const": "literal" },
+            "value": true,
+            "valueHash": { "$ref": "#/$defs/hash" }
+          }
+        }
+      ]
+    },
+    "reducerImplementation": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "version"],
+          "properties": {
+            "kind": { "const": "builtin" },
+            "version": { "const": "state-reducers/v1alpha1" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "version", "contentDigest", "entrypoint", "authority"],
+          "properties": {
+            "kind": { "const": "custom-deterministic-transform" },
+            "version": { "const": "custom-state-reducer/v1alpha1" },
+            "contentDigest": { "$ref": "#/$defs/hash" },
+            "entrypoint": { "$ref": "#/$defs/identifier" },
+            "authority": { "const": "none" }
+          }
+        }
+      ]
+    },
+    "integerBounds": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["minimum", "maximum", "overflow"],
+      "properties": {
+        "minimum": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "maximum": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "overflow": { "const": "structured-failure" }
+      }
+    },
+    "reducerBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "graphKey",
+        "nodeId",
+        "statePointer",
+        "contributors",
+        "operation",
+        "implementation",
+        "law",
+        "initialState",
+        "conflictPolicy",
+        "order",
+        "idempotency",
+        "validation",
+        "commit",
+        "recovery",
+        "payloadPolicy",
+        "maxWrites",
+        "maxStateBytes",
+        "maxUpdateBytes"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "graphKey": { "$ref": "#/$defs/graphKey" },
+        "nodeId": { "$ref": "#/$defs/identifier" },
+        "statePointer": { "$ref": "#/$defs/nonRootJsonPointer" },
+        "contributors": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4096,
+          "items": { "$ref": "#/$defs/contributor" }
+        },
+        "operation": {
+          "enum": [
+            "ordered-replace",
+            "ordered-append",
+            "merge-disjoint",
+            "set-union-by-hash",
+            "bounded-integer-sum",
+            "bounded-integer-min",
+            "bounded-integer-max",
+            "custom-deterministic"
+          ]
+        },
+        "implementation": { "$ref": "#/$defs/reducerImplementation" },
+        "law": {
+          "enum": [
+            "ordered-noncommutative",
+            "commutative-associative-canonical-order",
+            "declared-by-content-addressed-transform"
+          ]
+        },
+        "initialState": { "$ref": "#/$defs/reducerInitialState" },
+        "conflictPolicy": { "const": "reject-overlap" },
+        "order": { "const": "contributor-declaration" },
+        "idempotency": { "const": "exact-batch" },
+        "validation": { "const": "state-schema-and-byte-bounds-before-cas" },
+        "commit": { "const": "event-stream-cas-and-state-version" },
+        "recovery": { "const": "fold-committed-batches-fork-copies-value-not-write-authority" },
+        "payloadPolicy": { "const": "requires-state-sink-policy/v1alpha1" },
+        "maxWrites": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "maxStateBytes": { "$ref": "#/$defs/safePositiveInteger" },
+        "maxUpdateBytes": { "$ref": "#/$defs/safePositiveInteger" },
+        "integerBounds": { "$ref": "#/$defs/integerBounds" }
+      }
+    },
+    "artifactEdge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "graphKey",
+        "edgeId",
+        "maxBytes",
+        "allowedMediaTypes",
+        "storageNamespace",
+        "tenantBinding",
+        "lifetime",
+        "integrity",
+        "publication",
+        "partialUploadCleanup",
+        "deduplication",
+        "collision",
+        "authorizationScope",
+        "producerCapabilities",
+        "consumerCapabilities",
+        "replayFork",
+        "supportExport",
+        "onError",
+        "requiredStoreContract",
+        "requiredCapturePolicyContract"
+      ],
+      "properties": {
+        "graphKey": { "$ref": "#/$defs/graphKey" },
+        "edgeId": { "$ref": "#/$defs/identifier" },
+        "maxBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 67108864
+        },
+        "allowedMediaTypes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9!#$&^_.+-]+/[A-Za-z0-9!#$&^_.+-]+$"
+          }
+        },
+        "storageNamespace": { "$ref": "#/$defs/nonRootJsonPointer" },
+        "tenantBinding": { "$ref": "#/$defs/identifier" },
+        "lifetime": { "enum": ["run", "lineage", "pinned"] },
+        "integrity": { "const": "sha256-size/v1alpha1" },
+        "publication": { "const": "atomic-before-edge-release" },
+        "partialUploadCleanup": { "const": "bounded-idempotent-orphan-cleanup" },
+        "deduplication": { "const": "same-digest-size-media-type-and-tenant-only" },
+        "collision": { "const": "same-digest-different-bytes-is-fatal" },
+        "authorizationScope": { "const": "run-and-invocation" },
+        "producerCapabilities": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 2,
+          "uniqueItems": true,
+          "items": { "enum": ["artifact:write", "artifact:delete"] }
+        },
+        "consumerCapabilities": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 2,
+          "uniqueItems": true,
+          "items": { "enum": ["artifact:read", "artifact:list"] }
+        },
+        "replayFork": { "const": "replay-read-only-fork-reauthorize-sharing" },
+        "supportExport": { "const": "metadata-only-unless-explicit-protected-export" },
+        "onError": { "const": "fail-edge" },
+        "requiredStoreContract": { "const": "artifact-store/v1alpha1" },
+        "requiredCapturePolicyContract": {
+          "const": "artifact-sink-policy/v1alpha1"
+        }
+      }
+    },
+    "streamEdge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "graphKey",
+        "edgeId",
+        "itemMode",
+        "itemSchemaHash",
+        "topology",
+        "maxItems",
+        "maxItemBytes",
+        "maxInFlightBytes",
+        "bufferCapacity",
+        "maxUnacknowledged",
+        "maxDemandPerGrant",
+        "ordering",
+        "delivery",
+        "demand",
+        "recovery",
+        "attemptIdentity",
+        "lateItems",
+        "terminalFrames",
+        "spillPolicy",
+        "checkpointBoundary",
+        "duplicateSuppression",
+        "traceMetrics",
+        "onError",
+        "onCancel",
+        "requiredRuntimeContract",
+        "requiredCapturePolicyContract"
+      ],
+      "properties": {
+        "graphKey": { "$ref": "#/$defs/graphKey" },
+        "edgeId": { "$ref": "#/$defs/identifier" },
+        "itemMode": { "enum": ["value", "artifact-ref"] },
+        "itemSchemaHash": { "$ref": "#/$defs/hash" },
+        "topology": { "const": "one-to-one" },
+        "maxItems": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "maxItemBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 67108864
+        },
+        "maxInFlightBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1073741824
+        },
+        "bufferCapacity": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65536
+        },
+        "maxUnacknowledged": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65536
+        },
+        "maxDemandPerGrant": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65536
+        },
+        "ordering": { "const": "source" },
+        "delivery": { "const": "at-least-once" },
+        "demand": { "const": "explicit-credit" },
+        "recovery": { "const": "redeliver-unacknowledged" },
+        "attemptIdentity": { "const": "stream-item-sequence-and-delivery-attempt" },
+        "lateItems": { "const": "reject-after-terminal" },
+        "terminalFrames": { "const": "exactly-one-success-error-or-cancel" },
+        "spillPolicy": { "enum": ["forbid", "authorized-artifact-ref-only"] },
+        "checkpointBoundary": { "const": "after-every-durable-frame" },
+        "duplicateSuppression": { "const": "item-hash-sequence-and-ack-ledger" },
+        "traceMetrics": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "uniqueItems": true,
+          "items": { "enum": ["blockedNs", "lagItems", "queueDepth", "throughputItems"] }
+        },
+        "onError": { "const": "fail-edge" },
+        "onCancel": { "const": "cancel-edge" },
+        "requiredRuntimeContract": { "const": "durable-stream-edge/v1alpha1" },
+        "requiredCapturePolicyContract": {
+          "const": "stream-sink-policy/v1alpha1"
+        }
+      }
+    }
+  }
+}

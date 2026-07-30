@@ -1,0 +1,750 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/subgraph-edge-event.schema.json",
+  "title": "Graph Engineering Subgraph and Edge Recovery Event",
+  "allOf": [
+    { "$ref": "#/$defs/baseEvent" },
+    {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "InvocationCreated" },
+            "data": { "$ref": "#/$defs/invocationCreated" }
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "InvocationStarted" },
+            "data": { "$ref": "#/$defs/emptyData" }
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "InvocationSucceeded" },
+            "data": { "$ref": "#/$defs/invocationSucceeded" }
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "InvocationFailed" },
+            "data": { "$ref": "#/$defs/invocationFailed" }
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "InvocationCancelled" },
+            "data": { "$ref": "#/$defs/invocationCancelled" }
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "StateReducerCommitted" },
+            "data": { "$ref": "#/$defs/stateReducerCommitted" }
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "ArtifactPublished" },
+            "data": { "$ref": "#/$defs/artifactPublished" }
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "ArtifactReadVerified" },
+            "data": { "$ref": "#/$defs/artifactReadVerified" }
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "ArtifactReleased" },
+            "data": { "$ref": "#/$defs/artifactReleased" }
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "ArtifactFailed" },
+            "data": { "$ref": "#/$defs/artifactFailed" }
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "StreamOpened" },
+            "data": { "$ref": "#/$defs/streamOpened" }
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "StreamDemandGranted" },
+            "data": { "$ref": "#/$defs/streamDemandGranted" }
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "StreamItemPublished" },
+            "data": { "$ref": "#/$defs/streamItemPublished" }
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "StreamItemDelivered" },
+            "data": { "$ref": "#/$defs/streamItemDelivered" }
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "StreamItemAcknowledged" },
+            "data": { "$ref": "#/$defs/streamItemAcknowledged" }
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "StreamSourceClosed" },
+            "data": { "$ref": "#/$defs/streamSourceClosed" }
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "StreamCompleted" },
+            "data": { "$ref": "#/$defs/streamCompleted" }
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "StreamFailed" },
+            "data": { "$ref": "#/$defs/streamFailed" }
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "StreamCancelled" },
+            "data": { "$ref": "#/$defs/streamCancelled" }
+          }
+        }
+      ]
+    }
+  ],
+  "$defs": {
+    "safeNonNegativeInteger": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "safePositiveInteger": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$"
+    },
+    "graphKey": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,62}$"
+    },
+    "timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01])T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\\.[0-9]{1,9})?Z$"
+    },
+    "runLineage": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode"],
+          "properties": { "mode": { "const": "start" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "sourceRunId", "sourceSequence", "sourceHistoryHash"],
+          "properties": {
+            "mode": { "enum": ["resume", "replay", "fork"] },
+            "sourceRunId": { "$ref": "#/$defs/identifier" },
+            "sourceSequence": { "$ref": "#/$defs/safeNonNegativeInteger" },
+            "sourceHistoryHash": { "$ref": "#/$defs/hash" }
+          }
+        }
+      ]
+    },
+    "traceContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["traceId", "spanId", "parentSpanId", "relation"],
+      "properties": {
+        "traceId": { "$ref": "#/$defs/hash" },
+        "spanId": { "$ref": "#/$defs/hash" },
+        "parentSpanId": {
+          "oneOf": [
+            { "$ref": "#/$defs/hash" },
+            { "type": "null" }
+          ]
+        },
+        "relation": { "enum": ["root", "child-of", "follows-from"] }
+      }
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "namespace",
+        "invocationId",
+        "parentInvocationId",
+        "graphKey",
+        "graphHash",
+        "compiledPlanHash",
+        "graphRevision",
+        "depth",
+        "callId",
+        "callOrdinal",
+        "recursionGroup",
+        "recursionDepth"
+      ],
+      "properties": {
+        "namespace": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 65536
+        },
+        "invocationId": { "$ref": "#/$defs/hash" },
+        "parentInvocationId": {
+          "anyOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/hash" }
+          ]
+        },
+        "graphKey": { "$ref": "#/$defs/graphKey" },
+        "graphHash": { "$ref": "#/$defs/hash" },
+        "compiledPlanHash": { "$ref": "#/$defs/hash" },
+        "graphRevision": { "const": 1 },
+        "depth": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 64
+        },
+        "callId": {
+          "anyOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/identifier" }
+          ]
+        },
+        "callOrdinal": { "$ref": "#/$defs/safeNonNegativeInteger" },
+        "recursionGroup": {
+          "anyOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/identifier" }
+          ]
+        },
+        "recursionDepth": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 32
+        }
+      }
+    },
+    "eventType": {
+      "enum": [
+        "InvocationCreated",
+        "InvocationStarted",
+        "InvocationSucceeded",
+        "InvocationFailed",
+        "InvocationCancelled",
+        "StateReducerCommitted",
+        "ArtifactPublished",
+        "ArtifactReadVerified",
+        "ArtifactReleased",
+        "ArtifactFailed",
+        "StreamOpened",
+        "StreamDemandGranted",
+        "StreamItemPublished",
+        "StreamItemDelivered",
+        "StreamItemAcknowledged",
+        "StreamSourceClosed",
+        "StreamCompleted",
+        "StreamFailed",
+        "StreamCancelled"
+      ]
+    },
+    "baseEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "apiVersion",
+        "kind",
+        "contractVersion",
+        "runId",
+        "eventStreamId",
+        "revisionHash",
+        "lineage",
+        "sequence",
+        "expectedPreviousSequence",
+        "eventId",
+        "timestamp",
+        "monotonicOffsetNs",
+        "planHash",
+        "rootGraphHash",
+        "scope",
+        "trace",
+        "type",
+        "payloadDisposition",
+        "redacted",
+        "data",
+        "previousEventHash",
+        "payloadHash",
+        "eventHash"
+      ],
+      "properties": {
+        "apiVersion": {
+          "const": "graphengineering.reacher-z.github.io/subgraph-edge-events/v1alpha1"
+        },
+        "kind": { "const": "SubgraphEdgeEvent" },
+        "contractVersion": { "const": "subgraph-edge-recovery/v1alpha1" },
+        "runId": { "$ref": "#/$defs/identifier" },
+        "eventStreamId": { "$ref": "#/$defs/hash" },
+        "revisionHash": { "$ref": "#/$defs/hash" },
+        "lineage": { "$ref": "#/$defs/runLineage" },
+        "sequence": { "$ref": "#/$defs/safeNonNegativeInteger" },
+        "expectedPreviousSequence": {
+          "type": "integer",
+          "minimum": -1,
+          "maximum": 9007199254740990
+        },
+        "eventId": { "$ref": "#/$defs/identifier" },
+        "timestamp": { "$ref": "#/$defs/timestamp" },
+        "monotonicOffsetNs": { "$ref": "#/$defs/safeNonNegativeInteger" },
+        "planHash": { "$ref": "#/$defs/hash" },
+        "rootGraphHash": { "$ref": "#/$defs/hash" },
+        "scope": { "$ref": "#/$defs/scope" },
+        "trace": { "$ref": "#/$defs/traceContext" },
+        "type": { "$ref": "#/$defs/eventType" },
+        "payloadDisposition": { "const": "inline-unredacted" },
+        "redacted": { "const": false },
+        "data": { "type": "object" },
+        "previousEventHash": {
+          "anyOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/hash" }
+          ]
+        },
+        "payloadHash": { "$ref": "#/$defs/hash" },
+        "eventHash": { "$ref": "#/$defs/hash" }
+      }
+    },
+    "emptyData": {
+      "type": "object",
+      "additionalProperties": false,
+      "maxProperties": 0
+    },
+    "invocationCreated": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "input",
+        "inputHash",
+        "projectionHash",
+        "effectiveAuthorityHash",
+        "budgetAllocationHash",
+        "reuseDisposition"
+      ],
+      "properties": {
+        "input": {},
+        "inputHash": { "$ref": "#/$defs/hash" },
+        "projectionHash": { "$ref": "#/$defs/hash" },
+        "effectiveAuthorityHash": { "$ref": "#/$defs/hash" },
+        "budgetAllocationHash": { "$ref": "#/$defs/hash" },
+        "reuseDisposition": { "enum": ["new-work", "committed-exact-reuse"] }
+      }
+    },
+    "invocationSucceeded": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["namedOutputsHash", "projectedOutput", "projectedOutputHash"],
+      "properties": {
+        "namedOutputsHash": { "$ref": "#/$defs/hash" },
+        "projectedOutput": {},
+        "projectedOutputHash": { "$ref": "#/$defs/hash" }
+      }
+    },
+    "failureCode": {
+      "enum": [
+        "GE_D4_CAPABILITY_UNAVAILABLE",
+        "GE_D4_PLAN_INVALID",
+        "GE_D4_NAMESPACE_INVALID",
+        "GE_D4_RECURSION_LIMIT",
+        "GE_D4_PROJECTION_MISSING",
+        "GE_D4_PROJECTION_COLLISION",
+        "GE_D4_REDUCER_CONFLICT",
+        "GE_D4_REDUCER_IDEMPOTENCY_CONFLICT",
+        "GE_D4_ARTIFACT_STORE_UNAVAILABLE",
+        "GE_D4_ARTIFACT_PUBLICATION_FAILED",
+        "GE_D4_ARTIFACT_NOT_FOUND",
+        "GE_D4_ARTIFACT_CORRUPT",
+        "GE_D4_ARTIFACT_UNAUTHORIZED",
+        "GE_D4_ARTIFACT_OVERSIZED",
+        "GE_D4_ARTIFACT_EXPIRED",
+        "GE_D4_STREAM_DEMAND_EXHAUSTED",
+        "GE_D4_STREAM_BUFFER_FULL",
+        "GE_D4_STREAM_ITEM_INVALID",
+        "GE_D4_STREAM_PROTOCOL",
+        "GE_D4_STREAM_CANCELLED",
+        "GE_D4_STREAM_FAILED",
+        "GE_D4_PAYLOAD_POLICY_UNAVAILABLE",
+        "GE_D4_INVALID_HISTORY",
+        "GE_D4_CORRUPT_CHECKPOINT"
+      ]
+    },
+    "failure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "phase", "message", "retryable"],
+      "properties": {
+        "code": { "$ref": "#/$defs/failureCode" },
+        "phase": {
+          "enum": [
+            "negotiate",
+            "plan",
+            "scope",
+            "projection",
+            "reduce",
+            "artifact",
+            "stream",
+            "recover",
+            "trace"
+          ]
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "retryable": { "type": "boolean" }
+      }
+    },
+    "invocationFailed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["failure"],
+      "properties": { "failure": { "$ref": "#/$defs/failure" } }
+    },
+    "invocationCancelled": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reason"],
+      "properties": {
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        }
+      }
+    },
+    "presentReducerWrite": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contributorOrdinal",
+        "nodeId",
+        "writeId",
+        "present",
+        "value",
+        "valueHash"
+      ],
+      "properties": {
+        "contributorOrdinal": { "$ref": "#/$defs/safeNonNegativeInteger" },
+        "nodeId": { "$ref": "#/$defs/identifier" },
+        "writeId": { "$ref": "#/$defs/hash" },
+        "present": { "const": true },
+        "value": {},
+        "valueHash": { "$ref": "#/$defs/hash" }
+      }
+    },
+    "absentReducerWrite": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contributorOrdinal",
+        "nodeId",
+        "writeId",
+        "present",
+        "terminalStatus",
+        "failureCode"
+      ],
+      "properties": {
+        "contributorOrdinal": { "$ref": "#/$defs/safeNonNegativeInteger" },
+        "nodeId": { "$ref": "#/$defs/identifier" },
+        "writeId": { "$ref": "#/$defs/hash" },
+        "present": { "const": false },
+        "terminalStatus": { "enum": ["failed", "skipped", "cancelled"] },
+        "failureCode": { "$ref": "#/$defs/failureCode" }
+      }
+    },
+    "stateReducerCommitted": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reducerId",
+        "reducerIdentity",
+        "batchId",
+        "stateVersionBefore",
+        "stateVersionAfter",
+        "beforeStateHash",
+        "afterState",
+        "afterStateHash",
+        "updateBytes",
+        "writes"
+      ],
+      "properties": {
+        "reducerId": { "$ref": "#/$defs/identifier" },
+        "reducerIdentity": { "$ref": "#/$defs/hash" },
+        "batchId": { "$ref": "#/$defs/hash" },
+        "stateVersionBefore": { "$ref": "#/$defs/safeNonNegativeInteger" },
+        "stateVersionAfter": { "$ref": "#/$defs/safePositiveInteger" },
+        "beforeStateHash": { "$ref": "#/$defs/hash" },
+        "afterState": {},
+        "afterStateHash": { "$ref": "#/$defs/hash" },
+        "updateBytes": { "$ref": "#/$defs/safeNonNegativeInteger" },
+        "writes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4096,
+          "items": {
+            "oneOf": [
+              { "$ref": "#/$defs/presentReducerWrite" },
+              { "$ref": "#/$defs/absentReducerWrite" }
+            ]
+          }
+        }
+      }
+    },
+    "artifactPublished": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["publicationId", "finalizeAttemptId", "holdId", "artifactRef"],
+      "properties": {
+        "publicationId": { "$ref": "#/$defs/hash" },
+        "finalizeAttemptId": { "$ref": "#/$defs/hash" },
+        "holdId": { "$ref": "#/$defs/identifier" },
+        "artifactRef": {
+          "$ref": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/artifact-ref.schema.json"
+        }
+      }
+    },
+    "artifactReadVerified": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifactId", "capabilityId", "readAttemptId", "readerNodeId", "digest", "sizeBytes"],
+      "properties": {
+        "artifactId": { "$ref": "#/$defs/hash" },
+        "capabilityId": { "$ref": "#/$defs/hash" },
+        "readAttemptId": { "$ref": "#/$defs/hash" },
+        "readerNodeId": { "$ref": "#/$defs/identifier" },
+        "digest": { "$ref": "#/$defs/hash" },
+        "sizeBytes": { "$ref": "#/$defs/safeNonNegativeInteger" }
+      }
+    },
+    "artifactReleased": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifactId", "holdId", "reason"],
+      "properties": {
+        "artifactId": { "$ref": "#/$defs/hash" },
+        "holdId": { "$ref": "#/$defs/identifier" },
+        "reason": { "enum": ["edge-consumed", "run-terminal", "explicit-unpin"] }
+      }
+    },
+    "artifactFailed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["edgeId", "failure"],
+      "properties": {
+        "edgeId": { "$ref": "#/$defs/identifier" },
+        "failure": { "$ref": "#/$defs/failure" }
+      }
+    },
+    "streamOpened": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "streamId",
+        "edgeId",
+        "producerNodeId",
+        "consumerNodeId",
+        "itemMode",
+        "itemSchemaHash",
+        "topology",
+        "maxItems",
+        "maxItemBytes",
+        "maxInFlightBytes",
+        "bufferCapacity",
+        "maxUnacknowledged",
+        "maxDemandPerGrant"
+      ],
+      "properties": {
+        "streamId": { "$ref": "#/$defs/hash" },
+        "edgeId": { "$ref": "#/$defs/identifier" },
+        "producerNodeId": { "$ref": "#/$defs/identifier" },
+        "consumerNodeId": { "$ref": "#/$defs/identifier" },
+        "itemMode": { "enum": ["value", "artifact-ref"] },
+        "itemSchemaHash": { "$ref": "#/$defs/hash" },
+        "topology": { "const": "one-to-one" },
+        "maxItems": { "$ref": "#/$defs/safePositiveInteger" },
+        "maxItemBytes": { "$ref": "#/$defs/safePositiveInteger" },
+        "maxInFlightBytes": { "$ref": "#/$defs/safePositiveInteger" },
+        "bufferCapacity": { "$ref": "#/$defs/safePositiveInteger" },
+        "maxUnacknowledged": { "$ref": "#/$defs/safePositiveInteger" },
+        "maxDemandPerGrant": { "$ref": "#/$defs/safePositiveInteger" }
+      }
+    },
+    "streamDemandGranted": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["streamId", "credits", "totalDemand"],
+      "properties": {
+        "streamId": { "$ref": "#/$defs/hash" },
+        "credits": { "$ref": "#/$defs/safePositiveInteger" },
+        "totalDemand": { "$ref": "#/$defs/safePositiveInteger" }
+      }
+    },
+    "valueStreamItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["streamId", "itemSequence", "itemAttemptId", "itemMode", "itemBytes", "value", "itemHash"],
+      "properties": {
+        "streamId": { "$ref": "#/$defs/hash" },
+        "itemSequence": { "$ref": "#/$defs/safeNonNegativeInteger" },
+        "itemAttemptId": { "$ref": "#/$defs/hash" },
+        "itemMode": { "const": "value" },
+        "itemBytes": { "$ref": "#/$defs/safeNonNegativeInteger" },
+        "value": {},
+        "itemHash": { "$ref": "#/$defs/hash" }
+      }
+    },
+    "artifactStreamItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["streamId", "itemSequence", "itemAttemptId", "itemMode", "itemBytes", "artifactRef", "itemHash"],
+      "properties": {
+        "streamId": { "$ref": "#/$defs/hash" },
+        "itemSequence": { "$ref": "#/$defs/safeNonNegativeInteger" },
+        "itemAttemptId": { "$ref": "#/$defs/hash" },
+        "itemMode": { "const": "artifact-ref" },
+        "itemBytes": { "$ref": "#/$defs/safeNonNegativeInteger" },
+        "artifactRef": {
+          "$ref": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/artifact-ref.schema.json"
+        },
+        "itemHash": { "$ref": "#/$defs/hash" }
+      }
+    },
+    "streamItemPublished": {
+      "oneOf": [
+        { "$ref": "#/$defs/valueStreamItem" },
+        { "$ref": "#/$defs/artifactStreamItem" }
+      ]
+    },
+    "streamItemDelivered": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["streamId", "itemSequence", "deliveryAttempt", "deliveryAttemptId"],
+      "properties": {
+        "streamId": { "$ref": "#/$defs/hash" },
+        "itemSequence": { "$ref": "#/$defs/safeNonNegativeInteger" },
+        "deliveryAttempt": { "$ref": "#/$defs/safePositiveInteger" },
+        "deliveryAttemptId": { "$ref": "#/$defs/hash" }
+      }
+    },
+    "streamItemAcknowledged": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["streamId", "itemSequence", "deliveryAttempt", "deliveryAttemptId"],
+      "properties": {
+        "streamId": { "$ref": "#/$defs/hash" },
+        "itemSequence": { "$ref": "#/$defs/safeNonNegativeInteger" },
+        "deliveryAttempt": { "$ref": "#/$defs/safePositiveInteger" },
+        "deliveryAttemptId": { "$ref": "#/$defs/hash" }
+      }
+    },
+    "streamSourceClosed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["streamId", "publishedCount"],
+      "properties": {
+        "streamId": { "$ref": "#/$defs/hash" },
+        "publishedCount": { "$ref": "#/$defs/safeNonNegativeInteger" }
+      }
+    },
+    "streamCompleted": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["streamId", "published", "delivered", "acknowledged"],
+      "properties": {
+        "streamId": { "$ref": "#/$defs/hash" },
+        "published": { "$ref": "#/$defs/safeNonNegativeInteger" },
+        "delivered": { "$ref": "#/$defs/safeNonNegativeInteger" },
+        "acknowledged": { "$ref": "#/$defs/safeNonNegativeInteger" }
+      }
+    },
+    "streamFailed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "streamId",
+        "published",
+        "delivered",
+        "acknowledged",
+        "failure"
+      ],
+      "properties": {
+        "streamId": { "$ref": "#/$defs/hash" },
+        "published": { "$ref": "#/$defs/safeNonNegativeInteger" },
+        "delivered": { "$ref": "#/$defs/safeNonNegativeInteger" },
+        "acknowledged": { "$ref": "#/$defs/safeNonNegativeInteger" },
+        "failure": { "$ref": "#/$defs/failure" }
+      }
+    },
+    "streamCancelled": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "streamId",
+        "published",
+        "delivered",
+        "acknowledged",
+        "reason"
+      ],
+      "properties": {
+        "streamId": { "$ref": "#/$defs/hash" },
+        "published": { "$ref": "#/$defs/safeNonNegativeInteger" },
+        "delivered": { "$ref": "#/$defs/safeNonNegativeInteger" },
+        "acknowledged": { "$ref": "#/$defs/safeNonNegativeInteger" },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        }
+      }
+    }
+  }
+}

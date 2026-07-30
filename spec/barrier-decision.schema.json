@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/barrier-decision.schema.json",
+  "title": "Graph Engineering durable barrier decision",
+  "description": "Frozen 'data' payload of a BarrierSatisfied event. Emitted for every committed decision, satisfied or not; the 'satisfied' member carries the truth. A committed decision is authoritative forever and is never re-judged on resume, replay, or fork.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "barrierNodeId",
+    "policyHash",
+    "decisionId",
+    "armedAtMs",
+    "decidedAtMs",
+    "deadlineElapsed",
+    "satisfied",
+    "reasonCode",
+    "resolution",
+    "total",
+    "succeeded",
+    "failed",
+    "missing",
+    "timedOut",
+    "abstained",
+    "unknown",
+    "acceptedIds",
+    "failedIds",
+    "missingIds",
+    "timedOutIds",
+    "abstainedIds",
+    "unknownIds"
+  ],
+  "properties": {
+    "barrierNodeId": { "$ref": "#/$defs/safeId" },
+    "policyHash": { "$ref": "#/$defs/sha256" },
+    "decisionId": { "$ref": "#/$defs/sha256" },
+    "armedAtMs": { "$ref": "#/$defs/safeInteger" },
+    "decidedAtMs": { "$ref": "#/$defs/safeInteger" },
+    "deadlineElapsed": { "type": "boolean" },
+    "satisfied": { "type": "boolean" },
+    "reasonCode": {
+      "enum": [
+        "NO_ITEMS",
+        "ALL_SUCCEEDED",
+        "ALL_NOT_SUCCEEDED",
+        "MINIMUM_MET",
+        "MINIMUM_NOT_MET",
+        "MINIMUM_EXCEEDS_TOTAL",
+        "PERCENTAGE_MET",
+        "PERCENTAGE_NOT_MET",
+        "QUORUM_MET",
+        "QUORUM_NOT_MET",
+        "QUORUM_EXCEEDS_PARTICIPANTS"
+      ]
+    },
+    "resolution": {
+      "enum": ["satisfied", "failed", "unknown", "awaiting_human"]
+    },
+    "total": { "$ref": "#/$defs/safeInteger" },
+    "succeeded": { "$ref": "#/$defs/safeInteger" },
+    "failed": { "$ref": "#/$defs/safeInteger" },
+    "missing": { "$ref": "#/$defs/safeInteger" },
+    "timedOut": { "$ref": "#/$defs/safeInteger" },
+    "abstained": { "$ref": "#/$defs/safeInteger" },
+    "unknown": { "$ref": "#/$defs/safeInteger" },
+    "acceptedIds": { "$ref": "#/$defs/idList" },
+    "failedIds": { "$ref": "#/$defs/idList" },
+    "missingIds": { "$ref": "#/$defs/idList" },
+    "timedOutIds": { "$ref": "#/$defs/idList" },
+    "abstainedIds": { "$ref": "#/$defs/idList" },
+    "unknownIds": { "$ref": "#/$defs/idList" },
+    "votes": {
+      "description": "Present if and only if the policy kind is 'quorum'. Exactly one record per disposition entry, in incoming-edge declaration order.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sourceNodeId", "verdict"],
+        "properties": {
+          "sourceNodeId": { "$ref": "#/$defs/safeId" },
+          "verdict": {
+            "description": "The four cast verdicts mirror barrier-vote.schema.json. 'not-cast' is the fifth member and exists only here: a quorum barrier may legitimately have entries that produced no vote at all (missing after route pruning, upstream failure, upstream unknown or cancellation, and timed_out after the deadline elapsed). Those entries still appear in the census so that votes remains a faithful one-record-per-entry record, and 'not-cast' states plainly that no vote was produced. An upstream can never cast 'not-cast'.",
+            "enum": ["accept", "reject", "abstain", "unknown", "not-cast"]
+          },
+          "confidenceBasisPoints": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000
+          },
+          "evidenceHash": { "$ref": "#/$defs/sha256" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "safeId": {
+      "description": "A Graph IR node identifier. This is deliberately the node-ID pattern from graph.schema.json, not the wider SafeRouteId pattern: a decision document must not accept a node ID the compiler can never produce.",
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "safeInteger": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "idList": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/safeId" }
+    }
+  }
+}

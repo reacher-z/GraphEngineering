@@ -1,0 +1,145 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/budget-policy.schema.json",
+  "title": "Graph Engineering Portable Budget Policy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "contractVersion",
+    "policyId",
+    "authorityBindingHash",
+    "currency",
+    "minorUnitExponent",
+    "limitSemantics",
+    "rootCeiling",
+    "scopeCeilings",
+    "allowedProviderMetrics",
+    "unknownUsage",
+    "unknownPricing",
+    "overage",
+    "compensation",
+    "reservation",
+    "terminalPrecedence",
+    "limits"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "graphengineering.reacher-z.github.io/budget-policies/v1alpha1"
+    },
+    "kind": { "const": "BudgetPolicy" },
+    "contractVersion": { "const": "portable-budget/v1alpha1" },
+    "policyId": { "$ref": "#/$defs/identifier" },
+    "authorityBindingHash": { "$ref": "#/$defs/hash" },
+    "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+    "minorUnitExponent": { "type": "integer", "minimum": 0, "maximum": 6 },
+    "limitSemantics": { "const": "inclusive-ceiling-admit-only-if-worst-case-fits" },
+    "rootCeiling": {
+      "$ref": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/budget-vector.schema.json"
+    },
+    "scopeCeilings": {
+      "type": "array",
+      "maxItems": 4096,
+      "items": { "$ref": "#/$defs/scopeCeiling" }
+    },
+    "allowedProviderMetrics": {
+      "type": "array",
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/versionedIdentity" }
+    },
+    "unknownUsage": { "const": "deny-before-dispatch" },
+    "unknownPricing": { "const": "deny-unless-explicit-conservative-reservation" },
+    "overage": { "const": "commit-declared-ceiling-dispute-excess-stop-new-work" },
+    "compensation": { "const": "economic-audit-only-never-restores-scheduling-capacity" },
+    "reservation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "admission",
+        "atomicity",
+        "nesting",
+        "idempotency",
+        "fencing",
+        "replay",
+        "fork",
+        "inDoubt"
+      ],
+      "properties": {
+        "admission": { "const": "sound-worst-case-before-dispatch" },
+        "atomicity": { "const": "all-dimensions-or-none" },
+        "nesting": { "const": "child-allocation-contained-by-parent" },
+        "idempotency": { "const": "one-canonical-outcome-per-settlement-id" },
+        "fencing": { "const": "event-stream-cas-plus-monotonic-lease-fence" },
+        "replay": { "const": "read-only-recorded-decisions-no-new-debit" },
+        "fork": { "const": "new-account-or-explicit-new-allocation-no-credit-copy" },
+        "inDoubt": { "const": "retain-maximum-unresolved-usage" }
+      }
+    },
+    "terminalPrecedence": {
+      "type": "array",
+      "minItems": 12,
+      "maxItems": 12,
+      "uniqueItems": true,
+      "prefixItems": [
+        { "const": "CANCELLED" },
+        { "const": "MAX_DURATION" },
+        { "const": "MAX_MONEY" },
+        { "const": "MAX_PROVIDER_USAGE" },
+        { "const": "MAX_ATTEMPTS" },
+        { "const": "MAX_DYNAMIC_NODES" },
+        { "const": "MAX_GRAPH_SIZE" },
+        { "const": "MAX_FAN_OUT" },
+        { "const": "MAX_DEPTH" },
+        { "const": "MAX_BYTES" },
+        { "const": "DISPUTED_USAGE" },
+        { "const": "FAILED" }
+      ],
+      "items": false
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "maxReservations",
+        "maxReservationDepth",
+        "maxProviderMetrics",
+        "maxEvents",
+        "maxCanonicalBytes"
+      ],
+      "properties": {
+        "maxReservations": { "type": "integer", "minimum": 1, "maximum": 1000000 },
+        "maxReservationDepth": { "type": "integer", "minimum": 1, "maximum": 64 },
+        "maxProviderMetrics": { "type": "integer", "minimum": 0, "maximum": 64 },
+        "maxEvents": { "type": "integer", "minimum": 1, "maximum": 100000000 },
+        "maxCanonicalBytes": { "type": "integer", "minimum": 1024, "maximum": 16777216 }
+      }
+    }
+  },
+  "$defs": {
+    "hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$"
+    },
+    "versionedIdentity": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,254}/v[0-9]+(?:alpha[0-9]+|beta[0-9]+)?$"
+    },
+    "scopeCeiling": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scopeKind", "scopeId", "ceiling"],
+      "properties": {
+        "scopeKind": {
+          "enum": ["activity", "graph", "model", "node", "provider", "run", "tenant"]
+        },
+        "scopeId": { "$ref": "#/$defs/identifier" },
+        "ceiling": {
+          "$ref": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/budget-vector.schema.json"
+        }
+      }
+    }
+  }
+}

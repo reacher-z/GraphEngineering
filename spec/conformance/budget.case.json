@@ -1,0 +1,451 @@
+{
+  "apiVersion": "graphengineering.reacher-z.github.io/conformance/budgets/v1alpha1",
+  "kind": "BudgetConformanceCase",
+  "contractVersion": "portable-budget/v1alpha1",
+  "contractStatus": "contract-only-native-implementation-required",
+  "implementationClaim": false,
+  "identities": {
+    "authorityBindingHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "classificationHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "healthSnapshotHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "graphHash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "planHash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "attemptId": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "usageEnvelopeHash": "1111111111111111111111111111111111111111111111111111111111111111",
+    "eventStreamId": "2222222222222222222222222222222222222222222222222222222222222222"
+  },
+  "expected": {
+    "policyHash": "a9e20b2442d345fc726cd1103a0a01f4d13fc0096069c866a74bd98f649c9471",
+    "pricingSnapshotHash": "db513b784e5614f5c5a8c72e29a7b39ece55a8ab3201540d378d473d361be57b",
+    "routerPolicyHash": "7ad87bc82fbfd815e593d40cda9fdd23c7b071ba568e28ff63f891c156c3ec3b",
+    "routeDecisionHashes": {
+      "select-premium-for-confidential-tools": "5c64ba56a6931c75b3cc4f2e211c16f746076bf7cd780d9c12f0f62dc73b32ef",
+      "deny-secret-data": "10c566483a62775f5f49b04b04b8e257b5bec98518bc11a385a182c9bb6f3274",
+      "deny-open-health": "4916dae3d0afaebf247b6dd373043c68c072df4ca984638b383206c486e86325",
+      "deny-money-bound": "c464bf45e68ed967be04aadccc2e65cac5c282fa6a67fe9ba1b54286e759dae4"
+    },
+    "eventHashes": [
+      "1cc9bb61417a4dd55fb34008b445700740b785b894ae76287d0e3e7b3f0f950a",
+      "36618bea9be36a029d5c023fe07b389676d7b24cb9f00503a3ce78f5f25f1185",
+      "db7c0b1f9bafc419fbadeba72c7a9c11a04a41599b94797ec613cb1f179eb119",
+      "27f447f6bd5c47eaa6e98181b96a7aeccce716318f15924ff757b85e3a8a2859",
+      "31cda87eb40e517ef22190050202c7920426bc25da461c9e434ce69e5976b059",
+      "89c08256951aa8af9d77ba962ca6050afc5696b5d2ef920f813700f2aebee421",
+      "a9a007f9e67a91d8f70b6bf06817f53acb4ff81ce9e0522fb7d63c229996f544",
+      "07f3dcb9f05b3a7f4eaeac818e121b4a302db83d089f8319ac859a8fe2cd372d",
+      "3ab023b458130be8c0d37555e9db0afbd40b567e89499578be21efec003adc5a",
+      "b8440750ff52a9482c267718cee1fa5725d69bd1d94d253166d8805efd7d2fd7"
+    ],
+    "checkpointContentHash": "296256e89d8c3b2fee25fee0df8891bc435ec8b1e774f165a8440c8885c0b340",
+    "terminalProjectionHash": "0f91aa447f3eecbaff1abf3c9b5c929bd0a7d16e91048e2485126c7eadb55456"
+  },
+  "vectors": {
+    "rootCeiling": {
+      "apiVersion": "graphengineering.reacher-z.github.io/budget-vectors/v1alpha1",
+      "kind": "BudgetVector",
+      "contractVersion": "portable-budget/v1alpha1",
+      "currency": "USD",
+      "minorUnitExponent": 2,
+      "quantities": [
+        { "resource": "attempts", "unit": "count", "aggregation": "sum", "amount": 20 },
+        { "resource": "depth", "unit": "count", "aggregation": "maximum", "amount": 8 },
+        { "resource": "dynamic-nodes", "unit": "count", "aggregation": "sum", "amount": 10 },
+        { "resource": "elapsed-ms", "unit": "millisecond", "aggregation": "maximum", "amount": 60000 },
+        { "resource": "fan-out", "unit": "count", "aggregation": "maximum", "amount": 16 },
+        { "resource": "graph-edges", "unit": "count", "aggregation": "maximum", "amount": 100 },
+        { "resource": "graph-nodes", "unit": "count", "aggregation": "maximum", "amount": 50 },
+        { "resource": "input-units", "unit": "usage-unit", "aggregation": "sum", "amount": 10000 },
+        { "resource": "money-nano-minor", "unit": "nano-minor", "aggregation": "sum", "amount": 5000000000 },
+        { "resource": "output-units", "unit": "usage-unit", "aggregation": "sum", "amount": 5000 },
+        { "resource": "provider-calls", "unit": "count", "aggregation": "sum", "amount": 10 },
+        { "resource": "tool-calls", "unit": "count", "aggregation": "sum", "amount": 10 },
+        { "resource": "transport-bytes", "unit": "byte", "aggregation": "sum", "amount": 1048576 }
+      ],
+      "providerSpecific": []
+    },
+    "rootReservation": {
+      "apiVersion": "graphengineering.reacher-z.github.io/budget-vectors/v1alpha1",
+      "kind": "BudgetVector",
+      "contractVersion": "portable-budget/v1alpha1",
+      "currency": "USD",
+      "minorUnitExponent": 2,
+      "quantities": [
+        { "resource": "attempts", "unit": "count", "aggregation": "sum", "amount": 5 },
+        { "resource": "input-units", "unit": "usage-unit", "aggregation": "sum", "amount": 1000 },
+        { "resource": "money-nano-minor", "unit": "nano-minor", "aggregation": "sum", "amount": 1000000000 },
+        { "resource": "output-units", "unit": "usage-unit", "aggregation": "sum", "amount": 500 },
+        { "resource": "provider-calls", "unit": "count", "aggregation": "sum", "amount": 1 }
+      ],
+      "providerSpecific": []
+    },
+    "childReservation": {
+      "apiVersion": "graphengineering.reacher-z.github.io/budget-vectors/v1alpha1",
+      "kind": "BudgetVector",
+      "contractVersion": "portable-budget/v1alpha1",
+      "currency": "USD",
+      "minorUnitExponent": 2,
+      "quantities": [
+        { "resource": "attempts", "unit": "count", "aggregation": "sum", "amount": 2 },
+        { "resource": "input-units", "unit": "usage-unit", "aggregation": "sum", "amount": 1000 },
+        { "resource": "money-nano-minor", "unit": "nano-minor", "aggregation": "sum", "amount": 600000000 },
+        { "resource": "output-units", "unit": "usage-unit", "aggregation": "sum", "amount": 500 },
+        { "resource": "provider-calls", "unit": "count", "aggregation": "sum", "amount": 1 }
+      ],
+      "providerSpecific": []
+    },
+    "childUsage": {
+      "apiVersion": "graphengineering.reacher-z.github.io/budget-vectors/v1alpha1",
+      "kind": "BudgetVector",
+      "contractVersion": "portable-budget/v1alpha1",
+      "currency": "USD",
+      "minorUnitExponent": 2,
+      "quantities": [
+        { "resource": "attempts", "unit": "count", "aggregation": "sum", "amount": 1 },
+        { "resource": "input-units", "unit": "usage-unit", "aggregation": "sum", "amount": 800 },
+        { "resource": "money-nano-minor", "unit": "nano-minor", "aggregation": "sum", "amount": 400000000 },
+        { "resource": "output-units", "unit": "usage-unit", "aggregation": "sum", "amount": 200 },
+        { "resource": "provider-calls", "unit": "count", "aggregation": "sum", "amount": 1 }
+      ],
+      "providerSpecific": []
+    },
+    "childRemainder": {
+      "apiVersion": "graphengineering.reacher-z.github.io/budget-vectors/v1alpha1",
+      "kind": "BudgetVector",
+      "contractVersion": "portable-budget/v1alpha1",
+      "currency": "USD",
+      "minorUnitExponent": 2,
+      "quantities": [
+        { "resource": "attempts", "unit": "count", "aggregation": "sum", "amount": 1 },
+        { "resource": "input-units", "unit": "usage-unit", "aggregation": "sum", "amount": 200 },
+        { "resource": "money-nano-minor", "unit": "nano-minor", "aggregation": "sum", "amount": 200000000 },
+        { "resource": "output-units", "unit": "usage-unit", "aggregation": "sum", "amount": 300 }
+      ],
+      "providerSpecific": []
+    },
+    "rootRemainderAfterChild": {
+      "apiVersion": "graphengineering.reacher-z.github.io/budget-vectors/v1alpha1",
+      "kind": "BudgetVector",
+      "contractVersion": "portable-budget/v1alpha1",
+      "currency": "USD",
+      "minorUnitExponent": 2,
+      "quantities": [
+        { "resource": "attempts", "unit": "count", "aggregation": "sum", "amount": 4 },
+        { "resource": "input-units", "unit": "usage-unit", "aggregation": "sum", "amount": 200 },
+        { "resource": "money-nano-minor", "unit": "nano-minor", "aggregation": "sum", "amount": 600000000 },
+        { "resource": "output-units", "unit": "usage-unit", "aggregation": "sum", "amount": 300 }
+      ],
+      "providerSpecific": []
+    },
+    "empty": {
+      "apiVersion": "graphengineering.reacher-z.github.io/budget-vectors/v1alpha1",
+      "kind": "BudgetVector",
+      "contractVersion": "portable-budget/v1alpha1",
+      "currency": "USD",
+      "minorUnitExponent": 2,
+      "quantities": [],
+      "providerSpecific": []
+    }
+  },
+  "policy": {
+    "apiVersion": "graphengineering.reacher-z.github.io/budget-policies/v1alpha1",
+    "kind": "BudgetPolicy",
+    "contractVersion": "portable-budget/v1alpha1",
+    "policyId": "policy-main",
+    "authorityBindingHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "currency": "USD",
+    "minorUnitExponent": 2,
+    "limitSemantics": "inclusive-ceiling-admit-only-if-worst-case-fits",
+    "rootCeiling": { "$vector": "rootCeiling" },
+    "scopeCeilings": [
+      { "scopeKind": "model", "scopeId": "premium-model", "ceiling": { "$vector": "rootReservation" } },
+      { "scopeKind": "run", "scopeId": "run-1", "ceiling": { "$vector": "rootCeiling" } }
+    ],
+    "allowedProviderMetrics": [],
+    "unknownUsage": "deny-before-dispatch",
+    "unknownPricing": "deny-unless-explicit-conservative-reservation",
+    "overage": "commit-declared-ceiling-dispute-excess-stop-new-work",
+    "compensation": "economic-audit-only-never-restores-scheduling-capacity",
+    "reservation": {
+      "admission": "sound-worst-case-before-dispatch",
+      "atomicity": "all-dimensions-or-none",
+      "nesting": "child-allocation-contained-by-parent",
+      "idempotency": "one-canonical-outcome-per-settlement-id",
+      "fencing": "event-stream-cas-plus-monotonic-lease-fence",
+      "replay": "read-only-recorded-decisions-no-new-debit",
+      "fork": "new-account-or-explicit-new-allocation-no-credit-copy",
+      "inDoubt": "retain-maximum-unresolved-usage"
+    },
+    "terminalPrecedence": [
+      "CANCELLED",
+      "MAX_DURATION",
+      "MAX_MONEY",
+      "MAX_PROVIDER_USAGE",
+      "MAX_ATTEMPTS",
+      "MAX_DYNAMIC_NODES",
+      "MAX_GRAPH_SIZE",
+      "MAX_FAN_OUT",
+      "MAX_DEPTH",
+      "MAX_BYTES",
+      "DISPUTED_USAGE",
+      "FAILED"
+    ],
+    "limits": {
+      "maxReservations": 1000,
+      "maxReservationDepth": 8,
+      "maxProviderMetrics": 16,
+      "maxEvents": 100000,
+      "maxCanonicalBytes": 1048576
+    }
+  },
+  "pricingSnapshot": {
+    "apiVersion": "graphengineering.reacher-z.github.io/pricing-snapshots/v1alpha1",
+    "kind": "PricingSnapshot",
+    "contractVersion": "portable-pricing/v1alpha1",
+    "snapshotId": "pricing-2026-07-26",
+    "currency": "USD",
+    "minorUnitExponent": 2,
+    "effectiveFrom": "2026-07-26T00:00:00Z",
+    "effectiveUntil": null,
+    "source": {
+      "kind": "bundled",
+      "locatorHash": "3333333333333333333333333333333333333333333333333333333333333333",
+      "retrievedAt": "2026-07-26T00:00:00Z",
+      "contentHash": "4444444444444444444444444444444444444444444444444444444444444444",
+      "signatureDisposition": "content-addressed-unverified",
+      "refresh": "outside-active-run-new-snapshot-only"
+    },
+    "policyBindingHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "rounding": "ceil-each-request-meter-before-sum",
+    "entries": [
+      {
+        "entryId": "economy-price",
+        "providerId": "mock-provider",
+        "accountClass": "default-account",
+        "region": "ca-west",
+        "subjectKind": "model",
+        "subjectId": "mock/economy-v1",
+        "rules": [
+          { "meter": "input-units", "usageClass": "standard", "unitQuantity": 1000, "priceNanoMinor": 100000000 },
+          { "meter": "output-units", "usageClass": "standard", "unitQuantity": 1000, "priceNanoMinor": 200000000 }
+        ]
+      },
+      {
+        "entryId": "premium-price",
+        "providerId": "mock-provider",
+        "accountClass": "default-account",
+        "region": "ca-west",
+        "subjectKind": "model",
+        "subjectId": "mock/premium-v1",
+        "rules": [
+          { "meter": "input-units", "usageClass": "standard", "unitQuantity": 1000, "priceNanoMinor": 200000000 },
+          { "meter": "output-units", "usageClass": "standard", "unitQuantity": 1000, "priceNanoMinor": 400000000 }
+        ]
+      }
+    ]
+  },
+  "routerPolicy": {
+    "apiVersion": "graphengineering.reacher-z.github.io/model-router-policies/v1alpha1",
+    "kind": "ModelRouterPolicy",
+    "contractVersion": "model-router/v1alpha1",
+    "policyId": "router-main",
+    "authorityBindingHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "allowedAuthorityGrantHashes": [
+      "5555555555555555555555555555555555555555555555555555555555555555",
+      "6666666666666666666666666666666666666666666666666666666666666666"
+    ],
+    "pricingSnapshotHash": "0000000000000000000000000000000000000000000000000000000000000000",
+    "classificationPolicyHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "inheritance": "resolve-session-and-default-before-persist",
+    "selection": "first-eligible-by-quality-then-fallback-rank-then-candidate-id",
+    "fallback": "may-narrow-never-bypass-authority-privacy-approval-budget-or-capability",
+    "health": "recorded-snapshot-input-no-live-lookup-during-replay",
+    "replay": "reuse-exact-recorded-decision-with-zero-provider-rediscovery",
+    "candidates": [
+      {
+        "candidateId": "economy-model",
+        "providerId": "mock-provider",
+        "modelId": "mock/economy-v1",
+        "accountClass": "default-account",
+        "region": "ca-west",
+        "qualityTier": "economy",
+        "fallbackRank": 1,
+        "capabilities": ["json-schema-output", "text-input", "text-output"],
+        "allowedDataClasses": ["internal", "public"],
+        "pricingEntryId": "economy-price",
+        "maxInputUnits": 8000,
+        "maxOutputUnits": 4000,
+        "maxContextUnits": 12000,
+        "maxDurationMs": 30000,
+        "requiresApproval": false,
+        "authorityGrantHash": "5555555555555555555555555555555555555555555555555555555555555555"
+      },
+      {
+        "candidateId": "premium-model",
+        "providerId": "mock-provider",
+        "modelId": "mock/premium-v1",
+        "accountClass": "default-account",
+        "region": "ca-west",
+        "qualityTier": "premium",
+        "fallbackRank": 0,
+        "capabilities": ["json-schema-output", "reasoning", "text-input", "text-output", "tool-calling"],
+        "allowedDataClasses": ["confidential", "internal", "public"],
+        "pricingEntryId": "premium-price",
+        "maxInputUnits": 16000,
+        "maxOutputUnits": 8000,
+        "maxContextUnits": 24000,
+        "maxDurationMs": 60000,
+        "requiresApproval": false,
+        "authorityGrantHash": "6666666666666666666666666666666666666666666666666666666666666666"
+      }
+    ]
+  },
+  "routeCases": [
+    {
+      "id": "select-premium-for-confidential-tools",
+      "requirements": {
+        "capabilities": ["json-schema-output", "text-input", "text-output", "tool-calling"],
+        "dataClass": "confidential",
+        "allowedRegions": ["ca-west"],
+        "minimumQualityTier": "standard",
+        "inputUnits": 800,
+        "maximumOutputUnits": 200,
+        "maximumContextUnits": 1000,
+        "maximumDurationMs": 30000,
+        "maximumMoneyNanoMinor": 600000000,
+        "approvalBindingHash": null
+      },
+      "health": { "economy-model": "ready", "premium-model": "ready" },
+      "expectOutcome": "selected",
+      "expectCandidateId": "premium-model",
+      "expectDenialCode": null
+    },
+    {
+      "id": "deny-secret-data",
+      "requirements": {
+        "capabilities": ["json-schema-output", "text-input", "text-output"],
+        "dataClass": "secret",
+        "allowedRegions": ["ca-west"],
+        "minimumQualityTier": "economy",
+        "inputUnits": 100,
+        "maximumOutputUnits": 100,
+        "maximumContextUnits": 200,
+        "maximumDurationMs": 10000,
+        "maximumMoneyNanoMinor": 600000000,
+        "approvalBindingHash": null
+      },
+      "health": { "economy-model": "ready", "premium-model": "ready" },
+      "expectOutcome": "denied",
+      "expectCandidateId": null,
+      "expectDenialCode": "GE_ROUTE_PRIVACY_DENIED"
+    },
+    {
+      "id": "deny-open-health",
+      "requirements": {
+        "capabilities": ["json-schema-output", "text-input", "text-output", "tool-calling"],
+        "dataClass": "confidential",
+        "allowedRegions": ["ca-west"],
+        "minimumQualityTier": "standard",
+        "inputUnits": 800,
+        "maximumOutputUnits": 200,
+        "maximumContextUnits": 1000,
+        "maximumDurationMs": 30000,
+        "maximumMoneyNanoMinor": 600000000,
+        "approvalBindingHash": null
+      },
+      "health": { "economy-model": "open", "premium-model": "open" },
+      "expectOutcome": "denied",
+      "expectCandidateId": null,
+      "expectDenialCode": "GE_ROUTE_HEALTH_UNAVAILABLE"
+    },
+    {
+      "id": "deny-money-bound",
+      "requirements": {
+        "capabilities": ["json-schema-output", "text-input", "text-output", "tool-calling"],
+        "dataClass": "confidential",
+        "allowedRegions": ["ca-west"],
+        "minimumQualityTier": "standard",
+        "inputUnits": 800,
+        "maximumOutputUnits": 200,
+        "maximumContextUnits": 1000,
+        "maximumDurationMs": 30000,
+        "maximumMoneyNanoMinor": 100000000,
+        "approvalBindingHash": null
+      },
+      "health": { "economy-model": "ready", "premium-model": "ready" },
+      "expectOutcome": "denied",
+      "expectCandidateId": null,
+      "expectDenialCode": "GE_ROUTE_BUDGET_DENIED"
+    }
+  ],
+  "ledger": {
+    "accountId": "account-1",
+    "tenantId": "tenant-1",
+    "runId": "run-1",
+    "lease": {
+      "leaseId": "lease-1",
+      "holderId": "worker-1",
+      "leaseEpoch": 1,
+      "fencingToken": 1,
+      "acquiredAt": "2026-07-26T00:00:00Z",
+      "expiresAt": "2026-07-26T01:00:00Z"
+    },
+    "operations": [
+      { "type": "BudgetAccountOpened" },
+      { "type": "ReservationCreated", "reservationId": "round-1", "parentReservationId": null, "depth": 0, "vector": "rootReservation", "routeDecision": false },
+      { "type": "RouteDecisionRecorded", "reservationId": "model-1", "routeCase": "select-premium-for-confidential-tools" },
+      { "type": "ReservationCreated", "reservationId": "model-1", "parentReservationId": "round-1", "depth": 1, "vector": "childReservation", "routeDecision": true },
+      { "type": "UsageCommitted", "reservationId": "model-1", "settlementId": "settlement-1", "vector": "childUsage", "inDoubt": false },
+      { "type": "ReservationReleased", "reservationId": "model-1", "releaseId": "release-child-1", "vector": "childRemainder", "reason": "settled" },
+      { "type": "ReservationClosed", "reservationId": "model-1", "state": "closed" },
+      { "type": "ReservationReleased", "reservationId": "round-1", "releaseId": "release-root-1", "vector": "rootRemainderAfterChild", "reason": "settled" },
+      { "type": "ReservationClosed", "reservationId": "round-1", "state": "closed" },
+      { "type": "BudgetAccountClosed", "terminalReason": "COMPLETED" }
+    ]
+  },
+  "semanticNegativeCases": [
+    { "id": "vector-resource-order", "operation": "reverse-root-vector", "expectCode": "GE_BUDGET_VECTOR_ORDER" },
+    { "id": "vector-unit-mismatch", "operation": "wrong-attempt-unit", "expectCode": "GE_BUDGET_VECTOR_UNIT" },
+    { "id": "vector-duplicate-resource", "operation": "duplicate-attempt-resource", "expectCode": "GE_BUDGET_VECTOR_DUPLICATE" },
+    { "id": "policy-currency-mismatch", "operation": "root-vector-currency-eur", "expectCode": "GE_BUDGET_CURRENCY_MISMATCH" },
+    { "id": "policy-scope-expansion", "operation": "scope-exceeds-root", "expectCode": "GE_BUDGET_SCOPE_EXPANSION" },
+    { "id": "pricing-rule-order", "operation": "reverse-pricing-rules", "expectCode": "GE_PRICING_ORDER" },
+    { "id": "pricing-effective-interval", "operation": "pricing-end-before-start", "expectCode": "GE_PRICING_INTERVAL" },
+    { "id": "router-pricing-drift", "operation": "router-pricing-hash-drift", "expectCode": "GE_ROUTE_PRICING_UNAVAILABLE" },
+    { "id": "router-fallback-authority", "operation": "selected-authority-drift", "expectCode": "GE_ROUTE_AUTHORITY_DENIED" },
+    { "id": "ledger-parent-missing", "operation": "child-before-parent", "expectCode": "GE_BUDGET_PARENT_MISSING" },
+    { "id": "ledger-child-expands", "operation": "child-over-parent", "expectCode": "GE_BUDGET_CHILD_EXPANSION" },
+    { "id": "ledger-usage-over-reservation", "operation": "usage-over-reservation", "expectCode": "GE_BUDGET_USAGE_OVERAGE" },
+    { "id": "ledger-duplicate-settlement", "operation": "duplicate-settlement-id", "expectCode": "GE_BUDGET_IDEMPOTENCY_CONFLICT" },
+    { "id": "ledger-release-over-remaining", "operation": "release-over-remaining", "expectCode": "GE_BUDGET_COUNTER_MISMATCH" },
+    { "id": "ledger-close-live-child", "operation": "close-parent-with-live-child", "expectCode": "GE_BUDGET_CHILD_OPEN" },
+    { "id": "ledger-stale-fence", "operation": "stale-fencing-token", "expectCode": "GE_BUDGET_LEASE_CONFLICT" },
+    { "id": "ledger-hash-chain", "operation": "resigned-semantic-account-drift", "expectCode": "GE_BUDGET_INVALID_HISTORY" },
+    { "id": "ledger-event-after-terminal", "operation": "event-after-account-close", "expectCode": "GE_BUDGET_INVALID_HISTORY" },
+    { "id": "checkpoint-substitution", "operation": "checkpoint-available-drift", "expectCode": "GE_BUDGET_CORRUPT_CHECKPOINT" },
+    { "id": "compensation-credit-escape", "operation": "compensation-restores-capacity", "expectCode": "GE_BUDGET_COMPENSATION_INVALID" },
+    { "id": "unknown-provider-meter", "operation": "unknown-provider-metric", "expectCode": "GE_BUDGET_UNKNOWN_USAGE" },
+    { "id": "fork-credit-reuse", "operation": "fork-copies-available-credit", "expectCode": "GE_BUDGET_FORK_CREDIT_REUSE" },
+    { "id": "integer-overflow", "operation": "vector-add-overflow", "expectCode": "GE_BUDGET_COUNTER_OVERFLOW" },
+    { "id": "negative-usage", "operation": "negative-usage", "expectCode": "GE_BUDGET_VECTOR_INVALID" },
+    { "id": "reservation-key-drift", "operation": "reservation-idempotency-key-drift", "expectCode": "GE_BUDGET_IDEMPOTENCY_CONFLICT" },
+    { "id": "reservation-key-conflict", "operation": "reservation-idempotency-conflict", "expectCode": "GE_BUDGET_IDEMPOTENCY_CONFLICT" },
+    { "id": "reservation-binding-drift", "operation": "resigned-reservation-binding-drift", "expectCode": "GE_BUDGET_INVALID_HISTORY" },
+    { "id": "reservation-expired", "operation": "expired-before-admission", "expectCode": "GE_BUDGET_ADMISSION_DENIED" },
+    { "id": "reservation-close-twice", "operation": "duplicate-reservation-close", "expectCode": "GE_BUDGET_PARENT_MISSING" },
+    { "id": "lease-takeover-fence-reuse", "operation": "takeover-reuses-fencing-token", "expectCode": "GE_BUDGET_LEASE_CONFLICT" },
+    { "id": "maximum-gate-over", "operation": "maximum-depth-one-over", "expectCode": "GE_BUDGET_ADMISSION_DENIED" },
+    { "id": "route-grant-not-allowed", "operation": "router-grant-not-allowlisted", "expectCode": "GE_ROUTE_AUTHORITY_DENIED" },
+    { "id": "route-decision-grant-drift", "operation": "selected-grant-drift", "expectCode": "GE_ROUTE_AUTHORITY_DENIED" },
+    { "id": "pricing-overflow", "operation": "route-price-multiplication-overflow", "expectCode": "GE_BUDGET_COUNTER_OVERFLOW" },
+    { "id": "invalid-calendar-time", "operation": "event-invalid-calendar-date", "expectCode": "GE_BUDGET_INVALID_HISTORY" },
+    { "id": "checkpoint-idempotency-loss", "operation": "checkpoint-drops-reservation-outcomes", "expectCode": "GE_BUDGET_CORRUPT_CHECKPOINT" }
+  ],
+  "terminalPrecedenceCases": [
+    { "id": "cancel-before-all", "facts": ["FAILED", "MAX_MONEY", "CANCELLED"], "expect": "CANCELLED" },
+    { "id": "duration-before-money", "facts": ["MAX_MONEY", "MAX_DURATION"], "expect": "MAX_DURATION" },
+    { "id": "money-before-attempts", "facts": ["MAX_ATTEMPTS", "MAX_MONEY"], "expect": "MAX_MONEY" },
+    { "id": "provider-before-attempts", "facts": ["MAX_ATTEMPTS", "MAX_PROVIDER_USAGE"], "expect": "MAX_PROVIDER_USAGE" },
+    { "id": "graph-before-fanout", "facts": ["MAX_FAN_OUT", "MAX_GRAPH_SIZE"], "expect": "MAX_GRAPH_SIZE" },
+    { "id": "dispute-before-failed", "facts": ["FAILED", "DISPUTED_USAGE"], "expect": "DISPUTED_USAGE" }
+  ]
+}

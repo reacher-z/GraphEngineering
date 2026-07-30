@@ -28,8 +28,10 @@ The implementation should land in two explicit stages:
    journal and checkpoints contain references, policy identity, and keyed
    semantic identities—not plaintext application values. Default
    log/trace/error/prompt/tool/support capture remains off or metadata-only.
-   D9 closes only after this path, both native implementations, legacy handling,
-   packaged canary scans, and independent security review are green.
+   The D9 product roll-up closes only after this path, both native
+   implementations, legacy handling, packaged canary scans, and independent
+   security review are green. The prerequisite contract task `039` closes
+   earlier under Section 14 so its native dependents can start.
 
 Encryption/protection and redaction are different facts. Ciphertext or a
 protected reference is **not** described as redacted. An event is `redacted:
@@ -174,19 +176,32 @@ One immutable policy is bound at run creation and reused on resume:
 
 ```json
 {
-  "apiVersion": "graphengineering.reacher-z.github.io/capture-policy/v1alpha1",
+  "apiVersion": "graphengineering.reacher-z.github.io/capture-policy/v1alpha2",
   "durableValues": "protected",
   "checkpointValues": "protected",
   "events": "metadata-or-protected",
+  "artifacts": "off",
   "errors": "codes-and-sanitized-message",
   "logs": "metadata-only",
-  "traces": "metadata-only",
+  "traces": "off",
+  "metrics": "off",
   "prompts": "off",
   "responses": "off",
   "tools": "off",
+  "mcp": "off",
+  "plugins": "off",
+  "isolationOutputs": "off",
+  "database": "off",
+  "exports": "off",
   "supportBundles": "off",
+  "testArtifacts": "off",
+  "identifiers": "generated-opaque-only",
   "maxDiagnosticUtf8Bytes": 1024,
-  "redactionTransform": "json-pointer-rules/v1alpha1",
+  "redactionTransform": "json-pointer-rules/v1alpha2",
+  "transformImplementationHash": "<64 lowercase hex>",
+  "ruleRegistryVersion": 1,
+  "ruleRegistryHash": "<64 lowercase hex>",
+  "redactionRules": [],
   "keyRef": "operator-owned-key-reference"
 }
 ```
@@ -546,24 +561,61 @@ Hard dependencies/reopening rules:
 
 ## 14. Definition of done for `D9-REDACTION-039`
 
-The task is complete only when all of the following are true:
+`039` is a contract-only prerequisite. It is complete only when all of the
+following are true for one immutable contract revision:
 
-1. No default or durable writer can assert `redacted: true` without performing
-   and proving the defined transform.
-2. Default packaged durable execution never persists plaintext application
-   values; missing protection fails before a sink write.
-3. Authoritative recovery obtains exact values only through authenticated,
-   authorized protected refs and never through redacted derivatives.
-4. Hash/MAC/activity/replay behavior is specified and identical in TS/Python.
-5. Existing misleading histories are rejected before executor invocation and
-   have an explicit quarantine/archive/new-run path.
-6. The complete canary source/lifecycle/sink matrix and its negative control pass
-   for clean npm and Python artifacts.
-7. Shared conformance, focused native suites, full workspace gates, package
-   checks, and independent R3 review are green for one immutable revision.
-8. Release language says exactly what is protected, redacted, disabled, and
-   still outside the threat model; no stable claim relies on the boolean alone.
+1. The normative semantics, fourteen closed Draft 2020-12 schemas, and checked-in
+   adversarial corpus jointly define wire truth, source×sink evaluation,
+   occurrence/authority AAD, protected-store joins, bound receipts/live-rule
+   registry, deterministic transforms, portable bounds, failure atomicity,
+   legacy behavior, and safe side-effect normalization.
+2. The executable contract checks pass. They live in
+   `spec/conformance/redaction.validate.mjs`, which is imported and run by
+   `scripts/validate-fixtures.mjs`, and they cover: meta-schema validation and
+   strict-mode compilation of all fourteen schemas, every declared wire case
+   matched against its named schema, the independent RFC 6901 pointer oracle
+   executed over every `pointerCases` entry, the payload-disposition truth
+   table, receipt pointer-ordering/count/crossing rules, AAD record-kind
+   relations, adjacent MAC equality, policy/rule consistency, the deterministic
+   source×sink flow join over every `flowCases` entry, and the
+   inventory/Cartesian completeness checks against the closed
+   `capture-source.schema.json` and `capture-sink.schema.json` enums. The exact
+   commands are `node spec/conformance/redaction.validate.mjs` and
+   `node scripts/validate-fixtures.mjs` (`pnpm validate:fixtures` in CI), plus
+   `pnpm check:docs` for documentation links. Tool versions recorded at the
+   time of writing: Node.js v22.23.1, Ajv 8.20.0 (`Ajv2020`,
+   `{ allErrors: true, strict: true }`).
 
-Until then, current JSONL/checkpoint directories must be treated as containing
-raw application data, kept private, and excluded from trace galleries, support
-bundles, and release evidence.
+   Not yet executable, therefore explicitly Open rather than claimed: a general
+   semantic mutation oracle. Only the twenty-four Section 11 portable-limit
+   cases and the two pointer-grounded cases of the 106-case `semanticCases`
+   corpus are executed today; the remaining eighty declare symbolic mutation
+   operators with no interpreter. Building that interpreter is owned by
+   `087`/`088`/`089` and must not be cited as passing evidence until it exists
+   as a runnable file in this repository.
+3. The corpus contains a valid/hostile pair for every semantic rule it claims,
+   and `redaction.validate.mjs` machine-enforces the pairing: exactly one
+   positive and one hostile case per `pairId`, a single rule name per pair, a
+   stable failure code on every hostile case, and zero raw
+   write/executor-call/dependent-release counts on every case. Whether that set
+   of pairs is *sufficient* — including the nineteen independently identified
+   relations — remains a reviewer judgement in item 4, not a machine-checked
+   fact.
+4. Contract artifacts and evidence are bound by exact SHA-256 hashes; a fresh
+   independent R3 reviewer reports zero open contract P0/P1 and explicitly
+   authorizes contract acceptance.
+5. Registry/document dependency edges remain acyclic and exact:
+   `039 -> 087/088 -> 089`; `089 + 077 -> 031`.
+6. The handoff explicitly leaves TypeScript implementation `087`, Python
+   implementation `088`, shared native/security/canary join `089`, privacy,
+   candidate security, packaging, RC, and release claims Open.
+
+Native writers, runtime parity, clean-package canary scans, fault injection,
+full workspace gates, and candidate release language are deliberately excluded
+from `039` completion. They remain mandatory owned deliverables of `087`,
+`088`, `089`, and the later candidate-security roll-up; this exclusion narrows
+the prerequisite task and does not weaken those gates.
+
+Until the downstream join is independently accepted, current JSONL/checkpoint
+directories must be treated as containing raw application data, kept private,
+and excluded from trace galleries, support bundles, and release evidence.

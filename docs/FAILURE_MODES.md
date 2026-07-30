@@ -116,11 +116,20 @@ usable decision requires only a subset.
 **Cause:** An all-input dependency was chosen for code simplicity.
 
 **Current boundary:** Alpha supports normal all-dependencies readiness. It
-does not implement quorum or deadline barriers.
+does not implement quorum or deadline barriers. A `barrier` node is scheduled as
+an ordinary identity node, so a threshold policy written into its `config` is
+not evaluated at all — the barrier passes regardless of whether its policy was
+met. Treat that as a wrong answer, not a missing feature, and keep real
+thresholds out of `barrier` nodes until the contract below is implemented.
 
 **Target-v1 mitigation:** Declare `all`, count, percentage, quorum, and deadline
 semantics explicitly. Preserve the settled status of every item. On insufficient
 quorum, return `unknown` or escalate; never manufacture success from missing data.
+The frozen contract is
+[integrated barrier semantics](../spec/integrated-barrier-semantics.md); it
+requires that an unsatisfied barrier never succeeds and never binds an output
+under any of its three resolutions, and that the runtime refuse a policy-bearing
+barrier before dispatch until the behavior exists.
 
 ### A graph contains an implicit cycle
 

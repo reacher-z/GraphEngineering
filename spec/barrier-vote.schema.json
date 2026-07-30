@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/barrier-vote.schema.json",
+  "title": "Graph Engineering barrier vote",
+  "description": "Value an upstream node must produce when it is bound to a quorum barrier. A malformed vote is the non-retryable node failure INVALID_BARRIER_VOTE after exactly one attempt; it is never coerced to abstain or unknown and never counts as a participant.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "verdict"],
+  "properties": {
+    "apiVersion": {
+      "const": "graphengineering.reacher-z.github.io/barrier/v1alpha1"
+    },
+    "kind": {
+      "const": "BarrierVote"
+    },
+    "verdict": {
+      "enum": ["accept", "reject", "abstain", "unknown"]
+    },
+    "confidenceBasisPoints": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 10000
+    },
+    "evidence": {
+      "description": "Optional portable JSON retained only as a canonical hash in the durable decision. Retention of the raw value is governed by the redaction contract."
+    }
+  }
+}

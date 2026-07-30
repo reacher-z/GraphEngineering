@@ -78,6 +78,100 @@ production evidence; executable conformance remains the capability gate. Their
 v1alpha1 authoritative payloads are explicitly inline-unredacted and therefore
 do not satisfy the still-open D9 protected-payload or stable-release gate.
 
+Scheduler-integrated conditional routing, its compiler diagnostics and its
+`routedBranches` lowering are frozen by
+[integrated-router-semantics.md](integrated-router-semantics.md). The remaining
+D6 surface — integrated barriers, quorum, abstention, deadlines, the closed
+`onUnsatisfied` resolution set, late arrival, cancellation propagation, and
+durable zero-rejudge decision replay for both routers and barriers — is frozen
+by [integrated-barrier-semantics.md](integrated-barrier-semantics.md). Its
+machine-readable carriers are
+[integrated-barrier-policy.schema.json](integrated-barrier-policy.schema.json),
+[barrier-vote.schema.json](barrier-vote.schema.json),
+[barrier-decision.schema.json](barrier-decision.schema.json), and
+[route-decision.schema.json](route-decision.schema.json). The barrier contract
+carries `implementationClaim: false`: no runtime implements it yet, and until
+one does, both runtimes must reject a barrier node bearing an exact policy
+before dispatch rather than executing it as an ordinary transform, because a
+silently passed unsatisfied barrier is the exact defect the contract exists to
+prevent.
+
+Durable payload protection, the v1alpha1 `redacted` truth hotfix, the closed
+57-source/54-sink capture inventories, the JSON Pointer redaction transform, and
+the sink-before-write guard are fixed by
+[redaction-semantics.md](redaction-semantics.md). Its fourteen machine carriers
+are [capture-source.schema.json](capture-source.schema.json),
+[capture-sink.schema.json](capture-sink.schema.json),
+[capture-policy.schema.json](capture-policy.schema.json),
+[redaction-rule.schema.json](redaction-rule.schema.json),
+[redaction-receipt.schema.json](redaction-receipt.schema.json),
+[payload-disposition.schema.json](payload-disposition.schema.json),
+[protected-value.schema.json](protected-value.schema.json),
+[protected-blob.schema.json](protected-blob.schema.json),
+[protected-aad.schema.json](protected-aad.schema.json),
+[protected-store-envelope.schema.json](protected-store-envelope.schema.json),
+[sink-guard-decision.schema.json](sink-guard-decision.schema.json),
+[event-v1alpha2.schema.json](event-v1alpha2.schema.json),
+[checkpoint-v1alpha2.schema.json](checkpoint-v1alpha2.schema.json), and
+[redaction-conformance.schema.json](redaction-conformance.schema.json), with the
+adversarial corpus at [conformance/redaction.case.json](conformance/redaction.case.json)
+and its executable validator at
+[conformance/redaction.validate.mjs](conformance/redaction.validate.mjs). The
+corpus carries `implementationClaim: false`. What is *not* implemented: neither
+native runtime protects, redacts, classifies, or guards anything. There is no
+`ProtectedPayloadStore`, no `KeyProvider`, no sink-before-write guard, no
+redaction transform, and no capture policy in either runtime. The v1alpha2 event
+and checkpoint envelopes are contracts only; the runtimes still write the
+v1alpha1 shapes. Of the 106 `semanticCases`, twenty-six are executed today (the
+twenty-four portable-limit cases and two pointer cases); the remaining eighty
+declare symbolic mutation operators with no interpreter, and the 3,078-pair
+source×sink domain is exercised by the thirty-nine `flowCases` rather than
+materialized. Existing v1alpha1 JSONL journals and checkpoints must still be
+treated as containing plaintext application data.
+
+Portable budget vectors, ceilings, reservations, the pricing snapshot, the model
+router policy, and the append-only budget ledger are fixed by
+[budget-semantics.md](budget-semantics.md). Its machine carriers are
+[budget-vector.schema.json](budget-vector.schema.json),
+[budget-policy.schema.json](budget-policy.schema.json),
+[pricing-snapshot.schema.json](pricing-snapshot.schema.json),
+[model-router-policy.schema.json](model-router-policy.schema.json),
+[model-route-decision.schema.json](model-route-decision.schema.json),
+[budget-ledger-event.schema.json](budget-ledger-event.schema.json), and
+[budget-ledger-checkpoint.schema.json](budget-ledger-checkpoint.schema.json),
+with the corpus at [conformance/budget.case.json](conformance/budget.case.json)
+and its validator at
+[conformance/budget.validate.mjs](conformance/budget.validate.mjs). The corpus
+carries `implementationClaim: false`. What is *not* implemented: no runtime
+meters, reserves, settles, or denies against a budget, and no runtime consults a
+pricing snapshot or model router policy. The validator is CI-wired but is not
+yet a complete rule engine — several of its checks are pinned by frozen golden
+hashes rather than by independently reproducible semantic rules, so a
+second-language runtime with its own goldens would have no rule to fail. Scope
+ceilings and route-bound reservation coverage are not enforced, and several hash
+domains used by the oracle are undocumented in the specification.
+
+Nested subgraph scopes, deterministic reducers, artifact references, durable
+stream edges, and event/checkpoint/trace lineage are fixed by
+[subgraph-and-edge-semantics.md](subgraph-and-edge-semantics.md). Its machine
+carriers are [artifact-ref.schema.json](artifact-ref.schema.json),
+[subgraph-edge-plan.schema.json](subgraph-edge-plan.schema.json),
+[subgraph-edge-event.schema.json](subgraph-edge-event.schema.json),
+[subgraph-edge-checkpoint.schema.json](subgraph-edge-checkpoint.schema.json), and
+[subgraph-edge-trace.schema.json](subgraph-edge-trace.schema.json), with the
+corpus at [conformance/subgraph-edge.case.json](conformance/subgraph-edge.case.json)
+and its validator at
+[conformance/subgraph-edge.validate.mjs](conformance/subgraph-edge.validate.mjs).
+The corpus carries `implementationClaim: false`. What is *not* implemented: no
+runtime executes a nested subgraph invocation, a deterministic reducer, an
+artifact-ref edge, or a durable stream edge; `runtime-capability-semantics.md`
+still requires both runtimes to reject `stream` and `artifact-ref` edge modes
+before dispatch. The validator is CI-wired but is closer to a single-instance
+golden pin than a rule engine: several of its own guards have no fixture
+coverage, artifact authorization (capability expiry, media type, size, lifetime
+mode) is largely unevaluated, and the terminal-state and source-closed stream
+guards have known gaps. Treat it as shape and lineage evidence only.
+
 ## Canonical serialization v1alpha1
 
 Before hashing a Graph IR document, implementations must:
@@ -141,6 +235,22 @@ The following codes are stable across languages:
 - `GE1301_UNSUPPORTED_GRAPH_REVISION`
 - `GE1302_GRAPH_IDENTITY_MISMATCH`
 - `GE1303_COMPONENT_IDENTITY_MISMATCH`
+- `GE1401_INVALID_ROUTER_POLICY`
+- `GE1402_UNSUPPORTED_EDGE_CONDITION`
+- `GE1403_CONDITION_SOURCE_NOT_ROUTER`
+- `GE1404_ROUTE_NOT_ALLOWED`
+- `GE1405_DUPLICATE_ROUTE_CASE`
+- `GE1406_DUPLICATE_ROUTE_TARGET`
+- `GE1407_INCOMPLETE_ROUTE_COVERAGE`
+- `GE1421_INVALID_BARRIER_POLICY`
+- `GE1422_BARRIER_POLICY_KIND_MISMATCH`
+- `GE1423_BARRIER_NO_INPUTS`
+- `GE1424_BARRIER_THRESHOLD_EXCEEDS_INPUTS`
+
+`GE1401` through `GE1407` are emitted by the integrated router pass and
+`GE1421` through `GE1424` by the integrated barrier pass. The router pass runs
+before the barrier pass, and both run after graph policies and before strict
+typed ports.
 
 Compilers may attach language-specific explanatory messages and source
 locations, but conformance tests compare the stable diagnostic code and

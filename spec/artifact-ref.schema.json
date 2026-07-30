@@ -1,0 +1,198 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/artifact-ref.schema.json",
+  "title": "Graph Engineering Artifact Reference",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "artifactId",
+    "storeId",
+    "storageNamespace",
+    "tenantId",
+    "runId",
+    "algorithm",
+    "digest",
+    "sizeBytes",
+    "mediaType",
+    "encoding",
+    "logicalName",
+    "protection",
+    "retention",
+    "capability",
+    "lifetime",
+    "createdBy"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "graphengineering.reacher-z.github.io/artifact-refs/v1alpha1"
+    },
+    "kind": { "const": "ArtifactRef" },
+    "artifactId": { "$ref": "#/$defs/hash" },
+    "storeId": { "$ref": "#/$defs/identifier" },
+    "storageNamespace": { "$ref": "#/$defs/nonRootJsonPointer" },
+    "tenantId": { "$ref": "#/$defs/identifier" },
+    "runId": { "$ref": "#/$defs/identifier" },
+    "algorithm": { "const": "sha256" },
+    "digest": { "$ref": "#/$defs/hash" },
+    "sizeBytes": { "$ref": "#/$defs/safeNonNegativeInteger" },
+    "mediaType": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9!#$&^_.+-]+/[A-Za-z0-9!#$&^_.+-]+$"
+    },
+    "encoding": { "const": "identity" },
+    "logicalName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255,
+      "pattern": "^[^/\\\\\\u0000-\\u001f\\u007f]+$"
+    },
+    "protection": { "$ref": "#/$defs/protection" },
+    "retention": { "$ref": "#/$defs/retention" },
+    "capability": { "$ref": "#/$defs/capability" },
+    "lifetime": { "$ref": "#/$defs/lifetime" },
+    "createdBy": { "$ref": "#/$defs/createdBy" }
+  },
+  "$defs": {
+    "hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$"
+    },
+    "nonRootJsonPointer": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096,
+      "pattern": "^(?:/(?:[^~/]|~[01])*)+$"
+    },
+    "timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01])T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\\.[0-9]{1,9})?Z$"
+    },
+    "graphKey": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,62}$"
+    },
+    "safeNonNegativeInteger": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "protection": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "policyId"],
+          "properties": {
+            "mode": { "const": "unprotected-test-only" },
+            "policyId": { "$ref": "#/$defs/identifier" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "policyId", "keyId", "aadHash"],
+          "properties": {
+            "mode": { "const": "protected-encrypted-reference" },
+            "policyId": { "$ref": "#/$defs/identifier" },
+            "keyId": { "$ref": "#/$defs/identifier" },
+            "aadHash": { "$ref": "#/$defs/hash" }
+          }
+        }
+      ]
+    },
+    "retention": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policyId", "createdAt", "minimumRetainUntil", "gcRequiresDeleteCapability"],
+      "properties": {
+        "policyId": { "$ref": "#/$defs/identifier" },
+        "createdAt": { "$ref": "#/$defs/timestamp" },
+        "minimumRetainUntil": {
+          "oneOf": [
+            { "$ref": "#/$defs/timestamp" },
+            { "type": "null" }
+          ]
+        },
+        "gcRequiresDeleteCapability": { "const": true }
+      }
+    },
+    "capability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["capabilityId", "authorityHash", "actions", "expiresAt"],
+      "properties": {
+        "capabilityId": { "$ref": "#/$defs/hash" },
+        "authorityHash": { "$ref": "#/$defs/hash" },
+        "actions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
+          "uniqueItems": true,
+          "items": { "enum": ["read", "write", "list", "delete"] }
+        },
+        "expiresAt": {
+          "oneOf": [
+            { "$ref": "#/$defs/timestamp" },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "lifetime": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "lineageRootRunId"],
+          "properties": {
+            "mode": { "enum": ["run", "lineage"] },
+            "lineageRootRunId": { "$ref": "#/$defs/identifier" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "lineageRootRunId", "pinId"],
+          "properties": {
+            "mode": { "const": "pinned" },
+            "lineageRootRunId": { "$ref": "#/$defs/identifier" },
+            "pinId": { "$ref": "#/$defs/identifier" }
+          }
+        }
+      ]
+    },
+    "createdBy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "planHash",
+        "runId",
+        "invocationId",
+        "graphKey",
+        "nodeId",
+        "edgeId",
+        "taskId",
+        "attemptId",
+        "attemptNumber"
+      ],
+      "properties": {
+        "planHash": { "$ref": "#/$defs/hash" },
+        "runId": { "$ref": "#/$defs/identifier" },
+        "invocationId": { "$ref": "#/$defs/hash" },
+        "graphKey": { "$ref": "#/$defs/graphKey" },
+        "nodeId": { "$ref": "#/$defs/identifier" },
+        "edgeId": { "$ref": "#/$defs/identifier" },
+        "taskId": { "$ref": "#/$defs/identifier" },
+        "attemptId": { "$ref": "#/$defs/hash" },
+        "attemptNumber": { "$ref": "#/$defs/safeNonNegativeInteger" },
+        "itemSequence": { "$ref": "#/$defs/safeNonNegativeInteger" }
+      }
+    }
+  }
+}

@@ -815,7 +815,9 @@ schema, public threat model, fixtures, and its declared dependency closure.
 | --- | --- | --- | --- |
 | `P0-now` | `D7-PIPELINE-CONFORMANCE-013` | `in_progress` | Finish parity, cancellation/cleanup red-team work, docs, and full gates; it is the only open head that unlocks the serial runtime backbone |
 | `P0-now` | `CTRL-DOCS-073` | `in_progress`, no dependency | Complete evidence-based architecture/research documents in parallel, while preserving honest implemented/target labels |
-| `P0-contract` | Raw-payload/`redacted: true` correction | **No dedicated registry task** | Integration owner must create or explicitly assign a cross-language contract task before durable event/checkpoint formats expand; `D16-SECURITY-062` must validate the completed fix, not become the first place it is discovered |
+| `P0-contract` | `D9-REDACTION-039` canonical payload/redaction contract | `in_progress`; native dependents remain Open | Freeze closed carriers and hostile corpus first; contract acceptance is only **contract Green**, not native, conformance, candidate, or release Green |
+| `P0-native` | `D9-TS-REDACTION-087` and `D9-PY-REDACTION-088` | `planned`, each depends on accepted `039` | Implement guarded writers, protected refs, truthful flags, legacy denial, and focused native suites independently from the frozen contract hash |
+| `P0-security join` | `D9-REDACTION-CONFORMANCE-089` | `planned`, depends on both `087` and `088` | Join cross-language semantics, package canaries, hostile sink scans, fault injection, and independent R3; only this can make D9 native/conformance Green |
 | `P0-backbone` | `D6-ROUTER-BARRIER-023` -> `D7-CYCLE-SPEC-024` -> native cycles -> `D7-CYCLE-CONFORMANCE-027` -> `D8-CHAOS-OPS-030` | `planned`, transitively blocked by active pipeline task | Preserve bounded routing/cycles and cancellation semantics needed by later durable, budget, verifier, and isolation policy enforcement |
 | `P0-durable` | `D9-DURABLE-EXT-SPEC-031` -> native durable extensions -> `D9-DURABLE-EXT-CONFORMANCE-034` | `planned`, depends on chaos | Freeze safe event/checkpoint payload treatment, leases, fencing, stale approvals, and effect reconciliation here; do not carry the false redaction assertion into a larger wire surface |
 | `P0-policy prerequisites` | `D10-BUDGET-*` -> `D11-VERIFY-*` | `planned`, depends on durable closure | Prove authority cannot escape through budget contention, retries, verifier fan-out, citations, or stale human gates |
@@ -834,7 +836,7 @@ before implementation can be considered scheduled.
 
 | Rank | Gap | Current evidence | Registry disposition | Acceptance boundary |
 | ---: | --- | --- | --- | --- |
-| `S0` | Durable payloads are labeled `redacted: true` while raw input/output remains | Confirmed in both runtime implementations; release blocker in Section 8 | **Unmapped as a dedicated corrective task**; must be resolved at or before `D9-DURABLE-EXT-SPEC-031`, then independently revalidated by `D16-SECURITY-062` | Canary secret is absent from journal, checkpoint, artifact, stdout, stderr, log, trace, error, and support-bundle bytes under defaults; scanner positive/negative controls pass in both languages |
+| `S0` | Durable payloads are labeled `redacted: true` while raw input/output remains | Confirmed in both runtime implementations; release blocker in Section 8 | Mapped exactly to contract `D9-REDACTION-039`, native `087`/`088`, and independent join `089`; `089 + D9-APPROVAL-077` gate `D9-DURABLE-EXT-SPEC-031`, and `D16-SECURITY-062` revalidates the candidate | Contract Green requires closed semantics/corpus; native Green requires both runtimes; D9 conformance Green requires `089`; candidate Green additionally requires Day 16. Canary secret is absent from every named sink under defaults with positive/negative controls |
 | `S1` | No executable capability/approval contract or authority intersection | Resource/side-effect metadata is descriptive; custom executors retain ambient authority | Mapped to `D12-ISOLATION-SPEC-044` and native D12 lanes, currently dependency-blocked | Deny-by-default, parent-child non-expansion, bounded grants, stale/replay denial, structured audit events, parity fixtures |
 | `S2` | Cooperative cancellation cannot kill hostile or synchronous execution | Scheduler owns in-process tasks only | Mapped to D12 plus `D8-CHAOS-OPS-030` precursor | Independent process kill, deadline containment, descendant cleanup, no post-terminal mutation |
 | `S3` | No path-safe workspace/worktree lease or merge gate | Parallel writers share host/repository unless operators isolate them | Mapped to D12 | Traversal/symlink/device escape denied; exclusive namespaces; stale lease cleanup; dirty/conflicting merge denied; target branch unchanged on failure |
@@ -846,14 +848,14 @@ before implementation can be considered scheduled.
 | `S9` | Supply-chain controls are partial | Pinned CI actions, lockfile installs, audit, dependency review, and CodeQL exist; final license/SBOM/attestation/trusted publishing evidence does not | Mapped to D16 and D20 | Candidate-bound scans/SBOM/checksums/attestations and independent source-to-package verification; no inferred registry authority |
 | `S10` | Independent review can be claimed without candidate identity unless evidence is digest-bound | Plans define R1-R3, but future reports do not yet exist | Mapped to D12 red-team, D16, D19, and D20 | Reviewer identity/role, commands, raw outputs, fixture/candidate digests, time, exceptions, and invalidation rules are recorded |
 
-The urgent planning correction is `S0`: it is already exploitable as a
-truthfulness and secret-persistence defect, yet the registry currently defers
-the broad redaction audit to Day 16. The corrective implementation should be a
-small, separately reviewable cross-language contract milestone before the Day 9
-durable schema grows. Day 16 remains the full-candidate verification gate. This
-separation prevents a late audit from discovering that every intervening
-fixture, migration, adapter, and storage implementation encoded the unsafe
-assumption.
+The urgent implementation correction remains `S0`: it is already exploitable
+as a truthfulness and secret-persistence defect. It is no longer unmapped. The
+live order is `039 -> 087/088 -> 089`, followed by the `089 + 077 -> 031`
+durable-extension join. A remediated independent review may make only `039`
+contract Green; it cannot make either native runtime, the D9 security join, a
+candidate, privacy, RC, or release Green. Day 16 remains the full-candidate
+verification gate. This staged distinction prevents documentation from
+claiming away the current defect while also avoiding a dependency deadlock.
 
 The next schedule risk is the long serial path from the active pipeline gate to
 Day 12. Safe acceleration means parallelizing threat analysis, fixtures,

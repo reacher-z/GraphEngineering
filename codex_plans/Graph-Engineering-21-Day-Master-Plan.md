@@ -14997,3 +14997,210 @@ chain. The next implementation leaf is operation-sequence-zero publication
 using the exact header receipt and provider-authoritative outer timestamp.
 Protocol completion, adoption, rebind, commit, manifest and release claims
 remain false.
+
+## 31.38 D6 integrated-barrier, quorum, deadline and durable decision-replay contract freeze (append-only execution plan, 2026-07-30)
+
+This section is append-only. It does not edit, delete, weaken, reinterpret or
+mark complete any earlier line. The pre-append 14,999-line prefix remains
+byte-identical with SHA-256
+`99c9abbf7e332f2a5b0cac39887f9a46662dea4ad41c10760c25d8e8256c508f`.
+
+### 31.38.1 Why this tranche exists and what it is not
+
+Section 31.35.12 accepted the integrated-router compiler, `routedBranches`
+lowering, ordinary execution and the zero-execution foreign-condition preflight,
+and closed with an explicit exclusion list: no dedicated durable `RouteSelected`
+identity, no zero-rejudge decision replay, no integrated all/minimum/percentage
+barriers, no quorum, no abstention, no deadlines, no late-arrival policy, no
+barrier cancellation propagation, no barrier trace or CLI visibility and no
+distributed coordination. `D6-ROUTER-BARRIER-023` therefore remained open.
+
+This tranche freezes exactly that excluded remainder as a contract candidate. It
+implements nothing. `implementationClaim` is `false` for the barrier contract
+and stays `false` until executable dual-language evidence exists.
+
+### 31.38.2 The safety fact that motivates the first deliverable
+
+`packages/runtime/src/scheduler.ts` currently classifies a `barrier` node
+together with `transform` and executes it as an ordinary deterministic node.
+`packages/primitives/src/barrier.ts` provides only a pure settled evaluator over
+`all`, `minimum` and `percentage`, with no quorum, deadline, abstention,
+scheduler integration or durable decision.
+
+The consequence is not a missing feature but a wrong answer: a graph that
+declares a barrier policy today is executed as a plain transform, which silently
+passes a barrier whose policy was never evaluated. Therefore the first
+deliverable of this lane, ahead of any barrier functionality, is a
+pre-dispatch capability rejection in both runtimes for a `barrier` node bearing
+an exact `IntegratedBarrierPolicy`, with zero executor calls, zero node
+attempts and no durable side effect. This reuses the accepted foreign-condition
+preflight mechanism rather than inventing a second gate.
+
+### 31.38.3 Frozen contract artifacts
+
+The normative source is `spec/integrated-barrier-semantics.md`. Its
+machine-readable carriers are `spec/integrated-barrier-policy.schema.json`,
+`spec/barrier-vote.schema.json`, `spec/barrier-decision.schema.json` and
+`spec/route-decision.schema.json`. The literal shared corpus is
+`spec/conformance/integrated-barrier.case.json` with an independently
+recomputing validator at `spec/conformance/integrated-barrier.validate.mjs`.
+The construction brief is
+`codex_plans/delivery/d6-integrated-barrier-implementation-brief.md`.
+
+The contract freezes the direct barrier policy on `barrier` nodes, a closed
+six-member arrival-disposition vocabulary including `abstained` and `unknown`,
+the `BarrierVote` carrier and retained-vote requirement for quorum, exact-integer
+satisfaction arithmetic for all four kinds, deterministic deadline arming and
+settlement against an injected clock, the closed `onUnsatisfied` resolution set,
+late-arrival behavior, cancellation propagation, the frozen `BarrierSatisfied`
+and `RouteSelected` decision documents with domain-separated identities, and
+compiler diagnostics `GE1421` through `GE1424`.
+
+### 31.38.4 Non-negotiable semantic decisions
+
+1. `onUnsatisfied` and `lateArrival` are required for every policy kind and have
+   no default, because a silently defaulted unsatisfied barrier is exactly the
+   implicit pass this contract exists to forbid.
+2. An unsatisfied barrier never succeeds and never binds an output. All three
+   resolutions — `fail`, `unknown` and `awaiting_human` — are non-passes.
+3. A quorum `unknown` vote always counts as a participant and never as an
+   accept. A malformed vote is the non-retryable `INVALID_BARRIER_VOTE` after
+   exactly one attempt and is never coerced to `abstain` or `unknown`.
+4. Percentage and quorum arithmetic is exact safe-integer multiplication. No
+   floating-point ratio is computed in either language.
+5. Deadlines are evaluated only against an injected monotonic clock at
+   scheduler quiescence points. No wall clock and no timer participates, so a
+   scripted tick list produces identical results in both languages.
+6. A committed decision is authoritative forever. Resume, replay and fork adopt
+   it verbatim with zero executor calls, zero re-evaluation and no second
+   decision event. `policyHash` drift, `decisionId` mismatch and a duplicate
+   decision are three distinct non-retryable failures rather than a silent
+   re-judgement.
+7. Run terminal precedence becomes `failed`, `cancelled`, `awaiting_human`,
+   `unknown`, `succeeded`. `UPSTREAM_UNKNOWN` is excluded from graph failure
+   codes exactly as `ROUTE_NOT_SELECTED` already is.
+8. `awaiting_human` suspends the run and stops. The authority that may later
+   resume it is `D9-APPROVAL-077` work and is an explicit non-claim here.
+
+### 31.38.5 Execution order
+
+P0-A freezes the semantics and schemas. P0-B produces the literal corpus and a
+validator that independently recomputes every stored hash and every arithmetic
+expectation, so a corpus typo fails the gate. P0-C runs the TypeScript and
+Python lanes in parallel on disjoint paths, each delivering the capability gate
+first, then the compiler pass, then scheduler integration. P0-D adds the
+cross-language join under `tools/conformance/` in which neither side imports the
+other's expected values. P0-E adds documentation, a provider-free example, an
+independent hostile review by a reviewer who did not author the candidate,
+registry evidence and the coverage-matrix update.
+
+Ordering violations discovered in 31.35.12 must not recur: diagnostic emission
+order must be identical in both languages, and the package root must export the
+discriminated result union members alongside the validator functions.
+
+### 31.38.6 Explicit non-claims
+
+This tranche claims no barrier capability, no quorum capability, no deadline
+capability, no decision-replay capability, no human-approval authority, no
+verifier or judge semantics, no budget accounting, no distributed coordination,
+no Explorer or CLI barrier visibility, and no release, adoption or star outcome.
+Freezing a contract is not implementing it. Until the P0-C and P0-D evidence
+exists, the Day 6 coverage-matrix row remains Partial and
+`D6-ROUTER-BARRIER-023` remains in progress.
+
+#### 31.37.35 Operation-sequence-zero permanent publication receipt tranche (append-only execution record, 2026-07-30)
+
+This section belongs to the §31.37 initial-publication chain and consumes only
+the authorization at the end of §31.37.34. It is appended here, after §31.38,
+because this plan is append-only and no earlier line may be edited or displaced.
+The pre-append 15,109-line prefix remains byte-identical with SHA-256
+`fde874b690f0848553127750fee45f8fbcaa323b5f784d9711577a7ac008aff0`.
+
+It implements the fourth and final ordered initial-write receipt and stops
+before four-receipt atomic adoption.
+
+### 31.37.35.1 Scope and predecessor
+
+The sole predecessor is the authentic exact baseline-header publication receipt
+minted by §31.37.33. Presentation of a clone, structural copy, Proxy, revoked
+Proxy, cross-run receipt or foreign-authority receipt is rejected before any
+prepare, without consuming the issuer and without disturbing the healthy graph.
+
+The write is one `INSERT` of the singleton `main.ge_cycle_operation_sequence`
+row from the frozen zero-caller-input statement
+
+```sql
+INSERT INTO main.ge_cycle_operation_sequence (singleton, baseline_id, last_commit_sequence, baseline_captured_at_ms, updated_at_ms) VALUES (1, ?, 0, ?, ?)
+```
+
+whose exact UTF-8 SHA-256 is
+`a9afde17c90fcc7381eefa3fa81823752d6f1bc29c9eced2de8b31176cc1dd85`
+and whose parameter order is frozen as
+`baselineId`, `baselineCapturedAtMs`, `updatedAtMs`. Both values are already
+frozen in `spec/conformance/sqlite-cursor-publication-rebind-v2.case.json`
+together with `requiredLastCommitSequence: 0`. The reader recomputes the digest
+before prepare; `last_commit_sequence` is a literal `0` inside the SQL and is
+never a caller parameter.
+
+### 31.37.35.2 Value provenance
+
+`baseline_id` and `baseline_captured_at_ms` come from the retained A2b source
+envelope and the exact projection, not from caller input. `updated_at_ms` comes
+from the provider clock reading captured at outer-authority preparation from the
+authentic clock evidence. It is never `Date.now()`, never an environment
+variable and never a caller parameter, and the leaf must prove both that
+`Date.now` is not called and that an injected environment override is ignored.
+
+Provider-timestamp monotonicity is the defining new invariant of this leaf:
+`updatedAtMs` must be greater than or equal to `baselineCapturedAtMs`. It is a
+distinct branch with its own message and its own hostile case, separate from the
+entry-phase conditions and from the header-snapshot identity binding. Collapsing
+these into one branch is a defect, because an operator debugging a poisoned
+graph would be told the clock drifted when the real cause was an out-of-order
+call.
+
+The assert path must re-derive the timestamp from the authentic clock evidence
+rather than comparing a cached authority field to itself. The frozen contract
+requires both the `outer-clock-evidence-receipt-object-identity` and the
+`outer-provider-now-ms` commitments; proving only object identity leaves the
+value binding unverified.
+
+### 31.37.35.3 Write accounting
+
+The phase transition is exactly
+`baseline-header-complete` -> `executing-sequence-zero` ->
+`sequence-zero-complete`. The outer ledger advances by exactly `+1` in each of
+its three dimensions: logical write sequence three to four, fixed statement
+count `21+E` to `22+E`, and affected rows `2+L+E` to `3+L+E`. This matches the
+frozen counter profile `initial-sequence-complete-before-adoption` at
+`outerLedgerLogicalWriteSequence: 4`.
+
+The connection provides one opaque, WeakMap-authenticated, exclusive-lineage,
+one-prepare and one-run session that verifies exactly one affected row against a
+real `total_changes` delta, records native-return completion before inspecting
+the result, preserves actual progress after failure and poisons replay. Prepare
+failure records zero run and zero row progress; a post-write failure records the
+real one-row progress and mints zero receipts. The leaf never opens, commits or
+rolls back the caller transaction.
+
+### 31.37.35.4 Failure precedence
+
+Caller presentation and graph provenance resolve before SQL. SQL digest, entry
+phase, header identity and provider-timestamp invariants resolve before prepare;
+the digest comparison is performed outside the preflight `try` so that the
+stage-ownership poison reason names the real defect instead of degrading to a
+generic preflight failure. Post-write parameter-digest and aggregate-result
+digest drift are rejected before any receipt is minted.
+
+### 31.37.35.5 Explicit non-claims
+
+This leaf consumes no receipt, performs no four-receipt atomic stage adoption,
+opens no publication session, does not rebind the cursor, implements neither
+validation rule 11 nor 12, does not retire the TEMP stage, does not commit or
+reopen the transaction, activates no manifest and adds no Python parity.
+`implementationClaim` and `activeManifestClaim` remain `false`. Protocol
+completion, adoption, release-candidate status and any external-adoption claim
+remain false.
+
+The next implementation leaf is the four-receipt atomic stage adoption using all
+four authentic non-consumed initial-write receipts.

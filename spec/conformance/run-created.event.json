@@ -7,7 +7,7 @@
   "graphRevision": 1,
   "sequence": 0,
   "traceId": "trace-conformance-001",
-  "redacted": true,
+  "redacted": false,
   "data": {
     "graphHash": "24819fe69f3b9449c79bcdd85b2049000c7cc8f313aab5957657a6078a80d288"
   }

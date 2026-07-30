@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha2/protected-aad.schema.json",
+  "title": "Graph Engineering Protected Value Associated Data",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "contractVersion",
+    "runId",
+    "graphRevision",
+    "recordKind",
+    "recordType",
+    "sequence",
+    "fieldPath",
+    "capturePolicyHash",
+    "keyRefHash",
+    "authorityBindingHash",
+    "tenantScopeHash",
+    "codec",
+    "valueMac"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "graphengineering.reacher-z.github.io/protected-aad/v1alpha1"
+    },
+    "contractVersion": { "const": "scheduler-recovery/v1alpha2" },
+    "runId": { "$ref": "#/$defs/identifier" },
+    "graphRevision": { "$ref": "#/$defs/safePositiveInteger" },
+    "recordKind": { "enum": ["event", "checkpoint"] },
+    "recordType": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$"
+    },
+    "nodeId": { "$ref": "#/$defs/identifier" },
+    "edgeId": { "$ref": "#/$defs/identifier" },
+    "attempt": { "$ref": "#/$defs/safePositiveInteger" },
+    "eventId": { "$ref": "#/$defs/identifier" },
+    "checkpointId": { "$ref": "#/$defs/identifier" },
+    "sequence": { "$ref": "#/$defs/safeNonNegativeInteger" },
+    "fieldPath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024,
+      "pattern": "^(?:/(?:[^~/]|~[01])*)+$"
+    },
+    "capturePolicyHash": { "$ref": "#/$defs/sha256" },
+    "keyRefHash": { "$ref": "#/$defs/sha256" },
+    "authorityBindingHash": { "$ref": "#/$defs/sha256" },
+    "tenantScopeHash": { "$ref": "#/$defs/sha256" },
+    "codec": { "const": "durable-json/v1alpha1" },
+    "valueMac": { "$ref": "#/$defs/sha256" }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "recordKind": { "const": "event" } },
+        "required": ["recordKind"]
+      },
+      "then": {
+        "required": ["eventId"],
+        "properties": {
+          "eventId": { "$ref": "#/$defs/identifier" },
+          "checkpointId": false
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "recordKind": { "const": "checkpoint" } },
+        "required": ["recordKind"]
+      },
+      "then": {
+        "required": ["checkpointId"],
+        "properties": {
+          "checkpointId": { "$ref": "#/$defs/identifier" },
+          "eventId": false
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+      "not": { "enum": [".", ".."] }
+    },
+    "safePositiveInteger": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "safeNonNegativeInteger": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+  }
+}

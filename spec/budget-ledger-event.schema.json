@@ -1,0 +1,445 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/budget-ledger-event.schema.json",
+  "title": "Graph Engineering Durable Budget Ledger Event",
+  "allOf": [
+    { "$ref": "#/$defs/baseEvent" },
+    {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "BudgetAccountOpened" },
+            "data": { "$ref": "#/$defs/accountOpened" }
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "ReservationCreated" },
+            "data": { "$ref": "#/$defs/reservationCreated" }
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "UsageCommitted" },
+            "data": { "$ref": "#/$defs/usageCommitted" }
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "ReservationReleased" },
+            "data": { "$ref": "#/$defs/reservationReleased" }
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "UsageDisputed" },
+            "data": { "$ref": "#/$defs/usageDisputed" }
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "UsageCompensated" },
+            "data": { "$ref": "#/$defs/usageCompensated" }
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "RouteDecisionRecorded" },
+            "data": { "$ref": "#/$defs/routeDecisionRecorded" }
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "ReservationClosed" },
+            "data": { "$ref": "#/$defs/reservationClosed" }
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "BudgetAccountClosed" },
+            "data": { "$ref": "#/$defs/accountClosed" }
+          }
+        }
+      ]
+    }
+  ],
+  "$defs": {
+    "safeNonNegativeInteger": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "safePositiveInteger": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$"
+    },
+    "timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01])T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\\.[0-9]{1,9})?Z$"
+    },
+    "eventType": {
+      "enum": [
+        "BudgetAccountClosed",
+        "BudgetAccountOpened",
+        "ReservationClosed",
+        "ReservationCreated",
+        "ReservationReleased",
+        "RouteDecisionRecorded",
+        "UsageCommitted",
+        "UsageCompensated",
+        "UsageDisputed"
+      ]
+    },
+    "lease": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "leaseId",
+        "holderId",
+        "leaseEpoch",
+        "fencingToken",
+        "acquiredAt",
+        "expiresAt"
+      ],
+      "properties": {
+        "leaseId": { "$ref": "#/$defs/identifier" },
+        "holderId": { "$ref": "#/$defs/identifier" },
+        "leaseEpoch": { "$ref": "#/$defs/safePositiveInteger" },
+        "fencingToken": { "$ref": "#/$defs/safePositiveInteger" },
+        "acquiredAt": { "$ref": "#/$defs/timestamp" },
+        "expiresAt": { "$ref": "#/$defs/timestamp" }
+      }
+    },
+    "baseEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "apiVersion",
+        "kind",
+        "contractVersion",
+        "accountId",
+        "eventStreamId",
+        "eventId",
+        "sequence",
+        "expectedPreviousSequence",
+        "previousEventHash",
+        "timestamp",
+        "lease",
+        "policyHash",
+        "pricingSnapshotHash",
+        "authorityBindingHash",
+        "type",
+        "payloadDisposition",
+        "redacted",
+        "data",
+        "payloadHash",
+        "eventHash"
+      ],
+      "properties": {
+        "apiVersion": {
+          "const": "graphengineering.reacher-z.github.io/budget-ledger-events/v1alpha1"
+        },
+        "kind": { "const": "BudgetLedgerEvent" },
+        "contractVersion": { "const": "durable-budget-ledger/v1alpha1" },
+        "accountId": { "$ref": "#/$defs/identifier" },
+        "eventStreamId": { "$ref": "#/$defs/hash" },
+        "eventId": { "$ref": "#/$defs/identifier" },
+        "sequence": { "$ref": "#/$defs/safeNonNegativeInteger" },
+        "expectedPreviousSequence": {
+          "type": "integer",
+          "minimum": -1,
+          "maximum": 9007199254740990
+        },
+        "previousEventHash": {
+          "oneOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }]
+        },
+        "timestamp": { "$ref": "#/$defs/timestamp" },
+        "lease": { "$ref": "#/$defs/lease" },
+        "policyHash": { "$ref": "#/$defs/hash" },
+        "pricingSnapshotHash": { "$ref": "#/$defs/hash" },
+        "authorityBindingHash": { "$ref": "#/$defs/hash" },
+        "type": { "$ref": "#/$defs/eventType" },
+        "payloadDisposition": { "const": "metadata-only" },
+        "redacted": { "const": false },
+        "data": { "type": "object" },
+        "payloadHash": { "$ref": "#/$defs/hash" },
+        "eventHash": { "$ref": "#/$defs/hash" }
+      }
+    },
+    "binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tenantId",
+        "runId",
+        "graphHash",
+        "graphRevision",
+        "nodeId",
+        "attemptId",
+        "activityId",
+        "roundId",
+        "planHash",
+        "providerId",
+        "modelId"
+      ],
+      "properties": {
+        "tenantId": { "$ref": "#/$defs/identifier" },
+        "runId": { "$ref": "#/$defs/identifier" },
+        "graphHash": { "$ref": "#/$defs/hash" },
+        "graphRevision": { "$ref": "#/$defs/safePositiveInteger" },
+        "nodeId": {
+          "oneOf": [{ "$ref": "#/$defs/identifier" }, { "type": "null" }]
+        },
+        "attemptId": {
+          "oneOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }]
+        },
+        "activityId": {
+          "oneOf": [{ "$ref": "#/$defs/identifier" }, { "type": "null" }]
+        },
+        "roundId": {
+          "oneOf": [{ "$ref": "#/$defs/identifier" }, { "type": "null" }]
+        },
+        "planHash": { "$ref": "#/$defs/hash" },
+        "providerId": {
+          "oneOf": [{ "$ref": "#/$defs/identifier" }, { "type": "null" }]
+        },
+        "modelId": {
+          "oneOf": [
+            { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,254}$" },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "accountOpened": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policy",
+        "policyHash",
+        "pricingSnapshotHash",
+        "routerPolicyHash",
+        "rootScope",
+        "ceiling",
+        "startedAt"
+      ],
+      "properties": {
+        "policy": {
+          "$ref": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/budget-policy.schema.json"
+        },
+        "policyHash": { "$ref": "#/$defs/hash" },
+        "pricingSnapshotHash": { "$ref": "#/$defs/hash" },
+        "routerPolicyHash": { "$ref": "#/$defs/hash" },
+        "rootScope": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "tenantId",
+            "runId",
+            "graphHash",
+            "graphRevision",
+            "planHash"
+          ],
+          "properties": {
+            "tenantId": { "$ref": "#/$defs/identifier" },
+            "runId": { "$ref": "#/$defs/identifier" },
+            "graphHash": { "$ref": "#/$defs/hash" },
+            "graphRevision": { "$ref": "#/$defs/safePositiveInteger" },
+            "planHash": { "$ref": "#/$defs/hash" }
+          }
+        },
+        "ceiling": {
+          "$ref": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/budget-vector.schema.json"
+        },
+        "startedAt": { "$ref": "#/$defs/timestamp" }
+      }
+    },
+    "reservationCreated": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reservationId",
+        "parentReservationId",
+        "depth",
+        "binding",
+        "maximum",
+        "idempotencyKey",
+        "expiresAt",
+        "routeDecisionHash"
+      ],
+      "properties": {
+        "reservationId": { "$ref": "#/$defs/identifier" },
+        "parentReservationId": {
+          "oneOf": [{ "$ref": "#/$defs/identifier" }, { "type": "null" }]
+        },
+        "depth": { "type": "integer", "minimum": 0, "maximum": 64 },
+        "binding": { "$ref": "#/$defs/binding" },
+        "maximum": {
+          "$ref": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/budget-vector.schema.json"
+        },
+        "idempotencyKey": { "$ref": "#/$defs/hash" },
+        "expiresAt": { "$ref": "#/$defs/timestamp" },
+        "routeDecisionHash": {
+          "oneOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }]
+        }
+      }
+    },
+    "usageCommitted": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reservationId",
+        "settlementId",
+        "usage",
+        "source",
+        "usageEnvelopeHash",
+        "reportedAt",
+        "overageDisposition",
+        "inDoubt"
+      ],
+      "properties": {
+        "reservationId": { "$ref": "#/$defs/identifier" },
+        "settlementId": { "$ref": "#/$defs/identifier" },
+        "usage": {
+          "$ref": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/budget-vector.schema.json"
+        },
+        "source": { "enum": ["operator", "provider", "runtime", "tool"] },
+        "usageEnvelopeHash": { "$ref": "#/$defs/hash" },
+        "reportedAt": { "$ref": "#/$defs/timestamp" },
+        "overageDisposition": { "enum": ["none", "declared-ceiling-committed-excess-disputed"] },
+        "inDoubt": { "type": "boolean" }
+      }
+    },
+    "reservationReleased": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reservationId", "releaseId", "released", "reason"],
+      "properties": {
+        "reservationId": { "$ref": "#/$defs/identifier" },
+        "releaseId": { "$ref": "#/$defs/identifier" },
+        "released": {
+          "$ref": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/budget-vector.schema.json"
+        },
+        "reason": {
+          "enum": [
+            "cancelled",
+            "expired",
+            "failed",
+            "parent-closed",
+            "path-not-selected",
+            "settled",
+            "unused"
+          ]
+        }
+      }
+    },
+    "usageDisputed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reservationId", "disputeId", "settlementId", "disputed", "reason"],
+      "properties": {
+        "reservationId": { "$ref": "#/$defs/identifier" },
+        "disputeId": { "$ref": "#/$defs/identifier" },
+        "settlementId": { "$ref": "#/$defs/identifier" },
+        "disputed": {
+          "$ref": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/budget-vector.schema.json"
+        },
+        "reason": {
+          "enum": [
+            "currency-mismatch",
+            "duplicate-provider-report",
+            "pricing-mismatch",
+            "provider-over-declared-ceiling",
+            "unknown-meter",
+            "usage-mismatch"
+          ]
+        }
+      }
+    },
+    "usageCompensated": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reservationId",
+        "compensationId",
+        "disputeId",
+        "amount",
+        "economicOnly",
+        "restoresSchedulingCapacity"
+      ],
+      "properties": {
+        "reservationId": { "$ref": "#/$defs/identifier" },
+        "compensationId": { "$ref": "#/$defs/identifier" },
+        "disputeId": { "$ref": "#/$defs/identifier" },
+        "amount": {
+          "$ref": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/budget-vector.schema.json"
+        },
+        "economicOnly": { "const": true },
+        "restoresSchedulingCapacity": { "const": false }
+      }
+    },
+    "routeDecisionRecorded": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["decisionHash", "reservationId", "outcome"],
+      "properties": {
+        "decisionHash": { "$ref": "#/$defs/hash" },
+        "reservationId": {
+          "oneOf": [{ "$ref": "#/$defs/identifier" }, { "type": "null" }]
+        },
+        "outcome": { "enum": ["denied", "selected"] }
+      }
+    },
+    "reservationClosed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reservationId", "finalProjectionHash", "state"],
+      "properties": {
+        "reservationId": { "$ref": "#/$defs/identifier" },
+        "finalProjectionHash": { "$ref": "#/$defs/hash" },
+        "state": { "enum": ["closed", "disputed"] }
+      }
+    },
+    "accountClosed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["terminalReason", "finalProjectionHash", "closedAt"],
+      "properties": {
+        "terminalReason": {
+          "enum": [
+            "CANCELLED",
+            "COMPLETED",
+            "DISPUTED_USAGE",
+            "FAILED",
+            "MAX_ATTEMPTS",
+            "MAX_BYTES",
+            "MAX_DEPTH",
+            "MAX_DURATION",
+            "MAX_DYNAMIC_NODES",
+            "MAX_FAN_OUT",
+            "MAX_GRAPH_SIZE",
+            "MAX_MONEY",
+            "MAX_PROVIDER_USAGE"
+          ]
+        },
+        "finalProjectionHash": { "$ref": "#/$defs/hash" },
+        "closedAt": { "$ref": "#/$defs/timestamp" }
+      }
+    }
+  }
+}

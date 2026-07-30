@@ -1,0 +1,7164 @@
+{
+  "contract": "graphengineering.reacher-z.github.io/integrated-barrier/v1alpha1",
+  "semantics": "integrated-barrier-semantics.md",
+  "implementationClaim": false,
+  "claims": {
+    "implementationClaim": false,
+    "typescriptRuntimeClaim": false,
+    "pythonRuntimeClaim": false,
+    "capabilityGateClaim": false
+  },
+  "claimsNote": "Every flag is literally false. Nothing in this repository implements this contract: the scheduler still executes a barrier node as an ordinary deterministic transform, so a declared IntegratedBarrierPolicy is silently passed today. Flipping any flag to true must be a deliberate, reviewed edit made by the lane that implements the corresponding behavior, never an inference from this corpus.",
+  "provenance": {
+    "expectationsImportedFromOtherFixtures": [],
+    "note": "Every expectation in this corpus is derived only from integrated-barrier-semantics.md and the four frozen schemas. No value is copied from another conformance fixture and no value is imported from a language runtime."
+  },
+  "schemas": {
+    "policy": "integrated-barrier-policy.schema.json",
+    "vote": "barrier-vote.schema.json",
+    "barrierDecision": "barrier-decision.schema.json",
+    "routeDecision": "route-decision.schema.json"
+  },
+  "diagnosticProjection": {
+    "fieldsInOrder": [
+      "code",
+      "path",
+      "nodeIds",
+      "edgeId"
+    ],
+    "absentFieldBehavior": "omit",
+    "preserveDiagnosticOrder": true,
+    "preserveNodeIdOrder": true
+  },
+  "diagnosticCodes": [
+    "GE1421_INVALID_BARRIER_POLICY",
+    "GE1422_BARRIER_POLICY_KIND_MISMATCH",
+    "GE1423_BARRIER_NO_INPUTS",
+    "GE1424_BARRIER_THRESHOLD_EXCEEDS_INPUTS"
+  ],
+  "diagnosticEmissionOrder": {
+    "passOrder": [
+      "GE1007",
+      "GE1001..GE1004,GE1008,GE1009",
+      "GE1005",
+      "GE1010,GE1006",
+      "GE1101,GE1102",
+      "GE1401..GE1407",
+      "GE1421..GE1424",
+      "GE1201..GE1208"
+    ],
+    "withinPass": "by category in GE1421, GE1422, GE1423, GE1424 order, then node declaration order within each category",
+    "suppression": "GE1421 on a node suppresses GE1422 and GE1424 for that node only; it never suppresses GE1423 on that node, any diagnostic on another node, or any later pass"
+  },
+  "diagnosticBaseLocations": {
+    "GE1421_INVALID_BARRIER_POLICY": "#/nodes/{index}/config + firstInvalidDescendant (config root when the config is not an object)",
+    "GE1422_BARRIER_POLICY_KIND_MISMATCH": "#/nodes/{index}/config + offending member path",
+    "GE1423_BARRIER_NO_INPUTS": "#/nodes/{index}",
+    "GE1424_BARRIER_THRESHOLD_EXCEEDS_INPUTS": "#/nodes/{index}/config/minimum or #/nodes/{index}/config/quorum/accepts"
+  },
+  "firstInvalidDescendantRule": {
+    "order": "unknown keys first in ascending Unicode code-point order, then required-or-present fields in contract order, with array elements by increasing index",
+    "policyFieldOrder": [
+      "kind",
+      "minimum",
+      "basisPoints",
+      "quorum",
+      "deadline",
+      "onUnsatisfied",
+      "lateArrival"
+    ],
+    "quorumFieldOrder": [
+      "accepts",
+      "countAbstainAsParticipant"
+    ],
+    "deadlineFieldOrder": [
+      "afterMs"
+    ],
+    "cardinalityFieldOrder": [
+      "minimum",
+      "basisPoints",
+      "quorum"
+    ],
+    "note": "policyFieldOrder is the declaration order of the IntegratedBarrierPolicy block in integrated-barrier-semantics.md, which differs from the 'properties' order of integrated-barrier-policy.schema.json. The declaration block is the normative contract text and is frozen here."
+  },
+  "vocabulary": {
+    "kinds": [
+      "all",
+      "minimum",
+      "percentage",
+      "quorum"
+    ],
+    "dispositions": [
+      "succeeded",
+      "failed",
+      "missing",
+      "timed_out",
+      "abstained",
+      "unknown"
+    ],
+    "quorumOnlyDispositions": [
+      "abstained",
+      "unknown"
+    ],
+    "verdicts": [
+      "accept",
+      "reject",
+      "abstain",
+      "unknown"
+    ],
+    "voteRecordVerdicts": [
+      "accept",
+      "reject",
+      "abstain",
+      "unknown",
+      "not-cast"
+    ],
+    "decisionOnlyVerdicts": [
+      "not-cast"
+    ],
+    "nonVotingDispositions": [
+      "missing",
+      "timed_out"
+    ],
+    "verdictToDisposition": {
+      "accept": "succeeded",
+      "reject": "failed",
+      "abstain": "abstained",
+      "unknown": "unknown"
+    },
+    "reasonCodes": [
+      "NO_ITEMS",
+      "ALL_SUCCEEDED",
+      "ALL_NOT_SUCCEEDED",
+      "MINIMUM_MET",
+      "MINIMUM_NOT_MET",
+      "MINIMUM_EXCEEDS_TOTAL",
+      "PERCENTAGE_MET",
+      "PERCENTAGE_NOT_MET",
+      "QUORUM_MET",
+      "QUORUM_NOT_MET",
+      "QUORUM_EXCEEDS_PARTICIPANTS"
+    ],
+    "routeReasonCodes": [
+      "REQUESTED_ROUTES_SELECTED",
+      "DEFAULT_SELECTED_NO_REQUEST",
+      "DEFAULT_SELECTED_UNKNOWN_ROUTE",
+      "ESCALATION_SELECTED_LOW_CONFIDENCE",
+      "NO_REQUESTED_ROUTE",
+      "UNKNOWN_ROUTE",
+      "MULTIPLE_ROUTES_FOR_SINGLE",
+      "MULTICAST_LIMIT_EXCEEDED"
+    ],
+    "routeDecisionNullableMembers": [
+      "confidenceBasisPoints"
+    ],
+    "onUnsatisfied": [
+      "fail",
+      "unknown",
+      "human"
+    ],
+    "lateArrival": [
+      "ignore",
+      "reject"
+    ],
+    "resolutions": [
+      "satisfied",
+      "failed",
+      "unknown",
+      "awaiting_human"
+    ],
+    "resolutionByOnUnsatisfied": {
+      "fail": "failed",
+      "unknown": "unknown",
+      "human": "awaiting_human"
+    },
+    "dispositionToCountField": {
+      "succeeded": "succeeded",
+      "failed": "failed",
+      "missing": "missing",
+      "timed_out": "timedOut",
+      "abstained": "abstained",
+      "unknown": "unknown"
+    },
+    "dispositionToIdList": {
+      "succeeded": "acceptedIds",
+      "failed": "failedIds",
+      "missing": "missingIds",
+      "timed_out": "timedOutIds",
+      "abstained": "abstainedIds",
+      "unknown": "unknownIds"
+    },
+    "runTerminalPrecedence": [
+      "failed",
+      "cancelled",
+      "awaiting_human",
+      "unknown",
+      "succeeded"
+    ],
+    "replayRejectionCodes": [
+      "DECISION_POLICY_DRIFT",
+      "DECISION_IDENTITY_MISMATCH",
+      "DUPLICATE_DECISION"
+    ],
+    "nodeFailureCodes": [
+      "INVALID_BARRIER_VOTE",
+      "BARRIER_NOT_SATISFIED",
+      "BARRIER_LATE_ARRIVAL",
+      "UPSTREAM_UNKNOWN"
+    ]
+  },
+  "satisfactionArithmetic": {
+    "noItems": "total == 0 is unsatisfied with reason NO_ITEMS for every kind",
+    "all": "satisfied iff succeeded == total",
+    "minimum": "minimum > total is MINIMUM_EXCEEDS_TOTAL; otherwise satisfied iff succeeded >= minimum",
+    "percentage": "satisfied iff succeeded * 10000 >= total * basisPoints, both exact safe integers",
+    "quorum": "participants = total - (countAbstainAsParticipant ? 0 : abstained); accepts > participants is QUORUM_EXCEEDS_PARTICIPANTS; otherwise satisfied iff succeeded >= accepts",
+    "deadlineElapsedRule": "deadlineElapsed is true exactly when at least one disposition entry is timed_out"
+  },
+  "voteCensus": {
+    "rule": "For a quorum policy, votes is a complete one-record-per-entry census in incoming-edge declaration order, not a list of received ballots",
+    "castVerdictsComeFromTheUpstreamCarrier": [
+      "accept",
+      "reject",
+      "abstain",
+      "unknown"
+    ],
+    "decisionOnlyVerdict": "not-cast",
+    "notCastAppliesExactlyTo": [
+      "missing",
+      "timed_out"
+    ],
+    "notCastRecordShape": "A not-cast record carries sourceNodeId and verdict only. confidenceBasisPoints and evidenceHash are absent, because an entry that cast no ballot supplied neither confidence nor evidence; materializing either would invent a ballot nobody cast.",
+    "upstreamMayNeverCastNotCast": true
+  },
+  "identifierContract": {
+    "nodeIdPattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$",
+    "safeRouteIdPattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+    "reservedRouteKeys": [
+      ".",
+      ".."
+    ],
+    "nodeIdMembers": [
+      "BarrierDecision.barrierNodeId",
+      "BarrierDecision.acceptedIds[]",
+      "BarrierDecision.failedIds[]",
+      "BarrierDecision.missingIds[]",
+      "BarrierDecision.timedOutIds[]",
+      "BarrierDecision.abstainedIds[]",
+      "BarrierDecision.unknownIds[]",
+      "BarrierDecision.votes[].sourceNodeId",
+      "RouteDecision.routerNodeId"
+    ],
+    "routeKeyMembers": [
+      "RouteDecision.requestedRoutes[]",
+      "RouteDecision.selectedRoutes[]",
+      "RouteDecision.unknownRoutes[]"
+    ],
+    "note": "A node identifier is a Graph IR node ID and can never begin with a digit, so a decision document must never accept a node ID the compiler cannot produce. A route key is a SafeRouteId, which may begin with a digit but is never '.' or '..'. The two patterns are deliberately different."
+  },
+  "hashContract": {
+    "canonicalSerializer": "canonicalSerialize: UTF-8 JSON with no insignificant whitespace and object keys sorted in ascending Unicode code-point order; arrays keep index order",
+    "digest": "SHA-256, rendered lowercase hexadecimal",
+    "framing": "frame(s) = uint32be(byteLength(utf8(s))) || utf8(s)",
+    "policyHashDomain": "graphengineering.policy.v1alpha1",
+    "policyKindTags": [
+      "barrier",
+      "router"
+    ],
+    "policyHashFrames": [
+      "policyHashDomain",
+      "policyKindTag",
+      "canonicalSerialize(policy)"
+    ],
+    "barrierDecisionDomain": "graphengineering.barrier-decision.v1alpha1",
+    "routeDecisionDomain": "graphengineering.route-decision.v1alpha1",
+    "decisionIdFrames": [
+      "decisionDomain",
+      "runId",
+      "decimal(graphRevision)",
+      "nodeId",
+      "canonicalSerialize(document without decisionId)"
+    ],
+    "graphHash": "sha256(utf8(canonicalSerialize(graph)))",
+    "evidenceHash": "sha256(utf8(canonicalSerialize(evidence)))",
+    "crossRuntimeRequirement": "TypeScript and Python MUST each recompute every literal in this corpus from these rules alone; neither may import an expectation from the other",
+    "domainSeparation": {
+      "policy": {
+        "kind": "all",
+        "lateArrival": "ignore",
+        "onUnsatisfied": "fail"
+      },
+      "canonicalPolicy": "{\"kind\":\"all\",\"lateArrival\":\"ignore\",\"onUnsatisfied\":\"fail\"}",
+      "barrierPolicyHash": "6737202047614939f6a39f16273bd223c3b2290d0522709c3a4aa093fe80241e",
+      "routerPolicyHash": "b70a1e0c1d2ab89e882c0b859560c7eb91db25f034ee15224fdb8f2a5a17486e"
+    }
+  },
+  "policyCases": [
+    {
+      "name": "all-kind-is-valid",
+      "config": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "all"
+      },
+      "expect": {
+        "valid": true,
+        "policy": {
+          "onUnsatisfied": "fail",
+          "lateArrival": "ignore",
+          "kind": "all"
+        }
+      }
+    },
+    {
+      "name": "minimum-kind-is-valid",
+      "config": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "minimum",
+        "minimum": 2
+      },
+      "expect": {
+        "valid": true,
+        "policy": {
+          "onUnsatisfied": "fail",
+          "lateArrival": "ignore",
+          "kind": "minimum",
+          "minimum": 2
+        }
+      }
+    },
+    {
+      "name": "percentage-kind-is-valid",
+      "config": {
+        "onUnsatisfied": "human",
+        "lateArrival": "reject",
+        "kind": "percentage",
+        "basisPoints": 6666
+      },
+      "expect": {
+        "valid": true,
+        "policy": {
+          "onUnsatisfied": "human",
+          "lateArrival": "reject",
+          "kind": "percentage",
+          "basisPoints": 6666
+        }
+      }
+    },
+    {
+      "name": "quorum-kind-is-valid",
+      "config": {
+        "onUnsatisfied": "unknown",
+        "lateArrival": "reject",
+        "kind": "quorum",
+        "quorum": {
+          "accepts": 2,
+          "countAbstainAsParticipant": true
+        }
+      },
+      "expect": {
+        "valid": true,
+        "policy": {
+          "onUnsatisfied": "unknown",
+          "lateArrival": "reject",
+          "kind": "quorum",
+          "quorum": {
+            "accepts": 2,
+            "countAbstainAsParticipant": true
+          }
+        }
+      }
+    },
+    {
+      "name": "deadline-is-optional-for-every-kind",
+      "config": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "all",
+        "deadline": {
+          "afterMs": 1000
+        }
+      },
+      "expect": {
+        "valid": true,
+        "policy": {
+          "onUnsatisfied": "fail",
+          "lateArrival": "ignore",
+          "kind": "all",
+          "deadline": {
+            "afterMs": 1000
+          }
+        }
+      }
+    },
+    {
+      "name": "quorum-with-deadline-and-reject-late-arrival",
+      "config": {
+        "onUnsatisfied": "human",
+        "lateArrival": "reject",
+        "kind": "quorum",
+        "quorum": {
+          "accepts": 1,
+          "countAbstainAsParticipant": false
+        },
+        "deadline": {
+          "afterMs": 250
+        }
+      },
+      "expect": {
+        "valid": true,
+        "policy": {
+          "onUnsatisfied": "human",
+          "lateArrival": "reject",
+          "kind": "quorum",
+          "quorum": {
+            "accepts": 1,
+            "countAbstainAsParticipant": false
+          },
+          "deadline": {
+            "afterMs": 250
+          }
+        }
+      }
+    },
+    {
+      "name": "json-one-point-zero-is-integer-one-for-minimum",
+      "config": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "minimum",
+        "minimum": 1.0
+      },
+      "expect": {
+        "valid": true,
+        "policy": {
+          "onUnsatisfied": "fail",
+          "lateArrival": "ignore",
+          "kind": "minimum",
+          "minimum": 1.0
+        }
+      },
+      "integerSourceLiteral": "\"minimum\": 1.0"
+    },
+    {
+      "name": "json-one-point-zero-is-integer-one-for-basis-points",
+      "config": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "percentage",
+        "basisPoints": 1.0
+      },
+      "expect": {
+        "valid": true,
+        "policy": {
+          "onUnsatisfied": "fail",
+          "lateArrival": "ignore",
+          "kind": "percentage",
+          "basisPoints": 1.0
+        }
+      },
+      "integerSourceLiteral": "\"basisPoints\": 1.0"
+    },
+    {
+      "name": "json-one-point-zero-is-integer-one-for-quorum-accepts",
+      "config": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "quorum",
+        "quorum": {
+          "accepts": 1.0,
+          "countAbstainAsParticipant": false
+        }
+      },
+      "expect": {
+        "valid": true,
+        "policy": {
+          "onUnsatisfied": "fail",
+          "lateArrival": "ignore",
+          "kind": "quorum",
+          "quorum": {
+            "accepts": 1.0,
+            "countAbstainAsParticipant": false
+          }
+        }
+      },
+      "integerSourceLiteral": "\"accepts\": 1.0"
+    },
+    {
+      "name": "json-one-point-zero-is-integer-one-for-deadline-after-ms",
+      "config": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "all",
+        "deadline": {
+          "afterMs": 1.0
+        }
+      },
+      "expect": {
+        "valid": true,
+        "policy": {
+          "onUnsatisfied": "fail",
+          "lateArrival": "ignore",
+          "kind": "all",
+          "deadline": {
+            "afterMs": 1.0
+          }
+        }
+      },
+      "integerSourceLiteral": "\"afterMs\": 1.0"
+    },
+    {
+      "name": "boolean-is-not-an-integer-minimum",
+      "config": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "minimum",
+        "minimum": true
+      },
+      "expect": {
+        "valid": false,
+        "code": "GE1421_INVALID_BARRIER_POLICY",
+        "relativePath": "/minimum"
+      }
+    },
+    {
+      "name": "boolean-is-not-an-integer-basis-points",
+      "config": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "percentage",
+        "basisPoints": true
+      },
+      "expect": {
+        "valid": false,
+        "code": "GE1421_INVALID_BARRIER_POLICY",
+        "relativePath": "/basisPoints"
+      }
+    },
+    {
+      "name": "boolean-is-not-an-integer-quorum-accepts",
+      "config": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "quorum",
+        "quorum": {
+          "accepts": true,
+          "countAbstainAsParticipant": false
+        }
+      },
+      "expect": {
+        "valid": false,
+        "code": "GE1421_INVALID_BARRIER_POLICY",
+        "relativePath": "/quorum/accepts"
+      }
+    },
+    {
+      "name": "boolean-is-not-an-integer-deadline-after-ms",
+      "config": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "all",
+        "deadline": {
+          "afterMs": true
+        }
+      },
+      "expect": {
+        "valid": false,
+        "code": "GE1421_INVALID_BARRIER_POLICY",
+        "relativePath": "/deadline/afterMs"
+      }
+    },
+    {
+      "name": "fractional-number-is-not-an-integer-minimum",
+      "config": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "minimum",
+        "minimum": 1.5
+      },
+      "expect": {
+        "valid": false,
+        "code": "GE1421_INVALID_BARRIER_POLICY",
+        "relativePath": "/minimum"
+      }
+    },
+    {
+      "name": "string-digits-are-not-an-integer-basis-points",
+      "config": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "percentage",
+        "basisPoints": "6666"
+      },
+      "expect": {
+        "valid": false,
+        "code": "GE1421_INVALID_BARRIER_POLICY",
+        "relativePath": "/basisPoints"
+      }
+    },
+    {
+      "name": "unknown-top-level-field",
+      "config": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "all",
+        "extra": true
+      },
+      "expect": {
+        "valid": false,
+        "code": "GE1421_INVALID_BARRIER_POLICY",
+        "relativePath": "/extra"
+      }
+    },
+    {
+      "name": "unknown-key-precedes-a-missing-required-field",
+      "config": {
+        "kind": "all",
+        "lateArrival": "ignore",
+        "extra": true
+      },
+      "expect": {
+        "valid": false,
+        "code": "GE1421_INVALID_BARRIER_POLICY",
+        "relativePath": "/extra"
+      }
+    },
+    {
+      "name": "two-unknown-keys-use-unicode-code-point-order",
+      "config": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "all",
+        "zeta": 1,
+        "alpha": 2
+      },
+      "expect": {
+        "valid": false,
+        "code": "GE1421_INVALID_BARRIER_POLICY",
+        "relativePath": "/alpha"
+      }
+    },
+    {
+      "name": "wrapper-config-is-not-a-direct-policy",
+      "config": {
+        "policy": {
+          "kind": "all",
+          "onUnsatisfied": "fail",
+          "lateArrival": "ignore"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "code": "GE1421_INVALID_BARRIER_POLICY",
+        "relativePath": "/policy"
+      }
+    },
+    {
+      "name": "explicit-null-deadline-is-not-omission",
+      "config": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "all",
+        "deadline": null
+      },
+      "expect": {
+        "valid": false,
+        "code": "GE1421_INVALID_BARRIER_POLICY",
+        "relativePath": "/deadline"
+      }
+    },
+    {
+      "name": "explicit-null-minimum-is-not-omission",
+      "config": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "minimum",
+        "minimum": null
+      },
+      "expect": {
+        "valid": false,
+        "code": "GE1421_INVALID_BARRIER_POLICY",
+        "relativePath": "/minimum"
+      }
+    },
+    {
+      "name": "explicit-null-quorum-is-not-omission",
+      "config": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "quorum",
+        "quorum": null
+      },
+      "expect": {
+        "valid": false,
+        "code": "GE1421_INVALID_BARRIER_POLICY",
+        "relativePath": "/quorum"
+      }
+    },
+    {
+      "name": "explicit-null-basis-points-is-not-omission",
+      "config": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "percentage",
+        "basisPoints": null
+      },
+      "expect": {
+        "valid": false,
+        "code": "GE1421_INVALID_BARRIER_POLICY",
+        "relativePath": "/basisPoints"
+      }
+    },
+    {
+      "name": "explicit-null-on-unsatisfied-is-not-omission",
+      "config": {
+        "kind": "all",
+        "onUnsatisfied": null,
+        "lateArrival": "ignore"
+      },
+      "expect": {
+        "valid": false,
+        "code": "GE1421_INVALID_BARRIER_POLICY",
+        "relativePath": "/onUnsatisfied"
+      }
+    },
+    {
+      "name": "missing-on-unsatisfied",
+      "config": {
+        "kind": "all",
+        "lateArrival": "ignore"
+      },
+      "expect": {
+        "valid": false,
+        "code": "GE1421_INVALID_BARRIER_POLICY",
+        "relativePath": "/onUnsatisfied"
+      }
+    },
+    {
+      "name": "missing-late-arrival",
+      "config": {
+        "kind": "all",
+        "onUnsatisfied": "fail"
+      },
+      "expect": {
+        "valid": false,
+        "code": "GE1421_INVALID_BARRIER_POLICY",
+        "relativePath": "/lateArrival"
+      }
+    },
+    {
+      "name": "missing-both-resolution-members-reports-on-unsatisfied-first",
+      "config": {
+        "kind": "all"
+      },
+      "expect": {
+        "valid": false,
+        "code": "GE1421_INVALID_BARRIER_POLICY",
+        "relativePath": "/onUnsatisfied"
+      }
+    },
+    {
+      "name": "missing-kind",
+      "config": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore"
+      },
+      "expect": {
+        "valid": false,
+        "code": "GE1421_INVALID_BARRIER_POLICY",
+        "relativePath": "/kind"
+      }
+    },
+    {
+      "name": "unknown-kind-value",
+      "config": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "any"
+      },
+      "expect": {
+        "valid": false,
+        "code": "GE1421_INVALID_BARRIER_POLICY",
+        "relativePath": "/kind"
+      }
+    },
+    {
+      "name": "unknown-on-unsatisfied-value",
+      "config": {
+        "onUnsatisfied": "pass",
+        "lateArrival": "ignore",
+        "kind": "all"
+      },
+      "expect": {
+        "valid": false,
+        "code": "GE1421_INVALID_BARRIER_POLICY",
+        "relativePath": "/onUnsatisfied"
+      }
+    },
+    {
+      "name": "unknown-late-arrival-value",
+      "config": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "requeue",
+        "kind": "all"
+      },
+      "expect": {
+        "valid": false,
+        "code": "GE1421_INVALID_BARRIER_POLICY",
+        "relativePath": "/lateArrival"
+      }
+    },
+    {
+      "name": "basis-points-zero-is-below-range",
+      "config": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "percentage",
+        "basisPoints": 0
+      },
+      "expect": {
+        "valid": false,
+        "code": "GE1421_INVALID_BARRIER_POLICY",
+        "relativePath": "/basisPoints"
+      }
+    },
+    {
+      "name": "basis-points-one-is-the-inclusive-lower-bound",
+      "config": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "percentage",
+        "basisPoints": 1
+      },
+      "expect": {
+        "valid": true,
+        "policy": {
+          "onUnsatisfied": "fail",
+          "lateArrival": "ignore",
+          "kind": "percentage",
+          "basisPoints": 1
+        }
+      }
+    },
+    {
+      "name": "basis-points-ten-thousand-is-the-inclusive-upper-bound",
+      "config": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "percentage",
+        "basisPoints": 10000
+      },
+      "expect": {
+        "valid": true,
+        "policy": {
+          "onUnsatisfied": "fail",
+          "lateArrival": "ignore",
+          "kind": "percentage",
+          "basisPoints": 10000
+        }
+      }
+    },
+    {
+      "name": "basis-points-ten-thousand-and-one-is-above-range",
+      "config": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "percentage",
+        "basisPoints": 10001
+      },
+      "expect": {
+        "valid": false,
+        "code": "GE1421_INVALID_BARRIER_POLICY",
+        "relativePath": "/basisPoints"
+      }
+    },
+    {
+      "name": "minimum-zero-is-below-range",
+      "config": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "minimum",
+        "minimum": 0
+      },
+      "expect": {
+        "valid": false,
+        "code": "GE1421_INVALID_BARRIER_POLICY",
+        "relativePath": "/minimum"
+      }
+    },
+    {
+      "name": "minimum-one-is-the-inclusive-lower-bound",
+      "config": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "minimum",
+        "minimum": 1
+      },
+      "expect": {
+        "valid": true,
+        "policy": {
+          "onUnsatisfied": "fail",
+          "lateArrival": "ignore",
+          "kind": "minimum",
+          "minimum": 1
+        }
+      }
+    },
+    {
+      "name": "minimum-at-the-safe-integer-ceiling",
+      "config": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "minimum",
+        "minimum": 9007199254740991
+      },
+      "expect": {
+        "valid": true,
+        "policy": {
+          "onUnsatisfied": "fail",
+          "lateArrival": "ignore",
+          "kind": "minimum",
+          "minimum": 9007199254740991
+        }
+      }
+    },
+    {
+      "name": "quorum-accepts-zero-is-below-range",
+      "config": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "quorum",
+        "quorum": {
+          "accepts": 0,
+          "countAbstainAsParticipant": false
+        }
+      },
+      "expect": {
+        "valid": false,
+        "code": "GE1421_INVALID_BARRIER_POLICY",
+        "relativePath": "/quorum/accepts"
+      }
+    },
+    {
+      "name": "quorum-accepts-one-is-the-inclusive-lower-bound",
+      "config": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "quorum",
+        "quorum": {
+          "accepts": 1,
+          "countAbstainAsParticipant": false
+        }
+      },
+      "expect": {
+        "valid": true,
+        "policy": {
+          "onUnsatisfied": "fail",
+          "lateArrival": "ignore",
+          "kind": "quorum",
+          "quorum": {
+            "accepts": 1,
+            "countAbstainAsParticipant": false
+          }
+        }
+      }
+    },
+    {
+      "name": "quorum-missing-accepts",
+      "config": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "quorum",
+        "quorum": {
+          "countAbstainAsParticipant": false
+        }
+      },
+      "expect": {
+        "valid": false,
+        "code": "GE1421_INVALID_BARRIER_POLICY",
+        "relativePath": "/quorum/accepts"
+      }
+    },
+    {
+      "name": "quorum-missing-count-abstain-as-participant",
+      "config": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "quorum",
+        "quorum": {
+          "accepts": 1
+        }
+      },
+      "expect": {
+        "valid": false,
+        "code": "GE1421_INVALID_BARRIER_POLICY",
+        "relativePath": "/quorum/countAbstainAsParticipant"
+      }
+    },
+    {
+      "name": "quorum-count-abstain-as-participant-must-be-boolean",
+      "config": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "quorum",
+        "quorum": {
+          "accepts": 1,
+          "countAbstainAsParticipant": "true"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "code": "GE1421_INVALID_BARRIER_POLICY",
+        "relativePath": "/quorum/countAbstainAsParticipant"
+      }
+    },
+    {
+      "name": "nested-unknown-key-inside-quorum",
+      "config": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "quorum",
+        "quorum": {
+          "accepts": 1,
+          "countAbstainAsParticipant": false,
+          "tieBreak": "accept"
+        }
+      },
+      "expect": {
+        "valid": false,
+        "code": "GE1421_INVALID_BARRIER_POLICY",
+        "relativePath": "/quorum/tieBreak"
+      }
+    },
+    {
+      "name": "quorum-must-be-an-object",
+      "config": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "quorum",
+        "quorum": [
+          1
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "code": "GE1421_INVALID_BARRIER_POLICY",
+        "relativePath": "/quorum"
+      }
+    },
+    {
+      "name": "deadline-after-ms-zero-is-below-range",
+      "config": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "all",
+        "deadline": {
+          "afterMs": 0
+        }
+      },
+      "expect": {
+        "valid": false,
+        "code": "GE1421_INVALID_BARRIER_POLICY",
+        "relativePath": "/deadline/afterMs"
+      }
+    },
+    {
+      "name": "deadline-after-ms-one-is-the-inclusive-lower-bound",
+      "config": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "all",
+        "deadline": {
+          "afterMs": 1
+        }
+      },
+      "expect": {
+        "valid": true,
+        "policy": {
+          "onUnsatisfied": "fail",
+          "lateArrival": "ignore",
+          "kind": "all",
+          "deadline": {
+            "afterMs": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "deadline-missing-after-ms",
+      "config": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "all",
+        "deadline": {}
+      },
+      "expect": {
+        "valid": false,
+        "code": "GE1421_INVALID_BARRIER_POLICY",
+        "relativePath": "/deadline/afterMs"
+      }
+    },
+    {
+      "name": "nested-unknown-key-inside-deadline",
+      "config": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "all",
+        "deadline": {
+          "afterMs": 5,
+          "graceMs": 1
+        }
+      },
+      "expect": {
+        "valid": false,
+        "code": "GE1421_INVALID_BARRIER_POLICY",
+        "relativePath": "/deadline/graceMs"
+      }
+    },
+    {
+      "name": "deadline-must-be-an-object",
+      "config": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "all",
+        "deadline": 5
+      },
+      "expect": {
+        "valid": false,
+        "code": "GE1421_INVALID_BARRIER_POLICY",
+        "relativePath": "/deadline"
+      }
+    },
+    {
+      "name": "portable-null-config-reports-at-the-config-root",
+      "config": null,
+      "expect": {
+        "valid": false,
+        "code": "GE1421_INVALID_BARRIER_POLICY",
+        "relativePath": ""
+      }
+    },
+    {
+      "name": "portable-integer-config-reports-at-the-config-root",
+      "config": 1,
+      "expect": {
+        "valid": false,
+        "code": "GE1421_INVALID_BARRIER_POLICY",
+        "relativePath": ""
+      }
+    },
+    {
+      "name": "portable-string-config-reports-at-the-config-root",
+      "config": "all",
+      "expect": {
+        "valid": false,
+        "code": "GE1421_INVALID_BARRIER_POLICY",
+        "relativePath": ""
+      }
+    },
+    {
+      "name": "portable-boolean-config-reports-at-the-config-root",
+      "config": true,
+      "expect": {
+        "valid": false,
+        "code": "GE1421_INVALID_BARRIER_POLICY",
+        "relativePath": ""
+      }
+    },
+    {
+      "name": "portable-array-config-reports-at-the-config-root",
+      "config": [],
+      "expect": {
+        "valid": false,
+        "code": "GE1421_INVALID_BARRIER_POLICY",
+        "relativePath": ""
+      }
+    },
+    {
+      "name": "minimum-kind-requires-minimum",
+      "config": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "minimum"
+      },
+      "expect": {
+        "valid": false,
+        "code": "GE1422_BARRIER_POLICY_KIND_MISMATCH",
+        "relativePath": "/minimum"
+      }
+    },
+    {
+      "name": "percentage-kind-requires-basis-points",
+      "config": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "percentage"
+      },
+      "expect": {
+        "valid": false,
+        "code": "GE1422_BARRIER_POLICY_KIND_MISMATCH",
+        "relativePath": "/basisPoints"
+      }
+    },
+    {
+      "name": "quorum-kind-requires-quorum",
+      "config": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "quorum"
+      },
+      "expect": {
+        "valid": false,
+        "code": "GE1422_BARRIER_POLICY_KIND_MISMATCH",
+        "relativePath": "/quorum"
+      }
+    },
+    {
+      "name": "all-kind-forbids-minimum",
+      "config": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "all",
+        "minimum": 2
+      },
+      "expect": {
+        "valid": false,
+        "code": "GE1422_BARRIER_POLICY_KIND_MISMATCH",
+        "relativePath": "/minimum"
+      }
+    },
+    {
+      "name": "all-kind-forbids-basis-points",
+      "config": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "all",
+        "basisPoints": 5000
+      },
+      "expect": {
+        "valid": false,
+        "code": "GE1422_BARRIER_POLICY_KIND_MISMATCH",
+        "relativePath": "/basisPoints"
+      }
+    },
+    {
+      "name": "all-kind-forbids-quorum",
+      "config": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "all",
+        "quorum": {
+          "accepts": 1,
+          "countAbstainAsParticipant": false
+        }
+      },
+      "expect": {
+        "valid": false,
+        "code": "GE1422_BARRIER_POLICY_KIND_MISMATCH",
+        "relativePath": "/quorum"
+      }
+    },
+    {
+      "name": "percentage-kind-forbids-minimum",
+      "config": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "percentage",
+        "basisPoints": 5000,
+        "minimum": 2
+      },
+      "expect": {
+        "valid": false,
+        "code": "GE1422_BARRIER_POLICY_KIND_MISMATCH",
+        "relativePath": "/minimum"
+      }
+    },
+    {
+      "name": "minimum-kind-forbids-basis-points",
+      "config": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "minimum",
+        "minimum": 2,
+        "basisPoints": 5000
+      },
+      "expect": {
+        "valid": false,
+        "code": "GE1422_BARRIER_POLICY_KIND_MISMATCH",
+        "relativePath": "/basisPoints"
+      }
+    },
+    {
+      "name": "minimum-kind-forbids-quorum",
+      "config": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "minimum",
+        "minimum": 2,
+        "quorum": {
+          "accepts": 1,
+          "countAbstainAsParticipant": false
+        }
+      },
+      "expect": {
+        "valid": false,
+        "code": "GE1422_BARRIER_POLICY_KIND_MISMATCH",
+        "relativePath": "/quorum"
+      }
+    },
+    {
+      "name": "quorum-kind-forbids-minimum",
+      "config": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "quorum",
+        "quorum": {
+          "accepts": 1,
+          "countAbstainAsParticipant": false
+        },
+        "minimum": 2
+      },
+      "expect": {
+        "valid": false,
+        "code": "GE1422_BARRIER_POLICY_KIND_MISMATCH",
+        "relativePath": "/minimum"
+      }
+    },
+    {
+      "name": "quorum-kind-forbids-basis-points",
+      "config": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "quorum",
+        "quorum": {
+          "accepts": 1,
+          "countAbstainAsParticipant": false
+        },
+        "basisPoints": 5000
+      },
+      "expect": {
+        "valid": false,
+        "code": "GE1422_BARRIER_POLICY_KIND_MISMATCH",
+        "relativePath": "/basisPoints"
+      }
+    },
+    {
+      "name": "percentage-kind-forbids-quorum",
+      "config": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "percentage",
+        "basisPoints": 5000,
+        "quorum": {
+          "accepts": 1,
+          "countAbstainAsParticipant": false
+        }
+      },
+      "expect": {
+        "valid": false,
+        "code": "GE1422_BARRIER_POLICY_KIND_MISMATCH",
+        "relativePath": "/quorum"
+      }
+    },
+    {
+      "name": "two-forbidden-fields-report-the-first-in-contract-order",
+      "config": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "all",
+        "quorum": {
+          "accepts": 1,
+          "countAbstainAsParticipant": false
+        },
+        "minimum": 2
+      },
+      "expect": {
+        "valid": false,
+        "code": "GE1422_BARRIER_POLICY_KIND_MISMATCH",
+        "relativePath": "/minimum"
+      }
+    },
+    {
+      "name": "threshold-field-precedes-resolution-field-in-contract-order",
+      "config": {
+        "kind": "minimum",
+        "minimum": 0,
+        "lateArrival": "ignore"
+      },
+      "expect": {
+        "valid": false,
+        "code": "GE1421_INVALID_BARRIER_POLICY",
+        "relativePath": "/minimum"
+      },
+      "contractOrderWitness": true
+    },
+    {
+      "name": "deadline-precedes-resolution-field-in-contract-order",
+      "config": {
+        "kind": "all",
+        "deadline": {
+          "afterMs": 0
+        },
+        "onUnsatisfied": "fail"
+      },
+      "expect": {
+        "valid": false,
+        "code": "GE1421_INVALID_BARRIER_POLICY",
+        "relativePath": "/deadline/afterMs"
+      },
+      "contractOrderWitness": true
+    },
+    {
+      "name": "shape-error-suppresses-a-cardinality-error-on-the-same-config",
+      "config": {
+        "kind": "minimum",
+        "lateArrival": "ignore"
+      },
+      "expect": {
+        "valid": false,
+        "code": "GE1421_INVALID_BARRIER_POLICY",
+        "relativePath": "/onUnsatisfied"
+      },
+      "contractOrderWitness": true
+    }
+  ],
+  "compilerCases": [
+    {
+      "name": "valid-multi-barrier-graph-emits-no-barrier-diagnostics",
+      "graphHash": "ff4df6e6da8cfe948aad5239d9d4f57b1e8e9edb565b62990385d724e1810eb4",
+      "expectValid": true,
+      "expectDiagnostics": [],
+      "graph": {
+        "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+        "kind": "Graph",
+        "metadata": {
+          "name": "valid-multi-barrier",
+          "version": "1"
+        },
+        "inputSchema": {},
+        "outputSchema": {},
+        "entrypoints": [
+          "seed"
+        ],
+        "outputs": {
+          "result": {
+            "node": "sink"
+          }
+        },
+        "nodes": [
+          {
+            "id": "seed",
+            "kind": "transform",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {}
+          },
+          {
+            "id": "left",
+            "kind": "transform",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {}
+          },
+          {
+            "id": "right",
+            "kind": "transform",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {}
+          },
+          {
+            "id": "gate-all",
+            "kind": "barrier",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {
+              "onUnsatisfied": "fail",
+              "lateArrival": "ignore",
+              "kind": "all"
+            }
+          },
+          {
+            "id": "gate-quorum",
+            "kind": "barrier",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {
+              "onUnsatisfied": "unknown",
+              "lateArrival": "reject",
+              "kind": "quorum",
+              "quorum": {
+                "accepts": 2,
+                "countAbstainAsParticipant": true
+              },
+              "deadline": {
+                "afterMs": 500
+              }
+            }
+          },
+          {
+            "id": "gate-percentage",
+            "kind": "barrier",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {
+              "onUnsatisfied": "human",
+              "lateArrival": "ignore",
+              "kind": "percentage",
+              "basisPoints": 5000
+            }
+          },
+          {
+            "id": "sink",
+            "kind": "transform",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {}
+          }
+        ],
+        "edges": [
+          {
+            "id": "seed-left",
+            "from": {
+              "node": "seed"
+            },
+            "to": {
+              "node": "left"
+            }
+          },
+          {
+            "id": "seed-right",
+            "from": {
+              "node": "seed"
+            },
+            "to": {
+              "node": "right"
+            }
+          },
+          {
+            "id": "left-all",
+            "from": {
+              "node": "left"
+            },
+            "to": {
+              "node": "gate-all"
+            }
+          },
+          {
+            "id": "right-all",
+            "from": {
+              "node": "right"
+            },
+            "to": {
+              "node": "gate-all"
+            }
+          },
+          {
+            "id": "left-quorum",
+            "from": {
+              "node": "left"
+            },
+            "to": {
+              "node": "gate-quorum"
+            }
+          },
+          {
+            "id": "right-quorum",
+            "from": {
+              "node": "right"
+            },
+            "to": {
+              "node": "gate-quorum"
+            }
+          },
+          {
+            "id": "left-percentage",
+            "from": {
+              "node": "left"
+            },
+            "to": {
+              "node": "gate-percentage"
+            }
+          },
+          {
+            "id": "right-percentage",
+            "from": {
+              "node": "right"
+            },
+            "to": {
+              "node": "gate-percentage"
+            }
+          },
+          {
+            "id": "all-sink",
+            "from": {
+              "node": "gate-all"
+            },
+            "to": {
+              "node": "sink"
+            }
+          },
+          {
+            "id": "quorum-sink",
+            "from": {
+              "node": "gate-quorum"
+            },
+            "to": {
+              "node": "sink"
+            }
+          },
+          {
+            "id": "percentage-sink",
+            "from": {
+              "node": "gate-percentage"
+            },
+            "to": {
+              "node": "sink"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "ge1421-unknown-policy-field-reports-the-first-invalid-descendant",
+      "graphHash": "beb6f5e9ef7d7c20fb9ffd19fb45f87321433de36b388fcbcc3a517e326dd4a6",
+      "expectValid": false,
+      "expectDiagnostics": [
+        {
+          "code": "GE1421_INVALID_BARRIER_POLICY",
+          "path": "#/nodes/3/config/extra",
+          "nodeIds": [
+            "gate"
+          ]
+        }
+      ],
+      "graph": {
+        "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+        "kind": "Graph",
+        "metadata": {
+          "name": "ge1421-unknown-field",
+          "version": "1"
+        },
+        "inputSchema": {},
+        "outputSchema": {},
+        "entrypoints": [
+          "seed"
+        ],
+        "outputs": {
+          "result": {
+            "node": "sink"
+          }
+        },
+        "nodes": [
+          {
+            "id": "seed",
+            "kind": "transform",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {}
+          },
+          {
+            "id": "left",
+            "kind": "transform",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {}
+          },
+          {
+            "id": "right",
+            "kind": "transform",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {}
+          },
+          {
+            "id": "gate",
+            "kind": "barrier",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {
+              "onUnsatisfied": "fail",
+              "lateArrival": "ignore",
+              "kind": "all",
+              "extra": true
+            }
+          },
+          {
+            "id": "sink",
+            "kind": "transform",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {}
+          }
+        ],
+        "edges": [
+          {
+            "id": "seed-left",
+            "from": {
+              "node": "seed"
+            },
+            "to": {
+              "node": "left"
+            }
+          },
+          {
+            "id": "seed-right",
+            "from": {
+              "node": "seed"
+            },
+            "to": {
+              "node": "right"
+            }
+          },
+          {
+            "id": "left-gate",
+            "from": {
+              "node": "left"
+            },
+            "to": {
+              "node": "gate"
+            }
+          },
+          {
+            "id": "right-gate",
+            "from": {
+              "node": "right"
+            },
+            "to": {
+              "node": "gate"
+            }
+          },
+          {
+            "id": "gate-sink",
+            "from": {
+              "node": "gate"
+            },
+            "to": {
+              "node": "sink"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "ge1421-non-object-barrier-config-reports-at-the-config-root",
+      "graphHash": "6e9cd7da5c493685adbe23902faf700c66cb5a733df136fc122652acbda2572f",
+      "expectValid": false,
+      "expectDiagnostics": [
+        {
+          "code": "GE1421_INVALID_BARRIER_POLICY",
+          "path": "#/nodes/3/config",
+          "nodeIds": [
+            "gate"
+          ]
+        }
+      ],
+      "graph": {
+        "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+        "kind": "Graph",
+        "metadata": {
+          "name": "ge1421-null-config",
+          "version": "1"
+        },
+        "inputSchema": {},
+        "outputSchema": {},
+        "entrypoints": [
+          "seed"
+        ],
+        "outputs": {
+          "result": {
+            "node": "sink"
+          }
+        },
+        "nodes": [
+          {
+            "id": "seed",
+            "kind": "transform",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {}
+          },
+          {
+            "id": "left",
+            "kind": "transform",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {}
+          },
+          {
+            "id": "right",
+            "kind": "transform",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {}
+          },
+          {
+            "id": "gate",
+            "kind": "barrier",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": null
+          },
+          {
+            "id": "sink",
+            "kind": "transform",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {}
+          }
+        ],
+        "edges": [
+          {
+            "id": "seed-left",
+            "from": {
+              "node": "seed"
+            },
+            "to": {
+              "node": "left"
+            }
+          },
+          {
+            "id": "seed-right",
+            "from": {
+              "node": "seed"
+            },
+            "to": {
+              "node": "right"
+            }
+          },
+          {
+            "id": "left-gate",
+            "from": {
+              "node": "left"
+            },
+            "to": {
+              "node": "gate"
+            }
+          },
+          {
+            "id": "right-gate",
+            "from": {
+              "node": "right"
+            },
+            "to": {
+              "node": "gate"
+            }
+          },
+          {
+            "id": "gate-sink",
+            "from": {
+              "node": "gate"
+            },
+            "to": {
+              "node": "sink"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "ge1422-kind-required-field-absent",
+      "graphHash": "191033ee0606d0bd413d0d371276948003e3c7dbee7fa302af675271ca9ad7bb",
+      "expectValid": false,
+      "expectDiagnostics": [
+        {
+          "code": "GE1422_BARRIER_POLICY_KIND_MISMATCH",
+          "path": "#/nodes/3/config/minimum",
+          "nodeIds": [
+            "gate"
+          ]
+        }
+      ],
+      "graph": {
+        "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+        "kind": "Graph",
+        "metadata": {
+          "name": "ge1422-required-absent",
+          "version": "1"
+        },
+        "inputSchema": {},
+        "outputSchema": {},
+        "entrypoints": [
+          "seed"
+        ],
+        "outputs": {
+          "result": {
+            "node": "sink"
+          }
+        },
+        "nodes": [
+          {
+            "id": "seed",
+            "kind": "transform",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {}
+          },
+          {
+            "id": "left",
+            "kind": "transform",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {}
+          },
+          {
+            "id": "right",
+            "kind": "transform",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {}
+          },
+          {
+            "id": "gate",
+            "kind": "barrier",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {
+              "onUnsatisfied": "fail",
+              "lateArrival": "ignore",
+              "kind": "minimum"
+            }
+          },
+          {
+            "id": "sink",
+            "kind": "transform",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {}
+          }
+        ],
+        "edges": [
+          {
+            "id": "seed-left",
+            "from": {
+              "node": "seed"
+            },
+            "to": {
+              "node": "left"
+            }
+          },
+          {
+            "id": "seed-right",
+            "from": {
+              "node": "seed"
+            },
+            "to": {
+              "node": "right"
+            }
+          },
+          {
+            "id": "left-gate",
+            "from": {
+              "node": "left"
+            },
+            "to": {
+              "node": "gate"
+            }
+          },
+          {
+            "id": "right-gate",
+            "from": {
+              "node": "right"
+            },
+            "to": {
+              "node": "gate"
+            }
+          },
+          {
+            "id": "gate-sink",
+            "from": {
+              "node": "gate"
+            },
+            "to": {
+              "node": "sink"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "ge1422-kind-forbidden-field-present",
+      "graphHash": "0a6fa86e44853ec8a7ef087d3e231c45368a0bcac0e8629002dd2a58b4676ec7",
+      "expectValid": false,
+      "expectDiagnostics": [
+        {
+          "code": "GE1422_BARRIER_POLICY_KIND_MISMATCH",
+          "path": "#/nodes/3/config/minimum",
+          "nodeIds": [
+            "gate"
+          ]
+        }
+      ],
+      "graph": {
+        "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+        "kind": "Graph",
+        "metadata": {
+          "name": "ge1422-forbidden-present",
+          "version": "1"
+        },
+        "inputSchema": {},
+        "outputSchema": {},
+        "entrypoints": [
+          "seed"
+        ],
+        "outputs": {
+          "result": {
+            "node": "sink"
+          }
+        },
+        "nodes": [
+          {
+            "id": "seed",
+            "kind": "transform",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {}
+          },
+          {
+            "id": "left",
+            "kind": "transform",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {}
+          },
+          {
+            "id": "right",
+            "kind": "transform",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {}
+          },
+          {
+            "id": "gate",
+            "kind": "barrier",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {
+              "onUnsatisfied": "fail",
+              "lateArrival": "ignore",
+              "kind": "percentage",
+              "basisPoints": 5000,
+              "minimum": 2
+            }
+          },
+          {
+            "id": "sink",
+            "kind": "transform",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {}
+          }
+        ],
+        "edges": [
+          {
+            "id": "seed-left",
+            "from": {
+              "node": "seed"
+            },
+            "to": {
+              "node": "left"
+            }
+          },
+          {
+            "id": "seed-right",
+            "from": {
+              "node": "seed"
+            },
+            "to": {
+              "node": "right"
+            }
+          },
+          {
+            "id": "left-gate",
+            "from": {
+              "node": "left"
+            },
+            "to": {
+              "node": "gate"
+            }
+          },
+          {
+            "id": "right-gate",
+            "from": {
+              "node": "right"
+            },
+            "to": {
+              "node": "gate"
+            }
+          },
+          {
+            "id": "gate-sink",
+            "from": {
+              "node": "gate"
+            },
+            "to": {
+              "node": "sink"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "ge1423-barrier-with-zero-incoming-edges",
+      "graphHash": "f90f29d617d247c4a5918d03d6cdea62e8697ee81c18aa8ad3f81c11069e9ccc",
+      "expectValid": false,
+      "expectDiagnostics": [
+        {
+          "code": "GE1423_BARRIER_NO_INPUTS",
+          "path": "#/nodes/0",
+          "nodeIds": [
+            "gate"
+          ]
+        }
+      ],
+      "graph": {
+        "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+        "kind": "Graph",
+        "metadata": {
+          "name": "ge1423-no-inputs",
+          "version": "1"
+        },
+        "inputSchema": {},
+        "outputSchema": {},
+        "entrypoints": [
+          "gate"
+        ],
+        "outputs": {
+          "result": {
+            "node": "sink"
+          }
+        },
+        "nodes": [
+          {
+            "id": "gate",
+            "kind": "barrier",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {
+              "onUnsatisfied": "fail",
+              "lateArrival": "ignore",
+              "kind": "all"
+            }
+          },
+          {
+            "id": "sink",
+            "kind": "transform",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {}
+          }
+        ],
+        "edges": [
+          {
+            "id": "gate-sink",
+            "from": {
+              "node": "gate"
+            },
+            "to": {
+              "node": "sink"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "ge1424-minimum-exceeds-incoming-edge-count",
+      "graphHash": "16e28747d47111e933edd752b7edb7c5c001e3bfad9e780ed22af7e2f0f6c88b",
+      "expectValid": false,
+      "expectDiagnostics": [
+        {
+          "code": "GE1424_BARRIER_THRESHOLD_EXCEEDS_INPUTS",
+          "path": "#/nodes/3/config/minimum",
+          "nodeIds": [
+            "gate"
+          ]
+        }
+      ],
+      "graph": {
+        "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+        "kind": "Graph",
+        "metadata": {
+          "name": "ge1424-minimum",
+          "version": "1"
+        },
+        "inputSchema": {},
+        "outputSchema": {},
+        "entrypoints": [
+          "seed"
+        ],
+        "outputs": {
+          "result": {
+            "node": "sink"
+          }
+        },
+        "nodes": [
+          {
+            "id": "seed",
+            "kind": "transform",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {}
+          },
+          {
+            "id": "left",
+            "kind": "transform",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {}
+          },
+          {
+            "id": "right",
+            "kind": "transform",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {}
+          },
+          {
+            "id": "gate",
+            "kind": "barrier",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {
+              "onUnsatisfied": "fail",
+              "lateArrival": "ignore",
+              "kind": "minimum",
+              "minimum": 3
+            }
+          },
+          {
+            "id": "sink",
+            "kind": "transform",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {}
+          }
+        ],
+        "edges": [
+          {
+            "id": "seed-left",
+            "from": {
+              "node": "seed"
+            },
+            "to": {
+              "node": "left"
+            }
+          },
+          {
+            "id": "seed-right",
+            "from": {
+              "node": "seed"
+            },
+            "to": {
+              "node": "right"
+            }
+          },
+          {
+            "id": "left-gate",
+            "from": {
+              "node": "left"
+            },
+            "to": {
+              "node": "gate"
+            }
+          },
+          {
+            "id": "right-gate",
+            "from": {
+              "node": "right"
+            },
+            "to": {
+              "node": "gate"
+            }
+          },
+          {
+            "id": "gate-sink",
+            "from": {
+              "node": "gate"
+            },
+            "to": {
+              "node": "sink"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "ge1424-quorum-accepts-exceeds-incoming-edge-count",
+      "graphHash": "ec0d0855fe86afe2b443b86fc080ca59f7a68b1eb793667c6e78cfe2f2327c17",
+      "expectValid": false,
+      "expectDiagnostics": [
+        {
+          "code": "GE1424_BARRIER_THRESHOLD_EXCEEDS_INPUTS",
+          "path": "#/nodes/3/config/quorum/accepts",
+          "nodeIds": [
+            "gate"
+          ]
+        }
+      ],
+      "graph": {
+        "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+        "kind": "Graph",
+        "metadata": {
+          "name": "ge1424-quorum",
+          "version": "1"
+        },
+        "inputSchema": {},
+        "outputSchema": {},
+        "entrypoints": [
+          "seed"
+        ],
+        "outputs": {
+          "result": {
+            "node": "sink"
+          }
+        },
+        "nodes": [
+          {
+            "id": "seed",
+            "kind": "transform",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {}
+          },
+          {
+            "id": "left",
+            "kind": "transform",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {}
+          },
+          {
+            "id": "right",
+            "kind": "transform",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {}
+          },
+          {
+            "id": "gate",
+            "kind": "barrier",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {
+              "onUnsatisfied": "fail",
+              "lateArrival": "ignore",
+              "kind": "quorum",
+              "quorum": {
+                "accepts": 3,
+                "countAbstainAsParticipant": true
+              }
+            }
+          },
+          {
+            "id": "sink",
+            "kind": "transform",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {}
+          }
+        ],
+        "edges": [
+          {
+            "id": "seed-left",
+            "from": {
+              "node": "seed"
+            },
+            "to": {
+              "node": "left"
+            }
+          },
+          {
+            "id": "seed-right",
+            "from": {
+              "node": "seed"
+            },
+            "to": {
+              "node": "right"
+            }
+          },
+          {
+            "id": "left-gate",
+            "from": {
+              "node": "left"
+            },
+            "to": {
+              "node": "gate"
+            }
+          },
+          {
+            "id": "right-gate",
+            "from": {
+              "node": "right"
+            },
+            "to": {
+              "node": "gate"
+            }
+          },
+          {
+            "id": "gate-sink",
+            "from": {
+              "node": "gate"
+            },
+            "to": {
+              "node": "sink"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "two-invalid-barriers-follow-node-declaration-order-within-a-category",
+      "graphHash": "deb74c77d0264b25288ec50a838e940c4d2da1d816db5b44d0b21e808c9a72f5",
+      "expectValid": false,
+      "expectDiagnostics": [
+        {
+          "code": "GE1421_INVALID_BARRIER_POLICY",
+          "path": "#/nodes/3/config/extra",
+          "nodeIds": [
+            "gate-z"
+          ]
+        },
+        {
+          "code": "GE1421_INVALID_BARRIER_POLICY",
+          "path": "#/nodes/4/config/other",
+          "nodeIds": [
+            "gate-a"
+          ]
+        }
+      ],
+      "graph": {
+        "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+        "kind": "Graph",
+        "metadata": {
+          "name": "two-invalid-barriers",
+          "version": "1"
+        },
+        "inputSchema": {},
+        "outputSchema": {},
+        "entrypoints": [
+          "seed"
+        ],
+        "outputs": {
+          "result": {
+            "node": "sink"
+          }
+        },
+        "nodes": [
+          {
+            "id": "seed",
+            "kind": "transform",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {}
+          },
+          {
+            "id": "left",
+            "kind": "transform",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {}
+          },
+          {
+            "id": "right",
+            "kind": "transform",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {}
+          },
+          {
+            "id": "gate-z",
+            "kind": "barrier",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {
+              "onUnsatisfied": "fail",
+              "lateArrival": "ignore",
+              "kind": "all",
+              "extra": true
+            }
+          },
+          {
+            "id": "gate-a",
+            "kind": "barrier",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {
+              "onUnsatisfied": "fail",
+              "lateArrival": "ignore",
+              "kind": "all",
+              "other": 1
+            }
+          },
+          {
+            "id": "sink",
+            "kind": "transform",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {}
+          }
+        ],
+        "edges": [
+          {
+            "id": "seed-left",
+            "from": {
+              "node": "seed"
+            },
+            "to": {
+              "node": "left"
+            }
+          },
+          {
+            "id": "seed-right",
+            "from": {
+              "node": "seed"
+            },
+            "to": {
+              "node": "right"
+            }
+          },
+          {
+            "id": "left-z",
+            "from": {
+              "node": "left"
+            },
+            "to": {
+              "node": "gate-z"
+            }
+          },
+          {
+            "id": "right-z",
+            "from": {
+              "node": "right"
+            },
+            "to": {
+              "node": "gate-z"
+            }
+          },
+          {
+            "id": "left-a",
+            "from": {
+              "node": "left"
+            },
+            "to": {
+              "node": "gate-a"
+            }
+          },
+          {
+            "id": "right-a",
+            "from": {
+              "node": "right"
+            },
+            "to": {
+              "node": "gate-a"
+            }
+          },
+          {
+            "id": "z-sink",
+            "from": {
+              "node": "gate-z"
+            },
+            "to": {
+              "node": "sink"
+            }
+          },
+          {
+            "id": "a-sink",
+            "from": {
+              "node": "gate-a"
+            },
+            "to": {
+              "node": "sink"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "ge1421-suppresses-ge1422-and-ge1424-on-the-same-node-only",
+      "graphHash": "d99952a34e838e2467ac78aaef87a2b7fa69831a3eb39f12facb7d8e11a481e1",
+      "expectValid": false,
+      "expectDiagnostics": [
+        {
+          "code": "GE1421_INVALID_BARRIER_POLICY",
+          "path": "#/nodes/3/config/extra",
+          "nodeIds": [
+            "gate-bad"
+          ]
+        },
+        {
+          "code": "GE1422_BARRIER_POLICY_KIND_MISMATCH",
+          "path": "#/nodes/4/config/quorum",
+          "nodeIds": [
+            "gate-other"
+          ]
+        }
+      ],
+      "graph": {
+        "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+        "kind": "Graph",
+        "metadata": {
+          "name": "ge1421-local-suppression",
+          "version": "1"
+        },
+        "inputSchema": {},
+        "outputSchema": {},
+        "entrypoints": [
+          "seed"
+        ],
+        "outputs": {
+          "result": {
+            "node": "sink"
+          }
+        },
+        "nodes": [
+          {
+            "id": "seed",
+            "kind": "transform",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {}
+          },
+          {
+            "id": "left",
+            "kind": "transform",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {}
+          },
+          {
+            "id": "right",
+            "kind": "transform",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {}
+          },
+          {
+            "id": "gate-bad",
+            "kind": "barrier",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {
+              "onUnsatisfied": "fail",
+              "lateArrival": "ignore",
+              "kind": "percentage",
+              "basisPoints": 5000,
+              "minimum": 5,
+              "extra": true
+            }
+          },
+          {
+            "id": "gate-other",
+            "kind": "barrier",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {
+              "onUnsatisfied": "fail",
+              "lateArrival": "ignore",
+              "kind": "quorum"
+            }
+          },
+          {
+            "id": "sink",
+            "kind": "transform",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {}
+          }
+        ],
+        "edges": [
+          {
+            "id": "seed-left",
+            "from": {
+              "node": "seed"
+            },
+            "to": {
+              "node": "left"
+            }
+          },
+          {
+            "id": "seed-right",
+            "from": {
+              "node": "seed"
+            },
+            "to": {
+              "node": "right"
+            }
+          },
+          {
+            "id": "left-bad",
+            "from": {
+              "node": "left"
+            },
+            "to": {
+              "node": "gate-bad"
+            }
+          },
+          {
+            "id": "right-bad",
+            "from": {
+              "node": "right"
+            },
+            "to": {
+              "node": "gate-bad"
+            }
+          },
+          {
+            "id": "left-other",
+            "from": {
+              "node": "left"
+            },
+            "to": {
+              "node": "gate-other"
+            }
+          },
+          {
+            "id": "right-other",
+            "from": {
+              "node": "right"
+            },
+            "to": {
+              "node": "gate-other"
+            }
+          },
+          {
+            "id": "bad-sink",
+            "from": {
+              "node": "gate-bad"
+            },
+            "to": {
+              "node": "sink"
+            }
+          },
+          {
+            "id": "other-sink",
+            "from": {
+              "node": "gate-other"
+            },
+            "to": {
+              "node": "sink"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "ge1421-does-not-suppress-ge1423-on-the-same-node",
+      "graphHash": "8cf5753348660abda258015a57a714b3aab85d7935326e84514b150da955d921",
+      "expectValid": false,
+      "expectDiagnostics": [
+        {
+          "code": "GE1421_INVALID_BARRIER_POLICY",
+          "path": "#/nodes/0/config",
+          "nodeIds": [
+            "gate"
+          ]
+        },
+        {
+          "code": "GE1423_BARRIER_NO_INPUTS",
+          "path": "#/nodes/0",
+          "nodeIds": [
+            "gate"
+          ]
+        }
+      ],
+      "graph": {
+        "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+        "kind": "Graph",
+        "metadata": {
+          "name": "ge1421-with-ge1423",
+          "version": "1"
+        },
+        "inputSchema": {},
+        "outputSchema": {},
+        "entrypoints": [
+          "gate"
+        ],
+        "outputs": {
+          "result": {
+            "node": "sink"
+          }
+        },
+        "nodes": [
+          {
+            "id": "gate",
+            "kind": "barrier",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": 42
+          },
+          {
+            "id": "sink",
+            "kind": "transform",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {}
+          }
+        ],
+        "edges": [
+          {
+            "id": "gate-sink",
+            "from": {
+              "node": "gate"
+            },
+            "to": {
+              "node": "sink"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "ge1422-suppresses-ge1424-on-the-same-node",
+      "graphHash": "0ca3aa18cc60cd80535e4d5664b311785de8a1a58124731a55dd6bca3fbbec2f",
+      "expectValid": false,
+      "expectDiagnostics": [
+        {
+          "code": "GE1422_BARRIER_POLICY_KIND_MISMATCH",
+          "path": "#/nodes/3/config/quorum",
+          "nodeIds": [
+            "gate"
+          ]
+        }
+      ],
+      "graph": {
+        "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+        "kind": "Graph",
+        "metadata": {
+          "name": "ge1422-suppresses-ge1424",
+          "version": "1"
+        },
+        "inputSchema": {},
+        "outputSchema": {},
+        "entrypoints": [
+          "seed"
+        ],
+        "outputs": {
+          "result": {
+            "node": "sink"
+          }
+        },
+        "nodes": [
+          {
+            "id": "seed",
+            "kind": "transform",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {}
+          },
+          {
+            "id": "left",
+            "kind": "transform",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {}
+          },
+          {
+            "id": "right",
+            "kind": "transform",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {}
+          },
+          {
+            "id": "gate",
+            "kind": "barrier",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {
+              "onUnsatisfied": "fail",
+              "lateArrival": "ignore",
+              "kind": "minimum",
+              "minimum": 9,
+              "quorum": {
+                "accepts": 7,
+                "countAbstainAsParticipant": false
+              }
+            }
+          },
+          {
+            "id": "sink",
+            "kind": "transform",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {}
+          }
+        ],
+        "edges": [
+          {
+            "id": "seed-left",
+            "from": {
+              "node": "seed"
+            },
+            "to": {
+              "node": "left"
+            }
+          },
+          {
+            "id": "seed-right",
+            "from": {
+              "node": "seed"
+            },
+            "to": {
+              "node": "right"
+            }
+          },
+          {
+            "id": "left-gate",
+            "from": {
+              "node": "left"
+            },
+            "to": {
+              "node": "gate"
+            }
+          },
+          {
+            "id": "right-gate",
+            "from": {
+              "node": "right"
+            },
+            "to": {
+              "node": "gate"
+            }
+          },
+          {
+            "id": "gate-sink",
+            "from": {
+              "node": "gate"
+            },
+            "to": {
+              "node": "sink"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "router-pass-emits-before-the-barrier-pass",
+      "graphHash": "ca585d76f3a619748d132a0044de80f76a34a45e591b6084e97950ceb0f686bb",
+      "expectValid": false,
+      "expectDiagnostics": [
+        {
+          "code": "GE1401_INVALID_ROUTER_POLICY",
+          "path": "#/nodes/0/config/policy",
+          "nodeIds": [
+            "route"
+          ]
+        },
+        {
+          "code": "GE1421_INVALID_BARRIER_POLICY",
+          "path": "#/nodes/3/config/extra",
+          "nodeIds": [
+            "gate"
+          ]
+        }
+      ],
+      "graph": {
+        "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+        "kind": "Graph",
+        "metadata": {
+          "name": "router-before-barrier",
+          "version": "1"
+        },
+        "inputSchema": {},
+        "outputSchema": {},
+        "entrypoints": [
+          "route"
+        ],
+        "outputs": {
+          "result": {
+            "node": "sink"
+          }
+        },
+        "nodes": [
+          {
+            "id": "route",
+            "kind": "router",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {
+              "policy": {
+                "kind": "single",
+                "allowedRoutes": [
+                  "quick"
+                ]
+              }
+            }
+          },
+          {
+            "id": "quick",
+            "kind": "transform",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {}
+          },
+          {
+            "id": "audit",
+            "kind": "transform",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {}
+          },
+          {
+            "id": "gate",
+            "kind": "barrier",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {
+              "onUnsatisfied": "fail",
+              "lateArrival": "ignore",
+              "kind": "all",
+              "extra": true
+            }
+          },
+          {
+            "id": "sink",
+            "kind": "transform",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {}
+          }
+        ],
+        "edges": [
+          {
+            "id": "route-quick",
+            "from": {
+              "node": "route"
+            },
+            "to": {
+              "node": "quick"
+            }
+          },
+          {
+            "id": "route-audit",
+            "from": {
+              "node": "route"
+            },
+            "to": {
+              "node": "audit"
+            }
+          },
+          {
+            "id": "quick-gate",
+            "from": {
+              "node": "quick"
+            },
+            "to": {
+              "node": "gate"
+            }
+          },
+          {
+            "id": "audit-gate",
+            "from": {
+              "node": "audit"
+            },
+            "to": {
+              "node": "gate"
+            }
+          },
+          {
+            "id": "gate-sink",
+            "from": {
+              "node": "gate"
+            },
+            "to": {
+              "node": "sink"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "barrier-categories-emit-in-ge1421-ge1422-ge1423-ge1424-order",
+      "graphHash": "5dffdb4d6593b30bdfa7ba1d03aa03f00eb6f4d20c7d72bc61dc631b493913f5",
+      "expectValid": false,
+      "expectDiagnostics": [
+        {
+          "code": "GE1421_INVALID_BARRIER_POLICY",
+          "path": "#/nodes/3/config/zeta",
+          "nodeIds": [
+            "gate-shape"
+          ]
+        },
+        {
+          "code": "GE1422_BARRIER_POLICY_KIND_MISMATCH",
+          "path": "#/nodes/4/config/minimum",
+          "nodeIds": [
+            "gate-kind"
+          ]
+        },
+        {
+          "code": "GE1423_BARRIER_NO_INPUTS",
+          "path": "#/nodes/5",
+          "nodeIds": [
+            "gate-orphan"
+          ]
+        },
+        {
+          "code": "GE1424_BARRIER_THRESHOLD_EXCEEDS_INPUTS",
+          "path": "#/nodes/6/config/minimum",
+          "nodeIds": [
+            "gate-threshold"
+          ]
+        }
+      ],
+      "graph": {
+        "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+        "kind": "Graph",
+        "metadata": {
+          "name": "barrier-category-order",
+          "version": "1"
+        },
+        "inputSchema": {},
+        "outputSchema": {},
+        "entrypoints": [
+          "seed",
+          "gate-orphan"
+        ],
+        "outputs": {
+          "result": {
+            "node": "sink"
+          }
+        },
+        "nodes": [
+          {
+            "id": "seed",
+            "kind": "transform",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {}
+          },
+          {
+            "id": "left",
+            "kind": "transform",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {}
+          },
+          {
+            "id": "right",
+            "kind": "transform",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {}
+          },
+          {
+            "id": "gate-shape",
+            "kind": "barrier",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {
+              "onUnsatisfied": "fail",
+              "lateArrival": "ignore",
+              "kind": "all",
+              "zeta": 1
+            }
+          },
+          {
+            "id": "gate-kind",
+            "kind": "barrier",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {
+              "onUnsatisfied": "fail",
+              "lateArrival": "ignore",
+              "kind": "minimum"
+            }
+          },
+          {
+            "id": "gate-orphan",
+            "kind": "barrier",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {
+              "onUnsatisfied": "fail",
+              "lateArrival": "ignore",
+              "kind": "all"
+            }
+          },
+          {
+            "id": "gate-threshold",
+            "kind": "barrier",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {
+              "onUnsatisfied": "fail",
+              "lateArrival": "ignore",
+              "kind": "minimum",
+              "minimum": 9
+            }
+          },
+          {
+            "id": "sink",
+            "kind": "transform",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {}
+          }
+        ],
+        "edges": [
+          {
+            "id": "seed-left",
+            "from": {
+              "node": "seed"
+            },
+            "to": {
+              "node": "left"
+            }
+          },
+          {
+            "id": "seed-right",
+            "from": {
+              "node": "seed"
+            },
+            "to": {
+              "node": "right"
+            }
+          },
+          {
+            "id": "left-shape",
+            "from": {
+              "node": "left"
+            },
+            "to": {
+              "node": "gate-shape"
+            }
+          },
+          {
+            "id": "right-shape",
+            "from": {
+              "node": "right"
+            },
+            "to": {
+              "node": "gate-shape"
+            }
+          },
+          {
+            "id": "left-kind",
+            "from": {
+              "node": "left"
+            },
+            "to": {
+              "node": "gate-kind"
+            }
+          },
+          {
+            "id": "right-kind",
+            "from": {
+              "node": "right"
+            },
+            "to": {
+              "node": "gate-kind"
+            }
+          },
+          {
+            "id": "left-threshold",
+            "from": {
+              "node": "left"
+            },
+            "to": {
+              "node": "gate-threshold"
+            }
+          },
+          {
+            "id": "right-threshold",
+            "from": {
+              "node": "right"
+            },
+            "to": {
+              "node": "gate-threshold"
+            }
+          },
+          {
+            "id": "shape-sink",
+            "from": {
+              "node": "gate-shape"
+            },
+            "to": {
+              "node": "sink"
+            }
+          },
+          {
+            "id": "kind-sink",
+            "from": {
+              "node": "gate-kind"
+            },
+            "to": {
+              "node": "sink"
+            }
+          },
+          {
+            "id": "orphan-sink",
+            "from": {
+              "node": "gate-orphan"
+            },
+            "to": {
+              "node": "sink"
+            }
+          },
+          {
+            "id": "threshold-sink",
+            "from": {
+              "node": "gate-threshold"
+            },
+            "to": {
+              "node": "sink"
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "evaluationCases": [
+    {
+      "name": "no-items-all-is-never-an-implicit-pass",
+      "policy": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "all"
+      },
+      "barrierNodeId": "gate",
+      "dispositions": [],
+      "expect": {
+        "barrierNodeId": "gate",
+        "deadlineElapsed": false,
+        "satisfied": false,
+        "reasonCode": "NO_ITEMS",
+        "resolution": "failed",
+        "total": 0,
+        "succeeded": 0,
+        "failed": 0,
+        "missing": 0,
+        "timedOut": 0,
+        "abstained": 0,
+        "unknown": 0,
+        "acceptedIds": [],
+        "failedIds": [],
+        "missingIds": [],
+        "timedOutIds": [],
+        "abstainedIds": [],
+        "unknownIds": []
+      }
+    },
+    {
+      "name": "no-items-minimum-precedes-the-threshold-rule",
+      "policy": {
+        "onUnsatisfied": "unknown",
+        "lateArrival": "ignore",
+        "kind": "minimum",
+        "minimum": 1
+      },
+      "barrierNodeId": "gate",
+      "dispositions": [],
+      "expect": {
+        "barrierNodeId": "gate",
+        "deadlineElapsed": false,
+        "satisfied": false,
+        "reasonCode": "NO_ITEMS",
+        "resolution": "unknown",
+        "total": 0,
+        "succeeded": 0,
+        "failed": 0,
+        "missing": 0,
+        "timedOut": 0,
+        "abstained": 0,
+        "unknown": 0,
+        "acceptedIds": [],
+        "failedIds": [],
+        "missingIds": [],
+        "timedOutIds": [],
+        "abstainedIds": [],
+        "unknownIds": []
+      }
+    },
+    {
+      "name": "no-items-percentage-precedes-the-ratio-rule",
+      "policy": {
+        "onUnsatisfied": "human",
+        "lateArrival": "ignore",
+        "kind": "percentage",
+        "basisPoints": 1
+      },
+      "barrierNodeId": "gate",
+      "dispositions": [],
+      "expect": {
+        "barrierNodeId": "gate",
+        "deadlineElapsed": false,
+        "satisfied": false,
+        "reasonCode": "NO_ITEMS",
+        "resolution": "awaiting_human",
+        "total": 0,
+        "succeeded": 0,
+        "failed": 0,
+        "missing": 0,
+        "timedOut": 0,
+        "abstained": 0,
+        "unknown": 0,
+        "acceptedIds": [],
+        "failedIds": [],
+        "missingIds": [],
+        "timedOutIds": [],
+        "abstainedIds": [],
+        "unknownIds": []
+      }
+    },
+    {
+      "name": "no-items-quorum-precedes-the-participant-rule",
+      "policy": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "quorum",
+        "quorum": {
+          "accepts": 1,
+          "countAbstainAsParticipant": true
+        }
+      },
+      "barrierNodeId": "gate",
+      "dispositions": [],
+      "expect": {
+        "barrierNodeId": "gate",
+        "deadlineElapsed": false,
+        "satisfied": false,
+        "reasonCode": "NO_ITEMS",
+        "resolution": "failed",
+        "total": 0,
+        "succeeded": 0,
+        "failed": 0,
+        "missing": 0,
+        "timedOut": 0,
+        "abstained": 0,
+        "unknown": 0,
+        "acceptedIds": [],
+        "failedIds": [],
+        "missingIds": [],
+        "timedOutIds": [],
+        "abstainedIds": [],
+        "unknownIds": [],
+        "votes": []
+      }
+    },
+    {
+      "name": "all-succeeded",
+      "policy": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "all"
+      },
+      "barrierNodeId": "gate",
+      "dispositions": [
+        {
+          "sourceNodeId": "a",
+          "disposition": "succeeded"
+        },
+        {
+          "sourceNodeId": "b",
+          "disposition": "succeeded"
+        }
+      ],
+      "expect": {
+        "barrierNodeId": "gate",
+        "deadlineElapsed": false,
+        "satisfied": true,
+        "reasonCode": "ALL_SUCCEEDED",
+        "resolution": "satisfied",
+        "total": 2,
+        "succeeded": 2,
+        "failed": 0,
+        "missing": 0,
+        "timedOut": 0,
+        "abstained": 0,
+        "unknown": 0,
+        "acceptedIds": [
+          "a",
+          "b"
+        ],
+        "failedIds": [],
+        "missingIds": [],
+        "timedOutIds": [],
+        "abstainedIds": [],
+        "unknownIds": []
+      }
+    },
+    {
+      "name": "all-not-succeeded-with-one-failure",
+      "policy": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "all"
+      },
+      "barrierNodeId": "gate",
+      "dispositions": [
+        {
+          "sourceNodeId": "a",
+          "disposition": "succeeded"
+        },
+        {
+          "sourceNodeId": "b",
+          "disposition": "failed"
+        }
+      ],
+      "expect": {
+        "barrierNodeId": "gate",
+        "deadlineElapsed": false,
+        "satisfied": false,
+        "reasonCode": "ALL_NOT_SUCCEEDED",
+        "resolution": "failed",
+        "total": 2,
+        "succeeded": 1,
+        "failed": 1,
+        "missing": 0,
+        "timedOut": 0,
+        "abstained": 0,
+        "unknown": 0,
+        "acceptedIds": [
+          "a"
+        ],
+        "failedIds": [
+          "b"
+        ],
+        "missingIds": [],
+        "timedOutIds": [],
+        "abstainedIds": [],
+        "unknownIds": []
+      }
+    },
+    {
+      "name": "all-not-succeeded-with-one-missing",
+      "policy": {
+        "onUnsatisfied": "unknown",
+        "lateArrival": "ignore",
+        "kind": "all"
+      },
+      "barrierNodeId": "gate",
+      "dispositions": [
+        {
+          "sourceNodeId": "a",
+          "disposition": "succeeded"
+        },
+        {
+          "sourceNodeId": "b",
+          "disposition": "missing"
+        }
+      ],
+      "expect": {
+        "barrierNodeId": "gate",
+        "deadlineElapsed": false,
+        "satisfied": false,
+        "reasonCode": "ALL_NOT_SUCCEEDED",
+        "resolution": "unknown",
+        "total": 2,
+        "succeeded": 1,
+        "failed": 0,
+        "missing": 1,
+        "timedOut": 0,
+        "abstained": 0,
+        "unknown": 0,
+        "acceptedIds": [
+          "a"
+        ],
+        "failedIds": [],
+        "missingIds": [
+          "b"
+        ],
+        "timedOutIds": [],
+        "abstainedIds": [],
+        "unknownIds": []
+      }
+    },
+    {
+      "name": "all-not-succeeded-with-one-timed-out-sets-deadline-elapsed",
+      "policy": {
+        "onUnsatisfied": "human",
+        "lateArrival": "ignore",
+        "kind": "all",
+        "deadline": {
+          "afterMs": 100
+        }
+      },
+      "barrierNodeId": "gate",
+      "dispositions": [
+        {
+          "sourceNodeId": "a",
+          "disposition": "succeeded"
+        },
+        {
+          "sourceNodeId": "b",
+          "disposition": "timed_out"
+        }
+      ],
+      "expect": {
+        "barrierNodeId": "gate",
+        "deadlineElapsed": true,
+        "satisfied": false,
+        "reasonCode": "ALL_NOT_SUCCEEDED",
+        "resolution": "awaiting_human",
+        "total": 2,
+        "succeeded": 1,
+        "failed": 0,
+        "missing": 0,
+        "timedOut": 1,
+        "abstained": 0,
+        "unknown": 0,
+        "acceptedIds": [
+          "a"
+        ],
+        "failedIds": [],
+        "missingIds": [],
+        "timedOutIds": [
+          "b"
+        ],
+        "abstainedIds": [],
+        "unknownIds": []
+      }
+    },
+    {
+      "name": "all-partitions-every-disposition-in-declaration-order",
+      "policy": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "all",
+        "deadline": {
+          "afterMs": 100
+        }
+      },
+      "barrierNodeId": "gate",
+      "dispositions": [
+        {
+          "sourceNodeId": "ok-a",
+          "disposition": "succeeded"
+        },
+        {
+          "sourceNodeId": "lost-a",
+          "disposition": "missing"
+        },
+        {
+          "sourceNodeId": "failed-a",
+          "disposition": "failed"
+        },
+        {
+          "sourceNodeId": "late-a",
+          "disposition": "timed_out"
+        },
+        {
+          "sourceNodeId": "ok-b",
+          "disposition": "succeeded"
+        },
+        {
+          "sourceNodeId": "failed-b",
+          "disposition": "failed"
+        }
+      ],
+      "expect": {
+        "barrierNodeId": "gate",
+        "deadlineElapsed": true,
+        "satisfied": false,
+        "reasonCode": "ALL_NOT_SUCCEEDED",
+        "resolution": "failed",
+        "total": 6,
+        "succeeded": 2,
+        "failed": 2,
+        "missing": 1,
+        "timedOut": 1,
+        "abstained": 0,
+        "unknown": 0,
+        "acceptedIds": [
+          "ok-a",
+          "ok-b"
+        ],
+        "failedIds": [
+          "failed-a",
+          "failed-b"
+        ],
+        "missingIds": [
+          "lost-a"
+        ],
+        "timedOutIds": [
+          "late-a"
+        ],
+        "abstainedIds": [],
+        "unknownIds": []
+      }
+    },
+    {
+      "name": "minimum-one-below-threshold",
+      "policy": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "minimum",
+        "minimum": 3
+      },
+      "barrierNodeId": "gate",
+      "dispositions": [
+        {
+          "sourceNodeId": "a",
+          "disposition": "succeeded"
+        },
+        {
+          "sourceNodeId": "b",
+          "disposition": "succeeded"
+        },
+        {
+          "sourceNodeId": "c",
+          "disposition": "failed"
+        },
+        {
+          "sourceNodeId": "d",
+          "disposition": "failed"
+        }
+      ],
+      "expect": {
+        "barrierNodeId": "gate",
+        "deadlineElapsed": false,
+        "satisfied": false,
+        "reasonCode": "MINIMUM_NOT_MET",
+        "resolution": "failed",
+        "total": 4,
+        "succeeded": 2,
+        "failed": 2,
+        "missing": 0,
+        "timedOut": 0,
+        "abstained": 0,
+        "unknown": 0,
+        "acceptedIds": [
+          "a",
+          "b"
+        ],
+        "failedIds": [
+          "c",
+          "d"
+        ],
+        "missingIds": [],
+        "timedOutIds": [],
+        "abstainedIds": [],
+        "unknownIds": []
+      }
+    },
+    {
+      "name": "minimum-at-threshold",
+      "policy": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "minimum",
+        "minimum": 3
+      },
+      "barrierNodeId": "gate",
+      "dispositions": [
+        {
+          "sourceNodeId": "a",
+          "disposition": "succeeded"
+        },
+        {
+          "sourceNodeId": "b",
+          "disposition": "succeeded"
+        },
+        {
+          "sourceNodeId": "c",
+          "disposition": "succeeded"
+        },
+        {
+          "sourceNodeId": "d",
+          "disposition": "failed"
+        }
+      ],
+      "expect": {
+        "barrierNodeId": "gate",
+        "deadlineElapsed": false,
+        "satisfied": true,
+        "reasonCode": "MINIMUM_MET",
+        "resolution": "satisfied",
+        "total": 4,
+        "succeeded": 3,
+        "failed": 1,
+        "missing": 0,
+        "timedOut": 0,
+        "abstained": 0,
+        "unknown": 0,
+        "acceptedIds": [
+          "a",
+          "b",
+          "c"
+        ],
+        "failedIds": [
+          "d"
+        ],
+        "missingIds": [],
+        "timedOutIds": [],
+        "abstainedIds": [],
+        "unknownIds": []
+      }
+    },
+    {
+      "name": "minimum-one-above-threshold",
+      "policy": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "minimum",
+        "minimum": 3
+      },
+      "barrierNodeId": "gate",
+      "dispositions": [
+        {
+          "sourceNodeId": "a",
+          "disposition": "succeeded"
+        },
+        {
+          "sourceNodeId": "b",
+          "disposition": "succeeded"
+        },
+        {
+          "sourceNodeId": "c",
+          "disposition": "succeeded"
+        },
+        {
+          "sourceNodeId": "d",
+          "disposition": "succeeded"
+        }
+      ],
+      "expect": {
+        "barrierNodeId": "gate",
+        "deadlineElapsed": false,
+        "satisfied": true,
+        "reasonCode": "MINIMUM_MET",
+        "resolution": "satisfied",
+        "total": 4,
+        "succeeded": 4,
+        "failed": 0,
+        "missing": 0,
+        "timedOut": 0,
+        "abstained": 0,
+        "unknown": 0,
+        "acceptedIds": [
+          "a",
+          "b",
+          "c",
+          "d"
+        ],
+        "failedIds": [],
+        "missingIds": [],
+        "timedOutIds": [],
+        "abstainedIds": [],
+        "unknownIds": []
+      }
+    },
+    {
+      "name": "minimum-equal-to-total-is-not-exceeds-total",
+      "policy": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "minimum",
+        "minimum": 3
+      },
+      "barrierNodeId": "gate",
+      "dispositions": [
+        {
+          "sourceNodeId": "a",
+          "disposition": "succeeded"
+        },
+        {
+          "sourceNodeId": "b",
+          "disposition": "succeeded"
+        },
+        {
+          "sourceNodeId": "c",
+          "disposition": "succeeded"
+        }
+      ],
+      "expect": {
+        "barrierNodeId": "gate",
+        "deadlineElapsed": false,
+        "satisfied": true,
+        "reasonCode": "MINIMUM_MET",
+        "resolution": "satisfied",
+        "total": 3,
+        "succeeded": 3,
+        "failed": 0,
+        "missing": 0,
+        "timedOut": 0,
+        "abstained": 0,
+        "unknown": 0,
+        "acceptedIds": [
+          "a",
+          "b",
+          "c"
+        ],
+        "failedIds": [],
+        "missingIds": [],
+        "timedOutIds": [],
+        "abstainedIds": [],
+        "unknownIds": []
+      }
+    },
+    {
+      "name": "minimum-exceeds-total-by-one",
+      "policy": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "minimum",
+        "minimum": 4
+      },
+      "barrierNodeId": "gate",
+      "dispositions": [
+        {
+          "sourceNodeId": "a",
+          "disposition": "succeeded"
+        },
+        {
+          "sourceNodeId": "b",
+          "disposition": "succeeded"
+        },
+        {
+          "sourceNodeId": "c",
+          "disposition": "succeeded"
+        }
+      ],
+      "expect": {
+        "barrierNodeId": "gate",
+        "deadlineElapsed": false,
+        "satisfied": false,
+        "reasonCode": "MINIMUM_EXCEEDS_TOTAL",
+        "resolution": "failed",
+        "total": 3,
+        "succeeded": 3,
+        "failed": 0,
+        "missing": 0,
+        "timedOut": 0,
+        "abstained": 0,
+        "unknown": 0,
+        "acceptedIds": [
+          "a",
+          "b",
+          "c"
+        ],
+        "failedIds": [],
+        "missingIds": [],
+        "timedOutIds": [],
+        "abstainedIds": [],
+        "unknownIds": []
+      }
+    },
+    {
+      "name": "minimum-exceeds-total-outranks-a-sufficient-success-count",
+      "policy": {
+        "onUnsatisfied": "human",
+        "lateArrival": "ignore",
+        "kind": "minimum",
+        "minimum": 2
+      },
+      "barrierNodeId": "gate",
+      "dispositions": [
+        {
+          "sourceNodeId": "a",
+          "disposition": "succeeded"
+        }
+      ],
+      "expect": {
+        "barrierNodeId": "gate",
+        "deadlineElapsed": false,
+        "satisfied": false,
+        "reasonCode": "MINIMUM_EXCEEDS_TOTAL",
+        "resolution": "awaiting_human",
+        "total": 1,
+        "succeeded": 1,
+        "failed": 0,
+        "missing": 0,
+        "timedOut": 0,
+        "abstained": 0,
+        "unknown": 0,
+        "acceptedIds": [
+          "a"
+        ],
+        "failedIds": [],
+        "missingIds": [],
+        "timedOutIds": [],
+        "abstainedIds": [],
+        "unknownIds": []
+      }
+    },
+    {
+      "name": "minimum-not-met-resolves-to-unknown",
+      "policy": {
+        "onUnsatisfied": "unknown",
+        "lateArrival": "ignore",
+        "kind": "minimum",
+        "minimum": 2
+      },
+      "barrierNodeId": "gate",
+      "dispositions": [
+        {
+          "sourceNodeId": "a",
+          "disposition": "succeeded"
+        },
+        {
+          "sourceNodeId": "b",
+          "disposition": "missing"
+        }
+      ],
+      "expect": {
+        "barrierNodeId": "gate",
+        "deadlineElapsed": false,
+        "satisfied": false,
+        "reasonCode": "MINIMUM_NOT_MET",
+        "resolution": "unknown",
+        "total": 2,
+        "succeeded": 1,
+        "failed": 0,
+        "missing": 1,
+        "timedOut": 0,
+        "abstained": 0,
+        "unknown": 0,
+        "acceptedIds": [
+          "a"
+        ],
+        "failedIds": [],
+        "missingIds": [
+          "b"
+        ],
+        "timedOutIds": [],
+        "abstainedIds": [],
+        "unknownIds": []
+      }
+    },
+    {
+      "name": "minimum-not-met-resolves-to-awaiting-human",
+      "policy": {
+        "onUnsatisfied": "human",
+        "lateArrival": "reject",
+        "kind": "minimum",
+        "minimum": 2
+      },
+      "barrierNodeId": "gate",
+      "dispositions": [
+        {
+          "sourceNodeId": "a",
+          "disposition": "succeeded"
+        },
+        {
+          "sourceNodeId": "b",
+          "disposition": "failed"
+        }
+      ],
+      "expect": {
+        "barrierNodeId": "gate",
+        "deadlineElapsed": false,
+        "satisfied": false,
+        "reasonCode": "MINIMUM_NOT_MET",
+        "resolution": "awaiting_human",
+        "total": 2,
+        "succeeded": 1,
+        "failed": 1,
+        "missing": 0,
+        "timedOut": 0,
+        "abstained": 0,
+        "unknown": 0,
+        "acceptedIds": [
+          "a"
+        ],
+        "failedIds": [
+          "b"
+        ],
+        "missingIds": [],
+        "timedOutIds": [],
+        "abstainedIds": [],
+        "unknownIds": []
+      }
+    },
+    {
+      "name": "percentage-one-below-threshold",
+      "policy": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "percentage",
+        "basisPoints": 5000
+      },
+      "barrierNodeId": "gate",
+      "dispositions": [
+        {
+          "sourceNodeId": "a",
+          "disposition": "succeeded"
+        },
+        {
+          "sourceNodeId": "b",
+          "disposition": "failed"
+        },
+        {
+          "sourceNodeId": "c",
+          "disposition": "failed"
+        },
+        {
+          "sourceNodeId": "d",
+          "disposition": "failed"
+        }
+      ],
+      "expect": {
+        "barrierNodeId": "gate",
+        "deadlineElapsed": false,
+        "satisfied": false,
+        "reasonCode": "PERCENTAGE_NOT_MET",
+        "resolution": "failed",
+        "total": 4,
+        "succeeded": 1,
+        "failed": 3,
+        "missing": 0,
+        "timedOut": 0,
+        "abstained": 0,
+        "unknown": 0,
+        "acceptedIds": [
+          "a"
+        ],
+        "failedIds": [
+          "b",
+          "c",
+          "d"
+        ],
+        "missingIds": [],
+        "timedOutIds": [],
+        "abstainedIds": [],
+        "unknownIds": []
+      }
+    },
+    {
+      "name": "percentage-at-threshold",
+      "policy": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "percentage",
+        "basisPoints": 5000
+      },
+      "barrierNodeId": "gate",
+      "dispositions": [
+        {
+          "sourceNodeId": "a",
+          "disposition": "succeeded"
+        },
+        {
+          "sourceNodeId": "b",
+          "disposition": "succeeded"
+        },
+        {
+          "sourceNodeId": "c",
+          "disposition": "failed"
+        },
+        {
+          "sourceNodeId": "d",
+          "disposition": "failed"
+        }
+      ],
+      "expect": {
+        "barrierNodeId": "gate",
+        "deadlineElapsed": false,
+        "satisfied": true,
+        "reasonCode": "PERCENTAGE_MET",
+        "resolution": "satisfied",
+        "total": 4,
+        "succeeded": 2,
+        "failed": 2,
+        "missing": 0,
+        "timedOut": 0,
+        "abstained": 0,
+        "unknown": 0,
+        "acceptedIds": [
+          "a",
+          "b"
+        ],
+        "failedIds": [
+          "c",
+          "d"
+        ],
+        "missingIds": [],
+        "timedOutIds": [],
+        "abstainedIds": [],
+        "unknownIds": []
+      }
+    },
+    {
+      "name": "percentage-one-above-threshold",
+      "policy": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "percentage",
+        "basisPoints": 5000
+      },
+      "barrierNodeId": "gate",
+      "dispositions": [
+        {
+          "sourceNodeId": "a",
+          "disposition": "succeeded"
+        },
+        {
+          "sourceNodeId": "b",
+          "disposition": "succeeded"
+        },
+        {
+          "sourceNodeId": "c",
+          "disposition": "succeeded"
+        },
+        {
+          "sourceNodeId": "d",
+          "disposition": "failed"
+        }
+      ],
+      "expect": {
+        "barrierNodeId": "gate",
+        "deadlineElapsed": false,
+        "satisfied": true,
+        "reasonCode": "PERCENTAGE_MET",
+        "resolution": "satisfied",
+        "total": 4,
+        "succeeded": 3,
+        "failed": 1,
+        "missing": 0,
+        "timedOut": 0,
+        "abstained": 0,
+        "unknown": 0,
+        "acceptedIds": [
+          "a",
+          "b",
+          "c"
+        ],
+        "failedIds": [
+          "d"
+        ],
+        "missingIds": [],
+        "timedOutIds": [],
+        "abstainedIds": [],
+        "unknownIds": []
+      }
+    },
+    {
+      "name": "percentage-exact-integer-products-avoid-float-rounding-met",
+      "policy": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "percentage",
+        "basisPoints": 6666
+      },
+      "barrierNodeId": "gate",
+      "dispositions": [
+        {
+          "sourceNodeId": "a",
+          "disposition": "succeeded"
+        },
+        {
+          "sourceNodeId": "b",
+          "disposition": "succeeded"
+        },
+        {
+          "sourceNodeId": "c",
+          "disposition": "failed"
+        }
+      ],
+      "expect": {
+        "barrierNodeId": "gate",
+        "deadlineElapsed": false,
+        "satisfied": true,
+        "reasonCode": "PERCENTAGE_MET",
+        "resolution": "satisfied",
+        "total": 3,
+        "succeeded": 2,
+        "failed": 1,
+        "missing": 0,
+        "timedOut": 0,
+        "abstained": 0,
+        "unknown": 0,
+        "acceptedIds": [
+          "a",
+          "b"
+        ],
+        "failedIds": [
+          "c"
+        ],
+        "missingIds": [],
+        "timedOutIds": [],
+        "abstainedIds": [],
+        "unknownIds": []
+      }
+    },
+    {
+      "name": "percentage-exact-integer-products-avoid-float-rounding-not-met",
+      "policy": {
+        "onUnsatisfied": "unknown",
+        "lateArrival": "ignore",
+        "kind": "percentage",
+        "basisPoints": 6667
+      },
+      "barrierNodeId": "gate",
+      "dispositions": [
+        {
+          "sourceNodeId": "a",
+          "disposition": "succeeded"
+        },
+        {
+          "sourceNodeId": "b",
+          "disposition": "succeeded"
+        },
+        {
+          "sourceNodeId": "c",
+          "disposition": "failed"
+        }
+      ],
+      "expect": {
+        "barrierNodeId": "gate",
+        "deadlineElapsed": false,
+        "satisfied": false,
+        "reasonCode": "PERCENTAGE_NOT_MET",
+        "resolution": "unknown",
+        "total": 3,
+        "succeeded": 2,
+        "failed": 1,
+        "missing": 0,
+        "timedOut": 0,
+        "abstained": 0,
+        "unknown": 0,
+        "acceptedIds": [
+          "a",
+          "b"
+        ],
+        "failedIds": [
+          "c"
+        ],
+        "missingIds": [],
+        "timedOutIds": [],
+        "abstainedIds": [],
+        "unknownIds": []
+      }
+    },
+    {
+      "name": "percentage-ten-thousand-basis-points-requires-every-success",
+      "policy": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "percentage",
+        "basisPoints": 10000
+      },
+      "barrierNodeId": "gate",
+      "dispositions": [
+        {
+          "sourceNodeId": "a",
+          "disposition": "succeeded"
+        },
+        {
+          "sourceNodeId": "b",
+          "disposition": "succeeded"
+        },
+        {
+          "sourceNodeId": "c",
+          "disposition": "succeeded"
+        }
+      ],
+      "expect": {
+        "barrierNodeId": "gate",
+        "deadlineElapsed": false,
+        "satisfied": true,
+        "reasonCode": "PERCENTAGE_MET",
+        "resolution": "satisfied",
+        "total": 3,
+        "succeeded": 3,
+        "failed": 0,
+        "missing": 0,
+        "timedOut": 0,
+        "abstained": 0,
+        "unknown": 0,
+        "acceptedIds": [
+          "a",
+          "b",
+          "c"
+        ],
+        "failedIds": [],
+        "missingIds": [],
+        "timedOutIds": [],
+        "abstainedIds": [],
+        "unknownIds": []
+      }
+    },
+    {
+      "name": "percentage-ten-thousand-basis-points-rejects-one-timeout",
+      "policy": {
+        "onUnsatisfied": "human",
+        "lateArrival": "ignore",
+        "kind": "percentage",
+        "basisPoints": 10000,
+        "deadline": {
+          "afterMs": 50
+        }
+      },
+      "barrierNodeId": "gate",
+      "dispositions": [
+        {
+          "sourceNodeId": "a",
+          "disposition": "succeeded"
+        },
+        {
+          "sourceNodeId": "b",
+          "disposition": "succeeded"
+        },
+        {
+          "sourceNodeId": "c",
+          "disposition": "timed_out"
+        }
+      ],
+      "expect": {
+        "barrierNodeId": "gate",
+        "deadlineElapsed": true,
+        "satisfied": false,
+        "reasonCode": "PERCENTAGE_NOT_MET",
+        "resolution": "awaiting_human",
+        "total": 3,
+        "succeeded": 2,
+        "failed": 0,
+        "missing": 0,
+        "timedOut": 1,
+        "abstained": 0,
+        "unknown": 0,
+        "acceptedIds": [
+          "a",
+          "b"
+        ],
+        "failedIds": [],
+        "missingIds": [],
+        "timedOutIds": [
+          "c"
+        ],
+        "abstainedIds": [],
+        "unknownIds": []
+      }
+    },
+    {
+      "name": "percentage-one-basis-point-still-requires-one-success",
+      "policy": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "percentage",
+        "basisPoints": 1
+      },
+      "barrierNodeId": "gate",
+      "dispositions": [
+        {
+          "sourceNodeId": "a",
+          "disposition": "missing"
+        },
+        {
+          "sourceNodeId": "b",
+          "disposition": "failed"
+        }
+      ],
+      "expect": {
+        "barrierNodeId": "gate",
+        "deadlineElapsed": false,
+        "satisfied": false,
+        "reasonCode": "PERCENTAGE_NOT_MET",
+        "resolution": "failed",
+        "total": 2,
+        "succeeded": 0,
+        "failed": 1,
+        "missing": 1,
+        "timedOut": 0,
+        "abstained": 0,
+        "unknown": 0,
+        "acceptedIds": [],
+        "failedIds": [
+          "b"
+        ],
+        "missingIds": [
+          "a"
+        ],
+        "timedOutIds": [],
+        "abstainedIds": [],
+        "unknownIds": []
+      }
+    },
+    {
+      "name": "quorum-one-below-threshold",
+      "policy": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "quorum",
+        "quorum": {
+          "accepts": 3,
+          "countAbstainAsParticipant": true
+        }
+      },
+      "barrierNodeId": "gate",
+      "dispositions": [
+        {
+          "sourceNodeId": "a",
+          "disposition": "succeeded",
+          "vote": {
+            "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
+            "kind": "BarrierVote",
+            "verdict": "accept"
+          }
+        },
+        {
+          "sourceNodeId": "b",
+          "disposition": "succeeded",
+          "vote": {
+            "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
+            "kind": "BarrierVote",
+            "verdict": "accept"
+          }
+        },
+        {
+          "sourceNodeId": "c",
+          "disposition": "failed",
+          "vote": {
+            "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
+            "kind": "BarrierVote",
+            "verdict": "reject"
+          }
+        },
+        {
+          "sourceNodeId": "d",
+          "disposition": "failed",
+          "vote": {
+            "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
+            "kind": "BarrierVote",
+            "verdict": "reject"
+          }
+        }
+      ],
+      "expect": {
+        "barrierNodeId": "gate",
+        "deadlineElapsed": false,
+        "satisfied": false,
+        "reasonCode": "QUORUM_NOT_MET",
+        "resolution": "failed",
+        "total": 4,
+        "succeeded": 2,
+        "failed": 2,
+        "missing": 0,
+        "timedOut": 0,
+        "abstained": 0,
+        "unknown": 0,
+        "acceptedIds": [
+          "a",
+          "b"
+        ],
+        "failedIds": [
+          "c",
+          "d"
+        ],
+        "missingIds": [],
+        "timedOutIds": [],
+        "abstainedIds": [],
+        "unknownIds": [],
+        "votes": [
+          {
+            "sourceNodeId": "a",
+            "verdict": "accept"
+          },
+          {
+            "sourceNodeId": "b",
+            "verdict": "accept"
+          },
+          {
+            "sourceNodeId": "c",
+            "verdict": "reject"
+          },
+          {
+            "sourceNodeId": "d",
+            "verdict": "reject"
+          }
+        ]
+      }
+    },
+    {
+      "name": "quorum-at-threshold",
+      "policy": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "quorum",
+        "quorum": {
+          "accepts": 3,
+          "countAbstainAsParticipant": true
+        }
+      },
+      "barrierNodeId": "gate",
+      "dispositions": [
+        {
+          "sourceNodeId": "a",
+          "disposition": "succeeded",
+          "vote": {
+            "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
+            "kind": "BarrierVote",
+            "verdict": "accept"
+          }
+        },
+        {
+          "sourceNodeId": "b",
+          "disposition": "succeeded",
+          "vote": {
+            "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
+            "kind": "BarrierVote",
+            "verdict": "accept"
+          }
+        },
+        {
+          "sourceNodeId": "c",
+          "disposition": "succeeded",
+          "vote": {
+            "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
+            "kind": "BarrierVote",
+            "verdict": "accept"
+          }
+        },
+        {
+          "sourceNodeId": "d",
+          "disposition": "failed",
+          "vote": {
+            "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
+            "kind": "BarrierVote",
+            "verdict": "reject"
+          }
+        }
+      ],
+      "expect": {
+        "barrierNodeId": "gate",
+        "deadlineElapsed": false,
+        "satisfied": true,
+        "reasonCode": "QUORUM_MET",
+        "resolution": "satisfied",
+        "total": 4,
+        "succeeded": 3,
+        "failed": 1,
+        "missing": 0,
+        "timedOut": 0,
+        "abstained": 0,
+        "unknown": 0,
+        "acceptedIds": [
+          "a",
+          "b",
+          "c"
+        ],
+        "failedIds": [
+          "d"
+        ],
+        "missingIds": [],
+        "timedOutIds": [],
+        "abstainedIds": [],
+        "unknownIds": [],
+        "votes": [
+          {
+            "sourceNodeId": "a",
+            "verdict": "accept"
+          },
+          {
+            "sourceNodeId": "b",
+            "verdict": "accept"
+          },
+          {
+            "sourceNodeId": "c",
+            "verdict": "accept"
+          },
+          {
+            "sourceNodeId": "d",
+            "verdict": "reject"
+          }
+        ]
+      }
+    },
+    {
+      "name": "quorum-one-above-threshold",
+      "policy": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "quorum",
+        "quorum": {
+          "accepts": 3,
+          "countAbstainAsParticipant": true
+        }
+      },
+      "barrierNodeId": "gate",
+      "dispositions": [
+        {
+          "sourceNodeId": "a",
+          "disposition": "succeeded",
+          "vote": {
+            "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
+            "kind": "BarrierVote",
+            "verdict": "accept"
+          }
+        },
+        {
+          "sourceNodeId": "b",
+          "disposition": "succeeded",
+          "vote": {
+            "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
+            "kind": "BarrierVote",
+            "verdict": "accept"
+          }
+        },
+        {
+          "sourceNodeId": "c",
+          "disposition": "succeeded",
+          "vote": {
+            "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
+            "kind": "BarrierVote",
+            "verdict": "accept"
+          }
+        },
+        {
+          "sourceNodeId": "d",
+          "disposition": "succeeded",
+          "vote": {
+            "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
+            "kind": "BarrierVote",
+            "verdict": "accept"
+          }
+        }
+      ],
+      "expect": {
+        "barrierNodeId": "gate",
+        "deadlineElapsed": false,
+        "satisfied": true,
+        "reasonCode": "QUORUM_MET",
+        "resolution": "satisfied",
+        "total": 4,
+        "succeeded": 4,
+        "failed": 0,
+        "missing": 0,
+        "timedOut": 0,
+        "abstained": 0,
+        "unknown": 0,
+        "acceptedIds": [
+          "a",
+          "b",
+          "c",
+          "d"
+        ],
+        "failedIds": [],
+        "missingIds": [],
+        "timedOutIds": [],
+        "abstainedIds": [],
+        "unknownIds": [],
+        "votes": [
+          {
+            "sourceNodeId": "a",
+            "verdict": "accept"
+          },
+          {
+            "sourceNodeId": "b",
+            "verdict": "accept"
+          },
+          {
+            "sourceNodeId": "c",
+            "verdict": "accept"
+          },
+          {
+            "sourceNodeId": "d",
+            "verdict": "accept"
+          }
+        ]
+      }
+    },
+    {
+      "name": "quorum-count-abstain-as-participant-true",
+      "policy": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "quorum",
+        "quorum": {
+          "accepts": 3,
+          "countAbstainAsParticipant": true
+        }
+      },
+      "barrierNodeId": "gate",
+      "dispositions": [
+        {
+          "sourceNodeId": "a",
+          "disposition": "succeeded",
+          "vote": {
+            "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
+            "kind": "BarrierVote",
+            "verdict": "accept"
+          }
+        },
+        {
+          "sourceNodeId": "b",
+          "disposition": "succeeded",
+          "vote": {
+            "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
+            "kind": "BarrierVote",
+            "verdict": "accept"
+          }
+        },
+        {
+          "sourceNodeId": "c",
+          "disposition": "abstained",
+          "vote": {
+            "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
+            "kind": "BarrierVote",
+            "verdict": "abstain"
+          }
+        },
+        {
+          "sourceNodeId": "d",
+          "disposition": "abstained",
+          "vote": {
+            "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
+            "kind": "BarrierVote",
+            "verdict": "abstain"
+          }
+        }
+      ],
+      "expect": {
+        "barrierNodeId": "gate",
+        "deadlineElapsed": false,
+        "satisfied": false,
+        "reasonCode": "QUORUM_NOT_MET",
+        "resolution": "failed",
+        "total": 4,
+        "succeeded": 2,
+        "failed": 0,
+        "missing": 0,
+        "timedOut": 0,
+        "abstained": 2,
+        "unknown": 0,
+        "acceptedIds": [
+          "a",
+          "b"
+        ],
+        "failedIds": [],
+        "missingIds": [],
+        "timedOutIds": [],
+        "abstainedIds": [
+          "c",
+          "d"
+        ],
+        "unknownIds": [],
+        "votes": [
+          {
+            "sourceNodeId": "a",
+            "verdict": "accept"
+          },
+          {
+            "sourceNodeId": "b",
+            "verdict": "accept"
+          },
+          {
+            "sourceNodeId": "c",
+            "verdict": "abstain"
+          },
+          {
+            "sourceNodeId": "d",
+            "verdict": "abstain"
+          }
+        ]
+      }
+    },
+    {
+      "name": "quorum-count-abstain-as-participant-false",
+      "policy": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "quorum",
+        "quorum": {
+          "accepts": 3,
+          "countAbstainAsParticipant": false
+        }
+      },
+      "barrierNodeId": "gate",
+      "dispositions": [
+        {
+          "sourceNodeId": "a",
+          "disposition": "succeeded",
+          "vote": {
+            "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
+            "kind": "BarrierVote",
+            "verdict": "accept"
+          }
+        },
+        {
+          "sourceNodeId": "b",
+          "disposition": "succeeded",
+          "vote": {
+            "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
+            "kind": "BarrierVote",
+            "verdict": "accept"
+          }
+        },
+        {
+          "sourceNodeId": "c",
+          "disposition": "abstained",
+          "vote": {
+            "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
+            "kind": "BarrierVote",
+            "verdict": "abstain"
+          }
+        },
+        {
+          "sourceNodeId": "d",
+          "disposition": "abstained",
+          "vote": {
+            "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
+            "kind": "BarrierVote",
+            "verdict": "abstain"
+          }
+        }
+      ],
+      "expect": {
+        "barrierNodeId": "gate",
+        "deadlineElapsed": false,
+        "satisfied": false,
+        "reasonCode": "QUORUM_EXCEEDS_PARTICIPANTS",
+        "resolution": "failed",
+        "total": 4,
+        "succeeded": 2,
+        "failed": 0,
+        "missing": 0,
+        "timedOut": 0,
+        "abstained": 2,
+        "unknown": 0,
+        "acceptedIds": [
+          "a",
+          "b"
+        ],
+        "failedIds": [],
+        "missingIds": [],
+        "timedOutIds": [],
+        "abstainedIds": [
+          "c",
+          "d"
+        ],
+        "unknownIds": [],
+        "votes": [
+          {
+            "sourceNodeId": "a",
+            "verdict": "accept"
+          },
+          {
+            "sourceNodeId": "b",
+            "verdict": "accept"
+          },
+          {
+            "sourceNodeId": "c",
+            "verdict": "abstain"
+          },
+          {
+            "sourceNodeId": "d",
+            "verdict": "abstain"
+          }
+        ]
+      }
+    },
+    {
+      "name": "quorum-exceeds-participants-when-every-vote-abstains",
+      "policy": {
+        "onUnsatisfied": "human",
+        "lateArrival": "ignore",
+        "kind": "quorum",
+        "quorum": {
+          "accepts": 1,
+          "countAbstainAsParticipant": false
+        }
+      },
+      "barrierNodeId": "gate",
+      "dispositions": [
+        {
+          "sourceNodeId": "a",
+          "disposition": "abstained",
+          "vote": {
+            "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
+            "kind": "BarrierVote",
+            "verdict": "abstain"
+          }
+        },
+        {
+          "sourceNodeId": "b",
+          "disposition": "abstained",
+          "vote": {
+            "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
+            "kind": "BarrierVote",
+            "verdict": "abstain"
+          }
+        }
+      ],
+      "expect": {
+        "barrierNodeId": "gate",
+        "deadlineElapsed": false,
+        "satisfied": false,
+        "reasonCode": "QUORUM_EXCEEDS_PARTICIPANTS",
+        "resolution": "awaiting_human",
+        "total": 2,
+        "succeeded": 0,
+        "failed": 0,
+        "missing": 0,
+        "timedOut": 0,
+        "abstained": 2,
+        "unknown": 0,
+        "acceptedIds": [],
+        "failedIds": [],
+        "missingIds": [],
+        "timedOutIds": [],
+        "abstainedIds": [
+          "a",
+          "b"
+        ],
+        "unknownIds": [],
+        "votes": [
+          {
+            "sourceNodeId": "a",
+            "verdict": "abstain"
+          },
+          {
+            "sourceNodeId": "b",
+            "verdict": "abstain"
+          }
+        ]
+      }
+    },
+    {
+      "name": "quorum-unknown-counts-as-participant-and-never-as-accept",
+      "policy": {
+        "onUnsatisfied": "unknown",
+        "lateArrival": "ignore",
+        "kind": "quorum",
+        "quorum": {
+          "accepts": 2,
+          "countAbstainAsParticipant": false
+        }
+      },
+      "barrierNodeId": "gate",
+      "dispositions": [
+        {
+          "sourceNodeId": "a",
+          "disposition": "succeeded",
+          "vote": {
+            "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
+            "kind": "BarrierVote",
+            "verdict": "accept"
+          }
+        },
+        {
+          "sourceNodeId": "b",
+          "disposition": "unknown",
+          "vote": {
+            "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
+            "kind": "BarrierVote",
+            "verdict": "unknown"
+          }
+        },
+        {
+          "sourceNodeId": "c",
+          "disposition": "unknown",
+          "vote": {
+            "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
+            "kind": "BarrierVote",
+            "verdict": "unknown"
+          }
+        }
+      ],
+      "expect": {
+        "barrierNodeId": "gate",
+        "deadlineElapsed": false,
+        "satisfied": false,
+        "reasonCode": "QUORUM_NOT_MET",
+        "resolution": "unknown",
+        "total": 3,
+        "succeeded": 1,
+        "failed": 0,
+        "missing": 0,
+        "timedOut": 0,
+        "abstained": 0,
+        "unknown": 2,
+        "acceptedIds": [
+          "a"
+        ],
+        "failedIds": [],
+        "missingIds": [],
+        "timedOutIds": [],
+        "abstainedIds": [],
+        "unknownIds": [
+          "b",
+          "c"
+        ],
+        "votes": [
+          {
+            "sourceNodeId": "a",
+            "verdict": "accept"
+          },
+          {
+            "sourceNodeId": "b",
+            "verdict": "unknown"
+          },
+          {
+            "sourceNodeId": "c",
+            "verdict": "unknown"
+          }
+        ]
+      }
+    },
+    {
+      "name": "quorum-unknown-participates-while-abstain-is-excluded",
+      "policy": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "quorum",
+        "quorum": {
+          "accepts": 2,
+          "countAbstainAsParticipant": false
+        }
+      },
+      "barrierNodeId": "gate",
+      "dispositions": [
+        {
+          "sourceNodeId": "a",
+          "disposition": "succeeded",
+          "vote": {
+            "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
+            "kind": "BarrierVote",
+            "verdict": "accept"
+          }
+        },
+        {
+          "sourceNodeId": "b",
+          "disposition": "unknown",
+          "vote": {
+            "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
+            "kind": "BarrierVote",
+            "verdict": "unknown"
+          }
+        },
+        {
+          "sourceNodeId": "c",
+          "disposition": "abstained",
+          "vote": {
+            "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
+            "kind": "BarrierVote",
+            "verdict": "abstain"
+          }
+        }
+      ],
+      "expect": {
+        "barrierNodeId": "gate",
+        "deadlineElapsed": false,
+        "satisfied": false,
+        "reasonCode": "QUORUM_NOT_MET",
+        "resolution": "failed",
+        "total": 3,
+        "succeeded": 1,
+        "failed": 0,
+        "missing": 0,
+        "timedOut": 0,
+        "abstained": 1,
+        "unknown": 1,
+        "acceptedIds": [
+          "a"
+        ],
+        "failedIds": [],
+        "missingIds": [],
+        "timedOutIds": [],
+        "abstainedIds": [
+          "c"
+        ],
+        "unknownIds": [
+          "b"
+        ],
+        "votes": [
+          {
+            "sourceNodeId": "a",
+            "verdict": "accept"
+          },
+          {
+            "sourceNodeId": "b",
+            "verdict": "unknown"
+          },
+          {
+            "sourceNodeId": "c",
+            "verdict": "abstain"
+          }
+        ]
+      }
+    },
+    {
+      "name": "quorum-met-with-confidence-and-evidence-records",
+      "policy": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "reject",
+        "kind": "quorum",
+        "quorum": {
+          "accepts": 2,
+          "countAbstainAsParticipant": true
+        }
+      },
+      "barrierNodeId": "gate",
+      "dispositions": [
+        {
+          "sourceNodeId": "a",
+          "disposition": "succeeded",
+          "vote": {
+            "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
+            "kind": "BarrierVote",
+            "verdict": "accept",
+            "confidenceBasisPoints": 9000,
+            "evidence": {
+              "citation": "spec/integrated-barrier-semantics.md"
+            }
+          }
+        },
+        {
+          "sourceNodeId": "b",
+          "disposition": "succeeded",
+          "vote": {
+            "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
+            "kind": "BarrierVote",
+            "verdict": "accept",
+            "confidenceBasisPoints": 10000
+          }
+        },
+        {
+          "sourceNodeId": "c",
+          "disposition": "failed",
+          "vote": {
+            "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
+            "kind": "BarrierVote",
+            "verdict": "reject",
+            "evidence": {
+              "note": "insufficient",
+              "refs": [
+                1,
+                2
+              ]
+            }
+          }
+        }
+      ],
+      "expect": {
+        "barrierNodeId": "gate",
+        "deadlineElapsed": false,
+        "satisfied": true,
+        "reasonCode": "QUORUM_MET",
+        "resolution": "satisfied",
+        "total": 3,
+        "succeeded": 2,
+        "failed": 1,
+        "missing": 0,
+        "timedOut": 0,
+        "abstained": 0,
+        "unknown": 0,
+        "acceptedIds": [
+          "a",
+          "b"
+        ],
+        "failedIds": [
+          "c"
+        ],
+        "missingIds": [],
+        "timedOutIds": [],
+        "abstainedIds": [],
+        "unknownIds": [],
+        "votes": [
+          {
+            "sourceNodeId": "a",
+            "verdict": "accept",
+            "confidenceBasisPoints": 9000,
+            "evidenceHash": "03a89d0dcdfc85c27c0682aeaf90f29dc18c64b8c187792a0a783f0ed46cefe1"
+          },
+          {
+            "sourceNodeId": "b",
+            "verdict": "accept",
+            "confidenceBasisPoints": 10000
+          },
+          {
+            "sourceNodeId": "c",
+            "verdict": "reject",
+            "evidenceHash": "41876da1e08f169a27fe8022132a80e607d16eb461da89dba0a5e14ae9c3dc17"
+          }
+        ]
+      }
+    },
+    {
+      "name": "quorum-rejects-are-classified-as-failed",
+      "policy": {
+        "onUnsatisfied": "human",
+        "lateArrival": "ignore",
+        "kind": "quorum",
+        "quorum": {
+          "accepts": 2,
+          "countAbstainAsParticipant": true
+        }
+      },
+      "barrierNodeId": "gate",
+      "dispositions": [
+        {
+          "sourceNodeId": "a",
+          "disposition": "failed",
+          "vote": {
+            "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
+            "kind": "BarrierVote",
+            "verdict": "reject"
+          }
+        },
+        {
+          "sourceNodeId": "b",
+          "disposition": "failed",
+          "vote": {
+            "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
+            "kind": "BarrierVote",
+            "verdict": "reject"
+          }
+        },
+        {
+          "sourceNodeId": "c",
+          "disposition": "succeeded",
+          "vote": {
+            "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
+            "kind": "BarrierVote",
+            "verdict": "accept"
+          }
+        }
+      ],
+      "expect": {
+        "barrierNodeId": "gate",
+        "deadlineElapsed": false,
+        "satisfied": false,
+        "reasonCode": "QUORUM_NOT_MET",
+        "resolution": "awaiting_human",
+        "total": 3,
+        "succeeded": 1,
+        "failed": 2,
+        "missing": 0,
+        "timedOut": 0,
+        "abstained": 0,
+        "unknown": 0,
+        "acceptedIds": [
+          "c"
+        ],
+        "failedIds": [
+          "a",
+          "b"
+        ],
+        "missingIds": [],
+        "timedOutIds": [],
+        "abstainedIds": [],
+        "unknownIds": [],
+        "votes": [
+          {
+            "sourceNodeId": "a",
+            "verdict": "reject"
+          },
+          {
+            "sourceNodeId": "b",
+            "verdict": "reject"
+          },
+          {
+            "sourceNodeId": "c",
+            "verdict": "accept"
+          }
+        ]
+      }
+    },
+    {
+      "name": "quorum-accepts-equal-to-participants-is-the-inclusive-boundary",
+      "policy": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "quorum",
+        "quorum": {
+          "accepts": 2,
+          "countAbstainAsParticipant": false
+        }
+      },
+      "barrierNodeId": "gate",
+      "dispositions": [
+        {
+          "sourceNodeId": "a",
+          "disposition": "succeeded",
+          "vote": {
+            "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
+            "kind": "BarrierVote",
+            "verdict": "accept"
+          }
+        },
+        {
+          "sourceNodeId": "b",
+          "disposition": "succeeded",
+          "vote": {
+            "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
+            "kind": "BarrierVote",
+            "verdict": "accept"
+          }
+        },
+        {
+          "sourceNodeId": "c",
+          "disposition": "abstained",
+          "vote": {
+            "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
+            "kind": "BarrierVote",
+            "verdict": "abstain"
+          }
+        }
+      ],
+      "expect": {
+        "barrierNodeId": "gate",
+        "deadlineElapsed": false,
+        "satisfied": true,
+        "reasonCode": "QUORUM_MET",
+        "resolution": "satisfied",
+        "total": 3,
+        "succeeded": 2,
+        "failed": 0,
+        "missing": 0,
+        "timedOut": 0,
+        "abstained": 1,
+        "unknown": 0,
+        "acceptedIds": [
+          "a",
+          "b"
+        ],
+        "failedIds": [],
+        "missingIds": [],
+        "timedOutIds": [],
+        "abstainedIds": [
+          "c"
+        ],
+        "unknownIds": [],
+        "votes": [
+          {
+            "sourceNodeId": "a",
+            "verdict": "accept"
+          },
+          {
+            "sourceNodeId": "b",
+            "verdict": "accept"
+          },
+          {
+            "sourceNodeId": "c",
+            "verdict": "abstain"
+          }
+        ]
+      }
+    },
+    {
+      "name": "quorum-accepts-one-above-participants-is-exceeds-participants",
+      "policy": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "quorum",
+        "quorum": {
+          "accepts": 3,
+          "countAbstainAsParticipant": false
+        }
+      },
+      "barrierNodeId": "gate",
+      "dispositions": [
+        {
+          "sourceNodeId": "a",
+          "disposition": "succeeded",
+          "vote": {
+            "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
+            "kind": "BarrierVote",
+            "verdict": "accept"
+          }
+        },
+        {
+          "sourceNodeId": "b",
+          "disposition": "succeeded",
+          "vote": {
+            "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
+            "kind": "BarrierVote",
+            "verdict": "accept"
+          }
+        },
+        {
+          "sourceNodeId": "c",
+          "disposition": "abstained",
+          "vote": {
+            "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
+            "kind": "BarrierVote",
+            "verdict": "abstain"
+          }
+        }
+      ],
+      "expect": {
+        "barrierNodeId": "gate",
+        "deadlineElapsed": false,
+        "satisfied": false,
+        "reasonCode": "QUORUM_EXCEEDS_PARTICIPANTS",
+        "resolution": "failed",
+        "total": 3,
+        "succeeded": 2,
+        "failed": 0,
+        "missing": 0,
+        "timedOut": 0,
+        "abstained": 1,
+        "unknown": 0,
+        "acceptedIds": [
+          "a",
+          "b"
+        ],
+        "failedIds": [],
+        "missingIds": [],
+        "timedOutIds": [],
+        "abstainedIds": [
+          "c"
+        ],
+        "unknownIds": [],
+        "votes": [
+          {
+            "sourceNodeId": "a",
+            "verdict": "accept"
+          },
+          {
+            "sourceNodeId": "b",
+            "verdict": "accept"
+          },
+          {
+            "sourceNodeId": "c",
+            "verdict": "abstain"
+          }
+        ]
+      }
+    },
+    {
+      "name": "quorum-missing-entry-is-recorded-as-not-cast",
+      "policy": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "quorum",
+        "quorum": {
+          "accepts": 2,
+          "countAbstainAsParticipant": true
+        }
+      },
+      "barrierNodeId": "gate",
+      "dispositions": [
+        {
+          "sourceNodeId": "a",
+          "disposition": "succeeded",
+          "vote": {
+            "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
+            "kind": "BarrierVote",
+            "verdict": "accept"
+          }
+        },
+        {
+          "sourceNodeId": "b",
+          "disposition": "missing"
+        },
+        {
+          "sourceNodeId": "c",
+          "disposition": "succeeded",
+          "vote": {
+            "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
+            "kind": "BarrierVote",
+            "verdict": "accept"
+          }
+        }
+      ],
+      "expect": {
+        "barrierNodeId": "gate",
+        "deadlineElapsed": false,
+        "satisfied": true,
+        "reasonCode": "QUORUM_MET",
+        "resolution": "satisfied",
+        "total": 3,
+        "succeeded": 2,
+        "failed": 0,
+        "missing": 1,
+        "timedOut": 0,
+        "abstained": 0,
+        "unknown": 0,
+        "acceptedIds": [
+          "a",
+          "c"
+        ],
+        "failedIds": [],
+        "missingIds": [
+          "b"
+        ],
+        "timedOutIds": [],
+        "abstainedIds": [],
+        "unknownIds": [],
+        "votes": [
+          {
+            "sourceNodeId": "a",
+            "verdict": "accept"
+          },
+          {
+            "sourceNodeId": "b",
+            "verdict": "not-cast"
+          },
+          {
+            "sourceNodeId": "c",
+            "verdict": "accept"
+          }
+        ]
+      }
+    },
+    {
+      "name": "quorum-timed-out-entry-is-recorded-as-not-cast",
+      "policy": {
+        "onUnsatisfied": "human",
+        "lateArrival": "ignore",
+        "kind": "quorum",
+        "quorum": {
+          "accepts": 2,
+          "countAbstainAsParticipant": true
+        },
+        "deadline": {
+          "afterMs": 200
+        }
+      },
+      "barrierNodeId": "gate",
+      "dispositions": [
+        {
+          "sourceNodeId": "a",
+          "disposition": "succeeded",
+          "vote": {
+            "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
+            "kind": "BarrierVote",
+            "verdict": "accept"
+          }
+        },
+        {
+          "sourceNodeId": "b",
+          "disposition": "timed_out"
+        },
+        {
+          "sourceNodeId": "c",
+          "disposition": "timed_out"
+        }
+      ],
+      "expect": {
+        "barrierNodeId": "gate",
+        "deadlineElapsed": true,
+        "satisfied": false,
+        "reasonCode": "QUORUM_NOT_MET",
+        "resolution": "awaiting_human",
+        "total": 3,
+        "succeeded": 1,
+        "failed": 0,
+        "missing": 0,
+        "timedOut": 2,
+        "abstained": 0,
+        "unknown": 0,
+        "acceptedIds": [
+          "a"
+        ],
+        "failedIds": [],
+        "missingIds": [],
+        "timedOutIds": [
+          "b",
+          "c"
+        ],
+        "abstainedIds": [],
+        "unknownIds": [],
+        "votes": [
+          {
+            "sourceNodeId": "a",
+            "verdict": "accept"
+          },
+          {
+            "sourceNodeId": "b",
+            "verdict": "not-cast"
+          },
+          {
+            "sourceNodeId": "c",
+            "verdict": "not-cast"
+          }
+        ]
+      }
+    },
+    {
+      "name": "quorum-census-covers-every-cast-and-non-cast-arrival",
+      "policy": {
+        "onUnsatisfied": "unknown",
+        "lateArrival": "reject",
+        "kind": "quorum",
+        "quorum": {
+          "accepts": 3,
+          "countAbstainAsParticipant": false
+        },
+        "deadline": {
+          "afterMs": 75
+        }
+      },
+      "barrierNodeId": "gate",
+      "dispositions": [
+        {
+          "sourceNodeId": "a",
+          "disposition": "succeeded",
+          "vote": {
+            "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
+            "kind": "BarrierVote",
+            "verdict": "accept",
+            "confidenceBasisPoints": 8000
+          }
+        },
+        {
+          "sourceNodeId": "b",
+          "disposition": "missing"
+        },
+        {
+          "sourceNodeId": "c",
+          "disposition": "abstained",
+          "vote": {
+            "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
+            "kind": "BarrierVote",
+            "verdict": "abstain"
+          }
+        },
+        {
+          "sourceNodeId": "d",
+          "disposition": "timed_out"
+        },
+        {
+          "sourceNodeId": "e",
+          "disposition": "unknown",
+          "vote": {
+            "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
+            "kind": "BarrierVote",
+            "verdict": "unknown"
+          }
+        },
+        {
+          "sourceNodeId": "f",
+          "disposition": "failed",
+          "vote": {
+            "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
+            "kind": "BarrierVote",
+            "verdict": "reject",
+            "evidence": {
+              "reason": "contradicted"
+            }
+          }
+        }
+      ],
+      "expect": {
+        "barrierNodeId": "gate",
+        "deadlineElapsed": true,
+        "satisfied": false,
+        "reasonCode": "QUORUM_NOT_MET",
+        "resolution": "unknown",
+        "total": 6,
+        "succeeded": 1,
+        "failed": 1,
+        "missing": 1,
+        "timedOut": 1,
+        "abstained": 1,
+        "unknown": 1,
+        "acceptedIds": [
+          "a"
+        ],
+        "failedIds": [
+          "f"
+        ],
+        "missingIds": [
+          "b"
+        ],
+        "timedOutIds": [
+          "d"
+        ],
+        "abstainedIds": [
+          "c"
+        ],
+        "unknownIds": [
+          "e"
+        ],
+        "votes": [
+          {
+            "sourceNodeId": "a",
+            "verdict": "accept",
+            "confidenceBasisPoints": 8000
+          },
+          {
+            "sourceNodeId": "b",
+            "verdict": "not-cast"
+          },
+          {
+            "sourceNodeId": "c",
+            "verdict": "abstain"
+          },
+          {
+            "sourceNodeId": "d",
+            "verdict": "not-cast"
+          },
+          {
+            "sourceNodeId": "e",
+            "verdict": "unknown"
+          },
+          {
+            "sourceNodeId": "f",
+            "verdict": "reject",
+            "evidenceHash": "77e894f653725e2f484809f9519d1024ed3e6e881f5759511b8a249466e168a5"
+          }
+        ]
+      }
+    },
+    {
+      "name": "quorum-non-cast-arrivals-still-count-toward-participants",
+      "policy": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "quorum",
+        "quorum": {
+          "accepts": 2,
+          "countAbstainAsParticipant": false
+        },
+        "deadline": {
+          "afterMs": 10
+        }
+      },
+      "barrierNodeId": "gate",
+      "dispositions": [
+        {
+          "sourceNodeId": "a",
+          "disposition": "missing"
+        },
+        {
+          "sourceNodeId": "b",
+          "disposition": "timed_out"
+        },
+        {
+          "sourceNodeId": "c",
+          "disposition": "abstained",
+          "vote": {
+            "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
+            "kind": "BarrierVote",
+            "verdict": "abstain"
+          }
+        }
+      ],
+      "expect": {
+        "barrierNodeId": "gate",
+        "deadlineElapsed": true,
+        "satisfied": false,
+        "reasonCode": "QUORUM_NOT_MET",
+        "resolution": "failed",
+        "total": 3,
+        "succeeded": 0,
+        "failed": 0,
+        "missing": 1,
+        "timedOut": 1,
+        "abstained": 1,
+        "unknown": 0,
+        "acceptedIds": [],
+        "failedIds": [],
+        "missingIds": [
+          "a"
+        ],
+        "timedOutIds": [
+          "b"
+        ],
+        "abstainedIds": [
+          "c"
+        ],
+        "unknownIds": [],
+        "votes": [
+          {
+            "sourceNodeId": "a",
+            "verdict": "not-cast"
+          },
+          {
+            "sourceNodeId": "b",
+            "verdict": "not-cast"
+          },
+          {
+            "sourceNodeId": "c",
+            "verdict": "abstain"
+          }
+        ]
+      }
+    }
+  ],
+  "identityCases": [
+    {
+      "name": "barrier-all-satisfied-identity",
+      "documentKind": "BarrierDecision",
+      "decisionDomain": "graphengineering.barrier-decision.v1alpha1",
+      "policyKindTag": "barrier",
+      "policy": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "all"
+      },
+      "runId": "run-alpha",
+      "graphRevision": 1,
+      "nodeId": "gate",
+      "document": {
+        "armedAtMs": 12,
+        "decidedAtMs": 40,
+        "deadlineElapsed": false,
+        "satisfied": true,
+        "reasonCode": "ALL_SUCCEEDED",
+        "resolution": "satisfied",
+        "total": 2,
+        "succeeded": 2,
+        "failed": 0,
+        "missing": 0,
+        "timedOut": 0,
+        "abstained": 0,
+        "unknown": 0,
+        "acceptedIds": [
+          "a",
+          "b"
+        ],
+        "failedIds": [],
+        "missingIds": [],
+        "timedOutIds": [],
+        "abstainedIds": [],
+        "unknownIds": [],
+        "barrierNodeId": "gate",
+        "policyHash": "6737202047614939f6a39f16273bd223c3b2290d0522709c3a4aa093fe80241e",
+        "decisionId": "8a2a2fbe4a299672f73aab19d7027e324bbd3ab6f0d54376970453ae5926750f"
+      },
+      "expect": {
+        "policyHash": "6737202047614939f6a39f16273bd223c3b2290d0522709c3a4aa093fe80241e",
+        "decisionId": "8a2a2fbe4a299672f73aab19d7027e324bbd3ab6f0d54376970453ae5926750f",
+        "canonicalPolicyUtf8Bytes": 60,
+        "canonicalDocumentWithoutDecisionIdUtf8Bytes": 423
+      }
+    },
+    {
+      "name": "barrier-minimum-unsatisfied-identity",
+      "documentKind": "BarrierDecision",
+      "decisionDomain": "graphengineering.barrier-decision.v1alpha1",
+      "policyKindTag": "barrier",
+      "policy": {
+        "onUnsatisfied": "unknown",
+        "lateArrival": "reject",
+        "kind": "minimum",
+        "minimum": 3
+      },
+      "runId": "run-beta",
+      "graphRevision": 7,
+      "nodeId": "gate.minimum",
+      "document": {
+        "armedAtMs": 0,
+        "decidedAtMs": 0,
+        "deadlineElapsed": false,
+        "satisfied": false,
+        "reasonCode": "MINIMUM_NOT_MET",
+        "resolution": "unknown",
+        "total": 4,
+        "succeeded": 2,
+        "failed": 1,
+        "missing": 1,
+        "timedOut": 0,
+        "abstained": 0,
+        "unknown": 0,
+        "acceptedIds": [
+          "a",
+          "c"
+        ],
+        "failedIds": [
+          "b"
+        ],
+        "missingIds": [
+          "d"
+        ],
+        "timedOutIds": [],
+        "abstainedIds": [],
+        "unknownIds": [],
+        "barrierNodeId": "gate.minimum",
+        "policyHash": "a91c42bf7eb5f516091f2137daa1b903b863cb7e54262f6fe16975597f70488d",
+        "decisionId": "b8df2eb9cd8ac713e8318d740f05d82e2d72facd185e0fd273e16a198dde82eb"
+      },
+      "expect": {
+        "policyHash": "a91c42bf7eb5f516091f2137daa1b903b863cb7e54262f6fe16975597f70488d",
+        "decisionId": "b8df2eb9cd8ac713e8318d740f05d82e2d72facd185e0fd273e16a198dde82eb",
+        "canonicalPolicyUtf8Bytes": 79,
+        "canonicalDocumentWithoutDecisionIdUtf8Bytes": 436
+      }
+    },
+    {
+      "name": "barrier-percentage-awaiting-human-identity",
+      "documentKind": "BarrierDecision",
+      "decisionDomain": "graphengineering.barrier-decision.v1alpha1",
+      "policyKindTag": "barrier",
+      "policy": {
+        "onUnsatisfied": "human",
+        "lateArrival": "ignore",
+        "kind": "percentage",
+        "basisPoints": 10000,
+        "deadline": {
+          "afterMs": 250
+        }
+      },
+      "runId": "run-gamma",
+      "graphRevision": 12,
+      "nodeId": "gate-percentage",
+      "document": {
+        "armedAtMs": 100,
+        "decidedAtMs": 350,
+        "deadlineElapsed": true,
+        "satisfied": false,
+        "reasonCode": "PERCENTAGE_NOT_MET",
+        "resolution": "awaiting_human",
+        "total": 3,
+        "succeeded": 2,
+        "failed": 0,
+        "missing": 0,
+        "timedOut": 1,
+        "abstained": 0,
+        "unknown": 0,
+        "acceptedIds": [
+          "a",
+          "b"
+        ],
+        "failedIds": [],
+        "missingIds": [],
+        "timedOutIds": [
+          "c"
+        ],
+        "abstainedIds": [],
+        "unknownIds": [],
+        "barrierNodeId": "gate-percentage",
+        "policyHash": "430729720ce6fc03f1dc01f51b4672430646bff1392a02119e16a70966157014",
+        "decisionId": "460a66be0a0242ed9cdd39a8d8c4459593de61cad4b989323ae93aa8d83d0a6a"
+      },
+      "expect": {
+        "policyHash": "430729720ce6fc03f1dc01f51b4672430646bff1392a02119e16a70966157014",
+        "decisionId": "460a66be0a0242ed9cdd39a8d8c4459593de61cad4b989323ae93aa8d83d0a6a",
+        "canonicalPolicyUtf8Bytes": 115,
+        "canonicalDocumentWithoutDecisionIdUtf8Bytes": 449
+      }
+    },
+    {
+      "name": "barrier-quorum-identity-with-non-ascii-evidence-keys",
+      "documentKind": "BarrierDecision",
+      "decisionDomain": "graphengineering.barrier-decision.v1alpha1",
+      "policyKindTag": "barrier",
+      "policy": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "reject",
+        "kind": "quorum",
+        "quorum": {
+          "accepts": 2,
+          "countAbstainAsParticipant": false
+        },
+        "deadline": {
+          "afterMs": 1000
+        }
+      },
+      "runId": "run-delta",
+      "graphRevision": 3,
+      "nodeId": "gate-quorum",
+      "evidenceInputs": [
+        {
+          "sourceNodeId": "a",
+          "evidence": {
+            "＠source": "fullwidth-commercial-at",
+            "😀mood": "supplementary-plane",
+            "resumé": "combining-acute",
+            "ascii": 1
+          },
+          "evidenceHash": "07ee1d493d56b789c9f1fd0f60abfde4471b84e2d892fcff70c863fd735a91f6"
+        }
+      ],
+      "canonicalEvidenceKeyOrder": [
+        "ascii",
+        "resumé",
+        "＠source",
+        "😀mood"
+      ],
+      "document": {
+        "armedAtMs": 5,
+        "decidedAtMs": 9,
+        "deadlineElapsed": false,
+        "satisfied": true,
+        "reasonCode": "QUORUM_MET",
+        "resolution": "satisfied",
+        "total": 3,
+        "succeeded": 2,
+        "failed": 0,
+        "missing": 0,
+        "timedOut": 0,
+        "abstained": 1,
+        "unknown": 0,
+        "acceptedIds": [
+          "a",
+          "b"
+        ],
+        "failedIds": [],
+        "missingIds": [],
+        "timedOutIds": [],
+        "abstainedIds": [
+          "c"
+        ],
+        "unknownIds": [],
+        "votes": [
+          {
+            "sourceNodeId": "a",
+            "verdict": "accept",
+            "confidenceBasisPoints": 9000,
+            "evidenceHash": "07ee1d493d56b789c9f1fd0f60abfde4471b84e2d892fcff70c863fd735a91f6"
+          },
+          {
+            "sourceNodeId": "b",
+            "verdict": "accept",
+            "confidenceBasisPoints": 10000
+          },
+          {
+            "sourceNodeId": "c",
+            "verdict": "abstain"
+          }
+        ],
+        "barrierNodeId": "gate-quorum",
+        "policyHash": "eeb28a2b813b8c48ea287690be14d4124d41c8151fd8c0af089785f38a6b50ee",
+        "decisionId": "eef774127ef5345f9476b3b252244f252ef4d10f62b4de60dca7f389ac7bc370"
+      },
+      "expect": {
+        "policyHash": "eeb28a2b813b8c48ea287690be14d4124d41c8151fd8c0af089785f38a6b50ee",
+        "decisionId": "eef774127ef5345f9476b3b252244f252ef4d10f62b4de60dca7f389ac7bc370",
+        "canonicalPolicyUtf8Bytes": 148,
+        "canonicalDocumentWithoutDecisionIdUtf8Bytes": 700
+      }
+    },
+    {
+      "name": "barrier-quorum-identity-with-a-not-cast-census-record",
+      "documentKind": "BarrierDecision",
+      "decisionDomain": "graphengineering.barrier-decision.v1alpha1",
+      "policyKindTag": "barrier",
+      "policy": {
+        "onUnsatisfied": "unknown",
+        "lateArrival": "reject",
+        "kind": "quorum",
+        "quorum": {
+          "accepts": 2,
+          "countAbstainAsParticipant": true
+        },
+        "deadline": {
+          "afterMs": 400
+        }
+      },
+      "runId": "run-zeta",
+      "graphRevision": 6,
+      "nodeId": "gate-census",
+      "document": {
+        "armedAtMs": 20,
+        "decidedAtMs": 420,
+        "deadlineElapsed": true,
+        "satisfied": false,
+        "reasonCode": "QUORUM_NOT_MET",
+        "resolution": "unknown",
+        "total": 3,
+        "succeeded": 1,
+        "failed": 0,
+        "missing": 1,
+        "timedOut": 1,
+        "abstained": 0,
+        "unknown": 0,
+        "acceptedIds": [
+          "a"
+        ],
+        "failedIds": [],
+        "missingIds": [
+          "b"
+        ],
+        "timedOutIds": [
+          "c"
+        ],
+        "abstainedIds": [],
+        "unknownIds": [],
+        "votes": [
+          {
+            "sourceNodeId": "a",
+            "verdict": "accept",
+            "confidenceBasisPoints": 7500
+          },
+          {
+            "sourceNodeId": "b",
+            "verdict": "not-cast"
+          },
+          {
+            "sourceNodeId": "c",
+            "verdict": "not-cast"
+          }
+        ],
+        "barrierNodeId": "gate-census",
+        "policyHash": "fa33ce080b0d2381deb4b5a3df4943e8ada48d0d99b701aebf80f75014937770",
+        "decisionId": "26176ef37e28668d001ffd446e6d873854511a296a8d93f8cb1d2f9fb8669d77"
+      },
+      "expect": {
+        "policyHash": "fa33ce080b0d2381deb4b5a3df4943e8ada48d0d99b701aebf80f75014937770",
+        "decisionId": "26176ef37e28668d001ffd446e6d873854511a296a8d93f8cb1d2f9fb8669d77",
+        "canonicalPolicyUtf8Bytes": 149,
+        "canonicalDocumentWithoutDecisionIdUtf8Bytes": 595
+      }
+    },
+    {
+      "name": "barrier-identity-binds-the-run-id",
+      "documentKind": "BarrierDecision",
+      "decisionDomain": "graphengineering.barrier-decision.v1alpha1",
+      "policyKindTag": "barrier",
+      "policy": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "all"
+      },
+      "runId": "run-alpha-fork",
+      "graphRevision": 1,
+      "nodeId": "gate",
+      "document": {
+        "armedAtMs": 12,
+        "decidedAtMs": 40,
+        "deadlineElapsed": false,
+        "satisfied": true,
+        "reasonCode": "ALL_SUCCEEDED",
+        "resolution": "satisfied",
+        "total": 2,
+        "succeeded": 2,
+        "failed": 0,
+        "missing": 0,
+        "timedOut": 0,
+        "abstained": 0,
+        "unknown": 0,
+        "acceptedIds": [
+          "a",
+          "b"
+        ],
+        "failedIds": [],
+        "missingIds": [],
+        "timedOutIds": [],
+        "abstainedIds": [],
+        "unknownIds": [],
+        "barrierNodeId": "gate",
+        "policyHash": "6737202047614939f6a39f16273bd223c3b2290d0522709c3a4aa093fe80241e",
+        "decisionId": "36522f138ca9c9c95afe966c20b21aeb16eb5238991bcc992c3361021d9f2104"
+      },
+      "expect": {
+        "policyHash": "6737202047614939f6a39f16273bd223c3b2290d0522709c3a4aa093fe80241e",
+        "decisionId": "36522f138ca9c9c95afe966c20b21aeb16eb5238991bcc992c3361021d9f2104",
+        "canonicalPolicyUtf8Bytes": 60,
+        "canonicalDocumentWithoutDecisionIdUtf8Bytes": 423
+      }
+    },
+    {
+      "name": "framing-defeats-naive-concatenation-left",
+      "documentKind": "BarrierDecision",
+      "decisionDomain": "graphengineering.barrier-decision.v1alpha1",
+      "policyKindTag": "barrier",
+      "policy": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "all"
+      },
+      "runId": "run-1",
+      "graphRevision": 23,
+      "nodeId": "gate",
+      "naiveConcatenationGroup": "run-id-graph-revision-boundary",
+      "document": {
+        "armedAtMs": 1,
+        "decidedAtMs": 2,
+        "deadlineElapsed": false,
+        "satisfied": false,
+        "reasonCode": "ALL_NOT_SUCCEEDED",
+        "resolution": "failed",
+        "total": 2,
+        "succeeded": 1,
+        "failed": 1,
+        "missing": 0,
+        "timedOut": 0,
+        "abstained": 0,
+        "unknown": 0,
+        "acceptedIds": [
+          "a"
+        ],
+        "failedIds": [
+          "b"
+        ],
+        "missingIds": [],
+        "timedOutIds": [],
+        "abstainedIds": [],
+        "unknownIds": [],
+        "barrierNodeId": "gate",
+        "policyHash": "6737202047614939f6a39f16273bd223c3b2290d0522709c3a4aa093fe80241e",
+        "decisionId": "2ad46150f2cabc617e0acb0693fe650df7be1f6362a23bfbdf2a60854ba1d2ec"
+      },
+      "expect": {
+        "policyHash": "6737202047614939f6a39f16273bd223c3b2290d0522709c3a4aa093fe80241e",
+        "decisionId": "2ad46150f2cabc617e0acb0693fe650df7be1f6362a23bfbdf2a60854ba1d2ec",
+        "canonicalPolicyUtf8Bytes": 60,
+        "canonicalDocumentWithoutDecisionIdUtf8Bytes": 422
+      }
+    },
+    {
+      "name": "framing-defeats-naive-concatenation-right",
+      "documentKind": "BarrierDecision",
+      "decisionDomain": "graphengineering.barrier-decision.v1alpha1",
+      "policyKindTag": "barrier",
+      "policy": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "all"
+      },
+      "runId": "run-12",
+      "graphRevision": 3,
+      "nodeId": "gate",
+      "naiveConcatenationGroup": "run-id-graph-revision-boundary",
+      "document": {
+        "armedAtMs": 1,
+        "decidedAtMs": 2,
+        "deadlineElapsed": false,
+        "satisfied": false,
+        "reasonCode": "ALL_NOT_SUCCEEDED",
+        "resolution": "failed",
+        "total": 2,
+        "succeeded": 1,
+        "failed": 1,
+        "missing": 0,
+        "timedOut": 0,
+        "abstained": 0,
+        "unknown": 0,
+        "acceptedIds": [
+          "a"
+        ],
+        "failedIds": [
+          "b"
+        ],
+        "missingIds": [],
+        "timedOutIds": [],
+        "abstainedIds": [],
+        "unknownIds": [],
+        "barrierNodeId": "gate",
+        "policyHash": "6737202047614939f6a39f16273bd223c3b2290d0522709c3a4aa093fe80241e",
+        "decisionId": "3cd58a48e6d8f22f93cb7a04dd282c417cc8ad53dfe1d001373e9703fdf448b8"
+      },
+      "expect": {
+        "policyHash": "6737202047614939f6a39f16273bd223c3b2290d0522709c3a4aa093fe80241e",
+        "decisionId": "3cd58a48e6d8f22f93cb7a04dd282c417cc8ad53dfe1d001373e9703fdf448b8",
+        "canonicalPolicyUtf8Bytes": 60,
+        "canonicalDocumentWithoutDecisionIdUtf8Bytes": 422
+      }
+    },
+    {
+      "name": "route-decision-requested-routes-selected-with-null-confidence",
+      "documentKind": "RouteDecision",
+      "decisionDomain": "graphengineering.route-decision.v1alpha1",
+      "policyKindTag": "router",
+      "policy": {
+        "kind": "single",
+        "allowedRoutes": [
+          "audit",
+          "quick"
+        ],
+        "defaultRoute": "quick"
+      },
+      "runId": "run-alpha",
+      "graphRevision": 1,
+      "nodeId": "route",
+      "nullMemberWitness": "confidenceBasisPoints",
+      "document": {
+        "routed": true,
+        "reasonCode": "REQUESTED_ROUTES_SELECTED",
+        "requestedRoutes": [
+          "audit"
+        ],
+        "selectedRoutes": [
+          "audit"
+        ],
+        "unknownRoutes": [],
+        "confidenceBasisPoints": null,
+        "usedDefault": false,
+        "escalated": false,
+        "routerNodeId": "route",
+        "policyHash": "f6da316ae013ae51c77d4cd6ca0ea9f0eaca55d74b02d8fb99b1053d3bbdf289",
+        "decisionId": "8b8f9f4553f3f53c4e159bf63784f1d81ab3d07614d615ed1de43f42a3a0cac3"
+      },
+      "expect": {
+        "policyHash": "f6da316ae013ae51c77d4cd6ca0ea9f0eaca55d74b02d8fb99b1053d3bbdf289",
+        "decisionId": "8b8f9f4553f3f53c4e159bf63784f1d81ab3d07614d615ed1de43f42a3a0cac3",
+        "canonicalPolicyUtf8Bytes": 74,
+        "canonicalDocumentWithoutDecisionIdUtf8Bytes": 300
+      }
+    },
+    {
+      "name": "route-decision-default-selected-no-request-identity",
+      "documentKind": "RouteDecision",
+      "decisionDomain": "graphengineering.route-decision.v1alpha1",
+      "policyKindTag": "router",
+      "policy": {
+        "kind": "single",
+        "allowedRoutes": [
+          "audit",
+          "quick"
+        ],
+        "defaultRoute": "quick"
+      },
+      "runId": "run-alpha",
+      "graphRevision": 1,
+      "nodeId": "route-default",
+      "nullMemberWitness": "confidenceBasisPoints",
+      "document": {
+        "routed": true,
+        "reasonCode": "DEFAULT_SELECTED_NO_REQUEST",
+        "requestedRoutes": [],
+        "selectedRoutes": [
+          "quick"
+        ],
+        "unknownRoutes": [],
+        "confidenceBasisPoints": null,
+        "usedDefault": true,
+        "escalated": false,
+        "routerNodeId": "route-default",
+        "policyHash": "f6da316ae013ae51c77d4cd6ca0ea9f0eaca55d74b02d8fb99b1053d3bbdf289",
+        "decisionId": "549c84a9d6331a7f181ec5934e00282baad436d9cabc6ca6a27a81b549c306c7"
+      },
+      "expect": {
+        "policyHash": "f6da316ae013ae51c77d4cd6ca0ea9f0eaca55d74b02d8fb99b1053d3bbdf289",
+        "decisionId": "549c84a9d6331a7f181ec5934e00282baad436d9cabc6ca6a27a81b549c306c7",
+        "canonicalPolicyUtf8Bytes": 74,
+        "canonicalDocumentWithoutDecisionIdUtf8Bytes": 302
+      }
+    },
+    {
+      "name": "route-decision-escalation-selected-low-confidence-identity",
+      "documentKind": "RouteDecision",
+      "decisionDomain": "graphengineering.route-decision.v1alpha1",
+      "policyKindTag": "router",
+      "policy": {
+        "kind": "single",
+        "allowedRoutes": [
+          "human",
+          "quick"
+        ],
+        "confidence": {
+          "minimumBasisPoints": 7000,
+          "escalationRoute": "human"
+        }
+      },
+      "runId": "run-epsilon",
+      "graphRevision": 4,
+      "nodeId": "route-escalate",
+      "document": {
+        "routed": true,
+        "reasonCode": "ESCALATION_SELECTED_LOW_CONFIDENCE",
+        "requestedRoutes": [
+          "quick"
+        ],
+        "selectedRoutes": [
+          "human"
+        ],
+        "unknownRoutes": [],
+        "confidenceBasisPoints": 6999,
+        "usedDefault": false,
+        "escalated": true,
+        "routerNodeId": "route-escalate",
+        "policyHash": "ab11bb7d3d5bdaeb6d48c59e7c724e12c6d8d2ce835bd9427369d96ba7a636c3",
+        "decisionId": "b9845a755beeec14dd3ebf55b67019888d48ef7f2498649e963c46979799f58f"
+      },
+      "expect": {
+        "policyHash": "ab11bb7d3d5bdaeb6d48c59e7c724e12c6d8d2ce835bd9427369d96ba7a636c3",
+        "decisionId": "b9845a755beeec14dd3ebf55b67019888d48ef7f2498649e963c46979799f58f",
+        "canonicalPolicyUtf8Bytes": 118,
+        "canonicalDocumentWithoutDecisionIdUtf8Bytes": 317
+      }
+    },
+    {
+      "name": "route-decision-unrouted-no-requested-route-identity",
+      "documentKind": "RouteDecision",
+      "decisionDomain": "graphengineering.route-decision.v1alpha1",
+      "policyKindTag": "router",
+      "policy": {
+        "kind": "single",
+        "allowedRoutes": [
+          "audit",
+          "quick"
+        ]
+      },
+      "runId": "run-epsilon",
+      "graphRevision": 4,
+      "nodeId": "route-unrouted",
+      "nullMemberWitness": "confidenceBasisPoints",
+      "document": {
+        "routed": false,
+        "reasonCode": "NO_REQUESTED_ROUTE",
+        "requestedRoutes": [],
+        "selectedRoutes": [],
+        "unknownRoutes": [],
+        "confidenceBasisPoints": null,
+        "usedDefault": false,
+        "escalated": false,
+        "routerNodeId": "route-unrouted",
+        "policyHash": "557d1dd958dce60655e1de062c071d02ceb9b28ec067c5cf96486d42e6efff79",
+        "decisionId": "51d0efb833714cde4c416061967d1a7178464ab85bde8bcfedec5a9cc4d558d2"
+      },
+      "expect": {
+        "policyHash": "557d1dd958dce60655e1de062c071d02ceb9b28ec067c5cf96486d42e6efff79",
+        "decisionId": "51d0efb833714cde4c416061967d1a7178464ab85bde8bcfedec5a9cc4d558d2",
+        "canonicalPolicyUtf8Bytes": 51,
+        "canonicalDocumentWithoutDecisionIdUtf8Bytes": 289
+      }
+    }
+  ],
+  "identifierBaseDocuments": {
+    "BarrierDecision": {
+      "barrierNodeId": "gate",
+      "policyHash": "224b46b0ee690fa5b0605433c08cb9a7b4161a3abdf729e3f9ebf074c23bcd7c",
+      "armedAtMs": 0,
+      "decidedAtMs": 1,
+      "deadlineElapsed": false,
+      "satisfied": true,
+      "reasonCode": "QUORUM_MET",
+      "resolution": "satisfied",
+      "total": 2,
+      "succeeded": 1,
+      "failed": 0,
+      "missing": 1,
+      "timedOut": 0,
+      "abstained": 0,
+      "unknown": 0,
+      "acceptedIds": [
+        "a"
+      ],
+      "failedIds": [],
+      "missingIds": [
+        "b"
+      ],
+      "timedOutIds": [],
+      "abstainedIds": [],
+      "unknownIds": [],
+      "votes": [
+        {
+          "sourceNodeId": "a",
+          "verdict": "accept"
+        },
+        {
+          "sourceNodeId": "b",
+          "verdict": "not-cast"
+        }
+      ],
+      "decisionId": "bcc9392e69c79d3d2386a1da8ae92c8631121a05074ea2326640a16efdb98aac"
+    },
+    "RouteDecision": {
+      "routerNodeId": "route",
+      "policyHash": "d4b9ce1af0ee13a3112d498bc0d0425caa6afac893b7afc2092a38cd024220ba",
+      "routed": true,
+      "reasonCode": "REQUESTED_ROUTES_SELECTED",
+      "requestedRoutes": [
+        "7audit"
+      ],
+      "selectedRoutes": [
+        "7audit"
+      ],
+      "unknownRoutes": [],
+      "confidenceBasisPoints": null,
+      "usedDefault": false,
+      "escalated": false,
+      "decisionId": "dfdf5c98a36a8faa1e84b1273772f1f079f0766b0da85132e48b3b5a120811a0"
+    }
+  },
+  "identifierCases": [
+    {
+      "name": "barrier-node-id-control",
+      "documentKind": "BarrierDecision",
+      "path": "/barrierNodeId",
+      "value": "gate",
+      "expect": {
+        "valid": true,
+        "reason": "node-id-begins-with-a-letter"
+      }
+    },
+    {
+      "name": "barrier-node-id-must-not-begin-with-a-digit",
+      "documentKind": "BarrierDecision",
+      "path": "/barrierNodeId",
+      "value": "0gate",
+      "expect": {
+        "valid": false,
+        "reason": "node-id-must-not-begin-with-a-digit"
+      }
+    },
+    {
+      "name": "barrier-node-id-must-not-begin-with-a-hyphen",
+      "documentKind": "BarrierDecision",
+      "path": "/barrierNodeId",
+      "value": "-gate",
+      "expect": {
+        "valid": false,
+        "reason": "node-id-must-not-begin-with-a-hyphen"
+      }
+    },
+    {
+      "name": "barrier-id-list-member-must-not-begin-with-a-digit",
+      "documentKind": "BarrierDecision",
+      "path": "/acceptedIds/0",
+      "value": "0a",
+      "expect": {
+        "valid": false,
+        "reason": "node-id-must-not-begin-with-a-digit"
+      }
+    },
+    {
+      "name": "barrier-vote-source-node-id-must-not-begin-with-a-digit",
+      "documentKind": "BarrierDecision",
+      "path": "/votes/0/sourceNodeId",
+      "value": "9a",
+      "expect": {
+        "valid": false,
+        "reason": "node-id-must-not-begin-with-a-digit"
+      }
+    },
+    {
+      "name": "route-node-id-control",
+      "documentKind": "RouteDecision",
+      "path": "/routerNodeId",
+      "value": "route",
+      "expect": {
+        "valid": true,
+        "reason": "node-id-begins-with-a-letter"
+      }
+    },
+    {
+      "name": "route-node-id-must-not-begin-with-a-digit",
+      "documentKind": "RouteDecision",
+      "path": "/routerNodeId",
+      "value": "0route",
+      "expect": {
+        "valid": false,
+        "reason": "node-id-must-not-begin-with-a-digit"
+      }
+    },
+    {
+      "name": "route-key-may-begin-with-a-digit",
+      "documentKind": "RouteDecision",
+      "path": "/selectedRoutes/0",
+      "value": "7audit",
+      "expect": {
+        "valid": true,
+        "reason": "safe-route-id-admits-a-leading-digit"
+      }
+    },
+    {
+      "name": "requested-route-key-may-begin-with-a-digit",
+      "documentKind": "RouteDecision",
+      "path": "/requestedRoutes/0",
+      "value": "0quick",
+      "expect": {
+        "valid": true,
+        "reason": "safe-route-id-admits-a-leading-digit"
+      }
+    },
+    {
+      "name": "route-key-must-not-be-the-current-directory",
+      "documentKind": "RouteDecision",
+      "path": "/selectedRoutes/0",
+      "value": ".",
+      "expect": {
+        "valid": false,
+        "reason": "safe-route-id-excludes-dot"
+      }
+    },
+    {
+      "name": "route-key-must-not-be-the-parent-directory",
+      "documentKind": "RouteDecision",
+      "path": "/selectedRoutes/0",
+      "value": "..",
+      "expect": {
+        "valid": false,
+        "reason": "safe-route-id-excludes-dot-dot"
+      }
+    },
+    {
+      "name": "route-key-must-not-begin-with-a-hyphen",
+      "documentKind": "RouteDecision",
+      "path": "/selectedRoutes/0",
+      "value": "-quick",
+      "expect": {
+        "valid": false,
+        "reason": "safe-route-id-must-not-begin-with-a-hyphen"
+      }
+    }
+  ],
+  "replayCases": [
+    {
+      "name": "zero-rejudge-adoption-of-a-committed-barrier-decision",
+      "runId": "run-replay",
+      "graphRevision": 5,
+      "currentPolicies": {
+        "gate": {
+          "onUnsatisfied": "fail",
+          "lateArrival": "ignore",
+          "kind": "minimum",
+          "minimum": 2
+        }
+      },
+      "history": [
+        {
+          "type": "BarrierSatisfied",
+          "nodeId": "gate",
+          "data": {
+            "armedAtMs": 10,
+            "decidedAtMs": 30,
+            "deadlineElapsed": false,
+            "satisfied": true,
+            "reasonCode": "MINIMUM_MET",
+            "resolution": "satisfied",
+            "total": 3,
+            "succeeded": 2,
+            "failed": 1,
+            "missing": 0,
+            "timedOut": 0,
+            "abstained": 0,
+            "unknown": 0,
+            "acceptedIds": [
+              "a",
+              "b"
+            ],
+            "failedIds": [
+              "c"
+            ],
+            "missingIds": [],
+            "timedOutIds": [],
+            "abstainedIds": [],
+            "unknownIds": [],
+            "barrierNodeId": "gate",
+            "policyHash": "caae7fe331288adc52d60846ee6c0b9b6cbae4728018d87c35e549dfa5914750",
+            "decisionId": "2b1a9ffb7a2859fc659bdc87b3dd63be1e47bb3a3a32e746cea4a5a5982d21e0"
+          }
+        }
+      ],
+      "expect": {
+        "outcome": "adopted",
+        "adoptedNodeIds": [
+          "gate"
+        ],
+        "appendedDecisionEvents": 0,
+        "expectedExecutorCalls": 0
+      }
+    },
+    {
+      "name": "decision-policy-drift-rejects-a-recompiled-threshold",
+      "runId": "run-replay",
+      "graphRevision": 5,
+      "currentPolicies": {
+        "gate": {
+          "onUnsatisfied": "fail",
+          "lateArrival": "ignore",
+          "kind": "minimum",
+          "minimum": 3
+        }
+      },
+      "history": [
+        {
+          "type": "BarrierSatisfied",
+          "nodeId": "gate",
+          "data": {
+            "armedAtMs": 10,
+            "decidedAtMs": 30,
+            "deadlineElapsed": false,
+            "satisfied": true,
+            "reasonCode": "MINIMUM_MET",
+            "resolution": "satisfied",
+            "total": 3,
+            "succeeded": 2,
+            "failed": 1,
+            "missing": 0,
+            "timedOut": 0,
+            "abstained": 0,
+            "unknown": 0,
+            "acceptedIds": [
+              "a",
+              "b"
+            ],
+            "failedIds": [
+              "c"
+            ],
+            "missingIds": [],
+            "timedOutIds": [],
+            "abstainedIds": [],
+            "unknownIds": [],
+            "barrierNodeId": "gate",
+            "policyHash": "caae7fe331288adc52d60846ee6c0b9b6cbae4728018d87c35e549dfa5914750",
+            "decisionId": "2b1a9ffb7a2859fc659bdc87b3dd63be1e47bb3a3a32e746cea4a5a5982d21e0"
+          }
+        }
+      ],
+      "expect": {
+        "outcome": "rejected",
+        "code": "DECISION_POLICY_DRIFT",
+        "nodeId": "gate",
+        "recordedPolicyHash": "caae7fe331288adc52d60846ee6c0b9b6cbae4728018d87c35e549dfa5914750",
+        "currentPolicyHash": "7f4fa7aabfc4c96a71b6d7e5763af0d4a57af67df64fe600bc4cd3952c67ff17",
+        "adoptedNodeIds": [],
+        "appendedDecisionEvents": 0,
+        "expectedExecutorCalls": 0
+      }
+    },
+    {
+      "name": "decision-identity-mismatch-rejects-a-transplanted-run-id",
+      "runId": "run-child",
+      "graphRevision": 5,
+      "currentPolicies": {
+        "gate": {
+          "onUnsatisfied": "fail",
+          "lateArrival": "ignore",
+          "kind": "minimum",
+          "minimum": 2
+        }
+      },
+      "history": [
+        {
+          "type": "BarrierSatisfied",
+          "nodeId": "gate",
+          "data": {
+            "armedAtMs": 10,
+            "decidedAtMs": 30,
+            "deadlineElapsed": false,
+            "satisfied": true,
+            "reasonCode": "MINIMUM_MET",
+            "resolution": "satisfied",
+            "total": 3,
+            "succeeded": 2,
+            "failed": 1,
+            "missing": 0,
+            "timedOut": 0,
+            "abstained": 0,
+            "unknown": 0,
+            "acceptedIds": [
+              "a",
+              "b"
+            ],
+            "failedIds": [
+              "c"
+            ],
+            "missingIds": [],
+            "timedOutIds": [],
+            "abstainedIds": [],
+            "unknownIds": [],
+            "barrierNodeId": "gate",
+            "policyHash": "caae7fe331288adc52d60846ee6c0b9b6cbae4728018d87c35e549dfa5914750",
+            "decisionId": "2b1a9ffb7a2859fc659bdc87b3dd63be1e47bb3a3a32e746cea4a5a5982d21e0"
+          }
+        }
+      ],
+      "expect": {
+        "outcome": "rejected",
+        "code": "DECISION_IDENTITY_MISMATCH",
+        "nodeId": "gate",
+        "recordedDecisionId": "2b1a9ffb7a2859fc659bdc87b3dd63be1e47bb3a3a32e746cea4a5a5982d21e0",
+        "recomputedDecisionId": "6c0e4b37c4bd19c358968ad1c81eb2c872a905718920c510dedbed47ef7944ae",
+        "adoptedNodeIds": [],
+        "appendedDecisionEvents": 0,
+        "expectedExecutorCalls": 0
+      }
+    },
+    {
+      "name": "duplicate-decision-rejects-two-committed-events-for-one-node",
+      "runId": "run-replay",
+      "graphRevision": 5,
+      "currentPolicies": {
+        "gate": {
+          "onUnsatisfied": "fail",
+          "lateArrival": "ignore",
+          "kind": "minimum",
+          "minimum": 2
+        }
+      },
+      "history": [
+        {
+          "type": "BarrierSatisfied",
+          "nodeId": "gate",
+          "data": {
+            "armedAtMs": 10,
+            "decidedAtMs": 30,
+            "deadlineElapsed": false,
+            "satisfied": true,
+            "reasonCode": "MINIMUM_MET",
+            "resolution": "satisfied",
+            "total": 3,
+            "succeeded": 2,
+            "failed": 1,
+            "missing": 0,
+            "timedOut": 0,
+            "abstained": 0,
+            "unknown": 0,
+            "acceptedIds": [
+              "a",
+              "b"
+            ],
+            "failedIds": [
+              "c"
+            ],
+            "missingIds": [],
+            "timedOutIds": [],
+            "abstainedIds": [],
+            "unknownIds": [],
+            "barrierNodeId": "gate",
+            "policyHash": "caae7fe331288adc52d60846ee6c0b9b6cbae4728018d87c35e549dfa5914750",
+            "decisionId": "2b1a9ffb7a2859fc659bdc87b3dd63be1e47bb3a3a32e746cea4a5a5982d21e0"
+          }
+        },
+        {
+          "type": "BarrierSatisfied",
+          "nodeId": "gate",
+          "data": {
+            "armedAtMs": 10,
+            "decidedAtMs": 30,
+            "deadlineElapsed": false,
+            "satisfied": true,
+            "reasonCode": "MINIMUM_MET",
+            "resolution": "satisfied",
+            "total": 3,
+            "succeeded": 2,
+            "failed": 1,
+            "missing": 0,
+            "timedOut": 0,
+            "abstained": 0,
+            "unknown": 0,
+            "acceptedIds": [
+              "a",
+              "b"
+            ],
+            "failedIds": [
+              "c"
+            ],
+            "missingIds": [],
+            "timedOutIds": [],
+            "abstainedIds": [],
+            "unknownIds": [],
+            "barrierNodeId": "gate",
+            "policyHash": "caae7fe331288adc52d60846ee6c0b9b6cbae4728018d87c35e549dfa5914750",
+            "decisionId": "2b1a9ffb7a2859fc659bdc87b3dd63be1e47bb3a3a32e746cea4a5a5982d21e0"
+          }
+        }
+      ],
+      "expect": {
+        "outcome": "rejected",
+        "code": "DUPLICATE_DECISION",
+        "nodeId": "gate",
+        "adoptedNodeIds": [],
+        "appendedDecisionEvents": 0,
+        "expectedExecutorCalls": 0
+      }
+    },
+    {
+      "name": "fork-recomputes-its-own-decision-identity-under-the-child-run-id",
+      "runId": "run-child",
+      "graphRevision": 5,
+      "currentPolicies": {
+        "gate": {
+          "onUnsatisfied": "fail",
+          "lateArrival": "ignore",
+          "kind": "minimum",
+          "minimum": 2
+        }
+      },
+      "history": [
+        {
+          "type": "BarrierSatisfied",
+          "nodeId": "gate",
+          "data": {
+            "armedAtMs": 10,
+            "decidedAtMs": 30,
+            "deadlineElapsed": false,
+            "satisfied": true,
+            "reasonCode": "MINIMUM_MET",
+            "resolution": "satisfied",
+            "total": 3,
+            "succeeded": 2,
+            "failed": 1,
+            "missing": 0,
+            "timedOut": 0,
+            "abstained": 0,
+            "unknown": 0,
+            "acceptedIds": [
+              "a",
+              "b"
+            ],
+            "failedIds": [
+              "c"
+            ],
+            "missingIds": [],
+            "timedOutIds": [],
+            "abstainedIds": [],
+            "unknownIds": [],
+            "barrierNodeId": "gate",
+            "policyHash": "caae7fe331288adc52d60846ee6c0b9b6cbae4728018d87c35e549dfa5914750",
+            "decisionId": "6c0e4b37c4bd19c358968ad1c81eb2c872a905718920c510dedbed47ef7944ae"
+          }
+        }
+      ],
+      "expect": {
+        "outcome": "adopted",
+        "adoptedNodeIds": [
+          "gate"
+        ],
+        "appendedDecisionEvents": 0,
+        "expectedExecutorCalls": 0,
+        "forkedFromRunId": "run-replay",
+        "parentDecisionId": "2b1a9ffb7a2859fc659bdc87b3dd63be1e47bb3a3a32e746cea4a5a5982d21e0",
+        "childDecisionId": "6c0e4b37c4bd19c358968ad1c81eb2c872a905718920c510dedbed47ef7944ae"
+      }
+    },
+    {
+      "name": "adoption-of-a-committed-route-selected-decision",
+      "runId": "run-route",
+      "graphRevision": 2,
+      "currentPolicies": {
+        "route": {
+          "kind": "single",
+          "allowedRoutes": [
+            "audit",
+            "quick"
+          ]
+        }
+      },
+      "history": [
+        {
+          "type": "RouteSelected",
+          "nodeId": "route",
+          "data": {
+            "routed": true,
+            "reasonCode": "REQUESTED_ROUTES_SELECTED",
+            "requestedRoutes": [
+              "quick"
+            ],
+            "selectedRoutes": [
+              "quick"
+            ],
+            "unknownRoutes": [],
+            "confidenceBasisPoints": 8000,
+            "usedDefault": false,
+            "escalated": false,
+            "routerNodeId": "route",
+            "policyHash": "557d1dd958dce60655e1de062c071d02ceb9b28ec067c5cf96486d42e6efff79",
+            "decisionId": "799d13c10d31b11eca6ca2e30a5b947809e3fb273c855fa5f44fa7f07b27da8f"
+          }
+        }
+      ],
+      "expect": {
+        "outcome": "adopted",
+        "adoptedNodeIds": [
+          "route"
+        ],
+        "appendedDecisionEvents": 0,
+        "expectedExecutorCalls": 0
+      }
+    },
+    {
+      "name": "mixed-history-adopts-both-decision-families-without-rejudging",
+      "runId": "run-mixed",
+      "graphRevision": 9,
+      "currentPolicies": {
+        "route": {
+          "kind": "single",
+          "allowedRoutes": [
+            "audit",
+            "quick"
+          ]
+        },
+        "gate": {
+          "onUnsatisfied": "fail",
+          "lateArrival": "ignore",
+          "kind": "minimum",
+          "minimum": 2
+        }
+      },
+      "history": [
+        {
+          "type": "RouteSelected",
+          "nodeId": "route",
+          "data": {
+            "routed": true,
+            "reasonCode": "REQUESTED_ROUTES_SELECTED",
+            "requestedRoutes": [
+              "quick"
+            ],
+            "selectedRoutes": [
+              "quick"
+            ],
+            "unknownRoutes": [],
+            "confidenceBasisPoints": 8000,
+            "usedDefault": false,
+            "escalated": false,
+            "routerNodeId": "route",
+            "policyHash": "557d1dd958dce60655e1de062c071d02ceb9b28ec067c5cf96486d42e6efff79",
+            "decisionId": "51f4acf170e82a9d063cb3c40aceabf785e282a49d525cd681bbf9e870ef9566"
+          }
+        },
+        {
+          "type": "BarrierSatisfied",
+          "nodeId": "gate",
+          "data": {
+            "armedAtMs": 10,
+            "decidedAtMs": 30,
+            "deadlineElapsed": false,
+            "satisfied": true,
+            "reasonCode": "MINIMUM_MET",
+            "resolution": "satisfied",
+            "total": 3,
+            "succeeded": 2,
+            "failed": 1,
+            "missing": 0,
+            "timedOut": 0,
+            "abstained": 0,
+            "unknown": 0,
+            "acceptedIds": [
+              "a",
+              "b"
+            ],
+            "failedIds": [
+              "c"
+            ],
+            "missingIds": [],
+            "timedOutIds": [],
+            "abstainedIds": [],
+            "unknownIds": [],
+            "barrierNodeId": "gate",
+            "policyHash": "caae7fe331288adc52d60846ee6c0b9b6cbae4728018d87c35e549dfa5914750",
+            "decisionId": "b4e654e27b6f3b814945360527bb67a1f9941184499bf1b939fe80f38cd0fa31"
+          }
+        }
+      ],
+      "expect": {
+        "outcome": "adopted",
+        "adoptedNodeIds": [
+          "route",
+          "gate"
+        ],
+        "appendedDecisionEvents": 0,
+        "expectedExecutorCalls": 0
+      }
+    },
+    {
+      "name": "route-decision-policy-drift-is-rejected-with-the-same-code",
+      "runId": "run-route",
+      "graphRevision": 2,
+      "currentPolicies": {
+        "route": {
+          "kind": "single",
+          "allowedRoutes": [
+            "audit",
+            "human",
+            "quick"
+          ]
+        }
+      },
+      "history": [
+        {
+          "type": "RouteSelected",
+          "nodeId": "route",
+          "data": {
+            "routed": true,
+            "reasonCode": "REQUESTED_ROUTES_SELECTED",
+            "requestedRoutes": [
+              "quick"
+            ],
+            "selectedRoutes": [
+              "quick"
+            ],
+            "unknownRoutes": [],
+            "confidenceBasisPoints": 8000,
+            "usedDefault": false,
+            "escalated": false,
+            "routerNodeId": "route",
+            "policyHash": "557d1dd958dce60655e1de062c071d02ceb9b28ec067c5cf96486d42e6efff79",
+            "decisionId": "799d13c10d31b11eca6ca2e30a5b947809e3fb273c855fa5f44fa7f07b27da8f"
+          }
+        }
+      ],
+      "expect": {
+        "outcome": "rejected",
+        "code": "DECISION_POLICY_DRIFT",
+        "nodeId": "route",
+        "recordedPolicyHash": "557d1dd958dce60655e1de062c071d02ceb9b28ec067c5cf96486d42e6efff79",
+        "currentPolicyHash": "03c19cc5a5c6e2d6949f20197c1f5134a8eed78cc644ea782359143773720490",
+        "adoptedNodeIds": [],
+        "appendedDecisionEvents": 0,
+        "expectedExecutorCalls": 0
+      }
+    }
+  ]
+}

@@ -1,0 +1,215 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha2/checkpoint-v1alpha2.schema.json",
+  "title": "Graph Engineering Protected Scheduler Checkpoint v1alpha2",
+  "description": "Closed rebuildable scheduler projection. Every application value is a checkpoint-bound protected occurrence; arbitrary inline state is forbidden.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "projectionType",
+    "runId",
+    "checkpointId",
+    "sequence",
+    "createdAt",
+    "graphRevision",
+    "graphHash",
+    "implementationHash",
+    "capturePolicyHash",
+    "protectedStoreContract",
+    "keyRefHash",
+    "historyPrefixHash",
+    "totalAttempts",
+    "protectedRefCount",
+    "redacted",
+    "payloadDisposition",
+    "graphInputRef",
+    "graphInputMac",
+    "nodes",
+    "contentHash"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "graphengineering.reacher-z.github.io/checkpoints/v1alpha2"
+    },
+    "projectionType": { "const": "scheduler-projection/v1alpha2" },
+    "runId": { "$ref": "#/$defs/identifier" },
+    "checkpointId": { "$ref": "#/$defs/identifier" },
+    "sequence": { "$ref": "#/$defs/safeNonNegativeInteger" },
+    "createdAt": { "$ref": "#/$defs/timestamp" },
+    "graphRevision": { "$ref": "#/$defs/safePositiveInteger" },
+    "graphHash": { "$ref": "#/$defs/sha256" },
+    "implementationHash": { "$ref": "#/$defs/sha256" },
+    "capturePolicyHash": { "$ref": "#/$defs/sha256" },
+    "protectedStoreContract": { "const": "protected-payload-store/v1alpha1" },
+    "keyRefHash": { "$ref": "#/$defs/sha256" },
+    "historyPrefixHash": { "$ref": "#/$defs/sha256" },
+    "totalAttempts": { "$ref": "#/$defs/safeNonNegativeInteger" },
+    "protectedRefCount": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1024
+    },
+    "redacted": { "const": false },
+    "payloadDisposition": { "const": "protected-ref" },
+    "graphInputRef": { "$ref": "protected-value.schema.json" },
+    "graphInputMac": { "$ref": "#/$defs/sha256" },
+    "nodes": {
+      "type": "array",
+      "maxItems": 2048,
+      "items": { "$ref": "#/$defs/nodeProjection" }
+    },
+    "contentHash": { "$ref": "#/$defs/sha256" }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+      "not": { "enum": [".", ".."] }
+    },
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "safePositiveInteger": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "safeNonNegativeInteger": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "timestamp": {
+      "type": "string",
+      "pattern": "^\\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\\d|3[01])T([01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|[+-](?:[01]\\d|2[0-3]):[0-5]\\d)$"
+    },
+    "failureCode": {
+      "enum": [
+        "EXECUTOR_NOT_FOUND",
+        "NODE_EXECUTION_FAILED",
+        "NODE_TIMEOUT",
+        "NODE_CANCELLED",
+        "INVALID_OUTPUT",
+        "UPSTREAM_FAILED",
+        "INPUT_BINDING_FAILED",
+        "ATTEMPT_BUDGET_EXHAUSTED",
+        "NODE_EXECUTION_INTERRUPTED"
+      ]
+    },
+    "nodeProjection": {
+      "oneOf": [
+        { "$ref": "#/$defs/pendingNode" },
+        { "$ref": "#/$defs/runningNode" },
+        { "$ref": "#/$defs/retryWaitNode" },
+        { "$ref": "#/$defs/succeededNode" },
+        { "$ref": "#/$defs/failedNode" },
+        { "$ref": "#/$defs/skippedNode" }
+      ]
+    },
+    "pendingNode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["nodeId", "status", "attempts"],
+      "properties": {
+        "nodeId": { "$ref": "#/$defs/identifier" },
+        "status": { "const": "pending" },
+        "attempts": { "const": 0 }
+      }
+    },
+    "runningNode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "nodeId",
+        "status",
+        "attempts",
+        "inputRef",
+        "inputMac",
+        "activityKey",
+        "openAttempt"
+      ],
+      "properties": {
+        "nodeId": { "$ref": "#/$defs/identifier" },
+        "status": { "const": "running" },
+        "attempts": { "$ref": "#/$defs/safePositiveInteger" },
+        "inputRef": { "$ref": "protected-value.schema.json" },
+        "inputMac": { "$ref": "#/$defs/sha256" },
+        "activityKey": { "$ref": "#/$defs/sha256" },
+        "openAttempt": { "$ref": "#/$defs/safePositiveInteger" }
+      }
+    },
+    "retryWaitNode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "nodeId",
+        "status",
+        "attempts",
+        "inputRef",
+        "inputMac",
+        "activityKey",
+        "nextAttempt",
+        "availableAt"
+      ],
+      "properties": {
+        "nodeId": { "$ref": "#/$defs/identifier" },
+        "status": { "const": "retry-wait" },
+        "attempts": { "$ref": "#/$defs/safePositiveInteger" },
+        "inputRef": { "$ref": "protected-value.schema.json" },
+        "inputMac": { "$ref": "#/$defs/sha256" },
+        "activityKey": { "$ref": "#/$defs/sha256" },
+        "nextAttempt": { "$ref": "#/$defs/safePositiveInteger" },
+        "availableAt": { "$ref": "#/$defs/timestamp" }
+      }
+    },
+    "succeededNode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "nodeId",
+        "status",
+        "attempts",
+        "inputRef",
+        "inputMac",
+        "outputRef",
+        "outputMac",
+        "activityKey"
+      ],
+      "properties": {
+        "nodeId": { "$ref": "#/$defs/identifier" },
+        "status": { "const": "succeeded" },
+        "attempts": { "$ref": "#/$defs/safePositiveInteger" },
+        "inputRef": { "$ref": "protected-value.schema.json" },
+        "inputMac": { "$ref": "#/$defs/sha256" },
+        "outputRef": { "$ref": "protected-value.schema.json" },
+        "outputMac": { "$ref": "#/$defs/sha256" },
+        "activityKey": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "failedNode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["nodeId", "status", "attempts", "resultRef", "resultMac", "failureCode"],
+      "properties": {
+        "nodeId": { "$ref": "#/$defs/identifier" },
+        "status": { "const": "failed" },
+        "attempts": { "$ref": "#/$defs/safeNonNegativeInteger" },
+        "resultRef": { "$ref": "protected-value.schema.json" },
+        "resultMac": { "$ref": "#/$defs/sha256" },
+        "failureCode": { "$ref": "#/$defs/failureCode" }
+      }
+    },
+    "skippedNode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["nodeId", "status", "attempts", "resultRef", "resultMac", "failureCode"],
+      "properties": {
+        "nodeId": { "$ref": "#/$defs/identifier" },
+        "status": { "const": "skipped" },
+        "attempts": { "$ref": "#/$defs/safeNonNegativeInteger" },
+        "resultRef": { "$ref": "protected-value.schema.json" },
+        "resultMac": { "$ref": "#/$defs/sha256" },
+        "failureCode": { "$ref": "#/$defs/failureCode" }
+      }
+    }
+  }
+}

@@ -1,0 +1,309 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/subgraph-edge-trace.schema.json",
+  "title": "Graph Engineering Normalized Subgraph and Edge Trace",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "contractVersion",
+    "runId",
+    "traceId",
+    "planHash",
+    "rootGraphHash",
+    "revisionHash",
+    "source",
+    "normalization",
+    "payloadDisposition",
+    "externalExport",
+    "spans",
+    "links",
+    "criticalPathInputs",
+    "metrics",
+    "contentHash"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "graphengineering.reacher-z.github.io/subgraph-edge-traces/v1alpha1"
+    },
+    "kind": { "const": "NormalizedTrace" },
+    "contractVersion": { "const": "normalized-trace/v1alpha1" },
+    "runId": { "$ref": "#/$defs/identifier" },
+    "traceId": { "$ref": "#/$defs/hash" },
+    "planHash": { "$ref": "#/$defs/hash" },
+    "rootGraphHash": { "$ref": "#/$defs/hash" },
+    "revisionHash": { "$ref": "#/$defs/hash" },
+    "source": { "$ref": "#/$defs/source" },
+    "normalization": { "const": "canonical-json-code-point-order/v1alpha1" },
+    "payloadDisposition": { "const": "metadata-only" },
+    "externalExport": { "const": "off-by-default" },
+    "spans": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1000000,
+      "items": { "$ref": "#/$defs/span" }
+    },
+    "links": {
+      "type": "array",
+      "maxItems": 1000000,
+      "items": { "$ref": "#/$defs/link" }
+    },
+    "criticalPathInputs": { "$ref": "#/$defs/criticalPathInputs" },
+    "metrics": { "$ref": "#/$defs/metrics" },
+    "contentHash": { "$ref": "#/$defs/hash" }
+  },
+  "$defs": {
+    "safeNonNegativeInteger": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$"
+    },
+    "timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01])T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\\.[0-9]{1,9})?Z$"
+    },
+    "nullableHash": {
+      "oneOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }]
+    },
+    "nullableIdentifier": {
+      "oneOf": [{ "$ref": "#/$defs/identifier" }, { "type": "null" }]
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["eventStreamId", "throughSequence", "historyHash", "complete"],
+      "properties": {
+        "eventStreamId": { "$ref": "#/$defs/hash" },
+        "throughSequence": { "$ref": "#/$defs/safeNonNegativeInteger" },
+        "historyHash": { "$ref": "#/$defs/hash" },
+        "complete": { "type": "boolean" }
+      }
+    },
+    "identities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "graphHash",
+        "compiledPlanHash",
+        "revisionHash",
+        "nodeId",
+        "edgeId",
+        "attemptId",
+        "activityId",
+        "controllerId",
+        "subgraphInvocationId",
+        "artifactId",
+        "streamId",
+        "providerId"
+      ],
+      "properties": {
+        "graphHash": { "$ref": "#/$defs/nullableHash" },
+        "compiledPlanHash": { "$ref": "#/$defs/nullableHash" },
+        "revisionHash": { "$ref": "#/$defs/hash" },
+        "nodeId": { "$ref": "#/$defs/nullableIdentifier" },
+        "edgeId": { "$ref": "#/$defs/nullableIdentifier" },
+        "attemptId": { "$ref": "#/$defs/nullableHash" },
+        "activityId": { "$ref": "#/$defs/nullableHash" },
+        "controllerId": { "$ref": "#/$defs/nullableHash" },
+        "subgraphInvocationId": { "$ref": "#/$defs/nullableHash" },
+        "artifactId": { "$ref": "#/$defs/nullableHash" },
+        "streamId": { "$ref": "#/$defs/nullableHash" },
+        "providerId": { "$ref": "#/$defs/nullableIdentifier" }
+      }
+    },
+    "causality": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["startSequence", "endSequence", "parentEventSequence"],
+      "properties": {
+        "startSequence": { "$ref": "#/$defs/safeNonNegativeInteger" },
+        "endSequence": { "$ref": "#/$defs/safeNonNegativeInteger" },
+        "parentEventSequence": {
+          "oneOf": [
+            { "$ref": "#/$defs/safeNonNegativeInteger" },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "timing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "wallStart",
+        "wallEnd",
+        "monotonicStartOffsetNs",
+        "monotonicEndOffsetNs",
+        "durationNs"
+      ],
+      "properties": {
+        "wallStart": { "$ref": "#/$defs/timestamp" },
+        "wallEnd": { "$ref": "#/$defs/timestamp" },
+        "monotonicStartOffsetNs": { "$ref": "#/$defs/safeNonNegativeInteger" },
+        "monotonicEndOffsetNs": { "$ref": "#/$defs/safeNonNegativeInteger" },
+        "durationNs": { "$ref": "#/$defs/safeNonNegativeInteger" }
+      }
+    },
+    "waits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "queueNs",
+        "barrierNs",
+        "retryNs",
+        "backpressureNs",
+        "approvalNs",
+        "checkpointRecoveryNs"
+      ],
+      "properties": {
+        "queueNs": { "$ref": "#/$defs/safeNonNegativeInteger" },
+        "barrierNs": { "$ref": "#/$defs/safeNonNegativeInteger" },
+        "retryNs": { "$ref": "#/$defs/safeNonNegativeInteger" },
+        "backpressureNs": { "$ref": "#/$defs/safeNonNegativeInteger" },
+        "approvalNs": { "$ref": "#/$defs/safeNonNegativeInteger" },
+        "checkpointRecoveryNs": { "$ref": "#/$defs/safeNonNegativeInteger" }
+      }
+    },
+    "usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "attemptsReserved",
+        "attemptsCommitted",
+        "inputUnits",
+        "outputUnits",
+        "costNanos",
+        "currency",
+        "budgetReservationId",
+        "budgetReleased"
+      ],
+      "properties": {
+        "attemptsReserved": { "$ref": "#/$defs/safeNonNegativeInteger" },
+        "attemptsCommitted": { "$ref": "#/$defs/safeNonNegativeInteger" },
+        "inputUnits": { "$ref": "#/$defs/safeNonNegativeInteger" },
+        "outputUnits": { "$ref": "#/$defs/safeNonNegativeInteger" },
+        "costNanos": { "$ref": "#/$defs/safeNonNegativeInteger" },
+        "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+        "budgetReservationId": { "$ref": "#/$defs/nullableHash" },
+        "budgetReleased": { "type": "boolean" }
+      }
+    },
+    "failure": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["code", "phase", "retryable"],
+          "properties": {
+            "code": { "$ref": "#/$defs/identifier" },
+            "phase": { "$ref": "#/$defs/identifier" },
+            "retryable": { "type": "boolean" }
+          }
+        }
+      ]
+    },
+    "span": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "spanId",
+        "parentSpanId",
+        "kind",
+        "name",
+        "identities",
+        "causality",
+        "timing",
+        "state",
+        "waits",
+        "usage",
+        "payloadDisposition",
+        "failure"
+      ],
+      "properties": {
+        "spanId": { "$ref": "#/$defs/hash" },
+        "parentSpanId": { "$ref": "#/$defs/nullableHash" },
+        "kind": {
+          "enum": [
+            "run",
+            "invocation",
+            "node-attempt",
+            "activity",
+            "controller",
+            "reducer",
+            "artifact",
+            "stream",
+            "provider",
+            "barrier-wait",
+            "checkpoint-recovery"
+          ]
+        },
+        "name": { "type": "string", "minLength": 1, "maxLength": 255 },
+        "identities": { "$ref": "#/$defs/identities" },
+        "causality": { "$ref": "#/$defs/causality" },
+        "timing": { "$ref": "#/$defs/timing" },
+        "state": {
+          "enum": ["created", "running", "succeeded", "failed", "cancelled", "unknown"]
+        },
+        "waits": { "$ref": "#/$defs/waits" },
+        "usage": { "$ref": "#/$defs/usage" },
+        "payloadDisposition": { "const": "metadata-only" },
+        "failure": { "$ref": "#/$defs/failure" }
+      }
+    },
+    "link": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fromSpanId", "toSpanId", "kind", "eventSequence"],
+      "properties": {
+        "fromSpanId": { "$ref": "#/$defs/hash" },
+        "toSpanId": { "$ref": "#/$defs/hash" },
+        "kind": { "enum": ["child", "data", "retry", "recovery", "fork"] },
+        "eventSequence": { "$ref": "#/$defs/safeNonNegativeInteger" }
+      }
+    },
+    "criticalPathInputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rootSpanId", "terminalSpanIds", "availableParallelism", "observedPeakParallelism"],
+      "properties": {
+        "rootSpanId": { "$ref": "#/$defs/hash" },
+        "terminalSpanIds": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1000000,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/hash" }
+        },
+        "availableParallelism": { "$ref": "#/$defs/safeNonNegativeInteger" },
+        "observedPeakParallelism": { "$ref": "#/$defs/safeNonNegativeInteger" }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "queueDepthHighWater",
+        "streamLagHighWater",
+        "artifactBytes",
+        "streamBytes",
+        "droppedSpans",
+        "incomplete"
+      ],
+      "properties": {
+        "queueDepthHighWater": { "$ref": "#/$defs/safeNonNegativeInteger" },
+        "streamLagHighWater": { "$ref": "#/$defs/safeNonNegativeInteger" },
+        "artifactBytes": { "$ref": "#/$defs/safeNonNegativeInteger" },
+        "streamBytes": { "$ref": "#/$defs/safeNonNegativeInteger" },
+        "droppedSpans": { "$ref": "#/$defs/safeNonNegativeInteger" },
+        "incomplete": { "type": "boolean" }
+      }
+    }
+  }
+}

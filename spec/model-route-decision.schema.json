@@ -1,0 +1,251 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/model-route-decision.schema.json",
+  "title": "Graph Engineering Persisted Model Route Decision",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "contractVersion",
+    "decisionId",
+    "requestId",
+    "runId",
+    "nodeId",
+    "attemptId",
+    "routerPolicyHash",
+    "pricingSnapshotHash",
+    "authorityBindingHash",
+    "classificationHash",
+    "healthSnapshotHash",
+    "requirements",
+    "evaluated",
+    "outcome",
+    "selected",
+    "denialCode",
+    "reservationId",
+    "decisionOrigin",
+    "decidedAt"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "graphengineering.reacher-z.github.io/model-route-decisions/v1alpha1"
+    },
+    "kind": { "const": "ModelRouteDecision" },
+    "contractVersion": { "const": "model-router/v1alpha1" },
+    "decisionId": { "$ref": "#/$defs/hash" },
+    "requestId": { "$ref": "#/$defs/identifier" },
+    "runId": { "$ref": "#/$defs/identifier" },
+    "nodeId": { "$ref": "#/$defs/identifier" },
+    "attemptId": { "$ref": "#/$defs/hash" },
+    "routerPolicyHash": { "$ref": "#/$defs/hash" },
+    "pricingSnapshotHash": { "$ref": "#/$defs/hash" },
+    "authorityBindingHash": { "$ref": "#/$defs/hash" },
+    "classificationHash": { "$ref": "#/$defs/hash" },
+    "healthSnapshotHash": { "$ref": "#/$defs/hash" },
+    "requirements": { "$ref": "#/$defs/requirements" },
+    "evaluated": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1024,
+      "items": { "$ref": "#/$defs/evaluation" }
+    },
+    "outcome": { "enum": ["denied", "selected"] },
+    "selected": {
+      "oneOf": [{ "$ref": "#/$defs/selection" }, { "type": "null" }]
+    },
+    "denialCode": {
+      "oneOf": [
+        {
+          "enum": [
+            "GE_ROUTE_APPROVAL_REQUIRED",
+            "GE_ROUTE_AUTHORITY_DENIED",
+            "GE_ROUTE_BUDGET_DENIED",
+            "GE_ROUTE_CAPABILITY_UNAVAILABLE",
+            "GE_ROUTE_HEALTH_UNAVAILABLE",
+            "GE_ROUTE_NO_CANDIDATE",
+            "GE_ROUTE_PRICING_UNAVAILABLE",
+            "GE_ROUTE_PRIVACY_DENIED",
+            "GE_ROUTE_REGION_DENIED"
+          ]
+        },
+        { "type": "null" }
+      ]
+    },
+    "reservationId": {
+      "oneOf": [{ "$ref": "#/$defs/identifier" }, { "type": "null" }]
+    },
+    "decisionOrigin": { "const": "new-decision" },
+    "decidedAt": { "$ref": "#/$defs/timestamp" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "outcome": { "const": "selected" } }, "required": ["outcome"] },
+      "then": {
+        "properties": {
+          "selected": { "$ref": "#/$defs/selection" },
+          "denialCode": { "type": "null" },
+          "reservationId": { "$ref": "#/$defs/identifier" }
+        }
+      },
+      "else": {
+        "properties": {
+          "selected": { "type": "null" },
+          "denialCode": {
+            "enum": [
+              "GE_ROUTE_APPROVAL_REQUIRED",
+              "GE_ROUTE_AUTHORITY_DENIED",
+              "GE_ROUTE_BUDGET_DENIED",
+              "GE_ROUTE_CAPABILITY_UNAVAILABLE",
+              "GE_ROUTE_HEALTH_UNAVAILABLE",
+              "GE_ROUTE_NO_CANDIDATE",
+              "GE_ROUTE_PRICING_UNAVAILABLE",
+              "GE_ROUTE_PRIVACY_DENIED",
+              "GE_ROUTE_REGION_DENIED"
+            ]
+          },
+          "reservationId": { "type": "null" }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$"
+    },
+    "subjectIdentifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,254}$"
+    },
+    "safeNonNegativeInteger": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "safePositiveInteger": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01])T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\\.[0-9]{1,9})?Z$"
+    },
+    "capability": {
+      "enum": [
+        "audio-input",
+        "audio-output",
+        "image-input",
+        "json-schema-output",
+        "reasoning",
+        "streaming",
+        "text-input",
+        "text-output",
+        "tool-calling"
+      ]
+    },
+    "requirements": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "capabilities",
+        "dataClass",
+        "allowedRegions",
+        "minimumQualityTier",
+        "inputUnits",
+        "maximumOutputUnits",
+        "maximumContextUnits",
+        "maximumDurationMs",
+        "maximumMoneyNanoMinor",
+        "approvalBindingHash"
+      ],
+      "properties": {
+        "capabilities": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 9,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/capability" }
+        },
+        "dataClass": { "enum": ["confidential", "internal", "public", "restricted", "secret"] },
+        "allowedRegions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 128,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/identifier" }
+        },
+        "minimumQualityTier": { "enum": ["economy", "judge", "premium", "standard"] },
+        "inputUnits": { "$ref": "#/$defs/safeNonNegativeInteger" },
+        "maximumOutputUnits": { "$ref": "#/$defs/safePositiveInteger" },
+        "maximumContextUnits": { "$ref": "#/$defs/safePositiveInteger" },
+        "maximumDurationMs": { "type": "integer", "minimum": 1, "maximum": 2147483647 },
+        "maximumMoneyNanoMinor": { "$ref": "#/$defs/safeNonNegativeInteger" },
+        "approvalBindingHash": {
+          "oneOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }]
+        }
+      }
+    },
+    "evaluation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["candidateId", "eligible", "reasons", "estimatedMoneyNanoMinor", "health"],
+      "properties": {
+        "candidateId": { "$ref": "#/$defs/identifier" },
+        "eligible": { "type": "boolean" },
+        "reasons": {
+          "type": "array",
+          "maxItems": 11,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "approval",
+              "authority",
+              "budget",
+              "capability",
+              "context",
+              "duration",
+              "health",
+              "pricing",
+              "privacy",
+              "quality",
+              "region"
+            ]
+          }
+        },
+        "estimatedMoneyNanoMinor": { "$ref": "#/$defs/safeNonNegativeInteger" },
+        "health": { "enum": ["closed", "half-open", "open", "rate-limited", "ready", "unknown"] }
+      }
+    },
+    "selection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "candidateId",
+        "providerId",
+        "modelId",
+        "accountClass",
+        "region",
+        "qualityTier",
+        "fallbackRank",
+        "pricingEntryId",
+        "authorityGrantHash",
+        "estimatedMoneyNanoMinor"
+      ],
+      "properties": {
+        "candidateId": { "$ref": "#/$defs/identifier" },
+        "providerId": { "$ref": "#/$defs/identifier" },
+        "modelId": { "$ref": "#/$defs/subjectIdentifier" },
+        "accountClass": { "$ref": "#/$defs/identifier" },
+        "region": { "$ref": "#/$defs/identifier" },
+        "qualityTier": { "enum": ["economy", "judge", "premium", "standard"] },
+        "fallbackRank": { "type": "integer", "minimum": 0, "maximum": 1023 },
+        "pricingEntryId": { "$ref": "#/$defs/identifier" },
+        "authorityGrantHash": { "$ref": "#/$defs/hash" },
+        "estimatedMoneyNanoMinor": { "$ref": "#/$defs/safeNonNegativeInteger" }
+      }
+    }
+  }
+}

@@ -1,0 +1,140 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/pricing-snapshot.schema.json",
+  "title": "Graph Engineering Immutable Pricing Snapshot",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "contractVersion",
+    "snapshotId",
+    "currency",
+    "minorUnitExponent",
+    "effectiveFrom",
+    "effectiveUntil",
+    "source",
+    "policyBindingHash",
+    "rounding",
+    "entries"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "graphengineering.reacher-z.github.io/pricing-snapshots/v1alpha1"
+    },
+    "kind": { "const": "PricingSnapshot" },
+    "contractVersion": { "const": "portable-pricing/v1alpha1" },
+    "snapshotId": { "$ref": "#/$defs/identifier" },
+    "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+    "minorUnitExponent": { "type": "integer", "minimum": 0, "maximum": 6 },
+    "effectiveFrom": { "$ref": "#/$defs/timestamp" },
+    "effectiveUntil": {
+      "oneOf": [{ "$ref": "#/$defs/timestamp" }, { "type": "null" }]
+    },
+    "source": { "$ref": "#/$defs/source" },
+    "policyBindingHash": { "$ref": "#/$defs/hash" },
+    "rounding": { "const": "ceil-each-request-meter-before-sum" },
+    "entries": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 10000,
+      "items": { "$ref": "#/$defs/entry" }
+    }
+  },
+  "$defs": {
+    "safeNonNegativeInteger": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "safePositiveInteger": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$"
+    },
+    "subjectIdentifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,254}$"
+    },
+    "timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01])T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\\.[0-9]{1,9})?Z$"
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "locatorHash",
+        "retrievedAt",
+        "contentHash",
+        "signatureDisposition",
+        "refresh"
+      ],
+      "properties": {
+        "kind": { "enum": ["bundled", "operator-supplied", "provider-published"] },
+        "locatorHash": { "$ref": "#/$defs/hash" },
+        "retrievedAt": { "$ref": "#/$defs/timestamp" },
+        "contentHash": { "$ref": "#/$defs/hash" },
+        "signatureDisposition": {
+          "enum": ["content-addressed-unverified", "verified-provider-signature", "verified-operator-signature"]
+        },
+        "refresh": { "const": "outside-active-run-new-snapshot-only" }
+      }
+    },
+    "priceRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["meter", "usageClass", "unitQuantity", "priceNanoMinor"],
+      "properties": {
+        "meter": {
+          "enum": [
+            "audio-units",
+            "cached-input-units",
+            "image-units",
+            "input-units",
+            "output-units",
+            "provider-calls",
+            "reasoning-units",
+            "tool-calls"
+          ]
+        },
+        "usageClass": { "enum": ["batch", "cached", "priority", "standard"] },
+        "unitQuantity": { "$ref": "#/$defs/safePositiveInteger" },
+        "priceNanoMinor": { "$ref": "#/$defs/safeNonNegativeInteger" }
+      }
+    },
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entryId",
+        "providerId",
+        "accountClass",
+        "region",
+        "subjectKind",
+        "subjectId",
+        "rules"
+      ],
+      "properties": {
+        "entryId": { "$ref": "#/$defs/identifier" },
+        "providerId": { "$ref": "#/$defs/identifier" },
+        "accountClass": { "$ref": "#/$defs/identifier" },
+        "region": { "$ref": "#/$defs/identifier" },
+        "subjectKind": { "enum": ["model", "tool"] },
+        "subjectId": { "$ref": "#/$defs/subjectIdentifier" },
+        "rules": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": { "$ref": "#/$defs/priceRule" }
+        }
+      }
+    }
+  }
+}

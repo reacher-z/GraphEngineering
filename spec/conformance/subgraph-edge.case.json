@@ -1,0 +1,1058 @@
+{
+  "contractVersion": "subgraph-edge/v1alpha1",
+  "description": "D4 contract-only vectors for nested scopes, deterministic reducers, artifact references, durable stream edges, and event/checkpoint lineage. Native execution is intentionally not implied.",
+  "contractStatus": "contract-only-native-implementation-required",
+  "implementationClaim": false,
+  "sourceGraphs": {
+    "root": {
+      "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+      "kind": "Graph",
+      "metadata": {
+        "name": "d4-root",
+        "version": "1.0.0"
+      },
+      "inputSchema": {},
+      "outputSchema": {},
+      "entrypoints": ["seed"],
+      "outputs": {
+        "result": { "node": "sink" }
+      },
+      "nodes": [
+        {
+          "id": "seed",
+          "kind": "transform",
+          "inputSchema": {},
+          "outputSchema": {},
+          "config": null
+        },
+        {
+          "id": "nested",
+          "kind": "subgraph",
+          "inputSchema": {},
+          "outputSchema": {},
+          "config": null
+        },
+        {
+          "id": "artifactConsumer",
+          "kind": "transform",
+          "inputSchema": {},
+          "outputSchema": {},
+          "config": null
+        },
+        {
+          "id": "streamConsumer",
+          "kind": "transform",
+          "inputSchema": {},
+          "outputSchema": {},
+          "config": null
+        },
+        {
+          "id": "sink",
+          "kind": "transform",
+          "inputSchema": {},
+          "outputSchema": {},
+          "config": null
+        }
+      ],
+      "edges": [
+        {
+          "id": "e_seed_nested",
+          "from": { "node": "seed" },
+          "to": { "node": "nested" },
+          "mode": "value"
+        },
+        {
+          "id": "e_nested_artifact",
+          "from": { "node": "nested" },
+          "to": { "node": "artifactConsumer", "port": "artifact" },
+          "mode": "artifact-ref"
+        },
+        {
+          "id": "e_nested_stream",
+          "from": { "node": "nested" },
+          "to": { "node": "streamConsumer", "port": "items" },
+          "mode": "stream"
+        },
+        {
+          "id": "e_artifact_sink",
+          "from": { "node": "artifactConsumer" },
+          "to": { "node": "sink", "port": "artifactResult" },
+          "mode": "value"
+        },
+        {
+          "id": "e_stream_sink",
+          "from": { "node": "streamConsumer" },
+          "to": { "node": "sink", "port": "streamResult" },
+          "mode": "value"
+        }
+      ],
+      "policies": {
+        "maxConcurrency": 4,
+        "maxTotalAttempts": 16,
+        "maxDepth": 8,
+        "maxFanOut": 4
+      }
+    },
+    "child": {
+      "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+      "kind": "Graph",
+      "metadata": {
+        "name": "d4-child",
+        "version": "1.0.0"
+      },
+      "inputSchema": {},
+      "outputSchema": {},
+      "stateSchema": {},
+      "entrypoints": ["childStart"],
+      "outputs": {
+        "result": { "node": "reduce" }
+      },
+      "nodes": [
+        {
+          "id": "childStart",
+          "kind": "transform",
+          "inputSchema": {},
+          "outputSchema": {},
+          "config": null
+        },
+        {
+          "id": "left",
+          "kind": "transform",
+          "inputSchema": {},
+          "outputSchema": {},
+          "config": null
+        },
+        {
+          "id": "right",
+          "kind": "transform",
+          "inputSchema": {},
+          "outputSchema": {},
+          "config": null
+        },
+        {
+          "id": "reduce",
+          "kind": "transform",
+          "inputSchema": {},
+          "outputSchema": {},
+          "config": null
+        }
+      ],
+      "edges": [
+        {
+          "id": "e_child_left",
+          "from": { "node": "childStart" },
+          "to": { "node": "left" },
+          "mode": "value"
+        },
+        {
+          "id": "e_child_right",
+          "from": { "node": "childStart" },
+          "to": { "node": "right" },
+          "mode": "value"
+        },
+        {
+          "id": "e_left_reduce",
+          "from": { "node": "left" },
+          "to": { "node": "reduce", "port": "left" },
+          "mode": "value"
+        },
+        {
+          "id": "e_right_reduce",
+          "from": { "node": "right" },
+          "to": { "node": "reduce", "port": "right" },
+          "mode": "value"
+        }
+      ],
+      "policies": {
+        "maxConcurrency": 2,
+        "maxTotalAttempts": 8,
+        "maxDepth": 4,
+        "maxFanOut": 2
+      }
+    }
+  },
+  "planTemplate": {
+    "apiVersion": "graphengineering.reacher-z.github.io/subgraph-edge-plans/v1alpha1",
+    "kind": "SubgraphEdgePlan",
+    "contractVersion": "subgraph-edge/v1alpha1",
+    "planId": "d4-contract-plan",
+    "activation": "requires-capability-negotiation",
+    "namespaceCodec": "rfc6901-segments/v1alpha1",
+    "rootGraphKey": "root",
+    "requiredCapabilities": [
+      "artifact-store/v1alpha1",
+      "durable-stream-edge/v1alpha1",
+      "nested-subgraph/v1alpha1",
+      "state-reducer/v1alpha1",
+      "subgraph-edge/v1alpha1",
+      "trace-checkpoint-lineage/v1alpha1"
+    ],
+    "policies": {
+      "maxNestingDepth": 4,
+      "maxRecursiveDepth": 2,
+      "maxTotalInvocations": 16,
+      "maxConcurrentInvocations": 4,
+      "maxStateBytes": 4096,
+      "maxReducerWrites": 16,
+      "maxArtifacts": 8,
+      "maxArtifactBytes": 4096,
+      "maxTotalArtifactBytes": 8192,
+      "maxStreamEdges": 4,
+      "maxStreamItemsPerEdge": 8,
+      "maxTotalStreamItems": 16,
+      "maxStreamInFlightBytes": 4096,
+      "maxNamespaceBytes": 4096,
+      "maxDurationMs": 60000,
+      "unreducedStateWrites": "compile-error"
+    },
+    "authority": {
+      "mode": "deny-by-default",
+      "policyId": "d4-fixture-authority",
+      "ceiling": [
+        "artifact:delete",
+        "artifact:read",
+        "artifact:write",
+        "stream:consume",
+        "stream:produce"
+      ]
+    },
+    "budget": {
+      "mode": "hard-reservation-before-dispatch",
+      "maxAttempts": 16,
+      "maxDurationMs": 60000,
+      "maxStateBytes": 4096,
+      "maxArtifactBytes": 8192,
+      "maxStreamItems": 16,
+      "maxStreamInFlightBytes": 4096
+    },
+    "recovery": {
+      "resume": "fold-authoritative-events-before-dispatch",
+      "replay": "read-only-exact-prefix-no-dispatch",
+      "fork": "new-run-new-scope-reauthorize",
+      "successfulChildReuse": "exact-graph-plan-input-policy-and-committed-terminal-only"
+    },
+    "trace": {
+      "contractVersion": "normalized-trace/v1alpha1",
+      "capture": "metadata-only",
+      "externalExport": "off-by-default",
+      "clock": "recorded-wall-plus-run-monotonic-offset",
+      "maxSpans": 128,
+      "maxLinks": 256,
+      "maxBytes": 1048576,
+      "criticalPathInputs": "causal-links-state-and-wait-durations"
+    },
+    "graphsFromSources": ["child", "root"],
+    "calls": [
+      {
+        "id": "call-child",
+        "ownerGraphKey": "root",
+        "nodeId": "nested",
+        "childGraphKey": "child",
+        "checkpointScope": "isolated",
+        "maxCallsPerParent": 1,
+        "inputProjection": { "mode": "whole" },
+        "outputProjection": {
+          "mode": "object",
+          "fields": [
+            {
+              "sourceOutput": "result",
+              "sourcePointer": "",
+              "targetKey": "result",
+              "required": true
+            }
+          ]
+        },
+        "recursion": { "mode": "forbid" },
+        "authority": {
+          "mode": "intersect-parent-ceiling",
+          "requested": [
+            "artifact:read",
+            "artifact:write",
+            "stream:consume",
+            "stream:produce"
+          ],
+          "effective": [
+            "artifact:read",
+            "artifact:write",
+            "stream:consume",
+            "stream:produce"
+          ]
+        },
+        "budget": {
+          "mode": "reserve-before-invocation-created",
+          "maxAttempts": 8,
+          "maxDurationMs": 30000,
+          "maxStateBytes": 2048,
+          "maxArtifactBytes": 4096,
+          "maxStreamItems": 8,
+          "maxStreamInFlightBytes": 2048
+        },
+        "propagation": {
+          "parentCancellation": "cancel-child-before-next-commit",
+          "childFailure": "fail-call-edge-with-structured-failure",
+          "childCancellation": "cancel-call-edge",
+          "nonCooperativeChild": "retain-in-doubt-no-downstream-release",
+          "parentFailureAfterChildCommit": "retain-child-history-no-implicit-reuse"
+        },
+        "recovery": {
+          "resume": "continue-isolated-child-scope-from-events",
+          "replay": "project-child-history-with-zero-dispatch",
+          "fork": "new-child-scope-and-authority-decision",
+          "successfulReuse": "exact-input-graph-plan-policy-and-committed-terminal"
+        },
+        "boundaryTransfer": {
+          "artifacts": "explicit-authorized-artifact-ref-only",
+          "streams": "new-descriptor-no-credit-ack-or-write-authority-inheritance"
+        }
+      }
+    ],
+    "reducers": [
+      {
+        "id": "collect-items",
+        "graphKey": "child",
+        "nodeId": "reduce",
+        "statePointer": "/items",
+        "contributors": [
+          { "nodeId": "left", "outputPointer": "/value", "required": true },
+          { "nodeId": "right", "outputPointer": "/value", "required": true }
+        ],
+        "operation": "ordered-append",
+        "implementation": {
+          "kind": "builtin",
+          "version": "state-reducers/v1alpha1"
+        },
+        "law": "ordered-noncommutative",
+        "initialState": { "mode": "required-invocation-state" },
+        "conflictPolicy": "reject-overlap",
+        "order": "contributor-declaration",
+        "idempotency": "exact-batch",
+        "validation": "state-schema-and-byte-bounds-before-cas",
+        "commit": "event-stream-cas-and-state-version",
+        "recovery": "fold-committed-batches-fork-copies-value-not-write-authority",
+        "payloadPolicy": "requires-state-sink-policy/v1alpha1",
+        "maxWrites": 2,
+        "maxStateBytes": 2048,
+        "maxUpdateBytes": 1024
+      }
+    ],
+    "artifactEdges": [
+      {
+        "graphKey": "root",
+        "edgeId": "e_nested_artifact",
+        "maxBytes": 4096,
+        "allowedMediaTypes": ["application/json"],
+        "storageNamespace": "/tenants/fixture-tenant/runs/run-d4-contract",
+        "tenantBinding": "fixture-tenant",
+        "lifetime": "lineage",
+        "integrity": "sha256-size/v1alpha1",
+        "publication": "atomic-before-edge-release",
+        "partialUploadCleanup": "bounded-idempotent-orphan-cleanup",
+        "deduplication": "same-digest-size-media-type-and-tenant-only",
+        "collision": "same-digest-different-bytes-is-fatal",
+        "authorizationScope": "run-and-invocation",
+        "producerCapabilities": ["artifact:write", "artifact:delete"],
+        "consumerCapabilities": ["artifact:read"],
+        "replayFork": "replay-read-only-fork-reauthorize-sharing",
+        "supportExport": "metadata-only-unless-explicit-protected-export",
+        "onError": "fail-edge",
+        "requiredStoreContract": "artifact-store/v1alpha1",
+        "requiredCapturePolicyContract": "artifact-sink-policy/v1alpha1"
+      }
+    ],
+    "streamEdges": [
+      {
+        "graphKey": "root",
+        "edgeId": "e_nested_stream",
+        "itemMode": "value",
+        "itemSchemaHash": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "topology": "one-to-one",
+        "maxItems": 8,
+        "maxItemBytes": 1024,
+        "maxInFlightBytes": 2048,
+        "bufferCapacity": 1,
+        "maxUnacknowledged": 1,
+        "maxDemandPerGrant": 2,
+        "ordering": "source",
+        "delivery": "at-least-once",
+        "demand": "explicit-credit",
+        "recovery": "redeliver-unacknowledged",
+        "attemptIdentity": "stream-item-sequence-and-delivery-attempt",
+        "lateItems": "reject-after-terminal",
+        "terminalFrames": "exactly-one-success-error-or-cancel",
+        "spillPolicy": "forbid",
+        "checkpointBoundary": "after-every-durable-frame",
+        "duplicateSuppression": "item-hash-sequence-and-ack-ledger",
+        "traceMetrics": ["blockedNs", "lagItems", "queueDepth", "throughputItems"],
+        "onError": "fail-edge",
+        "onCancel": "cancel-edge",
+        "requiredRuntimeContract": "durable-stream-edge/v1alpha1",
+        "requiredCapturePolicyContract": "stream-sink-policy/v1alpha1"
+      }
+    ]
+  },
+  "scenario": {
+    "runId": "run-d4-contract",
+    "checkpointId": "d4-final",
+    "timestamp": "2026-07-26T22:45:00.000Z",
+    "nodeInput": {
+      "options": { "depth": 1 },
+      "topic": "graph"
+    },
+    "childNamedOutputs": {
+      "result": {
+        "items": ["left", "right"],
+        "meta": { "count": 2 }
+      }
+    },
+    "expectedProjectedOutput": {
+      "result": {
+        "items": ["left", "right"],
+        "meta": { "count": 2 }
+      }
+    },
+    "initialState": { "items": [] },
+    "contributorOutputs": {
+      "left": { "value": "left" },
+      "right": { "value": "right" }
+    },
+    "completionOrder": ["right", "left"],
+    "expectedReducedState": { "items": ["left", "right"] },
+    "artifactContentUtf8": "{\"items\":[\"left\",\"right\"]}",
+    "artifactMediaType": "application/json",
+    "streamItem": { "delta": 1 },
+    "eventSteps": [
+      { "scope": "root", "type": "InvocationCreated" },
+      { "scope": "root", "type": "InvocationStarted" },
+      { "scope": "child", "type": "InvocationCreated" },
+      { "scope": "child", "type": "InvocationStarted" },
+      { "scope": "root", "type": "StreamOpened" },
+      { "scope": "root", "type": "StreamDemandGranted" },
+      { "scope": "root", "type": "StreamItemPublished" },
+      { "scope": "root", "type": "StreamItemDelivered" },
+      { "scope": "root", "type": "StreamItemAcknowledged" },
+      { "scope": "root", "type": "StreamSourceClosed" },
+      { "scope": "root", "type": "StreamCompleted" },
+      { "scope": "child", "type": "StateReducerCommitted" },
+      { "scope": "child", "type": "InvocationSucceeded" },
+      { "scope": "root", "type": "ArtifactPublished" },
+      { "scope": "root", "type": "ArtifactReadVerified" },
+      { "scope": "root", "type": "ArtifactReleased" },
+      { "scope": "root", "type": "InvocationSucceeded" }
+    ]
+  },
+  "schemaNegativeCases": [
+    {
+      "name": "plan-missing-depth-bound",
+      "target": "plan",
+      "mutations": [
+        { "op": "remove", "path": "/policies/maxNestingDepth" }
+      ]
+    },
+    {
+      "name": "plan-call-unknown-field",
+      "target": "plan",
+      "mutations": [
+        { "op": "add", "path": "/calls/0/prompt", "value": "not-a-contract" }
+      ]
+    },
+    {
+      "name": "plan-zero-stream-buffer",
+      "target": "plan",
+      "mutations": [
+        { "op": "replace", "path": "/streamEdges/0/bufferCapacity", "value": 0 }
+      ]
+    },
+    {
+      "name": "plan-invalid-json-pointer",
+      "target": "plan",
+      "mutations": [
+        { "op": "replace", "path": "/reducers/0/statePointer", "value": "items" }
+      ]
+    },
+    {
+      "name": "plan-unknown-capability",
+      "target": "plan",
+      "mutations": [
+        { "op": "replace", "path": "/requiredCapabilities/0", "value": "magic/v1" }
+      ]
+    },
+    {
+      "name": "artifact-uppercase-digest",
+      "target": "artifact",
+      "mutations": [
+        { "op": "replace", "path": "/digest", "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" }
+      ]
+    },
+    {
+      "name": "artifact-negative-size",
+      "target": "artifact",
+      "mutations": [
+        { "op": "replace", "path": "/sizeBytes", "value": -1 }
+      ]
+    },
+    {
+      "name": "artifact-pinned-without-pin",
+      "target": "artifact",
+      "mutations": [
+        { "op": "replace", "path": "/lifetime/mode", "value": "pinned" }
+      ]
+    },
+    {
+      "name": "event-false-redaction-signal",
+      "target": "event",
+      "eventIndex": 0,
+      "mutations": [
+        { "op": "replace", "path": "/redacted", "value": true }
+      ]
+    },
+    {
+      "name": "event-unknown-data-field",
+      "target": "event",
+      "eventIndex": 1,
+      "mutations": [
+        { "op": "add", "path": "/data/value", "value": null }
+      ]
+    },
+    {
+      "name": "checkpoint-missing-content-hash",
+      "target": "checkpoint",
+      "mutations": [
+        { "op": "remove", "path": "/contentHash" }
+      ]
+    },
+    {
+      "name": "checkpoint-failed-without-code",
+      "target": "checkpoint",
+      "mutations": [
+        { "op": "replace", "path": "/invocations/0/status", "value": "failed" },
+        { "op": "remove", "path": "/invocations/0/projectedOutputHash" }
+      ]
+    },
+    {
+      "name": "plan-call-missing-authority",
+      "target": "plan",
+      "mutations": [
+        { "op": "remove", "path": "/calls/0/authority" }
+      ]
+    },
+    {
+      "name": "artifact-empty-capability",
+      "target": "artifact",
+      "mutations": [
+        { "op": "replace", "path": "/capability/actions", "value": [] }
+      ]
+    },
+    {
+      "name": "event-negative-monotonic-offset",
+      "target": "event",
+      "eventIndex": 0,
+      "mutations": [
+        { "op": "replace", "path": "/monotonicOffsetNs", "value": -1 }
+      ]
+    },
+    {
+      "name": "checkpoint-missing-trace-projection",
+      "target": "checkpoint",
+      "mutations": [
+        { "op": "remove", "path": "/trace" }
+      ]
+    },
+    {
+      "name": "trace-export-cannot-enable-itself",
+      "target": "trace",
+      "mutations": [
+        { "op": "replace", "path": "/externalExport", "value": "enabled" }
+      ]
+    }
+  ],
+  "semanticPlanCases": [
+    {
+      "name": "graph-hash-substitution",
+      "expectedCode": "GE_D4_GRAPH_BINDING_MISMATCH",
+      "mutations": [
+        { "op": "replace", "path": "/graphs/1/graphHash", "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
+      ]
+    },
+    {
+      "name": "subgraph-node-without-call",
+      "expectedCode": "GE_D4_SUBGRAPH_CALL_MISSING",
+      "mutations": [
+        { "op": "remove", "path": "/calls/0" }
+      ]
+    },
+    {
+      "name": "call-targets-transform-node",
+      "expectedCode": "GE_D4_SUBGRAPH_NODE_KIND",
+      "mutations": [
+        { "op": "replace", "path": "/calls/0/nodeId", "value": "seed" }
+      ]
+    },
+    {
+      "name": "artifact-edge-binding-removed",
+      "expectedCode": "GE_D4_EDGE_BINDING_MISSING",
+      "mutations": [
+        { "op": "remove", "path": "/artifactEdges/0" }
+      ]
+    },
+    {
+      "name": "artifact-policy-on-stream-edge",
+      "expectedCode": "GE_D4_EDGE_MODE_MISMATCH",
+      "mutations": [
+        { "op": "replace", "path": "/artifactEdges/0/edgeId", "value": "e_nested_stream" }
+      ]
+    },
+    {
+      "name": "stream-limit-exceeds-global-policy",
+      "expectedCode": "GE_D4_LIMIT_INCONSISTENT",
+      "mutations": [
+        { "op": "replace", "path": "/streamEdges/0/maxItems", "value": 9 }
+      ]
+    },
+    {
+      "name": "overlapping-reducer-state-pointers",
+      "expectedCode": "GE_D4_REDUCER_OVERLAP",
+      "mutations": [
+        {
+          "op": "add",
+          "path": "/reducers/1",
+          "valueFrom": "/reducers/0"
+        },
+        { "op": "replace", "path": "/reducers/1/id", "value": "collect-item-zero" },
+        { "op": "replace", "path": "/reducers/1/statePointer", "value": "/items/0" }
+      ]
+    },
+    {
+      "name": "output-projection-key-collision",
+      "expectedCode": "GE_D4_PROJECTION_COLLISION",
+      "mutations": [
+        {
+          "op": "add",
+          "path": "/calls/0/outputProjection/fields/1",
+          "valueFrom": "/calls/0/outputProjection/fields/0"
+        }
+      ]
+    },
+    {
+      "name": "undeclared-self-recursion",
+      "expectedCode": "GE_D4_RECURSION_UNDECLARED",
+      "mutations": [
+        { "op": "replace", "path": "/calls/0/childGraphKey", "value": "root" }
+      ]
+    },
+    {
+      "name": "bounded-self-recursion-is-explicit",
+      "expectedCode": null,
+      "mutations": [
+        { "op": "replace", "path": "/calls/0/childGraphKey", "value": "root" },
+        {
+          "op": "replace",
+          "path": "/calls/0/recursion",
+          "value": {
+            "mode": "bounded",
+            "group": "root-recursion",
+            "maxDepth": 2,
+            "onLimit": "structured-failure"
+          }
+        }
+      ]
+    },
+    {
+      "name": "recursive-bound-exceeds-plan-bound",
+      "expectedCode": "GE_D4_LIMIT_INCONSISTENT",
+      "mutations": [
+        { "op": "replace", "path": "/calls/0/childGraphKey", "value": "root" },
+        {
+          "op": "replace",
+          "path": "/calls/0/recursion",
+          "value": {
+            "mode": "bounded",
+            "group": "root-recursion",
+            "maxDepth": 3,
+            "onLimit": "structured-failure"
+          }
+        }
+      ]
+    },
+    {
+      "name": "child-effective-authority-must-equal-intersection",
+      "expectedCode": "GE_D4_AUTHORITY_EXPANSION",
+      "mutations": [
+        { "op": "replace", "path": "/calls/0/authority/effective/0", "value": "artifact:delete" }
+      ]
+    },
+    {
+      "name": "child-budget-cannot-exceed-parent",
+      "expectedCode": "GE_D4_LIMIT_INCONSISTENT",
+      "mutations": [
+        { "op": "replace", "path": "/calls/0/budget/maxAttempts", "value": 17 }
+      ]
+    },
+    {
+      "name": "reducer-law-must-match-operation",
+      "expectedCode": "GE_D4_REDUCER_LAW_MISMATCH",
+      "mutations": [
+        { "op": "replace", "path": "/reducers/0/law", "value": "commutative-associative-canonical-order" }
+      ]
+    },
+    {
+      "name": "numeric-reducer-requires-explicit-bounds",
+      "expectedCode": "GE_D4_REDUCER_BOUNDS_MISSING",
+      "mutations": [
+        { "op": "replace", "path": "/reducers/0/operation", "value": "bounded-integer-sum" },
+        { "op": "replace", "path": "/reducers/0/law", "value": "commutative-associative-canonical-order" }
+      ]
+    },
+    {
+      "name": "custom-operation-requires-content-addressed-transform",
+      "expectedCode": "GE_D4_REDUCER_IMPLEMENTATION_MISMATCH",
+      "mutations": [
+        { "op": "replace", "path": "/reducers/0/operation", "value": "custom-deterministic" },
+        { "op": "replace", "path": "/reducers/0/law", "value": "declared-by-content-addressed-transform" }
+      ]
+    },
+    {
+      "name": "artifact-capability-cannot-exceed-plan-ceiling",
+      "expectedCode": "GE_D4_AUTHORITY_EXPANSION",
+      "mutations": [
+        { "op": "replace", "path": "/artifactEdges/0/consumerCapabilities/0", "value": "artifact:list" }
+      ]
+    },
+    {
+      "name": "stream-in-flight-reservation-matches-slots",
+      "expectedCode": "GE_D4_LIMIT_INCONSISTENT",
+      "mutations": [
+        { "op": "replace", "path": "/streamEdges/0/maxInFlightBytes", "value": 2049 }
+      ]
+    }
+  ],
+  "semanticRuntimeCases": [
+    {
+      "name": "missing-required-output-projection",
+      "operation": "project-output",
+      "input": {},
+      "expectedCode": "GE_D4_PROJECTION_MISSING"
+    },
+    {
+      "name": "bounded-recursion-allows-second-entry",
+      "operation": "enter-recursion",
+      "ancestorDepth": 1,
+      "maxDepth": 2,
+      "expectedCode": null
+    },
+    {
+      "name": "bounded-recursion-rejects-third-entry",
+      "operation": "enter-recursion",
+      "ancestorDepth": 2,
+      "maxDepth": 2,
+      "expectedCode": "GE_D4_RECURSION_LIMIT"
+    },
+    {
+      "name": "reducer-retry-is-idempotent",
+      "operation": "repeat-reducer-batch",
+      "changeValue": false,
+      "expectedCode": null
+    },
+    {
+      "name": "reducer-batch-id-cannot-change-value",
+      "operation": "repeat-reducer-batch",
+      "changeValue": true,
+      "expectedCode": "GE_D4_REDUCER_IDEMPOTENCY_CONFLICT"
+    },
+    {
+      "name": "ordered-replace-uses-declaration-last",
+      "operation": "reduce-operation",
+      "reducerOperation": "ordered-replace",
+      "initial": "initial",
+      "values": ["first", "second"],
+      "expected": "second",
+      "expectedCode": null
+    },
+    {
+      "name": "ordered-append-preserves-declaration-order",
+      "operation": "reduce-operation",
+      "reducerOperation": "ordered-append",
+      "initial": ["initial"],
+      "values": ["first", "second"],
+      "expected": ["initial", "first", "second"],
+      "expectedCode": null
+    },
+    {
+      "name": "merge-disjoint-sorts-object-keys",
+      "operation": "reduce-operation",
+      "reducerOperation": "merge-disjoint",
+      "initial": { "base": 0 },
+      "values": [{ "z": 2 }, { "a": 1 }],
+      "expected": { "a": 1, "base": 0, "z": 2 },
+      "expectedCode": null
+    },
+    {
+      "name": "merge-disjoint-rejects-key-conflict",
+      "operation": "reduce-operation",
+      "reducerOperation": "merge-disjoint",
+      "initial": { "base": 0 },
+      "values": [{ "base": 1 }],
+      "expected": null,
+      "expectedCode": "GE_D4_REDUCER_CONFLICT"
+    },
+    {
+      "name": "set-union-dedupes-and-orders-by-value-hash",
+      "operation": "reduce-operation",
+      "reducerOperation": "set-union-by-hash",
+      "initial": ["a"],
+      "values": ["b", "a"],
+      "expected": ["b", "a"],
+      "expectedCode": null
+    },
+    {
+      "name": "artifact-content-corruption",
+      "operation": "verify-artifact",
+      "contentUtf8": "{\"items\":[\"left\",\"tampered\"]}",
+      "expectedCode": "GE_D4_ARTIFACT_CORRUPT"
+    },
+    {
+      "name": "lineage-artifact-release-is-not-gc",
+      "operation": "artifact-gc",
+      "expectedEligible": false,
+      "expectedCode": null
+    },
+    {
+      "name": "stream-publish-without-demand",
+      "operation": "stream",
+      "steps": ["publish"],
+      "expectedCode": "GE_D4_STREAM_DEMAND_EXHAUSTED"
+    },
+    {
+      "name": "stream-buffer-is-hard-bound",
+      "operation": "stream",
+      "steps": ["demand-two", "publish", "publish"],
+      "expectedCode": "GE_D4_STREAM_BUFFER_FULL"
+    },
+    {
+      "name": "stream-ack-before-delivery",
+      "operation": "stream",
+      "steps": ["demand-one", "publish", "ack"],
+      "expectedCode": "GE_D4_STREAM_PROTOCOL"
+    },
+    {
+      "name": "stream-cancel-prevents-later-publish",
+      "operation": "stream",
+      "steps": ["demand-one", "cancel", "publish"],
+      "expectedCode": "GE_D4_STREAM_CANCELLED"
+    },
+    {
+      "name": "stream-failure-is-not-null-success",
+      "operation": "stream-failure",
+      "expectedBoundValue": false,
+      "expectedCode": "GE_D4_STREAM_FAILED"
+    },
+    {
+      "name": "bounded-integer-sum-is-portable",
+      "operation": "reduce-operation",
+      "reducerOperation": "bounded-integer-sum",
+      "initial": 1,
+      "values": [2, 3],
+      "integerBounds": { "minimum": -10, "maximum": 10 },
+      "expected": 6,
+      "expectedCode": null
+    },
+    {
+      "name": "bounded-integer-sum-fails-closed-on-overflow",
+      "operation": "reduce-operation",
+      "reducerOperation": "bounded-integer-sum",
+      "initial": 8,
+      "values": [3],
+      "integerBounds": { "minimum": -10, "maximum": 10 },
+      "expected": null,
+      "expectedCode": "GE_D4_REDUCER_CONFLICT"
+    },
+    {
+      "name": "bounded-integer-min-is-commutative",
+      "operation": "reduce-operation",
+      "reducerOperation": "bounded-integer-min",
+      "initial": 5,
+      "values": [9, -2, 4],
+      "integerBounds": { "minimum": -10, "maximum": 10 },
+      "expected": -2,
+      "expectedCode": null
+    },
+    {
+      "name": "bounded-integer-max-is-commutative",
+      "operation": "reduce-operation",
+      "reducerOperation": "bounded-integer-max",
+      "initial": 5,
+      "values": [9, -2, 4],
+      "integerBounds": { "minimum": -10, "maximum": 10 },
+      "expected": 9,
+      "expectedCode": null
+    },
+    {
+      "name": "artifact-capability-rejects-delete",
+      "operation": "authorize-artifact",
+      "tenantId": "fixture-tenant",
+      "action": "delete",
+      "expectedCode": "GE_D4_ARTIFACT_UNAUTHORIZED"
+    },
+    {
+      "name": "artifact-capability-rejects-foreign-tenant",
+      "operation": "authorize-artifact",
+      "tenantId": "other-tenant",
+      "action": "read",
+      "expectedCode": "GE_D4_ARTIFACT_UNAUTHORIZED"
+    },
+    {
+      "name": "artifact-edge-rejects-oversized-publication",
+      "operation": "publish-artifact-size",
+      "sizeBytes": 4097,
+      "expectedCode": "GE_D4_ARTIFACT_OVERSIZED"
+    },
+    {
+      "name": "stream-item-byte-bound-is-hard",
+      "operation": "stream-item-size",
+      "itemBytes": 1025,
+      "expectedCode": "GE_D4_STREAM_ITEM_INVALID"
+    }
+  ],
+  "semanticHistoryCases": [
+    {
+      "name": "event-sequence-gap",
+      "expectedCode": "GE_D4_INVALID_HISTORY",
+      "eventIndex": 4,
+      "mutations": [
+        { "op": "replace", "path": "/sequence", "value": 9 }
+      ]
+    },
+    {
+      "name": "event-previous-hash-substitution",
+      "expectedCode": "GE_D4_INVALID_HISTORY",
+      "eventIndex": 5,
+      "mutations": [
+        { "op": "replace", "path": "/previousEventHash", "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" }
+      ]
+    },
+    {
+      "name": "event-payload-hash-substitution",
+      "expectedCode": "GE_D4_INVALID_HISTORY",
+      "eventIndex": 6,
+      "mutations": [
+        { "op": "replace", "path": "/payloadHash", "value": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" }
+      ]
+    },
+    {
+      "name": "event-scope-namespace-substitution",
+      "expectedCode": "GE_D4_NAMESPACE_INVALID",
+      "eventIndex": 11,
+      "rehash": true,
+      "mutations": [
+        { "op": "replace", "path": "/scope/namespace", "value": "/runs/other/invocations/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
+      ]
+    },
+    {
+      "name": "event-ack-item-substitution",
+      "expectedCode": "GE_D4_STREAM_PROTOCOL",
+      "eventIndex": 8,
+      "rehash": true,
+      "mutations": [
+        { "op": "replace", "path": "/data/itemSequence", "value": 1 }
+      ]
+    },
+    {
+      "name": "checkpoint-prefix-substitution",
+      "expectedCode": "GE_D4_CORRUPT_CHECKPOINT",
+      "target": "checkpoint",
+      "mutations": [
+        { "op": "replace", "path": "/historyPrefixHash", "value": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd" }
+      ]
+    },
+    {
+      "name": "checkpoint-stream-counter-substitution",
+      "expectedCode": "GE_D4_CORRUPT_CHECKPOINT",
+      "target": "checkpoint",
+      "rehash": true,
+      "mutations": [
+        { "op": "replace", "path": "/streams/0/acknowledged", "value": 0 }
+      ]
+    },
+    {
+      "name": "checkpoint-reducer-state-substitution",
+      "expectedCode": "GE_D4_CORRUPT_CHECKPOINT",
+      "target": "checkpoint",
+      "rehash": true,
+      "mutations": [
+        { "op": "replace", "path": "/reducers/0/state/items/1", "value": "tampered" }
+      ]
+    },
+    {
+      "name": "rehashed-event-revision-substitution",
+      "expectedCode": "GE_D4_INVALID_HISTORY",
+      "eventIndex": 5,
+      "rehash": true,
+      "mutations": [
+        { "op": "replace", "path": "/revisionHash", "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
+      ]
+    },
+    {
+      "name": "rehashed-event-monotonic-rollback",
+      "expectedCode": "GE_D4_INVALID_HISTORY",
+      "eventIndex": 5,
+      "rehash": true,
+      "mutations": [
+        { "op": "replace", "path": "/monotonicOffsetNs", "value": 0 }
+      ]
+    },
+    {
+      "name": "rehashed-event-trace-span-substitution",
+      "expectedCode": "GE_D4_INVALID_HISTORY",
+      "eventIndex": 11,
+      "rehash": true,
+      "mutations": [
+        { "op": "replace", "path": "/trace/spanId", "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" }
+      ]
+    }
+  ],
+  "semanticTraceCases": [
+    {
+      "name": "trace-content-hash-substitution",
+      "expectedCode": "GE_D4_TRACE_INVALID",
+      "mutations": [
+        { "op": "replace", "path": "/contentHash", "value": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" }
+      ]
+    },
+    {
+      "name": "rehashed-trace-cannot-change-backpressure-wait",
+      "expectedCode": "GE_D4_TRACE_INVALID",
+      "rehash": true,
+      "mutations": [
+        { "op": "replace", "path": "/spans/2/waits/backpressureNs", "value": 0 }
+      ]
+    },
+    {
+      "name": "rehashed-trace-cannot-change-event-lineage",
+      "expectedCode": "GE_D4_TRACE_INVALID",
+      "rehash": true,
+      "mutations": [
+        { "op": "replace", "path": "/source/throughSequence", "value": 15 }
+      ]
+    }
+  ],
+  "goldens": {
+    "rootGraphHash": "171369b68a8d534bf2f7aa015537fba200f08fb2dc53c39a7d49e88cc35f931f",
+    "childGraphHash": "8d48d230dd68aeb79d1d1c55c16b1bbb8b818bcad91bd2d100f586d3fba7ebfd",
+    "rootCompiledPlanHash": "d1157e0f410cd194d2301db814343f42b19a28e82ebb814d2e5e0e863d81ecab",
+    "childCompiledPlanHash": "f261bce00d58bffd5944e1cd47db6c207f0baa49c9702e14ac2b5f448adb2b84",
+    "planHash": "2b9e582635d4273ec2ffefb19cbef3a1343451f3c2d8f4f3c6f1b0882180cc4d",
+    "revisionHash": "bd7d9bbf051ae7f2eef78ecdd90d877cd30197452d08956f054d20c898979635",
+    "eventStreamId": "79ed6e155e3f0229b819a2467fbf7397148c74ad62badae1bcd3ab804ad00653",
+    "rootInvocationId": "8a3a50a35ca05d6730e4872c064884cb6f307265f65b44a7181048126ce0c464",
+    "childInvocationId": "f834d6b7f8e8346e39557571fc839b7fdbd9c8fb2c294bf1415194fd79968e94",
+    "projectedOutputHash": "c8f16d565132f5f1ecc2eb967c007c425e3930a40391cdf2dda1fd226ca58032",
+    "reducerBatchId": "75a7bc1b880466cbc84c1c8bfa7587f9ab450b50a0595ceb88aa57235753bee8",
+    "artifactDigest": "64f243b3ff441b11925ccb205552705b91b32e24e8873a48a17ae7acf3e0e7ef",
+    "artifactId": "7a94992e0d64bd10376dcc3a1e768e4f40b92d5a0ac7309a31d8348076d64a6d",
+    "artifactCapabilityId": "ac0e498554b739cc8cfeabae201c41e1c4b1e9535a9fd30bdc237fa67d4f87d5",
+    "streamId": "f325908f871d9487093498ba431e5b1dd39220fb38f4e771cff0ec1f631edd1f",
+    "traceId": "6bf351cae81059895e559d0d8e37a00663007590ad81f6ee46450c1204b833f7",
+    "traceHash": "182b8535d07f94e4de72779976cd05757df82cb10a1968e86feb9cdddb8b59c5",
+    "terminalEventHash": "6eff99f24e2d871679ba52132315aff2830828ba4dfc986b6a3e7a63a3a5b5f2",
+    "checkpointHash": "5452f429ab844279c9f829f274690bc3632b2d20ce8664e1dcace67731225d88"
+  }
+}

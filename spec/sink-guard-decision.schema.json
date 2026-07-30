@@ -1,0 +1,194 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha2/sink-guard-decision.schema.json",
+  "title": "Graph Engineering Sink Guard Decision Audit Projection",
+  "description": "Metadata-only audit projection of a total pre-sink decision. It is not a serializable write capability and contains no application value.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "decisionId",
+    "sourceClass",
+    "sink",
+    "authorityClass",
+    "capturePolicyHash",
+    "outcome",
+    "writeAuthorized"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "graphengineering.reacher-z.github.io/sink-guard-decision/v1alpha1"
+    },
+    "decisionId": { "$ref": "#/$defs/identifier" },
+    "sourceClass": { "$ref": "capture-source.schema.json" },
+    "sink": { "$ref": "capture-sink.schema.json" },
+    "authorityClass": { "enum": ["authoritative", "observational"] },
+    "capturePolicyHash": { "$ref": "#/$defs/sha256" },
+    "outcome": {
+      "enum": [
+        "suppressed",
+        "metadata-only",
+        "protected-ref",
+        "redacted",
+        "inline-unredacted",
+        "failed"
+      ]
+    },
+    "writeAuthorized": { "type": "boolean" },
+    "preparedPayloadHash": { "$ref": "#/$defs/sha256" },
+    "protectedRefs": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1024,
+      "items": { "$ref": "protected-value.schema.json" }
+    },
+    "redactionReceipt": { "$ref": "redaction-receipt.schema.json" },
+    "inlineRiskAuthorizationHash": { "$ref": "#/$defs/sha256" },
+    "failureCode": { "$ref": "#/$defs/failureCode" },
+    "executorOutcome": {
+      "enum": ["not-started", "succeeded", "failed", "not-applicable"]
+    },
+    "retryDisposition": {
+      "enum": ["not-applicable", "safe-new-attempt", "in-doubt-effect", "forbidden"]
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "authorityClass": { "const": "authoritative" } }, "required": ["authorityClass"] },
+      "then": {
+        "properties": {
+          "outcome": { "enum": ["protected-ref", "inline-unredacted", "failed"] }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "outcome": { "const": "suppressed" } }, "required": ["outcome"] },
+      "then": {
+        "properties": {
+          "writeAuthorized": { "const": false },
+          "preparedPayloadHash": false,
+          "protectedRefs": false,
+          "redactionReceipt": false,
+          "inlineRiskAuthorizationHash": false,
+          "failureCode": false,
+          "executorOutcome": false,
+          "retryDisposition": false
+        }
+      }
+    },
+    {
+      "if": { "properties": { "outcome": { "const": "metadata-only" } }, "required": ["outcome"] },
+      "then": {
+        "required": ["preparedPayloadHash"],
+        "properties": {
+          "writeAuthorized": { "const": true },
+          "preparedPayloadHash": { "$ref": "#/$defs/sha256" },
+          "protectedRefs": false,
+          "redactionReceipt": false,
+          "inlineRiskAuthorizationHash": false,
+          "failureCode": false,
+          "executorOutcome": false,
+          "retryDisposition": false
+        }
+      }
+    },
+    {
+      "if": { "properties": { "outcome": { "const": "protected-ref" } }, "required": ["outcome"] },
+      "then": {
+        "required": ["preparedPayloadHash", "protectedRefs"],
+        "properties": {
+          "writeAuthorized": { "const": true },
+          "preparedPayloadHash": { "$ref": "#/$defs/sha256" },
+          "protectedRefs": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 1024,
+            "items": { "$ref": "protected-value.schema.json" }
+          },
+          "redactionReceipt": false,
+          "inlineRiskAuthorizationHash": false,
+          "failureCode": false,
+          "executorOutcome": false,
+          "retryDisposition": false
+        }
+      }
+    },
+    {
+      "if": { "properties": { "outcome": { "const": "redacted" } }, "required": ["outcome"] },
+      "then": {
+        "required": ["preparedPayloadHash", "redactionReceipt"],
+        "properties": {
+          "writeAuthorized": { "const": true },
+          "authorityClass": { "const": "observational" },
+          "preparedPayloadHash": { "$ref": "#/$defs/sha256" },
+          "redactionReceipt": { "$ref": "redaction-receipt.schema.json" },
+          "protectedRefs": false,
+          "inlineRiskAuthorizationHash": false,
+          "failureCode": false,
+          "executorOutcome": false,
+          "retryDisposition": false
+        }
+      }
+    },
+    {
+      "if": { "properties": { "outcome": { "const": "inline-unredacted" } }, "required": ["outcome"] },
+      "then": {
+        "required": ["preparedPayloadHash", "inlineRiskAuthorizationHash"],
+        "properties": {
+          "writeAuthorized": { "const": true },
+          "preparedPayloadHash": { "$ref": "#/$defs/sha256" },
+          "inlineRiskAuthorizationHash": { "$ref": "#/$defs/sha256" },
+          "protectedRefs": false,
+          "redactionReceipt": false,
+          "failureCode": false,
+          "executorOutcome": false,
+          "retryDisposition": false
+        }
+      }
+    },
+    {
+      "if": { "properties": { "outcome": { "const": "failed" } }, "required": ["outcome"] },
+      "then": {
+        "required": ["failureCode", "executorOutcome", "retryDisposition"],
+        "properties": {
+          "writeAuthorized": { "const": false },
+          "failureCode": { "$ref": "#/$defs/failureCode" },
+          "executorOutcome": {
+            "enum": ["not-started", "succeeded", "failed", "not-applicable"]
+          },
+          "retryDisposition": {
+            "enum": ["not-applicable", "safe-new-attempt", "in-doubt-effect", "forbidden"]
+          },
+          "preparedPayloadHash": false,
+          "protectedRefs": false,
+          "redactionReceipt": false,
+          "inlineRiskAuthorizationHash": false
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+      "not": { "enum": [".", ".."] }
+    },
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "failureCode": {
+      "enum": [
+        "REDACTION_POLICY_REQUIRED",
+        "REDACTION_POLICY_INVALID",
+        "CAPTURE_POLICY_MISMATCH",
+        "INLINE_CAPTURE_NOT_AUTHORIZED",
+        "PAYLOAD_PROTECTION_REQUIRED",
+        "PAYLOAD_PROTECTION_FAILED",
+        "PROTECTED_PAYLOAD_NOT_FOUND",
+        "PROTECTED_PAYLOAD_UNAUTHORIZED",
+        "PROTECTED_PAYLOAD_CORRUPT",
+        "REDACTION_RECEIPT_INVALID",
+        "LEGACY_REDACTION_MISMATCH",
+        "SECRET_CANARY_DETECTED"
+      ]
+    }
+  }
+}

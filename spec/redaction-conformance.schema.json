@@ -1,0 +1,1029 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha2/redaction-conformance.schema.json",
+  "title": "Graph Engineering Redaction Contract Conformance Corpus",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "contractStatus",
+    "implementationClaim",
+    "sinkInventory",
+    "sourceInventory",
+    "resourceLimits",
+    "flowPolicy",
+    "sinkPolicyCases",
+    "flowCases",
+    "wireCases",
+    "pointerCases",
+    "semanticCases",
+    "guardCases",
+    "normalizationCases",
+    "failureMatrix",
+    "storeBypassCases",
+    "derivativeCases",
+    "sensitiveFieldCases",
+    "legacyCases",
+    "legacyMatrix",
+    "dependencyJoin"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "graphengineering.reacher-z.github.io/redaction-conformance/v1alpha2"
+    },
+    "contractStatus": { "const": "contract-only-native-implementation-required" },
+    "implementationClaim": {
+      "const": false,
+      "description": "Literally false. Nothing in this repository implements the D9 redaction contract. Flipping this flag must be a deliberate, reviewed edit made by the lane that implements the behaviour, never an inference from this corpus."
+    },
+    "sinkInventory": {
+      "type": "array",
+      "minItems": 54,
+      "maxItems": 54,
+      "uniqueItems": true,
+      "items": { "$ref": "capture-sink.schema.json" }
+    },
+    "sourceInventory": {
+      "type": "array",
+      "minItems": 57,
+      "maxItems": 57,
+      "uniqueItems": true,
+      "items": { "$ref": "capture-source.schema.json" }
+    },
+    "resourceLimits": { "$ref": "#/$defs/resourceLimits" },
+    "flowPolicy": { "$ref": "#/$defs/flowPolicy" },
+    "sinkPolicyCases": {
+      "type": "array",
+      "minItems": 54,
+      "maxItems": 54,
+      "items": { "$ref": "#/$defs/sinkPolicyCase" }
+    },
+    "flowCases": {
+      "type": "array",
+      "minItems": 16,
+      "maxItems": 256,
+      "items": { "$ref": "#/$defs/flowCase" }
+    },
+    "wireCases": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 256,
+      "items": { "$ref": "#/$defs/wireCase" }
+    },
+    "pointerCases": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 256,
+      "items": { "$ref": "#/$defs/pointerCase" }
+    },
+    "semanticCases": {
+      "type": "array",
+      "minItems": 38,
+      "maxItems": 256,
+      "items": { "$ref": "#/$defs/semanticCase" }
+    },
+    "guardCases": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 256,
+      "items": { "$ref": "#/$defs/guardCase" }
+    },
+    "normalizationCases": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "items": { "$ref": "#/$defs/normalizationCase" }
+    },
+    "failureMatrix": { "$ref": "#/$defs/failureMatrix" },
+    "storeBypassCases": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "items": { "$ref": "#/$defs/storeBypassCase" }
+    },
+    "derivativeCases": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 128,
+      "items": { "$ref": "#/$defs/derivativeCase" }
+    },
+    "sensitiveFieldCases": {
+      "type": "array",
+      "minItems": 57,
+      "maxItems": 57,
+      "items": { "$ref": "#/$defs/sensitiveFieldCase" }
+    },
+    "legacyCases": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "items": { "$ref": "#/$defs/legacyCase" }
+    },
+    "legacyMatrix": { "$ref": "#/$defs/legacyMatrix" },
+    "dependencyJoin": { "$ref": "#/$defs/dependencyJoin" }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+      "not": { "enum": [".", ".."] }
+    },
+    "semanticOperator": {
+      "enum": [
+        "accept-unknown-side-effects",
+        "change-registry-during-write",
+        "construct-checkpoint-aad",
+        "construct-checkpoint-ref-count",
+        "construct-container-count",
+        "construct-diagnostic-utf8-bytes",
+        "construct-distinct-portable-keys",
+        "construct-event-aad",
+        "construct-multibyte-field-path",
+        "construct-object-member-count",
+        "construct-pointer-token-count",
+        "construct-pointer-token-utf8-bytes",
+        "construct-pointer-utf8-bytes",
+        "construct-policy-canonical-bytes",
+        "construct-protected-utf8-bytes",
+        "construct-ref-utf8-bytes",
+        "construct-rule-pointer-count",
+        "construct-surrogate-pair-key-collision",
+        "construct-transformed-utf8-bytes",
+        "construct-value-depth",
+        "construct-value-node-count",
+        "copy-checkpoint-ref",
+        "copy-event-ref",
+        "duplicate-global-case-id",
+        "mutate-aad-authority-binding-hash",
+        "mutate-aad-key-ref-hash",
+        "mutate-aad-tenant-scope-hash",
+        "mutate-registry-version",
+        "mutate-result-with-stale-receipt",
+        "mutate-source-with-stale-receipt",
+        "mutate-transform-implementation-hash",
+        "normalize-omitted-side-effects",
+        "omit-failed-disposition",
+        "preserve-global-case-ids",
+        "preserve-receipt-authority",
+        "preserve-receipt-occurrence",
+        "preserve-receipt-sink",
+        "preserve-receipt-timestamp",
+        "preserve-rule-set-order",
+        "protect-retry-as-new-occurrence",
+        "recompute-result-hash",
+        "recompute-source-hash",
+        "remove-source-classification",
+        "reorder-rules-with-stale-hash",
+        "replay-byte-identical-operation",
+        "resolve-forbidden-prototype-segment",
+        "resolve-one-registry-snapshot",
+        "resolve-own-empty-key",
+        "retain-failed-disposition",
+        "reuse-operation-id-with-changed-envelope",
+        "reuse-retry-occurrence-aad",
+        "set-authority-binding-hashes",
+        "set-checkpoint-graph-input-mac",
+        "set-ciphertext",
+        "set-compatible-runtime-log-rule",
+        "set-event-output-mac",
+        "set-incompatible-runtime-log-rule",
+        "set-key-ref-hashes",
+        "set-parent-only",
+        "set-receipt-count",
+        "set-receipt-paths",
+        "set-ref-value-mac",
+        "set-registry-resolution",
+        "set-rule-paths",
+        "set-rule-sink-count",
+        "set-source-classification-count",
+        "set-sink-policy-count",
+        "remove-sink-policy",
+        "set-cartesian-evaluation-count",
+        "skip-source-sink-pair",
+        "set-store-policy-hash",
+        "set-store-run-id",
+        "set-tag-final-character",
+        "set-tenant-scope-hashes",
+        "set-trace-context",
+        "set-transform-identity",
+        "swap-receipt-authority",
+        "swap-receipt-occurrence",
+        "swap-receipt-sink",
+        "swap-receipt-timestamp"
+      ]
+    },
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "failureCode": {
+      "enum": [
+        "REDACTION_POLICY_REQUIRED",
+        "REDACTION_POLICY_INVALID",
+        "CAPTURE_POLICY_MISMATCH",
+        "INLINE_CAPTURE_NOT_AUTHORIZED",
+        "PAYLOAD_PROTECTION_REQUIRED",
+        "PAYLOAD_PROTECTION_FAILED",
+        "PROTECTED_PAYLOAD_NOT_FOUND",
+        "PROTECTED_PAYLOAD_UNAUTHORIZED",
+        "PROTECTED_PAYLOAD_CORRUPT",
+        "REDACTION_RECEIPT_INVALID",
+        "LEGACY_REDACTION_MISMATCH",
+        "SECRET_CANARY_DETECTED"
+      ]
+    },
+    "policyControl": {
+      "enum": [
+        "durableValues",
+        "checkpointValues",
+        "events",
+        "artifacts",
+        "errors",
+        "logs",
+        "traces",
+        "metrics",
+        "prompts",
+        "responses",
+        "tools",
+        "mcp",
+        "plugins",
+        "isolationOutputs",
+        "database",
+        "exports",
+        "supportBundles",
+        "testArtifacts",
+        "identifiers",
+        "deny"
+      ]
+    },
+    "sinkFamily": {
+      "enum": [
+        "event",
+        "checkpoint",
+        "protected-store",
+        "artifact",
+        "queue-transport",
+        "provider-tool",
+        "process-diagnostic",
+        "trace",
+        "metrics",
+        "error",
+        "cli-mcp",
+        "plugin",
+        "isolation",
+        "explorer-http",
+        "database",
+        "export-replay-fork",
+        "support-migration",
+        "test-evidence"
+      ]
+    },
+    "resourceLimits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "maxPolicyUtf8Bytes",
+        "maxProtectedValueUtf8Bytes",
+        "maxTransformedUtf8Bytes",
+        "maxValueDepth",
+        "maxValueNodes",
+        "maxContainers",
+        "maxObjectMembers",
+        "maxPointersPerRule",
+        "maxPointerTokens",
+        "maxPointerUtf8Bytes",
+        "maxPointerTokenUtf8Bytes",
+        "maxProtectedRefsPerRecord",
+        "maxRefUtf8Bytes",
+        "maxDiagnosticUtf8Bytes"
+      ],
+      "properties": {
+        "maxPolicyUtf8Bytes": { "const": 65536 },
+        "maxProtectedValueUtf8Bytes": { "const": 67108864 },
+        "maxTransformedUtf8Bytes": { "const": 67108864 },
+        "maxValueDepth": { "const": 128 },
+        "maxValueNodes": { "const": 1000000 },
+        "maxContainers": { "const": 100000 },
+        "maxObjectMembers": { "const": 1000000 },
+        "maxPointersPerRule": { "const": 1024 },
+        "maxPointerTokens": { "const": 128 },
+        "maxPointerUtf8Bytes": { "const": 1024 },
+        "maxPointerTokenUtf8Bytes": { "const": 256 },
+        "maxProtectedRefsPerRecord": { "const": 1024 },
+        "maxRefUtf8Bytes": { "const": 128 },
+        "maxDiagnosticUtf8Bytes": { "const": 1024 }
+      }
+    },
+    "flowPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "algorithm",
+        "sourceRuleCount",
+        "sinkRuleCount",
+        "cartesianProductCount",
+        "unknownSource",
+        "unknownSink",
+        "unknownControl"
+      ],
+      "properties": {
+        "algorithm": { "const": "source-sink-intersection/v1alpha1" },
+        "sourceRuleCount": { "const": 57 },
+        "sinkRuleCount": { "const": 54 },
+        "cartesianProductCount": { "const": 3078 },
+        "unknownSource": { "const": "deny" },
+        "unknownSink": { "const": "deny" },
+        "unknownControl": { "const": "deny" }
+      }
+    },
+    "sinkPolicyCase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "sink",
+        "family",
+        "policyControls",
+        "acceptsProtected",
+        "acceptsMetadata",
+        "defaultEnabled"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "sink": { "$ref": "capture-sink.schema.json" },
+        "family": { "$ref": "#/$defs/sinkFamily" },
+        "policyControls": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/policyControl" }
+        },
+        "acceptsProtected": { "type": "boolean" },
+        "acceptsMetadata": { "type": "boolean" },
+        "defaultEnabled": { "type": "boolean" }
+      }
+    },
+    "flowCase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "sourceClass",
+        "sink",
+        "policyControl",
+        "knownSource",
+        "knownSink",
+        "knownControl",
+        "policyEnabled",
+        "expected"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "sourceClass": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "sink": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "policyControl": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "knownSource": { "type": "boolean" },
+        "knownSink": { "type": "boolean" },
+        "knownControl": { "type": "boolean" },
+        "policyEnabled": { "type": "boolean" },
+        "expected": { "$ref": "#/$defs/flowExpected" }
+      }
+    },
+    "flowExpected": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["outcome", "writeAuthorized"],
+      "properties": {
+        "outcome": {
+          "enum": ["protected-ref", "metadata-only", "suppressed", "failed"]
+        },
+        "writeAuthorized": { "type": "boolean" },
+        "code": { "$ref": "#/$defs/failureCode" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "outcome": { "const": "failed" } },
+            "required": ["outcome"]
+          },
+          "then": {
+            "required": ["code"],
+            "properties": {
+              "writeAuthorized": { "const": false },
+              "code": { "$ref": "#/$defs/failureCode" }
+            }
+          },
+          "else": { "properties": { "code": false } }
+        }
+      ]
+    },
+    "wireCase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "schema", "document", "valid"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "schema": {
+          "enum": [
+            "capture-policy.schema.json",
+            "capture-sink.schema.json",
+            "capture-source.schema.json",
+            "redaction-rule.schema.json",
+            "redaction-receipt.schema.json",
+            "payload-disposition.schema.json",
+            "protected-value.schema.json",
+            "protected-blob.schema.json",
+            "protected-aad.schema.json",
+            "protected-store-envelope.schema.json",
+            "sink-guard-decision.schema.json",
+            "event-v1alpha2.schema.json",
+            "checkpoint-v1alpha2.schema.json"
+          ]
+        },
+        "document": {},
+        "valid": { "type": "boolean" },
+        "expectedCode": { "$ref": "#/$defs/failureCode" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "valid": { "const": true } }, "required": ["valid"] },
+          "then": { "properties": { "expectedCode": false } },
+          "else": {
+            "properties": { "expectedCode": { "$ref": "#/$defs/failureCode" } },
+            "required": ["expectedCode"]
+          }
+        }
+      ]
+    },
+    "pointerCase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "input", "paths", "replacementMode", "expected"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "input": {},
+        "paths": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1024,
+          "items": { "type": "string", "maxLength": 1024 }
+        },
+        "replacementMode": { "enum": ["remove", "constant-token"] },
+        "expected": { "$ref": "#/$defs/pointerExpected" }
+      }
+    },
+    "pointerExpected": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["valid"],
+      "properties": {
+        "valid": { "type": "boolean" },
+        "output": {},
+        "canonicalPaths": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1024,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 1024 }
+        },
+        "code": { "const": "REDACTION_RECEIPT_INVALID" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "valid": { "const": true } }, "required": ["valid"] },
+          "then": {
+            "properties": {
+              "output": {},
+              "canonicalPaths": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 1024,
+                "uniqueItems": true,
+                "items": { "type": "string", "minLength": 1, "maxLength": 1024 }
+              },
+              "code": false
+            },
+            "required": ["output", "canonicalPaths"]
+          },
+          "else": {
+            "properties": { "output": false, "canonicalPaths": false, "code": { "const": "REDACTION_RECEIPT_INVALID" } },
+            "required": ["code"]
+          }
+        }
+      ]
+    },
+    "semanticCase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "pairId",
+        "polarity",
+        "rule",
+        "baseSection",
+        "baseCaseId",
+        "mutation",
+        "expected"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "pairId": { "$ref": "#/$defs/identifier" },
+        "polarity": { "enum": ["positive", "hostile"] },
+        "rule": {
+          "enum": [
+            "policy-mode-rule-compatibility",
+            "policy-path-order",
+            "policy-duplicate-rule-sink",
+            "policy-utf8-byte-limit",
+            "receipt-count-equality",
+            "receipt-path-order",
+            "base64url-tag-pad-bits",
+            "base64url-ciphertext-length",
+            "aad-field-path-utf8-limit",
+            "store-aad-run-id-equality",
+            "ref-aad-value-mac-equality",
+            "store-aad-policy-equality",
+            "event-ref-output-mac-equality",
+            "trace-parent-context",
+            "checkpoint-graph-input-mac-equality",
+            "checkpoint-ref-aggregate-limit",
+            "failed-guard-disposition-required",
+            "source-classification-completeness",
+            "sink-policy-completeness",
+            "flow-cartesian-completeness",
+            "global-case-id-uniqueness",
+            "aad-checkpoint-occurrence-binding",
+            "aad-event-occurrence-binding",
+            "aad-key-ref-binding",
+            "aad-authority-scope-binding",
+            "aad-tenant-scope-binding",
+            "store-idempotent-operation-binding",
+            "receipt-source-binding",
+            "receipt-result-binding",
+            "receipt-rule-set-binding",
+            "receipt-registry-binding",
+            "receipt-transform-binding",
+            "receipt-authority-binding",
+            "receipt-sink-binding",
+            "receipt-occurrence-binding",
+            "receipt-stale-registry-atomicity",
+            "side-effects-normalization",
+            "pointer-prototype-segment",
+            "portable-key-normalization-collision",
+            "resource-value-depth",
+            "resource-value-count",
+            "resource-container-count",
+            "resource-object-member-count",
+            "resource-protected-bytes",
+            "resource-transformed-bytes",
+            "resource-pointer-count",
+            "resource-pointer-token-count",
+            "resource-pointer-bytes",
+            "resource-pointer-token-bytes",
+            "resource-ref-bytes",
+            "resource-diagnostic-bytes"
+          ]
+        },
+        "baseSection": {
+          "enum": [
+            "wireCases",
+            "pointerCases",
+            "guardCases",
+            "storeBypassCases",
+            "derivativeCases",
+            "sensitiveFieldCases",
+            "legacyCases",
+            "sinkPolicyCases",
+            "flowCases",
+            "normalizationCases",
+            "resourceLimits",
+            "corpus"
+          ]
+        },
+        "baseCaseId": { "$ref": "#/$defs/identifier" },
+        "mutation": { "$ref": "#/$defs/semanticMutation" },
+        "expected": { "$ref": "#/$defs/semanticExpected" }
+      }
+    },
+    "semanticMutation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operator", "parameters"],
+      "properties": {
+        "operator": { "$ref": "#/$defs/semanticOperator" },
+        "parameters": {
+          "type": "array",
+          "maxItems": 24,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "value"],
+            "properties": {
+              "name": { "$ref": "#/$defs/identifier" },
+              "value": {}
+            }
+          }
+        }
+      }
+    },
+    "semanticExpected": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "valid",
+        "rawWrites",
+        "sinkWrites",
+        "executorCalls",
+        "dependentReleases"
+      ],
+      "properties": {
+        "valid": { "type": "boolean" },
+        "code": { "$ref": "#/$defs/failureCode" },
+        "rawWrites": { "const": 0 },
+        "sinkWrites": { "type": "integer", "minimum": 0, "maximum": 1 },
+        "executorCalls": { "const": 0 },
+        "dependentReleases": { "const": 0 }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "valid": { "const": true } },
+            "required": ["valid"]
+          },
+          "then": { "properties": { "code": false } },
+          "else": {
+            "required": ["code"],
+            "properties": {
+              "code": { "$ref": "#/$defs/failureCode" },
+              "sinkWrites": { "const": 0 }
+            }
+          }
+        }
+      ]
+    },
+    "guardCase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "sourceClass",
+        "sink",
+        "authorityClass",
+        "executorOutcome",
+        "sideEffects",
+        "failurePoint",
+        "expected"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "sourceClass": { "$ref": "capture-source.schema.json" },
+        "sink": { "$ref": "capture-sink.schema.json" },
+        "authorityClass": { "enum": ["authoritative", "observational"] },
+        "executorOutcome": { "enum": ["not-started", "succeeded", "failed", "not-applicable"] },
+        "sideEffects": {
+          "enum": [
+            "none",
+            "idempotent",
+            "non-idempotent",
+            "unspecified",
+            "unknown",
+            "not-applicable"
+          ]
+        },
+        "failurePoint": {
+          "enum": [
+            "none",
+            "snapshot",
+            "classification",
+            "policy",
+            "encode",
+            "mac",
+            "protect",
+            "atomic-publish",
+            "receipt",
+            "scan",
+            "canonicalize",
+            "sink-write",
+            "compare-and-swap"
+          ]
+        },
+        "expected": { "$ref": "#/$defs/guardExpected" }
+      }
+    },
+    "guardExpected": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rawWrites",
+        "eventWrites",
+        "checkpointWrites",
+        "diagnosticWrites",
+        "executorCalls",
+        "dependentReleases",
+        "safeOrphans",
+        "retryDisposition"
+      ],
+      "properties": {
+        "rawWrites": { "type": "integer", "minimum": 0, "maximum": 1 },
+        "eventWrites": { "type": "integer", "minimum": 0, "maximum": 1 },
+        "checkpointWrites": { "type": "integer", "minimum": 0, "maximum": 1 },
+        "diagnosticWrites": { "type": "integer", "minimum": 0, "maximum": 1 },
+        "executorCalls": { "type": "integer", "minimum": 0, "maximum": 1 },
+        "dependentReleases": { "type": "integer", "minimum": 0, "maximum": 1 },
+        "safeOrphans": { "type": "integer", "minimum": 0, "maximum": 1 },
+        "retryDisposition": {
+          "enum": ["not-applicable", "safe-new-attempt", "in-doubt-effect", "forbidden"]
+        },
+        "code": { "$ref": "#/$defs/failureCode" }
+      }
+    },
+    "normalizationCase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "graphValue", "expected"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "graphValue": {
+          "enum": ["omitted", "none", "idempotent", "non-idempotent", "unknown"]
+        },
+        "expected": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "valid",
+            "eventWrites",
+            "executorCalls",
+            "retryDispositionForOpenAttempt"
+          ],
+          "properties": {
+            "valid": { "type": "boolean" },
+            "normalized": {
+              "enum": ["none", "idempotent", "non-idempotent", "unspecified"]
+            },
+            "code": { "$ref": "#/$defs/failureCode" },
+            "eventWrites": { "type": "integer", "minimum": 0, "maximum": 1 },
+            "executorCalls": { "const": 0 },
+            "retryDispositionForOpenAttempt": {
+              "enum": ["safe-new-attempt", "in-doubt-effect", "forbidden"]
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": { "valid": { "const": true } },
+                "required": ["valid"]
+              },
+              "then": {
+                "required": ["normalized"],
+                "properties": {
+                  "normalized": {
+                    "enum": ["none", "idempotent", "non-idempotent", "unspecified"]
+                  },
+                  "code": false
+                }
+              },
+              "else": {
+                "required": ["code"],
+                "properties": {
+                  "normalized": false,
+                  "code": { "$ref": "#/$defs/failureCode" },
+                  "eventWrites": { "const": 0 }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "failureMatrix": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "preExecutorFailurePoints",
+        "postExecutorFailurePoints",
+        "sideEffectClassifications",
+        "matrixCaseCount",
+        "preExecutorRule",
+        "postExecutorPureRule",
+        "postExecutorEffectRule",
+        "unknownClassificationRule"
+      ],
+      "properties": {
+        "preExecutorFailurePoints": {
+          "const": [
+            "snapshot",
+            "classification",
+            "policy",
+            "encode",
+            "mac",
+            "protect",
+            "atomic-publish",
+            "receipt",
+            "scan",
+            "canonicalize",
+            "sink-write",
+            "compare-and-swap"
+          ]
+        },
+        "postExecutorFailurePoints": {
+          "const": [
+            "encode",
+            "mac",
+            "protect",
+            "atomic-publish",
+            "receipt",
+            "scan",
+            "canonicalize",
+            "sink-write",
+            "compare-and-swap"
+          ]
+        },
+        "sideEffectClassifications": {
+          "const": ["none", "idempotent", "non-idempotent", "unspecified"]
+        },
+        "matrixCaseCount": { "const": 48 },
+        "preExecutorRule": { "const": "no-write-no-executor" },
+        "postExecutorPureRule": { "const": "no-write-safe-new-attempt" },
+        "postExecutorEffectRule": { "const": "no-write-in-doubt-effect" },
+        "unknownClassificationRule": { "const": "reject-before-write-or-executor" }
+      }
+    },
+    "storeBypassCase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "operation", "sourceClass", "expected"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "operation": {
+          "enum": [
+            "direct-event-append",
+            "direct-memory-event-append",
+            "direct-checkpoint-save",
+            "raw-protected-put",
+            "custom-adapter-write",
+            "reused-prepared-write"
+          ]
+        },
+        "sourceClass": { "$ref": "capture-source.schema.json" },
+        "expected": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["denied", "code", "sinkWrites"],
+          "properties": {
+            "denied": { "const": true },
+            "code": { "enum": ["REDACTION_POLICY_REQUIRED", "REDACTION_POLICY_INVALID", "PAYLOAD_PROTECTION_REQUIRED", "PAYLOAD_PROTECTION_FAILED"] },
+            "sinkWrites": { "const": 0 }
+          }
+        }
+      }
+    },
+    "derivativeCase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "operation", "sourceDisposition", "sameRun", "expected"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "operation": {
+          "enum": ["checkpoint", "replay", "fork", "trace", "export", "terminal-result", "migration", "support-bundle"]
+        },
+        "sourceDisposition": { "enum": ["metadata-only", "protected-ref", "redacted", "inline-unredacted"] },
+        "sameRun": { "type": "boolean" },
+        "expected": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["disposition", "policyRelation", "refAction", "authoritySource", "mayFeedScheduler"],
+          "properties": {
+            "disposition": { "enum": ["metadata-only", "protected-ref", "redacted", "inline-unredacted", "forbidden"] },
+            "policyRelation": { "enum": ["same-hash", "new-run-policy", "explicit-legacy-authorization", "not-applicable"] },
+            "refAction": { "enum": ["new-protected-occurrence", "reuse-only-identical-aad", "redact-again", "omit", "forbidden"] },
+            "authoritySource": { "enum": ["event-journal", "new-run-created", "none"] },
+            "mayFeedScheduler": { "type": "boolean" }
+          }
+        }
+      }
+    },
+    "sensitiveFieldCase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "sourceClass",
+        "policyControl",
+        "defaultAction",
+        "mayBeMetadata",
+        "mayFeedScheduler",
+        "identifierTreatment"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "sourceClass": { "$ref": "capture-source.schema.json" },
+        "policyControl": { "$ref": "#/$defs/policyControl" },
+        "defaultAction": { "enum": ["off", "metadata-only-allowlist", "protected-ref"] },
+        "mayBeMetadata": { "type": "boolean" },
+        "mayFeedScheduler": { "type": "boolean" },
+        "identifierTreatment": {
+          "enum": [
+            "not-applicable",
+            "replace-with-runtime-opaque-and-protect-original",
+            "generated-opaque-metadata"
+          ]
+        }
+      }
+    },
+    "legacyCase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "redactedField", "inlineShape", "terminal", "authorization", "expected"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "redactedField": { "enum": ["true", "false", "absent"] },
+        "inlineShape": { "enum": ["input", "output", "failure", "result", "checkpoint"] },
+        "terminal": { "type": "boolean" },
+        "authorization": { "enum": ["none", "legacy-inline", "unsafe-inspect", "migration"] },
+        "expected": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["action", "executorCalls", "sourceRewritten"],
+          "properties": {
+            "action": { "enum": ["reject", "unsafe-read-only", "quarantine", "sealed-archive", "new-run"] },
+            "code": { "enum": ["LEGACY_REDACTION_MISMATCH", "INLINE_CAPTURE_NOT_AUTHORIZED"] },
+            "executorCalls": { "const": 0 },
+            "sourceRewritten": { "const": false }
+          }
+        }
+      }
+    },
+    "legacyMatrix": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "redactedFields",
+        "inlineShapes",
+        "terminalStates",
+        "cartesianCaseCount",
+        "misleadingRule",
+        "truthfulInlineRule"
+      ],
+      "properties": {
+        "redactedFields": { "const": ["true", "absent", "false"] },
+        "inlineShapes": {
+          "const": ["input", "output", "failure", "result", "checkpoint"]
+        },
+        "terminalStates": { "const": [false, true] },
+        "cartesianCaseCount": { "const": 30 },
+        "misleadingRule": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["redactedFields", "action", "code", "executorCalls", "sourceRewritten"],
+          "properties": {
+            "redactedFields": { "const": ["true", "absent"] },
+            "action": { "const": "reject" },
+            "code": { "const": "LEGACY_REDACTION_MISMATCH" },
+            "executorCalls": { "const": 0 },
+            "sourceRewritten": { "const": false }
+          }
+        },
+        "truthfulInlineRule": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["redactedField", "action", "code", "executorCalls", "sourceRewritten"],
+          "properties": {
+            "redactedField": { "const": "false" },
+            "action": { "const": "reject" },
+            "code": { "const": "INLINE_CAPTURE_NOT_AUTHORIZED" },
+            "executorCalls": { "const": 0 },
+            "sourceRewritten": { "const": false }
+          }
+        }
+      }
+    },
+    "dependencyJoin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contractTask", "nativeTasks", "securityJoin", "durableExtensionTask", "durableExtensionRequires"],
+      "properties": {
+        "contractTask": { "const": "D9-REDACTION-039" },
+        "nativeTasks": {
+          "type": "array",
+          "prefixItems": [
+            { "const": "D9-TS-REDACTION-087" },
+            { "const": "D9-PY-REDACTION-088" }
+          ],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "securityJoin": { "const": "D9-REDACTION-CONFORMANCE-089" },
+        "durableExtensionTask": { "const": "D9-DURABLE-EXT-SPEC-031" },
+        "durableExtensionRequires": {
+          "type": "array",
+          "prefixItems": [
+            { "const": "D9-REDACTION-CONFORMANCE-089" },
+            { "const": "D9-APPROVAL-077" }
+          ],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        }
+      }
+    }
+  }
+}
