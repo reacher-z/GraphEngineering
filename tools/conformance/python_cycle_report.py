@@ -6,6 +6,7 @@ import asyncio
 import copy
 import hashlib
 import json
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, cast
 
@@ -39,6 +40,23 @@ FIXTURES = ROOT / "spec" / "conformance"
 STARTED_AT = "2026-07-26T12:00:00.000Z"
 CHECKPOINT_AT = "2026-07-26T12:00:01.000Z"
 RESOLUTION_AT = CHECKPOINT_AT
+
+
+def _inline(handler: Callable[[Any], Any]) -> Callable[[Any], Awaitable[Any]]:
+    """Dispatch a campaign handler inline on the event loop.
+
+    The controller offloads a plain synchronous handler to `asyncio.to_thread`,
+    and that thread hop races the binding's wall-clock `timeoutMs` (100 ms in
+    this campaign) whenever the host is loaded, aborting an attempt this
+    campaign never intends to time out. A coroutine handler runs to completion
+    in its first loop step, so the timer can never preempt it -- which is how
+    the TypeScript reference controller executes the same handlers.
+    """
+
+    async def invoke(context: Any) -> Any:
+        return handler(context)
+
+    return invoke
 
 
 def _request(graph_hash: str) -> dict[str, Any]:
@@ -202,9 +220,9 @@ async def _accepted_patch_report(
     result = await start_cycle(
         request,
         CycleHandlers(
-            finder=finder,
-            candidate_evaluator=evaluator,
-            patch_planner=planner,
+            finder=_inline(finder),
+            candidate_evaluator=_inline(evaluator),
+            patch_planner=_inline(planner),
         ),
         store=MemoryCycleStore(),
         lease=patch_lease,
@@ -273,7 +291,7 @@ async def _resume_report(
     try:
         await start_cycle(
             request,
-            CycleHandlers(finder=finder, candidate_evaluator=evaluator),
+            CycleHandlers(finder=_inline(finder), candidate_evaluator=_inline(evaluator)),
             store=store,
             lease=first_lease,
             clock=lambda: STARTED_AT,
@@ -293,7 +311,7 @@ async def _resume_report(
     }
     result = await resume_cycle(
         request,
-        CycleHandlers(finder=finder, candidate_evaluator=evaluator),
+        CycleHandlers(finder=_inline(finder), candidate_evaluator=_inline(evaluator)),
         store=store,
         expected_version=len(interrupted) - 1,
         lease=second_lease,
@@ -373,10 +391,10 @@ async def _mode_report(
     result = await start_cycle(
         request,
         CycleHandlers(
-            finder=finder,
-            candidate_evaluator=evaluator,
-            condition=decide if mode == "while" else None,
-            optimizer_evaluator=decide if mode != "while" else None,
+            finder=_inline(finder),
+            candidate_evaluator=_inline(evaluator),
+            condition=_inline(decide) if mode == "while" else None,
+            optimizer_evaluator=_inline(decide) if mode != "while" else None,
         ),
         store=MemoryCycleStore(),
         lease=mode_lease,
@@ -433,7 +451,7 @@ async def _in_doubt_report(
     in_doubt_lease["leaseId"] = f"cycle-cross-language-in-doubt-{suffix}-lease"
     result = await start_cycle(
         request,
-        CycleHandlers(finder=finder, candidate_evaluator=evaluator),
+        CycleHandlers(finder=_inline(finder), candidate_evaluator=_inline(evaluator)),
         store=MemoryCycleStore(),
         lease=in_doubt_lease,
         clock=lambda: STARTED_AT,
@@ -487,7 +505,10 @@ async def _resolution_report(graph_hash: str) -> dict[str, Any]:
     }
     terminal = await start_cycle(
         request,
-        CycleHandlers(finder=finder, candidate_evaluator=lambda _: []),
+        CycleHandlers(
+            finder=_inline(finder),
+            candidate_evaluator=_inline(lambda _: []),
+        ),
         store=store,
         lease=initial_lease,
         clock=lambda: STARTED_AT,
@@ -757,11 +778,15 @@ async def _lease_fault_campaign(
             await start_cycle(
                 request,
                 CycleHandlers(
-                    finder=lambda _: (_ for _ in ()).throw(
-                        AssertionError("seed dispatched finder")
+                    finder=_inline(
+                        lambda _: (_ for _ in ()).throw(
+                            AssertionError("seed dispatched finder")
+                        )
                     ),
-                    candidate_evaluator=lambda _: (_ for _ in ()).throw(
-                        AssertionError("seed dispatched evaluator")
+                    candidate_evaluator=_inline(
+                        lambda _: (_ for _ in ()).throw(
+                            AssertionError("seed dispatched evaluator")
+                        )
                     ),
                 ),
                 store=store,
@@ -851,8 +876,8 @@ async def _lease_fault_campaign(
             await resume_cycle(
                 request,
                 CycleHandlers(
-                    finder=stale_finder,
-                    candidate_evaluator=lambda _: [],
+                    finder=_inline(stale_finder),
+                    candidate_evaluator=_inline(lambda _: []),
                 ),
                 store=store,
                 expected_version=len(recovered_events) - 1,
@@ -887,7 +912,7 @@ async def _lease_fault_campaign(
 
         resumed = await resume_cycle(
             request,
-            CycleHandlers(finder=finder, candidate_evaluator=evaluator),
+            CycleHandlers(finder=_inline(finder), candidate_evaluator=_inline(evaluator)),
             store=store,
             expected_version=len(recovered_events) - 1,
             lease={
@@ -918,11 +943,15 @@ async def _lease_fault_campaign(
         terminal = await resume_cycle(
             request,
             CycleHandlers(
-                finder=lambda _: (_ for _ in ()).throw(
-                    AssertionError("terminal resume dispatched finder")
+                finder=_inline(
+                    lambda _: (_ for _ in ()).throw(
+                        AssertionError("terminal resume dispatched finder")
+                    )
                 ),
-                candidate_evaluator=lambda _: (_ for _ in ()).throw(
-                    AssertionError("terminal resume dispatched evaluator")
+                candidate_evaluator=_inline(
+                    lambda _: (_ for _ in ()).throw(
+                        AssertionError("terminal resume dispatched evaluator")
+                    )
                 ),
             ),
             store=store,
@@ -1025,7 +1054,7 @@ async def _main() -> None:
 
     result = await start_cycle(
         request,
-        CycleHandlers(finder=finder, candidate_evaluator=evaluator),
+        CycleHandlers(finder=_inline(finder), candidate_evaluator=_inline(evaluator)),
         store=MemoryCycleStore(),
         lease=_lease(),
         clock=lambda: STARTED_AT,

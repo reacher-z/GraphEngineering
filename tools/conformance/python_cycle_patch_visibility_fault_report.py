@@ -230,15 +230,24 @@ async def _exercise_entry(
     seed_finder_calls = 0
     seed_evaluator_calls = 0
 
-    def seed_finder(_: object) -> list[object]:
+    # Every campaign handler is a coroutine function so the controller runs it
+    # inline on the event loop instead of offloading it to `asyncio.to_thread`.
+    # A thread hop would race the binding's wall-clock `timeoutMs` under host
+    # load and non-deterministically abort an attempt this campaign never
+    # intends to time out. Inline dispatch matches how the TypeScript reference
+    # controller executes its synchronous campaign handlers.
+    async def seed_finder(_: object) -> list[object]:
         nonlocal seed_finder_calls
         seed_finder_calls += 1
         return []
 
-    def seed_evaluator(_: object) -> list[object]:
+    async def seed_evaluator(_: object) -> list[object]:
         nonlocal seed_evaluator_calls
         seed_evaluator_calls += 1
         return []
+
+    async def seed_planner(_: object) -> object:
+        raise AssertionError("patch-visibility seed dispatched the planner")
 
     def seed_hook(boundary: str) -> None:
         target_hook(boundary)
@@ -251,9 +260,7 @@ async def _exercise_entry(
             CycleHandlers(
                 finder=seed_finder,
                 candidate_evaluator=seed_evaluator,
-                patch_planner=lambda _: (_ for _ in ()).throw(
-                    AssertionError("patch-visibility seed dispatched the planner")
-                ),
+                patch_planner=seed_planner,
             ),
             store=store,
             lease=_lease(cast(str, request["controllerRunId"]), 1),
@@ -278,15 +285,15 @@ async def _exercise_entry(
     planner_keys: list[str] = []
     forbidden_calls = {"finder": 0, "evaluator": 0}
 
-    def forbidden_finder(_: object) -> object:
+    async def forbidden_finder(_: object) -> object:
         forbidden_calls["finder"] += 1
         raise AssertionError("patch-visibility recovery reran finder")
 
-    def forbidden_evaluator(_: object) -> object:
+    async def forbidden_evaluator(_: object) -> object:
         forbidden_calls["evaluator"] += 1
         raise AssertionError("patch-visibility recovery reran evaluator")
 
-    def planner(context: CycleActivityContext) -> dict[str, Any]:
+    async def planner(context: CycleActivityContext) -> dict[str, Any]:
         nonlocal planner_calls
         planner_calls += 1
         planner_keys.append(context.activity_key)
@@ -438,7 +445,7 @@ async def _exercise_entry(
     terminal_handler_calls = 0
     terminal_clock_calls = 0
 
-    def terminal_forbidden(_: object) -> object:
+    async def terminal_forbidden(_: object) -> object:
         nonlocal terminal_handler_calls
         terminal_handler_calls += 1
         raise AssertionError("patch-visibility terminal resume dispatched a handler")

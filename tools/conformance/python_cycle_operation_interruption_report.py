@@ -108,11 +108,15 @@ def _lease(run_id: str, epoch: int) -> dict[str, Any]:
 
 
 def _handlers(counter: dict[str, int]) -> CycleHandlers:
-    def finder(_: object) -> list[object]:
+    # Coroutine handlers run inline on the event loop. A plain synchronous
+    # handler is offloaded to `asyncio.to_thread`, and the resulting thread hop
+    # races the binding's 100 ms wall-clock `timeoutMs` under host load, which
+    # would abort an attempt this campaign never intends to time out.
+    async def finder(_: object) -> list[object]:
         counter["finder"] += 1
         return []
 
-    def evaluator(_: object) -> list[object]:
+    async def evaluator(_: object) -> list[object]:
         counter["candidateEvaluator"] += 1
         return []
 

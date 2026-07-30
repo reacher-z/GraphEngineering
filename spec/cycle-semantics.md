@@ -1222,6 +1222,58 @@ policy uses two maximum attempts and USD 0.25 per attempt. Tests control the
 boundary directly and use a bounded timer; they do not depend on arbitrary
 sleep ordering.
 
+#### Registered divergence: attempt timeout is the one non-deterministic bound
+
+Every other bound in this contract — `deadlineAt`, `durationMs`,
+`maxDurationMs` — is driven by the injected trusted clock and is therefore
+deterministic under a frozen clock. The per-attempt `timeoutMs` is not. It is
+measured against real wall-clock time, and the two native runtimes disagree
+about whether it can fire at all for a synchronous handler:
+
+- **TypeScript.** `invokeActivity` invokes the handler through
+  `Promise.resolve().then(...)` and races it against a `setTimeout`. A
+  synchronous handler settles in a microtask, and the timer callback is a
+  macrotask that cannot run until the microtask queue drains. A synchronous
+  TypeScript handler therefore **can never time out**, at any load and at any
+  `timeoutMs`. A measured 20-iteration probe with a handler blocking the loop
+  for 300 ms against `timeoutMs: 100` recorded 0 timeouts.
+- **Python.** A non-coroutine handler is dispatched through
+  `asyncio.to_thread`, so it must cross the default thread pool and re-acquire
+  the GIL before its result reaches the event loop. That crossing genuinely
+  races the wall clock. Under CPU saturation, measured dispatch latency for the
+  same handlers inflated from a p99 of 0.86 ms to a maximum of 661 ms, past a
+  100 ms `timeoutMs`.
+
+A synchronous handler is consequently timeout-exempt in TypeScript and
+timeout-eligible in Python. This is a real divergence, not a harness artifact.
+Its consequence is durable, not cosmetic: a load-induced timeout on an
+`idempotent` binding writes an in-doubt activity into the event stream, so two
+conforming runtimes can produce different durable histories for the same
+inputs purely because of machine load.
+
+Until this is resolved, the following is normative:
+
+1. **A cross-language conformance campaign MUST NOT use a synchronous
+   handler.** Every campaign handler MUST be a coroutine function in Python and
+   the corresponding asynchronous form in TypeScript, so dispatch completes in
+   its first event-loop step and the timer can never preempt it. A campaign
+   that violates this is measuring machine load rather than protocol behavior.
+2. A campaign that deliberately exercises attempt timeout MUST make the handler
+   block on an awaited primitive rather than rely on scheduling delay.
+3. No implementation may treat the current TypeScript behavior as the
+   specification. That a synchronous handler cannot time out is an artifact of
+   the microtask ordering, not a decision this contract made.
+
+Resolving the divergence requires a decision this contract does not yet make.
+Running Python's non-coroutine handlers inline would match TypeScript exactly,
+but would remove a strictly stronger guarantee Python currently has and tests —
+a blocking synchronous handler being timed out, charged, and never committed —
+which TypeScript cannot express at all. Driving attempt timeout from the
+injected clock would make the controller fully deterministic, but would make
+`timeoutMs` unreachable in the campaigns that require it to fire, and needs a
+matching injectable-timer design on both sides. The choice is a specification
+decision and is recorded as open.
+
 For every row, native reports compare complete event canonical bytes and
 record hashes, result and checkpoint projections, activity paths, failure and
 settlement facts, in-doubt state, replay, and terminal resume behavior. This is

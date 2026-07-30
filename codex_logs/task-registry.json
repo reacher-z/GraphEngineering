@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-07-30T11:00:00Z",
+  "updated_at": "2026-07-30T12:45:00Z",
   "repository": ".",
   "scan_policy": {
     "warning_after_minutes": 60,
@@ -2036,6 +2036,22 @@
       "risk": "critical",
       "blocker": null,
       "next_action": "Join both native redaction lanes with shared fixtures and sink-byte canary scans"
+    },
+    {
+      "id": "D8-CYCLE-TIMEOUT-DIVERGENCE-090",
+      "title": "Resolve the cross-language attempt-timeout divergence for synchronous handlers",
+      "owner": "main protocol lane + TS/Python runtime lanes",
+      "status": "planned",
+      "work_package": "WP5-WP11",
+      "depends_on": ["D7-CYCLE-CONFORMANCE-027"],
+      "expected_artifacts": ["spec/cycle-semantics.md", "packages/runtime/src/cycle-controller.ts", "python/src/graph_engineering/cycle_controller.py", "tools/conformance"],
+      "expected_tests": ["a synchronous handler produces the same timeout verdict in both runtimes under CPU saturation", "attempt timeout is reachable in both runtimes only through a deliberate awaited block", "no load-induced in-doubt activity is written to the durable stream in either runtime", "the chosen resolution preserves or explicitly retires the Python blocking-handler charge-and-never-commit guarantee"],
+      "assigned_at": "2026-07-30T12:45:00Z",
+      "started_at": null,
+      "last_heartbeat": "2026-07-30T12:45:00Z",
+      "risk": "high",
+      "blocker": null,
+      "next_action": "TypeScript races a setTimeout macrotask against a handler that settles in a microtask, so a synchronous handler can never time out; Python dispatches a non-coroutine handler through asyncio.to_thread, so the same handler races the wall clock, and under load it times out, aborts the attempt before the event carrying the campaign boundary is built, and writes a divergent in-doubt activity. Measured: TypeScript 0 timeouts in 20 iterations with a 300ms blocking handler against timeoutMs 100; Python dispatch latency inflated from p99 0.86ms to a 661ms maximum under 32 spinners, with an unmodified-tree control of 1 pass in 5 runs. Conformance campaigns are now normatively barred from synchronous handlers, which removes the observable flake but not the divergence. Choose between running Python non-coroutine handlers inline, which matches TypeScript but retires Python's stronger blocking-handler charge-and-never-commit guarantee that TypeScript cannot express, and driving attempt timeout from the injected clock, which is fully deterministic but makes timeoutMs unreachable in the campaigns that require it to fire. Both are specification decisions, not bug fixes"
     }
   ]
 }
