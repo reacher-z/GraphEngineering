@@ -15204,3 +15204,103 @@ remain false.
 
 The next implementation leaf is the four-receipt atomic stage adoption using all
 four authentic non-consumed initial-write receipts.
+
+## 31.39 D6 integrated-barrier contract revision 2: ownership is a versioned claim (append-only, 2026-07-30)
+
+This section is append-only and edits no earlier line. The pre-append
+15,206-line prefix remains byte-identical with SHA-256
+`a0213ddf565b21bacd4e13f6cd0ab08a463df8c8f11fcb7bd5f1d91c7dc1fd6e`.
+
+### 31.39.1 What revision 1 got wrong
+
+§31.38 froze the integrated-barrier contract with an ownership rule copied
+verbatim from the accepted integrated-router pass: `GE1421` owns every portable
+barrier config admitted by the Graph envelope.
+
+That copy was invalid because the two node kinds have different histories.
+Routers were introduced together with their policy, so no router config predated
+the rule. Barrier nodes predate this contract and already ship with configs the
+rule cannot accept — `{"condition": "all"}` in
+`spec/conformance/diamond.graph.json`, `{}` in the integrated-router runtime
+graphs, and `{"condition": "minimum", "minimum": 1}` in
+`spec/conformance/runtime-capability.case.json`, whose frozen expectation is a
+successful run.
+
+Under revision 1 every one of those became a compile error. Measured with the
+pass installed: 16 pre-existing tests failed across `core/compiler`,
+`core/integrated-router`, `runtime/scheduler`, `runtime/durable`,
+`runtime/graph-patch` and `runtime/integrated-router-conformance`. That directly
+contradicted conformance requirement 13 of the same contract, which requires the
+existing core, primitives, patterns, scheduler, router and durable suites to
+remain green. The two requirements were mutually unsatisfiable.
+
+### 31.39.2 How it was found
+
+Not by review. The TypeScript and Python implementation lanes were dispatched in
+parallel with no shared channel, and both reached the identical conclusion,
+implemented their compiler pass fully, and then deliberately declined to install
+it — each leaving a comment at the exact insertion point recording why. Neither
+invented a carve-out.
+
+That is the outcome the ownership discipline is for. A lane that had "fixed" the
+fixtures instead would have migrated `diamond.graph.json` and every dependent
+frozen hash across `expected.json`, three GraphPatch corpora, the CLI, the MCP
+server, both quickstarts and the Python suite — a large cross-language migration
+performed to satisfy a rule that was itself wrong.
+
+### 31.39.3 The revision
+
+`IntegratedBarrierPolicy` now requires
+`apiVersion: "graphengineering.reacher-z.github.io/barrier/v1alpha1"`. A barrier
+config is a *claimed policy* if and only if it is a portable object carrying
+that exact value.
+
+Ownership is keyed on `apiVersion` alone. `kind` is validated content, not part
+of the ownership key. This is a deliberate asymmetry with the conditional-edge
+registry, which keys on the exact `(apiVersion, kind)` pair: keying a barrier
+policy on the pair would make `{apiVersion: <exact>, kynd: "all", …}` unclaimed
+and therefore silent, which is precisely the implicit pass the contract exists
+to forbid.
+
+All four diagnostics are ownership-gated, including `GE1423`. An input-free
+legacy barrier keeps its pre-contract behavior; existing reachability and
+entrypoint diagnostics continue to apply to it unchanged. Two `GE1421` locations
+became unreachable by construction — the config root and `/apiVersion` — because
+a claimed policy is by definition an object carrying the exact version.
+
+The safety property is unchanged. The silent-pass defect concerns barriers that
+*declare* a threshold, and a declaration is now something an author states
+rather than something a compiler guesses. A vote-shaped object pasted into a
+barrier config carries the same `apiVersion` and is therefore diagnosed rather
+than silently ignored.
+
+### 31.39.4 Corpus consequences
+
+Every barrier `policyHash` moved, because the hash frames the canonical policy,
+and every `decisionId` framing a document containing one moved with it. Exactly
+the router-side literals did not move — the four `RouteDecision` identity cases,
+the three route replay events and the `RouteDecision` identifier base — which is
+the expected signature of a barrier-only discriminator and was used as a
+correctness check rather than assumed.
+
+The corpus grew to 79 policy cases with a three-way outcome, because "not an
+exact policy" and "not claimed at all" are different facts with different
+consequences; 16 compiler cases carrying 21 diagnostics, including two that mix
+a legacy barrier with a claimed one in the same graph; and a new 15-case
+`ownershipCases` section that drops each unclaimed config into a real conforming
+graph and asserts the barrier pass emits nothing. The validator additionally
+asserts that no `GE142x` diagnostic anywhere in the corpus ever names an
+unclaimed barrier.
+
+One question is deliberately left undecided in the corpus rather than guessed:
+no case places an unclaimed barrier with zero incoming edges, and the validator
+fails if one is ever added, so the corpus freezes no assumption about a
+situation the contract had not yet settled. §31.39.3 settles it.
+
+### 31.39.5 Non-claims
+
+Revision 2 changes ownership only. It implements nothing, and
+`implementationClaim`, `typescriptRuntimeClaim`, `pythonRuntimeClaim` and
+`capabilityGateClaim` all remain `false`. No barrier execution, deadline,
+quorum, resolution, late-arrival, cancellation or decision-replay behavior
+exists in either runtime.

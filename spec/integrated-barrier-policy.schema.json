@@ -2,10 +2,14 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/integrated-barrier-policy.schema.json",
   "title": "Graph Engineering integrated barrier policy",
-  "description": "Direct config of a Graph IR node whose kind is 'barrier'. There is no config.policy wrapper and no inference from edges or metadata. onUnsatisfied and lateArrival are required for every kind and have no default, because a silently defaulted unsatisfied barrier is the implicit pass this contract exists to forbid. Each kind declares exactly its own threshold member; unevaluatedProperties therefore rejects a threshold that belongs to a different kind.",
+  "description": "Direct config of a Graph IR node whose kind is 'barrier'. There is no config.policy wrapper and no inference from edges or metadata. apiVersion is the ownership discriminator: a barrier config is a claimed policy only if it carries that exact value, so pre-contract configs without it are not interpreted as policies at all. onUnsatisfied and lateArrival are required for every kind and have no default, because a silently defaulted unsatisfied barrier is the implicit pass this contract exists to forbid. Each kind declares exactly its own threshold member; unevaluatedProperties therefore rejects a threshold that belongs to a different kind.",
   "type": "object",
-  "required": ["kind", "onUnsatisfied", "lateArrival"],
+  "required": ["apiVersion", "kind", "onUnsatisfied", "lateArrival"],
   "properties": {
+    "apiVersion": {
+      "description": "Ownership discriminator. A barrier config is a claimed policy if and only if it carries this exact value. A barrier config without it is not interpreted by the barrier compiler pass at all, which is what keeps pre-contract configs such as {\"condition\": \"all\"} compiling. Ownership is a versioned claim the author states, never a shape the compiler guesses.",
+      "const": "graphengineering.reacher-z.github.io/barrier/v1alpha1"
+    },
     "kind": {
       "enum": ["all", "minimum", "percentage", "quorum"]
     },

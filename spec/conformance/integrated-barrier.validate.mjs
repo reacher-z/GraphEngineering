@@ -126,7 +126,9 @@ const ID_LIST_FIELDS = ["acceptedIds", "failedIds", "missingIds", "timedOutIds",
 // "unknown keys first in Unicode code-point order, then required-or-present
 // fields in contract order". The contract order is the declaration order of the
 // IntegratedBarrierPolicy block in the semantics document.
+const BARRIER_API_VERSION = "graphengineering.reacher-z.github.io/barrier/v1alpha1";
 const POLICY_FIELD_ORDER = [
+  "apiVersion",
   "kind",
   "minimum",
   "basisPoints",
@@ -277,6 +279,11 @@ function policyShapeError(config) {
     const present = Object.hasOwn(config, field);
     const value = config[field];
     switch (field) {
+      case "apiVersion":
+        // Unreachable for a claimed policy: an absent or wrong apiVersion means
+        // the config was never claimed, so no diagnostic is produced at all.
+        if (!present || value !== BARRIER_API_VERSION) return "/apiVersion";
+        break;
       case "kind":
         if (!present || !KINDS.includes(value)) return "/kind";
         break;
@@ -334,7 +341,18 @@ function policyThresholdError(config, incomingEdgeCount) {
   return null;
 }
 
+/**
+ * Ownership. A barrier config is a claimed policy if and only if it is a
+ * portable object carrying exactly the barrier apiVersion. Everything else is
+ * not interpreted by this pass at all, which is what keeps pre-contract
+ * configs such as {"condition": "all"} and {} compiling.
+ */
+function isClaimedPolicy(config) {
+  return isPlainObject(config) && config.apiVersion === BARRIER_API_VERSION;
+}
+
 function referencePolicyDiagnostic(config) {
+  if (!isClaimedPolicy(config)) return null;
   const shape = policyShapeError(config);
   if (shape !== null) return { code: GE1421, relativePath: shape };
   const cardinality = policyCardinalityError(config);
@@ -354,6 +372,8 @@ function referenceBarrierDiagnostics(graph) {
   const byCategory = { [GE1421]: [], [GE1422]: [], [GE1423]: [], [GE1424]: [] };
   graph.nodes.forEach((node, index) => {
     if (node.kind !== "barrier") return;
+    // Unclaimed barrier configs are not interpreted by this pass at all.
+    if (!isClaimedPolicy(node.config)) return;
     const base = `#/nodes/${index}`;
     const edgeCount = incoming.get(node.id) ?? 0;
     const policyDiagnostic = referencePolicyDiagnostic(node.config);
@@ -512,6 +532,11 @@ function referenceReplayOutcome(testCase) {
 // Structural helpers.
 // ---------------------------------------------------------------------------
 
+/** Documentation fields may cite other spec files; expectation fields may not. */
+function isProseKey(key) {
+  return key === "note" || key === "notes" || key === "description" || key.endsWith("Note");
+}
+
 function collectStrings(value, sink) {
   if (typeof value === "string") {
     sink.push(value);
@@ -524,6 +549,7 @@ function collectStrings(value, sink) {
   if (isPlainObject(value)) {
     for (const key of Object.keys(value)) {
       sink.push(key);
+      if (isProseKey(key)) continue;
       collectStrings(value[key], sink);
     }
   }
@@ -537,6 +563,29 @@ function assertDiagnosticProjection(diagnostic, label) {
     assert.notEqual(diagnostic[field], null, `${label} materialized an absent diagnostic field as null`);
   }
   assert.ok(Array.isArray(diagnostic.nodeIds) && diagnostic.nodeIds.length > 0, `${label} names no node`);
+}
+
+/** Minimal conforming graph whose single barrier carries the supplied config. */
+function ownershipProbeGraph(config) {
+  const node = (id) => ({ id, kind: "transform", inputSchema: {}, outputSchema: {}, config: {} });
+  return {
+    apiVersion: "graphengineering.reacher-z.github.io/v1alpha1",
+    kind: "Graph",
+    metadata: { name: "ownership-probe", version: "1" },
+    inputSchema: {},
+    outputSchema: {},
+    entrypoints: ["seed"],
+    outputs: { result: { node: "sink" } },
+    nodes: [
+      node("seed"),
+      { id: "gate", kind: "barrier", inputSchema: {}, outputSchema: {}, config },
+      node("sink"),
+    ],
+    edges: [
+      { id: "seed-gate", from: { node: "seed" }, to: { node: "gate" } },
+      { id: "gate-sink", from: { node: "gate" }, to: { node: "sink" } },
+    ],
+  };
 }
 
 function compileSchema(engine, schema, label) {
@@ -601,6 +650,32 @@ export async function validateIntegratedBarrierFixture() {
     POLICY_FIELD_ORDER,
     "frozen policy contract order drifted",
   );
+  assert.equal(
+    fixture.firstInvalidDescendantRule.policyFieldOrder[0],
+    "apiVersion",
+    "the ownership discriminator must lead the normative contract order",
+  );
+  assert.equal(fixture.ownership.discriminator, "apiVersion");
+  assert.equal(fixture.ownership.claimedApiVersion, BARRIER_API_VERSION, "claimed apiVersion drifted");
+  assert.equal(fixture.ownership.nonObjectConfigsCannotClaim, true);
+  assert.deepEqual(fixture.ownership.unreachableDiagnosticPaths, ["", "/apiVersion"]);
+  assert.equal(
+    policySchema.properties.apiVersion.const,
+    BARRIER_API_VERSION,
+    "integrated-barrier-policy.schema.json ownership discriminator drifted",
+  );
+  assert.ok(
+    policySchema.required.includes("apiVersion"),
+    "the ownership discriminator must be required by the frozen policy schema",
+  );
+  // The policy and the vote carrier deliberately share an apiVersion; they are
+  // separated by kind, so a vote pasted into a barrier config is still claimed.
+  assert.equal(
+    voteSchema.properties.apiVersion.const,
+    BARRIER_API_VERSION,
+    "the vote carrier no longer shares the barrier apiVersion",
+  );
+  assert.equal(fixture.ownership.sharedWithVoteCarrier, true);
   assert.deepEqual(fixture.firstInvalidDescendantRule.quorumFieldOrder, QUORUM_FIELD_ORDER);
   assert.deepEqual(fixture.firstInvalidDescendantRule.deadlineFieldOrder, DEADLINE_FIELD_ORDER);
   assert.deepEqual(fixture.firstInvalidDescendantRule.cardinalityFieldOrder, CARDINALITY_FIELD_ORDER);
@@ -796,6 +871,83 @@ export async function validateIntegratedBarrierFixture() {
     "this validator must read no other conformance corpus",
   );
 
+  // --- ownershipCases -----------------------------------------------------
+  // This is the assertion the revision exists for: no unclaimed barrier config
+  // may produce any GE142x diagnostic.
+  const ownershipCases = fixture.ownershipCases;
+  assert.ok(ownershipCases.length >= 8, `ownershipCases must hold at least 8 cases, saw ${ownershipCases.length}`);
+  assert.equal(
+    new Set(ownershipCases.map(({ name }) => name)).size,
+    ownershipCases.length,
+    "ownershipCases names are not unique",
+  );
+  let unclaimedOwnershipCases = 0;
+  let claimedOwnershipCases = 0;
+  for (const testCase of ownershipCases) {
+    const label = `ownershipCases/${testCase.name}`;
+    const claimed = isClaimedPolicy(testCase.config);
+    assert.equal(claimed, testCase.expect.claimed, `${label} ownership claim drifted`);
+    const diagnostic = referencePolicyDiagnostic(testCase.config);
+    if (!claimed) {
+      unclaimedOwnershipCases += 1;
+      assert.deepEqual(
+        testCase.expect.diagnostics,
+        [],
+        `${label} is unclaimed, so the barrier pass must emit nothing for it`,
+      );
+      assert.equal(diagnostic, null, `${label} unclaimed config produced a diagnostic`);
+      // Prove it end to end: the same config inside a real graph emits nothing.
+      const probe = ownershipProbeGraph(testCase.config);
+      assert.deepEqual(
+        referenceBarrierDiagnostics(probe),
+        [],
+        `${label} produced a barrier diagnostic when compiled inside a graph`,
+      );
+      assert.equal(
+        validateGraph(probe),
+        true,
+        `${label} probe graph does not conform: ${JSON.stringify(validateGraph.errors)}`,
+      );
+    } else {
+      claimedOwnershipCases += 1;
+      const expected = testCase.expect.diagnostics;
+      assert.deepEqual(
+        diagnostic === null ? [] : [{ code: diagnostic.code, relativePath: diagnostic.relativePath }],
+        expected,
+        `${label} claimed-policy diagnostic drifted`,
+      );
+    }
+    assert.equal(
+      validatePolicy(testCase.config),
+      testCase.expect.claimed && testCase.expect.diagnostics.length === 0,
+      `${label} frozen schema acceptance disagrees with the claimed/clean expectation`,
+    );
+  }
+  assert.ok(unclaimedOwnershipCases >= 6, "ownershipCases must exercise several unclaimed shapes");
+  assert.ok(claimedOwnershipCases >= 3, "ownershipCases must exercise claimed carriers too");
+  for (const legacy of [{ condition: "all" }, {}]) {
+    assert.ok(
+      ownershipCases.some((item) => (
+        canonicalSerialize(item.config) === canonicalSerialize(legacy)
+        && item.expect.claimed === false
+        && item.expect.diagnostics.length === 0
+      )),
+      `ownershipCases must prove the pre-contract config ${canonicalSerialize(legacy)} is untouched`,
+    );
+  }
+  assert.ok(
+    ownershipCases.some((item) => (
+      item.config !== null
+      && typeof item.config === "object"
+      && !Array.isArray(item.config)
+      && item.config.apiVersion === BARRIER_API_VERSION
+      && item.config.kind === "BarrierVote"
+      && item.expect.claimed === true
+      && item.expect.diagnostics.length === 1
+    )),
+    "ownershipCases must freeze the shared-apiVersion consequence for a BarrierVote-shaped config",
+  );
+
   // --- policyCases --------------------------------------------------------
   const policyCases = fixture.policyCases;
   assert.ok(policyCases.length >= 34, `policyCases must hold at least 34 cases, saw ${policyCases.length}`);
@@ -806,9 +958,27 @@ export async function validateIntegratedBarrierFixture() {
   );
   const policyCodeCoverage = new Set();
   let validPolicyCases = 0;
+  let unclaimedPolicyCases = 0;
   for (const testCase of policyCases) {
     const label = `policyCases/${testCase.name}`;
+    const claimed = isClaimedPolicy(testCase.config);
+    assert.equal(claimed, testCase.expect.claimed, `${label} ownership claim drifted`);
     const expected = referencePolicyDiagnostic(testCase.config);
+    if (!claimed) {
+      // Not a claimed policy: never valid, and never a diagnostic either.
+      assert.equal(testCase.expect.valid, false, `${label} an unclaimed config cannot be a valid policy`);
+      assert.equal(expected, null, `${label} unclaimed config produced a diagnostic`);
+      assert.equal(Object.hasOwn(testCase.expect, "code"), false, `${label} unclaimed case carries a code`);
+      assert.equal(Object.hasOwn(testCase.expect, "relativePath"), false, `${label} unclaimed case carries a path`);
+      assert.equal(Object.hasOwn(testCase.expect, "policy"), false, `${label} unclaimed case carries a policy`);
+      assert.equal(
+        validatePolicy(testCase.config),
+        false,
+        `${label} unclaimed config must not conform to the frozen policy schema`,
+      );
+      unclaimedPolicyCases += 1;
+      continue;
+    }
     if (testCase.expect.valid) {
       validPolicyCases += 1;
       assert.equal(expected, null, `${label} is expected valid but the reference rule rejects it`);
@@ -871,9 +1041,35 @@ export async function validateIntegratedBarrierFixture() {
       `policyCases must accept a policy whose lateArrival is ${member}`,
     );
   }
+  // Revision 2 makes both of these unreachable: a claimed policy is by
+  // definition a portable object carrying the exact apiVersion.
+  for (const unreachable of ["", "/apiVersion"]) {
+    assert.equal(
+      policyCases.some((item) => item.expect.claimed && item.expect.relativePath === unreachable),
+      false,
+      `no claimed policy can report a diagnostic at '${unreachable}'`,
+    );
+  }
   assert.ok(
-    policyCases.some((item) => !item.expect.valid && item.expect.relativePath === ""),
-    "policyCases must report a non-object config at the config root",
+    unclaimedPolicyCases >= 8,
+    `policyCases must exercise the unclaimed branch, saw ${unclaimedPolicyCases}`,
+  );
+  for (const shape of [null, 1, "all", true, []]) {
+    assert.ok(
+      policyCases.some((item) => (
+        canonicalSerialize(item.config) === canonicalSerialize(shape) && item.expect.claimed === false
+      )),
+      `policyCases must prove ${canonicalSerialize(shape)} cannot carry an ownership claim`,
+    );
+  }
+  assert.ok(
+    policyCases.some((item) => (
+      item.expect.claimed === false
+      && isPlainObject(item.config)
+      && !Object.hasOwn(item.config, "apiVersion")
+      && Object.hasOwn(item.config, "kind")
+    )),
+    "policyCases must include a missing-apiVersion witness",
   );
 
   // --- compilerCases ------------------------------------------------------
@@ -971,6 +1167,44 @@ export async function validateIntegratedBarrierFixture() {
     }),
     "compilerCases must prove GE1421 does not suppress GE1423 on the same node",
   );
+
+  // The semantics document is ambiguous for one configuration: the ownership
+  // section says an unclaimed config produces no diagnostic from this pass,
+  // while the GE1423 table row is unqualified. The corpus must therefore
+  // contain no unclaimed barrier with zero incoming edges, so that it freezes
+  // no guess about the open question.
+  for (const testCase of compilerCases) {
+    const incoming = new Map();
+    for (const edge of testCase.graph.edges) {
+      incoming.set(edge.to.node, (incoming.get(edge.to.node) ?? 0) + 1);
+    }
+    for (const node of testCase.graph.nodes) {
+      if (node.kind !== "barrier" || isClaimedPolicy(node.config)) continue;
+      assert.notEqual(
+        incoming.get(node.id) ?? 0,
+        0,
+        `compilerCases/${testCase.name} places an unclaimed barrier with zero incoming edges, which the contract does not yet resolve`,
+      );
+    }
+  }
+  assert.ok(
+    compilerCases.some((testCase) => testCase.graph.nodes.some((node) => (
+      node.kind === "barrier" && !isClaimedPolicy(node.config)
+    )) && testCase.graph.nodes.some((node) => (
+      node.kind === "barrier" && isClaimedPolicy(node.config)
+    ))),
+    "compilerCases must contain a graph mixing a legacy barrier with a claimed policy barrier",
+  );
+  for (const testCase of compilerCases) {
+    for (const diagnostic of testCase.expectDiagnostics) {
+      if (!BARRIER_DIAGNOSTIC_CODE_SET.has(diagnostic.code)) continue;
+      const node = testCase.graph.nodes.find((item) => item.id === diagnostic.nodeIds[0]);
+      assert.ok(
+        isClaimedPolicy(node.config),
+        `compilerCases/${testCase.name} emits ${diagnostic.code} for the unclaimed barrier ${node.id}`,
+      );
+    }
+  }
 
   // GE1422 suppresses GE1424 on the same node. The witness must be a barrier
   // whose threshold member genuinely exceeds its incoming-edge count, so that
@@ -1600,9 +1834,12 @@ export async function validateIntegratedBarrierFixture() {
   return {
     contract: fixture.contract,
     claims: { ...claims },
+    ownershipCases: ownershipCases.length,
+    unclaimedOwnershipCases,
     policyCases: policyCases.length,
     validPolicyCases,
-    invalidPolicyCases: policyCases.length - validPolicyCases,
+    unclaimedPolicyCases,
+    invalidPolicyCases: policyCases.length - validPolicyCases - unclaimedPolicyCases,
     compilerCases: compilerCases.length,
     compilerDiagnostics: compilerCases.reduce((total, item) => total + item.expectDiagnostics.length, 0),
     evaluationCases: evaluationCases.length,

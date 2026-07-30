@@ -1,9 +1,17 @@
 # Integrated barrier and durable decision semantics v1alpha1
 
-Status: contract candidate, revision 1. `implementationClaim: false`. No
+Status: contract candidate, **revision 2**. `implementationClaim: false`. No
 TypeScript or Python runtime implements this contract yet. Freezing this file
 does not grant any barrier, quorum, deadline, human-gate, or decision-replay
 capability claim.
+
+Revision 2 makes policy ownership an explicit versioned claim rather than an
+inference from shape. Revision 1 made `GE1421` own every portable barrier config
+admitted by the Graph envelope, which turned every pre-contract barrier config
+in this repository into a compile error and contradicted this document's own
+requirement that the existing suites stay green. Two independent implementation
+lanes reached that conclusion separately and both stopped rather than inventing
+a carve-out. See the ownership section below.
 
 The normative corpus is `spec/conformance/integrated-barrier.case.json`.
 
@@ -56,6 +64,7 @@ inference from metadata is permitted.
 
 ```text
 IntegratedBarrierPolicy {
+  apiVersion: "graphengineering.reacher-z.github.io/barrier/v1alpha1"
   kind: "all" | "minimum" | "percentage" | "quorum"
   minimum?: integer 1..9007199254740991      // required iff kind == "minimum"
   basisPoints?: integer 1..10000             // required iff kind == "percentage"
@@ -71,9 +80,10 @@ IntegratedBarrierPolicy {
 }
 ```
 
-`onUnsatisfied` and `lateArrival` are required for every kind. There is no
-default. A policy that omits either is invalid, because a silently defaulted
-unsatisfied barrier is exactly the implicit pass this contract forbids.
+`apiVersion`, `onUnsatisfied` and `lateArrival` are required for every kind.
+There is no default for either resolution member. A claimed policy that omits
+one is invalid, because a silently defaulted unsatisfied barrier is exactly the
+implicit pass this contract forbids.
 
 Numeric integers are finite mathematical integers within the portable JSON
 safe-integer range, so JSON `1.0` is accepted as integer one in both languages
@@ -81,12 +91,65 @@ while booleans are never integers. Objects are exact: unknown fields,
 duplicates, and explicit null optionals are invalid. Omission, not null, selects
 optional behavior.
 
+### Ownership: a policy is a versioned claim, not an inference
+
+`apiVersion` is required and is the ownership discriminator. A barrier config
+is a *claimed policy* if and only if it is a portable object carrying that exact
+`apiVersion` value. Ownership is keyed by `apiVersion` **alone**; `kind` is
+validated content, not part of the ownership key.
+
+That asymmetry with the conditional-edge registry, which keys on the exact
+`(apiVersion, kind)` pair, is deliberate. Keying a barrier policy on the pair
+would make `{apiVersion: <exact>, kynd: "all", …}` unclaimed and therefore
+silent, which is precisely the implicit pass this contract exists to forbid. A
+misspelled or missing `kind` inside a claimed carrier must be a diagnostic, so
+the carrier alone must establish the claim.
+
+One consequence follows and is intended: the `BarrierVote` carrier declares the
+same `apiVersion`, so a vote-shaped object placed in a barrier node's `config`
+is a claimed policy and is diagnosed — its first invalid descendant is
+`/verdict`, since unknown keys precede required-or-present fields. Someone who
+pastes a vote where a policy belongs gets an error rather than a silently
+ignored barrier.
+
+The consequences are exact:
+
+- A claimed policy is fully validated. Every defect inside it — an unknown
+  member, a missing `kind`, a wrong type, a kind/threshold cardinality error —
+  is `GE1421` or `GE1422`. A typo such as `kynd` inside a claimed carrier is a
+  diagnostic, never a silent pass.
+- A barrier config that does not carry the `apiVersion` is **not** a claimed
+  policy. This pass emits no diagnostic for it and does not interpret it. It
+  keeps whatever pre-contract behavior it already had.
+- A portable null, scalar, or array barrier config cannot carry an
+  `apiVersion`, so it is not a claimed policy either.
+- Non-barrier configs are never interpreted as policies.
+
+This rule exists because the alternative is unimplementable, and that was
+discovered by two independent implementation lanes reaching the same conclusion
+rather than by review. An earlier revision made `GE1421` own every portable
+barrier config admitted by the envelope, copying the router pass verbatim. But
+routers were introduced together with their policy, while barrier nodes predate
+this contract and already ship with configs such as `{"condition": "all"}` in
+`spec/conformance/diamond.graph.json` and `{}` in the integrated-router runtime
+graphs. Under the earlier rule every one of those became a compile error:
+measured, 16 pre-existing tests failed across `core/compiler`,
+`core/integrated-router`, `runtime/scheduler`, `runtime/durable`,
+`runtime/graph-patch` and `runtime/integrated-router-conformance`. That directly
+contradicted this document's own conformance requirement that the existing core,
+primitives, patterns, scheduler, router and durable suites remain green. The two
+requirements were mutually unsatisfiable, so the ownership rule was wrong.
+
+Requiring an explicit version is the honest repair rather than a carve-out: it
+does not weaken any safety property, because the silent-pass defect this
+contract exists to prevent concerns barriers that *declare* a threshold, and a
+declaration is now something a graph author states rather than something a
+compiler guesses.
+
 Graph capture and the Graph envelope run before this validator. Accessors,
 proxies, sparse arrays, non-data properties, cycles, and other values that
 cannot enter portable Graph IR are `GE1007_INVALID_GRAPH` and are never
-relabeled `GE1421`. A barrier's portable null, scalar, or array config is
-`GE1421` at the config root. Non-barrier configs are not interpreted as
-policies.
+relabeled `GE1421`.
 
 ### Barrier vote
 
@@ -415,10 +478,23 @@ Public entry points remain TypeScript `compileGraph(document)` and Python
 
 | Code | Meaning | Base location |
 |---|---|---|
-| `GE1421_INVALID_BARRIER_POLICY` | admitted barrier config is not an exact policy | config root for non-object, otherwise first invalid descendant; node ID |
+| `GE1421_INVALID_BARRIER_POLICY` | a claimed policy is not an exact policy | first invalid descendant; node ID |
 | `GE1422_BARRIER_POLICY_KIND_MISMATCH` | a field required by `kind` is absent, or a field forbidden by `kind` is present | the offending member path; node ID |
-| `GE1423_BARRIER_NO_INPUTS` | barrier node has zero incoming edges | `#/nodes/{i}`; node ID |
+| `GE1423_BARRIER_NO_INPUTS` | a barrier node **carrying a claimed policy** has zero incoming edges | `#/nodes/{i}`; node ID |
 | `GE1424_BARRIER_THRESHOLD_EXCEEDS_INPUTS` | `minimum` or `quorum.accepts` exceeds the barrier's incoming-edge count | `/minimum` or `/quorum/accepts`; node ID |
+
+Every one of the four is ownership-gated. This pass never emits a diagnostic for
+a barrier whose config is not a claimed policy, including `GE1423`: an
+input-free legacy barrier keeps whatever pre-contract behavior it already had,
+and existing reachability and entrypoint diagnostics continue to apply to it
+unchanged. Gating `GE1423` too is the only reading consistent with the ownership
+rule, which is categorical.
+
+Two `GE1421` locations are unreachable by construction and must not appear. A
+claimed policy is by definition a portable object carrying the exact
+`apiVersion`, so `GE1421` can report neither at the config root nor at
+`/apiVersion`. A portable null, scalar or array config cannot carry an
+`apiVersion` at all, so it is unclaimed rather than a root-located `GE1421`.
 
 "First invalid descendant" is the same deterministic rule the router pass
 already uses: unknown keys first in Unicode code-point order, then
@@ -430,16 +506,25 @@ name the barrier node.
 above:
 
 ```text
-kind, minimum, basisPoints, quorum, deadline, onUnsatisfied, lateArrival
+apiVersion, kind, minimum, basisPoints, quorum, deadline, onUnsatisfied, lateArrival
 ```
 
-It is deliberately **not** the `properties` order of
-`integrated-barrier-policy.schema.json`, which lists the required resolution
-members before the per-kind threshold members. The two orders disagree: for
-`{kind: "minimum", minimum: 0, lateArrival: "ignore"}` the declaration order
-yields `/minimum` while the schema order would yield `/onUnsatisfied`. The
-normative text wins, the schema `properties` order carries no diagnostic
-meaning, and the corpus freezes witness cases for exactly this disagreement.
+It is deliberately **not** the member order of
+`integrated-barrier-policy.schema.json`, whose top-level `properties` lists the
+required resolution members before the optional `deadline`, and whose per-kind
+threshold members live inside the four `oneOf` branches rather than at the top
+level. The two orders disagree. For the claimed policy
+
+```json
+{"apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1", "kind": "minimum", "minimum": 0, "lateArrival": "ignore"}
+```
+
+the declaration order yields `/minimum` while the schema order would yield
+`/onUnsatisfied`. The normative text wins, the schema's member order carries no
+diagnostic meaning, and the corpus freezes witness cases for exactly this
+disagreement. Note that the example must carry the `apiVersion`: without it the
+config is not a claimed policy and yields no diagnostic at all, so it would
+illustrate nothing.
 
 ### Pass boundary and ordering
 

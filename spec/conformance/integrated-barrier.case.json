@@ -59,6 +59,7 @@
   "firstInvalidDescendantRule": {
     "order": "unknown keys first in ascending Unicode code-point order, then required-or-present fields in contract order, with array elements by increasing index",
     "policyFieldOrder": [
+      "apiVersion",
       "kind",
       "minimum",
       "basisPoints",
@@ -215,6 +216,20 @@
     "quorum": "participants = total - (countAbstainAsParticipant ? 0 : abstained); accepts > participants is QUORUM_EXCEEDS_PARTICIPANTS; otherwise satisfied iff succeeded >= accepts",
     "deadlineElapsedRule": "deadlineElapsed is true exactly when at least one disposition entry is timed_out"
   },
+  "ownership": {
+    "discriminator": "apiVersion",
+    "claimedApiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
+    "rule": "A barrier config is a claimed policy if and only if it is a portable object carrying exactly this apiVersion value",
+    "unclaimedBehavior": "The barrier pass emits no GE1421, GE1422, GE1423 or GE1424 diagnostic for an unclaimed config and does not interpret it; the config keeps whatever pre-contract behavior it already had",
+    "nonObjectConfigsCannotClaim": true,
+    "sharedWithVoteCarrier": true,
+    "sharedCarrierNote": "barrier-vote.schema.json declares the same apiVersion, so the policy and the vote carrier are separated by kind, not by apiVersion. A BarrierVote pasted into a barrier config therefore IS a claimed policy and is diagnosed rather than silently passed.",
+    "unreachableDiagnosticPaths": [
+      "",
+      "/apiVersion"
+    ],
+    "unreachableDiagnosticPathsNote": "A claimed policy is by definition a portable object carrying the exact apiVersion, so GE1421 can never report at the config root and can never report /apiVersion. Both are unreachable under revision 2."
+  },
   "voteCensus": {
     "rule": "For a quorum policy, votes is a complete one-record-per-entry census in incoming-edge declaration order, not a list of received ballots",
     "castVerdictsComeFromTheUpstreamCarrier": [
@@ -284,26 +299,215 @@
     "crossRuntimeRequirement": "TypeScript and Python MUST each recompute every literal in this corpus from these rules alone; neither may import an expectation from the other",
     "domainSeparation": {
       "policy": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "kind": "all",
         "lateArrival": "ignore",
         "onUnsatisfied": "fail"
       },
-      "canonicalPolicy": "{\"kind\":\"all\",\"lateArrival\":\"ignore\",\"onUnsatisfied\":\"fail\"}",
-      "barrierPolicyHash": "6737202047614939f6a39f16273bd223c3b2290d0522709c3a4aa093fe80241e",
-      "routerPolicyHash": "b70a1e0c1d2ab89e882c0b859560c7eb91db25f034ee15224fdb8f2a5a17486e"
+      "canonicalPolicy": "{\"apiVersion\":\"graphengineering.reacher-z.github.io/barrier/v1alpha1\",\"kind\":\"all\",\"lateArrival\":\"ignore\",\"onUnsatisfied\":\"fail\"}",
+      "barrierPolicyHash": "b3c176834bf41d36d8930fd7a5fab6479cd4f8eb7560c1dfad9ee40abf935db1",
+      "routerPolicyHash": "8a25c37bb8ca5d1898407240e53195919a7c87487d48f8128a10e17987f774f6"
     }
   },
+  "ownershipCases": [
+    {
+      "name": "legacy-condition-all-config-yields-no-barrier-diagnostic",
+      "config": {
+        "condition": "all"
+      },
+      "expect": {
+        "claimed": false,
+        "diagnostics": []
+      },
+      "note": "the exact config shipped by spec/conformance/diamond.graph.json"
+    },
+    {
+      "name": "empty-config-yields-no-barrier-diagnostic",
+      "config": {},
+      "expect": {
+        "claimed": false,
+        "diagnostics": []
+      },
+      "note": "the exact config shipped by the integrated-router runtime graphs"
+    },
+    {
+      "name": "portable-null-config-cannot-carry-a-claim",
+      "config": null,
+      "expect": {
+        "claimed": false,
+        "diagnostics": []
+      }
+    },
+    {
+      "name": "portable-scalar-config-cannot-carry-a-claim",
+      "config": 7,
+      "expect": {
+        "claimed": false,
+        "diagnostics": []
+      }
+    },
+    {
+      "name": "portable-string-config-cannot-carry-a-claim",
+      "config": "all",
+      "expect": {
+        "claimed": false,
+        "diagnostics": []
+      }
+    },
+    {
+      "name": "portable-boolean-config-cannot-carry-a-claim",
+      "config": false,
+      "expect": {
+        "claimed": false,
+        "diagnostics": []
+      }
+    },
+    {
+      "name": "portable-array-config-cannot-carry-a-claim",
+      "config": [],
+      "expect": {
+        "claimed": false,
+        "diagnostics": []
+      }
+    },
+    {
+      "name": "exact-policy-body-without-the-discriminator-is-unowned",
+      "config": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "minimum",
+        "minimum": 2
+      },
+      "expect": {
+        "claimed": false,
+        "diagnostics": []
+      }
+    },
+    {
+      "name": "wrong-apiVersion-value-is-unowned",
+      "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v2",
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "all"
+      },
+      "expect": {
+        "claimed": false,
+        "diagnostics": []
+      }
+    },
+    {
+      "name": "wrapped-policy-is-unowned-because-the-outer-object-makes-no-claim",
+      "config": {
+        "policy": {
+          "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
+          "onUnsatisfied": "fail",
+          "lateArrival": "ignore",
+          "kind": "all"
+        }
+      },
+      "expect": {
+        "claimed": false,
+        "diagnostics": []
+      }
+    },
+    {
+      "name": "unrelated-carrier-apiVersion-is-unowned",
+      "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1",
+        "kind": "RouteEquals",
+        "routeKey": "quick"
+      },
+      "expect": {
+        "claimed": false,
+        "diagnostics": []
+      }
+    },
+    {
+      "name": "barrier-vote-shaped-config-is-claimed-and-diagnosed",
+      "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
+        "kind": "BarrierVote",
+        "verdict": "accept"
+      },
+      "expect": {
+        "claimed": true,
+        "diagnostics": [
+          {
+            "code": "GE1421_INVALID_BARRIER_POLICY",
+            "relativePath": "/verdict"
+          }
+        ]
+      },
+      "note": "BarrierVote shares the barrier apiVersion with IntegratedBarrierPolicy, so a vote pasted into a barrier config IS a claimed policy and is diagnosed rather than silently passed. 'verdict' is an unknown policy member and unknown keys precede required-or-present fields, so the first invalid descendant is /verdict, not /kind."
+    },
+    {
+      "name": "claimed-carrier-with-a-misspelled-kind-is-diagnosed",
+      "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
+        "kynd": "all",
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore"
+      },
+      "expect": {
+        "claimed": true,
+        "diagnostics": [
+          {
+            "code": "GE1421_INVALID_BARRIER_POLICY",
+            "relativePath": "/kynd"
+          }
+        ]
+      },
+      "note": "a typo inside a claimed carrier is a diagnostic, never a silent pass"
+    },
+    {
+      "name": "claimed-carrier-with-a-cardinality-error-is-diagnosed",
+      "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "percentage",
+        "basisPoints": 5000,
+        "minimum": 2
+      },
+      "expect": {
+        "claimed": true,
+        "diagnostics": [
+          {
+            "code": "GE1422_BARRIER_POLICY_KIND_MISMATCH",
+            "relativePath": "/minimum"
+          }
+        ]
+      }
+    },
+    {
+      "name": "exact-claimed-policy-is-owned-and-clean",
+      "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "all"
+      },
+      "expect": {
+        "claimed": true,
+        "diagnostics": []
+      }
+    }
+  ],
   "policyCases": [
     {
       "name": "all-kind-is-valid",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "all"
       },
       "expect": {
         "valid": true,
+        "claimed": true,
         "policy": {
+          "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
           "onUnsatisfied": "fail",
           "lateArrival": "ignore",
           "kind": "all"
@@ -313,6 +517,7 @@
     {
       "name": "minimum-kind-is-valid",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "minimum",
@@ -320,7 +525,9 @@
       },
       "expect": {
         "valid": true,
+        "claimed": true,
         "policy": {
+          "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
           "onUnsatisfied": "fail",
           "lateArrival": "ignore",
           "kind": "minimum",
@@ -331,6 +538,7 @@
     {
       "name": "percentage-kind-is-valid",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "human",
         "lateArrival": "reject",
         "kind": "percentage",
@@ -338,7 +546,9 @@
       },
       "expect": {
         "valid": true,
+        "claimed": true,
         "policy": {
+          "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
           "onUnsatisfied": "human",
           "lateArrival": "reject",
           "kind": "percentage",
@@ -349,6 +559,7 @@
     {
       "name": "quorum-kind-is-valid",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "unknown",
         "lateArrival": "reject",
         "kind": "quorum",
@@ -359,7 +570,9 @@
       },
       "expect": {
         "valid": true,
+        "claimed": true,
         "policy": {
+          "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
           "onUnsatisfied": "unknown",
           "lateArrival": "reject",
           "kind": "quorum",
@@ -373,6 +586,7 @@
     {
       "name": "deadline-is-optional-for-every-kind",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "all",
@@ -382,7 +596,9 @@
       },
       "expect": {
         "valid": true,
+        "claimed": true,
         "policy": {
+          "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
           "onUnsatisfied": "fail",
           "lateArrival": "ignore",
           "kind": "all",
@@ -395,6 +611,7 @@
     {
       "name": "quorum-with-deadline-and-reject-late-arrival",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "human",
         "lateArrival": "reject",
         "kind": "quorum",
@@ -408,7 +625,9 @@
       },
       "expect": {
         "valid": true,
+        "claimed": true,
         "policy": {
+          "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
           "onUnsatisfied": "human",
           "lateArrival": "reject",
           "kind": "quorum",
@@ -425,6 +644,7 @@
     {
       "name": "json-one-point-zero-is-integer-one-for-minimum",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "minimum",
@@ -432,7 +652,9 @@
       },
       "expect": {
         "valid": true,
+        "claimed": true,
         "policy": {
+          "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
           "onUnsatisfied": "fail",
           "lateArrival": "ignore",
           "kind": "minimum",
@@ -444,6 +666,7 @@
     {
       "name": "json-one-point-zero-is-integer-one-for-basis-points",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "percentage",
@@ -451,7 +674,9 @@
       },
       "expect": {
         "valid": true,
+        "claimed": true,
         "policy": {
+          "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
           "onUnsatisfied": "fail",
           "lateArrival": "ignore",
           "kind": "percentage",
@@ -463,6 +688,7 @@
     {
       "name": "json-one-point-zero-is-integer-one-for-quorum-accepts",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "quorum",
@@ -473,7 +699,9 @@
       },
       "expect": {
         "valid": true,
+        "claimed": true,
         "policy": {
+          "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
           "onUnsatisfied": "fail",
           "lateArrival": "ignore",
           "kind": "quorum",
@@ -488,6 +716,7 @@
     {
       "name": "json-one-point-zero-is-integer-one-for-deadline-after-ms",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "all",
@@ -497,7 +726,9 @@
       },
       "expect": {
         "valid": true,
+        "claimed": true,
         "policy": {
+          "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
           "onUnsatisfied": "fail",
           "lateArrival": "ignore",
           "kind": "all",
@@ -511,6 +742,7 @@
     {
       "name": "boolean-is-not-an-integer-minimum",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "minimum",
@@ -518,6 +750,7 @@
       },
       "expect": {
         "valid": false,
+        "claimed": true,
         "code": "GE1421_INVALID_BARRIER_POLICY",
         "relativePath": "/minimum"
       }
@@ -525,6 +758,7 @@
     {
       "name": "boolean-is-not-an-integer-basis-points",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "percentage",
@@ -532,6 +766,7 @@
       },
       "expect": {
         "valid": false,
+        "claimed": true,
         "code": "GE1421_INVALID_BARRIER_POLICY",
         "relativePath": "/basisPoints"
       }
@@ -539,6 +774,7 @@
     {
       "name": "boolean-is-not-an-integer-quorum-accepts",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "quorum",
@@ -549,6 +785,7 @@
       },
       "expect": {
         "valid": false,
+        "claimed": true,
         "code": "GE1421_INVALID_BARRIER_POLICY",
         "relativePath": "/quorum/accepts"
       }
@@ -556,6 +793,7 @@
     {
       "name": "boolean-is-not-an-integer-deadline-after-ms",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "all",
@@ -565,6 +803,7 @@
       },
       "expect": {
         "valid": false,
+        "claimed": true,
         "code": "GE1421_INVALID_BARRIER_POLICY",
         "relativePath": "/deadline/afterMs"
       }
@@ -572,6 +811,7 @@
     {
       "name": "fractional-number-is-not-an-integer-minimum",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "minimum",
@@ -579,6 +819,7 @@
       },
       "expect": {
         "valid": false,
+        "claimed": true,
         "code": "GE1421_INVALID_BARRIER_POLICY",
         "relativePath": "/minimum"
       }
@@ -586,6 +827,7 @@
     {
       "name": "string-digits-are-not-an-integer-basis-points",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "percentage",
@@ -593,6 +835,7 @@
       },
       "expect": {
         "valid": false,
+        "claimed": true,
         "code": "GE1421_INVALID_BARRIER_POLICY",
         "relativePath": "/basisPoints"
       }
@@ -600,6 +843,7 @@
     {
       "name": "unknown-top-level-field",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "all",
@@ -607,6 +851,7 @@
       },
       "expect": {
         "valid": false,
+        "claimed": true,
         "code": "GE1421_INVALID_BARRIER_POLICY",
         "relativePath": "/extra"
       }
@@ -614,12 +859,14 @@
     {
       "name": "unknown-key-precedes-a-missing-required-field",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "kind": "all",
         "lateArrival": "ignore",
         "extra": true
       },
       "expect": {
         "valid": false,
+        "claimed": true,
         "code": "GE1421_INVALID_BARRIER_POLICY",
         "relativePath": "/extra"
       }
@@ -627,6 +874,7 @@
     {
       "name": "two-unknown-keys-use-unicode-code-point-order",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "all",
@@ -635,6 +883,7 @@
       },
       "expect": {
         "valid": false,
+        "claimed": true,
         "code": "GE1421_INVALID_BARRIER_POLICY",
         "relativePath": "/alpha"
       }
@@ -643,20 +892,21 @@
       "name": "wrapper-config-is-not-a-direct-policy",
       "config": {
         "policy": {
-          "kind": "all",
+          "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
           "onUnsatisfied": "fail",
-          "lateArrival": "ignore"
+          "lateArrival": "ignore",
+          "kind": "all"
         }
       },
       "expect": {
         "valid": false,
-        "code": "GE1421_INVALID_BARRIER_POLICY",
-        "relativePath": "/policy"
+        "claimed": false
       }
     },
     {
       "name": "explicit-null-deadline-is-not-omission",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "all",
@@ -664,6 +914,7 @@
       },
       "expect": {
         "valid": false,
+        "claimed": true,
         "code": "GE1421_INVALID_BARRIER_POLICY",
         "relativePath": "/deadline"
       }
@@ -671,6 +922,7 @@
     {
       "name": "explicit-null-minimum-is-not-omission",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "minimum",
@@ -678,6 +930,7 @@
       },
       "expect": {
         "valid": false,
+        "claimed": true,
         "code": "GE1421_INVALID_BARRIER_POLICY",
         "relativePath": "/minimum"
       }
@@ -685,6 +938,7 @@
     {
       "name": "explicit-null-quorum-is-not-omission",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "quorum",
@@ -692,6 +946,7 @@
       },
       "expect": {
         "valid": false,
+        "claimed": true,
         "code": "GE1421_INVALID_BARRIER_POLICY",
         "relativePath": "/quorum"
       }
@@ -699,6 +954,7 @@
     {
       "name": "explicit-null-basis-points-is-not-omission",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "percentage",
@@ -706,6 +962,7 @@
       },
       "expect": {
         "valid": false,
+        "claimed": true,
         "code": "GE1421_INVALID_BARRIER_POLICY",
         "relativePath": "/basisPoints"
       }
@@ -713,12 +970,14 @@
     {
       "name": "explicit-null-on-unsatisfied-is-not-omission",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "kind": "all",
         "onUnsatisfied": null,
         "lateArrival": "ignore"
       },
       "expect": {
         "valid": false,
+        "claimed": true,
         "code": "GE1421_INVALID_BARRIER_POLICY",
         "relativePath": "/onUnsatisfied"
       }
@@ -726,11 +985,13 @@
     {
       "name": "missing-on-unsatisfied",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "kind": "all",
         "lateArrival": "ignore"
       },
       "expect": {
         "valid": false,
+        "claimed": true,
         "code": "GE1421_INVALID_BARRIER_POLICY",
         "relativePath": "/onUnsatisfied"
       }
@@ -738,11 +999,13 @@
     {
       "name": "missing-late-arrival",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "kind": "all",
         "onUnsatisfied": "fail"
       },
       "expect": {
         "valid": false,
+        "claimed": true,
         "code": "GE1421_INVALID_BARRIER_POLICY",
         "relativePath": "/lateArrival"
       }
@@ -750,10 +1013,12 @@
     {
       "name": "missing-both-resolution-members-reports-on-unsatisfied-first",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "kind": "all"
       },
       "expect": {
         "valid": false,
+        "claimed": true,
         "code": "GE1421_INVALID_BARRIER_POLICY",
         "relativePath": "/onUnsatisfied"
       }
@@ -761,11 +1026,13 @@
     {
       "name": "missing-kind",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore"
       },
       "expect": {
         "valid": false,
+        "claimed": true,
         "code": "GE1421_INVALID_BARRIER_POLICY",
         "relativePath": "/kind"
       }
@@ -773,12 +1040,14 @@
     {
       "name": "unknown-kind-value",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "any"
       },
       "expect": {
         "valid": false,
+        "claimed": true,
         "code": "GE1421_INVALID_BARRIER_POLICY",
         "relativePath": "/kind"
       }
@@ -786,12 +1055,14 @@
     {
       "name": "unknown-on-unsatisfied-value",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "pass",
         "lateArrival": "ignore",
         "kind": "all"
       },
       "expect": {
         "valid": false,
+        "claimed": true,
         "code": "GE1421_INVALID_BARRIER_POLICY",
         "relativePath": "/onUnsatisfied"
       }
@@ -799,12 +1070,14 @@
     {
       "name": "unknown-late-arrival-value",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "requeue",
         "kind": "all"
       },
       "expect": {
         "valid": false,
+        "claimed": true,
         "code": "GE1421_INVALID_BARRIER_POLICY",
         "relativePath": "/lateArrival"
       }
@@ -812,6 +1085,7 @@
     {
       "name": "basis-points-zero-is-below-range",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "percentage",
@@ -819,6 +1093,7 @@
       },
       "expect": {
         "valid": false,
+        "claimed": true,
         "code": "GE1421_INVALID_BARRIER_POLICY",
         "relativePath": "/basisPoints"
       }
@@ -826,6 +1101,7 @@
     {
       "name": "basis-points-one-is-the-inclusive-lower-bound",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "percentage",
@@ -833,7 +1109,9 @@
       },
       "expect": {
         "valid": true,
+        "claimed": true,
         "policy": {
+          "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
           "onUnsatisfied": "fail",
           "lateArrival": "ignore",
           "kind": "percentage",
@@ -844,6 +1122,7 @@
     {
       "name": "basis-points-ten-thousand-is-the-inclusive-upper-bound",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "percentage",
@@ -851,7 +1130,9 @@
       },
       "expect": {
         "valid": true,
+        "claimed": true,
         "policy": {
+          "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
           "onUnsatisfied": "fail",
           "lateArrival": "ignore",
           "kind": "percentage",
@@ -862,6 +1143,7 @@
     {
       "name": "basis-points-ten-thousand-and-one-is-above-range",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "percentage",
@@ -869,6 +1151,7 @@
       },
       "expect": {
         "valid": false,
+        "claimed": true,
         "code": "GE1421_INVALID_BARRIER_POLICY",
         "relativePath": "/basisPoints"
       }
@@ -876,6 +1159,7 @@
     {
       "name": "minimum-zero-is-below-range",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "minimum",
@@ -883,6 +1167,7 @@
       },
       "expect": {
         "valid": false,
+        "claimed": true,
         "code": "GE1421_INVALID_BARRIER_POLICY",
         "relativePath": "/minimum"
       }
@@ -890,6 +1175,7 @@
     {
       "name": "minimum-one-is-the-inclusive-lower-bound",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "minimum",
@@ -897,7 +1183,9 @@
       },
       "expect": {
         "valid": true,
+        "claimed": true,
         "policy": {
+          "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
           "onUnsatisfied": "fail",
           "lateArrival": "ignore",
           "kind": "minimum",
@@ -908,6 +1196,7 @@
     {
       "name": "minimum-at-the-safe-integer-ceiling",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "minimum",
@@ -915,7 +1204,9 @@
       },
       "expect": {
         "valid": true,
+        "claimed": true,
         "policy": {
+          "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
           "onUnsatisfied": "fail",
           "lateArrival": "ignore",
           "kind": "minimum",
@@ -926,6 +1217,7 @@
     {
       "name": "quorum-accepts-zero-is-below-range",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "quorum",
@@ -936,6 +1228,7 @@
       },
       "expect": {
         "valid": false,
+        "claimed": true,
         "code": "GE1421_INVALID_BARRIER_POLICY",
         "relativePath": "/quorum/accepts"
       }
@@ -943,6 +1236,7 @@
     {
       "name": "quorum-accepts-one-is-the-inclusive-lower-bound",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "quorum",
@@ -953,7 +1247,9 @@
       },
       "expect": {
         "valid": true,
+        "claimed": true,
         "policy": {
+          "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
           "onUnsatisfied": "fail",
           "lateArrival": "ignore",
           "kind": "quorum",
@@ -967,6 +1263,7 @@
     {
       "name": "quorum-missing-accepts",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "quorum",
@@ -976,6 +1273,7 @@
       },
       "expect": {
         "valid": false,
+        "claimed": true,
         "code": "GE1421_INVALID_BARRIER_POLICY",
         "relativePath": "/quorum/accepts"
       }
@@ -983,6 +1281,7 @@
     {
       "name": "quorum-missing-count-abstain-as-participant",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "quorum",
@@ -992,6 +1291,7 @@
       },
       "expect": {
         "valid": false,
+        "claimed": true,
         "code": "GE1421_INVALID_BARRIER_POLICY",
         "relativePath": "/quorum/countAbstainAsParticipant"
       }
@@ -999,6 +1299,7 @@
     {
       "name": "quorum-count-abstain-as-participant-must-be-boolean",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "quorum",
@@ -1009,6 +1310,7 @@
       },
       "expect": {
         "valid": false,
+        "claimed": true,
         "code": "GE1421_INVALID_BARRIER_POLICY",
         "relativePath": "/quorum/countAbstainAsParticipant"
       }
@@ -1016,6 +1318,7 @@
     {
       "name": "nested-unknown-key-inside-quorum",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "quorum",
@@ -1027,6 +1330,7 @@
       },
       "expect": {
         "valid": false,
+        "claimed": true,
         "code": "GE1421_INVALID_BARRIER_POLICY",
         "relativePath": "/quorum/tieBreak"
       }
@@ -1034,6 +1338,7 @@
     {
       "name": "quorum-must-be-an-object",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "quorum",
@@ -1043,6 +1348,7 @@
       },
       "expect": {
         "valid": false,
+        "claimed": true,
         "code": "GE1421_INVALID_BARRIER_POLICY",
         "relativePath": "/quorum"
       }
@@ -1050,6 +1356,7 @@
     {
       "name": "deadline-after-ms-zero-is-below-range",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "all",
@@ -1059,6 +1366,7 @@
       },
       "expect": {
         "valid": false,
+        "claimed": true,
         "code": "GE1421_INVALID_BARRIER_POLICY",
         "relativePath": "/deadline/afterMs"
       }
@@ -1066,6 +1374,7 @@
     {
       "name": "deadline-after-ms-one-is-the-inclusive-lower-bound",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "all",
@@ -1075,7 +1384,9 @@
       },
       "expect": {
         "valid": true,
+        "claimed": true,
         "policy": {
+          "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
           "onUnsatisfied": "fail",
           "lateArrival": "ignore",
           "kind": "all",
@@ -1088,6 +1399,7 @@
     {
       "name": "deadline-missing-after-ms",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "all",
@@ -1095,6 +1407,7 @@
       },
       "expect": {
         "valid": false,
+        "claimed": true,
         "code": "GE1421_INVALID_BARRIER_POLICY",
         "relativePath": "/deadline/afterMs"
       }
@@ -1102,6 +1415,7 @@
     {
       "name": "nested-unknown-key-inside-deadline",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "all",
@@ -1112,6 +1426,7 @@
       },
       "expect": {
         "valid": false,
+        "claimed": true,
         "code": "GE1421_INVALID_BARRIER_POLICY",
         "relativePath": "/deadline/graceMs"
       }
@@ -1119,6 +1434,7 @@
     {
       "name": "deadline-must-be-an-object",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "all",
@@ -1126,64 +1442,147 @@
       },
       "expect": {
         "valid": false,
+        "claimed": true,
         "code": "GE1421_INVALID_BARRIER_POLICY",
         "relativePath": "/deadline"
       }
     },
     {
-      "name": "portable-null-config-reports-at-the-config-root",
+      "name": "portable-null-config-is-not-claimed",
       "config": null,
       "expect": {
         "valid": false,
-        "code": "GE1421_INVALID_BARRIER_POLICY",
-        "relativePath": ""
+        "claimed": false
       }
     },
     {
-      "name": "portable-integer-config-reports-at-the-config-root",
+      "name": "portable-integer-config-is-not-claimed",
       "config": 1,
       "expect": {
         "valid": false,
-        "code": "GE1421_INVALID_BARRIER_POLICY",
-        "relativePath": ""
+        "claimed": false
       }
     },
     {
-      "name": "portable-string-config-reports-at-the-config-root",
+      "name": "portable-string-config-is-not-claimed",
       "config": "all",
       "expect": {
         "valid": false,
-        "code": "GE1421_INVALID_BARRIER_POLICY",
-        "relativePath": ""
+        "claimed": false
       }
     },
     {
-      "name": "portable-boolean-config-reports-at-the-config-root",
+      "name": "portable-boolean-config-is-not-claimed",
       "config": true,
       "expect": {
         "valid": false,
-        "code": "GE1421_INVALID_BARRIER_POLICY",
-        "relativePath": ""
+        "claimed": false
       }
     },
     {
-      "name": "portable-array-config-reports-at-the-config-root",
+      "name": "portable-array-config-is-not-claimed",
       "config": [],
       "expect": {
         "valid": false,
-        "code": "GE1421_INVALID_BARRIER_POLICY",
-        "relativePath": ""
+        "claimed": false
+      }
+    },
+    {
+      "name": "missing-apiVersion-is-not-a-claimed-policy",
+      "config": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "all"
+      },
+      "expect": {
+        "valid": false,
+        "claimed": false
+      }
+    },
+    {
+      "name": "exact-policy-body-without-the-discriminator-is-not-claimed",
+      "config": {
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "quorum",
+        "quorum": {
+          "accepts": 2,
+          "countAbstainAsParticipant": true
+        }
+      },
+      "expect": {
+        "valid": false,
+        "claimed": false
+      }
+    },
+    {
+      "name": "wrong-apiVersion-value-is-not-claimed",
+      "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v2",
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "all"
+      },
+      "expect": {
+        "valid": false,
+        "claimed": false
+      }
+    },
+    {
+      "name": "non-string-apiVersion-is-not-claimed",
+      "config": {
+        "apiVersion": 1,
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "all"
+      },
+      "expect": {
+        "valid": false,
+        "claimed": false
+      }
+    },
+    {
+      "name": "null-apiVersion-is-not-claimed",
+      "config": {
+        "apiVersion": null,
+        "onUnsatisfied": "fail",
+        "lateArrival": "ignore",
+        "kind": "all"
+      },
+      "expect": {
+        "valid": false,
+        "claimed": false
+      }
+    },
+    {
+      "name": "legacy-condition-all-config-is-not-claimed",
+      "config": {
+        "condition": "all"
+      },
+      "expect": {
+        "valid": false,
+        "claimed": false
+      }
+    },
+    {
+      "name": "empty-config-is-not-claimed",
+      "config": {},
+      "expect": {
+        "valid": false,
+        "claimed": false
       }
     },
     {
       "name": "minimum-kind-requires-minimum",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "minimum"
       },
       "expect": {
         "valid": false,
+        "claimed": true,
         "code": "GE1422_BARRIER_POLICY_KIND_MISMATCH",
         "relativePath": "/minimum"
       }
@@ -1191,12 +1590,14 @@
     {
       "name": "percentage-kind-requires-basis-points",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "percentage"
       },
       "expect": {
         "valid": false,
+        "claimed": true,
         "code": "GE1422_BARRIER_POLICY_KIND_MISMATCH",
         "relativePath": "/basisPoints"
       }
@@ -1204,12 +1605,14 @@
     {
       "name": "quorum-kind-requires-quorum",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "quorum"
       },
       "expect": {
         "valid": false,
+        "claimed": true,
         "code": "GE1422_BARRIER_POLICY_KIND_MISMATCH",
         "relativePath": "/quorum"
       }
@@ -1217,6 +1620,7 @@
     {
       "name": "all-kind-forbids-minimum",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "all",
@@ -1224,6 +1628,7 @@
       },
       "expect": {
         "valid": false,
+        "claimed": true,
         "code": "GE1422_BARRIER_POLICY_KIND_MISMATCH",
         "relativePath": "/minimum"
       }
@@ -1231,6 +1636,7 @@
     {
       "name": "all-kind-forbids-basis-points",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "all",
@@ -1238,6 +1644,7 @@
       },
       "expect": {
         "valid": false,
+        "claimed": true,
         "code": "GE1422_BARRIER_POLICY_KIND_MISMATCH",
         "relativePath": "/basisPoints"
       }
@@ -1245,6 +1652,7 @@
     {
       "name": "all-kind-forbids-quorum",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "all",
@@ -1255,6 +1663,7 @@
       },
       "expect": {
         "valid": false,
+        "claimed": true,
         "code": "GE1422_BARRIER_POLICY_KIND_MISMATCH",
         "relativePath": "/quorum"
       }
@@ -1262,6 +1671,7 @@
     {
       "name": "percentage-kind-forbids-minimum",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "percentage",
@@ -1270,6 +1680,7 @@
       },
       "expect": {
         "valid": false,
+        "claimed": true,
         "code": "GE1422_BARRIER_POLICY_KIND_MISMATCH",
         "relativePath": "/minimum"
       }
@@ -1277,6 +1688,7 @@
     {
       "name": "minimum-kind-forbids-basis-points",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "minimum",
@@ -1285,6 +1697,7 @@
       },
       "expect": {
         "valid": false,
+        "claimed": true,
         "code": "GE1422_BARRIER_POLICY_KIND_MISMATCH",
         "relativePath": "/basisPoints"
       }
@@ -1292,6 +1705,7 @@
     {
       "name": "minimum-kind-forbids-quorum",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "minimum",
@@ -1303,6 +1717,7 @@
       },
       "expect": {
         "valid": false,
+        "claimed": true,
         "code": "GE1422_BARRIER_POLICY_KIND_MISMATCH",
         "relativePath": "/quorum"
       }
@@ -1310,6 +1725,7 @@
     {
       "name": "quorum-kind-forbids-minimum",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "quorum",
@@ -1321,6 +1737,7 @@
       },
       "expect": {
         "valid": false,
+        "claimed": true,
         "code": "GE1422_BARRIER_POLICY_KIND_MISMATCH",
         "relativePath": "/minimum"
       }
@@ -1328,6 +1745,7 @@
     {
       "name": "quorum-kind-forbids-basis-points",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "quorum",
@@ -1339,6 +1757,7 @@
       },
       "expect": {
         "valid": false,
+        "claimed": true,
         "code": "GE1422_BARRIER_POLICY_KIND_MISMATCH",
         "relativePath": "/basisPoints"
       }
@@ -1346,6 +1765,7 @@
     {
       "name": "percentage-kind-forbids-quorum",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "percentage",
@@ -1357,6 +1777,7 @@
       },
       "expect": {
         "valid": false,
+        "claimed": true,
         "code": "GE1422_BARRIER_POLICY_KIND_MISMATCH",
         "relativePath": "/quorum"
       }
@@ -1364,6 +1785,7 @@
     {
       "name": "two-forbidden-fields-report-the-first-in-contract-order",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "all",
@@ -1375,6 +1797,7 @@
       },
       "expect": {
         "valid": false,
+        "claimed": true,
         "code": "GE1422_BARRIER_POLICY_KIND_MISMATCH",
         "relativePath": "/minimum"
       }
@@ -1382,12 +1805,14 @@
     {
       "name": "threshold-field-precedes-resolution-field-in-contract-order",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "kind": "minimum",
         "minimum": 0,
         "lateArrival": "ignore"
       },
       "expect": {
         "valid": false,
+        "claimed": true,
         "code": "GE1421_INVALID_BARRIER_POLICY",
         "relativePath": "/minimum"
       },
@@ -1396,6 +1821,7 @@
     {
       "name": "deadline-precedes-resolution-field-in-contract-order",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "kind": "all",
         "deadline": {
           "afterMs": 0
@@ -1404,6 +1830,7 @@
       },
       "expect": {
         "valid": false,
+        "claimed": true,
         "code": "GE1421_INVALID_BARRIER_POLICY",
         "relativePath": "/deadline/afterMs"
       },
@@ -1412,11 +1839,13 @@
     {
       "name": "shape-error-suppresses-a-cardinality-error-on-the-same-config",
       "config": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "kind": "minimum",
         "lateArrival": "ignore"
       },
       "expect": {
         "valid": false,
+        "claimed": true,
         "code": "GE1421_INVALID_BARRIER_POLICY",
         "relativePath": "/onUnsatisfied"
       },
@@ -1426,7 +1855,7 @@
   "compilerCases": [
     {
       "name": "valid-multi-barrier-graph-emits-no-barrier-diagnostics",
-      "graphHash": "ff4df6e6da8cfe948aad5239d9d4f57b1e8e9edb565b62990385d724e1810eb4",
+      "graphHash": "b7d957df9d5d6e3c8424f0b434057a0a5f7f331009a5195e5eef96c38bc01595",
       "expectValid": true,
       "expectDiagnostics": [],
       "graph": {
@@ -1474,6 +1903,7 @@
             "inputSchema": {},
             "outputSchema": {},
             "config": {
+              "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
               "onUnsatisfied": "fail",
               "lateArrival": "ignore",
               "kind": "all"
@@ -1485,6 +1915,7 @@
             "inputSchema": {},
             "outputSchema": {},
             "config": {
+              "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
               "onUnsatisfied": "unknown",
               "lateArrival": "reject",
               "kind": "quorum",
@@ -1503,6 +1934,7 @@
             "inputSchema": {},
             "outputSchema": {},
             "config": {
+              "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
               "onUnsatisfied": "human",
               "lateArrival": "ignore",
               "kind": "percentage",
@@ -1622,7 +2054,7 @@
     },
     {
       "name": "ge1421-unknown-policy-field-reports-the-first-invalid-descendant",
-      "graphHash": "beb6f5e9ef7d7c20fb9ffd19fb45f87321433de36b388fcbcc3a517e326dd4a6",
+      "graphHash": "2b301c846a947c38be1a60415b11ca2cbedc431a9da23e1ba2ba2952cd5bb828",
       "expectValid": false,
       "expectDiagnostics": [
         {
@@ -1678,6 +2110,7 @@
             "inputSchema": {},
             "outputSchema": {},
             "config": {
+              "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
               "onUnsatisfied": "fail",
               "lateArrival": "ignore",
               "kind": "all",
@@ -1742,23 +2175,15 @@
       }
     },
     {
-      "name": "ge1421-non-object-barrier-config-reports-at-the-config-root",
-      "graphHash": "6e9cd7da5c493685adbe23902faf700c66cb5a733df136fc122652acbda2572f",
-      "expectValid": false,
-      "expectDiagnostics": [
-        {
-          "code": "GE1421_INVALID_BARRIER_POLICY",
-          "path": "#/nodes/3/config",
-          "nodeIds": [
-            "gate"
-          ]
-        }
-      ],
+      "name": "non-object-barrier-config-cannot-be-claimed-and-emits-nothing",
+      "graphHash": "0ae81aca3a9c50dc3c141db7720143207ab6b6721dea2a14ed3b98b6b21c2765",
+      "expectValid": true,
+      "expectDiagnostics": [],
       "graph": {
         "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
         "kind": "Graph",
         "metadata": {
-          "name": "ge1421-null-config",
+          "name": "null-barrier-config",
           "version": "1"
         },
         "inputSchema": {},
@@ -1859,7 +2284,7 @@
     },
     {
       "name": "ge1422-kind-required-field-absent",
-      "graphHash": "191033ee0606d0bd413d0d371276948003e3c7dbee7fa302af675271ca9ad7bb",
+      "graphHash": "4dc6418bf834b9a44b44a4660d76627204c37537686299cf98cac2b803ef169a",
       "expectValid": false,
       "expectDiagnostics": [
         {
@@ -1915,6 +2340,7 @@
             "inputSchema": {},
             "outputSchema": {},
             "config": {
+              "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
               "onUnsatisfied": "fail",
               "lateArrival": "ignore",
               "kind": "minimum"
@@ -1979,7 +2405,7 @@
     },
     {
       "name": "ge1422-kind-forbidden-field-present",
-      "graphHash": "0a6fa86e44853ec8a7ef087d3e231c45368a0bcac0e8629002dd2a58b4676ec7",
+      "graphHash": "57356b2d7b4c5d870ba0227d2207cca48ea99d452b48f35426356d6e57e8df2f",
       "expectValid": false,
       "expectDiagnostics": [
         {
@@ -2035,6 +2461,7 @@
             "inputSchema": {},
             "outputSchema": {},
             "config": {
+              "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
               "onUnsatisfied": "fail",
               "lateArrival": "ignore",
               "kind": "percentage",
@@ -2101,7 +2528,7 @@
     },
     {
       "name": "ge1423-barrier-with-zero-incoming-edges",
-      "graphHash": "f90f29d617d247c4a5918d03d6cdea62e8697ee81c18aa8ad3f81c11069e9ccc",
+      "graphHash": "945c604aac4889dcf7b22ae5bffe2b6db0b663888e6bc38727858245d8fd46c3",
       "expectValid": false,
       "expectDiagnostics": [
         {
@@ -2136,6 +2563,7 @@
             "inputSchema": {},
             "outputSchema": {},
             "config": {
+              "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
               "onUnsatisfied": "fail",
               "lateArrival": "ignore",
               "kind": "all"
@@ -2164,7 +2592,7 @@
     },
     {
       "name": "ge1424-minimum-exceeds-incoming-edge-count",
-      "graphHash": "16e28747d47111e933edd752b7edb7c5c001e3bfad9e780ed22af7e2f0f6c88b",
+      "graphHash": "eaac81237d571ffa34845c21f25009b2c918e4b4b9783313297f65ad53b74f10",
       "expectValid": false,
       "expectDiagnostics": [
         {
@@ -2220,6 +2648,7 @@
             "inputSchema": {},
             "outputSchema": {},
             "config": {
+              "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
               "onUnsatisfied": "fail",
               "lateArrival": "ignore",
               "kind": "minimum",
@@ -2285,7 +2714,7 @@
     },
     {
       "name": "ge1424-quorum-accepts-exceeds-incoming-edge-count",
-      "graphHash": "ec0d0855fe86afe2b443b86fc080ca59f7a68b1eb793667c6e78cfe2f2327c17",
+      "graphHash": "e510bd29d4c67ca22f64f96ba0119fe2780afd59b1eba33d28dd8b9d128ddd4f",
       "expectValid": false,
       "expectDiagnostics": [
         {
@@ -2341,6 +2770,7 @@
             "inputSchema": {},
             "outputSchema": {},
             "config": {
+              "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
               "onUnsatisfied": "fail",
               "lateArrival": "ignore",
               "kind": "quorum",
@@ -2409,7 +2839,7 @@
     },
     {
       "name": "two-invalid-barriers-follow-node-declaration-order-within-a-category",
-      "graphHash": "deb74c77d0264b25288ec50a838e940c4d2da1d816db5b44d0b21e808c9a72f5",
+      "graphHash": "3463a6a297d42bb5eec4edd7004325947e06369b8a0851089d7ba79587801b6a",
       "expectValid": false,
       "expectDiagnostics": [
         {
@@ -2472,6 +2902,7 @@
             "inputSchema": {},
             "outputSchema": {},
             "config": {
+              "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
               "onUnsatisfied": "fail",
               "lateArrival": "ignore",
               "kind": "all",
@@ -2484,6 +2915,7 @@
             "inputSchema": {},
             "outputSchema": {},
             "config": {
+              "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
               "onUnsatisfied": "fail",
               "lateArrival": "ignore",
               "kind": "all",
@@ -2576,7 +3008,7 @@
     },
     {
       "name": "ge1421-suppresses-ge1422-and-ge1424-on-the-same-node-only",
-      "graphHash": "d99952a34e838e2467ac78aaef87a2b7fa69831a3eb39f12facb7d8e11a481e1",
+      "graphHash": "dd27940c9cb5bedeca563c4c2c1c56affeecabc8f365282cbe3152f298acb3bd",
       "expectValid": false,
       "expectDiagnostics": [
         {
@@ -2639,6 +3071,7 @@
             "inputSchema": {},
             "outputSchema": {},
             "config": {
+              "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
               "onUnsatisfied": "fail",
               "lateArrival": "ignore",
               "kind": "percentage",
@@ -2653,6 +3086,7 @@
             "inputSchema": {},
             "outputSchema": {},
             "config": {
+              "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
               "onUnsatisfied": "fail",
               "lateArrival": "ignore",
               "kind": "quorum"
@@ -2744,12 +3178,12 @@
     },
     {
       "name": "ge1421-does-not-suppress-ge1423-on-the-same-node",
-      "graphHash": "8cf5753348660abda258015a57a714b3aab85d7935326e84514b150da955d921",
+      "graphHash": "889d2ad18210de985ac7c553fc6b2b656f56db08542a37c2eaa289e85284eacf",
       "expectValid": false,
       "expectDiagnostics": [
         {
           "code": "GE1421_INVALID_BARRIER_POLICY",
-          "path": "#/nodes/0/config",
+          "path": "#/nodes/0/config/extra",
           "nodeIds": [
             "gate"
           ]
@@ -2785,7 +3219,13 @@
             "kind": "barrier",
             "inputSchema": {},
             "outputSchema": {},
-            "config": 42
+            "config": {
+              "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
+              "onUnsatisfied": "fail",
+              "lateArrival": "ignore",
+              "kind": "all",
+              "extra": true
+            }
           },
           {
             "id": "sink",
@@ -2810,7 +3250,7 @@
     },
     {
       "name": "ge1422-suppresses-ge1424-on-the-same-node",
-      "graphHash": "0ca3aa18cc60cd80535e4d5664b311785de8a1a58124731a55dd6bca3fbbec2f",
+      "graphHash": "6f307c0ae5be5395e0514a7eb3fcc231cf85f8bafc0ba34d73e46354316e1ef4",
       "expectValid": false,
       "expectDiagnostics": [
         {
@@ -2866,6 +3306,7 @@
             "inputSchema": {},
             "outputSchema": {},
             "config": {
+              "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
               "onUnsatisfied": "fail",
               "lateArrival": "ignore",
               "kind": "minimum",
@@ -2934,8 +3375,322 @@
       }
     },
     {
+      "name": "legacy-barrier-config-is-untouched-beside-a-claimed-policy",
+      "graphHash": "13ee1798fa828a773be21b0c0be781c06bd05d6959cb7621b14852017b95097f",
+      "expectValid": false,
+      "expectDiagnostics": [
+        {
+          "code": "GE1421_INVALID_BARRIER_POLICY",
+          "path": "#/nodes/4/config/extra",
+          "nodeIds": [
+            "gate-claimed"
+          ]
+        }
+      ],
+      "graph": {
+        "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+        "kind": "Graph",
+        "metadata": {
+          "name": "legacy-beside-claimed",
+          "version": "1"
+        },
+        "inputSchema": {},
+        "outputSchema": {},
+        "entrypoints": [
+          "seed"
+        ],
+        "outputs": {
+          "result": {
+            "node": "sink"
+          }
+        },
+        "nodes": [
+          {
+            "id": "seed",
+            "kind": "transform",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {}
+          },
+          {
+            "id": "left",
+            "kind": "transform",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {}
+          },
+          {
+            "id": "right",
+            "kind": "transform",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {}
+          },
+          {
+            "id": "gate-legacy",
+            "kind": "barrier",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {
+              "condition": "all"
+            }
+          },
+          {
+            "id": "gate-claimed",
+            "kind": "barrier",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {
+              "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
+              "onUnsatisfied": "fail",
+              "lateArrival": "ignore",
+              "kind": "all",
+              "extra": true
+            }
+          },
+          {
+            "id": "sink",
+            "kind": "transform",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {}
+          }
+        ],
+        "edges": [
+          {
+            "id": "seed-left",
+            "from": {
+              "node": "seed"
+            },
+            "to": {
+              "node": "left"
+            }
+          },
+          {
+            "id": "seed-right",
+            "from": {
+              "node": "seed"
+            },
+            "to": {
+              "node": "right"
+            }
+          },
+          {
+            "id": "left-legacy",
+            "from": {
+              "node": "left"
+            },
+            "to": {
+              "node": "gate-legacy"
+            }
+          },
+          {
+            "id": "right-legacy",
+            "from": {
+              "node": "right"
+            },
+            "to": {
+              "node": "gate-legacy"
+            }
+          },
+          {
+            "id": "left-claimed",
+            "from": {
+              "node": "left"
+            },
+            "to": {
+              "node": "gate-claimed"
+            }
+          },
+          {
+            "id": "right-claimed",
+            "from": {
+              "node": "right"
+            },
+            "to": {
+              "node": "gate-claimed"
+            }
+          },
+          {
+            "id": "legacy-sink",
+            "from": {
+              "node": "gate-legacy"
+            },
+            "to": {
+              "node": "sink"
+            }
+          },
+          {
+            "id": "claimed-sink",
+            "from": {
+              "node": "gate-claimed"
+            },
+            "to": {
+              "node": "sink"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "empty-legacy-barrier-config-emits-nothing",
+      "graphHash": "fa24f01864a42d4222ae4e7b6747cb6982279383de8a5027cd626e01892ae00d",
+      "expectValid": false,
+      "expectDiagnostics": [
+        {
+          "code": "GE1424_BARRIER_THRESHOLD_EXCEEDS_INPUTS",
+          "path": "#/nodes/4/config/minimum",
+          "nodeIds": [
+            "gate-claimed"
+          ]
+        }
+      ],
+      "graph": {
+        "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+        "kind": "Graph",
+        "metadata": {
+          "name": "empty-legacy-barrier",
+          "version": "1"
+        },
+        "inputSchema": {},
+        "outputSchema": {},
+        "entrypoints": [
+          "seed"
+        ],
+        "outputs": {
+          "result": {
+            "node": "sink"
+          }
+        },
+        "nodes": [
+          {
+            "id": "seed",
+            "kind": "transform",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {}
+          },
+          {
+            "id": "left",
+            "kind": "transform",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {}
+          },
+          {
+            "id": "right",
+            "kind": "transform",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {}
+          },
+          {
+            "id": "gate-empty",
+            "kind": "barrier",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {}
+          },
+          {
+            "id": "gate-claimed",
+            "kind": "barrier",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {
+              "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
+              "onUnsatisfied": "fail",
+              "lateArrival": "ignore",
+              "kind": "minimum",
+              "minimum": 9
+            }
+          },
+          {
+            "id": "sink",
+            "kind": "transform",
+            "inputSchema": {},
+            "outputSchema": {},
+            "config": {}
+          }
+        ],
+        "edges": [
+          {
+            "id": "seed-left",
+            "from": {
+              "node": "seed"
+            },
+            "to": {
+              "node": "left"
+            }
+          },
+          {
+            "id": "seed-right",
+            "from": {
+              "node": "seed"
+            },
+            "to": {
+              "node": "right"
+            }
+          },
+          {
+            "id": "left-empty",
+            "from": {
+              "node": "left"
+            },
+            "to": {
+              "node": "gate-empty"
+            }
+          },
+          {
+            "id": "right-empty",
+            "from": {
+              "node": "right"
+            },
+            "to": {
+              "node": "gate-empty"
+            }
+          },
+          {
+            "id": "left-claimed",
+            "from": {
+              "node": "left"
+            },
+            "to": {
+              "node": "gate-claimed"
+            }
+          },
+          {
+            "id": "right-claimed",
+            "from": {
+              "node": "right"
+            },
+            "to": {
+              "node": "gate-claimed"
+            }
+          },
+          {
+            "id": "empty-sink",
+            "from": {
+              "node": "gate-empty"
+            },
+            "to": {
+              "node": "sink"
+            }
+          },
+          {
+            "id": "claimed-sink",
+            "from": {
+              "node": "gate-claimed"
+            },
+            "to": {
+              "node": "sink"
+            }
+          }
+        ]
+      }
+    },
+    {
       "name": "router-pass-emits-before-the-barrier-pass",
-      "graphHash": "ca585d76f3a619748d132a0044de80f76a34a45e591b6084e97950ceb0f686bb",
+      "graphHash": "d0e7e5edb760b544b4d7dc9da18aed160002fcaf0b076629b6f6a9059b5915a8",
       "expectValid": false,
       "expectDiagnostics": [
         {
@@ -3005,6 +3760,7 @@
             "inputSchema": {},
             "outputSchema": {},
             "config": {
+              "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
               "onUnsatisfied": "fail",
               "lateArrival": "ignore",
               "kind": "all",
@@ -3070,7 +3826,7 @@
     },
     {
       "name": "barrier-categories-emit-in-ge1421-ge1422-ge1423-ge1424-order",
-      "graphHash": "5dffdb4d6593b30bdfa7ba1d03aa03f00eb6f4d20c7d72bc61dc631b493913f5",
+      "graphHash": "c2670e9fd802cd6319cb0c7ef961735bc1d3a2e55e70439beccc3710cd852dab",
       "expectValid": false,
       "expectDiagnostics": [
         {
@@ -3148,6 +3904,7 @@
             "inputSchema": {},
             "outputSchema": {},
             "config": {
+              "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
               "onUnsatisfied": "fail",
               "lateArrival": "ignore",
               "kind": "all",
@@ -3160,6 +3917,7 @@
             "inputSchema": {},
             "outputSchema": {},
             "config": {
+              "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
               "onUnsatisfied": "fail",
               "lateArrival": "ignore",
               "kind": "minimum"
@@ -3171,6 +3929,7 @@
             "inputSchema": {},
             "outputSchema": {},
             "config": {
+              "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
               "onUnsatisfied": "fail",
               "lateArrival": "ignore",
               "kind": "all"
@@ -3182,6 +3941,7 @@
             "inputSchema": {},
             "outputSchema": {},
             "config": {
+              "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
               "onUnsatisfied": "fail",
               "lateArrival": "ignore",
               "kind": "minimum",
@@ -3313,6 +4073,7 @@
     {
       "name": "no-items-all-is-never-an-implicit-pass",
       "policy": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "all"
@@ -3343,6 +4104,7 @@
     {
       "name": "no-items-minimum-precedes-the-threshold-rule",
       "policy": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "unknown",
         "lateArrival": "ignore",
         "kind": "minimum",
@@ -3374,6 +4136,7 @@
     {
       "name": "no-items-percentage-precedes-the-ratio-rule",
       "policy": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "human",
         "lateArrival": "ignore",
         "kind": "percentage",
@@ -3405,6 +4168,7 @@
     {
       "name": "no-items-quorum-precedes-the-participant-rule",
       "policy": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "quorum",
@@ -3440,6 +4204,7 @@
     {
       "name": "all-succeeded",
       "policy": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "all"
@@ -3482,6 +4247,7 @@
     {
       "name": "all-not-succeeded-with-one-failure",
       "policy": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "all"
@@ -3525,6 +4291,7 @@
     {
       "name": "all-not-succeeded-with-one-missing",
       "policy": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "unknown",
         "lateArrival": "ignore",
         "kind": "all"
@@ -3568,6 +4335,7 @@
     {
       "name": "all-not-succeeded-with-one-timed-out-sets-deadline-elapsed",
       "policy": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "human",
         "lateArrival": "ignore",
         "kind": "all",
@@ -3614,6 +4382,7 @@
     {
       "name": "all-partitions-every-disposition-in-declaration-order",
       "policy": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "all",
@@ -3682,6 +4451,7 @@
     {
       "name": "minimum-one-below-threshold",
       "policy": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "minimum",
@@ -3736,6 +4506,7 @@
     {
       "name": "minimum-at-threshold",
       "policy": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "minimum",
@@ -3790,6 +4561,7 @@
     {
       "name": "minimum-one-above-threshold",
       "policy": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "minimum",
@@ -3843,6 +4615,7 @@
     {
       "name": "minimum-equal-to-total-is-not-exceeds-total",
       "policy": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "minimum",
@@ -3891,6 +4664,7 @@
     {
       "name": "minimum-exceeds-total-by-one",
       "policy": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "minimum",
@@ -3939,6 +4713,7 @@
     {
       "name": "minimum-exceeds-total-outranks-a-sufficient-success-count",
       "policy": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "human",
         "lateArrival": "ignore",
         "kind": "minimum",
@@ -3977,6 +4752,7 @@
     {
       "name": "minimum-not-met-resolves-to-unknown",
       "policy": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "unknown",
         "lateArrival": "ignore",
         "kind": "minimum",
@@ -4021,6 +4797,7 @@
     {
       "name": "minimum-not-met-resolves-to-awaiting-human",
       "policy": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "human",
         "lateArrival": "reject",
         "kind": "minimum",
@@ -4065,6 +4842,7 @@
     {
       "name": "percentage-one-below-threshold",
       "policy": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "percentage",
@@ -4119,6 +4897,7 @@
     {
       "name": "percentage-at-threshold",
       "policy": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "percentage",
@@ -4173,6 +4952,7 @@
     {
       "name": "percentage-one-above-threshold",
       "policy": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "percentage",
@@ -4227,6 +5007,7 @@
     {
       "name": "percentage-exact-integer-products-avoid-float-rounding-met",
       "policy": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "percentage",
@@ -4276,6 +5057,7 @@
     {
       "name": "percentage-exact-integer-products-avoid-float-rounding-not-met",
       "policy": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "unknown",
         "lateArrival": "ignore",
         "kind": "percentage",
@@ -4325,6 +5107,7 @@
     {
       "name": "percentage-ten-thousand-basis-points-requires-every-success",
       "policy": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "percentage",
@@ -4373,6 +5156,7 @@
     {
       "name": "percentage-ten-thousand-basis-points-rejects-one-timeout",
       "policy": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "human",
         "lateArrival": "ignore",
         "kind": "percentage",
@@ -4425,6 +5209,7 @@
     {
       "name": "percentage-one-basis-point-still-requires-one-success",
       "policy": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "percentage",
@@ -4469,6 +5254,7 @@
     {
       "name": "quorum-one-below-threshold",
       "policy": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "quorum",
@@ -4564,6 +5350,7 @@
     {
       "name": "quorum-at-threshold",
       "policy": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "quorum",
@@ -4659,6 +5446,7 @@
     {
       "name": "quorum-one-above-threshold",
       "policy": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "quorum",
@@ -4753,6 +5541,7 @@
     {
       "name": "quorum-count-abstain-as-participant-true",
       "policy": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "quorum",
@@ -4848,6 +5637,7 @@
     {
       "name": "quorum-count-abstain-as-participant-false",
       "policy": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "quorum",
@@ -4943,6 +5733,7 @@
     {
       "name": "quorum-exceeds-participants-when-every-vote-abstains",
       "policy": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "human",
         "lateArrival": "ignore",
         "kind": "quorum",
@@ -5009,6 +5800,7 @@
     {
       "name": "quorum-unknown-counts-as-participant-and-never-as-accept",
       "policy": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "unknown",
         "lateArrival": "ignore",
         "kind": "quorum",
@@ -5090,6 +5882,7 @@
     {
       "name": "quorum-unknown-participates-while-abstain-is-excluded",
       "policy": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "quorum",
@@ -5172,6 +5965,7 @@
     {
       "name": "quorum-met-with-confidence-and-evidence-records",
       "policy": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "reject",
         "kind": "quorum",
@@ -5269,6 +6063,7 @@
     {
       "name": "quorum-rejects-are-classified-as-failed",
       "policy": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "human",
         "lateArrival": "ignore",
         "kind": "quorum",
@@ -5350,6 +6145,7 @@
     {
       "name": "quorum-accepts-equal-to-participants-is-the-inclusive-boundary",
       "policy": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "quorum",
@@ -5431,6 +6227,7 @@
     {
       "name": "quorum-accepts-one-above-participants-is-exceeds-participants",
       "policy": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "quorum",
@@ -5512,6 +6309,7 @@
     {
       "name": "quorum-missing-entry-is-recorded-as-not-cast",
       "policy": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "quorum",
@@ -5588,6 +6386,7 @@
     {
       "name": "quorum-timed-out-entry-is-recorded-as-not-cast",
       "policy": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "human",
         "lateArrival": "ignore",
         "kind": "quorum",
@@ -5662,6 +6461,7 @@
     {
       "name": "quorum-census-covers-every-cast-and-non-cast-arrival",
       "policy": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "unknown",
         "lateArrival": "reject",
         "kind": "quorum",
@@ -5788,6 +6588,7 @@
     {
       "name": "quorum-non-cast-arrivals-still-count-toward-participants",
       "policy": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "quorum",
@@ -5868,6 +6669,7 @@
       "decisionDomain": "graphengineering.barrier-decision.v1alpha1",
       "policyKindTag": "barrier",
       "policy": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "all"
@@ -5899,13 +6701,13 @@
         "abstainedIds": [],
         "unknownIds": [],
         "barrierNodeId": "gate",
-        "policyHash": "6737202047614939f6a39f16273bd223c3b2290d0522709c3a4aa093fe80241e",
-        "decisionId": "8a2a2fbe4a299672f73aab19d7027e324bbd3ab6f0d54376970453ae5926750f"
+        "policyHash": "b3c176834bf41d36d8930fd7a5fab6479cd4f8eb7560c1dfad9ee40abf935db1",
+        "decisionId": "a901a2e02ea7444fc1e9cc5b42267b45b5a3a240af963d2044728da786bcce04"
       },
       "expect": {
-        "policyHash": "6737202047614939f6a39f16273bd223c3b2290d0522709c3a4aa093fe80241e",
-        "decisionId": "8a2a2fbe4a299672f73aab19d7027e324bbd3ab6f0d54376970453ae5926750f",
-        "canonicalPolicyUtf8Bytes": 60,
+        "policyHash": "b3c176834bf41d36d8930fd7a5fab6479cd4f8eb7560c1dfad9ee40abf935db1",
+        "decisionId": "a901a2e02ea7444fc1e9cc5b42267b45b5a3a240af963d2044728da786bcce04",
+        "canonicalPolicyUtf8Bytes": 129,
         "canonicalDocumentWithoutDecisionIdUtf8Bytes": 423
       }
     },
@@ -5915,6 +6717,7 @@
       "decisionDomain": "graphengineering.barrier-decision.v1alpha1",
       "policyKindTag": "barrier",
       "policy": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "unknown",
         "lateArrival": "reject",
         "kind": "minimum",
@@ -5951,13 +6754,13 @@
         "abstainedIds": [],
         "unknownIds": [],
         "barrierNodeId": "gate.minimum",
-        "policyHash": "a91c42bf7eb5f516091f2137daa1b903b863cb7e54262f6fe16975597f70488d",
-        "decisionId": "b8df2eb9cd8ac713e8318d740f05d82e2d72facd185e0fd273e16a198dde82eb"
+        "policyHash": "50d90115ca9a8a661a3ee086e9f3fe030b4e724605bf963dff766633fde4b1fe",
+        "decisionId": "9f18049e46196750249bfb550765d614b599d6f84e514563cd0ced5149b1aca1"
       },
       "expect": {
-        "policyHash": "a91c42bf7eb5f516091f2137daa1b903b863cb7e54262f6fe16975597f70488d",
-        "decisionId": "b8df2eb9cd8ac713e8318d740f05d82e2d72facd185e0fd273e16a198dde82eb",
-        "canonicalPolicyUtf8Bytes": 79,
+        "policyHash": "50d90115ca9a8a661a3ee086e9f3fe030b4e724605bf963dff766633fde4b1fe",
+        "decisionId": "9f18049e46196750249bfb550765d614b599d6f84e514563cd0ced5149b1aca1",
+        "canonicalPolicyUtf8Bytes": 148,
         "canonicalDocumentWithoutDecisionIdUtf8Bytes": 436
       }
     },
@@ -5967,6 +6770,7 @@
       "decisionDomain": "graphengineering.barrier-decision.v1alpha1",
       "policyKindTag": "barrier",
       "policy": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "human",
         "lateArrival": "ignore",
         "kind": "percentage",
@@ -6004,13 +6808,13 @@
         "abstainedIds": [],
         "unknownIds": [],
         "barrierNodeId": "gate-percentage",
-        "policyHash": "430729720ce6fc03f1dc01f51b4672430646bff1392a02119e16a70966157014",
-        "decisionId": "460a66be0a0242ed9cdd39a8d8c4459593de61cad4b989323ae93aa8d83d0a6a"
+        "policyHash": "f8773c60e21aa6dbdb9c903e8d04a7316924a9e5afabaa73c2b303a52a5c9fbb",
+        "decisionId": "43fde976ce93a6090c198d6c9f727eed845666a19c7a8f2eb25569e0caef19c8"
       },
       "expect": {
-        "policyHash": "430729720ce6fc03f1dc01f51b4672430646bff1392a02119e16a70966157014",
-        "decisionId": "460a66be0a0242ed9cdd39a8d8c4459593de61cad4b989323ae93aa8d83d0a6a",
-        "canonicalPolicyUtf8Bytes": 115,
+        "policyHash": "f8773c60e21aa6dbdb9c903e8d04a7316924a9e5afabaa73c2b303a52a5c9fbb",
+        "decisionId": "43fde976ce93a6090c198d6c9f727eed845666a19c7a8f2eb25569e0caef19c8",
+        "canonicalPolicyUtf8Bytes": 184,
         "canonicalDocumentWithoutDecisionIdUtf8Bytes": 449
       }
     },
@@ -6020,6 +6824,7 @@
       "decisionDomain": "graphengineering.barrier-decision.v1alpha1",
       "policyKindTag": "barrier",
       "policy": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "reject",
         "kind": "quorum",
@@ -6095,13 +6900,13 @@
           }
         ],
         "barrierNodeId": "gate-quorum",
-        "policyHash": "eeb28a2b813b8c48ea287690be14d4124d41c8151fd8c0af089785f38a6b50ee",
-        "decisionId": "eef774127ef5345f9476b3b252244f252ef4d10f62b4de60dca7f389ac7bc370"
+        "policyHash": "70b590d4eb5eb03243a4f800d8240ea034273b75ce00aea8d14dfa8d797dad6f",
+        "decisionId": "bca97cc7eb9cf1a81be74870f637b16e50a5833f82678cc4c8353bf1692caf7e"
       },
       "expect": {
-        "policyHash": "eeb28a2b813b8c48ea287690be14d4124d41c8151fd8c0af089785f38a6b50ee",
-        "decisionId": "eef774127ef5345f9476b3b252244f252ef4d10f62b4de60dca7f389ac7bc370",
-        "canonicalPolicyUtf8Bytes": 148,
+        "policyHash": "70b590d4eb5eb03243a4f800d8240ea034273b75ce00aea8d14dfa8d797dad6f",
+        "decisionId": "bca97cc7eb9cf1a81be74870f637b16e50a5833f82678cc4c8353bf1692caf7e",
+        "canonicalPolicyUtf8Bytes": 217,
         "canonicalDocumentWithoutDecisionIdUtf8Bytes": 700
       }
     },
@@ -6111,6 +6916,7 @@
       "decisionDomain": "graphengineering.barrier-decision.v1alpha1",
       "policyKindTag": "barrier",
       "policy": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "unknown",
         "lateArrival": "reject",
         "kind": "quorum",
@@ -6167,13 +6973,13 @@
           }
         ],
         "barrierNodeId": "gate-census",
-        "policyHash": "fa33ce080b0d2381deb4b5a3df4943e8ada48d0d99b701aebf80f75014937770",
-        "decisionId": "26176ef37e28668d001ffd446e6d873854511a296a8d93f8cb1d2f9fb8669d77"
+        "policyHash": "0525c669fee68f70ba4d6209bd92132153fc366fd4c58c604b295e3f3f41a5f0",
+        "decisionId": "d7082682358335d05528ef96092727a273ebc6ca5b81cc8dbdd264f1b8ebf692"
       },
       "expect": {
-        "policyHash": "fa33ce080b0d2381deb4b5a3df4943e8ada48d0d99b701aebf80f75014937770",
-        "decisionId": "26176ef37e28668d001ffd446e6d873854511a296a8d93f8cb1d2f9fb8669d77",
-        "canonicalPolicyUtf8Bytes": 149,
+        "policyHash": "0525c669fee68f70ba4d6209bd92132153fc366fd4c58c604b295e3f3f41a5f0",
+        "decisionId": "d7082682358335d05528ef96092727a273ebc6ca5b81cc8dbdd264f1b8ebf692",
+        "canonicalPolicyUtf8Bytes": 218,
         "canonicalDocumentWithoutDecisionIdUtf8Bytes": 595
       }
     },
@@ -6183,6 +6989,7 @@
       "decisionDomain": "graphengineering.barrier-decision.v1alpha1",
       "policyKindTag": "barrier",
       "policy": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "all"
@@ -6214,13 +7021,13 @@
         "abstainedIds": [],
         "unknownIds": [],
         "barrierNodeId": "gate",
-        "policyHash": "6737202047614939f6a39f16273bd223c3b2290d0522709c3a4aa093fe80241e",
-        "decisionId": "36522f138ca9c9c95afe966c20b21aeb16eb5238991bcc992c3361021d9f2104"
+        "policyHash": "b3c176834bf41d36d8930fd7a5fab6479cd4f8eb7560c1dfad9ee40abf935db1",
+        "decisionId": "7916e8d6adf5ca9fd46bf32903021395d9fff18b5e7b88d528207c3dd1b20550"
       },
       "expect": {
-        "policyHash": "6737202047614939f6a39f16273bd223c3b2290d0522709c3a4aa093fe80241e",
-        "decisionId": "36522f138ca9c9c95afe966c20b21aeb16eb5238991bcc992c3361021d9f2104",
-        "canonicalPolicyUtf8Bytes": 60,
+        "policyHash": "b3c176834bf41d36d8930fd7a5fab6479cd4f8eb7560c1dfad9ee40abf935db1",
+        "decisionId": "7916e8d6adf5ca9fd46bf32903021395d9fff18b5e7b88d528207c3dd1b20550",
+        "canonicalPolicyUtf8Bytes": 129,
         "canonicalDocumentWithoutDecisionIdUtf8Bytes": 423
       }
     },
@@ -6230,6 +7037,7 @@
       "decisionDomain": "graphengineering.barrier-decision.v1alpha1",
       "policyKindTag": "barrier",
       "policy": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "all"
@@ -6263,13 +7071,13 @@
         "abstainedIds": [],
         "unknownIds": [],
         "barrierNodeId": "gate",
-        "policyHash": "6737202047614939f6a39f16273bd223c3b2290d0522709c3a4aa093fe80241e",
-        "decisionId": "2ad46150f2cabc617e0acb0693fe650df7be1f6362a23bfbdf2a60854ba1d2ec"
+        "policyHash": "b3c176834bf41d36d8930fd7a5fab6479cd4f8eb7560c1dfad9ee40abf935db1",
+        "decisionId": "99e21f5448ecb5666a952a6cf91c3ec90a27a6998d6c289282cb024638096427"
       },
       "expect": {
-        "policyHash": "6737202047614939f6a39f16273bd223c3b2290d0522709c3a4aa093fe80241e",
-        "decisionId": "2ad46150f2cabc617e0acb0693fe650df7be1f6362a23bfbdf2a60854ba1d2ec",
-        "canonicalPolicyUtf8Bytes": 60,
+        "policyHash": "b3c176834bf41d36d8930fd7a5fab6479cd4f8eb7560c1dfad9ee40abf935db1",
+        "decisionId": "99e21f5448ecb5666a952a6cf91c3ec90a27a6998d6c289282cb024638096427",
+        "canonicalPolicyUtf8Bytes": 129,
         "canonicalDocumentWithoutDecisionIdUtf8Bytes": 422
       }
     },
@@ -6279,6 +7087,7 @@
       "decisionDomain": "graphengineering.barrier-decision.v1alpha1",
       "policyKindTag": "barrier",
       "policy": {
+        "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
         "onUnsatisfied": "fail",
         "lateArrival": "ignore",
         "kind": "all"
@@ -6312,13 +7121,13 @@
         "abstainedIds": [],
         "unknownIds": [],
         "barrierNodeId": "gate",
-        "policyHash": "6737202047614939f6a39f16273bd223c3b2290d0522709c3a4aa093fe80241e",
-        "decisionId": "3cd58a48e6d8f22f93cb7a04dd282c417cc8ad53dfe1d001373e9703fdf448b8"
+        "policyHash": "b3c176834bf41d36d8930fd7a5fab6479cd4f8eb7560c1dfad9ee40abf935db1",
+        "decisionId": "47277d38e16ba7e2c0e916c4f827869260e663553cd64d0f1d29ce8fafa14329"
       },
       "expect": {
-        "policyHash": "6737202047614939f6a39f16273bd223c3b2290d0522709c3a4aa093fe80241e",
-        "decisionId": "3cd58a48e6d8f22f93cb7a04dd282c417cc8ad53dfe1d001373e9703fdf448b8",
-        "canonicalPolicyUtf8Bytes": 60,
+        "policyHash": "b3c176834bf41d36d8930fd7a5fab6479cd4f8eb7560c1dfad9ee40abf935db1",
+        "decisionId": "47277d38e16ba7e2c0e916c4f827869260e663553cd64d0f1d29ce8fafa14329",
+        "canonicalPolicyUtf8Bytes": 129,
         "canonicalDocumentWithoutDecisionIdUtf8Bytes": 422
       }
     },
@@ -6485,7 +7294,7 @@
   "identifierBaseDocuments": {
     "BarrierDecision": {
       "barrierNodeId": "gate",
-      "policyHash": "224b46b0ee690fa5b0605433c08cb9a7b4161a3abdf729e3f9ebf074c23bcd7c",
+      "policyHash": "9cb5f1b38c1fe7381f922af5e1081c9e5652832e8c7e791c0020b847f66c7716",
       "armedAtMs": 0,
       "decidedAtMs": 1,
       "deadlineElapsed": false,
@@ -6519,7 +7328,7 @@
           "verdict": "not-cast"
         }
       ],
-      "decisionId": "bcc9392e69c79d3d2386a1da8ae92c8631121a05074ea2326640a16efdb98aac"
+      "decisionId": "f118a09000a39fc534f3c8867baba911b2eb71bb1a5fd2ba62dbfd6c72ff2e5d"
     },
     "RouteDecision": {
       "routerNodeId": "route",
@@ -6668,6 +7477,7 @@
       "graphRevision": 5,
       "currentPolicies": {
         "gate": {
+          "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
           "onUnsatisfied": "fail",
           "lateArrival": "ignore",
           "kind": "minimum",
@@ -6704,8 +7514,8 @@
             "abstainedIds": [],
             "unknownIds": [],
             "barrierNodeId": "gate",
-            "policyHash": "caae7fe331288adc52d60846ee6c0b9b6cbae4728018d87c35e549dfa5914750",
-            "decisionId": "2b1a9ffb7a2859fc659bdc87b3dd63be1e47bb3a3a32e746cea4a5a5982d21e0"
+            "policyHash": "4d28cb718fec047ddc34dbc5d807d4bbcb8faf90e9981cf6246c1556f0343ad2",
+            "decisionId": "3ff618ef3f78313458adb88f3d6a9defb290a9f0dee9759fc5f6c1b116184ff0"
           }
         }
       ],
@@ -6724,6 +7534,7 @@
       "graphRevision": 5,
       "currentPolicies": {
         "gate": {
+          "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
           "onUnsatisfied": "fail",
           "lateArrival": "ignore",
           "kind": "minimum",
@@ -6760,8 +7571,8 @@
             "abstainedIds": [],
             "unknownIds": [],
             "barrierNodeId": "gate",
-            "policyHash": "caae7fe331288adc52d60846ee6c0b9b6cbae4728018d87c35e549dfa5914750",
-            "decisionId": "2b1a9ffb7a2859fc659bdc87b3dd63be1e47bb3a3a32e746cea4a5a5982d21e0"
+            "policyHash": "4d28cb718fec047ddc34dbc5d807d4bbcb8faf90e9981cf6246c1556f0343ad2",
+            "decisionId": "3ff618ef3f78313458adb88f3d6a9defb290a9f0dee9759fc5f6c1b116184ff0"
           }
         }
       ],
@@ -6769,8 +7580,8 @@
         "outcome": "rejected",
         "code": "DECISION_POLICY_DRIFT",
         "nodeId": "gate",
-        "recordedPolicyHash": "caae7fe331288adc52d60846ee6c0b9b6cbae4728018d87c35e549dfa5914750",
-        "currentPolicyHash": "7f4fa7aabfc4c96a71b6d7e5763af0d4a57af67df64fe600bc4cd3952c67ff17",
+        "recordedPolicyHash": "4d28cb718fec047ddc34dbc5d807d4bbcb8faf90e9981cf6246c1556f0343ad2",
+        "currentPolicyHash": "5a0a3c8965a5a8297a8bc59effc9a11c8230b70773758772a8518a3e805f47c5",
         "adoptedNodeIds": [],
         "appendedDecisionEvents": 0,
         "expectedExecutorCalls": 0
@@ -6782,6 +7593,7 @@
       "graphRevision": 5,
       "currentPolicies": {
         "gate": {
+          "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
           "onUnsatisfied": "fail",
           "lateArrival": "ignore",
           "kind": "minimum",
@@ -6818,8 +7630,8 @@
             "abstainedIds": [],
             "unknownIds": [],
             "barrierNodeId": "gate",
-            "policyHash": "caae7fe331288adc52d60846ee6c0b9b6cbae4728018d87c35e549dfa5914750",
-            "decisionId": "2b1a9ffb7a2859fc659bdc87b3dd63be1e47bb3a3a32e746cea4a5a5982d21e0"
+            "policyHash": "4d28cb718fec047ddc34dbc5d807d4bbcb8faf90e9981cf6246c1556f0343ad2",
+            "decisionId": "3ff618ef3f78313458adb88f3d6a9defb290a9f0dee9759fc5f6c1b116184ff0"
           }
         }
       ],
@@ -6827,8 +7639,8 @@
         "outcome": "rejected",
         "code": "DECISION_IDENTITY_MISMATCH",
         "nodeId": "gate",
-        "recordedDecisionId": "2b1a9ffb7a2859fc659bdc87b3dd63be1e47bb3a3a32e746cea4a5a5982d21e0",
-        "recomputedDecisionId": "6c0e4b37c4bd19c358968ad1c81eb2c872a905718920c510dedbed47ef7944ae",
+        "recordedDecisionId": "3ff618ef3f78313458adb88f3d6a9defb290a9f0dee9759fc5f6c1b116184ff0",
+        "recomputedDecisionId": "9fba0ab0e53c09c9ccded1de7e28464591dbdfa670fdf9f4072e73bc234372b5",
         "adoptedNodeIds": [],
         "appendedDecisionEvents": 0,
         "expectedExecutorCalls": 0
@@ -6840,6 +7652,7 @@
       "graphRevision": 5,
       "currentPolicies": {
         "gate": {
+          "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
           "onUnsatisfied": "fail",
           "lateArrival": "ignore",
           "kind": "minimum",
@@ -6876,8 +7689,8 @@
             "abstainedIds": [],
             "unknownIds": [],
             "barrierNodeId": "gate",
-            "policyHash": "caae7fe331288adc52d60846ee6c0b9b6cbae4728018d87c35e549dfa5914750",
-            "decisionId": "2b1a9ffb7a2859fc659bdc87b3dd63be1e47bb3a3a32e746cea4a5a5982d21e0"
+            "policyHash": "4d28cb718fec047ddc34dbc5d807d4bbcb8faf90e9981cf6246c1556f0343ad2",
+            "decisionId": "3ff618ef3f78313458adb88f3d6a9defb290a9f0dee9759fc5f6c1b116184ff0"
           }
         },
         {
@@ -6909,8 +7722,8 @@
             "abstainedIds": [],
             "unknownIds": [],
             "barrierNodeId": "gate",
-            "policyHash": "caae7fe331288adc52d60846ee6c0b9b6cbae4728018d87c35e549dfa5914750",
-            "decisionId": "2b1a9ffb7a2859fc659bdc87b3dd63be1e47bb3a3a32e746cea4a5a5982d21e0"
+            "policyHash": "4d28cb718fec047ddc34dbc5d807d4bbcb8faf90e9981cf6246c1556f0343ad2",
+            "decisionId": "3ff618ef3f78313458adb88f3d6a9defb290a9f0dee9759fc5f6c1b116184ff0"
           }
         }
       ],
@@ -6929,6 +7742,7 @@
       "graphRevision": 5,
       "currentPolicies": {
         "gate": {
+          "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
           "onUnsatisfied": "fail",
           "lateArrival": "ignore",
           "kind": "minimum",
@@ -6965,8 +7779,8 @@
             "abstainedIds": [],
             "unknownIds": [],
             "barrierNodeId": "gate",
-            "policyHash": "caae7fe331288adc52d60846ee6c0b9b6cbae4728018d87c35e549dfa5914750",
-            "decisionId": "6c0e4b37c4bd19c358968ad1c81eb2c872a905718920c510dedbed47ef7944ae"
+            "policyHash": "4d28cb718fec047ddc34dbc5d807d4bbcb8faf90e9981cf6246c1556f0343ad2",
+            "decisionId": "9fba0ab0e53c09c9ccded1de7e28464591dbdfa670fdf9f4072e73bc234372b5"
           }
         }
       ],
@@ -6978,8 +7792,8 @@
         "appendedDecisionEvents": 0,
         "expectedExecutorCalls": 0,
         "forkedFromRunId": "run-replay",
-        "parentDecisionId": "2b1a9ffb7a2859fc659bdc87b3dd63be1e47bb3a3a32e746cea4a5a5982d21e0",
-        "childDecisionId": "6c0e4b37c4bd19c358968ad1c81eb2c872a905718920c510dedbed47ef7944ae"
+        "parentDecisionId": "3ff618ef3f78313458adb88f3d6a9defb290a9f0dee9759fc5f6c1b116184ff0",
+        "childDecisionId": "9fba0ab0e53c09c9ccded1de7e28464591dbdfa670fdf9f4072e73bc234372b5"
       }
     },
     {
@@ -7040,6 +7854,7 @@
           ]
         },
         "gate": {
+          "apiVersion": "graphengineering.reacher-z.github.io/barrier/v1alpha1",
           "onUnsatisfied": "fail",
           "lateArrival": "ignore",
           "kind": "minimum",
@@ -7097,8 +7912,8 @@
             "abstainedIds": [],
             "unknownIds": [],
             "barrierNodeId": "gate",
-            "policyHash": "caae7fe331288adc52d60846ee6c0b9b6cbae4728018d87c35e549dfa5914750",
-            "decisionId": "b4e654e27b6f3b814945360527bb67a1f9941184499bf1b939fe80f38cd0fa31"
+            "policyHash": "4d28cb718fec047ddc34dbc5d807d4bbcb8faf90e9981cf6246c1556f0343ad2",
+            "decisionId": "160735424762cadf49ef7d94ced7eb986dab34e0e8075ba349ce53ed945efbd9"
           }
         }
       ],
