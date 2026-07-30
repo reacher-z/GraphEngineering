@@ -176,14 +176,14 @@ picture. None is closed.
    row anywhere, so the redaction path of the source-by-sink evaluator — the
    behavior the contract is named for — is uncovered by the only executable
    join that exists.
-4. **`maxValueDepth` and `maxPointerTokens` are jointly unsatisfiable under the
-   obvious depth convention.** A 128-token pointer addresses a value 128 levels
-   below the root, so if the root counts as depth 1 the corpus's own
-   `semantic-pointer-tokens-positive` case (128 tokens, expected valid)
-   contradicts `maxValueDepth: 128`. The two limits are consistent only if the
-   root is depth 0, and the specification never says which. The validator
-   documents a root-is-depth-0 convention; the semantics document must state it
-   normatively.
+4. ~~**`maxValueDepth` and `maxPointerTokens` are jointly unsatisfiable under
+   the obvious depth convention.**~~ **Withdrawn on verification.** The finding
+   assumed the specification never states which convention applies. It does:
+   `redaction-semantics.md` §11 gives the limit as "Value depth (root is depth
+   0)" in the table and repeats "The root is one value node at depth 0" in the
+   prose immediately below it. The two limits are consistent as written and no
+   change was needed. Recorded rather than deleted, because a withdrawn finding
+   is evidence that the check was performed.
 
 ## Required disposition
 

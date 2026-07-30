@@ -1081,6 +1081,35 @@ Trace and span IDs use their protocol-safe fixed format. Trace attributes come
 from a closed metadata allowlist. Input, output, prompt, response, tool body,
 raw exception, environment, and secret values are absent by default.
 
+### 7.1 Retry never transforms an already-transformed value
+
+A retried sink write MUST re-enter the guard from the immutable pre-transform
+snapshot captured in step 1, keyed by the idempotency identity of §8.2. It MUST
+NOT resume from, re-transform, or re-protect a value that a previous attempt
+already transformed.
+
+Two specific errors are forbidden:
+
+1. **Double-transforming ciphertext.** Re-protecting an already protected blob
+   produces a value whose plaintext is another ciphertext. Recovery would then
+   need to know how many times protection was applied, which no persisted field
+   records, so a value that is nominally recoverable becomes permanently
+   unreadable while every hash and receipt still validates.
+2. **Hashing an already-replaced token as though it were raw.** After a
+   `constant-token` replacement the field holds the token, not the application
+   value. Computing `sourceHash` over the token yields a receipt that attests to
+   a source nobody ever held: the receipt validates, the pointer count matches,
+   and the digest proves nothing. This is the same class of defect as the
+   `redacted: true` flag over raw payload — a true-looking claim about a value
+   that was never examined.
+
+An implementation MUST therefore treat the pre-transform snapshot as the only
+legitimate transform input, and MUST reject a transform whose input already
+carries a protected reference, a protected blob, or a replacement token
+produced by the same rule set. Because the guard is a total function over
+(snapshot, policy, sink), a correct retry recomputes an identical
+`PreparedSinkWrite` rather than advancing a partially transformed one.
+
 ## 8. Hashes, activity identity, recovery, replay, and rotation
 
 ### 8.1 Required order
@@ -1469,6 +1498,28 @@ value/artifact source, and support/log metadata. Scan event/checkpoint
 temporary and final files, protected blobs, stdout, stderr, logs, traces/network
 bytes, serialized errors, CLI/MCP diagnostics, Explorer/API caches, support
 archives, migration manifests, and release evidence.
+
+#### Recorded narrowing of the canary campaign
+
+Master plan §15.5 requires one negative seeded canary per source and per sink,
+which is 57 plus 54 canaries. The campaign specified immediately above narrows
+that to seven seed points and roughly thirteen scan targets. That narrowing is
+deliberate, and recording it is mandatory rather than optional, because the
+difference is not cosmetic: 47 of the 54 sink classes receive no canary at all,
+so a leak through `database-materialized-projection`, `dead-letter`,
+`retry-buffer` or `benchmark-artifact` would not be detected by the very gate
+that exists to detect leaks.
+
+The seven seed points were chosen because they are the sources a runtime can
+actually populate in a provider-free candidate run. They are not evidence about
+the other sinks, and the campaign MUST NOT be described as per-sink coverage.
+
+This narrowing is therefore an accepted, bounded risk for the alpha contract
+only. It is not accepted for stable release: closing §15.5 as written requires
+either per-sink canary coverage or an explicit, separately reviewed risk
+acceptance naming each uncovered sink. `D9-REDACTION-CONFORMANCE-089` owns that
+decision, and until it is made no document may claim that the canary campaign
+demonstrates sink coverage.
 
 The scanner checks literal UTF-8 and obvious JSON, URL, base64, hexadecimal,
 UTF-16 LE/BE, and compressed-member forms. It includes:
