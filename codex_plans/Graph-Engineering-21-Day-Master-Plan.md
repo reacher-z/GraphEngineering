@@ -14890,3 +14890,110 @@ receipt with this exact entries receipt as predecessor. It does not authorize
 sequence zero, receipt consumption, stage adoption, Python parity, cursor
 publication, transaction commit, manifest activation, release-candidate status
 or claims about external adoption and star counts.
+
+#### 31.37.33 Baseline-header permanent publication receipt tranche
+
+This tranche implements the third ordered initial-write receipt and stops
+before operation-sequence zero. Its only predecessor is the exact authentic
+baseline-entry publication receipt from section 31.37.32; an entries clone,
+structural copy, Proxy, revoked Proxy, cross-run receipt or receipt from another
+authority/fence/reader graph cannot authorize the header.
+
+The fixed INSERT is the literal B3 contract SQL for
+`main.ge_cycle_operation_baselines`, with SHA-256
+`b1a32ec385dd78f9727a63b9c303a9cb95c9525910010984d09b7f0fd868e79a`.
+The statement fixes baseline format version one, source application ID
+1195724359 and source user version one in SQL. It binds exactly fourteen
+parameters in the frozen order: baseline ID, source schema hash, source
+migration-lineage ID/hash, source descriptor hash, capture time, legacy count,
+entry count, first hash, final hash, projection hash, creation runtime,
+creation runtime version and policy BLOB.
+
+The connection provides one closed-set, opaque, exclusive-lineage execution
+session. It prepares once, runs once, requires own-data parameter properties,
+rejects Proxy carriers, verifies one affected row and one real
+`total_changes` delta, records native-return completion before result
+inspection, preserves actual progress after failure and poisons replay. It
+never issues transaction control and never accepts caller SQL.
+
+Every header value is derived inside the authority graph:
+
+- source fields and `capturedAtMs` come from the exact frozen source envelope
+  retained privately when the outer authority validates its A2b receipt;
+- baseline, counts and first/final/projection hashes come from the exact
+  projection and entries predecessor;
+- creation runtime is the literal `graph-engineering-typescript`;
+- creation runtime version is the literal `0.1.0-alpha.1`; and
+- policy bytes come from `encodeOperationBaselinePolicy()` and are detached
+  before the native write.
+
+Caller runtime identity, `process.version`, package-manager environment,
+ambient interpreter version, caller policy, caller clock and reconstructed
+source envelopes are forbidden. The authority retains the already validated
+source envelope privately rather than re-entering a mutable provenance hash
+path during header publication.
+
+The canonical parameter digest is a dense one-execution by fourteen-scalar
+frame. The policy BLOB is committed by byte length, base64url bytes and SHA-256.
+Parameter and aggregate `{"affectedRows":"1"}` result digests are independently
+recomputed before receipt registration. A complete native write followed by a
+digest fault retains the real fixed-statement/affected-row watermarks, mints
+zero receipts and poisons the authority.
+
+The phase transition is literal:
+
+`baseline-entries-complete -> executing-baseline-header -> baseline-header-complete`.
+
+The successful three-dimensional ledger delta is `+1/+1/+1`: logical sequence
+two to three, fixed statements `20 + E` to `21 + E`, and affected rows
+`1 + L + E` to `2 + L + E`. Prepare failure records zero run/affected progress;
+native-return or result-shape failure records the real one-row progress without
+minting a receipt. A second header call poisons before additional SQL.
+
+The frozen null-prototype receipt commits the authentic entries predecessor,
+authority, connection, lineage, catalog fence, reader lease, projection
+reference, all source/projection/header scalars, exact SQL/hash/parameter order,
+policy byte identity, parameter/result digests, before/after epochs and
+`total_changes`, counters and the complete outer-ledger transition. Assertion
+is reusable and non-consuming for sequence-zero and adoption work.
+
+All new database, statement, string, buffer and SHA-256 operations use module-
+load-captured intrinsics. SQL preflight, parameter construction, predecessor
+observation, native execution, receipt verification and assertion translate
+ordinary failures into structured provider errors before poisoning; no raw
+hostile-prototype error may leave the authority active or ambiguously retryable.
+
+The dedicated hostile suite covers exact SQL/SHA and fourteen-order, strict
+one-by-fourteen typed framing, stable runtime literals, the canonical 946-byte
+policy BLOB and fixed policy hash, source/projection/hash commitments, one
+prepare/run/change/counter delta, ledger transition, cloned/proxied/revoked/
+cross-run predecessors, replay, prepare/run/result/digest failures, no
+transaction ownership, stale lineage, catalog and watermark drift, captured
+native/string/hash methods and package-root negative exports.
+
+Acceptance requires the 19-case header suite, entries regression, complete
+SQLite package regression, workspace typecheck/lint, B3 and migration gates,
+package/install smoke, append-only prefix proof and final severity-zero review.
+Passing authorizes only the sequence-zero receipt. Receipt consumption, atomic
+stage adoption, Python parity, cursor rebind, rules 11/12, TEMP retirement,
+commit, active manifest and release/adoption claims remain downstream.
+
+#### 31.37.34 Baseline-header executable acceptance checkpoint
+
+The header tranche has passed its bounded executable gates: header hostile
+tests 19/19, entries-plus-header focused regression 39/39, SQLite full
+regression 29/29 files and 981/981 tests, workspace typecheck/lint across all
+eight implementation packages, B3/ledger contracts 61/61 plus validators,
+migration release tests 6/6, eight/eight npm package-content checks and
+eight/eight packed-install smoke tests.
+
+The pre-append 14,892-line plan prefix remains byte-identical with SHA-256
+`5c34ede9379797e0b1b9b70672fb7014c9b8b0ccd5dcb93aab37fc26580a88cf`.
+Independent final review is HIGH 0 / MEDIUM 0 / LOW 0 after explicitly closing
+owner/counter observation termination and exact single-run epoch `+1n` proof.
+
+This milestone is the third non-consumed receipt in the initial publication
+chain. The next implementation leaf is operation-sequence-zero publication
+using the exact header receipt and provider-authoritative outer timestamp.
+Protocol completion, adoption, rebind, commit, manifest and release claims
+remain false.

@@ -162,6 +162,27 @@ export const SQLITE_CURSOR_BASELINE_ENTRY_PUBLICATION_PARAMETER_ORDER_INTRINSIC 
     "previousEntryHash",
     "entryHash",
   ] as const);
+export const SQLITE_CURSOR_BASELINE_HEADER_PUBLICATION_INSERT_SQL_INTRINSIC =
+  "INSERT INTO main.ge_cycle_operation_baselines (baseline_id, baseline_format_version, source_application_id, source_user_version, source_schema_identity_sha256, source_migration_lineage_id, source_migration_lineage_sha256, source_descriptor_hash, captured_at_ms, legacy_operation_count, entry_count, first_entry_hash, final_entry_hash, canonical_projection_sha256, creation_runtime, creation_runtime_version, policy_blob) VALUES (?, 1, 1195724359, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)" as const;
+export const SQLITE_CURSOR_BASELINE_HEADER_PUBLICATION_INSERT_SQL_SHA256_INTRINSIC =
+  "b1a32ec385dd78f9727a63b9c303a9cb95c9525910010984d09b7f0fd868e79a" as const;
+export const SQLITE_CURSOR_BASELINE_HEADER_PUBLICATION_PARAMETER_ORDER_INTRINSIC =
+  objectFreezeIntrinsic([
+    "baselineId",
+    "sourceSchemaIdentitySha256",
+    "sourceMigrationLineageId",
+    "sourceMigrationLineageSha256",
+    "sourceDescriptorHash",
+    "capturedAtMs",
+    "legacyOperationCount",
+    "entryCount",
+    "firstEntryHash",
+    "finalEntryHash",
+    "canonicalProjectionSha256",
+    "creationRuntime",
+    "creationRuntimeVersion",
+    "policyBlob",
+  ] as const);
 export type SQLiteConnectionNativeReadKind =
   | "cursor-publication-post-ddl-baseline-source"
   | "cursor-publication-target-catalog"
@@ -279,6 +300,51 @@ export interface SQLiteConnectionBaselineEntryPublicationExecutionSnapshot {
   readonly transactionLineage: SQLiteConnectionTransactionLineage;
 }
 
+/** Exact fourteen-value input contract for the single baseline-header run. */
+export interface SQLiteConnectionBaselineHeaderPublicationRow {
+  readonly baselineId: string;
+  readonly sourceSchemaIdentitySha256: string;
+  readonly sourceMigrationLineageId: string;
+  readonly sourceMigrationLineageSha256: string;
+  readonly sourceDescriptorHash: string;
+  readonly capturedAtMs: number;
+  readonly legacyOperationCount: number;
+  readonly entryCount: number;
+  readonly firstEntryHash: string;
+  readonly finalEntryHash: string;
+  readonly canonicalProjectionSha256: string;
+  readonly creationRuntime: string;
+  readonly creationRuntimeVersion: string;
+  readonly policyBlob: Uint8Array;
+}
+
+/** Opaque, connection-owned single-prepare/single-run header session. */
+export interface SQLiteConnectionBaselineHeaderPublicationExecution {
+  readonly __sqliteConnectionBaselineHeaderPublicationExecution: never;
+}
+
+export interface SQLiteConnectionBaselineHeaderPublicationStepSnapshot {
+  readonly affectedRowsDelta: 1;
+  readonly completedExecutionCount: 1;
+  readonly executeCount: 1;
+  readonly prepareCount: 1;
+  readonly totalChanges: number;
+  readonly transactionEpoch: bigint;
+  readonly transactionLineage: SQLiteConnectionTransactionLineage;
+}
+
+export interface SQLiteConnectionBaselineHeaderPublicationExecutionSnapshot {
+  readonly affectedRows: number;
+  readonly completedExecutionCount: 0 | 1;
+  readonly executeCount: 0 | 1;
+  readonly lifecycle: "active" | "completed" | "poisoned";
+  readonly prepareCount: 1;
+  readonly totalChanges: number;
+  readonly totalChangesDelta: number;
+  readonly transactionEpoch: bigint;
+  readonly transactionLineage: SQLiteConnectionTransactionLineage;
+}
+
 interface Migration0002ExecutionState {
   readonly asset: SQLiteCursorMigration0002Asset;
   readonly assetSnapshot: SQLiteCursorMigration0002AssetSnapshot;
@@ -308,10 +374,27 @@ interface BaselineEntryPublicationExecutionState {
   transactionEpoch: bigint;
 }
 
+interface BaselineHeaderPublicationExecutionState {
+  readonly connection: SQLiteConnection;
+  readonly initialTotalChanges: number;
+  readonly statement: StatementSync;
+  readonly transactionLineage: SQLiteConnectionTransactionLineage;
+  affectedRows: number;
+  completedExecutionCount: 0 | 1;
+  executeCount: 0 | 1;
+  lifecycle: "active" | "completed" | "poisoned";
+  totalChanges: number;
+  transactionEpoch: bigint;
+}
+
 const MIGRATION_0002_EXECUTIONS = new WeakMap<object, Migration0002ExecutionState>();
 const BASELINE_ENTRY_PUBLICATION_EXECUTIONS = new WeakMap<
   object,
   BaselineEntryPublicationExecutionState
+>();
+const BASELINE_HEADER_PUBLICATION_EXECUTIONS = new WeakMap<
+  object,
+  BaselineHeaderPublicationExecutionState
 >();
 const weakMapGetIntrinsic = WeakMap.prototype.get;
 const weakMapSetIntrinsic = WeakMap.prototype.set;
@@ -393,6 +476,122 @@ function checkedBaselineEntryPublicationParameters(
     entryStateBlob,
     previousEntryHash,
     entryHash,
+  ];
+}
+
+function baselineHeaderPublicationOwnValue(
+  row: object,
+  key: keyof SQLiteConnectionBaselineHeaderPublicationRow,
+): unknown {
+  const descriptor = reflectApplyIntrinsic(
+    objectGetOwnPropertyDescriptorIntrinsic,
+    Object,
+    [row, key],
+  ) as PropertyDescriptor | undefined;
+  if (descriptor === undefined || !("value" in descriptor)) {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "inspect-schema",
+      "SQLite baseline-header publication row is invalid",
+    );
+  }
+  return descriptor.value;
+}
+
+function checkedBaselineHeaderPublicationParameters(
+  row: SQLiteConnectionBaselineHeaderPublicationRow,
+): [
+  string,
+  string,
+  string,
+  string,
+  string,
+  number,
+  number,
+  number,
+  string,
+  string,
+  string,
+  string,
+  string,
+  Uint8Array,
+] {
+  if (row === null || typeof row !== "object" || isProxy(row)) {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "inspect-schema",
+      "SQLite baseline-header publication row is invalid",
+    );
+  }
+  const baselineId = baselineHeaderPublicationOwnValue(row, "baselineId");
+  const sourceSchemaIdentitySha256 = baselineHeaderPublicationOwnValue(
+    row, "sourceSchemaIdentitySha256",
+  );
+  const sourceMigrationLineageId = baselineHeaderPublicationOwnValue(
+    row, "sourceMigrationLineageId",
+  );
+  const sourceMigrationLineageSha256 = baselineHeaderPublicationOwnValue(
+    row, "sourceMigrationLineageSha256",
+  );
+  const sourceDescriptorHash = baselineHeaderPublicationOwnValue(row, "sourceDescriptorHash");
+  const capturedAtMs = baselineHeaderPublicationOwnValue(row, "capturedAtMs");
+  const legacyOperationCount = baselineHeaderPublicationOwnValue(row, "legacyOperationCount");
+  const entryCount = baselineHeaderPublicationOwnValue(row, "entryCount");
+  const firstEntryHash = baselineHeaderPublicationOwnValue(row, "firstEntryHash");
+  const finalEntryHash = baselineHeaderPublicationOwnValue(row, "finalEntryHash");
+  const canonicalProjectionSha256 = baselineHeaderPublicationOwnValue(
+    row, "canonicalProjectionSha256",
+  );
+  const creationRuntime = baselineHeaderPublicationOwnValue(row, "creationRuntime");
+  const creationRuntimeVersion = baselineHeaderPublicationOwnValue(
+    row, "creationRuntimeVersion",
+  );
+  const policyBlob = baselineHeaderPublicationOwnValue(row, "policyBlob");
+  if (typeof baselineId !== "string"
+      || !reflectApplyIntrinsic(stringStartsWithIntrinsic, baselineId, ["v2-"])
+      || !isLowerHex64(
+        reflectApplyIntrinsic(stringSliceIntrinsic, baselineId, [3]) as string,
+      )
+      || typeof sourceSchemaIdentitySha256 !== "string"
+      || !isLowerHex64(sourceSchemaIdentitySha256)
+      || typeof sourceMigrationLineageId !== "string"
+      || sourceMigrationLineageId.length === 0
+      || typeof sourceMigrationLineageSha256 !== "string"
+      || !isLowerHex64(sourceMigrationLineageSha256)
+      || typeof sourceDescriptorHash !== "string" || !isLowerHex64(sourceDescriptorHash)
+      || !numberIsSafeIntegerIntrinsic(capturedAtMs) || (capturedAtMs as number) < 0
+      || !numberIsSafeIntegerIntrinsic(legacyOperationCount)
+      || (legacyOperationCount as number) < 0
+      || !numberIsSafeIntegerIntrinsic(entryCount) || (entryCount as number) < 0
+      || (legacyOperationCount as number) > (entryCount as number)
+      || typeof firstEntryHash !== "string" || !isLowerHex64(firstEntryHash)
+      || typeof finalEntryHash !== "string" || !isLowerHex64(finalEntryHash)
+      || typeof canonicalProjectionSha256 !== "string"
+      || !isLowerHex64(canonicalProjectionSha256)
+      || typeof creationRuntime !== "string" || creationRuntime.length === 0
+      || typeof creationRuntimeVersion !== "string" || creationRuntimeVersion.length === 0
+      || !isUint8Array(policyBlob)) {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "inspect-schema",
+      "SQLite baseline-header publication row is invalid",
+    );
+  }
+  return [
+    baselineId,
+    sourceSchemaIdentitySha256,
+    sourceMigrationLineageId,
+    sourceMigrationLineageSha256,
+    sourceDescriptorHash,
+    capturedAtMs as number,
+    legacyOperationCount as number,
+    entryCount as number,
+    firstEntryHash,
+    finalEntryHash,
+    canonicalProjectionSha256,
+    creationRuntime,
+    creationRuntimeVersion,
+    policyBlob,
   ];
 }
 
@@ -645,6 +844,12 @@ const SQLITE_CONNECTION_BEGIN_BASELINE_ENTRY_PUBLICATION = Symbol(
 );
 const SQLITE_CONNECTION_EXECUTE_BASELINE_ENTRY_PUBLICATION_NEXT = Symbol(
   "SQLiteConnection.executeBaselineEntryPublicationNext",
+);
+const SQLITE_CONNECTION_BEGIN_BASELINE_HEADER_PUBLICATION = Symbol(
+  "SQLiteConnection.beginBaselineHeaderPublication",
+);
+const SQLITE_CONNECTION_EXECUTE_BASELINE_HEADER_PUBLICATION = Symbol(
+  "SQLiteConnection.executeBaselineHeaderPublication",
 );
 
 /** One hardened, synchronous, file-backed SQLite connection. */
@@ -1390,6 +1595,190 @@ export class SQLiteConnection {
     }
   }
 
+  [SQLITE_CONNECTION_BEGIN_BASELINE_HEADER_PUBLICATION]():
+    SQLiteConnectionBaselineHeaderPublicationExecution {
+    this.#assertOpen("inspect-schema");
+    if (!this.#database.isTransaction || this.#transactionMode !== "exclusive"
+        || this.#transactionLineage === null) {
+      throw new CycleStoreProviderError(
+        "GE_CYCLE_STORE_STALE_FENCE",
+        "inspect-schema",
+        "SQLite baseline-header publication requires the active BEGIN EXCLUSIVE owner",
+      );
+    }
+
+    const transactionLineage = this.#transactionLineage;
+    const transactionEpoch = this.#transactionEpoch;
+    const totalChanges = this.#readTotalChangesCounter();
+    let statement: StatementSync;
+    try {
+      statement = hardenSQLiteNativeStatementIntrinsic(reflectApplyIntrinsic(
+        databasePrepareIntrinsic,
+        this.#database,
+        [SQLITE_CURSOR_BASELINE_HEADER_PUBLICATION_INSERT_SQL_INTRINSIC],
+      ) as StatementSync);
+    } catch (error) {
+      throw translateSQLiteError(error, "inspect-schema");
+    }
+    if (!this.#database.isTransaction || this.#transactionMode !== "exclusive"
+        || this.#transactionLineage !== transactionLineage
+        || this.#transactionEpoch !== transactionEpoch
+        || this.#readTotalChangesCounter() !== totalChanges) {
+      throw new CycleStoreProviderError(
+        "GE_CYCLE_STORE_CORRUPTION",
+        "inspect-schema",
+        "SQLite baseline-header publication owner drifted during prepare",
+      );
+    }
+
+    const execution = objectFreezeIntrinsic(
+      reflectApplyIntrinsic(objectCreateIntrinsic, Object, [null]),
+    ) as SQLiteConnectionBaselineHeaderPublicationExecution;
+    const state: BaselineHeaderPublicationExecutionState = {
+      affectedRows: 0,
+      completedExecutionCount: 0,
+      connection: this,
+      executeCount: 0,
+      initialTotalChanges: totalChanges,
+      lifecycle: "active",
+      statement,
+      totalChanges,
+      transactionEpoch,
+      transactionLineage,
+    };
+    reflectApplyIntrinsic(weakMapSetIntrinsic, BASELINE_HEADER_PUBLICATION_EXECUTIONS, [
+      execution as object,
+      state,
+    ]);
+    return execution;
+  }
+
+  [SQLITE_CONNECTION_EXECUTE_BASELINE_HEADER_PUBLICATION](
+    execution: SQLiteConnectionBaselineHeaderPublicationExecution,
+    row: SQLiteConnectionBaselineHeaderPublicationRow,
+  ): SQLiteConnectionBaselineHeaderPublicationStepSnapshot {
+    const state = execution !== null && typeof execution === "object" && !isProxy(execution)
+      ? reflectApplyIntrinsic(weakMapGetIntrinsic, BASELINE_HEADER_PUBLICATION_EXECUTIONS, [
+        execution as object,
+      ]) as BaselineHeaderPublicationExecutionState | undefined
+      : undefined;
+    if (state === undefined || state.connection !== this) {
+      throw new CycleStoreProviderError(
+        "GE_CYCLE_STORE_INVALID_ARGUMENT",
+        "inspect-schema",
+        "SQLite baseline-header publication execution is invalid",
+      );
+    }
+    if (state.lifecycle !== "active") {
+      throw new CycleStoreProviderError(
+        "GE_CYCLE_STORE_CORRUPTION",
+        "inspect-schema",
+        "SQLite baseline-header publication execution is terminal",
+      );
+    }
+
+    let parameters: ReturnType<typeof checkedBaselineHeaderPublicationParameters>;
+    try {
+      parameters = checkedBaselineHeaderPublicationParameters(row);
+      this.#assertOpen("inspect-schema");
+      if (!this.#database.isTransaction || this.#transactionMode !== "exclusive"
+          || this.#transactionLineage !== state.transactionLineage
+          || this.#transactionEpoch !== state.transactionEpoch
+          || this.#readTotalChangesCounter() !== state.totalChanges) {
+        throw new CycleStoreProviderError(
+          "GE_CYCLE_STORE_CORRUPTION",
+          "inspect-schema",
+          "SQLite baseline-header publication execution owner drifted",
+        );
+      }
+    } catch (error) {
+      this.#synchronizeBaselineHeaderPublicationAfterFailure(state);
+      state.lifecycle = "poisoned";
+      throw translateSQLiteError(error, "inspect-schema");
+    }
+
+    let rawResult: unknown;
+    state.executeCount = 1;
+    this.#transactionEpoch += 1n;
+    try {
+      rawResult = reflectApplyIntrinsic(statementRunIntrinsic, state.statement, parameters);
+    } catch (error) {
+      this.#synchronizeBaselineHeaderPublicationAfterFailure(state);
+      state.lifecycle = "poisoned";
+      throw translateSQLiteError(error, "inspect-schema");
+    }
+
+    // Native return is the irreversible one-row completion boundary.
+    state.completedExecutionCount = 1;
+    state.affectedRows = 1;
+    state.transactionEpoch = this.#transactionEpoch;
+    try {
+      if (rawResult === null || typeof rawResult !== "object" || isProxy(rawResult)) {
+        throw new CycleStoreProviderError(
+          "GE_CYCLE_STORE_CORRUPTION",
+          "inspect-schema",
+          "SQLite baseline-header publication result is invalid",
+        );
+      }
+      const changesDescriptor = reflectApplyIntrinsic(
+        objectGetOwnPropertyDescriptorIntrinsic,
+        Object,
+        [rawResult, "changes"],
+      ) as PropertyDescriptor | undefined;
+      const changes = changesDescriptor !== undefined && "value" in changesDescriptor
+        ? changesDescriptor.value
+        : undefined;
+      if (!((typeof changes === "bigint" && changes === 1n) || changes === 1)) {
+        throw new CycleStoreProviderError(
+          "GE_CYCLE_STORE_CORRUPTION",
+          "inspect-schema",
+          "SQLite baseline-header publication must affect exactly one row",
+        );
+      }
+      const totalChanges = this.#readTotalChangesCounter();
+      if (totalChanges - state.totalChanges !== 1) {
+        throw new CycleStoreProviderError(
+          "GE_CYCLE_STORE_CORRUPTION",
+          "inspect-schema",
+          "SQLite baseline-header publication disagreed with total_changes",
+        );
+      }
+      state.totalChanges = totalChanges;
+      state.affectedRows = totalChanges - state.initialTotalChanges;
+      state.lifecycle = "completed";
+      return objectFreezeIntrinsic({
+        affectedRowsDelta: 1,
+        completedExecutionCount: 1,
+        executeCount: 1,
+        prepareCount: 1,
+        totalChanges,
+        transactionEpoch: state.transactionEpoch,
+        transactionLineage: state.transactionLineage,
+      });
+    } catch (error) {
+      this.#synchronizeBaselineHeaderPublicationAfterFailure(state);
+      state.lifecycle = "poisoned";
+      throw translateSQLiteError(error, "inspect-schema");
+    }
+  }
+
+  #synchronizeBaselineHeaderPublicationAfterFailure(
+    state: BaselineHeaderPublicationExecutionState,
+  ): void {
+    state.transactionEpoch = this.#transactionEpoch;
+    try {
+      if (this.#database.isOpen) {
+        state.totalChanges = this.#readTotalChangesCounter();
+        const delta = state.totalChanges - state.initialTotalChanges;
+        if (numberIsSafeIntegerIntrinsic(delta) && delta >= 0) {
+          state.affectedRows = delta;
+        }
+      }
+    } catch {
+      // The statement/result failure remains primary; the owner poisons and rolls back.
+    }
+  }
+
   #epochTrackedStatement(statement: StatementSync): StatementSync {
     const executionMethods = new Set<PropertyKey>(["all", "get", "iterate", "run"]);
     return new Proxy(statement, {
@@ -1648,6 +2037,10 @@ const sqliteConnectionBeginBaselineEntryPublicationIntrinsic =
   SQLiteConnection.prototype[SQLITE_CONNECTION_BEGIN_BASELINE_ENTRY_PUBLICATION];
 const sqliteConnectionExecuteBaselineEntryPublicationNextIntrinsic =
   SQLiteConnection.prototype[SQLITE_CONNECTION_EXECUTE_BASELINE_ENTRY_PUBLICATION_NEXT];
+const sqliteConnectionBeginBaselineHeaderPublicationIntrinsic =
+  SQLiteConnection.prototype[SQLITE_CONNECTION_BEGIN_BASELINE_HEADER_PUBLICATION];
+const sqliteConnectionExecuteBaselineHeaderPublicationIntrinsic =
+  SQLiteConnection.prototype[SQLITE_CONNECTION_EXECUTE_BASELINE_HEADER_PUBLICATION];
 const sqliteConnectionExecTrustedIntrinsic = SQLiteConnection.prototype.execTrusted;
 const sqliteConnectionPrepareIntrinsic = SQLiteConnection.prototype.prepare;
 
@@ -1795,6 +2188,60 @@ export function readSQLiteConnectionBaselineEntryPublicationExecutionSnapshotInt
     expectedEntryCount: state.expectedEntryCount,
     lifecycle: state.lifecycle,
     nextEntryOrdinal: state.nextEntryOrdinal,
+    prepareCount: 1,
+    totalChanges: state.totalChanges,
+    totalChangesDelta: state.totalChanges - state.initialTotalChanges,
+    transactionEpoch: state.transactionEpoch,
+    transactionLineage: state.transactionLineage,
+  });
+}
+
+/** Prepare the exact baseline-header INSERT once under the live exclusive owner. */
+export function beginSQLiteConnectionBaselineHeaderPublicationExecutionIntrinsic(
+  connection: SQLiteConnection,
+): SQLiteConnectionBaselineHeaderPublicationExecution {
+  return reflectApplyIntrinsic(
+    sqliteConnectionBeginBaselineHeaderPublicationIntrinsic,
+    connection,
+    [],
+  );
+}
+
+/** Run the exact fourteen-parameter baseline-header INSERT once. */
+export function executeSQLiteConnectionBaselineHeaderPublicationIntrinsic(
+  connection: SQLiteConnection,
+  execution: SQLiteConnectionBaselineHeaderPublicationExecution,
+  row: SQLiteConnectionBaselineHeaderPublicationRow,
+): SQLiteConnectionBaselineHeaderPublicationStepSnapshot {
+  return reflectApplyIntrinsic(
+    sqliteConnectionExecuteBaselineHeaderPublicationIntrinsic,
+    connection,
+    [execution, row],
+  );
+}
+
+/** Read real prepare/run/row/counter progress, including after failure. */
+export function readSQLiteConnectionBaselineHeaderPublicationExecutionSnapshotIntrinsic(
+  connection: SQLiteConnection,
+  execution: SQLiteConnectionBaselineHeaderPublicationExecution,
+): SQLiteConnectionBaselineHeaderPublicationExecutionSnapshot {
+  const state = execution !== null && typeof execution === "object" && !isProxy(execution)
+    ? reflectApplyIntrinsic(weakMapGetIntrinsic, BASELINE_HEADER_PUBLICATION_EXECUTIONS, [
+      execution as object,
+    ]) as BaselineHeaderPublicationExecutionState | undefined
+    : undefined;
+  if (state === undefined || state.connection !== connection) {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "inspect-schema",
+      "SQLite baseline-header publication execution is invalid",
+    );
+  }
+  return objectFreezeIntrinsic({
+    affectedRows: state.affectedRows,
+    completedExecutionCount: state.completedExecutionCount,
+    executeCount: state.executeCount,
+    lifecycle: state.lifecycle,
     prepareCount: 1,
     totalChanges: state.totalChanges,
     totalChangesDelta: state.totalChanges - state.initialTotalChanges,
