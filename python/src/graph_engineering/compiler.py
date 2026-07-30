@@ -48,6 +48,10 @@ class DiagnosticCode(StrEnum):
     DUPLICATE_ROUTE_CASE = "GE1405_DUPLICATE_ROUTE_CASE"
     DUPLICATE_ROUTE_TARGET = "GE1406_DUPLICATE_ROUTE_TARGET"
     INCOMPLETE_ROUTE_COVERAGE = "GE1407_INCOMPLETE_ROUTE_COVERAGE"
+    INVALID_BARRIER_POLICY = "GE1421_INVALID_BARRIER_POLICY"
+    BARRIER_POLICY_KIND_MISMATCH = "GE1422_BARRIER_POLICY_KIND_MISMATCH"
+    BARRIER_NO_INPUTS = "GE1423_BARRIER_NO_INPUTS"
+    BARRIER_THRESHOLD_EXCEEDS_INPUTS = "GE1424_BARRIER_THRESHOLD_EXCEEDS_INPUTS"
 
 
 @dataclass(frozen=True, slots=True)
@@ -324,10 +328,12 @@ def try_compile_graph(graph: GraphSpec | Mapping[str, Any]) -> CompilationResult
 
     # Import lazily because the validators project through this module's stable
     # Diagnostic type. They do not compile or mutate graphs.
+    from .integrated_barrier import validate_integrated_barrier_snapshot
     from .integrated_router import validate_integrated_router_snapshot
     from .typed_ports import validate_strict_typed_ports
 
     diagnostics.extend(validate_integrated_router_snapshot(graph))
+    diagnostics.extend(validate_integrated_barrier_snapshot(graph))
     diagnostics.extend(validate_strict_typed_ports(graph))
     if diagnostics:
         return CompilationResult(
