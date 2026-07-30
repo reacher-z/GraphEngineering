@@ -608,9 +608,23 @@ It requires all of:
 - an operator policy that explicitly selects inline capture for the named sink;
 - a separately authenticated risk authorization whose 64-lowercase-hex digest
   is bound into the effective policy;
-- `payloadDisposition: inline-unredacted` and `redacted: false` on each event;
+- `payloadDisposition: inline-unredacted` and `redacted: false` on each record
+  written to that sink;
 - a diagnostic warning that contains no application value; and
 - a deployment policy that permits the mode.
+
+Inline mode is a property of an observational sink record, never of the
+`events/v1alpha2` scheduler envelope. `event-v1alpha2.schema.json` pins exactly
+one disposition per event type — `metadata-only` or `protected-ref` — so
+`inline-unredacted` is not merely denied by the default profile there, it is
+unrepresentable. That is deliberate and must not be relaxed. Section 3.2 already
+requires the producer to keep the scheduler event `protected-ref` and emit any
+permitted observational derivative through a separate guarded record; widening
+the envelope enum would readmit plaintext application material into the
+authoritative durable stream, which is precisely the defect this contract
+exists to eliminate. An earlier draft of this section said "on each event",
+which read as a requirement implementers could not satisfy against any schema in
+this repository; the requirement is on sink records, and the envelope is closed.
 
 The stable production profile always denies it. Inline mode cannot satisfy D9,
 the default-privacy canary gate, or stable release evidence. An untrusted graph
