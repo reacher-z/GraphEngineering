@@ -5,7 +5,7 @@ import {
   type BackupProgressInfo,
 } from "node:sqlite";
 import { performance } from "node:perf_hooks";
-import { isProxy } from "node:util/types";
+import { isProxy, isUint8Array } from "node:util/types";
 
 import {
   CycleStoreProviderError,
@@ -34,6 +34,9 @@ const objectGetOwnPropertyDescriptorIntrinsic = Object.getOwnPropertyDescriptor;
 const objectGetPrototypeOfIntrinsic = Object.getPrototypeOf;
 const functionToStringIntrinsic = Function.prototype.toString;
 const numberIsSafeIntegerIntrinsic = Number.isSafeInteger;
+const stringCharCodeAtIntrinsic = String.prototype.charCodeAt;
+const stringSliceIntrinsic = String.prototype.slice;
+const stringStartsWithIntrinsic = String.prototype.startsWith;
 const statementGetIntrinsic = StatementSync.prototype.get;
 const statementIterateIntrinsic = StatementSync.prototype.iterate;
 const statementRunIntrinsic = StatementSync.prototype.run;
@@ -145,6 +148,20 @@ export const SQLITE_CURSOR_MIGRATION_0002_TEMP_CONFLICT_QUERY_INTRINSIC =
   + "'ge_cycle_operation_baselines','ge_cycle_operation_baseline_entries',"
   + "'ge_cycle_operation_baseline_entries_key_uq',"
   + "'ge_cycle_operation_baseline_entries_hash_uq','ge_cycle_operation_sequence')";
+export const SQLITE_CURSOR_BASELINE_ENTRY_PUBLICATION_INSERT_SQL_INTRINSIC =
+  "INSERT INTO main.ge_cycle_operation_baseline_entries (baseline_id, ordinal, entry_kind, entry_key_blob, entry_state_blob, previous_entry_hash, entry_hash) VALUES (?, ?, ?, ?, ?, ?, ?)" as const;
+export const SQLITE_CURSOR_BASELINE_ENTRY_PUBLICATION_INSERT_SQL_SHA256_INTRINSIC =
+  "b522e3ee2bb4599d74b32c8602242b1b74c3f804dd9129a8eb5a0f529cdca88b" as const;
+export const SQLITE_CURSOR_BASELINE_ENTRY_PUBLICATION_PARAMETER_ORDER_INTRINSIC =
+  objectFreezeIntrinsic([
+    "baselineId",
+    "ordinal",
+    "entryKind",
+    "entryKeyBlob",
+    "entryStateBlob",
+    "previousEntryHash",
+    "entryHash",
+  ] as const);
 export type SQLiteConnectionNativeReadKind =
   | "cursor-publication-post-ddl-baseline-source"
   | "cursor-publication-target-catalog"
@@ -221,6 +238,47 @@ export interface SQLiteConnectionMigration0002ExecutionSnapshot {
   readonly transactionLineage: SQLiteConnectionTransactionLineage;
 }
 
+/** Exact seven-value input contract for one baseline-entry publication run. */
+export interface SQLiteConnectionBaselineEntryPublicationRow {
+  readonly baselineId: string;
+  readonly ordinal: number;
+  readonly entryKind: string;
+  readonly entryKeyBlob: Uint8Array;
+  readonly entryStateBlob: Uint8Array;
+  readonly previousEntryHash: string;
+  readonly entryHash: string;
+}
+
+/** Opaque, connection-owned single-prepare baseline-entry write session. */
+export interface SQLiteConnectionBaselineEntryPublicationExecution {
+  readonly __sqliteConnectionBaselineEntryPublicationExecution: never;
+}
+
+export interface SQLiteConnectionBaselineEntryPublicationStepSnapshot {
+  readonly affectedRowsDelta: 1;
+  readonly completedEntryCount: number;
+  readonly entryOrdinal: number;
+  readonly executeCount: number;
+  readonly prepareCount: 1;
+  readonly totalChanges: number;
+  readonly transactionEpoch: bigint;
+  readonly transactionLineage: SQLiteConnectionTransactionLineage;
+}
+
+export interface SQLiteConnectionBaselineEntryPublicationExecutionSnapshot {
+  readonly affectedRows: number;
+  readonly completedEntryCount: number;
+  readonly executeCount: number;
+  readonly expectedEntryCount: number;
+  readonly lifecycle: "active" | "completed" | "poisoned";
+  readonly nextEntryOrdinal: number;
+  readonly prepareCount: 1;
+  readonly totalChanges: number;
+  readonly totalChangesDelta: number;
+  readonly transactionEpoch: bigint;
+  readonly transactionLineage: SQLiteConnectionTransactionLineage;
+}
+
 interface Migration0002ExecutionState {
   readonly asset: SQLiteCursorMigration0002Asset;
   readonly assetSnapshot: SQLiteCursorMigration0002AssetSnapshot;
@@ -235,7 +293,26 @@ interface Migration0002ExecutionState {
   transactionEpoch: bigint;
 }
 
+interface BaselineEntryPublicationExecutionState {
+  readonly connection: SQLiteConnection;
+  readonly expectedEntryCount: number;
+  readonly initialTotalChanges: number;
+  readonly statement: StatementSync;
+  readonly transactionLineage: SQLiteConnectionTransactionLineage;
+  affectedRows: number;
+  completedEntryCount: number;
+  executeCount: number;
+  lifecycle: "active" | "completed" | "poisoned";
+  nextEntryOrdinal: number;
+  totalChanges: number;
+  transactionEpoch: bigint;
+}
+
 const MIGRATION_0002_EXECUTIONS = new WeakMap<object, Migration0002ExecutionState>();
+const BASELINE_ENTRY_PUBLICATION_EXECUTIONS = new WeakMap<
+  object,
+  BaselineEntryPublicationExecutionState
+>();
 const weakMapGetIntrinsic = WeakMap.prototype.get;
 const weakMapSetIntrinsic = WeakMap.prototype.set;
 
@@ -245,6 +322,78 @@ function invalid(message: string): never {
     "inspect-schema",
     message,
   );
+}
+
+function isLowerHex64(value: string): boolean {
+  if (value.length !== 64) return false;
+  for (let index = 0; index < value.length; index += 1) {
+    const code = reflectApplyIntrinsic(stringCharCodeAtIntrinsic, value, [index]) as number;
+    if (!((code >= 48 && code <= 57) || (code >= 97 && code <= 102))) return false;
+  }
+  return true;
+}
+
+function baselineEntryPublicationOwnValue(
+  row: object,
+  key: keyof SQLiteConnectionBaselineEntryPublicationRow,
+): unknown {
+  const descriptor = reflectApplyIntrinsic(
+    objectGetOwnPropertyDescriptorIntrinsic,
+    Object,
+    [row, key],
+  ) as PropertyDescriptor | undefined;
+  if (descriptor === undefined || !("value" in descriptor)) {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "inspect-schema",
+      "SQLite baseline-entry publication row is invalid",
+    );
+  }
+  return descriptor.value;
+}
+
+function checkedBaselineEntryPublicationParameters(
+  row: SQLiteConnectionBaselineEntryPublicationRow,
+): [string, number, string, Uint8Array, Uint8Array, string, string] {
+  if (row === null || typeof row !== "object" || isProxy(row)) {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "inspect-schema",
+      "SQLite baseline-entry publication row is invalid",
+    );
+  }
+  const baselineId = baselineEntryPublicationOwnValue(row, "baselineId");
+  const ordinal = baselineEntryPublicationOwnValue(row, "ordinal");
+  const entryKind = baselineEntryPublicationOwnValue(row, "entryKind");
+  const entryKeyBlob = baselineEntryPublicationOwnValue(row, "entryKeyBlob");
+  const entryStateBlob = baselineEntryPublicationOwnValue(row, "entryStateBlob");
+  const previousEntryHash = baselineEntryPublicationOwnValue(row, "previousEntryHash");
+  const entryHash = baselineEntryPublicationOwnValue(row, "entryHash");
+  if (typeof baselineId !== "string"
+      || !reflectApplyIntrinsic(stringStartsWithIntrinsic, baselineId, ["v2-"])
+      || !isLowerHex64(
+        reflectApplyIntrinsic(stringSliceIntrinsic, baselineId, [3]) as string,
+      )
+      || !numberIsSafeIntegerIntrinsic(ordinal) || (ordinal as number) < 0
+      || typeof entryKind !== "string" || entryKind.length === 0
+      || !isUint8Array(entryKeyBlob) || !isUint8Array(entryStateBlob)
+      || typeof previousEntryHash !== "string" || !isLowerHex64(previousEntryHash)
+      || typeof entryHash !== "string" || !isLowerHex64(entryHash)) {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "inspect-schema",
+      "SQLite baseline-entry publication row is invalid",
+    );
+  }
+  return [
+    baselineId,
+    ordinal as number,
+    entryKind,
+    entryKeyBlob,
+    entryStateBlob,
+    previousEntryHash,
+    entryHash,
+  ];
 }
 
 function checkedPath(value: unknown): string {
@@ -490,6 +639,12 @@ const SQLITE_CONNECTION_BEGIN_MIGRATION_0002 = Symbol(
 );
 const SQLITE_CONNECTION_EXECUTE_MIGRATION_0002_NEXT = Symbol(
   "SQLiteConnection.executeMigration0002Next",
+);
+const SQLITE_CONNECTION_BEGIN_BASELINE_ENTRY_PUBLICATION = Symbol(
+  "SQLiteConnection.beginBaselineEntryPublication",
+);
+const SQLITE_CONNECTION_EXECUTE_BASELINE_ENTRY_PUBLICATION_NEXT = Symbol(
+  "SQLiteConnection.executeBaselineEntryPublicationNext",
 );
 
 /** One hardened, synchronous, file-backed SQLite connection. */
@@ -1015,6 +1170,226 @@ export class SQLiteConnection {
     }
   }
 
+  [SQLITE_CONNECTION_BEGIN_BASELINE_ENTRY_PUBLICATION](
+    expectedEntryCount: number,
+  ): SQLiteConnectionBaselineEntryPublicationExecution {
+    this.#assertOpen("inspect-schema");
+    if (!numberIsSafeIntegerIntrinsic(expectedEntryCount) || expectedEntryCount < 0) {
+      throw new CycleStoreProviderError(
+        "GE_CYCLE_STORE_INVALID_ARGUMENT",
+        "inspect-schema",
+        "SQLite baseline-entry publication expected count is invalid",
+      );
+    }
+    if (!this.#database.isTransaction || this.#transactionMode !== "exclusive"
+        || this.#transactionLineage === null) {
+      throw new CycleStoreProviderError(
+        "GE_CYCLE_STORE_STALE_FENCE",
+        "inspect-schema",
+        "SQLite baseline-entry publication requires the active BEGIN EXCLUSIVE owner",
+      );
+    }
+
+    const transactionLineage = this.#transactionLineage;
+    const transactionEpoch = this.#transactionEpoch;
+    const totalChanges = this.#readTotalChangesCounter();
+    let statement: StatementSync;
+    try {
+      statement = hardenSQLiteNativeStatementIntrinsic(reflectApplyIntrinsic(
+        databasePrepareIntrinsic,
+        this.#database,
+        [SQLITE_CURSOR_BASELINE_ENTRY_PUBLICATION_INSERT_SQL_INTRINSIC],
+      ) as StatementSync);
+    } catch (error) {
+      throw translateSQLiteError(error, "inspect-schema");
+    }
+    if (!this.#database.isTransaction || this.#transactionMode !== "exclusive"
+        || this.#transactionLineage !== transactionLineage
+        || this.#transactionEpoch !== transactionEpoch
+        || this.#readTotalChangesCounter() !== totalChanges) {
+      throw new CycleStoreProviderError(
+        "GE_CYCLE_STORE_CORRUPTION",
+        "inspect-schema",
+        "SQLite baseline-entry publication owner drifted during prepare",
+      );
+    }
+
+    const execution = objectFreezeIntrinsic(
+      reflectApplyIntrinsic(objectCreateIntrinsic, Object, [null]),
+    ) as SQLiteConnectionBaselineEntryPublicationExecution;
+    const state: BaselineEntryPublicationExecutionState = {
+      affectedRows: 0,
+      completedEntryCount: 0,
+      connection: this,
+      executeCount: 0,
+      expectedEntryCount,
+      initialTotalChanges: totalChanges,
+      lifecycle: expectedEntryCount === 0 ? "completed" : "active",
+      nextEntryOrdinal: 0,
+      statement,
+      totalChanges,
+      transactionEpoch,
+      transactionLineage,
+    };
+    reflectApplyIntrinsic(weakMapSetIntrinsic, BASELINE_ENTRY_PUBLICATION_EXECUTIONS, [
+      execution as object,
+      state,
+    ]);
+    return execution;
+  }
+
+  [SQLITE_CONNECTION_EXECUTE_BASELINE_ENTRY_PUBLICATION_NEXT](
+    execution: SQLiteConnectionBaselineEntryPublicationExecution,
+    row: SQLiteConnectionBaselineEntryPublicationRow,
+  ): SQLiteConnectionBaselineEntryPublicationStepSnapshot {
+    const state = execution !== null && typeof execution === "object" && !isProxy(execution)
+      ? reflectApplyIntrinsic(weakMapGetIntrinsic, BASELINE_ENTRY_PUBLICATION_EXECUTIONS, [
+        execution as object,
+      ]) as BaselineEntryPublicationExecutionState | undefined
+      : undefined;
+    if (state === undefined || state.connection !== this) {
+      throw new CycleStoreProviderError(
+        "GE_CYCLE_STORE_INVALID_ARGUMENT",
+        "inspect-schema",
+        "SQLite baseline-entry publication execution is invalid",
+      );
+    }
+    if (state.lifecycle !== "active") {
+      throw new CycleStoreProviderError(
+        "GE_CYCLE_STORE_CORRUPTION",
+        "inspect-schema",
+        "SQLite baseline-entry publication execution is terminal",
+      );
+    }
+    if (state.nextEntryOrdinal >= state.expectedEntryCount) {
+      state.lifecycle = "poisoned";
+      throw new CycleStoreProviderError(
+        "GE_CYCLE_STORE_CORRUPTION",
+        "inspect-schema",
+        "SQLite baseline-entry publication execution was reused",
+      );
+    }
+
+    let parameters: ReturnType<typeof checkedBaselineEntryPublicationParameters>;
+    try {
+      parameters = checkedBaselineEntryPublicationParameters(row);
+      this.#assertOpen("inspect-schema");
+      if (!this.#database.isTransaction || this.#transactionMode !== "exclusive"
+          || this.#transactionLineage !== state.transactionLineage
+          || this.#transactionEpoch !== state.transactionEpoch
+          || this.#readTotalChangesCounter() !== state.totalChanges) {
+        throw new CycleStoreProviderError(
+          "GE_CYCLE_STORE_CORRUPTION",
+          "inspect-schema",
+          "SQLite baseline-entry publication execution owner drifted",
+        );
+      }
+      if (parameters[1] !== state.nextEntryOrdinal) {
+        throw new CycleStoreProviderError(
+          "GE_CYCLE_STORE_CORRUPTION",
+          "inspect-schema",
+          "SQLite baseline-entry publication ordinal is not sequential",
+        );
+      }
+    } catch (error) {
+      this.#synchronizeBaselineEntryPublicationAfterFailure(state);
+      state.lifecycle = "poisoned";
+      throw translateSQLiteError(error, "inspect-schema");
+    }
+
+    let rawResult: unknown;
+    state.executeCount += 1;
+    this.#transactionEpoch += 1n;
+    try {
+      rawResult = reflectApplyIntrinsic(statementRunIntrinsic, state.statement, parameters);
+    } catch (error) {
+      this.#synchronizeBaselineEntryPublicationAfterFailure(state);
+      state.lifecycle = "poisoned";
+      throw translateSQLiteError(error, "inspect-schema");
+    }
+
+    // A returning native run is the irreversible completion boundary. Preserve
+    // that progress before result inspection or total_changes can fail.
+    const entryOrdinal = state.nextEntryOrdinal;
+    state.completedEntryCount += 1;
+    state.nextEntryOrdinal += 1;
+    state.affectedRows = state.completedEntryCount;
+    state.transactionEpoch = this.#transactionEpoch;
+    try {
+      if (rawResult === null || typeof rawResult !== "object" || isProxy(rawResult)) {
+        throw new CycleStoreProviderError(
+          "GE_CYCLE_STORE_CORRUPTION",
+          "inspect-schema",
+          "SQLite baseline-entry publication result is invalid",
+        );
+      }
+      const changesDescriptor = reflectApplyIntrinsic(
+        objectGetOwnPropertyDescriptorIntrinsic,
+        Object,
+        [rawResult, "changes"],
+      ) as PropertyDescriptor | undefined;
+      const changes = changesDescriptor !== undefined && "value" in changesDescriptor
+        ? changesDescriptor.value
+        : undefined;
+      const runChanges = typeof changes === "bigint" && changes === 1n
+        ? 1
+        : changes === 1
+          ? 1
+          : undefined;
+      if (runChanges !== 1) {
+        throw new CycleStoreProviderError(
+          "GE_CYCLE_STORE_CORRUPTION",
+          "inspect-schema",
+          "SQLite baseline-entry publication must affect exactly one row",
+        );
+      }
+      const totalChanges = this.#readTotalChangesCounter();
+      if (totalChanges - state.totalChanges !== 1) {
+        throw new CycleStoreProviderError(
+          "GE_CYCLE_STORE_CORRUPTION",
+          "inspect-schema",
+          "SQLite baseline-entry publication disagreed with total_changes",
+        );
+      }
+      state.totalChanges = totalChanges;
+      state.affectedRows = totalChanges - state.initialTotalChanges;
+      if (state.completedEntryCount === state.expectedEntryCount) {
+        state.lifecycle = "completed";
+      }
+      return objectFreezeIntrinsic({
+        affectedRowsDelta: 1,
+        completedEntryCount: state.completedEntryCount,
+        entryOrdinal,
+        executeCount: state.executeCount,
+        prepareCount: 1,
+        totalChanges,
+        transactionEpoch: state.transactionEpoch,
+        transactionLineage: state.transactionLineage,
+      });
+    } catch (error) {
+      this.#synchronizeBaselineEntryPublicationAfterFailure(state);
+      state.lifecycle = "poisoned";
+      throw translateSQLiteError(error, "inspect-schema");
+    }
+  }
+
+  #synchronizeBaselineEntryPublicationAfterFailure(
+    state: BaselineEntryPublicationExecutionState,
+  ): void {
+    state.transactionEpoch = this.#transactionEpoch;
+    try {
+      if (this.#database.isOpen) {
+        state.totalChanges = this.#readTotalChangesCounter();
+        const delta = state.totalChanges - state.initialTotalChanges;
+        if (numberIsSafeIntegerIntrinsic(delta) && delta >= 0) {
+          state.affectedRows = delta;
+        }
+      }
+    } catch {
+      // The statement/result failure remains primary; the owner poisons and rolls back.
+    }
+  }
+
   #epochTrackedStatement(statement: StatementSync): StatementSync {
     const executionMethods = new Set<PropertyKey>(["all", "get", "iterate", "run"]);
     return new Proxy(statement, {
@@ -1269,6 +1644,10 @@ const sqliteConnectionBeginMigration0002Intrinsic =
   SQLiteConnection.prototype[SQLITE_CONNECTION_BEGIN_MIGRATION_0002];
 const sqliteConnectionExecuteMigration0002NextIntrinsic =
   SQLiteConnection.prototype[SQLITE_CONNECTION_EXECUTE_MIGRATION_0002_NEXT];
+const sqliteConnectionBeginBaselineEntryPublicationIntrinsic =
+  SQLiteConnection.prototype[SQLITE_CONNECTION_BEGIN_BASELINE_ENTRY_PUBLICATION];
+const sqliteConnectionExecuteBaselineEntryPublicationNextIntrinsic =
+  SQLiteConnection.prototype[SQLITE_CONNECTION_EXECUTE_BASELINE_ENTRY_PUBLICATION_NEXT];
 const sqliteConnectionExecTrustedIntrinsic = SQLiteConnection.prototype.execTrusted;
 const sqliteConnectionPrepareIntrinsic = SQLiteConnection.prototype.prepare;
 
@@ -1362,6 +1741,63 @@ export function readSQLiteConnectionMigration0002ExecutionSnapshotIntrinsic(
     nextStatementOrdinal: state.nextStatementOrdinal,
     preparedStatementCount: state.preparedStatementCount,
     totalChanges: state.totalChanges,
+    transactionEpoch: state.transactionEpoch,
+    transactionLineage: state.transactionLineage,
+  });
+}
+
+/** Prepare the exact baseline-entry INSERT once under the live exclusive owner. */
+export function beginSQLiteConnectionBaselineEntryPublicationExecutionIntrinsic(
+  connection: SQLiteConnection,
+  expectedEntryCount: number,
+): SQLiteConnectionBaselineEntryPublicationExecution {
+  return reflectApplyIntrinsic(
+    sqliteConnectionBeginBaselineEntryPublicationIntrinsic,
+    connection,
+    [expectedEntryCount],
+  );
+}
+
+/** Run the next exact seven-parameter baseline-entry INSERT sequentially. */
+export function executeNextSQLiteConnectionBaselineEntryPublicationRowIntrinsic(
+  connection: SQLiteConnection,
+  execution: SQLiteConnectionBaselineEntryPublicationExecution,
+  row: SQLiteConnectionBaselineEntryPublicationRow,
+): SQLiteConnectionBaselineEntryPublicationStepSnapshot {
+  return reflectApplyIntrinsic(
+    sqliteConnectionExecuteBaselineEntryPublicationNextIntrinsic,
+    connection,
+    [execution, row],
+  );
+}
+
+/** Read real prepared/run/row/counter progress, including after failure. */
+export function readSQLiteConnectionBaselineEntryPublicationExecutionSnapshotIntrinsic(
+  connection: SQLiteConnection,
+  execution: SQLiteConnectionBaselineEntryPublicationExecution,
+): SQLiteConnectionBaselineEntryPublicationExecutionSnapshot {
+  const state = execution !== null && typeof execution === "object" && !isProxy(execution)
+    ? reflectApplyIntrinsic(weakMapGetIntrinsic, BASELINE_ENTRY_PUBLICATION_EXECUTIONS, [
+      execution as object,
+    ]) as BaselineEntryPublicationExecutionState | undefined
+    : undefined;
+  if (state === undefined || state.connection !== connection) {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "inspect-schema",
+      "SQLite baseline-entry publication execution is invalid",
+    );
+  }
+  return objectFreezeIntrinsic({
+    affectedRows: state.affectedRows,
+    completedEntryCount: state.completedEntryCount,
+    executeCount: state.executeCount,
+    expectedEntryCount: state.expectedEntryCount,
+    lifecycle: state.lifecycle,
+    nextEntryOrdinal: state.nextEntryOrdinal,
+    prepareCount: 1,
+    totalChanges: state.totalChanges,
+    totalChangesDelta: state.totalChanges - state.initialTotalChanges,
     transactionEpoch: state.transactionEpoch,
     transactionLineage: state.transactionLineage,
   });

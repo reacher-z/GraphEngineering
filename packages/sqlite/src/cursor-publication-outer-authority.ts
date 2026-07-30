@@ -33,6 +33,7 @@ import {
 } from "./operation-baseline-cursor-stage-ownership.js";
 import {
   BASELINE_ENTRY_KINDS,
+  BASELINE_GENESIS_HASH,
   MAX_BASELINE_KEY_BYTES,
   MAX_BASELINE_STATE_BYTES,
   OperationBaselineAccumulator,
@@ -45,16 +46,22 @@ import {
 import { SQLiteBaselineTempStage } from "./operation-baseline-stage.js";
 import {
   SQLiteConnection,
+  SQLITE_CURSOR_BASELINE_ENTRY_PUBLICATION_INSERT_SQL_INTRINSIC,
+  SQLITE_CURSOR_BASELINE_ENTRY_PUBLICATION_INSERT_SQL_SHA256_INTRINSIC,
   SQLITE_CURSOR_POST_DDL_BASELINE_SOURCE_QUERY_INTRINSIC,
+  beginSQLiteConnectionBaselineEntryPublicationExecutionIntrinsic,
   beginSQLiteConnectionMigration0002ExecutionIntrinsic,
+  executeNextSQLiteConnectionBaselineEntryPublicationRowIntrinsic,
   executeNextSQLiteConnectionMigration0002StatementIntrinsic,
   getSQLiteStatementNativeIntrinsic,
   iterateSQLiteStatementNativeIntrinsic,
   nextSQLiteStatementIteratorNativeIntrinsic,
   prepareSQLiteConnectionCursorPublicationReadIntrinsic,
+  readSQLiteConnectionBaselineEntryPublicationExecutionSnapshotIntrinsic,
   readSQLiteConnectionMigration0002ExecutionSnapshotIntrinsic,
   returnSQLiteStatementIteratorNativeIntrinsic,
   type SQLiteConnectionTransactionLineage,
+  type SQLiteConnectionBaselineEntryPublicationRow,
   readSQLiteConnectionOwnerSnapshot,
   readSQLiteConnectionTotalChangesSnapshot,
 } from "./sqlite-connection.js";
@@ -72,7 +79,9 @@ import {
 import {
   digestSQLiteInitialWriteParametersIntrinsic,
   digestSQLiteInitialWriteResultIntrinsic,
+  type SQLiteInitialWriteParameterExecutions,
   type SQLiteInitialWriteSha256,
+  type SQLiteInitialWriteTaggedScalar,
 } from "./cursor-publication-initial-write-digest.js";
 import {
   SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_DOMAIN_UTF8,
@@ -94,7 +103,15 @@ const numberIsSafeIntegerIntrinsic = Number.isSafeInteger;
 const maximumSafeIntegerIntrinsic = Number.MAX_SAFE_INTEGER;
 const bufferCompareIntrinsic = Buffer.compare;
 const bufferFromIntrinsic = Buffer.from;
+const bufferToStringIntrinsic = Buffer.prototype.toString;
 const createHashIntrinsic = createHash;
+const hashProbe = createHashIntrinsic("sha256");
+const hashUpdateIntrinsic = hashProbe.update;
+const hashDigestIntrinsic = hashProbe.digest;
+const digestSQLiteInitialWriteParametersVerifierIntrinsic =
+  digestSQLiteInitialWriteParametersIntrinsic;
+const digestSQLiteInitialWriteResultVerifierIntrinsic =
+  digestSQLiteInitialWriteResultIntrinsic;
 const objectDefinePropertyIntrinsic = Object.defineProperty;
 const operationBaselineAccumulatorAppendIntrinsic =
   OperationBaselineAccumulator.prototype.append;
@@ -148,6 +165,9 @@ export type SQLiteCursorOuterPublicationWritePhase =
   | "executing-0002"
   | "0002-complete"
   | "post-ddl-catalog-fence"
+  | "post-ddl-reader-closed"
+  | "executing-baseline-entries"
+  | "baseline-entries-complete"
   | "poisoned"
   | "retired";
 
@@ -193,6 +213,50 @@ export interface SQLiteCursorOuterPublicationLedgerSnapshot {
   readonly logicalWriteSequence: number;
   readonly fixedStatementCount: number;
   readonly affectedRowsWatermark: number;
+}
+
+export interface SQLiteBaselineEntriesPublicationReceipt {
+  readonly __sqliteBaselineEntriesPublicationReceipt: never;
+}
+
+export interface SQLiteBaselineEntriesPublicationReceiptSnapshot {
+  readonly affectedRows: number;
+  readonly authority: SQLiteCursorOuterPublicationAuthority;
+  readonly baselineId: string;
+  readonly connection: SQLiteConnection;
+  readonly entryCount: number;
+  readonly executeCount: number;
+  readonly finalEntryHash: string;
+  readonly firstEntryHash: string;
+  readonly fixedInsertSql:
+    typeof SQLITE_CURSOR_BASELINE_ENTRY_PUBLICATION_INSERT_SQL_INTRINSIC;
+  readonly fixedInsertSqlSha256:
+    typeof SQLITE_CURSOR_BASELINE_ENTRY_PUBLICATION_INSERT_SQL_SHA256_INTRINSIC;
+  readonly migration0002Receipt: SQLiteMigration0002CatalogRebuildReceipt;
+  readonly mintCount: 1;
+  readonly outerLedgerAfter: SQLiteCursorOuterPublicationLedgerSnapshot;
+  readonly outerLedgerBefore: SQLiteCursorOuterPublicationLedgerSnapshot;
+  readonly outerLedgerDelta: SQLiteCursorOuterPublicationLedgerSnapshot;
+  readonly parameterSha256: SQLiteInitialWriteSha256;
+  readonly postDdlCatalogFence: SQLiteCursorPostDdlCatalogFence;
+  readonly prepareCount: 1;
+  readonly projectionIdentity: OperationBaselineProjectionIdentity;
+  readonly projectionReference: SQLiteCursorExactProjectionReference;
+  readonly readerCloseCount: 1;
+  readonly readerLease: SQLiteCursorPostDdlPublicationReaderLease;
+  readonly readerLeaseLifecycle: "retired";
+  readonly readerReDerivedProjectionSha256: string;
+  readonly resultSha256: SQLiteInitialWriteSha256;
+  readonly sourceReadSql: typeof SQLITE_CURSOR_POST_DDL_PUBLICATION_READER_SOURCE_SQL;
+  readonly sourceReadSqlSha256:
+    typeof SQLITE_CURSOR_POST_DDL_PUBLICATION_READER_SOURCE_SQL_SHA256;
+  readonly totalChangesAfter: number;
+  readonly totalChangesBefore: number;
+  readonly totalChangesDelta: number;
+  readonly transactionEpochAfter: bigint;
+  readonly transactionEpochBefore: bigint;
+  readonly transactionLineage: SQLiteConnectionTransactionLineage;
+  readonly writeKind: "baseline-entries-publication";
 }
 
 export interface SQLiteCursorPostDdlCatalogFence {
@@ -299,6 +363,13 @@ export interface SQLiteCursorOuterPublicationAuthoritySnapshot {
     SQLiteCursorPostDdlPublicationReaderLease | undefined;
   readonly postDdlPublicationReaderLeaseCloseCount: 0 | 1;
   readonly postDdlPublicationReaderLeaseMintCount: 0 | 1;
+  readonly baselineEntriesPublicationReceipt:
+    SQLiteBaselineEntriesPublicationReceipt | undefined;
+  readonly baselineEntriesPublicationReceiptMintCount: 0 | 1;
+  readonly baselineEntriesLogicalExecutionCount: 0 | 1;
+  readonly baselineEntriesPrepareCount: 0 | 1;
+  readonly baselineEntriesExecuteCount: number;
+  readonly baselineEntriesAffectedRows: number;
   readonly writePhase: SQLiteCursorOuterPublicationWritePhase;
 }
 
@@ -334,6 +405,12 @@ interface AuthorityState {
   postDdlPublicationReaderLease: SQLiteCursorPostDdlPublicationReaderLease | undefined;
   postDdlPublicationReaderLeaseCloseCount: 0 | 1;
   postDdlPublicationReaderLeaseMintCount: 0 | 1;
+  baselineEntriesPublicationReceipt: SQLiteBaselineEntriesPublicationReceipt | undefined;
+  baselineEntriesPublicationReceiptMintCount: 0 | 1;
+  baselineEntriesLogicalExecutionCount: 0 | 1;
+  baselineEntriesPrepareCount: 0 | 1;
+  baselineEntriesExecuteCount: number;
+  baselineEntriesAffectedRows: number;
   writePhase: SQLiteCursorOuterPublicationWritePhase;
 }
 
@@ -378,6 +455,15 @@ interface PostDdlPublicationReaderLeaseState {
   readonly transfer: SQLiteCursorStageOwnershipTransfer;
 }
 
+interface BaselineEntriesPublicationReceiptState {
+  readonly authority: SQLiteCursorOuterPublicationAuthority;
+  readonly connection: SQLiteConnection;
+  readonly fence: SQLiteCursorPostDdlCatalogFence;
+  readonly migration0002Receipt: SQLiteMigration0002CatalogRebuildReceipt;
+  readonly readerLease: SQLiteCursorPostDdlPublicationReaderLease;
+  readonly snapshot: SQLiteBaselineEntriesPublicationReceiptSnapshot;
+}
+
 interface CancellationState { cancelled: boolean }
 
 const AUTHORITIES = new WeakMap<object, AuthorityState>();
@@ -388,6 +474,8 @@ const MIGRATION_0002_RECEIPTS = new WeakMap<object, Migration0002ReceiptState>()
 const POST_DDL_CATALOG_FENCES = new WeakMap<object, PostDdlCatalogFenceState>();
 const POST_DDL_PUBLICATION_READER_LEASES =
   new WeakMap<object, PostDdlPublicationReaderLeaseState>();
+const BASELINE_ENTRIES_PUBLICATION_RECEIPTS =
+  new WeakMap<object, BaselineEntriesPublicationReceiptState>();
 const weakMapGetIntrinsic = WeakMap.prototype.get;
 const weakMapSetIntrinsic = WeakMap.prototype.set;
 
@@ -593,6 +681,12 @@ export function prepareSQLiteCursorOuterPublicationAuthorityIntrinsic(
   const state: AuthorityState = {
     activationCount: 0,
     affectedRowsWatermark: 0,
+    baselineEntriesPublicationReceipt: undefined,
+    baselineEntriesPublicationReceiptMintCount: 0,
+    baselineEntriesLogicalExecutionCount: 0,
+    baselineEntriesPrepareCount: 0,
+    baselineEntriesExecuteCount: 0,
+    baselineEntriesAffectedRows: 0,
     connection,
     currentTotalChanges: changes.totalChanges,
     currentTransactionEpoch: owner.transactionEpoch,
@@ -1088,6 +1182,57 @@ function sameProjectionIdentity(
     && left.projectionSha256 === right.projectionSha256;
 }
 
+function defineDenseArrayValue<T>(array: T[], index: number, value: T): void {
+  reflectApplyIntrinsic(objectDefinePropertyIntrinsic, Object, [array, `${index}`, {
+    configurable: true,
+    enumerable: true,
+    value,
+    writable: true,
+  }]);
+}
+
+function sha256Utf8Intrinsic(value: string): string {
+  const hash = createHashIntrinsic("sha256");
+  reflectApplyIntrinsic(hashUpdateIntrinsic, hash, [value, "utf8"]);
+  return reflectApplyIntrinsic(hashDigestIntrinsic, hash, ["hex"]) as string;
+}
+
+function initialWriteText(value: string): SQLiteInitialWriteTaggedScalar {
+  return objectFreezeIntrinsic({ type: "text" as const, value });
+}
+
+function initialWriteInteger(value: number): SQLiteInitialWriteTaggedScalar {
+  if (!numberIsSafeIntegerIntrinsic(value) || value < 0) {
+    return fail(
+      "GE_CYCLE_STORE_CORRUPTION",
+      "SQLite baseline-entry publication integer is invalid",
+    );
+  }
+  return objectFreezeIntrinsic({ type: "integer" as const, value: `${value}` });
+}
+
+function initialWriteBlob(value: Uint8Array): SQLiteInitialWriteTaggedScalar {
+  const bytes = bufferFromIntrinsic(value);
+  const encoded = reflectApplyIntrinsic(
+    bufferToStringIntrinsic, bytes, ["base64url"],
+  ) as string;
+  return objectFreezeIntrinsic({ type: "blob" as const, value: encoded });
+}
+
+function baselineEntryParameterFrame(
+  row: SQLiteConnectionBaselineEntryPublicationRow,
+): readonly SQLiteInitialWriteTaggedScalar[] {
+  const frame: SQLiteInitialWriteTaggedScalar[] = [];
+  defineDenseArrayValue(frame, 0, initialWriteText(row.baselineId));
+  defineDenseArrayValue(frame, 1, initialWriteInteger(row.ordinal));
+  defineDenseArrayValue(frame, 2, initialWriteText(row.entryKind));
+  defineDenseArrayValue(frame, 3, initialWriteBlob(row.entryKeyBlob));
+  defineDenseArrayValue(frame, 4, initialWriteBlob(row.entryStateBlob));
+  defineDenseArrayValue(frame, 5, initialWriteText(row.previousEntryHash));
+  defineDenseArrayValue(frame, 6, initialWriteText(row.entryHash));
+  return objectFreezeIntrinsic(frame);
+}
+
 function postDdlPublicationReaderCorruption(message: string): CycleStoreProviderError {
   return new CycleStoreProviderError(
     "GE_CYCLE_STORE_CORRUPTION",
@@ -1382,9 +1527,9 @@ export function mintSQLiteCursorPostDdlPublicationReaderLeaseIntrinsic(
     assertSQLiteCursorPostDdlCatalogFenceIntrinsic(
       authority, migration0002Receipt, fence,
     );
-    const sourceSqlSha256 = createHashIntrinsic("sha256")
-      .update(SQLITE_CURSOR_POST_DDL_PUBLICATION_READER_SOURCE_SQL, "utf8")
-      .digest("hex");
+    const sourceSqlSha256 = sha256Utf8Intrinsic(
+      SQLITE_CURSOR_POST_DDL_PUBLICATION_READER_SOURCE_SQL,
+    );
     if (SQLITE_CURSOR_POST_DDL_PUBLICATION_READER_SOURCE_SQL
           !== SQLITE_CURSOR_POST_DDL_BASELINE_SOURCE_QUERY_INTRINSIC
         || sourceSqlSha256
@@ -1504,9 +1649,9 @@ export function executeSQLiteCursorPostDdlPublicationReaderIntrinsic(
     assertSQLiteCursorPostDdlCatalogFenceIntrinsic(
       authority, migration0002Receipt, fence,
     );
-    const sourceSqlSha256 = createHashIntrinsic("sha256")
-      .update(SQLITE_CURSOR_POST_DDL_PUBLICATION_READER_SOURCE_SQL, "utf8")
-      .digest("hex");
+    const sourceSqlSha256 = sha256Utf8Intrinsic(
+      SQLITE_CURSOR_POST_DDL_PUBLICATION_READER_SOURCE_SQL,
+    );
     if (SQLITE_CURSOR_POST_DDL_PUBLICATION_READER_SOURCE_SQL
           !== SQLITE_CURSOR_POST_DDL_BASELINE_SOURCE_QUERY_INTRINSIC
         || sourceSqlSha256
@@ -1885,8 +2030,22 @@ export function executeSQLiteCursorPostDdlPublicationReaderIntrinsic(
       "SQLite post-DDL publication reader retained proof is incomplete",
     );
   }
+  if (authorityRecord.writePhase !== "post-ddl-catalog-fence"
+      || authorityRecord.baselineEntriesPublicationReceipt !== undefined
+      || authorityRecord.baselineEntriesPublicationReceiptMintCount !== 0) {
+    leaseRecord.lifecycle = "poisoned";
+    poisonAuthorityGraph(
+      authorityRecord,
+      authority,
+      "SQLite post-DDL publication reader completion phase drifted",
+    );
+    throw postDdlPublicationReaderCorruption(
+      "SQLite post-DDL publication reader completion phase drifted",
+    );
+  }
   leaseRecord.retainedEntries = objectFreezeIntrinsic(retainedEntries);
   leaseRecord.lifecycle = "retired";
+  authorityRecord.writePhase = "post-ddl-reader-closed";
   return lease;
 }
 
@@ -1946,6 +2105,564 @@ export function assertSQLiteCursorPostDdlPublicationReaderTerminalProofIntrinsic
   return lease;
 }
 
+function baselineEntriesReceiptState(
+  receipt: SQLiteBaselineEntriesPublicationReceipt,
+): BaselineEntriesPublicationReceiptState {
+  const state = receipt !== null && typeof receipt === "object"
+    ? reflectApplyIntrinsic(
+      weakMapGetIntrinsic,
+      BASELINE_ENTRIES_PUBLICATION_RECEIPTS,
+      [receipt as object],
+    ) as BaselineEntriesPublicationReceiptState | undefined
+    : undefined;
+  if (state === undefined) {
+    return fail(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "SQLite baseline-entries publication receipt is invalid",
+    );
+  }
+  return state;
+}
+
+function digestRetainedBaselineEntryParametersIntrinsic(
+  reader: PostDdlPublicationReaderLeaseState,
+): SQLiteInitialWriteSha256 {
+  const retainedEntries = reader.retainedEntries;
+  const projection = reader.rederivedProjection;
+  if (retainedEntries === undefined
+      || projection === undefined
+      || retainedEntries.length !== projection.entryCount) {
+    return fail(
+      "GE_CYCLE_STORE_CORRUPTION",
+      "SQLite baseline-entries publication retained parameters are unavailable",
+    );
+  }
+  const executions: SQLiteInitialWriteTaggedScalar[][] = [];
+  let previousEntryHash = BASELINE_GENESIS_HASH;
+  for (let ordinal = 0; ordinal < projection.entryCount; ordinal += 1) {
+    const entry = retainedEntries[ordinal];
+    if (entry === undefined
+        || entry.baselineId !== projection.baselineId
+        || entry.ordinal !== ordinal
+        || entry.previousEntryHash !== previousEntryHash
+        || (ordinal === 0 && entry.entryHash !== projection.firstEntryHash)
+        || (ordinal === projection.entryCount - 1
+          && entry.entryHash !== projection.finalEntryHash)) {
+      return fail(
+        "GE_CYCLE_STORE_CORRUPTION",
+        "SQLite baseline-entries publication retained parameter chain drifted",
+      );
+    }
+    const row = objectFreezeIntrinsic({
+      baselineId: entry.baselineId,
+      entryHash: entry.entryHash,
+      entryKeyBlob: bufferFromIntrinsic(entry.keyBytes),
+      entryKind: entry.entryKind,
+      entryStateBlob: bufferFromIntrinsic(entry.stateBytes),
+      ordinal: entry.ordinal,
+      previousEntryHash: entry.previousEntryHash,
+    } satisfies SQLiteConnectionBaselineEntryPublicationRow);
+    const frame = baselineEntryParameterFrame(row);
+    defineDenseArrayValue(
+      executions,
+      ordinal,
+      frame as SQLiteInitialWriteTaggedScalar[],
+    );
+    previousEntryHash = entry.entryHash;
+  }
+  if (projection.entryCount === 0
+      ? projection.firstEntryHash !== projection.finalEntryHash
+      : previousEntryHash !== projection.finalEntryHash) {
+    return fail(
+      "GE_CYCLE_STORE_CORRUPTION",
+      "SQLite baseline-entries publication retained parameter terminus drifted",
+    );
+  }
+  return digestSQLiteInitialWriteParametersVerifierIntrinsic(
+    objectFreezeIntrinsic(executions) as SQLiteInitialWriteParameterExecutions,
+  );
+}
+
+/** Publish only the canonical rows retained by the exact terminal reader lease. */
+export function executeSQLiteCursorBaselineEntriesPublicationIntrinsic(
+  authority: SQLiteCursorOuterPublicationAuthority,
+  migration0002Receipt: SQLiteMigration0002CatalogRebuildReceipt,
+  fence: SQLiteCursorPostDdlCatalogFence,
+  terminalLease: SQLiteCursorPostDdlPublicationReaderLease,
+): SQLiteBaselineEntriesPublicationReceipt {
+  const authorityRecord = authorityState(authority);
+  const reader = postDdlPublicationReaderLeaseState(terminalLease);
+  if (reader.authority !== authority
+      || reader.migration0002Receipt !== migration0002Receipt
+      || reader.fence !== fence
+      || authorityRecord.migration0002Receipt !== migration0002Receipt
+      || authorityRecord.postDdlCatalogFence !== fence
+      || authorityRecord.postDdlPublicationReaderLease !== terminalLease) {
+    return fail(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "SQLite baseline-entries publication graph is invalid",
+    );
+  }
+  if (authorityRecord.baselineEntriesPublicationReceipt !== undefined
+      || authorityRecord.baselineEntriesPublicationReceiptMintCount !== 0
+      || authorityRecord.baselineEntriesLogicalExecutionCount !== 0
+      || authorityRecord.baselineEntriesPrepareCount !== 0
+      || authorityRecord.baselineEntriesExecuteCount !== 0
+      || authorityRecord.baselineEntriesAffectedRows !== 0) {
+    poisonAuthorityGraph(
+      authorityRecord,
+      authority,
+      "SQLite baseline-entries publication was reused",
+    );
+    return fail(
+      "GE_CYCLE_STORE_CORRUPTION",
+      "SQLite baseline-entries publication was reused",
+    );
+  }
+
+  assertSQLiteCursorPostDdlPublicationReaderTerminalProofIntrinsic(
+    authority, migration0002Receipt, fence, terminalLease,
+  );
+  readSQLiteMigration0002CatalogRebuildReceiptSnapshotIntrinsic(migration0002Receipt);
+  const retainedEntries = reader.retainedEntries;
+  const projection = reader.rederivedProjection;
+  if (authorityRecord.writePhase !== "post-ddl-reader-closed"
+      || retainedEntries === undefined
+      || projection === undefined
+      || retainedEntries.length !== authorityRecord.projectionIdentity.entryCount
+      || !sameProjectionIdentity(projection, authorityRecord.projectionIdentity)
+      || reader.projectionReference !== authorityRecord.projectionReference
+      || reader.closeAttemptCount !== 1
+      || !reader.closeSucceeded) {
+    poisonAuthorityGraph(
+      authorityRecord,
+      authority,
+      "SQLite baseline-entries publication predecessor is invalid",
+    );
+    return fail(
+      "GE_CYCLE_STORE_CORRUPTION",
+      "SQLite baseline-entries publication predecessor is invalid",
+    );
+  }
+
+  let sourceSqlSha256: string;
+  let insertSqlSha256: string;
+  try {
+    sourceSqlSha256 = sha256Utf8Intrinsic(
+      SQLITE_CURSOR_POST_DDL_PUBLICATION_READER_SOURCE_SQL,
+    );
+    insertSqlSha256 = sha256Utf8Intrinsic(
+      SQLITE_CURSOR_BASELINE_ENTRY_PUBLICATION_INSERT_SQL_INTRINSIC,
+    );
+  } catch (error) {
+    const translated = translateSQLiteError(error, OPERATION);
+    poisonAuthorityGraph(
+      authorityRecord,
+      authority,
+      "SQLite baseline-entries publication SQL identity observation failed",
+    );
+    throw translated;
+  }
+  if (sourceSqlSha256 !== SQLITE_CURSOR_POST_DDL_PUBLICATION_READER_SOURCE_SQL_SHA256
+      || insertSqlSha256
+        !== SQLITE_CURSOR_BASELINE_ENTRY_PUBLICATION_INSERT_SQL_SHA256_INTRINSIC) {
+    poisonAuthorityGraph(
+      authorityRecord,
+      authority,
+      "SQLite baseline-entries publication SQL identity drifted",
+    );
+    return fail(
+      "GE_CYCLE_STORE_CORRUPTION",
+      "SQLite baseline-entries publication SQL identity drifted",
+    );
+  }
+
+  const expectedEntryCount = projection.entryCount;
+  const rows: SQLiteConnectionBaselineEntryPublicationRow[] = [];
+  const parameterExecutions: SQLiteInitialWriteTaggedScalar[][] = [];
+  let previousEntryHash = BASELINE_GENESIS_HASH;
+  try {
+    for (let ordinal = 0; ordinal < expectedEntryCount; ordinal += 1) {
+      const entry = retainedEntries[ordinal];
+      if (entry === undefined
+          || entry.baselineId !== projection.baselineId
+          || entry.ordinal !== ordinal
+          || entry.previousEntryHash !== previousEntryHash
+          || (ordinal === 0 && entry.entryHash !== projection.firstEntryHash)
+          || (ordinal === expectedEntryCount - 1
+            && entry.entryHash !== projection.finalEntryHash)) {
+        fail(
+          "GE_CYCLE_STORE_CORRUPTION",
+          "SQLite baseline-entries publication retained chain drifted",
+        );
+      }
+      const row = objectFreezeIntrinsic({
+        baselineId: entry.baselineId,
+        entryHash: entry.entryHash,
+        entryKeyBlob: bufferFromIntrinsic(entry.keyBytes),
+        entryKind: entry.entryKind,
+        entryStateBlob: bufferFromIntrinsic(entry.stateBytes),
+        ordinal: entry.ordinal,
+        previousEntryHash: entry.previousEntryHash,
+      } satisfies SQLiteConnectionBaselineEntryPublicationRow);
+      defineDenseArrayValue(rows, ordinal, row);
+      defineDenseArrayValue(
+        parameterExecutions,
+        ordinal,
+        baselineEntryParameterFrame(row) as SQLiteInitialWriteTaggedScalar[],
+      );
+      previousEntryHash = entry.entryHash;
+    }
+    if (expectedEntryCount === 0
+        ? projection.firstEntryHash !== projection.finalEntryHash
+        : previousEntryHash !== projection.finalEntryHash) {
+      fail(
+        "GE_CYCLE_STORE_CORRUPTION",
+        "SQLite baseline-entries publication terminal chain drifted",
+      );
+    }
+  } catch (error) {
+    poisonAuthorityGraph(
+      authorityRecord,
+      authority,
+      "SQLite baseline-entries publication parameter construction failed",
+    );
+    throw error;
+  }
+
+  const totalChangesBefore = authorityRecord.currentTotalChanges;
+  const transactionEpochBefore = authorityRecord.currentTransactionEpoch;
+  const ledgerBefore = outerLedgerSnapshot(authorityRecord);
+  let execution: ReturnType<
+    typeof beginSQLiteConnectionBaselineEntryPublicationExecutionIntrinsic
+  > | undefined;
+  try {
+    authorityRecord.writePhase = "executing-baseline-entries";
+    authorityRecord.baselineEntriesLogicalExecutionCount = 1;
+    execution = beginSQLiteConnectionBaselineEntryPublicationExecutionIntrinsic(
+      authorityRecord.connection,
+      expectedEntryCount,
+    );
+    authorityRecord.baselineEntriesPrepareCount = 1;
+    for (let ordinal = 0; ordinal < expectedEntryCount; ordinal += 1) {
+      const step = executeNextSQLiteConnectionBaselineEntryPublicationRowIntrinsic(
+        authorityRecord.connection,
+        execution,
+        rows[ordinal]!,
+      );
+      if (step.entryOrdinal !== ordinal
+          || step.completedEntryCount !== ordinal + 1
+          || step.executeCount !== ordinal + 1
+          || step.prepareCount !== 1
+          || step.affectedRowsDelta !== 1
+          || step.transactionLineage !== authorityRecord.transactionLineage) {
+        fail(
+          "GE_CYCLE_STORE_CORRUPTION",
+          "SQLite baseline-entries publication execution drifted",
+        );
+      }
+      authorityRecord.currentTransactionEpoch = step.transactionEpoch;
+      authorityRecord.currentTotalChanges = step.totalChanges;
+      authorityRecord.baselineEntriesExecuteCount = step.executeCount;
+      authorityRecord.baselineEntriesAffectedRows = step.completedEntryCount;
+      authorityRecord.fixedStatementCount = ledgerBefore.fixedStatementCount
+        + step.completedEntryCount;
+      authorityRecord.affectedRowsWatermark = ledgerBefore.affectedRowsWatermark
+        + step.completedEntryCount;
+    }
+
+    const progress = readSQLiteConnectionBaselineEntryPublicationExecutionSnapshotIntrinsic(
+      authorityRecord.connection,
+      execution,
+    );
+    if (progress.lifecycle !== "completed"
+        || progress.prepareCount !== 1
+        || progress.executeCount !== expectedEntryCount
+        || progress.completedEntryCount !== expectedEntryCount
+        || progress.expectedEntryCount !== expectedEntryCount
+        || progress.nextEntryOrdinal !== expectedEntryCount
+        || progress.affectedRows !== expectedEntryCount
+        || progress.totalChangesDelta !== expectedEntryCount
+        || progress.totalChanges - totalChangesBefore !== expectedEntryCount
+        || progress.transactionLineage !== authorityRecord.transactionLineage
+        || authorityRecord.currentTransactionEpoch !== progress.transactionEpoch
+        || authorityRecord.currentTotalChanges !== progress.totalChanges
+        || authorityRecord.fixedStatementCount
+          !== ledgerBefore.fixedStatementCount + expectedEntryCount
+        || authorityRecord.affectedRowsWatermark
+          !== ledgerBefore.affectedRowsWatermark + expectedEntryCount) {
+      fail(
+        "GE_CYCLE_STORE_CORRUPTION",
+        "SQLite baseline-entries publication completion ledger drifted",
+      );
+    }
+
+    const parameterSha256 = digestSQLiteInitialWriteParametersIntrinsic(
+      objectFreezeIntrinsic(parameterExecutions) as SQLiteInitialWriteParameterExecutions,
+    );
+    const verifiedParameterSha256 =
+      digestRetainedBaselineEntryParametersIntrinsic(reader);
+    const resultSha256 = digestSQLiteInitialWriteResultIntrinsic({
+      affectedRows: `${expectedEntryCount}`,
+    });
+    const verifiedResultSha256 = digestSQLiteInitialWriteResultVerifierIntrinsic({
+      affectedRows: `${expectedEntryCount}`,
+    });
+    if (parameterSha256 !== verifiedParameterSha256
+        || resultSha256 !== verifiedResultSha256) {
+      fail(
+        "GE_CYCLE_STORE_CORRUPTION",
+        "SQLite baseline-entries publication receipt digest drifted",
+      );
+    }
+    const ledgerAfter = objectFreezeIntrinsic({
+      affectedRowsWatermark: ledgerBefore.affectedRowsWatermark + expectedEntryCount,
+      fixedStatementCount: ledgerBefore.fixedStatementCount + expectedEntryCount,
+      logicalWriteSequence: ledgerBefore.logicalWriteSequence + 1,
+    });
+    const snapshot = objectFreezeIntrinsic({
+      affectedRows: expectedEntryCount,
+      authority,
+      baselineId: projection.baselineId,
+      connection: authorityRecord.connection,
+      entryCount: expectedEntryCount,
+      executeCount: expectedEntryCount,
+      finalEntryHash: projection.finalEntryHash,
+      firstEntryHash: projection.firstEntryHash,
+      fixedInsertSql: SQLITE_CURSOR_BASELINE_ENTRY_PUBLICATION_INSERT_SQL_INTRINSIC,
+      fixedInsertSqlSha256:
+        SQLITE_CURSOR_BASELINE_ENTRY_PUBLICATION_INSERT_SQL_SHA256_INTRINSIC,
+      migration0002Receipt,
+      mintCount: 1 as const,
+      outerLedgerAfter: ledgerAfter,
+      outerLedgerBefore: ledgerBefore,
+      outerLedgerDelta: objectFreezeIntrinsic({
+        affectedRowsWatermark: expectedEntryCount,
+        fixedStatementCount: expectedEntryCount,
+        logicalWriteSequence: 1,
+      }),
+      parameterSha256,
+      postDdlCatalogFence: fence,
+      prepareCount: 1 as const,
+      projectionIdentity: authorityRecord.projectionIdentity,
+      projectionReference: authorityRecord.projectionReference,
+      readerCloseCount: 1 as const,
+      readerLease: terminalLease,
+      readerLeaseLifecycle: "retired" as const,
+      readerReDerivedProjectionSha256: projection.projectionSha256,
+      resultSha256,
+      sourceReadSql: SQLITE_CURSOR_POST_DDL_PUBLICATION_READER_SOURCE_SQL,
+      sourceReadSqlSha256: SQLITE_CURSOR_POST_DDL_PUBLICATION_READER_SOURCE_SQL_SHA256,
+      totalChangesAfter: progress.totalChanges,
+      totalChangesBefore,
+      totalChangesDelta: expectedEntryCount,
+      transactionEpochAfter: progress.transactionEpoch,
+      transactionEpochBefore,
+      transactionLineage: authorityRecord.transactionLineage,
+      writeKind: "baseline-entries-publication" as const,
+    } satisfies SQLiteBaselineEntriesPublicationReceiptSnapshot);
+    const receipt = objectFreezeIntrinsic(
+      reflectApplyIntrinsic(objectCreateIntrinsic, Object, [null]),
+    ) as SQLiteBaselineEntriesPublicationReceipt;
+    reflectApplyIntrinsic(weakMapSetIntrinsic, BASELINE_ENTRIES_PUBLICATION_RECEIPTS, [
+      receipt as object,
+      objectFreezeIntrinsic({
+        authority,
+        connection: authorityRecord.connection,
+        fence,
+        migration0002Receipt,
+        readerLease: terminalLease,
+        snapshot,
+      } satisfies BaselineEntriesPublicationReceiptState),
+    ]);
+    authorityRecord.logicalWriteSequence = ledgerAfter.logicalWriteSequence;
+    authorityRecord.baselineEntriesPublicationReceipt = receipt;
+    authorityRecord.baselineEntriesPublicationReceiptMintCount = 1;
+    authorityRecord.writePhase = "baseline-entries-complete";
+    return receipt;
+  } catch (error) {
+    if (execution !== undefined) {
+      try {
+        const progress = readSQLiteConnectionBaselineEntryPublicationExecutionSnapshotIntrinsic(
+          authorityRecord.connection,
+          execution,
+        );
+        authorityRecord.currentTransactionEpoch = progress.transactionEpoch;
+        authorityRecord.currentTotalChanges = progress.totalChanges;
+        authorityRecord.baselineEntriesPrepareCount = progress.prepareCount;
+        authorityRecord.baselineEntriesExecuteCount = progress.executeCount;
+        authorityRecord.baselineEntriesAffectedRows = progress.affectedRows;
+        authorityRecord.fixedStatementCount = ledgerBefore.fixedStatementCount
+          + progress.completedEntryCount;
+        authorityRecord.affectedRowsWatermark = ledgerBefore.affectedRowsWatermark
+          + progress.affectedRows;
+      } catch {
+        // Preserve the write failure while poisoning the exact authority below.
+      }
+    }
+    poisonAuthorityGraph(
+      authorityRecord,
+      authority,
+      "SQLite baseline-entries publication failed",
+    );
+    throw error;
+  }
+}
+
+/** Reusable, non-consuming proof of the exact completed baseline-entry write. */
+export function assertSQLiteCursorBaselineEntriesPublicationReceiptIntrinsic(
+  authority: SQLiteCursorOuterPublicationAuthority,
+  migration0002Receipt: SQLiteMigration0002CatalogRebuildReceipt,
+  fence: SQLiteCursorPostDdlCatalogFence,
+  terminalLease: SQLiteCursorPostDdlPublicationReaderLease,
+  receipt: SQLiteBaselineEntriesPublicationReceipt,
+): SQLiteBaselineEntriesPublicationReceipt {
+  const receiptRecord = baselineEntriesReceiptState(receipt);
+  if (receiptRecord.authority !== authority
+      || receiptRecord.migration0002Receipt !== migration0002Receipt
+      || receiptRecord.fence !== fence
+      || receiptRecord.readerLease !== terminalLease) {
+    return fail(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "SQLite baseline-entries publication receipt graph is invalid",
+    );
+  }
+  const authorityRecord = authorityState(authority);
+  assertSQLiteCursorPostDdlPublicationReaderTerminalProofIntrinsic(
+    authority, migration0002Receipt, fence, terminalLease,
+  );
+  const snapshot = receiptRecord.snapshot;
+  const reader = postDdlPublicationReaderLeaseState(terminalLease);
+  const projection = reader.rederivedProjection;
+  let retainedParameterSha256: SQLiteInitialWriteSha256;
+  try {
+    retainedParameterSha256 = digestRetainedBaselineEntryParametersIntrinsic(reader);
+  } catch (error) {
+    poisonAuthorityGraph(
+      authorityRecord,
+      authority,
+      "SQLite baseline-entries publication receipt parameters drifted",
+    );
+    throw error;
+  }
+  let exactSourceSqlSha256: string;
+  let exactInsertSqlSha256: string;
+  try {
+    exactSourceSqlSha256 = sha256Utf8Intrinsic(
+      SQLITE_CURSOR_POST_DDL_PUBLICATION_READER_SOURCE_SQL,
+    );
+    exactInsertSqlSha256 = sha256Utf8Intrinsic(
+      SQLITE_CURSOR_BASELINE_ENTRY_PUBLICATION_INSERT_SQL_INTRINSIC,
+    );
+  } catch (error) {
+    const translated = translateSQLiteError(error, OPERATION);
+    poisonAuthorityGraph(
+      authorityRecord,
+      authority,
+      "SQLite baseline-entries publication receipt SQL identity observation failed",
+    );
+    throw translated;
+  }
+  const expectedResultSha256 = digestSQLiteInitialWriteResultVerifierIntrinsic({
+    affectedRows: `${snapshot.entryCount}`,
+  });
+  if (authorityRecord.connection !== receiptRecord.connection
+      || authorityRecord.baselineEntriesPublicationReceipt !== receipt
+      || authorityRecord.baselineEntriesPublicationReceiptMintCount !== 1
+      || authorityRecord.baselineEntriesLogicalExecutionCount !== 1
+      || authorityRecord.baselineEntriesPrepareCount !== 1
+      || authorityRecord.baselineEntriesExecuteCount !== snapshot.entryCount
+      || authorityRecord.baselineEntriesAffectedRows !== snapshot.entryCount
+      || authorityRecord.logicalWriteSequence < snapshot.outerLedgerAfter.logicalWriteSequence
+      || authorityRecord.fixedStatementCount < snapshot.outerLedgerAfter.fixedStatementCount
+      || authorityRecord.affectedRowsWatermark
+        < snapshot.outerLedgerAfter.affectedRowsWatermark
+      || authorityRecord.currentTransactionEpoch < snapshot.transactionEpochAfter
+      || authorityRecord.currentTotalChanges < snapshot.totalChangesAfter
+      || projection === undefined
+      || snapshot.authority !== authority
+      || snapshot.connection !== authorityRecord.connection
+      || snapshot.migration0002Receipt !== migration0002Receipt
+      || snapshot.postDdlCatalogFence !== fence
+      || snapshot.projectionIdentity !== authorityRecord.projectionIdentity
+      || snapshot.projectionReference !== authorityRecord.projectionReference
+      || snapshot.readerLease !== terminalLease
+      || snapshot.baselineId !== projection.baselineId
+      || snapshot.entryCount !== projection.entryCount
+      || snapshot.firstEntryHash !== projection.firstEntryHash
+      || snapshot.finalEntryHash !== projection.finalEntryHash
+      || snapshot.readerLeaseLifecycle !== "retired"
+      || snapshot.readerCloseCount !== 1
+      || snapshot.readerReDerivedProjectionSha256 !== projection.projectionSha256
+      || reader.lifecycle !== "retired"
+      || reader.closeAttemptCount !== 1
+      || !reader.closeSucceeded
+      || snapshot.sourceReadSql !== SQLITE_CURSOR_POST_DDL_PUBLICATION_READER_SOURCE_SQL
+      || snapshot.sourceReadSqlSha256
+        !== SQLITE_CURSOR_POST_DDL_PUBLICATION_READER_SOURCE_SQL_SHA256
+      || exactSourceSqlSha256 !== snapshot.sourceReadSqlSha256
+      || snapshot.fixedInsertSql
+        !== SQLITE_CURSOR_BASELINE_ENTRY_PUBLICATION_INSERT_SQL_INTRINSIC
+      || snapshot.fixedInsertSqlSha256
+        !== SQLITE_CURSOR_BASELINE_ENTRY_PUBLICATION_INSERT_SQL_SHA256_INTRINSIC
+      || exactInsertSqlSha256 !== snapshot.fixedInsertSqlSha256
+      || snapshot.parameterSha256 !== retainedParameterSha256
+      || snapshot.resultSha256 !== expectedResultSha256
+      || snapshot.writeKind !== "baseline-entries-publication"
+      || snapshot.mintCount !== 1
+      || snapshot.prepareCount !== 1
+      || snapshot.executeCount !== snapshot.entryCount
+      || snapshot.affectedRows !== snapshot.entryCount
+      || snapshot.totalChangesDelta !== snapshot.entryCount
+      || snapshot.totalChangesBefore !== reader.totalChangesReadWatermark
+      || snapshot.totalChangesAfter
+        !== snapshot.totalChangesBefore + snapshot.entryCount
+      || snapshot.transactionEpochBefore !== reader.transactionEpoch
+      || snapshot.transactionEpochAfter < snapshot.transactionEpochBefore
+      || snapshot.transactionLineage !== authorityRecord.transactionLineage
+      || snapshot.transactionLineage !== reader.transactionLineage
+      || snapshot.outerLedgerBefore.logicalWriteSequence
+        !== reader.outerLedgerReadWatermark.logicalWriteSequence
+      || snapshot.outerLedgerBefore.fixedStatementCount
+        !== reader.outerLedgerReadWatermark.fixedStatementCount
+      || snapshot.outerLedgerBefore.affectedRowsWatermark
+        !== reader.outerLedgerReadWatermark.affectedRowsWatermark
+      || snapshot.outerLedgerDelta.logicalWriteSequence !== 1
+      || snapshot.outerLedgerDelta.fixedStatementCount !== snapshot.entryCount
+      || snapshot.outerLedgerDelta.affectedRowsWatermark !== snapshot.entryCount
+      || snapshot.outerLedgerAfter.logicalWriteSequence
+        !== snapshot.outerLedgerBefore.logicalWriteSequence + 1
+      || snapshot.outerLedgerAfter.fixedStatementCount
+        !== snapshot.outerLedgerBefore.fixedStatementCount + snapshot.entryCount
+      || snapshot.outerLedgerAfter.affectedRowsWatermark
+        !== snapshot.outerLedgerBefore.affectedRowsWatermark + snapshot.entryCount) {
+    poisonAuthorityGraph(
+      authorityRecord,
+      authority,
+      "SQLite baseline-entries publication receipt graph drifted",
+    );
+    return fail(
+      "GE_CYCLE_STORE_CORRUPTION",
+      "SQLite baseline-entries publication receipt graph drifted",
+    );
+  }
+  return receipt;
+}
+
+export function readSQLiteBaselineEntriesPublicationReceiptSnapshotIntrinsic(
+  receipt: SQLiteBaselineEntriesPublicationReceipt,
+): SQLiteBaselineEntriesPublicationReceiptSnapshot {
+  const state = baselineEntriesReceiptState(receipt);
+  assertSQLiteCursorBaselineEntriesPublicationReceiptIntrinsic(
+    state.authority,
+    state.migration0002Receipt,
+    state.fence,
+    state.readerLease,
+    receipt,
+  );
+  return state.snapshot;
+}
+
 /** Package-private identity snapshot for downstream receipt construction and tests. */
 export function readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(
   authority: SQLiteCursorOuterPublicationAuthority,
@@ -1953,6 +2670,13 @@ export function readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(
   const state = authorityState(authority);
   return objectFreezeIntrinsic({
     activationCount: state.activationCount,
+    baselineEntriesAffectedRows: state.baselineEntriesAffectedRows,
+    baselineEntriesExecuteCount: state.baselineEntriesExecuteCount,
+    baselineEntriesLogicalExecutionCount: state.baselineEntriesLogicalExecutionCount,
+    baselineEntriesPrepareCount: state.baselineEntriesPrepareCount,
+    baselineEntriesPublicationReceipt: state.baselineEntriesPublicationReceipt,
+    baselineEntriesPublicationReceiptMintCount:
+      state.baselineEntriesPublicationReceiptMintCount,
     connection: state.connection,
     lifecycle: state.lifecycle,
     migrationLockCapability: state.migrationLockCapability,

@@ -14693,3 +14693,200 @@ sequence zero, four-receipt atomic adoption, Python parity, the executable
 145-case hostile campaign, publication session, cursor rebind, validation
 rules 11/12, TEMP retirement, commit, manifest activation and release claims
 remain downstream work.
+
+#### 31.37.31 Baseline-entry permanent publication receipt implementation tranche
+
+This append-only tranche implements the direct successor authorized by section
+31.37.30 and stops before baseline-header publication. It converts the exact
+terminal reader lease into the second ordered initial-write receipt while
+preserving the caller-owned `BEGIN EXCLUSIVE` transaction, package-private
+authority graph and false release/manifest claims.
+
+The only permitted permanent statement is the following exact 183-byte UTF-8
+literal:
+
+```sql
+INSERT INTO main.ge_cycle_operation_baseline_entries (baseline_id, ordinal, entry_kind, entry_key_blob, entry_state_blob, previous_entry_hash, entry_hash) VALUES (?, ?, ?, ?, ?, ?, ?)
+```
+
+Its SHA-256 is
+`b522e3ee2bb4599d74b32c8602242b1b74c3f804dd9129a8eb5a0f529cdca88b`.
+The connection owns this SQL through a closed-set intrinsic. Caller SQL,
+subclass `prepare`, mutable native prototypes, `RETURNING`, transaction-control
+statements, savepoints and implicit transaction replacement are forbidden.
+
+The connection mints one opaque execution object only under the live exclusive
+transaction lineage. It captures the exact connection and lineage identities,
+private epoch, initial and current `total_changes`, expected entry count `E`,
+one native statement, run-attempt count, native-run-completed count, next
+ordinal, actual affected-row delta and lifecycle `active`, `completed` or
+`poisoned`.
+
+The prepare happens once before any row execution. An empty `E = 0` projection
+still performs that prepare and completes without a run. Nonempty execution
+accepts exactly `E` calls in strict zero-based ordinal order. A terminal or
+replayed execution object is corruption and can neither prepare nor run again.
+
+Every run receives exactly seven parameters in this order:
+
+1. baseline ID as text;
+2. ordinal as a canonical non-negative integer;
+3. entry kind as text;
+4. entry-key bytes as BLOB;
+5. entry-state bytes as BLOB;
+6. previous-entry hash as lowercase hexadecimal text; and
+7. entry hash as lowercase hexadecimal text.
+
+Parameter validation reads only own data properties, rejects Proxy and revoked
+Proxy carriers, rejects missing/accessor properties and constructs the tuple
+internally. String code-unit, prefix and slice operations use module-load-
+captured native intrinsics through `Reflect.apply`. Database prepare, statement
+run and SHA-256 update/digest are likewise probed and captured at module load;
+later hostile prototype replacement cannot alter validation, SQL identity or
+receipt proof, and cannot escape as an unstructured error.
+
+The irreversible progress boundary is native `run` return. The execution
+records the completed row and advances the epoch before inspecting the result
+or a later counter. Each result must expose one own `changes` data property
+equal to integer one, and real `total_changes` must advance by exactly one.
+Result-shape, affected-count or counter disagreement poisons the execution
+while retaining the real completed-row, execute-attempt, epoch, affected-row
+and counter observations. Cleanup failure cannot replace the primary error.
+
+The outer writer accepts exactly the active authority, its exact migration
+`0002` receipt, exact reusable post-DDL catalog fence and exact retired reader
+lease with one successful close. Clone, structural copy, Proxy, wrong-run or
+substituted predecessors fail identity validation. A wrong graph writes
+nothing and leaves an untouched valid graph retryable. Replay after a receipt
+exists poisons before prepare or row execution.
+
+Before prepare, the writer freshly asserts the terminal reader proof and
+catalog fence. It requires reader lifecycle `retired`, prepare one, execute
+one, ownership one, close attempt one, close success, private retained entries,
+exact projection reference and independently rederived projection. It consumes
+only those private rows: no second `temp.ge_blr_stage` query, caller row array,
+caller baseline ID, caller count, caller ordinal or caller hash is allowed.
+
+The retained vector is traversed in exact ordinal order and reproves vector
+length, baseline ID, ordinal, genesis predecessor, continuous previous/entry
+hash chain, first hash, final hash and projection terminus. The literal phase
+transition is:
+
+`post-ddl-reader-closed -> executing-baseline-entries -> baseline-entries-complete`.
+
+Any predecessor, SQL, chain, prepare, run, result, counter, ledger, digest or
+receipt-construction invariant failure poisons the graph. Only complete receipt
+mint reaches `baseline-entries-complete`; partial success never advances the
+logical-write sequence to two.
+
+The writer constructs one dense two-dimensional parameter frame. Its outer
+dimension has exactly `E` executions and every inner dimension has exactly
+seven tagged scalars. BLOBs use unpadded base64url, ordinals use canonical
+decimal and Unicode is not normalized. Flattening executions, adapter
+serialization, caller digests or per-row digest substitution is forbidden.
+The aggregate result payload is exactly `{"affectedRows":"E"}` and excludes
+`lastInsertRowid`.
+
+Receipt mint performs an independent verification pass after all rows have
+been written but before any receipt enters its registry. The verifier rebuilds
+the full frame from the private lease, recomputes parameter and result digests
+through captured intrinsics and compares both first-pass outputs. A fault that
+changes either digest leaves completed rows and real progress visible, mints
+zero receipts, poisons the authority and requires rollback. Complete DML is not
+equivalent to an authentic receipt.
+
+The frozen null-prototype receipt explicitly commits:
+
+- write kind `baseline-entries-publication`;
+- exact authority, connection and transaction-lineage identities;
+- before/after private epochs and `total_changes`;
+- exact migration receipt, catalog fence and terminal reader lease;
+- reader lifecycle `retired`, close count one and rederived projection digest;
+- exact projection and opaque projection-reference identities;
+- baseline ID, entry count, first hash and final hash;
+- ordered source-read SQL and SHA-256;
+- fixed INSERT SQL and SHA-256;
+- canonical two-dimensional parameter and aggregate result SHA-256 values;
+- prepare one, execute `E` and affected rows `E`;
+- three-dimensional ledger before, after and delta; and
+- mint count one.
+
+Receipt assertion is reusable and non-consuming. It rechecks the exact graph,
+terminal reader, live authority, fixed SQL hashes, source-read identity,
+retained frame, result, baseline chain, counters and ledger predecessor. Later
+authorized ledger advancement is permitted, but regression below the receipt
+watermarks is forbidden. Caller construction, cloning and cross-run reuse
+cannot enter the registry.
+
+The successful outer ledger transition is:
+
+- logical writes: `1 -> 2`, delta one;
+- fixed statements: `20 -> 20 + E`, delta `E`; and
+- affected rows: `1 + L -> 1 + L + E`, delta `E`.
+
+For frozen `E = 12`, `L = 1`, this is `1/20/2 -> 2/32/14`. A failure after six
+completed rows retains `1/26/8`, execute six, affected six, mint zero and
+poisoned state. Prepare failure retains `1/20/(1 + L)` with zero execution and
+mint. A post-write digest fault retains complete physical progress but logical
+sequence one and mint zero.
+
+The hostile suite covers exact SQL/SHA, one-prepare/E-run behavior, a real
+12-by-7 parameter frame, chain continuity, result known answer, no second TEMP
+read, prepare failure, six-row partial failure, wrong `changes`, digest faults,
+hostile database/statement/string/hash prototypes, transaction ownership,
+receipt identity/assertion, clone/Proxy/wrong graph, active or failed-close
+reader, stale lineage, unexplained watermark drift, replay before additional
+SQL and package-root negative exports.
+
+Acceptance requires the focused receipt suite, combined reader/authority/
+connection suite, typecheck/lint, complete SQLite regression, B3 fixture and
+validator gates, migration/package gates, `git diff --check`, append-only
+prefix verification and independent severity-zero review. Exact evidence is
+recorded in the durable review log after the final regression.
+
+Passing this tranche authorizes only baseline-header publication. Sequence
+zero, four-receipt adoption, Python parity, full hostile registry, publication
+session, cursor rebind, rules 11/12, TEMP retirement, commit, manifest switch,
+release claims and any GitHub-star/adoption outcome remain downstream and
+unclaimed.
+
+#### 31.37.32 Baseline-entry publication executable acceptance checkpoint
+
+The implementation tranche in section 31.37.31 has passed its bounded
+acceptance gates. It is now the second authentic initial-write leaf after the
+exact migration `0002` receipt and does not broaden the active-manifest or
+protocol-completion claims.
+
+Final executable evidence is:
+
+- baseline-entry hostile suite: 20/20;
+- final baseline-entry/reader/outer-authority/connection serial integration:
+  104/104;
+- final SQLite package regression: 28/28 files and 962/962 tests;
+- workspace typecheck and lint: all eight implementation packages;
+- ledger/B3 contract tests: 61/61 plus strict validators;
+- B3 frozen hostile registry: 145/145 records, with implementation and active-
+  manifest claims still false;
+- migration release checks: source/mirror digests plus 6/6 executable tests;
+- npm package content checks: eight/eight packages;
+- packed-install smoke: eight/eight tarballs and healthy installed binaries;
+- append-only plan proof: the original first 14,695 lines still hash to
+  `e54ea6e2fe71555fbf089fbec1df0c15143a3e29fcd9e78df0b07f86d58ce27c`;
+  and
+- independent final static review: HIGH 0 / MEDIUM 0 / LOW 0.
+
+The hostile suite discovered and closed two post-implementation defects rather
+than merely confirming the happy path. First, a complete 12-row DML pass could
+receive a faulted parameter/result digest before receipt registration; receipt
+mint now performs an independent private-row verification pass and mints zero
+on disagreement while retaining real completed progress. Second, mutable
+string and hash prototypes could escape structured error handling; the
+connection and outer authority now capture, probe and invoke those native
+intrinsics through `Reflect.apply`. The final hostile hash case proves zero
+calls reach replaced prototype methods during publication or receipt assertion.
+
+This checkpoint authorizes implementation of the baseline-header publication
+receipt with this exact entries receipt as predecessor. It does not authorize
+sequence zero, receipt consumption, stage adoption, Python parity, cursor
+publication, transaction commit, manifest activation, release-candidate status
+or claims about external adoption and star counts.
