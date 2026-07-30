@@ -164,7 +164,7 @@ def _validate_quorum(value: JsonValue) -> BarrierQuorumSnapshot | InvalidBarrier
         return _shape_error(f"/quorum/{unknown}")
     accepts = _bounded_integer(value.get("accepts"), 1, MAX_SAFE_INTEGER)
     if accepts is None:
-        return _shape_error("/quorum/accept")
+        return _shape_error("/quorum/accepts")
     count_abstain = value.get("countAbstainAsParticipant")
     if type(count_abstain) is not bool:
         return _shape_error("/quorum/countAbstainAsParticipant")
