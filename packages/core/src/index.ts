@@ -28,6 +28,25 @@ export type {
 } from "./component-identity.js";
 export { compileGraph } from "./compiler.js";
 export {
+  INTEGRATED_BARRIER_API_VERSION,
+  claimsIntegratedBarrierPolicy,
+  validateBarrierPolicy,
+  validateIntegratedBarrierSnapshot,
+} from "./integrated-barrier.js";
+export type {
+  BarrierLateArrivalPolicy,
+  BarrierPolicyValidation,
+  BarrierUnsatisfiedResolution,
+  IntegratedBarrierDeadlineSnapshot,
+  IntegratedBarrierKind,
+  IntegratedBarrierPolicySnapshot,
+  IntegratedBarrierQuorumSnapshot,
+  InvalidBarrierPolicyCardinality,
+  InvalidBarrierPolicyShape,
+  UnclaimedBarrierConfig,
+  ValidBarrierPolicy,
+} from "./integrated-barrier.js";
+export {
   ROUTER_CONDITION_API_VERSION,
   validateRegisteredEdgeCondition,
   validateRouteSelectionPolicy,

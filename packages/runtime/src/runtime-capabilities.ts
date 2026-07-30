@@ -1,9 +1,23 @@
 import {
+  claimsIntegratedBarrierPolicy,
   compareUnicodeCodePoints,
   type GraphSpec,
 } from "@graph-engineering/core";
 
 export const RUNTIME_CAPABILITY_CONTRACT = "runtime-capability/v1alpha1" as const;
+
+/**
+ * Capability name for a `barrier` node whose config claims
+ * `IntegratedBarrierPolicy` by `apiVersion`. `integrated-barrier-semantics.md`
+ * requires such a graph to be refused before dispatch: no runtime implements
+ * barrier satisfaction, deadlines, quorum, resolutions or durable decisions
+ * yet, and the scheduler would otherwise run the node as an ordinary
+ * deterministic transform and silently pass an unsatisfied barrier.
+ *
+ * The gate keys on the ownership claim, not on the shape, so a pre-contract
+ * barrier config keeps the published `node-config:barrier` path.
+ */
+export const INTEGRATED_BARRIER_CAPABILITY = "integrated-barrier-policy" as const;
 
 const TYPED_PORTS_POLICY = "graphengineering.reacher-z.github.io/typed-ports";
 const SUPPORTED_NODE_KINDS = new Set([
@@ -77,8 +91,15 @@ export function graphRuntimeCapabilityIssues(
     if (!SUPPORTED_NODE_KINDS.has(node.kind)) {
       issues.push(issue(node.id, `node-kind:${node.kind}`, `${base}/kind`));
     }
-    if (node.kind === "barrier" && !supportedBarrierConfig(node.config)) {
-      issues.push(issue(node.id, "node-config:barrier", `${base}/config`));
+    if (node.kind === "barrier") {
+      // A claimed integrated barrier policy is refused under its own capability
+      // name so the failure states the real reason. Every other unsupported
+      // barrier config keeps the published `node-config:barrier` name.
+      if (claimsIntegratedBarrierPolicy(node.config)) {
+        issues.push(issue(node.id, INTEGRATED_BARRIER_CAPABILITY, `${base}/config`));
+      } else if (!supportedBarrierConfig(node.config)) {
+        issues.push(issue(node.id, "node-config:barrier", `${base}/config`));
+      }
     }
     if (node.cache !== undefined) {
       issues.push(issue(node.id, "node-cache", `${base}/cache`));

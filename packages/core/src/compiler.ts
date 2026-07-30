@@ -5,6 +5,7 @@ import {
   hashCanonicalSerialization,
 } from "./canonical.js";
 import { validateGraphDocument } from "./schema-validation.js";
+import { validateIntegratedBarrierSnapshot } from "./integrated-barrier.js";
 import { validateIntegratedRouterSnapshot } from "./integrated-router.js";
 import { validateStrictTypedPortsSnapshot } from "./typed-ports.js";
 import type { EdgeSpec, GraphSpec } from "./types.js";
@@ -41,7 +42,11 @@ export type DiagnosticCode =
   | "GE1404_ROUTE_NOT_ALLOWED"
   | "GE1405_DUPLICATE_ROUTE_CASE"
   | "GE1406_DUPLICATE_ROUTE_TARGET"
-  | "GE1407_INCOMPLETE_ROUTE_COVERAGE";
+  | "GE1407_INCOMPLETE_ROUTE_COVERAGE"
+  | "GE1421_INVALID_BARRIER_POLICY"
+  | "GE1422_BARRIER_POLICY_KIND_MISMATCH"
+  | "GE1423_BARRIER_NO_INPUTS"
+  | "GE1424_BARRIER_THRESHOLD_EXCEEDS_INPUTS";
 
 export interface CompilerDiagnostic {
   code: DiagnosticCode;
@@ -334,6 +339,13 @@ export function compileGraph(document: GraphSpec | unknown): CompilationResult {
   }
 
   diagnostics.push(...validateIntegratedRouterSnapshot(graph));
+
+  // The barrier pass runs after the integrated router pass and before strict
+  // typed ports, so its four diagnostics never precede a router diagnostic and
+  // never suppress a later typed-port proof. It interprets a barrier config
+  // only when that config claims the barrier contract by `apiVersion`, so
+  // pre-contract barrier configs keep compiling unchanged.
+  diagnostics.push(...validateIntegratedBarrierSnapshot(graph));
 
   // Typed-port proof is deliberately opt-in. It runs only after the base
   // envelope, references, DAG, and graph policies are stable, so malformed
