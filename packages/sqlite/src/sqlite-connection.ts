@@ -183,6 +183,16 @@ export const SQLITE_CURSOR_BASELINE_HEADER_PUBLICATION_PARAMETER_ORDER_INTRINSIC
     "creationRuntimeVersion",
     "policyBlob",
   ] as const);
+export const SQLITE_CURSOR_OPERATION_SEQUENCE_ZERO_INSERT_SQL_INTRINSIC =
+  "INSERT INTO main.ge_cycle_operation_sequence (singleton, baseline_id, last_commit_sequence, baseline_captured_at_ms, updated_at_ms) VALUES (1, ?, 0, ?, ?)" as const;
+export const SQLITE_CURSOR_OPERATION_SEQUENCE_ZERO_INSERT_SQL_SHA256_INTRINSIC =
+  "a9afde17c90fcc7381eefa3fa81823752d6f1bc29c9eced2de8b31176cc1dd85" as const;
+export const SQLITE_CURSOR_OPERATION_SEQUENCE_ZERO_PARAMETER_ORDER_INTRINSIC =
+  objectFreezeIntrinsic([
+    "baselineId",
+    "baselineCapturedAtMs",
+    "updatedAtMs",
+  ] as const);
 export type SQLiteConnectionNativeReadKind =
   | "cursor-publication-post-ddl-baseline-source"
   | "cursor-publication-target-catalog"
@@ -345,6 +355,40 @@ export interface SQLiteConnectionBaselineHeaderPublicationExecutionSnapshot {
   readonly transactionLineage: SQLiteConnectionTransactionLineage;
 }
 
+/** Exact three-value input contract for the singleton sequence-zero write. */
+export interface SQLiteConnectionOperationSequenceZeroRow {
+  readonly baselineId: string;
+  readonly baselineCapturedAtMs: number;
+  readonly updatedAtMs: number;
+}
+
+/** Opaque, connection-owned single-prepare/single-run sequence-zero session. */
+export interface SQLiteConnectionOperationSequenceZeroExecution {
+  readonly __sqliteConnectionOperationSequenceZeroExecution: never;
+}
+
+export interface SQLiteConnectionOperationSequenceZeroStepSnapshot {
+  readonly affectedRowsDelta: 1;
+  readonly completedExecutionCount: 1;
+  readonly executeCount: 1;
+  readonly prepareCount: 1;
+  readonly totalChanges: number;
+  readonly transactionEpoch: bigint;
+  readonly transactionLineage: SQLiteConnectionTransactionLineage;
+}
+
+export interface SQLiteConnectionOperationSequenceZeroExecutionSnapshot {
+  readonly affectedRows: number;
+  readonly completedExecutionCount: 0 | 1;
+  readonly executeCount: 0 | 1;
+  readonly lifecycle: "active" | "completed" | "poisoned";
+  readonly prepareCount: 1;
+  readonly totalChanges: number;
+  readonly totalChangesDelta: number;
+  readonly transactionEpoch: bigint;
+  readonly transactionLineage: SQLiteConnectionTransactionLineage;
+}
+
 interface Migration0002ExecutionState {
   readonly asset: SQLiteCursorMigration0002Asset;
   readonly assetSnapshot: SQLiteCursorMigration0002AssetSnapshot;
@@ -387,6 +431,19 @@ interface BaselineHeaderPublicationExecutionState {
   transactionEpoch: bigint;
 }
 
+interface OperationSequenceZeroExecutionState {
+  readonly connection: SQLiteConnection;
+  readonly initialTotalChanges: number;
+  readonly statement: StatementSync;
+  readonly transactionLineage: SQLiteConnectionTransactionLineage;
+  affectedRows: number;
+  completedExecutionCount: 0 | 1;
+  executeCount: 0 | 1;
+  lifecycle: "active" | "completed" | "poisoned";
+  totalChanges: number;
+  transactionEpoch: bigint;
+}
+
 const MIGRATION_0002_EXECUTIONS = new WeakMap<object, Migration0002ExecutionState>();
 const BASELINE_ENTRY_PUBLICATION_EXECUTIONS = new WeakMap<
   object,
@@ -395,6 +452,10 @@ const BASELINE_ENTRY_PUBLICATION_EXECUTIONS = new WeakMap<
 const BASELINE_HEADER_PUBLICATION_EXECUTIONS = new WeakMap<
   object,
   BaselineHeaderPublicationExecutionState
+>();
+const OPERATION_SEQUENCE_ZERO_EXECUTIONS = new WeakMap<
+  object,
+  OperationSequenceZeroExecutionState
 >();
 const weakMapGetIntrinsic = WeakMap.prototype.get;
 const weakMapSetIntrinsic = WeakMap.prototype.set;
@@ -593,6 +654,56 @@ function checkedBaselineHeaderPublicationParameters(
     creationRuntimeVersion,
     policyBlob,
   ];
+}
+
+function operationSequenceZeroOwnValue(
+  row: object,
+  key: keyof SQLiteConnectionOperationSequenceZeroRow,
+): unknown {
+  const descriptor = reflectApplyIntrinsic(
+    objectGetOwnPropertyDescriptorIntrinsic,
+    Object,
+    [row, key],
+  ) as PropertyDescriptor | undefined;
+  if (descriptor === undefined || !("value" in descriptor)) {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "inspect-schema",
+      "SQLite operation-sequence-zero row is invalid",
+    );
+  }
+  return descriptor.value;
+}
+
+function checkedOperationSequenceZeroParameters(
+  row: SQLiteConnectionOperationSequenceZeroRow,
+): [string, number, number] {
+  if (row === null || typeof row !== "object" || isProxy(row)) {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "inspect-schema",
+      "SQLite operation-sequence-zero row is invalid",
+    );
+  }
+  const baselineId = operationSequenceZeroOwnValue(row, "baselineId");
+  const baselineCapturedAtMs = operationSequenceZeroOwnValue(row, "baselineCapturedAtMs");
+  const updatedAtMs = operationSequenceZeroOwnValue(row, "updatedAtMs");
+  if (typeof baselineId !== "string"
+      || !reflectApplyIntrinsic(stringStartsWithIntrinsic, baselineId, ["v2-"])
+      || !isLowerHex64(
+        reflectApplyIntrinsic(stringSliceIntrinsic, baselineId, [3]) as string,
+      )
+      || !numberIsSafeIntegerIntrinsic(baselineCapturedAtMs)
+      || (baselineCapturedAtMs as number) < 0
+      || !numberIsSafeIntegerIntrinsic(updatedAtMs)
+      || (updatedAtMs as number) < (baselineCapturedAtMs as number)) {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "inspect-schema",
+      "SQLite operation-sequence-zero row is invalid",
+    );
+  }
+  return [baselineId, baselineCapturedAtMs as number, updatedAtMs as number];
 }
 
 function checkedPath(value: unknown): string {
@@ -850,6 +961,12 @@ const SQLITE_CONNECTION_BEGIN_BASELINE_HEADER_PUBLICATION = Symbol(
 );
 const SQLITE_CONNECTION_EXECUTE_BASELINE_HEADER_PUBLICATION = Symbol(
   "SQLiteConnection.executeBaselineHeaderPublication",
+);
+const SQLITE_CONNECTION_BEGIN_OPERATION_SEQUENCE_ZERO = Symbol(
+  "SQLiteConnection.beginOperationSequenceZero",
+);
+const SQLITE_CONNECTION_EXECUTE_OPERATION_SEQUENCE_ZERO = Symbol(
+  "SQLiteConnection.executeOperationSequenceZero",
 );
 
 /** One hardened, synchronous, file-backed SQLite connection. */
@@ -1779,6 +1896,197 @@ export class SQLiteConnection {
     }
   }
 
+  [SQLITE_CONNECTION_BEGIN_OPERATION_SEQUENCE_ZERO]():
+    SQLiteConnectionOperationSequenceZeroExecution {
+    this.#assertOpen("inspect-schema");
+    if (!this.#database.isTransaction || this.#transactionMode !== "exclusive"
+        || this.#transactionLineage === null) {
+      throw new CycleStoreProviderError(
+        "GE_CYCLE_STORE_STALE_FENCE",
+        "inspect-schema",
+        "SQLite operation-sequence-zero write requires the active BEGIN EXCLUSIVE owner",
+      );
+    }
+
+    const transactionLineage = this.#transactionLineage;
+    const transactionEpoch = this.#transactionEpoch;
+    const totalChanges = this.#readTotalChangesCounter();
+    let statement: StatementSync;
+    try {
+      statement = hardenSQLiteNativeStatementIntrinsic(reflectApplyIntrinsic(
+        databasePrepareIntrinsic,
+        this.#database,
+        [SQLITE_CURSOR_OPERATION_SEQUENCE_ZERO_INSERT_SQL_INTRINSIC],
+      ) as StatementSync);
+    } catch (error) {
+      throw translateSQLiteError(error, "inspect-schema");
+    }
+    // Unreachable while `DatabaseSync.prepare` keeps its contract: preparing a
+    // statement executes nothing, so no reachable caller can move the owner
+    // transaction, its epoch, or the change counter across the call above.
+    // Retained as defence in depth against a native contract violation.
+    if (!this.#database.isTransaction || this.#transactionMode !== "exclusive"
+        || this.#transactionLineage !== transactionLineage
+        || this.#transactionEpoch !== transactionEpoch
+        || this.#readTotalChangesCounter() !== totalChanges) {
+      throw new CycleStoreProviderError(
+        "GE_CYCLE_STORE_CORRUPTION",
+        "inspect-schema",
+        "SQLite operation-sequence-zero owner drifted during prepare",
+      );
+    }
+
+    const execution = objectFreezeIntrinsic(
+      reflectApplyIntrinsic(objectCreateIntrinsic, Object, [null]),
+    ) as SQLiteConnectionOperationSequenceZeroExecution;
+    const state: OperationSequenceZeroExecutionState = {
+      affectedRows: 0,
+      completedExecutionCount: 0,
+      connection: this,
+      executeCount: 0,
+      initialTotalChanges: totalChanges,
+      lifecycle: "active",
+      statement,
+      totalChanges,
+      transactionEpoch,
+      transactionLineage,
+    };
+    reflectApplyIntrinsic(weakMapSetIntrinsic, OPERATION_SEQUENCE_ZERO_EXECUTIONS, [
+      execution as object,
+      state,
+    ]);
+    return execution;
+  }
+
+  [SQLITE_CONNECTION_EXECUTE_OPERATION_SEQUENCE_ZERO](
+    execution: SQLiteConnectionOperationSequenceZeroExecution,
+    row: SQLiteConnectionOperationSequenceZeroRow,
+  ): SQLiteConnectionOperationSequenceZeroStepSnapshot {
+    const state = execution !== null && typeof execution === "object" && !isProxy(execution)
+      ? reflectApplyIntrinsic(weakMapGetIntrinsic, OPERATION_SEQUENCE_ZERO_EXECUTIONS, [
+        execution as object,
+      ]) as OperationSequenceZeroExecutionState | undefined
+      : undefined;
+    if (state === undefined || state.connection !== this) {
+      throw new CycleStoreProviderError(
+        "GE_CYCLE_STORE_INVALID_ARGUMENT",
+        "inspect-schema",
+        "SQLite operation-sequence-zero execution is invalid",
+      );
+    }
+    if (state.lifecycle !== "active") {
+      throw new CycleStoreProviderError(
+        "GE_CYCLE_STORE_CORRUPTION",
+        "inspect-schema",
+        "SQLite operation-sequence-zero execution is terminal",
+      );
+    }
+
+    let parameters: ReturnType<typeof checkedOperationSequenceZeroParameters>;
+    try {
+      parameters = checkedOperationSequenceZeroParameters(row);
+      this.#assertOpen("inspect-schema");
+      if (!this.#database.isTransaction || this.#transactionMode !== "exclusive"
+          || this.#transactionLineage !== state.transactionLineage
+          || this.#transactionEpoch !== state.transactionEpoch
+          || this.#readTotalChangesCounter() !== state.totalChanges) {
+        throw new CycleStoreProviderError(
+          "GE_CYCLE_STORE_CORRUPTION",
+          "inspect-schema",
+          "SQLite operation-sequence-zero execution owner drifted",
+        );
+      }
+    } catch (error) {
+      this.#synchronizeOperationSequenceZeroAfterFailure(state);
+      state.lifecycle = "poisoned";
+      throw translateSQLiteError(error, "inspect-schema");
+    }
+
+    let rawResult: unknown;
+    state.executeCount = 1;
+    this.#transactionEpoch += 1n;
+    try {
+      rawResult = reflectApplyIntrinsic(statementRunIntrinsic, state.statement, parameters);
+    } catch (error) {
+      this.#synchronizeOperationSequenceZeroAfterFailure(state);
+      state.lifecycle = "poisoned";
+      throw translateSQLiteError(error, "inspect-schema");
+    }
+
+    // Native return is the irreversible one-row completion boundary.
+    state.completedExecutionCount = 1;
+    state.affectedRows = 1;
+    state.transactionEpoch = this.#transactionEpoch;
+    try {
+      // Unreachable while `StatementSync.run` keeps its contract of returning a
+      // plain result object. Retained as defence in depth against a native
+      // contract violation; every other rejection below is caller-reachable.
+      if (rawResult === null || typeof rawResult !== "object" || isProxy(rawResult)) {
+        throw new CycleStoreProviderError(
+          "GE_CYCLE_STORE_CORRUPTION",
+          "inspect-schema",
+          "SQLite operation-sequence-zero result is invalid",
+        );
+      }
+      const changesDescriptor = reflectApplyIntrinsic(
+        objectGetOwnPropertyDescriptorIntrinsic,
+        Object,
+        [rawResult, "changes"],
+      ) as PropertyDescriptor | undefined;
+      const changes = changesDescriptor !== undefined && "value" in changesDescriptor
+        ? changesDescriptor.value
+        : undefined;
+      if (!((typeof changes === "bigint" && changes === 1n) || changes === 1)) {
+        throw new CycleStoreProviderError(
+          "GE_CYCLE_STORE_CORRUPTION",
+          "inspect-schema",
+          "SQLite operation-sequence-zero write must affect exactly one row",
+        );
+      }
+      const totalChanges = this.#readTotalChangesCounter();
+      if (totalChanges - state.totalChanges !== 1) {
+        throw new CycleStoreProviderError(
+          "GE_CYCLE_STORE_CORRUPTION",
+          "inspect-schema",
+          "SQLite operation-sequence-zero write disagreed with total_changes",
+        );
+      }
+      state.totalChanges = totalChanges;
+      state.affectedRows = totalChanges - state.initialTotalChanges;
+      state.lifecycle = "completed";
+      return objectFreezeIntrinsic({
+        affectedRowsDelta: 1,
+        completedExecutionCount: 1,
+        executeCount: 1,
+        prepareCount: 1,
+        totalChanges,
+        transactionEpoch: state.transactionEpoch,
+        transactionLineage: state.transactionLineage,
+      });
+    } catch (error) {
+      this.#synchronizeOperationSequenceZeroAfterFailure(state);
+      state.lifecycle = "poisoned";
+      throw translateSQLiteError(error, "inspect-schema");
+    }
+  }
+
+  #synchronizeOperationSequenceZeroAfterFailure(
+    state: OperationSequenceZeroExecutionState,
+  ): void {
+    state.transactionEpoch = this.#transactionEpoch;
+    try {
+      if (this.#database.isOpen) {
+        state.totalChanges = this.#readTotalChangesCounter();
+        const delta = state.totalChanges - state.initialTotalChanges;
+        if (numberIsSafeIntegerIntrinsic(delta) && delta >= 0) {
+          state.affectedRows = delta;
+        }
+      }
+    } catch {
+      // The statement/result failure remains primary; the owner poisons and rolls back.
+    }
+  }
+
   #epochTrackedStatement(statement: StatementSync): StatementSync {
     const executionMethods = new Set<PropertyKey>(["all", "get", "iterate", "run"]);
     return new Proxy(statement, {
@@ -2041,6 +2349,10 @@ const sqliteConnectionBeginBaselineHeaderPublicationIntrinsic =
   SQLiteConnection.prototype[SQLITE_CONNECTION_BEGIN_BASELINE_HEADER_PUBLICATION];
 const sqliteConnectionExecuteBaselineHeaderPublicationIntrinsic =
   SQLiteConnection.prototype[SQLITE_CONNECTION_EXECUTE_BASELINE_HEADER_PUBLICATION];
+const sqliteConnectionBeginOperationSequenceZeroIntrinsic =
+  SQLiteConnection.prototype[SQLITE_CONNECTION_BEGIN_OPERATION_SEQUENCE_ZERO];
+const sqliteConnectionExecuteOperationSequenceZeroIntrinsic =
+  SQLiteConnection.prototype[SQLITE_CONNECTION_EXECUTE_OPERATION_SEQUENCE_ZERO];
 const sqliteConnectionExecTrustedIntrinsic = SQLiteConnection.prototype.execTrusted;
 const sqliteConnectionPrepareIntrinsic = SQLiteConnection.prototype.prepare;
 
@@ -2235,6 +2547,60 @@ export function readSQLiteConnectionBaselineHeaderPublicationExecutionSnapshotIn
       "GE_CYCLE_STORE_INVALID_ARGUMENT",
       "inspect-schema",
       "SQLite baseline-header publication execution is invalid",
+    );
+  }
+  return objectFreezeIntrinsic({
+    affectedRows: state.affectedRows,
+    completedExecutionCount: state.completedExecutionCount,
+    executeCount: state.executeCount,
+    lifecycle: state.lifecycle,
+    prepareCount: 1,
+    totalChanges: state.totalChanges,
+    totalChangesDelta: state.totalChanges - state.initialTotalChanges,
+    transactionEpoch: state.transactionEpoch,
+    transactionLineage: state.transactionLineage,
+  });
+}
+
+/** Prepare the exact singleton operation-sequence-zero INSERT once. */
+export function beginSQLiteConnectionOperationSequenceZeroExecutionIntrinsic(
+  connection: SQLiteConnection,
+): SQLiteConnectionOperationSequenceZeroExecution {
+  return reflectApplyIntrinsic(
+    sqliteConnectionBeginOperationSequenceZeroIntrinsic,
+    connection,
+    [],
+  );
+}
+
+/** Run the exact three-parameter operation-sequence-zero INSERT once. */
+export function executeSQLiteConnectionOperationSequenceZeroIntrinsic(
+  connection: SQLiteConnection,
+  execution: SQLiteConnectionOperationSequenceZeroExecution,
+  row: SQLiteConnectionOperationSequenceZeroRow,
+): SQLiteConnectionOperationSequenceZeroStepSnapshot {
+  return reflectApplyIntrinsic(
+    sqliteConnectionExecuteOperationSequenceZeroIntrinsic,
+    connection,
+    [execution, row],
+  );
+}
+
+/** Read real prepare/run/row/counter progress, including after failure. */
+export function readSQLiteConnectionOperationSequenceZeroExecutionSnapshotIntrinsic(
+  connection: SQLiteConnection,
+  execution: SQLiteConnectionOperationSequenceZeroExecution,
+): SQLiteConnectionOperationSequenceZeroExecutionSnapshot {
+  const state = execution !== null && typeof execution === "object" && !isProxy(execution)
+    ? reflectApplyIntrinsic(weakMapGetIntrinsic, OPERATION_SEQUENCE_ZERO_EXECUTIONS, [
+      execution as object,
+    ]) as OperationSequenceZeroExecutionState | undefined
+    : undefined;
+  if (state === undefined || state.connection !== connection) {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "inspect-schema",
+      "SQLite operation-sequence-zero execution is invalid",
     );
   }
   return objectFreezeIntrinsic({

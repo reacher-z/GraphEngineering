@@ -175,7 +175,10 @@ function mintPreRebindReceipt(
   return new SQLiteCursorPreRebindReceiptIssuer(input).issue(input);
 }
 
-export function createReaderLeaseTestGraph(legacyOperationCount = 0): ReaderLeaseTestGraph {
+export function createReaderLeaseTestGraph(
+  legacyOperationCount = 0,
+  options: Readonly<{ outerProviderNowMs?: number }> = {},
+): ReaderLeaseTestGraph {
   const root = mkdtempSync(join(tmpdir(), "graph-engineering-b3-reader-"));
   const connection = new SQLiteConnection(join(root, "cycle-store.db"));
   ensureSQLiteCycleStoreSchema(connection, createSQLiteCycleStoreDescriptor(), {
@@ -253,7 +256,7 @@ export function createReaderLeaseTestGraph(legacyOperationCount = 0): ReaderLeas
       LOCK,
     );
     const providerClockSource = createSQLiteCursorProviderClockSourceIntrinsic(
-      () => READER_CAPTURED_AT_MS,
+      () => options.outerProviderNowMs ?? READER_CAPTURED_AT_MS,
     );
     const providerClockCapability = createSQLiteCursorProviderClockCapabilityIntrinsic(
       connection,

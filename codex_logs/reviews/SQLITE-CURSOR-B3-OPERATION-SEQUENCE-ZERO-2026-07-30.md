@@ -197,8 +197,195 @@ the actual write is validated only transitively.
 Protocol completion, adoption, release-candidate status and any external
 adoption claim remain false.
 
+## Third pass — both MEDIUMs remediated
+
+**MEDIUM-1** is closed at the shared boundary. A new module-local
+`liveAuthorityState()` refuses a terminal authority — poisoned yields
+`GE_CYCLE_STORE_CORRUPTION`, retired yields `GE_CYCLE_STORE_STALE_FENCE` — and
+all four initial-write asserts now route through it, so the three snapshot
+readers inherit the gate through their asserts. `authorityState()` itself is
+deliberately left ungated, because the authority snapshot reader and the
+poison and retire paths must keep reading terminal state; dozens of existing
+tests assert `lifecycle: "poisoned"` through exactly that path.
+
+A fourth pass corrected the justification recorded here for a second deliberate
+ungating. This log originally said `assertSQLiteCursorPostDdlCatalogFenceIntrinsic`
+is safe because it is "reached transitively through the gated reader proof".
+That is factually wrong. Four callers reach it, and three of them —
+`readSQLiteCursorPostDdlCatalogFenceSnapshotIntrinsic`,
+`mintSQLiteCursorPostDdlPublicationReaderLeaseIntrinsic` and
+`executeSQLiteCursorPostDdlPublicationReaderIntrinsic` — pass no gated assert
+first. The decision is still safe, but for a different reason: the fence
+assert's own first act is `assertSQLiteCursorOuterPublicationAuthorityIntrinsic`,
+which requires `lifecycle === "active"`. Recording the wrong reason is its own
+defect, because a future edit removing that inner assert would silently open all
+three paths while the reasoning here still read as sound.
+
+The same pass established why the original defect hit exactly three surfaces and
+no more, which this log had not explained. `assertSQLiteCursorOuterPublication
+AuthorityIntrinsic` already refuses a non-active authority and sits on the path
+of every pre-receipt operation. The header assert delegates to
+`assertBaselineEntriesHeaderPredecessorIntrinsic`, the one predecessor helper
+that reaches neither the active assert nor the fence assert — so the reader
+terminal proof and the entries assert were already closed, and only the header
+assert, the sequence assert and the sequence snapshot reader were exposed. The
+gate closes the real gap and does not paper over a wider one.
+
+One ordering consequence was handled rather than absorbed. In the sequence-zero
+executor the authority's own entry-state check now runs before the delegated
+header proof, because otherwise the new gate would have converted the existing
+`"publication entry state drifted"` rejection into `"authority is poisoned"`,
+silently changing which failure an operator sees.
+
+The closure is proved by mutation, not by inspection. Reverting all four call
+sites to `authorityState` reproduced the original defect exactly: on a poisoned
+authority the header assert, the sequence assert and the sequence snapshot
+reader each returned successfully. With the gate restored all five refuse.
+
+**MEDIUM-2** is closed by a new direct session test file exercising the
+connection-level sequence-zero session for real rather than through a mocked
+intrinsic. Each of the three previously unverified guards was independently
+proved load-bearing by removal:
+
+| Guard removed | Observed |
+|---|---|
+| `updatedAtMs < baselineCapturedAtMs` | the SQL `CHECK` fires instead, so the code changes from `GE_CYCLE_STORE_INVALID_ARGUMENT` to `GE_CYCLE_STORE_CORRUPTION` — the guard was catching it before the physical write |
+| `totalChanges - state.totalChanges !== 1` | the write is accepted |
+| `changes === 1n` | the affected-row message no longer fires |
+
+The earlier LOW about the unguarded SQL-identity hoist is also closed: the
+stage-ownership poison reason is now exposed on the authority snapshot and
+asserted, and re-applying the reviewer's mutation E is now caught.
+
+Two of the nine session rejection messages remain unreachable by driving the
+session — `"owner drifted during prepare"` requires the owner transaction,
+epoch or `total_changes` to move across a single `prepare`, which executes
+nothing, and `"result is invalid"` requires the native `run` to return a
+non-object. Both intrinsics are captured at module load, so no test seam reaches
+them without faking the native layer. They carry labelled source comments rather
+than tests, which is the honest disposition.
+
+The `baselineCapturedAtMs` bound added for LOW-2 is dominated and unreachable,
+and the remediation says so rather than claiming coverage: a hostile capture
+time cannot survive the baseline-header write, and mutating the retained
+envelope afterwards is caught by the header receipt proof, since NaN can never
+satisfy the snapshot equality. Removing the new bound leaves the suite green.
+The added test pins what LOW-2 actually cares about — a hostile retained capture
+time is rejected with zero prepares, no row, and no session begin.
+
+Suite after remediation: **32 files / 1,022 tests, zero failures, zero
+timeouts**, up from 30 / 1,006. Ledger contract 61/61 with both claim flags
+still false. The frozen SQL, its SHA-256, the parameter order and the ledger
+arithmetic are untouched, `src/index.ts` is unmodified, and no new package-root
+export was introduced.
+
+## Fourth pass — independent blast-radius review of the shared gate
+
+Verdict **HIGH 0 / MEDIUM 1 / LOW 3**, safe to commit with the MEDIUM tracked.
+
+The gate is correct. All thirteen remaining `authorityState()` callers were
+enumerated and judged individually; none is a hole the gate was meant to close.
+The retired-versus-poisoned lifecycle is monotonic and provably single-writer:
+`lifecycle` is assigned in exactly three places, both terminal writers
+early-return on an already-terminal graph, retirement never sets a poison
+reason, and the `active` assignment cannot resurrect a terminal graph. The
+`writePhase` halves of the gate are genuinely dominated by the `lifecycle`
+halves, exactly as the source comment claims.
+
+The gate is also not over-strict, which was the other half of the risk. No
+production or test flow asserts a receipt after retirement; the disposal helper
+only rolls back and closes. The module has no production consumer at all — no
+file under any `packages/*/src/` imports it — so today's blast radius is
+confined to its own tests. Earlier leaves re-run in isolation: 4 files / 104
+tests passed.
+
+One improvement was found rather than a regression: on a terminal authority the
+reader terminal proof and the entries assert used to surface
+`GE_CYCLE_STORE_INVALID_ARGUMENT "…is not active"` leaked from the nested fence
+assert, and now surface the correct `CORRUPTION` / `STALE_FENCE` pair. No
+committed test asserted the old code.
+
+Both honesty claims from the third pass survived independent verification. The
+two unreachable session messages are genuinely unreachable — `hardenSQLiteNative
+StatementIntrinsic` executes no SQL and the private transaction fields have no
+caller-controlled writer, and `statementRunIntrinsic` is a module-private const
+captured at load, outside the `vi.spyOn` seam the suite uses. The dominated
+`baselineCapturedAtMs` bound has three independent dominators.
+
+### The MEDIUM: a retired authority is misclassified as corrupt
+
+`executeSQLiteCursorOperationSequenceZeroPublicationIntrinsic` checks
+`writePhase !== "baseline-header-complete"` ahead of the gated header proof. The
+reviewer proved the reachable `writePhase` set at that point is exactly
+`{poisoned, retired}`, because reaching it requires having passed the receipt
+identity check and the reuse gate. It is therefore not a phase-machine check at
+all — it is a second, unlabelled terminal check shadowing the labelled one.
+
+For a poisoned authority this is message-only. For a **retired** one the code
+class changes from `GE_CYCLE_STORE_STALE_FENCE` to `GE_CYCLE_STORE_CORRUPTION`,
+against the module's own new doc-comment. A caller that loses its
+`BEGIN EXCLUSIVE` generation — ordinary concurrency, retryable one layer up — is
+told the store is corrupt instead of stale-fenced.
+
+No existing test would have caught it: the only entry-state test drives a
+poisoned graph, where the two orderings are indistinguishable, and no test
+drives a retired authority through any executor at all. The sibling
+baseline-header executor still checks its phase *after* its delegated proof, so
+the two now use opposite precedence.
+
+This matters specifically because the next leaf is four-receipt atomic
+adoption, and it is the first code that must act on the difference between
+"this generation is gone, retry" and "this store is corrupt, stop".
+
+### The MEDIUM and both actionable LOWs are closed
+
+The reviewer's first option was taken: the sequence-zero executor now resolves
+`liveAuthorityState` at entry and the shadowing entry-state branch is deleted,
+since it had no non-terminal trigger. Its phase clause was not discarded — it
+was folded into the adjacent dominated defence-in-depth branch and moved after
+the delegated header proof, which is what makes the two sibling executors match.
+Precedence is now identical in both: entry graph shape, reuse gate, delegated
+predecessor proof, own phase and state check, local identity checks, with
+terminal classification hoisted to a single `liveAuthorityState` call at entry.
+The baseline-header executor was aligned the same way.
+
+The fix is proved load-bearing by mutation in both directions. Reverting the
+sequence-zero executor reproduces the reported regression verbatim — a retired
+authority reported as `GE_CYCLE_STORE_CORRUPTION` rather than
+`GE_CYCLE_STORE_STALE_FENCE`. Reverting the header executor produces a different
+and previously unnoticed defect: that executor was already code-correct, but it
+surfaced a predecessor-specific message,
+`"SQLite baseline-header publication transaction lineage is stale"`, rather than
+the shared terminal vocabulary. So the two new tests pin different properties —
+the sequence-zero test pins the code class, the header test pins the shared
+message — and both fail on revert.
+
+`LOW-2` is closed: the migration-0002 receipt reader now routes through
+`liveAuthorityState`, so a terminal authority yields the same
+`CORRUPTION` / `STALE_FENCE` pair as the four receipt proofs instead of a
+divergent `INVALID_ARGUMENT "…is not active"`. `LOW-3` is closed by comment: the
+post-DDL fence assert now names its own internal active-authority assert as the
+lifecycle boundary for the three callers that reach it with no gated assert on
+the path, so the reasoning cannot rot silently.
+
+`LOW-4` remains open and needs no code change: the reader-lease snapshot reader
+performs no authority check at all, but it self-labels
+`mayMintStageAdoptionReceipt: false` and `consumesAnyWriteReceipt: false`. The
+adoption leaf's design must reference those labels so the distinction is not
+rediscovered by accident.
+
+Suite after the fix: **32 files / 1,024 tests**, up from 1,022 by exactly the two
+new retired-authority executor tests. Ledger contract 61/61 with both claim flags
+still false. One test expectation was deliberately changed and is recorded here:
+the existing entry-state test drives a genuinely poisoned graph, so it now
+expects the labelled poisoned message from `liveAuthorityState` rather than the
+deleted branch's message; its code, counter and no-write assertions are
+unchanged.
+
 ## Disposition
 
-Not authorized for commit. MEDIUM-1 and MEDIUM-2 must close first, and
-MEDIUM-1 must close before the four-receipt adoption leaf begins, because that
-leaf is what consumes these receipts.
+Accepted for commit at HIGH 0 / MEDIUM 0 / LOW 1, the remaining LOW being
+documentation for the successor leaf. MEDIUM-1 from the second pass — the
+lifecycle gate — is now closed, which was the gating item for four-receipt
+atomic adoption, since that leaf is the first code that must distinguish
+"this generation is gone, retry" from "this store is corrupt, stop".

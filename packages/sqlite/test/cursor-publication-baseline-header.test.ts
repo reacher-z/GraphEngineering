@@ -701,6 +701,50 @@ describe("SQLite baseline-header publication receipt", () => {
       });
   });
 
+  it("stale-fences a retired authority rather than reporting a corrupt store", () => {
+    const graph = headerGraph(1);
+    // Retire through an unrelated route so the executor observes an authority
+    // that is already terminal, not the invariant that retired it. The executor
+    // must report the retirement as a stale fence a caller can retry at a higher
+    // layer, never as corruption.
+    graph.connection.execTrusted("ROLLBACK", "inspect-schema");
+    graph.connection.execTrusted("BEGIN EXCLUSIVE", "inspect-schema");
+    expectProviderError(
+      () => readSQLiteBaselineEntriesPublicationReceiptSnapshotIntrinsic(graph.entriesReceipt),
+      "GE_CYCLE_STORE_STALE_FENCE",
+      /lineage|owner|retired|stale/u,
+    );
+    expect(readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(graph.authority))
+      .toMatchObject({
+        lifecycle: "retired",
+        stageOwnershipPoisonReason: undefined,
+        writePhase: "retired",
+      });
+    const begin = vi.spyOn(
+      sqliteConnectionModule,
+      "beginSQLiteConnectionBaselineHeaderPublicationExecutionIntrinsic",
+    );
+
+    expectProviderError(
+      () => publishHeader(graph),
+      "GE_CYCLE_STORE_STALE_FENCE",
+      /^SQLite outer publication authority is retired$/u,
+    );
+    expect(begin).not.toHaveBeenCalled();
+    expect(readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(graph.authority))
+      .toMatchObject({
+        baselineHeaderAffectedRows: 0,
+        baselineHeaderExecuteCount: 0,
+        baselineHeaderLogicalExecutionCount: 0,
+        baselineHeaderPrepareCount: 0,
+        baselineHeaderPublicationReceipt: undefined,
+        baselineHeaderPublicationReceiptMintCount: 0,
+        lifecycle: "retired",
+        stageOwnershipPoisonReason: undefined,
+        writePhase: "retired",
+      });
+  });
+
   it("poisons catalog drift before preparing the header", () => {
     const graph = headerGraph(1);
     graph.connection.prepare(
