@@ -66,28 +66,28 @@
     "occurrenceId": { "$ref": "#/$defs/identifier" },
     "occurrenceSequence": { "$ref": "#/$defs/safeNonNegativeInteger" },
     "occurredAt": { "$ref": "#/$defs/timestamp" },
-    "fieldPath": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 1024,
-      "pattern": "^(?:/(?:[^~/]|~[01])*)+$"
-    },
+    "fieldPath": { "$ref": "#/$defs/safeJsonPointer" },
     "paths": {
       "type": "array",
       "minItems": 1,
       "maxItems": 1024,
       "uniqueItems": true,
-      "items": {
-        "type": "string",
-        "minLength": 1,
-        "maxLength": 1024,
-        "pattern": "^(?:/(?:[^~/]|~[01])*)+$"
-      }
+      "items": { "$ref": "#/$defs/safeJsonPointer" }
     },
     "replacementMode": { "enum": ["remove", "constant-token"] },
     "count": { "type": "integer", "minimum": 1, "maximum": 1024 }
   },
   "$defs": {
+    "safeJsonPointer": {
+      "description": "An RFC 6901 JSON Pointer that traverses no prototype-bearing member, identical to the definition in redaction-rule.schema.json. A receipt records what a transform actually did, so accepting a pointer the rule schema forbids would let a receipt attest to a traversal that could never have been legitimately authorized. RFC 6901 escapes only '~' and '/', and none of __proto__, constructor or prototype contains either character, so each has exactly one spelling and no escaped variant can evade this pattern.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024,
+      "allOf": [
+        { "pattern": "^(?:/(?:[^~/]|~[01])*)+$" },
+        { "not": { "pattern": "(?:^|/)(?:__proto__|constructor|prototype)(?:/|$)" } }
+      ]
+    },
     "neverRedactableSourceClass": {
       "description": "redaction-semantics.md Section 1.2 row 1: authoritative; protect, never redact. Section 2.2 forbids redacted data from ever being authoritative, so no receipt may name one of these classes for any sink.",
       "enum": [

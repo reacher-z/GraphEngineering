@@ -24,16 +24,21 @@
       "minItems": 1,
       "maxItems": 1024,
       "uniqueItems": true,
-      "items": {
-        "type": "string",
-        "minLength": 1,
-        "maxLength": 1024,
-        "pattern": "^(?:/(?:[^~/]|~[01])*)+$"
-      }
+      "items": { "$ref": "#/$defs/safeJsonPointer" }
     },
     "replacementMode": { "enum": ["remove", "constant-token"] }
   },
   "$defs": {
+    "safeJsonPointer": {
+      "description": "An RFC 6901 JSON Pointer that traverses no prototype-bearing member. redaction-semantics.md declares prototype-property traversal normatively forbidden and the transform rejects it at apply time, but a poisoned rule can otherwise be stored in a policy and hashed into policyHash before any transform ever runs, so the prohibition is enforced here as well. A single literal check suffices: RFC 6901 escapes only '~' and '/', and none of __proto__, constructor or prototype contains either character, so each has exactly one spelling and no escaped variant can evade this pattern.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024,
+      "allOf": [
+        { "pattern": "^(?:/(?:[^~/]|~[01])*)+$" },
+        { "not": { "pattern": "(?:^|/)(?:__proto__|constructor|prototype)(?:/|$)" } }
+      ]
+    },
     "identifier": {
       "type": "string",
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
