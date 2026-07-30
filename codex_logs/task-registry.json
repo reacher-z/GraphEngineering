@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-07-30T12:45:00Z",
+  "updated_at": "2026-07-30T13:45:00Z",
   "repository": ".",
   "scan_policy": {
     "warning_after_minutes": 60,
@@ -793,7 +793,7 @@
       "last_heartbeat": "2026-07-30T11:00:00Z",
       "risk": "high",
       "blocker": null,
-      "next_action": "The conditional-routing compiler, lowering and runtime half was accepted at commit 3fea613 ancestry per plan section 31.35.12, which explicitly excluded integrated barriers, quorum, abstention, deadlines, late arrival, cancellation propagation and durable decision replay. The remaining half is frozen as a candidate in spec/integrated-barrier-semantics.md with implementationClaim false; build the literal shared corpus and independent hostile contract review, then implement disjoint TypeScript and Python barrier and decision-replay paths before any executable parity or capability claim"
+      "next_action": "Contract frozen at revision 2 (b34aea1): ownership is a versioned apiVersion claim, after both implementation lanes independently proved revision 1 turned every pre-contract barrier config into a compile error and contradicted the contract's own requirement 13. Shared corpus is 79 policy, 15 ownership, 16 compiler, 41 evaluation, 12 identity, 12 identifier and 8 replay cases with 60 independently recomputed literals. TypeScript tranche 1 landed at 6330204: pre-dispatch capability gate plus the GE1421-GE1424 pass, core 238 to 378 and runtime 265 to 275, refusing a claimed policy rather than executing it as an identity node. Remaining: Python tranche 1, then the cross-language diagnostic-order join, which is the gate that matters because plan section 31.35.12 rejected a previous tranche for exactly that divergence. Then tranche 2 (arming, dispositions, satisfaction arithmetic, deadlines, the three non-pass resolutions, late arrival, cancellation propagation, decision documents and zero-rejudge replay). No capability flag may move before the join and an independent review"
     },
     {
       "id": "D7-CYCLE-SPEC-024",
