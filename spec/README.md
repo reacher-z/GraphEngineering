@@ -172,6 +172,140 @@ coverage, artifact authorization (capability expiry, media type, size, lifetime
 mode) is largely unevaluated, and the terminal-state and source-closed stream
 guards have known gaps. Treat it as shape and lineage evidence only.
 
+Canonical human approval — authority ceilings, scope narrowing, the stable
+idempotency key, stale-decision rejection, and the barrier discharge path — is
+fixed by [approval-semantics.md](approval-semantics.md). Its machine carriers
+are [approval-authority.schema.json](approval-authority.schema.json),
+[approval-request.schema.json](approval-request.schema.json), and
+[approval-grant.schema.json](approval-grant.schema.json); the discharge path
+reuses the frozen
+[barrier-decision.schema.json](barrier-decision.schema.json) rather than
+minting a second decision carrier. The corpus is at
+[conformance/approval.case.json](conformance/approval.case.json) and its
+validator at
+[conformance/approval.validate.mjs](conformance/approval.validate.mjs). The
+corpus carries `implementationClaim: false`. What is *not* implemented: neither
+runtime issues, presents, validates, or honours an approval. There is no
+approval issuer, no approver surface, no grant validator, no ledger fold, and
+no discharge path in this repository, and because no runtime implements
+integrated barriers either, the discharge path of the contract has no reachable
+producer. No signature, PKI, or attestation of the approver exists:
+`approverPrincipal` is a name checked against an allowlist, so the contract
+makes forgery of the *binding* detectable and does **not** make impersonation
+of the *approver* detectable. No multi-approver quorum, delegation, escalation,
+transport, notification, or timeout scheduling is defined. `event.schema.json`
+is unchanged, so `HumanInputRequested.data` and `HumanInputReceived.data`
+remain open objects on the wire.
+
+Durable-runtime extension — lease and fence authority, read-only replay, fork
+lineage, the artifact-store and lock-manager boundaries, and disposable
+checkpoint acceleration — is fixed by
+[durable-extension-semantics.md](durable-extension-semantics.md). Its five
+machine carriers are [lease.schema.json](lease.schema.json),
+[replay-plan.schema.json](replay-plan.schema.json),
+[fork-lineage.schema.json](fork-lineage.schema.json),
+[artifact-store-descriptor.schema.json](artifact-store-descriptor.schema.json),
+and [checkpoint-acceleration.schema.json](checkpoint-acceleration.schema.json),
+with the corpus at
+[conformance/durable-extension.case.json](conformance/durable-extension.case.json)
+and its validator at
+[conformance/durable-extension.validate.mjs](conformance/durable-extension.validate.mjs).
+The corpus carries `implementationClaim: false` and
+`contractStatus: contract-only-native-implementation-required`. What is *not*
+implemented: no runtime acquires or fences a lease, executes a read-only
+replay, forks a lineage, resolves an artifact store, or accelerates a
+checkpoint. The shipped CycleStore provider renews leases without counting
+renewals or binding a policy identity, and its `leaseEpoch` and `fencingToken`
+are always equal, so adopting this contract's `renewalCount`, `renewalLimit`,
+`policyId`, `policyHash` and independent fence changes `GE_CYCLE_STORE_*` wire
+bytes; that migration is unperformed. The validator's guard-neutralization
+sweep is a separate measurement path (`GE_DX_MEASURE=1` on the validator's own
+CLI) and is deliberately not run by `validate-fixtures`.
+
+Capability manifests, authority narrowing, resolved-path policy, git worktree
+leases, restricted process and container launch, the isolation provider
+boundary, and the safe merge gate are fixed by
+[isolation-semantics.md](isolation-semantics.md). Its machine carriers are
+[capability-manifest.schema.json](capability-manifest.schema.json),
+[isolation-provider.schema.json](isolation-provider.schema.json),
+[worktree-lease.schema.json](worktree-lease.schema.json), and
+[merge-gate-decision.schema.json](merge-gate-decision.schema.json), with the
+corpus at [conformance/isolation.case.json](conformance/isolation.case.json)
+and its validator at
+[conformance/isolation.validate.mjs](conformance/isolation.validate.mjs). The
+corpus carries `implementationClaim: false` and an `ambientAuthority` block
+asserting `runtimeHasAmbientAuthority: true`; the validator fails hard if
+either is edited, so the only way to stop this corpus from saying "nothing is
+implemented" is to make the gate red. What is *not* implemented: no runtime
+derives or enforces a capability manifest, no isolation provider exists, no
+worktree is leased or cleaned up, no process or container limit is applied, and
+no merge gate runs. Graph IR `resources`, `isolation` and `sideEffects` remain
+opaque declarations — a capability manifest committed beside a graph changes
+nothing at execution time. Freezing this contract is contract-level evidence
+only; it is not a security claim, and the Day 12 gate remains open. The
+document also discloses that one of its 129 rejection rules
+(`deriveBranch`'s forbidden-git-ref check) has no isolating vector.
+
+Rubrics, verdicts, judge panels, citation claims, reflection bounds, quorum,
+and the unknown state are fixed by
+[verification-semantics.md](verification-semantics.md). Its machine carriers
+are [rubric.schema.json](rubric.schema.json),
+[verdict.schema.json](verdict.schema.json),
+[judge-panel.schema.json](judge-panel.schema.json),
+[citation-claim.schema.json](citation-claim.schema.json), and
+[reflection-record.schema.json](reflection-record.schema.json); it composes
+with the frozen [barrier-vote.schema.json](barrier-vote.schema.json) and
+[barrier-decision.schema.json](barrier-decision.schema.json) rather than
+redefining them. The corpus is at
+[conformance/verification.case.json](conformance/verification.case.json) and
+its validator at
+[conformance/verification.validate.mjs](conformance/verification.validate.mjs).
+The corpus carries `implementationClaim: false`. What is *not* implemented: no
+runtime evaluates a rubric, retains a ballot, computes a panel census, verifies
+a citation, or bounds a reflection. No provider, model, network, or wall clock
+participates, so nothing here is evidence that verification works against a
+real model. Human-gate *resumption* is unspecified and owned by
+`D9-APPROVAL-077`; budget units are bounded but never accounted; maker/verifier
+context isolation is a declared hash-inequality obligation the contract cannot
+verify and cannot detect a forgery of; citation verification runs only against
+frozen local sources and the `networkVerification: "bounded"` mode is never
+exercised. The corpus discloses that two of its 179 guards (`Q010`, `X009`)
+survive neutralization — they have no isolating vector — and the survivability
+sweep itself is a separate measurement path on the validator's own CLI, not
+part of `validate-fixtures`.
+
+Provider and tool adapters — capability discovery, structured output and tool
+calls, streaming, usage accounting, and the retry/rate/circuit/fallback/cancel
+ladder — are fixed by [adapter-semantics.md](adapter-semantics.md). Its machine
+carriers are
+[adapter-capability.schema.json](adapter-capability.schema.json),
+[adapter-descriptor.schema.json](adapter-descriptor.schema.json),
+[adapter-error.schema.json](adapter-error.schema.json), and
+[adapter-usage.schema.json](adapter-usage.schema.json), with the corpus at
+[conformance/adapter.case.json](conformance/adapter.case.json) and its
+validator at
+[conformance/adapter.validate.mjs](conformance/adapter.validate.mjs). The
+corpus carries `implementationClaim: false` and
+`evidenceClass: deterministic-mock`, and asserts `credentialRequired: false`,
+`networkAccess: false`, `wallClockDependence: false`, `injectedClockOnly: true`.
+What is *not* implemented: no runtime in this repository implements this
+contract — there is no TypeScript adapter and no Python adapter. No provider
+integration exists; `openai`, `anthropic`, `google-gemini` and
+`openai-compatible` name intended boundary shapes, not working clients, and no
+request has ever been sent to any of them by this code. Even the deterministic
+`mock` adapter is unimplemented: the corpus is a fixture, not a running
+adapter. It proves internal consistency and composition with the frozen budget
+([budget-vector.schema.json](budget-vector.schema.json)) and cycle
+([cycle-controller.schema.json](cycle-controller.schema.json)) contracts, and
+nothing about any provider.
+
+The five contracts above use their own stable `GE_APPROVAL_*`, `GE_DX_*`,
+`GE_CAP_*`, `GE_ISO_*`, `GE_MERGE_*` and `GE_ADAPTER_*` diagnostic vocabularies,
+enumerated and frozen in their own semantics documents and corpora. They are
+deliberately not listed under "Compiler diagnostic codes" below: that list is
+scoped to the `GE1xxx` codes emitted by compiler passes, and the `D9`, `D10`
+and `D4` runtime vocabularies are scoped the same way.
+
 ## Canonical serialization v1alpha1
 
 Before hashing a Graph IR document, implementations must:

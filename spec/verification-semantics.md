@@ -1148,11 +1148,19 @@ schemas.
 8. The cross-language join `D11-VERIFY-CONFORMANCE-043` is unstarted. A single
    JavaScript oracle passing is contract-author evidence, not conformance
    evidence.
-9. This contract is not yet wired into `scripts/validate-fixtures.mjs`, is not
-   referenced by `spec/README.md`, and does not appear in the task registry's
-   expected-artifact list. Until it is, `pnpm validate:fixtures` being green
-   says nothing about this corpus and this document is discoverable from
-   nowhere inside `spec/`. The oracle must be run directly:
-   `node spec/conformance/verification.validate.mjs`.
+9. ~~This contract is not yet wired into `scripts/validate-fixtures.mjs`~~
+   **Closed.** The corpus is now imported and executed by
+   `scripts/validate-fixtures.mjs`, documented in `spec/README.md`, and listed
+   in the task registry's expected artifacts, so `pnpm validate:fixtures`
+   failing is now evidence about this corpus. Verified by corrupting a stored
+   rubric hash and observing the shared gate fail with
+   `[R001] rubric rubric.core hash drifted`.
+
+   What the shared gate still does **not** prove is guard survivability. It
+   checks that the corpus agrees with the oracle, not that every oracle rule
+   has an isolating vector. The `Q010` and `X009` survivors above are measured
+   only by `measureGuardSurvivability()`, which re-runs the whole corpus once
+   per guard and is reachable only from the validator's own CLI entry point.
+   Putting that in CI is a separate, slower job.
 10. Two guards are disclosed survivors of the deletion campaign (§15.2). Both
     are evaluated on every run; only their deletion is invisible.

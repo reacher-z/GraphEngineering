@@ -772,11 +772,13 @@ report.
 
 1. Reference `humanInputRequestedData` and `humanInputReceivedData` from
    `spec/event.schema.json`, closing `data` per event type.
-2. Register the three schemas and the corpus in `spec/README.md` and in the
-   shared fixture validator, so the oracle runs in CI rather than only by hand.
-3. Record the three schemas and the corpus as expected artifacts in the task
-   registry, so release-map and evidence-closure checks can see the machine
-   contract.
+2. ~~Register the three schemas and the corpus in `spec/README.md` and in the
+   shared fixture validator~~ **Closed.** Both are done; the oracle runs inside
+   `pnpm validate:fixtures`, verified by corrupting an authority revision and
+   observing the shared gate fail with `authority A1 hash drifted`.
+3. ~~Record the three schemas and the corpus as expected artifacts in the task
+   registry~~ **Closed.** `D9-APPROVAL-077` now lists them, so release-map and
+   evidence-closure can see the machine contract.
 4. Implement the pipeline in both runtimes and join them, recomputing every
    literal in each language.
 5. Decide whether approver authentication belongs in this contract or in a
