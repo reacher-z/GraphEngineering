@@ -3167,3 +3167,595 @@ for (const testCase of authoringCases.identityMutationCases) {
 process.stdout.write(
   `Cross-language authoring conformance passed for ${authoringCases.equivalenceCases.length} four-authoring-path equivalence cases (six native reports), ${authoringCases.validSourceCases.length} four-report valid-source cases, ${authoringCases.builderDiagnosticCases.length} builder diagnostics, ${sourceFailureCases.cases.length} source failures, ${authoringCases.typedDiagnosticCases.length} typed diagnostics, and ${authoringCases.identityMutationCases.length} identity mutations.\n`,
 );
+
+// ---------------------------------------------------------------------------
+// Integrated barrier cross-language join.
+//
+// Master plan 31.35.12 rejected the integrated-router tranche at HIGH 3 for a
+// cross-language divergence — TypeScript grouped diagnostics by router while
+// Python retained global edge order — that both single-language suites passed
+// over. This block exists so the same defect class cannot survive in the
+// barrier tranche.
+//
+// Neither side may read the other's expectations. The TypeScript half below is
+// computed only from `@graph-engineering/core`; the Python half is computed by
+// tools/conformance/python_integrated_barrier_report.py from the native
+// `graph_engineering` package. The single shared input is the corpus JSON, and
+// the corpus `expect` blocks are used only after the two native results have
+// already been proved equal to each other.
+const barrierCorpus = JSON.parse(
+  await readFile(join(fixtureRoot, "integrated-barrier.case.json"), "utf8"),
+);
+
+const BARRIER_DIAGNOSTIC_CODES = [
+  "GE1421_INVALID_BARRIER_POLICY",
+  "GE1422_BARRIER_POLICY_KIND_MISMATCH",
+  "GE1423_BARRIER_NO_INPUTS",
+  "GE1424_BARRIER_THRESHOLD_EXCEEDS_INPUTS",
+];
+const BARRIER_CODE_RANK = new Map(BARRIER_DIAGNOSTIC_CODES.map((code, rank) => [code, rank]));
+const BARRIER_ROUTER_PASS_CODES = new Set([
+  "GE1401_INVALID_ROUTER_POLICY",
+  "GE1402_UNSUPPORTED_EDGE_CONDITION",
+  "GE1403_CONDITION_SOURCE_NOT_ROUTER",
+  "GE1404_ROUTE_NOT_ALLOWED",
+  "GE1405_DUPLICATE_ROUTE_CASE",
+  "GE1406_DUPLICATE_ROUTE_TARGET",
+  "GE1407_INCOMPLETE_ROUTE_COVERAGE",
+]);
+const BARRIER_OPTIONAL_POLICY_FIELDS = ["minimum", "basisPoints", "quorum", "deadline"];
+const BARRIER_POLICY_FIELDS = [
+  "claimed",
+  "valid",
+  "claimsPredicate",
+  "code",
+  "relativePath",
+  "policy",
+  "policyFields",
+  "policyOptionalPresent",
+  "policyOptionalAbsent",
+];
+const BARRIER_COMPILER_FIELDS = ["valid", "graphHash", "diagnostics", "diagnosticFields"];
+// The ownership probe rule, stated identically in both report halves: replace
+// the config of the two-input barrier at node index 3 of this corpus graph, so
+// GE1423 can never confound the ownership discriminant.
+const BARRIER_PROBE_CASE = "ge1421-unknown-policy-field-reports-the-first-invalid-descendant";
+const BARRIER_PROBE_NODE_INDEX = 3;
+
+/**
+ * Render a value for a divergence message with object keys sorted, so the two
+ * halves are compared by the reader on content rather than on the key order
+ * their respective JSON transports happened to use. Array order is preserved
+ * because array order is exactly what this join is defending.
+ */
+function barrierStringify(value) {
+  if (Array.isArray(value)) return `[${value.map(barrierStringify).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    return `{${Object.keys(value).sort()
+      .map((key) => `${JSON.stringify(key)}:${barrierStringify(value[key])}`)
+      .join(",")}}`;
+  }
+  return value === undefined ? "undefined" : JSON.stringify(value);
+}
+
+function barrierDivergence(section, caseName, field, tsValue, pyValue) {
+  return new Error(
+    `Integrated barrier cross-language divergence in ${section} case '${caseName}',`
+      + ` field '${field}': TypeScript ${barrierStringify(tsValue)}`
+      + ` vs Python ${barrierStringify(pyValue)}`,
+  );
+}
+
+function assertBarrierAgreement(section, caseName, field, tsValue, pyValue) {
+  if (!isDeepStrictEqual(tsValue, pyValue)) {
+    throw barrierDivergence(section, caseName, field, tsValue, pyValue);
+  }
+}
+
+/** The omit-if-absent projection rule: no absent field may become a JSON null. */
+function assertBarrierNoMaterializedNull(value, label) {
+  if (value === null) {
+    throw new Error(
+      `Integrated barrier projection defect: ${label} materializes an absent field as JSON null`,
+    );
+  }
+  if (Array.isArray(value)) {
+    value.forEach((entry, index) => assertBarrierNoMaterializedNull(entry, `${label}[${index}]`));
+    return;
+  }
+  if (typeof value === "object") {
+    for (const [key, entry] of Object.entries(value)) {
+      assertBarrierNoMaterializedNull(entry, `${label}.${key}`);
+    }
+  }
+}
+
+function assertBarrierEntryAgreement(section, caseName, fields, tsEntry, pyEntry) {
+  for (const field of fields) {
+    const tsHas = Object.hasOwn(tsEntry, field);
+    const pyHas = Object.hasOwn(pyEntry, field);
+    if (tsHas !== pyHas) {
+      throw barrierDivergence(
+        section,
+        caseName,
+        field,
+        tsHas ? tsEntry[field] : "<field absent>",
+        pyHas ? pyEntry[field] : "<field absent>",
+      );
+    }
+    if (tsHas) assertBarrierAgreement(section, caseName, field, tsEntry[field], pyEntry[field]);
+  }
+  assertBarrierAgreement(
+    section,
+    caseName,
+    "reportedFieldSet",
+    Object.keys(tsEntry).sort(),
+    Object.keys(pyEntry).sort(),
+  );
+}
+
+/**
+ * Enumerate a corpus section and prove both halves reported every declared
+ * case exactly once. A silently skipped case is the failure mode this whole
+ * join exists to prevent, so absence is an error rather than a no-op.
+ */
+function barrierSectionNames(section, pyOrder, pyReport) {
+  const cases = barrierCorpus[section];
+  assert.ok(Array.isArray(cases) && cases.length > 0, `${section}: corpus declares no cases`);
+  const declared = cases.map((item) => item.name);
+  assert.equal(
+    new Set(declared).size,
+    declared.length,
+    `${section}: corpus declares a duplicate case name`,
+  );
+  assertBarrierAgreement(section, "<section>", "declaredCaseOrder", declared, pyOrder);
+  for (const name of declared) {
+    if (!Object.hasOwn(pyReport, name)) {
+      throw new Error(`${section}: Python skipped corpus case '${name}'`);
+    }
+  }
+  for (const name of Object.keys(pyReport)) {
+    if (!declared.includes(name)) {
+      throw new Error(`${section}: Python reported case '${name}' the corpus does not declare`);
+    }
+  }
+  assert.equal(
+    Object.keys(pyReport).length,
+    declared.length,
+    `${section}: Python reported ${Object.keys(pyReport).length} cases for ${declared.length} declared`,
+  );
+  return cases;
+}
+
+function typescriptBarrierPolicyReport(config) {
+  const validation = core.validateBarrierPolicy(config);
+  const entry = {
+    claimed: validation.claimed,
+    valid: validation.valid,
+    claimsPredicate: core.claimsIntegratedBarrierPolicy(config),
+  };
+  if (validation.valid) {
+    const policy = { ...validation.policy };
+    entry.policy = policy;
+    entry.policyFields = Object.keys(policy);
+    entry.policyOptionalPresent = BARRIER_OPTIONAL_POLICY_FIELDS
+      .filter((field) => Object.hasOwn(policy, field));
+    entry.policyOptionalAbsent = BARRIER_OPTIONAL_POLICY_FIELDS
+      .filter((field) => !Object.hasOwn(policy, field));
+  } else if (validation.claimed) {
+    entry.code = validation.code;
+    entry.relativePath = validation.relativePath;
+  }
+  return entry;
+}
+
+function projectBarrierDiagnostic(item) {
+  const projected = { code: item.code };
+  if (item.path !== undefined) projected.path = item.path;
+  if (item.nodeIds !== undefined) projected.nodeIds = [...item.nodeIds];
+  if (item.edgeId !== undefined) projected.edgeId = item.edgeId;
+  return projected;
+}
+
+function typescriptBarrierCompilerReport(graph) {
+  const result = core.compileGraph(graph);
+  const diagnostics = result.diagnostics.map(projectBarrierDiagnostic);
+  return {
+    valid: result.valid,
+    graphHash: result.graphHash,
+    diagnostics,
+    diagnosticFields: diagnostics.map((projection) => Object.keys(projection)),
+  };
+}
+
+function barrierProbeGraph(base, config) {
+  const document = JSON.parse(JSON.stringify(base));
+  document.nodes[BARRIER_PROBE_NODE_INDEX].config = config;
+  return document;
+}
+
+/** (category rank, node declaration index, code, node id) for barrier diagnostics. */
+function barrierOrderWitness(diagnostics) {
+  return diagnostics
+    .filter((item) => BARRIER_CODE_RANK.has(item.code))
+    .map((item) => {
+      const match = /^#\/nodes\/(\d+)(?:\/|$)/.exec(item.path ?? "");
+      if (match === null) {
+        throw new Error(`barrier diagnostic ${item.code} has no node-anchored path`);
+      }
+      return [
+        BARRIER_CODE_RANK.get(item.code),
+        Number.parseInt(match[1], 10),
+        item.code,
+        (item.nodeIds ?? [])[0] ?? null,
+      ];
+    });
+}
+
+function assertBarrierEmissionOrder(language, caseName, witness) {
+  for (let index = 1; index < witness.length; index += 1) {
+    const [previousRank, previousNode, previousCode] = witness[index - 1];
+    const [rank, node, code] = witness[index];
+    if (rank < previousRank) {
+      throw new Error(
+        `${language} emitted ${code} after ${previousCode} in compiler case '${caseName}':`
+          + " barrier categories must emit in GE1421, GE1422, GE1423, GE1424 order",
+      );
+    }
+    if (rank === previousRank && node <= previousNode) {
+      throw new Error(
+        `${language} emitted ${code} at node index ${node} after node index ${previousNode}`
+          + ` in compiler case '${caseName}': within a category, node declaration order is required`,
+      );
+    }
+  }
+}
+
+function barrierCodesByNode(diagnostics) {
+  const byNode = {};
+  for (const item of diagnostics) {
+    if (!BARRIER_CODE_RANK.has(item.code)) continue;
+    for (const nodeId of item.nodeIds ?? []) {
+      (byNode[nodeId] ??= []).push(item.code);
+    }
+  }
+  return byNode;
+}
+
+function assertBarrierSuppressionChain(language, caseName, byNode) {
+  for (const [nodeId, codes] of Object.entries(byNode)) {
+    const present = new Set(codes);
+    if (present.has("GE1421_INVALID_BARRIER_POLICY")) {
+      for (const suppressed of [
+        "GE1422_BARRIER_POLICY_KIND_MISMATCH",
+        "GE1424_BARRIER_THRESHOLD_EXCEEDS_INPUTS",
+      ]) {
+        if (present.has(suppressed)) {
+          throw new Error(
+            `${language} emitted ${suppressed} beside GE1421 on node '${nodeId}'`
+              + ` in compiler case '${caseName}': GE1421 suppresses it on the same node`,
+          );
+        }
+      }
+    }
+    if (present.has("GE1422_BARRIER_POLICY_KIND_MISMATCH")
+        && present.has("GE1424_BARRIER_THRESHOLD_EXCEEDS_INPUTS")) {
+      throw new Error(
+        `${language} emitted GE1424 beside GE1422 on node '${nodeId}'`
+          + ` in compiler case '${caseName}': GE1422 suppresses it on the same node`,
+      );
+    }
+  }
+}
+
+function assertBarrierRouterBeforeBarrier(language, caseName, diagnostics) {
+  const routerIndexes = [];
+  const barrierIndexes = [];
+  diagnostics.forEach((item, index) => {
+    if (BARRIER_ROUTER_PASS_CODES.has(item.code)) routerIndexes.push(index);
+    if (BARRIER_CODE_RANK.has(item.code)) barrierIndexes.push(index);
+  });
+  if (routerIndexes.length === 0 || barrierIndexes.length === 0) return false;
+  const lastRouter = Math.max(...routerIndexes);
+  const firstBarrier = Math.min(...barrierIndexes);
+  if (lastRouter > firstBarrier) {
+    throw new Error(
+      `${language} emitted a barrier diagnostic at index ${firstBarrier} before the router`
+        + ` diagnostic at index ${lastRouter} in compiler case '${caseName}':`
+        + " the integrated router pass must emit before the barrier pass",
+    );
+  }
+  return true;
+}
+
+const pythonBarrier = spawnSync(
+  "uv",
+  ["run", "--project", "python", "python", "tools/conformance/python_integrated_barrier_report.py"],
+  { cwd: root, encoding: "utf8" },
+);
+if (pythonBarrier.status !== 0) {
+  throw new Error(
+    `Python integrated barrier conformance failed:\n${pythonBarrier.stderr || pythonBarrier.stdout}`,
+  );
+}
+const pyBarrierReport = JSON.parse(pythonBarrier.stdout);
+
+assert.equal(
+  pyBarrierReport.contract,
+  barrierCorpus.contract,
+  "integrated barrier: the two halves read different corpus contracts",
+);
+assertBarrierAgreement(
+  "corpus",
+  "<contract>",
+  "diagnosticCodes",
+  barrierCorpus.diagnosticCodes,
+  pyBarrierReport.diagnosticCodes,
+);
+assertBarrierAgreement(
+  "corpus",
+  "<contract>",
+  "diagnosticCodes",
+  BARRIER_DIAGNOSTIC_CODES,
+  barrierCorpus.diagnosticCodes,
+);
+assertBarrierAgreement(
+  "corpus",
+  "<contract>",
+  "ownershipProbe",
+  { case: BARRIER_PROBE_CASE, nodeIndex: BARRIER_PROBE_NODE_INDEX },
+  pyBarrierReport.ownershipProbe,
+);
+
+// The four claim flags are literally false on both sides. Each process read
+// them from the corpus itself, so this is a two-reader assertion rather than a
+// restatement of one read.
+const barrierClaimNames = [
+  "implementationClaim",
+  "typescriptRuntimeClaim",
+  "pythonRuntimeClaim",
+  "capabilityGateClaim",
+];
+assertBarrierAgreement(
+  "claims",
+  "<claims>",
+  "flagNames",
+  [...barrierClaimNames].sort(),
+  Object.keys(pyBarrierReport.claims).sort(),
+);
+assertBarrierAgreement(
+  "claims",
+  "<claims>",
+  "flagNames",
+  [...barrierClaimNames].sort(),
+  Object.keys(barrierCorpus.claims).sort(),
+);
+for (const flag of barrierClaimNames) {
+  assert.strictEqual(
+    barrierCorpus.claims[flag],
+    false,
+    `integrated barrier claim '${flag}' is not literally false in the Node-side read`,
+  );
+  assert.strictEqual(
+    pyBarrierReport.claims[flag],
+    false,
+    `integrated barrier claim '${flag}' is not literally false in the Python-side read`,
+  );
+}
+assert.strictEqual(
+  barrierCorpus.implementationClaim,
+  false,
+  "integrated barrier implementationClaim is not literally false",
+);
+
+const barrierPolicyCases = barrierSectionNames(
+  "policyCases",
+  pyBarrierReport.policyCaseOrder,
+  pyBarrierReport.policyCases,
+);
+for (const testCase of barrierPolicyCases) {
+  const tsEntry = typescriptBarrierPolicyReport(testCase.config);
+  const pyEntry = pyBarrierReport.policyCases[testCase.name];
+  assertBarrierEntryAgreement("policyCases", testCase.name, BARRIER_POLICY_FIELDS, tsEntry, pyEntry);
+  assertBarrierNoMaterializedNull(tsEntry, `policyCases '${testCase.name}' TypeScript`);
+  assertBarrierNoMaterializedNull(pyEntry, `policyCases '${testCase.name}' Python`);
+
+  // Only after the two native halves agree is the corpus expectation consulted.
+  const expectation = testCase.expect;
+  for (const [language, entry] of [["TypeScript", tsEntry], ["Python", pyEntry]]) {
+    assert.equal(entry.claimed, expectation.claimed, `${testCase.name}: ${language} claimed`);
+    assert.equal(entry.valid, expectation.valid, `${testCase.name}: ${language} valid`);
+    assert.equal(
+      entry.claimsPredicate,
+      expectation.claimed,
+      `${testCase.name}: ${language} ownership discriminator`,
+    );
+    if (expectation.valid) {
+      assert.deepEqual(entry.policy, expectation.policy, `${testCase.name}: ${language} policy`);
+    } else if (expectation.claimed) {
+      assert.equal(entry.code, expectation.code, `${testCase.name}: ${language} diagnostic code`);
+      assert.equal(
+        entry.relativePath,
+        expectation.relativePath,
+        `${testCase.name}: ${language} relative path`,
+      );
+    } else {
+      assert.ok(!Object.hasOwn(entry, "code"), `${testCase.name}: ${language} unclaimed code`);
+      assert.ok(
+        !Object.hasOwn(entry, "relativePath"),
+        `${testCase.name}: ${language} unclaimed relative path`,
+      );
+    }
+  }
+}
+const barrierValidPolicyCases = barrierPolicyCases.filter((item) => item.expect.valid === true);
+assert.ok(barrierValidPolicyCases.length > 0, "policyCases: no valid policy snapshot compared");
+
+const barrierProbeBase = barrierCorpus.compilerCases
+  .find((item) => item.name === BARRIER_PROBE_CASE);
+assert.ok(barrierProbeBase !== undefined, `corpus is missing probe case '${BARRIER_PROBE_CASE}'`);
+
+const barrierOwnershipCases = barrierSectionNames(
+  "ownershipCases",
+  pyBarrierReport.ownershipCaseOrder,
+  pyBarrierReport.ownershipCases,
+);
+for (const testCase of barrierOwnershipCases) {
+  const validation = core.validateBarrierPolicy(testCase.config);
+  const tsEntry = {
+    claimed: validation.claimed,
+    claimsPredicate: core.claimsIntegratedBarrierPolicy(testCase.config),
+    diagnostics: validation.valid || !validation.claimed
+      ? []
+      : [{ code: validation.code, relativePath: validation.relativePath }],
+    probe: typescriptBarrierCompilerReport(
+      barrierProbeGraph(barrierProbeBase.graph, testCase.config),
+    ),
+  };
+  const pyEntry = pyBarrierReport.ownershipCases[testCase.name];
+  assertBarrierEntryAgreement(
+    "ownershipCases",
+    testCase.name,
+    ["claimed", "claimsPredicate", "diagnostics"],
+    tsEntry,
+    pyEntry,
+  );
+  assertBarrierEntryAgreement(
+    "ownershipCases probe",
+    testCase.name,
+    BARRIER_COMPILER_FIELDS,
+    tsEntry.probe,
+    pyEntry.probe,
+  );
+  assertBarrierNoMaterializedNull(tsEntry, `ownershipCases '${testCase.name}' TypeScript`);
+  assertBarrierNoMaterializedNull(pyEntry, `ownershipCases '${testCase.name}' Python`);
+
+  const expectation = testCase.expect;
+  const probeDiagnostics = expectation.diagnostics.map((item) => ({
+    code: item.code,
+    path: `#/nodes/${BARRIER_PROBE_NODE_INDEX}/config${item.relativePath}`,
+    nodeIds: [barrierProbeBase.graph.nodes[BARRIER_PROBE_NODE_INDEX].id],
+  }));
+  for (const [language, entry] of [["TypeScript", tsEntry], ["Python", pyEntry]]) {
+    assert.equal(entry.claimed, expectation.claimed, `${testCase.name}: ${language} claimed`);
+    assert.equal(
+      entry.claimsPredicate,
+      expectation.claimed,
+      `${testCase.name}: ${language} ownership discriminator`,
+    );
+    assert.deepEqual(
+      entry.diagnostics,
+      expectation.diagnostics,
+      `${testCase.name}: ${language} ownership diagnostics`,
+    );
+    assert.deepEqual(
+      entry.probe.diagnostics,
+      probeDiagnostics,
+      `${testCase.name}: ${language} ownership diagnostics through the real compiler`,
+    );
+  }
+}
+
+const barrierCompilerCases = barrierSectionNames(
+  "compilerCases",
+  pyBarrierReport.compilerCaseOrder,
+  pyBarrierReport.compilerCases,
+);
+let barrierOrderedDiagnostics = 0;
+let barrierMultiDiagnosticCases = 0;
+let barrierRouterOrderWitnesses = 0;
+let barrierSuppressionWitnesses = 0;
+const barrierCategoriesSeen = new Set();
+for (const testCase of barrierCompilerCases) {
+  const tsEntry = typescriptBarrierCompilerReport(testCase.graph);
+  const pyEntry = pyBarrierReport.compilerCases[testCase.name];
+
+  // The HIGH-3 axis: the complete ordered diagnostic list, never a set.
+  assertBarrierEntryAgreement(
+    "compilerCases",
+    testCase.name,
+    BARRIER_COMPILER_FIELDS,
+    tsEntry,
+    pyEntry,
+  );
+  assertBarrierNoMaterializedNull(tsEntry, `compilerCases '${testCase.name}' TypeScript`);
+  assertBarrierNoMaterializedNull(pyEntry, `compilerCases '${testCase.name}' Python`);
+
+  const tsWitness = barrierOrderWitness(tsEntry.diagnostics);
+  const pyWitness = barrierOrderWitness(pyEntry.diagnostics);
+  assertBarrierAgreement("compilerCases", testCase.name, "emissionOrder", tsWitness, pyWitness);
+  assertBarrierEmissionOrder("TypeScript", testCase.name, tsWitness);
+  assertBarrierEmissionOrder("Python", testCase.name, pyWitness);
+  if (tsEntry.diagnostics.length > 1) barrierMultiDiagnosticCases += 1;
+  barrierOrderedDiagnostics += tsEntry.diagnostics.length;
+  for (const [, , code] of tsWitness) barrierCategoriesSeen.add(code);
+
+  const tsByNode = barrierCodesByNode(tsEntry.diagnostics);
+  const pyByNode = barrierCodesByNode(pyEntry.diagnostics);
+  assertBarrierAgreement("compilerCases", testCase.name, "codesByNode", tsByNode, pyByNode);
+  assertBarrierSuppressionChain("TypeScript", testCase.name, tsByNode);
+  assertBarrierSuppressionChain("Python", testCase.name, pyByNode);
+
+  if (assertBarrierRouterBeforeBarrier("TypeScript", testCase.name, tsEntry.diagnostics)) {
+    barrierRouterOrderWitnesses += 1;
+  }
+  assertBarrierRouterBeforeBarrier("Python", testCase.name, pyEntry.diagnostics);
+
+  for (const [language, entry] of [["TypeScript", tsEntry], ["Python", pyEntry]]) {
+    assert.equal(
+      entry.graphHash,
+      testCase.graphHash,
+      `${testCase.name}: ${language} literal graph hash`,
+    );
+    assert.deepEqual(
+      entry.diagnostics,
+      testCase.expectDiagnostics,
+      `${testCase.name}: ${language} ordered diagnostic projection`,
+    );
+    assert.equal(entry.valid, testCase.expectValid, `${testCase.name}: ${language} validity`);
+  }
+}
+
+// The suppression chain is asserted on every compiler case above; these three
+// named cases are the positive witnesses that the chain is exercised at all,
+// including the one link that must NOT suppress.
+for (const [name, expectedCodes] of [
+  [
+    "ge1421-suppresses-ge1422-and-ge1424-on-the-same-node-only",
+    ["GE1421_INVALID_BARRIER_POLICY", "GE1422_BARRIER_POLICY_KIND_MISMATCH"],
+  ],
+  ["ge1422-suppresses-ge1424-on-the-same-node", ["GE1422_BARRIER_POLICY_KIND_MISMATCH"]],
+  [
+    "ge1421-does-not-suppress-ge1423-on-the-same-node",
+    ["GE1421_INVALID_BARRIER_POLICY", "GE1423_BARRIER_NO_INPUTS"],
+  ],
+]) {
+  const testCase = barrierCompilerCases.find((item) => item.name === name);
+  assert.ok(testCase !== undefined, `compilerCases: corpus is missing suppression witness '${name}'`);
+  const tsCodes = typescriptBarrierCompilerReport(testCase.graph).diagnostics.map((i) => i.code);
+  const pyCodes = pyBarrierReport.compilerCases[name].diagnostics.map((item) => item.code);
+  assertBarrierAgreement("suppression chain", name, "codes", tsCodes, pyCodes);
+  assert.deepEqual(tsCodes, expectedCodes, `${name}: TypeScript suppression chain`);
+  assert.deepEqual(pyCodes, expectedCodes, `${name}: Python suppression chain`);
+  barrierSuppressionWitnesses += 1;
+}
+assert.equal(barrierSuppressionWitnesses, 3, "the suppression chain is not fully witnessed");
+assert.ok(
+  barrierRouterOrderWitnesses > 0,
+  "no compiler case witnesses the router pass emitting before the barrier pass",
+);
+assert.ok(
+  barrierMultiDiagnosticCases > 0,
+  "no compiler case emits more than one diagnostic, so emission order is unwitnessed",
+);
+assertBarrierAgreement(
+  "compilerCases",
+  "<categories>",
+  "categoriesExercised",
+  BARRIER_DIAGNOSTIC_CODES,
+  [...barrierCategoriesSeen].sort(),
+);
+
+process.stdout.write(
+  `Cross-language integrated-barrier conformance passed for ${barrierPolicyCases.length} policy cases (${barrierValidPolicyCases.length} normalized policy snapshots), ${barrierOwnershipCases.length} ownership cases through both the native validator and the real compiler pass, and ${barrierCompilerCases.length} compiler cases through compileGraph/try_compile_graph carrying ${barrierCompilerCases.length} literal graph hashes and ${barrierOrderedDiagnostics} ordered diagnostics (${barrierMultiDiagnosticCases} multi-diagnostic order witnesses, ${barrierRouterOrderWitnesses} router-before-barrier witness, ${barrierSuppressionWitnesses} suppression-chain witnesses, all 4 categories); claims ${JSON.stringify(barrierCorpus.claims)}.\n`,
+);
