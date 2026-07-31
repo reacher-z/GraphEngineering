@@ -572,6 +572,49 @@ content. A mismatch is `GE_D4_ARTIFACT_CORRUPT`; the target is not invoked and
 does not receive null, an empty object, stale cache content, or unverified
 bytes.
 
+Both obligations are ordered checks, not a single golden comparison. An
+implementation that reproduces the canonical reference byte for byte still has
+to execute every row below, because a conformant run may legally carry a
+different reference.
+
+Publication order, before `ArtifactPublished` may commit:
+
+| # | Check | Code on failure |
+| --- | --- | --- |
+| 1 | Reference validates against `artifact-ref.schema.json` | `GE_D4_ARTIFACT_PUBLICATION_FAILED` |
+| 2 | `tenantId` equals the edge `tenantBinding` | `GE_D4_ARTIFACT_UNAUTHORIZED` |
+| 3 | `storageNamespace` equals the edge `storageNamespace` | `GE_D4_ARTIFACT_UNAUTHORIZED` |
+| 4 | `mediaType` is a member of the edge `allowedMediaTypes` | `GE_D4_ARTIFACT_PUBLICATION_FAILED` |
+| 5 | `lifetime.mode` equals the edge `lifetime` policy | `GE_D4_ARTIFACT_PUBLICATION_FAILED` |
+| 6 | `sizeBytes` is less than or equal to the edge `maxBytes` | `GE_D4_ARTIFACT_OVERSIZED` |
+| 7 | `artifactId` equals the hash of the closed identity body of 9.1 | `GE_D4_ARTIFACT_PUBLICATION_FAILED` |
+| 8 | `capability.capabilityId` equals the hash of `[artifactId, capability]` | `GE_D4_ARTIFACT_UNAUTHORIZED` |
+
+Rows 4 and 5 are 9.2 step 2 validations: the edge refused the bytes, so no
+publication happened and no reference exists. They are therefore
+`GE_D4_ARTIFACT_PUBLICATION_FAILED` and not `GE_D4_ARTIFACT_UNAUTHORIZED`,
+which is reserved for a binding the caller was never entitled to.
+`maxBytes` is an inclusive ceiling: exactly `maxBytes` publishes.
+
+Read order, before any byte is decoded and before `ArtifactReadVerified` may
+commit:
+
+| # | Check | Code on failure |
+| --- | --- | --- |
+| 1 | `capability.capabilityId` rebinds to this artifact and capability body | `GE_D4_ARTIFACT_UNAUTHORIZED` |
+| 2 | `capability.authorityHash` equals the plan authority hash | `GE_D4_ARTIFACT_UNAUTHORIZED` |
+| 3 | The requested action is a member of `capability.actions` | `GE_D4_ARTIFACT_UNAUTHORIZED` |
+| 4 | `capability.expiresAt` is null, or the read instant is strictly earlier | `GE_D4_ARTIFACT_EXPIRED` |
+| 5 | The reader tenant equals `tenantId` | `GE_D4_ARTIFACT_UNAUTHORIZED` |
+| 6 | The reader run equals `runId` | `GE_D4_ARTIFACT_UNAUTHORIZED` |
+| 7 | The reader namespace equals `storageNamespace` | `GE_D4_ARTIFACT_UNAUTHORIZED` |
+| 8 | Observed byte length equals `sizeBytes` | `GE_D4_ARTIFACT_CORRUPT` |
+| 9 | Observed digest equals `digest` | `GE_D4_ARTIFACT_CORRUPT` |
+
+Expiry is exclusive at its own instant: a read at exactly `expiresAt` is
+`GE_D4_ARTIFACT_EXPIRED`. Instants compare as strict UTC RFC 3339 with
+millisecond precision.
+
 ### 9.3 Lifetime and garbage collection
 
 - `run` remains readable through terminal result retention for the originating
@@ -1004,18 +1047,79 @@ The checked corpus currently contains:
 
 - five D4 schemas under strict Draft 2020-12 meta-validation/Ajv compilation;
 - two exact Graph IR documents bound into one canonical plan;
-- two valid plans (canonical plus bounded self-recursion) and seventeen invalid
-  semantic plan variants;
+- two valid plans (canonical plus bounded self-recursion) and thirty-nine
+  invalid semantic plan variants;
 - seventeen globally chained, scope-mixed event facts;
 - one event-derived terminal checkpoint and one normalized trace;
 - seventeen schema-negative mutations;
-- twenty-five runtime-semantic cases across projection, recursion, seven
-  built-in reducer operations/idempotency, artifact identity/authority/size/
-  lifetime, stream demand/bytes/buffering/cancellation, and structured failure;
-- eleven hostile event/checkpoint substitutions, including rehashed semantic
-  corruption; and
-- three hostile normalized-trace substitutions, including rehashed semantic
+- seventy-four runtime-semantic cases across projection, recursion, seven
+  built-in reducer operations/idempotency/completion order, the ordered
+  publication and read verifications of 9.2, and the stream state machine of
+  10.2 through 10.4;
+- fifty-seven hostile event/checkpoint substitutions, including resealed
+  semantic corruption and rebuilt hostile histories; and
+- four hostile normalized-trace substitutions, including rehashed semantic
   drift.
+
+### 15.1 Mutation adequacy
+
+A conformance corpus that only re-derives one golden run is not evidence. The
+binding obligation on this corpus is therefore stated as a mutation criterion
+rather than as a pass:
+
+> For every rejection rule the oracle implements, at least one vector must
+> exist that isolates it — deleting that rule from the oracle must make the
+> shipped corpus fail.
+
+Two consequences follow for the vector shapes this corpus uses.
+
+First, a hostile event substitution in the middle of a history must **reseal**
+the remaining chain — recompute every later `previousEventHash` and
+`eventHash` — before it proves anything about a semantic rule. Without that,
+the hash-chain guard of 13.2 fires on the next frame and absorbs the mutation,
+and the semantic rule under test could be deleted with the corpus still green.
+A vector that deliberately targets the chain guard itself is the one case that
+must not reseal.
+
+Second, some rules are only reachable from a recovered counter state. Because
+10.5 requires resume to reconstruct demand, buffered items, unacknowledged
+deliveries and byte reservations from the committed prefix, a stream vector may
+seed those counters directly and must still be refused when the seeded state
+violates a bound.
+
+The criterion is verifiable mechanically: neutralize one rejection in the
+oracle, run the corpus, and require a failure. On the corpus as shipped, 133 of
+its 144 rejections are held that way. The eleven that are not are listed here
+rather than left for the next audit to find.
+
+Five are unreachable from the two frozen Graph IR documents and their plan, and
+remain obligations on the native suites below:
+
+- a value-hash collision under `set-union-by-hash` requires an actual SHA-256
+  collision;
+- a recursive component with disagreeing groups or bounds requires a second
+  subgraph node that neither frozen graph contains;
+- the artifact-edge and stream-edge count ceilings cannot be violated while the
+  plan schema floors each at one and the plan declares exactly one of each; and
+- the reducer state-pointer parent and leaf existence rules are shadowed,
+  because the only declared state pointer has one segment and its presence is
+  already established before the write.
+
+Six are implemented, reachable, and exercised, but are shadowed by a
+neighbouring rule that reports the same code, so deleting one alone leaves the
+verdict unchanged:
+
+- reducer state-schema identity drift, behind the graph-binding equality rule;
+- duplicate `InvocationCreated`, behind the invocation-status ladder;
+- an `ArtifactReadVerified` that precedes its publication, behind
+  "artifact published twice";
+- checkpoint and normalized-trace schema validity, each behind its own
+  event-derived projection equality rule; and
+- the byte-length half of the read verification, behind the digest half.
+
+Nothing in that second group is unchecked. Each is disclosed because a
+single-rule deletion is not observable through the portable failure code, and
+13.2 makes only the code portable.
 
 Native package suites must add, without weakening those vectors:
 
@@ -1101,8 +1205,18 @@ only guarded event-derived projections and never becomes authority.
 
 ## 18. Current audit disposition
 
-The machine contract itself has no known open shape/fold P0 or P1 after the
-included hostile oracle passes. Product completion remains blocked:
+The included oracle passing is not by itself evidence about the machine
+contract. An independent hostile audit dated 2026-07-30 found the oracle
+accepted knowingly wrong input: it exempted `publish` from the terminal-state
+guard of 10.4, never read source-close state on the publish path, bounded
+demand per grant but never cumulatively, left capability expiry, media type,
+byte ceiling, lifetime mode and read-side tenant/run/namespace bindings
+unevaluated, and carried an artifact digest check and a `previousEventHash`
+chain check that could each be deleted with the corpus still green. Those rules
+are now implemented and each is held by at least one isolating vector under the
+mutation criterion of 15.1. The two families named as unreachable there, and
+the ordering rules whose failure code collides with a neighbouring rule's, are
+disclosed rather than claimed. Product completion remains blocked:
 
 ### P0 — release blocking
 

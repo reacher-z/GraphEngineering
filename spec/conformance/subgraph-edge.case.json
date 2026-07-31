@@ -567,6 +567,188 @@
   ],
   "semanticPlanCases": [
     {
+      "name": "plan-kind-substitution",
+      "expectedCode": "GE_D4_PLAN_SCHEMA",
+      "mutations": [
+        { "op": "replace", "path": "/kind", "value": "NotASubgraphEdgePlan" }
+      ]
+    },
+    {
+      "name": "authority-ceiling-is-not-code-point-sorted",
+      "expectedCode": "GE_D4_AUTHORITY_ORDER",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/authority/ceiling",
+          "value": ["artifact:read", "artifact:delete", "artifact:write", "stream:consume", "stream:produce"]
+        }
+      ]
+    },
+    {
+      "name": "output-projection-names-an-unknown-child-output",
+      "expectedCode": "GE_D4_PROJECTION_SOURCE_MISSING",
+      "mutations": [
+        { "op": "replace", "path": "/calls/0/outputProjection/fields/0/sourceOutput", "value": "ghost" }
+      ]
+    },
+    {
+      "name": "root-budget-exceeds-plan-policy",
+      "expectedCode": "GE_D4_LIMIT_INCONSISTENT",
+      "mutations": [
+        { "op": "replace", "path": "/budget/maxDurationMs", "value": 60001 }
+      ]
+    },
+    {
+      "name": "root-graph-key-is-absent",
+      "expectedCode": "GE_D4_ROOT_GRAPH_MISSING",
+      "mutations": [
+        { "op": "replace", "path": "/rootGraphKey", "value": "absent" }
+      ]
+    },
+    {
+      "name": "graph-binding-has-no-source-graph",
+      "expectedCode": "GE_D4_GRAPH_BINDING_MISMATCH",
+      "mutations": [
+        { "op": "replace", "path": "/graphs/0/key", "value": "aardvark" }
+      ]
+    },
+    {
+      "name": "call-names-an-unknown-child-graph",
+      "expectedCode": "GE_D4_SUBGRAPH_GRAPH_MISSING",
+      "mutations": [
+        { "op": "replace", "path": "/calls/0/childGraphKey", "value": "absent" }
+      ]
+    },
+    {
+      "name": "call-count-exceeds-total-invocation-limit",
+      "expectedCode": "GE_D4_LIMIT_INCONSISTENT",
+      "mutations": [
+        { "op": "replace", "path": "/calls/0/maxCallsPerParent", "value": 17 }
+      ]
+    },
+    {
+      "name": "recursion-declared-outside-a-cycle",
+      "expectedCode": "GE_D4_RECURSION_UNUSED",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/calls/0/recursion",
+          "value": { "mode": "bounded", "group": "unused-recursion", "maxDepth": 2, "onLimit": "structured-failure" }
+        }
+      ]
+    },
+    {
+      "name": "reducer-graph-is-absent",
+      "expectedCode": "GE_D4_REDUCER_GRAPH_MISSING",
+      "mutations": [
+        { "op": "replace", "path": "/reducers/0/graphKey", "value": "absent" }
+      ]
+    },
+    {
+      "name": "reducer-graph-has-no-state-schema",
+      "expectedCode": "GE_D4_REDUCER_STATE_SCHEMA_MISSING",
+      "mutations": [
+        { "op": "replace", "path": "/reducers/0/graphKey", "value": "root" }
+      ]
+    },
+    {
+      "name": "reducer-node-is-absent",
+      "expectedCode": "GE_D4_REDUCER_NODE_KIND",
+      "mutations": [
+        { "op": "replace", "path": "/reducers/0/nodeId", "value": "ghost" }
+      ]
+    },
+    {
+      "name": "reducer-contributor-node-is-absent",
+      "expectedCode": "GE_D4_REDUCER_CONTRIBUTOR_MISSING",
+      "mutations": [
+        { "op": "replace", "path": "/reducers/0/contributors/0/nodeId", "value": "ghost" }
+      ]
+    },
+    {
+      "name": "reducer-cannot-contribute-to-itself",
+      "expectedCode": "GE_D4_REDUCER_SELF_WRITE",
+      "mutations": [
+        { "op": "replace", "path": "/reducers/0/contributors/0/nodeId", "value": "reduce" }
+      ]
+    },
+    {
+      "name": "reducer-write-bound-is-inconsistent",
+      "expectedCode": "GE_D4_LIMIT_INCONSISTENT",
+      "mutations": [
+        { "op": "replace", "path": "/reducers/0/maxWrites", "value": 1 }
+      ]
+    },
+    {
+      "name": "numeric-reducer-minimum-exceeds-maximum",
+      "expectedCode": "GE_D4_REDUCER_BOUNDS_INVALID",
+      "mutations": [
+        { "op": "replace", "path": "/reducers/0/operation", "value": "bounded-integer-sum" },
+        { "op": "replace", "path": "/reducers/0/law", "value": "commutative-associative-canonical-order" },
+        {
+          "op": "add",
+          "path": "/reducers/0/integerBounds",
+          "value": { "minimum": 5, "maximum": 1, "overflow": "structured-failure" }
+        }
+      ]
+    },
+    {
+      "name": "literal-initial-state-hash-drifted",
+      "expectedCode": "GE_D4_REDUCER_INITIAL_HASH",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/reducers/0/initialState",
+          "value": {
+            "mode": "literal",
+            "value": { "items": [] },
+            "valueHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        }
+      ]
+    },
+    {
+      "name": "artifact-edge-exceeds-global-artifact-bytes",
+      "expectedCode": "GE_D4_LIMIT_INCONSISTENT",
+      "mutations": [
+        { "op": "replace", "path": "/artifactEdges/0/maxBytes", "value": 4097 }
+      ]
+    },
+    {
+      "name": "stream-policy-on-artifact-edge",
+      "expectedCode": "GE_D4_EDGE_MODE_MISMATCH",
+      "mutations": [
+        { "op": "replace", "path": "/streamEdges/0/edgeId", "value": "e_nested_artifact" }
+      ]
+    },
+    {
+      "name": "artifact-byte-reservations-exceed-global-bound",
+      "expectedCode": "GE_D4_LIMIT_INCONSISTENT",
+      "mutations": [
+        { "op": "replace", "path": "/policies/maxTotalArtifactBytes", "value": 2048 },
+        { "op": "replace", "path": "/budget/maxArtifactBytes", "value": 2048 },
+        { "op": "replace", "path": "/calls/0/budget/maxArtifactBytes", "value": 2048 }
+      ]
+    },
+    {
+      "name": "stream-item-reservations-exceed-global-bound",
+      "expectedCode": "GE_D4_LIMIT_INCONSISTENT",
+      "mutations": [
+        { "op": "replace", "path": "/policies/maxTotalStreamItems", "value": 4 },
+        { "op": "replace", "path": "/budget/maxStreamItems", "value": 4 },
+        { "op": "replace", "path": "/calls/0/budget/maxStreamItems", "value": 4 }
+      ]
+    },
+    {
+      "name": "stream-in-flight-reservations-exceed-global-bound",
+      "expectedCode": "GE_D4_LIMIT_INCONSISTENT",
+      "mutations": [
+        { "op": "replace", "path": "/policies/maxStreamInFlightBytes", "value": 1024 },
+        { "op": "replace", "path": "/budget/maxStreamInFlightBytes", "value": 1024 },
+        { "op": "replace", "path": "/calls/0/budget/maxStreamInFlightBytes", "value": 1024 }
+      ]
+    },
+    {
       "name": "graph-hash-substitution",
       "expectedCode": "GE_D4_GRAPH_BINDING_MISMATCH",
       "mutations": [
@@ -733,6 +915,19 @@
       "expectedCode": "GE_D4_PROJECTION_MISSING"
     },
     {
+      "name": "runtime-output-projection-target-collision",
+      "operation": "project-output",
+      "projection": {
+        "mode": "object",
+        "fields": [
+          { "sourceOutput": "result", "sourcePointer": "/items", "targetKey": "result", "required": true },
+          { "sourceOutput": "result", "sourcePointer": "/meta", "targetKey": "result", "required": true }
+        ]
+      },
+      "input": { "result": { "items": ["left", "right"], "meta": { "count": 2 } } },
+      "expectedCode": "GE_D4_PROJECTION_COLLISION"
+    },
+    {
       "name": "bounded-recursion-allows-second-entry",
       "operation": "enter-recursion",
       "ancestorDepth": 1,
@@ -805,9 +1000,21 @@
     },
     {
       "name": "artifact-content-corruption",
-      "operation": "verify-artifact",
+      "operation": "read-artifact",
+      "contentUtf8": "{\"items\":[\"left\",\"wrong\"]}",
+      "expectedCode": "GE_D4_ARTIFACT_CORRUPT"
+    },
+    {
+      "name": "artifact-length-corruption",
+      "operation": "read-artifact",
       "contentUtf8": "{\"items\":[\"left\",\"tampered\"]}",
       "expectedCode": "GE_D4_ARTIFACT_CORRUPT"
+    },
+    {
+      "name": "artifact-read-of-exact-bytes-is-authorized",
+      "operation": "read-artifact",
+      "contentUtf8": "{\"items\":[\"left\",\"right\"]}",
+      "expectedCode": null
     },
     {
       "name": "lineage-artifact-release-is-not-gc",
@@ -887,29 +1094,384 @@
     },
     {
       "name": "artifact-capability-rejects-delete",
-      "operation": "authorize-artifact",
-      "tenantId": "fixture-tenant",
+      "operation": "read-artifact",
       "action": "delete",
       "expectedCode": "GE_D4_ARTIFACT_UNAUTHORIZED"
     },
     {
       "name": "artifact-capability-rejects-foreign-tenant",
-      "operation": "authorize-artifact",
+      "operation": "read-artifact",
       "tenantId": "other-tenant",
-      "action": "read",
       "expectedCode": "GE_D4_ARTIFACT_UNAUTHORIZED"
     },
     {
+      "name": "artifact-capability-rejects-foreign-run",
+      "operation": "read-artifact",
+      "runId": "run-d4-other",
+      "expectedCode": "GE_D4_ARTIFACT_UNAUTHORIZED"
+    },
+    {
+      "name": "artifact-capability-rejects-foreign-namespace",
+      "operation": "read-artifact",
+      "storageNamespace": "/tenants/fixture-tenant/runs/run-d4-other",
+      "expectedCode": "GE_D4_ARTIFACT_UNAUTHORIZED"
+    },
+    {
+      "name": "artifact-capability-id-must-rebind-to-its-authority",
+      "operation": "read-artifact",
+      "refMutations": [
+        { "op": "add", "path": "/capability/actions/1", "value": "list" }
+      ],
+      "expectedCode": "GE_D4_ARTIFACT_UNAUTHORIZED"
+    },
+    {
+      "name": "artifact-capability-authority-hash-must-be-the-plan-authority",
+      "operation": "read-artifact",
+      "rebind": "capability",
+      "refMutations": [
+        { "op": "replace", "path": "/capability/authorityHash", "value": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" }
+      ],
+      "expectedCode": "GE_D4_ARTIFACT_UNAUTHORIZED"
+    },
+    {
+      "name": "artifact-capability-expiry-rejects-later-read",
+      "operation": "read-artifact",
+      "rebind": "capability",
+      "readAt": "2026-07-26T22:45:00.000Z",
+      "refMutations": [
+        { "op": "replace", "path": "/capability/expiresAt", "value": "2026-07-26T22:44:59.999Z" }
+      ],
+      "expectedCode": "GE_D4_ARTIFACT_EXPIRED"
+    },
+    {
+      "name": "artifact-capability-expiry-is-exclusive-at-its-own-instant",
+      "operation": "read-artifact",
+      "rebind": "capability",
+      "readAt": "2026-07-26T22:45:00.000Z",
+      "refMutations": [
+        { "op": "replace", "path": "/capability/expiresAt", "value": "2026-07-26T22:45:00.000Z" }
+      ],
+      "expectedCode": "GE_D4_ARTIFACT_EXPIRED"
+    },
+    {
+      "name": "artifact-capability-expiry-admits-an-earlier-read",
+      "operation": "read-artifact",
+      "rebind": "capability",
+      "readAt": "2026-07-26T22:45:00.000Z",
+      "refMutations": [
+        { "op": "replace", "path": "/capability/expiresAt", "value": "2026-07-26T22:45:00.001Z" }
+      ],
+      "expectedCode": null
+    },
+    {
+      "name": "artifact-publication-of-the-canonical-reference-is-allowed",
+      "operation": "publish-artifact",
+      "expectedCode": null
+    },
+    {
+      "name": "artifact-publication-rejects-a-schema-invalid-reference",
+      "operation": "publish-artifact",
+      "rebind": true,
+      "refMutations": [
+        { "op": "replace", "path": "/algorithm", "value": "sha512" }
+      ],
+      "expectedCode": "GE_D4_ARTIFACT_PUBLICATION_FAILED"
+    },
+    {
+      "name": "artifact-read-rejects-a-byte-length-that-is-not-the-reference-length",
+      "operation": "read-artifact",
+      "rebind": true,
+      "contentUtf8": "{\"items\":[\"left\",\"right\"]}",
+      "refMutations": [
+        { "op": "replace", "path": "/sizeBytes", "value": 99 }
+      ],
+      "expectedCode": "GE_D4_ARTIFACT_CORRUPT"
+    },
+    {
+      "name": "reducer-required-contributor-output-is-missing",
+      "operation": "reduce-contributors",
+      "contributorOutputs": { "left": { "value": "left" }, "right": {} },
+      "expectedCode": "GE_D4_REDUCER_CONFLICT"
+    },
+    {
+      "name": "reducer-state-pointer-target-must-exist",
+      "operation": "reduce-contributors",
+      "contributorOutputs": { "left": { "value": "left" }, "right": { "value": "right" } },
+      "initialState": {},
+      "expectedCode": "GE_D4_REDUCER_CONFLICT"
+    },
+    {
+      "name": "ordered-append-requires-an-array-state-value",
+      "operation": "reduce-operation",
+      "reducerOperation": "ordered-append",
+      "initial": "not-an-array",
+      "values": ["first"],
+      "expected": null,
+      "expectedCode": "GE_D4_REDUCER_CONFLICT"
+    },
+    {
+      "name": "merge-disjoint-requires-an-object-state-value",
+      "operation": "reduce-operation",
+      "reducerOperation": "merge-disjoint",
+      "initial": ["not-an-object"],
+      "values": [{ "a": 1 }],
+      "expected": null,
+      "expectedCode": "GE_D4_REDUCER_CONFLICT"
+    },
+    {
+      "name": "merge-disjoint-requires-object-contributions",
+      "operation": "reduce-operation",
+      "reducerOperation": "merge-disjoint",
+      "initial": { "base": 0 },
+      "values": ["not-an-object"],
+      "expected": null,
+      "expectedCode": "GE_D4_REDUCER_CONFLICT"
+    },
+    {
+      "name": "set-union-requires-an-array-state-value",
+      "operation": "reduce-operation",
+      "reducerOperation": "set-union-by-hash",
+      "initial": { "not": "an-array" },
+      "values": ["a"],
+      "expected": null,
+      "expectedCode": "GE_D4_REDUCER_CONFLICT"
+    },
+    {
+      "name": "bounded-integer-reducer-requires-declared-bounds",
+      "operation": "reduce-operation",
+      "reducerOperation": "bounded-integer-sum",
+      "initial": 1,
+      "values": [2],
+      "expected": null,
+      "expectedCode": "GE_D4_REDUCER_CONFLICT"
+    },
+    {
+      "name": "bounded-integer-sum-rejects-intermediate-overflow",
+      "operation": "reduce-operation",
+      "reducerOperation": "bounded-integer-sum",
+      "initial": 9007199254740991,
+      "values": [1, -1],
+      "integerBounds": { "minimum": -9007199254740991, "maximum": 9007199254740991 },
+      "expected": null,
+      "expectedCode": "GE_D4_REDUCER_CONFLICT"
+    },
+    {
+      "name": "stream-demand-grant-must-be-positive",
+      "operation": "stream",
+      "steps": ["demand-zero", "publish"],
+      "expectedCode": "GE_D4_STREAM_PROTOCOL"
+    },
+    {
       "name": "artifact-edge-rejects-oversized-publication",
-      "operation": "publish-artifact-size",
-      "sizeBytes": 4097,
+      "operation": "publish-artifact",
+      "rebind": true,
+      "refMutations": [
+        { "op": "replace", "path": "/sizeBytes", "value": 9007199254740991 }
+      ],
       "expectedCode": "GE_D4_ARTIFACT_OVERSIZED"
     },
     {
+      "name": "artifact-edge-rejects-one-byte-over-its-ceiling",
+      "operation": "publish-artifact",
+      "rebind": true,
+      "refMutations": [
+        { "op": "replace", "path": "/sizeBytes", "value": 4097 }
+      ],
+      "expectedCode": "GE_D4_ARTIFACT_OVERSIZED"
+    },
+    {
+      "name": "artifact-edge-admits-its-exact-byte-ceiling",
+      "operation": "publish-artifact",
+      "rebind": true,
+      "refMutations": [
+        { "op": "replace", "path": "/sizeBytes", "value": 4096 }
+      ],
+      "expectedCode": null
+    },
+    {
+      "name": "artifact-edge-rejects-undeclared-media-type",
+      "operation": "publish-artifact",
+      "rebind": true,
+      "refMutations": [
+        { "op": "replace", "path": "/mediaType", "value": "application/octet-stream" }
+      ],
+      "expectedCode": "GE_D4_ARTIFACT_PUBLICATION_FAILED"
+    },
+    {
+      "name": "artifact-edge-rejects-foreign-lifetime-mode",
+      "operation": "publish-artifact",
+      "rebind": true,
+      "refMutations": [
+        { "op": "replace", "path": "/lifetime/mode", "value": "run" }
+      ],
+      "expectedCode": "GE_D4_ARTIFACT_PUBLICATION_FAILED"
+    },
+    {
+      "name": "artifact-edge-rejects-foreign-tenant-binding",
+      "operation": "publish-artifact",
+      "rebind": true,
+      "refMutations": [
+        { "op": "replace", "path": "/tenantId", "value": "other-tenant" }
+      ],
+      "expectedCode": "GE_D4_ARTIFACT_UNAUTHORIZED"
+    },
+    {
+      "name": "artifact-edge-rejects-foreign-storage-namespace",
+      "operation": "publish-artifact",
+      "rebind": true,
+      "refMutations": [
+        { "op": "replace", "path": "/storageNamespace", "value": "/tenants/fixture-tenant/runs/run-d4-other" }
+      ],
+      "expectedCode": "GE_D4_ARTIFACT_UNAUTHORIZED"
+    },
+    {
+      "name": "artifact-id-must-rebind-to-its-closed-identity-body",
+      "operation": "publish-artifact",
+      "refMutations": [
+        { "op": "replace", "path": "/logicalName", "value": "renamed-result.json" }
+      ],
+      "expectedCode": "GE_D4_ARTIFACT_PUBLICATION_FAILED"
+    },
+    {
+      "name": "artifact-publication-rejects-unbound-capability-id",
+      "operation": "publish-artifact",
+      "refMutations": [
+        { "op": "replace", "path": "/capability/expiresAt", "value": "2027-01-01T00:00:00.000Z" }
+      ],
+      "expectedCode": "GE_D4_ARTIFACT_UNAUTHORIZED"
+    },
+    {
+      "name": "reducer-ignores-completion-order",
+      "operation": "reducer-completion-order",
+      "expectedCode": null
+    },
+    {
+      "name": "reducer-that-folds-in-completion-order-is-a-conflict",
+      "operation": "reducer-completion-order",
+      "foldInArrivalOrder": true,
+      "expectedCode": "GE_D4_REDUCER_CONFLICT"
+    },
+    {
       "name": "stream-item-byte-bound-is-hard",
-      "operation": "stream-item-size",
+      "operation": "stream",
       "itemBytes": 1025,
+      "steps": ["demand-one", "publish"],
       "expectedCode": "GE_D4_STREAM_ITEM_INVALID"
+    },
+    {
+      "name": "stream-item-byte-bound-admits-its-exact-ceiling",
+      "operation": "stream",
+      "itemBytes": 1024,
+      "steps": ["demand-one", "publish"],
+      "expectedCode": null
+    },
+    {
+      "name": "stream-in-flight-byte-reservation-is-hard",
+      "operation": "stream",
+      "seed": { "inFlightBytes": 2040, "inFlightBytesHighWater": 2040 },
+      "steps": ["demand-one", "publish"],
+      "expectedCode": "GE_D4_STREAM_ITEM_INVALID"
+    },
+    {
+      "name": "stream-cumulative-demand-cannot-exceed-max-items",
+      "operation": "stream",
+      "steps": ["demand-two", "demand-two", "demand-two", "demand-two", "demand-two", "demand-two"],
+      "expectedCode": "GE_D4_STREAM_PROTOCOL"
+    },
+    {
+      "name": "stream-cumulative-demand-admits-exactly-max-items",
+      "operation": "stream",
+      "steps": ["demand-two", "demand-two", "demand-two", "demand-two"],
+      "expectedCode": null
+    },
+    {
+      "name": "stream-item-bound-is-hard-on-a-recovered-state",
+      "operation": "stream",
+      "seed": { "totalDemand": 8, "published": 8, "delivered": 8, "acknowledged": 8 },
+      "steps": ["publish"],
+      "expectedCode": "GE_D4_STREAM_PROTOCOL"
+    },
+    {
+      "name": "stream-publish-after-source-close-is-rejected",
+      "operation": "stream",
+      "steps": ["demand-two", "publish", "deliver", "ack", "source-close", "publish"],
+      "expectedCode": "GE_D4_STREAM_PROTOCOL"
+    },
+    {
+      "name": "stream-source-cannot-close-twice",
+      "operation": "stream",
+      "steps": ["demand-one", "publish", "deliver", "ack", "source-close", "source-close"],
+      "expectedCode": "GE_D4_STREAM_PROTOCOL"
+    },
+    {
+      "name": "stream-publish-after-completion-is-rejected",
+      "operation": "stream",
+      "steps": ["demand-two", "publish", "deliver", "ack", "source-close", "complete", "publish"],
+      "expectedCode": "GE_D4_STREAM_PROTOCOL"
+    },
+    {
+      "name": "stream-cannot-complete-twice",
+      "operation": "stream",
+      "steps": ["demand-one", "publish", "deliver", "ack", "source-close", "complete", "complete"],
+      "expectedCode": "GE_D4_STREAM_PROTOCOL"
+    },
+    {
+      "name": "stream-cannot-complete-before-source-close",
+      "operation": "stream",
+      "steps": ["demand-one", "publish", "deliver", "ack", "complete"],
+      "expectedCode": "GE_D4_STREAM_PROTOCOL"
+    },
+    {
+      "name": "stream-cannot-complete-with-a-buffered-item",
+      "operation": "stream",
+      "steps": ["demand-one", "publish", "source-close", "complete"],
+      "expectedCode": "GE_D4_STREAM_PROTOCOL"
+    },
+    {
+      "name": "stream-cannot-complete-with-an-unacknowledged-delivery",
+      "operation": "stream",
+      "steps": ["demand-one", "publish", "deliver", "source-close", "complete"],
+      "expectedCode": "GE_D4_STREAM_PROTOCOL"
+    },
+    {
+      "name": "stream-failure-prevents-later-publish",
+      "operation": "stream",
+      "steps": ["demand-two", "publish", "fail", "publish"],
+      "expectedCode": "GE_D4_STREAM_FAILED"
+    },
+    {
+      "name": "stream-cancellation-prevents-later-delivery",
+      "operation": "stream",
+      "steps": ["demand-one", "publish", "cancel", "deliver"],
+      "expectedCode": "GE_D4_STREAM_CANCELLED"
+    },
+    {
+      "name": "stream-delivery-requires-a-buffered-item",
+      "operation": "stream",
+      "steps": ["demand-one", "deliver"],
+      "expectedCode": "GE_D4_STREAM_PROTOCOL"
+    },
+    {
+      "name": "stream-unacknowledged-bound-is-hard-on-a-recovered-state",
+      "operation": "stream",
+      "seed": {
+        "totalDemand": 2,
+        "published": 2,
+        "delivered": 1,
+        "buffer": [1],
+        "unacknowledged": [0],
+        "inFlightBytes": 22,
+        "inFlightBytesHighWater": 22
+      },
+      "steps": ["deliver"],
+      "expectedCode": "GE_D4_STREAM_PROTOCOL"
+    },
+    {
+      "name": "stream-demand-grant-is-bounded-per-grant",
+      "operation": "stream",
+      "seed": { "totalDemand": 0 },
+      "steps": ["demand-three"],
+      "expectedCode": "GE_D4_STREAM_PROTOCOL"
     }
   ],
   "semanticHistoryCases": [
@@ -941,7 +1503,7 @@
       "name": "event-scope-namespace-substitution",
       "expectedCode": "GE_D4_NAMESPACE_INVALID",
       "eventIndex": 11,
-      "rehash": true,
+      "reseal": true,
       "mutations": [
         { "op": "replace", "path": "/scope/namespace", "value": "/runs/other/invocations/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
       ]
@@ -950,7 +1512,7 @@
       "name": "event-ack-item-substitution",
       "expectedCode": "GE_D4_STREAM_PROTOCOL",
       "eventIndex": 8,
-      "rehash": true,
+      "reseal": true,
       "mutations": [
         { "op": "replace", "path": "/data/itemSequence", "value": 1 }
       ]
@@ -982,30 +1544,473 @@
       ]
     },
     {
-      "name": "rehashed-event-revision-substitution",
+      "name": "resealed-event-revision-substitution",
       "expectedCode": "GE_D4_INVALID_HISTORY",
       "eventIndex": 5,
-      "rehash": true,
+      "reseal": true,
       "mutations": [
         { "op": "replace", "path": "/revisionHash", "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
       ]
     },
     {
-      "name": "rehashed-event-monotonic-rollback",
+      "name": "resealed-event-monotonic-rollback",
       "expectedCode": "GE_D4_INVALID_HISTORY",
       "eventIndex": 5,
-      "rehash": true,
+      "reseal": true,
       "mutations": [
         { "op": "replace", "path": "/monotonicOffsetNs", "value": 0 }
       ]
     },
     {
-      "name": "rehashed-event-trace-span-substitution",
+      "name": "resealed-event-trace-span-substitution",
       "expectedCode": "GE_D4_INVALID_HISTORY",
       "eventIndex": 11,
-      "rehash": true,
+      "reseal": true,
       "mutations": [
         { "op": "replace", "path": "/trace/spanId", "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" }
+      ]
+    },
+    {
+      "name": "rehashed-event-previous-hash-substitution",
+      "expectedCode": "GE_D4_INVALID_HISTORY",
+      "eventIndex": 5,
+      "rehash": true,
+      "mutations": [
+        { "op": "replace", "path": "/previousEventHash", "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" }
+      ]
+    },
+    {
+      "name": "terminal-event-hash-substitution",
+      "expectedCode": "GE_D4_INVALID_HISTORY",
+      "eventIndex": 16,
+      "mutations": [
+        { "op": "replace", "path": "/eventHash", "value": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" }
+      ]
+    },
+    {
+      "name": "resealed-terminal-payload-hash-substitution",
+      "expectedCode": "GE_D4_INVALID_HISTORY",
+      "eventIndex": 16,
+      "rehash": "event",
+      "mutations": [
+        { "op": "replace", "path": "/payloadHash", "value": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" }
+      ]
+    },
+    {
+      "name": "rehashed-terminal-sequence-substitution",
+      "expectedCode": "GE_D4_INVALID_HISTORY",
+      "eventIndex": 16,
+      "rehash": true,
+      "mutations": [
+        { "op": "replace", "path": "/sequence", "value": 99 }
+      ]
+    },
+    {
+      "name": "rehashed-terminal-expected-previous-sequence-substitution",
+      "expectedCode": "GE_D4_INVALID_HISTORY",
+      "eventIndex": 16,
+      "rehash": true,
+      "mutations": [
+        { "op": "replace", "path": "/expectedPreviousSequence", "value": 0 }
+      ]
+    },
+    {
+      "name": "rehashed-terminal-plan-hash-substitution",
+      "expectedCode": "GE_D4_INVALID_HISTORY",
+      "eventIndex": 16,
+      "rehash": true,
+      "mutations": [
+        { "op": "replace", "path": "/planHash", "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
+      ]
+    },
+    {
+      "name": "rehashed-terminal-root-graph-hash-substitution",
+      "expectedCode": "GE_D4_INVALID_HISTORY",
+      "eventIndex": 16,
+      "rehash": true,
+      "mutations": [
+        { "op": "replace", "path": "/rootGraphHash", "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
+      ]
+    },
+    {
+      "name": "rehashed-terminal-run-id-substitution",
+      "expectedCode": "GE_D4_INVALID_HISTORY",
+      "eventIndex": 16,
+      "rehash": true,
+      "mutations": [
+        { "op": "replace", "path": "/runId", "value": "run-d4-other" }
+      ]
+    },
+    {
+      "name": "rehashed-terminal-event-stream-substitution",
+      "expectedCode": "GE_D4_INVALID_HISTORY",
+      "eventIndex": 16,
+      "rehash": true,
+      "mutations": [
+        { "op": "replace", "path": "/eventStreamId", "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
+      ]
+    },
+    {
+      "name": "rehashed-terminal-lineage-substitution",
+      "expectedCode": "GE_D4_INVALID_HISTORY",
+      "eventIndex": 16,
+      "rehash": true,
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/lineage",
+          "value": {
+            "mode": "resume",
+            "sourceRunId": "run-d4-prior",
+            "sourceSequence": 0,
+            "sourceHistoryHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        }
+      ]
+    },
+    {
+      "name": "rehashed-terminal-duplicate-event-id",
+      "expectedCode": "GE_D4_INVALID_HISTORY",
+      "eventIndex": 16,
+      "rehash": true,
+      "mutations": [
+        { "op": "replace", "path": "/eventId", "value": "d4-event-0" }
+      ]
+    },
+    {
+      "name": "resealed-invocation-payload-substitution",
+      "expectedCode": "GE_D4_INVALID_HISTORY",
+      "eventIndex": 0,
+      "reseal": true,
+      "mutations": [
+        { "op": "replace", "path": "/data/inputHash", "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
+      ]
+    },
+    {
+      "name": "resealed-reducer-commit-substitution",
+      "expectedCode": "GE_D4_INVALID_HISTORY",
+      "eventIndex": 11,
+      "reseal": true,
+      "mutations": [
+        { "op": "replace", "path": "/data/afterStateHash", "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
+      ]
+    },
+    {
+      "name": "rehashed-stream-open-policy-widening",
+      "expectedCode": "GE_D4_STREAM_PROTOCOL",
+      "eventIndex": 4,
+      "rehash": true,
+      "mutations": [
+        { "op": "replace", "path": "/data/maxItems", "value": 99 }
+      ]
+    },
+    {
+      "name": "rehashed-stream-demand-total-substitution",
+      "expectedCode": "GE_D4_STREAM_PROTOCOL",
+      "eventIndex": 5,
+      "rehash": true,
+      "mutations": [
+        { "op": "replace", "path": "/data/totalDemand", "value": 2 }
+      ]
+    },
+    {
+      "name": "rehashed-stream-item-hash-substitution",
+      "expectedCode": "GE_D4_STREAM_PROTOCOL",
+      "eventIndex": 6,
+      "rehash": true,
+      "mutations": [
+        { "op": "replace", "path": "/data/itemHash", "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
+      ]
+    },
+    {
+      "name": "rehashed-stream-delivery-order-substitution",
+      "expectedCode": "GE_D4_STREAM_PROTOCOL",
+      "eventIndex": 7,
+      "rehash": true,
+      "mutations": [
+        { "op": "replace", "path": "/data/itemSequence", "value": 1 }
+      ]
+    },
+    {
+      "name": "rehashed-stream-source-close-count-substitution",
+      "expectedCode": "GE_D4_STREAM_PROTOCOL",
+      "eventIndex": 9,
+      "rehash": true,
+      "mutations": [
+        { "op": "replace", "path": "/data/publishedCount", "value": 2 }
+      ]
+    },
+    {
+      "name": "rehashed-stream-completion-counter-substitution",
+      "expectedCode": "GE_D4_STREAM_PROTOCOL",
+      "eventIndex": 10,
+      "rehash": true,
+      "mutations": [
+        { "op": "replace", "path": "/data/published", "value": 2 }
+      ]
+    },
+    {
+      "name": "rebound-artifact-published-digest-substitution",
+      "expectedCode": "GE_D4_INVALID_HISTORY",
+      "eventIndex": 13,
+      "reseal": true,
+      "rebindArtifact": true,
+      "mutations": [
+        { "op": "replace", "path": "/data/artifactRef/digest", "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
+      ]
+    },
+    {
+      "name": "rebound-artifact-published-provenance-substitution",
+      "expectedCode": "GE_D4_INVALID_HISTORY",
+      "eventIndex": 13,
+      "reseal": true,
+      "rebindArtifact": true,
+      "mutations": [
+        { "op": "replace", "path": "/data/artifactRef/logicalName", "value": "renamed-result.json" }
+      ]
+    },
+    {
+      "name": "rebound-artifact-published-media-type-substitution",
+      "expectedCode": "GE_D4_ARTIFACT_PUBLICATION_FAILED",
+      "eventIndex": 13,
+      "rehash": true,
+      "rebindArtifact": true,
+      "mutations": [
+        { "op": "replace", "path": "/data/artifactRef/mediaType", "value": "application/octet-stream" }
+      ]
+    },
+    {
+      "name": "rebound-artifact-published-lifetime-substitution",
+      "expectedCode": "GE_D4_ARTIFACT_PUBLICATION_FAILED",
+      "eventIndex": 13,
+      "rehash": true,
+      "rebindArtifact": true,
+      "mutations": [
+        { "op": "replace", "path": "/data/artifactRef/lifetime/mode", "value": "run" }
+      ]
+    },
+    {
+      "name": "rebound-artifact-published-oversize-substitution",
+      "expectedCode": "GE_D4_ARTIFACT_OVERSIZED",
+      "eventIndex": 13,
+      "rehash": true,
+      "rebindArtifact": true,
+      "mutations": [
+        { "op": "replace", "path": "/data/artifactRef/sizeBytes", "value": 4097 }
+      ]
+    },
+    {
+      "name": "rebound-artifact-published-tenant-substitution",
+      "expectedCode": "GE_D4_ARTIFACT_UNAUTHORIZED",
+      "eventIndex": 13,
+      "rehash": true,
+      "rebindArtifact": true,
+      "mutations": [
+        { "op": "replace", "path": "/data/artifactRef/tenantId", "value": "other-tenant" }
+      ]
+    },
+    {
+      "name": "resealed-artifact-read-digest-substitution",
+      "expectedCode": "GE_D4_INVALID_HISTORY",
+      "eventIndex": 14,
+      "reseal": true,
+      "mutations": [
+        { "op": "replace", "path": "/data/digest", "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
+      ]
+    },
+    {
+      "name": "resealed-artifact-read-size-substitution",
+      "expectedCode": "GE_D4_INVALID_HISTORY",
+      "eventIndex": 14,
+      "reseal": true,
+      "mutations": [
+        { "op": "replace", "path": "/data/sizeBytes", "value": 9999 }
+      ]
+    },
+    {
+      "name": "resealed-artifact-read-capability-substitution",
+      "expectedCode": "GE_D4_INVALID_HISTORY",
+      "eventIndex": 14,
+      "reseal": true,
+      "mutations": [
+        { "op": "replace", "path": "/data/capabilityId", "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
+      ]
+    },
+    {
+      "name": "stream-publish-after-completion-in-history",
+      "expectedCode": "GE_D4_STREAM_PROTOCOL",
+      "prefixLength": 11,
+      "appendSteps": [
+        {
+          "scope": "root",
+          "type": "StreamItemPublished",
+          "dataMutations": [
+            { "op": "replace", "path": "/itemSequence", "value": 1 }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "stream-publish-after-source-close-in-history",
+      "expectedCode": "GE_D4_STREAM_PROTOCOL",
+      "prefixLength": 10,
+      "appendSteps": [
+        {
+          "scope": "root",
+          "type": "StreamItemPublished",
+          "dataMutations": [
+            { "op": "replace", "path": "/itemSequence", "value": 1 }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "stream-cumulative-demand-in-history-is-bounded",
+      "expectedCode": "GE_D4_STREAM_PROTOCOL",
+      "prefixLength": 6,
+      "appendSteps": [
+        {
+          "scope": "root",
+          "type": "StreamDemandGranted",
+          "dataMutations": [
+            { "op": "replace", "path": "/credits", "value": 2 },
+            { "op": "replace", "path": "/totalDemand", "value": 3 }
+          ]
+        },
+        {
+          "scope": "root",
+          "type": "StreamDemandGranted",
+          "dataMutations": [
+            { "op": "replace", "path": "/credits", "value": 2 },
+            { "op": "replace", "path": "/totalDemand", "value": 5 }
+          ]
+        },
+        {
+          "scope": "root",
+          "type": "StreamDemandGranted",
+          "dataMutations": [
+            { "op": "replace", "path": "/credits", "value": 2 },
+            { "op": "replace", "path": "/totalDemand", "value": 7 }
+          ]
+        },
+        {
+          "scope": "root",
+          "type": "StreamDemandGranted",
+          "dataMutations": [
+            { "op": "replace", "path": "/credits", "value": 2 },
+            { "op": "replace", "path": "/totalDemand", "value": 9 }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "event-after-root-terminal-event",
+      "expectedCode": "GE_D4_INVALID_HISTORY",
+      "appendSteps": [
+        { "scope": "root", "type": "StreamOpened" }
+      ]
+    },
+    {
+      "name": "history-without-a-root-terminal-event",
+      "expectedCode": "GE_D4_INVALID_HISTORY",
+      "prefixLength": 16
+    },
+    {
+      "name": "root-succeeded-before-edge-settlement",
+      "expectedCode": "GE_D4_INVALID_HISTORY",
+      "prefixLength": 13,
+      "appendSteps": [
+        { "scope": "root", "type": "InvocationSucceeded" }
+      ]
+    },
+    {
+      "name": "child-succeeded-before-reducer-commit",
+      "expectedCode": "GE_D4_INVALID_HISTORY",
+      "stepMutations": [
+        { "op": "remove", "path": "/11" }
+      ]
+    },
+    {
+      "name": "artifact-read-before-publication",
+      "expectedCode": "GE_D4_INVALID_HISTORY",
+      "stepMutations": [
+        { "op": "remove", "path": "/13" },
+        { "op": "add", "path": "/14", "value": { "scope": "root", "type": "ArtifactPublished" } }
+      ]
+    },
+    {
+      "name": "terminal-event-kind-substitution",
+      "expectedCode": "GE_D4_INVALID_HISTORY",
+      "eventIndex": 16,
+      "reseal": true,
+      "mutations": [
+        { "op": "replace", "path": "/kind", "value": "NotASubgraphEdgeEvent" }
+      ]
+    },
+    {
+      "name": "invocation-started-twice",
+      "expectedCode": "GE_D4_INVALID_HISTORY",
+      "stepMutations": [
+        { "op": "add", "path": "/2", "value": { "scope": "root", "type": "InvocationStarted" } }
+      ]
+    },
+    {
+      "name": "invocation-succeeded-twice",
+      "expectedCode": "GE_D4_INVALID_HISTORY",
+      "stepMutations": [
+        { "op": "add", "path": "/13", "value": { "scope": "child", "type": "InvocationSucceeded" } }
+      ]
+    },
+    {
+      "name": "reducer-commit-outside-its-child-scope",
+      "expectedCode": "GE_D4_INVALID_HISTORY",
+      "stepMutations": [
+        { "op": "replace", "path": "/11/scope", "value": "root" }
+      ]
+    },
+    {
+      "name": "stream-opened-twice",
+      "expectedCode": "GE_D4_STREAM_PROTOCOL",
+      "stepMutations": [
+        { "op": "add", "path": "/5", "value": { "scope": "root", "type": "StreamOpened" } }
+      ]
+    },
+    {
+      "name": "artifact-published-twice",
+      "expectedCode": "GE_D4_INVALID_HISTORY",
+      "stepMutations": [
+        { "op": "add", "path": "/14", "value": { "scope": "root", "type": "ArtifactPublished" } }
+      ]
+    },
+    {
+      "name": "artifact-released-twice",
+      "expectedCode": "GE_D4_INVALID_HISTORY",
+      "stepMutations": [
+        { "op": "add", "path": "/16", "value": { "scope": "root", "type": "ArtifactReleased" } }
+      ]
+    },
+    {
+      "name": "unmodelled-terminal-stream-frame-is-not-silently-folded",
+      "expectedCode": "GE_D4_INVALID_HISTORY",
+      "stepMutations": [
+        { "op": "add", "path": "/6", "value": { "scope": "root", "type": "StreamCancelled" } }
+      ]
+    },
+    {
+      "name": "checkpoint-content-hash-substitution",
+      "expectedCode": "GE_D4_CORRUPT_CHECKPOINT",
+      "target": "checkpoint",
+      "mutations": [
+        { "op": "replace", "path": "/contentHash", "value": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" }
+      ]
+    },
+    {
+      "name": "checkpoint-kind-substitution",
+      "expectedCode": "GE_D4_CORRUPT_CHECKPOINT",
+      "target": "checkpoint",
+      "rehash": true,
+      "mutations": [
+        { "op": "replace", "path": "/kind", "value": "NotASubgraphEdgeCheckpoint" }
       ]
     }
   ],
@@ -1023,6 +2028,14 @@
       "rehash": true,
       "mutations": [
         { "op": "replace", "path": "/spans/2/waits/backpressureNs", "value": 0 }
+      ]
+    },
+    {
+      "name": "rehashed-trace-kind-substitution",
+      "expectedCode": "GE_D4_TRACE_INVALID",
+      "rehash": true,
+      "mutations": [
+        { "op": "replace", "path": "/kind", "value": "NotANormalizedSubgraphEdgeTrace" }
       ]
     },
     {

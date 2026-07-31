@@ -707,11 +707,20 @@ function setPointerValue(document, pointer, value) {
   parent[leaf] = value;
 }
 
-function buildReducerCommit(contributorOutputs = fixture.scenario.contributorOutputs, verifyExpected = true) {
+function buildReducerCommit(contributorOutputs = fixture.scenario.contributorOutputs, verifyExpected = true,
+  contributorOrder = null, initialState = fixture.scenario.initialState) {
   const reducer = plan.reducers[0];
-  const beforeState = clone(fixture.scenario.initialState);
+  const beforeState = clone(initialState);
   const beforeStateHash = domainHash(DOMAINS.value, beforeState);
-  const writes = reducer.contributors.map((contributor, contributorOrdinal) => {
+  // Semantics 8.2/8.3: present writes apply in contributor declaration order.
+  // `contributorOrder` exists only so a hostile vector can fold in some other
+  // order and be rejected; it is never the declared behaviour.
+  const contributors = contributorOrder === null ? reducer.contributors : contributorOrder.map((nodeId) => {
+    const found = reducer.contributors.find((candidate) => candidate.nodeId === nodeId);
+    assert.ok(found, `unknown reducer contributor: ${nodeId}`);
+    return found;
+  });
+  const writes = contributors.map((contributor, contributorOrdinal) => {
     const selected = pointerValue(contributorOutputs[contributor.nodeId], contributor.outputPointer);
     if (!selected.present) {
       if (contributor.required) throw new D4Error("GE_D4_REDUCER_CONFLICT", "required contributor output is missing");
@@ -780,6 +789,40 @@ function buildReducerCommit(contributorOutputs = fixture.scenario.contributorOut
 }
 
 const reducerCommit = buildReducerCommit();
+
+const declaredContributorOrder = plan.reducers[0].contributors.map((contributor) => contributor.nodeId);
+// `scenario.completionOrder` is live data: it must be a real permutation of the
+// declared contributors and must differ from declaration order, otherwise the
+// determinism-under-concurrency vectors below degenerate into the golden path.
+assertExact(
+  [...fixture.scenario.completionOrder].sort(compareUnicodeCodePoints),
+  [...declaredContributorOrder].sort(compareUnicodeCodePoints),
+  "scenario.completionOrder is not a permutation of the declared reducer contributors",
+);
+assert.notEqual(
+  canonicalJson(fixture.scenario.completionOrder),
+  canonicalJson(declaredContributorOrder),
+  "scenario.completionOrder must differ from declaration order to exercise semantics 8.2",
+);
+
+// Semantics 8.2: completion order never changes reducer order. The batch ID,
+// write ordinals and after-state must reproduce the declaration-ordered commit
+// byte for byte no matter which contributor finished first.
+function foldReducerUnderCompletionOrder(arrivalOrder, foldInArrivalOrder) {
+  const received = Object.create(null);
+  for (const nodeId of arrivalOrder) {
+    assert.ok(
+      Object.hasOwn(fixture.scenario.contributorOutputs, nodeId),
+      `completion order names a contributor with no output: ${nodeId}`,
+    );
+    received[nodeId] = clone(fixture.scenario.contributorOutputs[nodeId]);
+  }
+  const commit = buildReducerCommit(received, false, foldInArrivalOrder ? [...arrivalOrder] : null);
+  if (canonicalJson(commit) !== canonicalJson(reducerCommit)) {
+    throw new D4Error("GE_D4_REDUCER_CONFLICT", "completion order changed the reducer commit");
+  }
+  return commit;
+}
 
 function applyReducerOperation(operation, initial, values, integerBounds = null) {
   if (operation === "ordered-replace") {
@@ -915,6 +958,128 @@ const artifactRef = {
 };
 assert.equal(validateArtifact(artifactRef), true, `artifact ref is invalid: ${JSON.stringify(validateArtifact.errors)}`);
 
+const artifactEdge = plan.artifactEdges[0];
+// Semantics 9.1: the artifact ID preimage is exactly this closed body.
+const ARTIFACT_IDENTITY_FIELDS = Object.freeze(Object.keys(artifactIdentityBody));
+assertExact(
+  ARTIFACT_IDENTITY_FIELDS,
+  [
+    "storeId", "storageNamespace", "tenantId", "runId", "algorithm", "digest",
+    "sizeBytes", "mediaType", "encoding", "logicalName", "protection",
+    "retention", "lifetime", "createdBy",
+  ],
+  "artifact identity preimage field set drifted from semantics 9.1",
+);
+
+const RFC3339_MILLIS = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
+
+function compareInstants(left, right) {
+  assert.match(left, RFC3339_MILLIS, "instant is not strict UTC RFC 3339 with millisecond precision");
+  assert.match(right, RFC3339_MILLIS, "instant is not strict UTC RFC 3339 with millisecond precision");
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function artifactIdentityOf(ref) {
+  const body = Object.create(null);
+  for (const field of ARTIFACT_IDENTITY_FIELDS) body[field] = clone(ref[field]);
+  return domainHash(DOMAINS.artifact, body);
+}
+
+function artifactCapabilityIdOf(ref) {
+  return domainHash(DOMAINS.artifactCapability, [ref.artifactId, {
+    authorityHash: ref.capability.authorityHash,
+    actions: clone(ref.capability.actions),
+    expiresAt: ref.capability.expiresAt,
+  }]);
+}
+
+function rebindArtifactRef(ref, mode) {
+  if (mode === "artifact" || mode === true) ref.artifactId = artifactIdentityOf(ref);
+  if (mode === "capability" || mode === true) ref.capability.capabilityId = artifactCapabilityIdOf(ref);
+  return ref;
+}
+
+// Semantics 9.2 steps 2 and 7: media type, lifetime mode, tenant/namespace
+// binding, byte ceiling and both derived identities are validated before an
+// ArtifactPublished event may commit.
+function publishArtifactRef(ref, edge = artifactEdge) {
+  if (!validateArtifact(ref)) {
+    throw new D4Error("GE_D4_ARTIFACT_PUBLICATION_FAILED", "artifact reference failed schema validation");
+  }
+  if (ref.tenantId !== edge.tenantBinding) {
+    throw new D4Error("GE_D4_ARTIFACT_UNAUTHORIZED", "artifact tenant is not the edge tenant binding");
+  }
+  if (ref.storageNamespace !== edge.storageNamespace) {
+    throw new D4Error("GE_D4_ARTIFACT_UNAUTHORIZED", "artifact namespace is not the edge storage namespace");
+  }
+  if (!edge.allowedMediaTypes.includes(ref.mediaType)) {
+    throw new D4Error("GE_D4_ARTIFACT_PUBLICATION_FAILED", "artifact media type is not allowed by the edge");
+  }
+  if (ref.lifetime.mode !== edge.lifetime) {
+    throw new D4Error("GE_D4_ARTIFACT_PUBLICATION_FAILED", "artifact lifetime mode is not the edge lifetime policy");
+  }
+  if (ref.sizeBytes > edge.maxBytes) {
+    throw new D4Error("GE_D4_ARTIFACT_OVERSIZED", "artifact exceeds edge byte bound");
+  }
+  if (ref.artifactId !== artifactIdentityOf(ref)) {
+    throw new D4Error("GE_D4_ARTIFACT_PUBLICATION_FAILED", "artifact ID is not the hash of its closed identity body");
+  }
+  if (ref.capability.capabilityId !== artifactCapabilityIdOf(ref)) {
+    throw new D4Error("GE_D4_ARTIFACT_UNAUTHORIZED", "capability ID is not bound to this artifact and authority");
+  }
+  return ref;
+}
+
+// Semantics 9.2: on every read, tenant/run/namespace/capability/expiry
+// authorization, existence, exact length, and digest are verified before
+// decoding. None of these may be skipped because a golden matched.
+function authorizeArtifactRead(ref, request) {
+  if (ref.capability.capabilityId !== artifactCapabilityIdOf(ref)) {
+    throw new D4Error("GE_D4_ARTIFACT_UNAUTHORIZED", "capability ID is not bound to this artifact and authority");
+  }
+  if (ref.capability.authorityHash !== jsonHash(plan.authority)) {
+    throw new D4Error("GE_D4_ARTIFACT_UNAUTHORIZED", "capability authority hash is not the plan authority");
+  }
+  if (!ref.capability.actions.includes(request.action)) {
+    throw new D4Error("GE_D4_ARTIFACT_UNAUTHORIZED", "capability does not authorize the requested action");
+  }
+  if (ref.capability.expiresAt !== null && compareInstants(request.readAt, ref.capability.expiresAt) >= 0) {
+    throw new D4Error("GE_D4_ARTIFACT_EXPIRED", "capability expired before the read instant");
+  }
+  if (request.tenantId !== ref.tenantId) {
+    throw new D4Error("GE_D4_ARTIFACT_UNAUTHORIZED", "reader tenant is not the artifact tenant");
+  }
+  if (request.runId !== ref.runId) {
+    throw new D4Error("GE_D4_ARTIFACT_UNAUTHORIZED", "reader run is not the artifact run binding");
+  }
+  if (request.storageNamespace !== ref.storageNamespace) {
+    throw new D4Error("GE_D4_ARTIFACT_UNAUTHORIZED", "reader namespace is not the artifact storage namespace");
+  }
+  if (request.contentUtf8 !== undefined) {
+    const bytes = Buffer.from(request.contentUtf8, "utf8");
+    if (bytes.length !== ref.sizeBytes) {
+      throw new D4Error("GE_D4_ARTIFACT_CORRUPT", "artifact byte length does not match the reference");
+    }
+    if (sha256Bytes(bytes) !== ref.digest) {
+      throw new D4Error("GE_D4_ARTIFACT_CORRUPT", "artifact bytes do not match content identity");
+    }
+  }
+  return ref;
+}
+
+const canonicalReadRequest = Object.freeze({
+  action: "read",
+  tenantId: artifactRef.tenantId,
+  runId: artifactRef.runId,
+  storageNamespace: artifactRef.storageNamespace,
+  readAt: fixture.scenario.timestamp,
+});
+publishArtifactRef(clone(artifactRef));
+authorizeArtifactRead(clone(artifactRef), {
+  ...canonicalReadRequest,
+  contentUtf8: fixture.scenario.artifactContentUtf8,
+});
+
 const streamPolicy = plan.streamEdges[0];
 const streamId = domainHash(DOMAINS.stream, [
   fixture.scenario.runId,
@@ -931,8 +1096,29 @@ const streamItemHash = domainHash(DOMAINS.streamItem, {
   value: fixture.scenario.streamItem,
 });
 
-function streamState() {
-  return {
+const STREAM_SEED_FIELDS = Object.freeze([
+  "status",
+  "totalDemand",
+  "published",
+  "delivered",
+  "acknowledged",
+  "sourceClosed",
+  "inFlightBytes",
+  "inFlightBytesHighWater",
+  "buffer",
+  "unacknowledged",
+]);
+// Semantics 10.2 grants: the fixture spells a grant as a named step so the
+// credit count is corpus data rather than a validator constant.
+const STREAM_DEMAND_STEPS = Object.freeze({
+  "demand-zero": 0,
+  "demand-one": 1,
+  "demand-two": 2,
+  "demand-three": 3,
+});
+
+function streamState(seed = null) {
+  const state = {
     status: "open",
     totalDemand: 0,
     published: 0,
@@ -944,44 +1130,85 @@ function streamState() {
     buffer: [],
     unacknowledged: [],
   };
+  if (seed === null) return state;
+  // Semantics 10.5: resume reconstructs counters from the committed prefix, so
+  // a hostile vector is allowed to start the machine from a recovered state.
+  for (const [field, value] of Object.entries(seed)) {
+    assert.ok(STREAM_SEED_FIELDS.includes(field), `unknown stream seed field: ${field}`);
+    state[field] = clone(value);
+  }
+  return state;
 }
 
-function streamTransition(state, step) {
-  if (state.status === "cancelled" && step === "publish") {
-    throw new D4Error("GE_D4_STREAM_CANCELLED", "cancelled stream cannot publish");
+// Semantics 10.4: the first committed terminal event wins. No terminal event
+// can be followed by a publish, deliver, ack, close, or second terminal event;
+// `publish` is not exempt.
+function streamTerminalGuard(state) {
+  if (state.status === "cancelled") {
+    throw new D4Error("GE_D4_STREAM_CANCELLED", "cancelled stream cannot transition");
   }
-  if (["completed", "failed", "cancelled"].includes(state.status) && step !== "publish") {
+  if (state.status === "failed") {
+    throw new D4Error("GE_D4_STREAM_FAILED", "failed stream cannot transition");
+  }
+  if (state.status === "completed") {
     throw new D4Error("GE_D4_STREAM_PROTOCOL", "terminal stream cannot transition");
   }
-  if (step === "demand-one" || step === "demand-two") {
-    const credits = step === "demand-one" ? 1 : 2;
-    if (credits > streamPolicy.maxDemandPerGrant) throw new D4Error("GE_D4_STREAM_PROTOCOL", "demand grant exceeds bound");
+}
+
+function streamTransition(state, step, options = {}) {
+  const itemBytes = options.itemBytes ?? streamItemBytes;
+  streamTerminalGuard(state);
+  if (Object.hasOwn(STREAM_DEMAND_STEPS, step)) {
+    return streamTransition(state, "demand", { ...options, credits: STREAM_DEMAND_STEPS[step] });
+  }
+  if (step === "demand") {
+    const credits = options.credits;
+    // Semantics 10.2: one grant is positive and no larger than
+    // maxDemandPerGrant, and cumulative demand cannot exceed maxItems.
+    if (!Number.isSafeInteger(credits) || credits <= 0) {
+      throw new D4Error("GE_D4_STREAM_PROTOCOL", "demand grant is not a positive safe integer");
+    }
+    if (credits > streamPolicy.maxDemandPerGrant) {
+      throw new D4Error("GE_D4_STREAM_PROTOCOL", "demand grant exceeds bound");
+    }
+    if (state.totalDemand + credits > streamPolicy.maxItems) {
+      throw new D4Error("GE_D4_STREAM_PROTOCOL", "cumulative demand exceeds the stream item bound");
+    }
     state.totalDemand += credits;
     return;
   }
   if (step === "publish") {
+    // Semantics 10.3: StreamSourceClosed forbids later publication.
+    if (state.sourceClosed) {
+      throw new D4Error("GE_D4_STREAM_PROTOCOL", "source-closed stream cannot publish");
+    }
+    if (state.published >= streamPolicy.maxItems) {
+      throw new D4Error("GE_D4_STREAM_PROTOCOL", "stream item bound is exhausted");
+    }
     if (state.published >= state.totalDemand) {
       throw new D4Error("GE_D4_STREAM_DEMAND_EXHAUSTED", "producer has no demand credit");
     }
     if (state.buffer.length >= streamPolicy.bufferCapacity) {
       throw new D4Error("GE_D4_STREAM_BUFFER_FULL", "durable stream buffer is full");
     }
-    if (state.published >= streamPolicy.maxItems) {
-      throw new D4Error("GE_D4_STREAM_PROTOCOL", "stream item bound is exhausted");
+    if (itemBytes > streamPolicy.maxItemBytes) {
+      throw new D4Error("GE_D4_STREAM_ITEM_INVALID", "stream item exceeds the item byte bound");
     }
-    if (streamItemBytes > streamPolicy.maxItemBytes ||
-      state.inFlightBytes + streamItemBytes > streamPolicy.maxInFlightBytes) {
-      throw new D4Error("GE_D4_STREAM_ITEM_INVALID", "stream item exceeds byte reservation");
+    if (state.inFlightBytes + itemBytes > streamPolicy.maxInFlightBytes) {
+      throw new D4Error("GE_D4_STREAM_ITEM_INVALID", "stream item exceeds the in-flight byte reservation");
     }
     state.buffer.push(state.published);
-    state.inFlightBytes += streamItemBytes;
+    state.inFlightBytes += itemBytes;
     state.inFlightBytesHighWater = Math.max(state.inFlightBytesHighWater, state.inFlightBytes);
     state.published += 1;
     return;
   }
   if (step === "deliver") {
-    if (state.buffer.length === 0 || state.unacknowledged.length >= streamPolicy.maxUnacknowledged) {
-      throw new D4Error("GE_D4_STREAM_PROTOCOL", "stream item cannot be delivered");
+    if (state.buffer.length === 0) {
+      throw new D4Error("GE_D4_STREAM_PROTOCOL", "stream delivery has no buffered item");
+    }
+    if (state.unacknowledged.length >= streamPolicy.maxUnacknowledged) {
+      throw new D4Error("GE_D4_STREAM_PROTOCOL", "stream unacknowledged bound is exhausted");
     }
     state.unacknowledged.push(state.buffer.shift());
     state.delivered += 1;
@@ -992,17 +1219,24 @@ function streamTransition(state, step) {
       throw new D4Error("GE_D4_STREAM_PROTOCOL", "stream ack has no delivered item");
     }
     state.unacknowledged.shift();
-    state.inFlightBytes -= streamItemBytes;
+    state.inFlightBytes -= itemBytes;
     state.acknowledged += 1;
     return;
   }
   if (step === "source-close") {
+    if (state.sourceClosed) {
+      throw new D4Error("GE_D4_STREAM_PROTOCOL", "stream source closed twice");
+    }
     state.sourceClosed = true;
     state.status = "source-closed";
     return;
   }
   if (step === "complete") {
-    if (!state.sourceClosed || state.buffer.length !== 0 || state.unacknowledged.length !== 0 || state.acknowledged !== state.published) {
+    // Semantics 10.3: completion is legal only when the source is closed, the
+    // buffer and unacknowledged sets are empty, and
+    // published == delivered == acknowledged.
+    if (!state.sourceClosed || state.buffer.length !== 0 || state.unacknowledged.length !== 0 ||
+      state.delivered !== state.published || state.acknowledged !== state.published) {
       throw new D4Error("GE_D4_STREAM_PROTOCOL", "stream completed with unsettled items");
     }
     state.status = "completed";
@@ -1012,12 +1246,16 @@ function streamTransition(state, step) {
     state.status = "cancelled";
     return;
   }
+  if (step === "fail") {
+    state.status = "failed";
+    return;
+  }
   throw new Error(`unknown stream test step: ${step}`);
 }
 
-function runStreamSteps(steps) {
-  const state = streamState();
-  for (const step of steps) streamTransition(state, step);
+function runStreamSteps(steps, options = {}) {
+  const state = streamState(options.seed ?? null);
+  for (const step of steps) streamTransition(state, step, options);
   return state;
 }
 
@@ -1117,6 +1355,9 @@ function eventData(type, scopeName) {
       deliveryAttemptId: domainHash(DOMAINS.streamItem, [streamId, 0, "delivery", 1]),
     };
   }
+  if (type === "StreamCancelled") {
+    return { streamId, published: 1, delivered: 1, acknowledged: 1, reason: "caller-cancelled" };
+  }
   if (type === "StreamSourceClosed") return { streamId, publishedCount: 1 };
   if (type === "StreamCompleted") return { streamId, published: 1, delivered: 1, acknowledged: 1 };
   throw new Error(`event data factory does not support ${type}`);
@@ -1128,10 +1369,14 @@ function calculateEventHash(event) {
   return domainHash(DOMAINS.event, body);
 }
 
-function makeEvents() {
+function makeEvents(steps = fixture.scenario.eventSteps, { validateShape = true } = {}) {
   const events = [];
-  for (const [sequence, step] of fixture.scenario.eventSteps.entries()) {
+  for (const [sequence, step] of steps.entries()) {
     const data = eventData(step.type, step.scope);
+    // A hostile history may append or reorder authentic frames; `dataMutations`
+    // edits the generated payload before the chain is sealed, so the resulting
+    // history is byte-consistent and only its semantics are wrong.
+    if (step.dataMutations !== undefined) applyMutations(data, step.dataMutations);
     const event = {
       apiVersion: "graphengineering.reacher-z.github.io/subgraph-edge-events/v1alpha1",
       kind: "SubgraphEdgeEvent",
@@ -1158,7 +1403,9 @@ function makeEvents() {
       eventHash: "0".repeat(64),
     };
     event.eventHash = calculateEventHash(event);
-    assert.equal(validateEvent(event), true, `event ${sequence} is invalid: ${JSON.stringify(validateEvent.errors)}`);
+    if (validateShape) {
+      assert.equal(validateEvent(event), true, `event ${sequence} is invalid: ${JSON.stringify(validateEvent.errors)}`);
+    }
     events.push(event);
   }
   return events;
@@ -1186,21 +1433,41 @@ function foldHistory(history) {
   for (const [index, event] of history.entries()) {
     if (!validateEvent(event)) throw new D4Error("GE_D4_INVALID_HISTORY", "event schema mismatch");
     if (terminal) throw new D4Error("GE_D4_INVALID_HISTORY", "event follows root terminal event");
-    if (event.sequence !== index || event.expectedPreviousSequence !== index - 1) {
-      throw new D4Error("GE_D4_INVALID_HISTORY", "event sequence is not contiguous");
+    // Semantics 13.2: byte/envelope and hash-chain corruption wins before any
+    // semantic transition check. Each obligation below is a separate guard so a
+    // single hostile field cannot be absorbed by a neighbouring check.
+    if (event.payloadHash !== jsonHash(event.data)) {
+      throw new D4Error("GE_D4_INVALID_HISTORY", "event payload hash does not match canonical bytes");
+    }
+    if (event.eventHash !== calculateEventHash(event)) {
+      throw new D4Error("GE_D4_INVALID_HISTORY", "event hash does not match canonical bytes");
     }
     if (event.previousEventHash !== previousHash) {
       throw new D4Error("GE_D4_INVALID_HISTORY", "previous event hash does not match");
     }
-    if (event.payloadHash !== jsonHash(event.data) || event.eventHash !== calculateEventHash(event)) {
-      throw new D4Error("GE_D4_INVALID_HISTORY", "event hash does not match canonical bytes");
+    if (event.sequence !== index) {
+      throw new D4Error("GE_D4_INVALID_HISTORY", "event sequence is not contiguous");
     }
-    if (event.planHash !== planHash || event.rootGraphHash !== graphHashes.root) {
-      throw new D4Error("GE_D4_INVALID_HISTORY", "event plan or root graph identity drifted");
+    if (event.expectedPreviousSequence !== index - 1) {
+      throw new D4Error("GE_D4_INVALID_HISTORY", "event expected-previous sequence is not contiguous");
     }
-    if (event.runId !== fixture.scenario.runId || event.eventStreamId !== eventStreamId ||
-      event.revisionHash !== revisionHash || canonicalJson(event.lineage) !== canonicalJson(runLineage)) {
-      throw new D4Error("GE_D4_INVALID_HISTORY", "event run, stream, revision, or lineage drifted");
+    if (event.planHash !== planHash) {
+      throw new D4Error("GE_D4_INVALID_HISTORY", "event plan identity drifted");
+    }
+    if (event.rootGraphHash !== graphHashes.root) {
+      throw new D4Error("GE_D4_INVALID_HISTORY", "event root graph identity drifted");
+    }
+    if (event.runId !== fixture.scenario.runId) {
+      throw new D4Error("GE_D4_INVALID_HISTORY", "event run identity drifted");
+    }
+    if (event.eventStreamId !== eventStreamId) {
+      throw new D4Error("GE_D4_INVALID_HISTORY", "event stream identity drifted");
+    }
+    if (event.revisionHash !== revisionHash) {
+      throw new D4Error("GE_D4_INVALID_HISTORY", "event revision identity drifted");
+    }
+    if (canonicalJson(event.lineage) !== canonicalJson(runLineage)) {
+      throw new D4Error("GE_D4_INVALID_HISTORY", "event run lineage drifted");
     }
     if (event.monotonicOffsetNs < previousMonotonicOffsetNs) {
       throw new D4Error("GE_D4_INVALID_HISTORY", "event monotonic offset moved backward");
@@ -1217,6 +1484,13 @@ function foldHistory(history) {
 
     const invocationId = event.scope.invocationId;
     const status = invocationStatus.get(invocationId);
+    const scopeName = invocationId === childScope.invocationId ? "child" : "root";
+    // Semantics 11.2: an invocation frame carries the deterministic projection
+    // of its own scope, not free-form data the corpus never re-derives.
+    if (["InvocationCreated", "InvocationStarted", "InvocationSucceeded"].includes(event.type) &&
+      canonicalJson(event.data) !== canonicalJson(eventData(event.type, scopeName))) {
+      throw new D4Error("GE_D4_INVALID_HISTORY", "invocation event payload is not the deterministic projection");
+    }
     if (event.type === "InvocationCreated") {
       if (status !== undefined) throw new D4Error("GE_D4_INVALID_HISTORY", "invocation was created twice");
       invocationStatus.set(invocationId, "created");
@@ -1231,7 +1505,9 @@ function foldHistory(history) {
       if (status !== "running" || event.scope.graphKey !== "child") {
         throw new D4Error("GE_D4_INVALID_HISTORY", "reducer commit is outside a running child scope");
       }
-      assertExact(event.data, reducerCommit, "reducer event does not reproduce deterministic fold");
+      if (canonicalJson(event.data) !== canonicalJson(reducerCommit)) {
+        throw new D4Error("GE_D4_INVALID_HISTORY", "reducer event does not reproduce the deterministic fold");
+      }
       reducerSeen = true;
       continue;
     }
@@ -1251,6 +1527,11 @@ function foldHistory(history) {
     }
     if (event.type === "StreamOpened") {
       if (stream.opened) throw new D4Error("GE_D4_STREAM_PROTOCOL", "stream opened twice");
+      // Semantics 10.1: the open frame republishes the plan's edge policy; a
+      // history that widens a bound here would silently widen every later check.
+      if (canonicalJson(event.data) !== canonicalJson(eventData("StreamOpened", "root"))) {
+        throw new D4Error("GE_D4_STREAM_PROTOCOL", "stream open frame does not echo the declared edge policy");
+      }
       stream.opened = true;
       continue;
     }
@@ -1258,7 +1539,9 @@ function foldHistory(history) {
       if (!stream.opened || event.data.totalDemand !== stream.totalDemand + event.data.credits) {
         throw new D4Error("GE_D4_STREAM_PROTOCOL", "stream demand transition is invalid");
       }
-      stream.totalDemand += event.data.credits;
+      // The fold must reach the same demand guards as the state machine rather
+      // than adding credits directly.
+      streamTransition(stream, "demand", { credits: event.data.credits });
       continue;
     }
     if (event.type === "StreamItemPublished") {
@@ -1286,20 +1569,36 @@ function foldHistory(history) {
     }
     if (event.type === "StreamCompleted") {
       streamTransition(stream, "complete");
-      assert.equal(event.data.published, stream.published);
-      assert.equal(event.data.delivered, stream.delivered);
-      assert.equal(event.data.acknowledged, stream.acknowledged);
+      if (event.data.published !== stream.published || event.data.delivered !== stream.delivered ||
+        event.data.acknowledged !== stream.acknowledged) {
+        throw new D4Error("GE_D4_STREAM_PROTOCOL", "stream completion counters drifted");
+      }
       continue;
     }
     if (event.type === "ArtifactPublished") {
       if (artifactStatus !== "absent") throw new D4Error("GE_D4_INVALID_HISTORY", "artifact published twice");
-      assertExact(event.data.artifactRef, artifactRef, "artifact identity drifted");
+      // Semantics 9.2 step 7/8: the published reference is re-validated against
+      // the edge policy before the event may be accepted, and its content
+      // identity must reproduce the canonical reference exactly.
+      publishArtifactRef(clone(event.data.artifactRef));
+      if (canonicalJson(event.data.artifactRef) !== canonicalJson(artifactRef)) {
+        throw new D4Error("GE_D4_INVALID_HISTORY", "artifact identity drifted");
+      }
       artifactStatus = "published";
       continue;
     }
     if (event.type === "ArtifactReadVerified") {
-      if (artifactStatus !== "published" || event.data.digest !== artifactRef.digest || event.data.sizeBytes !== artifactRef.sizeBytes) {
-        throw new D4Error("GE_D4_INVALID_HISTORY", "artifact verification is invalid");
+      if (artifactStatus !== "published") {
+        throw new D4Error("GE_D4_INVALID_HISTORY", "artifact read precedes its publication");
+      }
+      // Semantics 9.2: every read re-authorizes tenant, run, namespace,
+      // capability and expiry before the recorded identity is trusted.
+      authorizeArtifactRead(clone(artifactRef), canonicalReadRequest);
+      if (event.data.digest !== artifactRef.digest) {
+        throw new D4Error("GE_D4_INVALID_HISTORY", "artifact read digest drifted");
+      }
+      if (event.data.sizeBytes !== artifactRef.sizeBytes) {
+        throw new D4Error("GE_D4_INVALID_HISTORY", "artifact read byte length drifted");
       }
       if (event.data.capabilityId !== artifactRef.capability.capabilityId) {
         throw new D4Error("GE_D4_INVALID_HISTORY", "artifact read capability drifted");
@@ -1654,7 +1953,7 @@ for (const testCase of fixture.semanticRuntimeCases) {
   let code = null;
   try {
     if (testCase.operation === "project-output") {
-      projectValue(null, call.outputProjection, testCase.input);
+      projectValue(null, testCase.projection ?? call.outputProjection, testCase.input);
     } else if (testCase.operation === "enter-recursion") {
       if (testCase.ancestorDepth >= testCase.maxDepth) {
         throw new D4Error("GE_D4_RECURSION_LIMIT", "bounded recursion is exhausted");
@@ -1678,28 +1977,46 @@ for (const testCase of fixture.semanticRuntimeCases) {
         testCase.integerBounds ?? null,
       );
       assertExact(reduced, testCase.expected, `${testCase.name} reducer projection drifted`);
-    } else if (testCase.operation === "verify-artifact") {
-      const candidate = Buffer.from(testCase.contentUtf8, "utf8");
-      if (candidate.length !== artifactRef.sizeBytes || sha256Bytes(candidate) !== artifactRef.digest) {
-        throw new D4Error("GE_D4_ARTIFACT_CORRUPT", "artifact bytes do not match content identity");
-      }
     } else if (testCase.operation === "artifact-gc") {
       const eligible = checkpoint.artifacts[0].eligibleForGc;
       assert.equal(eligible, testCase.expectedEligible, `${testCase.name} GC verdict drifted`);
-    } else if (testCase.operation === "authorize-artifact") {
-      if (testCase.tenantId !== artifactRef.tenantId || !artifactRef.capability.actions.includes(testCase.action)) {
-        throw new D4Error("GE_D4_ARTIFACT_UNAUTHORIZED", "artifact capability does not authorize action and tenant");
-      }
-    } else if (testCase.operation === "publish-artifact-size") {
-      if (testCase.sizeBytes > plan.artifactEdges[0].maxBytes) {
-        throw new D4Error("GE_D4_ARTIFACT_OVERSIZED", "artifact exceeds edge byte bound");
-      }
+    } else if (testCase.operation === "publish-artifact") {
+      const candidate = rebindArtifactRef(
+        applyMutations(clone(artifactRef), testCase.refMutations ?? []),
+        testCase.rebind ?? false,
+      );
+      publishArtifactRef(candidate);
+    } else if (testCase.operation === "read-artifact") {
+      const candidate = rebindArtifactRef(
+        applyMutations(clone(artifactRef), testCase.refMutations ?? []),
+        testCase.rebind ?? false,
+      );
+      const request = {
+        action: testCase.action ?? canonicalReadRequest.action,
+        tenantId: testCase.tenantId ?? candidate.tenantId,
+        runId: testCase.runId ?? candidate.runId,
+        storageNamespace: testCase.storageNamespace ?? candidate.storageNamespace,
+        readAt: testCase.readAt ?? canonicalReadRequest.readAt,
+      };
+      if (Object.hasOwn(testCase, "contentUtf8")) request.contentUtf8 = testCase.contentUtf8;
+      authorizeArtifactRead(candidate, request);
+    } else if (testCase.operation === "reduce-contributors") {
+      buildReducerCommit(
+        testCase.contributorOutputs,
+        false,
+        null,
+        testCase.initialState ?? fixture.scenario.initialState,
+      );
+    } else if (testCase.operation === "reducer-completion-order") {
+      foldReducerUnderCompletionOrder(
+        testCase.completionOrder ?? fixture.scenario.completionOrder,
+        testCase.foldInArrivalOrder === true,
+      );
     } else if (testCase.operation === "stream") {
-      runStreamSteps(testCase.steps);
-    } else if (testCase.operation === "stream-item-size") {
-      if (testCase.itemBytes > streamPolicy.maxItemBytes || testCase.itemBytes > streamPolicy.maxInFlightBytes) {
-        throw new D4Error("GE_D4_STREAM_ITEM_INVALID", "stream item exceeds byte bound");
-      }
+      runStreamSteps(testCase.steps, {
+        seed: testCase.seed ?? null,
+        ...(testCase.itemBytes === undefined ? {} : { itemBytes: testCase.itemBytes }),
+      });
     } else if (testCase.operation === "stream-failure") {
       const result = {
         boundValue: false,
@@ -1733,11 +2050,42 @@ for (const testCase of fixture.semanticHistoryCases) {
       }
       validateCheckpointSemantics(candidate);
     } else {
-      const history = clone(events);
-      applyMutations(history[testCase.eventIndex], testCase.mutations);
-      if (testCase.rehash === true) {
-        history[testCase.eventIndex].payloadHash = jsonHash(history[testCase.eventIndex].data);
-        history[testCase.eventIndex].eventHash = calculateEventHash(history[testCase.eventIndex]);
+      let history;
+      if (testCase.prefixLength !== undefined || testCase.stepMutations !== undefined ||
+        testCase.appendSteps !== undefined) {
+        // Rebuild an authentic, fully re-chained history from a hostile step
+        // list so terminal/ordering obligations are exercised by real frames
+        // rather than by a hash the corpus could never produce.
+        const steps = clone(fixture.scenario.eventSteps)
+          .slice(0, testCase.prefixLength ?? fixture.scenario.eventSteps.length);
+        if (testCase.stepMutations !== undefined) applyMutations(steps, testCase.stepMutations);
+        for (const step of testCase.appendSteps ?? []) steps.push(clone(step));
+        history = makeEvents(steps, { validateShape: false });
+      } else {
+        history = clone(events);
+      }
+      if (testCase.eventIndex !== undefined) {
+        applyMutations(history[testCase.eventIndex], testCase.mutations ?? []);
+        if (testCase.rebindArtifact !== undefined) {
+          // Re-derive the embedded reference's own identities so the frame is
+          // internally consistent and only its relation to the run is hostile.
+          rebindArtifactRef(history[testCase.eventIndex].data.artifactRef, testCase.rebindArtifact);
+        }
+        if (testCase.rehash === true) {
+          history[testCase.eventIndex].payloadHash = jsonHash(history[testCase.eventIndex].data);
+        }
+        if (testCase.rehash === true || testCase.rehash === "event") {
+          history[testCase.eventIndex].eventHash = calculateEventHash(history[testCase.eventIndex]);
+        }
+        if (testCase.reseal === true) {
+          // Re-chain every later frame as well, so a mid-history semantic
+          // substitution is not absorbed by the hash-chain guard downstream.
+          history[testCase.eventIndex].payloadHash = jsonHash(history[testCase.eventIndex].data);
+          for (let index = testCase.eventIndex; index < history.length; index += 1) {
+            history[index].previousEventHash = index === 0 ? null : history[index - 1].eventHash;
+            history[index].eventHash = calculateEventHash(history[index]);
+          }
+        }
       }
       foldHistory(history);
     }
