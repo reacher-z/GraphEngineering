@@ -1,0 +1,194 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/adapter-error.schema.json",
+  "title": "Graph Engineering Adapter Error",
+  "description": "Normalized adapter failure envelope. The code is the only portable fact; retryability, external-effect disposition and usage disposition are properties of the code and are never derived from a message string, an HTTP status text or a provider payload.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "contractVersion",
+    "adapterId",
+    "adapterKind",
+    "requestId",
+    "attempt",
+    "code",
+    "boundary",
+    "retryable",
+    "effectDisposition",
+    "usageDisposition",
+    "sideEffectClass",
+    "denialReason",
+    "providerRequestId",
+    "retryAfterMs",
+    "message",
+    "detail",
+    "usage"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "graphengineering.reacher-z.github.io/adapters/v1alpha1"
+    },
+    "kind": { "const": "AdapterError" },
+    "contractVersion": { "const": "adapter-contract/v1alpha1" },
+    "adapterId": { "$ref": "#/$defs/adapterId" },
+    "adapterKind": {
+      "$ref": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/adapter-descriptor.schema.json#/$defs/adapterKind"
+    },
+    "requestId": { "$ref": "#/$defs/requestId" },
+    "attempt": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 16,
+      "description": "One-based index of the dispatch attempt this failure closes."
+    },
+    "code": { "$ref": "#/$defs/errorCode" },
+    "boundary": { "$ref": "#/$defs/boundary" },
+    "retryable": { "type": "boolean" },
+    "effectDisposition": { "$ref": "#/$defs/effectDisposition" },
+    "usageDisposition": { "$ref": "#/$defs/usageDisposition" },
+    "sideEffectClass": { "$ref": "#/$defs/sideEffectClass" },
+    "denialReason": {
+      "description": "Present only for GE_ADAPTER_POLICY_DENIED; null for every other code.",
+      "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/denialReason" }]
+    },
+    "providerRequestId": {
+      "description": "Provider-assigned request identity. Non-null only when the call reached the provider boundary and the adapter declares provider-request-id.",
+      "oneOf": [
+        { "type": "null" },
+        { "type": "string", "minLength": 1, "maxLength": 256 }
+      ]
+    },
+    "retryAfterMs": {
+      "description": "Provider-supplied backoff hint. Non-null only for a code whose retryable property is true and only when the adapter declares retry-after-hint.",
+      "oneOf": [
+        { "type": "null" },
+        { "type": "integer", "minimum": 0, "maximum": 3600000 }
+      ]
+    },
+    "message": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "description": "Operator-facing text. Never load-bearing: no implementation may parse it to decide retry, and it MUST NOT carry credentials, prompts or unredacted provider payloads."
+    },
+    "detail": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["providerSafeFields"],
+      "properties": {
+        "providerSafeFields": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "value"],
+            "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]{0,62}$"
+              },
+              "value": { "type": "string", "maxLength": 256 }
+            }
+          }
+        }
+      }
+    },
+    "usage": {
+      "description": "Usage observed for the failed attempt. Null whenever usageDisposition is none.",
+      "oneOf": [
+        { "type": "null" },
+        {
+          "$ref": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/adapter-usage.schema.json"
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "adapterId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,62}$"
+    },
+    "requestId": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,126}$"
+    },
+    "errorCode": {
+      "description": "Closed adapter failure taxonomy. Nine dispatch codes describe an attempt that reached or attempted the external boundary; five pre-dispatch codes describe a refusal that provably performed no external effect.",
+      "enum": [
+        "GE_ADAPTER_AUTHENTICATION",
+        "GE_ADAPTER_BOUNDS_EXCEEDED",
+        "GE_ADAPTER_CANCELLED",
+        "GE_ADAPTER_CAPABILITY_UNSUPPORTED",
+        "GE_ADAPTER_CONTENT_FILTERED",
+        "GE_ADAPTER_DESCRIPTOR_INVALID",
+        "GE_ADAPTER_INVALID_REQUEST",
+        "GE_ADAPTER_MALFORMED_RESPONSE",
+        "GE_ADAPTER_POLICY_DENIED",
+        "GE_ADAPTER_QUOTA_EXCEEDED",
+        "GE_ADAPTER_RATE_LIMITED",
+        "GE_ADAPTER_TIMEOUT",
+        "GE_ADAPTER_TOOL_VALIDATION_FAILED",
+        "GE_ADAPTER_TRANSPORT_FAILURE"
+      ]
+    },
+    "boundary": {
+      "enum": ["dispatch", "pre-dispatch"]
+    },
+    "effectDisposition": {
+      "description": "applied: the external effect provably occurred. in-doubt: the external effect may have occurred and MUST NOT be assumed absent. not-applied: the external effect provably did not occur.",
+      "enum": ["applied", "in-doubt", "not-applied"]
+    },
+    "usageDisposition": {
+      "description": "none: the adapter asserts zero external usage and the caller MAY release the reservation. conservative: the adapter cannot assert zero usage and the caller MUST commit conservatively.",
+      "enum": ["conservative", "none"]
+    },
+    "sideEffectClass": {
+      "description": "Exactly the vocabulary of cycle-controller.schema.json #/$defs/activity/properties/sideEffects.",
+      "enum": ["none", "idempotent", "non-idempotent"]
+    },
+    "denialReason": {
+      "description": "Closed reason set for GE_ADAPTER_POLICY_DENIED. The code stays portable; the reason stays diagnostic.",
+      "enum": [
+        "capability-approval",
+        "circuit-open",
+        "egress-not-allowlisted",
+        "environment-not-allowlisted",
+        "executable-not-authorized",
+        "idempotency-key-missing",
+        "mcp-mutation-not-approved",
+        "mcp-tool-not-allowlisted",
+        "redirect-not-reauthorized",
+        "stdin-policy",
+        "tls-policy"
+      ]
+    },
+    "taxonomyRow": {
+      "description": "One frozen row of the closed taxonomy. The conformance oracle recomputes every derived member rather than reading it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "boundary",
+        "retryable",
+        "effectDisposition",
+        "usageDisposition",
+        "ledgerAction",
+        "summary"
+      ],
+      "properties": {
+        "code": { "$ref": "#/$defs/errorCode" },
+        "boundary": { "$ref": "#/$defs/boundary" },
+        "retryable": { "type": "boolean" },
+        "effectDisposition": { "$ref": "#/$defs/effectDisposition" },
+        "usageDisposition": { "$ref": "#/$defs/usageDisposition" },
+        "ledgerAction": {
+          "enum": ["commit-conservative", "release-reservation"]
+        },
+        "summary": { "type": "string", "minLength": 1, "maxLength": 256 }
+      }
+    }
+  }
+}

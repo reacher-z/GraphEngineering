@@ -1,0 +1,6512 @@
+{
+  "apiVersion": "graphengineering.reacher-z.github.io/adapter-conformance/v1alpha1",
+  "kind": "AdapterConformanceCorpus",
+  "contractVersion": "adapter-contract/v1alpha1",
+  "contractStatus": "contract-only-native-implementation-required",
+  "implementationClaim": false,
+  "evidenceClass": "deterministic-mock",
+  "environmentAssertions": {
+    "credentialRequired": false,
+    "injectedClockOnly": true,
+    "networkAccess": false,
+    "wallClockDependence": false
+  },
+  "capabilityInventory": [
+    "attachments",
+    "cached-input-usage-reporting",
+    "cancellation",
+    "content-filter-reporting",
+    "deterministic-replay",
+    "fault-injection",
+    "idempotency-key",
+    "parallel-tool-calls",
+    "provider-request-id",
+    "rate-limit-reporting",
+    "reasoning-usage-reporting",
+    "retry-after-hint",
+    "streaming",
+    "structured-output",
+    "tool-calling",
+    "usage-reporting"
+  ],
+  "adapterKindInventory": [
+    "anthropic",
+    "google-gemini",
+    "http",
+    "mcp",
+    "mock",
+    "openai",
+    "openai-compatible",
+    "shell"
+  ],
+  "denialReasonInventory": [
+    "capability-approval",
+    "circuit-open",
+    "egress-not-allowlisted",
+    "environment-not-allowlisted",
+    "executable-not-authorized",
+    "idempotency-key-missing",
+    "mcp-mutation-not-approved",
+    "mcp-tool-not-allowlisted",
+    "redirect-not-reauthorized",
+    "stdin-policy",
+    "tls-policy"
+  ],
+  "finishReasonInventory": [
+    "cancelled",
+    "content-filter",
+    "max-output",
+    "stop",
+    "tool-calls"
+  ],
+  "reportableResourceInventory": [
+    "audio-units",
+    "cached-input-units",
+    "image-units",
+    "input-units",
+    "output-units",
+    "provider-calls",
+    "reasoning-units",
+    "tool-calls",
+    "transport-bytes"
+  ],
+  "budgetPolicyAllowedProviderMetrics": [
+    {
+      "metricId": "graph-engineering/mock-metric/v1alpha1",
+      "unitId": "graph-engineering/mock-unit/v1alpha1",
+      "aggregation": "sum"
+    },
+    {
+      "metricId": "graph-engineering/mock-second-metric/v1alpha1",
+      "unitId": "graph-engineering/mock-unit/v1alpha1",
+      "aggregation": "sum"
+    }
+  ],
+  "budgetComposition": {
+    "resourceBindings": [
+      {
+        "resource": "audio-units",
+        "unit": "usage-unit",
+        "aggregation": "sum"
+      },
+      {
+        "resource": "cached-input-units",
+        "unit": "usage-unit",
+        "aggregation": "sum"
+      },
+      {
+        "resource": "image-units",
+        "unit": "usage-unit",
+        "aggregation": "sum"
+      },
+      {
+        "resource": "input-units",
+        "unit": "usage-unit",
+        "aggregation": "sum"
+      },
+      {
+        "resource": "output-units",
+        "unit": "usage-unit",
+        "aggregation": "sum"
+      },
+      {
+        "resource": "provider-calls",
+        "unit": "count",
+        "aggregation": "sum"
+      },
+      {
+        "resource": "reasoning-units",
+        "unit": "usage-unit",
+        "aggregation": "sum"
+      },
+      {
+        "resource": "tool-calls",
+        "unit": "count",
+        "aggregation": "sum"
+      },
+      {
+        "resource": "transport-bytes",
+        "unit": "byte",
+        "aggregation": "sum"
+      }
+    ],
+    "forbiddenResources": [
+      "artifact-bytes",
+      "artifacts",
+      "attempts",
+      "candidates",
+      "concurrent-activities",
+      "depth",
+      "disk-bytes",
+      "dynamic-nodes",
+      "elapsed-ms",
+      "fan-out",
+      "graph-edges",
+      "graph-nodes",
+      "in-flight-bytes",
+      "memory-bytes",
+      "money-nano-minor",
+      "node-dispatches"
+    ],
+    "costStateBindings": [
+      {
+        "trust": "adapter-conservative",
+        "budgetCostState": "estimated"
+      },
+      {
+        "trust": "provider-reported",
+        "budgetCostState": "provider-reported"
+      },
+      {
+        "trust": "unknown",
+        "budgetCostState": "unknown"
+      }
+    ]
+  },
+  "cycleComposition": {
+    "sideEffectClasses": [
+      "none",
+      "idempotent",
+      "non-idempotent"
+    ],
+    "matrix": [
+      {
+        "effectDisposition": "applied",
+        "recordsInDoubtIdentity": false,
+        "retryPermittedBySideEffect": true,
+        "sideEffectClass": "none"
+      },
+      {
+        "effectDisposition": "applied",
+        "recordsInDoubtIdentity": false,
+        "retryPermittedBySideEffect": true,
+        "sideEffectClass": "idempotent"
+      },
+      {
+        "effectDisposition": "applied",
+        "recordsInDoubtIdentity": false,
+        "retryPermittedBySideEffect": false,
+        "sideEffectClass": "non-idempotent"
+      },
+      {
+        "effectDisposition": "in-doubt",
+        "recordsInDoubtIdentity": false,
+        "retryPermittedBySideEffect": true,
+        "sideEffectClass": "none"
+      },
+      {
+        "effectDisposition": "in-doubt",
+        "recordsInDoubtIdentity": true,
+        "retryPermittedBySideEffect": true,
+        "sideEffectClass": "idempotent"
+      },
+      {
+        "effectDisposition": "in-doubt",
+        "recordsInDoubtIdentity": true,
+        "retryPermittedBySideEffect": false,
+        "sideEffectClass": "non-idempotent"
+      },
+      {
+        "effectDisposition": "not-applied",
+        "recordsInDoubtIdentity": false,
+        "retryPermittedBySideEffect": true,
+        "sideEffectClass": "none"
+      },
+      {
+        "effectDisposition": "not-applied",
+        "recordsInDoubtIdentity": false,
+        "retryPermittedBySideEffect": true,
+        "sideEffectClass": "idempotent"
+      },
+      {
+        "effectDisposition": "not-applied",
+        "recordsInDoubtIdentity": false,
+        "retryPermittedBySideEffect": true,
+        "sideEffectClass": "non-idempotent"
+      }
+    ]
+  },
+  "errorTaxonomy": [
+    {
+      "code": "GE_ADAPTER_AUTHENTICATION",
+      "boundary": "dispatch",
+      "retryable": false,
+      "effectDisposition": "not-applied",
+      "usageDisposition": "none",
+      "ledgerAction": "release-reservation",
+      "summary": "the provider refused the credential before performing work"
+    },
+    {
+      "code": "GE_ADAPTER_BOUNDS_EXCEEDED",
+      "boundary": "pre-dispatch",
+      "retryable": false,
+      "effectDisposition": "not-applied",
+      "usageDisposition": "none",
+      "ledgerAction": "release-reservation",
+      "summary": "the request violated a declared bound and was never dispatched"
+    },
+    {
+      "code": "GE_ADAPTER_CANCELLED",
+      "boundary": "dispatch",
+      "retryable": false,
+      "effectDisposition": "in-doubt",
+      "usageDisposition": "conservative",
+      "ledgerAction": "commit-conservative",
+      "summary": "the caller cancelled a call that had already crossed the dispatch boundary"
+    },
+    {
+      "code": "GE_ADAPTER_CAPABILITY_UNSUPPORTED",
+      "boundary": "pre-dispatch",
+      "retryable": false,
+      "effectDisposition": "not-applied",
+      "usageDisposition": "none",
+      "ledgerAction": "release-reservation",
+      "summary": "the request required a capability the adapter does not declare"
+    },
+    {
+      "code": "GE_ADAPTER_CONTENT_FILTERED",
+      "boundary": "dispatch",
+      "retryable": false,
+      "effectDisposition": "applied",
+      "usageDisposition": "conservative",
+      "ledgerAction": "commit-conservative",
+      "summary": "the provider processed the request and refused to return content"
+    },
+    {
+      "code": "GE_ADAPTER_DESCRIPTOR_INVALID",
+      "boundary": "pre-dispatch",
+      "retryable": false,
+      "effectDisposition": "not-applied",
+      "usageDisposition": "none",
+      "ledgerAction": "release-reservation",
+      "summary": "the adapter descriptor is not a valid declaration"
+    },
+    {
+      "code": "GE_ADAPTER_INVALID_REQUEST",
+      "boundary": "dispatch",
+      "retryable": false,
+      "effectDisposition": "not-applied",
+      "usageDisposition": "none",
+      "ledgerAction": "release-reservation",
+      "summary": "the provider rejected the request as malformed"
+    },
+    {
+      "code": "GE_ADAPTER_MALFORMED_RESPONSE",
+      "boundary": "dispatch",
+      "retryable": true,
+      "effectDisposition": "applied",
+      "usageDisposition": "conservative",
+      "ledgerAction": "commit-conservative",
+      "summary": "the provider returned a response this contract cannot normalize"
+    },
+    {
+      "code": "GE_ADAPTER_POLICY_DENIED",
+      "boundary": "pre-dispatch",
+      "retryable": false,
+      "effectDisposition": "not-applied",
+      "usageDisposition": "none",
+      "ledgerAction": "release-reservation",
+      "summary": "a boundary policy refused the call before any external effect"
+    },
+    {
+      "code": "GE_ADAPTER_QUOTA_EXCEEDED",
+      "boundary": "dispatch",
+      "retryable": false,
+      "effectDisposition": "not-applied",
+      "usageDisposition": "none",
+      "ledgerAction": "release-reservation",
+      "summary": "the account has no remaining provider quota"
+    },
+    {
+      "code": "GE_ADAPTER_RATE_LIMITED",
+      "boundary": "dispatch",
+      "retryable": true,
+      "effectDisposition": "not-applied",
+      "usageDisposition": "none",
+      "ledgerAction": "release-reservation",
+      "summary": "the provider refused the call and asked for backoff"
+    },
+    {
+      "code": "GE_ADAPTER_TIMEOUT",
+      "boundary": "dispatch",
+      "retryable": true,
+      "effectDisposition": "in-doubt",
+      "usageDisposition": "conservative",
+      "ledgerAction": "commit-conservative",
+      "summary": "no trusted response arrived within the declared bound"
+    },
+    {
+      "code": "GE_ADAPTER_TOOL_VALIDATION_FAILED",
+      "boundary": "pre-dispatch",
+      "retryable": false,
+      "effectDisposition": "not-applied",
+      "usageDisposition": "none",
+      "ledgerAction": "release-reservation",
+      "summary": "a tool declaration or model-emitted tool call failed validation"
+    },
+    {
+      "code": "GE_ADAPTER_TRANSPORT_FAILURE",
+      "boundary": "dispatch",
+      "retryable": true,
+      "effectDisposition": "in-doubt",
+      "usageDisposition": "conservative",
+      "ledgerAction": "commit-conservative",
+      "summary": "the transport failed after the request may have been delivered"
+    }
+  ],
+  "ruleRegister": [
+    {
+      "rule": "C-001",
+      "kind": "decision",
+      "code": null,
+      "denialReason": null,
+      "obligation": "consecutive retryable dispatch failures open the circuit"
+    },
+    {
+      "rule": "C-002",
+      "kind": "decision",
+      "code": null,
+      "denialReason": null,
+      "obligation": "a success resets the consecutive failure counter"
+    },
+    {
+      "rule": "C-003",
+      "kind": "decision",
+      "code": null,
+      "denialReason": null,
+      "obligation": "an open circuit half-opens only after the injected-clock window"
+    },
+    {
+      "rule": "C-004",
+      "kind": "decision",
+      "code": null,
+      "denialReason": null,
+      "obligation": "an open circuit admits no dispatch"
+    },
+    {
+      "rule": "C-005",
+      "kind": "decision",
+      "code": null,
+      "denialReason": null,
+      "obligation": "a half-open success closes the circuit"
+    },
+    {
+      "rule": "C-006",
+      "kind": "decision",
+      "code": null,
+      "denialReason": null,
+      "obligation": "a half-open failure reopens the circuit"
+    },
+    {
+      "rule": "C-007",
+      "kind": "decision",
+      "code": null,
+      "denialReason": null,
+      "obligation": "pre-dispatch and non-retryable failures do not move the circuit"
+    },
+    {
+      "rule": "D-001",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_DESCRIPTOR_INVALID",
+      "denialReason": null,
+      "obligation": "capabilities are ordered by Unicode code point"
+    },
+    {
+      "rule": "D-002",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_DESCRIPTOR_INVALID",
+      "denialReason": null,
+      "obligation": "a deterministic-mock adapter allowlists no routable host"
+    },
+    {
+      "rule": "D-003",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_DESCRIPTOR_INVALID",
+      "denialReason": null,
+      "obligation": "a mock adapter declares no network, process or MCP profile"
+    },
+    {
+      "rule": "D-004",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_DESCRIPTOR_INVALID",
+      "denialReason": null,
+      "obligation": "an http adapter declares exactly one network profile"
+    },
+    {
+      "rule": "D-005",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_DESCRIPTOR_INVALID",
+      "denialReason": null,
+      "obligation": "a shell adapter declares exactly one process profile"
+    },
+    {
+      "rule": "D-006",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_DESCRIPTOR_INVALID",
+      "denialReason": null,
+      "obligation": "an mcp adapter declares exactly one MCP profile"
+    },
+    {
+      "rule": "D-007",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_DESCRIPTOR_INVALID",
+      "denialReason": null,
+      "obligation": "a model adapter declares exactly one network profile"
+    },
+    {
+      "rule": "D-008",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_DESCRIPTOR_INVALID",
+      "denialReason": null,
+      "obligation": "an idempotent adapter declares idempotency-key"
+    },
+    {
+      "rule": "D-009",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_DESCRIPTOR_INVALID",
+      "denialReason": null,
+      "obligation": "cached-input-usage-reporting requires usage-reporting"
+    },
+    {
+      "rule": "D-010",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_DESCRIPTOR_INVALID",
+      "denialReason": null,
+      "obligation": "reasoning-usage-reporting requires usage-reporting"
+    },
+    {
+      "rule": "D-011",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_DESCRIPTOR_INVALID",
+      "denialReason": null,
+      "obligation": "parallel-tool-calls requires tool-calling"
+    },
+    {
+      "rule": "D-012",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_DESCRIPTOR_INVALID",
+      "denialReason": null,
+      "obligation": "retry-after-hint requires rate-limit-reporting"
+    },
+    {
+      "rule": "D-013",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_DESCRIPTOR_INVALID",
+      "denialReason": null,
+      "obligation": "deterministic-replay requires deterministic-mock evidence"
+    },
+    {
+      "rule": "D-014",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_DESCRIPTOR_INVALID",
+      "denialReason": null,
+      "obligation": "fault-injection requires deterministic-mock evidence"
+    },
+    {
+      "rule": "D-015",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_DESCRIPTOR_INVALID",
+      "denialReason": null,
+      "obligation": "maxBackoffMs is not below initialBackoffMs"
+    },
+    {
+      "rule": "D-016",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_DESCRIPTOR_INVALID",
+      "denialReason": null,
+      "obligation": "capture.enabled agrees with a non-none retention disposition"
+    },
+    {
+      "rule": "D-017",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_DESCRIPTOR_INVALID",
+      "denialReason": null,
+      "obligation": "a network adapter declares DNS and IP rebinding defense"
+    },
+    {
+      "rule": "D-018",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_DESCRIPTOR_INVALID",
+      "denialReason": null,
+      "obligation": "a network adapter isolates headers and credentials"
+    },
+    {
+      "rule": "D-019",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_DESCRIPTOR_INVALID",
+      "denialReason": null,
+      "obligation": "redirects require redirect re-authorization"
+    },
+    {
+      "rule": "D-020",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_DESCRIPTOR_INVALID",
+      "denialReason": null,
+      "obligation": "plaintext http is allowlisted only for non-routable hosts"
+    },
+    {
+      "rule": "D-021",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_DESCRIPTOR_INVALID",
+      "denialReason": null,
+      "obligation": "schemes, hosts and ports are canonically ordered"
+    },
+    {
+      "rule": "D-022",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_DESCRIPTOR_INVALID",
+      "denialReason": null,
+      "obligation": "argumentVector[0] is the explicit executable identity"
+    },
+    {
+      "rule": "D-023",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_DESCRIPTOR_INVALID",
+      "denialReason": null,
+      "obligation": "environmentAllowlist is canonically ordered"
+    },
+    {
+      "rule": "D-024",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_DESCRIPTOR_INVALID",
+      "denialReason": null,
+      "obligation": "a mutating MCP adapter requires approval"
+    },
+    {
+      "rule": "D-025",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_DESCRIPTOR_INVALID",
+      "denialReason": null,
+      "obligation": "a mutating MCP adapter requires an idempotency gate"
+    },
+    {
+      "rule": "D-026",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_DESCRIPTOR_INVALID",
+      "denialReason": null,
+      "obligation": "a mutating MCP adapter names its exact tools"
+    },
+    {
+      "rule": "D-027",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_DESCRIPTOR_INVALID",
+      "denialReason": null,
+      "obligation": "a read-only MCP adapter is not non-idempotent"
+    },
+    {
+      "rule": "D-028",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_DESCRIPTOR_INVALID",
+      "denialReason": null,
+      "obligation": "allowedProviderMetrics are unique and canonically ordered"
+    },
+    {
+      "rule": "D-029",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_DESCRIPTOR_INVALID",
+      "denialReason": null,
+      "obligation": "allowedProviderMetrics are a subset of the budget policy allowlist"
+    },
+    {
+      "rule": "D-030",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_DESCRIPTOR_INVALID",
+      "denialReason": null,
+      "obligation": "a streaming adapter admits at least a start and a finish frame"
+    },
+    {
+      "rule": "D-031",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_DESCRIPTOR_INVALID",
+      "denialReason": null,
+      "obligation": "tool bounds are zero without tool-calling"
+    },
+    {
+      "rule": "D-032",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_DESCRIPTOR_INVALID",
+      "denialReason": null,
+      "obligation": "attachment bounds are zero without attachments"
+    },
+    {
+      "rule": "D-033",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_DESCRIPTOR_INVALID",
+      "denialReason": null,
+      "obligation": "one stream frame cannot exceed the whole response bound"
+    },
+    {
+      "rule": "E-001",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_MALFORMED_RESPONSE",
+      "denialReason": null,
+      "obligation": "retryability equals the taxonomy row"
+    },
+    {
+      "rule": "E-002",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_MALFORMED_RESPONSE",
+      "denialReason": null,
+      "obligation": "boundary equals the taxonomy row"
+    },
+    {
+      "rule": "E-003",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_MALFORMED_RESPONSE",
+      "denialReason": null,
+      "obligation": "effect disposition equals the taxonomy row"
+    },
+    {
+      "rule": "E-004",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_MALFORMED_RESPONSE",
+      "denialReason": null,
+      "obligation": "usage disposition is derived from the effect disposition"
+    },
+    {
+      "rule": "E-005",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_MALFORMED_RESPONSE",
+      "denialReason": null,
+      "obligation": "a denial reason accompanies only GE_ADAPTER_POLICY_DENIED"
+    },
+    {
+      "rule": "E-006",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_MALFORMED_RESPONSE",
+      "denialReason": null,
+      "obligation": "a pre-dispatch refusal carries no provider request identity"
+    },
+    {
+      "rule": "E-007",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_MALFORMED_RESPONSE",
+      "denialReason": null,
+      "obligation": "a provider request identity requires provider-request-id"
+    },
+    {
+      "rule": "E-008",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_MALFORMED_RESPONSE",
+      "denialReason": null,
+      "obligation": "a backoff hint requires a retryable code"
+    },
+    {
+      "rule": "E-009",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_MALFORMED_RESPONSE",
+      "denialReason": null,
+      "obligation": "a backoff hint requires retry-after-hint"
+    },
+    {
+      "rule": "E-010",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_MALFORMED_RESPONSE",
+      "denialReason": null,
+      "obligation": "a not-applied refusal carries no usage"
+    },
+    {
+      "rule": "E-011",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_MALFORMED_RESPONSE",
+      "denialReason": null,
+      "obligation": "attached usage binds the same adapter and request"
+    },
+    {
+      "rule": "E-012",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_MALFORMED_RESPONSE",
+      "denialReason": null,
+      "obligation": "the attempt index is within the declared ceiling"
+    },
+    {
+      "rule": "E-013",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_MALFORMED_RESPONSE",
+      "denialReason": null,
+      "obligation": "an error cannot escalate the adapter side-effect class"
+    },
+    {
+      "rule": "E-014",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_MALFORMED_RESPONSE",
+      "denialReason": null,
+      "obligation": "an error carries no credential, prompt or unredacted payload"
+    },
+    {
+      "rule": "E-015",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_MALFORMED_RESPONSE",
+      "denialReason": null,
+      "obligation": "provider-safe detail names are unique and ordered"
+    },
+    {
+      "rule": "P-001",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_CAPABILITY_UNSUPPORTED",
+      "denialReason": null,
+      "obligation": "a required capability must be declared"
+    },
+    {
+      "rule": "P-002",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_CAPABILITY_UNSUPPORTED",
+      "denialReason": null,
+      "obligation": "streaming requires the streaming capability"
+    },
+    {
+      "rule": "P-003",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_CAPABILITY_UNSUPPORTED",
+      "denialReason": null,
+      "obligation": "structured output requires the structured-output capability"
+    },
+    {
+      "rule": "P-004",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_CAPABILITY_UNSUPPORTED",
+      "denialReason": null,
+      "obligation": "tool definitions require the tool-calling capability"
+    },
+    {
+      "rule": "P-005",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_CAPABILITY_UNSUPPORTED",
+      "denialReason": null,
+      "obligation": "attachments require the attachments capability"
+    },
+    {
+      "rule": "P-006",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_CAPABILITY_UNSUPPORTED",
+      "denialReason": null,
+      "obligation": "cancellation requires the cancellation capability"
+    },
+    {
+      "rule": "P-007",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_POLICY_DENIED",
+      "denialReason": "capability-approval",
+      "obligation": "a request cannot escalate the adapter side-effect class"
+    },
+    {
+      "rule": "P-008",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_BOUNDS_EXCEEDED",
+      "denialReason": null,
+      "obligation": "request bytes are bounded"
+    },
+    {
+      "rule": "P-009",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_BOUNDS_EXCEEDED",
+      "denialReason": null,
+      "obligation": "attachment count is bounded"
+    },
+    {
+      "rule": "P-010",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_BOUNDS_EXCEEDED",
+      "denialReason": null,
+      "obligation": "attachment bytes are bounded per item and in total"
+    },
+    {
+      "rule": "P-011",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_BOUNDS_EXCEEDED",
+      "denialReason": null,
+      "obligation": "tool definition count is bounded"
+    },
+    {
+      "rule": "P-012",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_TOOL_VALIDATION_FAILED",
+      "denialReason": null,
+      "obligation": "tool definition names are unique"
+    },
+    {
+      "rule": "P-013",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_POLICY_DENIED",
+      "denialReason": "circuit-open",
+      "obligation": "an open circuit admits nothing"
+    },
+    {
+      "rule": "P-014",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_POLICY_DENIED",
+      "denialReason": "egress-not-allowlisted",
+      "obligation": "the target scheme is allowlisted"
+    },
+    {
+      "rule": "P-015",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_POLICY_DENIED",
+      "denialReason": "egress-not-allowlisted",
+      "obligation": "the target host is allowlisted"
+    },
+    {
+      "rule": "P-016",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_POLICY_DENIED",
+      "denialReason": "egress-not-allowlisted",
+      "obligation": "the target port is allowlisted"
+    },
+    {
+      "rule": "P-017",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_POLICY_DENIED",
+      "denialReason": "redirect-not-reauthorized",
+      "obligation": "a redirect target is re-authorized"
+    },
+    {
+      "rule": "P-018",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_POLICY_DENIED",
+      "denialReason": "egress-not-allowlisted",
+      "obligation": "redirects are followed only when declared"
+    },
+    {
+      "rule": "P-019",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_POLICY_DENIED",
+      "denialReason": "tls-policy",
+      "obligation": "a redirect cannot downgrade the transport to plaintext"
+    },
+    {
+      "rule": "P-020",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_POLICY_DENIED",
+      "denialReason": "mcp-tool-not-allowlisted",
+      "obligation": "the MCP tool is allowlisted"
+    },
+    {
+      "rule": "P-021",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_POLICY_DENIED",
+      "denialReason": "mcp-mutation-not-approved",
+      "obligation": "a read-only MCP adapter refuses a mutating call"
+    },
+    {
+      "rule": "P-022",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_POLICY_DENIED",
+      "denialReason": "mcp-mutation-not-approved",
+      "obligation": "a mutating MCP call carries an approval token"
+    },
+    {
+      "rule": "P-023",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_POLICY_DENIED",
+      "denialReason": "executable-not-authorized",
+      "obligation": "the call names the declared executable identity"
+    },
+    {
+      "rule": "P-024",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_POLICY_DENIED",
+      "denialReason": "executable-not-authorized",
+      "obligation": "the declared argument vector is an exact prefix"
+    },
+    {
+      "rule": "P-025",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_POLICY_DENIED",
+      "denialReason": "environment-not-allowlisted",
+      "obligation": "environment variables are allowlisted"
+    },
+    {
+      "rule": "P-026",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_POLICY_DENIED",
+      "denialReason": "stdin-policy",
+      "obligation": "stdin bytes require an explicit stdin policy"
+    },
+    {
+      "rule": "P-027",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_POLICY_DENIED",
+      "denialReason": "executable-not-authorized",
+      "obligation": "an argument vector member carries no NUL byte"
+    },
+    {
+      "rule": "P-028",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_POLICY_DENIED",
+      "denialReason": "idempotency-key-missing",
+      "obligation": "an idempotent request carries a stable idempotency key"
+    },
+    {
+      "rule": "P-029",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_CAPABILITY_UNSUPPORTED",
+      "denialReason": null,
+      "obligation": "an idempotency key requires the idempotency-key capability"
+    },
+    {
+      "rule": "R-001",
+      "kind": "decision",
+      "code": null,
+      "denialReason": null,
+      "obligation": "the integer backoff schedule is recomputed and clamped"
+    },
+    {
+      "rule": "R-002",
+      "kind": "decision",
+      "code": null,
+      "denialReason": null,
+      "obligation": "a provider backoff hint dominates the computed backoff"
+    },
+    {
+      "rule": "R-003",
+      "kind": "decision",
+      "code": null,
+      "denialReason": null,
+      "obligation": "a hint above the local ceiling abandons rather than truncates"
+    },
+    {
+      "rule": "R-004",
+      "kind": "decision",
+      "code": null,
+      "denialReason": null,
+      "obligation": "the attempt ceiling ends retry"
+    },
+    {
+      "rule": "R-005",
+      "kind": "decision",
+      "code": null,
+      "denialReason": null,
+      "obligation": "a non-retryable code is never retried"
+    },
+    {
+      "rule": "R-006",
+      "kind": "decision",
+      "code": null,
+      "denialReason": null,
+      "obligation": "a non-idempotent call is not retried while its effect is uncertain"
+    },
+    {
+      "rule": "S-001",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_MALFORMED_RESPONSE",
+      "denialReason": null,
+      "obligation": "a stream opens with a start frame"
+    },
+    {
+      "rule": "S-002",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_MALFORMED_RESPONSE",
+      "denialReason": null,
+      "obligation": "a stream carries exactly one start frame"
+    },
+    {
+      "rule": "S-003",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_MALFORMED_RESPONSE",
+      "denialReason": null,
+      "obligation": "stream sequence starts at zero"
+    },
+    {
+      "rule": "S-004",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_MALFORMED_RESPONSE",
+      "denialReason": null,
+      "obligation": "stream sequence increases by exactly one"
+    },
+    {
+      "rule": "S-005",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_MALFORMED_RESPONSE",
+      "denialReason": null,
+      "obligation": "no frame follows the finish frame"
+    },
+    {
+      "rule": "S-006",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_TRANSPORT_FAILURE",
+      "denialReason": null,
+      "obligation": "a stream that never finishes is a transport failure"
+    },
+    {
+      "rule": "S-007",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_MALFORMED_RESPONSE",
+      "denialReason": null,
+      "obligation": "a frame is bounded by maxStreamFrameBytes"
+    },
+    {
+      "rule": "S-008",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_MALFORMED_RESPONSE",
+      "denialReason": null,
+      "obligation": "a stream is bounded by maxStreamFrames"
+    },
+    {
+      "rule": "S-009",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_MALFORMED_RESPONSE",
+      "denialReason": null,
+      "obligation": "a stream carries at most one usage frame"
+    },
+    {
+      "rule": "S-010",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_MALFORMED_RESPONSE",
+      "denialReason": null,
+      "obligation": "a usage frame requires usage-reporting"
+    },
+    {
+      "rule": "S-011",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_MALFORMED_RESPONSE",
+      "denialReason": null,
+      "obligation": "a tool-call frame requires tool-calling"
+    },
+    {
+      "rule": "S-012",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_MALFORMED_RESPONSE",
+      "denialReason": null,
+      "obligation": "tool-call frames are bounded by maxToolCallsPerResponse"
+    },
+    {
+      "rule": "S-013",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_MALFORMED_RESPONSE",
+      "denialReason": null,
+      "obligation": "streamed text is bounded by maxResponseBytes"
+    },
+    {
+      "rule": "S-014",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_MALFORMED_RESPONSE",
+      "denialReason": null,
+      "obligation": "finishReason tool-calls requires a tool call"
+    },
+    {
+      "rule": "S-015",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_MALFORMED_RESPONSE",
+      "denialReason": null,
+      "obligation": "cancelled is never a provider finish reason"
+    },
+    {
+      "rule": "S-016",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_MALFORMED_RESPONSE",
+      "denialReason": null,
+      "obligation": "a second tool call requires parallel-tool-calls"
+    },
+    {
+      "rule": "S-017",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_MALFORMED_RESPONSE",
+      "denialReason": null,
+      "obligation": "finishReason content-filter requires content-filter-reporting"
+    },
+    {
+      "rule": "T-001",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_TOOL_VALIDATION_FAILED",
+      "denialReason": null,
+      "obligation": "a tool call names a declared tool"
+    },
+    {
+      "rule": "T-002",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_TOOL_VALIDATION_FAILED",
+      "denialReason": null,
+      "obligation": "tool call arguments satisfy the declared argument contract"
+    },
+    {
+      "rule": "T-003",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_TOOL_VALIDATION_FAILED",
+      "denialReason": null,
+      "obligation": "tool calls are bounded by maxToolCallsPerResponse"
+    },
+    {
+      "rule": "T-004",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_TOOL_VALIDATION_FAILED",
+      "denialReason": null,
+      "obligation": "tool call identifiers are unique"
+    },
+    {
+      "rule": "T-005",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_TOOL_VALIDATION_FAILED",
+      "denialReason": null,
+      "obligation": "authority comes from policy and never from the model"
+    },
+    {
+      "rule": "T-006",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_TOOL_VALIDATION_FAILED",
+      "denialReason": null,
+      "obligation": "a tool description cannot widen the MCP allowlist"
+    },
+    {
+      "rule": "U-001",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_MALFORMED_RESPONSE",
+      "denialReason": null,
+      "obligation": "usage quantities are ordered by resource"
+    },
+    {
+      "rule": "U-002",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_MALFORMED_RESPONSE",
+      "denialReason": null,
+      "obligation": "usage resources are unique"
+    },
+    {
+      "rule": "U-003",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_MALFORMED_RESPONSE",
+      "denialReason": null,
+      "obligation": "each resource carries its fixed unit"
+    },
+    {
+      "rule": "U-004",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_MALFORMED_RESPONSE",
+      "denialReason": null,
+      "obligation": "an adapter reports only sum-aggregated resources"
+    },
+    {
+      "rule": "U-005",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_MALFORMED_RESPONSE",
+      "denialReason": null,
+      "obligation": "an adapter reports meters and never money"
+    },
+    {
+      "rule": "U-006",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_MALFORMED_RESPONSE",
+      "denialReason": null,
+      "obligation": "budgetCostState is derived from trust"
+    },
+    {
+      "rule": "U-007",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_MALFORMED_RESPONSE",
+      "denialReason": null,
+      "obligation": "a dispatch-boundary envelope records at least one provider call"
+    },
+    {
+      "rule": "U-008",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_MALFORMED_RESPONSE",
+      "denialReason": null,
+      "obligation": "provider-reported trust requires usage-reporting"
+    },
+    {
+      "rule": "U-009",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_MALFORMED_RESPONSE",
+      "denialReason": null,
+      "obligation": "cached-input-units requires cached-input-usage-reporting"
+    },
+    {
+      "rule": "U-010",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_MALFORMED_RESPONSE",
+      "denialReason": null,
+      "obligation": "reasoning-units requires reasoning-usage-reporting"
+    },
+    {
+      "rule": "U-011",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_MALFORMED_RESPONSE",
+      "denialReason": null,
+      "obligation": "image-units and audio-units require attachments"
+    },
+    {
+      "rule": "U-012",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_MALFORMED_RESPONSE",
+      "denialReason": null,
+      "obligation": "tool-calls requires tool-calling"
+    },
+    {
+      "rule": "U-013",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_MALFORMED_RESPONSE",
+      "denialReason": null,
+      "obligation": "a provider request identity requires provider-request-id"
+    },
+    {
+      "rule": "U-014",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_MALFORMED_RESPONSE",
+      "denialReason": null,
+      "obligation": "provider metrics are unique and canonically ordered"
+    },
+    {
+      "rule": "U-015",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_MALFORMED_RESPONSE",
+      "denialReason": null,
+      "obligation": "a provider metric is never silently bucketed"
+    },
+    {
+      "rule": "U-016",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_MALFORMED_RESPONSE",
+      "denialReason": null,
+      "obligation": "usage amounts are positive portable integers"
+    },
+    {
+      "rule": "U-017",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_MALFORMED_RESPONSE",
+      "denialReason": null,
+      "obligation": "a content-filter finish reason requires content-filter-reporting"
+    },
+    {
+      "rule": "U-018",
+      "kind": "rejection",
+      "code": "GE_ADAPTER_MALFORMED_RESPONSE",
+      "denialReason": null,
+      "obligation": "an adapter without usage-reporting reports unknown trust and no usage-unit meter"
+    }
+  ],
+  "forbiddenMarkers": [
+    "synthetic-authorization-header",
+    "synthetic-credential-value",
+    "synthetic-prompt-body"
+  ],
+  "declaredCounts": {
+    "circuitCases": 7,
+    "descriptorCases": 35,
+    "descriptors": 12,
+    "errorCases": 29,
+    "preflightCases": 31,
+    "retryCases": 13,
+    "rules": 131,
+    "schemaNegativeCases": 24,
+    "streamCases": 21,
+    "toolCases": 8,
+    "usageCases": 21
+  },
+  "descriptors": [
+    {
+      "apiVersion": "graphengineering.reacher-z.github.io/adapters/v1alpha1",
+      "kind": "AdapterDescriptor",
+      "contractVersion": "adapter-contract/v1alpha1",
+      "adapterId": "mock-full",
+      "adapterKind": "mock",
+      "adapterVersion": "0.1.0",
+      "evidenceClass": "deterministic-mock",
+      "sideEffectClass": "none",
+      "capabilities": [
+        "attachments",
+        "cached-input-usage-reporting",
+        "cancellation",
+        "content-filter-reporting",
+        "deterministic-replay",
+        "fault-injection",
+        "idempotency-key",
+        "parallel-tool-calls",
+        "provider-request-id",
+        "rate-limit-reporting",
+        "reasoning-usage-reporting",
+        "retry-after-hint",
+        "streaming",
+        "structured-output",
+        "tool-calling",
+        "usage-reporting"
+      ],
+      "bounds": {
+        "maxRequestBytes": 1048576,
+        "maxResponseBytes": 1048576,
+        "maxStreamFrameBytes": 65536,
+        "maxStreamFrames": 1024,
+        "maxToolDefinitions": 16,
+        "maxToolCallsPerResponse": 8,
+        "maxAttachments": 8,
+        "maxAttachmentBytes": 262144,
+        "requestTimeoutMs": 30000
+      },
+      "retryPolicy": {
+        "maxAttempts": 4,
+        "initialBackoffMs": 250,
+        "backoffMultiplierMilli": 2000,
+        "maxBackoffMs": 4000,
+        "jitter": false
+      },
+      "circuitPolicy": {
+        "consecutiveFailureThreshold": 3,
+        "openDurationMs": 1000,
+        "halfOpenProbeLimit": 1
+      },
+      "capture": {
+        "enabled": false,
+        "retention": "none"
+      },
+      "allowedProviderMetrics": [
+        {
+          "metricId": "graph-engineering/mock-metric/v1alpha1",
+          "unitId": "graph-engineering/mock-unit/v1alpha1",
+          "aggregation": "sum"
+        },
+        {
+          "metricId": "graph-engineering/mock-second-metric/v1alpha1",
+          "unitId": "graph-engineering/mock-unit/v1alpha1",
+          "aggregation": "sum"
+        }
+      ],
+      "network": null,
+      "process": null,
+      "mcp": null
+    },
+    {
+      "apiVersion": "graphengineering.reacher-z.github.io/adapters/v1alpha1",
+      "kind": "AdapterDescriptor",
+      "contractVersion": "adapter-contract/v1alpha1",
+      "adapterId": "mock-idempotent",
+      "adapterKind": "mock",
+      "adapterVersion": "0.1.0",
+      "evidenceClass": "deterministic-mock",
+      "sideEffectClass": "idempotent",
+      "capabilities": [
+        "attachments",
+        "cached-input-usage-reporting",
+        "cancellation",
+        "content-filter-reporting",
+        "deterministic-replay",
+        "fault-injection",
+        "idempotency-key",
+        "parallel-tool-calls",
+        "provider-request-id",
+        "rate-limit-reporting",
+        "reasoning-usage-reporting",
+        "retry-after-hint",
+        "streaming",
+        "structured-output",
+        "tool-calling",
+        "usage-reporting"
+      ],
+      "bounds": {
+        "maxRequestBytes": 1048576,
+        "maxResponseBytes": 1048576,
+        "maxStreamFrameBytes": 65536,
+        "maxStreamFrames": 1024,
+        "maxToolDefinitions": 16,
+        "maxToolCallsPerResponse": 8,
+        "maxAttachments": 8,
+        "maxAttachmentBytes": 262144,
+        "requestTimeoutMs": 30000
+      },
+      "retryPolicy": {
+        "maxAttempts": 4,
+        "initialBackoffMs": 250,
+        "backoffMultiplierMilli": 2000,
+        "maxBackoffMs": 4000,
+        "jitter": false
+      },
+      "circuitPolicy": {
+        "consecutiveFailureThreshold": 3,
+        "openDurationMs": 1000,
+        "halfOpenProbeLimit": 1
+      },
+      "capture": {
+        "enabled": false,
+        "retention": "none"
+      },
+      "allowedProviderMetrics": [
+        {
+          "metricId": "graph-engineering/mock-metric/v1alpha1",
+          "unitId": "graph-engineering/mock-unit/v1alpha1",
+          "aggregation": "sum"
+        }
+      ],
+      "network": null,
+      "process": null,
+      "mcp": null
+    },
+    {
+      "apiVersion": "graphengineering.reacher-z.github.io/adapters/v1alpha1",
+      "kind": "AdapterDescriptor",
+      "contractVersion": "adapter-contract/v1alpha1",
+      "adapterId": "mock-nonidempotent",
+      "adapterKind": "mock",
+      "adapterVersion": "0.1.0",
+      "evidenceClass": "deterministic-mock",
+      "sideEffectClass": "non-idempotent",
+      "capabilities": [
+        "attachments",
+        "cached-input-usage-reporting",
+        "cancellation",
+        "content-filter-reporting",
+        "deterministic-replay",
+        "fault-injection",
+        "idempotency-key",
+        "parallel-tool-calls",
+        "provider-request-id",
+        "rate-limit-reporting",
+        "reasoning-usage-reporting",
+        "retry-after-hint",
+        "streaming",
+        "structured-output",
+        "tool-calling",
+        "usage-reporting"
+      ],
+      "bounds": {
+        "maxRequestBytes": 1048576,
+        "maxResponseBytes": 1048576,
+        "maxStreamFrameBytes": 65536,
+        "maxStreamFrames": 1024,
+        "maxToolDefinitions": 16,
+        "maxToolCallsPerResponse": 8,
+        "maxAttachments": 8,
+        "maxAttachmentBytes": 262144,
+        "requestTimeoutMs": 30000
+      },
+      "retryPolicy": {
+        "maxAttempts": 4,
+        "initialBackoffMs": 250,
+        "backoffMultiplierMilli": 2000,
+        "maxBackoffMs": 4000,
+        "jitter": false
+      },
+      "circuitPolicy": {
+        "consecutiveFailureThreshold": 3,
+        "openDurationMs": 1000,
+        "halfOpenProbeLimit": 1
+      },
+      "capture": {
+        "enabled": false,
+        "retention": "none"
+      },
+      "allowedProviderMetrics": [
+        {
+          "metricId": "graph-engineering/mock-metric/v1alpha1",
+          "unitId": "graph-engineering/mock-unit/v1alpha1",
+          "aggregation": "sum"
+        }
+      ],
+      "network": null,
+      "process": null,
+      "mcp": null
+    },
+    {
+      "apiVersion": "graphengineering.reacher-z.github.io/adapters/v1alpha1",
+      "kind": "AdapterDescriptor",
+      "contractVersion": "adapter-contract/v1alpha1",
+      "adapterId": "mock-minimal",
+      "adapterKind": "mock",
+      "adapterVersion": "0.1.0",
+      "evidenceClass": "deterministic-mock",
+      "sideEffectClass": "none",
+      "capabilities": [],
+      "bounds": {
+        "maxRequestBytes": 1048576,
+        "maxResponseBytes": 1048576,
+        "maxStreamFrameBytes": 65536,
+        "maxStreamFrames": 1024,
+        "maxToolDefinitions": 0,
+        "maxToolCallsPerResponse": 0,
+        "maxAttachments": 0,
+        "maxAttachmentBytes": 262144,
+        "requestTimeoutMs": 30000
+      },
+      "retryPolicy": {
+        "maxAttempts": 4,
+        "initialBackoffMs": 250,
+        "backoffMultiplierMilli": 2000,
+        "maxBackoffMs": 4000,
+        "jitter": false
+      },
+      "circuitPolicy": {
+        "consecutiveFailureThreshold": 3,
+        "openDurationMs": 1000,
+        "halfOpenProbeLimit": 1
+      },
+      "capture": {
+        "enabled": false,
+        "retention": "none"
+      },
+      "allowedProviderMetrics": [],
+      "network": null,
+      "process": null,
+      "mcp": null
+    },
+    {
+      "apiVersion": "graphengineering.reacher-z.github.io/adapters/v1alpha1",
+      "kind": "AdapterDescriptor",
+      "contractVersion": "adapter-contract/v1alpha1",
+      "adapterId": "openai-mock",
+      "adapterKind": "openai",
+      "adapterVersion": "0.1.0",
+      "evidenceClass": "deterministic-mock",
+      "sideEffectClass": "none",
+      "capabilities": [
+        "attachments",
+        "cached-input-usage-reporting",
+        "cancellation",
+        "content-filter-reporting",
+        "idempotency-key",
+        "parallel-tool-calls",
+        "provider-request-id",
+        "rate-limit-reporting",
+        "reasoning-usage-reporting",
+        "retry-after-hint",
+        "streaming",
+        "structured-output",
+        "tool-calling",
+        "usage-reporting"
+      ],
+      "bounds": {
+        "maxRequestBytes": 1048576,
+        "maxResponseBytes": 1048576,
+        "maxStreamFrameBytes": 65536,
+        "maxStreamFrames": 1024,
+        "maxToolDefinitions": 16,
+        "maxToolCallsPerResponse": 8,
+        "maxAttachments": 8,
+        "maxAttachmentBytes": 262144,
+        "requestTimeoutMs": 30000
+      },
+      "retryPolicy": {
+        "maxAttempts": 4,
+        "initialBackoffMs": 250,
+        "backoffMultiplierMilli": 2000,
+        "maxBackoffMs": 4000,
+        "jitter": false
+      },
+      "circuitPolicy": {
+        "consecutiveFailureThreshold": 3,
+        "openDurationMs": 1000,
+        "halfOpenProbeLimit": 1
+      },
+      "capture": {
+        "enabled": false,
+        "retention": "none"
+      },
+      "allowedProviderMetrics": [
+        {
+          "metricId": "graph-engineering/mock-metric/v1alpha1",
+          "unitId": "graph-engineering/mock-unit/v1alpha1",
+          "aggregation": "sum"
+        }
+      ],
+      "network": {
+        "allowedSchemes": [
+          "https"
+        ],
+        "allowedHosts": [
+          "api-openai.invalid"
+        ],
+        "allowedPorts": [
+          443
+        ],
+        "allowRedirects": false,
+        "redirectReauthorization": false,
+        "rebindingDefense": true,
+        "credentialIsolation": true,
+        "tlsMinimumVersion": "TLSv1.2"
+      },
+      "process": null,
+      "mcp": null
+    },
+    {
+      "apiVersion": "graphengineering.reacher-z.github.io/adapters/v1alpha1",
+      "kind": "AdapterDescriptor",
+      "contractVersion": "adapter-contract/v1alpha1",
+      "adapterId": "anthropic-mock",
+      "adapterKind": "anthropic",
+      "adapterVersion": "0.1.0",
+      "evidenceClass": "deterministic-mock",
+      "sideEffectClass": "none",
+      "capabilities": [
+        "attachments",
+        "cached-input-usage-reporting",
+        "cancellation",
+        "content-filter-reporting",
+        "idempotency-key",
+        "parallel-tool-calls",
+        "provider-request-id",
+        "rate-limit-reporting",
+        "reasoning-usage-reporting",
+        "retry-after-hint",
+        "streaming",
+        "structured-output",
+        "tool-calling",
+        "usage-reporting"
+      ],
+      "bounds": {
+        "maxRequestBytes": 1048576,
+        "maxResponseBytes": 1048576,
+        "maxStreamFrameBytes": 65536,
+        "maxStreamFrames": 1024,
+        "maxToolDefinitions": 16,
+        "maxToolCallsPerResponse": 8,
+        "maxAttachments": 8,
+        "maxAttachmentBytes": 262144,
+        "requestTimeoutMs": 30000
+      },
+      "retryPolicy": {
+        "maxAttempts": 4,
+        "initialBackoffMs": 250,
+        "backoffMultiplierMilli": 2000,
+        "maxBackoffMs": 4000,
+        "jitter": false
+      },
+      "circuitPolicy": {
+        "consecutiveFailureThreshold": 3,
+        "openDurationMs": 1000,
+        "halfOpenProbeLimit": 1
+      },
+      "capture": {
+        "enabled": false,
+        "retention": "none"
+      },
+      "allowedProviderMetrics": [
+        {
+          "metricId": "graph-engineering/mock-metric/v1alpha1",
+          "unitId": "graph-engineering/mock-unit/v1alpha1",
+          "aggregation": "sum"
+        }
+      ],
+      "network": {
+        "allowedSchemes": [
+          "https"
+        ],
+        "allowedHosts": [
+          "api-anthropic.invalid"
+        ],
+        "allowedPorts": [
+          443
+        ],
+        "allowRedirects": false,
+        "redirectReauthorization": false,
+        "rebindingDefense": true,
+        "credentialIsolation": true,
+        "tlsMinimumVersion": "TLSv1.2"
+      },
+      "process": null,
+      "mcp": null
+    },
+    {
+      "apiVersion": "graphengineering.reacher-z.github.io/adapters/v1alpha1",
+      "kind": "AdapterDescriptor",
+      "contractVersion": "adapter-contract/v1alpha1",
+      "adapterId": "gemini-mock",
+      "adapterKind": "google-gemini",
+      "adapterVersion": "0.1.0",
+      "evidenceClass": "deterministic-mock",
+      "sideEffectClass": "none",
+      "capabilities": [
+        "attachments",
+        "cancellation",
+        "content-filter-reporting",
+        "idempotency-key",
+        "parallel-tool-calls",
+        "provider-request-id",
+        "rate-limit-reporting",
+        "reasoning-usage-reporting",
+        "retry-after-hint",
+        "streaming",
+        "structured-output",
+        "tool-calling",
+        "usage-reporting"
+      ],
+      "bounds": {
+        "maxRequestBytes": 1048576,
+        "maxResponseBytes": 1048576,
+        "maxStreamFrameBytes": 65536,
+        "maxStreamFrames": 1024,
+        "maxToolDefinitions": 16,
+        "maxToolCallsPerResponse": 8,
+        "maxAttachments": 8,
+        "maxAttachmentBytes": 262144,
+        "requestTimeoutMs": 30000
+      },
+      "retryPolicy": {
+        "maxAttempts": 4,
+        "initialBackoffMs": 250,
+        "backoffMultiplierMilli": 2000,
+        "maxBackoffMs": 4000,
+        "jitter": false
+      },
+      "circuitPolicy": {
+        "consecutiveFailureThreshold": 3,
+        "openDurationMs": 1000,
+        "halfOpenProbeLimit": 1
+      },
+      "capture": {
+        "enabled": false,
+        "retention": "none"
+      },
+      "allowedProviderMetrics": [
+        {
+          "metricId": "graph-engineering/mock-metric/v1alpha1",
+          "unitId": "graph-engineering/mock-unit/v1alpha1",
+          "aggregation": "sum"
+        }
+      ],
+      "network": {
+        "allowedSchemes": [
+          "https"
+        ],
+        "allowedHosts": [
+          "api-gemini.invalid"
+        ],
+        "allowedPorts": [
+          443
+        ],
+        "allowRedirects": false,
+        "redirectReauthorization": false,
+        "rebindingDefense": true,
+        "credentialIsolation": true,
+        "tlsMinimumVersion": "TLSv1.2"
+      },
+      "process": null,
+      "mcp": null
+    },
+    {
+      "apiVersion": "graphengineering.reacher-z.github.io/adapters/v1alpha1",
+      "kind": "AdapterDescriptor",
+      "contractVersion": "adapter-contract/v1alpha1",
+      "adapterId": "local-mock",
+      "adapterKind": "openai-compatible",
+      "adapterVersion": "0.1.0",
+      "evidenceClass": "deterministic-mock",
+      "sideEffectClass": "none",
+      "capabilities": [
+        "cancellation",
+        "idempotency-key",
+        "provider-request-id",
+        "streaming",
+        "structured-output",
+        "tool-calling",
+        "usage-reporting"
+      ],
+      "bounds": {
+        "maxRequestBytes": 1048576,
+        "maxResponseBytes": 1048576,
+        "maxStreamFrameBytes": 65536,
+        "maxStreamFrames": 1024,
+        "maxToolDefinitions": 8,
+        "maxToolCallsPerResponse": 4,
+        "maxAttachments": 0,
+        "maxAttachmentBytes": 262144,
+        "requestTimeoutMs": 30000
+      },
+      "retryPolicy": {
+        "maxAttempts": 4,
+        "initialBackoffMs": 250,
+        "backoffMultiplierMilli": 2000,
+        "maxBackoffMs": 4000,
+        "jitter": false
+      },
+      "circuitPolicy": {
+        "consecutiveFailureThreshold": 3,
+        "openDurationMs": 1000,
+        "halfOpenProbeLimit": 1
+      },
+      "capture": {
+        "enabled": false,
+        "retention": "none"
+      },
+      "allowedProviderMetrics": [],
+      "network": {
+        "allowedSchemes": [
+          "http",
+          "https"
+        ],
+        "allowedHosts": [
+          "localhost"
+        ],
+        "allowedPorts": [
+          8080,
+          8443
+        ],
+        "allowRedirects": false,
+        "redirectReauthorization": false,
+        "rebindingDefense": true,
+        "credentialIsolation": true,
+        "tlsMinimumVersion": "TLSv1.2"
+      },
+      "process": null,
+      "mcp": null
+    },
+    {
+      "apiVersion": "graphengineering.reacher-z.github.io/adapters/v1alpha1",
+      "kind": "AdapterDescriptor",
+      "contractVersion": "adapter-contract/v1alpha1",
+      "adapterId": "http-mock",
+      "adapterKind": "http",
+      "adapterVersion": "0.1.0",
+      "evidenceClass": "deterministic-mock",
+      "sideEffectClass": "none",
+      "capabilities": [
+        "cancellation",
+        "idempotency-key",
+        "rate-limit-reporting",
+        "retry-after-hint",
+        "streaming"
+      ],
+      "bounds": {
+        "maxRequestBytes": 1048576,
+        "maxResponseBytes": 1048576,
+        "maxStreamFrameBytes": 65536,
+        "maxStreamFrames": 1024,
+        "maxToolDefinitions": 0,
+        "maxToolCallsPerResponse": 0,
+        "maxAttachments": 0,
+        "maxAttachmentBytes": 262144,
+        "requestTimeoutMs": 30000
+      },
+      "retryPolicy": {
+        "maxAttempts": 4,
+        "initialBackoffMs": 250,
+        "backoffMultiplierMilli": 2000,
+        "maxBackoffMs": 4000,
+        "jitter": false
+      },
+      "circuitPolicy": {
+        "consecutiveFailureThreshold": 3,
+        "openDurationMs": 1000,
+        "halfOpenProbeLimit": 1
+      },
+      "capture": {
+        "enabled": false,
+        "retention": "none"
+      },
+      "allowedProviderMetrics": [],
+      "network": {
+        "allowedSchemes": [
+          "http",
+          "https"
+        ],
+        "allowedHosts": [
+          "gateway.invalid",
+          "stream.invalid"
+        ],
+        "allowedPorts": [
+          443,
+          8443
+        ],
+        "allowRedirects": true,
+        "redirectReauthorization": true,
+        "rebindingDefense": true,
+        "credentialIsolation": true,
+        "tlsMinimumVersion": "TLSv1.3"
+      },
+      "process": null,
+      "mcp": null
+    },
+    {
+      "apiVersion": "graphengineering.reacher-z.github.io/adapters/v1alpha1",
+      "kind": "AdapterDescriptor",
+      "contractVersion": "adapter-contract/v1alpha1",
+      "adapterId": "shell-mock",
+      "adapterKind": "shell",
+      "adapterVersion": "0.1.0",
+      "evidenceClass": "deterministic-mock",
+      "sideEffectClass": "none",
+      "capabilities": [
+        "cancellation"
+      ],
+      "bounds": {
+        "maxRequestBytes": 1048576,
+        "maxResponseBytes": 1048576,
+        "maxStreamFrameBytes": 65536,
+        "maxStreamFrames": 1,
+        "maxToolDefinitions": 0,
+        "maxToolCallsPerResponse": 0,
+        "maxAttachments": 0,
+        "maxAttachmentBytes": 262144,
+        "requestTimeoutMs": 30000
+      },
+      "retryPolicy": {
+        "maxAttempts": 4,
+        "initialBackoffMs": 250,
+        "backoffMultiplierMilli": 2000,
+        "maxBackoffMs": 4000,
+        "jitter": false
+      },
+      "circuitPolicy": {
+        "consecutiveFailureThreshold": 3,
+        "openDurationMs": 1000,
+        "halfOpenProbeLimit": 1
+      },
+      "capture": {
+        "enabled": false,
+        "retention": "none"
+      },
+      "allowedProviderMetrics": [],
+      "network": null,
+      "process": {
+        "executablePath": "/usr/bin/ge-mock-tool",
+        "argumentVector": [
+          "/usr/bin/ge-mock-tool",
+          "--mock"
+        ],
+        "workingDirectory": "/var/empty",
+        "environmentAllowlist": [
+          "GE_MOCK_MODE",
+          "PATH"
+        ],
+        "stdinPolicy": "closed",
+        "shellExpansion": false,
+        "maxOutputBytes": 1048576,
+        "maxDurationMs": 30000,
+        "maxProcesses": 8,
+        "maxMemoryBytes": 268435456,
+        "cancelSignal": "SIGTERM"
+      },
+      "mcp": null
+    },
+    {
+      "apiVersion": "graphengineering.reacher-z.github.io/adapters/v1alpha1",
+      "kind": "AdapterDescriptor",
+      "contractVersion": "adapter-contract/v1alpha1",
+      "adapterId": "mcp-read-mock",
+      "adapterKind": "mcp",
+      "adapterVersion": "0.1.0",
+      "evidenceClass": "deterministic-mock",
+      "sideEffectClass": "idempotent",
+      "capabilities": [
+        "cancellation",
+        "idempotency-key",
+        "tool-calling"
+      ],
+      "bounds": {
+        "maxRequestBytes": 1048576,
+        "maxResponseBytes": 1048576,
+        "maxStreamFrameBytes": 65536,
+        "maxStreamFrames": 1,
+        "maxToolDefinitions": 4,
+        "maxToolCallsPerResponse": 4,
+        "maxAttachments": 0,
+        "maxAttachmentBytes": 262144,
+        "requestTimeoutMs": 30000
+      },
+      "retryPolicy": {
+        "maxAttempts": 4,
+        "initialBackoffMs": 250,
+        "backoffMultiplierMilli": 2000,
+        "maxBackoffMs": 4000,
+        "jitter": false
+      },
+      "circuitPolicy": {
+        "consecutiveFailureThreshold": 3,
+        "openDurationMs": 1000,
+        "halfOpenProbeLimit": 1
+      },
+      "capture": {
+        "enabled": false,
+        "retention": "none"
+      },
+      "allowedProviderMetrics": [],
+      "network": null,
+      "process": null,
+      "mcp": {
+        "serverId": "mock-server",
+        "mode": "read-only",
+        "allowedTools": [
+          "list-files",
+          "read-file"
+        ],
+        "approvalRequired": false,
+        "idempotencyRequired": true
+      }
+    },
+    {
+      "apiVersion": "graphengineering.reacher-z.github.io/adapters/v1alpha1",
+      "kind": "AdapterDescriptor",
+      "contractVersion": "adapter-contract/v1alpha1",
+      "adapterId": "mcp-write-mock",
+      "adapterKind": "mcp",
+      "adapterVersion": "0.1.0",
+      "evidenceClass": "deterministic-mock",
+      "sideEffectClass": "non-idempotent",
+      "capabilities": [
+        "cancellation",
+        "idempotency-key",
+        "tool-calling"
+      ],
+      "bounds": {
+        "maxRequestBytes": 1048576,
+        "maxResponseBytes": 1048576,
+        "maxStreamFrameBytes": 65536,
+        "maxStreamFrames": 1,
+        "maxToolDefinitions": 4,
+        "maxToolCallsPerResponse": 4,
+        "maxAttachments": 0,
+        "maxAttachmentBytes": 262144,
+        "requestTimeoutMs": 30000
+      },
+      "retryPolicy": {
+        "maxAttempts": 4,
+        "initialBackoffMs": 250,
+        "backoffMultiplierMilli": 2000,
+        "maxBackoffMs": 4000,
+        "jitter": false
+      },
+      "circuitPolicy": {
+        "consecutiveFailureThreshold": 3,
+        "openDurationMs": 1000,
+        "halfOpenProbeLimit": 1
+      },
+      "capture": {
+        "enabled": false,
+        "retention": "none"
+      },
+      "allowedProviderMetrics": [],
+      "network": null,
+      "process": null,
+      "mcp": {
+        "serverId": "mock-server",
+        "mode": "mutating",
+        "allowedTools": [
+          "write-file"
+        ],
+        "approvalRequired": true,
+        "idempotencyRequired": true
+      }
+    }
+  ],
+  "requestTemplate": {
+    "requestId": "req-baseline",
+    "sideEffectClass": "none",
+    "requiredCapabilities": [],
+    "requestBytes": 4096,
+    "attachments": [],
+    "toolDefinitions": [],
+    "streaming": false,
+    "structuredOutput": false,
+    "cancellable": false,
+    "idempotencyKey": null,
+    "circuitState": "closed",
+    "target": null,
+    "mcpCall": null,
+    "processCall": null
+  },
+  "streamTemplate": [
+    {
+      "sequence": 0,
+      "kind": "start",
+      "bytes": 16
+    },
+    {
+      "sequence": 1,
+      "kind": "text-delta",
+      "bytes": 64
+    },
+    {
+      "sequence": 2,
+      "kind": "tool-call",
+      "bytes": 48,
+      "toolCallId": "call-1"
+    },
+    {
+      "sequence": 3,
+      "kind": "usage",
+      "bytes": 32
+    },
+    {
+      "sequence": 4,
+      "kind": "finish",
+      "bytes": 8,
+      "finishReason": "tool-calls"
+    }
+  ],
+  "usageTemplate": {
+    "apiVersion": "graphengineering.reacher-z.github.io/adapters/v1alpha1",
+    "kind": "AdapterUsage",
+    "contractVersion": "adapter-contract/v1alpha1",
+    "adapterId": "mock-full",
+    "adapterKind": "mock",
+    "requestId": "req-baseline",
+    "providerRequestId": "mock-req-000001",
+    "trust": "provider-reported",
+    "budgetCostState": "provider-reported",
+    "finishReason": "stop",
+    "quantities": [
+      {
+        "resource": "audio-units",
+        "unit": "usage-unit",
+        "aggregation": "sum",
+        "amount": 2
+      },
+      {
+        "resource": "cached-input-units",
+        "unit": "usage-unit",
+        "aggregation": "sum",
+        "amount": 64
+      },
+      {
+        "resource": "image-units",
+        "unit": "usage-unit",
+        "aggregation": "sum",
+        "amount": 3
+      },
+      {
+        "resource": "input-units",
+        "unit": "usage-unit",
+        "aggregation": "sum",
+        "amount": 1024
+      },
+      {
+        "resource": "output-units",
+        "unit": "usage-unit",
+        "aggregation": "sum",
+        "amount": 256
+      },
+      {
+        "resource": "provider-calls",
+        "unit": "count",
+        "aggregation": "sum",
+        "amount": 1
+      },
+      {
+        "resource": "reasoning-units",
+        "unit": "usage-unit",
+        "aggregation": "sum",
+        "amount": 128
+      },
+      {
+        "resource": "tool-calls",
+        "unit": "count",
+        "aggregation": "sum",
+        "amount": 1
+      },
+      {
+        "resource": "transport-bytes",
+        "unit": "byte",
+        "aggregation": "sum",
+        "amount": 8192
+      }
+    ],
+    "providerSpecific": [
+      {
+        "metricId": "graph-engineering/mock-metric/v1alpha1",
+        "unitId": "graph-engineering/mock-unit/v1alpha1",
+        "aggregation": "sum",
+        "amount": 7
+      }
+    ]
+  },
+  "errorTemplate": {
+    "apiVersion": "graphengineering.reacher-z.github.io/adapters/v1alpha1",
+    "kind": "AdapterError",
+    "contractVersion": "adapter-contract/v1alpha1",
+    "adapterId": "mock-full",
+    "adapterKind": "mock",
+    "requestId": "req-baseline",
+    "attempt": 1,
+    "code": "GE_ADAPTER_TIMEOUT",
+    "boundary": "dispatch",
+    "retryable": true,
+    "effectDisposition": "in-doubt",
+    "usageDisposition": "conservative",
+    "sideEffectClass": "none",
+    "denialReason": null,
+    "providerRequestId": "mock-req-000002",
+    "retryAfterMs": null,
+    "message": "the deterministic mock did not return a trusted response in time",
+    "detail": {
+      "providerSafeFields": [
+        {
+          "name": "attempt",
+          "value": "1"
+        },
+        {
+          "name": "rule",
+          "value": "none"
+        }
+      ]
+    },
+    "usage": null
+  },
+  "toolResponseTemplate": {
+    "toolCalls": [
+      {
+        "id": "call-1",
+        "name": "echo",
+        "arguments": {
+          "text": "mock"
+        }
+      }
+    ],
+    "authorizedTools": [
+      "echo"
+    ]
+  },
+  "schemaNegativeBase": "mock-full",
+  "descriptorCases": [
+    {
+      "id": "descriptor-positive",
+      "base": "mock-full",
+      "mutations": [],
+      "expectedCode": null,
+      "expectedRule": null
+    },
+    {
+      "id": "descriptor-capability-order",
+      "base": "mock-full",
+      "expectedRule": "D-001",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/capabilities",
+          "value": [
+            "streaming",
+            "attachments"
+          ]
+        }
+      ],
+      "capabilitiesExercised": [
+        "attachments",
+        "streaming"
+      ],
+      "expectedCode": "GE_ADAPTER_DESCRIPTOR_INVALID"
+    },
+    {
+      "id": "descriptor-mock-routable-host",
+      "base": "http-mock",
+      "expectedRule": "D-002",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/network/allowedHosts",
+          "value": [
+            "gateway.example"
+          ]
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_DESCRIPTOR_INVALID"
+    },
+    {
+      "id": "descriptor-mock-declares-mcp",
+      "base": "mock-full",
+      "expectedRule": "D-003",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/mcp",
+          "value": {
+            "serverId": "mock-server",
+            "mode": "read-only",
+            "allowedTools": [],
+            "approvalRequired": false,
+            "idempotencyRequired": true
+          }
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_DESCRIPTOR_INVALID"
+    },
+    {
+      "id": "descriptor-http-without-network",
+      "base": "http-mock",
+      "expectedRule": "D-004",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/network",
+          "value": null
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_DESCRIPTOR_INVALID"
+    },
+    {
+      "id": "descriptor-shell-without-process",
+      "base": "shell-mock",
+      "expectedRule": "D-005",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/process",
+          "value": null
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_DESCRIPTOR_INVALID"
+    },
+    {
+      "id": "descriptor-mcp-without-profile",
+      "base": "mcp-read-mock",
+      "expectedRule": "D-006",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/mcp",
+          "value": null
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_DESCRIPTOR_INVALID"
+    },
+    {
+      "id": "descriptor-model-without-network",
+      "base": "openai-mock",
+      "expectedRule": "D-007",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/network",
+          "value": null
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_DESCRIPTOR_INVALID"
+    },
+    {
+      "id": "descriptor-idempotent-without-key",
+      "base": "mock-idempotent",
+      "expectedRule": "D-008",
+      "mutations": [
+        {
+          "op": "remove",
+          "path": "/capabilities/6"
+        }
+      ],
+      "capabilitiesExercised": [
+        "idempotency-key"
+      ],
+      "expectedCode": "GE_ADAPTER_DESCRIPTOR_INVALID"
+    },
+    {
+      "id": "descriptor-cached-without-usage",
+      "base": "mock-full",
+      "expectedRule": "D-009",
+      "mutations": [
+        {
+          "op": "remove",
+          "path": "/capabilities/15"
+        }
+      ],
+      "capabilitiesExercised": [
+        "cached-input-usage-reporting",
+        "usage-reporting"
+      ],
+      "expectedCode": "GE_ADAPTER_DESCRIPTOR_INVALID"
+    },
+    {
+      "id": "descriptor-reasoning-without-usage",
+      "base": "mock-full",
+      "expectedRule": "D-010",
+      "mutations": [
+        {
+          "op": "remove",
+          "path": "/capabilities/15"
+        },
+        {
+          "op": "remove",
+          "path": "/capabilities/1"
+        }
+      ],
+      "capabilitiesExercised": [
+        "reasoning-usage-reporting"
+      ],
+      "expectedCode": "GE_ADAPTER_DESCRIPTOR_INVALID"
+    },
+    {
+      "id": "descriptor-parallel-without-tools",
+      "base": "mock-full",
+      "expectedRule": "D-011",
+      "mutations": [
+        {
+          "op": "remove",
+          "path": "/capabilities/14"
+        }
+      ],
+      "capabilitiesExercised": [
+        "parallel-tool-calls",
+        "tool-calling"
+      ],
+      "expectedCode": "GE_ADAPTER_DESCRIPTOR_INVALID"
+    },
+    {
+      "id": "descriptor-retry-after-without-rate-limit",
+      "base": "mock-full",
+      "expectedRule": "D-012",
+      "mutations": [
+        {
+          "op": "remove",
+          "path": "/capabilities/9"
+        }
+      ],
+      "capabilitiesExercised": [
+        "rate-limit-reporting",
+        "retry-after-hint"
+      ],
+      "expectedCode": "GE_ADAPTER_DESCRIPTOR_INVALID"
+    },
+    {
+      "id": "descriptor-live-claims-deterministic-replay",
+      "base": "mock-full",
+      "expectedRule": "D-013",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/evidenceClass",
+          "value": "live-provider"
+        }
+      ],
+      "capabilitiesExercised": [
+        "deterministic-replay"
+      ],
+      "expectedCode": "GE_ADAPTER_DESCRIPTOR_INVALID"
+    },
+    {
+      "id": "descriptor-live-claims-fault-injection",
+      "base": "mock-full",
+      "expectedRule": "D-014",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/evidenceClass",
+          "value": "live-provider"
+        },
+        {
+          "op": "remove",
+          "path": "/capabilities/4"
+        }
+      ],
+      "capabilitiesExercised": [
+        "fault-injection"
+      ],
+      "expectedCode": "GE_ADAPTER_DESCRIPTOR_INVALID"
+    },
+    {
+      "id": "descriptor-backoff-ceiling-below-floor",
+      "base": "mock-full",
+      "expectedRule": "D-015",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/retryPolicy/maxBackoffMs",
+          "value": 100
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_DESCRIPTOR_INVALID"
+    },
+    {
+      "id": "descriptor-capture-retention-disagrees",
+      "base": "mock-full",
+      "expectedRule": "D-016",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/capture/enabled",
+          "value": true
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_DESCRIPTOR_INVALID"
+    },
+    {
+      "id": "descriptor-no-rebinding-defense",
+      "base": "http-mock",
+      "expectedRule": "D-017",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/network/rebindingDefense",
+          "value": false
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_DESCRIPTOR_INVALID"
+    },
+    {
+      "id": "descriptor-no-credential-isolation",
+      "base": "http-mock",
+      "expectedRule": "D-018",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/network/credentialIsolation",
+          "value": false
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_DESCRIPTOR_INVALID"
+    },
+    {
+      "id": "descriptor-redirect-without-reauthorization",
+      "base": "http-mock",
+      "expectedRule": "D-019",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/network/redirectReauthorization",
+          "value": false
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_DESCRIPTOR_INVALID"
+    },
+    {
+      "id": "descriptor-plaintext-to-routable-host",
+      "base": "http-mock",
+      "expectedRule": "D-020",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/evidenceClass",
+          "value": "live-provider"
+        },
+        {
+          "op": "replace",
+          "path": "/network/allowedHosts",
+          "value": [
+            "gateway.example"
+          ]
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_DESCRIPTOR_INVALID"
+    },
+    {
+      "id": "descriptor-hosts-out-of-order",
+      "base": "http-mock",
+      "expectedRule": "D-021",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/network/allowedHosts",
+          "value": [
+            "stream.invalid",
+            "gateway.invalid"
+          ]
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_DESCRIPTOR_INVALID"
+    },
+    {
+      "id": "descriptor-ports-out-of-order",
+      "base": "http-mock",
+      "expectedRule": "D-021",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/network/allowedPorts",
+          "value": [
+            8443,
+            443
+          ]
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_DESCRIPTOR_INVALID"
+    },
+    {
+      "id": "descriptor-argv-zero-mismatch",
+      "base": "shell-mock",
+      "expectedRule": "D-022",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/process/argumentVector/0",
+          "value": "/usr/bin/other-tool"
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_DESCRIPTOR_INVALID"
+    },
+    {
+      "id": "descriptor-environment-out-of-order",
+      "base": "shell-mock",
+      "expectedRule": "D-023",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/process/environmentAllowlist",
+          "value": [
+            "PATH",
+            "GE_MOCK_MODE"
+          ]
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_DESCRIPTOR_INVALID"
+    },
+    {
+      "id": "descriptor-mutating-without-approval",
+      "base": "mcp-write-mock",
+      "expectedRule": "D-024",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/mcp/approvalRequired",
+          "value": false
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_DESCRIPTOR_INVALID"
+    },
+    {
+      "id": "descriptor-mutating-without-idempotency",
+      "base": "mcp-write-mock",
+      "expectedRule": "D-025",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/mcp/idempotencyRequired",
+          "value": false
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_DESCRIPTOR_INVALID"
+    },
+    {
+      "id": "descriptor-mutating-without-tools",
+      "base": "mcp-write-mock",
+      "expectedRule": "D-026",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/mcp/allowedTools",
+          "value": []
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_DESCRIPTOR_INVALID"
+    },
+    {
+      "id": "descriptor-readonly-nonidempotent",
+      "base": "mcp-read-mock",
+      "expectedRule": "D-027",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/sideEffectClass",
+          "value": "non-idempotent"
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_DESCRIPTOR_INVALID"
+    },
+    {
+      "id": "descriptor-metrics-out-of-order",
+      "base": "mock-full",
+      "expectedRule": "D-028",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/allowedProviderMetrics",
+          "value": [
+            {
+              "metricId": "graph-engineering/mock-second-metric/v1alpha1",
+              "unitId": "graph-engineering/mock-unit/v1alpha1",
+              "aggregation": "sum"
+            },
+            {
+              "metricId": "graph-engineering/mock-metric/v1alpha1",
+              "unitId": "graph-engineering/mock-unit/v1alpha1",
+              "aggregation": "sum"
+            }
+          ]
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_DESCRIPTOR_INVALID"
+    },
+    {
+      "id": "descriptor-metric-outside-budget-policy",
+      "base": "mock-full",
+      "expectedRule": "D-029",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/allowedProviderMetrics/1/metricId",
+          "value": "graph-engineering/zz-unlisted-metric/v1alpha1"
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_DESCRIPTOR_INVALID"
+    },
+    {
+      "id": "descriptor-streaming-frame-floor",
+      "base": "mock-full",
+      "expectedRule": "D-030",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/bounds/maxStreamFrames",
+          "value": 1
+        }
+      ],
+      "capabilitiesExercised": [
+        "streaming"
+      ],
+      "expectedCode": "GE_ADAPTER_DESCRIPTOR_INVALID"
+    },
+    {
+      "id": "descriptor-tool-bounds-without-capability",
+      "base": "mock-full",
+      "expectedRule": "D-031",
+      "mutations": [
+        {
+          "op": "remove",
+          "path": "/capabilities/14"
+        },
+        {
+          "op": "remove",
+          "path": "/capabilities/7"
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_DESCRIPTOR_INVALID"
+    },
+    {
+      "id": "descriptor-attachment-bounds-without-capability",
+      "base": "mock-full",
+      "expectedRule": "D-032",
+      "mutations": [
+        {
+          "op": "remove",
+          "path": "/capabilities/0"
+        }
+      ],
+      "capabilitiesExercised": [
+        "attachments"
+      ],
+      "expectedCode": "GE_ADAPTER_DESCRIPTOR_INVALID"
+    },
+    {
+      "id": "descriptor-frame-exceeds-response",
+      "base": "mock-full",
+      "expectedRule": "D-033",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/bounds/maxStreamFrameBytes",
+          "value": 2097152
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_DESCRIPTOR_INVALID"
+    }
+  ],
+  "preflightCases": [
+    {
+      "id": "preflight-positive",
+      "descriptor": "mock-full",
+      "requestMutations": [],
+      "expectedCode": null,
+      "expectedRule": null
+    },
+    {
+      "id": "preflight-invalid-descriptor-first",
+      "descriptor": "http-mock",
+      "descriptorMutations": [
+        {
+          "op": "replace",
+          "path": "/network/rebindingDefense",
+          "value": false
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_DESCRIPTOR_INVALID",
+      "expectedRule": "D-017"
+    },
+    {
+      "id": "preflight-required-capability-missing",
+      "descriptor": "mock-minimal",
+      "requestMutations": [
+        {
+          "op": "replace",
+          "path": "/requiredCapabilities",
+          "value": [
+            "streaming",
+            "attachments"
+          ]
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_CAPABILITY_UNSUPPORTED",
+      "expectedRule": "P-001",
+      "expectedMessage": "Adapter capability 'attachments' required by request 'req-baseline' is not declared by adapter 'mock-minimal'",
+      "capabilitiesExercised": [
+        "attachments",
+        "streaming"
+      ]
+    },
+    {
+      "id": "preflight-streaming-undeclared",
+      "descriptor": "mock-minimal",
+      "requestMutations": [
+        {
+          "op": "replace",
+          "path": "/streaming",
+          "value": true
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_CAPABILITY_UNSUPPORTED",
+      "expectedRule": "P-002",
+      "expectedMessage": "Adapter capability 'streaming' required by request 'req-baseline' is not declared by adapter 'mock-minimal'",
+      "capabilitiesExercised": [
+        "streaming"
+      ]
+    },
+    {
+      "id": "preflight-structured-output-undeclared",
+      "descriptor": "mock-minimal",
+      "requestMutations": [
+        {
+          "op": "replace",
+          "path": "/structuredOutput",
+          "value": true
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_CAPABILITY_UNSUPPORTED",
+      "expectedRule": "P-003",
+      "expectedMessage": "Adapter capability 'structured-output' required by request 'req-baseline' is not declared by adapter 'mock-minimal'",
+      "capabilitiesExercised": [
+        "structured-output"
+      ]
+    },
+    {
+      "id": "preflight-tools-undeclared",
+      "descriptor": "mock-minimal",
+      "requestMutations": [
+        {
+          "op": "replace",
+          "path": "/toolDefinitions",
+          "value": [
+            {
+              "name": "echo",
+              "requiredArguments": [
+                "text"
+              ],
+              "allowedArguments": [
+                "locale",
+                "text"
+              ]
+            }
+          ]
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_CAPABILITY_UNSUPPORTED",
+      "expectedRule": "P-004",
+      "expectedMessage": "Adapter capability 'tool-calling' required by request 'req-baseline' is not declared by adapter 'mock-minimal'",
+      "capabilitiesExercised": [
+        "tool-calling"
+      ]
+    },
+    {
+      "id": "preflight-attachments-undeclared",
+      "descriptor": "mock-minimal",
+      "requestMutations": [
+        {
+          "op": "replace",
+          "path": "/attachments",
+          "value": [
+            {
+              "bytes": 16
+            }
+          ]
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_CAPABILITY_UNSUPPORTED",
+      "expectedRule": "P-005",
+      "expectedMessage": "Adapter capability 'attachments' required by request 'req-baseline' is not declared by adapter 'mock-minimal'",
+      "capabilitiesExercised": [
+        "attachments"
+      ]
+    },
+    {
+      "id": "preflight-cancellation-undeclared",
+      "descriptor": "mock-minimal",
+      "requestMutations": [
+        {
+          "op": "replace",
+          "path": "/cancellable",
+          "value": true
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_CAPABILITY_UNSUPPORTED",
+      "expectedRule": "P-006",
+      "expectedMessage": "Adapter capability 'cancellation' required by request 'req-baseline' is not declared by adapter 'mock-minimal'",
+      "capabilitiesExercised": [
+        "cancellation"
+      ]
+    },
+    {
+      "id": "preflight-idempotency-key-undeclared",
+      "descriptor": "mock-minimal",
+      "requestMutations": [
+        {
+          "op": "replace",
+          "path": "/idempotencyKey",
+          "value": "key-0001"
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_CAPABILITY_UNSUPPORTED",
+      "expectedRule": "P-029",
+      "expectedMessage": "Adapter capability 'idempotency-key' required by request 'req-baseline' is not declared by adapter 'mock-minimal'",
+      "capabilitiesExercised": [
+        "idempotency-key"
+      ]
+    },
+    {
+      "id": "preflight-side-effect-escalation",
+      "descriptor": "mock-full",
+      "requestMutations": [
+        {
+          "op": "replace",
+          "path": "/sideEffectClass",
+          "value": "idempotent"
+        },
+        {
+          "op": "replace",
+          "path": "/idempotencyKey",
+          "value": "key-0001"
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_POLICY_DENIED",
+      "expectedRule": "P-007",
+      "expectedDenialReason": "capability-approval"
+    },
+    {
+      "id": "preflight-request-bytes",
+      "descriptor": "mock-full",
+      "requestMutations": [
+        {
+          "op": "replace",
+          "path": "/requestBytes",
+          "value": 2097152
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_BOUNDS_EXCEEDED",
+      "expectedRule": "P-008"
+    },
+    {
+      "id": "preflight-attachment-count",
+      "descriptor": "mock-full",
+      "requestMutations": [
+        {
+          "op": "replace",
+          "path": "/attachments",
+          "value": [
+            {
+              "bytes": 8
+            },
+            {
+              "bytes": 8
+            },
+            {
+              "bytes": 8
+            },
+            {
+              "bytes": 8
+            },
+            {
+              "bytes": 8
+            },
+            {
+              "bytes": 8
+            },
+            {
+              "bytes": 8
+            },
+            {
+              "bytes": 8
+            },
+            {
+              "bytes": 8
+            }
+          ]
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_BOUNDS_EXCEEDED",
+      "expectedRule": "P-009"
+    },
+    {
+      "id": "preflight-attachment-bytes",
+      "descriptor": "mock-full",
+      "requestMutations": [
+        {
+          "op": "replace",
+          "path": "/attachments",
+          "value": [
+            {
+              "bytes": 524288
+            }
+          ]
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_BOUNDS_EXCEEDED",
+      "expectedRule": "P-010"
+    },
+    {
+      "id": "preflight-tool-definition-count",
+      "descriptor": "mock-full",
+      "requestMutations": [
+        {
+          "op": "replace",
+          "path": "/toolDefinitions",
+          "value": [
+            {
+              "name": "tool-00",
+              "requiredArguments": [],
+              "allowedArguments": []
+            },
+            {
+              "name": "tool-01",
+              "requiredArguments": [],
+              "allowedArguments": []
+            },
+            {
+              "name": "tool-02",
+              "requiredArguments": [],
+              "allowedArguments": []
+            },
+            {
+              "name": "tool-03",
+              "requiredArguments": [],
+              "allowedArguments": []
+            },
+            {
+              "name": "tool-04",
+              "requiredArguments": [],
+              "allowedArguments": []
+            },
+            {
+              "name": "tool-05",
+              "requiredArguments": [],
+              "allowedArguments": []
+            },
+            {
+              "name": "tool-06",
+              "requiredArguments": [],
+              "allowedArguments": []
+            },
+            {
+              "name": "tool-07",
+              "requiredArguments": [],
+              "allowedArguments": []
+            },
+            {
+              "name": "tool-08",
+              "requiredArguments": [],
+              "allowedArguments": []
+            },
+            {
+              "name": "tool-09",
+              "requiredArguments": [],
+              "allowedArguments": []
+            },
+            {
+              "name": "tool-10",
+              "requiredArguments": [],
+              "allowedArguments": []
+            },
+            {
+              "name": "tool-11",
+              "requiredArguments": [],
+              "allowedArguments": []
+            },
+            {
+              "name": "tool-12",
+              "requiredArguments": [],
+              "allowedArguments": []
+            },
+            {
+              "name": "tool-13",
+              "requiredArguments": [],
+              "allowedArguments": []
+            },
+            {
+              "name": "tool-14",
+              "requiredArguments": [],
+              "allowedArguments": []
+            },
+            {
+              "name": "tool-15",
+              "requiredArguments": [],
+              "allowedArguments": []
+            },
+            {
+              "name": "tool-16",
+              "requiredArguments": [],
+              "allowedArguments": []
+            }
+          ]
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_BOUNDS_EXCEEDED",
+      "expectedRule": "P-011"
+    },
+    {
+      "id": "preflight-duplicate-tool-definition",
+      "descriptor": "mock-full",
+      "requestMutations": [
+        {
+          "op": "replace",
+          "path": "/toolDefinitions",
+          "value": [
+            {
+              "name": "echo",
+              "requiredArguments": [
+                "text"
+              ],
+              "allowedArguments": [
+                "locale",
+                "text"
+              ]
+            },
+            {
+              "name": "echo",
+              "requiredArguments": [
+                "text"
+              ],
+              "allowedArguments": [
+                "locale",
+                "text"
+              ]
+            }
+          ]
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_TOOL_VALIDATION_FAILED",
+      "expectedRule": "P-012"
+    },
+    {
+      "id": "preflight-circuit-open",
+      "descriptor": "mock-full",
+      "requestMutations": [
+        {
+          "op": "replace",
+          "path": "/circuitState",
+          "value": "open"
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_POLICY_DENIED",
+      "expectedRule": "P-013",
+      "expectedDenialReason": "circuit-open"
+    },
+    {
+      "id": "preflight-scheme-not-allowlisted",
+      "descriptor": "http-mock",
+      "requestMutations": [
+        {
+          "op": "replace",
+          "path": "/target",
+          "value": {
+            "scheme": "ftp",
+            "host": "gateway.invalid",
+            "port": 443,
+            "redirected": false,
+            "reauthorized": false
+          }
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_POLICY_DENIED",
+      "expectedRule": "P-014",
+      "expectedDenialReason": "egress-not-allowlisted"
+    },
+    {
+      "id": "preflight-host-not-allowlisted",
+      "descriptor": "http-mock",
+      "requestMutations": [
+        {
+          "op": "replace",
+          "path": "/target",
+          "value": {
+            "scheme": "https",
+            "host": "other.invalid",
+            "port": 443,
+            "redirected": false,
+            "reauthorized": false
+          }
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_POLICY_DENIED",
+      "expectedRule": "P-015",
+      "expectedDenialReason": "egress-not-allowlisted"
+    },
+    {
+      "id": "preflight-port-not-allowlisted",
+      "descriptor": "http-mock",
+      "requestMutations": [
+        {
+          "op": "replace",
+          "path": "/target",
+          "value": {
+            "scheme": "https",
+            "host": "gateway.invalid",
+            "port": 9999,
+            "redirected": false,
+            "reauthorized": false
+          }
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_POLICY_DENIED",
+      "expectedRule": "P-016",
+      "expectedDenialReason": "egress-not-allowlisted"
+    },
+    {
+      "id": "preflight-redirect-not-followed",
+      "descriptor": "http-mock",
+      "descriptorMutations": [
+        {
+          "op": "replace",
+          "path": "/network/allowRedirects",
+          "value": false
+        }
+      ],
+      "requestMutations": [
+        {
+          "op": "replace",
+          "path": "/target",
+          "value": {
+            "scheme": "https",
+            "host": "gateway.invalid",
+            "port": 443,
+            "redirected": true,
+            "reauthorized": true
+          }
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_POLICY_DENIED",
+      "expectedRule": "P-018",
+      "expectedDenialReason": "egress-not-allowlisted"
+    },
+    {
+      "id": "preflight-redirect-not-reauthorized",
+      "descriptor": "http-mock",
+      "requestMutations": [
+        {
+          "op": "replace",
+          "path": "/target",
+          "value": {
+            "scheme": "https",
+            "host": "gateway.invalid",
+            "port": 443,
+            "redirected": true,
+            "reauthorized": false
+          }
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_POLICY_DENIED",
+      "expectedRule": "P-017",
+      "expectedDenialReason": "redirect-not-reauthorized"
+    },
+    {
+      "id": "preflight-redirect-downgrades-transport",
+      "descriptor": "http-mock",
+      "requestMutations": [
+        {
+          "op": "replace",
+          "path": "/target",
+          "value": {
+            "scheme": "http",
+            "host": "gateway.invalid",
+            "port": 443,
+            "redirected": true,
+            "reauthorized": true
+          }
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_POLICY_DENIED",
+      "expectedRule": "P-019",
+      "expectedDenialReason": "tls-policy"
+    },
+    {
+      "id": "preflight-mcp-tool-not-allowlisted",
+      "descriptor": "mcp-read-mock",
+      "requestMutations": [
+        {
+          "op": "replace",
+          "path": "/mcpCall",
+          "value": {
+            "tool": "delete-file",
+            "mutating": false,
+            "approvalToken": null
+          }
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_POLICY_DENIED",
+      "expectedRule": "P-020",
+      "expectedDenialReason": "mcp-tool-not-allowlisted"
+    },
+    {
+      "id": "preflight-mcp-mutation-on-read-only",
+      "descriptor": "mcp-read-mock",
+      "requestMutations": [
+        {
+          "op": "replace",
+          "path": "/mcpCall",
+          "value": {
+            "tool": "read-file",
+            "mutating": true,
+            "approvalToken": "approval-0001"
+          }
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_POLICY_DENIED",
+      "expectedRule": "P-021",
+      "expectedDenialReason": "mcp-mutation-not-approved"
+    },
+    {
+      "id": "preflight-mcp-mutation-without-approval",
+      "descriptor": "mcp-write-mock",
+      "requestMutations": [
+        {
+          "op": "replace",
+          "path": "/mcpCall",
+          "value": {
+            "tool": "write-file",
+            "mutating": true,
+            "approvalToken": null
+          }
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_POLICY_DENIED",
+      "expectedRule": "P-022",
+      "expectedDenialReason": "mcp-mutation-not-approved"
+    },
+    {
+      "id": "preflight-executable-identity",
+      "descriptor": "shell-mock",
+      "requestMutations": [
+        {
+          "op": "replace",
+          "path": "/processCall",
+          "value": {
+            "argumentVector": [
+              "/usr/bin/other-tool",
+              "--mock"
+            ],
+            "environment": [],
+            "stdinBytes": 0
+          }
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_POLICY_DENIED",
+      "expectedRule": "P-023",
+      "expectedDenialReason": "executable-not-authorized"
+    },
+    {
+      "id": "preflight-argument-prefix",
+      "descriptor": "shell-mock",
+      "requestMutations": [
+        {
+          "op": "replace",
+          "path": "/processCall",
+          "value": {
+            "argumentVector": [
+              "/usr/bin/ge-mock-tool",
+              "--other"
+            ],
+            "environment": [],
+            "stdinBytes": 0
+          }
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_POLICY_DENIED",
+      "expectedRule": "P-024",
+      "expectedDenialReason": "executable-not-authorized"
+    },
+    {
+      "id": "preflight-environment-not-allowlisted",
+      "descriptor": "shell-mock",
+      "requestMutations": [
+        {
+          "op": "replace",
+          "path": "/processCall",
+          "value": {
+            "argumentVector": [
+              "/usr/bin/ge-mock-tool",
+              "--mock"
+            ],
+            "environment": [
+              "SECRET_TOKEN"
+            ],
+            "stdinBytes": 0
+          }
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_POLICY_DENIED",
+      "expectedRule": "P-025",
+      "expectedDenialReason": "environment-not-allowlisted"
+    },
+    {
+      "id": "preflight-stdin-closed",
+      "descriptor": "shell-mock",
+      "requestMutations": [
+        {
+          "op": "replace",
+          "path": "/processCall",
+          "value": {
+            "argumentVector": [
+              "/usr/bin/ge-mock-tool",
+              "--mock"
+            ],
+            "environment": [
+              "PATH"
+            ],
+            "stdinBytes": 8
+          }
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_POLICY_DENIED",
+      "expectedRule": "P-026",
+      "expectedDenialReason": "stdin-policy"
+    },
+    {
+      "id": "preflight-argument-nul-byte",
+      "descriptor": "shell-mock",
+      "requestMutations": [
+        {
+          "op": "replace",
+          "path": "/processCall",
+          "value": {
+            "argumentVector": [
+              "/usr/bin/ge-mock-tool",
+              "--mock",
+              "payload\u0000injected"
+            ],
+            "environment": [],
+            "stdinBytes": 0
+          }
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_POLICY_DENIED",
+      "expectedRule": "P-027",
+      "expectedDenialReason": "executable-not-authorized"
+    },
+    {
+      "id": "preflight-idempotency-key-missing",
+      "descriptor": "mock-idempotent",
+      "requestMutations": [
+        {
+          "op": "replace",
+          "path": "/sideEffectClass",
+          "value": "idempotent"
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_POLICY_DENIED",
+      "expectedRule": "P-028",
+      "expectedDenialReason": "idempotency-key-missing"
+    }
+  ],
+  "streamCases": [
+    {
+      "id": "stream-positive-tool-calls",
+      "descriptor": "mock-full",
+      "mutations": [],
+      "expectedCode": null,
+      "expectedRule": null,
+      "expectedNormalized": {
+        "frames": 5,
+        "textBytes": 64,
+        "toolCalls": 1,
+        "usageFrames": 1,
+        "finishReason": "tool-calls"
+      },
+      "capabilitiesExercised": [
+        "streaming",
+        "tool-calling",
+        "usage-reporting"
+      ]
+    },
+    {
+      "id": "stream-positive-stop",
+      "descriptor": "mock-full",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/4/finishReason",
+          "value": "stop"
+        }
+      ],
+      "expectedCode": null,
+      "expectedRule": null,
+      "expectedNormalized": {
+        "frames": 5,
+        "textBytes": 64,
+        "toolCalls": 1,
+        "usageFrames": 1,
+        "finishReason": "stop"
+      }
+    },
+    {
+      "id": "stream-positive-max-output",
+      "descriptor": "mock-full",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/4/finishReason",
+          "value": "max-output"
+        }
+      ],
+      "expectedCode": null,
+      "expectedRule": null,
+      "expectedNormalized": {
+        "frames": 5,
+        "textBytes": 64,
+        "toolCalls": 1,
+        "usageFrames": 1,
+        "finishReason": "max-output"
+      }
+    },
+    {
+      "id": "stream-positive-content-filter",
+      "descriptor": "mock-full",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/4/finishReason",
+          "value": "content-filter"
+        }
+      ],
+      "expectedCode": null,
+      "expectedRule": null,
+      "expectedNormalized": {
+        "frames": 5,
+        "textBytes": 64,
+        "toolCalls": 1,
+        "usageFrames": 1,
+        "finishReason": "content-filter"
+      },
+      "capabilitiesExercised": [
+        "content-filter-reporting"
+      ]
+    },
+    {
+      "id": "stream-missing-start",
+      "descriptor": "mock-full",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/0/kind",
+          "value": "text-delta"
+        }
+      ],
+      "expectedRule": "S-001",
+      "expectedCode": "GE_ADAPTER_MALFORMED_RESPONSE"
+    },
+    {
+      "id": "stream-second-start",
+      "descriptor": "mock-full",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/1",
+          "value": {
+            "sequence": 1,
+            "kind": "start",
+            "bytes": 16
+          }
+        }
+      ],
+      "expectedRule": "S-002",
+      "expectedCode": "GE_ADAPTER_MALFORMED_RESPONSE"
+    },
+    {
+      "id": "stream-sequence-not-zero",
+      "descriptor": "mock-full",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/0/sequence",
+          "value": 1
+        }
+      ],
+      "expectedRule": "S-003",
+      "expectedCode": "GE_ADAPTER_MALFORMED_RESPONSE"
+    },
+    {
+      "id": "stream-duplicate-sequence",
+      "descriptor": "mock-full",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/2/sequence",
+          "value": 1
+        }
+      ],
+      "expectedRule": "S-004",
+      "expectedCode": "GE_ADAPTER_MALFORMED_RESPONSE"
+    },
+    {
+      "id": "stream-late-frame",
+      "descriptor": "mock-full",
+      "mutations": [
+        {
+          "op": "add",
+          "path": "/5",
+          "value": {
+            "sequence": 5,
+            "kind": "text-delta",
+            "bytes": 8
+          }
+        }
+      ],
+      "expectedRule": "S-005",
+      "expectedCode": "GE_ADAPTER_MALFORMED_RESPONSE"
+    },
+    {
+      "id": "stream-provider-disconnect",
+      "descriptor": "mock-full",
+      "mutations": [
+        {
+          "op": "remove",
+          "path": "/4"
+        }
+      ],
+      "expectedRule": "S-006",
+      "expectedCode": "GE_ADAPTER_TRANSPORT_FAILURE"
+    },
+    {
+      "id": "stream-oversized-frame",
+      "descriptor": "mock-full",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/1/bytes",
+          "value": 131072
+        }
+      ],
+      "expectedRule": "S-007",
+      "expectedCode": "GE_ADAPTER_MALFORMED_RESPONSE"
+    },
+    {
+      "id": "stream-too-many-frames",
+      "descriptor": "mock-full",
+      "descriptorMutations": [
+        {
+          "op": "replace",
+          "path": "/bounds/maxStreamFrames",
+          "value": 4
+        }
+      ],
+      "mutations": [],
+      "expectedRule": "S-008",
+      "expectedCode": "GE_ADAPTER_MALFORMED_RESPONSE"
+    },
+    {
+      "id": "stream-second-usage-frame",
+      "descriptor": "mock-full",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/1",
+          "value": {
+            "sequence": 1,
+            "kind": "usage",
+            "bytes": 16
+          }
+        }
+      ],
+      "expectedRule": "S-009",
+      "expectedCode": "GE_ADAPTER_MALFORMED_RESPONSE"
+    },
+    {
+      "id": "stream-usage-without-capability",
+      "descriptor": "mock-full",
+      "descriptorMutations": [
+        {
+          "op": "remove",
+          "path": "/capabilities/15"
+        }
+      ],
+      "mutations": [],
+      "expectedRule": "S-010",
+      "capabilitiesExercised": [
+        "usage-reporting"
+      ],
+      "expectedCode": "GE_ADAPTER_MALFORMED_RESPONSE"
+    },
+    {
+      "id": "stream-tool-call-without-capability",
+      "descriptor": "mock-full",
+      "descriptorMutations": [
+        {
+          "op": "remove",
+          "path": "/capabilities/14"
+        }
+      ],
+      "mutations": [],
+      "expectedRule": "S-011",
+      "capabilitiesExercised": [
+        "tool-calling"
+      ],
+      "expectedCode": "GE_ADAPTER_MALFORMED_RESPONSE"
+    },
+    {
+      "id": "stream-tool-call-over-bound",
+      "descriptor": "mock-full",
+      "descriptorMutations": [
+        {
+          "op": "replace",
+          "path": "/bounds/maxToolCallsPerResponse",
+          "value": 0
+        }
+      ],
+      "mutations": [],
+      "expectedRule": "S-012",
+      "expectedCode": "GE_ADAPTER_MALFORMED_RESPONSE"
+    },
+    {
+      "id": "stream-text-over-response-bound",
+      "descriptor": "mock-full",
+      "descriptorMutations": [
+        {
+          "op": "replace",
+          "path": "/bounds/maxResponseBytes",
+          "value": 32
+        }
+      ],
+      "mutations": [],
+      "expectedRule": "S-013",
+      "expectedCode": "GE_ADAPTER_MALFORMED_RESPONSE"
+    },
+    {
+      "id": "stream-tool-finish-without-tool-call",
+      "descriptor": "mock-full",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/2/kind",
+          "value": "text-delta"
+        }
+      ],
+      "expectedRule": "S-014",
+      "expectedCode": "GE_ADAPTER_MALFORMED_RESPONSE"
+    },
+    {
+      "id": "stream-cancelled-finish-reason",
+      "descriptor": "mock-full",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/4/finishReason",
+          "value": "cancelled"
+        }
+      ],
+      "expectedRule": "S-015",
+      "finishReasonExercised": "cancelled",
+      "expectedCode": "GE_ADAPTER_MALFORMED_RESPONSE"
+    },
+    {
+      "id": "stream-parallel-tool-calls-undeclared",
+      "descriptor": "mock-full",
+      "descriptorMutations": [
+        {
+          "op": "remove",
+          "path": "/capabilities/7"
+        }
+      ],
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/3",
+          "value": {
+            "sequence": 3,
+            "kind": "tool-call",
+            "bytes": 32,
+            "toolCallId": "call-2"
+          }
+        }
+      ],
+      "expectedRule": "S-016",
+      "capabilitiesExercised": [
+        "parallel-tool-calls"
+      ],
+      "expectedCode": "GE_ADAPTER_MALFORMED_RESPONSE"
+    },
+    {
+      "id": "stream-content-filter-undeclared",
+      "descriptor": "mock-full",
+      "descriptorMutations": [
+        {
+          "op": "remove",
+          "path": "/capabilities/3"
+        }
+      ],
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/4/finishReason",
+          "value": "content-filter"
+        }
+      ],
+      "expectedRule": "S-017",
+      "capabilitiesExercised": [
+        "content-filter-reporting"
+      ],
+      "expectedCode": "GE_ADAPTER_MALFORMED_RESPONSE"
+    }
+  ],
+  "usageCases": [
+    {
+      "id": "usage-positive",
+      "descriptor": "mock-full",
+      "mutations": [],
+      "expectedCode": null,
+      "expectedRule": null,
+      "expectedSummary": {
+        "resources": 9,
+        "providerCalls": 1,
+        "budgetCostState": "provider-reported"
+      },
+      "resourcesExercised": [
+        "audio-units",
+        "cached-input-units",
+        "image-units",
+        "input-units",
+        "output-units",
+        "provider-calls",
+        "reasoning-units",
+        "tool-calls",
+        "transport-bytes"
+      ],
+      "capabilitiesExercised": [
+        "provider-request-id",
+        "usage-reporting"
+      ]
+    },
+    {
+      "id": "usage-out-of-order",
+      "descriptor": "mock-full",
+      "expectedRule": "U-001",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/quantities/0",
+          "value": {
+            "resource": "cached-input-units",
+            "unit": "usage-unit",
+            "aggregation": "sum",
+            "amount": 64
+          }
+        },
+        {
+          "op": "replace",
+          "path": "/quantities/1",
+          "value": {
+            "resource": "audio-units",
+            "unit": "usage-unit",
+            "aggregation": "sum",
+            "amount": 2
+          }
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_MALFORMED_RESPONSE"
+    },
+    {
+      "id": "usage-duplicate-resource",
+      "descriptor": "mock-full",
+      "expectedRule": "U-002",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/quantities/1",
+          "value": {
+            "resource": "audio-units",
+            "unit": "usage-unit",
+            "aggregation": "sum",
+            "amount": 5
+          }
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_MALFORMED_RESPONSE"
+    },
+    {
+      "id": "usage-wrong-unit",
+      "descriptor": "mock-full",
+      "expectedRule": "U-003",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/quantities/3/unit",
+          "value": "count"
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_MALFORMED_RESPONSE"
+    },
+    {
+      "id": "usage-maximum-aggregation",
+      "descriptor": "mock-full",
+      "expectedRule": "U-004",
+      "schemaValid": false,
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/quantities/3/aggregation",
+          "value": "maximum"
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_MALFORMED_RESPONSE"
+    },
+    {
+      "id": "usage-reports-money",
+      "descriptor": "mock-full",
+      "expectedRule": "U-005",
+      "schemaValid": false,
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/quantities/5/resource",
+          "value": "money-nano-minor"
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_MALFORMED_RESPONSE"
+    },
+    {
+      "id": "usage-cost-state-not-derived",
+      "descriptor": "mock-full",
+      "expectedRule": "U-006",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/budgetCostState",
+          "value": "estimated"
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_MALFORMED_RESPONSE"
+    },
+    {
+      "id": "usage-without-provider-call",
+      "descriptor": "mock-full",
+      "expectedRule": "U-007",
+      "mutations": [
+        {
+          "op": "remove",
+          "path": "/quantities/5"
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_MALFORMED_RESPONSE"
+    },
+    {
+      "id": "usage-trusted-without-capability",
+      "descriptor": "mock-full",
+      "expectedRule": "U-008",
+      "descriptorMutations": [
+        {
+          "op": "remove",
+          "path": "/capabilities/15"
+        }
+      ],
+      "mutations": [],
+      "capabilitiesExercised": [
+        "usage-reporting"
+      ],
+      "expectedCode": "GE_ADAPTER_MALFORMED_RESPONSE"
+    },
+    {
+      "id": "usage-cached-without-capability",
+      "descriptor": "mock-full",
+      "expectedRule": "U-009",
+      "descriptorMutations": [
+        {
+          "op": "remove",
+          "path": "/capabilities/1"
+        }
+      ],
+      "mutations": [],
+      "capabilitiesExercised": [
+        "cached-input-usage-reporting"
+      ],
+      "resourcesExercised": [
+        "cached-input-units"
+      ],
+      "expectedCode": "GE_ADAPTER_MALFORMED_RESPONSE"
+    },
+    {
+      "id": "usage-reasoning-without-capability",
+      "descriptor": "mock-full",
+      "expectedRule": "U-010",
+      "descriptorMutations": [
+        {
+          "op": "remove",
+          "path": "/capabilities/10"
+        }
+      ],
+      "mutations": [],
+      "capabilitiesExercised": [
+        "reasoning-usage-reporting"
+      ],
+      "resourcesExercised": [
+        "reasoning-units"
+      ],
+      "expectedCode": "GE_ADAPTER_MALFORMED_RESPONSE"
+    },
+    {
+      "id": "usage-image-without-attachments",
+      "descriptor": "mock-full",
+      "expectedRule": "U-011",
+      "descriptorMutations": [
+        {
+          "op": "remove",
+          "path": "/capabilities/0"
+        }
+      ],
+      "mutations": [
+        {
+          "op": "remove",
+          "path": "/quantities/0"
+        }
+      ],
+      "capabilitiesExercised": [
+        "attachments"
+      ],
+      "resourcesExercised": [
+        "image-units"
+      ],
+      "expectedCode": "GE_ADAPTER_MALFORMED_RESPONSE"
+    },
+    {
+      "id": "usage-audio-without-attachments",
+      "descriptor": "mock-full",
+      "expectedRule": "U-011",
+      "descriptorMutations": [
+        {
+          "op": "remove",
+          "path": "/capabilities/0"
+        }
+      ],
+      "mutations": [
+        {
+          "op": "remove",
+          "path": "/quantities/2"
+        }
+      ],
+      "resourcesExercised": [
+        "audio-units"
+      ],
+      "expectedCode": "GE_ADAPTER_MALFORMED_RESPONSE"
+    },
+    {
+      "id": "usage-tool-calls-without-capability",
+      "descriptor": "mock-full",
+      "expectedRule": "U-012",
+      "descriptorMutations": [
+        {
+          "op": "remove",
+          "path": "/capabilities/14"
+        }
+      ],
+      "mutations": [],
+      "capabilitiesExercised": [
+        "tool-calling"
+      ],
+      "resourcesExercised": [
+        "tool-calls"
+      ],
+      "expectedCode": "GE_ADAPTER_MALFORMED_RESPONSE"
+    },
+    {
+      "id": "usage-provider-request-id-without-capability",
+      "descriptor": "mock-full",
+      "expectedRule": "U-013",
+      "descriptorMutations": [
+        {
+          "op": "remove",
+          "path": "/capabilities/8"
+        }
+      ],
+      "mutations": [],
+      "capabilitiesExercised": [
+        "provider-request-id"
+      ],
+      "expectedCode": "GE_ADAPTER_MALFORMED_RESPONSE"
+    },
+    {
+      "id": "usage-provider-metrics-out-of-order",
+      "descriptor": "mock-full",
+      "expectedRule": "U-014",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/providerSpecific",
+          "value": [
+            {
+              "metricId": "graph-engineering/mock-second-metric/v1alpha1",
+              "unitId": "graph-engineering/mock-unit/v1alpha1",
+              "aggregation": "sum",
+              "amount": 3
+            },
+            {
+              "metricId": "graph-engineering/mock-metric/v1alpha1",
+              "unitId": "graph-engineering/mock-unit/v1alpha1",
+              "aggregation": "sum",
+              "amount": 7
+            }
+          ]
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_MALFORMED_RESPONSE"
+    },
+    {
+      "id": "usage-provider-metric-unlisted",
+      "descriptor": "mock-full",
+      "expectedRule": "U-015",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/providerSpecific/0/metricId",
+          "value": "graph-engineering/zz-unknown-metric/v1alpha1"
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_MALFORMED_RESPONSE"
+    },
+    {
+      "id": "usage-zero-amount",
+      "descriptor": "mock-full",
+      "expectedRule": "U-016",
+      "schemaValid": false,
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/quantities/3/amount",
+          "value": 0
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_MALFORMED_RESPONSE"
+    },
+    {
+      "id": "usage-content-filter-without-capability",
+      "descriptor": "mock-full",
+      "expectedRule": "U-017",
+      "descriptorMutations": [
+        {
+          "op": "remove",
+          "path": "/capabilities/3"
+        }
+      ],
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/finishReason",
+          "value": "content-filter"
+        }
+      ],
+      "capabilitiesExercised": [
+        "content-filter-reporting"
+      ],
+      "expectedCode": "GE_ADAPTER_MALFORMED_RESPONSE"
+    },
+    {
+      "id": "usage-conservative-trust-without-usage-reporting",
+      "descriptor": "mock-full",
+      "expectedRule": "U-018",
+      "descriptorMutations": [
+        {
+          "op": "remove",
+          "path": "/capabilities/15"
+        }
+      ],
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/trust",
+          "value": "adapter-conservative"
+        },
+        {
+          "op": "replace",
+          "path": "/budgetCostState",
+          "value": "estimated"
+        },
+        {
+          "op": "remove",
+          "path": "/quantities/6"
+        },
+        {
+          "op": "remove",
+          "path": "/quantities/4"
+        },
+        {
+          "op": "remove",
+          "path": "/quantities/3"
+        },
+        {
+          "op": "remove",
+          "path": "/quantities/2"
+        },
+        {
+          "op": "remove",
+          "path": "/quantities/1"
+        },
+        {
+          "op": "remove",
+          "path": "/quantities/0"
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_MALFORMED_RESPONSE"
+    },
+    {
+      "id": "usage-unit-meters-without-usage-reporting",
+      "descriptor": "mock-full",
+      "expectedRule": "U-018",
+      "descriptorMutations": [
+        {
+          "op": "remove",
+          "path": "/capabilities/15"
+        }
+      ],
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/trust",
+          "value": "unknown"
+        },
+        {
+          "op": "replace",
+          "path": "/budgetCostState",
+          "value": "unknown"
+        }
+      ],
+      "expectedCode": "GE_ADAPTER_MALFORMED_RESPONSE"
+    }
+  ],
+  "toolCases": [
+    {
+      "id": "tool-positive",
+      "descriptor": "mock-full",
+      "requestMutations": [
+        {
+          "op": "replace",
+          "path": "/toolDefinitions",
+          "value": [
+            {
+              "name": "echo",
+              "requiredArguments": [
+                "text"
+              ],
+              "allowedArguments": [
+                "locale",
+                "text"
+              ]
+            }
+          ]
+        }
+      ],
+      "mutations": [],
+      "expectedCode": null,
+      "expectedRule": null,
+      "capabilitiesExercised": [
+        "tool-calling"
+      ]
+    },
+    {
+      "id": "tool-undeclared-name",
+      "descriptor": "mock-full",
+      "requestMutations": [
+        {
+          "op": "replace",
+          "path": "/toolDefinitions",
+          "value": [
+            {
+              "name": "echo",
+              "requiredArguments": [
+                "text"
+              ],
+              "allowedArguments": [
+                "locale",
+                "text"
+              ]
+            }
+          ]
+        }
+      ],
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/toolCalls/0/name",
+          "value": "unknown-tool"
+        }
+      ],
+      "expectedRule": "T-001",
+      "expectedCode": "GE_ADAPTER_TOOL_VALIDATION_FAILED"
+    },
+    {
+      "id": "tool-missing-required-argument",
+      "descriptor": "mock-full",
+      "requestMutations": [
+        {
+          "op": "replace",
+          "path": "/toolDefinitions",
+          "value": [
+            {
+              "name": "echo",
+              "requiredArguments": [
+                "text"
+              ],
+              "allowedArguments": [
+                "locale",
+                "text"
+              ]
+            }
+          ]
+        }
+      ],
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/toolCalls/0/arguments",
+          "value": {}
+        }
+      ],
+      "expectedRule": "T-002",
+      "expectedCode": "GE_ADAPTER_TOOL_VALIDATION_FAILED"
+    },
+    {
+      "id": "tool-undeclared-argument",
+      "descriptor": "mock-full",
+      "requestMutations": [
+        {
+          "op": "replace",
+          "path": "/toolDefinitions",
+          "value": [
+            {
+              "name": "echo",
+              "requiredArguments": [
+                "text"
+              ],
+              "allowedArguments": [
+                "locale",
+                "text"
+              ]
+            }
+          ]
+        }
+      ],
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/toolCalls/0/arguments",
+          "value": {
+            "text": "mock",
+            "elevate": "true"
+          }
+        }
+      ],
+      "expectedRule": "T-002",
+      "expectedCode": "GE_ADAPTER_TOOL_VALIDATION_FAILED"
+    },
+    {
+      "id": "tool-over-response-bound",
+      "descriptor": "mock-full",
+      "requestMutations": [
+        {
+          "op": "replace",
+          "path": "/toolDefinitions",
+          "value": [
+            {
+              "name": "echo",
+              "requiredArguments": [
+                "text"
+              ],
+              "allowedArguments": [
+                "locale",
+                "text"
+              ]
+            }
+          ]
+        }
+      ],
+      "descriptorMutations": [
+        {
+          "op": "replace",
+          "path": "/bounds/maxToolCallsPerResponse",
+          "value": 0
+        }
+      ],
+      "mutations": [],
+      "expectedRule": "T-003",
+      "expectedCode": "GE_ADAPTER_TOOL_VALIDATION_FAILED"
+    },
+    {
+      "id": "tool-duplicate-call-id",
+      "descriptor": "mock-full",
+      "requestMutations": [
+        {
+          "op": "replace",
+          "path": "/toolDefinitions",
+          "value": [
+            {
+              "name": "echo",
+              "requiredArguments": [
+                "text"
+              ],
+              "allowedArguments": [
+                "locale",
+                "text"
+              ]
+            }
+          ]
+        }
+      ],
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/toolCalls",
+          "value": [
+            {
+              "id": "call-1",
+              "name": "echo",
+              "arguments": {
+                "text": "a"
+              }
+            },
+            {
+              "id": "call-1",
+              "name": "echo",
+              "arguments": {
+                "text": "b"
+              }
+            }
+          ]
+        }
+      ],
+      "expectedRule": "T-004",
+      "expectedCode": "GE_ADAPTER_TOOL_VALIDATION_FAILED"
+    },
+    {
+      "id": "tool-not-authorized-by-policy",
+      "descriptor": "mock-full",
+      "requestMutations": [
+        {
+          "op": "replace",
+          "path": "/toolDefinitions",
+          "value": [
+            {
+              "name": "echo",
+              "requiredArguments": [
+                "text"
+              ],
+              "allowedArguments": [
+                "locale",
+                "text"
+              ]
+            }
+          ]
+        }
+      ],
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/authorizedTools",
+          "value": []
+        }
+      ],
+      "expectedRule": "T-005",
+      "expectedCode": "GE_ADAPTER_TOOL_VALIDATION_FAILED"
+    },
+    {
+      "id": "tool-widens-mcp-allowlist",
+      "descriptor": "mcp-read-mock",
+      "requestMutations": [
+        {
+          "op": "replace",
+          "path": "/toolDefinitions",
+          "value": [
+            {
+              "name": "echo",
+              "requiredArguments": [
+                "text"
+              ],
+              "allowedArguments": [
+                "locale",
+                "text"
+              ]
+            }
+          ]
+        }
+      ],
+      "mutations": [],
+      "expectedRule": "T-006",
+      "expectedCode": "GE_ADAPTER_TOOL_VALIDATION_FAILED"
+    }
+  ],
+  "errorCases": [
+    {
+      "id": "error-taxonomy-ge-adapter-authentication",
+      "descriptor": "mock-full",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/code",
+          "value": "GE_ADAPTER_AUTHENTICATION"
+        },
+        {
+          "op": "replace",
+          "path": "/boundary",
+          "value": "dispatch"
+        },
+        {
+          "op": "replace",
+          "path": "/retryable",
+          "value": false
+        },
+        {
+          "op": "replace",
+          "path": "/effectDisposition",
+          "value": "not-applied"
+        },
+        {
+          "op": "replace",
+          "path": "/usageDisposition",
+          "value": "none"
+        },
+        {
+          "op": "replace",
+          "path": "/adapterId",
+          "value": "mock-full"
+        },
+        {
+          "op": "replace",
+          "path": "/sideEffectClass",
+          "value": "none"
+        },
+        {
+          "op": "replace",
+          "path": "/denialReason",
+          "value": null
+        },
+        {
+          "op": "replace",
+          "path": "/providerRequestId",
+          "value": "mock-req-000002"
+        }
+      ],
+      "expectedCode": null,
+      "expectedRule": null,
+      "expectedSummary": {
+        "code": "GE_ADAPTER_AUTHENTICATION",
+        "ledgerAction": "release-reservation",
+        "requiresInDoubtRecord": false
+      }
+    },
+    {
+      "id": "error-taxonomy-ge-adapter-bounds-exceeded",
+      "descriptor": "mock-full",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/code",
+          "value": "GE_ADAPTER_BOUNDS_EXCEEDED"
+        },
+        {
+          "op": "replace",
+          "path": "/boundary",
+          "value": "pre-dispatch"
+        },
+        {
+          "op": "replace",
+          "path": "/retryable",
+          "value": false
+        },
+        {
+          "op": "replace",
+          "path": "/effectDisposition",
+          "value": "not-applied"
+        },
+        {
+          "op": "replace",
+          "path": "/usageDisposition",
+          "value": "none"
+        },
+        {
+          "op": "replace",
+          "path": "/adapterId",
+          "value": "mock-full"
+        },
+        {
+          "op": "replace",
+          "path": "/sideEffectClass",
+          "value": "none"
+        },
+        {
+          "op": "replace",
+          "path": "/denialReason",
+          "value": null
+        },
+        {
+          "op": "replace",
+          "path": "/providerRequestId",
+          "value": null
+        }
+      ],
+      "expectedCode": null,
+      "expectedRule": null,
+      "expectedSummary": {
+        "code": "GE_ADAPTER_BOUNDS_EXCEEDED",
+        "ledgerAction": "release-reservation",
+        "requiresInDoubtRecord": false
+      }
+    },
+    {
+      "id": "error-taxonomy-ge-adapter-cancelled",
+      "descriptor": "mock-nonidempotent",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/code",
+          "value": "GE_ADAPTER_CANCELLED"
+        },
+        {
+          "op": "replace",
+          "path": "/boundary",
+          "value": "dispatch"
+        },
+        {
+          "op": "replace",
+          "path": "/retryable",
+          "value": false
+        },
+        {
+          "op": "replace",
+          "path": "/effectDisposition",
+          "value": "in-doubt"
+        },
+        {
+          "op": "replace",
+          "path": "/usageDisposition",
+          "value": "conservative"
+        },
+        {
+          "op": "replace",
+          "path": "/adapterId",
+          "value": "mock-nonidempotent"
+        },
+        {
+          "op": "replace",
+          "path": "/sideEffectClass",
+          "value": "non-idempotent"
+        },
+        {
+          "op": "replace",
+          "path": "/denialReason",
+          "value": null
+        },
+        {
+          "op": "replace",
+          "path": "/providerRequestId",
+          "value": "mock-req-000002"
+        }
+      ],
+      "expectedCode": null,
+      "expectedRule": null,
+      "expectedSummary": {
+        "code": "GE_ADAPTER_CANCELLED",
+        "ledgerAction": "commit-conservative",
+        "requiresInDoubtRecord": true
+      }
+    },
+    {
+      "id": "error-taxonomy-ge-adapter-capability-unsupported",
+      "descriptor": "mock-full",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/code",
+          "value": "GE_ADAPTER_CAPABILITY_UNSUPPORTED"
+        },
+        {
+          "op": "replace",
+          "path": "/boundary",
+          "value": "pre-dispatch"
+        },
+        {
+          "op": "replace",
+          "path": "/retryable",
+          "value": false
+        },
+        {
+          "op": "replace",
+          "path": "/effectDisposition",
+          "value": "not-applied"
+        },
+        {
+          "op": "replace",
+          "path": "/usageDisposition",
+          "value": "none"
+        },
+        {
+          "op": "replace",
+          "path": "/adapterId",
+          "value": "mock-full"
+        },
+        {
+          "op": "replace",
+          "path": "/sideEffectClass",
+          "value": "none"
+        },
+        {
+          "op": "replace",
+          "path": "/denialReason",
+          "value": null
+        },
+        {
+          "op": "replace",
+          "path": "/providerRequestId",
+          "value": null
+        }
+      ],
+      "expectedCode": null,
+      "expectedRule": null,
+      "expectedSummary": {
+        "code": "GE_ADAPTER_CAPABILITY_UNSUPPORTED",
+        "ledgerAction": "release-reservation",
+        "requiresInDoubtRecord": false
+      }
+    },
+    {
+      "id": "error-taxonomy-ge-adapter-content-filtered",
+      "descriptor": "mock-full",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/code",
+          "value": "GE_ADAPTER_CONTENT_FILTERED"
+        },
+        {
+          "op": "replace",
+          "path": "/boundary",
+          "value": "dispatch"
+        },
+        {
+          "op": "replace",
+          "path": "/retryable",
+          "value": false
+        },
+        {
+          "op": "replace",
+          "path": "/effectDisposition",
+          "value": "applied"
+        },
+        {
+          "op": "replace",
+          "path": "/usageDisposition",
+          "value": "conservative"
+        },
+        {
+          "op": "replace",
+          "path": "/adapterId",
+          "value": "mock-full"
+        },
+        {
+          "op": "replace",
+          "path": "/sideEffectClass",
+          "value": "none"
+        },
+        {
+          "op": "replace",
+          "path": "/denialReason",
+          "value": null
+        },
+        {
+          "op": "replace",
+          "path": "/providerRequestId",
+          "value": "mock-req-000002"
+        }
+      ],
+      "expectedCode": null,
+      "expectedRule": null,
+      "expectedSummary": {
+        "code": "GE_ADAPTER_CONTENT_FILTERED",
+        "ledgerAction": "commit-conservative",
+        "requiresInDoubtRecord": false
+      }
+    },
+    {
+      "id": "error-taxonomy-ge-adapter-descriptor-invalid",
+      "descriptor": "mock-full",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/code",
+          "value": "GE_ADAPTER_DESCRIPTOR_INVALID"
+        },
+        {
+          "op": "replace",
+          "path": "/boundary",
+          "value": "pre-dispatch"
+        },
+        {
+          "op": "replace",
+          "path": "/retryable",
+          "value": false
+        },
+        {
+          "op": "replace",
+          "path": "/effectDisposition",
+          "value": "not-applied"
+        },
+        {
+          "op": "replace",
+          "path": "/usageDisposition",
+          "value": "none"
+        },
+        {
+          "op": "replace",
+          "path": "/adapterId",
+          "value": "mock-full"
+        },
+        {
+          "op": "replace",
+          "path": "/sideEffectClass",
+          "value": "none"
+        },
+        {
+          "op": "replace",
+          "path": "/denialReason",
+          "value": null
+        },
+        {
+          "op": "replace",
+          "path": "/providerRequestId",
+          "value": null
+        }
+      ],
+      "expectedCode": null,
+      "expectedRule": null,
+      "expectedSummary": {
+        "code": "GE_ADAPTER_DESCRIPTOR_INVALID",
+        "ledgerAction": "release-reservation",
+        "requiresInDoubtRecord": false
+      }
+    },
+    {
+      "id": "error-taxonomy-ge-adapter-invalid-request",
+      "descriptor": "mock-full",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/code",
+          "value": "GE_ADAPTER_INVALID_REQUEST"
+        },
+        {
+          "op": "replace",
+          "path": "/boundary",
+          "value": "dispatch"
+        },
+        {
+          "op": "replace",
+          "path": "/retryable",
+          "value": false
+        },
+        {
+          "op": "replace",
+          "path": "/effectDisposition",
+          "value": "not-applied"
+        },
+        {
+          "op": "replace",
+          "path": "/usageDisposition",
+          "value": "none"
+        },
+        {
+          "op": "replace",
+          "path": "/adapterId",
+          "value": "mock-full"
+        },
+        {
+          "op": "replace",
+          "path": "/sideEffectClass",
+          "value": "none"
+        },
+        {
+          "op": "replace",
+          "path": "/denialReason",
+          "value": null
+        },
+        {
+          "op": "replace",
+          "path": "/providerRequestId",
+          "value": "mock-req-000002"
+        }
+      ],
+      "expectedCode": null,
+      "expectedRule": null,
+      "expectedSummary": {
+        "code": "GE_ADAPTER_INVALID_REQUEST",
+        "ledgerAction": "release-reservation",
+        "requiresInDoubtRecord": false
+      }
+    },
+    {
+      "id": "error-taxonomy-ge-adapter-malformed-response",
+      "descriptor": "mock-full",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/code",
+          "value": "GE_ADAPTER_MALFORMED_RESPONSE"
+        },
+        {
+          "op": "replace",
+          "path": "/boundary",
+          "value": "dispatch"
+        },
+        {
+          "op": "replace",
+          "path": "/retryable",
+          "value": true
+        },
+        {
+          "op": "replace",
+          "path": "/effectDisposition",
+          "value": "applied"
+        },
+        {
+          "op": "replace",
+          "path": "/usageDisposition",
+          "value": "conservative"
+        },
+        {
+          "op": "replace",
+          "path": "/adapterId",
+          "value": "mock-full"
+        },
+        {
+          "op": "replace",
+          "path": "/sideEffectClass",
+          "value": "none"
+        },
+        {
+          "op": "replace",
+          "path": "/denialReason",
+          "value": null
+        },
+        {
+          "op": "replace",
+          "path": "/providerRequestId",
+          "value": "mock-req-000002"
+        }
+      ],
+      "expectedCode": null,
+      "expectedRule": null,
+      "expectedSummary": {
+        "code": "GE_ADAPTER_MALFORMED_RESPONSE",
+        "ledgerAction": "commit-conservative",
+        "requiresInDoubtRecord": false
+      }
+    },
+    {
+      "id": "error-taxonomy-ge-adapter-policy-denied",
+      "descriptor": "mock-full",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/code",
+          "value": "GE_ADAPTER_POLICY_DENIED"
+        },
+        {
+          "op": "replace",
+          "path": "/boundary",
+          "value": "pre-dispatch"
+        },
+        {
+          "op": "replace",
+          "path": "/retryable",
+          "value": false
+        },
+        {
+          "op": "replace",
+          "path": "/effectDisposition",
+          "value": "not-applied"
+        },
+        {
+          "op": "replace",
+          "path": "/usageDisposition",
+          "value": "none"
+        },
+        {
+          "op": "replace",
+          "path": "/adapterId",
+          "value": "mock-full"
+        },
+        {
+          "op": "replace",
+          "path": "/sideEffectClass",
+          "value": "none"
+        },
+        {
+          "op": "replace",
+          "path": "/denialReason",
+          "value": "circuit-open"
+        },
+        {
+          "op": "replace",
+          "path": "/providerRequestId",
+          "value": null
+        }
+      ],
+      "expectedCode": null,
+      "expectedRule": null,
+      "expectedSummary": {
+        "code": "GE_ADAPTER_POLICY_DENIED",
+        "ledgerAction": "release-reservation",
+        "requiresInDoubtRecord": false
+      }
+    },
+    {
+      "id": "error-taxonomy-ge-adapter-quota-exceeded",
+      "descriptor": "mock-full",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/code",
+          "value": "GE_ADAPTER_QUOTA_EXCEEDED"
+        },
+        {
+          "op": "replace",
+          "path": "/boundary",
+          "value": "dispatch"
+        },
+        {
+          "op": "replace",
+          "path": "/retryable",
+          "value": false
+        },
+        {
+          "op": "replace",
+          "path": "/effectDisposition",
+          "value": "not-applied"
+        },
+        {
+          "op": "replace",
+          "path": "/usageDisposition",
+          "value": "none"
+        },
+        {
+          "op": "replace",
+          "path": "/adapterId",
+          "value": "mock-full"
+        },
+        {
+          "op": "replace",
+          "path": "/sideEffectClass",
+          "value": "none"
+        },
+        {
+          "op": "replace",
+          "path": "/denialReason",
+          "value": null
+        },
+        {
+          "op": "replace",
+          "path": "/providerRequestId",
+          "value": "mock-req-000002"
+        }
+      ],
+      "expectedCode": null,
+      "expectedRule": null,
+      "expectedSummary": {
+        "code": "GE_ADAPTER_QUOTA_EXCEEDED",
+        "ledgerAction": "release-reservation",
+        "requiresInDoubtRecord": false
+      }
+    },
+    {
+      "id": "error-taxonomy-ge-adapter-rate-limited",
+      "descriptor": "mock-full",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/code",
+          "value": "GE_ADAPTER_RATE_LIMITED"
+        },
+        {
+          "op": "replace",
+          "path": "/boundary",
+          "value": "dispatch"
+        },
+        {
+          "op": "replace",
+          "path": "/retryable",
+          "value": true
+        },
+        {
+          "op": "replace",
+          "path": "/effectDisposition",
+          "value": "not-applied"
+        },
+        {
+          "op": "replace",
+          "path": "/usageDisposition",
+          "value": "none"
+        },
+        {
+          "op": "replace",
+          "path": "/adapterId",
+          "value": "mock-full"
+        },
+        {
+          "op": "replace",
+          "path": "/sideEffectClass",
+          "value": "none"
+        },
+        {
+          "op": "replace",
+          "path": "/denialReason",
+          "value": null
+        },
+        {
+          "op": "replace",
+          "path": "/providerRequestId",
+          "value": "mock-req-000002"
+        }
+      ],
+      "expectedCode": null,
+      "expectedRule": null,
+      "expectedSummary": {
+        "code": "GE_ADAPTER_RATE_LIMITED",
+        "ledgerAction": "release-reservation",
+        "requiresInDoubtRecord": false
+      }
+    },
+    {
+      "id": "error-taxonomy-ge-adapter-timeout",
+      "descriptor": "mock-nonidempotent",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/code",
+          "value": "GE_ADAPTER_TIMEOUT"
+        },
+        {
+          "op": "replace",
+          "path": "/boundary",
+          "value": "dispatch"
+        },
+        {
+          "op": "replace",
+          "path": "/retryable",
+          "value": true
+        },
+        {
+          "op": "replace",
+          "path": "/effectDisposition",
+          "value": "in-doubt"
+        },
+        {
+          "op": "replace",
+          "path": "/usageDisposition",
+          "value": "conservative"
+        },
+        {
+          "op": "replace",
+          "path": "/adapterId",
+          "value": "mock-nonidempotent"
+        },
+        {
+          "op": "replace",
+          "path": "/sideEffectClass",
+          "value": "non-idempotent"
+        },
+        {
+          "op": "replace",
+          "path": "/denialReason",
+          "value": null
+        },
+        {
+          "op": "replace",
+          "path": "/providerRequestId",
+          "value": "mock-req-000002"
+        }
+      ],
+      "expectedCode": null,
+      "expectedRule": null,
+      "expectedSummary": {
+        "code": "GE_ADAPTER_TIMEOUT",
+        "ledgerAction": "commit-conservative",
+        "requiresInDoubtRecord": true
+      }
+    },
+    {
+      "id": "error-taxonomy-ge-adapter-tool-validation-failed",
+      "descriptor": "mock-full",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/code",
+          "value": "GE_ADAPTER_TOOL_VALIDATION_FAILED"
+        },
+        {
+          "op": "replace",
+          "path": "/boundary",
+          "value": "pre-dispatch"
+        },
+        {
+          "op": "replace",
+          "path": "/retryable",
+          "value": false
+        },
+        {
+          "op": "replace",
+          "path": "/effectDisposition",
+          "value": "not-applied"
+        },
+        {
+          "op": "replace",
+          "path": "/usageDisposition",
+          "value": "none"
+        },
+        {
+          "op": "replace",
+          "path": "/adapterId",
+          "value": "mock-full"
+        },
+        {
+          "op": "replace",
+          "path": "/sideEffectClass",
+          "value": "none"
+        },
+        {
+          "op": "replace",
+          "path": "/denialReason",
+          "value": null
+        },
+        {
+          "op": "replace",
+          "path": "/providerRequestId",
+          "value": null
+        }
+      ],
+      "expectedCode": null,
+      "expectedRule": null,
+      "expectedSummary": {
+        "code": "GE_ADAPTER_TOOL_VALIDATION_FAILED",
+        "ledgerAction": "release-reservation",
+        "requiresInDoubtRecord": false
+      }
+    },
+    {
+      "id": "error-taxonomy-ge-adapter-transport-failure",
+      "descriptor": "mock-nonidempotent",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/code",
+          "value": "GE_ADAPTER_TRANSPORT_FAILURE"
+        },
+        {
+          "op": "replace",
+          "path": "/boundary",
+          "value": "dispatch"
+        },
+        {
+          "op": "replace",
+          "path": "/retryable",
+          "value": true
+        },
+        {
+          "op": "replace",
+          "path": "/effectDisposition",
+          "value": "in-doubt"
+        },
+        {
+          "op": "replace",
+          "path": "/usageDisposition",
+          "value": "conservative"
+        },
+        {
+          "op": "replace",
+          "path": "/adapterId",
+          "value": "mock-nonidempotent"
+        },
+        {
+          "op": "replace",
+          "path": "/sideEffectClass",
+          "value": "non-idempotent"
+        },
+        {
+          "op": "replace",
+          "path": "/denialReason",
+          "value": null
+        },
+        {
+          "op": "replace",
+          "path": "/providerRequestId",
+          "value": "mock-req-000002"
+        }
+      ],
+      "expectedCode": null,
+      "expectedRule": null,
+      "expectedSummary": {
+        "code": "GE_ADAPTER_TRANSPORT_FAILURE",
+        "ledgerAction": "commit-conservative",
+        "requiresInDoubtRecord": true
+      }
+    },
+    {
+      "id": "error-retryability-restated",
+      "descriptor": "mock-full",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/retryable",
+          "value": false
+        }
+      ],
+      "expectedRule": "E-001",
+      "expectedCode": "GE_ADAPTER_MALFORMED_RESPONSE"
+    },
+    {
+      "id": "error-boundary-restated",
+      "descriptor": "mock-full",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/boundary",
+          "value": "pre-dispatch"
+        }
+      ],
+      "expectedRule": "E-002",
+      "expectedCode": "GE_ADAPTER_MALFORMED_RESPONSE"
+    },
+    {
+      "id": "error-effect-disposition-restated",
+      "descriptor": "mock-full",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/effectDisposition",
+          "value": "applied"
+        }
+      ],
+      "expectedRule": "E-003",
+      "expectedCode": "GE_ADAPTER_MALFORMED_RESPONSE"
+    },
+    {
+      "id": "error-usage-disposition-not-derived",
+      "descriptor": "mock-full",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/usageDisposition",
+          "value": "none"
+        }
+      ],
+      "expectedRule": "E-004",
+      "expectedCode": "GE_ADAPTER_MALFORMED_RESPONSE"
+    },
+    {
+      "id": "error-denial-reason-without-denial",
+      "descriptor": "mock-full",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/denialReason",
+          "value": "circuit-open"
+        }
+      ],
+      "expectedRule": "E-005",
+      "expectedCode": "GE_ADAPTER_MALFORMED_RESPONSE"
+    },
+    {
+      "id": "error-provider-id-on-pre-dispatch",
+      "descriptor": "mock-full",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/code",
+          "value": "GE_ADAPTER_POLICY_DENIED"
+        },
+        {
+          "op": "replace",
+          "path": "/boundary",
+          "value": "pre-dispatch"
+        },
+        {
+          "op": "replace",
+          "path": "/retryable",
+          "value": false
+        },
+        {
+          "op": "replace",
+          "path": "/effectDisposition",
+          "value": "not-applied"
+        },
+        {
+          "op": "replace",
+          "path": "/usageDisposition",
+          "value": "none"
+        },
+        {
+          "op": "replace",
+          "path": "/denialReason",
+          "value": "circuit-open"
+        }
+      ],
+      "expectedRule": "E-006",
+      "expectedCode": "GE_ADAPTER_MALFORMED_RESPONSE"
+    },
+    {
+      "id": "error-provider-id-without-capability",
+      "descriptor": "mock-full",
+      "descriptorMutations": [
+        {
+          "op": "remove",
+          "path": "/capabilities/8"
+        }
+      ],
+      "mutations": [],
+      "expectedRule": "E-007",
+      "capabilitiesExercised": [
+        "provider-request-id"
+      ],
+      "expectedCode": "GE_ADAPTER_MALFORMED_RESPONSE"
+    },
+    {
+      "id": "error-retry-after-on-non-retryable",
+      "descriptor": "mock-full",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/code",
+          "value": "GE_ADAPTER_AUTHENTICATION"
+        },
+        {
+          "op": "replace",
+          "path": "/retryable",
+          "value": false
+        },
+        {
+          "op": "replace",
+          "path": "/effectDisposition",
+          "value": "not-applied"
+        },
+        {
+          "op": "replace",
+          "path": "/usageDisposition",
+          "value": "none"
+        },
+        {
+          "op": "replace",
+          "path": "/retryAfterMs",
+          "value": 1000
+        }
+      ],
+      "expectedRule": "E-008",
+      "expectedCode": "GE_ADAPTER_MALFORMED_RESPONSE"
+    },
+    {
+      "id": "error-retry-after-without-capability",
+      "descriptor": "mock-full",
+      "descriptorMutations": [
+        {
+          "op": "remove",
+          "path": "/capabilities/11"
+        }
+      ],
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/retryAfterMs",
+          "value": 1000
+        }
+      ],
+      "expectedRule": "E-009",
+      "capabilitiesExercised": [
+        "retry-after-hint"
+      ],
+      "expectedCode": "GE_ADAPTER_MALFORMED_RESPONSE"
+    },
+    {
+      "id": "error-usage-on-not-applied",
+      "descriptor": "mock-full",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/code",
+          "value": "GE_ADAPTER_RATE_LIMITED"
+        },
+        {
+          "op": "replace",
+          "path": "/effectDisposition",
+          "value": "not-applied"
+        },
+        {
+          "op": "replace",
+          "path": "/usageDisposition",
+          "value": "none"
+        },
+        {
+          "op": "replace",
+          "path": "/usage",
+          "value": {
+            "apiVersion": "graphengineering.reacher-z.github.io/adapters/v1alpha1",
+            "kind": "AdapterUsage",
+            "contractVersion": "adapter-contract/v1alpha1",
+            "adapterId": "mock-full",
+            "adapterKind": "mock",
+            "requestId": "req-baseline",
+            "providerRequestId": "mock-req-000001",
+            "trust": "provider-reported",
+            "budgetCostState": "provider-reported",
+            "finishReason": "stop",
+            "quantities": [
+              {
+                "resource": "audio-units",
+                "unit": "usage-unit",
+                "aggregation": "sum",
+                "amount": 2
+              },
+              {
+                "resource": "cached-input-units",
+                "unit": "usage-unit",
+                "aggregation": "sum",
+                "amount": 64
+              },
+              {
+                "resource": "image-units",
+                "unit": "usage-unit",
+                "aggregation": "sum",
+                "amount": 3
+              },
+              {
+                "resource": "input-units",
+                "unit": "usage-unit",
+                "aggregation": "sum",
+                "amount": 1024
+              },
+              {
+                "resource": "output-units",
+                "unit": "usage-unit",
+                "aggregation": "sum",
+                "amount": 256
+              },
+              {
+                "resource": "provider-calls",
+                "unit": "count",
+                "aggregation": "sum",
+                "amount": 1
+              },
+              {
+                "resource": "reasoning-units",
+                "unit": "usage-unit",
+                "aggregation": "sum",
+                "amount": 128
+              },
+              {
+                "resource": "tool-calls",
+                "unit": "count",
+                "aggregation": "sum",
+                "amount": 1
+              },
+              {
+                "resource": "transport-bytes",
+                "unit": "byte",
+                "aggregation": "sum",
+                "amount": 8192
+              }
+            ],
+            "providerSpecific": [
+              {
+                "metricId": "graph-engineering/mock-metric/v1alpha1",
+                "unitId": "graph-engineering/mock-unit/v1alpha1",
+                "aggregation": "sum",
+                "amount": 7
+              }
+            ]
+          }
+        }
+      ],
+      "expectedRule": "E-010",
+      "expectedCode": "GE_ADAPTER_MALFORMED_RESPONSE"
+    },
+    {
+      "id": "error-usage-binds-other-request",
+      "descriptor": "mock-full",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/usage",
+          "value": {
+            "apiVersion": "graphengineering.reacher-z.github.io/adapters/v1alpha1",
+            "kind": "AdapterUsage",
+            "contractVersion": "adapter-contract/v1alpha1",
+            "adapterId": "mock-full",
+            "adapterKind": "mock",
+            "requestId": "req-baseline",
+            "providerRequestId": "mock-req-000001",
+            "trust": "provider-reported",
+            "budgetCostState": "provider-reported",
+            "finishReason": "stop",
+            "quantities": [
+              {
+                "resource": "audio-units",
+                "unit": "usage-unit",
+                "aggregation": "sum",
+                "amount": 2
+              },
+              {
+                "resource": "cached-input-units",
+                "unit": "usage-unit",
+                "aggregation": "sum",
+                "amount": 64
+              },
+              {
+                "resource": "image-units",
+                "unit": "usage-unit",
+                "aggregation": "sum",
+                "amount": 3
+              },
+              {
+                "resource": "input-units",
+                "unit": "usage-unit",
+                "aggregation": "sum",
+                "amount": 1024
+              },
+              {
+                "resource": "output-units",
+                "unit": "usage-unit",
+                "aggregation": "sum",
+                "amount": 256
+              },
+              {
+                "resource": "provider-calls",
+                "unit": "count",
+                "aggregation": "sum",
+                "amount": 1
+              },
+              {
+                "resource": "reasoning-units",
+                "unit": "usage-unit",
+                "aggregation": "sum",
+                "amount": 128
+              },
+              {
+                "resource": "tool-calls",
+                "unit": "count",
+                "aggregation": "sum",
+                "amount": 1
+              },
+              {
+                "resource": "transport-bytes",
+                "unit": "byte",
+                "aggregation": "sum",
+                "amount": 8192
+              }
+            ],
+            "providerSpecific": [
+              {
+                "metricId": "graph-engineering/mock-metric/v1alpha1",
+                "unitId": "graph-engineering/mock-unit/v1alpha1",
+                "aggregation": "sum",
+                "amount": 7
+              }
+            ]
+          }
+        },
+        {
+          "op": "replace",
+          "path": "/usage/requestId",
+          "value": "req-other"
+        }
+      ],
+      "expectedRule": "E-011",
+      "expectedCode": "GE_ADAPTER_MALFORMED_RESPONSE"
+    },
+    {
+      "id": "error-attempt-over-ceiling",
+      "descriptor": "mock-full",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/attempt",
+          "value": 9
+        }
+      ],
+      "expectedRule": "E-012",
+      "expectedCode": "GE_ADAPTER_MALFORMED_RESPONSE"
+    },
+    {
+      "id": "error-side-effect-escalation",
+      "descriptor": "mock-full",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/sideEffectClass",
+          "value": "non-idempotent"
+        }
+      ],
+      "expectedRule": "E-013",
+      "expectedCode": "GE_ADAPTER_MALFORMED_RESPONSE"
+    },
+    {
+      "id": "error-carries-credential-marker",
+      "descriptor": "mock-full",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/message",
+          "value": "provider refused: synthetic-credential-value was rejected"
+        }
+      ],
+      "expectedRule": "E-014",
+      "expectedCode": "GE_ADAPTER_MALFORMED_RESPONSE"
+    },
+    {
+      "id": "error-detail-fields-out-of-order",
+      "descriptor": "mock-full",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/detail/providerSafeFields",
+          "value": [
+            {
+              "name": "rule",
+              "value": "none"
+            },
+            {
+              "name": "attempt",
+              "value": "1"
+            }
+          ]
+        }
+      ],
+      "expectedRule": "E-015",
+      "expectedCode": "GE_ADAPTER_MALFORMED_RESPONSE"
+    }
+  ],
+  "retryCases": [
+    {
+      "id": "retry-first-backoff",
+      "descriptor": "mock-full",
+      "code": "GE_ADAPTER_TIMEOUT",
+      "sideEffectClass": "none",
+      "attempt": 1,
+      "retryAfterMs": null,
+      "expected": {
+        "mayRetry": true,
+        "backoffMs": 250,
+        "rule": "R-001"
+      }
+    },
+    {
+      "id": "retry-second-backoff",
+      "descriptor": "mock-full",
+      "code": "GE_ADAPTER_TIMEOUT",
+      "sideEffectClass": "none",
+      "attempt": 2,
+      "retryAfterMs": null,
+      "expected": {
+        "mayRetry": true,
+        "backoffMs": 500,
+        "rule": "R-001"
+      }
+    },
+    {
+      "id": "retry-third-backoff",
+      "descriptor": "mock-full",
+      "code": "GE_ADAPTER_TRANSPORT_FAILURE",
+      "sideEffectClass": "none",
+      "attempt": 3,
+      "retryAfterMs": null,
+      "expected": {
+        "mayRetry": true,
+        "backoffMs": 1000,
+        "rule": "R-001"
+      }
+    },
+    {
+      "id": "retry-backoff-clamped",
+      "descriptor": "mock-full",
+      "code": "GE_ADAPTER_RATE_LIMITED",
+      "sideEffectClass": "none",
+      "attempt": 3,
+      "retryAfterMs": null,
+      "descriptorMutations": [
+        {
+          "op": "replace",
+          "path": "/retryPolicy/maxBackoffMs",
+          "value": 600
+        }
+      ],
+      "expected": {
+        "mayRetry": true,
+        "backoffMs": 600,
+        "rule": "R-001"
+      }
+    },
+    {
+      "id": "retry-hint-dominates",
+      "descriptor": "mock-full",
+      "code": "GE_ADAPTER_RATE_LIMITED",
+      "sideEffectClass": "none",
+      "attempt": 1,
+      "retryAfterMs": 3000,
+      "expected": {
+        "mayRetry": true,
+        "backoffMs": 3000,
+        "rule": "R-002"
+      }
+    },
+    {
+      "id": "retry-hint-below-computed",
+      "descriptor": "mock-full",
+      "code": "GE_ADAPTER_TIMEOUT",
+      "sideEffectClass": "none",
+      "attempt": 2,
+      "retryAfterMs": 100,
+      "expected": {
+        "mayRetry": true,
+        "backoffMs": 500,
+        "rule": "R-002"
+      }
+    },
+    {
+      "id": "retry-hint-at-ceiling",
+      "descriptor": "mock-full",
+      "code": "GE_ADAPTER_RATE_LIMITED",
+      "sideEffectClass": "none",
+      "attempt": 1,
+      "retryAfterMs": 4000,
+      "expected": {
+        "mayRetry": true,
+        "backoffMs": 4000,
+        "rule": "R-002"
+      }
+    },
+    {
+      "id": "retry-hint-over-ceiling-abandons",
+      "descriptor": "mock-full",
+      "code": "GE_ADAPTER_RATE_LIMITED",
+      "sideEffectClass": "none",
+      "attempt": 1,
+      "retryAfterMs": 5000,
+      "expected": {
+        "mayRetry": false,
+        "backoffMs": null,
+        "rule": "R-003"
+      }
+    },
+    {
+      "id": "retry-attempt-ceiling",
+      "descriptor": "mock-full",
+      "code": "GE_ADAPTER_TIMEOUT",
+      "sideEffectClass": "none",
+      "attempt": 4,
+      "retryAfterMs": null,
+      "expected": {
+        "mayRetry": false,
+        "backoffMs": null,
+        "rule": "R-004"
+      }
+    },
+    {
+      "id": "retry-non-retryable-code",
+      "descriptor": "mock-full",
+      "code": "GE_ADAPTER_AUTHENTICATION",
+      "sideEffectClass": "none",
+      "attempt": 1,
+      "retryAfterMs": null,
+      "expected": {
+        "mayRetry": false,
+        "backoffMs": null,
+        "rule": "R-005"
+      }
+    },
+    {
+      "id": "retry-non-idempotent-in-doubt",
+      "descriptor": "mock-nonidempotent",
+      "code": "GE_ADAPTER_TIMEOUT",
+      "sideEffectClass": "non-idempotent",
+      "attempt": 1,
+      "retryAfterMs": null,
+      "expected": {
+        "mayRetry": false,
+        "backoffMs": null,
+        "rule": "R-006"
+      }
+    },
+    {
+      "id": "retry-non-idempotent-not-applied",
+      "descriptor": "mock-nonidempotent",
+      "code": "GE_ADAPTER_RATE_LIMITED",
+      "sideEffectClass": "non-idempotent",
+      "attempt": 1,
+      "retryAfterMs": null,
+      "expected": {
+        "mayRetry": true,
+        "backoffMs": 250,
+        "rule": "R-001"
+      }
+    },
+    {
+      "id": "retry-idempotent-in-doubt",
+      "descriptor": "mock-idempotent",
+      "code": "GE_ADAPTER_TRANSPORT_FAILURE",
+      "sideEffectClass": "idempotent",
+      "attempt": 1,
+      "retryAfterMs": null,
+      "expected": {
+        "mayRetry": true,
+        "backoffMs": 250,
+        "rule": "R-001"
+      }
+    }
+  ],
+  "circuitCases": [
+    {
+      "id": "circuit-opens-on-threshold",
+      "descriptor": "mock-full",
+      "rules": [
+        "C-001"
+      ],
+      "script": [
+        {
+          "event": "failure",
+          "code": "GE_ADAPTER_TIMEOUT",
+          "nowMs": 0
+        },
+        {
+          "event": "failure",
+          "code": "GE_ADAPTER_TIMEOUT",
+          "nowMs": 10
+        },
+        {
+          "event": "failure",
+          "code": "GE_ADAPTER_TIMEOUT",
+          "nowMs": 20
+        }
+      ],
+      "expected": {
+        "state": "open",
+        "consecutiveFailures": 3,
+        "openedAtMs": 20,
+        "admitted": 3,
+        "refused": 0
+      }
+    },
+    {
+      "id": "circuit-success-resets",
+      "descriptor": "mock-full",
+      "rules": [
+        "C-002"
+      ],
+      "script": [
+        {
+          "event": "failure",
+          "code": "GE_ADAPTER_TIMEOUT",
+          "nowMs": 0
+        },
+        {
+          "event": "failure",
+          "code": "GE_ADAPTER_TIMEOUT",
+          "nowMs": 10
+        },
+        {
+          "event": "success",
+          "nowMs": 20
+        },
+        {
+          "event": "failure",
+          "code": "GE_ADAPTER_TIMEOUT",
+          "nowMs": 30
+        }
+      ],
+      "expected": {
+        "state": "closed",
+        "consecutiveFailures": 1,
+        "openedAtMs": null,
+        "admitted": 4,
+        "refused": 0
+      }
+    },
+    {
+      "id": "circuit-open-refuses-before-window",
+      "descriptor": "mock-full",
+      "rules": [
+        "C-003",
+        "C-004"
+      ],
+      "script": [
+        {
+          "event": "failure",
+          "code": "GE_ADAPTER_TIMEOUT",
+          "nowMs": 0
+        },
+        {
+          "event": "failure",
+          "code": "GE_ADAPTER_TIMEOUT",
+          "nowMs": 10
+        },
+        {
+          "event": "failure",
+          "code": "GE_ADAPTER_TIMEOUT",
+          "nowMs": 20
+        },
+        {
+          "event": "advance",
+          "nowMs": 500
+        },
+        {
+          "event": "failure",
+          "code": "GE_ADAPTER_TIMEOUT",
+          "nowMs": 600
+        }
+      ],
+      "expected": {
+        "state": "open",
+        "consecutiveFailures": 3,
+        "openedAtMs": 20,
+        "admitted": 3,
+        "refused": 1
+      }
+    },
+    {
+      "id": "circuit-open-at-window-boundary",
+      "descriptor": "mock-full",
+      "rules": [
+        "C-003",
+        "C-004"
+      ],
+      "script": [
+        {
+          "event": "failure",
+          "code": "GE_ADAPTER_TIMEOUT",
+          "nowMs": 0
+        },
+        {
+          "event": "failure",
+          "code": "GE_ADAPTER_TIMEOUT",
+          "nowMs": 10
+        },
+        {
+          "event": "failure",
+          "code": "GE_ADAPTER_TIMEOUT",
+          "nowMs": 20
+        },
+        {
+          "event": "advance",
+          "nowMs": 1019
+        },
+        {
+          "event": "failure",
+          "code": "GE_ADAPTER_TIMEOUT",
+          "nowMs": 1030
+        }
+      ],
+      "expected": {
+        "state": "open",
+        "consecutiveFailures": 3,
+        "openedAtMs": 20,
+        "admitted": 3,
+        "refused": 1
+      }
+    },
+    {
+      "id": "circuit-half-open-success-closes",
+      "descriptor": "mock-full",
+      "rules": [
+        "C-003",
+        "C-005"
+      ],
+      "script": [
+        {
+          "event": "failure",
+          "code": "GE_ADAPTER_TIMEOUT",
+          "nowMs": 0
+        },
+        {
+          "event": "failure",
+          "code": "GE_ADAPTER_TIMEOUT",
+          "nowMs": 10
+        },
+        {
+          "event": "failure",
+          "code": "GE_ADAPTER_TIMEOUT",
+          "nowMs": 20
+        },
+        {
+          "event": "advance",
+          "nowMs": 1020
+        },
+        {
+          "event": "success",
+          "nowMs": 1030
+        }
+      ],
+      "expected": {
+        "state": "closed",
+        "consecutiveFailures": 0,
+        "openedAtMs": null,
+        "admitted": 4,
+        "refused": 0
+      }
+    },
+    {
+      "id": "circuit-half-open-failure-reopens",
+      "descriptor": "mock-full",
+      "rules": [
+        "C-006"
+      ],
+      "script": [
+        {
+          "event": "failure",
+          "code": "GE_ADAPTER_TIMEOUT",
+          "nowMs": 0
+        },
+        {
+          "event": "failure",
+          "code": "GE_ADAPTER_TIMEOUT",
+          "nowMs": 10
+        },
+        {
+          "event": "failure",
+          "code": "GE_ADAPTER_TIMEOUT",
+          "nowMs": 20
+        },
+        {
+          "event": "advance",
+          "nowMs": 1020
+        },
+        {
+          "event": "failure",
+          "code": "GE_ADAPTER_TIMEOUT",
+          "nowMs": 1030
+        }
+      ],
+      "expected": {
+        "state": "open",
+        "consecutiveFailures": 3,
+        "openedAtMs": 1030,
+        "admitted": 4,
+        "refused": 0
+      }
+    },
+    {
+      "id": "circuit-non-retryable-does-not-trip",
+      "descriptor": "mock-full",
+      "rules": [
+        "C-007"
+      ],
+      "script": [
+        {
+          "event": "failure",
+          "code": "GE_ADAPTER_AUTHENTICATION",
+          "nowMs": 0
+        },
+        {
+          "event": "failure",
+          "code": "GE_ADAPTER_INVALID_REQUEST",
+          "nowMs": 10
+        },
+        {
+          "event": "failure",
+          "code": "GE_ADAPTER_QUOTA_EXCEEDED",
+          "nowMs": 20
+        },
+        {
+          "event": "failure",
+          "code": "GE_ADAPTER_CONTENT_FILTERED",
+          "nowMs": 30
+        },
+        {
+          "event": "failure",
+          "code": "GE_ADAPTER_CANCELLED",
+          "nowMs": 40
+        }
+      ],
+      "expected": {
+        "state": "closed",
+        "consecutiveFailures": 0,
+        "openedAtMs": null,
+        "admitted": 5,
+        "refused": 0
+      }
+    }
+  ],
+  "schemaNegativeCases": [
+    {
+      "id": "schema-descriptor-missing-id",
+      "schema": "adapter-descriptor.schema.json",
+      "mutations": [
+        {
+          "op": "remove",
+          "path": "/adapterId"
+        }
+      ]
+    },
+    {
+      "id": "schema-descriptor-wrong-api",
+      "schema": "adapter-descriptor.schema.json",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/apiVersion",
+          "value": "graphengineering.reacher-z.github.io/adapters/v2"
+        }
+      ]
+    },
+    {
+      "id": "schema-descriptor-wrong-kind",
+      "schema": "adapter-descriptor.schema.json",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/kind",
+          "value": "Adapter"
+        }
+      ]
+    },
+    {
+      "id": "schema-descriptor-extra-member",
+      "schema": "adapter-descriptor.schema.json",
+      "mutations": [
+        {
+          "op": "add",
+          "path": "/vendorExtras",
+          "value": {
+            "any": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "schema-descriptor-jitter-true",
+      "schema": "adapter-descriptor.schema.json",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/retryPolicy/jitter",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": "schema-descriptor-unknown-adapter-kind",
+      "schema": "adapter-descriptor.schema.json",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/adapterKind",
+          "value": "cohere"
+        }
+      ]
+    },
+    {
+      "id": "schema-descriptor-unknown-capability",
+      "schema": "adapter-descriptor.schema.json",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/capabilities/0",
+          "value": "telepathy"
+        }
+      ]
+    },
+    {
+      "id": "schema-descriptor-duplicate-capability",
+      "schema": "adapter-descriptor.schema.json",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/capabilities",
+          "value": [
+            "streaming",
+            "streaming"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "schema-descriptor-zero-request-bytes",
+      "schema": "adapter-descriptor.schema.json",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/bounds/maxRequestBytes",
+          "value": 0
+        }
+      ]
+    },
+    {
+      "id": "schema-descriptor-half-open-probe",
+      "schema": "adapter-descriptor.schema.json",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/circuitPolicy/halfOpenProbeLimit",
+          "value": 2
+        }
+      ]
+    },
+    {
+      "id": "schema-descriptor-short-version",
+      "schema": "adapter-descriptor.schema.json",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/adapterVersion",
+          "value": "1.0"
+        }
+      ]
+    },
+    {
+      "id": "schema-descriptor-unknown-retention",
+      "schema": "adapter-descriptor.schema.json",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/capture/retention",
+          "value": "forever"
+        }
+      ]
+    },
+    {
+      "id": "schema-descriptor-shell-expansion",
+      "schema": "adapter-descriptor.schema.json",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/process",
+          "value": {
+            "executablePath": "/bin/sh",
+            "argumentVector": [
+              "/bin/sh"
+            ],
+            "workingDirectory": "/",
+            "environmentAllowlist": [],
+            "stdinPolicy": "closed",
+            "shellExpansion": true,
+            "maxOutputBytes": 1024,
+            "maxDurationMs": 1000,
+            "maxProcesses": 1,
+            "maxMemoryBytes": 1048576,
+            "cancelSignal": "SIGTERM"
+          }
+        }
+      ]
+    },
+    {
+      "id": "schema-usage-adds-currency",
+      "schema": "adapter-usage.schema.json",
+      "mutations": [
+        {
+          "op": "add",
+          "path": "/currency",
+          "value": "USD"
+        }
+      ]
+    },
+    {
+      "id": "schema-usage-adds-money",
+      "schema": "adapter-usage.schema.json",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/quantities/0/resource",
+          "value": "money-nano-minor"
+        }
+      ]
+    },
+    {
+      "id": "schema-usage-maximum-aggregation",
+      "schema": "adapter-usage.schema.json",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/quantities/0/aggregation",
+          "value": "maximum"
+        }
+      ]
+    },
+    {
+      "id": "schema-usage-unknown-trust",
+      "schema": "adapter-usage.schema.json",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/trust",
+          "value": "trusted"
+        }
+      ]
+    },
+    {
+      "id": "schema-usage-zero-amount",
+      "schema": "adapter-usage.schema.json",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/quantities/0/amount",
+          "value": 0
+        }
+      ]
+    },
+    {
+      "id": "schema-usage-unknown-finish-reason",
+      "schema": "adapter-usage.schema.json",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/finishReason",
+          "value": "refusal"
+        }
+      ]
+    },
+    {
+      "id": "schema-error-unknown-code",
+      "schema": "adapter-error.schema.json",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/code",
+          "value": "GE_ADAPTER_UNKNOWN"
+        }
+      ]
+    },
+    {
+      "id": "schema-error-unknown-denial",
+      "schema": "adapter-error.schema.json",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/denialReason",
+          "value": "because"
+        }
+      ]
+    },
+    {
+      "id": "schema-error-missing-usage-member",
+      "schema": "adapter-error.schema.json",
+      "mutations": [
+        {
+          "op": "remove",
+          "path": "/usage"
+        }
+      ]
+    },
+    {
+      "id": "schema-error-empty-message",
+      "schema": "adapter-error.schema.json",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/message",
+          "value": ""
+        }
+      ]
+    },
+    {
+      "id": "schema-error-zero-attempt",
+      "schema": "adapter-error.schema.json",
+      "mutations": [
+        {
+          "op": "replace",
+          "path": "/attempt",
+          "value": 0
+        }
+      ]
+    }
+  ],
+  "integrationNotes": [
+    {
+      "integration": "claude-code",
+      "mechanism": "shell",
+      "officialV1Adapter": false,
+      "privateApiClaim": false,
+      "note": "Documented only as an invocation of a published command-line entry point through the shell adapter, under the same executable identity, argument vector, environment allowlist and output bounds as any other subprocess. No private or undocumented API is used, referenced or claimed."
+    },
+    {
+      "integration": "codex",
+      "mechanism": "shell",
+      "officialV1Adapter": false,
+      "privateApiClaim": false,
+      "note": "Documented only as an invocation of a published command-line entry point through the shell adapter. No private or undocumented API is used, referenced or claimed."
+    },
+    {
+      "integration": "generic-agent-harness",
+      "mechanism": "mcp",
+      "officialV1Adapter": false,
+      "privateApiClaim": false,
+      "note": "Documented only as an MCP server reached through the read-only-by-default MCP adapter. Mutation requires the exact server and tool, schema, capability, policy, approval, budget, timeout, output, redaction and idempotency gates. No private or undocumented API is used, referenced or claimed."
+    }
+  ],
+  "nonClaims": [
+    "No runtime in this repository implements this contract. No TypeScript or Python adapter exists.",
+    "No provider integration exists. Naming OpenAI, Anthropic, Google Gemini or an OpenAI-compatible endpoint declares an intended boundary shape, not a working client.",
+    "This corpus is deterministic-mock evidence only. It performs no network access, requires no credential and reads no clock.",
+    "Live-provider evidence is opt-in, quarantined and separately gated. It can never substitute for this corpus.",
+    "Claude Code, Codex and generic agent-harness integrations are documented through published command-line and MCP surfaces only. No private API is claimed.",
+    "Rule identifiers are portable diagnostic facts of the contract, not a claim that any implementation emits them today."
+  ]
+}

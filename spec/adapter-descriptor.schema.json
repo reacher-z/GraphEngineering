@@ -1,0 +1,300 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/adapter-descriptor.schema.json",
+  "title": "Graph Engineering Adapter Descriptor",
+  "description": "The complete declaration a provider or tool adapter publishes before any dispatch. It is a declaration of intent and boundary policy, not evidence that any implementation exists. Shape validity never implies semantic validity: adapter-semantics.md section 5 imposes descriptor rules this schema deliberately does not encode, so that each rule can be isolated by a corpus vector.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "contractVersion",
+    "adapterId",
+    "adapterKind",
+    "adapterVersion",
+    "evidenceClass",
+    "sideEffectClass",
+    "capabilities",
+    "bounds",
+    "retryPolicy",
+    "circuitPolicy",
+    "capture",
+    "allowedProviderMetrics",
+    "network",
+    "process",
+    "mcp"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "graphengineering.reacher-z.github.io/adapters/v1alpha1"
+    },
+    "kind": { "const": "AdapterDescriptor" },
+    "contractVersion": { "const": "adapter-contract/v1alpha1" },
+    "adapterId": {
+      "$ref": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/adapter-error.schema.json#/$defs/adapterId"
+    },
+    "adapterKind": { "$ref": "#/$defs/adapterKind" },
+    "adapterVersion": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "evidenceClass": {
+      "description": "deterministic-mock: usable in the candidate gate; no network, no credential, no wall clock. live-provider: opt-in, quarantined, never a substitute for mock conformance.",
+      "enum": ["deterministic-mock", "live-provider"]
+    },
+    "sideEffectClass": {
+      "$ref": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/adapter-error.schema.json#/$defs/sideEffectClass"
+    },
+    "capabilities": {
+      "type": "array",
+      "maxItems": 16,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/adapter-capability.schema.json"
+      }
+    },
+    "bounds": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "maxRequestBytes",
+        "maxResponseBytes",
+        "maxStreamFrameBytes",
+        "maxStreamFrames",
+        "maxToolDefinitions",
+        "maxToolCallsPerResponse",
+        "maxAttachments",
+        "maxAttachmentBytes",
+        "requestTimeoutMs"
+      ],
+      "properties": {
+        "maxRequestBytes": { "type": "integer", "minimum": 1, "maximum": 1073741824 },
+        "maxResponseBytes": { "type": "integer", "minimum": 1, "maximum": 1073741824 },
+        "maxStreamFrameBytes": { "type": "integer", "minimum": 1, "maximum": 16777216 },
+        "maxStreamFrames": { "type": "integer", "minimum": 1, "maximum": 1048576 },
+        "maxToolDefinitions": { "type": "integer", "minimum": 0, "maximum": 256 },
+        "maxToolCallsPerResponse": { "type": "integer", "minimum": 0, "maximum": 256 },
+        "maxAttachments": { "type": "integer", "minimum": 0, "maximum": 256 },
+        "maxAttachmentBytes": { "type": "integer", "minimum": 0, "maximum": 1073741824 },
+        "requestTimeoutMs": { "type": "integer", "minimum": 1, "maximum": 3600000 }
+      }
+    },
+    "retryPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "maxAttempts",
+        "initialBackoffMs",
+        "backoffMultiplierMilli",
+        "maxBackoffMs",
+        "jitter"
+      ],
+      "properties": {
+        "maxAttempts": { "type": "integer", "minimum": 1, "maximum": 16 },
+        "initialBackoffMs": { "type": "integer", "minimum": 0, "maximum": 3600000 },
+        "backoffMultiplierMilli": {
+          "description": "Growth factor in thousandths. 2000 means double. Integer arithmetic only; there is no floating-point backoff.",
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 16000
+        },
+        "maxBackoffMs": { "type": "integer", "minimum": 0, "maximum": 3600000 },
+        "jitter": {
+          "description": "Always false. runtime-capability-semantics.md admits retry without jitter only, and a jittered schedule is not reproducible across two runtimes.",
+          "const": false
+        }
+      }
+    },
+    "circuitPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "consecutiveFailureThreshold",
+        "openDurationMs",
+        "halfOpenProbeLimit"
+      ],
+      "properties": {
+        "consecutiveFailureThreshold": { "type": "integer", "minimum": 1, "maximum": 64 },
+        "openDurationMs": { "type": "integer", "minimum": 1, "maximum": 3600000 },
+        "halfOpenProbeLimit": { "const": 1 }
+      }
+    },
+    "capture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "retention"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "retention": {
+          "enum": ["none", "operator-approved", "run-scoped"]
+        }
+      }
+    },
+    "allowedProviderMetrics": {
+      "description": "Bounded allowlist of provider-specific meters this adapter may emit. It MUST be a subset of the active budget policy allowedProviderMetrics; the adapter can narrow the policy and can never widen it.",
+      "type": "array",
+      "maxItems": 16,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["metricId", "unitId", "aggregation"],
+        "properties": {
+          "metricId": {
+            "$ref": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/adapter-usage.schema.json#/$defs/versionedIdentity"
+          },
+          "unitId": {
+            "$ref": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/adapter-usage.schema.json#/$defs/versionedIdentity"
+          },
+          "aggregation": { "const": "sum" }
+        }
+      }
+    },
+    "network": {
+      "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/networkProfile" }]
+    },
+    "process": {
+      "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/processProfile" }]
+    },
+    "mcp": {
+      "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/mcpProfile" }]
+    }
+  },
+  "$defs": {
+    "adapterKind": {
+      "description": "The closed set of official v1 adapter kinds. Agent-harness integrations are documented, not enumerated here, because no private-API integration is claimed.",
+      "enum": [
+        "anthropic",
+        "google-gemini",
+        "http",
+        "mcp",
+        "mock",
+        "openai",
+        "openai-compatible",
+        "shell"
+      ]
+    },
+    "networkProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "allowedSchemes",
+        "allowedHosts",
+        "allowedPorts",
+        "allowRedirects",
+        "redirectReauthorization",
+        "rebindingDefense",
+        "credentialIsolation",
+        "tlsMinimumVersion"
+      ],
+      "properties": {
+        "allowedSchemes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 2,
+          "uniqueItems": true,
+          "items": { "enum": ["http", "https"] }
+        },
+        "allowedHosts": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9]([a-z0-9.-]{0,252}[a-z0-9])?$"
+          }
+        },
+        "allowedPorts": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": { "type": "integer", "minimum": 1, "maximum": 65535 }
+        },
+        "allowRedirects": { "type": "boolean" },
+        "redirectReauthorization": { "type": "boolean" },
+        "rebindingDefense": { "type": "boolean" },
+        "credentialIsolation": { "type": "boolean" },
+        "tlsMinimumVersion": { "enum": ["TLSv1.2", "TLSv1.3"] }
+      }
+    },
+    "processProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "executablePath",
+        "argumentVector",
+        "workingDirectory",
+        "environmentAllowlist",
+        "stdinPolicy",
+        "shellExpansion",
+        "maxOutputBytes",
+        "maxDurationMs",
+        "maxProcesses",
+        "maxMemoryBytes",
+        "cancelSignal"
+      ],
+      "properties": {
+        "executablePath": {
+          "type": "string",
+          "pattern": "^/[^\\u0000]{1,1023}$"
+        },
+        "argumentVector": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": { "type": "string", "maxLength": 1024 }
+        },
+        "workingDirectory": {
+          "type": "string",
+          "pattern": "^/[^\\u0000]{0,1023}$"
+        },
+        "environmentAllowlist": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,62}$" }
+        },
+        "stdinPolicy": { "enum": ["closed", "explicit-bytes"] },
+        "shellExpansion": {
+          "description": "Always false. There is no implicit shell; the argument vector is executed directly.",
+          "const": false
+        },
+        "maxOutputBytes": { "type": "integer", "minimum": 1, "maximum": 1073741824 },
+        "maxDurationMs": { "type": "integer", "minimum": 1, "maximum": 3600000 },
+        "maxProcesses": { "type": "integer", "minimum": 1, "maximum": 1024 },
+        "maxMemoryBytes": { "type": "integer", "minimum": 1048576, "maximum": 68719476736 },
+        "cancelSignal": { "enum": ["SIGKILL", "SIGTERM"] }
+      }
+    },
+    "mcpProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "serverId",
+        "mode",
+        "allowedTools",
+        "approvalRequired",
+        "idempotencyRequired"
+      ],
+      "properties": {
+        "serverId": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,62}$"
+        },
+        "mode": {
+          "description": "read-only is the default posture. mutating is opt-in and carries additional obligations in adapter-semantics.md section 5.4.",
+          "enum": ["mutating", "read-only"]
+        },
+        "allowedTools": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,62}$" }
+        },
+        "approvalRequired": { "type": "boolean" },
+        "idempotencyRequired": { "type": "boolean" }
+      }
+    }
+  }
+}

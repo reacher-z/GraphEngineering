@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/adapter-capability.schema.json",
+  "title": "Graph Engineering Adapter Capability",
+  "description": "Closed inventory of capabilities a provider or tool adapter may declare. A capability is a declaration of what the adapter supports at its boundary, never a claim that any runtime dispatches through it. A graph requiring a capability absent from an adapter descriptor fails preflight with GE_ADAPTER_CAPABILITY_UNSUPPORTED before any external effect.",
+  "type": "string",
+  "enum": [
+    "attachments",
+    "cached-input-usage-reporting",
+    "cancellation",
+    "content-filter-reporting",
+    "deterministic-replay",
+    "fault-injection",
+    "idempotency-key",
+    "parallel-tool-calls",
+    "provider-request-id",
+    "rate-limit-reporting",
+    "reasoning-usage-reporting",
+    "retry-after-hint",
+    "streaming",
+    "structured-output",
+    "tool-calling",
+    "usage-reporting"
+  ]
+}

@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/adapter-usage.schema.json",
+  "title": "Graph Engineering Adapter Usage Envelope",
+  "description": "Meters observed by an adapter for one dispatch attempt. The envelope carries meters only. It has no currency, no minor-unit exponent and no money resource, because money is produced exclusively by applying an immutable pricing snapshot to these meters. An adapter that reports a cost bypasses the pricing snapshot and is rejected.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "contractVersion",
+    "adapterId",
+    "adapterKind",
+    "requestId",
+    "providerRequestId",
+    "trust",
+    "budgetCostState",
+    "finishReason",
+    "quantities",
+    "providerSpecific"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "graphengineering.reacher-z.github.io/adapters/v1alpha1"
+    },
+    "kind": { "const": "AdapterUsage" },
+    "contractVersion": { "const": "adapter-contract/v1alpha1" },
+    "adapterId": {
+      "$ref": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/adapter-error.schema.json#/$defs/adapterId"
+    },
+    "adapterKind": {
+      "$ref": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/adapter-descriptor.schema.json#/$defs/adapterKind"
+    },
+    "requestId": {
+      "$ref": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/adapter-error.schema.json#/$defs/requestId"
+    },
+    "providerRequestId": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "string", "minLength": 1, "maxLength": 256 }
+      ]
+    },
+    "trust": {
+      "description": "provider-reported: the provider returned these meters. adapter-conservative: the adapter could not obtain trusted meters and substituted a sound worst case. unknown: neither is available.",
+      "enum": ["adapter-conservative", "provider-reported", "unknown"]
+    },
+    "budgetCostState": {
+      "description": "The public cost state of budget-semantics 7.5 that this envelope may contribute to. Derived from trust; the oracle recomputes it.",
+      "enum": ["estimated", "provider-reported", "unknown"]
+    },
+    "finishReason": {
+      "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/finishReason" }]
+    },
+    "quantities": {
+      "type": "array",
+      "maxItems": 9,
+      "items": { "$ref": "#/$defs/quantity" }
+    },
+    "providerSpecific": {
+      "type": "array",
+      "maxItems": 16,
+      "items": { "$ref": "#/$defs/providerQuantity" }
+    }
+  },
+  "$defs": {
+    "safePositiveInteger": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "versionedIdentity": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,254}/v[0-9]+(?:alpha[0-9]+|beta[0-9]+)?$"
+    },
+    "reportableResource": {
+      "description": "The subset of budget-vector resources an adapter is permitted to observe. Every member is a sum-aggregated resource in budget-semantics 4.1. money-nano-minor and every maximum-aggregated resource are deliberately absent.",
+      "enum": [
+        "audio-units",
+        "cached-input-units",
+        "image-units",
+        "input-units",
+        "output-units",
+        "provider-calls",
+        "reasoning-units",
+        "tool-calls",
+        "transport-bytes"
+      ]
+    },
+    "finishReason": {
+      "enum": [
+        "cancelled",
+        "content-filter",
+        "max-output",
+        "stop",
+        "tool-calls"
+      ]
+    },
+    "quantity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["resource", "unit", "aggregation", "amount"],
+      "properties": {
+        "resource": { "$ref": "#/$defs/reportableResource" },
+        "unit": { "enum": ["byte", "count", "usage-unit"] },
+        "aggregation": { "const": "sum" },
+        "amount": { "$ref": "#/$defs/safePositiveInteger" }
+      }
+    },
+    "providerQuantity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["metricId", "unitId", "aggregation", "amount"],
+      "properties": {
+        "metricId": { "$ref": "#/$defs/versionedIdentity" },
+        "unitId": { "$ref": "#/$defs/versionedIdentity" },
+        "aggregation": { "const": "sum" },
+        "amount": { "$ref": "#/$defs/safePositiveInteger" }
+      }
+    }
+  }
+}
