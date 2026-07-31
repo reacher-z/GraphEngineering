@@ -1,0 +1,166 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/lease.schema.json",
+  "title": "Graph Engineering durable-extension lease and LockManager binding",
+  "description": "Portable lease record, lease policy, and LockManager descriptor for durable-extension/v1alpha1. Schema acceptance is envelope conformance only; fence monotonicity, renewal accounting, takeover admissibility, and the domain-separated leaseHash are semantic obligations enforced by conformance/durable-extension.validate.mjs.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "contractVersion",
+    "resourceKey",
+    "leaseId",
+    "ownerId",
+    "epoch",
+    "fence",
+    "acquiredAtMs",
+    "expiresAtMs",
+    "renewalCount",
+    "renewalLimit",
+    "policyId",
+    "policyHash",
+    "state",
+    "leaseHash"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "graphengineering.reacher-z.github.io/durable-extension/v1alpha1"
+    },
+    "kind": { "const": "Lease" },
+    "contractVersion": { "const": "durable-extension/v1alpha1" },
+    "resourceKey": {
+      "$ref": "#/$defs/identifier",
+      "description": "The fenced resource. One run's authoritative event stream is one resource key."
+    },
+    "leaseId": { "$ref": "#/$defs/identifier" },
+    "ownerId": {
+      "$ref": "#/$defs/identifier",
+      "description": "The orchestrator or worker that holds the lease. Two owners may never hold one resourceKey at one instant."
+    },
+    "epoch": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991,
+      "description": "Ownership generation. Starts at 1 and strictly increases on every acquire and takeover."
+    },
+    "fence": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991,
+      "description": "Monotonic fencing token. Every authoritative commit carries the holder's fence; a lower fence is refused."
+    },
+    "acquiredAtMs": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991,
+      "description": "Provider clock instant of acquisition. Never a caller-supplied value."
+    },
+    "expiresAtMs": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991,
+      "description": "Provider clock expiry. Strictly greater than acquiredAtMs and bounded by the policy TTL ceiling."
+    },
+    "renewalCount": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+    "renewalLimit": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991,
+      "description": "Maximum renewals permitted for this lease instance. Exceeding it is GE_DX_RENEWAL_LIMIT_EXCEEDED, not a silent re-acquire."
+    },
+    "policyId": { "$ref": "#/$defs/identifier" },
+    "policyHash": {
+      "$ref": "#/$defs/sha256",
+      "description": "Domain hash of the bound leasePolicy body. A lease whose policyHash differs from the resource's bound policy has no authority."
+    },
+    "state": {
+      "enum": ["active", "expired", "released", "taken-over", "lost"],
+      "description": "Lease lifecycle state at the observation instant. Every member is exercised by the conformance corpus."
+    },
+    "leaseHash": { "$ref": "#/$defs/sha256" }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "leasePolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policyId",
+        "maxTtlMs",
+        "maxRenewals",
+        "maxClockSkewMs",
+        "clockSource",
+        "takeoverRequiresExpiry",
+        "takeoverRequiresPriorFence",
+        "policyHash"
+      ],
+      "properties": {
+        "policyId": { "$ref": "#/$defs/identifier" },
+        "maxTtlMs": { "type": "integer", "minimum": 1, "maximum": 86400000 },
+        "maxRenewals": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+        "maxClockSkewMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 86400000,
+          "description": "Bounded skew between a holder's observed clock and the provider clock. Beyond it a holder may not self-certify liveness."
+        },
+        "clockSource": {
+          "enum": ["provider", "host"],
+          "description": "provider means lease time comes from the storage authority. host is permitted only for process-local development providers and can never support distributed fencing."
+        },
+        "takeoverRequiresExpiry": { "const": true },
+        "takeoverRequiresPriorFence": { "const": true },
+        "policyHash": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "lockManagerDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "providerId",
+        "distributedFencing",
+        "maxLeaseTtlMs",
+        "maxRenewals",
+        "clockSource",
+        "maxClockSkewMs",
+        "casAcquire",
+        "casRenew",
+        "casRelease",
+        "fenceCheckedInWriteTransaction"
+      ],
+      "properties": {
+        "providerId": { "$ref": "#/$defs/identifier" },
+        "distributedFencing": { "type": "boolean" },
+        "maxLeaseTtlMs": { "type": "integer", "minimum": 1, "maximum": 86400000 },
+        "maxRenewals": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+        "clockSource": { "enum": ["provider", "host"] },
+        "maxClockSkewMs": { "type": "integer", "minimum": 0, "maximum": 86400000 },
+        "casAcquire": { "const": true },
+        "casRenew": { "const": true },
+        "casRelease": { "const": true },
+        "fenceCheckedInWriteTransaction": { "type": "boolean" }
+      }
+    },
+    "leaseDecision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operation", "outcome", "resourceKey", "requestedTtlMs"],
+      "properties": {
+        "operation": { "enum": ["acquire", "renew", "release", "takeover", "inspect"] },
+        "outcome": { "enum": ["granted", "refused"] },
+        "resourceKey": { "$ref": "#/$defs/identifier" },
+        "requestedTtlMs": { "type": "integer", "minimum": 1, "maximum": 86400000 },
+        "expectedFence": { "type": ["integer", "null"], "minimum": 0 },
+        "code": { "type": ["string", "null"] }
+      }
+    }
+  }
+}

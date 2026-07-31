@@ -1,0 +1,163 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/approval-request.schema.json",
+  "title": "Graph Engineering approval request",
+  "description": "The exact document a runtime emits when it needs a human authority transfer, and the frozen `data` payload of the HumanInputRequested event. A request binds one run, one graph revision, one node, one subject identity (an attempt or a durable decision), one canonical subject-document hash, and one requested scope. Binding all of them into the request identity is what stops a grant issued for one request from satisfying another. See approval-semantics.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "requestId",
+    "runId",
+    "graphRevision",
+    "nodeId",
+    "operationKind",
+    "subject",
+    "sideEffects",
+    "requestedScope",
+    "authorityId",
+    "authorityHash",
+    "requesterPrincipal",
+    "leaseFence",
+    "nonce",
+    "requestedAtMs",
+    "expiresAtMs",
+    "reason"
+  ],
+  "properties": {
+    "apiVersion": {
+      "description": "Ownership discriminator. A document is a claimed approval request if and only if it carries this exact value.",
+      "const": "graphengineering.reacher-z.github.io/approval/v1alpha1"
+    },
+    "kind": { "const": "ApprovalRequest" },
+    "requestId": {
+      "description": "Lowercase hex SHA-256 over the domain-separated framing given in approval-semantics.md. It is recomputed on every presentation and is never trusted as carried.",
+      "$ref": "#/$defs/sha256Hex"
+    },
+    "runId": { "$ref": "#/$defs/runId" },
+    "graphRevision": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "nodeId": { "$ref": "#/$defs/nodeId" },
+    "operationKind": {
+      "$ref": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/approval-authority.schema.json#/$defs/operationKind"
+    },
+    "subject": {
+      "description": "Exactly one attempt identity or one durable decision identity, plus the canonical hash of the exact document under approval. A barrier that resolved to 'human' produces subject.kind 'decision' whose decisionId is the frozen BarrierDecision identity and whose documentHash covers that document verbatim.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "documentHash"],
+      "properties": {
+        "kind": { "enum": ["attempt", "decision"] },
+        "attempt": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "decisionId": { "$ref": "#/$defs/sha256Hex" },
+        "documentHash": { "$ref": "#/$defs/sha256Hex" }
+      },
+      "oneOf": [
+        {
+          "title": "attempt",
+          "required": ["attempt"],
+          "properties": {
+            "kind": { "const": "attempt" },
+            "attempt": { "type": "integer" },
+            "decisionId": false
+          }
+        },
+        {
+          "title": "decision",
+          "required": ["decisionId"],
+          "properties": {
+            "kind": { "const": "decision" },
+            "decisionId": { "type": "string" },
+            "attempt": false
+          }
+        }
+      ]
+    },
+    "sideEffects": {
+      "description": "The value committed with NodeScheduled for the node under approval, echoed verbatim. 'none' is the only member that permits a grant without a confirmation block; the other three are in-doubt states in which a human must state what the external system actually did.",
+      "enum": ["none", "idempotent", "non-idempotent", "unspecified"]
+    },
+    "requestedScope": {
+      "description": "The authority being asked for. A grant may narrow it and may never widen it.",
+      "$ref": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/approval-authority.schema.json#/$defs/approvalScope"
+    },
+    "authorityId": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$"
+    },
+    "authorityHash": {
+      "description": "Lowercase hex SHA-256 of the authority document in force when the request was emitted. A grant carrying a different value is authority drift, not forgery and not staleness.",
+      "$ref": "#/$defs/sha256Hex"
+    },
+    "requesterPrincipal": {
+      "$ref": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/approval-authority.schema.json#/$defs/principal"
+    },
+    "leaseFence": {
+      "description": "The lease fencing token held when the request was emitted. A grant presented under a strictly greater live fence is stale, because another orchestrator has taken the run over.",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "nonce": {
+      "description": "32 random bytes as 64 lowercase hex characters. It makes two otherwise identical requests distinct documents with distinct identities, so a grant for the first can never be replayed onto the second.",
+      "$ref": "#/$defs/sha256Hex"
+    },
+    "requestedAtMs": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "expiresAtMs": {
+      "description": "Strictly greater than requestedAtMs. Expiry is a refusal or an unknown, never a pass.",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "reason": {
+      "description": "Human-facing text. It carries no application value and is bounded; the redaction contract governs anything that would.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    }
+  },
+  "$defs": {
+    "sha256Hex": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "runId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+    },
+    "nodeId": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$"
+    },
+    "humanInputRequestedData": {
+      "description": "Frozen `data` payload of the HumanInputRequested event. It carries both the request and the exact document under approval, because the integrated barrier contract requires a 'human' resolution to emit HumanInputRequested carrying the decision document. request.subject.documentHash MUST equal the domain-separated canonical hash of `document`; the pair is otherwise unverifiable. spec/event.schema.json still declares an open `data` object; the integration lane owns referencing this definition from it, and this contract does not modify that file.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["apiVersion", "kind", "request", "document"],
+      "properties": {
+        "apiVersion": {
+          "const": "graphengineering.reacher-z.github.io/approval/v1alpha1"
+        },
+        "kind": { "const": "HumanInputRequested" },
+        "request": {
+          "$ref": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/approval-request.schema.json"
+        },
+        "document": {
+          "description": "The exact document under approval, serialized verbatim. For a barrier that resolved to 'human' this is the frozen BarrierDecision document, unaltered."
+        }
+      }
+    }
+  }
+}

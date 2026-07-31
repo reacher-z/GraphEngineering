@@ -1,0 +1,343 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/checkpoint-acceleration.schema.json",
+  "title": "Graph Engineering durable-extension checkpoint acceleration record",
+  "description": "A checkpoint is a disposable accelerator over an authoritative prefix and is never authority. This file also owns the authorityFrame definition that replay-plan.schema.json and fork-lineage.schema.json reference, because the acceleration record is the only document that binds a whole history prefix. Schema acceptance does not establish reconstruction equality; that is a semantic obligation of conformance/durable-extension.validate.mjs.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "contractVersion",
+    "checkpointId",
+    "runId",
+    "eventStreamId",
+    "throughSequence",
+    "historyHash",
+    "graphRevision",
+    "graphHash",
+    "planHash",
+    "authority",
+    "writeFence",
+    "holderId",
+    "crashState",
+    "projection",
+    "byteCount",
+    "contentHash"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "graphengineering.reacher-z.github.io/durable-extension/v1alpha1"
+    },
+    "kind": { "const": "CheckpointAcceleration" },
+    "contractVersion": { "const": "durable-extension/v1alpha1" },
+    "checkpointId": { "$ref": "#/$defs/identifier" },
+    "runId": { "$ref": "#/$defs/identifier" },
+    "eventStreamId": { "$ref": "#/$defs/identifier" },
+    "throughSequence": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+    "historyHash": { "$ref": "#/$defs/sha256" },
+    "graphRevision": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+    "graphHash": { "$ref": "#/$defs/sha256" },
+    "planHash": { "$ref": "#/$defs/sha256" },
+    "authority": {
+      "const": false,
+      "description": "Structurally pinned. A checkpoint can never assert authority over the event log; there is no wire representation of an authoritative checkpoint."
+    },
+    "writeFence": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991,
+      "description": "The fence held when the checkpoint was saved. After a resource enters fenced ownership, a save below the current fence is refused."
+    },
+    "holderId": { "oneOf": [{ "$ref": "#/$defs/identifier" }, { "type": "null" }] },
+    "crashState": {
+      "enum": [
+        "committed",
+        "before-write",
+        "during-temp-write",
+        "before-rename",
+        "after-rename",
+        "concurrent-resume"
+      ],
+      "description": "The crash window this record was observed in. Every member is exercised by the conformance corpus; a torn observation must resolve to the previous complete checkpoint or to no checkpoint, never to a partial one."
+    },
+    "projection": { "$ref": "#/$defs/projection" },
+    "byteCount": { "type": "integer", "minimum": 0, "maximum": 16777216 },
+    "contentHash": { "$ref": "#/$defs/sha256" }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "frameType": {
+      "description": "Closed frame vocabulary. The first sixteen members are exactly members of the shipped v1alpha1 envelope vocabulary in packages/persistence/src/events.ts:8-31. The last eight are durable-extension additions with no shipped v1alpha1 counterpart; see durable-extension-semantics.md section 3.2.",
+      "enum": [
+        "RunCreated",
+        "RunStarted",
+        "RunResumed",
+        "NodeScheduled",
+        "NodeStarted",
+        "NodeSucceeded",
+        "NodeAttemptFailed",
+        "NodeRetried",
+        "NodeSettledWithoutAttempt",
+        "EdgeEmitted",
+        "ArtifactCreated",
+        "RouteSelected",
+        "BudgetUpdated",
+        "RunSucceeded",
+        "RunFailed",
+        "RunCancelled",
+        "LeaseAcquired",
+        "LeaseRenewed",
+        "LeaseTakenOver",
+        "LeaseReleased",
+        "LeaseLost",
+        "CheckpointRecorded",
+        "ForkCreated",
+        "ResumeConfirmed"
+      ]
+    },
+    "authorityFrame": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "apiVersion",
+        "kind",
+        "runId",
+        "eventStreamId",
+        "sequence",
+        "eventId",
+        "type",
+        "provenance",
+        "parentSequence",
+        "nodeId",
+        "attempt",
+        "fence",
+        "holderId",
+        "payload",
+        "payloadBytes",
+        "payloadHash",
+        "artifactRef",
+        "decisionHash",
+        "previousFrameHash",
+        "frameHash",
+        "historyHash"
+      ],
+      "properties": {
+        "apiVersion": {
+          "const": "graphengineering.reacher-z.github.io/durable-extension/v1alpha1"
+        },
+        "kind": { "const": "AuthorityFrame" },
+        "runId": { "$ref": "#/$defs/identifier" },
+        "eventStreamId": { "$ref": "#/$defs/identifier" },
+        "sequence": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+        "eventId": { "$ref": "#/$defs/identifier" },
+        "type": { "$ref": "#/$defs/frameType" },
+        "provenance": {
+          "enum": ["new", "inherited"],
+          "description": "inherited names a fact adopted from a parent run at fork. A child may never present an inherited fact as new work."
+        },
+        "parentSequence": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "nodeId": { "oneOf": [{ "$ref": "#/$defs/identifier" }, { "type": "null" }] },
+        "attempt": { "type": ["integer", "null"], "minimum": 1, "maximum": 9007199254740991 },
+        "fence": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "Zero is legal only before the resource has ever entered fenced ownership."
+        },
+        "holderId": { "oneOf": [{ "$ref": "#/$defs/identifier" }, { "type": "null" }] },
+        "payload": { "type": "object" },
+        "payloadBytes": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+        "payloadHash": { "$ref": "#/$defs/sha256" },
+        "artifactRef": { "oneOf": [{ "$ref": "#/$defs/identifier" }, { "type": "null" }] },
+        "decisionHash": {
+          "$ref": "#/$defs/sha256",
+          "description": "Domain hash over [runId, sequence, type, payloadHash]. Binding runId into the decision identity is what makes verbatim adoption of a parent decision detectable rather than silent."
+        },
+        "previousFrameHash": {
+          "oneOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }],
+          "description": "Null only at sequence zero."
+        },
+        "frameHash": { "$ref": "#/$defs/sha256" },
+        "historyHash": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "projection": {
+      "description": "The exact ten projection compartments required by master-plan section 14.2. The key set is closed and every compartment is independently recomputed from the authoritative prefix.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reducerState",
+        "controllerState",
+        "attempts",
+        "budgets",
+        "approvals",
+        "locks",
+        "artifacts",
+        "routes",
+        "seen",
+        "lineage"
+      ],
+      "properties": {
+        "reducerState": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["succeededNodeIds", "outputHashes"],
+          "properties": {
+            "succeededNodeIds": { "type": "array", "items": { "$ref": "#/$defs/identifier" } },
+            "outputHashes": {
+              "type": "object",
+              "additionalProperties": { "$ref": "#/$defs/sha256" }
+            }
+          }
+        },
+        "controllerState": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["terminal", "openAttempts", "settledWithoutAttempt", "emittedEdgeIds"],
+          "properties": {
+            "terminal": {
+              "oneOf": [
+                { "enum": ["RunSucceeded", "RunFailed", "RunCancelled"] },
+                { "type": "null" }
+              ]
+            },
+            "openAttempts": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["nodeId", "attempt", "activityKey", "sideEffects"],
+                "properties": {
+                  "nodeId": { "$ref": "#/$defs/identifier" },
+                  "attempt": { "type": "integer", "minimum": 1 },
+                  "activityKey": { "$ref": "#/$defs/sha256" },
+                  "sideEffects": { "enum": ["none", "idempotent", "non-idempotent", "undeclared"] }
+                }
+              }
+            },
+            "settledWithoutAttempt": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/identifier" }
+            },
+            "emittedEdgeIds": { "type": "array", "items": { "$ref": "#/$defs/identifier" } }
+          }
+        },
+        "attempts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["perNode", "total"],
+          "properties": {
+            "perNode": {
+              "type": "object",
+              "additionalProperties": { "type": "integer", "minimum": 0 }
+            },
+            "total": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "budgets": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["maxTotalAttempts", "consumedAttempts", "recordedUnits"],
+          "properties": {
+            "maxTotalAttempts": { "type": "integer", "minimum": 1 },
+            "consumedAttempts": { "type": "integer", "minimum": 0 },
+            "recordedUnits": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "approvals": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["nodeId", "attempt", "activityKey", "disposition", "confirmedBy"],
+            "properties": {
+              "nodeId": { "$ref": "#/$defs/identifier" },
+              "attempt": { "type": "integer", "minimum": 1 },
+              "activityKey": { "$ref": "#/$defs/sha256" },
+              "disposition": { "enum": ["retry", "compensate", "abandon"] },
+              "confirmedBy": { "$ref": "#/$defs/identifier" }
+            }
+          }
+        },
+        "locks": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "activeLeaseId",
+            "activeOwnerId",
+            "activeFence",
+            "activeEpoch",
+            "lastFence",
+            "lastEpoch",
+            "state",
+            "retiredLeaseIds"
+          ],
+          "properties": {
+            "activeLeaseId": { "oneOf": [{ "$ref": "#/$defs/identifier" }, { "type": "null" }] },
+            "activeOwnerId": { "oneOf": [{ "$ref": "#/$defs/identifier" }, { "type": "null" }] },
+            "activeFence": { "type": ["integer", "null"], "minimum": 1 },
+            "activeEpoch": { "type": ["integer", "null"], "minimum": 1 },
+            "lastFence": { "type": "integer", "minimum": 0 },
+            "lastEpoch": { "type": "integer", "minimum": 0 },
+            "state": { "enum": ["none", "active", "released", "lost"] },
+            "retiredLeaseIds": { "type": "array", "items": { "$ref": "#/$defs/identifier" } }
+          }
+        },
+        "artifacts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["artifactId", "digest", "byteCount", "storeProviderId"],
+            "properties": {
+              "artifactId": { "$ref": "#/$defs/identifier" },
+              "digest": { "$ref": "#/$defs/sha256" },
+              "byteCount": { "type": "integer", "minimum": 0 },
+              "storeProviderId": { "$ref": "#/$defs/identifier" }
+            }
+          }
+        },
+        "routes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["nodeId", "modelId", "routePolicyHash"],
+            "properties": {
+              "nodeId": { "$ref": "#/$defs/identifier" },
+              "modelId": { "$ref": "#/$defs/identifier" },
+              "routePolicyHash": { "$ref": "#/$defs/sha256" }
+            }
+          }
+        },
+        "seen": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/identifier" },
+          "description": "Every eventId folded into this projection, in commit order. Duplicate membership is a history violation, not a projection detail."
+        },
+        "lineage": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["generation", "parentRunId", "ancestorLineageHashes"],
+          "properties": {
+            "generation": { "type": "integer", "minimum": 1 },
+            "parentRunId": { "oneOf": [{ "$ref": "#/$defs/identifier" }, { "type": "null" }] },
+            "ancestorLineageHashes": { "type": "array", "items": { "$ref": "#/$defs/sha256" } }
+          }
+        }
+      }
+    }
+  }
+}

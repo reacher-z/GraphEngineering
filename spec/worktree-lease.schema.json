@@ -1,0 +1,231 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/worktree-lease.schema.json",
+  "title": "Graph Engineering Worktree Lease",
+  "description": "Closed exclusive-lease record for one provider-owned git worktree, its deterministic branch identity, its allowed and denied paths, and its private port, temporary-directory, cache, and database namespaces. A lease record is a contract document; no provider allocates one today.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "leaseId",
+    "providerId",
+    "repository",
+    "holder",
+    "branch",
+    "worktreePath",
+    "allowedPaths",
+    "deniedPaths",
+    "namespaces",
+    "state",
+    "acquiredAtMs",
+    "heartbeatAtMs",
+    "expiresAtMs",
+    "cleanup"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "graphengineering.reacher-z.github.io/worktree-lease/v1alpha1"
+    },
+    "leaseId": { "$ref": "capability-manifest.schema.json#/$defs/identifier" },
+    "providerId": { "$ref": "capability-manifest.schema.json#/$defs/identifier" },
+    "repository": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "originHash",
+        "baseCommit",
+        "cleanStatusRequired",
+        "submodulesEnabled",
+        "hooksEnabled",
+        "sparseCheckout"
+      ],
+      "properties": {
+        "originHash": { "$ref": "capability-manifest.schema.json#/$defs/sha256" },
+        "baseCommit": { "$ref": "capability-manifest.schema.json#/$defs/commitId" },
+        "cleanStatusRequired": { "const": true },
+        "submodulesEnabled": { "type": "boolean" },
+        "hooksEnabled": {
+          "description": "Repository hooks are untrusted execution inputs and are never enabled inside a lease.",
+          "const": false
+        },
+        "sparseCheckout": {
+          "description": "Sparse or filtered checkout behaviour is declared explicitly, never inferred.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["declared", "patterns"],
+          "properties": {
+            "declared": { "type": "boolean" },
+            "patterns": {
+              "type": "array",
+              "uniqueItems": true,
+              "maxItems": 64,
+              "items": { "type": "string", "minLength": 1, "maxLength": 256 }
+            }
+          }
+        }
+      }
+    },
+    "holder": {
+      "description": "Exactly one run/node/attempt holds a lease. holderToken is the only credential that authorizes a write, a release, or a merge proposal.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["runId", "nodeId", "attempt", "holderToken"],
+      "properties": {
+        "runId": { "$ref": "capability-manifest.schema.json#/$defs/identifier" },
+        "nodeId": { "$ref": "capability-manifest.schema.json#/$defs/identifier" },
+        "attempt": { "type": "integer", "minimum": 1 },
+        "holderToken": { "$ref": "capability-manifest.schema.json#/$defs/sha256" }
+      }
+    },
+    "branch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "mode", "derivation"],
+      "properties": {
+        "name": {
+          "description": "Deterministic per-node branch identity. The grammar is strictly narrower than git's own ref rules, so no identifier can inject a ref path segment.",
+          "type": "string",
+          "pattern": "^ge/iso/[a-z0-9][a-z0-9_-]{0,63}/[a-z0-9][a-z0-9_-]{0,63}/[1-9][0-9]{0,6}-[0-9a-f]{16}$"
+        },
+        "mode": { "enum": ["branch", "detached"] },
+        "derivation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["algorithm", "inputs", "discriminator"],
+          "properties": {
+            "algorithm": { "const": "sha256-tagged-json/v1alpha1" },
+            "inputs": {
+              "type": "array",
+              "uniqueItems": true,
+              "minItems": 4,
+              "maxItems": 4,
+              "items": { "enum": ["graphHash", "runId", "nodeId", "attempt"] }
+            },
+            "discriminator": { "type": "string", "pattern": "^[0-9a-f]{16}$" }
+          }
+        }
+      }
+    },
+    "worktreePath": {
+      "$ref": "capability-manifest.schema.json#/$defs/absolutePath"
+    },
+    "allowedPaths": {
+      "type": "array",
+      "uniqueItems": true,
+      "maxItems": 64,
+      "items": { "$ref": "#/$defs/leasePath" }
+    },
+    "deniedPaths": {
+      "type": "array",
+      "uniqueItems": true,
+      "maxItems": 64,
+      "items": { "$ref": "#/$defs/leasePath" }
+    },
+    "namespaces": {
+      "description": "Isolation is not only the filesystem. Ports, temporary files, caches, and database schemas are separated per lease.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "portBase",
+        "portCount",
+        "tempDirectory",
+        "cacheNamespace",
+        "databaseSchema"
+      ],
+      "properties": {
+        "portBase": { "type": "integer", "minimum": 1024, "maximum": 65535 },
+        "portCount": { "type": "integer", "minimum": 1, "maximum": 64 },
+        "tempDirectory": {
+          "$ref": "capability-manifest.schema.json#/$defs/absolutePath"
+        },
+        "cacheNamespace": {
+          "$ref": "capability-manifest.schema.json#/$defs/namespaceName"
+        },
+        "databaseSchema": {
+          "$ref": "capability-manifest.schema.json#/$defs/namespaceName"
+        }
+      }
+    },
+    "state": {
+      "$ref": "isolation-provider.schema.json#/$defs/lifecycleState"
+    },
+    "acquiredAtMs": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "heartbeatAtMs": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "expiresAtMs": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "cleanup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policy", "verified", "preservedForDebugging"],
+      "properties": {
+        "policy": { "const": "provider-created-only" },
+        "verified": { "type": "boolean" },
+        "preservedForDebugging": { "type": "boolean" }
+      }
+    }
+  },
+  "$defs": {
+    "leasePath": {
+      "description": "A lease-relative path. No absolute prefix, no parent segment, no backslash, and no repository metadata segment is representable.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._][A-Za-z0-9._/-]{0,255}$",
+      "not": { "pattern": "(^|/)(\\.\\.|\\.git)(/|$)" }
+    },
+    "pathRequest": {
+      "description": "One resolved-path authorization request. linkMap is declarative test data: it names the symlink resolution the provider would observe, so the corpus never touches a real filesystem.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["leaseId", "operation", "candidate", "linkMap"],
+      "properties": {
+        "leaseId": { "$ref": "capability-manifest.schema.json#/$defs/identifier" },
+        "operation": { "enum": ["read", "write", "create", "delete"] },
+        "candidate": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "linkMap": {
+          "type": "object",
+          "additionalProperties": { "type": "string", "maxLength": 1024 },
+          "propertyNames": { "type": "string", "maxLength": 1024 }
+        }
+      }
+    },
+    "leaseEvent": {
+      "description": "One attempted lease state transition, authorized only by a matching holderToken and an unexpired lease under the injected clock.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["leaseId", "transition", "presentedToken", "atMs"],
+      "properties": {
+        "leaseId": { "$ref": "capability-manifest.schema.json#/$defs/identifier" },
+        "transition": {
+          "enum": [
+            "acquire",
+            "heartbeat",
+            "activate",
+            "write",
+            "propose-merge",
+            "begin-release",
+            "complete-release",
+            "quarantine"
+          ]
+        },
+        "presentedToken": {
+          "$ref": "capability-manifest.schema.json#/$defs/sha256"
+        },
+        "atMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      }
+    }
+  }
+}

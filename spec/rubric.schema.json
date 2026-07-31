@@ -1,0 +1,304 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/rubric.schema.json",
+  "title": "Graph Engineering versioned rubric",
+  "description": "Closed, content-addressed review contract. A panel references a rubric by rubricId, rubricVersion and rubricHash, and every counted ballot carries the same rubricHash. onInsufficientQuorum and onThresholdUnsatisfied are required and have no default, because a silently defaulted resolution is the implicit pass this contract exists to forbid; neither vocabulary contains a pass member. Free-form review cannot satisfy a release gate.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "rubricId",
+    "rubricVersion",
+    "rubricHash",
+    "subjectSchemaHash",
+    "mode",
+    "criteria",
+    "decision",
+    "independence",
+    "ceiling",
+    "deprecation"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "graphengineering.reacher-z.github.io/verification/v1alpha1"
+    },
+    "kind": { "const": "Rubric" },
+    "rubricId": { "$ref": "#/$defs/identifier" },
+    "rubricVersion": {
+      "description": "Exact version string. Identity is rubricHash; rubricVersion alone is never trusted as identity.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "rubricHash": {
+      "description": "SHA-256 over frame('graphengineering.rubric.v1alpha1') || frame(canonicalSerialize(rubric without rubricHash)).",
+      "$ref": "#/$defs/sha256"
+    },
+    "subjectSchemaHash": {
+      "description": "Digest of the claim/output schema under review.",
+      "$ref": "#/$defs/sha256"
+    },
+    "mode": {
+      "description": "'verification' judges one subject. 'comparison' ranks a frozen candidate set and therefore requires decision.aggregation and decision.tieBreak.",
+      "enum": ["verification", "comparison"]
+    },
+    "criteria": {
+      "description": "Ordered and normative. The ballot fold and the reflection issue list both visit this order.",
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 256,
+      "items": { "$ref": "#/$defs/criterion" }
+    },
+    "decision": { "$ref": "#/$defs/decision" },
+    "citation": { "$ref": "#/$defs/citationPolicy" },
+    "reflection": { "$ref": "#/$defs/reflectionPolicy" },
+    "independence": { "$ref": "#/$defs/independence" },
+    "ceiling": { "$ref": "#/$defs/ceiling" },
+    "deprecation": { "$ref": "#/$defs/deprecation" }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "positiveInteger": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "lens": {
+      "description": "Closed eight-member perspective vocabulary.",
+      "enum": [
+        "correctness",
+        "security",
+        "performance",
+        "reproducibility",
+        "compatibility",
+        "operability",
+        "source-quality",
+        "evidence-citation"
+      ]
+    },
+    "criterion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "criterionId",
+        "lens",
+        "severity",
+        "evidenceRequired",
+        "citationRequired",
+        "refutationDefault",
+        "basis"
+      ],
+      "properties": {
+        "criterionId": { "$ref": "#/$defs/identifier" },
+        "lens": { "$ref": "#/$defs/lens" },
+        "severity": { "enum": ["blocking", "major", "minor", "advisory"] },
+        "evidenceRequired": {
+          "description": "When true, a criterion outcome with an empty evidenceRefs list must be 'unknown', never 'pass' and never 'reject'.",
+          "type": "boolean"
+        },
+        "citationRequired": { "type": "boolean" },
+        "refutationDefault": {
+          "description": "Adversarial default. When true, present evidence that fails to establish support yields 'reject' rather than 'abstain'.",
+          "type": "boolean"
+        },
+        "basis": {
+          "description": "A deterministic criterion must not be answered by model judgment, and the reverse.",
+          "enum": ["deterministic", "model-judgment"]
+        }
+      }
+    },
+    "decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "quorum",
+        "threshold",
+        "onInsufficientQuorum",
+        "onThresholdUnsatisfied"
+      ],
+      "properties": {
+        "quorum": {
+          "description": "Stage 1. A floor on how much evidence must exist before the threshold is even consulted. It has no counterpart in IntegratedBarrierPolicy and is never delegable to a barrier.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["minimumCast", "countAbstainAsCast", "countUnknownAsCast"],
+          "properties": {
+            "minimumCast": { "$ref": "#/$defs/positiveInteger" },
+            "countAbstainAsCast": { "type": "boolean" },
+            "countUnknownAsCast": {
+              "description": "Permitted but discouraged: an unknown ballot reports that the verifier could not decide, and counting it as participation converts absence of evidence into evidence of participation.",
+              "type": "boolean"
+            }
+          }
+        },
+        "threshold": { "$ref": "#/$defs/threshold" },
+        "onInsufficientQuorum": {
+          "description": "Closed two-member set. 'pass' and 'reject' are deliberately absent: an evidence gap may not become an acceptance, and it may not become a substantive finding either.",
+          "enum": ["unknown", "human"]
+        },
+        "onThresholdUnsatisfied": {
+          "description": "The barrier's onUnsatisfied set with 'fail' renamed to 'reject'. No member is a pass.",
+          "enum": ["reject", "unknown", "human"]
+        },
+        "aggregation": {
+          "description": "Required iff mode is 'comparison'. Deterministic aggregation happens in code.",
+          "enum": ["sum-of-normalized", "borda-count"]
+        },
+        "tieBreak": { "$ref": "#/$defs/tieBreak" }
+      }
+    },
+    "threshold": {
+      "description": "Stage 2. Bit-identical to IntegratedBarrierPolicy's four kinds and their exact-integer arithmetic. Each kind declares exactly its own members; a member belonging to a different kind is invalid.",
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": { "enum": ["all", "minimum", "percentage", "quorum"] }
+      },
+      "oneOf": [
+        {
+          "title": "all",
+          "required": ["kind"],
+          "properties": { "kind": { "const": "all" } }
+        },
+        {
+          "title": "minimum",
+          "required": ["kind", "minimum"],
+          "properties": {
+            "kind": { "const": "minimum" },
+            "minimum": { "$ref": "#/$defs/positiveInteger" }
+          }
+        },
+        {
+          "title": "percentage",
+          "required": ["kind", "basisPoints"],
+          "properties": {
+            "kind": { "const": "percentage" },
+            "basisPoints": { "type": "integer", "minimum": 1, "maximum": 10000 }
+          }
+        },
+        {
+          "title": "quorum",
+          "required": ["kind", "accepts", "countAbstainAsParticipant"],
+          "properties": {
+            "kind": { "const": "quorum" },
+            "accepts": { "$ref": "#/$defs/positiveInteger" },
+            "countAbstainAsParticipant": { "type": "boolean" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "tieBreak": {
+      "description": "Required iff mode is 'comparison'. An exhausted ladder is not a pick: it resolves to onUnresolved, which has no pass member.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ladder", "onUnresolved"],
+      "properties": {
+        "ladder": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 6,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "highest-minimum-score",
+              "highest-median-score",
+              "most-first-ranks",
+              "fewest-blocking-findings",
+              "earliest-declared-candidate",
+              "lowest-content-hash"
+            ]
+          }
+        },
+        "onUnresolved": { "enum": ["unknown", "human"] }
+      }
+    },
+    "citationPolicy": {
+      "description": "Present iff some criterion sets citationRequired true.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "networkVerification",
+        "maxExcerptCodePoints",
+        "authorityRequired"
+      ],
+      "properties": {
+        "networkVerification": {
+          "description": "No conformance case may set 'bounded'. Under 'disabled' a url locator is SOURCE_UNREACHABLE and the verification is still emitted rather than skipped.",
+          "enum": ["disabled", "bounded"]
+        },
+        "maxExcerptCodePoints": { "$ref": "#/$defs/positiveInteger" },
+        "authorityRequired": { "type": "boolean" }
+      }
+    },
+    "reflectionPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sameModelPermitted", "maxRevisions"],
+      "properties": {
+        "sameModelPermitted": { "type": "boolean" },
+        "maxRevisions": { "$ref": "#/$defs/positiveInteger" }
+      }
+    },
+    "independence": {
+      "description": "Makers and verifiers use isolated contexts and verifiers inspect original evidence rather than the maker's summary of it. Every member here feeds an exclusion decision that must be computable from provenance alone.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sameIdentityPermitted",
+        "sharedContextPermitted",
+        "evidenceSource",
+        "separationProofRequired",
+        "minimumDistinctLenses"
+      ],
+      "properties": {
+        "sameIdentityPermitted": { "type": "boolean" },
+        "sharedContextPermitted": { "type": "boolean" },
+        "evidenceSource": { "enum": ["original", "maker-summary"] },
+        "separationProofRequired": { "type": "boolean" },
+        "minimumDistinctLenses": {
+          "description": "Perspective diversity floor. A panel covering fewer distinct lenses fails stage 1 exactly as an insufficient ballot count does.",
+          "$ref": "#/$defs/positiveInteger"
+        }
+      }
+    },
+    "ceiling": {
+      "description": "Bounded, not accounted. D10-BUDGET-SPEC-035 owns the ledger; PANEL_CEILING_EXCEEDED is a refusal, not an accounting entry.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["maxVerifiers", "maxRevisions", "maxUnits", "modelTierCeiling", "capabilities"],
+      "properties": {
+        "maxVerifiers": { "$ref": "#/$defs/positiveInteger" },
+        "maxRevisions": { "$ref": "#/$defs/positiveInteger" },
+        "maxUnits": { "$ref": "#/$defs/positiveInteger" },
+        "modelTierCeiling": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "capabilities": {
+          "description": "Ascending Unicode code-point order and unique. A seat whose declared capabilities are not a subset is excluded with CAPABILITY_DENIED.",
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 64,
+          "items": { "$ref": "#/$defs/identifier" }
+        }
+      }
+    },
+    "deprecation": {
+      "description": "A deprecated rubric may still record reject, unknown or human. It may never reach pass: withdrawing a rubric must not retroactively convert an open finding into an accepted one.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["deprecated"],
+      "properties": {
+        "deprecated": { "type": "boolean" },
+        "supersedes": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "migrationNote": { "type": "string", "minLength": 1, "maxLength": 1000 }
+      }
+    }
+  }
+}

@@ -1,0 +1,396 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/isolation-provider.schema.json",
+  "title": "Graph Engineering Isolation Provider Descriptor",
+  "description": "Closed descriptor for one isolation provider: its declared trust boundary, its total operation set, its lifecycle, and the namespace domains it claims to separate. A descriptor is a contract document, not an implementation. No isolation provider exists in this repository; the only representable value of 'implemented' is false.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "providerId",
+    "providerKind",
+    "implemented",
+    "trustBoundary",
+    "supportedOperations",
+    "lifecycle",
+    "namespaceDomains",
+    "capabilityCeilingHash",
+    "cleanupProof",
+    "unsupportedOperationCode"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "graphengineering.reacher-z.github.io/isolation-provider/v1alpha1"
+    },
+    "providerId": {
+      "$ref": "capability-manifest.schema.json#/$defs/identifier"
+    },
+    "providerKind": { "$ref": "#/$defs/providerKind" },
+    "implemented": {
+      "description": "Honest implementation claim. No native runtime implements any provider in this vocabulary.",
+      "const": false
+    },
+    "trustBoundary": { "$ref": "#/$defs/trustBoundary" },
+    "supportedOperations": {
+      "description": "Master-plan Section 18.1 requires all eight operations from every provider. A provider that cannot perform one must still answer it with GE_ISO_PROVIDER_UNSUPPORTED rather than omit it.",
+      "type": "array",
+      "uniqueItems": true,
+      "minItems": 8,
+      "maxItems": 8,
+      "items": { "$ref": "#/$defs/providerOperation" }
+    },
+    "lifecycle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["states", "initialState", "terminalStates"],
+      "properties": {
+        "states": {
+          "type": "array",
+          "uniqueItems": true,
+          "minItems": 6,
+          "maxItems": 6,
+          "items": { "$ref": "#/$defs/lifecycleState" }
+        },
+        "initialState": { "const": "allocated" },
+        "terminalStates": {
+          "type": "array",
+          "uniqueItems": true,
+          "minItems": 2,
+          "maxItems": 2,
+          "items": { "enum": ["released", "quarantined"] }
+        }
+      }
+    },
+    "namespaceDomains": {
+      "type": "array",
+      "uniqueItems": true,
+      "maxItems": 6,
+      "items": { "$ref": "#/$defs/namespaceDomain" }
+    },
+    "capabilityCeilingHash": {
+      "$ref": "capability-manifest.schema.json#/$defs/sha256"
+    },
+    "cleanupProof": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["required", "provesNoNamespaceRemains", "scope"],
+      "properties": {
+        "required": { "const": true },
+        "provesNoNamespaceRemains": { "const": true },
+        "scope": {
+          "description": "Cleanup only ever removes a resource the provider itself created and still owns.",
+          "const": "provider-created-only"
+        }
+      }
+    },
+    "unsupportedOperationCode": { "const": "GE_ISO_PROVIDER_UNSUPPORTED" },
+    "platforms": {
+      "type": "array",
+      "uniqueItems": true,
+      "maxItems": 3,
+      "items": { "enum": ["linux", "macos", "windows"] }
+    }
+  },
+  "$defs": {
+    "providerKind": {
+      "enum": ["noop-local", "git-worktree", "restricted-process", "container"]
+    },
+    "providerOperation": {
+      "enum": [
+        "allocate",
+        "execute",
+        "exchange",
+        "inspect",
+        "cancel",
+        "diagnostics",
+        "release",
+        "prove-cleanup"
+      ]
+    },
+    "lifecycleState": {
+      "enum": [
+        "allocated",
+        "leased",
+        "active",
+        "releasing",
+        "released",
+        "quarantined"
+      ]
+    },
+    "namespaceDomain": {
+      "enum": [
+        "port",
+        "temp-directory",
+        "cache",
+        "database-schema",
+        "branch",
+        "worktree-path"
+      ]
+    },
+    "trustBoundary": {
+      "description": "The exact separation a provider claims. A false value is a disclosure, not a defect: a worktree separates file history and nothing else, and no provider claims kernel isolation.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "statement",
+        "isolatesFilesystem",
+        "isolatesProcess",
+        "isolatesNetwork",
+        "isolatesPorts",
+        "isolatesTempFiles",
+        "isolatesCaches",
+        "isolatesDatabaseNamespaces",
+        "isolatesKernel"
+      ],
+      "properties": {
+        "statement": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "isolatesFilesystem": { "type": "boolean" },
+        "isolatesProcess": { "type": "boolean" },
+        "isolatesNetwork": { "type": "boolean" },
+        "isolatesPorts": { "type": "boolean" },
+        "isolatesTempFiles": { "type": "boolean" },
+        "isolatesCaches": { "type": "boolean" },
+        "isolatesDatabaseNamespaces": { "type": "boolean" },
+        "isolatesKernel": {
+          "description": "No provider in this vocabulary isolates the host kernel. Container availability is not a kernel boundary.",
+          "const": false
+        }
+      }
+    },
+    "processSpec": {
+      "description": "A restricted process launch request. Every field is explicit; nothing is inherited from the host.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "apiVersion",
+        "leaseId",
+        "executable",
+        "argv",
+        "cwd",
+        "environment",
+        "secretInjection",
+        "networkEnabled",
+        "limits",
+        "streamFraming"
+      ],
+      "properties": {
+        "apiVersion": {
+          "const": "graphengineering.reacher-z.github.io/isolation-process-spec/v1alpha1"
+        },
+        "leaseId": { "$ref": "capability-manifest.schema.json#/$defs/identifier" },
+        "executable": {
+          "$ref": "capability-manifest.schema.json#/$defs/absolutePath"
+        },
+        "argv": {
+          "type": "array",
+          "maxItems": 256,
+          "items": { "type": "string", "maxLength": 4096 }
+        },
+        "cwd": { "$ref": "capability-manifest.schema.json#/$defs/absolutePath" },
+        "environment": {
+          "type": "object",
+          "additionalProperties": { "type": "string", "maxLength": 4096 },
+          "propertyNames": {
+            "$ref": "capability-manifest.schema.json#/$defs/environmentName"
+          }
+        },
+        "secretInjection": {
+          "enum": ["none", "stdin", "file", "environment"]
+        },
+        "networkEnabled": { "type": "boolean" },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "maxProcesses",
+            "maxOpenFiles",
+            "maxDurationMs",
+            "maxCpuMillis",
+            "maxMemoryBytes",
+            "maxOutputBytes",
+            "maxTempBytes"
+          ],
+          "properties": {
+            "maxProcesses": {
+              "$ref": "capability-manifest.schema.json#/$defs/boundedCount"
+            },
+            "maxOpenFiles": {
+              "$ref": "capability-manifest.schema.json#/$defs/boundedCount"
+            },
+            "maxDurationMs": {
+              "$ref": "capability-manifest.schema.json#/$defs/boundedMillis"
+            },
+            "maxCpuMillis": {
+              "$ref": "capability-manifest.schema.json#/$defs/boundedMillis"
+            },
+            "maxMemoryBytes": {
+              "$ref": "capability-manifest.schema.json#/$defs/boundedBytes"
+            },
+            "maxOutputBytes": {
+              "$ref": "capability-manifest.schema.json#/$defs/boundedBytes"
+            },
+            "maxTempBytes": {
+              "$ref": "capability-manifest.schema.json#/$defs/boundedBytes"
+            }
+          }
+        },
+        "streamFraming": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["stdin", "stdout", "stderr", "truncationReceiptRequired"],
+          "properties": {
+            "stdin": { "enum": ["closed", "secret-channel", "piped"] },
+            "stdout": { "enum": ["captured-bounded", "discarded"] },
+            "stderr": { "enum": ["captured-bounded", "discarded"] },
+            "truncationReceiptRequired": { "const": true }
+          }
+        }
+      }
+    },
+    "containerSpec": {
+      "description": "A container launch request. Absent provenance, a mutable tag, a privileged flag, a host socket mount, or a root user is a denial, never a warning.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "apiVersion",
+        "leaseId",
+        "image",
+        "privileged",
+        "runAsNonRoot",
+        "readOnlyRootFilesystem",
+        "droppedCapabilities",
+        "seccompProfile",
+        "mounts",
+        "networkEnabled",
+        "egressAllowlist",
+        "limits"
+      ],
+      "properties": {
+        "apiVersion": {
+          "const": "graphengineering.reacher-z.github.io/isolation-container-spec/v1alpha1"
+        },
+        "leaseId": { "$ref": "capability-manifest.schema.json#/$defs/identifier" },
+        "image": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["reference", "digest", "provenanceHash"],
+          "properties": {
+            "reference": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+            },
+            "digest": {
+              "oneOf": [
+                { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+                { "type": "null" }
+              ]
+            },
+            "provenanceHash": {
+              "oneOf": [
+                { "$ref": "capability-manifest.schema.json#/$defs/sha256" },
+                { "type": "null" }
+              ]
+            }
+          }
+        },
+        "privileged": { "type": "boolean" },
+        "runAsNonRoot": { "type": "boolean" },
+        "readOnlyRootFilesystem": { "type": "boolean" },
+        "droppedCapabilities": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 64,
+          "items": { "type": "string", "pattern": "^CAP_[A-Z_]{1,32}$" }
+        },
+        "seccompProfile": {
+          "enum": ["runtime-default", "explicit-profile", "unconfined-denied"]
+        },
+        "mounts": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["source", "target", "readOnly"],
+            "properties": {
+              "source": { "type": "string", "minLength": 1, "maxLength": 512 },
+              "target": {
+                "$ref": "capability-manifest.schema.json#/$defs/absolutePath"
+              },
+              "readOnly": { "type": "boolean" }
+            }
+          }
+        },
+        "networkEnabled": { "type": "boolean" },
+        "egressAllowlist": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 64,
+          "items": { "$ref": "capability-manifest.schema.json#/$defs/hostPattern" }
+        },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["maxPids", "maxMemoryBytes", "maxCpuMillis", "maxDiskBytes"],
+          "properties": {
+            "maxPids": {
+              "$ref": "capability-manifest.schema.json#/$defs/boundedCount"
+            },
+            "maxMemoryBytes": {
+              "$ref": "capability-manifest.schema.json#/$defs/boundedBytes"
+            },
+            "maxCpuMillis": {
+              "$ref": "capability-manifest.schema.json#/$defs/boundedMillis"
+            },
+            "maxDiskBytes": {
+              "$ref": "capability-manifest.schema.json#/$defs/boundedBytes"
+            }
+          }
+        }
+      }
+    },
+    "cleanupReceipt": {
+      "description": "The Section 18.1 proof that no namespace remains. Every declared namespace domain must appear exactly once with an explicit released verdict.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "apiVersion",
+        "leaseId",
+        "providerId",
+        "removedResources",
+        "residualNamespaces",
+        "outcome"
+      ],
+      "properties": {
+        "apiVersion": {
+          "const": "graphengineering.reacher-z.github.io/isolation-cleanup-receipt/v1alpha1"
+        },
+        "leaseId": { "$ref": "capability-manifest.schema.json#/$defs/identifier" },
+        "providerId": {
+          "$ref": "capability-manifest.schema.json#/$defs/identifier"
+        },
+        "removedResources": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["domain", "value", "createdByProvider"],
+            "properties": {
+              "domain": { "$ref": "#/$defs/namespaceDomain" },
+              "value": { "type": "string", "minLength": 1, "maxLength": 512 },
+              "createdByProvider": { "type": "boolean" }
+            }
+          }
+        },
+        "residualNamespaces": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 6,
+          "items": { "$ref": "#/$defs/namespaceDomain" }
+        },
+        "outcome": { "enum": ["clean", "incomplete", "foreign-resource"] }
+      }
+    }
+  }
+}

@@ -1,0 +1,177 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/approval-authority.schema.json",
+  "title": "Graph Engineering approval authority policy",
+  "description": "Closed policy that says who may decide an approval, what the widest decidable scope is, how long a request lives, and what happens when nobody answers. An approval is an authority transfer, so this document is the ceiling every request and grant is intersected against. It also owns the canonical ApprovalScope definition that approval-request.schema.json and approval-grant.schema.json reference, because a single scope shape is what makes the non-expansion rule mechanically checkable. See approval-semantics.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "authorityId",
+    "authorityRevision",
+    "principals",
+    "separation",
+    "maxScope",
+    "operationKinds",
+    "requestTtlMs",
+    "onUnanswered",
+    "forkTransfer",
+    "nonIdempotentResume"
+  ],
+  "properties": {
+    "apiVersion": {
+      "description": "Ownership discriminator. A document is a claimed approval authority if and only if it carries this exact value. Ownership is a versioned claim the author states, never a shape inferred from content.",
+      "const": "graphengineering.reacher-z.github.io/approval/v1alpha1"
+    },
+    "kind": { "const": "ApprovalAuthority" },
+    "authorityId": {
+      "description": "Stable identifier of this authority. It is not the authority hash; drift between the two is the detection mechanism for a substituted policy.",
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$"
+    },
+    "authorityRevision": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "principals": {
+      "description": "Closed allowlist of principals that may decide. Ascending Unicode code-point order, unique. The 'system:' namespace is structurally excluded: no machine principal may ever be an approver, which is what makes 'absence of a response is never a grant' impossible to work around by synthesizing an approver.",
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/humanPrincipal" }
+    },
+    "separation": {
+      "description": "Minimum separation of requester and approver. 'requester-must-differ' refuses a grant whose approverPrincipal equals the request's requesterPrincipal.",
+      "enum": ["none", "requester-must-differ"]
+    },
+    "maxScope": {
+      "description": "Widest scope this authority may ever decide. A request whose requestedScope is not a subset of this value is refused before any approver is contacted.",
+      "$ref": "#/$defs/approvalScope"
+    },
+    "operationKinds": {
+      "description": "Closed set of operation kinds this authority may decide. Ascending Unicode code-point order, unique.",
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 6,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/operationKind" }
+    },
+    "requestTtlMs": {
+      "description": "Maximum lifetime of a request, in milliseconds on the injected monotonic clock. expiresAtMs - requestedAtMs must not exceed it.",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "onUnanswered": {
+      "description": "Outcome when the request window closes with no grant. Both members are non-grants. There is deliberately no 'approve' member and no default, because a defaulted unanswered request is exactly the implicit grant this contract exists to forbid.",
+      "enum": ["refuse", "unknown"]
+    },
+    "forkTransfer": {
+      "description": "Whether a grant bound to a parent run may be carried into a forked child. 'never' refuses outright; 'bound-reapproval' refuses the transplanted grant and requires a fresh request bound to the child run identity. Neither member permits verbatim reuse.",
+      "enum": ["never", "bound-reapproval"]
+    },
+    "nonIdempotentResume": {
+      "description": "Single-member enum. Resuming a node whose committed sideEffects are not 'none' always requires an explicit confirmation block on the grant. The member set is closed at one so that no deployment can configure the confirmation away.",
+      "const": "require-confirmation"
+    }
+  },
+  "$defs": {
+    "humanPrincipal": {
+      "description": "Namespaced principal. The namespace is a lowercase token; 'system' is forbidden so that no runtime-synthesized identity can occupy an approver slot.",
+      "type": "string",
+      "allOf": [
+        { "pattern": "^[a-z][a-z0-9-]{0,31}:[A-Za-z0-9._@-]{1,64}$" },
+        { "not": { "pattern": "^system:" } }
+      ]
+    },
+    "principal": {
+      "description": "Namespaced principal for a requester, which may legitimately be a runtime component such as 'system:scheduler'.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,31}:[A-Za-z0-9._@-]{1,64}$"
+    },
+    "operationKind": {
+      "description": "Closed six-member operation vocabulary.",
+      "enum": [
+        "capability-use",
+        "external-effect",
+        "fork-rebind",
+        "graph-patch",
+        "resume-barrier",
+        "resume-in-doubt-node"
+      ]
+    },
+    "scopeOperation": {
+      "description": "Closed ten-member operation vocabulary carried inside a scope.",
+      "enum": [
+        "artifact-write",
+        "budget-override",
+        "filesystem-read",
+        "filesystem-write",
+        "graph-patch",
+        "model-invoke",
+        "network-request",
+        "process-execute",
+        "secret-read",
+        "tool-invoke"
+      ]
+    },
+    "scopeTokenList": {
+      "description": "Set-valued scope member. Ascending Unicode code-point order and uniqueness are normative so that canonical serialization is deterministic and subset comparison is unambiguous. Membership is exact string equality: no prefix, glob, suffix, case-insensitive, or path-normalizing match participates, because a prefix rule would silently let '/var' cover '/var/../etc'.",
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 256
+      }
+    },
+    "approvalScope": {
+      "description": "Exact eight-member scope. Every member is required, so a scope can never widen by omission. The empty scope is all five lists empty and all three ceilings zero; it is what a refusal must carry.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "operations",
+        "filesystemWriteRoots",
+        "networkHosts",
+        "processExecutables",
+        "secretNames",
+        "maxAttempts",
+        "maxDurationMs",
+        "maxCostMinorUnits"
+      ],
+      "properties": {
+        "operations": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 10,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/scopeOperation" }
+        },
+        "filesystemWriteRoots": { "$ref": "#/$defs/scopeTokenList" },
+        "networkHosts": { "$ref": "#/$defs/scopeTokenList" },
+        "processExecutables": { "$ref": "#/$defs/scopeTokenList" },
+        "secretNames": { "$ref": "#/$defs/scopeTokenList" },
+        "maxAttempts": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "maxDurationMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "maxCostMinorUnits": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      }
+    }
+  }
+}

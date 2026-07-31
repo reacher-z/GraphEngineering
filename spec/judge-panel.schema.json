@@ -1,0 +1,350 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/judge-panel.schema.json",
+  "title": "Graph Engineering panel decision",
+  "description": "Durable decision document of a verification or judge panel, emitted as VerificationDecided event data for every committed decision whatever its resolution. The census holds exactly one record per declared seat and nothing is filtered, sorted, deduplicated or dropped before the gate. Only a 'pass' resolution binds an output; the other three settle on non-passing terminals and still emit this document.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "panelDecisionId",
+    "panelNodeId",
+    "runId",
+    "graphRevision",
+    "rubricId",
+    "rubricVersion",
+    "rubricHash",
+    "mode",
+    "subject",
+    "seats",
+    "tally",
+    "quorum",
+    "threshold",
+    "thresholdSatisfied",
+    "reasonCode",
+    "reasonClass",
+    "resolution",
+    "terminal",
+    "bindsOutput",
+    "postTallyCollision"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "graphengineering.reacher-z.github.io/verification/v1alpha1"
+    },
+    "kind": { "const": "PanelDecision" },
+    "panelDecisionId": {
+      "description": "SHA-256 over frame('graphengineering.panel-decision.v1alpha1') || frame(runId) || frame(decimal(graphRevision)) || frame(panelNodeId) || frame(canonicalSerialize(document without panelDecisionId)). Same five-part construction as the barrier decisionId with a different domain string, so neither can be adopted as the other.",
+      "$ref": "#/$defs/sha256"
+    },
+    "panelNodeId": { "$ref": "#/$defs/identifier" },
+    "runId": { "$ref": "#/$defs/identifier" },
+    "graphRevision": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+    "rubricId": { "$ref": "#/$defs/identifier" },
+    "rubricVersion": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "rubricHash": { "$ref": "#/$defs/sha256" },
+    "mode": { "enum": ["verification", "comparison"] },
+    "subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["subjectId", "evidenceHash", "makerIdentity"],
+      "properties": {
+        "subjectId": { "$ref": "#/$defs/identifier" },
+        "evidenceHash": { "$ref": "#/$defs/sha256" },
+        "makerIdentity": { "$ref": "#/$defs/identifier" },
+        "makerSummaryHash": {
+          "description": "Present when a maker summary exists. A ballot whose evidenceSourceHash equals it is EVIDENCE_NOT_ORIGINAL.",
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "seats": {
+      "description": "One record per declared seat, in declared seat order. Missing, failed and abstaining verifiers remain visible and cannot be filtered away before the gate. An empty census is unreachable through a compiled panel node but remains defined for direct evaluator conformance, where it yields NO_ITEMS.",
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 256,
+      "items": { "$ref": "#/$defs/seat" }
+    },
+    "tally": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pass", "reject", "abstain", "unknown", "notCast", "counted", "excluded", "missing", "timedOut"],
+      "properties": {
+        "pass": { "$ref": "#/$defs/count" },
+        "reject": { "$ref": "#/$defs/count" },
+        "abstain": { "$ref": "#/$defs/count" },
+        "unknown": { "$ref": "#/$defs/count" },
+        "notCast": { "$ref": "#/$defs/count" },
+        "counted": { "$ref": "#/$defs/count" },
+        "excluded": { "$ref": "#/$defs/count" },
+        "missing": { "$ref": "#/$defs/count" },
+        "timedOut": { "$ref": "#/$defs/count" }
+      }
+    },
+    "quorum": {
+      "description": "Stage 1. Evaluated before the threshold; its only possible outputs are unknown and human, so it can never produce a pass and can never produce a reject.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "minimumCast",
+        "countAbstainAsCast",
+        "countUnknownAsCast",
+        "castCount",
+        "minimumDistinctLenses",
+        "distinctCountedLenses",
+        "satisfied"
+      ],
+      "properties": {
+        "minimumCast": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+        "countAbstainAsCast": { "type": "boolean" },
+        "countUnknownAsCast": { "type": "boolean" },
+        "castCount": { "$ref": "#/$defs/count" },
+        "minimumDistinctLenses": { "type": "integer", "minimum": 1, "maximum": 8 },
+        "distinctCountedLenses": { "type": "integer", "minimum": 0, "maximum": 8 },
+        "satisfied": { "type": "boolean" }
+      }
+    },
+    "threshold": {
+      "description": "Stage 2, bit-identical to IntegratedBarrierPolicy. Each kind declares exactly its own members.",
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": { "enum": ["all", "minimum", "percentage", "quorum"] }
+      },
+      "oneOf": [
+        { "title": "all", "required": ["kind"], "properties": { "kind": { "const": "all" } } },
+        {
+          "title": "minimum",
+          "required": ["kind", "minimum"],
+          "properties": {
+            "kind": { "const": "minimum" },
+            "minimum": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 }
+          }
+        },
+        {
+          "title": "percentage",
+          "required": ["kind", "basisPoints"],
+          "properties": {
+            "kind": { "const": "percentage" },
+            "basisPoints": { "type": "integer", "minimum": 1, "maximum": 10000 }
+          }
+        },
+        {
+          "title": "quorum",
+          "required": ["kind", "accepts", "countAbstainAsParticipant"],
+          "properties": {
+            "kind": { "const": "quorum" },
+            "accepts": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+            "countAbstainAsParticipant": { "type": "boolean" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "thresholdSatisfied": { "type": "boolean" },
+    "reasonCode": {
+      "description": "The integrated barrier's eleven reason codes, unchanged and not extended.",
+      "enum": [
+        "NO_ITEMS",
+        "ALL_SUCCEEDED",
+        "ALL_NOT_SUCCEEDED",
+        "MINIMUM_MET",
+        "MINIMUM_NOT_MET",
+        "MINIMUM_EXCEEDS_TOTAL",
+        "PERCENTAGE_MET",
+        "PERCENTAGE_NOT_MET",
+        "QUORUM_MET",
+        "QUORUM_NOT_MET",
+        "QUORUM_EXCEEDS_PARTICIPANTS"
+      ]
+    },
+    "reasonClass": {
+      "description": "Total, disjoint 4+4+3 partition of the eleven reason codes. 'insufficient' means the policy could not be evaluated against the evidence present, which is not the same as the evidence answering no.",
+      "enum": ["satisfied", "unsatisfied", "insufficient"]
+    },
+    "resolution": {
+      "description": "Closed four-member set. No member is an implicit pass.",
+      "enum": ["pass", "reject", "unknown", "human"]
+    },
+    "terminal": {
+      "enum": ["succeeded", "failed", "unknown", "awaiting_human"]
+    },
+    "bindsOutput": {
+      "description": "True iff resolution is 'pass'. A non-passing panel that bound an output would contribute the 'succeeded' disposition at any all/minimum/percentage barrier downstream, which is exactly the implicit pass this contract forbids.",
+      "type": "boolean"
+    },
+    "postTallyCollision": {
+      "description": "True when a maker/verifier identity collision was discovered after a ballot had been counted. The ballot stays counted and the whole resolution degrades to onInsufficientQuorum; removing the ballot would let a panel improve its own tally by disqualifying seats after seeing them.",
+      "type": "boolean"
+    },
+    "candidates": {
+      "description": "Present iff mode is 'comparison'. Frozen before judging: unique ids and pairwise distinct contentHash values.",
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["candidateId", "contentHash", "frozenAtSequence"],
+        "properties": {
+          "candidateId": { "$ref": "#/$defs/identifier" },
+          "contentHash": { "$ref": "#/$defs/sha256" },
+          "frozenAtSequence": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }
+        }
+      }
+    },
+    "aggregation": { "enum": ["sum-of-normalized", "borda-count"] },
+    "ranking": {
+      "description": "Present iff mode is 'comparison'. Recomputed, never asserted: rank(i) = 1 + |{j : normalized(j) > normalized(i)}|.",
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["candidateId", "aggregateScore", "rank"],
+        "properties": {
+          "candidateId": { "$ref": "#/$defs/identifier" },
+          "aggregateScore": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+          "rank": { "type": "integer", "minimum": 1, "maximum": 64 }
+        }
+      }
+    },
+    "tieBreak": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ladder", "onUnresolved", "resolvedAtRung", "leadingCandidateIds"],
+      "properties": {
+        "ladder": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 6,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "highest-minimum-score",
+              "highest-median-score",
+              "most-first-ranks",
+              "fewest-blocking-findings",
+              "earliest-declared-candidate",
+              "lowest-content-hash"
+            ]
+          }
+        },
+        "onUnresolved": { "enum": ["unknown", "human"] },
+        "resolvedAtRung": {
+          "description": "Explicit null when the ladder was exhausted with more than one candidate leading. An exhausted ladder is not a pick.",
+          "type": ["string", "null"],
+          "enum": [
+            "highest-minimum-score",
+            "highest-median-score",
+            "most-first-ranks",
+            "fewest-blocking-findings",
+            "earliest-declared-candidate",
+            "lowest-content-hash",
+            null
+          ]
+        },
+        "leadingCandidateIds": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/identifier" }
+        }
+      }
+    },
+    "selection": {
+      "description": "The record of what lost is part of the record of what won. candidateHashes holds every declared candidate in declaration order and verdictHashes holds every counted seat in census order; dropping a runner-up or a dissenting ballot is PANEL_CENSUS_INCOMPLETE.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["candidateId", "candidateHashes", "verdictHashes"],
+      "properties": {
+        "candidateId": { "$ref": "#/$defs/identifier" },
+        "candidateHashes": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 64,
+          "items": { "$ref": "#/$defs/sha256" }
+        },
+        "verdictHashes": {
+          "type": "array",
+          "maxItems": 256,
+          "items": { "$ref": "#/$defs/sha256" }
+        }
+      }
+    },
+    "synthesis": {
+      "description": "Present only when resolution is 'pass'. Synthesis may graft cited strengths only with traceable source references.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contentHash", "grafts"],
+      "properties": {
+        "contentHash": { "$ref": "#/$defs/sha256" },
+        "grafts": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["fromCandidateId", "evidenceRef", "excerptHash"],
+            "properties": {
+              "fromCandidateId": { "$ref": "#/$defs/identifier" },
+              "evidenceRef": { "$ref": "#/$defs/identifier" },
+              "excerptHash": { "$ref": "#/$defs/sha256" }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "count": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+    "seat": {
+      "description": "verdict is 'not-cast' if and only if participation is not 'counted'. A not-cast record must not carry confidenceBasisPoints and must not carry verdictHash, because there is no ballot from which either could be derived; materializing one would be inventing the ballot the member exists to deny. A counted record must carry verdictHash: 'all votes are retained' is unenforceable if the census cannot address the vote it counts.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["verifierId", "lens", "participation", "verdict"],
+      "properties": {
+        "verifierId": { "$ref": "#/$defs/identifier" },
+        "lens": {
+          "enum": [
+            "correctness",
+            "security",
+            "performance",
+            "reproducibility",
+            "compatibility",
+            "operability",
+            "source-quality",
+            "evidence-citation"
+          ]
+        },
+        "participation": { "enum": ["counted", "excluded", "missing", "timed_out"] },
+        "verdict": { "enum": ["pass", "reject", "abstain", "unknown", "not-cast"] },
+        "exclusionCode": {
+          "description": "Present iff participation is 'excluded'. Every member is decidable from seat and ballot provenance alone; none may read the verdict or its content.",
+          "enum": [
+            "MAKER_VERIFIER_IDENTITY_COLLISION",
+            "SHARED_CONTEXT_DENIED",
+            "EVIDENCE_NOT_ORIGINAL",
+            "SEPARATION_PROOF_ABSENT",
+            "RUBRIC_HASH_MISMATCH",
+            "CAPABILITY_DENIED"
+          ]
+        },
+        "confidenceBasisPoints": { "type": "integer", "minimum": 1, "maximum": 10000 },
+        "verdictHash": { "$ref": "#/$defs/sha256" }
+      }
+    }
+  }
+}

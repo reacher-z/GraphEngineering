@@ -1,0 +1,164 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/replay-plan.schema.json",
+  "title": "Graph Engineering durable-extension replay plan and effect ledger",
+  "description": "Replay is a read-only fold over an authoritative prefix. The effect ledger pins every externally observable channel to zero at the schema level, so a replay that emitted anything has no valid wire representation. Schema acceptance does not establish projection equality; that is a semantic obligation of conformance/durable-extension.validate.mjs.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "contractVersion",
+    "runId",
+    "eventStreamId",
+    "throughSequence",
+    "mode",
+    "expected",
+    "effectBudget",
+    "observedEffects",
+    "unknownFacts",
+    "planHash"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "graphengineering.reacher-z.github.io/durable-extension/v1alpha1"
+    },
+    "kind": { "const": "ReplayPlan" },
+    "contractVersion": { "const": "durable-extension/v1alpha1" },
+    "runId": { "$ref": "#/$defs/identifier" },
+    "eventStreamId": { "$ref": "#/$defs/identifier" },
+    "throughSequence": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "maximum": 9007199254740991,
+      "description": "Null means the committed tail at the instant the plan was bound. A value beyond the tail is refused rather than clamped."
+    },
+    "mode": {
+      "enum": ["result", "state", "trace"],
+      "description": "The projection the replay is allowed to render. Every member is exercised by the conformance corpus."
+    },
+    "expected": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "graphHash",
+        "planHash",
+        "inputHash",
+        "implementationHash",
+        "policyHash",
+        "authorityHash",
+        "historyHash"
+      ],
+      "properties": {
+        "graphHash": { "$ref": "#/$defs/sha256" },
+        "planHash": { "$ref": "#/$defs/sha256" },
+        "inputHash": { "$ref": "#/$defs/sha256" },
+        "implementationHash": { "$ref": "#/$defs/sha256" },
+        "policyHash": { "$ref": "#/$defs/sha256" },
+        "authorityHash": { "$ref": "#/$defs/sha256" },
+        "historyHash": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "effectBudget": { "$ref": "#/$defs/zeroEffectLedger" },
+    "observedEffects": { "$ref": "#/$defs/effectLedger" },
+    "unknownFacts": {
+      "type": "array",
+      "description": "In-doubt facts carried forward verbatim. Replay may never resolve an unknown outcome into a known one.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sequence", "nodeId", "attempt", "activityKey", "sideEffects", "disposition"],
+        "properties": {
+          "sequence": { "type": "integer", "minimum": 0 },
+          "nodeId": { "$ref": "#/$defs/identifier" },
+          "attempt": { "type": "integer", "minimum": 1 },
+          "activityKey": { "$ref": "#/$defs/sha256" },
+          "sideEffects": { "enum": ["none", "idempotent", "non-idempotent", "undeclared"] },
+          "disposition": { "const": "unknown" }
+        }
+      }
+    },
+    "planHash": { "$ref": "#/$defs/sha256" }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "effectChannel": {
+      "description": "The closed inventory of externally observable channels a replay must not touch. The conformance corpus is required to carry one isolating negative vector per member.",
+      "enum": [
+        "eventAppends",
+        "checkpointWrites",
+        "artifactMutations",
+        "leaseOperations",
+        "nodeExecutions",
+        "modelCalls",
+        "toolCalls",
+        "providerCalls",
+        "randomDraws",
+        "currentClockReads"
+      ]
+    },
+    "effectLedger": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "eventAppends",
+        "checkpointWrites",
+        "artifactMutations",
+        "leaseOperations",
+        "nodeExecutions",
+        "modelCalls",
+        "toolCalls",
+        "providerCalls",
+        "randomDraws",
+        "currentClockReads"
+      ],
+      "properties": {
+        "eventAppends": { "type": "integer", "minimum": 0 },
+        "checkpointWrites": { "type": "integer", "minimum": 0 },
+        "artifactMutations": { "type": "integer", "minimum": 0 },
+        "leaseOperations": { "type": "integer", "minimum": 0 },
+        "nodeExecutions": { "type": "integer", "minimum": 0 },
+        "modelCalls": { "type": "integer", "minimum": 0 },
+        "toolCalls": { "type": "integer", "minimum": 0 },
+        "providerCalls": { "type": "integer", "minimum": 0 },
+        "randomDraws": { "type": "integer", "minimum": 0 },
+        "currentClockReads": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "zeroEffectLedger": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "eventAppends",
+        "checkpointWrites",
+        "artifactMutations",
+        "leaseOperations",
+        "nodeExecutions",
+        "modelCalls",
+        "toolCalls",
+        "providerCalls",
+        "randomDraws",
+        "currentClockReads"
+      ],
+      "properties": {
+        "eventAppends": { "const": 0 },
+        "checkpointWrites": { "const": 0 },
+        "artifactMutations": { "const": 0 },
+        "leaseOperations": { "const": 0 },
+        "nodeExecutions": { "const": 0 },
+        "modelCalls": { "const": 0 },
+        "toolCalls": { "const": 0 },
+        "providerCalls": { "const": 0 },
+        "randomDraws": { "const": 0 },
+        "currentClockReads": { "const": 0 }
+      }
+    }
+  }
+}

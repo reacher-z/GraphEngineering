@@ -1,0 +1,713 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/capability-manifest.schema.json",
+  "title": "Graph Engineering Capability Manifest",
+  "description": "Closed deny-by-default capability manifest for one authority level, plus the portable code, domain, requestor, and decision vocabulary shared by the D12 isolation contract. Declaring a capability is not evidence that any runtime enforces it; no Graph Engineering runtime enforces this manifest today.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "manifestId", "policyVersion", "level", "binding", "domains"],
+  "properties": {
+    "apiVersion": {
+      "const": "graphengineering.reacher-z.github.io/capability-manifest/v1alpha1"
+    },
+    "manifestId": { "$ref": "#/$defs/identifier" },
+    "policyVersion": { "$ref": "#/$defs/policyVersion" },
+    "level": { "$ref": "#/$defs/authorityLevel" },
+    "enforced": {
+      "description": "Honest enforcement claim. No runtime in this repository enforces a capability manifest, so the only representable value is false.",
+      "const": false
+    },
+    "binding": { "$ref": "#/$defs/capabilityBinding" },
+    "domains": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tool": { "$ref": "#/$defs/toolDomain" },
+        "filesystem": { "$ref": "#/$defs/filesystemDomain" },
+        "network": { "$ref": "#/$defs/networkDomain" },
+        "secret": { "$ref": "#/$defs/secretDomain" },
+        "process": { "$ref": "#/$defs/processDomain" },
+        "worktree": { "$ref": "#/$defs/worktreeDomain" },
+        "container": { "$ref": "#/$defs/containerDomain" },
+        "artifact": { "$ref": "#/$defs/artifactDomain" },
+        "storage": { "$ref": "#/$defs/storageDomain" },
+        "mcp": { "$ref": "#/$defs/mcpDomain" },
+        "approval": { "$ref": "#/$defs/approvalDomain" },
+        "patch": { "$ref": "#/$defs/patchDomain" }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "description": "An operator ceiling is total: every domain of the closed vocabulary must be stated, because an omitted domain is read as deny and a ceiling that denies everything cannot be a ceiling.",
+      "if": {
+        "type": "object",
+        "properties": { "level": { "const": "operator" } },
+        "required": ["level"]
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "domains": {
+            "type": "object",
+            "required": [
+              "tool",
+              "filesystem",
+              "network",
+              "secret",
+              "process",
+              "worktree",
+              "container",
+              "artifact",
+              "storage",
+              "mcp",
+              "approval",
+              "patch"
+            ],
+            "properties": {
+              "tool": { "$ref": "#/$defs/toolDomain" },
+              "filesystem": { "$ref": "#/$defs/filesystemDomain" },
+              "network": { "$ref": "#/$defs/networkDomain" },
+              "secret": { "$ref": "#/$defs/secretDomain" },
+              "process": { "$ref": "#/$defs/processDomain" },
+              "worktree": { "$ref": "#/$defs/worktreeDomain" },
+              "container": { "$ref": "#/$defs/containerDomain" },
+              "artifact": { "$ref": "#/$defs/artifactDomain" },
+              "storage": { "$ref": "#/$defs/storageDomain" },
+              "mcp": { "$ref": "#/$defs/mcpDomain" },
+              "approval": { "$ref": "#/$defs/approvalDomain" },
+              "patch": { "$ref": "#/$defs/patchDomain" }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "commitId": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "policyVersion": {
+      "description": "Closed set of policy vocabulary versions. An unknown version fails closed with GE_CAP_UNKNOWN_POLICY_VERSION; it is never treated as a permissive default.",
+      "enum": ["capability-policy/v1alpha1"]
+    },
+    "authorityLevel": {
+      "description": "Authority levels in strict narrowing order. Every later level may only request a subset of the effective authority of the earlier ones.",
+      "enum": [
+        "operator",
+        "deployment",
+        "tenant",
+        "graph",
+        "run",
+        "node",
+        "adapter",
+        "request"
+      ]
+    },
+    "capabilityDomain": {
+      "description": "Closed capability domain vocabulary. Anything not named here is undeclared and therefore denied.",
+      "enum": [
+        "tool",
+        "filesystem",
+        "network",
+        "secret",
+        "process",
+        "worktree",
+        "container",
+        "artifact",
+        "storage",
+        "mcp",
+        "approval",
+        "patch"
+      ]
+    },
+    "requestorKind": {
+      "description": "Every principal that may submit a capability request. Each may request strictly less authority and none may request more.",
+      "enum": [
+        "operator-policy",
+        "graph",
+        "node",
+        "router",
+        "planner",
+        "verifier",
+        "provider",
+        "tool",
+        "model-output",
+        "resumed-worker",
+        "dynamic-patch",
+        "child-graph"
+      ]
+    },
+    "requestorTrust": {
+      "description": "Trusted requestors are deterministic policy inputs. Untrusted requestors are data: their request may narrow authority and may never touch an authority-bearing field.",
+      "enum": ["trusted", "untrusted"]
+    },
+    "escapeClass": {
+      "description": "Enumerated escape attempts required by master-plan Section 18.6.",
+      "enum": [
+        "path-traversal",
+        "symlink-escape",
+        "lease-theft",
+        "branch-name-collision",
+        "port-reuse",
+        "temp-file-reuse",
+        "cache-poisoning",
+        "environment-inheritance",
+        "prompt-injection-capability-expansion"
+      ]
+    },
+    "code": {
+      "description": "Closed portable outcome vocabulary. GE_CAP_GRANTED and GE_MERGE_AUTHORIZED are the only success codes; every other member is a structured denial. A capability outcome is never a bare boolean and never a thrown string.",
+      "enum": [
+        "GE_CAP_APPROVAL_REQUIRED",
+        "GE_CAP_APPROVAL_STALE",
+        "GE_CAP_AUTHORITY_IMMUTABLE",
+        "GE_CAP_BINDING_MISMATCH",
+        "GE_CAP_DENIED_BY_DEFAULT",
+        "GE_CAP_EXPANSION_DENIED",
+        "GE_CAP_GRANTED",
+        "GE_CAP_MANIFEST_INVALID",
+        "GE_CAP_UNKNOWN_POLICY_VERSION",
+        "GE_CAP_UNTRUSTED_REQUESTOR_AUTHORITY",
+        "GE_ISO_BRANCH_COLLISION",
+        "GE_ISO_CACHE_UNTRUSTED_ENTRY",
+        "GE_ISO_CLEANUP_FOREIGN_RESOURCE",
+        "GE_ISO_CLEANUP_INCOMPLETE",
+        "GE_ISO_ENV_INHERITED",
+        "GE_ISO_HOOK_EXECUTION_DENIED",
+        "GE_ISO_IDENTIFIER_INVALID",
+        "GE_ISO_IMAGE_UNVERIFIED",
+        "GE_ISO_KILL_FAILED",
+        "GE_ISO_LEASE_CONFLICT",
+        "GE_ISO_LEASE_EXPIRED",
+        "GE_ISO_LEASE_NOT_HELD",
+        "GE_ISO_LIMIT_EXCEEDED",
+        "GE_ISO_NAMESPACE_COLLISION",
+        "GE_ISO_NAMESPACE_REUSE",
+        "GE_ISO_NETWORK_DENIED",
+        "GE_ISO_PATH_ESCAPE",
+        "GE_ISO_PATH_NOT_GRANTED",
+        "GE_ISO_PRIVILEGE_DENIED",
+        "GE_ISO_PROVIDER_UNSUPPORTED",
+        "GE_ISO_REPOSITORY_METADATA_DENIED",
+        "GE_ISO_SECRET_EXPOSED",
+        "GE_ISO_SYMLINK_ESCAPE",
+        "GE_MERGE_APPROVAL_REQUIRED",
+        "GE_MERGE_APPROVAL_STALE",
+        "GE_MERGE_AUTHORIZED",
+        "GE_MERGE_CONFLICT",
+        "GE_MERGE_DIRTY_STATE",
+        "GE_MERGE_EXTERNAL_PUSH_DENIED",
+        "GE_MERGE_GATE_FAILED",
+        "GE_MERGE_GENERATED_DRIFT",
+        "GE_MERGE_OWNERSHIP_DENIED",
+        "GE_MERGE_PROTECTED_PATH",
+        "GE_MERGE_SOURCE_MISMATCH",
+        "GE_MERGE_STALE_BASE"
+      ]
+    },
+    "approvalOperation": {
+      "enum": [
+        "filesystem-write",
+        "process-execution",
+        "network-egress",
+        "secret-resolution",
+        "worktree-merge",
+        "artifact-publication",
+        "storage-migration",
+        "dynamic-patch"
+      ]
+    },
+    "capabilityBinding": {
+      "description": "Immutable identity a capability snapshot is bound to. Retry and resume reuse this snapshot; they never acquire newly available ambient authority.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "graphHash",
+        "graphRevision",
+        "runId",
+        "nodeId",
+        "attempt",
+        "inputHash",
+        "executorIdentityHash",
+        "approvalRef",
+        "approvalExpiresAtMs"
+      ],
+      "properties": {
+        "graphHash": { "$ref": "#/$defs/sha256" },
+        "graphRevision": { "type": "integer", "minimum": 1 },
+        "runId": { "$ref": "#/$defs/identifier" },
+        "nodeId": { "$ref": "#/$defs/identifier" },
+        "attempt": { "type": "integer", "minimum": 1 },
+        "inputHash": { "$ref": "#/$defs/sha256" },
+        "executorIdentityHash": { "$ref": "#/$defs/sha256" },
+        "approvalRef": {
+          "oneOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }]
+        },
+        "approvalExpiresAtMs": {
+          "oneOf": [
+            { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "boundedCount": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1048576
+    },
+    "boundedBytes": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 68719476736
+    },
+    "boundedMillis": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 86400000
+    },
+    "absolutePath": {
+      "type": "string",
+      "pattern": "^/[A-Za-z0-9][A-Za-z0-9._/-]{0,255}$"
+    },
+    "environmentName": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "hostPattern": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9.-]{0,253}$"
+    },
+    "namespaceName": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9_]{0,62}$"
+    },
+    "toolDomain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operations", "maxCallsPerAttempt"],
+      "properties": {
+        "operations": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 256,
+          "items": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$" }
+        },
+        "maxCallsPerAttempt": { "$ref": "#/$defs/boundedCount" }
+      }
+    },
+    "filesystemDomain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["roots", "deniedPaths", "followSymlinks", "maxWriteBytes"],
+      "properties": {
+        "roots": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "read", "write", "create", "delete"],
+            "properties": {
+              "path": { "$ref": "#/$defs/absolutePath" },
+              "read": { "type": "boolean" },
+              "write": { "type": "boolean" },
+              "create": { "type": "boolean" },
+              "delete": { "type": "boolean" }
+            }
+          }
+        },
+        "deniedPaths": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 256,
+          "items": { "$ref": "#/$defs/absolutePath" }
+        },
+        "followSymlinks": {
+          "description": "A resolved-path policy never follows a link out of its grant. Only false is representable.",
+          "const": false
+        },
+        "maxWriteBytes": { "$ref": "#/$defs/boundedBytes" }
+      }
+    },
+    "networkDomain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "hosts",
+        "ports",
+        "protocols",
+        "allowRedirects",
+        "maxRequestBytes",
+        "maxResponseBytes"
+      ],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "hosts": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 128,
+          "items": { "$ref": "#/$defs/hostPattern" }
+        },
+        "ports": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 128,
+          "items": { "type": "integer", "minimum": 1, "maximum": 65535 }
+        },
+        "protocols": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 4,
+          "items": { "enum": ["https", "http", "tcp"] }
+        },
+        "allowRedirects": { "type": "boolean" },
+        "maxRequestBytes": { "$ref": "#/$defs/boundedBytes" },
+        "maxResponseBytes": { "$ref": "#/$defs/boundedBytes" }
+      }
+    },
+    "secretDomain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["refs", "injection", "allowInArgv", "allowInTrackedContent"],
+      "properties": {
+        "refs": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 64,
+          "items": { "type": "string", "pattern": "^secret:[a-z0-9][a-z0-9._-]{0,95}$" }
+        },
+        "injection": {
+          "description": "One-way injection channel, ordered from narrowest to broadest exposure.",
+          "enum": ["none", "stdin", "file", "environment"]
+        },
+        "allowInArgv": {
+          "description": "A secret in argv is world-readable through the process table. Only false is representable.",
+          "const": false
+        },
+        "allowInTrackedContent": {
+          "description": "A secret copied into tracked worktree content survives the lease. Only false is representable.",
+          "const": false
+        }
+      }
+    },
+    "processDomain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "executables",
+        "environmentAllowlist",
+        "maxProcesses",
+        "maxOpenFiles",
+        "maxDurationMs",
+        "maxCpuMillis",
+        "maxMemoryBytes",
+        "maxOutputBytes",
+        "maxTempBytes"
+      ],
+      "properties": {
+        "executables": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 64,
+          "items": { "$ref": "#/$defs/absolutePath" }
+        },
+        "environmentAllowlist": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 64,
+          "items": { "$ref": "#/$defs/environmentName" }
+        },
+        "maxProcesses": { "$ref": "#/$defs/boundedCount" },
+        "maxOpenFiles": { "$ref": "#/$defs/boundedCount" },
+        "maxDurationMs": { "$ref": "#/$defs/boundedMillis" },
+        "maxCpuMillis": { "$ref": "#/$defs/boundedMillis" },
+        "maxMemoryBytes": { "$ref": "#/$defs/boundedBytes" },
+        "maxOutputBytes": { "$ref": "#/$defs/boundedBytes" },
+        "maxTempBytes": { "$ref": "#/$defs/boundedBytes" }
+      }
+    },
+    "worktreeDomain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "operations",
+        "allowDetached",
+        "protectedDirectories",
+        "allowRepositoryHooks",
+        "maxDiffBytes"
+      ],
+      "properties": {
+        "operations": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 8,
+          "items": {
+            "enum": [
+              "allocate",
+              "checkout",
+              "commit",
+              "diff",
+              "status",
+              "propose-merge",
+              "preserve",
+              "release"
+            ]
+          }
+        },
+        "allowDetached": { "type": "boolean" },
+        "protectedDirectories": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 64,
+          "items": { "$ref": "#/$defs/absolutePath" }
+        },
+        "allowRepositoryHooks": {
+          "description": "Repository hooks and configuration are untrusted execution inputs. Only false is representable.",
+          "const": false
+        },
+        "maxDiffBytes": { "$ref": "#/$defs/boundedBytes" }
+      }
+    },
+    "containerDomain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "images",
+        "allowPrivileged",
+        "allowHostSockets",
+        "readOnlyRoot",
+        "runAsNonRoot",
+        "droppedCapabilities",
+        "seccompProfile",
+        "networkEnabled",
+        "maxPids",
+        "maxMemoryBytes",
+        "maxCpuMillis",
+        "maxDiskBytes"
+      ],
+      "properties": {
+        "images": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["reference", "digest", "provenanceHash"],
+            "properties": {
+              "reference": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+              },
+              "digest": {
+                "type": "string",
+                "pattern": "^sha256:[0-9a-f]{64}$"
+              },
+              "provenanceHash": {
+                "oneOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }]
+              }
+            }
+          }
+        },
+        "allowPrivileged": { "const": false },
+        "allowHostSockets": { "const": false },
+        "readOnlyRoot": { "const": true },
+        "runAsNonRoot": { "const": true },
+        "droppedCapabilities": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 64,
+          "items": { "type": "string", "pattern": "^CAP_[A-Z_]{1,32}$" }
+        },
+        "seccompProfile": {
+          "enum": ["runtime-default", "explicit-profile", "unconfined-denied"]
+        },
+        "networkEnabled": { "type": "boolean" },
+        "maxPids": { "$ref": "#/$defs/boundedCount" },
+        "maxMemoryBytes": { "$ref": "#/$defs/boundedBytes" },
+        "maxCpuMillis": { "$ref": "#/$defs/boundedMillis" },
+        "maxDiskBytes": { "$ref": "#/$defs/boundedBytes" }
+      }
+    },
+    "artifactDomain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["namespaces", "actions", "maxBytes"],
+      "properties": {
+        "namespaces": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 64,
+          "items": { "$ref": "#/$defs/namespaceName" }
+        },
+        "actions": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 3,
+          "items": { "enum": ["read", "write", "delete"] }
+        },
+        "maxBytes": { "$ref": "#/$defs/boundedBytes" }
+      }
+    },
+    "storageDomain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["namespaces", "operations"],
+      "properties": {
+        "namespaces": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 64,
+          "items": { "$ref": "#/$defs/namespaceName" }
+        },
+        "operations": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 4,
+          "items": { "enum": ["read", "write", "delete", "migrate"] }
+        }
+      }
+    },
+    "mcpDomain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["servers", "tools", "resources", "allowMutation"],
+      "properties": {
+        "servers": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 32,
+          "items": { "$ref": "#/$defs/identifier" }
+        },
+        "tools": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 128,
+          "items": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$" }
+        },
+        "resources": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 128,
+          "items": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._:/-]{0,127}$" }
+        },
+        "allowMutation": { "type": "boolean" }
+      }
+    },
+    "approvalDomain": {
+      "description": "Monotone in the opposite direction to every other domain: a narrowing request must require approval for at least as many operations as its ceiling.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requiredFor"],
+      "properties": {
+        "requiredFor": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 8,
+          "items": { "$ref": "#/$defs/approvalOperation" }
+        }
+      }
+    },
+    "patchDomain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["allowed", "maxNodes", "maxEdges", "mayRequestCapabilities"],
+      "properties": {
+        "allowed": { "type": "boolean" },
+        "maxNodes": { "$ref": "#/$defs/boundedCount" },
+        "maxEdges": { "$ref": "#/$defs/boundedCount" },
+        "mayRequestCapabilities": {
+          "description": "A dynamic patch is untrusted structure, never an authority document. Only false is representable.",
+          "const": false
+        }
+      }
+    },
+    "capabilityDecision": {
+      "description": "The structured value every capability evaluation returns. It carries no application value; detail is metadata-only text.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "apiVersion",
+        "decisionId",
+        "outcome",
+        "code",
+        "domain",
+        "requestorKind",
+        "requestorTrust",
+        "policyVersion",
+        "binding",
+        "effectiveManifestHash",
+        "evaluatedAtMs",
+        "detail"
+      ],
+      "properties": {
+        "apiVersion": {
+          "const": "graphengineering.reacher-z.github.io/capability-decision/v1alpha1"
+        },
+        "decisionId": { "$ref": "#/$defs/identifier" },
+        "outcome": { "enum": ["granted", "denied"] },
+        "code": { "$ref": "#/$defs/code" },
+        "domain": {
+          "oneOf": [{ "$ref": "#/$defs/capabilityDomain" }, { "type": "null" }]
+        },
+        "requestorKind": { "$ref": "#/$defs/requestorKind" },
+        "requestorTrust": { "$ref": "#/$defs/requestorTrust" },
+        "policyVersion": { "$ref": "#/$defs/policyVersion" },
+        "binding": { "$ref": "#/$defs/capabilityBinding" },
+        "effectiveManifestHash": {
+          "oneOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }]
+        },
+        "evaluatedAtMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "detail": { "type": "string", "maxLength": 512 }
+      },
+      "allOf": [
+        {
+          "if": {
+            "type": "object",
+            "properties": { "outcome": { "const": "granted" } },
+            "required": ["outcome"]
+          },
+          "then": {
+            "type": "object",
+            "properties": {
+              "code": { "const": "GE_CAP_GRANTED" },
+              "effectiveManifestHash": { "$ref": "#/$defs/sha256" }
+            }
+          }
+        },
+        {
+          "if": {
+            "type": "object",
+            "properties": { "outcome": { "const": "denied" } },
+            "required": ["outcome"]
+          },
+          "then": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "not": { "enum": ["GE_CAP_GRANTED", "GE_MERGE_AUTHORIZED"] }
+              },
+              "effectiveManifestHash": { "type": "null" }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

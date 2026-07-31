@@ -1,0 +1,134 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/artifact-store-descriptor.schema.json",
+  "title": "Graph Engineering durable-extension ArtifactStore and LockManager descriptor",
+  "description": "The closed extension-interface declaration a storage provider must publish before durable work. It carries the ArtifactStore surface and the LockManager binding together, because a provider that cannot fence cannot safely own artifacts either. Schema acceptance is a declaration, never evidence: durability, distributed fencing, and backup claims require separate drills.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "contractVersion",
+    "providerId",
+    "schemaVersion",
+    "backend",
+    "addressing",
+    "digestAlgorithm",
+    "durabilityClass",
+    "capabilities",
+    "limits",
+    "lockManager",
+    "descriptorHash"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "graphengineering.reacher-z.github.io/durable-extension/v1alpha1"
+    },
+    "kind": { "const": "ArtifactStoreDescriptor" },
+    "contractVersion": { "const": "durable-extension/v1alpha1" },
+    "providerId": { "$ref": "#/$defs/identifier" },
+    "schemaVersion": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+    "backend": {
+      "enum": ["memory", "jsonl", "local-file", "sqlite", "postgres", "s3-compatible"],
+      "description": "The six storage implementations master-plan section 14.6 requires. Every member is exercised by the conformance corpus and every member must fold the shared history to the identical projection."
+    },
+    "addressing": { "enum": ["content-addressed", "path-addressed"] },
+    "digestAlgorithm": { "const": "sha256" },
+    "durabilityClass": {
+      "enum": ["process-local", "local-file", "single-host-durable", "multi-host-durable"],
+      "description": "Every member is exercised by the conformance corpus. A class is a claim about evidence already gathered, never about the client library in use."
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contentAddressed",
+        "immutableWrite",
+        "idempotentWrite",
+        "rangeRead",
+        "presignedRead",
+        "namespaceIsolation",
+        "tenantIsolation",
+        "boundedPagination",
+        "cancellation",
+        "retries",
+        "migration",
+        "backupRestore"
+      ],
+      "properties": {
+        "contentAddressed": { "type": "boolean" },
+        "immutableWrite": { "type": "boolean" },
+        "idempotentWrite": { "type": "boolean" },
+        "rangeRead": { "type": "boolean" },
+        "presignedRead": { "type": "boolean" },
+        "namespaceIsolation": { "type": "boolean" },
+        "tenantIsolation": { "type": "boolean" },
+        "boundedPagination": { "type": "boolean" },
+        "cancellation": { "type": "boolean" },
+        "retries": { "type": "boolean" },
+        "migration": { "type": "boolean" },
+        "backupRestore": { "type": "boolean" }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["maxObjectBytes", "maxPageSize", "maxKeyLength", "maxInlinePayloadBytes"],
+      "properties": {
+        "maxObjectBytes": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+        "maxPageSize": { "type": "integer", "minimum": 1, "maximum": 256 },
+        "maxKeyLength": { "type": "integer", "minimum": 1, "maximum": 128 },
+        "maxInlinePayloadBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1048576,
+          "description": "Above this bound an event payload must be carried by artifact indirection rather than inline."
+        }
+      }
+    },
+    "lockManager": { "$ref": "lease.schema.json#/$defs/lockManagerDescriptor" },
+    "descriptorHash": { "$ref": "#/$defs/sha256" }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "artifactRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifactId", "digest", "byteCount", "mediaType", "storeProviderId", "content"],
+      "properties": {
+        "artifactId": { "$ref": "#/$defs/identifier" },
+        "digest": {
+          "$ref": "#/$defs/sha256",
+          "description": "Lowercase SHA-256 of the exact stored bytes. Under content addressing the artifactId is derived from this digest."
+        },
+        "byteCount": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+        "mediaType": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "storeProviderId": { "$ref": "#/$defs/identifier" },
+        "content": { "type": "string" }
+      }
+    },
+    "capabilityName": {
+      "enum": [
+        "contentAddressed",
+        "immutableWrite",
+        "idempotentWrite",
+        "rangeRead",
+        "presignedRead",
+        "namespaceIsolation",
+        "tenantIsolation",
+        "boundedPagination",
+        "cancellation",
+        "retries",
+        "migration",
+        "backupRestore"
+      ]
+    }
+  }
+}

@@ -1,0 +1,176 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/verdict.schema.json",
+  "title": "Graph Engineering verifier verdict",
+  "description": "One retained ballot. The ballot vocabulary has exactly four members; 'not-cast' belongs to the panel census and can never appear here, because a ballot that exists was cast by definition. A ballot that fails this schema or the semantic rules of verification-semantics.md section 5 is the non-retryable node failure INVALID_VERIFIER_VERDICT after exactly one attempt; it is never coerced to abstain or unknown and never counts as a participant.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "verdictHash",
+    "runId",
+    "verifierId",
+    "lens",
+    "rubricId",
+    "rubricVersion",
+    "rubricHash",
+    "subjectId",
+    "subjectEvidenceHash",
+    "verdict",
+    "findings",
+    "evidenceRefs"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "graphengineering.reacher-z.github.io/verification/v1alpha1"
+    },
+    "kind": { "const": "VerifierVerdict" },
+    "verdictHash": {
+      "description": "SHA-256 over frame('graphengineering.verifier-verdict.v1alpha1') || frame(runId) || frame(verifierId) || frame(canonicalSerialize(verdict without verdictHash)). Binding runId and verifierId means a ballot cannot be transplanted between runs or reattributed.",
+      "$ref": "#/$defs/sha256"
+    },
+    "runId": { "$ref": "#/$defs/identifier" },
+    "verifierId": { "$ref": "#/$defs/identifier" },
+    "lens": { "$ref": "#/$defs/lens" },
+    "rubricId": { "$ref": "#/$defs/identifier" },
+    "rubricVersion": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "rubricHash": { "$ref": "#/$defs/sha256" },
+    "subjectId": { "$ref": "#/$defs/identifier" },
+    "subjectEvidenceHash": {
+      "description": "Digest of the ORIGINAL evidence, never the maker's summary of it.",
+      "$ref": "#/$defs/sha256"
+    },
+    "verdict": { "enum": ["pass", "reject", "abstain", "unknown"] },
+    "confidenceBasisPoints": {
+      "description": "Optional integer 1..10000, matching BarrierVote.confidenceBasisPoints exactly so the projection to a barrier vote is the identity on this member. Absence signals 'no confidence supplied'; it is never materialized as null.",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 10000
+    },
+    "abstainReason": {
+      "description": "Present iff verdict is 'abstain'. A verifier abstains from the whole rubric, not from a criterion.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1000
+    },
+    "criterionOutcomes": {
+      "description": "Absent iff verdict is 'abstain'. Otherwise exactly one entry per rubric criterion, in rubric declaration order.",
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 256,
+      "items": { "$ref": "#/$defs/criterionOutcome" }
+    },
+    "findings": {
+      "description": "Ordered and retained. Minor and advisory findings never move the ballot verdict but remain visible in the census.",
+      "type": "array",
+      "maxItems": 256,
+      "items": { "$ref": "#/$defs/finding" }
+    },
+    "evidenceRefs": {
+      "type": "array",
+      "uniqueItems": true,
+      "maxItems": 256,
+      "items": { "$ref": "#/$defs/identifier" }
+    },
+    "separationProof": { "$ref": "#/$defs/separationProof" },
+    "scores": {
+      "description": "Present iff the rubric mode is 'comparison'. Exactly one entry per frozen candidate, in declared candidate order.",
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "items": { "$ref": "#/$defs/candidateScore" }
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "lens": {
+      "enum": [
+        "correctness",
+        "security",
+        "performance",
+        "reproducibility",
+        "compatibility",
+        "operability",
+        "source-quality",
+        "evidence-citation"
+      ]
+    },
+    "criterionOutcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["criterionId", "outcome", "supportEstablished", "evidenceRefs", "basis"],
+      "properties": {
+        "criterionId": { "$ref": "#/$defs/identifier" },
+        "outcome": {
+          "description": "Three members. 'abstain' is a whole-ballot property and is not a criterion outcome.",
+          "enum": ["pass", "reject", "unknown"]
+        },
+        "supportEstablished": {
+          "description": "outcome 'pass' requires true. A verifier may not pass a criterion it did not establish.",
+          "type": "boolean"
+        },
+        "evidenceRefs": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 64,
+          "items": { "$ref": "#/$defs/identifier" }
+        },
+        "basis": {
+          "description": "Must equal the rubric criterion's basis. A deterministic check must not be answered by model judgment.",
+          "enum": ["deterministic", "model-judgment"]
+        }
+      }
+    },
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["criterionId", "severity", "detail", "evidenceRefs"],
+      "properties": {
+        "criterionId": { "$ref": "#/$defs/identifier" },
+        "severity": { "enum": ["blocking", "major", "minor", "advisory"] },
+        "detail": { "type": "string", "minLength": 1, "maxLength": 2000 },
+        "evidenceRefs": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 64,
+          "items": { "$ref": "#/$defs/identifier" }
+        }
+      }
+    },
+    "separationProof": {
+      "description": "Maker/verifier separation proof. Exclusion decisions read only this block, the verifier identity, the lens, the rubric hash and the declared capabilities; never the verdict or its content.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["makerContextHash", "verifierContextHash", "evidenceSourceHash"],
+      "properties": {
+        "makerContextHash": { "$ref": "#/$defs/sha256" },
+        "verifierContextHash": { "$ref": "#/$defs/sha256" },
+        "evidenceSourceHash": {
+          "description": "Must equal the subject's original evidence hash. Equality with the maker's summary hash is EVIDENCE_NOT_ORIGINAL.",
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "candidateScore": {
+      "description": "normalizedBasisPoints = floor(((rawScore - scaleMin) * 10000) / (scaleMax - scaleMin)). The numerator is non-negative so floor and truncation agree in both languages. Floating-point normalization is forbidden.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["candidateId", "rawScore", "scaleMin", "scaleMax", "normalizedBasisPoints"],
+      "properties": {
+        "candidateId": { "$ref": "#/$defs/identifier" },
+        "rawScore": { "type": "integer", "minimum": -9007199254740991, "maximum": 9007199254740991 },
+        "scaleMin": { "type": "integer", "minimum": -9007199254740991, "maximum": 9007199254740991 },
+        "scaleMax": { "type": "integer", "minimum": -9007199254740991, "maximum": 9007199254740991 },
+        "normalizedBasisPoints": { "type": "integer", "minimum": 0, "maximum": 10000 }
+      }
+    }
+  }
+}

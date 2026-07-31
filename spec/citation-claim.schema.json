@@ -1,0 +1,167 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/citation-claim.schema.json",
+  "title": "Graph Engineering cited claim and its verification",
+  "description": "A claim span bound to sources, together with exactly one verification per citation in citation order. The four outcomes are distinct on purpose: a citation that exists and is reachable but does not support the claim is 'insufficient', never 'inaccessible', and a citation that cannot be resolved at all is 'inaccessible', never 'insufficient'. Reporting a real source cited for something it never said as a merely missing citation hides the more dangerous failure. Every temporal quantity is a durable sequence number; no wall clock participates.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "claimHash",
+    "claimId",
+    "runId",
+    "claimSpan",
+    "citations",
+    "verifications"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "graphengineering.reacher-z.github.io/verification/v1alpha1"
+    },
+    "kind": { "const": "CitationClaim" },
+    "claimHash": {
+      "description": "SHA-256 over frame('graphengineering.claim.v1alpha1') || frame(canonicalSerialize(claim without claimHash)).",
+      "$ref": "#/$defs/sha256"
+    },
+    "claimId": { "$ref": "#/$defs/identifier" },
+    "runId": { "$ref": "#/$defs/identifier" },
+    "criterionId": {
+      "description": "Present when the claim is bound to a rubric criterion whose citationRequired is true.",
+      "$ref": "#/$defs/identifier"
+    },
+    "claimSpan": {
+      "description": "The exact claim span inside the reviewed document, in Unicode code points.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["documentHash", "startCodePoint", "endCodePoint"],
+      "properties": {
+        "documentHash": { "$ref": "#/$defs/sha256" },
+        "startCodePoint": { "$ref": "#/$defs/count" },
+        "endCodePoint": { "$ref": "#/$defs/count" }
+      }
+    },
+    "citations": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "items": { "$ref": "#/$defs/citation" }
+    },
+    "verifications": {
+      "description": "Exactly one entry per citation, in citation order. A verification is emitted even when the harness itself made the source unreachable; it is never skipped.",
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "items": { "$ref": "#/$defs/verification" }
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "count": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+    "citation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "citationId",
+        "locator",
+        "declaredVersion",
+        "contentDigest",
+        "excerpt",
+        "authority",
+        "retrievedAtSequence"
+      ],
+      "properties": {
+        "citationId": { "$ref": "#/$defs/identifier" },
+        "locator": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "value"],
+          "properties": {
+            "kind": { "enum": ["frozen-local", "url", "artifact", "document"] },
+            "value": { "type": "string", "minLength": 1, "maxLength": 1000 }
+          }
+        },
+        "declaredVersion": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "contentDigest": {
+          "description": "sha256(utf8(source text)), unframed: it digests opaque source bytes rather than a structured record with forgeable field boundaries.",
+          "$ref": "#/$defs/sha256"
+        },
+        "excerpt": {
+          "description": "The permitted excerpt, addressed in Unicode code points. An over-limit excerpt is refused rather than truncated: truncating would produce a digest matching nothing and would silently change what was cited.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["startCodePoint", "endCodePoint", "digest"],
+          "properties": {
+            "startCodePoint": { "$ref": "#/$defs/count" },
+            "endCodePoint": { "$ref": "#/$defs/count" },
+            "digest": { "$ref": "#/$defs/sha256" }
+          }
+        },
+        "authority": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["declared", "verified"],
+          "properties": {
+            "declared": { "type": "string", "minLength": 1, "maxLength": 200 },
+            "verified": { "type": "boolean" }
+          }
+        },
+        "retrievedAtSequence": {
+          "description": "A durable event sequence number, never a wall-clock time. Freshness is a comparison of sequence numbers and declaredVersion, so a conformance case can never depend on when it ran.",
+          "$ref": "#/$defs/count"
+        }
+      }
+    },
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["citationId", "outcome", "defects", "networkUsed", "externalAvailabilityReported"],
+      "properties": {
+        "citationId": { "$ref": "#/$defs/identifier" },
+        "outcome": {
+          "enum": ["supported", "contradicted", "insufficient", "inaccessible"]
+        },
+        "supportMode": {
+          "description": "Present iff outcome is 'supported'. Direct support and inference are different claims about the same source.",
+          "enum": ["direct", "inferred"]
+        },
+        "defects": {
+          "description": "Ordered by the vocabulary's declaration order and unique, so two conforming implementations that find the same defects emit the same list. Empty iff outcome is 'supported'.",
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 11,
+          "items": {
+            "enum": [
+              "SOURCE_NOT_FOUND",
+              "SOURCE_UNREACHABLE",
+              "FABRICATED_LOCATOR",
+              "DIGEST_MISMATCH",
+              "STALE_VERSION",
+              "EXCERPT_NOT_IN_SOURCE",
+              "CONTRADICTED_BY_SOURCE",
+              "CIRCULAR_REFERENCE",
+              "CITATION_LAUNDERING",
+              "AUTHORITY_UNVERIFIED",
+              "EXCERPT_LIMIT_EXCEEDED"
+            ]
+          }
+        },
+        "networkUsed": {
+          "description": "Always false in conformance. Normal CI uses frozen local sources only.",
+          "type": "boolean"
+        },
+        "externalAvailabilityReported": {
+          "description": "True when the unreachability is a property of the harness rather than of the source, so that a disabled network is reported honestly instead of being read as a missing source.",
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

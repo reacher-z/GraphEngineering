@@ -1,0 +1,188 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/approval-grant.schema.json",
+  "title": "Graph Engineering approval grant",
+  "description": "The exact document a human authority produces to decide one approval request, and the frozen `data` payload of the HumanInputReceived event. A grant echoes every binding field of its request and carries the request's identity and document hash, so a grant issued for one request cannot satisfy another. Five decisions exist and only 'approve' and 'supersede' confer authority. See approval-semantics.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "grantId",
+    "requestId",
+    "requestHash",
+    "runId",
+    "graphRevision",
+    "nodeId",
+    "operationKind",
+    "subject",
+    "decision",
+    "approverPrincipal",
+    "grantedScope",
+    "authorityId",
+    "authorityHash",
+    "leaseFence",
+    "decidedAtMs"
+  ],
+  "properties": {
+    "apiVersion": {
+      "description": "Ownership discriminator. A document is a claimed approval grant if and only if it carries this exact value.",
+      "const": "graphengineering.reacher-z.github.io/approval/v1alpha1"
+    },
+    "kind": { "const": "ApprovalGrant" },
+    "grantId": {
+      "description": "Lowercase hex SHA-256 over the domain-separated framing of every other member of this document. Because the identity covers the whole body, two grants with equal grantId have equal canonical bytes up to a SHA-256 collision, which is what makes the duplicate-presentation rule a byte-exact replay test rather than a name match.",
+      "$ref": "#/$defs/sha256Hex"
+    },
+    "requestId": {
+      "description": "Identity of the request this grant decides. Recomputed from the outstanding request and compared; never trusted as carried.",
+      "$ref": "#/$defs/sha256Hex"
+    },
+    "requestHash": {
+      "description": "Domain-separated canonical hash of the complete request document, including its own requestId. requestId binds the request's inputs; requestHash binds its exact bytes. Both are checked, because a document can differ in a member that the identity framing does not cover.",
+      "$ref": "#/$defs/sha256Hex"
+    },
+    "runId": { "$ref": "#/$defs/runId" },
+    "graphRevision": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "nodeId": { "$ref": "#/$defs/nodeId" },
+    "operationKind": {
+      "$ref": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/approval-authority.schema.json#/$defs/operationKind"
+    },
+    "subject": {
+      "description": "Verbatim echo of the request's subject. Any difference is a binding mismatch, not a narrowing.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "documentHash"],
+      "properties": {
+        "kind": { "enum": ["attempt", "decision"] },
+        "attempt": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "decisionId": { "$ref": "#/$defs/sha256Hex" },
+        "documentHash": { "$ref": "#/$defs/sha256Hex" }
+      },
+      "oneOf": [
+        {
+          "title": "attempt",
+          "required": ["attempt"],
+          "properties": {
+            "kind": { "const": "attempt" },
+            "attempt": { "type": "integer" },
+            "decisionId": false
+          }
+        },
+        {
+          "title": "decision",
+          "required": ["decisionId"],
+          "properties": {
+            "kind": { "const": "decision" },
+            "decisionId": { "type": "string" },
+            "attempt": false
+          }
+        }
+      ]
+    },
+    "decision": {
+      "description": "Closed five-member decision vocabulary. 'approve' and 'supersede' confer authority; 'reject', 'revoke' and 'expire' are refusals and MUST carry the empty scope. There is no default and no sixth member, so no absence of information can become a grant.",
+      "enum": ["approve", "reject", "revoke", "expire", "supersede"]
+    },
+    "approverPrincipal": {
+      "description": "The deciding principal. The 'system:' namespace is structurally excluded here as it is in the authority allowlist, so no runtime-synthesized identity can decide.",
+      "$ref": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/approval-authority.schema.json#/$defs/humanPrincipal"
+    },
+    "grantedScope": {
+      "description": "The authority actually conferred. It MUST be a subset of the request's requestedScope under the member-wise rule in approval-semantics.md, and for a superseding grant also a subset of the grant it supersedes.",
+      "$ref": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/approval-authority.schema.json#/$defs/approvalScope"
+    },
+    "authorityId": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$"
+    },
+    "authorityHash": { "$ref": "#/$defs/sha256Hex" },
+    "leaseFence": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "decidedAtMs": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "supersedesGrantId": {
+      "description": "Required if and only if decision is 'revoke' or 'supersede'; forbidden otherwise. It names the grant currently in effect for this request.",
+      "$ref": "#/$defs/sha256Hex"
+    },
+    "confirmation": {
+      "description": "Required if and only if the decision confers authority and the request's sideEffects are not 'none'; forbidden otherwise. It records what the approver actually verified about the external system, and it is the only thing that may authorize re-firing a non-idempotent effect.",
+      "$ref": "#/$defs/confirmation"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "decision": { "enum": ["revoke", "supersede"] } },
+        "required": ["decision"]
+      },
+      "then": {
+        "required": ["supersedesGrantId"],
+        "properties": { "supersedesGrantId": { "type": "string" } }
+      },
+      "else": { "properties": { "supersedesGrantId": false } }
+    }
+  ],
+  "$defs": {
+    "sha256Hex": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "runId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+    },
+    "nodeId": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$"
+    },
+    "confirmation": {
+      "description": "Explicit confirmation for a resumed node whose committed sideEffects are not 'none'. 'new-attempt' re-fires the effect and is admissible only against a verified not-applied observation; 'adopt-applied' continues past an effect the approver verified as applied and never fabricates the lost output.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sideEffects", "observedExternalState", "action"],
+      "properties": {
+        "sideEffects": {
+          "description": "Verbatim echo of the request's sideEffects. 'none' is absent here because a 'none' request forbids the confirmation block entirely.",
+          "enum": ["idempotent", "non-idempotent", "unspecified"]
+        },
+        "observedExternalState": {
+          "description": "What the approver verified about the external system. 'unverified' can never authorize anything; it exists so an approver can say so truthfully instead of guessing.",
+          "enum": ["verified-not-applied", "verified-applied", "unverified"]
+        },
+        "action": {
+          "enum": ["new-attempt", "adopt-applied"]
+        }
+      }
+    },
+    "humanInputReceivedData": {
+      "description": "Frozen `data` payload of the HumanInputReceived event. Exactly one grant per event; a runtime never batches decisions into one event, because the ledger folds one committed grant per appended event and a batch would make the duplicate rule ambiguous. spec/event.schema.json still declares an open `data` object; the integration lane owns referencing this definition from it, and this contract does not modify that file.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["apiVersion", "kind", "grant"],
+      "properties": {
+        "apiVersion": {
+          "const": "graphengineering.reacher-z.github.io/approval/v1alpha1"
+        },
+        "kind": { "const": "HumanInputReceived" },
+        "grant": {
+          "$ref": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/approval-grant.schema.json"
+        }
+      }
+    }
+  }
+}

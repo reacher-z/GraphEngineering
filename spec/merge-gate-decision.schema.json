@@ -1,0 +1,297 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/merge-gate-decision.schema.json",
+  "title": "Graph Engineering Merge Gate Decision",
+  "description": "Closed decision record of the separate merge node. Merge consumes immutable commits, diffs, and gate reports, never a mutable worktree directory. Every non-authorized outcome leaves the target unchanged and the isolated work preserved.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "decisionId",
+    "mergeNodeId",
+    "targetBranch",
+    "expectedBaseCommit",
+    "observedBaseCommit",
+    "sourceCommits",
+    "strategy",
+    "gateReports",
+    "outcome",
+    "code",
+    "targetUnchanged",
+    "isolatedWorkPreserved",
+    "conflictPaths",
+    "approval",
+    "externalPublication"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "graphengineering.reacher-z.github.io/merge-gate-decision/v1alpha1"
+    },
+    "decisionId": { "$ref": "capability-manifest.schema.json#/$defs/identifier" },
+    "mergeNodeId": {
+      "$ref": "capability-manifest.schema.json#/$defs/identifier"
+    },
+    "targetBranch": { "type": "string", "minLength": 1, "maxLength": 255 },
+    "expectedBaseCommit": {
+      "$ref": "capability-manifest.schema.json#/$defs/commitId"
+    },
+    "observedBaseCommit": {
+      "$ref": "capability-manifest.schema.json#/$defs/commitId"
+    },
+    "sourceCommits": {
+      "type": "array",
+      "uniqueItems": true,
+      "minItems": 1,
+      "maxItems": 64,
+      "items": { "$ref": "capability-manifest.schema.json#/$defs/commitId" }
+    },
+    "strategy": {
+      "enum": ["merge-no-ff", "rebase", "cherry-pick", "squash"]
+    },
+    "gateReports": {
+      "description": "Master-plan Section 18.5 requires exact lint, type, test, build, security, and package gates. All six are stated; a skipped gate is a failure, never a pass.",
+      "type": "array",
+      "uniqueItems": true,
+      "minItems": 6,
+      "maxItems": 6,
+      "items": { "$ref": "#/$defs/gateReport" }
+    },
+    "outcome": { "enum": ["merge-authorized", "merge-denied"] },
+    "code": { "$ref": "capability-manifest.schema.json#/$defs/code" },
+    "targetUnchanged": { "type": "boolean" },
+    "isolatedWorkPreserved": { "type": "boolean" },
+    "conflictPaths": {
+      "type": "array",
+      "uniqueItems": true,
+      "maxItems": 256,
+      "items": { "$ref": "worktree-lease.schema.json#/$defs/leasePath" }
+    },
+    "approval": {
+      "oneOf": [{ "$ref": "#/$defs/approvalRecord" }, { "type": "null" }]
+    },
+    "externalPublication": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pushRequested", "workflowAuthorityRef"],
+      "properties": {
+        "pushRequested": { "type": "boolean" },
+        "workflowAuthorityRef": {
+          "oneOf": [
+            { "$ref": "capability-manifest.schema.json#/$defs/sha256" },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "commitAttribution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["messageHash", "trailersHash", "attributable"],
+      "properties": {
+        "messageHash": {
+          "$ref": "capability-manifest.schema.json#/$defs/sha256"
+        },
+        "trailersHash": {
+          "$ref": "capability-manifest.schema.json#/$defs/sha256"
+        },
+        "attributable": { "const": true }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "description": "Authorization is the only outcome that may carry the success code, and it is the only outcome for which the target may change.",
+      "if": {
+        "type": "object",
+        "properties": { "outcome": { "const": "merge-authorized" } },
+        "required": ["outcome"]
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "code": { "const": "GE_MERGE_AUTHORIZED" },
+          "conflictPaths": { "type": "array", "maxItems": 0 },
+          "isolatedWorkPreserved": { "const": true }
+        }
+      },
+      "else": {
+        "type": "object",
+        "properties": {
+          "code": { "not": { "const": "GE_MERGE_AUTHORIZED" } },
+          "targetUnchanged": { "const": true },
+          "isolatedWorkPreserved": { "const": true }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "gateReport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["gate", "status", "reportHash"],
+      "properties": {
+        "gate": {
+          "enum": ["lint", "typecheck", "test", "build", "security", "package"]
+        },
+        "status": { "enum": ["pass", "fail", "skipped"] },
+        "reportHash": {
+          "oneOf": [
+            { "$ref": "capability-manifest.schema.json#/$defs/sha256" },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "approvalRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "approvalRef",
+        "boundPayloadHash",
+        "approverId",
+        "issuedAtMs",
+        "expiresAtMs"
+      ],
+      "properties": {
+        "approvalRef": {
+          "$ref": "capability-manifest.schema.json#/$defs/sha256"
+        },
+        "boundPayloadHash": {
+          "$ref": "capability-manifest.schema.json#/$defs/sha256"
+        },
+        "approverId": {
+          "$ref": "capability-manifest.schema.json#/$defs/identifier"
+        },
+        "issuedAtMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "expiresAtMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      }
+    },
+    "mergeRequest": {
+      "description": "The immutable inputs the merge oracle consumes. There is no mutable directory handle: the merge node never sees a worktree.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "decisionId",
+        "mergeNodeId",
+        "targetBranch",
+        "expectedBaseCommit",
+        "observedBaseCommit",
+        "expectedSourceCommits",
+        "presentedSourceCommits",
+        "strategy",
+        "workerStatusClean",
+        "generatedFileDrift",
+        "touchedPaths",
+        "protectedPaths",
+        "ownedPaths",
+        "gateReports",
+        "conflictPaths",
+        "approvalRequired",
+        "approval",
+        "externalPublication",
+        "evaluatedAtMs"
+      ],
+      "properties": {
+        "decisionId": {
+          "$ref": "capability-manifest.schema.json#/$defs/identifier"
+        },
+        "mergeNodeId": {
+          "$ref": "capability-manifest.schema.json#/$defs/identifier"
+        },
+        "targetBranch": { "type": "string", "minLength": 1, "maxLength": 255 },
+        "expectedBaseCommit": {
+          "$ref": "capability-manifest.schema.json#/$defs/commitId"
+        },
+        "observedBaseCommit": {
+          "$ref": "capability-manifest.schema.json#/$defs/commitId"
+        },
+        "expectedSourceCommits": {
+          "type": "array",
+          "uniqueItems": true,
+          "minItems": 1,
+          "maxItems": 64,
+          "items": { "$ref": "capability-manifest.schema.json#/$defs/commitId" }
+        },
+        "presentedSourceCommits": {
+          "type": "array",
+          "uniqueItems": true,
+          "minItems": 1,
+          "maxItems": 64,
+          "items": { "$ref": "capability-manifest.schema.json#/$defs/commitId" }
+        },
+        "strategy": {
+          "enum": ["merge-no-ff", "rebase", "cherry-pick", "squash"]
+        },
+        "workerStatusClean": { "type": "boolean" },
+        "generatedFileDrift": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 64,
+          "items": { "$ref": "worktree-lease.schema.json#/$defs/leasePath" }
+        },
+        "touchedPaths": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 256,
+          "items": { "$ref": "worktree-lease.schema.json#/$defs/leasePath" }
+        },
+        "protectedPaths": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 64,
+          "items": { "$ref": "worktree-lease.schema.json#/$defs/leasePath" }
+        },
+        "ownedPaths": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 256,
+          "items": { "$ref": "worktree-lease.schema.json#/$defs/leasePath" }
+        },
+        "gateReports": {
+          "type": "array",
+          "uniqueItems": true,
+          "minItems": 6,
+          "maxItems": 6,
+          "items": { "$ref": "#/$defs/gateReport" }
+        },
+        "conflictPaths": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 256,
+          "items": { "$ref": "worktree-lease.schema.json#/$defs/leasePath" }
+        },
+        "approvalRequired": { "type": "boolean" },
+        "approval": {
+          "oneOf": [{ "$ref": "#/$defs/approvalRecord" }, { "type": "null" }]
+        },
+        "externalPublication": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["pushRequested", "workflowAuthorityRef"],
+          "properties": {
+            "pushRequested": { "type": "boolean" },
+            "workflowAuthorityRef": {
+              "oneOf": [
+                { "$ref": "capability-manifest.schema.json#/$defs/sha256" },
+                { "type": "null" }
+              ]
+            }
+          }
+        },
+        "evaluatedAtMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      }
+    }
+  }
+}

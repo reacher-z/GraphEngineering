@@ -1,0 +1,148 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/reflection-record.schema.json",
+  "title": "Graph Engineering reflection record",
+  "description": "One attempt of a rubric-bound, bounded reflection. Reflection compares a producer output to the exact rubric and emits structured issues, evidence, suggested changes and a verdict; it is not open-ended self-critique. acceptedResultHash always equals subjectHash, so the accepted result is never silently edited: a revision is a proposal carried separately as proposedResultHash. Exactly the last record of a chain stops, with a reason drawn from a closed six-member vocabulary.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "reflectionId",
+    "runId",
+    "nodeId",
+    "rubricId",
+    "rubricVersion",
+    "rubricHash",
+    "subjectHash",
+    "acceptedResultHash",
+    "attempt",
+    "verdict",
+    "issues",
+    "deterministicChecks",
+    "modelJudgment",
+    "ceiling",
+    "stopped"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "graphengineering.reacher-z.github.io/verification/v1alpha1"
+    },
+    "kind": { "const": "ReflectionRecord" },
+    "reflectionId": {
+      "description": "SHA-256 over frame('graphengineering.reflection.v1alpha1') || frame(runId) || frame(nodeId) || frame(decimal(attempt)) || frame(canonicalSerialize(record without reflectionId)).",
+      "$ref": "#/$defs/sha256"
+    },
+    "runId": { "$ref": "#/$defs/identifier" },
+    "nodeId": { "$ref": "#/$defs/identifier" },
+    "rubricId": { "$ref": "#/$defs/identifier" },
+    "rubricVersion": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "rubricHash": {
+      "description": "Identical across every record of a chain. A rubric that changes mid-chain is RUBRIC_DRIFT.",
+      "$ref": "#/$defs/sha256"
+    },
+    "subjectHash": {
+      "description": "The exact producer output under review, preserved unchanged on this record.",
+      "$ref": "#/$defs/sha256"
+    },
+    "acceptedResultHash": {
+      "description": "Must equal subjectHash on every record. Reflection never silently edits the accepted result.",
+      "$ref": "#/$defs/sha256"
+    },
+    "proposedResultHash": {
+      "description": "Present iff verdict is 'reject', and never equal to subjectHash. The successor record's subjectHash is this value.",
+      "$ref": "#/$defs/sha256"
+    },
+    "attempt": {
+      "description": "Runs 1..revisionsMax + 1 and is contiguous and strictly increasing across a chain. Every attempt is recorded.",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "verdict": {
+      "description": "Three members. A reflection cannot abstain from its own rubric.",
+      "enum": ["pass", "reject", "unknown"]
+    },
+    "issues": {
+      "description": "In rubric criterion declaration order. Each issue's basis must equal its criterion's basis.",
+      "type": "array",
+      "maxItems": 256,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["criterionId", "severity", "basis", "detail", "evidenceRefs"],
+        "properties": {
+          "criterionId": { "$ref": "#/$defs/identifier" },
+          "severity": { "enum": ["blocking", "major", "minor", "advisory"] },
+          "basis": { "enum": ["deterministic", "model-judgment"] },
+          "detail": { "type": "string", "minLength": 1, "maxLength": 2000 },
+          "evidenceRefs": {
+            "type": "array",
+            "uniqueItems": true,
+            "maxItems": 64,
+            "items": { "$ref": "#/$defs/identifier" }
+          },
+          "suggestedChange": { "type": "string", "minLength": 1, "maxLength": 2000 }
+        }
+      }
+    },
+    "deterministicChecks": {
+      "description": "Covers exactly the rubric criteria whose basis is 'deterministic', in rubric declaration order, and no other. This is the separation of deterministic checks from model judgment, made mechanical.",
+      "type": "array",
+      "maxItems": 256,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["criterionId", "outcome"],
+        "properties": {
+          "criterionId": { "$ref": "#/$defs/identifier" },
+          "outcome": { "enum": ["pass", "fail", "unknown"] }
+        }
+      }
+    },
+    "modelJudgment": {
+      "description": "Whether the same model and the same context are permitted is a declared permission that must equal the rubric's, never an inference.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sameModelPermitted", "sameContextPermitted"],
+      "properties": {
+        "sameModelPermitted": { "type": "boolean" },
+        "sameContextPermitted": { "type": "boolean" }
+      }
+    },
+    "ceiling": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["revisionsUsed", "revisionsMax", "unitsUsed", "unitsMax"],
+      "properties": {
+        "revisionsUsed": { "$ref": "#/$defs/count" },
+        "revisionsMax": { "$ref": "#/$defs/count" },
+        "unitsUsed": { "$ref": "#/$defs/count" },
+        "unitsMax": { "$ref": "#/$defs/count" }
+      }
+    },
+    "stopped": { "type": "boolean" },
+    "stopReason": {
+      "description": "Present iff stopped is true. Closed six-member vocabulary with exact conditions; 'unknown-evidence' terminates reflection rather than licensing another lap.",
+      "enum": [
+        "converged",
+        "revision-limit",
+        "unknown-evidence",
+        "no-progress",
+        "ceiling-exhausted",
+        "cancelled"
+      ]
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "count": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }
+  }
+}

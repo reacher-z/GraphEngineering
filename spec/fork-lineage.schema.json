@@ -1,0 +1,137 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/fork-lineage.schema.json",
+  "title": "Graph Engineering durable-extension fork lineage record",
+  "description": "A fork binds a new child run to a fixed parent prefix. The parent is never mutated and the child never presents an inherited fact as new work. Schema acceptance does not establish parent-prefix integrity or inherited-fact enumeration; those are semantic obligations of conformance/durable-extension.validate.mjs.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "contractVersion",
+    "childRunId",
+    "childEventStreamId",
+    "parentRunId",
+    "parentEventStreamId",
+    "parentThroughSequence",
+    "parentHistoryHash",
+    "parentGraphRevision",
+    "artifactDisposition",
+    "authorityDisposition",
+    "parentIdentity",
+    "childIdentity",
+    "changedIdentityFields",
+    "inheritedFacts",
+    "generation",
+    "ancestorLineageHashes",
+    "lineageHash"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "graphengineering.reacher-z.github.io/durable-extension/v1alpha1"
+    },
+    "kind": { "const": "ForkLineage" },
+    "contractVersion": { "const": "durable-extension/v1alpha1" },
+    "childRunId": { "$ref": "#/$defs/identifier" },
+    "childEventStreamId": { "$ref": "#/$defs/identifier" },
+    "parentRunId": { "$ref": "#/$defs/identifier" },
+    "parentEventStreamId": { "$ref": "#/$defs/identifier" },
+    "parentThroughSequence": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+    "parentHistoryHash": { "$ref": "#/$defs/sha256" },
+    "parentGraphRevision": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+    "artifactDisposition": {
+      "enum": ["reference", "copy", "rehydrate", "drop"],
+      "description": "How parent artifacts reach the child. Every member is exercised by the conformance corpus."
+    },
+    "authorityDisposition": {
+      "enum": ["inherit-bound", "require-reapproval", "revoke"],
+      "description": "inherit-bound is the only disposition under which a parent approval may transfer, and only when the approval is rebound to the child identity. Every member is exercised by the conformance corpus."
+    },
+    "parentIdentity": { "$ref": "#/$defs/runIdentity" },
+    "childIdentity": { "$ref": "#/$defs/runIdentity" },
+    "changedIdentityFields": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/identityField" },
+      "description": "Exactly the identity fields where childIdentity differs from parentIdentity. A declared set that does not equal the recomputed difference is a lineage violation."
+    },
+    "inheritedFacts": {
+      "type": "array",
+      "description": "Every fact the child reuses, enumerated and integrity checked. An unenumerated reuse is silent reuse and is refused.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "parentSequence",
+          "childSequence",
+          "type",
+          "parentFrameHash",
+          "parentDecisionHash",
+          "childDecisionHash",
+          "integrityVerified"
+        ],
+        "properties": {
+          "parentSequence": { "type": "integer", "minimum": 0 },
+          "childSequence": { "type": "integer", "minimum": 0 },
+          "type": {
+            "$ref": "checkpoint-acceleration.schema.json#/$defs/frameType"
+          },
+          "parentFrameHash": { "$ref": "#/$defs/sha256" },
+          "parentDecisionHash": { "$ref": "#/$defs/sha256" },
+          "childDecisionHash": {
+            "$ref": "#/$defs/sha256",
+            "description": "Recomputed under the child runId. Equality with parentDecisionHash means the child adopted a parent decision verbatim and is refused as GE_DX_FORK_IDENTITY_REUSE."
+          },
+          "integrityVerified": { "const": true }
+        }
+      }
+    },
+    "generation": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+    "ancestorLineageHashes": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/sha256" },
+      "description": "The parent chain root-first. Length must equal generation minus one."
+    },
+    "lineageHash": { "$ref": "#/$defs/sha256" }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "identityField": {
+      "enum": [
+        "graphHash",
+        "planHash",
+        "inputHash",
+        "implementationHash",
+        "policyHash",
+        "authorityHash"
+      ]
+    },
+    "runIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "graphHash",
+        "planHash",
+        "inputHash",
+        "implementationHash",
+        "policyHash",
+        "authorityHash"
+      ],
+      "properties": {
+        "graphHash": { "$ref": "#/$defs/sha256" },
+        "planHash": { "$ref": "#/$defs/sha256" },
+        "inputHash": { "$ref": "#/$defs/sha256" },
+        "implementationHash": { "$ref": "#/$defs/sha256" },
+        "policyHash": { "$ref": "#/$defs/sha256" },
+        "authorityHash": { "$ref": "#/$defs/sha256" }
+      }
+    }
+  }
+}
