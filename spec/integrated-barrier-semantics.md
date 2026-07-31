@@ -369,6 +369,42 @@ one would be inventing the ballot the member exists to deny. Conversely, a
 `missing` or `timed_out` disposition MUST be recorded as `not-cast` and never as
 a cast verdict, and a cast disposition MUST NEVER be recorded as `not-cast`.
 
+**The census key is the ballot, not the disposition name.** An earlier revision
+left one case undecided, and it was found by the verification lane rather than
+by review: a quorum barrier whose upstream *fails without producing a vote* has
+disposition `failed` and no ballot. The two sentences above then disagree —
+`failed` is a cast disposition, so the second forbids `not-cast`, while no
+ballot exists to record. The rule is therefore stated on the ballot:
+
+- an entry that produced a conforming `BarrierVote` is recorded with that
+  vote's verdict, and `failed` in that case means the ballot said `reject`;
+- an entry that produced no ballot at all is recorded `not-cast`, whatever its
+  disposition — including a `failed` arising from upstream execution failure,
+  and including `missing` and `timed_out`; and
+- `INVALID_BARRIER_VOTE` is not a ballot. A malformed vote produces no census
+  verdict, and the node fails non-retryably after one attempt as already
+  specified.
+
+The two invariants above remain exactly true under this reading, because
+"cast disposition" means a disposition arising from a cast ballot.
+
+### Do not bind a verifier to a non-quorum barrier
+
+`all`, `minimum` and `percentage` barriers deliberately do not inspect upstream
+values. An upstream node that executes successfully therefore contributes
+`succeeded` **regardless of what its output says**.
+
+The consequence is a silent inversion: a verifier node that runs correctly and
+returns a refutation contributes an acceptance, so a panel of refuters can
+satisfy an `all` barrier. Nothing in the barrier's own text catches this,
+because from the barrier's side nothing is wrong — the node succeeded.
+
+A barrier that consumes verdicts MUST therefore declare `kind: "quorum"`, which
+is the only kind that reads the ballot. A graph binding a verdict-producing node
+to a non-quorum barrier is expressing an implicit pass, which is the defect this
+entire contract exists to prevent. `verification-semantics.md` enforces the same
+restriction from its own side.
+
 `BarrierVoteRecord.confidenceBasisPoints` is optional with the range
 `1..10000`, while `RouteDecision.confidenceBasisPoints` is required with the
 range `0..10000` or `null`. The asymmetry is intentional: a vote signals
