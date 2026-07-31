@@ -181,6 +181,27 @@ API keys. macOS and Windows matrices need real machines. Star counts are an
 observed outcome, never an artifact. These remain External and no amount of
 local work closes them.
 
+## Final gate verification at handoff
+
+Run at `0e699d1` after all work landed, not accumulated from earlier partial
+runs.
+
+| Gate | Result |
+|---|---|
+| `pnpm -r typecheck` / `lint` / `build` | green, 8 packages each |
+| `pnpm -r test` | core 378, runtime 275, sqlite 1024, cli 147, primitives 147, patterns 106, persistence 27, mcp-server 15 |
+| `uv run pytest` | 2,389 passed plus 2 subtests, 20m43s |
+| `ruff check python/src python/tests` | clean |
+| `mypy --config-file python/pyproject.toml python/src` | clean, 56 source files |
+| `node scripts/validate-fixtures.mjs` | green |
+| `node tools/conformance/run.mjs` | green, including the integrated-barrier join |
+| `check:release-map` / `check:evidence-closure` / `check:docs` | 40/40, 102/102, 332 links |
+
+`ruff format --check` is deliberately absent: it is not a repository gate and
+never has been. Run repository-wide it reports 40 of 103 files as unformatted,
+and CI invokes only `ruff check`. An earlier draft of this session's working
+plan listed it as required, which was wrong.
+
 ## The method that found everything
 
 Every substantive defect this session came from making something recompute,
