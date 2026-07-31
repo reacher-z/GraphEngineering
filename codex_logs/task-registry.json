@@ -1011,7 +1011,7 @@
       "last_heartbeat": "2026-07-27T00:17:20Z",
       "risk": "high",
       "blocker": null,
-      "next_action": "Submit the 7-schema 36-negative durable budget pricing and deterministic router candidate to a fresh hostile reviewer; close every P0/P1 without claiming native support, then freeze only contract task 035 before starting native 036/037 after D9 extended durability"
+      "next_action": "An independent hostile audit returned P0 8 / P1 17 on 2026-07-30: the oracle passed on knowingly-wrong input while wired into CI. All eight P0s are closed at ffb7b16 and each is proved by a mutation that now fails, including the two binds the oracle used to overwrite before validating and the negative loop that had no count assertion, where deleting all 36 cases previously passed. Eleven further zero-coverage guards the audit missed were also closed; the negative corpus is 36 to 54. A 34-mutation campaign caught 34 with 0 missed, 29 by semantic rule. Two deliberate normative wire changes are recorded in the commit: the overage const now names the rejection behaviour because the documented commit-to-ceiling behaviour is structurally unrepresentable against the section 6.3 conservation and section 6.1 subset invariants, and scopeId was widened because a model scope ceiling was previously unexpressible. One P1 stays open: per-scope demand is not recoverable from a checkpoint alone because section 6.11 retains bindingHash but not binding coordinates, documented as a replay obligation rather than a schema change. Remaining P1s and a fresh independent review are still required before the contract may be frozen, and native 036/037 must not start until then. implementationClaim stays false"
     },
     {
       "id": "D10-TS-BUDGET-036",
