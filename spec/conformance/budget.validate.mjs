@@ -15,6 +15,7 @@ const DOMAINS = Object.freeze({
   checkpoint: "graph-engineering/budget-checkpoint/v1alpha1\0",
   event: "graph-engineering/budget-event/v1alpha1\0",
   eventId: "graph-engineering/budget-event-id/v1alpha1\0",
+  health: "graph-engineering/model-health-snapshot/v1alpha1\0",
   payload: "graph-engineering/budget-event-payload/v1alpha1\0",
   policy: "graph-engineering/budget-policy/v1alpha1\0",
   pricing: "graph-engineering/pricing-snapshot/v1alpha1\0",
@@ -58,6 +59,20 @@ const QUALITY_RANK = Object.freeze({
   standard: 1,
   premium: 2,
   judge: 3,
+});
+
+// budget-semantics.md 5.1: a scope ceiling applies to a reservation when the
+// reservation binding carries the scope identity at this fixed coordinate. The
+// map is asserted below to cover exactly the schema's scopeKind enum, so a new
+// scope kind cannot be added to the wire without an enforcement rule.
+const SCOPE_BINDING_COORDINATE = Object.freeze({
+  activity: "activityId",
+  graph: "graphHash",
+  model: "modelId",
+  node: "nodeId",
+  provider: "providerId",
+  run: "runId",
+  tenant: "tenantId",
 });
 
 class BudgetError extends Error {
@@ -223,6 +238,25 @@ function requireShape(validate, value, code, context) {
     throw new BudgetError(code, context + ": " + JSON.stringify(validate.errors));
   }
 }
+
+// A second-language runtime can only reproduce these identities if every hash
+// domain this oracle uses is written down in the normative document. The
+// document renders the NUL terminator as the two characters "\0", so that is
+// the literal searched for here.
+const semanticsText = await readFile(join(specRoot, "budget-semantics.md"), "utf8");
+for (const [name, domain] of Object.entries(DOMAINS)) {
+  assert.ok(
+    semanticsText.includes(domain.slice(0, -1) + "\\0"),
+    "hash domain " + name + ' ("' + domain.slice(0, -1) + '\\0") is undocumented in budget-semantics.md',
+  );
+}
+assert.equal(
+  canonicalJson(Object.keys(SCOPE_BINDING_COORDINATE).sort(compareCodePoints)),
+  canonicalJson(
+    [...policySchema.$defs.scopeCeiling.properties.scopeKind.enum].sort(compareCodePoints),
+  ),
+  "scope coordinate map and budget-policy scopeKind enum drifted",
+);
 
 function vectorIdentity(vector) {
   return {
@@ -503,12 +537,13 @@ function validatePricing(pricing, policy) {
 function materializeContracts() {
   const policy = validatePolicy(materializePolicy());
   const policyHash = domainHash(DOMAINS.policy, policy);
+  // The corpus declares policyBindingHash and pricingSnapshotHash. They are
+  // validated as bindings, never assigned from the recomputation, or the two
+  // drift checks below would be structurally unreachable on the positive path.
   const pricing = clone(fixture.pricingSnapshot);
-  pricing.policyBindingHash = policyHash;
   validatePricing(pricing, policy);
   const pricingHash = domainHash(DOMAINS.pricing, pricing);
   const routerPolicy = clone(fixture.routerPolicy);
-  routerPolicy.pricingSnapshotHash = pricingHash;
   return { policy, policyHash, pricing, pricingHash, routerPolicy };
 }
 
@@ -722,7 +757,7 @@ function materializeRouteDecision(routeCase, contracts, options = {}) {
     pricingSnapshotHash: contracts.pricingHash,
     authorityBindingHash: contracts.policy.authorityBindingHash,
     classificationHash: fixture.identities.classificationHash,
-    healthSnapshotHash: fixture.identities.healthSnapshotHash,
+    healthSnapshotHash: domainHash(DOMAINS.health, routeCase.health),
     requirements: clone(routeCase.requirements),
     evaluated: routed.evaluated,
     outcome: routed.outcome,
@@ -759,6 +794,14 @@ function validateRecordedDecision(decision, routeCase, contracts) {
     decision.routerPolicyHash !== domainHash(DOMAINS.routerPolicy, contracts.routerPolicy)
   ) {
     throw new BudgetError("GE_ROUTE_PRICING_UNAVAILABLE", "recorded route policy or price drifted");
+  }
+  // 8.1/8.6: health is a recorded input. One constant reused across snapshots
+  // with opposite recorded health would make replay unverifiable.
+  if (decision.healthSnapshotHash !== domainHash(DOMAINS.health, routeCase.health)) {
+    throw new BudgetError(
+      "GE_ROUTE_DECISION_INVALID",
+      "recorded health snapshot identity is not bound to the evaluated health",
+    );
   }
   if (decision.outcome === "selected") {
     const candidate = contracts.routerPolicy.candidates.find(
@@ -808,6 +851,8 @@ function makeLedgerState(contracts, decisions) {
     disputed: null,
     compensatedEconomic: null,
     reservations: new Map(),
+    reservationBindings: new Map(),
+    scopeDemand: new Map(),
     reservationOutcomes: new Map(),
     settlementIds: new Map(),
     releaseIds: new Map(),
@@ -880,6 +925,68 @@ function assertAdditiveLedgerVector(vector, state, context) {
   if (Buffer.byteLength(canonicalJson(vector), "utf8") > state.contracts.policy.limits.maxCanonicalBytes) {
     throw new BudgetError("GE_BUDGET_LIMIT_INVALID", context + " exceeds canonical byte limit");
   }
+}
+
+function scopeKeyOf(scope) {
+  return scope.scopeKind + "\0" + scope.scopeId;
+}
+
+// 5.1: the applicable scope set of a reservation is every declared scope whose
+// identity equals the reservation binding coordinate for that scope kind. A
+// null coordinate (no provider, no model) matches no scope.
+function applicableScopes(policy, binding) {
+  const applicable = new Map();
+  for (const scope of policy.scopeCeilings) {
+    const coordinate = SCOPE_BINDING_COORDINATE[scope.scopeKind];
+    assert.ok(coordinate, "scope coordinate map lacks " + scope.scopeKind);
+    const value = binding[coordinate];
+    if (value !== null && value !== undefined && value === scope.scopeId) {
+      applicable.set(scopeKeyOf(scope), scope);
+    }
+  }
+  return applicable;
+}
+
+// 5.1/5.2: effective admission is the component-wise intersection of the root
+// ceiling and every applicable scope ceiling. A reservation charges a scope
+// only when its parent does not already carry the same scope identity, because
+// a child allocation is carved out of the parent maximum that already charged
+// it; charging both would double count instead of intersect.
+function scopeDemandAfterAdmission(state, data) {
+  const policy = state.contracts.policy;
+  const applicable = applicableScopes(policy, data.binding);
+  const parentBinding = data.parentReservationId === null
+    ? null
+    : state.reservationBindings.get(data.parentReservationId);
+  const inherited = parentBinding === undefined || parentBinding === null
+    ? new Map()
+    : applicableScopes(policy, parentBinding);
+  const pending = new Map();
+  for (const [key, scope] of applicable) {
+    if (inherited.has(key)) continue;
+    const current = state.scopeDemand.get(key) ?? emptyVector(data.maximum);
+    const next = addVectors(current, data.maximum);
+    if (!vectorLessOrEqual(next, scope.ceiling)) {
+      throw new BudgetError(
+        "GE_BUDGET_ADMISSION_DENIED",
+        "reservation demand exceeds the " + scope.scopeKind + " scope ceiling for " + scope.scopeId,
+      );
+    }
+    pending.set(key, next);
+  }
+  return pending;
+}
+
+// 16.2/5.2: a reservation that authorizes a selected route MUST itself cover
+// the sound worst case that route recorded. Otherwise the admission gate is
+// decorative and a provider call is dispatched against capacity nobody holds.
+function routeWorstCaseVector(decision, like) {
+  return makeAdditiveVector(like, {
+    "input-units": decision.requirements.inputUnits,
+    "money-nano-minor": decision.selected.estimatedMoneyNanoMinor,
+    "output-units": decision.requirements.maximumOutputUnits,
+    "provider-calls": 1,
+  });
 }
 
 function openChildren(state, reservationId) {
@@ -1108,12 +1215,20 @@ function foldReservationCreated(event, state) {
     ) {
       throw new BudgetError("GE_ROUTE_DECISION_INVALID", "reservation binding differs from selected route");
     }
+    const worstCase = routeWorstCaseVector(decision, data.maximum);
+    if (!vectorLessOrEqual(worstCase, data.maximum)) {
+      throw new BudgetError(
+        "GE_BUDGET_ADMISSION_DENIED",
+        "route-bound reservation does not cover the worst case of its own route decision",
+      );
+    }
   } else if (data.binding.providerId !== null || data.binding.modelId !== null) {
     throw new BudgetError(
       "GE_ROUTE_DECISION_INVALID",
       "provider/model reservation requires a persisted route decision",
     );
   }
+  const pendingScopeDemand = scopeDemandAfterAdmission(state, data);
   const bindingHash = domainHash(DOMAINS.binding, data.binding);
   const reservation = {
     reservationId: data.reservationId,
@@ -1139,7 +1254,9 @@ function foldReservationCreated(event, state) {
     parent.remaining = subtractVectors(parent.remaining, data.maximum, "GE_BUDGET_CHILD_EXPANSION");
     parent.childAllocated = addVectors(parent.childAllocated, data.maximum);
   }
+  for (const [key, vector] of pendingScopeDemand) state.scopeDemand.set(key, vector);
   state.reservations.set(data.reservationId, reservation);
+  state.reservationBindings.set(data.reservationId, clone(data.binding));
   state.reservationOutcomes.set(data.idempotencyKey, {
     reservationId: data.reservationId,
     payloadHash,
@@ -1153,6 +1270,17 @@ function foldUsageCommitted(event, state) {
     throw new BudgetError("GE_BUDGET_PARENT_MISSING", "usage reservation is absent or closed");
   }
   assertAdditiveLedgerVector(data.usage, state, "committed usage");
+  // 5.3: v1alpha1 has no representation for committing a declared ceiling and
+  // disputing the excess. 6.1 requires disputed <= committed and 6.3 requires
+  // committed + released + remaining + childAllocated = maximum, so an excess
+  // above the maximum cannot be both committed and disputed. The wire value is
+  // therefore refused rather than silently treated as "none".
+  if (data.overageDisposition !== "none") {
+    throw new BudgetError(
+      "GE_BUDGET_USAGE_OVERAGE",
+      "overage disposition " + data.overageDisposition + " has no v1alpha1 ledger representation",
+    );
+  }
   const reportedAt = timestampNanos(data.reportedAt);
   if (reportedAt < state.startedAtNanos || reportedAt > timestampNanos(event.timestamp)) {
     throw new BudgetError("GE_BUDGET_INVALID_HISTORY", "usage report time is outside account history");
@@ -1765,6 +1893,34 @@ for (const [name, vector] of Object.entries(fixture.vectors)) {
   );
 }
 const routes = routeArtifacts(contracts);
+// 11.1: the money boundary is claimed at one integer unit, so it is asserted at
+// one integer unit. The admitted case carries a ceiling exactly equal to the
+// sound estimate (the inclusive bound of 5.2); the denied case differs from it
+// in that one field and sits exactly one nano-minor unit below.
+const admittedMoneyRoute = routes.byCase.get("select-premium-for-confidential-tools");
+const deniedMoneyRoute = routes.byCase.get("deny-money-bound");
+assert.ok(admittedMoneyRoute && deniedMoneyRoute, "the money-boundary route pair is absent");
+const soundMoneyEstimate = admittedMoneyRoute.decision.selected.estimatedMoneyNanoMinor;
+assert.equal(
+  admittedMoneyRoute.routeCase.requirements.maximumMoneyNanoMinor,
+  soundMoneyEstimate,
+  "the admitted money case must sit exactly on the inclusive bound",
+);
+assert.equal(
+  deniedMoneyRoute.routeCase.requirements.maximumMoneyNanoMinor,
+  soundMoneyEstimate - 1,
+  "the denied money case must sit exactly one nano-minor unit below the sound estimate",
+);
+exact(
+  { ...clone(deniedMoneyRoute.routeCase.requirements), maximumMoneyNanoMinor: soundMoneyEstimate },
+  admittedMoneyRoute.routeCase.requirements,
+  "the money-bound denial differs from the admitted case in more than its money ceiling",
+);
+exact(
+  deniedMoneyRoute.routeCase.health,
+  admittedMoneyRoute.routeCase.health,
+  "the money-bound denial and the admitted case must share one recorded health snapshot",
+);
 const baseline = materializeLedger(contracts, routes);
 assert.equal(baseline.events.length, fixture.ledger.operations.length);
 assert.equal(baseline.state.status, "closed");
@@ -1786,7 +1942,7 @@ const observedGolden = {
 };
 exact(observedGolden, fixture.expected, "portable budget golden identities drifted");
 
-function expectBudgetCode(expectedCode, operation, context) {
+function expectBudgetCode(expectedCode, operation, context, expectedMessage) {
   let caught = null;
   try {
     operation();
@@ -1799,6 +1955,36 @@ function expectBudgetCode(expectedCode, operation, context) {
     expectedCode,
     context + " produced " + (caught.code ?? caught.name) + ": " + caught.message,
   );
+  // Two distinct rules may share one stable code. Where the corpus names the
+  // rule, the message must prove which rule fired.
+  if (expectedMessage !== undefined) {
+    assert.ok(
+      caught.message.includes(expectedMessage),
+      context + " raised the right code from the wrong rule: " + caught.message,
+    );
+  }
+}
+
+function operationsThrough(type, ordinal = 0) {
+  const operations = clone(fixture.ledger.operations);
+  return operations.slice(0, operationIndex(operations, type, ordinal) + 1);
+}
+
+// A ledger prefix whose route-bound child reservation is still open, used by
+// the restored-projection attacks below.
+function liveLedgerState() {
+  return materializeLedger(contracts, routes, {
+    operations: operationsThrough("UsageCommitted", 0),
+  });
+}
+
+// 5.4 permits a narrower deployment limit. Re-deriving the policy hash keeps
+// the narrowed policy a real, self-consistent contract rather than an event
+// whose declared binding no longer matches its own policy.
+function narrowPolicyLimits(limits) {
+  const policy = clone(contracts.policy);
+  policy.limits = { ...policy.limits, ...limits };
+  return { ...contracts, policy, policyHash: domainHash(DOMAINS.policy, policy) };
 }
 
 function operationIndex(operations, type, ordinal = 0) {
@@ -1824,317 +2010,481 @@ function validateFork(sourceCheckpoint, forkCheckpoint) {
   }
 }
 
-function executeNegative(operation) {
-  switch (operation) {
-    case "reverse-root-vector": {
-      const vector = clone(fixture.vectors.rootCeiling);
-      vector.quantities.reverse();
-      validateVector(vector, { policy: contracts.policy });
-      return;
-    }
-    case "wrong-attempt-unit": {
-      const vector = clone(fixture.vectors.rootCeiling);
-      vector.quantities.find((entry) => entry.resource === "attempts").unit = "byte";
-      validateVector(vector, { policy: contracts.policy });
-      return;
-    }
-    case "duplicate-attempt-resource": {
-      const vector = clone(fixture.vectors.rootCeiling);
-      vector.quantities.push(clone(vector.quantities.find((entry) => entry.resource === "attempts")));
-      validateVector(vector, { policy: contracts.policy });
-      return;
-    }
-    case "root-vector-currency-eur": {
-      const policy = clone(contracts.policy);
-      policy.rootCeiling.currency = "EUR";
-      validatePolicy(policy);
-      return;
-    }
-    case "scope-exceeds-root": {
-      const policy = clone(contracts.policy);
-      const scope = policy.scopeCeilings.find((item) => item.scopeKind === "model");
-      scope.ceiling.quantities.find((entry) => entry.resource === "attempts").amount = 21;
-      validatePolicy(policy);
-      return;
-    }
-    case "reverse-pricing-rules": {
-      const pricing = clone(contracts.pricing);
-      pricing.entries[0].rules.reverse();
-      validatePricing(pricing, contracts.policy);
-      return;
-    }
-    case "pricing-end-before-start": {
-      const pricing = clone(contracts.pricing);
-      pricing.effectiveUntil = "2026-07-25T23:59:59Z";
-      validatePricing(pricing, contracts.policy);
-      return;
-    }
-    case "router-pricing-hash-drift": {
-      const router = clone(contracts.routerPolicy);
-      router.pricingSnapshotHash = "9".repeat(64);
-      validateRouterPolicy(router, contracts);
-      return;
-    }
-    case "selected-authority-drift": {
-      const routeCase = fixture.routeCases.find((item) => item.expectOutcome === "selected");
-      const decision = materializeRouteDecision(routeCase, contracts);
-      decision.authorityBindingHash = "9".repeat(64);
-      validateRecordedDecision(decision, routeCase, contracts);
-      return;
-    }
-    case "child-before-parent": {
-      const operations = clone(fixture.ledger.operations);
-      const childIndex = operationIndex(operations, "ReservationCreated", 1);
-      const child = operations.splice(childIndex, 1)[0];
-      operations.splice(1, 0, child);
-      materializeLedger(contracts, routes, { operations });
-      return;
-    }
-    case "child-over-parent": {
-      const vectors = clone(fixture.vectors);
-      vectors.childReservation.quantities.find((entry) => entry.resource === "attempts").amount = 6;
-      materializeLedger(contracts, routes, { vectors });
-      return;
-    }
-    case "usage-over-reservation": {
-      const vectors = clone(fixture.vectors);
-      vectors.overUsage = makeAdditiveVector(vectors.childUsage, {
-        attempts: 1,
-        "input-units": 2000,
-        "money-nano-minor": 400000000,
-        "output-units": 200,
-        "provider-calls": 1,
-      });
-      const operations = clone(fixture.ledger.operations);
-      operations[operationIndex(operations, "UsageCommitted")].vector = "overUsage";
-      materializeLedger(contracts, routes, { operations, vectors });
-      return;
-    }
-    case "duplicate-settlement-id": {
-      const operations = clone(fixture.ledger.operations);
-      const usageIndex = operationIndex(operations, "UsageCommitted");
-      operations.splice(usageIndex + 1, 0, {
-        type: "UsageCommitted",
-        reservationId: "model-1",
-        settlementId: "settlement-1",
-        vector: "childRemainder",
-        inDoubt: false,
-      });
-      materializeLedger(contracts, routes, { operations });
-      return;
-    }
-    case "release-over-remaining": {
-      const vectors = clone(fixture.vectors);
-      vectors.releaseOver = makeAdditiveVector(vectors.childRemainder, {
-        attempts: 2,
-        "input-units": 200,
-        "money-nano-minor": 200000000,
-        "output-units": 300,
-      });
-      const operations = clone(fixture.ledger.operations);
-      operations[operationIndex(operations, "ReservationReleased", 0)].vector = "releaseOver";
-      materializeLedger(contracts, routes, { operations, vectors });
-      return;
-    }
-    case "close-parent-with-live-child": {
-      const operations = clone(fixture.ledger.operations);
-      const childIndex = operationIndex(operations, "ReservationCreated", 1);
-      operations.splice(childIndex + 1, 0, {
-        type: "ReservationClosed",
-        reservationId: "round-1",
-        state: "closed",
-      });
-      materializeLedger(contracts, routes, { operations });
-      return;
-    }
-    case "stale-fencing-token":
-      materializeLedger(contracts, routes, {
-        leaseForSequence(sequence, original) {
-          const lease = clone(original);
-          if (sequence === 4) lease.fencingToken = 2;
-          return lease;
-        },
-      });
-      return;
-    case "resigned-semantic-account-drift": {
-      const events = clone(baseline.events);
-      events[5].accountId = "account-evil";
-      resealHistory(events, contracts);
-      foldHistory(events, contracts, routes);
-      return;
-    }
-    case "event-after-account-close": {
-      const events = clone(baseline.events);
-      const appended = clone(events[2]);
-      appended.timestamp = timestampForSequence(events.length);
-      events.push(appended);
-      resealHistory(events, contracts);
-      foldHistory(events, contracts, routes);
-      return;
-    }
-    case "checkpoint-available-drift": {
-      const changed = clone(checkpoint);
-      changed.totals.available.quantities
-        .find((entry) => entry.resource === "attempts").amount += 1;
-      const content = clone(changed);
-      delete content.contentHash;
-      changed.contentHash = domainHash(DOMAINS.checkpoint, content);
-      validateCheckpoint(changed, baseline.state);
-      return;
-    }
-    case "compensation-restores-capacity": {
-      const malicious = { economicOnly: true, restoresSchedulingCapacity: true };
-      if (malicious.economicOnly !== true || malicious.restoresSchedulingCapacity !== false) {
-        throw new BudgetError(
-          "GE_BUDGET_COMPENSATION_INVALID",
-          "economic compensation cannot restore scheduling capacity",
-        );
-      }
-      return;
-    }
-    case "unknown-provider-metric": {
-      const vector = clone(fixture.vectors.empty);
-      vector.providerSpecific.push({
-        metricId: "mock.tokens/v1",
-        unitId: "mock.unit/v1",
-        aggregation: "sum",
-        amount: 1,
-      });
-      validateVector(vector, { policy: contracts.policy });
-      return;
-    }
-    case "fork-copies-available-credit": {
-      const fork = clone(checkpoint);
-      fork.accountId = "account-fork";
-      fork.eventStreamId = "8".repeat(64);
-      validateFork(checkpoint, fork);
-      return;
-    }
-    case "vector-add-overflow": {
-      const maximum = makeAdditiveVector(fixture.vectors.empty, { attempts: MAX_SAFE });
-      const one = makeAdditiveVector(fixture.vectors.empty, { attempts: 1 });
-      addVectors(maximum, one);
-      return;
-    }
-    case "negative-usage": {
-      const vector = clone(fixture.vectors.childUsage);
-      vector.quantities[0].amount = -1;
-      validateVector(vector, { policy: contracts.policy, additiveOnly: true });
-      return;
-    }
-    case "reservation-idempotency-key-drift": {
-      const events = clone(baseline.events);
-      events[1].data.idempotencyKey = "9".repeat(64);
-      resealHistory(events, contracts);
-      foldHistory(events, contracts, routes);
-      return;
-    }
-    case "reservation-idempotency-conflict": {
-      const events = clone(baseline.events);
-      const conflicting = clone(events[1]);
-      conflicting.data.reservationId = "round-evil";
-      events.splice(2, 0, conflicting);
-      resealHistory(events, contracts);
-      foldHistory(events, contracts, routes);
-      return;
-    }
-    case "resigned-reservation-binding-drift": {
-      const events = clone(baseline.events);
-      const child = events.find((event) =>
-        event.type === "ReservationCreated" && event.data.parentReservationId !== null);
-      child.data.binding.graphHash = "9".repeat(64);
-      recomputeReservationIdempotencyKey(child.data);
-      resealHistory(events, contracts);
-      foldHistory(events, contracts, routes);
-      return;
-    }
-    case "expired-before-admission": {
-      const events = clone(baseline.events);
-      events[1].data.expiresAt = events[1].timestamp;
-      recomputeReservationIdempotencyKey(events[1].data);
-      resealHistory(events, contracts);
-      foldHistory(events, contracts, routes);
-      return;
-    }
-    case "duplicate-reservation-close": {
-      const events = clone(baseline.events);
-      const closeIndex = events.findIndex((event) =>
-        event.type === "ReservationClosed" && event.data.reservationId === "model-1");
-      events.splice(closeIndex + 1, 0, clone(events[closeIndex]));
-      resealHistory(events, contracts);
-      foldHistory(events, contracts, routes);
-      return;
-    }
-    case "takeover-reuses-fencing-token": {
-      const events = clone(baseline.events);
-      events[4].lease.leaseId = "lease-evil";
-      events[4].lease.holderId = "worker-evil";
-      events[4].lease.leaseEpoch = 2;
-      events[4].lease.fencingToken = 1;
-      resealHistory(events, contracts);
-      foldHistory(events, contracts, routes);
-      return;
-    }
-    case "maximum-depth-one-over":
-      validateMaximumGates(
-        makeMaximumVector(fixture.vectors.empty, { depth: 9 }),
-        contracts.policy.rootCeiling,
-        contracts.policy,
+const SEMANTIC_NEGATIVES = Object.freeze({
+  "reverse-root-vector"() {
+    const vector = clone(fixture.vectors.rootCeiling);
+    vector.quantities.reverse();
+    validateVector(vector, { policy: contracts.policy });
+  },
+  "wrong-attempt-unit"() {
+    const vector = clone(fixture.vectors.rootCeiling);
+    vector.quantities.find((entry) => entry.resource === "attempts").unit = "byte";
+    validateVector(vector, { policy: contracts.policy });
+  },
+  "duplicate-attempt-resource"() {
+    const vector = clone(fixture.vectors.rootCeiling);
+    vector.quantities.push(clone(vector.quantities.find((entry) => entry.resource === "attempts")));
+    validateVector(vector, { policy: contracts.policy });
+  },
+  "root-vector-currency-eur"() {
+    const policy = clone(contracts.policy);
+    policy.rootCeiling.currency = "EUR";
+    validatePolicy(policy);
+  },
+  "scope-exceeds-root"() {
+    const policy = clone(contracts.policy);
+    const scope = policy.scopeCeilings.find((item) => item.scopeKind === "model");
+    scope.ceiling.quantities.find((entry) => entry.resource === "attempts").amount = 21;
+    validatePolicy(policy);
+  },
+  "reverse-pricing-rules"() {
+    const pricing = clone(contracts.pricing);
+    pricing.entries[0].rules.reverse();
+    validatePricing(pricing, contracts.policy);
+  },
+  "pricing-end-before-start"() {
+    const pricing = clone(contracts.pricing);
+    pricing.effectiveUntil = "2026-07-25T23:59:59Z";
+    validatePricing(pricing, contracts.policy);
+  },
+  "router-pricing-hash-drift"() {
+    const router = clone(contracts.routerPolicy);
+    router.pricingSnapshotHash = "9".repeat(64);
+    validateRouterPolicy(router, contracts);
+  },
+  "selected-authority-drift"() {
+    const routeCase = fixture.routeCases.find((item) => item.expectOutcome === "selected");
+    const decision = materializeRouteDecision(routeCase, contracts);
+    decision.authorityBindingHash = "9".repeat(64);
+    validateRecordedDecision(decision, routeCase, contracts);
+  },
+  "child-before-parent"() {
+    const operations = clone(fixture.ledger.operations);
+    const childIndex = operationIndex(operations, "ReservationCreated", 1);
+    const child = operations.splice(childIndex, 1)[0];
+    operations.splice(1, 0, child);
+    materializeLedger(contracts, routes, { operations });
+  },
+  "child-over-parent"() {
+    const vectors = clone(fixture.vectors);
+    vectors.childReservation.quantities.find((entry) => entry.resource === "attempts").amount = 6;
+    materializeLedger(contracts, routes, { vectors });
+  },
+  "usage-over-reservation"() {
+    const vectors = clone(fixture.vectors);
+    vectors.overUsage = makeAdditiveVector(vectors.childUsage, {
+      attempts: 1,
+      "input-units": 2000,
+      "money-nano-minor": 400000000,
+      "output-units": 200,
+      "provider-calls": 1,
+    });
+    const operations = clone(fixture.ledger.operations);
+    operations[operationIndex(operations, "UsageCommitted")].vector = "overUsage";
+    materializeLedger(contracts, routes, { operations, vectors });
+  },
+  "duplicate-settlement-id"() {
+    const operations = clone(fixture.ledger.operations);
+    const usageIndex = operationIndex(operations, "UsageCommitted");
+    operations.splice(usageIndex + 1, 0, {
+      type: "UsageCommitted",
+      reservationId: "model-1",
+      settlementId: "settlement-1",
+      vector: "childRemainder",
+      inDoubt: false,
+    });
+    materializeLedger(contracts, routes, { operations });
+  },
+  "release-over-remaining"() {
+    const vectors = clone(fixture.vectors);
+    vectors.releaseOver = makeAdditiveVector(vectors.childRemainder, {
+      attempts: 2,
+      "input-units": 200,
+      "money-nano-minor": 200000000,
+      "output-units": 300,
+    });
+    const operations = clone(fixture.ledger.operations);
+    operations[operationIndex(operations, "ReservationReleased", 0)].vector = "releaseOver";
+    materializeLedger(contracts, routes, { operations, vectors });
+  },
+  "close-parent-with-live-child"() {
+    const operations = clone(fixture.ledger.operations);
+    const childIndex = operationIndex(operations, "ReservationCreated", 1);
+    operations.splice(childIndex + 1, 0, {
+      type: "ReservationClosed",
+      reservationId: "round-1",
+      state: "closed",
+    });
+    materializeLedger(contracts, routes, { operations });
+  },
+  "stale-fencing-token"() {
+    materializeLedger(contracts, routes, {
+      leaseForSequence(sequence, original) {
+        const lease = clone(original);
+        if (sequence === 4) lease.fencingToken = 2;
+        return lease;
+      },
+    });
+  },
+  "resigned-semantic-account-drift"() {
+    const events = clone(baseline.events);
+    events[5].accountId = "account-evil";
+    resealHistory(events, contracts);
+    foldHistory(events, contracts, routes);
+  },
+  "event-after-account-close"() {
+    const events = clone(baseline.events);
+    const appended = clone(events[2]);
+    appended.timestamp = timestampForSequence(events.length);
+    events.push(appended);
+    resealHistory(events, contracts);
+    foldHistory(events, contracts, routes);
+  },
+  "checkpoint-available-drift"() {
+    const changed = clone(checkpoint);
+    changed.totals.available.quantities
+      .find((entry) => entry.resource === "attempts").amount += 1;
+    const content = clone(changed);
+    delete content.contentHash;
+    changed.contentHash = domainHash(DOMAINS.checkpoint, content);
+    validateCheckpoint(changed, baseline.state);
+  },
+  "compensation-restores-capacity"() {
+    const malicious = { economicOnly: true, restoresSchedulingCapacity: true };
+    if (malicious.economicOnly !== true || malicious.restoresSchedulingCapacity !== false) {
+      throw new BudgetError(
+        "GE_BUDGET_COMPENSATION_INVALID",
+        "economic compensation cannot restore scheduling capacity",
       );
-      return;
-    case "router-grant-not-allowlisted": {
-      const router = clone(contracts.routerPolicy);
-      router.allowedAuthorityGrantHashes = [router.allowedAuthorityGrantHashes[0]];
-      validateRouterPolicy(router, contracts);
-      return;
     }
-    case "selected-grant-drift": {
-      const routeCase = fixture.routeCases.find((item) => item.expectOutcome === "selected");
-      const decision = materializeRouteDecision(routeCase, contracts);
-      decision.selected.authorityGrantHash = "9".repeat(64);
-      validateRecordedDecision(decision, routeCase, contracts);
-      return;
-    }
-    case "route-price-multiplication-overflow": {
-      const routeCase = clone(
-        fixture.routeCases.find((item) => item.expectOutcome === "selected"),
-      );
-      routeCase.requirements.inputUnits = MAX_SAFE;
-      routeCase.requirements.maximumOutputUnits = 1;
-      routeCase.requirements.maximumContextUnits = MAX_SAFE;
-      routeModel(
-        contracts.routerPolicy,
-        contracts.pricing,
-        routeCase.requirements,
-        routeCase.health,
-      );
-      return;
-    }
-    case "event-invalid-calendar-date": {
-      const events = clone(baseline.events);
-      events[0].timestamp = "2026-02-31T00:00:00Z";
-      resealHistory(events, contracts);
-      foldHistory(events, contracts, routes);
-      return;
-    }
-    case "checkpoint-drops-reservation-outcomes": {
-      const changed = clone(checkpoint);
-      delete changed.reservationOutcomes;
-      validateCheckpoint(changed, baseline.state);
-      return;
-    }
-    default:
-      assert.fail("unknown semantic negative operation " + operation);
-  }
-}
+  },
+  "unknown-provider-metric"() {
+    const vector = clone(fixture.vectors.empty);
+    vector.providerSpecific.push({
+      metricId: "mock.tokens/v1",
+      unitId: "mock.unit/v1",
+      aggregation: "sum",
+      amount: 1,
+    });
+    validateVector(vector, { policy: contracts.policy });
+  },
+  "fork-copies-available-credit"() {
+    const fork = clone(checkpoint);
+    fork.accountId = "account-fork";
+    fork.eventStreamId = "8".repeat(64);
+    validateFork(checkpoint, fork);
+  },
+  "vector-add-overflow"() {
+    const maximum = makeAdditiveVector(fixture.vectors.empty, { attempts: MAX_SAFE });
+    const one = makeAdditiveVector(fixture.vectors.empty, { attempts: 1 });
+    addVectors(maximum, one);
+  },
+  "negative-usage"() {
+    const vector = clone(fixture.vectors.childUsage);
+    vector.quantities[0].amount = -1;
+    validateVector(vector, { policy: contracts.policy, additiveOnly: true });
+  },
+  "reservation-idempotency-key-drift"() {
+    const events = clone(baseline.events);
+    events[1].data.idempotencyKey = "9".repeat(64);
+    resealHistory(events, contracts);
+    foldHistory(events, contracts, routes);
+  },
+  "reservation-idempotency-conflict"() {
+    const events = clone(baseline.events);
+    const conflicting = clone(events[1]);
+    conflicting.data.reservationId = "round-evil";
+    events.splice(2, 0, conflicting);
+    resealHistory(events, contracts);
+    foldHistory(events, contracts, routes);
+  },
+  "resigned-reservation-binding-drift"() {
+    const events = clone(baseline.events);
+    const child = events.find((event) =>
+      event.type === "ReservationCreated" && event.data.parentReservationId !== null);
+    child.data.binding.graphHash = "9".repeat(64);
+    recomputeReservationIdempotencyKey(child.data);
+    resealHistory(events, contracts);
+    foldHistory(events, contracts, routes);
+  },
+  "expired-before-admission"() {
+    const events = clone(baseline.events);
+    events[1].data.expiresAt = events[1].timestamp;
+    recomputeReservationIdempotencyKey(events[1].data);
+    resealHistory(events, contracts);
+    foldHistory(events, contracts, routes);
+  },
+  "duplicate-reservation-close"() {
+    const events = clone(baseline.events);
+    const closeIndex = events.findIndex((event) =>
+      event.type === "ReservationClosed" && event.data.reservationId === "model-1");
+    events.splice(closeIndex + 1, 0, clone(events[closeIndex]));
+    resealHistory(events, contracts);
+    foldHistory(events, contracts, routes);
+  },
+  "takeover-reuses-fencing-token"() {
+    const events = clone(baseline.events);
+    events[4].lease.leaseId = "lease-evil";
+    events[4].lease.holderId = "worker-evil";
+    events[4].lease.leaseEpoch = 2;
+    events[4].lease.fencingToken = 1;
+    resealHistory(events, contracts);
+    foldHistory(events, contracts, routes);
+  },
+  "maximum-depth-one-over"() {
+    validateMaximumGates(
+      makeMaximumVector(fixture.vectors.empty, { depth: 9 }),
+      contracts.policy.rootCeiling,
+      contracts.policy,
+    );
+  },
+  "router-grant-not-allowlisted"() {
+    const router = clone(contracts.routerPolicy);
+    router.allowedAuthorityGrantHashes = [router.allowedAuthorityGrantHashes[0]];
+    validateRouterPolicy(router, contracts);
+  },
+  "selected-grant-drift"() {
+    const routeCase = fixture.routeCases.find((item) => item.expectOutcome === "selected");
+    const decision = materializeRouteDecision(routeCase, contracts);
+    decision.selected.authorityGrantHash = "9".repeat(64);
+    validateRecordedDecision(decision, routeCase, contracts);
+  },
+  "route-price-multiplication-overflow"() {
+    const routeCase = clone(
+      fixture.routeCases.find((item) => item.expectOutcome === "selected"),
+    );
+    routeCase.requirements.inputUnits = MAX_SAFE;
+    routeCase.requirements.maximumOutputUnits = 1;
+    routeCase.requirements.maximumContextUnits = MAX_SAFE;
+    routeModel(
+      contracts.routerPolicy,
+      contracts.pricing,
+      routeCase.requirements,
+      routeCase.health,
+    );
+  },
+  "event-invalid-calendar-date"() {
+    const events = clone(baseline.events);
+    events[0].timestamp = "2026-02-31T00:00:00Z";
+    resealHistory(events, contracts);
+    foldHistory(events, contracts, routes);
+  },
+  "checkpoint-drops-reservation-outcomes"() {
+    const changed = clone(checkpoint);
+    delete changed.reservationOutcomes;
+    validateCheckpoint(changed, baseline.state);
+  },
+  "pricing-policy-binding-drift"() {
+    const pricing = clone(contracts.pricing);
+    pricing.policyBindingHash = "9".repeat(64);
+    validatePricing(pricing, contracts.policy);
+  },
+  "route-health-snapshot-drift"() {
+    const routeCase = fixture.routeCases.find((item) => item.expectOutcome === "selected");
+    const decision = materializeRouteDecision(routeCase, contracts);
+    decision.healthSnapshotHash = "9".repeat(64);
+    validateRecordedDecision(decision, routeCase, contracts);
+  },
+  // The three admission attacks below stop the ledger at the reservation under
+  // attack. A longer prefix would fail later on conservation anyway, which
+  // would let the admission rule be deleted while the case still threw.
+  "reservation-one-over-model-scope"() {
+    const vectors = clone(fixture.vectors);
+    vectors.childReservation.quantities
+      .find((entry) => entry.resource === "money-nano-minor").amount += 1;
+    materializeLedger(contracts, routes, {
+      operations: operationsThrough("ReservationCreated", 1),
+      vectors,
+    });
+  },
+  "sibling-demand-over-tenant-scope"() {
+    const operations = operationsThrough("ReservationCreated", 0);
+    operations.push({
+      type: "ReservationCreated",
+      reservationId: "round-2",
+      parentReservationId: null,
+      depth: 0,
+      vector: "rootReservation",
+      routeDecision: false,
+    });
+    materializeLedger(contracts, routes, { operations });
+  },
+  "route-reservation-under-covers-estimate"() {
+    const vectors = clone(fixture.vectors);
+    vectors.childReservation.quantities
+      .find((entry) => entry.resource === "money-nano-minor").amount = 1000;
+    materializeLedger(contracts, routes, {
+      operations: operationsThrough("ReservationCreated", 1),
+      vectors,
+    });
+  },
+  "overage-disposition-unrepresentable"() {
+    const operations = clone(fixture.ledger.operations);
+    operations[operationIndex(operations, "UsageCommitted")].overageDisposition =
+      "declared-ceiling-committed-excess-disputed";
+    materializeLedger(contracts, routes, { operations });
+  },
+  // The four attacks below corrupt a restored projection rather than the wire.
+  // 6.1 and 6.3 are invariants over recovered counters; a runtime that trusts a
+  // durable store without re-deriving them has no other place to fail.
+  "restored-reservation-breaks-conservation"() {
+    const { state } = liveLedgerState();
+    const reservation = state.reservations.get("model-1");
+    reservation.remaining = addVectors(
+      reservation.remaining,
+      makeAdditiveVector(reservation.remaining, { attempts: 1 }),
+    );
+    validateLedgerInvariants(state);
+  },
+  "restored-in-doubt-over-committed"() {
+    const { state } = liveLedgerState();
+    const reservation = state.reservations.get("model-1");
+    reservation.inDoubt = addVectors(
+      reservation.committed,
+      makeAdditiveVector(reservation.committed, { attempts: 1 }),
+    );
+    validateLedgerInvariants(state);
+  },
+  "restored-compensation-over-disputed"() {
+    const { state } = liveLedgerState();
+    const reservation = state.reservations.get("model-1");
+    reservation.compensatedEconomic = makeAdditiveVector(
+      reservation.maximum,
+      { "money-nano-minor": 1 },
+    );
+    validateLedgerInvariants(state);
+  },
+  "restored-account-conservation-break"() {
+    const { state } = liveLedgerState();
+    state.available = addVectors(
+      state.available,
+      makeAdditiveVector(state.available, { attempts: 1 }),
+    );
+    validateLedgerInvariants(state);
+  },
+  "reservation-binding-not-its-route"() {
+    const events = clone(baseline.events);
+    const child = events.find((event) =>
+      event.type === "ReservationCreated" && event.data.routeDecisionHash !== null);
+    child.data.binding.modelId = "mock/economy-v1";
+    recomputeReservationIdempotencyKey(child.data);
+    resealHistory(events, contracts);
+    foldHistory(events, contracts, routes);
+  },
+  "provider-reservation-without-route"() {
+    const events = clone(baseline.events);
+    const root = events.find((event) =>
+      event.type === "ReservationCreated" && event.data.routeDecisionHash === null);
+    root.data.binding.providerId = "mock-provider";
+    recomputeReservationIdempotencyKey(root.data);
+    resealHistory(events, contracts);
+    foldHistory(events, contracts, routes);
+  },
+  "route-rebound-to-second-decision"() {
+    const routeCase = clone(fixture.routeCases.find((item) => item.expectOutcome === "selected"));
+    routeCase.id = "select-premium-second-request";
+    const second = materializeRouteDecision(routeCase, contracts, { reservationId: "model-1" });
+    const secondHash = domainHash(DOMAINS.routeDecision, second);
+    const rebound = {
+      byCase: new Map(routes.byCase).set(routeCase.id, {
+        routeCase,
+        decision: second,
+        decisionHash: secondHash,
+      }),
+      byHash: new Map(routes.byHash).set(secondHash, second),
+    };
+    const operations = operationsThrough("RouteDecisionRecorded", 0);
+    operations.push({
+      type: "RouteDecisionRecorded",
+      reservationId: "model-1",
+      routeCase: routeCase.id,
+    });
+    materializeLedger(contracts, rebound, { operations });
+  },
+  "reservation-depth-over-policy-limit"() {
+    const narrowed = narrowPolicyLimits({ maxReservationDepth: 1 });
+    const operations = operationsThrough("ReservationCreated", 1);
+    operations.push({
+      type: "ReservationCreated",
+      reservationId: "model-2",
+      parentReservationId: "model-1",
+      depth: 2,
+      vector: "childRemainder",
+      routeDecision: false,
+    });
+    materializeLedger(narrowed, routes, { operations });
+  },
+  "reservation-count-over-policy-limit"() {
+    materializeLedger(narrowPolicyLimits({ maxReservations: 1 }), routes, {
+      operations: operationsThrough("ReservationCreated", 1),
+    });
+  },
+  "event-count-over-policy-limit"() {
+    materializeLedger(narrowPolicyLimits({ maxEvents: 2 }), routes, {
+      operations: operationsThrough("ReservationCreated", 1),
+    });
+  },
+  "policy-over-canonical-byte-limit"() {
+    const policy = clone(contracts.policy);
+    policy.limits.maxCanonicalBytes = 1024;
+    validatePolicy(policy);
+  },
+  "provider-metrics-over-policy-limit"() {
+    const policy = clone(contracts.policy);
+    policy.limits.maxProviderMetrics = 0;
+    policy.allowedProviderMetrics = ["mock.tokens/v1"];
+    validatePolicy(policy);
+  },
+});
 
-for (const testCase of fixture.semanticNegativeCases) {
+// budget-semantics.md 11.3. A bare `for` over the corpus is not a gate: an
+// empty corpus prints "0 semantic negatives" and passes. The corpus, the
+// implemented attack registry, and the count the document publishes must be
+// the same set, and every declared case must be observed to execute.
+const REQUIRED_SEMANTIC_NEGATIVES = 54;
+const implementedNegatives = Object.keys(SEMANTIC_NEGATIVES).sort(compareCodePoints);
+const declaredNegatives = fixture.semanticNegativeCases;
+assert.equal(
+  implementedNegatives.length,
+  REQUIRED_SEMANTIC_NEGATIVES,
+  "the oracle implements " + implementedNegatives.length + " semantic attacks; the contract requires " +
+  REQUIRED_SEMANTIC_NEGATIVES,
+);
+assert.equal(
+  declaredNegatives.length,
+  REQUIRED_SEMANTIC_NEGATIVES,
+  "the corpus declares " + declaredNegatives.length + " semantic negatives; the contract requires " +
+  REQUIRED_SEMANTIC_NEGATIVES,
+);
+assert.equal(
+  new Set(declaredNegatives.map((testCase) => testCase.id)).size,
+  REQUIRED_SEMANTIC_NEGATIVES,
+  "semantic negative IDs are not unique",
+);
+exact(
+  declaredNegatives.map((testCase) => testCase.operation).sort(compareCodePoints),
+  implementedNegatives,
+  "declared semantic negatives and implemented semantic attacks differ",
+);
+const executedNegatives = new Set();
+for (const testCase of declaredNegatives) {
+  const attack = SEMANTIC_NEGATIVES[testCase.operation];
+  assert.ok(attack, "unknown semantic negative operation " + testCase.operation);
   expectBudgetCode(
     testCase.expectCode,
-    () => executeNegative(testCase.operation),
+    () => {
+      executedNegatives.add(testCase.operation);
+      attack();
+    },
     testCase.id,
+    testCase.expectMessage,
   );
 }
+exact(
+  [...executedNegatives].sort(compareCodePoints),
+  implementedNegatives,
+  "a declared semantic negative did not execute its attack",
+);
 
 const atomicState = makeLedgerState(contracts, routes.byHash);
 foldEvent(clone(baseline.events[0]), atomicState);

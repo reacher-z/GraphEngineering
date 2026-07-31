@@ -134,6 +134,43 @@ Currency and `minorUnitExponent` are part of every vector identity even when
 the vector contains no money entry. This prevents an empty or partial vector
 from being reused across incompatible accounts.
 
+### 3.4 Hash domain register
+
+Every identity in this contract is:
+
+```text
+SHA-256(UTF8(domain) || UTF8(canonical_json(framed_value)))
+```
+
+where `domain` always ends in a single NUL (`\0`) and `framed_value` is the
+exact value named below. A second-language runtime that reproduces these
+fourteen rows over thirteen domains reproduces every identity the conformance
+oracle publishes; a row
+that is not written down here cannot be reproduced from the specification, so
+this register is normative and complete. The oracle asserts that each domain
+string it uses appears in this document.
+
+| Identity | Domain string | Framed value |
+|---|---|---|
+| Budget policy identity — `policyHash`, `PricingSnapshot.policyBindingHash`, `BudgetLedgerEvent.policyHash` | `graph-engineering/budget-policy/v1alpha1\0` | the complete resolved `BudgetPolicy`, with every ceiling materialized inline |
+| Pricing snapshot identity — `pricingSnapshotHash`, `ModelRouterPolicy.pricingSnapshotHash` | `graph-engineering/pricing-snapshot/v1alpha1\0` | the complete `PricingSnapshot`, including its `policyBindingHash` |
+| Router policy identity — `routerPolicyHash` | `graph-engineering/model-router-policy/v1alpha1\0` | the complete `ModelRouterPolicy` |
+| Recorded health snapshot — `ModelRouteDecision.healthSnapshotHash` | `graph-engineering/model-health-snapshot/v1alpha1\0` | the recorded candidate-health object, one member per persisted candidate ID whose value is that candidate's recorded health state |
+| Route decision identity — `ModelRouteDecision.decisionId` | `graph-engineering/model-route-decision/v1alpha1\0` | the complete decision **without** `decisionId` |
+| Route decision content address — `RouteDecisionRecorded.decisionHash`, `ReservationCreated.routeDecisionHash`, checkpoint `routeDecisionHashes` | `graph-engineering/model-route-decision/v1alpha1\0` | the complete decision **including** its computed `decisionId` |
+| Reservation binding — reservation projection `bindingHash` | `graph-engineering/budget-binding/v1alpha1\0` | the closed `ReservationCreated.data.binding` object |
+| Reservation idempotency key — `ReservationCreated.data.idempotencyKey` | `graph-engineering/budget-reservation-request/v1alpha1\0` | `ReservationCreated.data` without `reservationId` and without `idempotencyKey` |
+| Reservation final projection — `ReservationClosed.finalProjectionHash` | `graph-engineering/budget-reservation/v1alpha1\0` | the 6.3 reservation projection with its terminal `state` and its `closedSequence` set to the closing event's sequence |
+| Account final projection — `BudgetAccountClosed.finalProjectionHash` | `graph-engineering/budget-projection/v1alpha1\0` | the account projection with `status = "closed"` and the terminal reason applied |
+| Event payload — `BudgetLedgerEvent.payloadHash` | `graph-engineering/budget-event-payload/v1alpha1\0` | the event's closed `data` object |
+| Event envelope — `BudgetLedgerEvent.eventHash` | `graph-engineering/budget-event/v1alpha1\0` | the complete event **without** `eventHash` |
+| Event ID — `BudgetLedgerEvent.eventId`, prefixed with `e-` | `graph-engineering/budget-event-id/v1alpha1\0` | `{accountId, eventStreamId, sequence, type, payloadHash}` |
+| Checkpoint content — `BudgetLedgerCheckpoint.contentHash` | `graph-engineering/budget-checkpoint/v1alpha1\0` | the complete checkpoint **without** `contentHash` |
+
+The route-decision domain carries two framings. They can never collide: the
+identity framing has no `decisionId` member and the content-address framing
+always does, so no canonical byte string is a valid input to both.
+
 ## 4. Budget vector
 
 The wire schema is
@@ -270,6 +307,43 @@ scope. Inheritance is narrowing only. Missing scope metadata does not grant the
 widest scope; policy resolution must explicitly choose the applicable set
 before an admission event is created.
 
+A scope is *applicable* to a candidate reservation when the reservation binding
+of 6.2 carries the scope identity at the fixed coordinate for that scope kind:
+
+| `scopeKind` | reservation binding coordinate |
+|---|---|
+| `tenant` | `tenantId` |
+| `run` | `runId` |
+| `graph` | `graphHash` |
+| `node` | `nodeId` |
+| `activity` | `activityId` |
+| `provider` | `providerId` |
+| `model` | `modelId` |
+
+A null coordinate — a reservation with no provider or no model — matches no
+scope of that kind. It never matches every scope of that kind. Because a model
+or tool subject may contain `/` and `:`, `scopeId` uses the subject identifier
+grammar rather than the plain identifier grammar; a policy whose model scope
+cannot name its model is a policy whose model ceiling can never bind.
+
+Each applicable scope carries a running demand total. A reservation adds its
+declared maximum to the demand of scope `S` if and only if `S` is applicable to
+that reservation and `S` is **not** applicable to its parent reservation. A
+child allocation is carved out of the parent maximum that already charged the
+shared scope, so charging both would double count rather than intersect; the
+topmost reservation on each chain is the one that charges.
+
+Admission requires, for every charged scope, that the resulting demand remain
+component-wise less than or equal to that scope ceiling. Failure is
+`GE_BUDGET_ADMISSION_DENIED` and is atomic with the rest of 5.2: no dimension
+and no scope is debited when any check fails.
+
+Scope demand is a fold-derived quantity. It is recomputed from the event
+history, not restored from a checkpoint, because a checkpoint retains only each
+reservation's `bindingHash` and not its binding coordinates. A native runtime
+that resumes from a checkpoint MUST therefore replay the referenced prefix
+before admitting further reservations.
+
 ### 5.2 Inclusive admission
 
 The fixed v1alpha1 rule is:
@@ -305,14 +379,37 @@ The fixed behaviors are:
 - unknown usage: deny before dispatch;
 - unknown pricing: deny unless a conservative explicit money reservation
   exists;
-- provider overage: commit at most the declared ceiling, dispute the excess,
-  and stop new work; and
+- provider overage:
+  `deny-report-above-declared-ceiling-retain-envelope-stop-new-work`; and
 - in-doubt use: retain the maximum unresolved amount.
 
 A provider report above a reservation is not allowed to create new credit or
-silently enlarge the reservation. The trusted report envelope is retained by
-hash, the admitted portion is settled, and excess is represented through the
-dispute path.
+silently enlarge the reservation. In v1alpha1 such a report is **rejected** at
+the ledger boundary with `GE_BUDGET_USAGE_OVERAGE`. The event is not appended,
+the trusted report envelope is retained by hash outside the ledger, and the
+rejection is the stop signal for new work on that reservation.
+
+An earlier draft of this section required the runtime to "commit at most the
+declared ceiling, dispute the excess". That behavior is not representable in
+the v1alpha1 ledger algebra and the requirement is withdrawn rather than
+weakened:
+
+- 6.3 requires `committed + released + remaining + childAllocated = maximum`,
+  so committed use can never exceed the reservation maximum; and
+- 6.1 requires `disputed` to remain a subset of committed use.
+
+Excess above the maximum is therefore neither committable nor disputable. A
+representation for it would have to break one of those two invariants, which is
+a larger change than a settlement path is allowed to make. `UsageCommitted`
+consequently accepts only `overageDisposition: "none"`; the reserved wire value
+`declared-ceiling-committed-excess-disputed` is refused with
+`GE_BUDGET_USAGE_OVERAGE` so that it cannot be mistaken for an accepted
+disposition, and it remains reserved for a v1alpha2 contract that introduces an
+explicit excess carrier alongside revised conservation rules.
+
+The supported way to settle more than a reservation currently holds is to
+enlarge authority before the report: obtain a new authorized allocation, or a
+second reservation, and settle against that. Authority always precedes spend.
 
 ### 5.4 Bounds
 
@@ -832,6 +929,22 @@ Selected, denial, and reservation fields are mutually constrained:
 The decision identity is content-addressed. A reservation referencing a route
 must first observe the exact decision hash in the ledger.
 
+A reservation that carries a `routeDecisionHash` MUST also *cover* that
+decision's own sound worst case. Its declared maximum MUST be component-wise
+greater than or equal to:
+
+| Dimension | Lower bound from the decision |
+|---|---|
+| `input-units` | `requirements.inputUnits` |
+| `output-units` | `requirements.maximumOutputUnits` |
+| `money-nano-minor` | `selected.estimatedMoneyNanoMinor` |
+| `provider-calls` | `1` |
+
+Otherwise the admission gate is decorative: the ledger would authorize a
+provider call whose recorded worst case exceeds the capacity anybody holds, and
+the resulting report would be forced through the 5.3 overage path. Failure is
+`GE_BUDGET_ADMISSION_DENIED`.
+
 ### 8.7 Replay
 
 Replay reuses the exact recorded decision bytes. A runtime invocation envelope
@@ -938,25 +1051,37 @@ The oracle is
 The current candidate exercises:
 
 - seven Draft 2020-12 schemas;
-- seven vector projections;
-- root and narrowed model/run scopes;
+- eight vector projections;
+- a root ceiling narrowed by tenant, run, provider, and model scopes;
 - immutable two-model mock pricing;
 - four route outcomes;
 - ten durable nested-ledger events;
 - complete hash-chain replay;
 - terminal checkpoint validation;
-- thirty-six semantic negative cases;
+- fifty-four semantic negative cases;
 - six multi-fact terminal precedence cases; and
 - seven re-signed unknown-field attacks.
+
+The corpus, the attack registry inside the oracle, and the count published
+above are asserted to be the same set on every run, and every declared negative
+is observed to execute. Deleting cases from the corpus fails the gate instead
+of shrinking it silently.
 
 ### 11.1 Positive route cases
 
 The fixture proves:
 
-- confidential tool use selects the premium mock candidate;
+- confidential tool use selects the premium mock candidate at a money ceiling
+  exactly equal to the sound estimate — `600000000` against an estimate of
+  `600000000`, the inclusive bound of 5.2;
 - secret data is denied by privacy;
 - open circuits are denied before dispatch; and
-- a money ceiling one unit below the sound estimate is denied.
+- a money ceiling exactly one nano-minor unit below the same sound estimate —
+  `599999999` against `600000000` — is denied with `GE_ROUTE_BUDGET_DENIED`.
+
+The last two cases share every other requirement, so together they pin the
+inclusive/exclusive boundary at one integer unit rather than at an arbitrary
+distance.
 
 Mock pricing is deterministic. Normal CI does not require credentials, network
 access, a provider account, or current public prices.
@@ -1007,10 +1132,28 @@ The negative corpus covers:
 - an authority grant outside the allowlist;
 - selected-grant substitution;
 - price multiplication overflow;
-- an impossible calendar date; and
-- checkpoint loss of reservation outcomes.
+- an impossible calendar date;
+- checkpoint loss of reservation outcomes;
+- a pricing snapshot bound to another policy;
+- a route decision whose recorded health snapshot identity does not match the
+  health it evaluated;
+- a reservation one nano-minor unit over its applicable model scope ceiling;
+- two sibling root reservations whose cumulative demand exceeds the tenant
+  scope ceiling while account `available` still permits both;
+- a route-bound reservation that does not cover its own recorded estimate;
+- a settlement carrying the unrepresentable overage disposition of 5.3;
+- four restored projections that break a 6.1 or 6.3 invariant — reservation
+  conservation, in-doubt over committed, compensation over disputed, and
+  account-level conservation;
+- a route-bound reservation whose binding names another model;
+- a provider-bound reservation with no persisted route decision;
+- a second route decision rebound to a reservation that already has one; and
+- the four 5.4 deployment bounds — reservation depth, reservation count, event
+  count, and policy canonical bytes — plus the provider-metric count bound.
 
-Each attack asserts one stable code. Merely throwing is not sufficient.
+Each attack asserts one stable code. Merely throwing is not sufficient. Where
+two rules share one stable code, the case also asserts the substring of the
+message that identifies which rule fired.
 
 ### 11.4 Required native extensions
 

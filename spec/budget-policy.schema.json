@@ -51,7 +51,7 @@
     },
     "unknownUsage": { "const": "deny-before-dispatch" },
     "unknownPricing": { "const": "deny-unless-explicit-conservative-reservation" },
-    "overage": { "const": "commit-declared-ceiling-dispute-excess-stop-new-work" },
+    "overage": { "const": "deny-report-above-declared-ceiling-retain-envelope-stop-new-work" },
     "compensation": { "const": "economic-audit-only-never-restores-scheduling-capacity" },
     "reservation": {
       "type": "object",
@@ -127,6 +127,10 @@
       "type": "string",
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,254}/v[0-9]+(?:alpha[0-9]+|beta[0-9]+)?$"
     },
+    "scopeIdentifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,254}$"
+    },
     "scopeCeiling": {
       "type": "object",
       "additionalProperties": false,
@@ -135,7 +139,7 @@
         "scopeKind": {
           "enum": ["activity", "graph", "model", "node", "provider", "run", "tenant"]
         },
-        "scopeId": { "$ref": "#/$defs/identifier" },
+        "scopeId": { "$ref": "#/$defs/scopeIdentifier" },
         "ceiling": {
           "$ref": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/budget-vector.schema.json"
         }

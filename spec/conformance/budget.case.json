@@ -7,7 +7,6 @@
   "identities": {
     "authorityBindingHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "classificationHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-    "healthSnapshotHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
     "graphHash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
     "planHash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
     "attemptId": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
@@ -15,29 +14,29 @@
     "eventStreamId": "2222222222222222222222222222222222222222222222222222222222222222"
   },
   "expected": {
-    "policyHash": "a9e20b2442d345fc726cd1103a0a01f4d13fc0096069c866a74bd98f649c9471",
-    "pricingSnapshotHash": "db513b784e5614f5c5a8c72e29a7b39ece55a8ab3201540d378d473d361be57b",
-    "routerPolicyHash": "7ad87bc82fbfd815e593d40cda9fdd23c7b071ba568e28ff63f891c156c3ec3b",
+    "policyHash": "36de9603d6fb0762550f4e778530a30b92edcf3dbdad7b8a57d271e7d7279ff4",
+    "pricingSnapshotHash": "f4c498c9a9517e6848b7c47b5be9fc66616b237a0a79e3074d741caf09d6d4d2",
+    "routerPolicyHash": "88c5f75462e474f319320f4596a828aa2d705f9187a21fcd91c1c4d3bb427bb5",
     "routeDecisionHashes": {
-      "select-premium-for-confidential-tools": "5c64ba56a6931c75b3cc4f2e211c16f746076bf7cd780d9c12f0f62dc73b32ef",
-      "deny-secret-data": "10c566483a62775f5f49b04b04b8e257b5bec98518bc11a385a182c9bb6f3274",
-      "deny-open-health": "4916dae3d0afaebf247b6dd373043c68c072df4ca984638b383206c486e86325",
-      "deny-money-bound": "c464bf45e68ed967be04aadccc2e65cac5c282fa6a67fe9ba1b54286e759dae4"
+      "select-premium-for-confidential-tools": "e327e31926686b28b4e1364f911e4a91759c71caf59ed3224daab3568fa2c548",
+      "deny-secret-data": "c2afe087964e4a84c6c7a8f514906d179358f70d6589e81a3f86cf1a10d320ad",
+      "deny-open-health": "6d898b210335622abb51562d376233d60d2402f69c97be1fb29c76c2168b389b",
+      "deny-money-bound": "4b210d109ed0e1b3adfc564b92bd3c2aa9489b8d584bcde7a4453f4790ea244d"
     },
     "eventHashes": [
-      "1cc9bb61417a4dd55fb34008b445700740b785b894ae76287d0e3e7b3f0f950a",
-      "36618bea9be36a029d5c023fe07b389676d7b24cb9f00503a3ce78f5f25f1185",
-      "db7c0b1f9bafc419fbadeba72c7a9c11a04a41599b94797ec613cb1f179eb119",
-      "27f447f6bd5c47eaa6e98181b96a7aeccce716318f15924ff757b85e3a8a2859",
-      "31cda87eb40e517ef22190050202c7920426bc25da461c9e434ce69e5976b059",
-      "89c08256951aa8af9d77ba962ca6050afc5696b5d2ef920f813700f2aebee421",
-      "a9a007f9e67a91d8f70b6bf06817f53acb4ff81ce9e0522fb7d63c229996f544",
-      "07f3dcb9f05b3a7f4eaeac818e121b4a302db83d089f8319ac859a8fe2cd372d",
-      "3ab023b458130be8c0d37555e9db0afbd40b567e89499578be21efec003adc5a",
-      "b8440750ff52a9482c267718cee1fa5725d69bd1d94d253166d8805efd7d2fd7"
+      "1e368660d59c3e76729f746218cb6ad32025931b1385372050c5c17699362e08",
+      "70b8a00f30c43aae41ae05996bc0a2503451e8f0361ea1d625648067d1473b28",
+      "d12c3262fcba14a9a3ca3b4080cf266425bfd2cffb8e577f9f2a4db3389378cf",
+      "32c6e0d454f1a09d7ab7f898e6eca592b20c82b8c86f15f7ccfd9720706db876",
+      "b67d9958576d2283c6b7be91c73d376c7d6612d84d06e61e17e096e1aa2eea3f",
+      "b2db0e14add36a235e3601e70a8780ac4da95d0232f31d37bf9f037c09c00584",
+      "21bec25b87caea16e9f33ab7dbc1963099812e6058a1f34992b0e56585e0ff2b",
+      "769ce0e30d5806e35620a0d21aa810ce0ee2ce5f55dc45f56fb4bdad418677dc",
+      "5353daefdc62091048292a69017b69a2d6a0c6f2aa83510ab505a237f5baa718",
+      "ed5f863773773f9fe1104ea5a95836602463aa11e7e703b15953c607a9dc17d7"
     ],
-    "checkpointContentHash": "296256e89d8c3b2fee25fee0df8891bc435ec8b1e774f165a8440c8885c0b340",
-    "terminalProjectionHash": "0f91aa447f3eecbaff1abf3c9b5c929bd0a7d16e91048e2485126c7eadb55456"
+    "checkpointContentHash": "14db14531f61f836c34b1d0488d36bf6c201f8f0ff7abc056e80db04c85d1f2b",
+    "terminalProjectionHash": "f6bbe00d1af27a0ab30833c41bf2ea5c533771df46bdcec17546c13f2180a4b2"
   },
   "vectors": {
     "rootCeiling": {
@@ -136,6 +135,21 @@
       ],
       "providerSpecific": []
     },
+    "tenantScopeCeiling": {
+      "apiVersion": "graphengineering.reacher-z.github.io/budget-vectors/v1alpha1",
+      "kind": "BudgetVector",
+      "contractVersion": "portable-budget/v1alpha1",
+      "currency": "USD",
+      "minorUnitExponent": 2,
+      "quantities": [
+        { "resource": "attempts", "unit": "count", "aggregation": "sum", "amount": 8 },
+        { "resource": "input-units", "unit": "usage-unit", "aggregation": "sum", "amount": 2000 },
+        { "resource": "money-nano-minor", "unit": "nano-minor", "aggregation": "sum", "amount": 1500000000 },
+        { "resource": "output-units", "unit": "usage-unit", "aggregation": "sum", "amount": 1000 },
+        { "resource": "provider-calls", "unit": "count", "aggregation": "sum", "amount": 2 }
+      ],
+      "providerSpecific": []
+    },
     "empty": {
       "apiVersion": "graphengineering.reacher-z.github.io/budget-vectors/v1alpha1",
       "kind": "BudgetVector",
@@ -157,13 +171,15 @@
     "limitSemantics": "inclusive-ceiling-admit-only-if-worst-case-fits",
     "rootCeiling": { "$vector": "rootCeiling" },
     "scopeCeilings": [
-      { "scopeKind": "model", "scopeId": "premium-model", "ceiling": { "$vector": "rootReservation" } },
-      { "scopeKind": "run", "scopeId": "run-1", "ceiling": { "$vector": "rootCeiling" } }
+      { "scopeKind": "model", "scopeId": "mock/premium-v1", "ceiling": { "$vector": "childReservation" } },
+      { "scopeKind": "provider", "scopeId": "mock-provider", "ceiling": { "$vector": "rootReservation" } },
+      { "scopeKind": "run", "scopeId": "run-1", "ceiling": { "$vector": "rootCeiling" } },
+      { "scopeKind": "tenant", "scopeId": "tenant-1", "ceiling": { "$vector": "tenantScopeCeiling" } }
     ],
     "allowedProviderMetrics": [],
     "unknownUsage": "deny-before-dispatch",
     "unknownPricing": "deny-unless-explicit-conservative-reservation",
-    "overage": "commit-declared-ceiling-dispute-excess-stop-new-work",
+    "overage": "deny-report-above-declared-ceiling-retain-envelope-stop-new-work",
     "compensation": "economic-audit-only-never-restores-scheduling-capacity",
     "reservation": {
       "admission": "sound-worst-case-before-dispatch",
@@ -214,7 +230,7 @@
       "signatureDisposition": "content-addressed-unverified",
       "refresh": "outside-active-run-new-snapshot-only"
     },
-    "policyBindingHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "policyBindingHash": "36de9603d6fb0762550f4e778530a30b92edcf3dbdad7b8a57d271e7d7279ff4",
     "rounding": "ceil-each-request-meter-before-sum",
     "entries": [
       {
@@ -253,7 +269,7 @@
       "5555555555555555555555555555555555555555555555555555555555555555",
       "6666666666666666666666666666666666666666666666666666666666666666"
     ],
-    "pricingSnapshotHash": "0000000000000000000000000000000000000000000000000000000000000000",
+    "pricingSnapshotHash": "f4c498c9a9517e6848b7c47b5be9fc66616b237a0a79e3074d741caf09d6d4d2",
     "classificationPolicyHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     "inheritance": "resolve-session-and-default-before-persist",
     "selection": "first-eligible-by-quality-then-fallback-rank-then-candidate-id",
@@ -368,7 +384,7 @@
         "maximumOutputUnits": 200,
         "maximumContextUnits": 1000,
         "maximumDurationMs": 30000,
-        "maximumMoneyNanoMinor": 100000000,
+        "maximumMoneyNanoMinor": 599999999,
         "approvalBindingHash": null
       },
       "health": { "economy-model": "ready", "premium-model": "ready" },
@@ -438,7 +454,25 @@
     { "id": "route-decision-grant-drift", "operation": "selected-grant-drift", "expectCode": "GE_ROUTE_AUTHORITY_DENIED" },
     { "id": "pricing-overflow", "operation": "route-price-multiplication-overflow", "expectCode": "GE_BUDGET_COUNTER_OVERFLOW" },
     { "id": "invalid-calendar-time", "operation": "event-invalid-calendar-date", "expectCode": "GE_BUDGET_INVALID_HISTORY" },
-    { "id": "checkpoint-idempotency-loss", "operation": "checkpoint-drops-reservation-outcomes", "expectCode": "GE_BUDGET_CORRUPT_CHECKPOINT" }
+    { "id": "checkpoint-idempotency-loss", "operation": "checkpoint-drops-reservation-outcomes", "expectCode": "GE_BUDGET_CORRUPT_CHECKPOINT" },
+    { "id": "pricing-policy-binding-drift", "operation": "pricing-policy-binding-drift", "expectCode": "GE_PRICING_POLICY_DRIFT" },
+    { "id": "route-health-snapshot-drift", "operation": "route-health-snapshot-drift", "expectCode": "GE_ROUTE_DECISION_INVALID" },
+    { "id": "scope-ceiling-one-over", "operation": "reservation-one-over-model-scope", "expectCode": "GE_BUDGET_ADMISSION_DENIED", "expectMessage": "exceeds the model scope ceiling" },
+    { "id": "scope-cumulative-demand", "operation": "sibling-demand-over-tenant-scope", "expectCode": "GE_BUDGET_ADMISSION_DENIED", "expectMessage": "exceeds the tenant scope ceiling" },
+    { "id": "route-reservation-under-covers", "operation": "route-reservation-under-covers-estimate", "expectCode": "GE_BUDGET_ADMISSION_DENIED", "expectMessage": "does not cover the worst case of its own route decision" },
+    { "id": "overage-disposition-unrepresentable", "operation": "overage-disposition-unrepresentable", "expectCode": "GE_BUDGET_USAGE_OVERAGE", "expectMessage": "has no v1alpha1 ledger representation" },
+    { "id": "restored-reservation-conservation", "operation": "restored-reservation-breaks-conservation", "expectCode": "GE_BUDGET_COUNTER_MISMATCH", "expectMessage": "reservation conservation failed for model-1" },
+    { "id": "restored-in-doubt-over-committed", "operation": "restored-in-doubt-over-committed", "expectCode": "GE_BUDGET_COUNTER_MISMATCH", "expectMessage": "in-doubt usage exceeds committed usage" },
+    { "id": "restored-compensation-over-disputed", "operation": "restored-compensation-over-disputed", "expectCode": "GE_BUDGET_COMPENSATION_INVALID", "expectMessage": "compensation exceeds disputed usage" },
+    { "id": "restored-account-conservation", "operation": "restored-account-conservation-break", "expectCode": "GE_BUDGET_COUNTER_MISMATCH", "expectMessage": "account-level conservation failed" },
+    { "id": "reservation-binding-not-its-route", "operation": "reservation-binding-not-its-route", "expectCode": "GE_ROUTE_DECISION_INVALID", "expectMessage": "reservation binding differs from selected route" },
+    { "id": "provider-reservation-without-route", "operation": "provider-reservation-without-route", "expectCode": "GE_ROUTE_DECISION_INVALID", "expectMessage": "requires a persisted route decision" },
+    { "id": "route-rebound-to-second-decision", "operation": "route-rebound-to-second-decision", "expectCode": "GE_BUDGET_IDEMPOTENCY_CONFLICT", "expectMessage": "conflicting route decisions" },
+    { "id": "reservation-depth-over-limit", "operation": "reservation-depth-over-policy-limit", "expectCode": "GE_BUDGET_CHILD_EXPANSION" },
+    { "id": "reservation-count-over-limit", "operation": "reservation-count-over-policy-limit", "expectCode": "GE_BUDGET_LIMIT_INVALID", "expectMessage": "reservation count exceeds policy" },
+    { "id": "event-count-over-limit", "operation": "event-count-over-policy-limit", "expectCode": "GE_BUDGET_LIMIT_INVALID", "expectMessage": "event count exceeds policy" },
+    { "id": "policy-over-canonical-bytes", "operation": "policy-over-canonical-byte-limit", "expectCode": "GE_BUDGET_LIMIT_INVALID", "expectMessage": "policy exceeds canonical byte limit" },
+    { "id": "provider-metrics-over-limit", "operation": "provider-metrics-over-policy-limit", "expectCode": "GE_BUDGET_LIMIT_INVALID", "expectMessage": "provider metrics exceed policy limit" }
   ],
   "terminalPrecedenceCases": [
     { "id": "cancel-before-all", "facts": ["FAILED", "MAX_MONEY", "CANCELLED"], "expect": "CANCELLED" },
