@@ -112,14 +112,10 @@ The cross-language join caught it on its first real run. Two lessons:
 
 ## What is open, ranked by risk
 
-1. **`D10-BUDGET-SPEC-035` (8 P0) and `D4-TRACE-SUBGRAPH-022` (16 P0).** Both
-   oracles pass on knowingly-wrong input — D10 overwrites two of the binds it
-   exists to check and its 36-case negative corpus can be deleted without
-   failing; D4's stream state machine accepts publishing after `StreamCompleted`
-   and after `StreamSourceClosed`, and its artifact digest and event-chain
-   checks are each deletable with the corpus still green. Both are now CI-wired,
-   which makes a false green *more* dangerous, not less. Remediation was in
-   flight at handoff.
+1. ~~**`D10-BUDGET-SPEC-035` (8 P0) and `D4-TRACE-SUBGRAPH-022` (16 P0).**~~
+   **Both P0 sets are now closed** — D10 at `ffb7b16`, D4 at `d41b161`. Their
+   P1s remain open and both still need a fresh independent review before either
+   contract may be frozen. See "The two oracles" below.
 2. **`D8-CYCLE-TIMEOUT-DIVERGENCE-090`.** Needs a normative decision.
 3. **Three D9 P1s.** The surrogate-pair collision check cannot fire in
    JavaScript at all and is testable only from Python, where no D9 oracle
@@ -134,6 +130,48 @@ The cross-language join caught it on its first real run. Two lessons:
    adapters, API freeze, production stores, workers, Explorer, performance, all
    ten pattern bundles, the fourteen-step course, Beta, compatibility matrix,
    RC, provenance, release. 59 tasks, none started.
+
+## The two oracles
+
+Both D10 and D4 were passing on knowingly-wrong input while wired into CI. That
+is worse than having no oracle, because a green gate is read as evidence. Both
+P0 sets are closed, and in both cases the remediation found more than the audit
+had.
+
+**D4 carries the number worth keeping.** A harness that neutralizes each
+`D4Error` throw site in turn and requires the corpus to fail measured **37 of
+110 rules held before, 133 of 144 after** — that is, 66% of the oracle was
+deletable without the corpus noticing. Eleven survivors remain, enumerated in
+`subgraph-and-edge-semantics.md` §15.1: five are unreachable without changing
+the two frozen Graph IR documents and their published goldens, and six are
+shadowed by a neighbour reporting the same portable code, so single-rule
+deletion is invisible through a code-only portability check. All eleven are
+implemented and exercised; only the deletion test is blind. That distinction is
+recorded rather than smoothed over.
+
+**D4 also exposed a general mechanism.** A mid-history mutation must reseal
+every later `previousEventHash` and `eventHash`, or the integrity guard absorbs
+it and masks the rule under test. That is precisely why the old
+`previousEventHash` vector proved nothing — it was testing the integrity guard,
+not the chain guard. A reseal mode now exists and the requirement is normative.
+
+**D10 found eleven further zero-coverage guards the audit missed** — reservation
+conservation, in-doubt and compensated bounds, account conservation, the four
+deployment bounds, the provider-metric bound, and three binding rules. Negative
+corpus 36 → 54.
+
+**Both lanes declined to claim a number against the audit's own 30 mutations**,
+because that list is not enumerated anywhere in the repository and could not be
+re-run. Each built and reported its own measured campaign instead. That is the
+correct answer to an unanswerable question and should stay the norm.
+
+**Two normative decisions were made rather than deferred**, both disclosed. D10's
+§5.3 "commit to ceiling and dispute the excess" was withdrawn because it is
+structurally unrepresentable — §6.3 conservation and §6.1 subset invariants make
+excess above the maximum neither committable nor disputable, so implementing the
+prose would have broken the ledger's foundation. D4 mapped §9.2 step-2
+validations to `PUBLICATION_FAILED` rather than `UNAUTHORIZED`, because the edge
+refused the bytes and no reference exists.
 
 ## What cannot be done from inside this repository
 
