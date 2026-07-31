@@ -84,13 +84,23 @@ does not perform network I/O or resolve user input.
 
 ## Run over stdio
 
-After the workspace has been installed and built:
+Start from a source checkout and use the locked workspace dependencies:
+
+```bash
+git clone https://github.com/reacher-z/GraphEngineering.git
+cd GraphEngineering
+corepack pnpm install --frozen-lockfile
+corepack pnpm --filter @graph-engineering/core build
+corepack pnpm --filter @graph-engineering/mcp-server build
+```
+
+Then run the built entrypoint directly:
 
 ```bash
 node packages/mcp-server/dist/src/stdio.js
 ```
 
-Or use the package bin after installation:
+Or use the workspace package bin after the locked install and build:
 
 ```text
 graph-engineering-mcp
@@ -100,7 +110,20 @@ An MCP host should launch the command and communicate over stdin/stdout. Stdout 
 reserved exclusively for MCP JSON-RPC; startup and errors use stderr. `SIGINT` and
 `SIGTERM` close the server transport.
 
-Example host configuration:
+Example host configuration using the package bin:
+
+```json
+{
+  "mcpServers": {
+    "graph-engineering": {
+      "command": "/absolute/path/to/GraphEngineering/node_modules/.bin/graph-engineering-mcp",
+      "args": []
+    }
+  }
+}
+```
+
+Example host configuration using the explicit built entrypoint:
 
 ```json
 {
@@ -115,6 +138,13 @@ Example host configuration:
 
 Use an explicit, reviewed absolute path in host configuration. The server itself
 does not derive paths from model input.
+
+Both forms expose only `graph_validate`, `graph_plan`, and `graph_get_schema`.
+They do not add graph execution, filesystem, shell, network, or mutation tools.
+The MCP host launches this local process with the permissions of your user, so
+review the checkout and executable path before approving the configuration.
+Graph-size, worker-timeout, and operating-system limits described above still
+apply; stdio does not create an additional sandbox.
 
 ## Security boundary
 
