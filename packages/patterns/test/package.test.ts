@@ -16,6 +16,7 @@ test("package marks itself side-effect free and exposes only the intended API", 
     "PatternInputError",
     "diamond",
     "loopUntilDry",
+    "researchDiamond",
     "routedBranches",
     "verifiedFanout",
   ]);

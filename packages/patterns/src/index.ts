@@ -1,5 +1,10 @@
 export { PatternInputError, type PatternErrorCode } from "./errors.js";
 export { diamond, loopUntilDry, routedBranches, verifiedFanout } from "./patterns.js";
+export {
+  researchDiamond,
+  type ResearchDiamondOptions,
+  type ResearchSource,
+} from "./research-diamond.js";
 export type {
   DiamondOptions,
   DeepReadonly,

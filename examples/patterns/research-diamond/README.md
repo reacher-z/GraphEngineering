@@ -126,10 +126,13 @@ graph TD
   stance -->|yes| accepted["acceptedClaims<br/>with citations"]
 ```
 
-The corpus deliberately contains all three cases: one claim found by two
-sources (folded), one claim two sources disagree about (reported as a
-contradiction, never accepted), and one claim cited to a document its own
-source never returned (rejected as citation laundering).
+The corpus deliberately contains all four cases: one claim found by two sources
+(folded into one claim with two citations), one claim two sources disagree about
+(reported as a contradiction, never accepted), one claim cited to a document its
+own source never returned (rejected as citation laundering), and one claim whose
+text is a prompt-injection attempt (accepted as a claim, obeyed as nothing —
+the contradiction is still reported and the laundered citation is still
+rejected).
 
 ## Authority
 

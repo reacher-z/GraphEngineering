@@ -48,6 +48,43 @@ const graph = diamond({
 });
 ```
 
+### `researchDiamond`
+
+Builds the Pattern 01 multi-source research diamond: `scope` fans out to one
+`source-<key>` node per source, and every source result reaches a unique
+`synthesize` barrier port named by its key. Unlike the other constructors it
+owns the node identities, so two callers who describe the same sources get the
+same graph.
+
+```ts
+const graph = researchDiamond({
+  sources: [
+    { key: "code", role: "Find executable examples and implementation constraints" },
+    { key: "docs", role: "Find primary documentation and return cited facts" },
+    { key: "web", role: "Find third-party reports and dated claims" },
+  ],
+});
+```
+
+Optional fields are `name` (default `research-diamond`), `version` (default
+`1.0.0`) and `maxAttemptsPerSource` (default `2`, range `1..8`). Source keys are
+normalized by Unicode code point, so source order never changes the graph or its
+hash. Each source declares `sideEffects: "none"` and `retry.maxAttempts`, which
+together are what let an interrupted attempt be re-driven on a durable resume
+rather than refused as in-doubt. Policies are derived: `maxConcurrency` and
+`maxFanOut` equal the source count, `maxDepth` is `3`, and `maxTotalAttempts` is
+`2 + sources × maxAttemptsPerSource`.
+
+The constructor declares no budget, permission, network policy or isolation.
+Nothing in this repository enforces any of those, and emitting them would make
+an ungoverned run read as a governed one; the bundle manifest states them as
+documented intent instead.
+
+The runnable bundle — canonical JSON and YAML, fixtures, a deterministic mock
+end-to-end run and an injected-failure-and-resume demonstration in both
+languages — is in
+[`examples/patterns/research-diamond/`](../../examples/patterns/research-diamond/README.md).
+
 ### `routedBranches`
 
 Builds `classify → branches → merge`. Classifier-to-branch edges carry this

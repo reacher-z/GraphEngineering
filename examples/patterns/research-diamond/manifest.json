@@ -153,6 +153,22 @@
       "status": "not-delivered",
       "reason": "Replay/fork of a durable run is not exercised by this bundle."
     },
+    "promptInjection": {
+      "status": "delivered",
+      "where": "fixtures/sources.json — the web source returns a claim whose text is an instruction to accept everything and suppress the contradiction. It is accepted as a claim and obeyed as nothing; fixtures/expected-run.json still reports the contradiction and still rejects the laundered citation."
+    },
+    "citationLaundering": {
+      "status": "delivered",
+      "where": "fixtures/sources.json — a claim cited to a document its own source never returned is rejected with reason citation-not-in-source-manifest."
+    },
+    "duplicateSources": {
+      "status": "delivered",
+      "where": "fixtures/sources.json — one claim reported by two sources is folded into one claim with two citations."
+    },
+    "contradictorySources": {
+      "status": "delivered",
+      "where": "fixtures/sources.json — two sources disagree on stance; the claim is reported as a contradiction with both positions and is never accepted."
+    },
     "partialSourceFailureRetention": {
       "status": "blocked",
       "reason": "The merge node is a static all-success barrier. If one source fails permanently the barrier is never satisfied and no partial report is produced. Retaining partial sources needs quorum or settled barrier behaviour, which is capability-gated and not implemented."
