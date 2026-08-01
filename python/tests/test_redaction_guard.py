@@ -161,6 +161,46 @@ def test_a_failure_never_echoes_the_offending_value() -> None:
     assert secret not in rendered
 
 
+def test_plaintext_beside_the_reference_is_refused() -> None:
+    """Section 3.2: `protected-ref` carrying plaintext beside the ref is invalid."""
+
+    guard, _, store = _guard()
+    outcome = guard.prepare(
+        _request(
+            store,
+            metadata={"nodeId": "worker", "data": {"echo": {"answer": "synthetic-value"}}},
+            payload={"answer": "synthetic-value"},
+        )
+    )
+    assert isinstance(outcome, GuardFailed)
+    assert outcome.failure.code == "PAYLOAD_PROTECTION_REQUIRED"
+
+
+def test_a_closed_envelope_identifier_is_not_plaintext_beside_the_reference() -> None:
+    """A value that coincides with a closed identifier is not an inline leak.
+
+    "Beside the reference" is the container the reference is inserted into. A
+    node whose output happens to equal its own node id would otherwise be
+    permanently unwritable, and refusing it would say something false about the
+    record: the envelope's `nodeId` is graph-declared metadata, not a copy of
+    the protected application value.
+    """
+
+    guard, _, store = _guard()
+    outcome = guard.prepare(
+        _request(
+            store,
+            metadata={"nodeId": "worker", "data": {}},
+            payload="worker",
+        )
+    )
+    assert isinstance(outcome, GuardPrepared)
+    assert outcome.document["data"]["outputRef"]["apiVersion"].endswith(
+        "protected-value/v1alpha1"
+    )
+    assert "worker" not in str(outcome.document["data"])
+
+
 def test_metadata_only_record_cannot_carry_an_application_payload() -> None:
     guard, _, store = _guard()
     outcome = guard.prepare(

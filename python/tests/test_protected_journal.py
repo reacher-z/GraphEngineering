@@ -293,11 +293,23 @@ def test_absent_redacted_flag_remains_absent_in_the_native_model() -> None:
     assert "redacted" not in capture_graph_model_document(event, GraphEvent)
 
 
-def test_the_v1alpha1_durable_writer_emits_a_truthful_flag() -> None:
+def test_the_durable_writer_emits_only_the_protected_v1alpha2_envelope() -> None:
+    """The durable writer has no v1alpha1 code path left to be truthful about.
+
+    Section 3.1 made the old inline writer stop claiming ``redacted: true``;
+    truthful was never the goal. The durable runtime now writes only the guarded
+    ``events/v1alpha2`` envelope, whose ``redacted`` is an unconditional false
+    beside a real ``payloadDisposition``, and there is no fallback branch that
+    could emit an inline v1alpha1 record instead.
+    """
+
     source = Path(__file__).resolve().parents[1] / "src" / "graph_engineering" / "durable.py"
     text = source.read_text(encoding="utf-8")
     assert '"redacted": False,' in text
     assert '"redacted": True,' not in text
+    assert 'apiVersion": "graphengineering.reacher-z.github.io/events/v1alpha1' not in text
+    assert "EVENT_V1ALPHA2_API_VERSION" in text
+    assert "encode_durable_json" not in text
 
 
 def _legacy_event(**overrides: Any) -> dict[str, Any]:

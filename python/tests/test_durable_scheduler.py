@@ -15,25 +15,54 @@ from graph_engineering import (
     DurableRunErrorCode,
     FailureCode,
     GraphCompileError,
-    GraphEvent,
     NodeContext,
     NodeFailure,
+    ProtectedGraphEvent,
     RunStatus,
     compile_graph,
-    decode_durable_json,
     durable_json_hash,
-    encode_durable_json,
     resume_graph_run,
     start_graph_run,
     try_compile_graph,
 )
 from graph_engineering.canonical import canonical_sha256
 from graph_engineering.durable import _DurableJournal, _EventDraft, _strict_rfc3339
-from graph_engineering.persistence import EventStore, MemoryEventStore, VersionConflictError
+from graph_engineering.persistence import VersionConflictError
+from graph_engineering.persistence.protected_journal import (
+    GuardedMemoryEventStore,
+    ProtectedEventStore,
+)
+from graph_engineering.redaction.guard import PreparedSinkWrite
+from graph_engineering.redaction.protect import (
+    activity_key,
+    graph_input_context,
+    node_input_context,
+    node_output_context,
+    node_result_context,
+    run_result_context,
+)
 from graph_engineering.scheduler import _AttemptIdentity
+from tests.durable_support import (
+    forged_protected_event,
+    install_history,
+    memory_journal,
+    memory_protection,
+    protect_occurrence,
+    rebind_event,
+    recover_occurrence,
+    reprotect,
+    resign,
+)
 
 ROOT = Path(__file__).parents[2]
 FIXED_TIME = "2026-07-26T12:00:00.000Z"
+
+# redaction-semantics.md Section 4.2 makes a configured protected payload store
+# and key provider a precondition of every durable run, so every durable test
+# supplies one. `test_an_unconfigured_durable_run_refuses` is the case that
+# deliberately does not.
+PROTECTION = memory_protection()
+POLICY_HASH = PROTECTION.policy_hash
 
 
 def registered_loop_condition_graph() -> Any:
@@ -211,12 +240,8 @@ def unsupported_condition_document() -> dict[str, Any]:
     }
 
 
-async def events(store: EventStore, run_id: str) -> tuple[GraphEvent, ...]:
+async def events(store: ProtectedEventStore, run_id: str) -> tuple[ProtectedGraphEvent, ...]:
     return await store.read(run_id)
-
-
-def resign(event: GraphEvent, data: dict[str, Any]) -> GraphEvent:
-    return event.model_copy(update={"data": data, "payload_hash": canonical_sha256(data)})
 
 
 def forged_event(
@@ -226,50 +251,97 @@ def forged_event(
     event_type: str,
     data: dict[str, Any],
     node_id: str | None = None,
+    edge_id: str | None = None,
     attempt: int | None = None,
-) -> GraphEvent:
-    document: dict[str, Any] = {
-        "apiVersion": "graphengineering.reacher-z.github.io/events/v1alpha1",
-        "eventId": f"forged:{sequence}",
-        "type": event_type,
-        "timestamp": FIXED_TIME,
-        "runId": run_id,
-        "graphRevision": 1,
-        "sequence": sequence,
-        "payloadHash": canonical_sha256(data),
-        "redacted": True,
-        "data": data,
+) -> ProtectedGraphEvent:
+    return forged_protected_event(
+        run_id=run_id,
+        sequence=sequence,
+        event_type=event_type,
+        data=data,
+        capture_policy_hash=POLICY_HASH,
+        node_id=node_id,
+        edge_id=edge_id,
+        attempt=attempt,
+        timestamp=FIXED_TIME,
+    )
+
+
+def protected_scheduled_data(
+    run_id: str,
+    node_id: str,
+    node_input: Any,
+    *,
+    sequence: int,
+    attempt: int,
+    side_effects: str = "none",
+    event_id: str | None = None,
+) -> dict[str, Any]:
+    """A `NodeScheduled` payload whose protected input really is protected."""
+
+    placeholder = forged_event(
+        run_id=run_id,
+        sequence=sequence,
+        event_type="NodeScheduled",
+        data={},
+        node_id=node_id,
+        attempt=attempt,
+    )
+    if event_id is not None:
+        placeholder = placeholder.model_copy(update={"event_id": event_id})
+    document, mac = protect_occurrence(
+        PROTECTION,
+        event=placeholder,
+        field_path="/data/inputRef",
+        value=node_input,
+        semantic_context=node_input_context(run_id, 1, node_id),
+    )
+    return {
+        "inputRef": document,
+        "inputMac": mac,
+        "activityKey": activity_key(
+            PROTECTION.identity_key(run_id),
+            run_id=run_id,
+            graph_revision=1,
+            node_id=node_id,
+            input_mac=mac,
+        ),
+        "sideEffects": side_effects,
     }
-    if node_id is not None:
-        document["nodeId"] = node_id
-    if attempt is not None:
-        document["attempt"] = attempt
-    return GraphEvent.model_validate(document)
 
 
-class TrackingStore:
-    def __init__(self, delegate: MemoryEventStore | None = None) -> None:
-        self.delegate = delegate or MemoryEventStore()
+class TrackingStore(GuardedMemoryEventStore):
+    """A guarded store that counts the store calls the runtime actually makes."""
+
+    def __init__(self, source: GuardedMemoryEventStore | None = None) -> None:
+        super().__init__()
         self.read_calls = 0
         self.append_calls = 0
+        if source is not None:
+            # The protected blobs live in the shared protection authority, so an
+            # adopted history keeps authenticating.
+            for run_id, stream in source._streams.items():
+                install_history(self, run_id, stream)
 
-    async def read(self, run_id: str, from_sequence: int = 0) -> tuple[GraphEvent, ...]:
+    async def read(
+        self, run_id: str, from_sequence: int = 0
+    ) -> tuple[ProtectedGraphEvent, ...]:
         self.read_calls += 1
-        return await self.delegate.read(run_id, from_sequence)
+        return await super().read(run_id, from_sequence)
 
     async def append(
         self,
         run_id: str,
         expected_version: int,
-        values: Sequence[GraphEvent],
+        prepared: Sequence[PreparedSinkWrite],
     ) -> int:
         self.append_calls += 1
-        return await self.delegate.append(run_id, expected_version, values)
+        return await super().append(run_id, expected_version, prepared)
 
 
 def test_start_commits_claim_before_handler_and_terminal_resume_is_idempotent() -> None:
     async def scenario() -> None:
-        store = MemoryEventStore()
+        store = memory_journal()
         observed_identity: tuple[str | None, str | None, str | None] | None = None
 
         async def handler(context: NodeContext) -> Any:
@@ -290,6 +362,7 @@ def test_start_commits_claim_before_handler_and_terminal_resume_is_idempotent() 
             run_id="run-start",
             implementation_id="handlers@1",
             event_store=store,
+            payload_protection=PROTECTION,
             clock=fixed_clock,
         )
         history = await store.read("run-start")
@@ -322,6 +395,7 @@ def test_start_commits_claim_before_handler_and_terminal_resume_is_idempotent() 
             run_id="run-start",
             implementation_id="handlers@1",
             event_store=store,
+            payload_protection=PROTECTION,
             clock=fixed_clock,
         )
         assert resumed == result
@@ -335,6 +409,7 @@ def test_start_commits_claim_before_handler_and_terminal_resume_is_idempotent() 
                 run_id="run-start",
                 implementation_id="handlers@1",
                 event_store=store,
+                payload_protection=PROTECTION,
                 clock=fixed_clock,
             )
         assert duplicate.value.code is DurableRunErrorCode.RUN_ALREADY_EXISTS
@@ -344,7 +419,7 @@ def test_start_commits_claim_before_handler_and_terminal_resume_is_idempotent() 
 
 def test_durable_route_skip_and_active_join_resume_without_reexecution() -> None:
     async def scenario() -> None:
-        store = MemoryEventStore()
+        store = memory_journal()
         compiled = durable_routed_graph()
         result = await start_graph_run(
             compiled,
@@ -353,6 +428,7 @@ def test_durable_route_skip_and_active_join_resume_without_reexecution() -> None
             run_id="durable-route",
             implementation_id="router@1",
             event_store=store,
+            payload_protection=PROTECTION,
             clock=fixed_clock,
         )
 
@@ -371,6 +447,7 @@ def test_durable_route_skip_and_active_join_resume_without_reexecution() -> None
             run_id="durable-route",
             implementation_id="router@1",
             event_store=store,
+            payload_protection=PROTECTION,
             clock=fixed_clock,
         )
         assert resumed == result
@@ -380,7 +457,7 @@ def test_durable_route_skip_and_active_join_resume_without_reexecution() -> None
 
 def test_invalid_durable_route_result_never_commits_success_and_never_retries() -> None:
     async def scenario() -> None:
-        store = MemoryEventStore()
+        store = memory_journal()
         compiled = durable_routed_graph(router_retry=True)
         invalid = {
             "routed": True,
@@ -399,6 +476,7 @@ def test_invalid_durable_route_result_never_commits_success_and_never_retries() 
             run_id="durable-invalid-route",
             implementation_id="router@1",
             event_store=store,
+            payload_protection=PROTECTION,
             clock=fixed_clock,
         )
 
@@ -423,6 +501,7 @@ def test_invalid_durable_route_result_never_commits_success_and_never_retries() 
             run_id="durable-invalid-route",
             implementation_id="router@1",
             event_store=store,
+            payload_protection=PROTECTION,
             clock=fixed_clock,
         )
         assert resumed == result
@@ -433,7 +512,7 @@ def test_invalid_durable_route_result_never_commits_success_and_never_retries() 
 def test_durable_router_success_is_bound_to_its_committed_input() -> None:
     async def scenario() -> None:
         compiled = durable_routed_graph()
-        source = MemoryEventStore()
+        source = memory_journal()
         await start_graph_run(
             compiled,
             {"requestedRoutes": ["quick"]},
@@ -441,6 +520,7 @@ def test_durable_router_success_is_bound_to_its_committed_input() -> None:
             run_id="durable-authoritative-route-input",
             implementation_id="router@1",
             event_store=source,
+            payload_protection=PROTECTION,
             clock=fixed_clock,
         )
         history = list(await source.read("durable-authoritative-route-input"))
@@ -454,19 +534,28 @@ def test_durable_router_success_is_bound_to_its_committed_input() -> None:
             "usedDefault": False,
             "escalated": False,
         }
+        run_id = "durable-authoritative-route-input"
         for index, event in enumerate(history):
             if event.type == "NodeSucceeded" and event.node_id == "classify":
-                data = dict(event.data)
-                data["output"] = encode_durable_json(forged_output)
-                data["outputHash"] = durable_json_hash(forged_output)
-                history[index] = resign(event, data)
+                # The forged route decision is protected correctly for this exact
+                # occurrence, so only its semantics are wrong.
+                history[index] = reprotect(
+                    PROTECTION,
+                    event=event,
+                    reference_field="outputRef",
+                    mac_field="outputMac",
+                    value=forged_output,
+                    semantic_context=node_output_context(run_id, 1, "classify"),
+                )
+                forged_mac = history[index].data["outputMac"]
+                for later in range(index + 1, len(history)):
+                    edge = history[later]
+                    if edge.type != "EdgeEmitted" or edge.node_id != "classify":
+                        break
+                    history[later] = resign(edge, {"outputMac": forged_mac})
                 break
-        forged = MemoryEventStore()
-        await forged.append(
-            "durable-authoritative-route-input",
-            -1,
-            tuple(history),
-        )
+        forged = memory_journal()
+        install_history(forged, run_id, history)
 
         with pytest.raises(DurableRunError) as error:
             await resume_graph_run(
@@ -474,6 +563,7 @@ def test_durable_router_success_is_bound_to_its_committed_input() -> None:
                 run_id="durable-authoritative-route-input",
                 implementation_id="router@1",
                 event_store=forged,
+                payload_protection=PROTECTION,
             )
         assert error.value.code is DurableRunErrorCode.INVALID_RUN_HISTORY
 
@@ -483,7 +573,7 @@ def test_durable_router_success_is_bound_to_its_committed_input() -> None:
 def test_durable_history_rejects_scheduling_an_inactive_route_branch() -> None:
     async def scenario() -> None:
         compiled = durable_routed_graph()
-        source = MemoryEventStore()
+        source = memory_journal()
         await start_graph_run(
             compiled,
             {"requestedRoutes": ["quick"]},
@@ -491,6 +581,7 @@ def test_durable_history_rejects_scheduling_an_inactive_route_branch() -> None:
             run_id="forged-inactive-route-schedule",
             implementation_id="router@1",
             event_store=source,
+            payload_protection=PROTECTION,
             clock=fixed_clock,
         )
         history = list(await source.read("forged-inactive-route-schedule"))
@@ -499,34 +590,29 @@ def test_durable_history_rejects_scheduling_an_inactive_route_branch() -> None:
             for event in history
             if event.type == "NodeSettledWithoutAttempt" and event.node_id == "security"
         )
-        forged_data = {
-            "input": encode_durable_json({}),
-            "inputHash": durable_json_hash({}),
-            "activityKey": durable_json_hash(
-                [
-                    "activity/v1alpha1",
-                    "forged-inactive-route-schedule",
-                    1,
-                    "security",
-                    durable_json_hash({}),
-                ]
-            ),
-            "sideEffects": "none",
-        }
+        inactive_index = history.index(inactive)
+        forged_data = protected_scheduled_data(
+            "forged-inactive-route-schedule",
+            "security",
+            {},
+            sequence=inactive.sequence,
+            attempt=1,
+            event_id=inactive.event_id,
+        )
         forged_scheduled = inactive.model_copy(
             update={
                 "type": "NodeScheduled",
                 "attempt": 1,
+                "payload_disposition": "protected-ref",
                 "data": forged_data,
                 "payload_hash": canonical_sha256(forged_data),
             }
         )
-        inactive_index = history.index(inactive)
-        forged = MemoryEventStore()
-        await forged.append(
+        forged = memory_journal()
+        install_history(
+            forged,
             "forged-inactive-route-schedule",
-            -1,
-            tuple([*history[:inactive_index], forged_scheduled]),
+            [*history[:inactive_index], forged_scheduled],
         )
 
         with pytest.raises(DurableRunError) as error:
@@ -535,6 +621,7 @@ def test_durable_history_rejects_scheduling_an_inactive_route_branch() -> None:
                 run_id="forged-inactive-route-schedule",
                 implementation_id="router@1",
                 event_store=forged,
+                payload_protection=PROTECTION,
             )
         assert error.value.code is DurableRunErrorCode.INVALID_RUN_HISTORY
         assert "unselected route" in str(error.value)
@@ -583,6 +670,7 @@ def test_registered_foreign_conditions_preflight_durable_start_and_resume() -> N
             run_id="registered-loop-preflight",
             implementation_id="runtime@1",
             event_store=store,
+            payload_protection=PROTECTION,
             clock=fixed_clock,
         )
         assert started.status is RunStatus.FAILED
@@ -602,6 +690,7 @@ def test_registered_foreign_conditions_preflight_durable_start_and_resume() -> N
             run_id="registered-loop-preflight",
             implementation_id="runtime@1",
             event_store=store,
+            payload_protection=PROTECTION,
             clock=fixed_clock,
         )
         assert resumed == started
@@ -640,7 +729,7 @@ def test_durable_scheduled_order_preserves_interleaved_first_event_order() -> No
     )
 
     async def scenario() -> None:
-        store = MemoryEventStore()
+        store = memory_journal()
         a_started = asyncio.Event()
         release_a = asyncio.Event()
 
@@ -671,6 +760,7 @@ def test_durable_scheduled_order_preserves_interleaved_first_event_order() -> No
             run_id="durable-interleaving",
             implementation_id="interleaving@1",
             event_store=store,
+            payload_protection=PROTECTION,
             clock=fixed_clock,
         )
 
@@ -689,6 +779,7 @@ def test_durable_scheduled_order_preserves_interleaved_first_event_order() -> No
             run_id="durable-interleaving",
             implementation_id="interleaving@1",
             event_store=store,
+            payload_protection=PROTECTION,
             clock=fixed_clock,
         )
         assert resumed == result
@@ -703,7 +794,7 @@ def test_shared_resume_fixture_reuses_success_and_advances_open_attempt() -> Non
     compiled = compile_graph(fixture["graph"])
 
     async def scenario() -> None:
-        store = MemoryEventStore()
+        store = memory_journal()
 
         async def left(_: NodeContext) -> Any:
             return fixture["preCrash"]["succeeded"]["output"]
@@ -720,6 +811,7 @@ def test_shared_resume_fixture_reuses_success_and_advances_open_attempt() -> Non
                 run_id=fixture["runId"],
                 implementation_id=fixture["implementationId"],
                 event_store=store,
+                payload_protection=PROTECTION,
                 clock=fixed_clock,
             )
         pre_resume_count = len(await store.read(fixture["runId"]))
@@ -748,6 +840,7 @@ def test_shared_resume_fixture_reuses_success_and_advances_open_attempt() -> Non
             run_id=fixture["runId"],
             implementation_id=fixture["implementationId"],
             event_store=store,
+            payload_protection=PROTECTION,
             clock=fixed_clock,
         )
         assert calls == [
@@ -780,6 +873,7 @@ def test_shared_resume_fixture_reuses_success_and_advances_open_attempt() -> Non
             run_id=fixture["runId"],
             implementation_id=fixture["implementationId"],
             event_store=store,
+            payload_protection=PROTECTION,
             clock=fixed_clock,
         )
         assert terminal == result
@@ -790,7 +884,7 @@ def test_shared_resume_fixture_reuses_success_and_advances_open_attempt() -> Non
 
 def test_resume_rejects_implementation_graph_input_and_payload_identity() -> None:
     async def scenario() -> None:
-        store = MemoryEventStore()
+        store = memory_journal()
         await start_graph_run(
             graph(),
             {"seed": 1},
@@ -798,6 +892,7 @@ def test_resume_rejects_implementation_graph_input_and_payload_identity() -> Non
             run_id="identity",
             implementation_id="v1",
             event_store=store,
+            payload_protection=PROTECTION,
             clock=fixed_clock,
         )
         with pytest.raises(DurableRunError) as implementation:
@@ -806,6 +901,7 @@ def test_resume_rejects_implementation_graph_input_and_payload_identity() -> Non
                 run_id="identity",
                 implementation_id="v2",
                 event_store=store,
+                payload_protection=PROTECTION,
             )
         assert implementation.value.code is DurableRunErrorCode.IMPLEMENTATION_MISMATCH
 
@@ -825,31 +921,31 @@ def test_resume_rejects_implementation_graph_input_and_payload_identity() -> Non
                 run_id="identity",
                 implementation_id="v1",
                 event_store=store,
+                payload_protection=PROTECTION,
             )
         assert graph_error.value.code is DurableRunErrorCode.GRAPH_HASH_MISMATCH
 
         original = await store.read("identity")
-        tampered_store = MemoryEventStore()
+        tampered_store = memory_journal()
         data = dict(original[0].data)
-        data["inputHash"] = "0" * 64
-        tampered = original[0].model_copy(
-            update={"data": data, "payload_hash": canonical_sha256(data)}
-        )
-        await tampered_store.append("identity", -1, (tampered, *original[1:]))
+        data["inputMac"] = "0" * 64
+        tampered = resign(original[0], data)
+        install_history(tampered_store, "identity", (tampered, *original[1:]))
         with pytest.raises(DurableRunError) as input_error:
             await resume_graph_run(
                 graph(),
                 run_id="identity",
                 implementation_id="v1",
                 event_store=tampered_store,
+                payload_protection=PROTECTION,
             )
         assert input_error.value.code is DurableRunErrorCode.INPUT_HASH_MISMATCH
 
-        bad_hash_store = MemoryEventStore()
+        bad_hash_store = memory_journal()
         bad_hash = original[2].model_copy(update={"payload_hash": "f" * 64})
-        await bad_hash_store.append(
+        install_history(
+            bad_hash_store,
             "identity",
-            -1,
             (*original[:2], bad_hash, *original[3:]),
         )
         with pytest.raises(DurableRunError) as history_error:
@@ -858,6 +954,7 @@ def test_resume_rejects_implementation_graph_input_and_payload_identity() -> Non
                 run_id="identity",
                 implementation_id="v1",
                 event_store=bad_hash_store,
+                payload_protection=PROTECTION,
             )
         assert history_error.value.code is DurableRunErrorCode.INVALID_RUN_HISTORY
 
@@ -877,7 +974,7 @@ def test_undeclared_interrupted_side_effect_is_in_doubt_and_never_reinvoked() ->
     )
 
     async def scenario() -> None:
-        store = MemoryEventStore()
+        store = memory_journal()
         with pytest.raises(ProcessLost):
             await start_graph_run(
                 unsafe_graph,
@@ -886,6 +983,7 @@ def test_undeclared_interrupted_side_effect_is_in_doubt_and_never_reinvoked() ->
                 run_id="unsafe",
                 implementation_id="v1",
                 event_store=store,
+                payload_protection=PROTECTION,
                 clock=fixed_clock,
             )
         calls = 0
@@ -902,6 +1000,7 @@ def test_undeclared_interrupted_side_effect_is_in_doubt_and_never_reinvoked() ->
                 run_id="unsafe",
                 implementation_id="v1",
                 event_store=store,
+                payload_protection=PROTECTION,
                 clock=fixed_clock,
             )
         assert error.value.code is DurableRunErrorCode.IN_DOUBT_SIDE_EFFECT
@@ -914,6 +1013,7 @@ def test_undeclared_interrupted_side_effect_is_in_doubt_and_never_reinvoked() ->
                 run_id="unsafe",
                 implementation_id="v1",
                 event_store=store,
+                payload_protection=PROTECTION,
                 clock=fixed_clock,
             )
         assert repeated.value.code is DurableRunErrorCode.IN_DOUBT_SIDE_EFFECT
@@ -937,7 +1037,7 @@ def test_interrupted_idempotent_node_reuses_activity_key_on_retry() -> None:
     )
 
     async def scenario() -> None:
-        store = MemoryEventStore()
+        store = memory_journal()
         first_key: str | None = None
 
         def crashes(context: NodeContext) -> Any:
@@ -953,6 +1053,7 @@ def test_interrupted_idempotent_node_reuses_activity_key_on_retry() -> None:
                 run_id="idempotent",
                 implementation_id="v1",
                 event_store=store,
+                payload_protection=PROTECTION,
                 clock=fixed_clock,
             )
         second_key: str | None = None
@@ -969,6 +1070,7 @@ def test_interrupted_idempotent_node_reuses_activity_key_on_retry() -> None:
             run_id="idempotent",
             implementation_id="v1",
             event_store=store,
+            payload_protection=PROTECTION,
             clock=fixed_clock,
         )
         assert result.succeeded
@@ -979,7 +1081,7 @@ def test_interrupted_idempotent_node_reuses_activity_key_on_retry() -> None:
 
 def test_resigned_forged_terminal_output_is_invalid_history() -> None:
     async def scenario() -> None:
-        source = MemoryEventStore()
+        source = memory_journal()
         await start_graph_run(
             graph(),
             {"seed": 1},
@@ -987,17 +1089,29 @@ def test_resigned_forged_terminal_output_is_invalid_history() -> None:
             run_id="forged-terminal",
             implementation_id="v1",
             event_store=source,
+            payload_protection=PROTECTION,
             clock=fixed_clock,
         )
         history = list(await source.read("forged-terminal"))
         terminal = history[-1]
-        result = decode_durable_json(terminal.data["result"])
+        result = recover_occurrence(
+            PROTECTION,
+            event=terminal,
+            reference_field="resultRef",
+            semantic_context=run_result_context("forged-terminal", 1),
+        )
         assert isinstance(result, dict)
         result["output"] = {"result": "forged"}
-        terminal_data = {"result": encode_durable_json(result)}
-        history[-1] = resign(terminal, terminal_data)
-        forged = MemoryEventStore()
-        await forged.append("forged-terminal", -1, history)
+        history[-1] = reprotect(
+            PROTECTION,
+            event=terminal,
+            reference_field="resultRef",
+            mac_field="resultMac",
+            value=result,
+            semantic_context=run_result_context("forged-terminal", 1),
+        )
+        forged = memory_journal()
+        install_history(forged, "forged-terminal", history)
 
         with pytest.raises(DurableRunError) as error:
             await resume_graph_run(
@@ -1005,6 +1119,7 @@ def test_resigned_forged_terminal_output_is_invalid_history() -> None:
                 run_id="forged-terminal",
                 implementation_id="v1",
                 event_store=forged,
+                payload_protection=PROTECTION,
             )
         assert error.value.code is DurableRunErrorCode.INVALID_RUN_HISTORY
 
@@ -1018,7 +1133,7 @@ def test_resigned_forged_terminal_output_is_invalid_history() -> None:
 def test_resigned_forged_terminal_projection_is_invalid_history(field_name: str) -> None:
     async def scenario() -> None:
         run_id = f"forged-terminal-{field_name}"
-        source = MemoryEventStore()
+        source = memory_journal()
         await start_graph_run(
             graph(),
             {},
@@ -1026,11 +1141,17 @@ def test_resigned_forged_terminal_projection_is_invalid_history(field_name: str)
             run_id=run_id,
             implementation_id="v1",
             event_store=source,
+            payload_protection=PROTECTION,
             clock=fixed_clock,
         )
         history = list(await source.read(run_id))
         terminal = history[-1]
-        result = decode_durable_json(terminal.data["result"])
+        result = recover_occurrence(
+            PROTECTION,
+            event=terminal,
+            reference_field="resultRef",
+            semantic_context=run_result_context(run_id, 1),
+        )
         assert isinstance(result, dict)
         if field_name == "status":
             result["status"] = "failed"
@@ -1057,9 +1178,16 @@ def test_resigned_forged_terminal_projection_is_invalid_history(field_name: str)
             result["completionOrder"] = []
         else:
             result["maxObservedConcurrency"] = 2
-        history[-1] = resign(terminal, {"result": encode_durable_json(result)})
-        forged = MemoryEventStore()
-        await forged.append(run_id, -1, history)
+        history[-1] = reprotect(
+            PROTECTION,
+            event=terminal,
+            reference_field="resultRef",
+            mac_field="resultMac",
+            value=result,
+            semantic_context=run_result_context(run_id, 1),
+        )
+        forged = memory_journal()
+        install_history(forged, run_id, history)
 
         with pytest.raises(DurableRunError) as error:
             await resume_graph_run(
@@ -1067,6 +1195,7 @@ def test_resigned_forged_terminal_projection_is_invalid_history(field_name: str)
                 run_id=run_id,
                 implementation_id="v1",
                 event_store=forged,
+                payload_protection=PROTECTION,
             )
         assert error.value.code is DurableRunErrorCode.INVALID_RUN_HISTORY
 
@@ -1075,7 +1204,7 @@ def test_resigned_forged_terminal_projection_is_invalid_history(field_name: str)
 
 def test_self_consistent_forged_scheduled_input_is_invalid_history() -> None:
     async def scenario() -> None:
-        source = MemoryEventStore()
+        source = memory_journal()
         await start_graph_run(
             graph(),
             {"seed": 1},
@@ -1083,6 +1212,7 @@ def test_self_consistent_forged_scheduled_input_is_invalid_history() -> None:
             run_id="forged-input",
             implementation_id="v1",
             event_store=source,
+            payload_protection=PROTECTION,
             clock=fixed_clock,
         )
         history = list(await source.read("forged-input"))
@@ -1096,35 +1226,54 @@ def test_self_consistent_forged_scheduled_input_is_invalid_history() -> None:
             index for index, item in enumerate(history) if item.type == "NodeSucceeded"
         )
         forged_input = {"seed": 999}
-        input_hash = durable_json_hash(forged_input)
-        activity_key = durable_json_hash(
-            ["activity/v1alpha1", "forged-input", 1, "root", input_hash]
+        history[scheduled_index] = reprotect(
+            PROTECTION,
+            event=history[scheduled_index],
+            reference_field="inputRef",
+            mac_field="inputMac",
+            value=forged_input,
+            semantic_context=node_input_context("forged-input", 1, "root"),
+        )
+        input_mac = str(history[scheduled_index].data["inputMac"])
+        forged_activity = activity_key(
+            PROTECTION.identity_key("forged-input"),
+            run_id="forged-input",
+            graph_revision=1,
+            node_id="root",
+            input_mac=input_mac,
         )
         history[scheduled_index] = resign(
             history[scheduled_index],
-            {
-                "input": encode_durable_json(forged_input),
-                "inputHash": input_hash,
-                "activityKey": activity_key,
-                "sideEffects": "none",
-            },
+            {**dict(history[scheduled_index].data), "activityKey": forged_activity},
         )
         history[started_index] = resign(
             history[started_index],
-            {"inputHash": input_hash, "activityKey": activity_key},
+            {"inputMac": input_mac, "activityKey": forged_activity},
         )
         succeeded_data = dict(history[succeeded_index].data)
-        succeeded_data["inputHash"] = input_hash
+        succeeded_data["inputMac"] = input_mac
         history[succeeded_index] = resign(history[succeeded_index], succeeded_data)
         terminal = history[-1]
-        result = decode_durable_json(terminal.data["result"])
+        result = recover_occurrence(
+            PROTECTION,
+            event=terminal,
+            reference_field="resultRef",
+            semantic_context=run_result_context("forged-input", 1),
+        )
         assert isinstance(result, dict)
         nodes = result["nodes"]
         assert isinstance(nodes, list) and isinstance(nodes[0], dict)
         nodes[0]["input"] = forged_input
-        history[-1] = resign(terminal, {"result": encode_durable_json(result)})
-        forged = MemoryEventStore()
-        await forged.append("forged-input", -1, history)
+        history[-1] = reprotect(
+            PROTECTION,
+            event=terminal,
+            reference_field="resultRef",
+            mac_field="resultMac",
+            value=result,
+            semantic_context=run_result_context("forged-input", 1),
+        )
+        forged = memory_journal()
+        install_history(forged, "forged-input", history)
 
         with pytest.raises(DurableRunError) as error:
             await resume_graph_run(
@@ -1132,6 +1281,7 @@ def test_self_consistent_forged_scheduled_input_is_invalid_history() -> None:
                 run_id="forged-input",
                 implementation_id="v1",
                 event_store=forged,
+                payload_protection=PROTECTION,
             )
         assert error.value.code is DurableRunErrorCode.INVALID_RUN_HISTORY
 
@@ -1152,7 +1302,7 @@ def test_run_resumed_lists_must_match_folded_facts_without_overlap() -> None:
     )
 
     async def scenario() -> None:
-        source = MemoryEventStore()
+        source = memory_journal()
         with pytest.raises(ProcessLost):
             await start_graph_run(
                 retry_graph,
@@ -1161,6 +1311,7 @@ def test_run_resumed_lists_must_match_folded_facts_without_overlap() -> None:
                 run_id="forged-resume-lists",
                 implementation_id="v1",
                 event_store=source,
+                payload_protection=PROTECTION,
                 clock=fixed_clock,
             )
         await resume_graph_run(
@@ -1169,6 +1320,7 @@ def test_run_resumed_lists_must_match_folded_facts_without_overlap() -> None:
             run_id="forged-resume-lists",
             implementation_id="v1",
             event_store=source,
+            payload_protection=PROTECTION,
             clock=fixed_clock,
         )
         history = list(await source.read("forged-resume-lists"))
@@ -1179,8 +1331,8 @@ def test_run_resumed_lists_must_match_folded_facts_without_overlap() -> None:
             history[index],
             {"reusedNodeIds": ["root"], "interruptedNodeIds": ["root"]},
         )
-        forged = MemoryEventStore()
-        await forged.append("forged-resume-lists", -1, history)
+        forged = memory_journal()
+        install_history(forged, "forged-resume-lists", history)
 
         with pytest.raises(DurableRunError) as error:
             await resume_graph_run(
@@ -1188,6 +1340,7 @@ def test_run_resumed_lists_must_match_folded_facts_without_overlap() -> None:
                 run_id="forged-resume-lists",
                 implementation_id="v1",
                 event_store=forged,
+                payload_protection=PROTECTION,
             )
         assert error.value.code is DurableRunErrorCode.INVALID_RUN_HISTORY
 
@@ -1219,7 +1372,7 @@ def test_retry_beyond_node_or_global_attempt_budget_is_invalid_history(
     run_id = f"over-budget-{max_attempts}-{max_total_attempts}"
 
     async def scenario() -> None:
-        store = MemoryEventStore()
+        store = memory_journal()
         with pytest.raises(ProcessLost):
             await start_graph_run(
                 limited_graph,
@@ -1228,13 +1381,14 @@ def test_retry_beyond_node_or_global_attempt_budget_is_invalid_history(
                 run_id=run_id,
                 implementation_id="v1",
                 event_store=store,
+                payload_protection=PROTECTION,
                 clock=fixed_clock,
             )
         history = await store.read(run_id)
         version = history[-1].sequence
         scheduled = next(item for item in history if item.type == "NodeScheduled")
-        activity_key = str(scheduled.data["activityKey"])
-        input_hash = str(scheduled.data["inputHash"])
+        recorded_activity = str(scheduled.data["activityKey"])
+        input_mac = str(scheduled.data["inputMac"])
         failure = {
             "phase": "execute",
             "code": "NODE_EXECUTION_INTERRUPTED",
@@ -1257,7 +1411,7 @@ def test_retry_beyond_node_or_global_attempt_budget_is_invalid_history(
                 run_id=run_id,
                 sequence=version + 2,
                 event_type="NodeRetried",
-                data={"availableAt": FIXED_TIME, "activityKey": activity_key},
+                data={"availableAt": FIXED_TIME, "activityKey": recorded_activity},
                 node_id="root",
                 attempt=2,
             ),
@@ -1265,12 +1419,14 @@ def test_retry_beyond_node_or_global_attempt_budget_is_invalid_history(
                 run_id=run_id,
                 sequence=version + 3,
                 event_type="NodeScheduled",
-                data={
-                    "input": scheduled.data["input"],
-                    "inputHash": input_hash,
-                    "activityKey": activity_key,
-                    "sideEffects": "none",
-                },
+                data=protected_scheduled_data(
+                    run_id,
+                    "root",
+                    {},
+                    sequence=version + 3,
+                    attempt=2,
+                    event_id=f"forged:{version + 3}",
+                ),
                 node_id="root",
                 attempt=2,
             ),
@@ -1278,12 +1434,12 @@ def test_retry_beyond_node_or_global_attempt_budget_is_invalid_history(
                 run_id=run_id,
                 sequence=version + 4,
                 event_type="NodeStarted",
-                data={"inputHash": input_hash, "activityKey": activity_key},
+                data={"inputMac": input_mac, "activityKey": recorded_activity},
                 node_id="root",
                 attempt=2,
             ),
         )
-        await store.append(run_id, version, suffix)
+        install_history(store, run_id, (*history, *suffix))
 
         with pytest.raises(DurableRunError) as error:
             await resume_graph_run(
@@ -1291,32 +1447,34 @@ def test_retry_beyond_node_or_global_attempt_budget_is_invalid_history(
                 run_id=run_id,
                 implementation_id="v1",
                 event_store=store,
+                payload_protection=PROTECTION,
             )
         assert error.value.code is DurableRunErrorCode.INVALID_RUN_HISTORY
 
     asyncio.run(scenario())
 
 
-class ConflictStore:
-    def __init__(self, delegate: MemoryEventStore) -> None:
-        self.delegate = delegate
+class ConflictStore(GuardedMemoryEventStore):
+    """A guarded store that always loses the compare-and-swap comparison."""
 
-    async def read(self, run_id: str, from_sequence: int = 0) -> tuple[GraphEvent, ...]:
-        return await self.delegate.read(run_id, from_sequence)
+    def __init__(self, source: GuardedMemoryEventStore) -> None:
+        super().__init__()
+        for run_id, stream in source._streams.items():
+            install_history(self, run_id, stream)
 
     async def append(
         self,
         run_id: str,
         expected_version: int,
-        values: Sequence[GraphEvent],
+        prepared: Sequence[PreparedSinkWrite],
     ) -> int:
-        actual = len(await self.delegate.read(run_id)) - 1
+        actual = len(await self.read(run_id)) - 1
         raise VersionConflictError(run_id, expected_version, actual + 1)
 
 
 def test_resume_cas_conflict_invokes_no_executor() -> None:
     async def scenario() -> None:
-        store = MemoryEventStore()
+        store = memory_journal()
         with pytest.raises(ProcessLost):
             await start_graph_run(
                 graph(
@@ -1335,6 +1493,7 @@ def test_resume_cas_conflict_invokes_no_executor() -> None:
                 run_id="conflict",
                 implementation_id="v1",
                 event_store=store,
+                payload_protection=PROTECTION,
                 clock=fixed_clock,
             )
         calls = 0
@@ -1362,6 +1521,7 @@ def test_resume_cas_conflict_invokes_no_executor() -> None:
                 run_id="conflict",
                 implementation_id="v1",
                 event_store=ConflictStore(store),
+                payload_protection=PROTECTION,
                 clock=fixed_clock,
             )
         assert error.value.code is DurableRunErrorCode.RESUME_CONFLICT
@@ -1395,6 +1555,7 @@ def test_durable_entrypoints_recompile_a_detached_graph_before_store_access() ->
                 run_id="unsafe-start",
                 implementation_id="v1",
                 event_store=store,
+                payload_protection=PROTECTION,
             )
         with pytest.raises(GraphCompileError):
             await resume_graph_run(
@@ -1402,6 +1563,7 @@ def test_durable_entrypoints_recompile_a_detached_graph_before_store_access() ->
                 run_id="unsafe-resume",
                 implementation_id="v1",
                 event_store=store,
+                payload_protection=PROTECTION,
             )
 
         assert store.read_calls == 0
@@ -1443,7 +1605,7 @@ def test_mutating_the_original_compiled_graph_does_not_reach_later_handlers() ->
     )
 
     async def scenario() -> None:
-        store = MemoryEventStore()
+        store = memory_journal()
 
         def mutate_original(_: NodeContext) -> Any:
             original_config = compiled.spec.nodes[1].config
@@ -1465,6 +1627,7 @@ def test_mutating_the_original_compiled_graph_does_not_reach_later_handlers() ->
             run_id="snapshot-isolation",
             implementation_id="v1",
             event_store=store,
+            payload_protection=PROTECTION,
             clock=fixed_clock,
         )
 
@@ -1486,7 +1649,7 @@ def test_resume_recomputes_graph_hash_after_nested_graph_mutation() -> None:
                 "sideEffects": "none",
             }
         )
-        store = MemoryEventStore()
+        store = memory_journal()
         await start_graph_run(
             compiled,
             {},
@@ -1494,6 +1657,7 @@ def test_resume_recomputes_graph_hash_after_nested_graph_mutation() -> None:
             run_id="mutated-hash",
             implementation_id="v1",
             event_store=store,
+            payload_protection=PROTECTION,
             clock=fixed_clock,
         )
         config = compiled.spec.nodes[0].config
@@ -1506,6 +1670,7 @@ def test_resume_recomputes_graph_hash_after_nested_graph_mutation() -> None:
                 run_id="mutated-hash",
                 implementation_id="v1",
                 event_store=store,
+                payload_protection=PROTECTION,
             )
 
         assert error.value.code is DurableRunErrorCode.GRAPH_HASH_MISMATCH
@@ -1534,7 +1699,7 @@ def test_retry_available_at_requires_strict_real_rfc3339_before_append(
 
     async def scenario() -> None:
         run_id = "bad-time-date" if available_at.endswith("Z") else "bad-time-offset"
-        source = MemoryEventStore()
+        source = memory_journal()
         calls = 0
 
         def flaky(_: NodeContext) -> Any:
@@ -1551,6 +1716,7 @@ def test_retry_available_at_requires_strict_real_rfc3339_before_append(
             run_id=run_id,
             implementation_id="v1",
             event_store=source,
+            payload_protection=PROTECTION,
             clock=fixed_clock,
         )
         history = list(await source.read(run_id))
@@ -1560,8 +1726,8 @@ def test_retry_available_at_requires_strict_real_rfc3339_before_append(
         retry_data = dict(history[retry_index].data)
         retry_data["availableAt"] = available_at
         history[retry_index] = resign(history[retry_index], retry_data)
-        forged = MemoryEventStore()
-        await forged.append(run_id, -1, history)
+        forged = memory_journal()
+        install_history(forged, run_id, history)
         tracked = TrackingStore(forged)
 
         with pytest.raises(DurableRunError) as error:
@@ -1570,6 +1736,7 @@ def test_retry_available_at_requires_strict_real_rfc3339_before_append(
                 run_id=run_id,
                 implementation_id="v1",
                 event_store=tracked,
+                payload_protection=PROTECTION,
             )
 
         assert error.value.code is DurableRunErrorCode.INVALID_RUN_HISTORY
@@ -1585,7 +1752,7 @@ def test_terminal_node_outcomes_reject_resigned_semantic_contradictions(
 ) -> None:
     async def scenario() -> None:
         run_id = f"terminal-semantics-{mutation}"
-        source = MemoryEventStore()
+        source = memory_journal()
         await start_graph_run(
             graph(),
             {},
@@ -1593,11 +1760,17 @@ def test_terminal_node_outcomes_reject_resigned_semantic_contradictions(
             run_id=run_id,
             implementation_id="v1",
             event_store=source,
+            payload_protection=PROTECTION,
             clock=fixed_clock,
         )
         history = list(await source.read(run_id))
         terminal = history[-1]
-        result = decode_durable_json(terminal.data["result"])
+        result = recover_occurrence(
+            PROTECTION,
+            event=terminal,
+            reference_field="resultRef",
+            semantic_context=run_result_context(run_id, 1),
+        )
         assert isinstance(result, dict)
         nodes = result["nodes"]
         assert isinstance(nodes, list) and isinstance(nodes[0], dict)
@@ -1611,9 +1784,16 @@ def test_terminal_node_outcomes_reject_resigned_semantic_contradictions(
             failure["phase"] = "output"
         else:
             nodes[0]["status"] = "skipped"
-        history[-1] = resign(terminal, {"result": encode_durable_json(result)})
-        forged = MemoryEventStore()
-        await forged.append(run_id, -1, history)
+        history[-1] = reprotect(
+            PROTECTION,
+            event=terminal,
+            reference_field="resultRef",
+            mac_field="resultMac",
+            value=result,
+            semantic_context=run_result_context(run_id, 1),
+        )
+        forged = memory_journal()
+        install_history(forged, run_id, history)
 
         with pytest.raises(DurableRunError) as error:
             await resume_graph_run(
@@ -1621,6 +1801,7 @@ def test_terminal_node_outcomes_reject_resigned_semantic_contradictions(
                 run_id=run_id,
                 implementation_id="v1",
                 event_store=forged,
+                payload_protection=PROTECTION,
             )
 
         assert error.value.code is DurableRunErrorCode.INVALID_RUN_HISTORY
@@ -1643,7 +1824,7 @@ def test_safe_interrupted_attempt_cannot_be_forged_terminal_while_budget_remains
 
     async def scenario() -> None:
         run_id = "forged-terminal-interruption"
-        store = MemoryEventStore()
+        store = memory_journal()
         with pytest.raises(ProcessLost):
             await start_graph_run(
                 retry_graph,
@@ -1652,6 +1833,7 @@ def test_safe_interrupted_attempt_cannot_be_forged_terminal_while_budget_remains
                 run_id=run_id,
                 implementation_id="v1",
                 event_store=store,
+                payload_protection=PROTECTION,
                 clock=fixed_clock,
             )
         history = await store.read(run_id)
@@ -1683,10 +1865,24 @@ def test_safe_interrupted_attempt_cannot_be_forged_terminal_while_budget_remains
             "maxObservedConcurrency": 1,
             "totalAttempts": 1,
         }
-        await store.append(
+        forged_terminal = forged_event(
+            run_id=run_id,
+            sequence=len(history) + 1,
+            event_type="RunFailed",
+            data={"status": "failed"},
+        )
+        terminal_document, terminal_mac = protect_occurrence(
+            PROTECTION,
+            event=forged_terminal,
+            field_path="/data/resultRef",
+            value=terminal_result,
+            semantic_context=run_result_context(run_id, 1),
+        )
+        install_history(
+            store,
             run_id,
-            history[-1].sequence,
             (
+                *history,
                 forged_event(
                     run_id=run_id,
                     sequence=len(history),
@@ -1695,11 +1891,13 @@ def test_safe_interrupted_attempt_cannot_be_forged_terminal_while_budget_remains
                     node_id="root",
                     attempt=1,
                 ),
-                forged_event(
-                    run_id=run_id,
-                    sequence=len(history) + 1,
-                    event_type="RunFailed",
-                    data={"result": encode_durable_json(terminal_result)},
+                resign(
+                    forged_terminal,
+                    {
+                        "status": "failed",
+                        "resultRef": terminal_document,
+                        "resultMac": terminal_mac,
+                    },
                 ),
             ),
         )
@@ -1710,6 +1908,7 @@ def test_safe_interrupted_attempt_cannot_be_forged_terminal_while_budget_remains
                 run_id=run_id,
                 implementation_id="v1",
                 event_store=store,
+                payload_protection=PROTECTION,
             )
 
         assert error.value.code is DurableRunErrorCode.INVALID_RUN_HISTORY
@@ -1731,7 +1930,7 @@ def test_safe_interrupted_attempt_may_be_terminal_only_after_retry_budget_exhaus
     )
 
     async def scenario() -> None:
-        store = MemoryEventStore()
+        store = memory_journal()
         with pytest.raises(ProcessLost):
             await start_graph_run(
                 exhausted_graph,
@@ -1740,6 +1939,7 @@ def test_safe_interrupted_attempt_may_be_terminal_only_after_retry_budget_exhaus
                 run_id="exhausted-interruption",
                 implementation_id="v1",
                 event_store=store,
+                payload_protection=PROTECTION,
                 clock=fixed_clock,
             )
 
@@ -1748,6 +1948,7 @@ def test_safe_interrupted_attempt_may_be_terminal_only_after_retry_budget_exhaus
             run_id="exhausted-interruption",
             implementation_id="v1",
             event_store=store,
+            payload_protection=PROTECTION,
             clock=fixed_clock,
         )
         assert result.status is RunStatus.FAILED
@@ -1761,6 +1962,7 @@ def test_safe_interrupted_attempt_may_be_terminal_only_after_retry_budget_exhaus
                 run_id="exhausted-interruption",
                 implementation_id="v1",
                 event_store=store,
+                payload_protection=PROTECTION,
             )
             == result
         )
@@ -1783,7 +1985,7 @@ def test_global_budget_does_not_emit_an_unfunded_single_node_retry() -> None:
     )
 
     async def scenario() -> None:
-        store = MemoryEventStore()
+        store = memory_journal()
         result = await start_graph_run(
             limited_graph,
             {},
@@ -1791,6 +1993,7 @@ def test_global_budget_does_not_emit_an_unfunded_single_node_retry() -> None:
             run_id="single-reservation",
             implementation_id="v1",
             event_store=store,
+            payload_protection=PROTECTION,
             clock=fixed_clock,
         )
         history = await store.read("single-reservation")
@@ -1806,6 +2009,7 @@ def test_global_budget_does_not_emit_an_unfunded_single_node_retry() -> None:
                 run_id="single-reservation",
                 implementation_id="v1",
                 event_store=store,
+                payload_protection=PROTECTION,
             )
             == result
         )
@@ -1841,7 +2045,7 @@ def test_concurrent_failures_compete_for_one_global_retry_reservation() -> None:
     )
 
     async def scenario() -> None:
-        store = MemoryEventStore()
+        store = memory_journal()
         both_started = asyncio.Event()
         first_attempts = 0
 
@@ -1861,6 +2065,7 @@ def test_concurrent_failures_compete_for_one_global_retry_reservation() -> None:
             run_id="reservation-race",
             implementation_id="v1",
             event_store=store,
+            payload_protection=PROTECTION,
             clock=fixed_clock,
         )
         history = await store.read("reservation-race")
@@ -1882,6 +2087,7 @@ def test_concurrent_failures_compete_for_one_global_retry_reservation() -> None:
                 run_id="reservation-race",
                 implementation_id="v1",
                 event_store=store,
+                payload_protection=PROTECTION,
             )
             == result
         )
@@ -1921,9 +2127,54 @@ def test_persisted_retry_reservation_is_counted_before_new_attempt_admission() -
 
     async def scenario() -> None:
         run_id = "persisted-reservation"
-        store = MemoryEventStore()
-        input_hash = durable_json_hash({})
-        activity_key = durable_json_hash(["activity/v1alpha1", run_id, 1, "a", input_hash])
+        store = memory_journal()
+        scheduled_data = protected_scheduled_data(
+            run_id, "a", {}, sequence=2, attempt=1, event_id="forged:2"
+        )
+        input_mac = str(scheduled_data["inputMac"])
+        recorded_activity = str(scheduled_data["activityKey"])
+        settled_result = {
+            "nodeId": "b",
+            "sequence": 1,
+            "status": "failed",
+            "attempts": 0,
+            "input": {},
+            "failure": {
+                "phase": "execute",
+                "code": "ATTEMPT_BUDGET_EXHAUSTED",
+                "message": "foreign scheduler budget wording",
+                "nodeId": "b",
+                "attempt": 0,
+                "retryable": False,
+            },
+        }
+        settled_placeholder = forged_event(
+            run_id=run_id,
+            sequence=6,
+            event_type="NodeSettledWithoutAttempt",
+            data={},
+            node_id="b",
+        )
+        settled_document, settled_mac = protect_occurrence(
+            PROTECTION,
+            event=settled_placeholder,
+            field_path="/data/resultRef",
+            value=settled_result,
+            semantic_context=node_result_context(run_id, 1, "b"),
+        )
+        created_placeholder = forged_event(
+            run_id=run_id,
+            sequence=0,
+            event_type="RunCreated",
+            data={},
+        )
+        created_document, created_mac = protect_occurrence(
+            PROTECTION,
+            event=created_placeholder,
+            field_path="/data/inputRef",
+            value={},
+            semantic_context=graph_input_context(run_id, 1),
+        )
         failure = {
             "phase": "execute",
             "code": "NODE_EXECUTION_FAILED",
@@ -1937,11 +2188,14 @@ def test_persisted_retry_reservation_is_counted_before_new_attempt_admission() -
             (
                 "RunCreated",
                 {
-                    "contractVersion": "scheduler-recovery/v1alpha1",
+                    "contractVersion": "scheduler-recovery/v1alpha2",
                     "graphHash": compiled.graph_hash,
                     "implementationHash": durable_json_hash("v1"),
-                    "input": encode_durable_json({}),
-                    "inputHash": input_hash,
+                    "capturePolicyHash": POLICY_HASH,
+                    "protectedStoreContract": "protected-payload-store/v1alpha1",
+                    "keyRefHash": PROTECTION.key_ref_digest,
+                    "inputRef": created_document,
+                    "inputMac": created_mac,
                     "maxTotalAttempts": 2,
                 },
                 None,
@@ -1950,20 +2204,15 @@ def test_persisted_retry_reservation_is_counted_before_new_attempt_admission() -
             ("RunStarted", {}, None, None),
             (
                 "NodeScheduled",
-                {
-                    "input": encode_durable_json({}),
-                    "inputHash": input_hash,
-                    "activityKey": activity_key,
-                    "sideEffects": "none",
-                },
+                scheduled_data,
                 "a",
                 1,
             ),
             (
                 "NodeStarted",
                 {
-                    "inputHash": input_hash,
-                    "activityKey": activity_key,
+                    "inputMac": input_mac,
+                    "activityKey": recorded_activity,
                 },
                 "a",
                 1,
@@ -1981,40 +2230,22 @@ def test_persisted_retry_reservation_is_counted_before_new_attempt_admission() -
                 "NodeRetried",
                 {
                     "availableAt": FIXED_TIME,
-                    "activityKey": activity_key,
+                    "activityKey": recorded_activity,
                 },
                 "a",
                 2,
             ),
             (
                 "NodeSettledWithoutAttempt",
-                {
-                    "result": encode_durable_json(
-                        {
-                            "nodeId": "b",
-                            "sequence": 1,
-                            "status": "failed",
-                            "attempts": 0,
-                            "input": {},
-                            "failure": {
-                                "phase": "execute",
-                                "code": "ATTEMPT_BUDGET_EXHAUSTED",
-                                "message": "foreign scheduler budget wording",
-                                "nodeId": "b",
-                                "attempt": 0,
-                                "retryable": False,
-                            },
-                        }
-                    )
-                },
+                {"resultRef": settled_document, "resultMac": settled_mac},
                 "b",
                 None,
             ),
         )
-        await store.append(
+        install_history(
+            store,
             run_id,
-            -1,
-            tuple(
+            [
                 forged_event(
                     run_id=run_id,
                     sequence=index,
@@ -2024,7 +2255,7 @@ def test_persisted_retry_reservation_is_counted_before_new_attempt_admission() -
                     attempt=attempt,
                 )
                 for index, (event_type, data, node_id, attempt) in enumerate(documents)
-            ),
+            ],
         )
         b_calls = 0
 
@@ -2039,6 +2270,7 @@ def test_persisted_retry_reservation_is_counted_before_new_attempt_admission() -
             run_id=run_id,
             implementation_id="v1",
             event_store=store,
+            payload_protection=PROTECTION,
             clock=fixed_clock,
         )
 
@@ -2055,6 +2287,7 @@ def test_persisted_retry_reservation_is_counted_before_new_attempt_admission() -
                 run_id=run_id,
                 implementation_id="v1",
                 event_store=store,
+                payload_protection=PROTECTION,
             )
             == result
         )
@@ -2089,7 +2322,7 @@ def test_budget_rejection_does_not_inflate_durable_concurrency() -> None:
     )
 
     async def scenario() -> None:
-        store = MemoryEventStore()
+        store = memory_journal()
         calls: list[str] = []
 
         async def execute(context: NodeContext) -> Any:
@@ -2104,6 +2337,7 @@ def test_budget_rejection_does_not_inflate_durable_concurrency() -> None:
             run_id="budget-concurrency",
             implementation_id="v1",
             event_store=store,
+            payload_protection=PROTECTION,
             clock=fixed_clock,
         )
         history = await store.read("budget-concurrency")
@@ -2118,6 +2352,7 @@ def test_budget_rejection_does_not_inflate_durable_concurrency() -> None:
                 run_id="budget-concurrency",
                 implementation_id="v1",
                 event_store=store,
+                payload_protection=PROTECTION,
             )
             == result
         )
@@ -2152,7 +2387,7 @@ def test_failure_is_committed_before_a_single_slot_admits_the_next_node() -> Non
     )
 
     async def scenario() -> None:
-        store = MemoryEventStore()
+        store = memory_journal()
         result = await start_graph_run(
             compiled,
             {},
@@ -2163,6 +2398,7 @@ def test_failure_is_committed_before_a_single_slot_admits_the_next_node() -> Non
             run_id="failure-slot-order",
             implementation_id="v1",
             event_store=store,
+            payload_protection=PROTECTION,
             clock=fixed_clock,
         )
         history = await store.read("failure-slot-order")
@@ -2185,6 +2421,7 @@ def test_failure_is_committed_before_a_single_slot_admits_the_next_node() -> Non
                 run_id="failure-slot-order",
                 implementation_id="v1",
                 event_store=store,
+                payload_protection=PROTECTION,
             )
             == result
         )
@@ -2193,18 +2430,16 @@ def test_failure_is_committed_before_a_single_slot_admits_the_next_node() -> Non
 
 
 def test_durable_journal_latches_the_first_concurrent_store_failure() -> None:
-    class FailingStore:
+    class FailingStore(GuardedMemoryEventStore):
         def __init__(self) -> None:
+            super().__init__()
             self.append_calls = 0
-
-        async def read(self, run_id: str, from_sequence: int = 0) -> tuple[GraphEvent, ...]:
-            return ()
 
         async def append(
             self,
             run_id: str,
             expected_version: int,
-            values: Sequence[GraphEvent],
+            prepared: Sequence[PreparedSinkWrite],
         ) -> int:
             self.append_calls += 1
             await asyncio.sleep(0)
@@ -2216,6 +2451,7 @@ def test_durable_journal_latches_the_first_concurrent_store_failure() -> None:
             graph=graph(),
             run_id="fatal-latch",
             store=store,
+            protection=PROTECTION,
             version=-1,
             clock=fixed_clock,
             event_id_factory=lambda run_id, sequence: f"{run_id}:{sequence}",
@@ -2262,26 +2498,29 @@ def test_durable_journal_failure_does_not_wait_for_handler_ignoring_cancellation
         }
     )
 
-    class FailFirstSuccessStore:
-        def __init__(self) -> None:
-            self.delegate = MemoryEventStore()
+    class FailFirstSuccessStore(GuardedMemoryEventStore):
+        """Fails the append that would commit node `a`'s success.
 
-        async def read(
-            self,
-            run_id: str,
-            from_sequence: int = 0,
-        ) -> tuple[GraphEvent, ...]:
-            return await self.delegate.read(run_id, from_sequence)
+        A prepared write is a capability, not a document, so this store cannot
+        read the event type out of the batch. It identifies the success commit
+        by the committed prefix instead: `a`'s `NodeSucceeded` is the first
+        append after `a` has started and no node has succeeded yet.
+        """
 
         async def append(
             self,
             run_id: str,
             expected_version: int,
-            values: Sequence[GraphEvent],
+            prepared: Sequence[PreparedSinkWrite],
         ) -> int:
-            if any(event.type == "NodeSucceeded" and event.node_id == "a" for event in values):
+            committed = await self.read(run_id)
+            started = {
+                event.node_id for event in committed if event.type == "NodeStarted"
+            }
+            succeeded = any(event.type == "NodeSucceeded" for event in committed)
+            if "a" in started and not succeeded and len(prepared) == 1:
                 raise RuntimeError("store unavailable")
-            return await self.delegate.append(run_id, expected_version, values)
+            return await super().append(run_id, expected_version, prepared)
 
     async def scenario() -> None:
         loop = asyncio.get_running_loop()
@@ -2317,6 +2556,7 @@ def test_durable_journal_failure_does_not_wait_for_handler_ignoring_cancellation
                     run_id="journal-failure-cancellation",
                     implementation_id="v1",
                     event_store=FailFirstSuccessStore(),
+                    payload_protection=PROTECTION,
                     clock=fixed_clock,
                 )
             )
@@ -2338,18 +2578,16 @@ def test_durable_journal_failure_does_not_wait_for_handler_ignoring_cancellation
 
 
 def test_durable_journal_rejects_and_latches_an_inexact_returned_version() -> None:
-    class WrongVersionStore:
+    class WrongVersionStore(GuardedMemoryEventStore):
         def __init__(self) -> None:
+            super().__init__()
             self.append_calls = 0
-
-        async def read(self, run_id: str, from_sequence: int = 0) -> tuple[GraphEvent, ...]:
-            return ()
 
         async def append(
             self,
             run_id: str,
             expected_version: int,
-            values: Sequence[GraphEvent],
+            prepared: Sequence[PreparedSinkWrite],
         ) -> int:
             self.append_calls += 1
             return expected_version
@@ -2360,6 +2598,7 @@ def test_durable_journal_rejects_and_latches_an_inexact_returned_version() -> No
             graph=graph(),
             run_id="wrong-version",
             store=store,
+            protection=PROTECTION,
             version=-1,
             clock=fixed_clock,
             event_id_factory=lambda run_id, sequence: f"{run_id}:{sequence}",
@@ -2379,13 +2618,14 @@ def test_durable_journal_rejects_and_latches_an_inexact_returned_version() -> No
 
 def test_missing_executor_commits_explicit_outcome_and_terminal_resume_is_read_only() -> None:
     async def scenario() -> None:
-        store = MemoryEventStore()
+        store = memory_journal()
         result = await start_graph_run(
             graph(),
             {"realNull": None},
             run_id="missing-executor-outcome",
             implementation_id="v1",
             event_store=store,
+            payload_protection=PROTECTION,
             clock=fixed_clock,
         )
         history = await store.read("missing-executor-outcome")
@@ -2396,7 +2636,12 @@ def test_missing_executor_commits_explicit_outcome_and_terminal_resume_is_read_o
             "NodeSettledWithoutAttempt",
             "RunFailed",
         ]
-        settled = decode_durable_json(history[2].data["result"])
+        settled = recover_occurrence(
+            PROTECTION,
+            event=history[2],
+            reference_field="resultRef",
+            semantic_context=node_result_context("missing-executor-outcome", 1, "root"),
+        )
         assert isinstance(settled, dict)
         assert settled["attempts"] == 0
         assert settled["input"] == {"realNull": None}
@@ -2416,6 +2661,7 @@ def test_missing_executor_commits_explicit_outcome_and_terminal_resume_is_read_o
             run_id="missing-executor-outcome",
             implementation_id="v1",
             event_store=tracked,
+            payload_protection=PROTECTION,
         )
         assert resumed == result
         assert calls == 0
@@ -2450,29 +2696,36 @@ def test_node_settlement_commits_before_a_failed_descendant_is_released() -> Non
         }
     )
 
-    class GateStore:
+    class GateStore(GuardedMemoryEventStore):
+        """Holds the append that would commit `root`'s settlement.
+
+        The batch is an opaque capability, so the gate is chosen by the
+        committed prefix: `RunCreated`/`RunStarted` is exactly the point before
+        `root` settles in this executor-free graph.
+        """
+
         def __init__(self) -> None:
-            self.delegate = MemoryEventStore()
+            super().__init__()
             self.root_settle_entered = asyncio.Event()
             self.release_root_settle = asyncio.Event()
-            self.appended_node_ids: list[str | None] = []
-
-        async def read(self, run_id: str, from_sequence: int = 0) -> tuple[GraphEvent, ...]:
-            return await self.delegate.read(run_id, from_sequence)
+            self.settled_node_ids: list[str | None] = []
 
         async def append(
             self,
             run_id: str,
             expected_version: int,
-            values: Sequence[GraphEvent],
+            prepared: Sequence[PreparedSinkWrite],
         ) -> int:
-            first = values[0]
-            if first.type == "NodeSettledWithoutAttempt":
-                self.appended_node_ids.append(first.node_id)
-            if first.type == "NodeSettledWithoutAttempt" and first.node_id == "root":
+            if expected_version == 1:
                 self.root_settle_entered.set()
                 await self.release_root_settle.wait()
-            return await self.delegate.append(run_id, expected_version, values)
+            version = await super().append(run_id, expected_version, prepared)
+            self.settled_node_ids.extend(
+                event.node_id
+                for event in await self.read(run_id, expected_version + 1)
+                if event.type == "NodeSettledWithoutAttempt"
+            )
+            return version
 
     async def scenario() -> None:
         store = GateStore()
@@ -2483,18 +2736,19 @@ def test_node_settlement_commits_before_a_failed_descendant_is_released() -> Non
                 run_id="settle-before-release",
                 implementation_id="v1",
                 event_store=store,
+                payload_protection=PROTECTION,
                 clock=fixed_clock,
             )
         )
         await store.root_settle_entered.wait()
-        assert store.appended_node_ids == ["root"]
-        assert [event.type for event in await store.delegate.read("settle-before-release")] == [
+        assert store.settled_node_ids == []
+        assert [event.type for event in await store.read("settle-before-release")] == [
             "RunCreated",
             "RunStarted",
         ]
         store.release_root_settle.set()
         result = await task
-        history = await store.delegate.read("settle-before-release")
+        history = await store.read("settle-before-release")
         outcomes = [event.node_id for event in history if event.type == "NodeSettledWithoutAttempt"]
         assert outcomes == ["root", "child"]
         child_event = next(
@@ -2502,7 +2756,13 @@ def test_node_settlement_commits_before_a_failed_descendant_is_released() -> Non
             for event in history
             if event.type == "NodeSettledWithoutAttempt" and event.node_id == "child"
         )
-        child_document = decode_durable_json(child_event.data["result"])
+        assert store.settled_node_ids == ["root", "child"]
+        child_document = recover_occurrence(
+            PROTECTION,
+            event=child_event,
+            reference_field="resultRef",
+            semantic_context=node_result_context("settle-before-release", 1, "child"),
+        )
         assert isinstance(child_document, dict) and "input" not in child_document
         assert result.nodes["child"].attempts == 0
 
@@ -2523,7 +2783,7 @@ def test_retry_delay_cancellation_settles_with_the_preserved_attempt_offset() ->
     )
 
     async def scenario() -> None:
-        store = MemoryEventStore()
+        store = memory_journal()
         cancel = asyncio.Event()
 
         def fail_then_cancel(_: NodeContext) -> Any:
@@ -2537,6 +2797,7 @@ def test_retry_delay_cancellation_settles_with_the_preserved_attempt_offset() ->
             run_id="retry-delay-cancel",
             implementation_id="v1",
             event_store=store,
+            payload_protection=PROTECTION,
             cancel_event=cancel,
             clock=fixed_clock,
         )
@@ -2544,7 +2805,12 @@ def test_retry_delay_cancellation_settles_with_the_preserved_attempt_offset() ->
         settled_event = next(
             event for event in history if event.type == "NodeSettledWithoutAttempt"
         )
-        settled = decode_durable_json(settled_event.data["result"])
+        settled = recover_occurrence(
+            PROTECTION,
+            event=settled_event,
+            reference_field="resultRef",
+            semantic_context=node_result_context("retry-delay-cancel", 1, "root"),
+        )
         assert isinstance(settled, dict)
         assert settled["attempts"] == 1
         assert "input" in settled and settled["input"] is None
@@ -2557,6 +2823,7 @@ def test_retry_delay_cancellation_settles_with_the_preserved_attempt_offset() ->
                 run_id="retry-delay-cancel",
                 implementation_id="v1",
                 event_store=store,
+                payload_protection=PROTECTION,
             )
             == result
         )
@@ -2565,27 +2832,23 @@ def test_retry_delay_cancellation_settles_with_the_preserved_attempt_offset() ->
 
 
 def test_start_and_resume_snapshot_handler_registries_before_store_io() -> None:
-    class BlockingReadStore:
-        def __init__(self, delegate: MemoryEventStore) -> None:
-            self.delegate = delegate
+    class BlockingReadStore(GuardedMemoryEventStore):
+        def __init__(self, source: GuardedMemoryEventStore) -> None:
+            super().__init__()
+            for run_id, stream in source._streams.items():
+                install_history(self, run_id, stream)
             self.read_entered = asyncio.Event()
             self.release_read = asyncio.Event()
 
-        async def read(self, run_id: str, from_sequence: int = 0) -> tuple[GraphEvent, ...]:
+        async def read(
+            self, run_id: str, from_sequence: int = 0
+        ) -> tuple[ProtectedGraphEvent, ...]:
             self.read_entered.set()
             await self.release_read.wait()
-            return await self.delegate.read(run_id, from_sequence)
-
-        async def append(
-            self,
-            run_id: str,
-            expected_version: int,
-            values: Sequence[GraphEvent],
-        ) -> int:
-            return await self.delegate.append(run_id, expected_version, values)
+            return await super().read(run_id, from_sequence)
 
     async def scenario() -> None:
-        start_delegate = MemoryEventStore()
+        start_delegate = memory_journal()
         start_store = BlockingReadStore(start_delegate)
         start_calls: list[str] = []
         registry = {"root": lambda _: start_calls.append("original") or "original"}
@@ -2597,6 +2860,7 @@ def test_start_and_resume_snapshot_handler_registries_before_store_io() -> None:
                 run_id="handler-snapshot-start",
                 implementation_id="v1",
                 event_store=start_store,
+                payload_protection=PROTECTION,
                 clock=fixed_clock,
             )
         )
@@ -2618,7 +2882,7 @@ def test_start_and_resume_snapshot_handler_registries_before_store_io() -> None:
                 "sideEffects": "none",
             }
         )
-        resume_delegate = MemoryEventStore()
+        resume_delegate = memory_journal()
         with pytest.raises(ProcessLost):
             await start_graph_run(
                 retry_graph,
@@ -2627,6 +2891,7 @@ def test_start_and_resume_snapshot_handler_registries_before_store_io() -> None:
                 run_id="handler-snapshot-resume",
                 implementation_id="v1",
                 event_store=resume_delegate,
+                payload_protection=PROTECTION,
                 clock=fixed_clock,
             )
         resume_store = BlockingReadStore(resume_delegate)
@@ -2639,6 +2904,7 @@ def test_start_and_resume_snapshot_handler_registries_before_store_io() -> None:
                 run_id="handler-snapshot-resume",
                 implementation_id="v1",
                 event_store=resume_store,
+                payload_protection=PROTECTION,
                 clock=fixed_clock,
             )
         )
@@ -2686,7 +2952,7 @@ def test_each_attempt_gets_a_fresh_graph_context_and_cannot_corrupt_history() ->
     )
 
     async def scenario() -> None:
-        store = MemoryEventStore()
+        store = memory_journal()
 
         def root(context: NodeContext) -> Any:
             assert isinstance(context.node.config, dict)
@@ -2713,6 +2979,7 @@ def test_each_attempt_gets_a_fresh_graph_context_and_cannot_corrupt_history() ->
             run_id="attempt-context-isolation",
             implementation_id="v1",
             event_store=store,
+            payload_protection=PROTECTION,
             clock=fixed_clock,
         )
         assert result.succeeded
@@ -2724,6 +2991,7 @@ def test_each_attempt_gets_a_fresh_graph_context_and_cannot_corrupt_history() ->
                 run_id="attempt-context-isolation",
                 implementation_id="v1",
                 event_store=store,
+                payload_protection=PROTECTION,
             )
             == result
         )
@@ -2821,7 +3089,7 @@ def test_output_binding_failure_uses_canonical_shape_and_semantic_message_matchi
     )
 
     async def scenario() -> None:
-        source = MemoryEventStore()
+        source = memory_journal()
         result = await start_graph_run(
             output_graph,
             {},
@@ -2829,11 +3097,17 @@ def test_output_binding_failure_uses_canonical_shape_and_semantic_message_matchi
             run_id="output-failure-shape",
             implementation_id="v1",
             event_store=source,
+            payload_protection=PROTECTION,
             clock=fixed_clock,
         )
         history = list(await source.read("output-failure-shape"))
         terminal = history[-1]
-        document = decode_durable_json(terminal.data["result"])
+        document = recover_occurrence(
+            PROTECTION,
+            event=terminal,
+            reference_field="resultRef",
+            semantic_context=run_result_context("output-failure-shape", 1),
+        )
         assert isinstance(document, dict)
         failures = document["failures"]
         assert isinstance(failures, list) and isinstance(failures[0], dict)
@@ -2850,27 +3124,43 @@ def test_output_binding_failure_uses_canonical_shape_and_semantic_message_matchi
         assert result.failures[-1].output_port == "missing"
 
         failure["message"] = "Foreign runtime wording is allowed"
-        history[-1] = resign(terminal, {"result": encode_durable_json(document)})
-        foreign = MemoryEventStore()
-        await foreign.append("output-failure-shape", -1, history)
+        history[-1] = reprotect(
+            PROTECTION,
+            event=terminal,
+            reference_field="resultRef",
+            mac_field="resultMac",
+            value=document,
+            semantic_context=run_result_context("output-failure-shape", 1),
+        )
+        foreign = memory_journal()
+        install_history(foreign, "output-failure-shape", history)
         resumed = await resume_graph_run(
             output_graph,
             run_id="output-failure-shape",
             implementation_id="v1",
             event_store=foreign,
+            payload_protection=PROTECTION,
         )
         assert resumed.failures[-1].message == "Foreign runtime wording is allowed"
 
         del failure["port"]
-        history[-1] = resign(terminal, {"result": encode_durable_json(document)})
-        missing_port = MemoryEventStore()
-        await missing_port.append("output-failure-shape", -1, history)
+        history[-1] = reprotect(
+            PROTECTION,
+            event=terminal,
+            reference_field="resultRef",
+            mac_field="resultMac",
+            value=document,
+            semantic_context=run_result_context("output-failure-shape", 1),
+        )
+        missing_port = memory_journal()
+        install_history(missing_port, "output-failure-shape", history)
         with pytest.raises(DurableRunError) as error:
             await resume_graph_run(
                 output_graph,
                 run_id="output-failure-shape",
                 implementation_id="v1",
                 event_store=missing_port,
+                payload_protection=PROTECTION,
             )
         assert error.value.code is DurableRunErrorCode.INVALID_RUN_HISTORY
 
@@ -2882,7 +3172,7 @@ def test_fold_rejects_duplicate_event_ids_and_extraneous_terminal_identity(
     mutation: str,
 ) -> None:
     async def scenario() -> None:
-        source = MemoryEventStore()
+        source = memory_journal()
         await start_graph_run(
             graph(),
             {},
@@ -2890,15 +3180,18 @@ def test_fold_rejects_duplicate_event_ids_and_extraneous_terminal_identity(
             run_id=f"event-identity-{mutation}",
             implementation_id="v1",
             event_store=source,
+            payload_protection=PROTECTION,
             clock=fixed_clock,
         )
         history = list(await source.read(f"event-identity-{mutation}"))
         if mutation == "duplicate-event-id":
-            history[-1] = history[-1].model_copy(update={"event_id": history[0].event_id})
+            history[-1] = rebind_event(
+                PROTECTION, history[-1], event_id=history[0].event_id
+            )
         else:
-            history[-1] = history[-1].model_copy(update={"node_id": "root"})
-        forged = MemoryEventStore()
-        await forged.append(f"event-identity-{mutation}", -1, history)
+            history[-1] = rebind_event(PROTECTION, history[-1], node_id="root")
+        forged = memory_journal()
+        install_history(forged, f"event-identity-{mutation}", history)
 
         with pytest.raises(DurableRunError) as error:
             await resume_graph_run(
@@ -2906,6 +3199,7 @@ def test_fold_rejects_duplicate_event_ids_and_extraneous_terminal_identity(
                 run_id=f"event-identity-{mutation}",
                 implementation_id="v1",
                 event_store=forged,
+                payload_protection=PROTECTION,
             )
         assert error.value.code is DurableRunErrorCode.INVALID_RUN_HISTORY
 
@@ -2923,6 +3217,7 @@ def test_writer_rejects_duplicate_event_ids_before_any_store_write() -> None:
                 run_id="duplicate-writer-id",
                 implementation_id="v1",
                 event_store=store,
+                payload_protection=PROTECTION,
                 event_id_factory=lambda _run_id, _sequence: "constant",
                 clock=fixed_clock,
             )
@@ -2947,7 +3242,7 @@ def test_resume_writer_rejects_an_event_id_that_collides_with_history() -> None:
     )
 
     async def scenario() -> None:
-        delegate = MemoryEventStore()
+        delegate = memory_journal()
         with pytest.raises(ProcessLost):
             await start_graph_run(
                 retry_graph,
@@ -2956,6 +3251,7 @@ def test_resume_writer_rejects_an_event_id_that_collides_with_history() -> None:
                 run_id="resume-id-collision",
                 implementation_id="v1",
                 event_store=delegate,
+                payload_protection=PROTECTION,
                 clock=fixed_clock,
             )
         store = TrackingStore(delegate)
@@ -2973,6 +3269,7 @@ def test_resume_writer_rejects_an_event_id_that_collides_with_history() -> None:
                 run_id="resume-id-collision",
                 implementation_id="v1",
                 event_store=store,
+                payload_protection=PROTECTION,
                 event_id_factory=lambda _run_id, _sequence: "resume-id-collision:0",
                 clock=fixed_clock,
             )
@@ -3002,6 +3299,7 @@ def test_retry_timestamp_overflow_is_mapped_and_fatal_latched() -> None:
             graph=retry_graph,
             run_id="clock-overflow",
             store=store,
+            protection=PROTECTION,
             version=-1,
             clock=lambda: "9999-12-31T23:59:59.999Z",
             event_id_factory=lambda run_id, sequence: f"{run_id}:{sequence}",
@@ -3031,21 +3329,25 @@ def test_retry_timestamp_overflow_is_mapped_and_fatal_latched() -> None:
 
 def test_terminal_event_cannot_supply_an_uncommitted_node_outcome() -> None:
     async def scenario() -> None:
-        source = MemoryEventStore()
+        source = memory_journal()
         await start_graph_run(
             graph(),
             {},
             run_id="terminal-without-outcome",
             implementation_id="v1",
             event_store=source,
+            payload_protection=PROTECTION,
             clock=fixed_clock,
         )
         history = list(await source.read("terminal-without-outcome"))
-        terminal = history[-1].model_copy(
-            update={"sequence": 2, "event_id": "terminal-without-outcome:terminal"}
+        terminal = rebind_event(
+            PROTECTION,
+            history[-1],
+            sequence=2,
+            event_id="terminal-without-outcome:terminal",
         )
-        forged = MemoryEventStore()
-        await forged.append("terminal-without-outcome", -1, (*history[:2], terminal))
+        forged = memory_journal()
+        install_history(forged, "terminal-without-outcome", (*history[:2], terminal))
 
         with pytest.raises(DurableRunError) as error:
             await resume_graph_run(
@@ -3053,6 +3355,7 @@ def test_terminal_event_cannot_supply_an_uncommitted_node_outcome() -> None:
                 run_id="terminal-without-outcome",
                 implementation_id="v1",
                 event_store=forged,
+                payload_protection=PROTECTION,
             )
         assert error.value.code is DurableRunErrorCode.INVALID_RUN_HISTORY
 
@@ -3061,7 +3364,7 @@ def test_terminal_event_cannot_supply_an_uncommitted_node_outcome() -> None:
 
 def test_attempt_event_rejects_a_non_attempt_failure_code() -> None:
     async def scenario() -> None:
-        source = MemoryEventStore()
+        source = memory_journal()
         await start_graph_run(
             graph(),
             {},
@@ -3069,6 +3372,7 @@ def test_attempt_event_rejects_a_non_attempt_failure_code() -> None:
             run_id="forged-attempt-code",
             implementation_id="v1",
             event_store=source,
+            payload_protection=PROTECTION,
             clock=fixed_clock,
         )
         history = list(await source.read("forged-attempt-code"))
@@ -3078,8 +3382,8 @@ def test_attempt_event_rejects_a_non_attempt_failure_code() -> None:
         failure["code"] = "EXECUTOR_NOT_FOUND"
         data["failure"] = failure
         history[index] = resign(history[index], data)
-        forged = MemoryEventStore()
-        await forged.append("forged-attempt-code", -1, history)
+        forged = memory_journal()
+        install_history(forged, "forged-attempt-code", history)
 
         with pytest.raises(DurableRunError) as error:
             await resume_graph_run(
@@ -3087,6 +3391,7 @@ def test_attempt_event_rejects_a_non_attempt_failure_code() -> None:
                 run_id="forged-attempt-code",
                 implementation_id="v1",
                 event_store=forged,
+                payload_protection=PROTECTION,
             )
         assert error.value.code is DurableRunErrorCode.INVALID_RUN_HISTORY
 
@@ -3095,7 +3400,7 @@ def test_attempt_event_rejects_a_non_attempt_failure_code() -> None:
 
 def test_settled_node_cannot_be_started_again_after_success() -> None:
     async def scenario() -> None:
-        source = MemoryEventStore()
+        source = memory_journal()
         await start_graph_run(
             graph(),
             {},
@@ -3103,6 +3408,7 @@ def test_settled_node_cannot_be_started_again_after_success() -> None:
             run_id="second-start",
             implementation_id="v1",
             event_store=source,
+            payload_protection=PROTECTION,
             clock=fixed_clock,
         )
         history = list(await source.read("second-start"))
@@ -3116,16 +3422,16 @@ def test_settled_node_cannot_be_started_again_after_success() -> None:
             node_id="root",
             attempt=1,
         )
-        shifted_terminal = terminal.model_copy(
-            update={
-                "sequence": terminal.sequence + 1,
-                "event_id": "second-start:shifted-terminal",
-            }
+        shifted_terminal = rebind_event(
+            PROTECTION,
+            terminal,
+            sequence=terminal.sequence + 1,
+            event_id="second-start:shifted-terminal",
         )
-        forged = MemoryEventStore()
-        await forged.append(
+        forged = memory_journal()
+        install_history(
+            forged,
             "second-start",
-            -1,
             (*history[:-1], second_start, shifted_terminal),
         )
 
@@ -3135,6 +3441,7 @@ def test_settled_node_cannot_be_started_again_after_success() -> None:
                 run_id="second-start",
                 implementation_id="v1",
                 event_store=forged,
+                payload_protection=PROTECTION,
             )
         assert error.value.code is DurableRunErrorCode.INVALID_RUN_HISTORY
 
@@ -3155,7 +3462,7 @@ def test_retry_reservation_cannot_be_consumed_by_restarting_the_old_attempt() ->
     )
 
     async def scenario() -> None:
-        source = MemoryEventStore()
+        source = memory_journal()
         calls = 0
 
         def flaky(_: NodeContext) -> Any:
@@ -3172,6 +3479,7 @@ def test_retry_reservation_cannot_be_consumed_by_restarting_the_old_attempt() ->
             run_id="old-attempt-restart",
             implementation_id="v1",
             event_store=source,
+            payload_protection=PROTECTION,
             clock=fixed_clock,
         )
         history = list(await source.read("old-attempt-restart"))
@@ -3185,10 +3493,10 @@ def test_retry_reservation_cannot_be_consumed_by_restarting_the_old_attempt() ->
             node_id="root",
             attempt=1,
         )
-        forged = MemoryEventStore()
-        await forged.append(
+        forged = memory_journal()
+        install_history(
+            forged,
             "old-attempt-restart",
-            -1,
             (*history[: retry_index + 1], forged_old_start),
         )
 
@@ -3198,6 +3506,7 @@ def test_retry_reservation_cannot_be_consumed_by_restarting_the_old_attempt() ->
                 run_id="old-attempt-restart",
                 implementation_id="v1",
                 event_store=forged,
+                payload_protection=PROTECTION,
             )
         assert error.value.code is DurableRunErrorCode.INVALID_RUN_HISTORY
 
@@ -3230,13 +3539,14 @@ def test_downstream_cannot_settle_before_its_upstream_has_an_outcome() -> None:
     )
 
     async def scenario() -> None:
-        source = MemoryEventStore()
+        source = memory_journal()
         await start_graph_run(
             compiled,
             {},
             run_id="premature-settlement",
             implementation_id="v1",
             event_store=source,
+            payload_protection=PROTECTION,
             clock=fixed_clock,
         )
         history = list(await source.read("premature-settlement"))
@@ -3250,16 +3560,16 @@ def test_downstream_cannot_settle_before_its_upstream_has_an_outcome() -> None:
             for event in history
             if event.type == "NodeSettledWithoutAttempt" and event.node_id == "child"
         )
-        premature_child = child.model_copy(
-            update={"sequence": 2, "event_id": "premature-settlement:child-first"}
+        premature_child = rebind_event(
+            PROTECTION, child, sequence=2, event_id="premature-settlement:child-first"
         )
-        late_root = root.model_copy(
-            update={"sequence": 3, "event_id": "premature-settlement:root-second"}
+        late_root = rebind_event(
+            PROTECTION, root, sequence=3, event_id="premature-settlement:root-second"
         )
-        forged = MemoryEventStore()
-        await forged.append(
+        forged = memory_journal()
+        install_history(
+            forged,
             "premature-settlement",
-            -1,
             (*history[:2], premature_child, late_root),
         )
 
@@ -3269,6 +3579,7 @@ def test_downstream_cannot_settle_before_its_upstream_has_an_outcome() -> None:
                 run_id="premature-settlement",
                 implementation_id="v1",
                 event_store=forged,
+                payload_protection=PROTECTION,
             )
         assert error.value.code is DurableRunErrorCode.INVALID_RUN_HISTORY
 
@@ -3289,7 +3600,7 @@ def test_terminal_event_rejects_a_pending_retry_reservation() -> None:
     )
 
     async def scenario() -> None:
-        source = MemoryEventStore()
+        source = memory_journal()
         calls = 0
 
         def flaky(_: NodeContext) -> Any:
@@ -3306,20 +3617,21 @@ def test_terminal_event_rejects_a_pending_retry_reservation() -> None:
             run_id="terminal-pending-reservation",
             implementation_id="v1",
             event_store=source,
+            payload_protection=PROTECTION,
             clock=fixed_clock,
         )
         history = list(await source.read("terminal-pending-reservation"))
         retry_index = next(i for i, event in enumerate(history) if event.type == "NodeRetried")
-        terminal = history[-1].model_copy(
-            update={
-                "sequence": retry_index + 1,
-                "event_id": "terminal-pending-reservation:early-terminal",
-            }
+        terminal = rebind_event(
+            PROTECTION,
+            history[-1],
+            sequence=retry_index + 1,
+            event_id="terminal-pending-reservation:early-terminal",
         )
-        forged = MemoryEventStore()
-        await forged.append(
+        forged = memory_journal()
+        install_history(
+            forged,
             "terminal-pending-reservation",
-            -1,
             (*history[: retry_index + 1], terminal),
         )
 
@@ -3329,6 +3641,7 @@ def test_terminal_event_rejects_a_pending_retry_reservation() -> None:
                 run_id="terminal-pending-reservation",
                 implementation_id="v1",
                 event_store=forged,
+                payload_protection=PROTECTION,
             )
         assert error.value.code is DurableRunErrorCode.INVALID_RUN_HISTORY
 

@@ -23,10 +23,13 @@ import os
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final
+from typing import Final, Protocol, runtime_checkable
+
+from pydantic import ValidationError
 
 from ..canonical import canonical_bytes, canonical_json
-from ..models import JsonValue
+from ..events import ProtectedGraphEvent
+from ..models import MAX_SAFE_INTEGER, JsonValue
 from ..redaction.disposition import PayloadDisposition, validate_disposition
 from ..redaction.errors import RedactionDenied, RedactionFailure, failure
 from ..redaction.guard import (
@@ -50,12 +53,19 @@ from ..redaction.protect import (
     run_result_context,
     value_mac,
 )
-from .errors import PersistenceIOError
+from .errors import (
+    CorruptEventLogError,
+    PersistenceIOError,
+    PersistenceValidationError,
+    ValidationIssue,
+    VersionConflictError,
+)
 from .identifiers import assert_safe_identifier, identifier_hash
 from .locks import process_lock
 
 EVENT_V1ALPHA2_API_VERSION: Final = "graphengineering.reacher-z.github.io/events/v1alpha2"
 CONTRACT_VERSION_V1ALPHA2: Final = "scheduler-recovery/v1alpha2"
+EVENT_JOURNAL_SINK: Final = "event-journal"
 
 # Section 3.2 and event-v1alpha2.schema.json: exactly one disposition per event
 # type. `inline-unredacted` is unrepresentable here, deliberately.
@@ -85,6 +95,167 @@ class UnguardedWriteError(RuntimeError):
     """Raised when a caller tries to write bytes that no guard prepared."""
 
 
+@runtime_checkable
+class ProtectedEventStore(Protocol):
+    """The guarded durable journal sink the scheduler is allowed to write to.
+
+    ``append`` accepts capabilities, never documents: the only way to obtain a
+    :class:`~graph_engineering.redaction.guard.PreparedSinkWrite` is to pass a
+    candidate record through the shared guard, so a caller cannot reach a raw
+    byte writer and there is no legacy fallback to fall back to.
+    """
+
+    async def append(
+        self,
+        run_id: str,
+        expected_version: int,
+        prepared: Sequence[PreparedSinkWrite],
+    ) -> int: ...
+
+    async def read(
+        self,
+        run_id: str,
+        from_sequence: int = 0,
+    ) -> tuple[ProtectedGraphEvent, ...]: ...
+
+    def legacy_documents(self, run_id: str) -> tuple[Mapping[str, JsonValue], ...]:
+        """Return any co-located ``events/v1alpha1`` records, read-only.
+
+        Section 9.1 requires legacy detection before ``RunResumed``, before
+        append, and before any executor invocation.  The bytes are returned
+        exactly as they are on disk; nothing here rewrites, scrubs, truncates,
+        or reinterprets them.
+        """
+        ...
+
+
+def _validate_expected_version(value: int) -> None:
+    if type(value) is not int or value < -1 or value > MAX_SAFE_INTEGER:
+        raise PersistenceValidationError(
+            "expectedVersion is invalid",
+            (
+                ValidationIssue(
+                    "#/expectedVersion",
+                    f"expected an integer from -1 through {MAX_SAFE_INTEGER}",
+                ),
+            ),
+        )
+
+
+def _decode_protected_line(
+    run_id: str,
+    raw_line: bytes,
+    line_number: int,
+    expected_sequence: int,
+) -> ProtectedGraphEvent:
+    try:
+        document = json.loads(raw_line)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise CorruptEventLogError(run_id, str(exc), line_number) from exc
+    invalid = validate_protected_event(document)
+    if invalid is not None:
+        raise CorruptEventLogError(
+            run_id, f"protected event is invalid: {invalid.code}", line_number
+        )
+    try:
+        event = ProtectedGraphEvent.model_validate(document)
+    except ValidationError as exc:
+        raise CorruptEventLogError(run_id, str(exc), line_number) from exc
+    if event.run_id != run_id:
+        raise CorruptEventLogError(
+            run_id,
+            f"record runId {event.run_id!r} does not match file stream",
+            line_number,
+        )
+    if event.sequence != expected_sequence:
+        raise CorruptEventLogError(
+            run_id,
+            f"expected sequence {expected_sequence}, received {event.sequence}",
+            line_number,
+        )
+    return event
+
+
+def _consumed_events(
+    run_id: str,
+    expected_version: int,
+    sink: object,
+    prepared: Sequence[PreparedSinkWrite],
+) -> tuple[tuple[ProtectedGraphEvent, ...], bytes]:
+    """Consume each capability once and decode the exact bytes it authorized.
+
+    Consumption happens only after the compare-and-swap comparison succeeded, so
+    a lost race never burns a capability and never writes a partial batch.
+    """
+
+    events: list[ProtectedGraphEvent] = []
+    payloads: list[bytes] = []
+    for index, item in enumerate(prepared):
+        if type(item) is not PreparedSinkWrite:
+            raise UnguardedWriteError("this sink accepts only a PreparedSinkWrite")
+        if item.sink != EVENT_JOURNAL_SINK:
+            raise UnguardedWriteError("prepared write is bound to another sink class")
+        payload = item.consume(sink)
+        events.append(
+            _decode_protected_line(run_id, payload, index + 1, expected_version + index + 1)
+        )
+        payloads.append(payload)
+    return tuple(events), b"".join(payload + b"\n" for payload in payloads)
+
+
+class GuardedMemoryEventStore:
+    """A process-local guarded journal with the same compare-and-swap contract."""
+
+    sink: Final = EVENT_JOURNAL_SINK
+
+    def __init__(
+        self,
+        legacy_histories: Mapping[str, Sequence[Mapping[str, JsonValue]]] | None = None,
+    ) -> None:
+        self._streams: dict[str, list[ProtectedGraphEvent]] = {}
+        self._locks: dict[str, asyncio.Lock] = {}
+        self._legacy = {
+            run_id: tuple(dict(document) for document in documents)
+            for run_id, documents in (legacy_histories or {}).items()
+        }
+
+    def _lock(self, run_id: str) -> asyncio.Lock:
+        return self._locks.setdefault(run_id, asyncio.Lock())
+
+    async def append(
+        self,
+        run_id: str,
+        expected_version: int,
+        prepared: Sequence[PreparedSinkWrite],
+    ) -> int:
+        assert_safe_identifier(run_id, "runId")
+        _validate_expected_version(expected_version)
+        async with self._lock(run_id):
+            stream = self._streams.setdefault(run_id, [])
+            actual_version = stream[-1].sequence if stream else -1
+            if expected_version != actual_version:
+                raise VersionConflictError(run_id, expected_version, actual_version)
+            events, _ = _consumed_events(run_id, expected_version, self, prepared)
+            stream.extend(events)
+            return stream[-1].sequence if stream else -1
+
+    async def read(
+        self,
+        run_id: str,
+        from_sequence: int = 0,
+    ) -> tuple[ProtectedGraphEvent, ...]:
+        assert_safe_identifier(run_id, "runId")
+        async with self._lock(run_id):
+            return tuple(
+                event
+                for event in self._streams.get(run_id, ())
+                if event.sequence >= from_sequence
+            )
+
+    def legacy_documents(self, run_id: str) -> tuple[Mapping[str, JsonValue], ...]:
+        return self._legacy.get(run_id, ())
+
+
 @dataclass(frozen=True, slots=True)
 class ProtectedAppend:
     """One accepted guarded append."""
@@ -104,11 +275,14 @@ class GuardedJsonlEventStore:
     already prepared bytes.
     """
 
-    sink: Final = "event-journal"
+    sink: Final = EVENT_JOURNAL_SINK
 
     def __init__(self, root: str | os.PathLike[str]) -> None:
         self.root = Path(root).resolve()
         self.events_directory = self.root / "events-v1alpha2"
+        # `events/` is where a `JsonlEventStore` keeps a legacy v1alpha1 journal
+        # for the same root. It is only ever opened read-only, for detection.
+        self.legacy_events_directory = self.root / "events"
         try:
             self.events_directory.mkdir(parents=True, exist_ok=True)
         except OSError as exc:
@@ -119,6 +293,95 @@ class GuardedJsonlEventStore:
     def path_for_run(self, run_id: str) -> Path:
         assert_safe_identifier(run_id, "runId")
         return self.events_directory / f"{identifier_hash(run_id)}.jsonl"
+
+    def legacy_path_for_run(self, run_id: str) -> Path:
+        assert_safe_identifier(run_id, "runId")
+        return self.legacy_events_directory / f"{identifier_hash(run_id)}.jsonl"
+
+    def legacy_documents(self, run_id: str) -> tuple[Mapping[str, JsonValue], ...]:
+        path = self.legacy_path_for_run(run_id)
+        if not path.exists():
+            return ()
+        documents: list[Mapping[str, JsonValue]] = []
+        for line in path.read_bytes().splitlines():
+            if not line:
+                continue
+            try:
+                document = json.loads(line)
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                # An undecodable legacy record is still a legacy record. It is
+                # reported as an opaque marker rather than repaired or skipped.
+                documents.append({"apiVersion": "unreadable"})
+                continue
+            documents.append(document if isinstance(document, dict) else {})
+        return tuple(documents)
+
+    def _decode_log(self, run_id: str) -> tuple[ProtectedGraphEvent, ...]:
+        path = self.path_for_run(run_id)
+        if not path.exists():
+            return ()
+        try:
+            raw = path.read_bytes()
+        except OSError as exc:
+            raise PersistenceIOError("read protected event log", str(path), exc) from exc
+        if not raw:
+            raise CorruptEventLogError(run_id, "empty protected event log file")
+        if not raw.endswith(b"\n"):
+            raise CorruptEventLogError(run_id, "truncated final JSONL record")
+        events: list[ProtectedGraphEvent] = []
+        for line_number, raw_line in enumerate(raw.splitlines(), start=1):
+            if not raw_line:
+                raise CorruptEventLogError(run_id, "blank JSONL record", line_number)
+            events.append(_decode_protected_line(run_id, raw_line, line_number, len(events)))
+        return tuple(events)
+
+    def _append_sync(
+        self,
+        run_id: str,
+        expected_version: int,
+        prepared: Sequence[PreparedSinkWrite],
+    ) -> int:
+        existing = self._decode_log(run_id)
+        actual_version = existing[-1].sequence if existing else -1
+        if expected_version != actual_version:
+            raise VersionConflictError(run_id, expected_version, actual_version)
+        events, payload = _consumed_events(run_id, expected_version, self, prepared)
+        if not events:
+            return actual_version
+        path = self.path_for_run(run_id)
+        try:
+            descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+            with os.fdopen(descriptor, "ab") as handle:
+                handle.write(payload)
+                handle.flush()
+                os.fsync(handle.fileno())
+        except OSError as exc:
+            raise PersistenceIOError("append protected event log", str(path), exc) from exc
+        return events[-1].sequence
+
+    async def append(
+        self,
+        run_id: str,
+        expected_version: int,
+        prepared: Sequence[PreparedSinkWrite],
+    ) -> int:
+        assert_safe_identifier(run_id, "runId")
+        _validate_expected_version(expected_version)
+        path = self.path_for_run(run_id)
+        async with process_lock(f"protected-event:{path}"):
+            return await asyncio.to_thread(
+                self._append_sync, run_id, expected_version, prepared
+            )
+
+    async def read(
+        self,
+        run_id: str,
+        from_sequence: int = 0,
+    ) -> tuple[ProtectedGraphEvent, ...]:
+        path = self.path_for_run(run_id)
+        async with process_lock(f"protected-event:{path}"):
+            events = await asyncio.to_thread(self._decode_log, run_id)
+        return tuple(event for event in events if event.sequence >= from_sequence)
 
     async def write(self, run_id: str, prepared: PreparedSinkWrite) -> int:
         """Append exactly the prepared bytes. The token is consumed once."""

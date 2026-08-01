@@ -1,14 +1,17 @@
 """Native Python coverage for the durable operational CLI surface.
 
-The authentic fixtures in this module are produced by the real Python durable
-runtime, so the projections are checked against histories this implementation
-actually writes. The adversarial fixtures come from the shared cross-language
-corpus, which is input only: no expectation is copied out of it.
+The operational CLI is a read-only projection of an ``events/v1alpha1`` journal.
+Since the durable writer moved to the guarded ``events/v1alpha2`` path, such a
+journal is legacy data under ``redaction-semantics.md`` Section 9, so the
+authentic fixtures in this module are byte-frozen histories the real Python
+durable runtime wrote rather than histories it still writes. The projections are
+therefore still checked against real output. The adversarial fixtures come from
+the shared cross-language corpus, which is input only: no expectation is copied
+out of it.
 """
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import json
 import os
@@ -22,7 +25,6 @@ from typing import Any
 
 import pytest
 
-from graph_engineering import compile_graph, start_graph_run
 from graph_engineering.cli import ExitCode
 from graph_engineering.cli_operations import (
     DEFAULT_LOG_LIMIT,
@@ -30,7 +32,6 @@ from graph_engineering.cli_operations import (
     MAX_LOG_LIMIT,
     UNSUPPORTED_OPERATIONS,
 )
-from graph_engineering.persistence import JsonlEventStore
 
 ROOT = Path(__file__).resolve().parents[2]
 CORPUS = json.loads(
@@ -39,6 +40,7 @@ CORPUS = json.loads(
 
 READ_COMMANDS = ("status", "inspect", "logs")
 
+#: The graph the frozen legacy journals below were produced from.
 DIAMOND: dict[str, Any] = {
     "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
     "kind": "Graph",
@@ -126,37 +128,27 @@ def corpus_store(root: Path, journal_name: str) -> Path:
     return store
 
 
-def _clock() -> Any:
-    counter = {"value": 0}
-
-    def tick() -> str:
-        counter["value"] += 1
-        return f"2026-07-26T12:00:{counter['value']:02d}.000Z"
-
-    return tick
+#: Histories this implementation actually wrote, frozen at the last commit whose
+#: durable writer emitted `events/v1alpha1`. `redaction-semantics.md` Section 9
+#: makes those journals legacy data: the live runtime now writes the guarded
+#: `events/v1alpha2` journal and refuses to continue a v1alpha1 stream, so an
+#: authentic v1alpha1 fixture can no longer be produced by calling the runtime.
+#: They are still exactly what the read-only operational projection must be able
+#: to read, which is what these tests check. The bytes are used verbatim; no
+#: expectation below is copied out of them.
+LEGACY_JOURNALS: Mapping[str, str] = json.loads(
+    (Path(__file__).resolve().parent / "data" / "legacy-v1alpha1-journals.json").read_text(
+        encoding="utf-8"
+    )
+)
 
 
 def build_run(store_root: Path, run_id: str, *, cancel: bool = False) -> Path:
-    """Write one authentic durable history with the native Python runtime."""
+    """Materialize one frozen legacy v1alpha1 history into a private store."""
 
-    async def scenario() -> None:
-        store = JsonlEventStore(store_root)
-        cancel_event = asyncio.Event()
-        if cancel:
-            cancel_event.set()
-        await start_graph_run(
-            compile_graph(DIAMOND),
-            {"seed": 1},
-            {node_id: (lambda context: {"node": context.node.id}) for node_id in
-             ("root", "left", "right", "join")},
-            run_id=run_id,
-            implementation_id="operations-test",
-            event_store=store,
-            cancel_event=cancel_event if cancel else None,
-            clock=_clock(),
-        )
-
-    asyncio.run(scenario())
+    path = journal_path(store_root, run_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(LEGACY_JOURNALS[run_id].encode("utf-8"))
     return store_root
 
 
@@ -172,7 +164,7 @@ def cancelled_store(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return build_run(root, "python-cancelled", cancel=True)
 
 
-def test_status_projects_an_authentic_python_runtime_history(succeeded_store: Path) -> None:
+def test_status_projects_a_real_python_runtime_history(succeeded_store: Path) -> None:
     envelope = machine(
         invoke(["status", "--run", "python-succeeded", "--store", str(succeeded_store), "--json"])
     )

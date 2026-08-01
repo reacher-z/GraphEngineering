@@ -12,6 +12,13 @@ from pydantic import ConfigDict, Field, field_validator
 from ._json import JsonKeyCollisionError, normalize_json_strings
 from .models import MAX_SAFE_INTEGER, JsonObject, StrictModel
 
+PayloadDispositionValue: TypeAlias = Literal[
+    "metadata-only",
+    "protected-ref",
+    "redacted",
+    "inline-unredacted",
+]
+
 EventType: TypeAlias = Literal[
     "RunCreated",
     "RunStarted",
@@ -50,6 +57,33 @@ def _contains_nonfinite_number(value: object) -> bool:
     if isinstance(value, dict):
         return any(_contains_nonfinite_number(item) for item in value.values())
     return False
+
+
+def _validated_timestamp(value: str) -> str:
+    if not _RFC3339.fullmatch(value):
+        raise ValueError("timestamp must be an ISO 8601 date-time")
+    if int(value[11:13]) > 23 or int(value[14:16]) > 59 or int(value[17:19]) > 59:
+        raise ValueError("timestamp contains an invalid time of day")
+    normalized = f"{value[:-1]}+00:00" if value.endswith("Z") else value
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError as exc:
+        raise ValueError("timestamp must be an ISO 8601 date-time") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError("timestamp must include a UTC offset")
+    return value
+
+
+def _validated_event_data(value: JsonObject) -> JsonObject:
+    if _contains_nonfinite_number(value):
+        raise ValueError("event data must contain only finite JSON numbers")
+    try:
+        normalized = normalize_json_strings(value)
+    except JsonKeyCollisionError as exc:
+        raise ValueError(str(exc)) from exc
+    if not isinstance(normalized, dict):
+        raise ValueError("event data must be a JSON object")
+    return cast(JsonObject, normalized)
 
 
 class GraphEvent(StrictModel):
@@ -91,18 +125,7 @@ class GraphEvent(StrictModel):
     @field_validator("timestamp")
     @classmethod
     def timestamp_is_timezone_aware_iso8601(cls, value: str) -> str:
-        if not _RFC3339.fullmatch(value):
-            raise ValueError("timestamp must be an ISO 8601 date-time")
-        if int(value[11:13]) > 23 or int(value[14:16]) > 59 or int(value[17:19]) > 59:
-            raise ValueError("timestamp contains an invalid time of day")
-        normalized = f"{value[:-1]}+00:00" if value.endswith("Z") else value
-        try:
-            parsed = datetime.fromisoformat(normalized)
-        except ValueError as exc:
-            raise ValueError("timestamp must be an ISO 8601 date-time") from exc
-        if parsed.tzinfo is None or parsed.utcoffset() is None:
-            raise ValueError("timestamp must include a UTC offset")
-        return value
+        return _validated_timestamp(value)
 
     @field_validator(
         "trace_id",
@@ -147,12 +170,71 @@ class GraphEvent(StrictModel):
     @field_validator("data")
     @classmethod
     def data_contains_only_finite_numbers(cls, value: JsonObject) -> JsonObject:
-        if _contains_nonfinite_number(value):
-            raise ValueError("event data must contain only finite JSON numbers")
-        try:
-            normalized = normalize_json_strings(value)
-        except JsonKeyCollisionError as exc:
-            raise ValueError(str(exc)) from exc
-        if not isinstance(normalized, dict):
-            raise ValueError("event data must be a JSON object")
-        return cast(JsonObject, normalized)
+        return _validated_event_data(value)
+
+
+class ProtectedGraphEvent(StrictModel):
+    """A strict ``events/v1alpha2`` envelope.
+
+    ``redaction-semantics.md`` Section 3.2: the envelope is a closed object and
+    both ``redacted`` and ``payloadDisposition`` are required facts with no
+    schema default.  Unlike :class:`GraphEvent`, ``payloadHash`` and
+    ``capturePolicyHash`` are mandatory, and there is no inline application
+    payload field: authoritative values appear only as protected references
+    placed by the sink guard.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+        populate_by_name=True,
+        strict=True,
+        title="Graph Engineering Protected Runtime Event",
+    )
+
+    api_version: Literal["graphengineering.reacher-z.github.io/events/v1alpha2"] = Field(
+        alias="apiVersion"
+    )
+    event_id: Annotated[str, Field(min_length=1)] = Field(alias="eventId")
+    type: EventType
+    timestamp: str
+    run_id: Annotated[str, Field(min_length=1)] = Field(alias="runId")
+    graph_revision: Annotated[int, Field(ge=1, le=MAX_SAFE_INTEGER)] = Field(alias="graphRevision")
+    sequence: Annotated[int, Field(ge=0, le=MAX_SAFE_INTEGER)]
+    trace_id: str | None = Field(default=None, alias="traceId")
+    span_id: str | None = Field(default=None, alias="spanId")
+    parent_span_id: str | None = Field(default=None, alias="parentSpanId")
+    node_id: str | None = Field(default=None, alias="nodeId")
+    edge_id: str | None = Field(default=None, alias="edgeId")
+    attempt: Annotated[int, Field(ge=1, le=MAX_SAFE_INTEGER)] | None = None
+    payload_hash: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")] = Field(alias="payloadHash")
+    capture_policy_hash: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")] = Field(
+        alias="capturePolicyHash"
+    )
+    redacted: bool
+    payload_disposition: PayloadDispositionValue = Field(alias="payloadDisposition")
+    data: JsonObject
+
+    @field_validator("timestamp")
+    @classmethod
+    def timestamp_is_timezone_aware_iso8601(cls, value: str) -> str:
+        return _validated_timestamp(value)
+
+    @field_validator("trace_id", "span_id", "parent_span_id", "node_id", "edge_id")
+    @classmethod
+    def present_optional_strings_are_not_null(cls, value: str | None) -> str:
+        if value is None:
+            raise ValueError("present optional string fields cannot be null")
+        return value
+
+    @field_validator("attempt")
+    @classmethod
+    def present_attempt_is_not_null(cls, value: int | None) -> int:
+        if value is None:
+            raise ValueError("present attempt cannot be null")
+        return value
+
+    @field_validator("data")
+    @classmethod
+    def data_contains_only_finite_numbers(cls, value: JsonObject) -> JsonObject:
+        return _validated_event_data(value)

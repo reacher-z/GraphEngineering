@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -18,8 +18,8 @@ import pytest
 
 from graph_engineering import (
     FailureCode,
-    GraphEvent,
     NodeContext,
+    ProtectedGraphEvent,
     RunStatus,
     compile_graph,
     resume_graph_run,
@@ -34,11 +34,17 @@ from graph_engineering.integrated_barrier import (
     claims_integrated_barrier_policy,
     validate_integrated_barrier_policy,
 )
+from graph_engineering.models import JsonValue
+from graph_engineering.redaction.guard import PreparedSinkWrite
+from tests.durable_support import memory_protection
 
 ROOT = Path(__file__).resolve().parents[2]
 CORPUS: dict[str, Any] = json.loads(
     (ROOT / "spec/conformance/integrated-barrier.case.json").read_text()
 )
+# Section 4.2: a durable run refuses before preflight without a configured
+# protection authority, so the zero-store-IO assertion needs one.
+PROTECTION = memory_protection()
 POLICY_SCHEMA: dict[str, Any] = json.loads(
     (ROOT / "spec/integrated-barrier-policy.schema.json").read_text()
 )
@@ -409,7 +415,9 @@ class NoIoEventStore:
         self.read_calls = 0
         self.append_calls = 0
 
-    async def read(self, run_id: str, from_sequence: int = 0) -> tuple[GraphEvent, ...]:
+    async def read(
+        self, run_id: str, from_sequence: int = 0
+    ) -> tuple[ProtectedGraphEvent, ...]:
         self.read_calls += 1
         raise AssertionError(f"unexpected durable read for {run_id!r} at {from_sequence}")
 
@@ -417,12 +425,15 @@ class NoIoEventStore:
         self,
         run_id: str,
         expected_version: int,
-        values: Sequence[GraphEvent],
+        prepared: Sequence[PreparedSinkWrite],
     ) -> int:
         self.append_calls += 1
         raise AssertionError(
-            f"unexpected durable append for {run_id!r} at {expected_version}: {values!r}"
+            f"unexpected durable append for {run_id!r} at {expected_version}"
         )
+
+    def legacy_documents(self, run_id: str) -> tuple[Mapping[str, JsonValue], ...]:
+        raise AssertionError(f"unexpected legacy history probe for {run_id!r}")
 
 
 def test_exact_policy_barriers_are_refused_before_dispatch_with_no_side_effect() -> None:
@@ -481,6 +492,7 @@ def test_exact_policy_barriers_are_refused_with_zero_durable_store_io() -> None:
             run_id="integrated-barrier-capability",
             implementation_id="integrated-barrier@1",
             event_store=store,
+            payload_protection=PROTECTION,
         )
         resumed = await resume_graph_run(
             compiled,
@@ -488,6 +500,7 @@ def test_exact_policy_barriers_are_refused_with_zero_durable_store_io() -> None:
             run_id="integrated-barrier-capability",
             implementation_id="integrated-barrier@1",
             event_store=store,
+            payload_protection=PROTECTION,
         )
 
         assert started.status is RunStatus.FAILED

@@ -696,8 +696,14 @@ class SinkGuard:
             )
 
         # Section 3.2: `protected-ref` containing plaintext beside the reference
-        # is invalid. The metadata is checked against the exact payload bytes.
-        if _contains_payload_bytes(metadata, snapshot):
+        # is invalid. "Beside" is the container the reference is placed in, not
+        # the whole record: a closed envelope legitimately carries graph-declared
+        # identifiers, and a node whose output happens to equal its own node id
+        # is not a plaintext leak. Every other member of that container is
+        # caller-supplied inline material, which is exactly what this forbids.
+        if _contains_payload_bytes(
+            _reference_container(metadata, occurrence.field_path), snapshot
+        ):
             return self._failed(
                 request,
                 decision_id,
@@ -994,6 +1000,32 @@ def _read_at_pointer(document: dict[str, JsonValue], pointer: str) -> JsonValue:
         if token not in current:
             return _MISSING  # type: ignore[return-value]
         current = current[token]
+    return current
+
+
+def _reference_container(
+    metadata: Mapping[str, JsonValue],
+    field_path: str,
+) -> Mapping[str, JsonValue]:
+    """The object the protected reference will be inserted into.
+
+    Falls back to the complete record when the parent cannot be resolved, so an
+    unresolvable path never narrows the check.
+    """
+
+    try:
+        tokens = decode_pointer(field_path)
+    except PointerSyntaxError:
+        return metadata
+    if len(tokens) < 2:
+        return metadata
+    current: JsonValue = dict(metadata)
+    for token in tokens[:-1]:
+        if type(current) is not dict or token not in current:
+            return metadata
+        current = current[token]
+    if type(current) is not dict:
+        return metadata
     return current
 
 

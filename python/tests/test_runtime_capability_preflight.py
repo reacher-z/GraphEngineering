@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -10,20 +10,27 @@ import pytest
 
 from graph_engineering import (
     FailureCode,
-    GraphEvent,
     NodeContext,
+    ProtectedGraphEvent,
     RunStatus,
     compile_graph,
     resume_graph_run,
     run_graph,
     start_graph_run,
 )
-from graph_engineering.persistence import MemoryEventStore
+from graph_engineering.models import JsonValue
+from graph_engineering.redaction.guard import PreparedSinkWrite
+from tests.durable_support import memory_journal, memory_protection
 
 ROOT = Path(__file__).resolve().parents[2]
 CAPABILITY_CORPUS: dict[str, Any] = json.loads(
     (ROOT / "spec/conformance/runtime-capability.case.json").read_text()
 )
+
+# redaction-semantics.md Section 4.2: a durable run without a configured
+# protected store and key provider refuses before preflight can even report a
+# capability failure, so these tests configure one.
+PROTECTION = memory_protection()
 
 
 def node(node_id: str, **overrides: Any) -> dict[str, Any]:
@@ -224,7 +231,7 @@ def test_durable_runtime_consumes_capability_corpus_literally(case: dict[str, An
             else {"*": handler}
         )
         if case["expect"]["supported"]:
-            store: Any = MemoryEventStore()
+            store: Any = memory_journal()
         else:
             store = NoIoEventStore()
         run_id = f"capability-{case['name']}"
@@ -235,6 +242,7 @@ def test_durable_runtime_consumes_capability_corpus_literally(case: dict[str, An
             run_id=run_id,
             implementation_id="runtime-capability@1",
             event_store=store,
+            payload_protection=PROTECTION,
         )
         resumed = await resume_graph_run(
             compiled,
@@ -242,6 +250,7 @@ def test_durable_runtime_consumes_capability_corpus_literally(case: dict[str, An
             run_id=run_id,
             implementation_id="runtime-capability@1",
             event_store=store,
+            payload_protection=PROTECTION,
         )
 
         if case["expect"]["supported"]:
@@ -279,7 +288,9 @@ class NoIoEventStore:
         self.read_calls = 0
         self.append_calls = 0
 
-    async def read(self, run_id: str, from_sequence: int = 0) -> tuple[GraphEvent, ...]:
+    async def read(
+        self, run_id: str, from_sequence: int = 0
+    ) -> tuple[ProtectedGraphEvent, ...]:
         self.read_calls += 1
         raise AssertionError(f"unexpected durable read for {run_id!r} at {from_sequence}")
 
@@ -287,12 +298,15 @@ class NoIoEventStore:
         self,
         run_id: str,
         expected_version: int,
-        values: Sequence[GraphEvent],
+        prepared: Sequence[PreparedSinkWrite],
     ) -> int:
         self.append_calls += 1
         raise AssertionError(
-            f"unexpected durable append for {run_id!r} at {expected_version}: {values!r}"
+            f"unexpected durable append for {run_id!r} at {expected_version}"
         )
+
+    def legacy_documents(self, run_id: str) -> tuple[Mapping[str, JsonValue], ...]:
+        raise AssertionError(f"unexpected legacy history probe for {run_id!r}")
 
 
 def test_durable_start_and_resume_preflight_perform_zero_store_io() -> None:
@@ -312,6 +326,7 @@ def test_durable_start_and_resume_preflight_perform_zero_store_io() -> None:
             run_id="unsupported-start",
             implementation_id="runtime@1",
             event_store=store,
+            payload_protection=PROTECTION,
         )
         resumed = await resume_graph_run(
             compiled,
@@ -319,6 +334,7 @@ def test_durable_start_and_resume_preflight_perform_zero_store_io() -> None:
             run_id="unsupported-resume",
             implementation_id="runtime@1",
             event_store=store,
+            payload_protection=PROTECTION,
         )
 
         assert_capability_failure(started)
@@ -348,6 +364,7 @@ def test_runtime_issues_precede_foreign_condition_issues_with_zero_side_effects(
             run_id="combined-capability-start",
             implementation_id="runtime@1",
             event_store=store,
+            payload_protection=PROTECTION,
         )
         resumed = await resume_graph_run(
             compiled,
@@ -355,6 +372,7 @@ def test_runtime_issues_precede_foreign_condition_issues_with_zero_side_effects(
             run_id="combined-capability-resume",
             implementation_id="runtime@1",
             event_store=store,
+            payload_protection=PROTECTION,
         )
 
         assert ordinary == durable == resumed

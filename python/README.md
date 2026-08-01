@@ -549,11 +549,23 @@ substitute for one another. Resume reads the original input from `RunCreated`,
 checks the graph and caller-supplied implementation identity, and reuses every
 committed successful node.
 
-```python
-from graph_engineering import resume_graph_run, start_graph_run
-from graph_engineering.persistence import JsonlEventStore
+A durable run requires a configured protected payload store and key provider.
+`redaction-semantics.md` Section 4.2 makes this a precondition, not an option:
+without one, `start_graph_run` and `resume_graph_run` fail with
+`PAYLOAD_PROTECTION_REQUIRED` before the first event, temporary file, or
+executor invocation. There is deliberately no no-op key provider and no fallback
+to the older inline writer.
 
-store = JsonlEventStore(".graph-engineering")
+```python
+from graph_engineering import PayloadProtection, resume_graph_run, start_graph_run
+from graph_engineering.persistence import GuardedJsonlEventStore
+from graph_engineering.redaction.protect import FileProtectedPayloadStore
+
+store = GuardedJsonlEventStore(".graph-engineering")
+protection = PayloadProtection(
+    key_provider=your_key_provider,        # operator-owned; see Section 5.3
+    payload_store=FileProtectedPayloadStore(".graph-engineering/protected"),
+)
 result = await start_graph_run(
     graph,
     {"seed": 1},
@@ -561,6 +573,7 @@ result = await start_graph_run(
     run_id="research-001",
     implementation_id="research-handlers@1",
     event_store=store,
+    payload_protection=protection,
 )
 
 # In a later process, after confirming the old coordinator has stopped:
@@ -570,8 +583,22 @@ result = await resume_graph_run(
     run_id="research-001",
     implementation_id="research-handlers@1",
     event_store=store,
+    payload_protection=protection,
 )
 ```
+
+The journal is `events/v1alpha2`. Every authoritative application value —
+graph input, bound node input, node output, node result, terminal run result —
+appears only as a validated protected reference beside its keyed MAC, and the
+sink accepts nothing but a `PreparedSinkWrite` the shared guard produced.
+Resume resolves the capture policy again and must match the hash recorded by
+`RunCreated`, or the operation fails with `CAPTURE_POLICY_MISMATCH`.
+
+Existing `events/v1alpha1` journals remain readable by the operational CLI
+projection, but they are legacy inline data. A durable start or resume that
+finds one for the same run identity fails with `LEGACY_HISTORY_UNSAFE` and
+reports the Section 9.1 classification; the original bytes are never flipped,
+rehashed, scrubbed, or reinterpreted as protected.
 
 The durable journal commits `NodeScheduled` and `NodeStarted` before calling a
 handler. It commits a validated `NodeSucceeded` together with its ordered
@@ -582,10 +609,13 @@ charged to both retry budgets. Nodes declared `sideEffects: none` or
 declaration fails closed with `IN_DOUBT_SIDE_EFFECT` and is not invoked again.
 
 Inputs, outputs, implementation IDs, and terminal results use tagged Durable
-JSON. Non-integer finite doubles are encoded from their exact IEEE-754 bits, so
-hashes do not depend on Python or JavaScript decimal rendering. The public
-`encode_durable_json`, `decode_durable_json`, and `durable_json_hash` helpers
-implement the shared conformance corpus.
+JSON inside the protected blob. Non-integer finite doubles are encoded from
+their exact IEEE-754 bits, so hashes do not depend on Python or JavaScript
+decimal rendering. The public `encode_durable_json`, `decode_durable_json`, and
+`durable_json_hash` helpers implement the shared conformance corpus. Unkeyed
+value hashes are not on the wire: the journal carries keyed `inputMac`,
+`outputMac`, and `resultMac` values instead, because a digest of a low-entropy
+application value is still a statement about that value.
 
 Terminal resume is idempotent: it returns the recorded result without an event,
 checkpoint write, or handler call. CAS detects a losing continuation but is not

@@ -19,16 +19,41 @@ from .compiler import (
     GraphCompileError,
     compile_graph,
 )
-from .durable_json import (
-    DurableJsonError,
-    decode_durable_json,
-    durable_json_hash,
-    encode_durable_json,
-)
-from .events import EventType, GraphEvent
+from .durable_json import durable_json_hash
+from .durable_protection import PayloadProtection
+from .events import EventType, ProtectedGraphEvent
 from .models import MAX_SAFE_INTEGER, JsonValue, NodeSpec
-from .persistence import EventStore, PersistenceError, VersionConflictError
+from .persistence import PersistenceError, VersionConflictError
+from .persistence.protected_journal import (
+    CONTRACT_VERSION_V1ALPHA2,
+    EVENT_DISPOSITIONS,
+    EVENT_JOURNAL_SINK,
+    EVENT_V1ALPHA2_API_VERSION,
+    ProtectedEventStore,
+    reject_legacy_history,
+    validate_protected_event,
+)
 from .portable_json import PortableJsonError, portable_json_snapshot
+from .redaction.errors import RedactionFailure
+from .redaction.guard import (
+    NO_PAYLOAD,
+    GuardFailed,
+    GuardPrepared,
+    GuardSuppressed,
+    OccurrenceContext,
+    PreparedSinkWrite,
+    SinkWriteRequest,
+)
+from .redaction.protect import (
+    PROTECTED_STORE_CONTRACT,
+    activity_key,
+    graph_input_context,
+    node_input_context,
+    node_output_context,
+    node_result_context,
+    run_result_context,
+    value_mac,
+)
 from .scheduler import (
     AsyncScheduler,
     FailureCode,
@@ -48,7 +73,7 @@ from .scheduler import (
     _UnsupportedEdgeConditionError,
 )
 
-_CONTRACT_VERSION = "scheduler-recovery/v1alpha1"
+_CONTRACT_VERSION = CONTRACT_VERSION_V1ALPHA2
 _GRAPH_REVISION = 1
 _RFC3339 = re.compile(
     r"^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])"
@@ -71,6 +96,20 @@ class DurableRunErrorCode(StrEnum):
     IN_DOUBT_SIDE_EFFECT = "IN_DOUBT_SIDE_EFFECT"
     RESUME_CONFLICT = "RESUME_CONFLICT"
     DURABILITY_STORE_FAILED = "DURABILITY_STORE_FAILED"
+    # redaction-semantics.md Section 4.2: a durable run that would persist an
+    # authoritative application value without a configured protected store and
+    # key provider fails closed, before any event, log, temporary file, or
+    # executor invocation.
+    PAYLOAD_PROTECTION_REQUIRED = "PAYLOAD_PROTECTION_REQUIRED"
+    # Section 4.4: the effective capture policy resolved for a resume must hash
+    # exactly to the one recorded by `RunCreated`.
+    CAPTURE_POLICY_MISMATCH = "CAPTURE_POLICY_MISMATCH"
+    # Section 6.1: a committed protected reference did not authenticate under
+    # its exact event AAD, or its blob is missing or corrupt.
+    PROTECTED_PAYLOAD_UNRECOVERABLE = "PROTECTED_PAYLOAD_UNRECOVERABLE"
+    # Section 9: an `events/v1alpha1` history exists for this run identity.
+    # Silent repair is forbidden, so it is refused rather than continued.
+    LEGACY_HISTORY_UNSAFE = "LEGACY_HISTORY_UNSAFE"
 
 
 class DurableRunError(Exception):
@@ -143,6 +182,58 @@ def _failure_document(failure: NodeFailure) -> dict[str, JsonValue]:
     return document
 
 
+#: redaction-semantics.md Section 6.1: `NodeAttemptFailed` default messages are
+#: selected from versioned fixed templates by stable code; they are never
+#: substrings of a caught exception, a provider body, a prompt, or a path. The
+#: executor's own prose stays in the protected terminal result, never inline.
+_FAILURE_MESSAGE_TEMPLATES: Mapping[FailureCode, str] = MappingProxyType(
+    {
+        FailureCode.EXECUTOR_NOT_FOUND: "no executor is registered for this node",
+        FailureCode.NODE_EXECUTION_FAILED: "the node executor raised",
+        FailureCode.NODE_TIMEOUT: "the node executor exceeded its timeout",
+        FailureCode.NODE_CANCELLED: "the node attempt was cancelled",
+        FailureCode.INVALID_OUTPUT: "the node produced an invalid output value",
+        FailureCode.UPSTREAM_FAILED: "an upstream dependency did not succeed",
+        FailureCode.INPUT_BINDING_FAILED: "the node input could not be bound",
+        FailureCode.OUTPUT_BINDING_FAILED: "a graph output could not be bound",
+        FailureCode.ATTEMPT_BUDGET_EXHAUSTED: "the durable attempt budget is exhausted",
+        FailureCode.NODE_EXECUTION_INTERRUPTED: (
+            "process ended before the attempt outcome was durably recorded"
+        ),
+        FailureCode.INVALID_ROUTE_SELECTION: "the router produced an invalid route selection",
+        FailureCode.UNSUPPORTED_EDGE_CONDITION: "the edge condition is not supported",
+        FailureCode.UNSUPPORTED_RUNTIME_CAPABILITY: (
+            "the graph requires a runtime capability this implementation does not provide"
+        ),
+        FailureCode.ROUTE_NOT_SELECTED: "no incoming route was selected for this node",
+    }
+)
+
+#: Section 6.1: host-specific cause names are omitted unless mapped through a
+#: closed safe allowlist. `ProcessLost` is runtime-generated and is the one name
+#: the interrupted-attempt recovery rule depends on; every other cause name is an
+#: application- or host-derived string and is dropped.
+_ALLOWED_CAUSE_NAMES: frozenset[str] = frozenset({"ProcessLost"})
+
+
+def _durable_failure_document(failure: NodeFailure) -> dict[str, JsonValue]:
+    """The closed metadata projection of one attempt failure.
+
+    `NodeAttemptFailed` is pinned to `metadata-only`, so this document is the
+    exact inline payload. It carries stable codes, graph-declared identifiers,
+    attempt numbers, and a fixed template message; it never carries executor
+    prose, an exception name outside the closed allowlist, a stack, a path, or a
+    provider body.
+    """
+
+    document = _failure_document(failure)
+    document["message"] = _FAILURE_MESSAGE_TEMPLATES[failure.code]
+    cause = document.get("causeName")
+    if cause is not None and cause not in _ALLOWED_CAUSE_NAMES:
+        del document["causeName"]
+    return document
+
+
 def _node_result_document(result: NodeResult) -> dict[str, JsonValue]:
     document: dict[str, JsonValue] = {
         "nodeId": result.node_id,
@@ -186,11 +277,47 @@ def _invalid_history(run_id: str, message: str, **details: object) -> DurableRun
 
 @dataclass(frozen=True, slots=True)
 class _EventDraft:
+    """One candidate durable event, with its application payload kept apart.
+
+    ``data`` is the closed inline metadata only. An authoritative application
+    value is never placed there by the caller: it travels in ``payload`` and only
+    the sink guard may put anything derived from it into the record, as a
+    validated protected reference at ``field_path``.
+    """
+
     type: EventType
     data: dict[str, JsonValue]
     node_id: str | None = None
     edge_id: str | None = None
     attempt: int | None = None
+    payload: object = NO_PAYLOAD
+    source_class: str = "runtime-generated-identifier"
+    semantic_context: Mapping[str, JsonValue] | None = None
+    field_path: str = "/data"
+    mac_field_path: str | None = None
+    side_effects: str = "not-applicable"
+    executor_outcome: str = "not-applicable"
+
+
+def _guard_error(
+    run_id: str,
+    redaction_failure: RedactionFailure,
+    message: str,
+) -> DurableRunError:
+    code = {
+        "PAYLOAD_PROTECTION_REQUIRED": DurableRunErrorCode.PAYLOAD_PROTECTION_REQUIRED,
+        "REDACTION_POLICY_REQUIRED": DurableRunErrorCode.PAYLOAD_PROTECTION_REQUIRED,
+        "CAPTURE_POLICY_MISMATCH": DurableRunErrorCode.CAPTURE_POLICY_MISMATCH,
+    }.get(redaction_failure.code, DurableRunErrorCode.DURABILITY_STORE_FAILED)
+    return DurableRunError(
+        code,
+        run_id,
+        message,
+        {
+            "redactionCode": redaction_failure.code,
+            "guardPhase": redaction_failure.phase,
+        },
+    )
 
 
 class _DurableJournal:
@@ -199,7 +326,8 @@ class _DurableJournal:
         *,
         graph: CompiledGraph,
         run_id: str,
-        store: EventStore,
+        store: ProtectedEventStore,
+        protection: PayloadProtection,
         version: int,
         clock: Clock,
         event_id_factory: EventIdFactory,
@@ -210,6 +338,7 @@ class _DurableJournal:
         self.graph = graph
         self.run_id = run_id
         self.store = store
+        self.protection = protection
         self.version = version
         self.clock = clock
         self.event_id_factory = event_id_factory
@@ -217,42 +346,111 @@ class _DurableJournal:
         self.retry_available_at: dict[str, str] = {}
         self._activity_keys = dict(activity_keys or {})
         self._event_ids = set(prior_event_ids)
+        self._identity_key = protection.identity_key(run_id)
         self._lock = asyncio.Lock()
         self._fatal_error: BaseException | None = None
 
-    def _event(self, draft: _EventDraft, sequence: int) -> GraphEvent:
-        document: dict[str, Any] = {
-            "apiVersion": "graphengineering.reacher-z.github.io/events/v1alpha1",
-            "eventId": self.event_id_factory(self.run_id, sequence),
+    @property
+    def identity_key(self) -> bytes:
+        return self._identity_key
+
+    def _event(
+        self, draft: _EventDraft, sequence: int
+    ) -> tuple[ProtectedGraphEvent, PreparedSinkWrite]:
+        """Evaluate one candidate record against the shared sink guard.
+
+        Nothing here can reach the journal bytes on its own: the envelope is
+        handed to the guard together with the detached payload, and the guard
+        returns either a structured refusal or the single-use capability the
+        guarded sink will accept.
+        """
+
+        disposition = EVENT_DISPOSITIONS[draft.type]
+        event_id = self.event_id_factory(self.run_id, sequence)
+        timestamp = self.clock()
+        envelope: dict[str, JsonValue] = {
+            "apiVersion": EVENT_V1ALPHA2_API_VERSION,
+            "eventId": event_id,
             "type": draft.type,
-            "timestamp": self.clock(),
+            "timestamp": timestamp,
             "runId": self.run_id,
             "graphRevision": _GRAPH_REVISION,
             "sequence": sequence,
-            "payloadHash": canonical_sha256(draft.data),
-            # redaction-semantics.md Section 3.1 truth hotfix, item 3: every
-            # newly written inline v1alpha1 durable event explicitly emits
-            # `redacted: false`. This writer persists raw Tagged Durable JSON,
-            # so `true` was a false assertion about bytes on disk. The flag is
-            # now truthful; the payload is still unprotected legacy-inline data
-            # and the guarded v1alpha2 journal is the protected write path.
+            "capturePolicyHash": self.protection.policy_hash,
+            # Section 3.2: both facts are required and neither has a default.
             "redacted": False,
-            "data": draft.data,
+            "payloadDisposition": disposition,
+            "data": dict(draft.data),
         }
         if draft.node_id is not None:
-            document["nodeId"] = draft.node_id
+            envelope["nodeId"] = draft.node_id
         if draft.edge_id is not None:
-            document["edgeId"] = draft.edge_id
+            envelope["edgeId"] = draft.edge_id
         if draft.attempt is not None:
-            document["attempt"] = draft.attempt
-        return GraphEvent.model_validate(document)
+            envelope["attempt"] = draft.attempt
+
+        protected = disposition == "protected-ref"
+        outcome = self.protection.guard.prepare(
+            SinkWriteRequest(
+                source_class=draft.source_class,
+                sink=EVENT_JOURNAL_SINK,
+                sink_instance=self.store,
+                authority_class="authoritative" if protected else "observational",
+                occurrence=OccurrenceContext(
+                    run_id=self.run_id,
+                    graph_revision=_GRAPH_REVISION,
+                    record_kind="event",
+                    record_type=draft.type,
+                    occurrence_id=event_id,
+                    sequence=sequence,
+                    field_path=draft.field_path,
+                    occurred_at=timestamp,
+                    node_id=draft.node_id,
+                    edge_id=draft.edge_id,
+                    attempt=draft.attempt,
+                ),
+                metadata=envelope,
+                payload=draft.payload,
+                semantic_context=draft.semantic_context,
+                mac_field_path=draft.mac_field_path,
+                payload_hash_field="/payloadHash",
+                payload_hash_source="/data",
+                side_effects=draft.side_effects,  # type: ignore[arg-type]
+                executor_outcome=draft.executor_outcome,  # type: ignore[arg-type]
+            )
+        )
+        if isinstance(outcome, GuardFailed):
+            raise _guard_error(
+                self.run_id,
+                outcome.failure,
+                "the sink guard refused a durable event",
+            )
+        if isinstance(outcome, GuardSuppressed):
+            # An authoritative durable value has exactly one legal
+            # representation; suppression is not a reduced-capture success.
+            raise DurableRunError(
+                DurableRunErrorCode.PAYLOAD_PROTECTION_REQUIRED,
+                self.run_id,
+                "the capture policy suppressed an authoritative durable value",
+                {"eventType": draft.type},
+            )
+        assert isinstance(outcome, GuardPrepared)
+        invalid = validate_protected_event(outcome.document)
+        if invalid is not None:
+            # The prepared write is abandoned unconsumed; nothing reaches disk.
+            raise _guard_error(
+                self.run_id,
+                invalid,
+                "a prepared durable event is not a valid protected envelope",
+            )
+        return ProtectedGraphEvent.model_validate(outcome.document), outcome.prepared
 
     async def append(
         self,
         drafts: list[_EventDraft],
         *,
         conflict_code: DurableRunErrorCode = DurableRunErrorCode.RESUME_CONFLICT,
-    ) -> tuple[GraphEvent, ...]:
+    ) -> tuple[ProtectedGraphEvent, ...]:
         async with self._lock:
             return await self._append_locked(drafts, conflict_code=conflict_code)
 
@@ -261,15 +459,17 @@ class _DurableJournal:
         drafts: list[_EventDraft],
         *,
         conflict_code: DurableRunErrorCode,
-    ) -> tuple[GraphEvent, ...]:
+    ) -> tuple[ProtectedGraphEvent, ...]:
         if self._fatal_error is not None:
             raise self._fatal_error
         expected_version = self.version
         try:
-            events = tuple(
+            candidates = [
                 self._event(draft, expected_version + index + 1)
                 for index, draft in enumerate(drafts)
-            )
+            ]
+            events = tuple(event for event, _ in candidates)
+            prepared = [item for _, item in candidates]
             seen_ids = set(self._event_ids)
             duplicate_ids: set[str] = set()
             for event in events:
@@ -286,7 +486,7 @@ class _DurableJournal:
             returned_version = await self.store.append(
                 self.run_id,
                 expected_version,
-                events,
+                prepared,
             )
             required_version = expected_version + len(events)
             if type(returned_version) is not int or returned_version != required_version:
@@ -339,9 +539,22 @@ class _DurableJournal:
         self._event_ids.update(event.event_id for event in events)
         return events
 
-    def activity_key(self, node_id: str, input_hash: str) -> str:
-        return durable_json_hash(
-            ["activity/v1alpha1", self.run_id, _GRAPH_REVISION, node_id, input_hash]
+    def input_mac(self, node_id: str, node_input: JsonValue) -> str:
+        """Section 5.4: the keyed logical identity of one bound node input."""
+
+        return value_mac(
+            self._identity_key,
+            node_input_context(self.run_id, _GRAPH_REVISION, node_id),
+            node_input,
+        )
+
+    def activity_key(self, node_id: str, input_mac: str) -> str:
+        return activity_key(
+            self._identity_key,
+            run_id=self.run_id,
+            graph_revision=_GRAPH_REVISION,
+            node_id=node_id,
+            input_mac=input_mac,
         )
 
     async def before_attempt(
@@ -350,29 +563,30 @@ class _DurableJournal:
         node_input: JsonValue,
         attempt: int,
     ) -> _AttemptIdentity:
-        tagged_input = encode_durable_json(node_input)
-        input_hash = durable_json_hash(node_input)
-        activity_key = self.activity_key(node.id, input_hash)
-        self._activity_keys[node.id] = activity_key
+        input_mac = self.input_mac(node.id, node_input)
+        activity = self.activity_key(node.id, input_mac)
+        self._activity_keys[node.id] = activity
+        side_effects = _side_effects(node)
         drafts: list[_EventDraft] = []
         if self.pre_scheduled.pop(node.id, None) != attempt:
             drafts.append(
                 _EventDraft(
                     "NodeScheduled",
-                    {
-                        "input": tagged_input,
-                        "inputHash": input_hash,
-                        "activityKey": activity_key,
-                        "sideEffects": _side_effects(node),
-                    },
+                    {"activityKey": activity, "sideEffects": side_effects},
                     node_id=node.id,
                     attempt=attempt,
+                    payload=node_input,
+                    source_class="bound-node-input",
+                    semantic_context=node_input_context(self.run_id, _GRAPH_REVISION, node.id),
+                    field_path="/data/inputRef",
+                    mac_field_path="/data/inputMac",
+                    side_effects=side_effects,
                 )
             )
         drafts.append(
             _EventDraft(
                 "NodeStarted",
-                {"inputHash": input_hash, "activityKey": activity_key},
+                {"inputMac": input_mac, "activityKey": activity},
                 node_id=node.id,
                 attempt=attempt,
             )
@@ -382,7 +596,7 @@ class _DurableJournal:
         return _AttemptIdentity(
             run_id=self.run_id,
             attempt_id=f"{self.run_id}/{node.id}/{attempt}",
-            activity_key=activity_key,
+            activity_key=activity,
             scheduled_ordinal=scheduled_ordinal,
         )
 
@@ -403,7 +617,7 @@ class _DurableJournal:
                         "NodeAttemptFailed",
                         {
                             "terminal": not will_retry,
-                            "failure": _failure_document(failure),
+                            "failure": _durable_failure_document(failure),
                         },
                         node_id=failure.node_id,
                         attempt=failure.attempt,
@@ -459,25 +673,28 @@ class _DurableJournal:
         attempt: int,
         output: JsonValue,
     ) -> int:
-        input_hash = durable_json_hash(node_input)
-        tagged_output = encode_durable_json(output)
-        output_hash = durable_json_hash(output)
+        input_mac = self.input_mac(node.id, node_input)
+        output_context = node_output_context(self.run_id, _GRAPH_REVISION, node.id)
+        output_mac = value_mac(self._identity_key, output_context, output)
         drafts = [
             _EventDraft(
                 "NodeSucceeded",
-                {
-                    "inputHash": input_hash,
-                    "output": tagged_output,
-                    "outputHash": output_hash,
-                },
+                {"inputMac": input_mac},
                 node_id=node.id,
                 attempt=attempt,
+                payload=output,
+                source_class="node-output",
+                semantic_context=output_context,
+                field_path="/data/outputRef",
+                mac_field_path="/data/outputMac",
+                side_effects=_side_effects(node),
+                executor_outcome="succeeded",
             )
         ]
         drafts.extend(
             _EventDraft(
                 "EdgeEmitted",
-                {"outputHash": output_hash},
+                {"outputMac": output_mac},
                 node_id=node.id,
                 edge_id=edge.id,
                 attempt=attempt,
@@ -496,8 +713,13 @@ class _DurableJournal:
             [
                 _EventDraft(
                     "NodeSettledWithoutAttempt",
-                    {"result": encode_durable_json(_node_result_document(result))},
+                    {},
                     node_id=node.id,
+                    payload=_node_result_document(result),
+                    source_class="node-result",
+                    semantic_context=node_result_context(self.run_id, _GRAPH_REVISION, node.id),
+                    field_path="/data/resultRef",
+                    mac_field_path="/data/resultMac",
                 )
             ]
         )
@@ -513,7 +735,17 @@ class _DurableJournal:
             }[result.status],
         )
         await self.append(
-            [_EventDraft(event_type, {"result": encode_durable_json(_run_result_document(result))})]
+            [
+                _EventDraft(
+                    event_type,
+                    {"status": result.status.value},
+                    payload=_run_result_document(result),
+                    source_class="run-result",
+                    semantic_context=run_result_context(self.run_id, _GRAPH_REVISION),
+                    field_path="/data/resultRef",
+                    mac_field_path="/data/resultMac",
+                )
+            ]
         )
 
 
@@ -748,7 +980,7 @@ class _NodeProjection:
     node_id: str
     input: JsonValue = None
     input_bound: bool = False
-    input_hash: str | None = None
+    input_mac: str | None = None
     activity_key: str | None = None
     side_effects: str | None = None
     scheduled_attempt: int | None = None
@@ -757,14 +989,14 @@ class _NodeProjection:
     retry_available_at: str | None = None
     attempts: int = 0
     result: NodeResult | None = None
-    output_hash: str | None = None
+    output_mac: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class _FoldedRun:
     graph_input: JsonValue
     graph_hash: str
-    input_hash: str
+    input_mac: str
     implementation_hash: str
     max_total_attempts: int
     projections: Mapping[str, _NodeProjection]
@@ -950,13 +1182,13 @@ def _validate_terminal_result(
         raise _invalid_history(run_id, "terminal status contradicts reconstructed graph result")
 
 
-def _event_attempt(event: GraphEvent, run_id: str) -> int:
+def _event_attempt(event: ProtectedGraphEvent, run_id: str) -> int:
     if event.attempt is None:
         raise _invalid_history(run_id, f"{event.type} requires an attempt")
     return event.attempt
 
 
-def _event_node(event: GraphEvent, graph: CompiledGraph, run_id: str) -> str:
+def _event_node(event: ProtectedGraphEvent, graph: CompiledGraph, run_id: str) -> str:
     if event.node_id is None or event.node_id not in graph.nodes:
         raise _invalid_history(run_id, f"{event.type} references an unknown node")
     return event.node_id
@@ -1296,12 +1528,75 @@ def _validate_settled_without_attempt(
         )
 
 
+def _recovered_value(
+    event: ProtectedGraphEvent,
+    *,
+    run_id: str,
+    protection: PayloadProtection,
+    reference_field: str,
+    mac_field: str,
+    semantic_context: Mapping[str, JsonValue],
+    mac_mismatch_code: DurableRunErrorCode | None = None,
+) -> JsonValue:
+    """Authenticate one committed protected reference and return its value.
+
+    Section 6.1: the adjacent MAC must equal the referenced object's
+    ``valueMac``, and the reference must verify under its exact event AAD before
+    it can affect state. Nothing partially recovered is ever exposed to the fold.
+    """
+
+    reference = protection.reference_from_document(event.data.get(reference_field))
+    if isinstance(reference, RedactionFailure):
+        raise DurableRunError(
+            DurableRunErrorCode.PROTECTED_PAYLOAD_UNRECOVERABLE,
+            run_id,
+            f"{event.type}.{reference_field} is not a valid protected reference",
+            {"redactionCode": reference.code, "sequence": event.sequence},
+        )
+    if event.data.get(mac_field) != reference.value_mac:
+        if mac_mismatch_code is not None:
+            raise DurableRunError(
+                mac_mismatch_code,
+                run_id,
+                f"stored value does not match the recorded {mac_field}",
+                {"sequence": event.sequence},
+            )
+        raise _invalid_history(
+            run_id,
+            f"{event.type}.{mac_field} does not equal the referenced valueMac",
+            sequence=event.sequence,
+        )
+    recovered = protection.recover(
+        reference,
+        run_id=run_id,
+        graph_revision=event.graph_revision,
+        record_type=event.type,
+        event_id=event.event_id,
+        sequence=event.sequence,
+        field_path=f"/data/{reference_field}",
+        capture_policy_hash_value=event.capture_policy_hash,
+        semantic_context=semantic_context,
+        node_id=event.node_id,
+        edge_id=event.edge_id,
+        attempt=event.attempt,
+    )
+    if isinstance(recovered, RedactionFailure):
+        raise DurableRunError(
+            DurableRunErrorCode.PROTECTED_PAYLOAD_UNRECOVERABLE,
+            run_id,
+            f"{event.type}.{reference_field} did not authenticate under its event AAD",
+            {"redactionCode": recovered.code, "sequence": event.sequence},
+        )
+    return recovered
+
+
 def _fold_history(
-    events: tuple[GraphEvent, ...],
+    events: tuple[ProtectedGraphEvent, ...],
     *,
     graph: CompiledGraph,
     run_id: str,
     implementation_hash: str,
+    protection: PayloadProtection,
 ) -> _FoldedRun:
     if not events:
         raise DurableRunError(
@@ -1309,10 +1604,11 @@ def _fold_history(
             run_id,
             "durable run does not exist",
         )
+    identity_key = protection.identity_key(run_id)
     projections = {node_id: _NodeProjection(node_id) for node_id in graph.nodes}
     graph_input: JsonValue = None
     stored_graph_hash = ""
-    stored_input_hash = ""
+    stored_input_mac = ""
     stored_implementation_hash = ""
     max_total_attempts = 0
     started = False
@@ -1350,8 +1646,35 @@ def _fold_history(
                 eventId=event.event_id,
             )
         event_ids.add(event.event_id)
-        if event.payload_hash is None or event.payload_hash != canonical_sha256(event.data):
+        if event.payload_hash != canonical_sha256(event.data):
             raise _invalid_history(run_id, "event payload hash is invalid", sequence=index)
+        if event.capture_policy_hash != protection.policy_hash:
+            # Section 4.4: resume must resolve the policy again and match the
+            # recorded hash exactly. A narrower or wider policy is a mismatch,
+            # never a silent semantic change.
+            raise DurableRunError(
+                DurableRunErrorCode.CAPTURE_POLICY_MISMATCH,
+                run_id,
+                "the effective capture policy does not match the durable run",
+                {
+                    "expected": event.capture_policy_hash,
+                    "actual": protection.policy_hash,
+                    "sequence": index,
+                },
+            )
+        if (
+            event.type not in EVENT_DISPOSITIONS
+            or event.payload_disposition != EVENT_DISPOSITIONS[event.type]
+            or event.redacted
+        ):
+            # Section 3.2: exactly one disposition per event type, and the
+            # scheduler envelope is never redacted or inline.
+            raise _invalid_history(
+                run_id,
+                "event payload disposition is not the one pinned for its type",
+                sequence=index,
+                eventType=event.type,
+            )
         if terminal_seen:
             raise _invalid_history(run_id, "event appears after a terminal event", sequence=index)
         if event.type in {
@@ -1400,7 +1723,7 @@ def _fold_history(
             )
 
         if expected_edges:
-            edge_id, producer_id, attempt, output_hash = expected_edges.pop(0)
+            edge_id, producer_id, attempt, output_mac = expected_edges.pop(0)
             if event.type != "EdgeEmitted" or event.edge_id != edge_id:
                 raise _invalid_history(
                     run_id,
@@ -1410,13 +1733,13 @@ def _fold_history(
                 )
             if event.node_id != producer_id or event.attempt != attempt:
                 raise _invalid_history(run_id, "EdgeEmitted producer identity is invalid")
-            _exact_keys(event.data, {"outputHash"}, run_id, "EdgeEmitted.data")
-            if event.data["outputHash"] != output_hash:
-                raise _invalid_history(run_id, "EdgeEmitted output hash is invalid")
+            _exact_keys(event.data, {"outputMac"}, run_id, "EdgeEmitted.data")
+            if event.data["outputMac"] != output_mac:
+                raise _invalid_history(run_id, "EdgeEmitted output MAC is invalid")
             continue
 
         if expected_retry is not None:
-            node_id, attempt, activity_key = expected_retry
+            node_id, attempt, reserved_activity = expected_retry
             if event.type != "NodeRetried" or event.node_id != node_id or event.attempt != attempt:
                 raise _invalid_history(
                     run_id,
@@ -1434,7 +1757,7 @@ def _fold_history(
                 _strict_rfc3339(available_at)
             except ValueError as exc:
                 raise _invalid_history(run_id, "NodeRetried.availableAt is invalid") from exc
-            if event.data["activityKey"] != activity_key:
+            if event.data["activityKey"] != reserved_activity:
                 raise _invalid_history(run_id, "NodeRetried activity key is invalid")
             projection = projections[node_id]
             if attempt > _max_node_attempts(graph.nodes[node_id]):
@@ -1468,8 +1791,11 @@ def _fold_history(
                     "contractVersion",
                     "graphHash",
                     "implementationHash",
-                    "input",
-                    "inputHash",
+                    "capturePolicyHash",
+                    "protectedStoreContract",
+                    "keyRefHash",
+                    "inputRef",
+                    "inputMac",
                     "maxTotalAttempts",
                 },
                 run_id,
@@ -1477,32 +1803,39 @@ def _fold_history(
             )
             if event.data["contractVersion"] != _CONTRACT_VERSION:
                 raise _invalid_history(run_id, "RunCreated contract version is incompatible")
+            if event.data["protectedStoreContract"] != PROTECTED_STORE_CONTRACT:
+                raise _invalid_history(
+                    run_id, "RunCreated protected store contract is incompatible"
+                )
+            if event.data["capturePolicyHash"] != event.capture_policy_hash:
+                raise _invalid_history(run_id, "RunCreated capture policy hash is inconsistent")
+            if event.data["keyRefHash"] != protection.key_ref_digest:
+                raise DurableRunError(
+                    DurableRunErrorCode.PROTECTED_PAYLOAD_UNRECOVERABLE,
+                    run_id,
+                    "the configured key reference does not match the durable run",
+                    {"redactionCode": "PROTECTED_PAYLOAD_UNAUTHORIZED"},
+                )
             stored_graph_hash = _string(event.data["graphHash"], run_id, "graphHash")
             stored_implementation_hash = _string(
                 event.data["implementationHash"], run_id, "implementationHash"
             )
-            stored_input_hash = _string(event.data["inputHash"], run_id, "inputHash")
+            stored_input_mac = _string(event.data["inputMac"], run_id, "inputMac")
             max_total_attempts = _integer(
                 event.data["maxTotalAttempts"],
                 run_id,
                 "maxTotalAttempts",
                 minimum=1,
             )
-            try:
-                graph_input = decode_durable_json(event.data["input"])
-            except DurableJsonError as exc:
-                raise DurableRunError(
-                    DurableRunErrorCode.INPUT_HASH_MISMATCH,
-                    run_id,
-                    "stored graph input is not valid Durable JSON",
-                    cause=exc,
-                ) from exc
-            if durable_json_hash(graph_input) != stored_input_hash:
-                raise DurableRunError(
-                    DurableRunErrorCode.INPUT_HASH_MISMATCH,
-                    run_id,
-                    "stored graph input does not match inputHash",
-                )
+            graph_input = _recovered_value(
+                event,
+                run_id=run_id,
+                protection=protection,
+                reference_field="inputRef",
+                mac_field="inputMac",
+                semantic_context=graph_input_context(run_id, _GRAPH_REVISION),
+                mac_mismatch_code=DurableRunErrorCode.INPUT_HASH_MISMATCH,
+            )
             if stored_graph_hash != graph.graph_hash:
                 raise DurableRunError(
                     DurableRunErrorCode.GRAPH_HASH_MISMATCH,
@@ -1589,17 +1922,18 @@ def _fold_history(
                 )
             _exact_keys(
                 event.data,
-                {"result"},
+                {"resultRef", "resultMac"},
                 run_id,
                 "NodeSettledWithoutAttempt.data",
             )
-            try:
-                decoded_result = decode_durable_json(event.data["result"])
-            except DurableJsonError as exc:
-                raise _invalid_history(
-                    run_id,
-                    "NodeSettledWithoutAttempt result is malformed",
-                ) from exc
+            decoded_result = _recovered_value(
+                event,
+                run_id=run_id,
+                protection=protection,
+                reference_field="resultRef",
+                mac_field="resultMac",
+                semantic_context=node_result_context(run_id, _GRAPH_REVISION, node_id),
+            )
             result = _decode_node_result(
                 decoded_result,
                 run_id,
@@ -1663,17 +1997,19 @@ def _fold_history(
                 )
             _exact_keys(
                 event.data,
-                {"input", "inputHash", "activityKey", "sideEffects"},
+                {"inputRef", "inputMac", "activityKey", "sideEffects"},
                 run_id,
                 "NodeScheduled.data",
             )
-            try:
-                node_input = decode_durable_json(event.data["input"])
-            except DurableJsonError as exc:
-                raise _invalid_history(run_id, "NodeScheduled input is malformed") from exc
-            input_hash = _string(event.data["inputHash"], run_id, "inputHash")
-            if durable_json_hash(node_input) != input_hash:
-                raise _invalid_history(run_id, "NodeScheduled inputHash is invalid")
+            node_input = _recovered_value(
+                event,
+                run_id=run_id,
+                protection=protection,
+                reference_field="inputRef",
+                mac_field="inputMac",
+                semantic_context=node_input_context(run_id, _GRAPH_REVISION, node_id),
+            )
+            input_mac = _string(event.data["inputMac"], run_id, "inputMac")
             expected_input = _bound_input_from_history(
                 graph,
                 node_id,
@@ -1695,19 +2031,23 @@ def _fold_history(
                     nodeId=node_id,
                     attempt=attempt,
                 )
-            activity_key = _string(event.data["activityKey"], run_id, "activityKey")
-            expected_activity = durable_json_hash(
-                ["activity/v1alpha1", run_id, _GRAPH_REVISION, node_id, input_hash]
+            recorded_activity = _string(event.data["activityKey"], run_id, "activityKey")
+            expected_activity = activity_key(
+                identity_key,
+                run_id=run_id,
+                graph_revision=_GRAPH_REVISION,
+                node_id=node_id,
+                input_mac=input_mac,
             )
-            if activity_key != expected_activity:
+            if recorded_activity != expected_activity:
                 raise _invalid_history(run_id, "NodeScheduled activityKey is invalid")
             side_effects = _string(event.data["sideEffects"], run_id, "sideEffects")
             if side_effects != _side_effects(graph.nodes[node_id]):
                 raise _invalid_history(run_id, "NodeScheduled sideEffects is inconsistent")
             projection.input = node_input
             projection.input_bound = True
-            projection.input_hash = input_hash
-            projection.activity_key = activity_key
+            projection.input_mac = input_mac
+            projection.activity_key = recorded_activity
             projection.side_effects = side_effects
             projection.scheduled_attempt = attempt
             projection.retry_attempt = None
@@ -1726,9 +2066,9 @@ def _fold_history(
                 or projection.retry_attempt is not None
             ):
                 raise _invalid_history(run_id, "NodeStarted lacks its required NodeScheduled")
-            _exact_keys(event.data, {"inputHash", "activityKey"}, run_id, "NodeStarted.data")
+            _exact_keys(event.data, {"inputMac", "activityKey"}, run_id, "NodeStarted.data")
             if (
-                event.data["inputHash"] != projection.input_hash
+                event.data["inputMac"] != projection.input_mac
                 or event.data["activityKey"] != projection.activity_key
             ):
                 raise _invalid_history(run_id, "NodeStarted recovery identity is invalid")
@@ -1777,19 +2117,21 @@ def _fold_history(
                 raise _invalid_history(run_id, "NodeSucceeded lacks one open attempt")
             _exact_keys(
                 event.data,
-                {"inputHash", "output", "outputHash"},
+                {"inputMac", "outputRef", "outputMac"},
                 run_id,
                 "NodeSucceeded.data",
             )
-            if event.data["inputHash"] != projection.input_hash:
-                raise _invalid_history(run_id, "NodeSucceeded inputHash is invalid")
-            try:
-                output = decode_durable_json(event.data["output"])
-            except DurableJsonError as exc:
-                raise _invalid_history(run_id, "NodeSucceeded output is malformed") from exc
-            output_hash = _string(event.data["outputHash"], run_id, "outputHash")
-            if durable_json_hash(output) != output_hash:
-                raise _invalid_history(run_id, "NodeSucceeded outputHash is invalid")
+            if event.data["inputMac"] != projection.input_mac:
+                raise _invalid_history(run_id, "NodeSucceeded inputMac is invalid")
+            output = _recovered_value(
+                event,
+                run_id=run_id,
+                protection=protection,
+                reference_field="outputRef",
+                mac_field="outputMac",
+                semantic_context=node_output_context(run_id, _GRAPH_REVISION, node_id),
+            )
+            output_mac = _string(event.data["outputMac"], run_id, "outputMac")
             if graph.nodes[node_id].kind == "router":
                 try:
                     if not projection.input_bound:
@@ -1803,7 +2145,7 @@ def _fold_history(
                         "NodeSucceeded contains an invalid route decision",
                         nodeId=node_id,
                     ) from exc
-            projection.output_hash = output_hash
+            projection.output_mac = output_mac
             projection.open_attempt = None
             active.discard(node_id)
             projection.result = NodeResult(
@@ -1818,7 +2160,7 @@ def _fold_history(
             if node_id not in completion_order:
                 completion_order.append(node_id)
             expected_edges = [
-                (edge.id, node_id, attempt, output_hash)
+                (edge.id, node_id, attempt, output_mac)
                 for edge in sorted(graph.outgoing[node_id], key=lambda item: item.id)
             ]
             continue
@@ -1930,11 +2272,27 @@ def _fold_history(
                     "terminal event leaves retry reservations pending",
                     nodeIds=sorted(retry_reservations, key=declaration_order.__getitem__),
                 )
-            _exact_keys(event.data, {"result"}, run_id, f"{event.type}.data")
-            try:
-                decoded_result = decode_durable_json(event.data["result"])
-            except DurableJsonError as exc:
-                raise _invalid_history(run_id, "terminal result is malformed") from exc
+            _exact_keys(
+                event.data,
+                {"status", "resultRef", "resultMac"},
+                run_id,
+                f"{event.type}.data",
+            )
+            expected_terminal_status = {
+                "RunSucceeded": RunStatus.SUCCEEDED,
+                "RunFailed": RunStatus.FAILED,
+                "RunCancelled": RunStatus.CANCELLED,
+            }[event.type]
+            if event.data["status"] != expected_terminal_status.value:
+                raise _invalid_history(run_id, "terminal event status metadata is inconsistent")
+            decoded_result = _recovered_value(
+                event,
+                run_id=run_id,
+                protection=protection,
+                reference_field="resultRef",
+                mac_field="resultMac",
+                semantic_context=run_result_context(run_id, _GRAPH_REVISION),
+            )
             terminal_result = _decode_run_result(decoded_result, run_id, graph)
             _validate_terminal_result(
                 run_id=run_id,
@@ -1965,7 +2323,7 @@ def _fold_history(
     return _FoldedRun(
         graph_input=graph_input,
         graph_hash=stored_graph_hash,
-        input_hash=stored_input_hash,
+        input_mac=stored_input_mac,
         implementation_hash=stored_implementation_hash,
         max_total_attempts=max_total_attempts,
         projections=MappingProxyType(projections),
@@ -1979,7 +2337,70 @@ def _fold_history(
     )
 
 
-async def _read_history(store: EventStore, run_id: str) -> tuple[GraphEvent, ...]:
+def _require_protection(
+    run_id: str,
+    store: object,
+    protection: PayloadProtection | None,
+) -> PayloadProtection:
+    """Section 4.2, checked before the first event, file, or executor call.
+
+    An unconfigured run refuses. It does not generate a key beside the
+    ciphertext, does not fall back to the legacy inline writer, and does not
+    downgrade to a metadata-only or redacted representation of an authoritative
+    value: each of those would put plaintext or an unrecoverable placeholder
+    where a protected reference belongs.
+    """
+
+    if protection is None:
+        raise DurableRunError(
+            DurableRunErrorCode.PAYLOAD_PROTECTION_REQUIRED,
+            run_id,
+            "a durable run requires a configured protected payload store and key provider",
+            {"redactionCode": "PAYLOAD_PROTECTION_REQUIRED"},
+        )
+    if not isinstance(store, ProtectedEventStore):
+        raise DurableRunError(
+            DurableRunErrorCode.PAYLOAD_PROTECTION_REQUIRED,
+            run_id,
+            "a durable run requires a guarded protected event store",
+            {"redactionCode": "PAYLOAD_PROTECTION_REQUIRED"},
+        )
+    return protection
+
+
+def _reject_legacy_history(store: ProtectedEventStore, run_id: str) -> None:
+    """Section 9.1 detection, before append, ``RunResumed``, and any executor.
+
+    The original bytes are opened read-only and are never rewritten, scrubbed,
+    truncated, re-hashed, or reinterpreted as protected. A v1alpha1 journal for
+    this run identity is refused; quarantine, sealed archive, and replay-fork are
+    the supported outcomes and none of them happens automatically.
+    """
+
+    documents = store.legacy_documents(run_id)
+    if not documents:
+        return
+    terminal = any(
+        document.get("type") in {"RunSucceeded", "RunFailed", "RunCancelled"}
+        for document in documents
+    )
+    detected = reject_legacy_history(documents, terminal=terminal)
+    raise DurableRunError(
+        DurableRunErrorCode.LEGACY_HISTORY_UNSAFE,
+        run_id,
+        "an events/v1alpha1 history exists for this run identity and cannot be continued",
+        {
+            "redactionCode": detected.code if detected is not None else None,
+            "contractVersion": "scheduler-recovery/v1alpha1",
+            "records": len(documents),
+            "terminal": terminal,
+        },
+    )
+
+
+async def _read_history(
+    store: ProtectedEventStore, run_id: str
+) -> tuple[ProtectedGraphEvent, ...]:
     try:
         return await store.read(run_id)
     except PersistenceError:
@@ -2053,7 +2474,8 @@ async def start_graph_run(
     *,
     run_id: str,
     implementation_id: str,
-    event_store: EventStore,
+    event_store: ProtectedEventStore,
+    payload_protection: PayloadProtection | None = None,
     max_concurrency: int | None = None,
     cancel_event: asyncio.Event | None = None,
     clock: Clock | None = None,
@@ -2061,6 +2483,9 @@ async def start_graph_run(
 ) -> RunResult:
     """Create and execute a new durable run; never silently resume one."""
 
+    # Section 4.2: this refusal precedes graph compilation, history reads, the
+    # first event, and any executor invocation.
+    protection = _require_protection(run_id, event_store, payload_protection)
     handler_snapshot = dict(handlers or {})
     graph = _fresh_compiled_graph(graph)
     capability_failure = _condition_capability_failure(graph)
@@ -2071,17 +2496,18 @@ async def start_graph_run(
         input_snapshot = portable_json_snapshot(graph_input)
     except PortableJsonError:
         raise TypeError("graph input must be a portable finite JSON value") from None
+    _reject_legacy_history(event_store, run_id)
     if await _read_history(event_store, run_id):
         raise DurableRunError(
             DurableRunErrorCode.RUN_ALREADY_EXISTS,
             run_id,
             "durable run already exists",
         )
-    input_hash = durable_json_hash(input_snapshot)
     journal = _DurableJournal(
         graph=graph,
         run_id=run_id,
         store=event_store,
+        protection=protection,
         version=-1,
         clock=clock or _default_clock,
         event_id_factory=event_id_factory or _default_event_id,
@@ -2094,10 +2520,16 @@ async def start_graph_run(
                     "contractVersion": _CONTRACT_VERSION,
                     "graphHash": graph.graph_hash,
                     "implementationHash": implementation_hash,
-                    "input": encode_durable_json(input_snapshot),
-                    "inputHash": input_hash,
+                    "capturePolicyHash": protection.policy_hash,
+                    "protectedStoreContract": PROTECTED_STORE_CONTRACT,
+                    "keyRefHash": protection.key_ref_digest,
                     "maxTotalAttempts": _effective_attempt_limit(graph),
                 },
+                payload=input_snapshot,
+                source_class="graph-input",
+                semantic_context=graph_input_context(run_id, _GRAPH_REVISION),
+                field_path="/data/inputRef",
+                mac_field_path="/data/inputMac",
             ),
             _EventDraft("RunStarted", {}),
         ],
@@ -2118,7 +2550,8 @@ async def resume_graph_run(
     *,
     run_id: str,
     implementation_id: str,
-    event_store: EventStore,
+    event_store: ProtectedEventStore,
+    payload_protection: PayloadProtection | None = None,
     max_concurrency: int | None = None,
     cancel_event: asyncio.Event | None = None,
     clock: Clock | None = None,
@@ -2126,18 +2559,21 @@ async def resume_graph_run(
 ) -> RunResult:
     """Resume one non-terminal durable history without replacing its input."""
 
+    protection = _require_protection(run_id, event_store, payload_protection)
     handler_snapshot = dict(handlers or {})
     graph = _fresh_compiled_graph(graph)
     capability_failure = _condition_capability_failure(graph)
     if capability_failure is not None:
         return capability_failure
     implementation_hash = _implementation_hash(implementation_id)
+    _reject_legacy_history(event_store, run_id)
     events = await _read_history(event_store, run_id)
     folded = _fold_history(
         events,
         graph=graph,
         run_id=run_id,
         implementation_hash=implementation_hash,
+        protection=protection,
     )
     if folded.terminal_result is not None:
         return folded.terminal_result
@@ -2164,6 +2600,7 @@ async def resume_graph_run(
         graph=graph,
         run_id=run_id,
         store=event_store,
+        protection=protection,
         version=folded.version,
         clock=effective_clock,
         event_id_factory=event_id_factory or _default_event_id,

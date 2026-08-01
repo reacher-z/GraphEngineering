@@ -162,7 +162,11 @@ from .durable_json import (
     durable_json_hash,
     encode_durable_json,
 )
-from .events import GraphEvent
+from .durable_protection import (
+    PayloadProtection,
+    default_durable_capture_policy,
+)
+from .events import GraphEvent, ProtectedGraphEvent
 from .graph_patch import (
     GraphPatchRuntime,
     PatchAuthority,
@@ -403,6 +407,7 @@ __all__ = [
     "PatchAuthority",
     "PatchDecision",
     "PatchReservation",
+    "PayloadProtection",
     "PercentageBarrierPolicy",
     "PipelineFailureCode",
     "PipelineFailurePolicy",
@@ -424,6 +429,7 @@ __all__ = [
     "PrimitiveValidationError",
     "PrimitiveValidationIssue",
     "PrimitiveValidationIssueCode",
+    "ProtectedGraphEvent",
     "RetryPolicy",
     "RouteConfidencePolicy",
     "RouteSelectionPolicy",
@@ -464,6 +470,7 @@ __all__ = [
     "cycle_store_adapter_codec",
     "decode_canonical_mutation_request",
     "decode_durable_json",
+    "default_durable_capture_policy",
     "durable_json_hash",
     "encode_canonical_mutation_request",
     "encode_durable_json",
