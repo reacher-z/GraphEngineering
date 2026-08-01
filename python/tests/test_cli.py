@@ -654,7 +654,7 @@ def test_help_and_version_are_plain_successful_commands() -> None:
     assert help_result.stderr == version_result.stderr == b""
     assert b"graph validate" in help_result.stdout
     assert b"grapheng" not in help_result.stdout
-    assert version_result.stdout == b"0.1.0-alpha.1\n"
+    assert version_result.stdout == b"0.2.0-alpha.2\n"
 
 
 def test_unexpected_internal_failure_uses_exit_seventy(

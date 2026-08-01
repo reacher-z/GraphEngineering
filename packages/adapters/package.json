@@ -1,6 +1,6 @@
 {
   "name": "@graph-engineering/adapters",
-  "version": "0.1.0-alpha.1",
+  "version": "0.2.0-alpha.2",
   "description": "Deterministic provider and tool adapters for Graph Engineering",
   "keywords": [
     "ai",

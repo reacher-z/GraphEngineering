@@ -1,6 +1,6 @@
 {
   "name": "@graph-engineering/primitives",
-  "version": "0.1.0-alpha.1",
+  "version": "0.2.0-alpha.2",
   "description": "Deterministic orchestration primitives for Graph Engineering",
   "keywords": ["ai", "agents", "graph", "workflow", "barrier", "router"],
   "repository": {

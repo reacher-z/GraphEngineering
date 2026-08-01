@@ -1,6 +1,6 @@
 {
   "name": "@graph-engineering/persistence",
-  "version": "0.1.0-alpha.1",
+  "version": "0.2.0-alpha.2",
   "description": "Local durable event and checkpoint stores for Graph Engineering",
   "keywords": ["ai", "agents", "graph", "workflow", "persistence", "checkpoints"],
   "repository": {

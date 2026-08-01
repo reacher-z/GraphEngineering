@@ -1,6 +1,6 @@
 {
   "name": "@graph-engineering/sqlite",
-  "version": "0.1.0-alpha.1",
+  "version": "0.2.0-alpha.2",
   "description": "Same-host durable SQLite CycleStore provider for Graph Engineering",
   "keywords": ["ai", "agents", "graph", "workflow", "sqlite", "persistence", "cycle-store"],
   "repository": {

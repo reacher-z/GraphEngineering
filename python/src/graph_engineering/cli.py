@@ -44,7 +44,7 @@ from .source import (
     parse_graph_source,
 )
 
-CLI_VERSION: Final = "0.1.0-alpha.1"
+CLI_VERSION: Final = "0.2.0-alpha.2"
 MACHINE_SCHEMA_VERSION: Final = "graph-engineering.cli/v1alpha1"
 QUICKSTART_TEMPLATE: Final = "quickstart/research-diamond.graph.json"
 QUICKSTART_RESOURCE: Final = "data/research-diamond.graph.json"

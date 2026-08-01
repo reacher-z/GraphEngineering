@@ -287,10 +287,16 @@ function parseRounds(value: unknown): ParsedRound[] {
  * mandatory (1..100) and must equal `rounds.length`. Every round is explicitly
  * `find → checkDry`; each verdict flows to a unique finalize port, and every
  * non-final verdict also has a versioned `LoopContinue` annotation toward the
- * next finder. The current v1alpha1 scheduler ignores conditions and therefore
- * runs all rounds; finalize must select the earliest dry verdict. Actual early
- * stop requires the metadata-declared
- * `edge-condition-routing-and-early-stop/v1alpha1` runtime capability.
+ * next finder. `finalize` is specified to select the earliest dry verdict.
+ *
+ * The graph this returns compiles, but **no scheduler in this repository runs
+ * it**. The v1alpha1 runtime fails it closed before any executor is invoked:
+ * every `LoopDryVerdict` / `LoopContinue` / `LoopVerdictAtBound` condition is
+ * rejected as `UNSUPPORTED_EDGE_CONDITION`, because `edgeConditionError` admits
+ * `RouteEquals` on a router and nothing else. Execution additionally requires
+ * the metadata-declared `edge-condition-routing-and-early-stop/v1alpha1`
+ * runtime capability, which no runtime implements. Treat this constructor as a
+ * blueprint, not a runnable pattern.
  */
 export function loopUntilDry(options: LoopUntilDryOptions): PatternGraph {
   const input = snapshotOptions(options, fields("maxRounds", "rounds", "finalize"));

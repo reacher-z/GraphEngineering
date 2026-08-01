@@ -1,6 +1,6 @@
 {
   "name": "@graph-engineering/runtime",
-  "version": "0.1.0-alpha.1",
+  "version": "0.2.0-alpha.2",
   "description": "Deterministic asynchronous TypeScript graph scheduler",
   "keywords": ["ai", "agents", "graph", "workflow", "scheduler", "orchestration"],
   "repository": {

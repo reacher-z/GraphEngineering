@@ -1,6 +1,6 @@
 {
   "name": "@graph-engineering/cli",
-  "version": "0.1.0-alpha.1",
+  "version": "0.2.0-alpha.2",
   "description": "Safely initialize, validate, inspect, compile, visualize, and diagnose Graph Engineering Graph IR tooling",
   "keywords": ["ai", "agents", "graph", "workflow", "cli", "visualization"],
   "repository": {

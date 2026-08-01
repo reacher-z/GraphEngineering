@@ -1,6 +1,6 @@
 # Support
 
-Graph Engineering is an early alpha (`0.1.0-alpha.1`). Public APIs can change, but bug reports and
+Graph Engineering is an early alpha (`0.2.0-alpha.2`). Public APIs can change, but bug reports and
 reproducible feedback are welcome.
 
 - Use [GitHub Discussions](https://github.com/reacher-z/GraphEngineering/discussions)

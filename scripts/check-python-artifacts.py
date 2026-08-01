@@ -38,6 +38,9 @@ SHARED_AUTHORING_YAML = (AUTHORING_ROOT / TYPED_CASE["yaml"]).read_bytes()
 MACHINE_SCHEMA_VERSION = "graph-engineering.cli/v1alpha1"
 CONSOLE_SCRIPT_TARGET = "graph_engineering.cli:main"
 QUICKSTART_ARCHIVE_PATH = "graph_engineering/data/research-diamond.graph.json"
+IMPORTED_VERSION_PROBE = (
+    "import graph_engineering, sys; print(graph_engineering.__version__)"
+)
 QUICKSTART_SOURCE = (
     ROOT / "examples" / "quickstart" / "research-diamond.graph.json"
 ).read_bytes()
@@ -127,6 +130,23 @@ def parse_console_scripts(source: bytes) -> dict[str, str]:
     if not parser.has_section("console_scripts"):
         raise SystemExit("wheel entry_points.txt omits [console_scripts]")
     return dict(parser.items("console_scripts", raw=True))
+
+
+def display_version(project_version: str) -> str:
+    """Map the PEP 440 project version onto the CLI's SemVer display spelling.
+
+    The wheel is labelled with the PEP 440 form and the CLI prints the SemVer
+    form of the same release. Only the pre-release spellings this project uses
+    are recognised, so an unfamiliar version fails here instead of silently
+    disabling the agreement check below.
+    """
+    match = re.fullmatch(r"(\d+\.\d+\.\d+)(?:(a|b|rc)(\d+))?", project_version)
+    if match is None:
+        raise SystemExit(f"unsupported project version spelling: {project_version!r}")
+    release, kind, ordinal = match.groups()
+    if kind is None:
+        return release
+    return f"{release}-{ {'a': 'alpha', 'b': 'beta', 'rc': 'rc'}[kind]}.{ordinal}"
 
 
 def installed_console_script(virtualenv: Path, name: str) -> Path:
@@ -662,6 +682,31 @@ for artifact_kind, artifact in (("wheel", wheel), ("sdist", sdist)):
         )
         graph = installed_console_script(virtualenv, "graph")
         grapheng = installed_console_script(virtualenv, "grapheng")
+        reported = subprocess.run(
+            [str(graph), "--version"],
+            cwd=directory,
+            check=True,
+            capture_output=True,
+            timeout=60,
+        ).stdout.decode("utf-8")
+        expected_display = display_version(version)
+        if reported != f"{expected_display}\n":
+            raise SystemExit(
+                f"installed {artifact_kind} is labelled {version!r} but its CLI "
+                f"reports {reported!r}, expected {expected_display + chr(10)!r}"
+            )
+        imported = subprocess.run(
+            [str(executable), "-I", "-c", IMPORTED_VERSION_PROBE],
+            cwd=directory,
+            check=True,
+            capture_output=True,
+            timeout=60,
+        ).stdout.decode("utf-8")
+        if imported != f"{version}\n":
+            raise SystemExit(
+                f"installed {artifact_kind} is labelled {version!r} but "
+                f"graph_engineering.__version__ is {imported.strip()!r}"
+            )
         validation = invoke_machine_cli(
             graph,
             ["validate", str(fixture), "--input-format", "yaml", "--json"],
@@ -708,5 +753,5 @@ for artifact_kind, artifact in (("wheel", wheel), ("sdist", sdist)):
 print(
     f"Validated and installed Python wheel and sdist for graph-engineering {version}: "
     f"{len(wheel_names)} wheel entries, {len(names)} sdist entries; entry points, "
-    "shared YAML authoring, validate, and doctor passed."
+    "reported version agreement, shared YAML authoring, validate, and doctor passed."
 )

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "graph-engineering"
-version = "0.1.0a1"
+version = "0.2.0a2"
 description = "A typed, deterministic graph runtime for multi-agent systems"
 readme = "README.md"
 requires-python = ">=3.11"

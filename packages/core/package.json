@@ -1,6 +1,6 @@
 {
   "name": "@graph-engineering/core",
-  "version": "0.1.0-alpha.1",
+  "version": "0.2.0-alpha.2",
   "description": "Canonical Graph IR types, hashing, and compiler for Graph Engineering",
   "keywords": ["ai", "agents", "graph", "workflow", "compiler", "orchestration"],
   "repository": {

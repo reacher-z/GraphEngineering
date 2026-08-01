@@ -32,7 +32,7 @@ import {
   type UnsupportedOperationName,
 } from "./operations.js";
 
-const VERSION = "0.1.0-alpha.1";
+const VERSION = "0.2.0-alpha.2";
 export const MACHINE_SCHEMA_VERSION = "graph-engineering.cli/v1alpha1" as const;
 
 export const EXIT_CODES = {

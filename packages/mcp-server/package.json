@@ -1,6 +1,6 @@
 {
   "name": "@graph-engineering/mcp-server",
-  "version": "0.1.0-alpha.1",
+  "version": "0.2.0-alpha.2",
   "description": "Read-only MCP server for Graph Engineering Graph IR",
   "keywords": ["ai", "agents", "graph", "workflow", "mcp", "model-context-protocol"],
   "repository": {

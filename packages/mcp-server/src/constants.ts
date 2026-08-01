@@ -1,5 +1,5 @@
 export const SERVER_NAME = "graph-engineering-readonly";
-export const SERVER_VERSION = "0.1.0-alpha.1";
+export const SERVER_VERSION = "0.2.0-alpha.2";
 export const STRUCTURED_CONTENT_VERSION = "graph-engineering.mcp/v1alpha1";
 export const GRAPH_API_VERSION = "graphengineering.reacher-z.github.io/v1alpha1";
 export const GRAPH_SCHEMA_URI = "graph-engineering://schemas/v1alpha1/graph";

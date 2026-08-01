@@ -1,6 +1,6 @@
 {
   "name": "@graph-engineering/patterns",
-  "version": "0.1.0-alpha.1",
+  "version": "0.2.0-alpha.2",
   "description": "Deterministic, portable Graph IR pattern constructors",
   "keywords": ["ai", "agents", "graph", "workflow", "patterns", "orchestration"],
   "repository": {
