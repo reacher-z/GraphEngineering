@@ -127,6 +127,7 @@ _METADATA_QUERY: Final = (
     "SELECT application_id, user_version "
     "FROM main.pragma_application_id(), main.pragma_user_version()"
 )
+_OWNER_EXECUTE = SQLiteV1BaselineConnectionOwner.execute
 
 _T = TypeVar("_T")
 
@@ -253,7 +254,7 @@ def _read_metadata_from_cursor_intrinsic(
     return metadata
 
 
-def _snapshot_target_catalog_observation_intrinsic(
+def _build_target_catalog_observation_intrinsic(
     application_id_value: object,
     user_version_value: object,
     rows_value: object,
@@ -299,7 +300,13 @@ def _snapshot_target_catalog_observation_intrinsic(
         target_descriptor=SQLITE_CURSOR_PUBLICATION_TARGET_DESCRIPTOR,
         user_version=user_version,
     )
-    if (
+    return snapshot
+
+
+def _validate_target_catalog_snapshot_intrinsic(
+    snapshot: _TargetCatalogSnapshot,
+) -> _TargetCatalogSnapshot:
+    if type(snapshot) is not _TargetCatalogSnapshot or (
         snapshot.application_id != SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_EXPECTED_APPLICATION_ID
         or snapshot.user_version != SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_EXPECTED_USER_VERSION
         or snapshot.row_count != SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_EXPECTED_ROW_COUNT
@@ -314,19 +321,46 @@ def _snapshot_target_catalog_observation_intrinsic(
     return snapshot
 
 
-def _read_validated_target_catalog_intrinsic(
+def _snapshot_target_catalog_observation_intrinsic(
+    application_id_value: object,
+    user_version_value: object,
+    rows_value: object,
+) -> _TargetCatalogSnapshot:
+    """Build and validate the exact frozen v2 target observation."""
+
+    return _validate_target_catalog_snapshot_intrinsic(
+        _build_target_catalog_observation_intrinsic(
+            application_id_value,
+            user_version_value,
+            rows_value,
+        )
+    )
+
+
+def _read_target_catalog_observation_intrinsic(
     connection: SQLiteV1BaselineConnectionOwner,
 ) -> _TargetCatalogSnapshot:
+    """Read a canonical physical-catalog observation at any schema version."""
+
     if type(connection) is not SQLiteV1BaselineConnectionOwner:
         _fail("GE_CURSOR_B3_TARGET_CATALOG_CONNECTION")
     try:
-        cursor = connection.execute(SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_QUERY)
+        cursor = _OWNER_EXECUTE(connection, SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_QUERY)
     except Exception:
         _fail("GE_CURSOR_B3_TARGET_CATALOG_QUERY")
     rows = _read_catalog_rows_from_cursor_intrinsic(cursor)
     try:
-        metadata_cursor = connection.execute(_METADATA_QUERY)
+        metadata_cursor = _OWNER_EXECUTE(connection, _METADATA_QUERY)
     except Exception:
         _fail("GE_CURSOR_B3_TARGET_CATALOG_METADATA")
     metadata = _read_metadata_from_cursor_intrinsic(metadata_cursor)
-    return _snapshot_target_catalog_observation_intrinsic(metadata[0], metadata[1], rows)
+    return _build_target_catalog_observation_intrinsic(metadata[0], metadata[1], rows)
+
+
+_READ_TARGET_CATALOG_OBSERVATION = _read_target_catalog_observation_intrinsic
+
+
+def _read_validated_target_catalog_intrinsic(
+    connection: SQLiteV1BaselineConnectionOwner,
+) -> _TargetCatalogSnapshot:
+    return _validate_target_catalog_snapshot_intrinsic(_READ_TARGET_CATALOG_OBSERVATION(connection))

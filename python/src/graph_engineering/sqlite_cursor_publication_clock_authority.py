@@ -9,6 +9,8 @@ from weakref import WeakKeyDictionary
 
 from .sqlite_operation_baseline_source import SQLiteV1BaselineConnectionOwner
 
+_OWNER_EXECUTE = SQLiteV1BaselineConnectionOwner.execute
+
 _CONSTRUCTION_TOKEN: Final = object()
 
 ClockBoundary = Literal[
@@ -195,14 +197,15 @@ def _checked_lock(value: _MigrationLockIdentity) -> _MigrationLockIdentity:
 
 
 def _live_lock(connection: SQLiteV1BaselineConnectionOwner) -> _MigrationLockIdentity:
-    cursor = connection.execute(
+    cursor = _OWNER_EXECUTE(
+        connection,
         """
         SELECT active_lock_id, active_owner_id, active_source_version,
                active_target_version, active_lock_epoch, active_fencing_token,
                active_expires_at_ms
           FROM main.ge_cycle_migration_lock
          WHERE singleton = 1
-        """
+        """,
     )
     try:
         row = cursor.fetchone()

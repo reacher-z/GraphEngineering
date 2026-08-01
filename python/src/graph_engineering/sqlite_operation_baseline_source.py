@@ -9,13 +9,22 @@ from collections.abc import Callable, Generator, Iterator, Mapping
 from contextlib import suppress
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Literal, cast
+from typing import Literal, NamedTuple, Never, cast
 from weakref import ReferenceType, ref
 
 from .canonical import canonical_bytes, canonical_sha256
 from .cycle_store_provider import CycleStoreProviderOperation, cycle_store_adapter_codec
 from .models import MAX_SAFE_INTEGER, JsonObject, JsonValue
 from .portable_json import portable_json_snapshot
+from .sqlite_cursor_publication_migration_0002_asset import (
+    SQLITE_CURSOR_MIGRATION_0002_ASSET_SHA256,
+    SQLITE_CURSOR_MIGRATION_0002_ASSET_UTF8_BYTES,
+    SQLITE_CURSOR_MIGRATION_0002_FIXED_STATEMENT_COUNT,
+    SQLITE_CURSOR_MIGRATION_0002_PREVIEW_MANIFEST_SHA256,
+    SQLITE_CURSOR_MIGRATION_0002_SCHEMA_SQL_SHA256,
+    _read_sqlite_cursor_migration_0002_asset_snapshot_intrinsic,
+    _SQLiteCursorMigration0002Asset,
+)
 from .sqlite_cycle_store import (
     _REQUIRED_MIGRATION_POSTCONDITIONS,
     SQLITE_CYCLE_STORE_DESCRIPTOR_HASH,
@@ -234,6 +243,136 @@ class _SQLiteCursorCapability:
         self.__cursor.close()
 
 
+_MIGRATION_0002_CONSTRUCTION_TOKEN = object()
+_MIGRATION_0002_FIXED_STATEMENT_COUNT = 20
+_MIGRATION_0002_TEMP_CONFLICT_QUERY = (
+    "SELECT count(*) FROM temp.sqlite_schema WHERE lower(name) IN ("
+    "'ge_cycle_schema','ge_cycle_schema_v1','ge_cycle_operations',"
+    "'ge_cycle_operations_v1','ge_cycle_operations_commit_idx',"
+    "'ge_cycle_operations_sequence_uq','ge_cycle_operations_replay_idx',"
+    "'ge_cycle_operation_baselines','ge_cycle_operation_baseline_entries',"
+    "'ge_cycle_operation_baseline_entries_key_uq',"
+    "'ge_cycle_operation_baseline_entries_hash_uq','ge_cycle_operation_sequence')"
+)
+
+
+class _SQLiteConnectionMigration0002Execution:
+    """Opaque exact-owner session for the fixed migration-0002 statement plan."""
+
+    __slots__ = ("__weakref__",)
+
+    def __init__(self, token: object) -> None:
+        if token is not _MIGRATION_0002_CONSTRUCTION_TOKEN:
+            raise TypeError("GE_CURSOR_B3_MIGRATION_0002_EXECUTION")
+
+
+class _SQLiteConnectionMigration0002StepSnapshot(NamedTuple):
+    affected_rows_delta: int
+    completed_statement_count: int
+    fixed_statement_ordinal: int
+    prepared_statement_count: int
+    total_changes: int
+    transaction_epoch: int
+    transaction_generation: object
+
+
+class _SQLiteConnectionMigration0002ExecutionSnapshot(NamedTuple):
+    affected_rows: int
+    completed_statement_count: int
+    lifecycle: Literal["active", "completed", "poisoned"]
+    next_statement_ordinal: int
+    prepared_statement_count: int
+    total_changes: int
+    transaction_epoch: int
+    transaction_generation: object
+
+
+@dataclass(slots=True)
+class _Migration0002ExecutionState:
+    connection: SQLiteV1BaselineConnectionOwner
+    asset: object
+    statements: tuple[str, ...]
+    transaction_generation: object
+    affected_rows: int
+    completed_statement_count: int
+    lifecycle: Literal["active", "completed", "poisoned"]
+    next_statement_ordinal: int
+    prepared_statement_count: int
+    total_changes: int
+    transaction_epoch: int
+
+
+_MIGRATION_0002_EXECUTIONS: dict[
+    int,
+    tuple[
+        ReferenceType[_SQLiteConnectionMigration0002Execution],
+        _Migration0002ExecutionState,
+    ],
+] = {}
+
+# CPython's sqlite descriptors are captured once so later module/class
+# replacement cannot redirect the package-owned execution lane.
+_SQLITE_CONNECTION_CURSOR = sqlite3.Connection.cursor
+_SQLITE_CONNECTION_IN_TRANSACTION = sqlite3.Connection.in_transaction
+_SQLITE_CONNECTION_TOTAL_CHANGES = sqlite3.Connection.total_changes
+_SQLITE_CURSOR_EXECUTE = sqlite3.Cursor.execute
+_SQLITE_CURSOR_CLOSE = sqlite3.Cursor.close
+_SQLITE_CURSOR_FETCHONE = sqlite3.Cursor.fetchone
+_SQLITE_CURSOR_ROWCOUNT = sqlite3.Cursor.rowcount
+_READ_MIGRATION_0002_ASSET = _read_sqlite_cursor_migration_0002_asset_snapshot_intrinsic
+
+
+def _sqlite_native_in_transaction(connection: sqlite3.Connection) -> bool:
+    try:
+        value = _SQLITE_CONNECTION_IN_TRANSACTION.__get__(connection, sqlite3.Connection)
+    except BaseException as error:
+        raise ValueError("GE_CURSOR_B3_MIGRATION_0002_CONNECTION") from error
+    if type(value) is not bool:
+        _migration_0002_fail("GE_CURSOR_B3_MIGRATION_0002_CONNECTION")
+    return value
+
+
+def _sqlite_native_total_changes(connection: sqlite3.Connection) -> int:
+    try:
+        value = _SQLITE_CONNECTION_TOTAL_CHANGES.__get__(connection, sqlite3.Connection)
+    except BaseException as error:
+        raise ValueError("GE_CURSOR_B3_MIGRATION_0002_COUNTER") from error
+    if type(value) is not int or not 0 <= value <= MAX_SAFE_INTEGER:
+        _migration_0002_fail("GE_CURSOR_B3_MIGRATION_0002_COUNTER")
+    return value
+
+
+def _migration_0002_fail(code: str) -> Never:
+    raise ValueError(code)
+
+
+def _migration_0002_state(
+    connection: SQLiteV1BaselineConnectionOwner,
+    execution: _SQLiteConnectionMigration0002Execution,
+) -> _Migration0002ExecutionState:
+    if type(execution) is not _SQLiteConnectionMigration0002Execution:
+        _migration_0002_fail("GE_CURSOR_B3_MIGRATION_0002_EXECUTION")
+    current = _MIGRATION_0002_EXECUTIONS.get(id(execution))
+    if current is None or current[0]() is not execution or current[1].connection is not connection:
+        _migration_0002_fail("GE_CURSOR_B3_MIGRATION_0002_EXECUTION")
+    return current[1]
+
+
+def _register_migration_0002_execution(
+    execution: _SQLiteConnectionMigration0002Execution,
+    state: _Migration0002ExecutionState,
+) -> None:
+    execution_id = id(execution)
+
+    def discard(reference: ReferenceType[_SQLiteConnectionMigration0002Execution]) -> None:
+        current = _MIGRATION_0002_EXECUTIONS.get(execution_id)
+        if current is not None and current[0] is reference:
+            _MIGRATION_0002_EXECUTIONS.pop(execution_id, None)
+
+    reference = ref(execution, discard)
+    _MIGRATION_0002_EXECUTIONS[execution_id] = (reference, state)
+
+
 class SQLiteV1BaselineConnectionOwner:
     """Exclusive connection capability with separate lineage and mutation epoch."""
 
@@ -309,6 +448,207 @@ class SQLiteV1BaselineConnectionOwner:
             self.__transaction_epoch += 1
         return _SQLiteCursorCapability(cursor)
 
+    def _begin_migration_0002_execution(
+        self,
+        asset: object,
+    ) -> _SQLiteConnectionMigration0002Execution:
+        """Open the exact fixed-plan session; never accepts caller SQL."""
+
+        if (
+            not _sqlite_native_in_transaction(self.__connection)
+            or self.__transaction_mode != "exclusive"
+            or self.__transaction_generation is None
+        ):
+            _migration_0002_fail("GE_CURSOR_B3_MIGRATION_0002_STALE_FENCE")
+        snapshot = _READ_MIGRATION_0002_ASSET(cast(_SQLiteCursorMigration0002Asset, asset))
+        if (
+            snapshot.asset_sha256 != SQLITE_CURSOR_MIGRATION_0002_ASSET_SHA256
+            or snapshot.asset_utf8_bytes != SQLITE_CURSOR_MIGRATION_0002_ASSET_UTF8_BYTES
+            or snapshot.fixed_statement_count != SQLITE_CURSOR_MIGRATION_0002_FIXED_STATEMENT_COUNT
+            or snapshot.fixed_statement_count != _MIGRATION_0002_FIXED_STATEMENT_COUNT
+            or snapshot.preview_manifest_sha256
+            != SQLITE_CURSOR_MIGRATION_0002_PREVIEW_MANIFEST_SHA256
+            or snapshot.schema_sql_sha256 != SQLITE_CURSOR_MIGRATION_0002_SCHEMA_SQL_SHA256
+            or type(snapshot.statements) is not tuple
+            or len(snapshot.statements) != _MIGRATION_0002_FIXED_STATEMENT_COUNT
+            or any(type(statement) is not str or not statement for statement in snapshot.statements)
+        ):
+            _migration_0002_fail("GE_CURSOR_B3_MIGRATION_0002_ASSET")
+
+        try:
+            cursor = _SQLITE_CONNECTION_CURSOR(self.__connection)
+        except BaseException as error:
+            raise ValueError("GE_CURSOR_B3_MIGRATION_0002_PREPARE") from error
+        try:
+            _SQLITE_CURSOR_EXECUTE(cursor, _MIGRATION_0002_TEMP_CONFLICT_QUERY, ())
+            row = _SQLITE_CURSOR_FETCHONE(cursor)
+            trailing = _SQLITE_CURSOR_FETCHONE(cursor)
+        except BaseException as error:
+            with suppress(BaseException):
+                _SQLITE_CURSOR_CLOSE(cursor)
+            raise ValueError("GE_CURSOR_B3_MIGRATION_0002_TEMP_PREFLIGHT") from error
+        try:
+            _SQLITE_CURSOR_CLOSE(cursor)
+        except BaseException as error:
+            raise ValueError("GE_CURSOR_B3_MIGRATION_0002_CLEANUP") from error
+        if (
+            type(row) is not tuple
+            or len(row) != 1
+            or type(row[0]) is not int
+            or row[0] != 0
+            or trailing is not None
+        ):
+            _migration_0002_fail("GE_CURSOR_B3_MIGRATION_0002_TEMP_CONFLICT")
+
+        execution = _SQLiteConnectionMigration0002Execution(_MIGRATION_0002_CONSTRUCTION_TOKEN)
+        _register_migration_0002_execution(
+            execution,
+            _Migration0002ExecutionState(
+                connection=self,
+                asset=asset,
+                statements=snapshot.statements,
+                transaction_generation=self.__transaction_generation,
+                affected_rows=0,
+                completed_statement_count=0,
+                lifecycle="active",
+                next_statement_ordinal=1,
+                prepared_statement_count=0,
+                total_changes=_sqlite_native_total_changes(self.__connection),
+                transaction_epoch=self.__transaction_epoch,
+            ),
+        )
+        return execution
+
+    def _execute_next_migration_0002_statement(
+        self,
+        execution: _SQLiteConnectionMigration0002Execution,
+    ) -> _SQLiteConnectionMigration0002StepSnapshot:
+        """Execute one next-only statement and retain irreversible progress."""
+
+        state = _migration_0002_state(self, execution)
+        if state.lifecycle != "active":
+            _migration_0002_fail("GE_CURSOR_B3_MIGRATION_0002_TERMINAL")
+        if state.next_statement_ordinal > _MIGRATION_0002_FIXED_STATEMENT_COUNT:
+            state.lifecycle = "poisoned"
+            _migration_0002_fail("GE_CURSOR_B3_MIGRATION_0002_REPLAY")
+        try:
+            owner_drifted = (
+                not _sqlite_native_in_transaction(self.__connection)
+                or self.__transaction_mode != "exclusive"
+                or self.__transaction_generation is not state.transaction_generation
+                or self.__transaction_epoch != state.transaction_epoch
+                or _sqlite_native_total_changes(self.__connection) != state.total_changes
+            )
+        except BaseException as error:
+            state.lifecycle = "poisoned"
+            raise ValueError("GE_CURSOR_B3_MIGRATION_0002_OWNER_OBSERVATION") from error
+        if owner_drifted:
+            state.lifecycle = "poisoned"
+            _migration_0002_fail("GE_CURSOR_B3_MIGRATION_0002_OWNER_DRIFT")
+
+        ordinal = state.next_statement_ordinal
+        sql = state.statements[ordinal - 1]
+        cursor: sqlite3.Cursor | None = None
+        try:
+            try:
+                cursor = _SQLITE_CONNECTION_CURSOR(self.__connection)
+            except BaseException as error:
+                raise ValueError("GE_CURSOR_B3_MIGRATION_0002_PREPARE") from error
+            state.prepared_statement_count += 1
+            # Every attempted native statement consumes an epoch before run,
+            # including DML and an execute that later raises.
+            if type(self.__transaction_epoch) is not int or self.__transaction_epoch < 0:
+                _migration_0002_fail("GE_CURSOR_B3_MIGRATION_0002_EPOCH")
+            self.__transaction_epoch += 1
+            state.transaction_epoch = self.__transaction_epoch
+            try:
+                _SQLITE_CURSOR_EXECUTE(cursor, sql, ())
+            except BaseException as error:
+                raise ValueError("GE_CURSOR_B3_MIGRATION_0002_STATEMENT") from error
+
+            # Returning from native execute is the irreversible completion
+            # boundary. Record it before rowcount, counter or close observation.
+            state.completed_statement_count += 1
+            state.next_statement_ordinal += 1
+            try:
+                raw_rowcount = _SQLITE_CURSOR_ROWCOUNT.__get__(cursor, sqlite3.Cursor)
+            except BaseException as error:
+                raise ValueError("GE_CURSOR_B3_MIGRATION_0002_STATEMENT") from error
+            total_changes = _sqlite_native_total_changes(self.__connection)
+            delta = total_changes - state.total_changes
+            if (
+                type(raw_rowcount) is not int
+                or type(total_changes) is not int
+                or type(delta) is not int
+                or delta < 0
+                or delta > MAX_SAFE_INTEGER
+            ):
+                _migration_0002_fail("GE_CURSOR_B3_MIGRATION_0002_ACCOUNTING")
+            if ordinal in {4, 17}:
+                if raw_rowcount != delta:
+                    _migration_0002_fail("GE_CURSOR_B3_MIGRATION_0002_ACCOUNTING")
+            elif delta != 0:
+                _migration_0002_fail("GE_CURSOR_B3_MIGRATION_0002_ACCOUNTING")
+            if state.affected_rows > MAX_SAFE_INTEGER - delta:
+                _migration_0002_fail("GE_CURSOR_B3_MIGRATION_0002_ACCOUNTING")
+            state.affected_rows += delta
+            state.total_changes = total_changes
+            owned_cursor = cursor
+            cursor = None
+            try:
+                _SQLITE_CURSOR_CLOSE(owned_cursor)
+            except BaseException as error:
+                raise ValueError("GE_CURSOR_B3_MIGRATION_0002_CLEANUP") from error
+            if state.completed_statement_count == _MIGRATION_0002_FIXED_STATEMENT_COUNT:
+                state.lifecycle = "completed"
+            return _SQLiteConnectionMigration0002StepSnapshot(
+                affected_rows_delta=delta,
+                completed_statement_count=state.completed_statement_count,
+                fixed_statement_ordinal=ordinal,
+                prepared_statement_count=state.prepared_statement_count,
+                total_changes=state.total_changes,
+                transaction_epoch=state.transaction_epoch,
+                transaction_generation=state.transaction_generation,
+            )
+        except BaseException as error:
+            # Preserve the original failure. A completed native statement may
+            # have changed total_changes even if later observation failed.
+            try:
+                synchronized = _sqlite_native_total_changes(self.__connection)
+                delta = synchronized - state.total_changes
+                if (
+                    type(delta) is int
+                    and 0 <= delta <= MAX_SAFE_INTEGER
+                    and state.affected_rows <= MAX_SAFE_INTEGER - delta
+                ):
+                    state.affected_rows += delta
+                    state.total_changes = synchronized
+            except BaseException:
+                pass
+            state.lifecycle = "poisoned"
+            if cursor is not None:
+                with suppress(BaseException):
+                    _SQLITE_CURSOR_CLOSE(cursor)
+            if isinstance(error, ValueError):
+                raise
+            raise ValueError("GE_CURSOR_B3_MIGRATION_0002_STATEMENT") from error
+
+    def _read_migration_0002_execution_snapshot(
+        self,
+        execution: _SQLiteConnectionMigration0002Execution,
+    ) -> _SQLiteConnectionMigration0002ExecutionSnapshot:
+        state = _migration_0002_state(self, execution)
+        return _SQLiteConnectionMigration0002ExecutionSnapshot(
+            affected_rows=state.affected_rows,
+            completed_statement_count=state.completed_statement_count,
+            lifecycle=state.lifecycle,
+            next_statement_ordinal=state.next_statement_ordinal,
+            prepared_statement_count=state.prepared_statement_count,
+            total_changes=state.total_changes,
+            transaction_epoch=state.transaction_epoch,
+            transaction_generation=state.transaction_generation,
+        )
+
     def executescript(self, sql: str) -> None:
         if _forbidden_temp_store_directory(sql):
             raise ValueError("SQLite temp_store_directory is forbidden")
@@ -335,6 +675,40 @@ class SQLiteV1BaselineConnectionOwner:
     def close(self) -> None:
         self.__connection.close()
         self.__transaction_generation = None
+
+
+_OWNER_BEGIN_MIGRATION_0002 = SQLiteV1BaselineConnectionOwner._begin_migration_0002_execution
+_OWNER_EXECUTE_NEXT_MIGRATION_0002 = (
+    SQLiteV1BaselineConnectionOwner._execute_next_migration_0002_statement
+)
+_OWNER_READ_MIGRATION_0002 = SQLiteV1BaselineConnectionOwner._read_migration_0002_execution_snapshot
+
+
+def _begin_sqlite_connection_migration_0002_execution_intrinsic(
+    connection: SQLiteV1BaselineConnectionOwner,
+    asset: object,
+) -> _SQLiteConnectionMigration0002Execution:
+    if type(connection) is not SQLiteV1BaselineConnectionOwner:
+        _migration_0002_fail("GE_CURSOR_B3_MIGRATION_0002_CONNECTION")
+    return _OWNER_BEGIN_MIGRATION_0002(connection, asset)
+
+
+def _execute_next_sqlite_connection_migration_0002_statement_intrinsic(
+    connection: SQLiteV1BaselineConnectionOwner,
+    execution: _SQLiteConnectionMigration0002Execution,
+) -> _SQLiteConnectionMigration0002StepSnapshot:
+    if type(connection) is not SQLiteV1BaselineConnectionOwner:
+        _migration_0002_fail("GE_CURSOR_B3_MIGRATION_0002_CONNECTION")
+    return _OWNER_EXECUTE_NEXT_MIGRATION_0002(connection, execution)
+
+
+def _read_sqlite_connection_migration_0002_execution_snapshot_intrinsic(
+    connection: SQLiteV1BaselineConnectionOwner,
+    execution: _SQLiteConnectionMigration0002Execution,
+) -> _SQLiteConnectionMigration0002ExecutionSnapshot:
+    if type(connection) is not SQLiteV1BaselineConnectionOwner:
+        _migration_0002_fail("GE_CURSOR_B3_MIGRATION_0002_CONNECTION")
+    return _OWNER_READ_MIGRATION_0002(connection, execution)
 
 
 @dataclass(frozen=True, slots=True)

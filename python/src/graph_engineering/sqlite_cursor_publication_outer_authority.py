@@ -1,8 +1,8 @@
 """Package-private owner of the SQLite cursor initial-publication write lane.
 
-This first leaf only binds and activates the exact completed B2 stage graph.  It
-executes no SQL and owns no transaction boundary; later leaves add the ordered
-0002 and initial-publication writes behind this capability.
+The owner binds and activates the exact completed B2 stage graph, then permits
+one fixed, package-owned migration-0002 execution.  It never begins, commits,
+rolls back or rebinds the caller-owned transaction.
 """
 
 from __future__ import annotations
@@ -25,6 +25,31 @@ from .sqlite_cursor_publication_clock_authority import (
     _MigrationLockCapability,
     _ProviderClockCapability,
 )
+from .sqlite_cursor_publication_initial_write_digest import (
+    _digest_sqlite_initial_write_parameters_intrinsic,
+    _digest_sqlite_initial_write_result_intrinsic,
+)
+from .sqlite_cursor_publication_migration_0002_asset import (
+    SQLITE_CURSOR_MIGRATION_0002_ASSET_SHA256,
+    SQLITE_CURSOR_MIGRATION_0002_ASSET_UTF8_BYTES,
+    SQLITE_CURSOR_MIGRATION_0002_FIXED_STATEMENT_COUNT,
+    SQLITE_CURSOR_MIGRATION_0002_PREVIEW_MANIFEST_SHA256,
+    SQLITE_CURSOR_MIGRATION_0002_SCHEMA_SQL_SHA256,
+    _load_sqlite_cursor_migration_0002_asset_intrinsic,
+    _read_sqlite_cursor_migration_0002_asset_snapshot_intrinsic,
+    _SQLiteCursorMigration0002Asset,
+    _SQLiteCursorMigration0002PreviewManifestIdentity,
+)
+from .sqlite_cursor_publication_target_catalog import (
+    SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_EXPECTED_APPLICATION_ID,
+    SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_EXPECTED_CANONICAL_UTF8_BYTES,
+    SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_EXPECTED_INVENTORY,
+    SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_EXPECTED_ROW_COUNT,
+    SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_EXPECTED_SHA256,
+    SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_EXPECTED_USER_VERSION,
+    _read_target_catalog_observation_intrinsic,
+    _TargetCatalogSnapshot,
+)
 from .sqlite_operation_baseline import BaselineProjectionIdentity
 from .sqlite_operation_baseline_cursor_ownership import (
     SQLiteCursorExactProjectionReference,
@@ -43,16 +68,28 @@ from .sqlite_operation_baseline_cursor_stage_ownership import (
     _SQLiteCursorStageOwnershipOuterPublicationTail,
     _SQLiteCursorStageOwnershipTransfer,
 )
-from .sqlite_operation_baseline_source import SQLiteV1BaselineConnectionOwner
+from .sqlite_operation_baseline_source import (
+    SQLiteV1BaselineConnectionOwner,
+    _begin_sqlite_connection_migration_0002_execution_intrinsic,
+    _execute_next_sqlite_connection_migration_0002_statement_intrinsic,
+    _read_sqlite_connection_migration_0002_execution_snapshot_intrinsic,
+    _SQLiteConnectionMigration0002Execution,
+)
 from .sqlite_operation_baseline_stage import SQLiteV1BaselineTempStage
 
 _CONSTRUCTION_TOKEN = object()
 _MAX_SAFE_INTEGER = 2**53 - 1
+_SOURCE_V1_CATALOG_SHA256 = "359cf74f441a201fcae970d77eac460529d9c562ad7a42d20e5224b65b88b2f0"
+_SOURCE_V1_CATALOG_ROW_COUNT = 27
+_SOURCE_V1_CATALOG_CANONICAL_UTF8_BYTES = 4_504
 
 _SQLiteCursorOuterPublicationAuthority: TypeAlias = (
     _SQLiteCursorStageOwnershipOuterPublicationAuthority
 )
 _AuthorityLifecycle: TypeAlias = Literal["inactive", "active", "poisoned", "retired"]
+_WritePhase: TypeAlias = Literal[
+    "ready-0002", "executing-0002", "0002-complete", "poisoned", "retired"
+]
 
 
 class _SQLiteCursorOuterPublicationCancellationSignal:
@@ -96,6 +133,47 @@ class _SQLiteCursorOuterPublicationLedgerSnapshot(NamedTuple):
     logical_write_sequence: int
 
 
+class _SQLiteMigration0002CatalogRebuildReceipt:
+    __slots__ = ("__weakref__",)
+
+    def __init__(self, token: object) -> None:
+        if token is not _CONSTRUCTION_TOKEN:
+            raise TypeError("GE_CURSOR_B3_MIGRATION_0002_RECEIPT")
+
+
+class _SQLiteMigration0002CatalogRebuildReceiptSnapshot(NamedTuple):
+    affected_rows: int
+    application_id_after: Literal[1_195_724_359]
+    application_id_before: Literal[1_195_724_359]
+    asset_sha256: str
+    asset_utf8_bytes: int
+    execute_count: Literal[1]
+    fixed_statement_count: Literal[20]
+    legacy_operation_copy_row_count: int
+    outer_ledger_after: _SQLiteCursorOuterPublicationLedgerSnapshot
+    outer_ledger_before: _SQLiteCursorOuterPublicationLedgerSnapshot
+    outer_ledger_delta: _SQLiteCursorOuterPublicationLedgerSnapshot
+    parameter_sha256: str
+    post_ddl_catalog_sha256: str
+    pre_ddl_catalog_sha256: str
+    prepare_count: Literal[20]
+    preview_manifest_identity: _SQLiteCursorMigration0002PreviewManifestIdentity
+    preview_manifest_sha256: str
+    result_sha256: str
+    schema_copy_row_count: Literal[1]
+    schema_sql_sha256: str
+    statement_affected_rows: tuple[int, ...]
+    total_changes_after: int
+    total_changes_before: int
+    total_changes_delta: int
+    transaction_epoch_after: int
+    transaction_epoch_before: int
+    transaction_generation: object
+    user_version_after: Literal[2]
+    user_version_before: Literal[1]
+    write_kind: Literal["migration-0002-catalog-rebuild"]
+
+
 class _SQLiteCursorOuterPublicationAuthoritySnapshot(NamedTuple):
     lifecycle: _AuthorityLifecycle
     stage_ownership_poison_reason: str | None
@@ -119,7 +197,10 @@ class _SQLiteCursorOuterPublicationAuthoritySnapshot(NamedTuple):
     source_schema_version: Literal[1]
     target_schema_version: Literal[2]
     activation_count: Literal[0, 1]
-    write_phase: Literal["ready-0002", "poisoned", "retired"]
+    migration_0002_logical_execution_count: Literal[0, 1]
+    migration_0002_prepared_statement_count: int
+    migration_0002_receipt: _SQLiteMigration0002CatalogRebuildReceipt | None
+    write_phase: _WritePhase
 
 
 @dataclass(slots=True)
@@ -154,7 +235,20 @@ class _AuthorityState:
     affected_rows_watermark: int = 0
     fixed_statement_count: int = 0
     logical_write_sequence: int = 0
-    write_phase: Literal["ready-0002", "poisoned", "retired"] = "ready-0002"
+    migration_0002_logical_execution_count: Literal[0, 1] = 0
+    migration_0002_prepared_statement_count: int = 0
+    migration_0002_receipt: _SQLiteMigration0002CatalogRebuildReceipt | None = None
+    write_phase: _WritePhase = "ready-0002"
+
+
+@dataclass(frozen=True, slots=True)
+class _Migration0002ReceiptRecord:
+    asset: _SQLiteCursorMigration0002Asset
+    authority_ref: ReferenceType[_SQLiteCursorStageOwnershipOuterPublicationAuthority]
+    connection: SQLiteV1BaselineConnectionOwner
+    post_ddl_catalog: _TargetCatalogSnapshot
+    pre_ddl_catalog: _TargetCatalogSnapshot
+    snapshot: _SQLiteMigration0002CatalogRebuildReceiptSnapshot
 
 
 class _IdentityEntry(NamedTuple):
@@ -171,6 +265,7 @@ _CANCELLATIONS: dict[int, _IdentityEntry] = {}
 _AUTHORITIES: dict[int, _IdentityEntry] = {}
 _AUTHORITY_BY_EVIDENCE: dict[int, _AuthorityLink] = {}
 _AUTHORITY_BY_TRANSFER: dict[int, _AuthorityLink] = {}
+_MIGRATION_0002_RECEIPTS: dict[int, _IdentityEntry] = {}
 
 # Capture every replaceable dependency before any caller can alter its module or
 # class attribute.  Registry lookup below also checks the weak referent with
@@ -209,6 +304,14 @@ _OWNER_GENERATION = cast(
     "Callable[[SQLiteV1BaselineConnectionOwner], object | None]",
     cast("property", SQLiteV1BaselineConnectionOwner.__dict__["_transaction_generation"]).fget,
 )
+_LOAD_MIGRATION_0002_ASSET = _load_sqlite_cursor_migration_0002_asset_intrinsic
+_READ_MIGRATION_0002_ASSET = _read_sqlite_cursor_migration_0002_asset_snapshot_intrinsic
+_READ_TARGET_CATALOG = _read_target_catalog_observation_intrinsic
+_BEGIN_MIGRATION_0002 = _begin_sqlite_connection_migration_0002_execution_intrinsic
+_EXECUTE_NEXT_MIGRATION_0002 = _execute_next_sqlite_connection_migration_0002_statement_intrinsic
+_READ_MIGRATION_0002_PROGRESS = _read_sqlite_connection_migration_0002_execution_snapshot_intrinsic
+_DIGEST_INITIAL_WRITE_PARAMETERS = _digest_sqlite_initial_write_parameters_intrinsic
+_DIGEST_INITIAL_WRITE_RESULT = _digest_sqlite_initial_write_result_intrinsic
 
 
 def _fail(code: str) -> Never:
@@ -647,6 +750,247 @@ def _assert_sqlite_cursor_outer_publication_authority_intrinsic(
         raise
 
 
+def _outer_ledger_snapshot(
+    state: _AuthorityState,
+) -> _SQLiteCursorOuterPublicationLedgerSnapshot:
+    return _SQLiteCursorOuterPublicationLedgerSnapshot(
+        affected_rows_watermark=state.affected_rows_watermark,
+        fixed_statement_count=state.fixed_statement_count,
+        logical_write_sequence=state.logical_write_sequence,
+    )
+
+
+def _execute_sqlite_cursor_migration_0002_catalog_rebuild_intrinsic(
+    authority: _SQLiteCursorOuterPublicationAuthority,
+) -> _SQLiteMigration0002CatalogRebuildReceipt:
+    """Execute the fixed 20-statement asset without owning transaction completion."""
+
+    state = _authority_state(authority)
+    if (
+        state.migration_0002_receipt is not None
+        or state.migration_0002_logical_execution_count != 0
+        or state.logical_write_sequence != 0
+        or state.fixed_statement_count != 0
+        or state.affected_rows_watermark != 0
+    ):
+        _poison(state, authority, "SQLite migration 0002 was executed more than once")
+        _fail("GE_CURSOR_B3_MIGRATION_0002_REPLAY")
+
+    # Reuse above is terminal before any live SQLite read. A second invocation
+    # therefore emits no SQL and cannot look like an idempotent utility.
+    _assert_sqlite_cursor_outer_publication_authority_intrinsic(authority)
+    if state.write_phase != "ready-0002":
+        _poison(state, authority, "SQLite migration 0002 write phase is invalid")
+        _fail("GE_CURSOR_B3_MIGRATION_0002_PHASE")
+
+    total_changes_before = state.current_total_changes
+    transaction_epoch_before = state.current_transaction_epoch
+    ledger_before = _outer_ledger_snapshot(state)
+    execution: _SQLiteConnectionMigration0002Execution | None = None
+    schema_copy_row_count = 0
+    legacy_operation_copy_row_count = 0
+    statement_affected_rows: list[int] = []
+
+    try:
+        legacy_count = state.projection_identity.legacy_operation_count
+        if type(legacy_count) is not int or not 0 <= legacy_count < _MAX_SAFE_INTEGER:
+            _fail("GE_CURSOR_B3_MIGRATION_0002_LEGACY_COUNT")
+
+        asset = _LOAD_MIGRATION_0002_ASSET()
+        asset_snapshot = _READ_MIGRATION_0002_ASSET(asset)
+        if (
+            asset_snapshot.asset_sha256 != SQLITE_CURSOR_MIGRATION_0002_ASSET_SHA256
+            or asset_snapshot.asset_utf8_bytes != SQLITE_CURSOR_MIGRATION_0002_ASSET_UTF8_BYTES
+            or asset_snapshot.fixed_statement_count
+            != SQLITE_CURSOR_MIGRATION_0002_FIXED_STATEMENT_COUNT
+            or asset_snapshot.preview_manifest_sha256
+            != SQLITE_CURSOR_MIGRATION_0002_PREVIEW_MANIFEST_SHA256
+            or asset_snapshot.schema_sql_sha256 != SQLITE_CURSOR_MIGRATION_0002_SCHEMA_SQL_SHA256
+            or len(asset_snapshot.statements) != SQLITE_CURSOR_MIGRATION_0002_FIXED_STATEMENT_COUNT
+        ):
+            _fail("GE_CURSOR_B3_MIGRATION_0002_ASSET")
+
+        # Begin owns the fixed twelve-name TEMP preflight and binds this exact
+        # asset/session/connection graph before any permanent mutation.
+        execution = _BEGIN_MIGRATION_0002(state.connection, asset)
+        pre_ddl_catalog = _READ_TARGET_CATALOG(state.connection)
+        if (
+            pre_ddl_catalog.application_id != 1_195_724_359
+            or pre_ddl_catalog.user_version != 1
+            or pre_ddl_catalog.catalog_sha256 != _SOURCE_V1_CATALOG_SHA256
+            or pre_ddl_catalog.row_count != _SOURCE_V1_CATALOG_ROW_COUNT
+            or pre_ddl_catalog.canonical_utf8_bytes != _SOURCE_V1_CATALOG_CANONICAL_UTF8_BYTES
+        ):
+            _fail("GE_CURSOR_B3_MIGRATION_0002_SOURCE_METADATA")
+
+        state.write_phase = "executing-0002"
+        state.migration_0002_logical_execution_count = 1
+        for ordinal in range(1, SQLITE_CURSOR_MIGRATION_0002_FIXED_STATEMENT_COUNT + 1):
+            step = _EXECUTE_NEXT_MIGRATION_0002(state.connection, execution)
+            if (
+                step.fixed_statement_ordinal != ordinal
+                or step.completed_statement_count != ordinal
+                or step.prepared_statement_count != ordinal
+                or step.transaction_generation is not state.transaction_generation
+            ):
+                _fail("GE_CURSOR_B3_MIGRATION_0002_ORDER")
+            state.current_transaction_epoch = step.transaction_epoch
+            state.current_total_changes = step.total_changes
+            state.fixed_statement_count = step.completed_statement_count
+            state.migration_0002_prepared_statement_count = step.prepared_statement_count
+            state.affected_rows_watermark += step.affected_rows_delta
+            statement_affected_rows.append(step.affected_rows_delta)
+            if ordinal == 4:
+                schema_copy_row_count = step.affected_rows_delta
+            elif ordinal == 17:
+                legacy_operation_copy_row_count = step.affected_rows_delta
+
+        progress = _READ_MIGRATION_0002_PROGRESS(state.connection, execution)
+        expected_affected_rows = 1 + legacy_count
+        if (
+            progress.lifecycle != "completed"
+            or progress.prepared_statement_count
+            != SQLITE_CURSOR_MIGRATION_0002_FIXED_STATEMENT_COUNT
+            or progress.completed_statement_count
+            != SQLITE_CURSOR_MIGRATION_0002_FIXED_STATEMENT_COUNT
+            or progress.next_statement_ordinal
+            != SQLITE_CURSOR_MIGRATION_0002_FIXED_STATEMENT_COUNT + 1
+            or progress.transaction_generation is not state.transaction_generation
+            or schema_copy_row_count != 1
+            or legacy_operation_copy_row_count != legacy_count
+            or progress.affected_rows != expected_affected_rows
+            or state.affected_rows_watermark != expected_affected_rows
+            or progress.total_changes - total_changes_before != expected_affected_rows
+            or state.current_total_changes != progress.total_changes
+            or state.current_transaction_epoch != progress.transaction_epoch
+            or progress.transaction_epoch - transaction_epoch_before
+            != SQLITE_CURSOR_MIGRATION_0002_FIXED_STATEMENT_COUNT
+        ):
+            _fail("GE_CURSOR_B3_MIGRATION_0002_LEDGER")
+
+        post_ddl_catalog = _READ_TARGET_CATALOG(state.connection)
+        if (
+            post_ddl_catalog.application_id
+            != SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_EXPECTED_APPLICATION_ID
+            or post_ddl_catalog.user_version
+            != SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_EXPECTED_USER_VERSION
+            or post_ddl_catalog.row_count
+            != SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_EXPECTED_ROW_COUNT
+            or post_ddl_catalog.canonical_utf8_bytes
+            != SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_EXPECTED_CANONICAL_UTF8_BYTES
+            or post_ddl_catalog.catalog_sha256
+            != SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_EXPECTED_SHA256
+            or post_ddl_catalog.inventory
+            != SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_EXPECTED_INVENTORY
+        ):
+            _fail("GE_CURSOR_B3_MIGRATION_0002_TARGET_CATALOG")
+        parameter_sha256 = _DIGEST_INITIAL_WRITE_PARAMETERS([[]])
+        result_sha256 = _DIGEST_INITIAL_WRITE_RESULT({"affectedRows": str(expected_affected_rows)})
+        ledger_after = _SQLiteCursorOuterPublicationLedgerSnapshot(
+            affected_rows_watermark=expected_affected_rows,
+            fixed_statement_count=SQLITE_CURSOR_MIGRATION_0002_FIXED_STATEMENT_COUNT,
+            logical_write_sequence=1,
+        )
+        ledger_delta = ledger_after
+        receipt_snapshot = _SQLiteMigration0002CatalogRebuildReceiptSnapshot(
+            affected_rows=expected_affected_rows,
+            application_id_after=cast(Literal[1_195_724_359], post_ddl_catalog.application_id),
+            application_id_before=cast(Literal[1_195_724_359], pre_ddl_catalog.application_id),
+            asset_sha256=SQLITE_CURSOR_MIGRATION_0002_ASSET_SHA256,
+            asset_utf8_bytes=SQLITE_CURSOR_MIGRATION_0002_ASSET_UTF8_BYTES,
+            execute_count=1,
+            fixed_statement_count=20,
+            legacy_operation_copy_row_count=legacy_operation_copy_row_count,
+            outer_ledger_after=ledger_after,
+            outer_ledger_before=ledger_before,
+            outer_ledger_delta=ledger_delta,
+            parameter_sha256=parameter_sha256,
+            post_ddl_catalog_sha256=post_ddl_catalog.catalog_sha256,
+            pre_ddl_catalog_sha256=pre_ddl_catalog.catalog_sha256,
+            prepare_count=20,
+            preview_manifest_identity=asset_snapshot.preview_manifest_identity,
+            preview_manifest_sha256=SQLITE_CURSOR_MIGRATION_0002_PREVIEW_MANIFEST_SHA256,
+            result_sha256=result_sha256,
+            schema_copy_row_count=1,
+            schema_sql_sha256=SQLITE_CURSOR_MIGRATION_0002_SCHEMA_SQL_SHA256,
+            statement_affected_rows=tuple(statement_affected_rows),
+            total_changes_after=progress.total_changes,
+            total_changes_before=total_changes_before,
+            total_changes_delta=expected_affected_rows,
+            transaction_epoch_after=progress.transaction_epoch,
+            transaction_epoch_before=transaction_epoch_before,
+            transaction_generation=state.transaction_generation,
+            user_version_after=cast(Literal[2], post_ddl_catalog.user_version),
+            user_version_before=cast(Literal[1], pre_ddl_catalog.user_version),
+            write_kind="migration-0002-catalog-rebuild",
+        )
+        receipt = _SQLiteMigration0002CatalogRebuildReceipt(_CONSTRUCTION_TOKEN)
+        _identity_set(
+            _MIGRATION_0002_RECEIPTS,
+            receipt,
+            _Migration0002ReceiptRecord(
+                asset=asset,
+                authority_ref=_REF(authority),
+                connection=state.connection,
+                post_ddl_catalog=post_ddl_catalog,
+                pre_ddl_catalog=pre_ddl_catalog,
+                snapshot=receipt_snapshot,
+            ),
+        )
+        state.logical_write_sequence = 1
+        state.migration_0002_receipt = receipt
+        state.write_phase = "0002-complete"
+        return receipt
+    except BaseException:
+        if execution is not None:
+            with suppress(BaseException):
+                progress = _READ_MIGRATION_0002_PROGRESS(state.connection, execution)
+                state.current_transaction_epoch = progress.transaction_epoch
+                state.current_total_changes = progress.total_changes
+                state.fixed_statement_count = progress.completed_statement_count
+                state.migration_0002_prepared_statement_count = progress.prepared_statement_count
+                state.affected_rows_watermark = progress.affected_rows
+        _poison(state, authority, "SQLite migration 0002 execution failed")
+        raise
+
+
+def _read_sqlite_migration_0002_catalog_rebuild_receipt_snapshot_intrinsic(
+    receipt: _SQLiteMigration0002CatalogRebuildReceipt,
+) -> _SQLiteMigration0002CatalogRebuildReceiptSnapshot:
+    record = _identity_get(
+        _MIGRATION_0002_RECEIPTS,
+        receipt,
+        _SQLiteMigration0002CatalogRebuildReceipt,
+    )
+    if record is None:
+        _fail("GE_CURSOR_B3_MIGRATION_0002_RECEIPT")
+    checked = cast(_Migration0002ReceiptRecord, record)
+    authority = checked.authority_ref()
+    if authority is None:
+        _fail("GE_CURSOR_B3_MIGRATION_0002_RECEIPT")
+    state = _authority_state(authority)
+    _assert_sqlite_cursor_outer_publication_authority_intrinsic(authority)
+    asset = _READ_MIGRATION_0002_ASSET(checked.asset)
+    snapshot = checked.snapshot
+    if (
+        state.connection is not checked.connection
+        or state.transaction_generation is not snapshot.transaction_generation
+        or state.migration_0002_receipt is not receipt
+        or state.migration_0002_logical_execution_count != 1
+        or state.logical_write_sequence < snapshot.outer_ledger_after.logical_write_sequence
+        or state.fixed_statement_count < snapshot.outer_ledger_after.fixed_statement_count
+        or state.affected_rows_watermark < snapshot.outer_ledger_after.affected_rows_watermark
+        or state.current_transaction_epoch < snapshot.transaction_epoch_after
+        or state.current_total_changes < snapshot.total_changes_after
+        or asset.preview_manifest_identity is not snapshot.preview_manifest_identity
+        or asset.preview_manifest_sha256 != snapshot.preview_manifest_sha256
+        or asset.asset_sha256 != snapshot.asset_sha256
+    ):
+        _poison(state, authority, "SQLite migration 0002 receipt graph drifted")
+        _fail("GE_CURSOR_B3_MIGRATION_0002_RECEIPT_DRIFT")
+    return snapshot
+
+
 def _read_sqlite_cursor_outer_publication_authority_snapshot_intrinsic(
     authority: _SQLiteCursorOuterPublicationAuthority,
 ) -> _SQLiteCursorOuterPublicationAuthoritySnapshot:
@@ -678,5 +1022,8 @@ def _read_sqlite_cursor_outer_publication_authority_snapshot_intrinsic(
         source_schema_version=1,
         target_schema_version=2,
         activation_count=state.activation_count,
+        migration_0002_logical_execution_count=state.migration_0002_logical_execution_count,
+        migration_0002_prepared_statement_count=state.migration_0002_prepared_statement_count,
+        migration_0002_receipt=state.migration_0002_receipt,
         write_phase=state.write_phase,
     )

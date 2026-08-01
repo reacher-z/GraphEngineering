@@ -15987,3 +15987,204 @@ frozen statement sequence, execute exactly 20 individually owned statements
 and update the outer write ledger without `executescript` or transaction
 completion. Only after that leaf passes independent hostile review may work
 advance to the post-DDL reader/catalog and receipt owners.
+
+#### 31.37.45 Python B3 migration-0002 writer acceptance and post-DDL continuation
+
+This section is appended without changing the preceding 15,989 lines. That
+exact prefix hashes to
+`7a956e2e28dabc5be23ed3174a4c37b78cb27d70b08ac068653785b297c90d63`.
+It accepts the Python migration-0002 writer authorized by §31.37.44, records the
+full-suite regression it exposed and fixes, and freezes the next two bounded
+post-DDL leaves without weakening any earlier §31.37.38 nonclaim.
+
+##### 31.37.45.1 Accepted fixed-plan source execution owner
+
+The baseline connection now owns one opaque exact-identity migration session.
+The caller may provide only the package-minted migration asset; it cannot
+provide SQL, statement order, parameters, expected row counts, an epoch or a
+change-counter value. Session construction freshly validates the installed
+asset, manifest and schema identities, binds the active `BEGIN EXCLUSIVE`
+transaction generation, captures its epoch and native `total_changes`, and
+executes one fixed query proving that none of the twelve reserved main-catalog
+names is shadowed in TEMP.
+
+Only the source owner's next-statement intrinsic may advance the session. It
+selects one of the frozen 20 statements by the internally retained ordinal,
+opens one native cursor, records preparation, increments the transaction epoch
+immediately before native execute and records completion immediately after the
+native execute returns. Result observation, `total_changes` observation and
+cursor cleanup occur after that irreversible completion boundary. A later
+fault therefore retains the real completed count and mutation watermark rather
+than pretending that the native statement did not run.
+
+Affected-row accounting is exact. Statement 4 copies one schema singleton,
+statement 17 copies exactly `L` legacy operations and every other fixed
+statement contributes zero. Native rowcount and `total_changes` must agree at
+the two DML statements; any delta elsewhere is corruption. The affected-row
+and native-counter ledgers remain portable safe integers, while the Python
+transaction epoch intentionally uses its unbounded built-in integer domain and
+is not subject to a JavaScript safe-integer ceiling.
+
+The session is next-only and terminal after completion or failure. Replay,
+wrong connection, cloned session, transaction-generation replacement, epoch
+drift and counter drift cannot execute a statement. Cursor prepare, native
+execute, rowcount, counter and cleanup failures have stable structured errors,
+preserve the first primary over later cleanup failure and attempt cursor close
+at most once. Registry entries are id-keyed with exact weak referents and are
+removed naturally after abandonment.
+
+##### 31.37.45.2 Accepted outer writer and receipt graph
+
+The outer writer accepts exactly one active authority. It loads migration 0002
+afresh on every legitimate first invocation, revalidates the installed asset,
+records a fresh exact v1 physical-catalog observation, runs the source-owned 20
+statement session sequentially, reconciles every returned step and records a
+fresh exact v2 target-catalog observation. It does not call `executescript`,
+commit, rollback, rebind or any caller transaction-completion function.
+
+The outer phase advances literally:
+
+`ready-0002 -> executing-0002 -> 0002-complete`.
+
+Any fallible exit after the write boundary copies all available prepared,
+completed, epoch, `total_changes` and affected-row progress from the source
+session into the outer state before poisoning the authority/ownership/stage
+graph. A second invocation is terminal replay and is rejected before any live
+SQLite observation, so its trace is empty.
+
+The successful outer ledger transition is:
+
+- logical write sequence: `0 -> 1`;
+- fixed statement count: `0 -> 20`; and
+- affected rows: `0 -> 1 + L`.
+
+The opaque migration receipt binds the exact authority, connection and
+transaction generation; before/after epoch and `total_changes`; the complete
+20-element affected-row vector; schema and legacy copy counts; v1/v2 metadata
+and catalog hashes; asset byte count and asset/manifest/schema hashes; manifest
+identity; three-dimensional ledger before/after/delta; canonical empty
+parameter digest; canonical aggregate result digest; prepare/execute counts;
+and write kind `migration-0002-catalog-rebuild`.
+
+Receipt assertion is reusable and non-consuming. It requires the exact
+registered object and authority-owned relation, freshly validates the active
+authority and installed asset, and rejects lineage or lower-bound ledger drift.
+The receipt registry record holds only a weak authority reference, preventing
+the Python non-ephemeron retention cycle `authority -> receipt -> registry ->
+authority`. Joint abandonment tests prove authority, receipt and source session
+registries return naturally to their exact pre-test baselines.
+
+##### 31.37.45.3 Hostile coverage and complete-suite correction
+
+The final 40-case writer suite covers real `L=0` and `L=2` success, exact SQL
+order and ledger values, replay with zero SQL, rollback/rebegin, forged/cloned/
+cross-run carriers, all twelve TEMP shadows, source/target/asset/manifest/
+lineage drift, a real statement-12 collision, post-native rowcount and counter
+faults, hostile counter shapes, native execute failure, cleanup precedence,
+captured dependencies, root privacy and natural collection.
+
+Independent review identified one missing planned boundary before acceptance:
+native cursor prepare/open failure. The accepted suite now proves both a
+preflight cursor-open fault with zero session/epoch/ledger movement and a
+statement-5 cursor-open fault that retains exactly four completed statements
+without consuming a fifth attempt epoch. The two weak-registry cases also
+force collection before sampling their baselines, eliminating suite-order
+dependence without masking a product leak.
+
+The first complete Python run was not accepted. It produced 3,507 passes, one
+failure and two passing subtests in 1,737.10 seconds. The failure revealed that
+the previously published B2 ownership bridge rejected an authentic second
+campaign through a lifecycle early-return before the stage-owned one-shot
+latch could poison itself. The repair removes only that redundant early-return:
+exact replay again reaches the stage latch and poisons transfer, campaign and
+stage, while forged receipt/transfer presentation is still rejected before
+stage mutation. The failed node then passed, six adjacent exact/clone/tail and
+later-lifecycle cases passed, and independent review ended at severity zero.
+
+Acceptance evidence on the final byte set is:
+
+1. migration-0002 writer suite passed **40/40**;
+2. integrated clock/target/asset/writer/outer/source/source-fence matrix passed
+   **175/175 in 244.68 seconds**;
+3. the TypeScript outer-authority oracle passed **30/30 in 29.85 seconds**;
+4. the repaired B2 node passed **1/1** and its adjacent lifecycle matrix passed
+   **6/6 in 17.94 seconds**;
+5. the complete Python suite passed **3,508 tests plus two subtests**, with zero
+   failures and zero skips, in **1,733.09 seconds**;
+6. all seven changed production/test files passed Ruff check and format check;
+7. authoritative Python mypy passed all **101 source files**;
+8. whitespace validation passed; and
+9. both writer review and the B2 repair review reported
+   **HIGH 0 / MEDIUM 0 / LOW 0**.
+
+The durable acceptance record is
+`codex_logs/reviews/PYTHON-CURSOR-B3-MIGRATION-0002-WRITER-2026-08-01.md`.
+
+##### 31.37.45.4 Next isolated leaf: fresh post-DDL physical-catalog fence
+
+The next implementation must stop at a reusable physical-catalog fence and
+must not yet open the post-DDL reader lease. Its sole inputs are the exact
+active authority and exact authentic migration-0002 receipt. The caller may
+not provide a connection, snapshot, catalog row, inventory, hash, epoch,
+counter or ledger.
+
+The mint order is normative:
+
+1. reject second mint/replay before SQL and terminally poison;
+2. reject premature phase or incomplete 20-statement receipt before SQL and
+   terminally poison;
+3. validate receipt identity and authority relation, treating a forged,
+   substituted or wrong-run presentation as a non-poison caller error so the
+   corrected exact pair may still succeed;
+4. assert the live active authority and unchanged transaction generation;
+5. freshly read the authentic receipt and require current epoch,
+   `total_changes` and all three ledger watermarks to equal its after-values;
+6. independently execute the captured strict target-catalog reader rather than
+   trusting the catalog retained in the migration receipt;
+7. reassert the authority after the read and compare the fresh 34-row,
+   5,785-byte, application-ID, user-version, query-hash, inventory and catalog-
+   hash proof with both the frozen target and receipt-retained observation; and
+8. mint exactly one opaque fence by assignment only, advance phase to
+   `post-ddl-catalog-fence`, and leave epoch, counter and ledger unchanged.
+
+Fence records must use id plus exact weak referents. A record may retain frozen
+catalog scalars, but it must not retain a snapshot that strongly contains the
+authority. Read/assert reconstruct the snapshot after resolving the weak
+authority. Clone, structural copy, wrong type and cross-run fence presentation
+must be rejected without SQLite access or damage to a healthy graph.
+
+Every successful assertion and read must independently reread the validated
+physical catalog and reassert the live authority. Transaction generation must
+remain identical. Epoch, `total_changes` and the three ledger values are exact
+at mint; later assertions use lower bounds so future authenticated write leaves
+may advance them. The dynamic success test for a legitimately higher watermark
+is deferred until such a writer exists; this leaf may not forge private state
+to manufacture that success. Rollback/rebegin retires the fence graph; catalog,
+counter, epoch or ledger corruption poisons it. Closed-connection errors are
+translated to a stable unavailable code, never leaked as raw
+`sqlite3.ProgrammingError`.
+
+The fence suite must include real `L=0`/`L=2` success, fresh-read spies, zero
+mutation tracing, exact replay, corrected substituted-receipt presentation,
+premature mint precedence, forged/cloned/cross-run fences, rollback/rebegin,
+closed connection, same-count catalog replacement and SQL drift, unauthorized
+watermark drift, captured dependency replacement, root privacy and natural
+authority/receipt/fence collection. It must rerun the 40 writer tests, 28
+target-catalog tests, 15 activation tests and adjacent stage/ownership tests.
+
+##### 31.37.45.5 Following leaf and unchanged nonclaims
+
+Only after the physical fence passes may the following leaf open the one-shot
+post-DDL reader lease, select the retained TEMP projection, derive its exact
+identity, close the reader exactly once and publish a terminal reader proof.
+That reader leaf must not be collapsed into the fence because fresh physical
+catalog observation and TEMP reader lifecycle have distinct failure and
+cleanup ownership.
+
+This checkpoint claims neither fence nor reader implementation. It does not
+write baseline entries, header or sequence zero; consume four write receipts;
+mint their tombstones; adopt the stage; rebind the cursor; prove rules 11/12;
+retire TEMP state; commit or rollback; produce the Python/Node 28-field parity
+report; activate the v2 manifest; cut a release; or guarantee GitHub stars or
+external adoption. Those outcomes remain explicit downstream work and metrics,
+not facts implied by this bounded writer acceptance.

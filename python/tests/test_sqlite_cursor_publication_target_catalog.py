@@ -20,6 +20,7 @@ from graph_engineering.sqlite_cursor_publication_target_catalog import (
     SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_QUERY_SHA256,
     SQLITE_CURSOR_PUBLICATION_TARGET_DESCRIPTOR,
     _read_catalog_rows_from_cursor_intrinsic,
+    _read_target_catalog_observation_intrinsic,
     _read_validated_target_catalog_intrinsic,
     _snapshot_target_catalog_observation_intrinsic,
 )
@@ -155,6 +156,41 @@ def test_reads_exact_real_sqlite_v2_target_catalog() -> None:
             '[{"name":"ge_cycle_checkpoint_revisions_lookup_idx","sqlSha256":"'
         )
         assert snapshot.canonical_json.endswith('"type":"table"}]')
+    finally:
+        _close_target(connection)
+
+
+def test_generic_observation_preserves_real_pre_migration_v1_catalog() -> None:
+    connection = SQLiteV1BaselineConnectionOwner(":memory:")
+    connection.executescript(SCHEMA_V1.read_text(encoding="utf-8"))
+    connection.execute("BEGIN EXCLUSIVE").close()
+    try:
+        before = _read_target_catalog_observation_intrinsic(connection)
+        repeated = _read_target_catalog_observation_intrinsic(connection)
+
+        assert before.application_id == 1_195_724_359
+        assert before.user_version == 1
+        assert before.row_count > 0
+        assert before.catalog_sha256 == repeated.catalog_sha256
+        assert before.catalog_sha256 != SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_EXPECTED_SHA256
+        with _expect("GE_CURSOR_B3_TARGET_CATALOG_MISMATCH"):
+            _read_validated_target_catalog_intrinsic(connection)
+    finally:
+        _close_target(connection)
+
+
+def test_catalog_read_uses_captured_owner_execute_after_class_replacement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connection = _open_target()
+
+    def hostile_execute(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("replacement owner execute must not run")
+
+    monkeypatch.setattr(SQLiteV1BaselineConnectionOwner, "execute", hostile_execute)
+    try:
+        snapshot = _read_target_catalog_observation_intrinsic(connection)
+        assert snapshot.catalog_sha256 == SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_EXPECTED_SHA256
     finally:
         _close_target(connection)
 
@@ -408,6 +444,7 @@ def test_module_remains_package_private() -> None:
         "snapshot_target_catalog_observation",
         "_read_catalog_rows_from_cursor_intrinsic",
         "_read_metadata_from_cursor_intrinsic",
+        "_read_target_catalog_observation_intrinsic",
         "_read_validated_target_catalog_intrinsic",
         "_snapshot_target_catalog_observation_intrinsic",
     )

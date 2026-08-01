@@ -461,7 +461,7 @@ def _begin_sqlite_cursor_pre_rebind_campaign(
 
     _assert_sqlite_cursor_stage_ownership_transfer(connection, stage, receipt, transfer)
     transfer_metadata = _TRANSFERS.get(transfer)
-    if transfer_metadata is None or transfer_metadata.lifecycle != "b2-active":
+    if transfer_metadata is None:
         raise ValueError("cursor stage ownership transfer provenance is invalid")
     authority = _SQLiteCursorPreRebindCampaignAuthority(_CONSTRUCTION_TOKEN)
     campaign_session: object | None = None
