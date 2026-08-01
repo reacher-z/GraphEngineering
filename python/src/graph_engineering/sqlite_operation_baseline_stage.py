@@ -10,8 +10,8 @@ from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from types import TracebackType
-from typing import Literal, Never, cast
-from weakref import WeakKeyDictionary
+from typing import Literal, NamedTuple, Never, cast
+from weakref import ReferenceType, WeakKeyDictionary, ref
 
 from .canonical import canonical_sha256
 from .cycle_store_provider import CycleStoreProviderOperation, cycle_store_adapter_codec
@@ -146,6 +146,252 @@ _SQLiteCursorStageTransferState = Literal["unused", "active", "complete", "poiso
 _SQLiteCursorCampaignState = Literal[
     "unused", "active", "pre-rebind-complete", "diagnosed", "poisoned"
 ]
+_SQLiteCursorOuterPublicationState = Literal[
+    "unused",
+    "prepared",
+    "published",
+    "initial-adoption-prepared",
+    "initial-publication-adopted",
+    "retired",
+    "poisoned",
+]
+_SQLiteCursorPostDdlReaderState = Literal["unused", "active", "closed", "poisoned"]
+_SQLiteCursorB2CatalogChangeFenceState = Literal["live", "retired", "poisoned"]
+
+SQLITE_CURSOR_INITIAL_PUBLICATION_TARGET_CATALOG_SHA256 = (
+    "ca85cf266267fa3eb5443bdf6d957b4b03c795cd6e0232a28c52773f1041fadf"
+)
+_CURSOR_PUBLICATION_CONSTRUCTION_TOKEN = object()
+
+
+class _SQLiteCursorInitialPublicationOuterLedgerWatermark(NamedTuple):
+    affected_rows_watermark: int
+    fixed_statement_count: int
+    logical_write_sequence: int
+
+
+class _SQLiteCursorInitialPublicationStageWatermark(NamedTuple):
+    outer_ledger: _SQLiteCursorInitialPublicationOuterLedgerWatermark
+    target_catalog_sha256: str
+    total_changes: int
+    transaction_epoch: int
+
+
+class _SQLiteBaselineCursorB2FenceRetirement:
+    __slots__ = ("__weakref__",)
+
+    def __init__(self, token: object) -> None:
+        if token is not _CURSOR_PUBLICATION_CONSTRUCTION_TOKEN:
+            raise TypeError("SQLite cursor B2 fence retirements are module-minted")
+
+
+class _SQLiteBaselineCursorInitialPublicationAdoptionTail:
+    __slots__ = ("__weakref__",)
+
+    def __init__(self, token: object) -> None:
+        if token is not _CURSOR_PUBLICATION_CONSTRUCTION_TOKEN:
+            raise TypeError("SQLite cursor initial publication tails are module-minted")
+
+
+class _SQLiteBaselineCursorInitialPublicationAdoptionMint(NamedTuple):
+    retired_b2_fence: _SQLiteBaselineCursorB2FenceRetirement
+    tail: _SQLiteBaselineCursorInitialPublicationAdoptionTail
+    watermark: _SQLiteCursorInitialPublicationStageWatermark
+
+
+@dataclass(frozen=True, slots=True)
+class _SQLiteCursorInitialPublicationWatermarkRecord:
+    affected_rows_watermark: int
+    fixed_statement_count: int
+    logical_write_sequence: int
+    target_catalog_sha256: str
+    total_changes: int
+    transaction_epoch: int
+
+
+@dataclass(frozen=True, slots=True)
+class _SQLiteBaselineCursorB2FenceRetirementRecord:
+    authority_ref: ReferenceType[object]
+    previous_catalog: tuple[int, tuple[object, ...]]
+    previous_total_changes: int
+    previous_transaction_epoch: int
+    stage_ref: ReferenceType[SQLiteV1BaselineTempStage]
+    watermark: _SQLiteCursorInitialPublicationWatermarkRecord
+
+
+@dataclass(frozen=True, slots=True)
+class _SQLiteBaselineCursorInitialPublicationAdoptionContinuation:
+    authority_ref: ReferenceType[object]
+    next_catalog: tuple[int, tuple[object, ...]]
+    retired_b2_fence: _SQLiteBaselineCursorB2FenceRetirement
+    stage_ref: ReferenceType[SQLiteV1BaselineTempStage]
+    watermark: _SQLiteCursorInitialPublicationWatermarkRecord
+
+
+_CURSOR_B2_FENCE_RETIREMENTS: dict[
+    int,
+    tuple[
+        ReferenceType[_SQLiteBaselineCursorB2FenceRetirement],
+        _SQLiteBaselineCursorB2FenceRetirementRecord,
+    ],
+] = {}
+_CURSOR_INITIAL_PUBLICATION_ADOPTION_TAILS: dict[
+    int,
+    tuple[
+        ReferenceType[_SQLiteBaselineCursorInitialPublicationAdoptionTail],
+        _SQLiteBaselineCursorInitialPublicationAdoptionContinuation,
+    ],
+] = {}
+
+
+def _register_cursor_b2_fence_retirement(
+    retirement: _SQLiteBaselineCursorB2FenceRetirement,
+    record: _SQLiteBaselineCursorB2FenceRetirementRecord,
+) -> None:
+    object_id = id(retirement)
+
+    def discard(reference: ReferenceType[_SQLiteBaselineCursorB2FenceRetirement]) -> None:
+        current = _CURSOR_B2_FENCE_RETIREMENTS.get(object_id)
+        if current is not None and current[0] is reference:
+            _CURSOR_B2_FENCE_RETIREMENTS.pop(object_id, None)
+
+    reference = ref(retirement, discard)
+    _CURSOR_B2_FENCE_RETIREMENTS[object_id] = (reference, record)
+
+
+def _cursor_b2_fence_retirement_record(
+    retirement: object,
+) -> _SQLiteBaselineCursorB2FenceRetirementRecord | None:
+    if type(retirement) is not _SQLiteBaselineCursorB2FenceRetirement:
+        return None
+    current = _CURSOR_B2_FENCE_RETIREMENTS.get(id(retirement))
+    if current is None or current[0]() is not retirement:
+        return None
+    return current[1]
+
+
+def _discard_cursor_b2_fence_retirement(retirement: object) -> None:
+    if type(retirement) is not _SQLiteBaselineCursorB2FenceRetirement:
+        return
+    current = _CURSOR_B2_FENCE_RETIREMENTS.get(id(retirement))
+    if current is not None and current[0]() is retirement:
+        _CURSOR_B2_FENCE_RETIREMENTS.pop(id(retirement), None)
+
+
+def _register_cursor_initial_publication_adoption_tail(
+    tail: _SQLiteBaselineCursorInitialPublicationAdoptionTail,
+    record: _SQLiteBaselineCursorInitialPublicationAdoptionContinuation,
+) -> None:
+    object_id = id(tail)
+
+    def discard(
+        reference: ReferenceType[_SQLiteBaselineCursorInitialPublicationAdoptionTail],
+    ) -> None:
+        current = _CURSOR_INITIAL_PUBLICATION_ADOPTION_TAILS.get(object_id)
+        if current is not None and current[0] is reference:
+            _CURSOR_INITIAL_PUBLICATION_ADOPTION_TAILS.pop(object_id, None)
+
+    reference = ref(tail, discard)
+    _CURSOR_INITIAL_PUBLICATION_ADOPTION_TAILS[object_id] = (reference, record)
+
+
+def _cursor_initial_publication_adoption_continuation(
+    tail: object,
+) -> _SQLiteBaselineCursorInitialPublicationAdoptionContinuation | None:
+    if type(tail) is not _SQLiteBaselineCursorInitialPublicationAdoptionTail:
+        return None
+    current = _CURSOR_INITIAL_PUBLICATION_ADOPTION_TAILS.get(id(tail))
+    if current is None or current[0]() is not tail:
+        return None
+    return current[1]
+
+
+def _discard_cursor_initial_publication_adoption_tail(tail: object) -> None:
+    if type(tail) is not _SQLiteBaselineCursorInitialPublicationAdoptionTail:
+        return
+    current = _CURSOR_INITIAL_PUBLICATION_ADOPTION_TAILS.get(id(tail))
+    if current is not None and current[0]() is tail:
+        _CURSOR_INITIAL_PUBLICATION_ADOPTION_TAILS.pop(id(tail), None)
+
+
+def _copy_initial_publication_stage_watermark(
+    value: object,
+) -> tuple[
+    _SQLiteCursorInitialPublicationStageWatermark,
+    _SQLiteCursorInitialPublicationWatermarkRecord,
+]:
+    if type(value) is not _SQLiteCursorInitialPublicationStageWatermark:
+        raise ValueError("SQLite cursor initial publication stage watermark is invalid")
+    watermark = value
+    ledger = watermark.outer_ledger
+    if type(ledger) is not _SQLiteCursorInitialPublicationOuterLedgerWatermark:
+        raise ValueError("SQLite cursor initial publication stage watermark is invalid")
+    values = (
+        ledger.affected_rows_watermark,
+        ledger.fixed_statement_count,
+        ledger.logical_write_sequence,
+        watermark.target_catalog_sha256,
+        watermark.total_changes,
+        watermark.transaction_epoch,
+    )
+    affected_rows, statement_count, sequence, target_hash, total_changes, epoch = values
+    if (
+        type(affected_rows) is not int
+        or affected_rows < 0
+        or affected_rows > MAX_SAFE_INTEGER
+        or type(statement_count) is not int
+        or statement_count < 0
+        or statement_count > MAX_SAFE_INTEGER
+        or type(sequence) is not int
+        or sequence != 4
+        or type(target_hash) is not str
+        or target_hash != SQLITE_CURSOR_INITIAL_PUBLICATION_TARGET_CATALOG_SHA256
+        or type(total_changes) is not int
+        or total_changes < 0
+        or total_changes > MAX_SAFE_INTEGER
+        or type(epoch) is not int
+        or epoch < 0
+    ):
+        raise ValueError("SQLite cursor initial publication stage watermark is invalid")
+    record = _SQLiteCursorInitialPublicationWatermarkRecord(
+        affected_rows,
+        statement_count,
+        sequence,
+        target_hash,
+        total_changes,
+        epoch,
+    )
+    copied = _SQLiteCursorInitialPublicationStageWatermark(
+        _SQLiteCursorInitialPublicationOuterLedgerWatermark(
+            affected_rows,
+            statement_count,
+            sequence,
+        ),
+        target_hash,
+        total_changes,
+        epoch,
+    )
+    return copied, record
+
+
+def _same_initial_publication_watermark(
+    left: _SQLiteCursorInitialPublicationWatermarkRecord,
+    right: _SQLiteCursorInitialPublicationWatermarkRecord,
+) -> bool:
+    return left == right
+
+
+def _cursor_seal_catalog_snapshot(rootpage: int) -> str:
+    """Bind the cached B1 proof to its exact owned table identity and fixture."""
+
+    return hashlib.sha256(
+        (
+            f"{rootpage}:"
+            f"{SQLITE_V1_CURSOR_SEAL_TEMP_TABLE_DDL_SHA256}:"
+            f"{len(_SQLITE_V1_CURSOR_SEAL_XINFO)}"
+        ).encode()
+    ).hexdigest()
+
 
 # Freeze the owner observations used by the cursor handoff.  Calling the
 # captured property functions directly prevents a later class-level descriptor
@@ -161,6 +407,10 @@ _OWNER_TOTAL_CHANGES_GETTER = cast(
 _OWNER_EXCLUSIVE_TRANSACTION_GETTER = cast(
     "Callable[[SQLiteV1BaselineConnectionOwner], bool]",
     cast(property, SQLiteV1BaselineConnectionOwner.__dict__["in_exclusive_transaction"]).fget,
+)
+_OWNER_TRANSACTION_GENERATION_GETTER = cast(
+    "Callable[[SQLiteV1BaselineConnectionOwner], object | None]",
+    cast(property, SQLiteV1BaselineConnectionOwner.__dict__["_transaction_generation"]).fget,
 )
 _OWNER_EXECUTE = SQLiteV1BaselineConnectionOwner.execute
 _CURSOR_FETCHONE = _SQLiteCursorCapability.fetchone
@@ -1311,6 +1561,8 @@ class SQLiteV1BaselineTempStage:
         "_created_indexes",
         "_created_tables",
         "_created_view",
+        "_cursor_b2_catalog_change_fence_retirement",
+        "_cursor_b2_catalog_change_fence_state",
         "_cursor_campaign_active_cursor",
         "_cursor_campaign_active_role",
         "_cursor_campaign_active_rule_index",
@@ -1318,10 +1570,27 @@ class SQLiteV1BaselineTempStage:
         "_cursor_campaign_receipt",
         "_cursor_campaign_session",
         "_cursor_campaign_state",
+        "_cursor_initial_publication_adoption_mint",
+        "_cursor_initial_publication_adoption_retirement",
+        "_cursor_initial_publication_adoption_tail",
+        "_cursor_initial_publication_adoption_watermark",
+        "_cursor_initial_publication_outer_ledger",
+        "_cursor_initial_publication_target_catalog_sha256",
+        "_cursor_outer_publication_allowed_total_changes",
+        "_cursor_outer_publication_authority_ref",
+        "_cursor_outer_publication_epoch",
+        "_cursor_outer_publication_lineage",
+        "_cursor_outer_publication_state",
+        "_cursor_post_ddl_reader_authority_ref",
+        "_cursor_post_ddl_reader_cleanup",
+        "_cursor_post_ddl_reader_lease",
+        "_cursor_post_ddl_reader_state",
         "_cursor_transfer_allowed_total_changes",
         "_cursor_transfer_capture_epoch",
         "_cursor_transfer_catalog_created",
         "_cursor_transfer_catalog_rootpage",
+        "_cursor_transfer_catalog_snapshot",
+        "_cursor_transfer_lineage",
         "_cursor_transfer_projection",
         "_cursor_transfer_receipt",
         "_cursor_transfer_session",
@@ -1387,6 +1656,7 @@ class SQLiteV1BaselineTempStage:
         self._cursor_transfer_allowed_total_changes: int | None = None
         self._cursor_transfer_catalog_created = False
         self._cursor_transfer_catalog_rootpage: int | None = None
+        self._cursor_transfer_catalog_snapshot: str | None = None
         self._cursor_campaign_state: _SQLiteCursorCampaignState = "unused"
         self._cursor_campaign_session: object | None = None
         self._cursor_campaign_receipt: SQLiteCursorPreRebindReceipt | None = None
@@ -1394,6 +1664,36 @@ class SQLiteV1BaselineTempStage:
         self._cursor_campaign_active_cursor: _SQLiteCursorCapability | None = None
         self._cursor_campaign_active_role: str | None = None
         self._cursor_campaign_active_rule_index: int | None = None
+        self._cursor_outer_publication_state: _SQLiteCursorOuterPublicationState = "unused"
+        self._cursor_outer_publication_authority_ref: ReferenceType[object] | None = None
+        self._cursor_outer_publication_epoch: int | None = None
+        self._cursor_outer_publication_lineage: object | None = None
+        self._cursor_outer_publication_allowed_total_changes: int | None = None
+        self._cursor_initial_publication_adoption_retirement: (
+            _SQLiteBaselineCursorB2FenceRetirement | None
+        ) = None
+        self._cursor_initial_publication_adoption_mint: (
+            _SQLiteBaselineCursorInitialPublicationAdoptionMint | None
+        ) = None
+        self._cursor_initial_publication_adoption_tail: (
+            _SQLiteBaselineCursorInitialPublicationAdoptionTail | None
+        ) = None
+        self._cursor_initial_publication_adoption_watermark: (
+            _SQLiteCursorInitialPublicationWatermarkRecord | None
+        ) = None
+        self._cursor_initial_publication_outer_ledger: (
+            _SQLiteCursorInitialPublicationWatermarkRecord | None
+        ) = None
+        self._cursor_initial_publication_target_catalog_sha256: str | None = None
+        self._cursor_b2_catalog_change_fence_state: _SQLiteCursorB2CatalogChangeFenceState = "live"
+        self._cursor_b2_catalog_change_fence_retirement: (
+            _SQLiteBaselineCursorB2FenceRetirement | None
+        ) = None
+        self._cursor_post_ddl_reader_state: _SQLiteCursorPostDdlReaderState = "unused"
+        self._cursor_post_ddl_reader_authority_ref: ReferenceType[object] | None = None
+        self._cursor_post_ddl_reader_lease: object | None = None
+        self._cursor_post_ddl_reader_cleanup: Callable[[], None] | None = None
+        self._cursor_transfer_lineage: object | None = None
         self._ordered_handoff_started = False
         self._ordered_handoff_completed = False
         self._ordered_handoff_reader: _SQLiteV1BaselineOrderedStageReader | None = None
@@ -2310,10 +2610,13 @@ class SQLiteV1BaselineTempStage:
 
         expected_epoch = self._transaction_epoch
         expected_total_changes = self._allowed_total_changes
+        expected_lineage = _OWNER_TRANSACTION_GENERATION_GETTER(connection)
         self._assert_open_and_bound()
         if (
             _OWNER_TRANSACTION_EPOCH_GETTER(connection) != expected_epoch
             or _OWNER_TOTAL_CHANGES_GETTER(connection) != expected_total_changes
+            or expected_lineage is None
+            or _OWNER_TRANSACTION_GENERATION_GETTER(connection) is not expected_lineage
         ):
             self._abort_cursor_stage_transfer(
                 session,
@@ -2330,6 +2633,7 @@ class SQLiteV1BaselineTempStage:
             or _OWNER_TRANSACTION_EPOCH_GETTER(connection) != expected_epoch
             or self._allowed_total_changes != expected_total_changes
             or _OWNER_TOTAL_CHANGES_GETTER(connection) != expected_total_changes
+            or _OWNER_TRANSACTION_GENERATION_GETTER(connection) is not expected_lineage
             or self._cooperative_summary is not summary
             or self._ordered_projection_identity is not projection
         ):
@@ -2373,6 +2677,7 @@ class SQLiteV1BaselineTempStage:
         self._cursor_transfer_session = session
         self._cursor_transfer_capture_epoch = witness_metadata.transaction_epoch
         self._cursor_transfer_stage_epoch = expected_epoch
+        self._cursor_transfer_lineage = expected_lineage
         self._cursor_transfer_allowed_total_changes = expected_total_changes
         self._cursor_transfer_state = "active"
         return session
@@ -2382,7 +2687,7 @@ class SQLiteV1BaselineTempStage:
         expected_epoch: int,
         expected_total_changes: int,
         expected_rootpage: int | None,
-    ) -> int:
+    ) -> tuple[int, str]:
         """Validate the complete cursor-phase catalog against the frozen fixture."""
 
         def assert_fence() -> None:
@@ -2495,7 +2800,8 @@ class SQLiteV1BaselineTempStage:
         if tuple(xinfo) != _SQLITE_V1_CURSOR_SEAL_XINFO:
             raise ValueError("BLR_CURSOR_STAGE_CATALOG: cursor seal xinfo drifted")
         assert_fence()
-        return rootpage
+        snapshot = _cursor_seal_catalog_snapshot(rootpage)
+        return rootpage, snapshot
 
     def _create_cursor_seal_temp_table(
         self,
@@ -2551,7 +2857,7 @@ class SQLiteV1BaselineTempStage:
                     "BLR_CURSOR_STAGE_DDL: cursor seal TEMP DDL did not produce "
                     "exact +1 epoch/+0 changes"
                 )
-            rootpage = _CURSOR_STAGE_ASSERT_SEAL_CATALOG(
+            rootpage, catalog_snapshot = _CURSOR_STAGE_ASSERT_SEAL_CATALOG(
                 self,
                 after_epoch,
                 before_changes,
@@ -2594,12 +2900,14 @@ class SQLiteV1BaselineTempStage:
                             self._created_tables.remove(SQLITE_V1_CURSOR_SEAL_TEMP_TABLE)
                             self._cursor_transfer_catalog_created = False
                             self._cursor_transfer_catalog_rootpage = None
+                            self._cursor_transfer_catalog_snapshot = None
             self._abort_cursor_stage_transfer(session, primary)
 
         # Publication is deliberately adjacent and occurs only after every
         # exact catalog proof succeeds.  The historical capture epoch remains
         # immutable; only the live stage epochs adopt the owned +1 transition.
         self._cursor_transfer_catalog_rootpage = rootpage
+        self._cursor_transfer_catalog_snapshot = catalog_snapshot
         self._transaction_epoch = after_epoch
         self._cursor_transfer_stage_epoch = after_epoch
 
@@ -2656,7 +2964,12 @@ class SQLiteV1BaselineTempStage:
             )
         expected_epoch = self._cursor_transfer_stage_epoch
         expected_total_changes = self._cursor_transfer_allowed_total_changes
-        if type(expected_epoch) is not int or type(expected_total_changes) is not int:
+        expected_lineage = self._cursor_transfer_lineage
+        if (
+            type(expected_epoch) is not int
+            or type(expected_total_changes) is not int
+            or expected_lineage is None
+        ):
             self._abort_cursor_stage_transfer(
                 session,
                 "BLR_CURSOR_STAGE_AUTHORITY: cursor stage transfer snapshot is invalid",
@@ -2668,12 +2981,17 @@ class SQLiteV1BaselineTempStage:
         self.assert_relation_key_coverage()
         if self._cursor_transfer_catalog_created:
             try:
-                _CURSOR_STAGE_ASSERT_SEAL_CATALOG(
+                rootpage, catalog_snapshot = _CURSOR_STAGE_ASSERT_SEAL_CATALOG(
                     self,
                     expected_epoch,
                     expected_total_changes,
                     self._cursor_transfer_catalog_rootpage,
                 )
+                if (
+                    rootpage != self._cursor_transfer_catalog_rootpage
+                    or catalog_snapshot != self._cursor_transfer_catalog_snapshot
+                ):
+                    raise ValueError("BLR_CURSOR_STAGE_CATALOG: cached cursor seal catalog drifted")
             except BaseException as primary:
                 self._abort_cursor_stage_transfer(session, primary)
         else:
@@ -2684,6 +3002,7 @@ class SQLiteV1BaselineTempStage:
             or _OWNER_TRANSACTION_EPOCH_GETTER(connection) != expected_epoch
             or self._allowed_total_changes != expected_total_changes
             or _OWNER_TOTAL_CHANGES_GETTER(connection) != expected_total_changes
+            or _OWNER_TRANSACTION_GENERATION_GETTER(connection) is not expected_lineage
         ):
             self._abort_cursor_stage_transfer(
                 session,
@@ -2872,8 +3191,462 @@ class SQLiteV1BaselineTempStage:
             self._cursor_transfer_receipt = None
             self._cursor_transfer_projection = None
             self._cursor_transfer_stage_epoch = None
+            self._cursor_transfer_lineage = None
             self._cursor_transfer_allowed_total_changes = None
             self._cursor_transfer_state = "complete"
+
+    def _assert_cursor_pre_rebind_complete(
+        self,
+        connection: SQLiteV1BaselineConnectionOwner,
+        receipt: SQLiteCursorPreRebindReceipt,
+        projection: BaselineProjectionIdentity,
+        transfer_session: object,
+    ) -> None:
+        provenance = assert_sqlite_cursor_pre_rebind_receipt_provenance(receipt)
+        _assert_registered_sqlite_v1_baseline_temp_stage(self, connection)
+        if (
+            type(connection) is not SQLiteV1BaselineConnectionOwner
+            or type(projection) is not BaselineProjectionIdentity
+            or self._state != "open"
+            or self._connection is not connection
+            or self._cursor_transfer_state != "active"
+            or self._cursor_transfer_session is not transfer_session
+            or self._cursor_transfer_receipt is not receipt
+            or self._cursor_transfer_projection is not projection
+            or provenance.projection_identity is not projection
+            or self._cursor_transfer_stage_epoch is None
+            or self._cursor_transfer_lineage is None
+            or self._cursor_transfer_allowed_total_changes is None
+            or not self._cursor_transfer_catalog_created
+            or type(self._cursor_transfer_catalog_rootpage) is not int
+            or self._cursor_transfer_catalog_rootpage < 1
+            or type(self._cursor_transfer_catalog_snapshot) is not str
+            or self._cursor_transfer_catalog_snapshot
+            != _cursor_seal_catalog_snapshot(self._cursor_transfer_catalog_rootpage)
+            or self._cursor_campaign_state != "pre-rebind-complete"
+            or self._cursor_campaign_receipt is not receipt
+            or self._cursor_campaign_projection is not projection
+            or self._cursor_campaign_session is None
+            or self._cursor_campaign_active_cursor is not None
+            or not _OWNER_EXCLUSIVE_TRANSACTION_GETTER(connection)
+            or _OWNER_TRANSACTION_GENERATION_GETTER(connection) is not self._cursor_transfer_lineage
+            or _OWNER_TRANSACTION_EPOCH_GETTER(connection) != self._cursor_transfer_stage_epoch
+            or _OWNER_TOTAL_CHANGES_GETTER(connection)
+            != self._cursor_transfer_allowed_total_changes
+            or self._transaction_epoch != self._cursor_transfer_stage_epoch
+            or self._allowed_total_changes != self._cursor_transfer_allowed_total_changes
+        ):
+            raise ValueError("SQLite cursor pre-rebind completed authority is invalid")
+
+    def _prepare_cursor_outer_publication(
+        self,
+        connection: SQLiteV1BaselineConnectionOwner,
+        receipt: SQLiteCursorPreRebindReceipt,
+        projection: BaselineProjectionIdentity,
+        transfer_session: object,
+        authority: object,
+    ) -> None:
+        _CURSOR_STAGE_ASSERT_PRE_REBIND_COMPLETE(
+            self,
+            connection,
+            receipt,
+            projection,
+            transfer_session,
+        )
+        try:
+            authority_ref = ref(authority)
+        except TypeError:
+            raise ValueError("SQLite cursor outer publication authority is invalid") from None
+        if (
+            self._cursor_outer_publication_authority_ref is not None
+            and self._cursor_outer_publication_authority_ref() is authority
+            and self._cursor_outer_publication_state in {"prepared", "published"}
+        ):
+            return
+        if (
+            self._cursor_outer_publication_state != "unused"
+            or self._cursor_outer_publication_authority_ref is not None
+            or self._cursor_transfer_stage_epoch is None
+            or self._cursor_transfer_lineage is None
+            or self._cursor_transfer_allowed_total_changes is None
+        ):
+            raise ValueError("SQLite cursor outer publication preparation is invalid")
+        self._cursor_outer_publication_authority_ref = authority_ref
+        self._cursor_outer_publication_epoch = self._cursor_transfer_stage_epoch
+        self._cursor_outer_publication_lineage = self._cursor_transfer_lineage
+        self._cursor_outer_publication_allowed_total_changes = (
+            self._cursor_transfer_allowed_total_changes
+        )
+        self._cursor_outer_publication_state = "prepared"
+
+    def _publish_cursor_outer_publication(self, authority: object) -> None:
+        """Atomic-tail hook; the ownership bridge performs pair validation first."""
+
+        del authority
+        self._cursor_outer_publication_state = "published"
+
+    def _assert_cursor_outer_publication_owned(
+        self,
+        connection: SQLiteV1BaselineConnectionOwner,
+        receipt: SQLiteCursorPreRebindReceipt,
+        projection: BaselineProjectionIdentity,
+        transfer_session: object,
+        authority: object,
+    ) -> None:
+        _CURSOR_STAGE_ASSERT_PRE_REBIND_COMPLETE(
+            self,
+            connection,
+            receipt,
+            projection,
+            transfer_session,
+        )
+        if (
+            self._cursor_outer_publication_state != "published"
+            or self._cursor_outer_publication_authority_ref is None
+            or self._cursor_outer_publication_authority_ref() is not authority
+            or self._cursor_outer_publication_epoch != self._cursor_transfer_stage_epoch
+            or self._cursor_outer_publication_lineage is not self._cursor_transfer_lineage
+            or self._cursor_outer_publication_allowed_total_changes
+            != self._cursor_transfer_allowed_total_changes
+        ):
+            raise ValueError("SQLite cursor outer publication ownership is invalid")
+
+    def _assert_cursor_outer_publication_active(
+        self,
+        connection: SQLiteV1BaselineConnectionOwner,
+        receipt: SQLiteCursorPreRebindReceipt,
+        projection: BaselineProjectionIdentity,
+        transfer_session: object,
+        authority: object,
+    ) -> None:
+        provenance = assert_sqlite_cursor_pre_rebind_receipt_provenance(receipt)
+        _assert_registered_sqlite_v1_baseline_temp_stage(self, connection)
+        if (
+            type(projection) is not BaselineProjectionIdentity
+            or self._state != "open"
+            or self._connection is not connection
+            or self._cursor_transfer_state != "active"
+            or self._cursor_transfer_session is not transfer_session
+            or self._cursor_transfer_receipt is not receipt
+            or self._cursor_transfer_projection is not projection
+            or provenance.projection_identity is not projection
+            or self._cursor_campaign_state != "pre-rebind-complete"
+            or self._cursor_campaign_receipt is not receipt
+            or self._cursor_campaign_projection is not projection
+            or self._cursor_campaign_active_cursor is not None
+            or self._cursor_outer_publication_state
+            not in {"published", "initial-adoption-prepared"}
+            or self._cursor_outer_publication_authority_ref is None
+            or self._cursor_outer_publication_authority_ref() is not authority
+        ):
+            raise ValueError("SQLite cursor active outer publication ownership is invalid")
+
+    def _register_cursor_post_ddl_reader_cleanup(
+        self,
+        authority: object,
+        lease: object,
+        cleanup: Callable[[], None],
+    ) -> None:
+        if (
+            self._state != "open"
+            or self._cursor_outer_publication_state != "published"
+            or self._cursor_outer_publication_authority_ref is None
+            or self._cursor_outer_publication_authority_ref() is not authority
+            or lease is None
+            or not callable(cleanup)
+            or self._cursor_post_ddl_reader_state != "unused"
+            or self._cursor_post_ddl_reader_authority_ref is not None
+            or self._cursor_post_ddl_reader_lease is not None
+            or self._cursor_post_ddl_reader_cleanup is not None
+        ):
+            raise ValueError("SQLite cursor post-DDL reader cleanup owner is invalid")
+        self._cursor_post_ddl_reader_authority_ref = self._cursor_outer_publication_authority_ref
+        self._cursor_post_ddl_reader_lease = lease
+        self._cursor_post_ddl_reader_cleanup = cleanup
+        self._cursor_post_ddl_reader_state = "active"
+
+    def _clear_cursor_post_ddl_reader_cleanup(
+        self,
+        authority: object,
+        lease: object,
+    ) -> None:
+        if (
+            self._cursor_post_ddl_reader_state != "active"
+            or self._cursor_post_ddl_reader_authority_ref is None
+            or self._cursor_post_ddl_reader_authority_ref() is not authority
+            or self._cursor_post_ddl_reader_lease is not lease
+            or self._cursor_post_ddl_reader_cleanup is None
+        ):
+            raise ValueError("SQLite cursor post-DDL reader cleanup owner is invalid")
+        self._cursor_post_ddl_reader_cleanup = None
+        self._cursor_post_ddl_reader_state = "closed"
+
+    def _prepare_cursor_initial_publication_adoption(
+        self,
+        authority: object,
+        lease: object,
+        watermark_input: object,
+    ) -> _SQLiteBaselineCursorInitialPublicationAdoptionMint:
+        watermark, watermark_record = _copy_initial_publication_stage_watermark(watermark_input)
+        authority_ref = self._cursor_outer_publication_authority_ref
+        reader_authority_ref = self._cursor_post_ddl_reader_authority_ref
+        if (
+            authority_ref is None
+            or authority_ref() is not authority
+            or reader_authority_ref is None
+            or reader_authority_ref() is not authority
+            or self._cursor_post_ddl_reader_lease is not lease
+            or self._cursor_post_ddl_reader_state != "closed"
+            or self._cursor_post_ddl_reader_cleanup is not None
+        ):
+            raise ValueError("SQLite cursor initial publication adoption owner is invalid")
+        if self._cursor_outer_publication_state == "initial-adoption-prepared":
+            mint = self._cursor_initial_publication_adoption_mint
+            tail = self._cursor_initial_publication_adoption_tail
+            retirement = self._cursor_initial_publication_adoption_retirement
+            existing_watermark = self._cursor_initial_publication_adoption_watermark
+            if (
+                mint is None
+                or tail is None
+                or retirement is None
+                or existing_watermark is None
+                or mint.tail is not tail
+                or mint.retired_b2_fence is not retirement
+                or not _same_initial_publication_watermark(
+                    existing_watermark,
+                    watermark_record,
+                )
+            ):
+                raise ValueError(
+                    "SQLite cursor initial publication adoption preparation is invalid"
+                )
+            return mint
+        if (
+            self._cursor_outer_publication_state != "published"
+            or self._cursor_initial_publication_adoption_tail is not None
+            or self._cursor_initial_publication_adoption_retirement is not None
+            or self._cursor_initial_publication_adoption_mint is not None
+            or self._cursor_initial_publication_adoption_watermark is not None
+            or self._cursor_b2_catalog_change_fence_state != "live"
+            or self._cursor_b2_catalog_change_fence_retirement is not None
+            or self._cursor_transfer_capture_epoch is None
+            or self._cursor_transfer_stage_epoch is None
+            or self._cursor_transfer_allowed_total_changes is None
+            or self._cursor_transfer_lineage is None
+        ):
+            raise ValueError("SQLite cursor initial publication adoption preparation is invalid")
+
+        connection = self._connection
+        previous_catalog = (
+            self._legacy_main_schema_version,
+            self._legacy_main_operation_catalog,
+        )
+        try:
+            lineage_before = _OWNER_TRANSACTION_GENERATION_GETTER(connection)
+            epoch_before = _OWNER_TRANSACTION_EPOCH_GETTER(connection)
+            changes_before = _OWNER_TOTAL_CHANGES_GETTER(connection)
+            exclusive_before = _OWNER_EXCLUSIVE_TRANSACTION_GETTER(connection)
+            next_catalog = _CURSOR_STAGE_READ_MAIN_OPERATIONS_CATALOG(self)
+        except ValueError:
+            raise
+        except BaseException:
+            raise ValueError(
+                "SQLite cursor initial publication adoption fence is unavailable"
+            ) from None
+        next_schema_version, next_operation_catalog = next_catalog
+        if (
+            self._state != "open"
+            or _REGISTERED_SQLITE_V1_BASELINE_TEMP_STAGES.get(self) is not connection
+            or not exclusive_before
+            or lineage_before is None
+            or lineage_before is not self._cursor_transfer_lineage
+            or epoch_before != watermark_record.transaction_epoch
+            or changes_before != watermark_record.total_changes
+            or self._transaction_epoch != self._cursor_transfer_stage_epoch
+            or self._allowed_total_changes != self._cursor_transfer_allowed_total_changes
+            or not next_operation_catalog
+            or next_schema_version <= previous_catalog[0]
+            or (
+                next_operation_catalog[3] == previous_catalog[1][3]
+                and next_operation_catalog[4] == previous_catalog[1][4]
+                if previous_catalog[1]
+                else False
+            )
+        ):
+            _CURSOR_STAGE_POISON(
+                self,
+                "SQLite cursor initial publication adoption fence is invalid",
+            )
+        if (
+            not _OWNER_EXCLUSIVE_TRANSACTION_GETTER(connection)
+            or _OWNER_TRANSACTION_GENERATION_GETTER(connection) is not lineage_before
+            or _OWNER_TRANSACTION_EPOCH_GETTER(connection) != epoch_before
+            or _OWNER_TOTAL_CHANGES_GETTER(connection) != changes_before
+        ):
+            _CURSOR_STAGE_POISON(
+                self,
+                "SQLite cursor initial publication adoption fence changed",
+            )
+
+        retired_b2_fence = _SQLiteBaselineCursorB2FenceRetirement(
+            _CURSOR_PUBLICATION_CONSTRUCTION_TOKEN
+        )
+        tail = _SQLiteBaselineCursorInitialPublicationAdoptionTail(
+            _CURSOR_PUBLICATION_CONSTRUCTION_TOKEN
+        )
+        _register_cursor_b2_fence_retirement(
+            retired_b2_fence,
+            _SQLiteBaselineCursorB2FenceRetirementRecord(
+                authority_ref,
+                previous_catalog,
+                self._allowed_total_changes,
+                self._transaction_epoch,
+                ref(self),
+                watermark_record,
+            ),
+        )
+        _register_cursor_initial_publication_adoption_tail(
+            tail,
+            _SQLiteBaselineCursorInitialPublicationAdoptionContinuation(
+                authority_ref,
+                next_catalog,
+                retired_b2_fence,
+                ref(self),
+                watermark_record,
+            ),
+        )
+        mint = _SQLiteBaselineCursorInitialPublicationAdoptionMint(
+            retired_b2_fence,
+            tail,
+            watermark,
+        )
+        self._cursor_initial_publication_adoption_tail = tail
+        self._cursor_initial_publication_adoption_retirement = retired_b2_fence
+        self._cursor_initial_publication_adoption_mint = mint
+        self._cursor_initial_publication_adoption_watermark = watermark_record
+        self._cursor_outer_publication_state = "initial-adoption-prepared"
+        return mint
+
+    def _publish_cursor_initial_publication_adoption(
+        self,
+        tail: _SQLiteBaselineCursorInitialPublicationAdoptionTail,
+    ) -> None:
+        continuation = _cursor_initial_publication_adoption_continuation(tail)
+        continuation_authority = continuation.authority_ref() if continuation is not None else None
+        if (
+            continuation is None
+            or continuation.stage_ref() is not self
+            or self._cursor_outer_publication_state != "initial-adoption-prepared"
+            or self._cursor_outer_publication_authority_ref is None
+            or continuation_authority is None
+            or self._cursor_outer_publication_authority_ref() is not continuation_authority
+            or self._cursor_initial_publication_adoption_tail is not tail
+            or self._cursor_initial_publication_adoption_retirement
+            is not continuation.retired_b2_fence
+            or self._cursor_initial_publication_adoption_watermark != continuation.watermark
+            or self._cursor_b2_catalog_change_fence_state != "live"
+        ):
+            raise ValueError("SQLite cursor initial publication adoption tail is invalid")
+        _discard_cursor_initial_publication_adoption_tail(tail)
+        watermark = continuation.watermark
+        self._transaction_epoch = watermark.transaction_epoch
+        self._allowed_total_changes = watermark.total_changes
+        self._legacy_main_schema_version = continuation.next_catalog[0]
+        self._legacy_main_operation_catalog = continuation.next_catalog[1]
+        self._cursor_outer_publication_epoch = watermark.transaction_epoch
+        self._cursor_outer_publication_allowed_total_changes = watermark.total_changes
+        self._cursor_initial_publication_outer_ledger = watermark
+        self._cursor_initial_publication_target_catalog_sha256 = watermark.target_catalog_sha256
+        self._cursor_b2_catalog_change_fence_retirement = continuation.retired_b2_fence
+        self._cursor_b2_catalog_change_fence_state = "retired"
+        self._cursor_transfer_capture_epoch = None
+        self._cursor_transfer_stage_epoch = None
+        self._cursor_transfer_allowed_total_changes = None
+        self._cursor_outer_publication_state = "initial-publication-adopted"
+
+    def _assert_cursor_initial_publication_adopted(
+        self,
+        authority: object,
+        lease: object,
+        retired_b2_fence: _SQLiteBaselineCursorB2FenceRetirement,
+        watermark_input: object,
+    ) -> None:
+        _watermark, watermark = _copy_initial_publication_stage_watermark(watermark_input)
+        retirement = _cursor_b2_fence_retirement_record(retired_b2_fence)
+        if (
+            self._state != "open"
+            or _REGISTERED_SQLITE_V1_BASELINE_TEMP_STAGES.get(self) is not self._connection
+            or self._cursor_outer_publication_state != "initial-publication-adopted"
+            or self._cursor_outer_publication_authority_ref is None
+            or self._cursor_outer_publication_authority_ref() is not authority
+            or self._cursor_post_ddl_reader_authority_ref is None
+            or self._cursor_post_ddl_reader_authority_ref() is not authority
+            or self._cursor_post_ddl_reader_lease is not lease
+            or self._cursor_post_ddl_reader_state != "closed"
+            or self._cursor_post_ddl_reader_cleanup is not None
+            or self._cursor_b2_catalog_change_fence_state != "retired"
+            or self._cursor_b2_catalog_change_fence_retirement is not retired_b2_fence
+            or retirement is None
+            or retirement.stage_ref() is not self
+            or retirement.authority_ref() is not authority
+            or not _same_initial_publication_watermark(retirement.watermark, watermark)
+            or self._cursor_outer_publication_epoch != watermark.transaction_epoch
+            or self._cursor_outer_publication_lineage is not self._cursor_transfer_lineage
+            or self._cursor_outer_publication_allowed_total_changes != watermark.total_changes
+            or self._cursor_initial_publication_target_catalog_sha256
+            != watermark.target_catalog_sha256
+            or self._cursor_initial_publication_outer_ledger != watermark
+        ):
+            raise ValueError("SQLite cursor initial publication adopted authority is invalid")
+        connection = self._connection
+        if (
+            not _OWNER_EXCLUSIVE_TRANSACTION_GETTER(connection)
+            or _OWNER_TRANSACTION_GENERATION_GETTER(connection) is not self._cursor_transfer_lineage
+            or _OWNER_TRANSACTION_EPOCH_GETTER(connection) != watermark.transaction_epoch
+            or _OWNER_TOTAL_CHANGES_GETTER(connection) != watermark.total_changes
+        ):
+            _CURSOR_STAGE_POISON(
+                self,
+                "SQLite cursor initial publication adopted fence changed",
+            )
+        current_catalog = _CURSOR_STAGE_READ_MAIN_OPERATIONS_CATALOG(self)
+        if current_catalog != (
+            self._legacy_main_schema_version,
+            self._legacy_main_operation_catalog,
+        ):
+            _CURSOR_STAGE_POISON(
+                self,
+                "SQLite cursor initial publication adopted fence changed",
+            )
+
+    def _retire_cursor_outer_publication(self) -> None:
+        tail = self._cursor_initial_publication_adoption_tail
+        if tail is not None:
+            _discard_cursor_initial_publication_adoption_tail(tail)
+        retirement = self._cursor_initial_publication_adoption_retirement
+        if retirement is not None:
+            _discard_cursor_b2_fence_retirement(retirement)
+        self._cursor_initial_publication_adoption_mint = None
+        self._cursor_initial_publication_adoption_retirement = None
+        self._cursor_initial_publication_adoption_tail = None
+        self._cursor_initial_publication_adoption_watermark = None
+        self._cursor_b2_catalog_change_fence_retirement = None
+        self._cursor_outer_publication_authority_ref = None
+        self._cursor_post_ddl_reader_authority_ref = None
+        self._cursor_outer_publication_state = "retired"
+
+    def _poison_cursor_outer_publication(
+        self,
+        authority: object,
+        message: str,
+    ) -> Never:
+        if (
+            self._cursor_outer_publication_authority_ref is None
+            or self._cursor_outer_publication_authority_ref() is not authority
+        ):
+            raise ValueError("SQLite cursor outer publication authority is invalid")
+        self._cursor_outer_publication_state = "poisoned"
+        _CURSOR_STAGE_POISON(self, message)
 
     def _abort_cursor_pre_rebind_campaign(
         self,
@@ -2932,9 +3705,12 @@ class SQLiteV1BaselineTempStage:
         self._cursor_transfer_receipt = None
         self._cursor_transfer_projection = None
         self._cursor_transfer_stage_epoch = None
+        self._cursor_transfer_lineage = None
         self._cursor_transfer_allowed_total_changes = None
         # Historical capture epoch is intentionally never rewritten after publish.
         self._cursor_transfer_state = "poisoned"
+        if self._cursor_outer_publication_state != "unused":
+            self._cursor_outer_publication_state = "poisoned"
         if primary is None:
             self._poison(message)
         try:
@@ -3239,12 +4015,43 @@ class SQLiteV1BaselineTempStage:
         self._cursor_transfer_receipt = None
         self._cursor_transfer_projection = None
         self._cursor_transfer_stage_epoch = None
+        self._cursor_transfer_lineage = None
         self._cursor_transfer_allowed_total_changes = None
         if self._cursor_transfer_state == "active":
             self._cursor_transfer_state = "complete"
         active_reader = self._ordered_handoff_reader
         cursor_close_failure: BaseException | None = None
         cursor_cleanup_message = "BLR_HANDOFF_CLEANUP: ordered TEMP stage cursor cleanup failed"
+        if self._cursor_post_ddl_reader_state == "active":
+            cleanup = self._cursor_post_ddl_reader_cleanup
+            self._cursor_post_ddl_reader_cleanup = None
+            self._cursor_post_ddl_reader_state = "poisoned"
+            try:
+                if cleanup is not None:
+                    cleanup()
+            except BaseException as error:
+                cursor_close_failure = error
+                cursor_cleanup_message = "SQLite cursor post-DDL reader cleanup ownership failed"
+        adoption_tail = self._cursor_initial_publication_adoption_tail
+        if adoption_tail is not None:
+            _discard_cursor_initial_publication_adoption_tail(adoption_tail)
+        adoption_retirement = self._cursor_initial_publication_adoption_retirement
+        if adoption_retirement is not None:
+            _discard_cursor_b2_fence_retirement(adoption_retirement)
+        self._cursor_initial_publication_adoption_mint = None
+        self._cursor_initial_publication_adoption_retirement = None
+        self._cursor_initial_publication_adoption_tail = None
+        self._cursor_initial_publication_adoption_watermark = None
+        self._cursor_b2_catalog_change_fence_retirement = None
+        if self._cursor_outer_publication_state != "unused":
+            self._cursor_outer_publication_state = "poisoned"
+        self._cursor_outer_publication_authority_ref = None
+        self._cursor_outer_publication_epoch = None
+        self._cursor_outer_publication_lineage = None
+        self._cursor_outer_publication_allowed_total_changes = None
+        self._cursor_post_ddl_reader_authority_ref = None
+        self._cursor_post_ddl_reader_lease = None
+        self._cursor_b2_catalog_change_fence_state = "poisoned"
         if campaign_cursor is not None:
             try:
                 # B2 cursor ownership is package-private.  Dispose must not
@@ -3391,6 +4198,24 @@ class SQLiteV1BaselineTempStage:
         return row[0]
 
     def _poison(self, message: str) -> Never:
+        if self._cursor_post_ddl_reader_state == "active":
+            cleanup = self._cursor_post_ddl_reader_cleanup
+            self._cursor_post_ddl_reader_cleanup = None
+            self._cursor_post_ddl_reader_state = "poisoned"
+            if cleanup is not None:
+                with suppress(BaseException):
+                    cleanup()
+        adoption_tail = self._cursor_initial_publication_adoption_tail
+        if adoption_tail is not None:
+            _discard_cursor_initial_publication_adoption_tail(adoption_tail)
+        adoption_retirement = self._cursor_initial_publication_adoption_retirement
+        if adoption_retirement is not None:
+            _discard_cursor_b2_fence_retirement(adoption_retirement)
+        self._cursor_initial_publication_adoption_mint = None
+        self._cursor_initial_publication_adoption_retirement = None
+        self._cursor_initial_publication_adoption_tail = None
+        self._cursor_initial_publication_adoption_watermark = None
+        self._cursor_b2_catalog_change_fence_retirement = None
         active_reader = self._ordered_handoff_reader
         if active_reader is not None:
             with suppress(BaseException):
@@ -3433,7 +4258,17 @@ class SQLiteV1BaselineTempStage:
         self._cursor_transfer_receipt = None
         self._cursor_transfer_projection = None
         self._cursor_transfer_stage_epoch = None
+        self._cursor_transfer_lineage = None
         self._cursor_transfer_allowed_total_changes = None
+        if self._cursor_outer_publication_state != "unused":
+            self._cursor_outer_publication_state = "poisoned"
+        self._cursor_b2_catalog_change_fence_state = "poisoned"
+        self._cursor_outer_publication_authority_ref = None
+        self._cursor_outer_publication_epoch = None
+        self._cursor_outer_publication_lineage = None
+        self._cursor_outer_publication_allowed_total_changes = None
+        self._cursor_post_ddl_reader_authority_ref = None
+        self._cursor_post_ddl_reader_lease = None
         self._cooperative_pending_receipt = None
         self._cooperative_summary = None
         self._cooperative_stream_finished = False
@@ -3503,6 +4338,11 @@ _REGISTERED_SQLITE_V1_BASELINE_TEMP_STAGES: WeakKeyDictionary[
 # Internal calls use these exact functions rather than mutable class lookup.
 _CURSOR_STAGE_ASSERT_TRANSFER = SQLiteV1BaselineTempStage._assert_cursor_stage_transfer
 _CURSOR_STAGE_ASSERT_SEAL_CATALOG = SQLiteV1BaselineTempStage._assert_cursor_seal_temp_catalog
+_CURSOR_STAGE_ASSERT_PRE_REBIND_COMPLETE = (
+    SQLiteV1BaselineTempStage._assert_cursor_pre_rebind_complete
+)
+_CURSOR_STAGE_READ_MAIN_OPERATIONS_CATALOG = SQLiteV1BaselineTempStage._read_legacy_main_catalog
+_CURSOR_STAGE_POISON = SQLiteV1BaselineTempStage._poison
 
 
 def _assert_registered_sqlite_v1_baseline_temp_stage(

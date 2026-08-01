@@ -14,13 +14,37 @@ import pytest
 import graph_engineering
 import graph_engineering.sqlite_operation_baseline_cursor_stage_ownership as ownership
 import graph_engineering.sqlite_operation_baseline_stage as stage_module
+from graph_engineering.sqlite_cursor_publication_migration_0002_asset import (
+    _load_sqlite_cursor_migration_0002_asset_intrinsic,
+    _read_sqlite_cursor_migration_0002_asset_snapshot_intrinsic,
+)
+from graph_engineering.sqlite_operation_baseline import BaselineProjectionIdentity
+from graph_engineering.sqlite_operation_baseline_cursor_campaign import (
+    _run_sqlite_cursor_pre_rebind_campaign,
+)
+from graph_engineering.sqlite_operation_baseline_cursor_ownership import (
+    SQLiteCursorPreRebindReceipt,
+)
 from graph_engineering.sqlite_operation_baseline_cursor_source_fence import (
     _assert_sqlite_cursor_captured_source_connection_provenance,
 )
 from graph_engineering.sqlite_operation_baseline_cursor_stage_ownership import (
+    _assert_sqlite_cursor_stage_ownership_initial_publication_adopted_intrinsic,
+    _assert_sqlite_cursor_stage_ownership_outer_publication_owned_intrinsic,
+    _assert_sqlite_cursor_stage_ownership_outer_publication_prepared_intrinsic,
+    _assert_sqlite_cursor_stage_ownership_post_ddl_reader_terminal_intrinsic,
+    _assert_sqlite_cursor_stage_ownership_pre_rebind_complete_intrinsic,
     _assert_sqlite_cursor_stage_ownership_transfer,
     _begin_sqlite_cursor_stage_ownership_transfer,
+    _complete_sqlite_cursor_stage_ownership_post_ddl_reader_intrinsic,
     _create_sqlite_cursor_seal_temp_table,
+    _mint_sqlite_cursor_stage_ownership_outer_publication_authority_intrinsic,
+    _poison_sqlite_cursor_stage_ownership_outer_publication_intrinsic,
+    _prepare_sqlite_cursor_stage_ownership_initial_publication_adoption_intrinsic,
+    _publish_sqlite_cursor_stage_ownership_initial_publication_adoption_intrinsic,
+    _publish_sqlite_cursor_stage_ownership_outer_publication_intrinsic,
+    _register_sqlite_cursor_stage_ownership_post_ddl_reader_intrinsic,
+    _retire_sqlite_cursor_stage_ownership_outer_publication_intrinsic,
     _SQLiteCursorStageOwnershipTransfer,
 )
 from graph_engineering.sqlite_operation_baseline_source import (
@@ -28,10 +52,13 @@ from graph_engineering.sqlite_operation_baseline_source import (
 )
 from graph_engineering.sqlite_operation_baseline_stage import (
     _SQLITE_V1_CURSOR_SEAL_XINFO,
+    SQLITE_CURSOR_INITIAL_PUBLICATION_TARGET_CATALOG_SHA256,
     SQLITE_V1_CURSOR_SEAL_SQLITE_SCHEMA_SQL,
     SQLITE_V1_CURSOR_SEAL_TEMP_TABLE_DDL,
     SQLITE_V1_CURSOR_SEAL_TEMP_TABLE_DDL_SHA256,
     SQLiteV1BaselineTempStage,
+    _SQLiteCursorInitialPublicationOuterLedgerWatermark,
+    _SQLiteCursorInitialPublicationStageWatermark,
 )
 from tests.test_sqlite_operation_baseline_checkpoint_invariants import _cleanup
 from tests.test_sqlite_operation_baseline_cursor_source_fence import (
@@ -77,6 +104,481 @@ def _reserved_temp_count(connection: SQLiteV1BaselineConnectionOwner) -> int:
     )
     assert len(row) == 1 and type(row[0]) is int
     return row[0]
+
+
+def _completed_b2_graph() -> tuple[
+    SQLiteV1BaselineConnectionOwner,
+    SQLiteV1BaselineTempStage,
+    SQLiteCursorPreRebindReceipt,
+    BaselineProjectionIdentity,
+    _SQLiteCursorStageOwnershipTransfer,
+]:
+    connection, _summary, stage, identity, receipt = _prepared_fence()
+    transfer = _begin_sqlite_cursor_stage_ownership_transfer(connection, stage, receipt)
+    _create_sqlite_cursor_seal_temp_table(connection, stage, receipt, transfer)
+    outcome = _run_sqlite_cursor_pre_rebind_campaign(connection, stage, receipt, transfer)
+    assert outcome.status == "pre-rebind-complete"
+    assert outcome.projection_identity is identity
+    return connection, stage, receipt, identity, transfer
+
+
+def _owned_outer_graph() -> tuple[
+    SQLiteV1BaselineConnectionOwner,
+    SQLiteV1BaselineTempStage,
+    SQLiteCursorPreRebindReceipt,
+    BaselineProjectionIdentity,
+    _SQLiteCursorStageOwnershipTransfer,
+    object,
+]:
+    connection, stage, receipt, identity, transfer = _completed_b2_graph()
+    mint = _mint_sqlite_cursor_stage_ownership_outer_publication_authority_intrinsic(
+        connection, stage, receipt, identity, transfer
+    )
+    _assert_sqlite_cursor_stage_ownership_outer_publication_prepared_intrinsic(
+        connection,
+        stage,
+        receipt,
+        identity,
+        transfer,
+        mint.authority,
+        mint.tail,
+    )
+    _publish_sqlite_cursor_stage_ownership_outer_publication_intrinsic(mint.tail)
+    _assert_sqlite_cursor_stage_ownership_outer_publication_owned_intrinsic(
+        connection, stage, receipt, identity, transfer, mint.authority
+    )
+    return connection, stage, receipt, identity, transfer, mint.authority
+
+
+def _adoption_watermark(
+    connection: SQLiteV1BaselineConnectionOwner,
+    affected_rows_watermark: int,
+    fixed_statement_count: int,
+) -> _SQLiteCursorInitialPublicationStageWatermark:
+    return _SQLiteCursorInitialPublicationStageWatermark(
+        _SQLiteCursorInitialPublicationOuterLedgerWatermark(
+            affected_rows_watermark,
+            fixed_statement_count,
+            4,
+        ),
+        SQLITE_CURSOR_INITIAL_PUBLICATION_TARGET_CATALOG_SHA256,
+        connection.total_changes,
+        connection.transaction_epoch,
+    )
+
+
+def _apply_real_migration_0002(
+    connection: SQLiteV1BaselineConnectionOwner,
+) -> tuple[int, int]:
+    asset = _load_sqlite_cursor_migration_0002_asset_intrinsic()
+    snapshot = _read_sqlite_cursor_migration_0002_asset_snapshot_intrinsic(asset)
+    affected_rows = 0
+    for statement in snapshot.statements:
+        before_changes = connection.total_changes
+        connection.execute(statement).close()
+        affected_rows += connection.total_changes - before_changes
+    return affected_rows, snapshot.fixed_statement_count
+
+
+def test_outer_publication_tail_is_armed_once_replay_safe_and_weakrefable() -> None:
+    connection, stage, receipt, identity, transfer = _completed_b2_graph()
+    try:
+        assert (
+            _assert_sqlite_cursor_stage_ownership_pre_rebind_complete_intrinsic(
+                connection, stage, receipt, identity, transfer
+            )
+            is transfer
+        )
+        mint = _mint_sqlite_cursor_stage_ownership_outer_publication_authority_intrinsic(
+            connection, stage, receipt, identity, transfer
+        )
+        repeated = _mint_sqlite_cursor_stage_ownership_outer_publication_authority_intrinsic(
+            connection, stage, receipt, identity, transfer
+        )
+        assert repeated is not mint
+        assert repeated.authority is mint.authority
+        assert repeated.tail is mint.tail
+        assert ref(mint.authority)() is mint.authority
+        with pytest.raises(ValueError, match="outer publication tail is invalid"):
+            _publish_sqlite_cursor_stage_ownership_outer_publication_intrinsic(mint.tail)
+        _assert_sqlite_cursor_stage_ownership_outer_publication_prepared_intrinsic(
+            connection,
+            stage,
+            receipt,
+            identity,
+            transfer,
+            mint.authority,
+            mint.tail,
+        )
+        _publish_sqlite_cursor_stage_ownership_outer_publication_intrinsic(mint.tail)
+        assert (
+            _assert_sqlite_cursor_stage_ownership_outer_publication_owned_intrinsic(
+                connection,
+                stage,
+                receipt,
+                identity,
+                transfer,
+                mint.authority,
+            )
+            is transfer
+        )
+        with pytest.raises(ValueError, match="outer publication tail is invalid"):
+            _publish_sqlite_cursor_stage_ownership_outer_publication_intrinsic(mint.tail)
+        assert (
+            _assert_sqlite_cursor_stage_ownership_outer_publication_owned_intrinsic(
+                connection,
+                stage,
+                receipt,
+                identity,
+                transfer,
+                mint.authority,
+            )
+            is transfer
+        )
+    finally:
+        _cleanup(connection, stage)
+
+
+def test_outer_mint_transfer_and_stage_graph_is_collectable_after_cleanup() -> None:
+    gc.collect()
+    transfers_before = len(ownership._TRANSFERS)
+    connection, stage, receipt, identity, transfer = _completed_b2_graph()
+    mint = _mint_sqlite_cursor_stage_ownership_outer_publication_authority_intrinsic(
+        connection, stage, receipt, identity, transfer
+    )
+    authority_reference = ref(mint.authority)
+    transfer_reference = ref(transfer)
+    stage_reference = ref(stage)
+    assert len(ownership._TRANSFERS) == transfers_before + 1
+
+    _cleanup(connection, stage)
+    del mint
+    del transfer
+    del stage
+    del connection
+    del receipt
+    del identity
+    gc.collect()
+    gc.collect()
+
+    assert authority_reference() is None
+    assert transfer_reference() is None
+    assert stage_reference() is None
+    assert len(ownership._TRANSFERS) == transfers_before
+
+
+def test_lost_outer_authority_makes_live_tail_terminally_invalid() -> None:
+    connection, stage, receipt, identity, transfer = _completed_b2_graph()
+    try:
+        mint = _mint_sqlite_cursor_stage_ownership_outer_publication_authority_intrinsic(
+            connection, stage, receipt, identity, transfer
+        )
+        _assert_sqlite_cursor_stage_ownership_outer_publication_prepared_intrinsic(
+            connection,
+            stage,
+            receipt,
+            identity,
+            transfer,
+            mint.authority,
+            mint.tail,
+        )
+        authority_reference = ref(mint.authority)
+        tail = mint.tail
+        del mint
+        gc.collect()
+        gc.collect()
+
+        assert authority_reference() is None
+        with pytest.raises(ValueError, match="outer publication tail is invalid"):
+            _publish_sqlite_cursor_stage_ownership_outer_publication_intrinsic(tail)
+        with pytest.raises(ValueError, match="outer publication authority is invalid"):
+            _mint_sqlite_cursor_stage_ownership_outer_publication_authority_intrinsic(
+                connection, stage, receipt, identity, transfer
+            )
+        with pytest.raises(ValueError, match="outer publication tail is invalid"):
+            _publish_sqlite_cursor_stage_ownership_outer_publication_intrinsic(tail)
+    finally:
+        _cleanup(connection, stage)
+
+
+def test_retire_burns_armed_outer_tail_without_reviving_transfer() -> None:
+    connection, stage, receipt, identity, transfer = _completed_b2_graph()
+    try:
+        mint = _mint_sqlite_cursor_stage_ownership_outer_publication_authority_intrinsic(
+            connection, stage, receipt, identity, transfer
+        )
+        _assert_sqlite_cursor_stage_ownership_outer_publication_prepared_intrinsic(
+            connection,
+            stage,
+            receipt,
+            identity,
+            transfer,
+            mint.authority,
+            mint.tail,
+        )
+        _retire_sqlite_cursor_stage_ownership_outer_publication_intrinsic(transfer, mint.authority)
+        with pytest.raises(ValueError, match="outer publication tail is invalid"):
+            _publish_sqlite_cursor_stage_ownership_outer_publication_intrinsic(mint.tail)
+        with pytest.raises(ValueError, match="transfer context is invalid"):
+            _assert_sqlite_cursor_stage_ownership_transfer(connection, stage, receipt, transfer)
+        assert stage._cursor_outer_publication_state == "retired"
+    finally:
+        _cleanup(connection, stage)
+
+
+def test_reader_terminal_and_adoption_tails_are_exact_single_use() -> None:
+    connection, stage, receipt, identity, transfer, authority = _owned_outer_graph()
+    lease = object()
+    cleanup_calls = 0
+
+    def cleanup() -> None:
+        nonlocal cleanup_calls
+        cleanup_calls += 1
+
+    try:
+        _register_sqlite_cursor_stage_ownership_post_ddl_reader_intrinsic(
+            transfer, authority, lease, cleanup
+        )
+        with pytest.raises(ValueError, match="reader is not terminal"):
+            _assert_sqlite_cursor_stage_ownership_post_ddl_reader_terminal_intrinsic(
+                transfer, authority, lease
+            )
+        _complete_sqlite_cursor_stage_ownership_post_ddl_reader_intrinsic(
+            transfer, authority, lease, True
+        )
+        _assert_sqlite_cursor_stage_ownership_post_ddl_reader_terminal_intrinsic(
+            transfer, authority, lease
+        )
+        assert cleanup_calls == 0
+
+        affected_rows, statement_count = _apply_real_migration_0002(connection)
+        watermark = _adoption_watermark(
+            connection,
+            affected_rows,
+            statement_count,
+        )
+        mint = _prepare_sqlite_cursor_stage_ownership_initial_publication_adoption_intrinsic(
+            connection,
+            stage,
+            receipt,
+            identity,
+            transfer,
+            authority,
+            lease,
+            watermark,
+        )
+        repeated = _prepare_sqlite_cursor_stage_ownership_initial_publication_adoption_intrinsic(
+            connection,
+            stage,
+            receipt,
+            identity,
+            transfer,
+            authority,
+            lease,
+            watermark,
+        )
+        assert repeated is mint
+        assert repeated.tail is mint.tail
+        assert repeated.watermark is mint.watermark
+        assert repeated.retired_b2_fence is mint.retired_b2_fence
+        _publish_sqlite_cursor_stage_ownership_initial_publication_adoption_intrinsic(mint.tail)
+        assert (
+            _assert_sqlite_cursor_stage_ownership_initial_publication_adopted_intrinsic(
+                connection,
+                stage,
+                receipt,
+                identity,
+                transfer,
+                authority,
+                lease,
+                mint.retired_b2_fence,
+                mint.watermark,
+            )
+            is transfer
+        )
+        with pytest.raises(ValueError, match="adoption tail is invalid"):
+            _publish_sqlite_cursor_stage_ownership_initial_publication_adoption_intrinsic(mint.tail)
+        assert (
+            _assert_sqlite_cursor_stage_ownership_transfer(connection, stage, receipt, transfer)
+            is transfer
+        )
+    finally:
+        _cleanup(connection, stage)
+
+
+def test_poison_closes_active_reader_once_and_burns_outer_tail() -> None:
+    connection, stage, receipt, identity, transfer = _completed_b2_graph()
+    cleanup_calls = 0
+
+    def cleanup() -> None:
+        nonlocal cleanup_calls
+        cleanup_calls += 1
+
+    try:
+        mint = _mint_sqlite_cursor_stage_ownership_outer_publication_authority_intrinsic(
+            connection, stage, receipt, identity, transfer
+        )
+        _assert_sqlite_cursor_stage_ownership_outer_publication_prepared_intrinsic(
+            connection,
+            stage,
+            receipt,
+            identity,
+            transfer,
+            mint.authority,
+            mint.tail,
+        )
+        _publish_sqlite_cursor_stage_ownership_outer_publication_intrinsic(mint.tail)
+        lease = object()
+        _register_sqlite_cursor_stage_ownership_post_ddl_reader_intrinsic(
+            transfer, mint.authority, lease, cleanup
+        )
+        with pytest.raises(ValueError, match="forced ownership poison"):
+            _poison_sqlite_cursor_stage_ownership_outer_publication_intrinsic(
+                transfer, mint.authority, "forced ownership poison"
+            )
+        assert cleanup_calls == 1
+        assert stage.state == "poisoned"
+        with pytest.raises(ValueError, match="outer publication authority is invalid"):
+            _poison_sqlite_cursor_stage_ownership_outer_publication_intrinsic(
+                transfer, mint.authority, "replay"
+            )
+        assert cleanup_calls == 1
+    finally:
+        _cleanup(connection, stage)
+
+
+def test_stage_dispose_then_ownership_retire_attempts_reader_cleanup_exactly_once() -> None:
+    connection, stage, _receipt, _identity, transfer, authority = _owned_outer_graph()
+    lease = object()
+    cleanup_calls = 0
+
+    def cleanup() -> None:
+        nonlocal cleanup_calls
+        cleanup_calls += 1
+
+    try:
+        _register_sqlite_cursor_stage_ownership_post_ddl_reader_intrinsic(
+            transfer,
+            authority,
+            lease,
+            cleanup,
+        )
+        stage.dispose()
+        assert cleanup_calls == 1
+        _retire_sqlite_cursor_stage_ownership_outer_publication_intrinsic(
+            transfer,
+            authority,
+        )
+        assert cleanup_calls == 1
+    finally:
+        _cleanup(connection, stage)
+
+
+@pytest.mark.parametrize("terminal_action", ["retire", "poison"])
+def test_terminal_outer_action_burns_prepared_adoption_tail(
+    terminal_action: str,
+) -> None:
+    connection, stage, receipt, identity, transfer, authority = _owned_outer_graph()
+    lease = object()
+    try:
+        _register_sqlite_cursor_stage_ownership_post_ddl_reader_intrinsic(
+            transfer, authority, lease, lambda: None
+        )
+        _complete_sqlite_cursor_stage_ownership_post_ddl_reader_intrinsic(
+            transfer, authority, lease, True
+        )
+        affected_rows, statement_count = _apply_real_migration_0002(connection)
+        watermark = _adoption_watermark(
+            connection,
+            affected_rows,
+            statement_count,
+        )
+        mint = _prepare_sqlite_cursor_stage_ownership_initial_publication_adoption_intrinsic(
+            connection,
+            stage,
+            receipt,
+            identity,
+            transfer,
+            authority,
+            lease,
+            watermark,
+        )
+
+        if terminal_action == "retire":
+            _retire_sqlite_cursor_stage_ownership_outer_publication_intrinsic(transfer, authority)
+            assert stage._cursor_outer_publication_state == "retired"
+        else:
+            with pytest.raises(ValueError, match="terminal adoption poison"):
+                _poison_sqlite_cursor_stage_ownership_outer_publication_intrinsic(
+                    transfer, authority, "terminal adoption poison"
+                )
+            assert stage.state == "poisoned"
+
+        with pytest.raises(ValueError, match="adoption tail is invalid"):
+            _publish_sqlite_cursor_stage_ownership_initial_publication_adoption_intrinsic(mint.tail)
+        with pytest.raises(ValueError, match="transfer context is invalid"):
+            _assert_sqlite_cursor_stage_ownership_transfer(connection, stage, receipt, transfer)
+    finally:
+        if connection.in_transaction:
+            connection.rollback()
+        connection.close()
+
+
+def test_lower_stage_adoption_publish_drift_terminally_poisons_outer_wrapper() -> None:
+    connection, stage, receipt, identity, transfer, authority = _owned_outer_graph()
+    lease = object()
+    try:
+        _register_sqlite_cursor_stage_ownership_post_ddl_reader_intrinsic(
+            transfer, authority, lease, lambda: None
+        )
+        _complete_sqlite_cursor_stage_ownership_post_ddl_reader_intrinsic(
+            transfer, authority, lease, True
+        )
+        affected_rows, statement_count = _apply_real_migration_0002(connection)
+        watermark = _adoption_watermark(connection, affected_rows, statement_count)
+        mint = _prepare_sqlite_cursor_stage_ownership_initial_publication_adoption_intrinsic(
+            connection,
+            stage,
+            receipt,
+            identity,
+            transfer,
+            authority,
+            lease,
+            watermark,
+        )
+
+        connection.execute("CREATE TABLE hostile_after_adoption_prepare(value INTEGER)").close()
+        with pytest.raises(ValueError, match="BLR_TRANSACTION_CHANGED"):
+            _ = stage.common_entry_count
+        assert stage.state == "poisoned"
+        with pytest.raises(
+            ValueError,
+            match="SQLite cursor initial publication adoption tail is invalid",
+        ) as failure:
+            _publish_sqlite_cursor_stage_ownership_initial_publication_adoption_intrinsic(mint.tail)
+
+        assert failure.traceback[-1].name == "_publish_cursor_initial_publication_adoption"
+        metadata = ownership._TRANSFERS.get(transfer)
+        assert metadata is not None and metadata.lifecycle == "poisoned"
+        with pytest.raises(ValueError, match="adoption tail is invalid"):
+            _publish_sqlite_cursor_stage_ownership_initial_publication_adoption_intrinsic(mint.tail)
+        with pytest.raises(ValueError, match="adoption owner is invalid"):
+            _prepare_sqlite_cursor_stage_ownership_initial_publication_adoption_intrinsic(
+                connection,
+                stage,
+                receipt,
+                identity,
+                transfer,
+                authority,
+                lease,
+                watermark,
+            )
+        with pytest.raises(ValueError, match="transfer context is invalid"):
+            _assert_sqlite_cursor_stage_ownership_transfer(connection, stage, receipt, transfer)
+    finally:
+        if connection.in_transaction:
+            connection.rollback()
+        connection.close()
 
 
 def test_complete_real_lifecycle_transfers_once_without_sql_epoch_or_change() -> None:
@@ -132,6 +634,7 @@ def test_transfer_is_exact_registered_identity_and_registry_is_weak(
 ) -> None:
     connection, _summary, stage, _identity, receipt = _prepared_fence()
     try:
+        gc.collect()
         before = len(ownership._TRANSFERS)
         transfer = _begin_sqlite_cursor_stage_ownership_transfer(connection, stage, receipt)
         assert len(ownership._TRANSFERS) == before + 1

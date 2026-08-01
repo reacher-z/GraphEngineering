@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import gc
 import hashlib
 import sqlite3
 from dataclasses import FrozenInstanceError
 from datetime import datetime
 from typing import Any
+from weakref import ref
 
 import pytest
 
@@ -28,10 +30,13 @@ from graph_engineering.sqlite_operation_baseline_stage import (
     DEFAULT_SQLITE_V1_BASELINE_TEMP_CACHE_KIB,
     MAX_SQLITE_V1_BASELINE_TEMP_CACHE_KIB,
     MIN_SQLITE_V1_BASELINE_TEMP_CACHE_KIB,
+    SQLITE_CURSOR_INITIAL_PUBLICATION_TARGET_CATALOG_SHA256,
     SQLITE_V1_BASELINE_COMMON_STAGE_TABLE,
     SQLITE_V1_BASELINE_RELATION_KEYS_VIEW,
     SQLITE_V1_BASELINE_RELATION_TABLES,
     SQLiteV1BaselineTempStage,
+    _SQLiteCursorInitialPublicationOuterLedgerWatermark,
+    _SQLiteCursorInitialPublicationStageWatermark,
     configure_sqlite_v1_baseline_temp_storage,
     create_sqlite_v1_baseline_temp_stage,
     read_sqlite_v1_baseline_temp_storage,
@@ -41,6 +46,10 @@ H1 = "1" * 64
 H2 = "2" * 64
 H3 = "3" * 64
 H4 = "4" * 64
+
+
+class _TestCursorPublicationAuthority:
+    __slots__ = ("__weakref__",)
 
 
 def _schema_entry() -> BaselineEntryInput:
@@ -496,6 +505,42 @@ def _accept_test_relation_writes(
     stage._allowed_total_changes = connection.total_changes
 
 
+def _prime_stage_outer_publication(
+    stage: SQLiteV1BaselineTempStage,
+    connection: SQLiteV1BaselineConnectionOwner,
+    authority: object,
+) -> None:
+    """Isolate the new stage bridge after the separately tested authentic B2 gate."""
+
+    lineage = connection._transaction_generation
+    assert lineage is not None
+    stage._cursor_transfer_state = "active"
+    stage._cursor_transfer_capture_epoch = stage._transaction_epoch
+    stage._cursor_transfer_stage_epoch = stage._transaction_epoch
+    stage._cursor_transfer_lineage = lineage
+    stage._cursor_transfer_allowed_total_changes = stage._allowed_total_changes
+    stage._cursor_outer_publication_authority_ref = ref(authority)
+    stage._cursor_outer_publication_epoch = stage._transaction_epoch
+    stage._cursor_outer_publication_lineage = lineage
+    stage._cursor_outer_publication_allowed_total_changes = stage._allowed_total_changes
+    stage._cursor_outer_publication_state = "published"
+
+
+def _stage_adoption_watermark(
+    connection: SQLiteV1BaselineConnectionOwner,
+) -> _SQLiteCursorInitialPublicationStageWatermark:
+    return _SQLiteCursorInitialPublicationStageWatermark(
+        _SQLiteCursorInitialPublicationOuterLedgerWatermark(
+            affected_rows_watermark=16,
+            fixed_statement_count=34,
+            logical_write_sequence=4,
+        ),
+        SQLITE_CURSOR_INITIAL_PUBLICATION_TARGET_CATALOG_SHA256,
+        connection.total_changes,
+        connection.transaction_epoch,
+    )
+
+
 def _insert_schema_relation(
     connection: SQLiteV1BaselineConnectionOwner,
     key_blob: bytes,
@@ -562,9 +607,7 @@ def test_owner_conservatively_tracks_and_proves_exclusive_transaction_mode() -> 
         connection.rollback()
 
         with pytest.raises(Exception, match="definitely_missing_table"):
-            connection.executescript(
-                "BEGIN EXCLUSIVE; SELECT * FROM definitely_missing_table;"
-            )
+            connection.executescript("BEGIN EXCLUSIVE; SELECT * FROM definitely_missing_table;")
         assert connection.in_transaction
         assert connection.transaction_mode == "unknown"
         assert not connection.in_exclusive_transaction
@@ -636,14 +679,20 @@ def test_temp_configuration_rejects_transaction_scope_and_readback_drift() -> No
 def test_temp_cache_boundaries_and_directory_pragma_are_closed() -> None:
     connection = SQLiteV1BaselineConnectionOwner(":memory:")
     try:
-        assert configure_sqlite_v1_baseline_temp_storage(
-            connection,
-            cache_kib=MIN_SQLITE_V1_BASELINE_TEMP_CACHE_KIB,
-        ).cache_kib == MIN_SQLITE_V1_BASELINE_TEMP_CACHE_KIB
-        assert configure_sqlite_v1_baseline_temp_storage(
-            connection,
-            cache_kib=MAX_SQLITE_V1_BASELINE_TEMP_CACHE_KIB,
-        ).cache_kib == MAX_SQLITE_V1_BASELINE_TEMP_CACHE_KIB
+        assert (
+            configure_sqlite_v1_baseline_temp_storage(
+                connection,
+                cache_kib=MIN_SQLITE_V1_BASELINE_TEMP_CACHE_KIB,
+            ).cache_kib
+            == MIN_SQLITE_V1_BASELINE_TEMP_CACHE_KIB
+        )
+        assert (
+            configure_sqlite_v1_baseline_temp_storage(
+                connection,
+                cache_kib=MAX_SQLITE_V1_BASELINE_TEMP_CACHE_KIB,
+            ).cache_kib
+            == MAX_SQLITE_V1_BASELINE_TEMP_CACHE_KIB
+        )
         for cache_kib in (
             MIN_SQLITE_V1_BASELINE_TEMP_CACHE_KIB - 1,
             MAX_SQLITE_V1_BASELINE_TEMP_CACHE_KIB + 1,
@@ -725,11 +774,7 @@ def test_temp_stage_catalog_is_fixed_strict_and_without_rowid() -> None:
             table_rows = cursor.fetchmany(100)
         finally:
             cursor.close()
-        catalog = {
-            row[1]: (row[4], row[5])
-            for row in table_rows
-            if row[1] in expected_tables
-        }
+        catalog = {row[1]: (row[4], row[5]) for row in table_rows if row[1] in expected_tables}
         assert catalog == {name: (1, 1) for name in expected_tables}
 
         cursor = connection.execute(
@@ -781,8 +826,7 @@ def test_repeated_stage_creation_does_not_invalidate_or_leak_the_active_stage() 
         stage.assert_relation_key_coverage()
         stage.dispose()
         cursor = connection.execute(
-            "SELECT count(*) FROM temp.sqlite_schema "
-            "WHERE substr(lower(name), 1, 7) = 'ge_blr_'"
+            "SELECT count(*) FROM temp.sqlite_schema WHERE substr(lower(name), 1, 7) = 'ge_blr_'"
         )
         try:
             assert cursor.fetchone() == (0,)
@@ -825,8 +869,7 @@ def test_relation_tables_reject_inconsistent_stream_record_and_fence_rows() -> N
                 (b"m1",),
             ),
             (
-                "INSERT INTO temp.ge_blr_used_migration_locks VALUES "
-                "(?, 'lock', 1, 2, 3)",
+                "INSERT INTO temp.ge_blr_used_migration_locks VALUES (?, 'lock', 1, 2, 3)",
                 (b"v1",),
             ),
             (
@@ -957,8 +1000,7 @@ def test_catalog_creation_rejects_injected_row_write(
             create_sqlite_v1_baseline_temp_stage(connection)
         cursor = original_execute(
             connection,
-            "SELECT count(*) FROM temp.sqlite_schema "
-            "WHERE substr(lower(name), 1, 7) = 'ge_blr_'",
+            "SELECT count(*) FROM temp.sqlite_schema WHERE substr(lower(name), 1, 7) = 'ge_blr_'",
         )
         try:
             assert cursor.fetchone() == (0,)
@@ -990,8 +1032,7 @@ def test_catalog_shape_failure_after_pragma_still_cleans_every_owned_object(
         with pytest.raises(ValueError, match="injected catalog shape failure"):
             create_sqlite_v1_baseline_temp_stage(connection)
         cursor = connection.execute(
-            "SELECT count(*) FROM temp.sqlite_schema "
-            "WHERE substr(lower(name), 1, 7) = 'ge_blr_'"
+            "SELECT count(*) FROM temp.sqlite_schema WHERE substr(lower(name), 1, 7) = 'ge_blr_'"
         )
         try:
             assert cursor.fetchone() == (0,)
@@ -1048,9 +1089,7 @@ def test_common_stage_exact_grouped_total_counts_and_expectation_bounds() -> Non
         with pytest.raises(ValueError, match="outside bounds"):
             stage.assert_common_counts({**_zero_counts(), "schema-envelope": True})
         with pytest.raises(ValueError, match="outside bounds"):
-            stage.assert_common_counts(
-                {**_zero_counts(), "schema-envelope": 9_007_199_254_740_992}
-            )
+            stage.assert_common_counts({**_zero_counts(), "schema-envelope": 9_007_199_254_740_992})
         assert _stage_state(stage) == "open"
         stage.dispose()
     finally:
@@ -1321,8 +1360,7 @@ def test_legacy_source_query_is_main_qualified_against_temp_table_shadow() -> No
     connection.commit()
     configure_sqlite_v1_baseline_temp_storage(connection)
     connection.execute(
-        "CREATE TEMP TABLE ge_cycle_operations AS "
-        "SELECT * FROM main.ge_cycle_operations WHERE 0"
+        "CREATE TEMP TABLE ge_cycle_operations AS SELECT * FROM main.ge_cycle_operations WHERE 0"
     ).close()
     connection.execute(
         "INSERT INTO temp.ge_cycle_operations SELECT * FROM main.ge_cycle_operations"
@@ -1638,4 +1676,404 @@ def test_stale_stage_disposal_never_drops_replacement_namespace_object() -> None
             cursor.close()
     finally:
         connection.rollback()
+        connection.close()
+
+
+def test_post_ddl_reader_cleanup_is_exact_single_owner_and_dispose_fallback() -> None:
+    connection = SQLiteV1BaselineConnectionOwner(":memory:")
+    _begin_configured_stage_transaction(connection)
+    stage = create_sqlite_v1_baseline_temp_stage(connection)
+    authority = _TestCursorPublicationAuthority()
+    lease = object()
+    cleanup_calls = 0
+    _prime_stage_outer_publication(stage, connection, authority)
+
+    def cleanup() -> None:
+        nonlocal cleanup_calls
+        cleanup_calls += 1
+
+    try:
+        stage._register_cursor_post_ddl_reader_cleanup(authority, lease, cleanup)
+        with pytest.raises(ValueError, match="reader cleanup owner is invalid"):
+            stage._clear_cursor_post_ddl_reader_cleanup(authority, object())
+        stage.dispose()
+        assert cleanup_calls == 1
+        assert stage.state == "disposed"
+        stage.dispose()
+        assert cleanup_calls == 1
+    finally:
+        if connection.in_transaction:
+            connection.rollback()
+        connection.close()
+
+
+def test_closed_post_ddl_reader_is_not_cleaned_again_by_dispose() -> None:
+    connection = SQLiteV1BaselineConnectionOwner(":memory:")
+    _begin_configured_stage_transaction(connection)
+    stage = create_sqlite_v1_baseline_temp_stage(connection)
+    authority = _TestCursorPublicationAuthority()
+    lease = object()
+    cleanup_calls = 0
+    _prime_stage_outer_publication(stage, connection, authority)
+
+    def cleanup() -> None:
+        nonlocal cleanup_calls
+        cleanup_calls += 1
+
+    try:
+        stage._register_cursor_post_ddl_reader_cleanup(authority, lease, cleanup)
+        stage._clear_cursor_post_ddl_reader_cleanup(authority, lease)
+        stage.dispose()
+        assert cleanup_calls == 0
+        assert stage.state == "disposed"
+    finally:
+        if connection.in_transaction:
+            connection.rollback()
+        connection.close()
+
+
+def test_initial_publication_adoption_takes_over_v2_fences_without_disposing_temp() -> None:
+    connection = SQLiteV1BaselineConnectionOwner(":memory:")
+    _begin_configured_stage_transaction(connection)
+    stage = create_sqlite_v1_baseline_temp_stage(connection)
+    authority = _TestCursorPublicationAuthority()
+    lease = object()
+    _prime_stage_outer_publication(stage, connection, authority)
+    stage._register_cursor_post_ddl_reader_cleanup(authority, lease, lambda: None)
+    stage._clear_cursor_post_ddl_reader_cleanup(authority, lease)
+    connection.execute(
+        "CREATE TABLE ge_cycle_operations (operation_id TEXT PRIMARY KEY) STRICT"
+    ).close()
+    watermark = _stage_adoption_watermark(connection)
+
+    try:
+        mint = stage._prepare_cursor_initial_publication_adoption(
+            authority,
+            lease,
+            watermark,
+        )
+        repeated = stage._prepare_cursor_initial_publication_adoption(
+            authority,
+            lease,
+            _stage_adoption_watermark(connection),
+        )
+        assert repeated is mint
+        assert repeated.tail is mint.tail
+        assert repeated.retired_b2_fence is mint.retired_b2_fence
+        assert repeated.watermark is mint.watermark
+        assert stage._cursor_outer_publication_state == "initial-adoption-prepared"
+
+        with pytest.raises(AttributeError):
+            object.__setattr__(
+                mint.watermark.outer_ledger,
+                "fixed_statement_count",
+                1,
+            )
+        with pytest.raises(AttributeError):
+            object.__setattr__(mint.watermark, "total_changes", 1)
+        with pytest.raises(AttributeError):
+            object.__setattr__(mint, "watermark", watermark)
+        assert mint.watermark.outer_ledger.fixed_statement_count == 34
+        assert mint.watermark.total_changes == connection.total_changes
+        stage._publish_cursor_initial_publication_adoption(mint.tail)
+        assert stage._cursor_outer_publication_state == "initial-publication-adopted"
+        assert stage._cursor_b2_catalog_change_fence_state == "retired"
+        assert stage._cursor_transfer_capture_epoch is None
+        assert stage._cursor_transfer_stage_epoch is None
+        assert stage._cursor_transfer_allowed_total_changes is None
+        assert stage._cursor_transfer_lineage is connection._transaction_generation
+        assert stage._transaction_epoch == connection.transaction_epoch
+        assert stage._allowed_total_changes == connection.total_changes
+        assert stage._cursor_initial_publication_outer_ledger is not None
+        assert stage._cursor_initial_publication_outer_ledger.fixed_statement_count == 34
+        stage._assert_cursor_initial_publication_adopted(
+            authority,
+            lease,
+            mint.retired_b2_fence,
+            watermark,
+        )
+        with pytest.raises(ValueError, match="adoption tail is invalid"):
+            stage._publish_cursor_initial_publication_adoption(mint.tail)
+
+        cursor = connection.execute(
+            "SELECT count(*) FROM temp.sqlite_schema WHERE name = 'ge_blr_stage'"
+        )
+        try:
+            assert cursor.fetchone() == (1,)
+        finally:
+            cursor.close()
+        stage.dispose()
+        assert stage.state == "disposed"
+    finally:
+        if connection.in_transaction:
+            connection.rollback()
+        connection.close()
+
+
+def test_initial_publication_adopted_fence_drift_poison_is_terminal() -> None:
+    connection = SQLiteV1BaselineConnectionOwner(":memory:")
+    _begin_configured_stage_transaction(connection)
+    stage = create_sqlite_v1_baseline_temp_stage(connection)
+    authority = _TestCursorPublicationAuthority()
+    lease = object()
+    _prime_stage_outer_publication(stage, connection, authority)
+    stage._register_cursor_post_ddl_reader_cleanup(authority, lease, lambda: None)
+    stage._clear_cursor_post_ddl_reader_cleanup(authority, lease)
+    connection.execute(
+        "CREATE TABLE ge_cycle_operations (operation_id TEXT PRIMARY KEY) STRICT"
+    ).close()
+    watermark = _stage_adoption_watermark(connection)
+    mint = stage._prepare_cursor_initial_publication_adoption(authority, lease, watermark)
+    stage._publish_cursor_initial_publication_adoption(mint.tail)
+
+    try:
+        connection.execute("ALTER TABLE ge_cycle_operations ADD COLUMN hostile TEXT").close()
+        with pytest.raises(ValueError, match="adopted fence changed"):
+            stage._assert_cursor_initial_publication_adopted(
+                authority,
+                lease,
+                mint.retired_b2_fence,
+                watermark,
+            )
+        assert stage.state == "poisoned"
+        with pytest.raises(ValueError, match="poisoned"):
+            _ = stage.common_entry_count
+    finally:
+        connection.rollback()
+        connection.close()
+
+
+def test_abandoned_initial_publication_prepare_releases_stage_and_registries() -> None:
+    retirement_count = len(baseline_stage_module._CURSOR_B2_FENCE_RETIREMENTS)
+    tail_count = len(baseline_stage_module._CURSOR_INITIAL_PUBLICATION_ADOPTION_TAILS)
+    connection = SQLiteV1BaselineConnectionOwner(":memory:")
+    _begin_configured_stage_transaction(connection)
+    stage = create_sqlite_v1_baseline_temp_stage(connection)
+    authority = _TestCursorPublicationAuthority()
+    lease = object()
+    _prime_stage_outer_publication(stage, connection, authority)
+    stage._register_cursor_post_ddl_reader_cleanup(authority, lease, lambda: None)
+    stage._clear_cursor_post_ddl_reader_cleanup(authority, lease)
+    connection.execute(
+        "CREATE TABLE ge_cycle_operations (operation_id TEXT PRIMARY KEY) STRICT"
+    ).close()
+    mint = stage._prepare_cursor_initial_publication_adoption(
+        authority,
+        lease,
+        _stage_adoption_watermark(connection),
+    )
+    stage_reference = ref(stage)
+    tail_reference = ref(mint.tail)
+    retirement_reference = ref(mint.retired_b2_fence)
+
+    del stage, mint, authority, lease
+    gc.collect()
+
+    try:
+        assert stage_reference() is None
+        assert tail_reference() is None
+        assert retirement_reference() is None
+        assert len(baseline_stage_module._CURSOR_B2_FENCE_RETIREMENTS) == retirement_count
+        assert len(baseline_stage_module._CURSOR_INITIAL_PUBLICATION_ADOPTION_TAILS) == tail_count
+    finally:
+        connection.rollback()
+        connection.close()
+
+
+def test_published_adoption_dispose_releases_stage_and_retirement_registry() -> None:
+    retirement_count = len(baseline_stage_module._CURSOR_B2_FENCE_RETIREMENTS)
+    tail_count = len(baseline_stage_module._CURSOR_INITIAL_PUBLICATION_ADOPTION_TAILS)
+    connection = SQLiteV1BaselineConnectionOwner(":memory:")
+    _begin_configured_stage_transaction(connection)
+    stage = create_sqlite_v1_baseline_temp_stage(connection)
+    authority = _TestCursorPublicationAuthority()
+    lease = object()
+    _prime_stage_outer_publication(stage, connection, authority)
+    stage._register_cursor_post_ddl_reader_cleanup(authority, lease, lambda: None)
+    stage._clear_cursor_post_ddl_reader_cleanup(authority, lease)
+    connection.execute(
+        "CREATE TABLE ge_cycle_operations (operation_id TEXT PRIMARY KEY) STRICT"
+    ).close()
+    mint = stage._prepare_cursor_initial_publication_adoption(
+        authority,
+        lease,
+        _stage_adoption_watermark(connection),
+    )
+    stage._publish_cursor_initial_publication_adoption(mint.tail)
+    stage_reference = ref(stage)
+    tail_reference = ref(mint.tail)
+    retirement_reference = ref(mint.retired_b2_fence)
+
+    stage.dispose()
+    assert len(baseline_stage_module._CURSOR_B2_FENCE_RETIREMENTS) == retirement_count
+    assert len(baseline_stage_module._CURSOR_INITIAL_PUBLICATION_ADOPTION_TAILS) == tail_count
+    connection.rollback()
+    connection.close()
+    del stage, mint, connection, authority, lease
+    gc.collect()
+
+    assert stage_reference() is None
+    assert tail_reference() is None
+    assert retirement_reference() is None
+    assert len(baseline_stage_module._CURSOR_B2_FENCE_RETIREMENTS) == retirement_count
+    assert len(baseline_stage_module._CURSOR_INITIAL_PUBLICATION_ADOPTION_TAILS) == tail_count
+
+
+def test_adoption_authority_is_weak_and_dead_identity_cannot_publish() -> None:
+    retirement_count = len(baseline_stage_module._CURSOR_B2_FENCE_RETIREMENTS)
+    tail_count = len(baseline_stage_module._CURSOR_INITIAL_PUBLICATION_ADOPTION_TAILS)
+    connection = SQLiteV1BaselineConnectionOwner(":memory:")
+    _begin_configured_stage_transaction(connection)
+    stage = create_sqlite_v1_baseline_temp_stage(connection)
+    authority = _TestCursorPublicationAuthority()
+    lease = object()
+    _prime_stage_outer_publication(stage, connection, authority)
+    stage._register_cursor_post_ddl_reader_cleanup(authority, lease, lambda: None)
+    stage._clear_cursor_post_ddl_reader_cleanup(authority, lease)
+    connection.execute(
+        "CREATE TABLE ge_cycle_operations (operation_id TEXT PRIMARY KEY) STRICT"
+    ).close()
+    mint = stage._prepare_cursor_initial_publication_adoption(
+        authority,
+        lease,
+        _stage_adoption_watermark(connection),
+    )
+    authority_reference = ref(authority)
+
+    del authority
+    gc.collect()
+
+    try:
+        assert authority_reference() is None
+        assert stage._cursor_outer_publication_authority_ref is not None
+        assert stage._cursor_outer_publication_authority_ref() is None
+        with pytest.raises(ValueError, match="adoption tail is invalid"):
+            stage._publish_cursor_initial_publication_adoption(mint.tail)
+        stage.dispose()
+        assert len(baseline_stage_module._CURSOR_B2_FENCE_RETIREMENTS) == retirement_count
+        assert len(baseline_stage_module._CURSOR_INITIAL_PUBLICATION_ADOPTION_TAILS) == tail_count
+    finally:
+        if connection.in_transaction:
+            connection.rollback()
+        connection.close()
+
+
+def test_initial_publication_prepare_to_publish_write_drift_is_detected() -> None:
+    connection = SQLiteV1BaselineConnectionOwner(":memory:")
+    _begin_configured_stage_transaction(connection)
+    stage = create_sqlite_v1_baseline_temp_stage(connection)
+    authority = _TestCursorPublicationAuthority()
+    lease = object()
+    _prime_stage_outer_publication(stage, connection, authority)
+    stage._register_cursor_post_ddl_reader_cleanup(authority, lease, lambda: None)
+    stage._clear_cursor_post_ddl_reader_cleanup(authority, lease)
+    connection.execute(
+        "CREATE TABLE ge_cycle_operations (operation_id TEXT PRIMARY KEY) STRICT"
+    ).close()
+    watermark = _stage_adoption_watermark(connection)
+    mint = stage._prepare_cursor_initial_publication_adoption(authority, lease, watermark)
+    connection.execute("INSERT INTO ge_cycle_operations VALUES ('hostile')").close()
+    stage._publish_cursor_initial_publication_adoption(mint.tail)
+
+    try:
+        with pytest.raises(ValueError, match="adopted fence changed"):
+            stage._assert_cursor_initial_publication_adopted(
+                authority,
+                lease,
+                mint.retired_b2_fence,
+                watermark,
+            )
+        assert stage.state == "poisoned"
+    finally:
+        connection.rollback()
+        connection.close()
+
+
+def test_initial_publication_adopted_transaction_replacement_is_terminal() -> None:
+    connection = SQLiteV1BaselineConnectionOwner(":memory:")
+    _begin_configured_stage_transaction(connection)
+    stage = create_sqlite_v1_baseline_temp_stage(connection)
+    authority = _TestCursorPublicationAuthority()
+    lease = object()
+    _prime_stage_outer_publication(stage, connection, authority)
+    stage._register_cursor_post_ddl_reader_cleanup(authority, lease, lambda: None)
+    stage._clear_cursor_post_ddl_reader_cleanup(authority, lease)
+    connection.execute(
+        "CREATE TABLE ge_cycle_operations (operation_id TEXT PRIMARY KEY) STRICT"
+    ).close()
+    watermark = _stage_adoption_watermark(connection)
+    mint = stage._prepare_cursor_initial_publication_adoption(authority, lease, watermark)
+    stage._publish_cursor_initial_publication_adoption(mint.tail)
+    connection.rollback()
+    connection.execute("BEGIN EXCLUSIVE").close()
+
+    try:
+        with pytest.raises(ValueError, match="adopted fence changed"):
+            stage._assert_cursor_initial_publication_adopted(
+                authority,
+                lease,
+                mint.retired_b2_fence,
+                watermark,
+            )
+        assert stage.state == "poisoned"
+    finally:
+        connection.rollback()
+        connection.close()
+
+
+def test_pre_rebind_complete_cached_gate_is_sql_free_and_rejects_tampering() -> None:
+    import graph_engineering.sqlite_operation_baseline_cursor_stage_ownership as ownership
+    from tests.test_sqlite_operation_baseline_cursor_stage_ownership import (
+        _completed_b2_graph,
+    )
+
+    connection, stage, receipt, identity, transfer = _completed_b2_graph()
+    metadata = ownership._TRANSFERS[transfer]
+    native_connection = connection._SQLiteV1BaselineConnectionOwner__connection
+    statements: list[str] = []
+    native_connection.set_trace_callback(statements.append)
+    original_created = stage._cursor_transfer_catalog_created
+    original_rootpage = stage._cursor_transfer_catalog_rootpage
+    original_snapshot = stage._cursor_transfer_catalog_snapshot
+    tampering = (
+        ("_cursor_transfer_catalog_created", False),
+        ("_cursor_transfer_catalog_rootpage", None),
+        ("_cursor_transfer_catalog_rootpage", 0),
+        ("_cursor_transfer_catalog_snapshot", None),
+        ("_cursor_transfer_catalog_snapshot", "0" * 64),
+    )
+
+    try:
+        stage._assert_cursor_pre_rebind_complete(
+            connection,
+            receipt,
+            identity,
+            metadata.stage_session,
+        )
+        assert statements == []
+        for field, hostile_value in tampering:
+            original_value = getattr(stage, field)
+            setattr(stage, field, hostile_value)
+            try:
+                with pytest.raises(
+                    ValueError,
+                    match="pre-rebind completed authority is invalid",
+                ):
+                    stage._assert_cursor_pre_rebind_complete(
+                        connection,
+                        receipt,
+                        identity,
+                        metadata.stage_session,
+                    )
+                assert statements == []
+            finally:
+                setattr(stage, field, original_value)
+    finally:
+        native_connection.set_trace_callback(None)
+        stage._cursor_transfer_catalog_created = original_created
+        stage._cursor_transfer_catalog_rootpage = original_rootpage
+        stage._cursor_transfer_catalog_snapshot = original_snapshot
+        stage.dispose()
+        if connection.in_transaction:
+            connection.rollback()
         connection.close()

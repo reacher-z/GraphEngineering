@@ -15850,3 +15850,73 @@ Three hostile scalar-type parameters raise the focused foundation count from 57
 to **60**. The supplemental repair audit reports **H0 / M0 / L0**. This is a
 hardening correction only and does not change the ordered continuation or any
 non-claim in §31.37.40.
+
+#### 31.37.43 Python B3 stage/ownership bridge acceptance and ordered continuation
+
+This section is appended without changing the preceding 15,852 lines. That
+exact prefix hashes to
+`c44cd36b6e885527d3473f65bb5fec61533502d80c3e803bd0791939a96082c3e`.
+It accepts the Python package-private lifecycle bridge required between the
+completed B2 campaign and the future permanent initial-publication writer.
+
+The stage and ownership state machines now share one exact lifecycle graph.
+The graph binds the registered connection, TEMP stage, A2b receipt, projection
+identity, B0b transfer session and completed B2 campaign before it permits an
+outer-publication authority to be prepared. The preparation gate is cached and
+SQL-free: it validates the cursor-seal created bit, positive root page and
+deterministic catalog snapshot together with the transaction generation,
+epoch and `total_changes`, rather than rerunning the SQL-heavy B1 proof.
+
+Outer ownership is published through a separately registered exact tail. The
+fallible preparation assertion arms that tail only after all graph identities
+and cached fences pass. Publication removes the tail entry before applying the
+lower assignment. Replay, clone, cross-run substitution, retirement, poison or
+loss of the exact weak authority referent can never republish the graph.
+
+The bridge owns one post-DDL reader lease and exact-once cleanup continuation.
+Cleanup marks itself attempted before invoking caller code. Stage disposal,
+ownership retirement and a raising cleanup callback therefore cannot cause a
+second cleanup attempt or replace an earlier primary error. Adoption is
+unavailable until the reader is terminally closed and its stage continuation
+has been cleared.
+
+Initial-adoption preparation validates and copies the exact outer ledger and
+stage watermark, observes the post-DDL catalog fence and mints an opaque
+retired-B2-fence identity plus one adoption tail. Its lower publication tail
+preserves the TEMP stage for later cursor rebind and rule proofs while changing
+ownership to the new catalog/ledger/epoch watermark. The wrapper burns its own
+tail and enters terminal poison before calling the lower stage publication;
+only lower success advances it to adopted. A real SQLite DDL drift between
+prepare and publish proves preservation of the lower exception and permanent
+rejection of repeated publish, repeated prepare and transfer reuse.
+
+The accepted registry design accounts for Python's non-ephemeron weak maps.
+Outer authority references are weak in stage state, ownership metadata, tail
+continuations and retirement/adoption records. Canonical metadata does not
+retain an authority-bearing mint. While a caller retains the authority,
+idempotent minting reconstructs a value containing the same authority and tail
+identities; after abandonment, a surviving tail is invalid and cannot mint a
+replacement authority. Double-GC tests prove prepared and published stage
+graphs are released and every relevant registry returns to its exact baseline.
+
+Acceptance evidence on the final byte set is:
+
+1. stage tests passed **64/64**;
+2. ownership tests passed **54/54**;
+3. their combined boundary passed **118/118**;
+4. the integrated stage/ownership/outer boundary passed **133/133**;
+5. Ruff check and format check passed on all six integrated files;
+6. authoritative Python mypy passed all **101 source files**;
+7. whitespace validation passed; and
+8. independent final audit reported **HIGH 0 / MEDIUM 0 / LOW 0**.
+
+The durable acceptance record is
+`codex_logs/reviews/PYTHON-CURSOR-B3-STAGE-OWNERSHIP-BRIDGE-2026-08-01.md`.
+
+This checkpoint does not claim the Python permanent writer or complete
+§31.37.38. The next ordered implementation must consume the accepted outer
+authority to load migration 0002 afresh, execute its exact 20 statements,
+advance authenticated ledger watermarks, obtain the post-DDL reader and catalog
+proof, mint the four typed permanent-write receipts and hand their validated
+bundle into this adoption bridge. Cursor rebind, rules 11/12, commit and native
+parity remain later gates and must not be collapsed into that writer leaf.
