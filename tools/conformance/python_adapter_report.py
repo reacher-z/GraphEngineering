@@ -648,10 +648,10 @@ def mock_dispatch_report() -> dict[str, Any]:
 
 
 def mock_policy_denied_report() -> dict[str, Any]:
-    """The single case the TypeScript half is known to be unable to produce.
+    """The one code whose injectability depends on a scripted denial reason.
 
     Reported as its own member so the join can name both values rather than
-    burying the asymmetry inside a fourteen-code sweep.
+    burying the answer inside a fourteen-code sweep.
     """
 
     entry = mock_dispatch_report()["GE_ADAPTER_POLICY_DENIED"]
@@ -663,9 +663,15 @@ def mock_policy_denied_report() -> dict[str, Any]:
         "observedDenialReason": None if error is None else error["denialReason"],
         "observedMessage": None if error is None else error["message"],
         "injectable": error is not None and error["code"] == "GE_ADAPTER_POLICY_DENIED",
-        # The public constructor member that makes the code injectable, or None
-        # where the language has no such member. The join compares the two.
-        "denialReasonField": "denial_reason",
+        # Whether the public scripted-outcome type declares the denial-reason
+        # member that makes the code injectable.  Observed rather than asserted:
+        # the scripted reason survived into the envelope, which is impossible
+        # unless the member exists and is passed through.  The two halves spell
+        # the member differently (`denialReason` / `denial_reason`), so the join
+        # compares the fact and not the identifier.
+        "declaresDenialReasonMember": (
+            error is not None and error["denialReason"] == DENIAL_REASONS[0]
+        ),
     }
 
 

@@ -308,6 +308,53 @@ describe("every code in the closed taxonomy is reachable by configuration", () =
     await expect(mock.call(requestFrom())).rejects.toThrow(/fault-injection/);
   });
 
+  it("injects a genuine policy denial when the script carries a denial reason", async () => {
+    const outcome = await adapter("mock-full", [
+      { fail: "GE_ADAPTER_POLICY_DENIED", denialReason: "capability-approval" },
+    ]).call(requestFrom());
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    // The code the caller asked to inject is the code the caller observes: a
+    // laundered GE_ADAPTER_MALFORMED_RESPONSE would report retryable:true,
+    // boundary:"dispatch" and effectDisposition:"applied" instead.
+    expect(outcome.error.code).toBe("GE_ADAPTER_POLICY_DENIED");
+    expect(outcome.error.denialReason).toBe("capability-approval");
+    expect(outcome.error.retryable).toBe(false);
+    expect(outcome.error.boundary).toBe("pre-dispatch");
+    expect(outcome.error.effectDisposition).toBe("not-applied");
+    expect(outcome.error.usageDisposition).toBe("none");
+    expect(outcome.error.usage).toBeNull();
+    expect(outcome.error.providerRequestId).toBeNull();
+    expect(outcome.error.message).toBe(
+      "the deterministic mock produced GE_ADAPTER_POLICY_DENIED by configuration",
+    );
+  });
+
+  it("cannot inject a policy denial without a denial reason", async () => {
+    // E-005 is a property of the envelope, not of the script: a scripted denial
+    // with no reason is refused rather than emitted as a denial.
+    const outcome = await adapter("mock-full", [{ fail: "GE_ADAPTER_POLICY_DENIED" }])
+      .call(requestFrom());
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    expect(outcome.error.code).toBe("GE_ADAPTER_MALFORMED_RESPONSE");
+    expect(outcome.error.denialReason).toBeNull();
+  });
+
+  it("carries a denial reason on no other code", async () => {
+    for (const code of ADAPTER_ERROR_CODES) {
+      if (code === "GE_ADAPTER_POLICY_DENIED") continue;
+      const outcome = await adapter("mock-full", [
+        { fail: code, denialReason: "capability-approval" },
+      ]).call(requestFrom());
+      expect(outcome.ok).toBe(false);
+      if (outcome.ok) return;
+      // E-005 rejects a denial reason on every other code, so the mock refuses
+      // to emit one rather than laundering the request.
+      expect(outcome.error.code).toBe("GE_ADAPTER_MALFORMED_RESPONSE");
+    }
+  });
+
   it("carries a provider backoff hint only for a retryable code", async () => {
     const limited = await adapter("mock-full", [
       { fail: "GE_ADAPTER_RATE_LIMITED", retryAfterMs: 1500 },

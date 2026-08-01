@@ -6,8 +6,10 @@ use the same Graph IR compiler semantics, and emit the versioned
 `graph-engineering.cli/v1alpha1` machine envelope. The CLI is an authoring and
 inspection boundary: it never executes graph nodes, calls a model/provider, or
 loads credentials. The durable operations surface inherits that boundary — it
-reads legacy `events/v1alpha1` run history and never mutates it. There is no
-`graph run` command; execution is a library API.
+reads run history and never mutates it, in either the protected
+`events/v1alpha2` journal this runtime writes today or a legacy
+`events/v1alpha1` one. There is no `graph run` command; execution is a library
+API.
 
 The packages are source-only during the alpha. From a repository checkout:
 
@@ -53,9 +55,9 @@ graph retry   --run <runId> --node <nodeId> --store <directory> [--json]
 - `init` is the only writing command. It exclusively creates `graph.json` from
   the bundled, validated Quickstart fixture and has no force/overwrite mode.
 - `status`, `inspect`, and `logs` project one durable run history. They are the
-  only operational commands this runtime can honestly serve, and today they can
-  read only a legacy `events/v1alpha1` journal — see
-  [Journal version boundary](#journal-version-boundary).
+  only operational commands this runtime can honestly serve, and they read both
+  durable journal layouts — see
+  [Journal contracts](#journal-contracts).
 - `cancel`, `resume`, `replay`, `fork`, and `retry` fail closed. See
   [Unimplemented durable operations](#unimplemented-durable-operations).
 
@@ -107,29 +109,37 @@ not emit links, HTML labels, style directives, or executable configuration.
 
 ## Durable operations
 
-`status`, `inspect`, and `logs` read one durable run journal under
-`<store>/events/`. Both `--run` and `--store` are required; there is no default
-store path.
+`status`, `inspect`, and `logs` read one durable run journal. Both `--run` and
+`--store` are required; there is no default store path.
 
-### Journal version boundary
+### Journal contracts
 
-Read this before pointing these commands at a store the runtime produced.
+A durable store can carry either of two journal layouts, and these commands read
+both:
 
-These commands read the `scheduler-recovery/v1alpha1` journal at
-`<store>/events/<hash>.jsonl`. The current durable scheduler does not write that
-journal. Durable start and resume now require payload protection and write
-`events/v1alpha2` records to `<store>/events-v1alpha2/<hash>.jsonl` instead.
+| Contract | Path | Written by |
+| --- | --- | --- |
+| `events/v1alpha2` | `<store>/events-v1alpha2/<hash>.jsonl` | the protected durable scheduler, which is what this runtime writes today |
+| `events/v1alpha1` | `<store>/events/<hash>.jsonl` | the pre-redaction-cut durable scheduler; legacy data under `redaction-semantics.md` Section 9 |
 
-The consequence is concrete: pointing `graph status --store <dir>` at a store
-created by today's runtime exits `4` with `GECLI_RUN_NOT_FOUND`, because the
-`events/` directory it looks in does not exist. A hand-built store that mixes the
-two produces `5` `GECLI_HISTORY_MALFORMED` on the first v1alpha2 record, since
-its `apiVersion` is not the frozen v1alpha1 value.
+The protected layout is probed first, then the legacy one. A store that carries
+both for one run identity therefore projects the protected journal, and the
+legacy file is neither read nor touched. Every successful projection reports the
+contract it found in `journalApiVersion`, and human output names it on a
+`journal events/v1alpha2` or `journal events/v1alpha1` line. Neither layout is
+inferred from a record: the directory a journal lives in declares its contract,
+and a record whose `apiVersion` states the other one fails `5`
+`GECLI_HISTORY_MALFORMED`.
 
-Neither outcome is a silent wrong answer, but neither is useful yet. Teaching
-these commands to project a protected v1alpha2 journal — including resolving
-protected references through a key provider the CLI does not currently accept —
-is outstanding runtime work, not a documentation gap. `--run` must match the durable safe-identifier grammar
+Reading a protected journal requires no key provider and this CLI accepts none.
+A v1alpha2 envelope carries its own closed metadata inline — `sequence`, `type`,
+`nodeId`, `edgeId`, `attempt`, `timestamp`, `redacted`, `payloadDisposition` —
+which is everything these three projections use. `event.data` is never read, so
+a protected reference is never resolved and no plaintext payload can reach a
+sink. That is also why the envelope member lists below are identical for both
+contracts.
+
+`--run` must match the durable safe-identifier grammar
 `[A-Za-z0-9][A-Za-z0-9._-]{0,127}`, otherwise the CLI exits `2` with
 `GECLI_RUN_ID_INVALID` and never echoes the rejected value.
 
@@ -160,10 +170,11 @@ larger than 64 MiB is refused rather than buffered.
 ### Machine envelopes
 
 Every operational command uses the shared envelope. `data` members are a closed,
-ordered allowlist:
+ordered allowlist, identical for both journal contracts; `journalApiVersion`
+names the contract the read found:
 
 ```json
-{"schemaVersion":"graph-engineering.cli/v1alpha1","command":"status","ok":true,"exitCode":0,"data":{"runId":"…","runIdHash":"…","journalApiVersion":"graphengineering.reacher-z.github.io/events/v1alpha1","status":"succeeded","terminal":true,"eventCount":19,"lastSequence":18,"graphRevision":1,"firstEventTimestamp":"…","lastEventTimestamp":"…","resumeCount":0,"pauseCount":0,"observedNodeCount":4,"redaction":{"sink":"cli-json","eventDataEmitted":false,"payloadsEmitted":false,"pathsEmitted":false}},"error":null}
+{"schemaVersion":"graph-engineering.cli/v1alpha1","command":"status","ok":true,"exitCode":0,"data":{"runId":"…","runIdHash":"…","journalApiVersion":"graphengineering.reacher-z.github.io/events/v1alpha2","status":"succeeded","terminal":true,"eventCount":19,"lastSequence":18,"graphRevision":1,"firstEventTimestamp":"…","lastEventTimestamp":"…","resumeCount":0,"pauseCount":0,"observedNodeCount":4,"redaction":{"sink":"cli-json","eventDataEmitted":false,"payloadsEmitted":false,"pathsEmitted":false}},"error":null}
 ```
 
 | Command | `data` members |
@@ -197,10 +208,16 @@ absent from `observedNodes` rather than reported as pending.
 | `GECLI_UNSUPPORTED_CAPABILITY` | `6` | `runId`, `capability` |
 
 A malformed journal is never partially projected. Records are validated against
-the frozen `events/v1alpha1` envelope — closed property set, required members,
-`apiVersion`, known event type, RFC 3339 timestamp, matching `runId`, sequence
-equal to the record index, and an object `data` member — and the first violation
-fails the whole command.
+the frozen envelope of the contract the layout declares — closed property set,
+required members, `apiVersion`, an event type in that contract's vocabulary,
+RFC 3339 timestamp, matching `runId`, sequence equal to the record index, and an
+object `data` member — and the first violation fails the whole command. A
+v1alpha2 record additionally requires 64-hex `payloadHash` and
+`capturePolicyHash` members, `redacted: false`, and a `payloadDisposition` of
+`metadata-only` or `protected-ref`: an inline disposition or `redacted: true` is
+unrepresentable in a protected journal, so a record claiming either is refused
+rather than projected. Event types are contract-specific — a `RunPaused` record
+is valid v1alpha1 and malformed in a v1alpha2 journal.
 
 ### Unimplemented durable operations
 
@@ -210,7 +227,7 @@ so they neither read nor append:
 
 | Command | `capability` | Why it cannot be honest today |
 | --- | --- | --- |
-| `cancel` | `durable.run-cancellation` | `events/v1alpha1` has no cancellation-request record, and a terminal `RunCancelled` record must carry a scheduler-reconstructed run result covering every node. Cancelling a live run also needs an out-of-band control channel that does not exist. |
+| `cancel` | `durable.run-cancellation` | Neither journal contract has a cancellation-request record, and a terminal `RunCancelled` record must carry a scheduler-reconstructed run result covering every node. Cancelling a live run also needs an out-of-band control channel that does not exist. |
 | `resume` | `durable.run-resume` | Resuming needs a run lease and a node executor registry. The CLI never executes graph nodes, so a CLI resume would durably fail every remaining node. |
 | `replay` | `durable.run-replay` | Durable *graph-run* replay is not implemented. The standalone bounded-cycle controller has its own replay, which is a different object and is not reachable from this command. |
 | `fork` | `durable.run-fork` | Durable *graph-run* forking is not implemented, for the same reason. |
@@ -234,9 +251,12 @@ the `redaction` marker naming the sink.
 The two CLIs must emit byte-identical stdout, byte-identical stderr, and the
 same exit code for the same input. `node tools/conformance/run.mjs` enforces
 that over `tools/conformance/cli-operations.case.json`, a shared corpus of
-authentic durable journals plus adversarial malformed ones. Each half drives its
-own native CLI, materializes its own store, and reports its own constants; the
-corpus contains no expected output for either side to copy.
+authentic durable journals in both contracts — including protected v1alpha2
+histories the real durable scheduler wrote — plus adversarial malformed ones.
+Each half drives its own native CLI, materializes its own store, and reports its
+own constants; the corpus contains no expected output for either side to copy.
+The join also compares the store listing before and after every invocation, so a
+read command that created so much as a lock file would fail it.
 
 ## Safe initialization
 

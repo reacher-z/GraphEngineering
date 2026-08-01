@@ -35,6 +35,7 @@ import type {
   AdapterErrorCode,
   AdapterRequest,
   AdapterUsage,
+  DenialReason,
   FinishReason,
   ModelToolCall,
   NormalizedStream,
@@ -55,6 +56,13 @@ export interface MockOutcome {
   readonly fail?: AdapterErrorCode;
   /** Provider backoff hint. Requires a retryable code and `retry-after-hint`. */
   readonly retryAfterMs?: number;
+  /**
+   * The closed denial reason `GE_ADAPTER_POLICY_DENIED` carries, and which
+   * `E-005` forbids on every other code. Without it the mock cannot inject a
+   * policy denial at all: the envelope constructor would refuse under `E-005`
+   * and the caller would observe `GE_ADAPTER_MALFORMED_RESPONSE` instead.
+   */
+  readonly denialReason?: DenialReason;
   /** A scripted frame sequence, including deliberately malformed ones. */
   readonly frames?: readonly StreamFrame[];
   readonly text?: string;
@@ -297,6 +305,7 @@ export class MockAdapter implements StreamingAdapter {
       code,
       sideEffectClass: request.sideEffectClass,
       message: `the deterministic mock produced ${code} by configuration`,
+      denialReason: plan.denialReason ?? null,
       providerRequestId: facts.boundary === "dispatch" ? providerRequestId : null,
       retryAfterMs:
         plan.retryAfterMs !== undefined && facts.retryable && this.supports("retry-after-hint")

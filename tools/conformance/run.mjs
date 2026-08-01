@@ -4836,8 +4836,12 @@ process.stdout.write(
 // computed only from packages/cli; the Python half is computed by
 // tools/conformance/python_cli_operations_report.py from the native
 // `graph_engineering` package. The single shared input is
-// tools/conformance/cli-operations.case.json, which carries authentic v1alpha1
-// journals plus adversarial malformed ones and no expectation blocks at all.
+// tools/conformance/cli-operations.case.json, which carries authentic journals
+// in both durable layouts — legacy `events/` v1alpha1 histories and protected
+// `events-v1alpha2/` histories the real durable scheduler wrote — plus
+// adversarial malformed ones and no expectation blocks at all. Each journal
+// states the directory it belongs in; a case may name several, which is how the
+// corpus states a store carrying both layouts for one run identity.
 //
 // It also carries the append-free evidence: every read command runs against a
 // fingerprinted journal, and both halves must report that the bytes, size, and
@@ -4906,17 +4910,29 @@ const CLI_OPERATIONS_NODE_KEYS = [
 ];
 const CLI_OPERATIONS_EDGE_KEYS = ["edgeId", "eventCount", "firstSequence", "lastSequence"];
 
-function cliOperationsJournalPath(store, runId) {
-  return join(store, "events", `${createHash("sha256").update(runId, "utf8").digest("hex")}.jsonl`);
+function cliOperationsJournalPath(store, journal) {
+  const digest = createHash("sha256").update(journal.runId, "utf8").digest("hex");
+  return join(store, journal.directory, `${digest}.jsonl`);
 }
 
-async function cliOperationsMaterialize(store, journal) {
+/**
+ * Materialize every journal one case declares and return their paths.
+ *
+ * A case names one journal or several. Several is how the corpus states a store
+ * that carries both durable layouts for one run identity: the corpus says which
+ * directory each journal lives in, and this writes it there.
+ */
+async function cliOperationsMaterialize(store, journals) {
   await mkdir(store, { recursive: true });
-  if (journal === null || journal === undefined || journal.content === null) return null;
-  const path = cliOperationsJournalPath(store, journal.runId);
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, Buffer.from(journal.content, "utf8"));
-  return path;
+  const paths = [];
+  for (const journal of journals) {
+    if (journal === null || journal === undefined || journal.content === null) continue;
+    const path = cliOperationsJournalPath(store, journal);
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, Buffer.from(journal.content, "utf8"));
+    paths.push(path);
+  }
+  return paths;
 }
 
 async function cliOperationsFingerprint(path) {
@@ -5041,9 +5057,52 @@ assertCliOperationsAgreement(
 );
 assertCliOperationsAgreement(
   "<contract>",
+  "journalApiVersionV1Alpha2",
+  cliOperationsModule.JOURNAL_API_VERSION_V1ALPHA2,
+  pyCliOperations.nativeJournalApiVersionV1Alpha2,
+);
+assertCliOperationsAgreement(
+  "<contract>",
   "journalEventTypes",
   [...cliOperationsModule.JOURNAL_EVENT_TYPES],
   pyCliOperations.nativeJournalEventTypes,
+);
+assertCliOperationsAgreement(
+  "<contract>",
+  "journalEventTypesV1Alpha2",
+  [...cliOperationsModule.JOURNAL_EVENT_TYPES_V1ALPHA2],
+  pyCliOperations.nativeJournalEventTypesV1Alpha2,
+);
+// Both halves probe the same two layouts in the same order. The protected
+// layout is first: a store that carries both must project the journal this
+// runtime still writes.
+assertCliOperationsAgreement(
+  "<contract>",
+  "journalSources",
+  cliOperationsModule.JOURNAL_SOURCES.map((source) => [source.directory, source.apiVersion]),
+  pyCliOperations.nativeJournalSources,
+);
+assert.equal(
+  cliOperationsCorpus.journalApiVersion,
+  cliOperationsModule.JOURNAL_API_VERSION,
+  "durable CLI operations: the corpus legacy contract is not the one the CLI reads",
+);
+assert.equal(
+  cliOperationsCorpus.journalApiVersionV1Alpha2,
+  cliOperationsModule.JOURNAL_API_VERSION_V1ALPHA2,
+  "durable CLI operations: the corpus protected contract is not the one the CLI reads",
+);
+// Every journal the corpus carries states the layout it belongs in, and the
+// only two layouts are the two the readers probe.
+const cliOperationsDirectories = new Set(
+  Object.values(cliOperationsCorpus.journals)
+    .map((journal) => journal.directory)
+    .filter((directory) => directory !== null),
+);
+assert.deepEqual(
+  [...cliOperationsDirectories].sort(),
+  cliOperationsModule.JOURNAL_SOURCES.map((source) => source.directory).sort(),
+  "durable CLI operations: the corpus does not cover both durable journal layouts",
 );
 assertCliOperationsAgreement(
   "<contract>",
@@ -5134,24 +5193,34 @@ let cliOperationsReadCases = 0;
 let cliOperationsAppendProofs = 0;
 let cliOperationsUnsupportedCases = 0;
 const cliOperationsExitCodesSeen = new Set();
+const cliOperationsVersionsSeen = new Set();
 try {
   for (const [index, testCase] of cliOperationsCorpus.cases.entries()) {
     const name = String(testCase.name);
     const store = join(cliOperationsWorkspace, `case-${String(index).padStart(4, "0")}`);
-    const journal = testCase.journal === null
-      ? null
-      : cliOperationsCorpus.journals[testCase.journal];
-    const path = await cliOperationsMaterialize(store, journal);
-    const before = await cliOperationsFingerprint(path);
+    const journalNames = testCase.journal === null
+      ? []
+      : [testCase.journal].flat();
+    const journalDirectories = journalNames.map(
+      (journalName) => cliOperationsCorpus.journals[journalName].directory,
+    );
+    const paths = await cliOperationsMaterialize(
+      store,
+      journalNames.map((journalName) => cliOperationsCorpus.journals[journalName]),
+    );
+    const before = await Promise.all(paths.map(cliOperationsFingerprint));
     const argv = testCase.argv.map((item) =>
       String(item).split(cliOperationsCorpus.storeToken).join(store));
     const result = await cliOperationsInvoke(argv);
-    const after = await cliOperationsFingerprint(path);
+    const after = await Promise.all(paths.map(cliOperationsFingerprint));
     const tsEntry = {
       exitCode: result.exitCode,
       stdout: result.stdout,
       stderr: result.stderr,
-      journalUnchanged: path === null ? null : before === after,
+      // Every journal the case materialized, not only the one the command was
+      // expected to read: a command that appended to the layout it did not
+      // choose would fail here too.
+      journalUnchanged: paths.length === 0 ? null : isDeepStrictEqual(before, after),
       storeEntries: await cliOperationsEntries(store),
     };
     const pyEntry = pyCliOperations.cases[name];
@@ -5178,6 +5247,18 @@ try {
       const allowed = CLI_OPERATIONS_DATA_KEYS[envelope.command];
       if (allowed !== undefined && envelope.data !== null) {
         assert.deepEqual(Object.keys(envelope.data), allowed, `${name}: envelope members drifted`);
+        // Which contract the projection reports is decided by the layout the
+        // corpus put the journal in, and by the documented resolution order
+        // when a store carries both.
+        const expectedApiVersion = journalDirectories.includes("events-v1alpha2")
+          ? cliOperationsModule.JOURNAL_API_VERSION_V1ALPHA2
+          : cliOperationsModule.JOURNAL_API_VERSION;
+        assert.equal(
+          envelope.data.journalApiVersion,
+          expectedApiVersion,
+          `${name}: the projection named the wrong journal contract`,
+        );
+        cliOperationsVersionsSeen.add(envelope.data.journalApiVersion);
         assert.deepEqual(
           Object.keys(envelope.data.redaction),
           ["sink", "eventDataEmitted", "payloadsEmitted", "pathsEmitted"],
@@ -5229,7 +5310,7 @@ try {
     const command = argv[0];
     if (["status", "inspect", "logs"].includes(command)) {
       cliOperationsReadCases += 1;
-      if (path !== null) {
+      if (paths.length > 0) {
         assert.strictEqual(
           tsEntry.journalUnchanged,
           true,
@@ -5289,9 +5370,20 @@ for (const status of [0, 2, 4, 5, 6]) {
     `durable CLI operations: exit code ${status} is unwitnessed by the corpus`,
   );
 }
+// Both durable layouts are projected by the corpus, not merely readable in
+// principle.
+assert.deepEqual(
+  [...cliOperationsVersionsSeen].sort(),
+  cliOperationsModule.JOURNAL_SOURCES.map((source) => source.apiVersion).sort(),
+  "durable CLI operations: a journal contract is unwitnessed by the corpus",
+);
 
+const cliOperationsJournalsIn = (directory) => Object.values(cliOperationsCorpus.journals)
+  .filter((journal) => journal.directory === directory).length;
+const cliOperationsV1Alpha2Journals = cliOperationsJournalsIn("events-v1alpha2");
+const cliOperationsLegacyJournals = cliOperationsJournalsIn("events");
 process.stdout.write(
-  `Cross-language durable CLI operations conformance passed for ${cliOperationsCorpus.cases.length} cases over ${Object.keys(cliOperationsCorpus.journals).length} shared journals (${cliOperationsReadCases} read invocations, ${cliOperationsAppendProofs} append-free proofs, ${cliOperationsUnsupportedCases} fail-closed refusals, exit codes ${[...cliOperationsExitCodesSeen].sort((left, right) => left - right).join("/")}); claims ${JSON.stringify(cliOperationsCorpus.claims)}.\n`,
+  `Cross-language durable CLI operations conformance passed for ${cliOperationsCorpus.cases.length} cases over ${Object.keys(cliOperationsCorpus.journals).length} shared journals (${cliOperationsV1Alpha2Journals} protected events/v1alpha2, ${cliOperationsLegacyJournals} legacy events/v1alpha1, ${Object.keys(cliOperationsCorpus.journals).length - cliOperationsV1Alpha2Journals - cliOperationsLegacyJournals} absent) (${cliOperationsReadCases} read invocations, ${cliOperationsAppendProofs} append-free proofs, ${cliOperationsUnsupportedCases} fail-closed refusals, exit codes ${[...cliOperationsExitCodesSeen].sort((left, right) => left - right).join("/")}, journal contracts ${[...cliOperationsVersionsSeen].map((version) => version.split("/").slice(-2).join("/")).sort().join("+")}); claims ${JSON.stringify(cliOperationsCorpus.claims)}.\n`,
 );
 
 // ---------------------------------------------------------------------------
@@ -7113,9 +7205,12 @@ for (const code of adapterDist.ADAPTER_ERROR_CODES) {
       {
         fail: code,
         ...(facts.retryable ? { retryAfterMs: ADAPTER_PROBE_RETRY_AFTER_MS } : {}),
-        // A denial reason is meaningful on exactly one code. There is no
-        // `denialReason` member on the TypeScript `MockOutcome` to set, which
-        // is the disclosed divergence registered below.
+        // A denial reason is meaningful on exactly one code. The mock must be
+        // able to carry it, or GE_ADAPTER_POLICY_DENIED is not injectable at
+        // all and every consumer of the mock is untested against it.
+        ...(code === "GE_ADAPTER_POLICY_DENIED"
+          ? { denialReason: adapterDist.DENIAL_REASONS[0] }
+          : {}),
       },
     ],
     budgetPolicyAllowedProviderMetrics: ADAPTER_POLICY_METRICS,
@@ -7134,11 +7229,15 @@ const tsAdapterPolicyDenied = {
   observedDenialReason: tsAdapterPolicyDeniedEntry.error?.denialReason ?? null,
   observedMessage: tsAdapterPolicyDeniedEntry.error?.message ?? null,
   injectable: tsAdapterPolicyDeniedEntry.error?.code === "GE_ADAPTER_POLICY_DENIED",
-  // The public constructor member that makes the code injectable, or null where
-  // the language has no such member. Read off the shipped `MockOutcome` shape
-  // rather than asserted: `structuredClone` of a scripted outcome keeps only
-  // the members the type declares.
-  denialReasonField: null,
+  // Whether the public scripted-outcome type declares the denial-reason member
+  // that makes the code injectable. Observed rather than asserted, and observed
+  // the only way a language with erased types can observe it: the scripted
+  // reason survived into the envelope, which is impossible unless the member
+  // exists and is passed through. The two halves spell the member differently
+  // (`denialReason` / `denial_reason`), so the join compares the fact and not
+  // the identifier.
+  declaresDenialReasonMember:
+    tsAdapterPolicyDeniedEntry.error?.denialReason === adapterDist.DENIAL_REASONS[0],
 };
 
 const tsAdapterPlainAdapter = adapterDist.createMockAdapter({
@@ -7886,62 +7985,21 @@ assertAdapterAgreement(
   pyAdapter.mockCircuit,
 );
 
-// --- 10. the disclosed divergence register --------------------------------
+// --- 10. the cross-language equality backstop -----------------------------
 //
-// DISCLOSED DIVERGENCE. The two halves are NOT equal here, and this block does
-// not make them equal: it pins both values so the fork is recorded rather than
-// laundered, and so it cannot rot.
+// There is no disclosed divergence register here any more, and there must not
+// be one: the two halves are equal member for member, and this block proves it
+// rather than pinning a fork.
 //
-// The TypeScript `MockOutcome` (packages/adapters/src/mock-adapter.ts) has no
-// `denialReason` member. `#injectedFailure` therefore calls
-// `normalizedAdapterError` without one, `validateErrorEnvelope` rejects the
-// result under `E-005` ("a denial reason accompanies GE_ADAPTER_POLICY_DENIED
-// and nothing else"), and the `catch` in `call()` converts that rejection into
-// a `GE_ADAPTER_MALFORMED_RESPONSE` envelope. The code the caller asked to
-// inject is not the code the caller observes. The Python `MockOutcome`
-// (python/src/graph_engineering/adapters/mock_adapter.py) declares
-// `denial_reason`, so the same script produces a genuine
-// `GE_ADAPTER_POLICY_DENIED`.
-//
-// The consequence is operational, not cosmetic: the laundered TypeScript
-// envelope reports `retryable: true`, `boundary: "dispatch"` and
-// `effectDisposition: "applied"`, while the Python envelope reports
-// `retryable: false`, `boundary: "pre-dispatch"` and
-// `effectDisposition: "not-applied"`. A cycle that retries on `retryable` would
-// retry a policy denial against one mock and refuse it against the other.
-//
-// This lane is not permitted to modify `packages/`, so the defect is reported,
-// not fixed. Every value below is asserted exactly: if either language changes,
-// this register fails and the divergence must be re-adjudicated.
-const ADAPTER_DISCLOSED_DIVERGENCES = [
-  { path: "/mockDispatch/GE_ADAPTER_POLICY_DENIED/error/boundary",
-    typescript: "dispatch", python: "pre-dispatch" },
-  { path: "/mockDispatch/GE_ADAPTER_POLICY_DENIED/error/code",
-    typescript: "GE_ADAPTER_MALFORMED_RESPONSE", python: "GE_ADAPTER_POLICY_DENIED" },
-  { path: "/mockDispatch/GE_ADAPTER_POLICY_DENIED/error/denialReason",
-    typescript: null, python: "capability-approval" },
-  { path: "/mockDispatch/GE_ADAPTER_POLICY_DENIED/error/detail/providerSafeFields/1/value",
-    typescript: "E-005", python: "none" },
-  { path: "/mockDispatch/GE_ADAPTER_POLICY_DENIED/error/effectDisposition",
-    typescript: "applied", python: "not-applied" },
-  { path: "/mockDispatch/GE_ADAPTER_POLICY_DENIED/error/message",
-    typescript: "a denial reason accompanies GE_ADAPTER_POLICY_DENIED and nothing else",
-    python: "the deterministic mock produced GE_ADAPTER_POLICY_DENIED by configuration" },
-  { path: "/mockDispatch/GE_ADAPTER_POLICY_DENIED/error/retryable",
-    typescript: true, python: false },
-  { path: "/mockDispatch/GE_ADAPTER_POLICY_DENIED/error/usageDisposition",
-    typescript: "conservative", python: "none" },
-  { path: "/mockDispatch/GE_ADAPTER_POLICY_DENIED/injectableAsRequested",
-    typescript: false, python: true },
-  { path: "/mockPolicyDenied/denialReasonField", typescript: null, python: "denial_reason" },
-  { path: "/mockPolicyDenied/injectable", typescript: false, python: true },
-  { path: "/mockPolicyDenied/observedCode",
-    typescript: "GE_ADAPTER_MALFORMED_RESPONSE", python: "GE_ADAPTER_POLICY_DENIED" },
-  { path: "/mockPolicyDenied/observedDenialReason", typescript: null, python: "capability-approval" },
-  { path: "/mockPolicyDenied/observedMessage",
-    typescript: "a denial reason accompanies GE_ADAPTER_POLICY_DENIED and nothing else",
-    python: "the deterministic mock produced GE_ADAPTER_POLICY_DENIED by configuration" },
-];
+// The register this replaces recorded fourteen paths from a single defect. The
+// TypeScript `MockOutcome` (packages/adapters/src/mock-adapter.ts) had no
+// `denialReason` member, so `#injectedFailure` called `normalizedAdapterError`
+// without one, `validateErrorEnvelope` rejected the result under `E-005`, and
+// the `catch` in `call()` converted that rejection into a
+// `GE_ADAPTER_MALFORMED_RESPONSE` envelope: the code the caller asked to inject
+// was not the code the caller observed. The member now exists and is passed
+// through, so `GE_ADAPTER_POLICY_DENIED` is genuinely injectable in both
+// languages and every one of those fourteen paths agrees.
 
 /**
  * Walk both reports and yield every leaf path at which they differ. This is the
@@ -7989,49 +8047,23 @@ function adapterDeepDivergences(tsValue, pyValue, path = "") {
 // and `probeVectors` are already joined above and are restatements, not
 // results).
 const adapterObservedDivergences = adapterDeepDivergences(tsAdapter, pyAdapter);
-const adapterDisclosedByPath = new Map(
-  ADAPTER_DISCLOSED_DIVERGENCES.map((row) => [row.path, row]),
-);
 for (const divergence of adapterObservedDivergences) {
-  const disclosed = adapterDisclosedByPath.get(divergence.path);
-  if (disclosed === undefined) {
-    throw new Error(
-      `Adapter cross-language divergence at '${divergence.path}':`
-        + ` TypeScript ${adapterStringify(divergence.typescript)}`
-        + ` vs Python ${adapterStringify(divergence.python)}.`
-        + " This path is not in the disclosed divergence register.",
-    );
-  }
-  if (
-    !isDeepStrictEqual(disclosed.typescript, divergence.typescript)
-    || !isDeepStrictEqual(disclosed.python, divergence.python)
-  ) {
-    throw new Error(
-      `Disclosed adapter divergence at '${divergence.path}' changed:`
-        + ` register says TypeScript ${adapterStringify(disclosed.typescript)}`
-        + ` vs Python ${adapterStringify(disclosed.python)},`
-        + ` observed TypeScript ${adapterStringify(divergence.typescript)}`
-        + ` vs Python ${adapterStringify(divergence.python)}.`,
-    );
-  }
-}
-const adapterObservedPaths = new Set(adapterObservedDivergences.map((row) => row.path));
-for (const row of ADAPTER_DISCLOSED_DIVERGENCES) {
-  if (!adapterObservedPaths.has(row.path)) {
-    throw new Error(
-      `Disclosed adapter divergence at '${row.path}' no longer reproduces.`
-        + " If the TypeScript mock gained a denialReason member, delete this row"
-        + " and let the join assert equality instead.",
-    );
-  }
+  throw new Error(
+    `Adapter cross-language divergence at '${divergence.path}':`
+      + ` TypeScript ${adapterStringify(divergence.typescript)}`
+      + ` vs Python ${adapterStringify(divergence.python)}.`
+      + " The two adapter implementations must agree member for member;"
+      + " there is no disclosed divergence register to absorb this.",
+  );
 }
 assert.equal(
   adapterObservedDivergences.length,
-  ADAPTER_DISCLOSED_DIVERGENCES.length,
-  `adapter join: ${adapterObservedDivergences.length} divergences observed against ${ADAPTER_DISCLOSED_DIVERGENCES.length} disclosed`,
+  0,
+  `adapter join: ${adapterObservedDivergences.length} cross-language divergences observed, 0 permitted`,
 );
-// Thirteen of the fourteen codes are injectable in both languages; the
-// fourteenth is the disclosed one. Nothing here waives that.
+// Every code in the closed taxonomy is injectable through both real mock
+// adapters. `GE_ADAPTER_POLICY_DENIED` is injectable only when the script
+// carries a denial reason, which both `MockOutcome` types now declare.
 const adapterInjectableBoth = tsAdapter.vocabularies.adapterErrorCodes.filter(
   (code) =>
     tsAdapter.mockDispatch[code].injectableAsRequested
@@ -8041,9 +8073,27 @@ assert.deepEqual(
   tsAdapter.vocabularies.adapterErrorCodes.filter(
     (code) => !adapterInjectableBoth.includes(code),
   ),
-  ["GE_ADAPTER_POLICY_DENIED"],
-  "mockDispatch: the set of codes not injectable in both languages is not exactly the disclosed one",
+  [],
+  "mockDispatch: a code in the closed taxonomy is not injectable through both mocks",
 );
+assert.equal(
+  tsAdapter.mockPolicyDenied.declaresDenialReasonMember,
+  true,
+  "mockPolicyDenied: the TypeScript scripted outcome does not declare a denial-reason member",
+);
+assert.equal(
+  pyAdapter.mockPolicyDenied.declaresDenialReasonMember,
+  true,
+  "mockPolicyDenied: the Python scripted outcome does not declare a denial-reason member",
+);
+for (const half of [tsAdapter, pyAdapter]) {
+  assert.equal(half.mockPolicyDenied.observedCode, "GE_ADAPTER_POLICY_DENIED");
+  assert.equal(
+    half.mockPolicyDenied.observedDenialReason,
+    half.probeVectors.denialReason,
+    "mockPolicyDenied: the injected denial reason is not the one the probe scripted",
+  );
+}
 for (const code of adapterInjectableBoth) {
   assert.equal(
     pyAdapter.mockDispatch[code].error.code,
@@ -8097,8 +8147,8 @@ process.stdout.write(
     + ` ${tsAdapter.cycleMatrix.length}-row in-doubt matrix,`
     + ` and ${adapterInjectableBoth.length}/${tsAdapter.vocabularies.counts.adapterErrorCodes} codes`
     + ` injectable through both real mock adapters;`
-    + ` ${ADAPTER_DISCLOSED_DIVERGENCES.length} disclosed divergences, all from the single defect`
-    + ` that the TypeScript MockOutcome has no denialReason member so`
-    + ` GE_ADAPTER_POLICY_DENIED launders to GE_ADAPTER_MALFORMED_RESPONSE via E-005;`
+    + ` 0 disclosed divergences and ${adapterObservedDivergences.length} observed`
+    + ` across every joined member, including the GE_ADAPTER_POLICY_DENIED envelope`
+    + ` both MockOutcome types now carry a denial reason for;`
     + ` implementationClaim ${JSON.stringify(adapterCorpus.implementationClaim)}.\n`,
 );

@@ -1,13 +1,17 @@
 """Native Python coverage for the durable operational CLI surface.
 
-The operational CLI is a read-only projection of an ``events/v1alpha1`` journal.
-Since the durable writer moved to the guarded ``events/v1alpha2`` path, such a
-journal is legacy data under ``redaction-semantics.md`` Section 9, so the
-authentic fixtures in this module are byte-frozen histories the real Python
-durable runtime wrote rather than histories it still writes. The projections are
-therefore still checked against real output. The adversarial fixtures come from
-the shared cross-language corpus, which is input only: no expectation is copied
-out of it.
+The operational CLI is a read-only projection of a durable event journal in
+either of the two layouts a store can carry: the guarded ``events-v1alpha2/``
+journal this runtime writes today, and the legacy ``events/`` v1alpha1 journal
+that ``redaction-semantics.md`` Section 9 requires be detectable. Both are
+exercised here.
+
+The authentic v1alpha1 fixtures in this module are byte-frozen histories the
+real Python durable runtime wrote before the redaction hard cut, since it no
+longer writes that contract; the authentic v1alpha2 fixtures in the shared
+corpus came off disk from the real protected scheduler. The adversarial fixtures
+come from the shared cross-language corpus, which is input only: no expectation
+is copied out of it.
 """
 
 from __future__ import annotations
@@ -29,6 +33,9 @@ from graph_engineering.cli import ExitCode
 from graph_engineering.cli_operations import (
     DEFAULT_LOG_LIMIT,
     JOURNAL_API_VERSION,
+    JOURNAL_API_VERSION_V1ALPHA2,
+    JOURNAL_EVENT_TYPES_V1ALPHA2,
+    JOURNAL_SOURCES,
     MAX_LOG_LIMIT,
     UNSUPPORTED_OPERATIONS,
 )
@@ -105,9 +112,14 @@ def machine(result: Invocation) -> dict[str, Any]:
     return envelope
 
 
-def journal_path(store: Path, run_id: str) -> Path:
+def journal_path(store: Path, run_id: str, directory: str = "events") -> Path:
     digest = hashlib.sha256(run_id.encode("utf-8")).hexdigest()
-    return store / "events" / f"{digest}.jsonl"
+    return store / directory / f"{digest}.jsonl"
+
+
+def corpus_journal_path(store: Path, journal_name: str) -> Path:
+    journal = CORPUS["journals"][journal_name]
+    return journal_path(store, journal["runId"], journal["directory"])
 
 
 def fingerprint(path: Path) -> tuple[bytes, int, int]:
@@ -115,14 +127,16 @@ def fingerprint(path: Path) -> tuple[bytes, int, int]:
     return path.read_bytes(), state.st_size, state.st_mtime_ns
 
 
-def corpus_store(root: Path, journal_name: str) -> Path:
-    """Materialize one shared-corpus journal into a private store directory."""
+def corpus_store(root: Path, *journal_names: str) -> Path:
+    """Materialize one or more shared-corpus journals into a private store."""
 
-    store = root / journal_name
+    store = root / journal_names[0]
     store.mkdir(parents=True, exist_ok=True)
-    journal = CORPUS["journals"][journal_name]
-    if journal["content"] is not None:
-        path = journal_path(store, journal["runId"])
+    for journal_name in journal_names:
+        journal = CORPUS["journals"][journal_name]
+        if journal["content"] is None:
+            continue
+        path = journal_path(store, journal["runId"], journal["directory"])
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(journal["content"].encode("utf-8"))
     return store
@@ -608,3 +622,264 @@ def test_no_operational_command_invents_a_status_the_history_lacks(tmp_path: Pat
         assert envelope["data"]["terminal"] is (
             expected in {"succeeded", "failed", "cancelled"}
         )
+
+
+#: The protected run the shared corpus carries, produced today by the real
+#: durable scheduler over the quickstart research diamond.
+PROTECTED_RUN = "v1alpha2-succeeded-run"
+
+
+def test_the_shared_corpus_carries_journals_of_both_durable_layouts() -> None:
+    assert CORPUS["journalApiVersion"] == JOURNAL_API_VERSION
+    assert CORPUS["journalApiVersionV1Alpha2"] == JOURNAL_API_VERSION_V1ALPHA2
+    # Every journal states the layout it belongs in, and the only layouts are
+    # the two this reader probes, in the order it probes them.
+    assert [(source.directory, source.api_version) for source in JOURNAL_SOURCES] == [
+        ("events-v1alpha2", JOURNAL_API_VERSION_V1ALPHA2),
+        ("events", JOURNAL_API_VERSION),
+    ]
+    directories = {
+        journal["directory"]
+        for journal in CORPUS["journals"].values()
+        if journal["content"] is not None
+    }
+    assert sorted(directories) == ["events", "events-v1alpha2"]
+    content: str = CORPUS["journals"][PROTECTED_RUN]["content"]
+    for index, line in enumerate(content.rstrip("\n").split("\n")):
+        record = json.loads(line)
+        assert record["apiVersion"] == JOURNAL_API_VERSION_V1ALPHA2
+        assert record["sequence"] == index
+        assert record["runId"] == PROTECTED_RUN
+        assert record["redacted"] is False
+        assert record["payloadDisposition"] in {"metadata-only", "protected-ref"}
+        assert record["type"] in JOURNAL_EVENT_TYPES_V1ALPHA2
+
+
+def test_status_projects_a_protected_v1alpha2_run(tmp_path: Path) -> None:
+    store = corpus_store(tmp_path, PROTECTED_RUN)
+    result = invoke(["status", "--run", PROTECTED_RUN, "--store", str(store), "--json"])
+
+    assert result.status == ExitCode.SUCCESS
+    envelope = machine(result)
+    data = envelope["data"]
+    # The envelope contract does not change with the journal contract: the same
+    # closed, ordered member list, and the same redaction marker.
+    assert list(data) == [
+        "runId",
+        "runIdHash",
+        "journalApiVersion",
+        "status",
+        "terminal",
+        "eventCount",
+        "lastSequence",
+        "graphRevision",
+        "firstEventTimestamp",
+        "lastEventTimestamp",
+        "resumeCount",
+        "pauseCount",
+        "observedNodeCount",
+        "redaction",
+    ]
+    assert data["journalApiVersion"] == JOURNAL_API_VERSION_V1ALPHA2
+    assert data["status"] == "succeeded"
+    assert data["terminal"] is True
+    assert data["eventCount"] == 19
+    assert data["observedNodeCount"] == 4
+    assert data["redaction"] == {
+        "sink": "cli-json",
+        "eventDataEmitted": False,
+        "payloadsEmitted": False,
+        "pathsEmitted": False,
+    }
+
+
+def test_inspect_counts_protected_event_types_in_contract_order(tmp_path: Path) -> None:
+    store = corpus_store(tmp_path, "v1alpha2-failed-run")
+    envelope = machine(
+        invoke(
+            ["inspect", "--run", "v1alpha2-failed-run", "--store", str(store), "--json"]
+        )
+    )
+    data = envelope["data"]
+
+    assert data["journalApiVersion"] == JOURNAL_API_VERSION_V1ALPHA2
+    assert data["status"] == "failed"
+    counts: dict[str, int] = data["eventTypeCounts"]
+    assert list(counts) == [
+        event_type for event_type in JOURNAL_EVENT_TYPES_V1ALPHA2 if event_type in counts
+    ]
+    assert sum(counts.values()) == data["eventCount"]
+    # A protected failure is projected from envelope metadata alone.
+    assert "NodeAttemptFailed" in counts
+    assert "NodeSettledWithoutAttempt" in counts
+
+
+def test_logs_pages_protected_metadata_without_resolving_a_reference(
+    tmp_path: Path,
+) -> None:
+    store = corpus_store(tmp_path, PROTECTED_RUN)
+    envelope = machine(
+        invoke(["logs", "--run", PROTECTED_RUN, "--store", str(store), "--json"])
+    )
+    data = envelope["data"]
+
+    assert data["journalApiVersion"] == JOURNAL_API_VERSION_V1ALPHA2
+    assert data["returned"] == 19
+    for event in data["events"]:
+        assert list(event) == [
+            "sequence",
+            "type",
+            "timestamp",
+            "nodeId",
+            "edgeId",
+            "attempt",
+            "redacted",
+        ]
+        # v1alpha2 records are always `redacted: false`; the CLI restates the
+        # envelope fact rather than inventing one.
+        assert event["redacted"] is False
+    text = json.dumps(data)
+    for marker in (
+        "payloadHash",
+        "capturePolicyHash",
+        "protected-ref",
+        "inputRef",
+        "outputRef",
+        "valueMac",
+        "ciphertextHash",
+        "activityKey",
+    ):
+        assert marker not in text
+
+
+def test_a_store_with_both_layouts_projects_the_protected_journal(tmp_path: Path) -> None:
+    store = corpus_store(tmp_path, PROTECTED_RUN, "v1alpha2-precedence-legacy-run")
+    envelope = machine(
+        invoke(["status", "--run", PROTECTED_RUN, "--store", str(store), "--json"])
+    )
+
+    # The legacy half of this pair is a paused three-record history, so the
+    # projection below could only come from the protected journal.
+    assert envelope["data"]["journalApiVersion"] == JOURNAL_API_VERSION_V1ALPHA2
+    assert envelope["data"]["status"] == "succeeded"
+    assert envelope["data"]["eventCount"] == 19
+
+
+def test_a_legacy_only_store_still_reads_and_reports_the_legacy_contract(
+    tmp_path: Path,
+) -> None:
+    store = corpus_store(tmp_path, "v1alpha2-precedence-legacy-run")
+    envelope = machine(
+        invoke(["status", "--run", PROTECTED_RUN, "--store", str(store), "--json"])
+    )
+
+    assert envelope["data"]["journalApiVersion"] == JOURNAL_API_VERSION
+    assert envelope["data"]["status"] == "paused"
+    assert envelope["data"]["eventCount"] == 3
+
+
+@pytest.mark.parametrize(
+    ("journal_name", "message", "record"),
+    [
+        ("v1alpha2-empty-run", "durable history is empty", None),
+        (
+            "v1alpha2-truncated-run",
+            "durable history has a truncated final record",
+            None,
+        ),
+        (
+            "v1alpha2-unknown-property-run",
+            "durable history record has an unknown property",
+            2,
+        ),
+        (
+            "v1alpha2-missing-property-run",
+            "durable history record is missing a required property",
+            2,
+        ),
+        (
+            "v1alpha2-bad-api-version-run",
+            "durable history record has an unsupported event apiVersion",
+            2,
+        ),
+        (
+            "v1alpha2-redacted-run",
+            "durable history record has an invalid redacted flag",
+            2,
+        ),
+        (
+            "v1alpha2-inline-disposition-run",
+            "durable history record has an invalid payloadDisposition",
+            2,
+        ),
+        (
+            "v1alpha2-bad-payload-hash-run",
+            "durable history record has an invalid payload hash",
+            2,
+        ),
+        (
+            "v1alpha2-out-of-sequence-run",
+            "durable history record is out of sequence",
+            2,
+        ),
+        (
+            "v1alpha2-unknown-type-run",
+            "durable history record has an unknown event type",
+            2,
+        ),
+        (
+            "v1alpha2-foreign-run-id-run",
+            "durable history record does not belong to this run",
+            2,
+        ),
+    ],
+)
+def test_malformed_protected_histories_fail_closed(
+    tmp_path: Path, journal_name: str, message: str, record: int | None
+) -> None:
+    store = corpus_store(tmp_path, journal_name)
+    result = invoke(["status", "--run", PROTECTED_RUN, "--store", str(store), "--json"])
+
+    assert result.status == ExitCode.HISTORY
+    envelope = machine(result)
+    assert envelope["data"] is None
+    assert envelope["error"] == {
+        "code": "GECLI_HISTORY_MALFORMED",
+        "message": message,
+        "runId": PROTECTED_RUN,
+        "record": record,
+    }
+
+
+@pytest.mark.parametrize("command", READ_COMMANDS)
+def test_read_commands_append_nothing_to_a_protected_store(
+    tmp_path: Path, command: str
+) -> None:
+    store = corpus_store(tmp_path / command, PROTECTED_RUN, "v1alpha2-precedence-legacy-run")
+    protected_path = corpus_journal_path(store, PROTECTED_RUN)
+    legacy_path = corpus_journal_path(store, "v1alpha2-precedence-legacy-run")
+    before = (fingerprint(protected_path), fingerprint(legacy_path))
+    entries_before = sorted(str(item) for item in store.rglob("*"))
+
+    result = invoke([command, "--run", PROTECTED_RUN, "--store", str(store), "--json"])
+
+    assert result.status == ExitCode.SUCCESS
+    # Neither the layout that was read nor the one that was not.
+    assert (fingerprint(protected_path), fingerprint(legacy_path)) == before
+    assert sorted(str(item) for item in store.rglob("*")) == entries_before
+
+
+@pytest.mark.parametrize("command", READ_COMMANDS)
+def test_human_output_names_the_journal_contract(tmp_path: Path, command: str) -> None:
+    protected_store = corpus_store(tmp_path / f"{command}-protected", PROTECTED_RUN)
+    protected = invoke([command, "--run", PROTECTED_RUN, "--store", str(protected_store)])
+    assert protected.status == ExitCode.SUCCESS
+    assert b"journal events/v1alpha2" in protected.stdout
+    assert b"journal events/v1alpha1" not in protected.stdout
+    assert b"payloads and event data are never emitted by this sink" in protected.stdout
+    assert str(protected_store).encode() not in protected.stdout
+
+    legacy_store = corpus_store(tmp_path / f"{command}-legacy", "succeeded-run")
+    legacy = invoke([command, "--run", "succeeded-run", "--store", str(legacy_store)])
+    assert legacy.status == ExitCode.SUCCESS
+    assert b"journal events/v1alpha1" in legacy.stdout

@@ -9,7 +9,10 @@ import test from "node:test";
 import {
   DEFAULT_LOG_LIMIT,
   JOURNAL_API_VERSION,
+  JOURNAL_API_VERSION_V1ALPHA2,
   JOURNAL_EVENT_TYPES,
+  JOURNAL_EVENT_TYPES_V1ALPHA2,
+  JOURNAL_SOURCES,
   MAX_LOG_LIMIT,
   UNSUPPORTED_OPERATIONS,
 } from "../src/operations.js";
@@ -20,12 +23,14 @@ const cliEntrypoint = resolve(import.meta.dirname, "../src/cli.js");
 
 interface CorpusJournal {
   runId: string;
+  directory: string | null;
   content: string | null;
 }
 
 interface Corpus {
   contract: string;
   journalApiVersion: string;
+  journalApiVersionV1Alpha2: string;
   journals: Record<string, CorpusJournal>;
 }
 
@@ -86,8 +91,18 @@ function machine<T = Record<string, unknown>>(result: Invocation): Envelope<T> {
   return envelope;
 }
 
-function journalPath(store: string, runId: string): string {
-  return join(store, "events", `${createHash("sha256").update(runId, "utf8").digest("hex")}.jsonl`);
+function journalPath(store: string, runId: string, directory = "events"): string {
+  return join(
+    store,
+    directory,
+    `${createHash("sha256").update(runId, "utf8").digest("hex")}.jsonl`,
+  );
+}
+
+function corpusJournalPath(store: string, journalName: string): string {
+  const journal = corpus.journals[journalName];
+  assert.ok(journal !== undefined, `corpus is missing journal '${journalName}'`);
+  return journalPath(store, journal.runId, journal.directory as string);
 }
 
 function fingerprint(path: string): string {
@@ -114,14 +129,15 @@ function listing(store: string): string[] {
 
 const temporaryStores: string[] = [];
 
-/** Materialize one shared-corpus journal into a private store directory. */
-function corpusStore(journalName: string): string {
+/** Materialize one or more shared-corpus journals into a private store. */
+function corpusStore(...journalNames: readonly string[]): string {
   const store = mkdtempSync(join(tmpdir(), "graph-cli-ops-"));
   temporaryStores.push(store);
-  const journal = corpus.journals[journalName];
-  assert.ok(journal !== undefined, `corpus is missing journal '${journalName}'`);
-  if (journal.content !== null) {
-    const path = journalPath(store, journal.runId);
+  for (const journalName of journalNames) {
+    const journal = corpus.journals[journalName];
+    assert.ok(journal !== undefined, `corpus is missing journal '${journalName}'`);
+    if (journal.content === null) continue;
+    const path = journalPath(store, journal.runId, journal.directory as string);
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, Buffer.from(journal.content, "utf8"));
   }
@@ -132,9 +148,37 @@ process.on("exit", () => {
   for (const store of temporaryStores) rmSync(store, { recursive: true, force: true });
 });
 
-test("the shared corpus carries authentic v1alpha1 journals", () => {
+test("the shared corpus carries authentic journals of both durable layouts", () => {
   assert.equal(corpus.contract, "graph-engineering.cli/v1alpha1");
   assert.equal(corpus.journalApiVersion, JOURNAL_API_VERSION);
+  assert.equal(corpus.journalApiVersionV1Alpha2, JOURNAL_API_VERSION_V1ALPHA2);
+  // Every journal states the layout it belongs in, and the only layouts are the
+  // two this reader probes, in the order it probes them.
+  assert.deepEqual(
+    JOURNAL_SOURCES.map((source) => [source.directory, source.apiVersion]),
+    [
+      ["events-v1alpha2", JOURNAL_API_VERSION_V1ALPHA2],
+      ["events", JOURNAL_API_VERSION],
+    ],
+  );
+  const directories = new Set(
+    Object.values(corpus.journals)
+      .filter((journal) => journal.content !== null)
+      .map((journal) => journal.directory),
+  );
+  assert.deepEqual([...directories].sort(), ["events", "events-v1alpha2"]);
+  const protectedJournal = corpus.journals["v1alpha2-succeeded-run"];
+  assert.ok(protectedJournal?.content != null);
+  for (const [index, line] of (protectedJournal.content as string)
+    .trimEnd().split("\n").entries()) {
+    const record = JSON.parse(line) as Record<string, unknown>;
+    assert.equal(record.apiVersion, JOURNAL_API_VERSION_V1ALPHA2);
+    assert.equal(record.sequence, index);
+    assert.equal(record.runId, "v1alpha2-succeeded-run");
+    assert.equal(record.redacted, false);
+    assert.ok(["metadata-only", "protected-ref"].includes(record.payloadDisposition as string));
+    assert.ok(JOURNAL_EVENT_TYPES_V1ALPHA2.includes(record.type as never));
+  }
   const succeeded = corpus.journals["succeeded-run"];
   assert.ok(succeeded?.content !== null && succeeded !== undefined);
   const records = (succeeded.content as string).trimEnd().split("\n")
@@ -536,3 +580,203 @@ test("the exit-code table and log bounds are the documented ones", () => {
   assert.equal(MAX_LOG_LIMIT, 10_000);
   assert.deepEqual(UNSUPPORTED_NAMES, ["cancel", "fork", "replay", "resume", "retry"]);
 });
+
+const PROTECTED_RUN = "v1alpha2-succeeded-run";
+
+test("status projects a protected v1alpha2 run this runtime produces today", () => {
+  const store = corpusStore("v1alpha2-succeeded-run");
+  const result = invoke(["status", "--run", PROTECTED_RUN, "--store", store, "--json"]);
+
+  assert.equal(result.status, EXIT_CODES.success);
+  const envelope = machine<Record<string, unknown>>(result);
+  assert.equal(envelope.command, "status");
+  assert.equal(envelope.error, null);
+  // The envelope contract does not change with the journal contract: the same
+  // closed, ordered member list, and the same redaction marker.
+  assert.deepEqual(Object.keys(envelope.data ?? {}), [
+    "runId",
+    "runIdHash",
+    "journalApiVersion",
+    "status",
+    "terminal",
+    "eventCount",
+    "lastSequence",
+    "graphRevision",
+    "firstEventTimestamp",
+    "lastEventTimestamp",
+    "resumeCount",
+    "pauseCount",
+    "observedNodeCount",
+    "redaction",
+  ]);
+  assert.equal(envelope.data?.journalApiVersion, JOURNAL_API_VERSION_V1ALPHA2);
+  assert.equal(envelope.data?.status, "succeeded");
+  assert.equal(envelope.data?.terminal, true);
+  assert.equal(envelope.data?.eventCount, 19);
+  assert.equal(envelope.data?.observedNodeCount, 4);
+  assert.deepEqual(envelope.data?.redaction, {
+    sink: "cli-json",
+    eventDataEmitted: false,
+    payloadsEmitted: false,
+    pathsEmitted: false,
+  });
+});
+
+test("inspect counts protected event types in v1alpha2 contract order", () => {
+  const store = corpusStore("v1alpha2-failed-run");
+  const envelope = machine<{
+    journalApiVersion: string;
+    status: string;
+    eventTypeCounts: Record<string, number>;
+    observedNodes: Array<Record<string, unknown>>;
+    eventCount: number;
+  }>(invoke(["inspect", "--run", "v1alpha2-failed-run", "--store", store, "--json"]));
+
+  assert.equal(envelope.data?.journalApiVersion, JOURNAL_API_VERSION_V1ALPHA2);
+  assert.equal(envelope.data?.status, "failed");
+  const counts = envelope.data?.eventTypeCounts ?? {};
+  assert.deepEqual(
+    Object.keys(counts),
+    JOURNAL_EVENT_TYPES_V1ALPHA2.filter((type) => Object.hasOwn(counts, type)),
+  );
+  assert.equal(
+    Object.values(counts).reduce((total, value) => total + value, 0),
+    envelope.data?.eventCount,
+  );
+  // A protected failure is projected from envelope metadata alone.
+  assert.ok(Object.hasOwn(counts, "NodeAttemptFailed"));
+  assert.ok(Object.hasOwn(counts, "NodeSettledWithoutAttempt"));
+});
+
+test("logs pages protected envelope metadata and resolves no protected reference", () => {
+  const store = corpusStore("v1alpha2-succeeded-run");
+  const envelope = machine<{
+    journalApiVersion: string;
+    events: Array<Record<string, unknown>>;
+    returned: number;
+  }>(invoke(["logs", "--run", PROTECTED_RUN, "--store", store, "--json"]));
+
+  assert.equal(envelope.data?.journalApiVersion, JOURNAL_API_VERSION_V1ALPHA2);
+  assert.equal(envelope.data?.returned, 19);
+  for (const event of envelope.data?.events ?? []) {
+    assert.deepEqual(Object.keys(event), [
+      "sequence",
+      "type",
+      "timestamp",
+      "nodeId",
+      "edgeId",
+      "attempt",
+      "redacted",
+    ]);
+    // v1alpha2 records are always `redacted: false`; the CLI restates the
+    // envelope fact rather than inventing one.
+    assert.equal(event.redacted, false);
+  }
+  const text = JSON.stringify(envelope.data);
+  for (const marker of [
+    "payloadHash",
+    "capturePolicyHash",
+    "protected-ref",
+    "inputRef",
+    "outputRef",
+    "valueMac",
+    "ciphertextHash",
+    "activityKey",
+  ]) {
+    assert.ok(!text.includes(marker), `logs leaked the protected marker ${marker}`);
+  }
+});
+
+test("a store carrying both layouts projects the protected journal", () => {
+  const store = corpusStore("v1alpha2-succeeded-run", "v1alpha2-precedence-legacy-run");
+  const envelope = machine<{ journalApiVersion: string; status: string; eventCount: number }>(
+    invoke(["status", "--run", PROTECTED_RUN, "--store", store, "--json"]),
+  );
+
+  // The legacy half of this pair is a paused three-record history, so the
+  // projection below could only come from the protected journal.
+  assert.equal(envelope.data?.journalApiVersion, JOURNAL_API_VERSION_V1ALPHA2);
+  assert.equal(envelope.data?.status, "succeeded");
+  assert.equal(envelope.data?.eventCount, 19);
+});
+
+test("a legacy-only store still reads and reports the legacy contract", () => {
+  const store = corpusStore("v1alpha2-precedence-legacy-run");
+  const envelope = machine<{ journalApiVersion: string; status: string; eventCount: number }>(
+    invoke(["status", "--run", PROTECTED_RUN, "--store", store, "--json"]),
+  );
+
+  assert.equal(envelope.data?.journalApiVersion, JOURNAL_API_VERSION);
+  assert.equal(envelope.data?.status, "paused");
+  assert.equal(envelope.data?.eventCount, 3);
+});
+
+for (const [journalName, message, record] of [
+  ["v1alpha2-empty-run", "durable history is empty", null],
+  ["v1alpha2-truncated-run", "durable history has a truncated final record", null],
+  ["v1alpha2-unknown-property-run", "durable history record has an unknown property", 2],
+  ["v1alpha2-missing-property-run", "durable history record is missing a required property", 2],
+  ["v1alpha2-bad-api-version-run", "durable history record has an unsupported event apiVersion", 2],
+  ["v1alpha2-redacted-run", "durable history record has an invalid redacted flag", 2],
+  ["v1alpha2-inline-disposition-run", "durable history record has an invalid payloadDisposition", 2],
+  ["v1alpha2-bad-payload-hash-run", "durable history record has an invalid payload hash", 2],
+  ["v1alpha2-out-of-sequence-run", "durable history record is out of sequence", 2],
+  ["v1alpha2-unknown-type-run", "durable history record has an unknown event type", 2],
+  ["v1alpha2-foreign-run-id-run", "durable history record does not belong to this run", 2],
+] as const) {
+  test(`a ${journalName} history fails closed with a record ordinal`, () => {
+    const store = corpusStore(journalName);
+    const result = invoke(["status", "--run", PROTECTED_RUN, "--store", store, "--json"]);
+
+    assert.equal(result.status, EXIT_CODES.history);
+    const envelope = machine(result);
+    assert.equal(envelope.data, null);
+    assert.deepEqual(envelope.error, {
+      code: "GECLI_HISTORY_MALFORMED",
+      message,
+      runId: PROTECTED_RUN,
+      record,
+    });
+  });
+}
+
+for (const command of READ_COMMANDS) {
+  test(`${command} performs zero durable appends against a protected store`, () => {
+    const store = corpusStore("v1alpha2-succeeded-run", "v1alpha2-precedence-legacy-run");
+    const protectedPath = corpusJournalPath(store, "v1alpha2-succeeded-run");
+    const legacyPath = corpusJournalPath(store, "v1alpha2-precedence-legacy-run");
+    const before = [fingerprint(protectedPath), fingerprint(legacyPath)];
+    const entriesBefore = listing(store);
+
+    const result = invoke([command, "--run", PROTECTED_RUN, "--store", store, "--json"]);
+
+    assert.equal(result.status, EXIT_CODES.success);
+    // Neither the layout that was read nor the one that was not.
+    assert.deepEqual(
+      [fingerprint(protectedPath), fingerprint(legacyPath)],
+      before,
+      `${command} mutated a durable history`,
+    );
+    assert.deepEqual(listing(store), entriesBefore, `${command} changed the store layout`);
+  });
+
+  test(`${command} human output names the protected journal contract`, () => {
+    const store = corpusStore("v1alpha2-succeeded-run");
+    const result = invoke([command, "--run", PROTECTED_RUN, "--store", store]);
+
+    assert.equal(result.status, EXIT_CODES.success);
+    assert.equal(result.stderr, "");
+    assert.ok(result.stdout.includes("journal events/v1alpha2"));
+    assert.ok(!result.stdout.includes("journal events/v1alpha1"));
+    assert.ok(result.stdout.includes("payloads and event data are never emitted by this sink"));
+    assert.ok(!result.stdout.includes(store), "human output emitted a filesystem path");
+  });
+
+  test(`${command} human output names the legacy journal contract`, () => {
+    const store = corpusStore("succeeded-run");
+    const result = invoke([command, "--run", "succeeded-run", "--store", store]);
+
+    assert.equal(result.status, EXIT_CODES.success);
+    assert.ok(result.stdout.includes("journal events/v1alpha1"));
+  });
+}

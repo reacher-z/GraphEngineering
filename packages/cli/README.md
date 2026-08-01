@@ -3,8 +3,9 @@
 Command-line tools for canonical Graph Engineering Graph IR. The alpha CLI
 validates graphs, explains deterministic topology, exposes the exact canonical
 compiler result, renders safe topology diagrams, checks the local installation,
-safely initializes a minimal project, and reads legacy `events/v1alpha1` durable
-run history. It does not
+safely initializes a minimal project, and reads durable run history in both the
+protected `events/v1alpha2` journal this runtime writes and the legacy
+`events/v1alpha1` one. It does not
 execute graph nodes, call a model, access credentials, mutate an input graph, or
 append to a durable event journal. `init` is the only command in this slice that
 writes.
@@ -65,11 +66,12 @@ graph init my-graph --dry-run --json
   repository quickstart and is validated by the canonical core compiler before
   any write. The directory defaults to `.`. `--dry-run` performs all safety
   checks and reports planned output without creating a directory or file.
-- `status`, `inspect`, and `logs` project one durable run journal under
-  `<store>/events/`. They open the journal read-only, take no lock, create no
-  path, and append nothing, so they succeed against a read-only store. Their
-  exit code reports the read, not the run outcome. **They can read only a
-  `scheduler-recovery/v1alpha1` journal**; see the version boundary below.
+- `status`, `inspect`, and `logs` project one durable run journal, from
+  `<store>/events-v1alpha2/` or `<store>/events/`. They open the journal
+  read-only, take no lock, create no path, and append nothing, so they succeed
+  against a read-only store. Their exit code reports the read, not the run
+  outcome, and the projection names the journal contract it found; see the
+  journal contracts section below.
 - `cancel`, `resume`, `replay`, `fork`, and `retry` are present so the surface is
   complete and honest, and they fail closed with exit `6` and
   `GECLI_UNSUPPORTED_CAPABILITY` before touching the store. The durable
@@ -79,16 +81,21 @@ graph init my-graph --dry-run --json
   controller does have replay and fork, but that is a different object and is not
   reachable from these commands.
 
-## Journal version boundary
+## Journal contracts
 
-The current durable scheduler requires payload protection and writes
-`events/v1alpha2` records to `<store>/events-v1alpha2/`. These commands read
-`<store>/events/` and validate against the frozen `events/v1alpha1` envelope, so
-a store produced by today's runtime exits `4` `GECLI_RUN_NOT_FOUND`, and a
-v1alpha2 record placed under `events/` exits `5` `GECLI_HISTORY_MALFORMED`.
-Neither is a silent wrong answer, and neither is useful yet. Projecting a
-protected v1alpha2 journal requires resolving protected references through a key
-provider this CLI does not accept; that is outstanding runtime work.
+A store can carry either of two journal layouts and these commands read both:
+`<store>/events-v1alpha2/<hash>.jsonl` (`events/v1alpha2`), which the protected
+durable scheduler writes today, and `<store>/events/<hash>.jsonl`
+(`events/v1alpha1`), which is legacy data under `redaction-semantics.md`
+Section 9. The protected layout is probed first, so a store carrying both for one
+run identity projects the protected journal and leaves the legacy file untouched.
+`journalApiVersion` in the machine envelope, and a `journal events/v1alpha2` line
+in human output, name the contract that was read.
+
+No key provider is required and this CLI accepts none. A v1alpha2 envelope
+carries the metadata these projections use — `sequence`, `type`, `nodeId`,
+`edgeId`, `attempt`, `timestamp`, `redacted`, `payloadDisposition` — inline, and
+`event.data` is never read, so a protected reference is never resolved.
 
 ## Durable read boundary
 
@@ -102,10 +109,13 @@ classifies CLI diagnostics as a capture sink; this is how that is honoured.
 Statuses are derived only from event types the history contains: `created`,
 `running`, `paused`, `succeeded`, `failed`, and `cancelled`. A node the journal
 never mentions is absent from `inspect` output rather than reported as pending.
-Record validation is strict — a closed property set, the frozen
-`events/v1alpha1` `apiVersion`, a known event type, an RFC 3339 timestamp, a
-matching `runId`, and a sequence equal to the record index — and the first
-violation fails the whole command with exit `5`.
+Record validation is strict — a closed property set, the `apiVersion` of the
+contract the layout declares, an event type in that contract's vocabulary, an
+RFC 3339 timestamp, a matching `runId`, and a sequence equal to the record index
+— and the first violation fails the whole command with exit `5`. A v1alpha2
+record must also carry 64-hex `payloadHash` and `capturePolicyHash` members,
+`redacted: false`, and a `metadata-only` or `protected-ref`
+`payloadDisposition`; a forged inline disposition is refused, not projected.
 
 Full envelope member lists are in [docs/CLI.md](../../docs/CLI.md).
 

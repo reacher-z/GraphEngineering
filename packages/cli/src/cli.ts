@@ -23,10 +23,12 @@ import {
   UNSUPPORTED_OPERATIONS,
   inspectData,
   isSafeRunId,
+  journalLabel,
   logsData,
   readJournal,
   statusData,
-  type JournalEntry,
+  type JournalApiVersion,
+  type JournalRead,
   type UnsupportedOperationName,
 } from "./operations.js";
 
@@ -893,6 +895,17 @@ function flag(value: boolean): string {
   return value ? "yes" : "no";
 }
 
+/**
+ * Name the journal contract the read actually found.
+ *
+ * A store written by this runtime carries `events/v1alpha2`; a quarantined
+ * pre-cut history carries `events/v1alpha1`. The two project differently, so an
+ * operator is told which one was read rather than left to guess.
+ */
+function journalLine(data: Record<string, unknown>): string {
+  return `  journal ${journalLabel(data.journalApiVersion as JournalApiVersion)}`;
+}
+
 function printStatusHuman(data: Record<string, unknown>): void {
   const runId = terminalSafeText(String(data.runId));
   writeStdout(
@@ -903,6 +916,7 @@ function printStatusHuman(data: Record<string, unknown>): void {
     `  first ${String(data.firstEventTimestamp)} · last ${String(data.lastEventTimestamp)}\n` +
     `  resumes ${String(data.resumeCount)} · pauses ${String(data.pauseCount)}` +
     ` · observed nodes ${String(data.observedNodeCount)}\n` +
+    `${journalLine(data)}\n` +
     "  payloads and event data are never emitted by this sink",
   );
 }
@@ -939,6 +953,7 @@ function printInspectHuman(data: Record<string, unknown>): void {
     output +=
       `\n    ${terminalSafeText(String(edge.edgeId))} events=${String(edge.eventCount)}`;
   }
+  output += `\n${journalLine(data)}`;
   output += "\n  payloads and event data are never emitted by this sink";
   writeStdout(output);
 }
@@ -959,6 +974,7 @@ function printLogsHuman(data: Record<string, unknown>): void {
       ` attempt=${event.attempt === null ? "-" : String(event.attempt)}` +
       ` redacted=${flag(event.redacted === true)}`;
   }
+  output += `\n${journalLine(data)}`;
   output += "\n  payloads and event data are never emitted by this sink";
   writeStdout(output);
 }
@@ -1046,18 +1062,18 @@ export async function run(argv: string[]): Promise<CliExitCode> {
         // Fail closed before touching the durable store: no read, no append.
         throw unsupportedCliError(parsed.command as UnsupportedOperationName, runId);
       }
-      let entries: readonly JournalEntry[];
+      let read: JournalRead;
       try {
-        entries = await readJournal(store, runId);
+        read = await readJournal(store, runId);
       } catch (error) {
         if (error instanceof OperationError) throw operationCliError(error);
         throw error;
       }
       const data = parsed.command === "status"
-        ? statusData(runId, entries)
+        ? statusData(runId, read)
         : parsed.command === "inspect"
-          ? inspectData(runId, entries)
-          : logsData(runId, entries, parsed.fromSequence, parsed.limit);
+          ? inspectData(runId, read)
+          : logsData(runId, read, parsed.fromSequence, parsed.limit);
       if (parsed.json) {
         writeEnvelope(parsed.command, EXIT_CODES.success, data);
       } else if (parsed.command === "status") {

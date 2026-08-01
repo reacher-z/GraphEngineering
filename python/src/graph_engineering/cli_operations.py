@@ -27,8 +27,15 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Final, Literal
 
-#: Event envelope contract this reader understands.
+#: Event envelope contracts this reader understands.
+#:
+#: ``v1alpha2`` is what the protected durable scheduler writes today, under
+#: ``<store>/events-v1alpha2/``.  ``v1alpha1`` is the legacy journal layout under
+#: ``<store>/events/``; ``spec/redaction-semantics.md`` 9 requires legacy
+#: detection, and this CLI is the read path for a quarantined pre-cut history,
+#: so both are read and the projection reports which one it found.
 JOURNAL_API_VERSION: Final = "graphengineering.reacher-z.github.io/events/v1alpha1"
+JOURNAL_API_VERSION_V1ALPHA2: Final = "graphengineering.reacher-z.github.io/events/v1alpha2"
 
 #: Hard ceiling on a journal file this CLI will read into memory.
 MAX_JOURNAL_BYTES: Final = 67_108_864
@@ -70,7 +77,31 @@ JOURNAL_EVENT_TYPES: Final = (
     "RunSucceeded",
 )
 
+#: Closed v1alpha2 event-type vocabulary, in contract declaration order.
+#:
+#: The protected envelope has no ``RunPaused``, ``GraphPatched``,
+#: ``BarrierSatisfied``, ``RouteSelected``, ``VerificationRecorded``,
+#: ``BudgetUpdated``, ``ArtifactCreated``, ``HumanInputRequested`` or
+#: ``HumanInputReceived`` record, so a journal that carries one is malformed
+#: rather than merely unfamiliar.
+JOURNAL_EVENT_TYPES_V1ALPHA2: Final = (
+    "RunCreated",
+    "RunStarted",
+    "RunResumed",
+    "NodeScheduled",
+    "NodeStarted",
+    "NodeAttemptFailed",
+    "NodeSettledWithoutAttempt",
+    "NodeRetried",
+    "NodeSucceeded",
+    "EdgeEmitted",
+    "RunCancelled",
+    "RunFailed",
+    "RunSucceeded",
+)
+
 _EVENT_TYPE_SET = frozenset(JOURNAL_EVENT_TYPES)
+_EVENT_TYPE_SET_V1ALPHA2 = frozenset(JOURNAL_EVENT_TYPES_V1ALPHA2)
 
 _ENVELOPE_KEYS = frozenset(
     {
@@ -114,6 +145,117 @@ _OPTIONAL_STRING_KEYS: Final = (
     "payloadHash",
     "artifactRef",
 )
+
+#: The closed v1alpha2 envelope of ``spec/redaction-semantics.md`` 3.2 and 6.1.
+#:
+#: ``capturePolicyHash`` and ``payloadDisposition`` are required and ``redacted``
+#: is pinned to ``False``; there is no ``artifactRef``.
+_ENVELOPE_KEYS_V1ALPHA2 = frozenset(
+    {
+        "apiVersion",
+        "eventId",
+        "type",
+        "timestamp",
+        "runId",
+        "graphRevision",
+        "sequence",
+        "traceId",
+        "spanId",
+        "parentSpanId",
+        "nodeId",
+        "edgeId",
+        "attempt",
+        "payloadHash",
+        "capturePolicyHash",
+        "redacted",
+        "payloadDisposition",
+        "data",
+    }
+)
+
+_REQUIRED_KEYS_V1ALPHA2: Final = (
+    "apiVersion",
+    "eventId",
+    "type",
+    "timestamp",
+    "runId",
+    "graphRevision",
+    "sequence",
+    "payloadHash",
+    "capturePolicyHash",
+    "redacted",
+    "payloadDisposition",
+    "data",
+)
+
+_OPTIONAL_STRING_KEYS_V1ALPHA2: Final = (
+    "traceId",
+    "spanId",
+    "parentSpanId",
+    "nodeId",
+    "edgeId",
+)
+
+#: The two payload dispositions a protected record may declare.
+_PAYLOAD_DISPOSITIONS = frozenset({"metadata-only", "protected-ref"})
+
+_SHA256_HEX = re.compile(r"^[0-9a-f]{64}$")
+
+#: Operator-facing names for envelope members whose identifier is also an
+#: ``event.data`` payload marker the redaction gate scans for.  A diagnostic must
+#: be able to name the member it rejected without emitting a token that only ever
+#: appears inside a payload.
+_MEMBER_LABELS: Final[dict[str, str]] = {
+    "payloadHash": "payload hash",
+    "capturePolicyHash": "capture policy hash",
+}
+
+
+def _member_label(key: str) -> str:
+    return _MEMBER_LABELS.get(key, key)
+
+
+JournalApiVersion = Literal[
+    "graphengineering.reacher-z.github.io/events/v1alpha1",
+    "graphengineering.reacher-z.github.io/events/v1alpha2",
+]
+
+
+@dataclass(frozen=True, slots=True)
+class JournalSource:
+    """One durable journal layout: its directory and the contract it declares."""
+
+    api_version: JournalApiVersion
+    directory: str
+
+
+#: The journal layouts this reader probes, in resolution order.
+#:
+#: The protected layout is probed first because it is the only one this runtime
+#: still produces; the legacy layout is probed second so a pre-cut history stays
+#: readable.
+JOURNAL_SOURCES: Final = (
+    JournalSource(JOURNAL_API_VERSION_V1ALPHA2, "events-v1alpha2"),
+    JournalSource(JOURNAL_API_VERSION, "events"),
+)
+
+
+def journal_label(api_version: str) -> str:
+    """The short operator-facing label for one journal contract."""
+
+    return (
+        "events/v1alpha2"
+        if api_version == JOURNAL_API_VERSION_V1ALPHA2
+        else "events/v1alpha1"
+    )
+
+
+def journal_event_types(api_version: str) -> tuple[str, ...]:
+    """The event-type vocabulary of one journal contract, in declaration order."""
+
+    if api_version == JOURNAL_API_VERSION_V1ALPHA2:
+        return JOURNAL_EVENT_TYPES_V1ALPHA2
+    return JOURNAL_EVENT_TYPES
 
 RunStatus = Literal["created", "running", "paused", "succeeded", "failed", "cancelled"]
 
@@ -251,7 +393,10 @@ def _malformed(run_id: str, message: str, record: int | None) -> OperationError:
     return OperationError("GECLI_HISTORY_MALFORMED", message, run_id, record)
 
 
-def _decode_record(line: str, index: int, run_id: str) -> JournalEntry:
+def _decode_record(
+    line: str, index: int, run_id: str, api_version: JournalApiVersion
+) -> JournalEntry:
+    v1alpha2 = api_version == JOURNAL_API_VERSION_V1ALPHA2
     record = index + 1
     if not line:
         raise _malformed(run_id, "durable history record is blank", record)
@@ -261,20 +406,28 @@ def _decode_record(line: str, index: int, run_id: str) -> JournalEntry:
         raise _malformed(run_id, "durable history record is not JSON", record) from None
     if not isinstance(parsed, dict):
         raise _malformed(run_id, "durable history record is not a JSON object", record)
+    envelope_keys = _ENVELOPE_KEYS_V1ALPHA2 if v1alpha2 else _ENVELOPE_KEYS
+    required_keys = _REQUIRED_KEYS_V1ALPHA2 if v1alpha2 else _REQUIRED_KEYS
+    optional_string_keys = (
+        _OPTIONAL_STRING_KEYS_V1ALPHA2 if v1alpha2 else _OPTIONAL_STRING_KEYS
+    )
     for key in parsed:
-        if key not in _ENVELOPE_KEYS:
+        if key not in envelope_keys:
             raise _malformed(run_id, "durable history record has an unknown property", record)
-    for key in _REQUIRED_KEYS:
+    for key in required_keys:
         if key not in parsed:
             raise _malformed(
                 run_id, "durable history record is missing a required property", record
             )
-    if parsed["apiVersion"] != JOURNAL_API_VERSION:
+    # The directory a journal lives in declares its contract; a record that
+    # states another one is malformed rather than silently reinterpreted.
+    if parsed["apiVersion"] != api_version:
         raise _malformed(
             run_id, "durable history record has an unsupported event apiVersion", record
         )
+    event_types = _EVENT_TYPE_SET_V1ALPHA2 if v1alpha2 else _EVENT_TYPE_SET
     event_type = parsed["type"]
-    if not isinstance(event_type, str) or event_type not in _EVENT_TYPE_SET:
+    if not isinstance(event_type, str) or event_type not in event_types:
         raise _malformed(run_id, "durable history record has an unknown event type", record)
     event_id = parsed["eventId"]
     if not isinstance(event_id, str) or not event_id:
@@ -293,12 +446,38 @@ def _decode_record(line: str, index: int, run_id: str) -> JournalEntry:
         raise _malformed(run_id, "durable history record has an invalid sequence", record)
     if _as_integer(parsed["sequence"]) != index:
         raise _malformed(run_id, "durable history record is out of sequence", record)
-    for key in _OPTIONAL_STRING_KEYS:
+    for key in optional_string_keys:
         if key in parsed and not isinstance(parsed[key], str):
-            raise _malformed(run_id, f"durable history record has an invalid {key}", record)
+            raise _malformed(
+                run_id,
+                f"durable history record has an invalid {_member_label(key)}",
+                record,
+            )
     if "attempt" in parsed and not _is_bounded_integer(parsed["attempt"], 1):
         raise _malformed(run_id, "durable history record has an invalid attempt", record)
-    if "redacted" in parsed and not isinstance(parsed["redacted"], bool):
+    if v1alpha2:
+        for key in ("payloadHash", "capturePolicyHash"):
+            value = parsed[key]
+            if not isinstance(value, str) or not _SHA256_HEX.fullmatch(value):
+                raise _malformed(
+                    run_id,
+                    f"durable history record has an invalid {_member_label(key)}",
+                    record,
+                )
+        # spec/redaction-semantics.md 3.2: both facts are required and neither
+        # has a default.  `redacted: true` and an inline disposition are
+        # unrepresentable in a protected journal, so a record claiming either is
+        # refused here.
+        if parsed["redacted"] is not False:
+            raise _malformed(
+                run_id, "durable history record has an invalid redacted flag", record
+            )
+        disposition = parsed["payloadDisposition"]
+        if not isinstance(disposition, str) or disposition not in _PAYLOAD_DISPOSITIONS:
+            raise _malformed(
+                run_id, "durable history record has an invalid payloadDisposition", record
+            )
+    elif "redacted" in parsed and not isinstance(parsed["redacted"], bool):
         raise _malformed(run_id, "durable history record has an invalid redacted flag", record)
     if not isinstance(parsed.get("data"), dict):
         raise _malformed(run_id, "durable history record has a non-object data member", record)
@@ -317,36 +496,17 @@ def _decode_record(line: str, index: int, run_id: str) -> JournalEntry:
     )
 
 
-def read_journal(store_directory: str, run_id: str) -> tuple[JournalEntry, ...]:
-    """Read one durable history without mutating it.
+@dataclass(frozen=True, slots=True)
+class JournalRead:
+    """One durable history and the envelope contract it was written under."""
 
-    The journal file is opened read-only. No directory is created, no lock file
-    is taken, and no record is appended, so every caller of this function is a
-    provable zero-append reader.
-    """
+    api_version: JournalApiVersion
+    entries: tuple[JournalEntry, ...]
 
-    if not is_safe_run_id(run_id):
-        raise OperationError(
-            "GECLI_RUN_ID_INVALID",
-            "run identifier is not a safe durable identifier",
-            run_id,
-        )
-    try:
-        store_state = os.stat(store_directory)
-    except OSError:
-        raise OperationError(
-            "GECLI_STORE_UNREADABLE",
-            "durable store directory is not readable",
-            run_id,
-        ) from None
-    if not os.path.isdir(store_directory) or store_state.st_ino < 0:
-        raise OperationError(
-            "GECLI_STORE_UNREADABLE",
-            "durable store directory is not readable",
-            run_id,
-        )
 
-    path = os.path.join(store_directory, "events", f"{run_id_hash(run_id)}.jsonl")
+def _read_journal_bytes(path: str, run_id: str) -> bytes | None:
+    """Read one journal file, or ``None`` when that layout holds no such run."""
+
     try:
         with open(path, "rb", buffering=0) as stream:
             metadata = os.fstat(stream.fileno())
@@ -370,17 +530,67 @@ def read_journal(store_directory: str, run_id: str) -> tuple[JournalEntry, ...]:
                         "durable history exceeds the readable byte limit",
                         run_id,
                     )
-            raw = b"".join(chunks)
+            return b"".join(chunks)
     except OperationError:
         raise
     except FileNotFoundError:
-        raise OperationError(
-            "GECLI_RUN_NOT_FOUND", "durable run history does not exist", run_id
-        ) from None
+        return None
     except OSError:
         raise OperationError(
             "GECLI_HISTORY_UNREADABLE", "durable history is not readable", run_id
         ) from None
+
+
+def read_journal(store_directory: str, run_id: str) -> JournalRead:
+    """Read one durable history without mutating it.
+
+    Both journal layouts are probed in :data:`JOURNAL_SOURCES` order: the
+    protected ``events-v1alpha2/`` directory this runtime writes today, then the
+    legacy ``events/`` directory.  The first layout that holds the run wins, and
+    the contract it was written under is reported alongside the records.
+
+    The journal file is opened read-only. No directory is created, no lock file
+    is taken, and no record is appended, so every caller of this function is a
+    provable zero-append reader.  ``event.data`` is never read, so a protected
+    reference is never resolved and no key material is required.
+    """
+
+    if not is_safe_run_id(run_id):
+        raise OperationError(
+            "GECLI_RUN_ID_INVALID",
+            "run identifier is not a safe durable identifier",
+            run_id,
+        )
+    try:
+        store_state = os.stat(store_directory)
+    except OSError:
+        raise OperationError(
+            "GECLI_STORE_UNREADABLE",
+            "durable store directory is not readable",
+            run_id,
+        ) from None
+    if not os.path.isdir(store_directory) or store_state.st_ino < 0:
+        raise OperationError(
+            "GECLI_STORE_UNREADABLE",
+            "durable store directory is not readable",
+            run_id,
+        )
+
+    digest = run_id_hash(run_id)
+    found: tuple[JournalApiVersion, bytes] | None = None
+    for source in JOURNAL_SOURCES:
+        raw = _read_journal_bytes(
+            os.path.join(store_directory, source.directory, f"{digest}.jsonl"), run_id
+        )
+        if raw is None:
+            continue
+        found = (source.api_version, raw)
+        break
+    if found is None:
+        raise OperationError(
+            "GECLI_RUN_NOT_FOUND", "durable run history does not exist", run_id
+        )
+    api_version, raw = found
 
     if not raw:
         raise _malformed(run_id, "durable history is empty", None)
@@ -390,8 +600,12 @@ def read_journal(store_directory: str, run_id: str) -> tuple[JournalEntry, ...]:
         raise _malformed(run_id, "durable history is not valid UTF-8", None) from None
     if not text.endswith("\n"):
         raise _malformed(run_id, "durable history has a truncated final record", None)
-    return tuple(
-        _decode_record(line, index, run_id) for index, line in enumerate(text[:-1].split("\n"))
+    return JournalRead(
+        api_version=api_version,
+        entries=tuple(
+            _decode_record(line, index, run_id, api_version)
+            for index, line in enumerate(text[:-1].split("\n"))
+        ),
     )
 
 
@@ -427,7 +641,8 @@ def _require_entries(entries: Sequence[JournalEntry]) -> JournalEntry:
     return entries[-1]
 
 
-def status_data(run_id: str, entries: Sequence[JournalEntry]) -> dict[str, object]:
+def status_data(run_id: str, read: JournalRead) -> dict[str, object]:
+    entries = read.entries
     status = project_status(entries)
     last = _require_entries(entries)
     first = entries[0]
@@ -435,7 +650,7 @@ def status_data(run_id: str, entries: Sequence[JournalEntry]) -> dict[str, objec
     return {
         "runId": run_id,
         "runIdHash": run_id_hash(run_id),
-        "journalApiVersion": JOURNAL_API_VERSION,
+        "journalApiVersion": read.api_version,
         "status": status,
         "terminal": is_terminal_status(status),
         "eventCount": len(entries),
@@ -471,7 +686,8 @@ class _EdgeObservation:
     last_sequence: int
 
 
-def inspect_data(run_id: str, entries: Sequence[JournalEntry]) -> dict[str, object]:
+def inspect_data(run_id: str, read: JournalRead) -> dict[str, object]:
+    entries = read.entries
     status = project_status(entries)
     last = _require_entries(entries)
 
@@ -526,14 +742,14 @@ def inspect_data(run_id: str, entries: Sequence[JournalEntry]) -> dict[str, obje
 
     event_type_counts = {
         event_type: type_counts[event_type]
-        for event_type in JOURNAL_EVENT_TYPES
+        for event_type in journal_event_types(read.api_version)
         if event_type in type_counts
     }
 
     return {
         "runId": run_id,
         "runIdHash": run_id_hash(run_id),
-        "journalApiVersion": JOURNAL_API_VERSION,
+        "journalApiVersion": read.api_version,
         "status": status,
         "terminal": is_terminal_status(status),
         "eventCount": len(entries),
@@ -571,17 +787,18 @@ def inspect_data(run_id: str, entries: Sequence[JournalEntry]) -> dict[str, obje
 
 def logs_data(
     run_id: str,
-    entries: Sequence[JournalEntry],
+    read: JournalRead,
     from_sequence: int,
     limit: int,
 ) -> dict[str, object]:
+    entries = read.entries
     selected = [entry for entry in entries if entry.sequence >= from_sequence]
     window = selected[:limit]
     remaining = len(selected) - len(window)
     return {
         "runId": run_id,
         "runIdHash": run_id_hash(run_id),
-        "journalApiVersion": JOURNAL_API_VERSION,
+        "journalApiVersion": read.api_version,
         "eventCount": len(entries),
         "fromSequence": from_sequence,
         "limit": limit,
@@ -607,18 +824,26 @@ def logs_data(
 __all__ = [
     "DEFAULT_LOG_LIMIT",
     "JOURNAL_API_VERSION",
+    "JOURNAL_API_VERSION_V1ALPHA2",
     "JOURNAL_EVENT_TYPES",
+    "JOURNAL_EVENT_TYPES_V1ALPHA2",
+    "JOURNAL_SOURCES",
     "MAX_JOURNAL_BYTES",
     "MAX_LOG_LIMIT",
     "MAX_SAFE_INTEGER",
     "UNSUPPORTED_OPERATIONS",
+    "JournalApiVersion",
     "JournalEntry",
+    "JournalRead",
+    "JournalSource",
     "OperationError",
     "RunStatus",
     "UnsupportedOperation",
     "inspect_data",
     "is_safe_run_id",
     "is_terminal_status",
+    "journal_event_types",
+    "journal_label",
     "logs_data",
     "project_status",
     "read_journal",

@@ -18,9 +18,23 @@ import { join } from "node:path";
  * the process.
  */
 
-/** Event envelope contract this reader understands. */
+/**
+ * Event envelope contracts this reader understands.
+ *
+ * `v1alpha2` is what the protected durable scheduler writes today, under
+ * `<store>/events-v1alpha2/`. `v1alpha1` is the legacy journal layout under
+ * `<store>/events/`; spec/redaction-semantics.md 9 requires legacy detection,
+ * and this CLI is the read path for a quarantined pre-cut history, so both are
+ * read and the projection reports which one it found.
+ */
 export const JOURNAL_API_VERSION =
   "graphengineering.reacher-z.github.io/events/v1alpha1" as const;
+export const JOURNAL_API_VERSION_V1ALPHA2 =
+  "graphengineering.reacher-z.github.io/events/v1alpha2" as const;
+
+export type JournalApiVersion =
+  | typeof JOURNAL_API_VERSION
+  | typeof JOURNAL_API_VERSION_V1ALPHA2;
 
 /** Hard ceiling on a journal file this CLI will read into memory. */
 export const MAX_JOURNAL_BYTES = 67_108_864;
@@ -62,7 +76,32 @@ export const JOURNAL_EVENT_TYPES = [
   "RunSucceeded",
 ] as const;
 
+/**
+ * Closed v1alpha2 event-type vocabulary, in contract declaration order.
+ *
+ * The protected envelope has no `RunPaused`, `GraphPatched`, `BarrierSatisfied`,
+ * `RouteSelected`, `VerificationRecorded`, `BudgetUpdated`, `ArtifactCreated`,
+ * `HumanInputRequested` or `HumanInputReceived` record, so a journal that
+ * carries one is malformed rather than merely unfamiliar.
+ */
+export const JOURNAL_EVENT_TYPES_V1ALPHA2 = [
+  "RunCreated",
+  "RunStarted",
+  "RunResumed",
+  "NodeScheduled",
+  "NodeStarted",
+  "NodeAttemptFailed",
+  "NodeSettledWithoutAttempt",
+  "NodeRetried",
+  "NodeSucceeded",
+  "EdgeEmitted",
+  "RunCancelled",
+  "RunFailed",
+  "RunSucceeded",
+] as const;
+
 const EVENT_TYPE_SET = new Set<string>(JOURNAL_EVENT_TYPES);
+const EVENT_TYPE_SET_V1ALPHA2 = new Set<string>(JOURNAL_EVENT_TYPES_V1ALPHA2);
 
 const ENVELOPE_KEYS = new Set([
   "apiVersion",
@@ -104,6 +143,100 @@ const OPTIONAL_STRING_KEYS = [
   "payloadHash",
   "artifactRef",
 ] as const;
+
+/**
+ * The closed v1alpha2 envelope of spec/redaction-semantics.md 3.2 and 6.1.
+ *
+ * `capturePolicyHash` and `payloadDisposition` are required and `redacted` is
+ * pinned to `false`; there is no `artifactRef`.
+ */
+const ENVELOPE_KEYS_V1ALPHA2 = new Set([
+  "apiVersion",
+  "eventId",
+  "type",
+  "timestamp",
+  "runId",
+  "graphRevision",
+  "sequence",
+  "traceId",
+  "spanId",
+  "parentSpanId",
+  "nodeId",
+  "edgeId",
+  "attempt",
+  "payloadHash",
+  "capturePolicyHash",
+  "redacted",
+  "payloadDisposition",
+  "data",
+]);
+
+const REQUIRED_KEYS_V1ALPHA2 = [
+  "apiVersion",
+  "eventId",
+  "type",
+  "timestamp",
+  "runId",
+  "graphRevision",
+  "sequence",
+  "payloadHash",
+  "capturePolicyHash",
+  "redacted",
+  "payloadDisposition",
+  "data",
+] as const;
+
+const OPTIONAL_STRING_KEYS_V1ALPHA2 = [
+  "traceId",
+  "spanId",
+  "parentSpanId",
+  "nodeId",
+  "edgeId",
+] as const;
+
+/** The two payload dispositions a protected record may declare. */
+const PAYLOAD_DISPOSITIONS = new Set(["metadata-only", "protected-ref"]);
+
+const SHA256_HEX = /^[0-9a-f]{64}$/;
+
+/**
+ * Operator-facing names for envelope members whose identifier is also a
+ * `event.data` payload marker the redaction gate scans for. A diagnostic must
+ * be able to name the member it rejected without emitting a token that only
+ * ever appears inside a payload.
+ */
+const MEMBER_LABELS: Readonly<Record<string, string>> = {
+  payloadHash: "payload hash",
+  capturePolicyHash: "capture policy hash",
+};
+
+function memberLabel(key: string): string {
+  return MEMBER_LABELS[key] ?? key;
+}
+
+/**
+ * One durable journal layout, in resolution order.
+ *
+ * The protected layout is probed first because it is the only one this runtime
+ * still produces; the legacy layout is probed second so a pre-cut history stays
+ * readable.
+ */
+export const JOURNAL_SOURCES = [
+  { apiVersion: JOURNAL_API_VERSION_V1ALPHA2, directory: "events-v1alpha2" },
+  { apiVersion: JOURNAL_API_VERSION, directory: "events" },
+] as const;
+
+/** The short operator-facing label for one journal contract. */
+export function journalLabel(apiVersion: JournalApiVersion): string {
+  return apiVersion === JOURNAL_API_VERSION_V1ALPHA2 ? "events/v1alpha2" : "events/v1alpha1";
+}
+
+/** The event-type vocabulary of one journal contract, in declaration order. */
+export function journalEventTypes(apiVersion: JournalApiVersion): readonly string[] {
+  return apiVersion === JOURNAL_API_VERSION_V1ALPHA2
+    ? JOURNAL_EVENT_TYPES_V1ALPHA2
+    : JOURNAL_EVENT_TYPES;
+}
 
 /** The projection this CLI is allowed to emit for one journal record. */
 export interface JournalEntry {
@@ -247,7 +380,13 @@ function malformed(runId: string, message: string, record: number | null): Opera
   return new OperationError("GECLI_HISTORY_MALFORMED", message, runId, record);
 }
 
-function decodeRecord(line: string, index: number, runId: string): JournalEntry {
+function decodeRecord(
+  line: string,
+  index: number,
+  runId: string,
+  apiVersion: JournalApiVersion,
+): JournalEntry {
+  const v1alpha2 = apiVersion === JOURNAL_API_VERSION_V1ALPHA2;
   const record = index + 1;
   if (line.length === 0) {
     throw malformed(runId, "durable history record is blank", record);
@@ -261,20 +400,26 @@ function decodeRecord(line: string, index: number, runId: string): JournalEntry 
   if (!isRecordObject(parsed)) {
     throw malformed(runId, "durable history record is not a JSON object", record);
   }
+  const envelopeKeys = v1alpha2 ? ENVELOPE_KEYS_V1ALPHA2 : ENVELOPE_KEYS;
+  const requiredKeys = v1alpha2 ? REQUIRED_KEYS_V1ALPHA2 : REQUIRED_KEYS;
+  const optionalStringKeys = v1alpha2 ? OPTIONAL_STRING_KEYS_V1ALPHA2 : OPTIONAL_STRING_KEYS;
   for (const key of Object.keys(parsed)) {
-    if (!ENVELOPE_KEYS.has(key)) {
+    if (!envelopeKeys.has(key)) {
       throw malformed(runId, "durable history record has an unknown property", record);
     }
   }
-  for (const key of REQUIRED_KEYS) {
+  for (const key of requiredKeys) {
     if (!Object.hasOwn(parsed, key)) {
       throw malformed(runId, "durable history record is missing a required property", record);
     }
   }
-  if (parsed.apiVersion !== JOURNAL_API_VERSION) {
+  // The directory a journal lives in declares its contract; a record that
+  // states another one is malformed rather than silently reinterpreted.
+  if (parsed.apiVersion !== apiVersion) {
     throw malformed(runId, "durable history record has an unsupported event apiVersion", record);
   }
-  if (typeof parsed.type !== "string" || !EVENT_TYPE_SET.has(parsed.type)) {
+  const eventTypes = v1alpha2 ? EVENT_TYPE_SET_V1ALPHA2 : EVENT_TYPE_SET;
+  if (typeof parsed.type !== "string" || !eventTypes.has(parsed.type)) {
     throw malformed(runId, "durable history record has an unknown event type", record);
   }
   if (typeof parsed.eventId !== "string" || parsed.eventId.length === 0) {
@@ -298,16 +443,35 @@ function decodeRecord(line: string, index: number, runId: string): JournalEntry 
   if (parsed.sequence !== index) {
     throw malformed(runId, "durable history record is out of sequence", record);
   }
-  for (const key of OPTIONAL_STRING_KEYS) {
+  for (const key of optionalStringKeys) {
     const value = parsed[key];
     if (value !== undefined && typeof value !== "string") {
-      throw malformed(runId, `durable history record has an invalid ${key}`, record);
+      throw malformed(runId, `durable history record has an invalid ${memberLabel(key)}`, record);
     }
   }
   if (parsed.attempt !== undefined && !isBoundedInteger(parsed.attempt, 1)) {
     throw malformed(runId, "durable history record has an invalid attempt", record);
   }
-  if (parsed.redacted !== undefined && typeof parsed.redacted !== "boolean") {
+  if (v1alpha2) {
+    for (const key of ["payloadHash", "capturePolicyHash"] as const) {
+      const value = parsed[key];
+      if (typeof value !== "string" || !SHA256_HEX.test(value)) {
+        throw malformed(runId, `durable history record has an invalid ${memberLabel(key)}`, record);
+      }
+    }
+    // spec/redaction-semantics.md 3.2: both facts are required and neither has
+    // a default. `redacted: true` and an inline disposition are unrepresentable
+    // in a protected journal, so a record claiming either is refused here.
+    if (parsed.redacted !== false) {
+      throw malformed(runId, "durable history record has an invalid redacted flag", record);
+    }
+    if (
+      typeof parsed.payloadDisposition !== "string" ||
+      !PAYLOAD_DISPOSITIONS.has(parsed.payloadDisposition)
+    ) {
+      throw malformed(runId, "durable history record has an invalid payloadDisposition", record);
+    }
+  } else if (parsed.redacted !== undefined && typeof parsed.redacted !== "boolean") {
     throw malformed(runId, "durable history record has an invalid redacted flag", record);
   }
   if (!isRecordObject(parsed.data)) {
@@ -326,44 +490,8 @@ function decodeRecord(line: string, index: number, runId: string): JournalEntry 
   };
 }
 
-/**
- * Read one durable history without mutating it.
- *
- * The journal file is opened `"r"` only. No directory is created, no lock file
- * is taken, and no record is appended, so every caller of this function is a
- * provable zero-append reader.
- */
-export async function readJournal(
-  storeDirectory: string,
-  runId: string,
-): Promise<readonly JournalEntry[]> {
-  if (!isSafeRunId(runId)) {
-    throw new OperationError(
-      "GECLI_RUN_ID_INVALID",
-      "run identifier is not a safe durable identifier",
-      runId,
-    );
-  }
-  let storeStat: Awaited<ReturnType<typeof stat>>;
-  try {
-    storeStat = await stat(storeDirectory);
-  } catch {
-    throw new OperationError(
-      "GECLI_STORE_UNREADABLE",
-      "durable store directory is not readable",
-      runId,
-    );
-  }
-  if (!storeStat.isDirectory()) {
-    throw new OperationError(
-      "GECLI_STORE_UNREADABLE",
-      "durable store directory is not readable",
-      runId,
-    );
-  }
-
-  const path = join(storeDirectory, "events", `${runIdHash(runId)}.jsonl`);
-  let bytes: Buffer;
+/** Read one journal file, or `null` when that layout holds no such run. */
+async function readJournalBytes(path: string, runId: string): Promise<Buffer | null> {
   try {
     const handle = await open(path, "r");
     try {
@@ -391,7 +519,7 @@ export async function readJournal(
           );
         }
       }
-      bytes = Buffer.concat(chunks, total);
+      return Buffer.concat(chunks, total);
     } finally {
       await handle.close();
     }
@@ -402,17 +530,81 @@ export async function readJournal(
       error !== null &&
       (error as { code?: unknown }).code === "ENOENT"
     ) {
-      throw new OperationError("GECLI_RUN_NOT_FOUND", "durable run history does not exist", runId);
+      return null;
     }
     throw new OperationError("GECLI_HISTORY_UNREADABLE", "durable history is not readable", runId);
   }
+}
 
-  if (bytes.byteLength === 0) {
+/** One durable history and the envelope contract it was written under. */
+export interface JournalRead {
+  readonly apiVersion: JournalApiVersion;
+  readonly entries: readonly JournalEntry[];
+}
+
+/**
+ * Read one durable history without mutating it.
+ *
+ * Both journal layouts are probed in {@link JOURNAL_SOURCES} order: the
+ * protected `events-v1alpha2/` directory this runtime writes today, then the
+ * legacy `events/` directory. The first layout that holds the run wins, and the
+ * contract it was written under is reported alongside the records.
+ *
+ * The journal file is opened `"r"` only. No directory is created, no lock file
+ * is taken, and no record is appended, so every caller of this function is a
+ * provable zero-append reader. `event.data` is never read, so a protected
+ * reference is never resolved and no key material is required.
+ */
+export async function readJournal(
+  storeDirectory: string,
+  runId: string,
+): Promise<JournalRead> {
+  if (!isSafeRunId(runId)) {
+    throw new OperationError(
+      "GECLI_RUN_ID_INVALID",
+      "run identifier is not a safe durable identifier",
+      runId,
+    );
+  }
+  let storeStat: Awaited<ReturnType<typeof stat>>;
+  try {
+    storeStat = await stat(storeDirectory);
+  } catch {
+    throw new OperationError(
+      "GECLI_STORE_UNREADABLE",
+      "durable store directory is not readable",
+      runId,
+    );
+  }
+  if (!storeStat.isDirectory()) {
+    throw new OperationError(
+      "GECLI_STORE_UNREADABLE",
+      "durable store directory is not readable",
+      runId,
+    );
+  }
+
+  const digest = runIdHash(runId);
+  let found: { apiVersion: JournalApiVersion; bytes: Buffer } | null = null;
+  for (const source of JOURNAL_SOURCES) {
+    const bytes = await readJournalBytes(
+      join(storeDirectory, source.directory, `${digest}.jsonl`),
+      runId,
+    );
+    if (bytes === null) continue;
+    found = { apiVersion: source.apiVersion, bytes };
+    break;
+  }
+  if (found === null) {
+    throw new OperationError("GECLI_RUN_NOT_FOUND", "durable run history does not exist", runId);
+  }
+
+  if (found.bytes.byteLength === 0) {
     throw malformed(runId, "durable history is empty", null);
   }
   let text: string;
   try {
-    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    text = new TextDecoder("utf-8", { fatal: true }).decode(found.bytes);
   } catch {
     throw malformed(runId, "durable history is not valid UTF-8", null);
   }
@@ -420,7 +612,10 @@ export async function readJournal(
     throw malformed(runId, "durable history has a truncated final record", null);
   }
   const lines = text.slice(0, -1).split("\n");
-  return lines.map((line, index) => decodeRecord(line, index, runId));
+  return Object.freeze({
+    apiVersion: found.apiVersion,
+    entries: lines.map((line, index) => decodeRecord(line, index, runId, found.apiVersion)),
+  });
 }
 
 function lastOf(entries: readonly JournalEntry[]): JournalEntry {
@@ -450,7 +645,8 @@ function countType(entries: readonly JournalEntry[], type: string): number {
   return entries.filter((entry) => entry.type === type).length;
 }
 
-export function statusData(runId: string, entries: readonly JournalEntry[]): Record<string, unknown> {
+export function statusData(runId: string, read: JournalRead): Record<string, unknown> {
+  const entries = read.entries;
   const status = projectStatus(entries);
   const first = entries[0];
   const last = lastOf(entries);
@@ -461,7 +657,7 @@ export function statusData(runId: string, entries: readonly JournalEntry[]): Rec
   return {
     runId,
     runIdHash: runIdHash(runId),
-    journalApiVersion: JOURNAL_API_VERSION,
+    journalApiVersion: read.apiVersion,
     status,
     terminal: isTerminalStatus(status),
     eventCount: entries.length,
@@ -495,10 +691,8 @@ interface EdgeObservation {
   lastSequence: number;
 }
 
-export function inspectData(
-  runId: string,
-  entries: readonly JournalEntry[],
-): Record<string, unknown> {
+export function inspectData(runId: string, read: JournalRead): Record<string, unknown> {
+  const entries = read.entries;
   const status = projectStatus(entries);
   const last = lastOf(entries);
 
@@ -546,7 +740,7 @@ export function inspectData(
   }
 
   const eventTypeCounts: Record<string, number> = {};
-  for (const type of JOURNAL_EVENT_TYPES) {
+  for (const type of journalEventTypes(read.apiVersion)) {
     const count = typeCounts.get(type);
     if (count !== undefined) eventTypeCounts[type] = count;
   }
@@ -557,7 +751,7 @@ export function inspectData(
   return {
     runId,
     runIdHash: runIdHash(runId),
-    journalApiVersion: JOURNAL_API_VERSION,
+    journalApiVersion: read.apiVersion,
     status,
     terminal: isTerminalStatus(status),
     eventCount: entries.length,
@@ -595,17 +789,18 @@ export function inspectData(
 
 export function logsData(
   runId: string,
-  entries: readonly JournalEntry[],
+  read: JournalRead,
   fromSequence: number,
   limit: number,
 ): Record<string, unknown> {
+  const entries = read.entries;
   const window = entries.filter((entry) => entry.sequence >= fromSequence).slice(0, limit);
   const remaining = entries.filter((entry) => entry.sequence >= fromSequence).length - window.length;
   const nextEntry = window[window.length - 1];
   return {
     runId,
     runIdHash: runIdHash(runId),
-    journalApiVersion: JOURNAL_API_VERSION,
+    journalApiVersion: read.apiVersion,
     eventCount: entries.length,
     fromSequence,
     limit,

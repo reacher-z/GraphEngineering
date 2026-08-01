@@ -25,10 +25,11 @@ from .cli_operations import (
     MAX_LOG_LIMIT,
     MAX_SAFE_INTEGER,
     UNSUPPORTED_OPERATIONS,
-    JournalEntry,
+    JournalRead,
     OperationError,
     inspect_data,
     is_safe_run_id,
+    journal_label,
     logs_data,
     read_journal,
     status_data,
@@ -1512,6 +1513,17 @@ def _flag(value: object) -> str:
     return "yes" if value is True else "no"
 
 
+def _journal_line(data: Mapping[str, object]) -> str:
+    """Name the journal contract the read actually found.
+
+    A store written by this runtime carries ``events/v1alpha2``; a quarantined
+    pre-cut history carries ``events/v1alpha1``.  The two project differently, so
+    an operator is told which one was read rather than left to guess.
+    """
+
+    return f"  journal {journal_label(str(data['journalApiVersion']))}"
+
+
 def _print_status_human(io: _CliIo, data: Mapping[str, object]) -> None:
     _write(
         io.stdout,
@@ -1522,6 +1534,7 @@ def _print_status_human(io: _CliIo, data: Mapping[str, object]) -> None:
         f"  first {data['firstEventTimestamp']} · last {data['lastEventTimestamp']}\n"
         f"  resumes {data['resumeCount']} · pauses {data['pauseCount']}"
         f" · observed nodes {data['observedNodeCount']}\n"
+        f"{_journal_line(data)}\n"
         "  payloads and event data are never emitted by this sink",
     )
 
@@ -1559,6 +1572,7 @@ def _print_inspect_human(io: _CliIo, data: Mapping[str, object]) -> None:
         f"    {_terminal_safe_text(str(edge['edgeId']))} events={edge['eventCount']}"
         for edge in edges
     )
+    lines.append(_journal_line(data))
     lines.append("  payloads and event data are never emitted by this sink")
     _write(io.stdout, "\n".join(lines))
 
@@ -1584,6 +1598,7 @@ def _print_logs_human(io: _CliIo, data: Mapping[str, object]) -> None:
             f" attempt={'-' if attempt is None else attempt}"
             f" redacted={_flag(event['redacted'])}"
         )
+    lines.append(_journal_line(data))
     lines.append("  payloads and event data are never emitted by this sink")
     _write(io.stdout, "\n".join(lines))
 
@@ -1681,16 +1696,16 @@ def run(argv: Sequence[str], *, io: _CliIo | None = None) -> int:
                 # Fail closed before touching the durable store: no read, no append.
                 raise _unsupported_cli_error(parsed.command, parsed.run_id)
             try:
-                entries: tuple[JournalEntry, ...] = read_journal(parsed.store, parsed.run_id)
+                read: JournalRead = read_journal(parsed.store, parsed.run_id)
             except OperationError as error:
                 raise _operation_cli_error(error) from None
             if parsed.command == "status":
-                operation_data = status_data(parsed.run_id, entries)
+                operation_data = status_data(parsed.run_id, read)
             elif parsed.command == "inspect":
-                operation_data = inspect_data(parsed.run_id, entries)
+                operation_data = inspect_data(parsed.run_id, read)
             else:
                 operation_data = logs_data(
-                    parsed.run_id, entries, parsed.from_sequence, parsed.limit
+                    parsed.run_id, read, parsed.from_sequence, parsed.limit
                 )
             if parsed.json:
                 _write_envelope(streams, parsed.command, ExitCode.SUCCESS, operation_data)

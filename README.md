@@ -128,12 +128,13 @@ mislead:
   There is no fallback to an inline plaintext writer. Protection is not a KMS:
   key derivation, hardware boundary, escrow, and rotation are the operator's, and
   a decrypted value is in process memory for the executor that needs it.
-- **CLI run commands.** `status`, `inspect`, and `logs` project a
-  `scheduler-recovery/v1alpha1` journal from `<store>/events/`. The protected
-  durable scheduler writes `events/v1alpha2` records to
-  `<store>/events-v1alpha2/`, so these commands cannot yet read a run produced by
-  today's runtime — they report `GECLI_RUN_NOT_FOUND` rather than guessing.
-  Closing that gap is a source change, not a documentation change.
+- **CLI run commands.** `status`, `inspect`, and `logs` project one durable run
+  journal from `<store>/events-v1alpha2/` (the `events/v1alpha2` records the
+  protected durable scheduler writes today) or `<store>/events/` (a legacy
+  `events/v1alpha1` history), and report which contract they found. They read the
+  envelope only: no key provider is accepted and no protected reference is
+  resolved, so a run's inputs, outputs, and results stay unreadable to the CLI by
+  construction.
 - **Adapters.** `mock`, `http`, and `shell` ship. The HTTP adapter has no default
   transport — the caller injects one, and there is no fallback to
   `globalThis.fetch` or `node:http`. The shell adapter always refuses to launch a

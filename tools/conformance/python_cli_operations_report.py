@@ -38,7 +38,10 @@ from graph_engineering.cli import main as cli_main
 from graph_engineering.cli_operations import (
     DEFAULT_LOG_LIMIT,
     JOURNAL_API_VERSION,
+    JOURNAL_API_VERSION_V1ALPHA2,
     JOURNAL_EVENT_TYPES,
+    JOURNAL_EVENT_TYPES_V1ALPHA2,
+    JOURNAL_SOURCES,
     MAX_JOURNAL_BYTES,
     MAX_LOG_LIMIT,
     UNSUPPORTED_OPERATIONS,
@@ -67,21 +70,29 @@ def load_corpus() -> dict[str, Any]:
     return corpus
 
 
-def journal_path(store: Path, run_id: str) -> Path:
-    digest = hashlib.sha256(run_id.encode("utf-8")).hexdigest()
-    return store / "events" / f"{digest}.jsonl"
+def journal_path(store: Path, journal: dict[str, Any]) -> Path:
+    digest = hashlib.sha256(journal["runId"].encode("utf-8")).hexdigest()
+    return store / journal["directory"] / f"{digest}.jsonl"
 
 
-def materialize(store: Path, journal: dict[str, Any] | None) -> Path | None:
-    """Write one case's journal bytes; return the path when a file exists."""
+def materialize(store: Path, journals: list[dict[str, Any]]) -> list[Path]:
+    """Write every journal one case declares and return their paths.
+
+    A case names one journal or several.  Several is how the corpus states a
+    store that carries both durable layouts for one run identity: the corpus
+    says which directory each journal lives in, and this writes it there.
+    """
 
     store.mkdir(parents=True, exist_ok=True)
-    if journal is None or journal["content"] is None:
-        return None
-    path = journal_path(store, journal["runId"])
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(journal["content"].encode("utf-8"))
-    return path
+    paths: list[Path] = []
+    for journal in journals:
+        if journal is None or journal["content"] is None:
+            continue
+        path = journal_path(store, journal)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(journal["content"].encode("utf-8"))
+        paths.append(path)
+    return paths
 
 
 def fingerprint(path: Path | None) -> tuple[str, int, int] | None:
@@ -119,13 +130,19 @@ def main() -> None:
         for index, case in enumerate(cases):
             name = str(case["name"])
             store = workspace / f"case-{index:04d}"
-            journal_name = case["journal"]
-            path = materialize(store, journals[journal_name] if journal_name else None)
-            before = fingerprint(path)
+            declared = case["journal"]
+            journal_names = [] if declared is None else (
+                declared if isinstance(declared, list) else [declared]
+            )
+            paths = materialize(store, [journals[name] for name in journal_names])
+            before = [fingerprint(path) for path in paths]
             argv = [str(item).replace(store_token, os.fspath(store)) for item in case["argv"]]
             result = invoke(argv)
-            after = fingerprint(path)
-            result["journalUnchanged"] = None if path is None else before == after
+            after = [fingerprint(path) for path in paths]
+            # Every journal the case materialized, not only the one the command
+            # was expected to read: a command that appended to the layout it did
+            # not choose would fail here too.
+            result["journalUnchanged"] = None if not paths else before == after
             # Directory listings must be untouched too: a read command may not
             # create a lock, a temporary file, or an events directory.
             result["storeEntries"] = sorted(
@@ -168,7 +185,12 @@ def main() -> None:
             for command, descriptor in UNSUPPORTED_OPERATIONS.items()
         },
         "nativeJournalApiVersion": JOURNAL_API_VERSION,
+        "nativeJournalApiVersionV1Alpha2": JOURNAL_API_VERSION_V1ALPHA2,
         "nativeJournalEventTypes": list(JOURNAL_EVENT_TYPES),
+        "nativeJournalEventTypesV1Alpha2": list(JOURNAL_EVENT_TYPES_V1ALPHA2),
+        "nativeJournalSources": [
+            [source.directory, source.api_version] for source in JOURNAL_SOURCES
+        ],
         "nativeLimits": {
             "defaultLogLimit": DEFAULT_LOG_LIMIT,
             "maxLogLimit": MAX_LOG_LIMIT,
