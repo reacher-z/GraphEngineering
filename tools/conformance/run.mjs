@@ -4037,8 +4037,789 @@ assertBarrierAgreement(
   [...barrierCategoriesSeen].sort(),
 );
 
+// ---------------------------------------------------------------------------
+// Integrated barrier tranche 2: evaluation, identity, replay, identifiers.
+//
+// Tranche 1 above joins the compile-time surface. Tranche 2 joins the surface
+// both runtimes now execute, where the failure mode is worse than a diagnostic
+// ordering defect: if the two languages disagree on satisfaction arithmetic or
+// on a decision identity, a decision one runtime commits is one the other
+// rejects on replay, and a resumed run diverges silently.
+//
+// The same discipline applies as above. The TypeScript half is computed only
+// from `@graph-engineering/core` and `@graph-engineering/runtime`; the Python
+// half arrives in the same report process that already served tranche 1 and is
+// computed only from `graph_engineering`. Every hash on both sides is
+// recomputed from the framing rule in `hashContract`; neither half reads a
+// literal out of the other's output, and neither reads the corpus `expect`
+// block until the two native halves have already been proved equal.
+const BARRIER_DECISION_COUNT_FIELDS = [
+  "total",
+  "succeeded",
+  "failed",
+  "missing",
+  "timedOut",
+  "abstained",
+  "unknown",
+];
+const BARRIER_DECISION_ID_LIST_FIELDS = [
+  "acceptedIds",
+  "failedIds",
+  "missingIds",
+  "timedOutIds",
+  "abstainedIds",
+  "unknownIds",
+];
+// The evaluation surface owns neither hash; a decision document member it
+// materialized would mean it invented an identity it cannot compute.
+const BARRIER_DECISION_IDENTITY_FIELDS = ["policyHash", "decisionId"];
+const BARRIER_EVALUATION_FIELDS = [
+  "document",
+  "documentFields",
+  "barrierNodeId",
+  "deadlineElapsed",
+  "satisfied",
+  "reasonCode",
+  "resolution",
+  "counts",
+  "idLists",
+  "votesPresent",
+  "countSum",
+  "votes",
+  "voteFields",
+];
+const BARRIER_IDENTITY_FIELDS = [
+  "documentKind",
+  "policyKindTag",
+  "decisionDomain",
+  "policyHash",
+  "decisionId",
+  "recordedPolicyHash",
+  "recordedDecisionId",
+  "canonicalPolicyUtf8Bytes",
+  "canonicalDocumentWithoutDecisionIdUtf8Bytes",
+  "documentFieldsWithoutDecisionId",
+  "evidenceHashes",
+  "canonicalEvidenceKeyOrder",
+];
+const BARRIER_REPLAY_FIELDS = [
+  "outcome",
+  "adoptedNodeIds",
+  "appendedDecisionEvents",
+  "executorCalls",
+  "executedNodeIds",
+  "currentPolicyHashes",
+  "recomputedDecisionIds",
+  "recordedPolicyHashes",
+  "recordedDecisionIds",
+  "code",
+  "nodeId",
+  "recordedPolicyHash",
+  "currentPolicyHash",
+  "recordedDecisionId",
+  "recomputedDecisionId",
+];
+const BARRIER_IDENTIFIER_FIELDS = [
+  "documentKind",
+  "path",
+  "value",
+  "controlValid",
+  "valid",
+  "mutatedDocument",
+];
+const BARRIER_REPLAY_SOURCE_NODES = ["a", "b", "c"];
+
+// The five domain-separation constants, read from the TypeScript package rather
+// than from the corpus, so the join compares two native reads.
+const barrierIdentityDomains = {
+  policyHashDomain: core.POLICY_HASH_DOMAIN,
+  barrierDecisionDomain: core.BARRIER_DECISION_DOMAIN,
+  routeDecisionDomain: core.ROUTE_DECISION_DOMAIN,
+  barrierPolicyKindTag: "barrier",
+  routerPolicyKindTag: "router",
+};
+assertBarrierAgreement(
+  "identityDomains",
+  "<hashContract>",
+  "domainSeparation",
+  barrierIdentityDomains,
+  pyBarrierReport.identityDomains,
+);
+assert.equal(
+  barrierIdentityDomains.policyHashDomain,
+  barrierCorpus.hashContract.policyHashDomain,
+  "identityDomains: policy hash domain differs from the corpus contract",
+);
+assert.equal(
+  barrierIdentityDomains.barrierDecisionDomain,
+  barrierCorpus.hashContract.barrierDecisionDomain,
+  "identityDomains: barrier decision domain differs from the corpus contract",
+);
+assert.equal(
+  barrierIdentityDomains.routeDecisionDomain,
+  barrierCorpus.hashContract.routeDecisionDomain,
+  "identityDomains: route decision domain differs from the corpus contract",
+);
+assert.deepEqual(
+  [barrierIdentityDomains.barrierPolicyKindTag, barrierIdentityDomains.routerPolicyKindTag],
+  barrierCorpus.hashContract.policyKindTags,
+  "identityDomains: policy kind tags differ from the corpus contract",
+);
+
+/** Deep-copy a frozen native result into a plain JSON document, key order kept. */
+function barrierPlainDocument(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function typescriptBarrierEvaluationReport(testCase) {
+  const validation = core.validateBarrierPolicy(testCase.policy);
+  assert.ok(validation.valid, `${testCase.name}: corpus policy is not a valid barrier policy`);
+  const arrivals = testCase.dispositions.map((entry) => {
+    if (!Object.hasOwn(entry, "vote")) {
+      return { sourceNodeId: entry.sourceNodeId, disposition: entry.disposition };
+    }
+    const ballot = core.validateBarrierVote(entry.vote);
+    assert.ok(
+      ballot.valid,
+      `${testCase.name}: corpus ballot for '${entry.sourceNodeId}' is malformed`,
+    );
+    return {
+      sourceNodeId: entry.sourceNodeId,
+      disposition: entry.disposition,
+      vote: ballot.vote,
+    };
+  });
+  const document = barrierPlainDocument(core.evaluateIntegratedBarrier(
+    validation.policy,
+    testCase.barrierNodeId,
+    arrivals,
+  ));
+  for (const field of BARRIER_DECISION_IDENTITY_FIELDS) {
+    assert.ok(
+      !Object.hasOwn(document, field),
+      `${testCase.name}: the evaluation surface materialized '${field}'`,
+    );
+  }
+  const entry = {
+    document,
+    // Emitted separately because the Python transport sorts object keys; this
+    // is how the two halves are proved to agree on member order too.
+    documentFields: Object.keys(document),
+    barrierNodeId: document.barrierNodeId,
+    deadlineElapsed: document.deadlineElapsed,
+    satisfied: document.satisfied,
+    reasonCode: document.reasonCode,
+    resolution: document.resolution,
+    counts: Object.fromEntries(BARRIER_DECISION_COUNT_FIELDS.map((f) => [f, document[f]])),
+    idLists: Object.fromEntries(BARRIER_DECISION_ID_LIST_FIELDS.map((f) => [f, document[f]])),
+    votesPresent: Object.hasOwn(document, "votes"),
+    // The six dispositions partition the arrivals, so they sum to `total`.
+    countSum: BARRIER_DECISION_COUNT_FIELDS.slice(1).reduce((sum, f) => sum + document[f], 0),
+  };
+  if (entry.votesPresent) {
+    entry.votes = document.votes;
+    entry.voteFields = document.votes.map((record) => Object.keys(record));
+  }
+  return entry;
+}
+
+function typescriptBarrierIdentityReport(testCase) {
+  const kind = testCase.documentKind;
+  const document = testCase.document;
+  const { decisionId: _recordedDecisionId, ...withoutIdentity } = document;
+  const context = {
+    runId: testCase.runId,
+    graphRevision: testCase.graphRevision,
+    nodeId: testCase.nodeId,
+  };
+  let policyKindTag;
+  let decisionDomain;
+  let decisionId;
+  if (kind === "BarrierDecision") {
+    policyKindTag = barrierIdentityDomains.barrierPolicyKindTag;
+    decisionDomain = barrierIdentityDomains.barrierDecisionDomain;
+    decisionId = core.barrierDecisionId(context, document);
+  } else if (kind === "RouteDecision") {
+    policyKindTag = barrierIdentityDomains.routerPolicyKindTag;
+    decisionDomain = barrierIdentityDomains.routeDecisionDomain;
+    decisionId = core.routeDecisionId(context, document);
+  } else {
+    throw new Error(`${testCase.name}: unknown decision document kind '${kind}'`);
+  }
+  const entry = {
+    documentKind: kind,
+    policyKindTag,
+    decisionDomain,
+    policyHash: core.decisionPolicyHash(policyKindTag, testCase.policy),
+    decisionId,
+    // Echoed so the join can prove each half recomputed the document it was
+    // actually handed, rather than a document of its own construction.
+    recordedPolicyHash: document.policyHash,
+    recordedDecisionId: document.decisionId,
+    canonicalPolicyUtf8Bytes: Buffer.byteLength(core.canonicalSerialize(testCase.policy), "utf8"),
+    canonicalDocumentWithoutDecisionIdUtf8Bytes: Buffer.byteLength(
+      core.canonicalSerialize(withoutIdentity),
+      "utf8",
+    ),
+    documentFieldsWithoutDecisionId: Object.keys(withoutIdentity),
+  };
+  if (Object.hasOwn(testCase, "evidenceInputs")) {
+    entry.evidenceHashes = testCase.evidenceInputs.map((item) => ({
+      sourceNodeId: item.sourceNodeId,
+      evidenceHash: core.canonicalHash(item.evidence),
+    }));
+  }
+  if (Object.hasOwn(testCase, "canonicalEvidenceKeyOrder")) {
+    entry.canonicalEvidenceKeyOrder = Object.keys(
+      JSON.parse(core.canonicalSerialize(testCase.evidenceInputs[0].evidence)),
+    );
+  }
+  return entry;
+}
+
+function barrierReplayNode(id, overrides = {}) {
+  return { id, kind: "transform", inputSchema: {}, outputSchema: {}, config: {}, ...overrides };
+}
+
+/**
+ * A graph carrying exactly the replay case's currently compiled policies, so
+ * `runGraph` exercises the real scheduler rather than the fold in isolation.
+ * Three upstreams keep every corpus threshold within the incoming-edge count,
+ * so GE1424 never fires and the graph always compiles.
+ */
+function barrierReplayGraph(testCase) {
+  const entries = Object.entries(testCase.currentPolicies);
+  const barriers = entries.filter(
+    ([, config]) => config.apiVersion === core.INTEGRATED_BARRIER_API_VERSION,
+  );
+  const routers = entries.filter(
+    ([, config]) => config.apiVersion !== core.INTEGRATED_BARRIER_API_VERSION,
+  );
+  return {
+    apiVersion: "graphengineering.reacher-z.github.io/v1alpha1",
+    kind: "Graph",
+    metadata: { name: "integrated-barrier-replay", version: "1" },
+    inputSchema: {},
+    outputSchema: {},
+    entrypoints: ["root"],
+    outputs: { result: { node: "root" } },
+    nodes: [
+      barrierReplayNode("root"),
+      ...BARRIER_REPLAY_SOURCE_NODES.map((id) => barrierReplayNode(id)),
+      ...routers.map(([id, config]) => barrierReplayNode(id, { kind: "router", config })),
+      ...routers.flatMap(([id, config]) =>
+        config.allowedRoutes.map((route) => barrierReplayNode(`${id}-${route}`))),
+      ...barriers.map(([id, config]) => barrierReplayNode(id, { kind: "barrier", config })),
+    ],
+    edges: [
+      ...BARRIER_REPLAY_SOURCE_NODES.map((id) => ({
+        id: `root-${id}`,
+        from: { node: "root" },
+        to: { node: id, port: id },
+      })),
+      ...routers.map(([id]) => ({ id: `root-${id}`, from: { node: "root" }, to: { node: id } })),
+      // GE1407 requires every allowed route to carry a case.
+      ...routers.flatMap(([id, config]) =>
+        config.allowedRoutes.map((route) => ({
+          id: `${id}-${route}`,
+          from: { node: id },
+          to: { node: `${id}-${route}` },
+          condition: {
+            apiVersion: "graphengineering.reacher-z.github.io/pattern-conditions/v1alpha1",
+            kind: "RouteEquals",
+            routeKey: route,
+          },
+        }))),
+      ...barriers.flatMap(([id]) => BARRIER_REPLAY_SOURCE_NODES.map((source) => ({
+        id: `${source}-${id}`,
+        from: { node: source },
+        to: { node: id, port: source },
+      }))),
+    ],
+  };
+}
+
+/**
+ * The TypeScript replay half.
+ *
+ * `entry` is the comparable projection: it is produced by the same rule the
+ * Python report states, so the two halves can be compared member for member.
+ * `scheduler` is a TypeScript-only strengthening — the authentic executor call
+ * count and appended-event count observed by driving the real `runGraph` with
+ * a spy executor on every policy-carrying node. Python has no scheduler surface
+ * that accepts committed decisions, so only TypeScript can measure that; both
+ * must still be zero.
+ */
+async function typescriptBarrierReplayReport(testCase) {
+  const currentPolicies = new Map(Object.entries(testCase.currentPolicies));
+  const context = { runId: testCase.runId, graphRevision: testCase.graphRevision };
+  const adoption = runtime.adoptCommittedDecisions(testCase.history, currentPolicies, context);
+  const adoptedNodeIds = adoption.outcome === "adopted"
+    ? adoption.decisions.map((item) => item.nodeId)
+    : [];
+
+  // The executor-ledger rule, stated identically in the Python half: a
+  // rejection is a non-retryable run failure, so no node runs at all; on
+  // adoption, a node whose decision was adopted MUST NOT be re-evaluated, and
+  // only a policy-carrying node without an adopted decision reaches an executor.
+  const executedNodeIds = [];
+  if (adoption.outcome === "adopted") {
+    const adopted = new Set(adoptedNodeIds);
+    for (const nodeId of currentPolicies.keys()) {
+      if (!adopted.has(nodeId)) executedNodeIds.push(nodeId);
+    }
+  }
+
+  const spiedNodeIds = [];
+  const nodeExecutors = { a: () => "ok", b: () => "ok", c: () => "ok" };
+  for (const nodeId of currentPolicies.keys()) {
+    nodeExecutors[nodeId] = () => {
+      spiedNodeIds.push(nodeId);
+      return "must-not-run";
+    };
+  }
+  const scheduled = await runtime.runGraph(barrierReplayGraph(testCase), {}, {
+    decision: context,
+    committedDecisions: testCase.history,
+    nodeExecutors,
+  });
+  const appendedDecisionEvents = (scheduled.decisionEvents ?? []).length;
+
+  const identityOf = (event) => (event.type === "BarrierSatisfied"
+    ? core.barrierDecisionId({ ...context, nodeId: event.nodeId }, event.data)
+    : core.routeDecisionId({ ...context, nodeId: event.nodeId }, event.data));
+  const policyHashOf = (event) => core.decisionPolicyHash(
+    event.type === "BarrierSatisfied"
+      ? barrierIdentityDomains.barrierPolicyKindTag
+      : barrierIdentityDomains.routerPolicyKindTag,
+    currentPolicies.get(event.nodeId),
+  );
+
+  const entry = {
+    outcome: adoption.outcome,
+    adoptedNodeIds,
+    appendedDecisionEvents,
+    executorCalls: executedNodeIds.length,
+    executedNodeIds,
+    // Recomputed natively for every event in the history whatever the outcome:
+    // this is what makes a forked child run recompute its own identity instead
+    // of inheriting its parent's.
+    currentPolicyHashes: Object.fromEntries(testCase.history
+      .filter((event) => currentPolicies.has(event.nodeId))
+      .map((event) => [event.nodeId, policyHashOf(event)])),
+    recomputedDecisionIds: Object.fromEntries(testCase.history
+      .map((event) => [event.nodeId, identityOf(event)])),
+    recordedPolicyHashes: Object.fromEntries(testCase.history
+      .map((event) => [event.nodeId, event.data.policyHash])),
+    recordedDecisionIds: Object.fromEntries(testCase.history
+      .map((event) => [event.nodeId, event.data.decisionId])),
+  };
+  if (adoption.outcome === "rejected") {
+    const { rejection } = adoption;
+    entry.code = rejection.code;
+    entry.nodeId = rejection.nodeId;
+    // Absent members are omitted rather than materialized as JSON null.
+    for (const field of [
+      "recordedPolicyHash",
+      "currentPolicyHash",
+      "recordedDecisionId",
+      "recomputedDecisionId",
+    ]) {
+      if (Object.hasOwn(rejection, field)) entry[field] = rejection[field];
+    }
+  }
+  return { entry, scheduler: { status: scheduled.status, spiedNodeIds } };
+}
+
+/** Replace exactly one JSON-pointer slot in a deep copy of a base document. */
+function barrierApplyPointer(document, pointer, value) {
+  assert.ok(pointer.startsWith("/"), `identifier path '${pointer}' is not a JSON pointer`);
+  const tokens = pointer.slice(1).split("/")
+    .map((token) => token.replaceAll("~1", "/").replaceAll("~0", "~"));
+  const mutated = JSON.parse(JSON.stringify(document));
+  let cursor = mutated;
+  for (const token of tokens.slice(0, -1)) {
+    cursor = Array.isArray(cursor) ? cursor[Number.parseInt(token, 10)] : cursor[token];
+  }
+  const last = tokens[tokens.length - 1];
+  if (Array.isArray(cursor)) cursor[Number.parseInt(last, 10)] = value;
+  else cursor[last] = value;
+  return mutated;
+}
+
+function typescriptBarrierIdentifierReport(testCase, baseDocuments) {
+  const kind = testCase.documentKind;
+  const base = baseDocuments[kind];
+  const mutated = barrierApplyPointer(base, testCase.path, testCase.value);
+  return {
+    documentKind: kind,
+    path: testCase.path,
+    value: testCase.value,
+    // The unmutated base must be accepted, or the case proves nothing.
+    controlValid: core.decisionDocumentIdentifierIssues(kind, base).length === 0,
+    valid: core.decisionDocumentIdentifierIssues(kind, mutated).length === 0,
+    mutatedDocument: mutated,
+  };
+}
+
+const barrierEvaluationCases = barrierSectionNames(
+  "evaluationCases",
+  pyBarrierReport.evaluationCaseOrder,
+  pyBarrierReport.evaluationCases,
+);
+const barrierReasonCodesSeen = new Set();
+const barrierResolutionsSeen = new Set();
+let barrierCensusCases = 0;
+let barrierCensusRecords = 0;
+for (const testCase of barrierEvaluationCases) {
+  const tsEntry = typescriptBarrierEvaluationReport(testCase);
+  const pyEntry = pyBarrierReport.evaluationCases[testCase.name];
+  assertBarrierEntryAgreement(
+    "evaluationCases",
+    testCase.name,
+    BARRIER_EVALUATION_FIELDS,
+    tsEntry,
+    pyEntry,
+  );
+  assertBarrierNoMaterializedNull(tsEntry, `evaluationCases '${testCase.name}' TypeScript`);
+  assertBarrierNoMaterializedNull(pyEntry, `evaluationCases '${testCase.name}' Python`);
+
+  // Only after the two native halves agree is the corpus expectation consulted.
+  for (const [language, entry] of [["TypeScript", tsEntry], ["Python", pyEntry]]) {
+    assert.deepEqual(
+      entry.document,
+      testCase.expect,
+      `${testCase.name}: ${language} decision document`,
+    );
+    assert.equal(
+      entry.countSum,
+      entry.counts.total,
+      `${testCase.name}: ${language} counts do not partition the arrivals`,
+    );
+    assert.equal(
+      entry.votesPresent,
+      testCase.policy.kind === "quorum",
+      `${testCase.name}: ${language} census presence is not keyed on the quorum kind`,
+    );
+    for (const field of BARRIER_DECISION_ID_LIST_FIELDS) {
+      assert.deepEqual(
+        entry.idLists[field],
+        testCase.expect[field],
+        `${testCase.name}: ${language} ${field} in declaration order`,
+      );
+    }
+    assert.equal(
+      entry.deadlineElapsed,
+      entry.idLists.timedOutIds.length > 0,
+      `${testCase.name}: ${language} deadlineElapsed is not exactly the timed_out presence`,
+    );
+  }
+  barrierReasonCodesSeen.add(tsEntry.reasonCode);
+  barrierResolutionsSeen.add(tsEntry.resolution);
+  if (tsEntry.votesPresent) {
+    barrierCensusCases += 1;
+    barrierCensusRecords += tsEntry.votes.length;
+  }
+}
+assertBarrierAgreement(
+  "evaluationCases",
+  "<coverage>",
+  "reasonCodesExercised",
+  [...barrierCorpus.vocabulary.reasonCodes].sort(),
+  [...barrierReasonCodesSeen].sort(),
+);
+assertBarrierAgreement(
+  "evaluationCases",
+  "<coverage>",
+  "resolutionsExercised",
+  [...barrierCorpus.vocabulary.resolutions].sort(),
+  [...barrierResolutionsSeen].sort(),
+);
+assert.ok(barrierCensusCases > 0, "evaluationCases: no quorum census was compared");
+
+const barrierIdentityCases = barrierSectionNames(
+  "identityCases",
+  pyBarrierReport.identityCaseOrder,
+  pyBarrierReport.identityCases,
+);
+let barrierIdentityBarrierDocuments = 0;
+let barrierIdentityRouteDocuments = 0;
+for (const testCase of barrierIdentityCases) {
+  const tsEntry = typescriptBarrierIdentityReport(testCase);
+  const pyEntry = pyBarrierReport.identityCases[testCase.name];
+  assertBarrierEntryAgreement(
+    "identityCases",
+    testCase.name,
+    BARRIER_IDENTITY_FIELDS,
+    tsEntry,
+    pyEntry,
+  );
+  assertBarrierNoMaterializedNull(
+    { ...tsEntry, mutatedDocument: undefined },
+    `identityCases '${testCase.name}' TypeScript`,
+  );
+
+  for (const [language, entry] of [["TypeScript", tsEntry], ["Python", pyEntry]]) {
+    assert.equal(
+      entry.policyKindTag,
+      testCase.policyKindTag,
+      `${testCase.name}: ${language} policy kind tag`,
+    );
+    assert.equal(
+      entry.decisionDomain,
+      testCase.decisionDomain,
+      `${testCase.name}: ${language} decision domain`,
+    );
+    assert.equal(
+      entry.policyHash,
+      testCase.expect.policyHash,
+      `${testCase.name}: ${language} recomputed policyHash`,
+    );
+    assert.equal(
+      entry.decisionId,
+      testCase.expect.decisionId,
+      `${testCase.name}: ${language} recomputed decisionId`,
+    );
+    // The document literal in the corpus must itself recompute, or the corpus
+    // carries a decision neither runtime could have committed.
+    assert.equal(
+      entry.recordedPolicyHash,
+      entry.policyHash,
+      `${testCase.name}: ${language} recorded policyHash does not recompute`,
+    );
+    assert.equal(
+      entry.recordedDecisionId,
+      entry.decisionId,
+      `${testCase.name}: ${language} recorded decisionId does not recompute`,
+    );
+    assert.equal(
+      entry.canonicalPolicyUtf8Bytes,
+      testCase.expect.canonicalPolicyUtf8Bytes,
+      `${testCase.name}: ${language} canonical policy byte length`,
+    );
+    assert.equal(
+      entry.canonicalDocumentWithoutDecisionIdUtf8Bytes,
+      testCase.expect.canonicalDocumentWithoutDecisionIdUtf8Bytes,
+      `${testCase.name}: ${language} canonical document byte length`,
+    );
+    if (Object.hasOwn(testCase, "evidenceInputs")) {
+      assert.deepEqual(
+        entry.evidenceHashes,
+        testCase.evidenceInputs.map((item) => ({
+          sourceNodeId: item.sourceNodeId,
+          evidenceHash: item.evidenceHash,
+        })),
+        `${testCase.name}: ${language} recomputed evidence hashes`,
+      );
+    }
+    if (Object.hasOwn(testCase, "canonicalEvidenceKeyOrder")) {
+      assert.deepEqual(
+        entry.canonicalEvidenceKeyOrder,
+        testCase.canonicalEvidenceKeyOrder,
+        `${testCase.name}: ${language} canonical evidence key order`,
+      );
+    }
+  }
+  if (tsEntry.documentKind === "BarrierDecision") barrierIdentityBarrierDocuments += 1;
+  else barrierIdentityRouteDocuments += 1;
+}
+assert.ok(
+  barrierIdentityBarrierDocuments > 0 && barrierIdentityRouteDocuments > 0,
+  "identityCases: both decision families must be witnessed",
+);
+// Framing is what makes concatenation injective: two cases whose run ID and
+// graph revision concatenate to the same bytes must still hash differently.
+const barrierFramingGroups = new Map();
+for (const testCase of barrierIdentityCases) {
+  if (!Object.hasOwn(testCase, "naiveConcatenationGroup")) continue;
+  const group = barrierFramingGroups.get(testCase.naiveConcatenationGroup) ?? [];
+  group.push(testCase);
+  barrierFramingGroups.set(testCase.naiveConcatenationGroup, group);
+}
+let barrierFramingWitnesses = 0;
+for (const [group, members] of barrierFramingGroups) {
+  assert.equal(members.length, 2, `identityCases: framing group '${group}' is not a pair`);
+  const [left, right] = members;
+  assert.equal(
+    `${left.runId}${left.graphRevision}`,
+    `${right.runId}${right.graphRevision}`,
+    `identityCases: framing group '${group}' does not collide under naive concatenation`,
+  );
+  for (const [language, report] of [
+    ["TypeScript", (item) => typescriptBarrierIdentityReport(item).decisionId],
+    ["Python", (item) => pyBarrierReport.identityCases[item.name].decisionId],
+  ]) {
+    assert.notEqual(
+      report(left),
+      report(right),
+      `identityCases: ${language} framing group '${group}' collides`,
+    );
+  }
+  barrierFramingWitnesses += 1;
+}
+assert.ok(barrierFramingWitnesses > 0, "identityCases: framing is unwitnessed");
+
+const barrierReplayCases = barrierSectionNames(
+  "replayCases",
+  pyBarrierReport.replayCaseOrder,
+  pyBarrierReport.replayCases,
+);
+const barrierReplayCodesSeen = new Set();
+let barrierReplayAdoptions = 0;
+for (const testCase of barrierReplayCases) {
+  const { entry: tsEntry, scheduler } = await typescriptBarrierReplayReport(testCase);
+  const pyEntry = pyBarrierReport.replayCases[testCase.name];
+  assertBarrierEntryAgreement(
+    "replayCases",
+    testCase.name,
+    BARRIER_REPLAY_FIELDS,
+    tsEntry,
+    pyEntry,
+  );
+  assertBarrierNoMaterializedNull(tsEntry, `replayCases '${testCase.name}' TypeScript`);
+  assertBarrierNoMaterializedNull(pyEntry, `replayCases '${testCase.name}' Python`);
+
+  // The authentic scheduler observation, which only TypeScript can make.
+  assert.deepEqual(
+    scheduler.spiedNodeIds,
+    [],
+    `${testCase.name}: the real scheduler called an executor for a node with a committed decision`,
+  );
+  assert.equal(
+    scheduler.status,
+    testCase.expect.outcome === "adopted" ? "succeeded" : "failed",
+    `${testCase.name}: the real scheduler run status`,
+  );
+
+  const expectation = testCase.expect;
+  assert.strictEqual(
+    expectation.expectedExecutorCalls,
+    0,
+    `${testCase.name}: a replay case must declare zero executor calls`,
+  );
+  for (const [language, entry] of [["TypeScript", tsEntry], ["Python", pyEntry]]) {
+    assert.equal(entry.outcome, expectation.outcome, `${testCase.name}: ${language} outcome`);
+    assert.deepEqual(
+      entry.adoptedNodeIds,
+      expectation.adoptedNodeIds,
+      `${testCase.name}: ${language} adopted node ids`,
+    );
+    assert.strictEqual(
+      entry.appendedDecisionEvents,
+      expectation.appendedDecisionEvents,
+      `${testCase.name}: ${language} appended decision events`,
+    );
+    assert.strictEqual(
+      entry.executorCalls,
+      expectation.expectedExecutorCalls,
+      `${testCase.name}: ${language} executor calls`,
+    );
+    if (expectation.outcome === "rejected") {
+      assert.equal(entry.code, expectation.code, `${testCase.name}: ${language} rejection code`);
+      assert.equal(entry.nodeId, expectation.nodeId, `${testCase.name}: ${language} rejected node`);
+      for (const field of [
+        "recordedPolicyHash",
+        "currentPolicyHash",
+        "recordedDecisionId",
+        "recomputedDecisionId",
+      ]) {
+        if (!Object.hasOwn(expectation, field)) continue;
+        assert.equal(
+          entry[field],
+          expectation[field],
+          `${testCase.name}: ${language} ${field}`,
+        );
+      }
+    }
+    if (Object.hasOwn(expectation, "childDecisionId")) {
+      assert.equal(
+        entry.recomputedDecisionIds[expectation.adoptedNodeIds[0]],
+        expectation.childDecisionId,
+        `${testCase.name}: ${language} forked child identity`,
+      );
+      assert.equal(
+        entry.recordedDecisionIds[expectation.adoptedNodeIds[0]],
+        expectation.childDecisionId,
+        `${testCase.name}: ${language} forked child recorded identity`,
+      );
+      assert.notEqual(
+        expectation.childDecisionId,
+        expectation.parentDecisionId,
+        `${testCase.name}: ${language} fork reused the parent identity`,
+      );
+    }
+  }
+  if (expectation.outcome === "adopted") barrierReplayAdoptions += 1;
+  else barrierReplayCodesSeen.add(expectation.code);
+}
+assertBarrierAgreement(
+  "replayCases",
+  "<coverage>",
+  "rejectionCodesExercised",
+  [...barrierCorpus.vocabulary.replayRejectionCodes].sort(),
+  [...barrierReplayCodesSeen].sort(),
+);
+assert.ok(barrierReplayAdoptions > 0, "replayCases: no zero-rejudge adoption was compared");
+
+const barrierIdentifierCases = barrierSectionNames(
+  "identifierCases",
+  pyBarrierReport.identifierCaseOrder,
+  pyBarrierReport.identifierCases,
+);
+let barrierIdentifierAccepted = 0;
+let barrierIdentifierRejected = 0;
+for (const testCase of barrierIdentifierCases) {
+  const tsEntry = typescriptBarrierIdentifierReport(
+    testCase,
+    barrierCorpus.identifierBaseDocuments,
+  );
+  const pyEntry = pyBarrierReport.identifierCases[testCase.name];
+  assertBarrierEntryAgreement(
+    "identifierCases",
+    testCase.name,
+    BARRIER_IDENTIFIER_FIELDS,
+    tsEntry,
+    pyEntry,
+  );
+  // `mutatedDocument` is exempt from the no-null rule: the corpus RouteDecision
+  // declares `confidenceBasisPoints: null` as its nullable-member witness.
+
+  for (const [language, entry] of [["TypeScript", tsEntry], ["Python", pyEntry]]) {
+    assert.strictEqual(
+      entry.controlValid,
+      true,
+      `${testCase.name}: ${language} rejects the unmutated base document`,
+    );
+    assert.strictEqual(
+      entry.valid,
+      testCase.expect.valid,
+      `${testCase.name}: ${language} identifier acceptance`,
+    );
+  }
+  // TypeScript reports the offending pointer; it must be exactly the mutated one.
+  const tsIssues = core.decisionDocumentIdentifierIssues(
+    testCase.documentKind,
+    barrierApplyPointer(
+      barrierCorpus.identifierBaseDocuments[testCase.documentKind],
+      testCase.path,
+      testCase.value,
+    ),
+  );
+  assert.deepEqual(
+    [...tsIssues],
+    testCase.expect.valid ? [] : [testCase.path],
+    `${testCase.name}: TypeScript identifier issue pointer`,
+  );
+  if (testCase.expect.valid) barrierIdentifierAccepted += 1;
+  else barrierIdentifierRejected += 1;
+}
+assert.ok(
+  barrierIdentifierAccepted > 0 && barrierIdentifierRejected > 0,
+  "identifierCases: both acceptance and rejection must be witnessed",
+);
+
 process.stdout.write(
-  `Cross-language integrated-barrier conformance passed for ${barrierPolicyCases.length} policy cases (${barrierValidPolicyCases.length} normalized policy snapshots), ${barrierOwnershipCases.length} ownership cases through both the native validator and the real compiler pass, and ${barrierCompilerCases.length} compiler cases through compileGraph/try_compile_graph carrying ${barrierCompilerCases.length} literal graph hashes and ${barrierOrderedDiagnostics} ordered diagnostics (${barrierMultiDiagnosticCases} multi-diagnostic order witnesses, ${barrierRouterOrderWitnesses} router-before-barrier witness, ${barrierSuppressionWitnesses} suppression-chain witnesses, all 4 categories); claims ${JSON.stringify(barrierCorpus.claims)}.\n`,
+  `Cross-language integrated-barrier conformance passed for ${barrierPolicyCases.length} policy cases (${barrierValidPolicyCases.length} normalized policy snapshots), ${barrierOwnershipCases.length} ownership cases through both the native validator and the real compiler pass, and ${barrierCompilerCases.length} compiler cases through compileGraph/try_compile_graph carrying ${barrierCompilerCases.length} literal graph hashes and ${barrierOrderedDiagnostics} ordered diagnostics (${barrierMultiDiagnosticCases} multi-diagnostic order witnesses, ${barrierRouterOrderWitnesses} router-before-barrier witness, ${barrierSuppressionWitnesses} suppression-chain witnesses, all 4 categories); tranche 2 joined ${barrierEvaluationCases.length} evaluation cases through evaluateIntegratedBarrier/evaluate_integrated_barrier (all ${barrierCorpus.vocabulary.reasonCodes.length} reason codes, all ${barrierCorpus.vocabulary.resolutions.length} resolutions, ${barrierCensusCases} quorum censuses carrying ${barrierCensusRecords} vote records), ${barrierIdentityCases.length} identity cases with policyHash and decisionId recomputed natively on both sides (${barrierIdentityBarrierDocuments} barrier, ${barrierIdentityRouteDocuments} route, ${barrierFramingWitnesses} naive-concatenation framing witness), ${barrierReplayCases.length} replay cases (${barrierReplayAdoptions} zero-rejudge adoptions, all ${barrierCorpus.vocabulary.replayRejectionCodes.length} rejection codes, 0 executor calls on both sides and 0 through the real scheduler), and ${barrierIdentifierCases.length} identifier cases (${barrierIdentifierAccepted} accepted, ${barrierIdentifierRejected} rejected); claims ${JSON.stringify(barrierCorpus.claims)}.\n`,
 );
 
 // ---------------------------------------------------------------------------
@@ -5739,4 +6520,1585 @@ assert.ok(redactionWireInvalid > 0, "wireCases: no rejected document was compare
 
 process.stdout.write(
   `Cross-language redaction conformance passed for ${redactionPointerCases.length} pointer cases (${redactionPointerAccepted} transforms, ${redactionPointerRejected} rejections over ${redactionPointerCodesSeen.size} code), ${redactionWireCases.length} wire cases over ${redactionWireSchemas.size} schemas (${redactionWireValid} valid, ${redactionWireInvalid} rejected, ${redactionDispositionWireCases.length} disposition/redacted pairs), ${redactionFlowCases.length} flow cases (${redactionFlowAuthorized} authorized, ${redactionFlowDenied} denied) over the complete ${tsRedactionCartesian.pairCount}-pair Cartesian domain of ${tsRedactionNative.sourceRuleCount} sources x ${tsRedactionNative.sinkRuleCount} sinks (outcome digest ${tsRedactionCartesian.outcomeDigest.slice(0, 16)}), ${redactionCorpusReceiptCount + 1} receipts bound by count/order/MAC, the ${tsRedactionNative.failureCodes.length}-code vocabulary and the ${tsRedactionNative.payloadDispositions.length}-row disposition truth table, and one seeded canary scanned over ${tsRedactionCanary.guarded.filesScanned}/${pyRedaction.canary.guarded.filesScanned} files and ${tsRedactionCanary.guarded.bytesScanned}/${pyRedaction.canary.guarded.bytesScanned} bytes with 0 detections against ${tsRedactionCanary.positiveControl.detections.length}/${pyRedaction.canary.positiveControl.detections.length} positive-control detections; implementationClaim ${JSON.stringify(redactionCorpus.implementationClaim)}.\n`,
+);
+
+// ---------------------------------------------------------------------------
+// D13 adapter cross-language join (D13-ADAPTERS-049).
+//
+// Both languages implemented `adapter-contract/v1alpha1` natively and
+// independently, and each was measured against `spec/conformance/adapter.case.json`
+// alone. Until this block ran they had never been compared to each other. That
+// is the exact shape of defect this session has already found four times: two
+// green single-language suites, one silent fork. For adapters the fork is
+// operational — a graph runs against the TypeScript mock and behaves one way,
+// runs against the Python mock and behaves another, and the corpus is satisfied
+// both times.
+//
+// Neither half may read the other's expected values. The TypeScript half below
+// is computed only from `@graph-engineering/adapters`; the Python half is
+// computed by tools/conformance/python_adapter_report.py from the native
+// `graph_engineering.adapters` package. Both halves are driven through their
+// package's public export surface — `validateDescriptor`, `preflight`,
+// `normalizeStream`, `validateUsage`, `validateToolCalls`,
+// `validateErrorEnvelope`, `retryDecision`, `circuitFold` — and through the
+// real public adapter object (`createMockAdapter(...).call(...)`), never
+// through a private rule function.
+//
+// The two natives are compared to each other first, member for member,
+// including the rule identifier produced for every single case. A rule
+// shadowed by a neighbour that reports the same portable code is invisible to
+// a code-only comparison: fourteen codes cannot distinguish 131 rules, which is
+// why `D4` had to disclose that failure mode and `isolation` solved it with
+// reason tags. Only after the natives agree is either compared to the corpus.
+//
+// No network, no subprocess beyond the one `uv` invocation that produces the
+// Python half, and no wall clock: every clock reading in this join is an
+// injected integer.
+const adapterDist = await import(
+  pathToFileURL(join(root, "packages", "adapters", "dist", "index.js")).href
+);
+const adapterCorpus = JSON.parse(
+  await readFile(join(fixtureRoot, "adapter.case.json"), "utf8"),
+);
+
+// --- shared vectors -------------------------------------------------------
+// Restated here exactly as the Python report states them. They are inputs, not
+// expectations: no expected output is written down on either side, and the
+// join asserts the two statements equal before either is used.
+//
+// `mock-full` is the only shipped descriptor that declares `fault-injection`,
+// `provider-request-id` and `retry-after-hint` together, so it is the only one
+// that can inject every code and still carry a provider identity and a hint.
+const ADAPTER_PROBE_DESCRIPTOR = "mock-full";
+const ADAPTER_PROBE_RETRY_AFTER_MS = 250;
+const ADAPTER_PROBE_CLOCK_MS = [0, 10, 20];
+const ADAPTER_CASE_SECTIONS = [
+  "descriptorCases",
+  "preflightCases",
+  "streamCases",
+  "usageCases",
+  "toolCases",
+  "errorCases",
+  "retryCases",
+  "circuitCases",
+];
+// The closed vocabularies this contract freezes. Stated as sizes only; the
+// members themselves are read from each native package and compared to each
+// other and then to the corpus inventories.
+const ADAPTER_VOCABULARY_SIZES = {
+  adapterCapabilities: 16,
+  adapterErrorCodes: 14,
+  adapterKinds: 8,
+  denialReasons: 11,
+  finishReasons: 5,
+  reportableResources: 9,
+};
+// The recomputed taxonomy shape and the in-doubt matrix size.
+const ADAPTER_RETRYABLE_CODES = 4;
+const ADAPTER_PRE_DISPATCH_CODES = 5;
+const ADAPTER_CYCLE_MATRIX_ROWS = 9;
+
+/**
+ * Render a value for a divergence message with object keys sorted, so the two
+ * halves are compared by the reader on content rather than on the key order
+ * their respective JSON transports happened to use. Array order is preserved
+ * because array order is part of what this join defends.
+ */
+function adapterStringify(value) {
+  if (Array.isArray(value)) return `[${value.map(adapterStringify).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    return `{${Object.keys(value).sort()
+      .map((key) => `${JSON.stringify(key)}:${adapterStringify(value[key])}`)
+      .join(",")}}`;
+  }
+  return value === undefined ? "undefined" : JSON.stringify(value);
+}
+
+function adapterDivergence(section, caseName, field, tsValue, pyValue) {
+  return new Error(
+    `Adapter cross-language divergence in ${section} case '${caseName}',`
+      + ` field '${field}': TypeScript ${adapterStringify(tsValue)}`
+      + ` vs Python ${adapterStringify(pyValue)}`,
+  );
+}
+
+function assertAdapterAgreement(section, caseName, field, tsValue, pyValue) {
+  if (!isDeepStrictEqual(tsValue, pyValue)) {
+    throw adapterDivergence(section, caseName, field, tsValue, pyValue);
+  }
+}
+
+/** Compare one projected entry field by field, including the reported key set. */
+function assertAdapterEntryAgreement(section, caseName, fields, tsEntry, pyEntry) {
+  for (const field of fields) {
+    const tsHas = Object.hasOwn(tsEntry, field);
+    const pyHas = Object.hasOwn(pyEntry, field);
+    if (tsHas !== pyHas) {
+      throw adapterDivergence(
+        section,
+        caseName,
+        field,
+        tsHas ? tsEntry[field] : "<field absent>",
+        pyHas ? pyEntry[field] : "<field absent>",
+      );
+    }
+    if (tsHas) assertAdapterAgreement(section, caseName, field, tsEntry[field], pyEntry[field]);
+  }
+  assertAdapterAgreement(
+    section,
+    caseName,
+    "reportedFieldSet",
+    Object.keys(tsEntry).sort(),
+    Object.keys(pyEntry).sort(),
+  );
+}
+
+// --- the TypeScript half, computed only from @graph-engineering/adapters ----
+
+const adapterClone = (value) => structuredClone(value);
+
+function adapterPointerSegments(pointer) {
+  if (pointer === "") return [];
+  if (!pointer.startsWith("/")) {
+    throw new Error(`JSON Pointer must be empty or start with '/': ${pointer}`);
+  }
+  return pointer
+    .slice(1)
+    .split("/")
+    .map((segment) => segment.replaceAll("~1", "/").replaceAll("~0", "~"));
+}
+
+/**
+ * The corpus mutation language. This is corpus input handling, not an
+ * expectation: a mutation says what to feed the engine, never what the engine
+ * should answer.
+ */
+function adapterApplyMutations(document, mutations) {
+  for (const mutation of mutations ?? []) {
+    const segments = adapterPointerSegments(mutation.path);
+    const leaf = segments.pop();
+    if (leaf === undefined) throw new Error(`root mutation is not supported: ${mutation.path}`);
+    let parent = document;
+    for (const segment of segments) {
+      if (parent === null || typeof parent !== "object") {
+        throw new Error(`mutation parent does not exist: ${mutation.path}`);
+      }
+      parent = parent[segment];
+    }
+    if (parent === null || typeof parent !== "object") {
+      throw new Error(`mutation parent does not exist: ${mutation.path}`);
+    }
+    if (mutation.op === "remove") {
+      if (Array.isArray(parent)) parent.splice(Number(leaf), 1);
+      else delete parent[leaf];
+      continue;
+    }
+    const value = adapterClone(mutation.value);
+    if (mutation.op === "add") {
+      if (Array.isArray(parent)) parent.splice(Number(leaf), 0, value);
+      else parent[leaf] = value;
+      continue;
+    }
+    if (mutation.op !== "replace") throw new Error(`unknown mutation op: ${mutation.op}`);
+    parent[leaf] = value;
+  }
+  return document;
+}
+
+function adapterDescriptorDocument(adapterId) {
+  const found = adapterCorpus.descriptors.find((item) => item.adapterId === adapterId);
+  if (found === undefined) throw new Error(`unknown corpus descriptor '${adapterId}'`);
+  return adapterClone(found);
+}
+const adapterDescriptorFor = (adapterId, mutations) =>
+  adapterApplyMutations(adapterDescriptorDocument(adapterId), mutations);
+const adapterRequestFrom = (mutations) =>
+  adapterApplyMutations(adapterClone(adapterCorpus.requestTemplate), mutations);
+const ADAPTER_POLICY_METRICS = adapterCorpus.budgetPolicyAllowedProviderMetrics;
+const ADAPTER_FORBIDDEN_MARKERS = adapterCorpus.forbiddenMarkers;
+
+/** Every rule identifier the TypeScript half produced, and every code. */
+const adapterExercised = new Set();
+const adapterObservedCodes = new Set();
+const adapterObservedDenials = new Set();
+
+/**
+ * Run one public-surface call and project what it decided. A rejection is the
+ * `AdapterContractError` the surface throws; nothing else is caught, so a
+ * corpus defect can never be laundered into a contract verdict.
+ */
+function adapterObserve(run) {
+  try {
+    const projection = run();
+    return {
+      accepted: true,
+      code: null,
+      denialReason: null,
+      message: null,
+      projection,
+      rule: null,
+    };
+  } catch (error) {
+    if (!adapterDist.isAdapterContractError(error)) throw error;
+    adapterExercised.add(error.rule);
+    adapterObservedCodes.add(error.code);
+    if (error.denialReason !== null) adapterObservedDenials.add(error.denialReason);
+    return {
+      accepted: false,
+      code: error.code,
+      denialReason: error.denialReason,
+      message: error.message,
+      projection: null,
+      rule: error.rule,
+    };
+  }
+}
+
+// TypeScript spells an absent optional `undefined` and Python spells it
+// `null`. Normalizing here is a transport concern only: every projection below
+// names its fields explicitly, so an absent member can never be confused with a
+// member that is present and null.
+const adapterNz = (value) => (value === undefined ? null : value);
+const adapterProjQuantity = (item) => ({
+  resource: item.resource,
+  unit: item.unit,
+  aggregation: item.aggregation,
+  amount: item.amount,
+});
+const adapterProjProviderQuantity = (item) => ({
+  metricId: item.metricId,
+  unitId: item.unitId,
+  aggregation: item.aggregation,
+  amount: item.amount,
+});
+const adapterProjUsage = (usage) =>
+  usage === null || usage === undefined
+    ? null
+    : {
+        apiVersion: usage.apiVersion,
+        kind: usage.kind,
+        contractVersion: usage.contractVersion,
+        adapterId: usage.adapterId,
+        adapterKind: usage.adapterKind,
+        requestId: usage.requestId,
+        providerRequestId: adapterNz(usage.providerRequestId),
+        trust: usage.trust,
+        budgetCostState: usage.budgetCostState,
+        finishReason: adapterNz(usage.finishReason),
+        quantities: usage.quantities.map(adapterProjQuantity),
+        providerSpecific: usage.providerSpecific.map(adapterProjProviderQuantity),
+      };
+const adapterProjStream = (value) =>
+  value === null || value === undefined
+    ? null
+    : {
+        frames: value.frames,
+        textBytes: value.textBytes,
+        toolCalls: value.toolCalls,
+        usageFrames: value.usageFrames,
+        finishReason: adapterNz(value.finishReason),
+      };
+const adapterProjFrame = (frame) => {
+  const document = { sequence: frame.sequence, kind: frame.kind, bytes: frame.bytes };
+  if (frame.toolCallId !== undefined && frame.toolCallId !== null) {
+    document.toolCallId = frame.toolCallId;
+  }
+  if (frame.finishReason !== undefined && frame.finishReason !== null) {
+    document.finishReason = frame.finishReason;
+  }
+  return document;
+};
+const adapterProjEnvelope = (error) => ({
+  apiVersion: error.apiVersion,
+  kind: error.kind,
+  contractVersion: error.contractVersion,
+  adapterId: error.adapterId,
+  adapterKind: error.adapterKind,
+  requestId: error.requestId,
+  attempt: error.attempt,
+  code: error.code,
+  boundary: error.boundary,
+  retryable: error.retryable,
+  effectDisposition: error.effectDisposition,
+  usageDisposition: error.usageDisposition,
+  sideEffectClass: error.sideEffectClass,
+  denialReason: adapterNz(error.denialReason),
+  providerRequestId: adapterNz(error.providerRequestId),
+  retryAfterMs: adapterNz(error.retryAfterMs),
+  message: error.message,
+  detail: {
+    providerSafeFields: error.detail.providerSafeFields.map((field) => ({
+      name: field.name,
+      value: field.value,
+    })),
+  },
+  usage: adapterProjUsage(error.usage),
+});
+const adapterProjOutcome = (outcome) =>
+  outcome.ok
+    ? {
+        ok: true,
+        requestId: outcome.value.requestId,
+        providerRequestId: adapterNz(outcome.value.providerRequestId),
+        finishReason: outcome.value.finishReason,
+        text: outcome.value.text,
+        toolCalls: outcome.value.toolCalls.map((call) => call.id),
+        usage: adapterProjUsage(outcome.value.usage),
+        normalizedStream: adapterProjStream(outcome.value.normalizedStream),
+      }
+    : { ok: false, error: adapterProjEnvelope(outcome.error) };
+
+const tsAdapterSections = {};
+
+tsAdapterSections.descriptorCases = {};
+for (const testCase of adapterCorpus.descriptorCases) {
+  const candidate = adapterDescriptorFor(testCase.base, testCase.mutations);
+  tsAdapterSections.descriptorCases[testCase.id] = adapterObserve(() => {
+    adapterDist.validateDescriptor(candidate);
+    adapterDist.validateDescriptorAgainstBudgetPolicy(candidate, ADAPTER_POLICY_METRICS);
+    return { valid: true };
+  });
+}
+
+tsAdapterSections.preflightCases = {};
+for (const testCase of adapterCorpus.preflightCases) {
+  const descriptor = adapterDescriptorFor(testCase.descriptor, testCase.descriptorMutations);
+  const request = adapterRequestFrom(testCase.requestMutations);
+  tsAdapterSections.preflightCases[testCase.id] = adapterObserve(() => {
+    const outcome = adapterDist.preflight(descriptor, request, ADAPTER_POLICY_METRICS);
+    return {
+      admitted: outcome.admitted,
+      adapterId: outcome.adapterId,
+      requestId: outcome.requestId,
+      sideEffectClass: outcome.sideEffectClass,
+      idempotencyKey: adapterNz(outcome.idempotencyKey),
+    };
+  });
+}
+
+tsAdapterSections.streamCases = {};
+for (const testCase of adapterCorpus.streamCases) {
+  const descriptor = adapterDescriptorFor(testCase.descriptor, testCase.descriptorMutations);
+  const frames = adapterApplyMutations(
+    adapterClone(adapterCorpus.streamTemplate),
+    testCase.mutations,
+  );
+  tsAdapterSections.streamCases[testCase.id] = adapterObserve(() =>
+    adapterProjStream(adapterDist.normalizeStream(descriptor, frames)),
+  );
+}
+
+tsAdapterSections.usageCases = {};
+for (const testCase of adapterCorpus.usageCases) {
+  const descriptor = adapterDescriptorFor(testCase.descriptor, testCase.descriptorMutations);
+  const usage = adapterApplyMutations(
+    adapterClone(adapterCorpus.usageTemplate),
+    testCase.mutations,
+  );
+  tsAdapterSections.usageCases[testCase.id] = adapterObserve(() => {
+    const summary = adapterDist.validateUsage(descriptor, usage);
+    return {
+      resources: summary.resources,
+      providerCalls: adapterNz(summary.providerCalls),
+      budgetCostState: summary.budgetCostState,
+    };
+  });
+}
+
+tsAdapterSections.toolCases = {};
+for (const testCase of adapterCorpus.toolCases) {
+  const descriptor = adapterDescriptorFor(testCase.descriptor, testCase.descriptorMutations);
+  const request = adapterRequestFrom(testCase.requestMutations);
+  const response = adapterApplyMutations(
+    adapterClone(adapterCorpus.toolResponseTemplate),
+    testCase.mutations,
+  );
+  tsAdapterSections.toolCases[testCase.id] = adapterObserve(() => {
+    const summary = adapterDist.validateToolCalls(descriptor, request, response);
+    return { toolCalls: summary.toolCalls, responseToolCalls: response.toolCalls.length };
+  });
+}
+
+tsAdapterSections.errorCases = {};
+for (const testCase of adapterCorpus.errorCases) {
+  const descriptor = adapterDescriptorFor(testCase.descriptor, testCase.descriptorMutations);
+  const envelope = adapterApplyMutations(
+    adapterClone(adapterCorpus.errorTemplate),
+    testCase.mutations,
+  );
+  const entry = adapterObserve(() => {
+    const summary = adapterDist.validateErrorEnvelope(
+      descriptor,
+      envelope,
+      ADAPTER_FORBIDDEN_MARKERS,
+    );
+    return {
+      code: summary.code,
+      ledgerAction: summary.ledgerAction,
+      requiresInDoubtRecord: summary.requiresInDoubtRecord,
+    };
+  });
+  // An accepted envelope still witnesses its own code: the closed taxonomy is
+  // covered by acceptances as well as by rejections.
+  entry.envelopeCode = envelope.code;
+  if (entry.accepted) adapterObservedCodes.add(envelope.code);
+  tsAdapterSections.errorCases[testCase.id] = entry;
+}
+
+tsAdapterSections.retryCases = {};
+for (const testCase of adapterCorpus.retryCases) {
+  const descriptor = adapterDescriptorFor(testCase.descriptor, testCase.descriptorMutations);
+  const decision = adapterDist.retryDecision(
+    descriptor,
+    testCase.code,
+    testCase.sideEffectClass,
+    testCase.attempt,
+    testCase.retryAfterMs,
+  );
+  adapterExercised.add(decision.rule);
+  tsAdapterSections.retryCases[testCase.id] = {
+    decision: {
+      mayRetry: decision.mayRetry,
+      backoffMs: adapterNz(decision.backoffMs),
+      rule: decision.rule,
+    },
+    rule: decision.rule,
+    computedBackoffMs: adapterDist.computedBackoffMs(descriptor.retryPolicy, testCase.attempt),
+    retryableByCode: adapterDist.taxonomyFacts(testCase.code).retryable,
+  };
+}
+
+tsAdapterSections.circuitCases = {};
+for (const testCase of adapterCorpus.circuitCases) {
+  const descriptor = adapterDescriptorFor(testCase.descriptor);
+  const projection = adapterDist.circuitFold(descriptor, testCase.script);
+  for (const rule of testCase.rules) adapterExercised.add(String(rule));
+  tsAdapterSections.circuitCases[testCase.id] = {
+    projection: {
+      state: projection.state,
+      consecutiveFailures: projection.consecutiveFailures,
+      openedAtMs: adapterNz(projection.openedAtMs),
+      admitted: projection.admitted,
+      refused: projection.refused,
+    },
+    rules: testCase.rules.map(String),
+    steps: testCase.script.length,
+  };
+}
+
+const tsAdapterVocabularies = {
+  adapterCapabilities: [...adapterDist.ADAPTER_CAPABILITIES],
+  adapterErrorCodes: [...adapterDist.ADAPTER_ERROR_CODES],
+  adapterKinds: [...adapterDist.ADAPTER_KINDS],
+  denialReasons: [...adapterDist.DENIAL_REASONS],
+  finishReasons: [...adapterDist.FINISH_REASONS],
+  modelAdapterKinds: [...adapterDist.MODEL_ADAPTER_KINDS],
+  reportableResources: [...adapterDist.REPORTABLE_RESOURCES],
+  resourceUnits: Object.fromEntries(
+    Object.keys(adapterDist.RESOURCE_UNITS)
+      .sort()
+      .map((key) => [key, adapterDist.RESOURCE_UNITS[key]]),
+  ),
+  sideEffectOrder: [...adapterDist.SIDE_EFFECT_ORDER],
+  streamFrameKinds: [...adapterDist.STREAM_FRAME_KINDS],
+  usageUnitResources: [...adapterDist.USAGE_UNIT_RESOURCES],
+  capabilityImplications: adapterDist.CAPABILITY_IMPLICATIONS.map((row) => ({
+    rule: row.rule,
+    capability: row.capability,
+    requires: row.requires,
+  })),
+  mockOnlyCapabilities: adapterDist.MOCK_ONLY_CAPABILITIES.map((row) => ({
+    rule: row.rule,
+    capability: row.capability,
+  })),
+  capabilityGatedResources: adapterDist.CAPABILITY_GATED_RESOURCES.map((row) => ({
+    rule: row.rule,
+    resource: row.resource,
+    capability: row.capability,
+  })),
+  sortedByCodePoint: {
+    adapterCapabilities: adapterDist.isSortedByCodePoint(adapterDist.ADAPTER_CAPABILITIES),
+    adapterErrorCodes: adapterDist.isSortedByCodePoint(adapterDist.ADAPTER_ERROR_CODES),
+    adapterKinds: adapterDist.isSortedByCodePoint(adapterDist.ADAPTER_KINDS),
+    denialReasons: adapterDist.isSortedByCodePoint(adapterDist.DENIAL_REASONS),
+    finishReasons: adapterDist.isSortedByCodePoint(adapterDist.FINISH_REASONS),
+    reportableResources: adapterDist.isSortedByCodePoint(adapterDist.REPORTABLE_RESOURCES),
+  },
+  counts: {
+    adapterCapabilities: adapterDist.ADAPTER_CAPABILITIES.length,
+    adapterErrorCodes: adapterDist.ADAPTER_ERROR_CODES.length,
+    adapterKinds: adapterDist.ADAPTER_KINDS.length,
+    denialReasons: adapterDist.DENIAL_REASONS.length,
+    finishReasons: adapterDist.FINISH_REASONS.length,
+    reportableResources: adapterDist.REPORTABLE_RESOURCES.length,
+  },
+};
+
+// The taxonomy is recomputed from the code alone: retryability, boundary and
+// effect disposition are properties of the code, and usage disposition and
+// ledger action are derived. Nothing here reads `corpus.errorTaxonomy`.
+const tsAdapterTaxonomyRows = [];
+let tsAdapterRetryable = 0;
+let tsAdapterPreDispatch = 0;
+for (const code of adapterDist.ADAPTER_ERROR_CODES) {
+  const facts = adapterDist.taxonomyFacts(code);
+  const table = adapterDist.TAXONOMY_FACTS[code];
+  assert.deepEqual(
+    { boundary: facts.boundary, retryable: facts.retryable, effect: facts.effectDisposition },
+    { boundary: table.boundary, retryable: table.retryable, effect: table.effectDisposition },
+    `${code}: the TypeScript accessor disagrees with the TypeScript table`,
+  );
+  const usageDisposition = adapterDist.deriveUsageDisposition(facts.effectDisposition);
+  tsAdapterTaxonomyRows.push({
+    code,
+    boundary: facts.boundary,
+    retryable: facts.retryable,
+    effectDisposition: facts.effectDisposition,
+    usageDisposition,
+    ledgerAction: adapterDist.deriveLedgerAction(usageDisposition),
+  });
+  if (facts.retryable) tsAdapterRetryable += 1;
+  if (facts.boundary === "pre-dispatch") tsAdapterPreDispatch += 1;
+}
+
+const tsAdapterCycleMatrix = [];
+for (const disposition of ["applied", "in-doubt", "not-applied"]) {
+  for (const sideEffectClass of adapterDist.SIDE_EFFECT_ORDER) {
+    tsAdapterCycleMatrix.push({
+      effectDisposition: disposition,
+      recordsInDoubtIdentity: adapterDist.requiresInDoubtRecord(disposition, sideEffectClass),
+      retryPermittedBySideEffect: adapterDist.sideEffectPermitsRetry(disposition, sideEffectClass),
+      sideEffectClass,
+    });
+  }
+}
+
+const tsAdapterCostStates = [
+  ...new Set(adapterCorpus.budgetComposition.costStateBindings.map((row) => String(row.trust))),
+]
+  .sort()
+  .map((trust) => ({ trust, budgetCostState: adapterDist.deriveBudgetCostState(trust) }));
+
+const tsAdapterDescriptorInventory = {};
+for (const document of adapterCorpus.descriptors) {
+  const descriptor = adapterDescriptorFor(document.adapterId);
+  tsAdapterDescriptorInventory[document.adapterId] = {
+    adapterKind: descriptor.adapterKind,
+    capabilities: [...descriptor.capabilities],
+    evidenceClass: descriptor.evidenceClass,
+    sideEffectClass: descriptor.sideEffectClass,
+    valid: adapterDist.validateDescriptor(descriptor),
+    budgetPolicyValid: adapterDist.validateDescriptorAgainstBudgetPolicy(
+      descriptor,
+      ADAPTER_POLICY_METRICS,
+    ),
+    // Each language proves the descriptor survived its own reader. Python's is
+    // a real parser; TypeScript's is structural, so this member is a floor on
+    // both sides rather than a claim that the two readers are equally strict.
+    roundTrips:
+      JSON.stringify(descriptor) === JSON.stringify(adapterDescriptorDocument(document.adapterId)),
+  };
+}
+
+// --- the real public adapter object ---------------------------------------
+// Everything above decides; this dispatches. A validator-only join cannot ask
+// whether a code is injectable at all, and injectability is exactly where the
+// two mocks were already suspected of diverging.
+const tsAdapterMockDispatch = {};
+for (const code of adapterDist.ADAPTER_ERROR_CODES) {
+  const facts = adapterDist.taxonomyFacts(code);
+  const adapter = adapterDist.createMockAdapter({
+    descriptor: adapterDescriptorFor(ADAPTER_PROBE_DESCRIPTOR),
+    script: [
+      {
+        fail: code,
+        ...(facts.retryable ? { retryAfterMs: ADAPTER_PROBE_RETRY_AFTER_MS } : {}),
+        // A denial reason is meaningful on exactly one code. There is no
+        // `denialReason` member on the TypeScript `MockOutcome` to set, which
+        // is the disclosed divergence registered below.
+      },
+    ],
+    budgetPolicyAllowedProviderMetrics: ADAPTER_POLICY_METRICS,
+    forbiddenMarkers: ADAPTER_FORBIDDEN_MARKERS,
+  });
+  const entry = adapterProjOutcome(await adapter.call(adapterRequestFrom()));
+  entry.injectableAsRequested = entry.ok === false && entry.error.code === code;
+  tsAdapterMockDispatch[code] = entry;
+}
+
+const tsAdapterPolicyDeniedEntry = tsAdapterMockDispatch.GE_ADAPTER_POLICY_DENIED;
+const tsAdapterPolicyDenied = {
+  requestedCode: "GE_ADAPTER_POLICY_DENIED",
+  requestedDenialReason: adapterDist.DENIAL_REASONS[0],
+  observedCode: tsAdapterPolicyDeniedEntry.error?.code ?? null,
+  observedDenialReason: tsAdapterPolicyDeniedEntry.error?.denialReason ?? null,
+  observedMessage: tsAdapterPolicyDeniedEntry.error?.message ?? null,
+  injectable: tsAdapterPolicyDeniedEntry.error?.code === "GE_ADAPTER_POLICY_DENIED",
+  // The public constructor member that makes the code injectable, or null where
+  // the language has no such member. Read off the shipped `MockOutcome` shape
+  // rather than asserted: `structuredClone` of a scripted outcome keeps only
+  // the members the type declares.
+  denialReasonField: null,
+};
+
+const tsAdapterPlainAdapter = adapterDist.createMockAdapter({
+  descriptor: adapterDescriptorFor(ADAPTER_PROBE_DESCRIPTOR),
+  budgetPolicyAllowedProviderMetrics: ADAPTER_POLICY_METRICS,
+  forbiddenMarkers: ADAPTER_FORBIDDEN_MARKERS,
+});
+const tsAdapterStreamAdapter = adapterDist.createMockAdapter({
+  descriptor: adapterDescriptorFor(ADAPTER_PROBE_DESCRIPTOR),
+  budgetPolicyAllowedProviderMetrics: ADAPTER_POLICY_METRICS,
+  forbiddenMarkers: ADAPTER_FORBIDDEN_MARKERS,
+});
+const tsAdapterStreamHandle = tsAdapterStreamAdapter.stream(
+  adapterRequestFrom([{ op: "replace", path: "/streaming", value: true }]),
+);
+const tsAdapterStreamFrames = [];
+for await (const frame of tsAdapterStreamHandle.frames) {
+  tsAdapterStreamFrames.push(adapterProjFrame(frame));
+}
+const tsAdapterMockSuccess = {
+  call: adapterProjOutcome(await tsAdapterPlainAdapter.call(adapterRequestFrom())),
+  stream: {
+    outcome: adapterProjOutcome(await tsAdapterStreamHandle.completion),
+    frames: tsAdapterStreamFrames,
+  },
+};
+
+const tsAdapterMockCircuit = {
+  clockReadings: [...ADAPTER_PROBE_CLOCK_MS],
+  projection: (() => {
+    const projection = adapterDist.circuitFold(
+      adapterDescriptorFor(ADAPTER_PROBE_DESCRIPTOR),
+      ADAPTER_PROBE_CLOCK_MS.map((nowMs) => ({
+        event: "failure",
+        nowMs,
+        code: "GE_ADAPTER_TIMEOUT",
+      })),
+    );
+    return {
+      state: projection.state,
+      consecutiveFailures: projection.consecutiveFailures,
+      openedAtMs: adapterNz(projection.openedAtMs),
+      admitted: projection.admitted,
+      refused: projection.refused,
+    };
+  })(),
+};
+
+const adapterRegistered = [
+  ...new Set(adapterCorpus.ruleRegister.map((row) => String(row.rule))),
+].sort();
+const tsAdapterExercised = [...adapterExercised].sort();
+const tsAdapterRegister = {
+  registeredCount: adapterRegistered.length,
+  exercised: tsAdapterExercised,
+  exercisedCount: tsAdapterExercised.length,
+  missing: adapterRegistered.filter((rule) => !adapterExercised.has(rule)),
+  stray: tsAdapterExercised.filter((rule) => !adapterRegistered.includes(rule)),
+};
+
+const tsAdapter = {
+  apiVersion: adapterCorpus.apiVersion,
+  kind: adapterCorpus.kind,
+  contractVersion: adapterCorpus.contractVersion,
+  contractStatus: adapterCorpus.contractStatus,
+  implementationClaim: adapterCorpus.implementationClaim,
+  evidenceClass: adapterCorpus.evidenceClass,
+  environmentAssertions: adapterCorpus.environmentAssertions,
+  declaredCounts: adapterCorpus.declaredCounts,
+  observedCounts: {
+    circuitCases: adapterCorpus.circuitCases.length,
+    descriptorCases: adapterCorpus.descriptorCases.length,
+    descriptors: adapterCorpus.descriptors.length,
+    errorCases: adapterCorpus.errorCases.length,
+    preflightCases: adapterCorpus.preflightCases.length,
+    retryCases: adapterCorpus.retryCases.length,
+    rules: adapterCorpus.ruleRegister.length,
+    schemaNegativeCases: adapterCorpus.schemaNegativeCases.length,
+    streamCases: adapterCorpus.streamCases.length,
+    toolCases: adapterCorpus.toolCases.length,
+    usageCases: adapterCorpus.usageCases.length,
+  },
+  caseSections: ADAPTER_CASE_SECTIONS,
+  caseOrder: Object.fromEntries(
+    ADAPTER_CASE_SECTIONS.map((section) => [
+      section,
+      adapterCorpus[section].map((item) => String(item.id)),
+    ]),
+  ),
+  probeVectors: {
+    descriptor: ADAPTER_PROBE_DESCRIPTOR,
+    retryAfterMs: ADAPTER_PROBE_RETRY_AFTER_MS,
+    clockReadings: [...ADAPTER_PROBE_CLOCK_MS],
+    denialReason: adapterDist.DENIAL_REASONS[0],
+  },
+  vocabularies: tsAdapterVocabularies,
+  taxonomy: {
+    rows: tsAdapterTaxonomyRows,
+    retryableCount: tsAdapterRetryable,
+    preDispatchCount: tsAdapterPreDispatch,
+  },
+  cycleMatrix: tsAdapterCycleMatrix,
+  costStateBindings: tsAdapterCostStates,
+  descriptorInventory: tsAdapterDescriptorInventory,
+  sections: tsAdapterSections,
+  mockDispatch: tsAdapterMockDispatch,
+  mockPolicyDenied: tsAdapterPolicyDenied,
+  mockSuccess: tsAdapterMockSuccess,
+  mockCircuit: tsAdapterMockCircuit,
+  ruleRegister: tsAdapterRegister,
+  codesObserved: [...adapterObservedCodes].sort(),
+  denialReasonsObserved: [...adapterObservedDenials].sort(),
+};
+
+// --- the Python half -------------------------------------------------------
+
+const pythonAdapter = spawnSync(
+  "uv",
+  ["run", "--project", "python", "python", "tools/conformance/python_adapter_report.py"],
+  { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
+);
+if (pythonAdapter.status !== 0) {
+  throw new Error(
+    `Python adapter conformance failed:\n${pythonAdapter.stderr || pythonAdapter.stdout}`,
+  );
+}
+const pyAdapter = JSON.parse(pythonAdapter.stdout);
+
+// --- 1. the two halves agree on what they read and on the vectors ----------
+for (const field of [
+  "apiVersion",
+  "kind",
+  "contractVersion",
+  "contractStatus",
+  "evidenceClass",
+]) {
+  assertAdapterAgreement("corpus", "<header>", field, tsAdapter[field], pyAdapter[field]);
+}
+// Each process read the flag from the corpus itself, so this is a two-reader
+// assertion rather than a restatement of one read. This lane never flips it.
+assert.strictEqual(
+  adapterCorpus.implementationClaim,
+  false,
+  "adapter implementationClaim is not literally false in the Node-side read",
+);
+assert.strictEqual(
+  pyAdapter.implementationClaim,
+  false,
+  "adapter implementationClaim is not literally false in the Python-side read",
+);
+assertAdapterAgreement(
+  "corpus",
+  "<header>",
+  "environmentAssertions",
+  tsAdapter.environmentAssertions,
+  pyAdapter.environmentAssertions,
+);
+// injectedClockOnly and networkAccess are the two the join itself depends on.
+assert.strictEqual(
+  adapterCorpus.environmentAssertions.injectedClockOnly,
+  true,
+  "adapter corpus does not assert injected-clock-only evidence",
+);
+assert.strictEqual(
+  adapterCorpus.environmentAssertions.networkAccess,
+  false,
+  "adapter corpus does not assert the absence of network access",
+);
+assertAdapterAgreement(
+  "corpus",
+  "<vectors>",
+  "probeVectors",
+  tsAdapter.probeVectors,
+  pyAdapter.probeVectors,
+);
+assertAdapterAgreement(
+  "corpus",
+  "<vectors>",
+  "caseSections",
+  tsAdapter.caseSections,
+  pyAdapter.caseSections,
+);
+
+// --- 2. the closed vocabularies -------------------------------------------
+// Compared native to native first, then to the corpus inventories, then to the
+// sizes this contract freezes. A vocabulary that drifted on one side only is a
+// silent authorization difference.
+assertAdapterEntryAgreement(
+  "vocabularies",
+  "<all>",
+  Object.keys(tsAdapterVocabularies).sort(),
+  tsAdapter.vocabularies,
+  pyAdapter.vocabularies,
+);
+for (const [name, size] of Object.entries(ADAPTER_VOCABULARY_SIZES)) {
+  assert.equal(
+    tsAdapter.vocabularies.counts[name],
+    size,
+    `${name}: the TypeScript vocabulary has ${tsAdapter.vocabularies.counts[name]} members, not ${size}`,
+  );
+  assert.equal(
+    pyAdapter.vocabularies.counts[name],
+    size,
+    `${name}: the Python vocabulary has ${pyAdapter.vocabularies.counts[name]} members, not ${size}`,
+  );
+  assert.equal(
+    tsAdapter.vocabularies.sortedByCodePoint[name],
+    true,
+    `${name}: the TypeScript vocabulary is not in Unicode code-point order`,
+  );
+  assert.equal(
+    pyAdapter.vocabularies.sortedByCodePoint[name],
+    true,
+    `${name}: the Python vocabulary is not in Unicode code-point order`,
+  );
+}
+for (const [name, inventory] of [
+  ["adapterCapabilities", adapterCorpus.capabilityInventory],
+  ["adapterErrorCodes", adapterCorpus.errorTaxonomy.map((row) => row.code)],
+  ["adapterKinds", adapterCorpus.adapterKindInventory],
+  ["denialReasons", adapterCorpus.denialReasonInventory],
+  ["finishReasons", adapterCorpus.finishReasonInventory],
+  ["reportableResources", adapterCorpus.reportableResourceInventory],
+]) {
+  assert.deepEqual(
+    tsAdapter.vocabularies[name],
+    inventory,
+    `${name}: the TypeScript vocabulary differs from the corpus inventory`,
+  );
+  assert.deepEqual(
+    pyAdapter.vocabularies[name],
+    inventory,
+    `${name}: the Python vocabulary differs from the corpus inventory`,
+  );
+}
+assert.deepEqual(
+  tsAdapter.vocabularies.sideEffectOrder,
+  adapterCorpus.cycleComposition.sideEffectClasses,
+  "sideEffectOrder: the TypeScript order differs from the corpus",
+);
+assert.deepEqual(
+  pyAdapter.vocabularies.sideEffectOrder,
+  adapterCorpus.cycleComposition.sideEffectClasses,
+  "sideEffectOrder: the Python order differs from the corpus",
+);
+// adapter-semantics 7.1: money is never adapter-reportable, and the meter
+// bindings are fixed by the budget contract rather than by the adapter.
+for (const row of adapterCorpus.budgetComposition.resourceBindings) {
+  assert.equal(
+    tsAdapter.vocabularies.resourceUnits[row.resource],
+    row.unit,
+    `${row.resource}: the TypeScript unit differs from the budget binding`,
+  );
+  assert.equal(
+    pyAdapter.vocabularies.resourceUnits[row.resource],
+    row.unit,
+    `${row.resource}: the Python unit differs from the budget binding`,
+  );
+  assert.equal(row.aggregation, "sum", `${row.resource}: aggregation is not sum`);
+}
+for (const forbidden of adapterCorpus.budgetComposition.forbiddenResources) {
+  assert.ok(
+    !tsAdapter.vocabularies.reportableResources.includes(forbidden),
+    `${forbidden}: TypeScript reports a meter the budget contract forbids`,
+  );
+  assert.ok(
+    !pyAdapter.vocabularies.reportableResources.includes(forbidden),
+    `${forbidden}: Python reports a meter the budget contract forbids`,
+  );
+}
+assertAdapterAgreement(
+  "budgetComposition",
+  "<costStates>",
+  "costStateBindings",
+  tsAdapter.costStateBindings,
+  pyAdapter.costStateBindings,
+);
+for (const binding of adapterCorpus.budgetComposition.costStateBindings) {
+  const derived = tsAdapter.costStateBindings.find((row) => row.trust === binding.trust);
+  assert.equal(
+    derived?.budgetCostState,
+    binding.budgetCostState,
+    `${binding.trust}: the derived cost state differs from the corpus binding`,
+  );
+}
+
+// --- 3. the recomputed failure taxonomy -----------------------------------
+assertAdapterAgreement(
+  "errorTaxonomy",
+  "<rows>",
+  "taxonomy",
+  tsAdapter.taxonomy,
+  pyAdapter.taxonomy,
+);
+for (const language of ["TypeScript", "Python"]) {
+  const taxonomy = language === "TypeScript" ? tsAdapter.taxonomy : pyAdapter.taxonomy;
+  assert.equal(
+    taxonomy.retryableCount,
+    ADAPTER_RETRYABLE_CODES,
+    `${language}: ${taxonomy.retryableCount} retryable codes, not ${ADAPTER_RETRYABLE_CODES}`,
+  );
+  assert.equal(
+    taxonomy.preDispatchCount,
+    ADAPTER_PRE_DISPATCH_CODES,
+    `${language}: ${taxonomy.preDispatchCount} pre-dispatch codes, not ${ADAPTER_PRE_DISPATCH_CODES}`,
+  );
+  for (const row of taxonomy.rows) {
+    if (row.boundary !== "pre-dispatch") continue;
+    // A refusal that never reached the provider can never be retryable and can
+    // never have applied an external effect.
+    assert.equal(row.retryable, false, `${language} ${row.code}: pre-dispatch yet retryable`);
+    assert.equal(
+      row.effectDisposition,
+      "not-applied",
+      `${language} ${row.code}: pre-dispatch yet claims an external effect`,
+    );
+  }
+}
+for (const row of adapterCorpus.errorTaxonomy) {
+  const tsRow = tsAdapter.taxonomy.rows.find((item) => item.code === row.code);
+  const pyRow = pyAdapter.taxonomy.rows.find((item) => item.code === row.code);
+  for (const field of [
+    "boundary",
+    "retryable",
+    "effectDisposition",
+    "usageDisposition",
+    "ledgerAction",
+  ]) {
+    assert.equal(
+      tsRow[field],
+      row[field],
+      `${row.code}: the TypeScript ${field} differs from the corpus taxonomy`,
+    );
+    assert.equal(
+      pyRow[field],
+      row[field],
+      `${row.code}: the Python ${field} differs from the corpus taxonomy`,
+    );
+  }
+}
+
+// --- 4. the 3x3 in-doubt composition matrix -------------------------------
+assertAdapterAgreement(
+  "cycleComposition",
+  "<matrix>",
+  "cycleMatrix",
+  tsAdapter.cycleMatrix,
+  pyAdapter.cycleMatrix,
+);
+assert.equal(
+  tsAdapter.cycleMatrix.length,
+  ADAPTER_CYCLE_MATRIX_ROWS,
+  `cycleComposition: ${tsAdapter.cycleMatrix.length} rows, not ${ADAPTER_CYCLE_MATRIX_ROWS}`,
+);
+assert.deepEqual(
+  adapterCorpus.cycleComposition.matrix,
+  tsAdapter.cycleMatrix,
+  "cycleComposition: the corpus matrix differs from the recomputed matrix",
+);
+// cycle-semantics 13.4: exactly the two in-doubt external classes retain an
+// identity. `none` creates no in-doubt evidence at all.
+assert.equal(
+  tsAdapter.cycleMatrix.filter((row) => row.recordsInDoubtIdentity).length,
+  2,
+  "cycleComposition: the number of in-doubt identity rows is not 2",
+);
+
+// --- 5. the twelve shipped descriptors ------------------------------------
+assertAdapterAgreement(
+  "descriptors",
+  "<inventory>",
+  "descriptorInventory",
+  tsAdapter.descriptorInventory,
+  pyAdapter.descriptorInventory,
+);
+const adapterKindsSeen = new Set();
+const adapterCapabilitiesSeen = new Set();
+for (const document of adapterCorpus.descriptors) {
+  const entry = tsAdapter.descriptorInventory[document.adapterId];
+  assert.equal(entry.valid, true, `${document.adapterId}: a shipped descriptor is invalid`);
+  assert.equal(
+    entry.budgetPolicyValid,
+    true,
+    `${document.adapterId}: a shipped descriptor violates the budget policy`,
+  );
+  assert.equal(
+    entry.evidenceClass,
+    "deterministic-mock",
+    `${document.adapterId}: a shipped descriptor is not deterministic-mock evidence`,
+  );
+  adapterKindsSeen.add(entry.adapterKind);
+  for (const capability of entry.capabilities) adapterCapabilitiesSeen.add(capability);
+}
+for (const kind of tsAdapter.vocabularies.adapterKinds) {
+  assert.ok(adapterKindsSeen.has(kind), `adapterKinds: no shipped descriptor covers '${kind}'`);
+}
+for (const capability of tsAdapter.vocabularies.adapterCapabilities) {
+  assert.ok(
+    adapterCapabilitiesSeen.has(capability),
+    `capabilities: no shipped descriptor declares '${capability}'`,
+  );
+}
+
+// --- 6. every declared case, member for member ----------------------------
+// The rule identifier is compared for every case, not just the outcome. Two
+// neighbouring rules that report the same portable code are indistinguishable
+// without it, and a rule shadowed by its neighbour is exactly the defect the
+// register exists to make visible.
+const ADAPTER_SECTION_FIELDS = {
+  descriptorCases: ["accepted", "code", "rule", "message", "denialReason", "projection"],
+  preflightCases: ["accepted", "code", "rule", "message", "denialReason", "projection"],
+  streamCases: ["accepted", "code", "rule", "message", "denialReason", "projection"],
+  usageCases: ["accepted", "code", "rule", "message", "denialReason", "projection"],
+  toolCases: ["accepted", "code", "rule", "message", "denialReason", "projection"],
+  errorCases: [
+    "accepted",
+    "code",
+    "rule",
+    "message",
+    "denialReason",
+    "projection",
+    "envelopeCode",
+  ],
+  retryCases: ["decision", "rule", "computedBackoffMs", "retryableByCode"],
+  circuitCases: ["projection", "rules", "steps"],
+};
+
+const adapterSectionCounts = {};
+for (const section of ADAPTER_CASE_SECTIONS) {
+  const cases = adapterCorpus[section];
+  assert.ok(Array.isArray(cases) && cases.length > 0, `${section}: the corpus declares no cases`);
+  const declared = cases.map((item) => String(item.id));
+  assert.equal(
+    new Set(declared).size,
+    declared.length,
+    `${section}: the corpus declares a duplicate case id`,
+  );
+  assertAdapterAgreement(section, "<section>", "declaredCaseOrder", declared, pyAdapter.caseOrder[section]);
+
+  // A skipped case is the failure mode this join exists to prevent: a suite
+  // that passes because it excluded the cases it could not decide is not
+  // evidence. Absence on either side is an error, never a no-op.
+  for (const id of declared) {
+    if (!Object.hasOwn(tsAdapterSections[section], id)) {
+      throw new Error(`${section}: TypeScript skipped corpus case '${id}'`);
+    }
+    if (!Object.hasOwn(pyAdapter.sections[section], id)) {
+      throw new Error(`${section}: Python skipped corpus case '${id}'`);
+    }
+  }
+  for (const id of Object.keys(tsAdapterSections[section])) {
+    if (!declared.includes(id)) {
+      throw new Error(`${section}: TypeScript reported case '${id}' the corpus does not declare`);
+    }
+  }
+  for (const id of Object.keys(pyAdapter.sections[section])) {
+    if (!declared.includes(id)) {
+      throw new Error(`${section}: Python reported case '${id}' the corpus does not declare`);
+    }
+  }
+  assert.equal(
+    Object.keys(tsAdapterSections[section]).length,
+    declared.length,
+    `${section}: TypeScript reported ${Object.keys(tsAdapterSections[section]).length} cases for ${declared.length} declared`,
+  );
+  assert.equal(
+    Object.keys(pyAdapter.sections[section]).length,
+    declared.length,
+    `${section}: Python reported ${Object.keys(pyAdapter.sections[section]).length} cases for ${declared.length} declared`,
+  );
+
+  for (const testCase of cases) {
+    const id = String(testCase.id);
+    const tsEntry = tsAdapterSections[section][id];
+    const pyEntry = pyAdapter.sections[section][id];
+    assertAdapterEntryAgreement(section, id, ADAPTER_SECTION_FIELDS[section], tsEntry, pyEntry);
+
+    // Only now is either half compared to the corpus.
+    if (section === "retryCases") {
+      assert.deepEqual(
+        tsEntry.decision,
+        testCase.expected,
+        `${id}: the TypeScript retry decision differs from the corpus`,
+      );
+      assert.deepEqual(
+        pyEntry.decision,
+        testCase.expected,
+        `${id}: the Python retry decision differs from the corpus`,
+      );
+      assert.ok(
+        adapterRegistered.includes(tsEntry.rule),
+        `${id}: the retry rule '${tsEntry.rule}' is outside the register`,
+      );
+      continue;
+    }
+    if (section === "circuitCases") {
+      assert.deepEqual(
+        tsEntry.projection,
+        testCase.expected,
+        `${id}: the TypeScript circuit projection differs from the corpus`,
+      );
+      assert.deepEqual(
+        pyEntry.projection,
+        testCase.expected,
+        `${id}: the Python circuit projection differs from the corpus`,
+      );
+      for (const rule of tsEntry.rules) {
+        assert.ok(
+          adapterRegistered.includes(rule),
+          `${id}: the circuit rule '${rule}' is outside the register`,
+        );
+      }
+      continue;
+    }
+
+    assert.equal(
+      tsEntry.code,
+      testCase.expectedCode ?? null,
+      `${id}: the TypeScript code differs from the corpus`,
+    );
+    assert.equal(
+      pyEntry.code,
+      testCase.expectedCode ?? null,
+      `${id}: the Python code differs from the corpus`,
+    );
+    assert.equal(
+      tsEntry.rule,
+      testCase.expectedRule ?? null,
+      `${id}: the TypeScript rule differs from the corpus`,
+    );
+    assert.equal(
+      pyEntry.rule,
+      testCase.expectedRule ?? null,
+      `${id}: the Python rule differs from the corpus`,
+    );
+    if (tsEntry.rule !== null) {
+      assert.ok(
+        adapterRegistered.includes(tsEntry.rule),
+        `${id}: rule '${tsEntry.rule}' is outside the register`,
+      );
+    }
+    if (testCase.expectedMessage !== undefined) {
+      assert.equal(
+        tsEntry.message,
+        testCase.expectedMessage,
+        `${id}: the TypeScript message differs from the corpus`,
+      );
+      assert.equal(
+        pyEntry.message,
+        testCase.expectedMessage,
+        `${id}: the Python message differs from the corpus`,
+      );
+    }
+    if (testCase.expectedDenialReason !== undefined) {
+      assert.equal(
+        testCase.expectedCode,
+        "GE_ADAPTER_POLICY_DENIED",
+        `${id}: a denial reason accompanies GE_ADAPTER_POLICY_DENIED and nothing else`,
+      );
+      assert.equal(
+        tsEntry.denialReason,
+        testCase.expectedDenialReason,
+        `${id}: the TypeScript denial reason differs from the corpus`,
+      );
+      assert.equal(
+        pyEntry.denialReason,
+        testCase.expectedDenialReason,
+        `${id}: the Python denial reason differs from the corpus`,
+      );
+      const row = adapterCorpus.ruleRegister.find((item) => item.rule === testCase.expectedRule);
+      assert.equal(
+        row?.denialReason ?? null,
+        testCase.expectedDenialReason,
+        `${id}: the register disagrees with the case on the denial reason`,
+      );
+    } else if (section === "preflightCases") {
+      assert.equal(
+        tsEntry.denialReason,
+        null,
+        `${id}: TypeScript produced a denial reason the corpus does not declare`,
+      );
+      assert.equal(
+        pyEntry.denialReason,
+        null,
+        `${id}: Python produced a denial reason the corpus does not declare`,
+      );
+    }
+    if (testCase.expectedNormalized !== undefined) {
+      assert.deepEqual(
+        tsEntry.projection,
+        testCase.expectedNormalized,
+        `${id}: the TypeScript normalized stream differs from the corpus`,
+      );
+      assert.deepEqual(
+        pyEntry.projection,
+        testCase.expectedNormalized,
+        `${id}: the Python normalized stream differs from the corpus`,
+      );
+    }
+    if (testCase.expectedSummary !== undefined) {
+      assert.deepEqual(
+        tsEntry.projection,
+        testCase.expectedSummary,
+        `${id}: the TypeScript summary differs from the corpus`,
+      );
+      assert.deepEqual(
+        pyEntry.projection,
+        testCase.expectedSummary,
+        `${id}: the Python summary differs from the corpus`,
+      );
+    }
+  }
+  adapterSectionCounts[section] = declared.length;
+}
+
+// --- 7. the register: all 131 exercised, none unregistered ----------------
+assertAdapterAgreement(
+  "ruleRegister",
+  "<register>",
+  "ruleRegister",
+  tsAdapter.ruleRegister,
+  pyAdapter.ruleRegister,
+);
+for (const [language, register] of [
+  ["TypeScript", tsAdapter.ruleRegister],
+  ["Python", pyAdapter.ruleRegister],
+]) {
+  assert.deepEqual(
+    register.missing,
+    [],
+    `${language} left ${register.missing.length} registered rule(s) unexercised: ${register.missing.join(", ")}`,
+  );
+  assert.deepEqual(
+    register.stray,
+    [],
+    `${language} produced rule(s) outside the register: ${register.stray.join(", ")}`,
+  );
+  assert.equal(
+    register.exercisedCount,
+    adapterCorpus.declaredCounts.rules,
+    `${language} exercised ${register.exercisedCount} rules, not ${adapterCorpus.declaredCounts.rules}`,
+  );
+}
+assert.equal(
+  adapterRegistered.length,
+  adapterCorpus.declaredCounts.rules,
+  "ruleRegister: the register size differs from the declared rule count",
+);
+// A decision rule carries no portable code and no denial reason; a rejection
+// rule carries a code from the closed taxonomy.
+for (const row of adapterCorpus.ruleRegister) {
+  if (row.kind === "decision") {
+    assert.equal(row.code, null, `${row.rule}: a decision rule carries a portable code`);
+    assert.equal(row.denialReason, null, `${row.rule}: a decision rule carries a denial reason`);
+  } else {
+    assert.ok(
+      tsAdapter.vocabularies.adapterErrorCodes.includes(row.code),
+      `${row.rule}: the register names a code outside the closed taxonomy`,
+    );
+  }
+}
+assertAdapterAgreement(
+  "coverage",
+  "<codes>",
+  "codesObserved",
+  tsAdapter.codesObserved,
+  pyAdapter.codesObserved,
+);
+assert.deepEqual(
+  tsAdapter.codesObserved,
+  [...tsAdapter.vocabularies.adapterErrorCodes].sort(),
+  "coverage: the rule engine did not produce every code in the closed taxonomy",
+);
+assertAdapterAgreement(
+  "coverage",
+  "<denials>",
+  "denialReasonsObserved",
+  tsAdapter.denialReasonsObserved,
+  pyAdapter.denialReasonsObserved,
+);
+assert.deepEqual(
+  tsAdapter.denialReasonsObserved,
+  [...tsAdapter.vocabularies.denialReasons].sort(),
+  "coverage: the rule engine did not produce every denial reason in the closed set",
+);
+// Every finish reason and every meter is exercised by the corpus itself; the
+// two halves must have read the same coverage out of it.
+const adapterFinishReasons = new Set();
+for (const testCase of adapterCorpus.streamCases) {
+  const reason = testCase.expectedNormalized?.finishReason;
+  if (reason !== undefined && reason !== null) adapterFinishReasons.add(reason);
+  if (testCase.finishReasonExercised !== undefined) {
+    adapterFinishReasons.add(testCase.finishReasonExercised);
+  }
+}
+for (const reason of tsAdapter.vocabularies.finishReasons) {
+  assert.ok(adapterFinishReasons.has(reason), `coverage: finish reason '${reason}' is unexercised`);
+}
+const adapterMeters = new Set();
+for (const testCase of adapterCorpus.usageCases) {
+  for (const resource of testCase.resourcesExercised ?? []) adapterMeters.add(resource);
+}
+for (const resource of tsAdapter.vocabularies.reportableResources) {
+  assert.ok(adapterMeters.has(resource), `coverage: meter '${resource}' is unexercised`);
+}
+
+// --- 8. section counts, native to native and then to the corpus -----------
+assertAdapterAgreement(
+  "declaredCounts",
+  "<counts>",
+  "observedCounts",
+  tsAdapter.observedCounts,
+  pyAdapter.observedCounts,
+);
+assert.deepEqual(
+  tsAdapter.observedCounts,
+  adapterCorpus.declaredCounts,
+  "declaredCounts: the consumed section counts differ from the corpus declaration",
+);
+
+// --- 9. the real public adapter object ------------------------------------
+// The success path first: an unscripted call and a streamed call must produce
+// byte-identical responses, usage and frame plans in both languages.
+assertAdapterAgreement(
+  "mockSuccess",
+  "<call>",
+  "mockSuccess",
+  tsAdapter.mockSuccess,
+  pyAdapter.mockSuccess,
+);
+assert.equal(
+  tsAdapter.mockSuccess.call.ok,
+  true,
+  "mockSuccess: an unscripted mock call did not succeed",
+);
+assert.ok(
+  tsAdapter.mockSuccess.stream.frames.length > 0,
+  "mockSuccess: a streamed mock call produced no frames",
+);
+assertAdapterAgreement(
+  "mockCircuit",
+  "<projection>",
+  "mockCircuit",
+  tsAdapter.mockCircuit,
+  pyAdapter.mockCircuit,
+);
+
+// --- 10. the disclosed divergence register --------------------------------
+//
+// DISCLOSED DIVERGENCE. The two halves are NOT equal here, and this block does
+// not make them equal: it pins both values so the fork is recorded rather than
+// laundered, and so it cannot rot.
+//
+// The TypeScript `MockOutcome` (packages/adapters/src/mock-adapter.ts) has no
+// `denialReason` member. `#injectedFailure` therefore calls
+// `normalizedAdapterError` without one, `validateErrorEnvelope` rejects the
+// result under `E-005` ("a denial reason accompanies GE_ADAPTER_POLICY_DENIED
+// and nothing else"), and the `catch` in `call()` converts that rejection into
+// a `GE_ADAPTER_MALFORMED_RESPONSE` envelope. The code the caller asked to
+// inject is not the code the caller observes. The Python `MockOutcome`
+// (python/src/graph_engineering/adapters/mock_adapter.py) declares
+// `denial_reason`, so the same script produces a genuine
+// `GE_ADAPTER_POLICY_DENIED`.
+//
+// The consequence is operational, not cosmetic: the laundered TypeScript
+// envelope reports `retryable: true`, `boundary: "dispatch"` and
+// `effectDisposition: "applied"`, while the Python envelope reports
+// `retryable: false`, `boundary: "pre-dispatch"` and
+// `effectDisposition: "not-applied"`. A cycle that retries on `retryable` would
+// retry a policy denial against one mock and refuse it against the other.
+//
+// This lane is not permitted to modify `packages/`, so the defect is reported,
+// not fixed. Every value below is asserted exactly: if either language changes,
+// this register fails and the divergence must be re-adjudicated.
+const ADAPTER_DISCLOSED_DIVERGENCES = [
+  { path: "/mockDispatch/GE_ADAPTER_POLICY_DENIED/error/boundary",
+    typescript: "dispatch", python: "pre-dispatch" },
+  { path: "/mockDispatch/GE_ADAPTER_POLICY_DENIED/error/code",
+    typescript: "GE_ADAPTER_MALFORMED_RESPONSE", python: "GE_ADAPTER_POLICY_DENIED" },
+  { path: "/mockDispatch/GE_ADAPTER_POLICY_DENIED/error/denialReason",
+    typescript: null, python: "capability-approval" },
+  { path: "/mockDispatch/GE_ADAPTER_POLICY_DENIED/error/detail/providerSafeFields/1/value",
+    typescript: "E-005", python: "none" },
+  { path: "/mockDispatch/GE_ADAPTER_POLICY_DENIED/error/effectDisposition",
+    typescript: "applied", python: "not-applied" },
+  { path: "/mockDispatch/GE_ADAPTER_POLICY_DENIED/error/message",
+    typescript: "a denial reason accompanies GE_ADAPTER_POLICY_DENIED and nothing else",
+    python: "the deterministic mock produced GE_ADAPTER_POLICY_DENIED by configuration" },
+  { path: "/mockDispatch/GE_ADAPTER_POLICY_DENIED/error/retryable",
+    typescript: true, python: false },
+  { path: "/mockDispatch/GE_ADAPTER_POLICY_DENIED/error/usageDisposition",
+    typescript: "conservative", python: "none" },
+  { path: "/mockDispatch/GE_ADAPTER_POLICY_DENIED/injectableAsRequested",
+    typescript: false, python: true },
+  { path: "/mockPolicyDenied/denialReasonField", typescript: null, python: "denial_reason" },
+  { path: "/mockPolicyDenied/injectable", typescript: false, python: true },
+  { path: "/mockPolicyDenied/observedCode",
+    typescript: "GE_ADAPTER_MALFORMED_RESPONSE", python: "GE_ADAPTER_POLICY_DENIED" },
+  { path: "/mockPolicyDenied/observedDenialReason", typescript: null, python: "capability-approval" },
+  { path: "/mockPolicyDenied/observedMessage",
+    typescript: "a denial reason accompanies GE_ADAPTER_POLICY_DENIED and nothing else",
+    python: "the deterministic mock produced GE_ADAPTER_POLICY_DENIED by configuration" },
+];
+
+/**
+ * Walk both reports and yield every leaf path at which they differ. This is the
+ * backstop for the named assertions above: a divergence in a member no explicit
+ * assertion happens to cover still lands here.
+ */
+function adapterDeepDivergences(tsValue, pyValue, path = "") {
+  const found = [];
+  const tsObject = tsValue !== null && typeof tsValue === "object";
+  const pyObject = pyValue !== null && typeof pyValue === "object";
+  if (Array.isArray(tsValue) && Array.isArray(pyValue)) {
+    if (tsValue.length !== pyValue.length) {
+      found.push({ path: `${path}/length`, typescript: tsValue.length, python: pyValue.length });
+      return found;
+    }
+    for (const [index, item] of tsValue.entries()) {
+      found.push(...adapterDeepDivergences(item, pyValue[index], `${path}/${index}`));
+    }
+    return found;
+  }
+  if (tsObject && pyObject && !Array.isArray(tsValue) && !Array.isArray(pyValue)) {
+    for (const key of [...new Set([...Object.keys(tsValue), ...Object.keys(pyValue)])].sort()) {
+      const tsHas = Object.hasOwn(tsValue, key);
+      const pyHas = Object.hasOwn(pyValue, key);
+      if (!tsHas || !pyHas) {
+        found.push({
+          path: `${path}/${key}`,
+          typescript: tsHas ? tsValue[key] : "<member absent>",
+          python: pyHas ? pyValue[key] : "<member absent>",
+        });
+        continue;
+      }
+      found.push(...adapterDeepDivergences(tsValue[key], pyValue[key], `${path}/${key}`));
+    }
+    return found;
+  }
+  if (!isDeepStrictEqual(tsValue, pyValue)) {
+    found.push({ path, typescript: tsValue, python: pyValue });
+  }
+  return found;
+}
+
+// Compare the whole report, member for member, except the two members the
+// corpus does not require the two halves to state identically (`caseSections`
+// and `probeVectors` are already joined above and are restatements, not
+// results).
+const adapterObservedDivergences = adapterDeepDivergences(tsAdapter, pyAdapter);
+const adapterDisclosedByPath = new Map(
+  ADAPTER_DISCLOSED_DIVERGENCES.map((row) => [row.path, row]),
+);
+for (const divergence of adapterObservedDivergences) {
+  const disclosed = adapterDisclosedByPath.get(divergence.path);
+  if (disclosed === undefined) {
+    throw new Error(
+      `Adapter cross-language divergence at '${divergence.path}':`
+        + ` TypeScript ${adapterStringify(divergence.typescript)}`
+        + ` vs Python ${adapterStringify(divergence.python)}.`
+        + " This path is not in the disclosed divergence register.",
+    );
+  }
+  if (
+    !isDeepStrictEqual(disclosed.typescript, divergence.typescript)
+    || !isDeepStrictEqual(disclosed.python, divergence.python)
+  ) {
+    throw new Error(
+      `Disclosed adapter divergence at '${divergence.path}' changed:`
+        + ` register says TypeScript ${adapterStringify(disclosed.typescript)}`
+        + ` vs Python ${adapterStringify(disclosed.python)},`
+        + ` observed TypeScript ${adapterStringify(divergence.typescript)}`
+        + ` vs Python ${adapterStringify(divergence.python)}.`,
+    );
+  }
+}
+const adapterObservedPaths = new Set(adapterObservedDivergences.map((row) => row.path));
+for (const row of ADAPTER_DISCLOSED_DIVERGENCES) {
+  if (!adapterObservedPaths.has(row.path)) {
+    throw new Error(
+      `Disclosed adapter divergence at '${row.path}' no longer reproduces.`
+        + " If the TypeScript mock gained a denialReason member, delete this row"
+        + " and let the join assert equality instead.",
+    );
+  }
+}
+assert.equal(
+  adapterObservedDivergences.length,
+  ADAPTER_DISCLOSED_DIVERGENCES.length,
+  `adapter join: ${adapterObservedDivergences.length} divergences observed against ${ADAPTER_DISCLOSED_DIVERGENCES.length} disclosed`,
+);
+// Thirteen of the fourteen codes are injectable in both languages; the
+// fourteenth is the disclosed one. Nothing here waives that.
+const adapterInjectableBoth = tsAdapter.vocabularies.adapterErrorCodes.filter(
+  (code) =>
+    tsAdapter.mockDispatch[code].injectableAsRequested
+    && pyAdapter.mockDispatch[code].injectableAsRequested,
+);
+assert.deepEqual(
+  tsAdapter.vocabularies.adapterErrorCodes.filter(
+    (code) => !adapterInjectableBoth.includes(code),
+  ),
+  ["GE_ADAPTER_POLICY_DENIED"],
+  "mockDispatch: the set of codes not injectable in both languages is not exactly the disclosed one",
+);
+for (const code of adapterInjectableBoth) {
+  assert.equal(
+    pyAdapter.mockDispatch[code].error.code,
+    code,
+    `mockDispatch: Python did not produce ${code} as scripted`,
+  );
+  assert.equal(
+    tsAdapter.mockDispatch[code].error.code,
+    code,
+    `mockDispatch: TypeScript did not produce ${code} as scripted`,
+  );
+}
+
+// --- 11. the corpus honesty flags this lane never upgrades ----------------
+assert.equal(
+  adapterCorpus.integrationNotes.length,
+  3,
+  "integrationNotes: the corpus does not name three agent-harness integrations",
+);
+for (const note of adapterCorpus.integrationNotes) {
+  assert.equal(note.officialV1Adapter, false, `${note.integration}: claims an official adapter`);
+  assert.equal(note.privateApiClaim, false, `${note.integration}: claims a private API`);
+  assert.ok(
+    !tsAdapter.vocabularies.adapterKinds.includes(note.integration),
+    `${note.integration}: an integration note is not an adapter kind`,
+  );
+}
+assert.ok(
+  Array.isArray(adapterCorpus.nonClaims) && adapterCorpus.nonClaims.length > 0,
+  "nonClaims: the corpus states no non-claims",
+);
+
+const adapterTotalCases = Object.values(adapterSectionCounts).reduce((sum, n) => sum + n, 0);
+process.stdout.write(
+  `Cross-language adapter conformance passed for ${adapterTotalCases} declared cases`
+    + ` (${adapterSectionCounts.descriptorCases} descriptor, ${adapterSectionCounts.preflightCases} preflight,`
+    + ` ${adapterSectionCounts.streamCases} stream, ${adapterSectionCounts.usageCases} usage,`
+    + ` ${adapterSectionCounts.toolCases} tool, ${adapterSectionCounts.errorCases} error,`
+    + ` ${adapterSectionCounts.retryCases} retry, ${adapterSectionCounts.circuitCases} circuit)`
+    + ` compared code, rule identifier and projection member for member,`
+    + ` ${tsAdapter.ruleRegister.exercisedCount}/${pyAdapter.ruleRegister.exercisedCount} of`
+    + ` ${adapterRegistered.length} registered rules exercised with 0 unregistered on either side,`
+    + ` the ${tsAdapter.vocabularies.counts.adapterErrorCodes}-code /`
+    + ` ${tsAdapter.vocabularies.counts.denialReasons}-denial-reason /`
+    + ` ${tsAdapter.vocabularies.counts.finishReasons}-finish-reason /`
+    + ` ${tsAdapter.vocabularies.counts.reportableResources}-meter /`
+    + ` ${tsAdapter.vocabularies.counts.adapterKinds}-kind /`
+    + ` ${tsAdapter.vocabularies.counts.adapterCapabilities}-capability closed vocabularies,`
+    + ` the recomputed taxonomy (${tsAdapter.taxonomy.retryableCount} retryable,`
+    + ` ${tsAdapter.taxonomy.preDispatchCount} pre-dispatch) and the`
+    + ` ${tsAdapter.cycleMatrix.length}-row in-doubt matrix,`
+    + ` and ${adapterInjectableBoth.length}/${tsAdapter.vocabularies.counts.adapterErrorCodes} codes`
+    + ` injectable through both real mock adapters;`
+    + ` ${ADAPTER_DISCLOSED_DIVERGENCES.length} disclosed divergences, all from the single defect`
+    + ` that the TypeScript MockOutcome has no denialReason member so`
+    + ` GE_ADAPTER_POLICY_DENIED launders to GE_ADAPTER_MALFORMED_RESPONSE via E-005;`
+    + ` implementationClaim ${JSON.stringify(adapterCorpus.implementationClaim)}.\n`,
 );

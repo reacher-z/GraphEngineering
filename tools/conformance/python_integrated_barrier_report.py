@@ -9,9 +9,16 @@ never copies an ``expect`` block from the corpus into its own output: the
 result. The consuming join in ``tools/conformance/run.mjs`` computes the
 TypeScript half natively and compares the two member for member.
 
-The corpus declares ``implementationClaim: false``. This report proves nothing
-about barrier execution; it only exercises the policy validator, the ownership
-discriminator, and the real public compiler entry point.
+The corpus declares ``implementationClaim: false``. Tranche 1 of this report
+(``policyCases``, ``ownershipCases``, ``compilerCases``) exercises only the
+policy validator, the ownership discriminator, and the real public compiler
+entry point. Tranche 2 (``evaluationCases``, ``identityCases``, ``replayCases``,
+``identifierCases``) drives the real public barrier runtime surface —
+``evaluate_integrated_barrier``, ``barrier_policy_hash`` /
+``route_policy_hash``, ``barrier_decision_id`` / ``route_decision_id``,
+``fold_committed_decisions`` and ``validate_decision_identifiers`` — and every
+hash it prints is recomputed here from the framing rule, never read out of the
+corpus ``expect`` block and never read across from TypeScript.
 """
 
 from __future__ import annotations
@@ -20,6 +27,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from graph_engineering.canonical import canonical_json
 from graph_engineering.compiler import Diagnostic, try_compile_graph
 from graph_engineering.integrated_barrier import (
     BarrierPolicyValidation,
@@ -29,6 +37,27 @@ from graph_engineering.integrated_barrier import (
     ValidBarrierPolicy,
     claims_integrated_barrier_policy,
     validate_integrated_barrier_policy,
+)
+from graph_engineering.integrated_barrier_runtime import (
+    BARRIER_DECISION_DOMAIN,
+    BARRIER_POLICY_KIND_TAG,
+    POLICY_HASH_DOMAIN,
+    ROUTE_DECISION_DOMAIN,
+    ROUTER_POLICY_KIND_TAG,
+    BarrierArrival,
+    BarrierDisposition,
+    DecisionAdoption,
+    DecisionRejection,
+    MalformedBarrierVote,
+    barrier_decision_id,
+    barrier_policy_hash,
+    evaluate_integrated_barrier,
+    evidence_hash,
+    fold_committed_decisions,
+    parse_barrier_vote,
+    route_decision_id,
+    route_policy_hash,
+    validate_decision_identifiers,
 )
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -46,6 +75,31 @@ OWNERSHIP_PROBE_NODE_INDEX = 3
 # from the projection and reported in `policyOptionalAbsent`; it is never
 # materialized as JSON null.
 OPTIONAL_POLICY_FIELDS = ("minimum", "basisPoints", "quorum", "deadline")
+
+# The six count members and the six ID lists of a barrier decision, in the
+# declaration order the contract freezes. The join compares this projection
+# member for member, so a runtime that renamed, reordered, or dropped one is a
+# divergence rather than a silent pass.
+DECISION_COUNT_FIELDS = (
+    "total",
+    "succeeded",
+    "failed",
+    "missing",
+    "timedOut",
+    "abstained",
+    "unknown",
+)
+DECISION_ID_LIST_FIELDS = (
+    "acceptedIds",
+    "failedIds",
+    "missingIds",
+    "timedOutIds",
+    "abstainedIds",
+    "unknownIds",
+)
+# `decisionId` and `policyHash` are the two identity members the evaluation
+# surface does not own; an evaluation projection must never carry them.
+DECISION_IDENTITY_FIELDS = ("policyHash", "decisionId")
 
 
 def load_corpus() -> dict[str, Any]:
@@ -172,15 +226,283 @@ def compiler_report(graph: dict[str, Any]) -> dict[str, Any]:
     return report
 
 
+# --------------------------------------------------------------------------- #
+# evaluationCases: satisfaction arithmetic, dispositions, resolutions           #
+# --------------------------------------------------------------------------- #
+
+
+def valid_policy_snapshot(document: Any, label: str) -> IntegratedBarrierPolicySnapshot:
+    """Normalize a corpus policy through the real public validator."""
+
+    validation = validate_integrated_barrier_policy(document)
+    if type(validation) is not ValidBarrierPolicy:
+        raise AssertionError(f"{label}: corpus policy is not a valid barrier policy")
+    return validation.policy
+
+
+def arrival(entry: dict[str, Any], label: str) -> BarrierArrival:
+    """Build one arrival, parsing any ballot through the real public parser."""
+
+    disposition = BarrierDisposition(str(entry["disposition"]))
+    if "vote" not in entry:
+        return BarrierArrival(str(entry["sourceNodeId"]), disposition)
+    ballot = parse_barrier_vote(entry["vote"])
+    if type(ballot) is MalformedBarrierVote:
+        raise AssertionError(f"{label}: corpus ballot is malformed: {ballot.reason}")
+    return BarrierArrival(str(entry["sourceNodeId"]), disposition, ballot)
+
+
+def evaluation_report(case: dict[str, Any]) -> dict[str, Any]:
+    """Drive ``evaluate_integrated_barrier`` and project the decision document.
+
+    The projection is the whole document the evaluator owns: it carries neither
+    `policyHash` nor `decisionId`, because the evaluation surface does not own
+    identity. `counts` and `idLists` restate the twelve partition members
+    separately so a divergence names the exact member rather than the document.
+    """
+
+    name = str(case["name"])
+    policy = valid_policy_snapshot(case["policy"], name)
+    arrivals = [arrival(entry, name) for entry in case["dispositions"]]
+    document = evaluate_integrated_barrier(policy, str(case["barrierNodeId"]), arrivals).to_dict()
+
+    for field in DECISION_IDENTITY_FIELDS:
+        if field in document:
+            raise AssertionError(f"{name}: the evaluation surface materialized {field!r}")
+
+    entry: dict[str, Any] = {
+        "document": document,
+        # Emitted separately because the transport sorts object keys; the join
+        # compares this list against the TypeScript key order.
+        "documentFields": list(document),
+        "barrierNodeId": document["barrierNodeId"],
+        "deadlineElapsed": document["deadlineElapsed"],
+        "satisfied": document["satisfied"],
+        "reasonCode": document["reasonCode"],
+        "resolution": document["resolution"],
+        "counts": {field: document[field] for field in DECISION_COUNT_FIELDS},
+        "idLists": {field: document[field] for field in DECISION_ID_LIST_FIELDS},
+        "votesPresent": "votes" in document,
+    }
+    # The six counts partition the arrivals, so they must sum to `total`.
+    entry["countSum"] = sum(document[field] for field in DECISION_COUNT_FIELDS[1:])
+    if "votes" in document:
+        entry["votes"] = document["votes"]
+        entry["voteFields"] = [list(record) for record in document["votes"]]
+    return entry
+
+
+# --------------------------------------------------------------------------- #
+# identityCases: policyHash and decisionId, recomputed from the framing rule    #
+# --------------------------------------------------------------------------- #
+
+
+def canonical_utf8_bytes(value: Any) -> int:
+    return len(canonical_json(value).encode("utf-8"))
+
+
+def identity_report(case: dict[str, Any]) -> dict[str, Any]:
+    """Recompute both identities natively. No literal is read from ``expect``."""
+
+    kind = str(case["documentKind"])
+    document: dict[str, Any] = case["document"]
+    without_identity = {key: value for key, value in document.items() if key != "decisionId"}
+    run_id = str(case["runId"])
+    graph_revision = int(case["graphRevision"])
+    node_id = str(case["nodeId"])
+
+    if kind == "BarrierDecision":
+        policy_hash = barrier_policy_hash(case["policy"])
+        decision_id = barrier_decision_id(run_id, graph_revision, node_id, document)
+        # Taken from the native package constants, not from the corpus case.
+        policy_kind_tag = BARRIER_POLICY_KIND_TAG
+        decision_domain = BARRIER_DECISION_DOMAIN
+    elif kind == "RouteDecision":
+        policy_hash = route_policy_hash(case["policy"])
+        decision_id = route_decision_id(run_id, graph_revision, node_id, document)
+        policy_kind_tag = ROUTER_POLICY_KIND_TAG
+        decision_domain = ROUTE_DECISION_DOMAIN
+    else:
+        raise AssertionError(f"{case['name']}: unknown decision document kind {kind!r}")
+
+    entry: dict[str, Any] = {
+        "documentKind": kind,
+        "policyKindTag": policy_kind_tag,
+        "decisionDomain": decision_domain,
+        "policyHash": policy_hash,
+        "decisionId": decision_id,
+        # The recorded members are echoed so the join can prove each half
+        # recomputed the document it was actually handed.
+        "recordedPolicyHash": document["policyHash"],
+        "recordedDecisionId": document["decisionId"],
+        "canonicalPolicyUtf8Bytes": canonical_utf8_bytes(case["policy"]),
+        "canonicalDocumentWithoutDecisionIdUtf8Bytes": canonical_utf8_bytes(without_identity),
+        "documentFieldsWithoutDecisionId": list(without_identity),
+    }
+    if "evidenceInputs" in case:
+        entry["evidenceHashes"] = [
+            {
+                "sourceNodeId": item["sourceNodeId"],
+                "evidenceHash": evidence_hash(item["evidence"]),
+            }
+            for item in case["evidenceInputs"]
+        ]
+    if "canonicalEvidenceKeyOrder" in case:
+        entry["canonicalEvidenceKeyOrder"] = [
+            key
+            for key in json.loads(canonical_json(case["evidenceInputs"][0]["evidence"]))
+        ]
+    return entry
+
+
+# --------------------------------------------------------------------------- #
+# replayCases: zero-rejudge adoption and the three rejection codes              #
+# --------------------------------------------------------------------------- #
+
+
+class ExecutorLedger:
+    """Counts every executor call a replaying scheduler would make.
+
+    The rule, stated identically in the Node half of the join: a rejection is a
+    non-retryable run failure, so no node runs at all; on adoption, a node whose
+    decision was adopted MUST NOT be re-evaluated, and only a policy-carrying
+    node without an adopted decision would reach its executor.
+    """
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def execute(self, node_id: str) -> None:
+        self.calls.append(node_id)
+
+
+def replay_report(case: dict[str, Any]) -> dict[str, Any]:
+    name = str(case["name"])
+    run_id = str(case["runId"])
+    graph_revision = int(case["graphRevision"])
+    current_policies: dict[str, Any] = case["currentPolicies"]
+    history: list[dict[str, Any]] = case["history"]
+
+    outcome = fold_committed_decisions(
+        history,
+        run_id=run_id,
+        graph_revision=graph_revision,
+        current_policies=current_policies,
+    )
+    adopted_node_ids = list(outcome.adopted_node_ids)
+
+    ledger = ExecutorLedger()
+    if type(outcome) is DecisionAdoption:
+        for node_id in current_policies:
+            if node_id not in set(adopted_node_ids):
+                ledger.execute(node_id)
+
+    entry: dict[str, Any] = {
+        "outcome": "adopted" if type(outcome) is DecisionAdoption else "rejected",
+        "adoptedNodeIds": adopted_node_ids,
+        "appendedDecisionEvents": outcome.appended_decision_events,
+        "executorCalls": len(ledger.calls),
+        "executedNodeIds": list(ledger.calls),
+        # Recomputed natively for every event in the history, whatever the
+        # outcome: this is what makes a forked child run recompute its own
+        # identity instead of inheriting the parent's.
+        "currentPolicyHashes": {
+            str(event["nodeId"]): (
+                barrier_policy_hash(current_policies[str(event["nodeId"])])
+                if event["type"] == "BarrierSatisfied"
+                else route_policy_hash(current_policies[str(event["nodeId"])])
+            )
+            for event in history
+            if str(event["nodeId"]) in current_policies
+        },
+        "recomputedDecisionIds": {
+            str(event["nodeId"]): (
+                barrier_decision_id(run_id, graph_revision, str(event["nodeId"]), event["data"])
+                if event["type"] == "BarrierSatisfied"
+                else route_decision_id(run_id, graph_revision, str(event["nodeId"]), event["data"])
+            )
+            for event in history
+        },
+        "recordedPolicyHashes": {
+            str(event["nodeId"]): event["data"]["policyHash"] for event in history
+        },
+        "recordedDecisionIds": {
+            str(event["nodeId"]): event["data"]["decisionId"] for event in history
+        },
+    }
+    if type(outcome) is DecisionRejection:
+        entry["code"] = outcome.code.value
+        entry["nodeId"] = outcome.node_id
+        for field, value in (
+            ("recordedPolicyHash", outcome.recorded_policy_hash),
+            ("currentPolicyHash", outcome.current_policy_hash),
+            ("recordedDecisionId", outcome.recorded_decision_id),
+            ("recomputedDecisionId", outcome.recomputed_decision_id),
+        ):
+            # Absent members are omitted rather than materialized as JSON null.
+            if value is not None:
+                entry[field] = value
+    elif type(outcome) is not DecisionAdoption:
+        raise AssertionError(f"{name}: unknown replay outcome {type(outcome)!r}")
+    return entry
+
+
+# --------------------------------------------------------------------------- #
+# identifierCases: node IDs and route keys are deliberately different patterns  #
+# --------------------------------------------------------------------------- #
+
+
+def apply_pointer(document: Any, pointer: str, value: Any) -> Any:
+    """Return a deep copy of ``document`` with one JSON-pointer slot replaced."""
+
+    if not pointer.startswith("/"):
+        raise AssertionError(f"identifier path {pointer!r} is not a JSON pointer")
+    tokens = [token.replace("~1", "/").replace("~0", "~") for token in pointer[1:].split("/")]
+    mutated: Any = json.loads(json.dumps(document))
+    cursor: Any = mutated
+    for token in tokens[:-1]:
+        cursor = cursor[int(token)] if type(cursor) is list else cursor[token]
+    last = tokens[-1]
+    if type(cursor) is list:
+        cursor[int(last)] = value
+    else:
+        cursor[last] = value
+    return mutated
+
+
+def identifier_report(case: dict[str, Any], base_documents: dict[str, Any]) -> dict[str, Any]:
+    kind = str(case["documentKind"])
+    base = base_documents[kind]
+    mutated = apply_pointer(base, str(case["path"]), case["value"])
+    return {
+        "documentKind": kind,
+        "path": case["path"],
+        "value": case["value"],
+        # The unmutated base document must be accepted, or the case proves
+        # nothing about the mutation.
+        "controlValid": validate_decision_identifiers(kind, base),
+        "valid": validate_decision_identifiers(kind, mutated),
+        "mutatedDocument": mutated,
+    }
+
+
 def main() -> None:
     corpus = load_corpus()
     policy_cases: list[dict[str, Any]] = corpus["policyCases"]
     ownership_cases: list[dict[str, Any]] = corpus["ownershipCases"]
     compiler_cases: list[dict[str, Any]] = corpus["compilerCases"]
+    evaluation_cases: list[dict[str, Any]] = corpus["evaluationCases"]
+    identity_cases: list[dict[str, Any]] = corpus["identityCases"]
+    replay_cases: list[dict[str, Any]] = corpus["replayCases"]
+    identifier_cases: list[dict[str, Any]] = corpus["identifierCases"]
 
     policy_names = case_names(policy_cases, "policyCases")
     ownership_names = case_names(ownership_cases, "ownershipCases")
     compiler_names = case_names(compiler_cases, "compilerCases")
+    evaluation_names = case_names(evaluation_cases, "evaluationCases")
+    identity_names = case_names(identity_cases, "identityCases")
+    replay_names = case_names(replay_cases, "replayCases")
+    identifier_names = case_names(identifier_cases, "identifierCases")
 
     probe_base = next(
         case["graph"] for case in compiler_cases if case["name"] == OWNERSHIP_PROBE_CASE
@@ -219,6 +541,34 @@ def main() -> None:
     if len(compiler_report_by_name) != len(compiler_names):
         raise AssertionError("compilerCases: Python skipped a case the corpus declares")
 
+    evaluation_report_by_name: dict[str, Any] = {}
+    for case in evaluation_cases:
+        evaluation_report_by_name[str(case["name"])] = evaluation_report(case)
+    if len(evaluation_report_by_name) != len(evaluation_names):
+        raise AssertionError("evaluationCases: Python skipped a case the corpus declares")
+
+    identity_report_by_name: dict[str, Any] = {}
+    for case in identity_cases:
+        identity_report_by_name[str(case["name"])] = identity_report(case)
+    if len(identity_report_by_name) != len(identity_names):
+        raise AssertionError("identityCases: Python skipped a case the corpus declares")
+
+    replay_report_by_name: dict[str, Any] = {}
+    for case in replay_cases:
+        replay_report_by_name[str(case["name"])] = replay_report(case)
+    if len(replay_report_by_name) != len(replay_names):
+        raise AssertionError("replayCases: Python skipped a case the corpus declares")
+
+    identifier_base_documents: dict[str, Any] = corpus["identifierBaseDocuments"]
+    identifier_report_by_name: dict[str, Any] = {}
+    for case in identifier_cases:
+        identifier_report_by_name[str(case["name"])] = identifier_report(
+            case,
+            identifier_base_documents,
+        )
+    if len(identifier_report_by_name) != len(identifier_names):
+        raise AssertionError("identifierCases: Python skipped a case the corpus declares")
+
     report: dict[str, Any] = {
         "contract": corpus["contract"],
         # Read by this process from the corpus file; the join proves the Node
@@ -229,12 +579,30 @@ def main() -> None:
             "case": OWNERSHIP_PROBE_CASE,
             "nodeIndex": OWNERSHIP_PROBE_NODE_INDEX,
         },
+        # The five domain-separation constants, read from the native package
+        # rather than from the corpus. The join proves the TypeScript package
+        # declares literally the same five strings.
+        "identityDomains": {
+            "policyHashDomain": POLICY_HASH_DOMAIN,
+            "barrierDecisionDomain": BARRIER_DECISION_DOMAIN,
+            "routeDecisionDomain": ROUTE_DECISION_DOMAIN,
+            "barrierPolicyKindTag": BARRIER_POLICY_KIND_TAG,
+            "routerPolicyKindTag": ROUTER_POLICY_KIND_TAG,
+        },
         "policyCaseOrder": policy_names,
         "ownershipCaseOrder": ownership_names,
         "compilerCaseOrder": compiler_names,
+        "evaluationCaseOrder": evaluation_names,
+        "identityCaseOrder": identity_names,
+        "replayCaseOrder": replay_names,
+        "identifierCaseOrder": identifier_names,
         "policyCases": policy_report,
         "ownershipCases": ownership_report,
         "compilerCases": compiler_report_by_name,
+        "evaluationCases": evaluation_report_by_name,
+        "identityCases": identity_report_by_name,
+        "replayCases": replay_report_by_name,
+        "identifierCases": identifier_report_by_name,
     }
     print(json.dumps(report, ensure_ascii=True, sort_keys=True, separators=(",", ":")))
 
