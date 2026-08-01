@@ -22,11 +22,25 @@ export {
 } from "./decision-replay.js";
 export { runPipeline } from "./pipeline.js";
 export {
+  inspectLegacyDurableHistory,
   resumeDurableGraphRun,
   resumeGraphRun,
   startDurableGraphRun,
   startGraphRun,
+  type LegacyDurableHistoryReport,
 } from "./durable.js";
+export {
+  DURABLE_CONTRACT_VERSION,
+  DURABLE_GRAPH_REVISION,
+  ProtectedDurableRun,
+  assertPayloadProtection,
+  durableActivityKey,
+  type DurableEventDraft,
+  type DurablePayloadDraft,
+  type DurablePayloadProtection,
+  type GuardedDurableJournal,
+  type RecoveredEvent,
+} from "./durable-protection.js";
 export {
   DurableRunError,
   type DurableEventIdContext,

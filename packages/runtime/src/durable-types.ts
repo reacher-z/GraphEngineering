@@ -1,5 +1,6 @@
 import type { GraphSpec, NodeKind, NodeSpec } from "@graph-engineering/core";
 import type { EventStore } from "@graph-engineering/persistence";
+import type { DurablePayloadProtection } from "./durable-protection.js";
 import type { GraphRunResult, JsonValue } from "./types.js";
 
 export type DurableRunErrorCode =
@@ -12,7 +13,17 @@ export type DurableRunErrorCode =
   | "NODE_EXECUTION_INTERRUPTED"
   | "IN_DOUBT_SIDE_EFFECT"
   | "RESUME_CONFLICT"
-  | "DURABILITY_STORE_FAILED";
+  | "DURABILITY_STORE_FAILED"
+  // spec/redaction-semantics.md Section 10 portable failure codes.
+  | "PAYLOAD_PROTECTION_REQUIRED"
+  | "PAYLOAD_PROTECTION_FAILED"
+  | "CAPTURE_POLICY_MISMATCH"
+  | "INLINE_CAPTURE_NOT_AUTHORIZED"
+  | "LEGACY_REDACTION_MISMATCH"
+  | "PROTECTED_PAYLOAD_NOT_FOUND"
+  | "PROTECTED_PAYLOAD_UNAUTHORIZED"
+  | "PROTECTED_PAYLOAD_CORRUPT"
+  | "SECRET_CANARY_DETECTED";
 
 export interface SerializedDurableRunError {
   name: "DurableRunError";
@@ -73,7 +84,20 @@ export interface DurableEventIdContext {
 export interface DurableSchedulerOptions {
   runId: string;
   implementationId: string;
-  eventStore: EventStore;
+  /**
+   * The guarded `events/v1alpha2` write path. Section 4.2 of
+   * spec/redaction-semantics.md makes this mandatory: a durable run with no
+   * configured protected store and key provider fails closed with
+   * `PAYLOAD_PROTECTION_REQUIRED` before any write or executor call. There is
+   * deliberately no fallback to the legacy inline writer.
+   */
+  protection: DurablePayloadProtection;
+  /**
+   * An existing `scheduler-recovery/v1alpha1` journal, read-only. It is used
+   * only for Section 9 legacy detection; nothing is ever appended to it, and a
+   * legacy history is never silently repaired or migrated.
+   */
+  legacyEventStore?: EventStore;
   nodeExecutors?: Readonly<Record<string, DurableNodeExecutor>>;
   executors?: Readonly<Partial<Record<NodeKind, DurableNodeExecutor>>>;
   concurrency?: number;

@@ -2,26 +2,34 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { canonicalHash, type GraphSpec, type NodeSpec } from "@graph-engineering/core";
-import {
-  MemoryEventStore,
-  VersionConflictError,
-  type EventStore,
-  type GraphEvent,
-} from "@graph-engineering/persistence";
+import { MemoryProtectedEventStore } from "@graph-engineering/persistence";
 import { describe, expect, it, vi } from "vitest";
 import {
   decodeDurableJson,
   DurableRunError,
-  durableJsonHash,
   encodeDurableJson,
+  ProtectedDurableRun,
   resumeDurableGraphRun,
   startDurableGraphRun,
   type DurableNodeExecutionContext,
+  type DurablePayloadProtection,
+  type RecoveredEvent,
 } from "../src/index.js";
 import {
   projectedRuntimeCapabilityFailures,
   runtimeCapabilityCorpus,
 } from "./runtime-capability-fixtures.js";
+import {
+  activityKeyFor,
+  appendForged,
+  blockingSuccess,
+  commitThenThrow,
+  conflictProtection,
+  forgeHistory,
+  memoryProtection,
+  recoveredHistory,
+  valueMacFor,
+} from "./support/protected-durable.js";
 
 const FIXED_TIME = "2026-07-26T12:00:00.000Z";
 const fixedNow = (): Date => new Date(FIXED_TIME);
@@ -65,35 +73,43 @@ function registeredLoopConditionGraph(): GraphSpec {
   return fixture.graph;
 }
 
-async function history(store: EventStore, runId: string): Promise<GraphEvent[]> {
-  const result: GraphEvent[] = [];
-  for await (const event of store.read(runId)) result.push(event);
-  return result;
+async function history(
+  protection: DurablePayloadProtection,
+  runId: string,
+): Promise<RecoveredEvent[]> {
+  return recoveredHistory(protection, runId);
 }
 
-function resign(event: GraphEvent, data: Readonly<Record<string, unknown>>): GraphEvent {
-  return { ...event, data, payloadHash: canonicalHash(data) };
+/**
+ * Re-sign one recovered event with different `data`.
+ *
+ * Under `events/v1alpha2` "re-signing" no longer means recomputing a payload
+ * hash the writer asserts: every protected value is re-encrypted on the way
+ * back in and every derived MAC is recomputed from whatever value the forger
+ * supplies. Only genuinely caller-asserted inline metadata can be made to
+ * disagree with the protected truth, which is the point.
+ */
+function resign(event: RecoveredEvent, data: Readonly<Record<string, unknown>>): RecoveredEvent {
+  return { ...event, data: { ...event.data, ...data } };
 }
 
 function forgedEvent(fields: {
   runId: string;
   sequence: number;
-  type: GraphEvent["type"];
+  type: RecoveredEvent["type"];
   data: Readonly<Record<string, unknown>>;
   nodeId?: string;
   edgeId?: string;
   attempt?: number;
-}): GraphEvent {
+}): RecoveredEvent {
   return {
-    apiVersion: "graphengineering.reacher-z.github.io/events/v1alpha1",
-    eventId: `forged:${fields.sequence}`,
+    eventId: `forged-${fields.sequence}`,
     type: fields.type,
     timestamp: FIXED_TIME,
     runId: fields.runId,
     graphRevision: 1,
     sequence: fields.sequence,
-    payloadHash: canonicalHash(fields.data),
-    redacted: true,
+    payloadHash: "0".repeat(64),
     data: fields.data,
     ...(fields.nodeId === undefined ? {} : { nodeId: fields.nodeId }),
     ...(fields.edgeId === undefined ? {} : { edgeId: fields.edgeId }),
@@ -101,93 +117,11 @@ function forgedEvent(fields: {
   };
 }
 
-async function copyHistory(runId: string, events: readonly GraphEvent[]): Promise<MemoryEventStore> {
-  const store = new MemoryEventStore();
-  await store.append(runId, -1, events);
-  return store;
-}
-
-class CommitThenThrowStore implements EventStore {
-  readonly delegate: MemoryEventStore;
-  readonly shouldThrow: (events: readonly GraphEvent[]) => boolean;
-  threw = false;
-
-  constructor(
-    delegate: MemoryEventStore,
-    shouldThrow: (events: readonly GraphEvent[]) => boolean,
-  ) {
-    this.delegate = delegate;
-    this.shouldThrow = shouldThrow;
-  }
-
-  async append(
-    runId: string,
-    expectedVersion: number,
-    events: readonly GraphEvent[],
-  ): Promise<number> {
-    const version = await this.delegate.append(runId, expectedVersion, events);
-    if (!this.threw && this.shouldThrow(events)) {
-      this.threw = true;
-      throw new Error("simulated process loss after durable commit");
-    }
-    return version;
-  }
-
-  read(runId: string, fromSequence = 0): AsyncIterable<GraphEvent> {
-    return this.delegate.read(runId, fromSequence);
-  }
-}
-
-class ConflictStore implements EventStore {
-  readonly delegate: MemoryEventStore;
-
-  constructor(delegate: MemoryEventStore) {
-    this.delegate = delegate;
-  }
-
-  async append(runId: string, expectedVersion: number): Promise<number> {
-    const actual = (await history(this.delegate, runId)).length - 1;
-    throw new VersionConflictError(runId, expectedVersion, actual + 1);
-  }
-
-  read(runId: string, fromSequence = 0): AsyncIterable<GraphEvent> {
-    return this.delegate.read(runId, fromSequence);
-  }
-}
-
-class BlockingSuccessStore implements EventStore {
-  readonly delegate = new MemoryEventStore();
-  readonly entered: Promise<void>;
-  #enter!: () => void;
-  #release!: () => void;
-  #gate: Promise<void>;
-  #blocked = false;
-
-  constructor() {
-    this.entered = new Promise((resolve) => { this.#enter = resolve; });
-    this.#gate = new Promise((resolve) => { this.#release = resolve; });
-  }
-
-  release(): void {
-    this.#release();
-  }
-
-  async append(
-    runId: string,
-    expectedVersion: number,
-    events: readonly GraphEvent[],
-  ): Promise<number> {
-    if (!this.#blocked && events.some((event) => event.type === "NodeSucceeded")) {
-      this.#blocked = true;
-      this.#enter();
-      await this.#gate;
-    }
-    return this.delegate.append(runId, expectedVersion, events);
-  }
-
-  read(runId: string, fromSequence = 0): AsyncIterable<GraphEvent> {
-    return this.delegate.read(runId, fromSequence);
-  }
+async function copyHistory(
+  runId: string,
+  events: readonly RecoveredEvent[],
+): Promise<DurablePayloadProtection> {
+  return forgeHistory(runId, events);
 }
 
 describe("durable graph scheduler", () => {
@@ -204,11 +138,11 @@ describe("durable graph scheduler", () => {
         );
 
         if (testCase.expect.supported) {
-          const store = new MemoryEventStore();
+          const store = memoryProtection();
           const options = {
             runId: `capability-${entrypoint}`,
             implementationId: "v1",
-            eventStore: store,
+            protection: store,
             nodeExecutors,
           };
           if (entrypoint === "resume") {
@@ -240,7 +174,7 @@ describe("durable graph scheduler", () => {
         const options = {
           runId: `capability-${entrypoint}`,
           implementationId: "v1",
-          eventStore: store,
+          protection: store,
           nodeExecutors,
         };
         const result = entrypoint === "start"
@@ -277,7 +211,7 @@ describe("durable graph scheduler", () => {
     const options = {
       runId: "combined-capabilities",
       implementationId: "v1",
-      eventStore: { read, append } satisfies EventStore,
+      protection: { read, append } satisfies EventStore,
       nodeExecutors: { source: executor },
     };
 
@@ -324,7 +258,7 @@ describe("durable graph scheduler", () => {
     const options = {
       runId: "unsupported-barrier-config",
       implementationId: "v1",
-      eventStore: { read, append } satisfies EventStore,
+      protection: { read, append } satisfies EventStore,
       nodeExecutors: { root: executor },
     };
 
@@ -350,12 +284,12 @@ describe("durable graph scheduler", () => {
   });
 
   it("commits every claim before execution and terminal resume is deeply identical", async () => {
-    const store = new MemoryEventStore();
+    const store = memoryProtection();
     let identity: readonly string[] | undefined;
     const result = await startDurableGraphRun(graph(), { seed: 1.5 }, {
       runId: "start-basic",
       implementationId: "handlers@1",
-      eventStore: store,
+      protection: store,
       now: fixedNow,
       nodeExecutors: {
         root: async (context) => {
@@ -380,7 +314,7 @@ describe("durable graph scheduler", () => {
     const resumed = await resumeDurableGraphRun(graph(), {
       runId: "start-basic",
       implementationId: "handlers@1",
-      eventStore: store,
+      protection: store,
       now: fixedNow,
       nodeExecutors: { root: mustNotRun },
     });
@@ -424,40 +358,41 @@ describe("durable graph scheduler", () => {
         },
       ],
     });
-    const source = new MemoryEventStore();
-    const crash = new CommitThenThrowStore(
+    const source = memoryProtection();
+    const crash = commitThenThrow(
       source,
       (batch) => batch.some((event) => event.type === "NodeSucceeded" && event.nodeId === "route"),
     );
     await expect(startDurableGraphRun(routed, { requestedRoutes: ["quick"] }, {
       runId: "forged-router-success",
       implementationId: "v1",
-      eventStore: crash,
+      protection: crash,
       now: fixedNow,
     })).rejects.toMatchObject({ code: "DURABILITY_STORE_FAILED" });
 
     const events = await history(source, "forged-router-success");
     const successIndex = events.findIndex((event) => event.type === "NodeSucceeded");
-    const success = events[successIndex] as GraphEvent;
+    const success = events[successIndex] as RecoveredEvent;
     const output = JSON.parse(JSON.stringify(decodeDurableJson(success.data.output))) as Record<string, unknown>;
     output.requestedRoutes = ["audit"];
     output.selectedRoutes = ["audit"];
-    const outputHash = durableJsonHash(output);
+    const outputMac = valueMacFor(
+      source,
+      "forged-router-success",
+      { kind: "node-output", runId: "forged-router-success", graphRevision: 1, nodeId: "route" },
+      output,
+    );
     const changed = [...events];
-    changed[successIndex] = resign(success, {
-      ...success.data,
-      output: encodeDurableJson(output),
-      outputHash,
-    });
+    changed[successIndex] = resign(success, { output: encodeDurableJson(output) });
     const emittedIndex = events.findIndex((event) => event.type === "EdgeEmitted");
-    changed[emittedIndex] = resign(events[emittedIndex] as GraphEvent, { outputHash });
+    changed[emittedIndex] = resign(events[emittedIndex] as RecoveredEvent, { outputMac });
     const forged = await copyHistory("forged-router-success", changed);
     const before = (await history(forged, "forged-router-success")).length;
 
     await expect(resumeDurableGraphRun(routed, {
       runId: "forged-router-success",
       implementationId: "v1",
-      eventStore: forged,
+      protection: forged,
       now: fixedNow,
     })).rejects.toMatchObject({ code: "INVALID_RUN_HISTORY" });
     expect((await history(forged, "forged-router-success")).length).toBe(before);
@@ -485,13 +420,13 @@ describe("durable graph scheduler", () => {
         { id: "route-audit", from: { node: "route" }, to: { node: "audit" }, condition: condition("audit") },
       ],
     });
-    const store = new MemoryEventStore();
+    const store = memoryProtection();
     const quick = vi.fn(() => "must-not-run");
     const audit = vi.fn(() => ({ reviewed: true }));
     const first = await startDurableGraphRun(routed, { requestedRoutes: ["audit"] }, {
       runId: "durable-route-replay",
       implementationId: "v1",
-      eventStore: store,
+      protection: store,
       now: fixedNow,
       nodeExecutors: { quick, audit },
     });
@@ -507,7 +442,7 @@ describe("durable graph scheduler", () => {
     const resumed = await resumeDurableGraphRun(routed, {
       runId: "durable-route-replay",
       implementationId: "v1",
-      eventStore: store,
+      protection: store,
       now: fixedNow,
       nodeExecutors: { route: mustNotRun, quick: mustNotRun, audit: mustNotRun },
     });
@@ -537,12 +472,12 @@ describe("durable graph scheduler", () => {
         },
       }],
     });
-    const store = new MemoryEventStore();
+    const store = memoryProtection();
     const branch = vi.fn();
     const first = await startDurableGraphRun(routed, { requestedRoutes: ["unknown"] }, {
       runId: "inactive-route-output",
       implementationId: "v1",
-      eventStore: store,
+      protection: store,
       now: fixedNow,
       nodeExecutors: { branch },
     });
@@ -554,7 +489,7 @@ describe("durable graph scheduler", () => {
     const resumed = await resumeDurableGraphRun(routed, {
       runId: "inactive-route-output",
       implementationId: "v1",
-      eventStore: store,
+      protection: store,
       now: fixedNow,
       nodeExecutors: { branch },
     });
@@ -580,8 +515,8 @@ describe("durable graph scheduler", () => {
         condition: { kind: "RouteEquals", routeKey: "quick" },
       }],
     });
-    const source = new MemoryEventStore();
-    const crash = new CommitThenThrowStore(
+    const source = memoryProtection();
+    const crash = commitThenThrow(
       source,
       (batch) => batch.some((event) =>
         event.type === "NodeSettledWithoutAttempt" && event.nodeId === "route"),
@@ -591,7 +526,7 @@ describe("durable graph scheduler", () => {
     const result = await startDurableGraphRun(unsupported, {}, {
       runId: "unsupported-settlement-crash",
       implementationId: "v1",
-      eventStore: crash,
+      protection: crash,
       now: fixedNow,
       nodeExecutors: { route, child },
     });
@@ -618,7 +553,7 @@ describe("durable graph scheduler", () => {
     const options = {
       runId: "registered-loop-preflight",
       implementationId: "v1",
-      eventStore: store,
+      protection: store,
       now: fixedNow,
       nodeExecutors: { source: sourceExecutor },
     };
@@ -670,16 +605,16 @@ describe("durable graph scheduler", () => {
     });
     const unsupported = JSON.parse(JSON.stringify(supported)) as GraphSpec;
     unsupported.edges[0]!.condition = { kind: "RouteEquals", routeKey: "quick" };
-    const source = new MemoryEventStore();
+    const source = memoryProtection();
     await startDurableGraphRun(supported, { requestedRoutes: ["quick"] }, {
       runId: "attempted-unsupported-condition",
       implementationId: "v1",
-      eventStore: source,
+      protection: source,
       now: fixedNow,
       nodeExecutors: { child: () => ({ done: true }) },
     });
     const events = await history(source, "attempted-unsupported-condition");
-    const created = events[0] as GraphEvent;
+    const created = events[0] as RecoveredEvent;
     const resigned = [...events];
     resigned[0] = resign(created, {
       ...created.data,
@@ -691,7 +626,7 @@ describe("durable graph scheduler", () => {
     const result = await resumeDurableGraphRun(unsupported, {
       runId: "attempted-unsupported-condition",
       implementationId: "v1",
-      eventStore: forged,
+      protection: forged,
       now: fixedNow,
     });
     expect(result).toMatchObject({
@@ -730,16 +665,16 @@ describe("durable graph scheduler", () => {
     };
     inactiveDocument.edges[0]!.condition.routeKey = "audit";
     const inactive = inactiveDocument as unknown as GraphSpec;
-    const source = new MemoryEventStore();
+    const source = memoryProtection();
     await startDurableGraphRun(active, { requestedRoutes: ["quick"] }, {
       runId: "attempted-inactive-branch",
       implementationId: "v1",
-      eventStore: source,
+      protection: source,
       now: fixedNow,
       nodeExecutors: { child: () => ({ done: true }) },
     });
     const events = await history(source, "attempted-inactive-branch");
-    const created = events[0] as GraphEvent;
+    const created = events[0] as RecoveredEvent;
     const resigned = [...events];
     resigned[0] = resign(created, {
       ...created.data,
@@ -751,7 +686,7 @@ describe("durable graph scheduler", () => {
     const result = await resumeDurableGraphRun(inactive, {
       runId: "attempted-inactive-branch",
       implementationId: "v1",
-      eventStore: forged,
+      protection: forged,
       now: fixedNow,
     });
     expect(result).toMatchObject({
@@ -780,15 +715,15 @@ describe("durable graph scheduler", () => {
         totalAttempts: number;
       };
     };
-    const delegate = new MemoryEventStore();
-    const crashStore = new CommitThenThrowStore(
+    const delegate = memoryProtection();
+    const crashStore = commitThenThrow(
       delegate,
       (batch) => batch.some((event) => event.type === "NodeStarted" && event.nodeId === "right"),
     );
     await expect(startDurableGraphRun(fixture.graph, fixture.graphInput, {
       runId: fixture.runId,
       implementationId: fixture.implementationId,
-      eventStore: crashStore,
+      protection: crashStore,
       concurrency: 1,
       now: fixedNow,
       nodeExecutors: {
@@ -809,7 +744,7 @@ describe("durable graph scheduler", () => {
     const resumed = await resumeDurableGraphRun(fixture.graph, {
       runId: fixture.runId,
       implementationId: fixture.implementationId,
-      eventStore: crashStore,
+      protection: crashStore,
       now: fixedNow,
       nodeExecutors: {
         left,
@@ -839,7 +774,7 @@ describe("durable graph scheduler", () => {
     const terminal = await resumeDurableGraphRun(fixture.graph, {
       runId: fixture.runId,
       implementationId: fixture.implementationId,
-      eventStore: crashStore,
+      protection: crashStore,
       nodeExecutors: {
         left: left,
         right: left,
@@ -851,7 +786,7 @@ describe("durable graph scheduler", () => {
   });
 
   it("commits success before a dependent is released", async () => {
-    const store = new BlockingSuccessStore();
+    const store = blockingSuccess();
     const dependent = vi.fn(() => "done");
     const chain = graph({
       entrypoints: ["root"],
@@ -862,7 +797,7 @@ describe("durable graph scheduler", () => {
     const running = startDurableGraphRun(chain, { value: 1 }, {
       runId: "commit-before-release",
       implementationId: "v1",
-      eventStore: store,
+      protection: store,
       nodeExecutors: { root: () => "root", dependent },
     });
     await store.entered;
@@ -882,22 +817,22 @@ describe("durable graph scheduler", () => {
         retry: { maxAttempts: 2 },
       }],
     });
-    const delegate = new MemoryEventStore();
-    const crashStore = new CommitThenThrowStore(
+    const delegate = memoryProtection();
+    const crashStore = commitThenThrow(
       delegate,
       (batch) => batch.some((event) => event.type === "NodeStarted"),
     );
     await expect(startDurableGraphRun(unsafe, {}, {
       runId: "unsafe",
       implementationId: "v1",
-      eventStore: crashStore,
+      protection: crashStore,
       nodeExecutors: { root: () => "never" },
     })).rejects.toMatchObject({ code: "DURABILITY_STORE_FAILED" });
     const executor = vi.fn(() => "must-not-run");
     await expect(resumeDurableGraphRun(unsafe, {
       runId: "unsafe",
       implementationId: "v1",
-      eventStore: crashStore,
+      protection: crashStore,
       nodeExecutors: { root: executor },
     })).rejects.toMatchObject({ code: "IN_DOUBT_SIDE_EFFECT" });
     expect(executor).not.toHaveBeenCalled();
@@ -905,7 +840,7 @@ describe("durable graph scheduler", () => {
     await expect(resumeDurableGraphRun(unsafe, {
       runId: "unsafe",
       implementationId: "v1",
-      eventStore: crashStore,
+      protection: crashStore,
       nodeExecutors: { root: executor },
     })).rejects.toMatchObject({ code: "IN_DOUBT_SIDE_EFFECT" });
     expect((await history(delegate, "unsafe")).length).toBe(count);
@@ -914,34 +849,34 @@ describe("durable graph scheduler", () => {
 
   it("losing the resume CAS invokes no executor", async () => {
     const retrying = graph({ nodes: [node("root", { retry: { maxAttempts: 2 } })] });
-    const delegate = new MemoryEventStore();
-    const crashStore = new CommitThenThrowStore(
+    const delegate = memoryProtection();
+    const crashStore = commitThenThrow(
       delegate,
       (batch) => batch.some((event) => event.type === "NodeStarted"),
     );
     await expect(startDurableGraphRun(retrying, {}, {
       runId: "cas",
       implementationId: "v1",
-      eventStore: crashStore,
+      protection: crashStore,
       nodeExecutors: { root: () => "never" },
     })).rejects.toBeInstanceOf(DurableRunError);
     const executor = vi.fn(() => "bad");
     await expect(resumeDurableGraphRun(retrying, {
       runId: "cas",
       implementationId: "v1",
-      eventStore: new ConflictStore(delegate),
+      protection: conflictProtection(delegate),
       nodeExecutors: { root: executor },
     })).rejects.toMatchObject({ code: "RESUME_CONFLICT" });
     expect(executor).not.toHaveBeenCalled();
   });
 
   it("validates zero-attempt outcomes independently of current executor maps", async () => {
-    const store = new MemoryEventStore();
+    const store = memoryProtection();
     const missing = graph();
     const failed = await startDurableGraphRun(missing, {}, {
       runId: "missing-handler",
       implementationId: "missing@1",
-      eventStore: store,
+      protection: store,
     });
     expect(failed.failures[0]).toMatchObject({ code: "EXECUTOR_NOT_FOUND" });
     expect((await history(store, "missing-handler")).map((event) => event.type)).toEqual([
@@ -950,20 +885,20 @@ describe("durable graph scheduler", () => {
     const withHandler = await resumeDurableGraphRun(missing, {
       runId: "missing-handler",
       implementationId: "missing@1",
-      eventStore: store,
+      protection: store,
       nodeExecutors: { root: () => "would-change-the-outcome" },
     });
     const withoutHandler = await resumeDurableGraphRun(missing, {
       runId: "missing-handler",
       implementationId: "missing@1",
-      eventStore: store,
+      protection: store,
     });
     assert.deepStrictEqual(withHandler, failed);
     assert.deepStrictEqual(withoutHandler, failed);
   });
 
   it("snapshots the executor registry and gives handlers an immutable canonical graph", async () => {
-    const store = new MemoryEventStore();
+    const store = memoryProtection();
     const original = vi.fn((context: DurableNodeExecutionContext) => {
       expect(Object.isFrozen(context.graph)).toBe(true);
       expect(Object.isFrozen(context.graph.nodes)).toBe(true);
@@ -978,7 +913,7 @@ describe("durable graph scheduler", () => {
     const running = startDurableGraphRun(graph(), {}, {
       runId: "immutable-inputs",
       implementationId: "v1",
-      eventStore: store,
+      protection: store,
       nodeExecutors: registry,
     });
     registry.root = replacement;
@@ -989,48 +924,46 @@ describe("durable graph scheduler", () => {
   });
 
   it("rejects implementation, graph, input, and payload identity changes", async () => {
-    const source = new MemoryEventStore();
+    const source = memoryProtection();
     await startDurableGraphRun(graph(), { seed: 1 }, {
       runId: "identity",
       implementationId: "v1",
-      eventStore: source,
+      protection: source,
       now: fixedNow,
       nodeExecutors: { root: () => "ok" },
     });
     await expect(resumeDurableGraphRun(graph(), {
-      runId: "identity", implementationId: "v2", eventStore: source,
+      runId: "identity", implementationId: "v2", protection: source,
     })).rejects.toMatchObject({ code: "IMPLEMENTATION_MISMATCH" });
     await expect(resumeDurableGraphRun(graph({
       nodes: [node("root", { config: { changed: true } })],
     }), {
-      runId: "identity", implementationId: "v1", eventStore: source,
+      runId: "identity", implementationId: "v1", protection: source,
     })).rejects.toMatchObject({ code: "GRAPH_HASH_MISMATCH" });
 
+    // Under events/v1alpha2 the graph input travels as a protected reference and
+    // `RunCreated.inputMac` is computed by the guard from the value it just
+    // encrypted, so an input-identity lie is no longer expressible through the
+    // writer at all. What a forger still controls is the caller-asserted
+    // recovery identity on `NodeStarted`, and that must still be rejected.
     const events = await history(source, "identity");
-    const createdData = { ...events[0]!.data, inputHash: "0".repeat(64) };
-    const changedInput = await copyHistory("identity", [
-      resign(events[0]!, createdData), ...events.slice(1),
+    const startedIndex = events.findIndex((event) => event.type === "NodeStarted");
+    const forgedIdentity = await copyHistory("identity", [
+      ...events.slice(0, startedIndex),
+      resign(events[startedIndex]!, { inputMac: "0".repeat(64) }),
+      ...events.slice(startedIndex + 1),
     ]);
     await expect(resumeDurableGraphRun(graph(), {
-      runId: "identity", implementationId: "v1", eventStore: changedInput,
-    })).rejects.toMatchObject({ code: "INPUT_HASH_MISMATCH" });
-
-    const badPayload = await copyHistory("identity", [
-      ...events.slice(0, 2),
-      { ...events[2]!, payloadHash: "f".repeat(64) },
-      ...events.slice(3),
-    ]);
-    await expect(resumeDurableGraphRun(graph(), {
-      runId: "identity", implementationId: "v1", eventStore: badPayload,
+      runId: "identity", implementationId: "v1", protection: forgedIdentity,
     })).rejects.toMatchObject({ code: "INVALID_RUN_HISTORY" });
   });
 
   it("rejects resigned terminal and self-consistent scheduled-input forgeries", async () => {
-    const source = new MemoryEventStore();
+    const source = memoryProtection();
     await startDurableGraphRun(graph(), { seed: 1 }, {
       runId: "forgery",
       implementationId: "v1",
-      eventStore: source,
+      protection: source,
       now: fixedNow,
       nodeExecutors: { root: () => "real" },
     });
@@ -1045,7 +978,7 @@ describe("durable graph scheduler", () => {
       resign(events[terminalIndex]!, { result: encodeDurableJson(terminalResult) }),
     ]);
     await expect(resumeDurableGraphRun(graph(), {
-      runId: "forgery", implementationId: "v1", eventStore: forgedTerminal,
+      runId: "forgery", implementationId: "v1", protection: forgedTerminal,
       nodeExecutors: { root: () => "real" },
     })).rejects.toMatchObject({ code: "INVALID_RUN_HISTORY" });
 
@@ -1053,21 +986,22 @@ describe("durable graph scheduler", () => {
     const startedIndex = events.findIndex((event) => event.type === "NodeStarted");
     const succeededIndex = events.findIndex((event) => event.type === "NodeSucceeded");
     const forgedInput = { seed: 999 };
-    const inputHash = durableJsonHash(forgedInput);
-    const activityKey = durableJsonHash([
-      "activity/v1alpha1", "forgery", 1, "root", inputHash,
-    ]);
+    const inputMac = valueMacFor(
+      source,
+      "forgery",
+      { kind: "node-input", runId: "forgery", graphRevision: 1, nodeId: "root" },
+      forgedInput,
+    );
+    const activityKey = activityKeyFor(source, "forgery", "root", inputMac);
     const changed = [...events];
     changed[scheduledIndex] = resign(events[scheduledIndex]!, {
-      input: encodeDurableJson(forgedInput), inputHash, activityKey, sideEffects: "none",
+      input: encodeDurableJson(forgedInput), activityKey, sideEffects: "none",
     });
-    changed[startedIndex] = resign(events[startedIndex]!, { inputHash, activityKey });
-    changed[succeededIndex] = resign(events[succeededIndex]!, {
-      ...events[succeededIndex]!.data, inputHash,
-    });
+    changed[startedIndex] = resign(events[startedIndex]!, { inputMac, activityKey });
+    changed[succeededIndex] = resign(events[succeededIndex]!, { inputMac });
     const forgedInputStore = await copyHistory("forgery", changed);
     await expect(resumeDurableGraphRun(graph(), {
-      runId: "forgery", implementationId: "v1", eventStore: forgedInputStore,
+      runId: "forgery", implementationId: "v1", protection: forgedInputStore,
     })).rejects.toMatchObject({ code: "INVALID_RUN_HISTORY" });
   });
 
@@ -1080,11 +1014,11 @@ describe("durable graph scheduler", () => {
     });
     let aAttempts = 0;
     const b = vi.fn(() => "must-not-run");
-    const store = new MemoryEventStore();
+    const store = memoryProtection();
     const result = await startDurableGraphRun(limited, {}, {
       runId: "reserved-budget",
       implementationId: "v1",
-      eventStore: store,
+      protection: store,
       concurrency: 1,
       now: fixedNow,
       nodeExecutors: {
@@ -1104,7 +1038,7 @@ describe("durable graph scheduler", () => {
       (event) => event.type === "NodeSettledWithoutAttempt" && event.nodeId === "b",
     )).toBe(true);
     const terminal = await resumeDurableGraphRun(limited, {
-      runId: "reserved-budget", implementationId: "v1", eventStore: store,
+      runId: "reserved-budget", implementationId: "v1", protection: store,
       nodeExecutors: { a: () => "unused", b: () => "unused" },
     });
     assert.deepStrictEqual(terminal, result);
@@ -1120,8 +1054,8 @@ describe("durable graph scheduler", () => {
       ],
       policies: { maxConcurrency: 2, maxTotalAttempts: 3 },
     });
-    const delegate = new MemoryEventStore();
-    const crashStore = new CommitThenThrowStore(
+    const delegate = memoryProtection();
+    const crashStore = commitThenThrow(
       delegate,
       (batch) => batch.some((event) => event.type === "NodeStarted" && event.nodeId === "b"),
     );
@@ -1132,7 +1066,7 @@ describe("durable graph scheduler", () => {
     await expect(startDurableGraphRun(twoRoots, {}, {
       runId: "last-token",
       implementationId: "v1",
-      eventStore: crashStore,
+      protection: crashStore,
       concurrency: 2,
       now: fixedNow,
       nodeExecutors: { a: waitForAbort, b: () => "never" },
@@ -1144,7 +1078,7 @@ describe("durable graph scheduler", () => {
     const result = await resumeDurableGraphRun(twoRoots, {
       runId: "last-token",
       implementationId: "v1",
-      eventStore: crashStore,
+      protection: crashStore,
       now: fixedNow,
       nodeExecutors: {
         a: (context) => {
@@ -1184,7 +1118,7 @@ describe("durable graph scheduler", () => {
     });
     const earlyStore = await copyHistory("last-token", forgedEarlyTerminal);
     await expect(resumeDurableGraphRun(twoRoots, {
-      runId: "last-token", implementationId: "v1", eventStore: earlyStore,
+      runId: "last-token", implementationId: "v1", protection: earlyStore,
     })).rejects.toMatchObject({ code: "INVALID_RUN_HISTORY" });
 
     const bIndex = events.indexOf(interrupted[1]!);
@@ -1196,7 +1130,7 @@ describe("durable graph scheduler", () => {
     });
     const extraStore = await copyHistory("last-token", forgedExtraRetry);
     await expect(resumeDurableGraphRun(twoRoots, {
-      runId: "last-token", implementationId: "v1", eventStore: extraStore,
+      runId: "last-token", implementationId: "v1", protection: extraStore,
     })).rejects.toMatchObject({ code: "INVALID_RUN_HISTORY" });
 
     const retriedIndex = events.findIndex((event) =>
@@ -1208,7 +1142,7 @@ describe("durable graph scheduler", () => {
     });
     const invalidDateStore = await copyHistory("last-token", invalidDate);
     await expect(resumeDurableGraphRun(twoRoots, {
-      runId: "last-token", implementationId: "v1", eventStore: invalidDateStore,
+      runId: "last-token", implementationId: "v1", protection: invalidDateStore,
     })).rejects.toMatchObject({ code: "INVALID_RUN_HISTORY" });
 
     const yearZero = [...events];
@@ -1218,21 +1152,21 @@ describe("durable graph scheduler", () => {
     });
     const yearZeroStore = await copyHistory("last-token", yearZero);
     await expect(resumeDurableGraphRun(twoRoots, {
-      runId: "last-token", implementationId: "v1", eventStore: yearZeroStore,
+      runId: "last-token", implementationId: "v1", protection: yearZeroStore,
     })).rejects.toMatchObject({ code: "INVALID_RUN_HISTORY" });
   });
 
   it("rejects non-attempt codes in NodeAttemptFailed", async () => {
     const retrying = graph({ nodes: [node("root", { retry: { maxAttempts: 2 } })] });
-    const delegate = new MemoryEventStore();
-    const crashStore = new CommitThenThrowStore(
+    const delegate = memoryProtection();
+    const crashStore = commitThenThrow(
       delegate,
       (batch) => batch.some((event) => event.type === "NodeStarted"),
     );
     await expect(startDurableGraphRun(retrying, {}, {
       runId: "bad-attempt-code",
       implementationId: "v1",
-      eventStore: crashStore,
+      protection: crashStore,
       nodeExecutors: { root: () => "never" },
     })).rejects.toBeInstanceOf(DurableRunError);
     const events = await history(delegate, "bad-attempt-code");
@@ -1254,9 +1188,9 @@ describe("durable graph scheduler", () => {
         },
       },
     });
-    await delegate.append("bad-attempt-code", events.length - 1, [suffix]);
+    await appendForged(delegate, "bad-attempt-code", events.length - 1, [suffix]);
     await expect(resumeDurableGraphRun(retrying, {
-      runId: "bad-attempt-code", implementationId: "v1", eventStore: delegate,
+      runId: "bad-attempt-code", implementationId: "v1", protection: delegate,
     })).rejects.toMatchObject({ code: "INVALID_RUN_HISTORY" });
   });
 
@@ -1266,15 +1200,15 @@ describe("durable graph scheduler", () => {
       nodes: [node("root", { retry: { maxAttempts: 2 } }), node("dependent")],
       edges: [{ id: "root-dependent", from: { node: "root" }, to: { node: "dependent" } }],
     });
-    const delegate = new MemoryEventStore();
-    const crashStore = new CommitThenThrowStore(
+    const delegate = memoryProtection();
+    const crashStore = commitThenThrow(
       delegate,
       (batch) => batch.some((event) => event.type === "NodeStarted" && event.nodeId === "root"),
     );
     await expect(startDurableGraphRun(chain, {}, {
       runId: "premature-dependent",
       implementationId: "v1",
-      eventStore: crashStore,
+      protection: crashStore,
       nodeExecutors: { root: () => "never", dependent: () => "never" },
     })).rejects.toBeInstanceOf(DurableRunError);
     const events = await history(delegate, "premature-dependent");
@@ -1293,15 +1227,20 @@ describe("durable graph scheduler", () => {
         upstreamNodeIds: ["root"],
       },
     };
-    await delegate.append("premature-dependent", events.length - 1, [forgedEvent({
+    await appendForged(delegate, "premature-dependent", events.length - 1, [forgedEvent({
       runId: "premature-dependent",
       sequence: events.length,
       type: "NodeSettledWithoutAttempt",
       nodeId: "dependent",
-      data: { result: encodeDurableJson(result) },
+      data: {
+        result: encodeDurableJson(result),
+        status: "skipped",
+        attempts: 0,
+        failureCode: "UPSTREAM_FAILED",
+      },
     })]);
     await expect(resumeDurableGraphRun(chain, {
-      runId: "premature-dependent", implementationId: "v1", eventStore: delegate,
+      runId: "premature-dependent", implementationId: "v1", protection: delegate,
     })).rejects.toMatchObject({ code: "INVALID_RUN_HISTORY" });
   });
 
@@ -1314,7 +1253,7 @@ describe("durable graph scheduler", () => {
     const result = await startDurableGraphRun(inheritedName, {}, {
       runId: "own-executors",
       implementationId: "v1",
-      eventStore: new MemoryEventStore(),
+      protection: memoryProtection(),
       nodeExecutors: {},
       executors: {},
     });
@@ -1327,21 +1266,21 @@ describe("durable graph scheduler", () => {
       nodes: [node("root", { retry: { maxAttempts: 2 } })],
       policies: { maxTotalAttempts: 2 },
     });
-    const delegate = new MemoryEventStore();
-    const crashStore = new CommitThenThrowStore(
+    const delegate = memoryProtection();
+    const crashStore = commitThenThrow(
       delegate,
       (batch) => batch.some((event) => event.type === "NodeRetried"),
     );
     await expect(startDurableGraphRun(retrying, { seed: 1 }, {
       runId: "pre-scheduled-retry",
       implementationId: "v1",
-      eventStore: crashStore,
+      protection: crashStore,
       now: fixedNow,
       nodeExecutors: { root: () => { throw new Error("retry"); } },
     })).rejects.toMatchObject({ code: "DURABILITY_STORE_FAILED" });
     const events = await history(delegate, "pre-scheduled-retry");
     const firstSchedule = events.find((event) => event.type === "NodeScheduled")!;
-    await delegate.append("pre-scheduled-retry", events.length - 1, [forgedEvent({
+    await appendForged(delegate, "pre-scheduled-retry", events.length - 1, [forgedEvent({
       runId: "pre-scheduled-retry",
       sequence: events.length,
       type: "NodeScheduled",
@@ -1353,7 +1292,7 @@ describe("durable graph scheduler", () => {
     const result = await resumeDurableGraphRun(retrying, {
       runId: "pre-scheduled-retry",
       implementationId: "v1",
-      eventStore: crashStore,
+      protection: crashStore,
       now: fixedNow,
       nodeExecutors: {
         root: (context) => {
@@ -1376,15 +1315,15 @@ describe("durable graph scheduler", () => {
       nodes: [node("root", { retry: { maxAttempts: 2 } })],
       policies: { maxTotalAttempts: 2 },
     });
-    const delegate = new MemoryEventStore();
-    const crashStore = new CommitThenThrowStore(
+    const delegate = memoryProtection();
+    const crashStore = commitThenThrow(
       delegate,
       (batch) => batch.some((event) => event.type === "NodeRetried"),
     );
     await expect(startDurableGraphRun(retrying, {}, {
       runId: "cancel-pending-retry",
       implementationId: "v1",
-      eventStore: crashStore,
+      protection: crashStore,
       now: fixedNow,
       nodeExecutors: { root: () => { throw new Error("retry"); } },
     })).rejects.toBeInstanceOf(DurableRunError);
@@ -1394,7 +1333,7 @@ describe("durable graph scheduler", () => {
     const result = await resumeDurableGraphRun(retrying, {
       runId: "cancel-pending-retry",
       implementationId: "v1",
-      eventStore: crashStore,
+      protection: crashStore,
       signal: controller.signal,
       now: fixedNow,
       nodeExecutors: { root: executor },
@@ -1415,17 +1354,17 @@ describe("durable graph scheduler", () => {
     const terminal = await resumeDurableGraphRun(retrying, {
       runId: "cancel-pending-retry",
       implementationId: "v1",
-      eventStore: crashStore,
+      protection: crashStore,
     });
     assert.deepStrictEqual(terminal, result);
   });
 
   it("accepts foreign human text while keeping NodeSettled semantics strict", async () => {
-    const source = new MemoryEventStore();
+    const source = memoryProtection();
     await startDurableGraphRun(graph(), {}, {
       runId: "foreign-settled-text",
       implementationId: "v1",
-      eventStore: source,
+      protection: source,
       now: fixedNow,
     });
     const events = await history(source, "foreign-settled-text");
@@ -1453,17 +1392,17 @@ describe("durable graph scheduler", () => {
     });
     const store = await copyHistory("foreign-settled-text", foreign);
     await expect(resumeDurableGraphRun(graph(), {
-      runId: "foreign-settled-text", implementationId: "v1", eventStore: store,
+      runId: "foreign-settled-text", implementationId: "v1", protection: store,
     })).resolves.toMatchObject({ status: "failed" });
   });
 
   it("accepts a foreign cancelled-attempt message but preserves cancellation structure", async () => {
-    const source = new MemoryEventStore();
+    const source = memoryProtection();
     const controller = new AbortController();
     await startDurableGraphRun(graph(), {}, {
       runId: "foreign-cancel-text",
       implementationId: "v1",
-      eventStore: source,
+      protection: source,
       now: fixedNow,
       signal: controller.signal,
       nodeExecutors: {
@@ -1495,18 +1434,18 @@ describe("durable graph scheduler", () => {
     });
     const store = await copyHistory("foreign-cancel-text", foreign);
     await expect(resumeDurableGraphRun(graph(), {
-      runId: "foreign-cancel-text", implementationId: "v1", eventStore: store,
+      runId: "foreign-cancel-text", implementationId: "v1", protection: store,
       nodeExecutors: { root: () => "unused" },
     })).resolves.toMatchObject({ status: "cancelled" });
   });
 
   it("compares output-binding failures without runtime-specific human text", async () => {
     const outputGraph = graph({ outputs: { result: { node: "root", port: "missing" } } });
-    const source = new MemoryEventStore();
+    const source = memoryProtection();
     await startDurableGraphRun(outputGraph, {}, {
       runId: "foreign-output-text",
       implementationId: "v1",
-      eventStore: source,
+      protection: source,
       now: fixedNow,
       nodeExecutors: { root: () => ({ actual: true }) },
     });
@@ -1522,7 +1461,7 @@ describe("durable graph scheduler", () => {
     });
     const store = await copyHistory("foreign-output-text", foreign);
     await expect(resumeDurableGraphRun(outputGraph, {
-      runId: "foreign-output-text", implementationId: "v1", eventStore: store,
+      runId: "foreign-output-text", implementationId: "v1", protection: store,
       nodeExecutors: { root: () => "unused" },
     })).resolves.toMatchObject({
       status: "failed",
@@ -1541,12 +1480,12 @@ describe("durable graph scheduler", () => {
         to: { node: "consumer", port: "__proto__" },
       }],
     });
-    const store = new MemoryEventStore();
+    const store = memoryProtection();
     let boundInput: Record<string, unknown> | undefined;
     const result = await startDurableGraphRun(document, {}, {
       runId: "durable-proto-key",
       implementationId: "v1",
-      eventStore: store,
+      protection: store,
       nodeExecutors: {
         root: () => ({ safe: true }),
         consumer: ({ input }) => {
@@ -1564,7 +1503,7 @@ describe("durable graph scheduler", () => {
     const terminal = await resumeDurableGraphRun(document, {
       runId: "durable-proto-key",
       implementationId: "v1",
-      eventStore: store,
+      protection: store,
     });
     assert.deepStrictEqual(terminal, result);
   });
@@ -1575,12 +1514,12 @@ describe("durable graph scheduler", () => {
       ["invalid-initial-id", () => ""],
       ["throwing-id-factory", () => { throw new Error("factory failed"); }],
     ] as const) {
-      const store = new MemoryEventStore();
+      const store = memoryProtection();
       const executor = vi.fn(() => "never");
       await expect(startDurableGraphRun(graph(), {}, {
         runId,
         implementationId: "v1",
-        eventStore: store,
+        protection: store,
         createEventId: factory,
         nodeExecutors: { root: executor },
       })).rejects.toMatchObject({ code: "DURABILITY_STORE_FAILED" });
@@ -1594,12 +1533,12 @@ describe("durable graph scheduler", () => {
       ["throwing-clock", () => { throw new Error("clock failed"); }],
       ["invalid-clock", () => new Date(Number.NaN)],
     ] as const) {
-      const store = new MemoryEventStore();
+      const store = memoryProtection();
       const executor = vi.fn(() => "never");
       await expect(startDurableGraphRun(graph(), {}, {
         runId,
         implementationId: "v1",
-        eventStore: store,
+        protection: store,
         now,
         nodeExecutors: { root: executor },
       })).rejects.toMatchObject({ code: "DURABILITY_STORE_FAILED" });
@@ -1610,15 +1549,15 @@ describe("durable graph scheduler", () => {
 
   it("rejects a resume event ID that collides with committed history", async () => {
     const retrying = graph({ nodes: [node("root", { retry: { maxAttempts: 2 } })] });
-    const delegate = new MemoryEventStore();
-    const crashStore = new CommitThenThrowStore(
+    const delegate = memoryProtection();
+    const crashStore = commitThenThrow(
       delegate,
       (batch) => batch.some((event) => event.type === "NodeStarted"),
     );
     await expect(startDurableGraphRun(retrying, {}, {
       runId: "resume-id-collision",
       implementationId: "v1",
-      eventStore: crashStore,
+      protection: crashStore,
       nodeExecutors: { root: () => "never" },
     })).rejects.toBeInstanceOf(DurableRunError);
     const before = await history(delegate, "resume-id-collision");
@@ -1626,7 +1565,7 @@ describe("durable graph scheduler", () => {
     await expect(resumeDurableGraphRun(retrying, {
       runId: "resume-id-collision",
       implementationId: "v1",
-      eventStore: crashStore,
+      protection: crashStore,
       createEventId: () => before[0]!.eventId,
       nodeExecutors: { root: executor },
     })).rejects.toMatchObject({ code: "DURABILITY_STORE_FAILED" });
@@ -1635,11 +1574,11 @@ describe("durable graph scheduler", () => {
   });
 
   it("rejects a second NodeStarted after success, terminal failure, or NodeRetried", async () => {
-    const successSource = new MemoryEventStore();
+    const successSource = memoryProtection();
     await startDurableGraphRun(graph(), {}, {
       runId: "duplicate-start-success",
       implementationId: "v1",
-      eventStore: successSource,
+      protection: successSource,
       nodeExecutors: { root: () => "ok" },
     });
     const successEvents = await history(successSource, "duplicate-start-success");
@@ -1658,14 +1597,14 @@ describe("durable graph scheduler", () => {
       }),
     ]);
     await expect(resumeDurableGraphRun(graph(), {
-      runId: "duplicate-start-success", implementationId: "v1", eventStore: forgedSuccess,
+      runId: "duplicate-start-success", implementationId: "v1", protection: forgedSuccess,
     })).rejects.toMatchObject({ code: "INVALID_RUN_HISTORY" });
 
-    const failureSource = new MemoryEventStore();
+    const failureSource = memoryProtection();
     await startDurableGraphRun(graph(), {}, {
       runId: "duplicate-start-failure",
       implementationId: "v1",
-      eventStore: failureSource,
+      protection: failureSource,
       nodeExecutors: { root: () => { throw new Error("failed"); } },
     });
     const failureEvents = await history(failureSource, "duplicate-start-failure");
@@ -1684,24 +1623,24 @@ describe("durable graph scheduler", () => {
       }),
     ]);
     await expect(resumeDurableGraphRun(graph(), {
-      runId: "duplicate-start-failure", implementationId: "v1", eventStore: forgedFailure,
+      runId: "duplicate-start-failure", implementationId: "v1", protection: forgedFailure,
     })).rejects.toMatchObject({ code: "INVALID_RUN_HISTORY" });
 
     const retrying = graph({ nodes: [node("root", { retry: { maxAttempts: 2 } })] });
-    const retryDelegate = new MemoryEventStore();
-    const retryCrash = new CommitThenThrowStore(
+    const retryDelegate = memoryProtection();
+    const retryCrash = commitThenThrow(
       retryDelegate,
       (batch) => batch.some((event) => event.type === "NodeRetried"),
     );
     await expect(startDurableGraphRun(retrying, {}, {
       runId: "duplicate-start-retry",
       implementationId: "v1",
-      eventStore: retryCrash,
+      protection: retryCrash,
       nodeExecutors: { root: () => { throw new Error("retry"); } },
     })).rejects.toBeInstanceOf(DurableRunError);
     const retryEvents = await history(retryDelegate, "duplicate-start-retry");
     const retryStart = retryEvents.find((event) => event.type === "NodeStarted")!;
-    await retryDelegate.append("duplicate-start-retry", retryEvents.length - 1, [forgedEvent({
+    await appendForged(retryDelegate, "duplicate-start-retry", retryEvents.length - 1, [forgedEvent({
       runId: "duplicate-start-retry",
       sequence: retryEvents.length,
       type: "NodeStarted",
@@ -1710,7 +1649,7 @@ describe("durable graph scheduler", () => {
       data: retryStart.data,
     })]);
     await expect(resumeDurableGraphRun(retrying, {
-      runId: "duplicate-start-retry", implementationId: "v1", eventStore: retryDelegate,
+      runId: "duplicate-start-retry", implementationId: "v1", protection: retryDelegate,
     })).rejects.toMatchObject({ code: "INVALID_RUN_HISTORY" });
   });
 
@@ -1721,24 +1660,27 @@ describe("durable graph scheduler", () => {
       nodes: [node("a", { retry: { maxAttempts: 2 } }), node("b")],
       policies: { maxConcurrency: 1, maxTotalAttempts: 2 },
     });
-    const delegate = new MemoryEventStore();
-    const crashStore = new CommitThenThrowStore(
+    const delegate = memoryProtection();
+    const crashStore = commitThenThrow(
       delegate,
       (batch) => batch.some((event) => event.type === "NodeStarted" && event.nodeId === "a"),
     );
     await expect(startDurableGraphRun(limited, {}, {
       runId: "forged-concurrency",
       implementationId: "v1",
-      eventStore: crashStore,
+      protection: crashStore,
       concurrency: 1,
       nodeExecutors: { a: () => "never", b: () => "never" },
     })).rejects.toBeInstanceOf(DurableRunError);
     const events = await history(delegate, "forged-concurrency");
-    const inputHash = durableJsonHash({});
-    const activityKey = durableJsonHash([
-      "activity/v1alpha1", "forged-concurrency", 1, "b", inputHash,
-    ]);
-    await delegate.append("forged-concurrency", events.length - 1, [
+    const inputMac = valueMacFor(
+      delegate,
+      "forged-concurrency",
+      { kind: "node-input", runId: "forged-concurrency", graphRevision: 1, nodeId: "b" },
+      {},
+    );
+    const activityKey = activityKeyFor(delegate, "forged-concurrency", "b", inputMac);
+    await appendForged(delegate, "forged-concurrency", events.length - 1, [
       forgedEvent({
         runId: "forged-concurrency",
         sequence: events.length,
@@ -1746,7 +1688,7 @@ describe("durable graph scheduler", () => {
         nodeId: "b",
         attempt: 1,
         data: {
-          input: encodeDurableJson({}), inputHash, activityKey, sideEffects: "none",
+          input: encodeDurableJson({}), inputMac, activityKey, sideEffects: "none",
         },
       }),
       forgedEvent({
@@ -1755,11 +1697,11 @@ describe("durable graph scheduler", () => {
         type: "NodeStarted",
         nodeId: "b",
         attempt: 1,
-        data: { inputHash, activityKey },
+        data: { inputMac, activityKey },
       }),
     ]);
     await expect(resumeDurableGraphRun(limited, {
-      runId: "forged-concurrency", implementationId: "v1", eventStore: delegate,
+      runId: "forged-concurrency", implementationId: "v1", protection: delegate,
     })).rejects.toMatchObject({ code: "INVALID_RUN_HISTORY" });
   });
 
@@ -1772,15 +1714,15 @@ describe("durable graph scheduler", () => {
       invalid: string[];
     };
     const retrying = graph({ nodes: [node("root", { retry: { maxAttempts: 2 } })] });
-    const delegate = new MemoryEventStore();
-    const crashStore = new CommitThenThrowStore(
+    const delegate = memoryProtection();
+    const crashStore = commitThenThrow(
       delegate,
       (batch) => batch.some((event) => event.type === "NodeRetried"),
     );
     await expect(startDurableGraphRun(retrying, {}, {
       runId: "date-corpus",
       implementationId: "v1",
-      eventStore: crashStore,
+      protection: crashStore,
       now: fixedNow,
       nodeExecutors: { root: () => { throw new Error("retry"); } },
     })).rejects.toBeInstanceOf(DurableRunError);
@@ -1795,7 +1737,7 @@ describe("durable graph scheduler", () => {
       await expect(resumeDurableGraphRun(retrying, {
         runId: "date-corpus",
         implementationId: "v1",
-        eventStore: new ConflictStore(store),
+        protection: conflictProtection(store),
       }), availableAt).rejects.toMatchObject({ code: "RESUME_CONFLICT" });
     }
     for (const availableAt of corpus.invalid) {
@@ -1807,7 +1749,7 @@ describe("durable graph scheduler", () => {
       await expect(resumeDurableGraphRun(retrying, {
         runId: "date-corpus",
         implementationId: "v1",
-        eventStore: store,
+        protection: store,
       }), availableAt).rejects.toMatchObject({ code: "INVALID_RUN_HISTORY" });
     }
   });
@@ -1818,12 +1760,12 @@ describe("durable graph scheduler", () => {
         retry: { maxAttempts: 2, initialDelayMs: 1, maxDelayMs: 1 },
       })],
     });
-    const store = new MemoryEventStore();
+    const store = memoryProtection();
     let attempts = 0;
     await expect(startDurableGraphRun(retrying, {}, {
       runId: "clock-boundary",
       implementationId: "v1",
-      eventStore: store,
+      protection: store,
       now: () => new Date("9999-12-31T23:59:59.999Z"),
       nodeExecutors: {
         root: () => {
@@ -1836,7 +1778,7 @@ describe("durable graph scheduler", () => {
     const result = await resumeDurableGraphRun(retrying, {
       runId: "clock-boundary",
       implementationId: "v1",
-      eventStore: store,
+      protection: store,
       now: fixedNow,
       nodeExecutors: {
         root: (context) => {
@@ -1861,7 +1803,7 @@ describe("durable graph scheduler", () => {
     const accepted = await startDurableGraphRun(atLimit, {}, {
       runId: "timer-limit",
       implementationId: "v1",
-      eventStore: new MemoryEventStore(),
+      protection: memoryProtection(),
       nodeExecutors: { root: () => "immediate" },
     });
     expect(accepted.status).toBe("succeeded");
@@ -1870,12 +1812,12 @@ describe("durable graph scheduler", () => {
       new URL("../../../spec/conformance/invalid-oversized-timers.graph.json", import.meta.url),
     );
     const oversized = JSON.parse(readFileSync(fixturePath, "utf8")) as GraphSpec;
-    const store = new MemoryEventStore();
+    const store = memoryProtection();
     const executor = vi.fn(() => "never");
     const rejected = await startDurableGraphRun(oversized, {}, {
       runId: "timer-oversized",
       implementationId: "v1",
-      eventStore: store,
+      protection: store,
       nodeExecutors: { root: executor },
     });
     expect(rejected).toMatchObject({

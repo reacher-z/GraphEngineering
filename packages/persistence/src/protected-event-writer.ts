@@ -15,15 +15,27 @@
 
 import type { GraphEventV1Alpha2Type } from "./events-v1alpha2.js";
 import { GRAPH_EVENT_V1ALPHA2_API_VERSION } from "./events-v1alpha2.js";
-import type { ProtectedJsonlEventStore } from "./protected-event-store.js";
 import {
   encodePointer,
+  type CaptureSinkClass,
   type CaptureSourceClass,
   type GuardPayloadField,
   type GuardResult,
   type SemanticContext,
   type SinkGuard,
 } from "./redaction/index.js";
+
+/**
+ * The part of a guarded journal the writer needs: which of the 54 sink classes
+ * it occupies and the opaque per-instance binding a `PreparedSinkWrite` is
+ * minted against. `ProtectedJsonlEventStore` satisfies this structurally; so
+ * does an in-memory guarded journal. Neither can be written to without a
+ * prepared write, which is the property that matters.
+ */
+export interface GuardedEventSink {
+  readonly sink: CaptureSinkClass;
+  readonly binding: object;
+}
 
 export interface ProtectedEventPayload {
   /** The `data` member that will hold the reference, e.g. `inputRef`. */
@@ -63,7 +75,7 @@ export interface ProtectedEventSpec {
  */
 export async function prepareProtectedEvent(
   guard: SinkGuard,
-  journal: ProtectedJsonlEventStore,
+  journal: GuardedEventSink,
   spec: ProtectedEventSpec,
 ): Promise<GuardResult> {
   const payloads: GuardPayloadField[] = (spec.payloads ?? []).map((payload) => ({

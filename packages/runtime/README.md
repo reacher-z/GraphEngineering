@@ -257,18 +257,43 @@ exactly-once effects. See the
 
 ## Durable start and resume
 
+A durable run writes `events/v1alpha2`: every graph input, bound node input,
+node output, node result, run result, and raw failure message is an encrypted,
+authenticated `ProtectedValueRef` on the wire, and the journal only accepts
+records the sink-before-write guard prepared. Payload protection is therefore
+mandatory — a run with no protected payload store and key provider fails closed
+with `PAYLOAD_PROTECTION_REQUIRED` before any write or executor call, per
+[`spec/redaction-semantics.md`](../../spec/redaction-semantics.md) §4.2. There
+is no fallback to the legacy inline writer.
+
+`DeterministicTestKeyProvider` below is a test provider with derived keys and
+deterministic nonces. Production deployments supply their own `KeyProvider`.
+
 ```ts
-import { JsonlEventStore } from "@graph-engineering/persistence";
+import {
+  DeterministicTestKeyProvider,
+  FileProtectedPayloadStore,
+  ProtectedJsonlEventStore,
+} from "@graph-engineering/persistence";
 import {
   resumeDurableGraphRun,
   startDurableGraphRun,
 } from "@graph-engineering/runtime";
 
-const eventStore = new JsonlEventStore({ directory: ".graph-engineering" });
+const directory = ".graph-engineering";
 const options = {
   runId: "research-001",
   implementationId: "research-handlers@1",
-  eventStore,
+  protection: {
+    journal: new ProtectedJsonlEventStore({ directory }),
+    payloadStore: new FileProtectedPayloadStore({ directory }),
+    keys: new DeterministicTestKeyProvider(),
+    scope: {
+      tenantScopeId: "tenant-opaque-1",
+      authorityProviderId: "provider-opaque-1",
+      authoritySubjectId: "subject-opaque-1",
+    },
+  },
   nodeExecutors: {
     research: async ({ input, signal, idempotencyKey }) =>
       search(input, { signal, idempotencyKey }),
@@ -293,7 +318,21 @@ const result = process.argv.includes("--resume")
 The event stream is authoritative. A durable attempt claim commits before its
 executor is called; a validated success and ordered edge emissions commit before
 dependants are released. Resume verifies the bound graph, original input, and
-caller-supplied `implementationId`, then reuses committed successful nodes.
+caller-supplied `implementationId`, then reuses committed successful nodes. It
+also re-resolves the capture policy and fails with `CAPTURE_POLICY_MISMATCH` if
+the hash recorded in `RunCreated` no longer matches.
+
+### Existing `scheduler-recovery/v1alpha1` journals
+
+An older journal wrote application payloads inline. Those bytes are legacy data
+and this runtime will not continue them. Pass the old store as
+`legacyEventStore` and a start or resume for that run ID refuses with
+`LEGACY_REDACTION_MISMATCH` (the history claimed or defaulted to
+`redacted: true`) or `INLINE_CAPTURE_NOT_AUTHORIZED` (it is truthfully inline),
+before `RunResumed`, before any append, and before any executor call.
+`inspectLegacyDurableHistory` reads such a journal and returns a metadata-only
+report with a quarantine manifest. Nothing is rewritten, repaired, or migrated —
+§9.2 forbids it.
 
 An open attempt has an unknown outcome. Nodes declared
 `sideEffects: "none"` or `"idempotent"` may retry within their original node and

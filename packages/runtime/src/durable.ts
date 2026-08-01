@@ -1,5 +1,4 @@
 import {
-  canonicalHash,
   compareUnicodeCodePoints,
   compileGraph,
   type EdgeSpec,
@@ -8,14 +7,25 @@ import {
   type NodeSpec,
 } from "@graph-engineering/core";
 import {
-  GRAPH_EVENT_API_VERSION,
+  PROTECTED_STORE_CONTRACT,
   PersistenceError,
   VersionConflictError,
-  assertGraphEvent,
+  classifyLegacyHistory,
+  legacyQuarantineManifest,
   type EventStore,
   type GraphEvent,
-  type GraphEventType,
+  type GraphEventV1Alpha2Type,
+  type LegacyQuarantineManifest,
+  type SemanticContext,
 } from "@graph-engineering/persistence";
+import {
+  DURABLE_GRAPH_REVISION,
+  ProtectedDurableRun,
+  assertPayloadProtection,
+  type DurableEventDraft,
+  type DurablePayloadDraft,
+  type RecoveredEvent,
+} from "./durable-protection.js";
 import {
   type SchedulerAttemptIdentity,
   type SchedulerInternalOptions,
@@ -52,9 +62,13 @@ import type {
   SchedulerOptions,
 } from "./types.js";
 
-const CONTRACT_VERSION = "scheduler-recovery/v1alpha1";
-const GRAPH_REVISION = 1;
-const EVENT_API_VERSION = GRAPH_EVENT_API_VERSION;
+/**
+ * The durable stream is `scheduler-recovery/v1alpha2`: every authoritative
+ * application value is carried as a validated protected reference and the
+ * journal never sees a plaintext payload (spec/redaction-semantics.md 6.1).
+ */
+const CONTRACT_VERSION = "scheduler-recovery/v1alpha2";
+const GRAPH_REVISION = DURABLE_GRAPH_REVISION;
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
 type JsonRecord = Record<string, JsonValue>;
@@ -70,9 +84,16 @@ interface CompiledDurableGraph {
   readonly declaration: ReadonlyMap<string, number>;
 }
 
+/**
+ * One candidate scheduler event. `data` holds closed metadata only; every
+ * application value travels in `payloads` as a detached argument so there is no
+ * window in which a plaintext payload exists inside a record that could be
+ * serialized (spec/redaction-semantics.md 7).
+ */
 interface EventDraft {
-  readonly type: GraphEventType;
+  readonly type: GraphEventV1Alpha2Type;
   readonly data: Readonly<JsonRecord>;
+  readonly payloads?: readonly DurablePayloadDraft[];
   readonly nodeId?: string;
   readonly edgeId?: string;
   readonly attempt?: number;
@@ -260,6 +281,29 @@ function failureDocument(failure: NodeRunFailure): JsonRecord {
   };
 }
 
+/**
+ * The closed inline projection of an attempt failure.
+ *
+ * spec/redaction-semantics.md 6.1: raw errors, stack traces, provider
+ * responses, prompts, paths, and tool output are absent from `NodeAttemptFailed`;
+ * only identifiers, attempts, stable structured codes, and the retry flag stay
+ * inline. `message` and `causeName` are producer-derived text — a caught
+ * exception string reaches this runtime verbatim — so they travel as protected
+ * diagnostic evidence instead.
+ */
+function closedFailureProjection(failure: NodeRunFailure): JsonRecord {
+  return {
+    phase: failure.phase,
+    code: failure.code,
+    nodeId: failure.nodeId,
+    attempt: failure.attempt,
+    retryable: failure.retryable,
+    ...(failure.upstreamNodeIds === undefined
+      ? {}
+      : { upstreamNodeIds: [...failure.upstreamNodeIds] }),
+  };
+}
+
 function graphFailureDocument(failure: GraphRunFailure): JsonRecord {
   if (failure.phase === "execute") return failureDocument(failure);
   if (failure.phase === "output") {
@@ -393,10 +437,33 @@ function bindInput(
   return snapshotJson(input);
 }
 
+/**
+ * The closed `failureCode` member of a zero-attempt settlement when the outcome
+ * carries no failure at all (a skipped node). It is a stable runtime token, not
+ * an application value.
+ */
+const SETTLED_WITHOUT_FAILURE = "SETTLED_WITHOUT_FAILURE";
+
+function graphInputContext(runId: string): SemanticContext {
+  return { kind: "graph-input", runId, graphRevision: GRAPH_REVISION };
+}
+
+function nodeContext(
+  kind: "node-input" | "node-output" | "node-result",
+  runId: string,
+  nodeId: string,
+): SemanticContext {
+  return { kind, runId, graphRevision: GRAPH_REVISION, nodeId };
+}
+
+function runResultContext(runId: string): SemanticContext {
+  return { kind: "run-result", runId, graphRevision: GRAPH_REVISION };
+}
+
 class DurableJournal implements SchedulerJournal {
   readonly compiled: CompiledDurableGraph;
   readonly runId: string;
-  readonly store: EventStore;
+  readonly run: ProtectedDurableRun;
   readonly now: () => Date;
   readonly createEventId: NonNullable<DurableSchedulerOptions["createEventId"]>;
   readonly preScheduled: Map<string, number>;
@@ -411,7 +478,7 @@ class DurableJournal implements SchedulerJournal {
   constructor(fields: {
     compiled: CompiledDurableGraph;
     runId: string;
-    store: EventStore;
+    run: ProtectedDurableRun;
     version: number;
     now: () => Date;
     createEventId: NonNullable<DurableSchedulerOptions["createEventId"]>;
@@ -421,7 +488,7 @@ class DurableJournal implements SchedulerJournal {
   }) {
     this.compiled = fields.compiled;
     this.runId = fields.runId;
-    this.store = fields.store;
+    this.run = fields.run;
     this.version = fields.version;
     this.now = fields.now;
     this.createEventId = fields.createEventId;
@@ -430,61 +497,42 @@ class DurableJournal implements SchedulerJournal {
     this.eventIds = new Set(fields.eventIds);
   }
 
-  activityKey(nodeId: string, inputHash: string): string {
-    return durableJsonHash([
-      "activity/v1alpha1",
-      this.runId,
-      GRAPH_REVISION,
-      nodeId,
-      inputHash,
-    ]);
-  }
-
-  #event(draft: EventDraft, sequence: number): GraphEvent {
-    const document: GraphEvent = {
-      apiVersion: EVENT_API_VERSION,
-      eventId: this.createEventId({ runId: this.runId, sequence, type: draft.type }),
-      type: draft.type,
-      timestamp: this.now().toISOString(),
-      runId: this.runId,
-      graphRevision: GRAPH_REVISION,
-      sequence,
-      payloadHash: canonicalHash(draft.data),
-      redacted: true,
-      data: draft.data,
-      ...(draft.nodeId === undefined ? {} : { nodeId: draft.nodeId }),
-      ...(draft.edgeId === undefined ? {} : { edgeId: draft.edgeId }),
-      ...(draft.attempt === undefined ? {} : { attempt: draft.attempt }),
-    };
-    assertGraphEvent(document);
-    return document;
+  /** Section 8.2: the activity key is keyed by the run identity and the input MAC. */
+  activityKey(nodeId: string, inputMac: string): string {
+    return this.run.activityKey(nodeId, inputMac);
   }
 
   append(
     drafts: readonly EventDraft[],
     conflictCode: DurableRunErrorCode = "RESUME_CONFLICT",
-  ): Promise<readonly GraphEvent[]> {
+  ): Promise<void> {
     const operation = this.#queue.then(async () => {
       if (this.#fatal !== undefined) throw this.#fatal;
       const expectedVersion = this.version;
       try {
-        const events = drafts.map((draft, index) =>
-          this.#event(draft, expectedVersion + index + 1),
-        );
         const batchIds = new Set<string>();
-        for (const event of events) {
-          if (this.eventIds.has(event.eventId) || batchIds.has(event.eventId)) {
+        const identifiers: string[] = [];
+        for (const [index, draft] of drafts.entries()) {
+          const sequence = expectedVersion + index + 1;
+          const eventId = this.createEventId({ runId: this.runId, sequence, type: draft.type });
+          if (this.eventIds.has(eventId) || batchIds.has(eventId)) {
             throw new DurableRunError(
               "DURABILITY_STORE_FAILED",
               this.runId,
               "event ID factory produced a duplicate identifier",
-              { eventId: event.eventId, sequence: event.sequence },
+              { eventId, sequence },
             );
           }
-          batchIds.add(event.eventId);
+          batchIds.add(eventId);
+          identifiers.push(eventId);
         }
-        const actual = await this.store.append(this.runId, expectedVersion, events);
-        const expected = expectedVersion + events.length;
+        const actual = await this.run.append(
+          expectedVersion,
+          drafts as readonly DurableEventDraft[],
+          (sequence) => identifiers[sequence - expectedVersion - 1] as string,
+          () => this.now().toISOString(),
+        );
+        const expected = expectedVersion + drafts.length;
         if (actual !== expected) {
           throw new DurableRunError(
             "DURABILITY_STORE_FAILED",
@@ -495,7 +543,6 @@ class DurableJournal implements SchedulerJournal {
         }
         this.version = actual;
         for (const eventId of batchIds) this.eventIds.add(eventId);
-        return events;
       } catch (error) {
         let mapped: DurableRunError;
         if (error instanceof DurableRunError) {
@@ -544,8 +591,9 @@ class DurableJournal implements SchedulerJournal {
     signal: AbortSignal;
   }): Promise<SchedulerAttemptIdentity> {
     const input = snapshotJson(fields.input);
-    const inputHash = durableJsonHash(input);
-    const activityKey = this.activityKey(fields.node.id, inputHash);
+    const context = nodeContext("node-input", this.runId, fields.node.id);
+    const inputMac = this.run.valueMac(context, input);
+    const activityKey = this.activityKey(fields.node.id, inputMac);
     this.activityKeys.set(fields.node.id, activityKey);
     const drafts: EventDraft[] = [];
     if (this.preScheduled.get(fields.node.id) !== fields.attempt) {
@@ -553,12 +601,8 @@ class DurableJournal implements SchedulerJournal {
         type: "NodeScheduled",
         nodeId: fields.node.id,
         attempt: fields.attempt,
-        data: {
-          input: encodeDurableJson(input),
-          inputHash,
-          activityKey,
-          sideEffects: sideEffects(fields.node),
-        },
+        data: { activityKey, sideEffects: sideEffects(fields.node) },
+        payloads: [{ field: "inputRef", semanticContext: context, value: input }],
       });
     }
     this.preScheduled.delete(fields.node.id);
@@ -566,7 +610,7 @@ class DurableJournal implements SchedulerJournal {
       type: "NodeStarted",
       nodeId: fields.node.id,
       attempt: fields.attempt,
-      data: { inputHash, activityKey },
+      data: { inputMac, activityKey },
     });
     await this.append(drafts);
     return {
@@ -591,8 +635,22 @@ class DurableJournal implements SchedulerJournal {
       attempt: fields.failure.attempt,
       data: {
         terminal: !fields.willRetry,
-        failure: failureDocument(fields.failure),
+        failure: closedFailureProjection(fields.failure),
       },
+      // Section 6.1: raw failure text is explicit protected diagnostic evidence
+      // and is never scheduler authority.
+      payloads: [{
+        field: "evidenceRef",
+        semanticContext: {
+          kind: "diagnostic-evidence",
+          runId: this.runId,
+          graphRevision: GRAPH_REVISION,
+          nodeId: fields.node.id,
+          attempt: fields.failure.attempt,
+          code: fields.failure.code,
+        },
+        value: failureDocument(fields.failure),
+      }],
     }];
     if (fields.willRetry) {
       const activityKey = this.activityKeys.get(fields.node.id) ?? fields.identity.activityKey;
@@ -639,14 +697,19 @@ class DurableJournal implements SchedulerJournal {
     identity: SchedulerAttemptIdentity;
     outgoingEdges: readonly EdgeSpec[];
   }): Promise<void> {
-    const inputHash = durableJsonHash(fields.input);
+    const inputMac = this.run.valueMac(
+      nodeContext("node-input", this.runId, fields.node.id),
+      snapshotJson(fields.input),
+    );
+    const outputContext = nodeContext("node-output", this.runId, fields.node.id);
     const output = snapshotJson(fields.output);
-    const outputHash = durableJsonHash(output);
+    const outputMac = this.run.valueMac(outputContext, output);
     const drafts: EventDraft[] = [{
       type: "NodeSucceeded",
       nodeId: fields.node.id,
       attempt: fields.attempt,
-      data: { inputHash, output: encodeDurableJson(output), outputHash },
+      data: { inputMac },
+      payloads: [{ field: "outputRef", semanticContext: outputContext, value: output }],
     }];
     for (const edge of [...fields.outgoingEdges].sort((left, right) =>
       compareUnicodeCodePoints(left.id, right.id),
@@ -656,7 +719,7 @@ class DurableJournal implements SchedulerJournal {
         nodeId: fields.node.id,
         edgeId: edge.id,
         attempt: fields.attempt,
-        data: { outputHash },
+        data: { outputMac },
       });
     }
     await this.append(drafts);
@@ -667,22 +730,37 @@ class DurableJournal implements SchedulerJournal {
     node: NodeSpec;
     result: NodeRunResult;
   }): Promise<void> {
+    const document = nodeResultDocument(fields.result);
     await this.append([{
       type: "NodeSettledWithoutAttempt",
       nodeId: fields.node.id,
-      data: { result: encodeDurableJson(nodeResultDocument(fields.result)) },
+      data: {
+        status: fields.result.status,
+        attempts: fields.result.attempts,
+        failureCode: fields.result.failure?.code ?? SETTLED_WITHOUT_FAILURE,
+      },
+      payloads: [{
+        field: "resultRef",
+        semanticContext: nodeContext("node-result", this.runId, fields.node.id),
+        value: document,
+      }],
     }]);
   }
 
   async runTerminal(result: SchedulerRunResult): Promise<void> {
-    const type: GraphEventType = result.status === "succeeded"
+    const type: GraphEventV1Alpha2Type = result.status === "succeeded"
       ? "RunSucceeded"
       : result.status === "cancelled"
         ? "RunCancelled"
         : "RunFailed";
     await this.append([{
       type,
-      data: { result: encodeDurableJson(resultDocument(result)) },
+      data: { status: result.status },
+      payloads: [{
+        field: "resultRef",
+        semanticContext: runResultContext(this.runId),
+        value: resultDocument(result),
+      }],
     }]);
   }
 }
@@ -873,7 +951,7 @@ function decodeTerminalResult(
 interface NodeProjection {
   readonly nodeId: string;
   input: JsonValue | undefined;
-  inputHash: string | undefined;
+  inputMac: string | undefined;
   activityKey: string | undefined;
   sideEffects: ReturnType<typeof sideEffects> | undefined;
   scheduledAttempt: number | undefined;
@@ -883,13 +961,13 @@ interface NodeProjection {
   retryReserved: boolean;
   attempts: number;
   result: NodeRunResult | undefined;
-  outputHash: string | undefined;
+  outputMac: string | undefined;
 }
 
 interface FoldedRun {
   readonly graphInput: JsonValue;
   readonly graphHash: string;
-  readonly inputHash: string;
+  readonly inputMac: string;
   readonly implementationHash: string;
   readonly maxTotalAttempts: number;
   readonly projections: ReadonlyMap<string, NodeProjection>;
@@ -941,7 +1019,7 @@ function sameTerminalFailures(
 }
 
 function eventNode(
-  event: GraphEvent,
+  event: RecoveredEvent,
   compiled: CompiledDurableGraph,
   runId: string,
 ): string {
@@ -951,14 +1029,14 @@ function eventNode(
   return event.nodeId;
 }
 
-function eventAttempt(event: GraphEvent, runId: string): number {
+function eventAttempt(event: RecoveredEvent, runId: string): number {
   if (event.attempt === undefined) {
     throw invalidHistory(runId, `${event.type} requires an attempt`);
   }
   return event.attempt;
 }
 
-function noEventIdentity(event: GraphEvent, runId: string): void {
+function noEventIdentity(event: RecoveredEvent, runId: string): void {
   if (event.nodeId !== undefined || event.edgeId !== undefined || event.attempt !== undefined) {
     throw invalidHistory(runId, `${event.type} has unexpected node, edge, or attempt identity`);
   }
@@ -1318,14 +1396,15 @@ function validateSettledWithoutAttempt(fields: {
 }
 
 function foldHistory(
-  events: readonly GraphEvent[],
+  events: readonly RecoveredEvent[],
   fields: {
     compiled: CompiledDurableGraph;
     runId: string;
     implementationHash: string;
+    run: ProtectedDurableRun;
   },
 ): FoldedRun {
-  const { compiled, runId, implementationHash } = fields;
+  const { compiled, runId, implementationHash, run } = fields;
   if (events.length === 0) {
     throw new DurableRunError("RUN_NOT_FOUND", runId, "durable run does not exist");
   }
@@ -1334,7 +1413,7 @@ function foldHistory(
     {
       nodeId: node.id,
       input: undefined,
-      inputHash: undefined,
+      inputMac: undefined,
       activityKey: undefined,
       sideEffects: undefined,
       scheduledAttempt: undefined,
@@ -1344,12 +1423,12 @@ function foldHistory(
       retryReserved: false,
       attempts: 0,
       result: undefined,
-      outputHash: undefined,
+      outputMac: undefined,
     },
   ]));
   let graphInput: JsonValue = null;
   let storedGraphHash = "";
-  let storedInputHash = "";
+  let storedInputMac = "";
   let storedImplementationHash = "";
   let maxTotalAttempts = 0;
   let started = false;
@@ -1365,14 +1444,13 @@ function foldHistory(
     edgeId: string;
     producerId: string;
     attempt: number;
-    outputHash: string;
+    outputMac: string;
   }> = [];
   let expectedRetry: { nodeId: string; attempt: number; activityKey: string } | undefined;
   const eventIds = new Set<string>();
 
   for (let index = 0; index < events.length; index += 1) {
-    const event = events[index] as GraphEvent;
-    assertGraphEvent(event);
+    const event = events[index] as RecoveredEvent;
     strictDate(event.timestamp, runId, `event[${index}].timestamp`);
     if (event.sequence !== index || event.runId !== runId) {
       throw invalidHistory(runId, "event identity or sequence is inconsistent", { sequence: index });
@@ -1384,9 +1462,10 @@ function foldHistory(
       throw invalidHistory(runId, "eventId is duplicated", { eventId: event.eventId });
     }
     eventIds.add(event.eventId);
-    if (event.payloadHash === undefined || event.payloadHash !== canonicalHash(event.data)) {
-      throw invalidHistory(runId, "event payload hash is invalid", { sequence: index });
-    }
+    // Envelope integrity — payload hash, sequence contiguity, closed shape, and
+    // capture-policy continuity — is enforced by the guarded v1alpha2 journal
+    // before a record is ever handed to this fold. What remains here is the
+    // scheduler semantics the journal cannot know about.
     if (terminalSeen) {
       throw invalidHistory(runId, "event appears after a terminal event", { sequence: index });
     }
@@ -1401,9 +1480,9 @@ function foldHistory(
           { sequence: index, expectedEdgeId: expected.edgeId },
         );
       }
-      exactKeys(event.data, ["outputHash"], runId, "EdgeEmitted.data");
-      if (event.data.outputHash !== expected.outputHash) {
-        throw invalidHistory(runId, "EdgeEmitted output hash is invalid");
+      exactKeys(event.data, ["outputMac"], runId, "EdgeEmitted.data");
+      if (event.data.outputMac !== expected.outputMac) {
+        throw invalidHistory(runId, "EdgeEmitted output MAC is invalid");
       }
       continue;
     }
@@ -1449,17 +1528,32 @@ function foldHistory(
       }
       noEventIdentity(event, runId);
       exactKeys(event.data, [
-        "contractVersion", "graphHash", "implementationHash", "input", "inputHash",
-        "maxTotalAttempts",
+        "contractVersion", "graphHash", "implementationHash", "capturePolicyHash",
+        "protectedStoreContract", "keyRefHash", "input", "inputMac", "maxTotalAttempts",
       ], runId, "RunCreated.data");
       if (event.data.contractVersion !== CONTRACT_VERSION) {
         throw invalidHistory(runId, "RunCreated contract version is incompatible");
+      }
+      // Section 4.4: resume must resolve the policy again and match the hash
+      // exactly; a policy change on resume is CAPTURE_POLICY_MISMATCH.
+      run.assertPolicyHash(event.data.capturePolicyHash);
+      if (event.data.protectedStoreContract !== PROTECTED_STORE_CONTRACT) {
+        throw invalidHistory(runId, "RunCreated protected-store contract is incompatible", {
+          expected: PROTECTED_STORE_CONTRACT,
+        });
+      }
+      if (event.data.keyRefHash !== run.keyRefHash) {
+        throw new DurableRunError(
+          "PROTECTED_PAYLOAD_UNAUTHORIZED",
+          runId,
+          "durable run was created under a different key reference",
+        );
       }
       storedGraphHash = stringValue(event.data.graphHash, runId, "RunCreated.graphHash");
       storedImplementationHash = stringValue(
         event.data.implementationHash, runId, "RunCreated.implementationHash",
       );
-      storedInputHash = stringValue(event.data.inputHash, runId, "RunCreated.inputHash");
+      storedInputMac = stringValue(event.data.inputMac, runId, "RunCreated.inputMac");
       maxTotalAttempts = integerValue(
         event.data.maxTotalAttempts, runId, "RunCreated.maxTotalAttempts", 1,
       );
@@ -1474,9 +1568,9 @@ function foldHistory(
           { cause: error },
         );
       }
-      if (durableJsonHash(graphInput) !== storedInputHash) {
+      if (run.valueMac(graphInputContext(runId), graphInput) !== storedInputMac) {
         throw new DurableRunError(
-          "INPUT_HASH_MISMATCH", runId, "stored graph input does not match inputHash",
+          "INPUT_HASH_MISMATCH", runId, "stored graph input does not match inputMac",
         );
       }
       if (storedGraphHash !== compiled.graphHash) {
@@ -1566,7 +1660,12 @@ function foldHistory(
           nodeId,
         });
       }
-      exactKeys(event.data, ["result"], runId, "NodeSettledWithoutAttempt.data");
+      exactKeys(
+        event.data,
+        ["result", "resultMac", "status", "attempts", "failureCode"],
+        runId,
+        "NodeSettledWithoutAttempt.data",
+      );
       let decodedResult: JsonValue;
       try {
         decodedResult = decodeDurableJson(event.data.result);
@@ -1575,9 +1674,22 @@ function foldHistory(
           runId, "NodeSettledWithoutAttempt result is malformed", {}, { cause: error },
         );
       }
+      if (run.valueMac(nodeContext("node-result", runId, nodeId), decodedResult) !==
+          event.data.resultMac) {
+        throw invalidHistory(runId, "NodeSettledWithoutAttempt resultMac is invalid", { nodeId });
+      }
       const result = decodeNodeResult(
         decodedResult, runId, "NodeSettledWithoutAttempt.result",
       );
+      // The closed inline projection must agree with the protected result.
+      if (event.data.status !== result.status || event.data.attempts !== result.attempts ||
+          event.data.failureCode !== (result.failure?.code ?? SETTLED_WITHOUT_FAILURE)) {
+        throw invalidHistory(
+          runId,
+          "NodeSettledWithoutAttempt metadata contradicts its protected result",
+          { nodeId },
+        );
+      }
       pendingRetryReservations.delete(nodeId);
       projection.retryReserved = false;
       validateSettledWithoutAttempt({
@@ -1632,7 +1744,7 @@ function foldHistory(
         });
       }
       exactKeys(
-        event.data, ["input", "inputHash", "activityKey", "sideEffects"],
+        event.data, ["input", "inputMac", "activityKey", "sideEffects"],
         runId, "NodeScheduled.data",
       );
       let nodeInput: JsonValue;
@@ -1641,9 +1753,9 @@ function foldHistory(
       } catch (error) {
         throw invalidHistory(runId, "NodeScheduled input is malformed", {}, { cause: error });
       }
-      const inputHash = stringValue(event.data.inputHash, runId, "NodeScheduled.inputHash");
-      if (durableJsonHash(nodeInput) !== inputHash) {
-        throw invalidHistory(runId, "NodeScheduled inputHash is invalid");
+      const inputMac = stringValue(event.data.inputMac, runId, "NodeScheduled.inputMac");
+      if (run.valueMac(nodeContext("node-input", runId, nodeId), nodeInput) !== inputMac) {
+        throw invalidHistory(runId, "NodeScheduled inputMac is invalid");
       }
       let expectedInput: JsonValue;
       try {
@@ -1670,9 +1782,7 @@ function foldHistory(
         throw invalidHistory(runId, "retry changed the original bound node input", { nodeId, attempt });
       }
       const activityKey = stringValue(event.data.activityKey, runId, "NodeScheduled.activityKey");
-      const expectedActivityKey = durableJsonHash([
-        "activity/v1alpha1", runId, GRAPH_REVISION, nodeId, inputHash,
-      ]);
+      const expectedActivityKey = run.activityKey(nodeId, inputMac);
       if (activityKey !== expectedActivityKey) {
         throw invalidHistory(runId, "NodeScheduled activityKey is invalid");
       }
@@ -1683,7 +1793,7 @@ function foldHistory(
         throw invalidHistory(runId, "NodeScheduled sideEffects is inconsistent");
       }
       projection.input = nodeInput;
-      projection.inputHash = inputHash;
+      projection.inputMac = inputMac;
       projection.activityKey = activityKey;
       projection.sideEffects = declaredSideEffects as NodeProjection["sideEffects"];
       projection.scheduledAttempt = attempt;
@@ -1701,8 +1811,8 @@ function foldHistory(
           projection.result !== undefined || projection.retryAttempt !== undefined) {
         throw invalidHistory(runId, "NodeStarted lacks its required NodeScheduled");
       }
-      exactKeys(event.data, ["inputHash", "activityKey"], runId, "NodeStarted.data");
-      if (event.data.inputHash !== projection.inputHash ||
+      exactKeys(event.data, ["inputMac", "activityKey"], runId, "NodeStarted.data");
+      if (event.data.inputMac !== projection.inputMac ||
           event.data.activityKey !== projection.activityKey) {
         throw invalidHistory(runId, "NodeStarted recovery identity is invalid");
       }
@@ -1745,9 +1855,9 @@ function foldHistory(
       if (projection.openAttempt !== attempt || projection.result !== undefined) {
         throw invalidHistory(runId, "NodeSucceeded lacks one open attempt");
       }
-      exactKeys(event.data, ["inputHash", "output", "outputHash"], runId, "NodeSucceeded.data");
-      if (event.data.inputHash !== projection.inputHash) {
-        throw invalidHistory(runId, "NodeSucceeded inputHash is invalid");
+      exactKeys(event.data, ["inputMac", "output", "outputMac"], runId, "NodeSucceeded.data");
+      if (event.data.inputMac !== projection.inputMac) {
+        throw invalidHistory(runId, "NodeSucceeded inputMac is invalid");
       }
       let output: JsonValue;
       try {
@@ -1755,11 +1865,11 @@ function foldHistory(
       } catch (error) {
         throw invalidHistory(runId, "NodeSucceeded output is malformed", {}, { cause: error });
       }
-      const outputHash = stringValue(event.data.outputHash, runId, "NodeSucceeded.outputHash");
-      if (durableJsonHash(output) !== outputHash) {
-        throw invalidHistory(runId, "NodeSucceeded outputHash is invalid");
+      const outputMac = stringValue(event.data.outputMac, runId, "NodeSucceeded.outputMac");
+      if (run.valueMac(nodeContext("node-output", runId, nodeId), output) !== outputMac) {
+        throw invalidHistory(runId, "NodeSucceeded outputMac is invalid");
       }
-      projection.outputHash = outputHash;
+      projection.outputMac = outputMac;
       projection.openAttempt = undefined;
       active.delete(nodeId);
       projection.result = {
@@ -1772,7 +1882,7 @@ function foldHistory(
       };
       if (!completionOrder.includes(nodeId)) completionOrder.push(nodeId);
       expectedEdges = (compiled.outgoing.get(nodeId) ?? []).map((edge) => ({
-        edgeId: edge.id, producerId: nodeId, attempt, outputHash,
+        edgeId: edge.id, producerId: nodeId, attempt, outputMac,
       }));
       continue;
     }
@@ -1859,14 +1969,20 @@ function foldHistory(
           nodeIds: declarationOrder([...pendingRetryReservations], compiled),
         });
       }
-      exactKeys(event.data, ["result"], runId, `${event.type}.data`);
+      exactKeys(event.data, ["result", "resultMac", "status"], runId, `${event.type}.data`);
       let decoded: JsonValue;
       try {
         decoded = decodeDurableJson(event.data.result);
       } catch (error) {
         throw invalidHistory(runId, "terminal result is malformed", {}, { cause: error });
       }
+      if (run.valueMac(runResultContext(runId), decoded) !== event.data.resultMac) {
+        throw invalidHistory(runId, "terminal resultMac is invalid");
+      }
       terminalResult = decodeTerminalResult(decoded, runId, compiled);
+      if (event.data.status !== terminalResult.status) {
+        throw invalidHistory(runId, "terminal status contradicts its protected result");
+      }
       validateTerminalResult({
         runId,
         terminalType: event.type,
@@ -1902,7 +2018,7 @@ function foldHistory(
   return {
     graphInput,
     graphHash: storedGraphHash,
-    inputHash: storedInputHash,
+    inputMac: storedInputMac,
     implementationHash: storedImplementationHash,
     maxTotalAttempts,
     projections,
@@ -1912,16 +2028,18 @@ function foldHistory(
     maxObservedConcurrency,
     terminalResult,
     eventIds,
-    version: (events.at(-1) as GraphEvent).sequence,
+    version: (events.at(-1) as RecoveredEvent).sequence,
   };
 }
 
-async function readHistory(store: EventStore, runId: string): Promise<readonly GraphEvent[]> {
+async function readHistory(
+  run: ProtectedDurableRun,
+  runId: string,
+): Promise<readonly RecoveredEvent[]> {
   try {
-    const events: GraphEvent[] = [];
-    for await (const event of store.read(runId)) events.push(event);
-    return events;
+    return await run.read();
   } catch (error) {
+    if (error instanceof DurableRunError) throw error;
     if (error instanceof PersistenceError) throw error;
     throw new DurableRunError(
       "DURABILITY_STORE_FAILED",
@@ -1931,6 +2049,127 @@ async function readHistory(store: EventStore, runId: string): Promise<readonly G
       { cause: error },
     );
   }
+}
+
+/**
+ * A report about an existing `scheduler-recovery/v1alpha1` journal.
+ *
+ * spec/redaction-semantics.md Section 9 requires detection and forbids repair.
+ * This report is the detection result: metadata only, with the SHA-256 digest of
+ * the bytes that were read and the stable failure code that blocks resume. It
+ * never contains a source payload, a canary value, or an unkeyed logical-value
+ * digest, and producing it writes nothing anywhere.
+ */
+export interface LegacyDurableHistoryReport {
+  readonly runId: string;
+  readonly eventCount: number;
+  readonly classification: "not-legacy" | "misleading-redacted-claim" | "truthful-inline-unredacted";
+  readonly failureCode: DurableRunErrorCode | undefined;
+  readonly affectedSequences: readonly number[];
+  readonly manifest: LegacyQuarantineManifest | undefined;
+}
+
+async function readLegacyHistory(
+  store: EventStore,
+  runId: string,
+): Promise<readonly GraphEvent[]> {
+  try {
+    const events: GraphEvent[] = [];
+    for await (const event of store.read(runId)) events.push(event);
+    return events;
+  } catch (error) {
+    if (error instanceof PersistenceError) throw error;
+    throw new DurableRunError(
+      "DURABILITY_STORE_FAILED",
+      runId,
+      "legacy event history could not be read",
+      { causeName: errorName(error) },
+      { cause: error },
+    );
+  }
+}
+
+function legacyBytes(events: readonly GraphEvent[]): Uint8Array {
+  return new TextEncoder().encode(`${events.map((event) => JSON.stringify(event)).join("\n")}\n`);
+}
+
+/**
+ * Read and classify an existing v1alpha1 durable journal without continuing it.
+ *
+ * This is the explicit, authorized inspection path of Section 9.3: it reads,
+ * reports what it found, and stops. It appends no event, invokes no executor,
+ * rewrites no byte, and returns no application payload.
+ */
+export async function inspectLegacyDurableHistory(
+  store: EventStore,
+  runId: string,
+  options: { readonly legacyInlineAuthorized?: boolean } = {},
+): Promise<LegacyDurableHistoryReport> {
+  const events = await readLegacyHistory(store, runId);
+  if (events.length === 0) {
+    return {
+      runId,
+      eventCount: 0,
+      classification: "not-legacy",
+      failureCode: undefined,
+      affectedSequences: [],
+      manifest: undefined,
+    };
+  }
+  const classified = classifyLegacyHistory(events, options);
+  if (classified.kind === "not-legacy") {
+    return {
+      runId,
+      eventCount: events.length,
+      classification: "not-legacy",
+      failureCode: undefined,
+      affectedSequences: [],
+      manifest: undefined,
+    };
+  }
+  const classification =
+    classified.kind === "misleading"
+      ? ("misleading-redacted-claim" as const)
+      : ("truthful-inline-unredacted" as const);
+  return {
+    runId,
+    eventCount: events.length,
+    classification,
+    failureCode: classified.failure?.code as DurableRunErrorCode | undefined,
+    affectedSequences: classified.sequences,
+    manifest: legacyQuarantineManifest({
+      bytes: legacyBytes(events),
+      classification,
+      recordedAt: new Date().toISOString(),
+      affectedSequences: classified.sequences,
+    }),
+  };
+}
+
+/**
+ * Section 9.1: classification runs before `RunResumed`, before append, and
+ * before any executor invocation, and a terminal stream is not exempt. Silent
+ * repair is forbidden, so the only outcome here is a structured refusal.
+ */
+async function assertNoBlockingLegacyHistory(
+  options: DurableSchedulerOptions,
+): Promise<void> {
+  const store = options.legacyEventStore;
+  if (store === undefined) return;
+  const report = await inspectLegacyDurableHistory(store, options.runId);
+  if (report.failureCode === undefined) return;
+  throw new DurableRunError(
+    report.failureCode,
+    options.runId,
+    "a legacy scheduler-recovery/v1alpha1 journal exists for this run and cannot be continued",
+    {
+      classification: report.classification,
+      affectedSequences: report.affectedSequences,
+      eventCount: report.eventCount,
+      sourceDigest: report.manifest?.sourceDigest,
+      disposition: "quarantine",
+    },
+  );
 }
 
 function implementationHash(implementationId: string): string {
@@ -1947,7 +2186,9 @@ function effectiveNow(options: DurableSchedulerOptions): () => Date {
 function effectiveEventIdFactory(
   options: DurableSchedulerOptions,
 ): NonNullable<DurableSchedulerOptions["createEventId"]> {
-  return options.createEventId ?? (({ runId, sequence }) => `${runId}:${sequence}`);
+  // `:` is not in the v1alpha2 safe-identifier alphabet, so the default
+  // factory uses `.` — the identifier is runtime-generated either way.
+  return options.createEventId ?? (({ runId, sequence }) => `${runId}.${sequence}`);
 }
 
 function stableOptions(options: DurableSchedulerOptions): DurableSchedulerOptions {
@@ -2010,19 +2251,23 @@ export async function startDurableGraphRun(
   const unsupported = capabilityFailure(compiled);
   if (unsupported !== undefined) return unsupported;
   assertDurableTimerBounds(compiled.graph);
+  // Section 4.2: fail closed before the first event, checkpoint, log, error
+  // payload, temporary plaintext file, or executor invocation.
+  assertPayloadProtection(options.runId, options.protection);
+  const run = new ProtectedDurableRun(options.protection, options.runId);
   const implementation = implementationHash(options.implementationId);
   const inputSnapshot = snapshotJson(input);
-  const existing = await readHistory(options.eventStore, options.runId);
+  await assertNoBlockingLegacyHistory(options);
+  const existing = await readHistory(run, options.runId);
   if (existing.length > 0) {
     throw new DurableRunError(
       "RUN_ALREADY_EXISTS", options.runId, "durable run already exists",
     );
   }
-  const inputHash = durableJsonHash(inputSnapshot);
   const journal = new DurableJournal({
     compiled,
     runId: options.runId,
-    store: options.eventStore,
+    run,
     version: -1,
     now: effectiveNow(options),
     createEventId: effectiveEventIdFactory(options),
@@ -2034,10 +2279,16 @@ export async function startDurableGraphRun(
         contractVersion: CONTRACT_VERSION,
         graphHash: compiled.graphHash,
         implementationHash: implementation,
-        input: encodeDurableJson(inputSnapshot),
-        inputHash,
+        capturePolicyHash: run.capturePolicyHash,
+        protectedStoreContract: PROTECTED_STORE_CONTRACT,
+        keyRefHash: run.keyRefHash,
         maxTotalAttempts: effectiveAttemptLimit(compiled.graph),
       },
+      payloads: [{
+        field: "inputRef",
+        semanticContext: graphInputContext(options.runId),
+        value: inputSnapshot,
+      }],
     },
     { type: "RunStarted", data: {} },
   ], "RUN_ALREADY_EXISTS");
@@ -2060,12 +2311,16 @@ export async function resumeDurableGraphRun(
   const unsupported = capabilityFailure(compiled);
   if (unsupported !== undefined) return unsupported;
   assertDurableTimerBounds(compiled.graph);
+  assertPayloadProtection(options.runId, options.protection);
+  const run = new ProtectedDurableRun(options.protection, options.runId);
   const implementation = implementationHash(options.implementationId);
-  const events = await readHistory(options.eventStore, options.runId);
+  await assertNoBlockingLegacyHistory(options);
+  const events = await readHistory(run, options.runId);
   const folded = foldHistory(events, {
     compiled,
     runId: options.runId,
     implementationHash: implementation,
+    run,
   });
   for (const [nodeId, projection] of folded.projections) {
     const node = compiled.nodesById.get(nodeId) as NodeSpec;
@@ -2076,7 +2331,7 @@ export async function resumeDurableGraphRun(
     if (conditionIssues.length > 0) {
       if (projection.attempts !== 0 || projection.scheduledAttempt !== undefined ||
           projection.openAttempt !== undefined || projection.retryAttempt !== undefined ||
-          projection.input !== undefined || projection.inputHash !== undefined ||
+          projection.input !== undefined || projection.inputMac !== undefined ||
           projection.activityKey !== undefined) {
         throw invalidHistory(
           options.runId,
@@ -2149,7 +2404,7 @@ export async function resumeDurableGraphRun(
   const journal = new DurableJournal({
     compiled,
     runId: options.runId,
-    store: options.eventStore,
+    run,
     version: folded.version,
     now,
     createEventId: effectiveEventIdFactory(options),

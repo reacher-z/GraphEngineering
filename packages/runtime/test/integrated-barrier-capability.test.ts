@@ -7,10 +7,35 @@ import {
   compileGraph,
   type GraphSpec,
 } from "@graph-engineering/core";
-import type { EventStore, GraphEvent } from "@graph-engineering/persistence";
+import type { GraphEventV1Alpha2 } from "@graph-engineering/persistence";
 import { describe, expect, it, vi } from "vitest";
 
-import { resumeDurableGraphRun, runGraph, startDurableGraphRun } from "../src/index.js";
+import {
+  resumeDurableGraphRun,
+  runGraph,
+  startDurableGraphRun,
+  type DurablePayloadProtection,
+  type GuardedDurableJournal,
+} from "../src/index.js";
+import { memoryProtection } from "./support/protected-durable.js";
+
+/**
+ * Protection whose guarded journal explodes on any use. The capability
+ * preflight must complete before anything touches it.
+ */
+function hostileProtection(
+  journal: Pick<GuardedDurableJournal, "read" | "append">,
+): DurablePayloadProtection {
+  const base = memoryProtection();
+  return {
+    ...base,
+    journal: {
+      sink: base.journal.sink,
+      binding: base.journal.binding,
+      ...journal,
+    } as GuardedDurableJournal,
+  };
+}
 import {
   INTEGRATED_BARRIER_CAPABILITY,
   graphRuntimeCapabilityIssues,
@@ -220,14 +245,14 @@ describe("integrated barrier durable capability gate", () => {
     const result = await startDurableGraphRun(multiBarrierGraph, hostileInput, {
       runId: "integrated-barrier-hostile-input",
       implementationId: "v1",
-      eventStore: {
+      protection: hostileProtection({
         read: () => {
-          throw new Error("event store read must not run during capability preflight");
+          throw new Error("event journal read must not run during capability preflight");
         },
         append: async () => {
-          throw new Error("event store append must not run during capability preflight");
+          throw new Error("event journal append must not run during capability preflight");
         },
-      } satisfies EventStore,
+      }),
       executors: { transform: executor, barrier: executor },
     });
 
@@ -237,8 +262,8 @@ describe("integrated barrier durable capability gate", () => {
   });
 
   it("fails durable start and resume with no history read, append or other store call", async () => {
-    const read = vi.fn((): AsyncIterable<GraphEvent> => {
-      throw new Error("event store read must not run during capability preflight");
+    const read = vi.fn((): AsyncIterable<GraphEventV1Alpha2> => {
+      throw new Error("event journal read must not run during capability preflight");
     });
     const append = vi.fn(async (): Promise<number> => {
       throw new Error("event store append must not run during capability preflight");
@@ -247,7 +272,7 @@ describe("integrated barrier durable capability gate", () => {
     const options = {
       runId: "integrated-barrier-capability",
       implementationId: "v1",
-      eventStore: { read, append } satisfies EventStore,
+      protection: hostileProtection({ read, append }),
       executors: { transform: executor, barrier: executor },
     };
 

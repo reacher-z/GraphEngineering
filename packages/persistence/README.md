@@ -104,12 +104,18 @@ in production.
 
 ### What this does not claim
 
-The default scheduler in `@graph-engineering/runtime` still writes
-`events/v1alpha1` through `JsonlEventStore`. Existing v1alpha1 journals and
-checkpoints remain plaintext application data and are not retrofitted. D9 is not
-closed by this package alone: `redaction-semantics.md` Section 12.1 also requires
-the Python lane, shared cross-language parity, the packaged canary campaign, and
-an independent security review.
+The durable scheduler in `@graph-engineering/runtime` now writes
+`events/v1alpha2` through this guard and fails closed with
+`PAYLOAD_PROTECTION_REQUIRED` when no protected store and key provider are
+configured. `JsonlEventStore` remains exported as the legacy v1alpha1 writer for
+reading and quarantining existing journals; it is no longer reachable from the
+durable write path. Existing v1alpha1 journals and checkpoints remain plaintext
+application data and are not retrofitted. Checkpoints
+(`FileCheckpointStore`, `checkpoints/v1alpha1`) are still unguarded and must not
+be given application values. D9 is not closed by this package alone:
+`redaction-semantics.md` Section 12.1 also requires the Python lane, shared
+cross-language parity, the packaged canary campaign, and an independent security
+review.
 
 ## Alpha limits
 

@@ -48,13 +48,20 @@ export {
   type LegacyQuarantineManifest,
 } from "./legacy-history.js";
 export { MemoryEventStore } from "./memory-event-store.js";
+export { MemoryProtectedEventStore } from "./protected-memory-event-store.js";
 export {
   GuardBypassError,
   ProtectedJsonlEventStore,
   type ProtectedJsonlEventStoreOptions,
 } from "./protected-event-store.js";
 export {
+  ProtectedEventReader,
+  type ProtectedEventReaderOptions,
+  type ProtectedReadResult,
+} from "./protected-event-reader.js";
+export {
   prepareProtectedEvent,
+  type GuardedEventSink,
   type ProtectedEventPayload,
   type ProtectedEventSpec,
 } from "./protected-event-writer.js";
