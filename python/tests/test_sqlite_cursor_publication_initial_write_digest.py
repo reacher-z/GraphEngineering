@@ -22,6 +22,28 @@ ROOT = Path(__file__).resolve().parents[2]
 INVALID = "GE_CURSOR_B3_INITIAL_WRITE_DIGEST"
 
 
+class _ThrowingEquality:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def __eq__(self, other: object) -> bool:
+        self.calls += 1
+        raise RuntimeError("hostile equality escaped")
+
+
+class _CrossTypeEqual:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def __eq__(self, other: object) -> bool:
+        self.calls += 1
+        return other == "null"
+
+
+class _StringProxy(str):
+    pass
+
+
 def text(value: str) -> dict[str, str]:
     return {"type": "text", "value": value}
 
@@ -287,6 +309,18 @@ def test_rejects_wrong_shapes_and_noncanonical_results() -> None:
         {"affectedRows": "1", "extra": True},
     ):
         expect_result_invalid(value)
+
+
+@pytest.mark.parametrize(
+    "hostile_type",
+    [_ThrowingEquality(), _CrossTypeEqual(), _StringProxy("text")],
+)
+def test_rejects_non_exact_scalar_type_without_dispatching_hostile_equality(
+    hostile_type: object,
+) -> None:
+    expect_parameter_invalid([[{"type": hostile_type, "value": "x"}]])
+    calls = getattr(hostile_type, "calls", 0)
+    assert calls == 0
 
 
 def test_module_remains_package_private_and_avoids_general_canonical_json() -> None:

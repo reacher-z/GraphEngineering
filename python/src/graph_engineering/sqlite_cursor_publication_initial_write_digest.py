@@ -125,6 +125,10 @@ def _detach_tagged_scalar(value: object) -> dict[str, object]:
     if any(type(key) is not str for key in candidate):
         _fail()
     scalar_type = candidate.get("type")
+    if type(scalar_type) is not str:
+        # Never dispatch equality to a caller-owned proxy while classifying the
+        # tagged scalar.  The exact-string gate is part of the protocol boundary.
+        _fail()
     if scalar_type == "null":
         if frozenset(candidate) != frozenset(("type",)):
             _fail()

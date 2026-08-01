@@ -44,6 +44,17 @@ QUICKSTART_SOURCE = (
 FORBIDDEN = re.compile(
     r"(?:^|/)(?:__pycache__|\.pytest_cache|\.mypy_cache|\.ruff_cache|codex_logs|codex_plans)(?:/|$)|\.pyc$|(?:^|/)\.env(?:\.|$)"
 )
+WINDOWS_RESERVED_NAME = re.compile(
+    r"^(?:CON|PRN|AUX|NUL|CONIN\$|CONOUT\$|COM[1-9¹²³]|LPT[1-9¹²³])(?:\.|$)",
+    re.IGNORECASE,
+)
+
+
+def windows_archive_key(name: str) -> tuple[str, ...]:
+    """Return the Windows case-insensitive identity of one prevalidated path."""
+
+    candidate = name.removesuffix("/")
+    return tuple(part.casefold() for part in PurePosixPath(candidate).parts)
 
 
 def safe_archive_path(name: str) -> bool:
@@ -54,10 +65,15 @@ def safe_archive_path(name: str) -> bool:
         return False
     path = PurePosixPath(candidate)
     windows_path = PureWindowsPath(candidate)
+    windows_reserved = any(
+        part.endswith((".", " ")) or ":" in part or WINDOWS_RESERVED_NAME.match(part)
+        for part in path.parts
+    )
     return (
         not path.is_absolute()
         and not windows_path.is_absolute()
         and not windows_path.drive
+        and not windows_reserved
         and ".." not in path.parts
         and "." not in path.parts
         and str(path) == candidate
@@ -76,6 +92,11 @@ for hostile_archive_path in (
     "safe//alias",
     "safe/./alias",
     "safe\0suffix",
+    "package/file.py:stream",
+    "package/CON",
+    "package/aux.txt",
+    "package/name.",
+    "package/name ",
 ):
     if safe_archive_path(hostile_archive_path):
         raise SystemExit(
@@ -86,6 +107,8 @@ for ordinary_archive_path in ("package/module.py", "package/data/", "LICENSE"):
         raise SystemExit(
             f"archive path guard rejected ordinary path: {ordinary_archive_path!r}"
         )
+if windows_archive_key("Package/module.py") != windows_archive_key("package/MODULE.py"):
+    raise SystemExit("archive Windows collision guard self-test failed")
 
 
 def canonical_distribution_name(name: str) -> str:
@@ -199,6 +222,9 @@ with zipfile.ZipFile(wheel) as archive:
     wheel_names = [entry.filename for entry in wheel_entries]
     if len(wheel_names) != len(set(wheel_names)):
         raise SystemExit("wheel contains duplicate paths")
+    wheel_windows_keys = [windows_archive_key(name) for name in wheel_names]
+    if len(wheel_windows_keys) != len(set(wheel_windows_keys)):
+        raise SystemExit("wheel contains Windows-equivalent duplicate paths")
     if not all(safe_archive_path(name) for name in wheel_names):
         raise SystemExit("wheel contains an unsafe or forbidden path")
     if any(
@@ -288,6 +314,9 @@ with tarfile.open(sdist, mode="r:gz") as archive:
     names = [member.name for member in members]
     if len(names) != len(set(names)):
         raise SystemExit("sdist contains duplicate paths")
+    sdist_windows_keys = [windows_archive_key(name) for name in names]
+    if len(sdist_windows_keys) != len(set(sdist_windows_keys)):
+        raise SystemExit("sdist contains Windows-equivalent duplicate paths")
     if not all(safe_archive_path(name) for name in names):
         raise SystemExit("sdist contains an unsafe or forbidden path")
     if any(not (member.isfile() or member.isdir()) for member in members):
@@ -510,6 +539,10 @@ forbidden_foundation_root_exports = {
     "digest_sqlite_initial_write_result",
     "encode_sqlite_initial_write_parameter_payload",
     "encode_sqlite_initial_write_result_payload",
+    "_digest_sqlite_initial_write_parameters_intrinsic",
+    "_digest_sqlite_initial_write_result_intrinsic",
+    "_encode_sqlite_initial_write_parameter_payload_intrinsic",
+    "_encode_sqlite_initial_write_result_payload_intrinsic",
     "SQLITE_CURSOR_MIGRATION_0002_ASSET_NAME",
     "SQLITE_CURSOR_MIGRATION_0002_ASSET_SHA256",
     "SQLITE_CURSOR_MIGRATION_0002_ASSET_UTF8_BYTES",
@@ -522,6 +555,8 @@ forbidden_foundation_root_exports = {
     "SQLiteCursorMigration0002AssetSnapshot",
     "load_sqlite_cursor_migration_0002_asset",
     "read_sqlite_cursor_migration_0002_asset_snapshot",
+    "_load_sqlite_cursor_migration_0002_asset_intrinsic",
+    "_read_sqlite_cursor_migration_0002_asset_snapshot_intrinsic",
     "SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_QUERY",
     "SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_QUERY_SHA256",
     "SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_DOMAIN_UTF8",

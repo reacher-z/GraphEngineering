@@ -109,10 +109,23 @@ root-package API leakage.
   `object.__setattr__` and could poison every later snapshot. The descriptor is
   now tuple-backed, resists both normal and hostile mutation, and retains exact
   shared identity across real SQLite validation.
+- **Supplemental M1, fixed after the foundation commit:** a caller-owned scalar
+  `type` proxy could dispatch hostile equality before rejection. Classification
+  now requires an exact built-in `str` before any literal comparison; throwing,
+  cross-type-equal and `str`-subclass proxies are rejected without invoking
+  their equality implementation.
+- **Supplemental M2, fixed after the foundation commit:** Windows device names,
+  NTFS alternate streams, trailing-dot/space aliases and case-insensitive path
+  collisions were not all rejected. The artifact guard now denies those forms,
+  exercises them in startup self-tests and checks a canonical Windows key for
+  every wheel/sdist member before installation.
+- **Supplemental L1, fixed after the foundation commit:** installed negative-root
+  checks now enumerate the digest and migration underscore intrinsics as well
+  as their friendly spellings.
 
 ## Final-byte verification
 
-- focused pytest: **57 passed**;
+- focused pytest: **60 passed** after supplemental hostile-type coverage;
 - Ruff check: **passed** for all seven changed Python files;
 - Ruff format check: **7 files already formatted**;
 - strict mypy: **passed** for all three production modules;
@@ -124,8 +137,13 @@ root-package API leakage.
 - `scripts/check-sqlite-python-artifacts.py`: **passed**, including exact release,
   preview, and support assets plus two installed-provider checks; and
 - `git diff --check`: **passed**;
-- independent final-byte adversarial audit: **H0 / M0 / L0**, with all earlier
-  H1/M1/M2/M3 findings confirmed closed and no repair regression found.
+- the first independent final-byte adversarial audit returned **H0 / M0 / L0**;
+  a later independent supplemental audit found the equality and Windows-path
+  gaps above, which were repaired in the immediate follow-up patch rather than
+  hidden by rewriting the already-pushed foundation commit; and
+- supplemental repair audit: **H0 / M0 / L0**, confirming zero hostile equality
+  dispatch, Windows-equivalent archive collision rejection and complete private
+  intrinsic negative-root coverage.
 
 An earlier complete-Python-suite attempt reached **2,780 passed with no failures
 at 79%**, then was deliberately interrupted during the slow B2 hostile section

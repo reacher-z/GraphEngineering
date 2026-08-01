@@ -15825,3 +15825,28 @@ The additional adversarial round found and closed four defects before commit:
 
 These corrections strengthen the foundation only. They do not advance or
 weaken the explicit non-claims in §31.37.38.4 and §31.37.40.
+
+#### 31.37.42 Supplemental foundation audit and transparent follow-up
+
+This correction is appended after §31.37.41 without changing any earlier plan
+bytes. The exact 15,827-line prefix hashes to
+`b7ab600621a78a6bf030fff9f6d5c9ac660b28b493daa40e019ed4ea309cdc3d`.
+
+A second independent audit completed after the foundation commit had already
+been pushed. Its findings are fixed in a follow-up commit rather than hidden by
+rewriting published history:
+
+- tagged-scalar classification now admits only an exact built-in string before
+  any equality comparison, preventing caller-owned proxies from executing or
+  leaking arbitrary equality exceptions;
+- wheel/sdist path validation now rejects Windows reserved devices, NTFS
+  alternate streams, trailing-dot/space aliases and case-insensitive equivalent
+  archive paths before installation; and
+- installed negative-root probes now enumerate digest and migration underscore
+  intrinsics in addition to the already-covered friendly and target-catalog
+  names.
+
+Three hostile scalar-type parameters raise the focused foundation count from 57
+to **60**. The supplemental repair audit reports **H0 / M0 / L0**. This is a
+hardening correction only and does not change the ordered continuation or any
+non-claim in §31.37.40.
