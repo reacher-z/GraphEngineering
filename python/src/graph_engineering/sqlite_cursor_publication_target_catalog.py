@@ -214,6 +214,23 @@ def _read_then_close_intrinsic(
 ) -> _T:
     """Read once and close, preserving a read failure over a cleanup failure."""
 
+    result, cleanup_failed = _read_then_close_deferred_cleanup_intrinsic(
+        cursor,
+        reader,
+        read_failure_code,
+    )
+    if cleanup_failed:
+        _fail("GE_CURSOR_B3_TARGET_CATALOG_CLEANUP")
+    return result
+
+
+def _read_then_close_deferred_cleanup_intrinsic(
+    cursor: _ClosableCursor,
+    reader: Callable[[], _T],
+    read_failure_code: str,
+) -> tuple[_T, bool]:
+    """Return a successful read plus a deferred exact-once close failure."""
+
     try:
         result = reader()
     except Exception:
@@ -223,20 +240,29 @@ def _read_then_close_intrinsic(
     try:
         cursor.close()
     except Exception:
-        _fail("GE_CURSOR_B3_TARGET_CATALOG_CLEANUP")
-    return result
+        return result, True
+    return result, False
 
 
 def _read_catalog_rows_from_cursor_intrinsic(
     cursor: _CatalogCursor,
 ) -> tuple[tuple[object, ...], ...]:
-    raw_rows = _read_then_close_intrinsic(
+    rows, cleanup_failed = _read_catalog_rows_with_deferred_cleanup_intrinsic(cursor)
+    if cleanup_failed:
+        _fail("GE_CURSOR_B3_TARGET_CATALOG_CLEANUP")
+    return rows
+
+
+def _read_catalog_rows_with_deferred_cleanup_intrinsic(
+    cursor: _CatalogCursor,
+) -> tuple[tuple[tuple[object, ...], ...], bool]:
+    raw_rows, cleanup_failed = _read_then_close_deferred_cleanup_intrinsic(
         cursor,
         lambda: cursor.fetchmany(_MAXIMUM_OBSERVED_ROWS),
         "GE_CURSOR_B3_TARGET_CATALOG_QUERY",
     )
     try:
-        return tuple(raw_rows)
+        return tuple(raw_rows), cleanup_failed
     except Exception:
         _fail("GE_CURSOR_B3_TARGET_CATALOG_QUERY")
 
@@ -244,14 +270,23 @@ def _read_catalog_rows_from_cursor_intrinsic(
 def _read_metadata_from_cursor_intrinsic(
     cursor: _MetadataCursor,
 ) -> tuple[object, ...]:
-    metadata, trailing = _read_then_close_intrinsic(
+    metadata, cleanup_failed = _read_metadata_with_deferred_cleanup_intrinsic(cursor)
+    if cleanup_failed:
+        _fail("GE_CURSOR_B3_TARGET_CATALOG_CLEANUP")
+    return metadata
+
+
+def _read_metadata_with_deferred_cleanup_intrinsic(
+    cursor: _MetadataCursor,
+) -> tuple[tuple[object, ...], bool]:
+    (metadata, trailing), cleanup_failed = _read_then_close_deferred_cleanup_intrinsic(
         cursor,
         lambda: (cursor.fetchone(), cursor.fetchone()),
         "GE_CURSOR_B3_TARGET_CATALOG_METADATA",
     )
     if type(metadata) is not tuple or trailing is not None or len(metadata) != 2:
         _fail("GE_CURSOR_B3_TARGET_CATALOG_METADATA")
-    return metadata
+    return metadata, cleanup_failed
 
 
 def _build_target_catalog_observation_intrinsic(
@@ -342,25 +377,48 @@ def _read_target_catalog_observation_intrinsic(
 ) -> _TargetCatalogSnapshot:
     """Read a canonical physical-catalog observation at any schema version."""
 
+    snapshot, cleanup_failed = _read_target_catalog_observation_with_cleanup_intrinsic(connection)
+    if cleanup_failed:
+        _fail("GE_CURSOR_B3_TARGET_CATALOG_CLEANUP")
+    return snapshot
+
+
+def _read_target_catalog_observation_with_cleanup_intrinsic(
+    connection: SQLiteV1BaselineConnectionOwner,
+) -> tuple[_TargetCatalogSnapshot, bool]:
+    """Build the observation while deferring catalog and metadata cleanup."""
+
     if type(connection) is not SQLiteV1BaselineConnectionOwner:
         _fail("GE_CURSOR_B3_TARGET_CATALOG_CONNECTION")
     try:
         cursor = _OWNER_EXECUTE(connection, SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_QUERY)
     except Exception:
         _fail("GE_CURSOR_B3_TARGET_CATALOG_QUERY")
-    rows = _read_catalog_rows_from_cursor_intrinsic(cursor)
+    rows, cleanup_failed = _read_catalog_rows_with_deferred_cleanup_intrinsic(cursor)
     try:
         metadata_cursor = _OWNER_EXECUTE(connection, _METADATA_QUERY)
     except Exception:
         _fail("GE_CURSOR_B3_TARGET_CATALOG_METADATA")
-    metadata = _read_metadata_from_cursor_intrinsic(metadata_cursor)
-    return _build_target_catalog_observation_intrinsic(metadata[0], metadata[1], rows)
+    metadata, metadata_cleanup_failed = _read_metadata_with_deferred_cleanup_intrinsic(
+        metadata_cursor
+    )
+    return (
+        _build_target_catalog_observation_intrinsic(metadata[0], metadata[1], rows),
+        cleanup_failed or metadata_cleanup_failed,
+    )
 
 
 _READ_TARGET_CATALOG_OBSERVATION = _read_target_catalog_observation_intrinsic
+_READ_TARGET_CATALOG_OBSERVATION_WITH_CLEANUP = (
+    _read_target_catalog_observation_with_cleanup_intrinsic
+)
 
 
 def _read_validated_target_catalog_intrinsic(
     connection: SQLiteV1BaselineConnectionOwner,
 ) -> _TargetCatalogSnapshot:
-    return _validate_target_catalog_snapshot_intrinsic(_READ_TARGET_CATALOG_OBSERVATION(connection))
+    snapshot, cleanup_failed = _READ_TARGET_CATALOG_OBSERVATION_WITH_CLEANUP(connection)
+    validated = _validate_target_catalog_snapshot_intrinsic(snapshot)
+    if cleanup_failed:
+        _fail("GE_CURSOR_B3_TARGET_CATALOG_CLEANUP")
+    return validated

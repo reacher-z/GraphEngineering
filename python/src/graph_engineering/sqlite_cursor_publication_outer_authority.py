@@ -7,6 +7,7 @@ rolls back or rebinds the caller-owned transaction.
 
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
@@ -41,13 +42,17 @@ from .sqlite_cursor_publication_migration_0002_asset import (
     _SQLiteCursorMigration0002PreviewManifestIdentity,
 )
 from .sqlite_cursor_publication_target_catalog import (
+    SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_DOMAIN_UTF8,
     SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_EXPECTED_APPLICATION_ID,
     SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_EXPECTED_CANONICAL_UTF8_BYTES,
     SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_EXPECTED_INVENTORY,
     SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_EXPECTED_ROW_COUNT,
     SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_EXPECTED_SHA256,
     SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_EXPECTED_USER_VERSION,
+    SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_QUERY,
+    SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_QUERY_SHA256,
     _read_target_catalog_observation_intrinsic,
+    _read_validated_target_catalog_intrinsic,
     _TargetCatalogSnapshot,
 )
 from .sqlite_operation_baseline import BaselineProjectionIdentity
@@ -88,7 +93,12 @@ _SQLiteCursorOuterPublicationAuthority: TypeAlias = (
 )
 _AuthorityLifecycle: TypeAlias = Literal["inactive", "active", "poisoned", "retired"]
 _WritePhase: TypeAlias = Literal[
-    "ready-0002", "executing-0002", "0002-complete", "poisoned", "retired"
+    "ready-0002",
+    "executing-0002",
+    "0002-complete",
+    "post-ddl-catalog-fence",
+    "poisoned",
+    "retired",
 ]
 
 
@@ -174,6 +184,37 @@ class _SQLiteMigration0002CatalogRebuildReceiptSnapshot(NamedTuple):
     write_kind: Literal["migration-0002-catalog-rebuild"]
 
 
+class _SQLiteCursorPostDdlCatalogFence:
+    __slots__ = ("__weakref__",)
+
+    def __init__(self, token: object) -> None:
+        if token is not _CONSTRUCTION_TOKEN:
+            raise TypeError("GE_CURSOR_B3_POST_DDL_CATALOG_FENCE")
+
+
+class _SQLiteCursorPostDdlCatalogFenceSnapshot(NamedTuple):
+    application_id: Literal[1_195_724_359]
+    authority: _SQLiteCursorOuterPublicationAuthority
+    catalog_canonical_utf8_bytes: Literal[5_785]
+    catalog_digest_domain_utf8: str
+    catalog_inventory: tuple[str, ...]
+    catalog_query: str
+    catalog_query_sha256: str
+    catalog_row_count: Literal[34]
+    catalog_sha256: str
+    connection: SQLiteV1BaselineConnectionOwner
+    consumes_any_write_receipt: Literal[False]
+    is_final_v2_semantic_proof: Literal[False]
+    migration_0002_receipt: _SQLiteMigration0002CatalogRebuildReceipt
+    mint_count: Literal[1]
+    outer_ledger_watermark: _SQLiteCursorOuterPublicationLedgerSnapshot
+    proof_scope: Literal["post-0002-physical-target-catalog-before-baseline-publication"]
+    total_changes_watermark: int
+    transaction_epoch: int
+    transaction_generation: object
+    user_version: Literal[2]
+
+
 class _SQLiteCursorOuterPublicationAuthoritySnapshot(NamedTuple):
     lifecycle: _AuthorityLifecycle
     stage_ownership_poison_reason: str | None
@@ -200,6 +241,8 @@ class _SQLiteCursorOuterPublicationAuthoritySnapshot(NamedTuple):
     migration_0002_logical_execution_count: Literal[0, 1]
     migration_0002_prepared_statement_count: int
     migration_0002_receipt: _SQLiteMigration0002CatalogRebuildReceipt | None
+    post_ddl_catalog_fence: _SQLiteCursorPostDdlCatalogFence | None
+    post_ddl_catalog_fence_mint_count: Literal[0, 1]
     write_phase: _WritePhase
 
 
@@ -238,6 +281,8 @@ class _AuthorityState:
     migration_0002_logical_execution_count: Literal[0, 1] = 0
     migration_0002_prepared_statement_count: int = 0
     migration_0002_receipt: _SQLiteMigration0002CatalogRebuildReceipt | None = None
+    post_ddl_catalog_fence: _SQLiteCursorPostDdlCatalogFence | None = None
+    post_ddl_catalog_fence_mint_count: Literal[0, 1] = 0
     write_phase: _WritePhase = "ready-0002"
 
 
@@ -249,6 +294,24 @@ class _Migration0002ReceiptRecord:
     post_ddl_catalog: _TargetCatalogSnapshot
     pre_ddl_catalog: _TargetCatalogSnapshot
     snapshot: _SQLiteMigration0002CatalogRebuildReceiptSnapshot
+
+
+@dataclass(frozen=True, slots=True)
+class _PostDdlCatalogFenceRecord:
+    authority_id: int
+    authority_ref: ReferenceType[_SQLiteCursorStageOwnershipOuterPublicationAuthority]
+    catalog_application_id: int
+    catalog_canonical_utf8_bytes: int
+    catalog_inventory: tuple[str, ...]
+    catalog_row_count: int
+    catalog_sha256: str
+    catalog_user_version: int
+    migration_0002_receipt_id: int
+    migration_0002_receipt_ref: ReferenceType[_SQLiteMigration0002CatalogRebuildReceipt]
+    outer_ledger_watermark: _SQLiteCursorOuterPublicationLedgerSnapshot
+    total_changes_watermark: int
+    transaction_epoch: int
+    transaction_generation: object
 
 
 class _IdentityEntry(NamedTuple):
@@ -266,6 +329,7 @@ _AUTHORITIES: dict[int, _IdentityEntry] = {}
 _AUTHORITY_BY_EVIDENCE: dict[int, _AuthorityLink] = {}
 _AUTHORITY_BY_TRANSFER: dict[int, _AuthorityLink] = {}
 _MIGRATION_0002_RECEIPTS: dict[int, _IdentityEntry] = {}
+_POST_DDL_CATALOG_FENCES: dict[int, _IdentityEntry] = {}
 
 # Capture every replaceable dependency before any caller can alter its module or
 # class attribute.  Registry lookup below also checks the weak referent with
@@ -307,11 +371,13 @@ _OWNER_GENERATION = cast(
 _LOAD_MIGRATION_0002_ASSET = _load_sqlite_cursor_migration_0002_asset_intrinsic
 _READ_MIGRATION_0002_ASSET = _read_sqlite_cursor_migration_0002_asset_snapshot_intrinsic
 _READ_TARGET_CATALOG = _read_target_catalog_observation_intrinsic
+_READ_VALIDATED_TARGET_CATALOG = _read_validated_target_catalog_intrinsic
 _BEGIN_MIGRATION_0002 = _begin_sqlite_connection_migration_0002_execution_intrinsic
 _EXECUTE_NEXT_MIGRATION_0002 = _execute_next_sqlite_connection_migration_0002_statement_intrinsic
 _READ_MIGRATION_0002_PROGRESS = _read_sqlite_connection_migration_0002_execution_snapshot_intrinsic
 _DIGEST_INITIAL_WRITE_PARAMETERS = _digest_sqlite_initial_write_parameters_intrinsic
 _DIGEST_INITIAL_WRITE_RESULT = _digest_sqlite_initial_write_result_intrinsic
+_SQLITE_PROGRAMMING_ERROR = sqlite3.ProgrammingError
 
 
 def _fail(code: str) -> Never:
@@ -991,6 +1057,311 @@ def _read_sqlite_migration_0002_catalog_rebuild_receipt_snapshot_intrinsic(
     return snapshot
 
 
+def _exact_outer_ledger(
+    left: _SQLiteCursorOuterPublicationLedgerSnapshot,
+    right: _SQLiteCursorOuterPublicationLedgerSnapshot,
+) -> bool:
+    return (
+        left.logical_write_sequence == right.logical_write_sequence
+        and left.fixed_statement_count == right.fixed_statement_count
+        and left.affected_rows_watermark == right.affected_rows_watermark
+    )
+
+
+def _exact_post_ddl_catalog(
+    catalog: _TargetCatalogSnapshot,
+    retained: _TargetCatalogSnapshot,
+) -> bool:
+    return (
+        type(catalog) is _TargetCatalogSnapshot
+        and type(retained) is _TargetCatalogSnapshot
+        and catalog.application_id
+        == retained.application_id
+        == SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_EXPECTED_APPLICATION_ID
+        and catalog.user_version
+        == retained.user_version
+        == SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_EXPECTED_USER_VERSION
+        and catalog.row_count
+        == retained.row_count
+        == SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_EXPECTED_ROW_COUNT
+        and catalog.canonical_utf8_bytes
+        == retained.canonical_utf8_bytes
+        == SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_EXPECTED_CANONICAL_UTF8_BYTES
+        and catalog.catalog_sha256
+        == retained.catalog_sha256
+        == SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_EXPECTED_SHA256
+        and catalog.canonical_json == retained.canonical_json
+        and catalog.canonical_rows == retained.canonical_rows
+        and catalog.inventory
+        == retained.inventory
+        == SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_EXPECTED_INVENTORY
+        and catalog.query == retained.query == SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_QUERY
+        and catalog.query_sha256
+        == retained.query_sha256
+        == SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_QUERY_SHA256
+        and catalog.target_descriptor is retained.target_descriptor
+    )
+
+
+def _assert_open_fence_authority(
+    state: _AuthorityState,
+    authority: _SQLiteCursorOuterPublicationAuthority,
+) -> None:
+    """Classify a closed native owner before its properties can leak driver errors."""
+
+    try:
+        _OWNER_EXCLUSIVE(state.connection)
+    except _SQLITE_PROGRAMMING_ERROR:
+        _poison(state, authority, "SQLite post-DDL catalog connection is unavailable")
+        _fail("GE_CURSOR_B3_POST_DDL_CATALOG_UNAVAILABLE")
+    _assert_sqlite_cursor_outer_publication_authority_intrinsic(authority)
+
+
+def _translate_closed_fence_connection(
+    state: _AuthorityState,
+    authority: _SQLiteCursorOuterPublicationAuthority,
+) -> None:
+    """Reprobe after a masked reader failure and classify a newly closed owner."""
+
+    try:
+        _OWNER_EXCLUSIVE(state.connection)
+    except _SQLITE_PROGRAMMING_ERROR:
+        _poison(state, authority, "SQLite post-DDL catalog connection is unavailable")
+        raise ValueError("GE_CURSOR_B3_POST_DDL_CATALOG_UNAVAILABLE") from None
+
+
+def _post_ddl_catalog_fence_record(
+    fence: _SQLiteCursorPostDdlCatalogFence,
+) -> _PostDdlCatalogFenceRecord:
+    record = _identity_get(
+        _POST_DDL_CATALOG_FENCES,
+        fence,
+        _SQLiteCursorPostDdlCatalogFence,
+    )
+    if record is None:
+        _fail("GE_CURSOR_B3_POST_DDL_CATALOG_FENCE")
+    return cast(_PostDdlCatalogFenceRecord, record)
+
+
+def _resolve_post_ddl_catalog_fence_graph(
+    record: _PostDdlCatalogFenceRecord,
+) -> tuple[
+    _SQLiteCursorOuterPublicationAuthority,
+    _SQLiteMigration0002CatalogRebuildReceipt,
+]:
+    authority = record.authority_ref()
+    receipt = record.migration_0002_receipt_ref()
+    if (
+        authority is None
+        or receipt is None
+        or _ID(authority) != record.authority_id
+        or _ID(receipt) != record.migration_0002_receipt_id
+    ):
+        _fail("GE_CURSOR_B3_POST_DDL_CATALOG_FENCE")
+    return authority, receipt
+
+
+def _mint_sqlite_cursor_post_ddl_catalog_fence_intrinsic(
+    authority: _SQLiteCursorOuterPublicationAuthority,
+    migration_0002_receipt: _SQLiteMigration0002CatalogRebuildReceipt,
+) -> _SQLiteCursorPostDdlCatalogFence:
+    """Mint the one reusable physical-target proof from a fresh catalog read."""
+
+    state = _authority_state(authority)
+    if state.post_ddl_catalog_fence is not None or state.post_ddl_catalog_fence_mint_count != 0:
+        _poison(state, authority, "SQLite post-DDL catalog fence was minted more than once")
+        _fail("GE_CURSOR_B3_POST_DDL_CATALOG_REPLAY")
+    if (
+        state.write_phase != "0002-complete"
+        or state.migration_0002_logical_execution_count != 1
+        or state.migration_0002_prepared_statement_count
+        != SQLITE_CURSOR_MIGRATION_0002_FIXED_STATEMENT_COUNT
+        or state.migration_0002_receipt is None
+    ):
+        _poison(state, authority, "SQLite post-DDL catalog fence mint was premature")
+        _fail("GE_CURSOR_B3_POST_DDL_CATALOG_PREMATURE")
+
+    # Presentation is a caller-controlled shape error. Authenticate it before
+    # any live SQLite observation and without damaging a healthy exact graph.
+    presented = _identity_get(
+        _MIGRATION_0002_RECEIPTS,
+        migration_0002_receipt,
+        _SQLiteMigration0002CatalogRebuildReceipt,
+    )
+    if presented is None:
+        _fail("GE_CURSOR_B3_POST_DDL_CATALOG_RECEIPT")
+    receipt_record = cast(_Migration0002ReceiptRecord, presented)
+    if (
+        receipt_record.authority_ref() is not authority
+        or receipt_record.connection is not state.connection
+        or state.migration_0002_receipt is not migration_0002_receipt
+    ):
+        _fail("GE_CURSOR_B3_POST_DDL_CATALOG_RECEIPT")
+
+    try:
+        _assert_open_fence_authority(state, authority)
+        migration = _read_sqlite_migration_0002_catalog_rebuild_receipt_snapshot_intrinsic(
+            migration_0002_receipt
+        )
+        current_ledger = _outer_ledger_snapshot(state)
+        if (
+            state.transaction_generation is not migration.transaction_generation
+            or state.current_transaction_epoch != migration.transaction_epoch_after
+            or state.current_total_changes != migration.total_changes_after
+            or not _exact_outer_ledger(current_ledger, migration.outer_ledger_after)
+        ):
+            _fail("GE_CURSOR_B3_POST_DDL_CATALOG_WATERMARK")
+
+        # Receipt-retained catalog data is comparison evidence only. The proof
+        # authority is this independent captured validated read.
+        catalog = _READ_VALIDATED_TARGET_CATALOG(state.connection)
+        _assert_open_fence_authority(state, authority)
+        if (
+            not _exact_post_ddl_catalog(catalog, receipt_record.post_ddl_catalog)
+            or catalog.catalog_sha256 != migration.post_ddl_catalog_sha256
+            or catalog.application_id != migration.application_id_after
+            or catalog.user_version != migration.user_version_after
+        ):
+            _fail("GE_CURSOR_B3_POST_DDL_CATALOG_DRIFT")
+
+        fence = _SQLiteCursorPostDdlCatalogFence(_CONSTRUCTION_TOKEN)
+        _identity_set(
+            _POST_DDL_CATALOG_FENCES,
+            fence,
+            _PostDdlCatalogFenceRecord(
+                authority_id=_ID(authority),
+                authority_ref=_REF(authority),
+                catalog_application_id=catalog.application_id,
+                catalog_canonical_utf8_bytes=catalog.canonical_utf8_bytes,
+                catalog_inventory=catalog.inventory,
+                catalog_row_count=catalog.row_count,
+                catalog_sha256=catalog.catalog_sha256,
+                catalog_user_version=catalog.user_version,
+                migration_0002_receipt_id=_ID(migration_0002_receipt),
+                migration_0002_receipt_ref=_REF(migration_0002_receipt),
+                outer_ledger_watermark=current_ledger,
+                total_changes_watermark=state.current_total_changes,
+                transaction_epoch=state.current_transaction_epoch,
+                transaction_generation=state.transaction_generation,
+            ),
+        )
+        state.post_ddl_catalog_fence = fence
+        state.post_ddl_catalog_fence_mint_count = 1
+        state.write_phase = "post-ddl-catalog-fence"
+        return fence
+    except BaseException:
+        _translate_closed_fence_connection(state, authority)
+        _poison(state, authority, "SQLite post-DDL catalog fence validation failed")
+        raise
+
+
+def _assert_sqlite_cursor_post_ddl_catalog_fence_intrinsic(
+    authority: _SQLiteCursorOuterPublicationAuthority,
+    migration_0002_receipt: _SQLiteMigration0002CatalogRebuildReceipt,
+    fence: _SQLiteCursorPostDdlCatalogFence,
+) -> _SQLiteCursorPostDdlCatalogFence:
+    """Reprove the exact live fence with another independent catalog read."""
+
+    record = _post_ddl_catalog_fence_record(fence)
+    if (
+        record.authority_id != _ID(authority)
+        or record.authority_ref() is not authority
+        or record.migration_0002_receipt_id != _ID(migration_0002_receipt)
+        or record.migration_0002_receipt_ref() is not migration_0002_receipt
+    ):
+        _fail("GE_CURSOR_B3_POST_DDL_CATALOG_FENCE_GRAPH")
+    state = _authority_state(authority)
+    if (
+        state.post_ddl_catalog_fence is not fence
+        or state.post_ddl_catalog_fence_mint_count != 1
+        or state.migration_0002_receipt is not migration_0002_receipt
+    ):
+        _fail("GE_CURSOR_B3_POST_DDL_CATALOG_FENCE_GRAPH")
+
+    try:
+        _assert_open_fence_authority(state, authority)
+        registered_receipt = _identity_get(
+            _MIGRATION_0002_RECEIPTS,
+            migration_0002_receipt,
+            _SQLiteMigration0002CatalogRebuildReceipt,
+        )
+        if registered_receipt is None:
+            _fail("GE_CURSOR_B3_POST_DDL_CATALOG_FENCE_GRAPH")
+        receipt_record = cast(_Migration0002ReceiptRecord, registered_receipt)
+        if (
+            receipt_record.authority_ref() is not authority
+            or receipt_record.connection is not state.connection
+        ):
+            _fail("GE_CURSOR_B3_POST_DDL_CATALOG_FENCE_GRAPH")
+        _read_sqlite_migration_0002_catalog_rebuild_receipt_snapshot_intrinsic(
+            migration_0002_receipt
+        )
+        watermark = record.outer_ledger_watermark
+        if (
+            state.transaction_generation is not record.transaction_generation
+            or state.current_transaction_epoch < record.transaction_epoch
+            or state.current_total_changes < record.total_changes_watermark
+            or state.logical_write_sequence < watermark.logical_write_sequence
+            or state.fixed_statement_count < watermark.fixed_statement_count
+            or state.affected_rows_watermark < watermark.affected_rows_watermark
+        ):
+            _fail("GE_CURSOR_B3_POST_DDL_CATALOG_WATERMARK")
+        catalog = _READ_VALIDATED_TARGET_CATALOG(state.connection)
+        _assert_open_fence_authority(state, authority)
+        if (
+            not _exact_post_ddl_catalog(catalog, receipt_record.post_ddl_catalog)
+            or catalog.application_id != record.catalog_application_id
+            or catalog.user_version != record.catalog_user_version
+            or catalog.row_count != record.catalog_row_count
+            or catalog.canonical_utf8_bytes != record.catalog_canonical_utf8_bytes
+            or catalog.catalog_sha256 != record.catalog_sha256
+            or catalog.inventory != record.catalog_inventory
+            or catalog.query != SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_QUERY
+            or catalog.query_sha256 != SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_QUERY_SHA256
+        ):
+            _fail("GE_CURSOR_B3_POST_DDL_CATALOG_DRIFT")
+        return fence
+    except BaseException:
+        _translate_closed_fence_connection(state, authority)
+        _poison(state, authority, "SQLite post-DDL catalog fence revalidation failed")
+        raise
+
+
+def _read_sqlite_cursor_post_ddl_catalog_fence_snapshot_intrinsic(
+    fence: _SQLiteCursorPostDdlCatalogFence,
+) -> _SQLiteCursorPostDdlCatalogFenceSnapshot:
+    record = _post_ddl_catalog_fence_record(fence)
+    authority, migration_0002_receipt = _resolve_post_ddl_catalog_fence_graph(record)
+    _assert_sqlite_cursor_post_ddl_catalog_fence_intrinsic(
+        authority,
+        migration_0002_receipt,
+        fence,
+    )
+    state = _authority_state(authority)
+    return _SQLiteCursorPostDdlCatalogFenceSnapshot(
+        application_id=cast(Literal[1_195_724_359], record.catalog_application_id),
+        authority=authority,
+        catalog_canonical_utf8_bytes=cast(Literal[5_785], record.catalog_canonical_utf8_bytes),
+        catalog_digest_domain_utf8=SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_DOMAIN_UTF8,
+        catalog_inventory=record.catalog_inventory,
+        catalog_query=SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_QUERY,
+        catalog_query_sha256=SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_QUERY_SHA256,
+        catalog_row_count=cast(Literal[34], record.catalog_row_count),
+        catalog_sha256=record.catalog_sha256,
+        connection=state.connection,
+        consumes_any_write_receipt=False,
+        is_final_v2_semantic_proof=False,
+        migration_0002_receipt=migration_0002_receipt,
+        mint_count=1,
+        outer_ledger_watermark=record.outer_ledger_watermark,
+        proof_scope="post-0002-physical-target-catalog-before-baseline-publication",
+        total_changes_watermark=record.total_changes_watermark,
+        transaction_epoch=record.transaction_epoch,
+        transaction_generation=record.transaction_generation,
+        user_version=cast(Literal[2], record.catalog_user_version),
+    )
+
+
 def _read_sqlite_cursor_outer_publication_authority_snapshot_intrinsic(
     authority: _SQLiteCursorOuterPublicationAuthority,
 ) -> _SQLiteCursorOuterPublicationAuthoritySnapshot:
@@ -1025,5 +1396,7 @@ def _read_sqlite_cursor_outer_publication_authority_snapshot_intrinsic(
         migration_0002_logical_execution_count=state.migration_0002_logical_execution_count,
         migration_0002_prepared_statement_count=state.migration_0002_prepared_statement_count,
         migration_0002_receipt=state.migration_0002_receipt,
+        post_ddl_catalog_fence=state.post_ddl_catalog_fence,
+        post_ddl_catalog_fence_mint_count=state.post_ddl_catalog_fence_mint_count,
         write_phase=state.write_phase,
     )

@@ -61,6 +61,21 @@ class _ProbeCatalogCursor:
             raise RuntimeError("hostile close")
 
 
+class _ProbeMetadataCursor:
+    def __init__(self, metadata: tuple[object, ...], *, fail_close: bool = False) -> None:
+        self.rows: list[tuple[object, ...] | None] = [metadata, None]
+        self.fail_close = fail_close
+        self.close_count = 0
+
+    def fetchone(self) -> tuple[object, ...] | None:
+        return self.rows.pop(0)
+
+    def close(self) -> None:
+        self.close_count += 1
+        if self.fail_close:
+            raise RuntimeError("hostile metadata close")
+
+
 def _open_target() -> SQLiteV1BaselineConnectionOwner:
     connection = SQLiteV1BaselineConnectionOwner(":memory:")
     connection.executescript(SCHEMA_V2.read_text(encoding="utf-8"))
@@ -383,6 +398,72 @@ def test_read_failure_wins_over_close_failure_and_sole_close_failure_is_stable()
     with _expect("GE_CURSOR_B3_TARGET_CATALOG_CLEANUP"):
         _read_catalog_rows_from_cursor_intrinsic(cleanup)
     assert cleanup.close_count == 1
+
+
+def test_catalog_close_failure_is_deferred_through_full_target_validation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connection = _open_target()
+    try:
+        rows = list(_raw_rows(connection))
+
+        def assert_precedence(
+            metadata: tuple[object, ...],
+            expected: str,
+            *,
+            catalog_close: bool = False,
+            metadata_close: bool = False,
+        ) -> None:
+            catalog_cursor = _ProbeCatalogCursor(rows, fail_close=catalog_close)
+            metadata_cursor = _ProbeMetadataCursor(metadata, fail_close=metadata_close)
+
+            def execute(
+                owner: SQLiteV1BaselineConnectionOwner,
+                sql: str,
+            ) -> _ProbeCatalogCursor | _ProbeMetadataCursor:
+                assert owner is connection
+                if sql == SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_QUERY:
+                    return catalog_cursor
+                assert sql == target_catalog._METADATA_QUERY
+                return metadata_cursor
+
+            monkeypatch.setattr(target_catalog, "_OWNER_EXECUTE", execute)
+            with _expect(expected):
+                _read_validated_target_catalog_intrinsic(connection)
+            assert catalog_cursor.close_count == 1
+            assert metadata_cursor.close_count == 1
+
+        # A complete but invalid target outranks the earlier catalog cleanup.
+        assert_precedence(
+            (SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_EXPECTED_APPLICATION_ID, 3),
+            "GE_CURSOR_B3_TARGET_CATALOG_MISMATCH",
+            catalog_close=True,
+        )
+        # Only a fully valid target is allowed to surface deferred cleanup.
+        assert_precedence(
+            (
+                SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_EXPECTED_APPLICATION_ID,
+                SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_EXPECTED_USER_VERSION,
+            ),
+            "GE_CURSOR_B3_TARGET_CATALOG_CLEANUP",
+            catalog_close=True,
+        )
+        # Metadata-cursor cleanup follows the same full-validation precedence.
+        assert_precedence(
+            (SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_EXPECTED_APPLICATION_ID, 3),
+            "GE_CURSOR_B3_TARGET_CATALOG_MISMATCH",
+            metadata_close=True,
+        )
+        assert_precedence(
+            (
+                SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_EXPECTED_APPLICATION_ID,
+                SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_EXPECTED_USER_VERSION,
+            ),
+            "GE_CURSOR_B3_TARGET_CATALOG_CLEANUP",
+            metadata_close=True,
+        )
+    finally:
+        _close_target(connection)
 
 
 @pytest.mark.parametrize(

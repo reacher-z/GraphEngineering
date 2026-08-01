@@ -16188,3 +16188,197 @@ retire TEMP state; commit or rollback; produce the Python/Node 28-field parity
 report; activate the v2 manifest; cut a release; or guarantee GitHub stars or
 external adoption. Those outcomes remain explicit downstream work and metrics,
 not facts implied by this bounded writer acceptance.
+
+#### 31.37.46 Python B3 fresh post-DDL physical-catalog fence acceptance
+
+This section is appended without changing the preceding 16,190 lines. That
+exact prefix hashes to
+`dd605587073568f955317a6f405904489f8bf8770e7c0a6654ce9d7a443e5033`.
+It accepts the fresh physical-catalog fence ordered by §31.37.45.4 and
+authorizes only the independent post-DDL reader lease. All later receipt,
+adoption, rebind, rule, commit, manifest and adoption-outcome claims remain
+false.
+
+##### 31.37.46.1 Exact implemented boundary
+
+The active Python outer authority now owns one optional opaque post-DDL fence,
+one mint counter and the phase `post-ddl-catalog-fence`. The capability is an
+exact module-constructed weak-referenceable token. The root package exports no
+friendly or underscore fence symbol.
+
+Mint accepts only the exact active authority and exact authentic migration-0002
+receipt. It detects replay before any SQLite access, detects premature or
+incomplete migration state before receipt presentation, validates receipt
+registry/authority/connection/back-pointer identity as a non-poison caller
+boundary, reasserts the live exclusive generation, rereads the authentic
+receipt and requires exact equality with its after-epoch, `total_changes` and
+three-dimensional ledger.
+
+Receipt-retained catalog data is comparison evidence only. Mint invokes the
+captured strict target-catalog reader to obtain a new physical observation,
+then reasserts the authority after that read. It compares the fresh observation
+with both the frozen target constants and the exact observation retained by the
+migration receipt. Only after every fallible operation succeeds does one
+assignment-only tail register the fence, set the authority back-pointer,
+advance mint count zero to one and change the write phase. The tail executes no
+SQL, consumes no receipt and changes no epoch, native counter or ledger value.
+
+The exact catalog proof binds the canonical query using
+`lower(name) GLOB 'ge_cycle_*'`, query hash
+`bd9a24c0e8307f473f6160b940effdfb77007144fbeea83628f0b7664df1410c`,
+digest domain, 34-row ordered inventory, 5,785 canonical UTF-8 bytes,
+application ID 1,195,724,359, user version 2 and catalog hash
+`ca85cf266267fa3eb5443bdf6d957b4b03c795cd6e0232a28c52773f1041fadf`.
+Canonical JSON, canonical row records, query identity and tuple-backed target
+descriptor identity are also cross-checked, preventing equal-count object
+replacement, SQL whitespace mutation and case-variant owned-object attacks.
+
+##### 31.37.46.2 Weak graph and exact 20-field snapshot
+
+The private registry is designed for Python's non-ephemeron weak maps. Its
+value retains only integer ids, exact weak authority and receipt references,
+the transaction-generation token and frozen catalog/epoch/counter/ledger
+scalars. It does not strongly retain the authority, migration receipt,
+connection or a snapshot that contains graph objects. Weak callbacks capture
+only integer ids and registry state.
+
+Read resolves both weak referents and their exact ids, performs the full live
+assertion and fresh catalog read, derives the connection from the live
+authority and reconstructs the snapshot. No cached snapshot can become a stale
+escape hatch. The exact fields are:
+
+1. application ID;
+2. authority identity;
+3. canonical catalog UTF-8 byte count;
+4. catalog digest domain;
+5. full catalog inventory;
+6. catalog query;
+7. catalog query hash;
+8. catalog row count;
+9. catalog hash;
+10. connection identity;
+11. `consumes_any_write_receipt=False`;
+12. `is_final_v2_semantic_proof=False`;
+13. migration-0002 receipt identity;
+14. mint count one;
+15. outer-ledger watermark;
+16. proof scope
+    `post-0002-physical-target-catalog-before-baseline-publication`;
+17. `total_changes` watermark;
+18. transaction epoch;
+19. transaction-generation identity; and
+20. user version two.
+
+Assertion uses exact identity and graph back-pointers before live access. A
+forged token, clone, wrong authority, wrong receipt or cross-run pair is a
+non-poison zero-SQL presentation error. A live exact graph revalidates the
+authority and receipt, requires identical generation and lower-bounded epoch,
+counter and ledger dimensions, performs another fresh strict catalog read,
+reasserts authority after the read and compares every catalog commitment.
+Lower bounds permit later authenticated writers while rejecting regression;
+this leaf does not forge private state to pretend such a later writer exists.
+
+Natural abandonment removes authority, receipt, fence and stage graphs and
+returns authority/receipt/fence registries to their exact baseline. Retaining
+an orphan token cannot revive a dead authority or receipt.
+
+##### 31.37.46.3 Lifecycle, unavailable and cleanup precedence
+
+Rollback/rebegin and transaction-generation replacement retire the exact graph.
+Later calls cannot turn retired into poisoned. Catalog, epoch, native counter
+or ledger corruption poisons the live graph; later calls cannot turn poisoned
+into retired. Replay and premature mint are terminal before SQL, while wrong
+presentation leaves a valid graph retryable.
+
+Closed connections are classified before native owner properties can leak a
+driver exception. The fence repeats the captured owner-open probe after any
+reader error so a close occurring between the first assertion and catalog read
+cannot be hidden behind the target reader's query/metadata translation. Every
+closed path raises the stable
+`GE_CURSOR_B3_POST_DDL_CATALOG_UNAVAILABLE` from no raw driver cause and poisons
+the live graph.
+
+The target reader now defers successful-read close failure for both the catalog
+and metadata cursors. Each close is attempted exactly once. Deferred flags are
+combined, and the reader continues through metadata shape validation,
+canonical row/JSON construction and full expected-v2 validation. Fetch/read
+primary outranks close; metadata/row/digest/inventory/catalog corruption
+outranks close; only a fully valid target may surface
+`GE_CURSOR_B3_TARGET_CATALOG_CLEANUP`.
+
+The first security review found that metadata cleanup was still immediate even
+after catalog cleanup had been corrected. That medium finding was reproduced,
+fixed by combining both deferred cleanup flags, and locked with valid/invalid
+metadata crossed against catalog/metadata close failure. A later low finding
+that the helper docstring still described catalog-only cleanup was corrected.
+The final security and contract reviews both report severity zero.
+
+##### 31.37.46.4 Acceptance evidence
+
+Acceptance evidence on the final byte set is:
+
+1. fence hostile suite passed **20/20**;
+2. target-catalog suite passed **29/29**;
+3. final target-plus-fence boundary passed **49/49 in 80.01 seconds**;
+4. final target/migration/fence/outer boundary passed
+   **104/104 in 317.70 seconds**;
+5. TypeScript outer-authority oracle passed **30/30 in 29.20 seconds**;
+6. complete Python suite passed **3,529 tests plus two subtests**, with zero
+   failures, zero skips and exit code zero, in **1,817.32 seconds**;
+7. all four changed production/test files passed Ruff check and format check;
+8. authoritative Python mypy passed all **101 source files**;
+9. whitespace validation passed; and
+10. independent final contract and security audits reported
+    **HIGH 0 / MEDIUM 0 / LOW 0**.
+
+The durable acceptance record is
+`codex_logs/reviews/PYTHON-CURSOR-B3-POST-DDL-CATALOG-FENCE-2026-08-01.md`.
+
+##### 31.37.46.5 Next isolated leaf: post-DDL publication reader lease
+
+The next leaf must accept exactly the active authority, authentic migration
+receipt and authentic physical-catalog fence. Wrong, cloned, substituted or
+cross-run presentation must fail before reader ownership or SQL and leave a
+healthy exact graph retryable. The leaf may not trust caller rows, a caller
+projection, a caller count, a cached fence snapshot or an ambient cursor.
+
+It must mint one opaque reader lease in lifecycle `minted-unused`, bind the
+exact authority/receipt/fence/connection/transaction generation and acquire at
+most one package-owned cursor. Execution prepares the fixed ordered B2 TEMP
+projection query exactly once, executes exactly once, fetches through a bounded
+stream and validates every row before retaining an immutable private entry
+vector. It must recompute the projection identity and require exact equality
+with the authentic B2 projection and projection-reference graph.
+
+The reader owns no permanent write authority. Its counters are separate:
+ownership acquisition zero or one, prepare zero or one, execute zero or one,
+fetch count, close attempt zero or one and close success. It records its read
+epoch, `total_changes` and outer-ledger watermarks without changing them.
+
+Close is exact-once and primary preserving. A fetch/decode/projection primary
+outranks close; after otherwise successful reading, close failure is terminal.
+The stage cleanup continuation is cleared only after successful close. A
+successful terminal proof has lifecycle `retired`, one close attempt, close
+success true, no active cursor or cleanup owner, exact retained rows and exact
+rederived projection. Read/assert of the terminal lease must rerun live fence,
+authority, lineage, catalog and watermark checks; no stale snapshot escape is
+allowed.
+
+Cancellation is permitted only at the frozen reader boundaries. Cancellation
+before reader ownership leaves the lease retryable only where the earlier
+contract explicitly permits it; after ownership, close is mandatory and close
+failure outranks cancellation. Row primary outranks both close and
+cancellation. Every cursor is closed exactly once even if stage disposal,
+ownership retirement and caller cleanup race in sequence.
+
+Required evidence includes exact empty/nonempty projection success, fresh
+fence reads, one prepare/execute, bounded fetch, row-order/hash/projection
+rederivation, caller-row rejection, replay, cancellation at every boundary,
+row/close/cancellation precedence, connection close, rollback, catalog and
+watermark drift, hostile captured cursor methods, stage cleanup exact-once,
+package privacy and joint authority/receipt/fence/lease/stage collection.
+
+This acceptance does not implement that reader lease. Baseline-entry/header/
+sequence writes, four receipt tombstones, atomic adoption, publication session,
+cursor rebind, rules 11/12, TEMP retirement, commit, manifest activation,
+release and external-star/adoption outcomes remain explicit nonclaims.
