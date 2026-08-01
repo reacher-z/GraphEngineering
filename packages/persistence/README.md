@@ -46,6 +46,71 @@ Checkpoint state numbers are restricted to JavaScript safe integers so hashes
 remain portable across runtimes; represent decimals as strings or explicitly
 scaled integers.
 
+## Durable payload protection (D9, `events/v1alpha2`)
+
+`JsonlEventStore` is the legacy v1alpha1 writer: it persists raw Tagged Durable
+JSON payloads. `spec/redaction-semantics.md` forbids that, so this package also
+ships the protected path.
+
+```ts
+import {
+  DEFAULT_CAPTURE_POLICY,
+  DeterministicTestKeyProvider,
+  FileProtectedPayloadStore,
+  ProtectedJsonlEventStore,
+  SinkGuard,
+  prepareProtectedEvent,
+} from "@graph-engineering/persistence";
+
+const keys = new DeterministicTestKeyProvider();
+const guard = new SinkGuard({
+  policy: DEFAULT_CAPTURE_POLICY,
+  keys,
+  store: new FileProtectedPayloadStore({ directory: ".graph-engineering" }),
+  scope: { tenantScopeId, authorityProviderId, authoritySubjectId },
+});
+const journal = new ProtectedJsonlEventStore({ directory: ".graph-engineering" });
+
+const decision = await prepareProtectedEvent(guard, journal, spec);
+if (decision.kind === "prepared") {
+  await journal.append(runId, -1, [decision.prepared]);
+}
+```
+
+- `SinkGuard.prepare` is a total function over (snapshot, policy, sink). It
+  returns `suppressed`, a structured failure, or one `PreparedSinkWrite`. It
+  never throws provider text, never returns a partly transformed object, and
+  never uses `null` as failure.
+- `ProtectedJsonlEventStore` has no raw append. Its only write method accepts a
+  `PreparedSinkWrite` bound to that exact instance, minted only by the guard and
+  consumed at most once. A cloned, forged, serialized, or replayed write is
+  refused with `GuardBypassError`.
+- Authoritative application values are AES-256-GCM protected under
+  occurrence-specific associated data and appear on the wire only as a closed
+  `ProtectedValueRef` with `redacted: false` and
+  `payloadDisposition: "protected-ref"`.
+- `redactionTransform` implements the RFC 6901 transform of Section 3.3.1,
+  including prototype-member rejection at any depth, canonical array indices,
+  overlap/duplicate/order rejection, deepest-first application, and Section 11
+  limits evaluated before target and overlap checks.
+- `classifyLegacyHistory` reports `LEGACY_REDACTION_MISMATCH` for a v1alpha1
+  history that claims or defaults to `redacted: true` over an inline payload, and
+  `INLINE_CAPTURE_NOT_AUTHORIZED` for a truthful `redacted: false` one. Nothing
+  in this package repairs a legacy journal.
+
+`DeterministicTestKeyProvider` is a conformance vector generator, not a KMS. Its
+keys and nonces are pure functions of `(keyRef, runId)` and it must not be used
+in production.
+
+### What this does not claim
+
+The default scheduler in `@graph-engineering/runtime` still writes
+`events/v1alpha1` through `JsonlEventStore`. Existing v1alpha1 journals and
+checkpoints remain plaintext application data and are not retrofitted. D9 is not
+closed by this package alone: `redaction-semantics.md` Section 12.1 also requires
+the Python lane, shared cross-language parity, the packaged canary campaign, and
+an independent security review.
+
 ## Alpha limits
 
 CAS and write serialization are safe among store instances in one Node.js

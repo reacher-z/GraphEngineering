@@ -28,6 +28,34 @@ export {
   type GraphEventType,
   type GraphEventValidationResult,
 } from "./events.js";
+export {
+  GRAPH_EVENT_V1ALPHA2_API_VERSION,
+  GRAPH_EVENT_V1ALPHA2_TYPES,
+  validateGraphEventV1Alpha2,
+  type GraphEventV1Alpha2,
+  type GraphEventV1Alpha2Type,
+  type GraphEventV1Alpha2ValidationResult,
+} from "./events-v1alpha2.js";
 export { FileCheckpointStore, type FileCheckpointStoreOptions } from "./file-checkpoint-store.js";
 export { JsonlEventStore, type JsonlEventStoreOptions } from "./jsonl-event-store.js";
+export {
+  LEGACY_CONTRACT_VERSION,
+  classifyLegacyHistory,
+  hasKnownInlineShape,
+  legacyQuarantineManifest,
+  type LegacyClassification,
+  type LegacyClassificationOptions,
+  type LegacyQuarantineManifest,
+} from "./legacy-history.js";
 export { MemoryEventStore } from "./memory-event-store.js";
+export {
+  GuardBypassError,
+  ProtectedJsonlEventStore,
+  type ProtectedJsonlEventStoreOptions,
+} from "./protected-event-store.js";
+export {
+  prepareProtectedEvent,
+  type ProtectedEventPayload,
+  type ProtectedEventSpec,
+} from "./protected-event-writer.js";
+export * from "./redaction/index.js";
