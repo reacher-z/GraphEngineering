@@ -6,7 +6,8 @@ use the same Graph IR compiler semantics, and emit the versioned
 `graph-engineering.cli/v1alpha1` machine envelope. The CLI is an authoring and
 inspection boundary: it never executes graph nodes, calls a model/provider, or
 loads credentials. The durable operations surface inherits that boundary — it
-reads run history and never mutates it.
+reads legacy `events/v1alpha1` run history and never mutates it. There is no
+`graph run` command; execution is a library API.
 
 The packages are source-only during the alpha. From a repository checkout:
 
@@ -52,7 +53,9 @@ graph retry   --run <runId> --node <nodeId> --store <directory> [--json]
 - `init` is the only writing command. It exclusively creates `graph.json` from
   the bundled, validated Quickstart fixture and has no force/overwrite mode.
 - `status`, `inspect`, and `logs` project one durable run history. They are the
-  only operational commands this runtime can honestly serve.
+  only operational commands this runtime can honestly serve, and today they can
+  read only a legacy `events/v1alpha1` journal — see
+  [Journal version boundary](#journal-version-boundary).
 - `cancel`, `resume`, `replay`, `fork`, and `retry` fail closed. See
   [Unimplemented durable operations](#unimplemented-durable-operations).
 
@@ -106,7 +109,27 @@ not emit links, HTML labels, style directives, or executable configuration.
 
 `status`, `inspect`, and `logs` read one durable run journal under
 `<store>/events/`. Both `--run` and `--store` are required; there is no default
-store path. `--run` must match the durable safe-identifier grammar
+store path.
+
+### Journal version boundary
+
+Read this before pointing these commands at a store the runtime produced.
+
+These commands read the `scheduler-recovery/v1alpha1` journal at
+`<store>/events/<hash>.jsonl`. The current durable scheduler does not write that
+journal. Durable start and resume now require payload protection and write
+`events/v1alpha2` records to `<store>/events-v1alpha2/<hash>.jsonl` instead.
+
+The consequence is concrete: pointing `graph status --store <dir>` at a store
+created by today's runtime exits `4` with `GECLI_RUN_NOT_FOUND`, because the
+`events/` directory it looks in does not exist. A hand-built store that mixes the
+two produces `5` `GECLI_HISTORY_MALFORMED` on the first v1alpha2 record, since
+its `apiVersion` is not the frozen v1alpha1 value.
+
+Neither outcome is a silent wrong answer, but neither is useful yet. Teaching
+these commands to project a protected v1alpha2 journal — including resolving
+protected references through a key provider the CLI does not currently accept —
+is outstanding runtime work, not a documentation gap. `--run` must match the durable safe-identifier grammar
 `[A-Za-z0-9][A-Za-z0-9._-]{0,127}`, otherwise the CLI exits `2` with
 `GECLI_RUN_ID_INVALID` and never echoes the rejected value.
 
@@ -189,8 +212,8 @@ so they neither read nor append:
 | --- | --- | --- |
 | `cancel` | `durable.run-cancellation` | `events/v1alpha1` has no cancellation-request record, and a terminal `RunCancelled` record must carry a scheduler-reconstructed run result covering every node. Cancelling a live run also needs an out-of-band control channel that does not exist. |
 | `resume` | `durable.run-resume` | Resuming needs a run lease and a node executor registry. The CLI never executes graph nodes, so a CLI resume would durably fail every remaining node. |
-| `replay` | `durable.run-replay` | Durable replay is not implemented. |
-| `fork` | `durable.run-fork` | Durable run forking is not implemented. |
+| `replay` | `durable.run-replay` | Durable *graph-run* replay is not implemented. The standalone bounded-cycle controller has its own replay, which is a different object and is not reachable from this command. |
+| `fork` | `durable.run-fork` | Durable *graph-run* forking is not implemented, for the same reason. |
 | `retry` | `durable.node-retry` | Durable node-level retry scheduling is not implemented. |
 
 Usage validation still runs first, so a malformed invocation of one of these

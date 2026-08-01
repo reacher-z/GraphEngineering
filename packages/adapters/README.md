@@ -15,6 +15,11 @@ There is no OpenAI, Anthropic, Google Gemini or OpenAI-compatible client in this
 package. Those kinds name intended boundary shapes in the contract; no request
 has ever been sent to any of them by this code.
 
+A mirrored native implementation ships in Python at
+`python/src/graph_engineering/adapters/` — the same three adapters, the same
+descriptor, preflight, usage, stream, tool, retry and circuit rules, checked
+against the same conformance corpus. Neither lane is a client for the other.
+
 ## The four layers
 
 adapter-semantics 2 gives a conforming adapter four ordered layers, and this

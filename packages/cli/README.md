@@ -3,7 +3,8 @@
 Command-line tools for canonical Graph Engineering Graph IR. The alpha CLI
 validates graphs, explains deterministic topology, exposes the exact canonical
 compiler result, renders safe topology diagrams, checks the local installation,
-safely initializes a minimal project, and reads durable run history. It does not
+safely initializes a minimal project, and reads legacy `events/v1alpha1` durable
+run history. It does not
 execute graph nodes, call a model, access credentials, mutate an input graph, or
 append to a durable event journal. `init` is the only command in this slice that
 writes.
@@ -67,13 +68,27 @@ graph init my-graph --dry-run --json
 - `status`, `inspect`, and `logs` project one durable run journal under
   `<store>/events/`. They open the journal read-only, take no lock, create no
   path, and append nothing, so they succeed against a read-only store. Their
-  exit code reports the read, not the run outcome.
+  exit code reports the read, not the run outcome. **They can read only a
+  `scheduler-recovery/v1alpha1` journal**; see the version boundary below.
 - `cancel`, `resume`, `replay`, `fork`, and `retry` are present so the surface is
   complete and honest, and they fail closed with exit `6` and
   `GECLI_UNSUPPORTED_CAPABILITY` before touching the store. The durable
   capabilities they need — an out-of-band cancellation record, a run lease plus a
-  node executor registry, replay, fork, and node-level retry scheduling — do not
-  exist in this runtime.
+  node executor registry, durable *graph-run* replay and fork, and node-level
+  retry scheduling — do not exist in this runtime. The standalone bounded-cycle
+  controller does have replay and fork, but that is a different object and is not
+  reachable from these commands.
+
+## Journal version boundary
+
+The current durable scheduler requires payload protection and writes
+`events/v1alpha2` records to `<store>/events-v1alpha2/`. These commands read
+`<store>/events/` and validate against the frozen `events/v1alpha1` envelope, so
+a store produced by today's runtime exits `4` `GECLI_RUN_NOT_FOUND`, and a
+v1alpha2 record placed under `events/` exits `5` `GECLI_HISTORY_MALFORMED`.
+Neither is a silent wrong answer, and neither is useful yet. Projecting a
+protected v1alpha2 journal requires resolving protected references through a key
+provider this CLI does not accept; that is outstanding runtime work.
 
 ## Durable read boundary
 

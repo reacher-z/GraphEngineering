@@ -1,6 +1,6 @@
 # Runnable pattern showcase
 
-This example constructs all four built-in Graph Engineering patterns from the
+This example constructs the four topology patterns exported by the
 built `@graph-engineering/patterns` package, sends every result through the
 canonical core compiler again, and prints one stable JSON report containing
 each graph hash, topological layers, pattern label, and required runtime

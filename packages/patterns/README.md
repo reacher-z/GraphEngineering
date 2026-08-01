@@ -2,8 +2,11 @@
 
 > **Runtime boundary:** `routedBranches` emits the fixed, versioned
 > `RouteEquals` annotation executed by the current TypeScript and Python
-> schedulers. `loopUntilDry` remains declarative-only: its verdict annotations
-> do not yet stop later rounds early.
+> schedulers. `loopUntilDry` is **not executable on either scheduler**: its
+> `LoopContinue`, `LoopDryVerdict`, and `LoopVerdictAtBound` annotations are not
+> `RouteEquals`, so both runtimes refuse the whole graph with
+> `UNSUPPORTED_EDGE_CONDITION` and zero attempts. It is a blueprint, not a
+> runnable graph.
 
 Zero-side-effect TypeScript constructors for deterministic, canonical Graph
 Engineering Graph IR. Every result is detached from caller input, recursively
@@ -14,10 +17,16 @@ is returned.
 import {
   diamond,
   loopUntilDry,
+  researchDiamond,
   routedBranches,
   verifiedFanout,
 } from "@graph-engineering/patterns";
 ```
+
+`researchDiamond` is the Pattern 01 bundle constructor and the only one with a
+native Python peer, `graph_engineering.patterns.research_diamond`; both languages
+are required to produce the same canonical document. The other four constructors
+are TypeScript-only.
 
 ## Constructors
 
@@ -53,7 +62,7 @@ package-owned annotation; callers cannot replace or extend it:
 ```
 
 Branch outputs reach unique merge ports. Metadata declares required capability
-`edge-condition-routing/v1alpha1`. The native schedulers execute only selected
+`edge-condition-routing/v1alpha1`. Both native schedulers execute only selected
 branches, settle inactive paths without attempts, and bind the merge from active
 branch outputs. The constructor lowers an empty legacy classifier config to an
 exact direct single-route policy whose ordered `allowedRoutes` match normalized
@@ -68,6 +77,11 @@ Dedicated durable route-decision events remain follow-up work.
 Builds `work → lens verifiers → adjudicate`. Every verifier receives the full
 work result. Each verdict reaches a unique adjudicator port named by the lens
 key. The named graph output points to `adjudicate`.
+
+This constructs the fan-out shape only. `validator` nodes fail closed in both
+runtimes with zero attempts, and no verification, judge, rubric, or citation
+runtime exists. Nothing here evaluates a verdict; the adjudicator you supply
+does.
 
 ### `loopUntilDry`
 
@@ -95,10 +109,15 @@ feed the next finder at `previousVerdict` with a fixed `LoopContinue` annotation
 Verdict edges use fixed `LoopDryVerdict` or `LoopVerdictAtBound` annotations.
 
 The metadata capability is
-`edge-condition-routing-and-early-stop/v1alpha1`. The current scheduler ignores
-the annotations, executes all `maxRounds`, and gives all verdicts to `finalize`;
-the finalizer must select the earliest dry result. The package does not claim or
-simulate runtime early-stop and does not modify the Graph IR schema.
+`edge-condition-routing-and-early-stop/v1alpha1`. **No scheduler executes this
+graph today.** The loop annotations are registered conditions that neither
+runtime implements, so `runGraph`, `run_graph`, and durable start/resume all fail
+the whole graph during capability preflight with `UNSUPPORTED_EDGE_CONDITION`,
+zero node attempts, and no executor call. Use the constructor to author, hash,
+diff, and visualize the blueprint; to actually run bounded repetition today, use
+the standalone bounded-cycle controller in `@graph-engineering/runtime`. The
+package does not claim or simulate runtime early-stop and does not modify the
+Graph IR schema.
 
 ## Common envelope
 

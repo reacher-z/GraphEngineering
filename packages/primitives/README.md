@@ -4,6 +4,12 @@ Small, model-free orchestration primitives with deterministic, portable
 results. The alpha package contains settled-barrier and route-selection
 evaluators.
 
+These evaluate inputs that have **already settled**. Quorum, deadline, and
+late-arrival barrier policy is a separate, larger surface: the policy types live
+in `@graph-engineering/core`, and `@graph-engineering/runtime` executes them at
+the scheduler boundary as a strict superset that does not alter, weaken, or
+reinterpret the primitive below.
+
 ```ts
 import { evaluateSettledBarrier } from "@graph-engineering/primitives";
 

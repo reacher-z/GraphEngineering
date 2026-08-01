@@ -1,0 +1,77 @@
+{
+  "$comment": "Expected result of the deterministic mock end-to-end run. Both language runners compare against this file instead of restating it inline.",
+  "graphHash": "f266955aef97a44b8635271fa3c20ab2790abaa7a4815a08810d784c08eb2eef",
+  "status": "succeeded",
+  "maxObservedConcurrency": 3,
+  "totalAttempts": 5,
+  "output": {
+    "report": {
+      "acceptedClaims": [
+        {
+          "citations": [
+            {
+              "contentHash": "3f1c0a2b9d5e47c8a1b6f0d3e2c4958716ab0d9e5c3f218477ba6ce0d1928354",
+              "documentId": "code://packages/runtime/test/durable.test.ts",
+              "retrievedAt": "2026-01-01T00:00:00.000Z",
+              "source": "code"
+            },
+            {
+              "contentHash": "8c07d4e5b1a29f36c8d70e4a1b2359fd6047ea8c3b915d2e70fa46c8b3d09512",
+              "documentId": "docs://packages/runtime/README.md",
+              "retrievedAt": "2026-01-01T00:00:00.000Z",
+              "source": "docs"
+            }
+          ],
+          "claimId": "claim-committed-nodes-are-not-re-executed",
+          "stance": "supports",
+          "subject": "resume-reuse",
+          "text": "A node with a committed NodeSucceeded event is seeded as an initial result and its executor is never invoked again."
+        }
+      ],
+      "contradictions": [
+        {
+          "claimId": "claim-budgets-are-enforced-at-runtime",
+          "positions": [
+            {
+              "documentId": "docs://packages/runtime/README.md",
+              "source": "docs",
+              "stance": "contradicts"
+            },
+            {
+              "documentId": "web://example.invalid/orchestration-report",
+              "source": "web",
+              "stance": "supports"
+            }
+          ],
+          "stances": [
+            "contradicts",
+            "supports"
+          ],
+          "subject": "budget-enforcement"
+        }
+      ],
+      "coverage": {
+        "sourcesFailed": 0,
+        "sourcesReporting": 3
+      },
+      "multiSourceClaimIds": [
+        "claim-budgets-are-enforced-at-runtime",
+        "claim-committed-nodes-are-not-re-executed"
+      ],
+      "question": "What does the durable scheduler guarantee when a run is resumed?",
+      "sources": [
+        "code",
+        "docs",
+        "web"
+      ],
+      "unsupportedClaims": [
+        {
+          "claimId": "claim-cited-to-a-document-that-was-never-retrieved",
+          "documentId": "web://example.invalid/not-retrieved",
+          "reason": "citation-not-in-source-manifest",
+          "source": "web"
+        }
+      ]
+    }
+  }
+}

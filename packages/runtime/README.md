@@ -53,12 +53,35 @@ a registered foreign condition, ordinary execution and durable start/resume fail
 the whole graph during capability preflight with zero node attempts and before
 any executor or durable-history read/write.
 
-This alpha slice does not provide a separate `RouteSelected` event identity,
-arbitrary condition expressions, or quorum/deadline barrier scheduling.
+This alpha slice does not provide durable decision-event journaling or arbitrary
+condition expressions. `RouteSelected` and `BarrierSatisfied` decision documents
+are returned by `runGraph`, and a run can be *seeded* with committed decisions
+that it adopts without re-evaluating, but the durable scheduler neither writes
+those events nor folds them back on resume.
+
+### Integrated barriers: `runGraph` executes them, durable runs refuse them
+
+`runGraph` executes a barrier that claims the integrated-barrier contract: the
+node never enters the ready queue, it arms, accumulates a keyed arrival census,
+decides at a quiescence point or when its deadline elapses, produces the frozen
+`BarrierSatisfied` document, and settles. No executor is called and no identity
+value is produced — the node binds the decision.
+
+A deadline is evaluated against the injected `SchedulerOptions.clock`, which
+defaults to `FROZEN_CLOCK`. A barrier that carries a deadline will never see it
+elapse unless the caller supplies a `MonotonicClock`; `createScriptedClock` is
+provided for deterministic tests.
+
+`startDurableGraphRun` and `resumeDurableGraphRun` **refuse** a policy-bearing
+barrier with `UNSUPPORTED_RUNTIME_CAPABILITY` and capability
+`integrated-barrier-policy`, because the durable scheduler does not journal
+`BarrierSatisfied` yet. Integrated barriers and durable execution cannot be
+combined today. The Python runtime executes integrated barriers nowhere and
+refuses them under `node-config:barrier`.
 
 ### Fail-closed runtime capabilities
 
-`runGraph`, durable start, and durable resume apply the same
+`runGraph`, durable start, and durable resume apply the
 `runtime-capability/v1alpha1` preflight after compilation and before inspecting
 graph input, invoking an executor/journal hook, or reading/appending durable
 history. Unsupported features produce ordered
@@ -68,9 +91,11 @@ existing `UNSUPPORTED_EDGE_CONDITION` failures follow all runtime-capability
 failures in the same result.
 
 The captured execution slice supports `agent`, `model`, `tool`, `transform`,
-and `router` nodes. It also supports a static all-success `barrier` only when
-its config is exactly `{}` or `{ "condition": "all" }`. Subgraphs, validators,
-human nodes, other barrier configurations, node cache/resource/isolation
+and `router` nodes. It also supports a static all-success `barrier` whose config
+is exactly `{}` or `{ "condition": "all" }`, plus — in `runGraph` only — a
+barrier whose config claims the integrated-barrier contract by `apiVersion`.
+Subgraphs, validators,
+human nodes, any other barrier configuration, node cache/resource/isolation
 directives, retry jitter, edge maps, stream/artifact-reference edge modes,
 dynamic-node/deadline/cost policies, and unknown policy extensions fail closed.
 Explicit value edges, absent or false jitter, and the bounded concurrency,
@@ -467,7 +492,10 @@ or later state change. Reusing the operation ID with another byte or operation
 fails. Once lease ownership begins, append and checkpoint save require the
 exact active unexpired fence. `MemoryCycleStoreProvider` declares
 process-local durability and `distributedFencing: false`; it is executable
-adapter guidance, not production evidence. See the complete
+adapter guidance, not production evidence. The optional
+`@graph-engineering/sqlite` package supplies a same-host durable provider,
+`SQLiteCycleStoreProvider`, which declares `durability: "durable"` and still
+`distributedFencing: false`. See the complete
 [CycleStore provider semantics](../../spec/cycle-store-provider-semantics.md)
 and run `corepack pnpm test:conformance` for the 54-case TypeScript/Python join.
 
@@ -612,7 +640,9 @@ for the exact portability boundary.
   `[-(2^53-1), 2^53-1]`, cycles, sparse arrays, symbol keys, and class instances
   produce a structured `INVALID_OUTPUT` node failure and participate in the
   configured bounded retry policy. Finite non-integer doubles remain valid;
-- transform and barrier nodes default to deterministic identity executors;
+- transform nodes, and barrier nodes that do not claim the integrated-barrier
+  contract, default to deterministic identity executors. An integrated barrier
+  calls no executor at all;
 - router nodes default to deterministic route selection and the scheduler
   executes only the fixed versioned `RouteEquals` edge condition.
 

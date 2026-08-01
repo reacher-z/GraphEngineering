@@ -1,0 +1,47 @@
+{
+  "apiVersion": "graphengineering.reacher-z.github.io/adapters/v1alpha1",
+  "kind": "AdapterDescriptor",
+  "contractVersion": "adapter-contract/v1alpha1",
+  "adapterId": "research-diamond-mock",
+  "adapterKind": "mock",
+  "adapterVersion": "0.1.0",
+  "evidenceClass": "deterministic-mock",
+  "sideEffectClass": "none",
+  "capabilities": [
+    "fault-injection",
+    "provider-request-id",
+    "structured-output",
+    "usage-reporting"
+  ],
+  "bounds": {
+    "maxRequestBytes": 65536,
+    "maxResponseBytes": 65536,
+    "maxStreamFrameBytes": 0,
+    "maxStreamFrames": 0,
+    "maxToolDefinitions": 0,
+    "maxToolCallsPerResponse": 0,
+    "maxAttachments": 0,
+    "maxAttachmentBytes": 0,
+    "requestTimeoutMs": 30000
+  },
+  "retryPolicy": {
+    "maxAttempts": 2,
+    "initialBackoffMs": 0,
+    "backoffMultiplierMilli": 1000,
+    "maxBackoffMs": 0,
+    "jitter": false
+  },
+  "circuitPolicy": {
+    "consecutiveFailureThreshold": 3,
+    "openDurationMs": 1000,
+    "halfOpenProbeLimit": 1
+  },
+  "capture": {
+    "enabled": false,
+    "retention": "none"
+  },
+  "allowedProviderMetrics": [],
+  "network": null,
+  "process": null,
+  "mcp": null
+}

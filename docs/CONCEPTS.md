@@ -14,10 +14,11 @@ behavior that exists today and the intended v1 architecture.
 | Area | Current alpha | Target v1 |
 | --- | --- | --- |
 | Portable format | Versioned JSON Graph IR, canonical hash, compiler diagnostics, conformance fixtures | Stable compatibility and migration policy |
-| Native runtimes | TypeScript and Python IR, compilers, ready-queue schedulers, standalone bounded pipelines, and event-sourced start/resume pass shared conformance cases; APIs remain unstable | Distributed execution and a broader cross-language conformance corpus |
-| Topologies | DAG fan-out/fan-in; standalone per-item pipelines with bounded buffers/backpressure; deterministic settled all/minimum/percentage evaluation; compiler-validated `RouteEquals` routing in both ordinary and durable schedulers; static all-success joins; TypeScript constructors for diamonds, verifier fan-out, routing, and finite loop expansion | Graph-integrated/durable item streaming, durable route-decision identity, verifier policies, quorum/deadline barriers, subgraphs, and dynamic bounded loops |
-| Persistence | Native local event stores drive scheduler start/resume from authoritative history; atomic checkpoint stores exist separately but do not accelerate the scheduler | Checkpoint acceleration, replay, fork, leases, artifact stores, and production databases |
-| Security | Graph bounds and a trusted `sideEffects` declaration gate ambiguous durable retries; executors still have ambient process authority | Enforced capabilities, worktree/process/container isolation, redaction, approval gates, and policy-audited dynamic graphs |
+| Native runtimes | TypeScript and Python IR, compilers, ready-queue schedulers, standalone bounded pipelines, and protected event-sourced start/resume pass shared conformance cases; APIs remain unstable | Distributed execution and a broader cross-language conformance corpus |
+| Topologies | DAG fan-out/fan-in; standalone per-item pipelines with bounded buffers/backpressure; deterministic settled all/minimum/percentage evaluation; compiler-validated `RouteEquals` routing in both ordinary and durable schedulers; scheduler-executed integrated barriers in TypeScript only; TypeScript constructors for diamonds, verifier fan-out, routing, and finite loop expansion | Graph-integrated/durable item streaming, integrated barriers in the Python scheduler, verifier policies, subgraphs, and dynamic bounded loops |
+| Adapters | Deterministic mock, generic HTTP with an injected transport, and a shell adapter that refuses to execute — all in both languages, behind declared capabilities and preflight refusal | Provider clients, MCP client adapters, and live-provider evidence |
+| Persistence | Native local event stores drive scheduler start/resume from authoritative history, with mandatory payload protection; atomic checkpoint stores exist separately but do not accelerate the scheduler | Checkpoint acceleration, scheduler replay/fork, leases, artifact stores, and production databases |
+| Security | Sink-before-write redaction and mandatory durable payload protection; graph bounds and a trusted `sideEffects` declaration gate ambiguous durable retries; executors still have ambient process authority | Enforced capabilities, worktree/process/container isolation, approval gates, and policy-audited dynamic graphs |
 
 “Target v1” is a design commitment, not a claim that the feature is already
 available. See the [runtime package status](../packages/runtime/README.md) for the
@@ -95,6 +96,37 @@ This separation matters for four reasons:
 
 Calling an agent to “combine” results is appropriate when combination requires
 judgment. Calling one to concatenate arrays is paying model cost for an edge.
+
+## The adapter boundary is declared before it is used
+
+A node that needs a model or a tool reaches a provider through an adapter, and an
+adapter is four ordered layers: declaration, preflight, dispatch, normalization.
+Only the dispatch layer differs between kinds.
+
+The descriptor is the declaration. It names capabilities, bounds, a retry policy,
+a circuit policy, a side-effect class, and any network, process, or MCP profile.
+Preflight refuses everything the descriptor does not authorize *before* any
+external effect, so a refused call performs zero provider requests, zero usage,
+and zero ledger writes, and no request shape can reach an undeclared capability.
+A refusal is a value with a closed error code, not a thrown provider exception,
+and it never quotes a prompt — the preflight view of a request deliberately
+carries no payload content.
+
+Three adapters ship today, in both languages:
+
+- **`mock`** is the deterministic reference and the only kind the candidate gate
+  uses. It reads no clock, opens no socket, spawns no process, and needs no
+  credential; every observable is a function of its descriptor, its script, and
+  the request.
+- **`http`** is a generic tool adapter whose transport is injected. There is no
+  default `fetch` and no import of a host HTTP module, so it cannot silently
+  acquire network access.
+- **`shell`** constructs and authorizes a process launch and then refuses to
+  perform it, because no isolation provider exists.
+
+No OpenAI, Anthropic, or Gemini client exists here. Those kinds name intended
+boundary shapes in the contract; no request has ever been sent to any of them by
+this code. See [adapter semantics](../spec/adapter-semantics.md).
 
 ## Readiness is local, not layer-wide
 
@@ -190,27 +222,37 @@ An `all` fan-in can be represented today by normal incoming dependencies and a
 `barrier` node; transform and barrier nodes default to identity executors in the
 native runtimes.
 
-The model-free TypeScript and Python primitive APIs now evaluate already-settled
+The model-free TypeScript and Python primitive APIs evaluate already-settled
 `all`, minimum-count, and exact basis-point percentage policies. They expose
 success, failure, missing, and timeout counts and IDs without replacing failures
-with null. This is not yet a scheduler barrier: waiting for partial arrivals,
-durable barrier state, deadlines, quorum voting, and cancellation remain target
-v1 runtime work.
+with null.
 
-Read that limit literally before you rely on it. The scheduler currently
-classifies a `barrier` node together with `transform`, so a barrier node that
-carries a threshold, quorum, or deadline policy in its `config` is executed as
-an ordinary identity node and its policy is never evaluated — an unsatisfied
-barrier would pass silently. Do not encode a real threshold in a `barrier` node
-today; express the join with ordinary dependencies, or evaluate the settled
-policy yourself with the primitive API and branch on its result. The target
-behavior, including quorum, abstention, deadlines, the closed non-pass
-resolution set, late arrival, cancellation propagation, and durable zero-rejudge
-decision replay, is frozen as a contract candidate in
-[integrated barrier semantics](../spec/integrated-barrier-semantics.md) with
-`implementationClaim: false`. Its first required deliverable is a pre-dispatch
-rejection of exactly this case, so that the silent pass becomes a refusal rather
-than a wrong answer.
+**The two schedulers differ here, and the difference matters.**
+
+The ordinary TypeScript scheduler now executes integrated barriers directly. A
+barrier node never enters the ready queue; it arms, accumulates a keyed arrival
+census, decides at a quiescence point or when its deadline elapses, produces a
+`BarrierSatisfied` decision document, and settles. An unsatisfied barrier does
+not succeed and does not bind an output under any of its resolutions. The
+TypeScript **durable** scheduler still refuses a policy-bearing barrier, because
+it does not journal `BarrierSatisfied` yet: an integrated barrier and durable
+start/resume cannot be combined today.
+
+The Python scheduler does not execute barriers at all. It carries a complete,
+conformance-tested
+evaluator in `graph_engineering.integrated_barrier_runtime`, but nothing in the
+Python runtime imports it yet, so the scheduler **refuses** a policy-bearing
+`barrier` node as the unsupported runtime capability `node-config:barrier`
+rather than executing its policy. Refusal is the correct behavior for an
+unimplemented gate: a wrong answer is worse than a stop.
+
+Until both lanes execute barriers, a portable graph should either express the
+join with ordinary all-dependency edges, or evaluate the settled policy itself
+with the primitive API and branch on the result. The portable contract —
+quorum, abstention, deadlines, the closed non-pass resolution set, late arrival,
+cancellation propagation, and durable zero-rejudge decision replay — is
+[integrated barrier semantics](../spec/integrated-barrier-semantics.md),
+still a revision-2 candidate that may change.
 
 ### Router
 
@@ -231,10 +273,15 @@ Router results are recomputed from their request evidence and node policy before
 they can be committed, including during durable recovery.
 
 This is the first integrated routing slice, not the complete target-v1 router.
-Compiler-time exhaustiveness/default diagnostics, a dedicated durable
-`RouteSelected` event, replay identity separate from the recorded node result,
-general condition expressions, and scheduler-integrated quorum/deadline
-barriers remain open.
+The TypeScript runtime adds a zero-rejudge decision layer: a `RouteSelected` or
+`BarrierSatisfied` decision carries a policy hash and a decision identity, and a
+run seeded with a committed decision adopts it instead of re-evaluating, or
+refuses with `DECISION_POLICY_DRIFT` / `DECISION_IDENTITY_MISMATCH`. That layer
+is not yet connected to durable history: the durable scheduler does not journal
+decision events and does not fold them back on resume, so decisions must be
+supplied by the caller. Python has no peer for it at all. Compiler-time
+exhaustiveness/default diagnostics and general condition expressions remain open
+in both languages.
 
 ### Verifier
 
@@ -334,12 +381,39 @@ The v1alpha1 durable contract is stricter than periodically serializing memory:
 
 Recovery correctness currently rebuilds from the complete event stream.
 Content-hashed checkpoint adapters exist, but scheduler checkpoint acceleration
-is not implemented. Replay, fork, dynamic graph changes, and distributed
-lease/fencing are also outside this slice. CAS rejects stale event appends but is
-not a distributed lease, so an application must stop the old coordinator before
-resuming a run. See the
+is not implemented. Replay, fork, dynamic graph changes, decision-event
+journaling, integrated barriers, and distributed lease/fencing are also outside
+this slice. CAS rejects stale event appends but is not a distributed lease, so an
+application must stop the old coordinator before resuming a run. See the
 [durable recovery semantics](../spec/durable-recovery-semantics.md) and
 [persistence semantics](../spec/persistence-semantics.md).
+
+### Durable payloads are protected, or the run does not start
+
+A durable run persists authoritative application values, so it requires an
+operator-supplied protected payload store and key provider. Without them, start
+and resume fail with `PAYLOAD_PROTECTION_REQUIRED` **before** the first event,
+checkpoint, log line, error payload, temporary plaintext file, or executor
+invocation. There is deliberately no no-op key provider, no in-process default
+store, and no fallback to an inline plaintext writer, because each of those turns
+a refusal into silent plaintext on disk.
+
+The mechanism is a sink-before-write guard. No runtime sink exposes a public
+write method that accepts a raw value; the only way to put a byte into one is a
+prepared write minted by the shared guard for that exact sink instance, after a
+fixed pipeline: immutable snapshot, portable validation, field/sink
+classification, keyed semantic identity, capture policy, redaction or protection,
+disposition and schema validation, canary and credential scan, canonicalization.
+The guard is total — it returns a suppression, a structured failure, or one
+prepared write, never a half-transformed object.
+
+Two honest limits. First, this is not a KMS: key derivation, hardware boundary,
+escrow, and rotation schedule belong to the provider, and losing the key means
+losing the journal. Second, a recovered value is decoded into process memory so
+the scheduler can bind it as node input; protection does not hide a value from an
+authorized executor after decryption. What it guarantees is that no byte of that
+value reaches a sink outside the protected blob. See
+[redaction semantics](../spec/redaction-semantics.md).
 
 ### Exactly-once stops at the external boundary
 
@@ -374,8 +448,20 @@ contexts and event rows from becoming accidental blob storage.
 Parallel file writers also need physical isolation. The target worktree provider
 gives each writer a branch/worktree and a merge gate; process/container providers
 add isolation for ports, temporary directories, caches, and database schemas.
-These providers are not implemented in the current runtime. Custom executors run
-in the same process unless the application isolates them itself.
+
+**No isolation provider exists.** Not a worktree provider, not a
+restricted-process provider, not a container provider, not even a no-op one. A
+node executor has the ambient authority of the host process that runs it. No
+capability policy engine intersects or enforces a manifest, no merge gate runs,
+and `approvalRef` is a shape rather than an authenticated decision. Graph IR
+`resources` and `isolation` remain opaque declarations; a node that carries one
+is refused before dispatch rather than executed under a pretence of containment.
+See [`spec/isolation-semantics.md`](../spec/isolation-semantics.md) §0.
+
+The shell adapter is the shape of that honesty in code: it plans and fully
+authorizes a launch — argument vector, environment allowlist, byte, duration,
+process, and memory caps, no shell expansion — and then refuses to execute it,
+because a launch would run with the host process's authority.
 
 Security policy must be separate from graph planning: a planner may request work,
 but it cannot grant itself tools, paths, network routes, or secrets. See the

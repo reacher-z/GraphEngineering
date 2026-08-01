@@ -1,0 +1,74 @@
+{
+  "$comment": "The deterministic source corpus. Both language runners script the mock adapter from this file, so 'what the provider returned' is a committed fixture and not code. Nothing here is fetched; the URIs are opaque identifiers.",
+  "question": "What does the durable scheduler guarantee when a run is resumed?",
+  "sources": {
+    "code": {
+      "retrievedAt": "2026-01-01T00:00:00.000Z",
+      "documents": [
+        {
+          "documentId": "code://packages/runtime/test/durable.test.ts",
+          "contentHash": "3f1c0a2b9d5e47c8a1b6f0d3e2c4958716ab0d9e5c3f218477ba6ce0d1928354"
+        }
+      ],
+      "claims": [
+        {
+          "claimId": "claim-committed-nodes-are-not-re-executed",
+          "subject": "resume-reuse",
+          "stance": "supports",
+          "text": "A node with a committed NodeSucceeded event is seeded as an initial result and its executor is never invoked again.",
+          "documentId": "code://packages/runtime/test/durable.test.ts"
+        }
+      ]
+    },
+    "docs": {
+      "retrievedAt": "2026-01-01T00:00:00.000Z",
+      "documents": [
+        {
+          "documentId": "docs://packages/runtime/README.md",
+          "contentHash": "8c07d4e5b1a29f36c8d70e4a1b2359fd6047ea8c3b915d2e70fa46c8b3d09512"
+        }
+      ],
+      "claims": [
+        {
+          "claimId": "claim-committed-nodes-are-not-re-executed",
+          "subject": "resume-reuse",
+          "stance": "supports",
+          "text": "Resume folds the journal and reuses every committed node result.",
+          "documentId": "docs://packages/runtime/README.md"
+        },
+        {
+          "claimId": "claim-budgets-are-enforced-at-runtime",
+          "subject": "budget-enforcement",
+          "stance": "contradicts",
+          "text": "No runtime component reads or enforces a declared token, money or time budget.",
+          "documentId": "docs://packages/runtime/README.md"
+        }
+      ]
+    },
+    "web": {
+      "retrievedAt": "2026-01-01T00:00:00.000Z",
+      "documents": [
+        {
+          "documentId": "web://example.invalid/orchestration-report",
+          "contentHash": "d20b6f8194ac3e57021d8b4f6c9a3e70518cd2f4b60a7e9138cd5041ba7e26cf"
+        }
+      ],
+      "claims": [
+        {
+          "claimId": "claim-budgets-are-enforced-at-runtime",
+          "subject": "budget-enforcement",
+          "stance": "supports",
+          "text": "The orchestrator stops a run when the declared cost budget is exhausted.",
+          "documentId": "web://example.invalid/orchestration-report"
+        },
+        {
+          "claimId": "claim-cited-to-a-document-that-was-never-retrieved",
+          "subject": "citation-laundering",
+          "stance": "supports",
+          "text": "A claim whose citation names a document this source never returned.",
+          "documentId": "web://example.invalid/not-retrieved"
+        }
+      ]
+    }
+  }
+}

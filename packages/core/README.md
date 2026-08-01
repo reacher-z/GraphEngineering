@@ -2,8 +2,10 @@
 
 The deterministic TypeScript authoring and compiler core for Graph Engineering.
 It provides the v1alpha1 Graph IR, safe JSON/YAML decoding, a general graph
-builder, canonical serialization and hashing, opt-in strict typed ports, and
-revision-1 compiled component identities.
+builder, canonical serialization and hashing, opt-in strict typed ports,
+revision-1 compiled component identities, the integrated router and integrated
+barrier policy contracts, and the durable decision-identity functions the runtime
+uses for zero-rejudge adoption.
 
 The package requires Node.js 20 or newer and is ESM-only.
 
@@ -149,9 +151,20 @@ returns ordered `GE1401` through `GE1407` diagnostics for policy shape,
 condition ownership, source kind, membership, duplicate cases or targets, and
 incomplete coverage.
 
+## Compile integrated barriers
+
+A `barrier` node's `config` may claim the integrated-barrier contract by
+`apiVersion`. `compileGraph` then validates the policy shape, the policy kind
+against the node, the presence of incoming edges, and that a threshold does not
+exceed the number of inputs, emitting `GE1421_INVALID_BARRIER_POLICY`,
+`GE1422_BARRIER_POLICY_KIND_MISMATCH`, `GE1423_BARRIER_NO_INPUTS`, and
+`GE1424_BARRIER_THRESHOLD_EXCEEDS_INPUTS`. Compilation accepting a policy is not
+a claim that a given runtime executes it: `runGraph` does, durable start/resume
+refuses, and the Python scheduler refuses.
+
 Registered `LoopContinue`, `LoopDryVerdict`, and `LoopVerdictAtBound`
 conditions remain owned by the loop pattern and pass this compiler stage
-unchanged. Malformed portable router values receive GE140x diagnostics;
+unchanged. No runtime executes them. Malformed portable router values receive GE140x diagnostics;
 hostile or non-portable host values remain `GE1007_INVALID_GRAPH` at the
 earlier capture/envelope boundary.
 

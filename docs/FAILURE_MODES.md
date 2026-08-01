@@ -19,12 +19,14 @@ results, and pipeline items must be detached portable finite JSON.
 Durable runs write authoritative scheduler events and reconstruct continuation
 from the complete event history. They bind graph, original input, and
 caller-supplied implementation identity, reuse committed successes, preserve
-consumed attempt budgets, and make terminal resume side-effect free. Standalone
+consumed attempt budgets, and make terminal resume side-effect free. **A durable
+run now requires payload protection and fails closed without it**; see
+[Durable execution failures](#durable-execution-failures). Standalone
 checkpoint stores exist, but scheduler checkpoint acceleration does not. Replay,
 fork, and append-only dynamic patches exist only on the standalone controller;
 production controller stores/fencing, ordinary-scheduler dynamic revision
 integration, Graph IR-integrated or durable item streaming, arbitrary condition
-expressions, durable route-decision identity, verifier panels, provider rate
+expressions, durable decision-event journaling, verifier panels, provider rate
 limiting, and worktree isolation remain future work. The current schedulers do
 execute the closed compiler-validated `RouteEquals` condition and apply a
 fail-closed `runtime-capability/v1alpha1` preflight before ordinary work or
@@ -115,21 +117,29 @@ usable decision requires only a subset.
 
 **Cause:** An all-input dependency was chosen for code simplicity.
 
-**Current boundary:** Alpha supports normal all-dependencies readiness. It
-does not implement quorum or deadline barriers. A `barrier` node is scheduled as
-an ordinary identity node, so a threshold policy written into its `config` is
-not evaluated at all — the barrier passes regardless of whether its policy was
-met. Treat that as a wrong answer, not a missing feature, and keep real
-thresholds out of `barrier` nodes until the contract below is implemented.
+**Current boundary:** it depends on which scheduler you are on, and the
+difference is not cosmetic.
 
-**Target-v1 mitigation:** Declare `all`, count, percentage, quorum, and deadline
-semantics explicitly. Preserve the settled status of every item. On insufficient
-quorum, return `unknown` or escalate; never manufacture success from missing data.
-The frozen contract is
-[integrated barrier semantics](../spec/integrated-barrier-semantics.md); it
-requires that an unsatisfied barrier never succeeds and never binds an output
-under any of its three resolutions, and that the runtime refuse a policy-bearing
-barrier before dispatch until the behavior exists.
+| Entry point | Policy-bearing `barrier` node |
+| --- | --- |
+| TypeScript `runGraph` | Executed: arming, arrival census, deadline elapse, closed non-pass resolution set, `BarrierSatisfied` decision document |
+| TypeScript `startDurableGraphRun` / `resumeDurableGraphRun` | Refused before dispatch — the durable scheduler does not journal `BarrierSatisfied` yet |
+| Python `run_graph` and durable start/resume | Refused before dispatch as unsupported capability `node-config:barrier` |
+
+No path silently passes an unsatisfied barrier. A refusal reports
+`UNSUPPORTED_RUNTIME_CAPABILITY` with the owning node and the capability name,
+and no node is attempted.
+
+**Mitigation now:** for a portable graph, express the join with ordinary
+all-dependency edges, or evaluate the settled policy with the primitive barrier
+API and branch on its result. Do not combine an integrated barrier with durable
+start/resume; that combination is refused, not degraded.
+
+**Remaining work:** durable barrier decisions, Python scheduler execution, and
+late-arrival/cancellation accounting across both lanes. The contract is
+[integrated barrier semantics](../spec/integrated-barrier-semantics.md), a
+revision-2 candidate; it requires that an unsatisfied barrier never succeeds and
+never binds an output under any of its three resolutions.
 
 ### A graph contains an implicit cycle
 
@@ -263,15 +273,88 @@ is not a convergence strategy.
 
 **Symptom:** Rate limits and latency worsen as many branches retry together.
 
-**Current boundary:** Node retry backoff is bounded, but provider-wide rate
-limiting, jitter coordination, and circuit breakers are not implemented.
+**Current boundary:** node retry backoff is bounded. Each adapter instance
+carries a circuit breaker and a deterministic, jitter-free backoff schedule
+derived from its descriptor's retry policy, and preflight refuses any request
+whose reported circuit state is `open` with `GE_ADAPTER_POLICY_DENIED` and denial
+reason `circuit-open`. Folding failures into that state and reporting it on the
+next request is the caller's job. There is still no provider-wide or resource-group rate
+limiter, no coordination across adapter instances, and no jitter.
 
 **Mitigation now:** Keep concurrency and attempts low in application configuration.
-Use provider SDK rate limits and randomized delay in executors where necessary.
+Share one adapter instance across the nodes that talk to the same provider so
+they share its breaker. Use provider SDK rate limits and randomized delay in
+executors where necessary.
 
 **Target-v1 mitigation:** Centralize provider/resource-group concurrency, rate
 limits, jitter, retry-after handling, and circuit breaking. A breaker-open result
 is structured and should route to fallback or pause, not trigger more fan-out.
+
+## Provider and tool adapter failures
+
+An adapter refusal is a **value**, not a thrown provider exception: the caller
+must read a closed code, and a code is not something a `try` block can lose.
+Every envelope carries a boundary (`pre-dispatch` or `dispatch`), a
+retryability, an effect disposition (`not-applied`, `in-doubt`, `applied`), a
+usage disposition, and only provider-safe detail fields. It never quotes a
+prompt — the preflight view of a request deliberately carries no payload
+content.
+
+The fourteen codes are `GE_ADAPTER_AUTHENTICATION`, `GE_ADAPTER_BOUNDS_EXCEEDED`,
+`GE_ADAPTER_CANCELLED`, `GE_ADAPTER_CAPABILITY_UNSUPPORTED`,
+`GE_ADAPTER_CONTENT_FILTERED`, `GE_ADAPTER_DESCRIPTOR_INVALID`,
+`GE_ADAPTER_INVALID_REQUEST`, `GE_ADAPTER_MALFORMED_RESPONSE`,
+`GE_ADAPTER_POLICY_DENIED`, `GE_ADAPTER_QUOTA_EXCEEDED`,
+`GE_ADAPTER_RATE_LIMITED`, `GE_ADAPTER_TIMEOUT`,
+`GE_ADAPTER_TOOL_VALIDATION_FAILED`, and `GE_ADAPTER_TRANSPORT_FAILURE`.
+
+### A pre-dispatch refusal is treated as a failed provider call
+
+**Symptom:** an operator investigates provider health after
+`GE_ADAPTER_CAPABILITY_UNSUPPORTED` or `GE_ADAPTER_POLICY_DENIED`.
+
+**Behavior:** `boundary: "pre-dispatch"` means nothing was sent. The call
+performed zero provider requests, zero usage, and zero ledger writes, and the
+envelope's `usage` and `providerRequestId` are `null`. Fix the descriptor,
+the request, or the policy; retrying unchanged cannot help.
+
+### A cancelled dispatch is treated as "did not happen"
+
+**Symptom:** a run is cancelled and the operator assumes no external effect
+occurred.
+
+**Behavior:** cancellation *before* dispatch produces no adapter error at all —
+the caller's reason propagates unchanged. Cancellation *after* dispatch is
+`GE_ADAPTER_CANCELLED` with an `in-doubt` effect disposition and conservative
+usage: the provider may already have done the work.
+
+**Mitigation:** reconcile the external system before assuming either outcome.
+An in-doubt disposition on an `idempotent` or `non-idempotent` request retains
+one in-doubt identity; on a `none` request it creates no in-doubt evidence.
+
+### The shell adapter refuses to run anything
+
+**Symptom:** every shell call returns `GE_ADAPTER_POLICY_DENIED` with denial
+reason `capability-approval`, even for a command that is obviously safe.
+
+**This is deliberate and unconditional.** No isolation provider exists, so a
+subprocess launch would run with the ambient authority of the host process. The
+adapter still plans and authorizes the launch — executable identity, argument
+vector prefix, environment allowlist, closed stdin, no shell expansion, byte,
+duration, process, and memory caps — so a malformed command still reports its
+specific process-rule violation before the blanket refusal. Do not work around it
+by spawning processes from a custom executor and calling that isolation.
+
+### An HTTP adapter has no transport
+
+**Symptom:** constructing or calling the HTTP adapter throws because no `fetch`
+was supplied.
+
+**Behavior:** the transport is injected with no default. There is no fallback to
+`globalThis.fetch` and no import of a host HTTP module, so the adapter cannot
+silently acquire network access. Supply a transport explicitly, and note that
+egress is additionally constrained by the descriptor's allowlisted schemes,
+hosts, and ports, its redirect and re-authorization policy, and its TLS floor.
 
 ## Standalone bounded-pipeline failures
 
@@ -551,6 +634,50 @@ state, budget, or iteration limit. Do not equate “different output” with pro
 
 ## Durable execution failures
 
+### A durable run starts with no payload protection
+
+**Symptom:** `start_graph_run` / `startDurableGraphRun` throws
+`PAYLOAD_PROTECTION_REQUIRED` and nothing was written or executed.
+
+**Cause:** the caller supplied no protected payload store, no key provider, no
+authority scope, or a capture policy whose `keyRef` does not match the key
+provider actually in use.
+
+**This is the designed behavior.** The refusal precedes the first event,
+checkpoint, log line, error payload, temporary plaintext file, and executor
+invocation. There is no no-op key provider, no in-process default store, and no
+fallback to the legacy inline writer, because each of those turns a refusal into
+silent plaintext on disk.
+
+**Mitigation:** configure protection explicitly. TypeScript takes
+`DurableSchedulerOptions.protection` — a guarded journal, a protected payload
+store, a key provider, and an opaque authority scope, with an optional capture
+policy. Python takes `event_store=<ProtectedEventStore>` plus
+`payload_protection=<PayloadProtection>`. `examples/quickstart/run.mjs` and
+`run.py` show a complete working configuration.
+
+Related codes from the same guard: `PAYLOAD_PROTECTION_FAILED`,
+`PROTECTED_PAYLOAD_NOT_FOUND`, `PROTECTED_PAYLOAD_UNAUTHORIZED`,
+`PROTECTED_PAYLOAD_CORRUPT`, `CAPTURE_POLICY_MISMATCH`,
+`INLINE_CAPTURE_NOT_AUTHORIZED`, `LEGACY_REDACTION_MISMATCH`, and
+`SECRET_CANARY_DETECTED`. A `LEGACY_REDACTION_MISMATCH` means an existing
+`scheduler-recovery/v1alpha1` journal was found for that run: it is never
+silently repaired or migrated.
+
+### The protection key is gone
+
+**Symptom:** a journal exists but no value can be recovered from it.
+
+**Cause:** key material is operator-owned and is never written beside the
+ciphertext. A process-local or ephemeral provider loses its keys on exit.
+
+**Mitigation:** use a provider whose keys outlive the process, and treat key
+custody as a run-recovery dependency rather than a detail. Protection is not a
+KMS: derivation, hardware boundary, escrow, and rotation belong to the provider.
+Note also what protection does *not* claim — a recovered value is decoded into
+process memory so the scheduler can bind it as node input, so it is not hidden
+from an authorized executor after decryption.
+
 ### Crash after effect, before the durable outcome
 
 The external effect may exist after `NodeStarted` commits while the event stream
@@ -619,11 +746,22 @@ graph patches must pass compilation, budget, and authorization again. See
 
 ### Secrets leak through traces or artifacts
 
-The alpha runtime has no telemetry exporter, but node inputs and outputs are
-present in the returned in-memory result and application code can still log them.
-Do not put raw secrets in Graph IR or model prompts. Target v1 redacts before
-persistence/export, defaults payload capture off, and injects scoped secret
-references only at the executor boundary.
+**What is protected now:** the durable journal. Every runtime sink reachable by
+default exposes a write method that accepts only a prepared write minted by the
+shared sink guard for that exact sink instance, so an authoritative application
+value cannot reach a sink except as a validated protected reference. Payload
+capture defaults to off for observational data, and a canary and credential scan
+runs before canonicalization. The quickstart demonstrates the result: after a
+protected run, the plaintext input string appears in none of the bytes written
+under the run directory.
+
+**What is not protected:** node inputs and outputs are present in the returned
+in-memory result, and application code can still log, print, or serialize them.
+There is no telemetry exporter yet, and no scoped-secret injection at the
+executor boundary. Do not put raw secrets in Graph IR or model prompts.
+Adapter error envelopes carry only provider-safe fields and refuse to contain
+caller-supplied forbidden markers, but that is a boundary check, not a
+guarantee about what your own executor does with a value.
 
 ## Triage checklist
 

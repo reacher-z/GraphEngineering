@@ -2,7 +2,14 @@
 
 Local, dependency-free persistence primitives for Graph Engineering on Node.js
 20 and newer. The package contains a strict v1alpha1 event envelope, an
-optimistic event stream, and content-addressed atomic file checkpoints.
+optimistic event stream, content-addressed atomic file checkpoints, the
+`events/v1alpha2` protected journal, and the sink-before-write redaction layer
+that every durable write must pass through.
+
+Two directory layouts coexist and are not interchangeable: `JsonlEventStore`
+writes the legacy journal to `<directory>/events/`, while
+`ProtectedJsonlEventStore` writes the protected journal to
+`<directory>/events-v1alpha2/`.
 
 ```ts
 import { JsonlEventStore, FileCheckpointStore } from "@graph-engineering/persistence";
@@ -112,18 +119,22 @@ reading and quarantining existing journals; it is no longer reachable from the
 durable write path. Existing v1alpha1 journals and checkpoints remain plaintext
 application data and are not retrofitted. Checkpoints
 (`FileCheckpointStore`, `checkpoints/v1alpha1`) are still unguarded and must not
-be given application values. D9 is not closed by this package alone:
-`redaction-semantics.md` Section 12.1 also requires the Python lane, shared
-cross-language parity, the packaged canary campaign, and an independent security
-review.
+be given application values. D9 is not closed by this package alone: the mirrored
+Python lane now exists at `python/src/graph_engineering/redaction/`, but
+`redaction-semantics.md` Section 12.1 also requires shared cross-language parity
+evidence, the packaged canary campaign, and an independent security review, none
+of which is complete.
 
 ## Alpha limits
 
 CAS and write serialization are safe among store instances in one Node.js
 process. Two processes can both pass CAS and
 append concurrently; this package does **not** claim cross-process correctness.
-Cross-process file locks, SQLite/PostgreSQL stores, compaction, retention,
-encryption, and distributed leases remain later-alpha work. JSONL batch append
+Cross-process file locks, PostgreSQL or object stores, compaction, retention,
+and distributed leases remain later-alpha work. Encryption is **not** on that
+list: protected payloads are sealed with AES-256-GCM today, and a durable run
+without a key provider fails closed. A same-host durable SQLite CycleStore lives
+in the separate `@graph-engineering/sqlite` package. JSONL batch append
 is durable after a successful return, but a process or disk failure during the
 append can leave a truncated tail; the next operation detects and reports it
 instead of guessing or silently repairing history.

@@ -1,0 +1,122 @@
+apiVersion: graphengineering.reacher-z.github.io/v1alpha1
+kind: Graph
+metadata:
+  description: Decompose one question into independent sources, then merge at one barrier
+  labels:
+    graphengineering.reacher-z.github.io/pattern: diamond/v1alpha1
+    graphengineering.reacher-z.github.io/runtime-capability: dag/v1alpha1
+  name: research-diamond
+  version: 1.0.0
+inputSchema:
+  type: object
+outputSchema:
+  type: object
+entrypoints:
+- scope
+outputs:
+  report:
+    node: synthesize
+nodes:
+- config:
+    operation: decompose
+    sources:
+    - code
+    - docs
+    - web
+  id: scope
+  inputSchema:
+    type: object
+  kind: transform
+  outputSchema:
+    type: object
+  sideEffects: none
+- config:
+    role: Find executable examples and implementation constraints
+    sourceKey: code
+  id: source-code
+  inputSchema:
+    type: object
+  kind: agent
+  outputSchema:
+    type: object
+  retry:
+    maxAttempts: 2
+  sideEffects: none
+- config:
+    role: Find primary documentation and return cited facts
+    sourceKey: docs
+  id: source-docs
+  inputSchema:
+    type: object
+  kind: agent
+  outputSchema:
+    type: object
+  retry:
+    maxAttempts: 2
+  sideEffects: none
+- config:
+    role: Find third-party reports and dated claims
+    sourceKey: web
+  id: source-web
+  inputSchema:
+    type: object
+  kind: agent
+  outputSchema:
+    type: object
+  retry:
+    maxAttempts: 2
+  sideEffects: none
+- config:
+    condition: all
+  id: synthesize
+  inputSchema:
+    type: object
+  kind: barrier
+  outputSchema:
+    type: object
+  sideEffects: none
+edges:
+- id: ge-diamond-0001
+  from:
+    node: scope
+  to:
+    node: source-code
+  mode: value
+- id: ge-diamond-0002
+  from:
+    node: scope
+  to:
+    node: source-docs
+  mode: value
+- id: ge-diamond-0003
+  from:
+    node: scope
+  to:
+    node: source-web
+  mode: value
+- id: ge-diamond-0004
+  from:
+    node: source-code
+  to:
+    node: synthesize
+    port: code
+  mode: value
+- id: ge-diamond-0005
+  from:
+    node: source-docs
+  to:
+    node: synthesize
+    port: docs
+  mode: value
+- id: ge-diamond-0006
+  from:
+    node: source-web
+  to:
+    node: synthesize
+    port: web
+  mode: value
+policies:
+  maxConcurrency: 3
+  maxDepth: 3
+  maxFanOut: 3
+  maxTotalAttempts: 8
