@@ -15744,3 +15744,84 @@ Final installed-artifact evidence:
 - all release, preview and migration digests remain unchanged.
 
 These packaging gates do not change any §31.37.37.4 or §31.37.38.4 non-claim.
+
+#### 31.37.40 Python initial-publication foundation checkpoint and ordered continuation
+
+This extension is appended after §31.37.39 without modifying any prior plan
+text. The exact 15,746-line prefix hashes to
+`077c0d2d5c21ef4d1c0e6a5b918236590c626720ec4b372e31b219824c566ee7`.
+
+Three prerequisites of §31.37.38.1 are now implemented as package-private
+Python modules: the initial-write digest codec, immutable migration-0002 asset
+proof and target v2 physical-catalog proof. Their final focused suite passes 54
+tests. Ruff check/format and strict mypy pass. Both the wheel and sdist now have
+explicit inventory requirements and isolated executable probes for all three
+modules. Those probes execute all seven frozen digest vectors, reread and prove
+the installed 9,523-byte migration plus its 4,908-byte preview manifest, execute
+the 20 framed statements against the installed v1 SQLite schema, and validate
+the resulting 34-row/5,785-byte target catalog and descriptor. Root API leakage
+is rejected independently. The SQLite Python release/preview/support asset gate
+also passes with 114 wheel entries and 115 sdist entries.
+
+The implementation order from this checkpoint is strict:
+
+1. Extend the Python stage-ownership capability with explicit
+   outer-prepared/outer-owned and adoption-prepared/adopted states. Introduce
+   single-use exact-identity tail registries and a terminal reader lease. Prove
+   replay, clone, substitution, cross-run, retire-then-publish and
+   poison-then-publish rejection without exposing a SQLite handle.
+2. Extend the Python baseline stage bridge with the corresponding lifecycle,
+   lower-tail proof transfer, reader cleanup ownership, retired B2 fence,
+   adoption watermark and exact v2 epoch/`total_changes`/catalog/ledger takeover.
+   A failed bridge operation must preserve the caller-owned EXCLUSIVE
+   transaction when retry is allowed and poison it when the contract requires
+   terminal failure; the TEMP catalog must survive adoption.
+3. Implement the package-private outer publication authority. It must consume
+   only authentic stage/ownership capabilities, load migration 0002 afresh,
+   execute exactly 20 individually owned statements, obtain the post-DDL reader,
+   validate the target catalog, produce entries/header/sequence receipts, issue
+   four typed tombstones and adopt atomically. It may not call `executescript`,
+   commit, rollback, rebind, or export public API.
+4. Add real-SQLite focused suites for cancellation and corrected retry,
+   malformed bundles, reader presentation, all four receipt tombstones,
+   clone/substitution/cross-run/replay poisoning, hostile captured dependencies,
+   catalog/ledger/epoch/`total_changes` drift and every lower-tail terminal path.
+5. Add the independent Python native report and Node parity test for success,
+   invalid adoption bundle and catalog drift. Require the exact ordered 28-field
+   record, strict type/shape validation, a nonzero fault-hook self-test and zero
+   rebind/commit/rollback counts.
+6. Run the complete §31.37.38 acceptance matrix, including the complete Python
+   suite, before claiming the leaf complete. The earlier run that reached 2,780
+   passes at 79% and was interrupted with exit 130 remains partial baseline
+   evidence only; it must never be represented as a full-suite pass.
+
+The foundation review and exact non-claims are recorded in
+`codex_logs/reviews/PYTHON-CURSOR-B3-INITIAL-PUBLICATION-FOUNDATIONS-2026-08-01.md`.
+In particular, this checkpoint does not claim the outer authority, receipts,
+stage bridge, atomic adoption, parity report, publication session, cursor
+rebind, rules 11/12, commit or active-v2 manifest.
+
+#### 31.37.41 Python foundation post-audit hardening correction
+
+This correction is appended after §31.37.40 without changing its bytes. The
+exact 15,802-line prefix hashes to
+`e8a3a2e46d307be9588c305a4ac0479bd5910db7cad9cda511c27be64d85b6ac`.
+Where §31.37.40 records 54 focused tests, the final post-audit count is **57**.
+
+The additional adversarial round found and closed four defects before commit:
+
+- cross-platform archive-path and member-type validation now rejects Windows
+  drive/UNC/backslash escape forms, normalization aliases, wheel symlinks and
+  every sdist member that is not a regular file or directory;
+- migration proof registries no longer retain a caller-visible snapshot, so
+  hostile `object.__setattr__` changes cannot persistently replace the 20
+  statement execution plan or its hashes/manifest identity;
+- migration file-descriptor cleanup now preserves a primary read/validation
+  failure over a simultaneous close fault and maps a sole close fault to the
+  stable protocol error; and
+- the target descriptor is tuple-backed and cannot be poisoned through
+  `object.__setattr__`, while every validated snapshot still shares its exact
+  immutable identity.
+
+These corrections strengthen the foundation only. They do not advance or
+weaken the explicit non-claims in §31.37.38.4 and §31.37.40.
