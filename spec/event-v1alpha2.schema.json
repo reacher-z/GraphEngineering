@@ -394,7 +394,8 @@
             "NODE_TIMEOUT",
             "NODE_CANCELLED",
             "INVALID_OUTPUT",
-            "NODE_EXECUTION_INTERRUPTED"
+            "NODE_EXECUTION_INTERRUPTED",
+            "INVALID_ROUTE_SELECTION"
           ]
         },
         "messageTemplate": {
@@ -403,12 +404,13 @@
             "node-timeout/v1",
             "node-cancelled/v1",
             "invalid-output/v1",
-            "process-interrupted/v1"
+            "process-interrupted/v1",
+            "invalid-route-selection/v1"
           ]
         },
         "retryable": { "type": "boolean" },
         "causeCode": {
-          "enum": ["EXECUTOR_REJECTED", "TIMEOUT", "CANCELLED", "VALIDATION", "PROCESS_LOST"]
+          "enum": ["EXECUTOR_REJECTED", "TIMEOUT", "CANCELLED", "VALIDATION", "PROCESS_LOST", "ROUTER_CONTRACT"]
         }
       }
     },
@@ -433,12 +435,16 @@
       }
     },
     "settledFailureCode": {
+      "description": "Why a node settled without ever running an attempt. The last three members were added after the integrated-router and integrated-barrier lanes landed: both runtimes emit ROUTE_NOT_SELECTED, UNSUPPORTED_EDGE_CONDITION and UPSTREAM_UNKNOWN today, and this enum was frozen for a pre-router event set. There is deliberately no SETTLED_WITHOUT_FAILURE sentinel: a node that settled without failing has no failure code, so the member is absent rather than filled with a placeholder.",
       "enum": [
         "EXECUTOR_NOT_FOUND",
         "UPSTREAM_FAILED",
         "INPUT_BINDING_FAILED",
         "ATTEMPT_BUDGET_EXHAUSTED",
-        "NODE_CANCELLED"
+        "NODE_CANCELLED",
+        "ROUTE_NOT_SELECTED",
+        "UNSUPPORTED_EDGE_CONDITION",
+        "UPSTREAM_UNKNOWN"
       ]
     },
     "nodeSettledData": {
