@@ -85,6 +85,29 @@ def fixed_clock() -> str:
     return "2026-07-26T00:00:00Z"
 
 
+# Every handler this module actually dispatches is a coroutine function.
+#
+# Attempt `timeoutMs` is the one bound in the cycle contract that is not driven
+# by the injected trusted clock — `deadlineAt`, `durationMs` and `maxDurationMs`
+# all read the frozen clock — and Python dispatches a non-coroutine handler
+# through `asyncio.to_thread`, so it must cross the default thread pool and
+# re-acquire the GIL before its result reaches the event loop. That crossing
+# genuinely races the 100 ms wall-clock `timeoutMs` every binding in the shared
+# request carries: under host load the same handlers went from a dispatch p99 of
+# 0.86 ms to a 661 ms maximum. A load-induced timeout aborts the attempt, aborts
+# the round, and the event carrying the assertion target is never constructed.
+#
+# A coroutine handler settles in its first event-loop step, so the timer cannot
+# preempt it. See spec/cycle-semantics.md, "Registered divergence: attempt
+# timeout is the one non-deterministic bound" (D8-CYCLE-TIMEOUT-DIVERGENCE-090),
+# which makes this normative for any campaign not exercising attempt timeout.
+# The two tests that *do* exercise attempt timeout are marked in place.
+async def no_candidates(_: object) -> list[object]:
+    """Coroutine finder/evaluator whose output is deliberately empty."""
+
+    return []
+
+
 def resolution_command(
     request: dict[str, Any],
     events: tuple[Any, ...],
@@ -279,11 +302,11 @@ def test_shared_request_runs_native_until_dry_and_replays_without_dispatch() -> 
         store = MemoryCycleStore()
         calls = {"finder": 0, "evaluator": 0}
 
-        def finder(_: object) -> list[object]:
+        async def finder(_: object) -> list[object]:
             calls["finder"] += 1
             return []
 
-        def evaluator(_: object) -> list[object]:
+        async def evaluator(_: object) -> list[object]:
             calls["evaluator"] += 1
             return []
 
@@ -323,10 +346,10 @@ def test_global_seen_set_is_preserved_across_rounds() -> None:
             ]
         )
 
-        def finder(_: object) -> object:
+        async def finder(_: object) -> object:
             return next(batches)
 
-        def evaluator(context: Any) -> list[dict[str, str]]:
+        async def evaluator(context: Any) -> list[dict[str, str]]:
             return [
                 {"key": candidate["key"], "verdict": "reject"}
                 for candidate in context.input["candidates"]
@@ -373,7 +396,7 @@ def test_native_while_and_evaluator_optimizer_converge(
         handlers_for_mode(request, mode=mode)
         mode_calls = 0
 
-        def decide(_: object) -> object:
+        async def decide(_: object) -> object:
             nonlocal mode_calls
             mode_calls += 1
             return mode_output
@@ -381,8 +404,8 @@ def test_native_while_and_evaluator_optimizer_converge(
         result = await start_cycle(
             request,
             CycleHandlers(
-                finder=lambda _: [],
-                candidate_evaluator=lambda _: [],
+                finder=no_candidates,
+                candidate_evaluator=no_candidates,
                 condition=decide if mode == "while" else None,
                 optimizer_evaluator=(
                     decide if mode == "evaluator-optimizer" else None
@@ -482,7 +505,7 @@ def test_patch_enabled_round_reserves_planner_then_skips_unrouted_dispatch() -> 
         request["activities"]["patchPlanner"]["maxAttemptsPerRound"] = 4
         result = await start_cycle(
             request,
-            CycleHandlers(finder=lambda _: [], candidate_evaluator=lambda _: []),
+            CycleHandlers(finder=no_candidates, candidate_evaluator=no_candidates),
             store=MemoryCycleStore(),
             lease=lease(),
             clock=fixed_clock,
@@ -596,14 +619,17 @@ def test_hostile_finder_output_fails_once_without_getters_or_downstream_dispatch
         HostileOutput.calls = 0
         evaluator_calls = 0
 
-        def evaluator(_: object) -> list[object]:
+        async def hostile(_: object) -> object:
+            return HostileOutput()
+
+        async def evaluator(_: object) -> list[object]:
             nonlocal evaluator_calls
             evaluator_calls += 1
             return []
 
         result = await start_cycle(
             request_document(max_iterations=3),
-            CycleHandlers(finder=lambda _: HostileOutput(), candidate_evaluator=evaluator),
+            CycleHandlers(finder=hostile, candidate_evaluator=evaluator),
             store=MemoryCycleStore(),
             lease=lease(),
             clock=fixed_clock,
@@ -627,16 +653,19 @@ def test_invalid_evaluator_coverage_never_dispatches_a_later_phase() -> None:
         handlers_for_mode(request, mode="while")
         condition_calls = 0
 
-        def condition(_: object) -> bool:
+        async def condition(_: object) -> bool:
             nonlocal condition_calls
             condition_calls += 1
             return True
 
+        async def uncovered_finder(_: object) -> list[dict[str, object]]:
+            return [{"key": "a", "value": None}]
+
         result = await start_cycle(
             request,
             CycleHandlers(
-                finder=lambda _: [{"key": "a", "value": None}],
-                candidate_evaluator=lambda _: [],
+                finder=uncovered_finder,
+                candidate_evaluator=no_candidates,
                 condition=condition,
             ),
             store=MemoryCycleStore(),
@@ -660,7 +689,7 @@ def test_none_activity_retries_with_one_stable_key_and_runtime_derived_cost() ->
         request["activities"]["finder"]["maxCostUsdPerAttempt"] = 0.25
         calls = 0
 
-        def finder(_: object) -> list[object]:
+        async def finder(_: object) -> list[object]:
             nonlocal calls
             calls += 1
             if calls == 1:
@@ -669,7 +698,7 @@ def test_none_activity_retries_with_one_stable_key_and_runtime_derived_cost() ->
 
         result = await start_cycle(
             request,
-            CycleHandlers(finder=finder, candidate_evaluator=lambda _: []),
+            CycleHandlers(finder=finder, candidate_evaluator=no_candidates),
             store=MemoryCycleStore(),
             lease=lease(),
             clock=fixed_clock,
@@ -851,12 +880,12 @@ def test_canonical_event_boundary_recovers_without_duplicate_success(
         finder_calls = 0
         evaluator_calls = 0
 
-        def finder(_: object) -> list[dict[str, object]]:
+        async def finder(_: object) -> list[dict[str, object]]:
             nonlocal finder_calls
             finder_calls += 1
             return [{"key": "boundary", "value": True}]
 
-        def evaluator(context: Any) -> list[dict[str, str]]:
+        async def evaluator(context: Any) -> list[dict[str, str]]:
             nonlocal evaluator_calls
             evaluator_calls += 1
             return [
@@ -921,7 +950,7 @@ def test_terminal_checkpoint_boundaries_retain_authoritative_event_truth(
                 fired = True
                 raise Crash()
 
-        def finder(_: object) -> list[object]:
+        async def finder(_: object) -> list[object]:
             nonlocal finder_calls
             finder_calls += 1
             return []
@@ -929,7 +958,7 @@ def test_terminal_checkpoint_boundaries_retain_authoritative_event_truth(
         with pytest.raises(Crash):
             await start_cycle(
                 request,
-                CycleHandlers(finder=finder, candidate_evaluator=lambda _: []),
+                CycleHandlers(finder=finder, candidate_evaluator=no_candidates),
                 store=store,
                 lease=lease(),
                 clock=fixed_clock,
@@ -971,7 +1000,7 @@ def test_portable_checkpoint_interval_writes_latest_terminal_prefix(interval: in
 
         result = await start_cycle(
             request,
-            CycleHandlers(finder=lambda _: [], candidate_evaluator=lambda _: []),
+            CycleHandlers(finder=no_candidates, candidate_evaluator=no_candidates),
             store=store,
             lease=lease(),
             clock=fixed_clock,
@@ -1000,7 +1029,7 @@ def test_checkpoint_interval_rejects_non_safe_values(interval: object) -> None:
         with pytest.raises(CycleRuntimeError) as raised:
             await start_cycle(
                 request_document(max_iterations=1),
-                CycleHandlers(finder=lambda _: [], candidate_evaluator=lambda _: []),
+                CycleHandlers(finder=no_candidates, candidate_evaluator=no_candidates),
                 store=store,
                 lease=lease(),
                 clock=fixed_clock,
@@ -1019,7 +1048,7 @@ def test_terminal_delivery_process_loss_is_read_only_on_resume() -> None:
         store = MemoryCycleStore()
         finder_calls = 0
 
-        def finder(_: object) -> list[object]:
+        async def finder(_: object) -> list[object]:
             nonlocal finder_calls
             finder_calls += 1
             return []
@@ -1031,7 +1060,7 @@ def test_terminal_delivery_process_loss_is_read_only_on_resume() -> None:
         with pytest.raises(Crash):
             await start_cycle(
                 request,
-                CycleHandlers(finder=finder, candidate_evaluator=lambda _: []),
+                CycleHandlers(finder=finder, candidate_evaluator=no_candidates),
                 store=store,
                 lease=lease(),
                 clock=fixed_clock,
@@ -1066,12 +1095,12 @@ def test_resume_after_discovery_cas_reuses_finder_output_exactly() -> None:
         finder_calls = 0
         crashed = False
 
-        def finder(_: object) -> list[dict[str, object]]:
+        async def finder(_: object) -> list[dict[str, object]]:
             nonlocal finder_calls
             finder_calls += 1
             return [{"key": "a", "value": None}]
 
-        def evaluator(context: Any) -> list[dict[str, str]]:
+        async def evaluator(context: Any) -> list[dict[str, str]]:
             return [
                 {"key": item["key"], "verdict": "accept"}
                 for item in context.input["candidates"]
@@ -1127,7 +1156,7 @@ def test_resume_open_activity_honors_idempotency_and_in_doubt(side_effects: str)
         calls = 0
         crashed = False
 
-        def finder(_: object) -> list[object]:
+        async def finder(_: object) -> list[object]:
             nonlocal calls
             calls += 1
             return []
@@ -1141,7 +1170,7 @@ def test_resume_open_activity_honors_idempotency_and_in_doubt(side_effects: str)
         with pytest.raises(Crash):
             await start_cycle(
                 request,
-                CycleHandlers(finder=finder, candidate_evaluator=lambda _: []),
+                CycleHandlers(finder=finder, candidate_evaluator=no_candidates),
                 store=store,
                 lease=lease(),
                 clock=fixed_clock,
@@ -1153,7 +1182,7 @@ def test_resume_open_activity_honors_idempotency_and_in_doubt(side_effects: str)
             with pytest.raises(CycleRuntimeError) as raised:
                 await resume_cycle(
                     request,
-                    CycleHandlers(finder=finder, candidate_evaluator=lambda _: []),
+                    CycleHandlers(finder=finder, candidate_evaluator=no_candidates),
                     store=store,
                     expected_version=len(interrupted) - 1,
                     lease=lease(epoch=2, lease_id="lease-2"),
@@ -1173,7 +1202,7 @@ def test_resume_open_activity_honors_idempotency_and_in_doubt(side_effects: str)
         else:
             result = await resume_cycle(
                 request,
-                CycleHandlers(finder=finder, candidate_evaluator=lambda _: []),
+                CycleHandlers(finder=finder, candidate_evaluator=no_candidates),
                 store=store,
                 expected_version=len(interrupted) - 1,
                 lease=lease(epoch=2, lease_id="lease-2"),
@@ -1191,6 +1220,17 @@ def test_resume_open_activity_honors_idempotency_and_in_doubt(side_effects: str)
 
 
 def test_late_noncooperative_handler_is_charged_but_never_committed() -> None:
+    """`late` is deliberately synchronous and deliberately non-cooperative.
+
+    This is the one shape the divergence in spec/cycle-semantics.md says Python
+    has and TypeScript cannot express: a handler that blocks without ever
+    yielding, is timed out anyway, is charged for the attempt, and whose late
+    value is never committed. Making `late` a coroutine, or replacing the
+    blocking `time.sleep` with an awaited primitive, would retire that guarantee
+    rather than stabilise it, so it stays as written. The 30 ms block against a
+    1 ms `timeoutMs` is a 30x margin in the direction the test needs.
+    """
+
     async def run() -> None:
         request = request_document(max_iterations=3)
         request["activities"]["finder"]["timeoutMs"] = 1
@@ -1202,7 +1242,7 @@ def test_late_noncooperative_handler_is_charged_but_never_committed() -> None:
 
         result = await start_cycle(
             request,
-            CycleHandlers(finder=late, candidate_evaluator=lambda _: []),
+            CycleHandlers(finder=late, candidate_evaluator=no_candidates),
             store=MemoryCycleStore(),
             lease=lease(),
             clock=fixed_clock,
@@ -1223,12 +1263,12 @@ def test_invalid_patch_output_records_failure_without_revision_or_extra_round() 
         finder_calls = 0
         planner_calls = 0
 
-        def finder(_: object) -> list[object]:
+        async def finder(_: object) -> list[object]:
             nonlocal finder_calls
             finder_calls += 1
             return []
 
-        def planner(_: object) -> dict[str, object]:
+        async def planner(_: object) -> dict[str, object]:
             nonlocal planner_calls
             planner_calls += 1
             return {"not": "a GraphPatch"}
@@ -1237,7 +1277,7 @@ def test_invalid_patch_output_records_failure_without_revision_or_extra_round() 
             request,
             CycleHandlers(
                 finder=finder,
-                candidate_evaluator=lambda _: [],
+                candidate_evaluator=no_candidates,
                 patch_planner=planner,
             ),
             store=MemoryCycleStore(),
@@ -1268,7 +1308,7 @@ def test_patch_acceptance_and_crash_restore_rebuild_full_native_revision() -> No
         planner_calls = 0
         crashed = False
 
-        def planner(_: object) -> dict[str, Any]:
+        async def planner(_: object) -> dict[str, Any]:
             nonlocal planner_calls
             planner_calls += 1
             return accepted_patch(original)
@@ -1283,8 +1323,8 @@ def test_patch_acceptance_and_crash_restore_rebuild_full_native_revision() -> No
             await start_cycle(
                 request,
                 CycleHandlers(
-                    finder=lambda _: [],
-                    candidate_evaluator=lambda _: [],
+                    finder=no_candidates,
+                    candidate_evaluator=no_candidates,
                     patch_planner=planner,
                 ),
                 store=store,
@@ -1352,7 +1392,7 @@ def test_terminal_resume_and_prefix_replay_are_strictly_read_only() -> None:
         store = MemoryCycleStore()
         completed = await start_cycle(
             request,
-            CycleHandlers(finder=lambda _: [], candidate_evaluator=lambda _: []),
+            CycleHandlers(finder=no_candidates, candidate_evaluator=no_candidates),
             store=store,
             lease=lease(),
             clock=fixed_clock,
@@ -1404,7 +1444,7 @@ def test_dual_resume_has_one_cas_winner_and_one_dispatch_path() -> None:
         with pytest.raises(Crash):
             await start_cycle(
                 request,
-                CycleHandlers(finder=lambda _: [], candidate_evaluator=lambda _: []),
+                CycleHandlers(finder=no_candidates, candidate_evaluator=no_candidates),
                 store=store,
                 lease=lease(),
                 clock=fixed_clock,
@@ -1413,7 +1453,7 @@ def test_dual_resume_has_one_cas_winner_and_one_dispatch_path() -> None:
         interrupted = await store.read(request["eventStreamId"])
         calls = 0
 
-        def finder(_: object) -> list[object]:
+        async def finder(_: object) -> list[object]:
             nonlocal calls
             calls += 1
             return []
@@ -1422,7 +1462,7 @@ def test_dual_resume_has_one_cas_winner_and_one_dispatch_path() -> None:
             try:
                 return await resume_cycle(
                     request,
-                    CycleHandlers(finder=finder, candidate_evaluator=lambda _: []),
+                    CycleHandlers(finder=finder, candidate_evaluator=no_candidates),
                     store=store,
                     expected_version=len(interrupted) - 1,
                     lease=lease(epoch=epoch, lease_id=f"lease-{epoch}"),
@@ -1450,6 +1490,9 @@ def test_rejected_patch_restore_preserves_diagnostics_and_exact_retry() -> None:
         rejected["base"]["revisionHash"] = "f" * 64
         crashed = False
 
+        async def stale_planner(_: object) -> dict[str, Any]:
+            return rejected
+
         def crash_once(boundary: str) -> None:
             nonlocal crashed
             if boundary == "event:PatchRejected:after-cas" and not crashed:
@@ -1460,9 +1503,9 @@ def test_rejected_patch_restore_preserves_diagnostics_and_exact_retry() -> None:
             await start_cycle(
                 request,
                 CycleHandlers(
-                    finder=lambda _: [],
-                    candidate_evaluator=lambda _: [],
-                    patch_planner=lambda _: rejected,
+                    finder=no_candidates,
+                    candidate_evaluator=no_candidates,
+                    patch_planner=stale_planner,
                 ),
                 store=store,
                 lease=lease(),
@@ -1479,9 +1522,9 @@ def test_rejected_patch_restore_preserves_diagnostics_and_exact_retry() -> None:
         result = await resume_cycle(
             request,
             CycleHandlers(
-                finder=lambda _: [],
-                candidate_evaluator=lambda _: [],
-                patch_planner=lambda _: rejected,
+                finder=no_candidates,
+                candidate_evaluator=no_candidates,
+                patch_planner=stale_planner,
             ),
             store=store,
             expected_version=len(interrupted) - 1,
@@ -1520,7 +1563,7 @@ def test_event_identity_store_checkpoint_and_clock_fail_closed() -> None:
         with pytest.raises(CycleRuntimeError) as raised:
             await start_cycle(
                 request_document(),
-                CycleHandlers(finder=lambda _: [], candidate_evaluator=lambda _: []),
+                CycleHandlers(finder=no_candidates, candidate_evaluator=no_candidates),
                 store=store,
                 lease=lease(),
                 clock=fixed_clock,
@@ -1538,7 +1581,7 @@ def test_event_identity_store_checkpoint_and_clock_fail_closed() -> None:
         with pytest.raises(CycleRuntimeError) as raised:
             await start_cycle(
                 request_document(),
-                CycleHandlers(finder=lambda _: [], candidate_evaluator=lambda _: []),
+                CycleHandlers(finder=no_candidates, candidate_evaluator=no_candidates),
                 store=store,
                 lease=lease(),
                 clock=fixed_clock,
@@ -1555,7 +1598,7 @@ def test_event_identity_store_checkpoint_and_clock_fail_closed() -> None:
         request = request_document()
         result = await start_cycle(
             request,
-            CycleHandlers(finder=lambda _: [], candidate_evaluator=lambda _: []),
+            CycleHandlers(finder=no_candidates, candidate_evaluator=no_candidates),
             store=store,
             lease=lease(),
             clock=fixed_clock,
@@ -1620,7 +1663,7 @@ def test_cancellation_racing_output_retains_only_external_claims(
 
         result = await start_cycle(
             request,
-            CycleHandlers(finder=finder, candidate_evaluator=lambda _: []),
+            CycleHandlers(finder=finder, candidate_evaluator=no_candidates),
             store=store,
             lease=lease(),
             clock=fixed_clock,
@@ -1656,6 +1699,14 @@ def test_activity_timeout_charging_retry_and_failure_code_are_exact(
     expected_cost: float,
     expected_in_doubt: int,
 ) -> None:
+    """Attempt timeout is exercised deliberately here, and correctly.
+
+    The handler is a coroutine that blocks on an awaited primitive that is never
+    set, which is the form spec/cycle-semantics.md requires of any campaign that
+    means `timeoutMs` to fire. It never returns, so the timeout is certain in
+    both directions: it cannot be missed under load and cannot be reached early.
+    """
+
     async def run() -> None:
         store = MemoryCycleStore()
         request = request_document(max_iterations=2)
@@ -1674,7 +1725,7 @@ def test_activity_timeout_charging_retry_and_failure_code_are_exact(
 
         result = await start_cycle(
             request,
-            CycleHandlers(finder=finder, candidate_evaluator=lambda _: []),
+            CycleHandlers(finder=finder, candidate_evaluator=no_candidates),
             store=store,
             lease=lease(),
             clock=fixed_clock,
@@ -1712,7 +1763,7 @@ def test_idempotent_ambiguous_retries_coalesce_and_success_resolves_singleton() 
         store = MemoryCycleStore()
         calls = 0
 
-        def finder(_: object) -> list[object]:
+        async def finder(_: object) -> list[object]:
             nonlocal calls
             calls += 1
             if calls == 1:
@@ -1724,7 +1775,7 @@ def test_idempotent_ambiguous_retries_coalesce_and_success_resolves_singleton() 
 
         result = await start_cycle(
             request,
-            CycleHandlers(finder=finder, candidate_evaluator=lambda _: []),
+            CycleHandlers(finder=finder, candidate_evaluator=no_candidates),
             store=store,
             lease=lease(),
             clock=fixed_clock,
@@ -1755,7 +1806,7 @@ def test_exhausted_idempotent_ambiguity_retains_one_latest_attempt() -> None:
         store = MemoryCycleStore()
         calls = 0
 
-        def finder(_: object) -> list[object]:
+        async def finder(_: object) -> list[object]:
             nonlocal calls
             calls += 1
             raise CycleRuntimeError(
@@ -1765,7 +1816,7 @@ def test_exhausted_idempotent_ambiguity_retains_one_latest_attempt() -> None:
 
         result = await start_cycle(
             request,
-            CycleHandlers(finder=finder, candidate_evaluator=lambda _: []),
+            CycleHandlers(finder=finder, candidate_evaluator=no_candidates),
             store=store,
             lease=lease(),
             clock=fixed_clock,
@@ -1794,7 +1845,7 @@ def test_terminal_in_doubt_resolution_is_fenced_idempotent_and_checkpointed() ->
         request["activities"]["finder"]["maxAttemptsPerRound"] = 2
         store = MemoryCycleStore()
 
-        def finder(_: object) -> list[object]:
+        async def finder(_: object) -> list[object]:
             raise CycleRuntimeError(
                 CycleErrorCode.ACTIVITY_FAILED,
                 "ambiguous idempotent provider result",
@@ -1802,7 +1853,7 @@ def test_terminal_in_doubt_resolution_is_fenced_idempotent_and_checkpointed() ->
 
         terminal = await start_cycle(
             request,
-            CycleHandlers(finder=finder, candidate_evaluator=lambda _: []),
+            CycleHandlers(finder=finder, candidate_evaluator=no_candidates),
             store=store,
             lease=lease(),
             clock=fixed_clock,
@@ -1994,7 +2045,7 @@ def test_in_doubt_resolution_rejects_a_nonterminal_interrupted_claim() -> None:
         with pytest.raises(Crash):
             await start_cycle(
                 request,
-                CycleHandlers(finder=lambda _: [], candidate_evaluator=lambda _: []),
+                CycleHandlers(finder=no_candidates, candidate_evaluator=no_candidates),
                 store=store,
                 lease=lease(),
                 clock=fixed_clock,
@@ -2057,7 +2108,7 @@ def test_pause_handoff_and_stale_fence_are_zero_dispatch_operations() -> None:
         with pytest.raises(Crash):
             await start_cycle(
                 request,
-                CycleHandlers(finder=lambda _: [], candidate_evaluator=lambda _: []),
+                CycleHandlers(finder=no_candidates, candidate_evaluator=no_candidates),
                 store=store,
                 lease=lease(epoch=5, lease_id="lease-5"),
                 clock=fixed_clock,
@@ -2143,7 +2194,7 @@ def test_pause_handoff_and_stale_fence_are_zero_dispatch_operations() -> None:
         assert checkpoint["lease"] is None
         calls = 0
 
-        def finder(_: object) -> list[object]:
+        async def finder(_: object) -> list[object]:
             nonlocal calls
             calls += 1
             return []
@@ -2152,7 +2203,7 @@ def test_pause_handoff_and_stale_fence_are_zero_dispatch_operations() -> None:
         with pytest.raises(CycleRuntimeError) as stale:
             await resume_cycle(
                 request,
-                CycleHandlers(finder=finder, candidate_evaluator=lambda _: []),
+                CycleHandlers(finder=finder, candidate_evaluator=no_candidates),
                 store=store,
                 expected_version=len(paused.events) - 1,
                 lease=lease(epoch=5, lease_id="stale-lease"),
@@ -2164,7 +2215,7 @@ def test_pause_handoff_and_stale_fence_are_zero_dispatch_operations() -> None:
 
         result = await resume_cycle(
             request,
-            CycleHandlers(finder=finder, candidate_evaluator=lambda _: []),
+            CycleHandlers(finder=finder, candidate_evaluator=no_candidates),
             store=store,
             expected_version=len(paused.events) - 1,
             lease=lease(epoch=6, lease_id="lease-6"),
@@ -2194,7 +2245,7 @@ def test_concurrent_lease_administration_commits_exactly_one_cas_winner() -> Non
         with pytest.raises(Crash):
             await start_cycle(
                 request,
-                CycleHandlers(finder=lambda _: [], candidate_evaluator=lambda _: []),
+                CycleHandlers(finder=no_candidates, candidate_evaluator=no_candidates),
                 store=store,
                 lease=initial_lease,
                 clock=fixed_clock,
@@ -2255,6 +2306,9 @@ def test_fork_binds_exact_prefix_inherits_seen_and_diverges_independently() -> N
         store = MemoryCycleStore()
         crashed = False
 
+        async def parent_finder(_: object) -> list[dict[str, object]]:
+            return [{"key": "finding-a", "value": {"parent": True}}]
+
         def crash_once(boundary: str) -> None:
             nonlocal crashed
             if boundary == "event:DiscoveryCommitted:after-cas" and not crashed:
@@ -2265,8 +2319,8 @@ def test_fork_binds_exact_prefix_inherits_seen_and_diverges_independently() -> N
             await start_cycle(
                 parent,
                 CycleHandlers(
-                    finder=lambda _: [{"key": "finding-a", "value": {"parent": True}}],
-                    candidate_evaluator=lambda _: [],
+                    finder=parent_finder,
+                    candidate_evaluator=no_candidates,
                 ),
                 store=store,
                 lease=lease(),
@@ -2283,14 +2337,14 @@ def test_fork_binds_exact_prefix_inherits_seen_and_diverges_independently() -> N
         child["policy"]["maxIterations"] = 2
         child_calls = 0
 
-        def child_finder(_: object) -> list[dict[str, object]]:
+        async def child_finder(_: object) -> list[dict[str, object]]:
             nonlocal child_calls
             child_calls += 1
             return [{"key": "finding-a", "value": {"child": True}}]
 
         result = await fork_cycle(
             child,
-            CycleHandlers(finder=child_finder, candidate_evaluator=lambda _: []),
+            CycleHandlers(finder=child_finder, candidate_evaluator=no_candidates),
             store=store,
             lease=lease(lease_id="child-lease"),
             parent_controller_run_id=parent["controllerRunId"],
@@ -2323,7 +2377,7 @@ def test_fork_rejects_parent_hash_substitution_before_child_write() -> None:
         store = MemoryCycleStore()
         completed = await start_cycle(
             parent,
-            CycleHandlers(finder=lambda _: [], candidate_evaluator=lambda _: []),
+            CycleHandlers(finder=no_candidates, candidate_evaluator=no_candidates),
             store=store,
             lease=lease(),
             clock=fixed_clock,
@@ -2338,7 +2392,7 @@ def test_fork_rejects_parent_hash_substitution_before_child_write() -> None:
         with pytest.raises(CycleRuntimeError) as raised:
             await fork_cycle(
                 child,
-                CycleHandlers(finder=lambda _: [], candidate_evaluator=lambda _: []),
+                CycleHandlers(finder=no_candidates, candidate_evaluator=no_candidates),
                 store=store,
                 lease=lease(lease_id="child-lease"),
                 parent_controller_run_id=parent["controllerRunId"],
@@ -2371,7 +2425,7 @@ def test_fork_open_external_claim_is_in_doubt_without_dispatch(side_effects: str
         with pytest.raises(Crash):
             await start_cycle(
                 parent,
-                CycleHandlers(finder=lambda _: [], candidate_evaluator=lambda _: []),
+                CycleHandlers(finder=no_candidates, candidate_evaluator=no_candidates),
                 store=store,
                 lease=lease(),
                 clock=fixed_clock,
@@ -2425,13 +2479,18 @@ def test_lineage_manifest_exports_grandchild_siblings_and_distinct_prefixes() ->
     async def run() -> None:
         store = MemoryCycleStore()
         root = request_document(max_iterations=1, dry_rounds=2)
+
+        async def root_finder(_: object) -> list[dict[str, object]]:
+            return [{"key": "root-seen", "value": {"source": "root"}}]
+
+        async def root_evaluator(_: object) -> list[dict[str, str]]:
+            return [{"key": "root-seen", "verdict": "accept"}]
+
         await start_cycle(
             root,
             CycleHandlers(
-                finder=lambda _: [{"key": "root-seen", "value": {"source": "root"}}],
-                candidate_evaluator=lambda _: [
-                    {"key": "root-seen", "verdict": "accept"}
-                ],
+                finder=root_finder,
+                candidate_evaluator=root_evaluator,
             ),
             store=store,
             lease=lease(lease_id="lineage-root"),
@@ -2460,19 +2519,22 @@ def test_lineage_manifest_exports_grandchild_siblings_and_distinct_prefixes() ->
             child["checkpointScope"] = f"cycle-lineage-{suffix}.checkpoints"
             child["policy"]["maxIterations"] = 8
             child["policy"]["consecutiveDryRounds"] = dry_rounds
+
+            async def fork_finder(_: object) -> list[dict[str, object]]:
+                if suffix != "sibling":
+                    return []
+                return [{"key": "sibling-only", "value": {"source": "sibling"}}]
+
+            async def fork_evaluator(_: object) -> list[dict[str, str]]:
+                if suffix != "sibling":
+                    return []
+                return [{"key": "sibling-only", "verdict": "accept"}]
+
             await fork_cycle(
                 child,
                 CycleHandlers(
-                    finder=lambda _: (
-                        [{"key": "sibling-only", "value": {"source": "sibling"}}]
-                        if suffix == "sibling"
-                        else []
-                    ),
-                    candidate_evaluator=lambda _: (
-                        [{"key": "sibling-only", "verdict": "accept"}]
-                        if suffix == "sibling"
-                        else []
-                    ),
+                    finder=fork_finder,
+                    candidate_evaluator=fork_evaluator,
                 ),
                 store=store,
                 lease=lease(lease_id=f"lease-{suffix}"),
@@ -2574,7 +2636,7 @@ def test_lineage_manifest_rejects_rehashed_ancestry_attacks_and_missing_store_pa
         root = request_document(max_iterations=1, dry_rounds=2)
         await start_cycle(
             root,
-            CycleHandlers(finder=lambda _: [], candidate_evaluator=lambda _: []),
+            CycleHandlers(finder=no_candidates, candidate_evaluator=no_candidates),
             store=store,
             lease=lease(lease_id="lineage-attack-root"),
             clock=fixed_clock,
@@ -2594,7 +2656,7 @@ def test_lineage_manifest_rejects_rehashed_ancestry_attacks_and_missing_store_pa
         child["policy"]["consecutiveDryRounds"] = 3
         await fork_cycle(
             child,
-            CycleHandlers(finder=lambda _: [], candidate_evaluator=lambda _: []),
+            CycleHandlers(finder=no_candidates, candidate_evaluator=no_candidates),
             store=store,
             lease=lease(lease_id="lineage-attack-child"),
             parent_controller_run_id=root["controllerRunId"],
