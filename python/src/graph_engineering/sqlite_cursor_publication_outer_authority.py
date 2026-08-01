@@ -7,6 +7,8 @@ rolls back or rebinds the caller-owned transaction.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import sqlite3
 from collections.abc import Callable
 from contextlib import suppress
@@ -55,7 +57,15 @@ from .sqlite_cursor_publication_target_catalog import (
     _read_validated_target_catalog_intrinsic,
     _TargetCatalogSnapshot,
 )
-from .sqlite_operation_baseline import BaselineProjectionIdentity
+from .sqlite_operation_baseline import (
+    BASELINE_ENTRY_KINDS,
+    MAX_BASELINE_KEY_BYTES,
+    MAX_BASELINE_STATE_BYTES,
+    BaselineAccumulator,
+    BaselineEntry,
+    BaselineProjectionIdentity,
+    capture_baseline_entry,
+)
 from .sqlite_operation_baseline_cursor_ownership import (
     SQLiteCursorExactProjectionReference,
     SQLiteCursorPreRebindReceipt,
@@ -64,20 +74,29 @@ from .sqlite_operation_baseline_cursor_ownership import (
 from .sqlite_operation_baseline_cursor_stage_ownership import (
     _assert_sqlite_cursor_stage_ownership_outer_publication_owned_intrinsic,
     _assert_sqlite_cursor_stage_ownership_outer_publication_prepared_intrinsic,
+    _assert_sqlite_cursor_stage_ownership_post_ddl_reader_terminal_intrinsic,
     _assert_sqlite_cursor_stage_ownership_pre_rebind_complete_intrinsic,
+    _complete_sqlite_cursor_stage_ownership_post_ddl_reader_intrinsic,
     _mint_sqlite_cursor_stage_ownership_outer_publication_authority_intrinsic,
     _poison_sqlite_cursor_stage_ownership_outer_publication_intrinsic,
     _publish_sqlite_cursor_stage_ownership_outer_publication_intrinsic,
+    _register_sqlite_cursor_stage_ownership_post_ddl_reader_intrinsic,
     _retire_sqlite_cursor_stage_ownership_outer_publication_intrinsic,
     _SQLiteCursorStageOwnershipOuterPublicationAuthority,
     _SQLiteCursorStageOwnershipOuterPublicationTail,
     _SQLiteCursorStageOwnershipTransfer,
 )
 from .sqlite_operation_baseline_source import (
+    SQLITE_CURSOR_POST_DDL_BASELINE_SOURCE_QUERY_INTRINSIC,
     SQLiteV1BaselineConnectionOwner,
     _begin_sqlite_connection_migration_0002_execution_intrinsic,
+    _close_owned_sqlite_connection_post_ddl_publication_reader_intrinsic,
     _execute_next_sqlite_connection_migration_0002_statement_intrinsic,
+    _execute_sqlite_connection_post_ddl_publication_reader_intrinsic,
+    _fetch_next_owned_sqlite_connection_post_ddl_publication_reader_intrinsic,
+    _prepare_sqlite_connection_post_ddl_publication_reader_intrinsic,
     _read_sqlite_connection_migration_0002_execution_snapshot_intrinsic,
+    _read_sqlite_connection_post_ddl_publication_reader_snapshot_intrinsic,
     _SQLiteConnectionMigration0002Execution,
 )
 from .sqlite_operation_baseline_stage import SQLiteV1BaselineTempStage
@@ -87,6 +106,12 @@ _MAX_SAFE_INTEGER = 2**53 - 1
 _SOURCE_V1_CATALOG_SHA256 = "359cf74f441a201fcae970d77eac460529d9c562ad7a42d20e5224b65b88b2f0"
 _SOURCE_V1_CATALOG_ROW_COUNT = 27
 _SOURCE_V1_CATALOG_CANONICAL_UTF8_BYTES = 4_504
+SQLITE_CURSOR_POST_DDL_PUBLICATION_READER_SOURCE_SQL = (
+    SQLITE_CURSOR_POST_DDL_BASELINE_SOURCE_QUERY_INTRINSIC
+)
+SQLITE_CURSOR_POST_DDL_PUBLICATION_READER_SOURCE_SQL_SHA256 = (
+    "adae52750ecd70a75090b52de7d60763eea144c1383cf4739df9d8e8a6b2357f"
+)
 
 _SQLiteCursorOuterPublicationAuthority: TypeAlias = (
     _SQLiteCursorStageOwnershipOuterPublicationAuthority
@@ -97,6 +122,7 @@ _WritePhase: TypeAlias = Literal[
     "executing-0002",
     "0002-complete",
     "post-ddl-catalog-fence",
+    "post-ddl-reader-closed",
     "poisoned",
     "retired",
 ]
@@ -215,6 +241,59 @@ class _SQLiteCursorPostDdlCatalogFenceSnapshot(NamedTuple):
     user_version: Literal[2]
 
 
+class _SQLiteCursorPostDdlPublicationReaderLease:
+    """Opaque one-shot owner of the fixed post-DDL TEMP projection read."""
+
+    __slots__ = ("__weakref__",)
+
+    def __init__(self, token: object) -> None:
+        if token is not _CONSTRUCTION_TOKEN:
+            raise TypeError("GE_CURSOR_B3_POST_DDL_READER_LEASE")
+
+
+_ReaderLifecycle: TypeAlias = Literal[
+    "minted-unused",
+    "reader-active",
+    "reader-closed",
+    "retired",
+    "poisoned",
+]
+
+
+class _SQLiteCursorPostDdlPublicationReaderLeaseSnapshot(NamedTuple):
+    authority: _SQLiteCursorOuterPublicationAuthority
+    close_attempt_count: Literal[0, 1]
+    close_succeeded: bool
+    connection: SQLiteV1BaselineConnectionOwner
+    consumes_any_write_receipt: Literal[False]
+    read_proof_epoch: int
+    execute_count: Literal[0, 1]
+    fetch_count: int
+    lifecycle: _ReaderLifecycle
+    may_mint_stage_adoption_receipt: Literal[False]
+    migration_0002_receipt: _SQLiteMigration0002CatalogRebuildReceipt
+    mint_count: Literal[1]
+    outer_ledger_read_watermark: _SQLiteCursorOuterPublicationLedgerSnapshot
+    ownership_acquisition_count: Literal[0, 1]
+    permanent_write_authority: Literal[False]
+    post_ddl_catalog_fence: _SQLiteCursorPostDdlCatalogFence
+    prepare_count: Literal[0, 1]
+    projection_identity: BaselineProjectionIdentity
+    projection_reference: SQLiteCursorExactProjectionReference
+    rederived_entry_count: int | None
+    rederived_final_entry_hash: str | None
+    rederived_first_entry_hash: str | None
+    rederived_legacy_operation_count: int | None
+    rederived_projection_sha256: str | None
+    source_read_sql: str
+    source_read_sql_sha256: str
+    stage: SQLiteV1BaselineTempStage
+    total_changes_read_watermark: int
+    transaction_generation: object
+    transaction_epoch: int
+    transfer: _SQLiteCursorStageOwnershipTransfer
+
+
 class _SQLiteCursorOuterPublicationAuthoritySnapshot(NamedTuple):
     lifecycle: _AuthorityLifecycle
     stage_ownership_poison_reason: str | None
@@ -243,6 +322,9 @@ class _SQLiteCursorOuterPublicationAuthoritySnapshot(NamedTuple):
     migration_0002_receipt: _SQLiteMigration0002CatalogRebuildReceipt | None
     post_ddl_catalog_fence: _SQLiteCursorPostDdlCatalogFence | None
     post_ddl_catalog_fence_mint_count: Literal[0, 1]
+    post_ddl_publication_reader_lease: _SQLiteCursorPostDdlPublicationReaderLease | None
+    post_ddl_publication_reader_lease_mint_count: Literal[0, 1]
+    post_ddl_publication_reader_lease_close_count: Literal[0, 1]
     write_phase: _WritePhase
 
 
@@ -283,6 +365,9 @@ class _AuthorityState:
     migration_0002_receipt: _SQLiteMigration0002CatalogRebuildReceipt | None = None
     post_ddl_catalog_fence: _SQLiteCursorPostDdlCatalogFence | None = None
     post_ddl_catalog_fence_mint_count: Literal[0, 1] = 0
+    post_ddl_publication_reader_lease: _SQLiteCursorPostDdlPublicationReaderLease | None = None
+    post_ddl_publication_reader_lease_mint_count: Literal[0, 1] = 0
+    post_ddl_publication_reader_lease_close_count: Literal[0, 1] = 0
     write_phase: _WritePhase = "ready-0002"
 
 
@@ -314,6 +399,42 @@ class _PostDdlCatalogFenceRecord:
     transaction_generation: object
 
 
+@dataclass(slots=True)
+class _PostDdlPublicationReaderLeaseRecord:
+    authority_id: int
+    authority_ref: ReferenceType[_SQLiteCursorStageOwnershipOuterPublicationAuthority]
+    baseline_id: str
+    close_attempt_count: Literal[0, 1]
+    close_error_code: str | None
+    close_succeeded: bool
+    execute_count: Literal[0, 1]
+    expected_entry_count: int
+    expected_final_entry_hash: str
+    expected_first_entry_hash: str
+    expected_legacy_operation_count: int
+    expected_projection_sha256: str
+    fence_id: int
+    fence_ref: ReferenceType[_SQLiteCursorPostDdlCatalogFence]
+    fetch_count: int
+    lifecycle: _ReaderLifecycle
+    migration_0002_receipt_id: int
+    migration_0002_receipt_ref: ReferenceType[_SQLiteMigration0002CatalogRebuildReceipt]
+    outer_ledger_read_watermark: _SQLiteCursorOuterPublicationLedgerSnapshot
+    ownership_acquisition_count: Literal[0, 1]
+    prepare_count: Literal[0, 1]
+    projection_reference_id: int
+    projection_reference_ref: ReferenceType[SQLiteCursorExactProjectionReference]
+    rederived_projection: BaselineProjectionIdentity | None
+    retained_entries: tuple[BaselineEntry, ...] | None
+    stage_id: int
+    stage_ref: ReferenceType[SQLiteV1BaselineTempStage]
+    total_changes_read_watermark: int
+    transaction_epoch: int
+    transaction_generation: object
+    transfer_id: int
+    transfer_ref: ReferenceType[_SQLiteCursorStageOwnershipTransfer]
+
+
 class _IdentityEntry(NamedTuple):
     key_ref: ReferenceType[object]
     value: object
@@ -330,6 +451,7 @@ _AUTHORITY_BY_EVIDENCE: dict[int, _AuthorityLink] = {}
 _AUTHORITY_BY_TRANSFER: dict[int, _AuthorityLink] = {}
 _MIGRATION_0002_RECEIPTS: dict[int, _IdentityEntry] = {}
 _POST_DDL_CATALOG_FENCES: dict[int, _IdentityEntry] = {}
+_POST_DDL_PUBLICATION_READER_LEASES: dict[int, _IdentityEntry] = {}
 
 # Capture every replaceable dependency before any caller can alter its module or
 # class attribute.  Registry lookup below also checks the weak referent with
@@ -348,6 +470,15 @@ _OWNERSHIP_ASSERT_PREPARED = (
 )
 _OWNERSHIP_PUBLISH_OUTER = _publish_sqlite_cursor_stage_ownership_outer_publication_intrinsic
 _OWNERSHIP_ASSERT_OWNED = _assert_sqlite_cursor_stage_ownership_outer_publication_owned_intrinsic
+_OWNERSHIP_REGISTER_POST_DDL_READER = (
+    _register_sqlite_cursor_stage_ownership_post_ddl_reader_intrinsic
+)
+_OWNERSHIP_COMPLETE_POST_DDL_READER = (
+    _complete_sqlite_cursor_stage_ownership_post_ddl_reader_intrinsic
+)
+_OWNERSHIP_ASSERT_POST_DDL_READER_TERMINAL = (
+    _assert_sqlite_cursor_stage_ownership_post_ddl_reader_terminal_intrinsic
+)
 _OWNERSHIP_RETIRE = _retire_sqlite_cursor_stage_ownership_outer_publication_intrinsic
 _OWNERSHIP_POISON = _poison_sqlite_cursor_stage_ownership_outer_publication_intrinsic
 _CONSUME_CLOCK = _consume_provider_clock_evidence_intrinsic
@@ -368,6 +499,24 @@ _OWNER_GENERATION = cast(
     "Callable[[SQLiteV1BaselineConnectionOwner], object | None]",
     cast("property", SQLiteV1BaselineConnectionOwner.__dict__["_transaction_generation"]).fget,
 )
+_OWNER_PREPARE_POST_DDL_BASELINE_SOURCE = (
+    _prepare_sqlite_connection_post_ddl_publication_reader_intrinsic
+)
+_OWNER_EXECUTE_POST_DDL_BASELINE_SOURCE = (
+    _execute_sqlite_connection_post_ddl_publication_reader_intrinsic
+)
+_CURSOR_FETCHONE = _fetch_next_owned_sqlite_connection_post_ddl_publication_reader_intrinsic
+_CURSOR_CLOSE = _close_owned_sqlite_connection_post_ddl_publication_reader_intrinsic
+_ABORT_PREOWNERSHIP_READER = _close_owned_sqlite_connection_post_ddl_publication_reader_intrinsic
+_READ_POST_DDL_BASELINE_SOURCE = (
+    _read_sqlite_connection_post_ddl_publication_reader_snapshot_intrinsic
+)
+_ACCUMULATOR_CONSTRUCT = BaselineAccumulator
+_ACCUMULATOR_APPEND = BaselineAccumulator.append
+_ACCUMULATOR_FINISH = BaselineAccumulator.finish
+_CAPTURE_BASELINE_ENTRY = capture_baseline_entry
+_JSON_LOADS = json.loads
+_SHA256 = hashlib.sha256
 _LOAD_MIGRATION_0002_ASSET = _load_sqlite_cursor_migration_0002_asset_intrinsic
 _READ_MIGRATION_0002_ASSET = _read_sqlite_cursor_migration_0002_asset_snapshot_intrinsic
 _READ_TARGET_CATALOG = _read_target_catalog_observation_intrinsic
@@ -1362,6 +1511,659 @@ def _read_sqlite_cursor_post_ddl_catalog_fence_snapshot_intrinsic(
     )
 
 
+def _same_projection_identity(
+    left: BaselineProjectionIdentity,
+    right: BaselineProjectionIdentity,
+) -> bool:
+    return (
+        type(left) is BaselineProjectionIdentity
+        and type(right) is BaselineProjectionIdentity
+        and left.baseline_id == right.baseline_id
+        and left.entry_count == right.entry_count
+        and left.legacy_operation_count == right.legacy_operation_count
+        and left.first_entry_hash == right.first_entry_hash
+        and left.final_entry_hash == right.final_entry_hash
+        and left.projection_sha256 == right.projection_sha256
+    )
+
+
+def _post_ddl_publication_reader_record(
+    lease: _SQLiteCursorPostDdlPublicationReaderLease,
+) -> _PostDdlPublicationReaderLeaseRecord:
+    record = _identity_get(
+        _POST_DDL_PUBLICATION_READER_LEASES,
+        lease,
+        _SQLiteCursorPostDdlPublicationReaderLease,
+    )
+    if record is None:
+        _fail("GE_CURSOR_B3_POST_DDL_READER_LEASE")
+    return cast(_PostDdlPublicationReaderLeaseRecord, record)
+
+
+def _resolve_post_ddl_publication_reader_graph(
+    record: _PostDdlPublicationReaderLeaseRecord,
+) -> tuple[
+    _SQLiteCursorOuterPublicationAuthority,
+    _SQLiteMigration0002CatalogRebuildReceipt,
+    _SQLiteCursorPostDdlCatalogFence,
+    SQLiteV1BaselineTempStage,
+    _SQLiteCursorStageOwnershipTransfer,
+    SQLiteCursorExactProjectionReference,
+]:
+    authority = record.authority_ref()
+    receipt = record.migration_0002_receipt_ref()
+    fence = record.fence_ref()
+    stage = record.stage_ref()
+    transfer = record.transfer_ref()
+    projection_reference = record.projection_reference_ref()
+    if (
+        authority is None
+        or receipt is None
+        or fence is None
+        or stage is None
+        or transfer is None
+        or projection_reference is None
+        or _ID(authority) != record.authority_id
+        or _ID(receipt) != record.migration_0002_receipt_id
+        or _ID(fence) != record.fence_id
+        or _ID(stage) != record.stage_id
+        or _ID(transfer) != record.transfer_id
+        or _ID(projection_reference) != record.projection_reference_id
+    ):
+        _fail("GE_CURSOR_B3_POST_DDL_READER_LEASE")
+    return authority, receipt, fence, stage, transfer, projection_reference
+
+
+def _reader_cancellation_state(
+    cancellation: _SQLiteCursorOuterPublicationCancellationSignal | None,
+) -> _CancellationState | None:
+    if cancellation is None:
+        return None
+    state = _identity_get(
+        _CANCELLATIONS,
+        cancellation,
+        _SQLiteCursorOuterPublicationCancellationSignal,
+    )
+    if state is None:
+        _fail("GE_CURSOR_B3_POST_DDL_READER_CANCELLATION")
+    return cast(_CancellationState, state)
+
+
+def _reader_watermarks_match(
+    state: _AuthorityState,
+    record: _PostDdlPublicationReaderLeaseRecord,
+) -> bool:
+    return (
+        state.transaction_generation is record.transaction_generation
+        and state.current_transaction_epoch == record.transaction_epoch
+        and state.current_total_changes == record.total_changes_read_watermark
+        and _exact_outer_ledger(
+            _outer_ledger_snapshot(state),
+            record.outer_ledger_read_watermark,
+        )
+    )
+
+
+def _expected_reader_projection(
+    record: _PostDdlPublicationReaderLeaseRecord,
+) -> BaselineProjectionIdentity:
+    return BaselineProjectionIdentity(
+        baseline_id=record.baseline_id,
+        entry_count=record.expected_entry_count,
+        legacy_operation_count=record.expected_legacy_operation_count,
+        first_entry_hash=record.expected_first_entry_hash,
+        final_entry_hash=record.expected_final_entry_hash,
+        projection_sha256=record.expected_projection_sha256,
+    )
+
+
+def _mint_sqlite_cursor_post_ddl_publication_reader_lease_intrinsic(
+    authority: _SQLiteCursorOuterPublicationAuthority,
+    migration_0002_receipt: _SQLiteMigration0002CatalogRebuildReceipt,
+    fence: _SQLiteCursorPostDdlCatalogFence,
+) -> _SQLiteCursorPostDdlPublicationReaderLease:
+    """Mint the only lease for the package-owned ordered TEMP projection read."""
+
+    fence_record = _post_ddl_catalog_fence_record(fence)
+    state = _authority_state(authority)
+    if (
+        fence_record.authority_ref() is not authority
+        or fence_record.migration_0002_receipt_ref() is not migration_0002_receipt
+        or state.migration_0002_receipt is not migration_0002_receipt
+        or state.post_ddl_catalog_fence is not fence
+    ):
+        _fail("GE_CURSOR_B3_POST_DDL_READER_GRAPH")
+    if (
+        state.post_ddl_publication_reader_lease is not None
+        or state.post_ddl_publication_reader_lease_mint_count != 0
+    ):
+        _poison(state, authority, "SQLite post-DDL publication reader lease mint was reused")
+        _fail("GE_CURSOR_B3_POST_DDL_READER_MINT_REPLAY")
+    if state.write_phase != "post-ddl-catalog-fence":
+        _poison(state, authority, "SQLite post-DDL publication reader lease mint was premature")
+        _fail("GE_CURSOR_B3_POST_DDL_READER_PREMATURE")
+
+    try:
+        _assert_sqlite_cursor_post_ddl_catalog_fence_intrinsic(
+            authority,
+            migration_0002_receipt,
+            fence,
+        )
+        source_sha256 = _SHA256(
+            SQLITE_CURSOR_POST_DDL_PUBLICATION_READER_SOURCE_SQL.encode("utf-8")
+        ).hexdigest()
+        if (
+            SQLITE_CURSOR_POST_DDL_PUBLICATION_READER_SOURCE_SQL
+            != SQLITE_CURSOR_POST_DDL_BASELINE_SOURCE_QUERY_INTRINSIC
+            or source_sha256 != SQLITE_CURSOR_POST_DDL_PUBLICATION_READER_SOURCE_SQL_SHA256
+        ):
+            _fail("GE_CURSOR_B3_POST_DDL_READER_SQL")
+        provenance = _RECEIPT_PROVENANCE(state.receipt)
+        ledger = _outer_ledger_snapshot(state)
+        if (
+            provenance.projection_identity is not state.projection_identity
+            or provenance.projection_reference is not state.projection_reference
+            or state.transaction_generation is not fence_record.transaction_generation
+            or state.current_transaction_epoch != fence_record.transaction_epoch
+            or state.current_total_changes != fence_record.total_changes_watermark
+            or not _exact_outer_ledger(ledger, fence_record.outer_ledger_watermark)
+        ):
+            _fail("GE_CURSOR_B3_POST_DDL_READER_WATERMARK")
+        lease = _SQLiteCursorPostDdlPublicationReaderLease(_CONSTRUCTION_TOKEN)
+        _identity_set(
+            _POST_DDL_PUBLICATION_READER_LEASES,
+            lease,
+            _PostDdlPublicationReaderLeaseRecord(
+                authority_id=_ID(authority),
+                authority_ref=_REF(authority),
+                baseline_id=state.projection_identity.baseline_id,
+                close_attempt_count=0,
+                close_error_code=None,
+                close_succeeded=False,
+                execute_count=0,
+                expected_entry_count=state.projection_identity.entry_count,
+                expected_final_entry_hash=state.projection_identity.final_entry_hash,
+                expected_first_entry_hash=state.projection_identity.first_entry_hash,
+                expected_legacy_operation_count=state.projection_identity.legacy_operation_count,
+                expected_projection_sha256=state.projection_identity.projection_sha256,
+                fence_id=_ID(fence),
+                fence_ref=_REF(fence),
+                fetch_count=0,
+                lifecycle="minted-unused",
+                migration_0002_receipt_id=_ID(migration_0002_receipt),
+                migration_0002_receipt_ref=_REF(migration_0002_receipt),
+                outer_ledger_read_watermark=ledger,
+                ownership_acquisition_count=0,
+                prepare_count=0,
+                projection_reference_id=_ID(state.projection_reference),
+                projection_reference_ref=_REF(state.projection_reference),
+                rederived_projection=None,
+                retained_entries=None,
+                stage_id=_ID(state.stage),
+                stage_ref=_REF(state.stage),
+                total_changes_read_watermark=state.current_total_changes,
+                transaction_epoch=state.current_transaction_epoch,
+                transaction_generation=state.transaction_generation,
+                transfer_id=_ID(state.transfer),
+                transfer_ref=_REF(state.transfer),
+            ),
+        )
+        state.post_ddl_publication_reader_lease = lease
+        state.post_ddl_publication_reader_lease_mint_count = 1
+        return lease
+    except BaseException:
+        _translate_closed_fence_connection(state, authority)
+        _poison(state, authority, "SQLite post-DDL publication reader lease mint failed")
+        raise
+
+
+def _decode_post_ddl_reader_json(value: bytes, maximum: int) -> object:
+    if not 2 <= len(value) <= maximum:
+        _fail("GE_CURSOR_B3_POST_DDL_READER_ROW")
+    try:
+        return _JSON_LOADS(value)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValueError("GE_CURSOR_B3_POST_DDL_READER_ROW") from error
+
+
+_DECODE_POST_DDL_READER_JSON = _decode_post_ddl_reader_json
+
+
+def _execute_sqlite_cursor_post_ddl_publication_reader_intrinsic(
+    authority: _SQLiteCursorOuterPublicationAuthority,
+    migration_0002_receipt: _SQLiteMigration0002CatalogRebuildReceipt,
+    fence: _SQLiteCursorPostDdlCatalogFence,
+    lease: _SQLiteCursorPostDdlPublicationReaderLease,
+    cancellation: _SQLiteCursorOuterPublicationCancellationSignal | None = None,
+) -> _SQLiteCursorPostDdlPublicationReaderLease:
+    """Execute the fixed read once, retain exact rows, and close ownership once."""
+
+    record = _post_ddl_publication_reader_record(lease)
+    (
+        registered_authority,
+        registered_receipt,
+        registered_fence,
+        _,
+        transfer,
+        projection_reference,
+    ) = _resolve_post_ddl_publication_reader_graph(record)
+    if (
+        registered_authority is not authority
+        or registered_receipt is not migration_0002_receipt
+        or registered_fence is not fence
+    ):
+        _fail("GE_CURSOR_B3_POST_DDL_READER_GRAPH")
+    state = _authority_state(authority)
+    if (
+        state.post_ddl_publication_reader_lease is not lease
+        or state.post_ddl_publication_reader_lease_mint_count != 1
+        or state.projection_reference is not projection_reference
+    ):
+        _fail("GE_CURSOR_B3_POST_DDL_READER_GRAPH")
+    if record.lifecycle != "minted-unused":
+        _poison(state, authority, "SQLite post-DDL publication reader lease was reused")
+        _fail("GE_CURSOR_B3_POST_DDL_READER_REPLAY")
+    cancellation_state = _reader_cancellation_state(cancellation)
+
+    try:
+        _assert_sqlite_cursor_post_ddl_catalog_fence_intrinsic(
+            authority,
+            migration_0002_receipt,
+            fence,
+        )
+        source_sha256 = _SHA256(
+            SQLITE_CURSOR_POST_DDL_PUBLICATION_READER_SOURCE_SQL.encode("utf-8")
+        ).hexdigest()
+        if (
+            SQLITE_CURSOR_POST_DDL_PUBLICATION_READER_SOURCE_SQL
+            != SQLITE_CURSOR_POST_DDL_BASELINE_SOURCE_QUERY_INTRINSIC
+            or source_sha256 != SQLITE_CURSOR_POST_DDL_PUBLICATION_READER_SOURCE_SQL_SHA256
+            or not _reader_watermarks_match(state, record)
+        ):
+            _fail("GE_CURSOR_B3_POST_DDL_READER_WATERMARK")
+    except BaseException:
+        record.lifecycle = "poisoned"
+        _translate_closed_fence_connection(state, authority)
+        _poison(state, authority, "SQLite post-DDL publication reader pre-prepare failed")
+        raise
+
+    try:
+        accumulator = _ACCUMULATOR_CONSTRUCT(
+            record.baseline_id,
+            record.expected_entry_count,
+        )
+        retained: list[BaselineEntry] = []
+    except BaseException as error:
+        record.lifecycle = "poisoned"
+        _poison(state, authority, "SQLite post-DDL publication reader accumulator failed")
+        raise ValueError("GE_CURSOR_B3_POST_DDL_READER_ACCUMULATOR") from error
+    if cancellation_state is not None and cancellation_state.cancelled:
+        _fail("GE_CURSOR_B3_POST_DDL_READER_CANCELLED")
+
+    try:
+        cursor = _OWNER_PREPARE_POST_DDL_BASELINE_SOURCE(state.connection)
+        record.prepare_count = 1
+    except BaseException as error:
+        record.lifecycle = "poisoned"
+        _poison(state, authority, "SQLite post-DDL publication reader prepare failed")
+        raise ValueError("GE_CURSOR_B3_POST_DDL_READER_PREPARE") from error
+
+    try:
+        _OWNER_EXECUTE_POST_DDL_BASELINE_SOURCE(state.connection, cursor)
+    except BaseException as error:
+        with suppress(BaseException):
+            _ABORT_PREOWNERSHIP_READER(cursor)
+        record.lifecycle = "poisoned"
+        _poison(state, authority, "SQLite post-DDL publication reader execute failed")
+        raise ValueError("GE_CURSOR_B3_POST_DDL_READER_EXECUTE") from error
+
+    record.execute_count = 1
+    record.ownership_acquisition_count = 1
+    record.lifecycle = "reader-active"
+    authority_reference = _REF(authority)
+    initial_close_cause: BaseException | None = None
+
+    def close_owned_reader() -> None:
+        nonlocal initial_close_cause
+        if record.close_attempt_count == 1:
+            if record.close_error_code is not None:
+                raise ValueError(record.close_error_code)
+            return
+        record.close_attempt_count = 1
+        live_authority = authority_reference()
+        if live_authority is not None:
+            live_state = _identity_get(
+                _AUTHORITIES,
+                live_authority,
+                _SQLiteCursorStageOwnershipOuterPublicationAuthority,
+            )
+            if live_state is not None:
+                cast(
+                    _AuthorityState,
+                    live_state,
+                ).post_ddl_publication_reader_lease_close_count = 1
+        try:
+            _CURSOR_CLOSE(cursor)
+            record.close_succeeded = True
+        except BaseException as error:
+            record.close_error_code = "GE_CURSOR_B3_POST_DDL_READER_CLOSE"
+            initial_close_cause = error
+            raise ValueError(record.close_error_code) from error
+
+    def cleanup_owned_reader() -> None:
+        record.lifecycle = "poisoned"
+        close_owned_reader()
+
+    registered = False
+    primary: BaseException | None = None
+    try:
+        _OWNERSHIP_REGISTER_POST_DDL_READER(
+            transfer,
+            authority,
+            lease,
+            cleanup_owned_reader,
+        )
+        registered = True
+    except BaseException as error:
+        primary = ValueError("GE_CURSOR_B3_POST_DDL_READER_CLEANUP_OWNERSHIP")
+        primary.__cause__ = error
+
+    cancelled_after_ownership = False
+    terminal = False
+    previous_rank: int | None = None
+    previous_key: bytes | None = None
+    maximum_fetches = record.expected_entry_count + 1
+    for _ in range(maximum_fetches):
+        if primary is not None:
+            break
+        if cancellation_state is not None and cancellation_state.cancelled:
+            cancelled_after_ownership = True
+            break
+        try:
+            record.fetch_count += 1
+            row = _CURSOR_FETCHONE(cursor)
+        except BaseException as error:
+            primary = ValueError("GE_CURSOR_B3_POST_DDL_READER_FETCH")
+            primary.__cause__ = error
+            break
+        if row is None:
+            terminal = True
+            break
+        try:
+            if type(row) is not tuple or len(row) != 4:
+                _fail("GE_CURSOR_B3_POST_DDL_READER_ROW")
+            rank, entry_kind, key_blob, state_blob = row
+            if (
+                type(rank) is not int
+                or not 0 <= rank < len(BASELINE_ENTRY_KINDS)
+                or type(entry_kind) is not str
+                or BASELINE_ENTRY_KINDS[rank] != entry_kind
+                or type(key_blob) is not bytes
+                or type(state_blob) is not bytes
+            ):
+                _fail("GE_CURSOR_B3_POST_DDL_READER_ROW")
+            if previous_rank is not None and (
+                rank < previous_rank
+                or (rank == previous_rank and previous_key is not None and key_blob <= previous_key)
+            ):
+                _fail("GE_CURSOR_B3_POST_DDL_READER_ORDER")
+            try:
+                candidate = _CAPTURE_BASELINE_ENTRY(
+                    entry_kind,
+                    _DECODE_POST_DDL_READER_JSON(key_blob, MAX_BASELINE_KEY_BYTES),
+                    _DECODE_POST_DDL_READER_JSON(state_blob, MAX_BASELINE_STATE_BYTES),
+                )
+            except BaseException as error:
+                if isinstance(error, ValueError) and str(error).startswith(
+                    "GE_CURSOR_B3_POST_DDL_READER_"
+                ):
+                    raise
+                raise ValueError("GE_CURSOR_B3_POST_DDL_READER_ROW") from error
+            if candidate.key_bytes != key_blob or candidate.state_bytes != state_blob:
+                _fail("GE_CURSOR_B3_POST_DDL_READER_CANONICAL")
+            try:
+                retained.append(_ACCUMULATOR_APPEND(accumulator, candidate))
+            except BaseException as error:
+                raise ValueError("GE_CURSOR_B3_POST_DDL_READER_PROJECTION") from error
+            previous_rank = rank
+            previous_key = bytes(key_blob)
+        except BaseException as error:
+            primary = error
+            break
+        if cancellation_state is not None and cancellation_state.cancelled:
+            cancelled_after_ownership = True
+
+    rederived: BaselineProjectionIdentity | None = None
+    if primary is None and terminal:
+        try:
+            rederived = _ACCUMULATOR_FINISH(accumulator)
+            if not _same_projection_identity(rederived, _expected_reader_projection(record)):
+                _fail("GE_CURSOR_B3_POST_DDL_READER_PROJECTION")
+        except BaseException as error:
+            if isinstance(error, ValueError) and str(error).startswith(
+                "GE_CURSOR_B3_POST_DDL_READER_"
+            ):
+                primary = error
+            else:
+                translated = ValueError("GE_CURSOR_B3_POST_DDL_READER_PROJECTION")
+                translated.__cause__ = error
+                primary = translated
+    if rederived is not None:
+        record.rederived_projection = rederived
+
+    with suppress(BaseException):
+        close_owned_reader()
+    outward_close_cause = initial_close_cause
+    # The installed cleanup continuation may outlive this execution frame.
+    # Keep only the scalar retained error in registry state; the first native
+    # cause is transferred to this one outward raise and removed from the cell.
+    initial_close_cause = None
+    if cancellation_state is not None and cancellation_state.cancelled:
+        cancelled_after_ownership = True
+    if record.close_succeeded and cast(_ReaderLifecycle, record.lifecycle) != "poisoned":
+        record.lifecycle = "reader-closed"
+    if registered and record.close_succeeded:
+        try:
+            _OWNERSHIP_COMPLETE_POST_DDL_READER(
+                transfer,
+                authority,
+                lease,
+                True,
+            )
+        except BaseException as error:
+            if primary is None and not cancelled_after_ownership:
+                primary = ValueError("GE_CURSOR_B3_POST_DDL_READER_CLEANUP_COMPLETION")
+                primary.__cause__ = error
+
+    if primary is not None:
+        outward_close_cause = None
+        record.lifecycle = "poisoned"
+        _poison(state, authority, "SQLite post-DDL publication reader proof failed")
+        raise primary
+    if record.close_error_code is not None or not record.close_succeeded:
+        record.lifecycle = "poisoned"
+        _poison(state, authority, "SQLite post-DDL publication reader close failed")
+        if record.close_error_code is not None:
+            cause = outward_close_cause
+            outward_close_cause = None
+            raise ValueError(record.close_error_code) from cause
+        _fail("GE_CURSOR_B3_POST_DDL_READER_CLOSE")
+    if cancelled_after_ownership:
+        record.lifecycle = "poisoned"
+        _poison(state, authority, "SQLite post-DDL publication reader was cancelled")
+        _fail("GE_CURSOR_B3_POST_DDL_READER_CANCELLED")
+    if cast(_ReaderLifecycle, record.lifecycle) == "poisoned":
+        _poison(state, authority, "SQLite post-DDL publication reader owner was cleaned up")
+        _fail("GE_CURSOR_B3_POST_DDL_READER_CLEANUP")
+
+    try:
+        _assert_sqlite_cursor_post_ddl_catalog_fence_intrinsic(
+            authority,
+            migration_0002_receipt,
+            fence,
+        )
+        _assert_sqlite_cursor_outer_publication_authority_intrinsic(authority)
+        if not _reader_watermarks_match(state, record):
+            _fail("GE_CURSOR_B3_POST_DDL_READER_WATERMARK")
+    except BaseException:
+        record.lifecycle = "poisoned"
+        _translate_closed_fence_connection(state, authority)
+        _poison(state, authority, "SQLite post-DDL publication reader post-read fence failed")
+        raise
+    if cancelled_after_ownership or (
+        cancellation_state is not None and cancellation_state.cancelled
+    ):
+        record.lifecycle = "poisoned"
+        _poison(state, authority, "SQLite post-DDL publication reader was cancelled")
+        _fail("GE_CURSOR_B3_POST_DDL_READER_CANCELLED")
+    if (
+        rederived is None
+        or len(retained) != record.expected_entry_count
+        or state.write_phase != "post-ddl-catalog-fence"
+    ):
+        record.lifecycle = "poisoned"
+        _poison(state, authority, "SQLite post-DDL publication reader completion drifted")
+        _fail("GE_CURSOR_B3_POST_DDL_READER_INCOMPLETE")
+    record.retained_entries = tuple(retained)
+    record.lifecycle = "retired"
+    state.write_phase = "post-ddl-reader-closed"
+    return lease
+
+
+def _assert_sqlite_cursor_post_ddl_publication_reader_terminal_proof_intrinsic(
+    authority: _SQLiteCursorOuterPublicationAuthority,
+    migration_0002_receipt: _SQLiteMigration0002CatalogRebuildReceipt,
+    fence: _SQLiteCursorPostDdlCatalogFence,
+    lease: _SQLiteCursorPostDdlPublicationReaderLease,
+) -> _SQLiteCursorPostDdlPublicationReaderLease:
+    """Reprove one exact retired lease without consuming it."""
+
+    record = _post_ddl_publication_reader_record(lease)
+    (
+        registered_authority,
+        registered_receipt,
+        registered_fence,
+        _,
+        transfer,
+        projection_reference,
+    ) = _resolve_post_ddl_publication_reader_graph(record)
+    if (
+        registered_authority is not authority
+        or registered_receipt is not migration_0002_receipt
+        or registered_fence is not fence
+    ):
+        _fail("GE_CURSOR_B3_POST_DDL_READER_TERMINAL_GRAPH")
+    if (
+        record.lifecycle != "retired"
+        or record.prepare_count != 1
+        or record.execute_count != 1
+        or record.ownership_acquisition_count != 1
+        or record.close_attempt_count != 1
+        or not record.close_succeeded
+        or record.close_error_code is not None
+        or record.rederived_projection is None
+        or record.retained_entries is None
+        or len(record.retained_entries) != record.expected_entry_count
+    ):
+        _fail("GE_CURSOR_B3_POST_DDL_READER_NOT_TERMINAL")
+    state = _authority_state(authority)
+    _assert_sqlite_cursor_outer_publication_authority_intrinsic(authority)
+    if (
+        state.post_ddl_publication_reader_lease is not lease
+        or state.post_ddl_publication_reader_lease_mint_count != 1
+        or state.post_ddl_publication_reader_lease_close_count != 1
+        or state.projection_reference is not projection_reference
+        or state.write_phase != "post-ddl-reader-closed"
+        or not _reader_watermarks_match(state, record)
+    ):
+        _fail("GE_CURSOR_B3_POST_DDL_READER_TERMINAL_GRAPH")
+    _OWNERSHIP_ASSERT_POST_DDL_READER_TERMINAL(transfer, authority, lease)
+    _assert_sqlite_cursor_post_ddl_catalog_fence_intrinsic(
+        authority,
+        migration_0002_receipt,
+        fence,
+    )
+    if not _same_projection_identity(
+        record.rederived_projection,
+        _expected_reader_projection(record),
+    ):
+        _fail("GE_CURSOR_B3_POST_DDL_READER_PROJECTION")
+    return lease
+
+
+def _read_sqlite_cursor_post_ddl_publication_reader_lease_snapshot_intrinsic(
+    lease: _SQLiteCursorPostDdlPublicationReaderLease,
+) -> _SQLiteCursorPostDdlPublicationReaderLeaseSnapshot:
+    record = _post_ddl_publication_reader_record(lease)
+    authority, receipt, fence, stage, transfer, projection_reference = (
+        _resolve_post_ddl_publication_reader_graph(record)
+    )
+    if record.lifecycle == "retired":
+        _assert_sqlite_cursor_post_ddl_publication_reader_terminal_proof_intrinsic(
+            authority,
+            receipt,
+            fence,
+            lease,
+        )
+    state = _authority_state(authority)
+    rederived = record.rederived_projection
+    return _SQLiteCursorPostDdlPublicationReaderLeaseSnapshot(
+        authority=authority,
+        close_attempt_count=record.close_attempt_count,
+        close_succeeded=record.close_succeeded,
+        connection=state.connection,
+        consumes_any_write_receipt=False,
+        read_proof_epoch=record.transaction_epoch,
+        execute_count=record.execute_count,
+        fetch_count=record.fetch_count,
+        lifecycle=record.lifecycle,
+        may_mint_stage_adoption_receipt=False,
+        migration_0002_receipt=receipt,
+        mint_count=1,
+        outer_ledger_read_watermark=record.outer_ledger_read_watermark,
+        ownership_acquisition_count=record.ownership_acquisition_count,
+        permanent_write_authority=False,
+        post_ddl_catalog_fence=fence,
+        prepare_count=record.prepare_count,
+        projection_identity=state.projection_identity,
+        projection_reference=projection_reference,
+        rederived_entry_count=None if rederived is None else rederived.entry_count,
+        rederived_final_entry_hash=None if rederived is None else rederived.final_entry_hash,
+        rederived_first_entry_hash=None if rederived is None else rederived.first_entry_hash,
+        rederived_legacy_operation_count=(
+            None if rederived is None else rederived.legacy_operation_count
+        ),
+        rederived_projection_sha256=None if rederived is None else rederived.projection_sha256,
+        source_read_sql=SQLITE_CURSOR_POST_DDL_PUBLICATION_READER_SOURCE_SQL,
+        source_read_sql_sha256=SQLITE_CURSOR_POST_DDL_PUBLICATION_READER_SOURCE_SQL_SHA256,
+        stage=stage,
+        total_changes_read_watermark=record.total_changes_read_watermark,
+        transaction_generation=record.transaction_generation,
+        transaction_epoch=record.transaction_epoch,
+        transfer=transfer,
+    )
+
+
+def _read_sqlite_cursor_post_ddl_publication_reader_entries_intrinsic(
+    authority: _SQLiteCursorOuterPublicationAuthority,
+    migration_0002_receipt: _SQLiteMigration0002CatalogRebuildReceipt,
+    fence: _SQLiteCursorPostDdlCatalogFence,
+    lease: _SQLiteCursorPostDdlPublicationReaderLease,
+) -> tuple[BaselineEntry, ...]:
+    """Return the immutable private rows only to the next authenticated writer."""
+
+    _assert_sqlite_cursor_post_ddl_publication_reader_terminal_proof_intrinsic(
+        authority,
+        migration_0002_receipt,
+        fence,
+        lease,
+    )
+    retained = _post_ddl_publication_reader_record(lease).retained_entries
+    if retained is None:
+        _fail("GE_CURSOR_B3_POST_DDL_READER_NOT_TERMINAL")
+    return retained
+
+
 def _read_sqlite_cursor_outer_publication_authority_snapshot_intrinsic(
     authority: _SQLiteCursorOuterPublicationAuthority,
 ) -> _SQLiteCursorOuterPublicationAuthoritySnapshot:
@@ -1398,5 +2200,12 @@ def _read_sqlite_cursor_outer_publication_authority_snapshot_intrinsic(
         migration_0002_receipt=state.migration_0002_receipt,
         post_ddl_catalog_fence=state.post_ddl_catalog_fence,
         post_ddl_catalog_fence_mint_count=state.post_ddl_catalog_fence_mint_count,
+        post_ddl_publication_reader_lease=state.post_ddl_publication_reader_lease,
+        post_ddl_publication_reader_lease_mint_count=(
+            state.post_ddl_publication_reader_lease_mint_count
+        ),
+        post_ddl_publication_reader_lease_close_count=(
+            state.post_ddl_publication_reader_lease_close_count
+        ),
         write_phase=state.write_phase,
     )

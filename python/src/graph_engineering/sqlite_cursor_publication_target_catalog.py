@@ -9,7 +9,10 @@ from contextlib import suppress
 from dataclasses import dataclass
 from typing import Final, NamedTuple, NoReturn, Protocol, TypeVar
 
-from .sqlite_operation_baseline_source import SQLiteV1BaselineConnectionOwner
+from .sqlite_operation_baseline_source import (
+    SQLiteV1BaselineConnectionOwner,
+    _SQLiteCursorCapability,
+)
 
 SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_QUERY: Final = (
     "SELECT type, name, tbl_name AS tableName, sql FROM main.sqlite_schema "
@@ -128,6 +131,9 @@ _METADATA_QUERY: Final = (
     "FROM main.pragma_application_id(), main.pragma_user_version()"
 )
 _OWNER_EXECUTE = SQLiteV1BaselineConnectionOwner.execute
+_CURSOR_CLOSE = _SQLiteCursorCapability.close
+_CURSOR_FETCHMANY = _SQLiteCursorCapability.fetchmany
+_CURSOR_FETCHONE = _SQLiteCursorCapability.fetchone
 
 _T = TypeVar("_T")
 
@@ -142,6 +148,35 @@ class _CatalogCursor(_ClosableCursor, Protocol):
 
 class _MetadataCursor(_ClosableCursor, Protocol):
     def fetchone(self) -> tuple[object, ...] | None: ...
+
+
+def _close_catalog_cursor_intrinsic(cursor: _ClosableCursor) -> None:
+    if type(cursor) is _SQLiteCursorCapability:
+        _CURSOR_CLOSE(cursor)
+    else:
+        cursor.close()
+
+
+def _fetchmany_catalog_cursor_intrinsic(
+    cursor: _CatalogCursor,
+    size: int,
+) -> list[tuple[object, ...]]:
+    if type(cursor) is _SQLiteCursorCapability:
+        return _CURSOR_FETCHMANY(cursor, size)
+    return cursor.fetchmany(size)
+
+
+def _fetchone_metadata_cursor_intrinsic(
+    cursor: _MetadataCursor,
+) -> tuple[object, ...] | None:
+    if type(cursor) is _SQLiteCursorCapability:
+        return _CURSOR_FETCHONE(cursor)
+    return cursor.fetchone()
+
+
+_CLOSE_CATALOG_CURSOR = _close_catalog_cursor_intrinsic
+_FETCHMANY_CATALOG_CURSOR = _fetchmany_catalog_cursor_intrinsic
+_FETCHONE_METADATA_CURSOR = _fetchone_metadata_cursor_intrinsic
 
 
 @dataclass(frozen=True, slots=True)
@@ -235,10 +270,10 @@ def _read_then_close_deferred_cleanup_intrinsic(
         result = reader()
     except Exception:
         with suppress(Exception):
-            cursor.close()
+            _CLOSE_CATALOG_CURSOR(cursor)
         _fail(read_failure_code)
     try:
-        cursor.close()
+        _CLOSE_CATALOG_CURSOR(cursor)
     except Exception:
         return result, True
     return result, False
@@ -258,7 +293,7 @@ def _read_catalog_rows_with_deferred_cleanup_intrinsic(
 ) -> tuple[tuple[tuple[object, ...], ...], bool]:
     raw_rows, cleanup_failed = _read_then_close_deferred_cleanup_intrinsic(
         cursor,
-        lambda: cursor.fetchmany(_MAXIMUM_OBSERVED_ROWS),
+        lambda: _FETCHMANY_CATALOG_CURSOR(cursor, _MAXIMUM_OBSERVED_ROWS),
         "GE_CURSOR_B3_TARGET_CATALOG_QUERY",
     )
     try:
@@ -281,7 +316,10 @@ def _read_metadata_with_deferred_cleanup_intrinsic(
 ) -> tuple[tuple[object, ...], bool]:
     (metadata, trailing), cleanup_failed = _read_then_close_deferred_cleanup_intrinsic(
         cursor,
-        lambda: (cursor.fetchone(), cursor.fetchone()),
+        lambda: (
+            _FETCHONE_METADATA_CURSOR(cursor),
+            _FETCHONE_METADATA_CURSOR(cursor),
+        ),
         "GE_CURSOR_B3_TARGET_CATALOG_METADATA",
     )
     if type(metadata) is not tuple or trailing is not None or len(metadata) != 2:

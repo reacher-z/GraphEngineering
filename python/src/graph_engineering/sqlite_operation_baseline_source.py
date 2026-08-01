@@ -254,6 +254,11 @@ _MIGRATION_0002_TEMP_CONFLICT_QUERY = (
     "'ge_cycle_operation_baseline_entries_key_uq',"
     "'ge_cycle_operation_baseline_entries_hash_uq','ge_cycle_operation_sequence')"
 )
+SQLITE_CURSOR_POST_DDL_BASELINE_SOURCE_QUERY_INTRINSIC = (
+    "SELECT kind_rank, entry_kind, key_blob, state_blob "
+    "FROM temp.ge_blr_stage ORDER BY kind_rank ASC, key_blob ASC"
+)
+_POST_DDL_READER_SOURCE_SQL = SQLITE_CURSOR_POST_DDL_BASELINE_SOURCE_QUERY_INTRINSIC
 
 
 class _SQLiteConnectionMigration0002Execution:
@@ -287,6 +292,43 @@ class _SQLiteConnectionMigration0002ExecutionSnapshot(NamedTuple):
     transaction_generation: object
 
 
+class _SQLiteConnectionPostDdlPublicationReader:
+    """Opaque source-owner handle for one fixed ordered TEMP read."""
+
+    __slots__ = ("__weakref__",)
+
+    def __init__(self, token: object) -> None:
+        if token is not _MIGRATION_0002_CONSTRUCTION_TOKEN:
+            raise TypeError("GE_CURSOR_B3_POST_DDL_READER_SOURCE")
+
+
+class _SQLiteConnectionPostDdlPublicationReaderSnapshot(NamedTuple):
+    close_attempt_count: Literal[0, 1]
+    close_succeeded: bool
+    execute_count: Literal[0, 1]
+    fetch_count: int
+    lifecycle: Literal["prepared", "active", "closed", "poisoned"]
+    prepare_count: Literal[1]
+    total_changes: int
+    transaction_epoch: int
+    transaction_generation: object
+
+
+@dataclass(slots=True)
+class _PostDdlPublicationReaderState:
+    close_attempt_count: Literal[0, 1]
+    close_error_code: str | None
+    close_succeeded: bool
+    connection: SQLiteV1BaselineConnectionOwner
+    cursor: sqlite3.Cursor
+    execute_count: Literal[0, 1]
+    fetch_count: int
+    lifecycle: Literal["prepared", "active", "closed", "poisoned"]
+    total_changes: int
+    transaction_epoch: int
+    transaction_generation: object
+
+
 @dataclass(slots=True)
 class _Migration0002ExecutionState:
     connection: SQLiteV1BaselineConnectionOwner
@@ -307,6 +349,13 @@ _MIGRATION_0002_EXECUTIONS: dict[
     tuple[
         ReferenceType[_SQLiteConnectionMigration0002Execution],
         _Migration0002ExecutionState,
+    ],
+] = {}
+_POST_DDL_PUBLICATION_READERS: dict[
+    int,
+    tuple[
+        ReferenceType[_SQLiteConnectionPostDdlPublicationReader],
+        _PostDdlPublicationReaderState,
     ],
 ] = {}
 
@@ -371,6 +420,44 @@ def _register_migration_0002_execution(
 
     reference = ref(execution, discard)
     _MIGRATION_0002_EXECUTIONS[execution_id] = (reference, state)
+
+
+def _post_ddl_reader_state(
+    connection: SQLiteV1BaselineConnectionOwner,
+    reader: _SQLiteConnectionPostDdlPublicationReader,
+) -> _PostDdlPublicationReaderState:
+    if type(reader) is not _SQLiteConnectionPostDdlPublicationReader:
+        _migration_0002_fail("GE_CURSOR_B3_POST_DDL_READER_SOURCE")
+    current = _POST_DDL_PUBLICATION_READERS.get(id(reader))
+    if current is None or current[0]() is not reader or current[1].connection is not connection:
+        _migration_0002_fail("GE_CURSOR_B3_POST_DDL_READER_SOURCE")
+    return current[1]
+
+
+def _post_ddl_reader_state_from_handle(
+    reader: _SQLiteConnectionPostDdlPublicationReader,
+) -> _PostDdlPublicationReaderState:
+    if type(reader) is not _SQLiteConnectionPostDdlPublicationReader:
+        _migration_0002_fail("GE_CURSOR_B3_POST_DDL_READER_SOURCE")
+    current = _POST_DDL_PUBLICATION_READERS.get(id(reader))
+    if current is None or current[0]() is not reader:
+        _migration_0002_fail("GE_CURSOR_B3_POST_DDL_READER_SOURCE")
+    return current[1]
+
+
+def _register_post_ddl_reader(
+    reader: _SQLiteConnectionPostDdlPublicationReader,
+    state: _PostDdlPublicationReaderState,
+) -> None:
+    reader_id = id(reader)
+
+    def discard(reference: ReferenceType[_SQLiteConnectionPostDdlPublicationReader]) -> None:
+        current = _POST_DDL_PUBLICATION_READERS.get(reader_id)
+        if current is not None and current[0] is reference:
+            _POST_DDL_PUBLICATION_READERS.pop(reader_id, None)
+
+    reference = ref(reader, discard)
+    _POST_DDL_PUBLICATION_READERS[reader_id] = (reference, state)
 
 
 class SQLiteV1BaselineConnectionOwner:
@@ -447,6 +534,132 @@ class SQLiteV1BaselineConnectionOwner:
         if token in _EPOCH_MUTATING_TOKENS or before != after:
             self.__transaction_epoch += 1
         return _SQLiteCursorCapability(cursor)
+
+    def _prepare_post_ddl_publication_reader(
+        self,
+    ) -> _SQLiteConnectionPostDdlPublicationReader:
+        """Allocate one cursor for the package-fixed read without executing it."""
+
+        if (
+            not _sqlite_native_in_transaction(self.__connection)
+            or self.__transaction_mode != "exclusive"
+            or self.__transaction_generation is None
+        ):
+            _migration_0002_fail("GE_CURSOR_B3_POST_DDL_READER_SOURCE_FENCE")
+        try:
+            cursor = _SQLITE_CONNECTION_CURSOR(self.__connection)
+        except BaseException as error:
+            raise ValueError("GE_CURSOR_B3_POST_DDL_READER_SOURCE_PREPARE") from error
+        reader = _SQLiteConnectionPostDdlPublicationReader(_MIGRATION_0002_CONSTRUCTION_TOKEN)
+        _register_post_ddl_reader(
+            reader,
+            _PostDdlPublicationReaderState(
+                close_attempt_count=0,
+                close_error_code=None,
+                close_succeeded=False,
+                connection=self,
+                cursor=cursor,
+                execute_count=0,
+                fetch_count=0,
+                lifecycle="prepared",
+                total_changes=_sqlite_native_total_changes(self.__connection),
+                transaction_epoch=self.__transaction_epoch,
+                transaction_generation=self.__transaction_generation,
+            ),
+        )
+        return reader
+
+    def _execute_post_ddl_publication_reader(
+        self,
+        reader: _SQLiteConnectionPostDdlPublicationReader,
+    ) -> None:
+        """Execute the fixed zero-parameter source statement exactly once."""
+
+        state = _post_ddl_reader_state(self, reader)
+        if state.lifecycle != "prepared" or state.execute_count != 0:
+            state.lifecycle = "poisoned"
+            _migration_0002_fail("GE_CURSOR_B3_POST_DDL_READER_SOURCE_REPLAY")
+        if (
+            not _sqlite_native_in_transaction(self.__connection)
+            or self.__transaction_mode != "exclusive"
+            or self.__transaction_generation is not state.transaction_generation
+            or self.__transaction_epoch != state.transaction_epoch
+            or _sqlite_native_total_changes(self.__connection) != state.total_changes
+        ):
+            state.lifecycle = "poisoned"
+            _migration_0002_fail("GE_CURSOR_B3_POST_DDL_READER_SOURCE_FENCE")
+        try:
+            _SQLITE_CURSOR_EXECUTE(
+                state.cursor,
+                _POST_DDL_READER_SOURCE_SQL,
+                (),
+            )
+        except BaseException as error:
+            state.lifecycle = "poisoned"
+            state.close_attempt_count = 1
+            try:
+                _SQLITE_CURSOR_CLOSE(state.cursor)
+                state.close_succeeded = True
+            except BaseException:
+                state.close_error_code = "GE_CURSOR_B3_POST_DDL_READER_SOURCE_CLOSE"
+            raise ValueError("GE_CURSOR_B3_POST_DDL_READER_SOURCE_EXECUTE") from error
+        state.execute_count = 1
+        state.lifecycle = "active"
+
+    def _fetch_post_ddl_publication_reader(
+        self,
+        reader: _SQLiteConnectionPostDdlPublicationReader,
+    ) -> tuple[object, ...] | None:
+        """Fetch one row from an active fixed reader without implicit batching."""
+
+        state = _post_ddl_reader_state(self, reader)
+        if state.lifecycle != "active" or state.execute_count != 1:
+            _migration_0002_fail("GE_CURSOR_B3_POST_DDL_READER_SOURCE_STATE")
+        try:
+            row = _SQLITE_CURSOR_FETCHONE(state.cursor)
+        except BaseException as error:
+            state.lifecycle = "poisoned"
+            raise ValueError("GE_CURSOR_B3_POST_DDL_READER_SOURCE_FETCH") from error
+        state.fetch_count += 1
+        return cast(tuple[object, ...] | None, row)
+
+    def _close_post_ddl_publication_reader(
+        self,
+        reader: _SQLiteConnectionPostDdlPublicationReader,
+    ) -> None:
+        """Attempt native close once and replay any retained close error."""
+
+        state = _post_ddl_reader_state(self, reader)
+        if state.close_attempt_count == 1:
+            if state.close_error_code is not None:
+                raise ValueError(state.close_error_code)
+            return
+        state.close_attempt_count = 1
+        try:
+            _SQLITE_CURSOR_CLOSE(state.cursor)
+        except BaseException as error:
+            state.lifecycle = "poisoned"
+            state.close_error_code = "GE_CURSOR_B3_POST_DDL_READER_SOURCE_CLOSE"
+            raise ValueError(state.close_error_code) from error
+        state.close_succeeded = True
+        state.lifecycle = "closed"
+
+    def _read_post_ddl_publication_reader_snapshot(
+        self,
+        reader: _SQLiteConnectionPostDdlPublicationReader,
+    ) -> _SQLiteConnectionPostDdlPublicationReaderSnapshot:
+        state = _post_ddl_reader_state(self, reader)
+        return _SQLiteConnectionPostDdlPublicationReaderSnapshot(
+            close_attempt_count=state.close_attempt_count,
+            close_succeeded=state.close_succeeded,
+            execute_count=state.execute_count,
+            fetch_count=state.fetch_count,
+            lifecycle=state.lifecycle,
+            prepare_count=1,
+            total_changes=state.total_changes,
+            transaction_epoch=state.transaction_epoch,
+            transaction_generation=state.transaction_generation,
+        )
 
     def _begin_migration_0002_execution(
         self,
@@ -682,6 +895,17 @@ _OWNER_EXECUTE_NEXT_MIGRATION_0002 = (
     SQLiteV1BaselineConnectionOwner._execute_next_migration_0002_statement
 )
 _OWNER_READ_MIGRATION_0002 = SQLiteV1BaselineConnectionOwner._read_migration_0002_execution_snapshot
+_OWNER_PREPARE_POST_DDL_READER = (
+    SQLiteV1BaselineConnectionOwner._prepare_post_ddl_publication_reader
+)
+_OWNER_EXECUTE_POST_DDL_READER = (
+    SQLiteV1BaselineConnectionOwner._execute_post_ddl_publication_reader
+)
+_OWNER_FETCH_POST_DDL_READER = SQLiteV1BaselineConnectionOwner._fetch_post_ddl_publication_reader
+_OWNER_CLOSE_POST_DDL_READER = SQLiteV1BaselineConnectionOwner._close_post_ddl_publication_reader
+_OWNER_READ_POST_DDL_READER = (
+    SQLiteV1BaselineConnectionOwner._read_post_ddl_publication_reader_snapshot
+)
 
 
 def _begin_sqlite_connection_migration_0002_execution_intrinsic(
@@ -709,6 +933,68 @@ def _read_sqlite_connection_migration_0002_execution_snapshot_intrinsic(
     if type(connection) is not SQLiteV1BaselineConnectionOwner:
         _migration_0002_fail("GE_CURSOR_B3_MIGRATION_0002_CONNECTION")
     return _OWNER_READ_MIGRATION_0002(connection, execution)
+
+
+def _prepare_sqlite_connection_post_ddl_publication_reader_intrinsic(
+    connection: SQLiteV1BaselineConnectionOwner,
+) -> _SQLiteConnectionPostDdlPublicationReader:
+    if type(connection) is not SQLiteV1BaselineConnectionOwner:
+        _migration_0002_fail("GE_CURSOR_B3_POST_DDL_READER_SOURCE")
+    return _OWNER_PREPARE_POST_DDL_READER(connection)
+
+
+def _execute_sqlite_connection_post_ddl_publication_reader_intrinsic(
+    connection: SQLiteV1BaselineConnectionOwner,
+    reader: _SQLiteConnectionPostDdlPublicationReader,
+) -> None:
+    if type(connection) is not SQLiteV1BaselineConnectionOwner:
+        _migration_0002_fail("GE_CURSOR_B3_POST_DDL_READER_SOURCE")
+    _OWNER_EXECUTE_POST_DDL_READER(connection, reader)
+
+
+def _fetch_sqlite_connection_post_ddl_publication_reader_intrinsic(
+    connection: SQLiteV1BaselineConnectionOwner,
+    reader: _SQLiteConnectionPostDdlPublicationReader,
+) -> tuple[object, ...] | None:
+    if type(connection) is not SQLiteV1BaselineConnectionOwner:
+        _migration_0002_fail("GE_CURSOR_B3_POST_DDL_READER_SOURCE")
+    return _OWNER_FETCH_POST_DDL_READER(connection, reader)
+
+
+def _fetch_next_owned_sqlite_connection_post_ddl_publication_reader_intrinsic(
+    reader: _SQLiteConnectionPostDdlPublicationReader,
+) -> tuple[object, ...] | None:
+    """Fetch from an already-owned reader without exposing its connection."""
+
+    state = _post_ddl_reader_state_from_handle(reader)
+    return _OWNER_FETCH_POST_DDL_READER(state.connection, reader)
+
+
+def _close_sqlite_connection_post_ddl_publication_reader_intrinsic(
+    connection: SQLiteV1BaselineConnectionOwner,
+    reader: _SQLiteConnectionPostDdlPublicationReader,
+) -> None:
+    if type(connection) is not SQLiteV1BaselineConnectionOwner:
+        _migration_0002_fail("GE_CURSOR_B3_POST_DDL_READER_SOURCE")
+    _OWNER_CLOSE_POST_DDL_READER(connection, reader)
+
+
+def _close_owned_sqlite_connection_post_ddl_publication_reader_intrinsic(
+    reader: _SQLiteConnectionPostDdlPublicationReader,
+) -> None:
+    """Close an already-owned reader without retaining its graph connection."""
+
+    state = _post_ddl_reader_state_from_handle(reader)
+    _OWNER_CLOSE_POST_DDL_READER(state.connection, reader)
+
+
+def _read_sqlite_connection_post_ddl_publication_reader_snapshot_intrinsic(
+    connection: SQLiteV1BaselineConnectionOwner,
+    reader: _SQLiteConnectionPostDdlPublicationReader,
+) -> _SQLiteConnectionPostDdlPublicationReaderSnapshot:
+    if type(connection) is not SQLiteV1BaselineConnectionOwner:
+        _migration_0002_fail("GE_CURSOR_B3_POST_DDL_READER_SOURCE")
+    return _OWNER_READ_POST_DDL_READER(connection, reader)
 
 
 @dataclass(frozen=True, slots=True)

@@ -4024,14 +4024,15 @@ class SQLiteV1BaselineTempStage:
         cursor_cleanup_message = "BLR_HANDOFF_CLEANUP: ordered TEMP stage cursor cleanup failed"
         if self._cursor_post_ddl_reader_state == "active":
             cleanup = self._cursor_post_ddl_reader_cleanup
-            self._cursor_post_ddl_reader_cleanup = None
-            self._cursor_post_ddl_reader_state = "poisoned"
             try:
                 if cleanup is not None:
                     cleanup()
             except BaseException as error:
                 cursor_close_failure = error
                 cursor_cleanup_message = "SQLite cursor post-DDL reader cleanup ownership failed"
+            else:
+                self._cursor_post_ddl_reader_state = "poisoned"
+                self._cursor_post_ddl_reader_cleanup = None
         adoption_tail = self._cursor_initial_publication_adoption_tail
         if adoption_tail is not None:
             _discard_cursor_initial_publication_adoption_tail(adoption_tail)
@@ -4123,6 +4124,8 @@ class SQLiteV1BaselineTempStage:
                     cursor_residue = True
                 if cursor_residue:
                     self._state = "poisoned"
+                    if cursor_close_failure is not None:
+                        raise ValueError(cursor_cleanup_message) from cursor_close_failure
                     raise ValueError(
                         "BLR_STAGE_DISPOSE: cursor TEMP ownership cannot be discarded "
                         "while reserved objects remain"
@@ -4200,11 +4203,17 @@ class SQLiteV1BaselineTempStage:
     def _poison(self, message: str) -> Never:
         if self._cursor_post_ddl_reader_state == "active":
             cleanup = self._cursor_post_ddl_reader_cleanup
-            self._cursor_post_ddl_reader_cleanup = None
-            self._cursor_post_ddl_reader_state = "poisoned"
             if cleanup is not None:
-                with suppress(BaseException):
+                try:
                     cleanup()
+                except BaseException:
+                    # Preserve the failing continuation.  It retains and
+                    # replays the close error while its native cursor close is
+                    # permanently fenced to one attempt.
+                    pass
+                else:
+                    self._cursor_post_ddl_reader_state = "poisoned"
+                    self._cursor_post_ddl_reader_cleanup = None
         adoption_tail = self._cursor_initial_publication_adoption_tail
         if adoption_tail is not None:
             _discard_cursor_initial_publication_adoption_tail(adoption_tail)

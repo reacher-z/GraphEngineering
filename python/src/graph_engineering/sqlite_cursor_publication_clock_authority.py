@@ -7,9 +7,14 @@ from dataclasses import dataclass
 from typing import Final, Literal, NoReturn, TypeVar, cast
 from weakref import WeakKeyDictionary
 
-from .sqlite_operation_baseline_source import SQLiteV1BaselineConnectionOwner
+from .sqlite_operation_baseline_source import (
+    SQLiteV1BaselineConnectionOwner,
+    _SQLiteCursorCapability,
+)
 
 _OWNER_EXECUTE = SQLiteV1BaselineConnectionOwner.execute
+_CURSOR_FETCHONE = _SQLiteCursorCapability.fetchone
+_CURSOR_CLOSE = _SQLiteCursorCapability.close
 
 _CONSTRUCTION_TOKEN: Final = object()
 
@@ -208,11 +213,11 @@ def _live_lock(connection: SQLiteV1BaselineConnectionOwner) -> _MigrationLockIde
         """,
     )
     try:
-        row = cursor.fetchone()
-        if row is None or cursor.fetchone() is not None or len(row) != 7:
+        row = _CURSOR_FETCHONE(cursor)
+        if row is None or _CURSOR_FETCHONE(cursor) is not None or len(row) != 7:
             _fail("GE_CURSOR_B3_MIGRATION_LOCK")
     finally:
-        cursor.close()
+        _CURSOR_CLOSE(cursor)
     assert row is not None
     return _MigrationLockIdentity(
         lock_id=_identifier(row[0], "GE_CURSOR_B3_MIGRATION_LOCK"),

@@ -16382,3 +16382,387 @@ This acceptance does not implement that reader lease. Baseline-entry/header/
 sequence writes, four receipt tombstones, atomic adoption, publication session,
 cursor rebind, rules 11/12, TEMP retirement, commit, manifest activation,
 release and external-star/adoption outcomes remain explicit nonclaims.
+
+#### 31.37.47 Python B3 post-DDL publication reader lease acceptance and baseline-entry successor plan (append-only execution record, 2026-08-01)
+
+This section records the implemented Python post-DDL publication reader leaf
+authorized by sections 31.37.30 and 31.37.46.5. It is appended after, and does
+not alter, the original 16,384-line plan prefix whose SHA-256 is
+`d2751e45a2c076c0e14ad704c4aae48ac41b2bf33417480a87f62e02a84daf4f`.
+
+The accepted reader is a deliberately narrow B3 boundary. It begins only after
+the exact Python outer authority has executed all twenty migration-0002
+statements, minted the authentic migration receipt and proved the fresh
+post-DDL physical target catalog. It ends with an exact retired reader lease,
+one successful close, an independently rederived projection and an immutable
+private retained-entry tuple. It neither performs nor authorizes the next
+permanent write.
+
+##### 31.37.47.1 Exact implemented boundary and file ownership
+
+The implementation is distributed according to ownership rather than placed
+behind a single ambient cursor helper:
+
+1. `sqlite_cursor_publication_outer_authority.py` owns the exact authority,
+   receipt and fence presentation boundary, the opaque reader lease, private
+   weak registry, reader state machine, snapshot, terminal proof and private
+   retained-entry accessor.
+2. `sqlite_operation_baseline_source.py` owns the closed-set connection reader
+   primitive. It alone may allocate the native cursor, select the fixed source
+   kind, execute the zero-parameter SQL, fetch one row and close the cursor.
+3. `sqlite_operation_baseline_cursor_stage_ownership.py` owns the bridge that
+   registers the same cleanup continuation with the transfer and TEMP stage,
+   clears it after successful close and replays it after failed close.
+4. `sqlite_operation_baseline_stage.py` owns poison/dispose ordering. It runs
+   reader cleanup before TEMP teardown, preserves a failed continuation and
+   never allows a later residue error to replace an earlier close primary.
+5. `sqlite_cursor_publication_clock_authority.py` and
+   `sqlite_cursor_publication_target_catalog.py` capture exact cursor methods
+   required by fresh terminal reproving, including protocol fallback for
+   intentional test probes without reopening capability dispatch for the real
+   cursor type.
+6. `sqlite_operation_baseline.py` captures the accumulator's canonical entry
+   function, so late replacement cannot bypass row recapture during projection
+   rederivation.
+7. `test_sqlite_cursor_publication_post_ddl_reader.py` is the focused hostile
+   acceptance surface. It contains 48 test definitions and 65 parameter-
+   expanded cases on the final test bytes.
+
+No name introduced by this leaf is exported from the package root. The root
+negative-export matrix includes both outer lease/snapshot types, the private
+entries accessor, both source reader/snapshot types and every source
+prepare/execute/fetch/owned-fetch/close/owned-close/read intrinsic.
+
+##### 31.37.47.2 Fixed source, counters and row proof
+
+The only permitted source statement is the following exact literal:
+
+```sql
+SELECT kind_rank, entry_kind, key_blob, state_blob FROM temp.ge_blr_stage ORDER BY kind_rank ASC, key_blob ASC
+```
+
+Its UTF-8 SHA-256 is
+`adae52750ecd70a75090b52de7d60763eea144c1383cf4739df9d8e8a6b2357f`.
+It has zero parameters. The caller cannot supply SQL, a statement kind,
+parameters, a cursor, rows, an iterator, a projection, a count, a digest or a
+cleanup callback. Both mint and execute recompute and compare the source hash
+through a captured SHA-256 binding before ownership.
+
+The package-private source reader separates cursor allocation from execution.
+The outer counters consequently have exact meanings:
+
+- `prepare_count` is zero before source cursor allocation and one afterward;
+- `execute_count` becomes one only after the fixed source execution returns;
+- `ownership_acquisition_count` becomes one at the same irreversible boundary;
+- `fetch_count` counts every bounded fetch, including the terminal `None`;
+- `close_attempt_count` is recorded before the native close invocation; and
+- `close_succeeded` becomes true only after native close returns.
+
+Prepare failure leaves all outer counters zero. Source execute/acquisition
+failure leaves outer prepare one and execute/ownership/fetch/close zero while
+the source owner still aborts the unowned prepared cursor exactly once. After
+ownership every exit path performs the one mandatory close attempt.
+
+The fetch bound is `expected_entry_count + 1`. Every nonterminal row must be an
+exact four-item tuple. Rank must be an integer in the closed entry-kind range;
+entry kind must exactly equal the rank-selected kind; key and state must be
+bytes. Key and state are independently length bounded, strict UTF-8/JSON
+decoded, recaptured with the canonical baseline-entry constructor and required
+to reproduce the exact input bytes. Rank/key order is strictly increasing, so
+reverse order, duplicates, unexpected extras and truncation cannot pass.
+
+A fresh captured `BaselineAccumulator` rederives all six projection
+commitments: baseline id, entry count, legacy-operation count, first-entry
+hash, final-entry hash and projection SHA-256. The result must exactly equal
+the authentic projection and exact projection-reference graph. The immutable
+private entry tuple is retained only after every row, terminal fetch, close,
+ownership completion, fresh catalog fence and read watermark succeeds.
+
+##### 31.37.47.3 Exact 31-field snapshot and fresh terminal read
+
+The reader snapshot has exactly the following ordered fields:
+
+1. `authority`;
+2. `close_attempt_count`;
+3. `close_succeeded`;
+4. `connection`;
+5. `consumes_any_write_receipt=False`;
+6. `read_proof_epoch`;
+7. `execute_count`;
+8. `fetch_count`;
+9. `lifecycle`;
+10. `may_mint_stage_adoption_receipt=False`;
+11. `migration_0002_receipt`;
+12. `mint_count=1`;
+13. `outer_ledger_read_watermark`;
+14. `ownership_acquisition_count`;
+15. `permanent_write_authority=False`;
+16. `post_ddl_catalog_fence`;
+17. `prepare_count`;
+18. `projection_identity`;
+19. `projection_reference`;
+20. `rederived_entry_count`;
+21. `rederived_final_entry_hash`;
+22. `rederived_first_entry_hash`;
+23. `rederived_legacy_operation_count`;
+24. `rederived_projection_sha256`;
+25. `source_read_sql`;
+26. `source_read_sql_sha256`;
+27. `stage`;
+28. `total_changes_read_watermark`;
+29. `transaction_generation`;
+30. `transaction_epoch`; and
+31. `transfer`.
+
+The five rederived fields are `None` until projection completion. A retired
+snapshot is not a cached diagnostic escape: read invokes the full terminal
+proof before reconstructing the tuple. That proof resolves the exact weak
+graph, reasserts the live authority, rechecks stage ownership, reruns the fresh
+physical catalog fence and compares transaction generation, epoch,
+`total_changes` and the complete outer-ledger read watermark. A rollback and
+new exclusive transaction, catalog mutation, connection close or authority
+poison therefore rejects both terminal assertion and terminal snapshot read.
+
+##### 31.37.47.4 Weak graph, lifecycle and exact-once cleanup
+
+The lease registry value contains upstream integer ids plus weak references
+for authority, migration receipt, catalog fence, TEMP stage, transfer and
+projection reference. It stores scalar counters and commitments, immutable
+entry data and no connection, cursor, cleanup callback, graph snapshot or
+exception object. Connection and projection-bearing snapshot fields are
+reconstructed dynamically from the live authority graph.
+
+The successful lifecycle is exactly:
+
+`minted-unused -> reader-active -> reader-closed -> retired`.
+
+`reader-closed` is an internal bridge state; successor proof accepts only
+`retired`. Every postownership invariant failure becomes `poisoned`.
+
+The transfer and TEMP stage receive the same exact-once continuation. A
+successful close lets ownership completion clear both cleanup slots. A failed
+close leaves the continuation installed. Every later stage dispose/poison,
+ownership retire/poison or outer retire/poison invocation replays the retained
+stable close code while the native close count remains one.
+
+The wrapper itself retains only a failure Boolean and delegates replay to the
+private outer closer. The outer and source registries retain only scalar error
+codes. The first outward close error attaches the exact native cause through an
+execution-local value; that value is removed from the installed closure before
+control escapes. No retained traceback can therefore point back through an
+execution frame to the source reader or upstream authority graph.
+
+A live orphan lease does not retain authority, receipt, fence or stage. The
+failed-close orphan test additionally proves source reader registry return,
+outer registry return, absence of connection/cursor/exception fields in the
+lease record, snapshot rejection when only the orphan lease remains, and lease
+registry return after the final lease reference is dropped.
+
+##### 31.37.47.5 Cancellation and literal failure precedence
+
+An invalid cancellation object is rejected as caller presentation without
+poisoning an otherwise untouched exact graph. A valid already-cancelled signal
+is checked before prepare; the same lease remains `minted-unused`, all six
+reader counters remain zero and the caller may retry that exact lease.
+
+Cancellation after ownership requires close and cannot yield terminal proof.
+The precedence implemented and mutation-locked by tests is:
+
+1. caller presentation and exact graph provenance before SQL;
+2. SQL/hash, fresh fence, lineage and read watermark before prepare;
+3. row/fetch/decode/order/hash/projection primary before cleanup;
+4. close failure before cancellation after an otherwise valid read;
+5. observed cancellation before any later TEMP or outer cleanup failure; and
+6. cleanup completion failure only if no earlier primary exists.
+
+Row plus close plus cancellation reports the row primary. Row plus close
+without cancellation also reports the row primary. Close plus cancellation
+reports close. Cancellation followed by stage disposal or outer poison reports
+cancellation. Stage residue, ownership completion and nested poison paths
+cannot replace an already selected row, close or cancellation primary.
+
+##### 31.37.47.6 Hostile evidence and defects closed
+
+The focused 65-case suite covers real legacy-count zero/two success, exact
+field order, one fixed SELECT, fresh fences, wrong graph, substitution,
+forgery, cross-run use, mint replay, execution replay, pre-cancel retry,
+invalid cancellation, prepare/acquisition failure, every row-shape family,
+order/duplicate/extra/truncation, both blob size bounds, invalid UTF-8,
+noncanonical JSON, projection mismatch, every primary/close/cancel quadrant,
+post-read rollback/catalog/watermark/connection drift, stage/ownership/outer
+cleanup, reentrancy, stale proof, hostile captured dependencies, privacy,
+nonclaims and weak-graph collection.
+
+Parallel hostile work and two independent audits found and closed nine concrete
+issues before acceptance:
+
+1. stage and ownership cleared cleanup after failed close;
+2. cleanup replay silently returned instead of replaying the close code;
+3. retained exceptions and traceback frames could keep the graph alive;
+4. stage residue could replace a prior close primary;
+5. later cleanup could replace already observed cancellation;
+6. retired snapshot read returned cached state without fresh proof;
+7. snapshot field order diverged from the exact 31-field oracle;
+8. clock/target cursor methods remained late-bound; and
+9. accumulator canonical-entry capture remained late-bound.
+
+All nine are permanent regression cases or are exercised directly by the
+expanded hostile matrix. Final independent contract and security reviews both
+report **HIGH 0 / MEDIUM 0 / LOW 0**.
+
+Evidence already complete on the final production/test bytes is:
+
+- focused reader suite: **65/65 in 280.66 seconds**;
+- clock/target/migration/fence/outer/reader integration:
+  **181/181 in 605.32 seconds**;
+- TypeScript outer/reader behavior oracle: **65/65 in 31.54 seconds**;
+- Ruff check and format check: all eight changed Python files green;
+- mypy: all **101 source files** green;
+- whitespace validation: green; and
+- independent audits: **H0/M0/L0** and **H0/M0/L0**.
+
+The complete Python suite was still running when this append-only subsection
+was written. No commit or acceptance claim is authorized until a later
+append-only closure records its final exit code, exact pass/subtest/skip counts
+and duration on these same bytes. This deliberate split avoids editing any
+previous plan byte merely to replace a placeholder.
+
+##### 31.37.47.7 Explicit nonclaims
+
+This leaf does not write `ge_cycle_operation_baseline_entries`, the baseline
+header or operation sequence zero. It does not mint any of their receipts,
+consume the migration receipt or catalog fence, perform four-receipt atomic
+adoption, create a publication session, rebind the cursor, prove rules 11/12,
+retire TEMP objects, commit, roll back, activate a manifest or publish a
+release. It does not establish full Python B3 parity or guarantee stars,
+downloads, contributors, adoption or any other external popularity outcome.
+
+##### 31.37.47.8 Next isolated Python leaf: baseline-entry publication receipt
+
+The next implementation may add only the baseline-entry permanent publication
+receipt already specified cross-runtime in section 31.37.31. It consumes the
+exact active outer authority, authentic migration-0002 receipt, authentic
+fresh catalog fence and exact retired post-DDL reader lease. It must freshly
+assert all four and acquire rows only through the reader's private terminal
+entry accessor. A second TEMP SELECT, caller row vector, caller count, caller
+baseline id, caller ordinal, caller hashes or caller cleanup is forbidden.
+
+The only permanent statement is the exact 183-byte literal:
+
+```sql
+INSERT INTO main.ge_cycle_operation_baseline_entries (baseline_id, ordinal, entry_kind, entry_key_blob, entry_state_blob, previous_entry_hash, entry_hash) VALUES (?, ?, ?, ?, ?, ?, ?)
+```
+
+Its SHA-256 is
+`b522e3ee2bb4599d74b32c8602242b1b74c3f804dd9129a8eb5a0f529cdca88b`.
+The Python connection owner must expose this SQL only through a new closed-set
+execution kind. It must capture the native prepare/run/result/counter methods
+at module initialization, reject transaction control and forbid implicit
+transaction replacement.
+
+The connection execution object must be opaque and one-shot. Its record must
+bind exact connection and transaction generation, before/current epoch and
+`total_changes`, expected entry count `E`, prepare count, execute attempt,
+completed-row count, next ordinal, affected-row count and lifecycle. Prepare
+occurs exactly once even for `E=0`; empty publication completes without a row
+run. Nonempty execution requires exactly `E` calls in strict ordinal order.
+
+Each run owns exactly seven parameters in this order:
+
+1. baseline id text;
+2. canonical non-negative ordinal;
+3. entry kind text;
+4. entry-key BLOB;
+5. entry-state BLOB;
+6. lowercase previous-entry hash; and
+7. lowercase entry hash.
+
+The writer must rebuild these values from the private retained tuple, not from
+an adapter or caller. It must reprove vector length, baseline id, ordinal
+continuity, genesis predecessor, continuous previous/entry hash linkage, first
+hash, final hash and projection terminus before prepare and again before
+receipt mint.
+
+The irreversible boundary is native run return. Each completed run advances
+the real epoch before inspecting the result. The result must have one own
+integer `changes` value equal to one, and native `total_changes` must advance
+by one. A later result-shape, counter or digest failure must retain real
+physical progress, exact completed-row count and actual ledger observations,
+mint no receipt, poison the authority and require caller rollback.
+
+The literal phase transition is:
+
+`post-ddl-reader-closed -> executing-baseline-entries -> baseline-entries-complete`.
+
+Only authentic receipt mint may reach `baseline-entries-complete`. Partial DML
+must never advance the logical-write sequence to two.
+
+The writer constructs one dense `E x 7` parameter frame. BLOBs use unpadded
+base64url, ordinals canonical decimal, and Unicode is not normalized. The
+aggregate result is exactly `{"affectedRows":"E"}` with no rowid. An
+independent second pass must rebuild the frame from the private lease and
+recompute parameter and result digests before inserting the receipt into its
+registry. Complete DML with a digest mismatch is not an authentic receipt.
+
+The receipt must bind write kind, exact authority/connection/transaction,
+migration receipt, catalog fence, terminal reader lease, projection and
+projection reference, retained baseline commitments, source SELECT text/hash,
+INSERT text/hash, parameter/result digests, prepare/execute/affected counts,
+before/after epoch and `total_changes`, three-dimensional outer ledgers and
+mint count one. Assertion is reusable and non-consuming but must fresh-reprove
+the predecessor graph and reject ledger regression.
+
+The successful ledger delta is logical writes `+1`, fixed statements `+E` and
+affected rows `+E`. For the frozen `E=12`, `L=1` graph, the transition is
+`1/20/2 -> 2/32/14`. Prepare failure retains `1/20/(1+L)` with zero row
+execution. A six-row failure retains the real `1/26/8` progress, execute six,
+affected six, receipt mint zero and poisoned state. A complete post-write
+digest fault retains all physical rows but logical sequence one and mint zero.
+
+The next focused test lane must cover exact SQL/hash, empty and 12-row writes,
+one prepare, the real `12 x 7` frame, hash-chain continuity, known parameter
+and result digests, no second TEMP read, prepare failure, partial failure,
+wrong `changes`, native counter drift, digest faults, replay, wrong graph,
+clone/substitution/cross-run objects, active/failed-close/stale reader,
+transaction lineage drift, hostile captured methods, receipt assertion,
+privacy, GC and absence of header/sequence/adoption authority.
+
+Implementation should run in parallel lanes with non-overlapping ownership:
+
+- one lane for the source-owner closed-set INSERT execution object;
+- one lane for outer-authority writer/receipt/ledger integration;
+- one lane for Python hostile tests and TypeScript oracle extraction; and
+- one read-only lane for failure-precedence, weak-graph and API-privacy audit.
+
+The main agent must serialize integration on stable bytes, run the focused
+suite first, then the reader/authority/connection matrix, Ruff, format, mypy,
+complete Python regression and two independent severity-zero audits. A new
+append-only acceptance section and durable review log are mandatory before a
+scoped commit and push.
+
+Passing the baseline-entry leaf will authorize only the Python baseline-header
+writer. Sequence zero, receipt consumption, atomic adoption, publication
+session, cursor rebind, rules 11/12, TEMP retirement, commit, manifest
+activation, release and external adoption remain false afterward.
+
+##### 31.37.47.9 Final full-suite closure and commit authorization (append-only closure, 2026-08-01)
+
+The complete Python regression on the same frozen production and test bytes
+finished with exit code zero: **3,577 passed in 2,120.22 seconds (35 minutes
+20 seconds)**, with zero failures and zero skips. No production or test file
+changed between the focused 65/65 run, the integrated 181/181 run and this
+complete regression.
+
+This closure is appended after the 16,746-line plan whose SHA-256 before this
+closure was
+`4af19eeb56d0763111eb533c01c29feb434d4967499967967bfefec39f76f465`.
+The original first 16,384 lines still hash exactly to
+`d2751e45a2c076c0e14ad704c4aae48ac41b2bf33417480a87f62e02a84daf4f`.
+No earlier plan byte was changed.
+
+Together with the focused reader suite, adjacent integration, TypeScript
+behavior oracle, Ruff, format, mypy, whitespace gate, two implementation
+audits and the independent §31.37.47 append audit, this full-suite result
+authorizes one scoped commit and push for the Python post-DDL publication
+reader leaf. It does not broaden any nonclaim in section 31.37.47.7 and
+authorizes only the baseline-entry successor described in section 31.37.47.8.

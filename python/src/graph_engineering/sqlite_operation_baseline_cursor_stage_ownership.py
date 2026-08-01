@@ -1023,13 +1023,22 @@ def _register_sqlite_cursor_stage_ownership_post_ddl_reader_intrinsic(
         raise ValueError("SQLite post-DDL publication reader ownership is invalid")
 
     attempted = False
+    failed = False
 
     def cleanup_once() -> None:
-        nonlocal attempted
+        nonlocal attempted, failed
         if attempted:
+            if failed:
+                # The package-owned cleanup retains its failure as scalar
+                # state and replays it without another native close attempt.
+                cleanup()
             return
         attempted = True
-        cleanup()
+        try:
+            cleanup()
+        except BaseException:
+            failed = True
+            raise
 
     _STAGE_REGISTER_POST_DDL_READER_CLEANUP(
         metadata.stage,
@@ -1059,12 +1068,12 @@ def _complete_sqlite_cursor_stage_ownership_post_ddl_reader_intrinsic(
         or metadata.post_ddl_reader_lifecycle != "active"
         or metadata.post_ddl_reader_lease is not lease
         or metadata.post_ddl_reader_cleanup is None
-        or type(close_succeeded) is not bool
+        or close_succeeded is not True
     ):
         raise ValueError("SQLite post-DDL publication reader ownership is invalid")
     _STAGE_CLEAR_POST_DDL_READER_CLEANUP(metadata.stage, authority, lease)
     metadata.post_ddl_reader_cleanup = None
-    metadata.post_ddl_reader_lifecycle = "closed" if close_succeeded else "poisoned"
+    metadata.post_ddl_reader_lifecycle = "closed"
 
 
 def _assert_sqlite_cursor_stage_ownership_post_ddl_reader_terminal_intrinsic(
@@ -1231,20 +1240,18 @@ def _assert_sqlite_cursor_stage_ownership_initial_publication_adopted_intrinsic(
 
 def _close_active_post_ddl_reader(metadata: _TransferMetadata) -> None:
     cleanup = metadata.post_ddl_reader_cleanup
-    metadata.post_ddl_reader_cleanup = None
     if metadata.post_ddl_reader_lifecycle != "active":
         return
-    metadata.post_ddl_reader_lifecycle = "poisoned"
-    authority = _metadata_outer_publication_authority(metadata)
-    with suppress(BaseException):
-        _STAGE_CLEAR_POST_DDL_READER_CLEANUP(
-            metadata.stage,
-            authority,
-            metadata.post_ddl_reader_lease,
-        )
     if cleanup is not None:
-        with suppress(BaseException):
+        try:
             cleanup()
+        except BaseException:
+            # A failed exact-once native close is terminal, but the cleanup
+            # continuation remains installed so every later owner can replay
+            # the retained close error without issuing another native close.
+            return
+    metadata.post_ddl_reader_cleanup = None
+    metadata.post_ddl_reader_lifecycle = "poisoned"
 
 
 def _retire_sqlite_cursor_stage_ownership_outer_publication_intrinsic(

@@ -502,12 +502,25 @@ def _validate_key(kind: BaselineEntryKind, key: JsonObject) -> None:
 
 def _validate_state(kind: BaselineEntryKind, state: JsonObject) -> None:
     ids = {
-        "tenantId", "streamId", "recordId", "checkpointId", "checkpointScope",
-        "leaseId", "holdId", "lockId", "migrationId",
+        "tenantId",
+        "streamId",
+        "recordId",
+        "checkpointId",
+        "checkpointScope",
+        "leaseId",
+        "holdId",
+        "lockId",
+        "migrationId",
     }
     required_hashes = {
-        "latestMigrationSha256", "providerDescriptorHash", "schemaIdentitySha256",
-        "sqlSha256", "recordHash", "requestHash", "resultBlobSha256", "resultHash",
+        "latestMigrationSha256",
+        "providerDescriptorHash",
+        "schemaIdentitySha256",
+        "sqlSha256",
+        "recordHash",
+        "requestHash",
+        "resultBlobSha256",
+        "resultHash",
     }
     nullable_ids = {"activeHolderId", "activeLeaseId", "activeLockId", "activeOwnerId"}
     for name in ids & state.keys():
@@ -667,11 +680,15 @@ def _validate_active_lease_or_lock(state: JsonObject, *, lease: bool) -> None:
         ("activeLeaseId", "activeHolderId") if lease else ("activeLockId", "activeOwnerId")
     )
     version_names = () if lease else ("activeSourceVersion", "activeTargetVersion")
-    active_names = identity_names + version_names + (
-        epoch_name,
-        "activeFencingToken",
-        "activeAcquiredAtMs",
-        "activeExpiresAtMs",
+    active_names = (
+        identity_names
+        + version_names
+        + (
+            epoch_name,
+            "activeFencingToken",
+            "activeAcquiredAtMs",
+            "activeExpiresAtMs",
+        )
     )
     last_epoch = _integer(state[last_epoch_name], last_epoch_name)
     last_fence = _integer(state["lastFencingToken"], "lastFencingToken")
@@ -737,6 +754,12 @@ def sort_baseline_entries(entries: Iterable[BaselineEntryInput]) -> tuple[Baseli
         if previous.entry_kind == current.entry_kind and previous.key_bytes == current.key_bytes:
             raise ValueError("duplicate baseline entry key")
     return ordered
+
+
+# Baseline accumulators are security boundaries for provider-owned streaming
+# reads.  Capture validation once so late module replacement cannot redirect a
+# live accumulator after its projection authority was minted.
+_CAPTURE_BASELINE_ENTRY_INTRINSIC = capture_baseline_entry
 
 
 class BaselineAccumulator:
@@ -833,7 +856,7 @@ class BaselineAccumulator:
 
         # Build every candidate value before mutating accumulator state.  This
         # makes validation, ordering, duplicate, and hashing failures atomic.
-        validated = capture_baseline_entry(item.entry_kind, item.key, item.state)
+        validated = _CAPTURE_BASELINE_ENTRY_INTRINSIC(item.entry_kind, item.key, item.state)
         if validated.key_bytes != item.key_bytes or validated.state_bytes != item.state_bytes:
             raise ValueError("baseline entry canonical bytes drifted")
         rank, key_bytes = baseline_entry_sort_key(validated)
