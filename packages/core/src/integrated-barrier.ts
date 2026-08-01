@@ -1,4 +1,4 @@
-import { compareUnicodeCodePoints } from "./canonical.js";
+import { canonicalHash, compareUnicodeCodePoints } from "./canonical.js";
 import type { CompilerDiagnostic } from "./compiler.js";
 import type { GraphSpec } from "./types.js";
 
@@ -372,4 +372,308 @@ export function validateIntegratedBarrierSnapshot(
     ...inputDiagnostics,
     ...thresholdDiagnostics,
   ]);
+}
+
+/* ------------------------------------------------------------------------- *
+ * Barrier vote carrier
+ * ------------------------------------------------------------------------- */
+
+const VOTE_KEYS = new Set([
+  "apiVersion",
+  "kind",
+  "verdict",
+  "confidenceBasisPoints",
+  "evidence",
+]);
+const VERDICTS = new Set(["accept", "reject", "abstain", "unknown"]);
+
+export type BarrierVoteVerdict = "accept" | "reject" | "abstain" | "unknown";
+
+/**
+ * The exact carrier an upstream node bound to a quorum barrier must produce.
+ * `apiVersion` is shared with `IntegratedBarrierPolicy`, which is why a
+ * vote-shaped object placed in a barrier node's `config` is a *claimed policy*
+ * and is diagnosed rather than silently ignored.
+ */
+export interface BarrierVote {
+  readonly apiVersion: typeof INTEGRATED_BARRIER_API_VERSION;
+  readonly kind: "BarrierVote";
+  readonly verdict: BarrierVoteVerdict;
+  readonly confidenceBasisPoints?: number;
+  readonly evidence?: unknown;
+}
+
+export type BarrierVoteValidation =
+  | { readonly valid: true; readonly vote: BarrierVote }
+  | { readonly valid: false };
+
+const MALFORMED_VOTE: BarrierVoteValidation = Object.freeze({ valid: false });
+
+/**
+ * Validate an upstream value as a `BarrierVote`.
+ *
+ * Missing or additional fields, wrong types, an unknown verdict, an
+ * out-of-range confidence, or non-portable evidence make the value a malformed
+ * vote. A malformed vote is never coerced to `abstain` or `unknown`: the caller
+ * owns the non-retryable `INVALID_BARRIER_VOTE` node failure.
+ */
+export function validateBarrierVote(value: unknown): BarrierVoteValidation {
+  if (!record(value)) return MALFORMED_VOTE;
+  if (firstUnknown(value, VOTE_KEYS) !== undefined) return MALFORMED_VOTE;
+  if (value.apiVersion !== INTEGRATED_BARRIER_API_VERSION) return MALFORMED_VOTE;
+  if (value.kind !== "BarrierVote") return MALFORMED_VOTE;
+  if (typeof value.verdict !== "string" || !VERDICTS.has(value.verdict)) return MALFORMED_VOTE;
+  if (Object.hasOwn(value, "confidenceBasisPoints")
+      && !boundedInteger(value.confidenceBasisPoints, 1, MAX_BASIS_POINTS)) {
+    return MALFORMED_VOTE;
+  }
+  if (Object.hasOwn(value, "evidence")) {
+    try {
+      canonicalHash(value.evidence);
+    } catch {
+      return MALFORMED_VOTE;
+    }
+  }
+  return {
+    valid: true,
+    vote: Object.freeze({
+      apiVersion: INTEGRATED_BARRIER_API_VERSION,
+      kind: "BarrierVote",
+      verdict: value.verdict as BarrierVoteVerdict,
+      ...(Object.hasOwn(value, "confidenceBasisPoints")
+        ? { confidenceBasisPoints: value.confidenceBasisPoints as number }
+        : {}),
+      ...(Object.hasOwn(value, "evidence") ? { evidence: value.evidence } : {}),
+    }),
+  };
+}
+
+/* ------------------------------------------------------------------------- *
+ * Arrival dispositions and satisfaction arithmetic
+ * ------------------------------------------------------------------------- */
+
+export type BarrierArrivalDisposition =
+  | "succeeded"
+  | "failed"
+  | "missing"
+  | "timed_out"
+  | "abstained"
+  | "unknown";
+
+export type BarrierReasonCode =
+  | "NO_ITEMS"
+  | "ALL_SUCCEEDED"
+  | "ALL_NOT_SUCCEEDED"
+  | "MINIMUM_MET"
+  | "MINIMUM_NOT_MET"
+  | "MINIMUM_EXCEEDS_TOTAL"
+  | "PERCENTAGE_MET"
+  | "PERCENTAGE_NOT_MET"
+  | "QUORUM_MET"
+  | "QUORUM_NOT_MET"
+  | "QUORUM_EXCEEDS_PARTICIPANTS";
+
+export type BarrierResolution = "satisfied" | "failed" | "unknown" | "awaiting_human";
+
+/**
+ * Disposition each cast verdict produces. `unknown` is a disposition of its own:
+ * it is always a participant and never an accept.
+ */
+export const BARRIER_VERDICT_DISPOSITION: Readonly<
+  Record<BarrierVoteVerdict, BarrierArrivalDisposition>
+> = Object.freeze({
+  accept: "succeeded",
+  reject: "failed",
+  abstain: "abstained",
+  unknown: "unknown",
+});
+
+/** Resolution each declared `onUnsatisfied` member selects. All three are non-passes. */
+export const BARRIER_UNSATISFIED_RESOLUTION: Readonly<
+  Record<BarrierUnsatisfiedResolution, BarrierResolution>
+> = Object.freeze({
+  fail: "failed",
+  unknown: "unknown",
+  human: "awaiting_human",
+});
+
+/** One incoming edge of a barrier, in incoming-edge declaration order. */
+export interface BarrierArrival {
+  readonly sourceNodeId: string;
+  readonly disposition: BarrierArrivalDisposition;
+  /** The conforming ballot this arrival cast, when it cast one at all. */
+  readonly vote?: BarrierVote;
+}
+
+/**
+ * One census record per disposition entry. `not-cast` exists only here: an
+ * upstream node can never cast it.
+ */
+export interface BarrierVoteRecord {
+  readonly sourceNodeId: string;
+  readonly verdict: BarrierVoteVerdict | "not-cast";
+  readonly confidenceBasisPoints?: number;
+  readonly evidenceHash?: string;
+}
+
+/**
+ * The policy-decided part of a `BarrierSatisfied` document: everything except
+ * the clock observations and the two hashes, which the scheduler owns.
+ */
+export interface BarrierDecisionCore {
+  readonly barrierNodeId: string;
+  readonly deadlineElapsed: boolean;
+  readonly satisfied: boolean;
+  readonly reasonCode: BarrierReasonCode;
+  readonly resolution: BarrierResolution;
+  readonly total: number;
+  readonly succeeded: number;
+  readonly failed: number;
+  readonly missing: number;
+  readonly timedOut: number;
+  readonly abstained: number;
+  readonly unknown: number;
+  readonly acceptedIds: readonly string[];
+  readonly failedIds: readonly string[];
+  readonly missingIds: readonly string[];
+  readonly timedOutIds: readonly string[];
+  readonly abstainedIds: readonly string[];
+  readonly unknownIds: readonly string[];
+  /** Present iff the policy kind is `quorum`. */
+  readonly votes?: readonly BarrierVoteRecord[];
+}
+
+interface Outcome {
+  readonly satisfied: boolean;
+  readonly reasonCode: BarrierReasonCode;
+}
+
+function outcome(
+  policy: IntegratedBarrierPolicySnapshot,
+  total: number,
+  succeeded: number,
+  abstained: number,
+): Outcome {
+  // An input-free barrier is unreachable through the compiler, which rejects it
+  // as GE1423, but it is never an implicit pass for any kind.
+  if (total === 0) return { satisfied: false, reasonCode: "NO_ITEMS" };
+
+  switch (policy.kind) {
+    case "all":
+      return succeeded === total
+        ? { satisfied: true, reasonCode: "ALL_SUCCEEDED" }
+        : { satisfied: false, reasonCode: "ALL_NOT_SUCCEEDED" };
+    case "minimum": {
+      const minimum = policy.minimum as number;
+      if (minimum > total) return { satisfied: false, reasonCode: "MINIMUM_EXCEEDS_TOTAL" };
+      return succeeded >= minimum
+        ? { satisfied: true, reasonCode: "MINIMUM_MET" }
+        : { satisfied: false, reasonCode: "MINIMUM_NOT_MET" };
+    }
+    case "percentage":
+      // Exact safe-integer products on both sides. No floating-point ratio is
+      // ever computed: total is bounded by the incoming-edge count and basis
+      // points are capped at 10,000.
+      return succeeded * MAX_BASIS_POINTS >= total * (policy.basisPoints as number)
+        ? { satisfied: true, reasonCode: "PERCENTAGE_MET" }
+        : { satisfied: false, reasonCode: "PERCENTAGE_NOT_MET" };
+    case "quorum": {
+      const quorum = policy.quorum as IntegratedBarrierQuorumSnapshot;
+      const participants = total - (quorum.countAbstainAsParticipant ? 0 : abstained);
+      if (quorum.accepts > participants) {
+        return { satisfied: false, reasonCode: "QUORUM_EXCEEDS_PARTICIPANTS" };
+      }
+      return succeeded >= quorum.accepts
+        ? { satisfied: true, reasonCode: "QUORUM_MET" }
+        : { satisfied: false, reasonCode: "QUORUM_NOT_MET" };
+    }
+  }
+}
+
+/**
+ * The census key is the ballot, not the disposition name. An arrival that
+ * produced a conforming `BarrierVote` is recorded with that vote's verdict; an
+ * arrival that produced no ballot at all is recorded `not-cast` whatever its
+ * disposition, including a `failed` arising from upstream execution failure.
+ *
+ * A `not-cast` record's key set is exactly `sourceNodeId` and `verdict`:
+ * materializing a confidence or an evidence hash would invent the ballot the
+ * member exists to deny.
+ */
+function voteRecord(arrival: BarrierArrival): BarrierVoteRecord {
+  const { vote } = arrival;
+  if (vote === undefined) {
+    return Object.freeze({ sourceNodeId: arrival.sourceNodeId, verdict: "not-cast" as const });
+  }
+  return Object.freeze({
+    sourceNodeId: arrival.sourceNodeId,
+    verdict: vote.verdict,
+    ...(vote.confidenceBasisPoints === undefined
+      ? {}
+      : { confidenceBasisPoints: vote.confidenceBasisPoints }),
+    ...(Object.hasOwn(vote, "evidence") ? { evidenceHash: canonicalHash(vote.evidence) } : {}),
+  });
+}
+
+/**
+ * Decide a barrier from its complete disposition list.
+ *
+ * The six count fields sum to `total` and the six ID lists partition the
+ * arrivals, both in incoming-edge declaration order. `deadlineElapsed` is true
+ * exactly when at least one arrival timed out, because a deadline changes which
+ * dispositions exist rather than which policy rule decided.
+ *
+ * An unsatisfied barrier NEVER succeeds: its resolution is exactly the declared
+ * `onUnsatisfied` member, and all three of those are non-passes.
+ */
+export function evaluateIntegratedBarrier(
+  policy: IntegratedBarrierPolicySnapshot,
+  barrierNodeId: string,
+  arrivals: readonly BarrierArrival[],
+): BarrierDecisionCore {
+  const acceptedIds: string[] = [];
+  const failedIds: string[] = [];
+  const missingIds: string[] = [];
+  const timedOutIds: string[] = [];
+  const abstainedIds: string[] = [];
+  const unknownIds: string[] = [];
+  const buckets: Readonly<Record<BarrierArrivalDisposition, string[]>> = {
+    succeeded: acceptedIds,
+    failed: failedIds,
+    missing: missingIds,
+    timed_out: timedOutIds,
+    abstained: abstainedIds,
+    unknown: unknownIds,
+  };
+  for (const arrival of arrivals) {
+    buckets[arrival.disposition].push(arrival.sourceNodeId);
+  }
+
+  const total = arrivals.length;
+  const decided = outcome(policy, total, acceptedIds.length, abstainedIds.length);
+  return Object.freeze({
+    barrierNodeId,
+    deadlineElapsed: timedOutIds.length > 0,
+    satisfied: decided.satisfied,
+    reasonCode: decided.reasonCode,
+    resolution: decided.satisfied
+      ? "satisfied"
+      : BARRIER_UNSATISFIED_RESOLUTION[policy.onUnsatisfied],
+    total,
+    succeeded: acceptedIds.length,
+    failed: failedIds.length,
+    missing: missingIds.length,
+    timedOut: timedOutIds.length,
+    abstained: abstainedIds.length,
+    unknown: unknownIds.length,
+    acceptedIds: Object.freeze(acceptedIds),
+    failedIds: Object.freeze(failedIds),
+    missingIds: Object.freeze(missingIds),
+    timedOutIds: Object.freeze(timedOutIds),
+    abstainedIds: Object.freeze(abstainedIds),
+    unknownIds: Object.freeze(unknownIds),
+    ...(policy.kind === "quorum"
+      ? { votes: Object.freeze(arrivals.map(voteRecord)) }
+      : {}),
+  });
 }

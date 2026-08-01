@@ -1,4 +1,25 @@
 export { runGraph } from "./scheduler.js";
+export {
+  BARRIER_RESOLUTION_STATUS,
+  FROZEN_CLOCK,
+  bindIntegratedBarriers,
+  commitBarrierDecision,
+  createScriptedClock,
+  resolveArrival,
+  type ArrivalInputs,
+  type ArrivalResolution,
+  type BarrierBinding,
+  type BarrierDecisionDocument,
+  type ScriptedClock,
+} from "./barrier-runtime.js";
+export {
+  adoptCommittedDecisions,
+  adoptedRouteSelection,
+  decisionRejectionMessage,
+  type CommittedDecision,
+  type DecisionAdoption,
+  type DecisionRejection,
+} from "./decision-replay.js";
 export { runPipeline } from "./pipeline.js";
 export {
   resumeDurableGraphRun,
@@ -129,10 +150,14 @@ export {
 } from "./cycle-types.js";
 export type * from "./cycle-types.js";
 export type {
+  CommittedDecisionEvent,
   CompilationRunFailure,
+  DecisionContext,
+  DecisionEvent,
   GraphRunFailure,
   GraphRunResult,
   GraphRunStatus,
+  MonotonicClock,
   JsonArray,
   JsonObject,
   JsonValue,

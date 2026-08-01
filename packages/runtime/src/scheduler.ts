@@ -2,15 +2,19 @@ import {
   canonicalSerialize,
   compileGraph,
   compareUnicodeCodePoints,
+  type BarrierArrival,
   type EdgeSpec,
   type Endpoint,
   type GraphSpec,
   type NodeSpec,
 } from "@graph-engineering/core";
 import type {
+  DecisionContext,
+  DecisionEvent,
   GraphRunFailure,
   GraphRunResult,
   JsonValue,
+  MonotonicClock,
   NodeExecutionContext,
   NodeExecutor,
   NodeRunFailure,
@@ -19,6 +23,19 @@ import type {
   SchedulerOptions,
 } from "./types.js";
 import { snapshotJson } from "./json.js";
+import {
+  BARRIER_RESOLUTION_STATUS,
+  FROZEN_CLOCK,
+  bindIntegratedBarriers,
+  commitBarrierDecision,
+  resolveArrival,
+  type BarrierBinding,
+} from "./barrier-runtime.js";
+import {
+  adoptCommittedDecisions,
+  adoptedRouteSelection,
+  decisionRejectionMessage,
+} from "./decision-replay.js";
 import {
   graphRuntimeCapabilityIssues,
   runtimeCapabilityMessage,
@@ -34,6 +51,28 @@ import {
 
 const identityExecutor: NodeExecutor = ({ input }) => input;
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
+const DEFAULT_DECISION_CONTEXT: DecisionContext = Object.freeze({
+  runId: "",
+  graphRevision: 1,
+});
+
+/** Barrier state between arming and the single decision it may ever commit. */
+interface BarrierState {
+  armedAtMs?: number;
+  decided: boolean;
+  /** Sources still unsettled when the decision committed; every one is late. */
+  lateSources: Set<string>;
+}
+
+/**
+ * An upstream that settled `unknown`, or that inherited the zero-attempt
+ * `UPSTREAM_UNKNOWN` terminal from one. Neither is a failure: a run does not
+ * fail solely because a barrier resolved to unknown.
+ */
+function isUnknownTerminal(result: NodeRunResult | undefined): boolean {
+  return result?.status === "unknown" ||
+    (result?.status === "skipped" && result.failure?.code === "UPSTREAM_UNKNOWN");
+}
 
 export interface SchedulerAttemptIdentity {
   runId: string;
@@ -685,7 +724,9 @@ export async function runGraphWithJournal(
   // prevents caller or executor mutation from changing live routing/config
   // after validation while leaving graphHash unchanged.
   graph = snapshotJson(JSON.parse(compilation.canonicalGraph)) as unknown as GraphSpec;
-  const runtimeCapabilityIssues = graphRuntimeCapabilityIssues(graph);
+  const runtimeCapabilityIssues = graphRuntimeCapabilityIssues(graph, {
+    integratedBarrier: true,
+  });
   const capabilityIssues = graphConditionCapabilityIssues(graph);
   if (runtimeCapabilityIssues.length > 0 || capabilityIssues.length > 0) {
     return {
@@ -786,6 +827,89 @@ export async function runGraphWithJournal(
       }
     }
   }
+
+  const clock: MonotonicClock = options.clock ?? FROZEN_CLOCK;
+  const decisionContext = options.decision ?? DEFAULT_DECISION_CONTEXT;
+  const barrierBindings = bindIntegratedBarriers(graph);
+  const barrierStates = new Map<string, BarrierState>(
+    [...barrierBindings.keys()].map((nodeId) =>
+      [nodeId, { decided: false, lateSources: new Set<string>() }]),
+  );
+  const decisionEvents: DecisionEvent[] = [];
+  let haltedForHuman = false;
+
+  // Fold the durable history before scheduling. A node with a committed
+  // decision is never re-evaluated: no executor call, no recomputation, no
+  // upstream re-read, and no second decision event.
+  const committed = options.committedDecisions ?? [];
+  if (committed.length > 0) {
+    const currentPolicies = new Map<string, unknown>();
+    for (const event of committed) {
+      const node = nodesById.get(event.nodeId);
+      if (node !== undefined) currentPolicies.set(event.nodeId, node.config);
+    }
+    const adoption = adoptCommittedDecisions(committed, currentPolicies, decisionContext);
+    if (adoption.outcome === "rejected") {
+      const { rejection } = adoption;
+      return {
+        status: "failed",
+        graphHash: compilation.graphHash,
+        nodes: [],
+        failures: [runtimeFailure(
+          rejection.nodeId,
+          rejection.code,
+          decisionRejectionMessage(rejection),
+          0,
+        )],
+        maxObservedConcurrency: 0,
+        totalAttempts: 0,
+        scheduledOrder: [],
+        completionOrder: [],
+      };
+    }
+    for (const decision of adoption.decisions) {
+      const nodeSequence = sequence.get(decision.nodeId);
+      if (nodeSequence === undefined) {
+        throw new TypeError(`committed decision targets unknown node '${decision.nodeId}'`);
+      }
+      if (decision.type === "RouteSelected") {
+        restoredResults.set(decision.nodeId, {
+          nodeId: decision.nodeId,
+          sequence: nodeSequence,
+          status: "succeeded",
+          attempts: 0,
+          output: adoptedRouteSelection(decision.document),
+        });
+        continue;
+      }
+      const resolution = decision.document.resolution as keyof typeof BARRIER_RESOLUTION_STATUS;
+      const status = BARRIER_RESOLUTION_STATUS[resolution];
+      if (status === undefined) {
+        throw new TypeError(`committed barrier decision for '${decision.nodeId}' has no resolution`);
+      }
+      restoredResults.set(decision.nodeId, {
+        nodeId: decision.nodeId,
+        sequence: nodeSequence,
+        status,
+        attempts: 0,
+        ...(status === "succeeded" ? { output: decision.document as unknown as JsonValue } : {}),
+        ...(status === "failed"
+          ? {
+            failure: runtimeFailure(
+              decision.nodeId,
+              "BARRIER_NOT_SATISFIED",
+              `Barrier '${decision.nodeId}' was not satisfied`,
+              0,
+            ),
+          }
+          : {}),
+      });
+      const state = barrierStates.get(decision.nodeId);
+      if (state !== undefined) state.decided = true;
+      if (status === "awaiting_human") haltedForHuman = true;
+    }
+  }
+
   for (const nodeId of orderedNodeIds) {
     if (!restoredResults.has(nodeId)) continue;
     for (const edge of outgoing.get(nodeId) ?? []) {
@@ -794,8 +918,12 @@ export async function runGraphWithJournal(
     }
   }
 
+  // An integrated barrier never enters the ready queue: it is decided by the
+  // scheduler at a quiescence point, with zero executor attempts.
   const ready = orderedNodeIds
-    .filter((nodeId) => remaining.get(nodeId) === 0 && !restoredResults.has(nodeId))
+    .filter((nodeId) => remaining.get(nodeId) === 0 &&
+      !restoredResults.has(nodeId) &&
+      !barrierBindings.has(nodeId))
     .sort(compareNodes);
   const active = new Map<string, Promise<{ nodeId: string; result: NodeRunResult }>>();
   const results = restoredResults;
@@ -861,6 +989,29 @@ export async function runGraphWithJournal(
     retryReservations.delete(nodeId);
   };
 
+  const lateArrivalFailures: NodeRunFailure[] = [];
+
+  /**
+   * A source that settles after a barrier already committed its decision. The
+   * committed decision is immutable either way: a late arrival never mutates
+   * `total`, any count, any ID list, any vote, or the decision identity.
+   */
+  const observeLateArrival = (sourceNodeId: string): void => {
+    for (const [barrierNodeId, state] of barrierStates) {
+      if (!state.decided || !state.lateSources.delete(sourceNodeId)) continue;
+      const binding = barrierBindings.get(barrierNodeId) as BarrierBinding;
+      if (binding.policy.lateArrival !== "reject") continue;
+      lateArrivalFailures.push(runtimeFailure(
+        barrierNodeId,
+        "BARRIER_LATE_ARRIVAL",
+        `Barrier '${barrierNodeId}' had already decided when upstream `
+          + `'${sourceNodeId}' settled`,
+        0,
+        { upstreamNodeIds: [sourceNodeId] },
+      ));
+    }
+  };
+
   const settle = (nodeId: string, result: NodeRunResult): void => {
     results.set(nodeId, result);
     completionOrder.push(nodeId);
@@ -868,11 +1019,12 @@ export async function runGraphWithJournal(
       activeEdges.set(edge.id, edgeIsActive(edge, result));
       const next = (remaining.get(edge.to.node) ?? 0) - 1;
       remaining.set(edge.to.node, next);
-      if (next === 0 && !results.has(edge.to.node)) {
+      if (next === 0 && !results.has(edge.to.node) && !barrierBindings.has(edge.to.node)) {
         ready.push(edge.to.node);
       }
     }
     ready.sort(compareNodes);
+    observeLateArrival(nodeId);
   };
 
   const settleWithoutAttempt = async (
@@ -920,11 +1072,39 @@ export async function runGraphWithJournal(
         });
         continue;
       }
-      const failedUpstream = [...new Set(
+      const unsucceededUpstream = [...new Set(
         activeIncoming
           .map((edge) => edge.from.node)
           .filter((upstreamId) => results.get(upstreamId)?.status !== "succeeded"),
       )].sort(compareUnicodeCodePoints);
+      const unknownUpstream = unsucceededUpstream.filter(
+        (upstreamId) => isUnknownTerminal(results.get(upstreamId)),
+      );
+      const failedUpstream = unsucceededUpstream.filter(
+        (upstreamId) => !isUnknownTerminal(results.get(upstreamId)),
+      );
+
+      // A descendant reachable only through a barrier that resolved `unknown`
+      // inherits the zero-attempt `UPSTREAM_UNKNOWN` terminal. A genuine
+      // upstream failure still outranks it.
+      if (!runController.signal.aborted && failedUpstream.length === 0 &&
+          unknownUpstream.length > 0) {
+        await settleWithoutAttempt(node, {
+          nodeId,
+          sequence: sequence.get(nodeId) as number,
+          status: "skipped",
+          attempts: attemptOffset,
+          failure: runtimeFailure(
+            nodeId,
+            "UPSTREAM_UNKNOWN",
+            `Node '${nodeId}' did not start because upstream nodes are unknown: `
+              + unknownUpstream.join(", "),
+            attemptOffset,
+            { upstreamNodeIds: unknownUpstream },
+          ),
+        });
+        continue;
+      }
 
       if (runController.signal.aborted || failedUpstream.length > 0) {
         const cancelled = runController.signal.aborted;
@@ -1005,15 +1185,212 @@ export async function runGraphWithJournal(
     }
   };
 
+  const barrierNodeResult = (
+    nodeId: string,
+    status: NodeRunResult["status"],
+    extra: Omit<NodeRunResult, "nodeId" | "sequence" | "status" | "attempts"> & {
+      attempts?: number;
+    } = {},
+  ): NodeRunResult => {
+    const { attempts = 0, ...rest } = extra;
+    return {
+      nodeId,
+      sequence: sequence.get(nodeId) as number,
+      status,
+      attempts,
+      ...rest,
+    };
+  };
+
+  /** The value a barrier's incoming edge would bind, for ballot extraction only. */
+  const boundVoteValue = (edge: EdgeSpec): JsonValue | undefined => {
+    try {
+      return endpointValue(edge.from, results.get(edge.from.node)?.output) as JsonValue;
+    } catch {
+      return undefined;
+    }
+  };
+
+  const decideBarrier = async (binding: BarrierBinding, state: BarrierState): Promise<void> => {
+    const node = nodesById.get(binding.nodeId) as NodeSpec;
+    if (!scheduledOrder.includes(binding.nodeId)) scheduledOrder.push(binding.nodeId);
+    const arrivals: BarrierArrival[] = [];
+    for (const edge of binding.incoming) {
+      const resolved = resolveArrival(binding.policy, {
+        edge,
+        result: results.get(edge.from.node),
+        edgeActive: activeEdges.get(edge.id) !== false,
+        boundValue: () => boundVoteValue(edge),
+      });
+      if (resolved.kind === "malformed-vote") {
+        // Never coerced to abstain or unknown, and no disposition entry is
+        // produced: the barrier fails non-retryably after exactly one attempt.
+        state.decided = true;
+        totalAttempts += 1;
+        await settleWithoutAttempt(node, barrierNodeResult(binding.nodeId, "failed", {
+          attempts: 1,
+          failure: runtimeFailure(
+            binding.nodeId,
+            "INVALID_BARRIER_VOTE",
+            `Barrier '${binding.nodeId}' received a malformed vote from `
+              + `'${resolved.sourceNodeId}'`,
+            1,
+            { upstreamNodeIds: [resolved.sourceNodeId] },
+          ),
+        }));
+        return;
+      }
+      arrivals.push(resolved.arrival);
+    }
+
+    const document = commitBarrierDecision(
+      binding,
+      decisionContext,
+      arrivals,
+      state.armedAtMs as number,
+      clock.nowMs(),
+    );
+    state.decided = true;
+    state.lateSources = new Set(
+      binding.incoming
+        .filter((edge) => !results.has(edge.from.node))
+        .map((edge) => edge.from.node),
+    );
+    decisionEvents.push({
+      type: "BarrierSatisfied",
+      nodeId: binding.nodeId,
+      data: document as unknown as JsonValue,
+    });
+    if (document.resolution === "awaiting_human") {
+      decisionEvents.push({
+        type: "HumanInputRequested",
+        nodeId: binding.nodeId,
+        data: document as unknown as JsonValue,
+      });
+      haltedForHuman = true;
+    }
+    const status = BARRIER_RESOLUTION_STATUS[document.resolution];
+    await settleWithoutAttempt(node, barrierNodeResult(binding.nodeId, status, {
+      // A satisfied barrier binds the decision document. An unsatisfied one
+      // NEVER binds an output, whichever resolution it declared.
+      ...(status === "succeeded" ? { output: document as unknown as JsonValue } : {}),
+      ...(status === "failed"
+        ? {
+          failure: runtimeFailure(
+            binding.nodeId,
+            "BARRIER_NOT_SATISFIED",
+            `Barrier '${binding.nodeId}' was not satisfied (${document.reasonCode})`,
+            0,
+          ),
+        }
+        : {}),
+    }));
+  };
+
+  /**
+   * One quiescence point: arm every barrier that now has a bound upstream, then
+   * decide every barrier that is complete or whose deadline has elapsed.
+   * Returns true when anything settled, so the caller re-enters this state.
+   */
+  const observeBarrierQuiescence = async (): Promise<boolean> => {
+    let settledAny = false;
+    for (const nodeId of orderedNodeIds) {
+      const binding = barrierBindings.get(nodeId);
+      const state = barrierStates.get(nodeId);
+      if (binding === undefined || state === undefined || state.decided) continue;
+
+      if (runController.signal.aborted) {
+        // A cancelled armed barrier emits no decision event and never produces
+        // a partial decision document.
+        state.decided = true;
+        settledAny = true;
+        const node = nodesById.get(nodeId) as NodeSpec;
+        await settleWithoutAttempt(node, state.armedAtMs === undefined
+          ? barrierNodeResult(nodeId, "skipped", {
+            failure: runtimeFailure(
+              nodeId,
+              "NODE_CANCELLED",
+              `Node '${nodeId}' did not start because the run was cancelled`,
+              0,
+            ),
+          })
+          : barrierNodeResult(nodeId, "cancelled"));
+        continue;
+      }
+
+      const settledSources = binding.incoming.filter((edge) => results.has(edge.from.node));
+      if (settledSources.length === 0) continue;
+      state.armedAtMs ??= clock.nowMs();
+      const complete = settledSources.length === binding.incoming.length;
+      const afterMs = binding.policy.deadline?.afterMs;
+      const elapsed = afterMs !== undefined &&
+        clock.nowMs() - (state.armedAtMs as number) >= afterMs;
+      if (!complete && !elapsed) continue;
+      await decideBarrier(binding, state);
+      settledAny = true;
+    }
+    return settledAny;
+  };
+
+  /** True while some armed barrier can still only be decided by the clock. */
+  const awaitsDeadline = (): boolean => {
+    for (const [nodeId, state] of barrierStates) {
+      if (state.decided || state.armedAtMs === undefined) continue;
+      if (barrierBindings.get(nodeId)?.policy.deadline !== undefined) return true;
+    }
+    return false;
+  };
+
+  const TICK = Symbol("clock-tick");
+  type RaceOutcome = { nodeId: string; result: NodeRunResult } | typeof TICK;
+
+  // At most one tick is ever outstanding, so a tick the race did not win is
+  // reused rather than pulling a second value off the driver's script.
+  let pendingTick: Promise<RaceOutcome> | undefined;
+  const tickContender = (): Promise<RaceOutcome> | undefined => {
+    if (pendingTick !== undefined) return pendingTick;
+    const tick = clock.nextTick?.();
+    if (tick === undefined) return undefined;
+    const contender: Promise<RaceOutcome> = tick.then(() => {
+      if (pendingTick === contender) pendingTick = undefined;
+      return TICK;
+    });
+    pendingTick = contender;
+    return contender;
+  };
+
+  const raceNext = async (waitForTick: boolean): Promise<RaceOutcome | undefined> => {
+    // Node settlement is offered to the race first. A deterministic executor
+    // settles on the microtask queue while the driver delivers a tick on the
+    // macrotask queue, so a tick is only ever observed at a real quiescence
+    // point and the scheduler needs no timer of its own.
+    const contenders: Promise<RaceOutcome>[] = [...active.values()];
+    if (waitForTick) {
+      if (!runController.signal.aborted) {
+        // Cancellation is a quiescence point of its own, so a barrier waiting
+        // on a deadline must never outlive the run's abort.
+        contenders.push(new Promise<RaceOutcome>((resolve) => {
+          runController.signal.addEventListener("abort", () => resolve(TICK), { once: true });
+        }));
+      }
+      const tick = tickContender();
+      if (tick !== undefined) contenders.push(tick);
+    }
+    if (contenders.length === 0) return undefined;
+    return await Promise.race(contenders);
+  };
+
   try {
     while (results.size < graph.nodes.length) {
-      await launchReady();
-      if (active.size === 0) {
-        break;
-      }
-      const completed = await Promise.race(active.values());
-      active.delete(completed.nodeId);
-      settle(completed.nodeId, completed.result);
+      if (!haltedForHuman) await launchReady();
+      if (await observeBarrierQuiescence()) continue;
+      // A human resolution schedules no descendant and stops.
+      if (haltedForHuman && active.size === 0) break;
+      const raced = await raceNext(!haltedForHuman && awaitsDeadline());
+      if (raced === undefined) break;
+      if (raced === TICK) continue;
+      active.delete(raced.nodeId);
+      settle(raced.nodeId, raced.result);
     }
   } catch (error) {
     journalEnabled = false;
@@ -1028,12 +1405,22 @@ export async function runGraphWithJournal(
     options.signal?.removeEventListener("abort", cancelRun);
   }
 
-  const nodeResults = orderedNodeIds.map((nodeId) => results.get(nodeId) as NodeRunResult);
-  const failures: GraphRunFailure[] = nodeResults.flatMap((result) =>
-    result.failure === undefined || result.failure.code === "ROUTE_NOT_SELECTED"
-      ? []
-      : [result.failure],
-  );
+  // A run halted by a human resolution legitimately leaves nodes unscheduled.
+  const nodeResults = orderedNodeIds.flatMap((nodeId) => {
+    const result = results.get(nodeId);
+    return result === undefined ? [] : [result];
+  });
+  // `UPSTREAM_UNKNOWN` is excluded from graph failure codes exactly as
+  // `ROUTE_NOT_SELECTED` already is: neither invents a node failure.
+  const failures: GraphRunFailure[] = [
+    ...nodeResults.flatMap((result) =>
+      result.failure === undefined ||
+        result.failure.code === "ROUTE_NOT_SELECTED" ||
+        result.failure.code === "UPSTREAM_UNKNOWN"
+        ? []
+        : [result.failure]),
+    ...lateArrivalFailures,
+  ];
   const output = Object.create(null) as Record<string, JsonValue>;
   let outputsComplete = true;
   for (const [name, endpoint] of Object.entries(graph.outputs).sort(([left], [right]) =>
@@ -1059,10 +1446,28 @@ export async function runGraphWithJournal(
     }
   }
 
+  // Run terminal precedence, highest first: failed, cancelled, awaiting_human,
+  // unknown, succeeded. A node whose only failure is its own cancellation is a
+  // cancellation rather than a failure, which is how the shipped `cancelled`
+  // terminal keeps outranking the NODE_CANCELLED failures it necessarily emits.
   const cancelled = runController.signal.aborted;
-  const succeeded = !cancelled && failures.length === 0 && outputsComplete;
+  const failed = failures.some((failure) =>
+    failure.phase !== "execute" || failure.code !== "NODE_CANCELLED");
+  const awaitingHuman = nodeResults.some((result) => result.status === "awaiting_human");
+  const unknownTerminal = nodeResults.some((result) => result.status === "unknown");
+  const status: GraphRunResult["status"] = failed
+    ? "failed"
+    : cancelled
+      ? "cancelled"
+      : awaitingHuman
+        ? "awaiting_human"
+        : unknownTerminal
+          ? "unknown"
+          : outputsComplete
+            ? "succeeded"
+            : "failed";
   const runResult: SchedulerRunResult = {
-    status: cancelled ? "cancelled" : succeeded ? "succeeded" : "failed",
+    status,
     graphHash: compilation.graphHash,
     ...(outputsComplete
       ? { output: snapshotJson(output) as Readonly<Record<string, JsonValue>> }
@@ -1071,6 +1476,7 @@ export async function runGraphWithJournal(
     failures,
     maxObservedConcurrency: observedConcurrency,
     totalAttempts,
+    ...(decisionEvents.length === 0 ? {} : { decisionEvents: Object.freeze(decisionEvents) }),
     scheduledOrder,
     completionOrder,
   };
@@ -1094,6 +1500,11 @@ export async function runGraph(
     ...(options.executors === undefined ? {} : { executors: options.executors }),
     ...(options.concurrency === undefined ? {} : { concurrency: options.concurrency }),
     ...(options.signal === undefined ? {} : { signal: options.signal }),
+    ...(options.clock === undefined ? {} : { clock: options.clock }),
+    ...(options.decision === undefined ? {} : { decision: options.decision }),
+    ...(options.committedDecisions === undefined
+      ? {}
+      : { committedDecisions: options.committedDecisions }),
   };
   const { scheduledOrder: _scheduledOrder, completionOrder: _completionOrder, ...result } =
     await runGraphWithJournal(graph, input, publicOptions);

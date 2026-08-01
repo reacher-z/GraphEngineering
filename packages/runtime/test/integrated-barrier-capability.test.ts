@@ -89,7 +89,7 @@ function expectedFailures(graph: GraphSpec): readonly Readonly<Record<string, un
   }]);
 }
 
-describe("integrated barrier pre-dispatch capability gate", () => {
+describe("integrated barrier durable capability gate", () => {
   it("keeps the corpus capability-gate claim false for this tranche", () => {
     expect(corpus.claims.capabilityGateClaim).toBe(false);
   });
@@ -165,30 +165,47 @@ describe("integrated barrier pre-dispatch capability gate", () => {
     ]);
   });
 
-  it("fails the ordinary run before any executor, handler or journal call", async () => {
+  it("keeps the gate closed for the entry point that does not implement it", () => {
+    // The ordinary scheduler now decides integrated barriers, so it opts in.
+    // The durable scheduler does not journal BarrierSatisfied yet, so it keeps
+    // refusing under the same capability name and the default stays closed.
+    expect(graphRuntimeCapabilityIssues(multiBarrierGraph, { integratedBarrier: true }))
+      .toEqual([]);
+    for (const options of [undefined, {}, { integratedBarrier: false }]) {
+      expect(
+        graphRuntimeCapabilityIssues(multiBarrierGraph, options).map((issue) => issue.capability),
+        JSON.stringify(options ?? null),
+      ).toEqual([
+        INTEGRATED_BARRIER_CAPABILITY,
+        INTEGRATED_BARRIER_CAPABILITY,
+        INTEGRATED_BARRIER_CAPABILITY,
+      ]);
+    }
+  });
+
+  it("never calls a barrier executor now that the scheduler owns the decision", async () => {
     const executor = vi.fn(() => "never");
     const journal = spyingJournal();
     const nodeExecutors = Object.fromEntries(
-      multiBarrierGraph.nodes.map((node) => [node.id, executor]),
+      multiBarrierGraph.nodes
+        .filter((node) => node.kind === "barrier")
+        .map((node) => [node.id, executor]),
     );
 
     const result = await runGraphWithJournal(
       multiBarrierGraph,
       {},
-      { nodeExecutors, executors: { transform: executor, barrier: executor }, journal },
+      { nodeExecutors, executors: { barrier: executor }, journal },
     );
 
-    expect(result.status).toBe("failed");
-    expect(result.nodes).toEqual([]);
-    expect(result.totalAttempts).toBe(0);
-    expect(result.scheduledOrder).toEqual([]);
-    expect(result.completionOrder).toEqual([]);
-    expect(result.maxObservedConcurrency).toBe(0);
-    expect(result.failures).toEqual(expectedFailures(multiBarrierGraph));
+    // A barrier is decided with zero executor attempts whatever the outcome, so
+    // a registered barrier executor is never reached.
     expect(executor).not.toHaveBeenCalled();
-    for (const [name, spy] of Object.entries(journal)) {
-      expect(vi.mocked(spy).mock.calls.length, name).toBe(0);
-    }
+    expect(result.failures.map((failure) => failure.code))
+      .not.toContain("UNSUPPORTED_RUNTIME_CAPABILITY");
+    expect(vi.mocked(journal.beforeAttempt).mock.calls
+      .map((call) => (call[0] as { node: { id: string } }).node.id))
+      .not.toEqual(expect.arrayContaining(["gate-all", "gate-quorum", "gate-percentage"]));
   });
 
   it("does not inspect externally supplied graph input before refusing", async () => {
@@ -199,7 +216,18 @@ describe("integrated barrier pre-dispatch capability gate", () => {
       },
     });
 
-    const result = await runGraph(multiBarrierGraph, hostileInput, {
+    // The gated durable path still refuses without ever touching the input.
+    const result = await startDurableGraphRun(multiBarrierGraph, hostileInput, {
+      runId: "integrated-barrier-hostile-input",
+      implementationId: "v1",
+      eventStore: {
+        read: () => {
+          throw new Error("event store read must not run during capability preflight");
+        },
+        append: async () => {
+          throw new Error("event store append must not run during capability preflight");
+        },
+      } satisfies EventStore,
       executors: { transform: executor, barrier: executor },
     });
 
@@ -271,18 +299,26 @@ describe("integrated barrier pre-dispatch capability gate", () => {
       .toEqual(["node-config:barrier", "node-config:barrier", "node-config:barrier"]);
   });
 
-  it("refuses an exact policy that the pure evaluator could not have decided", async () => {
+  it("never executes an exact policy as an identity transform", async () => {
     // A quorum policy has no pure evaluator at all; executing it as an identity
-    // transform would silently pass an unsatisfied barrier.
+    // transform would silently pass an unsatisfied barrier. The scheduler now
+    // decides it instead, and an unsatisfied quorum is still not a success.
     const document = clone(multiBarrierGraph);
     const gate = document.nodes.find((node) => node.id === "gate-quorum");
     expect(gate?.config).toMatchObject({ kind: "quorum" });
-    const executor = vi.fn(() => "never");
+    const barrierExecutor = vi.fn(() => "never");
     const result = await runGraph(document, {}, {
-      executors: { transform: executor, barrier: executor },
+      executors: { barrier: barrierExecutor },
     });
-    expect(result.status).toBe("failed");
-    expect(result.failures.some((failure) => failure.nodeId === "gate-quorum")).toBe(true);
-    expect(executor).not.toHaveBeenCalled();
+    expect(barrierExecutor).not.toHaveBeenCalled();
+    const quorum = result.nodes.find((node) => node.nodeId === "gate-quorum");
+    expect(quorum?.status).not.toBe("succeeded");
+    expect(quorum?.output).toBeUndefined();
+    // The upstream transforms produce no ballot, so the quorum barrier fails
+    // non-retryably after exactly one attempt rather than coercing a verdict.
+    expect(quorum?.failure?.code).toBe("INVALID_BARRIER_VOTE");
+    expect(quorum?.attempts).toBe(1);
+    expect(quorum?.failure?.retryable).toBe(false);
+    expect(result.status).not.toBe("succeeded");
   });
 });

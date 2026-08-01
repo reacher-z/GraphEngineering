@@ -5,8 +5,25 @@ import type {
   NodeSpec,
 } from "@graph-engineering/core";
 
-export type NodeRunStatus = "succeeded" | "failed" | "skipped";
-export type GraphRunStatus = "succeeded" | "failed" | "cancelled";
+/**
+ * `unknown`, `awaiting_human` and `cancelled` are integrated-barrier terminals.
+ * None of them is a success and none of them binds an output.
+ */
+export type NodeRunStatus =
+  | "succeeded"
+  | "failed"
+  | "skipped"
+  | "unknown"
+  | "awaiting_human"
+  | "cancelled";
+
+/** Run terminal precedence, highest first, is the declaration order below. */
+export type GraphRunStatus =
+  | "failed"
+  | "cancelled"
+  | "awaiting_human"
+  | "unknown"
+  | "succeeded";
 
 /**
  * Deeply read-only, detached, acyclic JSON with finite numbers and integers in
@@ -39,7 +56,14 @@ export type RuntimeFailureCode =
   | "UPSTREAM_FAILED"
   | "INPUT_BINDING_FAILED"
   | "ATTEMPT_BUDGET_EXHAUSTED"
-  | "NODE_EXECUTION_INTERRUPTED";
+  | "NODE_EXECUTION_INTERRUPTED"
+  | "INVALID_BARRIER_VOTE"
+  | "BARRIER_NOT_SATISFIED"
+  | "BARRIER_LATE_ARRIVAL"
+  | "UPSTREAM_UNKNOWN"
+  | "DECISION_POLICY_DRIFT"
+  | "DECISION_IDENTITY_MISMATCH"
+  | "DUPLICATE_DECISION";
 
 export interface CompilationRunFailure {
   phase: "compile";
@@ -82,6 +106,17 @@ export interface NodeRunResult {
   failure?: NodeRunFailure;
 }
 
+/**
+ * A durable decision event this run committed. `BarrierSatisfied` is emitted for
+ * every committed barrier decision, satisfied or not; `satisfied` inside `data`
+ * carries the truth. `HumanInputRequested` carries the same decision document.
+ */
+export interface DecisionEvent {
+  readonly type: "BarrierSatisfied" | "RouteSelected" | "HumanInputRequested";
+  readonly nodeId: string;
+  readonly data: JsonValue;
+}
+
 export interface GraphRunResult {
   status: GraphRunStatus;
   graphHash: string | null;
@@ -90,6 +125,8 @@ export interface GraphRunResult {
   failures: readonly GraphRunFailure[];
   maxObservedConcurrency: number;
   totalAttempts: number;
+  /** Present only when this run committed at least one durable decision. */
+  decisionEvents?: readonly DecisionEvent[];
 }
 
 export interface NodeExecutionContext {
@@ -102,6 +139,33 @@ export interface NodeExecutionContext {
 
 export type NodeExecutor = (context: NodeExecutionContext) => unknown | Promise<unknown>;
 
+/**
+ * Injected monotonic millisecond clock. Barriers never read a wall clock and
+ * never schedule a timer: conformance drives this with a scripted tick list, so
+ * the same list produces the same decisions in every language.
+ */
+export interface MonotonicClock {
+  nowMs(): number;
+  /**
+   * The promise that resolves once the driver has advanced `nowMs`, or
+   * `undefined` when the driver will never advance it again.
+   */
+  nextTick?(): Promise<void> | undefined;
+}
+
+/** Run and graph revision that a durable decision identity binds. */
+export interface DecisionContext {
+  readonly runId: string;
+  readonly graphRevision: number;
+}
+
+/** A `BarrierSatisfied` or `RouteSelected` event folded from durable history. */
+export interface CommittedDecisionEvent {
+  readonly type: "BarrierSatisfied" | "RouteSelected";
+  readonly nodeId: string;
+  readonly data: Readonly<Record<string, unknown>>;
+}
+
 export interface SchedulerOptions {
   /** Per-node executors take precedence over kind executors. */
   nodeExecutors?: Readonly<Record<string, NodeExecutor>>;
@@ -109,6 +173,15 @@ export interface SchedulerOptions {
   /** Cannot exceed graph.policies.maxConcurrency when that policy is present. */
   concurrency?: number;
   signal?: AbortSignal;
+  /** Defaults to a clock frozen at zero, which no deadline can ever elapse. */
+  clock?: MonotonicClock;
+  /** Identity every decision this run commits binds. */
+  decision?: DecisionContext;
+  /**
+   * Durable history folded before scheduling. A node with a committed decision
+   * is never re-evaluated and its executor is never called.
+   */
+  committedDecisions?: readonly CommittedDecisionEvent[];
 }
 
 export type PipelineFailureCode =

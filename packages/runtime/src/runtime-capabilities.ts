@@ -47,6 +47,16 @@ export interface RuntimeCapabilityIssue {
   readonly path: string;
 }
 
+export interface RuntimeCapabilityOptions {
+  /**
+   * Set by an entry point that actually implements arming, satisfaction
+   * arithmetic, deadlines, resolutions, late arrival, cancellation and the
+   * durable decision document. The ordinary scheduler does; the durable
+   * scheduler does not journal `BarrierSatisfied` yet, so it keeps refusing.
+   */
+  readonly integratedBarrier?: boolean;
+}
+
 function hasOwn(value: object, key: PropertyKey): boolean {
   return Object.prototype.hasOwnProperty.call(value, key);
 }
@@ -79,6 +89,7 @@ function issue(
  */
 export function graphRuntimeCapabilityIssues(
   graph: GraphSpec,
+  options: RuntimeCapabilityOptions = {},
 ): readonly RuntimeCapabilityIssue[] {
   const graphOwner = graph.entrypoints[0] as string;
   const issues: RuntimeCapabilityIssue[] = [];
@@ -96,7 +107,9 @@ export function graphRuntimeCapabilityIssues(
       // name so the failure states the real reason. Every other unsupported
       // barrier config keeps the published `node-config:barrier` name.
       if (claimsIntegratedBarrierPolicy(node.config)) {
-        issues.push(issue(node.id, INTEGRATED_BARRIER_CAPABILITY, `${base}/config`));
+        if (options.integratedBarrier !== true) {
+          issues.push(issue(node.id, INTEGRATED_BARRIER_CAPABILITY, `${base}/config`));
+        }
       } else if (!supportedBarrierConfig(node.config)) {
         issues.push(issue(node.id, "node-config:barrier", `${base}/config`));
       }

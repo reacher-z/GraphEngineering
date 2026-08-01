@@ -28,15 +28,45 @@ export type {
 } from "./component-identity.js";
 export { compileGraph } from "./compiler.js";
 export {
+  BARRIER_DECISION_DOMAIN,
+  DECISION_NODE_ID,
+  DECISION_SAFE_ROUTE_ID,
+  POLICY_HASH_DOMAIN,
+  ROUTE_DECISION_DOMAIN,
+  barrierDecisionId,
+  decisionDocumentIdentifierIssues,
+  decisionIdentity,
+  decisionPolicyHash,
+  routeDecisionId,
+} from "./decision-identity.js";
+export type {
+  DecisionDocumentKind,
+  DecisionIdentityContext,
+  PolicyKindTag,
+} from "./decision-identity.js";
+export {
+  BARRIER_UNSATISFIED_RESOLUTION,
+  BARRIER_VERDICT_DISPOSITION,
   INTEGRATED_BARRIER_API_VERSION,
   claimsIntegratedBarrierPolicy,
+  evaluateIntegratedBarrier,
   validateBarrierPolicy,
+  validateBarrierVote,
   validateIntegratedBarrierSnapshot,
 } from "./integrated-barrier.js";
 export type {
+  BarrierArrival,
+  BarrierArrivalDisposition,
+  BarrierDecisionCore,
   BarrierLateArrivalPolicy,
   BarrierPolicyValidation,
+  BarrierReasonCode,
+  BarrierResolution,
   BarrierUnsatisfiedResolution,
+  BarrierVote,
+  BarrierVoteRecord,
+  BarrierVoteValidation,
+  BarrierVoteVerdict,
   IntegratedBarrierDeadlineSnapshot,
   IntegratedBarrierKind,
   IntegratedBarrierPolicySnapshot,
