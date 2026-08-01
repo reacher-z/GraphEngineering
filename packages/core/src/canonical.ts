@@ -1,6 +1,39 @@
 import { createHash } from "node:crypto";
 import { isProxy } from "node:util/types";
 
+const arrayIsArrayIntrinsic = Array.isArray;
+const arrayPushIntrinsic = Array.prototype.push;
+const arraySortIntrinsic = Array.prototype.sort;
+const numberIsSafeIntegerIntrinsic = Number.isSafeInteger;
+const numberIsFiniteIntrinsic = Number.isFinite;
+const numberIsIntegerIntrinsic = Number.isInteger;
+const numberIntrinsic = Number;
+const objectCreateIntrinsic = Object.create;
+const objectDefinePropertyIntrinsic = Object.defineProperty;
+const objectFreezeIntrinsic = Object.freeze;
+const objectGetOwnPropertyDescriptorIntrinsic = Object.getOwnPropertyDescriptor;
+const objectGetOwnPropertyNamesIntrinsic = Object.getOwnPropertyNames;
+const objectGetOwnPropertySymbolsIntrinsic = Object.getOwnPropertySymbols;
+const objectGetPrototypeOfIntrinsic = Object.getPrototypeOf;
+const objectHasOwnIntrinsic = Object.hasOwn;
+const objectKeysIntrinsic = Object.keys;
+const arrayPrototypeIntrinsic = Array.prototype;
+const objectPrototypeIntrinsic = Object.prototype;
+const reflectApplyIntrinsic = Reflect.apply;
+const stringCodePointAtIntrinsic = String.prototype.codePointAt;
+const stringReplaceAllIntrinsic = String.prototype.replaceAll;
+const stringIntrinsic = String;
+const jsonParseIntrinsic = JSON.parse;
+const jsonStringifyIntrinsic = JSON.stringify;
+const weakSetIntrinsic = WeakSet;
+const weakSetAddIntrinsic = WeakSet.prototype.add;
+const weakSetDeleteIntrinsic = WeakSet.prototype.delete;
+const weakSetHasIntrinsic = WeakSet.prototype.has;
+const createHashIntrinsic = createHash;
+const hashProbe = createHashIntrinsic("sha256");
+const hashUpdateIntrinsic = hashProbe.update;
+const hashDigestIntrinsic = hashProbe.digest;
+
 export class CanonicalizationError extends TypeError {
   readonly path: string;
 
@@ -13,22 +46,32 @@ export class CanonicalizationError extends TypeError {
 
 /** Compare strings lexicographically by Unicode code point, not UTF-16 unit. */
 export function compareUnicodeCodePoints(left: string, right: string): number {
-  const leftPoints = Array.from(left, (value) => value.codePointAt(0) as number);
-  const rightPoints = Array.from(right, (value) => value.codePointAt(0) as number);
-  const length = Math.min(leftPoints.length, rightPoints.length);
-
-  for (let index = 0; index < length; index += 1) {
-    const difference = (leftPoints[index] as number) - (rightPoints[index] as number);
+  let leftIndex = 0;
+  let rightIndex = 0;
+  while (leftIndex < left.length && rightIndex < right.length) {
+    const leftPoint = reflectApplyIntrinsic(stringCodePointAtIntrinsic, left, [leftIndex]) as number;
+    const rightPoint = reflectApplyIntrinsic(stringCodePointAtIntrinsic, right, [rightIndex]) as number;
+    const difference = leftPoint - rightPoint;
     if (difference !== 0) {
       return difference;
     }
+    leftIndex += leftPoint > 0xffff ? 2 : 1;
+    rightIndex += rightPoint > 0xffff ? 2 : 1;
   }
-
-  return leftPoints.length - rightPoints.length;
+  return (left.length - leftIndex) - (right.length - rightIndex);
 }
 
 function pointerSegment(value: string): string {
-  return value.replaceAll("~", "~0").replaceAll("/", "~1");
+  const escapedTilde = reflectApplyIntrinsic(
+    stringReplaceAllIntrinsic,
+    value,
+    ["~", "~0"],
+  ) as string;
+  return reflectApplyIntrinsic(
+    stringReplaceAllIntrinsic,
+    escapedTilde,
+    ["/", "~1"],
+  ) as string;
 }
 
 interface CanonicalJsonObject {
@@ -61,8 +104,14 @@ function dataDescriptor(
   key: PropertyKey,
   path: string,
 ): PropertyDescriptor & { value: unknown } {
-  const descriptor = Object.getOwnPropertyDescriptor(value, key);
-  if (descriptor === undefined || !Object.hasOwn(descriptor, "value")) {
+  const descriptor = reflectApplyIntrinsic(objectGetOwnPropertyDescriptorIntrinsic, Object, [
+    value,
+    key,
+  ]) as PropertyDescriptor | undefined;
+  if (descriptor === undefined || !reflectApplyIntrinsic(objectHasOwnIntrinsic, Object, [
+    descriptor,
+    "value",
+  ])) {
     return invalid("Accessor properties are not supported", path);
   }
   if (descriptor.enumerable !== true) {
@@ -76,32 +125,48 @@ function captureArray(
   path: string,
   ancestors: WeakSet<object>,
 ): readonly CanonicalJsonValue[] {
-  if (Object.getPrototypeOf(value) !== Array.prototype) {
+  if (reflectApplyIntrinsic(objectGetPrototypeOfIntrinsic, Object, [value])
+      !== arrayPrototypeIntrinsic) {
     return invalid("Only ordinary arrays are supported", path);
   }
-  if (Object.getOwnPropertySymbols(value).length > 0) {
+  if ((reflectApplyIntrinsic(objectGetOwnPropertySymbolsIntrinsic, Object, [value]) as symbol[])
+    .length > 0) {
     return invalid("Symbol keys are not valid JSON array keys", path);
   }
 
-  const lengthDescriptor = Object.getOwnPropertyDescriptor(value, "length");
-  if (lengthDescriptor === undefined || !Object.hasOwn(lengthDescriptor, "value")) {
+  const lengthDescriptor = reflectApplyIntrinsic(
+    objectGetOwnPropertyDescriptorIntrinsic,
+    Object,
+    [value, "length"],
+  ) as PropertyDescriptor | undefined;
+  if (lengthDescriptor === undefined || !reflectApplyIntrinsic(objectHasOwnIntrinsic, Object, [
+    lengthDescriptor,
+    "value",
+  ])) {
     return invalid("Array length could not be inspected safely", path);
   }
   const length = lengthDescriptor.value as number;
   const indexNames: string[] = [];
-  for (const name of Object.getOwnPropertyNames(value)) {
+  const ownNames = reflectApplyIntrinsic(objectGetOwnPropertyNamesIntrinsic, Object, [value]) as
+    string[];
+  for (let ownNameIndex = 0; ownNameIndex < ownNames.length; ownNameIndex += 1) {
+    const name = ownNames[ownNameIndex] as string;
     if (name === "length") continue;
-    const index = Number(name);
-    if (!Number.isInteger(index) || index < 0 || index >= length || String(index) !== name) {
+    const index = numberIntrinsic(name);
+    if (!numberIsIntegerIntrinsic(index) || index < 0 || index >= length
+        || stringIntrinsic(index) !== name) {
       return invalid("Extra array properties are not portable JSON", `${path}/${pointerSegment(name)}`);
     }
-    indexNames.push(name);
+    reflectApplyIntrinsic(arrayPushIntrinsic, indexNames, [name]);
   }
-  indexNames.sort((left, right) => Number(left) - Number(right));
+  reflectApplyIntrinsic(arraySortIntrinsic, indexNames, [
+    (left: string, right: string): number => numberIntrinsic(left) - numberIntrinsic(right),
+  ]);
 
   let expected = 0;
-  for (const name of indexNames) {
-    if (Number(name) !== expected) break;
+  for (let indexNameIndex = 0; indexNameIndex < indexNames.length; indexNameIndex += 1) {
+    const name = indexNames[indexNameIndex] as string;
+    if (numberIntrinsic(name) !== expected) break;
     expected += 1;
   }
   if (expected !== length) {
@@ -109,16 +174,19 @@ function captureArray(
   }
 
   const captured: CanonicalJsonValue[] = [];
-  ancestors.add(value);
+  reflectApplyIntrinsic(weakSetAddIntrinsic, ancestors, [value]);
   try {
-    for (const name of indexNames) {
+    for (let indexNameIndex = 0; indexNameIndex < indexNames.length; indexNameIndex += 1) {
+      const name = indexNames[indexNameIndex] as string;
       const descriptor = dataDescriptor(value, name, `${path}/${name}`);
-      captured.push(captureValue(descriptor.value, `${path}/${name}`, ancestors));
+      reflectApplyIntrinsic(arrayPushIntrinsic, captured, [
+        captureValue(descriptor.value, `${path}/${name}`, ancestors),
+      ]);
     }
   } finally {
-    ancestors.delete(value);
+    reflectApplyIntrinsic(weakSetDeleteIntrinsic, ancestors, [value]);
   }
-  return Object.freeze(captured);
+  return objectFreezeIntrinsic(captured);
 }
 
 function captureObject(
@@ -126,32 +194,36 @@ function captureObject(
   path: string,
   ancestors: WeakSet<object>,
 ): Readonly<Record<string, CanonicalJsonValue>> {
-  const prototype = Object.getPrototypeOf(value);
-  if (prototype !== Object.prototype && prototype !== null) {
+  const prototype = reflectApplyIntrinsic(objectGetPrototypeOfIntrinsic, Object, [value]);
+  if (prototype !== objectPrototypeIntrinsic && prototype !== null) {
     return invalid("Only plain JSON objects are supported", path);
   }
-  if (Object.getOwnPropertySymbols(value).length > 0) {
+  if ((reflectApplyIntrinsic(objectGetOwnPropertySymbolsIntrinsic, Object, [value]) as symbol[])
+    .length > 0) {
     return invalid("Symbol keys are not valid JSON object keys", path);
   }
 
-  const captured = Object.create(null) as Record<string, CanonicalJsonValue>;
-  const keys = Object.getOwnPropertyNames(value).sort(compareUnicodeCodePoints);
-  ancestors.add(value);
+  const captured = objectCreateIntrinsic(null) as Record<string, CanonicalJsonValue>;
+  const keys = reflectApplyIntrinsic(objectGetOwnPropertyNamesIntrinsic, Object, [value]) as
+    string[];
+  reflectApplyIntrinsic(arraySortIntrinsic, keys, [compareUnicodeCodePoints]);
+  reflectApplyIntrinsic(weakSetAddIntrinsic, ancestors, [value]);
   try {
-    for (const key of keys) {
+    for (let keyIndex = 0; keyIndex < keys.length; keyIndex += 1) {
+      const key = keys[keyIndex] as string;
       const childPath = `${path}/${pointerSegment(key)}`;
       const descriptor = dataDescriptor(value, key, childPath);
-      Object.defineProperty(captured, key, {
+      reflectApplyIntrinsic(objectDefinePropertyIntrinsic, Object, [captured, key, {
         value: captureValue(descriptor.value, childPath, ancestors),
         enumerable: true,
         configurable: false,
         writable: false,
-      });
+      }]);
     }
   } finally {
-    ancestors.delete(value);
+    reflectApplyIntrinsic(weakSetDeleteIntrinsic, ancestors, [value]);
   }
-  return Object.freeze(captured);
+  return objectFreezeIntrinsic(captured);
 }
 
 function captureValue(value: unknown, path: string, ancestors: WeakSet<object>): CanonicalJsonValue {
@@ -161,10 +233,10 @@ function captureValue(value: unknown, path: string, ancestors: WeakSet<object>):
     case "boolean":
       return value;
     case "number":
-      if (!Number.isFinite(value)) {
+      if (!numberIsFiniteIntrinsic(value)) {
         return invalid("Only finite JSON numbers are supported", path);
       }
-      if (Number.isInteger(value) && !Number.isSafeInteger(value)) {
+      if (numberIsIntegerIntrinsic(value) && !numberIsSafeIntegerIntrinsic(value)) {
         return invalid("JSON integers must be within the interoperable safe-integer range", path);
       }
       return value === 0 ? 0 : value;
@@ -180,10 +252,10 @@ function captureValue(value: unknown, path: string, ancestors: WeakSet<object>):
   if (isProxy(value)) {
     return invalid("Proxy values are not supported", path);
   }
-  if (ancestors.has(value)) {
+  if (reflectApplyIntrinsic(weakSetHasIntrinsic, ancestors, [value])) {
     return invalid("Cyclic values cannot be canonicalized", path);
   }
-  return Array.isArray(value)
+  return arrayIsArrayIntrinsic(value)
     ? captureArray(value, path, ancestors)
     : captureObject(value, path, ancestors);
 }
@@ -191,16 +263,27 @@ function captureValue(value: unknown, path: string, ancestors: WeakSet<object>):
 function serializeCaptured(value: CanonicalJsonValue): string {
   if (value === null) return "null";
   if (typeof value === "string" || typeof value === "boolean" || typeof value === "number") {
-    return JSON.stringify(value);
+    return reflectApplyIntrinsic(jsonStringifyIntrinsic, JSON, [value]) as string;
   }
-  if (Array.isArray(value)) {
-    return `[${value.map(serializeCaptured).join(",")}]`;
+  if (arrayIsArrayIntrinsic(value)) {
+    let serialized = "[";
+    for (let index = 0; index < value.length; index += 1) {
+      if (index > 0) serialized += ",";
+      serialized += serializeCaptured(value[index] as CanonicalJsonValue);
+    }
+    return `${serialized}]`;
   }
   const record = value as Readonly<Record<string, CanonicalJsonValue>>;
-  return `{${Object.keys(record)
-    .sort(compareUnicodeCodePoints)
-    .map((key) => `${JSON.stringify(key)}:${serializeCaptured(record[key] as CanonicalJsonValue)}`)
-    .join(",")}}`;
+  const keys = reflectApplyIntrinsic(objectKeysIntrinsic, Object, [record]) as string[];
+  reflectApplyIntrinsic(arraySortIntrinsic, keys, [compareUnicodeCodePoints]);
+  let serialized = "{";
+  for (let index = 0; index < keys.length; index += 1) {
+    if (index > 0) serialized += ",";
+    const key = keys[index] as string;
+    serialized += `${reflectApplyIntrinsic(jsonStringifyIntrinsic, JSON, [key]) as string}:${
+      serializeCaptured(record[key] as CanonicalJsonValue)}`;
+  }
+  return `${serialized}}`;
 }
 
 /**
@@ -209,8 +292,11 @@ function serializeCaptured(value: CanonicalJsonValue): string {
  */
 export function captureCanonicalJson(value: unknown): CapturedCanonicalJson {
   try {
-    const captured = captureValue(value, "#", new WeakSet<object>());
-    return Object.freeze({ value: captured, serialized: serializeCaptured(captured) });
+    const captured = captureValue(value, "#", new weakSetIntrinsic<object>());
+    return objectFreezeIntrinsic({
+      value: captured,
+      serialized: serializeCaptured(captured),
+    });
   } catch (error) {
     if (error instanceof CanonicalizationError) throw error;
     throw new CanonicalizationError("Value could not be inspected safely", "#");
@@ -219,7 +305,9 @@ export function captureCanonicalJson(value: unknown): CapturedCanonicalJson {
 
 /** SHA-256 of already canonicalized bytes; intended for the compiler snapshot. */
 export function hashCanonicalSerialization(serialized: string): string {
-  return createHash("sha256").update(serialized, "utf8").digest("hex");
+  const hash = createHashIntrinsic("sha256");
+  reflectApplyIntrinsic(hashUpdateIntrinsic, hash, [serialized, "utf8"]);
+  return reflectApplyIntrinsic(hashDigestIntrinsic, hash, ["hex"]) as string;
 }
 
 /** Canonical, whitespace-free UTF-8 JSON with recursively sorted object keys. */
@@ -235,8 +323,8 @@ export function canonicalHash(value: unknown): string {
 
 /** Rehydrate trusted canonical bytes as a recursively frozen ordinary JSON value. */
 export function parseFrozenCanonicalJson<T>(serialized: string): T {
-  return JSON.parse(serialized, (_key: string, value: unknown) => {
-    if (typeof value === "object" && value !== null) return Object.freeze(value);
+  return reflectApplyIntrinsic(jsonParseIntrinsic, JSON, [serialized, (_key: string, value: unknown) => {
+    if (typeof value === "object" && value !== null) return objectFreezeIntrinsic(value);
     return value;
-  }) as T;
+  }]) as T;
 }

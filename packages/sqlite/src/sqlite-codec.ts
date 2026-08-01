@@ -8,6 +8,8 @@ import {
 
 type SQLiteOutput = null | number | bigint | string | NodeJS.NonSharedUint8Array;
 
+const arrayIsArrayIntrinsic = Array.isArray;
+
 function corruption(
   operation: CycleStoreProviderOperation,
   label: string,
@@ -40,7 +42,9 @@ export function sqliteRow(
   operation: CycleStoreProviderOperation,
   label: string,
 ): readonly SQLiteOutput[] {
-  if (!Array.isArray(value) || value.length !== length) return corruption(operation, label);
+  if (!arrayIsArrayIntrinsic(value) || value.length !== length) {
+    return corruption(operation, label);
+  }
   return value as SQLiteOutput[];
 }
 

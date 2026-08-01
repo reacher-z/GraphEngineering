@@ -23,12 +23,17 @@ import {
   assertSQLiteCursorStageOwnershipOuterPublicationPreparedIntrinsic,
   assertSQLiteCursorStageOwnershipPostDdlReaderTerminalIntrinsic,
   assertSQLiteCursorStageOwnershipPreRebindCompleteIntrinsic,
+  assertSQLiteCursorStageOwnershipInitialPublicationAdoptedIntrinsic,
   completeSQLiteCursorStageOwnershipPostDdlReaderIntrinsic,
   mintSQLiteCursorStageOwnershipOuterPublicationAuthorityIntrinsic,
   poisonSQLiteCursorStageOwnershipOuterPublicationIntrinsic,
+  prepareSQLiteCursorStageOwnershipInitialPublicationAdoptionIntrinsic,
   publishSQLiteCursorStageOwnershipOuterPublicationIntrinsic,
+  publishSQLiteCursorStageOwnershipInitialPublicationAdoptionIntrinsic,
   registerSQLiteCursorStageOwnershipPostDdlReaderIntrinsic,
   retireSQLiteCursorStageOwnershipOuterPublicationIntrinsic,
+  type SQLiteBaselineCursorB2FenceRetirement,
+  type SQLiteCursorInitialPublicationStageWatermark,
   type SQLiteCursorStageOwnershipOuterPublicationTail,
   type SQLiteCursorStageOwnershipTransfer,
 } from "./operation-baseline-cursor-stage-ownership.js";
@@ -131,6 +136,9 @@ const digestSQLiteInitialWriteParametersVerifierIntrinsic =
 const digestSQLiteInitialWriteResultVerifierIntrinsic =
   digestSQLiteInitialWriteResultIntrinsic;
 const objectDefinePropertyIntrinsic = Object.defineProperty;
+const objectGetOwnPropertyDescriptorIntrinsic = Object.getOwnPropertyDescriptor;
+const reflectOwnKeysIntrinsic = Reflect.ownKeys;
+const arrayIsArrayIntrinsic = Array.isArray;
 const operationBaselineAccumulatorAppendIntrinsic =
   OperationBaselineAccumulator.prototype.append;
 const operationBaselineAccumulatorFinishIntrinsic =
@@ -190,6 +198,7 @@ export type SQLiteCursorOuterPublicationWritePhase =
   | "baseline-header-complete"
   | "executing-sequence-zero"
   | "sequence-zero-complete"
+  | "initial-stage-adoption-complete"
   | "poisoned"
   | "retired";
 
@@ -384,6 +393,72 @@ export interface SQLiteOperationSequenceZeroPublicationReceiptSnapshot {
   readonly writeKind: "operation-sequence-zero-publication";
 }
 
+/** Ordered, exact-identity presentation consumed by the one atomic adoption. */
+export type SQLiteCursorInitialPublicationReceiptBundle = readonly [
+  SQLiteMigration0002CatalogRebuildReceipt,
+  SQLiteBaselineEntriesPublicationReceipt,
+  SQLiteBaselineHeaderPublicationReceipt,
+  SQLiteOperationSequenceZeroPublicationReceipt,
+];
+
+export interface SQLiteMigration0002CatalogRebuildReceiptConsumedTombstone {
+  readonly __sqliteMigration0002CatalogRebuildReceiptConsumedTombstone: never;
+}
+
+export interface SQLiteBaselineEntriesPublicationReceiptConsumedTombstone {
+  readonly __sqliteBaselineEntriesPublicationReceiptConsumedTombstone: never;
+}
+
+export interface SQLiteBaselineHeaderPublicationReceiptConsumedTombstone {
+  readonly __sqliteBaselineHeaderPublicationReceiptConsumedTombstone: never;
+}
+
+export interface SQLiteOperationSequenceZeroPublicationReceiptConsumedTombstone {
+  readonly __sqliteOperationSequenceZeroPublicationReceiptConsumedTombstone: never;
+}
+
+/** Opaque proof that all four initial-write receipts were adopted together. */
+export interface SQLiteCursorInitialStageAdoptionReceipt {
+  readonly __sqliteCursorInitialStageAdoptionReceipt: never;
+}
+
+export interface SQLiteCursorInitialStageAdoptionReceiptSnapshot {
+  readonly authority: SQLiteCursorOuterPublicationAuthority;
+  readonly connection: SQLiteConnection;
+  readonly stage: SQLiteBaselineTempStage;
+  readonly receipt: SQLiteCursorPreRebindReceipt;
+  readonly projectionIdentity: OperationBaselineProjectionIdentity;
+  readonly projectionReference: SQLiteCursorExactProjectionReference;
+  readonly transfer: SQLiteCursorStageOwnershipTransfer;
+  readonly transactionLineage: SQLiteConnectionTransactionLineage;
+  readonly migration0002Receipt: SQLiteMigration0002CatalogRebuildReceipt;
+  readonly baselineEntriesPublicationReceipt: SQLiteBaselineEntriesPublicationReceipt;
+  readonly baselineHeaderPublicationReceipt: SQLiteBaselineHeaderPublicationReceipt;
+  readonly operationSequenceZeroPublicationReceipt:
+    SQLiteOperationSequenceZeroPublicationReceipt;
+  readonly migration0002ConsumedTombstone:
+    SQLiteMigration0002CatalogRebuildReceiptConsumedTombstone;
+  readonly baselineEntriesConsumedTombstone:
+    SQLiteBaselineEntriesPublicationReceiptConsumedTombstone;
+  readonly baselineHeaderConsumedTombstone:
+    SQLiteBaselineHeaderPublicationReceiptConsumedTombstone;
+  readonly operationSequenceZeroConsumedTombstone:
+    SQLiteOperationSequenceZeroPublicationReceiptConsumedTombstone;
+  readonly postDdlCatalogFence: SQLiteCursorPostDdlCatalogFence;
+  readonly readerLease: SQLiteCursorPostDdlPublicationReaderLease;
+  readonly readerLeaseLifecycle: "retired";
+  readonly readerCloseCount: 1;
+  readonly readerReDerivedProjectionSha256: string;
+  readonly adoptedTransactionEpoch: bigint;
+  readonly adoptedTotalChanges: number;
+  readonly adoptedOuterLedger: SQLiteCursorOuterPublicationLedgerSnapshot;
+  readonly targetCatalogSha256:
+    typeof SQLITE_CURSOR_PUBLICATION_TARGET.catalogSha256;
+  readonly retiredB2Fence: SQLiteBaselineCursorB2FenceRetirement;
+  readonly mintCount: 1;
+  readonly writeKind: "initial-publication-stage-adoption";
+}
+
 export interface SQLiteCursorPostDdlCatalogFence {
   readonly __sqliteCursorPostDdlCatalogFence: never;
 }
@@ -514,6 +589,19 @@ export interface SQLiteCursorOuterPublicationAuthoritySnapshot {
   readonly operationSequenceZeroPrepareCount: 0 | 1;
   readonly operationSequenceZeroExecuteCount: 0 | 1;
   readonly operationSequenceZeroAffectedRows: 0 | 1;
+  readonly initialStageAdoptionReceipt:
+    SQLiteCursorInitialStageAdoptionReceipt | undefined;
+  readonly initialStageAdoptionReceiptMintCount: 0 | 1;
+  readonly receiptConsumptionCount: 0 | 4;
+  readonly tombstoneMintCount: 0 | 4;
+  readonly migration0002ConsumedTombstone:
+    SQLiteMigration0002CatalogRebuildReceiptConsumedTombstone | undefined;
+  readonly baselineEntriesConsumedTombstone:
+    SQLiteBaselineEntriesPublicationReceiptConsumedTombstone | undefined;
+  readonly baselineHeaderConsumedTombstone:
+    SQLiteBaselineHeaderPublicationReceiptConsumedTombstone | undefined;
+  readonly operationSequenceZeroConsumedTombstone:
+    SQLiteOperationSequenceZeroPublicationReceiptConsumedTombstone | undefined;
   readonly writePhase: SQLiteCursorOuterPublicationWritePhase;
 }
 
@@ -571,6 +659,18 @@ interface AuthorityState {
   operationSequenceZeroPrepareCount: 0 | 1;
   operationSequenceZeroExecuteCount: 0 | 1;
   operationSequenceZeroAffectedRows: 0 | 1;
+  initialStageAdoptionReceipt: SQLiteCursorInitialStageAdoptionReceipt | undefined;
+  initialStageAdoptionReceiptMintCount: 0 | 1;
+  receiptConsumptionCount: 0 | 4;
+  tombstoneMintCount: 0 | 4;
+  migration0002ConsumedTombstone:
+    SQLiteMigration0002CatalogRebuildReceiptConsumedTombstone | undefined;
+  baselineEntriesConsumedTombstone:
+    SQLiteBaselineEntriesPublicationReceiptConsumedTombstone | undefined;
+  baselineHeaderConsumedTombstone:
+    SQLiteBaselineHeaderPublicationReceiptConsumedTombstone | undefined;
+  operationSequenceZeroConsumedTombstone:
+    SQLiteOperationSequenceZeroPublicationReceiptConsumedTombstone | undefined;
   writePhase: SQLiteCursorOuterPublicationWritePhase;
 }
 
@@ -645,6 +745,25 @@ interface OperationSequenceZeroPublicationReceiptState {
   readonly snapshot: SQLiteOperationSequenceZeroPublicationReceiptSnapshot;
 }
 
+type InitialStageAdoptionReceiptLifecycle = "pending" | "active";
+
+interface InitialStageAdoptionReceiptState {
+  readonly authority: SQLiteCursorOuterPublicationAuthority;
+  readonly bundle: SQLiteCursorInitialPublicationReceiptBundle;
+  readonly connection: SQLiteConnection;
+  lifecycle: InitialStageAdoptionReceiptLifecycle;
+  readonly fence: SQLiteCursorPostDdlCatalogFence;
+  readonly readerLease: SQLiteCursorPostDdlPublicationReaderLease;
+  readonly snapshot: SQLiteCursorInitialStageAdoptionReceiptSnapshot;
+  readonly stageWatermark: SQLiteCursorInitialPublicationStageWatermark;
+}
+
+interface ConsumedTombstoneState {
+  readonly adoptionReceipt: SQLiteCursorInitialStageAdoptionReceipt;
+  lifecycle: InitialStageAdoptionReceiptLifecycle;
+  readonly receipt: object;
+}
+
 interface CancellationState { cancelled: boolean }
 
 const AUTHORITIES = new WeakMap<object, AuthorityState>();
@@ -661,8 +780,21 @@ const BASELINE_HEADER_PUBLICATION_RECEIPTS =
   new WeakMap<object, BaselineHeaderPublicationReceiptState>();
 const OPERATION_SEQUENCE_ZERO_PUBLICATION_RECEIPTS =
   new WeakMap<object, OperationSequenceZeroPublicationReceiptState>();
+const INITIAL_STAGE_ADOPTION_RECEIPTS =
+  new WeakMap<object, InitialStageAdoptionReceiptState>();
+const INITIAL_STAGE_CONSUMED_TOMBSTONES =
+  new WeakMap<object, ConsumedTombstoneState>();
+const MIGRATION_0002_RECEIPT_CONSUMPTIONS = new WeakMap<object,
+  SQLiteMigration0002CatalogRebuildReceiptConsumedTombstone>();
+const BASELINE_ENTRIES_RECEIPT_CONSUMPTIONS = new WeakMap<object,
+  SQLiteBaselineEntriesPublicationReceiptConsumedTombstone>();
+const BASELINE_HEADER_RECEIPT_CONSUMPTIONS = new WeakMap<object,
+  SQLiteBaselineHeaderPublicationReceiptConsumedTombstone>();
+const OPERATION_SEQUENCE_ZERO_RECEIPT_CONSUMPTIONS = new WeakMap<object,
+  SQLiteOperationSequenceZeroPublicationReceiptConsumedTombstone>();
 const weakMapGetIntrinsic = WeakMap.prototype.get;
 const weakMapSetIntrinsic = WeakMap.prototype.set;
+const weakMapDeleteIntrinsic = WeakMap.prototype.delete;
 
 function fail(
   code: "GE_CYCLE_STORE_INVALID_ARGUMENT" | "GE_CYCLE_STORE_STALE_FENCE"
@@ -926,6 +1058,14 @@ export function prepareSQLiteCursorOuterPublicationAuthorityIntrinsic(
     operationSequenceZeroPrepareCount: 0,
     operationSequenceZeroExecuteCount: 0,
     operationSequenceZeroAffectedRows: 0,
+    initialStageAdoptionReceipt: undefined,
+    initialStageAdoptionReceiptMintCount: 0,
+    receiptConsumptionCount: 0,
+    tombstoneMintCount: 0,
+    migration0002ConsumedTombstone: undefined,
+    baselineEntriesConsumedTombstone: undefined,
+    baselineHeaderConsumedTombstone: undefined,
+    operationSequenceZeroConsumedTombstone: undefined,
     connection,
     currentTotalChanges: changes.totalChanges,
     currentTransactionEpoch: owner.transactionEpoch,
@@ -1053,10 +1193,25 @@ export function assertSQLiteCursorOuterPublicationAuthorityIntrinsic(
     return fail("GE_CYCLE_STORE_INVALID_ARGUMENT", "SQLite outer publication authority is not active");
   }
   try {
-    assertSQLiteCursorStageOwnershipOuterPublicationOwnedIntrinsic(
-      state.connection, state.stage, state.receipt, state.projectionIdentity,
-      state.transfer, authority,
-    );
+    if (state.writePhase === "initial-stage-adoption-complete") {
+      const adoptionReceipt = state.initialStageAdoptionReceipt;
+      const adoption = adoptionReceipt === undefined ? undefined : reflectApplyIntrinsic(
+        weakMapGetIntrinsic, INITIAL_STAGE_ADOPTION_RECEIPTS, [adoptionReceipt as object],
+      ) as InitialStageAdoptionReceiptState | undefined;
+      if (adoption === undefined || adoption.lifecycle !== "active") {
+        fail("GE_CYCLE_STORE_CORRUPTION", "SQLite initial stage adoption authority drifted");
+      }
+      assertSQLiteCursorStageOwnershipInitialPublicationAdoptedIntrinsic(
+        state.connection, state.stage, state.receipt, state.projectionIdentity,
+        state.transfer, authority, adoption.readerLease,
+        adoption.snapshot.retiredB2Fence, adoption.stageWatermark,
+      );
+    } else {
+      assertSQLiteCursorStageOwnershipOuterPublicationOwnedIntrinsic(
+        state.connection, state.stage, state.receipt, state.projectionIdentity,
+        state.transfer, authority,
+      );
+    }
     const clock = assertSQLiteCursorOuterClockAuthorityActiveGraphIntrinsic(
       state.connection, state.migrationLockCapability, state.providerClockCapability,
       state.outerClockEvidence, state.outerClockConsumedTombstone,
@@ -1323,6 +1478,11 @@ export function readSQLiteMigration0002CatalogRebuildReceiptSnapshotIntrinsic(
   if (state === undefined) {
     return fail("GE_CYCLE_STORE_INVALID_ARGUMENT", "SQLite migration 0002 receipt is invalid");
   }
+  if (reflectApplyIntrinsic(weakMapGetIntrinsic, MIGRATION_0002_RECEIPT_CONSUMPTIONS, [
+    receipt as object,
+  ]) !== undefined) {
+    return fail("GE_CYCLE_STORE_INVALID_ARGUMENT", "SQLite migration 0002 receipt was consumed");
+  }
   // This receipt is one of the reusable initial-write proofs a later adoption
   // replays, so it must speak the same terminal vocabulary as the other three:
   // a poisoned graph is corruption and a retired graph is a stale fence. The
@@ -1379,6 +1539,32 @@ function exactLedger(
   return left.logicalWriteSequence === right.logicalWriteSequence
     && left.fixedStatementCount === right.fixedStatementCount
     && left.affectedRowsWatermark === right.affectedRowsWatermark;
+}
+
+function assertActiveConsumedTombstoneIntrinsic(
+  tombstone: object,
+  receipt: object,
+  adoptionReceipt: SQLiteCursorInitialStageAdoptionReceipt,
+): void {
+  const tombstoneState = reflectApplyIntrinsic(
+    weakMapGetIntrinsic,
+    INITIAL_STAGE_CONSUMED_TOMBSTONES,
+    [tombstone],
+  ) as ConsumedTombstoneState | undefined;
+  const adoptionState = reflectApplyIntrinsic(
+    weakMapGetIntrinsic,
+    INITIAL_STAGE_ADOPTION_RECEIPTS,
+    [adoptionReceipt as object],
+  ) as InitialStageAdoptionReceiptState | undefined;
+  if (tombstoneState === undefined || tombstoneState.lifecycle !== "active"
+      || tombstoneState.receipt !== receipt
+      || tombstoneState.adoptionReceipt !== adoptionReceipt
+      || adoptionState === undefined || adoptionState.lifecycle !== "active") {
+    return fail(
+      "GE_CYCLE_STORE_CORRUPTION",
+      "SQLite initial publication receipt tombstone is invalid",
+    );
+  }
 }
 
 function postDdlPublicationReaderLeaseState(
@@ -1760,7 +1946,28 @@ export function assertSQLiteCursorPostDdlCatalogFenceIntrinsic(
 
   try {
     assertSQLiteCursorOuterPublicationAuthorityIntrinsic(authority);
-    readSQLiteMigration0002CatalogRebuildReceiptSnapshotIntrinsic(migration0002Receipt);
+    const consumed = reflectApplyIntrinsic(
+      weakMapGetIntrinsic,
+      MIGRATION_0002_RECEIPT_CONSUMPTIONS,
+      [migration0002Receipt as object],
+    ) as SQLiteMigration0002CatalogRebuildReceiptConsumedTombstone | undefined;
+    if (consumed === undefined) {
+      readSQLiteMigration0002CatalogRebuildReceiptSnapshotIntrinsic(migration0002Receipt);
+    } else {
+      const adoptionReceipt = authorityRecord.initialStageAdoptionReceipt;
+      if (adoptionReceipt === undefined
+          || authorityRecord.migration0002ConsumedTombstone !== consumed) {
+        fail(
+          "GE_CYCLE_STORE_CORRUPTION",
+          "SQLite post-DDL catalog fence consumed predecessor drifted",
+        );
+      }
+      assertActiveConsumedTombstoneIntrinsic(
+        consumed as object,
+        migration0002Receipt as object,
+        adoptionReceipt,
+      );
+    }
     const watermark = fenceRecord.snapshot.outerLedgerWatermark;
     if (authorityRecord.transactionLineage !== fenceRecord.snapshot.transactionLineage
         || authorityRecord.currentTransactionEpoch < fenceRecord.snapshot.transactionEpoch
@@ -2445,6 +2652,14 @@ function baselineEntriesReceiptState(
       "SQLite baseline-entries publication receipt is invalid",
     );
   }
+  if (reflectApplyIntrinsic(weakMapGetIntrinsic, BASELINE_ENTRIES_RECEIPT_CONSUMPTIONS, [
+    receipt as object,
+  ]) !== undefined) {
+    return fail(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "SQLite baseline-entries publication receipt was consumed",
+    );
+  }
   return state;
 }
 
@@ -3001,6 +3216,14 @@ function baselineHeaderReceiptState(
     return fail(
       "GE_CYCLE_STORE_INVALID_ARGUMENT",
       "SQLite baseline-header publication receipt is invalid",
+    );
+  }
+  if (reflectApplyIntrinsic(weakMapGetIntrinsic, BASELINE_HEADER_RECEIPT_CONSUMPTIONS, [
+    receipt as object,
+  ]) !== undefined) {
+    return fail(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "SQLite baseline-header publication receipt was consumed",
     );
   }
   return state;
@@ -3675,6 +3898,16 @@ function operationSequenceZeroReceiptState(
       "SQLite operation-sequence-zero publication receipt is invalid",
     );
   }
+  if (reflectApplyIntrinsic(
+    weakMapGetIntrinsic,
+    OPERATION_SEQUENCE_ZERO_RECEIPT_CONSUMPTIONS,
+    [receipt as object],
+  ) !== undefined) {
+    return fail(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "SQLite operation-sequence-zero publication receipt was consumed",
+    );
+  }
   return state;
 }
 
@@ -4207,6 +4440,474 @@ export function readSQLiteOperationSequenceZeroPublicationReceiptSnapshotIntrins
   return state.snapshot;
 }
 
+interface CheckedInitialPublicationBundle {
+  readonly migration: Migration0002ReceiptState;
+  readonly entries: BaselineEntriesPublicationReceiptState;
+  readonly header: BaselineHeaderPublicationReceiptState;
+  readonly sequence: OperationSequenceZeroPublicationReceiptState;
+  readonly migrationReceipt: SQLiteMigration0002CatalogRebuildReceipt;
+  readonly entriesReceipt: SQLiteBaselineEntriesPublicationReceipt;
+  readonly headerReceipt: SQLiteBaselineHeaderPublicationReceipt;
+  readonly sequenceReceipt: SQLiteOperationSequenceZeroPublicationReceipt;
+}
+
+function checkedInitialPublicationBundlePresentationIntrinsic(
+  authority: SQLiteCursorOuterPublicationAuthority,
+  bundle: SQLiteCursorInitialPublicationReceiptBundle,
+  fence: SQLiteCursorPostDdlCatalogFence,
+  readerLease: SQLiteCursorPostDdlPublicationReaderLease,
+): CheckedInitialPublicationBundle {
+  let values: readonly unknown[];
+  try {
+    if (!reflectApplyIntrinsic(arrayIsArrayIntrinsic, Array, [bundle])) {
+      return fail("GE_CYCLE_STORE_INVALID_ARGUMENT", "SQLite initial publication receipt bundle is invalid");
+    }
+    const keys = reflectApplyIntrinsic(reflectOwnKeysIntrinsic, Reflect, [bundle]) as
+      readonly PropertyKey[];
+    if (keys.length !== 5 || keys[0] !== "0" || keys[1] !== "1"
+        || keys[2] !== "2" || keys[3] !== "3" || keys[4] !== "length") {
+      return fail("GE_CYCLE_STORE_INVALID_ARGUMENT", "SQLite initial publication receipt bundle is invalid");
+    }
+    const dense: unknown[] = [];
+    for (let index = 0; index < 4; index += 1) {
+      const descriptor = reflectApplyIntrinsic(
+        objectGetOwnPropertyDescriptorIntrinsic,
+        Object,
+        [bundle, `${index}`],
+      ) as PropertyDescriptor | undefined;
+      if (descriptor === undefined || !("value" in descriptor)) {
+        return fail("GE_CYCLE_STORE_INVALID_ARGUMENT", "SQLite initial publication receipt bundle is invalid");
+      }
+      defineDenseArrayValue(dense, index, descriptor.value);
+    }
+    const lengthDescriptor = reflectApplyIntrinsic(
+      objectGetOwnPropertyDescriptorIntrinsic,
+      Object,
+      [bundle, "length"],
+    ) as PropertyDescriptor | undefined;
+    if (lengthDescriptor === undefined || lengthDescriptor.value !== 4) {
+      return fail("GE_CYCLE_STORE_INVALID_ARGUMENT", "SQLite initial publication receipt bundle is invalid");
+    }
+    values = dense;
+  } catch {
+    return fail("GE_CYCLE_STORE_INVALID_ARGUMENT", "SQLite initial publication receipt bundle is invalid");
+  }
+  // Do not destructure here: array destructuring consults the mutable
+  // Array.prototype iterator. Presentation validation must remain usable even
+  // when ambient prototypes are replaced after this module is loaded.
+  const migrationReceipt = values[0] as SQLiteMigration0002CatalogRebuildReceipt;
+  const entriesReceipt = values[1] as SQLiteBaselineEntriesPublicationReceipt;
+  const headerReceipt = values[2] as SQLiteBaselineHeaderPublicationReceipt;
+  const sequenceReceipt = values[3] as SQLiteOperationSequenceZeroPublicationReceipt;
+  const migration = migrationReceipt !== null && typeof migrationReceipt === "object"
+    ? reflectApplyIntrinsic(weakMapGetIntrinsic, MIGRATION_0002_RECEIPTS, [
+      migrationReceipt as object,
+    ]) as Migration0002ReceiptState | undefined
+    : undefined;
+  const entries = entriesReceipt !== null && typeof entriesReceipt === "object"
+    ? reflectApplyIntrinsic(weakMapGetIntrinsic, BASELINE_ENTRIES_PUBLICATION_RECEIPTS, [
+      entriesReceipt as object,
+    ]) as BaselineEntriesPublicationReceiptState | undefined
+    : undefined;
+  const header = headerReceipt !== null && typeof headerReceipt === "object"
+    ? reflectApplyIntrinsic(weakMapGetIntrinsic, BASELINE_HEADER_PUBLICATION_RECEIPTS, [
+      headerReceipt as object,
+    ]) as BaselineHeaderPublicationReceiptState | undefined
+    : undefined;
+  const sequence = sequenceReceipt !== null && typeof sequenceReceipt === "object"
+    ? reflectApplyIntrinsic(weakMapGetIntrinsic, OPERATION_SEQUENCE_ZERO_PUBLICATION_RECEIPTS, [
+      sequenceReceipt as object,
+    ]) as OperationSequenceZeroPublicationReceiptState | undefined
+    : undefined;
+  if (migration === undefined || entries === undefined || header === undefined
+      || sequence === undefined || migration.authority !== authority
+      || entries.authority !== authority || header.authority !== authority
+      || sequence.authority !== authority || entries.migration0002Receipt !== migrationReceipt
+      || header.migration0002Receipt !== migrationReceipt
+      || sequence.migration0002Receipt !== migrationReceipt
+      || header.baselineEntriesPublicationReceipt !== entriesReceipt
+      || sequence.baselineEntriesPublicationReceipt !== entriesReceipt
+      || sequence.baselineHeaderPublicationReceipt !== headerReceipt
+      || entries.readerLease !== readerLease || header.readerLease !== readerLease
+      || sequence.readerLease !== readerLease || migration.connection !== entries.connection
+      || entries.connection !== header.connection || header.connection !== sequence.connection) {
+    return fail("GE_CYCLE_STORE_INVALID_ARGUMENT", "SQLite initial publication receipt bundle is invalid");
+  }
+  if (entries.fence !== fence || header.fence !== fence || sequence.fence !== fence) {
+    return fail(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "SQLite initial publication stage adoption graph is invalid",
+    );
+  }
+  return { migration, entries, header, sequence, migrationReceipt, entriesReceipt,
+    headerReceipt, sequenceReceipt };
+}
+
+function initialAdoptionCorruption(
+  state: AuthorityState,
+  authority: SQLiteCursorOuterPublicationAuthority,
+  message: string,
+): never {
+  poisonAuthorityGraph(state, authority, message);
+  return fail("GE_CYCLE_STORE_CORRUPTION", message);
+}
+
+function validateInitialAdoptionGraphIntrinsic(
+  state: AuthorityState,
+  authority: SQLiteCursorOuterPublicationAuthority,
+  checked: CheckedInitialPublicationBundle,
+  fence: SQLiteCursorPostDdlCatalogFence,
+  readerLease: SQLiteCursorPostDdlPublicationReaderLease,
+): PostDdlPublicationReaderLeaseState {
+  const fenceState = postDdlCatalogFenceState(fence);
+  const reader = postDdlPublicationReaderLeaseState(readerLease);
+  const final = checked.sequence.snapshot;
+  if (state.initialStageAdoptionReceipt !== undefined
+      || state.initialStageAdoptionReceiptMintCount !== 0
+      || state.receiptConsumptionCount !== 0 || state.tombstoneMintCount !== 0
+      || state.migration0002ConsumedTombstone !== undefined
+      || state.baselineEntriesConsumedTombstone !== undefined
+      || state.baselineHeaderConsumedTombstone !== undefined
+      || state.operationSequenceZeroConsumedTombstone !== undefined
+      || reflectApplyIntrinsic(weakMapGetIntrinsic, MIGRATION_0002_RECEIPT_CONSUMPTIONS,
+        [checked.migrationReceipt as object]) !== undefined
+      || reflectApplyIntrinsic(weakMapGetIntrinsic, BASELINE_ENTRIES_RECEIPT_CONSUMPTIONS,
+        [checked.entriesReceipt as object]) !== undefined
+      || reflectApplyIntrinsic(weakMapGetIntrinsic, BASELINE_HEADER_RECEIPT_CONSUMPTIONS,
+        [checked.headerReceipt as object]) !== undefined
+      || reflectApplyIntrinsic(weakMapGetIntrinsic, OPERATION_SEQUENCE_ZERO_RECEIPT_CONSUMPTIONS,
+        [checked.sequenceReceipt as object]) !== undefined) {
+    return initialAdoptionCorruption(
+      state, authority, "SQLite initial publication stage adoption was reused",
+    );
+  }
+  let owner: ReturnType<typeof readSQLiteConnectionOwnerSnapshot>;
+  let changes: ReturnType<typeof readSQLiteConnectionTotalChangesSnapshot>;
+  try {
+    owner = readSQLiteConnectionOwnerSnapshot(state.connection);
+    changes = readSQLiteConnectionTotalChangesSnapshot(state.connection);
+  } catch (error) {
+    const translated = translateSQLiteError(error, OPERATION);
+    poisonAuthorityGraph(state, authority,
+      "SQLite initial publication stage adoption owner observation failed");
+    throw translated;
+  }
+  if (!owner.isTransaction || owner.transactionMode !== "exclusive"
+      || owner.transactionLineage !== state.transactionLineage) {
+    return initialAdoptionCorruption(
+      state, authority, "SQLite initial publication stage adoption lineage drifted",
+    );
+  }
+  if (owner.transactionEpoch !== state.currentTransactionEpoch
+      || changes.transactionEpoch !== owner.transactionEpoch
+      || changes.totalChanges !== state.currentTotalChanges) {
+    return initialAdoptionCorruption(
+      state, authority, "SQLite initial publication stage adoption ledger drifted",
+    );
+  }
+  try {
+    assertSQLiteCursorOuterPublicationAuthorityIntrinsic(authority);
+    readSQLiteMigration0002CatalogRebuildReceiptSnapshotIntrinsic(
+      checked.migrationReceipt,
+    );
+    assertSQLiteCursorPostDdlCatalogFenceIntrinsic(
+      authority, checked.migrationReceipt, fence,
+    );
+    assertSQLiteCursorPostDdlPublicationReaderTerminalProofIntrinsic(
+      authority, checked.migrationReceipt, fence, readerLease,
+    );
+    assertSQLiteCursorBaselineEntriesPublicationReceiptIntrinsic(
+      authority, checked.migrationReceipt, fence, readerLease,
+      checked.entriesReceipt,
+    );
+    assertSQLiteCursorBaselineHeaderPublicationReceiptIntrinsic(
+      authority, checked.migrationReceipt, fence, readerLease,
+      checked.entriesReceipt, checked.headerReceipt,
+    );
+    assertSQLiteCursorOperationSequenceZeroPublicationReceiptIntrinsic(
+      authority, checked.migrationReceipt, fence, readerLease,
+      checked.entriesReceipt, checked.headerReceipt, checked.sequenceReceipt,
+    );
+  } catch (error) {
+    terminateAfterInvariantFailure(state, authority, error,
+      "SQLite initial publication adoption authority validation failed");
+    throw error;
+  }
+  const expectedEntries = state.projectionIdentity.entryCount;
+  const expectedAffectedRows = 3 + state.projectionIdentity.legacyOperationCount
+    + expectedEntries;
+  if (state.writePhase !== "sequence-zero-complete"
+      || state.migration0002Receipt !== checked.migrationReceipt
+      || state.baselineEntriesPublicationReceipt !== checked.entriesReceipt
+      || state.baselineHeaderPublicationReceipt !== checked.headerReceipt
+      || state.operationSequenceZeroPublicationReceipt !== checked.sequenceReceipt
+      || state.migration0002LogicalExecutionCount !== 1
+      || state.migration0002PreparedStatementCount
+        !== SQLITE_CURSOR_MIGRATION_0002_FIXED_STATEMENT_COUNT
+      || state.baselineEntriesPublicationReceiptMintCount !== 1
+      || state.baselineEntriesLogicalExecutionCount !== 1
+      || state.baselineEntriesPrepareCount !== 1
+      || state.baselineEntriesExecuteCount !== expectedEntries
+      || state.baselineEntriesAffectedRows !== expectedEntries
+      || state.baselineHeaderPublicationReceiptMintCount !== 1
+      || state.baselineHeaderLogicalExecutionCount !== 1
+      || state.baselineHeaderPrepareCount !== 1 || state.baselineHeaderExecuteCount !== 1
+      || state.baselineHeaderAffectedRows !== 1
+      || state.operationSequenceZeroPublicationReceiptMintCount !== 1
+      || state.operationSequenceZeroLogicalExecutionCount !== 1
+      || state.operationSequenceZeroPrepareCount !== 1
+      || state.operationSequenceZeroExecuteCount !== 1
+      || state.operationSequenceZeroAffectedRows !== 1
+      || state.logicalWriteSequence !== 4
+      || state.fixedStatementCount
+        !== SQLITE_CURSOR_MIGRATION_0002_FIXED_STATEMENT_COUNT + expectedEntries + 2
+      || state.affectedRowsWatermark !== expectedAffectedRows
+      || state.currentTransactionEpoch !== final.transactionEpochAfter
+      || state.currentTotalChanges !== final.totalChangesAfter
+      || !exactLedger(outerLedgerSnapshot(state), final.outerLedgerAfter)
+      || checked.migration.snapshot.outerLedgerAfter.logicalWriteSequence !== 1
+      || checked.entries.snapshot.outerLedgerBefore.logicalWriteSequence !== 1
+      || checked.header.snapshot.outerLedgerBefore.logicalWriteSequence !== 2
+      || final.outerLedgerBefore.logicalWriteSequence !== 3
+      || fenceState.authority !== authority || fenceState.connection !== state.connection
+      || fenceState.migration0002Receipt !== checked.migrationReceipt
+      || fenceState.snapshot.catalogSha256 !== SQLITE_CURSOR_PUBLICATION_TARGET.catalogSha256
+      || state.postDdlCatalogFence !== fence || state.postDdlCatalogFenceMintCount !== 1
+      || state.postDdlPublicationReaderLease !== readerLease
+      || state.postDdlPublicationReaderLeaseMintCount !== 1
+      || state.postDdlPublicationReaderLeaseCloseCount !== 1
+      || reader.authority !== authority || reader.connection !== state.connection
+      || reader.fence !== fence || reader.migration0002Receipt !== checked.migrationReceipt
+      || reader.lifecycle !== "retired" || reader.closeAttemptCount !== 1
+      || !reader.closeSucceeded || reader.prepareCount !== 1 || reader.executeCount !== 1
+      || reader.ownershipAcquisitionCount !== 1 || reader.rederivedProjection === undefined
+      || !sameProjectionIdentity(reader.rederivedProjection, state.projectionIdentity)
+      || reader.rederivedProjection.projectionSha256 !== state.projectionIdentity.projectionSha256) {
+    return initialAdoptionCorruption(state, authority, "SQLite initial publication adoption graph drifted");
+  }
+  return reader;
+}
+
+export function adoptSQLiteCursorInitialPublicationStageIntrinsic(
+  authority: SQLiteCursorOuterPublicationAuthority,
+  bundle: SQLiteCursorInitialPublicationReceiptBundle,
+  fence: SQLiteCursorPostDdlCatalogFence,
+  readerLease: SQLiteCursorPostDdlPublicationReaderLease,
+  cancellation?: SQLiteCursorOuterPublicationCancellationSignal,
+): SQLiteCursorInitialStageAdoptionReceipt {
+  const checked = checkedInitialPublicationBundlePresentationIntrinsic(
+    authority, bundle, fence, readerLease,
+  );
+  const state = authorityState(authority);
+  const cancellationState = postDdlPublicationReaderCancellationState(cancellation);
+  const reader = validateInitialAdoptionGraphIntrinsic(
+    state, authority, checked, fence, readerLease,
+  );
+  const requestedWatermark = objectFreezeIntrinsic({
+    outerLedger: outerLedgerSnapshot(state),
+    targetCatalogSha256: SQLITE_CURSOR_PUBLICATION_TARGET.catalogSha256,
+    totalChanges: state.currentTotalChanges,
+    transactionEpoch: state.currentTransactionEpoch,
+  } satisfies SQLiteCursorInitialPublicationStageWatermark);
+  let mint: ReturnType<
+    typeof prepareSQLiteCursorStageOwnershipInitialPublicationAdoptionIntrinsic
+  >;
+  try {
+    mint = prepareSQLiteCursorStageOwnershipInitialPublicationAdoptionIntrinsic(
+      state.connection, state.stage, state.receipt, state.projectionIdentity,
+      state.transfer, authority, readerLease, requestedWatermark,
+    );
+  } catch (error) {
+    terminateAfterInvariantFailure(state, authority, error,
+      "SQLite initial publication stage adoption preparation failed");
+    throw error;
+  }
+  // This is the sole retryable exit after every fallible graph, catalog and
+  // stage-side adoption check, but before any receipt/tombstone is allocated
+  // or consumed. The exact prepared continuation remains reusable by the same
+  // untouched valid bundle.
+  if (cancellationState?.cancelled) {
+    return fail("GE_CYCLE_STORE_UNAVAILABLE", "SQLite initial publication stage adoption was cancelled");
+  }
+  const migrationTombstone = objectFreezeIntrinsic(objectCreateIntrinsic(null)) as
+    SQLiteMigration0002CatalogRebuildReceiptConsumedTombstone;
+  const entriesTombstone = objectFreezeIntrinsic(objectCreateIntrinsic(null)) as
+    SQLiteBaselineEntriesPublicationReceiptConsumedTombstone;
+  const headerTombstone = objectFreezeIntrinsic(objectCreateIntrinsic(null)) as
+    SQLiteBaselineHeaderPublicationReceiptConsumedTombstone;
+  const sequenceTombstone = objectFreezeIntrinsic(objectCreateIntrinsic(null)) as
+    SQLiteOperationSequenceZeroPublicationReceiptConsumedTombstone;
+  const adoptionReceipt = objectFreezeIntrinsic(objectCreateIntrinsic(null)) as
+    SQLiteCursorInitialStageAdoptionReceipt;
+  const adoptedOuterLedger = outerLedgerSnapshot(state);
+  const snapshot = objectFreezeIntrinsic({
+    adoptedOuterLedger,
+    adoptedTotalChanges: state.currentTotalChanges,
+    adoptedTransactionEpoch: state.currentTransactionEpoch,
+    authority,
+    baselineEntriesConsumedTombstone: entriesTombstone,
+    baselineEntriesPublicationReceipt: checked.entriesReceipt,
+    baselineHeaderConsumedTombstone: headerTombstone,
+    baselineHeaderPublicationReceipt: checked.headerReceipt,
+    connection: state.connection,
+    migration0002ConsumedTombstone: migrationTombstone,
+    migration0002Receipt: checked.migrationReceipt,
+    mintCount: 1 as const,
+    operationSequenceZeroConsumedTombstone: sequenceTombstone,
+    operationSequenceZeroPublicationReceipt: checked.sequenceReceipt,
+    postDdlCatalogFence: fence,
+    projectionIdentity: state.projectionIdentity,
+    projectionReference: state.projectionReference,
+    readerCloseCount: 1 as const,
+    readerLease,
+    readerLeaseLifecycle: "retired" as const,
+    readerReDerivedProjectionSha256: reader.rederivedProjection!.projectionSha256,
+    receipt: state.receipt,
+    retiredB2Fence: mint.retiredB2Fence,
+    stage: state.stage,
+    targetCatalogSha256: SQLITE_CURSOR_PUBLICATION_TARGET.catalogSha256,
+    transactionLineage: state.transactionLineage,
+    transfer: state.transfer,
+    writeKind: "initial-publication-stage-adoption" as const,
+  } satisfies SQLiteCursorInitialStageAdoptionReceiptSnapshot);
+  const receiptState: InitialStageAdoptionReceiptState = {
+    authority, bundle: objectFreezeIntrinsic([
+      checked.migrationReceipt, checked.entriesReceipt, checked.headerReceipt,
+      checked.sequenceReceipt,
+    ]), connection: state.connection, fence, lifecycle: "pending", readerLease,
+    snapshot, stageWatermark: mint.watermark,
+  };
+  const tombstones: readonly [object, object, object, object] = [
+    migrationTombstone as object, entriesTombstone as object,
+    headerTombstone as object, sequenceTombstone as object,
+  ];
+  const originals: readonly [object, object, object, object] = [
+    checked.migrationReceipt as object, checked.entriesReceipt as object,
+    checked.headerReceipt as object, checked.sequenceReceipt as object,
+  ];
+  reflectApplyIntrinsic(weakMapSetIntrinsic, INITIAL_STAGE_ADOPTION_RECEIPTS,
+    [adoptionReceipt as object, receiptState]);
+  for (let index = 0; index < 4; index += 1) {
+    reflectApplyIntrinsic(weakMapSetIntrinsic, INITIAL_STAGE_CONSUMED_TOMBSTONES, [
+      tombstones[index]!, { adoptionReceipt, lifecycle: "pending", receipt: originals[index]! },
+    ]);
+  }
+  try {
+    publishSQLiteCursorStageOwnershipInitialPublicationAdoptionIntrinsic(mint.tail);
+    reflectApplyIntrinsic(weakMapSetIntrinsic, MIGRATION_0002_RECEIPT_CONSUMPTIONS,
+      [checked.migrationReceipt as object, migrationTombstone]);
+    reflectApplyIntrinsic(weakMapSetIntrinsic, BASELINE_ENTRIES_RECEIPT_CONSUMPTIONS,
+      [checked.entriesReceipt as object, entriesTombstone]);
+    reflectApplyIntrinsic(weakMapSetIntrinsic, BASELINE_HEADER_RECEIPT_CONSUMPTIONS,
+      [checked.headerReceipt as object, headerTombstone]);
+    reflectApplyIntrinsic(weakMapSetIntrinsic, OPERATION_SEQUENCE_ZERO_RECEIPT_CONSUMPTIONS,
+      [checked.sequenceReceipt as object, sequenceTombstone]);
+    state.migration0002ConsumedTombstone = migrationTombstone;
+    state.baselineEntriesConsumedTombstone = entriesTombstone;
+    state.baselineHeaderConsumedTombstone = headerTombstone;
+    state.operationSequenceZeroConsumedTombstone = sequenceTombstone;
+    for (let index = 0; index < 4; index += 1) {
+      const tombstoneState = reflectApplyIntrinsic(
+        weakMapGetIntrinsic, INITIAL_STAGE_CONSUMED_TOMBSTONES, [tombstones[index]!],
+      ) as ConsumedTombstoneState;
+      tombstoneState.lifecycle = "active";
+    }
+    state.receiptConsumptionCount = 4;
+    state.tombstoneMintCount = 4;
+    receiptState.lifecycle = "active";
+    state.initialStageAdoptionReceipt = adoptionReceipt;
+    state.initialStageAdoptionReceiptMintCount = 1;
+    state.writePhase = "initial-stage-adoption-complete";
+    return adoptionReceipt;
+  } catch (error) {
+    poisonAuthorityGraph(state, authority, "SQLite initial publication stage adoption tail failed");
+    throw error;
+  }
+}
+
+export function assertSQLiteCursorInitialStageAdoptionReceiptIntrinsic(
+  authority: SQLiteCursorOuterPublicationAuthority,
+  bundle: SQLiteCursorInitialPublicationReceiptBundle,
+  fence: SQLiteCursorPostDdlCatalogFence,
+  readerLease: SQLiteCursorPostDdlPublicationReaderLease,
+  receipt: SQLiteCursorInitialStageAdoptionReceipt,
+): SQLiteCursorInitialStageAdoptionReceipt {
+  const checked = checkedInitialPublicationBundlePresentationIntrinsic(
+    authority, bundle, fence, readerLease,
+  );
+  const state = authorityState(authority);
+  const record = receipt !== null && typeof receipt === "object"
+    ? reflectApplyIntrinsic(weakMapGetIntrinsic, INITIAL_STAGE_ADOPTION_RECEIPTS,
+      [receipt as object]) as InitialStageAdoptionReceiptState | undefined
+    : undefined;
+  if (record === undefined || record.lifecycle !== "active" || record.authority !== authority
+      || record.fence !== fence || record.readerLease !== readerLease
+      || record.bundle[0] !== checked.migrationReceipt
+      || record.bundle[1] !== checked.entriesReceipt || record.bundle[2] !== checked.headerReceipt
+      || record.bundle[3] !== checked.sequenceReceipt) {
+    return initialAdoptionCorruption(
+      state, authority, "SQLite initial stage adoption receipt was substituted",
+    );
+  }
+  const snapshot = record.snapshot;
+  try {
+    assertSQLiteCursorStageOwnershipInitialPublicationAdoptedIntrinsic(
+      state.connection, state.stage, state.receipt, state.projectionIdentity, state.transfer,
+      authority, readerLease, snapshot.retiredB2Fence, record.stageWatermark,
+    );
+    const clock = assertSQLiteCursorOuterClockAuthorityActiveGraphIntrinsic(
+      state.connection, state.migrationLockCapability, state.providerClockCapability,
+      state.outerClockEvidence, state.outerClockConsumedTombstone!,
+    );
+    const owner = readSQLiteConnectionOwnerSnapshot(state.connection);
+    const changes = readSQLiteConnectionTotalChangesSnapshot(state.connection);
+    if (!owner.isTransaction || owner.transactionMode !== "exclusive"
+        || owner.transactionLineage !== state.transactionLineage
+        || clock.transactionLineage !== state.transactionLineage
+        || owner.transactionEpoch !== snapshot.adoptedTransactionEpoch
+        || changes.transactionEpoch !== owner.transactionEpoch
+        || changes.totalChanges !== snapshot.adoptedTotalChanges
+        || state.lifecycle !== "active" || state.writePhase !== "initial-stage-adoption-complete"
+        || state.initialStageAdoptionReceipt !== receipt
+        || state.initialStageAdoptionReceiptMintCount !== 1
+        || state.receiptConsumptionCount !== 4 || state.tombstoneMintCount !== 4
+        || !exactLedger(outerLedgerSnapshot(state), snapshot.adoptedOuterLedger)) {
+      return initialAdoptionCorruption(state, authority, "SQLite initial stage adoption receipt graph drifted");
+    }
+    const pairs: readonly [object, object][] = [
+      [snapshot.migration0002ConsumedTombstone as object, checked.migrationReceipt as object],
+      [snapshot.baselineEntriesConsumedTombstone as object, checked.entriesReceipt as object],
+      [snapshot.baselineHeaderConsumedTombstone as object, checked.headerReceipt as object],
+      [snapshot.operationSequenceZeroConsumedTombstone as object, checked.sequenceReceipt as object],
+    ];
+    for (let index = 0; index < pairs.length; index += 1) {
+      const pair = pairs[index]!;
+      assertActiveConsumedTombstoneIntrinsic(pair[0], pair[1], receipt);
+    }
+    return receipt;
+  } catch (error) {
+    terminateAfterInvariantFailure(state, authority, error,
+      "SQLite initial stage adoption receipt validation failed");
+    throw error;
+  }
+}
+
+export function readSQLiteCursorInitialStageAdoptionReceiptSnapshotIntrinsic(
+  receipt: SQLiteCursorInitialStageAdoptionReceipt,
+): SQLiteCursorInitialStageAdoptionReceiptSnapshot {
+  const record = receipt !== null && typeof receipt === "object"
+    ? reflectApplyIntrinsic(weakMapGetIntrinsic, INITIAL_STAGE_ADOPTION_RECEIPTS,
+      [receipt as object]) as InitialStageAdoptionReceiptState | undefined
+    : undefined;
+  if (record === undefined || record.lifecycle !== "active") {
+    return fail("GE_CYCLE_STORE_INVALID_ARGUMENT", "SQLite initial stage adoption receipt is invalid");
+  }
+  assertSQLiteCursorInitialStageAdoptionReceiptIntrinsic(
+    record.authority, record.bundle, record.fence, record.readerLease, receipt,
+  );
+  return record.snapshot;
+}
+
 /** Package-private identity snapshot for downstream receipt construction and tests. */
 export function readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(
   authority: SQLiteCursorOuterPublicationAuthority,
@@ -4228,6 +4929,11 @@ export function readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(
     baselineHeaderPublicationReceipt: state.baselineHeaderPublicationReceipt,
     baselineHeaderPublicationReceiptMintCount:
       state.baselineHeaderPublicationReceiptMintCount,
+    baselineEntriesConsumedTombstone: state.baselineEntriesConsumedTombstone,
+    baselineHeaderConsumedTombstone: state.baselineHeaderConsumedTombstone,
+    initialStageAdoptionReceipt: state.initialStageAdoptionReceipt,
+    initialStageAdoptionReceiptMintCount: state.initialStageAdoptionReceiptMintCount,
+    migration0002ConsumedTombstone: state.migration0002ConsumedTombstone,
     operationSequenceZeroAffectedRows: state.operationSequenceZeroAffectedRows,
     operationSequenceZeroExecuteCount: state.operationSequenceZeroExecuteCount,
     operationSequenceZeroLogicalExecutionCount:
@@ -4237,6 +4943,10 @@ export function readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(
       state.operationSequenceZeroPublicationReceipt,
     operationSequenceZeroPublicationReceiptMintCount:
       state.operationSequenceZeroPublicationReceiptMintCount,
+    operationSequenceZeroConsumedTombstone:
+      state.operationSequenceZeroConsumedTombstone,
+    receiptConsumptionCount: state.receiptConsumptionCount,
+    tombstoneMintCount: state.tombstoneMintCount,
     connection: state.connection,
     lifecycle: state.lifecycle,
     stageOwnershipPoisonReason: state.stageOwnershipPoisonReason,

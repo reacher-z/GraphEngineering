@@ -68,12 +68,14 @@ const REPOSITORY_ROOT = dirname(dirname(MODULE_PATH));
 const NPM_PACKAGE_NAMES = Object.freeze([
   "@graph-engineering/core",
   "@graph-engineering/persistence",
+  "@graph-engineering/primitives",
   "@graph-engineering/runtime",
   "@graph-engineering/sqlite",
 ]);
 const NPM_PACKAGE_DIRECTORIES = Object.freeze({
   "@graph-engineering/core": "core",
   "@graph-engineering/persistence": "persistence",
+  "@graph-engineering/primitives": "primitives",
   "@graph-engineering/runtime": "runtime",
   "@graph-engineering/sqlite": "sqlite",
 });

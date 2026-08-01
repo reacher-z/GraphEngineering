@@ -35,8 +35,14 @@ const objectGetPrototypeOfIntrinsic = Object.getPrototypeOf;
 const functionToStringIntrinsic = Function.prototype.toString;
 const numberIsSafeIntegerIntrinsic = Number.isSafeInteger;
 const stringCharCodeAtIntrinsic = String.prototype.charCodeAt;
+const stringIndexOfIntrinsic = String.prototype.indexOf;
 const stringSliceIntrinsic = String.prototype.slice;
 const stringStartsWithIntrinsic = String.prototype.startsWith;
+const stringToUpperCaseIntrinsic = String.prototype.toUpperCase;
+const arrayIncludesIntrinsic = Array.prototype.includes;
+const setHasIntrinsic = Set.prototype.has;
+const regexpExecIntrinsic = RegExp.prototype.exec;
+const regexpReplaceIntrinsic = RegExp.prototype[Symbol.replace];
 const statementGetIntrinsic = StatementSync.prototype.get;
 const statementIterateIntrinsic = StatementSync.prototype.iterate;
 const statementRunIntrinsic = StatementSync.prototype.run;
@@ -197,7 +203,10 @@ export type SQLiteConnectionNativeReadKind =
   | "cursor-publication-post-ddl-baseline-source"
   | "cursor-publication-target-catalog"
   | "cursor-publication-target-metadata"
-  | "cursor-publication-migration-0002-temp-conflicts";
+  | "cursor-publication-migration-0002-temp-conflicts"
+  | "cursor-publication-migration-lock"
+  | "cursor-publication-initial-stage-schema-version"
+  | "cursor-publication-initial-stage-main-operations";
 
 export const DEFAULT_SQLITE_BUSY_TIMEOUT_MS = 250;
 export const MAX_SQLITE_BUSY_TIMEOUT_MS = 5_000;
@@ -769,33 +778,43 @@ function firstSQLiteToken(sql: string): string {
       offset += 1;
       continue;
     }
-    const whitespace = /^\s+/u.exec(sql.slice(offset));
+    const whitespace = reflectApplyIntrinsic(regexpExecIntrinsic, /^\s+/u, [
+      reflectApplyIntrinsic(stringSliceIntrinsic, sql, [offset]),
+    ]) as RegExpExecArray | null;
     if (whitespace !== null) {
       offset += whitespace[0].length;
       continue;
     }
-    if (sql.startsWith("--", offset)) {
-      const newline = sql.indexOf("\n", offset + 2);
+    if (reflectApplyIntrinsic(stringStartsWithIntrinsic, sql, ["--", offset])) {
+      const newline = reflectApplyIntrinsic(stringIndexOfIntrinsic, sql, ["\n", offset + 2]) as
+        number;
       if (newline < 0) return "";
       offset = newline + 1;
       continue;
     }
-    if (sql.startsWith("/*", offset)) {
-      const close = sql.indexOf("*/", offset + 2);
+    if (reflectApplyIntrinsic(stringStartsWithIntrinsic, sql, ["/*", offset])) {
+      const close = reflectApplyIntrinsic(stringIndexOfIntrinsic, sql, ["*/", offset + 2]) as
+        number;
       if (close < 0) return "";
       offset = close + 2;
       continue;
     }
     break;
   }
-  return /^[A-Za-z]+/u.exec(sql.slice(offset))?.[0]?.toUpperCase() ?? "";
+  const token = reflectApplyIntrinsic(regexpExecIntrinsic, /^[A-Za-z]+/u, [
+    reflectApplyIntrinsic(stringSliceIntrinsic, sql, [offset]),
+  ]) as RegExpExecArray | null;
+  return token === null
+    ? ""
+    : reflectApplyIntrinsic(stringToUpperCaseIntrinsic, token[0], []) as string;
 }
 
 function withoutEmptySQLitePrefix(sql: string): string {
-  return sql.replace(
+  return reflectApplyIntrinsic(
+    regexpReplaceIntrinsic,
     /^(?:(?:\s|;)+|--[^\n]*(?:\n|$)|\/\*[\s\S]*?\*\/)+/u,
-    "",
-  );
+    [sql, ""],
+  ) as string;
 }
 
 function beginTransactionMode(sql: string): SQLiteTransactionMode {
@@ -816,7 +835,9 @@ const PREPARED_OWNER_MUTATION_TOKENS = new Set([
 ]);
 
 function preparedStatementMayMutateOwnerState(sql: string): boolean {
-  return PREPARED_OWNER_MUTATION_TOKENS.has(firstSQLiteToken(sql));
+  return reflectApplyIntrinsic(
+    setHasIntrinsic, PREPARED_OWNER_MUTATION_TOKENS, [firstSQLiteToken(sql)],
+  ) as boolean;
 }
 
 function ownerControlMayReplaceTransaction(sql: string, token: string): boolean {
@@ -838,7 +859,11 @@ function isForbiddenTempDirectoryPragma(sql: string): boolean {
   // Reject every schema qualifier, quoted spelling, and multi-statement route.
   // False positives inside a trusted PRAGMA value are acceptable because this
   // deprecated global-directory control is never needed by the provider.
-  return /\bPRAGMA\b[\s\S]*\btemp_store_directory\b/iu.test(withoutPrefix);
+  return reflectApplyIntrinsic(
+    regexpExecIntrinsic,
+    /\bPRAGMA\b[\s\S]*\btemp_store_directory\b/iu,
+    [withoutPrefix],
+  ) !== null;
 }
 
 function mayContainAdditionalStatement(sql: string): boolean {
@@ -1077,7 +1102,7 @@ export class SQLiteConnection {
         "SQLite owner state changed during its private snapshot",
       );
     }
-    return Object.freeze({
+    return objectFreezeIntrinsic({
       isTransaction: transactionAfter,
       transactionLineage: lineageAfter,
       transactionEpoch: epochAfter,
@@ -1108,7 +1133,7 @@ export class SQLiteConnection {
         "SQLite change counter changed during its private snapshot",
       );
     }
-    return Object.freeze({
+    return objectFreezeIntrinsic({
       totalChanges: after,
       transactionEpoch: epochAfter,
     });
@@ -1243,8 +1268,10 @@ export class SQLiteConnection {
         "SQLite temp_store_directory is forbidden",
       );
     }
-    if (["BEGIN", "COMMIT", "END", "ROLLBACK", "SAVEPOINT", "RELEASE"].includes(
-      firstSQLiteToken(sql),
+    if (reflectApplyIntrinsic(
+      arrayIncludesIntrinsic,
+      ["BEGIN", "COMMIT", "END", "ROLLBACK", "SAVEPOINT", "RELEASE"],
+      [firstSQLiteToken(sql)],
     )) {
       throw new CycleStoreProviderError(
         "GE_CYCLE_STORE_INVALID_ARGUMENT",
@@ -1275,7 +1302,21 @@ export class SQLiteConnection {
         ? SQLITE_CURSOR_PUBLICATION_METADATA_NATIVE_QUERY_INTRINSIC
         : kind === "cursor-publication-migration-0002-temp-conflicts"
           ? SQLITE_CURSOR_MIGRATION_0002_TEMP_CONFLICT_QUERY_INTRINSIC
-          : undefined;
+          : kind === "cursor-publication-migration-lock"
+            ? `
+              SELECT active_lock_id, active_owner_id, active_source_version,
+                     active_target_version, active_lock_epoch, active_fencing_token,
+                     active_expires_at_ms
+                FROM main.ge_cycle_migration_lock
+               WHERE singleton = 1
+            `
+            : kind === "cursor-publication-initial-stage-schema-version"
+              ? "SELECT schema_version FROM pragma_schema_version"
+              : kind === "cursor-publication-initial-stage-main-operations"
+                ? `SELECT type, name, tbl_name, rootpage, sql
+                     FROM main.sqlite_schema
+                    WHERE type = 'table' AND name = 'ge_cycle_operations'`
+                : undefined;
     if (sql === undefined) {
       throw new CycleStoreProviderError(
         "GE_CYCLE_STORE_INVALID_ARGUMENT",

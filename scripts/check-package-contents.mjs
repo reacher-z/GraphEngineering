@@ -9,6 +9,12 @@ import { fileURLToPath } from "node:url";
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const packageRoot = join(root, "packages");
 const forbiddenPath = /(?:^|\/)(?:node_modules|tests?|coverage|codex_logs|codex_plans)(?:\/|$)|(?:^|\/)\.env(?:\.|$)/u;
+const maxUnpackedSizeByPackage = new Map([
+  // SQLite carries the complete v1/v2 migration catalog and the package-private
+  // cursor publication proof machinery. Keep its exception explicit and
+  // bounded instead of weakening the default guard for every package.
+  ["@graph-engineering/sqlite", 2_500_000],
+]);
 
 function publicEntryPaths(manifest) {
   const paths = new Set();
@@ -109,7 +115,11 @@ for (const directory of directories) {
   assert.ok(files.has("package.json"), `${manifest.name}: tarball omits package.json`);
   assert.ok(files.has("README.md"), `${manifest.name}: tarball omits README.md`);
   assert.ok(files.has("LICENSE"), `${manifest.name}: tarball omits MIT license text`);
-  assert.ok(report.unpackedSize > 0 && report.unpackedSize <= 2_000_000, `${manifest.name}: unexpected unpacked size`);
+  const maxUnpackedSize = maxUnpackedSizeByPackage.get(manifest.name) ?? 2_000_000;
+  assert.ok(
+    report.unpackedSize > 0 && report.unpackedSize <= maxUnpackedSize,
+    `${manifest.name}: unexpected unpacked size`,
+  );
   for (const path of files.keys()) {
     assert.equal(forbiddenPath.test(path), false, `${manifest.name}: forbidden tarball path ${path}`);
     assert.equal(path.endsWith(".ts") && !path.endsWith(".d.ts"), false, `${manifest.name}: source TypeScript leaked: ${path}`);

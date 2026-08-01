@@ -3,8 +3,9 @@ import { CycleStoreProviderError } from "@graph-engineering/runtime";
 import { sqliteRow, sqliteSafeInteger, sqliteText } from "./sqlite-codec.js";
 import {
   SQLiteConnection,
+  getSQLiteStatementNativeIntrinsic,
   type SQLiteConnectionTransactionLineage,
-  prepareSQLiteConnectionIntrinsic,
+  prepareSQLiteConnectionCursorPublicationReadIntrinsic,
   readSQLiteConnectionOwnerSnapshot,
   readSQLiteConnectionTotalChangesSnapshot,
 } from "./sqlite-connection.js";
@@ -112,6 +113,7 @@ const LOCK_CAPABILITIES = new WeakMap<object, MigrationLockCapabilityState>();
 const TOMBSTONES = new WeakMap<object, TombstoneState>();
 const weakMapGetIntrinsic = WeakMap.prototype.get;
 const weakMapSetIntrinsic = WeakMap.prototype.set;
+const reflectApplyIntrinsic = Reflect.apply;
 const objectCreateIntrinsic = Object.create;
 const objectFreezeIntrinsic = Object.freeze;
 const objectGetOwnPropertyDescriptorsIntrinsic = Object.getOwnPropertyDescriptors;
@@ -171,7 +173,7 @@ function checkedExpectedLock(
       || lockEpoch !== fencingToken) {
     return fail("GE_CYCLE_STORE_INVALID_ARGUMENT", "migration lock version/fence is invalid");
   }
-  return Object.freeze({
+  return objectFreezeIntrinsic({
     lockId: identifier(data("lockId"), "migration lock ID"),
     ownerId: identifier(data("ownerId"), "migration lock owner ID"),
     sourceSchemaVersion: 1 as const,
@@ -197,14 +199,18 @@ function requireExclusiveLineage(
 }
 
 function liveLock(connection: SQLiteConnection): Readonly<SQLiteCursorMigrationLockIdentity> {
-  const row = sqliteRow(prepareSQLiteConnectionIntrinsic(connection, `
-    SELECT active_lock_id, active_owner_id, active_source_version,
-           active_target_version, active_lock_epoch, active_fencing_token,
-           active_expires_at_ms
-      FROM main.ge_cycle_migration_lock
-     WHERE singleton = 1
-  `, OPERATION).get(), 7, OPERATION, "cursor publication migration lock");
-  return Object.freeze({
+  const statement = prepareSQLiteConnectionCursorPublicationReadIntrinsic(
+    connection,
+    "cursor-publication-migration-lock",
+    OPERATION,
+  );
+  const row = sqliteRow(
+    getSQLiteStatementNativeIntrinsic(statement),
+    7,
+    OPERATION,
+    "cursor publication migration lock",
+  );
+  return objectFreezeIntrinsic({
     lockId: sqliteText(row[0], OPERATION, "migration lock ID"),
     ownerId: sqliteText(row[1], OPERATION, "migration lock owner ID"),
     sourceSchemaVersion: sqliteSafeInteger(
@@ -242,7 +248,7 @@ function capabilityState(
   capability: SQLiteCursorProviderClockCapability,
 ): CapabilityState {
   const state = capability !== null && typeof capability === "object"
-    ? Reflect.apply(weakMapGetIntrinsic, CAPABILITIES, [capability as object]) as
+    ? reflectApplyIntrinsic(weakMapGetIntrinsic, CAPABILITIES, [capability as object]) as
       CapabilityState | undefined
     : undefined;
   if (state === undefined) {
@@ -268,10 +274,14 @@ export function createSQLiteCursorMigrationLockCapabilityIntrinsic(
   connection: SQLiteConnection,
   expectedLockValue: SQLiteCursorMigrationLockIdentity,
 ): SQLiteCursorMigrationLockCapability {
-  if (!(connection instanceof SQLiteConnection)) {
+  let owner: ReturnType<typeof readSQLiteConnectionOwnerSnapshot>;
+  try {
+    // The captured base-class intrinsic is the brand check. Unlike
+    // `instanceof`, it cannot be redirected through a mutable @@hasInstance.
+    owner = readSQLiteConnectionOwnerSnapshot(connection);
+  } catch {
     return fail("GE_CYCLE_STORE_INVALID_ARGUMENT", "SQLite migration lock connection is invalid");
   }
-  const owner = readSQLiteConnectionOwnerSnapshot(connection);
   if (!owner.isTransaction || owner.transactionMode !== "exclusive"
       || owner.transactionLineage === null) {
     return fail("GE_CYCLE_STORE_INVALID_ARGUMENT", "SQLite migration lock requires BEGIN EXCLUSIVE");
@@ -308,8 +318,8 @@ export function createSQLiteCursorProviderClockCapabilityIntrinsic(
     ? Reflect.apply(weakMapGetIntrinsic, CLOCK_SOURCES, [providerClockSource as object]) as
       (() => number) | undefined
     : undefined;
-  if (!(connection instanceof SQLiteConnection) || lockState === undefined
-      || lockState.connection !== connection || providerNow === undefined) {
+  if (lockState === undefined || lockState.connection !== connection
+      || providerNow === undefined) {
     return fail("GE_CYCLE_STORE_INVALID_ARGUMENT", "SQLite cursor clock input is invalid");
   }
   requireExclusiveLineage(connection, lockState.transactionLineage);
@@ -435,7 +445,7 @@ export function consumeSQLiteCursorProviderClockEvidenceIntrinsic(
 ): SQLiteCursorProviderClockConsumedTombstone {
   capabilityState(capability);
   const state = evidence !== null && typeof evidence === "object"
-    ? Reflect.apply(weakMapGetIntrinsic, EVIDENCE, [evidence as object]) as
+    ? reflectApplyIntrinsic(weakMapGetIntrinsic, EVIDENCE, [evidence as object]) as
       EvidenceState | undefined
     : undefined;
   if (state === undefined || state.capability !== capability || state.consumer !== consumer) {
@@ -476,8 +486,7 @@ export function assertSQLiteCursorOuterClockAuthorityGraphIntrinsic(
     ? Reflect.apply(weakMapGetIntrinsic, EVIDENCE, [evidence as object]) as
       EvidenceState | undefined
     : undefined;
-  if (!(connection instanceof SQLiteConnection)
-      || clock.connection !== connection
+  if (clock.connection !== connection
       || clock.migrationLockCapability !== migrationLockCapability
       || clock.poisoned
       || clock.nextBoundaryIndex !== 1
@@ -512,7 +521,7 @@ export function assertSQLiteCursorOuterClockAuthorityGraphIntrinsic(
       "SQLite outer publication clock graph changed",
     );
   }
-  return Object.freeze({
+  return objectFreezeIntrinsic({
     activeExpiresAtMs: receipt.activeExpiresAtMs,
     boundary: receipt.boundary,
     consumer: receipt.consumer,
@@ -529,13 +538,13 @@ export function readSQLiteCursorProviderClockEvidenceSnapshotIntrinsic(
 ): SQLiteCursorProviderClockEvidenceSnapshot {
   capabilityState(capability);
   const state = evidence !== null && typeof evidence === "object"
-    ? Reflect.apply(weakMapGetIntrinsic, EVIDENCE, [evidence as object]) as
+    ? reflectApplyIntrinsic(weakMapGetIntrinsic, EVIDENCE, [evidence as object]) as
       EvidenceState | undefined
     : undefined;
   if (state === undefined || state.capability !== capability) {
     return fail("GE_CYCLE_STORE_INVALID_ARGUMENT", "SQLite cursor clock evidence is invalid");
   }
-  return Object.freeze({
+  return objectFreezeIntrinsic({
     activeExpiresAtMs: state.activeExpiresAtMs,
     boundary: state.boundary,
     consumer: state.consumer,
@@ -572,7 +581,7 @@ export function assertSQLiteCursorProviderClockConsumedTombstoneIntrinsic(
 ): SQLiteCursorProviderClockConsumedTombstone {
   capabilityState(capability);
   const state = tombstone !== null && typeof tombstone === "object"
-    ? Reflect.apply(weakMapGetIntrinsic, TOMBSTONES, [tombstone as object]) as
+    ? reflectApplyIntrinsic(weakMapGetIntrinsic, TOMBSTONES, [tombstone as object]) as
       TombstoneState | undefined
     : undefined;
   if (state === undefined || state.capability !== capability
@@ -592,15 +601,14 @@ export function assertSQLiteCursorOuterClockAuthorityActiveGraphIntrinsic(
 ): SQLiteCursorProviderClockEvidenceSnapshot {
   const clock = capabilityState(capability);
   const receipt = evidence !== null && typeof evidence === "object"
-    ? Reflect.apply(weakMapGetIntrinsic, EVIDENCE, [evidence as object]) as
+    ? reflectApplyIntrinsic(weakMapGetIntrinsic, EVIDENCE, [evidence as object]) as
       EvidenceState | undefined
     : undefined;
   const consumed = tombstone !== null && typeof tombstone === "object"
-    ? Reflect.apply(weakMapGetIntrinsic, TOMBSTONES, [tombstone as object]) as
+    ? reflectApplyIntrinsic(weakMapGetIntrinsic, TOMBSTONES, [tombstone as object]) as
       TombstoneState | undefined
     : undefined;
-  if (!(connection instanceof SQLiteConnection)
-      || clock.connection !== connection
+  if (clock.connection !== connection
       || clock.migrationLockCapability !== migrationLockCapability
       || clock.poisoned
       || receipt === undefined
@@ -625,7 +633,7 @@ export function assertSQLiteCursorOuterClockAuthorityActiveGraphIntrinsic(
       "SQLite active outer publication migration lock changed",
     );
   }
-  return Object.freeze({
+  return objectFreezeIntrinsic({
     activeExpiresAtMs: receipt.activeExpiresAtMs,
     boundary: receipt.boundary,
     consumer: receipt.consumer,

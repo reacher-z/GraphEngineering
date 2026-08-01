@@ -15304,3 +15304,443 @@ Revision 2 changes ownership only. It implements nothing, and
 `capabilityGateClaim` all remain `false`. No barrier execution, deadline,
 quorum, resolution, late-arrival, cancellation or decision-replay behavior
 exists in either runtime.
+
+#### 31.37.36 Four-receipt validation-first atomic stage-adoption tranche (append-only execution record, 2026-08-01)
+
+This section resumes the §31.37 cursor-publication chain after the physically
+later §31.39 material. It appends without editing or relocating any prior plan
+text. The exact pre-append prefix is 15,306 lines with SHA-256
+`f44aad42cdb09d4ae3e887298b6eabc7cd2b8d1caedf3f00ea6fa71673c7af07`.
+It consumes only the authorization at the end of §31.37.35: migration `0002`,
+the fresh post-DDL catalog fence, the closed publication-reader proof and the
+four ordered permanent-write receipts already exist. This tranche adopts
+those proofs into the TEMP-stage owner. It stops before publication-session
+minting, cursor rebind, rules 11/12, TEMP retirement and commit.
+
+##### 31.37.36.1 Exact input graph and presentation boundary
+
+The sole accepted bundle is a dense exact four-element array, with no holes,
+accessors, extra string keys or symbol keys, in this order:
+
+1. `migration0002CatalogRebuildReceipt`;
+2. `baselineEntriesPublicationReceipt`;
+3. `baselineHeaderPublicationReceipt`; and
+4. `operationSequenceZeroPublicationReceipt`.
+
+Every member is resolved through its module-private `WeakMap` registry. The
+coordinator verifies exact authority, connection, fence, reader-lease and
+predecessor identities before it reads mutable provider state. Missing,
+reordered, duplicated, cloned, substituted, cross-run, wrong-authority,
+wrong-reader and wrong-predecessor presentations consume zero receipts, mint
+zero tombstones, mint zero adoption receipts and leave the healthy authority
+at `sequence-zero-complete`. The same original objects may then succeed only
+inside a corrected complete bundle. A Proxy, revoked Proxy, accessor array or
+throwing structural probe is translated to the same stable presentation error;
+caller code is never invoked while extracting a bundle.
+
+Presentation rejection is deliberately different from corruption. Once an
+exact registered four-object graph has been selected, a reused receipt,
+authority lifecycle drift, transaction-lineage replacement, mutation-epoch
+advance, `total_changes` drift, write-counter disagreement, target-catalog
+drift, reader-terminal disagreement or ledger mismatch is terminal. It
+poisons the outer authority, transfer and TEMP-stage graph, consumes zero new
+receipts and requires caller-owned rollback plus a fresh authority graph.
+
+##### 31.37.36.2 Validation-before-consumption proof stack
+
+Before preparing the adoption continuation, the coordinator re-executes the
+complete proof stack rather than trusting cached snapshots:
+
+- active outer-authority and consumed outer-clock tombstone;
+- live unchanged `BEGIN EXCLUSIVE` lineage;
+- current connection mutation epoch and real `total_changes` watermark;
+- exact migration-`0002` receipt and asset/result commitments;
+- fresh post-DDL physical-catalog observation over all 34 owned objects, not
+  merely the `ge_cycle_operations` table;
+- terminal reader lease with exact closed lifecycle, one close attempt, one
+  successful close, no cleanup owner and re-derived projection identity;
+- baseline-entry receipt, its exact parameter/result digests and continuous
+  entry/hash chain;
+- baseline-header receipt, runtime/policy/projection commitments and exact
+  predecessor; and
+- sequence-zero receipt, provider-clock value re-derivation, exact predecessor,
+  fixed SQL identity, parameter/result digests and final ledger watermark.
+
+The final required outer ledger is logical write sequence `4`, fixed statement
+count `20 + entryCount + 2`, and affected rows
+`3 + legacyOperationCount + entryCount`. The coordinator also checks the
+receipt-to-receipt logical sequence `1 -> 2 -> 3 -> 4`, every prepare/execute/
+affected count and the final receipt's exact transaction epoch and
+`total_changes`. Neither an immutable receipt object nor a previously valid
+catalog digest is treated as evidence that the live graph is still valid.
+
+##### 31.37.36.3 Prepared cancellation and the non-interruptible tail
+
+Cancellation is observed exactly once after all authority, receipt, catalog,
+reader, ledger and stage-side adoption checks have completed and after the
+opaque stage continuation has been prepared, but before any tombstone or
+adoption receipt is allocated or registered. An already-cancelled authentic
+signal therefore returns the retryable unavailable result with consumption,
+tombstone and adoption counts all zero. The exact prepared continuation stays
+bound to the same watermark, so the same untouched valid bundle can retry.
+
+Prepared retry is an explicit lifecycle, not an accidental exception. The
+ownership bridge accepts `initial-publication-adoption-prepared` only for the
+same authority, stage, transfer, terminal reader lease and canonical watermark.
+The stage's active proof accepts the paired internal
+`initial-adoption-prepared` state without reviving or bypassing the old B2
+fence. Every full proof is rerun on retry; catalog, lineage, epoch or counter
+drift during the cancellation window poisons rather than continuing.
+
+After that cancellation boundary, the implementation preconstructs five
+opaque null-prototype frozen objects: four typed consumed-receipt tombstones
+and one stage-adoption receipt. Their registry records start as `pending` and
+cannot be asserted or read. The single tail then performs only captured native
+registry operations and assignments:
+
+1. resolve and burn the exact outer ownership continuation;
+2. resolve and burn the exact stage continuation;
+3. adopt current epoch, `total_changes`, v2 main-catalog identity and the three
+   outer-ledger values into the stage;
+4. retire only the obsolete B2 v1 catalog/change fence;
+5. bind the four original receipts to the four typed tombstones;
+6. activate all four tombstone records;
+7. set consumption/tombstone counts atomically to `4/4`;
+8. activate the adoption receipt and set its mint count to one; and
+9. transition the authority to `initial-stage-adoption-complete`.
+
+There is no SQL, provider callback, cancellation read, test hook, transaction
+control or cursor-rebind operation inside this tail. Pending objects are not
+observable; active objects appear only with the complete `4/4/1` state. A
+second use of any original receipt or the exact bundle is corruption and
+poisons the graph without minting a second result.
+
+##### 31.37.36.4 Stage watermark adoption and B2-fence retirement
+
+The ownership bridge has its own opaque, single-use continuation and an opaque
+`retiredB2Fence` identity. Preparation proves the exact transfer/authority,
+terminal reader, exclusive transaction lineage, current epoch, current
+`total_changes`, target catalog digest and `logicalWriteSequence === 4`. It
+reads the current `ge_cycle_operations` main-catalog identity through captured
+connection/native statement intrinsics and proves that migration produced a
+real v2 identity different from the retained v1 identity.
+
+Publication replaces the stage's canonical epoch, allowed-change watermark and
+main-operation catalog identity with the adopted v2 values. It retains the B2
+receipt, projection reference, transfer, TEMP stage, transaction lineage,
+post-DDL reader identity and post-DDL fence. The obsolete B2 capture/stage epoch
+and allowed-change fields are cleared, and their exact old catalog/change
+identity is retained only behind the opaque retirement proof. Later assertions
+use the adopted watermark and cannot accidentally call the old B2 fence.
+
+Both wrapper and stage continuations are burned before mutation. The stage
+publish primitive additionally checks the exact stored mint, tail, authority,
+watermark, retirement proof, prepared lifecycle and live-B2-fence state before
+assigning. Retirement and poisoning delete both continuation levels. A held
+tail therefore cannot publish after retire/poison, cannot replay after success
+and cannot resurrect an adopted or terminal graph.
+
+##### 31.37.36.5 Adoption receipt and surviving proofs
+
+The adoption receipt commits the complete transitive graph:
+
+- B2 pre-rebind receipt, projection identity/reference, ownership transfer and
+  baseline TEMP-stage identities;
+- SQLite connection, unchanged transaction lineage and outer authority;
+- post-DDL physical-catalog fence and terminal reader lease;
+- all four original receipt identities in canonical order;
+- all four consumed tombstone identities in the same order;
+- reader lifecycle `retired`, close count one and re-derived projection digest;
+- adopted private epoch, real `total_changes` and complete outer ledger;
+- target physical-catalog digest;
+- exact retired-B2-fence identity; and
+- mint count one and write kind `initial-publication-stage-adoption`.
+
+The original four receipts become unusable through their ordinary assert/read
+surfaces after success. The post-DDL fence deliberately remains live: its
+migration predecessor is then proved through the exact active consumed
+tombstone and adoption receipt rather than by pretending the old migration
+receipt is unconsumed. A cloned, substituted or cross-run adoption receipt at
+the exact adopted boundary poisons the presented authority; the snapshot
+reader cannot expose a pending or forged record.
+
+##### 31.37.36.6 Hostile-intrinsic closure and regression matrix
+
+The adoption path captures the `Object.create`, `Object.freeze`, `WeakMap`
+get/set/delete, `Reflect.apply`, `Number.isSafeInteger` and `Array.isArray`
+intrinsics it relies on. Full-proof revalidation exposed inherited live-global
+dependencies outside the new coordinator, so this tranche also hardens the
+specific reachable boundaries: canonical JSON detached capture, SQLite row
+shape checks, connection owner/change snapshots, provider-clock evidence and
+active-graph snapshots, stage active lookup and the v2 main-catalog identity
+freeze. Hostile replacement after module load therefore cannot alter or abort
+the adoption result.
+
+The dedicated TypeScript suite contains seventeen real cases covering:
+
+- successful exact adoption and full receipt commitments;
+- ten malformed bundle families followed by a corrected retry;
+- missing/cloned/cross-run/active reader presentations;
+- prepared pre-tail cancellation followed by same-bundle retry;
+- old-receipt consumption and post-DDL-fence survival;
+- adoption receipt clone/substitution rejection and exact replay poison;
+- mutation-epoch, `total_changes`, outer-ledger and transaction-lineage drift;
+- zero permanent write, zero transaction control and zero cursor rebind;
+- eight hostile mutable-intrinsic replacements;
+- authentic lower-tail publication once plus replay rejection;
+- lower-tail retirement followed by publish rejection;
+- lower-tail poisoning followed by publish rejection; and
+- package-root runtime/type isolation.
+
+The implementation candidate has passed the dedicated 17/17 suite and a fresh
+independent source audit reports HIGH 0 / MEDIUM 0 after the tail-lifecycle,
+prepared-cancellation and hostile-path remediations. The broader SQLite,
+workspace, fixture, migration, package and independent final gates are recorded
+only after they finish on one final byte set; this section does not pre-claim
+their results.
+
+##### 31.37.36.7 Explicit non-claims and next dependency
+
+This tranche opens no publication session, prepares or executes no cursor
+rebind, implements neither rule 11 nor rule 12, observes no second provider
+clock boundary, publishes no lineage or metadata rows, runs no final semantic
+audit, retires no TEMP object, commits or rolls back no transaction, activates
+no v2 runtime manifest and adds no Python implementation or cross-runtime
+hostile report. `implementationClaim`, `activeManifestClaim`, protocol,
+production-throughput, release and external-adoption claims remain false.
+
+After the final verification checkpoint for this byte set, the next production
+leaf is Python independent parity for the complete initial-publication/adoption
+boundary, followed by executable 145-case cross-runtime hostile registry and
+28-field normalized evidence. Only after those gates may the TypeScript cursor
+publication session, rebind and rules 11/12 begin.
+
+#### 31.37.37 Four-receipt adoption final acceptance checkpoint — 2026-08-01
+
+This append-only checkpoint closes the TypeScript four-receipt initial-stage
+adoption leaf described in §31.37.36. It does not close B3, flip a release
+checkbox or weaken any later dependency. The exact pre-append plan was 15,516
+lines with SHA-256
+`05e39a262a189462c6f8e008a51764ac17e5783dba91278813437970e82f0fde`.
+The original 15,306-line plan prefix still hashes to
+`f44aad42cdb09d4ae3e887298b6eabc7cd2b8d1caedf3f00ea6fa71673c7af07`.
+
+##### 31.37.37.1 Final implemented boundary
+
+The leaf now contains one validation-first, no-fail-tail adoption operation
+over the exact ordered tuple `[migration-0002, entries, header, sequence-zero]`.
+It revalidates the complete live proof graph, prepares the lower ownership
+transition, polls cancellation before consumption, then atomically publishes
+the transition, consumes all four original receipts into four distinct typed
+tombstones and activates one immutable adoption receipt. No permanent SQL,
+transaction control, callback, cancellation read or cursor rebind occurs after
+the first tombstone is made visible.
+
+The receipt commits exact identities for the connection, transaction lineage,
+private epoch, real `total_changes`, outer ledger, full target catalog,
+projection, terminal reader lease, four predecessor receipts, four consumed
+tombstones and the retired B2 fence. The old receipt assert/read surfaces reject
+after adoption. The post-DDL fence survives and proves its consumed migration
+predecessor through the exact tombstone/adoption chain.
+
+Malformed presentation, missing proof, cloned proof, cross-run proof, active
+reader, ledger drift, epoch drift, `total_changes` drift, lineage drift,
+catalog drift and replay all fail closed. Malformed presentation consumes
+nothing and allows a corrected retry. Prepared cancellation consumes nothing
+and allows the same exact bundle to retry. Lower-level tails are one-shot and
+cannot publish after replay, retirement or poisoning.
+
+##### 31.37.37.2 Hostile dependency remediation
+
+The final review expanded the initial eight-entry mutable-intrinsic probe into
+fourteen direct replacement cases plus a separate array-iterator replacement.
+The implementation now closes all concrete dependencies found by those probes:
+
+- `StatementSync.prototype.get` for migration-lock and main-catalog reads;
+- `DatabaseSync.prototype.prepare` for the three exact package-private native
+  reads used by adoption;
+- `Object.isFrozen`, `Object.getPrototypeOf` and `Reflect.ownKeys` in the lower
+  ownership bridge;
+- `instanceof SQLiteConnection` in the provider-clock authority graph;
+- array destructuring and `for...of` in bundle/receipt validation; and
+- Object, Array, Number, String, WeakSet, JSON and hash operations reached by
+  canonical policy revalidation.
+
+Public `SQLiteConnection.prepare` deliberately remains fault-injectable. An
+initial over-broad hardening broke 95 real B1/B2 adversarial injections and was
+rejected. The accepted design adds a closed native-read kind for exactly each
+adoption query — migration lock, schema version and main operations catalog —
+while preserving the public fault-injection seam. Invalid read kinds fail
+closed and no new intrinsic is exported from the package root.
+
+Two independent final source walks, including one after that scope correction,
+both report **HIGH 0 / MEDIUM 0 / LOW 0**. The final walk checked exact SQL,
+private-registry brand proof, captured prepare/get, receipt ordering, atomic
+tail, old B1/B2 routing and outer receipt/counter/ledger success semantics.
+
+##### 31.37.37.3 Executed acceptance evidence
+
+All results below were observed, not inferred:
+
+- `@graph-engineering/core` typecheck passed;
+- `@graph-engineering/core` tests passed: 10/10 files, 465/465 tests;
+- `@graph-engineering/sqlite` typecheck passed;
+- the dedicated adoption suite passed: 17/17 tests;
+- the final SQLite package run passed: 33/33 files, 1,041/1,041 tests,
+  Vitest duration 257.55 seconds and wall time 258.86 seconds;
+- the SQLite ledger/B3 contract gate passed: 61/61 tests plus all six strict
+  validators; `implementationClaim`, `activeManifestClaim` and
+  `protocolClaim` remain false;
+- the SQLite migration source/release gate passed: 6/6 executable tests and
+  all canonical/npm/Python mirror digest checks;
+- fixture validation passed with 85 JSON fixtures, 44 case manifests, 145 B3
+  hostile obligations and 20 B3 fault boundaries;
+- documentation validation passed across 477 local Markdown links;
+- workspace typecheck passed for all nine participating packages;
+- workspace lint passed for all nine participating packages;
+- the release-task map passed 178/178 leaves and 40/40 tests;
+- evidence closure passed in audit-only zero-weight mode with 102/102 tests;
+- the original 15,306-line plan prefix hash remained exact; and
+- scoped `git diff --check` remained clean.
+
+The review log is
+`codex_logs/reviews/SQLITE-CURSOR-B3-INITIAL-STAGE-ADOPTION-2026-08-01.md`.
+It records the failed broad-hardening experiment and the corrected closed-read
+design so future work cannot silently repeat the same mistake.
+
+##### 31.37.37.4 Claims that remain false
+
+This checkpoint does not claim a Python implementation, cross-runtime initial
+publication parity, executable 145-case runtime parity, publication session,
+cursor rebind, rule 11, rule 12, second provider-clock boundary, lineage or
+metadata publication, final semantic audits, TEMP retirement, commit/rollback,
+active v2 manifest, protocol completion, release readiness, production use or
+external adoption. GitHub star goals remain growth objectives, not testable
+technical evidence.
+
+#### 31.37.38 Next frozen leaf — complete Python initial-publication/adoption parity
+
+Python parity must reproduce the entire transitive boundary independently. A
+thin adoption coordinator over missing predecessor receipts would be a false
+parity claim. The current Python implementation has B2 stage/campaign support
+and provider-clock authority but does not yet have migration-0002 asset proof,
+outer publication authority, target-catalog proof, post-DDL reader, the four
+initial-write receipts or atomic adoption.
+
+##### 31.37.38.1 Required production modules
+
+1. Add
+   `python/src/graph_engineering/sqlite_cursor_publication_migration_0002_asset.py`.
+   It must load the installed regular migration asset on every logical
+   execution, validate UTF-8 and LF framing, prove 9,523 bytes, 20 statements,
+   migration hash `1bf03d68...`, preview-manifest 4,908-byte hash
+   `f1d447b5...` and schema SQL hash `5a092346...`. It must never split blindly
+   on semicolons and must never call `executescript()`.
+2. Add
+   `python/src/graph_engineering/sqlite_cursor_publication_initial_write_digest.py`.
+   It must implement the exact parameter/result domains, tagged scalar shape,
+   signed-int64 bounds, strict Unicode scalar rejection, code-point key order,
+   unpadded base64url and all seven frozen digest vectors.
+3. Add
+   `python/src/graph_engineering/sqlite_cursor_publication_target_catalog.py`.
+   It must execute the exact case-insensitive `ge_cycle_*` query and prove 34
+   rows, 5,785 canonical bytes, catalog hash `ca85cf26...`, application ID
+   1,195,724,359, user version 2 and the complete target descriptor.
+4. Add
+   `python/src/graph_engineering/sqlite_cursor_publication_outer_authority.py`.
+   It owns opaque weak-identity authority, cancellation, migration receipt,
+   fence, reader, entries/header/sequence receipts, four typed tombstones and
+   adoption receipt. It must execute 0002 as 20 owner-controlled statements,
+   never as a script, and expose only package-private intrinsic functions.
+5. Extend
+   `python/src/graph_engineering/sqlite_operation_baseline_cursor_stage_ownership.py`
+   with outer-prepared/owned and adoption-prepared/adopted lifecycles, two
+   single-use tail registries, terminal reader lease, exact retire and poison
+   propagation and no tail revival.
+6. Extend
+   `python/src/graph_engineering/sqlite_operation_baseline_stage.py` with the
+   matching stage bridge, reader cleanup ownership, retired B2 fence, adoption
+   watermark and v2 epoch/`total_changes`/catalog/ledger takeover. Adoption
+   must not dispose the TEMP catalog.
+
+`python/src/graph_engineering/__init__.py` must not export any new runtime
+surface. If the SQLite owner requires a stable one-statement or row-count hook,
+extend only the package-private source seam; do not grant transaction ownership
+or add `executescript()`.
+
+##### 31.37.38.2 Required focused tests
+
+Create independent tests for migration asset, initial-write digest, target
+catalog, outer authority, post-DDL reader, entries receipt, header receipt,
+sequence-zero receipt, complete initial-write lifecycle and atomic adoption.
+Extend the Python stage-ownership suite for authentic lower-tail success,
+replay, retire-then-publish and poison-then-publish. A shared clean-graph helper
+may reduce setup, but every success proof must traverse a real SQLite/B2 graph;
+tests must not construct opaque receipts or mutate private registries.
+
+The Python adoption suite must cover every TypeScript class from §31.37.36:
+exact success, ten malformed bundles followed by corrected retry, reader
+presentation, prepared cancellation and same-bundle retry, four old receipts
+consumed with surviving fence, clone/substitution/cross-run/replay poisoning,
+epoch/`total_changes`/ledger/lineage/catalog drift, zero SQL/transaction/rebind,
+hostile captured dependencies, lower-tail replay/retire/poison and root-export
+isolation.
+
+##### 31.37.38.3 Required parity evidence
+
+Add a native Python report and a Node parity test that independently execute
+real TypeScript and Python harnesses for three frozen controls: success,
+invalid adoption bundle and post-0002 catalog drift. Each report must emit the
+exact ordered 28-field normalized record, reject missing/extra/reordered or
+mistyped fields, prove a nonzero fault-hook self-test and retain zero rebind,
+commit and rollback counts. Bind the root package script to this parity gate.
+
+Acceptance additionally requires all focused pytest files, the complete Python
+suite, Ruff format/check, strict mypy, fixture/schema/malicious validators,
+source/wheel/sdist migration byte identity, installed-package import probes,
+negative root exports, repeated cancellation/cleanup, `git diff --check` and an
+independent H0/M0/L0 audit.
+
+##### 31.37.38.4 Python leaf non-claims
+
+Even complete Python initial adoption does not claim publication session,
+cursor rebind, rules 11/12, second clock boundary, lineage/metadata writes,
+final semantic audits, TEMP retirement, transaction completion, active v2
+manifest or the complete executable 145-case report. Those remain separate
+ordered leaves, and all implementation/protocol/release/adoption claims remain
+false until their own evidence gates close.
+
+#### 31.37.39 Packaging and installed-artifact acceptance extension
+
+This extension is appended after §31.37.38 without modifying it. The exact
+15,711-line prefix hashes to
+`74909401c6c2d80d03897bd4f0f6690e223a92beaf80108a768479f4632cc52c`.
+
+The workspace build passed for all nine participating packages. Package-content
+validation then exposed that the SQLite unpacked tarball had reached 2,058,027
+bytes, 58,027 bytes above the former repository-wide 2 MB ceiling. The fix did
+not weaken every package: the default remains 2 MB and SQLite alone receives an
+explicit 2.5 MB bound for its v1/v2 migration catalog and private publication
+proof machinery. The final content gate passed all nine packages; SQLite
+contains 149 allowed files and no source TypeScript, tests, plans, logs,
+credentials or other forbidden path.
+
+The installed-artifact staging check also exposed an older dependency-closure
+defect: its temporary npm workspace copied Core, Persistence, Runtime and SQLite
+but omitted Primitives even though Runtime declares Primitives as a workspace
+dependency. The staging set now includes Primitives explicitly. This is an
+artifact-harness closure fix, not a production dependency change.
+
+Final installed-artifact evidence:
+
+- `check:packages` passed 9/9 public npm manifests and dry-run tarballs;
+- `check:packed-install` installed and smoke-tested 9/9 pnpm tarballs, including
+  rewritten workspace dependencies and executable installed binaries;
+- `check:sqlite-artifacts` passed source, npm and Python artifact parity;
+- the SQLite npm staging closure contains five packages and its installed
+  runtime passed open/append/close/reopen/read/replay;
+- the Python wheel contains 111 entries, the sdist 112 entries, and both retain
+  exact release/preview/support assets; and
+- all release, preview and migration digests remain unchanged.
+
+These packaging gates do not change any §31.37.37.4 or §31.37.38.4 non-claim.

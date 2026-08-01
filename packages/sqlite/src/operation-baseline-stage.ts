@@ -98,6 +98,8 @@ import {
 import {
   SQLiteConnection,
   execSQLiteConnectionTrustedIntrinsic,
+  getSQLiteStatementNativeIntrinsic,
+  prepareSQLiteConnectionCursorPublicationReadIntrinsic,
   prepareSQLiteConnectionIntrinsic,
   readSQLiteConnectionOwnerSnapshot,
   readSQLiteConnectionTotalChangesSnapshot,
@@ -139,15 +141,62 @@ export interface SQLiteBaselineStageEntry {
   readonly stateBytes: Uint8Array;
 }
 
+export const SQLITE_CURSOR_INITIAL_PUBLICATION_TARGET_CATALOG_SHA256 =
+  "ca85cf266267fa3eb5443bdf6d957b4b03c795cd6e0232a28c52773f1041fadf" as const;
+
+export interface SQLiteCursorInitialPublicationOuterLedgerWatermark {
+  readonly affectedRowsWatermark: number;
+  readonly fixedStatementCount: number;
+  readonly logicalWriteSequence: number;
+}
+
+/** Value-only bridge input copied before any adoption state is prepared. */
+export interface SQLiteCursorInitialPublicationStageWatermark {
+  readonly outerLedger: SQLiteCursorInitialPublicationOuterLedgerWatermark;
+  readonly targetCatalogSha256:
+    typeof SQLITE_CURSOR_INITIAL_PUBLICATION_TARGET_CATALOG_SHA256;
+  readonly totalChanges: number;
+  readonly transactionEpoch: bigint;
+}
+
+/** Opaque proof that only the obsolete B2 v1 catalog/change fence was retired. */
+export interface SQLiteBaselineCursorB2FenceRetirement {
+  readonly __sqliteBaselineCursorB2FenceRetirement: never;
+}
+
+/** Opaque, single-use stage continuation owned by the higher ownership bridge. */
+export interface SQLiteBaselineCursorInitialPublicationAdoptionTail {
+  readonly __sqliteBaselineCursorInitialPublicationAdoptionTail: never;
+}
+
+export interface SQLiteBaselineCursorInitialPublicationAdoptionMint {
+  readonly retiredB2Fence: SQLiteBaselineCursorB2FenceRetirement;
+  readonly tail: SQLiteBaselineCursorInitialPublicationAdoptionTail;
+  readonly watermark: SQLiteCursorInitialPublicationStageWatermark;
+}
+
+const SQLITE_BASELINE_PREPARE_CURSOR_INITIAL_PUBLICATION_ADOPTION = Symbol(
+  "SQLiteBaselineTempStage.prepareCursorInitialPublicationAdoption",
+);
+const SQLITE_BASELINE_PUBLISH_CURSOR_INITIAL_PUBLICATION_ADOPTION = Symbol(
+  "SQLiteBaselineTempStage.publishCursorInitialPublicationAdoption",
+);
+const SQLITE_BASELINE_ASSERT_CURSOR_INITIAL_PUBLICATION_ADOPTED = Symbol(
+  "SQLiteBaselineTempStage.assertCursorInitialPublicationAdopted",
+);
+
 const EXCLUSIVE_PROOF_OWNER = Symbol("SQLiteExclusiveBaselineTransactionProof.owner");
 const ACTIVE_STAGES = new WeakMap<SQLiteConnection, SQLiteBaselineTempStage>();
 const weakMapGetIntrinsic = WeakMap.prototype.get;
 const weakMapSetIntrinsic = WeakMap.prototype.set;
 const weakMapDeleteIntrinsic = WeakMap.prototype.delete;
 const reflectApplyIntrinsic = Reflect.apply;
+const objectCreateIntrinsic = Object.create;
+const objectFreezeIntrinsic = Object.freeze;
+const numberIsSafeIntegerIntrinsic = Number.isSafeInteger;
 
 function activeStage(connection: SQLiteConnection): SQLiteBaselineTempStage | undefined {
-  return Reflect.apply(weakMapGetIntrinsic, ACTIVE_STAGES, [connection]) as
+  return reflectApplyIntrinsic(weakMapGetIntrinsic, ACTIVE_STAGES, [connection]) as
     SQLiteBaselineTempStage | undefined;
 }
 
@@ -762,27 +811,137 @@ interface SQLiteMainOperationsCatalogIdentity {
   readonly sql: string | null;
 }
 
+interface SQLiteBaselineCursorB2FenceRetirementRecord {
+  readonly authority: object;
+  readonly previousCatalog: SQLiteMainOperationsCatalogIdentity;
+  readonly previousTotalChanges: number;
+  readonly previousTransactionEpoch: bigint;
+  readonly stage: SQLiteBaselineTempStage;
+  readonly watermark: SQLiteCursorInitialPublicationStageWatermark;
+}
+
+interface SQLiteBaselineCursorInitialPublicationAdoptionContinuation {
+  readonly authority: object;
+  readonly nextCatalog: SQLiteMainOperationsCatalogIdentity;
+  readonly retiredB2Fence: SQLiteBaselineCursorB2FenceRetirement;
+  readonly stage: SQLiteBaselineTempStage;
+  readonly watermark: SQLiteCursorInitialPublicationStageWatermark;
+}
+
+const CURSOR_B2_FENCE_RETIREMENTS =
+  new WeakMap<object, SQLiteBaselineCursorB2FenceRetirementRecord>();
+const CURSOR_INITIAL_PUBLICATION_ADOPTION_TAILS =
+  new WeakMap<object, SQLiteBaselineCursorInitialPublicationAdoptionContinuation>();
+
+function copyInitialPublicationStageWatermark(
+  watermark: SQLiteCursorInitialPublicationStageWatermark,
+): SQLiteCursorInitialPublicationStageWatermark {
+  let affectedRowsWatermark: number;
+  let fixedStatementCount: number;
+  let logicalWriteSequence: number;
+  let targetCatalogSha256: string;
+  let totalChanges: number;
+  let transactionEpoch: bigint;
+  try {
+    if (watermark === null || typeof watermark !== "object") {
+      return invalid("SQLite cursor initial publication stage watermark is invalid");
+    }
+    const ledger = watermark.outerLedger;
+    if (ledger === null || typeof ledger !== "object") {
+      return invalid("SQLite cursor initial publication stage watermark is invalid");
+    }
+    affectedRowsWatermark = ledger.affectedRowsWatermark;
+    fixedStatementCount = ledger.fixedStatementCount;
+    logicalWriteSequence = ledger.logicalWriteSequence;
+    targetCatalogSha256 = watermark.targetCatalogSha256;
+    totalChanges = watermark.totalChanges;
+    transactionEpoch = watermark.transactionEpoch;
+  } catch {
+    return invalid("SQLite cursor initial publication stage watermark is invalid");
+  }
+  if (typeof transactionEpoch !== "bigint"
+      || !reflectApplyIntrinsic(numberIsSafeIntegerIntrinsic, Number, [totalChanges])
+      || totalChanges < 0
+      || targetCatalogSha256 !== SQLITE_CURSOR_INITIAL_PUBLICATION_TARGET_CATALOG_SHA256
+      || !reflectApplyIntrinsic(
+        numberIsSafeIntegerIntrinsic, Number, [logicalWriteSequence],
+      )
+      || logicalWriteSequence !== 4
+      || !reflectApplyIntrinsic(
+        numberIsSafeIntegerIntrinsic, Number, [fixedStatementCount],
+      )
+      || fixedStatementCount < 0
+      || !reflectApplyIntrinsic(
+        numberIsSafeIntegerIntrinsic, Number, [affectedRowsWatermark],
+      )
+      || affectedRowsWatermark < 0) {
+    return invalid("SQLite cursor initial publication stage watermark is invalid");
+  }
+  const copiedLedger = reflectApplyIntrinsic(objectFreezeIntrinsic, Object, [{
+    affectedRowsWatermark,
+    fixedStatementCount,
+    logicalWriteSequence,
+  }]) as SQLiteCursorInitialPublicationOuterLedgerWatermark;
+  return reflectApplyIntrinsic(objectFreezeIntrinsic, Object, [{
+    outerLedger: copiedLedger,
+    targetCatalogSha256: SQLITE_CURSOR_INITIAL_PUBLICATION_TARGET_CATALOG_SHA256,
+    totalChanges,
+    transactionEpoch,
+  }]) as SQLiteCursorInitialPublicationStageWatermark;
+}
+
+function sameInitialPublicationStageWatermark(
+  left: SQLiteCursorInitialPublicationStageWatermark,
+  right: SQLiteCursorInitialPublicationStageWatermark,
+): boolean {
+  return left.transactionEpoch === right.transactionEpoch
+    && left.totalChanges === right.totalChanges
+    && left.targetCatalogSha256 === right.targetCatalogSha256
+    && left.outerLedger.logicalWriteSequence === right.outerLedger.logicalWriteSequence
+    && left.outerLedger.fixedStatementCount === right.outerLedger.fixedStatementCount
+    && left.outerLedger.affectedRowsWatermark === right.outerLedger.affectedRowsWatermark;
+}
+
 function mainOperationsCatalogIdentity(
   connection: SQLiteConnection,
   captured = false,
 ): SQLiteMainOperationsCatalogIdentity {
-  const prepare = (sql: string): StatementSync => captured
-    ? prepareSQLiteConnectionIntrinsic(connection, sql, OPERATION)
-    : connection.prepare(sql, OPERATION);
+  const get = (statement: StatementSync): unknown => captured
+    ? getSQLiteStatementNativeIntrinsic(statement)
+    : statement.get();
+  const schemaVersionStatement = captured
+    ? prepareSQLiteConnectionCursorPublicationReadIntrinsic(
+      connection,
+      "cursor-publication-initial-stage-schema-version",
+      OPERATION,
+    )
+    : connection.prepare("SELECT schema_version FROM pragma_schema_version", OPERATION);
   const schemaVersion = sqliteSafeInteger(
     sqliteRow(
-      prepare("SELECT schema_version FROM pragma_schema_version").get(),
+      get(schemaVersionStatement),
       1, OPERATION, "main schema version",
     )[0],
     0, Number.MAX_SAFE_INTEGER, OPERATION, "main schema version",
   );
-  const raw = prepare(
+  const catalogStatement = captured
+    ? prepareSQLiteConnectionCursorPublicationReadIntrinsic(
+      connection,
+      "cursor-publication-initial-stage-main-operations",
+      OPERATION,
+    )
+    : connection.prepare(
       `SELECT type, name, tbl_name, rootpage, sql
          FROM main.sqlite_schema
         WHERE type = 'table' AND name = 'ge_cycle_operations'`,
-    ).get();
+      OPERATION,
+    );
+  const raw = get(catalogStatement);
   if (raw === undefined) {
-    return Object.freeze({ rootpage: null, schemaVersion, sql: null });
+    return reflectApplyIntrinsic(objectFreezeIntrinsic, Object, [{
+      rootpage: null,
+      schemaVersion,
+      sql: null,
+    }]) as SQLiteMainOperationsCatalogIdentity;
   }
   const row = sqliteRow(raw, 5, OPERATION, "main operation catalog identity");
   if (sqliteText(row[0], OPERATION, "main operation object type") !== "table"
@@ -790,13 +949,13 @@ function mainOperationsCatalogIdentity(
       || sqliteText(row[2], OPERATION, "main operation table name") !== "ge_cycle_operations") {
     return invalid("SQLite baseline main operation catalog is invalid");
   }
-  return Object.freeze({
+  return reflectApplyIntrinsic(objectFreezeIntrinsic, Object, [{
     rootpage: sqliteSafeInteger(
       row[3], 1, Number.MAX_SAFE_INTEGER, OPERATION, "main operation rootpage",
     ),
     schemaVersion,
     sql: sqliteText(row[4], OPERATION, "main operation table SQL"),
-  });
+  }]) as SQLiteMainOperationsCatalogIdentity;
 }
 
 function validateCursorSealTempCatalog(connection: SQLiteConnection): number {
@@ -1483,16 +1642,26 @@ export class SQLiteBaselineTempStage {
   #cursorPreRebindCleanup: (() => void) | undefined;
   #cursorPreRebindInsertStatement: StatementSync | undefined;
   #cursorOuterPublicationState:
-    "unused" | "prepared" | "published" | "retired" | "poisoned" = "unused";
+    "unused" | "prepared" | "published" | "initial-adoption-prepared"
+      | "initial-publication-adopted" | "retired" | "poisoned" = "unused";
   #cursorOuterPublicationAuthority: object | undefined;
   #cursorOuterPublicationEpoch: bigint | undefined;
   #cursorOuterPublicationLineage: SQLiteConnectionTransactionLineage | undefined;
   #cursorOuterPublicationAllowedTotalChanges: number | undefined;
+  #cursorInitialPublicationAdoptionMint:
+    SQLiteBaselineCursorInitialPublicationAdoptionMint | undefined;
+  #cursorInitialPublicationOuterLedger:
+    SQLiteCursorInitialPublicationOuterLedgerWatermark | undefined;
+  #cursorInitialPublicationTargetCatalogSha256:
+    typeof SQLITE_CURSOR_INITIAL_PUBLICATION_TARGET_CATALOG_SHA256 | undefined;
+  #cursorB2CatalogChangeFenceState: "live" | "retired" | "poisoned" = "live";
+  #cursorB2CatalogChangeFenceRetirement:
+    SQLiteBaselineCursorB2FenceRetirement | undefined;
   #cursorPostDdlReaderState: "unused" | "active" | "closed" | "poisoned" = "unused";
   #cursorPostDdlReaderAuthority: object | undefined;
   #cursorPostDdlReaderLease: object | undefined;
   #cursorPostDdlReaderCleanup: (() => void) | undefined;
-  readonly #mainOperationsCatalogIdentity: SQLiteMainOperationsCatalogIdentity;
+  #mainOperationsCatalogIdentity: SQLiteMainOperationsCatalogIdentity;
   #cooperativeWritesFinished = false;
 
   constructor(
@@ -2766,7 +2935,8 @@ export class SQLiteBaselineTempStage {
         || projectionIdentity !== this.#cursorTransferProjection
         || this.#cursorPreRebindState !== "pre-rebind-complete"
         || this.#cursorPreRebindSession !== undefined
-        || this.#cursorOuterPublicationState !== "published"
+        || (this.#cursorOuterPublicationState !== "published"
+          && this.#cursorOuterPublicationState !== "initial-adoption-prepared")
         || this.#cursorOuterPublicationAuthority !== authority) {
       return invalid("SQLite cursor active outer publication ownership is invalid");
     }
@@ -2810,8 +2980,219 @@ export class SQLiteBaselineTempStage {
     this.#cursorPostDdlReaderState = "closed";
   }
 
+  /**
+   * Complete every fallible stage-side adoption check and pre-register one
+   * opaque continuation.  The exact outer authority remains responsible for
+   * proving the four upstream receipts before it calls this bridge.
+   */
+  [SQLITE_BASELINE_PREPARE_CURSOR_INITIAL_PUBLICATION_ADOPTION](
+    authority: object,
+    lease: object,
+    watermarkInput: SQLiteCursorInitialPublicationStageWatermark,
+  ): SQLiteBaselineCursorInitialPublicationAdoptionMint {
+    const watermark = copyInitialPublicationStageWatermark(watermarkInput);
+    if (this.#cursorOuterPublicationAuthority !== authority
+        || this.#cursorPostDdlReaderAuthority !== authority
+        || this.#cursorPostDdlReaderLease !== lease
+        || this.#cursorPostDdlReaderState !== "closed"
+        || this.#cursorPostDdlReaderCleanup !== undefined) {
+      return invalid("SQLite cursor initial publication adoption owner is invalid");
+    }
+    const existing = this.#cursorInitialPublicationAdoptionMint;
+    if (this.#cursorOuterPublicationState === "initial-adoption-prepared") {
+      if (existing === undefined
+          || !sameInitialPublicationStageWatermark(existing.watermark, watermark)) {
+        return invalid("SQLite cursor initial publication adoption preparation is invalid");
+      }
+      return existing;
+    }
+    if (this.#cursorOuterPublicationState !== "published"
+        || existing !== undefined
+        || this.#cursorB2CatalogChangeFenceState !== "live"
+        || this.#cursorB2CatalogChangeFenceRetirement !== undefined
+        || this.#cursorTransferCaptureEpoch === undefined
+        || this.#cursorTransferStageEpoch === undefined
+        || this.#cursorTransferAllowedTotalChanges === undefined
+        || this.#cursorTransferLineage === undefined) {
+      return invalid("SQLite cursor initial publication adoption preparation is invalid");
+    }
+
+    let ownerBefore: SQLiteConnectionOwnerSnapshot;
+    let changesBefore: ReturnType<typeof readSQLiteConnectionTotalChangesSnapshot>;
+    let nextCatalog: SQLiteMainOperationsCatalogIdentity;
+    try {
+      ownerBefore = readSQLiteConnectionOwnerSnapshot(this.#connection);
+      changesBefore = readSQLiteConnectionTotalChangesSnapshot(this.#connection);
+      nextCatalog = mainOperationsCatalogIdentity(this.#connection, true);
+    } catch (error) {
+      if (error instanceof CycleStoreProviderError) throw error;
+      return unavailable("SQLite provider is closed");
+    }
+    const previousCatalog = this.#mainOperationsCatalogIdentity;
+    if (this.#state !== "open"
+        || activeStage(this.#connection) !== this
+        || !ownerBefore.isTransaction
+        || ownerBefore.transactionMode !== "exclusive"
+        || ownerBefore.transactionLineage !== this.#cursorTransferLineage
+        || ownerBefore.transactionEpoch !== watermark.transactionEpoch
+        || changesBefore.transactionEpoch !== ownerBefore.transactionEpoch
+        || changesBefore.totalChanges !== watermark.totalChanges
+        || this.#transactionEpoch !== this.#cursorTransferStageEpoch
+        || this.#allowedTotalChanges !== this.#cursorTransferAllowedTotalChanges
+        || nextCatalog.rootpage === null
+        || nextCatalog.sql === null
+        || nextCatalog.schemaVersion <= previousCatalog.schemaVersion
+        || (nextCatalog.rootpage === previousCatalog.rootpage
+          && nextCatalog.sql === previousCatalog.sql)) {
+      return this.#poison("SQLite cursor initial publication adoption fence is invalid");
+    }
+    const ownerAfter = readSQLiteConnectionOwnerSnapshot(this.#connection);
+    const changesAfter = readSQLiteConnectionTotalChangesSnapshot(this.#connection);
+    if (!ownerAfter.isTransaction
+        || ownerAfter.transactionMode !== "exclusive"
+        || ownerAfter.transactionLineage !== ownerBefore.transactionLineage
+        || ownerAfter.transactionEpoch !== ownerBefore.transactionEpoch
+        || changesAfter.transactionEpoch !== ownerAfter.transactionEpoch
+        || changesAfter.totalChanges !== changesBefore.totalChanges) {
+      return this.#poison("SQLite cursor initial publication adoption fence changed");
+    }
+
+    const retiredB2Fence = reflectApplyIntrinsic(
+      objectFreezeIntrinsic, Object, [reflectApplyIntrinsic(objectCreateIntrinsic, Object, [null])],
+    ) as SQLiteBaselineCursorB2FenceRetirement;
+    const tail = reflectApplyIntrinsic(
+      objectFreezeIntrinsic, Object, [reflectApplyIntrinsic(objectCreateIntrinsic, Object, [null])],
+    ) as SQLiteBaselineCursorInitialPublicationAdoptionTail;
+    const mint = reflectApplyIntrinsic(objectFreezeIntrinsic, Object, [{
+      retiredB2Fence,
+      tail,
+      watermark,
+    }]) as SQLiteBaselineCursorInitialPublicationAdoptionMint;
+    reflectApplyIntrinsic(weakMapSetIntrinsic, CURSOR_B2_FENCE_RETIREMENTS, [
+      retiredB2Fence as object,
+      {
+        authority,
+        previousCatalog,
+        previousTotalChanges: this.#allowedTotalChanges,
+        previousTransactionEpoch: this.#transactionEpoch,
+        stage: this,
+        watermark,
+      } satisfies SQLiteBaselineCursorB2FenceRetirementRecord,
+    ]);
+    reflectApplyIntrinsic(weakMapSetIntrinsic, CURSOR_INITIAL_PUBLICATION_ADOPTION_TAILS, [
+      tail as object,
+      {
+        authority,
+        nextCatalog,
+        retiredB2Fence,
+        stage: this,
+        watermark,
+      } satisfies SQLiteBaselineCursorInitialPublicationAdoptionContinuation,
+    ]);
+    this.#cursorInitialPublicationAdoptionMint = mint;
+    this.#cursorOuterPublicationState = "initial-adoption-prepared";
+    return mint;
+  }
+
+  /** Resolve one exact continuation, then perform only registry/field assignments. */
+  [SQLITE_BASELINE_PUBLISH_CURSOR_INITIAL_PUBLICATION_ADOPTION](
+    tail: SQLiteBaselineCursorInitialPublicationAdoptionTail,
+  ): void {
+    const continuation = reflectApplyIntrinsic(
+      weakMapGetIntrinsic, CURSOR_INITIAL_PUBLICATION_ADOPTION_TAILS, [tail as object],
+    ) as SQLiteBaselineCursorInitialPublicationAdoptionContinuation | undefined;
+    const mint = this.#cursorInitialPublicationAdoptionMint;
+    if (continuation === undefined || continuation.stage !== this
+        || this.#cursorOuterPublicationState !== "initial-adoption-prepared"
+        || this.#cursorOuterPublicationAuthority !== continuation.authority
+        || mint === undefined || mint.tail !== tail
+        || mint.retiredB2Fence !== continuation.retiredB2Fence
+        || mint.watermark !== continuation.watermark
+        || this.#cursorB2CatalogChangeFenceState !== "live") {
+      return invalid("SQLite cursor initial publication adoption tail is invalid");
+    }
+    reflectApplyIntrinsic(
+      weakMapDeleteIntrinsic, CURSOR_INITIAL_PUBLICATION_ADOPTION_TAILS, [tail as object],
+    );
+    this.#transactionEpoch = continuation.watermark.transactionEpoch;
+    this.#allowedTotalChanges = continuation.watermark.totalChanges;
+    this.#mainOperationsCatalogIdentity = continuation.nextCatalog;
+    this.#cursorOuterPublicationEpoch = continuation.watermark.transactionEpoch;
+    this.#cursorOuterPublicationAllowedTotalChanges = continuation.watermark.totalChanges;
+    this.#cursorInitialPublicationOuterLedger = continuation.watermark.outerLedger;
+    this.#cursorInitialPublicationTargetCatalogSha256 =
+      continuation.watermark.targetCatalogSha256;
+    this.#cursorB2CatalogChangeFenceRetirement = continuation.retiredB2Fence;
+    this.#cursorB2CatalogChangeFenceState = "retired";
+    this.#cursorTransferCaptureEpoch = undefined;
+    this.#cursorTransferStageEpoch = undefined;
+    this.#cursorTransferAllowedTotalChanges = undefined;
+    this.#cursorOuterPublicationState = "initial-publication-adopted";
+  }
+
+  /** Revalidate the adopted watermark without reviving the retired B2 fence. */
+  [SQLITE_BASELINE_ASSERT_CURSOR_INITIAL_PUBLICATION_ADOPTED](
+    authority: object,
+    lease: object,
+    retiredB2Fence: SQLiteBaselineCursorB2FenceRetirement,
+    watermarkInput: SQLiteCursorInitialPublicationStageWatermark,
+  ): void {
+    const watermark = copyInitialPublicationStageWatermark(watermarkInput);
+    const retirement = reflectApplyIntrinsic(
+      weakMapGetIntrinsic, CURSOR_B2_FENCE_RETIREMENTS, [retiredB2Fence as object],
+    ) as SQLiteBaselineCursorB2FenceRetirementRecord | undefined;
+    if (this.#state !== "open"
+        || activeStage(this.#connection) !== this
+        || this.#cursorOuterPublicationState !== "initial-publication-adopted"
+        || this.#cursorOuterPublicationAuthority !== authority
+        || this.#cursorPostDdlReaderAuthority !== authority
+        || this.#cursorPostDdlReaderLease !== lease
+        || this.#cursorPostDdlReaderState !== "closed"
+        || this.#cursorPostDdlReaderCleanup !== undefined
+        || this.#cursorB2CatalogChangeFenceState !== "retired"
+        || this.#cursorB2CatalogChangeFenceRetirement !== retiredB2Fence
+        || retirement === undefined || retirement.stage !== this
+        || retirement.authority !== authority
+        || !sameInitialPublicationStageWatermark(retirement.watermark, watermark)
+        || this.#cursorOuterPublicationEpoch !== watermark.transactionEpoch
+        || this.#cursorOuterPublicationLineage !== this.#cursorTransferLineage
+        || this.#cursorOuterPublicationAllowedTotalChanges !== watermark.totalChanges
+        || this.#cursorInitialPublicationTargetCatalogSha256
+          !== watermark.targetCatalogSha256
+        || this.#cursorInitialPublicationOuterLedger === undefined
+        || this.#cursorInitialPublicationOuterLedger.logicalWriteSequence
+          !== watermark.outerLedger.logicalWriteSequence
+        || this.#cursorInitialPublicationOuterLedger.fixedStatementCount
+          !== watermark.outerLedger.fixedStatementCount
+        || this.#cursorInitialPublicationOuterLedger.affectedRowsWatermark
+          !== watermark.outerLedger.affectedRowsWatermark) {
+      return invalid("SQLite cursor initial publication adopted authority is invalid");
+    }
+    const owner = readSQLiteConnectionOwnerSnapshot(this.#connection);
+    const changes = readSQLiteConnectionTotalChangesSnapshot(this.#connection);
+    const catalog = mainOperationsCatalogIdentity(this.#connection, true);
+    if (!owner.isTransaction || owner.transactionMode !== "exclusive"
+        || owner.transactionLineage !== this.#cursorTransferLineage
+        || owner.transactionEpoch !== watermark.transactionEpoch
+        || changes.transactionEpoch !== owner.transactionEpoch
+        || changes.totalChanges !== watermark.totalChanges
+        || catalog.rootpage !== this.#mainOperationsCatalogIdentity.rootpage
+        || catalog.schemaVersion !== this.#mainOperationsCatalogIdentity.schemaVersion
+        || catalog.sql !== this.#mainOperationsCatalogIdentity.sql) {
+      return this.#poison("SQLite cursor initial publication adopted fence changed");
+    }
+  }
+
   /** Atomic lifecycle hook; exact-pair validation is completed by the bridge. */
   [SQLITE_BASELINE_RETIRE_CURSOR_OUTER_PUBLICATION](): void {
+    const adoptionTail = this.#cursorInitialPublicationAdoptionMint?.tail;
+    if (adoptionTail !== undefined) {
+      reflectApplyIntrinsic(
+        weakMapDeleteIntrinsic,
+        CURSOR_INITIAL_PUBLICATION_ADOPTION_TAILS,
+        [adoptionTail as object],
+      );
+    }
     this.#cursorOuterPublicationState = "retired";
   }
 
@@ -3401,6 +3782,15 @@ export class SQLiteBaselineTempStage {
     if (this.#cursorOuterPublicationState !== "unused") {
       this.#cursorOuterPublicationState = "poisoned";
     }
+    const adoptionTail = this.#cursorInitialPublicationAdoptionMint?.tail;
+    if (adoptionTail !== undefined) {
+      reflectApplyIntrinsic(
+        weakMapDeleteIntrinsic,
+        CURSOR_INITIAL_PUBLICATION_ADOPTION_TAILS,
+        [adoptionTail as object],
+      );
+    }
+    this.#cursorB2CatalogChangeFenceState = "poisoned";
     this.#cursorOuterPublicationEpoch = undefined;
     this.#cursorOuterPublicationLineage = undefined;
     this.#cursorOuterPublicationAllowedTotalChanges = undefined;
@@ -3454,6 +3844,18 @@ const sqliteBaselineRegisterCursorPostDdlReaderCleanupIntrinsic =
   SQLiteBaselineTempStage.prototype[SQLITE_BASELINE_REGISTER_CURSOR_POST_DDL_READER_CLEANUP];
 const sqliteBaselineClearCursorPostDdlReaderCleanupIntrinsic =
   SQLiteBaselineTempStage.prototype[SQLITE_BASELINE_CLEAR_CURSOR_POST_DDL_READER_CLEANUP];
+const sqliteBaselinePrepareCursorInitialPublicationAdoptionIntrinsic =
+  SQLiteBaselineTempStage.prototype[
+    SQLITE_BASELINE_PREPARE_CURSOR_INITIAL_PUBLICATION_ADOPTION
+  ];
+const sqliteBaselinePublishCursorInitialPublicationAdoptionIntrinsic =
+  SQLiteBaselineTempStage.prototype[
+    SQLITE_BASELINE_PUBLISH_CURSOR_INITIAL_PUBLICATION_ADOPTION
+  ];
+const sqliteBaselineAssertCursorInitialPublicationAdoptedIntrinsic =
+  SQLiteBaselineTempStage.prototype[
+    SQLITE_BASELINE_ASSERT_CURSOR_INITIAL_PUBLICATION_ADOPTED
+  ];
 const sqliteBaselineRetireCursorOuterPublicationIntrinsic =
   SQLiteBaselineTempStage.prototype[SQLITE_BASELINE_RETIRE_CURSOR_OUTER_PUBLICATION];
 const sqliteBaselinePoisonCursorOuterPublicationIntrinsic =
@@ -3612,7 +4014,7 @@ export function assertSQLiteBaselineCursorOuterPublicationOwnedIntrinsic(
   transferSession: object,
   authority: object,
 ): void {
-  Reflect.apply(sqliteBaselineAssertCursorOuterPublicationOwnedIntrinsic, stage, [
+  reflectApplyIntrinsic(sqliteBaselineAssertCursorOuterPublicationOwnedIntrinsic, stage, [
     connection, receipt, projectionIdentity, transferSession, authority,
   ]);
 }
@@ -3626,7 +4028,7 @@ export function assertSQLiteBaselineCursorOuterPublicationActiveIntrinsic(
   transferSession: object,
   authority: object,
 ): void {
-  Reflect.apply(sqliteBaselineAssertCursorOuterPublicationActiveIntrinsic, stage, [
+  reflectApplyIntrinsic(sqliteBaselineAssertCursorOuterPublicationActiveIntrinsic, stage, [
     connection, receipt, projectionIdentity, transferSession, authority,
   ]);
 }
@@ -3650,6 +4052,45 @@ export function clearSQLiteBaselineCursorPostDdlReaderCleanupIntrinsic(
   reflectApplyIntrinsic(sqliteBaselineClearCursorPostDdlReaderCleanupIntrinsic, stage, [
     authority, lease,
   ]);
+}
+
+export function prepareSQLiteBaselineCursorInitialPublicationAdoptionIntrinsic(
+  stage: SQLiteBaselineTempStage,
+  authority: object,
+  lease: object,
+  watermark: SQLiteCursorInitialPublicationStageWatermark,
+): SQLiteBaselineCursorInitialPublicationAdoptionMint {
+  return reflectApplyIntrinsic(
+    sqliteBaselinePrepareCursorInitialPublicationAdoptionIntrinsic,
+    stage,
+    [authority, lease, watermark],
+  ) as SQLiteBaselineCursorInitialPublicationAdoptionMint;
+}
+
+/** Captured non-interruptible primitive: registry deletion and field assignments only. */
+export function publishSQLiteBaselineCursorInitialPublicationAdoptionIntrinsic(
+  stage: SQLiteBaselineTempStage,
+  tail: SQLiteBaselineCursorInitialPublicationAdoptionTail,
+): void {
+  reflectApplyIntrinsic(
+    sqliteBaselinePublishCursorInitialPublicationAdoptionIntrinsic,
+    stage,
+    [tail],
+  );
+}
+
+export function assertSQLiteBaselineCursorInitialPublicationAdoptedIntrinsic(
+  stage: SQLiteBaselineTempStage,
+  authority: object,
+  lease: object,
+  retiredB2Fence: SQLiteBaselineCursorB2FenceRetirement,
+  watermark: SQLiteCursorInitialPublicationStageWatermark,
+): void {
+  reflectApplyIntrinsic(
+    sqliteBaselineAssertCursorInitialPublicationAdoptedIntrinsic,
+    stage,
+    [authority, lease, retiredB2Fence, watermark],
+  );
 }
 
 /** Assignment-only retirement after the bridge validates the exact owner pair. */

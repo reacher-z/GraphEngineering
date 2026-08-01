@@ -1218,7 +1218,7 @@ describe("SQLite B3 outer publication authority", () => {
     expect(assertSQLiteCursorOuterPublicationAuthorityIntrinsic(authority)).toBe(authority);
   });
 
-  it("fails closed before 0002 if an upstream authority read prototype is replaced", () => {
+  it("uses captured native publication reads after DatabaseSync prototype replacement", () => {
     const graph = cleanGraph();
     const authority = prepare(graph);
     activateSQLiteCursorOuterPublicationAuthorityIntrinsic(authority);
@@ -1232,20 +1232,24 @@ describe("SQLite B3 outer publication authority", () => {
         ...prepareDescriptor,
         value: (): never => { throw new Error("hostile DatabaseSync.prepare"); },
       });
-      expect(() => executeSQLiteCursorMigration0002CatalogRebuildIntrinsic(authority)).toThrow();
+      const receipt = executeSQLiteCursorMigration0002CatalogRebuildIntrinsic(authority);
+      expect(readSQLiteMigration0002CatalogRebuildReceiptSnapshotIntrinsic(receipt))
+        .toMatchObject({ affectedRows: 1, fixedStatementCount: 20 });
     } finally {
       Object.defineProperty(DatabaseSync.prototype, "prepare", prepareDescriptor);
     }
     expect(readSQLiteConnectionTotalChangesSnapshot(graph.connection).totalChanges)
-      .toBe(before.totalChanges);
+      .toBe(before.totalChanges + 1);
     expect(readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(authority)).toMatchObject({
-      lifecycle: "poisoned",
-      migration0002PreparedStatementCount: 0,
+      lifecycle: "active",
+      migration0002LogicalExecutionCount: 1,
+      migration0002PreparedStatementCount: 20,
       outerLedger: {
-        affectedRowsWatermark: 0,
-        fixedStatementCount: 0,
-        logicalWriteSequence: 0,
+        affectedRowsWatermark: 1,
+        fixedStatementCount: 20,
+        logicalWriteSequence: 1,
       },
+      writePhase: "0002-complete",
     });
   });
 
