@@ -282,22 +282,92 @@ function failureDocument(failure: NodeRunFailure): JsonRecord {
 }
 
 /**
+ * `event-v1alpha2.schema.json` `$defs.attemptFailure`: the closed inline
+ * projection names a versioned template identifier instead of a message, so no
+ * producer-derived text reaches the wire. These two tables are the whole mapping
+ * and are mirrored exactly by `ATTEMPT_MESSAGE_TEMPLATES` and
+ * `ATTEMPT_CAUSE_CODES` in `python/src/graph_engineering/durable.py`. Their key
+ * set is exactly the set of codes a `NodeAttemptFailed` may carry; every other
+ * failure code settles the node without an attempt instead.
+ */
+export const ATTEMPT_MESSAGE_TEMPLATES: Readonly<Record<string, string>> = Object.freeze({
+  NODE_EXECUTION_FAILED: "node-execution-failed/v1",
+  NODE_TIMEOUT: "node-timeout/v1",
+  NODE_CANCELLED: "node-cancelled/v1",
+  INVALID_OUTPUT: "invalid-output/v1",
+  NODE_EXECUTION_INTERRUPTED: "process-interrupted/v1",
+  INVALID_ROUTE_SELECTION: "invalid-route-selection/v1",
+});
+
+/**
+ * The canonical text each template identifier stands for. It is a fixed string
+ * per template, never a substring of a caught exception, a provider body, a
+ * prompt, or a path, and it is byte-identical to `ATTEMPT_TEMPLATE_MESSAGES` in
+ * `python/src/graph_engineering/durable.py`. A metadata-only history carries no
+ * evidence, so this is what a recovered failure's `message` becomes: both lanes
+ * therefore rebuild the same result from the same history.
+ */
+export const ATTEMPT_TEMPLATE_MESSAGES: Readonly<Record<string, string>> = Object.freeze({
+  "node-execution-failed/v1": "the node executor raised",
+  "node-timeout/v1": "the node executor exceeded its timeout",
+  "node-cancelled/v1": "the node attempt was cancelled",
+  "invalid-output/v1": "the node produced an invalid output value",
+  "process-interrupted/v1": "process ended before the attempt outcome was durably recorded",
+  "invalid-route-selection/v1": "the router produced an invalid route selection",
+});
+
+export const ATTEMPT_CAUSE_CODES: Readonly<Record<string, string>> = Object.freeze({
+  NODE_EXECUTION_FAILED: "EXECUTOR_REJECTED",
+  NODE_TIMEOUT: "TIMEOUT",
+  NODE_CANCELLED: "CANCELLED",
+  INVALID_OUTPUT: "VALIDATION",
+  NODE_EXECUTION_INTERRUPTED: "PROCESS_LOST",
+  INVALID_ROUTE_SELECTION: "ROUTER_CONTRACT",
+});
+
+/**
  * The closed inline projection of an attempt failure.
  *
+ * Exactly `phase`, `code`, `messageTemplate`, `retryable` and `causeCode`, and
+ * nothing else: `$defs.attemptFailure` closes the object. `nodeId` and `attempt`
+ * are envelope members and are deliberately not duplicated here.
+ *
  * spec/redaction-semantics.md 6.1: raw errors, stack traces, provider
- * responses, prompts, paths, and tool output are absent from `NodeAttemptFailed`;
- * only identifiers, attempts, stable structured codes, and the retry flag stay
- * inline. `message` and `causeName` are producer-derived text — a caught
- * exception string reaches this runtime verbatim — so they travel as protected
- * diagnostic evidence instead.
+ * responses, prompts, paths, and tool output are absent from `NodeAttemptFailed`.
+ * `message` and `causeName` are producer-derived text — a caught exception
+ * string reaches this runtime verbatim — so they travel as protected diagnostic
+ * evidence instead.
  */
-function closedFailureProjection(failure: NodeRunFailure): JsonRecord {
+function closedFailureProjection(failure: NodeRunFailure, runId: string): JsonRecord {
+  const messageTemplate = ATTEMPT_MESSAGE_TEMPLATES[failure.code];
+  if (messageTemplate === undefined) {
+    throw invalidHistory(runId, "NodeAttemptFailed uses a non-attempt outcome code", {
+      code: failure.code,
+    });
+  }
   return {
     phase: failure.phase,
     code: failure.code,
+    messageTemplate,
+    retryable: failure.retryable,
+    causeCode: ATTEMPT_CAUSE_CODES[failure.code] as string,
+  };
+}
+
+/**
+ * The protected diagnostic evidence behind one attempt failure.
+ *
+ * A strict superset of the closed inline projection, so recovery can check the
+ * two against each other and the scheduler can rebuild the full `NodeRunFailure`
+ * from it.
+ */
+function attemptEvidenceDocument(failure: NodeRunFailure, runId: string): JsonRecord {
+  return {
+    ...closedFailureProjection(failure, runId),
+    message: failure.message,
     nodeId: failure.nodeId,
     attempt: failure.attempt,
-    retryable: failure.retryable,
+    ...(failure.causeName === undefined ? {} : { causeName: failure.causeName }),
     ...(failure.upstreamNodeIds === undefined
       ? {}
       : { upstreamNodeIds: [...failure.upstreamNodeIds] }),
@@ -322,6 +392,27 @@ function graphFailureDocument(failure: GraphRunFailure): JsonRecord {
     message: failure.message,
     diagnostic: snapshotJson(failure.diagnostic),
   };
+}
+
+/**
+ * A node result reduced to its portable facts, for comparing a committed
+ * terminal snapshot against the history it summarizes.
+ *
+ * `message` and `causeName` are deliberately dropped. Neither reaches the wire:
+ * an attempt failure's projection names a versioned template instead, so a
+ * folded failure has no host cause name and its message is the canonical text of
+ * that template, while the protected terminal snapshot still holds whatever
+ * wording the producing scheduler used. Comparing prose would make a run
+ * unresumable purely because two implementations word the same failure
+ * differently; comparing the facts is what the contract actually pins. This
+ * mirrors `_same_failure_semantics` on the Python lane.
+ */
+function portableNodeResult(result: NodeRunResult): JsonRecord {
+  const document = nodeResultDocument(result);
+  const failure = document["failure"];
+  if (!isRecord(failure)) return document;
+  const { message: _message, causeName: _causeName, ...facts } = failure;
+  return { ...document, failure: facts };
 }
 
 function nodeResultDocument(result: NodeRunResult): JsonRecord {
@@ -442,7 +533,27 @@ function bindInput(
  * carries no failure at all (a skipped node). It is a stable runtime token, not
  * an application value.
  */
-const SETTLED_WITHOUT_FAILURE = "SETTLED_WITHOUT_FAILURE";
+/**
+ * The closed outcome metadata beside a protected zero-attempt result.
+ *
+ * `$defs.nodeSettledData` requires `status`, `attempts` and `failureCode`, and
+ * `$defs.settledFailureCode` carries no "settled without failing" sentinel: a
+ * node that reaches this event always carries a failure, and a result that does
+ * not is an internal invariant violation rather than a record to be filled in
+ * with a placeholder that no reader can interpret.
+ */
+function settledMetadata(result: NodeRunResult, runId: string): JsonRecord {
+  if (result.failure === undefined) {
+    throw invalidHistory(runId, "NodeSettledWithoutAttempt has no failure code", {
+      nodeId: result.nodeId,
+    });
+  }
+  return {
+    status: result.status,
+    attempts: result.attempts,
+    failureCode: result.failure.code,
+  };
+}
 
 function graphInputContext(runId: string): SemanticContext {
   return { kind: "graph-input", runId, graphRevision: GRAPH_REVISION };
@@ -635,22 +746,28 @@ class DurableJournal implements SchedulerJournal {
       attempt: fields.failure.attempt,
       data: {
         terminal: !fields.willRetry,
-        failure: closedFailureProjection(fields.failure),
+        failure: closedFailureProjection(fields.failure, this.runId),
       },
       // Section 6.1: raw failure text is explicit protected diagnostic evidence
-      // and is never scheduler authority.
-      payloads: [{
-        field: "evidenceRef",
-        semanticContext: {
-          kind: "diagnostic-evidence",
-          runId: this.runId,
-          graphRevision: GRAPH_REVISION,
-          nodeId: fields.node.id,
-          attempt: fields.failure.attempt,
-          code: fields.failure.code,
-        },
-        value: failureDocument(fields.failure),
-      }],
+      // and is never scheduler authority. It is captured only when the effective
+      // policy authorizes it, and the record's disposition follows: evidence
+      // means `protected-ref`, no evidence means `metadata-only`.
+      ...(this.run.capturesDiagnosticEvidence
+        ? {
+            payloads: [{
+              field: "evidenceRef" as const,
+              semanticContext: {
+                kind: "diagnostic-evidence" as const,
+                runId: this.runId,
+                graphRevision: GRAPH_REVISION,
+                nodeId: fields.node.id,
+                attempt: fields.failure.attempt,
+                code: fields.failure.code,
+              },
+              value: attemptEvidenceDocument(fields.failure, this.runId),
+            }],
+          }
+        : {}),
     }];
     if (fields.willRetry) {
       const activityKey = this.activityKeys.get(fields.node.id) ?? fields.identity.activityKey;
@@ -734,11 +851,7 @@ class DurableJournal implements SchedulerJournal {
     await this.append([{
       type: "NodeSettledWithoutAttempt",
       nodeId: fields.node.id,
-      data: {
-        status: fields.result.status,
-        attempts: fields.result.attempts,
-        failureCode: fields.result.failure?.code ?? SETTLED_WITHOUT_FAILURE,
-      },
+      data: settledMetadata(fields.result, this.runId),
       payloads: [{
         field: "resultRef",
         semanticContext: nodeContext("node-result", this.runId, fields.node.id),
@@ -796,6 +909,49 @@ function optionalString(
   return Object.hasOwn(record, key)
     ? stringValue(record[key], runId, `${context}.${key}`)
     : undefined;
+}
+
+/**
+ * Rebuild one attempt failure from its recovered protected diagnostic evidence.
+ *
+ * `ProtectedDurableRun` has already checked that the closed inline projection
+ * agrees with this document member for member (Section 6.1 keeps the projection
+ * authoritative for what it carries). What remains is to pin the two
+ * projection-only members to the canonical mapping for the recovered code, so a
+ * history cannot claim one code and a different template, and then decode the
+ * remaining document exactly as before.
+ */
+function decodeAttemptFailure(
+  value: unknown,
+  runId: string,
+  context: string,
+  identity: { readonly nodeId: string; readonly attempt: number },
+): NodeRunFailure {
+  if (!isRecord(value)) throw invalidHistory(runId, `${context} must be an object`);
+  const { messageTemplate, causeCode, ...rest } = value;
+  const template = typeof messageTemplate === "string" ? messageTemplate : "";
+  // A protected history hands back the recovered evidence, a strict superset of
+  // the closed projection. A metadata-only history has no evidence at all, so
+  // the message is the canonical text of its template and the identity comes
+  // from the envelope, where it always lived.
+  const document = Object.hasOwn(rest, "message")
+    ? rest
+    : {
+        ...rest,
+        message: ATTEMPT_TEMPLATE_MESSAGES[template] ?? "",
+        nodeId: identity.nodeId,
+        attempt: identity.attempt,
+      };
+  const failure = decodeFailure(document, runId, context);
+  if (messageTemplate !== ATTEMPT_MESSAGE_TEMPLATES[failure.code] ||
+      causeCode !== ATTEMPT_CAUSE_CODES[failure.code]) {
+    throw invalidHistory(
+      runId,
+      `${context} template or cause code is not canonical for its code`,
+      { code: failure.code },
+    );
+  }
+  return failure;
 }
 
 function decodeFailure(value: unknown, runId: string, context: string): NodeRunFailure {
@@ -1009,7 +1165,15 @@ function sameTerminalFailures(
     const expected = right[index] as GraphRunFailure;
     if (failure.phase !== expected.phase) return false;
     if (failure.phase !== "output" || expected.phase !== "output") {
-      return sameJson(graphFailureDocument(failure), graphFailureDocument(expected));
+      // Portable facts only, for the same reason as `portableNodeResult`: the
+      // wire carries no prose, so comparing prose would make a run unresumable
+      // purely because two implementations word the same failure differently.
+      const facts = (item: GraphRunFailure): JsonRecord => {
+        const { message: _message, causeName: _causeName, ...rest } =
+          graphFailureDocument(item);
+        return rest;
+      };
+      return sameJson(facts(failure), facts(expected));
     }
     return failure.code === expected.code &&
       failure.outputName === expected.outputName &&
@@ -1105,7 +1269,7 @@ function reconstructTerminalNodes(fields: {
   }
   for (const terminalNode of terminal.nodes) {
     const committed = expected.get(terminalNode.nodeId) as NodeRunResult;
-    if (!sameJson(nodeResultDocument(terminalNode), nodeResultDocument(committed))) {
+    if (!sameJson(portableNodeResult(terminalNode), portableNodeResult(committed))) {
       throw invalidHistory(runId, "terminal result contradicts folded node history", {
         nodeId: terminalNode.nodeId,
       });
@@ -1683,7 +1847,7 @@ function foldHistory(
       );
       // The closed inline projection must agree with the protected result.
       if (event.data.status !== result.status || event.data.attempts !== result.attempts ||
-          event.data.failureCode !== (result.failure?.code ?? SETTLED_WITHOUT_FAILURE)) {
+          result.failure === undefined || event.data.failureCode !== result.failure.code) {
         throw invalidHistory(
           runId,
           "NodeSettledWithoutAttempt metadata contradicts its protected result",
@@ -1897,7 +2061,9 @@ function foldHistory(
       }
       exactKeys(event.data, ["terminal", "failure"], runId, "NodeAttemptFailed.data");
       const terminal = booleanValue(event.data.terminal, runId, "NodeAttemptFailed.terminal");
-      const failure = decodeFailure(event.data.failure, runId, "NodeAttemptFailed.failure");
+      const failure = decodeAttemptFailure(
+        event.data.failure, runId, "NodeAttemptFailed.failure", { nodeId, attempt },
+      );
       if (failure.nodeId !== nodeId || failure.attempt !== attempt) {
         throw invalidHistory(runId, "attempt failure identity is invalid");
       }
@@ -1933,9 +2099,11 @@ function foldHistory(
           expectedRetryable: shouldRetry,
         });
       }
+      // An interrupted attempt is canonical by its template, not by its prose.
+      // The message no longer reaches the wire at all, so the check that used to
+      // compare it now compares the versioned identifier that replaced it.
       if (failure.code === "NODE_EXECUTION_INTERRUPTED" &&
-          (failure.message !== "process ended before the attempt outcome was durably recorded" ||
-           failure.causeName !== "ProcessLost")) {
+          failure.message !== ATTEMPT_TEMPLATE_MESSAGES["process-interrupted/v1"]) {
         throw invalidHistory(runId, "interrupted attempt failure is not canonical", { nodeId, attempt });
       }
       if (failure.code === "NODE_CANCELLED" && (!terminal || failure.retryable)) {

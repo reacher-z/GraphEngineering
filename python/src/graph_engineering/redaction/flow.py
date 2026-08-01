@@ -16,7 +16,6 @@ from typing import Final, Literal, TypeAlias
 from .errors import RedactionFailure, failure
 from .inventory import (
     CARTESIAN_PAIR_COUNT,
-    POLICY_CONTROLS,
     SINK_CLASSES,
     SOURCE_CLASSES,
     sink_row,
@@ -71,30 +70,46 @@ def evaluate_flow(
 
     row = source_row(source_class) if type(source_class) is str else None
     destination = sink_row(sink) if type(sink) is str else None
-    control_known = type(policy_control) is str and policy_control in POLICY_CONTROLS
 
     if known_source is None:
         known_source = row is not None
     if known_sink is None:
         known_sink = destination is not None
-    if known_control is None:
-        known_control = control_known
 
     if not known_source or row is None:
         return _failed("sourceClass", str(source_class) if type(source_class) is str else "")
     if not known_sink or destination is None:
         return _failed("sink", str(sink) if type(sink) is str else "")
+
+    # Section 7: the guard locates the sink row and then verifies *the row's*
+    # named policy control.  Global vocabulary membership is not the test: a
+    # control this version knows about but which this sink does not own is not a
+    # control for this write, and `spec/conformance/redaction.validate.mjs`
+    # refuses to accept a flow case whose control the named sink does not
+    # declare.  Membership of the closed vocabulary is implied, because every
+    # sink-declared control is a vocabulary member.
+    control_known = type(policy_control) is str and policy_control in destination.policy_controls
+    if known_control is None:
+        known_control = control_known
+
     if not known_control or not control_known:
         return _failed("policyControl", str(policy_control) if type(policy_control) is str else "")
+
+    # The mandated opaque replacement for a caller-controlled identifier is a
+    # property of the source row alone. It is reported even when the write is
+    # suppressed, because the host must still replace the identifier.
+    identifier_replacement = (
+        row.identifier_treatment == "replace-with-runtime-opaque-and-protect-original"
+    )
 
     # A source whose own control is ``deny`` has no enabling policy mode in this
     # version and can never be widened by a sink row.
     if row.policy_control == "deny" or not policy_enabled:
-        return FlowDecision(outcome="suppressed", write_authorized=False)
-
-    identifier_replacement = (
-        row.identifier_treatment == "replace-with-runtime-opaque-and-protect-original"
-    )
+        return FlowDecision(
+            outcome="suppressed",
+            write_authorized=False,
+            identifier_replacement_required=identifier_replacement,
+        )
 
     if row.default_action == "metadata-only-allowlist":
         requested: FlowOutcome = "metadata-only"

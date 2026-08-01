@@ -228,6 +228,99 @@ const EVENT_TYPE_RULES: Readonly<Record<GraphEventV1Alpha2Type, readonly EventTy
     ],
   });
 
+/**
+ * `event-v1alpha2.schema.json` `$defs.attemptFailure`: a closed object whose
+ * `messageTemplate` and `causeCode` are closed enums. It carries no `nodeId`,
+ * `attempt`, `message` or `causeName`: the first two are envelope members and
+ * the last two are producer-derived text that belongs in the protected evidence.
+ */
+const ATTEMPT_FAILURE_REQUIRED = ["phase", "code", "messageTemplate", "retryable"] as const;
+const ATTEMPT_FAILURE_OPTIONAL = ["causeCode"] as const;
+const ATTEMPT_FAILURE_CODES: ReadonlySet<string> = new Set([
+  "NODE_EXECUTION_FAILED",
+  "NODE_TIMEOUT",
+  "NODE_CANCELLED",
+  "INVALID_OUTPUT",
+  "NODE_EXECUTION_INTERRUPTED",
+  "INVALID_ROUTE_SELECTION",
+]);
+const ATTEMPT_FAILURE_TEMPLATES: ReadonlySet<string> = new Set([
+  "node-execution-failed/v1",
+  "node-timeout/v1",
+  "node-cancelled/v1",
+  "invalid-output/v1",
+  "process-interrupted/v1",
+  "invalid-route-selection/v1",
+]);
+const ATTEMPT_FAILURE_CAUSE_CODES: ReadonlySet<string> = new Set([
+  "EXECUTOR_REJECTED",
+  "TIMEOUT",
+  "CANCELLED",
+  "VALIDATION",
+  "PROCESS_LOST",
+  "ROUTER_CONTRACT",
+]);
+
+/** `$defs.settledFailureCode`. There is deliberately no sentinel member. */
+const SETTLED_FAILURE_CODES: ReadonlySet<string> = new Set([
+  "EXECUTOR_NOT_FOUND",
+  "UPSTREAM_FAILED",
+  "INPUT_BINDING_FAILED",
+  "ATTEMPT_BUDGET_EXHAUSTED",
+  "NODE_CANCELLED",
+  "ROUTE_NOT_SELECTED",
+  "UNSUPPORTED_EDGE_CONDITION",
+  "UPSTREAM_UNKNOWN",
+]);
+
+/**
+ * Validate one `data.failure` against the frozen `$defs.attemptFailure`.
+ *
+ * This is the check whose absence let a non-conforming `NodeAttemptFailed` reach
+ * disk: the envelope was validated, the `data` member names were counted, and
+ * the object inside `failure` was never looked at.
+ */
+function attemptFailureIssues(value: unknown): readonly ValidationIssue[] {
+  if (!isRecord(value)) {
+    return [{ path: "#/data/failure", message: "expected an object" }];
+  }
+  const issues: ValidationIssue[] = [];
+  const allowed = new Set<string>([...ATTEMPT_FAILURE_REQUIRED, ...ATTEMPT_FAILURE_OPTIONAL]);
+  for (const key of Object.keys(value)) {
+    // `nodeId`, `attempt`, `message` and `causeName` land here.
+    if (!allowed.has(key)) {
+      issues.push({ path: `#/data/failure/${key}`, message: "unknown property" });
+    }
+  }
+  for (const key of ATTEMPT_FAILURE_REQUIRED) {
+    if (!Object.hasOwn(value, key)) {
+      issues.push({ path: `#/data/failure/${key}`, message: "required property is missing" });
+    }
+  }
+  if (Object.hasOwn(value, "phase") && value["phase"] !== "execute") {
+    issues.push({ path: "#/data/failure/phase", message: "expected execute" });
+  }
+  if (Object.hasOwn(value, "code") && !ATTEMPT_FAILURE_CODES.has(value["code"] as string)) {
+    issues.push({ path: "#/data/failure/code", message: "not an attempt failure code" });
+  }
+  if (
+    Object.hasOwn(value, "messageTemplate") &&
+    !ATTEMPT_FAILURE_TEMPLATES.has(value["messageTemplate"] as string)
+  ) {
+    issues.push({ path: "#/data/failure/messageTemplate", message: "unknown message template" });
+  }
+  if (Object.hasOwn(value, "retryable") && typeof value["retryable"] !== "boolean") {
+    issues.push({ path: "#/data/failure/retryable", message: "expected a boolean" });
+  }
+  if (
+    Object.hasOwn(value, "causeCode") &&
+    !ATTEMPT_FAILURE_CAUSE_CODES.has(value["causeCode"] as string)
+  ) {
+    issues.push({ path: "#/data/failure/causeCode", message: "unknown cause code" });
+  }
+  return issues;
+}
+
 const TERMINAL_STATUS: Readonly<Record<string, string>> = Object.freeze({
   RunCancelled: "cancelled",
   RunFailed: "failed",
@@ -303,6 +396,16 @@ function dataIssues(
         message: "expected protected-payload-store/v1alpha1",
       });
     }
+  }
+  if (type === "NodeAttemptFailed") {
+    issues.push(...attemptFailureIssues(data["failure"]));
+  }
+  if (
+    type === "NodeSettledWithoutAttempt" &&
+    Object.hasOwn(data, "failureCode") &&
+    !SETTLED_FAILURE_CODES.has(data["failureCode"] as string)
+  ) {
+    issues.push({ path: "#/data/failureCode", message: "not a settled failure code" });
   }
   if (type === "NodeScheduled") {
     const sideEffects = data["sideEffects"];

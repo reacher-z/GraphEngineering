@@ -24,6 +24,7 @@ import {
   CONTRACT_VERSION_V1ALPHA2,
   DURABLE_CODEC,
   PROTECTED_AAD_API_VERSION,
+  PROTECTED_STORE_CONTRACT,
   PROTECTED_STORE_ENVELOPE_API_VERSION,
   PROTECTED_VALUE_API_VERSION,
   type ProtectedAad,
@@ -54,8 +55,58 @@ const SAFE_REF = /^pv_[A-Za-z0-9][A-Za-z0-9._-]{0,124}$/;
 const TIMESTAMP =
   /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])T([01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/;
 
+export const CHECKPOINT_V1ALPHA2_API_VERSION =
+  "graphengineering.reacher-z.github.io/checkpoints/v1alpha2" as const;
+export const CHECKPOINT_PROJECTION_TYPE = "scheduler-projection/v1alpha2" as const;
+
+/** Section 6.2 node projection statuses. */
+const CHECKPOINT_NODE_STATUSES: ReadonlySet<string> = new Set([
+  "pending",
+  "running",
+  "retry-wait",
+  "succeeded",
+  "failed",
+  "skipped",
+]);
+
+const CHECKPOINT_REQUIRED = [
+  "apiVersion",
+  "projectionType",
+  "runId",
+  "checkpointId",
+  "sequence",
+  "createdAt",
+  "graphRevision",
+  "graphHash",
+  "implementationHash",
+  "capturePolicyHash",
+  "protectedStoreContract",
+  "keyRefHash",
+  "historyPrefixHash",
+  "totalAttempts",
+  "protectedRefCount",
+  "redacted",
+  "payloadDisposition",
+  "graphInputRef",
+  "graphInputMac",
+  "nodes",
+  "contentHash",
+] as const;
+
+const CHECKPOINT_MAX_NODES = 2048;
+const CHECKPOINT_MIN_REF_COUNT = 1;
+const CHECKPOINT_MAX_REF_COUNT = 1024;
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function safeInteger(value: unknown, minimum: number): boolean {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= minimum;
+}
+
+function identifier(value: unknown): boolean {
+  return typeof value === "string" && IDENTIFIER.test(value) && value !== "." && value !== "..";
 }
 
 function closed(
@@ -453,6 +504,96 @@ export function validateSinkGuardDecisionDocument(document: unknown): DocumentCh
   if (!Object.hasOwn(document, "preparedPayloadHash")) return bad("missing-preparedPayloadHash");
   if (authority === "authoritative" && outcome !== "protected-ref" && outcome !== "inline-unredacted") {
     return bad("authoritative-decision-cannot-use-this-outcome");
+  }
+  return OK;
+}
+
+/**
+ * Section 6.2 closed `checkpoints/v1alpha2` scheduler projection.
+ *
+ * This is the native mirror of `spec/checkpoint-v1alpha2.schema.json` and of
+ * `validate_checkpoint_shape` in
+ * `python/src/graph_engineering/redaction/wire.py`. It exists because the
+ * TypeScript lane previously carried validators for twelve of the thirteen
+ * closed wire schemas and had no native opinion at all about a checkpoint
+ * projection, so a `checkpoints/v1alpha2` document carrying arbitrary inline
+ * `state` was refused by Python and waved through here.
+ *
+ * The member-order of the two checks is load bearing and matches Python: a
+ * document that is *missing* a required member is a malformed projection, while
+ * a document carrying an *extra* member is legacy `checkpoints/v1alpha1`
+ * arbitrary inline state, which never becomes a protected v1alpha2 projection.
+ * The reasons are named so the two rejections stay distinguishable.
+ */
+export function validateCheckpointV1Alpha2Document(document: unknown): DocumentCheck {
+  if (!isRecord(document)) return bad("not-an-object");
+  for (const key of CHECKPOINT_REQUIRED) {
+    if (!Object.hasOwn(document, key)) return bad(`missing-property-${key}`);
+  }
+  const required = new Set<string>(CHECKPOINT_REQUIRED);
+  for (const key of Object.keys(document)) {
+    if (!required.has(key)) return bad(`arbitrary-inline-state-${key}`);
+  }
+  if (document["apiVersion"] !== CHECKPOINT_V1ALPHA2_API_VERSION) return bad("unknown-version");
+  if (document["projectionType"] !== CHECKPOINT_PROJECTION_TYPE) return bad("unknown-projection");
+  if (document["protectedStoreContract"] !== PROTECTED_STORE_CONTRACT) {
+    return bad("unknown-protected-store-contract");
+  }
+
+  // Section 3.2: the disposition and the redaction flag are joined through the
+  // one truth table, then pinned to the only disposition a checkpoint may claim.
+  const truth = checkDispositionFacts({
+    payloadDisposition: document["payloadDisposition"],
+    redacted: document["redacted"],
+  } as unknown as DispositionFacts);
+  if (!truth.valid) return bad(truth.reason);
+  if (document["payloadDisposition"] !== "protected-ref") return bad("checkpoint-is-not-protected");
+
+  if (!identifier(document["runId"])) return bad("bad-runId");
+  if (!identifier(document["checkpointId"])) return bad("bad-checkpointId");
+  const hex = hexFields(document, [
+    "graphHash",
+    "implementationHash",
+    "capturePolicyHash",
+    "keyRefHash",
+    "historyPrefixHash",
+    "graphInputMac",
+    "contentHash",
+  ]);
+  if (!hex.valid) return hex;
+  if (!safeInteger(document["sequence"], 0)) return bad("bad-sequence");
+  if (!safeInteger(document["graphRevision"], 1)) return bad("bad-graphRevision");
+  if (!safeInteger(document["totalAttempts"], 0)) return bad("bad-totalAttempts");
+  const refCount = document["protectedRefCount"];
+  if (
+    !safeInteger(refCount, CHECKPOINT_MIN_REF_COUNT) ||
+    (refCount as number) > CHECKPOINT_MAX_REF_COUNT
+  ) {
+    return bad("bad-protectedRefCount");
+  }
+  const createdAt = document["createdAt"];
+  if (typeof createdAt !== "string" || !TIMESTAMP.test(createdAt)) return bad("bad-createdAt");
+
+  const graphInput = validateProtectedValueRefDocument(document["graphInputRef"]);
+  if (!graphInput.valid) return graphInput;
+
+  const nodes = document["nodes"];
+  if (!Array.isArray(nodes) || nodes.length > CHECKPOINT_MAX_NODES) return bad("bad-nodes");
+  const seen = new Set<string>();
+  for (const node of nodes) {
+    if (!isRecord(node)) return bad("node-is-not-an-object");
+    const nodeId = node["nodeId"];
+    if (!identifier(nodeId)) return bad("bad-node-nodeId");
+    if (typeof node["status"] !== "string" || !CHECKPOINT_NODE_STATUSES.has(node["status"])) {
+      return bad("bad-node-status");
+    }
+    if (seen.has(nodeId as string)) return bad("duplicate-node-nodeId");
+    seen.add(nodeId as string);
+    for (const [key, value] of Object.entries(node)) {
+      if (!key.endsWith("Ref")) continue;
+      const reference = validateProtectedValueRefDocument(value);
+      if (!reference.valid) return reference;
+    }
   }
   return OK;
 }

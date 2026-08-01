@@ -694,18 +694,228 @@ if (pythonDurable.status !== 0) {
     `Python durable-recovery conformance failed:\n${pythonDurable.stderr || pythonDurable.stdout}`,
   );
 }
-const pyDurableWithHistory = JSON.parse(pythonDurable.stdout);
-const { preCrashEvents, ...pyDurable } = pyDurableWithHistory;
-const durableStore = new persistence.MemoryEventStore();
-await durableStore.append(durableCase.runId, -1, preCrashEvents);
-const beforeDurableResume = await collectEvents(durableStore.read(durableCase.runId));
+const pyDurable = JSON.parse(pythonDurable.stdout);
+
+// spec/redaction-semantics.md Section 4.2: a durable run without a configured
+// protected payload store and key provider fails closed with
+// PAYLOAD_PROTECTION_REQUIRED, so this campaign runs the guarded
+// `events/v1alpha2` path on both lanes. Each lane configures its own equivalent
+// protection — a guarded in-memory journal, an in-memory protected payload
+// store, and the clearly named deterministic test key provider.
+//
+// A protected reference is bound to its exact event AAD and its ciphertext
+// lives in the writing lane's payload store, so the pre-hard-cut handoff (ship
+// Python's committed events over stdout and replay the bytes into a TypeScript
+// store) is no longer possible: the two lanes' deterministic test key providers
+// derive different run identity keys, so TypeScript cannot authenticate a
+// Python-written reference. Each lane therefore produces the same crash history
+// itself, and the comparison moved to (a) the closed metadata envelope of every
+// committed record, including the full `data` member-name set, and (b) the
+// recovered projection — every protected reference resolved back to its
+// application value — which is what the transferred inline `data` used to carry.
+const DURABLE_SCOPE = Object.freeze({
+  tenantScopeId: "tenant-durable-conformance",
+  authorityProviderId: "provider-durable-conformance",
+  authoritySubjectId: "subject-durable-conformance",
+});
+
+/**
+ * `data` members that cannot be compared byte-for-byte across the two lanes.
+ *
+ * This set used to hold every key-derived member on the stated grounds that the
+ * two lanes ship different deterministic test providers. That is no longer true:
+ * both lanes derive protection keys, identity keys and nonces from one shared
+ * rule, so `activityKey`, `capturePolicyHash`, `keyRefHash` and every `*Mac` are
+ * byte-identical and are compared directly.
+ *
+ * What remains is the opaque reference object itself. Its `ref` is a fresh
+ * `uuid4` minted per protect call, which is deliberately not a function of
+ * anything — the point of the reference is that it carries no filename, path,
+ * tenant or key identity. What it protects is compared through the recovered
+ * projection, which authenticates it under its exact event AAD first.
+ */
+const DURABLE_OPAQUE_REFERENCE_MEMBERS = new Set([
+  "evidenceRef", "inputRef", "outputRef", "resultRef",
+]);
+
+/**
+ * `capturePolicyHash` is excluded for one specific, named reason, and the thing
+ * it stands for is compared directly instead (see `durableCapturePolicyModes`).
+ *
+ * The two lanes ship the same nineteen control modes and the same diagnostic
+ * limit, but different `transformImplementationHash`, `ruleRegistryVersion` and
+ * `ruleRegistryHash` — a redaction-policy divergence that is not this lane's to
+ * settle. Excluding the hash without comparing the modes would hide that; this
+ * comparison makes the modes a gate and leaves exactly the three known fields
+ * outstanding.
+ */
+const DURABLE_POLICY_HASH_MEMBERS = new Set(["capturePolicyHash"]);
+
+/** The semantic content of a capture policy: every control mode it declares. */
+function durableCapturePolicyModes(policy) {
+  const derived = new Set([
+    "apiVersion", "keyRef", "redactionTransform", "redactionRules",
+    "transformImplementationHash", "ruleRegistryVersion", "ruleRegistryHash",
+  ]);
+  return Object.fromEntries(
+    Object.keys(policy).sort().filter((name) => !derived.has(name))
+      .map((name) => [name, policy[name]]),
+  );
+}
+
+/** `[referenceMember, hydratedMember, taggedEncoding]` per protected event type. */
+const DURABLE_PROTECTED_FIELDS = {
+  RunCreated: ["inputRef", "input", true],
+  NodeScheduled: ["inputRef", "input", true],
+  NodeSucceeded: ["outputRef", "output", true],
+  NodeSettledWithoutAttempt: ["resultRef", "result", true],
+  RunSucceeded: ["resultRef", "result", true],
+  RunFailed: ["resultRef", "result", true],
+  RunCancelled: ["resultRef", "result", true],
+  NodeAttemptFailed: ["evidenceRef", "failure", false],
+};
+
+/**
+ * The closed, key-independent metadata of one committed `events/v1alpha2`
+ * record. `eventId` and `payloadHash` are deliberately absent: the two lanes
+ * mint different default event identifiers (`runId.sequence` here,
+ * `runId:sequence` on the Python lane) and `payloadHash` hashes a `data` member
+ * that now holds an opaque per-call reference.
+ */
+function durableEnvelope(event) {
+  return {
+    apiVersion: event.apiVersion,
+    sequence: event.sequence,
+    type: event.type,
+    nodeId: event.nodeId ?? null,
+    edgeId: event.edgeId ?? null,
+    attempt: event.attempt ?? null,
+    timestamp: event.timestamp,
+    redacted: event.redacted,
+    payloadDisposition: event.payloadDisposition,
+    dataKeys: Object.keys(event.data).sort(),
+    closedData: Object.fromEntries(
+      Object.keys(event.data)
+        .sort()
+        .filter((name) =>
+          !DURABLE_OPAQUE_REFERENCE_MEMBERS.has(name) && !DURABLE_POLICY_HASH_MEMBERS.has(name))
+        .map((name) => [name, event.data[name]]),
+    ),
+  };
+}
+
+/** Every protected reference in `rawEvents`, resolved back to its value. */
+function durableRecoveredValues(rawEvents, recovered) {
+  const bySequence = new Map(recovered.map((event) => [event.sequence, event]));
+  const values = [];
+  for (const raw of rawEvents) {
+    const spec = DURABLE_PROTECTED_FIELDS[raw.type];
+    if (spec === undefined) continue;
+    const [field, target, tagged] = spec;
+    if (raw.data[field] === undefined) continue;
+    const projection = bySequence.get(raw.sequence);
+    assert.ok(projection, `recovered projection is missing sequence ${raw.sequence}`);
+    const hydrated = projection.data[target];
+    values.push({
+      sequence: raw.sequence,
+      type: raw.type,
+      nodeId: raw.nodeId ?? null,
+      field,
+      value: tagged ? decodeDurableJson(hydrated) : hydrated,
+    });
+  }
+  return values;
+}
+
+/**
+ * A guarded journal that commits a batch and then loses the process. It sees
+ * only the closed metadata of what it already committed — never a prepared
+ * write's contents and never a payload — so it cannot be a bypass seam.
+ */
+class DurableCommitThenThrowJournal {
+  constructor(delegate, shouldThrow) {
+    this.delegate = delegate;
+    this.shouldThrow = shouldThrow;
+    this.threw = false;
+  }
+
+  get sink() {
+    return this.delegate.sink;
+  }
+
+  get binding() {
+    return this.delegate.binding;
+  }
+
+  async append(runId, expectedVersion, writes) {
+    const version = await this.delegate.append(runId, expectedVersion, writes);
+    const batch = await collectEvents(this.delegate.read(runId, expectedVersion + 1));
+    if (!this.threw && this.shouldThrow(batch)) {
+      this.threw = true;
+      throw new Error("simulated process loss after durable commit");
+    }
+    return version;
+  }
+
+  read(runId, fromSequence = 0) {
+    return this.delegate.read(runId, fromSequence);
+  }
+}
+
+const durableKeys = new persistence.DeterministicTestKeyProvider();
+// Section 5.1: the policy must name the key reference actually in use, or its
+// hash attests to a key that is protecting nothing.
+const durableCapturePolicy = Object.freeze({
+  ...persistence.DEFAULT_CAPTURE_POLICY,
+  keyRef: durableKeys.keyRef,
+});
+const durableProtection = {
+  journal: new persistence.MemoryProtectedEventStore(),
+  payloadStore: new persistence.MemoryProtectedPayloadStore(),
+  keys: durableKeys,
+  scope: DURABLE_SCOPE,
+  policy: durableCapturePolicy,
+};
+// The process is lost immediately after the batch that commits `left`'s success
+// and its outgoing edge, with `right`'s attempt still open. That is exactly the
+// point at which the Python lane's executor raises out of attempt handling.
+const durableCrashProtection = {
+  ...durableProtection,
+  journal: new DurableCommitThenThrowJournal(
+    durableProtection.journal,
+    (batch) => batch.some(({ type }) => type === "EdgeEmitted"),
+  ),
+};
+await assert.rejects(
+  startDurableGraphRun(durableCase.graph, durableCase.graphInput, {
+    runId: durableCase.runId,
+    implementationId: durableCase.implementationId,
+    protection: durableCrashProtection,
+    now: () => new Date("2026-07-26T12:00:00.000Z"),
+    nodeExecutors: {
+      left: () => durableCase.preCrash.succeeded.output,
+      // The attempt is still open when the process is lost.
+      right: () => new Promise(() => {}),
+      merge: () => {
+        throw new Error("merge must not run before the simulated process loss");
+      },
+    },
+  }),
+  ({ code }) => code === "DURABILITY_STORE_FAILED",
+  "the pre-crash execution unexpectedly completed",
+);
+const durableRun = new runtime.ProtectedDurableRun(durableProtection, durableCase.runId);
+const beforeDurableResume = await collectEvents(
+  durableProtection.journal.read(durableCase.runId),
+);
+const beforeDurableRecovered = [...(await durableRun.read())];
 const durableCalls = [];
 const durableActivityKeys = [];
 let durableMergeInput;
 const durableResult = await resumeDurableGraphRun(durableCase.graph, {
   runId: durableCase.runId,
   implementationId: durableCase.implementationId,
-  eventStore: durableStore,
+  protection: durableProtection,
   now: () => new Date("2026-07-26T12:00:00.000Z"),
   nodeExecutors: {
     left: () => {
@@ -723,7 +933,10 @@ const durableResult = await resumeDurableGraphRun(durableCase.graph, {
     },
   },
 });
-const afterDurableResume = await collectEvents(durableStore.read(durableCase.runId));
+const afterDurableResume = await collectEvents(
+  durableProtection.journal.read(durableCase.runId),
+);
+const afterDurableRecovered = [...(await durableRun.read())];
 const runResumed = afterDurableResume.find(({ type }) => type === "RunResumed");
 assert.ok(runResumed, "durable history must contain RunResumed");
 const rightSchedules = afterDurableResume.filter(
@@ -734,7 +947,7 @@ const terminalVersion = afterDurableResume.length;
 const terminalResult = await resumeDurableGraphRun(durableCase.graph, {
   runId: durableCase.runId,
   implementationId: durableCase.implementationId,
-  eventStore: durableStore,
+  protection: durableProtection,
   now: () => new Date("2026-07-26T12:00:00.000Z"),
   executors: Object.fromEntries(
     durableCase.graph.nodes.map(({ kind }) => [kind, () => {
@@ -743,7 +956,10 @@ const terminalResult = await resumeDurableGraphRun(durableCase.graph, {
     }]),
   ),
 });
-const finalDurableHistory = await collectEvents(durableStore.read(durableCase.runId));
+const finalDurableHistory = await collectEvents(
+  durableProtection.journal.read(durableCase.runId),
+);
+const durableResumeEvents = afterDurableResume.slice(beforeDurableResume.length);
 const tsDurable = {
   status: durableResult.status,
   output: durableResult.output ?? {},
@@ -759,7 +975,11 @@ const tsDurable = {
   reusedNodeIds: runResumed.data.reusedNodeIds,
   interruptedNodeIds: runResumed.data.interruptedNodeIds,
   preCrashEventTypes: beforeDurableResume.map(({ type }) => type),
-  resumeEventTypes: afterDurableResume.slice(beforeDurableResume.length).map(({ type }) => type),
+  preCrashEnvelope: beforeDurableResume.map(durableEnvelope),
+  preCrashValues: durableRecoveredValues(beforeDurableResume, beforeDurableRecovered),
+  resumeEventTypes: durableResumeEvents.map(({ type }) => type),
+  resumeEnvelope: durableResumeEvents.map(durableEnvelope),
+  resumeValues: durableRecoveredValues(durableResumeEvents, afterDurableRecovered),
   activityKeyStable: rightSchedules.length === 2 &&
     rightSchedules[0].data.activityKey === rightSchedules[1].data.activityKey &&
     isDeepStrictEqual(durableActivityKeys, [rightSchedules[0].data.activityKey]),
@@ -768,9 +988,35 @@ const tsDurable = {
     executorCalls: terminalExecutorCalls,
     sameResult: isDeepStrictEqual(terminalResult, durableResult),
   },
+  capturePolicyModes: durableCapturePolicyModes(durableCapturePolicy),
+  capturePolicyNamesTheProviderKey: durableCapturePolicy.keyRef === durableKeys.keyRef,
 };
 
 assert.deepEqual(tsDurable, pyDurable, "TypeScript/Python durable recovery reports differ");
+// Section 4.2 evidence: every committed record is a guarded v1alpha2 record and
+// no authoritative value survives inline in `data`.
+for (const event of finalDurableHistory) {
+  assert.equal(
+    event.apiVersion,
+    "graphengineering.reacher-z.github.io/events/v1alpha2",
+    `durable event ${event.sequence} is not a guarded v1alpha2 record`,
+  );
+  for (const inline of ["input", "output", "result"]) {
+    assert.equal(
+      Object.hasOwn(event.data, inline),
+      false,
+      `durable event ${event.sequence} leaked an inline '${inline}' member`,
+    );
+  }
+  const spec = DURABLE_PROTECTED_FIELDS[event.type];
+  if (spec !== undefined && event.data[spec[0]] !== undefined) {
+    assert.equal(
+      event.payloadDisposition,
+      "protected-ref",
+      `durable event ${event.sequence} carries a reference without a protected-ref disposition`,
+    );
+  }
+}
 assert.equal(tsDurable.status, durableCase.expect.status);
 assert.deepEqual(tsDurable.output, durableCase.expect.output);
 assert.deepEqual(tsDurable.executorCalls, durableCase.expect.executorCalls);
@@ -876,98 +1122,132 @@ const durableInteropCases = [
   },
 ];
 
-const tsProducedInterop = {};
-for (const testCase of durableInteropCases) {
-  const store = new persistence.MemoryEventStore();
-  const options = {
-    runId: testCase.tsRunId,
-    implementationId: testCase.implementationId,
-    eventStore: store,
-    now: () => new Date(testCase.fixedTime),
-    ...(testCase.mode === "outputBinding"
-      ? { nodeExecutors: { root: () => ({ actual: true }) } }
-      : {}),
-  };
-  const result = await startDurableGraphRun(testCase.graph, testCase.graphInput, options);
-  const events = await collectEvents(store.read(testCase.tsRunId));
-  tsProducedInterop[testCase.name] = {
-    result: normalizeDurableInteropResult(result),
-    eventTypes: events.map(({ type }) => type),
-    settled: durableSettledSemantics(events),
-    events,
-  };
-}
+/**
+ * OPEN: cross-language terminal durable-history interop (`D9-DURABLE-INTEROP`).
+ *
+ * This harness is the only one that moves a committed history *across* the
+ * language boundary and resumes it, rather than running each lane natively and
+ * comparing projections. Under `events/v1alpha2` that needs two things neither
+ * lane ships:
+ *
+ *   1. a transport for the protected blobs, not just the events; and
+ *   2. a way to admit an externally committed, already-guarded history into a
+ *      guarded store.
+ *
+ * There is deliberately no such door today: `MemoryProtectedEventStore` accepts
+ * only a `PreparedSinkWrite`, and Python's `GuardedMemoryEventStore(legacy_...)`
+ * is a *rejection* path (`LEGACY_HISTORY_UNSAFE`), not an adoption path. Adding
+ * one is the single API that would let bytes into a guarded store without a
+ * guard, so it is an owner decision rather than a harness fix.
+ *
+ * The cases below are kept executable so that adding the capability re-enables
+ * them by flipping one constant. Until then this prints on every run: it is a
+ * declared gap, not a silent skip.
+ */
+const DURABLE_INTEROP_ADOPTION_AVAILABLE = false;
 
-const pythonDurableInterop = spawnSync(
-  "uv",
-  ["run", "--project", "python", "python", "tools/conformance/python_durable_interop.py"],
-  {
-    cwd: root,
-    encoding: "utf8",
-    input: JSON.stringify({
-      cases: durableInteropCases.map((testCase) => ({
-        ...testCase,
-        tsEvents: tsProducedInterop[testCase.name].events,
-      })),
-    }),
-  },
-);
-if (pythonDurableInterop.status !== 0) {
-  throw new Error(
-    `Python durable terminal interop failed:\n${pythonDurableInterop.stderr || pythonDurableInterop.stdout}`,
-  );
-}
-const pyDurableInterop = JSON.parse(pythonDurableInterop.stdout);
+if (DURABLE_INTEROP_ADOPTION_AVAILABLE) {
+  const tsProducedInterop = {};
+  for (const testCase of durableInteropCases) {
+    const store = new persistence.MemoryEventStore();
+    const options = {
+      runId: testCase.tsRunId,
+      implementationId: testCase.implementationId,
+      eventStore: store,
+      now: () => new Date(testCase.fixedTime),
+      ...(testCase.mode === "outputBinding"
+        ? { nodeExecutors: { root: () => ({ actual: true }) } }
+        : {}),
+    };
+    const result = await startDurableGraphRun(testCase.graph, testCase.graphInput, options);
+    const events = await collectEvents(store.read(testCase.tsRunId));
+    tsProducedInterop[testCase.name] = {
+      result: normalizeDurableInteropResult(result),
+      eventTypes: events.map(({ type }) => type),
+      settled: durableSettledSemantics(events),
+      events,
+    };
+  }
 
-for (const testCase of durableInteropCases) {
-  const tsProduced = tsProducedInterop[testCase.name];
-  const pythonReport = pyDurableInterop[testCase.name];
-  assert.deepEqual(tsProduced.eventTypes, testCase.expectedEventTypes);
-  assert.deepEqual(tsProduced.settled, testCase.expectedSettled);
-  assert.deepEqual(
-    pythonReport.pythonConsumedTs.result,
-    tsProduced.result,
-    `${testCase.name}: Python did not reconstruct the TypeScript terminal result`,
-  );
-  assert.deepEqual(pythonReport.pythonConsumedTs.eventTypes, tsProduced.eventTypes);
-  assert.deepEqual(pythonReport.pythonConsumedTs.settled, tsProduced.settled);
-  assert.deepEqual(pythonReport.pythonConsumedTs.terminalResume, {
-    newEvents: 0,
-    executorCalls: 0,
-  });
-
-  const pythonProduced = pythonReport.pythonProduced;
-  assert.deepEqual(pythonProduced.eventTypes, testCase.expectedEventTypes);
-  assert.deepEqual(pythonProduced.settled, testCase.expectedSettled);
-  const store = new persistence.MemoryEventStore();
-  await store.append(testCase.pythonRunId, -1, pythonProduced.events);
-  const before = pythonProduced.events.length;
-  let executorCalls = 0;
-  const resumed = await resumeDurableGraphRun(testCase.graph, {
-    runId: testCase.pythonRunId,
-    implementationId: testCase.implementationId,
-    eventStore: store,
-    now: () => new Date(testCase.fixedTime),
-    nodeExecutors: {
-      root: () => {
-        executorCalls += 1;
-        throw new Error("terminal cross-language resume invoked an executor");
-      },
+  const pythonDurableInterop = spawnSync(
+    "uv",
+    ["run", "--project", "python", "python", "tools/conformance/python_durable_interop.py"],
+    {
+      cwd: root,
+      encoding: "utf8",
+      input: JSON.stringify({
+        cases: durableInteropCases.map((testCase) => ({
+          ...testCase,
+          tsEvents: tsProducedInterop[testCase.name].events,
+        })),
+      }),
     },
-  });
-  const after = await collectEvents(store.read(testCase.pythonRunId));
-  assert.deepEqual(
-    normalizeDurableInteropResult(resumed),
-    pythonProduced.result,
-    `${testCase.name}: TypeScript did not reconstruct the Python terminal result`,
   );
-  assert.equal(after.length - before, 0);
-  assert.equal(executorCalls, 0);
-}
+  if (pythonDurableInterop.status !== 0) {
+    throw new Error(
+      `Python durable terminal interop failed:\n${pythonDurableInterop.stderr || pythonDurableInterop.stdout}`,
+    );
+  }
+  const pyDurableInterop = JSON.parse(pythonDurableInterop.stdout);
 
-process.stdout.write(
-  `Cross-language terminal durable-history interop passed for ${durableInteropCases.length} cases in both directions.\n`,
-);
+  for (const testCase of durableInteropCases) {
+    const tsProduced = tsProducedInterop[testCase.name];
+    const pythonReport = pyDurableInterop[testCase.name];
+    assert.deepEqual(tsProduced.eventTypes, testCase.expectedEventTypes);
+    assert.deepEqual(tsProduced.settled, testCase.expectedSettled);
+    assert.deepEqual(
+      pythonReport.pythonConsumedTs.result,
+      tsProduced.result,
+      `${testCase.name}: Python did not reconstruct the TypeScript terminal result`,
+    );
+    assert.deepEqual(pythonReport.pythonConsumedTs.eventTypes, tsProduced.eventTypes);
+    assert.deepEqual(pythonReport.pythonConsumedTs.settled, tsProduced.settled);
+    assert.deepEqual(pythonReport.pythonConsumedTs.terminalResume, {
+      newEvents: 0,
+      executorCalls: 0,
+    });
+
+    const pythonProduced = pythonReport.pythonProduced;
+    assert.deepEqual(pythonProduced.eventTypes, testCase.expectedEventTypes);
+    assert.deepEqual(pythonProduced.settled, testCase.expectedSettled);
+    const store = new persistence.MemoryEventStore();
+    await store.append(testCase.pythonRunId, -1, pythonProduced.events);
+    const before = pythonProduced.events.length;
+    let executorCalls = 0;
+    const resumed = await resumeDurableGraphRun(testCase.graph, {
+      runId: testCase.pythonRunId,
+      implementationId: testCase.implementationId,
+      eventStore: store,
+      now: () => new Date(testCase.fixedTime),
+      nodeExecutors: {
+        root: () => {
+          executorCalls += 1;
+          throw new Error("terminal cross-language resume invoked an executor");
+        },
+      },
+    });
+    const after = await collectEvents(store.read(testCase.pythonRunId));
+    assert.deepEqual(
+      normalizeDurableInteropResult(resumed),
+      pythonProduced.result,
+      `${testCase.name}: TypeScript did not reconstruct the Python terminal result`,
+    );
+    assert.equal(after.length - before, 0);
+    assert.equal(executorCalls, 0);
+  }
+
+  process.stdout.write(
+    `Cross-language terminal durable-history interop passed for ${durableInteropCases.length} cases in both directions.\n`,
+  );
+} else {
+  process.stdout.write(
+    `OPEN: cross-language terminal durable-history interop is not executed for ` +
+    `${durableInteropCases.length} cases. A guarded store has no way to adopt a ` +
+    `foreign committed v1alpha2 history plus its protected blobs, so neither ` +
+    `direction of this harness can be built. Nothing else in this run covers ` +
+    `one lane consuming the other lane's durable history.\n`,
+  );
+}
 
 class PipelineFixtureSource {
   constructor(document) {
@@ -4231,4 +4511,1232 @@ for (const status of [0, 2, 4, 5, 6]) {
 
 process.stdout.write(
   `Cross-language durable CLI operations conformance passed for ${cliOperationsCorpus.cases.length} cases over ${Object.keys(cliOperationsCorpus.journals).length} shared journals (${cliOperationsReadCases} read invocations, ${cliOperationsAppendProofs} append-free proofs, ${cliOperationsUnsupportedCases} fail-closed refusals, exit codes ${[...cliOperationsExitCodesSeen].sort((left, right) => left - right).join("/")}); claims ${JSON.stringify(cliOperationsCorpus.claims)}.\n`,
+);
+
+// ---------------------------------------------------------------------------
+// D9 redaction cross-language join (D9-REDACTION-CONFORMANCE-089).
+//
+// Master plan 31.35.12 rejected the integrated-router tranche at HIGH 3 for a
+// cross-language divergence that both single-language suites passed over. For
+// redaction the stakes are higher than diagnostic ordering: if the two lanes
+// disagree about which pointer is rejected, which disposition is truthful, or
+// which sink is authorized, one of them is writing bytes the other would
+// refuse.
+//
+// Neither side may read the other's expectations. The TypeScript half below is
+// computed only from `@graph-engineering/persistence`; the Python half is
+// computed by tools/conformance/python_redaction_report.py from the native
+// `graph_engineering` package. The single shared input is the corpus JSON plus
+// the shared vectors restated identically in both halves, and the corpus
+// `expected`/`valid` blocks are consulted only after the two native results
+// have already been proved equal to each other.
+//
+// Section order is load bearing: the wire join composes the disposition truth
+// table, the receipt validator, and the two inventories, so those are joined
+// first and the wire documents last.
+
+const redactionCorpus = JSON.parse(
+  await readFile(join(fixtureRoot, "redaction.case.json"), "utf8"),
+);
+
+// --- shared vectors -------------------------------------------------------
+// Restated here exactly as the Python report states them. They are inputs, not
+// expectations: no expected output is written down on either side, and the join
+// asserts the two statements equal before either is used.
+const REDACTION_CARTESIAN_POLICY_ENABLED = true;
+const REDACTION_RECEIPT_IDENTITY_KEY_HEX = `${"0".repeat(62)}d9`;
+const REDACTION_RECEIPT_POLICY_HASH = "1a".repeat(32);
+const REDACTION_RECEIPT_TRANSFORM_IMPLEMENTATION_HASH = "2b".repeat(32);
+const REDACTION_RECEIPT_RULE_REGISTRY_HASH = "3c".repeat(32);
+const REDACTION_RECEIPT_AUTHORITY_BINDING_HASH = "4d".repeat(32);
+const REDACTION_RECEIPT_TENANT_SCOPE_HASH = "5e".repeat(32);
+const REDACTION_RECEIPT_RULE_REGISTRY_VERSION = 1;
+const REDACTION_RECEIPT_RULE_ID = "d9-join-observational-v1";
+const REDACTION_RECEIPT_RULE_RESOLUTION_ID = "d9-join-resolution-1";
+const REDACTION_RECEIPT_SOURCE_CLASS = "log-field";
+const REDACTION_RECEIPT_SINK = "runtime-log";
+const REDACTION_RECEIPT_DECISION_ID = "d9-join-decision-1";
+const REDACTION_RECEIPT_RUN_ID = "d9-join-run";
+const REDACTION_RECEIPT_GRAPH_REVISION = 1;
+const REDACTION_RECEIPT_OCCURRENCE_KIND = "sink-write";
+const REDACTION_RECEIPT_OCCURRENCE_ID = "d9-join-occurrence-1";
+const REDACTION_RECEIPT_OCCURRENCE_SEQUENCE = 3;
+const REDACTION_RECEIPT_OCCURRED_AT = "2026-07-31T00:00:00Z";
+const REDACTION_RECEIPT_FIELD_PATH = "/fields/message";
+const REDACTION_RECEIPT_REPLACEMENT_MODE = "constant-token";
+const REDACTION_RECEIPT_PATHS = ["/detail/token", "/message", "/nested/0/secret"];
+const REDACTION_RECEIPT_SOURCE_SNAPSHOT = {
+  detail: { token: "synthetic-sensitive-value-a", keep: 1 },
+  message: "synthetic-sensitive-value-b",
+  nested: [{ secret: "synthetic-sensitive-value-c" }, { secret: "kept" }],
+  public: ["a", "b"],
+};
+const REDACTION_CANARY_ID = "d9-redaction-conformance-canary-1";
+const REDACTION_CANARY_VALUE = "GE-CANARY-D9-REDACTION-089-7B3F1A6C2E9D4058";
+const REDACTION_CANARY_RUN_ID = "d9-canary-run";
+const REDACTION_CANARY_GRAPH_REVISION = 1;
+const REDACTION_CANARY_EVENT_ID = "evt-0";
+const REDACTION_CANARY_TIMESTAMP = "2026-07-31T00:00:00Z";
+const REDACTION_CANARY_GRAPH_HASH = "aa".repeat(32);
+const REDACTION_CANARY_IMPLEMENTATION_HASH = "bb".repeat(32);
+const REDACTION_CANARY_MAX_TOTAL_ATTEMPTS = 8;
+const REDACTION_CANARY_PAYLOAD = {
+  credentials: { apiKey: REDACTION_CANARY_VALUE },
+  history: [{ note: REDACTION_CANARY_VALUE }, { note: "ordinary application data" }],
+  question: REDACTION_CANARY_VALUE,
+};
+const REDACTION_CANARY_TRANSFORM_HASH = "11".repeat(32);
+const REDACTION_CANARY_REGISTRY_HASH = "22".repeat(32);
+const REDACTION_REQUIRED_SECTIONS = ["pointerCases", "wireCases", "flowCases"];
+// Unit and record separators; the Python report joins the Cartesian sweep the
+// same way, so the two digests are over byte-identical material.
+const REDACTION_UNIT_SEPARATOR = "\u001f";
+const REDACTION_RECORD_SEPARATOR = "\u001e";
+
+/**
+ * Render a value for a divergence message with object keys sorted, so the two
+ * halves are compared by the reader on content rather than on the key order
+ * their respective JSON transports happened to use. Array order is preserved
+ * because array order is part of what this join defends.
+ */
+function redactionStringify(value) {
+  if (Array.isArray(value)) return `[${value.map(redactionStringify).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    return `{${Object.keys(value).sort()
+      .map((key) => `${JSON.stringify(key)}:${redactionStringify(value[key])}`)
+      .join(",")}}`;
+  }
+  return value === undefined ? "undefined" : JSON.stringify(value);
+}
+
+function redactionDivergence(section, caseName, field, tsValue, pyValue) {
+  return new Error(
+    `Redaction cross-language divergence in ${section} case '${caseName}',`
+      + ` field '${field}': TypeScript ${redactionStringify(tsValue)}`
+      + ` vs Python ${redactionStringify(pyValue)}`,
+  );
+}
+
+function assertRedactionAgreement(section, caseName, field, tsValue, pyValue) {
+  if (!isDeepStrictEqual(tsValue, pyValue)) {
+    throw redactionDivergence(section, caseName, field, tsValue, pyValue);
+  }
+}
+
+/** Compare one projected entry field by field, including the reported key set. */
+function assertRedactionEntryAgreement(section, caseName, fields, tsEntry, pyEntry) {
+  for (const field of fields) {
+    const tsHas = Object.hasOwn(tsEntry, field);
+    const pyHas = Object.hasOwn(pyEntry, field);
+    if (tsHas !== pyHas) {
+      throw redactionDivergence(
+        section,
+        caseName,
+        field,
+        tsHas ? tsEntry[field] : "<field absent>",
+        pyHas ? pyEntry[field] : "<field absent>",
+      );
+    }
+    if (tsHas) assertRedactionAgreement(section, caseName, field, tsEntry[field], pyEntry[field]);
+  }
+  assertRedactionAgreement(
+    section,
+    caseName,
+    "reportedFieldSet",
+    Object.keys(tsEntry).sort(),
+    Object.keys(pyEntry).sort(),
+  );
+}
+
+/**
+ * Enumerate a corpus section and prove both halves reported every declared case
+ * exactly once. A silently skipped case is the failure mode this whole join
+ * exists to prevent, so absence is an error rather than a no-op.
+ */
+function redactionSectionCases(section, pyOrder, pyReport) {
+  const cases = redactionCorpus[section];
+  assert.ok(Array.isArray(cases) && cases.length > 0, `${section}: corpus declares no cases`);
+  const declared = cases.map((item) => item.id);
+  assert.equal(new Set(declared).size, declared.length, `${section}: corpus declares a duplicate id`);
+  assertRedactionAgreement(section, "<section>", "declaredCaseOrder", declared, pyOrder);
+  for (const id of declared) {
+    if (!Object.hasOwn(pyReport, id)) {
+      throw new Error(`${section}: Python skipped corpus case '${id}'`);
+    }
+  }
+  for (const id of Object.keys(pyReport)) {
+    if (!declared.includes(id)) {
+      throw new Error(`${section}: Python reported case '${id}' the corpus does not declare`);
+    }
+  }
+  assert.equal(
+    Object.keys(pyReport).length,
+    declared.length,
+    `${section}: Python reported ${Object.keys(pyReport).length} cases for ${declared.length} declared`,
+  );
+  return cases;
+}
+
+const pythonRedaction = spawnSync(
+  "uv",
+  ["run", "--project", "python", "python", "tools/conformance/python_redaction_report.py"],
+  { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
+);
+if (pythonRedaction.status !== 0) {
+  throw new Error(
+    `Python redaction conformance failed:\n${pythonRedaction.stderr || pythonRedaction.stdout}`,
+  );
+}
+const pyRedaction = JSON.parse(pythonRedaction.stdout);
+
+// --- 1. contract header and the honest-claim flag --------------------------
+assert.equal(
+  pyRedaction.apiVersion,
+  redactionCorpus.apiVersion,
+  "redaction: the two halves read different corpus apiVersions",
+);
+assert.equal(
+  pyRedaction.contractStatus,
+  redactionCorpus.contractStatus,
+  "redaction: the two halves read different corpus contract statuses",
+);
+// Each process read the flag from the corpus itself, so this is a two-reader
+// assertion rather than a restatement of one read. This lane never flips it.
+assert.strictEqual(
+  redactionCorpus.implementationClaim,
+  false,
+  "redaction implementationClaim is not literally false in the Node-side read",
+);
+assert.strictEqual(
+  pyRedaction.implementationClaim,
+  false,
+  "redaction implementationClaim is not literally false in the Python-side read",
+);
+assertRedactionAgreement(
+  "corpus",
+  "<contract>",
+  "requiredSections",
+  REDACTION_REQUIRED_SECTIONS,
+  pyRedaction.requiredSections,
+);
+
+// --- 2. shared vectors ------------------------------------------------------
+// Proving the two halves ran the same experiment. Without this, every later
+// comparison could be two implementations agreeing about different inputs.
+const redactionSharedVectors = {
+  cartesianPolicyEnabled: REDACTION_CARTESIAN_POLICY_ENABLED,
+  receiptIdentityKeyHex: REDACTION_RECEIPT_IDENTITY_KEY_HEX,
+  receiptPolicyHash: REDACTION_RECEIPT_POLICY_HASH,
+  receiptTransformImplementationHash: REDACTION_RECEIPT_TRANSFORM_IMPLEMENTATION_HASH,
+  receiptRuleRegistryHash: REDACTION_RECEIPT_RULE_REGISTRY_HASH,
+  receiptAuthorityBindingHash: REDACTION_RECEIPT_AUTHORITY_BINDING_HASH,
+  receiptTenantScopeHash: REDACTION_RECEIPT_TENANT_SCOPE_HASH,
+  receiptRuleRegistryVersion: REDACTION_RECEIPT_RULE_REGISTRY_VERSION,
+  receiptRuleId: REDACTION_RECEIPT_RULE_ID,
+  receiptRuleResolutionId: REDACTION_RECEIPT_RULE_RESOLUTION_ID,
+  receiptSourceClass: REDACTION_RECEIPT_SOURCE_CLASS,
+  receiptSink: REDACTION_RECEIPT_SINK,
+  receiptDecisionId: REDACTION_RECEIPT_DECISION_ID,
+  receiptRunId: REDACTION_RECEIPT_RUN_ID,
+  receiptGraphRevision: REDACTION_RECEIPT_GRAPH_REVISION,
+  receiptOccurrenceKind: REDACTION_RECEIPT_OCCURRENCE_KIND,
+  receiptOccurrenceId: REDACTION_RECEIPT_OCCURRENCE_ID,
+  receiptOccurrenceSequence: REDACTION_RECEIPT_OCCURRENCE_SEQUENCE,
+  receiptOccurredAt: REDACTION_RECEIPT_OCCURRED_AT,
+  receiptFieldPath: REDACTION_RECEIPT_FIELD_PATH,
+  receiptReplacementMode: REDACTION_RECEIPT_REPLACEMENT_MODE,
+  receiptPaths: REDACTION_RECEIPT_PATHS,
+  receiptSourceSnapshot: REDACTION_RECEIPT_SOURCE_SNAPSHOT,
+  canaryId: REDACTION_CANARY_ID,
+  canaryValue: REDACTION_CANARY_VALUE,
+  canaryRunId: REDACTION_CANARY_RUN_ID,
+  canaryGraphRevision: REDACTION_CANARY_GRAPH_REVISION,
+  canaryEventId: REDACTION_CANARY_EVENT_ID,
+  canaryTimestamp: REDACTION_CANARY_TIMESTAMP,
+  canaryGraphHash: REDACTION_CANARY_GRAPH_HASH,
+  canaryImplementationHash: REDACTION_CANARY_IMPLEMENTATION_HASH,
+  canaryMaxTotalAttempts: REDACTION_CANARY_MAX_TOTAL_ATTEMPTS,
+  canaryPayload: REDACTION_CANARY_PAYLOAD,
+};
+for (const key of Object.keys(redactionSharedVectors).sort()) {
+  assertRedactionAgreement(
+    "sharedVectors",
+    key,
+    "vector",
+    redactionSharedVectors[key],
+    pyRedaction.sharedVectors[key],
+  );
+}
+assertRedactionAgreement(
+  "sharedVectors",
+  "<all>",
+  "vectorNames",
+  Object.keys(redactionSharedVectors).sort(),
+  Object.keys(pyRedaction.sharedVectors).sort(),
+);
+
+// --- 3. closed vocabularies and the two inventories ------------------------
+const tsRedactionNative = {
+  algorithm: "source-sink-intersection/v1alpha1",
+  sourceInventory: [...persistence.CAPTURE_SOURCE_CLASSES],
+  sinkInventory: [...persistence.CAPTURE_SINK_CLASSES],
+  sourceRuleCount: persistence.CAPTURE_SOURCE_CLASSES.length,
+  sinkRuleCount: persistence.CAPTURE_SINK_CLASSES.length,
+  // The two inventories below are compared as ordered sets because the corpus
+  // declares them ordered. The policy-control vocabulary is a set with no
+  // contract order, so it is compared sorted.
+  policyControls: [...persistence.POLICY_CONTROLS].sort(),
+  failureCodes: [...persistence.REDACTION_FAILURE_CODES],
+  payloadDispositions: [...persistence.PAYLOAD_DISPOSITIONS],
+  neverRedactableSourceClasses: [...persistence.NEVER_REDACTABLE_SOURCE_CLASSES].sort(),
+  neverRedactableSinks: [...persistence.NEVER_REDACTABLE_SINKS].sort(),
+  redactionToken: persistence.REDACTION_TOKEN,
+  dispositionTruthTable: Object.fromEntries(
+    Object.entries(persistence.DISPOSITION_TRUTH_TABLE).map(([disposition, row]) => [
+      disposition,
+      { redacted: row.redacted, receiptRequired: row.receipt },
+    ]),
+  ),
+  limits: { ...persistence.SECTION_11_LIMITS },
+  sourceRows: persistence.SOURCE_CLASSIFICATION_ROWS.map((row) => ({
+    sourceClass: row.sourceClass,
+    policyControl: row.policyControl,
+    defaultAction: row.defaultAction,
+    mayBeMetadata: row.mayBeMetadata,
+    mayFeedScheduler: row.mayFeedScheduler,
+    identifierTreatment: row.identifierTreatment,
+  })),
+  sinkRows: persistence.SINK_POLICY_ROWS.map((row) => ({
+    sink: row.sink,
+    family: row.family,
+    policyControls: [...row.policyControls],
+    acceptsProtected: row.acceptsProtected,
+    acceptsMetadata: row.acceptsMetadata,
+    defaultEnabled: row.defaultEnabled,
+  })),
+};
+for (const field of Object.keys(tsRedactionNative).sort()) {
+  assertRedactionAgreement("native", field, field, tsRedactionNative[field], pyRedaction.native[field]);
+}
+assertRedactionAgreement(
+  "native",
+  "<all>",
+  "reportedFieldSet",
+  Object.keys(tsRedactionNative).sort(),
+  Object.keys(pyRedaction.native).sort(),
+);
+
+// Only now is the corpus consulted: the two natives already agree.
+assert.deepEqual(
+  tsRedactionNative.sourceInventory,
+  redactionCorpus.sourceInventory,
+  "sourceInventory: the agreed native inventory differs from the corpus, as an ordered set",
+);
+assert.deepEqual(
+  tsRedactionNative.sinkInventory,
+  redactionCorpus.sinkInventory,
+  "sinkInventory: the agreed native inventory differs from the corpus, as an ordered set",
+);
+assert.equal(tsRedactionNative.sourceInventory.length, 57, "the source inventory is not 57 members");
+assert.equal(tsRedactionNative.sinkInventory.length, 54, "the sink inventory is not 54 members");
+assert.equal(
+  tsRedactionNative.sourceRows.length,
+  redactionCorpus.sensitiveFieldCases.length,
+  "there is not exactly one native classification row per corpus source",
+);
+assert.deepEqual(
+  tsRedactionNative.sourceRows.map((row) => row.sourceClass),
+  redactionCorpus.sensitiveFieldCases.map((row) => row.sourceClass),
+  "the native source rows are not in corpus order",
+);
+assert.deepEqual(
+  tsRedactionNative.sinkRows.map((row) => row.sink),
+  redactionCorpus.sinkPolicyCases.map((row) => row.sink),
+  "the native sink rows are not in corpus order",
+);
+assert.equal(
+  tsRedactionNative.failureCodes.length,
+  12,
+  "the closed failure-code vocabulary is not twelve members",
+);
+assert.deepEqual(
+  tsRedactionNative.payloadDispositions,
+  ["metadata-only", "protected-ref", "redacted", "inline-unredacted"],
+  "the payload-disposition vocabulary is not the Section 3.2 four",
+);
+// Section 3.2: `redacted` is true for exactly one disposition, and exactly that
+// disposition requires a receipt.
+for (const [disposition, row] of Object.entries(tsRedactionNative.dispositionTruthTable)) {
+  assert.equal(
+    row.redacted,
+    disposition === "redacted",
+    `disposition truth table: '${disposition}' has the wrong redacted flag`,
+  );
+  assert.equal(
+    row.receiptRequired,
+    disposition === "redacted",
+    `disposition truth table: '${disposition}' has the wrong receipt requirement`,
+  );
+}
+for (const [field, value] of Object.entries(redactionCorpus.resourceLimits)) {
+  assert.equal(
+    tsRedactionNative.limits[field],
+    value,
+    `resourceLimits.${field}: the agreed native bound differs from the corpus`,
+  );
+}
+assert.equal(
+  tsRedactionNative.algorithm,
+  redactionCorpus.flowPolicy.algorithm,
+  "flowPolicy.algorithm differs from the agreed native algorithm",
+);
+
+// --- 4. the complete 3,078-pair Cartesian domain ---------------------------
+// The control for each pair is the sink row's first declared control; the
+// Python report states the same rule.
+const redactionCartesianOutcomes = [];
+const redactionCartesianHistogram = {};
+let redactionCartesianPairs = 0;
+for (const sourceClass of tsRedactionNative.sourceInventory) {
+  for (const sink of tsRedactionNative.sinkInventory) {
+    const row = persistence.sinkRow(sink);
+    assert.ok(row !== undefined, `cartesian sweep: no native policy row for sink '${sink}'`);
+    const decision = persistence.evaluateFlow({
+      sourceClass,
+      sink,
+      policyControl: row.policyControls[0],
+      policyEnabled: REDACTION_CARTESIAN_POLICY_ENABLED,
+    });
+    redactionCartesianOutcomes.push(
+      `${sourceClass}${REDACTION_UNIT_SEPARATOR}${sink}${REDACTION_UNIT_SEPARATOR}${decision.outcome}`,
+    );
+    redactionCartesianHistogram[decision.outcome] =
+      (redactionCartesianHistogram[decision.outcome] ?? 0) + 1;
+    redactionCartesianPairs += 1;
+  }
+}
+const tsRedactionCartesian = {
+  pairCount: redactionCartesianPairs,
+  nativeCartesianProductCount:
+    tsRedactionNative.sourceRuleCount * tsRedactionNative.sinkRuleCount,
+  outcomeHistogram: redactionCartesianHistogram,
+  outcomeDigest: createHash("sha256")
+    .update(redactionCartesianOutcomes.join(REDACTION_RECORD_SEPARATOR), "utf8")
+    .digest("hex"),
+};
+assertRedactionEntryAgreement(
+  "cartesian",
+  "<sweep>",
+  ["pairCount", "nativeCartesianProductCount", "outcomeHistogram", "outcomeDigest"],
+  tsRedactionCartesian,
+  pyRedaction.cartesian,
+);
+assert.equal(
+  tsRedactionCartesian.pairCount,
+  redactionCorpus.flowPolicy.cartesianProductCount,
+  "the agreed Cartesian pair count differs from the corpus",
+);
+assert.equal(tsRedactionCartesian.pairCount, 3078, "the Cartesian domain is not 3,078 pairs");
+assert.equal(
+  redactionCartesianHistogram.failed ?? 0,
+  0,
+  "a Cartesian pair produced no closed outcome, so a row is missing from an inventory",
+);
+assert.equal(
+  redactionCorpus.flowPolicy.sourceRuleCount,
+  tsRedactionNative.sourceRuleCount,
+  "flowPolicy.sourceRuleCount differs from the agreed native inventory",
+);
+assert.equal(
+  redactionCorpus.flowPolicy.sinkRuleCount,
+  tsRedactionNative.sinkRuleCount,
+  "flowPolicy.sinkRuleCount differs from the agreed native inventory",
+);
+
+// --- 5. the 21 pointer cases ----------------------------------------------
+const redactionPointerCases = redactionSectionCases(
+  "pointerCases",
+  pyRedaction.pointerCaseOrder,
+  pyRedaction.pointerCases,
+);
+let redactionPointerAccepted = 0;
+let redactionPointerRejected = 0;
+const redactionPointerCodesSeen = new Set();
+for (const testCase of redactionPointerCases) {
+  const result = persistence.redactionTransform(
+    testCase.input,
+    testCase.paths,
+    testCase.replacementMode,
+  );
+  const tsEntry = result.valid
+    ? {
+        valid: true,
+        output: JSON.parse(JSON.stringify(result.output)),
+        canonicalPaths: [...result.canonicalPaths],
+        count: result.canonicalPaths.length,
+      }
+    : { valid: false, code: result.code };
+  const pyEntry = pyRedaction.pointerCases[testCase.id];
+  assertRedactionEntryAgreement(
+    "pointerCases",
+    testCase.id,
+    ["valid", "output", "canonicalPaths", "count", "code"],
+    tsEntry,
+    pyEntry,
+  );
+
+  const expectation = testCase.expected;
+  for (const [language, entry] of [["TypeScript", tsEntry], ["Python", pyEntry]]) {
+    assert.equal(entry.valid, expectation.valid, `${testCase.id}: ${language} pointer validity`);
+    if (expectation.valid) {
+      assert.deepEqual(entry.output, expectation.output, `${testCase.id}: ${language} transform`);
+      assert.deepEqual(
+        entry.canonicalPaths,
+        expectation.canonicalPaths,
+        `${testCase.id}: ${language} canonical paths`,
+      );
+      assert.equal(
+        entry.count,
+        expectation.canonicalPaths.length,
+        `${testCase.id}: ${language} canonical path count`,
+      );
+    } else {
+      assert.equal(entry.code, expectation.code, `${testCase.id}: ${language} rejection code`);
+      assert.ok(
+        tsRedactionNative.failureCodes.includes(entry.code),
+        `${testCase.id}: ${language} rejected with a code outside the closed vocabulary`,
+      );
+    }
+  }
+  if (tsEntry.valid) redactionPointerAccepted += 1;
+  else {
+    redactionPointerRejected += 1;
+    redactionPointerCodesSeen.add(tsEntry.code);
+  }
+}
+assert.ok(redactionPointerAccepted > 0, "pointerCases: no accepted transform was compared");
+assert.ok(redactionPointerRejected > 0, "pointerCases: no rejection code was compared");
+
+// --- 6. the 39 flow cases --------------------------------------------------
+const redactionFlowCases = redactionSectionCases(
+  "flowCases",
+  pyRedaction.flowCaseOrder,
+  pyRedaction.flowCases,
+);
+const redactionFlowOutcomesSeen = new Set();
+let redactionFlowAuthorized = 0;
+let redactionFlowDenied = 0;
+for (const testCase of redactionFlowCases) {
+  const decision = persistence.evaluateFlow({
+    sourceClass: testCase.sourceClass,
+    sink: testCase.sink,
+    policyControl: testCase.policyControl,
+    policyEnabled: testCase.policyEnabled,
+  });
+  const tsEntry = {
+    outcome: decision.outcome,
+    writeAuthorized: decision.writeAuthorized,
+    code: decision.code ?? null,
+  };
+  const pyEntry = pyRedaction.flowCases[testCase.id];
+  assertRedactionEntryAgreement(
+    "flowCases",
+    testCase.id,
+    ["outcome", "writeAuthorized", "code"],
+    tsEntry,
+    pyEntry,
+  );
+
+  // The corpus states which rows it considers known; the agreed native
+  // inventories must classify them the same way, or the two halves agreed about
+  // a request the corpus did not describe.
+  assert.equal(
+    tsRedactionNative.sourceInventory.includes(testCase.sourceClass),
+    testCase.knownSource,
+    `${testCase.id}: the agreed source inventory disagrees with knownSource`,
+  );
+  assert.equal(
+    tsRedactionNative.sinkInventory.includes(testCase.sink),
+    testCase.knownSink,
+    `${testCase.id}: the agreed sink inventory disagrees with knownSink`,
+  );
+  assert.equal(
+    tsRedactionNative.policyControls.includes(testCase.policyControl),
+    testCase.knownControl,
+    `${testCase.id}: the agreed policy-control vocabulary disagrees with knownControl`,
+  );
+
+  const expectation = testCase.expected;
+  for (const [language, entry] of [["TypeScript", tsEntry], ["Python", pyEntry]]) {
+    assert.equal(entry.outcome, expectation.outcome, `${testCase.id}: ${language} flow outcome`);
+    assert.equal(
+      entry.writeAuthorized,
+      expectation.writeAuthorized,
+      `${testCase.id}: ${language} writeAuthorized`,
+    );
+    assert.equal(
+      entry.code,
+      expectation.code ?? null,
+      `${testCase.id}: ${language} flow failure code`,
+    );
+    // Section 7: only these three representations authorize a write.
+    assert.equal(
+      entry.writeAuthorized,
+      ["protected-ref", "metadata-only", "redacted"].includes(entry.outcome),
+      `${testCase.id}: ${language} writeAuthorized contradicts its own outcome`,
+    );
+  }
+  redactionFlowOutcomesSeen.add(tsEntry.outcome);
+  if (tsEntry.writeAuthorized) redactionFlowAuthorized += 1;
+  else redactionFlowDenied += 1;
+}
+assert.ok(redactionFlowAuthorized > 0, "flowCases: no authorized write was compared");
+assert.ok(redactionFlowDenied > 0, "flowCases: no denied write was compared");
+for (const outcome of ["protected-ref", "metadata-only", "suppressed", "failed"]) {
+  assert.ok(
+    redactionFlowOutcomesSeen.has(outcome),
+    `flowCases: the outcome '${outcome}' is unwitnessed by the corpus`,
+  );
+}
+
+// --- 7. the bound redaction receipt ----------------------------------------
+const redactionReceiptRule = {
+  apiVersion: persistence.REDACTION_RULE_API_VERSION,
+  ruleId: REDACTION_RECEIPT_RULE_ID,
+  registryVersion: REDACTION_RECEIPT_RULE_REGISTRY_VERSION,
+  sink: REDACTION_RECEIPT_SINK,
+  paths: REDACTION_RECEIPT_PATHS,
+  replacementMode: REDACTION_RECEIPT_REPLACEMENT_MODE,
+};
+const redactionReceiptRequest = {
+  identityKey: Buffer.from(REDACTION_RECEIPT_IDENTITY_KEY_HEX, "hex"),
+  policy: {
+    ...persistence.DEFAULT_CAPTURE_POLICY,
+    transformImplementationHash: REDACTION_RECEIPT_TRANSFORM_IMPLEMENTATION_HASH,
+    ruleRegistryHash: REDACTION_RECEIPT_RULE_REGISTRY_HASH,
+    ruleRegistryVersion: REDACTION_RECEIPT_RULE_REGISTRY_VERSION,
+  },
+  policyHash: REDACTION_RECEIPT_POLICY_HASH,
+  rule: redactionReceiptRule,
+  sourceClass: REDACTION_RECEIPT_SOURCE_CLASS,
+  sink: REDACTION_RECEIPT_SINK,
+  occurrence: {
+    decisionId: REDACTION_RECEIPT_DECISION_ID,
+    runId: REDACTION_RECEIPT_RUN_ID,
+    graphRevision: REDACTION_RECEIPT_GRAPH_REVISION,
+    occurrenceKind: REDACTION_RECEIPT_OCCURRENCE_KIND,
+    occurrenceId: REDACTION_RECEIPT_OCCURRENCE_ID,
+    occurrenceSequence: REDACTION_RECEIPT_OCCURRENCE_SEQUENCE,
+    occurredAt: REDACTION_RECEIPT_OCCURRED_AT,
+    fieldPath: REDACTION_RECEIPT_FIELD_PATH,
+    ruleResolutionId: REDACTION_RECEIPT_RULE_RESOLUTION_ID,
+  },
+  scope: {
+    tenantScopeId: "tenant-opaque-1",
+    authorityProviderId: "provider-opaque-1",
+    authoritySubjectId: "subject-opaque-1",
+  },
+  authorityBindingHash: REDACTION_RECEIPT_AUTHORITY_BINDING_HASH,
+  tenantScopeHash: REDACTION_RECEIPT_TENANT_SCOPE_HASH,
+  sourceSnapshot: REDACTION_RECEIPT_SOURCE_SNAPSHOT,
+};
+const redactionBuilt = persistence.buildRedactionReceipt(redactionReceiptRequest);
+assert.ok(redactionBuilt.valid, "the shared receipt vector must build on the TypeScript side");
+const redactionTamperedResult = JSON.parse(JSON.stringify(redactionBuilt.result));
+redactionTamperedResult.public = ["a", "b", "c"];
+const redactionTamperedVerification = persistence.verifyRedactionReceipt({
+  ...redactionReceiptRequest,
+  claimed: redactionBuilt.receipt,
+  persistedResult: redactionTamperedResult,
+});
+const redactionReceiptDocument = JSON.parse(JSON.stringify(redactionBuilt.receipt));
+const tsRedactionReceipt = {
+  document: redactionReceiptDocument,
+  documentFields: Object.keys(redactionReceiptDocument).sort(),
+  transformed: JSON.parse(JSON.stringify(redactionBuilt.result)),
+  countEqualsPathsLength: redactionBuilt.receipt.count === redactionBuilt.receipt.paths.length,
+  strictlyIncreasing: redactionBuilt.receipt.paths.every(
+    (path, index) =>
+      index === 0 ||
+      persistence.compareUnicodeCodePoints(redactionBuilt.receipt.paths[index - 1], path) < 0,
+  ),
+  structuralVerdict: persistence.validateRedactionReceiptDocument(redactionReceiptDocument).valid,
+  verified: persistence.verifyRedactionReceipt({
+    ...redactionReceiptRequest,
+    claimed: redactionBuilt.receipt,
+    persistedResult: redactionBuilt.result,
+  }).valid,
+  tamperedVerified: redactionTamperedVerification.valid,
+  tamperedCode: redactionTamperedVerification.valid
+    ? null
+    : redactionTamperedVerification.failure.code,
+};
+assertRedactionEntryAgreement(
+  "receipt",
+  "<shared vector>",
+  [
+    "document",
+    "documentFields",
+    "transformed",
+    "countEqualsPathsLength",
+    "strictlyIncreasing",
+    "structuralVerdict",
+    "verified",
+    "tamperedVerified",
+    "tamperedCode",
+  ],
+  tsRedactionReceipt,
+  pyRedaction.receipt,
+);
+assert.equal(tsRedactionReceipt.countEqualsPathsLength, true, "receipt: count != paths.length");
+assert.equal(
+  tsRedactionReceipt.strictlyIncreasing,
+  true,
+  "receipt: paths are not in strictly increasing code-point order",
+);
+assert.equal(tsRedactionReceipt.structuralVerdict, true, "receipt: the built receipt is not valid");
+assert.equal(tsRedactionReceipt.verified, true, "receipt: the deterministic replay did not verify");
+assert.equal(
+  tsRedactionReceipt.tamperedVerified,
+  false,
+  "receipt: a result the receipt does not bind still verified",
+);
+// The keyed digests are the receipt's MAC content. Both halves computed them
+// natively over the same identity key and the same adjacent domain-tagged
+// tuples, so equality here is a cross-language MAC equality, not a copied hash.
+for (const field of ["sourceHash", "resultHash", "ruleSetHash"]) {
+  assert.match(
+    tsRedactionReceipt.document[field],
+    /^[0-9a-f]{64}$/,
+    `receipt.${field} is not a lowercase SHA-256 hex digest`,
+  );
+  assert.equal(
+    tsRedactionReceipt.document[field],
+    pyRedaction.receipt.document[field],
+    `receipt.${field}: the two lanes computed different keyed digests`,
+  );
+}
+assert.notEqual(
+  tsRedactionReceipt.document.sourceHash,
+  tsRedactionReceipt.document.resultHash,
+  "receipt: the source and result digests are not domain separated",
+);
+
+// Every receipt the corpus carries as input, recomputed on both sides.
+const tsRedactionCorpusReceipts = {};
+for (const wireCase of redactionCorpus.wireCases) {
+  const document = wireCase.document;
+  if (typeof document !== "object" || document === null || Array.isArray(document)) continue;
+  const candidates = [];
+  if (wireCase.schema === "redaction-receipt.schema.json") candidates.push([wireCase.id, document]);
+  const embedded = document.redactionReceipt;
+  if (typeof embedded === "object" && embedded !== null && !Array.isArray(embedded)) {
+    candidates.push([`${wireCase.id}#redactionReceipt`, embedded]);
+  }
+  for (const [label, receipt] of candidates) {
+    const paths = receipt.paths;
+    tsRedactionCorpusReceipts[label] = {
+      count: receipt.count ?? null,
+      pathsLength: Array.isArray(paths) ? paths.length : null,
+      countEqualsPathsLength: Array.isArray(paths) ? receipt.count === paths.length : false,
+      strictlyIncreasing: Array.isArray(paths)
+        ? paths.every(
+            (path, index) =>
+              index === 0 || persistence.compareUnicodeCodePoints(paths[index - 1], path) < 0,
+          )
+        : null,
+      structuralVerdict: persistence.validateRedactionReceiptDocument(receipt).valid,
+    };
+  }
+}
+assertRedactionAgreement(
+  "corpusReceiptFacts",
+  "<labels>",
+  "labels",
+  Object.keys(tsRedactionCorpusReceipts).sort(),
+  Object.keys(pyRedaction.corpusReceiptFacts).sort(),
+);
+for (const label of Object.keys(tsRedactionCorpusReceipts).sort()) {
+  assertRedactionEntryAgreement(
+    "corpusReceiptFacts",
+    label,
+    ["count", "pathsLength", "countEqualsPathsLength", "strictlyIncreasing", "structuralVerdict"],
+    tsRedactionCorpusReceipts[label],
+    pyRedaction.corpusReceiptFacts[label],
+  );
+}
+const redactionCorpusReceiptCount = Object.keys(tsRedactionCorpusReceipts).length;
+assert.ok(
+  redactionCorpusReceiptCount > 0,
+  "corpusReceiptFacts: the corpus carries no receipt to recompute",
+);
+
+// --- 8. the shared seeded-canary vector ------------------------------------
+// Both lanes write the same payload with the same canary through their own
+// guarded durable path, then each scans its own output bytes.
+async function redactionWalkFiles(directory) {
+  const found = [];
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) {
+      found.push(...(await redactionWalkFiles(path)));
+      continue;
+    }
+    found.push(path);
+  }
+  return found.sort();
+}
+
+function redactionSuffix(path) {
+  const name = path.slice(path.lastIndexOf("/") + 1);
+  const dot = name.lastIndexOf(".");
+  return dot <= 0 ? "" : name.slice(dot);
+}
+
+async function redactionScanTree(directory) {
+  const files = await redactionWalkFiles(directory);
+  const detections = [];
+  let bytesScanned = 0;
+  for (const path of files) {
+    const info = await stat(path);
+    if (!info.isFile()) continue;
+    const bytes = await readFile(path);
+    bytesScanned += bytes.byteLength;
+    for (const detection of persistence.scanBytesForCanaries(bytes, [
+      { canaryId: REDACTION_CANARY_ID, value: REDACTION_CANARY_VALUE },
+    ])) {
+      detections.push({
+        canaryId: detection.canaryId,
+        form: detection.form,
+        file: path.slice(directory.length + 1),
+      });
+    }
+  }
+  detections.sort((left, right) =>
+    left.file === right.file
+      ? left.form.localeCompare(right.form)
+      : left.file.localeCompare(right.file),
+  );
+  return {
+    filesScanned: files.length,
+    bytesScanned,
+    detections,
+    suffixes: [...new Set(files.map(redactionSuffix))].sort(),
+  };
+}
+
+/** Every `<name>Mac` beside a `<name>Ref` must equal that ref's `valueMac`. */
+function redactionAdjacentMacEqualities(document) {
+  const equalities = [];
+  const stack = [document];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (Array.isArray(current)) {
+      stack.push(...current);
+      continue;
+    }
+    if (typeof current !== "object" || current === null) continue;
+    for (const [key, value] of Object.entries(current)) {
+      stack.push(value);
+      if (!key.endsWith("Ref")) continue;
+      if (typeof value !== "object" || value === null || Array.isArray(value)) continue;
+      const macField = `${key.slice(0, -3)}Mac`;
+      if (!Object.hasOwn(current, macField)) continue;
+      equalities.push({ refField: key, macField, equal: current[macField] === value.valueMac });
+    }
+  }
+  equalities.sort((left, right) =>
+    left.refField === right.refField
+      ? left.macField.localeCompare(right.macField)
+      : left.refField.localeCompare(right.refField),
+  );
+  return equalities;
+}
+
+const redactionCanaryGuardedDirectory = await mkdtemp(join(tmpdir(), "ge-d9-canary-guarded-"));
+const redactionCanaryControlDirectory = await mkdtemp(join(tmpdir(), "ge-d9-canary-control-"));
+let tsRedactionCanary;
+try {
+  const keys = new persistence.DeterministicTestKeyProvider();
+  const blobStore = new persistence.FileProtectedPayloadStore({
+    directory: join(redactionCanaryGuardedDirectory, "protected"),
+  });
+  const journal = new persistence.ProtectedJsonlEventStore({
+    directory: redactionCanaryGuardedDirectory,
+  });
+  const guard = new persistence.SinkGuard({
+    policy: {
+      ...persistence.DEFAULT_CAPTURE_POLICY,
+      transformImplementationHash: REDACTION_CANARY_TRANSFORM_HASH,
+      ruleRegistryHash: REDACTION_CANARY_REGISTRY_HASH,
+      ruleRegistryVersion: 1,
+      keyRef: keys.keyRef,
+    },
+    keys,
+    store: blobStore,
+    scope: {
+      tenantScopeId: "tenant-opaque-1",
+      authorityProviderId: "provider-opaque-1",
+      authoritySubjectId: "subject-opaque-1",
+    },
+  });
+  const prepared = await persistence.prepareProtectedEvent(guard, journal, {
+    decisionId: `decision-${REDACTION_CANARY_RUN_ID}-0`,
+    eventId: REDACTION_CANARY_EVENT_ID,
+    type: "RunCreated",
+    timestamp: REDACTION_CANARY_TIMESTAMP,
+    runId: REDACTION_CANARY_RUN_ID,
+    graphRevision: REDACTION_CANARY_GRAPH_REVISION,
+    sequence: 0,
+    sourceClass: "graph-input",
+    data: {
+      contractVersion: "scheduler-recovery/v1alpha2",
+      graphHash: REDACTION_CANARY_GRAPH_HASH,
+      implementationHash: REDACTION_CANARY_IMPLEMENTATION_HASH,
+      capturePolicyHash: guard.capturePolicyHash,
+      protectedStoreContract: "protected-payload-store/v1alpha1",
+      keyRefHash: persistence.keyRefHash(keys.keyRef),
+      maxTotalAttempts: REDACTION_CANARY_MAX_TOTAL_ATTEMPTS,
+    },
+    payloads: [
+      {
+        field: "inputRef",
+        macField: "inputMac",
+        semanticContext: {
+          kind: "graph-input",
+          runId: REDACTION_CANARY_RUN_ID,
+          graphRevision: REDACTION_CANARY_GRAPH_REVISION,
+        },
+        value: REDACTION_CANARY_PAYLOAD,
+      },
+    ],
+  });
+  assert.equal(
+    prepared.kind,
+    "prepared",
+    "the shared canary payload must pass the TypeScript guard as a prepared write",
+  );
+  await journal.append(REDACTION_CANARY_RUN_ID, -1, [prepared.prepared]);
+
+  // Read the record back from the bytes that actually reached the sink.
+  const journalFiles = (await redactionWalkFiles(redactionCanaryGuardedDirectory)).filter((path) =>
+    path.endsWith(".jsonl"),
+  );
+  assert.equal(journalFiles.length, 1, "the guarded write must produce exactly one journal file");
+  const journalLines = (await readFile(journalFiles[0], "utf8")).split("\n").filter((line) => line);
+  assert.equal(journalLines.length, 1, "the guarded write must produce exactly one journal record");
+  const record = JSON.parse(journalLines[0]);
+  const guardedScan = await redactionScanTree(redactionCanaryGuardedDirectory);
+
+  // The positive control: the same payload through the ungated legacy v1alpha1
+  // writer this task exists to displace. It writes Tagged Durable JSON verbatim.
+  const legacy = new persistence.JsonlEventStore({ directory: redactionCanaryControlDirectory });
+  await legacy.append("d9-canary-positive-control", -1, [
+    {
+      apiVersion: persistence.GRAPH_EVENT_API_VERSION,
+      eventId: "evt-0",
+      type: "RunCreated",
+      timestamp: REDACTION_CANARY_TIMESTAMP,
+      runId: "d9-canary-positive-control",
+      graphRevision: 1,
+      sequence: 0,
+      redacted: false,
+      data: { input: REDACTION_CANARY_PAYLOAD },
+    },
+  ]);
+  const controlScan = await redactionScanTree(redactionCanaryControlDirectory);
+
+  tsRedactionCanary = {
+    canaryId: REDACTION_CANARY_ID,
+    canaryValue: REDACTION_CANARY_VALUE,
+    record: {
+      recordCount: journalLines.length,
+      payloadDisposition: record.payloadDisposition ?? null,
+      redacted: record.redacted ?? null,
+      adjacentMacEqualities: redactionAdjacentMacEqualities(record),
+      inlinePayloadFields: Object.keys(record.data ?? {})
+        .filter((key) => ["input", "output", "result", "state"].includes(key))
+        .sort(),
+    },
+    guarded: guardedScan,
+    positiveControl: controlScan,
+    needles: persistence
+      .canaryNeedles(REDACTION_CANARY_VALUE)
+      .map(({ needle }) => Buffer.from(needle).toString("hex"))
+      .sort(),
+    needleCount: persistence.canaryNeedles(REDACTION_CANARY_VALUE).length,
+  };
+} finally {
+  await rm(redactionCanaryGuardedDirectory, { recursive: true, force: true });
+  await rm(redactionCanaryControlDirectory, { recursive: true, force: true });
+}
+
+// The needle sets are compared before the detection counts. Two scanners that
+// both report zero because they both look for nothing would otherwise agree.
+assertRedactionAgreement(
+  "canary",
+  "<needles>",
+  "needles",
+  tsRedactionCanary.needles,
+  pyRedaction.canary.needles,
+);
+assertRedactionAgreement(
+  "canary",
+  "<needles>",
+  "needleCount",
+  tsRedactionCanary.needleCount,
+  pyRedaction.canary.needleCount,
+);
+assert.ok(tsRedactionCanary.needleCount >= 8, "canary: fewer than eight encoded forms are checked");
+assertRedactionEntryAgreement(
+  "canary",
+  "<record>",
+  ["recordCount", "payloadDisposition", "redacted", "adjacentMacEqualities", "inlinePayloadFields"],
+  tsRedactionCanary.record,
+  pyRedaction.canary.record,
+);
+assertRedactionAgreement(
+  "canary",
+  "<vector>",
+  "canaryId",
+  tsRedactionCanary.canaryId,
+  pyRedaction.canary.canaryId,
+);
+assertRedactionAgreement(
+  "canary",
+  "<vector>",
+  "canaryValue",
+  tsRedactionCanary.canaryValue,
+  pyRedaction.canary.canaryValue,
+);
+for (const [language, canary] of [
+  ["TypeScript", tsRedactionCanary],
+  ["Python", pyRedaction.canary],
+]) {
+  // The scan must have had something to look at.
+  assert.ok(
+    canary.guarded.filesScanned >= 2,
+    `canary: the ${language} guarded path produced ${canary.guarded.filesScanned} files to scan`,
+  );
+  assert.ok(canary.guarded.bytesScanned > 0, `canary: the ${language} guarded scan read no bytes`);
+  assert.ok(
+    canary.guarded.suffixes.includes(".jsonl"),
+    `canary: the ${language} guarded path wrote no journal file`,
+  );
+  assert.ok(
+    canary.guarded.suffixes.includes(".blob"),
+    `canary: the ${language} guarded path wrote no protected blob`,
+  );
+  assert.ok(
+    !canary.guarded.suffixes.includes(".tmp"),
+    `canary: the ${language} guarded path left a temporary file behind`,
+  );
+  assert.deepEqual(
+    canary.guarded.detections,
+    [],
+    `canary: the seeded value reached a sink on the ${language} guarded path`,
+  );
+  // The positive control proves the scanner can in fact see a leak.
+  assert.ok(
+    canary.positiveControl.detections.length > 0,
+    `canary: the ${language} positive control was not detected, so the scan proves nothing`,
+  );
+  assert.ok(
+    canary.positiveControl.detections.every((item) => item.canaryId === REDACTION_CANARY_ID),
+    `canary: the ${language} positive control detected some other canary`,
+  );
+  // Section 3.2, on the record the guarded path actually persisted.
+  assert.equal(
+    canary.record.payloadDisposition,
+    "protected-ref",
+    `canary: the ${language} guarded record does not claim protected-ref`,
+  );
+  assert.equal(
+    canary.record.redacted,
+    false,
+    `canary: the ${language} guarded record claims redaction it did not perform`,
+  );
+  assert.deepEqual(
+    canary.record.inlinePayloadFields,
+    [],
+    `canary: the ${language} guarded record carries an inline application payload field`,
+  );
+  assert.ok(
+    canary.record.adjacentMacEqualities.length > 0,
+    `canary: the ${language} guarded record carries no adjacent MAC to check`,
+  );
+  for (const equality of canary.record.adjacentMacEqualities) {
+    assert.equal(
+      equality.equal,
+      true,
+      `canary: the ${language} record's ${equality.macField} does not equal ${equality.refField}.valueMac`,
+    );
+  }
+}
+
+// --- 9. the 34 wire cases --------------------------------------------------
+const REDACTION_WIRE_FIELDS = ["decided", "schema", "verdict", "code", "dispositionFacts"];
+
+/**
+ * Decide one wire document with the native TypeScript validators. A schema this
+ * lane carries no validator for returns `undefined`, which the join reports as
+ * an undecided case rather than quietly dropping it.
+ */
+function typescriptRedactionWireVerdict(schema, document) {
+  switch (schema) {
+    case "capture-source.schema.json":
+      return { valid: persistence.isCaptureSourceClass(document) };
+    case "capture-sink.schema.json":
+      return { valid: persistence.isCaptureSinkClass(document) };
+    case "capture-policy.schema.json":
+      return { valid: persistence.validateCapturePolicy(document).valid };
+    case "payload-disposition.schema.json":
+      return { valid: persistence.validatePayloadDispositionDocument(document).valid };
+    case "protected-value.schema.json":
+      return { valid: persistence.validateProtectedValueRefDocument(document).valid };
+    case "protected-blob.schema.json":
+      return { valid: persistence.validateProtectedBlobDocument(document).valid };
+    case "protected-aad.schema.json":
+      return { valid: persistence.validateProtectedAadDocument(document).valid };
+    case "protected-store-envelope.schema.json":
+      return { valid: persistence.validateProtectedStoreEnvelopeDocument(document).valid };
+    case "redaction-rule.schema.json":
+      return { valid: persistence.validateRedactionRuleDocument(document).valid };
+    case "redaction-receipt.schema.json":
+      return { valid: persistence.validateRedactionReceiptDocument(document).valid };
+    case "sink-guard-decision.schema.json":
+      return { valid: persistence.validateSinkGuardDecisionDocument(document).valid };
+    case "event-v1alpha2.schema.json":
+      return { valid: persistence.validateGraphEventV1Alpha2(document).valid };
+    case "checkpoint-v1alpha2.schema.json":
+      return { valid: persistence.validateCheckpointV1Alpha2Document(document).valid };
+    default:
+      return undefined;
+  }
+}
+
+/** The Section 3.2 facts a document states about itself, read natively. */
+function typescriptRedactionDispositionFacts(document) {
+  if (typeof document !== "object" || document === null || Array.isArray(document)) return null;
+  if (!Object.hasOwn(document, "payloadDisposition") || !Object.hasOwn(document, "redacted")) {
+    return null;
+  }
+  const disposition = document.payloadDisposition;
+  const row = persistence.DISPOSITION_TRUTH_TABLE[disposition];
+  const facts = {
+    disposition,
+    documentRedacted: document.redacted,
+    inTruthTable: row !== undefined,
+  };
+  if (row !== undefined) {
+    facts.tableRedacted = row.redacted;
+    facts.receiptRequired = row.receipt;
+  }
+  facts.truthTableVerdict = persistence.checkDispositionFacts({
+    payloadDisposition: disposition,
+    redacted: document.redacted,
+    ...(Object.hasOwn(document, "redactionReceipt")
+      ? { redactionReceipt: document.redactionReceipt }
+      : {}),
+  }).valid;
+  return facts;
+}
+
+const redactionWireCases = redactionSectionCases(
+  "wireCases",
+  pyRedaction.wireCaseOrder,
+  pyRedaction.wireCases,
+);
+const redactionWireSchemas = new Set();
+let redactionWireValid = 0;
+let redactionWireInvalid = 0;
+for (const testCase of redactionWireCases) {
+  const verdict = typescriptRedactionWireVerdict(testCase.schema, testCase.document);
+  const tsEntry = {
+    decided: verdict !== undefined,
+    schema: testCase.schema,
+    dispositionFacts: typescriptRedactionDispositionFacts(testCase.document),
+  };
+  const pyEntry = pyRedaction.wireCases[testCase.id];
+
+  // Decidability is compared before anything else: a case one lane decides and
+  // the other does not is exactly the hole this join exists to find.
+  if (tsEntry.decided !== pyEntry.decided) {
+    throw redactionDivergence(
+      "wireCases",
+      testCase.id,
+      "decided",
+      tsEntry.decided
+        ? `decided by a native validator for schema '${testCase.schema}'`
+        : `<no native validator for schema '${testCase.schema}'>`,
+      pyEntry.decided
+        ? `decided by a native validator for schema '${testCase.schema}'`
+        : `<no native validator for schema '${testCase.schema}'>`,
+    );
+  }
+  if (verdict !== undefined) {
+    tsEntry.verdict = verdict.valid;
+    // The TypeScript validators return a reason, not a code. The closed code
+    // vocabulary is joined separately, and the Python code is checked against
+    // the corpus below.
+    tsEntry.code = pyEntry.code ?? null;
+  }
+  assertRedactionEntryAgreement("wireCases", testCase.id, REDACTION_WIRE_FIELDS, tsEntry, pyEntry);
+
+  for (const [language, entry] of [["TypeScript", tsEntry], ["Python", pyEntry]]) {
+    assert.equal(entry.verdict, testCase.valid, `${testCase.id}: ${language} schema verdict`);
+    if (entry.dispositionFacts !== null) {
+      assert.equal(
+        entry.dispositionFacts.inTruthTable,
+        true,
+        `${testCase.id}: ${language} names a disposition outside the truth table`,
+      );
+      assert.equal(
+        entry.dispositionFacts.disposition,
+        testCase.document.payloadDisposition,
+        `${testCase.id}: ${language} read a different disposition than the document states`,
+      );
+      assert.equal(
+        entry.dispositionFacts.documentRedacted,
+        testCase.document.redacted,
+        `${testCase.id}: ${language} read a different redacted flag than the document states`,
+      );
+      // Section 3.2: a document whose flag contradicts its disposition can never
+      // be a valid record, whatever else the schema says.
+      if (entry.dispositionFacts.documentRedacted !== entry.dispositionFacts.tableRedacted) {
+        assert.equal(
+          entry.verdict,
+          false,
+          `${testCase.id}: ${language} accepted a record whose redacted flag contradicts its disposition`,
+        );
+      }
+    }
+  }
+  if (pyEntry.code !== null && pyEntry.code !== undefined) {
+    assert.equal(
+      pyEntry.code,
+      testCase.expectedCode,
+      `${testCase.id}: the rejection code differs from the corpus`,
+    );
+    assert.ok(
+      tsRedactionNative.failureCodes.includes(pyEntry.code),
+      `${testCase.id}: rejected with a code outside the closed vocabulary`,
+    );
+  }
+  redactionWireSchemas.add(testCase.schema);
+  if (testCase.valid) redactionWireValid += 1;
+  else redactionWireInvalid += 1;
+}
+const redactionDispositionWireCases = redactionWireCases.filter(
+  (item) => pyRedaction.wireCases[item.id].dispositionFacts !== null,
+);
+assert.ok(
+  redactionDispositionWireCases.length > 0,
+  "wireCases: no case states a disposition, so the truth table is unwitnessed",
+);
+assert.ok(redactionWireValid > 0, "wireCases: no accepted document was compared");
+assert.ok(redactionWireInvalid > 0, "wireCases: no rejected document was compared");
+
+process.stdout.write(
+  `Cross-language redaction conformance passed for ${redactionPointerCases.length} pointer cases (${redactionPointerAccepted} transforms, ${redactionPointerRejected} rejections over ${redactionPointerCodesSeen.size} code), ${redactionWireCases.length} wire cases over ${redactionWireSchemas.size} schemas (${redactionWireValid} valid, ${redactionWireInvalid} rejected, ${redactionDispositionWireCases.length} disposition/redacted pairs), ${redactionFlowCases.length} flow cases (${redactionFlowAuthorized} authorized, ${redactionFlowDenied} denied) over the complete ${tsRedactionCartesian.pairCount}-pair Cartesian domain of ${tsRedactionNative.sourceRuleCount} sources x ${tsRedactionNative.sinkRuleCount} sinks (outcome digest ${tsRedactionCartesian.outcomeDigest.slice(0, 16)}), ${redactionCorpusReceiptCount + 1} receipts bound by count/order/MAC, the ${tsRedactionNative.failureCodes.length}-code vocabulary and the ${tsRedactionNative.payloadDispositions.length}-row disposition truth table, and one seeded canary scanned over ${tsRedactionCanary.guarded.filesScanned}/${pyRedaction.canary.guarded.filesScanned} files and ${tsRedactionCanary.guarded.bytesScanned}/${pyRedaction.canary.guarded.bytesScanned} bytes with 0 detections against ${tsRedactionCanary.positiveControl.detections.length}/${pyRedaction.canary.positiveControl.detections.length} positive-control detections; implementationClaim ${JSON.stringify(redactionCorpus.implementationClaim)}.\n`,
 );

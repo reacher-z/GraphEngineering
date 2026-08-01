@@ -22,6 +22,9 @@ export {
 } from "./decision-replay.js";
 export { runPipeline } from "./pipeline.js";
 export {
+  ATTEMPT_CAUSE_CODES,
+  ATTEMPT_MESSAGE_TEMPLATES,
+  ATTEMPT_TEMPLATE_MESSAGES,
   inspectLegacyDurableHistory,
   resumeDurableGraphRun,
   resumeGraphRun,

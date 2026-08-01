@@ -243,6 +243,13 @@ class SinkWriteRequest:
     decision_id: str | None = None
     side_effects: SideEffectsInput = "not-applicable"
     executor_outcome: ExecutorOutcome = "not-applicable"
+    #: The control the sink row names for this write (Section 7). ``None`` means
+    #: "the first control this sink declares", which is what the shared
+    #: conformance sweeps use. It is never the *source* row's control: a source
+    #: control is not a control this sink owns, and passing one here is the
+    #: divergence that made the Python guard accept writes the TypeScript guard
+    #: refused.
+    policy_control: str | None = None
 
     @property
     def has_payload(self) -> bool:
@@ -481,7 +488,9 @@ class SinkGuard:
         flow = evaluate_flow(
             request.source_class,
             request.sink,
-            row.policy_control,
+            request.policy_control
+            if request.policy_control is not None
+            else destination.policy_controls[0],
             policy_enabled=policy_enabled_for(policy, request.source_class, request.sink),
         )
         if flow.outcome == "failed":

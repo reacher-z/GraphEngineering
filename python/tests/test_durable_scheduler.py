@@ -1389,14 +1389,15 @@ def test_retry_beyond_node_or_global_attempt_budget_is_invalid_history(
         scheduled = next(item for item in history if item.type == "NodeScheduled")
         recorded_activity = str(scheduled.data["activityKey"])
         input_mac = str(scheduled.data["inputMac"])
+        # `$defs.attemptFailure`: the closed projection carries a versioned
+        # template identifier, and no `nodeId`, `attempt`, `message` or
+        # `causeName`.
         failure = {
             "phase": "execute",
             "code": "NODE_EXECUTION_INTERRUPTED",
-            "message": "process ended before the attempt outcome was durably recorded",
-            "nodeId": "root",
-            "attempt": 1,
+            "messageTemplate": "process-interrupted/v1",
             "retryable": True,
-            "causeName": "ProcessLost",
+            "causeCode": "PROCESS_LOST",
         }
         suffix = (
             forged_event(
@@ -1837,14 +1838,15 @@ def test_safe_interrupted_attempt_cannot_be_forged_terminal_while_budget_remains
                 clock=fixed_clock,
             )
         history = await store.read(run_id)
+        # A terminal interruption forged while the retry budget still allows
+        # another attempt. The prose that used to carry the forgery cannot reach
+        # the wire any more, so the contradiction is the retry flag itself.
         failure = {
             "phase": "execute",
             "code": "NODE_EXECUTION_INTERRUPTED",
-            "message": "forged terminal interruption",
-            "nodeId": "root",
-            "attempt": 1,
+            "messageTemplate": "process-interrupted/v1",
             "retryable": False,
-            "causeName": "ProcessLost",
+            "causeCode": "PROCESS_LOST",
         }
         terminal_result = {
             "status": "failed",
@@ -2178,11 +2180,9 @@ def test_persisted_retry_reservation_is_counted_before_new_attempt_admission() -
         failure = {
             "phase": "execute",
             "code": "NODE_EXECUTION_FAILED",
-            "message": "retry me",
-            "nodeId": "a",
-            "attempt": 1,
+            "messageTemplate": "node-execution-failed/v1",
             "retryable": True,
-            "causeName": "RuntimeError",
+            "causeCode": "EXECUTOR_REJECTED",
         }
         documents: tuple[tuple[str, dict[str, Any], str | None, int | None], ...] = (
             (
@@ -2237,7 +2237,15 @@ def test_persisted_retry_reservation_is_counted_before_new_attempt_admission() -
             ),
             (
                 "NodeSettledWithoutAttempt",
-                {"resultRef": settled_document, "resultMac": settled_mac},
+                {
+                    "resultRef": settled_document,
+                    "resultMac": settled_mac,
+                    # `$defs.nodeSettledData` requires the closed outcome
+                    # metadata beside the protected result.
+                    "status": "failed",
+                    "attempts": 0,
+                    "failureCode": "ATTEMPT_BUDGET_EXHAUSTED",
+                },
                 "b",
                 None,
             ),

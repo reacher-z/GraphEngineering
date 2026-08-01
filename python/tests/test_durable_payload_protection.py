@@ -26,6 +26,7 @@ from graph_engineering import (
     resume_graph_run,
     start_graph_run,
 )
+from graph_engineering.durable import ATTEMPT_TEMPLATE_MESSAGES
 from graph_engineering.persistence import MemoryEventStore
 from graph_engineering.redaction.scan import encoded_forms
 from tests.durable_support import (
@@ -376,9 +377,24 @@ def test_an_attempt_failure_carries_a_template_message_and_no_host_cause_name(
     documents = asyncio.run(scenario())
     attempt_failed = next(item for item in documents if item["type"] == "NodeAttemptFailed")
     failure = attempt_failed["data"]["failure"]
-    assert failure["code"] == "NODE_EXECUTION_FAILED"
-    assert failure["message"] == "the node executor raised"
-    assert "causeName" not in failure
+    # `$defs.attemptFailure` closes the object at exactly these members. The
+    # message itself no longer reaches the wire at all: a versioned template
+    # identifier stands in for it, so there is no string on the wire that a
+    # caught exception could ever be a substring of.
+    assert failure == {
+        "phase": "execute",
+        "code": "NODE_EXECUTION_FAILED",
+        "messageTemplate": "node-execution-failed/v1",
+        "retryable": False,
+        "causeCode": "EXECUTOR_REJECTED",
+    }
+    assert ATTEMPT_TEMPLATE_MESSAGES["node-execution-failed/v1"] == "the node executor raised"
+    for absent in ("message", "causeName", "nodeId", "attempt"):
+        assert absent not in failure
+    # The default profile captures no diagnostic evidence, so the record is the
+    # metadata-only shape and carries no reference at all.
+    assert attempt_failed["payloadDisposition"] == "metadata-only"
+    assert "evidenceRef" not in attempt_failed["data"]
     assert CANARIES["failure-detail"] not in json.dumps(attempt_failed)
 
 

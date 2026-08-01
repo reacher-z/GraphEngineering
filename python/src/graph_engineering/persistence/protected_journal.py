@@ -67,23 +67,126 @@ EVENT_V1ALPHA2_API_VERSION: Final = "graphengineering.reacher-z.github.io/events
 CONTRACT_VERSION_V1ALPHA2: Final = "scheduler-recovery/v1alpha2"
 EVENT_JOURNAL_SINK: Final = "event-journal"
 
-# Section 3.2 and event-v1alpha2.schema.json: exactly one disposition per event
+# Section 3.2 and event-v1alpha2.schema.json: the legal dispositions per event
 # type. `inline-unredacted` is unrepresentable here, deliberately.
-EVENT_DISPOSITIONS: Final[dict[str, PayloadDisposition]] = {
-    "RunCreated": "protected-ref",
-    "RunStarted": "metadata-only",
-    "RunResumed": "metadata-only",
-    "NodeScheduled": "protected-ref",
-    "NodeStarted": "metadata-only",
-    "NodeAttemptFailed": "metadata-only",
-    "NodeSettledWithoutAttempt": "protected-ref",
-    "NodeRetried": "metadata-only",
-    "NodeSucceeded": "protected-ref",
-    "EdgeEmitted": "metadata-only",
-    "RunCancelled": "protected-ref",
-    "RunFailed": "protected-ref",
-    "RunSucceeded": "protected-ref",
+#
+# Twelve of the thirteen types pin exactly one disposition. `NodeAttemptFailed`
+# is the one type the schema gives two: `$defs.nodeAttemptFailedMetadataData`
+# and `$defs.nodeAttemptFailedProtectedData`. Section 6.1 decides between them by
+# what the record actually carries — "optional raw `evidenceRef`/`evidenceMac`
+# only under explicit protected-evidence policy" — so the disposition is a
+# function of the record, not of the type name. A table asserting one
+# disposition per type is what silently pinned this runtime to `metadata-only`
+# and made it reject the other lane's conforming record.
+EVENT_DISPOSITIONS: Final[dict[str, frozenset[PayloadDisposition]]] = {
+    "RunCreated": frozenset({"protected-ref"}),
+    "RunStarted": frozenset({"metadata-only"}),
+    "RunResumed": frozenset({"metadata-only"}),
+    "NodeScheduled": frozenset({"protected-ref"}),
+    "NodeStarted": frozenset({"metadata-only"}),
+    "NodeAttemptFailed": frozenset({"metadata-only", "protected-ref"}),
+    "NodeSettledWithoutAttempt": frozenset({"protected-ref"}),
+    "NodeRetried": frozenset({"metadata-only"}),
+    "NodeSucceeded": frozenset({"protected-ref"}),
+    "EdgeEmitted": frozenset({"metadata-only"}),
+    "RunCancelled": frozenset({"protected-ref"}),
+    "RunFailed": frozenset({"protected-ref"}),
+    "RunSucceeded": frozenset({"protected-ref"}),
 }
+
+
+def event_disposition(event_type: str, *, has_payload: bool) -> PayloadDisposition:
+    """The one disposition this record claims.
+
+    A record that carries an authoritative value to protect is `protected-ref`;
+    one that carries none is `metadata-only`. Both languages decide it from this
+    single fact, so the same input yields the same disposition on both lanes.
+    """
+
+    legal = EVENT_DISPOSITIONS[event_type]
+    chosen: PayloadDisposition = "protected-ref" if has_payload else "metadata-only"
+    if chosen in legal:
+        return chosen
+    # A type that pins exactly one disposition keeps it; the payload presence of
+    # such a type is fixed by its own schema and is not a free choice.
+    return next(iter(legal))
+
+
+# `event-v1alpha2.schema.json` `$defs.attemptFailure`: a closed object whose
+# `messageTemplate` and `causeCode` are closed enums. It carries no `nodeId`,
+# `attempt`, `message` or `causeName`: the first two are envelope members and the
+# last two are producer-derived text that belongs in the protected evidence.
+ATTEMPT_FAILURE_REQUIRED: Final[frozenset[str]] = frozenset(
+    {"phase", "code", "messageTemplate", "retryable"}
+)
+ATTEMPT_FAILURE_OPTIONAL: Final[frozenset[str]] = frozenset({"causeCode"})
+ATTEMPT_FAILURE_CODES: Final[frozenset[str]] = frozenset(
+    {
+        "NODE_EXECUTION_FAILED",
+        "NODE_TIMEOUT",
+        "NODE_CANCELLED",
+        "INVALID_OUTPUT",
+        "NODE_EXECUTION_INTERRUPTED",
+        "INVALID_ROUTE_SELECTION",
+    }
+)
+ATTEMPT_FAILURE_TEMPLATES: Final[frozenset[str]] = frozenset(
+    {
+        "node-execution-failed/v1",
+        "node-timeout/v1",
+        "node-cancelled/v1",
+        "invalid-output/v1",
+        "process-interrupted/v1",
+        "invalid-route-selection/v1",
+    }
+)
+ATTEMPT_FAILURE_CAUSE_CODES: Final[frozenset[str]] = frozenset(
+    {"EXECUTOR_REJECTED", "TIMEOUT", "CANCELLED", "VALIDATION", "PROCESS_LOST", "ROUTER_CONTRACT"}
+)
+
+SETTLED_FAILURE_CODES: Final[frozenset[str]] = frozenset(
+    {
+        "EXECUTOR_NOT_FOUND",
+        "UPSTREAM_FAILED",
+        "INPUT_BINDING_FAILED",
+        "ATTEMPT_BUDGET_EXHAUSTED",
+        "NODE_CANCELLED",
+        "ROUTE_NOT_SELECTED",
+        "UNSUPPORTED_EDGE_CONDITION",
+        "UPSTREAM_UNKNOWN",
+    }
+)
+
+
+def validate_attempt_failure(value: object) -> RedactionFailure | None:
+    """Validate one `data.failure` against `$defs.attemptFailure`.
+
+    This is the check whose absence let a non-conforming `NodeAttemptFailed`
+    reach disk in both languages: the envelope was validated, the `data` members
+    were counted, and the object inside `failure` was never looked at.
+    """
+
+    if not isinstance(value, Mapping):
+        return failure("REDACTION_POLICY_INVALID", "sink-write", field="failure")
+    keys = set(value.keys())
+    if not keys >= ATTEMPT_FAILURE_REQUIRED:
+        return failure("REDACTION_POLICY_INVALID", "sink-write", field="failure")
+    if not keys <= (ATTEMPT_FAILURE_REQUIRED | ATTEMPT_FAILURE_OPTIONAL):
+        # `nodeId`, `attempt`, `message` and `causeName` land here.
+        return failure("PAYLOAD_PROTECTION_REQUIRED", "sink-write", field="failure")
+    if value["phase"] != "execute":
+        return failure("REDACTION_POLICY_INVALID", "sink-write", field="failure.phase")
+    if value["code"] not in ATTEMPT_FAILURE_CODES:
+        return failure("REDACTION_POLICY_INVALID", "sink-write", field="failure.code")
+    if value["messageTemplate"] not in ATTEMPT_FAILURE_TEMPLATES:
+        return failure(
+            "REDACTION_POLICY_INVALID", "sink-write", field="failure.messageTemplate"
+        )
+    if not isinstance(value["retryable"], bool):
+        return failure("REDACTION_POLICY_INVALID", "sink-write", field="failure.retryable")
+    if "causeCode" in value and value["causeCode"] not in ATTEMPT_FAILURE_CAUSE_CODES:
+        return failure("REDACTION_POLICY_INVALID", "sink-write", field="failure.causeCode")
+    return None
 
 # Section 6.1 legacy aliases forbidden in a protected v1alpha2 payload.
 FORBIDDEN_LEGACY_DATA_FIELDS: Final[frozenset[str]] = frozenset(
@@ -450,7 +553,7 @@ def validate_protected_event(document: object) -> RedactionFailure | None:
     event_type = document["type"]
     if type(event_type) is not str or event_type not in EVENT_DISPOSITIONS:
         return failure("REDACTION_POLICY_INVALID", "sink-write")
-    if document["payloadDisposition"] != EVENT_DISPOSITIONS[event_type]:
+    if document["payloadDisposition"] not in EVENT_DISPOSITIONS[event_type]:
         return failure("REDACTION_POLICY_INVALID", "sink-write")
 
     disposition_failure = validate_disposition(
@@ -485,6 +588,26 @@ def validate_protected_event(document: object) -> RedactionFailure | None:
         # Legacy field aliases and inline payloads are forbidden in a protected
         # v1alpha2 payload.
         return failure("PAYLOAD_PROTECTION_REQUIRED", "sink-write")
+
+    if event_type == "NodeAttemptFailed":
+        # The one sub-object the schema closes. Validating the `data` member
+        # names without ever looking inside `failure` is what let a
+        # non-conforming record reach disk.
+        attempt_failure = validate_attempt_failure(data.get("failure"))
+        if attempt_failure is not None:
+            return attempt_failure
+        protected = document["payloadDisposition"] == "protected-ref"
+        if protected != ({"evidenceRef", "evidenceMac"} <= set(data.keys())):
+            # Section 6.1 ties the disposition to the evidence, in both
+            # directions: protected evidence means `protected-ref`, and no
+            # evidence means `metadata-only`.
+            return failure("REDACTION_POLICY_INVALID", "sink-write", field="payloadDisposition")
+    if event_type == "NodeSettledWithoutAttempt" and (
+        data.get("failureCode") not in SETTLED_FAILURE_CODES
+    ):
+        # `$defs.settledFailureCode` is closed and carries no
+        # `SETTLED_WITHOUT_FAILURE` sentinel.
+        return failure("REDACTION_POLICY_INVALID", "sink-write", field="failureCode")
 
     payload_hash = hashlib.sha256(canonical_bytes(dict(data))).hexdigest()
     if document["payloadHash"] != payload_hash:
@@ -746,7 +869,9 @@ class ProtectedEventJournal:
             "sequence": sequence,
             "capturePolicyHash": self._guard.policy_hash,
             "redacted": False,
-            "payloadDisposition": EVENT_DISPOSITIONS[event_type],
+            "payloadDisposition": event_disposition(
+                event_type, has_payload=payload is not NO_PAYLOAD
+            ),
             "data": dict(data),
         }
         if node_id is not None:
@@ -756,7 +881,7 @@ class ProtectedEventJournal:
         if attempt is not None:
             envelope["attempt"] = attempt
 
-        protected = EVENT_DISPOSITIONS[event_type] == "protected-ref"
+        protected = envelope["payloadDisposition"] == "protected-ref"
         request = SinkWriteRequest(
             source_class=source_class,
             sink=GuardedJsonlEventStore.sink,

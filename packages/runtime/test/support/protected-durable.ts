@@ -31,6 +31,16 @@ export const TEST_SCOPE: AuthorityScope = Object.freeze({
   authoritySubjectId: "subject-durable-test",
 });
 
+/**
+ * Section 5.1: the policy must name the key reference actually in use, or its
+ * hash attests to a key that is protecting nothing. The shipped default profile
+ * carries a placeholder reference, so a test provider needs its own.
+ */
+export const TEST_CAPTURE_POLICY = Object.freeze({
+  ...DEFAULT_CAPTURE_POLICY,
+  keyRef: new DeterministicTestKeyProvider().keyRef,
+});
+
 /** A fully configured in-memory protected write path for durable tests. */
 export function memoryProtection(
   overrides: Partial<DurablePayloadProtection> = {},
@@ -40,7 +50,7 @@ export function memoryProtection(
     payloadStore: new MemoryProtectedPayloadStore(),
     keys: new DeterministicTestKeyProvider(),
     scope: TEST_SCOPE,
-    policy: DEFAULT_CAPTURE_POLICY,
+    policy: TEST_CAPTURE_POLICY,
     ...overrides,
   };
 }
@@ -61,7 +71,7 @@ export async function fileProtection(): Promise<FileProtectionHarness> {
       payloadStore: new FileProtectedPayloadStore({ directory }),
       keys: new DeterministicTestKeyProvider(),
       scope: TEST_SCOPE,
-      policy: DEFAULT_CAPTURE_POLICY,
+      policy: TEST_CAPTURE_POLICY,
     },
     dispose: async () => {
       await rm(directory, { recursive: true, force: true });
@@ -182,33 +192,42 @@ export function draftFromRecovered(
         }],
       };
     case "NodeAttemptFailed": {
+      // The recovered `failure` is the protected evidence document, a strict
+      // superset of the closed `$defs.attemptFailure` projection. Rebuild the
+      // projection by selecting exactly the five members the schema allows.
       const failure = record(data.failure);
       const closed: Record<string, unknown> = {
         phase: failure.phase,
         code: failure.code,
-        nodeId: failure.nodeId,
-        attempt: failure.attempt,
+        messageTemplate: failure.messageTemplate,
         retryable: failure.retryable,
-        ...(failure.upstreamNodeIds === undefined
-          ? {}
-          : { upstreamNodeIds: failure.upstreamNodeIds }),
+        causeCode: failure.causeCode,
       };
+      // Only a history that actually captured evidence gets it back: the
+      // recovered `failure` carries a `message` exactly when it was protected.
+      // Re-attaching one unconditionally would forge a `protected-ref` record
+      // out of a `metadata-only` one.
+      const hadEvidence = failure.message !== undefined;
       return {
         type: "NodeAttemptFailed",
         ...identity,
         data: { terminal: data.terminal, failure: closed },
-        payloads: [{
-          field: "evidenceRef",
-          semanticContext: {
-            kind: "diagnostic-evidence",
-            runId,
-            graphRevision,
-            nodeId,
-            attempt: event.attempt as number,
-            code: String(failure.code),
-          },
-          value: failure,
-        }],
+        ...(hadEvidence
+          ? {
+              payloads: [{
+                field: "evidenceRef" as const,
+                semanticContext: {
+                  kind: "diagnostic-evidence" as const,
+                  runId,
+                  graphRevision,
+                  nodeId,
+                  attempt: event.attempt as number,
+                  code: String(failure.code),
+                },
+                value: failure,
+              }],
+            }
+          : {}),
       };
     }
     default:

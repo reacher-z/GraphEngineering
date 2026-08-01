@@ -15,14 +15,25 @@ Section 12 permit for fixed conformance vectors.  Nothing here is a KMS.
 from __future__ import annotations
 
 import hashlib
-import hmac
 import os
 from typing import Final, Protocol, runtime_checkable
 
+from ..canonical import canonical_bytes
+from ..durable_json import encode_durable_json
 from .aead import aes_256_gcm_decrypt, aes_256_gcm_encrypt
 
 _KEY_BYTES: Final = 32
 _NONCE_BYTES: Final = 12
+
+#: The one key reference the shared deterministic test provider uses in both
+#: languages.  It is an input to every derivation below, so two lanes that
+#: configure a different reference derive different keys instead of silently
+#: agreeing.
+DETERMINISTIC_TEST_KEY_REF: Final = "test-key-provider/deterministic/v1alpha1"
+
+_PROTECTION_KEY_DOMAIN: Final = "test-protection-key/v1alpha1"
+_IDENTITY_KEY_DOMAIN: Final = "test-identity-key/v1alpha1"
+_NONCE_DOMAIN: Final = "test-nonce/v1alpha1"
 
 
 @runtime_checkable
@@ -39,8 +50,15 @@ class KeyProvider(Protocol):
     def run_identity_key(self, run_id: str) -> bytes:
         """32 bytes of HMAC-SHA-256 identity key, stable across resume."""
 
-    def nonce(self) -> bytes:
-        """A fresh 12-byte AEAD nonce, unique for a protection key."""
+    def nonce(self, run_id: str, aad_hash: str) -> bytes:
+        """A 12-byte AEAD nonce that MUST be unique for a protection key.
+
+        The occurrence is named explicitly rather than left implicit in provider
+        state: Section 5.5 makes the associated data occurrence-specific, so a
+        provider that wants a reproducible nonce can derive it from
+        ``(run_id, aad_hash)`` and a provider that wants a random one may ignore
+        both arguments.  A provider MUST NOT depend on call order.
+        """
 
 
 @runtime_checkable
@@ -64,48 +82,63 @@ class ReferenceProtector:
         return aes_256_gcm_decrypt(key, nonce, ciphertext, tag, aad)
 
 
+def _derive(domain: str, key_ref: str, run_id: str, size: int) -> bytes:
+    """``SHA-256(canonicalTagged([domain, keyRef, runId]))`` truncated to ``size``.
+
+    This is the one derivation both language lanes implement.  ``canonicalTagged``
+    is the shared Tagged Durable JSON encoding, so the tag is unambiguous, the key
+    reference is an input rather than decoration, and the domain string separates
+    protection authority from identity authority.
+    """
+
+    digest = hashlib.sha256(canonical_bytes(encode_durable_json([domain, key_ref, run_id])))
+    return digest.digest()[:size]
+
+
 class DeterministicTestKeyProvider:
     """A clearly named test provider producing fixed conformance vectors.
 
-    Section 5.2 permits deterministic nonces and keys only here.  Two independent
-    keys are derived from one seed with domain separation so protection authority
-    and identity authority are cryptographically independent, and the nonce
-    counter is per protection key so no nonce repeats within a run.
+    Section 5.2 permits deterministic nonces and keys only here.  It exists so
+    shared conformance can compare exact ciphertext vectors across the TypeScript
+    and Python lanes, which requires that both lanes derive byte-identical
+    material from byte-identical inputs.  The derivation, the domain strings, the
+    default key reference, and the nonce rule are therefore fixed here and
+    mirrored exactly by ``DeterministicTestKeyProvider`` in
+    ``packages/persistence/src/redaction/key-provider.ts``:
 
-    This class MUST NOT be used in production: its keys are reproducible from the
-    seed, which is the opposite of what a key provider is for.
+    * ``protection_key(runId)``
+      ``= SHA-256(canonicalTagged(["test-protection-key/v1alpha1", keyRef, runId]))``
+    * ``run_identity_key(runId)``
+      ``= SHA-256(canonicalTagged(["test-identity-key/v1alpha1", keyRef, runId]))``
+    * ``nonce(runId, aadHash)``
+      ``= SHA-256(canonicalTagged(["test-nonce/v1alpha1/" + aadHash, keyRef, runId]))[:12]``
+
+    The nonce is a pure function of the occurrence-specific associated data
+    (Section 5.5), so a distinct occurrence yields a distinct nonce under one
+    protection key and the same occurrence yields the same ciphertext in either
+    language, in either process, in any call order.  A counter cannot do that.
+
+    This class MUST NOT be used in production: its keys are a pure function of
+    ``(key_ref, run_id)``, which is the opposite of what a key provider is for.
     """
 
-    def __init__(
-        self,
-        seed: bytes = b"graph-engineering/redaction-test-seed",
-        *,
-        key_ref: str = "test://deterministic/key-1",
-    ) -> None:
-        if type(seed) is not bytes or not seed:
-            raise ValueError("the deterministic test provider requires a non-empty seed")
-        self._seed = seed
+    def __init__(self, *, key_ref: str = DETERMINISTIC_TEST_KEY_REF) -> None:
+        if type(key_ref) is not str or not key_ref:
+            raise ValueError("the deterministic test provider requires a non-empty key reference")
         self._key_ref = key_ref
-        self._nonce_counter = 0
 
     @property
     def key_ref(self) -> str:
         return self._key_ref
 
     def protection_key(self, run_id: str) -> bytes:
-        return self._derive(b"protection-key/v1alpha1", run_id)
+        return _derive(_PROTECTION_KEY_DOMAIN, self._key_ref, run_id, _KEY_BYTES)
 
     def run_identity_key(self, run_id: str) -> bytes:
-        return self._derive(b"run-identity-key/v1alpha1", run_id)
+        return _derive(_IDENTITY_KEY_DOMAIN, self._key_ref, run_id, _KEY_BYTES)
 
-    def nonce(self) -> bytes:
-        self._nonce_counter += 1
-        return self._nonce_counter.to_bytes(_NONCE_BYTES, "big")
-
-    def _derive(self, domain: bytes, run_id: str) -> bytes:
-        return hmac.new(
-            self._seed, domain + b"\x00" + run_id.encode("utf-8"), hashlib.sha256
-        ).digest()[:_KEY_BYTES]
+    def nonce(self, run_id: str, aad_hash: str) -> bytes:
+        return _derive(f"{_NONCE_DOMAIN}/{aad_hash}", self._key_ref, run_id, _NONCE_BYTES)
 
 
 class EphemeralKeyProvider:
@@ -132,5 +165,5 @@ class EphemeralKeyProvider:
     def run_identity_key(self, run_id: str) -> bytes:
         return self._identity
 
-    def nonce(self) -> bytes:
+    def nonce(self, run_id: str, aad_hash: str) -> bytes:
         return os.urandom(_NONCE_BYTES)

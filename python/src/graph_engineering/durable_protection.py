@@ -24,11 +24,17 @@ from typing import Final
 
 from .canonical import canonical_sha256
 from .models import JsonValue
+from .persistence.protected_journal import EVENT_JOURNAL_SINK
 from .redaction.errors import RedactionFailure, failure
 from .redaction.guard import SinkGuard
 from .redaction.keys import KeyProvider, Protector
 from .redaction.limits import DEFAULT_LIMITS, PortableLimits
-from .redaction.policy import CapturePolicy, capture_policy_hash, default_stable_profile
+from .redaction.policy import (
+    CapturePolicy,
+    capture_policy_hash,
+    default_stable_profile,
+    policy_enabled_for,
+)
 from .redaction.protect import (
     ProtectedAad,
     ProtectedPayloadStore,
@@ -147,6 +153,19 @@ class PayloadProtection:
     @property
     def policy(self) -> CapturePolicy:
         return self._policy
+
+    @property
+    def captures_diagnostic_evidence(self) -> bool:
+        """Section 6.1: whether this run captures raw attempt-failure evidence.
+
+        ``exception-message`` has ``default_action='off'``, so the Section 4.1
+        default profile captures none and `NodeAttemptFailed` is the
+        metadata-only shape.  An operator who widens the event sink's controls
+        gets the protected shape.  Both language lanes evaluate this same
+        predicate, so the same policy yields the same disposition.
+        """
+
+        return policy_enabled_for(self._policy, "exception-message", EVENT_JOURNAL_SINK)
 
     @property
     def policy_hash(self) -> str:

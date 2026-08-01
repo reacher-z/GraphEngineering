@@ -20,10 +20,13 @@ from graph_engineering.durable_protection import PayloadProtection
 from graph_engineering.events import ProtectedGraphEvent
 from graph_engineering.models import JsonValue
 from graph_engineering.persistence.protected_journal import (
-    EVENT_DISPOSITIONS,
+    EVENT_DISPOSITIONS as EVENT_DISPOSITION_TYPES,
+)
+from graph_engineering.persistence.protected_journal import (
     EVENT_V1ALPHA2_API_VERSION,
     GuardedJsonlEventStore,
     GuardedMemoryEventStore,
+    event_disposition,
 )
 from graph_engineering.redaction.errors import RedactionFailure
 from graph_engineering.redaction.keys import DeterministicTestKeyProvider
@@ -119,7 +122,11 @@ def forged_protected_event(
         "payloadDisposition": (
             payload_disposition
             if payload_disposition is not None
-            else EVENT_DISPOSITIONS.get(event_type, "metadata-only")
+            # `NodeAttemptFailed` is the one type with two legal dispositions;
+            # a forged record with no protected reference is metadata-only.
+            else event_disposition(event_type, has_payload="evidenceRef" in data)
+            if event_type in EVENT_DISPOSITION_TYPES
+            else "metadata-only"
         ),
         "data": data,
     }

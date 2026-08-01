@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import re
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from types import MappingProxyType
@@ -30,6 +30,7 @@ from .persistence.protected_journal import (
     EVENT_JOURNAL_SINK,
     EVENT_V1ALPHA2_API_VERSION,
     ProtectedEventStore,
+    event_disposition,
     reject_legacy_history,
     validate_protected_event,
 )
@@ -47,6 +48,7 @@ from .redaction.guard import (
 from .redaction.protect import (
     PROTECTED_STORE_CONTRACT,
     activity_key,
+    diagnostic_evidence_context,
     graph_input_context,
     node_input_context,
     node_output_context,
@@ -215,22 +217,120 @@ _FAILURE_MESSAGE_TEMPLATES: Mapping[FailureCode, str] = MappingProxyType(
 #: application- or host-derived string and is dropped.
 _ALLOWED_CAUSE_NAMES: frozenset[str] = frozenset({"ProcessLost"})
 
+#: `event-v1alpha2.schema.json` `$defs.attemptFailure`: the closed inline
+#: projection names a versioned template identifier instead of a message, so no
+#: producer-derived text reaches the wire.  These two tables are the whole
+#: mapping and are mirrored exactly by `ATTEMPT_MESSAGE_TEMPLATES` and
+#: `ATTEMPT_CAUSE_CODES` in `packages/runtime/src/durable.ts`.  Their key set is
+#: exactly the set of codes a `NodeAttemptFailed` may carry; every other failure
+#: code settles the node without an attempt instead.
+ATTEMPT_MESSAGE_TEMPLATES: Mapping[FailureCode, str] = MappingProxyType(
+    {
+        FailureCode.NODE_EXECUTION_FAILED: "node-execution-failed/v1",
+        FailureCode.NODE_TIMEOUT: "node-timeout/v1",
+        FailureCode.NODE_CANCELLED: "node-cancelled/v1",
+        FailureCode.INVALID_OUTPUT: "invalid-output/v1",
+        FailureCode.NODE_EXECUTION_INTERRUPTED: "process-interrupted/v1",
+        FailureCode.INVALID_ROUTE_SELECTION: "invalid-route-selection/v1",
+    }
+)
 
-def _durable_failure_document(failure: NodeFailure) -> dict[str, JsonValue]:
-    """The closed metadata projection of one attempt failure.
+#: The canonical text each template identifier stands for.  It is a fixed string
+#: per template, never a substring of a caught exception, a provider body, a
+#: prompt, or a path, and it is byte-identical to ``ATTEMPT_TEMPLATE_MESSAGES``
+#: in ``packages/runtime/src/durable.ts``.  A metadata-only history carries no
+#: evidence, so this is what a recovered failure's message becomes: both lanes
+#: therefore rebuild the same result from the same history.
+ATTEMPT_TEMPLATE_MESSAGES: Mapping[str, str] = MappingProxyType(
+    {
+        "node-execution-failed/v1": "the node executor raised",
+        "node-timeout/v1": "the node executor exceeded its timeout",
+        "node-cancelled/v1": "the node attempt was cancelled",
+        "invalid-output/v1": "the node produced an invalid output value",
+        "process-interrupted/v1": (
+            "process ended before the attempt outcome was durably recorded"
+        ),
+        "invalid-route-selection/v1": "the router produced an invalid route selection",
+    }
+)
 
-    `NodeAttemptFailed` is pinned to `metadata-only`, so this document is the
-    exact inline payload. It carries stable codes, graph-declared identifiers,
-    attempt numbers, and a fixed template message; it never carries executor
-    prose, an exception name outside the closed allowlist, a stack, a path, or a
-    provider body.
+ATTEMPT_CAUSE_CODES: Mapping[FailureCode, str] = MappingProxyType(
+    {
+        FailureCode.NODE_EXECUTION_FAILED: "EXECUTOR_REJECTED",
+        FailureCode.NODE_TIMEOUT: "TIMEOUT",
+        FailureCode.NODE_CANCELLED: "CANCELLED",
+        FailureCode.INVALID_OUTPUT: "VALIDATION",
+        FailureCode.NODE_EXECUTION_INTERRUPTED: "PROCESS_LOST",
+        FailureCode.INVALID_ROUTE_SELECTION: "ROUTER_CONTRACT",
+    }
+)
+
+
+def _attempt_failure_projection(failure: NodeFailure, run_id: str = "") -> dict[str, JsonValue]:
+    """The closed inline projection of one attempt failure.
+
+    Exactly `phase`, `code`, `messageTemplate`, `retryable` and `causeCode`, and
+    nothing else: `event-v1alpha2.schema.json` `$defs.attemptFailure` closes the
+    object.  `nodeId` and `attempt` are envelope members and are deliberately not
+    duplicated here; `message` and `causeName` are producer-derived text and
+    travel as protected diagnostic evidence instead.
     """
 
-    document = _failure_document(failure)
-    document["message"] = _FAILURE_MESSAGE_TEMPLATES[failure.code]
-    cause = document.get("causeName")
-    if cause is not None and cause not in _ALLOWED_CAUSE_NAMES:
-        del document["causeName"]
+    template = ATTEMPT_MESSAGE_TEMPLATES.get(failure.code)
+    if template is None:
+        raise _invalid_history(
+            run_id,
+            "NodeAttemptFailed uses a non-attempt outcome code",
+            code=failure.code.value,
+        )
+    return {
+        "phase": "execute",
+        "code": failure.code.value,
+        "messageTemplate": template,
+        "retryable": failure.retryable,
+        "causeCode": ATTEMPT_CAUSE_CODES[failure.code],
+    }
+
+
+def _settled_metadata(result: NodeResult) -> dict[str, JsonValue]:
+    """The closed outcome metadata beside a protected zero-attempt result.
+
+    `$defs.nodeSettledData` requires `status`, `attempts` and `failureCode`.
+    There is deliberately no sentinel for "settled without failing": a node that
+    reaches this event always carries a failure, and a result that does not is an
+    internal invariant violation rather than a record to be filled in.
+    """
+
+    if result.failure is None:
+        raise _invalid_history(
+            "",
+            "NodeSettledWithoutAttempt has no failure code",
+            nodeId=result.node_id,
+        )
+    return {
+        "status": result.status.value,
+        "attempts": result.attempts,
+        "failureCode": result.failure.code.value,
+    }
+
+
+def _attempt_evidence_document(failure: NodeFailure) -> dict[str, JsonValue]:
+    """The protected diagnostic evidence behind one attempt failure.
+
+    Section 6.1 makes raw failure text explicit protected evidence that is never
+    scheduler authority.  It is a strict superset of the closed inline
+    projection, so recovery can check the two against each other and the
+    scheduler can rebuild the full `NodeFailure` from it.
+    """
+
+    document = _attempt_failure_projection(failure)
+    document["message"] = ATTEMPT_TEMPLATE_MESSAGES[str(document["messageTemplate"])]
+    document["nodeId"] = failure.node_id
+    document["attempt"] = failure.attempt
+    if failure.exception_type is not None and failure.exception_type in _ALLOWED_CAUSE_NAMES:
+        document["causeName"] = failure.exception_type
+    if failure.upstream_nodes:
+        document["upstreamNodeIds"] = list(failure.upstream_nodes)
     return document
 
 
@@ -365,7 +465,13 @@ class _DurableJournal:
         guarded sink will accept.
         """
 
-        disposition = EVENT_DISPOSITIONS[draft.type]
+        # Section 6.1: the disposition is a function of what the record actually
+        # carries, not of its type name. `NodeAttemptFailed` is the one type the
+        # schema gives two, and it is `protected-ref` exactly when diagnostic
+        # evidence is captured.
+        disposition = event_disposition(
+            draft.type, has_payload=draft.payload is not NO_PAYLOAD
+        )
         event_id = self.event_id_factory(self.run_id, sequence)
         timestamp = self.clock()
         envelope: dict[str, JsonValue] = {
@@ -612,17 +718,35 @@ class _DurableJournal:
                 raise self._fatal_error
             available_at: str | None = None
             try:
-                drafts = [
-                    _EventDraft(
-                        "NodeAttemptFailed",
-                        {
-                            "terminal": not will_retry,
-                            "failure": _durable_failure_document(failure),
-                        },
-                        node_id=failure.node_id,
-                        attempt=failure.attempt,
+                attempt_failed = _EventDraft(
+                    "NodeAttemptFailed",
+                    {
+                        "terminal": not will_retry,
+                        "failure": _attempt_failure_projection(failure),
+                    },
+                    node_id=failure.node_id,
+                    attempt=failure.attempt,
+                )
+                # Section 6.1: raw failure text is explicit protected diagnostic
+                # evidence and is never scheduler authority. It is captured only
+                # when the effective policy authorizes it, and the record's
+                # disposition follows from whether it is there.
+                if self.protection.captures_diagnostic_evidence:
+                    attempt_failed = replace(
+                        attempt_failed,
+                        payload=_attempt_evidence_document(failure),
+                        source_class="exception-message",
+                        semantic_context=diagnostic_evidence_context(
+                            self.run_id,
+                            _GRAPH_REVISION,
+                            failure.node_id,
+                            failure.attempt,
+                            failure.code.value,
+                        ),
+                        field_path="/data/evidenceRef",
+                        mac_field_path="/data/evidenceMac",
                     )
-                ]
+                drafts = [attempt_failed]
                 if will_retry:
                     node = self.graph.nodes[failure.node_id]
                     activity_key = self._activity_keys.get(failure.node_id, "")
@@ -713,7 +837,10 @@ class _DurableJournal:
             [
                 _EventDraft(
                     "NodeSettledWithoutAttempt",
-                    {},
+                    # `$defs.nodeSettledData` requires the closed outcome
+                    # metadata beside the protected result. Omitting it was a
+                    # required-member violation the guard never caught.
+                    _settled_metadata(result),
                     node_id=node.id,
                     payload=_node_result_document(result),
                     source_class="node-result",
@@ -801,6 +928,55 @@ def _exact_keys(
             expected=sorted(expected),
             actual=sorted(value),
         )
+
+
+def _decode_attempt_failure(
+    inline: Mapping[str, JsonValue],
+    evidence: object | None,
+    run_id: str,
+    context: str,
+    *,
+    node_id: str,
+    attempt: int,
+) -> NodeFailure:
+    """Rebuild one attempt failure from its wire projection and any evidence.
+
+    A protected history hands back the recovered evidence, a strict superset of
+    the closed projection, and the closed projection stays authoritative for the
+    members it carries (Section 6.1), so the two must agree exactly.  A
+    metadata-only history has no evidence at all, so the message is the canonical
+    text of its template and the identity comes from the envelope, where it
+    always lived.  Either way the template and cause code must be the canonical
+    mapping for the recovered code.
+    """
+
+    projection = dict(inline)
+    if evidence is None:
+        template = projection.get("messageTemplate")
+        document: dict[str, JsonValue] = {
+            **projection,
+            "message": ATTEMPT_TEMPLATE_MESSAGES.get(str(template), ""),
+            "nodeId": node_id,
+            "attempt": attempt,
+        }
+    else:
+        document = dict(_object(evidence, run_id, context))
+        for key, value in projection.items():
+            if document.get(key) != value:
+                raise _invalid_history(
+                    run_id,
+                    f"{context} evidence contradicts its closed metadata projection",
+                    field=key,
+                )
+    for key in ("messageTemplate", "causeCode"):
+        document.pop(key, None)
+    failure = _decode_failure(document, run_id, context)
+    if projection != _attempt_failure_projection(failure, run_id):
+        raise _invalid_history(
+            run_id,
+            f"{context} projection is not the canonical projection of its code",
+        )
+    return failure
 
 
 def _decode_failure(value: object, run_id: str, context: str) -> NodeFailure:
@@ -1664,14 +1840,17 @@ def _fold_history(
             )
         if (
             event.type not in EVENT_DISPOSITIONS
-            or event.payload_disposition != EVENT_DISPOSITIONS[event.type]
+            or event.payload_disposition not in EVENT_DISPOSITIONS[event.type]
             or event.redacted
         ):
-            # Section 3.2: exactly one disposition per event type, and the
-            # scheduler envelope is never redacted or inline.
+            # Section 3.2: the disposition is one of those the schema admits for
+            # this event type, and the scheduler envelope is never redacted or
+            # inline. Twelve types admit exactly one; `NodeAttemptFailed` admits
+            # both, and which one it claims is checked against the evidence it
+            # actually carries where that event is folded.
             raise _invalid_history(
                 run_id,
-                "event payload disposition is not the one pinned for its type",
+                "event payload disposition is not legal for its type",
                 sequence=index,
                 eventType=event.type,
             )
@@ -1922,7 +2101,7 @@ def _fold_history(
                 )
             _exact_keys(
                 event.data,
-                {"resultRef", "resultMac"},
+                {"resultRef", "resultMac", "status", "attempts", "failureCode"},
                 run_id,
                 "NodeSettledWithoutAttempt.data",
             )
@@ -1939,6 +2118,19 @@ def _fold_history(
                 run_id,
                 "NodeSettledWithoutAttempt.result",
             )
+            # The closed inline projection must agree with the protected result.
+            if event.data != {
+                **{
+                    key: event.data[key]
+                    for key in ("resultRef", "resultMac")
+                },
+                **_settled_metadata(result),
+            }:
+                raise _invalid_history(
+                    run_id,
+                    "NodeSettledWithoutAttempt metadata contradicts its protected result",
+                    nodeId=node_id,
+                )
             _validate_settled_without_attempt(
                 run_id=run_id,
                 graph=graph,
@@ -2171,16 +2363,46 @@ def _fold_history(
             projection = projections[node_id]
             if projection.open_attempt != attempt or projection.result is not None:
                 raise _invalid_history(run_id, "NodeAttemptFailed lacks one open attempt")
+            # Section 6.1 ties the disposition to the evidence in both
+            # directions: protected evidence means `protected-ref`, and no
+            # evidence means `metadata-only`.
+            protected_attempt = event.payload_disposition == "protected-ref"
             _exact_keys(
                 event.data,
-                {"terminal", "failure"},
+                {"terminal", "failure", "evidenceRef", "evidenceMac"}
+                if protected_attempt
+                else {"terminal", "failure"},
                 run_id,
                 "NodeAttemptFailed.data",
             )
             terminal = event.data["terminal"]
             if type(terminal) is not bool:
                 raise _invalid_history(run_id, "NodeAttemptFailed.terminal must be boolean")
-            failure = _decode_failure(event.data["failure"], run_id, "attempt failure")
+            inline_failure = _object(event.data["failure"], run_id, "attempt failure")
+            evidence: JsonValue | None = None
+            if "evidenceRef" in event.data:
+                evidence = _recovered_value(
+                    event,
+                    run_id=run_id,
+                    protection=protection,
+                    reference_field="evidenceRef",
+                    mac_field="evidenceMac",
+                    semantic_context=diagnostic_evidence_context(
+                        run_id,
+                        _GRAPH_REVISION,
+                        node_id,
+                        attempt,
+                        str(inline_failure.get("code")),
+                    ),
+                )
+            failure = _decode_attempt_failure(
+                inline_failure,
+                evidence,
+                run_id,
+                "attempt failure",
+                node_id=node_id,
+                attempt=attempt,
+            )
             if failure.node_id != node_id or failure.attempt != attempt:
                 raise _invalid_history(run_id, "attempt failure identity is invalid")
             allowed_attempt_codes = {
@@ -2228,9 +2450,12 @@ def _fold_history(
                     attempt=attempt,
                     expectedRetryable=should_retry,
                 )
-            if failure.code is FailureCode.NODE_EXECUTION_INTERRUPTED and (
-                failure.message != "process ended before the attempt outcome was durably recorded"
-                or failure.exception_type != "ProcessLost"
+            # An interrupted attempt is canonical by its template, not by its
+            # prose. The message no longer reaches the wire at all, so the check
+            # that used to compare it compares the identifier that replaced it.
+            if (
+                failure.code is FailureCode.NODE_EXECUTION_INTERRUPTED
+                and failure.message != ATTEMPT_TEMPLATE_MESSAGES["process-interrupted/v1"]
             ):
                 raise _invalid_history(
                     run_id,

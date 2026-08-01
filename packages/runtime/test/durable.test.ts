@@ -1181,17 +1181,19 @@ describe("durable graph scheduler", () => {
         failure: {
           phase: "execute",
           code: "EXECUTOR_NOT_FOUND",
-          message: "forged",
-          nodeId: "root",
-          attempt: 1,
+          messageTemplate: "node-execution-failed/v1",
           retryable: false,
+          causeCode: "EXECUTOR_REJECTED",
         },
       },
     });
-    await appendForged(delegate, "bad-attempt-code", events.length - 1, [suffix]);
-    await expect(resumeDurableGraphRun(retrying, {
-      runId: "bad-attempt-code", implementationId: "v1", protection: delegate,
-    })).rejects.toMatchObject({ code: "INVALID_RUN_HISTORY" });
+    // `$defs.attemptFailure.code` does not admit a settle-without-attempt code,
+    // so the record is now refused before it reaches disk rather than only when
+    // a later resume folds it. The journal is left exactly as it was.
+    await expect(
+      appendForged(delegate, "bad-attempt-code", events.length - 1, [suffix]),
+    ).rejects.toMatchObject({ issues: [{ path: "#/data/failure/code" }] });
+    expect((await history(delegate, "bad-attempt-code")).length).toBe(events.length);
   });
 
   it("rejects a dependant settlement before every upstream outcome exists", async () => {
@@ -1397,6 +1399,11 @@ describe("durable graph scheduler", () => {
   });
 
   it("accepts a foreign cancelled-attempt message but preserves cancellation structure", async () => {
+    // The wire no longer carries any wording at all: the attempt-failure
+    // projection names a versioned template. Prose survives only inside the
+    // protected terminal snapshot, and the fold compares portable facts rather
+    // than prose, so a foreign scheduler's wording is still tolerated while the
+    // cancellation structure is pinned exactly.
     const source = memoryProtection();
     const controller = new AbortController();
     await startDurableGraphRun(graph(), {}, {
@@ -1416,19 +1423,37 @@ describe("durable graph scheduler", () => {
     const failedIndex = events.findIndex((event) => event.type === "NodeAttemptFailed");
     const terminalIndex = events.length - 1;
     const failure = events[failedIndex]!.data.failure as Record<string, unknown>;
-    const foreignFailure = { ...failure, message: "node 'root' was cancelled" };
+    expect(failure).toEqual({
+      phase: "execute",
+      code: "NODE_CANCELLED",
+      messageTemplate: "node-cancelled/v1",
+      retryable: false,
+      causeCode: "CANCELLED",
+    });
+
     const terminalResult = JSON.parse(JSON.stringify(
       decodeDurableJson(events[terminalIndex]!.data.result),
     )) as {
       nodes: Array<{ failure: Record<string, unknown> }>;
       failures: Array<Record<string, unknown>>;
     };
-    terminalResult.nodes[0]!.failure = { ...foreignFailure };
-    terminalResult.failures[0] = { ...foreignFailure };
+    const clean = await copyHistory("foreign-cancel-text", [...events]);
+    await expect(resumeDurableGraphRun(graph(), {
+      runId: "foreign-cancel-text", implementationId: "v1", protection: clean,
+      nodeExecutors: { root: () => "unused" },
+    })).resolves.toMatchObject({ status: "cancelled" });
+
+    // Foreign prose in the protected terminal snapshot is tolerated: the fold
+    // compares the portable facts, which are unchanged.
+    terminalResult.nodes[0]!.failure = {
+      ...terminalResult.nodes[0]!.failure,
+      message: "node 'root' was cancelled",
+    };
+    terminalResult.failures[0] = {
+      ...terminalResult.failures[0],
+      message: "node 'root' was cancelled",
+    };
     const foreign = [...events];
-    foreign[failedIndex] = resign(events[failedIndex]!, {
-      terminal: true, failure: foreignFailure,
-    });
     foreign[terminalIndex] = resign(events[terminalIndex]!, {
       result: encodeDurableJson(terminalResult),
     });

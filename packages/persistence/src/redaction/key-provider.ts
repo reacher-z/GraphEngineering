@@ -42,6 +42,13 @@ export function keyRefHash(keyRef: string): string {
   return sha256Hex(canonicalTagged(["key-ref/v1alpha1", keyRef]));
 }
 
+/** The one key reference the shared deterministic test provider uses in both lanes. */
+export const DETERMINISTIC_TEST_KEY_REF = "test-key-provider/deterministic/v1alpha1" as const;
+
+const PROTECTION_KEY_DOMAIN = "test-protection-key/v1alpha1";
+const IDENTITY_KEY_DOMAIN = "test-identity-key/v1alpha1";
+const NONCE_DOMAIN = "test-nonce/v1alpha1";
+
 function derive(domain: string, runId: string, keyRef: string, bytes: number): Uint8Array {
   const digest = createHash("sha256")
     .update(Buffer.from(canonicalTagged([domain, keyRef, runId]), "utf8"))
@@ -51,32 +58,51 @@ function derive(domain: string, runId: string, keyRef: string, bytes: number): U
 
 /**
  * A deterministic test key provider. It exists only so shared conformance can
- * compare exact ciphertext vectors across the TypeScript and Python lanes. It is
- * not a KMS, has no hardware boundary, and MUST NOT be used in production: its
- * keys are a pure function of `(keyRef, runId)` and its nonces are a pure
- * function of the associated data.
+ * compare exact ciphertext vectors across the TypeScript and Python lanes, which
+ * is only true if both lanes derive byte-identical material from byte-identical
+ * inputs. The derivation, the domain strings, the default key reference, and the
+ * nonce rule are therefore fixed here and mirrored exactly by
+ * `DeterministicTestKeyProvider` in
+ * `python/src/graph_engineering/redaction/keys.py`:
+ *
+ * - `protectionKey(runId) = SHA-256(canonicalTagged(["test-protection-key/v1alpha1", keyRef, runId]))`
+ * - `runIdentityKey(runId) = SHA-256(canonicalTagged(["test-identity-key/v1alpha1", keyRef, runId]))`
+ * - `nonce(runId, aadHash) = SHA-256(canonicalTagged(["test-nonce/v1alpha1/" + aadHash, keyRef, runId])).slice(0, 12)`
+ *
+ * `keyRef` is an input to every one of them, so two lanes configured with
+ * different references derive different material instead of silently agreeing.
+ * The nonce is a pure function of the occurrence-specific associated data
+ * (Section 5.5), so a distinct occurrence yields a distinct nonce under one
+ * protection key and the same occurrence yields the same ciphertext in either
+ * language, in either process, in any call order. A counter cannot do that.
+ *
+ * It is not a KMS, has no hardware boundary, and MUST NOT be used in production:
+ * its keys are a pure function of `(keyRef, runId)`.
  */
 export class DeterministicTestKeyProvider implements KeyProvider {
   readonly keyRef: string;
   readonly deterministicNonces = true;
 
-  constructor(keyRef = "test-key-provider/deterministic/v1alpha1") {
+  constructor(keyRef: string = DETERMINISTIC_TEST_KEY_REF) {
+    if (typeof keyRef !== "string" || keyRef.length === 0) {
+      throw new RangeError("the deterministic test provider requires a non-empty key reference");
+    }
     this.keyRef = keyRef;
   }
 
   protectionKey(runId: string): Uint8Array {
-    return derive("test-protection-key/v1alpha1", runId, this.keyRef, PROTECTION_KEY_BYTES);
+    return derive(PROTECTION_KEY_DOMAIN, runId, this.keyRef, PROTECTION_KEY_BYTES);
   }
 
   runIdentityKey(runId: string): Uint8Array {
-    return derive("test-identity-key/v1alpha1", runId, this.keyRef, IDENTITY_KEY_BYTES);
+    return derive(IDENTITY_KEY_DOMAIN, runId, this.keyRef, IDENTITY_KEY_BYTES);
   }
 
   nonce(context: { readonly runId: string; readonly aadHash: string }): Uint8Array {
     // The AAD is occurrence-specific (Section 5.5), so a distinct occurrence
     // yields a distinct nonce under one protection key.
     return derive(
-      `test-nonce/v1alpha1/${context.aadHash}`,
+      `${NONCE_DOMAIN}/${context.aadHash}`,
       context.runId,
       this.keyRef,
       GCM_NONCE_BYTES,

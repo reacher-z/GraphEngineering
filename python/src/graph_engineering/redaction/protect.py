@@ -506,7 +506,7 @@ def protect_value(
     engine = protector if protector is not None else ReferenceProtector()
     try:
         key = key_provider.protection_key(aad.run_id)
-        nonce = key_provider.nonce()
+        nonce = key_provider.nonce(aad.run_id, aad.digest())
         ciphertext, tag = engine.seal(key, nonce, plaintext, aad.bytes())
     except Exception:
         # A raw key-provider error must never reach a sink.

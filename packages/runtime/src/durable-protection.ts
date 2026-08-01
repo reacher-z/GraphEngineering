@@ -30,9 +30,13 @@ import {
   SinkGuard,
   canonicalTagged,
   computeValueMac,
+  controlEnabled,
+  defaultPolicyEnabled,
   hmacSha256Hex,
   keyRefHash,
   prepareProtectedEvent,
+  sinkRow,
+  sourceRow,
   type AuthorityScope,
   type CapturePolicy,
   type CaptureSinkClass,
@@ -143,6 +147,38 @@ const EVENT_SOURCE_CLASS: Readonly<Record<GraphEventV1Alpha2Type, CaptureSourceC
     RunSucceeded: "run-result",
   });
 
+/**
+ * Section 6.1: raw attempt-failure text is *explicit* protected diagnostic
+ * evidence — "explicit raw diagnostic evidence uses a protected ref and is never
+ * scheduler authority". `exception-message` has `defaultAction: "off"`, so under
+ * the Section 4.1 default profile no evidence is captured at all and
+ * `NodeAttemptFailed` is the metadata-only shape. An operator who widens the
+ * sink's controls gets the protected shape.
+ *
+ * This is the whole disposition rule, and it is a pure function of the effective
+ * policy and the journal sink, so both language lanes reach the same answer on
+ * the same input. It is deliberately Python's `policy_enabled_for` formula
+ * verbatim rather than this lane's more permissive `SinkGuard` rule: the
+ * scheduler must never offer the guard a payload the other lane's guard would
+ * refuse.
+ */
+export function diagnosticEvidenceAuthorized(
+  policy: CapturePolicy,
+  sink: CaptureSinkClass,
+): boolean {
+  const source = sourceRow("exception-message");
+  const destination = sinkRow(sink);
+  if (source === undefined || destination === undefined) return false;
+  const mode = (candidate: CapturePolicy, control: string): unknown =>
+    (candidate as unknown as Record<string, unknown>)[control];
+  const widened = destination.policyControls.some(
+    (control) => mode(policy, control) !== mode(DEFAULT_CAPTURE_POLICY, control),
+  );
+  if (!defaultPolicyEnabled("exception-message", sink) && !widened) return false;
+  if (!controlEnabled(policy, source.policyControl)) return false;
+  return destination.policyControls.every((control) => controlEnabled(policy, control));
+}
+
 const MAC_FIELD: Readonly<Record<DurablePayloadDraft["field"], string>> = Object.freeze({
   inputRef: "inputMac",
   outputRef: "outputMac",
@@ -228,7 +264,24 @@ export function assertPayloadProtection(
       missing.push("scope");
     }
   }
-  if (missing.length === 0) return;
+  if (missing.length === 0) {
+    // Section 5.1: `keyRefHash` attests to the key reference actually in use, so
+    // a policy naming a different one attests to a key that is not protecting
+    // anything. Python's `PayloadProtection` has always refused this; this lane
+    // accepted it, and the two therefore committed different capture policy
+    // hashes for the same run.
+    const configured = protection as DurablePayloadProtection;
+    const policy = configured.policy;
+    if (policy !== undefined && policy.keyRef !== configured.keys.keyRef) {
+      throw new DurableRunError(
+        "PAYLOAD_PROTECTION_REQUIRED",
+        runId,
+        "capture policy keyRef does not match the configured key provider",
+        { contract: PROTECTED_STORE_CONTRACT },
+      );
+    }
+    return;
+  }
   throw new DurableRunError(
     "PAYLOAD_PROTECTION_REQUIRED",
     runId,
@@ -295,6 +348,14 @@ export class ProtectedDurableRun {
 
   get capturePolicyHash(): string {
     return this.#guard.capturePolicyHash;
+  }
+
+  /** Section 6.1: whether this run captures raw attempt-failure evidence. */
+  get capturesDiagnosticEvidence(): boolean {
+    return diagnosticEvidenceAuthorized(
+      this.#protection.policy ?? DEFAULT_CAPTURE_POLICY,
+      this.#protection.journal.sink,
+    );
   }
 
   get keyRefHash(): string {

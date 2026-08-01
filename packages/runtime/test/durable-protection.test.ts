@@ -25,6 +25,7 @@ import {
   memoryProtection,
   persistedHistory,
   recoveredHistory,
+  TEST_CAPTURE_POLICY,
   type FileProtectionHarness,
 } from "./support/protected-durable.js";
 
@@ -280,7 +281,7 @@ describe("durable payload protection is mandatory (redaction-semantics.md 4.2)",
     expect(persisted[0]?.payloadDisposition).toBe("protected-ref");
   });
 
-  it("sends raw attempt-failure text to protected evidence, never to the envelope", async () => {
+  it("keeps raw attempt-failure text out of the envelope under the default profile", async () => {
     const protection = memoryProtection();
     const retrying = graph({ nodes: [node("root", { retry: { maxAttempts: 1 } })] });
     await startDurableGraphRun(retrying, {}, {
@@ -297,11 +298,63 @@ describe("durable payload protection is mandatory (redaction-semantics.md 4.2)",
     const failed = persisted.find((event) => event.type === "NodeAttemptFailed");
     expect(failed).toBeDefined();
     expect(JSON.stringify(failed)).not.toContain("pa55word");
+    // `$defs.attemptFailure` closes the object at exactly these members. `nodeId`
+    // and `attempt` are envelope members and are not duplicated here; `message`
+    // and `causeName` are producer-derived text and never reach the wire.
     expect(Object.keys(failed?.data.failure as object).sort()).toEqual([
-      "attempt", "code", "nodeId", "phase", "retryable",
+      "causeCode", "code", "messageTemplate", "phase", "retryable",
     ]);
-    // The evidence is still recoverable by an authorized reader.
+    expect(failed?.data.failure).toEqual({
+      phase: "execute",
+      code: "NODE_EXECUTION_FAILED",
+      messageTemplate: "node-execution-failed/v1",
+      retryable: false,
+      causeCode: "EXECUTOR_REJECTED",
+    });
+    // Section 6.1: `exception-message` is `defaultAction: "off"`, so the default
+    // profile captures no evidence at all and the record is the metadata-only
+    // shape. The raw text is not protected here — it is simply never taken.
+    expect(failed?.payloadDisposition).toBe("metadata-only");
+    expect(Object.keys(failed?.data as object).sort()).toEqual(["failure", "terminal"]);
+    // The recovered projection is the wire projection: there is no evidence to
+    // resolve, and no prose anywhere. A replayed history rebuilds the message
+    // from the template identifier, so both lanes reconstruct the same result.
     const recovered = await recoveredHistory(protection, "failure-evidence");
+    const recoveredFailure = recovered.find((event) => event.type === "NodeAttemptFailed");
+    expect(recoveredFailure?.data.failure).toEqual(failed?.data.failure);
+    expect(JSON.stringify(recoveredFailure)).not.toContain("pa55word");
+  });
+
+  it("protects the raw text as evidence when the operator widens the sink", async () => {
+    // The same run under a policy that explicitly widens the event sink's
+    // control. Section 6.1: "explicit raw diagnostic evidence uses a protected
+    // ref and is never scheduler authority."
+    const protection = memoryProtection({
+      policy: { ...TEST_CAPTURE_POLICY, events: "allow-redacted" },
+    });
+    const retrying = graph({ nodes: [node("root", { retry: { maxAttempts: 1 } })] });
+    await startDurableGraphRun(retrying, {}, {
+      runId: "failure-evidence-widened",
+      implementationId: "v1",
+      protection,
+      nodeExecutors: {
+        root: () => {
+          throw new Error("connection to db://user:pa55word@host refused");
+        },
+      },
+    });
+    const persisted = await persistedHistory(protection, "failure-evidence-widened");
+    const failed = persisted.find((event) => event.type === "NodeAttemptFailed");
+    expect(failed).toBeDefined();
+    // The disposition follows the evidence, and the secret still never appears
+    // in the envelope.
+    expect(failed?.payloadDisposition).toBe("protected-ref");
+    expect(Object.keys(failed?.data as object).sort()).toEqual([
+      "evidenceMac", "evidenceRef", "failure", "terminal",
+    ]);
+    expect(JSON.stringify(failed)).not.toContain("pa55word");
+    // The evidence is recoverable by an authorized reader.
+    const recovered = await recoveredHistory(protection, "failure-evidence-widened");
     const recoveredFailure = recovered.find((event) => event.type === "NodeAttemptFailed");
     expect((recoveredFailure?.data.failure as { message: string }).message).toContain("pa55word");
   });
@@ -482,15 +535,20 @@ describe("persisted v1alpha2 bytes (redaction-semantics.md 10)", () => {
       protection,
       nodeExecutors: { root: () => "ok" },
     });
+    const rotatedKeys = {
+      ...protection.keys,
+      keyRef: "a-different-operator-key-reference",
+      protectionKey: (runId: string) => protection.keys.protectionKey(runId),
+      runIdentityKey: (runId: string) => protection.keys.runIdentityKey(runId),
+      nonce: (context: { readonly runId: string; readonly aadHash: string }) =>
+        protection.keys.nonce(context),
+    };
+    // A coherent configuration whose key reference simply differs from the one
+    // that wrote the history: the policy names the key actually in use.
     const other: DurablePayloadProtection = {
       ...protection,
-      keys: {
-        ...protection.keys,
-        keyRef: "a-different-operator-key-reference",
-        protectionKey: (runId: string) => protection.keys.protectionKey(runId),
-        runIdentityKey: (runId: string) => protection.keys.runIdentityKey(runId),
-        nonce: (context) => protection.keys.nonce(context),
-      },
+      keys: rotatedKeys,
+      policy: { ...TEST_CAPTURE_POLICY, keyRef: rotatedKeys.keyRef },
     };
     await expect(
       resumeDurableGraphRun(graph(), {
@@ -499,5 +557,16 @@ describe("persisted v1alpha2 bytes (redaction-semantics.md 10)", () => {
         protection: other,
       }),
     ).rejects.toMatchObject({ code: "PROTECTED_PAYLOAD_UNAUTHORIZED" });
+
+    // Section 5.1: a policy naming a key reference other than the provider's
+    // attests to a key that is protecting nothing, and is refused before the
+    // first event rather than producing a second, incoherent policy hash.
+    await expect(
+      resumeDurableGraphRun(graph(), {
+        runId: "rotated-key-ref",
+        implementationId: "v1",
+        protection: { ...protection, keys: rotatedKeys },
+      }),
+    ).rejects.toMatchObject({ code: "PAYLOAD_PROTECTION_REQUIRED" });
   });
 });

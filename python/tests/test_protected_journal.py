@@ -14,9 +14,11 @@ from typing import Any
 
 import pytest
 
+from graph_engineering.canonical import canonical_sha256
 from graph_engineering.durable_json import encode_durable_json
 from graph_engineering.events import GraphEvent
 from graph_engineering.persistence.protected_journal import (
+    EVENT_V1ALPHA2_API_VERSION,
     GuardedJsonlEventStore,
     ProtectedEventJournal,
     UnguardedWriteError,
@@ -363,3 +365,138 @@ def test_legacy_detection_never_rewrites_the_source(tmp_path: Path) -> None:
     assert disposition.action == "quarantine"
     assert disposition.source_rewritten is False
     assert path.read_bytes() == original
+
+
+def test_a_non_conforming_attempt_failure_is_rejected_before_it_reaches_disk() -> None:
+    """`$defs.attemptFailure` is the one sub-object the event schema closes.
+
+    Nothing checked it: the envelope was validated, the `data` member names were
+    counted, and the object inside `failure` was never looked at.  Both runtimes
+    therefore wrote a non-conforming `NodeAttemptFailed` for as long as the
+    defect existed, and each rejected the other's record.
+    """
+
+    conforming: dict[str, Any] = {
+        "phase": "execute",
+        "code": "NODE_EXECUTION_FAILED",
+        "messageTemplate": "node-execution-failed/v1",
+        "retryable": False,
+        "causeCode": "EXECUTOR_REJECTED",
+    }
+
+    def document(failure: Any) -> dict[str, Any]:
+        data: dict[str, Any] = {"terminal": True, "failure": failure}
+        return {
+            "apiVersion": EVENT_V1ALPHA2_API_VERSION,
+            "eventId": "e1",
+            "type": "NodeAttemptFailed",
+            "timestamp": "2026-07-26T12:00:00.000Z",
+            "runId": "r1",
+            "graphRevision": 1,
+            "sequence": 3,
+            "nodeId": "root",
+            "attempt": 1,
+            "payloadHash": canonical_sha256(data),
+            "capturePolicyHash": "b" * 64,
+            "redacted": False,
+            "payloadDisposition": "metadata-only",
+            "data": data,
+        }
+
+    assert validate_protected_event(document(conforming)) is None
+
+    rejected: tuple[tuple[str, Any], ...] = (
+        # The exact shape both runtimes used to emit.
+        ("duplicates the envelope node identity", {**conforming, "nodeId": "root"}),
+        ("duplicates the envelope attempt", {**conforming, "attempt": 1}),
+        # Producer-derived text. This is the member the contract exists for.
+        ("carries producer text", {**conforming, "message": "db://user:pa55word@host"}),
+        ("carries a host cause name", {**conforming, "causeName": "ECONNREFUSED"}),
+        (
+            "omits the message template",
+            {"phase": "execute", "code": "NODE_EXECUTION_FAILED", "retryable": False},
+        ),
+        ("uses a settle-without-attempt code", {**conforming, "code": "EXECUTOR_NOT_FOUND"}),
+        ("invents a message template", {**conforming, "messageTemplate": "node-exploded/v1"}),
+        ("invents a cause code", {**conforming, "causeCode": "GREMLINS"}),
+        ("uses a non-execute phase", {**conforming, "phase": "output"}),
+        ("uses a non-boolean retry flag", {**conforming, "retryable": "no"}),
+        ("is not an object", "NODE_EXECUTION_FAILED"),
+    )
+    for label, failure in rejected:
+        invalid = validate_protected_event(document(failure))
+        assert invalid is not None, label
+        assert invalid.code in {"REDACTION_POLICY_INVALID", "PAYLOAD_PROTECTION_REQUIRED"}, label
+
+
+def test_the_attempt_failed_disposition_must_match_the_evidence_it_carries() -> None:
+    """Section 6.1 ties the disposition to the evidence, in both directions."""
+
+    failure = {
+        "phase": "execute",
+        "code": "NODE_CANCELLED",
+        "messageTemplate": "node-cancelled/v1",
+        "retryable": False,
+        "causeCode": "CANCELLED",
+    }
+
+    def document(disposition: str, *, evidence: bool) -> dict[str, Any]:
+        data: dict[str, Any] = {"terminal": True, "failure": failure}
+        if evidence:
+            data["evidenceRef"] = {"apiVersion": "x"}
+            data["evidenceMac"] = "c" * 64
+        return {
+            "apiVersion": EVENT_V1ALPHA2_API_VERSION,
+            "eventId": "e1",
+            "type": "NodeAttemptFailed",
+            "timestamp": "2026-07-26T12:00:00.000Z",
+            "runId": "r1",
+            "graphRevision": 1,
+            "sequence": 3,
+            "nodeId": "root",
+            "attempt": 1,
+            "payloadHash": canonical_sha256(data),
+            "capturePolicyHash": "b" * 64,
+            "redacted": False,
+            "payloadDisposition": disposition,
+            "data": data,
+        }
+
+    assert validate_protected_event(document("metadata-only", evidence=False)) is None
+    assert validate_protected_event(document("protected-ref", evidence=True)) is None
+    # A record claiming protection while carrying no evidence, and one carrying
+    # evidence while claiming none, are both refused.
+    assert validate_protected_event(document("protected-ref", evidence=False)) is not None
+    assert validate_protected_event(document("metadata-only", evidence=True)) is not None
+
+
+def test_a_settled_without_attempt_sentinel_failure_code_is_rejected() -> None:
+    """`$defs.settledFailureCode` is closed and carries no sentinel member."""
+
+    def document(failure_code: str) -> dict[str, Any]:
+        data: dict[str, Any] = {
+            "resultRef": {"apiVersion": "x"},
+            "resultMac": "c" * 64,
+            "status": "skipped",
+            "attempts": 0,
+            "failureCode": failure_code,
+        }
+        return {
+            "apiVersion": EVENT_V1ALPHA2_API_VERSION,
+            "eventId": "e2",
+            "type": "NodeSettledWithoutAttempt",
+            "timestamp": "2026-07-26T12:00:00.000Z",
+            "runId": "r1",
+            "graphRevision": 1,
+            "sequence": 4,
+            "nodeId": "root",
+            "payloadHash": canonical_sha256(data),
+            "capturePolicyHash": "b" * 64,
+            "redacted": False,
+            "payloadDisposition": "protected-ref",
+            "data": data,
+        }
+
+    assert validate_protected_event(document("ROUTE_NOT_SELECTED")) is None
+    for code in ("SETTLED_WITHOUT_FAILURE", "NODE_EXECUTION_FAILED"):
+        assert validate_protected_event(document(code)) is not None, code

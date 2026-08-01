@@ -47,8 +47,11 @@ export {
   type PayloadDisposition,
 } from "./disposition.js";
 export {
+  CHECKPOINT_PROJECTION_TYPE,
+  CHECKPOINT_V1ALPHA2_API_VERSION,
   isCaptureSinkClass,
   isCaptureSourceClass,
+  validateCheckpointV1Alpha2Document,
   validatePayloadDispositionDocument,
   validateProtectedAadDocument,
   validateProtectedBlobDocument,
@@ -92,6 +95,7 @@ export {
   type SourceClassificationRow,
 } from "./inventory.js";
 export {
+  DETERMINISTIC_TEST_KEY_REF,
   DeterministicTestKeyProvider,
   HostKeyProvider,
   keyRefHash,

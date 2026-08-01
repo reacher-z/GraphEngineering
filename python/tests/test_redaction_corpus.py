@@ -35,12 +35,17 @@ from graph_engineering.redaction.guard import (
     retry_disposition_for,
 )
 from graph_engineering.redaction.inventory import (
+    POLICY_CONTROLS,
     SINK_CLASSES,
     SINK_ROWS,
     SOURCE_CLASSES,
     SOURCE_ROWS,
+    sink_row,
 )
-from graph_engineering.redaction.keys import DeterministicTestKeyProvider
+from graph_engineering.redaction.keys import (
+    DETERMINISTIC_TEST_KEY_REF,
+    DeterministicTestKeyProvider,
+)
 from graph_engineering.redaction.legacy import classify_record
 from graph_engineering.redaction.limits import (
     MAX_CONTAINERS,
@@ -64,7 +69,11 @@ from graph_engineering.redaction.policy import (
     default_stable_profile,
     normalize_capture_policy,
 )
-from graph_engineering.redaction.protect import MemoryProtectedPayloadStore
+from graph_engineering.redaction.protect import (
+    MemoryProtectedPayloadStore,
+    key_ref_hash,
+    value_mac,
+)
 from graph_engineering.redaction.wire import validate_wire_document
 
 CORPUS_PATH = Path(__file__).resolve().parents[2] / "spec" / "conformance" / "redaction.case.json"
@@ -169,21 +178,106 @@ def test_flow_case(case: dict[str, Any]) -> None:
 
 
 def test_the_complete_cartesian_domain_is_total() -> None:
-    """Every one of the 3,078 pairs produces exactly one closed outcome."""
+    """Every one of the 3,078 pairs produces exactly one closed outcome.
+
+    The control is taken from the sink row rather than hard-coded, because
+    Section 7 verifies the control the *sink* row names.  Passing a literal
+    ``"events"`` for all 54 sinks would make 47 of them fail the control check
+    and leave the intersection rule unwitnessed.
+    """
 
     seen = 0
     for source_class in SOURCE_CLASSES:
         for sink in SINK_CLASSES:
-            decision = evaluate_flow(source_class, sink, "events", policy_enabled=True)
+            destination = sink_row(sink)
+            assert destination is not None
+            decision = evaluate_flow(
+                source_class, sink, destination.policy_controls[0], policy_enabled=True
+            )
             assert decision.outcome in {
                 "suppressed",
                 "metadata-only",
                 "protected-ref",
-                "failed",
             }
-            assert decision.write_authorized is (decision.outcome not in ("suppressed", "failed"))
+            assert decision.write_authorized is (decision.outcome != "suppressed")
             seen += 1
     assert seen == CARTESIAN_PRODUCT_COUNT
+
+
+def test_the_deterministic_test_provider_matches_the_typescript_vector() -> None:
+    """Section 5.3 shared deterministic test provider.
+
+    This provider exists only so shared conformance can compare exact ciphertext
+    vectors across the TypeScript and Python lanes, which is a claim about both
+    lanes, not about this one.  These constants are restated verbatim by
+    "derives the shared cross-language key vector" in
+    ``packages/persistence/test/redaction-contract.test.ts``; if either lane
+    changes its key reference, derivation, domain string, or nonce rule, exactly
+    one of the two tests goes red.
+    """
+
+    keys = DeterministicTestKeyProvider()
+    run_id = "run-vector-1"
+    aad_hash = "a" * 64
+    assert keys.key_ref == DETERMINISTIC_TEST_KEY_REF
+    assert keys.key_ref == "test-key-provider/deterministic/v1alpha1"
+    assert key_ref_hash(keys.key_ref) == (
+        "c04d0abfcb3aa0cb7c74e6134d9f0eb525f9f0e0e405fa70e0c8401395625956"
+    )
+    assert keys.protection_key(run_id).hex() == (
+        "045d7f3efb794ef3e5e122a3bb79240c491d30df3dd3b010b63f100c2fdb3fb4"
+    )
+    assert keys.run_identity_key(run_id).hex() == (
+        "d3d3e6c607bda59e78181d3c97d06859cff8e85d3f4f2a1c4a50949d6c3e187f"
+    )
+    assert keys.nonce(run_id, aad_hash).hex() == "0eb8c477da0f8264cd5b82dc"
+    assert value_mac(
+        keys.run_identity_key(run_id),
+        {"kind": "node-input", "runId": run_id, "graphRevision": 1, "nodeId": "n1"},
+        {"x": [1, 2, 3]},
+    ) == "947f7559ba85073706bcb7accac4a1dc1c094ed1552b809633af4d78845a1ee7"
+    # The nonce is a pure function of the occurrence, not of call order.
+    assert keys.nonce(run_id, aad_hash) == keys.nonce(run_id, aad_hash)
+    assert keys.nonce(run_id, "b" * 64) != keys.nonce(run_id, aad_hash)
+    # The key reference is an input, not decoration.
+    other = DeterministicTestKeyProvider(key_ref="other-ref")
+    assert other.protection_key(run_id) != keys.protection_key(run_id)
+    assert other.run_identity_key(run_id) != keys.run_identity_key(run_id)
+
+
+def test_a_vocabulary_control_the_sink_row_does_not_own_is_denied() -> None:
+    """Section 7 verifies *the row's* named control, not vocabulary membership.
+
+    No corpus fixture separates the two readings: ``redaction.validate.mjs``
+    refuses a flow case whose control the named sink does not declare, so the
+    case is pinned here where it needs no fixture.  Before this was pinned,
+    TypeScript denied and Python authorized the write.
+    """
+
+    for sink, control in (
+        ("event-journal", "database"),
+        ("checkpoint-final", "events"),
+        # ``deny`` is in the closed vocabulary and is owned by no sink at all.
+        ("event-journal", "deny"),
+    ):
+        destination = sink_row(sink)
+        assert destination is not None
+        assert control in POLICY_CONTROLS
+        assert control not in destination.policy_controls
+        decision = evaluate_flow("graph-input", sink, control, policy_enabled=True)
+        assert decision.outcome == "failed", f"{sink}/{control}"
+        assert decision.write_authorized is False
+        assert decision.failure is not None
+        assert decision.failure.code == "REDACTION_POLICY_INVALID"
+
+
+def test_suppressed_flow_still_reports_the_mandated_identifier_replacement() -> None:
+    decision = evaluate_flow(
+        "caller-controlled-identifier", "runtime-log", "logs", policy_enabled=False
+    )
+    assert decision.outcome == "suppressed"
+    assert decision.write_authorized is False
+    assert decision.identifier_replacement_required is True
 
 
 def test_unknown_rows_are_denied_and_never_mapped_to_a_neighbour() -> None:
