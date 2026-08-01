@@ -15920,3 +15920,70 @@ advance authenticated ledger watermarks, obtain the post-DDL reader and catalog
 proof, mint the four typed permanent-write receipts and hand their validated
 bundle into this adoption bridge. Cursor rebind, rules 11/12, commit and native
 parity remain later gates and must not be collapsed into that writer leaf.
+
+#### 31.37.44 Python B3 outer-authority activation acceptance
+
+This section is appended without changing the preceding 15,922 lines. That
+exact prefix hashes to
+`7df37817e871b302667c1dd314117544e2e846831e68588b02311f7672357d23`.
+It accepts the first Python outer-authority runtime leaf and orders the next
+permanent-write tranche without weakening any §31.37.38 nonclaim.
+
+The new package-private owner consumes exactly one completed Python B2 graph:
+connection, TEMP stage, receipt, projection identity, transfer, migration-lock
+capability, provider-clock capability and the first-boundary clock evidence.
+Preparation proves that complete identity graph, captures source and schema
+hashes, records the transaction generation/epoch/change fence and publishes an
+inactive zero-ledger authority without consuming clock evidence.
+
+Cancellation is checked before the one-way boundary. A valid cancelled signal
+therefore leaves the same authority inactive and retryable. Activation first
+revalidates every fallible owner, stage, lock, clock and ledger condition; it
+then consumes the exact first evidence, retains its exact tombstone, publishes
+the prevalidated stage-ownership tail and advances the authority exactly once.
+If the lower publication tail fails after consumption, evidence remains
+consumed, the tombstone remains registered, outer/ownership/stage state becomes
+terminally poisoned and retry is impossible.
+
+Active-clock validation preserves the first evidence as historical provenance
+instead of treating it as the forever-current head. A valid second or later
+clock boundary does not stale the outer owner. A provider failure poisons the
+clock capability and is propagated by the next active assertion. Likewise,
+future authenticated write owners can advance the mutable current epoch and
+change-counter watermark without being compared incorrectly with the first
+evidence's preparation epoch. Transaction-generation replacement still retires
+the authority, while unauthorized current-ledger drift poisons it.
+
+The Python registries use id keys plus exact weak referents, never caller hash
+or equality. Combined with §31.37.43's weak stage/ownership authority links,
+this removes the reproduced cross-registry retention loop. A durable
+parameterized test naturally abandons both inactive and active graphs without
+calling cleanup; after double collection the authority, transfer and stage are
+dead and all four authority/link/transfer registries have their exact original
+sizes.
+
+Raw SQLite tracing proves preparation and activation execute no SQL. They do
+not alter the transaction epoch, `total_changes`, TEMP catalog or EXCLUSIVE
+ownership. Static and runtime package checks prove that the module embeds no
+SQL/commit/rollback/rebind control and exports no public root symbol.
+
+Acceptance evidence on the final byte set is:
+
+1. outer-authority tests passed **15/15**;
+2. the integrated stage/ownership/outer boundary passed **133/133**;
+3. all six integrated files passed Ruff check and format check;
+4. authoritative Python mypy passed all **101 source files**;
+5. whitespace validation passed; and
+6. independent final audit reported **HIGH 0 / MEDIUM 0 / LOW 0**.
+
+The durable acceptance record is
+`codex_logs/reviews/PYTHON-CURSOR-B3-OUTER-AUTHORITY-ACTIVATION-2026-08-01.md`.
+
+This acceptance does not claim the permanent writer, catalog reader, four
+receipts, atomic receipt-bundle adoption, cursor rebind, rule 11/12 proofs,
+commit or Python/Node parity. The next isolated leaf must consume this active
+authority to load the installed migration 0002 asset afresh, validate its
+frozen statement sequence, execute exactly 20 individually owned statements
+and update the outer write ledger without `executescript` or transaction
+completion. Only after that leaf passes independent hostile review may work
+advance to the post-DDL reader/catalog and receipt owners.
