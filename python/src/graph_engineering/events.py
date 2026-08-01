@@ -81,7 +81,11 @@ class GraphEvent(StrictModel):
     attempt: Annotated[int, Field(ge=1, le=MAX_SAFE_INTEGER)] | None = None
     payload_hash: str | None = Field(default=None, alias="payloadHash")
     artifact_ref: str | None = Field(default=None, alias="artifactRef")
-    redacted: bool = True
+    # redaction-semantics.md Section 3.1 truth hotfix, item 2: absence remains
+    # absence in both native models and decoders. `event.schema.json` no longer
+    # supplies `default: true`, and a reader MUST NOT infer that an absent flag
+    # means the payload was redacted.
+    redacted: bool | None = None
     data: JsonObject
 
     @field_validator("timestamp")
@@ -121,6 +125,24 @@ class GraphEvent(StrictModel):
         if value is None:
             raise ValueError("present attempt cannot be null")
         return value
+
+    @field_validator("redacted")
+    @classmethod
+    def present_redacted_is_not_null(cls, value: bool | None) -> bool:
+        if value is None:
+            raise ValueError("present redacted flag cannot be null")
+        return value
+
+    @property
+    def claims_redacted(self) -> bool:
+        """Whether this event explicitly claims a redaction transform.
+
+        Absence is not a claim. A v1alpha1 event that omits the flag while
+        carrying an inline payload is a legacy misleading shape, not a redacted
+        record; see :mod:`graph_engineering.redaction.legacy`.
+        """
+
+        return self.redacted is True
 
     @field_validator("data")
     @classmethod

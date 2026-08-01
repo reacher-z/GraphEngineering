@@ -230,7 +230,13 @@ class _DurableJournal:
             "graphRevision": _GRAPH_REVISION,
             "sequence": sequence,
             "payloadHash": canonical_sha256(draft.data),
-            "redacted": True,
+            # redaction-semantics.md Section 3.1 truth hotfix, item 3: every
+            # newly written inline v1alpha1 durable event explicitly emits
+            # `redacted: false`. This writer persists raw Tagged Durable JSON,
+            # so `true` was a false assertion about bytes on disk. The flag is
+            # now truthful; the payload is still unprotected legacy-inline data
+            # and the guarded v1alpha2 journal is the protected write path.
+            "redacted": False,
             "data": draft.data,
         }
         if draft.node_id is not None:

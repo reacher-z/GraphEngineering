@@ -1,0 +1,572 @@
+"""The guarded ``events/v1alpha2`` durable write path.
+
+``events/v1alpha1`` cannot express a truthful protected disposition: its
+envelope has no ``payloadDisposition``, its ``data`` is an open object, and the
+current writer persists raw Tagged Durable JSON.  Section 3.1 makes that writer
+honest by emitting ``redacted: false``, but honesty is not protection.  New
+protected writes therefore use ``events/v1alpha2``, whose envelope pins exactly
+one disposition per event type and whose payload fields are protected
+references.
+
+Everything in this module goes through :class:`~graph_engineering.redaction.
+guard.SinkGuard`.  :class:`GuardedJsonlEventStore` accepts only a
+:class:`~graph_engineering.redaction.guard.PreparedSinkWrite`; its byte writer is
+private, so an adapter cannot opt out by calling a lower-level raw writer.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import json
+import os
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Final
+
+from ..canonical import canonical_bytes, canonical_json
+from ..models import JsonValue
+from ..redaction.disposition import PayloadDisposition, validate_disposition
+from ..redaction.errors import RedactionDenied, RedactionFailure, failure
+from ..redaction.guard import (
+    NO_PAYLOAD,
+    GuardFailed,
+    GuardPrepared,
+    GuardSuppressed,
+    OccurrenceContext,
+    PreparedSinkWrite,
+    SinkGuard,
+    SinkWriteRequest,
+)
+from ..redaction.legacy import classify_history
+from ..redaction.protect import (
+    PROTECTED_STORE_CONTRACT,
+    ProtectedValueRef,
+    activity_key,
+    graph_input_context,
+    node_input_context,
+    node_output_context,
+    run_result_context,
+    value_mac,
+)
+from .errors import PersistenceIOError
+from .identifiers import assert_safe_identifier, identifier_hash
+from .locks import process_lock
+
+EVENT_V1ALPHA2_API_VERSION: Final = "graphengineering.reacher-z.github.io/events/v1alpha2"
+CONTRACT_VERSION_V1ALPHA2: Final = "scheduler-recovery/v1alpha2"
+
+# Section 3.2 and event-v1alpha2.schema.json: exactly one disposition per event
+# type. `inline-unredacted` is unrepresentable here, deliberately.
+EVENT_DISPOSITIONS: Final[dict[str, PayloadDisposition]] = {
+    "RunCreated": "protected-ref",
+    "RunStarted": "metadata-only",
+    "RunResumed": "metadata-only",
+    "NodeScheduled": "protected-ref",
+    "NodeStarted": "metadata-only",
+    "NodeAttemptFailed": "metadata-only",
+    "NodeSettledWithoutAttempt": "protected-ref",
+    "NodeRetried": "metadata-only",
+    "NodeSucceeded": "protected-ref",
+    "EdgeEmitted": "metadata-only",
+    "RunCancelled": "protected-ref",
+    "RunFailed": "protected-ref",
+    "RunSucceeded": "protected-ref",
+}
+
+# Section 6.1 legacy aliases forbidden in a protected v1alpha2 payload.
+FORBIDDEN_LEGACY_DATA_FIELDS: Final[frozenset[str]] = frozenset(
+    {"input", "output", "result", "inputHash", "outputHash", "resultHash"}
+)
+
+
+class UnguardedWriteError(RuntimeError):
+    """Raised when a caller tries to write bytes that no guard prepared."""
+
+
+@dataclass(frozen=True, slots=True)
+class ProtectedAppend:
+    """One accepted guarded append."""
+
+    document: Mapping[str, JsonValue]
+    payload_hash: str
+    protected_refs: tuple[ProtectedValueRef, ...]
+    decision_id: str
+
+
+class GuardedJsonlEventStore:
+    """A durable JSONL sink whose only public write method takes a prepared write.
+
+    Section 7: the default runtime dependency graph exposes only sinks whose
+    public write method accepts a ``PreparedSinkWrite``; raw byte, file, network,
+    and store primitives are private implementation details and receive only the
+    already prepared bytes.
+    """
+
+    sink: Final = "event-journal"
+
+    def __init__(self, root: str | os.PathLike[str]) -> None:
+        self.root = Path(root).resolve()
+        self.events_directory = self.root / "events-v1alpha2"
+        try:
+            self.events_directory.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise PersistenceIOError(
+                "create protected event directory", str(self.events_directory), exc
+            ) from exc
+
+    def path_for_run(self, run_id: str) -> Path:
+        assert_safe_identifier(run_id, "runId")
+        return self.events_directory / f"{identifier_hash(run_id)}.jsonl"
+
+    async def write(self, run_id: str, prepared: PreparedSinkWrite) -> int:
+        """Append exactly the prepared bytes. The token is consumed once."""
+
+        if type(prepared) is not PreparedSinkWrite:
+            # A serialized guard decision, store envelope, protected reference,
+            # or forged structural object is not a capability.
+            raise UnguardedWriteError("this sink accepts only a PreparedSinkWrite")
+        if prepared.sink != self.sink:
+            raise UnguardedWriteError("prepared write is bound to another sink class")
+        payload = prepared.consume(self)
+        path = self.path_for_run(run_id)
+        async with process_lock(f"protected-event:{path}"):
+            return await asyncio.to_thread(self._append_bytes, path, payload)
+
+    def read_documents(self, run_id: str) -> tuple[Mapping[str, JsonValue], ...]:
+        path = self.path_for_run(run_id)
+        if not path.exists():
+            return ()
+        raw = path.read_bytes()
+        documents: list[Mapping[str, JsonValue]] = []
+        for line in raw.splitlines():
+            if not line:
+                continue
+            documents.append(json.loads(line))
+        return tuple(documents)
+
+    @staticmethod
+    def _append_bytes(path: Path, payload: bytes) -> int:
+        try:
+            descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+            with os.fdopen(descriptor, "ab") as handle:
+                handle.write(payload + b"\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+        except OSError as exc:
+            raise PersistenceIOError("append protected event log", str(path), exc) from exc
+        return len(payload) + 1
+
+
+def validate_protected_event(document: object) -> RedactionFailure | None:
+    """Native closed validation of one ``events/v1alpha2`` envelope."""
+
+    if not isinstance(document, Mapping):
+        return failure("REDACTION_POLICY_INVALID", "sink-write")
+    required = {
+        "apiVersion",
+        "eventId",
+        "type",
+        "timestamp",
+        "runId",
+        "graphRevision",
+        "sequence",
+        "payloadHash",
+        "capturePolicyHash",
+        "redacted",
+        "payloadDisposition",
+        "data",
+    }
+    optional = {"traceId", "spanId", "parentSpanId", "nodeId", "edgeId", "attempt"}
+    keys = set(document.keys())
+    if not required <= keys or not keys <= (required | optional):
+        return failure("REDACTION_POLICY_INVALID", "sink-write")
+    if document["apiVersion"] != EVENT_V1ALPHA2_API_VERSION:
+        return failure("REDACTION_POLICY_INVALID", "sink-write")
+    event_type = document["type"]
+    if type(event_type) is not str or event_type not in EVENT_DISPOSITIONS:
+        return failure("REDACTION_POLICY_INVALID", "sink-write")
+    if document["payloadDisposition"] != EVENT_DISPOSITIONS[event_type]:
+        return failure("REDACTION_POLICY_INVALID", "sink-write")
+
+    disposition_failure = validate_disposition(
+        {
+            "payloadDisposition": document["payloadDisposition"],
+            "redacted": document["redacted"],
+        }
+    )
+    if disposition_failure is not None:
+        return disposition_failure
+
+    for identity in ("traceId", "spanId", "parentSpanId"):
+        value = document.get(identity)
+        if value is None:
+            continue
+        width = 32 if identity == "traceId" else 16
+        if (
+            type(value) is not str
+            or len(value) != width
+            or any(character not in "0123456789abcdef" for character in value)
+            or set(value) == {"0"}
+        ):
+            # Trace and span identities are lowercase fixed-width non-zero hex.
+            return failure("REDACTION_POLICY_INVALID", "sink-write")
+    if "parentSpanId" in document and "spanId" not in document:
+        return failure("REDACTION_POLICY_INVALID", "sink-write")
+
+    data = document["data"]
+    if not isinstance(data, Mapping):
+        return failure("REDACTION_POLICY_INVALID", "sink-write")
+    if set(data.keys()) & FORBIDDEN_LEGACY_DATA_FIELDS:
+        # Legacy field aliases and inline payloads are forbidden in a protected
+        # v1alpha2 payload.
+        return failure("PAYLOAD_PROTECTION_REQUIRED", "sink-write")
+
+    payload_hash = hashlib.sha256(canonical_bytes(dict(data))).hexdigest()
+    if document["payloadHash"] != payload_hash:
+        return failure("REDACTION_POLICY_INVALID", "sink-write")
+    return None
+
+
+class ProtectedEventJournal:
+    """The guarded durable event writer.
+
+    An event carrying an application payload cannot be written without passing
+    the guard: the payload is never placed into the envelope by the caller, it is
+    handed to the guard, and only the guard can produce the bytes this journal
+    accepts.
+    """
+
+    def __init__(
+        self,
+        *,
+        run_id: str,
+        graph_revision: int,
+        guard: SinkGuard,
+        store: GuardedJsonlEventStore,
+    ) -> None:
+        assert_safe_identifier(run_id, "runId")
+        self.run_id = run_id
+        self.graph_revision = graph_revision
+        self._guard = guard
+        self._store = store
+        self._sequence = -1
+        self._decisions: list[str] = []
+
+    @property
+    def sequence(self) -> int:
+        return self._sequence
+
+    async def append_run_created(
+        self,
+        *,
+        event_id: str,
+        timestamp: str,
+        graph_input: object,
+        graph_hash: str,
+        implementation_hash: str,
+        key_ref_digest: str,
+        max_total_attempts: int,
+    ) -> ProtectedAppend:
+        return await self._append(
+            event_type="RunCreated",
+            event_id=event_id,
+            timestamp=timestamp,
+            source_class="graph-input",
+            payload=graph_input,
+            semantic_context=graph_input_context(self.run_id, self.graph_revision),
+            field_path="/data/inputRef",
+            mac_field_path="/data/inputMac",
+            data={
+                "contractVersion": CONTRACT_VERSION_V1ALPHA2,
+                "graphHash": graph_hash,
+                "implementationHash": implementation_hash,
+                "capturePolicyHash": self._guard.policy_hash,
+                "protectedStoreContract": PROTECTED_STORE_CONTRACT,
+                "keyRefHash": key_ref_digest,
+                "maxTotalAttempts": max_total_attempts,
+            },
+        )
+
+    async def append_node_scheduled(
+        self,
+        *,
+        event_id: str,
+        timestamp: str,
+        node_id: str,
+        attempt: int,
+        node_input: object,
+        identity_key: bytes,
+        side_effects: str,
+    ) -> ProtectedAppend:
+        context = node_input_context(self.run_id, self.graph_revision, node_id)
+        mac = value_mac(identity_key, context, node_input)
+        return await self._append(
+            event_type="NodeScheduled",
+            event_id=event_id,
+            timestamp=timestamp,
+            source_class="bound-node-input",
+            payload=node_input,
+            semantic_context=context,
+            field_path="/data/inputRef",
+            mac_field_path="/data/inputMac",
+            node_id=node_id,
+            attempt=attempt,
+            data={
+                "activityKey": activity_key(
+                    identity_key,
+                    run_id=self.run_id,
+                    graph_revision=self.graph_revision,
+                    node_id=node_id,
+                    input_mac=mac,
+                ),
+                "sideEffects": side_effects,
+            },
+            side_effects=side_effects,
+        )
+
+    async def append_node_succeeded(
+        self,
+        *,
+        event_id: str,
+        timestamp: str,
+        node_id: str,
+        attempt: int,
+        output: object,
+        input_mac: str,
+        side_effects: str = "none",
+    ) -> ProtectedAppend:
+        return await self._append(
+            event_type="NodeSucceeded",
+            event_id=event_id,
+            timestamp=timestamp,
+            source_class="node-output",
+            payload=output,
+            semantic_context=node_output_context(self.run_id, self.graph_revision, node_id),
+            field_path="/data/outputRef",
+            mac_field_path="/data/outputMac",
+            node_id=node_id,
+            attempt=attempt,
+            data={"inputMac": input_mac},
+            side_effects=side_effects,
+            executor_outcome="succeeded",
+        )
+
+    async def append_run_succeeded(
+        self,
+        *,
+        event_id: str,
+        timestamp: str,
+        result: object,
+    ) -> ProtectedAppend:
+        return await self._append(
+            event_type="RunSucceeded",
+            event_id=event_id,
+            timestamp=timestamp,
+            source_class="run-result",
+            payload=result,
+            semantic_context=run_result_context(self.run_id, self.graph_revision),
+            field_path="/data/resultRef",
+            mac_field_path="/data/resultMac",
+            data={"status": "succeeded"},
+        )
+
+    async def append_node_started(
+        self,
+        *,
+        event_id: str,
+        timestamp: str,
+        node_id: str,
+        attempt: int,
+        input_mac: str,
+        activity: str,
+    ) -> ProtectedAppend:
+        """A metadata-only event: no application payload field is sourced."""
+
+        return await self._append_metadata_only(
+            event_type="NodeStarted",
+            event_id=event_id,
+            timestamp=timestamp,
+            data={"inputMac": input_mac, "activityKey": activity},
+            node_id=node_id,
+            attempt=attempt,
+        )
+
+    async def _append_metadata_only(
+        self,
+        *,
+        event_type: str,
+        event_id: str,
+        timestamp: str,
+        data: Mapping[str, JsonValue],
+        node_id: str | None = None,
+        edge_id: str | None = None,
+        attempt: int | None = None,
+    ) -> ProtectedAppend:
+        return await self._prepare_and_write(
+            event_type=event_type,
+            event_id=event_id,
+            timestamp=timestamp,
+            source_class="runtime-generated-identifier",
+            data=data,
+            node_id=node_id,
+            edge_id=edge_id,
+            attempt=attempt,
+            field_path="/data",
+            mac_field_path=None,
+            payload=None,
+            semantic_context=None,
+        )
+
+    async def _append(
+        self,
+        *,
+        event_type: str,
+        event_id: str,
+        timestamp: str,
+        source_class: str,
+        payload: object,
+        semantic_context: Mapping[str, JsonValue],
+        field_path: str,
+        mac_field_path: str,
+        data: Mapping[str, JsonValue],
+        node_id: str | None = None,
+        edge_id: str | None = None,
+        attempt: int | None = None,
+        side_effects: str = "not-applicable",
+        executor_outcome: str = "not-applicable",
+    ) -> ProtectedAppend:
+        return await self._prepare_and_write(
+            event_type=event_type,
+            event_id=event_id,
+            timestamp=timestamp,
+            source_class=source_class,
+            payload=payload,
+            semantic_context=semantic_context,
+            field_path=field_path,
+            mac_field_path=mac_field_path,
+            data=data,
+            node_id=node_id,
+            edge_id=edge_id,
+            attempt=attempt,
+            side_effects=side_effects,
+            executor_outcome=executor_outcome,
+        )
+
+    async def _prepare_and_write(
+        self,
+        *,
+        event_type: str,
+        event_id: str,
+        timestamp: str,
+        source_class: str,
+        payload: object,
+        semantic_context: Mapping[str, JsonValue] | None,
+        field_path: str,
+        mac_field_path: str | None,
+        data: Mapping[str, JsonValue],
+        node_id: str | None = None,
+        edge_id: str | None = None,
+        attempt: int | None = None,
+        side_effects: str = "not-applicable",
+        executor_outcome: str = "not-applicable",
+    ) -> ProtectedAppend:
+        sequence = self._sequence + 1
+        envelope: dict[str, JsonValue] = {
+            "apiVersion": EVENT_V1ALPHA2_API_VERSION,
+            "eventId": event_id,
+            "type": event_type,
+            "timestamp": timestamp,
+            "runId": self.run_id,
+            "graphRevision": self.graph_revision,
+            "sequence": sequence,
+            "capturePolicyHash": self._guard.policy_hash,
+            "redacted": False,
+            "payloadDisposition": EVENT_DISPOSITIONS[event_type],
+            "data": dict(data),
+        }
+        if node_id is not None:
+            envelope["nodeId"] = node_id
+        if edge_id is not None:
+            envelope["edgeId"] = edge_id
+        if attempt is not None:
+            envelope["attempt"] = attempt
+
+        protected = EVENT_DISPOSITIONS[event_type] == "protected-ref"
+        request = SinkWriteRequest(
+            source_class=source_class,
+            sink=GuardedJsonlEventStore.sink,
+            sink_instance=self._store,
+            authority_class="authoritative" if protected else "observational",
+            occurrence=OccurrenceContext(
+                run_id=self.run_id,
+                graph_revision=self.graph_revision,
+                record_kind="event",
+                record_type=event_type,
+                occurrence_id=event_id,
+                sequence=sequence,
+                field_path=field_path,
+                occurred_at=timestamp,
+                node_id=node_id,
+                edge_id=edge_id,
+                attempt=attempt,
+            ),
+            metadata=envelope,
+            payload=payload if protected else NO_PAYLOAD,
+            semantic_context=semantic_context,
+            mac_field_path=mac_field_path,
+            payload_hash_field="/payloadHash",
+            payload_hash_source="/data",
+            side_effects=side_effects,  # type: ignore[arg-type]
+            executor_outcome=executor_outcome,  # type: ignore[arg-type]
+        )
+        outcome = self._guard.prepare(request)
+        if isinstance(outcome, GuardFailed):
+            raise RedactionDenied(outcome.failure)
+        if isinstance(outcome, GuardSuppressed):
+            raise RedactionDenied(
+                failure("PAYLOAD_PROTECTION_REQUIRED", "policy", sink=request.sink)
+            )
+        assert isinstance(outcome, GuardPrepared)
+
+        document = outcome.document
+        invalid = validate_protected_event(document)
+        if invalid is not None:
+            # The prepared write is abandoned unconsumed; nothing reaches disk.
+            raise RedactionDenied(invalid)
+
+        await self._store.write(self.run_id, outcome.prepared)
+        self._sequence = sequence
+        self._decisions.append(outcome.decision.decision_id)
+        return ProtectedAppend(
+            document=document,
+            payload_hash=str(document["payloadHash"]),
+            protected_refs=outcome.protected_refs,
+            decision_id=outcome.decision.decision_id,
+        )
+
+
+def reject_legacy_history(
+    events: Sequence[Mapping[str, JsonValue]],
+    *,
+    terminal: bool = False,
+    authorization: str = "none",
+) -> RedactionFailure | None:
+    """Section 9.1 detection, before ``RunResumed`` and before any executor.
+
+    The original bytes are never rewritten, scrubbed, or reinterpreted.
+    """
+
+    disposition = classify_history(
+        events,
+        terminal=terminal,
+        authorization=authorization,  # type: ignore[arg-type]
+    )
+    if disposition is None:
+        return None
+    return disposition.failure
+
+
+def canonical_document_line(document: Mapping[str, JsonValue]) -> str:
+    return canonical_json(dict(document))
