@@ -11,6 +11,7 @@ import importlib.metadata
 import importlib.resources
 import io as io_module
 import os
+import re
 import sys
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
@@ -19,6 +20,19 @@ from types import ModuleType
 from typing import BinaryIO, Final, Literal, TextIO, cast
 
 from ._json import compact_json
+from .cli_operations import (
+    DEFAULT_LOG_LIMIT,
+    MAX_LOG_LIMIT,
+    MAX_SAFE_INTEGER,
+    UNSUPPORTED_OPERATIONS,
+    JournalEntry,
+    OperationError,
+    inspect_data,
+    is_safe_run_id,
+    logs_data,
+    read_journal,
+    status_data,
+)
 from .compiler import CompilationResult, Diagnostic, try_compile_graph
 from .models import Endpoint, GraphSpec
 from .source import (
@@ -35,9 +49,50 @@ QUICKSTART_TEMPLATE: Final = "quickstart/research-diamond.graph.json"
 QUICKSTART_RESOURCE: Final = "data/research-diamond.graph.json"
 QUICKSTART_HASH: Final = "f9aaeffc991e6cec223c959dbf7737a8fff96e1eb1ea433343f45fe663697b50"
 
-CommandName = Literal["validate", "plan", "compile", "visualize", "doctor", "init"]
+CommandName = Literal[
+    "validate",
+    "plan",
+    "compile",
+    "visualize",
+    "doctor",
+    "init",
+    "status",
+    "inspect",
+    "logs",
+    "cancel",
+    "resume",
+    "replay",
+    "fork",
+    "retry",
+]
 GraphInputFormat = Literal["json", "yaml", "auto"]
 VisualizationFormat = Literal["mermaid", "dot"]
+
+#: Commands that read one durable history; every one of them is append-free.
+_READ_COMMANDS: Final = ("status", "inspect", "logs")
+#: Commands scoped to a durable run, including the fail-closed ones.
+_OPERATIONAL_COMMANDS: Final = (
+    "status",
+    "inspect",
+    "logs",
+    "cancel",
+    "resume",
+    "replay",
+    "fork",
+    "retry",
+)
+_SOURCE_COMMANDS: Final = ("validate", "plan", "compile", "visualize")
+_ALL_COMMANDS: Final = (
+    "validate",
+    "plan",
+    "compile",
+    "visualize",
+    "doctor",
+    "init",
+    *_OPERATIONAL_COMMANDS,
+)
+
+_DECIMAL = re.compile(r"^(0|[1-9][0-9]*)$")
 
 
 class ExitCode:
@@ -47,7 +102,21 @@ class ExitCode:
     INVALID_GRAPH: Final = 1
     INPUT: Final = 2
     UNHEALTHY: Final = 3
+    RUN_NOT_FOUND: Final = 4
+    HISTORY: Final = 5
+    UNSUPPORTED: Final = 6
     INTERNAL: Final = 70
+
+
+#: Durable read failures map onto stable process status values.
+_OPERATION_EXIT_CODES: Final[dict[str, int]] = {
+    "GECLI_RUN_ID_INVALID": ExitCode.INPUT,
+    "GECLI_STORE_UNREADABLE": ExitCode.INPUT,
+    "GECLI_HISTORY_UNREADABLE": ExitCode.INPUT,
+    "GECLI_HISTORY_TOO_LARGE": ExitCode.INPUT,
+    "GECLI_RUN_NOT_FOUND": ExitCode.RUN_NOT_FOUND,
+    "GECLI_HISTORY_MALFORMED": ExitCode.HISTORY,
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,6 +127,11 @@ class _ParsedCommand:
     dry_run: bool
     format: VisualizationFormat | None
     input_format: GraphInputFormat | None
+    run_id: str | None = None
+    store: str | None = None
+    node_id: str | None = None
+    from_sequence: int = 0
+    limit: int = DEFAULT_LOG_LIMIT
 
 
 @dataclass(frozen=True, slots=True)
@@ -168,6 +242,14 @@ Usage:
                   [--format mermaid|dot] [--json]
   graph doctor [--json]
   graph init [directory] [--dry-run] [--json]
+  graph status --run <runId> --store <directory> [--json]
+  graph inspect --run <runId> --store <directory> [--json]
+  graph logs --run <runId> --store <directory> [--from <sequence>] [--limit <count>] [--json]
+  graph cancel --run <runId> --store <directory> [--json]
+  graph resume --run <runId> --store <directory> [--json]
+  graph replay --run <runId> --store <directory> [--json]
+  graph fork --run <runId> --store <directory> [--json]
+  graph retry --run <runId> --node <nodeId> --store <directory> [--json]
   graph --version
   graph --help
 
@@ -178,12 +260,27 @@ Commands:
   visualize Render a read-only Mermaid (default) or DOT topology after compilation
   doctor    Run bounded, read-only local Python installation checks
   init      Safely create graph.json from the bundled research-diamond template
+  status    Project one durable run's lifecycle status from its event history
+  inspect   Project observed node and edge activity from one durable run history
+  logs      Page durable event envelope metadata; payloads are never emitted
+  cancel    Unsupported: durable out-of-band run cancellation does not exist
+  resume    Unsupported: durable run leases and node executors do not exist
+  replay    Unsupported: durable replay does not exist
+  fork      Unsupported: durable run forking does not exist
+  retry     Unsupported: durable node-level retry scheduling does not exist
+
+status, inspect, and logs open the durable journal read-only and never append.
+cancel, resume, replay, fork, and retry fail closed with exit code 6; they do
+not read or write the durable store at all.
 
 Exit codes:
   0 success/healthy
   1 invalid Graph IR
   2 usage/input error or refused safe initialization
   3 doctor found an unhealthy local installation
+  4 durable run history does not exist
+  5 durable run history is malformed
+  6 the requested durable capability is not implemented
   70 unexpected internal error"""
 
 
@@ -193,9 +290,25 @@ def _requested_json(argv: Sequence[str]) -> bool:
 
 def _infer_command(argv: Sequence[str]) -> CommandName | None:
     for argument in argv:
-        if argument in {"validate", "plan", "compile", "visualize", "doctor", "init"}:
+        if argument in _ALL_COMMANDS:
             return cast(CommandName, argument)
     return None
+
+
+def _option_value(argv: Sequence[str], index: int, requirement: str) -> str:
+    value = argv[index + 1] if index + 1 < len(argv) else None
+    if value is None or value.startswith("-"):
+        raise _CliError("GECLI_USAGE", requirement)
+    return value
+
+
+def _bounded_integer(raw: str, requirement: str, minimum: int, maximum: int) -> int:
+    if not _DECIMAL.fullmatch(raw):
+        raise _CliError("GECLI_USAGE", requirement)
+    value = int(raw)
+    if value < minimum or value > maximum:
+        raise _CliError("GECLI_USAGE", requirement)
+    return value
 
 
 def _parse_arguments(argv: Sequence[str]) -> _ParsedCommand | Literal["help", "version"]:
@@ -218,11 +331,77 @@ def _parse_arguments(argv: Sequence[str]) -> _ParsedCommand | Literal["help", "v
     format_count = 0
     input_format_value: str | None = None
     input_format_count = 0
+    run_value: str | None = None
+    run_count = 0
+    store_value: str | None = None
+    store_count = 0
+    node_value: str | None = None
+    node_count = 0
+    from_value: str | None = None
+    from_count = 0
+    limit_value: str | None = None
+    limit_count = 0
     positionals: list[str] = []
     index = 0
     while index < len(argv):
         argument = argv[index]
         if argument in {"--json", "--dry-run"}:
+            index += 1
+            continue
+        if argument == "--run":
+            run_count += 1
+            run_value = _option_value(argv, index, "--run requires a durable run identifier")
+            index += 2
+            continue
+        if argument.startswith("--run="):
+            run_count += 1
+            run_value = argument[len("--run=") :]
+            index += 1
+            continue
+        if argument == "--store":
+            store_count += 1
+            store_value = _option_value(
+                argv, index, "--store requires a durable store directory"
+            )
+            index += 2
+            continue
+        if argument.startswith("--store="):
+            store_count += 1
+            store_value = argument[len("--store=") :]
+            index += 1
+            continue
+        if argument == "--node":
+            node_count += 1
+            node_value = _option_value(argv, index, "--node requires a node identifier")
+            index += 2
+            continue
+        if argument.startswith("--node="):
+            node_count += 1
+            node_value = argument[len("--node=") :]
+            index += 1
+            continue
+        if argument == "--from":
+            from_count += 1
+            from_value = _option_value(
+                argv, index, "--from requires a non-negative integer sequence"
+            )
+            index += 2
+            continue
+        if argument.startswith("--from="):
+            from_count += 1
+            from_value = argument[len("--from=") :]
+            index += 1
+            continue
+        if argument == "--limit":
+            limit_count += 1
+            limit_value = _option_value(
+                argv, index, f"--limit requires an integer from 1 through {MAX_LOG_LIMIT}"
+            )
+            index += 2
+            continue
+        if argument.startswith("--limit="):
+            limit_count += 1
+            limit_value = argument[len("--limit=") :]
             index += 1
             continue
         if argument == "--format":
@@ -258,22 +437,87 @@ def _parse_arguments(argv: Sequence[str]) -> _ParsedCommand | Literal["help", "v
         raise _CliError("GECLI_USAGE", "--format may be specified at most once")
     if input_format_count > 1:
         raise _CliError("GECLI_USAGE", "--input-format may be specified at most once")
+    for count, name in (
+        (run_count, "--run"),
+        (store_count, "--store"),
+        (node_count, "--node"),
+        (from_count, "--from"),
+        (limit_count, "--limit"),
+    ):
+        if count > 1:
+            raise _CliError("GECLI_USAGE", f"{name} may be specified at most once")
 
     raw_command = positionals[0] if positionals else None
     operands = positionals[1:]
-    if raw_command not in {"validate", "plan", "compile", "visualize", "doctor", "init"}:
-        raise _CliError(
-            "GECLI_USAGE",
-            "expected command validate, plan, compile, visualize, doctor, or init",
-        )
+    if raw_command not in _ALL_COMMANDS:
+        raise _CliError("GECLI_USAGE", f"expected one of {', '.join(_ALL_COMMANDS)}")
     command = cast(CommandName, raw_command)
+    operational = command in _OPERATIONAL_COMMANDS
 
     if dry_run and command != "init":
         raise _CliError("GECLI_USAGE", "--dry-run is supported only by init")
     if format_count > 0 and command != "visualize":
         raise _CliError("GECLI_USAGE", "--format is supported only by visualize")
-    if input_format_count > 0 and command in {"doctor", "init"}:
+    if input_format_count > 0 and command not in _SOURCE_COMMANDS:
         raise _CliError("GECLI_USAGE", f"--input-format is not supported by {command}")
+    if run_count > 0 and not operational:
+        raise _CliError("GECLI_USAGE", f"--run is not supported by {command}")
+    if store_count > 0 and not operational:
+        raise _CliError("GECLI_USAGE", f"--store is not supported by {command}")
+    if node_count > 0 and command != "retry":
+        raise _CliError("GECLI_USAGE", "--node is supported only by retry")
+    if from_count > 0 and command != "logs":
+        raise _CliError("GECLI_USAGE", "--from is supported only by logs")
+    if limit_count > 0 and command != "logs":
+        raise _CliError("GECLI_USAGE", "--limit is supported only by logs")
+
+    if operational:
+        if operands:
+            raise _CliError("GECLI_USAGE", f"{command} does not accept a positional operand")
+        if run_value is None:
+            raise _CliError("GECLI_USAGE", f"{command} requires --run <runId>")
+        if not is_safe_run_id(run_value):
+            raise _CliError(
+                "GECLI_RUN_ID_INVALID",
+                "run identifier is not a safe durable identifier",
+            )
+        if not store_value:
+            raise _CliError("GECLI_USAGE", f"{command} requires --store <directory>")
+        if command == "retry" and not node_value:
+            raise _CliError("GECLI_USAGE", "retry requires --node <nodeId>")
+        from_sequence = (
+            0
+            if from_value is None
+            else _bounded_integer(
+                from_value,
+                "--from requires a non-negative integer sequence",
+                0,
+                MAX_SAFE_INTEGER,
+            )
+        )
+        limit = (
+            DEFAULT_LOG_LIMIT
+            if limit_value is None
+            else _bounded_integer(
+                limit_value,
+                f"--limit requires an integer from 1 through {MAX_LOG_LIMIT}",
+                1,
+                MAX_LOG_LIMIT,
+            )
+        )
+        return _ParsedCommand(
+            command,
+            None,
+            json_mode,
+            False,
+            None,
+            None,
+            run_id=run_value,
+            store=store_value,
+            node_id=node_value,
+            from_sequence=from_sequence,
+            limit=limit,
+        )
 
     if input_format_value is None or input_format_value == "auto":
         input_format: GraphInputFormat = "auto"
@@ -1228,6 +1472,122 @@ def _print_init_human(io: _CliIo, report: _InitReport) -> None:
     )
 
 
+def _operation_cli_error(error: OperationError) -> _CliError:
+    """Project a durable read failure onto the shared error envelope."""
+
+    exit_code = _OPERATION_EXIT_CODES.get(error.code, ExitCode.INPUT)
+    message = str(error)
+    if error.code == "GECLI_RUN_ID_INVALID":
+        return _CliError(error.code, message, exit_code)
+    details: dict[str, object] = {"runId": error.run_id}
+    if error.code == "GECLI_HISTORY_MALFORMED":
+        details["record"] = error.record
+    return _CliError(
+        error.code,
+        message,
+        exit_code,
+        details=details,
+        human_message=f"{message}: {error.run_id}",
+    )
+
+
+def _unsupported_cli_error(command: str, run_id: str) -> _CliError:
+    """Refuse a command whose durable capability does not exist.
+
+    This runs before any store access, so a fail-closed command neither reads
+    nor writes a durable history.
+    """
+
+    descriptor = UNSUPPORTED_OPERATIONS[command]
+    return _CliError(
+        "GECLI_UNSUPPORTED_CAPABILITY",
+        descriptor.message,
+        ExitCode.UNSUPPORTED,
+        details={"runId": run_id, "capability": descriptor.capability},
+        human_message=f"{descriptor.message}: {run_id}",
+    )
+
+
+def _flag(value: object) -> str:
+    return "yes" if value is True else "no"
+
+
+def _print_status_human(io: _CliIo, data: Mapping[str, object]) -> None:
+    _write(
+        io.stdout,
+        f"Run {_terminal_safe_text(str(data['runId']))}\n"
+        f"  status {data['status']} · terminal {_flag(data['terminal'])}\n"
+        f"  events {data['eventCount']} · last sequence {data['lastSequence']}"
+        f" · graph revision {data['graphRevision']}\n"
+        f"  first {data['firstEventTimestamp']} · last {data['lastEventTimestamp']}\n"
+        f"  resumes {data['resumeCount']} · pauses {data['pauseCount']}"
+        f" · observed nodes {data['observedNodeCount']}\n"
+        "  payloads and event data are never emitted by this sink",
+    )
+
+
+def _print_inspect_human(io: _CliIo, data: Mapping[str, object]) -> None:
+    counts = cast(Mapping[str, int], data["eventTypeCounts"])
+    nodes = cast(Sequence[Mapping[str, object]], data["observedNodes"])
+    edges = cast(Sequence[Mapping[str, object]], data["observedEdges"])
+    lines = [
+        f"Run {_terminal_safe_text(str(data['runId']))}",
+        f"  status {data['status']} · events {data['eventCount']}"
+        f" · graph revision {data['graphRevision']}",
+        "  event types:",
+    ]
+    lines.extend(f"    {event_type} {count}" for event_type, count in counts.items())
+    lines.append("  observed nodes:")
+    if not nodes:
+        lines.append("    none")
+    lines.extend(
+        f"    {_terminal_safe_text(str(node['nodeId']))}"
+        f" events={node['eventCount']}"
+        f" attempt={node['observedMaxAttempt']}"
+        f" scheduled={_flag(node['scheduled'])}"
+        f" started={_flag(node['started'])}"
+        f" succeeded={_flag(node['succeeded'])}"
+        f" failures={node['attemptFailures']}"
+        f" retries={node['retries']}"
+        f" settled={_flag(node['settledWithoutAttempt'])}"
+        for node in nodes
+    )
+    lines.append("  observed edges:")
+    if not edges:
+        lines.append("    none")
+    lines.extend(
+        f"    {_terminal_safe_text(str(edge['edgeId']))} events={edge['eventCount']}"
+        for edge in edges
+    )
+    lines.append("  payloads and event data are never emitted by this sink")
+    _write(io.stdout, "\n".join(lines))
+
+
+def _print_logs_human(io: _CliIo, data: Mapping[str, object]) -> None:
+    events = cast(Sequence[Mapping[str, object]], data["events"])
+    lines = [
+        f"Run {_terminal_safe_text(str(data['runId']))}"
+        f" events {data['returned']} of {data['eventCount']}"
+        f" from sequence {data['fromSequence']}"
+        f" · truncated {_flag(data['truncated'])}"
+    ]
+    if not events:
+        lines.append("  none")
+    for event in events:
+        node_id = event["nodeId"]
+        edge_id = event["edgeId"]
+        attempt = event["attempt"]
+        lines.append(
+            f"  {event['sequence']} {event['type']} {event['timestamp']}"
+            f" node={'-' if node_id is None else _terminal_safe_text(str(node_id))}"
+            f" edge={'-' if edge_id is None else _terminal_safe_text(str(edge_id))}"
+            f" attempt={'-' if attempt is None else attempt}"
+            f" redacted={_flag(event['redacted'])}"
+        )
+    lines.append("  payloads and event data are never emitted by this sink")
+    _write(io.stdout, "\n".join(lines))
+
+
 def _emit_cli_error(
     io: _CliIo,
     error: _CliError,
@@ -1313,6 +1673,35 @@ def run(argv: Sequence[str], *, io: _CliIo | None = None) -> int:
             else:
                 _print_doctor_human(streams, doctor_report)
             return exit_code
+
+        if parsed.command in _OPERATIONAL_COMMANDS:
+            if parsed.run_id is None or parsed.store is None:
+                raise RuntimeError(f"{parsed.command} unexpectedly has no run identity")
+            if parsed.command not in _READ_COMMANDS:
+                # Fail closed before touching the durable store: no read, no append.
+                raise _unsupported_cli_error(parsed.command, parsed.run_id)
+            try:
+                entries: tuple[JournalEntry, ...] = read_journal(parsed.store, parsed.run_id)
+            except OperationError as error:
+                raise _operation_cli_error(error) from None
+            if parsed.command == "status":
+                operation_data = status_data(parsed.run_id, entries)
+            elif parsed.command == "inspect":
+                operation_data = inspect_data(parsed.run_id, entries)
+            else:
+                operation_data = logs_data(
+                    parsed.run_id, entries, parsed.from_sequence, parsed.limit
+                )
+            if parsed.json:
+                _write_envelope(streams, parsed.command, ExitCode.SUCCESS, operation_data)
+            elif parsed.command == "status":
+                _print_status_human(streams, operation_data)
+            elif parsed.command == "inspect":
+                _print_inspect_human(streams, operation_data)
+            else:
+                _print_logs_human(streams, operation_data)
+            # The exit code reports the CLI operation, never the durable run outcome.
+            return ExitCode.SUCCESS
 
         if parsed.file is None or parsed.input_format is None:
             raise RuntimeError(f"{parsed.command} unexpectedly has no graph source")

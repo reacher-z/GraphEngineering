@@ -3,9 +3,10 @@
 Command-line tools for canonical Graph Engineering Graph IR. The alpha CLI
 validates graphs, explains deterministic topology, exposes the exact canonical
 compiler result, renders safe topology diagrams, checks the local installation,
-and safely initializes a minimal project. It does not execute graph nodes, call
-a model, access credentials, or mutate an input graph. `init` is the only command
-in this slice that writes.
+safely initializes a minimal project, and reads durable run history. It does not
+execute graph nodes, call a model, access credentials, mutate an input graph, or
+append to a durable event journal. `init` is the only command in this slice that
+writes.
 
 ## Commands
 
@@ -21,6 +22,9 @@ graph visualize graph.json --format dot
 graph doctor
 graph init my-graph
 graph init my-graph --dry-run
+graph status --run my-run --store .graph
+graph inspect --run my-run --store .graph
+graph logs --run my-run --store .graph --from 0 --limit 200
 ```
 
 `validate`, `plan`, `compile`, and `visualize` accept JSON or safe YAML files and
@@ -60,6 +64,35 @@ graph init my-graph --dry-run --json
   repository quickstart and is validated by the canonical core compiler before
   any write. The directory defaults to `.`. `--dry-run` performs all safety
   checks and reports planned output without creating a directory or file.
+- `status`, `inspect`, and `logs` project one durable run journal under
+  `<store>/events/`. They open the journal read-only, take no lock, create no
+  path, and append nothing, so they succeed against a read-only store. Their
+  exit code reports the read, not the run outcome.
+- `cancel`, `resume`, `replay`, `fork`, and `retry` are present so the surface is
+  complete and honest, and they fail closed with exit `6` and
+  `GECLI_UNSUPPORTED_CAPABILITY` before touching the store. The durable
+  capabilities they need — an out-of-band cancellation record, a run lease plus a
+  node executor registry, replay, fork, and node-level retry scheduling — do not
+  exist in this runtime.
+
+## Durable read boundary
+
+The operational commands never read `event.data`. Graph input, bound node input,
+node output, run results, payload hashes, activity keys, implementation hashes,
+and resolved filesystem paths therefore cannot reach stdout or stderr; only a
+closed envelope-metadata allowlist is emitted, and each envelope repeats a
+`redaction` marker naming the `cli-json` sink. `spec/redaction-semantics.md`
+classifies CLI diagnostics as a capture sink; this is how that is honoured.
+
+Statuses are derived only from event types the history contains: `created`,
+`running`, `paused`, `succeeded`, `failed`, and `cancelled`. A node the journal
+never mentions is absent from `inspect` output rather than reported as pending.
+Record validation is strict — a closed property set, the frozen
+`events/v1alpha1` `apiVersion`, a known event type, an RFC 3339 timestamp, a
+matching `runId`, and a sequence equal to the record index — and the first
+violation fails the whole command with exit `5`.
+
+Full envelope member lists are in [docs/CLI.md](../../docs/CLI.md).
 
 ## JSON and safe YAML input
 
@@ -109,11 +142,11 @@ shell, network service, or credential provider.
 
 ## Machine protocol
 
-Every `validate`, `plan`, `compile`, `visualize`, `doctor`, or `init` invocation using
-`--json` writes exactly one newline-terminated JSON document to standard output
-and writes nothing to standard error. Success, invalid graphs, bad input,
-refused init targets, and an unhealthy doctor all use the same versioned
-envelope:
+Every invocation using `--json` writes exactly one newline-terminated JSON
+document to standard output and writes nothing to standard error. Success,
+invalid graphs, bad input, refused init targets, an unhealthy doctor, a missing
+or malformed durable history, and a refused durable capability all use the same
+versioned envelope:
 
 ```json
 {"schemaVersion":"graph-engineering.cli/v1alpha1","command":"compile","ok":true,"exitCode":0,"data":{"file":"graph.json","valid":true,"graphName":"example","graphHash":"…","canonicalGraph":"{…}","canonicalBytes":123,"diagnosticCodes":[],"diagnostics":[]},"error":null}
@@ -154,6 +187,9 @@ controls—as visible `\u{NNNN}` text. Machine mode retains normal JSON escaping
 | `1` | Graph IR is invalid |
 | `2` | Usage/read/source error, ambiguous input format, or refused/failed safe initialization |
 | `3` | `doctor` found an unhealthy local installation |
+| `4` | The named durable run history does not exist |
+| `5` | The durable run history is malformed |
+| `6` | The requested durable capability is not implemented |
 | `70` | Unexpected internal error |
 
 JSON/safe-YAML decoding, Graph hashing, canonical serialization, semantic

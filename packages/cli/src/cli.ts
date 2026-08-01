@@ -16,6 +16,19 @@ import {
 } from "./source-loader.js";
 import type { ValidationResult } from "./validation.js";
 import type { VisualizationFormat, VisualizationResult } from "./visualize.js";
+import {
+  DEFAULT_LOG_LIMIT,
+  MAX_LOG_LIMIT,
+  OperationError,
+  UNSUPPORTED_OPERATIONS,
+  inspectData,
+  isSafeRunId,
+  logsData,
+  readJournal,
+  statusData,
+  type JournalEntry,
+  type UnsupportedOperationName,
+} from "./operations.js";
 
 const VERSION = "0.1.0-alpha.1";
 export const MACHINE_SCHEMA_VERSION = "graph-engineering.cli/v1alpha1" as const;
@@ -25,6 +38,9 @@ export const EXIT_CODES = {
   invalidGraph: 1,
   input: 2,
   unhealthy: 3,
+  runNotFound: 4,
+  history: 5,
+  unsupported: 6,
   internal: 70,
 } as const;
 
@@ -34,8 +50,57 @@ export type CommandName =
   | "compile"
   | "visualize"
   | "doctor"
-  | "init";
+  | "init"
+  | "status"
+  | "inspect"
+  | "logs"
+  | "cancel"
+  | "resume"
+  | "replay"
+  | "fork"
+  | "retry";
 export type CliExitCode = (typeof EXIT_CODES)[keyof typeof EXIT_CODES];
+
+/** Commands that read one durable history; every one of them is append-free. */
+const READ_COMMANDS = ["status", "inspect", "logs"] as const;
+/** Commands scoped to a durable run, including the fail-closed ones. */
+const OPERATIONAL_COMMANDS = [
+  "status",
+  "inspect",
+  "logs",
+  "cancel",
+  "resume",
+  "replay",
+  "fork",
+  "retry",
+] as const;
+const SOURCE_COMMANDS = ["validate", "plan", "compile", "visualize"] as const;
+
+const OPERATIONAL_SET = new Set<string>(OPERATIONAL_COMMANDS);
+const READ_SET = new Set<string>(READ_COMMANDS);
+const SOURCE_SET = new Set<string>(SOURCE_COMMANDS);
+const ALL_COMMANDS = [
+  "validate",
+  "plan",
+  "compile",
+  "visualize",
+  "doctor",
+  "init",
+  ...OPERATIONAL_COMMANDS,
+] as const;
+const COMMAND_SET = new Set<string>(ALL_COMMANDS);
+
+const DECIMAL = /^(0|[1-9][0-9]*)$/;
+
+/** Durable read failures map onto stable process status values. */
+const OPERATION_EXIT_CODES: Readonly<Record<string, CliExitCode>> = {
+  GECLI_RUN_ID_INVALID: EXIT_CODES.input,
+  GECLI_STORE_UNREADABLE: EXIT_CODES.input,
+  GECLI_HISTORY_UNREADABLE: EXIT_CODES.input,
+  GECLI_HISTORY_TOO_LARGE: EXIT_CODES.input,
+  GECLI_RUN_NOT_FOUND: EXIT_CODES.runNotFound,
+  GECLI_HISTORY_MALFORMED: EXIT_CODES.history,
+};
 
 export interface MachineError {
   code: string;
@@ -44,6 +109,9 @@ export interface MachineError {
   path?: string | null;
   line?: number | null;
   column?: number | null;
+  runId?: string;
+  record?: number | null;
+  capability?: string;
 }
 
 export interface MachineEnvelope {
@@ -62,6 +130,11 @@ interface ParsedCommand {
   dryRun: boolean;
   format: VisualizationFormat | null;
   inputFormat: GraphInputFormat | null;
+  runId: string | null;
+  store: string | null;
+  nodeId: string | null;
+  fromSequence: number;
+  limit: number;
 }
 
 class CliError extends Error {
@@ -103,6 +176,14 @@ Usage:
   graph visualize <graph.json|graph.yaml|-> [--input-format json|yaml|auto] [--format mermaid|dot] [--json]
   graph doctor [--json]
   graph init [directory] [--dry-run] [--json]
+  graph status --run <runId> --store <directory> [--json]
+  graph inspect --run <runId> --store <directory> [--json]
+  graph logs --run <runId> --store <directory> [--from <sequence>] [--limit <count>] [--json]
+  graph cancel --run <runId> --store <directory> [--json]
+  graph resume --run <runId> --store <directory> [--json]
+  graph replay --run <runId> --store <directory> [--json]
+  graph fork --run <runId> --store <directory> [--json]
+  graph retry --run <runId> --node <nodeId> --store <directory> [--json]
   graph --version
   graph --help
 
@@ -113,12 +194,27 @@ Commands:
   visualize Render a read-only Mermaid (default) or DOT topology after compilation
   doctor    Run bounded, read-only local installation checks
   init      Safely create graph.json from the bundled research-diamond template
+  status    Project one durable run's lifecycle status from its event history
+  inspect   Project observed node and edge activity from one durable run history
+  logs      Page durable event envelope metadata; payloads are never emitted
+  cancel    Unsupported: durable out-of-band run cancellation does not exist
+  resume    Unsupported: durable run leases and node executors do not exist
+  replay    Unsupported: durable replay does not exist
+  fork      Unsupported: durable run forking does not exist
+  retry     Unsupported: durable node-level retry scheduling does not exist
+
+status, inspect, and logs open the durable journal read-only and never append.
+cancel, resume, replay, fork, and retry fail closed with exit code 6; they do
+not read or write the durable store at all.
 
 Exit codes:
   0 success/healthy
   1 invalid Graph IR
   2 usage/input error or refused safe initialization
   3 doctor found an unhealthy local installation
+  4 durable run history does not exist
+  5 durable run history is malformed
+  6 the requested durable capability is not implemented
   70 unexpected internal error`;
 }
 
@@ -127,14 +223,24 @@ function requestedJson(argv: readonly string[]): boolean {
 }
 
 function inferCommand(argv: readonly string[]): CommandName | null {
-  return argv.find((argument): argument is CommandName =>
-    argument === "validate" ||
-    argument === "plan" ||
-    argument === "compile" ||
-    argument === "visualize" ||
-    argument === "doctor" ||
-    argument === "init"
-  ) ?? null;
+  return argv.find((argument): argument is CommandName => COMMAND_SET.has(argument)) ?? null;
+}
+
+function optionValue(argv: readonly string[], index: number, requirement: string): string {
+  const value = argv[index + 1];
+  if (value === undefined || value.startsWith("-")) {
+    throw new CliError("GECLI_USAGE", requirement);
+  }
+  return value;
+}
+
+function boundedInteger(raw: string, requirement: string, minimum: number, maximum: number): number {
+  if (!DECIMAL.test(raw)) throw new CliError("GECLI_USAGE", requirement);
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < minimum || value > maximum) {
+    throw new CliError("GECLI_USAGE", requirement);
+  }
+  return value;
 }
 
 function parseArguments(argv: string[]): ParsedCommand | "help" | "version" {
@@ -155,10 +261,79 @@ function parseArguments(argv: string[]): ParsedCommand | "help" | "version" {
   let formatCount = 0;
   let inputFormatValue: string | null = null;
   let inputFormatCount = 0;
+  let runValue: string | null = null;
+  let runCount = 0;
+  let storeValue: string | null = null;
+  let storeCount = 0;
+  let nodeValue: string | null = null;
+  let nodeCount = 0;
+  let fromValue: string | null = null;
+  let fromCount = 0;
+  let limitValue: string | null = null;
+  let limitCount = 0;
   const positionals: string[] = [];
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === "--json" || argument === "--dry-run") continue;
+    if (argument === "--run") {
+      runCount += 1;
+      runValue = optionValue(argv, index, "--run requires a durable run identifier");
+      index += 1;
+      continue;
+    }
+    if (argument?.startsWith("--run=")) {
+      runCount += 1;
+      runValue = argument.slice("--run=".length);
+      continue;
+    }
+    if (argument === "--store") {
+      storeCount += 1;
+      storeValue = optionValue(argv, index, "--store requires a durable store directory");
+      index += 1;
+      continue;
+    }
+    if (argument?.startsWith("--store=")) {
+      storeCount += 1;
+      storeValue = argument.slice("--store=".length);
+      continue;
+    }
+    if (argument === "--node") {
+      nodeCount += 1;
+      nodeValue = optionValue(argv, index, "--node requires a node identifier");
+      index += 1;
+      continue;
+    }
+    if (argument?.startsWith("--node=")) {
+      nodeCount += 1;
+      nodeValue = argument.slice("--node=".length);
+      continue;
+    }
+    if (argument === "--from") {
+      fromCount += 1;
+      fromValue = optionValue(argv, index, "--from requires a non-negative integer sequence");
+      index += 1;
+      continue;
+    }
+    if (argument?.startsWith("--from=")) {
+      fromCount += 1;
+      fromValue = argument.slice("--from=".length);
+      continue;
+    }
+    if (argument === "--limit") {
+      limitCount += 1;
+      limitValue = optionValue(
+        argv,
+        index,
+        `--limit requires an integer from 1 through ${MAX_LOG_LIMIT}`,
+      );
+      index += 1;
+      continue;
+    }
+    if (argument?.startsWith("--limit=")) {
+      limitCount += 1;
+      limitValue = argument.slice("--limit=".length);
+      continue;
+    }
     if (argument === "--format") {
       formatCount += 1;
       const value = argv[index + 1];
@@ -197,31 +372,102 @@ function parseArguments(argv: string[]): ParsedCommand | "help" | "version" {
   if (inputFormatCount > 1) {
     throw new CliError("GECLI_USAGE", "--input-format may be specified at most once");
   }
+  for (const [count, name] of [
+    [runCount, "--run"],
+    [storeCount, "--store"],
+    [nodeCount, "--node"],
+    [fromCount, "--from"],
+    [limitCount, "--limit"],
+  ] as const) {
+    if (count > 1) {
+      throw new CliError("GECLI_USAGE", `${name} may be specified at most once`);
+    }
+  }
   const [rawCommand, ...operands] = positionals;
-  if (
-    rawCommand !== "validate" &&
-    rawCommand !== "plan" &&
-    rawCommand !== "compile" &&
-    rawCommand !== "visualize" &&
-    rawCommand !== "doctor" &&
-    rawCommand !== "init"
-  ) {
+  if (rawCommand === undefined || !COMMAND_SET.has(rawCommand)) {
     throw new CliError(
       "GECLI_USAGE",
-      "expected command validate, plan, compile, visualize, doctor, or init",
+      `expected one of ${ALL_COMMANDS.join(", ")}`,
     );
   }
-  if (dryRun && rawCommand !== "init") {
+  const command = rawCommand as CommandName;
+  const operational = OPERATIONAL_SET.has(command);
+  if (dryRun && command !== "init") {
     throw new CliError("GECLI_USAGE", "--dry-run is supported only by init");
   }
-  if (formatCount > 0 && rawCommand !== "visualize") {
+  if (formatCount > 0 && command !== "visualize") {
     throw new CliError("GECLI_USAGE", "--format is supported only by visualize");
   }
-  if (inputFormatCount > 0 && (rawCommand === "doctor" || rawCommand === "init")) {
+  if (inputFormatCount > 0 && !SOURCE_SET.has(command)) {
     throw new CliError(
       "GECLI_USAGE",
-      `--input-format is not supported by ${rawCommand}`,
+      `--input-format is not supported by ${command}`,
     );
+  }
+  if (runCount > 0 && !operational) {
+    throw new CliError("GECLI_USAGE", `--run is not supported by ${command}`);
+  }
+  if (storeCount > 0 && !operational) {
+    throw new CliError("GECLI_USAGE", `--store is not supported by ${command}`);
+  }
+  if (nodeCount > 0 && command !== "retry") {
+    throw new CliError("GECLI_USAGE", "--node is supported only by retry");
+  }
+  if (fromCount > 0 && command !== "logs") {
+    throw new CliError("GECLI_USAGE", "--from is supported only by logs");
+  }
+  if (limitCount > 0 && command !== "logs") {
+    throw new CliError("GECLI_USAGE", "--limit is supported only by logs");
+  }
+
+  if (operational) {
+    if (operands.length > 0) {
+      throw new CliError("GECLI_USAGE", `${command} does not accept a positional operand`);
+    }
+    if (runValue === null) {
+      throw new CliError("GECLI_USAGE", `${command} requires --run <runId>`);
+    }
+    if (!isSafeRunId(runValue)) {
+      throw new CliError(
+        "GECLI_RUN_ID_INVALID",
+        "run identifier is not a safe durable identifier",
+      );
+    }
+    if (storeValue === null || storeValue.length === 0) {
+      throw new CliError("GECLI_USAGE", `${command} requires --store <directory>`);
+    }
+    if (command === "retry" && (nodeValue === null || nodeValue.length === 0)) {
+      throw new CliError("GECLI_USAGE", "retry requires --node <nodeId>");
+    }
+    const fromSequence = fromValue === null
+      ? 0
+      : boundedInteger(
+        fromValue,
+        "--from requires a non-negative integer sequence",
+        0,
+        Number.MAX_SAFE_INTEGER,
+      );
+    const limit = limitValue === null
+      ? DEFAULT_LOG_LIMIT
+      : boundedInteger(
+        limitValue,
+        `--limit requires an integer from 1 through ${MAX_LOG_LIMIT}`,
+        1,
+        MAX_LOG_LIMIT,
+      );
+    return {
+      command,
+      file: null,
+      json,
+      dryRun: false,
+      format: null,
+      inputFormat: null,
+      runId: runValue,
+      store: storeValue,
+      nodeId: nodeValue,
+      fromSequence,
+      limit,
+    };
   }
   const inputFormat = inputFormatValue === null || inputFormatValue === "auto"
     ? "auto"
@@ -234,35 +480,40 @@ function parseArguments(argv: string[]): ParsedCommand | "help" | "version" {
       `unsupported input format ${inputFormatValue}; expected json, yaml, or auto`,
     );
   }
-  const format: VisualizationFormat | null = rawCommand === "visualize"
+  const format: VisualizationFormat | null = command === "visualize"
     ? formatValue === null || formatValue === "mermaid"
       ? "mermaid"
       : formatValue === "dot"
         ? "dot"
         : null
     : null;
-  if (rawCommand === "visualize" && format === null) {
+  if (command === "visualize" && format === null) {
     throw new CliError(
       "GECLI_USAGE",
       `unsupported visualization format ${formatValue}; expected mermaid or dot`,
     );
   }
 
-  if (rawCommand === "doctor") {
+  if (command === "doctor") {
     if (operands.length > 0) {
       throw new CliError("GECLI_USAGE", "doctor does not accept a file or other operand");
     }
     return {
-      command: rawCommand,
+      command,
       file: null,
       json,
       dryRun: false,
       format: null,
       inputFormat: null,
+      runId: null,
+      store: null,
+      nodeId: null,
+      fromSequence: 0,
+      limit: DEFAULT_LOG_LIMIT,
     };
   }
 
-  if (rawCommand === "init") {
+  if (command === "init") {
     if (operands.length > 1) {
       throw new CliError("GECLI_USAGE", "init accepts at most one target directory");
     }
@@ -274,25 +525,35 @@ function parseArguments(argv: string[]): ParsedCommand | "help" | "version" {
       );
     }
     return {
-      command: rawCommand,
+      command,
       file: directory,
       json,
       dryRun,
       format: null,
       inputFormat: null,
+      runId: null,
+      store: null,
+      nodeId: null,
+      fromSequence: 0,
+      limit: DEFAULT_LOG_LIMIT,
     };
   }
 
   if (operands.length !== 1 || operands[0] === undefined || operands[0].length === 0) {
-    throw new CliError("GECLI_USAGE", `${rawCommand} requires exactly one Graph IR source`);
+    throw new CliError("GECLI_USAGE", `${command} requires exactly one Graph IR source`);
   }
   return {
-    command: rawCommand,
+    command,
     file: operands[0],
     json,
     dryRun: false,
     format,
     inputFormat,
+    runId: null,
+    store: null,
+    nodeId: null,
+    fromSequence: 0,
+    limit: DEFAULT_LOG_LIMIT,
   };
 }
 
@@ -593,6 +854,115 @@ function printInitHuman(report: InitReport): void {
   );
 }
 
+/** Project a durable read failure onto the shared error envelope. */
+function operationCliError(error: OperationError): CliError {
+  const exitCode = OPERATION_EXIT_CODES[error.code] ?? EXIT_CODES.input;
+  if (error.code === "GECLI_RUN_ID_INVALID") {
+    return new CliError(error.code, error.message, exitCode);
+  }
+  const details = error.code === "GECLI_HISTORY_MALFORMED"
+    ? { runId: error.runId, record: error.record }
+    : { runId: error.runId };
+  return new CliError(
+    error.code,
+    error.message,
+    exitCode,
+    details,
+    `${error.message}: ${error.runId}`,
+  );
+}
+
+/**
+ * Refuse a command whose durable capability does not exist.
+ *
+ * This runs before any store access, so a fail-closed command neither reads nor
+ * writes a durable history.
+ */
+function unsupportedCliError(command: UnsupportedOperationName, runId: string): CliError {
+  const descriptor = UNSUPPORTED_OPERATIONS[command];
+  return new CliError(
+    "GECLI_UNSUPPORTED_CAPABILITY",
+    descriptor.message,
+    EXIT_CODES.unsupported,
+    { runId, capability: descriptor.capability },
+    `${descriptor.message}: ${runId}`,
+  );
+}
+
+function flag(value: boolean): string {
+  return value ? "yes" : "no";
+}
+
+function printStatusHuman(data: Record<string, unknown>): void {
+  const runId = terminalSafeText(String(data.runId));
+  writeStdout(
+    `Run ${runId}\n` +
+    `  status ${String(data.status)} · terminal ${flag(data.terminal === true)}\n` +
+    `  events ${String(data.eventCount)} · last sequence ${String(data.lastSequence)}` +
+    ` · graph revision ${String(data.graphRevision)}\n` +
+    `  first ${String(data.firstEventTimestamp)} · last ${String(data.lastEventTimestamp)}\n` +
+    `  resumes ${String(data.resumeCount)} · pauses ${String(data.pauseCount)}` +
+    ` · observed nodes ${String(data.observedNodeCount)}\n` +
+    "  payloads and event data are never emitted by this sink",
+  );
+}
+
+function printInspectHuman(data: Record<string, unknown>): void {
+  const counts = data.eventTypeCounts as Record<string, number>;
+  const nodes = data.observedNodes as ReadonlyArray<Record<string, unknown>>;
+  const edges = data.observedEdges as ReadonlyArray<Record<string, unknown>>;
+  let output =
+    `Run ${terminalSafeText(String(data.runId))}\n` +
+    `  status ${String(data.status)} · events ${String(data.eventCount)}` +
+    ` · graph revision ${String(data.graphRevision)}\n` +
+    "  event types:";
+  for (const [type, count] of Object.entries(counts)) {
+    output += `\n    ${type} ${String(count)}`;
+  }
+  output += "\n  observed nodes:";
+  if (nodes.length === 0) output += "\n    none";
+  for (const node of nodes) {
+    output +=
+      `\n    ${terminalSafeText(String(node.nodeId))}` +
+      ` events=${String(node.eventCount)}` +
+      ` attempt=${String(node.observedMaxAttempt)}` +
+      ` scheduled=${flag(node.scheduled === true)}` +
+      ` started=${flag(node.started === true)}` +
+      ` succeeded=${flag(node.succeeded === true)}` +
+      ` failures=${String(node.attemptFailures)}` +
+      ` retries=${String(node.retries)}` +
+      ` settled=${flag(node.settledWithoutAttempt === true)}`;
+  }
+  output += "\n  observed edges:";
+  if (edges.length === 0) output += "\n    none";
+  for (const edge of edges) {
+    output +=
+      `\n    ${terminalSafeText(String(edge.edgeId))} events=${String(edge.eventCount)}`;
+  }
+  output += "\n  payloads and event data are never emitted by this sink";
+  writeStdout(output);
+}
+
+function printLogsHuman(data: Record<string, unknown>): void {
+  const events = data.events as ReadonlyArray<Record<string, unknown>>;
+  let output =
+    `Run ${terminalSafeText(String(data.runId))}` +
+    ` events ${String(data.returned)} of ${String(data.eventCount)}` +
+    ` from sequence ${String(data.fromSequence)}` +
+    ` · truncated ${flag(data.truncated === true)}`;
+  if (events.length === 0) output += "\n  none";
+  for (const event of events) {
+    output +=
+      `\n  ${String(event.sequence)} ${String(event.type)} ${String(event.timestamp)}` +
+      ` node=${event.nodeId === null ? "-" : terminalSafeText(String(event.nodeId))}` +
+      ` edge=${event.edgeId === null ? "-" : terminalSafeText(String(event.edgeId))}` +
+      ` attempt=${event.attempt === null ? "-" : String(event.attempt)}` +
+      ` redacted=${flag(event.redacted === true)}`;
+  }
+  output += "\n  payloads and event data are never emitted by this sink";
+  writeStdout(output);
+}
+
 function emitCliError(error: CliError, command: CommandName | null, json: boolean): CliExitCode {
   if (json) {
     writeEnvelope(command, error.exitCode, null, error.machineError);
@@ -664,6 +1034,41 @@ export async function run(argv: string[]): Promise<CliExitCode> {
       if (parsed.json) writeEnvelope(parsed.command, exitCode, doctorData(report));
       else printDoctorHuman(report);
       return exitCode;
+    }
+
+    if (OPERATIONAL_SET.has(parsed.command)) {
+      const runId = parsed.runId;
+      const store = parsed.store;
+      if (runId === null || store === null) {
+        throw new Error(`${parsed.command} unexpectedly has no run identity`);
+      }
+      if (!READ_SET.has(parsed.command)) {
+        // Fail closed before touching the durable store: no read, no append.
+        throw unsupportedCliError(parsed.command as UnsupportedOperationName, runId);
+      }
+      let entries: readonly JournalEntry[];
+      try {
+        entries = await readJournal(store, runId);
+      } catch (error) {
+        if (error instanceof OperationError) throw operationCliError(error);
+        throw error;
+      }
+      const data = parsed.command === "status"
+        ? statusData(runId, entries)
+        : parsed.command === "inspect"
+          ? inspectData(runId, entries)
+          : logsData(runId, entries, parsed.fromSequence, parsed.limit);
+      if (parsed.json) {
+        writeEnvelope(parsed.command, EXIT_CODES.success, data);
+      } else if (parsed.command === "status") {
+        printStatusHuman(data);
+      } else if (parsed.command === "inspect") {
+        printInspectHuman(data);
+      } else {
+        printLogsHuman(data);
+      }
+      // The exit code reports the CLI operation, never the durable run outcome.
+      return EXIT_CODES.success;
     }
 
     const file = parsed.file;

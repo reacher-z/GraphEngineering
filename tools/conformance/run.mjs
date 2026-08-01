@@ -2,7 +2,8 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -3758,4 +3759,476 @@ assertBarrierAgreement(
 
 process.stdout.write(
   `Cross-language integrated-barrier conformance passed for ${barrierPolicyCases.length} policy cases (${barrierValidPolicyCases.length} normalized policy snapshots), ${barrierOwnershipCases.length} ownership cases through both the native validator and the real compiler pass, and ${barrierCompilerCases.length} compiler cases through compileGraph/try_compile_graph carrying ${barrierCompilerCases.length} literal graph hashes and ${barrierOrderedDiagnostics} ordered diagnostics (${barrierMultiDiagnosticCases} multi-diagnostic order witnesses, ${barrierRouterOrderWitnesses} router-before-barrier witness, ${barrierSuppressionWitnesses} suppression-chain witnesses, all 4 categories); claims ${JSON.stringify(barrierCorpus.claims)}.\n`,
+);
+
+// ---------------------------------------------------------------------------
+// Durable CLI operations cross-language join.
+//
+// The operational surface is the one place where a divergence is invisible to
+// both single-language suites: each CLI can be internally consistent while
+// emitting a different envelope, a different error code, or a different exit
+// status for the same durable history. This block removes that possibility by
+// driving both native CLIs over one shared corpus and comparing stdout bytes,
+// stderr bytes, and exit codes member for member.
+//
+// Neither side may read the other's expectations. The TypeScript half below is
+// computed only from packages/cli; the Python half is computed by
+// tools/conformance/python_cli_operations_report.py from the native
+// `graph_engineering` package. The single shared input is
+// tools/conformance/cli-operations.case.json, which carries authentic v1alpha1
+// journals plus adversarial malformed ones and no expectation blocks at all.
+//
+// It also carries the append-free evidence: every read command runs against a
+// fingerprinted journal, and both halves must report that the bytes, size, and
+// modification time did not move.
+const cliOperationsCorpus = JSON.parse(
+  await readFile(join(root, "tools", "conformance", "cli-operations.case.json"), "utf8"),
+);
+
+let cliOperationsModule;
+let cliEntrypointModule;
+try {
+  cliEntrypointModule = await import(
+    pathToFileURL(join(root, "packages", "cli", "dist", "src", "cli.js")).href
+  );
+  cliOperationsModule = await import(
+    pathToFileURL(join(root, "packages", "cli", "dist", "src", "operations.js")).href
+  );
+} catch (error) {
+  throw new Error(
+    "TypeScript CLI is not built; run `corepack pnpm --filter @graph-engineering/cli build`",
+    { cause: error },
+  );
+}
+
+// Payload markers that only ever appear inside `event.data`. The CLI is a
+// capture sink, so none of them may reach stdout or stderr. Restated here
+// independently of the Python half, which asserts the same list on its own
+// output.
+const CLI_OPERATIONS_FORBIDDEN_MARKERS = [
+  "implementationHash",
+  "contractVersion",
+  "inputHash",
+  "maxTotalAttempts",
+  "payloadHash",
+  "activityKey",
+  "outputHash",
+  "reusedNodeIds",
+  "availableAt",
+];
+
+// The exact, ordered member list each operational envelope is allowed to carry.
+// A payload leak would have to add a member here to escape, so this is a
+// positive redaction assertion rather than a substring search.
+const CLI_OPERATIONS_DATA_KEYS = {
+  status: [
+    "runId", "runIdHash", "journalApiVersion", "status", "terminal", "eventCount",
+    "lastSequence", "graphRevision", "firstEventTimestamp", "lastEventTimestamp",
+    "resumeCount", "pauseCount", "observedNodeCount", "redaction",
+  ],
+  inspect: [
+    "runId", "runIdHash", "journalApiVersion", "status", "terminal", "eventCount",
+    "lastSequence", "graphRevision", "eventTypeCounts", "observedNodes", "observedEdges",
+    "redaction",
+  ],
+  logs: [
+    "runId", "runIdHash", "journalApiVersion", "eventCount", "fromSequence", "limit",
+    "returned", "truncated", "nextSequence", "events", "redaction",
+  ],
+};
+const CLI_OPERATIONS_EVENT_KEYS = [
+  "sequence", "type", "timestamp", "nodeId", "edgeId", "attempt", "redacted",
+];
+const CLI_OPERATIONS_NODE_KEYS = [
+  "nodeId", "eventCount", "firstSequence", "lastSequence", "observedMaxAttempt",
+  "scheduled", "started", "succeeded", "attemptFailures", "retries", "settledWithoutAttempt",
+];
+const CLI_OPERATIONS_EDGE_KEYS = ["edgeId", "eventCount", "firstSequence", "lastSequence"];
+
+function cliOperationsJournalPath(store, runId) {
+  return join(store, "events", `${createHash("sha256").update(runId, "utf8").digest("hex")}.jsonl`);
+}
+
+async function cliOperationsMaterialize(store, journal) {
+  await mkdir(store, { recursive: true });
+  if (journal === null || journal === undefined || journal.content === null) return null;
+  const path = cliOperationsJournalPath(store, journal.runId);
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, Buffer.from(journal.content, "utf8"));
+  return path;
+}
+
+async function cliOperationsFingerprint(path) {
+  if (path === null) return null;
+  try {
+    const bytes = await readFile(path);
+    const state = await stat(path, { bigint: true });
+    return [
+      createHash("sha256").update(bytes).digest("hex"),
+      String(state.size),
+      String(state.mtimeNs),
+    ].join(":");
+  } catch {
+    return null;
+  }
+}
+
+async function cliOperationsEntries(store) {
+  const found = [];
+  async function walk(directory, prefix) {
+    let names;
+    try {
+      names = await readdir(directory, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of names) {
+      const relative = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
+      found.push(relative);
+      if (entry.isDirectory()) await walk(join(directory, entry.name), relative);
+    }
+  }
+  await walk(store, "");
+  return found.sort();
+}
+
+/**
+ * Run the built TypeScript CLI in process and capture its two streams.
+ *
+ * `run` writes through `process.stdout`/`process.stderr`, so those two writers
+ * are swapped for the duration of the call and always restored.
+ */
+async function cliOperationsInvoke(argv) {
+  const out = [];
+  const err = [];
+  const realOut = process.stdout.write;
+  const realErr = process.stderr.write;
+  const capture = (sink) => (chunk, encoding, callback) => {
+    sink.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
+    if (typeof encoding === "function") encoding();
+    else if (typeof callback === "function") callback();
+    return true;
+  };
+  process.stdout.write = capture(out);
+  process.stderr.write = capture(err);
+  let exitCode;
+  try {
+    exitCode = await cliEntrypointModule.run([...argv]);
+  } finally {
+    process.stdout.write = realOut;
+    process.stderr.write = realErr;
+  }
+  return { exitCode, stdout: out.join(""), stderr: err.join("") };
+}
+
+function cliOperationsDivergence(caseName, field, tsValue, pyValue) {
+  return new Error(
+    `Durable CLI operations divergence in case '${caseName}', field '${field}':`
+      + ` TypeScript ${JSON.stringify(tsValue)} vs Python ${JSON.stringify(pyValue)}`,
+  );
+}
+
+function assertCliOperationsAgreement(caseName, field, tsValue, pyValue) {
+  if (!isDeepStrictEqual(tsValue, pyValue)) {
+    throw cliOperationsDivergence(caseName, field, tsValue, pyValue);
+  }
+}
+
+const pythonCliOperations = spawnSync(
+  "uv",
+  ["run", "--project", "python", "python", "tools/conformance/python_cli_operations_report.py"],
+  { cwd: root, encoding: "utf8", maxBuffer: 256 * 1024 * 1024 },
+);
+if (pythonCliOperations.status !== 0) {
+  throw new Error(
+    "Python durable CLI operations conformance failed:\n"
+      + (pythonCliOperations.stderr || pythonCliOperations.stdout),
+  );
+}
+const pyCliOperations = JSON.parse(pythonCliOperations.stdout);
+
+assert.equal(
+  pyCliOperations.contract,
+  cliOperationsCorpus.contract,
+  "durable CLI operations: the two halves read different corpus contracts",
+);
+assert.equal(
+  cliOperationsCorpus.contract,
+  cliEntrypointModule.MACHINE_SCHEMA_VERSION,
+  "durable CLI operations: the corpus contract is not the CLI machine schema version",
+);
+
+// Two implementations, not two corpus reads: each half reported the constants
+// its own package defines.
+assertCliOperationsAgreement(
+  "<contract>",
+  "exitCodes",
+  cliEntrypointModule.EXIT_CODES,
+  pyCliOperations.nativeExitCodes,
+);
+assertCliOperationsAgreement(
+  "<contract>",
+  "exitCodes",
+  cliOperationsCorpus.exitCodes,
+  pyCliOperations.nativeExitCodes,
+);
+assertCliOperationsAgreement(
+  "<contract>",
+  "journalApiVersion",
+  cliOperationsModule.JOURNAL_API_VERSION,
+  pyCliOperations.nativeJournalApiVersion,
+);
+assertCliOperationsAgreement(
+  "<contract>",
+  "journalEventTypes",
+  [...cliOperationsModule.JOURNAL_EVENT_TYPES],
+  pyCliOperations.nativeJournalEventTypes,
+);
+assertCliOperationsAgreement(
+  "<contract>",
+  "limits",
+  {
+    defaultLogLimit: cliOperationsModule.DEFAULT_LOG_LIMIT,
+    maxLogLimit: cliOperationsModule.MAX_LOG_LIMIT,
+    maxJournalBytes: cliOperationsModule.MAX_JOURNAL_BYTES,
+  },
+  pyCliOperations.nativeLimits,
+);
+
+const cliUnsupportedNames = Object.keys(cliOperationsModule.UNSUPPORTED_OPERATIONS).sort();
+assertCliOperationsAgreement(
+  "<contract>",
+  "unsupportedCommands",
+  cliUnsupportedNames,
+  Object.keys(pyCliOperations.nativeUnsupported).sort(),
+);
+assertCliOperationsAgreement(
+  "<contract>",
+  "unsupportedCommands",
+  cliUnsupportedNames,
+  Object.keys(cliOperationsCorpus.unsupportedCapabilities).sort(),
+);
+for (const command of cliUnsupportedNames) {
+  const tsDescriptor = cliOperationsModule.UNSUPPORTED_OPERATIONS[command];
+  const pyDescriptor = pyCliOperations.nativeUnsupported[command];
+  assertCliOperationsAgreement(command, "capability", tsDescriptor.capability, pyDescriptor.capability);
+  assertCliOperationsAgreement(command, "message", tsDescriptor.message, pyDescriptor.message);
+  assert.equal(
+    tsDescriptor.capability,
+    cliOperationsCorpus.unsupportedCapabilities[command],
+    `durable CLI operations: '${command}' capability disagrees with the corpus`,
+  );
+}
+
+// The five claim flags are literally false on both sides. Each process read
+// them from the corpus itself, so this is a two-reader assertion rather than a
+// restatement of one read.
+const cliOperationsClaimNames = [
+  "durableCancellationClaim",
+  "durableResumeClaim",
+  "durableReplayClaim",
+  "durableForkClaim",
+  "durableNodeRetryClaim",
+];
+assertCliOperationsAgreement(
+  "<claims>",
+  "flagNames",
+  [...cliOperationsClaimNames].sort(),
+  Object.keys(pyCliOperations.claims).sort(),
+);
+assertCliOperationsAgreement(
+  "<claims>",
+  "flagNames",
+  [...cliOperationsClaimNames].sort(),
+  Object.keys(cliOperationsCorpus.claims).sort(),
+);
+for (const flag of cliOperationsClaimNames) {
+  assert.strictEqual(
+    cliOperationsCorpus.claims[flag],
+    false,
+    `durable CLI operations claim '${flag}' is not literally false in the Node-side read`,
+  );
+  assert.strictEqual(
+    pyCliOperations.claims[flag],
+    false,
+    `durable CLI operations claim '${flag}' is not literally false in the Python-side read`,
+  );
+}
+
+const cliOperationsCaseNames = cliOperationsCorpus.cases.map((item) => String(item.name));
+assert.equal(
+  new Set(cliOperationsCaseNames).size,
+  cliOperationsCaseNames.length,
+  "durable CLI operations: the corpus declares a duplicate case name",
+);
+assertCliOperationsAgreement(
+  "<corpus>",
+  "caseOrder",
+  cliOperationsCaseNames,
+  pyCliOperations.caseOrder,
+);
+
+const cliOperationsWorkspace = await mkdtemp(join(tmpdir(), "graph-cli-operations-node-"));
+let cliOperationsReadCases = 0;
+let cliOperationsAppendProofs = 0;
+let cliOperationsUnsupportedCases = 0;
+const cliOperationsExitCodesSeen = new Set();
+try {
+  for (const [index, testCase] of cliOperationsCorpus.cases.entries()) {
+    const name = String(testCase.name);
+    const store = join(cliOperationsWorkspace, `case-${String(index).padStart(4, "0")}`);
+    const journal = testCase.journal === null
+      ? null
+      : cliOperationsCorpus.journals[testCase.journal];
+    const path = await cliOperationsMaterialize(store, journal);
+    const before = await cliOperationsFingerprint(path);
+    const argv = testCase.argv.map((item) =>
+      String(item).split(cliOperationsCorpus.storeToken).join(store));
+    const result = await cliOperationsInvoke(argv);
+    const after = await cliOperationsFingerprint(path);
+    const tsEntry = {
+      exitCode: result.exitCode,
+      stdout: result.stdout,
+      stderr: result.stderr,
+      journalUnchanged: path === null ? null : before === after,
+      storeEntries: await cliOperationsEntries(store),
+    };
+    const pyEntry = pyCliOperations.cases[name];
+    assert.ok(pyEntry !== undefined, `durable CLI operations: Python skipped case '${name}'`);
+
+    for (const field of ["exitCode", "stdout", "stderr", "journalUnchanged", "storeEntries"]) {
+      assertCliOperationsAgreement(name, field, tsEntry[field], pyEntry[field]);
+    }
+    cliOperationsExitCodesSeen.add(result.exitCode);
+
+    // Machine mode is exactly one JSON document on stdout and nothing on stderr.
+    if (argv.includes("--json")) {
+      assert.equal(tsEntry.stderr, "", `${name}: machine mode wrote stderr`);
+      assert.ok(tsEntry.stdout.endsWith("\n"), `${name}: machine output is not newline terminated`);
+      assert.equal(
+        tsEntry.stdout.trimEnd().split("\n").length,
+        1,
+        `${name}: machine mode did not emit exactly one JSON line`,
+      );
+      const envelope = JSON.parse(tsEntry.stdout);
+      assert.equal(envelope.schemaVersion, cliEntrypointModule.MACHINE_SCHEMA_VERSION);
+      assert.equal(envelope.exitCode, tsEntry.exitCode, `${name}: envelope exit code disagrees`);
+      assert.equal(envelope.ok, tsEntry.exitCode === 0, `${name}: envelope ok disagrees`);
+      const allowed = CLI_OPERATIONS_DATA_KEYS[envelope.command];
+      if (allowed !== undefined && envelope.data !== null) {
+        assert.deepEqual(Object.keys(envelope.data), allowed, `${name}: envelope members drifted`);
+        assert.deepEqual(
+          Object.keys(envelope.data.redaction),
+          ["sink", "eventDataEmitted", "payloadsEmitted", "pathsEmitted"],
+          `${name}: redaction marker drifted`,
+        );
+        assert.deepEqual(
+          envelope.data.redaction,
+          {
+            sink: "cli-json",
+            eventDataEmitted: false,
+            payloadsEmitted: false,
+            pathsEmitted: false,
+          },
+          `${name}: redaction marker is not the frozen constant`,
+        );
+        for (const event of envelope.data.events ?? []) {
+          assert.deepEqual(Object.keys(event), CLI_OPERATIONS_EVENT_KEYS, `${name}: event members drifted`);
+        }
+        for (const node of envelope.data.observedNodes ?? []) {
+          assert.deepEqual(Object.keys(node), CLI_OPERATIONS_NODE_KEYS, `${name}: node members drifted`);
+        }
+        for (const edge of envelope.data.observedEdges ?? []) {
+          assert.deepEqual(Object.keys(edge), CLI_OPERATIONS_EDGE_KEYS, `${name}: edge members drifted`);
+        }
+      }
+    }
+
+    // Redaction: the CLI is a capture sink, so neither the resolved store path
+    // nor any `event.data` marker may appear on either stream.
+    const emitted = tsEntry.stdout + tsEntry.stderr;
+    assert.ok(!emitted.includes(store), `${name}: TypeScript CLI emitted a filesystem path`);
+    assert.strictEqual(
+      pyEntry.storePathLeaked,
+      false,
+      `${name}: Python CLI emitted a filesystem path`,
+    );
+    for (const marker of CLI_OPERATIONS_FORBIDDEN_MARKERS) {
+      assert.ok(
+        !emitted.includes(marker),
+        `${name}: TypeScript CLI emitted the payload marker ${JSON.stringify(marker)}`,
+      );
+    }
+    assert.deepEqual(
+      pyEntry.payloadMarkersLeaked,
+      [],
+      `${name}: Python CLI emitted a payload marker`,
+    );
+
+    const command = argv[0];
+    if (["status", "inspect", "logs"].includes(command)) {
+      cliOperationsReadCases += 1;
+      if (path !== null) {
+        assert.strictEqual(
+          tsEntry.journalUnchanged,
+          true,
+          `${name}: the TypeScript read command mutated the durable history`,
+        );
+        assert.strictEqual(
+          pyEntry.journalUnchanged,
+          true,
+          `${name}: the Python read command mutated the durable history`,
+        );
+        cliOperationsAppendProofs += 1;
+      }
+    }
+    if (cliUnsupportedNames.includes(command)) {
+      cliOperationsUnsupportedCases += 1;
+      if (argv.includes("--json")) {
+        const envelope = JSON.parse(tsEntry.stdout);
+        // A fail-closed command must never look like a result.
+        if (envelope.error !== null && envelope.error.code === "GECLI_UNSUPPORTED_CAPABILITY") {
+          assert.equal(envelope.data, null, `${name}: a refused command returned data`);
+          assert.equal(
+            envelope.exitCode,
+            cliOperationsCorpus.exitCodes.unsupported,
+            `${name}: a refused command did not exit with the unsupported status`,
+          );
+          assert.equal(
+            envelope.error.capability,
+            cliOperationsCorpus.unsupportedCapabilities[command],
+            `${name}: a refused command named the wrong capability`,
+          );
+        }
+      }
+      // The refusal must not have touched the store in either implementation.
+      assert.deepEqual(
+        tsEntry.storeEntries,
+        pyEntry.storeEntries,
+        `${name}: a refused command left different store state`,
+      );
+    }
+  }
+} finally {
+  await rm(cliOperationsWorkspace, { recursive: true, force: true });
+}
+
+assert.ok(cliOperationsReadCases > 0, "durable CLI operations: no read command was compared");
+assert.ok(
+  cliOperationsAppendProofs > 0,
+  "durable CLI operations: no read command was proved append-free",
+);
+assert.ok(
+  cliOperationsUnsupportedCases >= cliUnsupportedNames.length,
+  "durable CLI operations: not every fail-closed command was exercised",
+);
+for (const status of [0, 2, 4, 5, 6]) {
+  assert.ok(
+    cliOperationsExitCodesSeen.has(status),
+    `durable CLI operations: exit code ${status} is unwitnessed by the corpus`,
+  );
+}
+
+process.stdout.write(
+  `Cross-language durable CLI operations conformance passed for ${cliOperationsCorpus.cases.length} cases over ${Object.keys(cliOperationsCorpus.journals).length} shared journals (${cliOperationsReadCases} read invocations, ${cliOperationsAppendProofs} append-free proofs, ${cliOperationsUnsupportedCases} fail-closed refusals, exit codes ${[...cliOperationsExitCodesSeen].sort((left, right) => left - right).join("/")}); claims ${JSON.stringify(cliOperationsCorpus.claims)}.\n`,
 );

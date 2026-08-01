@@ -1,0 +1,1620 @@
+{
+  "contract": "graph-engineering.cli/v1alpha1",
+  "journalApiVersion": "graphengineering.reacher-z.github.io/events/v1alpha1",
+  "claims": {
+    "durableCancellationClaim": false,
+    "durableResumeClaim": false,
+    "durableReplayClaim": false,
+    "durableForkClaim": false,
+    "durableNodeRetryClaim": false
+  },
+  "exitCodes": {
+    "success": 0,
+    "invalidGraph": 1,
+    "input": 2,
+    "unhealthy": 3,
+    "runNotFound": 4,
+    "history": 5,
+    "unsupported": 6,
+    "internal": 70
+  },
+  "unsupportedCapabilities": {
+    "cancel": "durable.run-cancellation",
+    "resume": "durable.run-resume",
+    "replay": "durable.run-replay",
+    "fork": "durable.run-fork",
+    "retry": "durable.node-retry"
+  },
+  "storeToken": "<STORE>",
+  "journals": {
+    "succeeded-run": {
+      "runId": "succeeded-run",
+      "content": "{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"data\":{\"contractVersion\":\"scheduler-recovery/v1alpha1\",\"graphHash\":\"b279603658fe798478cf16e3a2cf17c0cd1e39683a420f944709dda522ba92ee\",\"implementationHash\":\"95293f5c36bd1b8cd91141f0e213b91bee340bab0249b0e2e05cd3eef7ae28e1\",\"input\":[\"o\",[[\"seed\",[\"i\",1]]]],\"inputHash\":\"9b5be40d702f6335f4fbb911a5784630cf2caeb089854fdd2a9ee3de3245475a\",\"maxTotalAttempts\":9007199254740991},\"eventId\":\"ev-0\",\"graphRevision\":1,\"payloadHash\":\"bfb54e72279aacb8a438a5d34af339d7277ff8e66df5894d5b56b2489cf4c21b\",\"redacted\":true,\"runId\":\"succeeded-run\",\"sequence\":0,\"timestamp\":\"2026-07-26T12:00:01.000Z\",\"type\":\"RunCreated\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"data\":{},\"eventId\":\"ev-1\",\"graphRevision\":1,\"payloadHash\":\"44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"redacted\":true,\"runId\":\"succeeded-run\",\"sequence\":1,\"timestamp\":\"2026-07-26T12:00:02.000Z\",\"type\":\"RunStarted\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"attempt\":1,\"data\":{\"activityKey\":\"f12969c2162584b8cd26dbcb28b8ce9768a3d13d0c8e5d7fd640c1fb2b902b39\",\"input\":[\"o\",[[\"seed\",[\"i\",1]]]],\"inputHash\":\"9b5be40d702f6335f4fbb911a5784630cf2caeb089854fdd2a9ee3de3245475a\",\"sideEffects\":\"none\"},\"eventId\":\"ev-2\",\"graphRevision\":1,\"nodeId\":\"root\",\"payloadHash\":\"916d7b10825641b301e9e51999bef9ab23ce9d8be7fbc19dd3f959658907941d\",\"redacted\":true,\"runId\":\"succeeded-run\",\"sequence\":2,\"timestamp\":\"2026-07-26T12:00:03.000Z\",\"type\":\"NodeScheduled\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"attempt\":1,\"data\":{\"activityKey\":\"f12969c2162584b8cd26dbcb28b8ce9768a3d13d0c8e5d7fd640c1fb2b902b39\",\"inputHash\":\"9b5be40d702f6335f4fbb911a5784630cf2caeb089854fdd2a9ee3de3245475a\"},\"eventId\":\"ev-3\",\"graphRevision\":1,\"nodeId\":\"root\",\"payloadHash\":\"0a0870e9733108a1e61262006d3ad28d2dc9fcf105f05c43b73151214b8c5729\",\"redacted\":true,\"runId\":\"succeeded-run\",\"sequence\":3,\"timestamp\":\"2026-07-26T12:00:04.000Z\",\"type\":\"NodeStarted\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"attempt\":1,\"data\":{\"inputHash\":\"9b5be40d702f6335f4fbb911a5784630cf2caeb089854fdd2a9ee3de3245475a\",\"output\":[\"o\",[[\"node\",[\"s\",\"root\"]]]],\"outputHash\":\"c2b0135ed2fed785714ca6f695c8de9aa2d51e247f3477f78261fe6f4627c45c\"},\"eventId\":\"ev-4\",\"graphRevision\":1,\"nodeId\":\"root\",\"payloadHash\":\"abebc7908a18f6af2d539e9d284e79de94af2b2c5f4675d5956c1d7807cd09ac\",\"redacted\":true,\"runId\":\"succeeded-run\",\"sequence\":4,\"timestamp\":\"2026-07-26T12:00:05.000Z\",\"type\":\"NodeSucceeded\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"attempt\":1,\"data\":{\"outputHash\":\"c2b0135ed2fed785714ca6f695c8de9aa2d51e247f3477f78261fe6f4627c45c\"},\"edgeId\":\"root-left\",\"eventId\":\"ev-5\",\"graphRevision\":1,\"nodeId\":\"root\",\"payloadHash\":\"c7f38cb61ec3b0b9acac2c682cacac904f72310004906a956ba378ff8e4d3667\",\"redacted\":true,\"runId\":\"succeeded-run\",\"sequence\":5,\"timestamp\":\"2026-07-26T12:00:06.000Z\",\"type\":\"EdgeEmitted\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"attempt\":1,\"data\":{\"outputHash\":\"c2b0135ed2fed785714ca6f695c8de9aa2d51e247f3477f78261fe6f4627c45c\"},\"edgeId\":\"root-right\",\"eventId\":\"ev-6\",\"graphRevision\":1,\"nodeId\":\"root\",\"payloadHash\":\"c7f38cb61ec3b0b9acac2c682cacac904f72310004906a956ba378ff8e4d3667\",\"redacted\":true,\"runId\":\"succeeded-run\",\"sequence\":6,\"timestamp\":\"2026-07-26T12:00:07.000Z\",\"type\":\"EdgeEmitted\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"attempt\":1,\"data\":{\"activityKey\":\"8c4a162ef52d2c5dc249201ef821c125a58f067dc2c7e3949983b2699cbc6ebe\",\"input\":[\"o\",[[\"root\",[\"o\",[[\"node\",[\"s\",\"root\"]]]]]]],\"inputHash\":\"992bd2bbe5cd7c6cd1bbec6a174eba45ebfa71d445eaeefafe74287aaa47b5ef\",\"sideEffects\":\"none\"},\"eventId\":\"ev-7\",\"graphRevision\":1,\"nodeId\":\"left\",\"payloadHash\":\"c1fc31ffed4b252773d9b000eb4ffa0d14e175360dfb64644ce05c795d14a594\",\"redacted\":true,\"runId\":\"succeeded-run\",\"sequence\":7,\"timestamp\":\"2026-07-26T12:00:08.000Z\",\"type\":\"NodeScheduled\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"attempt\":1,\"data\":{\"activityKey\":\"8c4a162ef52d2c5dc249201ef821c125a58f067dc2c7e3949983b2699cbc6ebe\",\"inputHash\":\"992bd2bbe5cd7c6cd1bbec6a174eba45ebfa71d445eaeefafe74287aaa47b5ef\"},\"eventId\":\"ev-8\",\"graphRevision\":1,\"nodeId\":\"left\",\"payloadHash\":\"96942c14c2e33501eee2a14616830d650fd1622350a7a02426e8fcd3b2d644b0\",\"redacted\":true,\"runId\":\"succeeded-run\",\"sequence\":8,\"timestamp\":\"2026-07-26T12:00:09.000Z\",\"type\":\"NodeStarted\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"attempt\":1,\"data\":{\"activityKey\":\"62a7ab5741ac98f63a171ed8832001fc925cec5502e8825297d1b842c24d5c84\",\"input\":[\"o\",[[\"root\",[\"o\",[[\"node\",[\"s\",\"root\"]]]]]]],\"inputHash\":\"992bd2bbe5cd7c6cd1bbec6a174eba45ebfa71d445eaeefafe74287aaa47b5ef\",\"sideEffects\":\"none\"},\"eventId\":\"ev-9\",\"graphRevision\":1,\"nodeId\":\"right\",\"payloadHash\":\"4e812cca87445813bb7854c5657dc5c0a2263d63d66c44fe68b01daa3fd6ad82\",\"redacted\":true,\"runId\":\"succeeded-run\",\"sequence\":9,\"timestamp\":\"2026-07-26T12:00:10.000Z\",\"type\":\"NodeScheduled\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"attempt\":1,\"data\":{\"activityKey\":\"62a7ab5741ac98f63a171ed8832001fc925cec5502e8825297d1b842c24d5c84\",\"inputHash\":\"992bd2bbe5cd7c6cd1bbec6a174eba45ebfa71d445eaeefafe74287aaa47b5ef\"},\"eventId\":\"ev-10\",\"graphRevision\":1,\"nodeId\":\"right\",\"payloadHash\":\"2dc593e3182d90cf2618a82266d14f1f1fc9675e3d344bfa396f95d578ae45e1\",\"redacted\":true,\"runId\":\"succeeded-run\",\"sequence\":10,\"timestamp\":\"2026-07-26T12:00:11.000Z\",\"type\":\"NodeStarted\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"attempt\":1,\"data\":{\"inputHash\":\"992bd2bbe5cd7c6cd1bbec6a174eba45ebfa71d445eaeefafe74287aaa47b5ef\",\"output\":[\"o\",[[\"node\",[\"s\",\"left\"]]]],\"outputHash\":\"7729c6210c0e84771d6fe2daf460685168a6e8ed3cbf9807a0be0236a79741d4\"},\"eventId\":\"ev-11\",\"graphRevision\":1,\"nodeId\":\"left\",\"payloadHash\":\"11a33e768e7f7a35127b150924258314a36f52303bf84ddc473333c0db75dddb\",\"redacted\":true,\"runId\":\"succeeded-run\",\"sequence\":11,\"timestamp\":\"2026-07-26T12:00:12.000Z\",\"type\":\"NodeSucceeded\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"attempt\":1,\"data\":{\"outputHash\":\"7729c6210c0e84771d6fe2daf460685168a6e8ed3cbf9807a0be0236a79741d4\"},\"edgeId\":\"left-join\",\"eventId\":\"ev-12\",\"graphRevision\":1,\"nodeId\":\"left\",\"payloadHash\":\"822702623b12e3be9e764d44000b5d785a2a464ec719166c9e01f5f409092508\",\"redacted\":true,\"runId\":\"succeeded-run\",\"sequence\":12,\"timestamp\":\"2026-07-26T12:00:13.000Z\",\"type\":\"EdgeEmitted\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"attempt\":1,\"data\":{\"inputHash\":\"992bd2bbe5cd7c6cd1bbec6a174eba45ebfa71d445eaeefafe74287aaa47b5ef\",\"output\":[\"o\",[[\"node\",[\"s\",\"right\"]]]],\"outputHash\":\"950e1767e02ca882c3ffcd9c2fb05d5cd486f4fb621eb6e0c2bb13071c88d3a0\"},\"eventId\":\"ev-13\",\"graphRevision\":1,\"nodeId\":\"right\",\"payloadHash\":\"b97156a3a083d9b4783fd1df7bf68168413c0d9a91a0bedcad6f7c3a9ad559d5\",\"redacted\":true,\"runId\":\"succeeded-run\",\"sequence\":13,\"timestamp\":\"2026-07-26T12:00:14.000Z\",\"type\":\"NodeSucceeded\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"attempt\":1,\"data\":{\"outputHash\":\"950e1767e02ca882c3ffcd9c2fb05d5cd486f4fb621eb6e0c2bb13071c88d3a0\"},\"edgeId\":\"right-join\",\"eventId\":\"ev-14\",\"graphRevision\":1,\"nodeId\":\"right\",\"payloadHash\":\"c786e2cdcd8e8b30dc0ed1c442f94261fbb03a86f5501c2d71358d22668945a2\",\"redacted\":true,\"runId\":\"succeeded-run\",\"sequence\":14,\"timestamp\":\"2026-07-26T12:00:15.000Z\",\"type\":\"EdgeEmitted\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"attempt\":1,\"data\":{\"activityKey\":\"94d44eff39327b4ebc081740a882bb6606cd7cd49e95ae6b8928ad0069352e77\",\"input\":[\"o\",[[\"left\",[\"o\",[[\"node\",[\"s\",\"left\"]]]]],[\"right\",[\"o\",[[\"node\",[\"s\",\"right\"]]]]]]],\"inputHash\":\"e96d0f9dc6ca4d89463bcb8a567245981070485ddb4467ec3081b2495fa29d75\",\"sideEffects\":\"none\"},\"eventId\":\"ev-15\",\"graphRevision\":1,\"nodeId\":\"join\",\"payloadHash\":\"533595cea44d6115881034734c80468f43e4dafef1e9f8ecb6c822cc05a95d18\",\"redacted\":true,\"runId\":\"succeeded-run\",\"sequence\":15,\"timestamp\":\"2026-07-26T12:00:16.000Z\",\"type\":\"NodeScheduled\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"attempt\":1,\"data\":{\"activityKey\":\"94d44eff39327b4ebc081740a882bb6606cd7cd49e95ae6b8928ad0069352e77\",\"inputHash\":\"e96d0f9dc6ca4d89463bcb8a567245981070485ddb4467ec3081b2495fa29d75\"},\"eventId\":\"ev-16\",\"graphRevision\":1,\"nodeId\":\"join\",\"payloadHash\":\"2140066f86ed94ab3147dc3f07dac86e0d834e0ad1c62bfec1fbec4a86c85f1e\",\"redacted\":true,\"runId\":\"succeeded-run\",\"sequence\":16,\"timestamp\":\"2026-07-26T12:00:17.000Z\",\"type\":\"NodeStarted\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"attempt\":1,\"data\":{\"inputHash\":\"e96d0f9dc6ca4d89463bcb8a567245981070485ddb4467ec3081b2495fa29d75\",\"output\":[\"o\",[[\"node\",[\"s\",\"join\"]]]],\"outputHash\":\"b66ec5fb9fb96ed2a740ac1b120dfa9a78c8d797561b4893940eba9122cc724e\"},\"eventId\":\"ev-17\",\"graphRevision\":1,\"nodeId\":\"join\",\"payloadHash\":\"98d6b2e0e7f212bf65820010fb8fcb8438fd5dc18c671b3a6fff40b6deddfc6e\",\"redacted\":true,\"runId\":\"succeeded-run\",\"sequence\":17,\"timestamp\":\"2026-07-26T12:00:18.000Z\",\"type\":\"NodeSucceeded\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"data\":{\"result\":[\"o\",[[\"completionOrder\",[\"a\",[[\"s\",\"root\"],[\"s\",\"left\"],[\"s\",\"right\"],[\"s\",\"join\"]]]],[\"failures\",[\"a\",[]]],[\"graphHash\",[\"s\",\"b279603658fe798478cf16e3a2cf17c0cd1e39683a420f944709dda522ba92ee\"]],[\"maxObservedConcurrency\",[\"i\",2]],[\"nodes\",[\"a\",[[\"o\",[[\"attempts\",[\"i\",1]],[\"input\",[\"o\",[[\"seed\",[\"i\",1]]]]],[\"nodeId\",[\"s\",\"root\"]],[\"output\",[\"o\",[[\"node\",[\"s\",\"root\"]]]]],[\"sequence\",[\"i\",0]],[\"status\",[\"s\",\"succeeded\"]]]],[\"o\",[[\"attempts\",[\"i\",1]],[\"input\",[\"o\",[[\"root\",[\"o\",[[\"node\",[\"s\",\"root\"]]]]]]]],[\"nodeId\",[\"s\",\"left\"]],[\"output\",[\"o\",[[\"node\",[\"s\",\"left\"]]]]],[\"sequence\",[\"i\",1]],[\"status\",[\"s\",\"succeeded\"]]]],[\"o\",[[\"attempts\",[\"i\",1]],[\"input\",[\"o\",[[\"root\",[\"o\",[[\"node\",[\"s\",\"root\"]]]]]]]],[\"nodeId\",[\"s\",\"right\"]],[\"output\",[\"o\",[[\"node\",[\"s\",\"right\"]]]]],[\"sequence\",[\"i\",2]],[\"status\",[\"s\",\"succeeded\"]]]],[\"o\",[[\"attempts\",[\"i\",1]],[\"input\",[\"o\",[[\"left\",[\"o\",[[\"node\",[\"s\",\"left\"]]]]],[\"right\",[\"o\",[[\"node\",[\"s\",\"right\"]]]]]]]],[\"nodeId\",[\"s\",\"join\"]],[\"output\",[\"o\",[[\"node\",[\"s\",\"join\"]]]]],[\"sequence\",[\"i\",3]],[\"status\",[\"s\",\"succeeded\"]]]]]]],[\"output\",[\"o\",[[\"result\",[\"o\",[[\"node\",[\"s\",\"join\"]]]]]]]],[\"scheduledOrder\",[\"a\",[[\"s\",\"root\"],[\"s\",\"left\"],[\"s\",\"right\"],[\"s\",\"join\"]]]],[\"status\",[\"s\",\"succeeded\"]],[\"totalAttempts\",[\"i\",4]]]]},\"eventId\":\"ev-18\",\"graphRevision\":1,\"payloadHash\":\"0c49aef694b417d9143eff2a8fe463d7cde488a7d26ea52ba686963f51345aa4\",\"redacted\":true,\"runId\":\"succeeded-run\",\"sequence\":18,\"timestamp\":\"2026-07-26T12:00:19.000Z\",\"type\":\"RunSucceeded\"}\n"
+    },
+    "failed-run": {
+      "runId": "failed-run",
+      "content": "{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"data\":{\"contractVersion\":\"scheduler-recovery/v1alpha1\",\"graphHash\":\"9a736e79e3aa1480c69d53ff68c25aeb0a76a7577427799afbab60d000fd7bb8\",\"implementationHash\":\"95293f5c36bd1b8cd91141f0e213b91bee340bab0249b0e2e05cd3eef7ae28e1\",\"input\":[\"o\",[[\"seed\",[\"i\",2]]]],\"inputHash\":\"6130a1627d9adbfcf5a2b7aea33efc43ca0aeddd23685a565559a1a540b90377\",\"maxTotalAttempts\":9007199254740991},\"eventId\":\"ev-0\",\"graphRevision\":1,\"payloadHash\":\"4a2ca1d687f5fe8ddfb97d47e6f3fbd9cef3657b5374c7ba11b7025669fb117d\",\"redacted\":true,\"runId\":\"failed-run\",\"sequence\":0,\"timestamp\":\"2026-07-26T12:00:01.000Z\",\"type\":\"RunCreated\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"data\":{},\"eventId\":\"ev-1\",\"graphRevision\":1,\"payloadHash\":\"44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"redacted\":true,\"runId\":\"failed-run\",\"sequence\":1,\"timestamp\":\"2026-07-26T12:00:02.000Z\",\"type\":\"RunStarted\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"attempt\":1,\"data\":{\"activityKey\":\"7c2996a7252d874911696e8ffb724db170084d937d36be0cfa9d57a78980c1dc\",\"input\":[\"o\",[[\"seed\",[\"i\",2]]]],\"inputHash\":\"6130a1627d9adbfcf5a2b7aea33efc43ca0aeddd23685a565559a1a540b90377\",\"sideEffects\":\"none\"},\"eventId\":\"ev-2\",\"graphRevision\":1,\"nodeId\":\"root\",\"payloadHash\":\"2b43bb7e1afed415e6ea7eba2448402906a2a80f3440033980fe572037af9e8a\",\"redacted\":true,\"runId\":\"failed-run\",\"sequence\":2,\"timestamp\":\"2026-07-26T12:00:03.000Z\",\"type\":\"NodeScheduled\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"attempt\":1,\"data\":{\"activityKey\":\"7c2996a7252d874911696e8ffb724db170084d937d36be0cfa9d57a78980c1dc\",\"inputHash\":\"6130a1627d9adbfcf5a2b7aea33efc43ca0aeddd23685a565559a1a540b90377\"},\"eventId\":\"ev-3\",\"graphRevision\":1,\"nodeId\":\"root\",\"payloadHash\":\"34b96610ac5da0b6163628816ad0dc575010613a93d62e5df3815daf7d6a319e\",\"redacted\":true,\"runId\":\"failed-run\",\"sequence\":3,\"timestamp\":\"2026-07-26T12:00:04.000Z\",\"type\":\"NodeStarted\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"attempt\":1,\"data\":{\"failure\":{\"attempt\":1,\"causeName\":\"Error\",\"code\":\"NODE_EXECUTION_FAILED\",\"message\":\"Node 'root' failed: deliberate fixture failure\",\"nodeId\":\"root\",\"phase\":\"execute\",\"retryable\":false},\"terminal\":true},\"eventId\":\"ev-4\",\"graphRevision\":1,\"nodeId\":\"root\",\"payloadHash\":\"abcc7e6084205eafbf1d661cfd9e603f5c81cde89c877caa2cc75321416dabae\",\"redacted\":true,\"runId\":\"failed-run\",\"sequence\":4,\"timestamp\":\"2026-07-26T12:00:05.000Z\",\"type\":\"NodeAttemptFailed\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"data\":{\"result\":[\"o\",[[\"completionOrder\",[\"a\",[[\"s\",\"root\"]]]],[\"failures\",[\"a\",[[\"o\",[[\"attempt\",[\"i\",1]],[\"causeName\",[\"s\",\"Error\"]],[\"code\",[\"s\",\"NODE_EXECUTION_FAILED\"]],[\"message\",[\"s\",\"Node 'root' failed: deliberate fixture failure\"]],[\"nodeId\",[\"s\",\"root\"]],[\"phase\",[\"s\",\"execute\"]],[\"retryable\",[\"b\",false]]]]]]],[\"graphHash\",[\"s\",\"9a736e79e3aa1480c69d53ff68c25aeb0a76a7577427799afbab60d000fd7bb8\"]],[\"maxObservedConcurrency\",[\"i\",1]],[\"nodes\",[\"a\",[[\"o\",[[\"attempts\",[\"i\",1]],[\"failure\",[\"o\",[[\"attempt\",[\"i\",1]],[\"causeName\",[\"s\",\"Error\"]],[\"code\",[\"s\",\"NODE_EXECUTION_FAILED\"]],[\"message\",[\"s\",\"Node 'root' failed: deliberate fixture failure\"]],[\"nodeId\",[\"s\",\"root\"]],[\"phase\",[\"s\",\"execute\"]],[\"retryable\",[\"b\",false]]]]],[\"input\",[\"o\",[[\"seed\",[\"i\",2]]]]],[\"nodeId\",[\"s\",\"root\"]],[\"sequence\",[\"i\",0]],[\"status\",[\"s\",\"failed\"]]]]]]],[\"scheduledOrder\",[\"a\",[[\"s\",\"root\"]]]],[\"status\",[\"s\",\"failed\"]],[\"totalAttempts\",[\"i\",1]]]]},\"eventId\":\"ev-5\",\"graphRevision\":1,\"payloadHash\":\"3438634c399908c5d57e3bca2bb2dc2491a4977503cc5df9d5fb92b6250c6a45\",\"redacted\":true,\"runId\":\"failed-run\",\"sequence\":5,\"timestamp\":\"2026-07-26T12:00:06.000Z\",\"type\":\"RunFailed\"}\n"
+    },
+    "cancelled-run": {
+      "runId": "cancelled-run",
+      "content": "{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"data\":{\"contractVersion\":\"scheduler-recovery/v1alpha1\",\"graphHash\":\"b279603658fe798478cf16e3a2cf17c0cd1e39683a420f944709dda522ba92ee\",\"implementationHash\":\"95293f5c36bd1b8cd91141f0e213b91bee340bab0249b0e2e05cd3eef7ae28e1\",\"input\":[\"o\",[[\"seed\",[\"i\",3]]]],\"inputHash\":\"41f5deb2a18f2940d44efe14b792a64f2efe68518091449d67d1bce71cdb4108\",\"maxTotalAttempts\":9007199254740991},\"eventId\":\"ev-0\",\"graphRevision\":1,\"payloadHash\":\"57bdb24b92f22d48c08e7bd301b8975830160df42947f4c0fec6f2908c462425\",\"redacted\":true,\"runId\":\"cancelled-run\",\"sequence\":0,\"timestamp\":\"2026-07-26T12:00:01.000Z\",\"type\":\"RunCreated\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"data\":{},\"eventId\":\"ev-1\",\"graphRevision\":1,\"payloadHash\":\"44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"redacted\":true,\"runId\":\"cancelled-run\",\"sequence\":1,\"timestamp\":\"2026-07-26T12:00:02.000Z\",\"type\":\"RunStarted\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"attempt\":1,\"data\":{\"activityKey\":\"144405b682f9b1856f742ab4bd111baaa7f713218f51ed76c9c1a10118ec70da\",\"input\":[\"o\",[[\"seed\",[\"i\",3]]]],\"inputHash\":\"41f5deb2a18f2940d44efe14b792a64f2efe68518091449d67d1bce71cdb4108\",\"sideEffects\":\"none\"},\"eventId\":\"ev-2\",\"graphRevision\":1,\"nodeId\":\"root\",\"payloadHash\":\"a1f7591b3fd63a5aa74cbfd88e168e13b0cdc5375c122480f5e195a422c05fbe\",\"redacted\":true,\"runId\":\"cancelled-run\",\"sequence\":2,\"timestamp\":\"2026-07-26T12:00:03.000Z\",\"type\":\"NodeScheduled\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"attempt\":1,\"data\":{\"activityKey\":\"144405b682f9b1856f742ab4bd111baaa7f713218f51ed76c9c1a10118ec70da\",\"inputHash\":\"41f5deb2a18f2940d44efe14b792a64f2efe68518091449d67d1bce71cdb4108\"},\"eventId\":\"ev-3\",\"graphRevision\":1,\"nodeId\":\"root\",\"payloadHash\":\"2e7a45df1521d3f6bff97f1c5af1bf241036aed604e0659057b5e7c185d66ce6\",\"redacted\":true,\"runId\":\"cancelled-run\",\"sequence\":3,\"timestamp\":\"2026-07-26T12:00:04.000Z\",\"type\":\"NodeStarted\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"attempt\":1,\"data\":{\"failure\":{\"attempt\":1,\"causeName\":\"Error\",\"code\":\"NODE_CANCELLED\",\"message\":\"Node 'root' was cancelled\",\"nodeId\":\"root\",\"phase\":\"execute\",\"retryable\":false},\"terminal\":true},\"eventId\":\"ev-4\",\"graphRevision\":1,\"nodeId\":\"root\",\"payloadHash\":\"efab6dde798bf062ee9b4a3ea093126f615d6b5d7d1d7036c037a48604fc14cf\",\"redacted\":true,\"runId\":\"cancelled-run\",\"sequence\":4,\"timestamp\":\"2026-07-26T12:00:05.000Z\",\"type\":\"NodeAttemptFailed\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"data\":{\"result\":[\"o\",[[\"attempts\",[\"i\",0]],[\"failure\",[\"o\",[[\"attempt\",[\"i\",0]],[\"code\",[\"s\",\"NODE_CANCELLED\"]],[\"message\",[\"s\",\"Node 'left' did not start because the run was cancelled\"]],[\"nodeId\",[\"s\",\"left\"]],[\"phase\",[\"s\",\"execute\"]],[\"retryable\",[\"b\",false]]]]],[\"nodeId\",[\"s\",\"left\"]],[\"sequence\",[\"i\",1]],[\"status\",[\"s\",\"skipped\"]]]]},\"eventId\":\"ev-5\",\"graphRevision\":1,\"nodeId\":\"left\",\"payloadHash\":\"d93790a373e0c3d9487c277976eea7547eab3720a8c0ed83f1431179a088089f\",\"redacted\":true,\"runId\":\"cancelled-run\",\"sequence\":5,\"timestamp\":\"2026-07-26T12:00:06.000Z\",\"type\":\"NodeSettledWithoutAttempt\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"data\":{\"result\":[\"o\",[[\"attempts\",[\"i\",0]],[\"failure\",[\"o\",[[\"attempt\",[\"i\",0]],[\"code\",[\"s\",\"NODE_CANCELLED\"]],[\"message\",[\"s\",\"Node 'right' did not start because the run was cancelled\"]],[\"nodeId\",[\"s\",\"right\"]],[\"phase\",[\"s\",\"execute\"]],[\"retryable\",[\"b\",false]]]]],[\"nodeId\",[\"s\",\"right\"]],[\"sequence\",[\"i\",2]],[\"status\",[\"s\",\"skipped\"]]]]},\"eventId\":\"ev-6\",\"graphRevision\":1,\"nodeId\":\"right\",\"payloadHash\":\"0d1d07a6643dc78d31f4059c06ef2ee747b4af3026d3c814f4a12100825864e0\",\"redacted\":true,\"runId\":\"cancelled-run\",\"sequence\":6,\"timestamp\":\"2026-07-26T12:00:07.000Z\",\"type\":\"NodeSettledWithoutAttempt\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"data\":{\"result\":[\"o\",[[\"attempts\",[\"i\",0]],[\"failure\",[\"o\",[[\"attempt\",[\"i\",0]],[\"code\",[\"s\",\"NODE_CANCELLED\"]],[\"message\",[\"s\",\"Node 'join' did not start because the run was cancelled\"]],[\"nodeId\",[\"s\",\"join\"]],[\"phase\",[\"s\",\"execute\"]],[\"retryable\",[\"b\",false]]]]],[\"nodeId\",[\"s\",\"join\"]],[\"sequence\",[\"i\",3]],[\"status\",[\"s\",\"skipped\"]]]]},\"eventId\":\"ev-7\",\"graphRevision\":1,\"nodeId\":\"join\",\"payloadHash\":\"2371e043c149a24120d8ed073f8afbd4fc7ba233ebb89ec2d8015d4b95515ec9\",\"redacted\":true,\"runId\":\"cancelled-run\",\"sequence\":7,\"timestamp\":\"2026-07-26T12:00:08.000Z\",\"type\":\"NodeSettledWithoutAttempt\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"data\":{\"result\":[\"o\",[[\"completionOrder\",[\"a\",[[\"s\",\"root\"],[\"s\",\"left\"],[\"s\",\"right\"],[\"s\",\"join\"]]]],[\"failures\",[\"a\",[[\"o\",[[\"attempt\",[\"i\",1]],[\"causeName\",[\"s\",\"Error\"]],[\"code\",[\"s\",\"NODE_CANCELLED\"]],[\"message\",[\"s\",\"Node 'root' was cancelled\"]],[\"nodeId\",[\"s\",\"root\"]],[\"phase\",[\"s\",\"execute\"]],[\"retryable\",[\"b\",false]]]],[\"o\",[[\"attempt\",[\"i\",0]],[\"code\",[\"s\",\"NODE_CANCELLED\"]],[\"message\",[\"s\",\"Node 'left' did not start because the run was cancelled\"]],[\"nodeId\",[\"s\",\"left\"]],[\"phase\",[\"s\",\"execute\"]],[\"retryable\",[\"b\",false]]]],[\"o\",[[\"attempt\",[\"i\",0]],[\"code\",[\"s\",\"NODE_CANCELLED\"]],[\"message\",[\"s\",\"Node 'right' did not start because the run was cancelled\"]],[\"nodeId\",[\"s\",\"right\"]],[\"phase\",[\"s\",\"execute\"]],[\"retryable\",[\"b\",false]]]],[\"o\",[[\"attempt\",[\"i\",0]],[\"code\",[\"s\",\"NODE_CANCELLED\"]],[\"message\",[\"s\",\"Node 'join' did not start because the run was cancelled\"]],[\"nodeId\",[\"s\",\"join\"]],[\"phase\",[\"s\",\"execute\"]],[\"retryable\",[\"b\",false]]]]]]],[\"graphHash\",[\"s\",\"b279603658fe798478cf16e3a2cf17c0cd1e39683a420f944709dda522ba92ee\"]],[\"maxObservedConcurrency\",[\"i\",1]],[\"nodes\",[\"a\",[[\"o\",[[\"attempts\",[\"i\",1]],[\"failure\",[\"o\",[[\"attempt\",[\"i\",1]],[\"causeName\",[\"s\",\"Error\"]],[\"code\",[\"s\",\"NODE_CANCELLED\"]],[\"message\",[\"s\",\"Node 'root' was cancelled\"]],[\"nodeId\",[\"s\",\"root\"]],[\"phase\",[\"s\",\"execute\"]],[\"retryable\",[\"b\",false]]]]],[\"input\",[\"o\",[[\"seed\",[\"i\",3]]]]],[\"nodeId\",[\"s\",\"root\"]],[\"sequence\",[\"i\",0]],[\"status\",[\"s\",\"failed\"]]]],[\"o\",[[\"attempts\",[\"i\",0]],[\"failure\",[\"o\",[[\"attempt\",[\"i\",0]],[\"code\",[\"s\",\"NODE_CANCELLED\"]],[\"message\",[\"s\",\"Node 'left' did not start because the run was cancelled\"]],[\"nodeId\",[\"s\",\"left\"]],[\"phase\",[\"s\",\"execute\"]],[\"retryable\",[\"b\",false]]]]],[\"nodeId\",[\"s\",\"left\"]],[\"sequence\",[\"i\",1]],[\"status\",[\"s\",\"skipped\"]]]],[\"o\",[[\"attempts\",[\"i\",0]],[\"failure\",[\"o\",[[\"attempt\",[\"i\",0]],[\"code\",[\"s\",\"NODE_CANCELLED\"]],[\"message\",[\"s\",\"Node 'right' did not start because the run was cancelled\"]],[\"nodeId\",[\"s\",\"right\"]],[\"phase\",[\"s\",\"execute\"]],[\"retryable\",[\"b\",false]]]]],[\"nodeId\",[\"s\",\"right\"]],[\"sequence\",[\"i\",2]],[\"status\",[\"s\",\"skipped\"]]]],[\"o\",[[\"attempts\",[\"i\",0]],[\"failure\",[\"o\",[[\"attempt\",[\"i\",0]],[\"code\",[\"s\",\"NODE_CANCELLED\"]],[\"message\",[\"s\",\"Node 'join' did not start because the run was cancelled\"]],[\"nodeId\",[\"s\",\"join\"]],[\"phase\",[\"s\",\"execute\"]],[\"retryable\",[\"b\",false]]]]],[\"nodeId\",[\"s\",\"join\"]],[\"sequence\",[\"i\",3]],[\"status\",[\"s\",\"skipped\"]]]]]]],[\"scheduledOrder\",[\"a\",[[\"s\",\"root\"],[\"s\",\"left\"],[\"s\",\"right\"],[\"s\",\"join\"]]]],[\"status\",[\"s\",\"cancelled\"]],[\"totalAttempts\",[\"i\",1]]]]},\"eventId\":\"ev-8\",\"graphRevision\":1,\"payloadHash\":\"1bc32c7c7ac6bf2fcad6052aac67671e4f4abf60fa3d5d3ff0ddf7b93739647f\",\"redacted\":true,\"runId\":\"cancelled-run\",\"sequence\":8,\"timestamp\":\"2026-07-26T12:00:09.000Z\",\"type\":\"RunCancelled\"}\n"
+    },
+    "interrupted-run": {
+      "runId": "interrupted-run",
+      "content": "{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"data\":{\"contractVersion\":\"scheduler-recovery/v1alpha1\",\"graphHash\":\"b279603658fe798478cf16e3a2cf17c0cd1e39683a420f944709dda522ba92ee\",\"implementationHash\":\"95293f5c36bd1b8cd91141f0e213b91bee340bab0249b0e2e05cd3eef7ae28e1\",\"input\":[\"o\",[[\"seed\",[\"i\",4]]]],\"inputHash\":\"1677fe469f7664f347a443c662a4aa43057bcebda532600a3a93a1af8a6f4b6d\",\"maxTotalAttempts\":9007199254740991},\"eventId\":\"ev-0\",\"graphRevision\":1,\"payloadHash\":\"537071d338501bef5ad2feea846453a73434f824641dafdbc7cd7a4f104f671c\",\"redacted\":true,\"runId\":\"interrupted-run\",\"sequence\":0,\"timestamp\":\"2026-07-26T12:00:01.000Z\",\"type\":\"RunCreated\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"data\":{},\"eventId\":\"ev-1\",\"graphRevision\":1,\"payloadHash\":\"44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"redacted\":true,\"runId\":\"interrupted-run\",\"sequence\":1,\"timestamp\":\"2026-07-26T12:00:02.000Z\",\"type\":\"RunStarted\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"attempt\":1,\"data\":{\"activityKey\":\"d2603d50312b5fec69d573b43a7ce7e760ee7da9ae52a4b9c139edd80c0df547\",\"input\":[\"o\",[[\"seed\",[\"i\",4]]]],\"inputHash\":\"1677fe469f7664f347a443c662a4aa43057bcebda532600a3a93a1af8a6f4b6d\",\"sideEffects\":\"none\"},\"eventId\":\"ev-2\",\"graphRevision\":1,\"nodeId\":\"root\",\"payloadHash\":\"8d305b1a8e4cf2edb8c27b819dfcae3c2034861d38edebd49e528db6cda2b553\",\"redacted\":true,\"runId\":\"interrupted-run\",\"sequence\":2,\"timestamp\":\"2026-07-26T12:00:03.000Z\",\"type\":\"NodeScheduled\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"attempt\":1,\"data\":{\"activityKey\":\"d2603d50312b5fec69d573b43a7ce7e760ee7da9ae52a4b9c139edd80c0df547\",\"inputHash\":\"1677fe469f7664f347a443c662a4aa43057bcebda532600a3a93a1af8a6f4b6d\"},\"eventId\":\"ev-3\",\"graphRevision\":1,\"nodeId\":\"root\",\"payloadHash\":\"716f082bb61688efd8cda1eab9b645caa187c14d46c5de12909321f922c645fa\",\"redacted\":true,\"runId\":\"interrupted-run\",\"sequence\":3,\"timestamp\":\"2026-07-26T12:00:04.000Z\",\"type\":\"NodeStarted\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"attempt\":1,\"data\":{\"inputHash\":\"1677fe469f7664f347a443c662a4aa43057bcebda532600a3a93a1af8a6f4b6d\",\"output\":[\"o\",[[\"node\",[\"s\",\"root\"]]]],\"outputHash\":\"c2b0135ed2fed785714ca6f695c8de9aa2d51e247f3477f78261fe6f4627c45c\"},\"eventId\":\"ev-4\",\"graphRevision\":1,\"nodeId\":\"root\",\"payloadHash\":\"ae1f6bf2d1e6c25086ea8490bbed285d9cce733e426e6abbbdf22705ebbaee88\",\"redacted\":true,\"runId\":\"interrupted-run\",\"sequence\":4,\"timestamp\":\"2026-07-26T12:00:05.000Z\",\"type\":\"NodeSucceeded\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"attempt\":1,\"data\":{\"outputHash\":\"c2b0135ed2fed785714ca6f695c8de9aa2d51e247f3477f78261fe6f4627c45c\"},\"edgeId\":\"root-left\",\"eventId\":\"ev-5\",\"graphRevision\":1,\"nodeId\":\"root\",\"payloadHash\":\"c7f38cb61ec3b0b9acac2c682cacac904f72310004906a956ba378ff8e4d3667\",\"redacted\":true,\"runId\":\"interrupted-run\",\"sequence\":5,\"timestamp\":\"2026-07-26T12:00:06.000Z\",\"type\":\"EdgeEmitted\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"attempt\":1,\"data\":{\"outputHash\":\"c2b0135ed2fed785714ca6f695c8de9aa2d51e247f3477f78261fe6f4627c45c\"},\"edgeId\":\"root-right\",\"eventId\":\"ev-6\",\"graphRevision\":1,\"nodeId\":\"root\",\"payloadHash\":\"c7f38cb61ec3b0b9acac2c682cacac904f72310004906a956ba378ff8e4d3667\",\"redacted\":true,\"runId\":\"interrupted-run\",\"sequence\":6,\"timestamp\":\"2026-07-26T12:00:07.000Z\",\"type\":\"EdgeEmitted\"}\n"
+    },
+    "created-only-run": {
+      "runId": "created-only-run",
+      "content": "{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"data\":{\"contractVersion\":\"scheduler-recovery/v1alpha1\",\"graphHash\":\"b279603658fe798478cf16e3a2cf17c0cd1e39683a420f944709dda522ba92ee\",\"implementationHash\":\"95293f5c36bd1b8cd91141f0e213b91bee340bab0249b0e2e05cd3eef7ae28e1\",\"input\":[\"o\",[[\"seed\",[\"i\",1]]]],\"inputHash\":\"9b5be40d702f6335f4fbb911a5784630cf2caeb089854fdd2a9ee3de3245475a\",\"maxTotalAttempts\":9007199254740991},\"eventId\":\"ev-0\",\"graphRevision\":1,\"payloadHash\":\"bfb54e72279aacb8a438a5d34af339d7277ff8e66df5894d5b56b2489cf4c21b\",\"redacted\":true,\"runId\":\"created-only-run\",\"sequence\":0,\"timestamp\":\"2026-07-26T12:00:01.000Z\",\"type\":\"RunCreated\"}\n"
+    },
+    "paused-run": {
+      "runId": "paused-run",
+      "content": "{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"data\":{\"contractVersion\":\"scheduler-recovery/v1alpha1\",\"graphHash\":\"b279603658fe798478cf16e3a2cf17c0cd1e39683a420f944709dda522ba92ee\",\"implementationHash\":\"95293f5c36bd1b8cd91141f0e213b91bee340bab0249b0e2e05cd3eef7ae28e1\",\"input\":[\"o\",[[\"seed\",[\"i\",1]]]],\"inputHash\":\"9b5be40d702f6335f4fbb911a5784630cf2caeb089854fdd2a9ee3de3245475a\",\"maxTotalAttempts\":9007199254740991},\"eventId\":\"ev-0\",\"graphRevision\":1,\"payloadHash\":\"bfb54e72279aacb8a438a5d34af339d7277ff8e66df5894d5b56b2489cf4c21b\",\"redacted\":true,\"runId\":\"paused-run\",\"sequence\":0,\"timestamp\":\"2026-07-26T12:00:01.000Z\",\"type\":\"RunCreated\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"data\":{},\"eventId\":\"ev-1\",\"graphRevision\":1,\"payloadHash\":\"44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"redacted\":true,\"runId\":\"paused-run\",\"sequence\":1,\"timestamp\":\"2026-07-26T12:00:02.000Z\",\"type\":\"RunStarted\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"data\":{},\"eventId\":\"ev-2\",\"graphRevision\":1,\"payloadHash\":\"44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"redacted\":true,\"runId\":\"paused-run\",\"sequence\":2,\"timestamp\":\"2026-07-26T12:00:03.000Z\",\"type\":\"RunPaused\"}\n"
+    },
+    "empty-run": {
+      "runId": "empty-run",
+      "content": ""
+    },
+    "truncated-run": {
+      "runId": "truncated-run",
+      "content": "{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"data\":{\"contractVersion\":\"scheduler-recovery/v1alpha1\",\"graphHash\":\"b279603658fe798478cf16e3a2cf17c0cd1e39683a420f944709dda522ba92ee\",\"implementationHash\":\"95293f5c36bd1b8cd91141f0e213b91bee340bab0249b0e2e05cd3eef7ae28e1\",\"input\":[\"o\",[[\"seed\",[\"i\",1]]]],\"inputHash\":\"9b5be40d702f6335f4fbb911a5784630cf2caeb089854fdd2a9ee3de3245475a\",\"maxTotalAttempts\":9007199254740991},\"eventId\":\"ev-0\",\"graphRevision\":1,\"payloadHash\":\"bfb54e72279aacb8a438a5d34af339d7277ff8e66df5894d5b56b2489cf4c21b\",\"redacted\":true,\"runId\":\"truncated-run\",\"sequence\":0,\"timestamp\":\"2026-07-26T12:00:01.000Z\",\"type\":\"RunCreated\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"data\":{},\"eventId\":\"ev-1\",\"graphRevision\":1,\"payloadHash\":\"44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"redacted\":true,\"runId\":\"truncated-run\",\"sequence\":1,\"timestamp\":\"2026-07-26T12:00:02.000Z\",\"type\":\"RunStarted\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"attempt\":1,\"data\":{\"activityKey\":\"f12969c2162584b8cd26dbcb28b8ce9768a3d13d0c8e5d7fd640c1fb2b902b39\",\"input\":[\"o\",[[\"seed\",[\"i\",1]]]],\"inputHash\":\"9b5be40d702f6335f4fbb911a5784630cf2caeb089854fdd2a9ee3de3245475a\",\"sideEffects\":\"none\"},\"eventId\":\"ev-2\",\"graphRevision\":1,\"nodeId\":\"root\",\"payloadHash\":\"916d7b10825641b301e9e51999bef9ab23ce9d8be7fbc19dd3f959658907941d\",\"redacted\":true,\"runId\":\"truncated-run\",\"sequence\":2,\"timestamp\":\"2026-07-26T12:00:03.000Z\",\"type\":\"NodeScheduled\"}"
+    },
+    "blank-record-run": {
+      "runId": "blank-record-run",
+      "content": "{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"data\":{\"contractVersion\":\"scheduler-recovery/v1alpha1\",\"graphHash\":\"b279603658fe798478cf16e3a2cf17c0cd1e39683a420f944709dda522ba92ee\",\"implementationHash\":\"95293f5c36bd1b8cd91141f0e213b91bee340bab0249b0e2e05cd3eef7ae28e1\",\"input\":[\"o\",[[\"seed\",[\"i\",1]]]],\"inputHash\":\"9b5be40d702f6335f4fbb911a5784630cf2caeb089854fdd2a9ee3de3245475a\",\"maxTotalAttempts\":9007199254740991},\"eventId\":\"ev-0\",\"graphRevision\":1,\"payloadHash\":\"bfb54e72279aacb8a438a5d34af339d7277ff8e66df5894d5b56b2489cf4c21b\",\"redacted\":true,\"runId\":\"blank-record-run\",\"sequence\":0,\"timestamp\":\"2026-07-26T12:00:01.000Z\",\"type\":\"RunCreated\"}\n\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"data\":{},\"eventId\":\"ev-1\",\"graphRevision\":1,\"payloadHash\":\"44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"redacted\":true,\"runId\":\"blank-record-run\",\"sequence\":1,\"timestamp\":\"2026-07-26T12:00:02.000Z\",\"type\":\"RunStarted\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"attempt\":1,\"data\":{\"activityKey\":\"f12969c2162584b8cd26dbcb28b8ce9768a3d13d0c8e5d7fd640c1fb2b902b39\",\"input\":[\"o\",[[\"seed\",[\"i\",1]]]],\"inputHash\":\"9b5be40d702f6335f4fbb911a5784630cf2caeb089854fdd2a9ee3de3245475a\",\"sideEffects\":\"none\"},\"eventId\":\"ev-2\",\"graphRevision\":1,\"nodeId\":\"root\",\"payloadHash\":\"916d7b10825641b301e9e51999bef9ab23ce9d8be7fbc19dd3f959658907941d\",\"redacted\":true,\"runId\":\"blank-record-run\",\"sequence\":2,\"timestamp\":\"2026-07-26T12:00:03.000Z\",\"type\":\"NodeScheduled\"}\n"
+    },
+    "not-json-run": {
+      "runId": "not-json-run",
+      "content": "{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"data\":{\"contractVersion\":\"scheduler-recovery/v1alpha1\",\"graphHash\":\"b279603658fe798478cf16e3a2cf17c0cd1e39683a420f944709dda522ba92ee\",\"implementationHash\":\"95293f5c36bd1b8cd91141f0e213b91bee340bab0249b0e2e05cd3eef7ae28e1\",\"input\":[\"o\",[[\"seed\",[\"i\",1]]]],\"inputHash\":\"9b5be40d702f6335f4fbb911a5784630cf2caeb089854fdd2a9ee3de3245475a\",\"maxTotalAttempts\":9007199254740991},\"eventId\":\"ev-0\",\"graphRevision\":1,\"payloadHash\":\"bfb54e72279aacb8a438a5d34af339d7277ff8e66df5894d5b56b2489cf4c21b\",\"redacted\":true,\"runId\":\"not-json-run\",\"sequence\":0,\"timestamp\":\"2026-07-26T12:00:01.000Z\",\"type\":\"RunCreated\"}\nthis is not json\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"attempt\":1,\"data\":{\"activityKey\":\"f12969c2162584b8cd26dbcb28b8ce9768a3d13d0c8e5d7fd640c1fb2b902b39\",\"input\":[\"o\",[[\"seed\",[\"i\",1]]]],\"inputHash\":\"9b5be40d702f6335f4fbb911a5784630cf2caeb089854fdd2a9ee3de3245475a\",\"sideEffects\":\"none\"},\"eventId\":\"ev-2\",\"graphRevision\":1,\"nodeId\":\"root\",\"payloadHash\":\"916d7b10825641b301e9e51999bef9ab23ce9d8be7fbc19dd3f959658907941d\",\"redacted\":true,\"runId\":\"not-json-run\",\"sequence\":2,\"timestamp\":\"2026-07-26T12:00:03.000Z\",\"type\":\"NodeScheduled\"}\n"
+    },
+    "non-object-run": {
+      "runId": "non-object-run",
+      "content": "{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"data\":{\"contractVersion\":\"scheduler-recovery/v1alpha1\",\"graphHash\":\"b279603658fe798478cf16e3a2cf17c0cd1e39683a420f944709dda522ba92ee\",\"implementationHash\":\"95293f5c36bd1b8cd91141f0e213b91bee340bab0249b0e2e05cd3eef7ae28e1\",\"input\":[\"o\",[[\"seed\",[\"i\",1]]]],\"inputHash\":\"9b5be40d702f6335f4fbb911a5784630cf2caeb089854fdd2a9ee3de3245475a\",\"maxTotalAttempts\":9007199254740991},\"eventId\":\"ev-0\",\"graphRevision\":1,\"payloadHash\":\"bfb54e72279aacb8a438a5d34af339d7277ff8e66df5894d5b56b2489cf4c21b\",\"redacted\":true,\"runId\":\"non-object-run\",\"sequence\":0,\"timestamp\":\"2026-07-26T12:00:01.000Z\",\"type\":\"RunCreated\"}\n[1,2,3]\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"attempt\":1,\"data\":{\"activityKey\":\"f12969c2162584b8cd26dbcb28b8ce9768a3d13d0c8e5d7fd640c1fb2b902b39\",\"input\":[\"o\",[[\"seed\",[\"i\",1]]]],\"inputHash\":\"9b5be40d702f6335f4fbb911a5784630cf2caeb089854fdd2a9ee3de3245475a\",\"sideEffects\":\"none\"},\"eventId\":\"ev-2\",\"graphRevision\":1,\"nodeId\":\"root\",\"payloadHash\":\"916d7b10825641b301e9e51999bef9ab23ce9d8be7fbc19dd3f959658907941d\",\"redacted\":true,\"runId\":\"non-object-run\",\"sequence\":2,\"timestamp\":\"2026-07-26T12:00:03.000Z\",\"type\":\"NodeScheduled\"}\n"
+    },
+    "unknown-property-run": {
+      "runId": "unknown-property-run",
+      "content": "{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"data\":{\"contractVersion\":\"scheduler-recovery/v1alpha1\",\"graphHash\":\"b279603658fe798478cf16e3a2cf17c0cd1e39683a420f944709dda522ba92ee\",\"implementationHash\":\"95293f5c36bd1b8cd91141f0e213b91bee340bab0249b0e2e05cd3eef7ae28e1\",\"input\":[\"o\",[[\"seed\",[\"i\",1]]]],\"inputHash\":\"9b5be40d702f6335f4fbb911a5784630cf2caeb089854fdd2a9ee3de3245475a\",\"maxTotalAttempts\":9007199254740991},\"eventId\":\"ev-0\",\"graphRevision\":1,\"payloadHash\":\"bfb54e72279aacb8a438a5d34af339d7277ff8e66df5894d5b56b2489cf4c21b\",\"redacted\":true,\"runId\":\"unknown-property-run\",\"sequence\":0,\"timestamp\":\"2026-07-26T12:00:01.000Z\",\"type\":\"RunCreated\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"data\":{},\"eventId\":\"ev-1\",\"graphRevision\":1,\"payloadHash\":\"44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"redacted\":true,\"runId\":\"unknown-property-run\",\"sequence\":1,\"timestamp\":\"2026-07-26T12:00:02.000Z\",\"type\":\"RunStarted\",\"unexpected\":\"value\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"attempt\":1,\"data\":{\"activityKey\":\"f12969c2162584b8cd26dbcb28b8ce9768a3d13d0c8e5d7fd640c1fb2b902b39\",\"input\":[\"o\",[[\"seed\",[\"i\",1]]]],\"inputHash\":\"9b5be40d702f6335f4fbb911a5784630cf2caeb089854fdd2a9ee3de3245475a\",\"sideEffects\":\"none\"},\"eventId\":\"ev-2\",\"graphRevision\":1,\"nodeId\":\"root\",\"payloadHash\":\"916d7b10825641b301e9e51999bef9ab23ce9d8be7fbc19dd3f959658907941d\",\"redacted\":true,\"runId\":\"unknown-property-run\",\"sequence\":2,\"timestamp\":\"2026-07-26T12:00:03.000Z\",\"type\":\"NodeScheduled\"}\n"
+    },
+    "missing-property-run": {
+      "runId": "missing-property-run",
+      "content": "{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"data\":{\"contractVersion\":\"scheduler-recovery/v1alpha1\",\"graphHash\":\"b279603658fe798478cf16e3a2cf17c0cd1e39683a420f944709dda522ba92ee\",\"implementationHash\":\"95293f5c36bd1b8cd91141f0e213b91bee340bab0249b0e2e05cd3eef7ae28e1\",\"input\":[\"o\",[[\"seed\",[\"i\",1]]]],\"inputHash\":\"9b5be40d702f6335f4fbb911a5784630cf2caeb089854fdd2a9ee3de3245475a\",\"maxTotalAttempts\":9007199254740991},\"eventId\":\"ev-0\",\"graphRevision\":1,\"payloadHash\":\"bfb54e72279aacb8a438a5d34af339d7277ff8e66df5894d5b56b2489cf4c21b\",\"redacted\":true,\"runId\":\"missing-property-run\",\"sequence\":0,\"timestamp\":\"2026-07-26T12:00:01.000Z\",\"type\":\"RunCreated\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"eventId\":\"ev-1\",\"graphRevision\":1,\"payloadHash\":\"44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"redacted\":true,\"runId\":\"missing-property-run\",\"sequence\":1,\"timestamp\":\"2026-07-26T12:00:02.000Z\",\"type\":\"RunStarted\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"attempt\":1,\"data\":{\"activityKey\":\"f12969c2162584b8cd26dbcb28b8ce9768a3d13d0c8e5d7fd640c1fb2b902b39\",\"input\":[\"o\",[[\"seed\",[\"i\",1]]]],\"inputHash\":\"9b5be40d702f6335f4fbb911a5784630cf2caeb089854fdd2a9ee3de3245475a\",\"sideEffects\":\"none\"},\"eventId\":\"ev-2\",\"graphRevision\":1,\"nodeId\":\"root\",\"payloadHash\":\"916d7b10825641b301e9e51999bef9ab23ce9d8be7fbc19dd3f959658907941d\",\"redacted\":true,\"runId\":\"missing-property-run\",\"sequence\":2,\"timestamp\":\"2026-07-26T12:00:03.000Z\",\"type\":\"NodeScheduled\"}\n"
+    },
+    "bad-api-version-run": {
+      "runId": "bad-api-version-run",
+      "content": "{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"data\":{\"contractVersion\":\"scheduler-recovery/v1alpha1\",\"graphHash\":\"b279603658fe798478cf16e3a2cf17c0cd1e39683a420f944709dda522ba92ee\",\"implementationHash\":\"95293f5c36bd1b8cd91141f0e213b91bee340bab0249b0e2e05cd3eef7ae28e1\",\"input\":[\"o\",[[\"seed\",[\"i\",1]]]],\"inputHash\":\"9b5be40d702f6335f4fbb911a5784630cf2caeb089854fdd2a9ee3de3245475a\",\"maxTotalAttempts\":9007199254740991},\"eventId\":\"ev-0\",\"graphRevision\":1,\"payloadHash\":\"bfb54e72279aacb8a438a5d34af339d7277ff8e66df5894d5b56b2489cf4c21b\",\"redacted\":true,\"runId\":\"bad-api-version-run\",\"sequence\":0,\"timestamp\":\"2026-07-26T12:00:01.000Z\",\"type\":\"RunCreated\"}\n{\"apiVersion\":\"events/v9\",\"data\":{},\"eventId\":\"ev-1\",\"graphRevision\":1,\"payloadHash\":\"44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"redacted\":true,\"runId\":\"bad-api-version-run\",\"sequence\":1,\"timestamp\":\"2026-07-26T12:00:02.000Z\",\"type\":\"RunStarted\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"attempt\":1,\"data\":{\"activityKey\":\"f12969c2162584b8cd26dbcb28b8ce9768a3d13d0c8e5d7fd640c1fb2b902b39\",\"input\":[\"o\",[[\"seed\",[\"i\",1]]]],\"inputHash\":\"9b5be40d702f6335f4fbb911a5784630cf2caeb089854fdd2a9ee3de3245475a\",\"sideEffects\":\"none\"},\"eventId\":\"ev-2\",\"graphRevision\":1,\"nodeId\":\"root\",\"payloadHash\":\"916d7b10825641b301e9e51999bef9ab23ce9d8be7fbc19dd3f959658907941d\",\"redacted\":true,\"runId\":\"bad-api-version-run\",\"sequence\":2,\"timestamp\":\"2026-07-26T12:00:03.000Z\",\"type\":\"NodeScheduled\"}\n"
+    },
+    "unknown-type-run": {
+      "runId": "unknown-type-run",
+      "content": "{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"data\":{\"contractVersion\":\"scheduler-recovery/v1alpha1\",\"graphHash\":\"b279603658fe798478cf16e3a2cf17c0cd1e39683a420f944709dda522ba92ee\",\"implementationHash\":\"95293f5c36bd1b8cd91141f0e213b91bee340bab0249b0e2e05cd3eef7ae28e1\",\"input\":[\"o\",[[\"seed\",[\"i\",1]]]],\"inputHash\":\"9b5be40d702f6335f4fbb911a5784630cf2caeb089854fdd2a9ee3de3245475a\",\"maxTotalAttempts\":9007199254740991},\"eventId\":\"ev-0\",\"graphRevision\":1,\"payloadHash\":\"bfb54e72279aacb8a438a5d34af339d7277ff8e66df5894d5b56b2489cf4c21b\",\"redacted\":true,\"runId\":\"unknown-type-run\",\"sequence\":0,\"timestamp\":\"2026-07-26T12:00:01.000Z\",\"type\":\"RunCreated\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"data\":{},\"eventId\":\"ev-1\",\"graphRevision\":1,\"payloadHash\":\"44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"redacted\":true,\"runId\":\"unknown-type-run\",\"sequence\":1,\"timestamp\":\"2026-07-26T12:00:02.000Z\",\"type\":\"RunTeleported\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"attempt\":1,\"data\":{\"activityKey\":\"f12969c2162584b8cd26dbcb28b8ce9768a3d13d0c8e5d7fd640c1fb2b902b39\",\"input\":[\"o\",[[\"seed\",[\"i\",1]]]],\"inputHash\":\"9b5be40d702f6335f4fbb911a5784630cf2caeb089854fdd2a9ee3de3245475a\",\"sideEffects\":\"none\"},\"eventId\":\"ev-2\",\"graphRevision\":1,\"nodeId\":\"root\",\"payloadHash\":\"916d7b10825641b301e9e51999bef9ab23ce9d8be7fbc19dd3f959658907941d\",\"redacted\":true,\"runId\":\"unknown-type-run\",\"sequence\":2,\"timestamp\":\"2026-07-26T12:00:03.000Z\",\"type\":\"NodeScheduled\"}\n"
+    },
+    "foreign-run-id-run": {
+      "runId": "foreign-run-id-run",
+      "content": "{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"data\":{\"contractVersion\":\"scheduler-recovery/v1alpha1\",\"graphHash\":\"b279603658fe798478cf16e3a2cf17c0cd1e39683a420f944709dda522ba92ee\",\"implementationHash\":\"95293f5c36bd1b8cd91141f0e213b91bee340bab0249b0e2e05cd3eef7ae28e1\",\"input\":[\"o\",[[\"seed\",[\"i\",1]]]],\"inputHash\":\"9b5be40d702f6335f4fbb911a5784630cf2caeb089854fdd2a9ee3de3245475a\",\"maxTotalAttempts\":9007199254740991},\"eventId\":\"ev-0\",\"graphRevision\":1,\"payloadHash\":\"bfb54e72279aacb8a438a5d34af339d7277ff8e66df5894d5b56b2489cf4c21b\",\"redacted\":true,\"runId\":\"foreign-run-id-run\",\"sequence\":0,\"timestamp\":\"2026-07-26T12:00:01.000Z\",\"type\":\"RunCreated\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"data\":{},\"eventId\":\"ev-1\",\"graphRevision\":1,\"payloadHash\":\"44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"redacted\":true,\"runId\":\"another-run\",\"sequence\":1,\"timestamp\":\"2026-07-26T12:00:02.000Z\",\"type\":\"RunStarted\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"attempt\":1,\"data\":{\"activityKey\":\"f12969c2162584b8cd26dbcb28b8ce9768a3d13d0c8e5d7fd640c1fb2b902b39\",\"input\":[\"o\",[[\"seed\",[\"i\",1]]]],\"inputHash\":\"9b5be40d702f6335f4fbb911a5784630cf2caeb089854fdd2a9ee3de3245475a\",\"sideEffects\":\"none\"},\"eventId\":\"ev-2\",\"graphRevision\":1,\"nodeId\":\"root\",\"payloadHash\":\"916d7b10825641b301e9e51999bef9ab23ce9d8be7fbc19dd3f959658907941d\",\"redacted\":true,\"runId\":\"foreign-run-id-run\",\"sequence\":2,\"timestamp\":\"2026-07-26T12:00:03.000Z\",\"type\":\"NodeScheduled\"}\n"
+    },
+    "out-of-sequence-run": {
+      "runId": "out-of-sequence-run",
+      "content": "{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"data\":{\"contractVersion\":\"scheduler-recovery/v1alpha1\",\"graphHash\":\"b279603658fe798478cf16e3a2cf17c0cd1e39683a420f944709dda522ba92ee\",\"implementationHash\":\"95293f5c36bd1b8cd91141f0e213b91bee340bab0249b0e2e05cd3eef7ae28e1\",\"input\":[\"o\",[[\"seed\",[\"i\",1]]]],\"inputHash\":\"9b5be40d702f6335f4fbb911a5784630cf2caeb089854fdd2a9ee3de3245475a\",\"maxTotalAttempts\":9007199254740991},\"eventId\":\"ev-0\",\"graphRevision\":1,\"payloadHash\":\"bfb54e72279aacb8a438a5d34af339d7277ff8e66df5894d5b56b2489cf4c21b\",\"redacted\":true,\"runId\":\"out-of-sequence-run\",\"sequence\":0,\"timestamp\":\"2026-07-26T12:00:01.000Z\",\"type\":\"RunCreated\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"data\":{},\"eventId\":\"ev-1\",\"graphRevision\":1,\"payloadHash\":\"44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"redacted\":true,\"runId\":\"out-of-sequence-run\",\"sequence\":7,\"timestamp\":\"2026-07-26T12:00:02.000Z\",\"type\":\"RunStarted\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"attempt\":1,\"data\":{\"activityKey\":\"f12969c2162584b8cd26dbcb28b8ce9768a3d13d0c8e5d7fd640c1fb2b902b39\",\"input\":[\"o\",[[\"seed\",[\"i\",1]]]],\"inputHash\":\"9b5be40d702f6335f4fbb911a5784630cf2caeb089854fdd2a9ee3de3245475a\",\"sideEffects\":\"none\"},\"eventId\":\"ev-2\",\"graphRevision\":1,\"nodeId\":\"root\",\"payloadHash\":\"916d7b10825641b301e9e51999bef9ab23ce9d8be7fbc19dd3f959658907941d\",\"redacted\":true,\"runId\":\"out-of-sequence-run\",\"sequence\":2,\"timestamp\":\"2026-07-26T12:00:03.000Z\",\"type\":\"NodeScheduled\"}\n"
+    },
+    "non-object-data-run": {
+      "runId": "non-object-data-run",
+      "content": "{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"data\":{\"contractVersion\":\"scheduler-recovery/v1alpha1\",\"graphHash\":\"b279603658fe798478cf16e3a2cf17c0cd1e39683a420f944709dda522ba92ee\",\"implementationHash\":\"95293f5c36bd1b8cd91141f0e213b91bee340bab0249b0e2e05cd3eef7ae28e1\",\"input\":[\"o\",[[\"seed\",[\"i\",1]]]],\"inputHash\":\"9b5be40d702f6335f4fbb911a5784630cf2caeb089854fdd2a9ee3de3245475a\",\"maxTotalAttempts\":9007199254740991},\"eventId\":\"ev-0\",\"graphRevision\":1,\"payloadHash\":\"bfb54e72279aacb8a438a5d34af339d7277ff8e66df5894d5b56b2489cf4c21b\",\"redacted\":true,\"runId\":\"non-object-data-run\",\"sequence\":0,\"timestamp\":\"2026-07-26T12:00:01.000Z\",\"type\":\"RunCreated\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"data\":[],\"eventId\":\"ev-1\",\"graphRevision\":1,\"payloadHash\":\"44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"redacted\":true,\"runId\":\"non-object-data-run\",\"sequence\":1,\"timestamp\":\"2026-07-26T12:00:02.000Z\",\"type\":\"RunStarted\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"attempt\":1,\"data\":{\"activityKey\":\"f12969c2162584b8cd26dbcb28b8ce9768a3d13d0c8e5d7fd640c1fb2b902b39\",\"input\":[\"o\",[[\"seed\",[\"i\",1]]]],\"inputHash\":\"9b5be40d702f6335f4fbb911a5784630cf2caeb089854fdd2a9ee3de3245475a\",\"sideEffects\":\"none\"},\"eventId\":\"ev-2\",\"graphRevision\":1,\"nodeId\":\"root\",\"payloadHash\":\"916d7b10825641b301e9e51999bef9ab23ce9d8be7fbc19dd3f959658907941d\",\"redacted\":true,\"runId\":\"non-object-data-run\",\"sequence\":2,\"timestamp\":\"2026-07-26T12:00:03.000Z\",\"type\":\"NodeScheduled\"}\n"
+    },
+    "invalid-timestamp-run": {
+      "runId": "invalid-timestamp-run",
+      "content": "{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"data\":{\"contractVersion\":\"scheduler-recovery/v1alpha1\",\"graphHash\":\"b279603658fe798478cf16e3a2cf17c0cd1e39683a420f944709dda522ba92ee\",\"implementationHash\":\"95293f5c36bd1b8cd91141f0e213b91bee340bab0249b0e2e05cd3eef7ae28e1\",\"input\":[\"o\",[[\"seed\",[\"i\",1]]]],\"inputHash\":\"9b5be40d702f6335f4fbb911a5784630cf2caeb089854fdd2a9ee3de3245475a\",\"maxTotalAttempts\":9007199254740991},\"eventId\":\"ev-0\",\"graphRevision\":1,\"payloadHash\":\"bfb54e72279aacb8a438a5d34af339d7277ff8e66df5894d5b56b2489cf4c21b\",\"redacted\":true,\"runId\":\"invalid-timestamp-run\",\"sequence\":0,\"timestamp\":\"2026-07-26T12:00:01.000Z\",\"type\":\"RunCreated\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"data\":{},\"eventId\":\"ev-1\",\"graphRevision\":1,\"payloadHash\":\"44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"redacted\":true,\"runId\":\"invalid-timestamp-run\",\"sequence\":1,\"timestamp\":\"yesterday\",\"type\":\"RunStarted\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"attempt\":1,\"data\":{\"activityKey\":\"f12969c2162584b8cd26dbcb28b8ce9768a3d13d0c8e5d7fd640c1fb2b902b39\",\"input\":[\"o\",[[\"seed\",[\"i\",1]]]],\"inputHash\":\"9b5be40d702f6335f4fbb911a5784630cf2caeb089854fdd2a9ee3de3245475a\",\"sideEffects\":\"none\"},\"eventId\":\"ev-2\",\"graphRevision\":1,\"nodeId\":\"root\",\"payloadHash\":\"916d7b10825641b301e9e51999bef9ab23ce9d8be7fbc19dd3f959658907941d\",\"redacted\":true,\"runId\":\"invalid-timestamp-run\",\"sequence\":2,\"timestamp\":\"2026-07-26T12:00:03.000Z\",\"type\":\"NodeScheduled\"}\n"
+    },
+    "invalid-attempt-run": {
+      "runId": "invalid-attempt-run",
+      "content": "{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"data\":{\"contractVersion\":\"scheduler-recovery/v1alpha1\",\"graphHash\":\"b279603658fe798478cf16e3a2cf17c0cd1e39683a420f944709dda522ba92ee\",\"implementationHash\":\"95293f5c36bd1b8cd91141f0e213b91bee340bab0249b0e2e05cd3eef7ae28e1\",\"input\":[\"o\",[[\"seed\",[\"i\",1]]]],\"inputHash\":\"9b5be40d702f6335f4fbb911a5784630cf2caeb089854fdd2a9ee3de3245475a\",\"maxTotalAttempts\":9007199254740991},\"eventId\":\"ev-0\",\"graphRevision\":1,\"payloadHash\":\"bfb54e72279aacb8a438a5d34af339d7277ff8e66df5894d5b56b2489cf4c21b\",\"redacted\":true,\"runId\":\"invalid-attempt-run\",\"sequence\":0,\"timestamp\":\"2026-07-26T12:00:01.000Z\",\"type\":\"RunCreated\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"data\":{},\"eventId\":\"ev-1\",\"graphRevision\":1,\"payloadHash\":\"44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"redacted\":true,\"runId\":\"invalid-attempt-run\",\"sequence\":1,\"timestamp\":\"2026-07-26T12:00:02.000Z\",\"type\":\"RunStarted\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"attempt\":0,\"data\":{\"activityKey\":\"f12969c2162584b8cd26dbcb28b8ce9768a3d13d0c8e5d7fd640c1fb2b902b39\",\"input\":[\"o\",[[\"seed\",[\"i\",1]]]],\"inputHash\":\"9b5be40d702f6335f4fbb911a5784630cf2caeb089854fdd2a9ee3de3245475a\",\"sideEffects\":\"none\"},\"eventId\":\"ev-2\",\"graphRevision\":1,\"nodeId\":\"root\",\"payloadHash\":\"916d7b10825641b301e9e51999bef9ab23ce9d8be7fbc19dd3f959658907941d\",\"redacted\":true,\"runId\":\"invalid-attempt-run\",\"sequence\":2,\"timestamp\":\"2026-07-26T12:00:03.000Z\",\"type\":\"NodeScheduled\"}\n"
+    },
+    "invalid-revision-run": {
+      "runId": "invalid-revision-run",
+      "content": "{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"data\":{\"contractVersion\":\"scheduler-recovery/v1alpha1\",\"graphHash\":\"b279603658fe798478cf16e3a2cf17c0cd1e39683a420f944709dda522ba92ee\",\"implementationHash\":\"95293f5c36bd1b8cd91141f0e213b91bee340bab0249b0e2e05cd3eef7ae28e1\",\"input\":[\"o\",[[\"seed\",[\"i\",1]]]],\"inputHash\":\"9b5be40d702f6335f4fbb911a5784630cf2caeb089854fdd2a9ee3de3245475a\",\"maxTotalAttempts\":9007199254740991},\"eventId\":\"ev-0\",\"graphRevision\":1,\"payloadHash\":\"bfb54e72279aacb8a438a5d34af339d7277ff8e66df5894d5b56b2489cf4c21b\",\"redacted\":true,\"runId\":\"invalid-revision-run\",\"sequence\":0,\"timestamp\":\"2026-07-26T12:00:01.000Z\",\"type\":\"RunCreated\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"data\":{},\"eventId\":\"ev-1\",\"graphRevision\":0,\"payloadHash\":\"44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"redacted\":true,\"runId\":\"invalid-revision-run\",\"sequence\":1,\"timestamp\":\"2026-07-26T12:00:02.000Z\",\"type\":\"RunStarted\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"attempt\":1,\"data\":{\"activityKey\":\"f12969c2162584b8cd26dbcb28b8ce9768a3d13d0c8e5d7fd640c1fb2b902b39\",\"input\":[\"o\",[[\"seed\",[\"i\",1]]]],\"inputHash\":\"9b5be40d702f6335f4fbb911a5784630cf2caeb089854fdd2a9ee3de3245475a\",\"sideEffects\":\"none\"},\"eventId\":\"ev-2\",\"graphRevision\":1,\"nodeId\":\"root\",\"payloadHash\":\"916d7b10825641b301e9e51999bef9ab23ce9d8be7fbc19dd3f959658907941d\",\"redacted\":true,\"runId\":\"invalid-revision-run\",\"sequence\":2,\"timestamp\":\"2026-07-26T12:00:03.000Z\",\"type\":\"NodeScheduled\"}\n"
+    },
+    "invalid-event-id-run": {
+      "runId": "invalid-event-id-run",
+      "content": "{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"data\":{\"contractVersion\":\"scheduler-recovery/v1alpha1\",\"graphHash\":\"b279603658fe798478cf16e3a2cf17c0cd1e39683a420f944709dda522ba92ee\",\"implementationHash\":\"95293f5c36bd1b8cd91141f0e213b91bee340bab0249b0e2e05cd3eef7ae28e1\",\"input\":[\"o\",[[\"seed\",[\"i\",1]]]],\"inputHash\":\"9b5be40d702f6335f4fbb911a5784630cf2caeb089854fdd2a9ee3de3245475a\",\"maxTotalAttempts\":9007199254740991},\"eventId\":\"ev-0\",\"graphRevision\":1,\"payloadHash\":\"bfb54e72279aacb8a438a5d34af339d7277ff8e66df5894d5b56b2489cf4c21b\",\"redacted\":true,\"runId\":\"invalid-event-id-run\",\"sequence\":0,\"timestamp\":\"2026-07-26T12:00:01.000Z\",\"type\":\"RunCreated\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"data\":{},\"eventId\":\"\",\"graphRevision\":1,\"payloadHash\":\"44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"redacted\":true,\"runId\":\"invalid-event-id-run\",\"sequence\":1,\"timestamp\":\"2026-07-26T12:00:02.000Z\",\"type\":\"RunStarted\"}\n{\"apiVersion\":\"graphengineering.reacher-z.github.io/events/v1alpha1\",\"attempt\":1,\"data\":{\"activityKey\":\"f12969c2162584b8cd26dbcb28b8ce9768a3d13d0c8e5d7fd640c1fb2b902b39\",\"input\":[\"o\",[[\"seed\",[\"i\",1]]]],\"inputHash\":\"9b5be40d702f6335f4fbb911a5784630cf2caeb089854fdd2a9ee3de3245475a\",\"sideEffects\":\"none\"},\"eventId\":\"ev-2\",\"graphRevision\":1,\"nodeId\":\"root\",\"payloadHash\":\"916d7b10825641b301e9e51999bef9ab23ce9d8be7fbc19dd3f959658907941d\",\"redacted\":true,\"runId\":\"invalid-event-id-run\",\"sequence\":2,\"timestamp\":\"2026-07-26T12:00:03.000Z\",\"type\":\"NodeScheduled\"}\n"
+    },
+    "absent-run": {
+      "runId": "absent-run",
+      "content": null
+    }
+  },
+  "cases": [
+    {
+      "name": "succeeded-run-status-json",
+      "journal": "succeeded-run",
+      "argv": [
+        "status",
+        "--run",
+        "succeeded-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "succeeded-run-status-human",
+      "journal": "succeeded-run",
+      "argv": [
+        "status",
+        "--run",
+        "succeeded-run",
+        "--store",
+        "<STORE>"
+      ]
+    },
+    {
+      "name": "succeeded-run-inspect-json",
+      "journal": "succeeded-run",
+      "argv": [
+        "inspect",
+        "--run",
+        "succeeded-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "succeeded-run-inspect-human",
+      "journal": "succeeded-run",
+      "argv": [
+        "inspect",
+        "--run",
+        "succeeded-run",
+        "--store",
+        "<STORE>"
+      ]
+    },
+    {
+      "name": "succeeded-run-logs-json",
+      "journal": "succeeded-run",
+      "argv": [
+        "logs",
+        "--run",
+        "succeeded-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "succeeded-run-logs-human",
+      "journal": "succeeded-run",
+      "argv": [
+        "logs",
+        "--run",
+        "succeeded-run",
+        "--store",
+        "<STORE>"
+      ]
+    },
+    {
+      "name": "failed-run-status-json",
+      "journal": "failed-run",
+      "argv": [
+        "status",
+        "--run",
+        "failed-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "failed-run-status-human",
+      "journal": "failed-run",
+      "argv": [
+        "status",
+        "--run",
+        "failed-run",
+        "--store",
+        "<STORE>"
+      ]
+    },
+    {
+      "name": "failed-run-inspect-json",
+      "journal": "failed-run",
+      "argv": [
+        "inspect",
+        "--run",
+        "failed-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "failed-run-inspect-human",
+      "journal": "failed-run",
+      "argv": [
+        "inspect",
+        "--run",
+        "failed-run",
+        "--store",
+        "<STORE>"
+      ]
+    },
+    {
+      "name": "failed-run-logs-json",
+      "journal": "failed-run",
+      "argv": [
+        "logs",
+        "--run",
+        "failed-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "failed-run-logs-human",
+      "journal": "failed-run",
+      "argv": [
+        "logs",
+        "--run",
+        "failed-run",
+        "--store",
+        "<STORE>"
+      ]
+    },
+    {
+      "name": "cancelled-run-status-json",
+      "journal": "cancelled-run",
+      "argv": [
+        "status",
+        "--run",
+        "cancelled-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "cancelled-run-status-human",
+      "journal": "cancelled-run",
+      "argv": [
+        "status",
+        "--run",
+        "cancelled-run",
+        "--store",
+        "<STORE>"
+      ]
+    },
+    {
+      "name": "cancelled-run-inspect-json",
+      "journal": "cancelled-run",
+      "argv": [
+        "inspect",
+        "--run",
+        "cancelled-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "cancelled-run-inspect-human",
+      "journal": "cancelled-run",
+      "argv": [
+        "inspect",
+        "--run",
+        "cancelled-run",
+        "--store",
+        "<STORE>"
+      ]
+    },
+    {
+      "name": "cancelled-run-logs-json",
+      "journal": "cancelled-run",
+      "argv": [
+        "logs",
+        "--run",
+        "cancelled-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "cancelled-run-logs-human",
+      "journal": "cancelled-run",
+      "argv": [
+        "logs",
+        "--run",
+        "cancelled-run",
+        "--store",
+        "<STORE>"
+      ]
+    },
+    {
+      "name": "interrupted-run-status-json",
+      "journal": "interrupted-run",
+      "argv": [
+        "status",
+        "--run",
+        "interrupted-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "interrupted-run-status-human",
+      "journal": "interrupted-run",
+      "argv": [
+        "status",
+        "--run",
+        "interrupted-run",
+        "--store",
+        "<STORE>"
+      ]
+    },
+    {
+      "name": "interrupted-run-inspect-json",
+      "journal": "interrupted-run",
+      "argv": [
+        "inspect",
+        "--run",
+        "interrupted-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "interrupted-run-inspect-human",
+      "journal": "interrupted-run",
+      "argv": [
+        "inspect",
+        "--run",
+        "interrupted-run",
+        "--store",
+        "<STORE>"
+      ]
+    },
+    {
+      "name": "interrupted-run-logs-json",
+      "journal": "interrupted-run",
+      "argv": [
+        "logs",
+        "--run",
+        "interrupted-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "interrupted-run-logs-human",
+      "journal": "interrupted-run",
+      "argv": [
+        "logs",
+        "--run",
+        "interrupted-run",
+        "--store",
+        "<STORE>"
+      ]
+    },
+    {
+      "name": "created-only-run-status-json",
+      "journal": "created-only-run",
+      "argv": [
+        "status",
+        "--run",
+        "created-only-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "created-only-run-status-human",
+      "journal": "created-only-run",
+      "argv": [
+        "status",
+        "--run",
+        "created-only-run",
+        "--store",
+        "<STORE>"
+      ]
+    },
+    {
+      "name": "created-only-run-inspect-json",
+      "journal": "created-only-run",
+      "argv": [
+        "inspect",
+        "--run",
+        "created-only-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "created-only-run-inspect-human",
+      "journal": "created-only-run",
+      "argv": [
+        "inspect",
+        "--run",
+        "created-only-run",
+        "--store",
+        "<STORE>"
+      ]
+    },
+    {
+      "name": "created-only-run-logs-json",
+      "journal": "created-only-run",
+      "argv": [
+        "logs",
+        "--run",
+        "created-only-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "created-only-run-logs-human",
+      "journal": "created-only-run",
+      "argv": [
+        "logs",
+        "--run",
+        "created-only-run",
+        "--store",
+        "<STORE>"
+      ]
+    },
+    {
+      "name": "paused-run-status-json",
+      "journal": "paused-run",
+      "argv": [
+        "status",
+        "--run",
+        "paused-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "paused-run-status-human",
+      "journal": "paused-run",
+      "argv": [
+        "status",
+        "--run",
+        "paused-run",
+        "--store",
+        "<STORE>"
+      ]
+    },
+    {
+      "name": "paused-run-inspect-json",
+      "journal": "paused-run",
+      "argv": [
+        "inspect",
+        "--run",
+        "paused-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "paused-run-inspect-human",
+      "journal": "paused-run",
+      "argv": [
+        "inspect",
+        "--run",
+        "paused-run",
+        "--store",
+        "<STORE>"
+      ]
+    },
+    {
+      "name": "paused-run-logs-json",
+      "journal": "paused-run",
+      "argv": [
+        "logs",
+        "--run",
+        "paused-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "paused-run-logs-human",
+      "journal": "paused-run",
+      "argv": [
+        "logs",
+        "--run",
+        "paused-run",
+        "--store",
+        "<STORE>"
+      ]
+    },
+    {
+      "name": "succeeded-run-logs-window",
+      "journal": "succeeded-run",
+      "argv": [
+        "logs",
+        "--run",
+        "succeeded-run",
+        "--store",
+        "<STORE>",
+        "--from",
+        "5",
+        "--limit",
+        "3",
+        "--json"
+      ]
+    },
+    {
+      "name": "succeeded-run-logs-window-human",
+      "journal": "succeeded-run",
+      "argv": [
+        "logs",
+        "--run",
+        "succeeded-run",
+        "--store",
+        "<STORE>",
+        "--from",
+        "5",
+        "--limit",
+        "3"
+      ]
+    },
+    {
+      "name": "succeeded-run-logs-beyond-end",
+      "journal": "succeeded-run",
+      "argv": [
+        "logs",
+        "--run",
+        "succeeded-run",
+        "--store",
+        "<STORE>",
+        "--from",
+        "999",
+        "--json"
+      ]
+    },
+    {
+      "name": "succeeded-run-logs-equals-form",
+      "journal": "succeeded-run",
+      "argv": [
+        "logs",
+        "--run=succeeded-run",
+        "--store=<STORE>",
+        "--limit=2",
+        "--json"
+      ]
+    },
+    {
+      "name": "empty-run-status-json",
+      "journal": "empty-run",
+      "argv": [
+        "status",
+        "--run",
+        "empty-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "empty-run-status-human",
+      "journal": "empty-run",
+      "argv": [
+        "status",
+        "--run",
+        "empty-run",
+        "--store",
+        "<STORE>"
+      ]
+    },
+    {
+      "name": "empty-run-logs-json",
+      "journal": "empty-run",
+      "argv": [
+        "logs",
+        "--run",
+        "empty-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "truncated-run-status-json",
+      "journal": "truncated-run",
+      "argv": [
+        "status",
+        "--run",
+        "truncated-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "truncated-run-status-human",
+      "journal": "truncated-run",
+      "argv": [
+        "status",
+        "--run",
+        "truncated-run",
+        "--store",
+        "<STORE>"
+      ]
+    },
+    {
+      "name": "truncated-run-logs-json",
+      "journal": "truncated-run",
+      "argv": [
+        "logs",
+        "--run",
+        "truncated-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "blank-record-run-status-json",
+      "journal": "blank-record-run",
+      "argv": [
+        "status",
+        "--run",
+        "blank-record-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "blank-record-run-status-human",
+      "journal": "blank-record-run",
+      "argv": [
+        "status",
+        "--run",
+        "blank-record-run",
+        "--store",
+        "<STORE>"
+      ]
+    },
+    {
+      "name": "blank-record-run-logs-json",
+      "journal": "blank-record-run",
+      "argv": [
+        "logs",
+        "--run",
+        "blank-record-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "not-json-run-status-json",
+      "journal": "not-json-run",
+      "argv": [
+        "status",
+        "--run",
+        "not-json-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "not-json-run-status-human",
+      "journal": "not-json-run",
+      "argv": [
+        "status",
+        "--run",
+        "not-json-run",
+        "--store",
+        "<STORE>"
+      ]
+    },
+    {
+      "name": "not-json-run-logs-json",
+      "journal": "not-json-run",
+      "argv": [
+        "logs",
+        "--run",
+        "not-json-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "non-object-run-status-json",
+      "journal": "non-object-run",
+      "argv": [
+        "status",
+        "--run",
+        "non-object-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "non-object-run-status-human",
+      "journal": "non-object-run",
+      "argv": [
+        "status",
+        "--run",
+        "non-object-run",
+        "--store",
+        "<STORE>"
+      ]
+    },
+    {
+      "name": "non-object-run-logs-json",
+      "journal": "non-object-run",
+      "argv": [
+        "logs",
+        "--run",
+        "non-object-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "unknown-property-run-status-json",
+      "journal": "unknown-property-run",
+      "argv": [
+        "status",
+        "--run",
+        "unknown-property-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "unknown-property-run-status-human",
+      "journal": "unknown-property-run",
+      "argv": [
+        "status",
+        "--run",
+        "unknown-property-run",
+        "--store",
+        "<STORE>"
+      ]
+    },
+    {
+      "name": "unknown-property-run-logs-json",
+      "journal": "unknown-property-run",
+      "argv": [
+        "logs",
+        "--run",
+        "unknown-property-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "missing-property-run-status-json",
+      "journal": "missing-property-run",
+      "argv": [
+        "status",
+        "--run",
+        "missing-property-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "missing-property-run-status-human",
+      "journal": "missing-property-run",
+      "argv": [
+        "status",
+        "--run",
+        "missing-property-run",
+        "--store",
+        "<STORE>"
+      ]
+    },
+    {
+      "name": "missing-property-run-logs-json",
+      "journal": "missing-property-run",
+      "argv": [
+        "logs",
+        "--run",
+        "missing-property-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "bad-api-version-run-status-json",
+      "journal": "bad-api-version-run",
+      "argv": [
+        "status",
+        "--run",
+        "bad-api-version-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "bad-api-version-run-status-human",
+      "journal": "bad-api-version-run",
+      "argv": [
+        "status",
+        "--run",
+        "bad-api-version-run",
+        "--store",
+        "<STORE>"
+      ]
+    },
+    {
+      "name": "bad-api-version-run-logs-json",
+      "journal": "bad-api-version-run",
+      "argv": [
+        "logs",
+        "--run",
+        "bad-api-version-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "unknown-type-run-status-json",
+      "journal": "unknown-type-run",
+      "argv": [
+        "status",
+        "--run",
+        "unknown-type-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "unknown-type-run-status-human",
+      "journal": "unknown-type-run",
+      "argv": [
+        "status",
+        "--run",
+        "unknown-type-run",
+        "--store",
+        "<STORE>"
+      ]
+    },
+    {
+      "name": "unknown-type-run-logs-json",
+      "journal": "unknown-type-run",
+      "argv": [
+        "logs",
+        "--run",
+        "unknown-type-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "foreign-run-id-run-status-json",
+      "journal": "foreign-run-id-run",
+      "argv": [
+        "status",
+        "--run",
+        "foreign-run-id-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "foreign-run-id-run-status-human",
+      "journal": "foreign-run-id-run",
+      "argv": [
+        "status",
+        "--run",
+        "foreign-run-id-run",
+        "--store",
+        "<STORE>"
+      ]
+    },
+    {
+      "name": "foreign-run-id-run-logs-json",
+      "journal": "foreign-run-id-run",
+      "argv": [
+        "logs",
+        "--run",
+        "foreign-run-id-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "out-of-sequence-run-status-json",
+      "journal": "out-of-sequence-run",
+      "argv": [
+        "status",
+        "--run",
+        "out-of-sequence-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "out-of-sequence-run-status-human",
+      "journal": "out-of-sequence-run",
+      "argv": [
+        "status",
+        "--run",
+        "out-of-sequence-run",
+        "--store",
+        "<STORE>"
+      ]
+    },
+    {
+      "name": "out-of-sequence-run-logs-json",
+      "journal": "out-of-sequence-run",
+      "argv": [
+        "logs",
+        "--run",
+        "out-of-sequence-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "non-object-data-run-status-json",
+      "journal": "non-object-data-run",
+      "argv": [
+        "status",
+        "--run",
+        "non-object-data-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "non-object-data-run-status-human",
+      "journal": "non-object-data-run",
+      "argv": [
+        "status",
+        "--run",
+        "non-object-data-run",
+        "--store",
+        "<STORE>"
+      ]
+    },
+    {
+      "name": "non-object-data-run-logs-json",
+      "journal": "non-object-data-run",
+      "argv": [
+        "logs",
+        "--run",
+        "non-object-data-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "invalid-timestamp-run-status-json",
+      "journal": "invalid-timestamp-run",
+      "argv": [
+        "status",
+        "--run",
+        "invalid-timestamp-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "invalid-timestamp-run-status-human",
+      "journal": "invalid-timestamp-run",
+      "argv": [
+        "status",
+        "--run",
+        "invalid-timestamp-run",
+        "--store",
+        "<STORE>"
+      ]
+    },
+    {
+      "name": "invalid-timestamp-run-logs-json",
+      "journal": "invalid-timestamp-run",
+      "argv": [
+        "logs",
+        "--run",
+        "invalid-timestamp-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "invalid-attempt-run-status-json",
+      "journal": "invalid-attempt-run",
+      "argv": [
+        "status",
+        "--run",
+        "invalid-attempt-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "invalid-attempt-run-status-human",
+      "journal": "invalid-attempt-run",
+      "argv": [
+        "status",
+        "--run",
+        "invalid-attempt-run",
+        "--store",
+        "<STORE>"
+      ]
+    },
+    {
+      "name": "invalid-attempt-run-logs-json",
+      "journal": "invalid-attempt-run",
+      "argv": [
+        "logs",
+        "--run",
+        "invalid-attempt-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "invalid-revision-run-status-json",
+      "journal": "invalid-revision-run",
+      "argv": [
+        "status",
+        "--run",
+        "invalid-revision-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "invalid-revision-run-status-human",
+      "journal": "invalid-revision-run",
+      "argv": [
+        "status",
+        "--run",
+        "invalid-revision-run",
+        "--store",
+        "<STORE>"
+      ]
+    },
+    {
+      "name": "invalid-revision-run-logs-json",
+      "journal": "invalid-revision-run",
+      "argv": [
+        "logs",
+        "--run",
+        "invalid-revision-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "invalid-event-id-run-status-json",
+      "journal": "invalid-event-id-run",
+      "argv": [
+        "status",
+        "--run",
+        "invalid-event-id-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "invalid-event-id-run-status-human",
+      "journal": "invalid-event-id-run",
+      "argv": [
+        "status",
+        "--run",
+        "invalid-event-id-run",
+        "--store",
+        "<STORE>"
+      ]
+    },
+    {
+      "name": "invalid-event-id-run-logs-json",
+      "journal": "invalid-event-id-run",
+      "argv": [
+        "logs",
+        "--run",
+        "invalid-event-id-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "absent-run-status-json",
+      "journal": "absent-run",
+      "argv": [
+        "status",
+        "--run",
+        "absent-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "absent-run-status-human",
+      "journal": "absent-run",
+      "argv": [
+        "status",
+        "--run",
+        "absent-run",
+        "--store",
+        "<STORE>"
+      ]
+    },
+    {
+      "name": "absent-run-inspect-json",
+      "journal": "absent-run",
+      "argv": [
+        "inspect",
+        "--run",
+        "absent-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "absent-run-logs-json",
+      "journal": "absent-run",
+      "argv": [
+        "logs",
+        "--run",
+        "absent-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "cancel-fails-closed-json",
+      "journal": "succeeded-run",
+      "argv": [
+        "cancel",
+        "--run",
+        "succeeded-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "cancel-fails-closed-human",
+      "journal": "succeeded-run",
+      "argv": [
+        "cancel",
+        "--run",
+        "succeeded-run",
+        "--store",
+        "<STORE>"
+      ]
+    },
+    {
+      "name": "cancel-fails-closed-on-absent-run",
+      "journal": "absent-run",
+      "argv": [
+        "cancel",
+        "--run",
+        "absent-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "resume-fails-closed-json",
+      "journal": "succeeded-run",
+      "argv": [
+        "resume",
+        "--run",
+        "succeeded-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "resume-fails-closed-human",
+      "journal": "succeeded-run",
+      "argv": [
+        "resume",
+        "--run",
+        "succeeded-run",
+        "--store",
+        "<STORE>"
+      ]
+    },
+    {
+      "name": "resume-fails-closed-on-absent-run",
+      "journal": "absent-run",
+      "argv": [
+        "resume",
+        "--run",
+        "absent-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "replay-fails-closed-json",
+      "journal": "succeeded-run",
+      "argv": [
+        "replay",
+        "--run",
+        "succeeded-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "replay-fails-closed-human",
+      "journal": "succeeded-run",
+      "argv": [
+        "replay",
+        "--run",
+        "succeeded-run",
+        "--store",
+        "<STORE>"
+      ]
+    },
+    {
+      "name": "replay-fails-closed-on-absent-run",
+      "journal": "absent-run",
+      "argv": [
+        "replay",
+        "--run",
+        "absent-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "fork-fails-closed-json",
+      "journal": "succeeded-run",
+      "argv": [
+        "fork",
+        "--run",
+        "succeeded-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "fork-fails-closed-human",
+      "journal": "succeeded-run",
+      "argv": [
+        "fork",
+        "--run",
+        "succeeded-run",
+        "--store",
+        "<STORE>"
+      ]
+    },
+    {
+      "name": "fork-fails-closed-on-absent-run",
+      "journal": "absent-run",
+      "argv": [
+        "fork",
+        "--run",
+        "absent-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "retry-fails-closed-json",
+      "journal": "succeeded-run",
+      "argv": [
+        "retry",
+        "--run",
+        "succeeded-run",
+        "--node",
+        "root",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "retry-fails-closed-human",
+      "journal": "succeeded-run",
+      "argv": [
+        "retry",
+        "--run",
+        "succeeded-run",
+        "--node",
+        "root",
+        "--store",
+        "<STORE>"
+      ]
+    },
+    {
+      "name": "retry-fails-closed-on-absent-run",
+      "journal": "absent-run",
+      "argv": [
+        "retry",
+        "--run",
+        "absent-run",
+        "--node",
+        "root",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "status-without-run",
+      "journal": "succeeded-run",
+      "argv": [
+        "status",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "status-without-store",
+      "journal": "succeeded-run",
+      "argv": [
+        "status",
+        "--run",
+        "succeeded-run",
+        "--json"
+      ]
+    },
+    {
+      "name": "status-unsafe-run-id",
+      "journal": "succeeded-run",
+      "argv": [
+        "status",
+        "--run",
+        "not a safe id",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "status-unsafe-run-id-human",
+      "journal": "succeeded-run",
+      "argv": [
+        "status",
+        "--run",
+        "not a safe id",
+        "--store",
+        "<STORE>"
+      ]
+    },
+    {
+      "name": "status-duplicate-run",
+      "journal": "succeeded-run",
+      "argv": [
+        "status",
+        "--run",
+        "succeeded-run",
+        "--run",
+        "succeeded-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "status-with-operand",
+      "journal": "succeeded-run",
+      "argv": [
+        "status",
+        "--run",
+        "succeeded-run",
+        "--store",
+        "<STORE>",
+        "leftover",
+        "--json"
+      ]
+    },
+    {
+      "name": "status-with-format",
+      "journal": "succeeded-run",
+      "argv": [
+        "status",
+        "--run",
+        "succeeded-run",
+        "--store",
+        "<STORE>",
+        "--format",
+        "dot",
+        "--json"
+      ]
+    },
+    {
+      "name": "status-with-input-format",
+      "journal": "succeeded-run",
+      "argv": [
+        "status",
+        "--run",
+        "succeeded-run",
+        "--store",
+        "<STORE>",
+        "--input-format",
+        "yaml",
+        "--json"
+      ]
+    },
+    {
+      "name": "status-with-node",
+      "journal": "succeeded-run",
+      "argv": [
+        "status",
+        "--run",
+        "succeeded-run",
+        "--store",
+        "<STORE>",
+        "--node",
+        "root",
+        "--json"
+      ]
+    },
+    {
+      "name": "status-with-limit",
+      "journal": "succeeded-run",
+      "argv": [
+        "status",
+        "--run",
+        "succeeded-run",
+        "--store",
+        "<STORE>",
+        "--limit",
+        "5",
+        "--json"
+      ]
+    },
+    {
+      "name": "doctor-with-run",
+      "journal": null,
+      "argv": [
+        "doctor",
+        "--run",
+        "succeeded-run",
+        "--json"
+      ]
+    },
+    {
+      "name": "retry-without-node",
+      "journal": "succeeded-run",
+      "argv": [
+        "retry",
+        "--run",
+        "succeeded-run",
+        "--store",
+        "<STORE>",
+        "--json"
+      ]
+    },
+    {
+      "name": "logs-zero-limit",
+      "journal": "succeeded-run",
+      "argv": [
+        "logs",
+        "--run",
+        "succeeded-run",
+        "--store",
+        "<STORE>",
+        "--limit",
+        "0",
+        "--json"
+      ]
+    },
+    {
+      "name": "logs-oversized-limit",
+      "journal": "succeeded-run",
+      "argv": [
+        "logs",
+        "--run",
+        "succeeded-run",
+        "--store",
+        "<STORE>",
+        "--limit",
+        "10001",
+        "--json"
+      ]
+    },
+    {
+      "name": "logs-negative-from",
+      "journal": "succeeded-run",
+      "argv": [
+        "logs",
+        "--run",
+        "succeeded-run",
+        "--store",
+        "<STORE>",
+        "--from",
+        "-1",
+        "--json"
+      ]
+    },
+    {
+      "name": "logs-non-numeric-from",
+      "journal": "succeeded-run",
+      "argv": [
+        "logs",
+        "--run",
+        "succeeded-run",
+        "--store",
+        "<STORE>",
+        "--from",
+        "01",
+        "--json"
+      ]
+    },
+    {
+      "name": "logs-missing-limit-value",
+      "journal": "succeeded-run",
+      "argv": [
+        "logs",
+        "--run",
+        "succeeded-run",
+        "--store",
+        "<STORE>",
+        "--limit",
+        "--json"
+      ]
+    },
+    {
+      "name": "status-missing-store-directory",
+      "journal": "succeeded-run",
+      "argv": [
+        "status",
+        "--run",
+        "succeeded-run",
+        "--store",
+        "<STORE>/absent-subdirectory",
+        "--json"
+      ]
+    },
+    {
+      "name": "unknown-operational-command",
+      "journal": null,
+      "argv": [
+        "status-report",
+        "--json"
+      ]
+    }
+  ]
+}
