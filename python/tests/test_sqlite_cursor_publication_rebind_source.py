@@ -330,7 +330,7 @@ def test_definition_time_native_and_owner_captures_survive_alias_rebinding(
 
         monkeypatch.setattr(source, "_CURSOR_REBIND_SQLITE_CONNECTION_CURSOR", forbidden)
         monkeypatch.setattr(source, "_CURSOR_REBIND_SQLITE_CURSOR_EXECUTE", forbidden)
-        monkeypatch.setattr(source, "_CURSOR_REBIND_SQLITE_CURSOR_FETCHONE", forbidden)
+        monkeypatch.setattr(source, "_CURSOR_REBIND_SQLITE_CURSOR_FETCHMANY", forbidden)
         monkeypatch.setattr(source, "_CURSOR_REBIND_SQLITE_CURSOR_CLOSE", forbidden)
         monkeypatch.setattr(
             SQLiteV1BaselineConnectionOwner,
@@ -626,9 +626,10 @@ def test_changes_shape_is_exact_and_primary_failure_wins_over_close_failure() ->
         _execute(connection, execution)
         _release(connection, execution)
 
-        def invalid_row(cursor: sqlite3.Cursor) -> object:
+        def invalid_rows(cursor: sqlite3.Cursor, size: int) -> object:
             del cursor
-            return Row((1,))
+            assert size == 2
+            return [Row((1,))]
 
         def hostile_close(cursor: sqlite3.Cursor) -> None:
             del cursor
@@ -638,7 +639,7 @@ def test_changes_shape_is_exact_and_primary_failure_wins_over_close_failure() ->
             source.SQLiteV1BaselineConnectionOwner._prove_cursor_publication_rebind_changes(
                 connection,
                 cast(Any, execution),
-                _cursor_fetchone=invalid_row,
+                _cursor_fetchmany=invalid_rows,
                 _cursor_close=hostile_close,
             )
         snapshot = source._read_sqlite_connection_cursor_publication_rebind_snapshot_intrinsic(
@@ -648,6 +649,197 @@ def test_changes_shape_is_exact_and_primary_failure_wins_over_close_failure() ->
         assert (snapshot.changes_fetch_count, snapshot.changes_release_count) == (1, 1)
     finally:
         _close(connection)
+
+
+def test_changes_value_primary_wins_over_close_failure() -> None:
+    connection = _open_target()
+    try:
+        execution = _prepare(connection)
+        _execute(connection, execution)
+        _release(connection, execution)
+
+        def invalid_rows(_cursor: sqlite3.Cursor, size: int) -> object:
+            assert size == 2
+            return [(-1,)]
+
+        def hostile_close(_cursor: sqlite3.Cursor) -> None:
+            raise RuntimeError("hostile close secondary")
+
+        with _expect("GE_CURSOR_B3_CURSOR_CHANGES_VALUE"):
+            source.SQLiteV1BaselineConnectionOwner._prove_cursor_publication_rebind_changes(
+                connection,
+                cast(Any, execution),
+                _cursor_fetchmany=invalid_rows,
+                _cursor_close=hostile_close,
+            )
+        snapshot = source._read_sqlite_connection_cursor_publication_rebind_snapshot_intrinsic(
+            connection, cast(Any, execution)
+        )
+        assert snapshot.lifecycle == "poisoned"
+        assert (snapshot.changes_fetch_count, snapshot.changes_release_count) == (1, 1)
+    finally:
+        _close(connection)
+
+
+def test_changes_prepare_and_bounded_fetch_failures_are_terminal() -> None:
+    class PreparePrimary(RuntimeError):
+        pass
+
+    class FetchPrimary(RuntimeError):
+        pass
+
+    prepare_connection = _open_target()
+    fetch_connection = _open_target()
+    try:
+        prepare_execution = _prepare(prepare_connection)
+        _execute(prepare_connection, prepare_execution)
+        _release(prepare_connection, prepare_execution)
+
+        def fail_prepare(_raw: sqlite3.Connection) -> sqlite3.Cursor:
+            raise PreparePrimary("changes prepare primary")
+
+        with _expect("GE_CURSOR_B3_CURSOR_CHANGES_PREPARE"):
+            source.SQLiteV1BaselineConnectionOwner._prove_cursor_publication_rebind_changes(
+                prepare_connection,
+                cast(Any, prepare_execution),
+                _cursor_factory=fail_prepare,
+            )
+        prepared = source._read_sqlite_connection_cursor_publication_rebind_snapshot_intrinsic(
+            prepare_connection, cast(Any, prepare_execution)
+        )
+        assert prepared.lifecycle == "poisoned"
+        assert (
+            prepared.changes_prepare_count,
+            prepared.changes_fetch_count,
+            prepared.changes_release_count,
+        ) == (0, 0, 0)
+
+        fetch_execution = _prepare(fetch_connection)
+        _execute(fetch_connection, fetch_execution)
+        _release(fetch_connection, fetch_execution)
+        fetch_calls: list[int] = []
+
+        def fail_fetch(_cursor: sqlite3.Cursor, size: int) -> object:
+            fetch_calls.append(size)
+            raise FetchPrimary("bounded fetch primary")
+
+        with pytest.raises(FetchPrimary, match=r"^bounded fetch primary$"):
+            source.SQLiteV1BaselineConnectionOwner._prove_cursor_publication_rebind_changes(
+                fetch_connection,
+                cast(Any, fetch_execution),
+                _cursor_fetchmany=fail_fetch,
+            )
+        fetched = source._read_sqlite_connection_cursor_publication_rebind_snapshot_intrinsic(
+            fetch_connection, cast(Any, fetch_execution)
+        )
+        assert fetch_calls == [2]
+        assert fetched.lifecycle == "poisoned"
+        assert (
+            fetched.changes_prepare_count,
+            fetched.changes_fetch_count,
+            fetched.changes_release_count,
+        ) == (1, 1, 1)
+    finally:
+        _close(prepare_connection)
+        _close(fetch_connection)
+
+
+@pytest.mark.parametrize(
+    ("rows", "code"),
+    [
+        ([], "GE_CURSOR_B3_CURSOR_CHANGES_SHAPE"),
+        ([(1,), (1,)], "GE_CURSOR_B3_CURSOR_CHANGES_SHAPE"),
+        (((1,),), "GE_CURSOR_B3_CURSOR_CHANGES_SHAPE"),
+        ("1", "GE_CURSOR_B3_CURSOR_CHANGES_SHAPE"),
+        ([()], "GE_CURSOR_B3_CURSOR_CHANGES_SHAPE"),
+        ([(1, 1)], "GE_CURSOR_B3_CURSOR_CHANGES_SHAPE"),
+        ([(1.0,)], "GE_CURSOR_B3_CURSOR_CHANGES_SHAPE"),
+        ([(True,)], "GE_CURSOR_B3_CURSOR_CHANGES_SHAPE"),
+        ([(-1,)], "GE_CURSOR_B3_CURSOR_CHANGES_VALUE"),
+        ([(2**53,)], "GE_CURSOR_B3_CURSOR_CHANGES_VALUE"),
+        ([(0,)], "GE_CURSOR_B3_CURSOR_CHANGES_VALUE"),
+    ],
+)
+def test_bounded_changes_rows_reject_zero_many_shape_type_and_range(
+    rows: object,
+    code: str,
+) -> None:
+    connection = _open_target()
+    try:
+        execution = _prepare(connection)
+        _execute(connection, execution)
+        _release(connection, execution)
+        calls: list[int] = []
+
+        def supplied_rows(_cursor: sqlite3.Cursor, size: int) -> object:
+            calls.append(size)
+            return rows
+
+        with _expect(code):
+            source.SQLiteV1BaselineConnectionOwner._prove_cursor_publication_rebind_changes(
+                connection,
+                cast(Any, execution),
+                _cursor_fetchmany=supplied_rows,
+            )
+        snapshot = source._read_sqlite_connection_cursor_publication_rebind_snapshot_intrinsic(
+            connection, cast(Any, execution)
+        )
+        assert calls == [2]
+        assert snapshot.lifecycle == "poisoned"
+        assert (
+            snapshot.changes_prepare_count,
+            snapshot.changes_fetch_count,
+            snapshot.changes_release_count,
+        ) == (1, 1, 1)
+        assert snapshot.changes_affected_rows is None
+    finally:
+        _close(connection)
+
+
+def test_bounded_changes_rejects_subclasses_and_hostile_iterables_without_hooks() -> None:
+    class Rows(list[tuple[object, ...]]):
+        pass
+
+    class Row(tuple[object, ...]):
+        pass
+
+    class Hostile:
+        calls = 0
+
+        def __len__(self) -> int:
+            type(self).calls += 1
+            raise AssertionError("must not inspect hostile length")
+
+        def __iter__(self) -> Any:
+            type(self).calls += 1
+            raise AssertionError("must not iterate hostile value")
+
+        def __getitem__(self, _key: object) -> Any:
+            type(self).calls += 1
+            raise AssertionError("must not index hostile value")
+
+    for rows in (Rows([(1,)]), [Row((1,))], Hostile()):
+        connection = _open_target()
+        try:
+            execution = _prepare(connection)
+            _execute(connection, execution)
+            _release(connection, execution)
+
+            def supplied_rows(
+                _cursor: sqlite3.Cursor, size: int, *, _rows: object = rows
+            ) -> object:
+                assert size == 2
+                return _rows
+
+            with _expect("GE_CURSOR_B3_CURSOR_CHANGES_SHAPE"):
+                source.SQLiteV1BaselineConnectionOwner._prove_cursor_publication_rebind_changes(
+                    connection,
+                    cast(Any, execution),
+                    _cursor_fetchmany=supplied_rows,
+                )
+        finally:
+            _close(connection)
+    assert Hostile.calls == 0
 
 
 @pytest.mark.parametrize("fault_at", [1, 2])
@@ -660,7 +852,7 @@ def test_changes_counter_fault_is_terminal_and_cannot_retry(fault_at: int) -> No
         execution = _prepare(connection)
         _execute(connection, execution)
         _release(connection, execution)
-        expected_total = _state(execution).total_changes
+        expected_total = cast(int, _state(execution).total_changes)
         calls = 0
 
         def faulting_total(raw: sqlite3.Connection) -> int:

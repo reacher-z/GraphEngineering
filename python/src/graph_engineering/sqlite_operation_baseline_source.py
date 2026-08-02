@@ -899,7 +899,7 @@ _CURSOR_REBIND_SQLITE_CONNECTION_IN_TRANSACTION = sqlite3.Connection.in_transact
 _CURSOR_REBIND_SQLITE_CONNECTION_TOTAL_CHANGES = sqlite3.Connection.total_changes
 _CURSOR_REBIND_SQLITE_CURSOR_EXECUTE = sqlite3.Cursor.execute
 _CURSOR_REBIND_SQLITE_CURSOR_CLOSE = sqlite3.Cursor.close
-_CURSOR_REBIND_SQLITE_CURSOR_FETCHONE = sqlite3.Cursor.fetchone
+_CURSOR_REBIND_SQLITE_CURSOR_FETCHMANY = sqlite3.Cursor.fetchmany
 _CURSOR_REBIND_SQLITE_CURSOR_ROWCOUNT = sqlite3.Cursor.rowcount
 _CURSOR_REBIND_SQLITE_CURSOR_CONNECTION = sqlite3.Cursor.connection
 _CURSOR_SEAL_READ_SQLITE_CONNECTION_CURSOR = sqlite3.Connection.cursor
@@ -2048,15 +2048,15 @@ class SQLiteV1BaselineConnectionOwner:
             _CURSOR_REBIND_SQLITE_CONNECTION_CURSOR
         ),
         _cursor_execute: Callable[..., sqlite3.Cursor] = _CURSOR_REBIND_SQLITE_CURSOR_EXECUTE,
-        _cursor_fetchone: Callable[[sqlite3.Cursor], object] = (
-            _CURSOR_REBIND_SQLITE_CURSOR_FETCHONE
+        _cursor_fetchmany: Callable[[sqlite3.Cursor, int], object] = (
+            _CURSOR_REBIND_SQLITE_CURSOR_FETCHMANY
         ),
         _cursor_close: Callable[[sqlite3.Cursor], None] = _CURSOR_REBIND_SQLITE_CURSOR_CLOSE,
         _cursor_belongs: Callable[[object, sqlite3.Connection], bool] = (
             _cursor_publication_rebind_cursor_belongs
         ),
     ) -> _SQLiteConnectionCursorPublicationRebindSnapshot:
-        """Read exactly one changes() row, close once, and finalize the private ledger."""
+        """Boundedly fetch the only changes() row, close once, and finalize."""
 
         state = _state_for(self, execution)
         try:
@@ -2093,11 +2093,14 @@ class SQLiteV1BaselineConnectionOwner:
         state.changes_prepare_count = 1
 
         primary: BaseException | None = None
-        row: object = None
+        rows: object = None
         try:
             _cursor_execute(changes_cursor, state.changes_sql, ())
-            row = _cursor_fetchone(changes_cursor)
             state.changes_fetch_count = 1
+            rows = _cursor_fetchmany(changes_cursor, 2)
+            if type(rows) is not list or len(rows) != 1:
+                _cursor_publication_rebind_fail("GE_CURSOR_B3_CURSOR_CHANGES_SHAPE")
+            row = rows[0]
             if type(row) is not tuple or len(row) != 1 or type(row[0]) is not int:
                 _cursor_publication_rebind_fail("GE_CURSOR_B3_CURSOR_CHANGES_SHAPE")
             value = row[0]

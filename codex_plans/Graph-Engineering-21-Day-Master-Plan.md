@@ -20508,3 +20508,121 @@ Rule11、Rule12全部消费同一条经过认证的clock lineage且manifest/prod
 
 每一Wave仍执行：append-only plan prefix proof、durable codex log、显式文件ownership、完整
 diff check、精确author/committer、无coauthor、push后local/tracking/remote object equality。
+
+#### 31.37.69 Wave 1E/P1：真实 post-T native failure 与 Python exact-one changes proof（2026-08-02 PDT 追加；既有内容不改）
+
+本节只接受 31.37.68.1 中两个已经闭环的增量，不宣称 Wave 1E hostile matrix整体完成。
+追加前计划精确为20,510行，完整前缀 SHA-256为
+`1bd675d0e5ab213972d32900e3d0dab333016152a9522084e5e00cc06b9b4a5f`；前20,510行
+必须持续 byte-for-byte 不变。
+
+##### 31.37.69.1 两端真实 post-T SQLite execute failure
+
+TypeScript test fixture增加默认关闭的 `beforeBaselineStageCreation` callback。它只在
+authentic cursor rows写入后、TEMP stage/B2/source/outer authority全部封口之前接收本次新建的
+exact connection并调用一次。测试通过该callback安装graph-local TEMP `BEFORE UPDATE` trigger，
+trigger body使用SQLite `RAISE(ABORT, ...)`。因为trigger在B2、outer authority与S捕获epoch之前
+已经存在，后续authority/ledger/clock lineage保持authentic；composite leaf先mint P/context、
+consume S得到T，再由定义期捕获的 `StatementSync.run` 真实命中SQLite class 19。
+
+Python使用同样语义但不增加production seam：在S mint后，从exact owner取得同一个真实
+`sqlite3.Connection`，安装TEMP `BEFORE UPDATE ... RAISE(ABORT)`。该raw exact connection路径
+不会伪造owner epoch或total counter；composite leaf越过T后在真实cursor execute抛
+`GE_CURSOR_B3_CURSOR_REBIND_EXECUTE`。
+
+两端接受条件均已证明：
+
+- T已经存在且S ordinary active reader拒绝；
+- E `executeCount=1`、`releaseCount=1`、lifecycle poisoned且statement/cursor ownership retired；
+- outer authority、P/context与T均poison；
+- A没有mint，因此W与R11控制流不可达且没有partial proof；
+- native affected、changes prepare/fetch/release与cursor ledger均保持零进度；
+- 原始native primary不被cleanup secondary覆盖；
+- transaction仍由上层fixture disposer rollback/close，leaf本身不冒充transaction owner；
+- success/prewrite/postconsume/native-run/W-fault/R11-fault六种TS GC profile全部回收；
+- Python graph/authority/connection/S/P/context/T/E weak references全部回收，九个registry回到
+  baseline，TEMP trigger显式drop。
+
+曾尝试的两个错误时序已经被拒绝且不保留：S后通过public `execTrusted`安装trigger会推进
+transaction epoch并在T前得到stale fence；B2封口后、outer authority前安装会使B2 authority
+失效。最终hook必须位于baseline stage创建前，不能把前置lineage drift冒充post-T failure。
+
+##### 31.37.69.2 Python changes() exact-one production observability
+
+Python lower source不再调用一次 `fetchone()` 后假定不存在第二行。它在模块定义期捕获
+`sqlite3.Cursor.fetchmany`，production proof执行一次 `fetchmany(2)`：
+
+1. 返回值必须是exact builtin list，禁止list subclass与hostile container；
+2. list长度必须exactly one，零行与两行都失败；
+3. 唯一row必须是exact builtin tuple且长度exactly one；
+4. 唯一value必须是exact int，boolean/float/subclass均失败；
+5. value必须位于0..MAX_SAFE_INTEGER；
+6. value必须等于native affected count；
+7. 一次bounded proof attempt仍记为 `changes_fetch_count=1`；
+8. prepare失败保持(prepare, fetch, release)=(0,0,0)；
+9. fetch/shape/type/range primary之后close恰尝试一次，计数为(1,1,1)，cleanup secondary
+   不替换primary；
+10. 只有不存在更早primary时，close failure才结构化为changes release failure。
+
+hostile对象在exact type check处短路，不调用其`__len__`、`__iter__`或`__getitem__`。Definition-
+time capture测试由FETCHONE更新为FETCHMANY，late alias rebinding不能改变production行为。
+
+##### 31.37.69.3 执行证据与独立审计
+
+- TS新增post-T exact test：1 passed / 16 skipped；
+- TS最终Rule11 suite：17/17，其中外层包含六profile isolated GC；
+- TS显式 `--expose-gc` threads模式：17/17；
+- TS共享fixture相邻回归：12 files / 206/206，216.39秒；
+- TS scoped typecheck与diff-check通过；
+- Python post-T delta exact：1/1；subprotocol full：32/32，约106秒；
+- Python lower changes suite：34/34；
+- Python Ruff、mypy、diff-check通过；
+- 修改后的完整cross-runtime Rule11 parity重新通过3/3，真实双端case约55.52秒；
+- TS post-T两文件独立审计：H0/M0/L0；
+- Python post-T test独立审计：H0/M0/L0；
+- Python exact-one lower两文件独立审计：H0/M0/L0。
+
+最终候选文件身份：
+
+- TS Rule11 test：`ad8ab573192bd3aa5755ac9602bd853c53cc202c0fb63190e45dd921385c13aa`；
+- TS clean graph support：`0814720184da62191864f7c08219cb52f4ff072e86212dd8463a4d58f4dbb937`；
+- Python lower source：`cdce9d1ce89f369d546c3d917804b9793a1b0b943dfd5736757d090e06bfe651`；
+- Python lower test：`b0d4cad0ed832f6d27390a2001d00d1f744637ebf8795377576159140e978ebb`；
+- Python subprotocol test：`85df5ee72ee7153941855eb4a6c6cb90632edb18feebcd339fa3dc281e4fd823`。
+
+五个文件权限均为0644；commit前必须重新核验，任何后续漂移只能以新追加段 supersede。
+
+##### 31.37.69.4 仍未完成的 Wave 1E hostile matrix
+
+以下项目仍是strict nonclaims，不能因为本节两个增量而标完成：
+
+- 两端composite preconsume release本身失败的exact-E、graph-bound真实证据；
+- TS native run result missing/accessor/proxy/string/float/negative/unsafe矩阵；
+- TS changes prepare/fetch/zero-row/two-row/shape/type/range/logical-retirement failure；
+- Python native affected missing/accessor/hostile/string/float/negative/unsafe完整矩阵；
+- Python changes hostile矩阵提升到serialized composite层；
+- authentic B2 root/count/stage/projection/parameter逐字段漂移；
+- authentic outer ledger与cursor ledger logical/fixed/affected逐字段漂移；
+- native!=changes、changes!=total、total!=ledger的完整组合；
+- transaction owner层的post-T rollback/close precedence；
+- Python bounded id-reuse是否真实发生的attempt budget与honest skip证据。
+
+TS `StatementSync`没有显式native close，因此TS只能声称logical statement retirement，禁止把它
+表述为native close fault。当前全局cleanup test seam不是execution-bound，不能直接提升到
+composite hostile matrix。
+
+##### 31.37.69.5 下一实施切片
+
+P1下一步先在TS lower connection把`changes()`由`.get()`改为定义期捕获的`.all()`或有界
+iterator，并严格验证outer array exactly one、row exactly one、safe bigint，然后建立与Python
+一致的zero/two-row、shape/type/range测试。随后设计exact execution-bound fault registry：
+
+- arm必须携带authentic connection+E，拒绝proxy/cross-run/double-arm；
+- 只允许exact selected E在指定boundary消费一次；
+- 未选graph保持健康；
+- fault消费后registry entry exact discard，success与abandoned arm可回收；
+- release primary覆盖cancellation；post-T native/changes primary覆盖cleanup secondary；
+- 每一seam先lower focused，再composite poison/GC，再决定是否加入portable parity。
+
+完成上述P1/P2、B2/ledger矩阵、transaction-owner precedence与id-reuse honesty之前，Wave 1E
+继续保持进行中；其后才进入Rule12 implementation。

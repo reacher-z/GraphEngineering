@@ -102,6 +102,13 @@ export interface ReaderLeaseTestGraph {
   readonly fence: SQLiteCursorPostDdlCatalogFence;
 }
 
+export interface ReaderLeaseTestGraphOptions {
+  readonly cursorCount?: number;
+  readonly outerProviderNowMs?: number;
+  /** One exact-connection, one-shot hook before TEMP stage/B2 authority capture. */
+  readonly beforeBaselineStageCreation?: (connection: SQLiteConnection) => void;
+}
+
 function installMigrationLock(connection: SQLiteConnection): void {
   connection.prepare(`
     INSERT INTO main.ge_cycle_used_migration_lock_ids
@@ -237,7 +244,7 @@ function sealAuthenticCursorRows(
 
 export function createReaderLeaseTestGraph(
   legacyOperationCount = 0,
-  options: Readonly<{ cursorCount?: number; outerProviderNowMs?: number }> = {},
+  options: Readonly<ReaderLeaseTestGraphOptions> = {},
 ): ReaderLeaseTestGraph {
   const cursorCount = options.cursorCount ?? 0;
   if (!Number.isSafeInteger(cursorCount) || cursorCount < 0 || cursorCount > 1_024) {
@@ -275,6 +282,19 @@ export function createReaderLeaseTestGraph(
     );
   }
   insertAuthenticCursorRows(connection, cursorCount);
+  const beforeBaselineStageCreation = options.beforeBaselineStageCreation;
+  try {
+    beforeBaselineStageCreation?.(connection);
+  } catch (error) {
+    try {
+      if (connection.isOpen && connection.isTransaction) {
+        connection.execTrusted("ROLLBACK", "inspect-schema");
+      }
+    } catch { /* Preserve callback primary. */ }
+    try { if (connection.isOpen) connection.close(); } catch { /* Preserve callback primary. */ }
+    rmSync(root, { recursive: true, force: true });
+    throw error;
+  }
 
   const stage = createSQLiteBaselineTempStage(
     connection,

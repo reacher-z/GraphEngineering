@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import builtins
 import gc
+import sqlite3
 from importlib import import_module
 from typing import Any, cast
 from weakref import ref
@@ -510,6 +511,111 @@ def test_second_boundary_cancellation_releases_p_context_and_same_s_retries(
         )
     finally:
         graph.close()
+
+
+def test_real_post_t_native_execute_failure_poisons_outer_preserves_primary_and_collects(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registries = (
+        protocol._WRITE_RECEIPTS,
+        protocol._RULE11_RECEIPTS,
+        protocol._WRITE_BY_CONTEXT,
+        outer._PUBLICATION_REBIND_CONTEXTS,
+        outer._PUBLICATION_REBIND_CONTEXT_BY_SESSION,
+        outer._PUBLICATION_REBIND_CONTEXT_BY_PREPARED_OWNER,
+        outer._PUBLICATION_SESSION_CONSUMED_TOMBSTONES,
+        outer._POST_REBIND_WATERMARK_ADOPTIONS,
+        source._CURSOR_PUBLICATION_REBIND_EXECUTIONS,
+    )
+    for _ in range(3):
+        gc.collect()
+    baseline = tuple(len(registry) for registry in registries)
+    graph = _CursorAdoptionGraph(1)
+    session = _session(graph)
+    raw = cast(
+        sqlite3.Connection,
+        object.__getattribute__(
+            graph.connection, "_SQLiteV1BaselineConnectionOwner__connection"
+        ),
+    )
+    # Test-only hostile native object. Installing it through the raw exact
+    # connection after S avoids changing the owner's captured epoch/counters.
+    raw.execute(
+        "CREATE TEMP TRIGGER hostile_serialized_rebind_abort "
+        "BEFORE UPDATE ON main.ge_cycle_cursors "
+        "BEGIN SELECT RAISE(ABORT, 'hostile serialized rebind'); END"
+    ).close()
+    original_release = protocol.__dict__[
+        "_release_sqlite_connection_cursor_publication_rebind_intrinsic"
+    ]
+    expected_connection_id = id(graph.connection)
+    expected_raw_id = id(raw)
+    released: list[Any] = []
+
+    class CleanupSecondary(BaseException):
+        pass
+
+    def release_then_secondary(connection: Any, execution: Any) -> Any:
+        assert id(connection) == expected_connection_id
+        assert id(
+            object.__getattribute__(
+                connection, "_SQLiteV1BaselineConnectionOwner__connection"
+            )
+        ) == expected_raw_id
+        assert released == []
+        released.append(execution)
+        original_release(connection, execution)
+        raise CleanupSecondary
+
+    monkeypatch.setattr(
+        protocol,
+        "_release_sqlite_connection_cursor_publication_rebind_intrinsic",
+        release_then_secondary,
+    )
+    write_before = len(protocol._WRITE_RECEIPTS)
+    rule11_before = len(protocol._RULE11_RECEIPTS)
+    with _expect("GE_CURSOR_B3_CURSOR_REBIND_EXECUTE"):
+        protocol._execute_sqlite_cursor_publication_rebind_rule11_intrinsic(session)
+    monkeypatch.setattr(
+        protocol,
+        "_release_sqlite_connection_cursor_publication_rebind_intrinsic",
+        original_release,
+    )
+    assert len(released) == 1
+    execution = released[0]
+    native = source._read_sqlite_connection_cursor_publication_rebind_snapshot_intrinsic(
+        graph.connection, execution
+    )
+    assert native.lifecycle == "poisoned"
+    assert (native.execute_count, native.release_count) == (1, 1)
+    assert len(protocol._WRITE_RECEIPTS) == write_before
+    assert len(protocol._RULE11_RECEIPTS) == rule11_before
+    authority = outer._read_sqlite_cursor_outer_publication_authority_snapshot_intrinsic(
+        graph.authority
+    )
+    assert authority.lifecycle == "poisoned"
+    assert authority.write_phase == "poisoned"
+    assert authority.publication_rebind_context is not None
+    assert authority.publication_session_consumed_tombstone is not None
+    with pytest.raises(ValueError, match="PUBLICATION_SESSION"):
+        outer._assert_sqlite_cursor_publication_session_intrinsic(session)
+
+    values = (
+        graph.authority,
+        session,
+        execution,
+        authority.publication_rebind_context,
+        authority.publication_session_consumed_tombstone,
+    )
+    weak = [ref(value) for value in values]
+    raw.execute("DROP TRIGGER temp.hostile_serialized_rebind_abort").close()
+    graph.close()
+    released.clear()
+    del authority, execution, graph, raw, session, values
+    for _ in range(12):
+        gc.collect()
+    assert all(item() is None for item in weak)
+    assert tuple(len(registry) for registry in registries) == baseline
 
 
 def test_forged_session_is_rejected_before_authentic_precancellation() -> None:

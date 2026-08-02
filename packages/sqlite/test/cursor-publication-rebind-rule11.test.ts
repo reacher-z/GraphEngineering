@@ -29,6 +29,7 @@ import {
   poisonSQLiteCursorPublicationRebindAfterConsumeIntrinsic,
   prepareSQLiteCursorPublicationRebindContextIntrinsic,
   readSQLiteCursorPublicationRebindContextSnapshotIntrinsic,
+  readSQLiteCursorPublicationSessionConsumedTombstoneSnapshotIntrinsic,
   readSQLiteCursorPublicationSessionSnapshotIntrinsic,
   readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic,
   releaseSQLiteCursorPublicationRebindContextBeforeConsumeIntrinsic,
@@ -55,6 +56,7 @@ import {
 } from "../src/operation-baseline-cursor-invariants.js";
 import {
   beginSQLiteConnectionCursorRebindExecutionIntrinsic,
+  readSQLiteConnectionCursorRebindExecutionSnapshotIntrinsic,
 } from "../src/sqlite-connection.js";
 import {
   createReaderLeaseTestGraph,
@@ -130,6 +132,17 @@ function counts(value: number): SQLiteCursorRebindRule11FiveCounts {
   });
 }
 
+function installNativeRebindAbortTrigger(
+  connection: ReaderLeaseTestGraph["connection"],
+): void {
+  connection.execTrusted(
+    "CREATE TEMP TRIGGER ge_rule11_native_run_abort "
+      + "BEFORE UPDATE ON main.ge_cycle_cursors BEGIN "
+      + "SELECT RAISE(ABORT, 'rule11 native run abort'); END",
+    "inspect-schema",
+  );
+}
+
 interface TrackedReferent {
   readonly label: string;
   readonly reference: WeakRef<object>;
@@ -137,13 +150,18 @@ interface TrackedReferent {
 
 function trackDroppedScenario(
   scenario: "success" | "prewrite-cancel" | "postconsume-poison"
-    | "write-fault" | "rule11-fault",
+    | "write-fault" | "rule11-fault" | "native-run-fault",
 ): Readonly<{
   readonly finalized: Set<string>;
   readonly referents: readonly TrackedReferent[];
   readonly registry: FinalizationRegistry<string>;
 }> {
-  const value = createReaderLeaseTestGraph(1);
+  const value = createReaderLeaseTestGraph(1, scenario === "native-run-fault"
+    ? {
+      beforeBaselineStageCreation: installNativeRebindAbortTrigger,
+      cursorCount: 1,
+    }
+    : {});
   const session = publicationSession(value);
   let identities: readonly (readonly [string, object])[];
   if (scenario === "prewrite-cancel") {
@@ -191,6 +209,43 @@ function trackDroppedScenario(
         "GC post-consume poison",
       );
     }
+  } else if (scenario === "native-run-fault") {
+    let failed = false;
+    try {
+      executeSQLiteCursorPublicationRebindRule11Intrinsic(session);
+    } catch {
+      failed = true;
+    }
+    if (!failed) throw new Error("expected native run failure");
+    const authority = readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(value.authority);
+    const context = authority.publicationRebindContext!;
+    const contextSnapshot = readSQLiteCursorPublicationRebindContextSnapshotIntrinsic(context);
+    const tombstone = authority.publicationSessionConsumedTombstone!;
+    const executionSnapshot = readSQLiteConnectionCursorRebindExecutionSnapshotIntrinsic(
+      value.connection,
+      contextSnapshot.execution,
+    );
+    if (authority.lifecycle !== "poisoned"
+        || authority.postRebindWatermarkAdoption !== undefined
+        || contextSnapshot.lifecycle !== "poisoned"
+        || readSQLiteCursorPublicationSessionConsumedTombstoneSnapshotIntrinsic(tombstone)
+          .lifecycle !== "poisoned"
+        || executionSnapshot.lifecycle !== "poisoned"
+        || executionSnapshot.executeCount !== 1
+        || executionSnapshot.releaseCount !== 1
+        || !executionSnapshot.statementOwnershipRetired) {
+      throw new Error("native run failure graph was not terminal before GC tracking");
+    }
+    identities = [
+      ["graph", value],
+      ["authority", value.authority],
+      ["connection", value.connection],
+      ["session", session],
+      ["prepared-owner", contextSnapshot.preparedOwner],
+      ["context", context],
+      ["tombstone", tombstone],
+      ["execution", contextSnapshot.execution],
+    ];
   } else {
     injectSQLiteCursorRebindProtocolRegistrationFaultForTestIntrinsic(
       scenario === "write-fault" ? "write" : "rule11",
@@ -567,6 +622,79 @@ describe("SQLite cursor publication rebind Rule 11 integration", () => {
       .toMatchObject({ lifecycle: "poisoned", writePhase: "poisoned" });
   });
 
+  it("preserves a real post-T native statement-run failure and poisons its exact graph", () => {
+    let hookCalls = 0;
+    let hookConnection: ReaderLeaseTestGraph["connection"] | undefined;
+    const value = createReaderLeaseTestGraph(1, {
+      beforeBaselineStageCreation: (connection) => {
+        hookCalls += 1;
+        hookConnection = connection;
+        installNativeRebindAbortTrigger(connection);
+      },
+      cursorCount: 1,
+    });
+    graphs.push(value);
+    expect(hookCalls).toBe(1);
+    expect(hookConnection).toBe(value.connection);
+    const session = publicationSession(value);
+
+    let primary: unknown;
+    try {
+      executeSQLiteCursorPublicationRebindRule11Intrinsic(session);
+      throw new Error("expected native statement-run failure");
+    } catch (error) {
+      primary = error;
+    }
+    expect(primary).toBeInstanceOf(CycleStoreProviderError);
+    expect(primary).toMatchObject({
+      code: "GE_CYCLE_STORE_CORRUPTION",
+      details: { sqliteClass: 19 },
+    });
+    const authority = readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(value.authority);
+    const context = authority.publicationRebindContext!;
+    const tombstone = authority.publicationSessionConsumedTombstone!;
+    const contextSnapshot = readSQLiteCursorPublicationRebindContextSnapshotIntrinsic(context);
+    expect(authority).toMatchObject({
+      lifecycle: "poisoned",
+      postRebindWatermarkAdoption: undefined,
+      publicationRebindContext: context,
+      publicationSessionConsumedTombstone: tombstone,
+      stageOwnershipPoisonReason: "SQLite cursor rebind failed after session consumption",
+      writePhase: "poisoned",
+    });
+    expect(contextSnapshot).toMatchObject({ lifecycle: "poisoned", session });
+    expect(readSQLiteCursorPublicationSessionConsumedTombstoneSnapshotIntrinsic(tombstone))
+      .toMatchObject({ context, lifecycle: "poisoned", session });
+    expect(readSQLiteConnectionCursorRebindExecutionSnapshotIntrinsic(
+      value.connection,
+      contextSnapshot.execution,
+    )).toMatchObject({
+      affectedRows: 0,
+      changesFetchCount: 0,
+      changesPrepareCount: 0,
+      changesReleaseCount: 0,
+      cursorLedgerAffectedRowsWatermark: 0,
+      cursorLedgerFixedStatementCount: 0,
+      cursorLedgerLogicalWriteSequence: 0,
+      executeCount: 1,
+      lifecycle: "poisoned",
+      releaseCount: 1,
+      statementOwnershipRetired: true,
+    });
+    expect(() => readSQLiteCursorPublicationSessionSnapshotIntrinsic(session))
+      .toThrow(/publication session is not active/u);
+    expect(() => readSQLiteCursorRebindWriteReceiptSnapshotIntrinsic(
+      Object.freeze(Object.create(null)),
+    )).toThrow(/write receipt is invalid/u);
+    expect(() => readSQLiteCursorRebindRule11OwnerSnapshotIntrinsic(
+      Object.freeze(Object.create(null)),
+    )).toThrow(/Rule 11 owner is invalid/u);
+    expect(value.connection.isTransaction).toBe(true);
+    expect(graphs.pop()).toBe(value);
+    disposeReaderLeaseTestGraph(value);
+    expect(value.connection.isOpen).toBe(false);
+  });
+
   it("performs zero additional SQLite work while reading W/R11 retained proofs", () => {
     const value = graph();
     const session = publicationSession(value);
@@ -703,7 +831,7 @@ describe("SQLite cursor publication rebind Rule 11 integration", () => {
   });
 
   if (process.env.GRAPH_ENGINEERING_RUN_RULE11_GC_PROBE !== "1") {
-    it("passes success, cancellation, poison and W/R11-fault isolated GC", () => {
+    it("passes success, cancellation, poison, native-run and W/R11-fault isolated GC", () => {
       const packageRoot = fileURLToPath(new URL("..", import.meta.url));
       const vitest = fileURLToPath(new URL("../node_modules/vitest/vitest.mjs", import.meta.url));
       const result = spawnSync(
@@ -734,12 +862,13 @@ describe("SQLite cursor publication rebind Rule 11 integration", () => {
       ].join("\n")).toBe(0);
     }, 160_000);
   } else {
-    it("collects every exact identity in all five terminal profiles", async () => {
+    it("collects every exact identity in all six terminal profiles", async () => {
       expect(typeof globalThis.gc).toBe("function");
       const scenarios = [
         "success",
         "prewrite-cancel",
         "postconsume-poison",
+        "native-run-fault",
         "write-fault",
         "rule11-fault",
       ] as const;
