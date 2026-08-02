@@ -6,12 +6,13 @@ import json
 
 import graph_engineering.sqlite_cursor_publication_outer_authority as outer
 import graph_engineering.sqlite_cursor_publication_subprotocol as protocol
+import graph_engineering.sqlite_operation_baseline_source as source
 from sqlite_cursor_publication_rule11_python_graph import (
     Rule11PythonGraph,
     create_rule11_python_graph,
 )
 
-SCHEMA_VERSION = "sqlite-cursor-publication-rule11-parity/v1"
+SCHEMA_VERSION = "sqlite-cursor-publication-rule11-parity/v2"
 
 
 def _invariant(condition: bool, message: str) -> None:
@@ -270,6 +271,74 @@ def _replay_poison_case() -> dict[str, object]:
         graph.close()
 
 
+def _preconsume_release_case() -> dict[str, object]:
+    class ReleasePrimary(BaseException):
+        pass
+
+    graph = create_rule11_python_graph(1)
+    try:
+        session = _publication_session(graph)
+        primary = ReleasePrimary("Rule11 parity exact preconsume release primary")
+        protocol._arm_sqlite_cursor_publication_preconsume_release_fault_for_test_intrinsic(
+            session, primary
+        )
+        caught: BaseException | None = None
+        try:
+            protocol._execute_sqlite_cursor_publication_rebind_rule11_intrinsic(
+                session
+            )
+        except ReleasePrimary as error:
+            caught = error
+        _invariant(
+            caught is primary,
+            "Python Rule11 preconsume release replaced the exact primary",
+        )
+        authority = (
+            outer._read_sqlite_cursor_outer_publication_authority_snapshot_intrinsic(
+                graph.authority
+            )
+        )
+        _invariant(
+            authority.publication_rebind_context is not None,
+            "Python Rule11 preconsume release omitted the selected context",
+        )
+        context = outer._read_sqlite_cursor_publication_rebind_context_snapshot_intrinsic(
+            authority.publication_rebind_context
+        )
+        execution = (
+            source._read_sqlite_connection_cursor_publication_rebind_snapshot_intrinsic(
+                graph.connection, context.execution
+            )
+        )
+        replay_rejected = False
+        try:
+            protocol._execute_sqlite_cursor_publication_rebind_rule11_intrinsic(
+                session
+            )
+        except (TypeError, ValueError) as error:
+            replay_rejected = str(error) == "GE_CURSOR_B3_PUBLICATION_SESSION_GRAPH"
+        _invariant(
+            replay_rejected,
+            "Python Rule11 poisoned preconsume release graph accepted replay",
+        )
+        return {
+            "caseId": "preconsume-release",
+            "outcome": "exact-release-primary",
+            "primaryIdentityPreserved": caught is primary,
+            "selectedGraphPoisoned": authority.lifecycle == "poisoned"
+            and authority.write_phase == "poisoned",
+            "sessionConsumed": authority.publication_session_consumed_tombstone
+            is not None,
+            "contextLifecycle": context.lifecycle,
+            "executionLifecycle": execution.lifecycle,
+            "executeCount": execution.execute_count,
+            "releaseCount": execution.release_count,
+            "replayRejected": replay_rejected,
+        }
+    finally:
+        graph.close()
+
+
 def build_report() -> dict[str, object]:
     return {
         "schemaVersion": SCHEMA_VERSION,
@@ -279,6 +348,7 @@ def build_report() -> dict[str, object]:
             _pre_cancel_case(),
             _forged_cancel_case(),
             _replay_poison_case(),
+            _preconsume_release_case(),
         ],
     }
 

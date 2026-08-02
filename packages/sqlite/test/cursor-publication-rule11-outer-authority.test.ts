@@ -17,6 +17,7 @@ import {
   mintSQLiteCursorPostDdlPublicationReaderLeaseIntrinsic,
   isSQLiteCursorPublicationSessionCancellationRequestedIntrinsic,
   injectSQLiteCursorPublicationRebindRegistrationFaultForTestIntrinsic,
+  injectSQLiteCursorPublicationRebindValidationDriftForTestIntrinsic,
   observeSQLiteCursorPublicationSessionClockIntrinsic,
   prepareSQLiteCursorPublicationRebindContextIntrinsic,
   prepareSQLiteCursorPublicationSessionIntrinsic,
@@ -31,6 +32,7 @@ import {
   type SQLiteCursorInitialPublicationReceiptBundle,
   type SQLiteCursorInitialStageAdoptionReceipt,
   type SQLiteCursorPublicationSession,
+  type SQLiteCursorPublicationRebindValidationDriftForTest,
 } from "../src/cursor-publication-outer-authority.js";
 import {
   beginSQLiteConnectionCursorRebindExecutionIntrinsic,
@@ -138,6 +140,168 @@ afterEach(() => {
 });
 
 describe("SQLite outer-owned cursor rebind transition", () => {
+  it.each([
+    "b2-immutable-root",
+    "b2-cursor-count",
+    "b2-stage",
+    "b2-projection",
+    "b2-parameter-commitment",
+    "outer-ledger-logical-write-sequence",
+    "outer-ledger-fixed-statement-count",
+    "outer-ledger-affected-rows-watermark",
+    "cursor-ledger-logical-write-sequence",
+    "cursor-ledger-fixed-statement-count",
+    "cursor-ledger-affected-rows-watermark",
+  ] as const satisfies readonly SQLiteCursorPublicationRebindValidationDriftForTest[])(
+    "fails closed on one authentic %s drift without selecting another graph",
+    (drift) => {
+      const selected = sessionGraph(1);
+      const unselected = sessionGraph(1);
+      const selectedExecution = beginSQLiteConnectionCursorRebindExecutionIntrinsic(
+        selected.connection,
+      );
+      const selectedContext = prepareSQLiteCursorPublicationRebindContextIntrinsic(
+        selected.session,
+        selectedExecution,
+      );
+      const unselectedExecution = beginSQLiteConnectionCursorRebindExecutionIntrinsic(
+        unselected.connection,
+      );
+      const unselectedContext = prepareSQLiteCursorPublicationRebindContextIntrinsic(
+        unselected.session,
+        unselectedExecution,
+      );
+
+      injectSQLiteCursorPublicationRebindValidationDriftForTestIntrinsic(
+        selectedContext,
+        selected.authority,
+        drift,
+      );
+      expect(() => consumeSQLiteCursorPublicationSessionForRebindIntrinsic(selectedContext))
+        .toThrow(expect.objectContaining({
+          code: "GE_CYCLE_STORE_CORRUPTION",
+          message: expect.stringMatching(/publication session consume graph drifted/u),
+        }));
+      expect(readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(selected.authority))
+        .toMatchObject({
+          lifecycle: "poisoned",
+          stageOwnershipPoisonReason: "SQLite publication session consume validation failed",
+          writePhase: "poisoned",
+        });
+      expect(readSQLiteCursorPublicationRebindContextSnapshotIntrinsic(selectedContext).lifecycle)
+        .toBe("poisoned");
+
+      expect(readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(unselected.authority))
+        .toMatchObject({ lifecycle: "active", writePhase: "publication-active" });
+      const unselectedTombstone =
+        consumeSQLiteCursorPublicationSessionForRebindIntrinsic(unselectedContext);
+      expect(readSQLiteCursorPublicationSessionConsumedTombstoneSnapshotIntrinsic(
+        unselectedTombstone,
+      ).lifecycle).toBe("active");
+      poisonSQLiteCursorPublicationRebindAfterConsumeIntrinsic(
+        unselectedContext,
+        unselectedTombstone,
+        undefined,
+        "drift-matrix unselected graph cleanup",
+      );
+    },
+  );
+
+  it("authenticates validation-drift arms and preserves the exact first one-shot arm", () => {
+    const left = sessionGraph();
+    const right = sessionGraph();
+    const leftExecution = beginSQLiteConnectionCursorRebindExecutionIntrinsic(left.connection);
+    const leftContext = prepareSQLiteCursorPublicationRebindContextIntrinsic(
+      left.session,
+      leftExecution,
+    );
+    const rightExecution = beginSQLiteConnectionCursorRebindExecutionIntrinsic(right.connection);
+    const rightContext = prepareSQLiteCursorPublicationRebindContextIntrinsic(
+      right.session,
+      rightExecution,
+    );
+
+    expect(() => injectSQLiteCursorPublicationRebindValidationDriftForTestIntrinsic(
+      leftContext,
+      right.authority,
+      "b2-cursor-count",
+    )).toThrow(/validation drift graph is invalid/u);
+    expect(() => injectSQLiteCursorPublicationRebindValidationDriftForTestIntrinsic(
+      Object.freeze(Object.create(null)) as typeof leftContext,
+      left.authority,
+      "b2-cursor-count",
+    )).toThrow(/rebind context is invalid/u);
+    expect(() => injectSQLiteCursorPublicationRebindValidationDriftForTestIntrinsic(
+      new Proxy(leftContext, {}),
+      left.authority,
+      "b2-cursor-count",
+    )).toThrow(/rebind context is invalid/u);
+    expect(() => injectSQLiteCursorPublicationRebindValidationDriftForTestIntrinsic(
+      leftContext,
+      left.authority,
+      "not-a-drift" as SQLiteCursorPublicationRebindValidationDriftForTest,
+    )).toThrow(/validation drift kind is invalid/u);
+    expect(readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(left.authority))
+      .toMatchObject({ lifecycle: "active", writePhase: "publication-active" });
+    expect(readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(right.authority))
+      .toMatchObject({ lifecycle: "active", writePhase: "publication-active" });
+
+    injectSQLiteCursorPublicationRebindValidationDriftForTestIntrinsic(
+      leftContext,
+      left.authority,
+      "b2-cursor-count",
+    );
+    expect(() => injectSQLiteCursorPublicationRebindValidationDriftForTestIntrinsic(
+      leftContext,
+      left.authority,
+      "b2-immutable-root",
+    )).toThrow(/validation drift is already armed/u);
+    expect(() => consumeSQLiteCursorPublicationSessionForRebindIntrinsic(leftContext))
+      .toThrow(/publication session consume graph drifted/u);
+    expect(readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(left.authority))
+      .toMatchObject({ lifecycle: "poisoned", writePhase: "poisoned" });
+    expect(readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(right.authority))
+      .toMatchObject({ lifecycle: "active", writePhase: "publication-active" });
+
+    const rightPrepared = readSQLiteCursorPublicationRebindContextSnapshotIntrinsic(rightContext);
+    releaseSQLiteCursorPublicationRebindContextBeforeConsumeIntrinsic(
+      rightContext,
+      rightPrepared.preparedOwner,
+    );
+  });
+
+  it("rolls back validation-drift registration failure and permits an exact retry", () => {
+    const graph = sessionGraph();
+    const execution = beginSQLiteConnectionCursorRebindExecutionIntrinsic(graph.connection);
+    const context = prepareSQLiteCursorPublicationRebindContextIntrinsic(
+      graph.session,
+      execution,
+    );
+    const primary = new Error("injected validation drift registration");
+    injectSQLiteCursorPublicationRebindRegistrationFaultForTestIntrinsic(
+      "validation-drift-arm",
+      primary,
+    );
+
+    expect(() => injectSQLiteCursorPublicationRebindValidationDriftForTestIntrinsic(
+      context,
+      graph.authority,
+      "outer-ledger-logical-write-sequence",
+    )).toThrow(primary);
+    expect(readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(graph.authority))
+      .toMatchObject({ lifecycle: "active", writePhase: "publication-active" });
+
+    injectSQLiteCursorPublicationRebindValidationDriftForTestIntrinsic(
+      context,
+      graph.authority,
+      "outer-ledger-logical-write-sequence",
+    );
+    expect(() => consumeSQLiteCursorPublicationSessionForRebindIntrinsic(context))
+      .toThrow(/publication session consume graph drifted/u);
+    expect(readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(graph.authority))
+      .toMatchObject({ lifecycle: "poisoned", writePhase: "poisoned" });
+  });
+
   it("reads optional authentic cancellation without consuming a graph", () => {
     const controller = createSQLiteCursorPublicationSessionCancellationControllerIntrinsic();
     expect(isSQLiteCursorPublicationSessionCancellationRequestedIntrinsic(undefined)).toBe(false);

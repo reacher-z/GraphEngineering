@@ -30,6 +30,7 @@ import {
 import {
   beginSQLiteConnectionCursorRebindExecutionIntrinsic,
   executeSQLiteConnectionCursorRebindIntrinsic,
+  injectSQLiteConnectionCursorRebindReleaseFaultForTestIntrinsic,
   releaseSQLiteConnectionCursorRebindExecutionIntrinsic,
   type SQLiteConnection,
   type SQLiteConnectionCursorRebindExecution,
@@ -46,6 +47,10 @@ const reflectOwnKeysIntrinsic = Reflect.ownKeys;
 const arrayIncludesIntrinsic = Array.prototype.includes;
 const weakMapGetIntrinsic = WeakMap.prototype.get;
 const weakMapSetIntrinsic = WeakMap.prototype.set;
+const weakMapDeleteIntrinsic = WeakMap.prototype.delete;
+const weakMapHasIntrinsic = WeakMap.prototype.has;
+const weakRefIntrinsic = WeakRef;
+const weakRefDerefIntrinsic = WeakRef.prototype.deref;
 const numberIsSafeIntegerIntrinsic = Number.isSafeInteger;
 const OPERATION = "inspect-schema" as const;
 
@@ -181,6 +186,51 @@ let registrationFault: Readonly<{
 }> | undefined;
 let cancelBeforeExecuteForTest = false;
 
+interface PendingPreconsumeReleaseFault {
+  readonly authority: WeakRef<object>;
+  readonly connection: WeakRef<object>;
+  readonly error: WeakRef<object>;
+}
+
+const PRECONSUME_RELEASE_FAULTS = new WeakMap<
+  object,
+  PendingPreconsumeReleaseFault
+>();
+type PreconsumeReleaseRegistrationFailure =
+  | Readonly<{ readonly kind: "direct"; readonly error: unknown }>
+  | Readonly<{ readonly kind: "weak"; readonly error: WeakRef<object> }>;
+let preconsumeReleaseFaultRegistrationFailureForTest:
+  PreconsumeReleaseRegistrationFailure | undefined;
+
+function preconsumeReleaseRegistrationFailure(
+  error: unknown,
+): PreconsumeReleaseRegistrationFailure {
+  return error !== null && (typeof error === "object" || typeof error === "function")
+    ? objectFreezeIntrinsic({
+      kind: "weak" as const,
+      error: new weakRefIntrinsic(error),
+    })
+    : objectFreezeIntrinsic({ kind: "direct" as const, error });
+}
+
+function throwPreconsumeReleaseRegistrationFailure(
+  failure: PreconsumeReleaseRegistrationFailure,
+): never {
+  if (failure.kind === "direct") throw failure.error;
+  const error = reflectApplyIntrinsic(
+    weakRefDerefIntrinsic,
+    failure.error,
+    [],
+  ) as object | undefined;
+  if (error === undefined) {
+    return fail(
+      "GE_CYCLE_STORE_CORRUPTION",
+      "SQLite rebind preconsume release fault registration failure expired",
+    );
+  }
+  throw error;
+}
+
 function fail(
   code: "GE_CYCLE_STORE_INVALID_ARGUMENT" | "GE_CYCLE_STORE_CORRUPTION"
     | "GE_CYCLE_STORE_UNAVAILABLE",
@@ -306,6 +356,114 @@ export function injectSQLiteCursorRebindCancelBeforeExecuteForTestIntrinsic(): v
     return fail("GE_CYCLE_STORE_INVALID_ARGUMENT", "SQLite rebind cancellation fault is armed");
   }
   cancelBeforeExecuteForTest = true;
+}
+
+/** Package-private exact-S arm for the exact-E preconsume release boundary. */
+export function injectSQLiteCursorRebindPreconsumeReleaseFaultForTestIntrinsic(
+  session: SQLiteCursorPublicationSession,
+  error: unknown,
+): void {
+  const snapshot = readSQLiteCursorPublicationSessionSnapshotIntrinsic(session);
+  if ((typeof error !== "object" && typeof error !== "function") || error === null
+      || isProxyIntrinsic(error)
+      || reflectApplyIntrinsic(weakMapHasIntrinsic, PRECONSUME_RELEASE_FAULTS, [
+        session as object,
+      ])) {
+    return fail(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "SQLite rebind preconsume release fault is invalid",
+    );
+  }
+  const pending = objectFreezeIntrinsic({
+    authority: new weakRefIntrinsic(snapshot.outerAuthority as object),
+    connection: new weakRefIntrinsic(snapshot.connection as object),
+    error: new weakRefIntrinsic(error),
+  });
+  try {
+    reflectApplyIntrinsic(weakMapSetIntrinsic, PRECONSUME_RELEASE_FAULTS, [
+      session as object,
+      pending,
+    ]);
+    const registrationFailure = preconsumeReleaseFaultRegistrationFailureForTest;
+    preconsumeReleaseFaultRegistrationFailureForTest = undefined;
+    if (registrationFailure !== undefined) {
+      throwPreconsumeReleaseRegistrationFailure(registrationFailure);
+    }
+  } catch (registrationError) {
+    reflectApplyIntrinsic(weakMapDeleteIntrinsic, PRECONSUME_RELEASE_FAULTS, [
+      session as object,
+    ]);
+    throw registrationError;
+  }
+}
+
+/** Package-private failure after exact-S pending registration, before arm returns. */
+export function injectSQLiteCursorRebindPreconsumeReleaseFaultRegistrationFailureForTestIntrinsic(
+  error: unknown,
+): void {
+  if (preconsumeReleaseFaultRegistrationFailureForTest !== undefined) {
+    return fail(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "SQLite rebind preconsume release fault registration failure is armed",
+    );
+  }
+  preconsumeReleaseFaultRegistrationFailureForTest =
+    preconsumeReleaseRegistrationFailure(error);
+}
+
+function handoffPreconsumeReleaseFault(
+  session: SQLiteCursorPublicationSession,
+  context: SQLiteCursorPublicationRebindContext,
+  preparedOwner: SQLiteCursorPublicationRebindPreparedOwner,
+  execution: SQLiteConnectionCursorRebindExecution,
+): boolean {
+  const pending = reflectApplyIntrinsic(
+    weakMapGetIntrinsic,
+    PRECONSUME_RELEASE_FAULTS,
+    [session as object],
+  ) as PendingPreconsumeReleaseFault | undefined;
+  if (pending === undefined) return false;
+  if (!reflectApplyIntrinsic(
+    weakMapDeleteIntrinsic,
+    PRECONSUME_RELEASE_FAULTS,
+    [session as object],
+  )) {
+    return fail(
+      "GE_CYCLE_STORE_CORRUPTION",
+      "SQLite rebind preconsume release fault identity drifted",
+    );
+  }
+  const authority = reflectApplyIntrinsic(
+    weakRefDerefIntrinsic,
+    pending.authority,
+    [],
+  ) as object | undefined;
+  const connection = reflectApplyIntrinsic(
+    weakRefDerefIntrinsic,
+    pending.connection,
+    [],
+  ) as SQLiteConnection | undefined;
+  const error = reflectApplyIntrinsic(
+    weakRefDerefIntrinsic,
+    pending.error,
+    [],
+  ) as object | undefined;
+  const snapshot = readSQLiteCursorPublicationRebindContextSnapshotIntrinsic(context);
+  if (authority === undefined || connection === undefined || error === undefined
+      || snapshot.outerAuthority !== authority || snapshot.connection !== connection
+      || snapshot.lifecycle !== "prepared" || snapshot.session !== session
+      || snapshot.preparedOwner !== preparedOwner || snapshot.execution !== execution) {
+    return fail(
+      "GE_CYCLE_STORE_CORRUPTION",
+      "SQLite rebind preconsume release fault identity drifted",
+    );
+  }
+  injectSQLiteConnectionCursorRebindReleaseFaultForTestIntrinsic(
+    connection,
+    execution,
+    error,
+  );
+  return true;
 }
 
 function writeState(receipt: SQLiteCursorRebindWriteReceipt): WriteState {
@@ -645,10 +803,26 @@ export function executeSQLiteCursorPublicationRebindRule11Intrinsic(
     throw error;
   }
 
-  if (injectedCancellation
-      || isSQLiteCursorPublicationSessionCancellationRequestedIntrinsic(cancellation)) {
+  let forcePreconsumeRelease: boolean;
+  try {
+    forcePreconsumeRelease = handoffPreconsumeReleaseFault(
+      session,
+      context,
+      preparedOwner,
+      execution,
+    );
+  } catch (error) {
+    cleanupPreparedContext(context, preparedOwner);
+    throw error;
+  }
+  const cancelledBeforeExecute = injectedCancellation
+    || isSQLiteCursorPublicationSessionCancellationRequestedIntrinsic(cancellation);
+  if (forcePreconsumeRelease || cancelledBeforeExecute) {
     // Release failure has precedence over cancellation and poisons in outer.
     releaseSQLiteCursorPublicationRebindContextBeforeConsumeIntrinsic(context, preparedOwner);
+    if (forcePreconsumeRelease) {
+      return fail("GE_CYCLE_STORE_CORRUPTION", "SQLite rebind release fault did not fire");
+    }
     return fail("GE_CYCLE_STORE_UNAVAILABLE", "SQLite cursor rebind was cancelled before execute");
   }
 

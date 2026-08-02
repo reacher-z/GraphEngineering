@@ -19,15 +19,18 @@ import {
 import {
   executeSQLiteCursorPublicationRebindRule11Intrinsic,
   executeSQLiteCursorRebindRule11GateIntrinsic,
+  injectSQLiteCursorRebindPreconsumeReleaseFaultForTestIntrinsic,
   readSQLiteCursorRebindRule11OwnerSnapshotIntrinsic,
   readSQLiteCursorRebindWriteReceiptSnapshotIntrinsic,
 } from "../../packages/sqlite/dist/cursor-publication-rebind.js";
+import { readSQLiteConnectionCursorRebindExecutionSnapshotIntrinsic } from
+  "../../packages/sqlite/dist/sqlite-connection.js";
 import {
   createRule11TypescriptGraph,
   disposeRule11TypescriptGraph,
 } from "./sqlite_cursor_publication_rule11_typescript_graph.mjs";
 
-const SCHEMA_VERSION = "sqlite-cursor-publication-rule11-parity/v1";
+const SCHEMA_VERSION = "sqlite-cursor-publication-rule11-parity/v2";
 
 function invariant(condition, message) {
   if (!condition) throw new Error(message);
@@ -262,11 +265,68 @@ function replayPoisonCase() {
   }
 }
 
+function preconsumeReleaseCase() {
+  const graph = createRule11TypescriptGraph(1);
+  try {
+    const session = publicationSession(graph);
+    const primary = new Error("Rule11 parity exact preconsume release primary");
+    injectSQLiteCursorRebindPreconsumeReleaseFaultForTestIntrinsic(session, primary);
+    let caught;
+    try {
+      executeSQLiteCursorPublicationRebindRule11Intrinsic(session);
+    } catch (error) {
+      caught = error;
+    }
+    invariant(caught === primary,
+      "TypeScript Rule11 preconsume release replaced the exact primary");
+    const authority = readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(
+      graph.authority,
+    );
+    invariant(authority.publicationRebindContext !== undefined,
+      "TypeScript Rule11 preconsume release omitted the selected context");
+    const context = readSQLiteCursorPublicationRebindContextSnapshotIntrinsic(
+      authority.publicationRebindContext,
+    );
+    const execution = readSQLiteConnectionCursorRebindExecutionSnapshotIntrinsic(
+      graph.connection,
+      context.execution,
+    );
+    let replayRejected = false;
+    try {
+      executeSQLiteCursorPublicationRebindRule11Intrinsic(session);
+    } catch (error) {
+      replayRejected = error?.code === "GE_CYCLE_STORE_CORRUPTION";
+    }
+    invariant(replayRejected,
+      "TypeScript Rule11 poisoned preconsume release graph accepted replay");
+    return Object.freeze({
+      caseId: "preconsume-release",
+      outcome: "exact-release-primary",
+      primaryIdentityPreserved: caught === primary,
+      selectedGraphPoisoned:
+        authority.lifecycle === "poisoned" && authority.writePhase === "poisoned",
+      sessionConsumed: authority.publicationSessionConsumedTombstone !== undefined,
+      contextLifecycle: context.lifecycle,
+      executionLifecycle: execution.lifecycle,
+      executeCount: execution.executeCount,
+      releaseCount: execution.releaseCount,
+      replayRejected,
+    });
+  } finally {
+    disposeRule11TypescriptGraph(graph);
+  }
+}
+
 const report = Object.freeze({
   schemaVersion: SCHEMA_VERSION,
   runtime: "typescript",
   successes: Object.freeze([0, 1, 3].map(successCase)),
-  failures: Object.freeze([preCancelCase(), forgedCancelCase(), replayPoisonCase()]),
+  failures: Object.freeze([
+    preCancelCase(),
+    forgedCancelCase(),
+    replayPoisonCase(),
+    preconsumeReleaseCase(),
+  ]),
 });
 
 process.stdout.write(`${JSON.stringify(report)}\n`);

@@ -14,7 +14,7 @@ const PY_REPORTER = join(
   ROOT,
   "tools/conformance/sqlite_cursor_publication_rule11_python_report.py",
 );
-const SCHEMA_VERSION = "sqlite-cursor-publication-rule11-parity/v1";
+const SCHEMA_VERSION = "sqlite-cursor-publication-rule11-parity/v2";
 const REBIND_SQL_SHA256 = "6fc61b515e758a1e84745af28783f4e9dcee5e76f80f314aa25a08980d2fef91";
 const CHANGES_SQL_SHA256 = "a6ab435eb54879f942436129997f231de19504b11028b55b014fddc2bb42e112";
 
@@ -82,6 +82,18 @@ const FAILURE_FIELDS = Object.freeze({
     "replayRejected",
     "receiptReadableAfterPoison",
   ],
+  "preconsume-release": [
+    "caseId",
+    "outcome",
+    "primaryIdentityPreserved",
+    "selectedGraphPoisoned",
+    "sessionConsumed",
+    "contextLifecycle",
+    "executionLifecycle",
+    "executeCount",
+    "releaseCount",
+    "replayRejected",
+  ],
 });
 
 function exactKeys(value, expected, label) {
@@ -93,6 +105,30 @@ function exactKeys(value, expected, label) {
 function exactSafeInteger(value, expected, label) {
   assert.equal(Number.isSafeInteger(value), true, `${label} must be a safe integer`);
   assert.equal(value, expected, `${label} differs`);
+}
+
+function validateCounts(value, cursorCount, label) {
+  exactKeys(value, COUNT_FIELDS, label);
+  for (const field of COUNT_FIELDS) {
+    exactSafeInteger(value[field], cursorCount, `${label}.${field}`);
+  }
+}
+
+function validateConsumeMint(value, label) {
+  exactKeys(value, CONSUME_MINT_FIELDS, label);
+  const expected = {
+    writePrepareCount: 1,
+    writeExecuteCount: 1,
+    writeReleaseCount: 1,
+    changesPrepareCount: 1,
+    changesFetchCount: 1,
+    changesReleaseCount: 1,
+    rule11ViolationCount: 0,
+  };
+  for (const [field, count] of Object.entries(expected)) {
+    exactSafeInteger(value[field], count, `${label}.${field}`);
+  }
+  assert.equal(value.diagnosticsTruncated, false, `${label}.diagnosticsTruncated differs`);
 }
 
 function sha256(value) {
@@ -117,10 +153,7 @@ function validateSuccess(value, cursorCount, index) {
     "524ece2b423a16fe16cf147e4918f74029ec71bd1559a65a2e7e2710a73ef37f");
   exactSafeInteger(value.epochDelta, 1, `${label}.epochDelta`);
   exactSafeInteger(value.totalDelta, cursorCount, `${label}.totalDelta`);
-  exactKeys(value.counts, COUNT_FIELDS, `${label}.counts`);
-  for (const field of COUNT_FIELDS) {
-    exactSafeInteger(value.counts[field], cursorCount, `${label}.counts.${field}`);
-  }
+  validateCounts(value.counts, cursorCount, `${label}.counts`);
   exactSafeInteger(value.cursorLedgerLogicalWriteDelta, 1,
     `${label}.cursorLedgerLogicalWriteDelta`);
   exactSafeInteger(value.cursorLedgerFixedStatementDelta, 1,
@@ -138,24 +171,21 @@ function validateSuccess(value, cursorCount, index) {
     write: "rule11-complete",
     rule11: "active",
   });
-  exactKeys(value.consumeMint, CONSUME_MINT_FIELDS, `${label}.consumeMint`);
-  assert.deepEqual(value.consumeMint, {
-    writePrepareCount: 1,
-    writeExecuteCount: 1,
-    writeReleaseCount: 1,
-    changesPrepareCount: 1,
-    changesFetchCount: 1,
-    changesReleaseCount: 1,
-    rule11ViolationCount: 0,
-    diagnosticsTruncated: false,
-  });
+  validateConsumeMint(value.consumeMint, `${label}.consumeMint`);
 }
 
 function validateFailures(values) {
   assert.equal(Array.isArray(values), true);
-  assert.equal(values.length, 3);
+  assert.equal(values.length, 4);
   for (const value of values) {
-    exactKeys(value, FAILURE_FIELDS[value.caseId], `failure.${String(value.caseId)}`);
+    const fields = FAILURE_FIELDS[value.caseId];
+    assert.equal(fields !== undefined, true,
+      `failure.${String(value.caseId)} has an unknown caseId`);
+    exactKeys(value, fields, `failure.${String(value.caseId)}`);
+    if (value.caseId === "preconsume-release") {
+      exactSafeInteger(value.executeCount, 0, "failure.preconsume-release.executeCount");
+      exactSafeInteger(value.releaseCount, 1, "failure.preconsume-release.releaseCount");
+    }
   }
   assert.deepEqual(values, [
     {
@@ -176,6 +206,18 @@ function validateFailures(values) {
       selectedGraphPoisoned: true,
       replayRejected: true,
       receiptReadableAfterPoison: false,
+    },
+    {
+      caseId: "preconsume-release",
+      outcome: "exact-release-primary",
+      primaryIdentityPreserved: true,
+      selectedGraphPoisoned: true,
+      sessionConsumed: false,
+      contextLifecycle: "poisoned",
+      executionLifecycle: "poisoned",
+      executeCount: 0,
+      releaseCount: 1,
+      replayRejected: true,
     },
   ]);
 }
@@ -245,6 +287,67 @@ test("Rule11 comparator rejects hostile canonical projections", () => {
     failures: [],
   };
   assert.throws(() => validateReport(reordered, "typescript"), /key order/u);
+
+  const exactRelease = {
+    caseId: "preconsume-release",
+    outcome: "exact-release-primary",
+    primaryIdentityPreserved: true,
+    selectedGraphPoisoned: true,
+    sessionConsumed: false,
+    contextLifecycle: "poisoned",
+    executionLifecycle: "poisoned",
+    executeCount: 0,
+    releaseCount: 1,
+    replayRejected: true,
+  };
+  assert.throws(() => validateFailures([
+    exactRelease,
+    exactRelease,
+    exactRelease,
+    { ...exactRelease, releaseCount: Number.MAX_SAFE_INTEGER + 1 },
+  ]), /safe integer/u);
+  const reorderedRelease = {
+    outcome: exactRelease.outcome,
+    caseId: exactRelease.caseId,
+    primaryIdentityPreserved: true,
+    selectedGraphPoisoned: true,
+    sessionConsumed: false,
+    contextLifecycle: "poisoned",
+    executionLifecycle: "poisoned",
+    executeCount: 0,
+    releaseCount: 1,
+    replayRejected: true,
+  };
+  assert.throws(() => validateFailures([
+    exactRelease,
+    exactRelease,
+    exactRelease,
+    reorderedRelease,
+  ]), /key order/u);
+  assert.throws(() => validateFailures([
+    exactRelease,
+    exactRelease,
+    exactRelease,
+    { caseId: "unknown" },
+  ]), /unknown caseId/u);
+
+  assert.throws(() => validateCounts({
+    b2CursorCount: 0,
+    nativeAffectedCount: 1,
+    changesAffectedCount: 0,
+    totalChangesDelta: 0,
+    cursorLedgerAffectedDelta: 0,
+  }, 0, "hostile native affected evidence"), /differs/u);
+  assert.throws(() => validateConsumeMint({
+    writePrepareCount: 1,
+    writeExecuteCount: 1,
+    writeReleaseCount: 1,
+    changesPrepareCount: 1,
+    changesFetchCount: 2,
+    changesReleaseCount: 1,
+    rule11ViolationCount: 0,
+    diagnosticsTruncated: false,
+  }, "hostile changes exact-one evidence"), /differs/u);
 });
 
 test("Rule11 reporter sources are isolated from tests, fixture oracles, and each other", () => {

@@ -19,6 +19,8 @@ import {
   beginSQLiteConnectionCursorRebindExecutionIntrinsic,
   executeSQLiteConnectionCursorRebindIntrinsic,
   injectSQLiteConnectionCursorRebindCleanupFaultForTestIntrinsic,
+  injectSQLiteConnectionCursorRebindReleaseFaultForTestIntrinsic,
+  injectSQLiteConnectionCursorRebindReleaseFaultRegistrationFailureForTestIntrinsic,
   readSQLiteConnectionCursorRebindExecutionSnapshotIntrinsic,
   readSQLiteConnectionOwnerSnapshot,
   readSQLiteConnectionTotalChangesSnapshot,
@@ -332,6 +334,141 @@ afterEach(() => {
 });
 
 describe("SQLite connection cursor publication rebind", () => {
+  it("binds a preconsume release fault to one authentic connection and exact E", () => {
+    const selected = graphWithCursors(1);
+    const unselected = graphWithCursors(1);
+    const selectedExecution = begin(selected);
+    const unselectedExecution = begin(unselected);
+    const primary = new Error("selected exact-E release primary");
+
+    expect(() => injectSQLiteConnectionCursorRebindReleaseFaultForTestIntrinsic(
+      unselected.connection,
+      selectedExecution,
+      primary,
+    )).toThrow(/release fault is invalid/u);
+    expect(() => injectSQLiteConnectionCursorRebindReleaseFaultForTestIntrinsic(
+      selected.connection,
+      new Proxy(selectedExecution, {}),
+      primary,
+    )).toThrow(/release fault is invalid/u);
+    expect(() => injectSQLiteConnectionCursorRebindReleaseFaultForTestIntrinsic(
+      selected.connection,
+      Object.freeze(Object.create(null)),
+      primary,
+    )).toThrow(/release fault is invalid/u);
+
+    injectSQLiteConnectionCursorRebindReleaseFaultForTestIntrinsic(
+      selected.connection,
+      selectedExecution,
+      primary,
+    );
+    expect(() => injectSQLiteConnectionCursorRebindReleaseFaultForTestIntrinsic(
+      selected.connection,
+      selectedExecution,
+      new Error("double arm"),
+    )).toThrow(/release fault is invalid/u);
+
+    expect(releaseSQLiteConnectionCursorRebindExecutionIntrinsic(
+      unselected.connection,
+      unselectedExecution,
+    )).toMatchObject({ lifecycle: "released", executeCount: 0, releaseCount: 1 });
+    try {
+      releaseSQLiteConnectionCursorRebindExecutionIntrinsic(
+        selected.connection,
+        selectedExecution,
+      );
+      throw new Error("expected exact-E release fault");
+    } catch (error) {
+      expect(error).toBe(primary);
+    }
+    expect(readSQLiteConnectionCursorRebindExecutionSnapshotIntrinsic(
+      selected.connection,
+      selectedExecution,
+    )).toMatchObject({
+      affectedRows: 0,
+      changesFetchCount: 0,
+      changesPrepareCount: 0,
+      changesReleaseCount: 0,
+      cursorLedgerAffectedRowsWatermark: 0,
+      cursorLedgerFixedStatementCount: 0,
+      cursorLedgerLogicalWriteSequence: 0,
+      executeCount: 0,
+      lifecycle: "poisoned",
+      parameterValues: null,
+      releaseCount: 1,
+      statementOwnershipRetired: true,
+      totalChangesDelta: 0,
+    });
+    expect(() => releaseSQLiteConnectionCursorRebindExecutionIntrinsic(
+      selected.connection,
+      selectedExecution,
+    )).toThrow(/release is terminal/u);
+  });
+
+  it("discards an exact-E partial arm when fault registration throws", () => {
+    const value = graphWithCursors(1);
+    const execution = begin(value);
+    const registrationPrimary = new Error("exact-E registration primary");
+    injectSQLiteConnectionCursorRebindReleaseFaultRegistrationFailureForTestIntrinsic(
+      registrationPrimary,
+    );
+    try {
+      injectSQLiteConnectionCursorRebindReleaseFaultForTestIntrinsic(
+        value.connection,
+        execution,
+        new Error("discarded release primary"),
+      );
+      throw new Error("expected exact-E registration failure");
+    } catch (error) {
+      expect(error).toBe(registrationPrimary);
+    }
+    const selectedPrimary = new Error("retry exact-E release primary");
+    injectSQLiteConnectionCursorRebindReleaseFaultForTestIntrinsic(
+      value.connection,
+      execution,
+      selectedPrimary,
+    );
+    try {
+      releaseSQLiteConnectionCursorRebindExecutionIntrinsic(value.connection, execution);
+      throw new Error("expected retry exact-E release failure");
+    } catch (error) {
+      expect(error).toBe(selectedPrimary);
+    }
+  });
+
+  it("exact-discards an exact-E partial arm when registration throws undefined", () => {
+    const value = graphWithCursors(1);
+    const execution = begin(value);
+    injectSQLiteConnectionCursorRebindReleaseFaultRegistrationFailureForTestIntrinsic(
+      undefined,
+    );
+    let caught = false;
+    try {
+      injectSQLiteConnectionCursorRebindReleaseFaultForTestIntrinsic(
+        value.connection,
+        execution,
+        new Error("discarded undefined-registration arm"),
+      );
+    } catch (error) {
+      caught = true;
+      expect(error).toBeUndefined();
+    }
+    expect(caught).toBe(true);
+
+    const retryPrimary = new Error("retry after thrown undefined");
+    injectSQLiteConnectionCursorRebindReleaseFaultForTestIntrinsic(
+      value.connection,
+      execution,
+      retryPrimary,
+    );
+    try {
+      releaseSQLiteConnectionCursorRebindExecutionIntrinsic(value.connection, execution);
+      throw new Error("expected retry release primary");
+    } catch (error) {
+      expect(error).toBe(retryPrimary);
+    }
+  });
+
   it("anchors the exact SQL, digests and positional parameter contract", () => {
     expect(SQLITE_CURSOR_PUBLICATION_REBIND_SQL_INTRINSIC).toBe(
       "UPDATE main.ge_cycle_cursors SET descriptor_hash = ?, schema_identity_sha256 = ? WHERE descriptor_hash = ? AND schema_identity_sha256 = ?",
@@ -1030,6 +1167,84 @@ function buildReleaseAndDropRebindGraph(): Readonly<{
   return { finalized, referents, registry };
 }
 
+function buildArmedReleaseFaultAndDropRebindGraph(): Readonly<{
+  readonly finalized: Set<string>;
+  readonly referents: readonly RebindTrackedReferent[];
+  readonly registry: FinalizationRegistry<string>;
+}> {
+  const graph = createReaderLeaseTestGraph(1);
+  const execution = beginSQLiteConnectionCursorRebindExecutionIntrinsic(graph.connection);
+  const error = new Error("abandoned exact-E release fault") as Error & {
+    connection?: object;
+    execution?: object;
+  };
+  error.connection = graph.connection;
+  error.execution = execution;
+  injectSQLiteConnectionCursorRebindReleaseFaultForTestIntrinsic(
+    graph.connection,
+    execution,
+    error,
+  );
+  const finalized = new Set<string>();
+  const registry = new FinalizationRegistry<string>((label) => finalized.add(label));
+  const values = [
+    ["armed-execution", execution],
+    ["armed-connection", graph.connection],
+    ["reverse-root-error", error],
+  ] as const;
+  const referents = values.map(([label, value]) => {
+    registry.register(value, label);
+    return { label, reference: new WeakRef(value) };
+  });
+  disposeReaderLeaseTestGraph(graph);
+  return { finalized, referents, registry };
+}
+
+function buildAbandonedReleaseRegistrationFailureGraph(): Readonly<{
+  readonly finalized: Set<string>;
+  readonly referents: readonly RebindTrackedReferent[];
+  readonly registry: FinalizationRegistry<string>;
+}> {
+  const graph = createReaderLeaseTestGraph(1);
+  const execution = beginSQLiteConnectionCursorRebindExecutionIntrinsic(graph.connection);
+  const error = new Error("abandoned exact-E registration failure") as Error & {
+    connection?: object;
+    execution?: object;
+    graph?: object;
+  };
+  error.connection = graph.connection;
+  error.execution = execution;
+  error.graph = graph;
+  injectSQLiteConnectionCursorRebindReleaseFaultRegistrationFailureForTestIntrinsic(error);
+  const finalized = new Set<string>();
+  const registry = new FinalizationRegistry<string>((label) => finalized.add(label));
+  const values = [
+    ["registration-graph", graph],
+    ["registration-execution", execution],
+    ["registration-connection", graph.connection],
+    ["registration-error", error],
+  ] as const;
+  const referents = values.map(([label, value]) => {
+    registry.register(value, label);
+    return { label, reference: new WeakRef(value) };
+  });
+  disposeReaderLeaseTestGraph(graph);
+  return { finalized, referents, registry };
+}
+
+function armAndDropExactEReleaseError(
+  connection: ReaderLeaseTestGraph["connection"],
+  execution: SQLiteConnectionCursorRebindExecution,
+): WeakRef<object> {
+  const error = new Error("dead exact-E release primary");
+  injectSQLiteConnectionCursorRebindReleaseFaultForTestIntrinsic(
+    connection,
+    execution,
+    error,
+  );
+  return new WeakRef(error);
+}
+
 async function forceRebindGraphCollection(
   referents: readonly RebindTrackedReferent[],
 ): Promise<readonly string[]> {
@@ -1087,6 +1302,76 @@ describe("SQLite cursor-rebind isolated released-graph GC", () => {
       const live = await forceRebindGraphCollection(tracked.referents);
       expect(live, [
         "released cursor-rebind graph retained roots after 80 GC rounds",
+        `live=${live.join(",") || "none"}`,
+        `finalized=${[...tracked.finalized].sort().join(",") || "none"}`,
+      ].join("; ")).toEqual([]);
+      expect(tracked.registry).toBeInstanceOf(FinalizationRegistry);
+    }, 120_000);
+
+    it("collects an abandoned exact-E arm even when its error points back to E and connection", async () => {
+      expect(typeof globalThis.gc).toBe("function");
+      const tracked = buildArmedReleaseFaultAndDropRebindGraph();
+      const live = await forceRebindGraphCollection(tracked.referents);
+      expect(live, [
+        "armed exact-E graph retained a reverse-root chain",
+        `live=${live.join(",") || "none"}`,
+        `finalized=${[...tracked.finalized].sort().join(",") || "none"}`,
+      ].join("; ")).toEqual([]);
+      expect(tracked.registry).toBeInstanceOf(FinalizationRegistry);
+    }, 120_000);
+
+    it("fails closed after the selected exact-E error dies and exact-discards the arm", async () => {
+      expect(typeof globalThis.gc).toBe("function");
+      const value = graphWithCursors(1);
+      const execution = begin(value);
+      const errorReference = armAndDropExactEReleaseError(value.connection, execution);
+      const live = await forceRebindGraphCollection([
+        { label: "release-error", reference: errorReference },
+      ]);
+      expect(live).toEqual([]);
+      expect(() => releaseSQLiteConnectionCursorRebindExecutionIntrinsic(
+        value.connection,
+        execution,
+      )).toThrow(/release fault identity drifted/u);
+      expect(readSQLiteConnectionCursorRebindExecutionSnapshotIntrinsic(
+        value.connection,
+        execution,
+      )).toMatchObject({ lifecycle: "poisoned", executeCount: 0, releaseCount: 1 });
+      expect(() => releaseSQLiteConnectionCursorRebindExecutionIntrinsic(
+        value.connection,
+        execution,
+      )).toThrow(/release is terminal/u);
+    }, 120_000);
+
+    it("weakly holds an abandoned exact-E registration failure and clears it on trigger", async () => {
+      expect(typeof globalThis.gc).toBe("function");
+      const tracked = buildAbandonedReleaseRegistrationFailureGraph();
+      const live = await forceRebindGraphCollection(tracked.referents);
+
+      // Always consume the global one-shot after the bounded collection attempt,
+      // so even a diagnostic assertion cannot contaminate a later test.
+      const next = graphWithCursors(1);
+      const execution = begin(next);
+      const nextPrimary = new Error("next exact-E release primary");
+      expect(() => injectSQLiteConnectionCursorRebindReleaseFaultForTestIntrinsic(
+        next.connection,
+        execution,
+        nextPrimary,
+      )).toThrow(/registration failure expired/u);
+      injectSQLiteConnectionCursorRebindReleaseFaultForTestIntrinsic(
+        next.connection,
+        execution,
+        nextPrimary,
+      );
+      try {
+        releaseSQLiteConnectionCursorRebindExecutionIntrinsic(next.connection, execution);
+        throw new Error("expected retry after expired registration failure");
+      } catch (error) {
+        expect(error).toBe(nextPrimary);
+      }
+
+      expect(live, [
+        "abandoned exact-E registration failure retained its graph",
         `live=${live.join(",") || "none"}`,
         `finalized=${[...tracked.finalized].sort().join(",") || "none"}`,
       ].join("; ")).toEqual([]);

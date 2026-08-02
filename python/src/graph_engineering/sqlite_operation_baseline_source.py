@@ -2062,7 +2062,14 @@ class SQLiteV1BaselineConnectionOwner:
             state.total_changes = total_changes
 
         try:
-            affected_value = _rowcount_descriptor.__get__(state.cursor, sqlite3.Cursor)
+            try:
+                affected_value = _rowcount_descriptor.__get__(
+                    state.cursor, sqlite3.Cursor
+                )
+            except BaseException as error:
+                raise ValueError(
+                    "GE_CURSOR_B3_CURSOR_REBIND_AFFECTED"
+                ) from error
             record_affected_rows(affected_value)
             total_changes = _native_total_changes(self.__connection)
             record_total_changes(total_changes)

@@ -20743,3 +20743,180 @@ one-shot、register rollback、abandoned-arm GC与stale callback安全。完成l
 preconsume boundary，证明release primary覆盖第二次cancellation、S未consume、A/W/R11零mint、selected
 graph poison/cleanup、unselected graph健康。随后两端共同推进B2/ledger单字段漂移与transaction-owner
 precedence，全部通过独立审计和portable parity后，才能讨论Wave 1E完成与Rule12起步。
+
+#### 31.37.71 Wave 1E/P3：TS exact-E release、两端 hostile evidence、B2/ledger matrix 与 parity v2（2026-08-02 PDT 追加；既有内容不改）
+
+本节接续31.37.70，只接受已经独立审计和真实运行验证的四个增量：TypeScript exact-S→exact-E
+preconsume release、Python serialized native/changes hostile evidence、TypeScript B2/ledger单字段闭合
+验证，以及cross-runtime Rule11 parity v2。它仍不把transaction-owner finalization、Wave 1E、Rule12
+或third clock标为完成。追加前计划精确为20,745行，完整前缀SHA-256为
+`2018c53d2081cbcf731365b1d57b9b7ef07e8fdec0a2cf74aac1ed912e9b7121`；前20,745行必须继续
+byte-for-byte不变。
+
+##### 31.37.71.1 TypeScript authentic exact-S → exact-E preconsume release
+
+lower connection建立package-private `WeakMap<E, fault-state>`。key必须是本次真实connection创建、仍在
+active、未execute、未release且仍持statement的exact E；value只以`WeakRef`保存exact connection与
+object/function primary，因而即使primary反向引用E、connection或graph也不会形成registry强根。
+arm拒绝proxy、forged E、cross-connection、double-arm与非weak-target error。take执行delete-before-
+deref/throw：只允许selected E消费一次；dead error或connection identity drift会先retire statement、
+poison E，再抛结构化corruption。正常selected failure同样先logical retire、置releaseCount=1、poison，
+再抛exact primary。Node `StatementSync`仍没有可用native close，本节只声称logical retirement。
+
+upper建立`WeakMap<S, pending>`，value只以`WeakRef`保存authority、connection与primary。handoff在
+composite leaf完成E、context和P创建/认证后执行，且同时核验：
+
+- pending key是本次exact S；
+- context snapshot仍绑定本次S、authority与connection；
+- lifecycle仍是prepared；
+- prepared owner和execution分别是本次exact P与E；
+- weak authority、connection与primary都仍存活。
+
+upper pending在调用lower arm之前exact delete。lower registration失败时composite cleanup释放E/context/P，
+S仍active并可用同一个对象重试。第二次cancellation检查先冻结为boolean；当release fault和cancellation
+同时存在时，release真实执行并让exact primary获胜，不会用cancel错误替换primary。此边界位于T之前，
+因此S未consume，T/A/W/R11均未mint；selected authority/context/E终态poisoned，unselected graph继续
+健康可执行。
+
+两层registration-failure test hook不再强持任意对象型error。它们使用tagged envelope：object/function
+只存WeakRef，primitive（包括`undefined`、`null`）直接存储。trigger先清全局one-shot state；dead object
+转为结构化expired failure，随后partial arm exact delete。专门测试锁定lower与upper `throw undefined`、
+exact rollback和retry；abandoned registration-error反向引用graph时也可GC，下一次dead trigger会清状态并
+允许再次注册。package-root non-export测试同时覆盖upper和lower四个新seam名称。
+
+最终TS验证：
+
+- connection full：40/40，约89.37秒，包含spawned `--expose-gc` child；
+- serialized Rule11 full：20/20，约51.13秒，包含spawned GC child；
+- lower/upper abandoned registration reverse-root：各1/1；
+- undefined/rollback/private-root focused：lower 2/2、upper 3/3；
+- scoped typecheck与diff-check通过；
+- 初审H0/M0/L3的三个Low全部修复，最终独立复审H0/M0/L0。
+
+##### 31.37.71.2 Python serialized hostile evidence 与 bounded real id reuse honesty
+
+Python lower owner把`sqlite3.Cursor.rowcount` descriptor lookup自身的missing/throwing failure也规范为
+`GE_CURSOR_B3_CURSOR_REBIND_AFFECTED`。异常发生后仍进入既有native-progress recovery：读取captured
+rowcount/total changes，按真实进度更新state并执行release；上游native/descriptor primary保持优先，
+release secondary不能替换它。
+
+serialized composite矩阵通过protocol模块实际动态全局插入最窄test wrapper，但wrapper最终调用真实
+`SQLiteV1BaselineConnectionOwner`，不是直接构造snapshot或JSON。矩阵每次捕获本次真实E并证明已经
+越过T，覆盖：
+
+- native affected missing descriptor、throwing descriptor、throwing accessor、hostile attribute、string、
+  float、negative与unsafe integer；
+- native affected primary叠加真实release secondary，保持原primary identity；
+- changes prepare、fetch、zero row、two rows、outer shape、row shape、wrong type、negative、unsafe；
+- changes close failure，以及shape/fetch primary覆盖close secondary；
+- `fetchmany(2)` exactly once，changes prepare/fetch/release计数与边界一致；
+- 每个failure中E prepare/execute/release均为exact一次，selected authority/context/T/E poisoned，A未mint，
+  W/R11 registry计数不增加。
+
+bounded id-reuse测试使用明确65,536次预算，并与既有private-root/registry GC测试分离。既有GC测试必须
+无条件PASS，不能因平台没有复用id而被整项标为skip。独立id-reuse测试只在CPython真实产生retired W或
+R11 token的exact id复用时验证stale reader拒绝；本机没有观察到复用，因此以包含attempt budget、
+`actual_reuse=False`和retired ids的理由诚实skip。普通object churn不被记录为id-reuse成功。
+
+最终Python验证：
+
+- lower full：40 passed，约2.54秒；
+- composite full：60 passed、1 honest skip，约236.07秒；
+- 独立hostile/GC/id-reuse audit targets：22 passed、1 honest skip；
+- Ruff、mypy与diff-check通过；
+- 独立审计H0/M0/L0。
+
+##### 31.37.71.3 Authentic B2/outer/cursor ledger 11-field drift matrix
+
+封口后的public token、receipt和connection private E ledger不能被合法外部修改，因此测试不能通过改写
+冻结token制造假证据。outer authority deep module新增package-private validation-observation seam：key是
+exact authentic context的WeakMap弱键，value只是11值enum，不保存graph对象；默认未武装、one-shot
+take-before-validation、未进入package root。arm先严格认证context↔authority↔active state，拒绝clone、
+proxy、cross-run、invalid enum和double-arm；register-then-throw会delete并允许exact retry。
+
+11个case分别只改变consume closed predicate看到的一个局部observed field，正常路径仍读取真实
+provenance、stage、projection、parameter values、live outer ledger与live E cursor ledger：
+
+1. B2 immutable root；
+2. B2 cursor count；
+3. B2 stage；
+4. B2 projection identity；
+5. B2 parameter commitment；
+6. outer ledger logical write sequence；
+7. outer ledger fixed statement count；
+8. outer ledger affected rows watermark；
+9. cursor ledger logical write sequence；
+10. cursor ledger fixed statement count；
+11. cursor ledger affected rows watermark。
+
+每个case只选择一个authentic graph并在同一正常consume closed predicate fail-closed；selected authority和
+context poison，unselected graph保持active并能正常consume。poison reason只首次写入，对already-poisoned
+graph不重复诊断。focused矩阵13/13、outer-authority full 36/36、Rule11+session regression 31/31、
+scoped typecheck与diff-check通过；独立审计H0/M0/L0。
+
+##### 31.37.71.4 Rule11 parity v2 与 portable failure projection
+
+三份conformance reporter/comparator升级到schema
+`sqlite-cursor-publication-rule11-parity/v2`。既有success N=0/1/3、pre-cancel、forged-cancel与
+replay-poison保持不变，新增`preconsume-release`。两端reporter都创建真实SQLite graph、mint authentic
+S、arm各自package-private exact-S seam并调用正常serialized Rule11 leaf；结果来自真实authority、context
+和E snapshot，不直接伪造JSON。
+
+portable projection固定并验证：exact primary identity preserved、selected graph poisoned、S未consume、
+context/E poisoned、executeCount=0、releaseCount=1、replay rejected。reporter不输出平台native文案、地址、
+时间或GC结果。comparator要求两端除runtime字段外canonical byte exact，并新增对unknown case id、key
+order、unsafe release count、native affected mismatch和changes fetch count不为1的显式 hostile reject。
+
+TS native/changes shape hostile需要import production前替换原生prototype，而Python使用不同的最窄seam；
+两端不存在共同portable机制，所以本节没有伪造这两类runtime parity case。它们由各自serialized/full
+测试提供证据，直到冻结共同contract seam前保持portable parity nonclaim。
+
+最终parity验证：
+
+- 主线程最终 `npm run test:sqlite-cursor-publication-rule11-parity`：3/3；
+- real-SQLite两端重复reporter canonical byte exact，约65.01秒，总计约65.13秒；
+- core/runtime/sqlite build、Python reporter Ruff与py_compile、diff-check通过；
+- 初审唯一Low为unknown case分支缺少hostile test；补测后focused 1/1，最终独立复审H0/M0/L0。
+
+##### 31.37.71.5 最终文件身份
+
+本轮11个production/test/conformance文件均为0644。最终候选SHA-256：
+
+- TS outer authority：`4888b71c2765c33ea21333c61fde31816794491d801928b7f5779f150f13e482`；
+- TS rebind leaf：`6da9ff8a58215dc4b9d191edbe154d6865c7c067516122a34852e447cd0001b6`；
+- TS connection：`86ed6a4685d5caf9cf65db866c2bda7c6c3a711ec81cd50b9b3e14a4db5f7b85`；
+- TS connection test：`0d1eec2c67bc978ea3322aad749423a4cdd88927a9f1598bf21134244de74520`；
+- TS Rule11 test：`c9c481414d68a56d91e716aac5190eacc1e32a349403d4726e3f7200e165de32`；
+- TS outer-authority test：`7d0c32b2de8dad7877b73c8b76e465640068b37bcd7efe04e4d7178a1e699e90`；
+- Python lower source：`07b757c4de7aa08f1e02547a8a757931c65fe6eb70af09109910a11e9a76b920`；
+- Python composite test：`a1fa4a2316d2be7bb8b73dc4cc12f8ce4163eadc7133b648477cec363f442a3a`；
+- parity test：`257985a1b89bc7b08b92901107a491d2675af7e4ad2e381486e8e20f5393d9fe`；
+- TS reporter：`faf5ed890327c1095bb540711502c68732e719b4a3ebfe7007138f419d1e6a2f`；
+- Python reporter：`45d62a3d14374f124d72c9f315de50f3168c8f12bed01b9e17ff4f68d232779f`。
+
+##### 31.37.71.6 Remaining strict nonclaims 与 transaction failure finalizer 下一切片
+
+本轮关闭了TS exact-E release、Python serialized hostile、B2/ledger单字段验证与一个portable release
+case，但Wave 1E仍有以下严格未完成项：
+
+- TS raw native affected hostile仍需完整serialized composite matrix；
+- TS changes hostile虽有lower full matrix，但尚未全部提升到serialized composite；
+- native、changes、total delta、outer/cursor ledger的pairwise与多点不一致组合尚未闭环；
+- 65,536预算内未实际观察Python id reuse，因此只能声称honest bounded attempt，不能声称复用路径在本机
+  动态命中；
+- 当前没有production publication transaction owner；只有physical connection/lineage owner和测试fixture
+  disposer；
+- Rule12、TEMP retirement、success commit fence与third clock尚未实现。
+
+下一切片不得把rollback/close塞进serialized Rule11 leaf。leaf已明确不拥有transaction begin/commit/
+rollback。先冻结一个package-private `PostConsumeTransactionFailureFinalizer` contract，只处理经过认证的
+post-T terminal primary：exact connection、transaction lineage/generation、authority、T与one-shot owner；
+先terminalize，再真实rollback一次，即使rollback失败仍真实close一次，最终选择顺序为
+`post-T native/changes primary > rollback secondary > close tertiary`。无既有primary的success cleanup分支
+受Rule12/final fence门禁，不能提前实现。
+
+现有driver接口不能稳定制造真正的native rollback/close throw。可接受的当前证据必须诚实命名为
+`after-native-return ambiguous cleanup fault`：真实rollback/close已返回后注入secondary/tertiary，证明
+cleanup失败不覆盖leaf primary。若要求driver-native throw，必须先提供可注入driver adapter或可复现的
+OS/driver failure；否则保持nonclaim。finalizer还必须证明rollback后reopen恢复pre-rebind永久数据、old
+S/T/authority不复活、fresh graph可成功、selected/unselected/abandoned/cross-owner/GC registry全矩阵。

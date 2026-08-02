@@ -747,6 +747,55 @@ let postRebindSealScanCloseFaultForTest: Readonly<{
 }> | undefined;
 const weakMapGetIntrinsic = WeakMap.prototype.get;
 const weakMapSetIntrinsic = WeakMap.prototype.set;
+const weakMapDeleteIntrinsic = WeakMap.prototype.delete;
+const weakMapHasIntrinsic = WeakMap.prototype.has;
+const weakRefIntrinsic = WeakRef;
+const weakRefDerefIntrinsic = WeakRef.prototype.deref;
+
+interface CursorRebindReleaseFaultState {
+  readonly connection: WeakRef<object>;
+  readonly error: WeakRef<object>;
+}
+
+const CURSOR_REBIND_RELEASE_FAULTS = new WeakMap<
+  object,
+  CursorRebindReleaseFaultState
+>();
+type CursorRebindRegistrationFailure =
+  | Readonly<{ readonly kind: "direct"; readonly error: unknown }>
+  | Readonly<{ readonly kind: "weak"; readonly error: WeakRef<object> }>;
+let cursorRebindReleaseFaultRegistrationFailureForTest:
+  CursorRebindRegistrationFailure | undefined;
+
+function cursorRebindRegistrationFailure(
+  error: unknown,
+): CursorRebindRegistrationFailure {
+  return error !== null && (typeof error === "object" || typeof error === "function")
+    ? objectFreezeIntrinsic({
+      kind: "weak" as const,
+      error: new weakRefIntrinsic(error),
+    })
+    : objectFreezeIntrinsic({ kind: "direct" as const, error });
+}
+
+function throwCursorRebindRegistrationFailure(
+  failure: CursorRebindRegistrationFailure,
+): never {
+  if (failure.kind === "direct") throw failure.error;
+  const error = reflectApplyIntrinsic(
+    weakRefDerefIntrinsic,
+    failure.error,
+    [],
+  ) as object | undefined;
+  if (error === undefined) {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_CORRUPTION",
+      "inspect-schema",
+      "SQLite cursor rebind release fault registration failure expired",
+    );
+  }
+  throw error;
+}
 
 function invalid(message: string): never {
   throw new CycleStoreProviderError(
@@ -2752,6 +2801,46 @@ export class SQLiteConnection {
         "SQLite cursor rebind release is terminal",
       );
     }
+    const injected = reflectApplyIntrinsic(
+      weakMapGetIntrinsic,
+      CURSOR_REBIND_RELEASE_FAULTS,
+      [execution as object],
+    ) as CursorRebindReleaseFaultState | undefined;
+    if (injected !== undefined) {
+      if (!reflectApplyIntrinsic(
+        weakMapDeleteIntrinsic,
+        CURSOR_REBIND_RELEASE_FAULTS,
+        [execution as object],
+      )) {
+        this.#retireCursorRebindStatement(state);
+        state.lifecycle = "poisoned";
+        throw new CycleStoreProviderError(
+          "GE_CYCLE_STORE_CORRUPTION",
+          "inspect-schema",
+          "SQLite cursor rebind release fault identity drifted",
+        );
+      }
+      const selectedConnection = reflectApplyIntrinsic(
+        weakRefDerefIntrinsic,
+        injected.connection,
+        [],
+      ) as object | undefined;
+      const selectedError = reflectApplyIntrinsic(
+        weakRefDerefIntrinsic,
+        injected.error,
+        [],
+      ) as object | undefined;
+      this.#retireCursorRebindStatement(state);
+      state.lifecycle = "poisoned";
+      if (selectedConnection !== this || selectedError === undefined) {
+        throw new CycleStoreProviderError(
+          "GE_CYCLE_STORE_CORRUPTION",
+          "inspect-schema",
+          "SQLite cursor rebind release fault identity drifted",
+        );
+      }
+      throw selectedError;
+    }
     this.#retireCursorRebindStatement(state);
     state.lifecycle = "released";
   }
@@ -4050,6 +4139,68 @@ export function releaseSQLiteConnectionCursorRebindExecutionIntrinsic(
     [execution],
   );
   return readSQLiteConnectionCursorRebindExecutionSnapshotIntrinsic(connection, execution);
+}
+
+/** Package-private exact-E one-shot preconsume release fault seam. */
+export function injectSQLiteConnectionCursorRebindReleaseFaultForTestIntrinsic(
+  connection: SQLiteConnection,
+  execution: SQLiteConnectionCursorRebindExecution,
+  error: unknown,
+): void {
+  const state = execution !== null && typeof execution === "object" && !isProxy(execution)
+    ? reflectApplyIntrinsic(weakMapGetIntrinsic, CURSOR_REBIND_EXECUTIONS, [
+      execution as object,
+    ]) as CursorRebindExecutionState | undefined
+    : undefined;
+  if (state === undefined || state.connection !== connection
+      || state.lifecycle !== "active" || state.statement === null
+      || state.executeCount !== 0 || state.releaseCount !== 0
+      || (typeof error !== "object" && typeof error !== "function")
+      || error === null || isProxy(error)
+      || reflectApplyIntrinsic(weakMapHasIntrinsic, CURSOR_REBIND_RELEASE_FAULTS, [
+        execution as object,
+      ])) {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "inspect-schema",
+      "SQLite cursor rebind release fault is invalid",
+    );
+  }
+  const fault = objectFreezeIntrinsic({
+    connection: new weakRefIntrinsic(connection as object),
+    error: new weakRefIntrinsic(error),
+  });
+  try {
+    reflectApplyIntrinsic(weakMapSetIntrinsic, CURSOR_REBIND_RELEASE_FAULTS, [
+      execution as object,
+      fault,
+    ]);
+    const registrationFailure = cursorRebindReleaseFaultRegistrationFailureForTest;
+    cursorRebindReleaseFaultRegistrationFailureForTest = undefined;
+    if (registrationFailure !== undefined) {
+      throwCursorRebindRegistrationFailure(registrationFailure);
+    }
+  } catch (registrationError) {
+    reflectApplyIntrinsic(weakMapDeleteIntrinsic, CURSOR_REBIND_RELEASE_FAULTS, [
+      execution as object,
+    ]);
+    throw registrationError;
+  }
+}
+
+/** Package-private failure after exact-E fault registration, before arm returns. */
+export function injectSQLiteConnectionCursorRebindReleaseFaultRegistrationFailureForTestIntrinsic(
+  error: unknown,
+): void {
+  if (cursorRebindReleaseFaultRegistrationFailureForTest !== undefined) {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "inspect-schema",
+      "SQLite cursor rebind release fault registration failure is armed",
+    );
+  }
+  cursorRebindReleaseFaultRegistrationFailureForTest =
+    cursorRebindRegistrationFailure(error);
 }
 
 /** Package-private one-shot fault seam proving cleanup never replaces a primary. */

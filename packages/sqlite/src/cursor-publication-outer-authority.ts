@@ -1026,10 +1026,25 @@ const PUBLICATION_SESSION_CONSUMED_TOMBSTONES =
   new WeakMap<object, PublicationSessionConsumedTombstoneState>();
 const POST_REBIND_WATERMARK_ADOPTIONS =
   new WeakMap<object, PostRebindWatermarkAdoptionState>();
+export type SQLiteCursorPublicationRebindValidationDriftForTest =
+  | "b2-immutable-root"
+  | "b2-cursor-count"
+  | "b2-stage"
+  | "b2-projection"
+  | "b2-parameter-commitment"
+  | "outer-ledger-logical-write-sequence"
+  | "outer-ledger-fixed-statement-count"
+  | "outer-ledger-affected-rows-watermark"
+  | "cursor-ledger-logical-write-sequence"
+  | "cursor-ledger-fixed-statement-count"
+  | "cursor-ledger-affected-rows-watermark";
+const PUBLICATION_REBIND_VALIDATION_DRIFTS_FOR_TEST =
+  new WeakMap<object, SQLiteCursorPublicationRebindValidationDriftForTest>();
 type PublicationRebindRegistrationFaultStage =
   | "context-primary"
   | "context-session"
   | "context-prepared-owner"
+  | "validation-drift-arm"
   | "session-tombstone"
   | "watermark-adoption";
 let publicationRebindRegistrationFault: Readonly<{
@@ -1342,6 +1357,80 @@ export function injectSQLiteCursorPublicationRebindRegistrationFaultForTestIntri
     );
   }
   publicationRebindRegistrationFault = objectFreezeIntrinsic({ error, stage });
+}
+
+/**
+ * Package-private one-shot seam for exercising the closed rebind validation
+ * tuple. The weak key is the exact authentic context and the value is only an
+ * enum, so an armed seam cannot reverse-root its graph. It is intentionally
+ * absent from the package root and never mutates a retained production token.
+ */
+export function injectSQLiteCursorPublicationRebindValidationDriftForTestIntrinsic(
+  contextToken: SQLiteCursorPublicationRebindContext,
+  authority: SQLiteCursorOuterPublicationAuthority,
+  drift: SQLiteCursorPublicationRebindValidationDriftForTest,
+): void {
+  if (drift !== "b2-immutable-root"
+      && drift !== "b2-cursor-count"
+      && drift !== "b2-stage"
+      && drift !== "b2-projection"
+      && drift !== "b2-parameter-commitment"
+      && drift !== "outer-ledger-logical-write-sequence"
+      && drift !== "outer-ledger-fixed-statement-count"
+      && drift !== "outer-ledger-affected-rows-watermark"
+      && drift !== "cursor-ledger-logical-write-sequence"
+      && drift !== "cursor-ledger-fixed-statement-count"
+      && drift !== "cursor-ledger-affected-rows-watermark") {
+    return fail(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "SQLite publication rebind validation drift kind is invalid",
+    );
+  }
+  const context = publicationRebindContextState(contextToken);
+  const state = authorityState(authority);
+  if (context.authority !== authority || state.publicationRebindContext !== contextToken
+      || context.lifecycle !== "prepared" || state.writePhase !== "publication-active") {
+    return fail(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "SQLite publication rebind validation drift graph is invalid",
+    );
+  }
+  const existing = reflectApplyIntrinsic(
+    weakMapGetIntrinsic, PUBLICATION_REBIND_VALIDATION_DRIFTS_FOR_TEST,
+    [contextToken as object],
+  ) as SQLiteCursorPublicationRebindValidationDriftForTest | undefined;
+  if (existing !== undefined) {
+    return fail(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "SQLite publication rebind validation drift is already armed",
+    );
+  }
+  reflectApplyIntrinsic(weakMapSetIntrinsic, PUBLICATION_REBIND_VALIDATION_DRIFTS_FOR_TEST, [
+    contextToken as object, drift,
+  ]);
+  try {
+    throwSQLiteCursorPublicationRebindRegistrationFaultIntrinsic("validation-drift-arm");
+  } catch (error) {
+    reflectApplyIntrinsic(weakMapDeleteIntrinsic, PUBLICATION_REBIND_VALIDATION_DRIFTS_FOR_TEST, [
+      contextToken as object,
+    ]);
+    throw error;
+  }
+}
+
+function takeSQLiteCursorPublicationRebindValidationDriftForTestIntrinsic(
+  contextToken: SQLiteCursorPublicationRebindContext,
+): SQLiteCursorPublicationRebindValidationDriftForTest | undefined {
+  const drift = reflectApplyIntrinsic(
+    weakMapGetIntrinsic, PUBLICATION_REBIND_VALIDATION_DRIFTS_FOR_TEST,
+    [contextToken as object],
+  ) as SQLiteCursorPublicationRebindValidationDriftForTest | undefined;
+  if (drift !== undefined) {
+    reflectApplyIntrinsic(weakMapDeleteIntrinsic, PUBLICATION_REBIND_VALIDATION_DRIFTS_FOR_TEST, [
+      contextToken as object,
+    ]);
+  }
+  return drift;
 }
 
 function throwSQLiteCursorPublicationRebindRegistrationFaultIntrinsic(
@@ -6432,17 +6521,63 @@ export function consumeSQLiteCursorPublicationSessionForRebindIntrinsic(
     const provenance = assertSQLiteCursorPreRebindReceiptProvenance(context.receipt);
     const owner = readSQLiteConnectionOwnerSnapshot(context.connection);
     const total = readSQLiteConnectionTotalChangesSnapshot(context.connection);
+    const drift = takeSQLiteCursorPublicationRebindValidationDriftForTestIntrinsic(contextToken);
+    const observedB2CursorCount = drift === "b2-cursor-count"
+      ? context.b2CursorCount + 1
+      : provenance.sealReceipt.cursorCount;
+    const observedB2ImmutableRootSha256 = drift === "b2-immutable-root"
+      ? ""
+      : provenance.sealReceipt.immutableRootSha256;
+    const observedStage = drift === "b2-stage"
+      ? undefined
+      : publication.snapshotBase.stage;
+    const observedProjectionIdentity = drift === "b2-projection"
+      ? undefined
+      : publication.snapshotBase.projectionIdentity;
+    const observedParameterValues = drift === "b2-parameter-commitment"
+      ? objectFreezeIntrinsic([
+          "", context.targetSchemaIdentitySha256,
+          context.sourceDescriptorHash, context.sourceSchemaIdentitySha256,
+        ] as const)
+      : context.parameterValues;
+    const observedOuterLedger = drift === "outer-ledger-logical-write-sequence"
+      ? objectFreezeIntrinsic({
+          ...context.historicalOuterLedger,
+          logicalWriteSequence: context.historicalOuterLedger.logicalWriteSequence + 1,
+        })
+      : drift === "outer-ledger-fixed-statement-count"
+        ? objectFreezeIntrinsic({
+            ...context.historicalOuterLedger,
+            fixedStatementCount: context.historicalOuterLedger.fixedStatementCount + 1,
+          })
+        : drift === "outer-ledger-affected-rows-watermark"
+          ? objectFreezeIntrinsic({
+              ...context.historicalOuterLedger,
+              affectedRowsWatermark: context.historicalOuterLedger.affectedRowsWatermark + 1,
+            })
+          : outerLedgerSnapshot(state);
+    const observedPreparedSnapshot = drift === "cursor-ledger-logical-write-sequence"
+      ? objectFreezeIntrinsic({ ...preparedSnapshot, cursorLedgerLogicalWriteSequence: 1 })
+      : drift === "cursor-ledger-fixed-statement-count"
+        ? objectFreezeIntrinsic({ ...preparedSnapshot, cursorLedgerFixedStatementCount: 1 })
+        : drift === "cursor-ledger-affected-rows-watermark"
+          ? objectFreezeIntrinsic({ ...preparedSnapshot, cursorLedgerAffectedRowsWatermark: 1 })
+          : preparedSnapshot;
     if (!preparedPublicationRebindSnapshotIsExact(context.preparedExecutionSnapshot, state)
-        || !preparedPublicationRebindSnapshotIsExact(preparedSnapshot, state)
+        || !preparedPublicationRebindSnapshotIsExact(observedPreparedSnapshot, state)
         || !owner.isTransaction || owner.transactionMode !== "exclusive"
         || owner.transactionLineage !== context.transactionLineage
         || owner.transactionEpoch !== context.historicalTransactionEpoch
         || total.transactionEpoch !== owner.transactionEpoch
         || total.totalChanges !== context.historicalTotalChanges
-        || !exactLedger(outerLedgerSnapshot(state), context.historicalOuterLedger)
+        || !exactLedger(observedOuterLedger, context.historicalOuterLedger)
         || provenance.receiptSha256 !== context.preRebindReceiptSha256
-        || provenance.sealReceipt.cursorCount !== context.b2CursorCount
-        || provenance.sealReceipt.immutableRootSha256 !== context.b2ImmutableRootSha256) {
+        || observedB2CursorCount !== context.b2CursorCount
+        || observedB2ImmutableRootSha256 !== context.b2ImmutableRootSha256
+        || observedStage !== state.stage
+        || observedProjectionIdentity !== state.projectionIdentity
+        || publication.snapshotBase.projectionReference !== state.projectionReference
+        || !exactPublicationRebindParameters(observedParameterValues, context)) {
       fail("GE_CYCLE_STORE_CORRUPTION", "SQLite publication session consume graph drifted");
     }
   } catch (error) {

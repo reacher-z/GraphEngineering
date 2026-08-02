@@ -1027,6 +1027,414 @@ def test_real_post_t_native_execute_failure_poisons_outer_preserves_primary_and_
     assert tuple(len(registry) for registry in registries) == baseline
 
 
+@pytest.mark.parametrize(
+    "case",
+    [
+        "missing-descriptor",
+        "throwing-descriptor",
+        "throwing-accessor",
+        "hostile-attribute",
+        "string",
+        "float",
+        "negative",
+        "unsafe-integer",
+    ],
+)
+def test_serialized_native_affected_hostile_matrix_is_terminal_before_receipts(
+    monkeypatch: pytest.MonkeyPatch,
+    case: str,
+) -> None:
+    class ThrowingDescriptor:
+        def __get__(self, _instance: object, _owner: object) -> int:
+            raise RuntimeError("throwing native affected descriptor")
+
+    class ThrowingAccessor:
+        @property
+        def __get__(self) -> Any:
+            raise RuntimeError("throwing native affected accessor")
+
+    class HostileAttribute:
+        calls = 0
+
+        def __getattribute__(self, name: str) -> Any:
+            if name == "__get__":
+                type(self).calls += 1
+                raise AssertionError("hostile native affected attribute")
+            return object.__getattribute__(self, name)
+
+    class SuppliedDescriptor:
+        def __init__(self, value: object) -> None:
+            self.value = value
+
+        def __get__(self, _instance: object, _owner: object) -> object:
+            return self.value
+
+    descriptor: object
+    if case == "missing-descriptor":
+        descriptor = object()
+    elif case == "throwing-descriptor":
+        descriptor = ThrowingDescriptor()
+    elif case == "throwing-accessor":
+        descriptor = ThrowingAccessor()
+    elif case == "hostile-attribute":
+        descriptor = HostileAttribute()
+    else:
+        descriptor = SuppliedDescriptor(
+            {
+                "string": "0",
+                "float": 0.0,
+                "negative": -1,
+                "unsafe-integer": 2**53,
+            }[case]
+        )
+
+    graph = _AdoptionGraph(0)
+    try:
+        session = _session(graph)
+        expected = outer._read_sqlite_cursor_publication_session_snapshot_intrinsic(
+            session
+        )
+        executions: list[Any] = []
+        execute_calls = 0
+
+        def execute(
+            connection: Any,
+            execution: Any,
+            target_descriptor: object,
+            target_schema: object,
+            source_descriptor: object,
+            source_schema: object,
+        ) -> Any:
+            nonlocal execute_calls
+            execute_calls += 1
+            assert connection is graph.connection
+            assert executions == []
+            executions.append(execution)
+            assert (
+                target_descriptor,
+                target_schema,
+                source_descriptor,
+                source_schema,
+            ) == (
+                expected.target_descriptor_hash,
+                expected.target_schema_identity,
+                expected.source_descriptor_hash,
+                expected.source_schema_identity,
+            )
+            return source.SQLiteV1BaselineConnectionOwner._execute_cursor_publication_rebind(
+                connection,
+                execution,
+                target_descriptor,
+                target_schema,
+                source_descriptor,
+                source_schema,
+                _rowcount_descriptor=descriptor,
+            )
+
+        monkeypatch.setattr(
+            protocol,
+            "_execute_sqlite_connection_cursor_publication_rebind_intrinsic",
+            execute,
+        )
+        write_before = len(protocol._WRITE_RECEIPTS)
+        rule11_before = len(protocol._RULE11_RECEIPTS)
+        with _expect("GE_CURSOR_B3_CURSOR_REBIND_AFFECTED"):
+            protocol._execute_sqlite_cursor_publication_rebind_rule11_intrinsic(
+                session
+            )
+        assert execute_calls == 1
+        assert len(executions) == 1
+        native = source._read_sqlite_connection_cursor_publication_rebind_snapshot_intrinsic(
+            graph.connection, executions[0]
+        )
+        assert native.lifecycle == "poisoned"
+        assert (native.prepare_count, native.execute_count, native.release_count) == (
+            1,
+            1,
+            1,
+        )
+        assert native.affected_rows == 0
+        assert native.cursor_ledger_after == (0, 1, 1)
+        assert (
+            native.changes_prepare_count,
+            native.changes_fetch_count,
+            native.changes_release_count,
+        ) == (0, 0, 0)
+        assert len(protocol._WRITE_RECEIPTS) == write_before
+        assert len(protocol._RULE11_RECEIPTS) == rule11_before
+        authority = outer._read_sqlite_cursor_outer_publication_authority_snapshot_intrinsic(
+            graph.authority
+        )
+        assert authority.lifecycle == "poisoned"
+        assert authority.write_phase == "poisoned"
+        assert authority.publication_session_consumed_tombstone is not None
+        assert authority.post_rebind_watermark_adoption is None
+        with pytest.raises(ValueError, match="PUBLICATION_SESSION"):
+            outer._assert_sqlite_cursor_publication_session_intrinsic(session)
+        if case == "hostile-attribute":
+            assert HostileAttribute.calls == 1
+    finally:
+        graph.close()
+
+
+def test_serialized_native_affected_primary_wins_over_release_secondary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class InvalidDescriptor:
+        def __get__(self, _instance: object, _owner: object) -> str:
+            return "not a count"
+
+    class ReleaseSecondary(BaseException):
+        pass
+
+    graph = _AdoptionGraph(0)
+    try:
+        session = _session(graph)
+        executions: list[Any] = []
+        original_release = protocol.__dict__[
+            "_release_sqlite_connection_cursor_publication_rebind_intrinsic"
+        ]
+
+        def execute(connection: Any, execution: Any, *parameters: object) -> Any:
+            executions.append(execution)
+            assert len(parameters) == 4
+            target_descriptor, target_schema, source_descriptor, source_schema = (
+                parameters
+            )
+            return source.SQLiteV1BaselineConnectionOwner._execute_cursor_publication_rebind(
+                connection,
+                execution,
+                target_descriptor,
+                target_schema,
+                source_descriptor,
+                source_schema,
+                _rowcount_descriptor=InvalidDescriptor(),
+            )
+
+        def release_then_secondary(connection: Any, execution: Any) -> Any:
+            assert execution is executions[0]
+            original_release(connection, execution)
+            raise ReleaseSecondary("release secondary")
+
+        monkeypatch.setattr(
+            protocol,
+            "_execute_sqlite_connection_cursor_publication_rebind_intrinsic",
+            execute,
+        )
+        monkeypatch.setattr(
+            protocol,
+            "_release_sqlite_connection_cursor_publication_rebind_intrinsic",
+            release_then_secondary,
+        )
+        with _expect("GE_CURSOR_B3_CURSOR_REBIND_AFFECTED"):
+            protocol._execute_sqlite_cursor_publication_rebind_rule11_intrinsic(
+                session
+            )
+        assert len(executions) == 1
+        native = source._read_sqlite_connection_cursor_publication_rebind_snapshot_intrinsic(
+            graph.connection, executions[0]
+        )
+        assert native.lifecycle == "poisoned"
+        assert (native.execute_count, native.release_count) == (1, 1)
+    finally:
+        graph.close()
+
+
+@pytest.mark.parametrize(
+    ("case", "code", "expected_changes_counts"),
+    [
+        ("prepare", "GE_CURSOR_B3_CURSOR_CHANGES_PREPARE", (0, 0, 0)),
+        ("zero-row", "GE_CURSOR_B3_CURSOR_CHANGES_SHAPE", (1, 1, 1)),
+        ("two-row", "GE_CURSOR_B3_CURSOR_CHANGES_SHAPE", (1, 1, 1)),
+        ("outer-shape", "GE_CURSOR_B3_CURSOR_CHANGES_SHAPE", (1, 1, 1)),
+        ("row-shape", "GE_CURSOR_B3_CURSOR_CHANGES_SHAPE", (1, 1, 1)),
+        ("type", "GE_CURSOR_B3_CURSOR_CHANGES_SHAPE", (1, 1, 1)),
+        ("negative", "GE_CURSOR_B3_CURSOR_CHANGES_VALUE", (1, 1, 1)),
+        ("unsafe", "GE_CURSOR_B3_CURSOR_CHANGES_VALUE", (1, 1, 1)),
+        ("close", "GE_CURSOR_B3_CURSOR_CHANGES_RELEASE", (1, 1, 1)),
+        ("shape-and-close", "GE_CURSOR_B3_CURSOR_CHANGES_SHAPE", (1, 1, 1)),
+    ],
+)
+def test_serialized_changes_hostile_matrix_is_terminal_before_receipts(
+    monkeypatch: pytest.MonkeyPatch,
+    case: str,
+    code: str,
+    expected_changes_counts: tuple[int, int, int],
+) -> None:
+    class PreparePrimary(RuntimeError):
+        pass
+
+    class CloseSecondary(RuntimeError):
+        pass
+
+    rows_by_case: dict[str, object] = {
+        "zero-row": [],
+        "two-row": [(0,), (0,)],
+        "outer-shape": ((0,),),
+        "row-shape": [()],
+        "type": [("0",)],
+        "negative": [(-1,)],
+        "unsafe": [(2**53,)],
+        "close": [(0,)],
+        "shape-and-close": [()],
+    }
+    graph = _AdoptionGraph(0)
+    try:
+        session = _session(graph)
+        executions: list[Any] = []
+        proof_calls = 0
+        original_prepare = protocol.__dict__[
+            "_prepare_sqlite_connection_cursor_publication_rebind_intrinsic"
+        ]
+
+        def prepare(connection: Any) -> Any:
+            execution = original_prepare(connection)
+            executions.append(execution)
+            return execution
+
+        def fail_prepare(_raw: sqlite3.Connection) -> sqlite3.Cursor:
+            raise PreparePrimary("serialized changes prepare")
+
+        def supplied_rows(_cursor: sqlite3.Cursor, size: int) -> object:
+            assert size == 2
+            return rows_by_case[case]
+
+        def close_then_secondary(cursor: sqlite3.Cursor) -> None:
+            source._CURSOR_REBIND_SQLITE_CURSOR_CLOSE(cursor)
+            raise CloseSecondary("serialized changes close")
+
+        def prove(connection: Any, execution: Any) -> Any:
+            nonlocal proof_calls
+            proof_calls += 1
+            assert connection is graph.connection
+            assert executions == [execution]
+            prove_changes = (
+                source.SQLiteV1BaselineConnectionOwner._prove_cursor_publication_rebind_changes
+            )
+            if case == "prepare":
+                return prove_changes(
+                    connection, execution, _cursor_factory=fail_prepare
+                )
+            if case in {"close", "shape-and-close"}:
+                return prove_changes(
+                    connection,
+                    execution,
+                    _cursor_fetchmany=supplied_rows,
+                    _cursor_close=close_then_secondary,
+                )
+            return prove_changes(
+                connection, execution, _cursor_fetchmany=supplied_rows
+            )
+
+        monkeypatch.setattr(
+            protocol,
+            "_prepare_sqlite_connection_cursor_publication_rebind_intrinsic",
+            prepare,
+        )
+        monkeypatch.setattr(
+            protocol,
+            "_prove_sqlite_connection_cursor_publication_rebind_changes_intrinsic",
+            prove,
+        )
+        write_before = len(protocol._WRITE_RECEIPTS)
+        rule11_before = len(protocol._RULE11_RECEIPTS)
+        with _expect(code):
+            protocol._execute_sqlite_cursor_publication_rebind_rule11_intrinsic(
+                session
+            )
+        assert proof_calls == 1
+        assert len(executions) == 1
+        native = source._read_sqlite_connection_cursor_publication_rebind_snapshot_intrinsic(
+            graph.connection, executions[0]
+        )
+        assert native.lifecycle == "poisoned"
+        assert (native.prepare_count, native.execute_count, native.release_count) == (
+            1,
+            1,
+            1,
+        )
+        assert (
+            native.changes_prepare_count,
+            native.changes_fetch_count,
+            native.changes_release_count,
+        ) == expected_changes_counts
+        assert len(protocol._WRITE_RECEIPTS) == write_before
+        assert len(protocol._RULE11_RECEIPTS) == rule11_before
+        authority = outer._read_sqlite_cursor_outer_publication_authority_snapshot_intrinsic(
+            graph.authority
+        )
+        assert authority.lifecycle == "poisoned"
+        assert authority.write_phase == "poisoned"
+        assert authority.publication_session_consumed_tombstone is not None
+        assert authority.post_rebind_watermark_adoption is None
+    finally:
+        graph.close()
+
+
+def test_serialized_changes_fetch_primary_wins_and_is_exactly_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FetchPrimary(BaseException):
+        pass
+
+    graph = _AdoptionGraph(0)
+    try:
+        session = _session(graph)
+        executions: list[Any] = []
+        original_prepare = protocol.__dict__[
+            "_prepare_sqlite_connection_cursor_publication_rebind_intrinsic"
+        ]
+        primary = FetchPrimary("serialized changes fetch")
+        fetch_sizes: list[int] = []
+
+        def prepare(connection: Any) -> Any:
+            execution = original_prepare(connection)
+            executions.append(execution)
+            return execution
+
+        def fetch(_cursor: sqlite3.Cursor, size: int) -> object:
+            fetch_sizes.append(size)
+            raise primary
+
+        def prove(connection: Any, execution: Any) -> Any:
+            assert executions == [execution]
+            return source.SQLiteV1BaselineConnectionOwner._prove_cursor_publication_rebind_changes(
+                connection, execution, _cursor_fetchmany=fetch
+            )
+
+        monkeypatch.setattr(
+            protocol,
+            "_prepare_sqlite_connection_cursor_publication_rebind_intrinsic",
+            prepare,
+        )
+        monkeypatch.setattr(
+            protocol,
+            "_prove_sqlite_connection_cursor_publication_rebind_changes_intrinsic",
+            prove,
+        )
+        write_before = len(protocol._WRITE_RECEIPTS)
+        rule11_before = len(protocol._RULE11_RECEIPTS)
+        with pytest.raises(FetchPrimary) as raised:
+            protocol._execute_sqlite_cursor_publication_rebind_rule11_intrinsic(
+                session
+            )
+        assert raised.value is primary
+        assert fetch_sizes == [2]
+        native = source._read_sqlite_connection_cursor_publication_rebind_snapshot_intrinsic(
+            graph.connection, executions[0]
+        )
+        assert native.lifecycle == "poisoned"
+        assert (
+            native.changes_prepare_count,
+            native.changes_fetch_count,
+            native.changes_release_count,
+        ) == (1, 1, 1)
+        assert len(protocol._WRITE_RECEIPTS) == write_before
+        assert len(protocol._RULE11_RECEIPTS) == rule11_before
+    finally:
+        graph.close()
+
+
 def test_forged_session_is_rejected_before_authentic_precancellation() -> None:
     graph = _AdoptionGraph(0)
     try:
@@ -1305,31 +1713,105 @@ def test_opaque_receipts_private_root_and_success_registries_collect() -> None:
     ):
         assert not hasattr(graph_engineering, name)
 
+    registries = (
+        protocol._WRITE_RECEIPTS,
+        protocol._RULE11_RECEIPTS,
+        protocol._WRITE_BY_CONTEXT,
+    )
+    for _ in range(3):
+        gc.collect()
+    baseline = tuple(len(registry) for registry in registries)
     data = _graph_to_a()
-    receipt = _mint_w(data)
-    rule11 = protocol._execute_sqlite_cursor_publication_rule11_intrinsic(receipt)
-    receipt_id, rule11_id = id(receipt), id(rule11)
-    receipt_ref, rule11_ref = ref(receipt), ref(rule11)
-    del receipt, rule11
+    try:
+        receipt = _mint_w(data)
+        rule11 = protocol._execute_sqlite_cursor_publication_rule11_intrinsic(receipt)
+        receipt_id, rule11_id = id(receipt), id(rule11)
+        receipt_ref, rule11_ref = ref(receipt), ref(rule11)
+        del receipt, rule11
+        for _ in range(8):
+            gc.collect()
+        assert receipt_ref() is None
+        assert rule11_ref() is None
+        assert receipt_id not in protocol._WRITE_RECEIPTS
+        assert rule11_id not in protocol._RULE11_RECEIPTS
+    finally:
+        data[0].close()
+    del data
     for _ in range(8):
         gc.collect()
-    assert receipt_ref() is None
-    assert rule11_ref() is None
-    assert receipt_id not in protocol._WRITE_RECEIPTS
-    assert rule11_id not in protocol._RULE11_RECEIPTS
-    reused = False
-    for _ in range(4_096):
-        forged = object.__new__(protocol._SQLiteCursorPublicationRebindWriteReceipt)
-        reused = reused or id(forged) == receipt_id
-        with _expect("GE_CURSOR_B3_REBIND_WRITE_RECEIPT"):
-            protocol._read_sqlite_cursor_publication_rebind_write_receipt_snapshot_intrinsic(
-                forged
+    assert tuple(len(registry) for registry in registries) == baseline
+
+
+def test_bounded_real_id_reuse_is_stale_safe_or_honestly_skipped() -> None:
+    registries = (
+        protocol._WRITE_RECEIPTS,
+        protocol._RULE11_RECEIPTS,
+        protocol._WRITE_BY_CONTEXT,
+    )
+    for _ in range(3):
+        gc.collect()
+    baseline = tuple(len(registry) for registry in registries)
+    attempt_budget = 65_536
+    actual_reuse: tuple[str, int] | None = None
+    data = _graph_to_a()
+    try:
+        receipt = _mint_w(data)
+        rule11 = protocol._execute_sqlite_cursor_publication_rule11_intrinsic(receipt)
+        receipt_id, rule11_id = id(receipt), id(rule11)
+        receipt_ref, rule11_ref = ref(receipt), ref(rule11)
+        del receipt, rule11
+        for _ in range(8):
+            gc.collect()
+        assert receipt_ref() is None
+        assert rule11_ref() is None
+        assert receipt_id not in protocol._WRITE_RECEIPTS
+        assert rule11_id not in protocol._RULE11_RECEIPTS
+
+        for attempt in range(1, attempt_budget + 1):
+            forged_write = object.__new__(
+                protocol._SQLiteCursorPublicationRebindWriteReceipt
             )
-        del forged
-        if reused:
-            break
-    assert receipt_id not in protocol._WRITE_RECEIPTS
-    data[0].close()
+            if id(forged_write) == receipt_id:
+                actual_reuse = ("write", attempt)
+                assert receipt_id not in protocol._WRITE_RECEIPTS
+                with _expect("GE_CURSOR_B3_REBIND_WRITE_RECEIPT"):
+                    protocol._read_sqlite_cursor_publication_rebind_write_receipt_snapshot_intrinsic(
+                        forged_write
+                    )
+                del forged_write
+                break
+            del forged_write
+
+            forged_rule11 = object.__new__(
+                protocol._SQLiteCursorPublicationRule11SuccessReceipt
+            )
+            if id(forged_rule11) == rule11_id:
+                actual_reuse = ("rule11", attempt)
+                assert rule11_id not in protocol._RULE11_RECEIPTS
+                with _expect("GE_CURSOR_B3_RULE11_RECEIPT"):
+                    protocol._read_sqlite_cursor_publication_rule11_receipt_snapshot_intrinsic(
+                        forged_rule11
+                    )
+                del forged_rule11
+                break
+            del forged_rule11
+        assert receipt_id not in protocol._WRITE_RECEIPTS
+        assert rule11_id not in protocol._RULE11_RECEIPTS
+    finally:
+        data[0].close()
+    del data
+    for _ in range(8):
+        gc.collect()
+    assert tuple(len(registry) for registry in registries) == baseline
+    if actual_reuse is None:
+        pytest.skip(
+            "bounded real CPython id-reuse attempt did not observe reuse: "
+            f"attempt_budget={attempt_budget}; actual_reuse=False; "
+            f"retired_write_id={receipt_id}; retired_rule11_id={rule11_id}"
+        )
+    kind, attempt = actual_reuse
+    assert kind in {"write", "rule11"}
+    assert 1 <= attempt <= attempt_budget
 
 
 def test_failure_profiles_do_not_root_rebind_graphs_or_registries(
