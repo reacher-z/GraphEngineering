@@ -8,6 +8,7 @@ import {
   parseStrictJson,
   validateCanonicalCursorPublicationFixture,
   validateCursorPublicationFixture,
+  validateCursorPublicationFixtureSemantics,
 } from "./sqlite-cursor-publication-rebind-v2.validate.mjs";
 
 const FIXTURE_DIGEST_DOMAIN =
@@ -87,6 +88,15 @@ function expectResignedFailure(mutator) {
       && error.code === "GE_CURSOR_B3_SCHEMA",
   );
 }
+function expectResignedSemanticFailure(mutator, code) {
+  const fixture = cloneFixture();
+  mutator(fixture);
+  resignFixture(fixture);
+  assert.throws(
+    () => validateCursorPublicationFixtureSemantics(fixture),
+    (error) => error instanceof CursorPublicationContractError && error.code === code,
+  );
+}
 
 test("B3 freezes an unimplemented cursor subprotocol inside one atomic v1-to-v2 migration", () => {
   assert.deepEqual(validateCanonicalCursorPublicationFixture(), {
@@ -101,7 +111,7 @@ test("B3 freezes an unimplemented cursor subprotocol inside one atomic v1-to-v2 
     faultBoundaryCount: 20,
     targetDescriptorHash: "f632104c823e7559dbbb889b08ac3adb0cf0b6dc528cdb9179c9521ce72cff92",
     targetSchemaIdentitySha256: "9fcd96c331999ffb0aca0d9d63ad2b9af073db80012471108c5437a77116f634",
-    fixtureCanonicalSha256: "7f890fe0512e1b3c7b500dd9c8f20a82fc41a99296d1b3538b379c46a8c317dc",
+    fixtureCanonicalSha256: "d368cd53e819e06e950f2dabedcb5a5b2fca535536efe85abb2e4b488bae2e7d",
     implementationClaim: false,
     activeManifestClaim: false,
   });
@@ -146,6 +156,224 @@ test("B3 freezes the complete atomic migration order", () => {
 test("B3 freezes rule 11 before rule 12", () => {
   expectFailure((fixture) => { fixture.rules.reverse(); }, "GE_CURSOR_B3_RULE_ORDER");
   expectFailure((fixture) => { fixture.rules[0].position = 12; }, "GE_CURSOR_B3_RULE_ORDER");
+});
+
+test("B3 semantic barrier fixes Rule 12 before the third clock and cursor-clock completion", () => {
+  const fixture = cloneFixture();
+  const contract = fixture.cursorSubprotocolContract;
+  assert.deepEqual(
+    contract.leafLocalEvidenceContract.failureProfileInvariants
+      .rule11OrRule12PoisonProviderReadsConsumes,
+    [2, 2],
+  );
+  assert.deepEqual(
+    contract.leafLocalEvidenceContract.failureProfileInvariants
+      .thirdClockPoisonProviderReadsConsumes,
+    [3, 2],
+  );
+  assert.deepEqual(
+    contract.leafLocalEvidenceContract.failureProfileInvariants
+      .cursorClockCompleteProviderReadsConsumes,
+    [3, 3],
+  );
+  assert.ok(
+    contract.orderedStages.indexOf("perform-bounded-rule-12-seal-and-mint-success-receipt")
+      < contract.orderedStages.indexOf(
+        "observe-third-before-verification-clock-only-after-rule-12-success",
+      ),
+  );
+});
+
+test("B3 rejects re-signed session consumption before preparation or execution boundaries", () => {
+  const code = "GE_CURSOR_B3_CURSOR_SESSION_CONSUMPTION_ORDER";
+  expectResignedSemanticFailure((fixture) => {
+    const stages = fixture.cursorSubprotocolContract.orderedStages;
+    [stages[0], stages[1]] = [stages[1], stages[0]];
+  }, code);
+  expectResignedSemanticFailure((fixture) => {
+    const stages = fixture.cursorSubprotocolContract.orderedStages;
+    [stages[1], stages[2]] = [stages[2], stages[1]];
+  }, code);
+  expectResignedSemanticFailure((fixture) => {
+    fixture.cursorSubprotocolContract.retryContract
+      .preparationOrCancellationBeforeSessionConsumptionRetryable = false;
+  }, code);
+});
+
+test("B3 rejects systematically re-signed cursor subprotocol semantic weakening", () => {
+  const mutations = [
+    {
+      code: "GE_CURSOR_B3_CURSOR_ROOT_ENVELOPE_ORDER",
+      mutate(fixture) {
+        const stages = fixture.cursorSubprotocolContract.orderedStages;
+        [stages[4], stages[5]] = [stages[5], stages[4]];
+      },
+    },
+    {
+      code: "GE_CURSOR_B3_CURSOR_RETRY_ORCHESTRATION",
+      mutate(fixture) {
+        const calls = fixture.cursorSubprotocolContract.orchestrationApiContract.exactCallOrder;
+        [calls[3], calls[4]] = [calls[4], calls[3]];
+      },
+    },
+    {
+      code: "GE_CURSOR_B3_CURSOR_THIRD_EVIDENCE",
+      mutate(fixture) {
+        fixture.authority.preVerificationClockEvidenceContract.observedAfter =
+          "rule-11-rebind-count-accepted";
+      },
+    },
+    {
+      code: "GE_CURSOR_B3_CURSOR_WRITE_RULE_RECEIPTS",
+      mutate(fixture) {
+        fixture.authority.rule12SuccessReceipt.exactPredecessor =
+          "cursor-rebind-write-receipt-object-identity";
+      },
+    },
+    {
+      code: "GE_CURSOR_B3_CURSOR_REBIND_AUTHORITY",
+      mutate(fixture) {
+        fixture.authority.cursorRebindPreparedOwner
+          .authenticatedGraphDriftAfterSessionSelectionPoisonsAllThreeOwners = false;
+      },
+    },
+    {
+      code: "GE_CURSOR_B3_CURSOR_WRITE_RULE_RECEIPTS",
+      mutate(fixture) {
+        fixture.authority.cursorRebindWriteReceipt.changesLifecycle.fetchCount = 2;
+      },
+    },
+    {
+      code: "GE_CURSOR_B3_CURSOR_LEAF_EVIDENCE",
+      mutate(fixture) {
+        fixture.cursorSubprotocolContract.leafLocalEvidenceContract.expectedSuccessRecord
+          .clockEvidenceConsumeCount = 2;
+      },
+    },
+    {
+      code: "GE_CURSOR_B3_CURSOR_PENDING_ATOMIC_TAIL",
+      mutate(fixture) {
+        const commitments = fixture.authority.cursorClock.requiredCommitments;
+        commitments[commitments.indexOf("rule-12-success-receipt-object-identity")] =
+          "cursor-rebind-write-receipt-object-identity";
+      },
+    },
+    {
+      code: "GE_CURSOR_B3_CURSOR_CLOCK_PROFILE",
+      mutate(fixture) {
+        fixture.hostileExecutionContract.counterProfiles["cursor-rebind-executed"]
+          .providerClockReadCount = 3;
+      },
+    },
+    {
+      code: "GE_CURSOR_B3_CURSOR_CLOCK_PROFILE",
+      mutate(fixture) {
+        fixture.hostileExecutionContract.counterProfiles[
+          "pre-verification-clock-read-unconsumed"
+        ].clockEvidenceConsumeCount = 3;
+      },
+    },
+    {
+      code: "GE_CURSOR_B3_CURSOR_CLOCK_PROFILE",
+      mutate(fixture) {
+        fixture.hostileExecutionContract.counterProfiles["post-verification-audits"]
+          .clockEvidenceConsumeCount = 2;
+      },
+    },
+    {
+      code: "GE_CURSOR_B3_CURSOR_CLOCK_PROFILE",
+      mutate(fixture) {
+        fixture.hostileExecutionContract.records[134].expectedCounterProfile =
+          "pre-verification-clock-read-unconsumed";
+      },
+    },
+    {
+      code: "GE_CURSOR_B3_CURSOR_PENDING_ATOMIC_TAIL",
+      mutate(fixture) {
+        const forbidden = fixture.authority.cursorClock.atomicTailContract
+          .forbiddenWithinAtomicTail;
+        [forbidden[0], forbidden[1]] = [forbidden[1], forbidden[0]];
+      },
+    },
+    {
+      code: "GE_CURSOR_B3_CURSOR_PENDING_ATOMIC_TAIL",
+      mutate(fixture) {
+        fixture.authority.cursorClock.pendingRegistrationContract
+          .completionContinuationPreparationOrder.reverse();
+      },
+    },
+    {
+      code: "GE_CURSOR_B3_CURSOR_ACTIVE_ASSERTION",
+      mutate(fixture) {
+        fixture.authority.cursorClock.activeAssertionContract.activeAssertionReadBudget
+          .providerClockCallbackCount = 1;
+      },
+    },
+    {
+      code: "GE_CURSOR_B3_FAILURE_PRECEDENCE",
+      mutate(fixture) {
+        fixture.failureContract.boundaryPrecedence.thirdClockObservation.reverse();
+      },
+    },
+  ];
+  for (const { code, mutate } of mutations) {
+    expectResignedSemanticFailure(mutate, code);
+  }
+});
+
+test("B3 closes all ten cursor-leaf semantic groups against re-signed mutations", () => {
+  const mutations = [
+    ["root-envelope-order-transition", "GE_CURSOR_B3_CURSOR_ROOT_ENVELOPE_ORDER",
+      (fixture) => { fixture.cursorSubprotocolContract.transition = "publication-active->poisoned"; }],
+    ["retry-orchestration-rollback", "GE_CURSOR_B3_CURSOR_RETRY_ORCHESTRATION",
+      (fixture) => {
+        fixture.cursorSubprotocolContract.retryContract.postExecutionCallerRollbackRequired = false;
+      }],
+    ["rebind-authority-accepted-input", "GE_CURSOR_B3_CURSOR_REBIND_AUTHORITY",
+      (fixture) => {
+        fixture.authority.cursorRebindPreparedOwner.acceptedInput =
+          "caller-provided-publication-session-fields";
+      }],
+    ["rebind-authority-opacity", "GE_CURSOR_B3_CURSOR_REBIND_AUTHORITY",
+      (fixture) => { fixture.authority.cursorRebindPreparedOwner.opaque = false; }],
+    ["write-receipt-execute-count", "GE_CURSOR_B3_CURSOR_WRITE_RULE_RECEIPTS",
+      (fixture) => {
+        fixture.authority.cursorRebindWriteReceipt.statementLifecycle.executeCount = 2;
+      }],
+    ["rule-11-blocks-rule-12", "GE_CURSOR_B3_CURSOR_WRITE_RULE_RECEIPTS",
+      (fixture) => { fixture.authority.rule11SuccessReceipt.failureBlocksRule12 = false; }],
+    ["bounded-read-active-cursors", "GE_CURSOR_B3_CURSOR_BOUNDED_READS_QUERY",
+      (fixture) => {
+        fixture.authority.rule12SuccessReceipt.boundedReadTopology.maximumActiveCursors = 3;
+      }],
+    ["query-budget-active-cursors", "GE_CURSOR_B3_CURSOR_BOUNDED_READS_QUERY",
+      (fixture) => {
+        fixture.cursorSubprotocolContract.queryBudgetContract
+          .maximumSimultaneouslyActiveCursors = 3;
+      }],
+    ["third-evidence-fourth-observation", "GE_CURSOR_B3_CURSOR_THIRD_EVIDENCE",
+      (fixture) => {
+        fixture.authority.preVerificationClockEvidenceContract.fourthObservationAllowed = true;
+      }],
+    ["pending-cancellation-count", "GE_CURSOR_B3_CURSOR_PENDING_ATOMIC_TAIL",
+      (fixture) => {
+        fixture.authority.cursorClock.pendingRegistrationContract.cancellationObservationCount = 2;
+      }],
+    ["three-layer-partial-publication", "GE_CURSOR_B3_CURSOR_THREE_LAYER_COMPLETION",
+      (fixture) => {
+        fixture.authority.cursorClock.threeLayerCompletionContract.partialPublicationForbidden =
+          false;
+      }],
+    ["active-assertion-read-only", "GE_CURSOR_B3_CURSOR_ACTIVE_ASSERTION",
+      (fixture) => { fixture.authority.cursorClock.activeAssertionContract.readOnly = false; }],
+    ["leaf-failure-profile-order", "GE_CURSOR_B3_CURSOR_LEAF_EVIDENCE",
+      (fixture) => {
+        fixture.cursorSubprotocolContract.leafLocalEvidenceContract.requiredFailureProfiles.reverse();
+      }],
+  ];
+  for (const [, code, mutate] of mutations) {
+    expectResignedSemanticFailure(mutate, code);
+  }
 });
 
 test("B3 freezes fixed module-owned rebind SQL and parameter order", () => {
@@ -768,7 +996,7 @@ test("B3 domain-separated fixture root and case-insensitive catalog probe are ex
   const zeroed = structuredClone(fixture);
   zeroed.parityGates.fixtureCanonicalSha256 = "0".repeat(64);
   assert.equal(domainSeparatedCanonicalDigest(FIXTURE_DIGEST_DOMAIN, zeroed),
-    "7f890fe0512e1b3c7b500dd9c8f20a82fc41a99296d1b3538b379c46a8c317dc");
+    "d368cd53e819e06e950f2dabedcb5a5b2fca535536efe85abb2e4b488bae2e7d");
   const catalog = fixture.authority.postDdlCatalogFence.catalogReadContract;
   assert.match(catalog.sql, /WHERE lower\(name\) GLOB 'ge_cycle_\*'/u);
   assert.equal(catalog.querySha256,

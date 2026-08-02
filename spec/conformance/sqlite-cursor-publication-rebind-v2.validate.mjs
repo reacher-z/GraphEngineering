@@ -13,7 +13,7 @@ const ROOT = dirname(fileURLToPath(import.meta.url));
 const REPOSITORY_ROOT = dirname(dirname(ROOT));
 const FIXTURE_PATH = join(ROOT, "sqlite-cursor-publication-rebind-v2.case.json");
 const SCHEMA_PATH = join(ROOT, "sqlite-cursor-publication-rebind-v2.schema.json");
-const TRUSTED_FIXTURE_SHA256 = "7f890fe0512e1b3c7b500dd9c8f20a82fc41a99296d1b3538b379c46a8c317dc";
+const TRUSTED_FIXTURE_SHA256 = "d368cd53e819e06e950f2dabedcb5a5b2fca535536efe85abb2e4b488bae2e7d";
 const TRUSTED_INITIAL_WRITE_CONTRACT_SHA256 =
   "3bcd8b69ec5ab63b38fa5bcbbd2c13b4c54120f7b7ba46af8649d1187cad2320";
 const TRUSTED_POST_DDL_CATALOG_FENCE_SHA256 =
@@ -44,6 +44,26 @@ const TRUSTED_HOSTILE_REGISTRY_DOMAIN =
   "graph-engineering/sqlite-b3-hostile-registry/v1\0";
 const TRUSTED_HOSTILE_EXPANDED_DOMAIN =
   "graph-engineering/sqlite-b3-expanded-hostile-expectations/v1\0";
+const TRUSTED_CURSOR_ROOT_ENVELOPE_ORDER_SHA256 =
+  "1037ce73b975135d9fcc0d34992506d2e19a7d67466dd100013c68c6797a644c";
+const TRUSTED_CURSOR_RETRY_ORCHESTRATION_SHA256 =
+  "ff981c4e2fa551c159413492fce971fe5f10429b2f40812f5bee8efec172ab1a";
+const TRUSTED_CURSOR_REBIND_AUTHORITY_SHA256 =
+  "837f2ab30e91097f944090c8f2f2c3b9527d1626764b7d2cb3d6b73657b3de26";
+const TRUSTED_CURSOR_WRITE_RULE_RECEIPTS_SHA256 =
+  "8c8678b7e2ad3ab9b189d2298b116ea8b6d976bf9bedb158949e54e1d796da95";
+const TRUSTED_CURSOR_BOUNDED_READS_QUERY_SHA256 =
+  "9ff9e59db6c6a0e94d58d699be70a98af6bb4f9063b3cfc688efa3b3dee71201";
+const TRUSTED_CURSOR_THIRD_EVIDENCE_SHA256 =
+  "4566795a8a6debc4ad40c193207666f6273ed8b002a7388a693f74763bb8e2ac";
+const TRUSTED_CURSOR_PENDING_ATOMIC_TAIL_SHA256 =
+  "db9fb4bba77cda0051b28f6fbc664129916b2f7565dcce1821f00f5ef06b8da6";
+const TRUSTED_CURSOR_THREE_LAYER_COMPLETION_SHA256 =
+  "f209dcfcd0779a6da3f3b21705caa6b20927f09b0de9097908b9567f6ee7422a";
+const TRUSTED_CURSOR_ACTIVE_ASSERTION_SHA256 =
+  "7c4b8815661d6e81a54165ad3fe1f5c9458507b62a07cb22b1acc00cbc3b370d";
+const TRUSTED_CURSOR_LEAF_EVIDENCE_SHA256 =
+  "096a829754d782cda6dc0f3c5540d49a383b664f0a6db492ee35864dbecd7a18";
 
 const EXACT_IDENTITIES = Object.freeze({
   sourceDescriptorHash: "4071e4e5e2cddad01af4f87e4df45fa55bbc4e238674174ce40eca765d2c03fe",
@@ -129,6 +149,98 @@ const EXACT_PRECEDENCE = Object.freeze({
   afterStatementStarted: Object.freeze(["sqlite-error-or-statement-result-shape",
     "affected-row-count", "total-changes-delta", "permanent-write-ledger-delta",
     "cancellation", "cleanup"]),
+  beforeRebindPrepare: Object.freeze([
+    "exact-publication-session-presentation-and-object-identity",
+    "publication-active-three-layer-authority-graph", "exclusive-transaction-lineage",
+    "live-migration-lock-tuple-and-expiry", "source-target-catalog-and-post-0002-fence",
+    "pre-rebind-receipt-and-stage-adoption-lineage",
+    "three-eqp-shapes-and-forbidden-fragments", "no-trigger-and-no-caller-controlled-sql",
+    "total-changes-and-cursor-ledger-before-watermarks", "cancellation",
+    "statement-close", "temp-cleanup", "outer-cleanup",
+  ]),
+  beforeRebindExecute: Object.freeze([
+    "exact-cursor-rebind-prepared-owner", "fixed-statement-identity-parameters-and-owner",
+    "unchanged-exclusive-transaction-lineage", "live-migration-lock-and-catalog-revalidation",
+    "cancellation", "publication-session-consumption-and-tombstone", "statement-close",
+    "temp-cleanup", "outer-cleanup",
+  ]),
+  afterRebindExecute: Object.freeze([
+    "native-sqlite-execute-primary", "native-run-result-shape", "affected-row-safe-integer",
+    "statement-release-primary", "cancellation", "temp-cleanup", "outer-cleanup",
+  ]),
+  changesLifecycle: Object.freeze([
+    "earlier-rebind-execute-or-release-primary", "changes-prepare-or-fetch-primary",
+    "changes-single-row-single-column-shape", "changes-safe-integer-and-affected-equality",
+    "changes-release-primary", "total-changes-before-after-delta",
+    "cursor-ledger-before-after-deltas", "cancellation", "temp-cleanup", "outer-cleanup",
+  ]),
+  rule11Validation: Object.freeze([
+    "exact-rebind-write-receipt-object-identity",
+    "session-connection-transaction-lock-and-target-lineage", "all-five-counts-safe-and-equal",
+    "rule-11-diagnostic-and-violation-result", "rule-11-success-receipt-registration",
+    "cancellation", "temp-cleanup", "outer-cleanup",
+  ]),
+  rule12MainCountLifecycle: Object.freeze([
+    "exact-rule-11-predecessor-and-read-authority", "main-key-count-eqp-and-prepare-primary",
+    "current-main-key-fetch-decode-and-order-primary", "terminal-fetch-and-count-proof",
+    "main-key-count-close-primary", "compare-main-count-to-b2-receipt-count",
+    "cancellation", "temp-cleanup", "outer-cleanup",
+  ]),
+  rule12DriverLifecycle: Object.freeze([
+    "main-key-count-ownership-cleared", "temp-driver-eqp-and-prepare-primary",
+    "point-statement-eqp-and-prepare-primary",
+    "current-driver-key-fetch-decode-and-order-primary", "terminal-driver-fetch-proof",
+    "point-statement-release-primary", "driver-close-primary", "cancellation",
+    "temp-cleanup", "outer-cleanup",
+  ]),
+  rule12PointLookupLifecycle: Object.freeze([
+    "earlier-driver-fetch-decode-or-order-primary", "point-execute-or-fetch-primary",
+    "exactly-one-main-row-result-shape",
+    "current-main-row-decode-immutable-and-target-identity-primary",
+    "point-cursor-close-primary", "cancellation", "next-driver-fetch",
+    "point-statement-release", "driver-close", "temp-cleanup", "outer-cleanup",
+  ]),
+  rule12Finalize: Object.freeze([
+    "earlier-count-driver-point-or-close-primary", "finish-seal-accumulator",
+    "main-driver-lookup-receipt-and-accumulator-count-equality",
+    "receipt-and-computed-root-equality", "every-row-target-mutable-identities",
+    "rule-12-diagnostic-and-violation-result", "rule-12-success-receipt-registration",
+    "cancellation", "temp-cleanup", "outer-cleanup",
+  ]),
+  beforeThirdClock: Object.freeze([
+    "exact-rule-12-success-receipt-object-identity",
+    "rebind-rule-11-rule-12-predecessor-chain",
+    "publication-session-connection-and-exclusive-transaction-lineage",
+    "provider-clock-and-migration-lock-capability-identities",
+    "current-provider-clock-head-index-two", "third-evidence-not-yet-observed",
+    "cancellation", "temp-cleanup", "outer-cleanup",
+  ]),
+  thirdClockObservation: Object.freeze([
+    "live-migration-lock-before-provider-read", "provider-callback-result-or-primary-failure",
+    "safe-monotonic-provider-now-and-strict-expiry-fence",
+    "live-migration-lock-after-provider-read",
+    "unchanged-connection-transaction-lock-and-catalog-lineage",
+    "exact-boundary-consumer-predecessor-and-head-index-three",
+    "third-evidence-registration-unconsumed", "cancellation", "temp-cleanup", "outer-cleanup",
+  ]),
+  cursorClockValidation: Object.freeze([
+    "exact-unconsumed-third-evidence-object-identity",
+    "exact-session-rebind-rule-11-and-rule-12-object-graph",
+    "unchanged-connection-transaction-live-lock-and-target-catalog",
+    "unchanged-total-changes-and-cursor-ledger-watermarks",
+    "before-cursor-clock-complete-cancellation", "preconstruct-immutable-capability-and-state",
+    "register-non-readable-pending-graph", "prepare-all-three-completion-continuations",
+    "burn-preparation-on-failure", "temp-cleanup", "outer-cleanup",
+  ]),
+  cursorClockAtomicTail: Object.freeze([
+    "complete-bundle-validation-and-pending-registration",
+    "burn-all-three-completion-continuations", "consume-exact-third-evidence-once",
+    "retain-exact-third-evidence-consumed-tombstone",
+    "publish-identical-cursor-clock-to-lower-two-layers",
+    "publish-identical-cursor-clock-to-outer-session",
+    "transition-all-three-layers-to-cursor-clock-complete",
+    "activate-and-return-cursor-clock-capability",
+  ]),
   afterCommitReturned: Object.freeze(["complete-v2-reopen-audit", "cleanup"]),
 });
 const EXACT_MUTABLE_FIELDS = Object.freeze(["descriptor_hash", "schema_identity_sha256"]);
@@ -148,6 +260,48 @@ const EXACT_STATES = Object.freeze([
 const EXACT_TRANSITIONS = Object.freeze([
   "pre-rebind-complete->publication-active", "publication-active->cursor/clock-complete",
 ]);
+const EXACT_CURSOR_SUBPROTOCOL_STAGES = Object.freeze([
+  "prepare-exact-cursor-rebind-owner-through-final-pre-execute-cancellation-without-consuming-session",
+  "consume-exact-active-publication-session-and-retain-tombstone-at-final-no-write-pre-execution-boundary",
+  "execute-fixed-cursor-rebind-exactly-once",
+  "release-statement-and-prove-affected-changes-total-and-ledger",
+  "mint-rule-11-success-receipt",
+  "perform-bounded-rule-12-seal-and-mint-success-receipt",
+  "observe-third-before-verification-clock-only-after-rule-12-success",
+  "register-pending-cursor-clock-graph-and-three-completion-continuations",
+  "consume-third-evidence-retain-tombstone-and-complete-all-three-layers",
+]);
+const EXACT_CURSOR_SUBPROTOCOL_CALL_ORDER = Object.freeze([
+  "prepare-cursor-rebind-owner", "execute-and-prove-cursor-rebind",
+  "validate-and-mint-rule-11-success-receipt",
+  "validate-and-mint-rule-12-success-receipt",
+  "observe-before-verification-through-exact-rule-12-owner",
+  "publish-cursor-clock-atomic-completion",
+]);
+const EXACT_CURSOR_CLOCK_ATOMIC_TAIL = Object.freeze([
+  "burn-outer-publication-session-continuation",
+  "burn-stage-ownership-transfer-continuation",
+  "burn-baseline-temp-stage-continuation",
+  "consume-exact-pre-verification-clock-evidence-once",
+  "retain-exact-pre-verification-clock-consumed-tombstone",
+  "publish-cursor-clock-identity-to-stage-and-ownership",
+  "publish-same-cursor-clock-identity-to-outer-and-session",
+  "set-all-three-lifecycle-owners-to-cursor-clock-complete",
+  "activate-and-return-opaque-cursor-clock-capability",
+]);
+const EXACT_CURSOR_CLOCK_ATOMIC_FORBIDDEN = Object.freeze([
+  "sql", "provider-clock-callback", "cancellation-read", "fault-injection-hook",
+  "caller-dispatch", "dynamic-import", "transaction-control", "cursor-execution",
+  "registry-lookup-or-deletion", "commit",
+]);
+const EXACT_CURSOR_CLOCK_COMMITMENTS = Object.freeze([
+  "pre-verification-clock-evidence-receipt-object-identity",
+  "pre-verification-provider-now-ms", "provider-clock-capability-object-identity",
+  "migration-lock-capability-object-identity", "sqlite-connection-object-identity",
+  "begin-exclusive-transaction-lineage", "live-migration-lock-tuple",
+  "publication-session-object-identity", "rule-11-success-receipt-object-identity",
+  "rule-12-success-receipt-object-identity",
+]);
 const EXACT_AUTHORITY_OBJECTS = Object.freeze([
   "preRebindReceipt", "projectionReference", "stageOwnershipTransfer",
   "baselineTempStage", "sqliteConnection", "migrationLockCapability",
@@ -161,7 +315,11 @@ const EXACT_AUTHORITY_OBJECTS = Object.freeze([
   "baselineEntriesPublicationConsumedTombstone",
   "baselineHeaderPublicationConsumedTombstone",
   "operationSequenceZeroPublicationConsumedTombstone", "stageAdoptionReceipt",
-  "publicationSession", "cursorClockCapability", "migrationLineagePublicationReceipt",
+  "publicationSession", "cursorRebindPreparedOwner",
+  "publicationSessionConsumedTombstone", "cursorRebindWriteReceipt",
+  "rule11SuccessReceipt", "rule12SuccessReceipt",
+  "preVerificationClockEvidenceConsumedTombstone", "cursorClockCapability",
+  "migrationLineagePublicationReceipt",
   "schemaDescriptorMetadataPublicationReceipt", "publicationRulesReceipt",
   "freshV2CatalogReceipt", "physicalSemanticPostconditionsReceipt",
   "preRetirementStageFenceReceipt", "stageRetirementReceipt", "finalCommitFenceReceipt",
@@ -1037,6 +1195,318 @@ function validateHostileExecutionContract(value) {
     "GE_CURSOR_B3_HOSTILE_EXECUTION", "hostile execution contract drifted");
 }
 
+function validateCursorSubprotocolBarrier(value) {
+  const authority = value.authority;
+  const contract = value.cursorSubprotocolContract;
+  const orchestration = contract.orchestrationApiContract;
+  const evidence = contract.leafLocalEvidenceContract;
+  const third = authority.preVerificationClockEvidenceContract;
+  const cursorClock = authority.cursorClock;
+
+  const initialStages = contract.orderedStages.slice(0, 3);
+  const preparationOrder = authority.cursorRebindPreparedOwner.preparationOrder;
+  const prepareCancellationIndex = preparationOrder.indexOf(
+    "observe-before-rebind-prepare-cancellation",
+  );
+  const prepareIndex = preparationOrder.indexOf(
+    "prepare-one-connection-owned-fixed-rebind-execution",
+  );
+  const executeCancellationIndex = preparationOrder.indexOf(
+    "observe-before-rebind-execute-cancellation",
+  );
+  const consumeIndex = preparationOrder.indexOf(
+    "consume-exact-publication-session-at-final-no-write-boundary",
+  );
+  const tombstoneIndex = preparationOrder.indexOf(
+    "retain-publication-session-consumed-tombstone",
+  );
+  const executeIndex = preparationOrder.indexOf("execute-fixed-rebind-exactly-once");
+  if (initialStages[0] !== EXACT_CURSOR_SUBPROTOCOL_STAGES[0]
+      || initialStages[1] !== EXACT_CURSOR_SUBPROTOCOL_STAGES[1]
+      || initialStages[2] !== EXACT_CURSOR_SUBPROTOCOL_STAGES[2]
+      || !(prepareCancellationIndex >= 0
+        && prepareCancellationIndex < prepareIndex
+        && prepareIndex < executeCancellationIndex
+        && executeCancellationIndex < consumeIndex
+        && consumeIndex < tombstoneIndex
+        && tombstoneIndex < executeIndex)
+      || contract.sessionConsumptionBoundary !== "final-no-write-pre-execution-boundary"
+      || !initialStages[1].endsWith(`at-${contract.sessionConsumptionBoundary}`)
+      || contract.retryContract.preparationOrCancellationBeforeSessionConsumptionRetryable
+        !== true
+      || authority.cursorRebindPreparedOwner.healthyFailureBeforeSessionConsumptionRetryable
+        !== true) {
+    fail("GE_CURSOR_B3_CURSOR_SESSION_CONSUMPTION_ORDER",
+      "prepare and pre-execution cancellation must precede session consumption, tombstone and execute");
+  }
+  exactDigest({
+    requiredExactObjects: authority.requiredExactObjects,
+    transition: contract.transition,
+    orderedStages: contract.orderedStages,
+    acceptedPermanentIntermediateStates: contract.acceptedPermanentIntermediateStates,
+    sessionConsumptionBoundary: contract.sessionConsumptionBoundary,
+    irreversibleRegionStartsAt: contract.irreversibleRegionStartsAt,
+  }, TRUSTED_CURSOR_ROOT_ENVELOPE_ORDER_SHA256,
+  "GE_CURSOR_B3_CURSOR_ROOT_ENVELOPE_ORDER", "cursor root envelope or order drifted");
+  exactDigest({
+    retryContract: contract.retryContract,
+    orchestrationApiContract: contract.orchestrationApiContract,
+  }, TRUSTED_CURSOR_RETRY_ORCHESTRATION_SHA256,
+  "GE_CURSOR_B3_CURSOR_RETRY_ORCHESTRATION",
+  "cursor retry and orchestration envelope drifted");
+  exactDigest({
+    cursorRebindPreparedOwner: authority.cursorRebindPreparedOwner,
+    publicationSessionConsumedTombstone: authority.publicationSessionConsumedTombstone,
+  }, TRUSTED_CURSOR_REBIND_AUTHORITY_SHA256,
+  "GE_CURSOR_B3_CURSOR_REBIND_AUTHORITY", "cursor rebind authority envelope drifted");
+  const { boundedReadTopology, ...rule12ReceiptEnvelope } = authority.rule12SuccessReceipt;
+  exactDigest({
+    cursorRebindWriteReceipt: authority.cursorRebindWriteReceipt,
+    rule11SuccessReceipt: authority.rule11SuccessReceipt,
+    rule12SuccessReceipt: rule12ReceiptEnvelope,
+  }, TRUSTED_CURSOR_WRITE_RULE_RECEIPTS_SHA256,
+  "GE_CURSOR_B3_CURSOR_WRITE_RULE_RECEIPTS", "cursor write and rule receipts drifted");
+  exactDigest({
+    boundedReadTopology,
+    queryBudgetContract: contract.queryBudgetContract,
+  }, TRUSTED_CURSOR_BOUNDED_READS_QUERY_SHA256,
+  "GE_CURSOR_B3_CURSOR_BOUNDED_READS_QUERY", "bounded reads or query budget drifted");
+  exactDigest({
+    preVerificationClockEvidenceContract: authority.preVerificationClockEvidenceContract,
+    preVerificationClockEvidenceConsumedTombstone:
+      authority.preVerificationClockEvidenceConsumedTombstone,
+  }, TRUSTED_CURSOR_THIRD_EVIDENCE_SHA256,
+  "GE_CURSOR_B3_CURSOR_THIRD_EVIDENCE", "third evidence envelope drifted");
+  const cursorClockEnvelope = Object.fromEntries(Object.entries(cursorClock)
+    .filter(([name]) => name !== "pendingRegistrationContract"
+      && name !== "atomicTailContract"
+      && name !== "threeLayerCompletionContract"
+      && name !== "activeAssertionContract"));
+  exactDigest({
+    cursorClockEnvelope,
+    pendingRegistrationContract: cursorClock.pendingRegistrationContract,
+    atomicTailContract: cursorClock.atomicTailContract,
+  }, TRUSTED_CURSOR_PENDING_ATOMIC_TAIL_SHA256,
+  "GE_CURSOR_B3_CURSOR_PENDING_ATOMIC_TAIL", "pending or atomic-tail envelope drifted");
+  exactDigest(cursorClock.threeLayerCompletionContract,
+    TRUSTED_CURSOR_THREE_LAYER_COMPLETION_SHA256,
+    "GE_CURSOR_B3_CURSOR_THREE_LAYER_COMPLETION",
+    "three-layer completion envelope drifted");
+  exactDigest(cursorClock.activeAssertionContract, TRUSTED_CURSOR_ACTIVE_ASSERTION_SHA256,
+    "GE_CURSOR_B3_CURSOR_ACTIVE_ASSERTION", "active assertion envelope drifted");
+  exactDigest(contract.leafLocalEvidenceContract, TRUSTED_CURSOR_LEAF_EVIDENCE_SHA256,
+    "GE_CURSOR_B3_CURSOR_LEAF_EVIDENCE", "leaf evidence envelope drifted");
+
+  exact(contract.orderedStages, EXACT_CURSOR_SUBPROTOCOL_STAGES,
+    "GE_CURSOR_B3_CURSOR_SUBPROTOCOL_ORDER", "cursor subprotocol stage order drifted");
+  exact(orchestration.exactCallOrder, EXACT_CURSOR_SUBPROTOCOL_CALL_ORDER,
+    "GE_CURSOR_B3_CURSOR_SUBPROTOCOL_ORDER", "cursor subprotocol call order drifted");
+  const rule12Stage = contract.orderedStages.indexOf(
+    "perform-bounded-rule-12-seal-and-mint-success-receipt",
+  );
+  const thirdStage = contract.orderedStages.indexOf(
+    "observe-third-before-verification-clock-only-after-rule-12-success",
+  );
+  const rule12Call = orchestration.exactCallOrder.indexOf(
+    "validate-and-mint-rule-12-success-receipt",
+  );
+  const thirdCall = orchestration.exactCallOrder.indexOf(
+    "observe-before-verification-through-exact-rule-12-owner",
+  );
+  if (!(rule12Stage >= 0 && rule12Stage < thirdStage
+      && rule12Call >= 0 && rule12Call < thirdCall
+      && orchestration.thirdObservationBeforeRule11OrRule12Forbidden === true
+      && orchestration.rule12FailureBlocksThirdObservation === true
+      && authority.rule12SuccessReceipt.failureBlocksThirdClockObservation === true
+      && third.observationAuthorizedOnlyBy === "exact-rule-12-success-receipt-object-identity"
+      && third.observedAfter === "rule-12-main-table-seal-accepted")) {
+    fail("GE_CURSOR_B3_THIRD_CLOCK_ORDER",
+      "third clock observation must be authorized by and occur only after Rule 12 success");
+  }
+  if (authority.cursorRebindPreparedOwner.healthyFailureBeforeSessionConsumptionRetryable
+        !== true
+      || authority.cursorRebindPreparedOwner
+        .authenticatedGraphDriftAfterSessionSelectionPoisonsAllThreeOwners !== true
+      || authority.cursorRebindPreparedOwner.failureAfterSessionConsumptionRequiresFreshAuthorityGraph
+        !== true
+      || contract.retryContract.preparationOrCancellationBeforeSessionConsumptionRetryable
+        !== true
+      || contract.retryContract.sessionConsumptionOrExecutionStartedPoisonsOnAnyLaterFailure
+        !== true
+      || contract.retryContract.postExecutionSameGraphRetryAllowed !== false) {
+    fail("GE_CURSOR_B3_CURSOR_RETRY_BOUNDARY",
+      "healthy pre-consume retry and authenticated selected-graph poison boundaries drifted");
+  }
+
+  const requiredObjects = [
+    "cursorRebindPreparedOwner", "publicationSessionConsumedTombstone",
+    "cursorRebindWriteReceipt", "rule11SuccessReceipt", "rule12SuccessReceipt",
+    "preVerificationClockEvidenceConsumedTombstone", "cursorClockCapability",
+  ];
+  if (requiredObjects.some((name) => !value.authority.requiredExactObjects.includes(name))) {
+    fail("GE_CURSOR_B3_CURSOR_RECEIPT_GRAPH",
+      "cursor subprotocol exact receipt and tombstone graph is incomplete");
+  }
+  exact(cursorClock.requiredCommitments, EXACT_CURSOR_CLOCK_COMMITMENTS,
+    "GE_CURSOR_B3_CURSOR_RECEIPT_GRAPH", "cursor clock commitments drifted");
+  if (!authority.cursorRebindWriteReceipt.requiredCommitments
+    .includes("publication-session-object-identity-and-consumed-tombstone")
+      || !authority.rule11SuccessReceipt.requiredCommitments
+        .includes("exact-predecessor-rebind-write-receipt-object-identity")
+      || authority.rule12SuccessReceipt.exactPredecessor
+        !== "rule-11-success-receipt-object-identity"
+      || !authority.rule12SuccessReceipt.requiredCommitments
+        .includes("rule-id-position-and-exact-rule-11-predecessor-identity")
+      || !third.requiredCommitments
+        .includes("publication-session-rebind-rule-11-and-rule-12-receipt-identities")
+      || !authority.preVerificationClockEvidenceConsumedTombstone.requiredCommitments
+        .includes("exact-rule-12-success-receipt-object-identity")) {
+    fail("GE_CURSOR_B3_CURSOR_RECEIPT_GRAPH",
+      "cursor receipt predecessor and consumed-tombstone commitments are not closed");
+  }
+  const changesLifecycle = authority.cursorRebindWriteReceipt.changesLifecycle;
+  exact([
+    changesLifecycle.prepareCount,
+    changesLifecycle.fetchCount,
+    changesLifecycle.releaseCount,
+  ], contract.queryBudgetContract.changesPrepareFetchRelease,
+  "GE_CURSOR_B3_CURSOR_QUERY_BUDGET", "changes() lifecycle disagrees with query budget");
+  if (changesLifecycle.connectionOwnedSingleRowGet !== true
+      || Object.hasOwn(changesLifecycle, "terminalFetchCount")) {
+    fail("GE_CURSOR_B3_CURSOR_QUERY_BUDGET",
+      "connection-owned changes() get must not invent a terminal fetch");
+  }
+
+  const successRecord = evidence.expectedSuccessRecord;
+  exact(Object.keys(successRecord), evidence.normalizedFields,
+    "GE_CURSOR_B3_CURSOR_SUCCESS_EVIDENCE",
+    "cursor subprotocol success evidence field order drifted");
+  const successCursorCount = evidence.successControlCursorCount;
+  const expectedSuccessRecord = {
+    caseId: "cursor-subprotocol-success-control",
+    outcome: "success",
+    failureBoundary: null,
+    state: "cursor/clock-complete",
+    poisoned: false,
+    providerClockReadCount: 3,
+    clockEvidenceConsumeCount: 3,
+    publicationSessionConsumeCount: 1,
+    publicationSessionTombstoneCount: 1,
+    cursorRebindPrepareCount: 1,
+    cursorRebindExecuteCount: 1,
+    cursorRebindReleaseCount: 1,
+    changesPrepareCount: 1,
+    changesFetchCount: 1,
+    changesReleaseCount: 1,
+    cursorLedgerLogicalWriteSequence: 1,
+    cursorLedgerFixedStatementCount: 1,
+    cursorLedgerAffectedRowsWatermark: successCursorCount,
+    outerLedgerLogicalWriteSequence: 4,
+    outerLedgerFixedStatementCount: 34,
+    outerLedgerAffectedRowsWatermark: 16,
+    totalChangesDelta: successCursorCount,
+    rule11ReceiptMintCount: 1,
+    rule12ReceiptMintCount: 1,
+    preVerificationEvidenceTombstoneCount: 1,
+    cursorClockMintCount: 1,
+    pendingCursorClockCount: 0,
+    commitCount: 0,
+  };
+  if (!Number.isSafeInteger(successCursorCount) || successCursorCount < 0) {
+    fail("GE_CURSOR_B3_CURSOR_SUCCESS_EVIDENCE", "success cursor count must be safe");
+  }
+  exact(successRecord, expectedSuccessRecord, "GE_CURSOR_B3_CURSOR_SUCCESS_EVIDENCE",
+    "cursor subprotocol success evidence drifted");
+
+  const profiles = value.hostileExecutionContract.counterProfiles;
+  const counts = (name) => [
+    profiles[name]?.providerClockReadCount,
+    profiles[name]?.clockEvidenceConsumeCount,
+  ];
+  exact(counts("cursor-rebind-executed"), [2, 2],
+    "GE_CURSOR_B3_CURSOR_CLOCK_PROFILE", "Rule 12 failure clock profile drifted");
+  exact(counts("pre-verification-clock-read-unconsumed"), [3, 2],
+    "GE_CURSOR_B3_CURSOR_CLOCK_PROFILE", "third-observed clock profile drifted");
+  exact(counts("post-verification-audits"), [3, 3],
+    "GE_CURSOR_B3_CURSOR_CLOCK_PROFILE", "cursor-clock success profile drifted");
+  exact(evidence.failureProfileInvariants.rule11OrRule12PoisonProviderReadsConsumes, [2, 2],
+    "GE_CURSOR_B3_CURSOR_CLOCK_PROFILE", "Rule 11/12 leaf profile drifted");
+  exact(evidence.failureProfileInvariants.thirdClockPoisonProviderReadsConsumes, [3, 2],
+    "GE_CURSOR_B3_CURSOR_CLOCK_PROFILE", "third-observed leaf profile drifted");
+  exact(evidence.failureProfileInvariants.cursorClockCompleteProviderReadsConsumes, [3, 3],
+    "GE_CURSOR_B3_CURSOR_CLOCK_PROFILE", "cursor-clock-complete leaf profile drifted");
+  if (third.rule11OrRule12FailureProviderClockReadCount !== 2
+      || third.rule11OrRule12FailureClockEvidenceConsumeCount !== 2
+      || third.successProviderClockReadCount !== 3
+      || third.successClockEvidenceConsumeCountBeforeTail !== 2) {
+    fail("GE_CURSOR_B3_CURSOR_CLOCK_PROFILE",
+      "third-boundary authority profile disagrees with leaf evidence");
+  }
+  const rule12Records = value.hostileExecutionContract.records.filter((record) =>
+    record.phase === "rule-12-count-scan" || record.phase === "rule-12-verification");
+  if (rule12Records.length !== 12
+      || rule12Records.some((record) =>
+        JSON.stringify(counts(record.expectedCounterProfile)) !== JSON.stringify([2, 2]))) {
+    fail("GE_CURSOR_B3_CURSOR_CLOCK_PROFILE",
+      "every frozen Rule 12 hostile must fail before the third clock observation");
+  }
+
+  exact(cursorClock.atomicTailContract.orderedSteps, EXACT_CURSOR_CLOCK_ATOMIC_TAIL,
+    "GE_CURSOR_B3_CURSOR_CLOCK_ATOMIC_TAIL", "cursor-clock atomic tail order drifted");
+  exact(cursorClock.atomicTailContract.forbiddenWithinAtomicTail,
+    EXACT_CURSOR_CLOCK_ATOMIC_FORBIDDEN, "GE_CURSOR_B3_CURSOR_CLOCK_ATOMIC_TAIL",
+    "cursor-clock atomic tail forbidden-operation inventory drifted");
+  const preparedContinuations = cursorClock.pendingRegistrationContract
+    .completionContinuationPreparationOrder;
+  const burnedContinuations = cursorClock.atomicTailContract.orderedSteps.slice(0, 3)
+    .map((step) => step.replace(/^burn-/u, ""));
+  if (JSON.stringify([...preparedContinuations].reverse())
+      !== JSON.stringify(burnedContinuations)) {
+    fail("GE_CURSOR_B3_CURSOR_CLOCK_ATOMIC_TAIL",
+      "completion continuations must prepare lower-to-outer and burn in exact reverse order");
+  }
+  if (cursorClock.atomicTailContract.nonInterruptible !== true
+      || cursorClock.atomicTailContract.allValidationAndNonClockAllocationPrecedeTail !== true
+      || cursorClock.atomicTailContract
+        .clockOwnedTombstoneAllocationAndRegistrationOccursInsideConsumeBeforeEvidenceBurn
+        !== true
+      || cursorClock.atomicTailContract.onlyAllowedFallibleTailOperation
+        !== "closure-captured-clock-owned-tombstone-allocation-and-registry-insertion"
+      || cursorClock.atomicTailContract.registryInsertionPrecedesOneWayEvidenceConsumedFlag !== true
+      || cursorClock.pendingRegistrationContract.pendingGraphRegisteredBeforeEvidenceConsumption
+        !== true
+      || cursorClock.pendingRegistrationContract.pendingCapabilityReadable !== false
+      || third.remainsUnconsumedUntil !== "cursor-clock-atomic-tail"
+      || contract.queryBudgetContract.atomicTailSqlProviderCancellationDispatchTransactionCursorCount
+        !== 0) {
+    fail("GE_CURSOR_B3_CURSOR_CLOCK_ATOMIC_TAIL",
+      "cursor-clock atomic tail must be closed, pre-registered and non-interruptible");
+  }
+  exact(cursorClock.activeAssertionContract.activeAssertionReadBudget, {
+    liveMigrationLockReadCount: 1,
+    targetCatalogObservationCount: 1,
+    targetCatalogNativeStatementCount: 2,
+    totalChangesReadCount: 1,
+    cursorLedgerPrivateSnapshotReadCount: 1,
+    providerClockCallbackCount: 0,
+    evidenceConsumeCount: 0,
+    writeSqlCount: 0,
+    transactionControlCount: 0,
+  }, "GE_CURSOR_B3_CURSOR_CLOCK_ASSERTION",
+  "cursor-clock active assertion read budget drifted");
+  if (cursorClock.activeAssertionContract.repeatable !== true
+      || cursorClock.activeAssertionContract.readOnly !== true
+      || cursorClock.activeAssertionContract.consumesNothing !== true
+      || cursorClock.activeAssertionContract.providerClockCallbackAllowed !== false
+      || cursorClock.activeAssertionContract.additionalEvidenceConsumptionAllowed !== false
+      || cursorClock.activeAssertionContract.noFourthClockObservationRequired !== true
+      || !cursorClock.activeAssertionContract.requiredProofs
+        .includes("target-catalog-identity-and-no-fourth-clock-observation")) {
+    fail("GE_CURSOR_B3_CURSOR_CLOCK_ASSERTION",
+      "cursor-clock assertion must be repeatable, read-only and preserve clock head three");
+  }
+}
+
 export function parseStrictJson(text) {
   let index = 0;
   const whitespace = () => { while (/[\t\n\r ]/u.test(text[index] ?? "")) index += 1; };
@@ -1105,7 +1575,7 @@ export function loadCursorPublicationFixture() {
   return parseStrictJson(readFileSync(FIXTURE_PATH, "utf8"));
 }
 
-function validateCursorPublicationFixtureSemantics(value, { verifyAssets = false } = {}) {
+export function validateCursorPublicationFixtureSemantics(value, { verifyAssets = false } = {}) {
   const { source, target, migration } = value.identities;
   exact(
     [source.schemaVersion, source.descriptorHash, source.schemaIdentitySha256],
@@ -1143,6 +1613,7 @@ function validateCursorPublicationFixtureSemantics(value, { verifyAssets = false
     "GE_CURSOR_B3_TRANSITIONS", "success transitions drifted");
   exact(value.authority.requiredExactObjects, EXACT_AUTHORITY_OBJECTS,
     "GE_CURSOR_B3_AUTHORITY_GRAPH", "exact authority graph drifted");
+  validateCursorSubprotocolBarrier(value);
   exact(value.authority.outerPublicationAuthority, EXACT_OUTER_AUTHORITY,
     "GE_CURSOR_B3_OUTER_AUTHORITY", "outer publication authority lifecycle drifted");
   exact(value.authority.outerPublicationAuthority.requiredCommitments,

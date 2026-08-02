@@ -19058,3 +19058,538 @@ rule-12 lineage/projection proof, third `before-verification` clock predecessor,
 single-use cursor-clock capability and all-three-owner transition to
 `cursor/clock-complete`. No commit, TEMP retirement or post-commit manifest work
 may enter that leaf, and no rebind-only intermediate commit is permitted.
+
+#### 31.37.58 Cursor-rebind, rules 11/12, third-clock and cursor-clock contract-hardening barrier
+
+This section is appended after publication-session commit
+`2a1fbcd2dc94d75687b5c392adf887ff5e5428fd`. It does not alter any earlier
+plan byte. The complete 19,060-line prefix has SHA-256
+`71740e6b4a574a41cb9684c64711557ea8fc28d5bde05e1446ded9ab1e10aaa8`
+and must remain exact.
+
+Three independent read-only topology audits agree that production truthfully
+ends at `publication-active`. The fixed cursor UPDATE, rule 11, rule 12, third
+provider-clock observation, cursor-clock capability and transition to
+`cursor/clock-complete` have no runtime authority in either language. The
+fixture describes their target behavior but does not yet close the opaque
+receipt graph, exact orchestration, fine-grained failure precedence or final
+atomic publication strongly enough for independent TypeScript and Python
+implementations. Runtime editing is therefore blocked behind one serialized
+contract-first barrier.
+
+##### 31.37.58.1 Inseparable bounded objective and authoritative timing
+
+The next implementation leaf is one indivisible cursor subprotocol:
+
+`publication-active -> cursor/clock-complete`
+
+Its ordered externally meaningful stages are exactly:
+
+1. consume the exact active publication session for one cursor-subprotocol
+   attempt;
+2. prepare and execute the fixed cursor rebind exactly once;
+3. close/release statement ownership and prove the affected-count,
+   `changes()`, `total_changes` and cursor-ledger equalities;
+4. mint the opaque Rule 11 success receipt;
+5. perform the bounded-memory Rule 12 count/driver/point-lookup seal proof and
+   mint the opaque Rule 12 success receipt;
+6. only after Rule 12 succeeds, observe the third provider-clock boundary
+   `before-verification` and retain it unconsumed;
+7. prepare and register the cursor-clock graph and all three lower completion
+   continuations; and
+8. consume the exact third evidence, retain its tombstone, publish the cursor-
+   clock identity and move outer/session, ownership and TEMP stage together to
+   `cursor/clock-complete`.
+
+The third-observation timing is no longer inferred from its label. It is frozen
+after Rule 12 success. Existing hostile counter profiles prove this order:
+ordinals 128–144 use `cursor-rebind-executed` with provider reads/consumes
+`2/2`; ordinal 19 uses `pre-verification-clock-read-unconsumed` with `3/2`;
+and completed post-verification evidence uses `3/3`. Observing the third clock
+before a Rule 11 or Rule 12 failure would contradict the accepted registry.
+
+No rebind-only, rule-11-only, rule-12-only or third-clock-only commit is
+permitted. The cursor UPDATE is permanent within the caller's open transaction;
+once it starts, any later failure is terminal poison and requires caller-owned
+rollback plus a fresh authority graph. This leaf never begins, commits or rolls
+back a transaction itself.
+
+##### 31.37.58.2 Mandatory closed object graph
+
+The case and schema must add one closed ordered object graph with the following
+module-minted opaque identities:
+
+1. `cursorRebindPreparedOwner`;
+2. `cursorRebindWriteReceipt`;
+3. `rule11SuccessReceipt`;
+4. `rule12SuccessReceipt`;
+5. `preVerificationClockEvidence`;
+6. `preVerificationClockEvidenceConsumedTombstone`; and
+7. `cursorClockCapability`.
+
+Every object is clone-, substitution-, cross-run- and structural-reconstruction
+rejected. Every predecessor and consumer edge uses exact object identity.
+Prepared owners and success receipts are single-use; replay is terminal after
+the exact graph has been selected. A presentation failure before exact session
+selection remains a healthy rejection. A graph mismatch after selection is
+authenticated corruption, poisons all three owners and cannot be retried on
+the same graph.
+
+`authority.requiredExactObjects` must explicitly include the rebind receipt,
+both rule receipts, third clock evidence/tombstone and cursor-clock capability.
+The existing cursor-clock commitment references to Rule 11 and Rule 12 receipt
+identities are invalid until those receipt contracts exist independently in
+case, schema, validator and malicious tests.
+
+##### 31.37.58.3 Cursor rebind prepared owner and write receipt
+
+The prepared owner accepts only the exact active publication session. It
+privately derives the connection, transaction generation, lock/provider
+capabilities, source/target identities, B2 pre-rebind receipt, post-0002 fence,
+stage-adoption graph and current total-changes/ledger watermarks. Callers may
+not supply redundant copies of those values or any SQL.
+
+Before the permanent write, it must:
+
+- prove exclusive unchanged transaction lineage and live migration lock;
+- reprove the exact source/target catalog and retained B2/session graph;
+- validate all three frozen EQP shapes and forbidden detail fragments;
+- prove triggers are absent and caller-controlled SQL is impossible;
+- observe cancellation at `before-rebind-prepare`;
+- prepare one connection-owned opaque rebind execution using only the frozen
+  UPDATE and four exact parameters; and
+- observe cancellation at `before-rebind-execute` while session evidence is
+  still unconsumed and the permanent statement has not run.
+
+The rebind write receipt freezes, in order:
+
+1. normalized UPDATE identity and SHA-256;
+2. exact target-descriptor, target-schema, source-descriptor and source-schema
+   parameter order and digest;
+3. exact publication-session object identity and consumed-session tombstone;
+4. connection, transaction generation and lock/provider capability identities;
+5. source and target descriptor/schema identities;
+6. prepare, execute and release counts, each exactly one;
+7. native run result shape and affected count;
+8. exact `SELECT changes() AS affected_rows` prepare/fetch/release lifecycle and
+   single safe-integer value;
+9. `total_changes` before, after and delta;
+10. cursor-ledger logical-write, fixed-statement and affected-row before/after
+    watermarks and deltas;
+11. rebind execution ordinal exactly one; and
+12. no-trigger, no-caller-SQL and no-unexplained-write proofs.
+
+The UPDATE begins the irreversible region. Session consumption must occur at
+the final no-write precondition boundary immediately before execution and must
+mint an exact consumed-session tombstone. Cancellation or preparation failure
+before that point leaves the active session retryable; any consumption,
+execute, release, changes-result, total-changes or ledger failure after that
+point is terminal. The runtime must not claim that SQL execution is a no-fail
+atomic tail.
+
+##### 31.37.58.4 Rule 11 success receipt
+
+Rule 11 is `BLR_CURSOR_REBIND_COUNT`, position 11, and runs without additional
+SQL after the write receipt is complete. Its opaque success receipt freezes:
+
+1. rule ID and position;
+2. exact predecessor rebind-write-receipt identity;
+3. expected B2 receipt cursor count;
+4. native run affected count;
+5. `changes()` affected count;
+6. total-changes delta;
+7. cursor-ledger statement and affected-row deltas;
+8. all five counts equal and safe;
+9. violation count zero and diagnostics-truncated false; and
+10. exact session, connection, transaction, lock and target identity lineage.
+
+Mismatch produces one diagnosed `count-mismatch`, mints no success receipt,
+forbids Rule 12 and poisons the selected graph. The receipt is minted exactly
+once and is not a free-form diagnostic carrier.
+
+##### 31.37.58.5 Rule 12 success receipt and bounded read topology
+
+Rule 12 is `BLR_CURSOR_SEAL_MISMATCH`, position 12. It must use only the frozen
+main-key-count scan, TEMP key driver and main point lookup. It reuses the
+existing O(1)-memory cursor-seal accumulator and never materializes the full
+main or TEMP row set.
+
+The exact lifecycle is:
+
+1. prepare the main-key-count cursor;
+2. fetch/decode/order-check every main key, counting rows one at a time;
+3. prove terminal fetch, close the cursor and clear its ownership;
+4. compare the frozen main count to the B2 receipt count;
+5. only after main-count ownership is cleared, prepare the TEMP key driver and
+   one reusable main point-lookup statement;
+6. fetch one driver key, execute one point lookup, fetch exactly one main row,
+   decode and validate it, close the point cursor, then observe cancellation
+   and only then fetch the next driver key;
+7. close/release the point statement owner, then terminally close the driver;
+8. finish the accumulator;
+9. compare main count, driver count, lookup count, receipt count, receipt root,
+   computed root and both target mutable identities; and
+10. mint Rule 12 success exactly once.
+
+The success receipt freezes, in order:
+
+- rule ID/position and exact Rule 11 predecessor identity;
+- exact rebind receipt and publication-session identities;
+- seal algorithm version, row/seal domains and byte ordering;
+- main, driver, lookup, receipt and accumulator counts;
+- receipt and computed roots;
+- target descriptor and schema identities for every row;
+- immutable projection digest, both blob lengths and both blob hashes;
+- all three EQP identities/digests;
+- count/driver/point prepare, execute/fetch, terminal-fetch, close and release
+  counters;
+- maximum active cursor count two, maximum live physical rows one and maximum
+  live carriers one;
+- violation count zero and diagnostics-truncated false; and
+- exact connection, transaction, lock and session lineage.
+
+Missing/extra/duplicate keys, zero/multiple point rows, immutable drift,
+same-length blob drift, source/third-party mutable identities, count/root drift,
+insert/delete swaps and second verification all poison and mint no receipt.
+
+##### 31.37.58.6 Third-clock graph and cursor-clock atomic completion
+
+Only an exact Rule 12 receipt may authorize observation of
+`before-verification`. The third clock evidence must prove:
+
+- current head index exactly three;
+- predecessor exact second `before-cursor-rebind` evidence identity;
+- boundary `before-verification` and consumer `cursor-clock-capability`;
+- exact provider and migration-lock capability identities;
+- exact connection and unchanged exclusive transaction generation;
+- a freshly reread complete live-lock tuple including active expiry;
+- provider safe integer, monotonic nondecrease and strict
+  `providerNowMs < activeExpiresAtMs`;
+- exact publication session, rebind receipt, Rule 11 receipt and Rule 12 receipt
+  identities; and
+- distinct, unconsumed evidence with no fourth observation.
+
+After successful observation, the runtime observes cancellation once at
+`before-cursor-clock-complete`, preconstructs the cursor-clock capability and
+immutable state, registers a non-readable pending graph, and prepares all
+three lower completion continuations. Allocation/registration failure before
+evidence consume burns preparation, poisons all three owners, retains the
+primary failure and leaves no readable pending capability.
+
+The final non-interruptible tail is exact:
+
+1. burn outer/session, ownership and stage completion continuations;
+2. consume the exact third evidence once;
+3. retain its exact consumed tombstone;
+4. publish cursor-clock identity to stage and ownership;
+5. publish the same identity to outer/session;
+6. set all three lifecycle owners to `cursor/clock-complete`; and
+7. activate and return the opaque cursor-clock capability.
+
+All validation and fallible object allocation precede the tail. The tail
+forbids SQL, provider callback, cancellation read, injected fault hook, caller
+dispatch, dynamic import, transaction control, cursor execution, registry
+lookup/deletion and commit. Registry insertion required to make clock consume
+failure-safe occurs before its one-way consumed flag, exactly as in the second
+boundary. Unexpected post-consume failure poisons all owners and cannot expose
+a pending or partially active cursor clock.
+
+The repeatable active assertion proves the exact cursor-clock identity, third
+evidence/tombstone, Rule 11/12 receipts, rebind receipt, session tombstone,
+connection/transaction/lock, unchanged post-rebind total-changes/cursor-ledger
+watermarks, all three ownership identities, target catalog and no fourth clock
+observation. It consumes nothing and executes only a separately enumerated
+fixed read budget.
+
+##### 31.37.58.7 Fine-grained failure precedence
+
+The generic `beforeCursorRebind` and `afterStatementStarted` buckets must be
+supplemented with closed precedence arrays for:
+
+- `beforeRebindPrepare`;
+- `beforeRebindExecute`;
+- `afterRebindExecute`;
+- `changesLifecycle`;
+- `rule11Validation`;
+- `rule12MainCountLifecycle`;
+- `rule12DriverLifecycle`;
+- `rule12PointLookupLifecycle`;
+- `rule12Finalize`;
+- `beforeThirdClock`;
+- `thirdClockObservation`;
+- `cursorClockValidation`; and
+- `cursorClockAtomicTail`.
+
+Before irreversible execution, precedence is exact authority/presentation,
+lineage/live-lock/catalog/EQP, cancellation, statement close. After execution
+starts it is native SQLite or row primary, result/rule invariant, cancellation,
+cursor/statement close, TEMP cleanup, outer cleanup. An earlier primary is
+never replaced by cancellation or cleanup. Rule 11 failure blocks Rule 12;
+Rule 12 failure blocks the third observation; third observation failure leaves
+reads/consumes `3/2`; cursor-clock success leaves `3/3`.
+
+##### 31.37.58.8 Hostile registry and malicious contract tests
+
+The current directly relevant registry slice includes ordinals 19, 27–30,
+42–43, 45, 49, 128–145. Ordinal 48 remains unavailable unless a real consumer
+of a cloned cursor-clock capability exists in this leaf; mint-time tests may
+not manufacture a future-consumer claim. Every activated record must use its
+real runtime seam and exact frozen counter profile.
+
+The contract correction may append new records from ordinal 146 for gaps that
+cannot be expressed by existing records: native rebind prepare/execute/release
+failure; malformed `changes()` row; rebind/rule receipt clone, substitution,
+cross-run and replay; count/driver/point prepare/fetch/finalize failures and
+cancellation-close combinations; third provider throw, unsafe integer,
+regression, expiry, lock/lineage drift, wrong predecessor, substitution and
+preconsumption; erroneous third observation after failed Rule 12; cursor-clock
+second mint/replay; consume-then-publish fault; wrong/missing tombstone;
+partial three-layer publication; and forbidden atomic-tail dispatch.
+
+If records are appended, registry count, order, obligation list, counter
+profiles, normalized expansion, schema prefix items, trusted registry digest,
+expanded-record digest and fixture canonical digest must be regenerated
+together. `runtimeExecutionEvidenceClaim` remains false. A contract record is
+not called executed until both real runtimes activate it.
+
+Malicious tests must independently mutate and re-sign every new Boolean,
+enum/order array, receipt commitment, predecessor edge, consumer/boundary,
+failure precedence list, query lifecycle, count equality, pending-registration
+rule, tail step and forbidden-operation entry. Validator logic may not validate
+only field presence or copy fixture values into its own oracle.
+
+##### 31.37.58.9 Runtime file ownership after the contract barrier
+
+Only after case/schema/validator/tests and canonical hashes pass independent
+H0/M0/L0 review may runtime lanes open.
+
+The TypeScript lane normally owns:
+
+- new `packages/sqlite/src/cursor-publication-rebind-contract.ts`;
+- `packages/sqlite/src/sqlite-connection.ts` closed execution/read kinds;
+- new `packages/sqlite/src/cursor-publication-rebind.ts` compound owner;
+- `packages/sqlite/src/cursor-publication-clock-authority.ts` third graph;
+- the outer authority, ownership and stage completion bridges; and
+- dedicated functional/query-budget/GC/static tests.
+
+The Python lane mirrors the same topology in package-private modules, using
+definition-time captured intrinsics, private registries and exact GC anchors.
+Neither lane modifies B2 rules 1–10, the existing seal accumulator, root package
+exports or transaction ownership.
+
+The conformance lane owns honest activated-record accounting, independent
+real-SQLite reporters, the shared fixture oracle comparator and source/dist or
+source/bytecode static gates. The integration lane alone owns plan/log append,
+shared package scripts, complete regressions, artifact rebuilds, staged scope,
+commit and push.
+
+##### 31.37.58.10 Mandatory runtime test and cost matrix
+
+Both runtimes cover zero, one and large-N cursors; exact source-to-target
+identity update; every Rule 11 equality independently drifting; every Rule 12
+count/root/identity/blob/order failure; clone/cross-run/replay for every opaque
+edge; rollback/rebegin, lock expiry and provider failure; every cancellation
+label; every cursor/statement close failure; pending-registration faults;
+atomic-tail alias replacement; complete graph GC; package privacy; and
+cross-runtime canonical parity.
+
+Exact query/cursor budgets are:
+
+- EQP probes: exactly three, all before permanent execution;
+- rebind prepare/execute/release: `1/1/1`;
+- `changes()` prepare/fetch/release: `1/1/1`;
+- Rule 11 additional SQL: zero;
+- main-key count prepare/rows/terminal-fetch/close: `1/N/1/1`;
+- TEMP driver prepare/rows/terminal-fetch/close: `1/N/1/1`;
+- point statement prepare/execute/release: `1/N/1`;
+- point cursors created/closed: `N/N`;
+- maximum simultaneously active cursors: two;
+- maximum live physical rows and carriers: one each;
+- third clock: the established before/after live-lock reads plus one provider
+  callback and no extra callback during consume/assert; and
+- atomic completion tail: zero SQL, provider, cancellation, assertion, caller
+  dispatch, transaction or cursor operation.
+
+Counter evidence requires cursor ledger `1/1/N`, rebind prepare/execute one,
+outer ledger unchanged at `4/34/16`, total-changes delta `N`, Rule 11/12 receipt
+mint one each, third observation/consume/tombstone one each, no fourth clock,
+and commit zero.
+
+GC probes retain and then release authority, session, prepared owner, rebind
+execution, rebind receipt, both rule receipts, third evidence/tombstone,
+cursor-clock, transfer, stage and connection. Success, pre-write cancellation,
+Rule 11 poison, Rule 12 poison, third-clock poison and pending-tail poison paths
+must all restore exact private-registry baselines.
+
+##### 31.37.58.11 Acceptance and explicit nonclaims
+
+Contract acceptance requires focused schema/validator/malicious tests, strict
+JSON duplicate-key rejection, all B3 contract/ledger tests, fixture validation,
+trusted hash recomputation, append-only plan proof and two independent final
+H0/M0/L0 audits. Runtime acceptance later requires complete TypeScript/Python
+functional and hostile suites, query budgets, type/lint/static gates, session/
+clock/initial regressions, honest activated-record parity, full SQLite suites,
+fresh npm and Python artifacts, installed smokes, GC, package privacy, durable
+review log and identical local/remote objects.
+
+This contract plan and its upcoming contract-only commit do not execute the
+UPDATE, implement Rule 11 or Rule 12, observe the third clock, mint cursor-clock
+authority, change runtime state, retire TEMP, publish lineage/metadata, commit,
+activate a manifest, claim production readiness or make any GitHub-star
+guarantee. Those claims remain false until their own executable evidence is
+complete.
+
+#### 31.37.59 Cursor-clock tombstone allocation correction (append-only)
+
+This correction is appended without changing §31.37.58 or any earlier byte.
+The complete 19,440-line prefix before this append has SHA-256
+`aaa0a5fd9135ca5788915a5f199662f959d5bb5d93e7677188f5025a1bd76998`.
+
+Integration review found that §31.37.58.6's statement that every fallible
+object allocation precedes the final tail is too broad. The already accepted
+provider-clock consume primitive owns its opaque consumed tombstone. To keep
+evidence failure-safe, that primitive must allocate the tombstone and register
+its immutable private state immediately before flipping evidence's one-way
+`consumed` flag. Moving this module-owned allocation outside consume would
+either expose a constructor/registry seam or recreate the consume-before-
+registration bug closed in §31.37.56.
+
+The corrected rule is:
+
+1. every validation, caller-visible object allocation, cursor-clock pending
+   state allocation, lower completion continuation and registry insertion
+   other than the clock-owned tombstone occurs before the tail;
+2. the tail invokes one exact definition-time-captured clock-consume intrinsic;
+3. inside that intrinsic only, tombstone allocation and private registry
+   insertion occur before the evidence flag changes from unconsumed to
+   consumed;
+4. allocation/registration failure leaves the evidence unconsumed and the
+   cursor-clock pending graph unreadable, then poisons all three owners;
+5. after the evidence flag changes, the remainder is pre-resolved identity
+   publication and lifecycle assignment; and
+6. no other allocation, registry lookup/deletion, dynamic dispatch, SQL,
+   provider callback, cancellation, assertion or fault hook is permitted.
+
+The case, schema, validator, malicious tests and future TypeScript/Python
+static gates must encode this exact exception rather than claim a completely
+allocation-free tail. This correction changes no runtime and does not weaken
+the no-SQL/no-callback/no-cancellation atomic boundary.
+
+#### 31.37.60 Cursor-subprotocol session-consumption timing correction (append-only)
+
+This correction is appended without changing §31.37.58, §31.37.59 or any
+earlier byte. The complete 19,476-line prefix before this append has SHA-256
+`bcb3dffac0803f72a16fb013f86ae0571604cc161fdaf311b071551a0fd5e37e`.
+
+Independent closed-world review found that §31.37.58.1's coarse stage list and
+the first FINAL3 contract draft placed `consume exact active publication
+session` before cursor-rebind preparation. That ordering contradicted the more
+specific authority and retry rules in the same draft: EQP proof, authority
+derivation, statement preparation and both pre-execution cancellation checks
+must finish while the publication session remains active and unconsumed; only
+then may the leaf cross its final no-write pre-execution boundary. Freezing both
+orders would have made a conforming runtime impossible and would have converted
+healthy preparation failures into terminal replay failures.
+
+The earlier coarse ordering is therefore superseded by this exact nine-stage
+cursor-subprotocol order:
+
+1. validate the exact active publication-session identity, derive and register
+   the opaque cursor-rebind prepared owner, prove the unchanged connection,
+   transaction, lock, catalog, B2 graph and three fixed EQP shapes, observe the
+   pre-prepare and pre-execute cancellation points, and prepare the one fixed
+   connection-owned rebind execution without consuming the session;
+2. at the final no-write pre-execution boundary, atomically consume the exact
+   active publication session once and retain its module-owned opaque consumed
+   tombstone;
+3. execute the fixed cursor rebind exactly once, after which every failure is
+   terminal poison for the selected graph;
+4. release statement ownership and prove affected-row count, connection-owned
+   single-row `changes()`, `total_changes` delta and private cursor-ledger
+   equality;
+5. validate Rule 11 and mint its exact opaque success receipt;
+6. execute the bounded Rule 12 main-count, TEMP-driver and point-lookup proof,
+   then mint its exact opaque success receipt;
+7. only after Rule 12 success, perform the third `before-verification` provider
+   clock observation and retain the fresh evidence unconsumed;
+8. allocate and register the unreadable pending cursor-clock graph plus the
+   three completion continuations in lower-to-outer preparation order; and
+9. run the non-interruptible cursor-clock tail in exact reverse continuation
+   order, consume the third evidence through its definition-time-captured
+   intrinsic, retain the clock-owned tombstone and publish all three completion
+   layers together.
+
+The corrected retry boundary is now unambiguous. Presentation rejection,
+authority validation failure, EQP rejection, statement-prepare failure and an
+authentic cancellation observed before session consumption preserve the exact
+active session and may retry. Authenticated private-graph drift after selection
+still poisons according to its own closed rule. Session consumption succeeds
+only after all fallible non-clock preparation that can safely precede execution
+has completed. Consumption failure leaves execution count zero. Once
+consumption succeeds, replay is terminal even if execution has not yet returned;
+the caller must roll back and construct a fresh authority graph. The leaf never
+owns BEGIN, COMMIT or ROLLBACK.
+
+The case, exact schema mirror, semantic validator and malicious re-signing tests
+must freeze the nine strings and their order. They must additionally cross-link
+the order against `cursorRebindPreparedOwner.preparationOrder`,
+`sessionConsumptionBoundary`, the retry contract, the session consumed
+tombstone commitments, statement prepare/execute counters and all relevant
+failure-precedence arrays. A test that merely stores two contradictory constant
+arrays is not acceptance.
+
+Acceptance for this correction requires: strict JSON and duplicate-key gates;
+Draft 2020-12 strict schema compile and case validation; unknown-field injection
+against every fixture object; a semantic mutation that moves consumption before
+preparation; a mutation that executes before consumption; a mutation that marks
+pre-consumption cancellation terminal; exact canonical self-digest
+recomputation; byte-identical preservation of all 145 hostile obligations and
+all 145 hostile execution records; the full focused B3 suite; the wider SQLite
+ledger-contract suite; fixture and documentation gates; and independent final
+H0/M0/L0 review.
+
+This correction changes no production runtime and makes no implementation,
+manifest, release, throughput, commit or GitHub-star claim. It removes a
+contract contradiction before either language is permitted to implement the
+cursor subprotocol.
+
+#### 31.37.61 Cursor-subprotocol contract acceptance checkpoint (append-only)
+
+This checkpoint is appended without changing §31.37.60 or any earlier byte.
+The complete 19,554-line prefix before this append has SHA-256
+`6eaeb3723202c6448fec54ccba924f08a169ca71e545df54d2ca5fc153469dd9`.
+
+The contract-hardening barrier is accepted. Its frozen artifacts are:
+
+- case SHA-256
+  `e188b35f43021186756edb60715ba6a6edc9699f9f5b885578fab7bd2b51a883`;
+- exact schema SHA-256
+  `70347ad80215cb39071de2a97d7c420e0ee86288cf50b7b5f51fee409edc62f9`;
+- semantic validator SHA-256
+  `449dda8f9535703ae47b20e78fa954888b92ee1eb28a65ca6279ea0d0320eb09`;
+- malicious test SHA-256
+  `9b1bff2a991949f57f9485c38ef49f74a21c9d1953137cfedf21448fca78104e`;
+- canonical fixture digest
+  `d368cd53e819e06e950f2dabedcb5a5b2fca535536efe85abb2e4b488bae2e7d`;
+  and
+- durable review-log SHA-256
+  `a51e6a59568323218641c27636e112471e29bac7da6cbbfbdd2626bf83ebd065`.
+
+Final evidence is green: focused B3 39/39; SQLite ledger contract 66/66 plus
+all chained validators; 85 JSON fixtures including 44 case manifests; 453
+closed-object unknown-field injections with zero accepted; 477 Markdown links;
+strict JSON, duplicate-key/trailing-content attacks, strict Draft 2020-12 Ajv,
+syntax and diff checks. The 145 hostile obligations and 145 records remain
+exact-equal to the parent, with ordinals 1 through 145, registry digest
+`4e08dbd783213483692c0a2c36d4b8a3732f9b6b3e1a3f0e8bda24861b816e58`
+and expanded digest
+`6bd821819215291851f2342b41beb565288e7c095de07fc066f47511cc232f95`.
+
+Two independent final read-only audits report H0/M0/L0 after the original
+session-consumption ordering contradiction, systematic mutation-coverage gap
+and cross-group relationship gap were corrected. The durable evidence is in
+`codex_logs/reviews/SQLITE-CURSOR-B3-REBIND-CURSOR-CLOCK-CONTRACT-2026-08-02.md`.
+
+This acceptance authorizes the next runtime implementation leaf but does not
+claim that leaf is implemented. All runtime, active-manifest, release,
+production and star guarantees remain false.
