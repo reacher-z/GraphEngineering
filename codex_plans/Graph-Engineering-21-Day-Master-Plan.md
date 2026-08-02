@@ -16766,3 +16766,430 @@ audits and the independent §31.37.47 append audit, this full-suite result
 authorizes one scoped commit and push for the Python post-DDL publication
 reader leaf. It does not broaden any nonclaim in section 31.37.47.7 and
 authorizes only the baseline-entry successor described in section 31.37.47.8.
+
+#### 31.37.48 Python B3 baseline-entry permanent publication receipt acceptance and baseline-header successor plan (append-only execution record, 2026-08-01)
+
+This section is an append-only continuation. Before this section was added, the
+plan contained exactly 16,768 lines and its SHA-256 was
+`a9a267c1ecb9e9617c48b02735bb5d912ed31efdb0d7214cb986ca3c67b2460c`.
+The first 16,768 lines must continue to reproduce that digest. No statement in
+an earlier section is edited, weakened, reordered or retrospectively marked as
+implemented by this record.
+
+##### 31.37.48.1 Delivered boundary
+
+The Python runtime now implements the baseline-entry permanent publication leaf
+authorized by section 31.37.47.8. The leaf starts with the exact active outer
+authority, authentic migration-0002 receipt, authentic reusable post-DDL
+catalog fence and exact retired post-DDL reader lease. It ends with one opaque,
+reusable and non-consuming baseline-entry receipt, or with a poisoned authority
+that exposes the real physical progress and requires caller rollback.
+
+The implementation is deliberately narrower than the complete B3 protocol. It
+does not write the baseline header or sequence-zero row, consume any receipt,
+adopt the TEMP stage, rebind cursors, retire TEMP artifacts, commit the caller's
+transaction, activate a manifest or claim release/adoption readiness. A
+complete entry write is the second ordered initial-write receipt, not an atomic
+publication.
+
+The production ownership remains confined to:
+
+- `python/src/graph_engineering/sqlite_operation_baseline_source.py`, which
+  owns the closed-set connection execution session and physical INSERT;
+- `python/src/graph_engineering/sqlite_cursor_publication_outer_authority.py`,
+  which owns graph validation, private row derivation, canonical frames,
+  ledgers, receipt minting and receipt assertion; and
+- no package-root public export. All new entry APIs remain package-private.
+
+The hostile acceptance surface is isolated in
+`python/tests/test_sqlite_cursor_publication_baseline_entries.py`. No existing
+test or fixture was relaxed to make the leaf pass.
+
+##### 31.37.48.2 Exact physical statement and Python adapter meaning
+
+The only permanent statement admitted by this leaf is the exact 183-byte UTF-8
+literal:
+
+```sql
+INSERT INTO main.ge_cycle_operation_baseline_entries (baseline_id, ordinal, entry_kind, entry_key_blob, entry_state_blob, previous_entry_hash, entry_hash) VALUES (?, ?, ?, ?, ?, ?, ?)
+```
+
+Its independently checked SHA-256 remains
+`b522e3ee2bb4599d74b32c8602242b1b74c3f804dd9129a8eb5a0f529cdca88b`.
+Every nonempty execution binds exactly seven values in the frozen order:
+baseline ID, ordinal, entry kind, key BLOB, state BLOB, previous hash and entry
+hash. No caller SQL, `RETURNING`, rowid, transaction statement, savepoint,
+second TEMP SELECT or adapter-generated statement enters the path.
+
+Python's standard `sqlite3` API does not expose a prepare-only operation. In
+this implementation, `prepare_count == 1` therefore has a precise and limited
+meaning: one module-owned cursor/session allocation is reserved before row
+execution. It is not a claim that SQLite compiled native bytecode before the
+first `execute`. The implementation does not fake native prepare with
+`EXPLAIN`, rollback DML, `ctypes` or an undocumented handle.
+
+For `E == 0`, that single reservation is allocated and closed exactly once with
+zero SQL executions, zero epoch advance and zero `total_changes` delta. For
+`E > 0`, the same cursor owns all strictly ordered calls and is closed exactly
+once at terminal success or failure. `prepare_count` is an adapter-level
+closed-set reservation counter throughout the Python port.
+
+##### 31.37.48.3 Source execution object and irreversible progress
+
+The source owner mints an opaque
+`_SQLiteConnectionBaselineEntryPublicationExecution`. Its private weak
+registry binds the exact connection, transaction generation, epoch,
+`total_changes`, expected entry count, current ordinal, attempts, completed
+native returns, actual affected rows, lifecycle and cursor cleanup state.
+Neither an execution back-reference nor an exception traceback is retained.
+
+The source snapshot exposes fourteen ordered observations:
+
+1. actual affected rows;
+2. completed entry count;
+3. execute-attempt count;
+4. expected entry count;
+5. lifecycle `active`, `completed` or `poisoned`;
+6. next entry ordinal;
+7. adapter prepare count one;
+8. `total_changes` before;
+9. current `total_changes`;
+10. exact `total_changes` delta;
+11. transaction epoch;
+12. transaction generation identity;
+13. close-attempt count zero or one; and
+14. close-success flag.
+
+Native `cursor.execute` return is the irreversible boundary. The execution
+advances completed count and private epoch before examining result shape or
+later counters. Each row must report exactly one affected row and native
+`total_changes` must advance by exactly one. A result-shape or counter fault
+therefore retains the physically completed row rather than pretending the
+statement did not happen.
+
+Strict ordinal order, exact connection identity, exclusive generation, active
+lifecycle and seven-value validation precede every native call. Replay,
+skipped/duplicated ordinal, foreign connection, stale generation and terminal
+handle use poison rather than silently restart the session.
+
+##### 31.37.48.4 Cleanup and error precedence
+
+Every terminal path attempts cursor close exactly once and immediately clears
+the cursor from private state. This includes empty completion, full completion,
+pre-run validation failure, owner drift, native execution failure,
+post-native result failure and counter disagreement.
+
+The first semantic or native failure is authoritative. A secondary close
+failure cannot replace it. State retains only a scalar close error code, never
+the close exception or traceback. Re-reading or replaying a terminal execution
+does not close a second time.
+
+If all permanent writes and receipt-source checks succeed but the final close
+fails, the source emits structured
+`GE_CURSOR_B3_BASELINE_ENTRY_CLEANUP`, retains the complete physical counts and
+poisons the execution. The outer authority then mints zero receipts, retains
+the physical ledger observations and poisons. A cleanup failure is never
+misreported as a successful receipt.
+
+##### 31.37.48.5 Outer graph, independent proof and receipt
+
+The outer writer freshly proves the exact predecessor graph before allocating
+the source session. It accepts no structural substitute for the authority,
+migration receipt, catalog fence, reader lease, projection identity or
+projection reference. The reader must still be retired with one successful
+close and must expose the exact private retained entry vector. A wrong graph
+writes nothing and leaves an otherwise valid graph retryable.
+
+The writer consumes no caller entry vector and performs no second query over
+`temp.ge_blr_stage`. It rebuilds the retained rows in exact ordinal order and
+reproves count, baseline ID, genesis predecessor, hash-chain continuity, first
+hash, final hash and projection terminus.
+
+Two different callables implement the construction and verification passes.
+Each independently rebuilds the complete `E x 7` tagged scalar frame from the
+private lease. The verifier is not an alias, wrapper or invocation of the
+builder. Both passes independently compute the parameter digest and aggregate
+`{"affectedRows":"E"}` result digest. Receipt registration happens only after
+the two outputs agree and the source reports terminal success and successful
+cleanup.
+
+The opaque receipt snapshot has exactly 34 fields. It binds affected rows,
+authority, baseline ID, connection, entry and execute counts, first/final
+hashes, INSERT SQL/SHA, migration receipt, mint count, before/after/delta
+ledgers, parameter digest, catalog fence, prepare count, projection identity
+and reference, reader close count/lease/lifecycle/rederived digest, result
+digest, source SELECT SQL/SHA, before/after/delta `total_changes`, before/after
+epoch, transaction generation and write kind.
+
+The weak receipt record retains only scalar commitments, exact identity IDs and
+weak references required for revalidation. It does not strongly retain the
+connection, projection, retained entries, receipt snapshot or any exception.
+Receipt assertion is reusable and non-consuming. It permits authorized later
+ledger advancement but rejects regression below its watermarks.
+
+Both source SELECT and permanent INSERT SQL identities are captured at module
+load. The receipt record stores all four SQL/SHA scalars. Assertion requires
+record equality with the captured canonical pair and freshly hashes the stored
+SQL. Mutating a public SQL global together with a matching new SHA cannot
+rewrite the meaning of an already minted receipt, and direct record tampering
+poisons rather than authenticates.
+
+##### 31.37.48.6 Phase and accounting proof
+
+The only successful phase transition is:
+
+`post-ddl-reader-closed -> executing-baseline-entries -> baseline-entries-complete`.
+
+For `E` rows, authentic receipt mint advances the outer ledger by logical
+`+1`, fixed statements `+E` and affected rows `+E`. The frozen `E=12`, `L=1`
+control graph therefore advances exactly from `1/20/2` to `2/32/14`.
+
+Prepare/session-allocation failure retains `1/20/(1+L)` with no execution.
+Failure after six native returns retains `1/26/8`, execute six, affected six,
+logical one and mint zero. A post-write digest, counter, cleanup or
+receipt-construction failure retains all completed physical progress but does
+not advance the logical sequence to two. Partial DML can never masquerade as
+an authentic receipt.
+
+##### 31.37.48.7 Defects found and closed by hostile review
+
+The acceptance work found and repaired four material issues before this
+checkpoint:
+
+1. per-step outer validation initially did not compare every observed
+   `total_changes` value; the writer now checks it after every native return;
+2. the second frame verifier initially shared implementation with the builder;
+   it is now a separately implemented rederivation path, and seam tests prove
+   one can be faulted without controlling the other;
+3. a receipt could have reported mutable module SQL globals rather than the
+   SQL committed at mint; captured canonical SQL/SHA pairs plus record-local
+   commitments now protect historical receipts; and
+4. nonempty source sessions initially lacked universal exact-once cursor
+   cleanup; success, primary failure, close failure and replay paths now carry
+   explicit close evidence and no retained cursor.
+
+These repairs were validated after the final code bytes were frozen. They are
+not deferred issues or documentation-only mitigations.
+
+##### 31.37.48.8 Executable evidence before the complete regression barrier
+
+Evidence on the frozen production and hostile-test bytes is:
+
+- dedicated Python hostile suite: 64/64 passed in 276.44 seconds;
+- nine-file serial Python source/clock/target/migration/authority/fence/reader/
+  entries integration: 312/312 passed in 875.51 seconds;
+- TypeScript baseline-entry behavioral oracle: 20/20 passed in 19.46 seconds;
+- Ruff lint: zero findings across the three changed Python files;
+- Ruff format check: all three files already formatted;
+- mypy: zero issues across 99 source files;
+- `py_compile` and `git diff --check`: exit zero;
+- security/failure-precedence audit: HIGH 0 / MEDIUM 0 / LOW 0; and
+- independent plan-to-code contract audit on the final file hashes: HIGH 0 /
+  MEDIUM 0 / LOW 0.
+
+The complete Python regression was launched only after these barriers passed.
+Its result is not claimed in this subsection; an EOF-only closure must append
+the exact total, duration and final prefix proof after the process exits.
+
+##### 31.37.48.9 Explicit nonclaims
+
+This acceptance does not claim SQLite native prepare-before-execute in Python.
+It does not claim baseline-header or sequence-zero publication, four-receipt
+consumption, atomic adoption, publication-session authority, cursor rebind,
+rules 11/12, TEMP retirement, caller transaction commit, manifest activation,
+release readiness, ecosystem adoption or any GitHub star outcome. Engineering
+evidence can make the repository worthy of adoption; it cannot guarantee an
+external star count.
+
+##### 31.37.48.10 Next isolated Python leaf: baseline-header publication
+
+After the complete regression and scoped baseline-entry commit, the only newly
+authorized leaf is the Python baseline-header receipt defined in sections
+31.37.33 and 31.37.34. It must consume the exact authentic baseline-entry
+receipt and stop before sequence-zero publication.
+
+The fixed header SQL is exactly 488 UTF-8 bytes and has SHA-256
+`b1a32ec385dd78f9727a63b9c303a9cb95c9525910010984d09b7f0fd868e79a`.
+It fixes baseline format version one, source application ID 1195724359 and
+source user version one in SQL, and binds exactly fourteen values in order:
+baseline ID; source schema hash; source migration-lineage ID; source
+migration-lineage hash; source descriptor hash; capture time; legacy count;
+entry count; first hash; final hash; canonical projection hash; creation
+runtime; creation runtime version; and policy BLOB.
+
+The Python runtime identity is frozen as `graph-engineering-python` and
+`0.1.0a1`; TypeScript runtime literals must not be copied into the Python
+receipt. The canonical policy is 946 bytes with SHA-256
+`67cbe0ac8bf04f28061d50f8b7089312cc1e1f9a9520ede95deec0d1f4ec5eb0`.
+The standard Python `E=12` fixture expects parameter SHA-256
+`08d9635267a488ec2a7f2277646708c8636c2266944bbb50383b230bf38817ff`
+and result SHA-256
+`2475973b53ba5659827cf78fca83b7a040172ae04e0c03d7de1cd7a297f1a96e`.
+
+The source lane must add one opaque, exclusive-lineage, single-run execution
+session. As with entries, Python `prepare_count == 1` means cursor/session
+allocation, not native compilation. Success and every failure path must close
+exactly once, clear the cursor, preserve native-return progress, retain only a
+scalar cleanup code and give the primary failure precedence.
+
+The outer lane must add phases `executing-baseline-header` and
+`baseline-header-complete`, header receipt/counters in authority state, an
+opaque 42-field receipt snapshot and a weak scalar/identity record. It must
+derive source values from the already validated private envelope, projection
+values from the authentic graph, runtime literals from the frozen Python
+contract and a detached policy BLOB from the package-owned encoder. Caller
+clock, environment, interpreter version, caller policy and reconstructed
+source envelope are forbidden.
+
+Construction and verification must be independent callables that each rebuild
+the `1 x 14` frame. Historical SELECT/INSERT SQL commitments need the same
+captured-pair plus fresh-record-hash defense as the entries receipt. Receipt
+mint occurs only after exact result, counter, cleanup, digest and predecessor
+proof.
+
+The phase transition must be
+`baseline-entries-complete -> executing-baseline-header -> baseline-header-complete`.
+The successful ledger delta is `+1/+1/+1`; for the frozen `E=12`, `L=1` graph,
+`2/32/14` becomes `3/33/15`. Any physical one-row completion followed by a
+result, counter, digest or cleanup fault retains that physical progress,
+increments no logical receipt sequence, mints zero and poisons.
+
+Implementation remains divided into non-overlapping source-owner, outer
+authority, hostile-test and read-only audit lanes. Root integration must freeze
+the production/test bytes, run the dedicated header suite, entries-through-
+header serial matrix, TypeScript 19-case oracle, Ruff, format, mypy, complete
+Python regression, two severity-zero audits, append-only prefix proof and a
+durable review log before the next scoped commit. Sequence zero and every later
+protocol phase remain unauthorized.
+
+##### 31.37.48.11 Append-only corrections and baseline-header detail supplement
+
+This subsection corrects four descriptions in the preceding append without
+modifying those bytes. It is authoritative wherever the earlier wording
+conflicts with this correction.
+
+First, an already `completed` or otherwise terminal baseline-entry source
+execution is rejected with the structured terminal error without another run,
+close or lifecycle mutation. A foreign-connection presentation is also
+rejected without poisoning an otherwise valid execution. Poisoning applies to
+validation, owner/lineage/ordinal, native execution, result or counter failures
+that occur against an allocated active session. Therefore the sentences in
+31.37.48.3 that grouped terminal, replay and foreign presentation with poison
+must be read as rejection without replay, not forced lifecycle transition.
+
+Second, the baseline-header leaf authenticates and accepts the exact
+baseline-entry receipt as a reusable, non-consuming predecessor. It does not
+consume that receipt. The word `consume` in the opening paragraph of
+31.37.48.10 is replaced semantically by `authenticate without consuming`.
+
+Third, the baseline-header leaf introduces no SELECT. It freshly asserts the
+predecessor graph, including the already committed source SELECT and
+baseline-entry INSERT identities, and locally captures plus freshly hashes only
+its own 488-byte baseline-header INSERT SQL/SHA pair. The phrase `Historical
+SELECT/INSERT SQL commitments` in 31.37.48.10 describes predecessor assertion;
+it does not authorize another read or a header SELECT.
+
+Fourth, the current TypeScript baseline-header oracle contains 20 tests, not
+19. The final Python header acceptance must run the currently collected
+20-case TypeScript oracle and report the executable count rather than rely on
+the older planning estimate.
+
+The baseline-entry receipt weak record also retains the exact
+transaction-generation identity as required for lineage assertion, in
+addition to scalar commitments, exact identity IDs and weak references. This
+does not create a strong connection, projection, retained-entry, snapshot,
+cursor, exception or traceback edge.
+
+The Python baseline-header receipt snapshot is planned as the snake-case
+counterpart of these exact 42 ordered commitments:
+
+1. affected rows;
+2. authority;
+3. baseline-entry publication receipt;
+4. baseline ID;
+5. canonical projection SHA-256;
+6. captured-at milliseconds;
+7. connection;
+8. creation runtime;
+9. creation runtime version;
+10. entry count;
+11. execute count;
+12. final entry hash;
+13. fixed INSERT SQL;
+14. fixed INSERT SQL SHA-256;
+15. first entry hash;
+16. legacy operation count;
+17. mint count;
+18. outer ledger after;
+19. outer ledger before;
+20. outer ledger delta;
+21. parameter SHA-256;
+22. frozen parameter order;
+23. policy BLOB unpadded base64url;
+24. policy BLOB SHA-256;
+25. policy BLOB UTF-8 byte count;
+26. post-DDL catalog fence;
+27. prepare count;
+28. projection identity;
+29. projection reference;
+30. reader lease;
+31. result SHA-256;
+32. source descriptor hash;
+33. source migration-lineage ID;
+34. source migration-lineage SHA-256;
+35. source schema-identity SHA-256;
+36. `total_changes` after;
+37. `total_changes` before;
+38. `total_changes` delta;
+39. transaction epoch after;
+40. transaction epoch before;
+41. transaction generation identity; and
+42. write kind `baseline-header-publication`.
+
+At outer-authority preparation, the Python implementation must capture the
+source migration-lineage ID, source migration-lineage hash and capture time
+from the already authenticated provenance source-summary envelope, alongside
+the existing source descriptor and schema-identity commitments. The later
+header writer reads these private frozen values; it must not re-enter a mutable
+provenance carrier or query the database to reconstruct them.
+
+The header hostile lane must also prove that no new package-root export exists,
+that the writer neither begins nor commits/rolls back the caller transaction,
+and that caller environment/runtime/clock/policy inputs cannot enter the
+frame. Final acceptance expands beyond the focused and adjacent tests to the
+frozen SQLite cursor-publication conformance validator, B3 hostile registry and
+ledger gates, migration source/mirror gates, package-content checks and packed-
+install smoke wherever those repository gates are applicable. Their exact
+commands and executable counts must be recorded; no planning estimate may be
+reported as a passed gate.
+
+##### 31.37.48.12 Final full-suite closure and scoped commit authorization (append-only closure, 2026-08-01)
+
+The complete Python regression finished on the same frozen production and
+hostile-test bytes with exit code zero: **3,641 passed in 2,387.80 seconds
+(39 minutes 47 seconds)**, with zero failures and zero skips. No production or
+test file changed between the focused 64/64 run, serial integrated 312/312 run,
+two implementation audits, append-documentation re-audit and this complete
+regression.
+
+Immediately before this closure was appended, the plan contained 17,164 lines
+and its SHA-256 was
+`1108bc09a3d84a4a4ce122a331802dc68e0b57c333e697f848a37d0b6ab2b6d7`.
+The original first 16,768 lines still hash to
+`a9a267c1ecb9e9617c48b02735bb5d912ed31efdb0d7214cb986ca3c67b2460c`,
+and the first acceptance append through line 17,063 still hashes to
+`960aeaf7604567389a8ff7b8d6489e50cb8d0dd95472d9fd29ae138af7c0378f`.
+No earlier plan byte was changed.
+
+Together with the focused hostile suite, nine-file serial integration,
+TypeScript 20/20 behavioral oracle, Ruff, format, mypy, `py_compile`, whitespace
+gate, two independent zero-severity implementation audits and final zero-
+severity append/log review, this full-suite result authorizes one scoped commit
+and push for the Python baseline-entry permanent publication receipt.
+
+Authorization remains bounded. The next leaf may authenticate, without
+consuming, this exact receipt to implement baseline-header publication under
+sections 31.37.48.10 and 31.37.48.11. Sequence zero, four-receipt consumption,
+atomic adoption, publication-session authority, cursor rebind, TEMP retirement,
+caller transaction commit, manifest activation, release claims and external
+adoption/star outcomes remain unauthorized and unclaimed.
