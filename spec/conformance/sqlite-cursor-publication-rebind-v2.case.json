@@ -714,11 +714,13 @@
       "moduleMinted": true,
       "singleUse": true,
       "cloneRejected": true,
+      "crossRunRejected": true,
+      "substitutionRejected": true,
       "mintedAfterPostDdlCatalogFence": true,
       "derivedFromOuterPublicationAuthority": true,
       "requiredCommitments": [
         "receipt-object-identity",
-        "projection-object-identity",
+        "projection-reference-object-identity",
         "stage-object-identity",
         "connection-object-identity",
         "transaction-generation",
@@ -733,14 +735,307 @@
         "provider-clock-capability-object-identity",
         "pre-rebind-clock-evidence-receipt-object-identity",
         "pre-rebind-provider-now-ms",
-        "post-0002-catalog-fence",
-        "stage-adoption-receipt",
+        "post-0002-catalog-fence-object-identity",
+        "stage-adoption-receipt-object-identity",
         "source-descriptor-hash",
         "source-schema-identity",
         "target-descriptor-hash",
         "target-schema-identity"
       ],
-      "consumesPreRebindClockEvidenceReceiptExactlyOnce": true
+      "consumesPreRebindClockEvidenceReceiptExactlyOnce": true,
+      "secondClockEvidenceContract": {
+        "boundary": "before-cursor-rebind",
+        "consumer": "cursor-publication-session",
+        "predecessor": "outer-clock-evidence-receipt-object-identity",
+        "capability": "provider-clock-capability-object-identity",
+        "distinctFromOuterEvidence": true,
+        "unconsumedAtValidation": true
+      },
+      "mintLifecycle": {
+        "presentationExtractionClosedBoundedAndValidationFirst": true,
+        "requiresExactActiveOuterPublicationAuthority": true,
+        "requiresExactActiveStageAdoptionReceipt": true,
+        "preparedContinuationOrder": [
+          "baseline-temp-stage-continuation",
+          "stage-ownership-transfer-continuation",
+          "outer-publication-authority-continuation"
+        ],
+        "orchestrationOrder": [
+          "validate-and-prepare-exact-adopted-graph",
+          "observe-before-cursor-rebind-provider-clock-boundary",
+          "validate-pre-rebind-clock-evidence-against-prepared-graph",
+          "observe-before-cursor-session-cancellation-once",
+          "allocate-and-register-pending-session-and-immutable-state",
+          "enter-non-interruptible-atomic-publish-tail",
+          "return-active-opaque-publication-session"
+        ],
+        "allContinuationsPreparedBeforeEvidenceConsumption": true,
+        "healthyPresentationFailureBeforeConsumptionMayRetrySameExactPreparedGraph": true
+      },
+      "cancellationContract": {
+        "label": "before-cursor-session",
+        "observationCount": 1,
+        "observationPoint": "after-preparation-and-evidence-validation-before-pending-registration-or-evidence-consumption",
+        "malformedPresentationRejectedWithoutHealthyGraphMutation": true,
+        "cancellationConsumesEvidence": false,
+        "cancellationPublishesSession": false,
+        "retryUsesSameExactPreparedGraph": true,
+        "retryUsesSameExactObservedUnconsumedEvidence": true,
+        "cancellationReadForbiddenAfterAtomicTailBegins": true,
+        "representedAsNewHostileRegistryRecord": false
+      },
+      "pendingRegistrationContract": {
+        "sessionAndImmutableStateRegisteredPendingBeforeEvidenceTransitionVisible": true,
+        "pendingSessionReadable": false,
+        "allocationOrRegistrationFailureBeforeTailConsumesEvidence": false,
+        "allocationOrRegistrationFailureBeforeTailPublishesAnyLayer": false,
+        "failureBeforeTailLeavesReadablePendingSession": false,
+        "failureBeforeTailMayRetrySameExactPreparedGraphAndEvidence": false,
+        "allocationOrRegistrationFailureBurnsAllPreparedContinuations": true,
+        "allocationOrRegistrationFailurePoisonsAllThreeOwners": true,
+        "allocationOrRegistrationFailureRequiresFreshAuthorityGraph": true,
+        "allocationOrRegistrationFailureRetainsPrimaryFailure": true
+      },
+      "atomicTailContract": {
+        "nonInterruptible": true,
+        "orderedSteps": [
+          "burn-outer-publication-authority-continuation",
+          "burn-stage-ownership-transfer-continuation",
+          "burn-baseline-temp-stage-continuation",
+          "consume-exact-pre-rebind-clock-evidence-once",
+          "retain-exact-pre-rebind-clock-consumed-tombstone",
+          "publish-lower-stage-and-stage-ownership-session-identities",
+          "publish-outer-publication-session-identity",
+          "activate-publication-session"
+        ],
+        "forbiddenWithinAtomicTail": [
+          "cancellation-read",
+          "fault-injection-hook",
+          "sql",
+          "provider-clock-callback",
+          "caller-dispatch",
+          "module-import",
+          "transaction-control",
+          "cursor-rebind",
+          "commit"
+        ],
+        "unexpectedFailureAfterEvidenceConsumptionPoisonsAllThreeOwners": true,
+        "unexpectedFailureAfterEvidenceConsumptionLeavesReadablePendingSession": false,
+        "unexpectedFailureAfterEvidenceConsumptionRetryable": false
+      },
+      "threeLayerPublicationContract": {
+        "layers": [
+          "outer-publication-authority",
+          "stage-ownership-transfer",
+          "baseline-temp-stage"
+        ],
+        "successfulState": "publication-active",
+        "allLayersTransitionTogether": true,
+        "outerOnlyTransitionForbidden": true,
+        "retainsExactIdentityEdges": [
+          "outer-publication-authority-object-identity",
+          "stage-ownership-transfer-object-identity",
+          "baseline-temp-stage-object-identity",
+          "baseline-projection-identity-object-identity"
+        ],
+        "availableToExactlyOneFutureRebindOwner": true,
+        "assertionRepeatableAndReadOnlyBeforeFutureConsume": true,
+        "secondMintOrPublishRejected": true,
+        "futureSecondConsumeRejected": true
+      },
+      "orchestrationApiContract": {
+        "exactCallShape": [
+          "prepare-exact-outer-authority-and-stage-adoption-receipt",
+          "observe-before-cursor-rebind-only-through-prepared-owner",
+          "publish-atomic-tail-with-evidence-and-cancellation"
+        ],
+        "preparedOwnerBindsExactOuterAuthorityAndStageAdoptionReceipt": true,
+        "secondBoundaryOwner": "prepared-publication-session-owner",
+        "arbitraryBundleInternalClockObservationForbidden": true,
+        "publicationInputs": [
+          "prepared-publication-session-owner",
+          "exact-pre-rebind-clock-evidence",
+          "before-cursor-session-cancellation-observation"
+        ]
+      },
+      "leafLocalEvidenceContract": {
+        "successCounterProfile": "pre-rebind-clock-consumed",
+        "success": {
+          "caseId": "publication-session-success-control",
+          "outcome": "success",
+          "failureBoundary": null,
+          "state": "publication-active",
+          "poisoned": false,
+          "providerClockReadCount": 2,
+          "clockEvidenceConsumeCount": 2,
+          "outerAuthorityMintCount": 1,
+          "perWritePrepareCounts": [20, 1, 1, 1],
+          "perWriteExecuteCounts": [1, 12, 1, 1],
+          "perWriteAffectedRowCounts": [2, 12, 1, 1],
+          "perWriteTotalChangesDeltas": [2, 12, 1, 1],
+          "outerLedgerLogicalWriteSequence": 4,
+          "outerLedgerFixedStatementCount": 34,
+          "outerLedgerAffectedRowsWatermark": 16,
+          "postDdlCatalogFenceMintCount": 1,
+          "readerLeaseMintCount": 1,
+          "readerLeaseCloseCount": 1,
+          "initialWriteReceiptMintCount": 4,
+          "initialWriteReceiptConsumeCount": 4,
+          "initialWriteReceiptTombstoneCount": 4,
+          "stageAdoptionReceiptMintCount": 1,
+          "bundleRetryable": false,
+          "sameTransactionLineage": true,
+          "catalogFenceMatches": true,
+          "cursorRebindPrepareCount": 0,
+          "cursorRebindExecuteCount": 0,
+          "commitCount": 0
+        },
+        "preTailCancellation": {
+          "caseId": "publication-session-cancelled-before-tail",
+          "outcome": "cancelled",
+          "state": "pre-rebind-complete",
+          "poisoned": false,
+          "providerClockReadCount": 2,
+          "clockEvidenceConsumeCount": 1,
+          "sessionRetryable": true,
+          "cursorRebindPrepareCount": 0,
+          "cursorRebindExecuteCount": 0,
+          "commitCount": 0
+        }
+      },
+      "postTailAssertionContract": {
+        "requiresPublicationActive": true,
+        "repeatableAndReadOnlyBeforeFutureConsume": true,
+        "requiredRevalidations": [
+          "exact-session-identity",
+          "live-migration-lock",
+          "unchanged-transaction-generation-and-exclusive-lineage",
+          "post-ddl-catalog-fence",
+          "stage-adoption-receipt-and-four-tombstone-graph",
+          "outer-write-ledger-and-total-changes",
+          "exact-pre-rebind-clock-consumed-tombstone",
+          "exact-outer-authority-stage-ownership-transfer-baseline-temp-stage-and-baseline-projection-identities"
+        ],
+        "revalidationFailurePoisonsAllThreeOwnersAndRequiresFreshGraph": true,
+        "allowedModuleOwnedReadOnlyProofSql": [
+          "module-owned-live-migration-lock-reread-select",
+          "module-owned-post-ddl-catalog-proof-select"
+        ],
+        "allOtherSqlForbidden": true,
+        "forbiddenOperations": [
+          "permanent-or-write-sql",
+          "cursor-rebind-sql",
+          "transaction-control",
+          "provider-clock-third-observation",
+          "rule-11",
+          "rule-12",
+          "commit"
+        ],
+        "consumesEvidenceOrPublicationSession": false
+      },
+      "failureAndRetryContract": {
+        "preparationPrecedence": [
+          "outer-authority-session-mint-carrier-and-adoption-receipt-presentation",
+          "known-private-identity",
+          "active-outer-authority-and-phase",
+          "exact-b2-receipt-projection-reference-stage-transfer-connection-graph",
+          "exact-adoption-tombstones",
+          "live-transaction-lineage",
+          "post-ddl-catalog",
+          "outer-write-ledger",
+          "lower-ownership"
+        ],
+        "publicationPrecedence": [
+          "exact-prepared-tail",
+          "exact-unconsumed-pre-rebind-evidence-capability-boundary-consumer-predecessor",
+          "fresh-migration-lock-tuple-and-capability",
+          "unchanged-transaction-generation-and-exclusive-lineage",
+          "post-ddl-catalog-fence",
+          "cancellation",
+          "non-interruptible-atomic-tail"
+        ],
+        "provenanceBoundary": {
+          "exactOuterAuthoritySelectionSeparatesPresentationFromAuthenticatedInvariant": true,
+          "healthyBeforeExactOuterAuthoritySelection": [
+            "malformed-closed-carrier",
+            "unknown-private-graph-presentation"
+          ],
+          "authoritativeAfterExactOuterAuthoritySelection": "outer-authority-bound-stage-adoption-receipt",
+          "stageAdoptionReceiptOrdinals": [100, 101, 102],
+          "postSelectionCloneCrossRunOrSubstitutionIsAuthenticatedInvariantFailure": true,
+          "postSelectionFailurePoisonsAllThreeOwnersAndRequiresRollback": true
+        },
+        "healthyPresentationRejectionClasses": [
+          "pre-authority-lookup-malformed-closed-carrier",
+          "pre-authority-lookup-unknown-private-graph"
+        ],
+        "terminalAuthenticatedDriftClasses": [
+          "authority-bound-stage-adoption-receipt-ordinals-100-102",
+          "lineage",
+          "lock",
+          "catalog",
+          "ledger",
+          "phase",
+          "evidence"
+        ],
+        "exactPreparedSecondBoundaryFailureClasses": [
+          "provider-clock-observation",
+          "live-migration-lock-reread",
+          "post-ddl-catalog-proof-reread"
+        ],
+        "exactPreparedSecondBoundaryFailurePoisonsAllThreeOwnersAndRequiresFreshGraph": true,
+        "healthyPresentationFailureConsumesEvidence": false,
+        "healthyPresentationFailureMutatesGraph": false,
+        "authenticatedDriftPoisonsAllThreeOwnersAndRequiresRollback": true,
+        "consumedEvidenceReplayTerminal": true,
+        "exactSessionReplayTerminal": true,
+        "cleanupMayReplacePrimaryFailure": false
+      },
+      "sideEffectContract": {
+        "unchangedMeasurements": [
+          "transaction-epoch",
+          "total-changes",
+          "physical-catalog",
+          "outer-write-ledger",
+          "initial-receipt-and-adoption-counters"
+        ],
+        "allowedReadOnlySqlBeforeAtomicTail": [
+          "module-owned-live-migration-lock-reread-select",
+          "module-owned-post-ddl-catalog-proof-select"
+        ],
+        "allowedReadOnlySqlForPostTailAssertion": [
+          "module-owned-live-migration-lock-reread-select",
+          "module-owned-post-ddl-catalog-proof-select"
+        ],
+        "forbiddenOperations": [
+          "permanent-or-write-sql",
+          "cursor-rebind-sql",
+          "provider-clock-third-observation",
+          "transaction-control",
+          "cursor-rebind-prepare",
+          "cursor-rebind-execute",
+          "rule-11",
+          "rule-12",
+          "commit"
+        ],
+        "allSqlForbiddenWithinAtomicTail": true,
+        "postTailAssertionForbiddenOperations": [
+          "permanent-or-write-sql",
+          "cursor-rebind-sql",
+          "transaction-control",
+          "provider-clock-third-observation",
+          "rule-11",
+          "rule-12",
+          "commit"
+        ],
+        "normalizedFieldCount": 28,
+        "sessionMintCounterAdded": false,
+        "successEvidence": [
+          "pre-rebind-complete-to-publication-active-state-transition",
+          "private-session-identity-graph",
+          "leaf-local-focused-evidence"
+        ]
+      }
     },
     "cursorClock": {
       "opaque": true,
@@ -1937,6 +2232,6 @@
       "selfFieldReplacement": "0000000000000000000000000000000000000000000000000000000000000000",
       "digestHexEncoding": "lowercase-hex"
     },
-    "fixtureCanonicalSha256": "32ebd363838ac9aa5c0d3573aa31b1f45244ca469ec248f7c906ff08d3c08993"
+    "fixtureCanonicalSha256": "7f890fe0512e1b3c7b500dd9c8f20a82fc41a99296d1b3538b379c46a8c317dc"
   }
 }

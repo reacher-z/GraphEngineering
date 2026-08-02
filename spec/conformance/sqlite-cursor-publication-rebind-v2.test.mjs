@@ -101,7 +101,7 @@ test("B3 freezes an unimplemented cursor subprotocol inside one atomic v1-to-v2 
     faultBoundaryCount: 20,
     targetDescriptorHash: "f632104c823e7559dbbb889b08ac3adb0cf0b6dc528cdb9179c9521ce72cff92",
     targetSchemaIdentitySha256: "9fcd96c331999ffb0aca0d9d63ad2b9af073db80012471108c5437a77116f634",
-    fixtureCanonicalSha256: "32ebd363838ac9aa5c0d3573aa31b1f45244ca469ec248f7c906ff08d3c08993",
+    fixtureCanonicalSha256: "7f890fe0512e1b3c7b500dd9c8f20a82fc41a99296d1b3538b379c46a8c317dc",
     implementationClaim: false,
     activeManifestClaim: false,
   });
@@ -235,6 +235,120 @@ test("B3 rejects re-signed weakening of the transitive authority chain", () => {
         && error.code === "GE_CURSOR_B3_SCHEMA",
     );
   }
+});
+
+test("B3 rejects every re-signed publication-session field and ordering mutation", () => {
+  const contractRoots = [
+    "crossRunRejected", "substitutionRejected",
+    "secondClockEvidenceContract", "mintLifecycle", "cancellationContract",
+    "pendingRegistrationContract",
+    "atomicTailContract", "threeLayerPublicationContract", "orchestrationApiContract",
+    "leafLocalEvidenceContract", "postTailAssertionContract", "failureAndRetryContract",
+    "sideEffectContract",
+  ];
+  const objectMemberPaths = [];
+  const scalarPaths = [];
+  const orderedArrayPaths = [];
+  const visit = (value, path) => {
+    if (Array.isArray(value)) {
+      if (value.length > 1) orderedArrayPaths.push(path);
+      value.forEach((entry, index) => visit(entry, [...path, index]));
+      return;
+    }
+    if (value !== null && typeof value === "object") {
+      for (const [key, entry] of Object.entries(value)) {
+        objectMemberPaths.push([...path, key]);
+        visit(entry, [...path, key]);
+      }
+      return;
+    }
+    scalarPaths.push(path);
+  };
+  const publicationSession = cloneFixture().authority.publicationSession;
+  for (const root of contractRoots) {
+    visit(publicationSession[root], ["authority", "publicationSession", root]);
+  }
+
+  for (const path of objectMemberPaths) {
+    expectResignedFailure((fixture) => {
+      const parent = path.slice(0, -1).reduce((current, key) => current[key], fixture);
+      delete parent[path.at(-1)];
+    });
+  }
+  for (const path of scalarPaths) {
+    expectResignedFailure((fixture) => {
+      mutatePath(fixture, path, (value) => {
+        if (typeof value === "boolean") return !value;
+        if (typeof value === "number") return value + 1;
+        return `${value}-attacker`;
+      });
+    });
+  }
+  for (const path of orderedArrayPaths) {
+    expectResignedFailure((fixture) => {
+      mutatePath(fixture, path, (value) => [...value].reverse());
+    });
+  }
+
+  assert.deepEqual(publicationSession.mintLifecycle.preparedContinuationOrder, [
+    "baseline-temp-stage-continuation",
+    "stage-ownership-transfer-continuation",
+    "outer-publication-authority-continuation",
+  ]);
+  assert.deepEqual(publicationSession.atomicTailContract.orderedSteps.slice(0, 3), [
+    "burn-outer-publication-authority-continuation",
+    "burn-stage-ownership-transfer-continuation",
+    "burn-baseline-temp-stage-continuation",
+  ]);
+  assert.equal(publicationSession.pendingRegistrationContract
+    .allocationOrRegistrationFailureBurnsAllPreparedContinuations, true);
+  assert.ok(publicationSession.requiredCommitments
+    .includes("projection-reference-object-identity"));
+  assert.ok(publicationSession.threeLayerPublicationContract.retainsExactIdentityEdges
+    .includes("baseline-projection-identity-object-identity"));
+  assert.deepEqual(publicationSession.secondClockEvidenceContract, {
+    boundary: "before-cursor-rebind",
+    consumer: "cursor-publication-session",
+    predecessor: "outer-clock-evidence-receipt-object-identity",
+    capability: "provider-clock-capability-object-identity",
+    distinctFromOuterEvidence: true,
+    unconsumedAtValidation: true,
+  });
+  assert.ok(publicationSession.requiredCommitments
+    .includes("post-0002-catalog-fence-object-identity"));
+  assert.ok(publicationSession.requiredCommitments
+    .includes("stage-adoption-receipt-object-identity"));
+  assert.equal(publicationSession.leafLocalEvidenceContract.successCounterProfile,
+    "pre-rebind-clock-consumed");
+  assert.deepEqual(Object.keys(publicationSession.leafLocalEvidenceContract.success),
+    cloneFixture().parityGates.initialPublicationNormalizedOutput.orderedFields);
+  assert.deepEqual(
+    publicationSession.postTailAssertionContract.allowedModuleOwnedReadOnlyProofSql,
+    publicationSession.sideEffectContract.allowedReadOnlySqlForPostTailAssertion,
+  );
+  assert.deepEqual(
+    publicationSession.postTailAssertionContract.forbiddenOperations,
+    publicationSession.sideEffectContract.postTailAssertionForbiddenOperations,
+  );
+  assert.deepEqual(publicationSession.postTailAssertionContract.requiredRevalidations, [
+    "exact-session-identity",
+    "live-migration-lock",
+    "unchanged-transaction-generation-and-exclusive-lineage",
+    "post-ddl-catalog-fence",
+    "stage-adoption-receipt-and-four-tombstone-graph",
+    "outer-write-ledger-and-total-changes",
+    "exact-pre-rebind-clock-consumed-tombstone",
+    "exact-outer-authority-stage-ownership-transfer-baseline-temp-stage-and-baseline-projection-identities",
+  ]);
+  assert.equal(publicationSession.postTailAssertionContract
+    .revalidationFailurePoisonsAllThreeOwnersAndRequiresFreshGraph, true);
+  assert.deepEqual(
+    publicationSession.failureAndRetryContract.provenanceBoundary.stageAdoptionReceiptOrdinals,
+    [100, 101, 102],
+  );
+  assert.equal(cloneFixture().hostileObligations.length, 145);
+  assert.equal(cloneFixture().hostileExecutionContract.records.length, 145);
+  assert.equal(Object.keys(cloneFixture().hostileExecutionContract.counterProfiles).length, 25);
 });
 
 test("B3 rejects re-signed weakening of every initial-publication lifecycle Boolean", () => {
@@ -654,7 +768,7 @@ test("B3 domain-separated fixture root and case-insensitive catalog probe are ex
   const zeroed = structuredClone(fixture);
   zeroed.parityGates.fixtureCanonicalSha256 = "0".repeat(64);
   assert.equal(domainSeparatedCanonicalDigest(FIXTURE_DIGEST_DOMAIN, zeroed),
-    "32ebd363838ac9aa5c0d3573aa31b1f45244ca469ec248f7c906ff08d3c08993");
+    "7f890fe0512e1b3c7b500dd9c8f20a82fc41a99296d1b3538b379c46a8c317dc");
   const catalog = fixture.authority.postDdlCatalogFence.catalogReadContract;
   assert.match(catalog.sql, /WHERE lower\(name\) GLOB 'ge_cycle_\*'/u);
   assert.equal(catalog.querySha256,

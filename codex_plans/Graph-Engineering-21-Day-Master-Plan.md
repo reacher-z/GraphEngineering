@@ -18280,3 +18280,447 @@ This checkpoint does not activate a publication session, cursor rebind, rules
 campaign, a v2 manifest or release authorization. The next isolated leaf is
 section 31.37.53.7 item 1: publication-session plus the second provider-clock
 boundary.
+
+#### 31.37.54 Publication-session contract hardening and maximum-parallel runtime runway
+
+This section is appended after the accepted three-control parity checkpoint.
+It does not modify or weaken any earlier byte. It refines section 31.37.53.7
+item 1 after three independent read-only audits found one blocking ambiguity:
+the B3 fixture freezes the publication session's opacity, single-use status,
+22 commitments and clock-receipt consumer, but does not freeze how validation,
+cancellation, preparation, evidence consumption and three-layer publication
+interact. TypeScript and Python must not infer different atomicity rules from
+that omission.
+
+The current contract anchors before this correction are:
+
+- case SHA-256
+  `dd83773da64cee7e5abc767df16946a12a87371106dd5b3787556583662fea19`;
+- schema SHA-256
+  `6ee28db4ec5a72c2617983cf0edf7718bddb6f2a8fce1cc9b65f229bdd07d15b`;
+- validator SHA-256
+  `05b666abde2d26e8a9af6a6219780a327dc127ebd47e7bc822d7558ad2b43455`;
+- fixture canonical SHA-256
+  `32ebd363838ac9aa5c0d3573aa31b1f45244ca469ec248f7c906ff08d3c08993`;
+- hostile registry SHA-256
+  `4e08dbd783213483692c0a2c36d4b8a3732f9b6b3e1a3f0e8bda24861b816e58`;
+  and
+- expanded 145-by-28 SHA-256
+  `6bd821819215291851f2342b41beb565288e7c095de07fc066f47511cc232f95`.
+
+All implementation, protocol, runtime-execution, active-manifest, release and
+production claims remain false. The accepted three-control parity report is
+not a 145-record runner and must never be counted as one.
+
+##### 31.37.54.1 Exact bounded objective
+
+The bounded runtime transition is stage 9 to stage 10 only:
+
+`post-ddl-stage-authority-adopted -> cursor-publication-session-minted`
+
+The corresponding public-normalized state transition is:
+
+`pre-rebind-complete -> publication-active`
+
+The second provider-clock observation uses boundary
+`before-cursor-rebind`, consumer `cursor-publication-session`, and an evidence
+receipt whose predecessor is the exact first-boundary outer-clock receipt.
+Success advances provider-clock read/consume counts from `1/1` to `2/2`.
+Every initial-publication counter, the four write arrays and the outer ledger
+remain unchanged at:
+
+- prepare `[20,1,1,1]`;
+- execute `[1,12,1,1]`;
+- affected rows `[2,12,1,1]`;
+- native changes `[2,12,1,1]`;
+- outer ledger `4/34/16`;
+- post-DDL fence `1`;
+- reader mint/close `1/1`;
+- initial receipt mint/consume/tombstone `4/4/4`; and
+- adoption receipt mint `1`.
+
+Cursor-rebind prepare, cursor-rebind execute, subject rollback and commit remain
+zero. This session leaf neither owns nor executes transaction rollback. A test
+harness may roll back while cleaning up a cancelled or poisoned graph, but that
+cleanup is outside the subject counter and does not add a normalized field. No
+fixed cursor UPDATE may be prepared, no `changes()` result may be read, no
+cursor write-ledger statement may be recorded, and neither rule 11 nor rule 12
+may run in this leaf.
+
+##### 31.37.54.2 Mandatory contract correction before runtime edits
+
+Before either runtime changes, the B3 case, schema, validator and malicious
+contract tests must freeze a closed publication-session mint contract with the
+following literal semantics:
+
+1. presentation extraction is closed, bounded and validation-first;
+2. the exact outer authority and exact active adoption receipt are required;
+3. outer, stage-ownership and stage continuations are all prepared before the
+   second clock evidence can be consumed;
+4. one authentic cancellation observation occurs after preparation and before
+   pending session allocation/registration or evidence consumption;
+5. cancellation at that point consumes nothing, publishes nothing and permits
+   retry with the same exact prepared graph and the same exact already-observed
+   unconsumed evidence;
+6. malformed cancellation presentation is rejected without mutating a healthy
+   graph;
+7. the session and its immutable state are registered as pending before the
+   evidence transition can become visible;
+8. the atomic tail burns every continuation, consumes the exact pre-rebind
+   evidence once, retains its exact tombstone, publishes the lower stage and
+   ownership identities, publishes the outer session identity and activates
+   the session;
+9. no cancellation read, injected hook, SQL, provider callback, caller
+   dispatch, import, transaction operation, rebind or commit exists within the
+   bounded atomic-tail body; after that tail returns, repeatable assertion may
+   execute only the separately allowed module-owned read-only lock and catalog
+   proof SQL;
+10. a failure before consumption keeps the exact graph retryable when it is a
+    presentation or cancellation failure;
+11. authenticated lineage, lock, catalog, ledger, adoption or state drift is
+    terminal, poisons all three owners and requires rollback;
+12. any unexpected failure after evidence consumption begins is terminal,
+    leaves no readable pending session, poisons all three owners and cannot be
+    converted into a retry;
+13. successful publication changes all three owners together to
+    `publication-active`; an outer-only transition is forbidden;
+14. the session is module-minted, opaque, clone/cross-run/substitution
+    rejected and available to exactly one future rebind owner;
+15. assertion is repeatable and read-only before that future consume, while a
+    second mint/publish and future second consume are rejected; and
+16. session mint changes no transaction epoch, `total_changes`, physical
+    catalog, outer write ledger or initial receipt/adoption counter.
+
+The correction must preserve the existing 28 normalized fields. It must not
+invent a twenty-ninth session-mint counter. Session existence is proved by the
+state transition, private identity graph and leaf-local focused evidence. Any
+new contract property is closed by schema, exercised by the validator and
+directly covered by malicious re-sign tests. Canonical hashes are recomputed
+from bytes; no digest is manually copied without independent recomputation.
+
+The existing 145 hostile records remain ordered and retain their meanings.
+The lifecycle-only `before-cursor-session` cancellation control is tested in a
+dedicated focused contract/runtime vector and is not represented as a newly
+executed 145-record case. If the contract correction changes the 145 registry,
+its count, ordering, obligations, counter profiles and both registry digests
+must all be regenerated together and independently audited; silent count drift
+is forbidden.
+
+##### 31.37.54.3 Exact 22 session commitments
+
+Both runtimes must bind the exact object/value graph already named by the
+fixture, in this order:
+
+1. pre-rebind receipt object identity;
+2. exact projection-reference object identity;
+3. stage object identity;
+4. connection object identity;
+5. transaction generation;
+6. migration lock ID;
+7. migration lock owner ID;
+8. migration lock epoch;
+9. migration lock fencing token;
+10. migration-lock capability object identity;
+11. migration-lock active expiry;
+12. migration source version;
+13. migration target version;
+14. provider-clock capability object identity;
+15. pre-rebind clock-evidence receipt object identity;
+16. pre-rebind provider-now value;
+17. post-0002 catalog fence object identity;
+18. stage-adoption receipt object identity;
+19. source descriptor hash;
+20. source schema identity;
+21. target descriptor hash; and
+22. target schema identity.
+
+The session additionally retains the exact outer-authority,
+stage-ownership-transfer, TEMP-stage and baseline-projection-identity objects
+needed to prove that those 22 commitments belong to one graph. The projection
+identity does not replace commitment 2's exact projection-reference object.
+These are identity edges, not additional cross-runtime scalar fields.
+
+##### 31.37.54.4 Three-layer implementation topology
+
+After the corrected contract is frozen and independently accepted, each
+runtime normally changes the following three existing production layers plus
+dedicated tests.
+
+TypeScript owns:
+
+- `packages/sqlite/src/cursor-publication-outer-authority.ts`;
+- `packages/sqlite/src/operation-baseline-cursor-stage-ownership.ts`;
+- `packages/sqlite/src/operation-baseline-stage.ts`; and
+- `packages/sqlite/test/cursor-publication-session.test.ts`.
+
+Python owns:
+
+- `python/src/graph_engineering/sqlite_cursor_publication_outer_authority.py`;
+- `python/src/graph_engineering/sqlite_operation_baseline_cursor_stage_ownership.py`;
+- `python/src/graph_engineering/sqlite_operation_baseline_stage.py`; and
+- `python/tests/test_sqlite_cursor_publication_session.py`.
+
+The existing clock-authority modules already implement the second observation,
+live-lock reread, predecessor identity, monotonic clock, strict expiry and
+single-use consume/tombstone semantics. They are read-only inputs unless a
+review proves that a narrow package-private validation or preparation helper is
+unavoidable. If that exception is triggered, the owning clock file becomes an
+explicit fourth production file, receives its own focused regression and is
+recorded in the later acceptance log. No public export may be added.
+
+Both implementations use the same orchestration shape:
+
+1. validate and prepare the exact adopted graph;
+2. observe the exact second provider-clock boundary;
+3. validate that evidence against the prepared graph;
+4. observe cancellation once;
+5. preconstruct and privately register every pending object;
+6. enter one non-interruptible publish tail; and
+7. return the active opaque session.
+
+Prepared state is private and must not appear as a new normalized state.
+Success leaves outer lifecycle active while changing outer write phase,
+ownership lifecycle and stage lifecycle to `publication-active`. A session
+assertion revalidates the live lock, transaction lineage, post-DDL catalog
+fence, adoption graph, ledger, exact tombstone and all three layer identities
+using only module-owned read-only lock and catalog proof SQL. It executes no
+permanent or write SQL, transaction control or cursor-rebind SQL and observes
+no third provider-clock boundary.
+
+The closed orchestration surface is conceptually the same in both runtimes:
+prepare accepts only the exact outer authority and exact adoption receipt;
+observe advances the second boundary only through that exact prepared owner;
+publish accepts the exact prepared tail, its exact second evidence and an
+optional authentic cancellation signal. Redundant caller-supplied copies of
+the receipt, projection, stage, connection, lock tuple, fence or target
+identities are forbidden; those commitments are re-derived from private
+registries. Direct package-internal clock observation that is not registered by
+the prepared session owner cannot later mint a session.
+
+##### 31.37.54.5 Failure precedence and retry classes
+
+Preparation precedence is exact outer-authority/session-mint carrier and
+adoption-receipt presentation, known private identity, active outer authority
+and phase, exact B2 receipt/projection-reference/stage/transfer/connection
+graph, exact adoption tombstones, live transaction lineage, post-DDL catalog,
+ledger and lower ownership. No publication session exists as an input to its
+own mint operation.
+
+The second clock primitive retains its existing precedence: boundary order and
+predecessor, live exclusive lineage, live lock before provider callback,
+provider callback, owner/epoch/changes after callback, live lock after callback,
+safe integer, monotonic nondecrease and strict `providerNow < expiry`.
+
+Publication precedence is exact prepared session owner/tail, exact unconsumed
+second evidence for the same capability/boundary/consumer/predecessor, fresh
+migration-lock tuple and capability, unchanged transaction generation and
+exclusive lineage, post-DDL catalog fence, cancellation, then the
+non-interruptible tail. This preserves the frozen before-cursor-rebind order:
+session, migration-lock freshness, transaction generation, catalog fence and
+cancellation.
+
+Malformed, cloned, foreign, cross-run or structurally reconstructed input is a
+healthy presentation rejection only before an exact outer authority is
+selected. The adoption receipt is a deliberate exception: after exact outer
+authority selection, that authority's privately retained adoption receipt is
+the provenance anchor, so a supplied clone, cross-run receipt or substitution
+is authenticated graph corruption. Frozen ordinals 100-102 therefore remain
+`GE_CURSOR_B3_INVARIANT`, poisoned, with fresh-graph retry evidence; they may
+not be reclassified as healthy caller rejection. Once the exact private graph
+is selected, adoption, lineage, lock, catalog, ledger, phase or evidence drift
+is terminal poison. A consumed exact evidence replay or exact session replay
+is terminal. Cleanup may never replace the primary failure.
+
+Provider callback, live-lock or second-observation failure after an exact
+prepared graph begins its observation is terminal and poisons all three
+owners, even if the lower clock primitive preserves a structured stale-fence
+or unavailable primary error. Pending session allocation, immutable-state
+construction or registry failure before evidence consumption is also terminal
+infrastructure failure: it burns the prepared continuations, poisons all three
+owners, retains the primary error and leaves no readable pending object. Only
+closed presentation failure and the one authentic pre-tail cancellation are
+same-graph retryable.
+
+##### 31.37.54.6 Hostile execution slice and honest accounting
+
+The fixture phases identify 25 candidate records for this boundary:
+
+`2-18, 20, 26, 46-48, 100-102`.
+
+They divide into 23 `publication-session` and two `pre-rebind-clock` records.
+Their counter profiles are `initial-adoption-complete` (`1/1` clock),
+`pre-rebind-clock-read-rejected` (`2/1`) and
+`pre-rebind-clock-consumed` (`2/2`). Everything else remains at the frozen
+initial-adoption values and rebind/commit remain zero.
+
+These are candidates, not current passes. Every record counted as activated
+must use its real hook, exact expected counter profile, exact normalized
+failure boundary and exact retry-evidence mode. Unavailable is neither pass nor
+skip. Ordinal 48 is named `cursor-clock-capability-clone`; it may be activated
+in this leaf only if the corrected contract exposes a real session validation
+seam that uses no permanent/write or rebind SQL and rejects it before any
+cursor-clock implementation exists.
+Otherwise it remains unavailable for the later cursor-clock leaf. Ordinal 7 is
+handled by the same rule: no synthetic wrong-session object may be reported as
+an executed runtime hook unless a real consumer validates it.
+
+The complete 145-record registry retains
+`runtimeExecutionEvidenceClaim=false` until all records execute in exact order
+in both runtimes. Partial slice progress is reported as `N/145 activated`, not
+as protocol implementation.
+
+##### 31.37.54.7 Focused test matrix
+
+Each runtime must cover:
+
+- one real happy graph with all 22 commitments and three-layer state identity;
+- exact distinct predecessor-linked first and second clock evidence;
+- provider read/consume `2/2`, unchanged permanent-write SQL counters, ledger
+  and catalog identity, and zero rebind/commit;
+- clone, foreign, cross-run and substitution for every opaque edge;
+- wrong receipt, projection, stage, transfer, connection, authority, fence,
+  adoption receipt, capability and clock receipt;
+- wrong boundary, skipped boundary, stale predecessor and preconsumed evidence;
+- provider exception, invalid integer, regression, equality with expiry, past
+  expiry, reentrancy, callback side effect and live-lock drift;
+- rollback/rebegin, transaction-generation drift, catalog drift, ledger drift
+  and lower-owner drift;
+- cancellation immediately before the tail followed by same exact evidence and
+  graph retry;
+- malformed cancellation presentation;
+- pending allocation/registration failures before the tail;
+- lower continuation replay, retirement and poison;
+- second mint/publish, session clone and session assertion after drift;
+- recursive source/bytecode closure proving the tail contains no SQL, provider
+  callback, cancellation, hook, import, transaction control, rebind or caller
+  dispatch;
+- weak-registry cleanup and complete graph garbage collection;
+- package-root runtime/type privacy and packed-artifact privacy; and
+- hostile objects that must not dispatch custom iteration, hashing, equality,
+  descriptors or attribute access during closed presentation extraction.
+
+Wrong-edge tests do not widen the production mint API. They activate the real
+lower-layer consumer that owns the edge, or a closed package-private test fault
+seam that cannot mint, publish, execute SQL or appear in package exports. A
+reporter-manufactured record is never evidence that an opaque-edge hook ran.
+
+Cross-runtime evidence uses the existing 28-field ordering and strict stdout/
+JSON comparator discipline. Leaf-local private measurements must be self-
+probed and excluded from public roots. The reports independently construct
+real SQLite graphs and may not import each other or manufacture fixture
+records.
+
+The contract correction freezes two leaf-local controls without adding a
+hostile-registry record or a twenty-ninth normalized field. The success control
+uses the existing 28-field order with `caseId` exactly
+`publication-session-success-control`, `outcome=success`,
+`failureBoundary=null`, `state=publication-active`, `poisoned=false`,
+`bundleRetryable=false`, `sameTransactionLineage=true` and
+`catalogFenceMatches=true`. Its counters use profile
+`pre-rebind-clock-consumed`, retain the unchanged four write arrays and ledger,
+and keep rebind/commit zero. The cancellation control is a separate closed
+non-registry record with exact fields `caseId`, `outcome`, `state`, `poisoned`,
+`providerClockReadCount`, `clockEvidenceConsumeCount`, `sessionRetryable`,
+`cursorRebindPrepareCount`, `cursorRebindExecuteCount` and `commitCount`; its
+values are respectively `publication-session-cancelled-before-tail`,
+`cancelled`, `pre-rebind-complete`, `false`, `2`, `1`, `true`, `0`, `0`, `0`.
+`sessionRetryable` means the same exact prepared graph and the same exact
+already-observed unconsumed evidence may retry; it does not revive the already
+consumed four-receipt adoption bundle, whose normalized `bundleRetryable`
+remains false.
+
+##### 31.37.54.8 Maximum-safe parallel execution
+
+The contract correction is one serialized integration barrier because the
+case, schema, validator, tests and canonical hashes form one byte-coupled
+artifact. While that lane runs, TypeScript and Python lanes may prepare
+read-only API maps and test matrices but may not edit production against an
+unfrozen contract.
+
+After the contract barrier passes:
+
+1. the TypeScript lane owns only the three TypeScript production modules and
+   its dedicated tests;
+2. the Python lane owns only the three Python production modules and its
+   dedicated tests;
+3. the parity/hostile lane owns reporters, comparator and activated-record
+   accounting; and
+4. main/integration owns the master plan, durable logs, package scripts, shared
+   gates, independent audits, staged scope, commit and push.
+
+No two lanes edit one file. Any discovered shared-runtime requirement is
+returned to integration and explicitly reassigned. Production bytes freeze
+before complete affected regressions begin.
+
+##### 31.37.54.9 Acceptance gates
+
+Contract acceptance requires schema/case/validator consistency, malicious
+re-sign coverage for every new Boolean and order rule, frozen hash
+recomputation, strict JSON rejection, the complete existing B3 contract suite,
+fixture validation, append-only prefix proof and two independent H0/M0/L0
+audits.
+
+Runtime acceptance later requires exact TypeScript/Python behavior, focused
+hostile suites, the honest activated-record slice, cross-runtime canonical
+parity, existing three-control parity, clock parity, all affected adoption and
+clock regressions, SQLite ledger/migration/fixture gates, TypeScript build/
+typecheck/lint, Python Ruff/format/mypy, package-content and packed-install
+smokes, Python wheel/sdist smokes, complete affected/full regressions on frozen
+bytes, public-surface privacy, tail static audits, two independent final
+H0/M0/L0 audits, a durable review log and local/upstream/remote object
+equality.
+
+##### 31.37.54.10 Explicit nonclaims and next boundary
+
+This contract-hardening work and the later session runtime leaf do not
+implement or claim cursor UPDATE, rebind prepare/execute, rebind receipt, rule
+11, rule 12, third clock observation, cursor-clock capability, lineage or
+metadata publication, audit receipts, TEMP retirement, final fence, commit,
+rollback ownership, crash/reopen success, full 145/145 execution, active
+manifest, release readiness, production use, external adoption or any GitHub
+star result.
+
+Only after the publication-session leaf is committed identically locally and
+remotely may the next isolated leaf prepare and execute the fixed cursor rebind
+once together with its inseparable affected-count, `changes()`, total-changes,
+cursor-ledger, rule-11 and rule-12 validation boundaries. A permanent cursor
+UPDATE may not be left as an accepted intermediate state before those two rules
+close the cursor subprotocol. That same leaf must observe the third
+`before-verification` provider-clock boundary, prove its exact predecessor,
+session, lock and transaction lineage, consume the pre-verification evidence
+exactly once after rules 11/12 succeed, retain its tombstone, mint the opaque
+cursor-clock capability and move all three owners from `publication-active` to
+`cursor/clock-complete`. The third clock, cursor-clock mint and state transition
+may not be deferred after an accepted rebind/rule-12 result.
+
+#### 31.37.55 Publication-session contract-hardening acceptance checkpoint
+
+On 2026-08-02 the serialized contract correction in §31.37.54 closed and may
+release the TypeScript and Python runtime lanes. This checkpoint appends only;
+the first 18,282 lines inherited from commit `c5c9269` retain SHA-256
+`5aadaf20550872dfaea2cabbcc81dbc270d9145e060e1dc2d0c7855a85c73747`.
+
+The final frozen case, schema, validator and focused-test SHA-256 values are
+respectively `8d6cc2a6a817cbf70ecb88cf75339d92af5cdf091ed83616682da384320cb971`,
+`f7c96820593092694f835bfe7e122ac5611d8670d6bfc3288ae9aa4a1bce4149`,
+`91bc2429ef7f8075f93b9dee31a6f3a2fd38ad42fa17ec9624bebc12f5591a8c`
+and `8f6e3515b7397ac959956b11004eaaba1256f830a108a5eea3b6f1fbe51dfd0c`.
+The publication-session canonical digest is
+`cbfeca0302748a04e3806f45016af37653660a41ab168952c842da4cf7a4a193`;
+the complete fixture canonical SHA-256 is
+`7f890fe0512e1b3c7b500dd9c8f20a82fc41a99296d1b3538b379c46a8c317dc`.
+
+Acceptance evidence is focused B3 `35/35`, SQLite ledger `62/62`, fixture
+validation `85 JSON / 44 manifests`, direct validator success, unchanged
+`145/145/25/28` registry dimensions, unchanged registry/expanded hashes,
+`git diff --check`, and two independent final audits at H0/M0/L0. The durable
+defect chronology and frozen evidence are recorded in
+`codex_logs/reviews/SQLITE-CURSOR-B3-PUBLICATION-SESSION-CONTRACT-2026-08-02.md`.
+
+This acceptance changes no production runtime and makes no implementation,
+protocol, manifest, release or adoption claim. The immediately released work
+is the exact three-module-per-runtime publication-session implementation and
+its focused tests. Its acceptance remains conditional on real-SQLite behavior,
+cross-runtime canonical parity, honest activated-record accounting, affected
+and artifact regressions, public-surface privacy, final independent audits and
+identical local/upstream/remote commit objects.

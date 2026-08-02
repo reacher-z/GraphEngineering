@@ -13,7 +13,7 @@ const ROOT = dirname(fileURLToPath(import.meta.url));
 const REPOSITORY_ROOT = dirname(dirname(ROOT));
 const FIXTURE_PATH = join(ROOT, "sqlite-cursor-publication-rebind-v2.case.json");
 const SCHEMA_PATH = join(ROOT, "sqlite-cursor-publication-rebind-v2.schema.json");
-const TRUSTED_FIXTURE_SHA256 = "32ebd363838ac9aa5c0d3573aa31b1f45244ca469ec248f7c906ff08d3c08993";
+const TRUSTED_FIXTURE_SHA256 = "7f890fe0512e1b3c7b500dd9c8f20a82fc41a99296d1b3538b379c46a8c317dc";
 const TRUSTED_INITIAL_WRITE_CONTRACT_SHA256 =
   "3bcd8b69ec5ab63b38fa5bcbbd2c13b4c54120f7b7ba46af8649d1187cad2320";
 const TRUSTED_POST_DDL_CATALOG_FENCE_SHA256 =
@@ -24,6 +24,8 @@ const TRUSTED_STAGE_ADOPTION_RECEIPT_SHA256 =
   "7f4da0e4423b4155a9210d6cd5c0a61424448cdfb9e369ef0c94483db5d54fda";
 const TRUSTED_STAGE_ADOPTION_BRIDGE_SHA256 =
   "b979278ad623140947718e8f6b7d01c6668f674fe0e4c15be61392226365de31";
+const TRUSTED_PUBLICATION_SESSION_SHA256 =
+  "cbfeca0302748a04e3806f45016af37653660a41ab168952c842da4cf7a4a193";
 const TRUSTED_HOSTILE_EXECUTION_CONTRACT_SHA256 =
   "1eab5f82e5d2ccca53196320703a3a67df517a982d9b18d69d1b11e03a3d3b4a";
 const TRUSTED_HOSTILE_REGISTRY_SHA256 =
@@ -497,14 +499,15 @@ const EXACT_INITIAL_STAGE_ADOPTION_SEMANTICS = Object.freeze({
   ]),
 });
 const EXACT_COMMITMENTS = Object.freeze([
-  "receipt-object-identity", "projection-object-identity", "stage-object-identity",
+  "receipt-object-identity", "projection-reference-object-identity", "stage-object-identity",
   "connection-object-identity", "transaction-generation", "migration-lock-id",
   "migration-lock-owner-id", "migration-lock-epoch", "migration-lock-fencing-token",
   "migration-lock-capability-object-identity", "migration-lock-active-expires-at-ms",
   "migration-source-version", "migration-target-version",
   "provider-clock-capability-object-identity",
   "pre-rebind-clock-evidence-receipt-object-identity", "pre-rebind-provider-now-ms",
-  "post-0002-catalog-fence", "stage-adoption-receipt", "source-descriptor-hash",
+  "post-0002-catalog-fence-object-identity", "stage-adoption-receipt-object-identity",
+  "source-descriptor-hash",
   "source-schema-identity", "target-descriptor-hash", "target-schema-identity",
 ]);
 const EXACT_HOSTILE = Object.freeze([
@@ -1174,6 +1177,161 @@ function validateCursorPublicationFixtureSemantics(value, { verifyAssets = false
     "stage adoption receipt order drifted");
   exact(value.authority.publicationSession.requiredCommitments, EXACT_COMMITMENTS,
     "GE_CURSOR_B3_COMMITMENTS", "publication commitments drifted");
+  const publicationSession = value.authority.publicationSession;
+  exactDigest(publicationSession, TRUSTED_PUBLICATION_SESSION_SHA256,
+    "GE_CURSOR_B3_PUBLICATION_SESSION", "publication session mint contract drifted");
+  if (publicationSession.crossRunRejected !== true
+      || publicationSession.substitutionRejected !== true) {
+    fail("GE_CURSOR_B3_PUBLICATION_SESSION",
+      "publication session must reject cross-run and substitution presentation");
+  }
+  if (!publicationSession.requiredCommitments.includes("projection-reference-object-identity")
+      || !publicationSession.threeLayerPublicationContract.retainsExactIdentityEdges
+        .includes("baseline-projection-identity-object-identity")) {
+    fail("GE_CURSOR_B3_PUBLICATION_SESSION",
+      "projection-reference commitment and baseline projection identity edge must remain distinct");
+  }
+  exact(publicationSession.secondClockEvidenceContract, {
+    boundary: "before-cursor-rebind",
+    consumer: "cursor-publication-session",
+    predecessor: "outer-clock-evidence-receipt-object-identity",
+    capability: "provider-clock-capability-object-identity",
+    distinctFromOuterEvidence: true,
+    unconsumedAtValidation: true,
+  }, "GE_CURSOR_B3_PUBLICATION_SESSION",
+  "second clock evidence contract drifted");
+  if (!value.authority.providerClock.receiptLabels
+    .includes("pre-rebind-clock-evidence-receipt")
+      || !publicationSession.requiredCommitments
+        .includes("pre-rebind-clock-evidence-receipt-object-identity")
+      || !publicationSession.requiredCommitments
+        .includes("post-0002-catalog-fence-object-identity")
+      || !publicationSession.requiredCommitments
+        .includes("stage-adoption-receipt-object-identity")) {
+    fail("GE_CURSOR_B3_PUBLICATION_SESSION",
+      "second evidence or authority identity commitments are not closed");
+  }
+  if (!value.lifecycleContract.cancellationLabels
+    .includes(publicationSession.cancellationContract.label)) {
+    fail("GE_CURSOR_B3_PUBLICATION_SESSION",
+      "publication cancellation label is not owned by the lifecycle contract");
+  }
+  if (!value.stateMachine.states
+    .includes(publicationSession.threeLayerPublicationContract.successfulState)) {
+    fail("GE_CURSOR_B3_PUBLICATION_SESSION",
+      "publication-active success state is not owned by the state machine");
+  }
+  const leafEvidence = publicationSession.leafLocalEvidenceContract;
+  const successCounterProfile = value.hostileExecutionContract.counterProfiles[
+    leafEvidence.successCounterProfile
+  ];
+  exact(Object.keys(leafEvidence.success),
+    value.parityGates.initialPublicationNormalizedOutput.orderedFields,
+    "GE_CURSOR_B3_PUBLICATION_SESSION",
+    "publication success evidence must preserve the exact 28-field order");
+  for (const field of Object.keys(successCounterProfile ?? {})) {
+    if (JSON.stringify(leafEvidence.success[field])
+        !== JSON.stringify(successCounterProfile[field])) {
+      fail("GE_CURSOR_B3_PUBLICATION_SESSION",
+        `publication success evidence disagrees with ${leafEvidence.successCounterProfile}.${field}`);
+    }
+  }
+  if (leafEvidence.success.caseId !== "publication-session-success-control"
+      || leafEvidence.success.outcome !== "success"
+      || leafEvidence.success.failureBoundary !== null
+      || leafEvidence.success.state !== "publication-active"
+      || leafEvidence.success.poisoned !== false
+      || leafEvidence.success.bundleRetryable !== false
+      || leafEvidence.success.sameTransactionLineage !== true
+      || leafEvidence.success.catalogFenceMatches !== true) {
+    fail("GE_CURSOR_B3_PUBLICATION_SESSION",
+      "publication success evidence semantic fields drifted");
+  }
+  const cancellation = leafEvidence.preTailCancellation;
+  exact(Object.keys(cancellation), [
+    "caseId", "outcome", "state", "poisoned", "providerClockReadCount",
+    "clockEvidenceConsumeCount", "sessionRetryable", "cursorRebindPrepareCount",
+    "cursorRebindExecuteCount", "commitCount",
+  ], "GE_CURSOR_B3_PUBLICATION_SESSION",
+  "pre-tail cancellation must preserve its exact 10-field order");
+  if (cancellation.providerClockReadCount !== successCounterProfile.providerClockReadCount
+      || cancellation.clockEvidenceConsumeCount !== 1
+      || cancellation.caseId !== "publication-session-cancelled-before-tail"
+      || cancellation.outcome !== "cancelled"
+      || cancellation.state !== value.boundary.requiredPredecessorState
+      || cancellation.poisoned !== false
+      || cancellation.sessionRetryable !== true
+      || cancellation.cursorRebindPrepareCount !== 0
+      || cancellation.cursorRebindExecuteCount !== 0
+      || cancellation.commitCount !== 0) {
+    fail("GE_CURSOR_B3_PUBLICATION_SESSION",
+      "pre-tail cancellation evidence does not preserve the exact prepared graph and evidence");
+  }
+  const adoptionPoisonRecords = value.hostileExecutionContract.records
+    .filter((record) => publicationSession.failureAndRetryContract.provenanceBoundary
+      .stageAdoptionReceiptOrdinals.includes(record.ordinal));
+  if (adoptionPoisonRecords.length !== 3
+      || adoptionPoisonRecords.some((record) => record.expectedCode !== "GE_CURSOR_B3_INVARIANT"
+        || record.expected.outcome !== "poisoned"
+        || record.expected.state !== "poisoned"
+        || record.expected.poisoned !== true)) {
+    fail("GE_CURSOR_B3_PUBLICATION_SESSION",
+      "authority-bound stage adoption receipt drift must poison at ordinals 100-102");
+  }
+  const preparedOrder = publicationSession.mintLifecycle.preparedContinuationOrder;
+  const burnedOwnerOrder = publicationSession.atomicTailContract.orderedSteps.slice(0, 3)
+    .map((step) => step.replace(/^burn-/u, ""));
+  if (JSON.stringify([...preparedOrder].reverse()) !== JSON.stringify(burnedOwnerOrder)) {
+    fail("GE_CURSOR_B3_PUBLICATION_SESSION",
+      "nested prepare must be stage-to-outer and atomic burn must be outer-to-stage");
+  }
+  const pending = publicationSession.pendingRegistrationContract;
+  if (pending.failureBeforeTailMayRetrySameExactPreparedGraphAndEvidence !== false
+      || pending.allocationOrRegistrationFailureBurnsAllPreparedContinuations !== true
+      || pending.allocationOrRegistrationFailurePoisonsAllThreeOwners !== true
+      || pending.allocationOrRegistrationFailureRequiresFreshAuthorityGraph !== true
+      || pending.allocationOrRegistrationFailureRetainsPrimaryFailure !== true) {
+    fail("GE_CURSOR_B3_PUBLICATION_SESSION",
+      "allocation or registration failure must poison three owners and retain its primary failure");
+  }
+  const postTailAssertion = publicationSession.postTailAssertionContract;
+  exact(postTailAssertion.requiredRevalidations, [
+    "exact-session-identity",
+    "live-migration-lock",
+    "unchanged-transaction-generation-and-exclusive-lineage",
+    "post-ddl-catalog-fence",
+    "stage-adoption-receipt-and-four-tombstone-graph",
+    "outer-write-ledger-and-total-changes",
+    "exact-pre-rebind-clock-consumed-tombstone",
+    "exact-outer-authority-stage-ownership-transfer-baseline-temp-stage-and-baseline-projection-identities",
+  ], "GE_CURSOR_B3_PUBLICATION_SESSION",
+  "post-tail assertion revalidation order drifted");
+  if (!publicationSession.atomicTailContract.forbiddenWithinAtomicTail.includes("sql")
+      || publicationSession.sideEffectContract.forbiddenOperations.includes("sql")
+      || publicationSession.sideEffectContract.allSqlForbiddenWithinAtomicTail !== true
+      || publicationSession.sideEffectContract.allowedReadOnlySqlBeforeAtomicTail.length !== 2
+      || JSON.stringify(postTailAssertion.allowedModuleOwnedReadOnlyProofSql)
+        !== JSON.stringify(
+          publicationSession.sideEffectContract.allowedReadOnlySqlForPostTailAssertion)
+      || JSON.stringify(publicationSession.sideEffectContract.allowedReadOnlySqlBeforeAtomicTail)
+        !== JSON.stringify(
+          publicationSession.sideEffectContract.allowedReadOnlySqlForPostTailAssertion)
+      || postTailAssertion.allOtherSqlForbidden !== true
+      || JSON.stringify(postTailAssertion.forbiddenOperations)
+        !== JSON.stringify(
+          publicationSession.sideEffectContract.postTailAssertionForbiddenOperations)
+      || [
+        "permanent-or-write-sql", "cursor-rebind-sql", "transaction-control",
+        "provider-clock-third-observation", "rule-11", "rule-12", "commit",
+      ].some((operation) => !postTailAssertion.forbiddenOperations.includes(operation))
+      || postTailAssertion.consumesEvidenceOrPublicationSession !== false) {
+    fail("GE_CURSOR_B3_PUBLICATION_SESSION",
+      "publication SQL boundary must isolate tail SQL and close post-tail assertion proof reads");
+  }
+  if (postTailAssertion.revalidationFailurePoisonsAllThreeOwnersAndRequiresFreshGraph !== true) {
+    fail("GE_CURSOR_B3_PUBLICATION_SESSION",
+      "post-tail revalidation failure must poison all three owners and require a fresh graph");
+  }
   exact(value.hostileObligations, EXACT_HOSTILE,
     "GE_CURSOR_B3_HOSTILE_MATRIX", "hostile obligations drifted");
   exact(value.parityGates.required, EXACT_PARITY,
