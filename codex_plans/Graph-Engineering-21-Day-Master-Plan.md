@@ -17701,3 +17701,530 @@ Authorization remains bounded to validation-first four-receipt atomic adoption
 under sections 31.37.50.6 through 31.37.50.9. Parity, publication session,
 rebind, rules, retirement, commit, manifest, release, external adoption and star
 claims remain false.
+
+#### 31.37.51 Python B3 validation-first four-receipt atomic-adoption acceptance checkpoint (append-only closure, 2026-08-01)
+
+This section was appended at the true EOF. Immediately before this append the
+plan contained exactly 17,703 lines and had SHA-256
+`d44424f0dd6f09a193c217844f153306fcc1bc500b775decccb1de1a13925049`.
+The first 17,438 lines still hash to
+`fdb0790253fb3bea3f7baae4881360b2690cfcf136670765c294ee6fac0fad23`,
+the first 17,576 lines still hash to
+`33c157d9d37d27ff510b54fc6c49eaecaca836204d7a8d9195a3e64af7d45a96`,
+and the first 17,676 lines still hash to
+`393271c83159473f35c9fc8d91f1edcad2ff2f4738cd33fbd3578b7b6cda1dc5`.
+No earlier plan byte was modified.
+
+This checkpoint accepts the Python implementation authorized by sections
+31.37.36, 31.37.37 and 31.37.50.6 through 31.37.50.10 for one scoped commit.
+It closes only initial-stage adoption. It does not close the complete B3
+protocol or the master plan.
+
+##### 31.37.51.1 Exact delivered operation
+
+The package-private Python coordinator accepts one exact built-in four-element
+tuple in this order:
+
+1. migration-0002 catalog-rebuild receipt;
+2. baseline-entry publication receipt;
+3. baseline-header publication receipt; and
+4. operation-sequence-zero publication receipt.
+
+The other exact graph inputs are the active outer publication authority, the
+post-DDL physical-catalog fence and the retired post-DDL reader lease. The
+coordinator performs no new permanent SQL. Success consumes all four exact
+receipts, mints four distinct typed consumed-receipt tombstones, mints one
+opaque adoption receipt, retires the obsolete B2 catalog/change capture and
+transfers the existing TEMP stage into the adopted lifecycle.
+
+The only observable success is complete `4/4/1` state:
+
+- receipt consumption count `4`;
+- tombstone mint count `4`;
+- adoption-receipt mint count `1`;
+- outer logical write sequence `4`;
+- fixed-statement watermark `20 + entryCount + 2`;
+- affected-row watermark `3 + legacyOperationCount + entryCount`;
+- exact receipt predecessor order `1 -> 2 -> 3 -> 4`;
+- unchanged transaction generation;
+- adopted current epoch and real native `total_changes`;
+- adopted complete v2 main-catalog identity; and
+- one exact retired-B2-fence identity.
+
+For the frozen parity control `legacyOperationCount=1` and `entryCount=12`, the
+ledger is therefore `4/34/16`. This arithmetic follows the frozen fixture,
+section 31.37.36.2 and the actual permanent-write effects. The stale
+`4 + E + L` wording in section 31.37.21.4 is not authoritative; the exact
+affected-row formula is `3 + E + L`.
+
+##### 31.37.51.2 Retryable presentation versus authenticated corruption
+
+Carrier extraction is closed before live proof validation. A list, subclass,
+custom sequence, wrong length/order, missing/duplicate element, structural
+copy, cloned proof, foreign graph, wrong authority/connection/projection,
+cross-run receipt or foreign typed tombstone is a retryable presentation
+rejection. Extraction does not invoke caller iteration, indexing, equality,
+hashing or attribute protocols.
+
+Presentation rejection must retain:
+
+- outer phase `sequence-zero-complete` or its already prepared equivalent;
+- ownership and stage health;
+- receipt/tombstone/adoption counts `0/0/0`;
+- zero adoption output object;
+- zero rebind, commit or rollback; and
+- the corrected tuple containing the same exact untouched receipts as a valid
+  retry candidate.
+
+Only after all exact private-registry identities and the full transitive graph
+are selected does a mismatch become authenticated corruption. Exact replay,
+reuse of the exact consumed originals, receipt substitution, authority,
+ownership or stage lifecycle drift, transaction-generation replacement, epoch
+drift, real `total_changes` drift, permanent-write counter drift, 34-object
+catalog drift, terminal-reader drift and outer-ledger drift poison outer,
+ownership and stage. Terminal corruption consumes no new receipt and requires
+caller-owned rollback plus a fresh graph.
+
+##### 31.37.51.3 Complete live proof and canonical reader reproof
+
+Every attempt, including a retry after cancellation, revalidates:
+
+- exact connection, stage, transfer, projection reference/identity and outer
+  authority;
+- the live `BEGIN EXCLUSIVE` generation, current epoch and native
+  `total_changes`;
+- migration-0002 asset bytes, execution receipt and result commitments;
+- a fresh complete 34-object target catalog;
+- the exact physical-catalog fence;
+- entries, header and sequence receipt parameter/result commitments;
+- the continuous predecessor and entry/hash chain;
+- provider-clock provenance and consumed clock tombstone;
+- every prepare, execute, affected-row and changes counter;
+- all three outer-ledger watermarks; and
+- the exact lower adoption watermark and retired B2 fence.
+
+The terminal reader is proved through the canonical full terminal-proof
+intrinsic. The proof includes lifecycle, prepare/execute/ownership/close counts,
+successful exact-once close, absence of cleanup ownership, exact retained-entry
+count, authority/receipt/fence/transfer/projection graph, non-regressed epoch,
+native counter and ledger, expected projection commitments and independent
+projection rederivation.
+
+The adoption receipt assert and snapshot reader rerun the same canonical proof
+after success. Post-adoption drift in prepare count, execute count, ownership
+acquisition, retained entries or expected projection poisons all three layers;
+it cannot leak a stale successful snapshot.
+
+##### 31.37.51.4 Prepared cancellation and sealed atomic tail
+
+The ownership and stage continuations, including their private weak
+registrations, are prepared only after complete validation. Cancellation is
+observed exactly once after both continuations exist and before any adoption
+output is allocated or registered: the four tombstones, adoption receipt,
+their weak graph edges and output records do not exist at the cancellation
+boundary.
+
+Cancellation returns public `0/0/0`, leaves both prepared continuations intact
+and permits same-bundle retry. Retry must rerun catalog, reader, lineage, epoch,
+counter, ledger and receipt proof; prepared state is never permission to use a
+cached proof.
+
+The actual captured tail is:
+
+`outer wrapper -> outer perform tail -> ownership publish -> stage publish`.
+
+Both lower continuation levels are burned before mutation. The recursive path
+contains no SQL, provider callback, cancellation read, test hook, caller
+callback, transaction control, cursor rebind, import or mutable global lookup.
+
+The tail constructs five pending proof objects and their records, registers
+all weak identity edges, publishes the lower stage transition and only then
+attaches the tombstones/adoption receipt to outer state, sets `4/4/1`, advances
+the outer phase and activates all five records. Pending objects cannot assert
+or read.
+
+The terminal outer wrapper covers every post-cancellation failure, including
+proof allocation, record construction, weak-reference creation, registry
+insertion and final lower publication. It poisons every constructed pending
+record, clears public output pointers and counts, burns both continuations,
+poisons all three layers and preserves the primary exception. A real full-outer
+probe authenticates both lower preparations, corrupts only the stage final
+publish gate and proves outer/ownership/stage poison plus double-tail replay
+rejection.
+
+##### 31.37.51.5 Exact surviving graph and privacy
+
+Successful adoption retires only the obsolete B2 v1 catalog/change fence and
+old capture fields. It retains:
+
+- the B2 receipt;
+- projection identity and projection reference;
+- ownership transfer and TEMP stage;
+- unchanged transaction generation;
+- post-DDL reader lease and physical-catalog fence;
+- all four consumed original identities;
+- four typed tombstones and active adoption receipt;
+- adopted epoch, native counter, catalog and ledger; and
+- the retired-B2-fence proof.
+
+All four original receipts reject their ordinary assert/read surfaces after
+consumption. The post-DDL fence survives through the exact migration tombstone
+and adoption-receipt chain. Old B2 owners and held tails cannot publish, replay
+or revive after adoption, retirement or poison.
+
+All new registries use stable integer identity plus exact weak referents and
+verify referents with `is`; caller equality/hash is never authority. Whole-graph
+collection returns receipt, tombstone, continuation and retirement registries
+to baseline. The package root and external static type surface export none of
+the adoption receipt, tombstone, cancellation, continuation, record or
+intrinsic symbols.
+
+##### 31.37.51.6 Frozen implementation and test bytes
+
+Production:
+
+- `sqlite_cursor_publication_outer_authority.py`: 5,820 lines,
+  SHA-256 `4ae74f4097360db680c18ffddab7ac860b8e4fb9b6275892409b536338b573ec`;
+- `sqlite_operation_baseline_cursor_stage_ownership.py`: 1,546 lines,
+  SHA-256 `6f7d1de70d1f52de7df945f2ae2e51237407063e74755b9b6276b5dc015877f0`;
+- `sqlite_operation_baseline_stage.py`: 4,819 lines,
+  SHA-256 `256a0d263b9dd50498f09b63bf6c81f4d5065a99eea78bc6d26a68d4e6be2fa8`.
+
+The production subject totals 12,185 lines.
+
+Dedicated tests:
+
+- primary: 31 cases, 1,103 lines,
+  SHA-256 `f0b37646e22fa991f66733314416cad34c5709f0c8f150aca696a1ea3c3ee17f`;
+- hostile: 17 cases, 510 lines,
+  SHA-256 `25455df61fe12c4edc7218c1126859c16b493c8f025bf7efe748ebefaaccea50`;
+- contract closure: 41 cases, 370 lines,
+  SHA-256 `834e3ad62475611fba6273d5fd03722d6283c8038e256da58379cc4d53a1c36d`;
+- reproof: 21 cases, 194 lines,
+  SHA-256 `03de40d9619cb094e9859d1bdda2ffe92881fec9af219fb0ce5f96c02ce9df8d`;
+- surface closure: 9 cases, 441 lines,
+  SHA-256 `c10935553430abe788aad1ba4ddc9e0eef9f7937d7afb432a0215327147865eb`.
+
+The adoption corpus totals 119 cases and 2,618 lines. Combined production and
+dedicated test subject totals 14,803 lines.
+
+##### 31.37.51.7 Executed acceptance evidence
+
+All commands below completed on the frozen production/test bytes:
+
+- adoption corpus: **119/119 passed in 632.47 seconds**;
+- complete Python regression: **3,908 passed plus 2 subtests in 3,611.79
+  seconds (1:00:11)**, zero failures, exit zero;
+- lower stage and ownership corpus: 118/118 in 52.21 seconds;
+- real stage-final-publish poison probe: 1/1;
+- pre-rebind semantic parity: TypeScript 70/70 and Python 70/70, exact
+  261/261 and 302/302 execution IDs, zero parity differences;
+- frozen TypeScript/Python descriptor parity: 1/1;
+- SQLite ledger contract: 61/61 plus every strict validator;
+- fixtures: 85 JSON fixtures and 44 case manifests;
+- SQLite migration release closure: 6/6;
+- npm package content/dry-run tarballs: 9/9;
+- installed packed npm smoke: 9/9;
+- Python wheel/sdist build and installed smoke: 114 wheel entries and 115
+  sdist entries, all entry points and shared resources healthy;
+- SQLite TypeScript typecheck: green;
+- Ruff check and format check across all eight subject files: green;
+- strict mypy across all three production modules: zero issues;
+- `py_compile`, whitespace and `git diff --check`: green; and
+- two independent final implementation audits: HIGH 0 / MEDIUM 0 / LOW 0.
+
+Two earlier full-suite attempts were interrupted after independent review found
+defects in non-final candidates. Neither emitted a terminal pytest summary or
+retained a complete candidate SHA/exit record. Their partial progress is not
+combined and is not acceptance evidence. Only the uninterrupted 3,908-test
+result above closes the complete-regression gate.
+
+Durable review:
+`codex_logs/reviews/PYTHON-CURSOR-B3-INITIAL-STAGE-ADOPTION-2026-08-01.md`.
+
+##### 31.37.51.8 Defects closed and commit authorization
+
+Independent review found and closed, rather than waived:
+
+1. transient GC observer retention in combined execution;
+2. post-cancellation allocation/registration exceptions outside terminal
+   cleanup;
+3. partial rather than canonical full terminal-reader proof before adoption;
+4. partial reader proof on adoption receipt assert/read;
+5. a recursive tail audit that stopped at the wrapper and missed its captured
+   perform-tail; and
+6. failure to propagate poison through an already-poisoned ownership bridge
+   when the stage final publish gate rejected.
+
+The poison path now accepts only the internal already-poisoned intermediate
+needed to propagate stage poison. The retire path does not accept poisoned, so
+terminal poison cannot degrade to retired or adopted.
+
+This evidence authorizes one commit scoped to the three Python production
+modules, five dedicated adoption tests, this EOF plan append and the durable
+review log. The commit identity must be `reacher-z <mtrxcop@gmail.com>`, with no
+co-author trailer. Production/test bytes must not change after the complete
+regression; staged scope, documentation links, diff whitespace and remote object
+equality remain pre-push checks.
+
+##### 31.37.51.9 Explicit nonclaims
+
+This accepted leaf does not implement or claim:
+
+- executable 145-case or normalized 28-field cross-runtime runtime parity;
+- publication-session mint or ownership;
+- a second provider-clock boundary;
+- cursor rebind prepare or execute;
+- rule 11 or rule 12;
+- migration-lineage or schema-metadata publication;
+- post-cursor receipts or final semantic audit;
+- TEMP catalog retirement;
+- pre-retirement, retirement, pre-commit or final-commit authority;
+- commit, rollback, commit-returned or crash/reopen v2 acceptance;
+- active-v2 manifest;
+- `implementationClaim`, `activeManifestClaim` or `protocolClaim`;
+- release-candidate, stable or production-use status;
+- external adoption; or
+- any guaranteed popularity or GitHub-star outcome.
+
+#### 31.37.52 Next isolated leaf: three-control exact-28-field TypeScript/Python real-SQLite parity
+
+This is the only authorized next B3 production-adjacent leaf after the scoped
+adoption commit is present identically on the local and remote branch. It
+implements the minimum parity evidence required by sections 31.37.38.3 and
+31.37.21.6. It does not claim or synthesize the complete 145-case campaign.
+
+##### 31.37.52.1 Immutable inputs and owned files
+
+The leaf consumes without changing:
+
+- `spec/conformance/sqlite-cursor-publication-rebind-v2.case.json`;
+- `spec/conformance/sqlite-cursor-publication-rebind-v2.schema.json`;
+- `spec/conformance/sqlite-cursor-publication-rebind-v2.validate.mjs`;
+- all frozen fixture and hostile-registry hashes;
+- accepted TypeScript and Python initial-adoption runtimes;
+- canonical/mirrored migration and schema assets; and
+- existing real-SQLite B2 graph construction.
+
+Expected new files are:
+
+- `tools/conformance/sqlite_cursor_publication_initial_python_report.py`;
+- `tools/conformance/sqlite_cursor_publication_initial_typescript_report.mjs`;
+- `tools/conformance/sqlite_cursor_publication_initial_parity.test.mjs`; and
+- optionally one focused Python report test.
+
+Integration owns one root script such as
+`test:sqlite-cursor-publication-initial-parity`. No public API is required. If
+a real counter cannot be read, the narrowest package-private read-only
+measurement accessor may be added to the owning runtime. It must execute no
+SQL, mutate no graph, add no ambient hook and remain absent from installed
+public exports and types.
+
+##### 31.37.52.2 Exact normalized record
+
+Each report emits exactly these 28 keys in this exact order:
+
+1. `caseId`; 2. `outcome`; 3. `failureBoundary`; 4. `state`;
+5. `poisoned`; 6. `providerClockReadCount`;
+7. `clockEvidenceConsumeCount`; 8. `outerAuthorityMintCount`;
+9. `perWritePrepareCounts`; 10. `perWriteExecuteCounts`;
+11. `perWriteAffectedRowCounts`; 12. `perWriteTotalChangesDeltas`;
+13. `outerLedgerLogicalWriteSequence`;
+14. `outerLedgerFixedStatementCount`;
+15. `outerLedgerAffectedRowsWatermark`;
+16. `postDdlCatalogFenceMintCount`; 17. `readerLeaseMintCount`;
+18. `readerLeaseCloseCount`; 19. `initialWriteReceiptMintCount`;
+20. `initialWriteReceiptConsumeCount`;
+21. `initialWriteReceiptTombstoneCount`;
+22. `stageAdoptionReceiptMintCount`; 23. `bundleRetryable`;
+24. `sameTransactionLineage`; 25. `catalogFenceMatches`;
+26. `cursorRebindPrepareCount`; 27. `cursorRebindExecuteCount`; and
+28. `commitCount`.
+
+Missing, extra or reordered keys fail. The four write arrays have exact length
+four in migration/entries/header/sequence order with nonnegative safe integers.
+Runtime object addresses and language-private epoch values are excluded. The
+normalized success `state` is `pre-rebind-complete`; reporters map the accepted
+internal adoption lifecycle to that frozen protocol state without opening a
+publication session. Rollback must be asserted separately in each harness and
+must not become a twenty-ninth normalized field.
+
+##### 31.37.52.3 Three mandatory real-SQLite controls
+
+**Success control** — use `legacyOperationCount=1`, `entryCount=12`; execute the
+real B2-through-adoption graph. Expected write arrays are prepare
+`[20,1,1,1]`, execute/affected/changes `[1,12,1,1]`, ledger `4/34/16`, receipt
+mint/consume/tombstone `4/4/4`, adoption `1`, same lineage/catalog true and
+rebind/commit `0/0/0`.
+
+**Invalid adoption bundle** — execute all four permanent writes, present the
+frozen invalid carrier, sample rejected state and separately prove corrected
+retry with the same exact original receipts. The rejected record retains the
+success pre-adoption write arrays and ledger, receipts minted `4`,
+consume/tombstone/adoption `0/0/0`, `bundleRetryable=true`, healthy graph and
+rebind/commit `0/0/0`.
+
+**Post-0002 catalog drift** — execute authentic migration 0002, introduce the
+frozen same-count physical catalog drift before fence mint. Expected prepare
+`[20,0,0,0]`, execute/affected/changes `[1,0,0,0]` except migration affected
+and changes are `2`, ledger `1/20/2`, one initial receipt, no fence/reader or
+adoption output, poisoned graph, catalog mismatch, same lineage true and
+rebind/commit `0/0/0`.
+
+Both reporters must construct real SQLite graphs independently. Neither may
+import the other report or copy expected fixture records. A separate all-one
+instrumentation self-probe must prove every counter recorder is live without
+mutating any of the three subject graphs.
+
+##### 31.37.52.4 Comparator, hostile output checks and privacy
+
+The Node comparator launches both reports and rejects nonzero child exits,
+stdout prefix/suffix noise, duplicate JSON keys, wrong record count/order,
+missing/extra/reordered fields, mistyped scalars, unsafe or negative integers,
+wrong four-array length/order, zero-valued self-probes, nonzero pre-rebind
+rebind/commit counters, divergence from the frozen fixture and any
+TypeScript/Python canonical-byte difference.
+
+Negative tests mutate every structural dimension. Runtime/package export tests
+must prove no private adoption or measurement symbol reaches either public
+root. Counter self-probes may use isolated no-op instrumentation but may not
+invoke real rebind or commit on the three controlled graphs.
+
+##### 31.37.52.5 Maximum-safe four-lane execution plan
+
+1. Main/integration owns `package.json`, fixture immutability checks, combined
+   gates, logs, plan checkpoint and commit/push.
+2. Python lane owns only the Python report and optional focused test, real graph
+   construction, Ruff and mypy.
+3. TypeScript lane owns only the TypeScript report and its private measurement
+   support, package build/typecheck and report smoke.
+4. Comparator/review lane owns only the Node parity test, strict shape/type
+   rejection and independent instrumentation/privacy audit.
+
+No two lanes edit one file. Shared fixtures are read-only. Any required runtime
+mutation is explicitly reassigned to the owning runtime lane and triggers its
+focused/full affected regression.
+
+##### 31.37.52.6 Acceptance gates and nonclaims
+
+Acceptance requires exactly three records from each runtime, live nonzero
+self-probes, exact fixture equality, exact Python/TypeScript canonical equality,
+corrected invalid-bundle retry, rebind/commit/rollback zero, hostile
+shape/type/order rejection, closed public exports, existing clock/descriptor
+parity, fixture validators, adoption suites, affected complete regressions,
+Ruff/format/mypy, TypeScript build/typecheck, installed artifact smoke,
+append-only prefix proof, two H0/M0/L0 audits and local/upstream/remote object
+equality.
+
+Three-record parity is not the executable 145-case campaign, a publication
+session, cursor rebind, rules 11/12, post-cursor publication, retirement,
+transaction completion, crash/reopen proof, manifest activation or release
+authorization.
+
+#### 31.37.53 Three-day source-only alpha readiness tranche and phased path to the 5,000-star objective
+
+The 5,000-star objective is a growth target, not an engineering invariant and
+not a guaranteed result. Stars must come from useful software, an honest first
+experience, reproducible evidence, community trust and sustained maintenance.
+No botting, fabricated usage, bought stars or false release claim is allowed.
+
+##### 31.37.53.1 P0 security-truth reconciliation
+
+Before any public alpha announcement, run a candidate-bound all-sink canary
+scan and reconcile `README.md`, `CHANGELOG.md`, `SECURITY.md`, user docs and
+`codex_plans/architecture/security-and-isolation.md`. The protected-journal
+claim must identify exactly which stores redact data. Any public
+`FileCheckpointStore`, `JsonlEventStore` or `MemoryEventStore` path that can
+retain raw payload must be fixed, removed from the recommended path or labeled
+legacy/unsafe opt-in with a prominent migration warning.
+
+Acceptance requires one table of every durable sink, default protection,
+redaction boundary, key ownership, retention behavior, test canary and public
+documentation link; cross-language canaries must prove no secret reaches event,
+checkpoint, trace, diagnostic or CLI output unintentionally.
+
+##### 31.37.53.2 P0 immutable alpha evidence
+
+The release evidence protocol currently has no candidate-bound proof and
+cannot authorize RC/stable. A source-only alpha may proceed only with explicit
+preview labeling. Bind an immutable candidate commit, source archive digest,
+Node/Python versions, OS, commands, exit results and independent audit to a
+durable alpha evidence record. Do not convert open release-checklist items into
+passes without artifacts.
+
+The alpha page must distinguish implemented runtime features, contract-only
+future features, preview SQLite B3 work and unsupported production claims. It
+must link the exact commit and reproducible quickstart rather than using broad
+“complete Graph Engineering” wording.
+
+##### 31.37.53.3 Cross-platform CI minimum
+
+Add macOS and Windows smoke cells without multiplying the full expensive
+matrix immediately. Each OS must run clean checkout/install, TypeScript and
+Python quickstarts, CLI help/doctor/validate, npm packed install, Python
+wheel/sdist install and a representative SQLite persistence smoke. Linux keeps
+the full Node 20/22 and Python 3.11/3.12/3.13 matrices. Failures become tracked
+release blockers, never allowed flakes.
+
+##### 31.37.53.4 Supply-chain publishing path
+
+Design npm and PyPI trusted publishing with protected environments, tagged
+version agreement, provenance attestations, SBOMs, checksums and release notes.
+Keep registry publishing disabled until dry-run artifacts, secret scan,
+dependency audit, license inventory, package-content guards, installed smokes
+and rollback procedure all pass on the bound candidate. Source-only alpha is
+the honest fallback while trusted publishing remains incomplete.
+
+##### 31.37.53.5 Five-minute onboarding and public product truth
+
+Correct the README command-count promise and run timed clean-clone onboarding
+with people who did not author the repository. Provide copy-paste TypeScript
+and Python paths, expected output, troubleshooting, architecture map, feature
+status matrix and one compelling graph visualization. Capture at least five
+independent usability reports; target median first success below five minutes
+and zero undocumented step.
+
+Do not market missing verifier/judge panels, integrated cycles, provider
+clients, isolation bundles or all nine pattern bundles as implemented. Add
+examples and docs only as their runtime tests and installed-package smokes
+become real.
+
+##### 31.37.53.6 Authentic growth operating system
+
+The route toward 5,000 stars is measured through leading indicators:
+
+- clean-install success rate and median time-to-first-graph;
+- weekly active repository users and repeat users;
+- issue first-response and median resolution time;
+- external contributors, merged external pull requests and returning
+  contributors;
+- documentation completion and example execution rates;
+- releases without rollback, security incident count and flaky-test rate;
+- newsletter/demo/community conversions that link to a real use case; and
+- organic stars, forks and dependents, reported without manipulation.
+
+Publish a transparent roadmap, `good first issue` queue, contribution guide,
+architecture decision records, weekly demo and benchmark evidence. Prioritize
+one unforgettable end-to-end workflow—parallel fan-out, conditional routing,
+verification, persistence and replay—over a long list of unintegrated claims.
+Every public launch asset must be reproducible from the tagged/source commit.
+
+##### 31.37.53.7 Phased B3 continuation after three-control parity
+
+The complete 145-case campaign references phases that are not implemented yet
+and therefore cannot be truthfully required before them. Continue in isolated
+leaves:
+
+1. publication session plus second provider-clock boundary;
+2. one-shot cursor rebind and rules 11/12;
+3. lineage/metadata and post-cursor semantic receipts;
+4. TEMP retirement and pre-commit/final-commit fences;
+5. transaction completion plus crash/reopen reconciliation;
+6. complete executable 145/145 TypeScript and Python parity; and
+7. cross-runtime interop, installed artifacts and active-manifest review.
+
+Each phase activates only the hostile hooks that actually exist. Unavailable
+future hooks are neither passes nor skips. The final 145-case claim requires
+exact ordered coverage, real hook activation, exact 28-field output, trusted
+hash recomputation, Python/TypeScript canonical equality, zero unexplained
+skip and two independent H0/M0/L0 audits.

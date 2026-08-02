@@ -243,88 +243,271 @@ _CURSOR_INITIAL_PUBLICATION_ADOPTION_TAILS: dict[
     ],
 ] = {}
 
+_DICT_GET = dict.get
+_DICT_POP = dict.pop
+_DICT_SETITEM = dict.__setitem__
+
 
 def _register_cursor_b2_fence_retirement(
     retirement: _SQLiteBaselineCursorB2FenceRetirement,
     record: _SQLiteBaselineCursorB2FenceRetirementRecord,
+    _registry: dict[
+        int,
+        tuple[
+            ReferenceType[_SQLiteBaselineCursorB2FenceRetirement],
+            _SQLiteBaselineCursorB2FenceRetirementRecord,
+        ],
+    ] = _CURSOR_B2_FENCE_RETIREMENTS,
+    _id: Callable[[object], int] = id,
+    _dict_get: Callable[
+        ...,
+        tuple[
+            ReferenceType[_SQLiteBaselineCursorB2FenceRetirement],
+            _SQLiteBaselineCursorB2FenceRetirementRecord,
+        ]
+        | None,
+    ] = _DICT_GET,
+    _dict_pop: Callable[..., object] = _DICT_POP,
+    _dict_set: Callable[..., None] = _DICT_SETITEM,
+    _ref: Callable[
+        [
+            _SQLiteBaselineCursorB2FenceRetirement,
+            Callable[[ReferenceType[_SQLiteBaselineCursorB2FenceRetirement]], None],
+        ],
+        ReferenceType[_SQLiteBaselineCursorB2FenceRetirement],
+    ] = ref,
 ) -> None:
-    object_id = id(retirement)
+    object_id = _id(retirement)
 
     def discard(reference: ReferenceType[_SQLiteBaselineCursorB2FenceRetirement]) -> None:
-        current = _CURSOR_B2_FENCE_RETIREMENTS.get(object_id)
+        current = _dict_get(_registry, object_id)
         if current is not None and current[0] is reference:
-            _CURSOR_B2_FENCE_RETIREMENTS.pop(object_id, None)
+            _dict_pop(_registry, object_id, None)
 
-    reference = ref(retirement, discard)
-    _CURSOR_B2_FENCE_RETIREMENTS[object_id] = (reference, record)
+    reference = _ref(retirement, discard)
+    _dict_set(_registry, object_id, (reference, record))
 
 
 def _cursor_b2_fence_retirement_record(
     retirement: object,
+    _registry: dict[
+        int,
+        tuple[
+            ReferenceType[_SQLiteBaselineCursorB2FenceRetirement],
+            _SQLiteBaselineCursorB2FenceRetirementRecord,
+        ],
+    ] = _CURSOR_B2_FENCE_RETIREMENTS,
+    _dict_get: Callable[
+        [
+            dict[
+                int,
+                tuple[
+                    ReferenceType[_SQLiteBaselineCursorB2FenceRetirement],
+                    _SQLiteBaselineCursorB2FenceRetirementRecord,
+                ],
+            ],
+            int,
+        ],
+        tuple[
+            ReferenceType[_SQLiteBaselineCursorB2FenceRetirement],
+            _SQLiteBaselineCursorB2FenceRetirementRecord,
+        ]
+        | None,
+    ] = _DICT_GET,
+    _type: Callable[[object], type] = type,
+    _id: Callable[[object], int] = id,
 ) -> _SQLiteBaselineCursorB2FenceRetirementRecord | None:
-    if type(retirement) is not _SQLiteBaselineCursorB2FenceRetirement:
+    if _type(retirement) is not _SQLiteBaselineCursorB2FenceRetirement:
         return None
-    current = _CURSOR_B2_FENCE_RETIREMENTS.get(id(retirement))
+    current = _dict_get(_registry, _id(retirement))
     if current is None or current[0]() is not retirement:
         return None
     return current[1]
 
 
-def _discard_cursor_b2_fence_retirement(retirement: object) -> None:
-    if type(retirement) is not _SQLiteBaselineCursorB2FenceRetirement:
+def _discard_cursor_b2_fence_retirement(
+    retirement: object,
+    _registry: dict[
+        int,
+        tuple[
+            ReferenceType[_SQLiteBaselineCursorB2FenceRetirement],
+            _SQLiteBaselineCursorB2FenceRetirementRecord,
+        ],
+    ] = _CURSOR_B2_FENCE_RETIREMENTS,
+    _dict_get: Callable[
+        [
+            dict[
+                int,
+                tuple[
+                    ReferenceType[_SQLiteBaselineCursorB2FenceRetirement],
+                    _SQLiteBaselineCursorB2FenceRetirementRecord,
+                ],
+            ],
+            int,
+        ],
+        tuple[
+            ReferenceType[_SQLiteBaselineCursorB2FenceRetirement],
+            _SQLiteBaselineCursorB2FenceRetirementRecord,
+        ]
+        | None,
+    ] = _DICT_GET,
+    _dict_pop: Callable[..., object] = _DICT_POP,
+    _type: Callable[[object], type] = type,
+    _id: Callable[[object], int] = id,
+) -> None:
+    if _type(retirement) is not _SQLiteBaselineCursorB2FenceRetirement:
         return
-    current = _CURSOR_B2_FENCE_RETIREMENTS.get(id(retirement))
+    retirement_id = _id(retirement)
+    current = _dict_get(_registry, retirement_id)
     if current is not None and current[0]() is retirement:
-        _CURSOR_B2_FENCE_RETIREMENTS.pop(id(retirement), None)
+        _dict_pop(_registry, retirement_id, None)
 
 
 def _register_cursor_initial_publication_adoption_tail(
     tail: _SQLiteBaselineCursorInitialPublicationAdoptionTail,
     record: _SQLiteBaselineCursorInitialPublicationAdoptionContinuation,
+    _registry: dict[
+        int,
+        tuple[
+            ReferenceType[_SQLiteBaselineCursorInitialPublicationAdoptionTail],
+            _SQLiteBaselineCursorInitialPublicationAdoptionContinuation,
+        ],
+    ] = _CURSOR_INITIAL_PUBLICATION_ADOPTION_TAILS,
+    _id: Callable[[object], int] = id,
+    _dict_get: Callable[
+        ...,
+        tuple[
+            ReferenceType[_SQLiteBaselineCursorInitialPublicationAdoptionTail],
+            _SQLiteBaselineCursorInitialPublicationAdoptionContinuation,
+        ]
+        | None,
+    ] = _DICT_GET,
+    _dict_pop: Callable[..., object] = _DICT_POP,
+    _dict_set: Callable[..., None] = _DICT_SETITEM,
+    _ref: Callable[
+        [
+            _SQLiteBaselineCursorInitialPublicationAdoptionTail,
+            Callable[
+                [ReferenceType[_SQLiteBaselineCursorInitialPublicationAdoptionTail]],
+                None,
+            ],
+        ],
+        ReferenceType[_SQLiteBaselineCursorInitialPublicationAdoptionTail],
+    ] = ref,
 ) -> None:
-    object_id = id(tail)
+    object_id = _id(tail)
 
     def discard(
         reference: ReferenceType[_SQLiteBaselineCursorInitialPublicationAdoptionTail],
     ) -> None:
-        current = _CURSOR_INITIAL_PUBLICATION_ADOPTION_TAILS.get(object_id)
+        current = _dict_get(_registry, object_id)
         if current is not None and current[0] is reference:
-            _CURSOR_INITIAL_PUBLICATION_ADOPTION_TAILS.pop(object_id, None)
+            _dict_pop(_registry, object_id, None)
 
-    reference = ref(tail, discard)
-    _CURSOR_INITIAL_PUBLICATION_ADOPTION_TAILS[object_id] = (reference, record)
+    reference = _ref(tail, discard)
+    _dict_set(_registry, object_id, (reference, record))
 
 
 def _cursor_initial_publication_adoption_continuation(
     tail: object,
+    _registry: dict[
+        int,
+        tuple[
+            ReferenceType[_SQLiteBaselineCursorInitialPublicationAdoptionTail],
+            _SQLiteBaselineCursorInitialPublicationAdoptionContinuation,
+        ],
+    ] = _CURSOR_INITIAL_PUBLICATION_ADOPTION_TAILS,
+    _dict_get: Callable[
+        [
+            dict[
+                int,
+                tuple[
+                    ReferenceType[_SQLiteBaselineCursorInitialPublicationAdoptionTail],
+                    _SQLiteBaselineCursorInitialPublicationAdoptionContinuation,
+                ],
+            ],
+            int,
+        ],
+        tuple[
+            ReferenceType[_SQLiteBaselineCursorInitialPublicationAdoptionTail],
+            _SQLiteBaselineCursorInitialPublicationAdoptionContinuation,
+        ]
+        | None,
+    ] = _DICT_GET,
+    _type: Callable[[object], type] = type,
+    _id: Callable[[object], int] = id,
 ) -> _SQLiteBaselineCursorInitialPublicationAdoptionContinuation | None:
-    if type(tail) is not _SQLiteBaselineCursorInitialPublicationAdoptionTail:
+    if _type(tail) is not _SQLiteBaselineCursorInitialPublicationAdoptionTail:
         return None
-    current = _CURSOR_INITIAL_PUBLICATION_ADOPTION_TAILS.get(id(tail))
+    current = _dict_get(_registry, _id(tail))
     if current is None or current[0]() is not tail:
         return None
     return current[1]
 
 
-def _discard_cursor_initial_publication_adoption_tail(tail: object) -> None:
-    if type(tail) is not _SQLiteBaselineCursorInitialPublicationAdoptionTail:
+def _discard_cursor_initial_publication_adoption_tail(
+    tail: object,
+    _registry: dict[
+        int,
+        tuple[
+            ReferenceType[_SQLiteBaselineCursorInitialPublicationAdoptionTail],
+            _SQLiteBaselineCursorInitialPublicationAdoptionContinuation,
+        ],
+    ] = _CURSOR_INITIAL_PUBLICATION_ADOPTION_TAILS,
+    _dict_get: Callable[
+        [
+            dict[
+                int,
+                tuple[
+                    ReferenceType[_SQLiteBaselineCursorInitialPublicationAdoptionTail],
+                    _SQLiteBaselineCursorInitialPublicationAdoptionContinuation,
+                ],
+            ],
+            int,
+        ],
+        tuple[
+            ReferenceType[_SQLiteBaselineCursorInitialPublicationAdoptionTail],
+            _SQLiteBaselineCursorInitialPublicationAdoptionContinuation,
+        ]
+        | None,
+    ] = _DICT_GET,
+    _dict_pop: Callable[..., object] = _DICT_POP,
+    _type: Callable[[object], type] = type,
+    _id: Callable[[object], int] = id,
+) -> None:
+    if _type(tail) is not _SQLiteBaselineCursorInitialPublicationAdoptionTail:
         return
-    current = _CURSOR_INITIAL_PUBLICATION_ADOPTION_TAILS.get(id(tail))
+    tail_id = _id(tail)
+    current = _dict_get(_registry, tail_id)
     if current is not None and current[0]() is tail:
-        _CURSOR_INITIAL_PUBLICATION_ADOPTION_TAILS.pop(id(tail), None)
+        _dict_pop(_registry, tail_id, None)
 
 
 def _copy_initial_publication_stage_watermark(
     value: object,
+    _type: Callable[[object], type] = type,
+    _watermark_type: type[_SQLiteCursorInitialPublicationStageWatermark] = (
+        _SQLiteCursorInitialPublicationStageWatermark
+    ),
+    _ledger_type: type[_SQLiteCursorInitialPublicationOuterLedgerWatermark] = (
+        _SQLiteCursorInitialPublicationOuterLedgerWatermark
+    ),
+    _record_type: type[_SQLiteCursorInitialPublicationWatermarkRecord] = (
+        _SQLiteCursorInitialPublicationWatermarkRecord
+    ),
+    _int_type: type[int] = int,
+    _str_type: type[str] = str,
+    _max_safe_integer: int = MAX_SAFE_INTEGER,
+    _target_catalog_sha256: str = (SQLITE_CURSOR_INITIAL_PUBLICATION_TARGET_CATALOG_SHA256),
 ) -> tuple[
     _SQLiteCursorInitialPublicationStageWatermark,
     _SQLiteCursorInitialPublicationWatermarkRecord,
 ]:
-    if type(value) is not _SQLiteCursorInitialPublicationStageWatermark:
+    if _type(value) is not _watermark_type:
         raise ValueError("SQLite cursor initial publication stage watermark is invalid")
-    watermark = value
+    watermark: _SQLiteCursorInitialPublicationStageWatermark = value  # type: ignore[assignment]
     ledger = watermark.outer_ledger
-    if type(ledger) is not _SQLiteCursorInitialPublicationOuterLedgerWatermark:
+    if _type(ledger) is not _ledger_type:
         raise ValueError("SQLite cursor initial publication stage watermark is invalid")
     values = (
         ledger.affected_rows_watermark,
@@ -336,24 +519,24 @@ def _copy_initial_publication_stage_watermark(
     )
     affected_rows, statement_count, sequence, target_hash, total_changes, epoch = values
     if (
-        type(affected_rows) is not int
+        _type(affected_rows) is not _int_type
         or affected_rows < 0
-        or affected_rows > MAX_SAFE_INTEGER
-        or type(statement_count) is not int
+        or affected_rows > _max_safe_integer
+        or _type(statement_count) is not _int_type
         or statement_count < 0
-        or statement_count > MAX_SAFE_INTEGER
-        or type(sequence) is not int
+        or statement_count > _max_safe_integer
+        or _type(sequence) is not _int_type
         or sequence != 4
-        or type(target_hash) is not str
-        or target_hash != SQLITE_CURSOR_INITIAL_PUBLICATION_TARGET_CATALOG_SHA256
-        or type(total_changes) is not int
+        or _type(target_hash) is not _str_type
+        or target_hash != _target_catalog_sha256
+        or _type(total_changes) is not _int_type
         or total_changes < 0
-        or total_changes > MAX_SAFE_INTEGER
-        or type(epoch) is not int
+        or total_changes > _max_safe_integer
+        or _type(epoch) is not _int_type
         or epoch < 0
     ):
         raise ValueError("SQLite cursor initial publication stage watermark is invalid")
-    record = _SQLiteCursorInitialPublicationWatermarkRecord(
+    record = _record_type(
         affected_rows,
         statement_count,
         sequence,
@@ -361,8 +544,8 @@ def _copy_initial_publication_stage_watermark(
         total_changes,
         epoch,
     )
-    copied = _SQLiteCursorInitialPublicationStageWatermark(
-        _SQLiteCursorInitialPublicationOuterLedgerWatermark(
+    copied = _watermark_type(
+        _ledger_type(
             affected_rows,
             statement_count,
             sequence,
@@ -416,6 +599,74 @@ _OWNER_EXECUTE = SQLiteV1BaselineConnectionOwner.execute
 _CURSOR_FETCHONE = _SQLiteCursorCapability.fetchone
 _CURSOR_CLOSE = _SQLiteCursorCapability.close
 _CURSOR_INTERNAL_CLOSE = _SQLiteCursorCapability.close
+
+
+def _read_initial_publication_main_operations_catalog(
+    connection: SQLiteV1BaselineConnectionOwner,
+    _execute: Callable[..., _SQLiteCursorCapability] = _OWNER_EXECUTE,
+    _fetchone: Callable[[_SQLiteCursorCapability], tuple[object, ...] | None] = _CURSOR_FETCHONE,
+    _close: Callable[[_SQLiteCursorCapability], None] = _CURSOR_INTERNAL_CLOSE,
+    _type: Callable[[object], type] = type,
+    _len: Callable[..., int] = len,
+    _tuple: Callable[..., tuple[object, ...]] = tuple,
+    _int_type: type[int] = int,
+    _str_type: type[str] = str,
+    _base_exception: type[BaseException] = BaseException,
+    _value_error: type[ValueError] = ValueError,
+    _suppress: type[suppress] = suppress,
+) -> tuple[int, tuple[object, ...]]:
+    """Closed native read used only by the validation-first adoption fence."""
+
+    schema_cursor: _SQLiteCursorCapability | None = None
+    catalog_cursor: _SQLiteCursorCapability | None = None
+    try:
+        schema_cursor = _execute(
+            connection,
+            "SELECT schema_version FROM pragma_schema_version",
+        )
+        schema_row = _fetchone(schema_cursor)
+        schema_extra = _fetchone(schema_cursor)
+        owned_schema_cursor = schema_cursor
+        schema_cursor = None
+        _close(owned_schema_cursor)
+        catalog_cursor = _execute(
+            connection,
+            "SELECT type, name, tbl_name, rootpage, sql FROM main.sqlite_schema "
+            "WHERE type = 'table' AND name = 'ge_cycle_operations'",
+        )
+        catalog_row = _fetchone(catalog_cursor)
+        catalog_extra = _fetchone(catalog_cursor)
+        owned_catalog_cursor = catalog_cursor
+        catalog_cursor = None
+        _close(owned_catalog_cursor)
+    except _base_exception as error:
+        if schema_cursor is not None:
+            with _suppress(_base_exception):
+                _close(schema_cursor)
+        if catalog_cursor is not None:
+            with _suppress(_base_exception):
+                _close(catalog_cursor)
+        raise _value_error(
+            "SQLite cursor initial publication main catalog is unavailable"
+        ) from error
+    if (
+        schema_row is None
+        or schema_extra is not None
+        or _len(schema_row) != 1
+        or _type(schema_row[0]) is not _int_type
+        or schema_row[0] < 0  # type: ignore[operator]
+        or catalog_row is None
+        or catalog_extra is not None
+        or _len(catalog_row) != 5
+        or catalog_row[0] != "table"
+        or catalog_row[1] != "ge_cycle_operations"
+        or catalog_row[2] != "ge_cycle_operations"
+        or _type(catalog_row[3]) is not _int_type
+        or catalog_row[3] < 1  # type: ignore[operator]
+        or _type(catalog_row[4]) is not _str_type
+    ):
+        raise _value_error("SQLite cursor initial publication main catalog is invalid")
+    return schema_row[0], _tuple(catalog_row)  # type: ignore[return-value]
 
 
 def _read_exact_cursor_seal_table_identity(
@@ -1536,6 +1787,12 @@ def configure_sqlite_v1_baseline_temp_storage(
     return profile
 
 
+_REGISTERED_SQLITE_V1_BASELINE_TEMP_STAGES: WeakKeyDictionary[
+    SQLiteV1BaselineTempStage, SQLiteV1BaselineConnectionOwner
+] = WeakKeyDictionary()
+_WEAK_KEY_DICTIONARY_GET = WeakKeyDictionary.get
+
+
 class SQLiteV1BaselineTempStage:
     """EXCLUSIVE-owner-bound TEMP catalog for one baseline reconciliation.
 
@@ -1571,6 +1828,8 @@ class SQLiteV1BaselineTempStage:
         "_cursor_campaign_session",
         "_cursor_campaign_state",
         "_cursor_initial_publication_adoption_mint",
+        "_cursor_initial_publication_adoption_next_catalog",
+        "_cursor_initial_publication_adoption_previous_catalog",
         "_cursor_initial_publication_adoption_retirement",
         "_cursor_initial_publication_adoption_tail",
         "_cursor_initial_publication_adoption_watermark",
@@ -1674,6 +1933,12 @@ class SQLiteV1BaselineTempStage:
         ) = None
         self._cursor_initial_publication_adoption_mint: (
             _SQLiteBaselineCursorInitialPublicationAdoptionMint | None
+        ) = None
+        self._cursor_initial_publication_adoption_next_catalog: (
+            tuple[int, tuple[object, ...]] | None
+        ) = None
+        self._cursor_initial_publication_adoption_previous_catalog: (
+            tuple[int, tuple[object, ...]] | None
         ) = None
         self._cursor_initial_publication_adoption_tail: (
             _SQLiteBaselineCursorInitialPublicationAdoptionTail | None
@@ -3386,8 +3651,84 @@ class SQLiteV1BaselineTempStage:
         authority: object,
         lease: object,
         watermark_input: object,
+        _copy_watermark: Callable[
+            [object],
+            tuple[
+                _SQLiteCursorInitialPublicationStageWatermark,
+                _SQLiteCursorInitialPublicationWatermarkRecord,
+            ],
+        ] = _copy_initial_publication_stage_watermark,
+        _read_catalog: Callable[
+            [SQLiteV1BaselineConnectionOwner], tuple[int, tuple[object, ...]]
+        ] = _read_initial_publication_main_operations_catalog,
+        _read_tail: Callable[
+            [object], _SQLiteBaselineCursorInitialPublicationAdoptionContinuation | None
+        ] = _cursor_initial_publication_adoption_continuation,
+        _read_retirement: Callable[
+            [object], _SQLiteBaselineCursorB2FenceRetirementRecord | None
+        ] = _cursor_b2_fence_retirement_record,
+        _read_generation: Callable[[SQLiteV1BaselineConnectionOwner], object | None] = (
+            _OWNER_TRANSACTION_GENERATION_GETTER
+        ),
+        _read_epoch: Callable[[SQLiteV1BaselineConnectionOwner], int] = (
+            _OWNER_TRANSACTION_EPOCH_GETTER
+        ),
+        _read_changes: Callable[[SQLiteV1BaselineConnectionOwner], int] = (
+            _OWNER_TOTAL_CHANGES_GETTER
+        ),
+        _read_exclusive: Callable[[SQLiteV1BaselineConnectionOwner], bool] = (
+            _OWNER_EXCLUSIVE_TRANSACTION_GETTER
+        ),
+        _register_retirement: Callable[
+            [
+                _SQLiteBaselineCursorB2FenceRetirement,
+                _SQLiteBaselineCursorB2FenceRetirementRecord,
+            ],
+            None,
+        ] = _register_cursor_b2_fence_retirement,
+        _register_tail: Callable[
+            [
+                _SQLiteBaselineCursorInitialPublicationAdoptionTail,
+                _SQLiteBaselineCursorInitialPublicationAdoptionContinuation,
+            ],
+            None,
+        ] = _register_cursor_initial_publication_adoption_tail,
+        _registered_stages: WeakKeyDictionary[
+            SQLiteV1BaselineTempStage, SQLiteV1BaselineConnectionOwner
+        ] = _REGISTERED_SQLITE_V1_BASELINE_TEMP_STAGES,
+        _registry_get: Callable[..., SQLiteV1BaselineConnectionOwner | None] = (
+            _WEAK_KEY_DICTIONARY_GET
+        ),
+        _same_watermark: Callable[
+            [
+                _SQLiteCursorInitialPublicationWatermarkRecord,
+                _SQLiteCursorInitialPublicationWatermarkRecord,
+            ],
+            bool,
+        ] = _same_initial_publication_watermark,
+        _retirement_type: type[_SQLiteBaselineCursorB2FenceRetirement] = (
+            _SQLiteBaselineCursorB2FenceRetirement
+        ),
+        _retirement_record_type: type[_SQLiteBaselineCursorB2FenceRetirementRecord] = (
+            _SQLiteBaselineCursorB2FenceRetirementRecord
+        ),
+        _tail_type: type[_SQLiteBaselineCursorInitialPublicationAdoptionTail] = (
+            _SQLiteBaselineCursorInitialPublicationAdoptionTail
+        ),
+        _continuation_type: type[_SQLiteBaselineCursorInitialPublicationAdoptionContinuation] = (
+            _SQLiteBaselineCursorInitialPublicationAdoptionContinuation
+        ),
+        _mint_type: type[_SQLiteBaselineCursorInitialPublicationAdoptionMint] = (
+            _SQLiteBaselineCursorInitialPublicationAdoptionMint
+        ),
+        _construction_token: object = _CURSOR_PUBLICATION_CONSTRUCTION_TOKEN,
+        _stage_ref: Callable[
+            [SQLiteV1BaselineTempStage], ReferenceType[SQLiteV1BaselineTempStage]
+        ] = ref,
+        _value_error: type[ValueError] = ValueError,
+        _base_exception: type[BaseException] = BaseException,
     ) -> _SQLiteBaselineCursorInitialPublicationAdoptionMint:
-        watermark, watermark_record = _copy_initial_publication_stage_watermark(watermark_input)
+        watermark, watermark_record = _copy_watermark(watermark_input)
         authority_ref = self._cursor_outer_publication_authority_ref
         reader_authority_ref = self._cursor_post_ddl_reader_authority_ref
         if (
@@ -3400,7 +3741,8 @@ class SQLiteV1BaselineTempStage:
             or self._cursor_post_ddl_reader_cleanup is not None
         ):
             raise ValueError("SQLite cursor initial publication adoption owner is invalid")
-        if self._cursor_outer_publication_state == "initial-adoption-prepared":
+        prepared = self._cursor_outer_publication_state == "initial-adoption-prepared"
+        if prepared:
             mint = self._cursor_initial_publication_adoption_mint
             tail = self._cursor_initial_publication_adoption_tail
             retirement = self._cursor_initial_publication_adoption_retirement
@@ -3412,7 +3754,7 @@ class SQLiteV1BaselineTempStage:
                 or existing_watermark is None
                 or mint.tail is not tail
                 or mint.retired_b2_fence is not retirement
-                or not _same_initial_publication_watermark(
+                or not _same_watermark(
                     existing_watermark,
                     watermark_record,
                 )
@@ -3420,12 +3762,13 @@ class SQLiteV1BaselineTempStage:
                 raise ValueError(
                     "SQLite cursor initial publication adoption preparation is invalid"
                 )
-            return mint
-        if (
+        elif (
             self._cursor_outer_publication_state != "published"
             or self._cursor_initial_publication_adoption_tail is not None
             or self._cursor_initial_publication_adoption_retirement is not None
             or self._cursor_initial_publication_adoption_mint is not None
+            or self._cursor_initial_publication_adoption_next_catalog is not None
+            or self._cursor_initial_publication_adoption_previous_catalog is not None
             or self._cursor_initial_publication_adoption_watermark is not None
             or self._cursor_b2_catalog_change_fence_state != "live"
             or self._cursor_b2_catalog_change_fence_retirement is not None
@@ -3442,21 +3785,21 @@ class SQLiteV1BaselineTempStage:
             self._legacy_main_operation_catalog,
         )
         try:
-            lineage_before = _OWNER_TRANSACTION_GENERATION_GETTER(connection)
-            epoch_before = _OWNER_TRANSACTION_EPOCH_GETTER(connection)
-            changes_before = _OWNER_TOTAL_CHANGES_GETTER(connection)
-            exclusive_before = _OWNER_EXCLUSIVE_TRANSACTION_GETTER(connection)
-            next_catalog = _CURSOR_STAGE_READ_MAIN_OPERATIONS_CATALOG(self)
-        except ValueError:
+            lineage_before = _read_generation(connection)
+            epoch_before = _read_epoch(connection)
+            changes_before = _read_changes(connection)
+            exclusive_before = _read_exclusive(connection)
+            next_catalog = _read_catalog(connection)
+        except _value_error:
             raise
-        except BaseException:
-            raise ValueError(
+        except _base_exception:
+            raise _value_error(
                 "SQLite cursor initial publication adoption fence is unavailable"
             ) from None
         next_schema_version, next_operation_catalog = next_catalog
         if (
             self._state != "open"
-            or _REGISTERED_SQLITE_V1_BASELINE_TEMP_STAGES.get(self) is not connection
+            or _registry_get(_registered_stages, self) is not connection
             or not exclusive_before
             or lineage_before is None
             or lineage_before is not self._cursor_transfer_lineage
@@ -3478,44 +3821,69 @@ class SQLiteV1BaselineTempStage:
                 "SQLite cursor initial publication adoption fence is invalid",
             )
         if (
-            not _OWNER_EXCLUSIVE_TRANSACTION_GETTER(connection)
-            or _OWNER_TRANSACTION_GENERATION_GETTER(connection) is not lineage_before
-            or _OWNER_TRANSACTION_EPOCH_GETTER(connection) != epoch_before
-            or _OWNER_TOTAL_CHANGES_GETTER(connection) != changes_before
+            not _read_exclusive(connection)
+            or _read_generation(connection) is not lineage_before
+            or _read_epoch(connection) != epoch_before
+            or _read_changes(connection) != changes_before
         ):
             _CURSOR_STAGE_POISON(
                 self,
                 "SQLite cursor initial publication adoption fence changed",
             )
 
-        retired_b2_fence = _SQLiteBaselineCursorB2FenceRetirement(
-            _CURSOR_PUBLICATION_CONSTRUCTION_TOKEN
-        )
-        tail = _SQLiteBaselineCursorInitialPublicationAdoptionTail(
-            _CURSOR_PUBLICATION_CONSTRUCTION_TOKEN
-        )
-        _register_cursor_b2_fence_retirement(
+        if prepared:
+            assert mint is not None
+            assert tail is not None
+            assert retirement is not None
+            tail_record = _read_tail(tail)
+            retirement_record = _read_retirement(retirement)
+            if (
+                tail_record is None
+                or tail_record.stage_ref() is not self
+                or tail_record.authority_ref() is not authority
+                or tail_record.retired_b2_fence is not retirement
+                or tail_record.next_catalog != next_catalog
+                or tail_record.watermark != watermark_record
+                or retirement_record is None
+                or retirement_record.stage_ref() is not self
+                or retirement_record.authority_ref() is not authority
+                or retirement_record.previous_catalog != previous_catalog
+                or retirement_record.previous_total_changes != self._allowed_total_changes
+                or retirement_record.previous_transaction_epoch != self._transaction_epoch
+                or retirement_record.watermark != watermark_record
+                or self._cursor_initial_publication_adoption_next_catalog != next_catalog
+                or self._cursor_initial_publication_adoption_previous_catalog != previous_catalog
+            ):
+                _CURSOR_STAGE_POISON(
+                    self,
+                    "SQLite cursor initial publication adoption preparation changed",
+                )
+            return mint
+
+        retired_b2_fence = _retirement_type(_construction_token)
+        tail = _tail_type(_construction_token)
+        _register_retirement(
             retired_b2_fence,
-            _SQLiteBaselineCursorB2FenceRetirementRecord(
+            _retirement_record_type(
                 authority_ref,
                 previous_catalog,
                 self._allowed_total_changes,
                 self._transaction_epoch,
-                ref(self),
+                _stage_ref(self),
                 watermark_record,
             ),
         )
-        _register_cursor_initial_publication_adoption_tail(
+        _register_tail(
             tail,
-            _SQLiteBaselineCursorInitialPublicationAdoptionContinuation(
+            _continuation_type(
                 authority_ref,
                 next_catalog,
                 retired_b2_fence,
-                ref(self),
+                _stage_ref(self),
                 watermark_record,
             ),
         )
-        mint = _SQLiteBaselineCursorInitialPublicationAdoptionMint(
+        mint = _mint_type(
             retired_b2_fence,
             tail,
             watermark,
@@ -3523,6 +3891,8 @@ class SQLiteV1BaselineTempStage:
         self._cursor_initial_publication_adoption_tail = tail
         self._cursor_initial_publication_adoption_retirement = retired_b2_fence
         self._cursor_initial_publication_adoption_mint = mint
+        self._cursor_initial_publication_adoption_next_catalog = next_catalog
+        self._cursor_initial_publication_adoption_previous_catalog = previous_catalog
         self._cursor_initial_publication_adoption_watermark = watermark_record
         self._cursor_outer_publication_state = "initial-adoption-prepared"
         return mint
@@ -3530,9 +3900,22 @@ class SQLiteV1BaselineTempStage:
     def _publish_cursor_initial_publication_adoption(
         self,
         tail: _SQLiteBaselineCursorInitialPublicationAdoptionTail,
+        _read_tail: Callable[
+            [object], _SQLiteBaselineCursorInitialPublicationAdoptionContinuation | None
+        ] = _cursor_initial_publication_adoption_continuation,
+        _read_retirement: Callable[
+            [object], _SQLiteBaselineCursorB2FenceRetirementRecord | None
+        ] = _cursor_b2_fence_retirement_record,
+        _discard_tail: Callable[[object], None] = (
+            _discard_cursor_initial_publication_adoption_tail
+        ),
     ) -> None:
-        continuation = _cursor_initial_publication_adoption_continuation(tail)
+        continuation = _read_tail(tail)
         continuation_authority = continuation.authority_ref() if continuation is not None else None
+        mint = self._cursor_initial_publication_adoption_mint
+        retirement = (
+            _read_retirement(continuation.retired_b2_fence) if continuation is not None else None
+        )
         if (
             continuation is None
             or continuation.stage_ref() is not self
@@ -3544,15 +3927,34 @@ class SQLiteV1BaselineTempStage:
             or self._cursor_initial_publication_adoption_retirement
             is not continuation.retired_b2_fence
             or self._cursor_initial_publication_adoption_watermark != continuation.watermark
+            or self._cursor_initial_publication_adoption_next_catalog != continuation.next_catalog
+            or mint is None
+            or mint.tail is not tail
+            or mint.retired_b2_fence is not continuation.retired_b2_fence
+            or retirement is None
+            or retirement.stage_ref() is not self
+            or retirement.authority_ref() is not continuation_authority
+            or self._cursor_initial_publication_adoption_previous_catalog is None
+            or retirement.previous_catalog
+            != self._cursor_initial_publication_adoption_previous_catalog
+            or self._legacy_main_schema_version
+            != self._cursor_initial_publication_adoption_previous_catalog[0]
+            or self._legacy_main_operation_catalog
+            != self._cursor_initial_publication_adoption_previous_catalog[1]
+            or retirement.previous_total_changes != self._allowed_total_changes
+            or retirement.previous_transaction_epoch != self._transaction_epoch
+            or retirement.watermark != continuation.watermark
             or self._cursor_b2_catalog_change_fence_state != "live"
         ):
             raise ValueError("SQLite cursor initial publication adoption tail is invalid")
-        _discard_cursor_initial_publication_adoption_tail(tail)
+        _discard_tail(tail)
         watermark = continuation.watermark
         self._transaction_epoch = watermark.transaction_epoch
         self._allowed_total_changes = watermark.total_changes
         self._legacy_main_schema_version = continuation.next_catalog[0]
         self._legacy_main_operation_catalog = continuation.next_catalog[1]
+        self._cursor_initial_publication_adoption_next_catalog = None
+        self._cursor_initial_publication_adoption_previous_catalog = None
         self._cursor_outer_publication_epoch = watermark.transaction_epoch
         self._cursor_outer_publication_allowed_total_changes = watermark.total_changes
         self._cursor_initial_publication_outer_ledger = watermark
@@ -3570,12 +3972,50 @@ class SQLiteV1BaselineTempStage:
         lease: object,
         retired_b2_fence: _SQLiteBaselineCursorB2FenceRetirement,
         watermark_input: object,
+        _copy_watermark: Callable[
+            [object],
+            tuple[
+                _SQLiteCursorInitialPublicationStageWatermark,
+                _SQLiteCursorInitialPublicationWatermarkRecord,
+            ],
+        ] = _copy_initial_publication_stage_watermark,
+        _read_retirement: Callable[
+            [object], _SQLiteBaselineCursorB2FenceRetirementRecord | None
+        ] = _cursor_b2_fence_retirement_record,
+        _read_catalog: Callable[
+            [SQLiteV1BaselineConnectionOwner], tuple[int, tuple[object, ...]]
+        ] = _read_initial_publication_main_operations_catalog,
+        _read_generation: Callable[[SQLiteV1BaselineConnectionOwner], object | None] = (
+            _OWNER_TRANSACTION_GENERATION_GETTER
+        ),
+        _read_epoch: Callable[[SQLiteV1BaselineConnectionOwner], int] = (
+            _OWNER_TRANSACTION_EPOCH_GETTER
+        ),
+        _read_changes: Callable[[SQLiteV1BaselineConnectionOwner], int] = (
+            _OWNER_TOTAL_CHANGES_GETTER
+        ),
+        _read_exclusive: Callable[[SQLiteV1BaselineConnectionOwner], bool] = (
+            _OWNER_EXCLUSIVE_TRANSACTION_GETTER
+        ),
+        _registered_stages: WeakKeyDictionary[
+            SQLiteV1BaselineTempStage, SQLiteV1BaselineConnectionOwner
+        ] = _REGISTERED_SQLITE_V1_BASELINE_TEMP_STAGES,
+        _registry_get: Callable[..., SQLiteV1BaselineConnectionOwner | None] = (
+            _WEAK_KEY_DICTIONARY_GET
+        ),
+        _same_watermark: Callable[
+            [
+                _SQLiteCursorInitialPublicationWatermarkRecord,
+                _SQLiteCursorInitialPublicationWatermarkRecord,
+            ],
+            bool,
+        ] = _same_initial_publication_watermark,
     ) -> None:
-        _watermark, watermark = _copy_initial_publication_stage_watermark(watermark_input)
-        retirement = _cursor_b2_fence_retirement_record(retired_b2_fence)
+        _watermark, watermark = _copy_watermark(watermark_input)
+        retirement = _read_retirement(retired_b2_fence)
         if (
             self._state != "open"
-            or _REGISTERED_SQLITE_V1_BASELINE_TEMP_STAGES.get(self) is not self._connection
+            or _registry_get(_registered_stages, self) is not self._connection
             or self._cursor_outer_publication_state != "initial-publication-adopted"
             or self._cursor_outer_publication_authority_ref is None
             or self._cursor_outer_publication_authority_ref() is not authority
@@ -3589,7 +4029,7 @@ class SQLiteV1BaselineTempStage:
             or retirement is None
             or retirement.stage_ref() is not self
             or retirement.authority_ref() is not authority
-            or not _same_initial_publication_watermark(retirement.watermark, watermark)
+            or not _same_watermark(retirement.watermark, watermark)
             or self._cursor_outer_publication_epoch != watermark.transaction_epoch
             or self._cursor_outer_publication_lineage is not self._cursor_transfer_lineage
             or self._cursor_outer_publication_allowed_total_changes != watermark.total_changes
@@ -3600,16 +4040,16 @@ class SQLiteV1BaselineTempStage:
             raise ValueError("SQLite cursor initial publication adopted authority is invalid")
         connection = self._connection
         if (
-            not _OWNER_EXCLUSIVE_TRANSACTION_GETTER(connection)
-            or _OWNER_TRANSACTION_GENERATION_GETTER(connection) is not self._cursor_transfer_lineage
-            or _OWNER_TRANSACTION_EPOCH_GETTER(connection) != watermark.transaction_epoch
-            or _OWNER_TOTAL_CHANGES_GETTER(connection) != watermark.total_changes
+            not _read_exclusive(connection)
+            or _read_generation(connection) is not self._cursor_transfer_lineage
+            or _read_epoch(connection) != watermark.transaction_epoch
+            or _read_changes(connection) != watermark.total_changes
         ):
             _CURSOR_STAGE_POISON(
                 self,
                 "SQLite cursor initial publication adopted fence changed",
             )
-        current_catalog = _CURSOR_STAGE_READ_MAIN_OPERATIONS_CATALOG(self)
+        current_catalog = _read_catalog(connection)
         if current_catalog != (
             self._legacy_main_schema_version,
             self._legacy_main_operation_catalog,
@@ -3627,6 +4067,8 @@ class SQLiteV1BaselineTempStage:
         if retirement is not None:
             _discard_cursor_b2_fence_retirement(retirement)
         self._cursor_initial_publication_adoption_mint = None
+        self._cursor_initial_publication_adoption_next_catalog = None
+        self._cursor_initial_publication_adoption_previous_catalog = None
         self._cursor_initial_publication_adoption_retirement = None
         self._cursor_initial_publication_adoption_tail = None
         self._cursor_initial_publication_adoption_watermark = None
@@ -4040,6 +4482,8 @@ class SQLiteV1BaselineTempStage:
         if adoption_retirement is not None:
             _discard_cursor_b2_fence_retirement(adoption_retirement)
         self._cursor_initial_publication_adoption_mint = None
+        self._cursor_initial_publication_adoption_next_catalog = None
+        self._cursor_initial_publication_adoption_previous_catalog = None
         self._cursor_initial_publication_adoption_retirement = None
         self._cursor_initial_publication_adoption_tail = None
         self._cursor_initial_publication_adoption_watermark = None
@@ -4221,6 +4665,8 @@ class SQLiteV1BaselineTempStage:
         if adoption_retirement is not None:
             _discard_cursor_b2_fence_retirement(adoption_retirement)
         self._cursor_initial_publication_adoption_mint = None
+        self._cursor_initial_publication_adoption_next_catalog = None
+        self._cursor_initial_publication_adoption_previous_catalog = None
         self._cursor_initial_publication_adoption_retirement = None
         self._cursor_initial_publication_adoption_tail = None
         self._cursor_initial_publication_adoption_watermark = None
@@ -4338,10 +4784,6 @@ class SQLiteV1BaselineTempStage:
         self._created_indexes.clear()
         self._created_tables.clear()
 
-
-_REGISTERED_SQLITE_V1_BASELINE_TEMP_STAGES: WeakKeyDictionary[
-    SQLiteV1BaselineTempStage, SQLiteV1BaselineConnectionOwner
-] = WeakKeyDictionary()
 
 # Freeze the B1 entry fence and phase-catalog validator after class creation.
 # Internal calls use these exact functions rather than mutable class lookup.

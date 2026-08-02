@@ -15,7 +15,7 @@ from base64 import urlsafe_b64encode
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
-from typing import Literal, NamedTuple, Never, TypeAlias, cast
+from typing import Any, Literal, NamedTuple, Never, TypeAlias, cast
 from weakref import ReferenceType, WeakKeyDictionary, ref
 
 from .sqlite_cursor_publication_clock_authority import (
@@ -77,6 +77,10 @@ from .sqlite_operation_baseline_cursor_ownership import (
     assert_sqlite_cursor_pre_rebind_receipt_provenance,
 )
 from .sqlite_operation_baseline_cursor_stage_ownership import (
+    _TRANSFERS as _OWNERSHIP_TRANSFERS,
+)
+from .sqlite_operation_baseline_cursor_stage_ownership import (
+    _assert_sqlite_cursor_stage_ownership_initial_publication_adopted_intrinsic,
     _assert_sqlite_cursor_stage_ownership_outer_publication_owned_intrinsic,
     _assert_sqlite_cursor_stage_ownership_outer_publication_prepared_intrinsic,
     _assert_sqlite_cursor_stage_ownership_post_ddl_reader_terminal_intrinsic,
@@ -84,6 +88,8 @@ from .sqlite_operation_baseline_cursor_stage_ownership import (
     _complete_sqlite_cursor_stage_ownership_post_ddl_reader_intrinsic,
     _mint_sqlite_cursor_stage_ownership_outer_publication_authority_intrinsic,
     _poison_sqlite_cursor_stage_ownership_outer_publication_intrinsic,
+    _prepare_sqlite_cursor_stage_ownership_initial_publication_adoption_intrinsic,
+    _publish_sqlite_cursor_stage_ownership_initial_publication_adoption_intrinsic,
     _publish_sqlite_cursor_stage_ownership_outer_publication_intrinsic,
     _register_sqlite_cursor_stage_ownership_post_ddl_reader_intrinsic,
     _retire_sqlite_cursor_stage_ownership_outer_publication_intrinsic,
@@ -119,7 +125,12 @@ from .sqlite_operation_baseline_source import (
     _SQLiteConnectionMigration0002Execution,
     _SQLiteConnectionOperationSequenceZeroExecution,
 )
-from .sqlite_operation_baseline_stage import SQLiteV1BaselineTempStage
+from .sqlite_operation_baseline_stage import (
+    SQLiteV1BaselineTempStage,
+    _SQLiteBaselineCursorB2FenceRetirement,
+    _SQLiteCursorInitialPublicationOuterLedgerWatermark,
+    _SQLiteCursorInitialPublicationStageWatermark,
+)
 
 _CONSTRUCTION_TOKEN = object()
 _MAX_SAFE_INTEGER = 2**53 - 1
@@ -556,6 +567,87 @@ class _SQLiteOperationSequenceZeroPublicationReceiptSnapshot(NamedTuple):
     write_kind: Literal["operation-sequence-zero-publication"]
 
 
+class _SQLiteMigration0002CatalogRebuildReceiptConsumedTombstone:
+    __slots__ = ("__weakref__",)
+
+    def __init__(self, token: object) -> None:
+        if token is not _CONSTRUCTION_TOKEN:
+            raise TypeError("GE_CURSOR_B3_INITIAL_ADOPTION_TOMBSTONE")
+
+
+class _SQLiteBaselineEntriesPublicationReceiptConsumedTombstone:
+    __slots__ = ("__weakref__",)
+
+    def __init__(self, token: object) -> None:
+        if token is not _CONSTRUCTION_TOKEN:
+            raise TypeError("GE_CURSOR_B3_INITIAL_ADOPTION_TOMBSTONE")
+
+
+class _SQLiteBaselineHeaderPublicationReceiptConsumedTombstone:
+    __slots__ = ("__weakref__",)
+
+    def __init__(self, token: object) -> None:
+        if token is not _CONSTRUCTION_TOKEN:
+            raise TypeError("GE_CURSOR_B3_INITIAL_ADOPTION_TOMBSTONE")
+
+
+class _SQLiteOperationSequenceZeroPublicationReceiptConsumedTombstone:
+    __slots__ = ("__weakref__",)
+
+    def __init__(self, token: object) -> None:
+        if token is not _CONSTRUCTION_TOKEN:
+            raise TypeError("GE_CURSOR_B3_INITIAL_ADOPTION_TOMBSTONE")
+
+
+class _SQLiteCursorInitialStageAdoptionReceipt:
+    __slots__ = ("__weakref__",)
+
+    def __init__(self, token: object) -> None:
+        if token is not _CONSTRUCTION_TOKEN:
+            raise TypeError("GE_CURSOR_B3_INITIAL_ADOPTION_RECEIPT")
+
+
+_SQLiteCursorInitialPublicationReceiptBundle: TypeAlias = tuple[
+    _SQLiteMigration0002CatalogRebuildReceipt,
+    _SQLiteBaselineEntriesPublicationReceipt,
+    _SQLiteBaselineHeaderPublicationReceipt,
+    _SQLiteOperationSequenceZeroPublicationReceipt,
+]
+
+
+class _SQLiteCursorInitialStageAdoptionReceiptSnapshot(NamedTuple):
+    authority: _SQLiteCursorOuterPublicationAuthority
+    connection: SQLiteV1BaselineConnectionOwner
+    stage: SQLiteV1BaselineTempStage
+    receipt: SQLiteCursorPreRebindReceipt
+    projection_identity: BaselineProjectionIdentity
+    projection_reference: SQLiteCursorExactProjectionReference
+    transfer: _SQLiteCursorStageOwnershipTransfer
+    transaction_generation: object
+    migration_0002_receipt: _SQLiteMigration0002CatalogRebuildReceipt
+    baseline_entries_publication_receipt: _SQLiteBaselineEntriesPublicationReceipt
+    baseline_header_publication_receipt: _SQLiteBaselineHeaderPublicationReceipt
+    operation_sequence_zero_publication_receipt: _SQLiteOperationSequenceZeroPublicationReceipt
+    migration_0002_consumed_tombstone: _SQLiteMigration0002CatalogRebuildReceiptConsumedTombstone
+    baseline_entries_consumed_tombstone: _SQLiteBaselineEntriesPublicationReceiptConsumedTombstone
+    baseline_header_consumed_tombstone: _SQLiteBaselineHeaderPublicationReceiptConsumedTombstone
+    operation_sequence_zero_consumed_tombstone: (
+        _SQLiteOperationSequenceZeroPublicationReceiptConsumedTombstone
+    )
+    post_ddl_catalog_fence: _SQLiteCursorPostDdlCatalogFence
+    reader_lease: _SQLiteCursorPostDdlPublicationReaderLease
+    reader_lease_lifecycle: Literal["retired"]
+    reader_close_count: Literal[1]
+    reader_rederived_projection_sha256: str
+    adopted_transaction_epoch: int
+    adopted_total_changes: int
+    adopted_outer_ledger: _SQLiteCursorOuterPublicationLedgerSnapshot
+    target_catalog_sha256: str
+    retired_b2_fence: _SQLiteBaselineCursorB2FenceRetirement
+    mint_count: Literal[1]
+    write_kind: Literal["initial-publication-stage-adoption"]
+
+
 class _SQLiteCursorOuterPublicationAuthoritySnapshot(NamedTuple):
     lifecycle: _AuthorityLifecycle
     stage_ownership_poison_reason: str | None
@@ -610,6 +702,22 @@ class _SQLiteCursorOuterPublicationAuthoritySnapshot(NamedTuple):
     operation_sequence_zero_prepare_count: Literal[0, 1]
     operation_sequence_zero_execute_count: Literal[0, 1]
     operation_sequence_zero_affected_rows: Literal[0, 1]
+    initial_stage_adoption_receipt: _SQLiteCursorInitialStageAdoptionReceipt | None
+    initial_stage_adoption_receipt_mint_count: Literal[0, 1]
+    receipt_consumption_count: Literal[0, 4]
+    tombstone_mint_count: Literal[0, 4]
+    migration_0002_consumed_tombstone: (
+        _SQLiteMigration0002CatalogRebuildReceiptConsumedTombstone | None
+    )
+    baseline_entries_consumed_tombstone: (
+        _SQLiteBaselineEntriesPublicationReceiptConsumedTombstone | None
+    )
+    baseline_header_consumed_tombstone: (
+        _SQLiteBaselineHeaderPublicationReceiptConsumedTombstone | None
+    )
+    operation_sequence_zero_consumed_tombstone: (
+        _SQLiteOperationSequenceZeroPublicationReceiptConsumedTombstone | None
+    )
     write_phase: _WritePhase
 
 
@@ -688,6 +796,22 @@ class _AuthorityState:
     operation_sequence_zero_prepare_count: Literal[0, 1] = 0
     operation_sequence_zero_execute_count: Literal[0, 1] = 0
     operation_sequence_zero_affected_rows: Literal[0, 1] = 0
+    initial_stage_adoption_receipt: _SQLiteCursorInitialStageAdoptionReceipt | None = None
+    initial_stage_adoption_receipt_mint_count: Literal[0, 1] = 0
+    receipt_consumption_count: Literal[0, 4] = 0
+    tombstone_mint_count: Literal[0, 4] = 0
+    migration_0002_consumed_tombstone: (
+        _SQLiteMigration0002CatalogRebuildReceiptConsumedTombstone | None
+    ) = None
+    baseline_entries_consumed_tombstone: (
+        _SQLiteBaselineEntriesPublicationReceiptConsumedTombstone | None
+    ) = None
+    baseline_header_consumed_tombstone: (
+        _SQLiteBaselineHeaderPublicationReceiptConsumedTombstone | None
+    ) = None
+    operation_sequence_zero_consumed_tombstone: (
+        _SQLiteOperationSequenceZeroPublicationReceiptConsumedTombstone | None
+    ) = None
     write_phase: _WritePhase = "ready-0002"
 
 
@@ -887,6 +1011,85 @@ class _OperationSequenceZeroPublicationReceiptRecord:
     updated_at_ms: int
 
 
+_InitialAdoptionLifecycle: TypeAlias = Literal["pending", "active", "poisoned"]
+
+
+@dataclass(slots=True)
+class _ConsumedReceiptTombstoneRecord:
+    lifecycle: _InitialAdoptionLifecycle
+    original_receipt_id: int
+    original_receipt_ref: ReferenceType[object]
+    adoption_receipt_id: int
+    adoption_receipt_ref: ReferenceType[_SQLiteCursorInitialStageAdoptionReceipt]
+
+
+@dataclass(slots=True)
+class _InitialStageAdoptionReceiptRecord:
+    lifecycle: _InitialAdoptionLifecycle
+    mint_count: Literal[1]
+    write_kind: Literal["initial-publication-stage-adoption"]
+    authority_id: int
+    authority_ref: ReferenceType[_SQLiteCursorStageOwnershipOuterPublicationAuthority]
+    connection_id: int
+    stage_id: int
+    stage_ref: ReferenceType[SQLiteV1BaselineTempStage]
+    receipt_id: int
+    receipt_ref: ReferenceType[SQLiteCursorPreRebindReceipt]
+    projection_identity_id: int
+    projection_reference_id: int
+    projection_reference_ref: ReferenceType[SQLiteCursorExactProjectionReference]
+    transfer_id: int
+    transfer_ref: ReferenceType[_SQLiteCursorStageOwnershipTransfer]
+    migration_0002_receipt_id: int
+    migration_0002_receipt_ref: ReferenceType[_SQLiteMigration0002CatalogRebuildReceipt]
+    baseline_entries_receipt_id: int
+    baseline_entries_receipt_ref: ReferenceType[_SQLiteBaselineEntriesPublicationReceipt]
+    baseline_header_receipt_id: int
+    baseline_header_receipt_ref: ReferenceType[_SQLiteBaselineHeaderPublicationReceipt]
+    operation_sequence_zero_receipt_id: int
+    operation_sequence_zero_receipt_ref: ReferenceType[
+        _SQLiteOperationSequenceZeroPublicationReceipt
+    ]
+    migration_0002_tombstone_id: int
+    migration_0002_tombstone_ref: ReferenceType[
+        _SQLiteMigration0002CatalogRebuildReceiptConsumedTombstone
+    ]
+    baseline_entries_tombstone_id: int
+    baseline_entries_tombstone_ref: ReferenceType[
+        _SQLiteBaselineEntriesPublicationReceiptConsumedTombstone
+    ]
+    baseline_header_tombstone_id: int
+    baseline_header_tombstone_ref: ReferenceType[
+        _SQLiteBaselineHeaderPublicationReceiptConsumedTombstone
+    ]
+    operation_sequence_zero_tombstone_id: int
+    operation_sequence_zero_tombstone_ref: ReferenceType[
+        _SQLiteOperationSequenceZeroPublicationReceiptConsumedTombstone
+    ]
+    fence_id: int
+    fence_ref: ReferenceType[_SQLiteCursorPostDdlCatalogFence]
+    reader_lease_id: int
+    reader_lease_ref: ReferenceType[_SQLiteCursorPostDdlPublicationReaderLease]
+    retired_b2_fence_id: int
+    retired_b2_fence_ref: ReferenceType[_SQLiteBaselineCursorB2FenceRetirement]
+    watermark: _SQLiteCursorInitialPublicationStageWatermark
+    adopted_outer_ledger: _SQLiteCursorOuterPublicationLedgerSnapshot
+    adopted_total_changes: int
+    adopted_transaction_epoch: int
+    target_catalog_sha256: str
+
+
+class _CheckedInitialPublicationBundle(NamedTuple):
+    migration_0002_receipt: _SQLiteMigration0002CatalogRebuildReceipt
+    migration_0002_record: _Migration0002ReceiptRecord
+    baseline_entries_receipt: _SQLiteBaselineEntriesPublicationReceipt
+    baseline_entries_record: _BaselineEntriesPublicationReceiptRecord
+    baseline_header_receipt: _SQLiteBaselineHeaderPublicationReceipt
+    baseline_header_record: _BaselineHeaderPublicationReceiptRecord
+    operation_sequence_zero_receipt: _SQLiteOperationSequenceZeroPublicationReceipt
+    operation_sequence_zero_record: _OperationSequenceZeroPublicationReceiptRecord
+
+
 class _IdentityEntry(NamedTuple):
     key_ref: ReferenceType[object]
     value: object
@@ -907,15 +1110,27 @@ _POST_DDL_PUBLICATION_READER_LEASES: dict[int, _IdentityEntry] = {}
 _BASELINE_ENTRIES_PUBLICATION_RECEIPTS: dict[int, _IdentityEntry] = {}
 _BASELINE_HEADER_PUBLICATION_RECEIPTS: dict[int, _IdentityEntry] = {}
 _OPERATION_SEQUENCE_ZERO_PUBLICATION_RECEIPTS: dict[int, _IdentityEntry] = {}
+_MIGRATION_0002_RECEIPT_CONSUMPTIONS: dict[int, _IdentityEntry] = {}
+_BASELINE_ENTRIES_PUBLICATION_RECEIPT_CONSUMPTIONS: dict[int, _IdentityEntry] = {}
+_BASELINE_HEADER_PUBLICATION_RECEIPT_CONSUMPTIONS: dict[int, _IdentityEntry] = {}
+_OPERATION_SEQUENCE_ZERO_PUBLICATION_RECEIPT_CONSUMPTIONS: dict[int, _IdentityEntry] = {}
+_INITIAL_STAGE_ADOPTION_RECEIPTS: dict[int, _IdentityEntry] = {}
+_INITIAL_STAGE_ADOPTION_TOMBSTONES: dict[int, _IdentityEntry] = {}
 
 # Capture every replaceable dependency before any caller can alter its module or
 # class attribute.  Registry lookup below also checks the weak referent with
 # ``is`` so equality and hash hooks are never authority.
 _ID = id
+_TYPE = type
 _REF = ref
+_STABLE_ID = _ID
+_STABLE_TYPE = _TYPE
+_STABLE_REF = _REF
 _DICT_GET = dict.get
 _DICT_SETITEM = dict.__setitem__
 _DICT_POP = dict.pop
+_TUPLE_LEN = tuple.__len__
+_TUPLE_GETITEM = tuple.__getitem__
 _WEAK_KEY_GET = WeakKeyDictionary.get
 _RECEIPT_PROVENANCE = assert_sqlite_cursor_pre_rebind_receipt_provenance
 _OWNERSHIP_ASSERT_COMPLETE = _assert_sqlite_cursor_stage_ownership_pre_rebind_complete_intrinsic
@@ -925,6 +1140,15 @@ _OWNERSHIP_ASSERT_PREPARED = (
 )
 _OWNERSHIP_PUBLISH_OUTER = _publish_sqlite_cursor_stage_ownership_outer_publication_intrinsic
 _OWNERSHIP_ASSERT_OWNED = _assert_sqlite_cursor_stage_ownership_outer_publication_owned_intrinsic
+_OWNERSHIP_PREPARE_INITIAL_ADOPTION = (
+    _prepare_sqlite_cursor_stage_ownership_initial_publication_adoption_intrinsic
+)
+_OWNERSHIP_PUBLISH_INITIAL_ADOPTION = (
+    _publish_sqlite_cursor_stage_ownership_initial_publication_adoption_intrinsic
+)
+_OWNERSHIP_ASSERT_INITIAL_ADOPTED = (
+    _assert_sqlite_cursor_stage_ownership_initial_publication_adopted_intrinsic
+)
 _OWNERSHIP_REGISTER_POST_DDL_READER = (
     _register_sqlite_cursor_stage_ownership_post_ddl_reader_intrinsic
 )
@@ -1027,12 +1251,12 @@ def _retire_dead_entry(
 
 
 def _identity_set(registry: dict[int, _IdentityEntry], key: object, value: object) -> None:
-    key_id = _ID(key)
+    key_id = _STABLE_ID(key)
 
     def retire(dead: ReferenceType[object]) -> None:
         _retire_dead_entry(registry, key_id, dead)
 
-    key_ref = _REF(key, retire)
+    key_ref = _STABLE_REF(key, retire)
     _DICT_SETITEM(registry, key_id, _IdentityEntry(key_ref, value))
 
 
@@ -1040,10 +1264,13 @@ def _identity_get(
     registry: dict[int, _IdentityEntry],
     key: object,
     exact_type: type[object],
+    _type: Callable[[object], type[object]] = _STABLE_TYPE,
+    _dictionary_get: Callable[..., Any] = _DICT_GET,
+    _identity: Callable[[object], int] = _STABLE_ID,
 ) -> object | None:
-    if type(key) is not exact_type:
+    if _type(key) is not exact_type:
         return None
-    entry = _DICT_GET(registry, _ID(key))
+    entry = _dictionary_get(registry, _identity(key))
     return entry.value if entry is not None and entry.key_ref() is key else None
 
 
@@ -1062,7 +1289,7 @@ def _link_set(
     key: object,
     authority: _SQLiteCursorOuterPublicationAuthority,
 ) -> None:
-    key_id = _ID(key)
+    key_id = _STABLE_ID(key)
 
     def retire_key(dead: ReferenceType[object]) -> None:
         _retire_dead_link(registry, key_id, dead)
@@ -1072,8 +1299,8 @@ def _link_set(
     ) -> None:
         _retire_dead_link(registry, key_id, cast(ReferenceType[object], dead))
 
-    key_ref = _REF(key, retire_key)
-    authority_ref = _REF(authority, retire_authority)
+    key_ref = _STABLE_REF(key, retire_key)
+    authority_ref = _STABLE_REF(authority, retire_authority)
     _DICT_SETITEM(registry, key_id, _AuthorityLink(key_ref, authority_ref))
 
 
@@ -1082,9 +1309,9 @@ def _link_get(
     key: object,
     exact_type: type[object],
 ) -> _SQLiteCursorOuterPublicationAuthority | None:
-    if type(key) is not exact_type:
+    if _STABLE_TYPE(key) is not exact_type:
         return None
-    entry = _DICT_GET(registry, _ID(key))
+    entry = _DICT_GET(registry, _STABLE_ID(key))
     if entry is None or entry.key_ref() is not key:
         return None
     return entry.authority_ref()
@@ -1108,9 +1335,9 @@ def _clock_graph(
     outer_clock_evidence: _ClockEvidence,
 ) -> tuple[object, int, int]:
     if (
-        type(migration_lock_capability) is not _MigrationLockCapability
-        or type(provider_clock_capability) is not _ProviderClockCapability
-        or type(outer_clock_evidence) is not _ClockEvidence
+        _STABLE_TYPE(migration_lock_capability) is not _MigrationLockCapability
+        or _STABLE_TYPE(provider_clock_capability) is not _ProviderClockCapability
+        or _STABLE_TYPE(outer_clock_evidence) is not _ClockEvidence
     ):
         _fail("GE_CURSOR_B3_OUTER_CLOCK_GRAPH")
     lock_state = _WEAK_KEY_GET(_LOCK_CAPABILITIES, migration_lock_capability)
@@ -1147,7 +1374,7 @@ def _clock_graph(
 
 def _active_clock_graph(state: _AuthorityState) -> object:
     tombstone = state.outer_clock_consumed_tombstone
-    if type(tombstone) is not _ConsumedClockTombstone:
+    if _STABLE_TYPE(tombstone) is not _ConsumedClockTombstone:
         _fail("GE_CURSOR_B3_OUTER_CLOCK_GRAPH")
     lock_state = _WEAK_KEY_GET(_LOCK_CAPABILITIES, state.migration_lock_capability)
     clock_state = _WEAK_KEY_GET(_CLOCK_CAPABILITIES, state.provider_clock_capability)
@@ -1188,9 +1415,9 @@ def _owner_snapshot(connection: SQLiteV1BaselineConnectionOwner) -> tuple[object
     if (
         not _OWNER_EXCLUSIVE(connection)
         or generation is None
-        or type(epoch) is not int
+        or _STABLE_TYPE(epoch) is not int
         or epoch < 0
-        or type(total_changes) is not int
+        or _STABLE_TYPE(total_changes) is not int
         or not 0 <= total_changes <= _MAX_SAFE_INTEGER
     ):
         _fail("GE_CURSOR_B3_OUTER_STALE_FENCE")
@@ -1230,8 +1457,22 @@ def _poison(
     state.lifecycle = "poisoned"
     state.write_phase = "poisoned"
     state.stage_ownership_poison_reason = reason
-    with suppress(BaseException):
+    try:
         _OWNERSHIP_POISON(state.transfer, authority, reason)
+    except BaseException:
+        # Once the outer graph has authenticated the exact transfer and
+        # authority, a corrupted lower lifecycle must not prevent terminal
+        # poison from reaching the transfer and stage.  Restore only the
+        # lower poison entry classification, then immediately burn it.
+        metadata = _WEAK_KEY_GET(_OWNERSHIP_TRANSFERS, state.transfer)
+        if (
+            metadata is not None
+            and metadata.outer_authority_ref is not None
+            and metadata.outer_authority_ref() is authority
+        ):
+            metadata.lifecycle = "outer-publication-owned"
+            with suppress(BaseException):
+                _OWNERSHIP_POISON(state.transfer, authority, reason)
 
 
 def _retire(
@@ -1350,17 +1591,17 @@ def _prepare_sqlite_cursor_outer_publication_authority_intrinsic(
     source_schema_identity_sha256 = source_envelope.get("sourceSchemaIdentitySha256")
     captured_at_ms = source_envelope.get("capturedAtMs")
     if (
-        type(source_descriptor_hash) is not str
+        _STABLE_TYPE(source_descriptor_hash) is not str
         or len(source_descriptor_hash) != 64
         or source_descriptor_hash != seal.source_descriptor_hash
-        or type(source_migration_lineage_id) is not str
+        or _STABLE_TYPE(source_migration_lineage_id) is not str
         or not source_migration_lineage_id
-        or type(source_migration_lineage_sha256) is not str
+        or _STABLE_TYPE(source_migration_lineage_sha256) is not str
         or len(source_migration_lineage_sha256) != 64
-        or type(source_schema_identity_sha256) is not str
+        or _STABLE_TYPE(source_schema_identity_sha256) is not str
         or len(source_schema_identity_sha256) != 64
         or source_schema_identity_sha256 != seal.source_schema_identity_sha256
-        or type(captured_at_ms) is not int
+        or _STABLE_TYPE(captured_at_ms) is not int
         or not 0 <= captured_at_ms <= _MAX_SAFE_INTEGER
     ):
         _fail("GE_CURSOR_B3_OUTER_SOURCE_ENVELOPE")
@@ -1463,14 +1704,29 @@ def _assert_sqlite_cursor_outer_publication_authority_intrinsic(
         clock_generation = _active_clock_graph(state)
         if clock_generation is not generation:
             _fail("GE_CURSOR_B3_OUTER_STALE_FENCE")
-        _OWNERSHIP_ASSERT_OWNED(
-            state.connection,
-            state.stage,
-            state.receipt,
-            state.projection_identity,
-            state.transfer,
-            authority,
-        )
+        if state.write_phase == "initial-stage-adoption-complete":
+            _assert_adopted_stage_ownership_from_state(state, authority)
+        elif (
+            state.write_phase == "sequence-zero-complete"
+            and state.post_ddl_publication_reader_lease is not None
+        ):
+            # The lower owner may already be in its retryable adoption-prepared
+            # state after a cancellation.  Its terminal-reader proof accepts
+            # both owned and adoption-prepared without exposing that state.
+            _OWNERSHIP_ASSERT_POST_DDL_READER_TERMINAL(
+                state.transfer,
+                authority,
+                state.post_ddl_publication_reader_lease,
+            )
+        else:
+            _OWNERSHIP_ASSERT_OWNED(
+                state.connection,
+                state.stage,
+                state.receipt,
+                state.projection_identity,
+                state.transfer,
+                authority,
+            )
         return authority
     except BaseException as error:
         if isinstance(error, ValueError) and str(error) == "GE_CURSOR_B3_OUTER_STALE_FENCE":
@@ -1523,7 +1779,7 @@ def _execute_sqlite_cursor_migration_0002_catalog_rebuild_intrinsic(
 
     try:
         legacy_count = state.projection_identity.legacy_operation_count
-        if type(legacy_count) is not int or not 0 <= legacy_count < _MAX_SAFE_INTEGER:
+        if _STABLE_TYPE(legacy_count) is not int or not 0 <= legacy_count < _MAX_SAFE_INTEGER:
             _fail("GE_CURSOR_B3_MIGRATION_0002_LEGACY_COUNT")
 
         asset = _LOAD_MIGRATION_0002_ASSET()
@@ -1660,7 +1916,7 @@ def _execute_sqlite_cursor_migration_0002_catalog_rebuild_intrinsic(
             receipt,
             _Migration0002ReceiptRecord(
                 asset=asset,
-                authority_ref=_REF(authority),
+                authority_ref=_STABLE_REF(authority),
                 connection=state.connection,
                 post_ddl_catalog=post_ddl_catalog,
                 pre_ddl_catalog=pre_ddl_catalog,
@@ -1687,6 +1943,15 @@ def _execute_sqlite_cursor_migration_0002_catalog_rebuild_intrinsic(
 def _read_sqlite_migration_0002_catalog_rebuild_receipt_snapshot_intrinsic(
     receipt: _SQLiteMigration0002CatalogRebuildReceipt,
 ) -> _SQLiteMigration0002CatalogRebuildReceiptSnapshot:
+    if (
+        _identity_get(
+            _MIGRATION_0002_RECEIPT_CONSUMPTIONS,
+            receipt,
+            _SQLiteMigration0002CatalogRebuildReceipt,
+        )
+        is not None
+    ):
+        _fail("GE_CURSOR_B3_MIGRATION_0002_RECEIPT_CONSUMED")
     record = _identity_get(
         _MIGRATION_0002_RECEIPTS,
         receipt,
@@ -1737,8 +2002,8 @@ def _exact_post_ddl_catalog(
     retained: _TargetCatalogSnapshot,
 ) -> bool:
     return (
-        type(catalog) is _TargetCatalogSnapshot
-        and type(retained) is _TargetCatalogSnapshot
+        _STABLE_TYPE(catalog) is _TargetCatalogSnapshot
+        and _STABLE_TYPE(retained) is _TargetCatalogSnapshot
         and catalog.application_id
         == retained.application_id
         == SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_EXPECTED_APPLICATION_ID
@@ -1818,8 +2083,8 @@ def _resolve_post_ddl_catalog_fence_graph(
     if (
         authority is None
         or receipt is None
-        or _ID(authority) != record.authority_id
-        or _ID(receipt) != record.migration_0002_receipt_id
+        or _STABLE_ID(authority) != record.authority_id
+        or _STABLE_ID(receipt) != record.migration_0002_receipt_id
     ):
         _fail("GE_CURSOR_B3_POST_DDL_CATALOG_FENCE")
     return authority, receipt
@@ -1893,16 +2158,16 @@ def _mint_sqlite_cursor_post_ddl_catalog_fence_intrinsic(
             _POST_DDL_CATALOG_FENCES,
             fence,
             _PostDdlCatalogFenceRecord(
-                authority_id=_ID(authority),
-                authority_ref=_REF(authority),
+                authority_id=_STABLE_ID(authority),
+                authority_ref=_STABLE_REF(authority),
                 catalog_application_id=catalog.application_id,
                 catalog_canonical_utf8_bytes=catalog.canonical_utf8_bytes,
                 catalog_inventory=catalog.inventory,
                 catalog_row_count=catalog.row_count,
                 catalog_sha256=catalog.catalog_sha256,
                 catalog_user_version=catalog.user_version,
-                migration_0002_receipt_id=_ID(migration_0002_receipt),
-                migration_0002_receipt_ref=_REF(migration_0002_receipt),
+                migration_0002_receipt_id=_STABLE_ID(migration_0002_receipt),
+                migration_0002_receipt_ref=_STABLE_REF(migration_0002_receipt),
                 outer_ledger_watermark=current_ledger,
                 total_changes_watermark=state.current_total_changes,
                 transaction_epoch=state.current_transaction_epoch,
@@ -1928,9 +2193,9 @@ def _assert_sqlite_cursor_post_ddl_catalog_fence_intrinsic(
 
     record = _post_ddl_catalog_fence_record(fence)
     if (
-        record.authority_id != _ID(authority)
+        record.authority_id != _STABLE_ID(authority)
         or record.authority_ref() is not authority
-        or record.migration_0002_receipt_id != _ID(migration_0002_receipt)
+        or record.migration_0002_receipt_id != _STABLE_ID(migration_0002_receipt)
         or record.migration_0002_receipt_ref() is not migration_0002_receipt
     ):
         _fail("GE_CURSOR_B3_POST_DDL_CATALOG_FENCE_GRAPH")
@@ -1957,9 +2222,23 @@ def _assert_sqlite_cursor_post_ddl_catalog_fence_intrinsic(
             or receipt_record.connection is not state.connection
         ):
             _fail("GE_CURSOR_B3_POST_DDL_CATALOG_FENCE_GRAPH")
-        _read_sqlite_migration_0002_catalog_rebuild_receipt_snapshot_intrinsic(
-            migration_0002_receipt
+        migration_consumption = _identity_get(
+            _MIGRATION_0002_RECEIPT_CONSUMPTIONS,
+            migration_0002_receipt,
+            _SQLiteMigration0002CatalogRebuildReceipt,
         )
+        if migration_consumption is None:
+            _read_sqlite_migration_0002_catalog_rebuild_receipt_snapshot_intrinsic(
+                migration_0002_receipt
+            )
+        else:
+            _assert_consumed_migration_fence_chain_intrinsic(
+                state,
+                authority,
+                migration_0002_receipt,
+                cast(_ConsumedReceiptTombstoneRecord, migration_consumption),
+                fence,
+            )
         watermark = record.outer_ledger_watermark
         if (
             state.transaction_generation is not record.transaction_generation
@@ -2031,8 +2310,8 @@ def _same_projection_identity(
     right: BaselineProjectionIdentity,
 ) -> bool:
     return (
-        type(left) is BaselineProjectionIdentity
-        and type(right) is BaselineProjectionIdentity
+        _STABLE_TYPE(left) is BaselineProjectionIdentity
+        and _STABLE_TYPE(right) is BaselineProjectionIdentity
         and left.baseline_id == right.baseline_id
         and left.entry_count == right.entry_count
         and left.legacy_operation_count == right.legacy_operation_count
@@ -2078,12 +2357,12 @@ def _resolve_post_ddl_publication_reader_graph(
         or stage is None
         or transfer is None
         or projection_reference is None
-        or _ID(authority) != record.authority_id
-        or _ID(receipt) != record.migration_0002_receipt_id
-        or _ID(fence) != record.fence_id
-        or _ID(stage) != record.stage_id
-        or _ID(transfer) != record.transfer_id
-        or _ID(projection_reference) != record.projection_reference_id
+        or _STABLE_ID(authority) != record.authority_id
+        or _STABLE_ID(receipt) != record.migration_0002_receipt_id
+        or _STABLE_ID(fence) != record.fence_id
+        or _STABLE_ID(stage) != record.stage_id
+        or _STABLE_ID(transfer) != record.transfer_id
+        or _STABLE_ID(projection_reference) != record.projection_reference_id
     ):
         _fail("GE_CURSOR_B3_POST_DDL_READER_LEASE")
     return authority, receipt, fence, stage, transfer, projection_reference
@@ -2205,8 +2484,8 @@ def _mint_sqlite_cursor_post_ddl_publication_reader_lease_intrinsic(
             _POST_DDL_PUBLICATION_READER_LEASES,
             lease,
             _PostDdlPublicationReaderLeaseRecord(
-                authority_id=_ID(authority),
-                authority_ref=_REF(authority),
+                authority_id=_STABLE_ID(authority),
+                authority_ref=_STABLE_REF(authority),
                 baseline_id=state.projection_identity.baseline_id,
                 close_attempt_count=0,
                 close_error_code=None,
@@ -2217,26 +2496,26 @@ def _mint_sqlite_cursor_post_ddl_publication_reader_lease_intrinsic(
                 expected_first_entry_hash=state.projection_identity.first_entry_hash,
                 expected_legacy_operation_count=state.projection_identity.legacy_operation_count,
                 expected_projection_sha256=state.projection_identity.projection_sha256,
-                fence_id=_ID(fence),
-                fence_ref=_REF(fence),
+                fence_id=_STABLE_ID(fence),
+                fence_ref=_STABLE_REF(fence),
                 fetch_count=0,
                 lifecycle="minted-unused",
-                migration_0002_receipt_id=_ID(migration_0002_receipt),
-                migration_0002_receipt_ref=_REF(migration_0002_receipt),
+                migration_0002_receipt_id=_STABLE_ID(migration_0002_receipt),
+                migration_0002_receipt_ref=_STABLE_REF(migration_0002_receipt),
                 outer_ledger_read_watermark=ledger,
                 ownership_acquisition_count=0,
                 prepare_count=0,
-                projection_reference_id=_ID(state.projection_reference),
-                projection_reference_ref=_REF(state.projection_reference),
+                projection_reference_id=_STABLE_ID(state.projection_reference),
+                projection_reference_ref=_STABLE_REF(state.projection_reference),
                 rederived_projection=None,
                 retained_entries=None,
-                stage_id=_ID(state.stage),
-                stage_ref=_REF(state.stage),
+                stage_id=_STABLE_ID(state.stage),
+                stage_ref=_STABLE_REF(state.stage),
                 total_changes_read_watermark=state.current_total_changes,
                 transaction_epoch=state.current_transaction_epoch,
                 transaction_generation=state.transaction_generation,
-                transfer_id=_ID(state.transfer),
-                transfer_ref=_REF(state.transfer),
+                transfer_id=_STABLE_ID(state.transfer),
+                transfer_ref=_STABLE_REF(state.transfer),
             ),
         )
         state.post_ddl_publication_reader_lease = lease
@@ -2351,7 +2630,7 @@ def _execute_sqlite_cursor_post_ddl_publication_reader_intrinsic(
     record.execute_count = 1
     record.ownership_acquisition_count = 1
     record.lifecycle = "reader-active"
-    authority_reference = _REF(authority)
+    authority_reference = _STABLE_REF(authority)
     initial_close_cause: BaseException | None = None
 
     def close_owned_reader() -> None:
@@ -2421,16 +2700,16 @@ def _execute_sqlite_cursor_post_ddl_publication_reader_intrinsic(
             terminal = True
             break
         try:
-            if type(row) is not tuple or len(row) != 4:
+            if _STABLE_TYPE(row) is not tuple or len(row) != 4:
                 _fail("GE_CURSOR_B3_POST_DDL_READER_ROW")
             rank, entry_kind, key_blob, state_blob = row
             if (
-                type(rank) is not int
+                _STABLE_TYPE(rank) is not int
                 or not 0 <= rank < len(BASELINE_ENTRY_KINDS)
-                or type(entry_kind) is not str
+                or _STABLE_TYPE(entry_kind) is not str
                 or BASELINE_ENTRY_KINDS[rank] != entry_kind
-                or type(key_blob) is not bytes
-                or type(state_blob) is not bytes
+                or _STABLE_TYPE(key_blob) is not bytes
+                or _STABLE_TYPE(state_blob) is not bytes
             ):
                 _fail("GE_CURSOR_B3_POST_DDL_READER_ROW")
             if previous_rank is not None and (
@@ -2712,7 +2991,7 @@ def _baseline_entries_frame(
     entries: tuple[BaselineEntry, ...],
     projection: BaselineProjectionIdentity,
 ) -> list[list[dict[str, str]]]:
-    if type(entries) is not tuple or len(entries) != projection.entry_count:
+    if _STABLE_TYPE(entries) is not tuple or len(entries) != projection.entry_count:
         _fail("GE_CURSOR_B3_BASELINE_ENTRIES_CHAIN")
     frame: list[list[dict[str, str]]] = []
     previous = BASELINE_GENESIS_HASH
@@ -2722,17 +3001,17 @@ def _baseline_entries_frame(
         raise ValueError("GE_CURSOR_B3_BASELINE_ENTRIES_CHAIN") from error
     for ordinal, entry in enumerate(entries):
         if (
-            type(entry) is not BaselineEntry
+            _STABLE_TYPE(entry) is not BaselineEntry
             or entry.baseline_id != projection.baseline_id
             or entry.ordinal != ordinal
             or entry.previous_entry_hash != previous
-            or type(entry.entry_kind) is not str
+            or _STABLE_TYPE(entry.entry_kind) is not str
             or entry.entry_kind not in BASELINE_ENTRY_KINDS
-            or type(entry.key_bytes) is not bytes
-            or type(entry.state_bytes) is not bytes
+            or _STABLE_TYPE(entry.key_bytes) is not bytes
+            or _STABLE_TYPE(entry.state_bytes) is not bytes
             or not 2 <= len(entry.key_bytes) <= MAX_BASELINE_KEY_BYTES
             or not 2 <= len(entry.state_bytes) <= MAX_BASELINE_STATE_BYTES
-            or type(entry.entry_hash) is not str
+            or _STABLE_TYPE(entry.entry_hash) is not str
             or len(entry.entry_hash) != 64
             or any(character not in "0123456789abcdef" for character in entry.entry_hash)
             or (ordinal == 0 and entry.entry_hash != projection.first_entry_hash)
@@ -2804,7 +3083,7 @@ def _verify_baseline_entries_frame(
 ) -> list[list[dict[str, str]]]:
     """Independently rebuild the receipt frame from retained canonical rows."""
 
-    if type(entries) is not tuple or len(entries) != projection.entry_count:
+    if _STABLE_TYPE(entries) is not tuple or len(entries) != projection.entry_count:
         _fail("GE_CURSOR_B3_BASELINE_ENTRIES_CHAIN")
     verified_frame: list[list[dict[str, str]]] = []
     expected_previous_hash = BASELINE_GENESIS_HASH
@@ -2817,17 +3096,17 @@ def _verify_baseline_entries_frame(
     for expected_ordinal in range(projection.entry_count):
         retained = entries[expected_ordinal]
         if (
-            type(retained) is not BaselineEntry
+            _STABLE_TYPE(retained) is not BaselineEntry
             or retained.baseline_id != projection.baseline_id
             or retained.ordinal != expected_ordinal
             or retained.previous_entry_hash != expected_previous_hash
-            or type(retained.entry_kind) is not str
+            or _STABLE_TYPE(retained.entry_kind) is not str
             or retained.entry_kind not in BASELINE_ENTRY_KINDS
-            or type(retained.key_bytes) is not bytes
-            or type(retained.state_bytes) is not bytes
+            or _STABLE_TYPE(retained.key_bytes) is not bytes
+            or _STABLE_TYPE(retained.state_bytes) is not bytes
             or not 2 <= len(retained.key_bytes) <= MAX_BASELINE_KEY_BYTES
             or not 2 <= len(retained.state_bytes) <= MAX_BASELINE_STATE_BYTES
-            or type(retained.entry_hash) is not str
+            or _STABLE_TYPE(retained.entry_hash) is not str
             or len(retained.entry_hash) != 64
             or any(symbol not in "0123456789abcdef" for symbol in retained.entry_hash)
             or (expected_ordinal == 0 and retained.entry_hash != projection.first_entry_hash)
@@ -2899,6 +3178,15 @@ _VERIFY_BASELINE_ENTRIES_FRAME = _verify_baseline_entries_frame
 def _baseline_entries_receipt_record(
     receipt: _SQLiteBaselineEntriesPublicationReceipt,
 ) -> _BaselineEntriesPublicationReceiptRecord:
+    if (
+        _identity_get(
+            _BASELINE_ENTRIES_PUBLICATION_RECEIPT_CONSUMPTIONS,
+            receipt,
+            _SQLiteBaselineEntriesPublicationReceipt,
+        )
+        is not None
+    ):
+        _fail("GE_CURSOR_B3_BASELINE_ENTRIES_RECEIPT_CONSUMED")
     record = _identity_get(
         _BASELINE_ENTRIES_PUBLICATION_RECEIPTS,
         receipt,
@@ -3057,20 +3345,20 @@ def _execute_sqlite_cursor_baseline_entries_publication_intrinsic(
             receipt,
             _BaselineEntriesPublicationReceiptRecord(
                 affected_rows=expected,
-                authority_id=_ID(authority),
-                authority_ref=_REF(authority),
+                authority_id=_STABLE_ID(authority),
+                authority_ref=_STABLE_REF(authority),
                 baseline_id=state.projection_identity.baseline_id,
-                connection_id=_ID(state.connection),
+                connection_id=_STABLE_ID(state.connection),
                 entry_count=expected,
                 execute_count=expected,
                 final_entry_hash=state.projection_identity.final_entry_hash,
                 first_entry_hash=state.projection_identity.first_entry_hash,
                 fixed_insert_sql=_BASELINE_ENTRIES_INSERT_SQL,
                 fixed_insert_sql_sha256=_BASELINE_ENTRIES_INSERT_SQL_SHA256,
-                fence_id=_ID(fence),
-                fence_ref=_REF(fence),
-                migration_0002_receipt_id=_ID(migration_0002_receipt),
-                migration_0002_receipt_ref=_REF(migration_0002_receipt),
+                fence_id=_STABLE_ID(fence),
+                fence_ref=_STABLE_REF(fence),
+                migration_0002_receipt_id=_STABLE_ID(migration_0002_receipt),
+                migration_0002_receipt_ref=_STABLE_REF(migration_0002_receipt),
                 outer_ledger_after=ledger_after,
                 outer_ledger_before=ledger_before,
                 outer_ledger_delta=_SQLiteCursorOuterPublicationLedgerSnapshot(
@@ -3078,11 +3366,11 @@ def _execute_sqlite_cursor_baseline_entries_publication_intrinsic(
                 ),
                 parameter_sha256=parameter_sha256,
                 prepare_count=1,
-                projection_identity_id=_ID(state.projection_identity),
-                projection_reference_id=_ID(state.projection_reference),
-                projection_reference_ref=_REF(state.projection_reference),
-                reader_lease_id=_ID(reader_lease),
-                reader_lease_ref=_REF(reader_lease),
+                projection_identity_id=_STABLE_ID(state.projection_identity),
+                projection_reference_id=_STABLE_ID(state.projection_reference),
+                projection_reference_ref=_STABLE_REF(state.projection_reference),
+                reader_lease_id=_STABLE_ID(reader_lease),
+                reader_lease_ref=_STABLE_REF(reader_lease),
                 reader_rederived_projection_sha256=(state.projection_identity.projection_sha256),
                 result_sha256=result_sha256,
                 source_read_sql=_BASELINE_ENTRIES_SOURCE_SQL,
@@ -3132,13 +3420,13 @@ def _assert_sqlite_cursor_baseline_entries_publication_receipt_intrinsic(
 
     record = _baseline_entries_receipt_record(receipt)
     if (
-        record.authority_id != _ID(authority)
+        record.authority_id != _STABLE_ID(authority)
         or record.authority_ref() is not authority
-        or record.migration_0002_receipt_id != _ID(migration_0002_receipt)
+        or record.migration_0002_receipt_id != _STABLE_ID(migration_0002_receipt)
         or record.migration_0002_receipt_ref() is not migration_0002_receipt
-        or record.fence_id != _ID(fence)
+        or record.fence_id != _STABLE_ID(fence)
         or record.fence_ref() is not fence
-        or record.reader_lease_id != _ID(reader_lease)
+        or record.reader_lease_id != _STABLE_ID(reader_lease)
         or record.reader_lease_ref() is not reader_lease
     ):
         _fail("GE_CURSOR_B3_BASELINE_ENTRIES_RECEIPT_GRAPH")
@@ -3170,7 +3458,7 @@ def _assert_sqlite_cursor_baseline_entries_publication_receipt_intrinsic(
     projection = state.projection_identity
     if (
         projection_reference is not state.projection_reference
-        or _ID(projection_reference) != record.projection_reference_id
+        or _STABLE_ID(projection_reference) != record.projection_reference_id
         or state.migration_0002_receipt is not migration_0002_receipt
         or state.post_ddl_catalog_fence is not fence
         or state.post_ddl_publication_reader_lease is not reader_lease
@@ -3185,8 +3473,8 @@ def _assert_sqlite_cursor_baseline_entries_publication_receipt_intrinsic(
         or state.affected_rows_watermark < after.affected_rows_watermark
         or state.current_transaction_epoch < record.transaction_epoch_after
         or state.current_total_changes < record.total_changes_after
-        or _ID(state.connection) != record.connection_id
-        or _ID(projection) != record.projection_identity_id
+        or _STABLE_ID(state.connection) != record.connection_id
+        or _STABLE_ID(projection) != record.projection_identity_id
         or record.baseline_id != projection.baseline_id
         or record.entry_count != projection.entry_count
         or record.first_entry_hash != projection.first_entry_hash
@@ -3387,6 +3675,15 @@ class _BaselineHeaderArguments(NamedTuple):
 def _baseline_header_receipt_record(
     receipt: _SQLiteBaselineHeaderPublicationReceipt,
 ) -> _BaselineHeaderPublicationReceiptRecord:
+    if (
+        _identity_get(
+            _BASELINE_HEADER_PUBLICATION_RECEIPT_CONSUMPTIONS,
+            receipt,
+            _SQLiteBaselineHeaderPublicationReceipt,
+        )
+        is not None
+    ):
+        _fail("GE_CURSOR_B3_BASELINE_HEADER_RECEIPT_CONSUMED")
     record = _identity_get(
         _BASELINE_HEADER_PUBLICATION_RECEIPTS,
         receipt,
@@ -3426,7 +3723,7 @@ def _assert_source_header_commitment_intrinsic(
 ) -> _SourceHeaderCommitment:
     source = state.source_header_commitment
     if (
-        type(source) is not _SourceHeaderCommitment
+        _STABLE_TYPE(source) is not _SourceHeaderCommitment
         or state.captured_at_ms != source.captured_at_ms
         or state.source_descriptor_hash != source.source_descriptor_hash
         or state.source_migration_lineage_id != source.source_migration_lineage_id
@@ -3481,14 +3778,14 @@ def _assert_baseline_entries_header_predecessor_intrinsic(
         _fail("GE_CURSOR_B3_BASELINE_HEADER_PREDECESSOR")
     if (
         state.lifecycle != "active"
-        or record.authority_id != _ID(authority)
+        or record.authority_id != _STABLE_ID(authority)
         or record.authority_ref() is not authority
-        or record.connection_id != _ID(state.connection)
-        or record.migration_0002_receipt_id != _ID(migration_0002_receipt)
+        or record.connection_id != _STABLE_ID(state.connection)
+        or record.migration_0002_receipt_id != _STABLE_ID(migration_0002_receipt)
         or record.migration_0002_receipt_ref() is not migration_0002_receipt
-        or record.fence_id != _ID(fence)
+        or record.fence_id != _STABLE_ID(fence)
         or record.fence_ref() is not fence
-        or record.reader_lease_id != _ID(reader_lease)
+        or record.reader_lease_id != _STABLE_ID(reader_lease)
         or record.reader_lease_ref() is not reader_lease
         or resolved[0] is not authority
         or resolved[1] is not migration_0002_receipt
@@ -3509,8 +3806,8 @@ def _assert_baseline_entries_header_predecessor_intrinsic(
         or reader.rederived_projection is None
         or not _same_projection_identity(reader.rederived_projection, projection)
         or projection_reference is not state.projection_reference
-        or record.projection_reference_id != _ID(state.projection_reference)
-        or record.projection_identity_id != _ID(projection)
+        or record.projection_reference_id != _STABLE_ID(state.projection_reference)
+        or record.projection_identity_id != _STABLE_ID(projection)
         or record.baseline_id != projection.baseline_id
         or record.entry_count != projection.entry_count
         or record.first_entry_hash != projection.first_entry_hash
@@ -3592,7 +3889,7 @@ def _execute_sqlite_cursor_baseline_header_publication_intrinsic(
         )
         if (
             state.write_phase != "baseline-entries-complete"
-            or entries_record.projection_identity_id != _ID(state.projection_identity)
+            or entries_record.projection_identity_id != _STABLE_ID(state.projection_identity)
             or entries_record.projection_reference_ref() is not state.projection_reference
             or entries_record.transaction_generation is not state.transaction_generation
             or entries_record.total_changes_after != state.current_total_changes
@@ -3690,14 +3987,14 @@ def _execute_sqlite_cursor_baseline_header_publication_intrinsic(
             receipt,
             _BaselineHeaderPublicationReceiptRecord(
                 affected_rows=1,
-                authority_id=_ID(authority),
-                authority_ref=_REF(authority),
-                baseline_entries_receipt_id=_ID(baseline_entries_publication_receipt),
-                baseline_entries_receipt_ref=_REF(baseline_entries_publication_receipt),
+                authority_id=_STABLE_ID(authority),
+                authority_ref=_STABLE_REF(authority),
+                baseline_entries_receipt_id=_STABLE_ID(baseline_entries_publication_receipt),
+                baseline_entries_receipt_ref=_STABLE_REF(baseline_entries_publication_receipt),
                 baseline_id=state.projection_identity.baseline_id,
                 canonical_projection_sha256=state.projection_identity.projection_sha256,
                 captured_at_ms=source_commitment.captured_at_ms,
-                connection_id=_ID(state.connection),
+                connection_id=_STABLE_ID(state.connection),
                 creation_runtime=_BASELINE_HEADER_CREATION_RUNTIME,
                 creation_runtime_version=_BASELINE_HEADER_CREATION_RUNTIME_VERSION,
                 entry_count=state.projection_identity.entry_count,
@@ -3707,10 +4004,10 @@ def _execute_sqlite_cursor_baseline_header_publication_intrinsic(
                 fixed_insert_sql=_BASELINE_HEADER_INSERT_SQL,
                 fixed_insert_sql_sha256=_BASELINE_HEADER_INSERT_SQL_SHA256,
                 legacy_operation_count=state.projection_identity.legacy_operation_count,
-                fence_id=_ID(fence),
-                fence_ref=_REF(fence),
-                migration_0002_receipt_id=_ID(migration_0002_receipt),
-                migration_0002_receipt_ref=_REF(migration_0002_receipt),
+                fence_id=_STABLE_ID(fence),
+                fence_ref=_STABLE_REF(fence),
+                migration_0002_receipt_id=_STABLE_ID(migration_0002_receipt),
+                migration_0002_receipt_ref=_STABLE_REF(migration_0002_receipt),
                 outer_ledger_after=ledger_after,
                 outer_ledger_before=ledger_before,
                 outer_ledger_delta=_SQLiteCursorOuterPublicationLedgerSnapshot(1, 1, 1),
@@ -3722,11 +4019,11 @@ def _execute_sqlite_cursor_baseline_header_publication_intrinsic(
                 policy_blob_sha256=policy_sha256,
                 policy_blob_utf8_bytes=len(policy_blob),
                 prepare_count=1,
-                projection_identity_id=_ID(state.projection_identity),
-                projection_reference_id=_ID(state.projection_reference),
-                projection_reference_ref=_REF(state.projection_reference),
-                reader_lease_id=_ID(reader_lease),
-                reader_lease_ref=_REF(reader_lease),
+                projection_identity_id=_STABLE_ID(state.projection_identity),
+                projection_reference_id=_STABLE_ID(state.projection_reference),
+                projection_reference_ref=_STABLE_REF(state.projection_reference),
+                reader_lease_id=_STABLE_ID(reader_lease),
+                reader_lease_ref=_STABLE_REF(reader_lease),
                 result_sha256=result_sha256,
                 source_descriptor_hash=source_commitment.source_descriptor_hash,
                 source_migration_lineage_id=(source_commitment.source_migration_lineage_id),
@@ -3777,15 +4074,15 @@ def _assert_sqlite_cursor_baseline_header_publication_receipt_intrinsic(
 
     record = _baseline_header_receipt_record(receipt)
     if (
-        record.authority_id != _ID(authority)
+        record.authority_id != _STABLE_ID(authority)
         or record.authority_ref() is not authority
-        or record.baseline_entries_receipt_id != _ID(baseline_entries_publication_receipt)
+        or record.baseline_entries_receipt_id != _STABLE_ID(baseline_entries_publication_receipt)
         or record.baseline_entries_receipt_ref() is not baseline_entries_publication_receipt
-        or record.migration_0002_receipt_id != _ID(migration_0002_receipt)
+        or record.migration_0002_receipt_id != _STABLE_ID(migration_0002_receipt)
         or record.migration_0002_receipt_ref() is not migration_0002_receipt
-        or record.fence_id != _ID(fence)
+        or record.fence_id != _STABLE_ID(fence)
         or record.fence_ref() is not fence
-        or record.reader_lease_id != _ID(reader_lease)
+        or record.reader_lease_id != _STABLE_ID(reader_lease)
         or record.reader_lease_ref() is not reader_lease
     ):
         _fail("GE_CURSOR_B3_BASELINE_HEADER_RECEIPT_GRAPH")
@@ -3821,7 +4118,7 @@ def _assert_sqlite_cursor_baseline_header_publication_receipt_intrinsic(
     entries_record = _baseline_entries_receipt_record(baseline_entries_publication_receipt)
     if (
         projection_reference is not state.projection_reference
-        or _ID(projection_reference) != record.projection_reference_id
+        or _STABLE_ID(projection_reference) != record.projection_reference_id
         or state.baseline_header_publication_receipt is not receipt
         or state.baseline_header_publication_receipt_mint_count != 1
         or state.baseline_header_logical_execution_count != 1
@@ -3833,8 +4130,8 @@ def _assert_sqlite_cursor_baseline_header_publication_receipt_intrinsic(
         or state.affected_rows_watermark < after.affected_rows_watermark
         or state.current_transaction_epoch < record.transaction_epoch_after
         or state.current_total_changes < record.total_changes_after
-        or record.connection_id != _ID(state.connection)
-        or record.projection_identity_id != _ID(projection)
+        or record.connection_id != _STABLE_ID(state.connection)
+        or record.projection_identity_id != _STABLE_ID(projection)
         or record.baseline_id != projection.baseline_id
         or record.canonical_projection_sha256 != projection.projection_sha256
         or record.captured_at_ms != source_commitment.captured_at_ms
@@ -4002,9 +4299,9 @@ def _assert_operation_sequence_zero_sql_commitment_intrinsic(
     canonical_sql, canonical_sha256, canonical_order = _read_canonical()
     canonical_fresh_sha256 = _SHA256(canonical_sql.encode("utf-8")).hexdigest()
     if (
-        type(_OPERATION_SEQUENCE_ZERO_INSERT_SQL) is not str
-        or type(_OPERATION_SEQUENCE_ZERO_INSERT_SQL_SHA256) is not str
-        or type(_OPERATION_SEQUENCE_ZERO_PARAMETER_ORDER) is not tuple
+        _STABLE_TYPE(_OPERATION_SEQUENCE_ZERO_INSERT_SQL) is not str
+        or _STABLE_TYPE(_OPERATION_SEQUENCE_ZERO_INSERT_SQL_SHA256) is not str
+        or _STABLE_TYPE(_OPERATION_SEQUENCE_ZERO_PARAMETER_ORDER) is not tuple
         or canonical_sql != _OPERATION_SEQUENCE_ZERO_INSERT_SQL
         or canonical_sha256 != _OPERATION_SEQUENCE_ZERO_INSERT_SQL_SHA256
         or canonical_order != _OPERATION_SEQUENCE_ZERO_PARAMETER_ORDER
@@ -4019,6 +4316,15 @@ def _assert_operation_sequence_zero_sql_commitment_intrinsic(
 def _operation_sequence_zero_receipt_record(
     receipt: _SQLiteOperationSequenceZeroPublicationReceipt,
 ) -> _OperationSequenceZeroPublicationReceiptRecord:
+    if (
+        _identity_get(
+            _OPERATION_SEQUENCE_ZERO_PUBLICATION_RECEIPT_CONSUMPTIONS,
+            receipt,
+            _SQLiteOperationSequenceZeroPublicationReceipt,
+        )
+        is not None
+    ):
+        _fail("GE_CURSOR_B3_SEQUENCE_ZERO_RECEIPT_CONSUMED")
     record = _identity_get(
         _OPERATION_SEQUENCE_ZERO_PUBLICATION_RECEIPTS,
         receipt,
@@ -4043,7 +4349,7 @@ def _read_sequence_zero_clock_value(
         or clock.consumer != "outer-publication-authority"
         or clock.transaction_generation is not state.transaction_generation
         or clock.transaction_epoch != state.transaction_epoch_at_preparation
-        or type(clock.provider_now_ms) is not int
+        or _STABLE_TYPE(clock.provider_now_ms) is not int
         or not 0 <= clock.provider_now_ms <= _MAX_SAFE_INTEGER
         or clock.provider_now_ms != state.outer_provider_now_ms
     ):
@@ -4065,15 +4371,16 @@ def _execute_sqlite_cursor_operation_sequence_zero_publication_intrinsic(
     # A foreign or cloned predecessor is an invalid argument, not graph poison.
     header_record = _baseline_header_receipt_record(baseline_header_publication_receipt)
     if (
-        header_record.authority_id != _ID(authority)
+        header_record.authority_id != _STABLE_ID(authority)
         or header_record.authority_ref() is not authority
-        or header_record.baseline_entries_receipt_id != _ID(baseline_entries_publication_receipt)
+        or header_record.baseline_entries_receipt_id
+        != _STABLE_ID(baseline_entries_publication_receipt)
         or header_record.baseline_entries_receipt_ref() is not baseline_entries_publication_receipt
-        or header_record.migration_0002_receipt_id != _ID(migration_0002_receipt)
+        or header_record.migration_0002_receipt_id != _STABLE_ID(migration_0002_receipt)
         or header_record.migration_0002_receipt_ref() is not migration_0002_receipt
-        or header_record.fence_id != _ID(fence)
+        or header_record.fence_id != _STABLE_ID(fence)
         or header_record.fence_ref() is not fence
-        or header_record.reader_lease_id != _ID(reader_lease)
+        or header_record.reader_lease_id != _STABLE_ID(reader_lease)
         or header_record.reader_lease_ref() is not reader_lease
     ):
         _fail("GE_CURSOR_B3_SEQUENCE_ZERO_RECEIPT_GRAPH")
@@ -4116,7 +4423,7 @@ def _execute_sqlite_cursor_operation_sequence_zero_publication_intrinsic(
         # Keep timestamp monotonicity separate from phase/header identity so a
         # poisoned graph names the actual provider-clock predecessor defect.
         if (
-            type(baseline_captured_at_ms) is not int
+            _STABLE_TYPE(baseline_captured_at_ms) is not int
             or not 0 <= baseline_captured_at_ms <= _MAX_SAFE_INTEGER
             or updated_at_ms < baseline_captured_at_ms
         ):
@@ -4248,37 +4555,37 @@ def _execute_sqlite_cursor_operation_sequence_zero_publication_intrinsic(
             receipt,
             _OperationSequenceZeroPublicationReceiptRecord(
                 affected_rows=1,
-                authority_id=_ID(authority),
-                authority_ref=_REF(authority),
+                authority_id=_STABLE_ID(authority),
+                authority_ref=_STABLE_REF(authority),
                 baseline_captured_at_ms=baseline_captured_at_ms,
-                baseline_entries_receipt_id=_ID(baseline_entries_publication_receipt),
-                baseline_entries_receipt_ref=_REF(baseline_entries_publication_receipt),
-                baseline_header_receipt_id=_ID(baseline_header_publication_receipt),
-                baseline_header_receipt_ref=_REF(baseline_header_publication_receipt),
+                baseline_entries_receipt_id=_STABLE_ID(baseline_entries_publication_receipt),
+                baseline_entries_receipt_ref=_STABLE_REF(baseline_entries_publication_receipt),
+                baseline_header_receipt_id=_STABLE_ID(baseline_header_publication_receipt),
+                baseline_header_receipt_ref=_STABLE_REF(baseline_header_publication_receipt),
                 baseline_id=state.projection_identity.baseline_id,
-                connection_id=_ID(state.connection),
+                connection_id=_STABLE_ID(state.connection),
                 execute_count=1,
                 fixed_insert_sql=mint_sql,
                 fixed_insert_sql_sha256=mint_sql_sha256,
                 last_commit_sequence=0,
-                migration_0002_receipt_id=_ID(migration_0002_receipt),
-                migration_0002_receipt_ref=_REF(migration_0002_receipt),
-                outer_clock_evidence_id=_ID(state.outer_clock_evidence),
-                outer_clock_evidence_ref=_REF(state.outer_clock_evidence),
+                migration_0002_receipt_id=_STABLE_ID(migration_0002_receipt),
+                migration_0002_receipt_ref=_STABLE_REF(migration_0002_receipt),
+                outer_clock_evidence_id=_STABLE_ID(state.outer_clock_evidence),
+                outer_clock_evidence_ref=_STABLE_REF(state.outer_clock_evidence),
                 outer_ledger_after=ledger_after,
                 outer_ledger_before=ledger_before,
                 outer_ledger_delta=_SQLiteCursorOuterPublicationLedgerSnapshot(1, 1, 1),
                 outer_provider_now_ms=updated_at_ms,
                 parameter_order=mint_parameter_order,
                 parameter_sha256=parameter_sha256,
-                fence_id=_ID(fence),
-                fence_ref=_REF(fence),
+                fence_id=_STABLE_ID(fence),
+                fence_ref=_STABLE_REF(fence),
                 prepare_count=1,
-                projection_identity_id=_ID(state.projection_identity),
-                projection_reference_id=_ID(state.projection_reference),
-                projection_reference_ref=_REF(state.projection_reference),
-                reader_lease_id=_ID(reader_lease),
-                reader_lease_ref=_REF(reader_lease),
+                projection_identity_id=_STABLE_ID(state.projection_identity),
+                projection_reference_id=_STABLE_ID(state.projection_reference),
+                projection_reference_ref=_STABLE_REF(state.projection_reference),
+                reader_lease_id=_STABLE_ID(reader_lease),
+                reader_lease_ref=_STABLE_REF(reader_lease),
                 result_sha256=result_sha256,
                 total_changes_after=progress.total_changes,
                 total_changes_before=total_before,
@@ -4329,17 +4636,17 @@ def _assert_sqlite_cursor_operation_sequence_zero_publication_receipt_intrinsic(
 
     record = _operation_sequence_zero_receipt_record(receipt)
     if (
-        record.authority_id != _ID(authority)
+        record.authority_id != _STABLE_ID(authority)
         or record.authority_ref() is not authority
-        or record.baseline_entries_receipt_id != _ID(baseline_entries_publication_receipt)
+        or record.baseline_entries_receipt_id != _STABLE_ID(baseline_entries_publication_receipt)
         or record.baseline_entries_receipt_ref() is not baseline_entries_publication_receipt
-        or record.baseline_header_receipt_id != _ID(baseline_header_publication_receipt)
+        or record.baseline_header_receipt_id != _STABLE_ID(baseline_header_publication_receipt)
         or record.baseline_header_receipt_ref() is not baseline_header_publication_receipt
-        or record.migration_0002_receipt_id != _ID(migration_0002_receipt)
+        or record.migration_0002_receipt_id != _STABLE_ID(migration_0002_receipt)
         or record.migration_0002_receipt_ref() is not migration_0002_receipt
-        or record.fence_id != _ID(fence)
+        or record.fence_id != _STABLE_ID(fence)
         or record.fence_ref() is not fence
-        or record.reader_lease_id != _ID(reader_lease)
+        or record.reader_lease_id != _STABLE_ID(reader_lease)
         or record.reader_lease_ref() is not reader_lease
     ):
         _fail("GE_CURSOR_B3_SEQUENCE_ZERO_RECEIPT_GRAPH")
@@ -4390,9 +4697,9 @@ def _assert_sqlite_cursor_operation_sequence_zero_publication_receipt_intrinsic(
     projection = state.projection_identity
     if (
         projection_reference is not state.projection_reference
-        or _ID(projection_reference) != record.projection_reference_id
+        or _STABLE_ID(projection_reference) != record.projection_reference_id
         or clock_evidence is not state.outer_clock_evidence
-        or record.outer_clock_evidence_id != _ID(state.outer_clock_evidence)
+        or record.outer_clock_evidence_id != _STABLE_ID(state.outer_clock_evidence)
         or state.operation_sequence_zero_publication_receipt is not receipt
         or state.operation_sequence_zero_publication_receipt_mint_count != 1
         or state.operation_sequence_zero_logical_execution_count != 1
@@ -4405,8 +4712,8 @@ def _assert_sqlite_cursor_operation_sequence_zero_publication_receipt_intrinsic(
         or state.affected_rows_watermark < after.affected_rows_watermark
         or state.current_transaction_epoch < record.transaction_epoch_after
         or state.current_total_changes < record.total_changes_after
-        or record.connection_id != _ID(state.connection)
-        or record.projection_identity_id != _ID(projection)
+        or record.connection_id != _STABLE_ID(state.connection)
+        or record.projection_identity_id != _STABLE_ID(projection)
         or record.baseline_id != projection.baseline_id
         or record.baseline_captured_at_ms != source_commitment.captured_at_ms
         or record.outer_provider_now_ms != rederived_provider_now_ms
@@ -4511,6 +4818,920 @@ def _read_sqlite_operation_sequence_zero_publication_receipt_snapshot_intrinsic(
     )
 
 
+def _checked_initial_publication_bundle_presentation_intrinsic(
+    authority: _SQLiteCursorOuterPublicationAuthority,
+    bundle: _SQLiteCursorInitialPublicationReceiptBundle,
+    fence: _SQLiteCursorPostDdlCatalogFence,
+    reader_lease: _SQLiteCursorPostDdlPublicationReaderLease,
+    _tuple_length: Callable[[tuple[object, ...]], int] = _TUPLE_LEN,
+    _tuple_item: Callable[[tuple[object, ...], int], object] = _TUPLE_GETITEM,
+) -> _CheckedInitialPublicationBundle:
+    """Resolve an exact carrier and immutable registry edges without live reads."""
+
+    if _STABLE_TYPE(bundle) is not tuple or _tuple_length(bundle) != 4:
+        _fail("GE_CURSOR_B3_INITIAL_ADOPTION_BUNDLE")
+    migration = _tuple_item(bundle, 0)
+    entries = _tuple_item(bundle, 1)
+    header = _tuple_item(bundle, 2)
+    sequence = _tuple_item(bundle, 3)
+    if (
+        _STABLE_TYPE(authority) is not _SQLiteCursorStageOwnershipOuterPublicationAuthority
+        or _STABLE_TYPE(migration) is not _SQLiteMigration0002CatalogRebuildReceipt
+        or _STABLE_TYPE(entries) is not _SQLiteBaselineEntriesPublicationReceipt
+        or _STABLE_TYPE(header) is not _SQLiteBaselineHeaderPublicationReceipt
+        or _STABLE_TYPE(sequence) is not _SQLiteOperationSequenceZeroPublicationReceipt
+        or _STABLE_TYPE(fence) is not _SQLiteCursorPostDdlCatalogFence
+        or _STABLE_TYPE(reader_lease) is not _SQLiteCursorPostDdlPublicationReaderLease
+        or _STABLE_ID(migration) in {_STABLE_ID(entries), _STABLE_ID(header), _STABLE_ID(sequence)}
+        or _STABLE_ID(entries) in {_STABLE_ID(header), _STABLE_ID(sequence)}
+        or _STABLE_ID(header) == _STABLE_ID(sequence)
+    ):
+        _fail("GE_CURSOR_B3_INITIAL_ADOPTION_BUNDLE")
+    authority_entry = _identity_get(_AUTHORITIES, authority, _STABLE_TYPE(authority))
+    migration_entry = _identity_get(_MIGRATION_0002_RECEIPTS, migration, _STABLE_TYPE(migration))
+    entries_entry = _identity_get(
+        _BASELINE_ENTRIES_PUBLICATION_RECEIPTS, entries, _STABLE_TYPE(entries)
+    )
+    header_entry = _identity_get(
+        _BASELINE_HEADER_PUBLICATION_RECEIPTS, header, _STABLE_TYPE(header)
+    )
+    sequence_entry = _identity_get(
+        _OPERATION_SEQUENCE_ZERO_PUBLICATION_RECEIPTS, sequence, _STABLE_TYPE(sequence)
+    )
+    fence_entry = _identity_get(_POST_DDL_CATALOG_FENCES, fence, _STABLE_TYPE(fence))
+    reader_entry = _identity_get(
+        _POST_DDL_PUBLICATION_READER_LEASES, reader_lease, _STABLE_TYPE(reader_lease)
+    )
+    if (
+        authority_entry is None
+        or migration_entry is None
+        or entries_entry is None
+        or header_entry is None
+        or sequence_entry is None
+        or fence_entry is None
+        or reader_entry is None
+    ):
+        _fail("GE_CURSOR_B3_INITIAL_ADOPTION_BUNDLE")
+    migration_record = cast(_Migration0002ReceiptRecord, migration_entry)
+    entries_record = cast(_BaselineEntriesPublicationReceiptRecord, entries_entry)
+    header_record = cast(_BaselineHeaderPublicationReceiptRecord, header_entry)
+    sequence_record = cast(_OperationSequenceZeroPublicationReceiptRecord, sequence_entry)
+    fence_record = cast(_PostDdlCatalogFenceRecord, fence_entry)
+    reader_record = cast(_PostDdlPublicationReaderLeaseRecord, reader_entry)
+    if (
+        migration_record.authority_ref() is not authority
+        or entries_record.authority_ref() is not authority
+        or header_record.authority_ref() is not authority
+        or sequence_record.authority_ref() is not authority
+        or fence_record.authority_ref() is not authority
+        or reader_record.authority_ref() is not authority
+        or entries_record.migration_0002_receipt_ref() is not migration
+        or header_record.migration_0002_receipt_ref() is not migration
+        or sequence_record.migration_0002_receipt_ref() is not migration
+        or fence_record.migration_0002_receipt_ref() is not migration
+        or reader_record.migration_0002_receipt_ref() is not migration
+        or header_record.baseline_entries_receipt_ref() is not entries
+        or sequence_record.baseline_entries_receipt_ref() is not entries
+        or sequence_record.baseline_header_receipt_ref() is not header
+        or entries_record.fence_ref() is not fence
+        or header_record.fence_ref() is not fence
+        or sequence_record.fence_ref() is not fence
+        or reader_record.fence_ref() is not fence
+        or entries_record.reader_lease_ref() is not reader_lease
+        or header_record.reader_lease_ref() is not reader_lease
+        or sequence_record.reader_lease_ref() is not reader_lease
+    ):
+        _fail("GE_CURSOR_B3_INITIAL_ADOPTION_BUNDLE_GRAPH")
+    return _CheckedInitialPublicationBundle(
+        migration,
+        migration_record,
+        entries,
+        entries_record,
+        header,
+        header_record,
+        sequence,
+        sequence_record,
+    )
+
+
+def _initial_adoption_watermark(
+    state: _AuthorityState,
+) -> _SQLiteCursorInitialPublicationStageWatermark:
+    ledger = _outer_ledger_snapshot(state)
+    return _SQLiteCursorInitialPublicationStageWatermark(
+        _SQLiteCursorInitialPublicationOuterLedgerWatermark(
+            ledger.affected_rows_watermark,
+            ledger.fixed_statement_count,
+            ledger.logical_write_sequence,
+        ),
+        SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_EXPECTED_SHA256,
+        state.current_total_changes,
+        state.current_transaction_epoch,
+    )
+
+
+def _validate_initial_adoption_graph_intrinsic(
+    state: _AuthorityState,
+    authority: _SQLiteCursorOuterPublicationAuthority,
+    checked: _CheckedInitialPublicationBundle,
+    fence: _SQLiteCursorPostDdlCatalogFence,
+    reader_lease: _SQLiteCursorPostDdlPublicationReaderLease,
+) -> _SQLiteCursorInitialPublicationStageWatermark:
+    if (
+        state.initial_stage_adoption_receipt is not None
+        or state.initial_stage_adoption_receipt_mint_count != 0
+        or state.receipt_consumption_count != 0
+        or state.tombstone_mint_count != 0
+        or state.migration_0002_consumed_tombstone is not None
+        or state.baseline_entries_consumed_tombstone is not None
+        or state.baseline_header_consumed_tombstone is not None
+        or state.operation_sequence_zero_consumed_tombstone is not None
+        or _identity_get(
+            _MIGRATION_0002_RECEIPT_CONSUMPTIONS,
+            checked.migration_0002_receipt,
+            _STABLE_TYPE(checked.migration_0002_receipt),
+        )
+        is not None
+        or _identity_get(
+            _BASELINE_ENTRIES_PUBLICATION_RECEIPT_CONSUMPTIONS,
+            checked.baseline_entries_receipt,
+            _STABLE_TYPE(checked.baseline_entries_receipt),
+        )
+        is not None
+        or _identity_get(
+            _BASELINE_HEADER_PUBLICATION_RECEIPT_CONSUMPTIONS,
+            checked.baseline_header_receipt,
+            _STABLE_TYPE(checked.baseline_header_receipt),
+        )
+        is not None
+        or _identity_get(
+            _OPERATION_SEQUENCE_ZERO_PUBLICATION_RECEIPT_CONSUMPTIONS,
+            checked.operation_sequence_zero_receipt,
+            _STABLE_TYPE(checked.operation_sequence_zero_receipt),
+        )
+        is not None
+    ):
+        _poison(state, authority, "SQLite initial publication adoption was replayed")
+        _fail("GE_CURSOR_B3_INITIAL_ADOPTION_REUSE")
+    try:
+        generation, epoch, changes = _owner_snapshot(state.connection)
+        if (
+            generation is not state.transaction_generation
+            or epoch != state.current_transaction_epoch
+            or changes != state.current_total_changes
+            or state.lifecycle != "active"
+            or state.write_phase != "sequence-zero-complete"
+            or state.migration_0002_receipt is not checked.migration_0002_receipt
+            or state.baseline_entries_publication_receipt is not checked.baseline_entries_receipt
+            or state.baseline_header_publication_receipt is not checked.baseline_header_receipt
+            or state.operation_sequence_zero_publication_receipt
+            is not checked.operation_sequence_zero_receipt
+            or state.post_ddl_catalog_fence is not fence
+            or state.post_ddl_publication_reader_lease is not reader_lease
+        ):
+            _fail("GE_CURSOR_B3_INITIAL_ADOPTION_GRAPH_DRIFT")
+        _assert_sqlite_cursor_operation_sequence_zero_publication_receipt_intrinsic(
+            authority,
+            checked.migration_0002_receipt,
+            fence,
+            reader_lease,
+            checked.baseline_entries_receipt,
+            checked.baseline_header_receipt,
+            checked.operation_sequence_zero_receipt,
+        )
+        _assert_sqlite_cursor_post_ddl_publication_reader_terminal_proof_intrinsic(
+            authority,
+            checked.migration_0002_receipt,
+            fence,
+            reader_lease,
+        )
+        reader = _post_ddl_publication_reader_record(reader_lease)
+        migration = checked.migration_0002_record.snapshot
+        entries = checked.baseline_entries_record
+        header = checked.baseline_header_record
+        sequence = checked.operation_sequence_zero_record
+        ledger = _outer_ledger_snapshot(state)
+        expected_fixed = (
+            SQLITE_CURSOR_MIGRATION_0002_FIXED_STATEMENT_COUNT + entries.entry_count + 2
+        )
+        expected_affected = migration.affected_rows + entries.affected_rows + 2
+        if (
+            reader.lifecycle != "retired"
+            or reader.close_attempt_count != 1
+            or reader.close_succeeded is not True
+            or reader.rederived_projection is None
+            or not _same_projection_identity(reader.rederived_projection, state.projection_identity)
+            or not _exact_outer_ledger(migration.outer_ledger_after, entries.outer_ledger_before)
+            or not _exact_outer_ledger(entries.outer_ledger_after, header.outer_ledger_before)
+            or not _exact_outer_ledger(header.outer_ledger_after, sequence.outer_ledger_before)
+            or not _exact_outer_ledger(sequence.outer_ledger_after, ledger)
+            or ledger.logical_write_sequence != 4
+            or ledger.fixed_statement_count != expected_fixed
+            or ledger.affected_rows_watermark != expected_affected
+            or sequence.transaction_epoch_after != state.current_transaction_epoch
+            or sequence.total_changes_after != state.current_total_changes
+            or fence is not state.post_ddl_catalog_fence
+        ):
+            _fail("GE_CURSOR_B3_INITIAL_ADOPTION_GRAPH_DRIFT")
+        return _initial_adoption_watermark(state)
+    except BaseException:
+        _poison(state, authority, "SQLite initial publication adoption graph drifted")
+        raise
+
+
+def _make_initial_adoption_atomic_tail(
+    *,
+    publish_lower: Callable[..., Any],
+    poison_lower: Callable[..., Any],
+    object_new: Callable[[type[object]], object],
+    adoption_receipt_type: type[_SQLiteCursorInitialStageAdoptionReceipt],
+    migration_tombstone_type: type[_SQLiteMigration0002CatalogRebuildReceiptConsumedTombstone],
+    entries_tombstone_type: type[_SQLiteBaselineEntriesPublicationReceiptConsumedTombstone],
+    header_tombstone_type: type[_SQLiteBaselineHeaderPublicationReceiptConsumedTombstone],
+    sequence_tombstone_type: type[_SQLiteOperationSequenceZeroPublicationReceiptConsumedTombstone],
+    adoption_record_type: type[_InitialStageAdoptionReceiptRecord],
+    consumption_record_type: type[_ConsumedReceiptTombstoneRecord],
+    identity_entry_type: type[_IdentityEntry],
+    identity: Callable[[object], int],
+    weak_reference: Callable[..., Any],
+    dictionary_get: Callable[..., Any],
+    dictionary_set: Callable[..., None],
+    dictionary_pop: Callable[..., object],
+    exception_type: type[BaseException],
+    adoption_receipts: dict[int, _IdentityEntry],
+    adoption_tombstones: dict[int, _IdentityEntry],
+    migration_consumptions: dict[int, _IdentityEntry],
+    entries_consumptions: dict[int, _IdentityEntry],
+    header_consumptions: dict[int, _IdentityEntry],
+    sequence_consumptions: dict[int, _IdentityEntry],
+    target_catalog_sha256: str,
+) -> Callable[..., _SQLiteCursorInitialStageAdoptionReceipt]:
+    """Seal every capability reachable after the cancellation boundary."""
+
+    def identity_set(registry: dict[int, _IdentityEntry], key: object, value: object) -> None:
+        key_id = identity(key)
+
+        def retire(dead: ReferenceType[object]) -> None:
+            current = dictionary_get(registry, key_id)
+            if current is not None and current.key_ref is dead:
+                dictionary_pop(registry, key_id, None)
+
+        key_ref = weak_reference(key, retire)
+        dictionary_set(registry, key_id, identity_entry_type(key_ref, value))
+
+    def mint(proof_type: type[object]) -> Any:
+        # Bypass a runtime lookup of the module construction token inside the
+        # opaque class __init__; exact mint authority is this sealed closure.
+        return object_new(proof_type)
+
+    def perform_tail(
+        state: _AuthorityState,
+        authority: _SQLiteCursorOuterPublicationAuthority,
+        connection: SQLiteV1BaselineConnectionOwner,
+        stage: SQLiteV1BaselineTempStage,
+        source_receipt: object,
+        projection_identity: BaselineProjectionIdentity,
+        projection_reference: SQLiteCursorExactProjectionReference,
+        transfer: _SQLiteCursorStageOwnershipTransfer,
+        migration_receipt: _SQLiteMigration0002CatalogRebuildReceipt,
+        entries_receipt: _SQLiteBaselineEntriesPublicationReceipt,
+        header_receipt: _SQLiteBaselineHeaderPublicationReceipt,
+        sequence_receipt: _SQLiteOperationSequenceZeroPublicationReceipt,
+        fence: _SQLiteCursorPostDdlCatalogFence,
+        reader_lease: _SQLiteCursorPostDdlPublicationReaderLease,
+        retired_b2_fence: _SQLiteBaselineCursorB2FenceRetirement,
+        watermark: _SQLiteCursorInitialPublicationStageWatermark,
+        ledger: _SQLiteCursorOuterPublicationLedgerSnapshot,
+        adopted_total_changes: int,
+        adopted_transaction_epoch: int,
+        lower_tail: object,
+        created_records: list[Any],
+    ) -> _SQLiteCursorInitialStageAdoptionReceipt:
+        adoption_receipt: _SQLiteCursorInitialStageAdoptionReceipt = mint(adoption_receipt_type)
+        migration_tombstone: _SQLiteMigration0002CatalogRebuildReceiptConsumedTombstone = mint(
+            migration_tombstone_type
+        )
+        entries_tombstone: _SQLiteBaselineEntriesPublicationReceiptConsumedTombstone = mint(
+            entries_tombstone_type
+        )
+        header_tombstone: _SQLiteBaselineHeaderPublicationReceiptConsumedTombstone = mint(
+            header_tombstone_type
+        )
+        sequence_tombstone: _SQLiteOperationSequenceZeroPublicationReceiptConsumedTombstone = mint(
+            sequence_tombstone_type
+        )
+        adoption_record = adoption_record_type(
+            lifecycle="pending",
+            mint_count=1,
+            write_kind="initial-publication-stage-adoption",
+            authority_id=identity(authority),
+            authority_ref=weak_reference(authority),
+            connection_id=identity(connection),
+            stage_id=identity(stage),
+            stage_ref=weak_reference(stage),
+            receipt_id=identity(source_receipt),
+            receipt_ref=weak_reference(source_receipt),
+            projection_identity_id=identity(projection_identity),
+            projection_reference_id=identity(projection_reference),
+            projection_reference_ref=weak_reference(projection_reference),
+            transfer_id=identity(transfer),
+            transfer_ref=weak_reference(transfer),
+            migration_0002_receipt_id=identity(migration_receipt),
+            migration_0002_receipt_ref=weak_reference(migration_receipt),
+            baseline_entries_receipt_id=identity(entries_receipt),
+            baseline_entries_receipt_ref=weak_reference(entries_receipt),
+            baseline_header_receipt_id=identity(header_receipt),
+            baseline_header_receipt_ref=weak_reference(header_receipt),
+            operation_sequence_zero_receipt_id=identity(sequence_receipt),
+            operation_sequence_zero_receipt_ref=weak_reference(sequence_receipt),
+            migration_0002_tombstone_id=identity(migration_tombstone),
+            migration_0002_tombstone_ref=weak_reference(migration_tombstone),
+            baseline_entries_tombstone_id=identity(entries_tombstone),
+            baseline_entries_tombstone_ref=weak_reference(entries_tombstone),
+            baseline_header_tombstone_id=identity(header_tombstone),
+            baseline_header_tombstone_ref=weak_reference(header_tombstone),
+            operation_sequence_zero_tombstone_id=identity(sequence_tombstone),
+            operation_sequence_zero_tombstone_ref=weak_reference(sequence_tombstone),
+            fence_id=identity(fence),
+            fence_ref=weak_reference(fence),
+            reader_lease_id=identity(reader_lease),
+            reader_lease_ref=weak_reference(reader_lease),
+            retired_b2_fence_id=identity(retired_b2_fence),
+            retired_b2_fence_ref=weak_reference(retired_b2_fence),
+            watermark=watermark,
+            adopted_outer_ledger=ledger,
+            adopted_total_changes=adopted_total_changes,
+            adopted_transaction_epoch=adopted_transaction_epoch,
+            target_catalog_sha256=target_catalog_sha256,
+        )
+        created_records.append(adoption_record)
+
+        def tombstone_record(original: object) -> _ConsumedReceiptTombstoneRecord:
+            return consumption_record_type(
+                "pending",
+                identity(original),
+                weak_reference(original),
+                identity(adoption_receipt),
+                weak_reference(adoption_receipt),
+            )
+
+        migration_consumption = tombstone_record(migration_receipt)
+        created_records.append(migration_consumption)
+        entries_consumption = tombstone_record(entries_receipt)
+        created_records.append(entries_consumption)
+        header_consumption = tombstone_record(header_receipt)
+        created_records.append(header_consumption)
+        sequence_consumption = tombstone_record(sequence_receipt)
+        created_records.append(sequence_consumption)
+        identity_set(adoption_receipts, adoption_receipt, adoption_record)
+        identity_set(adoption_tombstones, migration_tombstone, migration_consumption)
+        identity_set(adoption_tombstones, entries_tombstone, entries_consumption)
+        identity_set(adoption_tombstones, header_tombstone, header_consumption)
+        identity_set(adoption_tombstones, sequence_tombstone, sequence_consumption)
+        identity_set(
+            migration_consumptions,
+            migration_receipt,
+            migration_consumption,
+        )
+        identity_set(
+            entries_consumptions,
+            entries_receipt,
+            entries_consumption,
+        )
+        identity_set(
+            header_consumptions,
+            header_receipt,
+            header_consumption,
+        )
+        identity_set(
+            sequence_consumptions,
+            sequence_receipt,
+            sequence_consumption,
+        )
+        try:
+            publish_lower(lower_tail)
+            state.migration_0002_consumed_tombstone = migration_tombstone
+            state.baseline_entries_consumed_tombstone = entries_tombstone
+            state.baseline_header_consumed_tombstone = header_tombstone
+            state.operation_sequence_zero_consumed_tombstone = sequence_tombstone
+            state.receipt_consumption_count = 4
+            state.tombstone_mint_count = 4
+            state.initial_stage_adoption_receipt = adoption_receipt
+            state.initial_stage_adoption_receipt_mint_count = 1
+            state.write_phase = "initial-stage-adoption-complete"
+            migration_consumption.lifecycle = "active"
+            entries_consumption.lifecycle = "active"
+            header_consumption.lifecycle = "active"
+            sequence_consumption.lifecycle = "active"
+            adoption_record.lifecycle = "active"
+            return adoption_receipt
+        except exception_type:
+            adoption_record.lifecycle = "poisoned"
+            migration_consumption.lifecycle = "poisoned"
+            entries_consumption.lifecycle = "poisoned"
+            header_consumption.lifecycle = "poisoned"
+            sequence_consumption.lifecycle = "poisoned"
+            state.lifecycle = "poisoned"
+            state.write_phase = "poisoned"
+            state.stage_ownership_poison_reason = "SQLite initial publication adoption tail failed"
+            try:  # noqa: SIM105 - tail must not resolve a mutable suppress global
+                poison_lower(
+                    transfer,
+                    authority,
+                    "SQLite initial publication adoption tail failed",
+                )
+            except exception_type:
+                pass
+            raise
+
+    def atomic_tail(
+        state: _AuthorityState,
+        authority: _SQLiteCursorOuterPublicationAuthority,
+        connection: SQLiteV1BaselineConnectionOwner,
+        stage: SQLiteV1BaselineTempStage,
+        source_receipt: object,
+        projection_identity: BaselineProjectionIdentity,
+        projection_reference: SQLiteCursorExactProjectionReference,
+        transfer: _SQLiteCursorStageOwnershipTransfer,
+        migration_receipt: _SQLiteMigration0002CatalogRebuildReceipt,
+        entries_receipt: _SQLiteBaselineEntriesPublicationReceipt,
+        header_receipt: _SQLiteBaselineHeaderPublicationReceipt,
+        sequence_receipt: _SQLiteOperationSequenceZeroPublicationReceipt,
+        fence: _SQLiteCursorPostDdlCatalogFence,
+        reader_lease: _SQLiteCursorPostDdlPublicationReaderLease,
+        retired_b2_fence: _SQLiteBaselineCursorB2FenceRetirement,
+        watermark: _SQLiteCursorInitialPublicationStageWatermark,
+        ledger: _SQLiteCursorOuterPublicationLedgerSnapshot,
+        adopted_total_changes: int,
+        adopted_transaction_epoch: int,
+        lower_tail: object,
+    ) -> _SQLiteCursorInitialStageAdoptionReceipt:
+        created_records: list[Any] | None = None
+        try:
+            created_records = []
+            return perform_tail(
+                state,
+                authority,
+                connection,
+                stage,
+                source_receipt,
+                projection_identity,
+                projection_reference,
+                transfer,
+                migration_receipt,
+                entries_receipt,
+                header_receipt,
+                sequence_receipt,
+                fence,
+                reader_lease,
+                retired_b2_fence,
+                watermark,
+                ledger,
+                adopted_total_changes,
+                adopted_transaction_epoch,
+                lower_tail,
+                created_records,
+            )
+        except exception_type:
+            if created_records is not None:
+                for record in created_records:
+                    record.lifecycle = "poisoned"
+            state.migration_0002_consumed_tombstone = None
+            state.baseline_entries_consumed_tombstone = None
+            state.baseline_header_consumed_tombstone = None
+            state.operation_sequence_zero_consumed_tombstone = None
+            state.receipt_consumption_count = 0
+            state.tombstone_mint_count = 0
+            state.initial_stage_adoption_receipt = None
+            state.initial_stage_adoption_receipt_mint_count = 0
+            state.lifecycle = "poisoned"
+            state.write_phase = "poisoned"
+            state.stage_ownership_poison_reason = "SQLite initial publication adoption tail failed"
+            try:  # noqa: SIM105 - tail must not resolve a mutable suppress global
+                poison_lower(
+                    transfer,
+                    authority,
+                    "SQLite initial publication adoption tail failed",
+                )
+            except exception_type:
+                pass
+            raise
+
+    return atomic_tail
+
+
+_INITIAL_ADOPTION_ATOMIC_TAIL = _make_initial_adoption_atomic_tail(
+    publish_lower=_OWNERSHIP_PUBLISH_INITIAL_ADOPTION,
+    poison_lower=_OWNERSHIP_POISON,
+    object_new=object.__new__,
+    adoption_receipt_type=_SQLiteCursorInitialStageAdoptionReceipt,
+    migration_tombstone_type=_SQLiteMigration0002CatalogRebuildReceiptConsumedTombstone,
+    entries_tombstone_type=_SQLiteBaselineEntriesPublicationReceiptConsumedTombstone,
+    header_tombstone_type=_SQLiteBaselineHeaderPublicationReceiptConsumedTombstone,
+    sequence_tombstone_type=(_SQLiteOperationSequenceZeroPublicationReceiptConsumedTombstone),
+    adoption_record_type=_InitialStageAdoptionReceiptRecord,
+    consumption_record_type=_ConsumedReceiptTombstoneRecord,
+    identity_entry_type=_IdentityEntry,
+    identity=_ID,
+    weak_reference=_REF,
+    dictionary_get=_DICT_GET,
+    dictionary_set=_DICT_SETITEM,
+    dictionary_pop=_DICT_POP,
+    exception_type=BaseException,
+    adoption_receipts=_INITIAL_STAGE_ADOPTION_RECEIPTS,
+    adoption_tombstones=_INITIAL_STAGE_ADOPTION_TOMBSTONES,
+    migration_consumptions=_MIGRATION_0002_RECEIPT_CONSUMPTIONS,
+    entries_consumptions=_BASELINE_ENTRIES_PUBLICATION_RECEIPT_CONSUMPTIONS,
+    header_consumptions=_BASELINE_HEADER_PUBLICATION_RECEIPT_CONSUMPTIONS,
+    sequence_consumptions=_OPERATION_SEQUENCE_ZERO_PUBLICATION_RECEIPT_CONSUMPTIONS,
+    target_catalog_sha256=SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_EXPECTED_SHA256,
+)
+
+
+def _adopt_sqlite_cursor_initial_publication_stage_with_tail_intrinsic(
+    authority: _SQLiteCursorOuterPublicationAuthority,
+    bundle: _SQLiteCursorInitialPublicationReceiptBundle,
+    fence: _SQLiteCursorPostDdlCatalogFence,
+    reader_lease: _SQLiteCursorPostDdlPublicationReaderLease,
+    cancellation: _SQLiteCursorOuterPublicationCancellationSignal | None,
+    atomic_tail: Callable[..., _SQLiteCursorInitialStageAdoptionReceipt],
+    prepare_initial_adoption: Callable[..., Any],
+) -> _SQLiteCursorInitialStageAdoptionReceipt:
+    """Atomically consume the four write receipts into the permanent stage graph."""
+
+    checked = _checked_initial_publication_bundle_presentation_intrinsic(
+        authority, bundle, fence, reader_lease
+    )
+    cancellation_state = _reader_cancellation_state(cancellation)
+    state = _authority_state(authority)
+    watermark = _validate_initial_adoption_graph_intrinsic(
+        state, authority, checked, fence, reader_lease
+    )
+    try:
+        lower_mint = prepare_initial_adoption(
+            state.connection,
+            state.stage,
+            state.receipt,
+            state.projection_identity,
+            state.transfer,
+            authority,
+            reader_lease,
+            watermark,
+        )
+    except BaseException:
+        _poison(state, authority, "SQLite initial publication adoption preparation failed")
+        raise
+
+    connection = state.connection
+    stage = state.stage
+    pre_rebind_receipt = state.receipt
+    projection_identity = state.projection_identity
+    projection_reference = state.projection_reference
+    transfer = state.transfer
+    migration_receipt = checked.migration_0002_receipt
+    entries_receipt = checked.baseline_entries_receipt
+    header_receipt = checked.baseline_header_receipt
+    sequence_receipt = checked.operation_sequence_zero_receipt
+    retired_b2_fence = lower_mint.retired_b2_fence
+    lower_watermark = lower_mint.watermark
+    lower_tail = lower_mint.tail
+    adopted_ledger = checked.operation_sequence_zero_record.outer_ledger_after
+    adopted_total_changes = state.current_total_changes
+    adopted_transaction_epoch = state.current_transaction_epoch
+
+    # This is the sole cancellation observation.  It occurs after the lower
+    # continuation is prepared and before any receipt/tombstone allocation.
+    if cancellation_state is not None and cancellation_state.cancelled:
+        _fail("GE_CURSOR_B3_INITIAL_ADOPTION_CANCELLED")
+
+    return atomic_tail(
+        state,
+        authority,
+        connection,
+        stage,
+        pre_rebind_receipt,
+        projection_identity,
+        projection_reference,
+        transfer,
+        migration_receipt,
+        entries_receipt,
+        header_receipt,
+        sequence_receipt,
+        fence,
+        reader_lease,
+        retired_b2_fence,
+        lower_watermark,
+        adopted_ledger,
+        adopted_total_changes,
+        adopted_transaction_epoch,
+        lower_tail,
+    )
+
+
+def _close_initial_adoption_entry(
+    implementation: Callable[..., _SQLiteCursorInitialStageAdoptionReceipt],
+    atomic_tail: Callable[..., _SQLiteCursorInitialStageAdoptionReceipt],
+    prepare_initial_adoption: Callable[..., Any],
+) -> Callable[..., _SQLiteCursorInitialStageAdoptionReceipt]:
+    def adopt(
+        authority: _SQLiteCursorOuterPublicationAuthority,
+        bundle: _SQLiteCursorInitialPublicationReceiptBundle,
+        fence: _SQLiteCursorPostDdlCatalogFence,
+        reader_lease: _SQLiteCursorPostDdlPublicationReaderLease,
+        cancellation: _SQLiteCursorOuterPublicationCancellationSignal | None = None,
+    ) -> _SQLiteCursorInitialStageAdoptionReceipt:
+        return implementation(
+            authority,
+            bundle,
+            fence,
+            reader_lease,
+            cancellation,
+            atomic_tail,
+            prepare_initial_adoption,
+        )
+
+    return adopt
+
+
+_adopt_sqlite_cursor_initial_publication_stage_intrinsic = _close_initial_adoption_entry(
+    _adopt_sqlite_cursor_initial_publication_stage_with_tail_intrinsic,
+    _INITIAL_ADOPTION_ATOMIC_TAIL,
+    _OWNERSHIP_PREPARE_INITIAL_ADOPTION,
+)
+
+
+def _initial_stage_adoption_receipt_record(
+    receipt: _SQLiteCursorInitialStageAdoptionReceipt,
+) -> _InitialStageAdoptionReceiptRecord:
+    record = _identity_get(
+        _INITIAL_STAGE_ADOPTION_RECEIPTS,
+        receipt,
+        _SQLiteCursorInitialStageAdoptionReceipt,
+    )
+    if record is None:
+        _fail("GE_CURSOR_B3_INITIAL_ADOPTION_RECEIPT")
+    return cast(_InitialStageAdoptionReceiptRecord, record)
+
+
+def _assert_consumption_intrinsic(
+    registry: dict[int, _IdentityEntry],
+    original: object,
+    tombstone: object,
+    adoption_receipt: _SQLiteCursorInitialStageAdoptionReceipt,
+) -> None:
+    consumption = _identity_get(registry, original, _STABLE_TYPE(original))
+    tombstone_entry = _identity_get(
+        _INITIAL_STAGE_ADOPTION_TOMBSTONES, tombstone, _STABLE_TYPE(tombstone)
+    )
+    if (
+        consumption is None
+        or tombstone_entry is not consumption
+        or cast(_ConsumedReceiptTombstoneRecord, consumption).lifecycle != "active"
+        or cast(_ConsumedReceiptTombstoneRecord, consumption).original_receipt_ref() is not original
+        or cast(_ConsumedReceiptTombstoneRecord, consumption).adoption_receipt_ref()
+        is not adoption_receipt
+    ):
+        _fail("GE_CURSOR_B3_INITIAL_ADOPTION_TOMBSTONE_DRIFT")
+
+
+def _assert_consumed_migration_fence_chain_intrinsic(
+    state: _AuthorityState,
+    authority: _SQLiteCursorOuterPublicationAuthority,
+    migration_receipt: _SQLiteMigration0002CatalogRebuildReceipt,
+    consumption: _ConsumedReceiptTombstoneRecord,
+    fence: _SQLiteCursorPostDdlCatalogFence,
+) -> None:
+    adoption_receipt = consumption.adoption_receipt_ref()
+    if (
+        adoption_receipt is None
+        or state.initial_stage_adoption_receipt is not adoption_receipt
+        or state.migration_0002_consumed_tombstone is None
+        or state.post_ddl_catalog_fence is not fence
+    ):
+        _fail("GE_CURSOR_B3_POST_DDL_CATALOG_FENCE_GRAPH")
+    adoption = _initial_stage_adoption_receipt_record(adoption_receipt)
+    if (
+        adoption.lifecycle != "active"
+        or adoption.authority_ref() is not authority
+        or adoption.migration_0002_receipt_ref() is not migration_receipt
+        or adoption.fence_ref() is not fence
+        or adoption.migration_0002_tombstone_ref() is not state.migration_0002_consumed_tombstone
+    ):
+        _fail("GE_CURSOR_B3_POST_DDL_CATALOG_FENCE_GRAPH")
+    _assert_consumption_intrinsic(
+        _MIGRATION_0002_RECEIPT_CONSUMPTIONS,
+        migration_receipt,
+        state.migration_0002_consumed_tombstone,
+        adoption_receipt,
+    )
+
+
+def _assert_adopted_stage_ownership_from_state(
+    state: _AuthorityState,
+    authority: _SQLiteCursorOuterPublicationAuthority,
+) -> None:
+    receipt = state.initial_stage_adoption_receipt
+    if receipt is None:
+        _fail("GE_CURSOR_B3_INITIAL_ADOPTION_RECEIPT")
+    record = _initial_stage_adoption_receipt_record(receipt)
+    reader_lease = record.reader_lease_ref()
+    retired_b2_fence = record.retired_b2_fence_ref()
+    if reader_lease is None or retired_b2_fence is None:
+        _fail("GE_CURSOR_B3_INITIAL_ADOPTION_RECEIPT_DRIFT")
+    _OWNERSHIP_ASSERT_INITIAL_ADOPTED(
+        state.connection,
+        state.stage,
+        state.receipt,
+        state.projection_identity,
+        state.transfer,
+        authority,
+        reader_lease,
+        retired_b2_fence,
+        record.watermark,
+    )
+
+
+def _assert_sqlite_cursor_initial_stage_adoption_receipt_intrinsic(
+    authority: _SQLiteCursorOuterPublicationAuthority,
+    bundle: _SQLiteCursorInitialPublicationReceiptBundle,
+    fence: _SQLiteCursorPostDdlCatalogFence,
+    reader_lease: _SQLiteCursorPostDdlPublicationReaderLease,
+    receipt: _SQLiteCursorInitialStageAdoptionReceipt,
+) -> _SQLiteCursorInitialStageAdoptionReceipt:
+    checked = _checked_initial_publication_bundle_presentation_intrinsic(
+        authority, bundle, fence, reader_lease
+    )
+    state = _authority_state(authority)
+    try:
+        record = _initial_stage_adoption_receipt_record(receipt)
+        if (
+            record.authority_ref() is not authority
+            or state.initial_stage_adoption_receipt is not receipt
+        ):
+            _fail("GE_CURSOR_B3_INITIAL_ADOPTION_RECEIPT_SUBSTITUTION")
+        migration_tombstone = record.migration_0002_tombstone_ref()
+        entries_tombstone = record.baseline_entries_tombstone_ref()
+        header_tombstone = record.baseline_header_tombstone_ref()
+        sequence_tombstone = record.operation_sequence_zero_tombstone_ref()
+        retired_b2_fence = record.retired_b2_fence_ref()
+        if (
+            record.lifecycle != "active"
+            or record.mint_count != 1
+            or record.write_kind != "initial-publication-stage-adoption"
+            or record.authority_ref() is not authority
+            or record.connection_id != _STABLE_ID(state.connection)
+            or record.stage_ref() is not state.stage
+            or record.receipt_ref() is not state.receipt
+            or record.projection_identity_id != _STABLE_ID(state.projection_identity)
+            or record.projection_reference_ref() is not state.projection_reference
+            or record.transfer_ref() is not state.transfer
+            or record.migration_0002_receipt_ref() is not checked.migration_0002_receipt
+            or record.baseline_entries_receipt_ref() is not checked.baseline_entries_receipt
+            or record.baseline_header_receipt_ref() is not checked.baseline_header_receipt
+            or record.operation_sequence_zero_receipt_ref()
+            is not checked.operation_sequence_zero_receipt
+            or record.fence_ref() is not fence
+            or record.reader_lease_ref() is not reader_lease
+            or migration_tombstone is None
+            or entries_tombstone is None
+            or header_tombstone is None
+            or sequence_tombstone is None
+            or retired_b2_fence is None
+            or state.initial_stage_adoption_receipt is not receipt
+            or state.initial_stage_adoption_receipt_mint_count != 1
+            or state.receipt_consumption_count != 4
+            or state.tombstone_mint_count != 4
+            or state.migration_0002_consumed_tombstone is not migration_tombstone
+            or state.baseline_entries_consumed_tombstone is not entries_tombstone
+            or state.baseline_header_consumed_tombstone is not header_tombstone
+            or state.operation_sequence_zero_consumed_tombstone is not sequence_tombstone
+            or state.write_phase != "initial-stage-adoption-complete"
+            or state.current_transaction_epoch != record.adopted_transaction_epoch
+            or state.current_total_changes != record.adopted_total_changes
+            or not _exact_outer_ledger(_outer_ledger_snapshot(state), record.adopted_outer_ledger)
+            or record.target_catalog_sha256
+            != SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_EXPECTED_SHA256
+        ):
+            _fail("GE_CURSOR_B3_INITIAL_ADOPTION_RECEIPT_DRIFT")
+        generation, epoch, changes = _owner_snapshot(state.connection)
+        if (
+            generation is not state.transaction_generation
+            or epoch != record.adopted_transaction_epoch
+            or changes != record.adopted_total_changes
+        ):
+            _fail("GE_CURSOR_B3_INITIAL_ADOPTION_RECEIPT_DRIFT")
+        _assert_adopted_stage_ownership_from_state(state, authority)
+        _assert_sqlite_cursor_post_ddl_publication_reader_terminal_proof_intrinsic(
+            authority,
+            checked.migration_0002_receipt,
+            fence,
+            reader_lease,
+        )
+        _assert_consumption_intrinsic(
+            _MIGRATION_0002_RECEIPT_CONSUMPTIONS,
+            checked.migration_0002_receipt,
+            migration_tombstone,
+            receipt,
+        )
+        _assert_consumption_intrinsic(
+            _BASELINE_ENTRIES_PUBLICATION_RECEIPT_CONSUMPTIONS,
+            checked.baseline_entries_receipt,
+            entries_tombstone,
+            receipt,
+        )
+        _assert_consumption_intrinsic(
+            _BASELINE_HEADER_PUBLICATION_RECEIPT_CONSUMPTIONS,
+            checked.baseline_header_receipt,
+            header_tombstone,
+            receipt,
+        )
+        _assert_consumption_intrinsic(
+            _OPERATION_SEQUENCE_ZERO_PUBLICATION_RECEIPT_CONSUMPTIONS,
+            checked.operation_sequence_zero_receipt,
+            sequence_tombstone,
+            receipt,
+        )
+        return receipt
+    except BaseException as error:
+        _poison(state, authority, "SQLite initial publication adoption receipt drifted")
+        if isinstance(error, ValueError) and str(error) == "GE_CURSOR_B3_INITIAL_ADOPTION_RECEIPT":
+            _fail("GE_CURSOR_B3_INITIAL_ADOPTION_RECEIPT_SUBSTITUTION")
+        raise
+
+
+def _read_sqlite_cursor_initial_stage_adoption_receipt_snapshot_intrinsic(
+    receipt: _SQLiteCursorInitialStageAdoptionReceipt,
+) -> _SQLiteCursorInitialStageAdoptionReceiptSnapshot:
+    record = _initial_stage_adoption_receipt_record(receipt)
+    authority = record.authority_ref()
+    migration = record.migration_0002_receipt_ref()
+    entries = record.baseline_entries_receipt_ref()
+    header = record.baseline_header_receipt_ref()
+    sequence = record.operation_sequence_zero_receipt_ref()
+    fence = record.fence_ref()
+    reader_lease = record.reader_lease_ref()
+    if (
+        authority is None
+        or migration is None
+        or entries is None
+        or header is None
+        or sequence is None
+        or fence is None
+        or reader_lease is None
+    ):
+        _fail("GE_CURSOR_B3_INITIAL_ADOPTION_RECEIPT")
+    bundle = (migration, entries, header, sequence)
+    _assert_sqlite_cursor_initial_stage_adoption_receipt_intrinsic(
+        authority, bundle, fence, reader_lease, receipt
+    )
+    state = _authority_state(authority)
+    migration_tombstone = record.migration_0002_tombstone_ref()
+    entries_tombstone = record.baseline_entries_tombstone_ref()
+    header_tombstone = record.baseline_header_tombstone_ref()
+    sequence_tombstone = record.operation_sequence_zero_tombstone_ref()
+    retired_b2_fence = record.retired_b2_fence_ref()
+    reader = _post_ddl_publication_reader_record(reader_lease)
+    if (
+        migration_tombstone is None
+        or entries_tombstone is None
+        or header_tombstone is None
+        or sequence_tombstone is None
+        or retired_b2_fence is None
+        or reader.rederived_projection is None
+    ):
+        _fail("GE_CURSOR_B3_INITIAL_ADOPTION_RECEIPT_DRIFT")
+    return _SQLiteCursorInitialStageAdoptionReceiptSnapshot(
+        authority,
+        state.connection,
+        state.stage,
+        state.receipt,
+        state.projection_identity,
+        state.projection_reference,
+        state.transfer,
+        state.transaction_generation,
+        migration,
+        entries,
+        header,
+        sequence,
+        migration_tombstone,
+        entries_tombstone,
+        header_tombstone,
+        sequence_tombstone,
+        fence,
+        reader_lease,
+        "retired",
+        1,
+        reader.rederived_projection.projection_sha256,
+        record.adopted_transaction_epoch,
+        record.adopted_total_changes,
+        record.adopted_outer_ledger,
+        record.target_catalog_sha256,
+        retired_b2_fence,
+        1,
+        "initial-publication-stage-adoption",
+    )
+
+
 def _read_sqlite_cursor_outer_publication_authority_snapshot_intrinsic(
     authority: _SQLiteCursorOuterPublicationAuthority,
 ) -> _SQLiteCursorOuterPublicationAuthoritySnapshot:
@@ -4585,5 +5806,15 @@ def _read_sqlite_cursor_outer_publication_authority_snapshot_intrinsic(
         operation_sequence_zero_prepare_count=(state.operation_sequence_zero_prepare_count),
         operation_sequence_zero_execute_count=(state.operation_sequence_zero_execute_count),
         operation_sequence_zero_affected_rows=(state.operation_sequence_zero_affected_rows),
+        initial_stage_adoption_receipt=state.initial_stage_adoption_receipt,
+        initial_stage_adoption_receipt_mint_count=(state.initial_stage_adoption_receipt_mint_count),
+        receipt_consumption_count=state.receipt_consumption_count,
+        tombstone_mint_count=state.tombstone_mint_count,
+        migration_0002_consumed_tombstone=state.migration_0002_consumed_tombstone,
+        baseline_entries_consumed_tombstone=state.baseline_entries_consumed_tombstone,
+        baseline_header_consumed_tombstone=state.baseline_header_consumed_tombstone,
+        operation_sequence_zero_consumed_tombstone=(
+            state.operation_sequence_zero_consumed_tombstone
+        ),
         write_phase=state.write_phase,
     )

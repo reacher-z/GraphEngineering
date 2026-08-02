@@ -38,6 +38,7 @@ from .sqlite_operation_baseline_source import (
 from .sqlite_operation_baseline_stage import (
     SQLiteV1BaselineTempStage,
     _SQLiteBaselineCursorB2FenceRetirement,
+    _SQLiteBaselineCursorInitialPublicationAdoptionMint,
     _SQLiteBaselineCursorInitialPublicationAdoptionTail,
     _SQLiteCursorInitialPublicationOuterLedgerWatermark,
     _SQLiteCursorInitialPublicationStageWatermark,
@@ -135,6 +136,9 @@ class _TransferMetadata:
     initial_publication_adoption_stage_watermark: (
         _SQLiteCursorInitialPublicationStageWatermark | None
     ) = None
+    initial_publication_adoption_stage_tail: (
+        _SQLiteBaselineCursorInitialPublicationAdoptionTail | None
+    ) = None
     initial_publication_adoption_watermark_record: tuple[int, int, int, str, int, int] | None = None
     post_ddl_reader_cleanup: Callable[[], None] | None = None
     post_ddl_reader_lease: object | None = None
@@ -176,19 +180,27 @@ _DICT_SETITEM = dict.__setitem__
 def _retire_dead_outer_tail(
     tail_id: int,
     tail_ref: ReferenceType[_SQLiteCursorStageOwnershipOuterPublicationTail],
+    _tails: dict[int, _OuterPublicationTailContinuation] = _OUTER_PUBLICATION_TAILS,
+    _dict_get: Callable[..., _OuterPublicationTailContinuation | None] = _DICT_GET,
+    _dict_pop: Callable[..., object] = _DICT_POP,
 ) -> None:
-    continuation = _DICT_GET(_OUTER_PUBLICATION_TAILS, tail_id)
+    continuation = _dict_get(_tails, tail_id)
     if continuation is not None and continuation.tail_ref is tail_ref:
-        _DICT_POP(_OUTER_PUBLICATION_TAILS, tail_id, None)
+        _dict_pop(_tails, tail_id, None)
 
 
 def _retire_dead_adoption_tail(
     tail_id: int,
     tail_ref: ReferenceType[_SQLiteCursorStageOwnershipInitialPublicationAdoptionTail],
+    _tails: dict[
+        int, _InitialPublicationAdoptionTailContinuation
+    ] = _INITIAL_PUBLICATION_ADOPTION_TAILS,
+    _dict_get: Callable[..., _InitialPublicationAdoptionTailContinuation | None] = _DICT_GET,
+    _dict_pop: Callable[..., object] = _DICT_POP,
 ) -> None:
-    continuation = _DICT_GET(_INITIAL_PUBLICATION_ADOPTION_TAILS, tail_id)
+    continuation = _dict_get(_tails, tail_id)
     if continuation is not None and continuation.tail_ref is tail_ref:
-        _DICT_POP(_INITIAL_PUBLICATION_ADOPTION_TAILS, tail_id, None)
+        _dict_pop(_tails, tail_id, None)
 
 
 class _SQLiteCursorPreRebindCampaignAuthority:
@@ -219,6 +231,7 @@ _CAMPAIGNS: WeakKeyDictionary[
 # code later replaces the mutable registry class API.  Capture the unbound
 # intrinsic once and invoke it directly for best-effort registry retirement.
 _WEAK_KEY_DICTIONARY_POP = WeakKeyDictionary.pop
+_WEAK_KEY_DICTIONARY_GET = WeakKeyDictionary.get
 
 # Freeze the exact stage intrinsics before any hostile class-level replacement.
 # Internal calls must never redispatch through a mutable class attribute.
@@ -677,32 +690,44 @@ def _abort_sqlite_cursor_pre_rebind_campaign(
 
 def _checked_outer_publication_authority(
     authority: object,
+    _type: Callable[[object], type] = type,
+    _authority_type: type[_SQLiteCursorStageOwnershipOuterPublicationAuthority] = (
+        _SQLiteCursorStageOwnershipOuterPublicationAuthority
+    ),
 ) -> _SQLiteCursorStageOwnershipOuterPublicationAuthority:
-    if type(authority) is not _SQLiteCursorStageOwnershipOuterPublicationAuthority:
+    if _type(authority) is not _authority_type:
         raise ValueError("SQLite cursor outer publication authority is invalid")
-    return authority
+    return authority  # type: ignore[return-value]
 
 
 def _metadata_outer_publication_authority(
     metadata: _TransferMetadata,
+    _type: Callable[[object], type] = type,
+    _authority_type: type[_SQLiteCursorStageOwnershipOuterPublicationAuthority] = (
+        _SQLiteCursorStageOwnershipOuterPublicationAuthority
+    ),
 ) -> _SQLiteCursorStageOwnershipOuterPublicationAuthority | None:
     authority_ref = metadata.outer_authority_ref
     if authority_ref is None:
         return None
     authority = authority_ref()
-    return (
-        authority
-        if type(authority) is _SQLiteCursorStageOwnershipOuterPublicationAuthority
-        else None
-    )
+    return authority if _type(authority) is _authority_type else None
 
 
 def _read_transfer_metadata(
     transfer: object,
+    _type: Callable[[object], type] = type,
+    _transfers: WeakKeyDictionary[
+        _SQLiteCursorStageOwnershipTransfer, _TransferMetadata
+    ] = _TRANSFERS,
+    _registry_get: Callable[..., _TransferMetadata | None] = _WEAK_KEY_DICTIONARY_GET,
+    _transfer_type: type[_SQLiteCursorStageOwnershipTransfer] = (
+        _SQLiteCursorStageOwnershipTransfer
+    ),
 ) -> _TransferMetadata | None:
-    if type(transfer) is not _SQLiteCursorStageOwnershipTransfer:
+    if _type(transfer) is not _transfer_type:
         return None
-    return _TRANSFERS.get(transfer)
+    return _registry_get(_transfers, transfer)
 
 
 def _checked_transfer_identity_graph(
@@ -711,15 +736,26 @@ def _checked_transfer_identity_graph(
     receipt: SQLiteCursorPreRebindReceipt,
     projection_identity: BaselineProjectionIdentity,
     transfer: _SQLiteCursorStageOwnershipTransfer,
+    _type: Callable[[object], type] = type,
+    _transfers: WeakKeyDictionary[
+        _SQLiteCursorStageOwnershipTransfer, _TransferMetadata
+    ] = _TRANSFERS,
+    _registry_get: Callable[..., _TransferMetadata | None] = _WEAK_KEY_DICTIONARY_GET,
+    _transfer_type: type[_SQLiteCursorStageOwnershipTransfer] = (
+        _SQLiteCursorStageOwnershipTransfer
+    ),
+    _connection_type: type[SQLiteV1BaselineConnectionOwner] = (SQLiteV1BaselineConnectionOwner),
+    _stage_type: type[SQLiteV1BaselineTempStage] = SQLiteV1BaselineTempStage,
+    _projection_type: type[BaselineProjectionIdentity] = BaselineProjectionIdentity,
 ) -> _TransferMetadata:
-    if type(transfer) is not _SQLiteCursorStageOwnershipTransfer:
+    if _type(transfer) is not _transfer_type:
         raise TypeError("cursor stage ownership transfer has the wrong type")
-    metadata = _TRANSFERS.get(transfer)
+    metadata = _registry_get(_transfers, transfer)
     if (
         metadata is None
-        or type(connection) is not SQLiteV1BaselineConnectionOwner
-        or type(stage) is not SQLiteV1BaselineTempStage
-        or type(projection_identity) is not BaselineProjectionIdentity
+        or _type(connection) is not _connection_type
+        or _type(stage) is not _stage_type
+        or _type(projection_identity) is not _projection_type
         or metadata.connection is not connection
         or metadata.stage is not stage
         or metadata.receipt is not receipt
@@ -772,30 +808,63 @@ def _register_initial_publication_adoption_tail(
     tail: _SQLiteCursorStageOwnershipInitialPublicationAdoptionTail,
     stage_tail: _SQLiteBaselineCursorInitialPublicationAdoptionTail,
     metadata: _TransferMetadata,
+    _tails: dict[
+        int, _InitialPublicationAdoptionTailContinuation
+    ] = _INITIAL_PUBLICATION_ADOPTION_TAILS,
+    _id: Callable[[object], int] = id,
+    _tail_ref: Callable[
+        [
+            _SQLiteCursorStageOwnershipInitialPublicationAdoptionTail,
+            Callable[
+                [ReferenceType[_SQLiteCursorStageOwnershipInitialPublicationAdoptionTail]],
+                None,
+            ],
+        ],
+        ReferenceType[_SQLiteCursorStageOwnershipInitialPublicationAdoptionTail],
+    ] = ref,
+    _metadata_ref: Callable[[_TransferMetadata], ReferenceType[_TransferMetadata]] = ref,
+    _dict_set: Callable[..., None] = _DICT_SETITEM,
+    _retire: Callable[
+        [
+            int,
+            ReferenceType[_SQLiteCursorStageOwnershipInitialPublicationAdoptionTail],
+        ],
+        None,
+    ] = _retire_dead_adoption_tail,
+    _continuation_type: type[_InitialPublicationAdoptionTailContinuation] = (
+        _InitialPublicationAdoptionTailContinuation
+    ),
 ) -> None:
-    tail_id = id(tail)
+    tail_id = _id(tail)
 
     def retire_tail(
         current: ReferenceType[_SQLiteCursorStageOwnershipInitialPublicationAdoptionTail],
     ) -> None:
-        _retire_dead_adoption_tail(tail_id, current)
+        _retire(tail_id, current)
 
-    tail_ref = ref(tail, retire_tail)
-    continuation = _InitialPublicationAdoptionTailContinuation(
+    tail_ref = _tail_ref(tail, retire_tail)
+    continuation = _continuation_type(
         tail_ref,
         stage_tail,
-        ref(metadata),
+        _metadata_ref(metadata),
     )
-    _DICT_SETITEM(_INITIAL_PUBLICATION_ADOPTION_TAILS, tail_id, continuation)
+    _dict_set(_tails, tail_id, continuation)
 
 
 def _initial_publication_watermark_record(
     watermark: _SQLiteCursorInitialPublicationStageWatermark,
+    _type: Callable[[object], type] = type,
+    _watermark_type: type[_SQLiteCursorInitialPublicationStageWatermark] = (
+        _SQLiteCursorInitialPublicationStageWatermark
+    ),
+    _ledger_type: type[_SQLiteCursorInitialPublicationOuterLedgerWatermark] = (
+        _SQLiteCursorInitialPublicationOuterLedgerWatermark
+    ),
 ) -> tuple[int, int, int, str, int, int]:
-    if type(watermark) is not _SQLiteCursorInitialPublicationStageWatermark:
+    if _type(watermark) is not _watermark_type:
         raise ValueError("SQLite cursor initial publication stage watermark is invalid")
     ledger = watermark.outer_ledger
-    if type(ledger) is not _SQLiteCursorInitialPublicationOuterLedgerWatermark:
+    if _type(ledger) is not _ledger_type:
         raise ValueError("SQLite cursor initial publication stage watermark is invalid")
     return (
         ledger.affected_rows_watermark,
@@ -809,10 +878,20 @@ def _initial_publication_watermark_record(
 
 def _copy_initial_publication_watermark(
     watermark: _SQLiteCursorInitialPublicationStageWatermark,
+    _read_record: Callable[
+        [_SQLiteCursorInitialPublicationStageWatermark],
+        tuple[int, int, int, str, int, int],
+    ] = _initial_publication_watermark_record,
+    _watermark_type: type[_SQLiteCursorInitialPublicationStageWatermark] = (
+        _SQLiteCursorInitialPublicationStageWatermark
+    ),
+    _ledger_type: type[_SQLiteCursorInitialPublicationOuterLedgerWatermark] = (
+        _SQLiteCursorInitialPublicationOuterLedgerWatermark
+    ),
 ) -> _SQLiteCursorInitialPublicationStageWatermark:
-    record = _initial_publication_watermark_record(watermark)
-    return _SQLiteCursorInitialPublicationStageWatermark(
-        _SQLiteCursorInitialPublicationOuterLedgerWatermark(record[0], record[1], record[2]),
+    record = _read_record(watermark)
+    return _watermark_type(
+        _ledger_type(record[0], record[1], record[2]),
         record[3],
         record[4],
         record[5],
@@ -821,22 +900,45 @@ def _copy_initial_publication_watermark(
 
 def _burn_outer_publication_tail(
     tail: _SQLiteCursorStageOwnershipOuterPublicationTail | None,
+    _tails: dict[int, _OuterPublicationTailContinuation] = _OUTER_PUBLICATION_TAILS,
+    _dict_get: Callable[..., _OuterPublicationTailContinuation | None] = _DICT_GET,
+    _dict_pop: Callable[..., object] = _DICT_POP,
+    _id: Callable[[object], int] = id,
 ) -> None:
     if tail is None:
         return
-    continuation = _DICT_GET(_OUTER_PUBLICATION_TAILS, id(tail))
+    tail_id = _id(tail)
+    continuation = _dict_get(_tails, tail_id)
     if continuation is not None and continuation.tail_ref() is tail:
-        _DICT_POP(_OUTER_PUBLICATION_TAILS, id(tail), None)
+        _dict_pop(_tails, tail_id, None)
 
 
 def _burn_initial_publication_adoption_tail(
     tail: _SQLiteCursorStageOwnershipInitialPublicationAdoptionTail | None,
+    _tails: dict[
+        int, _InitialPublicationAdoptionTailContinuation
+    ] = _INITIAL_PUBLICATION_ADOPTION_TAILS,
+    _dict_get: Callable[..., _InitialPublicationAdoptionTailContinuation | None] = _DICT_GET,
+    _dict_pop: Callable[..., object] = _DICT_POP,
+    _id: Callable[[object], int] = id,
 ) -> None:
     if tail is None:
         return
-    continuation = _DICT_GET(_INITIAL_PUBLICATION_ADOPTION_TAILS, id(tail))
+    tail_id = _id(tail)
+    continuation = _dict_get(_tails, tail_id)
     if continuation is not None and continuation.tail_ref() is tail:
-        _DICT_POP(_INITIAL_PUBLICATION_ADOPTION_TAILS, id(tail), None)
+        _dict_pop(_tails, tail_id, None)
+
+
+def _clear_initial_publication_adoption_metadata(metadata: _TransferMetadata) -> None:
+    """Release every inactive lower-tail identity after terminal retirement."""
+
+    metadata.initial_publication_adoption_mint = None
+    metadata.initial_publication_adoption_tail = None
+    metadata.initial_publication_adoption_retired_b2_fence = None
+    metadata.initial_publication_adoption_stage_watermark = None
+    metadata.initial_publication_adoption_stage_tail = None
+    metadata.initial_publication_adoption_watermark_record = None
 
 
 def _assert_sqlite_cursor_stage_ownership_pre_rebind_complete_intrinsic(
@@ -1080,11 +1182,14 @@ def _assert_sqlite_cursor_stage_ownership_post_ddl_reader_terminal_intrinsic(
     transfer: _SQLiteCursorStageOwnershipTransfer,
     authority: object,
     lease: object,
+    _read_metadata: Callable[[object], _TransferMetadata | None] = _read_transfer_metadata,
+    _read_authority: Callable[
+        [_TransferMetadata],
+        _SQLiteCursorStageOwnershipOuterPublicationAuthority | None,
+    ] = _metadata_outer_publication_authority,
 ) -> None:
-    metadata = _read_transfer_metadata(transfer)
-    registered_authority = (
-        _metadata_outer_publication_authority(metadata) if metadata is not None else None
-    )
+    metadata = _read_metadata(transfer)
+    registered_authority = _read_authority(metadata) if metadata is not None else None
     if (
         metadata is None
         or metadata.lifecycle
@@ -1110,12 +1215,53 @@ def _prepare_sqlite_cursor_stage_ownership_initial_publication_adoption_intrinsi
     authority: object,
     lease: object,
     watermark: _SQLiteCursorInitialPublicationStageWatermark,
+    _tails: dict[
+        int, _InitialPublicationAdoptionTailContinuation
+    ] = _INITIAL_PUBLICATION_ADOPTION_TAILS,
+    _dict_get: Callable[
+        [dict[int, _InitialPublicationAdoptionTailContinuation], int],
+        _InitialPublicationAdoptionTailContinuation | None,
+    ] = _DICT_GET,
+    _id: Callable[[object], int] = id,
+    _check_transfer: Callable[..., _TransferMetadata] = _checked_transfer_identity_graph,
+    _check_authority: Callable[
+        [object], _SQLiteCursorStageOwnershipOuterPublicationAuthority
+    ] = _checked_outer_publication_authority,
+    _read_authority: Callable[
+        [_TransferMetadata],
+        _SQLiteCursorStageOwnershipOuterPublicationAuthority | None,
+    ] = _metadata_outer_publication_authority,
+    _stage_prepare: Callable[
+        ...,
+        _SQLiteBaselineCursorInitialPublicationAdoptionMint,
+    ] = _STAGE_PREPARE_INITIAL_PUBLICATION_ADOPTION,
+    _read_watermark: Callable[
+        [_SQLiteCursorInitialPublicationStageWatermark],
+        tuple[int, int, int, str, int, int],
+    ] = _initial_publication_watermark_record,
+    _copy_watermark: Callable[
+        [_SQLiteCursorInitialPublicationStageWatermark],
+        _SQLiteCursorInitialPublicationStageWatermark,
+    ] = _copy_initial_publication_watermark,
+    _register_tail: Callable[
+        [
+            _SQLiteCursorStageOwnershipInitialPublicationAdoptionTail,
+            _SQLiteBaselineCursorInitialPublicationAdoptionTail,
+            _TransferMetadata,
+        ],
+        None,
+    ] = _register_initial_publication_adoption_tail,
+    _tail_type: type[_SQLiteCursorStageOwnershipInitialPublicationAdoptionTail] = (
+        _SQLiteCursorStageOwnershipInitialPublicationAdoptionTail
+    ),
+    _mint_type: type[_SQLiteCursorStageOwnershipInitialPublicationAdoptionMint] = (
+        _SQLiteCursorStageOwnershipInitialPublicationAdoptionMint
+    ),
+    _construction_token: object = _CONSTRUCTION_TOKEN,
 ) -> _SQLiteCursorStageOwnershipInitialPublicationAdoptionMint:
-    metadata = _checked_transfer_identity_graph(
-        connection, stage, receipt, projection_identity, transfer
-    )
-    checked_authority = _checked_outer_publication_authority(authority)
-    registered_authority = _metadata_outer_publication_authority(metadata)
+    metadata = _check_transfer(connection, stage, receipt, projection_identity, transfer)
+    checked_authority = _check_authority(authority)
+    registered_authority = _read_authority(metadata)
     if (
         metadata.lifecycle
         not in {"outer-publication-owned", "initial-publication-adoption-prepared"}
@@ -1125,7 +1271,7 @@ def _prepare_sqlite_cursor_stage_ownership_initial_publication_adoption_intrinsi
         or metadata.post_ddl_reader_cleanup is not None
     ):
         raise ValueError("SQLite cursor initial publication adoption owner is invalid")
-    stage_mint = _STAGE_PREPARE_INITIAL_PUBLICATION_ADOPTION(
+    stage_mint = _stage_prepare(
         stage,
         checked_authority,
         lease,
@@ -1133,13 +1279,20 @@ def _prepare_sqlite_cursor_stage_ownership_initial_publication_adoption_intrinsi
     )
     if metadata.lifecycle == "initial-publication-adoption-prepared":
         existing = metadata.initial_publication_adoption_mint
+        existing_tail = metadata.initial_publication_adoption_tail
+        continuation = _dict_get(_tails, _id(existing_tail)) if existing_tail is not None else None
         if (
             existing is None
-            or metadata.initial_publication_adoption_tail is not existing.tail
+            or existing_tail is not existing.tail
+            or continuation is None
+            or continuation.tail_ref() is not existing_tail
+            or continuation.transfer_ref() is not metadata
+            or continuation.stage_tail is not stage_mint.tail
             or metadata.initial_publication_adoption_retired_b2_fence
             is not stage_mint.retired_b2_fence
+            or metadata.initial_publication_adoption_stage_tail is not stage_mint.tail
             or metadata.initial_publication_adoption_watermark_record
-            != _initial_publication_watermark_record(stage_mint.watermark)
+            != _read_watermark(stage_mint.watermark)
         ):
             raise ValueError("SQLite cursor initial publication adoption preparation is invalid")
         return existing
@@ -1148,23 +1301,25 @@ def _prepare_sqlite_cursor_stage_ownership_initial_publication_adoption_intrinsi
         or metadata.initial_publication_adoption_tail is not None
         or metadata.initial_publication_adoption_retired_b2_fence is not None
         or metadata.initial_publication_adoption_stage_watermark is not None
+        or metadata.initial_publication_adoption_stage_tail is not None
         or metadata.initial_publication_adoption_watermark_record is not None
     ):
         raise ValueError("SQLite cursor initial publication adoption preparation is invalid")
-    tail = _SQLiteCursorStageOwnershipInitialPublicationAdoptionTail(_CONSTRUCTION_TOKEN)
+    tail = _tail_type(_construction_token)
     stage_watermark = stage_mint.watermark
-    watermark_record = _initial_publication_watermark_record(stage_watermark)
-    exposed_watermark = _copy_initial_publication_watermark(stage_watermark)
-    mint = _SQLiteCursorStageOwnershipInitialPublicationAdoptionMint(
+    watermark_record = _read_watermark(stage_watermark)
+    exposed_watermark = _copy_watermark(stage_watermark)
+    mint = _mint_type(
         stage_mint.retired_b2_fence,
         tail,
         exposed_watermark,
     )
-    _register_initial_publication_adoption_tail(tail, stage_mint.tail, metadata)
+    _register_tail(tail, stage_mint.tail, metadata)
     metadata.initial_publication_adoption_mint = mint
     metadata.initial_publication_adoption_tail = tail
     metadata.initial_publication_adoption_retired_b2_fence = stage_mint.retired_b2_fence
     metadata.initial_publication_adoption_stage_watermark = stage_watermark
+    metadata.initial_publication_adoption_stage_tail = stage_mint.tail
     metadata.initial_publication_adoption_watermark_record = watermark_record
     metadata.lifecycle = "initial-publication-adoption-prepared"
     return mint
@@ -1172,23 +1327,47 @@ def _prepare_sqlite_cursor_stage_ownership_initial_publication_adoption_intrinsi
 
 def _publish_sqlite_cursor_stage_ownership_initial_publication_adoption_intrinsic(
     tail: _SQLiteCursorStageOwnershipInitialPublicationAdoptionTail,
+    _tails: dict[
+        int, _InitialPublicationAdoptionTailContinuation
+    ] = _INITIAL_PUBLICATION_ADOPTION_TAILS,
+    _dict_get: Callable[
+        [dict[int, _InitialPublicationAdoptionTailContinuation], int],
+        _InitialPublicationAdoptionTailContinuation | None,
+    ] = _DICT_GET,
+    _dict_pop: Callable[..., _InitialPublicationAdoptionTailContinuation | None] = _DICT_POP,
+    _stage_publish: Callable[
+        [SQLiteV1BaselineTempStage, _SQLiteBaselineCursorInitialPublicationAdoptionTail],
+        None,
+    ] = _STAGE_PUBLISH_INITIAL_PUBLICATION_ADOPTION,
+    _type: Callable[[object], type] = type,
+    _id: Callable[[object], int] = id,
+    _tail_type: type[_SQLiteCursorStageOwnershipInitialPublicationAdoptionTail] = (
+        _SQLiteCursorStageOwnershipInitialPublicationAdoptionTail
+    ),
 ) -> None:
-    if type(tail) is not _SQLiteCursorStageOwnershipInitialPublicationAdoptionTail:
+    if _type(tail) is not _tail_type:
         raise ValueError("SQLite cursor initial publication adoption tail is invalid")
-    tail_id = id(tail)
-    continuation = _DICT_GET(_INITIAL_PUBLICATION_ADOPTION_TAILS, tail_id)
+    tail_id = _id(tail)
+    continuation = _dict_get(_tails, tail_id)
     metadata = continuation.transfer_ref() if continuation is not None else None
+    mint = metadata.initial_publication_adoption_mint if metadata is not None else None
     if (
         continuation is None
         or continuation.tail_ref() is not tail
         or metadata is None
         or metadata.lifecycle != "initial-publication-adoption-prepared"
         or metadata.initial_publication_adoption_tail is not tail
+        or metadata.initial_publication_adoption_stage_tail is not continuation.stage_tail
+        or mint is None
+        or mint.tail is not tail
+        or mint.retired_b2_fence is not metadata.initial_publication_adoption_retired_b2_fence
+        or metadata.initial_publication_adoption_stage_watermark is None
+        or metadata.initial_publication_adoption_watermark_record is None
     ):
         raise ValueError("SQLite cursor initial publication adoption tail is invalid")
-    _DICT_POP(_INITIAL_PUBLICATION_ADOPTION_TAILS, tail_id, None)
+    _dict_pop(_tails, tail_id, None)
     metadata.lifecycle = "poisoned"
-    _STAGE_PUBLISH_INITIAL_PUBLICATION_ADOPTION(
+    _stage_publish(
         metadata.stage,
         continuation.stage_tail,
     )
@@ -1205,15 +1384,24 @@ def _assert_sqlite_cursor_stage_ownership_initial_publication_adopted_intrinsic(
     lease: object,
     retired_b2_fence: _SQLiteBaselineCursorB2FenceRetirement,
     watermark: _SQLiteCursorInitialPublicationStageWatermark,
+    _check_transfer: Callable[..., _TransferMetadata] = _checked_transfer_identity_graph,
+    _read_authority: Callable[
+        [_TransferMetadata],
+        _SQLiteCursorStageOwnershipOuterPublicationAuthority | None,
+    ] = _metadata_outer_publication_authority,
+    _read_watermark: Callable[
+        [_SQLiteCursorInitialPublicationStageWatermark],
+        tuple[int, int, int, str, int, int],
+    ] = _initial_publication_watermark_record,
+    _stage_assert: Callable[..., None] = _STAGE_ASSERT_INITIAL_PUBLICATION_ADOPTED,
+    _value_error: type[ValueError] = ValueError,
 ) -> _SQLiteCursorStageOwnershipTransfer:
-    metadata = _checked_transfer_identity_graph(
-        connection, stage, receipt, projection_identity, transfer
-    )
+    metadata = _check_transfer(connection, stage, receipt, projection_identity, transfer)
     mint = metadata.initial_publication_adoption_mint
-    registered_authority = _metadata_outer_publication_authority(metadata)
+    registered_authority = _read_authority(metadata)
     try:
-        supplied_watermark_record = _initial_publication_watermark_record(watermark)
-    except ValueError:
+        supplied_watermark_record = _read_watermark(watermark)
+    except _value_error:
         supplied_watermark_record = None
     if (
         metadata.lifecycle != "initial-publication-adopted"
@@ -1226,9 +1414,10 @@ def _assert_sqlite_cursor_stage_ownership_initial_publication_adopted_intrinsic(
         or metadata.initial_publication_adoption_retired_b2_fence is not retired_b2_fence
         or metadata.initial_publication_adoption_watermark_record != supplied_watermark_record
         or metadata.initial_publication_adoption_stage_watermark is None
+        or metadata.initial_publication_adoption_stage_tail is None
     ):
         raise ValueError("SQLite cursor initial publication adopted authority is invalid")
-    _STAGE_ASSERT_INITIAL_PUBLICATION_ADOPTED(
+    _stage_assert(
         stage,
         authority,
         lease,
@@ -1238,14 +1427,17 @@ def _assert_sqlite_cursor_stage_ownership_initial_publication_adopted_intrinsic(
     return transfer
 
 
-def _close_active_post_ddl_reader(metadata: _TransferMetadata) -> None:
+def _close_active_post_ddl_reader(
+    metadata: _TransferMetadata,
+    _base_exception: type[BaseException] = BaseException,
+) -> None:
     cleanup = metadata.post_ddl_reader_cleanup
     if metadata.post_ddl_reader_lifecycle != "active":
         return
     if cleanup is not None:
         try:
             cleanup()
-        except BaseException:
+        except _base_exception:
             # A failed exact-once native close is terminal, but the cleanup
             # continuation remains installed so every later owner can replay
             # the retained close error without issuing another native close.
@@ -1257,11 +1449,25 @@ def _close_active_post_ddl_reader(metadata: _TransferMetadata) -> None:
 def _retire_sqlite_cursor_stage_ownership_outer_publication_intrinsic(
     transfer: _SQLiteCursorStageOwnershipTransfer,
     authority: object,
+    _read_metadata: Callable[[object], _TransferMetadata | None] = _read_transfer_metadata,
+    _read_authority: Callable[
+        [_TransferMetadata],
+        _SQLiteCursorStageOwnershipOuterPublicationAuthority | None,
+    ] = _metadata_outer_publication_authority,
+    _burn_outer: Callable[
+        [_SQLiteCursorStageOwnershipOuterPublicationTail | None], None
+    ] = _burn_outer_publication_tail,
+    _burn_adoption: Callable[
+        [_SQLiteCursorStageOwnershipInitialPublicationAdoptionTail | None], None
+    ] = _burn_initial_publication_adoption_tail,
+    _close_reader: Callable[[_TransferMetadata], None] = _close_active_post_ddl_reader,
+    _stage_retire: Callable[[SQLiteV1BaselineTempStage], None] = (_STAGE_RETIRE_OUTER_PUBLICATION),
+    _clear_adoption: Callable[[_TransferMetadata], None] = (
+        _clear_initial_publication_adoption_metadata
+    ),
 ) -> None:
-    metadata = _read_transfer_metadata(transfer)
-    registered_authority = (
-        _metadata_outer_publication_authority(metadata) if metadata is not None else None
-    )
+    metadata = _read_metadata(transfer)
+    registered_authority = _read_authority(metadata) if metadata is not None else None
     if (
         metadata is None
         or metadata.lifecycle
@@ -1274,10 +1480,11 @@ def _retire_sqlite_cursor_stage_ownership_outer_publication_intrinsic(
         or registered_authority is not authority
     ):
         raise ValueError("SQLite cursor outer publication authority is invalid")
-    _burn_outer_publication_tail(metadata.outer_tail)
-    _burn_initial_publication_adoption_tail(metadata.initial_publication_adoption_tail)
-    _close_active_post_ddl_reader(metadata)
-    _STAGE_RETIRE_OUTER_PUBLICATION(metadata.stage)
+    _burn_outer(metadata.outer_tail)
+    _burn_adoption(metadata.initial_publication_adoption_tail)
+    _close_reader(metadata)
+    _stage_retire(metadata.stage)
+    _clear_adoption(metadata)
     metadata.lifecycle = "retired"
 
 
@@ -1285,12 +1492,31 @@ def _poison_sqlite_cursor_stage_ownership_outer_publication_intrinsic(
     transfer: _SQLiteCursorStageOwnershipTransfer,
     authority: object,
     message: str,
+    _read_metadata: Callable[[object], _TransferMetadata | None] = _read_transfer_metadata,
+    _check_authority: Callable[
+        [object], _SQLiteCursorStageOwnershipOuterPublicationAuthority
+    ] = _checked_outer_publication_authority,
+    _read_authority: Callable[
+        [_TransferMetadata],
+        _SQLiteCursorStageOwnershipOuterPublicationAuthority | None,
+    ] = _metadata_outer_publication_authority,
+    _close_reader: Callable[[_TransferMetadata], None] = _close_active_post_ddl_reader,
+    _burn_outer: Callable[
+        [_SQLiteCursorStageOwnershipOuterPublicationTail | None], None
+    ] = _burn_outer_publication_tail,
+    _burn_adoption: Callable[
+        [_SQLiteCursorStageOwnershipInitialPublicationAdoptionTail | None], None
+    ] = _burn_initial_publication_adoption_tail,
+    _clear_adoption: Callable[[_TransferMetadata], None] = (
+        _clear_initial_publication_adoption_metadata
+    ),
+    _stage_poison: Callable[[SQLiteV1BaselineTempStage, object, str], Never] = (
+        _STAGE_POISON_OUTER_PUBLICATION
+    ),
 ) -> Never:
-    metadata = _read_transfer_metadata(transfer)
-    checked_authority = _checked_outer_publication_authority(authority)
-    registered_authority = (
-        _metadata_outer_publication_authority(metadata) if metadata is not None else None
-    )
+    metadata = _read_metadata(transfer)
+    checked_authority = _check_authority(authority)
+    registered_authority = _read_authority(metadata) if metadata is not None else None
     if (
         metadata is None
         or registered_authority is not checked_authority
@@ -1300,14 +1526,20 @@ def _poison_sqlite_cursor_stage_ownership_outer_publication_intrinsic(
             "outer-publication-owned",
             "initial-publication-adoption-prepared",
             "initial-publication-adopted",
+            # The publication wrapper burns its continuation and marks the
+            # bridge terminal before entering the stage's no-fail publish.
+            # If that final stage gate rejects, the outer atomic-tail catcher
+            # must still be able to propagate poison through this bridge.
+            "poisoned",
         }
     ):
         raise ValueError("SQLite cursor outer publication authority is invalid")
     metadata.lifecycle = "poisoned"
-    _close_active_post_ddl_reader(metadata)
-    _burn_outer_publication_tail(metadata.outer_tail)
-    _burn_initial_publication_adoption_tail(metadata.initial_publication_adoption_tail)
-    _STAGE_POISON_OUTER_PUBLICATION(
+    _close_reader(metadata)
+    _burn_outer(metadata.outer_tail)
+    _burn_adoption(metadata.initial_publication_adoption_tail)
+    _clear_adoption(metadata)
+    _stage_poison(
         metadata.stage,
         checked_authority,
         message,
