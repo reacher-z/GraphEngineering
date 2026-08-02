@@ -19967,3 +19967,331 @@ Append-only proof：前 19,595 行 SHA-256 继续为
 下一个 partial milestone 仍必须保留 nonclaims：未接入的 Rule、clock、continuation、
 orchestrator、hook ordinal、manifest 与 release gate 不得提前声明完成；GitHub 5K/6K
 star 是产品与社区目标，不是代码门禁可保证的结果。
+
+#### 31.37.64 Wave 1C post-rebind bounded seal evidence 接受检查点（2026-08-02 PDT 追加；既有内容不改）
+
+本检查点接受 TypeScript 与 Python 两条 connection-only post-rebind seal
+evidence lane。它完成 31.37.63.6 第 1 项中的底层物理读取与 immutable seal
+计算，但没有完成 retained B2 比较、Rule 11、upper Rule 12 success receipt、第三
+clock、completion continuation、orchestrator、hook activation 或 manifest gate。
+
+##### 31.37.64.1 共同物理读取契约
+
+两端 runtime 均固定三条 exact SQL：main key scan、TEMP key driver 与 18-column
+main point lookup。SHA-256 分别为：
+
+- `09d1ce669070093fbbf0dfd8ce7e2a7bbfde96d051b3ce9341be85495479ec32`；
+- `1694ab6fe938203b0d8f6cb72cf82238e89234c21086ff5d224c7de4db7b1266`；
+- `bd056ee55f2bd27eee3277ed7bfee8ae7b7db935edc3cf0937fc8167e2eac342`。
+
+Main scan 固定按 `tenant_id COLLATE BINARY, token_hash COLLATE BINARY`
+排序；driver 与 accumulator 固定按 `token_hash COLLATE BINARY, tenant_id
+COLLATE BINARY` 排序。Main 必须完成 prepare 1、N rows、terminal fetch 1、
+close attempt/success 1/1，并在 driver prepare 前清空真实 owner。Driver 必须完成
+prepare 1、N rows、terminal fetch 1、close attempt/success 1/1。Reusable point
+owner 必须完成 logical prepare/execute/release `1/N/1`；每个 point cursor 只 fetch
+一次，不做 terminal fetch，并完成 create/close `N/N`。
+
+成功前必须同时证明：
+
+1. main count、driver count、lookup count、accumulator count、point execute、point
+   create 与 point close 全部等于 N；
+2. 当前 active cursors、live physical rows、live decoded carriers 为 `0/0/0`；
+3. 最大 active cursors 不超过 2；
+4. 最大 live physical rows 与 carriers 分别不超过 1；
+5. point cursor 在下一次 driver fetch 前成功 close；
+6. point logical owner 在 driver close 前 release；
+7. connection lineage、transaction epoch 与 total changes 从 begin 到 finish 不漂移；
+8. 非零行 descriptor/schema identity 对 accumulator 全部一致；以及
+9. raw row、BLOB、decoded carrier、statement、cursor 与 iterator 均不进入 evidence。
+
+N=0 不是 shortcut：仍必须构造 zero-identity accumulator、执行 `finish()` 并比较
+canonical empty root。Evidence 可以包含 computed raw immutable root 与实际观察的
+descriptor/schema identity，但没有 accepted Boolean、Rule 12 receipt 或 clock
+authority。
+
+##### 31.37.64.2 TypeScript connection-owned 状态机
+
+TypeScript 的三个 seal SQL 不属于公开 package-internal generic read union；即使
+caller 通过类型强转传入字符串，generic helper 也在 runtime 拒绝。只有
+`SQLiteConnection` 内部 private read kind 能准备它们。
+
+Connection-owned opaque scan 保存 main/driver/point 的真实 nullable statement 与
+iterator slots。外层 facade 不 import 或接触 `StatementSync`、native iterator、raw
+row、decoder、accumulator，也不通过 callback 接收可 retain 的 carrier。完整 SQL、
+next/return、decode、append、order、budget、close 与 finish 全部在 connection owner
+中执行，scan 只返回 immutable raw evidence。
+
+Native return 成功后才清除对应 handle；失败时 snapshot 同时公开 attempt/success、
+active count 与六个 owner Boolean。Poisoned dispose 按 point → driver → main 顺序
+重试真实 native return。第二次 attempt 独立计数，成功后 active 归零并清 owner。
+Cleanup precedence 使用显式 `{hasPrimary,value}`，合法的 `throw undefined` 仍是
+primary，不能被当成 no-error sentinel，也不能继续获取下一 driver row。
+
+Definition-time captures 覆盖 Database prepare、Statement iterate、native iterator
+next/return、Number safe-integer 与本 leaf 的 Math maximum watermark。Hostile test
+同时替换这些 mutable access path，N>0 control 仍必须返回 max `2/1/1`。同一
+exclusive transaction 内额外 DML 造成 total changes drift 时，任何 seal SQL
+prepare 前 terminal poison。
+
+Opaque facade execution 与 exact completed rebind、connection、lineage、epoch 与
+total watermark 绑定；每个 rebind 只允许 begin 一次。Completed 与 unexecuted-
+released 两张独立图均通过 `--expose-gc` bounded probe，seal/rebind/connection 共六
+个 weak referent 全部可回收。
+
+##### 31.37.64.3 Python connection-owned 状态机
+
+Python execution 由 exact private class、weak/id registry 与 callback-reference exact
+comparison 管理。Begin 只接受 exact completed rebind，并把 single-use begin counter
+记在 rebind private state。Execute 重验 execution state 中三条 SQL 与 SHA，但实际
+只使用 definition-time literals。
+
+一个 `_CursorSealReadPointStatementOwner` 固定 connection、SQL 与 lifecycle，真实
+执行 N 个 connection-bound point cursors，release 后拒绝 replay。Main、driver 与
+point cursor 均保留在 execution state，直到成功 close 或 definition-time recovery。
+正常 close 和 recovery attempt 分开计数；正常失败、recovery 成功为 attempts 2、
+success 1，双失败为 attempts 2、success 0、active 1，不能把尝试伪报为成功。
+
+Physical row 在 decode/append 后显式删除，decoded carrier gauge 仅在 decode 成功后
+进入。任何异常把 current physical/carrier 归零并清除未发布 root。Computed root
+只有在所有 count/resource gates 与最终 lineage proof 成功后才写入 state；所有非
+completed snapshot 必须返回 `None`。
+
+Python focused test 的 one-row oracle 只使用 test-side `hashlib` 与 canonical JSON
+chain，不调用 production decoder/accumulator；同长度 `{}` → `[]` BLOB substitution
+必须产生不同 raw root。64-row integration control 证明 cursor/row 生命周期保持
+O(1) owner budgets。
+
+##### 31.37.64.4 审计关闭与接受证据
+
+本 leaf 接受前关闭了 connection boundary 外置、raw callback retention、handle 丢失、
+recovery attempt 漏计、`undefined` sentinel、mutable Math watermark、iterator capture
+缺测、same-transaction DML drift 缺测、GC probe 名实不符、Python logical owner、late
+root disclosure 与非独立 oracle 等问题。
+
+最终三个独立只读审计结果为：TypeScript H0/M0/L0、Python H0/M0/L0、cross-runtime
+H0/M0/L0。验证证据：
+
+- TypeScript Rule12 focused 22/22；
+- TypeScript Rule12 + rebind 36/36；
+- TypeScript completed/released isolated GC 1/1；
+- TypeScript affected publication 15 files、248/248；
+- TypeScript typecheck 通过；
+- Python seal-read/rebind/baseline 83/83；
+- Python weak-registry source-fence 13/13；
+- Python debug-memory affected run 在修复既有 weak-key baseline flake 前为 673/674，
+  唯一失败随后 isolated 1/1，修复后其完整文件 13/13；
+- Ruff 与 mypy 通过；
+- contract parity 1/1；fixture 85 JSON / 44 case manifests；
+- SQLite ledger 66/66；documentation links 477；diff check 通过。
+
+实现身份：
+
+- TS contract `9aa3625e4ff85be40f1e9cf6cf56878f119c635af2402b3313be30dd1986c2ec`；
+- TS connection `1ac835d5044d26d77359a404927ab3dd5eaf963c3dee4cb45110af4b9f801540`；
+- TS facade `42a5d14b9749110030c15a7eaedfc4a201aa1b79471b5633e8cf5da57432ef84`；
+- TS focused `ea9df34e6fe086ccce1015c71d054488e0761f1e0b15ac3de52f65aa7322292e`；
+- TS GC `e1c4aefa94622db2fc6d649cb8b5465b55bbec6516544cb825076ec576cbce99`；
+- Python source `890acd70bf6301077091c00aace93b24087b7ab5737bb1531303ef93412e5125`；
+- Python focused `2f9eb79aef87e8388d35c2c7ce6252a2d3883c79d5874a64a32de2592317ee18`；
+- weak-registry test `5e098d191226a89b3eeeb2ee963d5db19a5e7ed0438d8e30e318fa6a9e1caedd`；
+- durable acceptance log `5de09cc71f57f6820f958bb4f529b1cc83d7748b3004353ce8ad93af711d698b`。
+
+Append-only proof：本次追加前完整 19,969 行 SHA-256 为
+`3d32f9818808f0e0c9f71a7c3e3b195b652d7624b68ea8208033ffed90492848`，与
+31.37.63 接受 commit 中的完整 plan 身份一致。
+
+#### 31.37.65 Cursor rebind write-receipt、post-rebind watermark adoption 与 Rule 11 predecessor bridge（后续执行计划；尚未实现；2026-08-02 PDT 追加）
+
+本节冻结下一 serialized leaf。它不声称 Rule 11、upper Rule 12、third clock、
+cursor-clock completion、fixture activation、release readiness 或 star 目标已经完成。
+当前 connection rebind primitive 与 post-rebind raw seal evidence 都不能自行创建
+Rule 11/12 authority。
+
+##### 31.37.65.1 最小闭包与所有权图
+
+下一 leaf 的唯一合法成功链为：
+
+`exact publication-active session S → rebind prepared owner P → consumed-session tombstone T → exact completed connection rebind E → post-rebind watermark adoption A → write receipt W → Rule 11 receipt R11`
+
+新增 TypeScript/Python opaque identities：P、T、W、R11。每个 identity 都必须绑定
+exact authority、connection、transaction generation/lineage、stage/projection、B2
+receipt、source/target identity 与直接 predecessor；结构相等、clone、proxy、cross-
+run substitution、ID reuse 与 replay 全部拒绝。R11 后续只能被 exact upper Rule 12
+owner 消费一次，不能由五个 scalar count 重新构造。
+
+P private state 至少保存：S、authority、connection、E0/T0 historical watermark、
+outer ledger before、B2 receipt/provenance、source/target descriptor/schema、lock 与
+provider capability、post-0002 fence、stage adoption identities、exact E，以及
+`prepared | released-before-write | session-consumed | write-adopted |
+write-receipt-minted | rule11-complete | poisoned` lifecycle。
+
+Caller 只允许提供 S 与 optional authentic cancellation signal。Connection、SQL、四
+参数、count、root、receipt、descriptor/schema、clock、stage、lock 与 ledger 均从
+exact private graph 派生，禁止 caller-supplied surrogate。
+
+##### 31.37.65.2 为什么旧 active-session assertion 不能跨 rebind
+
+现有 active-session assertion 把 S 绑定到 initial adoption 的历史 transaction epoch
+E0 与 total changes T0。真实 UPDATE 后 connection epoch 为 E1=E0+1，total 为
+T1=T0+N。Post-rebind 继续调用旧 assertion 会把合法写入误判为 drift；直接放宽旧
+assertion 又会删除历史 predecessor 证据。
+
+必须新增 consumed-session/post-rebind assertion，并保持旧 assertion 与 original
+adoption receipt byte-for-byte 不变。Adoption A 同时证明：
+
+1. T 的 historical predecessor 正是 S 的 E0/T0；
+2. E.totalChangesBefore=T0；
+3. E 与 S 的 transaction lineage/generation 相同；
+4. E.transactionEpoch=E0+1；
+5. live connection owner/total 正是 E1/T1；
+6. T1-T0 为 safe nonnegative integer并等于 authentic E total delta；
+7. outer ledger 在 rebind 前后逐字段不变；
+8. cursor-private ledger 与 outer `4/34/16` ledger 完全分离；
+9. catalog、lock、provider、source/target graph 未改变；
+10. A 只更新 authority private current epoch/total 与 cursor-subprotocol phase，不改写
+    initial receipt、pre-rebind session snapshot 或第二 clock evidence；
+11. second adoption、wrong E/T/P/S、rollback/rebegin、extra write 或 cross-run object
+    terminal poison；以及
+12. post-adoption assertion可重复、只读、零 SQL、零 clock callback。
+
+##### 31.37.65.3 Session consumption 的原子边界
+
+严格顺序：
+
+1. presentation-check S；外部 forged object healthy reject；
+2. 对 exact S 调用未放宽的 active assertion并派生 graph；
+3. reprove exclusive lineage、live lock、catalog、B2 与 adoption graph；
+4. 验证 frozen EQP、forbidden fragments、no trigger、no caller SQL；
+5. freeze E0/T0 与 outer-ledger-before；
+6. `before-rebind-prepare` cancellation；
+7. begin exact connection rebind E；
+8. 验证 prepared E 的 SQL/SHA、prepare1/execute0/release0、lineage/epoch/total；
+9. `before-rebind-execute` cancellation；取消时 release E，P terminal，S 仍 active；
+10. 预分配 T 与 registry record，完成所有可能失败的 consume checks；
+11. assignment-only 把 S 标记 consumed；此后 ordinary active assertion必须拒绝；
+12. 第一个可能失败的操作只能是 exact native UPDATE；
+13. 用 S 私有 target/source descriptor/schema 按冻结顺序执行 E；
+14. 完成 rebind logical release 与 changes `1/1/1`；
+15. 读取 authentic total/cursor-ledger并执行 A；
+16. 构造注册 W；
+17. 用 W 执行 zero-SQL Rule 11并注册 R11；
+18. R11 返回后才允许 upper Rule 12 begin。
+
+T allocation/registration failure 且 consumed flag 未改变时 S 可重试。Flag 改变后的
+native execute、release、changes、counter、ledger、adoption、W/R11 registration 任一
+失败均 poison outer/session，并通过既有 bridge 毒化 lower ownership 与 TEMP stage，
+要求 caller rollback；本 leaf 不 begin/commit/rollback transaction。
+
+##### 31.37.65.4 Write receipt W 的真实性
+
+W private record 依次保留：exact UPDATE SQL/SHA；四参数名/值顺序与规范 digest；
+S/T/P/E identity；connection/lineage/generation/lock/provider；source/target identities；
+prepare/execute/release `1/1/1`；native result shape与 affected；changes SQL/SHA、
+prepare/fetch/release `1/1/1`、one row/one column/safe integer；total before/after/delta；
+cursor ledger before/after/delta；outer ledger unchanged；no-trigger/no-caller-SQL proof。
+
+Cursor ledger before 固定为 prepared E 的 logical/fixed/affected `0/0/0`，after 必须
+为 completed E 的 `1/1/N`。若 connection snapshot 缺 authentic before/after，扩展
+connection snapshot；orchestrator 不得合成或接收 caller 数值。Parameter digest 必须
+按 spec canonical parameter order 跨语言一致，禁止依赖 object enumeration 或 address。
+
+W registration/allocation 必须在公开 W 前完成。任何 failure terminal poison，且 partial
+W 不可见。W→R11 只允许一次，R11 不接受普通 object 或 copied value projection。
+
+##### 31.37.65.5 Rule 11 五计数与 zero-SQL gate
+
+Rule 11 的五个 N 只能是：
+
+1. retained B2 pre-rebind receipt 的 cursorCount；
+2. native UPDATE affected count；
+3. exact `SELECT changes()` affected count；
+4. cursor window `total_changes` delta；
+5. cursor-private ledger affected-row delta。
+
+Cursor ledger logical-write delta 1 与 fixed-statement delta 1 是额外结构门禁，不是第
+六/七个 N。五个 N 均为 `0..MAX_SAFE_INTEGER` 且全等；N=0 合法。Rule 11 执行零
+SQL、零 clock、零 catalog read、零 transaction action、零 cursor operation。
+
+成功 R11 freezes rule id `BLR_CURSOR_REBIND_COUNT`、position 11、exact W、五 counts、
+ledger deltas、`violationCount=0`、`diagnosticsTruncated=false` 与 exact lineage。任一
+不等产生 exactly one internal count-mismatch violation，不 mint R11，阻止 Rule 12并
+poison graph。
+
+Authentic connection primitive 已拒绝 native/changes/total/ledger 内部不等，因此真实
+W 可达的 Rule11 mismatch 主要是 B2 cursorCount 与四个一致写观察不等。Pure closed
+tuple checker mutation test 不得宣称 real runtime hook execution，也不得提高 activation。
+
+##### 31.37.65.6 文件与并行开发分工
+
+TypeScript：
+
+- 新建 private `packages/sqlite/src/cursor-publication-rebind.ts`，拥有 P/W/R11；
+- 修改 outer-authority 增加 T、single-use consume、historical/live assertion split、A；
+- 仅在 authentic watermarks 缺失时最小扩展 sqlite-connection snapshot；
+- contract 文件只增加已冻结 receipt domain/parameter digest，不改现有 SQL；
+- 新建 Rule11 与 session-rebind-adoption focused suites；
+- 不从 package index export任何 opaque capability。
+
+Python：
+
+- 新建 private cursor publication subprotocol module拥有 P/W/R11；
+- 修改 outer authority 增加 T、historical/current split、A 与 poison bridge；
+- 仅在 authentic snapshot不足时扩展 baseline source owner；
+- 新建 rebind-rule11 与 adoption focused suites；
+- 保持 weak registry callback exact comparison且不在 `__init__.py` export。
+
+并行度只能用于不重叠文件：TS P/W/R11、Python P/W/R11、只读 contract mapping 与独立
+test matrix可并行；outer-authority 与 shared fixture/schema/validator 必须单 writer串行。
+主 Agent 负责每一 wave 的 diff ownership、审计发现分派、测试串行化、append-only plan、
+durable log与commit/push。
+
+##### 31.37.65.7 必测 hostile 矩阵
+
+两端至少覆盖 0/1/multi-N；SQL/parameter order/digest；S/P/T/E/A/W/R11 clone、proxy、
+substitution、cross-run、replay；second prepare/consume/execute/adopt/Rule11；pre-prepare与
+pre-execute cancellation及E release；T allocation/registration fault与session retry；
+post-flag native throw terminal；generation/epoch/total/catalog/lock/trigger drift；same-value
+rebind；native shape/unsafe count；changes shape/type/range/close；trigger total amplification；
+outer ledger drift；cursor ledger logical/fixed/affected drift；cleanup precedence含 thrown
+undefined/hostile exception；W/R11 registration fault；old active assertion post-consumption
+reject；private post-rebind assertion repeatability；Rule11 zero additional SQL；failure不调用
+Rule12；success/prewrite-cancel/postconsume-poison/Rule11-poison GC。
+
+Adoption 专测 historical receipt 保持 E0/T0、live authority 变为 E0+1/T0+N；改写旧
+receipt、wrong before/after/delta、outer ledger change、wrong E/T/P/S全部 poison。
+
+##### 31.37.65.8 Parity、接受与严格 nonclaims
+
+Cross-runtime reporter只输出 canonical value projection，不比较 opaque address：SQL/SHA、
+parameter digest、epoch delta、total delta、五 counts、logical/fixed deltas、consume/mint
+counts、same-identity Booleans、lifecycle/failure boundary、poison/retry profile。0/1/N与代表
+failure必须 byte-identical。
+
+接受门禁：TS focused/affected/typecheck/build；Python focused/affected/Ruff/mypy；existing
+session/rebind/seal regressions；contract/schema/ledger/fixture/docs/privacy；real SQLite query-
+count audit；TS GC/Python id-reuse；两份独立 H0/M0/L0 与一份 cross-runtime H0/M0/L0；
+durable log、append-only prefix proof、clean diff、exact author commit与remote object equality。
+
+只有全部通过才可声称 exact session consumption + write receipt + Rule11 predecessor 已实现。
+仍不得声称 upper Rule12 receipt、third clock、cursor/clock-complete、real hook activation、
+manifest activation、release readiness、production performance或 GitHub 5K/6K star 已达成。
+#### 31.37.66 Wave 1C evidence identity correction（2026-08-02 PDT 追加；既有内容不改）
+
+31.37.64 接受后，isolated GC probe 增加了 full-package safe skip branch：未设置
+`GRAPH_ENGINEERING_RUN_RULE12_GC_PROBE=1` 时由 Vitest 显式 skip，设置该变量且启用
+`--expose-gc` 时仍真实执行 completed 与 released 两张图的六对象回收。此改动不改变
+runtime、SQL、ownership、counter、root 或 GC success semantics，只避免普通 package
+test 把专用 probe 当成失败。
+
+因此 31.37.64 中以下两个身份由本段 supersede，其他实现身份保持不变：
+
+- final TS GC probe SHA-256：
+  `5b52456dc798919a473620a7629ed6c992ae1e6ae94b61c482af13ebe5c148a4`；
+- final durable acceptance log SHA-256：
+  `d1580cdeb05b663f6adec9aa95d0a9573354f53c698329110111ec5482e8beeb`。
+
+验证补充：isolated GC 在 exact env 下 1/1；普通 full-package run不再因本 probe 的
+env guard失败。Full-package并行 run另遇到既有 reservation-retry timing test一次失败，
+该 exact test随后 isolated 1/1；不把被中断的 full-package run声明为全绿。受影响
+publication 248/248、focused 36/36、typecheck/build 与三份 H0/M0/L0 结论不变。

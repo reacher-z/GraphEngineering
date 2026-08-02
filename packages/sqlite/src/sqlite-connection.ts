@@ -30,9 +30,17 @@ import {
   SQLITE_CURSOR_PUBLICATION_REBIND_PARAMETER_ORDER_INTRINSIC,
   SQLITE_CURSOR_PUBLICATION_REBIND_SQL_INTRINSIC,
   SQLITE_CURSOR_PUBLICATION_REBIND_SQL_SHA256_INTRINSIC,
+  SQLITE_CURSOR_PUBLICATION_POST_REBIND_KEY_DRIVER_SQL_INTRINSIC,
+  SQLITE_CURSOR_PUBLICATION_POST_REBIND_MAIN_KEY_COUNT_SQL_INTRINSIC,
+  SQLITE_CURSOR_PUBLICATION_POST_REBIND_POINT_LOOKUP_SQL_INTRINSIC,
   type SQLiteCursorPublicationRebindParameters,
   type SQLiteCursorPublicationRebindParameterTuple,
 } from "./cursor-publication-rebind-contract.js";
+import {
+  SQLITE_CURSOR_SEAL_EMPTY_ROOT,
+  SQLiteCursorSealAccumulator,
+  decodeSQLiteCursorSealRow,
+} from "./operation-baseline-cursor-invariants.js";
 
 const databasePrepareIntrinsic = DatabaseSync.prototype.prepare;
 const databaseCloseIntrinsic = DatabaseSync.prototype.close;
@@ -44,6 +52,7 @@ const objectGetOwnPropertyDescriptorIntrinsic = Object.getOwnPropertyDescriptor;
 const objectGetPrototypeOfIntrinsic = Object.getPrototypeOf;
 const functionToStringIntrinsic = Function.prototype.toString;
 const numberIsSafeIntegerIntrinsic = Number.isSafeInteger;
+const mathMaxIntrinsic = Math.max;
 const stringCharCodeAtIntrinsic = String.prototype.charCodeAt;
 const stringIndexOfIntrinsic = String.prototype.indexOf;
 const stringSliceIntrinsic = String.prototype.slice;
@@ -217,6 +226,11 @@ export type SQLiteConnectionNativeReadKind =
   | "cursor-publication-migration-lock"
   | "cursor-publication-initial-stage-schema-version"
   | "cursor-publication-initial-stage-main-operations";
+
+type SQLiteConnectionPrivateNativeReadKind = SQLiteConnectionNativeReadKind
+  | "cursor-publication-post-rebind-main-key-count"
+  | "cursor-publication-post-rebind-key-driver"
+  | "cursor-publication-post-rebind-point-lookup";
 
 export const DEFAULT_SQLITE_BUSY_TIMEOUT_MS = 250;
 export const MAX_SQLITE_BUSY_TIMEOUT_MS = 5_000;
@@ -466,6 +480,66 @@ export interface SQLiteConnectionCursorRebindExecutionSnapshot {
   readonly transactionLineage: SQLiteConnectionTransactionLineage;
 }
 
+/** Opaque owner for one exact, bounded post-rebind seal scan. */
+export interface SQLiteConnectionPostRebindSealScanExecution {
+  readonly __sqliteConnectionPostRebindSealScanExecution: never;
+}
+
+export interface SQLiteConnectionPostRebindSealScanSnapshot {
+  readonly lifecycle: "active" | "completed" | "released" | "poisoned";
+  readonly mainKeyCount: number;
+  readonly driverCount: number;
+  readonly lookupCount: number;
+  readonly pointStatementExecuteCount: number;
+  readonly mainKeyCountPrepareCount: 0 | 1;
+  readonly mainKeyCountTerminalFetchCount: 0 | 1;
+  readonly mainKeyCountCloseAttemptCount: number;
+  readonly mainKeyCountCloseCount: 0 | 1;
+  readonly driverPrepareCount: 0 | 1;
+  readonly driverTerminalFetchCount: 0 | 1;
+  readonly driverCloseAttemptCount: number;
+  readonly driverCloseCount: 0 | 1;
+  readonly pointStatementPrepareCount: 0 | 1;
+  readonly pointStatementReleaseCount: 0 | 1;
+  readonly pointCursorCreatedCount: number;
+  readonly pointCursorCloseAttemptCount: number;
+  readonly pointCursorClosedCount: number;
+  readonly activeCursors: number;
+  readonly livePhysicalRows: number;
+  readonly liveCarriers: number;
+  readonly maximumActiveCursors: number;
+  readonly maximumLivePhysicalRows: number;
+  readonly maximumLiveCarriers: number;
+  readonly mainStatementOwned: boolean;
+  readonly mainIteratorOwned: boolean;
+  readonly driverStatementOwned: boolean;
+  readonly driverIteratorOwned: boolean;
+  readonly pointStatementOwned: boolean;
+  readonly pointIteratorOwned: boolean;
+  readonly transactionEpoch: bigint;
+  readonly transactionLineage: SQLiteConnectionTransactionLineage;
+  readonly totalChanges: number;
+}
+
+export interface SQLiteConnectionPostRebindSealScanEvidence
+  extends SQLiteConnectionPostRebindSealScanSnapshot {
+  readonly lifecycle: "completed";
+  readonly mainKeyCountPrepareCount: 1;
+  readonly mainKeyCountTerminalFetchCount: 1;
+  readonly mainKeyCountCloseAttemptCount: 1;
+  readonly mainKeyCountCloseCount: 1;
+  readonly driverPrepareCount: 1;
+  readonly driverTerminalFetchCount: 1;
+  readonly driverCloseAttemptCount: 1;
+  readonly driverCloseCount: 1;
+  readonly pointStatementPrepareCount: 1;
+  readonly pointStatementReleaseCount: 1;
+  readonly accumulatorCount: number;
+  readonly computedImmutableRootSha256: string;
+  readonly observedDescriptorHash: string | null;
+  readonly observedSchemaIdentitySha256: string | null;
+}
+
 interface Migration0002ExecutionState {
   readonly asset: SQLiteCursorMigration0002Asset;
   readonly assetSnapshot: SQLiteCursorMigration0002AssetSnapshot;
@@ -542,6 +616,48 @@ interface CursorRebindExecutionState {
   readonly transactionLineage: SQLiteConnectionTransactionLineage;
 }
 
+interface PostRebindSealScanKey {
+  readonly tenantId: string;
+  readonly tokenHash: string;
+}
+
+interface PostRebindSealScanState {
+  readonly connection: SQLiteConnection;
+  readonly transactionEpoch: bigint;
+  readonly transactionLineage: SQLiteConnectionTransactionLineage;
+  readonly totalChanges: number;
+  lifecycle: "active" | "completed" | "released" | "poisoned";
+  mainKeyCount: number;
+  driverCount: number;
+  lookupCount: number;
+  pointStatementExecuteCount: number;
+  mainKeyCountPrepareCount: 0 | 1;
+  mainKeyCountTerminalFetchCount: 0 | 1;
+  mainKeyCountCloseAttemptCount: number;
+  mainKeyCountCloseCount: 0 | 1;
+  driverPrepareCount: 0 | 1;
+  driverTerminalFetchCount: 0 | 1;
+  driverCloseAttemptCount: number;
+  driverCloseCount: 0 | 1;
+  pointStatementPrepareCount: 0 | 1;
+  pointStatementReleaseCount: 0 | 1;
+  pointCursorCreatedCount: number;
+  pointCursorCloseAttemptCount: number;
+  pointCursorClosedCount: number;
+  activeCursors: number;
+  livePhysicalRows: number;
+  liveCarriers: number;
+  maximumActiveCursors: number;
+  maximumLivePhysicalRows: number;
+  maximumLiveCarriers: number;
+  mainStatement: StatementSync | null;
+  mainIterator: SQLiteNativeStatementIterator | null;
+  driverStatement: StatementSync | null;
+  driverIterator: SQLiteNativeStatementIterator | null;
+  pointStatement: StatementSync | null;
+  pointIterator: SQLiteNativeStatementIterator | null;
+}
+
 const MIGRATION_0002_EXECUTIONS = new WeakMap<object, Migration0002ExecutionState>();
 const BASELINE_ENTRY_PUBLICATION_EXECUTIONS = new WeakMap<
   object,
@@ -556,7 +672,12 @@ const OPERATION_SEQUENCE_ZERO_EXECUTIONS = new WeakMap<
   OperationSequenceZeroExecutionState
 >();
 const CURSOR_REBIND_EXECUTIONS = new WeakMap<object, CursorRebindExecutionState>();
+const POST_REBIND_SEAL_SCAN_EXECUTIONS = new WeakMap<object, PostRebindSealScanState>();
 let cursorRebindCleanupFaultForTest: Readonly<{ readonly error: unknown }> | undefined;
+let postRebindSealScanCloseFaultForTest: Readonly<{
+  readonly kind: "main-key-count" | "driver" | "point";
+  readonly error: unknown;
+}> | undefined;
 const weakMapGetIntrinsic = WeakMap.prototype.get;
 const weakMapSetIntrinsic = WeakMap.prototype.set;
 
@@ -1467,7 +1588,7 @@ export class SQLiteConnection {
   }
 
   [SQLITE_CONNECTION_PREPARE_NATIVE_READ](
-    kind: SQLiteConnectionNativeReadKind,
+    kind: SQLiteConnectionPrivateNativeReadKind,
     operation: CycleStoreProviderOperation,
   ): StatementSync {
     this.#assertOpen(operation);
@@ -1493,7 +1614,13 @@ export class SQLiteConnection {
                 ? `SELECT type, name, tbl_name, rootpage, sql
                      FROM main.sqlite_schema
                     WHERE type = 'table' AND name = 'ge_cycle_operations'`
-                : undefined;
+                : kind === "cursor-publication-post-rebind-main-key-count"
+                  ? SQLITE_CURSOR_PUBLICATION_POST_REBIND_MAIN_KEY_COUNT_SQL_INTRINSIC
+                  : kind === "cursor-publication-post-rebind-key-driver"
+                    ? SQLITE_CURSOR_PUBLICATION_POST_REBIND_KEY_DRIVER_SQL_INTRINSIC
+                    : kind === "cursor-publication-post-rebind-point-lookup"
+                      ? SQLITE_CURSOR_PUBLICATION_POST_REBIND_POINT_LOOKUP_SQL_INTRINSIC
+                      : undefined;
     if (sql === undefined) {
       throw new CycleStoreProviderError(
         "GE_CYCLE_STORE_INVALID_ARGUMENT",
@@ -2869,6 +2996,453 @@ const sqliteConnectionReleaseCursorRebindIntrinsic =
 const sqliteConnectionExecTrustedIntrinsic = SQLiteConnection.prototype.execTrusted;
 const sqliteConnectionPrepareIntrinsic = SQLiteConnection.prototype.prepare;
 
+const POST_REBIND_ZERO_IDENTITY = "0".repeat(64);
+
+function postRebindSealScanState(
+  connection: SQLiteConnection,
+  execution: SQLiteConnectionPostRebindSealScanExecution,
+): PostRebindSealScanState {
+  const state = execution !== null && typeof execution === "object" && !isProxy(execution)
+    ? reflectApplyIntrinsic(weakMapGetIntrinsic, POST_REBIND_SEAL_SCAN_EXECUTIONS, [
+      execution as object,
+    ]) as PostRebindSealScanState | undefined
+    : undefined;
+  if (state === undefined || state.connection !== connection) {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "inspect-schema",
+      "SQLite post-rebind seal scan execution is invalid",
+    );
+  }
+  return state;
+}
+
+function assertPostRebindSealScanOwner(state: PostRebindSealScanState): void {
+  const owner = reflectApplyIntrinsic(
+    sqliteConnectionOwnerSnapshotIntrinsic, state.connection, [],
+  ) as SQLiteConnectionOwnerSnapshot;
+  const total = reflectApplyIntrinsic(
+    sqliteConnectionTotalChangesSnapshotIntrinsic, state.connection, [],
+  ) as SQLiteConnectionTotalChangesSnapshot;
+  if (!owner.isTransaction || owner.transactionMode !== "exclusive"
+      || owner.transactionLineage !== state.transactionLineage
+      || owner.transactionEpoch !== state.transactionEpoch
+      || total.transactionEpoch !== state.transactionEpoch
+      || total.totalChanges !== state.totalChanges) {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_CORRUPTION",
+      "inspect-schema",
+      "SQLite post-rebind seal scan connection lineage drifted",
+    );
+  }
+}
+
+function postRebindSealScanPrepare(
+  state: PostRebindSealScanState,
+  kind: Exclude<SQLiteConnectionPrivateNativeReadKind, SQLiteConnectionNativeReadKind>,
+): StatementSync {
+  return reflectApplyIntrinsic(
+    sqliteConnectionPrepareNativeReadIntrinsic,
+    state.connection,
+    [kind, "inspect-schema"],
+  ) as StatementSync;
+}
+
+function postRebindSealScanEnterCursor(state: PostRebindSealScanState): void {
+  state.activeCursors += 1;
+  state.maximumActiveCursors = mathMaxIntrinsic(
+    state.maximumActiveCursors, state.activeCursors,
+  );
+  if (state.maximumActiveCursors > 2) {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_CORRUPTION",
+      "inspect-schema",
+      "SQLite post-rebind seal scan cursor budget exceeded",
+    );
+  }
+}
+
+function closePostRebindSealScanIterator(
+  state: PostRebindSealScanState,
+  kind: "main-key-count" | "driver" | "point",
+): void {
+  const iterator = kind === "main-key-count"
+    ? state.mainIterator
+    : kind === "driver" ? state.driverIterator : state.pointIterator;
+  if (iterator === null) return;
+  if (postRebindSealScanCloseFaultForTest?.kind === kind) {
+    const error = postRebindSealScanCloseFaultForTest.error;
+    postRebindSealScanCloseFaultForTest = undefined;
+    throw error;
+  }
+  reflectApplyIntrinsic(nativeStatementIteratorIntrinsics().return, iterator, []);
+  if (kind === "main-key-count") state.mainIterator = null;
+  else if (kind === "driver") state.driverIterator = null;
+  else state.pointIterator = null;
+  state.activeCursors -= 1;
+}
+
+function closePostRebindSealScanPreservingPrimary(
+  state: PostRebindSealScanState,
+  kind: "main-key-count" | "driver" | "point",
+  primary: Readonly<{ readonly hasPrimary: boolean; readonly value: unknown }>,
+): Readonly<{
+  readonly primary: Readonly<{ readonly hasPrimary: boolean; readonly value: unknown }>;
+  readonly succeeded: boolean;
+}> {
+  try {
+    closePostRebindSealScanIterator(state, kind);
+    return objectFreezeIntrinsic({ primary, succeeded: true });
+  } catch (cleanupError) {
+    return objectFreezeIntrinsic({
+      primary: primary.hasPrimary
+        ? primary
+        : objectFreezeIntrinsic({ hasPrimary: true, value: cleanupError }),
+      succeeded: false,
+    });
+  }
+}
+
+function checkedPostRebindSealScanKey(value: unknown, label: string): PostRebindSealScanKey {
+  const row = sqliteRow(value, 2, "inspect-schema", label);
+  const tenantId = sqliteText(row[0], "inspect-schema", `${label} tenant`);
+  const tokenHash = sqliteText(row[1], "inspect-schema", `${label} token hash`);
+  let tenantValid = tenantId.length >= 1 && tenantId.length <= 128;
+  for (let index = 0; tenantValid && index < tenantId.length; index += 1) {
+    const code = reflectApplyIntrinsic(stringCharCodeAtIntrinsic, tenantId, [index]) as number;
+    tenantValid = (code >= 48 && code <= 57)
+      || (code >= 65 && code <= 90)
+      || (code >= 97 && code <= 122)
+      || (index > 0 && (code === 45 || code === 46 || code === 95));
+  }
+  if (!tenantValid || !isLowerHex64(tokenHash)) {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_CORRUPTION",
+      "inspect-schema",
+      `SQLite ${label} is invalid`,
+    );
+  }
+  return objectFreezeIntrinsic({ tenantId, tokenHash });
+}
+
+function comparePostRebindSealScanMainKey(
+  left: PostRebindSealScanKey,
+  right: PostRebindSealScanKey,
+): number {
+  return left.tenantId < right.tenantId ? -1
+    : left.tenantId > right.tenantId ? 1
+      : left.tokenHash < right.tokenHash ? -1 : left.tokenHash > right.tokenHash ? 1 : 0;
+}
+
+function comparePostRebindSealScanDriverKey(
+  left: PostRebindSealScanKey,
+  right: PostRebindSealScanKey,
+): number {
+  return left.tokenHash < right.tokenHash ? -1
+    : left.tokenHash > right.tokenHash ? 1
+      : left.tenantId < right.tenantId ? -1 : left.tenantId > right.tenantId ? 1 : 0;
+}
+
+function nextPostRebindSealScanKey(
+  state: PostRebindSealScanState,
+  iterator: SQLiteNativeStatementIterator,
+  label: string,
+): Readonly<{ readonly done: true }> | Readonly<{
+  readonly done: false;
+  readonly key: PostRebindSealScanKey;
+}> {
+  let fetched: IteratorResult<unknown> | undefined = reflectApplyIntrinsic(
+    nativeStatementIteratorIntrinsics().next, iterator, [],
+  ) as IteratorResult<unknown>;
+  if (fetched.done) {
+    fetched = undefined;
+    return objectFreezeIntrinsic({ done: true });
+  }
+  state.livePhysicalRows += 1;
+  state.maximumLivePhysicalRows = mathMaxIntrinsic(
+    state.maximumLivePhysicalRows, state.livePhysicalRows,
+  );
+  let key: PostRebindSealScanKey;
+  try {
+    if (state.maximumLivePhysicalRows > 1) {
+      throw new CycleStoreProviderError(
+        "GE_CYCLE_STORE_CORRUPTION",
+        "inspect-schema",
+        "SQLite post-rebind seal scan physical-row budget exceeded",
+      );
+    }
+    key = checkedPostRebindSealScanKey(fetched.value, label);
+  } finally {
+    fetched = undefined;
+    state.livePhysicalRows -= 1;
+  }
+  return objectFreezeIntrinsic({ done: false, key });
+}
+
+function scanPostRebindMainKeys(state: PostRebindSealScanState): number {
+  let previous: PostRebindSealScanKey | undefined;
+  let primary: Readonly<{ readonly hasPrimary: boolean; readonly value: unknown }> =
+    objectFreezeIntrinsic({ hasPrimary: false, value: undefined });
+  try {
+    state.mainStatement = postRebindSealScanPrepare(
+      state, "cursor-publication-post-rebind-main-key-count",
+    );
+    state.mainKeyCountPrepareCount = 1;
+    state.mainIterator = reflectApplyIntrinsic(
+      statementIterateIntrinsic, state.mainStatement, [],
+    ) as SQLiteNativeStatementIterator;
+    postRebindSealScanEnterCursor(state);
+    while (true) {
+      const fetched = nextPostRebindSealScanKey(
+        state, state.mainIterator, "post-rebind main key",
+      );
+      if (fetched.done) {
+        state.mainKeyCountTerminalFetchCount = 1;
+        break;
+      }
+      if (previous !== undefined && comparePostRebindSealScanMainKey(fetched.key, previous) <= 0) {
+        throw new CycleStoreProviderError(
+          "GE_CYCLE_STORE_CORRUPTION",
+          "inspect-schema",
+          "SQLite post-rebind main key order is invalid",
+        );
+      }
+      previous = fetched.key;
+      state.mainKeyCount += 1;
+      if (!numberIsSafeIntegerIntrinsic(state.mainKeyCount)) {
+        throw new CycleStoreProviderError(
+          "GE_CYCLE_STORE_CORRUPTION",
+          "inspect-schema",
+          "SQLite post-rebind main key count is unsafe",
+        );
+      }
+    }
+  } catch (error) {
+    primary = objectFreezeIntrinsic({ hasPrimary: true, value: error });
+  }
+  if (state.mainIterator !== null) {
+    state.mainKeyCountCloseAttemptCount = 1;
+    const close = closePostRebindSealScanPreservingPrimary(
+      state, "main-key-count", primary,
+    );
+    primary = close.primary;
+    if (close.succeeded) {
+      state.mainKeyCountCloseCount = 1;
+      state.mainStatement = null;
+    }
+  }
+  if (primary.hasPrimary) throw primary.value;
+  return state.mainKeyCount;
+}
+
+function consumePostRebindPointRow(
+  state: PostRebindSealScanState,
+  key: PostRebindSealScanKey,
+  consume: (row: ReturnType<typeof decodeSQLiteCursorSealRow>) => void,
+): void {
+  state.pointStatementExecuteCount += 1;
+  state.pointIterator = reflectApplyIntrinsic(
+    statementIterateIntrinsic,
+    state.pointStatement,
+    [key.tenantId, key.tokenHash],
+  ) as SQLiteNativeStatementIterator;
+  state.pointCursorCreatedCount += 1;
+  postRebindSealScanEnterCursor(state);
+  let primary: Readonly<{ readonly hasPrimary: boolean; readonly value: unknown }> =
+    objectFreezeIntrinsic({ hasPrimary: false, value: undefined });
+  try {
+    let fetched: IteratorResult<unknown> | undefined = reflectApplyIntrinsic(
+      nativeStatementIteratorIntrinsics().next, state.pointIterator, [],
+    ) as IteratorResult<unknown>;
+    if (fetched.done) {
+      fetched = undefined;
+      throw new CycleStoreProviderError(
+        "GE_CYCLE_STORE_CORRUPTION",
+        "inspect-schema",
+        "SQLite post-rebind point lookup row is missing",
+      );
+    }
+    state.livePhysicalRows += 1;
+    state.maximumLivePhysicalRows = mathMaxIntrinsic(
+      state.maximumLivePhysicalRows, state.livePhysicalRows,
+    );
+    let decoded: ReturnType<typeof decodeSQLiteCursorSealRow> | undefined;
+    try {
+      if (state.maximumLivePhysicalRows > 1) {
+        throw new CycleStoreProviderError(
+          "GE_CYCLE_STORE_CORRUPTION",
+          "inspect-schema",
+          "SQLite post-rebind seal scan physical-row budget exceeded",
+        );
+      }
+      decoded = decodeSQLiteCursorSealRow(fetched.value);
+      fetched = undefined;
+      state.liveCarriers += 1;
+      state.maximumLiveCarriers = mathMaxIntrinsic(
+        state.maximumLiveCarriers, state.liveCarriers,
+      );
+      try {
+        if (state.maximumLiveCarriers > 1) {
+          throw new CycleStoreProviderError(
+            "GE_CYCLE_STORE_CORRUPTION",
+            "inspect-schema",
+            "SQLite post-rebind seal scan carrier budget exceeded",
+          );
+        }
+        consume(decoded);
+      } finally {
+        decoded = undefined;
+        state.liveCarriers -= 1;
+      }
+    } finally {
+      fetched = undefined;
+      state.livePhysicalRows -= 1;
+    }
+  } catch (error) {
+    primary = objectFreezeIntrinsic({ hasPrimary: true, value: error });
+  }
+  if (state.pointIterator !== null) {
+    state.pointCursorCloseAttemptCount += 1;
+    const close = closePostRebindSealScanPreservingPrimary(state, "point", primary);
+    primary = close.primary;
+    if (close.succeeded) state.pointCursorClosedCount += 1;
+  }
+  if (primary.hasPrimary) throw primary.value;
+}
+
+function scanPostRebindDrivenSeal(
+  state: PostRebindSealScanState,
+  mainKeyCount: number,
+): Readonly<{
+  readonly accumulatorCount: number;
+  readonly computedImmutableRootSha256: string;
+  readonly observedDescriptorHash: string | null;
+  readonly observedSchemaIdentitySha256: string | null;
+}> {
+  let accumulator: SQLiteCursorSealAccumulator | undefined;
+  let observedDescriptorHash: string | null = null;
+  let observedSchemaIdentitySha256: string | null = null;
+  let previous: PostRebindSealScanKey | undefined;
+  let primary: Readonly<{ readonly hasPrimary: boolean; readonly value: unknown }> =
+    objectFreezeIntrinsic({ hasPrimary: false, value: undefined });
+  try {
+    state.driverStatement = postRebindSealScanPrepare(
+      state, "cursor-publication-post-rebind-key-driver",
+    );
+    state.driverPrepareCount = 1;
+    state.pointStatement = postRebindSealScanPrepare(
+      state, "cursor-publication-post-rebind-point-lookup",
+    );
+    state.pointStatementPrepareCount = 1;
+    state.driverIterator = reflectApplyIntrinsic(
+      statementIterateIntrinsic, state.driverStatement, [],
+    ) as SQLiteNativeStatementIterator;
+    postRebindSealScanEnterCursor(state);
+    while (true) {
+      const fetched = nextPostRebindSealScanKey(
+        state, state.driverIterator, "post-rebind driver key",
+      );
+      if (fetched.done) {
+        state.driverTerminalFetchCount = 1;
+        break;
+      }
+      if (previous !== undefined
+          && comparePostRebindSealScanDriverKey(fetched.key, previous) <= 0) {
+        throw new CycleStoreProviderError(
+          "GE_CYCLE_STORE_CORRUPTION",
+          "inspect-schema",
+          "SQLite post-rebind driver key order is invalid",
+        );
+      }
+      previous = fetched.key;
+      state.driverCount += 1;
+      if (!numberIsSafeIntegerIntrinsic(state.driverCount)) {
+        throw new CycleStoreProviderError(
+          "GE_CYCLE_STORE_CORRUPTION",
+          "inspect-schema",
+          "SQLite post-rebind driver count is unsafe",
+        );
+      }
+      consumePostRebindPointRow(state, fetched.key, (row) => {
+        if (row.carrier.tenantId !== fetched.key.tenantId
+            || row.carrier.tokenHash !== fetched.key.tokenHash) {
+          throw new CycleStoreProviderError(
+            "GE_CYCLE_STORE_CORRUPTION",
+            "inspect-schema",
+            "SQLite post-rebind point lookup identity is invalid",
+          );
+        }
+        if (accumulator === undefined) {
+          observedDescriptorHash = row.descriptorHash;
+          observedSchemaIdentitySha256 = row.schemaIdentitySha256;
+          accumulator = new SQLiteCursorSealAccumulator(
+            mainKeyCount, observedDescriptorHash, observedSchemaIdentitySha256,
+          );
+        }
+        accumulator.append(row);
+        state.lookupCount += 1;
+      });
+      assertPostRebindSealScanOwner(state);
+    }
+  } catch (error) {
+    primary = objectFreezeIntrinsic({ hasPrimary: true, value: error });
+  }
+  if (state.pointIterator === null && state.pointStatement !== null) {
+    state.pointStatement = null;
+    state.pointStatementReleaseCount = 1;
+  }
+  if (state.driverIterator !== null) {
+    state.driverCloseAttemptCount = 1;
+    const close = closePostRebindSealScanPreservingPrimary(state, "driver", primary);
+    primary = close.primary;
+    if (close.succeeded) {
+      state.driverCloseCount = 1;
+      state.driverStatement = null;
+    }
+  }
+  if (primary.hasPrimary) throw primary.value;
+  if (state.driverCount !== mainKeyCount
+      || state.pointStatementExecuteCount !== mainKeyCount) {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_CORRUPTION",
+      "inspect-schema",
+      "SQLite post-rebind seal scan counts disagree",
+    );
+  }
+  if (accumulator === undefined) {
+    if (mainKeyCount !== 0) {
+      throw new CycleStoreProviderError(
+        "GE_CYCLE_STORE_CORRUPTION",
+        "inspect-schema",
+        "SQLite post-rebind seal accumulator is missing",
+      );
+    }
+    const empty = new SQLiteCursorSealAccumulator(
+      0, POST_REBIND_ZERO_IDENTITY, POST_REBIND_ZERO_IDENTITY,
+    ).finish();
+    if (empty.immutableRootSha256 !== SQLITE_CURSOR_SEAL_EMPTY_ROOT) {
+      throw new CycleStoreProviderError(
+        "GE_CYCLE_STORE_CORRUPTION",
+        "inspect-schema",
+        "SQLite post-rebind empty seal root drifted",
+      );
+    }
+    return objectFreezeIntrinsic({
+      accumulatorCount: 0,
+      computedImmutableRootSha256: empty.immutableRootSha256,
+      observedDescriptorHash: null,
+      observedSchemaIdentitySha256: null,
+    });
+  }
+  const seal = accumulator.finish();
+  return objectFreezeIntrinsic({
+    accumulatorCount: seal.cursorCount,
+    computedImmutableRootSha256: seal.immutableRootSha256,
+    observedDescriptorHash,
+    observedSchemaIdentitySha256,
+  });
+}
+
 /**
  * Read exact owner state through the captured base-class intrinsic.
  * Subclass accessors and prototype replacement cannot intercept this call.
@@ -2884,6 +3458,254 @@ export function readSQLiteConnectionTotalChangesSnapshot(
   connection: SQLiteConnection,
 ): SQLiteConnectionTotalChangesSnapshot {
   return reflectApplyIntrinsic(sqliteConnectionTotalChangesSnapshotIntrinsic, connection, []);
+}
+
+function postRebindSealScanSnapshot(
+  state: PostRebindSealScanState,
+): SQLiteConnectionPostRebindSealScanSnapshot {
+  return objectFreezeIntrinsic({
+    lifecycle: state.lifecycle,
+    mainKeyCount: state.mainKeyCount,
+    driverCount: state.driverCount,
+    lookupCount: state.lookupCount,
+    pointStatementExecuteCount: state.pointStatementExecuteCount,
+    mainKeyCountPrepareCount: state.mainKeyCountPrepareCount,
+    mainKeyCountTerminalFetchCount: state.mainKeyCountTerminalFetchCount,
+    mainKeyCountCloseAttemptCount: state.mainKeyCountCloseAttemptCount,
+    mainKeyCountCloseCount: state.mainKeyCountCloseCount,
+    driverPrepareCount: state.driverPrepareCount,
+    driverTerminalFetchCount: state.driverTerminalFetchCount,
+    driverCloseAttemptCount: state.driverCloseAttemptCount,
+    driverCloseCount: state.driverCloseCount,
+    pointStatementPrepareCount: state.pointStatementPrepareCount,
+    pointStatementReleaseCount: state.pointStatementReleaseCount,
+    pointCursorCreatedCount: state.pointCursorCreatedCount,
+    pointCursorCloseAttemptCount: state.pointCursorCloseAttemptCount,
+    pointCursorClosedCount: state.pointCursorClosedCount,
+    activeCursors: state.activeCursors,
+    livePhysicalRows: state.livePhysicalRows,
+    liveCarriers: state.liveCarriers,
+    maximumActiveCursors: state.maximumActiveCursors,
+    maximumLivePhysicalRows: state.maximumLivePhysicalRows,
+    maximumLiveCarriers: state.maximumLiveCarriers,
+    mainStatementOwned: state.mainStatement !== null,
+    mainIteratorOwned: state.mainIterator !== null,
+    driverStatementOwned: state.driverStatement !== null,
+    driverIteratorOwned: state.driverIterator !== null,
+    pointStatementOwned: state.pointStatement !== null,
+    pointIteratorOwned: state.pointIterator !== null,
+    transactionEpoch: state.transactionEpoch,
+    transactionLineage: state.transactionLineage,
+    totalChanges: state.totalChanges,
+  });
+}
+
+/** Begin one zero-parameter, exact-SQL, connection-owned seal scan. */
+export function beginSQLiteConnectionPostRebindSealScanIntrinsic(
+  connection: SQLiteConnection,
+): SQLiteConnectionPostRebindSealScanExecution {
+  const owner = readSQLiteConnectionOwnerSnapshot(connection);
+  const total = readSQLiteConnectionTotalChangesSnapshot(connection);
+  if (!owner.isTransaction || owner.transactionMode !== "exclusive"
+      || owner.transactionLineage === null
+      || total.transactionEpoch !== owner.transactionEpoch) {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_CORRUPTION",
+      "inspect-schema",
+      "SQLite post-rebind seal scan requires the active exclusive owner",
+    );
+  }
+  const execution = objectFreezeIntrinsic(
+    reflectApplyIntrinsic(objectCreateIntrinsic, Object, [null]),
+  ) as SQLiteConnectionPostRebindSealScanExecution;
+  const state: PostRebindSealScanState = {
+    connection,
+    transactionEpoch: owner.transactionEpoch,
+    transactionLineage: owner.transactionLineage,
+    totalChanges: total.totalChanges,
+    lifecycle: "active",
+    mainKeyCount: 0,
+    driverCount: 0,
+    lookupCount: 0,
+    pointStatementExecuteCount: 0,
+    mainKeyCountPrepareCount: 0,
+    mainKeyCountTerminalFetchCount: 0,
+    mainKeyCountCloseAttemptCount: 0,
+    mainKeyCountCloseCount: 0,
+    driverPrepareCount: 0,
+    driverTerminalFetchCount: 0,
+    driverCloseAttemptCount: 0,
+    driverCloseCount: 0,
+    pointStatementPrepareCount: 0,
+    pointStatementReleaseCount: 0,
+    pointCursorCreatedCount: 0,
+    pointCursorCloseAttemptCount: 0,
+    pointCursorClosedCount: 0,
+    activeCursors: 0,
+    livePhysicalRows: 0,
+    liveCarriers: 0,
+    maximumActiveCursors: 0,
+    maximumLivePhysicalRows: 0,
+    maximumLiveCarriers: 0,
+    mainStatement: null,
+    mainIterator: null,
+    driverStatement: null,
+    driverIterator: null,
+    pointStatement: null,
+    pointIterator: null,
+  };
+  reflectApplyIntrinsic(weakMapSetIntrinsic, POST_REBIND_SEAL_SCAN_EXECUTIONS, [
+    execution as object,
+    state,
+  ]);
+  return execution;
+}
+
+/** Execute the complete 1/N/1 scan without exposing statements, iterators or rows. */
+export function executeSQLiteConnectionPostRebindSealScanIntrinsic(
+  connection: SQLiteConnection,
+  execution: SQLiteConnectionPostRebindSealScanExecution,
+): SQLiteConnectionPostRebindSealScanEvidence {
+  const state = postRebindSealScanState(connection, execution);
+  if (state.lifecycle !== "active") {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_CORRUPTION",
+      "inspect-schema",
+      "SQLite post-rebind seal scan execution is terminal",
+    );
+  }
+  let seal: ReturnType<typeof scanPostRebindDrivenSeal>;
+  try {
+    assertPostRebindSealScanOwner(state);
+    const mainKeyCount = scanPostRebindMainKeys(state);
+    if (state.mainStatement !== null || state.mainIterator !== null) {
+      throw new CycleStoreProviderError(
+        "GE_CYCLE_STORE_CORRUPTION",
+        "inspect-schema",
+        "SQLite post-rebind main scan owner was not retired",
+      );
+    }
+    assertPostRebindSealScanOwner(state);
+    seal = scanPostRebindDrivenSeal(state, mainKeyCount);
+    assertPostRebindSealScanOwner(state);
+    if (state.mainKeyCountPrepareCount !== 1
+        || state.mainKeyCountTerminalFetchCount !== 1
+        || state.mainKeyCountCloseAttemptCount !== 1
+        || state.mainKeyCountCloseCount !== 1
+        || state.driverPrepareCount !== 1
+        || state.driverTerminalFetchCount !== 1
+        || state.driverCloseAttemptCount !== 1
+        || state.driverCloseCount !== 1
+        || state.pointStatementPrepareCount !== 1
+        || state.pointStatementReleaseCount !== 1
+        || state.pointStatementExecuteCount !== state.mainKeyCount
+        || state.lookupCount !== state.mainKeyCount
+        || state.pointCursorCreatedCount !== state.mainKeyCount
+        || state.pointCursorCloseAttemptCount !== state.mainKeyCount
+        || state.pointCursorClosedCount !== state.mainKeyCount
+        || state.driverCount !== state.mainKeyCount
+        || seal.accumulatorCount !== state.mainKeyCount
+        || state.activeCursors !== 0
+        || state.livePhysicalRows !== 0
+        || state.liveCarriers !== 0
+        || state.maximumActiveCursors > 2
+        || state.maximumLivePhysicalRows > 1
+        || state.maximumLiveCarriers > 1
+        || state.mainStatement !== null || state.mainIterator !== null
+        || state.driverStatement !== null || state.driverIterator !== null
+        || state.pointStatement !== null || state.pointIterator !== null) {
+      throw new CycleStoreProviderError(
+        "GE_CYCLE_STORE_CORRUPTION",
+        "inspect-schema",
+        "SQLite post-rebind seal scan lifecycle is incomplete",
+      );
+    }
+    state.lifecycle = "completed";
+  } catch (error) {
+    state.lifecycle = "poisoned";
+    throw error;
+  }
+  return objectFreezeIntrinsic({
+    ...postRebindSealScanSnapshot(state),
+    lifecycle: "completed",
+    mainKeyCountPrepareCount: 1,
+    mainKeyCountTerminalFetchCount: 1,
+    mainKeyCountCloseAttemptCount: 1,
+    mainKeyCountCloseCount: 1,
+    driverPrepareCount: 1,
+    driverTerminalFetchCount: 1,
+    driverCloseAttemptCount: 1,
+    driverCloseCount: 1,
+    pointStatementPrepareCount: 1,
+    pointStatementReleaseCount: 1,
+    accumulatorCount: seal.accumulatorCount,
+    computedImmutableRootSha256: seal.computedImmutableRootSha256,
+    observedDescriptorHash: seal.observedDescriptorHash,
+    observedSchemaIdentitySha256: seal.observedSchemaIdentitySha256,
+  });
+}
+
+/** Read exact lifecycle, budget and retained native-owner truth. */
+export function readSQLiteConnectionPostRebindSealScanSnapshotIntrinsic(
+  connection: SQLiteConnection,
+  execution: SQLiteConnectionPostRebindSealScanExecution,
+): SQLiteConnectionPostRebindSealScanSnapshot {
+  return postRebindSealScanSnapshot(postRebindSealScanState(connection, execution));
+}
+
+/** Release an unexecuted scan or recover every still-owned handle after poison. */
+export function disposeSQLiteConnectionPostRebindSealScanIntrinsic(
+  connection: SQLiteConnection,
+  execution: SQLiteConnectionPostRebindSealScanExecution,
+): SQLiteConnectionPostRebindSealScanSnapshot {
+  const state = postRebindSealScanState(connection, execution);
+  if (state.lifecycle === "completed" || state.lifecycle === "released") {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_CORRUPTION",
+      "inspect-schema",
+      "SQLite post-rebind seal scan dispose is terminal",
+    );
+  }
+  let primary: Readonly<{ readonly hasPrimary: boolean; readonly value: unknown }> =
+    objectFreezeIntrinsic({ hasPrimary: false, value: undefined });
+  for (const kind of ["point", "driver", "main-key-count"] as const) {
+    const iterator = kind === "point" ? state.pointIterator
+      : kind === "driver" ? state.driverIterator : state.mainIterator;
+    if (iterator === null) continue;
+    if (kind === "point") state.pointCursorCloseAttemptCount += 1;
+    else if (kind === "driver") state.driverCloseAttemptCount += 1;
+    else state.mainKeyCountCloseAttemptCount += 1;
+    const close = closePostRebindSealScanPreservingPrimary(state, kind, primary);
+    primary = close.primary;
+    if (!close.succeeded) continue;
+    if (kind === "point") state.pointCursorClosedCount += 1;
+    else if (kind === "driver") state.driverCloseCount = 1;
+    else state.mainKeyCountCloseCount = 1;
+  }
+  if (state.pointIterator === null && state.pointStatement !== null) {
+    state.pointStatement = null;
+    state.pointStatementReleaseCount = 1;
+  }
+  if (state.driverIterator === null) state.driverStatement = null;
+  if (state.mainIterator === null) state.mainStatement = null;
+  if (primary.hasPrimary) throw primary.value;
+  if (state.lifecycle === "active") state.lifecycle = "released";
+  return postRebindSealScanSnapshot(state);
+}
+
+/** Package-private one-shot native-close fault seam. */
+export function injectSQLiteConnectionPostRebindSealScanCloseFaultForTestIntrinsic(
+  kind: "main-key-count" | "driver" | "point",
+  error: unknown,
+): void {
+  if (postRebindSealScanCloseFaultForTest !== undefined) {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "inspect-schema",
+      "SQLite post-rebind seal scan close fault is already armed",
+    );
+  }
+  postRebindSealScanCloseFaultForTest = objectFreezeIntrinsic({ kind, error });
 }
 
 /** Execute one fixed package-owned statement through the captured base intrinsic. */
@@ -2910,6 +3732,16 @@ export function prepareSQLiteConnectionCursorPublicationReadIntrinsic(
   kind: SQLiteConnectionNativeReadKind,
   operation: CycleStoreProviderOperation,
 ): StatementSync {
+  const runtimeKind: string = kind;
+  if (runtimeKind === "cursor-publication-post-rebind-main-key-count"
+      || runtimeKind === "cursor-publication-post-rebind-key-driver"
+      || runtimeKind === "cursor-publication-post-rebind-point-lookup") {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      operation,
+      "post-rebind seal SQL is connection-owner private",
+    );
+  }
   return reflectApplyIntrinsic(
     sqliteConnectionPrepareNativeReadIntrinsic, connection, [kind, operation],
   );

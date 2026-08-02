@@ -38,6 +38,12 @@ from .sqlite_operation_baseline import (
     capture_baseline_entry,
     validate_baseline_source_envelope,
 )
+from .sqlite_operation_baseline_cursor_invariants import (
+    SQLITE_CURSOR_SEAL_EMPTY_ROOT,
+    SQLiteCursorSealAccumulator,
+    SQLiteCursorSealRow,
+    decode_sqlite_v1_cursor_seal_row,
+)
 
 
 @dataclass(slots=True)
@@ -422,6 +428,141 @@ class _CursorPublicationRebindExecutionState:
     cursor_ledger_logical_write_sequence: Literal[0, 1] = 0
     cursor_ledger_fixed_statement_count: Literal[0, 1] = 0
     cursor_ledger_affected_rows_watermark: int = 0
+    seal_read_begin_count: Literal[0, 1] = 0
+
+
+SQLITE_CURSOR_PUBLICATION_SEAL_MAIN_KEY_SCAN_SQL_INTRINSIC = (
+    "SELECT tenant_id, token_hash FROM main.ge_cycle_cursors "
+    "ORDER BY tenant_id COLLATE BINARY, token_hash COLLATE BINARY"
+)
+SQLITE_CURSOR_PUBLICATION_SEAL_MAIN_KEY_SCAN_SQL_SHA256_INTRINSIC = (
+    "09d1ce669070093fbbf0dfd8ce7e2a7bbfde96d051b3ce9341be85495479ec32"
+)
+SQLITE_CURSOR_PUBLICATION_SEAL_KEY_DRIVER_SQL_INTRINSIC = (
+    "SELECT tenant_id, token_hash FROM temp.ge_blr_cursor_seal "
+    "ORDER BY token_hash COLLATE BINARY, tenant_id COLLATE BINARY"
+)
+SQLITE_CURSOR_PUBLICATION_SEAL_KEY_DRIVER_SQL_SHA256_INTRINSIC = (
+    "1694ab6fe938203b0d8f6cb72cf82238e89234c21086ff5d224c7de4db7b1266"
+)
+SQLITE_CURSOR_PUBLICATION_SEAL_POINT_LOOKUP_SQL_INTRINSIC = (
+    "SELECT tenant_id, token_hash, kind, principal_hash, authorization_hash, "
+    "stream_id, checkpoint_scope, request_scope_blob, page_size, next_position, "
+    "snapshot_tail_sequence, snapshot_tail_record_hash, descriptor_hash, "
+    "schema_identity_sha256, snapshot_blob, created_at_ms, expires_at_ms, "
+    "consumed_at_ms FROM main.ge_cycle_cursors WHERE tenant_id = ? "
+    "AND token_hash = ? LIMIT 1"
+)
+SQLITE_CURSOR_PUBLICATION_SEAL_POINT_LOOKUP_SQL_SHA256_INTRINSIC = (
+    "bd056ee55f2bd27eee3277ed7bfee8ae7b7db935edc3cf0937fc8167e2eac342"
+)
+_CURSOR_PUBLICATION_SEAL_READ_CONSTRUCTION_TOKEN = object()
+
+
+class _SQLiteConnectionCursorPublicationSealReadExecution:
+    """Opaque exact-owner for one raw post-rebind seal observation."""
+
+    __slots__ = ("__weakref__",)
+
+    def __init__(self, token: object) -> None:
+        if token is not _CURSOR_PUBLICATION_SEAL_READ_CONSTRUCTION_TOKEN:
+            raise TypeError("GE_CURSOR_B3_CURSOR_SEAL_READ_EXECUTION")
+
+
+class _SQLiteConnectionCursorPublicationSealReadSnapshot(NamedTuple):
+    lifecycle: Literal["prepared", "running", "completed", "released", "poisoned"]
+    main_key_scan_sql: str
+    main_key_scan_sql_sha256: str
+    key_driver_sql: str
+    key_driver_sql_sha256: str
+    point_lookup_sql: str
+    point_lookup_sql_sha256: str
+    execute_count: Literal[0, 1]
+    release_count: Literal[0, 1]
+    main_key_prepare_count: Literal[0, 1]
+    main_key_row_count: int
+    main_key_terminal_fetch_count: Literal[0, 1]
+    main_key_close_attempt_count: int
+    main_key_close_count: Literal[0, 1]
+    driver_prepare_count: Literal[0, 1]
+    driver_row_count: int
+    driver_terminal_fetch_count: Literal[0, 1]
+    driver_close_attempt_count: int
+    driver_close_count: Literal[0, 1]
+    point_statement_prepare_count: Literal[0, 1]
+    point_statement_execute_count: int
+    point_statement_release_count: Literal[0, 1]
+    point_cursor_created_count: int
+    point_cursor_close_attempt_count: int
+    point_cursor_closed_count: int
+    lookup_row_count: int
+    accumulator_row_count: int
+    observed_descriptor_hash: str | None
+    observed_schema_identity_sha256: str | None
+    computed_immutable_root_sha256: str | None
+    active_cursor_count: int
+    maximum_active_cursor_count: int
+    live_physical_row_count: int
+    maximum_live_physical_row_count: int
+    live_carrier_count: int
+    maximum_live_carrier_count: int
+    transaction_epoch: int
+    transaction_generation: object
+    total_changes_before: int
+    total_changes: int
+    total_changes_delta: int
+
+
+@dataclass(slots=True)
+class _CursorPublicationSealReadExecutionState:
+    connection: SQLiteV1BaselineConnectionOwner
+    rebind_execution: _SQLiteConnectionCursorPublicationRebindExecution
+    main_key_scan_sql: str
+    main_key_scan_sql_sha256: str
+    key_driver_sql: str
+    key_driver_sql_sha256: str
+    point_lookup_sql: str
+    point_lookup_sql_sha256: str
+    transaction_generation: object
+    transaction_epoch: int
+    total_changes_before: int
+    total_changes: int
+    lifecycle: Literal["prepared", "running", "completed", "released", "poisoned"] = (
+        "prepared"
+    )
+    execute_count: Literal[0, 1] = 0
+    release_count: Literal[0, 1] = 0
+    main_key_prepare_count: Literal[0, 1] = 0
+    main_key_row_count: int = 0
+    main_key_terminal_fetch_count: Literal[0, 1] = 0
+    main_key_close_attempt_count: int = 0
+    main_key_close_count: Literal[0, 1] = 0
+    driver_prepare_count: Literal[0, 1] = 0
+    driver_row_count: int = 0
+    driver_terminal_fetch_count: Literal[0, 1] = 0
+    driver_close_attempt_count: int = 0
+    driver_close_count: Literal[0, 1] = 0
+    point_statement_prepare_count: Literal[0, 1] = 0
+    point_statement_execute_count: int = 0
+    point_statement_release_count: Literal[0, 1] = 0
+    point_cursor_created_count: int = 0
+    point_cursor_close_attempt_count: int = 0
+    point_cursor_closed_count: int = 0
+    lookup_row_count: int = 0
+    accumulator_row_count: int = 0
+    observed_descriptor_hash: str | None = None
+    observed_schema_identity_sha256: str | None = None
+    computed_immutable_root_sha256: str | None = None
+    active_cursor_count: int = 0
+    maximum_active_cursor_count: int = 0
+    live_physical_row_count: int = 0
+    maximum_live_physical_row_count: int = 0
+    live_carrier_count: int = 0
+    maximum_live_carrier_count: int = 0
+    main_cursor: sqlite3.Cursor | None = None
+    driver_cursor: sqlite3.Cursor | None = None
+    point_cursor: sqlite3.Cursor | None = None
+    point_statement_owner: _CursorSealReadPointStatementOwner | None = None
 
 
 class _SQLiteConnectionMigration0002Execution:
@@ -718,6 +859,13 @@ _CURSOR_PUBLICATION_REBIND_EXECUTIONS: dict[
         _CursorPublicationRebindExecutionState,
     ],
 ] = {}
+_CURSOR_PUBLICATION_SEAL_READ_EXECUTIONS: dict[
+    int,
+    tuple[
+        ReferenceType[_SQLiteConnectionCursorPublicationSealReadExecution],
+        _CursorPublicationSealReadExecutionState,
+    ],
+] = {}
 
 # CPython's sqlite descriptors are captured once so later module/class
 # replacement cannot redirect the package-owned execution lane.
@@ -754,6 +902,15 @@ _CURSOR_REBIND_SQLITE_CURSOR_CLOSE = sqlite3.Cursor.close
 _CURSOR_REBIND_SQLITE_CURSOR_FETCHONE = sqlite3.Cursor.fetchone
 _CURSOR_REBIND_SQLITE_CURSOR_ROWCOUNT = sqlite3.Cursor.rowcount
 _CURSOR_REBIND_SQLITE_CURSOR_CONNECTION = sqlite3.Cursor.connection
+_CURSOR_SEAL_READ_SQLITE_CONNECTION_CURSOR = sqlite3.Connection.cursor
+_CURSOR_SEAL_READ_SQLITE_CONNECTION_IN_TRANSACTION = sqlite3.Connection.in_transaction
+_CURSOR_SEAL_READ_SQLITE_CONNECTION_TOTAL_CHANGES = sqlite3.Connection.total_changes
+_CURSOR_SEAL_READ_SQLITE_CURSOR_EXECUTE = sqlite3.Cursor.execute
+_CURSOR_SEAL_READ_SQLITE_CURSOR_CLOSE = sqlite3.Cursor.close
+_CURSOR_SEAL_READ_SQLITE_CURSOR_FETCHONE = sqlite3.Cursor.fetchone
+_CURSOR_SEAL_READ_SQLITE_CURSOR_CONNECTION = sqlite3.Cursor.connection
+_CURSOR_SEAL_READ_ACCUMULATOR = SQLiteCursorSealAccumulator
+_CURSOR_SEAL_READ_DECODE_ROW = decode_sqlite_v1_cursor_seal_row
 _READ_MIGRATION_0002_ASSET = _read_sqlite_cursor_migration_0002_asset_snapshot_intrinsic
 
 
@@ -1299,6 +1456,257 @@ def _cursor_publication_rebind_snapshot(
     )
 
 
+def _cursor_publication_seal_read_fail(code: str) -> Never:
+    raise ValueError(code)
+
+
+def _cursor_publication_seal_read_native_in_transaction(
+    connection: sqlite3.Connection,
+    _descriptor: Any = _CURSOR_SEAL_READ_SQLITE_CONNECTION_IN_TRANSACTION,
+) -> bool:
+    try:
+        value = _descriptor.__get__(connection, sqlite3.Connection)
+    except BaseException as error:
+        raise ValueError("GE_CURSOR_B3_CURSOR_SEAL_READ_CONNECTION") from error
+    if type(value) is not bool:
+        _cursor_publication_seal_read_fail("GE_CURSOR_B3_CURSOR_SEAL_READ_CONNECTION")
+    return value
+
+
+def _cursor_publication_seal_read_native_total_changes(
+    connection: sqlite3.Connection,
+    _descriptor: Any = _CURSOR_SEAL_READ_SQLITE_CONNECTION_TOTAL_CHANGES,
+) -> int:
+    try:
+        value = _descriptor.__get__(connection, sqlite3.Connection)
+    except BaseException as error:
+        raise ValueError("GE_CURSOR_B3_CURSOR_SEAL_READ_COUNTER") from error
+    if type(value) is not int or not 0 <= value <= MAX_SAFE_INTEGER:
+        _cursor_publication_seal_read_fail("GE_CURSOR_B3_CURSOR_SEAL_READ_COUNTER")
+    return value
+
+
+def _cursor_publication_seal_read_cursor_belongs(
+    cursor: object,
+    connection: sqlite3.Connection,
+    _descriptor: Any = _CURSOR_SEAL_READ_SQLITE_CURSOR_CONNECTION,
+) -> bool:
+    if type(cursor) is not sqlite3.Cursor:
+        return False
+    try:
+        return _descriptor.__get__(cursor, sqlite3.Cursor) is connection
+    except BaseException:
+        return False
+
+
+def _cursor_publication_seal_read_key(row: object) -> tuple[str, str, bytes, bytes]:
+    if type(row) is not tuple or len(row) != 2:
+        _cursor_publication_seal_read_fail("GE_CURSOR_B3_CURSOR_SEAL_READ_KEY_SHAPE")
+    tenant_id, token_hash = row
+    if (
+        type(tenant_id) is not str
+        or not 1 <= len(tenant_id) <= 128
+        or not tenant_id[0].isascii()
+        or not tenant_id[0].isalnum()
+        or any(
+            not character.isascii()
+            or (not character.isalnum() and character not in "._-")
+            for character in tenant_id
+        )
+        or type(token_hash) is not str
+        or len(token_hash) != 64
+        or any(character not in "0123456789abcdef" for character in token_hash)
+    ):
+        _cursor_publication_seal_read_fail("GE_CURSOR_B3_CURSOR_SEAL_READ_KEY_SHAPE")
+    return tenant_id, token_hash, tenant_id.encode("utf-8"), token_hash.encode("utf-8")
+
+
+def _cursor_publication_seal_read_state(
+    connection: SQLiteV1BaselineConnectionOwner,
+    execution: object,
+    _type: Callable[[object], type] = type,
+    _identity: Callable[[object], int] = id,
+    _dictionary_get: Callable[..., object] = dict.get,
+) -> _CursorPublicationSealReadExecutionState:
+    if _type(execution) is not _SQLiteConnectionCursorPublicationSealReadExecution:
+        _cursor_publication_seal_read_fail("GE_CURSOR_B3_CURSOR_SEAL_READ_EXECUTION")
+    current = _dictionary_get(_CURSOR_PUBLICATION_SEAL_READ_EXECUTIONS, _identity(execution))
+    if (
+        type(current) is not tuple
+        or len(current) != 2
+        or current[0]() is not execution
+        or type(current[1]) is not _CursorPublicationSealReadExecutionState
+        or current[1].connection is not connection
+    ):
+        _cursor_publication_seal_read_fail("GE_CURSOR_B3_CURSOR_SEAL_READ_EXECUTION")
+    return current[1]
+
+
+def _cursor_publication_seal_read_snapshot(
+    state: _CursorPublicationSealReadExecutionState,
+) -> _SQLiteConnectionCursorPublicationSealReadSnapshot:
+    return _SQLiteConnectionCursorPublicationSealReadSnapshot(
+        lifecycle=state.lifecycle,
+        main_key_scan_sql=state.main_key_scan_sql,
+        main_key_scan_sql_sha256=state.main_key_scan_sql_sha256,
+        key_driver_sql=state.key_driver_sql,
+        key_driver_sql_sha256=state.key_driver_sql_sha256,
+        point_lookup_sql=state.point_lookup_sql,
+        point_lookup_sql_sha256=state.point_lookup_sql_sha256,
+        execute_count=state.execute_count,
+        release_count=state.release_count,
+        main_key_prepare_count=state.main_key_prepare_count,
+        main_key_row_count=state.main_key_row_count,
+        main_key_terminal_fetch_count=state.main_key_terminal_fetch_count,
+        main_key_close_attempt_count=state.main_key_close_attempt_count,
+        main_key_close_count=state.main_key_close_count,
+        driver_prepare_count=state.driver_prepare_count,
+        driver_row_count=state.driver_row_count,
+        driver_terminal_fetch_count=state.driver_terminal_fetch_count,
+        driver_close_attempt_count=state.driver_close_attempt_count,
+        driver_close_count=state.driver_close_count,
+        point_statement_prepare_count=state.point_statement_prepare_count,
+        point_statement_execute_count=state.point_statement_execute_count,
+        point_statement_release_count=state.point_statement_release_count,
+        point_cursor_created_count=state.point_cursor_created_count,
+        point_cursor_close_attempt_count=state.point_cursor_close_attempt_count,
+        point_cursor_closed_count=state.point_cursor_closed_count,
+        lookup_row_count=state.lookup_row_count,
+        accumulator_row_count=state.accumulator_row_count,
+        observed_descriptor_hash=state.observed_descriptor_hash,
+        observed_schema_identity_sha256=state.observed_schema_identity_sha256,
+        computed_immutable_root_sha256=(
+            state.computed_immutable_root_sha256
+            if state.lifecycle == "completed"
+            else None
+        ),
+        active_cursor_count=state.active_cursor_count,
+        maximum_active_cursor_count=state.maximum_active_cursor_count,
+        live_physical_row_count=state.live_physical_row_count,
+        maximum_live_physical_row_count=state.maximum_live_physical_row_count,
+        live_carrier_count=state.live_carrier_count,
+        maximum_live_carrier_count=state.maximum_live_carrier_count,
+        transaction_epoch=state.transaction_epoch,
+        transaction_generation=state.transaction_generation,
+        total_changes_before=state.total_changes_before,
+        total_changes=state.total_changes,
+        total_changes_delta=state.total_changes - state.total_changes_before,
+    )
+
+
+def _register_cursor_publication_seal_read_execution(
+    execution: _SQLiteConnectionCursorPublicationSealReadExecution,
+    state: _CursorPublicationSealReadExecutionState,
+    _identity: Callable[[object], int] = id,
+    _make_ref: Callable[..., ReferenceType[object]] = ref,
+    _dictionary_get: Callable[..., object] = dict.get,
+    _dictionary_set: Callable[..., None] = dict.__setitem__,
+    _dictionary_pop: Callable[..., object] = dict.pop,
+    _cursor_close: Callable[[sqlite3.Cursor], None] = _CURSOR_SEAL_READ_SQLITE_CURSOR_CLOSE,
+) -> None:
+    execution_id = _identity(execution)
+
+    def discard(dead: ReferenceType[object]) -> None:
+        current = _dictionary_get(_CURSOR_PUBLICATION_SEAL_READ_EXECUTIONS, execution_id)
+        if type(current) is tuple and len(current) == 2 and current[0] is dead:
+            current_state = current[1]
+            for attribute in ("point_cursor", "driver_cursor", "main_cursor"):
+                cursor = getattr(current_state, attribute)
+                if cursor is not None:
+                    with suppress(BaseException):
+                        _cursor_close(cursor)
+                    setattr(current_state, attribute, None)
+            current_state.active_cursor_count = 0
+            current_state.live_physical_row_count = 0
+            current_state.live_carrier_count = 0
+            _dictionary_pop(_CURSOR_PUBLICATION_SEAL_READ_EXECUTIONS, execution_id, None)
+
+    execution_ref = _make_ref(execution, discard)
+    _dictionary_set(
+        _CURSOR_PUBLICATION_SEAL_READ_EXECUTIONS,
+        execution_id,
+        (execution_ref, state),
+    )
+
+
+@dataclass(slots=True)
+class _CursorSealReadPointStatementOwner:
+    """One real reusable fixed-SQL point statement bound to one connection."""
+
+    state: _CursorPublicationSealReadExecutionState
+    connection: sqlite3.Connection
+    sql: str
+    cursor_factory: Callable[[sqlite3.Connection], sqlite3.Cursor]
+    cursor_execute: Callable[..., sqlite3.Cursor]
+    cursor_belongs: Callable[[object, sqlite3.Connection], bool]
+    recovery_cursor_close: Callable[[sqlite3.Cursor], None]
+    execute_count: int = 0
+    release_count: Literal[0, 1] = 0
+    active_cursor: sqlite3.Cursor | None = None
+
+    def execute(
+        self,
+        tenant_id: str,
+        token_hash: str,
+        _point_sql: str = SQLITE_CURSOR_PUBLICATION_SEAL_POINT_LOOKUP_SQL_INTRINSIC,
+        _point_sql_sha256: str = (
+            SQLITE_CURSOR_PUBLICATION_SEAL_POINT_LOOKUP_SQL_SHA256_INTRINSIC
+        ),
+    ) -> sqlite3.Cursor:
+        if (
+            self.release_count != 0
+            or self.active_cursor is not None
+            or self.state.lifecycle != "running"
+            or self.sql != _point_sql
+            or self.state.point_lookup_sql != _point_sql
+            or self.state.point_lookup_sql_sha256 != _point_sql_sha256
+        ):
+            _cursor_publication_seal_read_fail(
+                "GE_CURSOR_B3_CURSOR_SEAL_READ_POINT_EXECUTE"
+            )
+        try:
+            cursor = self.cursor_factory(self.connection)
+        except BaseException as error:
+            raise ValueError("GE_CURSOR_B3_CURSOR_SEAL_READ_POINT_PREPARE") from error
+        if not self.cursor_belongs(cursor, self.connection):
+            with suppress(BaseException):
+                self.recovery_cursor_close(cursor)
+            _cursor_publication_seal_read_fail(
+                "GE_CURSOR_B3_CURSOR_SEAL_READ_POINT_PREPARE"
+            )
+        self.active_cursor = cursor
+        self.state.point_cursor = cursor
+        self.state.point_cursor_created_count += 1
+        self.state.active_cursor_count += 1
+        self.state.maximum_active_cursor_count = max(
+            self.state.maximum_active_cursor_count,
+            self.state.active_cursor_count,
+        )
+        if self.state.active_cursor_count > 2:
+            _cursor_publication_seal_read_fail(
+                "GE_CURSOR_B3_CURSOR_SEAL_READ_CURSOR_BUDGET"
+            )
+        self.execute_count += 1
+        self.state.point_statement_execute_count = self.execute_count
+        try:
+            result = self.cursor_execute(cursor, _point_sql, (tenant_id, token_hash))
+        except BaseException as error:
+            raise ValueError("GE_CURSOR_B3_CURSOR_SEAL_READ_POINT_EXECUTE") from error
+        if result is not cursor:
+            _cursor_publication_seal_read_fail(
+                "GE_CURSOR_B3_CURSOR_SEAL_READ_POINT_EXECUTE"
+            )
+        return cursor
+
+    def release(self) -> None:
+        if self.release_count != 0 or self.active_cursor is not None:
+            _cursor_publication_seal_read_fail(
+                "GE_CURSOR_B3_CURSOR_SEAL_READ_POINT_RELEASE"
+            )
+        self.release_count = 1
+        self.state.point_statement_release_count = 1
+
+
 class SQLiteV1BaselineConnectionOwner:
     """Exclusive connection capability with separate lineage and mutation epoch."""
 
@@ -1734,6 +2142,577 @@ class SQLiteV1BaselineConnectionOwner:
         ),
     ) -> _SQLiteConnectionCursorPublicationRebindSnapshot:
         return _cursor_publication_rebind_snapshot(_state_for(self, execution))
+
+    def _begin_cursor_publication_seal_read(
+        self,
+        rebind_execution: _SQLiteConnectionCursorPublicationRebindExecution,
+        _rebind_state_for: Callable[..., _CursorPublicationRebindExecutionState] = (
+            _cursor_publication_rebind_state
+        ),
+        _native_in_transaction: Callable[[sqlite3.Connection], bool] = (
+            _cursor_publication_seal_read_native_in_transaction
+        ),
+        _native_total_changes: Callable[[sqlite3.Connection], int] = (
+            _cursor_publication_seal_read_native_total_changes
+        ),
+        _register: Callable[
+            [
+                _SQLiteConnectionCursorPublicationSealReadExecution,
+                _CursorPublicationSealReadExecutionState,
+            ],
+            None,
+        ] = _register_cursor_publication_seal_read_execution,
+        _digest: Callable[..., object] = hashlib.sha256,
+        _main_sql: str = SQLITE_CURSOR_PUBLICATION_SEAL_MAIN_KEY_SCAN_SQL_INTRINSIC,
+        _main_sha256: str = (
+            SQLITE_CURSOR_PUBLICATION_SEAL_MAIN_KEY_SCAN_SQL_SHA256_INTRINSIC
+        ),
+        _driver_sql: str = SQLITE_CURSOR_PUBLICATION_SEAL_KEY_DRIVER_SQL_INTRINSIC,
+        _driver_sha256: str = (
+            SQLITE_CURSOR_PUBLICATION_SEAL_KEY_DRIVER_SQL_SHA256_INTRINSIC
+        ),
+        _point_sql: str = SQLITE_CURSOR_PUBLICATION_SEAL_POINT_LOOKUP_SQL_INTRINSIC,
+        _point_sha256: str = (
+            SQLITE_CURSOR_PUBLICATION_SEAL_POINT_LOOKUP_SQL_SHA256_INTRINSIC
+        ),
+    ) -> _SQLiteConnectionCursorPublicationSealReadExecution:
+        """Bind raw seal observation to one exact completed rebind proof."""
+
+        rebind_state = _rebind_state_for(self, rebind_execution)
+        if (
+            rebind_state.lifecycle != "completed"
+            or rebind_state.cursor is not None
+            or rebind_state.execute_count != 1
+            or rebind_state.release_count != 1
+            or rebind_state.changes_prepare_count != 1
+            or rebind_state.changes_fetch_count != 1
+            or rebind_state.changes_release_count != 1
+            or rebind_state.affected_rows is None
+            or rebind_state.changes_affected_rows != rebind_state.affected_rows
+            or rebind_state.seal_read_begin_count != 0
+            or not _native_in_transaction(self.__connection)
+            or self.__transaction_mode != "exclusive"
+            or self.__transaction_generation is not rebind_state.transaction_generation
+            or self.__transaction_epoch != rebind_state.transaction_epoch
+        ):
+            _cursor_publication_seal_read_fail("GE_CURSOR_B3_CURSOR_SEAL_READ_LINEAGE")
+        total_changes = _native_total_changes(self.__connection)
+        if total_changes != rebind_state.total_changes:
+            _cursor_publication_seal_read_fail("GE_CURSOR_B3_CURSOR_SEAL_READ_LINEAGE")
+        exact_sql = (
+            (
+                _main_sql,
+                _main_sha256,
+                "SELECT tenant_id, token_hash FROM main.ge_cycle_cursors "
+                "ORDER BY tenant_id COLLATE BINARY, token_hash COLLATE BINARY",
+                "09d1ce669070093fbbf0dfd8ce7e2a7bbfde96d051b3ce9341be85495479ec32",
+            ),
+            (
+                _driver_sql,
+                _driver_sha256,
+                "SELECT tenant_id, token_hash FROM temp.ge_blr_cursor_seal "
+                "ORDER BY token_hash COLLATE BINARY, tenant_id COLLATE BINARY",
+                "1694ab6fe938203b0d8f6cb72cf82238e89234c21086ff5d224c7de4db7b1266",
+            ),
+            (
+                _point_sql,
+                _point_sha256,
+                "SELECT tenant_id, token_hash, kind, principal_hash, "
+                "authorization_hash, stream_id, checkpoint_scope, request_scope_blob, "
+                "page_size, next_position, snapshot_tail_sequence, "
+                "snapshot_tail_record_hash, descriptor_hash, schema_identity_sha256, "
+                "snapshot_blob, created_at_ms, expires_at_ms, consumed_at_ms FROM "
+                "main.ge_cycle_cursors WHERE tenant_id = ? AND token_hash = ? LIMIT 1",
+                "bd056ee55f2bd27eee3277ed7bfee8ae7b7db935edc3cf0937fc8167e2eac342",
+            ),
+        )
+        for sql, digest, literal, expected_digest in exact_sql:
+            try:
+                actual_digest = cast(Any, _digest)(sql.encode("utf-8")).hexdigest()
+            except BaseException as error:
+                raise ValueError("GE_CURSOR_B3_CURSOR_SEAL_READ_SQL_IDENTITY") from error
+            if sql != literal or digest != expected_digest or actual_digest != digest:
+                _cursor_publication_seal_read_fail(
+                    "GE_CURSOR_B3_CURSOR_SEAL_READ_SQL_IDENTITY"
+                )
+        execution = _SQLiteConnectionCursorPublicationSealReadExecution(
+            _CURSOR_PUBLICATION_SEAL_READ_CONSTRUCTION_TOKEN
+        )
+        state = _CursorPublicationSealReadExecutionState(
+            connection=self,
+            rebind_execution=rebind_execution,
+            main_key_scan_sql=_main_sql,
+            main_key_scan_sql_sha256=_main_sha256,
+            key_driver_sql=_driver_sql,
+            key_driver_sql_sha256=_driver_sha256,
+            point_lookup_sql=_point_sql,
+            point_lookup_sql_sha256=_point_sha256,
+            transaction_generation=rebind_state.transaction_generation,
+            transaction_epoch=rebind_state.transaction_epoch,
+            total_changes_before=total_changes,
+            total_changes=total_changes,
+        )
+        _register(execution, state)
+        rebind_state.seal_read_begin_count = 1
+        return execution
+
+    def _execute_cursor_publication_seal_read(
+        self,
+        execution: _SQLiteConnectionCursorPublicationSealReadExecution,
+        _state_for: Callable[..., _CursorPublicationSealReadExecutionState] = (
+            _cursor_publication_seal_read_state
+        ),
+        _native_in_transaction: Callable[[sqlite3.Connection], bool] = (
+            _cursor_publication_seal_read_native_in_transaction
+        ),
+        _native_total_changes: Callable[[sqlite3.Connection], int] = (
+            _cursor_publication_seal_read_native_total_changes
+        ),
+        _cursor_factory: Callable[[sqlite3.Connection], sqlite3.Cursor] = (
+            _CURSOR_SEAL_READ_SQLITE_CONNECTION_CURSOR
+        ),
+        _cursor_execute: Callable[..., sqlite3.Cursor] = (
+            _CURSOR_SEAL_READ_SQLITE_CURSOR_EXECUTE
+        ),
+        _cursor_fetchone: Callable[[sqlite3.Cursor], object] = (
+            _CURSOR_SEAL_READ_SQLITE_CURSOR_FETCHONE
+        ),
+        _cursor_close: Callable[[sqlite3.Cursor], None] = (
+            _CURSOR_SEAL_READ_SQLITE_CURSOR_CLOSE
+        ),
+        _recovery_cursor_close: Callable[[sqlite3.Cursor], None] = (
+            _CURSOR_SEAL_READ_SQLITE_CURSOR_CLOSE
+        ),
+        _cursor_belongs: Callable[[object, sqlite3.Connection], bool] = (
+            _cursor_publication_seal_read_cursor_belongs
+        ),
+        _decode_row: Callable[[object], SQLiteCursorSealRow] = _CURSOR_SEAL_READ_DECODE_ROW,
+        _accumulator_type: Callable[..., object] = _CURSOR_SEAL_READ_ACCUMULATOR,
+        _main_sql: str = SQLITE_CURSOR_PUBLICATION_SEAL_MAIN_KEY_SCAN_SQL_INTRINSIC,
+        _main_sql_sha256: str = (
+            SQLITE_CURSOR_PUBLICATION_SEAL_MAIN_KEY_SCAN_SQL_SHA256_INTRINSIC
+        ),
+        _driver_sql: str = SQLITE_CURSOR_PUBLICATION_SEAL_KEY_DRIVER_SQL_INTRINSIC,
+        _driver_sql_sha256: str = (
+            SQLITE_CURSOR_PUBLICATION_SEAL_KEY_DRIVER_SQL_SHA256_INTRINSIC
+        ),
+        _point_sql: str = SQLITE_CURSOR_PUBLICATION_SEAL_POINT_LOOKUP_SQL_INTRINSIC,
+        _point_sql_sha256: str = (
+            SQLITE_CURSOR_PUBLICATION_SEAL_POINT_LOOKUP_SQL_SHA256_INTRINSIC
+        ),
+    ) -> _SQLiteConnectionCursorPublicationSealReadSnapshot:
+        """Compute raw bounded seal evidence without accepting Rule 12."""
+
+        state = _state_for(self, execution)
+
+        def prove_lineage() -> None:
+            current_total = _native_total_changes(self.__connection)
+            state.total_changes = current_total
+            if (
+                not _native_in_transaction(self.__connection)
+                or self.__transaction_mode != "exclusive"
+                or self.__transaction_generation is not state.transaction_generation
+                or self.__transaction_epoch != state.transaction_epoch
+                or current_total != state.total_changes_before
+            ):
+                _cursor_publication_seal_read_fail(
+                    "GE_CURSOR_B3_CURSOR_SEAL_READ_LINEAGE"
+                )
+
+        def opened(cursor: sqlite3.Cursor, attribute: str) -> None:
+            setattr(state, attribute, cursor)
+            state.active_cursor_count += 1
+            state.maximum_active_cursor_count = max(
+                state.maximum_active_cursor_count,
+                state.active_cursor_count,
+            )
+            if state.active_cursor_count > 2:
+                _cursor_publication_seal_read_fail(
+                    "GE_CURSOR_B3_CURSOR_SEAL_READ_CURSOR_BUDGET"
+                )
+
+        def prepare_cursor(attribute: str, code: str) -> sqlite3.Cursor:
+            try:
+                cursor = _cursor_factory(self.__connection)
+            except BaseException as error:
+                raise ValueError(code) from error
+            if not _cursor_belongs(cursor, self.__connection):
+                with suppress(BaseException):
+                    _recovery_cursor_close(cursor)
+                _cursor_publication_seal_read_fail(code)
+            opened(cursor, attribute)
+            return cursor
+
+        def execute_sql(
+            cursor: sqlite3.Cursor,
+            sql: str,
+            parameters: tuple[object, ...],
+            code: str,
+        ) -> None:
+            try:
+                result = _cursor_execute(cursor, sql, parameters)
+            except BaseException as error:
+                raise ValueError(code) from error
+            if result is not cursor:
+                _cursor_publication_seal_read_fail(code)
+
+        def fetch_one(cursor: sqlite3.Cursor, code: str) -> object:
+            try:
+                return _cursor_fetchone(cursor)
+            except BaseException as error:
+                raise ValueError(code) from error
+
+        def close_cursor(
+            attribute: str,
+            attempt_counter: str,
+            success_counter: str,
+            code: str,
+        ) -> None:
+            cursor = cast(sqlite3.Cursor | None, getattr(state, attribute))
+            if cursor is None or getattr(state, success_counter) != 0:
+                _cursor_publication_seal_read_fail(code)
+            setattr(state, attempt_counter, getattr(state, attempt_counter) + 1)
+            try:
+                _cursor_close(cursor)
+            except BaseException as error:
+                raise ValueError(code) from error
+            setattr(state, success_counter, 1)
+            setattr(state, attribute, None)
+            state.active_cursor_count -= 1
+
+        def close_point(code: str) -> None:
+            cursor = state.point_cursor
+            if cursor is None:
+                _cursor_publication_seal_read_fail(code)
+            state.point_cursor_close_attempt_count += 1
+            try:
+                _cursor_close(cursor)
+            except BaseException as error:
+                raise ValueError(code) from error
+            state.point_cursor_closed_count += 1
+            state.point_cursor = None
+            if state.point_statement_owner is not None:
+                state.point_statement_owner.active_cursor = None
+            state.active_cursor_count -= 1
+
+        def recover_cursor(attribute: str) -> None:
+            cursor = cast(sqlite3.Cursor | None, getattr(state, attribute))
+            if cursor is not None:
+                if attribute == "point_cursor":
+                    state.point_cursor_close_attempt_count += 1
+                elif attribute == "driver_cursor":
+                    state.driver_close_attempt_count += 1
+                elif attribute == "main_cursor":
+                    state.main_key_close_attempt_count += 1
+                try:
+                    _recovery_cursor_close(cursor)
+                except BaseException:
+                    return
+                else:
+                    if attribute == "point_cursor":
+                        state.point_cursor_closed_count += 1
+                        if state.point_statement_owner is not None:
+                            state.point_statement_owner.active_cursor = None
+                    elif attribute == "driver_cursor":
+                        state.driver_close_count = 1
+                    elif attribute == "main_cursor":
+                        state.main_key_close_count = 1
+                    setattr(state, attribute, None)
+                    if state.active_cursor_count > 0:
+                        state.active_cursor_count -= 1
+
+        try:
+            if (
+                state.lifecycle != "prepared"
+                or state.execute_count != 0
+                or state.main_key_scan_sql != _main_sql
+                or state.main_key_scan_sql_sha256 != _main_sql_sha256
+                or state.key_driver_sql != _driver_sql
+                or state.key_driver_sql_sha256 != _driver_sql_sha256
+                or state.point_lookup_sql != _point_sql
+                or state.point_lookup_sql_sha256 != _point_sql_sha256
+            ):
+                _cursor_publication_seal_read_fail(
+                    "GE_CURSOR_B3_CURSOR_SEAL_READ_EXECUTION"
+                )
+            prove_lineage()
+            state.lifecycle = "running"
+            state.execute_count = 1
+
+            main_cursor = prepare_cursor(
+                "main_cursor", "GE_CURSOR_B3_CURSOR_SEAL_READ_MAIN_PREPARE"
+            )
+            state.main_key_prepare_count = 1
+            execute_sql(
+                main_cursor,
+                _main_sql,
+                (),
+                "GE_CURSOR_B3_CURSOR_SEAL_READ_MAIN_PREPARE",
+            )
+            previous_main_key: tuple[bytes, bytes] | None = None
+            while True:
+                row = fetch_one(main_cursor, "GE_CURSOR_B3_CURSOR_SEAL_READ_MAIN_FETCH")
+                if row is None:
+                    state.main_key_terminal_fetch_count = 1
+                    break
+                state.live_physical_row_count = 1
+                state.maximum_live_physical_row_count = max(
+                    state.maximum_live_physical_row_count, 1
+                )
+                try:
+                    _tenant, _token, tenant_bytes, token_bytes = (
+                        _cursor_publication_seal_read_key(row)
+                    )
+                    current_main_key = (tenant_bytes, token_bytes)
+                    if previous_main_key is not None and current_main_key <= previous_main_key:
+                        _cursor_publication_seal_read_fail(
+                            "GE_CURSOR_B3_CURSOR_SEAL_READ_MAIN_ORDER"
+                        )
+                    previous_main_key = current_main_key
+                    if state.main_key_row_count >= MAX_SAFE_INTEGER:
+                        _cursor_publication_seal_read_fail(
+                            "GE_CURSOR_B3_CURSOR_SEAL_READ_MAIN_COUNT"
+                        )
+                    state.main_key_row_count += 1
+                finally:
+                    state.live_physical_row_count = 0
+                    del row
+            close_cursor(
+                "main_cursor",
+                "main_key_close_attempt_count",
+                "main_key_close_count",
+                "GE_CURSOR_B3_CURSOR_SEAL_READ_MAIN_CLOSE",
+            )
+            prove_lineage()
+
+            driver_cursor = prepare_cursor(
+                "driver_cursor", "GE_CURSOR_B3_CURSOR_SEAL_READ_DRIVER_PREPARE"
+            )
+            state.driver_prepare_count = 1
+            execute_sql(
+                driver_cursor,
+                _driver_sql,
+                (),
+                "GE_CURSOR_B3_CURSOR_SEAL_READ_DRIVER_PREPARE",
+            )
+            point_statement_owner = _CursorSealReadPointStatementOwner(
+                state=state,
+                connection=self.__connection,
+                sql=_point_sql,
+                cursor_factory=_cursor_factory,
+                cursor_execute=_cursor_execute,
+                cursor_belongs=_cursor_belongs,
+                recovery_cursor_close=_recovery_cursor_close,
+            )
+            state.point_statement_owner = point_statement_owner
+            state.point_statement_prepare_count = 1
+            previous_driver_key: tuple[bytes, bytes] | None = None
+            accumulator: object | None = None
+            while True:
+                driver_row = fetch_one(
+                    driver_cursor, "GE_CURSOR_B3_CURSOR_SEAL_READ_DRIVER_FETCH"
+                )
+                if driver_row is None:
+                    state.driver_terminal_fetch_count = 1
+                    break
+                state.live_physical_row_count = 1
+                state.maximum_live_physical_row_count = max(
+                    state.maximum_live_physical_row_count, 1
+                )
+                try:
+                    tenant, token, tenant_bytes, token_bytes = (
+                        _cursor_publication_seal_read_key(driver_row)
+                    )
+                    current_driver_key = (token_bytes, tenant_bytes)
+                    if (
+                        previous_driver_key is not None
+                        and current_driver_key <= previous_driver_key
+                    ):
+                        _cursor_publication_seal_read_fail(
+                            "GE_CURSOR_B3_CURSOR_SEAL_READ_DRIVER_ORDER"
+                        )
+                    previous_driver_key = current_driver_key
+                    if state.driver_row_count >= MAX_SAFE_INTEGER:
+                        _cursor_publication_seal_read_fail(
+                            "GE_CURSOR_B3_CURSOR_SEAL_READ_DRIVER_COUNT"
+                        )
+                    state.driver_row_count += 1
+                finally:
+                    state.live_physical_row_count = 0
+                    del driver_row
+
+                point_cursor = point_statement_owner.execute(tenant, token)
+                physical_row = fetch_one(
+                    point_cursor, "GE_CURSOR_B3_CURSOR_SEAL_READ_POINT_FETCH"
+                )
+                if physical_row is None:
+                    _cursor_publication_seal_read_fail(
+                        "GE_CURSOR_B3_CURSOR_SEAL_READ_POINT_SHAPE"
+                    )
+                state.live_physical_row_count = 1
+                state.maximum_live_physical_row_count = max(
+                    state.maximum_live_physical_row_count, 1
+                )
+                decoded: SQLiteCursorSealRow | None = None
+                try:
+                    try:
+                        decoded = _decode_row(physical_row)
+                    except BaseException as error:
+                        raise ValueError("GE_CURSOR_B3_CURSOR_SEAL_READ_POINT_ROW") from error
+                    state.live_carrier_count = 1
+                    state.maximum_live_carrier_count = max(
+                        state.maximum_live_carrier_count, 1
+                    )
+                    if decoded.carrier.tenant_id != tenant or decoded.carrier.token_hash != token:
+                        _cursor_publication_seal_read_fail(
+                            "GE_CURSOR_B3_CURSOR_SEAL_READ_POINT_KEY"
+                        )
+                    if accumulator is None:
+                        state.observed_descriptor_hash = decoded.descriptor_hash
+                        state.observed_schema_identity_sha256 = (
+                            decoded.schema_identity_sha256
+                        )
+                        try:
+                            accumulator = cast(Any, _accumulator_type)(
+                                state.main_key_row_count,
+                                decoded.descriptor_hash,
+                                decoded.schema_identity_sha256,
+                            )
+                        except BaseException as error:
+                            raise ValueError(
+                                "GE_CURSOR_B3_CURSOR_SEAL_READ_ACCUMULATOR"
+                            ) from error
+                    try:
+                        cast(Any, accumulator).append(decoded)
+                    except BaseException as error:
+                        raise ValueError("GE_CURSOR_B3_CURSOR_SEAL_READ_POINT_ROW") from error
+                    state.accumulator_row_count = cast(Any, accumulator).cursor_count
+                    state.lookup_row_count += 1
+                finally:
+                    state.live_physical_row_count = 0
+                    state.live_carrier_count = 0
+                    del decoded, physical_row
+                close_point("GE_CURSOR_B3_CURSOR_SEAL_READ_POINT_CLOSE")
+                prove_lineage()
+
+            point_statement_owner.release()
+            close_cursor(
+                "driver_cursor",
+                "driver_close_attempt_count",
+                "driver_close_count",
+                "GE_CURSOR_B3_CURSOR_SEAL_READ_DRIVER_CLOSE",
+            )
+            prove_lineage()
+            if accumulator is None:
+                try:
+                    accumulator = cast(Any, _accumulator_type)(0, "0" * 64, "0" * 64)
+                except BaseException as error:
+                    raise ValueError("GE_CURSOR_B3_CURSOR_SEAL_READ_ACCUMULATOR") from error
+            if not (
+                state.main_key_row_count
+                == state.driver_row_count
+                == state.lookup_row_count
+                == state.accumulator_row_count
+                == state.point_statement_execute_count
+                == state.point_cursor_created_count
+                == state.point_cursor_closed_count
+            ):
+                _cursor_publication_seal_read_fail("GE_CURSOR_B3_CURSOR_SEAL_READ_COUNTS")
+            try:
+                computed = cast(Any, accumulator).finish()
+            except BaseException as error:
+                raise ValueError("GE_CURSOR_B3_CURSOR_SEAL_READ_ACCUMULATOR") from error
+            state.accumulator_row_count = computed.cursor_count
+            if state.main_key_row_count == 0:
+                if (
+                    computed.immutable_root_sha256 != SQLITE_CURSOR_SEAL_EMPTY_ROOT
+                    or state.observed_descriptor_hash is not None
+                    or state.observed_schema_identity_sha256 is not None
+                ):
+                    _cursor_publication_seal_read_fail(
+                        "GE_CURSOR_B3_CURSOR_SEAL_READ_ACCUMULATOR"
+                    )
+            elif (
+                computed.source_descriptor_hash != state.observed_descriptor_hash
+                or computed.source_schema_identity_sha256
+                != state.observed_schema_identity_sha256
+            ):
+                _cursor_publication_seal_read_fail(
+                    "GE_CURSOR_B3_CURSOR_SEAL_READ_ACCUMULATOR"
+                )
+            if not (
+                state.active_cursor_count == 0
+                and state.live_physical_row_count == 0
+                and state.live_carrier_count == 0
+                and state.maximum_active_cursor_count <= 2
+                and state.maximum_live_physical_row_count <= 1
+                and state.maximum_live_carrier_count <= 1
+                and state.main_key_prepare_count == 1
+                and state.main_key_terminal_fetch_count == 1
+                and state.main_key_close_attempt_count == 1
+                and state.main_key_close_count == 1
+                and state.driver_prepare_count == 1
+                and state.driver_terminal_fetch_count == 1
+                and state.driver_close_attempt_count == 1
+                and state.driver_close_count == 1
+                and state.point_statement_prepare_count == 1
+                and state.point_statement_release_count == 1
+                and state.point_cursor_close_attempt_count
+                == state.main_key_row_count
+                and point_statement_owner.execute_count
+                == state.point_statement_execute_count
+                and point_statement_owner.release_count == 1
+                and point_statement_owner.active_cursor is None
+            ):
+                _cursor_publication_seal_read_fail(
+                    "GE_CURSOR_B3_CURSOR_SEAL_READ_RESOURCE_BUDGET"
+                )
+            prove_lineage()
+            state.computed_immutable_root_sha256 = computed.immutable_root_sha256
+            state.lifecycle = "completed"
+            return _cursor_publication_seal_read_snapshot(state)
+        except BaseException as primary:
+            state.lifecycle = "poisoned"
+            state.computed_immutable_root_sha256 = None
+            state.live_physical_row_count = 0
+            state.live_carrier_count = 0
+            recover_cursor("point_cursor")
+            point_owner = state.point_statement_owner
+            if point_owner is not None and point_owner.release_count == 0:
+                with suppress(BaseException):
+                    point_owner.release()
+            recover_cursor("driver_cursor")
+            recover_cursor("main_cursor")
+            with suppress(BaseException):
+                state.total_changes = _native_total_changes(self.__connection)
+            raise primary
+
+    def _release_cursor_publication_seal_read(
+        self,
+        execution: _SQLiteConnectionCursorPublicationSealReadExecution,
+        _state_for: Callable[..., _CursorPublicationSealReadExecutionState] = (
+            _cursor_publication_seal_read_state
+        ),
+    ) -> _SQLiteConnectionCursorPublicationSealReadSnapshot:
+        """Cancel one still-prepared raw seal observation without reading SQL."""
+
+        state = _state_for(self, execution)
+        if state.lifecycle != "prepared" or state.execute_count != 0 or state.release_count != 0:
+            if state.lifecycle != "completed":
+                state.lifecycle = "poisoned"
+            _cursor_publication_seal_read_fail("GE_CURSOR_B3_CURSOR_SEAL_READ_RELEASE")
+        state.release_count = 1
+        state.lifecycle = "released"
+        return _cursor_publication_seal_read_snapshot(state)
+
+    def _read_cursor_publication_seal_read_snapshot(
+        self,
+        execution: _SQLiteConnectionCursorPublicationSealReadExecution,
+        _state_for: Callable[..., _CursorPublicationSealReadExecutionState] = (
+            _cursor_publication_seal_read_state
+        ),
+    ) -> _SQLiteConnectionCursorPublicationSealReadSnapshot:
+        return _cursor_publication_seal_read_snapshot(_state_for(self, execution))
 
     def _prepare_post_ddl_publication_reader(
         self,
@@ -2905,6 +3884,18 @@ _OWNER_PROVE_CURSOR_PUBLICATION_REBIND_CHANGES = (
 _OWNER_READ_CURSOR_PUBLICATION_REBIND = (
     SQLiteV1BaselineConnectionOwner._read_cursor_publication_rebind_snapshot
 )
+_OWNER_BEGIN_CURSOR_PUBLICATION_SEAL_READ = (
+    SQLiteV1BaselineConnectionOwner._begin_cursor_publication_seal_read
+)
+_OWNER_EXECUTE_CURSOR_PUBLICATION_SEAL_READ = (
+    SQLiteV1BaselineConnectionOwner._execute_cursor_publication_seal_read
+)
+_OWNER_RELEASE_CURSOR_PUBLICATION_SEAL_READ = (
+    SQLiteV1BaselineConnectionOwner._release_cursor_publication_seal_read
+)
+_OWNER_READ_CURSOR_PUBLICATION_SEAL_READ = (
+    SQLiteV1BaselineConnectionOwner._read_cursor_publication_seal_read_snapshot
+)
 
 
 def _prepare_sqlite_connection_cursor_publication_rebind_intrinsic(
@@ -2975,6 +3966,70 @@ def _read_sqlite_connection_cursor_publication_rebind_snapshot_intrinsic(
 ) -> _SQLiteConnectionCursorPublicationRebindSnapshot:
     if type(connection) is not SQLiteV1BaselineConnectionOwner:
         _cursor_publication_rebind_fail("GE_CURSOR_B3_CURSOR_REBIND_CONNECTION")
+    return _implementation(connection, execution)
+
+
+def _begin_sqlite_connection_cursor_publication_seal_read_intrinsic(
+    connection: SQLiteV1BaselineConnectionOwner,
+    rebind_execution: _SQLiteConnectionCursorPublicationRebindExecution,
+    _implementation: Callable[
+        [
+            SQLiteV1BaselineConnectionOwner,
+            _SQLiteConnectionCursorPublicationRebindExecution,
+        ],
+        _SQLiteConnectionCursorPublicationSealReadExecution,
+    ] = _OWNER_BEGIN_CURSOR_PUBLICATION_SEAL_READ,
+) -> _SQLiteConnectionCursorPublicationSealReadExecution:
+    if type(connection) is not SQLiteV1BaselineConnectionOwner:
+        _cursor_publication_seal_read_fail("GE_CURSOR_B3_CURSOR_SEAL_READ_CONNECTION")
+    return _implementation(connection, rebind_execution)
+
+
+def _execute_sqlite_connection_cursor_publication_seal_read_intrinsic(
+    connection: SQLiteV1BaselineConnectionOwner,
+    execution: _SQLiteConnectionCursorPublicationSealReadExecution,
+    _implementation: Callable[
+        [
+            SQLiteV1BaselineConnectionOwner,
+            _SQLiteConnectionCursorPublicationSealReadExecution,
+        ],
+        _SQLiteConnectionCursorPublicationSealReadSnapshot,
+    ] = _OWNER_EXECUTE_CURSOR_PUBLICATION_SEAL_READ,
+) -> _SQLiteConnectionCursorPublicationSealReadSnapshot:
+    if type(connection) is not SQLiteV1BaselineConnectionOwner:
+        _cursor_publication_seal_read_fail("GE_CURSOR_B3_CURSOR_SEAL_READ_CONNECTION")
+    return _implementation(connection, execution)
+
+
+def _release_sqlite_connection_cursor_publication_seal_read_intrinsic(
+    connection: SQLiteV1BaselineConnectionOwner,
+    execution: _SQLiteConnectionCursorPublicationSealReadExecution,
+    _implementation: Callable[
+        [
+            SQLiteV1BaselineConnectionOwner,
+            _SQLiteConnectionCursorPublicationSealReadExecution,
+        ],
+        _SQLiteConnectionCursorPublicationSealReadSnapshot,
+    ] = _OWNER_RELEASE_CURSOR_PUBLICATION_SEAL_READ,
+) -> _SQLiteConnectionCursorPublicationSealReadSnapshot:
+    if type(connection) is not SQLiteV1BaselineConnectionOwner:
+        _cursor_publication_seal_read_fail("GE_CURSOR_B3_CURSOR_SEAL_READ_CONNECTION")
+    return _implementation(connection, execution)
+
+
+def _read_sqlite_connection_cursor_publication_seal_read_snapshot_intrinsic(
+    connection: SQLiteV1BaselineConnectionOwner,
+    execution: _SQLiteConnectionCursorPublicationSealReadExecution,
+    _implementation: Callable[
+        [
+            SQLiteV1BaselineConnectionOwner,
+            _SQLiteConnectionCursorPublicationSealReadExecution,
+        ],
+        _SQLiteConnectionCursorPublicationSealReadSnapshot,
+    ] = _OWNER_READ_CURSOR_PUBLICATION_SEAL_READ,
+) -> _SQLiteConnectionCursorPublicationSealReadSnapshot:
+    if type(connection) is not SQLiteV1BaselineConnectionOwner:
+        _cursor_publication_seal_read_fail("GE_CURSOR_B3_CURSOR_SEAL_READ_CONNECTION")
     return _implementation(connection, execution)
 
 

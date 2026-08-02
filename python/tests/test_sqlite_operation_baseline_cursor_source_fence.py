@@ -167,6 +167,10 @@ def test_direct_clone_with_copied_real_token_is_not_registered() -> None:
 def test_witness_registry_does_not_retain_the_exact_witness() -> None:
     connection, _summary, stage, _identity, receipt = _prepared_fence()
     try:
+        # Clear unrelated unreachable weak keys before taking the registry baseline.
+        # Otherwise the collection below can remove both this witness and a stale
+        # witness left by an earlier test, making an exact length delta flaky.
+        gc.collect()
         before = len(source_fence._WITNESSES)
         witness = _assert_sqlite_cursor_captured_source_connection_provenance(
             connection,
