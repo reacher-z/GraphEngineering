@@ -19593,3 +19593,377 @@ and cross-group relationship gap were corrected. The durable evidence is in
 This acceptance authorizes the next runtime implementation leaf but does not
 claim that leaf is implemented. All runtime, active-manifest, release,
 production and star guarantees remain false.
+
+#### 31.37.62 Cursor-subprotocol runtime implementation program (append-only)
+
+This implementation program is appended after contract commit
+`ebb24ab5d8d0b0ce13ca07b849c7d5df718b8ac0` without changing §31.37.61 or
+any earlier byte. The complete 19,595-line accepted prefix has SHA-256
+`59eca0449c37d0c4c8bff5b05c421bde076798974a20f9f1ced491e7fefe4013`.
+
+Two language-specific topology audits confirm that production truth still
+ends at `publication-active`. The next objective is the complete, indivisible
+runtime transition to `cursor/clock-complete` in TypeScript and Python. It must
+implement the nine accepted stages, not a reduced demonstration. It must not
+activate a manifest or integrate a production migration caller until the
+package-private leaf, every hostile boundary and cross-runtime evidence are
+accepted.
+
+##### 31.37.62.1 Architecture rule: narrow modules and bridges
+
+The existing outer-authority modules are already approximately 5,700 lines in
+TypeScript and 6,700 lines in Python. The cursor subprotocol must therefore be
+a new package-private module per language, with only narrow lifecycle and
+identity bridges added to existing owners:
+
+- TypeScript orchestrator:
+  `packages/sqlite/src/cursor-publication-rebind.ts`;
+- TypeScript fixed connection execution:
+  `packages/sqlite/src/cursor-publication-rebind-contract.ts` plus private
+  execution support in `sqlite-connection.ts`;
+- Python orchestrator:
+  `python/src/graph_engineering/sqlite_cursor_publication_subprotocol.py`;
+- Python fixed connection execution: private support in
+  `sqlite_operation_baseline_source.py`;
+- third-clock authority remains in each existing
+  `cursor-publication-clock-authority` module; and
+- outer/session, stage ownership and TEMP stage modules expose only exact
+  prepare/burn/publish/assert/poison bridges.
+
+Neither new orchestrator is exported from the package root. Caller inputs are
+the exact active session identity and an optional authentic cancellation
+signal. SQL, redundant identity scalars, receipts, stage, connection, clock or
+target identities are never caller parameters.
+
+##### 31.37.62.2 Wave 1A: TypeScript connection execution owner
+
+Exclusive files:
+
+- `packages/sqlite/src/sqlite-connection.ts`;
+- new `packages/sqlite/src/cursor-publication-rebind-contract.ts`; and
+- new `packages/sqlite/test/cursor-publication-rebind-connection.test.ts`.
+
+The connection owner must provide definition-time-captured package-private
+intrinsics that prepare the literal rebind, execute the exact four parameters,
+retire JS statement/iterator ownership and expose an immutable snapshot. It
+must not claim a native `StatementSync.finalize()` method. Release means the
+package-owned execution no longer retains a usable statement or iterator.
+
+The execution snapshot must prove prepare/execute/release `1/1/1`; native run
+affected count; a separate connection-owned `SELECT changes()` get with
+prepare/fetch/release `1/1/1` and no terminal fetch; total-changes before,
+after and delta; transaction epoch/lineage; exact SQL and parameter identity;
+and a private cursor ledger delta of logical writes `1`, fixed statements `1`
+and affected-row watermark `N`. Outer ledger `4/34/16` must not change.
+
+The same owner must expose bounded Rule 12 primitives rather than allow the
+orchestrator to use unrestricted `prepare`: one main primary-key count scan to
+terminal fetch and close; one TEMP primary-key driver; one reusable main point
+statement; one point cursor per key, closed before cancellation and before the
+next driver fetch. Real counters must prove at most two simultaneous cursors,
+one live physical row and one live seal carrier.
+
+All three EQP probes and trigger/catalog checks finish before session
+consumption. No test hook may forge counters after the fact. Tests cover exact
+SQL, wrong parameter order, double execute/release, connection substitution,
+epoch drift, same-value replay, trigger creation, affected-count disagreement,
+`changes()` shape/type/range, total-change drift, statement escape, terminal
+fetch, cleanup precedence and every cursor/row/carrier bound.
+
+##### 31.37.62.3 Wave 1B: Python connection execution owner
+
+Exclusive files:
+
+- `python/src/graph_engineering/sqlite_operation_baseline_source.py`; and
+- new `python/tests/test_sqlite_cursor_publication_rebind_source.py`.
+
+Python must separate native cursor prepare, execute, fetch and close instead of
+using the existing convenience `execute()` path where doing so would hide
+required counters. It implements the same rebind, `changes()` and Rule 12
+snapshots and budgets as TypeScript. Every native method is captured at module
+definition time. Cursor cleanup preserves the first primary error and never
+lets a hostile `close`, `__iter__`, `__next__`, `__hash__` or `__eq__` replace
+it.
+
+Weak/id registries validate exact type before lookup, preserve weak referents,
+compare callback references before deletion and cannot create value-to-key GC
+cycles. Tests include alias rebinding, monkeypatching after import, ID reuse,
+foreign cursor injection, row subclass/proxy rejection, close failure,
+cancellation at each fetch boundary, bounded live objects and collection of a
+complete discarded execution graph.
+
+##### 31.37.62.4 Wave 1C: third provider-clock boundary in both runtimes
+
+Exclusive files:
+
+- `packages/sqlite/src/cursor-publication-clock-authority.ts`;
+- new `packages/sqlite/test/cursor-publication-before-verification-clock.test.ts`;
+- `python/src/graph_engineering/sqlite_cursor_publication_clock_authority.py`;
+- `python/tests/test_sqlite_cursor_publication_clock_authority.py`.
+
+The generic observe/consume primitives remain the sole provider-clock source,
+but new wrappers authorize `before-verification` only through the exact Rule 12
+receipt. Prepared and active third-boundary graph assertions must prove head
+index three, exact predecessor second evidence, exact provider/lock capability,
+unchanged exclusive transaction and total changes, consumer
+`cursor-clock-capability`, safe monotonic time strictly below expiry, distinct
+unconsumed evidence and no fourth observation.
+
+Profiles are executable invariants: Rule 11/12 failures remain `2/2`; a third
+observation failure or pending-graph failure before consumption is `3/2`; and
+success is `3/3`. Consuming third evidence allocates and registers the opaque
+clock-owned tombstone before flipping the evidence flag. A fault at allocation
+or insertion leaves evidence unconsumed. No other fallible work is permitted
+after the flag changes.
+
+Tests cover wrong receipt, Rule 11 receipt substitution, early third call,
+head drift, stale/expired/equal expiry, time regression, reentrant callback,
+callback throw/wrong type, connection/lock/capability substitution, predecessor
+replay, early consume, double consume, tombstone substitution, fourth call and
+allocation fault recovery.
+
+##### 31.37.62.5 Wave 1D: lower three-layer completion bridges
+
+Exclusive TypeScript files:
+
+- `packages/sqlite/src/operation-baseline-stage.ts`;
+- `packages/sqlite/src/operation-baseline-cursor-stage-ownership.ts`; and
+- new `packages/sqlite/test/cursor-publication-cursor-clock-layers.test.ts`.
+
+Exclusive Python files:
+
+- `python/src/graph_engineering/sqlite_operation_baseline_stage.py`;
+- `python/src/graph_engineering/sqlite_operation_baseline_cursor_stage_ownership.py`;
+- new `python/tests/test_sqlite_cursor_publication_cursor_clock_bridge.py`.
+
+Each lower layer gains opaque Tail, Continuation and Commit identities plus the
+private states `cursor-clock-prepared`, `cursor-clock-burned` and
+`cursor/clock-complete`. Continuations prepare TEMP stage first, ownership
+second and outer session last. Commits burn in exact reverse order: outer,
+ownership, TEMP. Publication installs the same cursor-clock capability identity
+in every layer and moves every lifecycle together.
+
+Prepared/burned state is unreadable from public or ordinary internal assertion
+surfaces. Partial publish, a second mint, wrong order, wrong identity, clone,
+cross-run substitution, missing continuation and graph drift poison all three
+owners. Rollback/disposal cleanup releases every retained registry edge.
+Success assertions are repeatable and read-only.
+
+##### 31.37.62.6 Wave 2: outer bridge and nine-stage orchestrators
+
+Only after Wave 1 APIs and snapshots freeze may integration edit:
+
+- `packages/sqlite/src/cursor-publication-outer-authority.ts`;
+- new `packages/sqlite/src/cursor-publication-rebind.ts`;
+- `python/src/graph_engineering/sqlite_cursor_publication_outer_authority.py`;
+- new `python/src/graph_engineering/sqlite_cursor_publication_subprotocol.py`.
+
+The outer bridge owns opaque prepared owner, session-consumed tombstone,
+rebind receipt, Rule 11 receipt, Rule 12 receipt, pending cursor-clock state
+and final cursor-clock capability anchors. Session/authority lifecycle expands
+from `publication-active` through private prepared/consumed states to
+`cursor/clock-complete`; private states are never accepted by ordinary active
+assertions.
+
+The orchestrator performs exactly:
+
+1. validate session, derive the private graph, prove lock/catalog/B2/EQP and
+   prepare execution without consuming;
+2. observe final cancellation, consume the exact session, retain tombstone;
+3. execute rebind once;
+4. release/prove the write snapshot and mint rebind receipt;
+5. validate five equal Rule 11 counts and mint Rule 11 receipt without SQL;
+6. execute the bounded Rule 12 proof and mint its receipt;
+7. observe the third clock through the Rule 12 owner;
+8. observe final cancellation, allocate/register pending cursor-clock state and
+   all lower continuations; and
+9. burn continuations, consume third evidence, retain tombstone, publish the
+   same capability and return it.
+
+Rule 12 reuses the accepted seal domains, binary ordering, strict 18-column row
+decoder and streaming accumulator. It compares main count, driver count,
+lookup count, B2 cursor count, computed immutable root, receipt root, target
+descriptor and target schema identity. It detects missing, extra, replaced,
+duplicate, reordered, mixed-target and same-length BLOB substitution cases.
+
+Every failure before session consumption is healthy only when the selected
+private graph remains authentic. Any failure at or after consumption poisons
+outer/session, ownership and TEMP stage, requires caller rollback and forbids
+same-graph retry. Neither orchestrator begins, commits nor rolls back.
+
+##### 31.37.62.7 Test topology and real evidence
+
+New focused suites must include happy paths with zero, one and multiple cursor
+rows; every cancellation label; every fault-matrix boundary; primary/cleanup
+precedence; clone/substitution/cross-run/replay; catalog/transaction/lock drift;
+Rule 11 mismatch; all Rule 12 corruption classes; third clock failures; pending
+registration faults; atomic-tail static audits; repeatable assertions; alias
+rebinding; GC; and randomized bounded-size hostile campaigns.
+
+Dedicated support graphs are new files, so existing publication-session support
+is not concurrently edited. Real hook reporters emit the exact 28-field record.
+The success control must equal the contract object byte-for-byte. Each activated
+hostile ordinal must be backed by a real runtime hook path; no synthetic counter
+increment or record copy counts as execution evidence.
+
+Cross-runtime parity is added only after each runtime independently passes.
+Activation begins with the smallest honest set and never changes existing 145
+obligations/records. A static source/dist audit proves atomic-tail call denial,
+definition-time capture and package-root privacy in compiled output.
+
+##### 31.37.62.8 Serialized acceptance waves
+
+Wave 1 accepts each connection, clock and lower-bridge lane independently with
+focused tests, type/static checks and an independent review. Wave 2 integrates
+one language at a time while the other runtime remains untouched. Wave 3 runs
+real evidence and parity. Wave 4 runs regression and artifacts.
+
+Required final gates include:
+
+- TypeScript build, typecheck and full `@graph-engineering/sqlite` Vitest;
+- Python focused, affected and full SQLite suites with `PYTHONMALLOC=debug` GC;
+- 39/39 focused contract tests and the complete SQLite ledger validators;
+- initial, clock and publication-session parity regressions;
+- new cursor-subprotocol parity and honest activation count;
+- fixture, documentation, source/dist static and package-privacy gates;
+- fresh npm tarballs and Python wheel/sdist contents and hashes;
+- installed-package smoke tests in clean temporary environments;
+- crash/rollback/reopen and no-intermediate-commit evidence;
+- two independent final H0/M0/L0 audits; and
+- a durable acceptance log plus identical local, tracked-remote and remote
+  commit objects.
+
+Until every wave passes, runtime execution evidence, manifest activation,
+release readiness, production performance and GitHub-star guarantees remain
+false. A partial Wave 1 commit may truthfully claim only its isolated private
+primitive and tests.
+
+#### 31.37.63 Wave 1A/1B connection rebind primitive acceptance checkpoint（2026-08-02 PDT 追加；既有内容不改）
+
+本检查点接受 TypeScript 与 Python 两条 connection-only cursor rebind
+primitive，并把后续开发边界收紧到 Rule 12 与 lower completion bridges。本次接受
+不是完整 cursor subprotocol 接受，不提高 fixture 中的 implementation、protocol、
+active-manifest 或 release gate 声明。
+
+##### 31.37.63.1 已完成的共同语义
+
+两端 runtime 均已实现以下不可分割的私有语义：
+
+1. 仅在 exact live `BEGIN EXCLUSIVE` connection owner 上创建 opaque execution；
+2. definition-time 冻结 exact UPDATE SQL、SHA-256、四参数顺序与独立
+   `SELECT changes()` SQL/SHA-256；
+3. execution 与 exact connection、transaction lineage、transaction epoch、
+   initial `total_changes` watermark 绑定；
+4. native UPDATE 至多执行一次，并立即记录真实 native affected count、logical
+   write sequence、fixed statement count 与 transaction epoch；
+5. update statement/cursor 确定性 logical release 一次；
+6. 独立 prepare/fetch/release `changes()` 一次；
+7. native affected、`changes()`、aggregate `total_changes` delta 与 cursor-private
+   ledger 分别观察，在 completion 前比较；
+8. success snapshot 固定为 rebind prepare/execute/release `1/1/1`、changes
+   prepare/fetch/release `1/1/1`、cursor ledger `1/1/N`、aggregate delta `N`；
+9. clone、substitution、cross-connection、lineage drift、second execute、double
+   release、execute-after-release 与 terminal retry 全部拒绝；
+10. primary error 不被 cleanup、close 或 recovery counter error 替换；
+11. native handles 不进入 snapshot、opaque token 或 package root；
+12. completed、released 与 GC 路径不会因 registry 的 value-to-key cycle 被永久保留。
+
+Trigger-amplified 写入是独立计数的强制控制：direct UPDATE 影响 `N` 行、trigger
+再写 `N` 行时，native affected 与 `changes()` 必须保持 `N`，cursor ledger 必须
+保持 `1/1/N`，aggregate delta 必须为 `2N`。两端必须先完成 rebind release 与
+changes `1/1/1`，再因 `2N != N` terminal poison；不得把 aggregate delta 伪装成
+cursor affected watermark，也不得在 changes proof 前提前终止。
+
+##### 31.37.63.2 TypeScript 接受范围
+
+TypeScript 私有 connection surface 接受 begin、execute、prepared-cancellation
+release 与 immutable snapshot 四个入口。Opaque handle 为 frozen null-prototype
+object，所有 mutable ownership 存在 module-private WeakMap。StatementSync 不存在
+伪造 finalize；release 表示 connection primitive 放弃对 statement 的逻辑所有权，
+并以 `statement=null`、`releaseCount=1` 固定这一事实。
+
+Post-import 对 `DatabaseSync.prepare`、`StatementSync.run`、`StatementSync.get`
+的 prototype 替换不能改变已捕获 intrinsic。一次性 package-private cleanup fault
+seam 仅用于动态证明 primary/cleanup precedence：它在抛出前自清除，不从 root
+export，并且不会污染后续 GC probe。
+
+##### 31.37.63.3 Python 接受范围
+
+Python 私有 source-owner surface 接受 prepare、execute、release、changes proof
+与 immutable snapshot。Registry 以 weak reference 和 callback-reference exact
+comparison 防止 ID reuse surrogate 删除 replacement，同时不形成 state 到 execution
+key 的强引用环。
+
+Same-value 输入在 native UPDATE 前 terminal poison，保留 `0/0/0` write progress，
+同 token 使用正确参数重试也必须拒绝。Native UPDATE 返回后，rowcount 必须先作为
+cursor affected/ledger 的权威值记录；aggregate counter 独立记录。Changes proof
+入口和尾部的 counter reader 抛错都必须先 poison 再原样抛出，且禁止同 execution
+重试。Trigger drift 只能在 changes cursor 已完成 `1/1/1` 后判定。
+
+##### 31.37.63.4 审计发现与关闭证明
+
+本 wave 在接受前关闭了六类真实缺口：
+
+- TypeScript prepared cancellation 缺少独立 release；
+- TypeScript primary/cleanup precedence 缺少可执行 fault evidence；
+- Python prepare 后 SQL identity TOCTOU 与 cleanup 覆盖 primary；
+- Python same-value token 可复用、trigger aggregate/native affected 混淆；
+- Python changes proof 入口/尾部 counter exception 未 terminal poison；
+- Python trigger drift 在 release/changes 前过早失败，违反冻结 lifecycle 与跨语言
+  顺序一致性。
+
+修复后，三份独立 final read-only audit 均为 H0/M0/L0。审计不得解释为完整 B3
+runtime、manifest activation 或 production readiness 已完成。
+
+##### 31.37.63.5 接受门禁与可复核身份
+
+接受证据如下：
+
+- TypeScript focused `--expose-gc`：14/14；
+- TypeScript affected publication suites：40/40；
+- `@graph-engineering/sqlite` typecheck：通过；
+- Python cursor-rebind source focused：20/20；
+- Python combined rebind/baseline focused：67/67；
+- Python affected publication suites：122/122；
+- Ruff 与 mypy：通过；
+- cursor publication contract parity：1/1；
+- fixture validation：85 JSON fixtures、44 case manifests；
+- SQLite ledger contract 与 chained validators：66/66；
+- documentation links：477；
+- `git diff --check`：通过。
+
+实现身份：
+
+- TS connection：`02f90cbb7d76c8aed7fb2ad3a387fd7c35cf40ca6e7f19d87cb178e0d4e4f609`；
+- TS contract：`7a51b2f3f5a68e1d0f92cc0b04b13b9bfc84636f95878c3ba9191b9f026de0f9`；
+- TS focused test：`3428c4a18983d01c7fbf7ba2d8f53c9328ec0dcb852ee3d8adb372e6efc1e521`；
+- Python source：`8471c254e4474c0a699e168f5f88d9991313372686b372a5dfc76448c535ae9c`；
+- Python focused test：`6398351dd2fadfabaf83812a30408ddb78a4f03f2dceda0b5d07278375a3fb89`；
+- durable acceptance log：`fff5da29a15eb8ee812192c4336e93ff6e709e7ffbff8e588c8cc3d730451d05`。
+
+Append-only proof：前 19,595 行 SHA-256 继续为
+`59eca0449c37d0c4c8bff5b05c421bde076798974a20f9f1ced491e7fefe4013`；
+前 19,839 行（31.37.62 完整 Wave 计划）SHA-256 为
+`5a9eb685c5de79c737042095d6b75941b30691aedf1286f0081736f62be58a64`。
+
+##### 31.37.63.6 下一 leaf 的严格顺序
+
+下一次实现不得重建临时 third-clock token。严格顺序是：
+
+1. 在 TypeScript 与 Python connection layer 实现真实 bounded Rule 12 seal proof；
+2. Rule 12 必须流式读取 accepted 18-column seal domain，限制 prepare/fetch/release、
+   row count、byte count 与 accumulator state；
+3. 比较 main count、driver count、lookup count、B2 cursor count、computed immutable
+   root、receipt root、target descriptor 与 target schema identity；
+4. 仅在完整 Rule 12 proof success 后 mint exact-owner、opaque、single-use Rule 12
+   receipt；
+5. 实现 lower completion continuations 与 pending registration bridge；
+6. 第三 clock 与真实 Rule 12 receipt 同一 commit 接入，禁止 placeholder authorization；
+7. 再接 publication-session consumption、Rule 11、outer orchestration 与真实 hostile
+   hook reporter；
+8. 只有跨 runtime parity、完整 SQLite regression、artifact/install smoke、crash/
+   rollback/reopen、static privacy/atomic-tail audit 全绿后，才评估 honest activation。
+
+下一个 partial milestone 仍必须保留 nonclaims：未接入的 Rule、clock、continuation、
+orchestrator、hook ordinal、manifest 与 release gate 不得提前声明完成；GitHub 5K/6K
+star 是产品与社区目标，不是代码门禁可保证的结果。

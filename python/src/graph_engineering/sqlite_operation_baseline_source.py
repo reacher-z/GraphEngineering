@@ -9,7 +9,7 @@ from collections.abc import Callable, Generator, Iterator, Mapping
 from contextlib import suppress
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Literal, NamedTuple, Never, cast
+from typing import Any, Literal, NamedTuple, Never, cast
 from weakref import ReferenceType, ref
 
 from .canonical import canonical_bytes, canonical_sha256
@@ -329,6 +329,100 @@ SQLITE_CURSOR_OPERATION_SEQUENCE_ZERO_PARAMETER_ORDER_INTRINSIC = (
 _OPERATION_SEQUENCE_ZERO_INSERT_SQL = SQLITE_CURSOR_OPERATION_SEQUENCE_ZERO_INSERT_SQL_INTRINSIC
 _OPERATION_SEQUENCE_ZERO_CONSTRUCTION_TOKEN = object()
 
+SQLITE_CURSOR_PUBLICATION_REBIND_SQL_INTRINSIC = (
+    "UPDATE main.ge_cycle_cursors SET descriptor_hash = ?, "
+    "schema_identity_sha256 = ? WHERE descriptor_hash = ? "
+    "AND schema_identity_sha256 = ?"
+)
+SQLITE_CURSOR_PUBLICATION_REBIND_SQL_SHA256_INTRINSIC = (
+    "6fc61b515e758a1e84745af28783f4e9dcee5e76f80f314aa25a08980d2fef91"
+)
+SQLITE_CURSOR_PUBLICATION_REBIND_PARAMETER_ORDER_INTRINSIC = (
+    "targetDescriptorHash",
+    "targetSchemaIdentitySha256",
+    "sourceDescriptorHash",
+    "sourceSchemaIdentitySha256",
+)
+SQLITE_CURSOR_PUBLICATION_CHANGES_SQL_INTRINSIC = "SELECT changes() AS affected_rows"
+SQLITE_CURSOR_PUBLICATION_CHANGES_SQL_SHA256_INTRINSIC = (
+    "a6ab435eb54879f942436129997f231de19504b11028b55b014fddc2bb42e112"
+)
+_CURSOR_PUBLICATION_REBIND_CONSTRUCTION_TOKEN = object()
+
+
+class _SQLiteConnectionCursorPublicationRebindExecution:
+    """Opaque owner for one fixed cursor rebind and its changes() proof."""
+
+    __slots__ = ("__weakref__",)
+
+    def __init__(self, token: object) -> None:
+        if token is not _CURSOR_PUBLICATION_REBIND_CONSTRUCTION_TOKEN:
+            raise TypeError("GE_CURSOR_B3_CURSOR_REBIND_EXECUTION")
+
+
+class _SQLiteCursorPrivateWriteLedgerSnapshot(NamedTuple):
+    affected_rows_watermark: int
+    fixed_statement_count: int
+    logical_write_sequence: int
+
+
+class _SQLiteConnectionCursorPublicationRebindSnapshot(NamedTuple):
+    lifecycle: Literal["prepared", "executed", "released", "completed", "poisoned"]
+    rebind_sql: str
+    rebind_sql_sha256: str
+    parameter_order: tuple[str, str, str, str]
+    changes_sql: str
+    changes_sql_sha256: str
+    parameters: tuple[str, str, str, str] | None
+    prepare_count: Literal[1]
+    execute_count: Literal[0, 1]
+    release_count: Literal[0, 1]
+    changes_prepare_count: Literal[0, 1]
+    changes_fetch_count: Literal[0, 1]
+    changes_release_count: Literal[0, 1]
+    affected_rows: int | None
+    changes_affected_rows: int | None
+    total_changes_before: int
+    total_changes: int
+    total_changes_delta: int
+    transaction_epoch_before: int
+    transaction_epoch: int
+    transaction_generation: object
+    cursor_ledger_before: _SQLiteCursorPrivateWriteLedgerSnapshot
+    cursor_ledger_after: _SQLiteCursorPrivateWriteLedgerSnapshot
+    cursor_ledger_delta: _SQLiteCursorPrivateWriteLedgerSnapshot
+
+
+@dataclass(slots=True)
+class _CursorPublicationRebindExecutionState:
+    connection: SQLiteV1BaselineConnectionOwner
+    cursor: sqlite3.Cursor | None
+    rebind_sql: str
+    rebind_sql_sha256: str
+    parameter_order: tuple[str, str, str, str]
+    changes_sql: str
+    changes_sql_sha256: str
+    transaction_generation: object
+    transaction_epoch_before: int
+    transaction_epoch: int
+    total_changes_before: int
+    total_changes: int
+    lifecycle: Literal["prepared", "executed", "released", "completed", "poisoned"] = (
+        "prepared"
+    )
+    parameters: tuple[str, str, str, str] | None = None
+    prepare_count: Literal[1] = 1
+    execute_count: Literal[0, 1] = 0
+    release_count: Literal[0, 1] = 0
+    changes_prepare_count: Literal[0, 1] = 0
+    changes_fetch_count: Literal[0, 1] = 0
+    changes_release_count: Literal[0, 1] = 0
+    affected_rows: int | None = None
+    changes_affected_rows: int | None = None
+    cursor_ledger_logical_write_sequence: Literal[0, 1] = 0
+    cursor_ledger_fixed_statement_count: Literal[0, 1] = 0
+    cursor_ledger_affected_rows_watermark: int = 0
+
 
 class _SQLiteConnectionMigration0002Execution:
     """Opaque exact-owner session for the fixed migration-0002 statement plan."""
@@ -617,6 +711,13 @@ _OPERATION_SEQUENCE_ZERO_EXECUTIONS: dict[
         _OperationSequenceZeroExecutionState,
     ],
 ] = {}
+_CURSOR_PUBLICATION_REBIND_EXECUTIONS: dict[
+    int,
+    tuple[
+        ReferenceType[_SQLiteConnectionCursorPublicationRebindExecution],
+        _CursorPublicationRebindExecutionState,
+    ],
+] = {}
 
 # CPython's sqlite descriptors are captured once so later module/class
 # replacement cannot redirect the package-owned execution lane.
@@ -645,6 +746,14 @@ _SEQUENCE_ZERO_SQLITE_CONNECTION_TOTAL_CHANGES = sqlite3.Connection.total_change
 _SEQUENCE_ZERO_SQLITE_CURSOR_EXECUTE = sqlite3.Cursor.execute
 _SEQUENCE_ZERO_SQLITE_CURSOR_CLOSE = sqlite3.Cursor.close
 _SEQUENCE_ZERO_SQLITE_CURSOR_ROWCOUNT = sqlite3.Cursor.rowcount
+_CURSOR_REBIND_SQLITE_CONNECTION_CURSOR = sqlite3.Connection.cursor
+_CURSOR_REBIND_SQLITE_CONNECTION_IN_TRANSACTION = sqlite3.Connection.in_transaction
+_CURSOR_REBIND_SQLITE_CONNECTION_TOTAL_CHANGES = sqlite3.Connection.total_changes
+_CURSOR_REBIND_SQLITE_CURSOR_EXECUTE = sqlite3.Cursor.execute
+_CURSOR_REBIND_SQLITE_CURSOR_CLOSE = sqlite3.Cursor.close
+_CURSOR_REBIND_SQLITE_CURSOR_FETCHONE = sqlite3.Cursor.fetchone
+_CURSOR_REBIND_SQLITE_CURSOR_ROWCOUNT = sqlite3.Cursor.rowcount
+_CURSOR_REBIND_SQLITE_CURSOR_CONNECTION = sqlite3.Cursor.connection
 _READ_MIGRATION_0002_ASSET = _read_sqlite_cursor_migration_0002_asset_snapshot_intrinsic
 
 
@@ -1049,6 +1158,147 @@ def _register_operation_sequence_zero_execution(
     _OPERATION_SEQUENCE_ZERO_EXECUTIONS[execution_id] = (reference, state)
 
 
+def _cursor_publication_rebind_fail(code: str) -> Never:
+    raise ValueError(code)
+
+
+def _cursor_publication_rebind_native_in_transaction(
+    connection: sqlite3.Connection,
+    _descriptor: Any = _CURSOR_REBIND_SQLITE_CONNECTION_IN_TRANSACTION,
+) -> bool:
+    try:
+        value = _descriptor.__get__(connection, sqlite3.Connection)
+    except BaseException as error:
+        raise ValueError("GE_CURSOR_B3_CURSOR_REBIND_CONNECTION") from error
+    if type(value) is not bool:
+        _cursor_publication_rebind_fail("GE_CURSOR_B3_CURSOR_REBIND_CONNECTION")
+    return value
+
+
+def _cursor_publication_rebind_native_total_changes(
+    connection: sqlite3.Connection,
+    _descriptor: Any = _CURSOR_REBIND_SQLITE_CONNECTION_TOTAL_CHANGES,
+) -> int:
+    try:
+        value = _descriptor.__get__(connection, sqlite3.Connection)
+    except BaseException as error:
+        raise ValueError("GE_CURSOR_B3_CURSOR_REBIND_COUNTER") from error
+    if type(value) is not int or not 0 <= value <= MAX_SAFE_INTEGER:
+        _cursor_publication_rebind_fail("GE_CURSOR_B3_CURSOR_REBIND_COUNTER")
+    return value
+
+
+def _cursor_publication_rebind_hash(value: object) -> str:
+    if (
+        type(value) is not str
+        or len(value) != 64
+        or any(character not in "0123456789abcdef" for character in value)
+    ):
+        _cursor_publication_rebind_fail("GE_CURSOR_B3_CURSOR_REBIND_PARAMETERS")
+    return value
+
+
+def _cursor_publication_rebind_cursor_belongs(
+    cursor: object,
+    connection: sqlite3.Connection,
+    _descriptor: Any = _CURSOR_REBIND_SQLITE_CURSOR_CONNECTION,
+) -> bool:
+    if type(cursor) is not sqlite3.Cursor:
+        return False
+    try:
+        return _descriptor.__get__(cursor, sqlite3.Cursor) is connection
+    except BaseException:
+        return False
+
+
+def _cursor_publication_rebind_state(
+    connection: SQLiteV1BaselineConnectionOwner,
+    execution: object,
+    _type: Callable[[object], type] = type,
+    _identity: Callable[[object], int] = id,
+    _dictionary_get: Callable[..., object] = dict.get,
+) -> _CursorPublicationRebindExecutionState:
+    if _type(execution) is not _SQLiteConnectionCursorPublicationRebindExecution:
+        _cursor_publication_rebind_fail("GE_CURSOR_B3_CURSOR_REBIND_EXECUTION")
+    current = _dictionary_get(_CURSOR_PUBLICATION_REBIND_EXECUTIONS, _identity(execution))
+    if (
+        type(current) is not tuple
+        or len(current) != 2
+        or current[0]() is not execution
+        or type(current[1]) is not _CursorPublicationRebindExecutionState
+        or current[1].connection is not connection
+    ):
+        _cursor_publication_rebind_fail("GE_CURSOR_B3_CURSOR_REBIND_EXECUTION")
+    return current[1]
+
+
+def _register_cursor_publication_rebind_execution(
+    execution: _SQLiteConnectionCursorPublicationRebindExecution,
+    state: _CursorPublicationRebindExecutionState,
+    _identity: Callable[[object], int] = id,
+    _make_ref: Callable[..., ReferenceType[object]] = ref,
+    _dictionary_get: Callable[..., object] = dict.get,
+    _dictionary_set: Callable[..., None] = dict.__setitem__,
+    _dictionary_pop: Callable[..., object] = dict.pop,
+    _cursor_close: Callable[[sqlite3.Cursor], None] = _CURSOR_REBIND_SQLITE_CURSOR_CLOSE,
+) -> None:
+    execution_id = _identity(execution)
+
+    def discard(dead: ReferenceType[object]) -> None:
+        current = _dictionary_get(_CURSOR_PUBLICATION_REBIND_EXECUTIONS, execution_id)
+        if type(current) is tuple and len(current) == 2 and current[0] is dead:
+            cursor = current[1].cursor
+            if cursor is not None:
+                with suppress(BaseException):
+                    _cursor_close(cursor)
+                current[1].cursor = None
+            _dictionary_pop(_CURSOR_PUBLICATION_REBIND_EXECUTIONS, execution_id, None)
+
+    execution_ref = _make_ref(execution, discard)
+    _dictionary_set(
+        _CURSOR_PUBLICATION_REBIND_EXECUTIONS,
+        execution_id,
+        (execution_ref, state),
+    )
+
+
+def _cursor_publication_rebind_snapshot(
+    state: _CursorPublicationRebindExecutionState,
+) -> _SQLiteConnectionCursorPublicationRebindSnapshot:
+    before = _SQLiteCursorPrivateWriteLedgerSnapshot(0, 0, 0)
+    after = _SQLiteCursorPrivateWriteLedgerSnapshot(
+        state.cursor_ledger_affected_rows_watermark,
+        state.cursor_ledger_fixed_statement_count,
+        state.cursor_ledger_logical_write_sequence,
+    )
+    return _SQLiteConnectionCursorPublicationRebindSnapshot(
+        lifecycle=state.lifecycle,
+        rebind_sql=state.rebind_sql,
+        rebind_sql_sha256=state.rebind_sql_sha256,
+        parameter_order=state.parameter_order,
+        changes_sql=state.changes_sql,
+        changes_sql_sha256=state.changes_sql_sha256,
+        parameters=state.parameters,
+        prepare_count=state.prepare_count,
+        execute_count=state.execute_count,
+        release_count=state.release_count,
+        changes_prepare_count=state.changes_prepare_count,
+        changes_fetch_count=state.changes_fetch_count,
+        changes_release_count=state.changes_release_count,
+        affected_rows=state.affected_rows,
+        changes_affected_rows=state.changes_affected_rows,
+        total_changes_before=state.total_changes_before,
+        total_changes=state.total_changes,
+        total_changes_delta=state.total_changes - state.total_changes_before,
+        transaction_epoch_before=state.transaction_epoch_before,
+        transaction_epoch=state.transaction_epoch,
+        transaction_generation=state.transaction_generation,
+        cursor_ledger_before=before,
+        cursor_ledger_after=after,
+        cursor_ledger_delta=after,
+    )
+
+
 class SQLiteV1BaselineConnectionOwner:
     """Exclusive connection capability with separate lineage and mutation epoch."""
 
@@ -1123,6 +1373,367 @@ class SQLiteV1BaselineConnectionOwner:
         if token in _EPOCH_MUTATING_TOKENS or before != after:
             self.__transaction_epoch += 1
         return _SQLiteCursorCapability(cursor)
+
+    def _prepare_cursor_publication_rebind(
+        self,
+        _native_in_transaction: Callable[[sqlite3.Connection], bool] = (
+            _cursor_publication_rebind_native_in_transaction
+        ),
+        _native_total_changes: Callable[[sqlite3.Connection], int] = (
+            _cursor_publication_rebind_native_total_changes
+        ),
+        _cursor_factory: Callable[[sqlite3.Connection], sqlite3.Cursor] = (
+            _CURSOR_REBIND_SQLITE_CONNECTION_CURSOR
+        ),
+        _register: Callable[
+            [
+                _SQLiteConnectionCursorPublicationRebindExecution,
+                _CursorPublicationRebindExecutionState,
+            ],
+            None,
+        ] = _register_cursor_publication_rebind_execution,
+        _cursor_belongs: Callable[[object, sqlite3.Connection], bool] = (
+            _cursor_publication_rebind_cursor_belongs
+        ),
+        _cursor_close: Callable[[sqlite3.Cursor], None] = (
+            _CURSOR_REBIND_SQLITE_CURSOR_CLOSE
+        ),
+        _digest: Callable[..., object] = hashlib.sha256,
+        _rebind_sql: str = SQLITE_CURSOR_PUBLICATION_REBIND_SQL_INTRINSIC,
+        _rebind_sql_sha256: str = SQLITE_CURSOR_PUBLICATION_REBIND_SQL_SHA256_INTRINSIC,
+        _parameter_order: tuple[str, str, str, str] = (
+            SQLITE_CURSOR_PUBLICATION_REBIND_PARAMETER_ORDER_INTRINSIC
+        ),
+        _changes_sql: str = SQLITE_CURSOR_PUBLICATION_CHANGES_SQL_INTRINSIC,
+        _changes_sql_sha256: str = SQLITE_CURSOR_PUBLICATION_CHANGES_SQL_SHA256_INTRINSIC,
+    ) -> _SQLiteConnectionCursorPublicationRebindExecution:
+        """Allocate one native cursor and bind it to the frozen rebind statement."""
+
+        generation = self.__transaction_generation
+        if (
+            not _native_in_transaction(self.__connection)
+            or self.__transaction_mode != "exclusive"
+            or generation is None
+            or type(self.__transaction_epoch) is not int
+            or self.__transaction_epoch < 0
+        ):
+            _cursor_publication_rebind_fail("GE_CURSOR_B3_CURSOR_REBIND_LINEAGE")
+        if (
+            _rebind_sql
+            != "UPDATE main.ge_cycle_cursors SET descriptor_hash = ?, "
+            "schema_identity_sha256 = ? WHERE descriptor_hash = ? "
+            "AND schema_identity_sha256 = ?"
+            or cast(Any, _digest)(_rebind_sql.encode("utf-8")).hexdigest()
+            != _rebind_sql_sha256
+            or _rebind_sql_sha256
+            != "6fc61b515e758a1e84745af28783f4e9dcee5e76f80f314aa25a08980d2fef91"
+            or _parameter_order
+            != (
+                "targetDescriptorHash",
+                "targetSchemaIdentitySha256",
+                "sourceDescriptorHash",
+                "sourceSchemaIdentitySha256",
+            )
+            or _changes_sql != "SELECT changes() AS affected_rows"
+            or cast(Any, _digest)(_changes_sql.encode("utf-8")).hexdigest()
+            != _changes_sql_sha256
+            or _changes_sql_sha256
+            != "a6ab435eb54879f942436129997f231de19504b11028b55b014fddc2bb42e112"
+        ):
+            _cursor_publication_rebind_fail("GE_CURSOR_B3_CURSOR_REBIND_SQL_IDENTITY")
+        total_changes = _native_total_changes(self.__connection)
+        try:
+            cursor = _cursor_factory(self.__connection)
+        except BaseException as error:
+            raise ValueError("GE_CURSOR_B3_CURSOR_REBIND_PREPARE") from error
+        if not _cursor_belongs(cursor, self.__connection):
+            with suppress(BaseException):
+                _cursor_close(cursor)
+            _cursor_publication_rebind_fail("GE_CURSOR_B3_CURSOR_REBIND_PREPARE")
+        execution = _SQLiteConnectionCursorPublicationRebindExecution(
+            _CURSOR_PUBLICATION_REBIND_CONSTRUCTION_TOKEN
+        )
+        state = _CursorPublicationRebindExecutionState(
+            connection=self,
+            cursor=cursor,
+            rebind_sql=_rebind_sql,
+            rebind_sql_sha256=_rebind_sql_sha256,
+            parameter_order=_parameter_order,
+            changes_sql=_changes_sql,
+            changes_sql_sha256=_changes_sql_sha256,
+            transaction_generation=generation,
+            transaction_epoch_before=self.__transaction_epoch,
+            transaction_epoch=self.__transaction_epoch,
+            total_changes_before=total_changes,
+            total_changes=total_changes,
+        )
+        try:
+            _register(execution, state)
+        except BaseException:
+            with suppress(BaseException):
+                _cursor_close(cursor)
+            raise
+        return execution
+
+    def _execute_cursor_publication_rebind(
+        self,
+        execution: _SQLiteConnectionCursorPublicationRebindExecution,
+        target_descriptor_hash: object,
+        target_schema_identity_sha256: object,
+        source_descriptor_hash: object,
+        source_schema_identity_sha256: object,
+        _state_for: Callable[..., _CursorPublicationRebindExecutionState] = (
+            _cursor_publication_rebind_state
+        ),
+        _validate_hash: Callable[[object], str] = _cursor_publication_rebind_hash,
+        _native_in_transaction: Callable[[sqlite3.Connection], bool] = (
+            _cursor_publication_rebind_native_in_transaction
+        ),
+        _native_total_changes: Callable[[sqlite3.Connection], int] = (
+            _cursor_publication_rebind_native_total_changes
+        ),
+        _cursor_execute: Callable[..., sqlite3.Cursor] = _CURSOR_REBIND_SQLITE_CURSOR_EXECUTE,
+        _rowcount_descriptor: Any = _CURSOR_REBIND_SQLITE_CURSOR_ROWCOUNT,
+        _cursor_belongs: Callable[[object, sqlite3.Connection], bool] = (
+            _cursor_publication_rebind_cursor_belongs
+        ),
+        _recovery_total_changes: Callable[[sqlite3.Connection], int] = (
+            _cursor_publication_rebind_native_total_changes
+        ),
+    ) -> _SQLiteConnectionCursorPublicationRebindSnapshot:
+        """Execute the four exact parameters once; retain cursor ownership for release."""
+
+        state = _state_for(self, execution)
+        parameters = (
+            _validate_hash(target_descriptor_hash),
+            _validate_hash(target_schema_identity_sha256),
+            _validate_hash(source_descriptor_hash),
+            _validate_hash(source_schema_identity_sha256),
+        )
+        if parameters[:2] == parameters[2:]:
+            state.lifecycle = "poisoned"
+            _cursor_publication_rebind_fail("GE_CURSOR_B3_CURSOR_REBIND_PARAMETERS")
+        if state.cursor is None or not _cursor_belongs(
+            state.cursor, self.__connection
+        ):
+            state.lifecycle = "poisoned"
+            _cursor_publication_rebind_fail("GE_CURSOR_B3_CURSOR_REBIND_EXECUTION")
+        if (
+            state.lifecycle != "prepared"
+            or state.execute_count != 0
+            or state.release_count != 0
+            or state.cursor is None
+            or not _native_in_transaction(self.__connection)
+            or self.__transaction_mode != "exclusive"
+            or self.__transaction_generation is not state.transaction_generation
+            or self.__transaction_epoch != state.transaction_epoch_before
+            or _native_total_changes(self.__connection) != state.total_changes_before
+        ):
+            state.lifecycle = "poisoned"
+            _cursor_publication_rebind_fail("GE_CURSOR_B3_CURSOR_REBIND_LINEAGE")
+        state.parameters = parameters
+        state.execute_count = 1
+        try:
+            _cursor_execute(
+                state.cursor,
+                state.rebind_sql,
+                parameters,
+            )
+        except BaseException as error:
+            state.lifecycle = "poisoned"
+            raise ValueError("GE_CURSOR_B3_CURSOR_REBIND_EXECUTE") from error
+
+        # Bypass of the public convenience execute path is intentional, so its
+        # mutation epoch must be advanced immediately after native success.
+        self.__transaction_epoch += 1
+        state.transaction_epoch = self.__transaction_epoch
+        state.lifecycle = "executed"
+        state.cursor_ledger_logical_write_sequence = 1
+        state.cursor_ledger_fixed_statement_count = 1
+
+        def record_affected_rows(affected_rows: object) -> None:
+            if (
+                type(affected_rows) is not int
+                or not 0 <= affected_rows <= MAX_SAFE_INTEGER
+            ):
+                _cursor_publication_rebind_fail("GE_CURSOR_B3_CURSOR_REBIND_AFFECTED")
+            state.affected_rows = affected_rows
+            state.cursor_ledger_affected_rows_watermark = affected_rows
+
+        def record_total_changes(total_changes: object) -> None:
+            if (
+                type(total_changes) is not int
+                or not state.total_changes_before <= total_changes <= MAX_SAFE_INTEGER
+            ):
+                _cursor_publication_rebind_fail("GE_CURSOR_B3_CURSOR_REBIND_COUNTER")
+            state.total_changes = total_changes
+
+        try:
+            affected_value = _rowcount_descriptor.__get__(state.cursor, sqlite3.Cursor)
+            record_affected_rows(affected_value)
+            total_changes = _native_total_changes(self.__connection)
+            record_total_changes(total_changes)
+            return _cursor_publication_rebind_snapshot(state)
+        except BaseException as primary:
+            state.lifecycle = "poisoned"
+            if state.affected_rows is None and state.cursor is not None:
+                with suppress(BaseException):
+                    record_affected_rows(
+                        _CURSOR_REBIND_SQLITE_CURSOR_ROWCOUNT.__get__(
+                            state.cursor, sqlite3.Cursor
+                        )
+                    )
+            if state.affected_rows is None:
+                state.cursor_ledger_affected_rows_watermark = 0
+            with suppress(BaseException):
+                record_total_changes(_recovery_total_changes(self.__connection))
+            raise primary
+
+    def _release_cursor_publication_rebind(
+        self,
+        execution: _SQLiteConnectionCursorPublicationRebindExecution,
+        _state_for: Callable[..., _CursorPublicationRebindExecutionState] = (
+            _cursor_publication_rebind_state
+        ),
+        _cursor_close: Callable[[sqlite3.Cursor], None] = _CURSOR_REBIND_SQLITE_CURSOR_CLOSE,
+        _cursor_belongs: Callable[[object, sqlite3.Connection], bool] = (
+            _cursor_publication_rebind_cursor_belongs
+        ),
+    ) -> _SQLiteConnectionCursorPublicationRebindSnapshot:
+        """Retire the native rebind cursor exactly once, including cancellation cleanup."""
+
+        state = _state_for(self, execution)
+        cursor = state.cursor
+        if (
+            state.release_count != 0
+            or cursor is None
+            or not _cursor_belongs(cursor, self.__connection)
+            or state.lifecycle not in {"prepared", "executed", "poisoned"}
+        ):
+            state.lifecycle = "poisoned"
+            _cursor_publication_rebind_fail("GE_CURSOR_B3_CURSOR_REBIND_RELEASE")
+        state.release_count = 1
+        state.cursor = None
+        previous = state.lifecycle
+        try:
+            _cursor_close(cursor)
+        except BaseException as error:
+            state.lifecycle = "poisoned"
+            raise ValueError("GE_CURSOR_B3_CURSOR_REBIND_RELEASE") from error
+        if previous in {"prepared", "executed"}:
+            state.lifecycle = "released"
+        return _cursor_publication_rebind_snapshot(state)
+
+    def _prove_cursor_publication_rebind_changes(
+        self,
+        execution: _SQLiteConnectionCursorPublicationRebindExecution,
+        _state_for: Callable[..., _CursorPublicationRebindExecutionState] = (
+            _cursor_publication_rebind_state
+        ),
+        _native_in_transaction: Callable[[sqlite3.Connection], bool] = (
+            _cursor_publication_rebind_native_in_transaction
+        ),
+        _native_total_changes: Callable[[sqlite3.Connection], int] = (
+            _cursor_publication_rebind_native_total_changes
+        ),
+        _cursor_factory: Callable[[sqlite3.Connection], sqlite3.Cursor] = (
+            _CURSOR_REBIND_SQLITE_CONNECTION_CURSOR
+        ),
+        _cursor_execute: Callable[..., sqlite3.Cursor] = _CURSOR_REBIND_SQLITE_CURSOR_EXECUTE,
+        _cursor_fetchone: Callable[[sqlite3.Cursor], object] = (
+            _CURSOR_REBIND_SQLITE_CURSOR_FETCHONE
+        ),
+        _cursor_close: Callable[[sqlite3.Cursor], None] = _CURSOR_REBIND_SQLITE_CURSOR_CLOSE,
+        _cursor_belongs: Callable[[object, sqlite3.Connection], bool] = (
+            _cursor_publication_rebind_cursor_belongs
+        ),
+    ) -> _SQLiteConnectionCursorPublicationRebindSnapshot:
+        """Read exactly one changes() row, close once, and finalize the private ledger."""
+
+        state = _state_for(self, execution)
+        try:
+            lineage_valid = (
+                state.lifecycle == "released"
+                and state.execute_count == 1
+                and state.release_count == 1
+                and state.affected_rows is not None
+                and state.changes_prepare_count == 0
+                and state.changes_fetch_count == 0
+                and state.changes_release_count == 0
+                and _native_in_transaction(self.__connection)
+                and self.__transaction_mode == "exclusive"
+                and self.__transaction_generation is state.transaction_generation
+                and self.__transaction_epoch == state.transaction_epoch
+                and _native_total_changes(self.__connection) == state.total_changes
+            )
+        except BaseException:
+            state.lifecycle = "poisoned"
+            raise
+        if not lineage_valid:
+            state.lifecycle = "poisoned"
+            _cursor_publication_rebind_fail("GE_CURSOR_B3_CURSOR_CHANGES_LINEAGE")
+        try:
+            changes_cursor = _cursor_factory(self.__connection)
+        except BaseException as error:
+            state.lifecycle = "poisoned"
+            raise ValueError("GE_CURSOR_B3_CURSOR_CHANGES_PREPARE") from error
+        if not _cursor_belongs(changes_cursor, self.__connection):
+            with suppress(BaseException):
+                _cursor_close(changes_cursor)
+            state.lifecycle = "poisoned"
+            _cursor_publication_rebind_fail("GE_CURSOR_B3_CURSOR_CHANGES_PREPARE")
+        state.changes_prepare_count = 1
+
+        primary: BaseException | None = None
+        row: object = None
+        try:
+            _cursor_execute(changes_cursor, state.changes_sql, ())
+            row = _cursor_fetchone(changes_cursor)
+            state.changes_fetch_count = 1
+            if type(row) is not tuple or len(row) != 1 or type(row[0]) is not int:
+                _cursor_publication_rebind_fail("GE_CURSOR_B3_CURSOR_CHANGES_SHAPE")
+            value = row[0]
+            if not 0 <= value <= MAX_SAFE_INTEGER or value != state.affected_rows:
+                _cursor_publication_rebind_fail("GE_CURSOR_B3_CURSOR_CHANGES_VALUE")
+            state.changes_affected_rows = value
+        except BaseException as error:
+            primary = error
+        state.changes_release_count = 1
+        close_error: BaseException | None = None
+        try:
+            _cursor_close(changes_cursor)
+        except BaseException as error:
+            close_error = error
+        if primary is not None:
+            state.lifecycle = "poisoned"
+            raise primary
+        if close_error is not None:
+            state.lifecycle = "poisoned"
+            raise ValueError("GE_CURSOR_B3_CURSOR_CHANGES_RELEASE") from close_error
+        try:
+            current_total = _native_total_changes(self.__connection)
+        except BaseException:
+            state.lifecycle = "poisoned"
+            raise
+        if (
+            current_total != state.total_changes
+            or current_total - state.total_changes_before != state.affected_rows
+            or self.__transaction_epoch != state.transaction_epoch
+            or self.__transaction_generation is not state.transaction_generation
+        ):
+            state.lifecycle = "poisoned"
+            _cursor_publication_rebind_fail("GE_CURSOR_B3_CURSOR_CHANGES_LINEAGE")
+        state.lifecycle = "completed"
+        return _cursor_publication_rebind_snapshot(state)
+
+    def _read_cursor_publication_rebind_snapshot(
+        self,
+        execution: _SQLiteConnectionCursorPublicationRebindExecution,
+        _state_for: Callable[..., _CursorPublicationRebindExecutionState] = (
+            _cursor_publication_rebind_state
+        ),
+    ) -> _SQLiteConnectionCursorPublicationRebindSnapshot:
+        return _cursor_publication_rebind_snapshot(_state_for(self, execution))
 
     def _prepare_post_ddl_publication_reader(
         self,
@@ -2279,6 +2890,92 @@ _OWNER_EXECUTE_OPERATION_SEQUENCE_ZERO = (
 _OWNER_READ_OPERATION_SEQUENCE_ZERO = (
     SQLiteV1BaselineConnectionOwner._read_operation_sequence_zero_execution_snapshot
 )
+_OWNER_PREPARE_CURSOR_PUBLICATION_REBIND = (
+    SQLiteV1BaselineConnectionOwner._prepare_cursor_publication_rebind
+)
+_OWNER_EXECUTE_CURSOR_PUBLICATION_REBIND = (
+    SQLiteV1BaselineConnectionOwner._execute_cursor_publication_rebind
+)
+_OWNER_RELEASE_CURSOR_PUBLICATION_REBIND = (
+    SQLiteV1BaselineConnectionOwner._release_cursor_publication_rebind
+)
+_OWNER_PROVE_CURSOR_PUBLICATION_REBIND_CHANGES = (
+    SQLiteV1BaselineConnectionOwner._prove_cursor_publication_rebind_changes
+)
+_OWNER_READ_CURSOR_PUBLICATION_REBIND = (
+    SQLiteV1BaselineConnectionOwner._read_cursor_publication_rebind_snapshot
+)
+
+
+def _prepare_sqlite_connection_cursor_publication_rebind_intrinsic(
+    connection: SQLiteV1BaselineConnectionOwner,
+    _implementation: Callable[
+        [SQLiteV1BaselineConnectionOwner],
+        _SQLiteConnectionCursorPublicationRebindExecution,
+    ] = _OWNER_PREPARE_CURSOR_PUBLICATION_REBIND,
+) -> _SQLiteConnectionCursorPublicationRebindExecution:
+    if type(connection) is not SQLiteV1BaselineConnectionOwner:
+        _cursor_publication_rebind_fail("GE_CURSOR_B3_CURSOR_REBIND_CONNECTION")
+    return _implementation(connection)
+
+
+def _execute_sqlite_connection_cursor_publication_rebind_intrinsic(
+    connection: SQLiteV1BaselineConnectionOwner,
+    execution: _SQLiteConnectionCursorPublicationRebindExecution,
+    target_descriptor_hash: object,
+    target_schema_identity_sha256: object,
+    source_descriptor_hash: object,
+    source_schema_identity_sha256: object,
+    _implementation: Callable[..., _SQLiteConnectionCursorPublicationRebindSnapshot] = (
+        _OWNER_EXECUTE_CURSOR_PUBLICATION_REBIND
+    ),
+) -> _SQLiteConnectionCursorPublicationRebindSnapshot:
+    if type(connection) is not SQLiteV1BaselineConnectionOwner:
+        _cursor_publication_rebind_fail("GE_CURSOR_B3_CURSOR_REBIND_CONNECTION")
+    return _implementation(
+        connection,
+        execution,
+        target_descriptor_hash,
+        target_schema_identity_sha256,
+        source_descriptor_hash,
+        source_schema_identity_sha256,
+    )
+
+
+def _release_sqlite_connection_cursor_publication_rebind_intrinsic(
+    connection: SQLiteV1BaselineConnectionOwner,
+    execution: _SQLiteConnectionCursorPublicationRebindExecution,
+    _implementation: Callable[..., _SQLiteConnectionCursorPublicationRebindSnapshot] = (
+        _OWNER_RELEASE_CURSOR_PUBLICATION_REBIND
+    ),
+) -> _SQLiteConnectionCursorPublicationRebindSnapshot:
+    if type(connection) is not SQLiteV1BaselineConnectionOwner:
+        _cursor_publication_rebind_fail("GE_CURSOR_B3_CURSOR_REBIND_CONNECTION")
+    return _implementation(connection, execution)
+
+
+def _prove_sqlite_connection_cursor_publication_rebind_changes_intrinsic(
+    connection: SQLiteV1BaselineConnectionOwner,
+    execution: _SQLiteConnectionCursorPublicationRebindExecution,
+    _implementation: Callable[..., _SQLiteConnectionCursorPublicationRebindSnapshot] = (
+        _OWNER_PROVE_CURSOR_PUBLICATION_REBIND_CHANGES
+    ),
+) -> _SQLiteConnectionCursorPublicationRebindSnapshot:
+    if type(connection) is not SQLiteV1BaselineConnectionOwner:
+        _cursor_publication_rebind_fail("GE_CURSOR_B3_CURSOR_REBIND_CONNECTION")
+    return _implementation(connection, execution)
+
+
+def _read_sqlite_connection_cursor_publication_rebind_snapshot_intrinsic(
+    connection: SQLiteV1BaselineConnectionOwner,
+    execution: _SQLiteConnectionCursorPublicationRebindExecution,
+    _implementation: Callable[..., _SQLiteConnectionCursorPublicationRebindSnapshot] = (
+        _OWNER_READ_CURSOR_PUBLICATION_REBIND
+    ),
+) -> _SQLiteConnectionCursorPublicationRebindSnapshot:
+    if type(connection) is not SQLiteV1BaselineConnectionOwner:
+        _cursor_publication_rebind_fail("GE_CURSOR_B3_CURSOR_REBIND_CONNECTION")
+    return _implementation(connection, execution)
 
 
 def _begin_sqlite_connection_migration_0002_execution_intrinsic(

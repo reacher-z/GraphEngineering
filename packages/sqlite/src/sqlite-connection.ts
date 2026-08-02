@@ -24,10 +24,20 @@ import {
   type SQLiteCursorMigration0002Asset,
   type SQLiteCursorMigration0002AssetSnapshot,
 } from "./cursor-publication-migration-0002-asset.js";
+import {
+  SQLITE_CURSOR_PUBLICATION_CHANGES_SQL_INTRINSIC,
+  SQLITE_CURSOR_PUBLICATION_CHANGES_SQL_SHA256_INTRINSIC,
+  SQLITE_CURSOR_PUBLICATION_REBIND_PARAMETER_ORDER_INTRINSIC,
+  SQLITE_CURSOR_PUBLICATION_REBIND_SQL_INTRINSIC,
+  SQLITE_CURSOR_PUBLICATION_REBIND_SQL_SHA256_INTRINSIC,
+  type SQLiteCursorPublicationRebindParameters,
+  type SQLiteCursorPublicationRebindParameterTuple,
+} from "./cursor-publication-rebind-contract.js";
 
 const databasePrepareIntrinsic = DatabaseSync.prototype.prepare;
 const databaseCloseIntrinsic = DatabaseSync.prototype.close;
 const reflectApplyIntrinsic = Reflect.apply;
+const reflectOwnKeysIntrinsic = Reflect.ownKeys;
 const objectFreezeIntrinsic = Object.freeze;
 const objectCreateIntrinsic = Object.create;
 const objectGetOwnPropertyDescriptorIntrinsic = Object.getOwnPropertyDescriptor;
@@ -398,6 +408,64 @@ export interface SQLiteConnectionOperationSequenceZeroExecutionSnapshot {
   readonly transactionLineage: SQLiteConnectionTransactionLineage;
 }
 
+/** Opaque, connection-owned single-use cursor identity rebind execution. */
+export interface SQLiteConnectionCursorRebindExecution {
+  readonly __sqliteConnectionCursorRebindExecution: never;
+}
+
+export interface SQLiteConnectionCursorRebindStepSnapshot {
+  readonly affectedRows: number;
+  readonly changesAffectedRows: number;
+  readonly changesFetchCount: 1;
+  readonly changesPrepareCount: 1;
+  readonly changesReleaseCount: 1;
+  readonly changesSql: typeof SQLITE_CURSOR_PUBLICATION_CHANGES_SQL_INTRINSIC;
+  readonly changesSqlSha256: typeof SQLITE_CURSOR_PUBLICATION_CHANGES_SQL_SHA256_INTRINSIC;
+  readonly cursorLedgerAffectedRowsWatermark: number;
+  readonly cursorLedgerFixedStatementCount: 1;
+  readonly cursorLedgerLogicalWriteSequence: 1;
+  readonly executeCount: 1;
+  readonly executionOrdinal: 1;
+  readonly parameterOrder: typeof SQLITE_CURSOR_PUBLICATION_REBIND_PARAMETER_ORDER_INTRINSIC;
+  readonly parameterValues: SQLiteCursorPublicationRebindParameterTuple;
+  readonly prepareCount: 1;
+  readonly releaseCount: 1;
+  readonly sql: typeof SQLITE_CURSOR_PUBLICATION_REBIND_SQL_INTRINSIC;
+  readonly sqlSha256: typeof SQLITE_CURSOR_PUBLICATION_REBIND_SQL_SHA256_INTRINSIC;
+  readonly totalChangesAfter: number;
+  readonly totalChangesBefore: number;
+  readonly totalChangesDelta: number;
+  readonly transactionEpoch: bigint;
+  readonly transactionLineage: SQLiteConnectionTransactionLineage;
+}
+
+export interface SQLiteConnectionCursorRebindExecutionSnapshot {
+  readonly affectedRows: number;
+  readonly changesAffectedRows: number | null;
+  readonly changesFetchCount: 0 | 1;
+  readonly changesPrepareCount: 0 | 1;
+  readonly changesReleaseCount: 0 | 1;
+  readonly changesSql: typeof SQLITE_CURSOR_PUBLICATION_CHANGES_SQL_INTRINSIC;
+  readonly changesSqlSha256: typeof SQLITE_CURSOR_PUBLICATION_CHANGES_SQL_SHA256_INTRINSIC;
+  readonly cursorLedgerAffectedRowsWatermark: number;
+  readonly cursorLedgerFixedStatementCount: 0 | 1;
+  readonly cursorLedgerLogicalWriteSequence: 0 | 1;
+  readonly executeCount: 0 | 1;
+  readonly lifecycle: "active" | "released" | "completed" | "poisoned";
+  readonly parameterOrder: typeof SQLITE_CURSOR_PUBLICATION_REBIND_PARAMETER_ORDER_INTRINSIC;
+  readonly parameterValues: SQLiteCursorPublicationRebindParameterTuple | null;
+  readonly prepareCount: 1;
+  readonly releaseCount: 0 | 1;
+  readonly sql: typeof SQLITE_CURSOR_PUBLICATION_REBIND_SQL_INTRINSIC;
+  readonly sqlSha256: typeof SQLITE_CURSOR_PUBLICATION_REBIND_SQL_SHA256_INTRINSIC;
+  readonly statementOwnershipRetired: boolean;
+  readonly totalChangesAfter: number;
+  readonly totalChangesBefore: number;
+  readonly totalChangesDelta: number;
+  readonly transactionEpoch: bigint;
+  readonly transactionLineage: SQLiteConnectionTransactionLineage;
+}
+
 interface Migration0002ExecutionState {
   readonly asset: SQLiteCursorMigration0002Asset;
   readonly assetSnapshot: SQLiteCursorMigration0002AssetSnapshot;
@@ -453,6 +521,27 @@ interface OperationSequenceZeroExecutionState {
   transactionEpoch: bigint;
 }
 
+interface CursorRebindExecutionState {
+  affectedRows: number;
+  changesAffectedRows: number | null;
+  changesFetchCount: 0 | 1;
+  changesPrepareCount: 0 | 1;
+  changesReleaseCount: 0 | 1;
+  readonly connection: SQLiteConnection;
+  cursorLedgerAffectedRowsWatermark: number;
+  cursorLedgerFixedStatementCount: 0 | 1;
+  cursorLedgerLogicalWriteSequence: 0 | 1;
+  executeCount: 0 | 1;
+  lifecycle: "active" | "released" | "completed" | "poisoned";
+  parameterValues: SQLiteCursorPublicationRebindParameterTuple | null;
+  releaseCount: 0 | 1;
+  statement: StatementSync | null;
+  totalChangesAfter: number;
+  readonly totalChangesBefore: number;
+  transactionEpoch: bigint;
+  readonly transactionLineage: SQLiteConnectionTransactionLineage;
+}
+
 const MIGRATION_0002_EXECUTIONS = new WeakMap<object, Migration0002ExecutionState>();
 const BASELINE_ENTRY_PUBLICATION_EXECUTIONS = new WeakMap<
   object,
@@ -466,6 +555,8 @@ const OPERATION_SEQUENCE_ZERO_EXECUTIONS = new WeakMap<
   object,
   OperationSequenceZeroExecutionState
 >();
+const CURSOR_REBIND_EXECUTIONS = new WeakMap<object, CursorRebindExecutionState>();
+let cursorRebindCleanupFaultForTest: Readonly<{ readonly error: unknown }> | undefined;
 const weakMapGetIntrinsic = WeakMap.prototype.get;
 const weakMapSetIntrinsic = WeakMap.prototype.set;
 
@@ -484,6 +575,83 @@ function isLowerHex64(value: string): boolean {
     if (!((code >= 48 && code <= 57) || (code >= 97 && code <= 102))) return false;
   }
   return true;
+}
+
+function cursorRebindOwnValue(
+  parameters: object,
+  key: keyof SQLiteCursorPublicationRebindParameters,
+): unknown {
+  const descriptor = reflectApplyIntrinsic(
+    objectGetOwnPropertyDescriptorIntrinsic,
+    Object,
+    [parameters, key],
+  ) as PropertyDescriptor | undefined;
+  if (descriptor === undefined || !("value" in descriptor)) {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "inspect-schema",
+      "SQLite cursor rebind parameters are invalid",
+    );
+  }
+  return descriptor.value;
+}
+
+function checkedCursorRebindParameters(
+  parameters: SQLiteCursorPublicationRebindParameters,
+): SQLiteCursorPublicationRebindParameterTuple {
+  if (parameters === null || typeof parameters !== "object" || isProxy(parameters)) {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "inspect-schema",
+      "SQLite cursor rebind parameters are invalid",
+    );
+  }
+  const ownKeys = reflectApplyIntrinsic(reflectOwnKeysIntrinsic, Reflect, [parameters]) as
+    readonly PropertyKey[];
+  if (ownKeys.length !== SQLITE_CURSOR_PUBLICATION_REBIND_PARAMETER_ORDER_INTRINSIC.length) {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "inspect-schema",
+      "SQLite cursor rebind parameters are invalid",
+    );
+  }
+  for (const expected of SQLITE_CURSOR_PUBLICATION_REBIND_PARAMETER_ORDER_INTRINSIC) {
+    if (!reflectApplyIntrinsic(arrayIncludesIntrinsic, ownKeys, [expected])) {
+      throw new CycleStoreProviderError(
+        "GE_CYCLE_STORE_INVALID_ARGUMENT",
+        "inspect-schema",
+        "SQLite cursor rebind parameters are invalid",
+      );
+    }
+  }
+  const targetDescriptorHash = cursorRebindOwnValue(parameters, "targetDescriptorHash");
+  const targetSchemaIdentitySha256 = cursorRebindOwnValue(
+    parameters, "targetSchemaIdentitySha256",
+  );
+  const sourceDescriptorHash = cursorRebindOwnValue(parameters, "sourceDescriptorHash");
+  const sourceSchemaIdentitySha256 = cursorRebindOwnValue(
+    parameters, "sourceSchemaIdentitySha256",
+  );
+  if (typeof targetDescriptorHash !== "string" || !isLowerHex64(targetDescriptorHash)
+      || typeof targetSchemaIdentitySha256 !== "string"
+      || !isLowerHex64(targetSchemaIdentitySha256)
+      || typeof sourceDescriptorHash !== "string" || !isLowerHex64(sourceDescriptorHash)
+      || typeof sourceSchemaIdentitySha256 !== "string"
+      || !isLowerHex64(sourceSchemaIdentitySha256)
+      || (targetDescriptorHash === sourceDescriptorHash
+          && targetSchemaIdentitySha256 === sourceSchemaIdentitySha256)) {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "inspect-schema",
+      "SQLite cursor rebind parameters are invalid",
+    );
+  }
+  return objectFreezeIntrinsic([
+    targetDescriptorHash,
+    targetSchemaIdentitySha256,
+    sourceDescriptorHash,
+    sourceSchemaIdentitySha256,
+  ]) as SQLiteCursorPublicationRebindParameterTuple;
 }
 
 function baselineEntryPublicationOwnValue(
@@ -992,6 +1160,15 @@ const SQLITE_CONNECTION_BEGIN_OPERATION_SEQUENCE_ZERO = Symbol(
 );
 const SQLITE_CONNECTION_EXECUTE_OPERATION_SEQUENCE_ZERO = Symbol(
   "SQLiteConnection.executeOperationSequenceZero",
+);
+const SQLITE_CONNECTION_BEGIN_CURSOR_REBIND = Symbol(
+  "SQLiteConnection.beginCursorRebind",
+);
+const SQLITE_CONNECTION_EXECUTE_CURSOR_REBIND = Symbol(
+  "SQLiteConnection.executeCursorRebind",
+);
+const SQLITE_CONNECTION_RELEASE_CURSOR_REBIND = Symbol(
+  "SQLiteConnection.releaseCursorRebind",
 );
 
 /** One hardened, synchronous, file-backed SQLite connection. */
@@ -2128,6 +2305,295 @@ export class SQLiteConnection {
     }
   }
 
+  [SQLITE_CONNECTION_BEGIN_CURSOR_REBIND](): SQLiteConnectionCursorRebindExecution {
+    this.#assertOpen("inspect-schema");
+    if (!this.#database.isTransaction || this.#transactionMode !== "exclusive"
+        || this.#transactionLineage === null) {
+      throw new CycleStoreProviderError(
+        "GE_CYCLE_STORE_STALE_FENCE",
+        "inspect-schema",
+        "SQLite cursor rebind requires the active BEGIN EXCLUSIVE owner",
+      );
+    }
+    const transactionLineage = this.#transactionLineage;
+    const transactionEpoch = this.#transactionEpoch;
+    const totalChangesBefore = this.#readTotalChangesCounter();
+    let statement: StatementSync;
+    try {
+      statement = hardenSQLiteNativeStatementIntrinsic(reflectApplyIntrinsic(
+        databasePrepareIntrinsic,
+        this.#database,
+        [SQLITE_CURSOR_PUBLICATION_REBIND_SQL_INTRINSIC],
+      ) as StatementSync);
+    } catch (error) {
+      throw translateSQLiteError(error, "inspect-schema");
+    }
+    if (!this.#database.isTransaction || this.#transactionMode !== "exclusive"
+        || this.#transactionLineage !== transactionLineage
+        || this.#transactionEpoch !== transactionEpoch
+        || this.#readTotalChangesCounter() !== totalChangesBefore) {
+      throw new CycleStoreProviderError(
+        "GE_CYCLE_STORE_CORRUPTION",
+        "inspect-schema",
+        "SQLite cursor rebind owner drifted during prepare",
+      );
+    }
+    const execution = objectFreezeIntrinsic(
+      reflectApplyIntrinsic(objectCreateIntrinsic, Object, [null]),
+    ) as SQLiteConnectionCursorRebindExecution;
+    const state: CursorRebindExecutionState = {
+      affectedRows: 0,
+      changesAffectedRows: null,
+      changesFetchCount: 0,
+      changesPrepareCount: 0,
+      changesReleaseCount: 0,
+      connection: this,
+      cursorLedgerAffectedRowsWatermark: 0,
+      cursorLedgerFixedStatementCount: 0,
+      cursorLedgerLogicalWriteSequence: 0,
+      executeCount: 0,
+      lifecycle: "active",
+      parameterValues: null,
+      releaseCount: 0,
+      statement,
+      totalChangesAfter: totalChangesBefore,
+      totalChangesBefore,
+      transactionEpoch,
+      transactionLineage,
+    };
+    reflectApplyIntrinsic(weakMapSetIntrinsic, CURSOR_REBIND_EXECUTIONS, [
+      execution as object,
+      state,
+    ]);
+    return execution;
+  }
+
+  [SQLITE_CONNECTION_EXECUTE_CURSOR_REBIND](
+    execution: SQLiteConnectionCursorRebindExecution,
+    parameters: SQLiteCursorPublicationRebindParameters,
+  ): SQLiteConnectionCursorRebindStepSnapshot {
+    const state = execution !== null && typeof execution === "object" && !isProxy(execution)
+      ? reflectApplyIntrinsic(weakMapGetIntrinsic, CURSOR_REBIND_EXECUTIONS, [
+        execution as object,
+      ]) as CursorRebindExecutionState | undefined
+      : undefined;
+    if (state === undefined || state.connection !== this) {
+      throw new CycleStoreProviderError(
+        "GE_CYCLE_STORE_INVALID_ARGUMENT",
+        "inspect-schema",
+        "SQLite cursor rebind execution is invalid",
+      );
+    }
+    if (state.lifecycle !== "active" || state.statement === null) {
+      throw new CycleStoreProviderError(
+        "GE_CYCLE_STORE_CORRUPTION",
+        "inspect-schema",
+        "SQLite cursor rebind execution is terminal",
+      );
+    }
+
+    let parameterValues: SQLiteCursorPublicationRebindParameterTuple;
+    try {
+      parameterValues = checkedCursorRebindParameters(parameters);
+      this.#assertOpen("inspect-schema");
+      if (!this.#database.isTransaction || this.#transactionMode !== "exclusive"
+          || this.#transactionLineage !== state.transactionLineage
+          || this.#transactionEpoch !== state.transactionEpoch
+          || this.#readTotalChangesCounter() !== state.totalChangesBefore) {
+        throw new CycleStoreProviderError(
+          "GE_CYCLE_STORE_CORRUPTION",
+          "inspect-schema",
+          "SQLite cursor rebind execution owner drifted",
+        );
+      }
+    } catch (error) {
+      this.#retireCursorRebindStatement(state);
+      state.lifecycle = "poisoned";
+      throw translateSQLiteError(error, "inspect-schema");
+    }
+
+    state.parameterValues = parameterValues;
+    state.executeCount = 1;
+    this.#transactionEpoch += 1n;
+    let rawResult: unknown;
+    try {
+      rawResult = reflectApplyIntrinsic(statementRunIntrinsic, state.statement, parameterValues);
+    } catch (error) {
+      state.transactionEpoch = this.#transactionEpoch;
+      this.#retireCursorRebindStatement(state);
+      this.#synchronizeCursorRebindAfterFailure(state);
+      state.lifecycle = "poisoned";
+      throw translateSQLiteError(error, "inspect-schema");
+    }
+
+    state.cursorLedgerLogicalWriteSequence = 1;
+    state.cursorLedgerFixedStatementCount = 1;
+    state.transactionEpoch = this.#transactionEpoch;
+    try {
+      if (rawResult === null || typeof rawResult !== "object" || isProxy(rawResult)) {
+        throw new CycleStoreProviderError(
+          "GE_CYCLE_STORE_CORRUPTION",
+          "inspect-schema",
+          "SQLite cursor rebind result is invalid",
+        );
+      }
+      const changesDescriptor = reflectApplyIntrinsic(
+        objectGetOwnPropertyDescriptorIntrinsic,
+        Object,
+        [rawResult, "changes"],
+      ) as PropertyDescriptor | undefined;
+      const rawChanges = changesDescriptor !== undefined && "value" in changesDescriptor
+        ? changesDescriptor.value
+        : undefined;
+      const affectedRows = typeof rawChanges === "bigint"
+          && rawChanges >= 0n && rawChanges <= BigInt(Number.MAX_SAFE_INTEGER)
+        ? Number(rawChanges)
+        : numberIsSafeIntegerIntrinsic(rawChanges) && (rawChanges as number) >= 0
+          ? rawChanges as number
+          : undefined;
+      if (affectedRows === undefined) {
+        throw new CycleStoreProviderError(
+          "GE_CYCLE_STORE_CORRUPTION",
+          "inspect-schema",
+          "SQLite cursor rebind affected count is invalid",
+        );
+      }
+      state.affectedRows = affectedRows;
+      state.cursorLedgerAffectedRowsWatermark = affectedRows;
+    } catch (error) {
+      this.#retireCursorRebindStatement(state);
+      this.#synchronizeCursorRebindAfterFailure(state);
+      state.lifecycle = "poisoned";
+      throw translateSQLiteError(error, "inspect-schema");
+    }
+    this.#retireCursorRebindStatement(state);
+
+    let changesStatement: StatementSync | null = null;
+    try {
+      changesStatement = hardenSQLiteNativeStatementIntrinsic(reflectApplyIntrinsic(
+        databasePrepareIntrinsic,
+        this.#database,
+        [SQLITE_CURSOR_PUBLICATION_CHANGES_SQL_INTRINSIC],
+      ) as StatementSync);
+      state.changesPrepareCount = 1;
+      state.changesFetchCount = 1;
+      const row = sqliteRow(
+        reflectApplyIntrinsic(statementGetIntrinsic, changesStatement, []),
+        1,
+        "inspect-schema",
+        "private SQLite cursor rebind changes result",
+      );
+      state.changesAffectedRows = sqliteSafeInteger(
+        row[0],
+        0,
+        Number.MAX_SAFE_INTEGER,
+        "inspect-schema",
+        "private SQLite cursor rebind changes result",
+      );
+    } catch (error) {
+      if (changesStatement !== null) state.changesReleaseCount = 1;
+      this.#synchronizeCursorRebindAfterFailure(state);
+      state.lifecycle = "poisoned";
+      throw translateSQLiteError(error, "inspect-schema");
+    }
+    state.changesReleaseCount = 1;
+
+    try {
+      state.totalChangesAfter = this.#readTotalChangesCounter();
+      const totalChangesDelta = state.totalChangesAfter - state.totalChangesBefore;
+      if (!numberIsSafeIntegerIntrinsic(totalChangesDelta) || totalChangesDelta < 0
+          || state.changesAffectedRows !== state.affectedRows
+          || totalChangesDelta !== state.affectedRows
+          || state.cursorLedgerAffectedRowsWatermark !== state.affectedRows) {
+        throw new CycleStoreProviderError(
+          "GE_CYCLE_STORE_CORRUPTION",
+          "inspect-schema",
+          "SQLite cursor rebind change observations disagree",
+        );
+      }
+      state.lifecycle = "completed";
+      return objectFreezeIntrinsic({
+        affectedRows: state.affectedRows,
+        changesAffectedRows: state.changesAffectedRows,
+        changesFetchCount: 1,
+        changesPrepareCount: 1,
+        changesReleaseCount: 1,
+        changesSql: SQLITE_CURSOR_PUBLICATION_CHANGES_SQL_INTRINSIC,
+        changesSqlSha256: SQLITE_CURSOR_PUBLICATION_CHANGES_SQL_SHA256_INTRINSIC,
+        cursorLedgerAffectedRowsWatermark: state.cursorLedgerAffectedRowsWatermark,
+        cursorLedgerFixedStatementCount: 1,
+        cursorLedgerLogicalWriteSequence: 1,
+        executeCount: 1,
+        executionOrdinal: 1,
+        parameterOrder: SQLITE_CURSOR_PUBLICATION_REBIND_PARAMETER_ORDER_INTRINSIC,
+        parameterValues: state.parameterValues,
+        prepareCount: 1,
+        releaseCount: 1,
+        sql: SQLITE_CURSOR_PUBLICATION_REBIND_SQL_INTRINSIC,
+        sqlSha256: SQLITE_CURSOR_PUBLICATION_REBIND_SQL_SHA256_INTRINSIC,
+        totalChangesAfter: state.totalChangesAfter,
+        totalChangesBefore: state.totalChangesBefore,
+        totalChangesDelta,
+        transactionEpoch: state.transactionEpoch,
+        transactionLineage: state.transactionLineage,
+      });
+    } catch (error) {
+      this.#synchronizeCursorRebindAfterFailure(state);
+      state.lifecycle = "poisoned";
+      throw translateSQLiteError(error, "inspect-schema");
+    }
+  }
+
+  [SQLITE_CONNECTION_RELEASE_CURSOR_REBIND](
+    execution: SQLiteConnectionCursorRebindExecution,
+  ): void {
+    const state = execution !== null && typeof execution === "object" && !isProxy(execution)
+      ? reflectApplyIntrinsic(weakMapGetIntrinsic, CURSOR_REBIND_EXECUTIONS, [
+        execution as object,
+      ]) as CursorRebindExecutionState | undefined
+      : undefined;
+    if (state === undefined || state.connection !== this) {
+      throw new CycleStoreProviderError(
+        "GE_CYCLE_STORE_INVALID_ARGUMENT",
+        "inspect-schema",
+        "SQLite cursor rebind execution is invalid",
+      );
+    }
+    if (state.lifecycle !== "active" || state.statement === null
+        || state.executeCount !== 0 || state.releaseCount !== 0) {
+      throw new CycleStoreProviderError(
+        "GE_CYCLE_STORE_CORRUPTION",
+        "inspect-schema",
+        "SQLite cursor rebind release is terminal",
+      );
+    }
+    this.#retireCursorRebindStatement(state);
+    state.lifecycle = "released";
+  }
+
+  #retireCursorRebindStatement(state: CursorRebindExecutionState): void {
+    if (state.statement !== null) {
+      state.statement = null;
+      state.releaseCount = 1;
+    }
+  }
+
+  #synchronizeCursorRebindAfterFailure(state: CursorRebindExecutionState): void {
+    state.transactionEpoch = this.#transactionEpoch;
+    try {
+      if (cursorRebindCleanupFaultForTest !== undefined) {
+        const { error } = cursorRebindCleanupFaultForTest;
+        cursorRebindCleanupFaultForTest = undefined;
+        throw error;
+      }
+      if (this.#database.isOpen) {
+        state.totalChangesAfter = this.#readTotalChangesCounter();
+      }
+    } catch {
+      // The original execution/result/counter failure remains primary.
+    }
+  }
+
   #epochTrackedStatement(statement: StatementSync): StatementSync {
     const executionMethods = new Set<PropertyKey>(["all", "get", "iterate", "run"]);
     return new Proxy(statement, {
@@ -2394,6 +2860,12 @@ const sqliteConnectionBeginOperationSequenceZeroIntrinsic =
   SQLiteConnection.prototype[SQLITE_CONNECTION_BEGIN_OPERATION_SEQUENCE_ZERO];
 const sqliteConnectionExecuteOperationSequenceZeroIntrinsic =
   SQLiteConnection.prototype[SQLITE_CONNECTION_EXECUTE_OPERATION_SEQUENCE_ZERO];
+const sqliteConnectionBeginCursorRebindIntrinsic =
+  SQLiteConnection.prototype[SQLITE_CONNECTION_BEGIN_CURSOR_REBIND];
+const sqliteConnectionExecuteCursorRebindIntrinsic =
+  SQLiteConnection.prototype[SQLITE_CONNECTION_EXECUTE_CURSOR_REBIND];
+const sqliteConnectionReleaseCursorRebindIntrinsic =
+  SQLiteConnection.prototype[SQLITE_CONNECTION_RELEASE_CURSOR_REBIND];
 const sqliteConnectionExecTrustedIntrinsic = SQLiteConnection.prototype.execTrusted;
 const sqliteConnectionPrepareIntrinsic = SQLiteConnection.prototype.prepare;
 
@@ -2652,6 +3124,98 @@ export function readSQLiteConnectionOperationSequenceZeroExecutionSnapshotIntrin
     prepareCount: 1,
     totalChanges: state.totalChanges,
     totalChangesDelta: state.totalChanges - state.initialTotalChanges,
+    transactionEpoch: state.transactionEpoch,
+    transactionLineage: state.transactionLineage,
+  });
+}
+
+/** Prepare the exact four-parameter cursor identity UPDATE once. */
+export function beginSQLiteConnectionCursorRebindExecutionIntrinsic(
+  connection: SQLiteConnection,
+): SQLiteConnectionCursorRebindExecution {
+  return reflectApplyIntrinsic(sqliteConnectionBeginCursorRebindIntrinsic, connection, []);
+}
+
+/** Execute, logically release, read changes(), and prove real counter agreement once. */
+export function executeSQLiteConnectionCursorRebindIntrinsic(
+  connection: SQLiteConnection,
+  execution: SQLiteConnectionCursorRebindExecution,
+  parameters: SQLiteCursorPublicationRebindParameters,
+): SQLiteConnectionCursorRebindStepSnapshot {
+  return reflectApplyIntrinsic(
+    sqliteConnectionExecuteCursorRebindIntrinsic,
+    connection,
+    [execution, parameters],
+  );
+}
+
+/** Deterministically retire one prepared, unexecuted rebind after cancellation. */
+export function releaseSQLiteConnectionCursorRebindExecutionIntrinsic(
+  connection: SQLiteConnection,
+  execution: SQLiteConnectionCursorRebindExecution,
+): SQLiteConnectionCursorRebindExecutionSnapshot {
+  reflectApplyIntrinsic(
+    sqliteConnectionReleaseCursorRebindIntrinsic,
+    connection,
+    [execution],
+  );
+  return readSQLiteConnectionCursorRebindExecutionSnapshotIntrinsic(connection, execution);
+}
+
+/** Package-private one-shot fault seam proving cleanup never replaces a primary. */
+export function injectSQLiteConnectionCursorRebindCleanupFaultForTestIntrinsic(
+  error: unknown,
+): void {
+  if (cursorRebindCleanupFaultForTest !== undefined) {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "inspect-schema",
+      "SQLite cursor rebind cleanup fault is already armed",
+    );
+  }
+  cursorRebindCleanupFaultForTest = objectFreezeIntrinsic({ error });
+}
+
+/** Read immutable real lifecycle, counter and private cursor-ledger progress. */
+export function readSQLiteConnectionCursorRebindExecutionSnapshotIntrinsic(
+  connection: SQLiteConnection,
+  execution: SQLiteConnectionCursorRebindExecution,
+): SQLiteConnectionCursorRebindExecutionSnapshot {
+  const state = execution !== null && typeof execution === "object" && !isProxy(execution)
+    ? reflectApplyIntrinsic(weakMapGetIntrinsic, CURSOR_REBIND_EXECUTIONS, [
+      execution as object,
+    ]) as CursorRebindExecutionState | undefined
+    : undefined;
+  if (state === undefined || state.connection !== connection) {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "inspect-schema",
+      "SQLite cursor rebind execution is invalid",
+    );
+  }
+  return objectFreezeIntrinsic({
+    affectedRows: state.affectedRows,
+    changesAffectedRows: state.changesAffectedRows,
+    changesFetchCount: state.changesFetchCount,
+    changesPrepareCount: state.changesPrepareCount,
+    changesReleaseCount: state.changesReleaseCount,
+    changesSql: SQLITE_CURSOR_PUBLICATION_CHANGES_SQL_INTRINSIC,
+    changesSqlSha256: SQLITE_CURSOR_PUBLICATION_CHANGES_SQL_SHA256_INTRINSIC,
+    cursorLedgerAffectedRowsWatermark: state.cursorLedgerAffectedRowsWatermark,
+    cursorLedgerFixedStatementCount: state.cursorLedgerFixedStatementCount,
+    cursorLedgerLogicalWriteSequence: state.cursorLedgerLogicalWriteSequence,
+    executeCount: state.executeCount,
+    lifecycle: state.lifecycle,
+    parameterOrder: SQLITE_CURSOR_PUBLICATION_REBIND_PARAMETER_ORDER_INTRINSIC,
+    parameterValues: state.parameterValues,
+    prepareCount: 1,
+    releaseCount: state.releaseCount,
+    sql: SQLITE_CURSOR_PUBLICATION_REBIND_SQL_INTRINSIC,
+    sqlSha256: SQLITE_CURSOR_PUBLICATION_REBIND_SQL_SHA256_INTRINSIC,
+    statementOwnershipRetired: state.statement === null,
+    totalChangesAfter: state.totalChangesAfter,
+    totalChangesBefore: state.totalChangesBefore,
+    totalChangesDelta: state.totalChangesAfter - state.totalChangesBefore,
     transactionEpoch: state.transactionEpoch,
     transactionLineage: state.transactionLineage,
   });
