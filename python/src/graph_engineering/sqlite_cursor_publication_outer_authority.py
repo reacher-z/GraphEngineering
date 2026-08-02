@@ -68,6 +68,7 @@ from .sqlite_operation_baseline import (
     BaselineEntry,
     BaselineProjectionIdentity,
     capture_baseline_entry,
+    encode_baseline_policy,
 )
 from .sqlite_operation_baseline_cursor_ownership import (
     SQLiteCursorExactProjectionReference,
@@ -93,17 +94,21 @@ from .sqlite_operation_baseline_source import (
     SQLITE_CURSOR_POST_DDL_BASELINE_SOURCE_QUERY_INTRINSIC,
     SQLiteV1BaselineConnectionOwner,
     _begin_sqlite_connection_baseline_entry_publication_execution_intrinsic,
+    _begin_sqlite_connection_baseline_header_publication_execution_intrinsic,
     _begin_sqlite_connection_migration_0002_execution_intrinsic,
     _close_owned_sqlite_connection_post_ddl_publication_reader_intrinsic,
     _execute_next_sqlite_connection_baseline_entry_publication_row_intrinsic,
     _execute_next_sqlite_connection_migration_0002_statement_intrinsic,
+    _execute_sqlite_connection_baseline_header_publication_intrinsic,
     _execute_sqlite_connection_post_ddl_publication_reader_intrinsic,
     _fetch_next_owned_sqlite_connection_post_ddl_publication_reader_intrinsic,
     _prepare_sqlite_connection_post_ddl_publication_reader_intrinsic,
     _read_sqlite_connection_baseline_entry_publication_execution_snapshot_intrinsic,
+    _read_sqlite_connection_baseline_header_publication_execution_snapshot_intrinsic,
     _read_sqlite_connection_migration_0002_execution_snapshot_intrinsic,
     _read_sqlite_connection_post_ddl_publication_reader_snapshot_intrinsic,
     _SQLiteConnectionBaselineEntryPublicationExecution,
+    _SQLiteConnectionBaselineHeaderPublicationExecution,
     _SQLiteConnectionMigration0002Execution,
 )
 from .sqlite_operation_baseline_stage import SQLiteV1BaselineTempStage
@@ -133,6 +138,49 @@ _BASELINE_ENTRIES_INSERT_SQL = SQLITE_CURSOR_BASELINE_ENTRY_PUBLICATION_INSERT_S
 _BASELINE_ENTRIES_INSERT_SQL_SHA256 = (
     SQLITE_CURSOR_BASELINE_ENTRY_PUBLICATION_INSERT_SQL_SHA256_INTRINSIC
 )
+SQLITE_CURSOR_BASELINE_HEADER_PUBLICATION_INSERT_SQL_INTRINSIC = (
+    "INSERT INTO main.ge_cycle_operation_baselines (baseline_id, "
+    "baseline_format_version, source_application_id, source_user_version, "
+    "source_schema_identity_sha256, source_migration_lineage_id, "
+    "source_migration_lineage_sha256, source_descriptor_hash, captured_at_ms, "
+    "legacy_operation_count, entry_count, first_entry_hash, final_entry_hash, "
+    "canonical_projection_sha256, creation_runtime, creation_runtime_version, "
+    "policy_blob) VALUES (?, 1, 1195724359, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+)
+SQLITE_CURSOR_BASELINE_HEADER_PUBLICATION_INSERT_SQL_SHA256_INTRINSIC = (
+    "b1a32ec385dd78f9727a63b9c303a9cb95c9525910010984d09b7f0fd868e79a"
+)
+SQLITE_CURSOR_BASELINE_HEADER_PUBLICATION_PARAMETER_ORDER_INTRINSIC = (
+    "baselineId",
+    "sourceSchemaIdentitySha256",
+    "sourceMigrationLineageId",
+    "sourceMigrationLineageSha256",
+    "sourceDescriptorHash",
+    "capturedAtMs",
+    "legacyOperationCount",
+    "entryCount",
+    "firstEntryHash",
+    "finalEntryHash",
+    "canonicalProjectionSha256",
+    "creationRuntime",
+    "creationRuntimeVersion",
+    "policyBlob",
+)
+SQLITE_CURSOR_BASELINE_HEADER_CREATION_RUNTIME_INTRINSIC = "graph-engineering-python"
+SQLITE_CURSOR_BASELINE_HEADER_CREATION_RUNTIME_VERSION_INTRINSIC = "0.1.0a1"
+_BASELINE_HEADER_INSERT_SQL = SQLITE_CURSOR_BASELINE_HEADER_PUBLICATION_INSERT_SQL_INTRINSIC
+_BASELINE_HEADER_INSERT_SQL_SHA256 = (
+    SQLITE_CURSOR_BASELINE_HEADER_PUBLICATION_INSERT_SQL_SHA256_INTRINSIC
+)
+_BASELINE_HEADER_PARAMETER_ORDER = (
+    SQLITE_CURSOR_BASELINE_HEADER_PUBLICATION_PARAMETER_ORDER_INTRINSIC
+)
+_BASELINE_HEADER_CREATION_RUNTIME = SQLITE_CURSOR_BASELINE_HEADER_CREATION_RUNTIME_INTRINSIC
+_BASELINE_HEADER_CREATION_RUNTIME_VERSION = (
+    SQLITE_CURSOR_BASELINE_HEADER_CREATION_RUNTIME_VERSION_INTRINSIC
+)
+_BASELINE_HEADER_POLICY_UTF8_BYTES = 946
+_BASELINE_HEADER_POLICY_SHA256 = "67cbe0ac8bf04f28061d50f8b7089312cc1e1f9a9520ede95deec0d1f4ec5eb0"
 
 _SQLiteCursorOuterPublicationAuthority: TypeAlias = (
     _SQLiteCursorStageOwnershipOuterPublicationAuthority
@@ -146,6 +194,8 @@ _WritePhase: TypeAlias = Literal[
     "post-ddl-reader-closed",
     "executing-baseline-entries",
     "baseline-entries-complete",
+    "executing-baseline-header",
+    "baseline-header-complete",
     "poisoned",
     "retired",
 ]
@@ -364,6 +414,61 @@ class _SQLiteBaselineEntriesPublicationReceiptSnapshot(NamedTuple):
     write_kind: Literal["baseline-entries-publication"]
 
 
+class _SQLiteBaselineHeaderPublicationReceipt:
+    """Opaque reusable proof of the permanent baseline-header write."""
+
+    __slots__ = ("__weakref__",)
+
+    def __init__(self, token: object) -> None:
+        if token is not _CONSTRUCTION_TOKEN:
+            raise TypeError("GE_CURSOR_B3_BASELINE_HEADER_RECEIPT")
+
+
+class _SQLiteBaselineHeaderPublicationReceiptSnapshot(NamedTuple):
+    affected_rows: Literal[1]
+    authority: _SQLiteCursorOuterPublicationAuthority
+    baseline_entries_publication_receipt: _SQLiteBaselineEntriesPublicationReceipt
+    baseline_id: str
+    canonical_projection_sha256: str
+    captured_at_ms: int
+    connection: SQLiteV1BaselineConnectionOwner
+    creation_runtime: Literal["graph-engineering-python"]
+    creation_runtime_version: Literal["0.1.0a1"]
+    entry_count: int
+    execute_count: Literal[1]
+    final_entry_hash: str
+    fixed_insert_sql: str
+    fixed_insert_sql_sha256: str
+    first_entry_hash: str
+    legacy_operation_count: int
+    mint_count: Literal[1]
+    outer_ledger_after: _SQLiteCursorOuterPublicationLedgerSnapshot
+    outer_ledger_before: _SQLiteCursorOuterPublicationLedgerSnapshot
+    outer_ledger_delta: _SQLiteCursorOuterPublicationLedgerSnapshot
+    parameter_sha256: str
+    parameter_order: tuple[str, ...]
+    policy_blob_base64url: str
+    policy_blob_sha256: str
+    policy_blob_utf8_bytes: int
+    post_ddl_catalog_fence: _SQLiteCursorPostDdlCatalogFence
+    prepare_count: Literal[1]
+    projection_identity: BaselineProjectionIdentity
+    projection_reference: SQLiteCursorExactProjectionReference
+    reader_lease: _SQLiteCursorPostDdlPublicationReaderLease
+    result_sha256: str
+    source_descriptor_hash: str
+    source_migration_lineage_id: str
+    source_migration_lineage_sha256: str
+    source_schema_identity_sha256: str
+    total_changes_after: int
+    total_changes_before: int
+    total_changes_delta: Literal[1]
+    transaction_epoch_after: int
+    transaction_epoch_before: int
+    transaction_generation: object
+    write_kind: Literal["baseline-header-publication"]
+
+
 class _SQLiteCursorOuterPublicationAuthoritySnapshot(NamedTuple):
     lifecycle: _AuthorityLifecycle
     stage_ownership_poison_reason: str | None
@@ -382,7 +487,10 @@ class _SQLiteCursorOuterPublicationAuthoritySnapshot(NamedTuple):
     total_changes_at_preparation: int
     outer_ledger: _SQLiteCursorOuterPublicationLedgerSnapshot
     source_descriptor_hash: str
+    source_migration_lineage_id: str
+    source_migration_lineage_sha256: str
     source_schema_identity_sha256: str
+    captured_at_ms: int
     outer_provider_now_ms: int
     source_schema_version: Literal[1]
     target_schema_version: Literal[2]
@@ -401,12 +509,29 @@ class _SQLiteCursorOuterPublicationAuthoritySnapshot(NamedTuple):
     baseline_entries_prepare_count: Literal[0, 1]
     baseline_entries_execute_count: int
     baseline_entries_affected_rows: int
+    baseline_header_publication_receipt: _SQLiteBaselineHeaderPublicationReceipt | None
+    baseline_header_publication_receipt_mint_count: Literal[0, 1]
+    baseline_header_logical_execution_count: Literal[0, 1]
+    baseline_header_prepare_count: Literal[0, 1]
+    baseline_header_execute_count: Literal[0, 1]
+    baseline_header_affected_rows: Literal[0, 1]
     write_phase: _WritePhase
 
 
 @dataclass(slots=True)
 class _CancellationState:
     cancelled: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class _SourceHeaderCommitment:
+    """Preparation-time source scalars independent of mutable authority state."""
+
+    captured_at_ms: int
+    source_descriptor_hash: str
+    source_migration_lineage_id: str
+    source_migration_lineage_sha256: str
+    source_schema_identity_sha256: str
 
 
 @dataclass(slots=True)
@@ -424,8 +549,12 @@ class _AuthorityState:
     transaction_generation: object
     transaction_epoch_at_preparation: int
     total_changes_at_preparation: int
+    source_header_commitment: _SourceHeaderCommitment
     source_descriptor_hash: str
+    source_migration_lineage_id: str
+    source_migration_lineage_sha256: str
     source_schema_identity_sha256: str
+    captured_at_ms: int
     outer_provider_now_ms: int
     lifecycle: _AuthorityLifecycle = "inactive"
     stage_ownership_poison_reason: str | None = None
@@ -450,6 +579,12 @@ class _AuthorityState:
     baseline_entries_prepare_count: Literal[0, 1] = 0
     baseline_entries_execute_count: int = 0
     baseline_entries_affected_rows: int = 0
+    baseline_header_publication_receipt: _SQLiteBaselineHeaderPublicationReceipt | None = None
+    baseline_header_publication_receipt_mint_count: Literal[0, 1] = 0
+    baseline_header_logical_execution_count: Literal[0, 1] = 0
+    baseline_header_prepare_count: Literal[0, 1] = 0
+    baseline_header_execute_count: Literal[0, 1] = 0
+    baseline_header_affected_rows: Literal[0, 1] = 0
     write_phase: _WritePhase = "ready-0002"
 
 
@@ -556,6 +691,56 @@ class _BaselineEntriesPublicationReceiptRecord:
     transaction_generation: object
 
 
+@dataclass(frozen=True, slots=True)
+class _BaselineHeaderPublicationReceiptRecord:
+    affected_rows: Literal[1]
+    authority_id: int
+    authority_ref: ReferenceType[_SQLiteCursorStageOwnershipOuterPublicationAuthority]
+    baseline_entries_receipt_id: int
+    baseline_entries_receipt_ref: ReferenceType[_SQLiteBaselineEntriesPublicationReceipt]
+    baseline_id: str
+    canonical_projection_sha256: str
+    captured_at_ms: int
+    connection_id: int
+    creation_runtime: str
+    creation_runtime_version: str
+    entry_count: int
+    execute_count: Literal[1]
+    final_entry_hash: str
+    first_entry_hash: str
+    fixed_insert_sql: str
+    fixed_insert_sql_sha256: str
+    legacy_operation_count: int
+    fence_id: int
+    fence_ref: ReferenceType[_SQLiteCursorPostDdlCatalogFence]
+    migration_0002_receipt_id: int
+    migration_0002_receipt_ref: ReferenceType[_SQLiteMigration0002CatalogRebuildReceipt]
+    outer_ledger_after: _SQLiteCursorOuterPublicationLedgerSnapshot
+    outer_ledger_before: _SQLiteCursorOuterPublicationLedgerSnapshot
+    outer_ledger_delta: _SQLiteCursorOuterPublicationLedgerSnapshot
+    parameter_sha256: str
+    parameter_order: tuple[str, ...]
+    policy_blob_base64url: str
+    policy_blob_sha256: str
+    policy_blob_utf8_bytes: int
+    prepare_count: Literal[1]
+    projection_identity_id: int
+    projection_reference_id: int
+    projection_reference_ref: ReferenceType[SQLiteCursorExactProjectionReference]
+    reader_lease_id: int
+    reader_lease_ref: ReferenceType[_SQLiteCursorPostDdlPublicationReaderLease]
+    result_sha256: str
+    source_descriptor_hash: str
+    source_migration_lineage_id: str
+    source_migration_lineage_sha256: str
+    source_schema_identity_sha256: str
+    total_changes_after: int
+    total_changes_before: int
+    transaction_epoch_after: int
+    transaction_epoch_before: int
+    transaction_generation: object
+
+
 class _IdentityEntry(NamedTuple):
     key_ref: ReferenceType[object]
     value: object
@@ -574,6 +759,7 @@ _MIGRATION_0002_RECEIPTS: dict[int, _IdentityEntry] = {}
 _POST_DDL_CATALOG_FENCES: dict[int, _IdentityEntry] = {}
 _POST_DDL_PUBLICATION_READER_LEASES: dict[int, _IdentityEntry] = {}
 _BASELINE_ENTRIES_PUBLICATION_RECEIPTS: dict[int, _IdentityEntry] = {}
+_BASELINE_HEADER_PUBLICATION_RECEIPTS: dict[int, _IdentityEntry] = {}
 
 # Capture every replaceable dependency before any caller can alter its module or
 # class attribute.  Registry lookup below also checks the weak referent with
@@ -655,11 +841,19 @@ _EXECUTE_NEXT_BASELINE_ENTRY = (
 _READ_BASELINE_ENTRY_PUBLICATION_PROGRESS = (
     _read_sqlite_connection_baseline_entry_publication_execution_snapshot_intrinsic
 )
+_BEGIN_BASELINE_HEADER_PUBLICATION = (
+    _begin_sqlite_connection_baseline_header_publication_execution_intrinsic
+)
+_EXECUTE_BASELINE_HEADER = _execute_sqlite_connection_baseline_header_publication_intrinsic
+_READ_BASELINE_HEADER_PUBLICATION_PROGRESS = (
+    _read_sqlite_connection_baseline_header_publication_execution_snapshot_intrinsic
+)
 _DIGEST_INITIAL_WRITE_PARAMETERS = _digest_sqlite_initial_write_parameters_intrinsic
 _DIGEST_INITIAL_WRITE_RESULT = _digest_sqlite_initial_write_result_intrinsic
 _DIGEST_INITIAL_WRITE_PARAMETERS_VERIFIER = _digest_sqlite_initial_write_parameters_intrinsic
 _DIGEST_INITIAL_WRITE_RESULT_VERIFIER = _digest_sqlite_initial_write_result_intrinsic
 _URLSAFE_B64ENCODE = urlsafe_b64encode
+_ENCODE_BASELINE_POLICY = encode_baseline_policy
 _SQLITE_PROGRAMMING_ERROR = sqlite3.ProgrammingError
 
 
@@ -994,6 +1188,34 @@ def _prepare_sqlite_cursor_outer_publication_authority_intrinsic(
     mint = _OWNERSHIP_MINT_OUTER(connection, stage, receipt, projection_identity, transfer)
     authority = mint.authority
     seal = provenance.immutable_seal_receipt
+    source_envelope = provenance.source_summary.source_envelope
+    source_descriptor_hash = source_envelope.get("sourceDescriptorHash")
+    source_migration_lineage_id = source_envelope.get("sourceMigrationLineageId")
+    source_migration_lineage_sha256 = source_envelope.get("sourceMigrationLineageSha256")
+    source_schema_identity_sha256 = source_envelope.get("sourceSchemaIdentitySha256")
+    captured_at_ms = source_envelope.get("capturedAtMs")
+    if (
+        type(source_descriptor_hash) is not str
+        or len(source_descriptor_hash) != 64
+        or source_descriptor_hash != seal.source_descriptor_hash
+        or type(source_migration_lineage_id) is not str
+        or not source_migration_lineage_id
+        or type(source_migration_lineage_sha256) is not str
+        or len(source_migration_lineage_sha256) != 64
+        or type(source_schema_identity_sha256) is not str
+        or len(source_schema_identity_sha256) != 64
+        or source_schema_identity_sha256 != seal.source_schema_identity_sha256
+        or type(captured_at_ms) is not int
+        or not 0 <= captured_at_ms <= _MAX_SAFE_INTEGER
+    ):
+        _fail("GE_CURSOR_B3_OUTER_SOURCE_ENVELOPE")
+    source_header_commitment = _SourceHeaderCommitment(
+        captured_at_ms=captured_at_ms,
+        source_descriptor_hash=source_descriptor_hash,
+        source_migration_lineage_id=source_migration_lineage_id,
+        source_migration_lineage_sha256=source_migration_lineage_sha256,
+        source_schema_identity_sha256=source_schema_identity_sha256,
+    )
     state = _AuthorityState(
         connection=connection,
         stage=stage,
@@ -1008,8 +1230,12 @@ def _prepare_sqlite_cursor_outer_publication_authority_intrinsic(
         transaction_generation=generation,
         transaction_epoch_at_preparation=epoch,
         total_changes_at_preparation=changes,
-        source_descriptor_hash=seal.source_descriptor_hash,
-        source_schema_identity_sha256=seal.source_schema_identity_sha256,
+        source_header_commitment=source_header_commitment,
+        source_descriptor_hash=source_header_commitment.source_descriptor_hash,
+        source_migration_lineage_id=source_migration_lineage_id,
+        source_migration_lineage_sha256=source_migration_lineage_sha256,
+        source_schema_identity_sha256=(source_header_commitment.source_schema_identity_sha256),
+        captured_at_ms=captured_at_ms,
         outer_provider_now_ms=outer_provider_now_ms,
         current_transaction_epoch=epoch,
         current_total_changes=changes,
@@ -2228,6 +2454,8 @@ def _assert_sqlite_cursor_post_ddl_publication_reader_terminal_proof_intrinsic(
             "post-ddl-reader-closed",
             "executing-baseline-entries",
             "baseline-entries-complete",
+            "executing-baseline-header",
+            "baseline-header-complete",
         }
         or not _reader_watermarks_not_regressed(state, record)
     ):
@@ -2900,6 +3128,676 @@ def _read_sqlite_baseline_entries_publication_receipt_snapshot_intrinsic(
     )
 
 
+def _baseline_header_parameter_frame(
+    baseline_id: str,
+    source_schema_identity_sha256: str,
+    source_migration_lineage_id: str,
+    source_migration_lineage_sha256: str,
+    source_descriptor_hash: str,
+    captured_at_ms: int,
+    legacy_operation_count: int,
+    entry_count: int,
+    first_entry_hash: str,
+    final_entry_hash: str,
+    canonical_projection_sha256: str,
+    creation_runtime: str,
+    creation_runtime_version: str,
+    policy_blob: bytes,
+) -> list[list[dict[str, str]]]:
+    """Build the sole dense fourteen-scalar header execution frame."""
+
+    encoded_policy = _URLSAFE_B64ENCODE(bytes(policy_blob)).rstrip(b"=").decode("ascii")
+    return [
+        [
+            {"type": "text", "value": baseline_id},
+            {"type": "text", "value": source_schema_identity_sha256},
+            {"type": "text", "value": source_migration_lineage_id},
+            {"type": "text", "value": source_migration_lineage_sha256},
+            {"type": "text", "value": source_descriptor_hash},
+            {"type": "integer", "value": str(captured_at_ms)},
+            {"type": "integer", "value": str(legacy_operation_count)},
+            {"type": "integer", "value": str(entry_count)},
+            {"type": "text", "value": first_entry_hash},
+            {"type": "text", "value": final_entry_hash},
+            {"type": "text", "value": canonical_projection_sha256},
+            {"type": "text", "value": creation_runtime},
+            {"type": "text", "value": creation_runtime_version},
+            {"type": "blob", "value": encoded_policy},
+        ]
+    ]
+
+
+def _verify_baseline_header_parameter_frame(
+    baseline_id: str,
+    source_schema_identity_sha256: str,
+    source_migration_lineage_id: str,
+    source_migration_lineage_sha256: str,
+    source_descriptor_hash: str,
+    captured_at_ms: int,
+    legacy_operation_count: int,
+    entry_count: int,
+    first_entry_hash: str,
+    final_entry_hash: str,
+    canonical_projection_sha256: str,
+    creation_runtime: str,
+    creation_runtime_version: str,
+    policy_blob: bytes,
+) -> list[list[dict[str, str]]]:
+    """Independently reconstruct the dense header frame for verification."""
+
+    detached_policy = bytes(policy_blob)
+    policy_base64url = _URLSAFE_B64ENCODE(detached_policy).rstrip(b"=").decode("ascii")
+    verification: list[dict[str, str]] = []
+    verification.append({"type": "text", "value": baseline_id})
+    verification.append({"type": "text", "value": source_schema_identity_sha256})
+    verification.append({"type": "text", "value": source_migration_lineage_id})
+    verification.append({"type": "text", "value": source_migration_lineage_sha256})
+    verification.append({"type": "text", "value": source_descriptor_hash})
+    verification.append({"type": "integer", "value": str(captured_at_ms)})
+    verification.append({"type": "integer", "value": str(legacy_operation_count)})
+    verification.append({"type": "integer", "value": str(entry_count)})
+    verification.append({"type": "text", "value": first_entry_hash})
+    verification.append({"type": "text", "value": final_entry_hash})
+    verification.append({"type": "text", "value": canonical_projection_sha256})
+    verification.append({"type": "text", "value": creation_runtime})
+    verification.append({"type": "text", "value": creation_runtime_version})
+    verification.append({"type": "blob", "value": policy_base64url})
+    return [verification]
+
+
+_BUILD_BASELINE_HEADER_FRAME = _baseline_header_parameter_frame
+_VERIFY_BASELINE_HEADER_FRAME = _verify_baseline_header_parameter_frame
+
+
+class _BaselineHeaderArguments(NamedTuple):
+    baseline_id: str
+    source_schema_identity_sha256: str
+    source_migration_lineage_id: str
+    source_migration_lineage_sha256: str
+    source_descriptor_hash: str
+    captured_at_ms: int
+    legacy_operation_count: int
+    entry_count: int
+    first_entry_hash: str
+    final_entry_hash: str
+    canonical_projection_sha256: str
+    creation_runtime: str
+    creation_runtime_version: str
+    policy_blob: bytes
+
+
+def _baseline_header_receipt_record(
+    receipt: _SQLiteBaselineHeaderPublicationReceipt,
+) -> _BaselineHeaderPublicationReceiptRecord:
+    record = _identity_get(
+        _BASELINE_HEADER_PUBLICATION_RECEIPTS,
+        receipt,
+        _SQLiteBaselineHeaderPublicationReceipt,
+    )
+    if record is None:
+        _fail("GE_CURSOR_B3_BASELINE_HEADER_RECEIPT")
+    return cast(_BaselineHeaderPublicationReceiptRecord, record)
+
+
+def _header_frame_arguments(
+    state: _AuthorityState,
+    source: _SourceHeaderCommitment,
+    policy_blob: bytes,
+) -> _BaselineHeaderArguments:
+    projection = state.projection_identity
+    return _BaselineHeaderArguments(
+        projection.baseline_id,
+        source.source_schema_identity_sha256,
+        source.source_migration_lineage_id,
+        source.source_migration_lineage_sha256,
+        source.source_descriptor_hash,
+        source.captured_at_ms,
+        projection.legacy_operation_count,
+        projection.entry_count,
+        projection.first_entry_hash,
+        projection.final_entry_hash,
+        projection.projection_sha256,
+        _BASELINE_HEADER_CREATION_RUNTIME,
+        _BASELINE_HEADER_CREATION_RUNTIME_VERSION,
+        policy_blob,
+    )
+
+
+def _assert_source_header_commitment_intrinsic(
+    state: _AuthorityState,
+) -> _SourceHeaderCommitment:
+    source = state.source_header_commitment
+    if (
+        type(source) is not _SourceHeaderCommitment
+        or state.captured_at_ms != source.captured_at_ms
+        or state.source_descriptor_hash != source.source_descriptor_hash
+        or state.source_migration_lineage_id != source.source_migration_lineage_id
+        or state.source_migration_lineage_sha256 != source.source_migration_lineage_sha256
+        or state.source_schema_identity_sha256 != source.source_schema_identity_sha256
+    ):
+        _fail("GE_CURSOR_B3_BASELINE_HEADER_SOURCE_COMMITMENT")
+    return source
+
+
+def _assert_baseline_entries_header_predecessor_intrinsic(
+    authority: _SQLiteCursorOuterPublicationAuthority,
+    state: _AuthorityState,
+    migration_0002_receipt: _SQLiteMigration0002CatalogRebuildReceipt,
+    fence: _SQLiteCursorPostDdlCatalogFence,
+    reader_lease: _SQLiteCursorPostDdlPublicationReaderLease,
+    receipt: _SQLiteBaselineEntriesPublicationReceipt,
+) -> _BaselineEntriesPublicationReceiptRecord:
+    """Authenticate the exact entries receipt without issuing a new SELECT."""
+
+    record = _baseline_entries_receipt_record(receipt)
+    reader = _post_ddl_publication_reader_record(reader_lease)
+    try:
+        _assert_source_header_commitment_intrinsic(state)
+        generation, epoch, total_changes = _owner_snapshot(state.connection)
+        entries = reader.retained_entries
+        if entries is None:
+            _fail("GE_CURSOR_B3_BASELINE_HEADER_PREDECESSOR")
+        parameter_sha256 = _DIGEST_INITIAL_WRITE_PARAMETERS_VERIFIER(
+            _VERIFY_BASELINE_ENTRIES_FRAME(entries, state.projection_identity)
+        )
+        result_sha256 = _DIGEST_INITIAL_WRITE_RESULT_VERIFIER(
+            {"affectedRows": str(record.entry_count)}
+        )
+        source_sha256 = _SHA256(record.source_read_sql.encode("utf-8")).hexdigest()
+        insert_sha256 = _SHA256(record.fixed_insert_sql.encode("utf-8")).hexdigest()
+        resolved = _resolve_post_ddl_publication_reader_graph(reader)
+        _OWNERSHIP_ASSERT_POST_DDL_READER_TERMINAL(resolved[4], authority, reader_lease)
+    except BaseException:
+        _poison(state, authority, "SQLite baseline-header predecessor observation failed")
+        raise
+    projection = state.projection_identity
+    projection_reference = record.projection_reference_ref()
+    before = record.outer_ledger_before
+    after = record.outer_ledger_after
+    delta = record.outer_ledger_delta
+    if generation is not state.transaction_generation:
+        _retire(state, authority)
+        _fail("GE_CURSOR_B3_BASELINE_HEADER_STALE_FENCE")
+    if epoch != state.current_transaction_epoch or total_changes != state.current_total_changes:
+        _poison(state, authority, "SQLite baseline-header predecessor owner ledger drifted")
+        _fail("GE_CURSOR_B3_BASELINE_HEADER_PREDECESSOR")
+    if (
+        state.lifecycle != "active"
+        or record.authority_id != _ID(authority)
+        or record.authority_ref() is not authority
+        or record.connection_id != _ID(state.connection)
+        or record.migration_0002_receipt_id != _ID(migration_0002_receipt)
+        or record.migration_0002_receipt_ref() is not migration_0002_receipt
+        or record.fence_id != _ID(fence)
+        or record.fence_ref() is not fence
+        or record.reader_lease_id != _ID(reader_lease)
+        or record.reader_lease_ref() is not reader_lease
+        or resolved[0] is not authority
+        or resolved[1] is not migration_0002_receipt
+        or resolved[2] is not fence
+        or state.migration_0002_receipt is not migration_0002_receipt
+        or state.post_ddl_catalog_fence is not fence
+        or state.post_ddl_publication_reader_lease is not reader_lease
+        or state.baseline_entries_publication_receipt is not receipt
+        or state.baseline_entries_publication_receipt_mint_count != 1
+        or state.baseline_entries_logical_execution_count != 1
+        or state.baseline_entries_prepare_count != 1
+        or state.baseline_entries_execute_count != projection.entry_count
+        or state.baseline_entries_affected_rows != projection.entry_count
+        or reader.lifecycle != "retired"
+        or reader.close_attempt_count != 1
+        or not reader.close_succeeded
+        or reader.close_error_code is not None
+        or reader.rederived_projection is None
+        or not _same_projection_identity(reader.rederived_projection, projection)
+        or projection_reference is not state.projection_reference
+        or record.projection_reference_id != _ID(state.projection_reference)
+        or record.projection_identity_id != _ID(projection)
+        or record.baseline_id != projection.baseline_id
+        or record.entry_count != projection.entry_count
+        or record.first_entry_hash != projection.first_entry_hash
+        or record.final_entry_hash != projection.final_entry_hash
+        or record.reader_rederived_projection_sha256 != projection.projection_sha256
+        or record.parameter_sha256 != parameter_sha256
+        or record.result_sha256 != result_sha256
+        or record.source_read_sql != _BASELINE_ENTRIES_SOURCE_SQL
+        or record.source_read_sql_sha256 != _BASELINE_ENTRIES_SOURCE_SQL_SHA256
+        or source_sha256 != record.source_read_sql_sha256
+        or record.fixed_insert_sql != _BASELINE_ENTRIES_INSERT_SQL
+        or record.fixed_insert_sql_sha256 != _BASELINE_ENTRIES_INSERT_SQL_SHA256
+        or insert_sha256 != record.fixed_insert_sql_sha256
+        or record.prepare_count != 1
+        or record.execute_count != projection.entry_count
+        or record.affected_rows != projection.entry_count
+        or record.total_changes_delta != projection.entry_count
+        or record.total_changes_after != record.total_changes_before + projection.entry_count
+        or record.transaction_epoch_after
+        != record.transaction_epoch_before + projection.entry_count
+        or record.transaction_generation is not state.transaction_generation
+        or record.transaction_generation is not reader.transaction_generation
+        or not _exact_outer_ledger(before, reader.outer_ledger_read_watermark)
+        or delta.logical_write_sequence != 1
+        or delta.fixed_statement_count != projection.entry_count
+        or delta.affected_rows_watermark != projection.entry_count
+        or after.logical_write_sequence != before.logical_write_sequence + 1
+        or after.fixed_statement_count != before.fixed_statement_count + projection.entry_count
+        or after.affected_rows_watermark != before.affected_rows_watermark + projection.entry_count
+        or state.logical_write_sequence < after.logical_write_sequence
+        or state.fixed_statement_count < after.fixed_statement_count
+        or state.affected_rows_watermark < after.affected_rows_watermark
+        or state.current_transaction_epoch < record.transaction_epoch_after
+        or state.current_total_changes < record.total_changes_after
+    ):
+        _poison(state, authority, "SQLite baseline-header entries predecessor drifted")
+        _fail("GE_CURSOR_B3_BASELINE_HEADER_PREDECESSOR")
+    return record
+
+
+def _execute_sqlite_cursor_baseline_header_publication_intrinsic(
+    authority: _SQLiteCursorOuterPublicationAuthority,
+    migration_0002_receipt: _SQLiteMigration0002CatalogRebuildReceipt,
+    fence: _SQLiteCursorPostDdlCatalogFence,
+    reader_lease: _SQLiteCursorPostDdlPublicationReaderLease,
+    baseline_entries_publication_receipt: _SQLiteBaselineEntriesPublicationReceipt,
+) -> _SQLiteBaselineHeaderPublicationReceipt:
+    """Publish one header from the authentic non-consuming entries proof."""
+
+    state = _authority_state(authority)
+    entries_record = _baseline_entries_receipt_record(baseline_entries_publication_receipt)
+    if (
+        entries_record.authority_ref() is not authority
+        or entries_record.migration_0002_receipt_ref() is not migration_0002_receipt
+        or entries_record.fence_ref() is not fence
+        or entries_record.reader_lease_ref() is not reader_lease
+        or state.baseline_entries_publication_receipt is not baseline_entries_publication_receipt
+    ):
+        _fail("GE_CURSOR_B3_BASELINE_HEADER_GRAPH")
+    if (
+        state.baseline_header_publication_receipt is not None
+        or state.baseline_header_publication_receipt_mint_count != 0
+        or state.baseline_header_logical_execution_count != 0
+        or state.baseline_header_prepare_count != 0
+        or state.baseline_header_execute_count != 0
+        or state.baseline_header_affected_rows != 0
+    ):
+        _poison(state, authority, "SQLite baseline-header publication was reused")
+        _fail("GE_CURSOR_B3_BASELINE_HEADER_REPLAY")
+
+    try:
+        _assert_baseline_entries_header_predecessor_intrinsic(
+            authority,
+            state,
+            migration_0002_receipt,
+            fence,
+            reader_lease,
+            baseline_entries_publication_receipt,
+        )
+        if (
+            state.write_phase != "baseline-entries-complete"
+            or entries_record.projection_identity_id != _ID(state.projection_identity)
+            or entries_record.projection_reference_ref() is not state.projection_reference
+            or entries_record.transaction_generation is not state.transaction_generation
+            or entries_record.total_changes_after != state.current_total_changes
+            or entries_record.transaction_epoch_after != state.current_transaction_epoch
+            or not _exact_outer_ledger(
+                entries_record.outer_ledger_after, _outer_ledger_snapshot(state)
+            )
+        ):
+            _fail("GE_CURSOR_B3_BASELINE_HEADER_PREDECESSOR")
+        exact_insert_sha256 = _SHA256(_BASELINE_HEADER_INSERT_SQL.encode("utf-8")).hexdigest()
+        if (
+            exact_insert_sha256 != _BASELINE_HEADER_INSERT_SQL_SHA256
+            or len(_BASELINE_HEADER_INSERT_SQL.encode("utf-8")) != 488
+        ):
+            _fail("GE_CURSOR_B3_BASELINE_HEADER_SQL")
+        policy_blob = bytes(_ENCODE_BASELINE_POLICY())
+        policy_sha256 = _SHA256(policy_blob).hexdigest()
+        if (
+            len(policy_blob) != _BASELINE_HEADER_POLICY_UTF8_BYTES
+            or policy_sha256 != _BASELINE_HEADER_POLICY_SHA256
+        ):
+            _fail("GE_CURSOR_B3_BASELINE_HEADER_POLICY")
+        source_commitment = _assert_source_header_commitment_intrinsic(state)
+        frame_arguments = _header_frame_arguments(state, source_commitment, policy_blob)
+        frame = _BUILD_BASELINE_HEADER_FRAME(*frame_arguments)
+    except BaseException:
+        _poison(state, authority, "SQLite baseline-header predecessor validation failed")
+        raise
+
+    total_before = state.current_total_changes
+    epoch_before = state.current_transaction_epoch
+    ledger_before = _outer_ledger_snapshot(state)
+    execution: _SQLiteConnectionBaselineHeaderPublicationExecution | None = None
+    try:
+        state.write_phase = "executing-baseline-header"
+        state.baseline_header_logical_execution_count = 1
+        execution = _BEGIN_BASELINE_HEADER_PUBLICATION(state.connection)
+        state.baseline_header_prepare_count = 1
+        step = _EXECUTE_BASELINE_HEADER(state.connection, execution, *frame_arguments)
+        state.current_transaction_epoch = step.transaction_epoch
+        state.current_total_changes = step.total_changes
+        state.baseline_header_execute_count = step.execute_count
+        state.baseline_header_affected_rows = step.affected_rows_delta
+        state.fixed_statement_count = ledger_before.fixed_statement_count + step.execute_count
+        state.affected_rows_watermark = (
+            ledger_before.affected_rows_watermark + step.affected_rows_delta
+        )
+        if (
+            step.prepare_count != 1
+            or step.execute_count != 1
+            or step.completed_execution_count != 1
+            or step.affected_rows_delta != 1
+            or step.total_changes != total_before + 1
+            or step.transaction_epoch != epoch_before + 1
+            or step.transaction_generation is not state.transaction_generation
+        ):
+            _fail("GE_CURSOR_B3_BASELINE_HEADER_EXECUTION")
+
+        progress = _READ_BASELINE_HEADER_PUBLICATION_PROGRESS(state.connection, execution)
+        if (
+            progress.lifecycle != "completed"
+            or progress.close_attempt_count != 1
+            or not progress.close_succeeded
+            or progress.prepare_count != 1
+            or progress.execute_count != 1
+            or progress.completed_execution_count != 1
+            or progress.affected_rows != 1
+            or progress.total_changes_before != total_before
+            or progress.total_changes_delta != 1
+            or progress.total_changes != total_before + 1
+            or progress.transaction_epoch != epoch_before + 1
+            or progress.transaction_generation is not state.transaction_generation
+        ):
+            _fail("GE_CURSOR_B3_BASELINE_HEADER_LEDGER")
+        state.current_transaction_epoch = progress.transaction_epoch
+        state.current_total_changes = progress.total_changes
+
+        parameter_sha256 = _DIGEST_INITIAL_WRITE_PARAMETERS(frame)
+        verified_parameter_sha256 = _DIGEST_INITIAL_WRITE_PARAMETERS_VERIFIER(
+            _VERIFY_BASELINE_HEADER_FRAME(*frame_arguments)
+        )
+        result_sha256 = _DIGEST_INITIAL_WRITE_RESULT({"affectedRows": "1"})
+        verified_result_sha256 = _DIGEST_INITIAL_WRITE_RESULT_VERIFIER({"affectedRows": "1"})
+        if parameter_sha256 != verified_parameter_sha256 or result_sha256 != verified_result_sha256:
+            _fail("GE_CURSOR_B3_BASELINE_HEADER_DIGEST")
+
+        ledger_after = _SQLiteCursorOuterPublicationLedgerSnapshot(
+            ledger_before.affected_rows_watermark + 1,
+            ledger_before.fixed_statement_count + 1,
+            ledger_before.logical_write_sequence + 1,
+        )
+        receipt = _SQLiteBaselineHeaderPublicationReceipt(_CONSTRUCTION_TOKEN)
+        _identity_set(
+            _BASELINE_HEADER_PUBLICATION_RECEIPTS,
+            receipt,
+            _BaselineHeaderPublicationReceiptRecord(
+                affected_rows=1,
+                authority_id=_ID(authority),
+                authority_ref=_REF(authority),
+                baseline_entries_receipt_id=_ID(baseline_entries_publication_receipt),
+                baseline_entries_receipt_ref=_REF(baseline_entries_publication_receipt),
+                baseline_id=state.projection_identity.baseline_id,
+                canonical_projection_sha256=state.projection_identity.projection_sha256,
+                captured_at_ms=source_commitment.captured_at_ms,
+                connection_id=_ID(state.connection),
+                creation_runtime=_BASELINE_HEADER_CREATION_RUNTIME,
+                creation_runtime_version=_BASELINE_HEADER_CREATION_RUNTIME_VERSION,
+                entry_count=state.projection_identity.entry_count,
+                execute_count=1,
+                final_entry_hash=state.projection_identity.final_entry_hash,
+                first_entry_hash=state.projection_identity.first_entry_hash,
+                fixed_insert_sql=_BASELINE_HEADER_INSERT_SQL,
+                fixed_insert_sql_sha256=_BASELINE_HEADER_INSERT_SQL_SHA256,
+                legacy_operation_count=state.projection_identity.legacy_operation_count,
+                fence_id=_ID(fence),
+                fence_ref=_REF(fence),
+                migration_0002_receipt_id=_ID(migration_0002_receipt),
+                migration_0002_receipt_ref=_REF(migration_0002_receipt),
+                outer_ledger_after=ledger_after,
+                outer_ledger_before=ledger_before,
+                outer_ledger_delta=_SQLiteCursorOuterPublicationLedgerSnapshot(1, 1, 1),
+                parameter_sha256=parameter_sha256,
+                parameter_order=_BASELINE_HEADER_PARAMETER_ORDER,
+                policy_blob_base64url=(
+                    _URLSAFE_B64ENCODE(policy_blob).rstrip(b"=").decode("ascii")
+                ),
+                policy_blob_sha256=policy_sha256,
+                policy_blob_utf8_bytes=len(policy_blob),
+                prepare_count=1,
+                projection_identity_id=_ID(state.projection_identity),
+                projection_reference_id=_ID(state.projection_reference),
+                projection_reference_ref=_REF(state.projection_reference),
+                reader_lease_id=_ID(reader_lease),
+                reader_lease_ref=_REF(reader_lease),
+                result_sha256=result_sha256,
+                source_descriptor_hash=source_commitment.source_descriptor_hash,
+                source_migration_lineage_id=(source_commitment.source_migration_lineage_id),
+                source_migration_lineage_sha256=(source_commitment.source_migration_lineage_sha256),
+                source_schema_identity_sha256=(source_commitment.source_schema_identity_sha256),
+                total_changes_after=progress.total_changes,
+                total_changes_before=total_before,
+                transaction_epoch_after=progress.transaction_epoch,
+                transaction_epoch_before=epoch_before,
+                transaction_generation=state.transaction_generation,
+            ),
+        )
+        state.logical_write_sequence = ledger_after.logical_write_sequence
+        state.fixed_statement_count = ledger_after.fixed_statement_count
+        state.affected_rows_watermark = ledger_after.affected_rows_watermark
+        state.baseline_header_publication_receipt = receipt
+        state.baseline_header_publication_receipt_mint_count = 1
+        state.write_phase = "baseline-header-complete"
+        return receipt
+    except BaseException:
+        if execution is not None:
+            with suppress(BaseException):
+                progress = _READ_BASELINE_HEADER_PUBLICATION_PROGRESS(state.connection, execution)
+                state.current_transaction_epoch = progress.transaction_epoch
+                state.current_total_changes = progress.total_changes
+                state.baseline_header_prepare_count = progress.prepare_count
+                state.baseline_header_execute_count = progress.execute_count
+                state.baseline_header_affected_rows = 1 if progress.affected_rows == 1 else 0
+                state.fixed_statement_count = (
+                    ledger_before.fixed_statement_count + progress.completed_execution_count
+                )
+                state.affected_rows_watermark = (
+                    ledger_before.affected_rows_watermark + progress.affected_rows
+                )
+        _poison(state, authority, "SQLite baseline-header publication failed")
+        raise
+
+
+def _assert_sqlite_cursor_baseline_header_publication_receipt_intrinsic(
+    authority: _SQLiteCursorOuterPublicationAuthority,
+    migration_0002_receipt: _SQLiteMigration0002CatalogRebuildReceipt,
+    fence: _SQLiteCursorPostDdlCatalogFence,
+    reader_lease: _SQLiteCursorPostDdlPublicationReaderLease,
+    baseline_entries_publication_receipt: _SQLiteBaselineEntriesPublicationReceipt,
+    receipt: _SQLiteBaselineHeaderPublicationReceipt,
+) -> _SQLiteBaselineHeaderPublicationReceipt:
+    """Reprove the exact completed header without consuming either receipt."""
+
+    record = _baseline_header_receipt_record(receipt)
+    if (
+        record.authority_id != _ID(authority)
+        or record.authority_ref() is not authority
+        or record.baseline_entries_receipt_id != _ID(baseline_entries_publication_receipt)
+        or record.baseline_entries_receipt_ref() is not baseline_entries_publication_receipt
+        or record.migration_0002_receipt_id != _ID(migration_0002_receipt)
+        or record.migration_0002_receipt_ref() is not migration_0002_receipt
+        or record.fence_id != _ID(fence)
+        or record.fence_ref() is not fence
+        or record.reader_lease_id != _ID(reader_lease)
+        or record.reader_lease_ref() is not reader_lease
+    ):
+        _fail("GE_CURSOR_B3_BASELINE_HEADER_RECEIPT_GRAPH")
+    state = _authority_state(authority)
+    try:
+        _assert_baseline_entries_header_predecessor_intrinsic(
+            authority,
+            state,
+            migration_0002_receipt,
+            fence,
+            reader_lease,
+            baseline_entries_publication_receipt,
+        )
+        source_commitment = _assert_source_header_commitment_intrinsic(state)
+        policy_blob = bytes(_ENCODE_BASELINE_POLICY())
+        frame_arguments = _header_frame_arguments(state, source_commitment, policy_blob)
+        parameter_sha256 = _DIGEST_INITIAL_WRITE_PARAMETERS_VERIFIER(
+            _VERIFY_BASELINE_HEADER_FRAME(*frame_arguments)
+        )
+        result_sha256 = _DIGEST_INITIAL_WRITE_RESULT_VERIFIER({"affectedRows": "1"})
+        policy_sha256 = _SHA256(policy_blob).hexdigest()
+        insert_sha256 = _SHA256(record.fixed_insert_sql.encode("utf-8")).hexdigest()
+        policy_base64url = _URLSAFE_B64ENCODE(policy_blob).rstrip(b"=").decode("ascii")
+    except BaseException:
+        _poison(state, authority, "SQLite baseline-header receipt proof failed")
+        raise
+
+    projection_reference = record.projection_reference_ref()
+    before = record.outer_ledger_before
+    after = record.outer_ledger_after
+    delta = record.outer_ledger_delta
+    projection = state.projection_identity
+    entries_record = _baseline_entries_receipt_record(baseline_entries_publication_receipt)
+    if (
+        projection_reference is not state.projection_reference
+        or _ID(projection_reference) != record.projection_reference_id
+        or state.baseline_header_publication_receipt is not receipt
+        or state.baseline_header_publication_receipt_mint_count != 1
+        or state.baseline_header_logical_execution_count != 1
+        or state.baseline_header_prepare_count != 1
+        or state.baseline_header_execute_count != 1
+        or state.baseline_header_affected_rows != 1
+        or state.logical_write_sequence < after.logical_write_sequence
+        or state.fixed_statement_count < after.fixed_statement_count
+        or state.affected_rows_watermark < after.affected_rows_watermark
+        or state.current_transaction_epoch < record.transaction_epoch_after
+        or state.current_total_changes < record.total_changes_after
+        or record.connection_id != _ID(state.connection)
+        or record.projection_identity_id != _ID(projection)
+        or record.baseline_id != projection.baseline_id
+        or record.canonical_projection_sha256 != projection.projection_sha256
+        or record.captured_at_ms != source_commitment.captured_at_ms
+        or record.entry_count != projection.entry_count
+        or record.legacy_operation_count != projection.legacy_operation_count
+        or record.first_entry_hash != projection.first_entry_hash
+        or record.final_entry_hash != projection.final_entry_hash
+        or record.source_descriptor_hash != source_commitment.source_descriptor_hash
+        or record.source_migration_lineage_id != source_commitment.source_migration_lineage_id
+        or record.source_migration_lineage_sha256
+        != source_commitment.source_migration_lineage_sha256
+        or record.source_schema_identity_sha256 != source_commitment.source_schema_identity_sha256
+        or record.creation_runtime != _BASELINE_HEADER_CREATION_RUNTIME
+        or record.creation_runtime_version != _BASELINE_HEADER_CREATION_RUNTIME_VERSION
+        or record.policy_blob_utf8_bytes != _BASELINE_HEADER_POLICY_UTF8_BYTES
+        or record.policy_blob_sha256 != _BASELINE_HEADER_POLICY_SHA256
+        or record.policy_blob_sha256 != policy_sha256
+        or record.policy_blob_base64url != policy_base64url
+        or record.fixed_insert_sql != _BASELINE_HEADER_INSERT_SQL
+        or record.fixed_insert_sql_sha256 != _BASELINE_HEADER_INSERT_SQL_SHA256
+        or insert_sha256 != record.fixed_insert_sql_sha256
+        or record.parameter_order != _BASELINE_HEADER_PARAMETER_ORDER
+        or record.parameter_sha256 != parameter_sha256
+        or record.result_sha256 != result_sha256
+        or record.prepare_count != 1
+        or record.execute_count != 1
+        or record.affected_rows != 1
+        or record.total_changes_before != entries_record.total_changes_after
+        or record.total_changes_after != record.total_changes_before + 1
+        or record.transaction_epoch_before != entries_record.transaction_epoch_after
+        or record.transaction_epoch_after != record.transaction_epoch_before + 1
+        or record.transaction_generation is not state.transaction_generation
+        or delta.logical_write_sequence != 1
+        or delta.fixed_statement_count != 1
+        or delta.affected_rows_watermark != 1
+        or after.logical_write_sequence != before.logical_write_sequence + 1
+        or after.fixed_statement_count != before.fixed_statement_count + 1
+        or after.affected_rows_watermark != before.affected_rows_watermark + 1
+    ):
+        _poison(state, authority, "SQLite baseline-header receipt graph drifted")
+        _fail("GE_CURSOR_B3_BASELINE_HEADER_RECEIPT_DRIFT")
+    if not _exact_outer_ledger(before, entries_record.outer_ledger_after):
+        _poison(state, authority, "SQLite baseline-header receipt predecessor drifted")
+        _fail("GE_CURSOR_B3_BASELINE_HEADER_RECEIPT_DRIFT")
+    return receipt
+
+
+def _read_sqlite_baseline_header_publication_receipt_snapshot_intrinsic(
+    receipt: _SQLiteBaselineHeaderPublicationReceipt,
+) -> _SQLiteBaselineHeaderPublicationReceiptSnapshot:
+    record = _baseline_header_receipt_record(receipt)
+    authority = record.authority_ref()
+    entries_receipt = record.baseline_entries_receipt_ref()
+    migration_0002_receipt = record.migration_0002_receipt_ref()
+    fence = record.fence_ref()
+    reader_lease = record.reader_lease_ref()
+    projection_reference = record.projection_reference_ref()
+    if (
+        authority is None
+        or entries_receipt is None
+        or migration_0002_receipt is None
+        or fence is None
+        or reader_lease is None
+        or projection_reference is None
+    ):
+        _fail("GE_CURSOR_B3_BASELINE_HEADER_RECEIPT")
+    _assert_sqlite_cursor_baseline_header_publication_receipt_intrinsic(
+        authority,
+        migration_0002_receipt,
+        fence,
+        reader_lease,
+        entries_receipt,
+        receipt,
+    )
+    state = _authority_state(authority)
+    return _SQLiteBaselineHeaderPublicationReceiptSnapshot(
+        affected_rows=1,
+        authority=authority,
+        baseline_entries_publication_receipt=entries_receipt,
+        baseline_id=record.baseline_id,
+        canonical_projection_sha256=record.canonical_projection_sha256,
+        captured_at_ms=record.captured_at_ms,
+        connection=state.connection,
+        creation_runtime="graph-engineering-python",
+        creation_runtime_version="0.1.0a1",
+        entry_count=record.entry_count,
+        execute_count=1,
+        final_entry_hash=record.final_entry_hash,
+        fixed_insert_sql=record.fixed_insert_sql,
+        fixed_insert_sql_sha256=record.fixed_insert_sql_sha256,
+        first_entry_hash=record.first_entry_hash,
+        legacy_operation_count=record.legacy_operation_count,
+        mint_count=1,
+        outer_ledger_after=record.outer_ledger_after,
+        outer_ledger_before=record.outer_ledger_before,
+        outer_ledger_delta=record.outer_ledger_delta,
+        parameter_sha256=record.parameter_sha256,
+        parameter_order=record.parameter_order,
+        policy_blob_base64url=record.policy_blob_base64url,
+        policy_blob_sha256=record.policy_blob_sha256,
+        policy_blob_utf8_bytes=record.policy_blob_utf8_bytes,
+        post_ddl_catalog_fence=fence,
+        prepare_count=1,
+        projection_identity=state.projection_identity,
+        projection_reference=projection_reference,
+        reader_lease=reader_lease,
+        result_sha256=record.result_sha256,
+        source_descriptor_hash=record.source_descriptor_hash,
+        source_migration_lineage_id=record.source_migration_lineage_id,
+        source_migration_lineage_sha256=record.source_migration_lineage_sha256,
+        source_schema_identity_sha256=record.source_schema_identity_sha256,
+        total_changes_after=record.total_changes_after,
+        total_changes_before=record.total_changes_before,
+        total_changes_delta=1,
+        transaction_epoch_after=record.transaction_epoch_after,
+        transaction_epoch_before=record.transaction_epoch_before,
+        transaction_generation=record.transaction_generation,
+        write_kind="baseline-header-publication",
+    )
+
+
 def _read_sqlite_cursor_outer_publication_authority_snapshot_intrinsic(
     authority: _SQLiteCursorOuterPublicationAuthority,
 ) -> _SQLiteCursorOuterPublicationAuthoritySnapshot:
@@ -2926,7 +3824,10 @@ def _read_sqlite_cursor_outer_publication_authority_snapshot_intrinsic(
             state.logical_write_sequence,
         ),
         source_descriptor_hash=state.source_descriptor_hash,
+        source_migration_lineage_id=state.source_migration_lineage_id,
+        source_migration_lineage_sha256=state.source_migration_lineage_sha256,
         source_schema_identity_sha256=state.source_schema_identity_sha256,
+        captured_at_ms=state.captured_at_ms,
         outer_provider_now_ms=state.outer_provider_now_ms,
         source_schema_version=1,
         target_schema_version=2,
@@ -2951,5 +3852,13 @@ def _read_sqlite_cursor_outer_publication_authority_snapshot_intrinsic(
         baseline_entries_prepare_count=state.baseline_entries_prepare_count,
         baseline_entries_execute_count=state.baseline_entries_execute_count,
         baseline_entries_affected_rows=state.baseline_entries_affected_rows,
+        baseline_header_publication_receipt=state.baseline_header_publication_receipt,
+        baseline_header_publication_receipt_mint_count=(
+            state.baseline_header_publication_receipt_mint_count
+        ),
+        baseline_header_logical_execution_count=(state.baseline_header_logical_execution_count),
+        baseline_header_prepare_count=state.baseline_header_prepare_count,
+        baseline_header_execute_count=state.baseline_header_execute_count,
+        baseline_header_affected_rows=state.baseline_header_affected_rows,
         write_phase=state.write_phase,
     )

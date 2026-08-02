@@ -280,6 +280,39 @@ _BASELINE_ENTRY_PUBLICATION_INSERT_SQL = (
     SQLITE_CURSOR_BASELINE_ENTRY_PUBLICATION_INSERT_SQL_INTRINSIC
 )
 _BASELINE_ENTRY_PUBLICATION_CONSTRUCTION_TOKEN = object()
+SQLITE_CURSOR_BASELINE_HEADER_PUBLICATION_INSERT_SQL_INTRINSIC = (
+    "INSERT INTO main.ge_cycle_operation_baselines "
+    "(baseline_id, baseline_format_version, source_application_id, "
+    "source_user_version, source_schema_identity_sha256, "
+    "source_migration_lineage_id, source_migration_lineage_sha256, "
+    "source_descriptor_hash, captured_at_ms, legacy_operation_count, entry_count, "
+    "first_entry_hash, final_entry_hash, canonical_projection_sha256, "
+    "creation_runtime, creation_runtime_version, policy_blob) "
+    "VALUES (?, 1, 1195724359, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+)
+SQLITE_CURSOR_BASELINE_HEADER_PUBLICATION_INSERT_SQL_SHA256_INTRINSIC = (
+    "b1a32ec385dd78f9727a63b9c303a9cb95c9525910010984d09b7f0fd868e79a"
+)
+SQLITE_CURSOR_BASELINE_HEADER_PUBLICATION_PARAMETER_ORDER_INTRINSIC = (
+    "baseline_id",
+    "source_schema_identity_sha256",
+    "source_migration_lineage_id",
+    "source_migration_lineage_sha256",
+    "source_descriptor_hash",
+    "captured_at_ms",
+    "legacy_operation_count",
+    "entry_count",
+    "first_entry_hash",
+    "final_entry_hash",
+    "canonical_projection_sha256",
+    "creation_runtime",
+    "creation_runtime_version",
+    "policy_blob",
+)
+_BASELINE_HEADER_PUBLICATION_INSERT_SQL = (
+    SQLITE_CURSOR_BASELINE_HEADER_PUBLICATION_INSERT_SQL_INTRINSIC
+)
+_BASELINE_HEADER_PUBLICATION_CONSTRUCTION_TOKEN = object()
 
 
 class _SQLiteConnectionMigration0002Execution:
@@ -373,6 +406,41 @@ class _SQLiteConnectionBaselineEntryPublicationExecutionSnapshot(NamedTuple):
     close_succeeded: bool
 
 
+class _SQLiteConnectionBaselineHeaderPublicationExecution:
+    """Opaque source-owner session for one permanent baseline-header write."""
+
+    __slots__ = ("__weakref__",)
+
+    def __init__(self, token: object) -> None:
+        if token is not _BASELINE_HEADER_PUBLICATION_CONSTRUCTION_TOKEN:
+            raise TypeError("GE_CURSOR_B3_BASELINE_HEADER_EXECUTION")
+
+
+class _SQLiteConnectionBaselineHeaderPublicationStepSnapshot(NamedTuple):
+    affected_rows_delta: Literal[1]
+    completed_execution_count: Literal[1]
+    execute_count: Literal[1]
+    prepare_count: Literal[1]
+    total_changes: int
+    transaction_epoch: int
+    transaction_generation: object
+
+
+class _SQLiteConnectionBaselineHeaderPublicationExecutionSnapshot(NamedTuple):
+    affected_rows: int
+    completed_execution_count: Literal[0, 1]
+    execute_count: Literal[0, 1]
+    lifecycle: Literal["active", "completed", "poisoned"]
+    prepare_count: Literal[1]
+    total_changes_before: int
+    total_changes: int
+    total_changes_delta: int
+    transaction_epoch: int
+    transaction_generation: object
+    close_attempt_count: Literal[0, 1]
+    close_succeeded: bool
+
+
 @dataclass(slots=True)
 class _PostDdlPublicationReaderState:
     close_attempt_count: Literal[0, 1]
@@ -424,6 +492,25 @@ class _BaselineEntryPublicationExecutionState:
     transaction_generation: object
 
 
+@dataclass(slots=True)
+class _BaselineHeaderPublicationExecutionState:
+    affected_rows: int
+    close_attempt_count: Literal[0, 1]
+    close_error_code: str | None
+    close_succeeded: bool
+    completed_execution_count: Literal[0, 1]
+    connection: SQLiteV1BaselineConnectionOwner
+    cursor: sqlite3.Cursor | None
+    execute_count: Literal[0, 1]
+    lifecycle: Literal["active", "completed", "poisoned"]
+    prepare_count: Literal[1]
+    total_changes_before: int
+    total_changes: int
+    transaction_epoch_before: int
+    transaction_epoch: int
+    transaction_generation: object
+
+
 _MIGRATION_0002_EXECUTIONS: dict[
     int,
     tuple[
@@ -445,6 +532,13 @@ _BASELINE_ENTRY_PUBLICATION_EXECUTIONS: dict[
         _BaselineEntryPublicationExecutionState,
     ],
 ] = {}
+_BASELINE_HEADER_PUBLICATION_EXECUTIONS: dict[
+    int,
+    tuple[
+        ReferenceType[_SQLiteConnectionBaselineHeaderPublicationExecution],
+        _BaselineHeaderPublicationExecutionState,
+    ],
+] = {}
 
 # CPython's sqlite descriptors are captured once so later module/class
 # replacement cannot redirect the package-owned execution lane.
@@ -461,6 +555,12 @@ _BASELINE_ENTRY_SQLITE_CONNECTION_TOTAL_CHANGES = sqlite3.Connection.total_chang
 _BASELINE_ENTRY_SQLITE_CURSOR_EXECUTE = sqlite3.Cursor.execute
 _BASELINE_ENTRY_SQLITE_CURSOR_CLOSE = sqlite3.Cursor.close
 _BASELINE_ENTRY_SQLITE_CURSOR_ROWCOUNT = sqlite3.Cursor.rowcount
+_BASELINE_HEADER_SQLITE_CONNECTION_CURSOR = sqlite3.Connection.cursor
+_BASELINE_HEADER_SQLITE_CONNECTION_IN_TRANSACTION = sqlite3.Connection.in_transaction
+_BASELINE_HEADER_SQLITE_CONNECTION_TOTAL_CHANGES = sqlite3.Connection.total_changes
+_BASELINE_HEADER_SQLITE_CURSOR_EXECUTE = sqlite3.Cursor.execute
+_BASELINE_HEADER_SQLITE_CURSOR_CLOSE = sqlite3.Cursor.close
+_BASELINE_HEADER_SQLITE_CURSOR_ROWCOUNT = sqlite3.Cursor.rowcount
 _READ_MIGRATION_0002_ASSET = _read_sqlite_cursor_migration_0002_asset_snapshot_intrinsic
 
 
@@ -587,6 +687,9 @@ def _is_baseline_entry_lower_hex_64(value: object) -> bool:
     return all(character in "0123456789abcdef" for character in value)
 
 
+_BASELINE_HEADER_IS_LOWER_HEX_64 = _is_baseline_entry_lower_hex_64
+
+
 def _checked_baseline_entry_publication_parameters(
     baseline_id: object,
     ordinal: object,
@@ -649,6 +752,123 @@ def _register_baseline_entry_publication_execution(
 
     reference = ref(execution, discard)
     _BASELINE_ENTRY_PUBLICATION_EXECUTIONS[execution_id] = (reference, state)
+
+
+def _baseline_header_publication_fail(code: str) -> Never:
+    raise ValueError(code)
+
+
+def _baseline_header_native_in_transaction(connection: sqlite3.Connection) -> bool:
+    try:
+        value = _BASELINE_HEADER_SQLITE_CONNECTION_IN_TRANSACTION.__get__(
+            connection, sqlite3.Connection
+        )
+    except BaseException as error:
+        raise ValueError("GE_CURSOR_B3_BASELINE_HEADER_CONNECTION") from error
+    if type(value) is not bool:
+        _baseline_header_publication_fail("GE_CURSOR_B3_BASELINE_HEADER_CONNECTION")
+    return value
+
+
+def _baseline_header_native_total_changes(connection: sqlite3.Connection) -> int:
+    try:
+        value = _BASELINE_HEADER_SQLITE_CONNECTION_TOTAL_CHANGES.__get__(
+            connection, sqlite3.Connection
+        )
+    except BaseException as error:
+        raise ValueError("GE_CURSOR_B3_BASELINE_HEADER_COUNTER") from error
+    if type(value) is not int or not 0 <= value <= MAX_SAFE_INTEGER:
+        _baseline_header_publication_fail("GE_CURSOR_B3_BASELINE_HEADER_COUNTER")
+    return value
+
+
+def _checked_baseline_header_publication_parameters(
+    baseline_id: object,
+    source_schema_identity_sha256: object,
+    source_migration_lineage_id: object,
+    source_migration_lineage_sha256: object,
+    source_descriptor_hash: object,
+    captured_at_ms: object,
+    legacy_operation_count: object,
+    entry_count: object,
+    first_entry_hash: object,
+    final_entry_hash: object,
+    canonical_projection_sha256: object,
+    creation_runtime: object,
+    creation_runtime_version: object,
+    policy_blob: object,
+) -> tuple[str, str, str, str, str, int, int, int, str, str, str, str, str, bytes]:
+    if (
+        type(baseline_id) is not str
+        or len(baseline_id) != 67
+        or baseline_id[:3] != "v2-"
+        or not _BASELINE_HEADER_IS_LOWER_HEX_64(baseline_id[3:])
+        or not _BASELINE_HEADER_IS_LOWER_HEX_64(source_schema_identity_sha256)
+        or type(source_migration_lineage_id) is not str
+        or not source_migration_lineage_id
+        or not _BASELINE_HEADER_IS_LOWER_HEX_64(source_migration_lineage_sha256)
+        or not _BASELINE_HEADER_IS_LOWER_HEX_64(source_descriptor_hash)
+        or type(captured_at_ms) is not int
+        or not 0 <= captured_at_ms <= MAX_SAFE_INTEGER
+        or type(legacy_operation_count) is not int
+        or not 0 <= legacy_operation_count <= MAX_SAFE_INTEGER
+        or type(entry_count) is not int
+        or not legacy_operation_count <= entry_count <= MAX_SAFE_INTEGER
+        or not _BASELINE_HEADER_IS_LOWER_HEX_64(first_entry_hash)
+        or not _BASELINE_HEADER_IS_LOWER_HEX_64(final_entry_hash)
+        or not _BASELINE_HEADER_IS_LOWER_HEX_64(canonical_projection_sha256)
+        or type(creation_runtime) is not str
+        or not creation_runtime
+        or type(creation_runtime_version) is not str
+        or not creation_runtime_version
+        or type(policy_blob) is not bytes
+    ):
+        _baseline_header_publication_fail("GE_CURSOR_B3_BASELINE_HEADER_PARAMETERS")
+    return (
+        baseline_id,
+        cast(str, source_schema_identity_sha256),
+        source_migration_lineage_id,
+        cast(str, source_migration_lineage_sha256),
+        cast(str, source_descriptor_hash),
+        captured_at_ms,
+        legacy_operation_count,
+        entry_count,
+        cast(str, first_entry_hash),
+        cast(str, final_entry_hash),
+        cast(str, canonical_projection_sha256),
+        creation_runtime,
+        creation_runtime_version,
+        policy_blob,
+    )
+
+
+def _baseline_header_publication_state(
+    connection: SQLiteV1BaselineConnectionOwner,
+    execution: _SQLiteConnectionBaselineHeaderPublicationExecution,
+) -> _BaselineHeaderPublicationExecutionState:
+    if type(execution) is not _SQLiteConnectionBaselineHeaderPublicationExecution:
+        _baseline_header_publication_fail("GE_CURSOR_B3_BASELINE_HEADER_EXECUTION")
+    current = _BASELINE_HEADER_PUBLICATION_EXECUTIONS.get(id(execution))
+    if current is None or current[0]() is not execution or current[1].connection is not connection:
+        _baseline_header_publication_fail("GE_CURSOR_B3_BASELINE_HEADER_EXECUTION")
+    return current[1]
+
+
+def _register_baseline_header_publication_execution(
+    execution: _SQLiteConnectionBaselineHeaderPublicationExecution,
+    state: _BaselineHeaderPublicationExecutionState,
+) -> None:
+    execution_id = id(execution)
+
+    def discard(
+        reference: ReferenceType[_SQLiteConnectionBaselineHeaderPublicationExecution],
+    ) -> None:
+        current = _BASELINE_HEADER_PUBLICATION_EXECUTIONS.get(execution_id)
+        if current is not None and current[0] is reference:
+            _BASELINE_HEADER_PUBLICATION_EXECUTIONS.pop(execution_id, None)
+
+    reference = ref(execution, discard)
+    _BASELINE_HEADER_PUBLICATION_EXECUTIONS[execution_id] = (reference, state)
 
 
 class SQLiteV1BaselineConnectionOwner:
@@ -1114,6 +1334,255 @@ class SQLiteV1BaselineConnectionOwner:
             close_succeeded=state.close_succeeded,
         )
 
+    def _begin_baseline_header_publication_execution(
+        self,
+    ) -> _SQLiteConnectionBaselineHeaderPublicationExecution:
+        """Allocate one cursor/session for the fixed baseline-header INSERT."""
+
+        try:
+            if (
+                not _baseline_header_native_in_transaction(self.__connection)
+                or self.__transaction_mode != "exclusive"
+                or self.__transaction_generation is None
+                or type(self.__transaction_epoch) is not int
+                or self.__transaction_epoch < 0
+            ):
+                _baseline_header_publication_fail("GE_CURSOR_B3_BASELINE_HEADER_STALE_FENCE")
+            transaction_generation = self.__transaction_generation
+            transaction_epoch = self.__transaction_epoch
+            total_changes = _baseline_header_native_total_changes(self.__connection)
+        except ValueError:
+            raise
+        except BaseException as error:
+            raise ValueError("GE_CURSOR_B3_BASELINE_HEADER_OWNER_OBSERVATION") from error
+
+        # Python's stdlib sqlite3 surface has no prepare-only API.  Exactly one
+        # package-owned cursor allocation is the closed-set prepare reservation;
+        # the fixed SQL is supplied only by the later single execute call.
+        try:
+            cursor = _BASELINE_HEADER_SQLITE_CONNECTION_CURSOR(self.__connection)
+        except BaseException as error:
+            raise ValueError("GE_CURSOR_B3_BASELINE_HEADER_PREPARE") from error
+        try:
+            owner_drifted = (
+                not _baseline_header_native_in_transaction(self.__connection)
+                or self.__transaction_mode != "exclusive"
+                or self.__transaction_generation is not transaction_generation
+                or self.__transaction_epoch != transaction_epoch
+                or _baseline_header_native_total_changes(self.__connection) != total_changes
+            )
+        except BaseException as error:
+            with suppress(BaseException):
+                _BASELINE_HEADER_SQLITE_CURSOR_CLOSE(cursor)
+            raise ValueError("GE_CURSOR_B3_BASELINE_HEADER_OWNER_OBSERVATION") from error
+        if owner_drifted:
+            with suppress(BaseException):
+                _BASELINE_HEADER_SQLITE_CURSOR_CLOSE(cursor)
+            _baseline_header_publication_fail("GE_CURSOR_B3_BASELINE_HEADER_OWNER_DRIFT")
+
+        execution = _SQLiteConnectionBaselineHeaderPublicationExecution(
+            _BASELINE_HEADER_PUBLICATION_CONSTRUCTION_TOKEN
+        )
+        _register_baseline_header_publication_execution(
+            execution,
+            _BaselineHeaderPublicationExecutionState(
+                affected_rows=0,
+                close_attempt_count=0,
+                close_error_code=None,
+                close_succeeded=False,
+                completed_execution_count=0,
+                connection=self,
+                cursor=cursor,
+                execute_count=0,
+                lifecycle="active",
+                prepare_count=1,
+                total_changes_before=total_changes,
+                total_changes=total_changes,
+                transaction_epoch_before=transaction_epoch,
+                transaction_epoch=transaction_epoch,
+                transaction_generation=transaction_generation,
+            ),
+        )
+        return execution
+
+    def _close_baseline_header_publication_execution(
+        self,
+        state: _BaselineHeaderPublicationExecutionState,
+    ) -> None:
+        """Close the header cursor exactly once and retain only a scalar code."""
+
+        if state.close_attempt_count == 1:
+            if state.close_error_code is not None:
+                raise ValueError(state.close_error_code)
+            return
+        state.close_attempt_count = 1
+        cursor = state.cursor
+        state.cursor = None
+        if cursor is None:
+            state.close_error_code = "GE_CURSOR_B3_BASELINE_HEADER_CLEANUP"
+            raise ValueError(state.close_error_code)
+        try:
+            _BASELINE_HEADER_SQLITE_CURSOR_CLOSE(cursor)
+        except BaseException as error:
+            state.close_error_code = "GE_CURSOR_B3_BASELINE_HEADER_CLEANUP"
+            raise ValueError(state.close_error_code) from error
+        state.close_succeeded = True
+
+    def _synchronize_baseline_header_publication_after_failure(
+        self,
+        state: _BaselineHeaderPublicationExecutionState,
+    ) -> None:
+        """Retain real native progress without replacing the primary error."""
+
+        if type(self.__transaction_epoch) is int and self.__transaction_epoch >= 0:
+            state.transaction_epoch = self.__transaction_epoch
+        try:
+            total_changes = _baseline_header_native_total_changes(self.__connection)
+            delta = total_changes - state.total_changes_before
+            if type(delta) is int and 0 <= delta <= MAX_SAFE_INTEGER:
+                state.total_changes = total_changes
+                state.affected_rows = delta
+        except BaseException:
+            pass
+
+    def _execute_baseline_header_publication(
+        self,
+        execution: _SQLiteConnectionBaselineHeaderPublicationExecution,
+        baseline_id: object,
+        source_schema_identity_sha256: object,
+        source_migration_lineage_id: object,
+        source_migration_lineage_sha256: object,
+        source_descriptor_hash: object,
+        captured_at_ms: object,
+        legacy_operation_count: object,
+        entry_count: object,
+        first_entry_hash: object,
+        final_entry_hash: object,
+        canonical_projection_sha256: object,
+        creation_runtime: object,
+        creation_runtime_version: object,
+        policy_blob: object,
+    ) -> _SQLiteConnectionBaselineHeaderPublicationStepSnapshot:
+        """Run the fixed fourteen-parameter INSERT and retain its real progress."""
+
+        state = _baseline_header_publication_state(self, execution)
+        if state.lifecycle != "active":
+            _baseline_header_publication_fail("GE_CURSOR_B3_BASELINE_HEADER_TERMINAL")
+        try:
+            parameters = _checked_baseline_header_publication_parameters(
+                baseline_id,
+                source_schema_identity_sha256,
+                source_migration_lineage_id,
+                source_migration_lineage_sha256,
+                source_descriptor_hash,
+                captured_at_ms,
+                legacy_operation_count,
+                entry_count,
+                first_entry_hash,
+                final_entry_hash,
+                canonical_projection_sha256,
+                creation_runtime,
+                creation_runtime_version,
+                policy_blob,
+            )
+            if (
+                not _baseline_header_native_in_transaction(self.__connection)
+                or self.__transaction_mode != "exclusive"
+                or self.__transaction_generation is not state.transaction_generation
+                or self.__transaction_epoch != state.transaction_epoch
+                or _baseline_header_native_total_changes(self.__connection) != state.total_changes
+            ):
+                _baseline_header_publication_fail("GE_CURSOR_B3_BASELINE_HEADER_OWNER_DRIFT")
+        except BaseException:
+            self._synchronize_baseline_header_publication_after_failure(state)
+            state.lifecycle = "poisoned"
+            with suppress(BaseException):
+                self._close_baseline_header_publication_execution(state)
+            raise
+
+        cursor = state.cursor
+        if cursor is None:
+            state.lifecycle = "poisoned"
+            _baseline_header_publication_fail("GE_CURSOR_B3_BASELINE_HEADER_EXECUTION")
+        state.execute_count = 1
+        if type(self.__transaction_epoch) is not int or self.__transaction_epoch < 0:
+            state.lifecycle = "poisoned"
+            with suppress(BaseException):
+                self._close_baseline_header_publication_execution(state)
+            _baseline_header_publication_fail("GE_CURSOR_B3_BASELINE_HEADER_EPOCH")
+        self.__transaction_epoch += 1
+        state.transaction_epoch = self.__transaction_epoch
+        try:
+            raw_result = _BASELINE_HEADER_SQLITE_CURSOR_EXECUTE(
+                cursor,
+                _BASELINE_HEADER_PUBLICATION_INSERT_SQL,
+                parameters,
+            )
+        except BaseException as error:
+            self._synchronize_baseline_header_publication_after_failure(state)
+            state.lifecycle = "poisoned"
+            with suppress(BaseException):
+                self._close_baseline_header_publication_execution(state)
+            raise ValueError("GE_CURSOR_B3_BASELINE_HEADER_EXECUTE") from error
+
+        # Native return is the irreversible one-row boundary.  Record it before
+        # inspecting result shape, rowcount, counters, or cleanup.
+        state.completed_execution_count = 1
+        state.affected_rows = 1
+        try:
+            if raw_result is not cursor:
+                _baseline_header_publication_fail("GE_CURSOR_B3_BASELINE_HEADER_RESULT")
+            try:
+                raw_rowcount = _BASELINE_HEADER_SQLITE_CURSOR_ROWCOUNT.__get__(
+                    cursor, sqlite3.Cursor
+                )
+            except BaseException as error:
+                raise ValueError("GE_CURSOR_B3_BASELINE_HEADER_RESULT") from error
+            if type(raw_rowcount) is not int or raw_rowcount != 1:
+                _baseline_header_publication_fail("GE_CURSOR_B3_BASELINE_HEADER_AFFECTED_ROWS")
+            total_changes = _baseline_header_native_total_changes(self.__connection)
+            if total_changes - state.total_changes != 1:
+                _baseline_header_publication_fail("GE_CURSOR_B3_BASELINE_HEADER_ACCOUNTING")
+            state.total_changes = total_changes
+            state.affected_rows = total_changes - state.total_changes_before
+            state.lifecycle = "completed"
+            self._close_baseline_header_publication_execution(state)
+            return _SQLiteConnectionBaselineHeaderPublicationStepSnapshot(
+                affected_rows_delta=1,
+                completed_execution_count=1,
+                execute_count=1,
+                prepare_count=state.prepare_count,
+                total_changes=state.total_changes,
+                transaction_epoch=state.transaction_epoch,
+                transaction_generation=state.transaction_generation,
+            )
+        except BaseException:
+            self._synchronize_baseline_header_publication_after_failure(state)
+            state.lifecycle = "poisoned"
+            with suppress(BaseException):
+                self._close_baseline_header_publication_execution(state)
+            raise
+
+    def _read_baseline_header_publication_execution_snapshot(
+        self,
+        execution: _SQLiteConnectionBaselineHeaderPublicationExecution,
+    ) -> _SQLiteConnectionBaselineHeaderPublicationExecutionSnapshot:
+        state = _baseline_header_publication_state(self, execution)
+        return _SQLiteConnectionBaselineHeaderPublicationExecutionSnapshot(
+            affected_rows=state.affected_rows,
+            completed_execution_count=state.completed_execution_count,
+            execute_count=state.execute_count,
+            lifecycle=state.lifecycle,
+            prepare_count=state.prepare_count,
+            total_changes_before=state.total_changes_before,
+            total_changes=state.total_changes,
+            total_changes_delta=state.total_changes - state.total_changes_before,
+            transaction_epoch=state.transaction_epoch,
+            transaction_generation=state.transaction_generation,
+            close_attempt_count=state.close_attempt_count,
+            close_succeeded=state.close_succeeded,
+        )
+
     def _begin_migration_0002_execution(
         self,
         asset: object,
@@ -1368,6 +1837,15 @@ _OWNER_EXECUTE_NEXT_BASELINE_ENTRY_PUBLICATION = (
 _OWNER_READ_BASELINE_ENTRY_PUBLICATION = (
     SQLiteV1BaselineConnectionOwner._read_baseline_entry_publication_execution_snapshot
 )
+_OWNER_BEGIN_BASELINE_HEADER_PUBLICATION = (
+    SQLiteV1BaselineConnectionOwner._begin_baseline_header_publication_execution
+)
+_OWNER_EXECUTE_BASELINE_HEADER_PUBLICATION = (
+    SQLiteV1BaselineConnectionOwner._execute_baseline_header_publication
+)
+_OWNER_READ_BASELINE_HEADER_PUBLICATION = (
+    SQLiteV1BaselineConnectionOwner._read_baseline_header_publication_execution_snapshot
+)
 
 
 def _begin_sqlite_connection_migration_0002_execution_intrinsic(
@@ -1507,6 +1985,69 @@ def _read_sqlite_connection_baseline_entry_publication_execution_snapshot_intrin
     if type(connection) is not SQLiteV1BaselineConnectionOwner:
         _baseline_entry_publication_fail("GE_CURSOR_B3_BASELINE_ENTRY_CONNECTION")
     return _OWNER_READ_BASELINE_ENTRY_PUBLICATION(connection, execution)
+
+
+def _begin_sqlite_connection_baseline_header_publication_execution_intrinsic(
+    connection: SQLiteV1BaselineConnectionOwner,
+) -> _SQLiteConnectionBaselineHeaderPublicationExecution:
+    """Allocate one source-owned session for the fixed baseline-header INSERT."""
+
+    if type(connection) is not SQLiteV1BaselineConnectionOwner:
+        _baseline_header_publication_fail("GE_CURSOR_B3_BASELINE_HEADER_CONNECTION")
+    return _OWNER_BEGIN_BASELINE_HEADER_PUBLICATION(connection)
+
+
+def _execute_sqlite_connection_baseline_header_publication_intrinsic(
+    connection: SQLiteV1BaselineConnectionOwner,
+    execution: _SQLiteConnectionBaselineHeaderPublicationExecution,
+    baseline_id: object,
+    source_schema_identity_sha256: object,
+    source_migration_lineage_id: object,
+    source_migration_lineage_sha256: object,
+    source_descriptor_hash: object,
+    captured_at_ms: object,
+    legacy_operation_count: object,
+    entry_count: object,
+    first_entry_hash: object,
+    final_entry_hash: object,
+    canonical_projection_sha256: object,
+    creation_runtime: object,
+    creation_runtime_version: object,
+    policy_blob: object,
+) -> _SQLiteConnectionBaselineHeaderPublicationStepSnapshot:
+    """Execute the exact package-owned fourteen-parameter header INSERT once."""
+
+    if type(connection) is not SQLiteV1BaselineConnectionOwner:
+        _baseline_header_publication_fail("GE_CURSOR_B3_BASELINE_HEADER_CONNECTION")
+    return _OWNER_EXECUTE_BASELINE_HEADER_PUBLICATION(
+        connection,
+        execution,
+        baseline_id,
+        source_schema_identity_sha256,
+        source_migration_lineage_id,
+        source_migration_lineage_sha256,
+        source_descriptor_hash,
+        captured_at_ms,
+        legacy_operation_count,
+        entry_count,
+        first_entry_hash,
+        final_entry_hash,
+        canonical_projection_sha256,
+        creation_runtime,
+        creation_runtime_version,
+        policy_blob,
+    )
+
+
+def _read_sqlite_connection_baseline_header_publication_execution_snapshot_intrinsic(
+    connection: SQLiteV1BaselineConnectionOwner,
+    execution: _SQLiteConnectionBaselineHeaderPublicationExecution,
+) -> _SQLiteConnectionBaselineHeaderPublicationExecutionSnapshot:
+    """Read exact prepare/run/completion/counter/cleanup progress."""
+
+    if type(connection) is not SQLiteV1BaselineConnectionOwner:
+        _baseline_header_publication_fail("GE_CURSOR_B3_BASELINE_HEADER_CONNECTION")
+    return _OWNER_READ_BASELINE_HEADER_PUBLICATION(connection, execution)
 
 
 @dataclass(frozen=True, slots=True)
