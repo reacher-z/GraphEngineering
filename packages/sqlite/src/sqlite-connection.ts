@@ -50,6 +50,10 @@ const objectFreezeIntrinsic = Object.freeze;
 const objectCreateIntrinsic = Object.create;
 const objectGetOwnPropertyDescriptorIntrinsic = Object.getOwnPropertyDescriptor;
 const objectGetPrototypeOfIntrinsic = Object.getPrototypeOf;
+const arrayIsArrayIntrinsic = Array.isArray;
+const arrayPrototypeIntrinsic = Array.prototype;
+const numberIntrinsic = Number;
+const SQLITE_MAX_SAFE_INTEGER_BIGINT_INTRINSIC = 9_007_199_254_740_991n;
 const functionToStringIntrinsic = Function.prototype.toString;
 const numberIsSafeIntegerIntrinsic = Number.isSafeInteger;
 const mathMaxIntrinsic = Math.max;
@@ -62,6 +66,7 @@ const arrayIncludesIntrinsic = Array.prototype.includes;
 const setHasIntrinsic = Set.prototype.has;
 const regexpExecIntrinsic = RegExp.prototype.exec;
 const regexpReplaceIntrinsic = RegExp.prototype[Symbol.replace];
+const statementAllIntrinsic = StatementSync.prototype.all;
 const statementGetIntrinsic = StatementSync.prototype.get;
 const statementIterateIntrinsic = StatementSync.prototype.iterate;
 const statementRunIntrinsic = StatementSync.prototype.run;
@@ -78,6 +83,68 @@ function hardenSQLiteNativeStatementIntrinsic(statement: StatementSync): Stateme
   reflectApplyIntrinsic(statementSetReadBigIntsIntrinsic, statement, [true]);
   reflectApplyIntrinsic(statementSetReturnArraysIntrinsic, statement, [true]);
   return statement;
+}
+
+function exactSQLiteCursorRebindChangesArrayElement(
+  value: unknown,
+): unknown {
+  if (value === null || typeof value !== "object" || isProxy(value)
+      || !reflectApplyIntrinsic(arrayIsArrayIntrinsic, Array, [value])
+      || objectGetPrototypeOfIntrinsic(value) !== arrayPrototypeIntrinsic) {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_CORRUPTION",
+      "inspect-schema",
+      "SQLite cursor rebind changes proof is invalid",
+    );
+  }
+  const keys = reflectApplyIntrinsic(reflectOwnKeysIntrinsic, Reflect, [value]) as
+    readonly PropertyKey[];
+  const element = reflectApplyIntrinsic(
+    objectGetOwnPropertyDescriptorIntrinsic,
+    Object,
+    [value, "0"],
+  ) as PropertyDescriptor | undefined;
+  const length = reflectApplyIntrinsic(
+    objectGetOwnPropertyDescriptorIntrinsic,
+    Object,
+    [value, "length"],
+  ) as PropertyDescriptor | undefined;
+  if (keys.length !== 2 || keys[0] !== "0" || keys[1] !== "length"
+      || element === undefined || !("value" in element)
+      || length === undefined || !("value" in length) || length.value !== 1) {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_CORRUPTION",
+      "inspect-schema",
+      "SQLite cursor rebind changes proof is invalid",
+    );
+  }
+  return element.value;
+}
+
+function exactSQLiteCursorRebindChangesProof(
+  value: unknown,
+  nativeAffectedRows: number,
+): number {
+  const row = exactSQLiteCursorRebindChangesArrayElement(value);
+  const rawAffectedRows = exactSQLiteCursorRebindChangesArrayElement(row);
+  if (typeof rawAffectedRows !== "bigint" || rawAffectedRows < 0n
+      || rawAffectedRows > SQLITE_MAX_SAFE_INTEGER_BIGINT_INTRINSIC) {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_CORRUPTION",
+      "inspect-schema",
+      "SQLite cursor rebind changes proof is invalid",
+    );
+  }
+  const affectedRows = reflectApplyIntrinsic(numberIntrinsic, undefined, [rawAffectedRows]) as
+    number;
+  if (affectedRows !== nativeAffectedRows) {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_CORRUPTION",
+      "inspect-schema",
+      "SQLite cursor rebind change observations disagree",
+    );
+  }
+  return affectedRows;
 }
 
 export interface SQLiteNativeStatementIterator {
@@ -2573,8 +2640,8 @@ export class SQLiteConnection {
         ? changesDescriptor.value
         : undefined;
       const affectedRows = typeof rawChanges === "bigint"
-          && rawChanges >= 0n && rawChanges <= BigInt(Number.MAX_SAFE_INTEGER)
-        ? Number(rawChanges)
+          && rawChanges >= 0n && rawChanges <= SQLITE_MAX_SAFE_INTEGER_BIGINT_INTRINSIC
+        ? reflectApplyIntrinsic(numberIntrinsic, undefined, [rawChanges]) as number
         : numberIsSafeIntegerIntrinsic(rawChanges) && (rawChanges as number) >= 0
           ? rawChanges as number
           : undefined;
@@ -2604,18 +2671,9 @@ export class SQLiteConnection {
       ) as StatementSync);
       state.changesPrepareCount = 1;
       state.changesFetchCount = 1;
-      const row = sqliteRow(
-        reflectApplyIntrinsic(statementGetIntrinsic, changesStatement, []),
-        1,
-        "inspect-schema",
-        "private SQLite cursor rebind changes result",
-      );
-      state.changesAffectedRows = sqliteSafeInteger(
-        row[0],
-        0,
-        Number.MAX_SAFE_INTEGER,
-        "inspect-schema",
-        "private SQLite cursor rebind changes result",
+      state.changesAffectedRows = exactSQLiteCursorRebindChangesProof(
+        reflectApplyIntrinsic(statementAllIntrinsic, changesStatement, []),
+        state.affectedRows,
       );
     } catch (error) {
       if (changesStatement !== null) state.changesReleaseCount = 1;

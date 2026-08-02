@@ -995,6 +995,229 @@ def test_snapshot_identity_and_stale_weak_callback_preserve_replacement_then_col
         _close(connection)
 
 
+def test_exact_prepared_release_fault_is_graph_bound_one_shot_and_default_off() -> None:
+    class ReleasePrimary(BaseException):
+        pass
+
+    first = _open_target()
+    second = _open_target()
+    try:
+        first_execution = _prepare(first)
+        second_execution = _prepare(second)
+        with _expect("GE_CURSOR_B3_CURSOR_REBIND_RELEASE_FAULT"):
+            source._arm_sqlite_connection_cursor_publication_rebind_release_fault_for_test_intrinsic(
+                first, cast(Any, first_execution), ValueError("not weakrefable")
+            )
+        primary = ReleasePrimary("selected exact E")
+        source._arm_sqlite_connection_cursor_publication_rebind_release_fault_for_test_intrinsic(
+            first, cast(Any, first_execution), primary
+        )
+        with _expect("GE_CURSOR_B3_CURSOR_REBIND_RELEASE_FAULT"):
+            source._arm_sqlite_connection_cursor_publication_rebind_release_fault_for_test_intrinsic(
+                first, cast(Any, first_execution), ReleasePrimary("double arm")
+            )
+        with _expect("GE_CURSOR_B3_CURSOR_REBIND_EXECUTION"):
+            source._arm_sqlite_connection_cursor_publication_rebind_release_fault_for_test_intrinsic(
+                second, cast(Any, first_execution), ReleasePrimary("cross graph")
+            )
+        forged = object.__new__(type(first_execution))
+        with _expect("GE_CURSOR_B3_CURSOR_REBIND_EXECUTION"):
+            source._arm_sqlite_connection_cursor_publication_rebind_release_fault_for_test_intrinsic(
+                first, cast(Any, forged), ReleasePrimary("forged")
+            )
+
+        unselected = _release(second, second_execution)
+        assert unselected.lifecycle == "released"
+        assert unselected.release_count == 1
+        with pytest.raises(ReleasePrimary, match=r"^selected exact E$"):
+            _release(first, first_execution)
+        selected = source._read_sqlite_connection_cursor_publication_rebind_snapshot_intrinsic(
+            first, cast(Any, first_execution)
+        )
+        assert selected.lifecycle == "poisoned"
+        assert (selected.execute_count, selected.release_count) == (0, 1)
+        assert id(first_execution) not in source._CURSOR_PUBLICATION_REBIND_RELEASE_FAULTS
+        with _expect("GE_CURSOR_B3_CURSOR_REBIND_RELEASE"):
+            _release(first, first_execution)
+
+        normal_execution = _prepare(first)
+        assert _release(first, normal_execution).lifecycle == "released"
+    finally:
+        _close(first)
+        _close(second)
+
+
+def test_injected_release_primary_wins_over_real_close_secondary() -> None:
+    class ReleasePrimary(BaseException):
+        pass
+
+    class CloseSecondary(BaseException):
+        pass
+
+    connection = _open_target()
+    leaked: list[sqlite3.Cursor] = []
+    try:
+        execution = _prepare(connection)
+        primary = ReleasePrimary("release primary")
+        source._arm_sqlite_connection_cursor_publication_rebind_release_fault_for_test_intrinsic(
+            connection,
+            cast(Any, execution),
+            primary,
+        )
+
+        def fail_close(cursor: sqlite3.Cursor) -> None:
+            leaked.append(cursor)
+            raise CloseSecondary("close secondary")
+
+        with pytest.raises(ReleasePrimary, match=r"^release primary$"):
+            source.SQLiteV1BaselineConnectionOwner._release_cursor_publication_rebind(
+                connection,
+                cast(Any, execution),
+                _cursor_close=fail_close,
+            )
+        snapshot = source._read_sqlite_connection_cursor_publication_rebind_snapshot_intrinsic(
+            connection, cast(Any, execution)
+        )
+        assert snapshot.lifecycle == "poisoned"
+        assert snapshot.release_count == 1
+        assert len(leaked) == 1
+        source._CURSOR_REBIND_SQLITE_CURSOR_CLOSE(leaked.pop())
+    finally:
+        for cursor in leaked:
+            source._CURSOR_REBIND_SQLITE_CURSOR_CLOSE(cursor)
+        _close(connection)
+
+
+def test_release_fault_registration_failure_discards_partial_exact_entry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class RegistrationPrimary(BaseException):
+        pass
+
+    connection = _open_target()
+    try:
+        execution = _prepare(connection)
+        register = source._REGISTER_CURSOR_PUBLICATION_REBIND_RELEASE_FAULT
+
+        def register_then_fail(*args: object) -> None:
+            register(*cast(Any, args))
+            raise RegistrationPrimary("release fault registration")
+
+        monkeypatch.setattr(
+            source,
+            "_REGISTER_CURSOR_PUBLICATION_REBIND_RELEASE_FAULT",
+            register_then_fail,
+        )
+        with pytest.raises(
+            RegistrationPrimary, match=r"^release fault registration$"
+        ):
+            source._arm_sqlite_connection_cursor_publication_rebind_release_fault_for_test_intrinsic(
+                connection,
+                cast(Any, execution),
+                RegistrationPrimary("selected"),
+            )
+        assert id(execution) not in source._CURSOR_PUBLICATION_REBIND_RELEASE_FAULTS
+        assert _release(connection, execution).lifecycle == "released"
+    finally:
+        _close(connection)
+
+
+def test_release_fault_registry_is_weak_and_stale_callback_safe() -> None:
+    class ReleasePrimary(BaseException):
+        pass
+
+    for _ in range(3):
+        gc.collect()
+    baseline = len(source._CURSOR_PUBLICATION_REBIND_RELEASE_FAULTS)
+    connection = _open_target()
+    try:
+        execution = _prepare(connection)
+        source._arm_sqlite_connection_cursor_publication_rebind_release_fault_for_test_intrinsic(
+            connection, cast(Any, execution), ReleasePrimary("weak")
+        )
+        execution_id = id(execution)
+        original = source._CURSOR_PUBLICATION_REBIND_RELEASE_FAULTS[execution_id]
+        callback = original[0].__callback__
+        assert callback is not None
+        replacement = source._SQLiteConnectionCursorPublicationRebindExecution(
+            source._CURSOR_PUBLICATION_REBIND_CONSTRUCTION_TOKEN
+        )
+        replacement_ref = ref(replacement)
+        source._CURSOR_PUBLICATION_REBIND_RELEASE_FAULTS[execution_id] = (
+            replacement_ref,
+            original[1],
+        )
+        callback(original[0])
+        assert source._CURSOR_PUBLICATION_REBIND_RELEASE_FAULTS[execution_id][0] is (
+            replacement_ref
+        )
+        source._CURSOR_PUBLICATION_REBIND_RELEASE_FAULTS[execution_id] = original
+        execution_ref = ref(execution)
+        del execution
+        for _ in range(8):
+            gc.collect()
+        assert execution_ref() is None
+        assert execution_id not in source._CURSOR_PUBLICATION_REBIND_RELEASE_FAULTS
+        assert len(source._CURSOR_PUBLICATION_REBIND_RELEASE_FAULTS) == baseline
+    finally:
+        _close(connection)
+
+
+def test_release_fault_error_reverse_root_collects_with_exact_e_graph() -> None:
+    class ReleasePrimary(BaseException):
+        pass
+
+    for _ in range(3):
+        gc.collect()
+    registries = (
+        source._CURSOR_PUBLICATION_REBIND_RELEASE_FAULTS,
+        source._CURSOR_PUBLICATION_REBIND_EXECUTIONS,
+    )
+    baseline = tuple(len(registry) for registry in registries)
+    connection = _open_target()
+    execution = _prepare(connection)
+    primary = ReleasePrimary("reverse lower root")
+    cast(Any, primary).graph = (execution, connection)
+    source._arm_sqlite_connection_cursor_publication_rebind_release_fault_for_test_intrinsic(
+        connection, cast(Any, execution), primary
+    )
+    weak = (ref(primary), ref(execution))
+    _close(connection)
+    del connection, execution, primary
+    for _ in range(12):
+        gc.collect()
+    assert all(item() is None for item in weak)
+    assert tuple(len(registry) for registry in registries) == baseline
+
+
+def test_dead_release_fault_error_selected_release_poisons_and_clears() -> None:
+    class ReleasePrimary(BaseException):
+        pass
+
+    connection = _open_target()
+    try:
+        execution = _prepare(connection)
+        primary = ReleasePrimary("dead lower primary")
+        primary_ref = ref(primary)
+        source._arm_sqlite_connection_cursor_publication_rebind_release_fault_for_test_intrinsic(
+            connection, cast(Any, execution), primary
+        )
+        del primary
+        for _ in range(3):
+            gc.collect()
+        assert primary_ref() is None
+        with _expect("GE_CURSOR_B3_CURSOR_REBIND_RELEASE_FAULT"):
+            _release(connection, execution)
+        snapshot = source._read_sqlite_connection_cursor_publication_rebind_snapshot_intrinsic(
+            connection, cast(Any, execution)
+        )
+        assert snapshot.lifecycle == "poisoned"
+        assert (snapshot.execute_count, snapshot.release_count) == (0, 1)
+        assert id(execution) not in source._CURSOR_PUBLICATION_REBIND_RELEASE_FAULTS
+    finally:
+        _close(connection)
+
+
 def test_rebind_primitives_remain_module_private() -> None:
     public = set(graph_engineering.__all__)
     assert "_SQLiteConnectionCursorPublicationRebindExecution" not in public

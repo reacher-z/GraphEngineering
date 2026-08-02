@@ -513,6 +513,415 @@ def test_second_boundary_cancellation_releases_p_context_and_same_s_retries(
         graph.close()
 
 
+def test_exact_s_preconsume_release_fault_is_selected_one_shot_and_isolated() -> None:
+    class ReleasePrimary(BaseException):
+        pass
+
+    selected = _AdoptionGraph(0)
+    unselected = _AdoptionGraph(0)
+    try:
+        selected_session = _session(selected)
+        unselected_session = _session(unselected)
+        with _expect("GE_CURSOR_B3_REBIND_RELEASE_FAULT"):
+            protocol._arm_sqlite_cursor_publication_preconsume_release_fault_for_test_intrinsic(
+                selected_session, ValueError("not weakrefable")
+            )
+        primary = ReleasePrimary("selected preconsume release")
+        protocol._arm_sqlite_cursor_publication_preconsume_release_fault_for_test_intrinsic(
+            selected_session, primary
+        )
+        with _expect("GE_CURSOR_B3_REBIND_RELEASE_FAULT"):
+            protocol._arm_sqlite_cursor_publication_preconsume_release_fault_for_test_intrinsic(
+                selected_session, ReleasePrimary("double arm")
+            )
+        forged = object.__new__(type(selected_session))
+        with _expect("GE_CURSOR_B3_PUBLICATION_SESSION"):
+            protocol._arm_sqlite_cursor_publication_preconsume_release_fault_for_test_intrinsic(
+                forged, ReleasePrimary("forged")
+            )
+
+        normal = protocol._execute_sqlite_cursor_publication_rebind_rule11_intrinsic(
+            unselected_session
+        )
+        assert (
+            protocol._read_sqlite_cursor_publication_rule11_receipt_snapshot_intrinsic(
+                normal
+            ).counts
+            == (0, 0, 0, 0, 0)
+        )
+        write_before = len(protocol._WRITE_RECEIPTS)
+        rule11_before = len(protocol._RULE11_RECEIPTS)
+        with pytest.raises(ReleasePrimary) as raised:
+            protocol._execute_sqlite_cursor_publication_rebind_rule11_intrinsic(
+                selected_session
+            )
+        assert raised.value is primary
+        assert id(selected_session) not in protocol._PRECONSUME_RELEASE_FAULTS
+        assert source._CURSOR_PUBLICATION_REBIND_RELEASE_FAULTS == {}
+        assert len(protocol._WRITE_RECEIPTS) == write_before
+        assert len(protocol._RULE11_RECEIPTS) == rule11_before
+
+        authority = outer._read_sqlite_cursor_outer_publication_authority_snapshot_intrinsic(
+            selected.authority
+        )
+        assert authority.lifecycle == "poisoned"
+        assert authority.write_phase == "poisoned"
+        assert authority.publication_session_consumed_tombstone is None
+        assert authority.post_rebind_watermark_adoption is None
+        assert authority.publication_rebind_context is not None
+        context = (
+            outer._read_sqlite_cursor_publication_rebind_context_snapshot_intrinsic(
+                authority.publication_rebind_context
+            )
+        )
+        assert context.lifecycle == "poisoned"
+        native = source._read_sqlite_connection_cursor_publication_rebind_snapshot_intrinsic(
+            selected.connection, context.execution
+        )
+        assert native.lifecycle == "poisoned"
+        assert (native.execute_count, native.release_count) == (0, 1)
+        with _expect("GE_CURSOR_B3_PUBLICATION_SESSION_GRAPH"):
+            protocol._execute_sqlite_cursor_publication_rebind_rule11_intrinsic(
+                selected_session
+            )
+    finally:
+        selected.close()
+        unselected.close()
+
+
+def test_release_primary_wins_over_second_boundary_cancellation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class ReleasePrimary(BaseException):
+        pass
+
+    graph = _AdoptionGraph(0)
+    try:
+        session = _session(graph)
+        primary = ReleasePrimary("release beats cancellation")
+        checks: list[object] = []
+        answers = iter((False, True))
+
+        def check(signal: object) -> bool:
+            checks.append(signal)
+            return next(answers)
+
+        monkeypatch.setattr(
+            protocol,
+            "_is_sqlite_cursor_publication_session_cancellation_requested_intrinsic",
+            check,
+        )
+        protocol._arm_sqlite_cursor_publication_preconsume_release_fault_for_test_intrinsic(
+            session, primary
+        )
+        with pytest.raises(ReleasePrimary) as raised:
+            protocol._execute_sqlite_cursor_publication_rebind_rule11_intrinsic(session)
+        assert raised.value is primary
+        assert checks == [None, None]
+        authority = outer._read_sqlite_cursor_outer_publication_authority_snapshot_intrinsic(
+            graph.authority
+        )
+        assert authority.lifecycle == "poisoned"
+        assert authority.write_phase == "poisoned"
+        assert authority.publication_session_consumed_tombstone is None
+        assert authority.post_rebind_watermark_adoption is None
+    finally:
+        graph.close()
+
+
+def test_preconsume_release_fault_registration_failure_discards_exact_s(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class RegistrationPrimary(BaseException):
+        pass
+
+    graph = _AdoptionGraph(0)
+    try:
+        session = _session(graph)
+        original = protocol._REGISTER_PRECONSUME_RELEASE_FAULT
+
+        def register_then_fail(*args: object) -> None:
+            original(*cast(Any, args))
+            raise RegistrationPrimary
+
+        monkeypatch.setattr(
+            protocol, "_REGISTER_PRECONSUME_RELEASE_FAULT", register_then_fail
+        )
+        with pytest.raises(RegistrationPrimary):
+            protocol._arm_sqlite_cursor_publication_preconsume_release_fault_for_test_intrinsic(
+                session, RegistrationPrimary("injected")
+            )
+        assert id(session) not in protocol._PRECONSUME_RELEASE_FAULTS
+        assert outer._assert_sqlite_cursor_publication_session_intrinsic(session) is session
+
+        monkeypatch.setattr(
+            protocol, "_REGISTER_PRECONSUME_RELEASE_FAULT", original
+        )
+        result = protocol._execute_sqlite_cursor_publication_rebind_rule11_intrinsic(
+            session
+        )
+        assert (
+            protocol._read_sqlite_cursor_publication_rule11_receipt_snapshot_intrinsic(
+                result
+            ).counts
+            == (0, 0, 0, 0, 0)
+        )
+    finally:
+        graph.close()
+
+
+def test_preconsume_handoff_registration_failure_is_atomic_and_retryable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class RegistrationPrimary(BaseException):
+        pass
+
+    graph = _AdoptionGraph(0)
+    try:
+        session = _session(graph)
+        executions: list[Any] = []
+        original_prepare = protocol.__dict__[
+            "_prepare_sqlite_connection_cursor_publication_rebind_intrinsic"
+        ]
+        original_register = source._REGISTER_CURSOR_PUBLICATION_REBIND_RELEASE_FAULT
+
+        def prepare(connection: Any) -> Any:
+            execution = original_prepare(connection)
+            executions.append(execution)
+            return execution
+
+        def register_then_fail(*args: object) -> None:
+            original_register(*cast(Any, args))
+            raise RegistrationPrimary
+
+        monkeypatch.setattr(
+            protocol,
+            "_prepare_sqlite_connection_cursor_publication_rebind_intrinsic",
+            prepare,
+        )
+        monkeypatch.setattr(
+            source,
+            "_REGISTER_CURSOR_PUBLICATION_REBIND_RELEASE_FAULT",
+            register_then_fail,
+        )
+        primary = RegistrationPrimary("handoff")
+        protocol._arm_sqlite_cursor_publication_preconsume_release_fault_for_test_intrinsic(
+            session, primary
+        )
+        write_before = len(protocol._WRITE_RECEIPTS)
+        rule11_before = len(protocol._RULE11_RECEIPTS)
+        with pytest.raises(RegistrationPrimary):
+            protocol._execute_sqlite_cursor_publication_rebind_rule11_intrinsic(session)
+        assert len(executions) == 1
+        assert id(session) not in protocol._PRECONSUME_RELEASE_FAULTS
+        assert id(executions[0]) not in source._CURSOR_PUBLICATION_REBIND_RELEASE_FAULTS
+        released = source._read_sqlite_connection_cursor_publication_rebind_snapshot_intrinsic(
+            graph.connection, executions[0]
+        )
+        assert released.lifecycle == "released"
+        assert (released.execute_count, released.release_count) == (0, 1)
+        authority = outer._read_sqlite_cursor_outer_publication_authority_snapshot_intrinsic(
+            graph.authority
+        )
+        assert authority.lifecycle == "active"
+        assert authority.write_phase == "publication-active"
+        assert authority.publication_rebind_context is None
+        assert authority.publication_session_consumed_tombstone is None
+        assert authority.post_rebind_watermark_adoption is None
+        assert len(protocol._WRITE_RECEIPTS) == write_before
+        assert len(protocol._RULE11_RECEIPTS) == rule11_before
+        assert outer._assert_sqlite_cursor_publication_session_intrinsic(session) is session
+
+        monkeypatch.setattr(
+            source,
+            "_REGISTER_CURSOR_PUBLICATION_REBIND_RELEASE_FAULT",
+            original_register,
+        )
+        monkeypatch.setattr(
+            protocol,
+            "_prepare_sqlite_connection_cursor_publication_rebind_intrinsic",
+            original_prepare,
+        )
+        result = protocol._execute_sqlite_cursor_publication_rebind_rule11_intrinsic(
+            session
+        )
+        assert (
+            protocol._read_sqlite_cursor_publication_rule11_receipt_snapshot_intrinsic(
+                result
+            ).counts
+            == (0, 0, 0, 0, 0)
+        )
+    finally:
+        graph.close()
+
+
+def test_preconsume_release_fault_registry_is_weak_and_stale_callback_safe() -> None:
+    class ReleasePrimary(BaseException):
+        pass
+
+    for _ in range(3):
+        gc.collect()
+    baseline = len(protocol._PRECONSUME_RELEASE_FAULTS)
+    graph = _AdoptionGraph(0)
+    session = _session(graph)
+    protocol._arm_sqlite_cursor_publication_preconsume_release_fault_for_test_intrinsic(
+        session, ReleasePrimary("pending")
+    )
+    session_id = id(session)
+    original = protocol._PRECONSUME_RELEASE_FAULTS[session_id]
+    replacement = object.__new__(type(session))
+    replacement_ref = ref(replacement)
+    protocol._PRECONSUME_RELEASE_FAULTS[session_id] = protocol._Entry(
+        replacement_ref, original.value
+    )
+    callback = original.key_ref.__callback__
+    assert callback is not None
+    callback(original.key_ref)
+    assert protocol._PRECONSUME_RELEASE_FAULTS[session_id].key_ref() is replacement
+    protocol._PRECONSUME_RELEASE_FAULTS[session_id] = original
+
+    authority_ref = ref(graph.authority)
+    session_ref = ref(session)
+    graph.close()
+    del callback, graph, original, replacement, replacement_ref, session
+    for _ in range(12):
+        gc.collect()
+    assert authority_ref() is None
+    assert session_ref() is None
+    assert len(protocol._PRECONSUME_RELEASE_FAULTS) == baseline
+
+
+def test_preconsume_fault_error_reverse_root_collects_with_s_authority_graph() -> None:
+    class ReleasePrimary(BaseException):
+        pass
+
+    for _ in range(3):
+        gc.collect()
+    registries = (
+        protocol._PRECONSUME_RELEASE_FAULTS,
+        outer._PUBLICATION_SESSIONS,
+    )
+    baseline = tuple(len(registry) for registry in registries)
+    graph = _AdoptionGraph(0)
+    session = _session(graph)
+    primary = ReleasePrimary("reverse upper root")
+    cast(Any, primary).graph = (session, graph.authority)
+    protocol._arm_sqlite_cursor_publication_preconsume_release_fault_for_test_intrinsic(
+        session, primary
+    )
+    weak = (ref(primary), ref(session), ref(graph.authority))
+    graph.close()
+    del graph, primary, session
+    for _ in range(12):
+        gc.collect()
+    assert all(item() is None for item in weak)
+    assert tuple(len(registry) for registry in registries) == baseline
+
+
+def test_dead_preconsume_fault_error_discards_and_releases_for_same_s_retry() -> None:
+    class ReleasePrimary(BaseException):
+        pass
+
+    graph = _AdoptionGraph(0)
+    try:
+        session = _session(graph)
+        primary = ReleasePrimary("dead upper primary")
+        primary_ref = ref(primary)
+        protocol._arm_sqlite_cursor_publication_preconsume_release_fault_for_test_intrinsic(
+            session, primary
+        )
+        del primary
+        for _ in range(3):
+            gc.collect()
+        assert primary_ref() is None
+        with _expect("GE_CURSOR_B3_REBIND_RELEASE_FAULT"):
+            protocol._execute_sqlite_cursor_publication_rebind_rule11_intrinsic(session)
+        assert id(session) not in protocol._PRECONSUME_RELEASE_FAULTS
+        assert source._CURSOR_PUBLICATION_REBIND_RELEASE_FAULTS == {}
+        authority = outer._read_sqlite_cursor_outer_publication_authority_snapshot_intrinsic(
+            graph.authority
+        )
+        assert authority.lifecycle == "active"
+        assert authority.write_phase == "publication-active"
+        assert authority.publication_rebind_context is None
+        result = protocol._execute_sqlite_cursor_publication_rebind_rule11_intrinsic(
+            session
+        )
+        assert (
+            protocol._read_sqlite_cursor_publication_rule11_receipt_snapshot_intrinsic(
+                result
+            ).counts
+            == (0, 0, 0, 0, 0)
+        )
+    finally:
+        graph.close()
+
+
+def test_selected_preconsume_release_failure_graph_collects_to_registry_baseline() -> None:
+    class ReleasePrimary(BaseException):
+        pass
+
+    registries = (
+        protocol._PRECONSUME_RELEASE_FAULTS,
+        protocol._WRITE_RECEIPTS,
+        protocol._RULE11_RECEIPTS,
+        protocol._WRITE_BY_CONTEXT,
+        source._CURSOR_PUBLICATION_REBIND_RELEASE_FAULTS,
+        source._CURSOR_PUBLICATION_REBIND_EXECUTIONS,
+        outer._PUBLICATION_SESSIONS,
+        outer._PUBLICATION_REBIND_CONTEXTS,
+        outer._PUBLICATION_REBIND_CONTEXT_BY_SESSION,
+        outer._PUBLICATION_REBIND_CONTEXT_BY_PREPARED_OWNER,
+        outer._PUBLICATION_SESSION_CONSUMED_TOMBSTONES,
+        outer._POST_REBIND_WATERMARK_ADOPTIONS,
+    )
+    for _ in range(3):
+        gc.collect()
+    baseline = tuple(len(registry) for registry in registries)
+
+    def fail_and_drop() -> list[Any]:
+        graph = _AdoptionGraph(0)
+        session = _session(graph)
+        primary = ReleasePrimary("selected GC")
+        protocol._arm_sqlite_cursor_publication_preconsume_release_fault_for_test_intrinsic(
+            session, primary
+        )
+        write_before = len(protocol._WRITE_RECEIPTS)
+        rule11_before = len(protocol._RULE11_RECEIPTS)
+        with pytest.raises(ReleasePrimary):
+            protocol._execute_sqlite_cursor_publication_rebind_rule11_intrinsic(session)
+        authority = outer._read_sqlite_cursor_outer_publication_authority_snapshot_intrinsic(
+            graph.authority
+        )
+        assert authority.publication_session_consumed_tombstone is None
+        assert authority.post_rebind_watermark_adoption is None
+        assert authority.publication_rebind_context is not None
+        context_token = authority.publication_rebind_context
+        context = (
+            outer._read_sqlite_cursor_publication_rebind_context_snapshot_intrinsic(
+                context_token
+            )
+        )
+        assert context.lifecycle == "poisoned"
+        assert len(protocol._WRITE_RECEIPTS) == write_before
+        assert len(protocol._RULE11_RECEIPTS) == rule11_before
+        weak = [
+            ref(graph.authority),
+            ref(session),
+            ref(context_token),
+            ref(context.execution),
+            ref(context.prepared_owner),
+        ]
+        graph.close()
+        return weak
+
+    weak = fail_and_drop()
+    for _ in range(12):
+        gc.collect()
+    assert all(item() is None for item in weak)
+    assert tuple(len(registry) for registry in registries) == baseline
+
+
 def test_real_post_t_native_execute_failure_poisons_outer_preserves_primary_and_collects(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

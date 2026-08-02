@@ -1,10 +1,11 @@
 import { Buffer } from "node:buffer";
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { DatabaseSync, StatementSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 
 import { CycleStoreProviderError } from "@graph-engineering/runtime";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   SQLITE_CURSOR_PUBLICATION_CHANGES_SQL_INTRINSIC,
@@ -42,6 +43,11 @@ const graphs: ReaderLeaseTestGraph[] = [];
 function graphWithCursors(count = 2): ReaderLeaseTestGraph {
   const graph = createReaderLeaseTestGraph(1);
   graphs.push(graph);
+  insertCursorRows(graph, count);
+  return graph;
+}
+
+function insertCursorRows(graph: ReaderLeaseTestGraph, count: number): void {
   const insert = graph.connection.prepare(
     `INSERT INTO main.ge_cycle_cursors
        (tenant_id, token_hash, kind, principal_hash, authorization_hash,
@@ -66,7 +72,57 @@ function graphWithCursors(count = 2): ReaderLeaseTestGraph {
       Buffer.from("{}"),
     );
   }
-  return graph;
+}
+
+type SQLiteConnectionModule = typeof import("../src/sqlite-connection.js");
+type CleanGraphModule = typeof import("./support/cursor-publication-clean-graph.js");
+type RuntimeModule = typeof import("@graph-engineering/runtime");
+
+async function withDefinitionTimeRebindCaptures(
+  captures: Readonly<{
+    all?: StatementSync["all"];
+    prepare?: DatabaseSync["prepare"];
+  }>,
+  callback: (
+    connectionModule: SQLiteConnectionModule,
+    graph: ReaderLeaseTestGraph,
+    runtimeModule: RuntimeModule,
+  ) => void | Promise<void>,
+): Promise<void> {
+  const allDescriptor = Object.getOwnPropertyDescriptor(StatementSync.prototype, "all")!;
+  const prepareDescriptor = Object.getOwnPropertyDescriptor(DatabaseSync.prototype, "prepare")!;
+  let supportModule: CleanGraphModule | undefined;
+  let graph: ReaderLeaseTestGraph | undefined;
+  vi.resetModules();
+  try {
+    if (captures.all !== undefined) {
+      Object.defineProperty(StatementSync.prototype, "all", {
+        ...allDescriptor,
+        value: captures.all,
+      });
+    }
+    if (captures.prepare !== undefined) {
+      Object.defineProperty(DatabaseSync.prototype, "prepare", {
+        ...prepareDescriptor,
+        value: captures.prepare,
+      });
+    }
+    const connectionModule = await import("../src/sqlite-connection.js");
+    Object.defineProperty(StatementSync.prototype, "all", allDescriptor);
+    Object.defineProperty(DatabaseSync.prototype, "prepare", prepareDescriptor);
+    const runtimeModule = await import("@graph-engineering/runtime");
+    supportModule = await import("./support/cursor-publication-clean-graph.js");
+    graph = supportModule.createReaderLeaseTestGraph(1);
+    insertCursorRows(graph, 2);
+    await callback(connectionModule, graph, runtimeModule);
+  } finally {
+    Object.defineProperty(StatementSync.prototype, "all", allDescriptor);
+    Object.defineProperty(DatabaseSync.prototype, "prepare", prepareDescriptor);
+    if (supportModule !== undefined && graph !== undefined) {
+      supportModule.disposeReaderLeaseTestGraph(graph);
+    }
+    vi.resetModules();
+  }
 }
 
 function parameters(
@@ -100,6 +156,176 @@ function expectProviderError(
   }
   throw new Error(`expected ${code}`);
 }
+
+function expectDynamicProviderError(
+  callback: () => unknown,
+  code: string,
+  message: RegExp,
+): Readonly<{ readonly code: string; readonly message: string }> {
+  try {
+    callback();
+  } catch (error) {
+    expect(error).toBeTypeOf("object");
+    expect(error).not.toBeNull();
+    const projected = error as Readonly<{ readonly code: string; readonly message: string }>;
+    expect(projected.code).toBe(code);
+    expect(projected.message).toMatch(message);
+    return projected;
+  }
+  throw new Error(`expected dynamic ${code}`);
+}
+
+function expectPoisonedChangesProofSnapshot(
+  connectionModule: SQLiteConnectionModule,
+  graph: ReaderLeaseTestGraph,
+  execution: SQLiteConnectionCursorRebindExecution,
+  changesCounts: readonly [0 | 1, 0 | 1, 0 | 1],
+  totalChangesDelta = 2,
+): void {
+  expect(connectionModule.readSQLiteConnectionCursorRebindExecutionSnapshotIntrinsic(
+    graph.connection,
+    execution,
+  )).toMatchObject({
+    affectedRows: 2,
+    changesAffectedRows: null,
+    changesFetchCount: changesCounts[1],
+    changesPrepareCount: changesCounts[0],
+    changesReleaseCount: changesCounts[2],
+    cursorLedgerAffectedRowsWatermark: 2,
+    cursorLedgerFixedStatementCount: 1,
+    cursorLedgerLogicalWriteSequence: 1,
+    executeCount: 1,
+    lifecycle: "poisoned",
+    releaseCount: 1,
+    statementOwnershipRetired: true,
+    totalChangesDelta,
+  });
+}
+
+const outerProxyTraps = { count: 0 };
+const rowProxyTraps = { count: 0 };
+const outerAccessorGets = { count: 0 };
+const rowAccessorGets = { count: 0 };
+
+const hostileChangesProofs: readonly Readonly<{
+  readonly name: string;
+  readonly makeResult: () => unknown;
+  readonly message: RegExp;
+}>[] = [
+  { name: "zero rows", makeResult: () => [], message: /changes proof is invalid/u },
+  {
+    name: "two rows",
+    makeResult: () => [[2n], [2n]],
+    message: /changes proof is invalid/u,
+  },
+  {
+    name: "outer Array subclass",
+    makeResult: () => {
+      class HostileOuterArray extends Array<unknown> {}
+      const value = new HostileOuterArray();
+      value.push([2n]);
+      if (!Array.isArray(value)) throw new Error("Array subclass probe drifted");
+      return value;
+    },
+    message: /changes proof is invalid/u,
+  },
+  {
+    name: "outer Array Proxy",
+    makeResult: () => new Proxy([[2n]], {
+      get() { outerProxyTraps.count += 1; throw new Error("outer proxy get trap"); },
+      getOwnPropertyDescriptor() {
+        outerProxyTraps.count += 1;
+        throw new Error("outer proxy descriptor trap");
+      },
+      getPrototypeOf() {
+        outerProxyTraps.count += 1;
+        throw new Error("outer proxy prototype trap");
+      },
+      ownKeys() { outerProxyTraps.count += 1; throw new Error("outer proxy keys trap"); },
+    }),
+    message: /changes proof is invalid/u,
+  },
+  {
+    name: "sparse outer Array",
+    makeResult: () => new Array<unknown>(1),
+    message: /changes proof is invalid/u,
+  },
+  {
+    name: "outer index accessor",
+    makeResult: () => {
+      const value: unknown[] = [];
+      Object.defineProperty(value, "0", {
+        configurable: true,
+        enumerable: true,
+        get() { outerAccessorGets.count += 1; return [2n]; },
+      });
+      return value;
+    },
+    message: /changes proof is invalid/u,
+  },
+  { name: "missing row", makeResult: () => [undefined], message: /changes proof is invalid/u },
+  {
+    name: "row Array subclass",
+    makeResult: () => {
+      class HostileRowArray extends Array<unknown> {}
+      const row = new HostileRowArray();
+      row.push(2n);
+      if (!Array.isArray(row)) throw new Error("row Array subclass probe drifted");
+      return [row];
+    },
+    message: /changes proof is invalid/u,
+  },
+  {
+    name: "row index accessor",
+    makeResult: () => {
+      const row: unknown[] = [];
+      Object.defineProperty(row, "0", {
+        configurable: true,
+        enumerable: true,
+        get() { rowAccessorGets.count += 1; return 2n; },
+      });
+      return [row];
+    },
+    message: /changes proof is invalid/u,
+  },
+  {
+    name: "row Array Proxy",
+    makeResult: () => [new Proxy([2n], {
+      get() { rowProxyTraps.count += 1; throw new Error("row proxy get trap"); },
+      getOwnPropertyDescriptor() {
+        rowProxyTraps.count += 1;
+        throw new Error("row proxy descriptor trap");
+      },
+      getPrototypeOf() {
+        rowProxyTraps.count += 1;
+        throw new Error("row proxy prototype trap");
+      },
+      ownKeys() { rowProxyTraps.count += 1; throw new Error("row proxy keys trap"); },
+    })],
+    message: /changes proof is invalid/u,
+  },
+  { name: "empty row", makeResult: () => [[]], message: /changes proof is invalid/u },
+  {
+    name: "sparse row",
+    makeResult: () => [new Array<unknown>(1)],
+    message: /changes proof is invalid/u,
+  },
+  { name: "wide row", makeResult: () => [[2n, 2n]], message: /changes proof is invalid/u },
+  { name: "number value", makeResult: () => [[2]], message: /changes proof is invalid/u },
+  { name: "string value", makeResult: () => [["2"]], message: /changes proof is invalid/u },
+  { name: "boolean value", makeResult: () => [[true]], message: /changes proof is invalid/u },
+  { name: "negative bigint", makeResult: () => [[-1n]], message: /changes proof is invalid/u },
+  {
+    name: "unsafe bigint",
+    makeResult: () => [[BigInt(Number.MAX_SAFE_INTEGER) + 1n]],
+    message: /changes proof is invalid/u,
+  },
+  {
+    name: "native mismatch",
+    makeResult: () => [[1n]],
+    message: /change observations disagree/u,
+  },
+];
 
 afterEach(() => {
   for (const graph of graphs.splice(0)) disposeReaderLeaseTestGraph(graph);
@@ -420,6 +646,7 @@ describe("SQLite connection cursor publication rebind", () => {
     )!;
     const runDescriptor = Object.getOwnPropertyDescriptor(StatementSync.prototype, "run")!;
     const getDescriptor = Object.getOwnPropertyDescriptor(StatementSync.prototype, "get")!;
+    const allDescriptor = Object.getOwnPropertyDescriptor(StatementSync.prototype, "all")!;
     const forbidden = (): never => { throw new Error("late native monkeypatch ran"); };
     try {
       Object.defineProperty(DatabaseSync.prototype, "prepare", {
@@ -434,6 +661,10 @@ describe("SQLite connection cursor publication rebind", () => {
         ...getDescriptor,
         value: forbidden,
       });
+      Object.defineProperty(StatementSync.prototype, "all", {
+        ...allDescriptor,
+        value: forbidden,
+      });
       const execution = begin(graph);
       expect(executeSQLiteConnectionCursorRebindIntrinsic(
         graph.connection,
@@ -444,7 +675,190 @@ describe("SQLite connection cursor publication rebind", () => {
       Object.defineProperty(DatabaseSync.prototype, "prepare", prepareDescriptor);
       Object.defineProperty(StatementSync.prototype, "run", runDescriptor);
       Object.defineProperty(StatementSync.prototype, "get", getDescriptor);
+      Object.defineProperty(StatementSync.prototype, "all", allDescriptor);
     }
+  });
+
+  it("uses definition-time numeric conversion after post-import global rebound", () => {
+    const graph = graphWithCursors(2);
+    const execution = begin(graph);
+    const numberDescriptor = Object.getOwnPropertyDescriptor(globalThis, "Number")!;
+    const originalNumber = numberDescriptor.value as NumberConstructor;
+    let forbiddenAffectedConversions = 0;
+    const hostileNumber = function (value?: unknown): number {
+      if (value === 2n) {
+        forbiddenAffectedConversions += 1;
+        throw new Error("late global Number rebound converted an affected count");
+      }
+      return Reflect.apply(originalNumber, undefined, [value]) as number;
+    } as NumberConstructor;
+    Object.setPrototypeOf(hostileNumber, originalNumber);
+    try {
+      Object.defineProperty(globalThis, "Number", {
+        ...numberDescriptor,
+        value: hostileNumber,
+      });
+      expect(executeSQLiteConnectionCursorRebindIntrinsic(
+        graph.connection,
+        execution,
+        parameters(),
+      )).toMatchObject({ affectedRows: 2, changesAffectedRows: 2 });
+      expect(forbiddenAffectedConversions).toBe(0);
+    } finally {
+      Object.defineProperty(globalThis, "Number", numberDescriptor);
+    }
+
+    const source = readFileSync(new URL("../src/sqlite-connection.ts", import.meta.url), "utf8");
+    const proofStart = source.indexOf("function exactSQLiteCursorRebindChangesArrayElement");
+    const proofEnd = source.indexOf("\nexport interface SQLiteNativeStatementIterator", proofStart);
+    const nativeStart = source.indexOf("const affectedRows = typeof rawChanges");
+    const nativeEnd = source.indexOf("\n      if (affectedRows === undefined)", nativeStart);
+    expect(proofStart).toBeGreaterThanOrEqual(0);
+    expect(proofEnd).toBeGreaterThan(proofStart);
+    expect(nativeStart).toBeGreaterThanOrEqual(0);
+    expect(nativeEnd).toBeGreaterThan(nativeStart);
+    for (const closure of [
+      source.slice(proofStart, proofEnd),
+      source.slice(nativeStart, nativeEnd),
+    ]) {
+      expect(closure).not.toMatch(/\bBigInt\s*\(/u);
+      expect(closure).not.toMatch(/\bNumber\s*\(/u);
+      expect(closure).toContain("SQLITE_MAX_SAFE_INTEGER_BIGINT_INTRINSIC");
+      expect(closure).toContain("numberIntrinsic");
+    }
+  });
+
+  it.each(hostileChangesProofs)(
+    "rejects a definition-time captured hostile changes proof: $name",
+    async ({ makeResult, message, name }) => {
+      if (name === "outer Array Proxy") outerProxyTraps.count = 0;
+      if (name === "row Array Proxy") rowProxyTraps.count = 0;
+      if (name === "outer index accessor") outerAccessorGets.count = 0;
+      if (name === "row index accessor") rowAccessorGets.count = 0;
+      await withDefinitionTimeRebindCaptures({
+        all: function (): unknown[] {
+          return makeResult() as unknown[];
+        },
+      }, (connectionModule, graph) => {
+        const execution = connectionModule
+          .beginSQLiteConnectionCursorRebindExecutionIntrinsic(graph.connection);
+        expectDynamicProviderError(
+          () => connectionModule.executeSQLiteConnectionCursorRebindIntrinsic(
+            graph.connection,
+            execution,
+            parameters(),
+          ),
+          "GE_CYCLE_STORE_CORRUPTION",
+          message,
+        );
+        expectPoisonedChangesProofSnapshot(connectionModule, graph, execution, [1, 1, 1]);
+      });
+      if (name === "outer Array Proxy") expect(outerProxyTraps.count).toBe(0);
+      if (name === "row Array Proxy") expect(rowProxyTraps.count).toBe(0);
+      if (name === "outer index accessor") expect(outerAccessorGets.count).toBe(0);
+      if (name === "row index accessor") expect(rowAccessorGets.count).toBe(0);
+    },
+  );
+
+  it("preserves an all primary over cleanup and retires the proof statement", async () => {
+    let primary: unknown;
+    const cleanup = new Error("changes cleanup must not replace all primary");
+    await withDefinitionTimeRebindCaptures({
+      all: function (): never {
+        if (primary === undefined) throw new Error("changes all primary was not installed");
+        throw primary;
+      },
+    }, (connectionModule, graph, runtimeModule) => {
+      primary = new runtimeModule.CycleStoreProviderError(
+        "GE_CYCLE_STORE_UNAVAILABLE",
+        "inspect-schema",
+        "changes all primary",
+      );
+      const execution = connectionModule
+        .beginSQLiteConnectionCursorRebindExecutionIntrinsic(graph.connection);
+      connectionModule.injectSQLiteConnectionCursorRebindCleanupFaultForTestIntrinsic(cleanup);
+      let caught: unknown;
+      try {
+        connectionModule.executeSQLiteConnectionCursorRebindIntrinsic(
+          graph.connection,
+          execution,
+          parameters(),
+        );
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBe(primary);
+      expectPoisonedChangesProofSnapshot(connectionModule, graph, execution, [1, 1, 1], 0);
+    });
+  });
+
+  it("preserves a changes-prepare primary over cleanup before fetch", async () => {
+    const nativePrepare = DatabaseSync.prototype.prepare;
+    let primary: unknown;
+    const cleanup = new Error("changes cleanup must not replace prepare primary");
+    await withDefinitionTimeRebindCaptures({
+      prepare: function (this: DatabaseSync, sql: string): StatementSync {
+        if (sql === SQLITE_CURSOR_PUBLICATION_CHANGES_SQL_INTRINSIC) {
+          if (primary === undefined) throw new Error("changes prepare primary was not installed");
+          throw primary;
+        }
+        return Reflect.apply(nativePrepare, this, [sql]) as StatementSync;
+      },
+    }, (connectionModule, graph, runtimeModule) => {
+      primary = new runtimeModule.CycleStoreProviderError(
+        "GE_CYCLE_STORE_UNAVAILABLE",
+        "inspect-schema",
+        "changes prepare primary",
+      );
+      const execution = connectionModule
+        .beginSQLiteConnectionCursorRebindExecutionIntrinsic(graph.connection);
+      connectionModule.injectSQLiteConnectionCursorRebindCleanupFaultForTestIntrinsic(cleanup);
+      let caught: unknown;
+      try {
+        connectionModule.executeSQLiteConnectionCursorRebindIntrinsic(
+          graph.connection,
+          execution,
+          parameters(),
+        );
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBe(primary);
+      expectPoisonedChangesProofSnapshot(connectionModule, graph, execution, [0, 0, 0], 0);
+    });
+  });
+
+  it("preserves a shape primary over cleanup without reading proxy traps", async () => {
+    const cleanup = new Error("changes cleanup must not replace shape primary");
+    let traps = 0;
+    await withDefinitionTimeRebindCaptures({
+      all: function (): unknown[] {
+        return new Proxy([[2n]], {
+          get() { traps += 1; throw new Error("shape proxy get trap"); },
+          getOwnPropertyDescriptor() {
+            traps += 1;
+            throw new Error("shape proxy descriptor trap");
+          },
+          getPrototypeOf() { traps += 1; throw new Error("shape proxy prototype trap"); },
+          ownKeys() { traps += 1; throw new Error("shape proxy keys trap"); },
+        });
+      },
+    }, (connectionModule, graph) => {
+      const execution = connectionModule
+        .beginSQLiteConnectionCursorRebindExecutionIntrinsic(graph.connection);
+      connectionModule.injectSQLiteConnectionCursorRebindCleanupFaultForTestIntrinsic(cleanup);
+      expectDynamicProviderError(
+        () => connectionModule.executeSQLiteConnectionCursorRebindIntrinsic(
+          graph.connection,
+          execution,
+          parameters(),
+        ),
+        "GE_CYCLE_STORE_CORRUPTION",
+        /changes proof is invalid/u,
+      );
+      expectPoisonedChangesProofSnapshot(connectionModule, graph, execution, [1, 1, 1], 0);
+    });
+    expect(traps).toBe(0);
   });
 
   it("keeps native result counts bounded and never exposes either owned statement", () => {

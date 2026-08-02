@@ -41,6 +41,7 @@ from .sqlite_operation_baseline_source import (
     SQLITE_CURSOR_PUBLICATION_REBIND_SQL_INTRINSIC,
     SQLITE_CURSOR_PUBLICATION_REBIND_SQL_SHA256_INTRINSIC,
     SQLiteV1BaselineConnectionOwner,
+    _arm_sqlite_connection_cursor_publication_rebind_release_fault_for_test_intrinsic,
     _execute_sqlite_connection_cursor_publication_rebind_intrinsic,
     _prepare_sqlite_connection_cursor_publication_rebind_intrinsic,
     _prove_sqlite_connection_cursor_publication_rebind_changes_intrinsic,
@@ -165,6 +166,13 @@ class _ContextLatch:
     write_receipt_ref: ReferenceType[_SQLiteCursorPublicationRebindWriteReceipt]
 
 
+@dataclass(frozen=True, slots=True)
+class _PendingPreconsumeReleaseFault:
+    authority_ref: ReferenceType[_SQLiteCursorOuterPublicationAuthority]
+    connection_id: int
+    error_ref: ReferenceType[BaseException]
+
+
 class _Entry(NamedTuple):
     key_ref: ReferenceType[object]
     value: object
@@ -173,6 +181,7 @@ class _Entry(NamedTuple):
 _WRITE_RECEIPTS: dict[int, _Entry] = {}
 _RULE11_RECEIPTS: dict[int, _Entry] = {}
 _WRITE_BY_CONTEXT: dict[int, _Entry] = {}
+_PRECONSUME_RELEASE_FAULTS: dict[int, _Entry] = {}
 
 
 def _register(registry: dict[int, _Entry], owner: object, value: object) -> None:
@@ -189,6 +198,7 @@ def _register(registry: dict[int, _Entry], owner: object, value: object) -> None
 _REGISTER_WRITE = _register
 _REGISTER_RULE11 = _register
 _REGISTER_CONTEXT_LATCH = _register
+_REGISTER_PRECONSUME_RELEASE_FAULT = _register
 
 
 def _discard_exact(registry: dict[int, _Entry], owner: object) -> None:
@@ -215,6 +225,79 @@ def _record(
     ):
         _fail(code)
     return current.value
+
+
+def _arm_sqlite_cursor_publication_preconsume_release_fault_for_test_intrinsic(
+    session: _SQLiteCursorPublicationSession,
+    error: BaseException,
+    _make_ref: Any = ref,
+) -> None:
+    """Arm one authentic S for an exact-E preconsume release failure."""
+
+    if not isinstance(error, BaseException):
+        _fail("GE_CURSOR_B3_REBIND_RELEASE_FAULT")
+    try:
+        error_ref = cast(ReferenceType[BaseException], _make_ref(error))
+    except TypeError:
+        _fail("GE_CURSOR_B3_REBIND_RELEASE_FAULT")
+    snapshot = _read_sqlite_cursor_publication_session_snapshot_intrinsic(session)
+    current = _DICT_GET(_PRECONSUME_RELEASE_FAULTS, _ID(session))
+    if current is not None and current.key_ref() is session:
+        _fail("GE_CURSOR_B3_REBIND_RELEASE_FAULT")
+    try:
+        _REGISTER_PRECONSUME_RELEASE_FAULT(
+            _PRECONSUME_RELEASE_FAULTS,
+            session,
+            _PendingPreconsumeReleaseFault(
+                _REF(snapshot.authority), _ID(snapshot.connection), error_ref
+            ),
+        )
+    except BaseException:
+        _discard_exact(_PRECONSUME_RELEASE_FAULTS, session)
+        raise
+
+
+def _handoff_sqlite_cursor_publication_preconsume_release_fault_for_test_intrinsic(
+    session: _SQLiteCursorPublicationSession,
+    context: _SQLiteCursorPublicationRebindContext,
+    prepared_owner: _SQLiteCursorPublicationRebindPreparedOwner,
+    execution: _SQLiteConnectionCursorPublicationRebindExecution,
+) -> bool:
+    current = _DICT_GET(_PRECONSUME_RELEASE_FAULTS, _ID(session))
+    if current is None or current.key_ref() is not session:
+        return False
+    pending = (
+        current.value
+        if _TYPE(current.value) is _PendingPreconsumeReleaseFault
+        else None
+    )
+    try:
+        error = pending.error_ref() if pending is not None else None
+        snapshot = _read_sqlite_cursor_publication_rebind_context_snapshot_intrinsic(
+            context
+        )
+        if (
+            pending is None
+            or error is None
+            or pending.authority_ref() is not snapshot.authority
+            or pending.connection_id != _ID(snapshot.connection)
+            or snapshot.lifecycle != "prepared"
+            or snapshot.session is not session
+        ):
+            _fail("GE_CURSOR_B3_REBIND_RELEASE_FAULT")
+        if (
+            snapshot.prepared_owner is not prepared_owner
+            or snapshot.execution is not execution
+        ):
+            _fail("GE_CURSOR_B3_REBIND_RELEASE_FAULT")
+    except BaseException:
+        _discard_exact(_PRECONSUME_RELEASE_FAULTS, session)
+        raise
+    _discard_exact(_PRECONSUME_RELEASE_FAULTS, session)
+    _arm_sqlite_connection_cursor_publication_rebind_release_fault_for_test_intrinsic(
+        snapshot.connection, execution, error
+    )
+    return True
 
 
 def _safe_count(value: object) -> int:
@@ -679,6 +762,7 @@ def _execute_sqlite_cursor_publication_rebind_rule11_intrinsic(
     execution: _SQLiteConnectionCursorPublicationRebindExecution | None = None
     context: _SQLiteCursorPublicationRebindContext | None = None
     prepared_owner: _SQLiteCursorPublicationRebindPreparedOwner | None = None
+    force_preconsume_release = False
     try:
         execution = _prepare_sqlite_connection_cursor_publication_rebind_intrinsic(
             connection
@@ -693,6 +777,11 @@ def _execute_sqlite_cursor_publication_rebind_rule11_intrinsic(
         _prepare_sqlite_cursor_publication_rebind_subprotocol_intrinsic(
             context, prepared_owner
         )
+        force_preconsume_release = (
+            _handoff_sqlite_cursor_publication_preconsume_release_fault_for_test_intrinsic(
+                session, context, prepared_owner, execution
+            )
+        )
     except BaseException as primary:
         if context is not None and prepared_owner is not None:
             with suppress(BaseException):
@@ -705,12 +794,17 @@ def _execute_sqlite_cursor_publication_rebind_rule11_intrinsic(
                     connection, execution
                 )
         raise primary
-    if _is_sqlite_cursor_publication_session_cancellation_requested_intrinsic(
-        cancellation
-    ):
+    cancelled_before_execute = (
+        _is_sqlite_cursor_publication_session_cancellation_requested_intrinsic(
+            cancellation
+        )
+    )
+    if force_preconsume_release or cancelled_before_execute:
         _release_sqlite_cursor_publication_rebind_context_before_consume_intrinsic(
             context, prepared_owner
         )
+        if force_preconsume_release:
+            _fail("GE_CURSOR_B3_REBIND_RELEASE_FAULT")
         _fail("GE_CURSOR_B3_REBIND_CANCELLED")
     try:
         tombstone = _consume_sqlite_cursor_publication_session_for_rebind_intrinsic(

@@ -20626,3 +20626,120 @@ iterator，并严格验证outer array exactly one、row exactly one、safe bigin
 
 完成上述P1/P2、B2/ledger矩阵、transaction-owner precedence与id-reuse honesty之前，Wave 1E
 继续保持进行中；其后才进入Rule12 implementation。
+
+#### 31.37.70 Wave 1E/P2：TS exact-one changes proof 与 Python exact-E preconsume release（2026-08-02 PDT 追加；既有内容不改）
+
+本节只接受两项可独立验证的安全增量：TypeScript `changes()` exactly-one 证明，以及 Python
+composite preconsume release 的 exact-S 到 exact-E 故障证据链。它不把 Wave 1E、Rule11 全部
+hostile matrix、transaction-owner cleanup 或 Rule12 标记为完成。追加前计划精确为20,628行，
+完整前缀 SHA-256 为
+`090098df45399e0870300cdc51c584d09bf07cf04ee461e6666ec8ec73812a50`；前20,628行必须继续
+byte-for-byte 不变。
+
+##### 31.37.70.1 TypeScript exact-one `changes()` production proof
+
+`packages/sqlite/src/sqlite-connection.ts` 的 cursor publication rebind changes lane 已从定义期捕获的
+`StatementSync.prototype.get` 切换为定义期捕获的 `StatementSync.prototype.all`。production decoder
+不信任用户可变的数组协议或迭代协议，而执行以下封闭验证：
+
+1. outer value 必须是 non-null object、不是 proxy、通过定义期捕获的 `Array.isArray`，且原型必须
+   exact `Array.prototype`；
+2. outer array 的 own keys 必须exactly为`0`与`length`，元素和length都必须是own data
+   descriptors，length必须exactly one；
+3. 唯一row再次执行相同exact-array验证，因而拒绝zero/two row、sparse array、array subclass、
+   accessor element、extra string/symbol key与proxy；
+4. 唯一值必须是bigint、非负且不超过bigint literal `9_007_199_254_740_991n`；
+5. bigint到number转换使用模块定义期捕获的`Number` intrinsic，并要求与native affected rows
+   exact相等；后置global `Number` rebound不能劫持raw result或changes proof；
+6. 一个`.all()`调用仍只计一次bounded proof attempt，即`changesFetchCount=1`；不存在通过
+   第二次native fetch伪造exact-one的窗口；
+7. changes prepare、all、shape、type、range、native mismatch任一失败都先逻辑retire statement、
+   poison execution并保持primary；cleanup secondary不能替换原primary；
+8. Node `StatementSync`没有显式close能力，因此这里只证明logical retirement与release count，
+   不宣称native statement close。
+
+测试把exact-one hostile矩阵放入fresh module graph：每个case先`vi.resetModules()`，再在import
+production前替换exact `StatementSync.prototype.all`或exact-SQL `prepare`，随后恢复prototype；support
+与production共享该次fresh cache，finally统一dispose/reset。矩阵覆盖zero/two rows、outer/row
+subclass、proxy零trap、sparse、accessor、extra key、wrong type、negative、unsafe、native mismatch、
+all throw、prepare throw、cleanup precedence、definition-time Number capture与静态closure约束。
+
+##### 31.37.70.2 Python exact-S → exact-E preconsume release evidence
+
+Python lower source新增仅测试可达的execution-bound release fault registry。key以exact E identity索引，
+key本身是带stale-callback identity check的weakref；value只保存exact connection id与
+`ReferenceType[BaseException]`，不强持error、E、connection或graph。arm只接受authentic、prepared、
+未execute、未release、仍持真实cursor的E；cross-connection、forged E、double arm与非weakrefable
+error全部fail-closed。register-then-throw会exact discard partial entry。
+
+upper subprotocol新增exact-S pending registry。pending value只保存weak authority、connection id与
+weak error。composite leaf创建并认证E、context、P之后，handoff必须同时证明：
+
+- pending key仍是本次exact S；
+- authority与connection身份等于context snapshot；
+- context lifecycle为prepared且绑定同一S；
+- context的prepared owner与execution分别是本次exact P和E。
+
+只有全部成立才先discard exact-S pending，再把同一个仍存活的error weak target arm到exact E。
+lower arm失败时，composite cleanup真实释放E/context/P，且S保持active可用同一对象重试；不会留下
+upper或lower半注册状态。
+
+第二次cancellation boundary先被求值并冻结为boolean，随后代码执行`force_preconsume_release or
+cancelled_before_execute`。如果selected fault存在，release primary优先于同时发生的cancellation；
+release必须发生在T consume之前，因此S没有tombstone、A/W/R11均未mint。lower release始终先把
+`release_count`置一、清空cursor owner，并真实调用一次cursor close；injected primary压过close
+secondary，execution终态poisoned。
+
+两层registry都禁止用任意异常对象形成`registry → error → S/E/graph`反向强链。error提前死亡时：
+
+- upper handoff exact discard pending，抛结构化release-fault；composite cleanup释放context/E/P，
+  authority与S恢复active，同一S随后成功重试；
+- lower take先pop exact entry，再抛结构化release-fault；release仍真实close一次、retire cursor owner、
+  记录`release_count=1`并poison E；
+- reverse-root GC测试分别让error attribute指回`(S, authority)`与`(E, connection)`，删除外部强引用
+  后验证weak targets死亡且所有相关registry回到baseline。
+
+##### 31.37.70.3 最终验证、审计与文件身份
+
+最终冻结后的验证证据如下：
+
+- TS connection suite：37/37，约77.42秒；
+- TS scoped typecheck：通过；
+- Python lower full：40/40，约2.40秒；
+- Python composite full：40/40，约150.19秒；
+- Python lower seam targets：5/5；upper seam targets：8/8；reverse-root targets：2/2；
+- Python Ruff：all checks passed；mypy：四个修改文件无问题；
+- 修改后的cross-runtime Rule11 parity：3/3，真实双端case约54.52秒，总计约54.69秒；
+- 全仓本轮diff-check：通过；六个production/test文件权限均为0644；
+- TS独立终审：H0/M0/L0；Python weak-error exact-E独立终审：H0/M0/L0。
+
+最终候选SHA-256：
+
+- TS source：`ef769cdeb7c6b38cb98c2dca386662c549726cf5b07c074b3ef758bcce6ff13f`；
+- TS test：`ac98cd0c41e1147863a5833d0f64a3d4b34de2257d597a39334cf4f73fa68097`；
+- Python lower source：`d937f2fd90925599d7b68ed89ca71f9bf4b8d1c7505eefad55994d31429c397e`；
+- Python composite source：`3c6c2a1ade23a9441ee21b937a2cd6eb31a09c8eb95c91c0595f5f92a2ca2925`；
+- Python lower test：`76edb3d8f704fbbc4d04048bc3c97b793d0254593931ac3f0cd355d26d3e873b`；
+- Python composite test：`565f510c6e91ae5b9df5bc65865efedcf868f7cc56be28c8fa48a6102a47a5f2`。
+
+##### 31.37.70.4 本轮明确不声称与下一切片
+
+本节关闭了31.37.69.4中的TS changes strict-one/hostile proof和Python exact-E preconsume release
+两个缺口，但以下项目仍保持strict nonclaim：
+
+- TypeScript尚无与Python同等级的exact-S→exact-E preconsume release failure seam；
+- TS raw native run result与Python native affected observation的完整missing/accessor/proxy/string/
+  float/negative/unsafe hostile矩阵仍未全部进入serialized composite；
+- authentic B2 root/count/stage/projection/parameter逐字段漂移仍未闭环；
+- outer ledger与cursor ledger logical/fixed/affected逐字段漂移仍未闭环；
+- native、changes、total delta、ledger之间的pairwise和多点不一致矩阵仍未闭环；
+- transaction owner层rollback/close secondary precedence仍未闭环；
+- Python bounded真实id-reuse需要attempt budget与honest skip，不能用普通GC churn代替；
+- Rule12 predecessor/success receipt与third clock尚未进入实现阶段。
+
+下一实施切片优先完成TypeScript exact-S→exact-E release fault。设计必须复用graph-local真实connection
+与authentic execution，不允许全局一次性boolean；arm、handoff、take、discard均需exact identity、
+one-shot、register rollback、abandoned-arm GC与stale callback安全。完成lower focused后，进入composite
+preconsume boundary，证明release primary覆盖第二次cancellation、S未consume、A/W/R11零mint、selected
+graph poison/cleanup、unselected graph健康。随后两端共同推进B2/ledger单字段漂移与transaction-owner
+precedence，全部通过独立审计和portable parity后，才能讨论Wave 1E完成与Rule12起步。

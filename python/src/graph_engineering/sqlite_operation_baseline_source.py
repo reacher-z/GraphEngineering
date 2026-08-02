@@ -431,6 +431,12 @@ class _CursorPublicationRebindExecutionState:
     seal_read_begin_count: Literal[0, 1] = 0
 
 
+@dataclass(frozen=True, slots=True)
+class _CursorPublicationRebindReleaseFaultState:
+    connection_id: int
+    error_ref: ReferenceType[BaseException]
+
+
 SQLITE_CURSOR_PUBLICATION_SEAL_MAIN_KEY_SCAN_SQL_INTRINSIC = (
     "SELECT tenant_id, token_hash FROM main.ge_cycle_cursors "
     "ORDER BY tenant_id COLLATE BINARY, token_hash COLLATE BINARY"
@@ -857,6 +863,13 @@ _CURSOR_PUBLICATION_REBIND_EXECUTIONS: dict[
     tuple[
         ReferenceType[_SQLiteConnectionCursorPublicationRebindExecution],
         _CursorPublicationRebindExecutionState,
+    ],
+] = {}
+_CURSOR_PUBLICATION_REBIND_RELEASE_FAULTS: dict[
+    int,
+    tuple[
+        ReferenceType[_SQLiteConnectionCursorPublicationRebindExecution],
+        _CursorPublicationRebindReleaseFaultState,
     ],
 ] = {}
 _CURSOR_PUBLICATION_SEAL_READ_EXECUTIONS: dict[
@@ -1417,6 +1430,78 @@ def _register_cursor_publication_rebind_execution(
         execution_id,
         (execution_ref, state),
     )
+
+
+def _register_cursor_publication_rebind_release_fault(
+    execution: _SQLiteConnectionCursorPublicationRebindExecution,
+    fault: _CursorPublicationRebindReleaseFaultState,
+    _identity: Callable[[object], int] = id,
+    _make_ref: Callable[..., ReferenceType[object]] = ref,
+    _dictionary_get: Callable[..., object] = dict.get,
+    _dictionary_set: Callable[..., None] = dict.__setitem__,
+    _dictionary_pop: Callable[..., object] = dict.pop,
+) -> None:
+    execution_id = _identity(execution)
+
+    def discard(dead: ReferenceType[object]) -> None:
+        current = _dictionary_get(
+            _CURSOR_PUBLICATION_REBIND_RELEASE_FAULTS, execution_id
+        )
+        if type(current) is tuple and len(current) == 2 and current[0] is dead:
+            _dictionary_pop(
+                _CURSOR_PUBLICATION_REBIND_RELEASE_FAULTS, execution_id, None
+            )
+
+    _dictionary_set(
+        _CURSOR_PUBLICATION_REBIND_RELEASE_FAULTS,
+        execution_id,
+        (_make_ref(execution, discard), fault),
+    )
+
+
+_REGISTER_CURSOR_PUBLICATION_REBIND_RELEASE_FAULT = (
+    _register_cursor_publication_rebind_release_fault
+)
+
+
+def _discard_cursor_publication_rebind_release_fault_exact(
+    execution: _SQLiteConnectionCursorPublicationRebindExecution,
+    _identity: Callable[[object], int] = id,
+    _dictionary_get: Callable[..., object] = dict.get,
+    _dictionary_pop: Callable[..., object] = dict.pop,
+) -> None:
+    execution_id = _identity(execution)
+    current = _dictionary_get(_CURSOR_PUBLICATION_REBIND_RELEASE_FAULTS, execution_id)
+    if type(current) is tuple and len(current) == 2 and current[0]() is execution:
+        _dictionary_pop(_CURSOR_PUBLICATION_REBIND_RELEASE_FAULTS, execution_id, None)
+
+
+def _take_cursor_publication_rebind_release_fault_exact(
+    connection: SQLiteV1BaselineConnectionOwner,
+    execution: _SQLiteConnectionCursorPublicationRebindExecution,
+    _identity: Callable[[object], int] = id,
+    _dictionary_get: Callable[..., object] = dict.get,
+    _dictionary_pop: Callable[..., object] = dict.pop,
+) -> BaseException | None:
+    execution_id = _identity(execution)
+    current = _dictionary_get(_CURSOR_PUBLICATION_REBIND_RELEASE_FAULTS, execution_id)
+    if current is None:
+        return None
+    if (
+        type(current) is not tuple
+        or len(current) != 2
+        or current[0]() is not execution
+        or type(current[1]) is not _CursorPublicationRebindReleaseFaultState
+        or current[1].connection_id != _identity(connection)
+    ):
+        _cursor_publication_rebind_fail("GE_CURSOR_B3_CURSOR_REBIND_RELEASE_FAULT")
+    error = current[1].error_ref()
+    _dictionary_pop(_CURSOR_PUBLICATION_REBIND_RELEASE_FAULTS, execution_id, None)
+    if error is None:
+        _cursor_publication_rebind_fail(
+            "GE_CURSOR_B3_CURSOR_REBIND_RELEASE_FAULT"
+        )
+    return error
 
 
 def _cursor_publication_rebind_snapshot(
@@ -2020,6 +2105,17 @@ class SQLiteV1BaselineConnectionOwner:
         ):
             state.lifecycle = "poisoned"
             _cursor_publication_rebind_fail("GE_CURSOR_B3_CURSOR_REBIND_RELEASE")
+        try:
+            injected_primary = _take_cursor_publication_rebind_release_fault_exact(
+                self, execution
+            )
+        except BaseException as primary:
+            state.release_count = 1
+            state.cursor = None
+            state.lifecycle = "poisoned"
+            with suppress(BaseException):
+                _cursor_close(cursor)
+            raise primary
         state.release_count = 1
         state.cursor = None
         previous = state.lifecycle
@@ -2027,7 +2123,12 @@ class SQLiteV1BaselineConnectionOwner:
             _cursor_close(cursor)
         except BaseException as error:
             state.lifecycle = "poisoned"
+            if injected_primary is not None:
+                raise injected_primary from None
             raise ValueError("GE_CURSOR_B3_CURSOR_REBIND_RELEASE") from error
+        if injected_primary is not None:
+            state.lifecycle = "poisoned"
+            raise injected_primary
         if previous in {"prepared", "executed"}:
             state.lifecycle = "released"
         return _cursor_publication_rebind_snapshot(state)
@@ -3946,6 +4047,45 @@ def _release_sqlite_connection_cursor_publication_rebind_intrinsic(
     if type(connection) is not SQLiteV1BaselineConnectionOwner:
         _cursor_publication_rebind_fail("GE_CURSOR_B3_CURSOR_REBIND_CONNECTION")
     return _implementation(connection, execution)
+
+
+def _arm_sqlite_connection_cursor_publication_rebind_release_fault_for_test_intrinsic(
+    connection: SQLiteV1BaselineConnectionOwner,
+    execution: _SQLiteConnectionCursorPublicationRebindExecution,
+    error: BaseException,
+    _make_ref: Callable[..., ReferenceType[object]] = ref,
+) -> None:
+    """Arm one exact prepared E; the selected release retires then raises."""
+
+    if type(connection) is not SQLiteV1BaselineConnectionOwner or not isinstance(
+        error, BaseException
+    ):
+        _cursor_publication_rebind_fail("GE_CURSOR_B3_CURSOR_REBIND_RELEASE_FAULT")
+    state = _cursor_publication_rebind_state(connection, execution)
+    if (
+        state.lifecycle != "prepared"
+        or state.execute_count != 0
+        or state.release_count != 0
+        or state.cursor is None
+    ):
+        _cursor_publication_rebind_fail("GE_CURSOR_B3_CURSOR_REBIND_RELEASE_FAULT")
+    try:
+        error_ref = cast(ReferenceType[BaseException], _make_ref(error))
+    except TypeError:
+        _cursor_publication_rebind_fail(
+            "GE_CURSOR_B3_CURSOR_REBIND_RELEASE_FAULT"
+        )
+    current = _CURSOR_PUBLICATION_REBIND_RELEASE_FAULTS.get(id(execution))
+    if current is not None and current[0]() is execution:
+        _cursor_publication_rebind_fail("GE_CURSOR_B3_CURSOR_REBIND_RELEASE_FAULT")
+    try:
+        _REGISTER_CURSOR_PUBLICATION_REBIND_RELEASE_FAULT(
+            execution,
+            _CursorPublicationRebindReleaseFaultState(id(connection), error_ref),
+        )
+    except BaseException:
+        _discard_cursor_publication_rebind_release_fault_exact(execution)
+        raise
 
 
 def _prove_sqlite_connection_cursor_publication_rebind_changes_intrinsic(
