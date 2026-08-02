@@ -1,5 +1,6 @@
 import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
+import { isProxy } from "node:util/types";
 
 import { CycleStoreProviderError } from "@graph-engineering/runtime";
 
@@ -89,7 +90,11 @@ import {
   readSQLiteConnectionBaselineHeaderPublicationExecutionSnapshotIntrinsic,
   readSQLiteConnectionOperationSequenceZeroExecutionSnapshotIntrinsic,
   readSQLiteConnectionMigration0002ExecutionSnapshotIntrinsic,
+  readSQLiteConnectionCursorRebindExecutionSnapshotIntrinsic,
+  releaseSQLiteConnectionCursorRebindExecutionIntrinsic,
   returnSQLiteStatementIteratorNativeIntrinsic,
+  type SQLiteConnectionCursorRebindExecution,
+  type SQLiteConnectionCursorRebindExecutionSnapshot,
   type SQLiteConnectionTransactionLineage,
   type SQLiteConnectionBaselineEntryPublicationRow,
   type SQLiteConnectionBaselineHeaderPublicationRow,
@@ -124,6 +129,13 @@ import {
   readValidatedSQLiteCursorPublicationTargetCatalogObservationIntrinsic,
   type SQLiteCursorPublicationTargetCatalogSnapshot,
 } from "./cursor-publication-target-catalog.js";
+import {
+  SQLITE_CURSOR_PUBLICATION_CHANGES_SQL_INTRINSIC,
+  SQLITE_CURSOR_PUBLICATION_CHANGES_SQL_SHA256_INTRINSIC,
+  SQLITE_CURSOR_PUBLICATION_REBIND_PARAMETER_ORDER_INTRINSIC,
+  SQLITE_CURSOR_PUBLICATION_REBIND_SQL_INTRINSIC,
+  SQLITE_CURSOR_PUBLICATION_REBIND_SQL_SHA256_INTRINSIC,
+} from "./cursor-publication-rebind-contract.js";
 import { sqliteBlob, sqliteRow, sqliteSafeInteger, sqliteText } from "./sqlite-codec.js";
 import { translateSQLiteError } from "./sqlite-errors.js";
 
@@ -147,8 +159,14 @@ const digestSQLiteInitialWriteResultVerifierIntrinsic =
   digestSQLiteInitialWriteResultIntrinsic;
 const objectDefinePropertyIntrinsic = Object.defineProperty;
 const objectGetOwnPropertyDescriptorIntrinsic = Object.getOwnPropertyDescriptor;
+const objectIsFrozenIntrinsic = Object.isFrozen;
 const reflectOwnKeysIntrinsic = Reflect.ownKeys;
 const arrayIsArrayIntrinsic = Array.isArray;
+const isProxyIntrinsic = isProxy;
+const readSQLiteConnectionCursorRebindExecutionSnapshotVerifierIntrinsic =
+  readSQLiteConnectionCursorRebindExecutionSnapshotIntrinsic;
+const releaseSQLiteConnectionCursorRebindExecutionVerifierIntrinsic =
+  releaseSQLiteConnectionCursorRebindExecutionIntrinsic;
 const operationBaselineAccumulatorAppendIntrinsic =
   OperationBaselineAccumulator.prototype.append;
 const operationBaselineAccumulatorFinishIntrinsic =
@@ -200,6 +218,26 @@ export interface SQLiteCursorPublicationSession {
   readonly __sqliteCursorPublicationSession: never;
 }
 
+/** Outer-owned bridge binding one exact active session, P and prepared E. */
+export interface SQLiteCursorPublicationRebindContext {
+  readonly __sqliteCursorPublicationRebindContext: never;
+}
+
+/** P: outer-minted exact prepared owner for one context and E. */
+export interface SQLiteCursorPublicationRebindPreparedOwner {
+  readonly __sqliteCursorPublicationRebindPreparedOwner: never;
+}
+
+/** T: one-shot proof that the exact active session was consumed for rebind. */
+export interface SQLiteCursorPublicationSessionConsumedTombstone {
+  readonly __sqliteCursorPublicationSessionConsumedTombstone: never;
+}
+
+/** A: immutable adoption of the exact completed rebind watermarks. */
+export interface SQLiteCursorPostRebindWatermarkAdoption {
+  readonly __sqliteCursorPostRebindWatermarkAdoption: never;
+}
+
 export interface SQLiteCursorPublicationSessionCancellationSignal {
   readonly __sqliteCursorPublicationSessionCancellationSignal: never;
 }
@@ -237,6 +275,66 @@ export interface SQLiteCursorPublicationSessionSnapshot {
     typeof SQLITE_CURSOR_PUBLICATION_TARGET.schemaIdentitySha256;
 }
 
+export interface SQLiteCursorPublicationRebindContextSnapshot {
+  readonly lifecycle: "prepared" | "released-before-write" | "session-consumed"
+    | "write-adopted" | "poisoned" | "retired";
+  readonly session: SQLiteCursorPublicationSession;
+  readonly preparedOwner: SQLiteCursorPublicationRebindPreparedOwner;
+  readonly execution: SQLiteConnectionCursorRebindExecution;
+  readonly preparedExecutionSnapshot: SQLiteConnectionCursorRebindExecutionSnapshot;
+  readonly outerAuthority: SQLiteCursorOuterPublicationAuthority;
+  readonly connection: SQLiteConnection;
+  readonly transactionLineage: SQLiteConnectionTransactionLineage;
+  readonly historicalTransactionEpoch: bigint;
+  readonly historicalTotalChanges: number;
+  readonly historicalOuterLedger: SQLiteCursorOuterPublicationLedgerSnapshot;
+  readonly receipt: SQLiteCursorPreRebindReceipt;
+  readonly preRebindReceiptSha256: string;
+  readonly b2CursorCount: number;
+  readonly b2ImmutableRootSha256: string;
+  readonly sourceDescriptorHash: string;
+  readonly sourceSchemaIdentitySha256: string;
+  readonly targetDescriptorHash: typeof SQLITE_CURSOR_PUBLICATION_TARGET.descriptorHash;
+  readonly targetSchemaIdentitySha256:
+    typeof SQLITE_CURSOR_PUBLICATION_TARGET.schemaIdentitySha256;
+  readonly parameterValues: NonNullable<
+    SQLiteConnectionCursorRebindExecutionSnapshot["parameterValues"]
+  >;
+}
+
+export interface SQLiteCursorPublicationSessionConsumedTombstoneSnapshot {
+  readonly lifecycle: "active" | "adopted" | "poisoned" | "retired";
+  readonly context: SQLiteCursorPublicationRebindContext;
+  readonly session: SQLiteCursorPublicationSession;
+  readonly preparedOwner: SQLiteCursorPublicationRebindPreparedOwner;
+  readonly execution: SQLiteConnectionCursorRebindExecution;
+  readonly preparedExecutionSnapshot: SQLiteConnectionCursorRebindExecutionSnapshot;
+  readonly historicalTransactionEpoch: bigint;
+  readonly historicalTotalChanges: number;
+}
+
+export interface SQLiteCursorPostRebindWatermarkAdoptionSnapshot {
+  readonly lifecycle: "active" | "poisoned" | "retired";
+  readonly context: SQLiteCursorPublicationRebindContext;
+  readonly tombstone: SQLiteCursorPublicationSessionConsumedTombstone;
+  readonly session: SQLiteCursorPublicationSession;
+  readonly preparedOwner: SQLiteCursorPublicationRebindPreparedOwner;
+  readonly execution: SQLiteConnectionCursorRebindExecution;
+  readonly preparedExecutionSnapshot: SQLiteConnectionCursorRebindExecutionSnapshot;
+  readonly executionSnapshot: SQLiteConnectionCursorRebindExecutionSnapshot;
+  readonly outerAuthority: SQLiteCursorOuterPublicationAuthority;
+  readonly connection: SQLiteConnection;
+  readonly transactionLineage: SQLiteConnectionTransactionLineage;
+  readonly historicalTransactionEpoch: bigint;
+  readonly adoptedTransactionEpoch: bigint;
+  readonly historicalTotalChanges: number;
+  readonly adoptedTotalChanges: number;
+  readonly totalChangesDelta: number;
+  readonly affectedRows: number;
+  readonly historicalOuterLedger: SQLiteCursorOuterPublicationLedgerSnapshot;
+  readonly adoptedOuterLedger: SQLiteCursorOuterPublicationLedgerSnapshot;
+}
+
 export type SQLiteCursorOuterPublicationAuthorityLifecycle =
   | "inactive"
   | "active"
@@ -257,6 +355,8 @@ export type SQLiteCursorOuterPublicationWritePhase =
   | "sequence-zero-complete"
   | "initial-stage-adoption-complete"
   | "publication-active"
+  | "publication-session-consumed"
+  | "cursor-rebind-adopted"
   | "poisoned"
   | "retired";
 
@@ -652,6 +752,11 @@ export interface SQLiteCursorOuterPublicationAuthoritySnapshot {
   readonly initialStageAdoptionReceiptMintCount: 0 | 1;
   readonly publicationPreparedOwner: SQLiteCursorPublicationSessionPreparedOwner | undefined;
   readonly publicationSession: SQLiteCursorPublicationSession | undefined;
+  readonly publicationRebindContext: SQLiteCursorPublicationRebindContext | undefined;
+  readonly publicationSessionConsumedTombstone:
+    SQLiteCursorPublicationSessionConsumedTombstone | undefined;
+  readonly postRebindWatermarkAdoption:
+    SQLiteCursorPostRebindWatermarkAdoption | undefined;
   readonly receiptConsumptionCount: 0 | 4;
   readonly tombstoneMintCount: 0 | 4;
   readonly migration0002ConsumedTombstone:
@@ -723,6 +828,10 @@ interface AuthorityState {
   initialStageAdoptionReceiptMintCount: 0 | 1;
   publicationPreparedOwner: SQLiteCursorPublicationSessionPreparedOwner | undefined;
   publicationSession: SQLiteCursorPublicationSession | undefined;
+  publicationRebindContext: SQLiteCursorPublicationRebindContext | undefined;
+  publicationSessionConsumedTombstone:
+    SQLiteCursorPublicationSessionConsumedTombstone | undefined;
+  postRebindWatermarkAdoption: SQLiteCursorPostRebindWatermarkAdoption | undefined;
   receiptConsumptionCount: 0 | 4;
   tombstoneMintCount: 0 | 4;
   migration0002ConsumedTombstone:
@@ -839,7 +948,56 @@ interface PublicationSessionState {
     "lifecycle" | "preRebindClockConsumedTombstone"
   >;
   consumedTombstone: SQLiteCursorProviderClockConsumedTombstone | undefined;
-  lifecycle: "pending" | "publication-active" | "poisoned";
+  rebindConsumedTombstone: SQLiteCursorPublicationSessionConsumedTombstone | undefined;
+  lifecycle: "pending" | "publication-active" | "consumed-for-rebind" | "poisoned";
+}
+
+interface PublicationRebindContextState {
+  readonly token: SQLiteCursorPublicationRebindContext;
+  readonly session: SQLiteCursorPublicationSession;
+  readonly preparedOwner: SQLiteCursorPublicationRebindPreparedOwner;
+  readonly execution: SQLiteConnectionCursorRebindExecution;
+  readonly preparedExecutionSnapshot: SQLiteConnectionCursorRebindExecutionSnapshot;
+  readonly authority: SQLiteCursorOuterPublicationAuthority;
+  readonly connection: SQLiteConnection;
+  readonly transactionLineage: SQLiteConnectionTransactionLineage;
+  readonly historicalTransactionEpoch: bigint;
+  readonly historicalTotalChanges: number;
+  readonly historicalOuterLedger: SQLiteCursorOuterPublicationLedgerSnapshot;
+  readonly receipt: SQLiteCursorPreRebindReceipt;
+  readonly preRebindReceiptSha256: string;
+  readonly b2CursorCount: number;
+  readonly b2ImmutableRootSha256: string;
+  readonly sourceDescriptorHash: string;
+  readonly sourceSchemaIdentitySha256: string;
+  readonly targetDescriptorHash: typeof SQLITE_CURSOR_PUBLICATION_TARGET.descriptorHash;
+  readonly targetSchemaIdentitySha256:
+    typeof SQLITE_CURSOR_PUBLICATION_TARGET.schemaIdentitySha256;
+  readonly parameterValues: NonNullable<
+    SQLiteConnectionCursorRebindExecutionSnapshot["parameterValues"]
+  >;
+  tombstone: SQLiteCursorPublicationSessionConsumedTombstone | undefined;
+  adoption: SQLiteCursorPostRebindWatermarkAdoption | undefined;
+  lifecycle: SQLiteCursorPublicationRebindContextSnapshot["lifecycle"];
+}
+
+interface PublicationSessionConsumedTombstoneState {
+  readonly token: SQLiteCursorPublicationSessionConsumedTombstone;
+  readonly context: PublicationRebindContextState;
+  lifecycle: SQLiteCursorPublicationSessionConsumedTombstoneSnapshot["lifecycle"];
+}
+
+interface PostRebindWatermarkAdoptionState {
+  readonly token: SQLiteCursorPostRebindWatermarkAdoption;
+  readonly context: PublicationRebindContextState;
+  readonly tombstone: PublicationSessionConsumedTombstoneState;
+  readonly executionSnapshot: SQLiteConnectionCursorRebindExecutionSnapshot;
+  readonly adoptedTransactionEpoch: bigint;
+  readonly adoptedTotalChanges: number;
+  readonly totalChangesDelta: number;
+  readonly affectedRows: number;
+  readonly adoptedOuterLedger: SQLiteCursorOuterPublicationLedgerSnapshot;
+  lifecycle: "active" | "poisoned" | "retired";
 }
 
 interface ConsumedTombstoneState {
@@ -859,6 +1017,25 @@ const PUBLICATION_PREPARED = new WeakMap<object, PublicationPreparedState>();
 const PUBLICATION_PREPARED_BY_AUTHORITY =
   new WeakMap<object, SQLiteCursorPublicationSessionPreparedOwner>();
 const PUBLICATION_SESSIONS = new WeakMap<object, PublicationSessionState>();
+const PUBLICATION_REBIND_CONTEXTS = new WeakMap<object, PublicationRebindContextState>();
+const PUBLICATION_REBIND_CONTEXT_BY_SESSION =
+  new WeakMap<object, SQLiteCursorPublicationRebindContext>();
+const PUBLICATION_REBIND_CONTEXT_BY_PREPARED_OWNER =
+  new WeakMap<object, SQLiteCursorPublicationRebindContext>();
+const PUBLICATION_SESSION_CONSUMED_TOMBSTONES =
+  new WeakMap<object, PublicationSessionConsumedTombstoneState>();
+const POST_REBIND_WATERMARK_ADOPTIONS =
+  new WeakMap<object, PostRebindWatermarkAdoptionState>();
+type PublicationRebindRegistrationFaultStage =
+  | "context-primary"
+  | "context-session"
+  | "context-prepared-owner"
+  | "session-tombstone"
+  | "watermark-adoption";
+let publicationRebindRegistrationFault: Readonly<{
+  readonly error: unknown;
+  readonly stage: PublicationRebindRegistrationFaultStage;
+}> | undefined;
 let publicationPendingRegistrationFault: Readonly<{ readonly error: unknown }> | undefined;
 const MIGRATION_0002_RECEIPTS = new WeakMap<object, Migration0002ReceiptState>();
 const POST_DDL_CATALOG_FENCES = new WeakMap<object, PostDdlCatalogFenceState>();
@@ -953,7 +1130,30 @@ function poisonAuthorityGraph(
   authority: SQLiteCursorOuterPublicationAuthority,
   message: string,
 ): void {
-  if (state.lifecycle === "retired" || state.lifecycle === "poisoned") return;
+  if (state.lifecycle === "retired") return;
+  const rebindContext = state.publicationRebindContext;
+  if (rebindContext !== undefined) {
+    const context = reflectApplyIntrinsic(
+      weakMapGetIntrinsic, PUBLICATION_REBIND_CONTEXTS, [rebindContext as object],
+    ) as PublicationRebindContextState | undefined;
+    if (context !== undefined) context.lifecycle = "poisoned";
+  }
+  const sessionConsumedTombstone = state.publicationSessionConsumedTombstone;
+  if (sessionConsumedTombstone !== undefined) {
+    const consumed = reflectApplyIntrinsic(
+      weakMapGetIntrinsic, PUBLICATION_SESSION_CONSUMED_TOMBSTONES,
+      [sessionConsumedTombstone as object],
+    ) as PublicationSessionConsumedTombstoneState | undefined;
+    if (consumed !== undefined) consumed.lifecycle = "poisoned";
+  }
+  const adoptionToken = state.postRebindWatermarkAdoption;
+  if (adoptionToken !== undefined) {
+    const adoption = reflectApplyIntrinsic(
+      weakMapGetIntrinsic, POST_REBIND_WATERMARK_ADOPTIONS, [adoptionToken as object],
+    ) as PostRebindWatermarkAdoptionState | undefined;
+    if (adoption !== undefined) adoption.lifecycle = "poisoned";
+  }
+  if (state.lifecycle === "poisoned") return;
   state.lifecycle = "poisoned";
   state.writePhase = "poisoned";
   const preparedOwner = state.publicationPreparedOwner;
@@ -991,6 +1191,28 @@ function retireAuthorityGraph(
   if (state.lifecycle === "retired" || state.lifecycle === "poisoned") return;
   state.lifecycle = "retired";
   state.writePhase = "retired";
+  const rebindContext = state.publicationRebindContext;
+  if (rebindContext !== undefined) {
+    const context = reflectApplyIntrinsic(
+      weakMapGetIntrinsic, PUBLICATION_REBIND_CONTEXTS, [rebindContext as object],
+    ) as PublicationRebindContextState | undefined;
+    if (context !== undefined) context.lifecycle = "retired";
+  }
+  const sessionConsumedTombstone = state.publicationSessionConsumedTombstone;
+  if (sessionConsumedTombstone !== undefined) {
+    const consumed = reflectApplyIntrinsic(
+      weakMapGetIntrinsic, PUBLICATION_SESSION_CONSUMED_TOMBSTONES,
+      [sessionConsumedTombstone as object],
+    ) as PublicationSessionConsumedTombstoneState | undefined;
+    if (consumed !== undefined) consumed.lifecycle = "retired";
+  }
+  const adoptionToken = state.postRebindWatermarkAdoption;
+  if (adoptionToken !== undefined) {
+    const adoption = reflectApplyIntrinsic(
+      weakMapGetIntrinsic, POST_REBIND_WATERMARK_ADOPTIONS, [adoptionToken as object],
+    ) as PostRebindWatermarkAdoptionState | undefined;
+    if (adoption !== undefined) adoption.lifecycle = "retired";
+  }
   const preparedOwner = state.publicationPreparedOwner;
   if (preparedOwner !== undefined) {
     const prepared = reflectApplyIntrinsic(
@@ -1073,6 +1295,25 @@ SQLiteCursorPublicationSessionCancellationController {
   });
 }
 
+/** Read an optional authentic cancellation signal without consuming any graph. */
+export function isSQLiteCursorPublicationSessionCancellationRequestedIntrinsic(
+  signal: SQLiteCursorPublicationSessionCancellationSignal | undefined,
+): boolean {
+  if (signal === undefined) return false;
+  const state = signal !== null && typeof signal === "object" && !isProxyIntrinsic(signal)
+    ? reflectApplyIntrinsic(
+      weakMapGetIntrinsic, PUBLICATION_CANCELLATIONS, [signal as object],
+    ) as CancellationState | undefined
+    : undefined;
+  if (state === undefined) {
+    return fail(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "SQLite publication session cancellation signal is invalid",
+    );
+  }
+  return state.cancelled;
+}
+
 /**
  * Package-private one-shot fault seam used to prove pending registration is a
  * terminal failure. It is intentionally absent from the package root.
@@ -1087,6 +1328,30 @@ export function injectSQLiteCursorPublicationSessionPendingRegistrationFaultForT
     );
   }
   publicationPendingRegistrationFault = objectFreezeIntrinsic({ error });
+}
+
+/** Package-private one-shot seam for proving rebind registry atomicity. */
+export function injectSQLiteCursorPublicationRebindRegistrationFaultForTestIntrinsic(
+  stage: PublicationRebindRegistrationFaultStage,
+  error: unknown,
+): void {
+  if (publicationRebindRegistrationFault !== undefined) {
+    return fail(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "SQLite publication rebind registration fault is already armed",
+    );
+  }
+  publicationRebindRegistrationFault = objectFreezeIntrinsic({ error, stage });
+}
+
+function throwSQLiteCursorPublicationRebindRegistrationFaultIntrinsic(
+  stage: PublicationRebindRegistrationFaultStage,
+): void {
+  const fault = publicationRebindRegistrationFault;
+  if (fault !== undefined && fault.stage === stage) {
+    publicationRebindRegistrationFault = undefined;
+    throw fault.error;
+  }
 }
 
 /**
@@ -1212,6 +1477,9 @@ export function prepareSQLiteCursorOuterPublicationAuthorityIntrinsic(
     initialStageAdoptionReceiptMintCount: 0,
     publicationPreparedOwner: undefined,
     publicationSession: undefined,
+    publicationRebindContext: undefined,
+    publicationSessionConsumedTombstone: undefined,
+    postRebindWatermarkAdoption: undefined,
     receiptConsumptionCount: 0,
     tombstoneMintCount: 0,
     migration0002ConsumedTombstone: undefined,
@@ -1346,7 +1614,9 @@ export function assertSQLiteCursorOuterPublicationAuthorityIntrinsic(
   }
   try {
     if (state.writePhase === "initial-stage-adoption-complete"
-        || state.writePhase === "publication-active") {
+        || state.writePhase === "publication-active"
+        || state.writePhase === "publication-session-consumed"
+        || state.writePhase === "cursor-rebind-adopted") {
       const adoptionReceipt = state.initialStageAdoptionReceipt;
       const adoption = adoptionReceipt === undefined ? undefined : reflectApplyIntrinsic(
         weakMapGetIntrinsic, INITIAL_STAGE_ADOPTION_RECEIPTS, [adoptionReceipt as object],
@@ -1354,7 +1624,9 @@ export function assertSQLiteCursorOuterPublicationAuthorityIntrinsic(
       if (adoption === undefined || adoption.lifecycle !== "active") {
         fail("GE_CYCLE_STORE_CORRUPTION", "SQLite initial stage adoption authority drifted");
       }
-      if (state.writePhase === "publication-active") {
+      if (state.writePhase === "publication-active"
+          || state.writePhase === "publication-session-consumed"
+          || state.writePhase === "cursor-rebind-adopted") {
         const session = state.publicationSession;
         if (session === undefined) {
           fail("GE_CYCLE_STORE_CORRUPTION", "SQLite publication session identity drifted");
@@ -1362,6 +1634,15 @@ export function assertSQLiteCursorOuterPublicationAuthorityIntrinsic(
         assertSQLiteCursorStageOwnershipPublicationSessionActiveIntrinsic(
           state.transfer, authority, adoptionReceipt!, session,
         );
+        if (state.writePhase === "publication-session-consumed") {
+          assertSQLiteCursorPublicationSessionConsumedTombstoneIntrinsic(
+            state.publicationSessionConsumedTombstone!,
+          );
+        } else if (state.writePhase === "cursor-rebind-adopted") {
+          assertSQLiteCursorPostRebindWatermarkAdoptionIntrinsic(
+            state.postRebindWatermarkAdoption!,
+          );
+        }
       } else {
         assertSQLiteCursorStageOwnershipInitialPublicationAdoptedIntrinsic(
           state.connection, state.stage, state.receipt, state.projectionIdentity,
@@ -5462,6 +5743,7 @@ export function publishSQLiteCursorPublicationSessionIntrinsic(
       adoptionReceipt: prepared.adoptionReceipt,
       authority: prepared.authority,
       consumedTombstone: undefined,
+      rebindConsumedTombstone: undefined,
       lifecycle: "pending",
       preparedOwner,
       snapshotBase,
@@ -5638,6 +5920,929 @@ export function readSQLiteCursorPublicationSessionSnapshotIntrinsic(
   });
 }
 
+function mintPublicationRebindOpaqueIntrinsic<T>(): T {
+  return objectFreezeIntrinsic(
+    reflectApplyIntrinsic(objectCreateIntrinsic, Object, [null]),
+  ) as T;
+}
+
+function publicationRebindContextState(
+  context: SQLiteCursorPublicationRebindContext,
+): PublicationRebindContextState {
+  const selected = context !== null && typeof context === "object" && !isProxyIntrinsic(context)
+    ? reflectApplyIntrinsic(weakMapGetIntrinsic, PUBLICATION_REBIND_CONTEXTS, [context as object]) as
+      PublicationRebindContextState | undefined
+    : undefined;
+  if (selected === undefined || selected.token !== context) {
+    return fail("GE_CYCLE_STORE_INVALID_ARGUMENT", "SQLite publication rebind context is invalid");
+  }
+  return selected;
+}
+
+function publicationSessionConsumedTombstoneState(
+  tombstone: SQLiteCursorPublicationSessionConsumedTombstone,
+): PublicationSessionConsumedTombstoneState {
+  const selected = tombstone !== null && typeof tombstone === "object"
+      && !isProxyIntrinsic(tombstone)
+    ? reflectApplyIntrinsic(
+      weakMapGetIntrinsic, PUBLICATION_SESSION_CONSUMED_TOMBSTONES, [tombstone as object],
+    ) as PublicationSessionConsumedTombstoneState | undefined
+    : undefined;
+  if (selected === undefined || selected.token !== tombstone) {
+    return fail(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "SQLite publication session consumed tombstone is invalid",
+    );
+  }
+  return selected;
+}
+
+function postRebindWatermarkAdoptionState(
+  adoption: SQLiteCursorPostRebindWatermarkAdoption,
+): PostRebindWatermarkAdoptionState {
+  const selected = adoption !== null && typeof adoption === "object" && !isProxyIntrinsic(adoption)
+    ? reflectApplyIntrinsic(
+      weakMapGetIntrinsic, POST_REBIND_WATERMARK_ADOPTIONS, [adoption as object],
+    ) as PostRebindWatermarkAdoptionState | undefined
+    : undefined;
+  if (selected === undefined || selected.token !== adoption) {
+    return fail(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "SQLite post-rebind watermark adoption is invalid",
+    );
+  }
+  return selected;
+}
+
+function safePublicationRebindCount(value: number, label: string): number {
+  if (!numberIsSafeIntegerIntrinsic(value) || value < 0) {
+    return fail(
+      "GE_CYCLE_STORE_CORRUPTION",
+      `SQLite publication rebind ${label} is invalid`,
+    );
+  }
+  return value;
+}
+
+function exactPublicationRebindParameterOrder(
+  value: SQLiteConnectionCursorRebindExecutionSnapshot["parameterOrder"],
+): boolean {
+  return value.length === 4
+    && value[0] === SQLITE_CURSOR_PUBLICATION_REBIND_PARAMETER_ORDER_INTRINSIC[0]
+    && value[1] === SQLITE_CURSOR_PUBLICATION_REBIND_PARAMETER_ORDER_INTRINSIC[1]
+    && value[2] === SQLITE_CURSOR_PUBLICATION_REBIND_PARAMETER_ORDER_INTRINSIC[2]
+    && value[3] === SQLITE_CURSOR_PUBLICATION_REBIND_PARAMETER_ORDER_INTRINSIC[3];
+}
+
+function exactPublicationRebindParameters(
+  value: SQLiteConnectionCursorRebindExecutionSnapshot["parameterValues"],
+  context: PublicationRebindContextState,
+): boolean {
+  return value !== null && value.length === 4
+    && value[0] === context.targetDescriptorHash
+    && value[1] === context.targetSchemaIdentitySha256
+    && value[2] === context.sourceDescriptorHash
+    && value[3] === context.sourceSchemaIdentitySha256;
+}
+
+function retainedPreparedPublicationRebindSnapshotIsExact(
+  snapshot: SQLiteConnectionCursorRebindExecutionSnapshot,
+  context: PublicationRebindContextState,
+): boolean {
+  return objectIsFrozenIntrinsic(snapshot)
+    && snapshot.lifecycle === "active"
+    && !snapshot.statementOwnershipRetired
+    && snapshot.prepareCount === 1
+    && snapshot.executeCount === 0
+    && snapshot.releaseCount === 0
+    && snapshot.changesPrepareCount === 0
+    && snapshot.changesFetchCount === 0
+    && snapshot.changesReleaseCount === 0
+    && snapshot.affectedRows === 0
+    && snapshot.changesAffectedRows === null
+    && snapshot.cursorLedgerLogicalWriteSequence === 0
+    && snapshot.cursorLedgerFixedStatementCount === 0
+    && snapshot.cursorLedgerAffectedRowsWatermark === 0
+    && snapshot.parameterValues === null
+    && snapshot.sql === SQLITE_CURSOR_PUBLICATION_REBIND_SQL_INTRINSIC
+    && snapshot.sqlSha256 === SQLITE_CURSOR_PUBLICATION_REBIND_SQL_SHA256_INTRINSIC
+    && exactPublicationRebindParameterOrder(snapshot.parameterOrder)
+    && snapshot.changesSql === SQLITE_CURSOR_PUBLICATION_CHANGES_SQL_INTRINSIC
+    && snapshot.changesSqlSha256 === SQLITE_CURSOR_PUBLICATION_CHANGES_SQL_SHA256_INTRINSIC
+    && snapshot.transactionLineage === context.transactionLineage
+    && snapshot.transactionEpoch === context.historicalTransactionEpoch
+    && snapshot.totalChangesBefore === context.historicalTotalChanges
+    && snapshot.totalChangesAfter === context.historicalTotalChanges
+    && snapshot.totalChangesDelta === 0;
+}
+
+function readPreparedPublicationRebindExecutionIntrinsic(
+  state: AuthorityState,
+  authority: SQLiteCursorOuterPublicationAuthority,
+  execution: SQLiteConnectionCursorRebindExecution,
+): SQLiteConnectionCursorRebindExecutionSnapshot {
+  let hasPrimary = false;
+  let primary: unknown;
+  let snapshot: SQLiteConnectionCursorRebindExecutionSnapshot | undefined;
+  try {
+    snapshot = readSQLiteConnectionCursorRebindExecutionSnapshotVerifierIntrinsic(
+      state.connection,
+      execution,
+    );
+  } catch (error) {
+    hasPrimary = true;
+    primary = error;
+  }
+  if (hasPrimary) {
+    poisonAuthorityGraph(
+      state,
+      authority,
+      "SQLite prepared publication rebind execution validation failed",
+    );
+    throw primary;
+  }
+  return snapshot!;
+}
+
+function preparedPublicationRebindSnapshotIsExact(
+  snapshot: SQLiteConnectionCursorRebindExecutionSnapshot,
+  state: AuthorityState,
+): boolean {
+  return objectIsFrozenIntrinsic(snapshot)
+    && snapshot.lifecycle === "active"
+    && !snapshot.statementOwnershipRetired
+    && snapshot.prepareCount === 1
+    && snapshot.executeCount === 0
+    && snapshot.releaseCount === 0
+    && snapshot.changesPrepareCount === 0
+    && snapshot.changesFetchCount === 0
+    && snapshot.changesReleaseCount === 0
+    && snapshot.affectedRows === 0
+    && snapshot.changesAffectedRows === null
+    && snapshot.cursorLedgerLogicalWriteSequence === 0
+    && snapshot.cursorLedgerFixedStatementCount === 0
+    && snapshot.cursorLedgerAffectedRowsWatermark === 0
+    && snapshot.parameterValues === null
+    && snapshot.sql === SQLITE_CURSOR_PUBLICATION_REBIND_SQL_INTRINSIC
+    && snapshot.sqlSha256 === SQLITE_CURSOR_PUBLICATION_REBIND_SQL_SHA256_INTRINSIC
+    && exactPublicationRebindParameterOrder(snapshot.parameterOrder)
+    && snapshot.changesSql === SQLITE_CURSOR_PUBLICATION_CHANGES_SQL_INTRINSIC
+    && snapshot.changesSqlSha256 === SQLITE_CURSOR_PUBLICATION_CHANGES_SQL_SHA256_INTRINSIC
+    && snapshot.transactionLineage === state.transactionLineage
+    && snapshot.transactionEpoch === state.currentTransactionEpoch
+    && snapshot.totalChangesBefore === state.currentTotalChanges
+    && snapshot.totalChangesAfter === state.currentTotalChanges
+    && snapshot.totalChangesDelta === 0;
+}
+
+/**
+ * Freeze the exact active-session predecessor after the orchestrator has begun
+ * one authentic, still-unexecuted connection rebind E.
+ */
+export function prepareSQLiteCursorPublicationRebindContextIntrinsic(
+  session: SQLiteCursorPublicationSession,
+  execution: SQLiteConnectionCursorRebindExecution,
+): SQLiteCursorPublicationRebindContext {
+  assertSQLiteCursorPublicationSessionIntrinsic(session);
+  const publication = reflectApplyIntrinsic(
+    weakMapGetIntrinsic, PUBLICATION_SESSIONS, [session as object],
+  ) as PublicationSessionState;
+  const state = authorityState(publication.authority);
+  const existingSessionContext = reflectApplyIntrinsic(
+    weakMapGetIntrinsic, PUBLICATION_REBIND_CONTEXT_BY_SESSION, [session as object],
+  ) as SQLiteCursorPublicationRebindContext | undefined;
+  if (existingSessionContext !== undefined || state.publicationRebindContext !== undefined) {
+    poisonAuthorityGraph(
+      state, publication.authority, "SQLite publication rebind context was prepared twice",
+    );
+    return fail("GE_CYCLE_STORE_CORRUPTION", "SQLite publication rebind context was reused");
+  }
+
+  const preparedSnapshot = readPreparedPublicationRebindExecutionIntrinsic(
+    state,
+    publication.authority,
+    execution,
+  );
+  if (!preparedPublicationRebindSnapshotIsExact(preparedSnapshot, state)) {
+    poisonAuthorityGraph(
+      state, publication.authority, "SQLite prepared publication rebind execution drifted",
+    );
+    return fail(
+      "GE_CYCLE_STORE_CORRUPTION",
+      "SQLite prepared publication rebind execution is invalid",
+    );
+  }
+  const owner = readSQLiteConnectionOwnerSnapshot(state.connection);
+  const total = readSQLiteConnectionTotalChangesSnapshot(state.connection);
+  const provenance = assertSQLiteCursorPreRebindReceiptProvenance(state.receipt);
+  const historicalOuterLedger = outerLedgerSnapshot(state);
+  const b2CursorCount = safePublicationRebindCount(
+    provenance.sealReceipt.cursorCount,
+    "B2 cursor count",
+  );
+  if (!owner.isTransaction || owner.transactionMode !== "exclusive"
+      || owner.transactionLineage !== state.transactionLineage
+      || owner.transactionEpoch !== state.currentTransactionEpoch
+      || total.transactionEpoch !== owner.transactionEpoch
+      || total.totalChanges !== state.currentTotalChanges
+      || publication.lifecycle !== "publication-active"
+      || publication.rebindConsumedTombstone !== undefined
+      || state.writePhase !== "publication-active"
+      || state.publicationSession !== session
+      || provenance.projectionIdentity !== state.projectionIdentity
+      || provenance.projectionReference !== state.projectionReference
+      || provenance.sealReceipt.sourceDescriptorHash !== state.sourceDescriptorHash
+      || provenance.sealReceipt.sourceSchemaIdentitySha256
+        !== state.sourceSchemaIdentitySha256) {
+    poisonAuthorityGraph(
+      state, publication.authority, "SQLite publication rebind predecessor graph drifted",
+    );
+    return fail("GE_CYCLE_STORE_CORRUPTION", "SQLite publication rebind predecessor is invalid");
+  }
+
+  const preparedOwner =
+    mintPublicationRebindOpaqueIntrinsic<SQLiteCursorPublicationRebindPreparedOwner>();
+  const token = mintPublicationRebindOpaqueIntrinsic<SQLiteCursorPublicationRebindContext>();
+  const parameterValues = objectFreezeIntrinsic([
+    SQLITE_CURSOR_PUBLICATION_TARGET.descriptorHash,
+    SQLITE_CURSOR_PUBLICATION_TARGET.schemaIdentitySha256,
+    state.sourceDescriptorHash,
+    state.sourceSchemaIdentitySha256,
+  ] as const);
+  const context: PublicationRebindContextState = {
+    adoption: undefined,
+    authority: publication.authority,
+    b2CursorCount,
+    b2ImmutableRootSha256: provenance.sealReceipt.immutableRootSha256,
+    connection: state.connection,
+    execution,
+    historicalOuterLedger,
+    historicalTotalChanges: state.currentTotalChanges,
+    historicalTransactionEpoch: state.currentTransactionEpoch,
+    lifecycle: "prepared",
+    parameterValues,
+    preRebindReceiptSha256: provenance.receiptSha256,
+    preparedExecutionSnapshot: preparedSnapshot,
+    preparedOwner,
+    receipt: state.receipt,
+    session,
+    sourceDescriptorHash: state.sourceDescriptorHash,
+    sourceSchemaIdentitySha256: state.sourceSchemaIdentitySha256,
+    targetDescriptorHash: SQLITE_CURSOR_PUBLICATION_TARGET.descriptorHash,
+    targetSchemaIdentitySha256: SQLITE_CURSOR_PUBLICATION_TARGET.schemaIdentitySha256,
+    token,
+    tombstone: undefined,
+    transactionLineage: state.transactionLineage,
+  };
+  let hasPrimary = false;
+  let primary: unknown;
+  try {
+    reflectApplyIntrinsic(weakMapSetIntrinsic, PUBLICATION_REBIND_CONTEXTS, [
+      token as object, context,
+    ]);
+    throwSQLiteCursorPublicationRebindRegistrationFaultIntrinsic("context-primary");
+    reflectApplyIntrinsic(weakMapSetIntrinsic, PUBLICATION_REBIND_CONTEXT_BY_SESSION, [
+      session as object, token,
+    ]);
+    throwSQLiteCursorPublicationRebindRegistrationFaultIntrinsic("context-session");
+    reflectApplyIntrinsic(weakMapSetIntrinsic, PUBLICATION_REBIND_CONTEXT_BY_PREPARED_OWNER, [
+      preparedOwner as object, token,
+    ]);
+    throwSQLiteCursorPublicationRebindRegistrationFaultIntrinsic("context-prepared-owner");
+  } catch (error) {
+    hasPrimary = true;
+    primary = error;
+  }
+  if (hasPrimary) {
+    reflectApplyIntrinsic(weakMapDeleteIntrinsic, PUBLICATION_REBIND_CONTEXTS, [token as object]);
+    reflectApplyIntrinsic(weakMapDeleteIntrinsic, PUBLICATION_REBIND_CONTEXT_BY_SESSION, [
+      session as object,
+    ]);
+    reflectApplyIntrinsic(weakMapDeleteIntrinsic, PUBLICATION_REBIND_CONTEXT_BY_PREPARED_OWNER, [
+      preparedOwner as object,
+    ]);
+    throw primary;
+  }
+  state.publicationRebindContext = token;
+  return token;
+}
+
+export function assertSQLiteCursorPublicationRebindPreparedOwnerIdentityIntrinsic(
+  preparedOwner: SQLiteCursorPublicationRebindPreparedOwner,
+  contextToken: SQLiteCursorPublicationRebindContext,
+): SQLiteCursorPublicationRebindPreparedOwner {
+  const context = publicationRebindContextState(contextToken);
+  const selected = preparedOwner !== null && typeof preparedOwner === "object"
+      && !isProxyIntrinsic(preparedOwner)
+    ? reflectApplyIntrinsic(
+      weakMapGetIntrinsic, PUBLICATION_REBIND_CONTEXT_BY_PREPARED_OWNER,
+      [preparedOwner as object],
+    ) as SQLiteCursorPublicationRebindContext | undefined
+    : undefined;
+  if (selected !== contextToken || context.preparedOwner !== preparedOwner) {
+    return fail(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "SQLite publication rebind prepared owner is invalid",
+    );
+  }
+  return preparedOwner;
+}
+
+export function assertSQLiteCursorPublicationRebindPreparedOwnerIntrinsic(
+  preparedOwner: SQLiteCursorPublicationRebindPreparedOwner,
+  contextToken: SQLiteCursorPublicationRebindContext,
+): SQLiteCursorPublicationRebindPreparedOwner {
+  assertSQLiteCursorPublicationRebindPreparedOwnerIdentityIntrinsic(
+    preparedOwner,
+    contextToken,
+  );
+  const context = publicationRebindContextState(contextToken);
+  const state = authorityState(context.authority);
+  if (state.lifecycle !== "active" || state.publicationRebindContext !== contextToken
+      || (context.lifecycle !== "prepared"
+        && context.lifecycle !== "session-consumed"
+        && context.lifecycle !== "write-adopted")) {
+    return fail(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "SQLite publication rebind prepared owner is not live",
+    );
+  }
+  if (context.lifecycle === "prepared") {
+    if (state.writePhase !== "publication-active") {
+      return fail(
+        "GE_CYCLE_STORE_INVALID_ARGUMENT",
+        "SQLite publication rebind prepared owner is not live",
+      );
+    }
+    assertSQLiteCursorPublicationSessionIntrinsic(context.session);
+  } else if (context.lifecycle === "session-consumed") {
+    assertSQLiteCursorPublicationSessionConsumedTombstoneIntrinsic(context.tombstone!);
+  } else {
+    assertSQLiteCursorPostRebindWatermarkAdoptionIntrinsic(context.adoption!);
+  }
+  return preparedOwner;
+}
+
+function snapshotPublicationRebindContext(
+  state: PublicationRebindContextState,
+): SQLiteCursorPublicationRebindContextSnapshot {
+  return objectFreezeIntrinsic({
+    b2CursorCount: state.b2CursorCount,
+    b2ImmutableRootSha256: state.b2ImmutableRootSha256,
+    connection: state.connection,
+    execution: state.execution,
+    historicalOuterLedger: state.historicalOuterLedger,
+    historicalTotalChanges: state.historicalTotalChanges,
+    historicalTransactionEpoch: state.historicalTransactionEpoch,
+    lifecycle: state.lifecycle,
+    outerAuthority: state.authority,
+    parameterValues: state.parameterValues,
+    preRebindReceiptSha256: state.preRebindReceiptSha256,
+    preparedExecutionSnapshot: state.preparedExecutionSnapshot,
+    preparedOwner: state.preparedOwner,
+    receipt: state.receipt,
+    session: state.session,
+    sourceDescriptorHash: state.sourceDescriptorHash,
+    sourceSchemaIdentitySha256: state.sourceSchemaIdentitySha256,
+    targetDescriptorHash: state.targetDescriptorHash,
+    targetSchemaIdentitySha256: state.targetSchemaIdentitySha256,
+    transactionLineage: state.transactionLineage,
+  });
+}
+
+export function readSQLiteCursorPublicationRebindContextSnapshotIntrinsic(
+  context: SQLiteCursorPublicationRebindContext,
+): SQLiteCursorPublicationRebindContextSnapshot {
+  return snapshotPublicationRebindContext(publicationRebindContextState(context));
+}
+
+function releasedPublicationRebindSnapshotIsExact(
+  snapshot: SQLiteConnectionCursorRebindExecutionSnapshot,
+  context: PublicationRebindContextState,
+): boolean {
+  return objectIsFrozenIntrinsic(snapshot)
+    && snapshot.lifecycle === "released"
+    && snapshot.statementOwnershipRetired
+    && snapshot.prepareCount === 1
+    && snapshot.executeCount === 0
+    && snapshot.releaseCount === 1
+    && snapshot.changesPrepareCount === 0
+    && snapshot.changesFetchCount === 0
+    && snapshot.changesReleaseCount === 0
+    && snapshot.affectedRows === 0
+    && snapshot.changesAffectedRows === null
+    && snapshot.cursorLedgerLogicalWriteSequence === 0
+    && snapshot.cursorLedgerFixedStatementCount === 0
+    && snapshot.cursorLedgerAffectedRowsWatermark === 0
+    && snapshot.parameterValues === null
+    && snapshot.sql === SQLITE_CURSOR_PUBLICATION_REBIND_SQL_INTRINSIC
+    && snapshot.sqlSha256 === SQLITE_CURSOR_PUBLICATION_REBIND_SQL_SHA256_INTRINSIC
+    && exactPublicationRebindParameterOrder(snapshot.parameterOrder)
+    && snapshot.changesSql === SQLITE_CURSOR_PUBLICATION_CHANGES_SQL_INTRINSIC
+    && snapshot.changesSqlSha256 === SQLITE_CURSOR_PUBLICATION_CHANGES_SQL_SHA256_INTRINSIC
+    && snapshot.transactionLineage === context.transactionLineage
+    && snapshot.transactionEpoch === context.historicalTransactionEpoch
+    && snapshot.totalChangesBefore === context.historicalTotalChanges
+    && snapshot.totalChangesAfter === context.historicalTotalChanges
+    && snapshot.totalChangesDelta === 0;
+}
+
+/** Release exact prepared E after pre-execute cancellation; S remains active and retryable. */
+export function releaseSQLiteCursorPublicationRebindContextBeforeConsumeIntrinsic(
+  contextToken: SQLiteCursorPublicationRebindContext,
+  preparedOwner: SQLiteCursorPublicationRebindPreparedOwner,
+): void {
+  const context = publicationRebindContextState(contextToken);
+  assertSQLiteCursorPublicationRebindPreparedOwnerIntrinsic(preparedOwner, contextToken);
+  const state = authorityState(context.authority);
+  if (context.lifecycle !== "prepared" || context.tombstone !== undefined
+      || context.adoption !== undefined || state.writePhase !== "publication-active") {
+    return fail(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "SQLite publication rebind context is not releasable",
+    );
+  }
+  let hasPrimary = false;
+  let primary: unknown;
+  try {
+    const released = releaseSQLiteConnectionCursorRebindExecutionVerifierIntrinsic(
+      context.connection,
+      context.execution,
+    );
+    const owner = readSQLiteConnectionOwnerSnapshot(context.connection);
+    const total = readSQLiteConnectionTotalChangesSnapshot(context.connection);
+    if (!releasedPublicationRebindSnapshotIsExact(released, context)
+        || !owner.isTransaction || owner.transactionMode !== "exclusive"
+        || owner.transactionLineage !== context.transactionLineage
+        || owner.transactionEpoch !== context.historicalTransactionEpoch
+        || total.transactionEpoch !== owner.transactionEpoch
+        || total.totalChanges !== context.historicalTotalChanges
+        || !exactLedger(outerLedgerSnapshot(state), context.historicalOuterLedger)
+        || !reflectApplyIntrinsic(
+          weakMapDeleteIntrinsic,
+          PUBLICATION_REBIND_CONTEXT_BY_SESSION,
+          [context.session as object],
+        )) {
+      fail("GE_CYCLE_STORE_CORRUPTION", "SQLite released publication rebind context drifted");
+    }
+  } catch (error) {
+    hasPrimary = true;
+    primary = error;
+  }
+  if (hasPrimary) {
+    poisonAuthorityGraph(
+      state,
+      context.authority,
+      "SQLite publication rebind cancellation release failed",
+    );
+    throw primary;
+  }
+
+  // Assignment-only cleanup tail. P/context stay authentic but terminal.
+  context.lifecycle = "released-before-write";
+  state.publicationRebindContext = undefined;
+  return;
+}
+
+/**
+ * Preallocate T and register every fallible identity edge before the assignment-
+ * only tail consumes S. E is still required to be the exact prepared execution.
+ */
+export function consumeSQLiteCursorPublicationSessionForRebindIntrinsic(
+  contextToken: SQLiteCursorPublicationRebindContext,
+): SQLiteCursorPublicationSessionConsumedTombstone {
+  const context = publicationRebindContextState(contextToken);
+  const state = authorityState(context.authority);
+  const publication = reflectApplyIntrinsic(
+    weakMapGetIntrinsic, PUBLICATION_SESSIONS, [context.session as object],
+  ) as PublicationSessionState | undefined;
+  if (context.lifecycle !== "prepared" || context.tombstone !== undefined
+      || state.publicationRebindContext !== contextToken
+      || state.publicationSessionConsumedTombstone !== undefined
+      || publication === undefined || publication.authority !== context.authority) {
+    poisonAuthorityGraph(state, context.authority, "SQLite publication session consume was reused");
+    return fail("GE_CYCLE_STORE_CORRUPTION", "SQLite publication session consume is terminal");
+  }
+  try {
+    assertSQLiteCursorPublicationSessionIntrinsic(context.session);
+    const preparedSnapshot = readSQLiteConnectionCursorRebindExecutionSnapshotVerifierIntrinsic(
+      context.connection,
+      context.execution,
+    );
+    const provenance = assertSQLiteCursorPreRebindReceiptProvenance(context.receipt);
+    const owner = readSQLiteConnectionOwnerSnapshot(context.connection);
+    const total = readSQLiteConnectionTotalChangesSnapshot(context.connection);
+    if (!preparedPublicationRebindSnapshotIsExact(context.preparedExecutionSnapshot, state)
+        || !preparedPublicationRebindSnapshotIsExact(preparedSnapshot, state)
+        || !owner.isTransaction || owner.transactionMode !== "exclusive"
+        || owner.transactionLineage !== context.transactionLineage
+        || owner.transactionEpoch !== context.historicalTransactionEpoch
+        || total.transactionEpoch !== owner.transactionEpoch
+        || total.totalChanges !== context.historicalTotalChanges
+        || !exactLedger(outerLedgerSnapshot(state), context.historicalOuterLedger)
+        || provenance.receiptSha256 !== context.preRebindReceiptSha256
+        || provenance.sealReceipt.cursorCount !== context.b2CursorCount
+        || provenance.sealReceipt.immutableRootSha256 !== context.b2ImmutableRootSha256) {
+      fail("GE_CYCLE_STORE_CORRUPTION", "SQLite publication session consume graph drifted");
+    }
+  } catch (error) {
+    poisonAuthorityGraph(
+      state, context.authority, "SQLite publication session consume validation failed",
+    );
+    throw error;
+  }
+
+  const token =
+    mintPublicationRebindOpaqueIntrinsic<SQLiteCursorPublicationSessionConsumedTombstone>();
+  const consumed: PublicationSessionConsumedTombstoneState = {
+    context,
+    lifecycle: "active",
+    token,
+  };
+  let hasPrimary = false;
+  let primary: unknown;
+  try {
+    reflectApplyIntrinsic(weakMapSetIntrinsic, PUBLICATION_SESSION_CONSUMED_TOMBSTONES, [
+      token as object, consumed,
+    ]);
+    throwSQLiteCursorPublicationRebindRegistrationFaultIntrinsic("session-tombstone");
+  } catch (error) {
+    hasPrimary = true;
+    primary = error;
+  }
+  if (hasPrimary) {
+    reflectApplyIntrinsic(weakMapDeleteIntrinsic, PUBLICATION_SESSION_CONSUMED_TOMBSTONES, [
+      token as object,
+    ]);
+    throw primary;
+  }
+
+  // Assignment-only consume tail. No fallible operation may be added below.
+  context.tombstone = token;
+  context.lifecycle = "session-consumed";
+  publication.rebindConsumedTombstone = token;
+  publication.lifecycle = "consumed-for-rebind";
+  state.publicationSessionConsumedTombstone = token;
+  state.writePhase = "publication-session-consumed";
+  return token;
+}
+
+export function assertSQLiteCursorPublicationSessionConsumedTombstoneIntrinsic(
+  tombstoneToken: SQLiteCursorPublicationSessionConsumedTombstone,
+): SQLiteCursorPublicationSessionConsumedTombstone {
+  const consumed = publicationSessionConsumedTombstoneState(tombstoneToken);
+  const context = consumed.context;
+  const state = authorityState(context.authority);
+  const publication = reflectApplyIntrinsic(
+    weakMapGetIntrinsic, PUBLICATION_SESSIONS, [context.session as object],
+  ) as PublicationSessionState | undefined;
+  const expectedPhase = consumed.lifecycle === "adopted"
+    ? "cursor-rebind-adopted"
+    : "publication-session-consumed";
+  if ((consumed.lifecycle !== "active" && consumed.lifecycle !== "adopted")
+      || context.tombstone !== tombstoneToken
+      || state.publicationRebindContext !== context.token
+      || state.publicationSessionConsumedTombstone !== tombstoneToken
+      || state.writePhase !== expectedPhase
+      || publication === undefined
+      || publication.lifecycle !== "consumed-for-rebind"
+      || publication.rebindConsumedTombstone !== tombstoneToken) {
+    poisonAuthorityGraph(state, context.authority, "SQLite consumed publication session drifted");
+    return fail(
+      "GE_CYCLE_STORE_CORRUPTION",
+      "SQLite publication session consumed tombstone is terminal",
+    );
+  }
+  return tombstoneToken;
+}
+
+export function readSQLiteCursorPublicationSessionConsumedTombstoneSnapshotIntrinsic(
+  tombstone: SQLiteCursorPublicationSessionConsumedTombstone,
+): SQLiteCursorPublicationSessionConsumedTombstoneSnapshot {
+  const state = publicationSessionConsumedTombstoneState(tombstone);
+  return objectFreezeIntrinsic({
+    context: state.context.token,
+    execution: state.context.execution,
+    preparedExecutionSnapshot: state.context.preparedExecutionSnapshot,
+    historicalTotalChanges: state.context.historicalTotalChanges,
+    historicalTransactionEpoch: state.context.historicalTransactionEpoch,
+    lifecycle: state.lifecycle,
+    preparedOwner: state.context.preparedOwner,
+    session: state.context.session,
+  });
+}
+
+function completedPublicationRebindSnapshotIsExact(
+  snapshot: SQLiteConnectionCursorRebindExecutionSnapshot,
+  context: PublicationRebindContextState,
+): boolean {
+  const totalChangesDelta = snapshot.totalChangesAfter - snapshot.totalChangesBefore;
+  return objectIsFrozenIntrinsic(snapshot)
+    && snapshot.lifecycle === "completed"
+    && snapshot.statementOwnershipRetired
+    && snapshot.prepareCount === 1
+    && snapshot.executeCount === 1
+    && snapshot.releaseCount === 1
+    && snapshot.changesPrepareCount === 1
+    && snapshot.changesFetchCount === 1
+    && snapshot.changesReleaseCount === 1
+    && snapshot.changesAffectedRows !== null
+    && snapshot.cursorLedgerLogicalWriteSequence === 1
+    && snapshot.cursorLedgerFixedStatementCount === 1
+    && snapshot.sql === SQLITE_CURSOR_PUBLICATION_REBIND_SQL_INTRINSIC
+    && snapshot.sqlSha256 === SQLITE_CURSOR_PUBLICATION_REBIND_SQL_SHA256_INTRINSIC
+    && exactPublicationRebindParameterOrder(snapshot.parameterOrder)
+    && exactPublicationRebindParameters(snapshot.parameterValues, context)
+    && snapshot.changesSql === SQLITE_CURSOR_PUBLICATION_CHANGES_SQL_INTRINSIC
+    && snapshot.changesSqlSha256 === SQLITE_CURSOR_PUBLICATION_CHANGES_SQL_SHA256_INTRINSIC
+    && snapshot.transactionLineage === context.transactionLineage
+    && snapshot.transactionEpoch === context.historicalTransactionEpoch + 1n
+    && snapshot.totalChangesBefore === context.historicalTotalChanges
+    && numberIsSafeIntegerIntrinsic(totalChangesDelta)
+    && totalChangesDelta >= 0
+    && totalChangesDelta === snapshot.totalChangesDelta
+    && totalChangesDelta === snapshot.affectedRows
+    && totalChangesDelta === snapshot.changesAffectedRows
+    && totalChangesDelta === snapshot.cursorLedgerAffectedRowsWatermark;
+}
+
+/** Adopt E1/T1 from the exact completed E and mint immutable A. */
+export function adoptSQLiteCursorPostRebindWatermarkIntrinsic(
+  contextToken: SQLiteCursorPublicationRebindContext,
+  tombstoneToken: SQLiteCursorPublicationSessionConsumedTombstone,
+  execution: SQLiteConnectionCursorRebindExecution,
+): SQLiteCursorPostRebindWatermarkAdoption {
+  const context = publicationRebindContextState(contextToken);
+  const consumed = publicationSessionConsumedTombstoneState(tombstoneToken);
+  const state = authorityState(context.authority);
+  if (context.lifecycle !== "session-consumed" || context.adoption !== undefined
+      || context.tombstone !== tombstoneToken || consumed.context !== context
+      || consumed.lifecycle !== "active" || execution !== context.execution
+      || state.writePhase !== "publication-session-consumed") {
+    poisonAuthorityGraph(state, context.authority, "SQLite post-rebind adoption was reused");
+    return fail("GE_CYCLE_STORE_CORRUPTION", "SQLite post-rebind adoption is terminal");
+  }
+
+  let hasPrimary = false;
+  let primary: unknown;
+  let snapshot: SQLiteConnectionCursorRebindExecutionSnapshot | undefined;
+  let currentOuterLedger: SQLiteCursorOuterPublicationLedgerSnapshot | undefined;
+  try {
+    snapshot = readSQLiteConnectionCursorRebindExecutionSnapshotVerifierIntrinsic(
+      context.connection,
+      execution,
+    );
+    const owner = readSQLiteConnectionOwnerSnapshot(context.connection);
+    const total = readSQLiteConnectionTotalChangesSnapshot(context.connection);
+    const publication = reflectApplyIntrinsic(
+      weakMapGetIntrinsic, PUBLICATION_SESSIONS, [context.session as object],
+    ) as PublicationSessionState | undefined;
+    if (publication === undefined
+        || publication.authority !== context.authority
+        || publication.adoptionReceipt !== state.initialStageAdoptionReceipt
+        || publication.lifecycle !== "consumed-for-rebind"
+        || publication.rebindConsumedTombstone !== tombstoneToken
+        || publication.snapshotBase.connection !== context.connection
+        || publication.snapshotBase.receipt !== context.receipt
+        || publication.snapshotBase.projectionIdentity !== state.projectionIdentity
+        || publication.snapshotBase.projectionReference !== state.projectionReference
+        || publication.snapshotBase.stage !== state.stage
+        || publication.snapshotBase.transfer !== state.transfer
+        || publication.snapshotBase.migrationLockCapability !== state.migrationLockCapability
+        || publication.snapshotBase.providerClockCapability !== state.providerClockCapability
+        || publication.snapshotBase.outerClockEvidence !== state.outerClockEvidence
+        || publication.snapshotBase.sourceDescriptorHash !== context.sourceDescriptorHash
+        || publication.snapshotBase.sourceSchemaIdentitySha256
+          !== context.sourceSchemaIdentitySha256
+        || publication.snapshotBase.targetDescriptorHash !== context.targetDescriptorHash
+        || publication.snapshotBase.targetSchemaIdentitySha256
+          !== context.targetSchemaIdentitySha256) {
+      fail("GE_CYCLE_STORE_CORRUPTION", "SQLite post-rebind retained session is invalid");
+    }
+    assertSQLiteCursorStageOwnershipPublicationSessionActiveIntrinsic(
+      state.transfer,
+      context.authority,
+      publication.adoptionReceipt,
+      context.session,
+    );
+    const clock = assertSQLiteCursorOuterClockAuthorityActiveGraphIntrinsic(
+      context.connection,
+      state.migrationLockCapability,
+      state.providerClockCapability,
+      state.outerClockEvidence,
+      state.outerClockConsumedTombstone!,
+    );
+    const catalog = readValidatedSQLiteCursorPublicationTargetCatalogObservationIntrinsic(
+      context.connection,
+    );
+    const fence = postDdlCatalogFenceState(publication.snapshotBase.postDdlCatalogFence);
+    const provenance = assertSQLiteCursorPreRebindReceiptProvenance(context.receipt);
+    currentOuterLedger = outerLedgerSnapshot(state);
+    if (!completedPublicationRebindSnapshotIsExact(snapshot, context)
+        || !owner.isTransaction || owner.transactionMode !== "exclusive"
+        || owner.transactionLineage !== context.transactionLineage
+        || owner.transactionEpoch !== snapshot.transactionEpoch
+        || total.transactionEpoch !== owner.transactionEpoch
+        || total.totalChanges !== snapshot.totalChangesAfter
+        || state.currentTransactionEpoch !== context.historicalTransactionEpoch
+        || state.currentTotalChanges !== context.historicalTotalChanges
+        || !exactLedger(currentOuterLedger, context.historicalOuterLedger)
+        || clock.transactionLineage !== context.transactionLineage
+        || clock.transactionEpoch !== snapshot.transactionEpoch
+        || fence.authority !== context.authority
+        || fence.connection !== context.connection
+        || fence.snapshot.catalogSha256 !== SQLITE_CURSOR_PUBLICATION_TARGET.catalogSha256
+        || catalog.catalogSha256 !== fence.snapshot.catalogSha256
+        || catalog.canonicalUtf8Bytes !== fence.snapshot.catalogCanonicalUtf8Bytes
+        || catalog.rowCount !== fence.snapshot.catalogRowCount
+        || catalog.applicationId !== fence.snapshot.applicationId
+        || catalog.userVersion !== fence.snapshot.userVersion
+        || provenance.receiptSha256 !== context.preRebindReceiptSha256
+        || provenance.projectionIdentity !== state.projectionIdentity
+        || provenance.projectionReference !== state.projectionReference
+        || provenance.sealReceipt.cursorCount !== context.b2CursorCount
+        || provenance.sealReceipt.immutableRootSha256 !== context.b2ImmutableRootSha256
+        || provenance.sealReceipt.sourceDescriptorHash !== context.sourceDescriptorHash
+        || provenance.sealReceipt.sourceSchemaIdentitySha256
+          !== context.sourceSchemaIdentitySha256) {
+      fail("GE_CYCLE_STORE_CORRUPTION", "SQLite post-rebind watermark is invalid");
+    }
+  } catch (error) {
+    hasPrimary = true;
+    primary = error;
+  }
+  if (hasPrimary) {
+    poisonAuthorityGraph(state, context.authority, "SQLite post-rebind watermark validation failed");
+    throw primary;
+  }
+
+  let token: SQLiteCursorPostRebindWatermarkAdoption | undefined;
+  try {
+    token = mintPublicationRebindOpaqueIntrinsic<SQLiteCursorPostRebindWatermarkAdoption>();
+    const adoption: PostRebindWatermarkAdoptionState = {
+      adoptedOuterLedger: currentOuterLedger!,
+      adoptedTotalChanges: snapshot!.totalChangesAfter,
+      adoptedTransactionEpoch: snapshot!.transactionEpoch,
+      affectedRows: snapshot!.affectedRows,
+      context,
+      executionSnapshot: snapshot!,
+      lifecycle: "active",
+      token,
+      tombstone: consumed,
+      totalChangesDelta: snapshot!.totalChangesDelta,
+    };
+    reflectApplyIntrinsic(weakMapSetIntrinsic, POST_REBIND_WATERMARK_ADOPTIONS, [
+      token as object, adoption,
+    ]);
+    throwSQLiteCursorPublicationRebindRegistrationFaultIntrinsic("watermark-adoption");
+  } catch (error) {
+    hasPrimary = true;
+    primary = error;
+  }
+  if (hasPrimary) {
+    if (token !== undefined) {
+      reflectApplyIntrinsic(weakMapDeleteIntrinsic, POST_REBIND_WATERMARK_ADOPTIONS, [
+        token as object,
+      ]);
+    }
+    poisonAuthorityGraph(state, context.authority, "SQLite post-rebind adoption mint failed");
+    throw primary;
+  }
+
+  // Assignment-only adoption tail. Historical receipts/session data remain unchanged.
+  context.adoption = token!;
+  context.lifecycle = "write-adopted";
+  consumed.lifecycle = "adopted";
+  state.currentTransactionEpoch = snapshot!.transactionEpoch;
+  state.currentTotalChanges = snapshot!.totalChangesAfter;
+  state.postRebindWatermarkAdoption = token!;
+  state.writePhase = "cursor-rebind-adopted";
+  return token!;
+}
+
+/** Repeatable post-adoption proof: registry/retained-data only, zero SQL/clock. */
+export function assertSQLiteCursorPostRebindWatermarkAdoptionIntrinsic(
+  adoptionToken: SQLiteCursorPostRebindWatermarkAdoption,
+): SQLiteCursorPostRebindWatermarkAdoption {
+  const adoption = postRebindWatermarkAdoptionState(adoptionToken);
+  const context = adoption.context;
+  const state = authorityState(context.authority);
+  if (adoption.lifecycle !== "active"
+      || context.lifecycle !== "write-adopted"
+      || context.adoption !== adoptionToken
+      || context.tombstone !== adoption.tombstone.token
+      || adoption.tombstone.lifecycle !== "adopted"
+      || state.lifecycle !== "active"
+      || state.writePhase !== "cursor-rebind-adopted"
+      || state.publicationRebindContext !== context.token
+      || state.publicationSessionConsumedTombstone !== adoption.tombstone.token
+      || state.postRebindWatermarkAdoption !== adoptionToken
+      || state.currentTransactionEpoch !== adoption.adoptedTransactionEpoch
+      || state.currentTotalChanges !== adoption.adoptedTotalChanges
+      || !exactLedger(outerLedgerSnapshot(state), context.historicalOuterLedger)
+      || !exactLedger(adoption.adoptedOuterLedger, context.historicalOuterLedger)
+      || adoption.executionSnapshot.transactionLineage !== context.transactionLineage
+      || !retainedPreparedPublicationRebindSnapshotIsExact(
+        context.preparedExecutionSnapshot,
+        context,
+      )
+      || adoption.executionSnapshot.transactionEpoch !== adoption.adoptedTransactionEpoch
+      || adoption.executionSnapshot.totalChangesBefore !== context.historicalTotalChanges
+      || adoption.executionSnapshot.totalChangesAfter !== adoption.adoptedTotalChanges
+      || adoption.executionSnapshot.totalChangesDelta !== adoption.totalChangesDelta
+      || adoption.executionSnapshot.affectedRows !== adoption.affectedRows) {
+    poisonAuthorityGraph(state, context.authority, "SQLite post-rebind adoption graph drifted");
+    return fail("GE_CYCLE_STORE_CORRUPTION", "SQLite post-rebind adoption is invalid");
+  }
+  return adoptionToken;
+}
+
+/**
+ * Authenticate the exact consumed graph before a downstream E/W/R11 failure
+ * poisons it. This performs no SQL and deliberately does not throw after a
+ * successful authentication, allowing callers to preserve any primary value,
+ * including a thrown `undefined`.
+ */
+export function poisonSQLiteCursorPublicationRebindAfterConsumeIntrinsic(
+  contextToken: SQLiteCursorPublicationRebindContext,
+  tombstoneToken: SQLiteCursorPublicationSessionConsumedTombstone,
+  adoptionToken: SQLiteCursorPostRebindWatermarkAdoption | undefined,
+  message: string,
+): void {
+  if (typeof message !== "string" || message.length === 0) {
+    return fail(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "SQLite publication rebind poison reason is invalid",
+    );
+  }
+  const context = publicationRebindContextState(contextToken);
+  const consumed = publicationSessionConsumedTombstoneState(tombstoneToken);
+  const state = authorityState(context.authority);
+  const adoption = adoptionToken === undefined
+    ? undefined
+    : postRebindWatermarkAdoptionState(adoptionToken);
+  const preAdoption = adoption === undefined
+    && context.lifecycle === "session-consumed"
+    && context.adoption === undefined
+    && consumed.lifecycle === "active"
+    && state.writePhase === "publication-session-consumed";
+  const postAdoption = adoption !== undefined
+    && adoption.context === context
+    && adoption.tombstone === consumed
+    && adoption.lifecycle === "active"
+    && context.lifecycle === "write-adopted"
+    && context.adoption === adoptionToken
+    && consumed.lifecycle === "adopted"
+    && state.writePhase === "cursor-rebind-adopted"
+    && state.postRebindWatermarkAdoption === adoptionToken;
+  if (consumed.context !== context
+      || context.tombstone !== tombstoneToken
+      || state.lifecycle !== "active"
+      || state.publicationRebindContext !== contextToken
+      || state.publicationSessionConsumedTombstone !== tombstoneToken
+      || (!preAdoption && !postAdoption)) {
+    return fail(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "SQLite publication rebind poison graph is invalid",
+    );
+  }
+  poisonAuthorityGraph(state, context.authority, message);
+}
+
+function snapshotPostRebindWatermarkAdoption(
+  state: PostRebindWatermarkAdoptionState,
+): SQLiteCursorPostRebindWatermarkAdoptionSnapshot {
+  const context = state.context;
+  return objectFreezeIntrinsic({
+    adoptedOuterLedger: state.adoptedOuterLedger,
+    adoptedTotalChanges: state.adoptedTotalChanges,
+    adoptedTransactionEpoch: state.adoptedTransactionEpoch,
+    affectedRows: state.affectedRows,
+    connection: context.connection,
+    context: context.token,
+    execution: context.execution,
+    executionSnapshot: state.executionSnapshot,
+    historicalOuterLedger: context.historicalOuterLedger,
+    historicalTotalChanges: context.historicalTotalChanges,
+    historicalTransactionEpoch: context.historicalTransactionEpoch,
+    lifecycle: state.lifecycle,
+    outerAuthority: context.authority,
+    preparedExecutionSnapshot: context.preparedExecutionSnapshot,
+    preparedOwner: context.preparedOwner,
+    session: context.session,
+    tombstone: state.tombstone.token,
+    totalChangesDelta: state.totalChangesDelta,
+    transactionLineage: context.transactionLineage,
+  });
+}
+
+export function readSQLiteCursorPostRebindWatermarkAdoptionSnapshotIntrinsic(
+  adoption: SQLiteCursorPostRebindWatermarkAdoption,
+): SQLiteCursorPostRebindWatermarkAdoptionSnapshot {
+  assertSQLiteCursorPostRebindWatermarkAdoptionIntrinsic(adoption);
+  return snapshotPostRebindWatermarkAdoption(postRebindWatermarkAdoptionState(adoption));
+}
+
 export function readSQLiteCursorInitialStageAdoptionReceiptSnapshotIntrinsic(
   receipt: SQLiteCursorInitialStageAdoptionReceipt,
 ): SQLiteCursorInitialStageAdoptionReceiptSnapshot {
@@ -5647,6 +6852,63 @@ export function readSQLiteCursorInitialStageAdoptionReceiptSnapshotIntrinsic(
     : undefined;
   if (record === undefined || record.lifecycle !== "active") {
     return fail("GE_CYCLE_STORE_INVALID_ARGUMENT", "SQLite initial stage adoption receipt is invalid");
+  }
+  const state = authorityState(record.authority);
+  if (state.writePhase === "publication-session-consumed"
+      || state.writePhase === "cursor-rebind-adopted") {
+    const contextToken = state.publicationRebindContext;
+    const tombstone = state.publicationSessionConsumedTombstone;
+    const context = contextToken === undefined
+      ? undefined
+      : publicationRebindContextState(contextToken);
+    const publication = context === undefined
+      ? undefined
+      : reflectApplyIntrinsic(
+        weakMapGetIntrinsic, PUBLICATION_SESSIONS, [context.session as object],
+      ) as PublicationSessionState | undefined;
+    if (context === undefined || tombstone === undefined
+        || record.authority !== context.authority
+        || record.connection !== context.connection
+        || publication === undefined || publication.adoptionReceipt !== receipt
+        || record.snapshot.adoptedTransactionEpoch !== context.historicalTransactionEpoch
+        || record.snapshot.adoptedTotalChanges !== context.historicalTotalChanges
+        || !exactLedger(record.snapshot.adoptedOuterLedger, context.historicalOuterLedger)) {
+      poisonAuthorityGraph(
+        state, record.authority, "SQLite retained initial adoption receipt drifted",
+      );
+      return fail(
+        "GE_CYCLE_STORE_CORRUPTION",
+        "SQLite retained initial adoption receipt is invalid",
+      );
+    }
+    assertActiveConsumedTombstoneIntrinsic(
+      record.snapshot.migration0002ConsumedTombstone as object,
+      record.bundle[0] as object,
+      receipt,
+    );
+    assertActiveConsumedTombstoneIntrinsic(
+      record.snapshot.baselineEntriesConsumedTombstone as object,
+      record.bundle[1] as object,
+      receipt,
+    );
+    assertActiveConsumedTombstoneIntrinsic(
+      record.snapshot.baselineHeaderConsumedTombstone as object,
+      record.bundle[2] as object,
+      receipt,
+    );
+    assertActiveConsumedTombstoneIntrinsic(
+      record.snapshot.operationSequenceZeroConsumedTombstone as object,
+      record.bundle[3] as object,
+      receipt,
+    );
+    if (state.writePhase === "cursor-rebind-adopted") {
+      assertSQLiteCursorPostRebindWatermarkAdoptionIntrinsic(
+        state.postRebindWatermarkAdoption!,
+      );
+    } else {
+      assertSQLiteCursorPublicationSessionConsumedTombstoneIntrinsic(tombstone);
+    }
+    return record.snapshot;
   }
   assertSQLiteCursorInitialStageAdoptionReceiptIntrinsic(
     record.authority, record.bundle, record.fence, record.readerLease, receipt,
@@ -5681,6 +6943,9 @@ export function readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(
     initialStageAdoptionReceiptMintCount: state.initialStageAdoptionReceiptMintCount,
     publicationPreparedOwner: state.publicationPreparedOwner,
     publicationSession: state.publicationSession,
+    publicationRebindContext: state.publicationRebindContext,
+    publicationSessionConsumedTombstone: state.publicationSessionConsumedTombstone,
+    postRebindWatermarkAdoption: state.postRebindWatermarkAdoption,
     migration0002ConsumedTombstone: state.migration0002ConsumedTombstone,
     operationSequenceZeroAffectedRows: state.operationSequenceZeroAffectedRows,
     operationSequenceZeroExecuteCount: state.operationSequenceZeroExecuteCount,

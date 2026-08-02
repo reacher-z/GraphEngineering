@@ -50,6 +50,7 @@ import { runSQLiteStreamRecordInvariantCampaign } from
 import { readSQLiteV1BaselineOrderedTempProjection } from
   "../../src/operation-baseline-handoff.js";
 import {
+  SQLITE_CURSOR_MAIN_SOURCE_QUERY,
   SQLiteCursorPreRebindReceiptIssuer,
   assertSQLiteCursorPreRebindReceiptProvenance,
   createSQLiteCursorCaptureSession,
@@ -59,7 +60,8 @@ import {
   type SQLiteCursorPreRebindReceipt,
 } from "../../src/operation-baseline-cursor-ownership.js";
 import {
-  SQLITE_CURSOR_SEAL_EMPTY_ROOT,
+  decodeSQLiteCursorSealRow,
+  sealSQLiteCursorRows,
   type SQLiteCursorSealReceipt,
 } from "../../src/operation-baseline-cursor-invariants.js";
 import type { OperationBaselineProjectionIdentity } from "../../src/operation-baseline.js";
@@ -68,6 +70,7 @@ import {
   type SQLiteV1BaselineSourceSummary,
 } from "../../src/operation-baseline-source.js";
 import { SQLiteConnection } from "../../src/sqlite-connection.js";
+import { sqliteRow, sqliteText } from "../../src/sqlite-codec.js";
 import { createSQLiteCycleStoreDescriptor } from "../../src/sqlite-profile.js";
 
 export const READER_CAPTURED_AT_MS = 1_785_110_405_000;
@@ -135,14 +138,9 @@ function installMigrationLock(connection: SQLiteConnection): void {
 function mintPreRebindReceipt(
   sourceSummary: SQLiteV1BaselineSourceSummary,
   projectionIdentity: OperationBaselineProjectionIdentity,
+  sealReceipt: SQLiteCursorSealReceipt,
 ): SQLiteCursorPreRebindReceipt {
   const projectionReference = createSQLiteCursorExactProjectionReference(projectionIdentity);
-  const sealReceipt = Object.freeze({
-    cursorCount: 0,
-    immutableRootSha256: SQLITE_CURSOR_SEAL_EMPTY_ROOT,
-    sourceDescriptorHash: sourceSummary.sourceEnvelope.sourceDescriptorHash,
-    sourceSchemaIdentitySha256: sourceSummary.sourceEnvelope.sourceSchemaIdentitySha256,
-  } satisfies SQLiteCursorSealReceipt);
   const tenantOwnership = createSQLiteCursorOwnershipCapability("tenant", Buffer.alloc(32, 1));
   const sourceStageOwnership = createSQLiteCursorOwnershipCapability(
     "source-stage", Buffer.alloc(32, 2),
@@ -175,10 +173,76 @@ function mintPreRebindReceipt(
   return new SQLiteCursorPreRebindReceiptIssuer(input).issue(input);
 }
 
+function insertAuthenticCursorRows(connection: SQLiteConnection, cursorCount: number): void {
+  const descriptor = createSQLiteCycleStoreDescriptor().descriptorHash;
+  const schema = sqliteText(sqliteRow(connection.prepare(
+    "SELECT schema_identity_sha256 FROM main.ge_cycle_schema WHERE singleton = 1",
+    "inspect-schema",
+  ).get(), 1, "inspect-schema", "schema row")[0], "inspect-schema", "schema identity");
+  const insert = connection.prepare(`
+    INSERT INTO main.ge_cycle_cursors
+      (tenant_id, token_hash, kind, principal_hash, authorization_hash, stream_id,
+       checkpoint_scope, request_scope_blob, page_size, next_position,
+       snapshot_tail_sequence, snapshot_tail_record_hash, descriptor_hash,
+       schema_identity_sha256, snapshot_blob, created_at_ms, expires_at_ms, consumed_at_ms)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `, "inspect-schema");
+  for (let ordinal = 1; ordinal <= cursorCount; ordinal += 1) {
+    const streamId = `stream-reader-cursor-${ordinal}`;
+    insert.run(
+      `tenant-reader-cursor-${ordinal}`,
+      ordinal.toString(16).padStart(64, "0"),
+      "event",
+      "2".repeat(64),
+      "3".repeat(64),
+      streamId,
+      null,
+      Buffer.from(
+        `{"contractVersion":"cycle-store-provider/v1alpha1","pageSize":1,`
+          + `"streamId":"${streamId}"}`,
+        "utf8",
+      ),
+      1,
+      0,
+      -1,
+      null,
+      descriptor,
+      schema,
+      Buffer.from('{"exists":false,"recordHash":null,"sequence":-1}', "utf8"),
+      READER_CAPTURED_AT_MS - 100,
+      READER_CAPTURED_AT_MS + 100,
+      null,
+    );
+  }
+}
+
+function sealAuthenticCursorRows(
+  connection: SQLiteConnection,
+  sourceSummary: SQLiteV1BaselineSourceSummary,
+  cursorCount: number,
+): SQLiteCursorSealReceipt {
+  const rows = [...connection.prepare(
+    SQLITE_CURSOR_MAIN_SOURCE_QUERY,
+    "inspect-schema",
+  ).iterate()].map(decodeSQLiteCursorSealRow).sort((left, right) =>
+    Buffer.compare(Buffer.from(left.carrier.tokenHash), Buffer.from(right.carrier.tokenHash))
+      || Buffer.compare(Buffer.from(left.carrier.tenantId), Buffer.from(right.carrier.tenantId)));
+  return sealSQLiteCursorRows(
+    cursorCount,
+    sourceSummary.sourceEnvelope.sourceDescriptorHash,
+    sourceSummary.sourceEnvelope.sourceSchemaIdentitySha256,
+    rows,
+  );
+}
+
 export function createReaderLeaseTestGraph(
   legacyOperationCount = 0,
-  options: Readonly<{ outerProviderNowMs?: number }> = {},
+  options: Readonly<{ cursorCount?: number; outerProviderNowMs?: number }> = {},
 ): ReaderLeaseTestGraph {
+  const cursorCount = options.cursorCount ?? 0;
+  if (!Number.isSafeInteger(cursorCount) || cursorCount < 0 || cursorCount > 1_024) {
+    throw new Error("reader-lease test cursor count is invalid");
+  }
   const root = mkdtempSync(join(tmpdir(), "graph-engineering-b3-reader-"));
   const connection = new SQLiteConnection(join(root, "cycle-store.db"));
   ensureSQLiteCycleStoreSchema(connection, createSQLiteCycleStoreDescriptor(), {
@@ -210,6 +274,7 @@ export function createReaderLeaseTestGraph(
       READER_CAPTURED_AT_MS - 10 + index,
     );
   }
+  insertAuthenticCursorRows(connection, cursorCount);
 
   const stage = createSQLiteBaselineTempStage(
     connection,
@@ -233,7 +298,12 @@ export function createReaderLeaseTestGraph(
       ...runSQLiteLegacyInvariantCampaign(connection, projectionIdentity, stage).diagnostics,
     ];
     if (diagnostics.length !== 0) throw new Error("expected a clean reader-lease B2 graph");
-    const preRebindReceipt = mintPreRebindReceipt(sourceSummary, projectionIdentity);
+    const sealReceipt = sealAuthenticCursorRows(connection, sourceSummary, cursorCount);
+    const preRebindReceipt = mintPreRebindReceipt(
+      sourceSummary,
+      projectionIdentity,
+      sealReceipt,
+    );
     const projectionReference = assertSQLiteCursorPreRebindReceiptProvenance(
       preRebindReceipt,
     ).projectionReference;

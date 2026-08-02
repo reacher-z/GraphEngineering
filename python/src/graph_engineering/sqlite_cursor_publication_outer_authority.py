@@ -117,6 +117,11 @@ from .sqlite_operation_baseline_source import (
     SQLITE_CURSOR_OPERATION_SEQUENCE_ZERO_INSERT_SQL_SHA256_INTRINSIC,
     SQLITE_CURSOR_OPERATION_SEQUENCE_ZERO_PARAMETER_ORDER_INTRINSIC,
     SQLITE_CURSOR_POST_DDL_BASELINE_SOURCE_QUERY_INTRINSIC,
+    SQLITE_CURSOR_PUBLICATION_CHANGES_SQL_INTRINSIC,
+    SQLITE_CURSOR_PUBLICATION_CHANGES_SQL_SHA256_INTRINSIC,
+    SQLITE_CURSOR_PUBLICATION_REBIND_PARAMETER_ORDER_INTRINSIC,
+    SQLITE_CURSOR_PUBLICATION_REBIND_SQL_INTRINSIC,
+    SQLITE_CURSOR_PUBLICATION_REBIND_SQL_SHA256_INTRINSIC,
     SQLiteV1BaselineConnectionOwner,
     _begin_sqlite_connection_baseline_entry_publication_execution_intrinsic,
     _begin_sqlite_connection_baseline_header_publication_execution_intrinsic,
@@ -132,11 +137,15 @@ from .sqlite_operation_baseline_source import (
     _prepare_sqlite_connection_post_ddl_publication_reader_intrinsic,
     _read_sqlite_connection_baseline_entry_publication_execution_snapshot_intrinsic,
     _read_sqlite_connection_baseline_header_publication_execution_snapshot_intrinsic,
+    _read_sqlite_connection_cursor_publication_rebind_snapshot_intrinsic,
     _read_sqlite_connection_migration_0002_execution_snapshot_intrinsic,
     _read_sqlite_connection_operation_sequence_zero_execution_snapshot_intrinsic,
     _read_sqlite_connection_post_ddl_publication_reader_snapshot_intrinsic,
+    _release_sqlite_connection_cursor_publication_rebind_intrinsic,
     _SQLiteConnectionBaselineEntryPublicationExecution,
     _SQLiteConnectionBaselineHeaderPublicationExecution,
+    _SQLiteConnectionCursorPublicationRebindExecution,
+    _SQLiteConnectionCursorPublicationRebindSnapshot,
     _SQLiteConnectionMigration0002Execution,
     _SQLiteConnectionOperationSequenceZeroExecution,
 )
@@ -263,6 +272,8 @@ _WritePhase: TypeAlias = Literal[
     "sequence-zero-complete",
     "initial-stage-adoption-complete",
     "publication-active",
+    "publication-session-consumed",
+    "cursor-rebind-adopted",
     "poisoned",
     "retired",
 ]
@@ -327,6 +338,50 @@ class _SQLiteCursorPublicationSession:
         raise TypeError("GE_CURSOR_B3_PUBLICATION_SESSION_STATE")
 
 
+class _SQLiteCursorPublicationRebindContext:
+    """Outer-owned exact bridge binding S, P and one prepared E."""
+
+    __slots__ = ("__state", "__weakref__")
+
+    def __init__(self, token: object) -> None:
+        if token is not _CONSTRUCTION_TOKEN:
+            raise TypeError("GE_CURSOR_B3_PUBLICATION_REBIND_CONTEXT")
+        object.__setattr__(self, "_SQLiteCursorPublicationRebindContext__state", None)
+
+    def __setattr__(self, _name: str, _value: object) -> None:
+        raise TypeError("GE_CURSOR_B3_PUBLICATION_REBIND_CONTEXT_STATE")
+
+
+class _SQLiteCursorPublicationRebindPreparedOwner:
+    """Outer-minted P bound to one exact active S and prepared E."""
+
+    __slots__ = ("__weakref__",)
+
+    def __init__(self, token: object) -> None:
+        if token is not _CONSTRUCTION_TOKEN:
+            raise TypeError("GE_CURSOR_B3_PUBLICATION_REBIND_PREPARED_OWNER")
+
+
+class _SQLiteCursorPublicationSessionConsumedTombstone:
+    """T: one-shot proof that the exact publication session was consumed."""
+
+    __slots__ = ("__weakref__",)
+
+    def __init__(self, token: object) -> None:
+        if token is not _CONSTRUCTION_TOKEN:
+            raise TypeError("GE_CURSOR_B3_PUBLICATION_REBIND_TOMBSTONE")
+
+
+class _SQLiteCursorPostRebindWatermarkAdoption:
+    """A: immutable adoption of the exact completed rebind watermarks."""
+
+    __slots__ = ("__weakref__",)
+
+    def __init__(self, token: object) -> None:
+        if token is not _CONSTRUCTION_TOKEN:
+            raise TypeError("GE_CURSOR_B3_POST_REBIND_ADOPTION")
+
+
 class _SQLiteCursorPublicationSessionCancellationSignal:
     __slots__ = ("__weakref__",)
 
@@ -366,6 +421,67 @@ class _SQLiteCursorOuterPublicationLedgerSnapshot(NamedTuple):
     affected_rows_watermark: int
     fixed_statement_count: int
     logical_write_sequence: int
+
+
+class _SQLiteCursorPublicationRebindContextSnapshot(NamedTuple):
+    lifecycle: Literal[
+        "prepared",
+        "released-before-write",
+        "session-consumed",
+        "write-adopted",
+        "poisoned",
+        "retired",
+    ]
+    session: _SQLiteCursorPublicationSession
+    prepared_owner: _SQLiteCursorPublicationRebindPreparedOwner
+    execution: _SQLiteConnectionCursorPublicationRebindExecution
+    prepared_execution_snapshot: _SQLiteConnectionCursorPublicationRebindSnapshot
+    authority: _SQLiteCursorOuterPublicationAuthority
+    connection: SQLiteV1BaselineConnectionOwner
+    transaction_generation: object
+    historical_transaction_epoch: int
+    historical_total_changes: int
+    historical_outer_ledger: _SQLiteCursorOuterPublicationLedgerSnapshot
+    receipt: SQLiteCursorPreRebindReceipt
+    pre_rebind_receipt_sha256: str
+    b2_cursor_count: int
+    b2_immutable_root_sha256: str
+    source_descriptor_hash: str
+    source_schema_identity: str
+    target_descriptor_hash: str
+    target_schema_identity: str
+    parameter_values: tuple[str, str, str, str]
+
+
+class _SQLiteCursorPublicationSessionConsumedTombstoneSnapshot(NamedTuple):
+    lifecycle: Literal["active", "adopted", "poisoned", "retired"]
+    context: _SQLiteCursorPublicationRebindContext
+    session: _SQLiteCursorPublicationSession
+    prepared_owner: _SQLiteCursorPublicationRebindPreparedOwner
+    execution: _SQLiteConnectionCursorPublicationRebindExecution
+    historical_transaction_epoch: int
+    historical_total_changes: int
+
+
+class _SQLiteCursorPostRebindWatermarkAdoptionSnapshot(NamedTuple):
+    lifecycle: Literal["active", "poisoned", "retired"]
+    context: _SQLiteCursorPublicationRebindContext
+    tombstone: _SQLiteCursorPublicationSessionConsumedTombstone
+    session: _SQLiteCursorPublicationSession
+    prepared_owner: _SQLiteCursorPublicationRebindPreparedOwner
+    execution: _SQLiteConnectionCursorPublicationRebindExecution
+    execution_snapshot: _SQLiteConnectionCursorPublicationRebindSnapshot
+    authority: _SQLiteCursorOuterPublicationAuthority
+    connection: SQLiteV1BaselineConnectionOwner
+    transaction_generation: object
+    historical_transaction_epoch: int
+    adopted_transaction_epoch: int
+    historical_total_changes: int
+    adopted_total_changes: int
+    total_changes_delta: int
+    affected_rows: int
+    historical_outer_ledger: _SQLiteCursorOuterPublicationLedgerSnapshot
+    adopted_outer_ledger: _SQLiteCursorOuterPublicationLedgerSnapshot
 
 
 class _SQLiteMigration0002CatalogRebuildReceipt:
@@ -779,6 +895,11 @@ class _SQLiteCursorOuterPublicationAuthoritySnapshot(NamedTuple):
     operation_sequence_zero_affected_rows: Literal[0, 1]
     initial_stage_adoption_receipt: _SQLiteCursorInitialStageAdoptionReceipt | None
     initial_stage_adoption_receipt_mint_count: Literal[0, 1]
+    publication_rebind_context: _SQLiteCursorPublicationRebindContext | None
+    publication_session_consumed_tombstone: (
+        _SQLiteCursorPublicationSessionConsumedTombstone | None
+    )
+    post_rebind_watermark_adoption: _SQLiteCursorPostRebindWatermarkAdoption | None
     receipt_consumption_count: Literal[0, 4]
     tombstone_mint_count: Literal[0, 4]
     migration_0002_consumed_tombstone: (
@@ -890,6 +1011,12 @@ class _AuthorityState:
     write_phase: _WritePhase = "ready-0002"
     publication_prepared_owner: _SQLiteCursorPublicationSessionPreparedOwner | None = None
     publication_session: ReferenceType[_SQLiteCursorPublicationSession] | None = None
+    publication_rebind_context: _SQLiteCursorPublicationRebindContext | None = None
+    publication_rebind_context_state: _PublicationRebindContextState | None = None
+    publication_session_consumed_tombstone: (
+        _SQLiteCursorPublicationSessionConsumedTombstone | None
+    ) = None
+    post_rebind_watermark_adoption: _SQLiteCursorPostRebindWatermarkAdoption | None = None
 
 
 @dataclass(slots=True)
@@ -926,7 +1053,78 @@ class _PublicationSessionState:
     target_descriptor_hash: str
     target_schema_identity: str
     consumed_tombstone: _ConsumedClockTombstone | None = None
-    lifecycle: Literal["pending", "publication-active", "poisoned"] = "pending"
+    rebind_consumed_tombstone: _SQLiteCursorPublicationSessionConsumedTombstone | None = None
+    lifecycle: Literal[
+        "pending", "publication-active", "consumed-for-rebind", "poisoned"
+    ] = "pending"
+
+
+@dataclass(slots=True, weakref_slot=True)
+class _PublicationRebindContextState:
+    session_ref: ReferenceType[_SQLiteCursorPublicationSession]
+    prepared_owner: _SQLiteCursorPublicationRebindPreparedOwner
+    execution: _SQLiteConnectionCursorPublicationRebindExecution
+    prepared_execution_snapshot: _SQLiteConnectionCursorPublicationRebindSnapshot
+    authority_ref: ReferenceType[_SQLiteCursorOuterPublicationAuthority]
+    connection: SQLiteV1BaselineConnectionOwner
+    transaction_generation: object
+    historical_transaction_epoch: int
+    historical_total_changes: int
+    historical_outer_ledger: _SQLiteCursorOuterPublicationLedgerSnapshot
+    receipt: SQLiteCursorPreRebindReceipt
+    pre_rebind_receipt_sha256: str
+    b2_cursor_count: int
+    b2_immutable_root_sha256: str
+    source_descriptor_hash: str
+    source_schema_identity: str
+    target_descriptor_hash: str
+    target_schema_identity: str
+    parameter_values: tuple[str, str, str, str]
+    lifecycle: Literal[
+        "prepared",
+        "released-before-write",
+        "session-consumed",
+        "write-adopted",
+        "poisoned",
+        "retired",
+    ] = "prepared"
+    tombstone: _SQLiteCursorPublicationSessionConsumedTombstone | None = None
+    tombstone_state: _PublicationSessionConsumedTombstoneState | None = None
+    adoption: _SQLiteCursorPostRebindWatermarkAdoption | None = None
+    adoption_state: _PostRebindWatermarkAdoptionState | None = None
+
+    @property
+    def session(self) -> _SQLiteCursorPublicationSession:
+        session = self.session_ref()
+        if session is None:
+            _fail("GE_CURSOR_B3_PUBLICATION_REBIND_CONTEXT")
+        return session
+
+    @property
+    def authority(self) -> _SQLiteCursorOuterPublicationAuthority:
+        authority = self.authority_ref()
+        if authority is None:
+            _fail("GE_CURSOR_B3_PUBLICATION_REBIND_CONTEXT")
+        return authority
+
+
+@dataclass(slots=True, weakref_slot=True)
+class _PublicationSessionConsumedTombstoneState:
+    context: _PublicationRebindContextState
+    lifecycle: Literal["active", "adopted", "poisoned", "retired"] = "active"
+
+
+@dataclass(slots=True, weakref_slot=True)
+class _PostRebindWatermarkAdoptionState:
+    context: _PublicationRebindContextState
+    tombstone: _PublicationSessionConsumedTombstoneState
+    execution_snapshot: _SQLiteConnectionCursorPublicationRebindSnapshot
+    adopted_transaction_epoch: int
+    adopted_total_changes: int
+    total_changes_delta: int
+    affected_rows: int
+    adopted_outer_ledger: _SQLiteCursorOuterPublicationLedgerSnapshot
+    lifecycle: Literal["active", "poisoned", "retired"] = "active"
 
 
 @dataclass(frozen=True, slots=True)
@@ -1214,6 +1412,16 @@ class _WeakPublicationSessionState(NamedTuple):
     state_ref: ReferenceType[_PublicationSessionState]
 
 
+class _WeakPublicationRebindState(NamedTuple):
+    authority_ref: ReferenceType[_SQLiteCursorOuterPublicationAuthority]
+    state_ref: ReferenceType[object]
+
+
+class _PublicationRebindContextLink(NamedTuple):
+    key_ref: ReferenceType[object]
+    context_ref: ReferenceType[_SQLiteCursorPublicationRebindContext]
+
+
 class _AuthorityLink(NamedTuple):
     key_ref: ReferenceType[object]
     authority_ref: ReferenceType[_SQLiteCursorStageOwnershipOuterPublicationAuthority]
@@ -1225,6 +1433,13 @@ _AUTHORITIES: dict[int, _IdentityEntry] = {}
 _PUBLICATION_PREPARED: dict[int, _IdentityEntry] = {}
 _PUBLICATION_PREPARED_BY_AUTHORITY: dict[int, _IdentityEntry] = {}
 _PUBLICATION_SESSIONS: dict[int, _IdentityEntry] = {}
+_PUBLICATION_REBIND_CONTEXTS: dict[int, _IdentityEntry] = {}
+_PUBLICATION_REBIND_CONTEXT_BY_SESSION: dict[int, _PublicationRebindContextLink] = {}
+_PUBLICATION_REBIND_CONTEXT_BY_PREPARED_OWNER: dict[
+    int, _PublicationRebindContextLink
+] = {}
+_PUBLICATION_SESSION_CONSUMED_TOMBSTONES: dict[int, _IdentityEntry] = {}
+_POST_REBIND_WATERMARK_ADOPTIONS: dict[int, _IdentityEntry] = {}
 _AUTHORITY_BY_EVIDENCE: dict[int, _AuthorityLink] = {}
 _AUTHORITY_BY_TRANSFER: dict[int, _AuthorityLink] = {}
 _MIGRATION_0002_RECEIPTS: dict[int, _IdentityEntry] = {}
@@ -1259,6 +1474,7 @@ _AUTHORITY_SESSION_STATE_SLOT = (
 )
 _AUTHORITY_STATE_SLOT = "_SQLiteCursorStageOwnershipOuterPublicationAuthority__publication_state"
 _SESSION_STATE_SLOT = "_SQLiteCursorPublicationSession__state"
+_REBIND_CONTEXT_STATE_SLOT = "_SQLiteCursorPublicationRebindContext__state"
 _DICT_GET = dict.get
 _DICT_SETITEM = dict.__setitem__
 _DICT_POP = dict.pop
@@ -1386,6 +1602,12 @@ _EXECUTE_OPERATION_SEQUENCE_ZERO = _execute_sqlite_connection_operation_sequence
 _READ_OPERATION_SEQUENCE_ZERO_PROGRESS = (
     _read_sqlite_connection_operation_sequence_zero_execution_snapshot_intrinsic
 )
+_READ_CURSOR_PUBLICATION_REBIND_PROGRESS = (
+    _read_sqlite_connection_cursor_publication_rebind_snapshot_intrinsic
+)
+_RELEASE_CURSOR_PUBLICATION_REBIND = (
+    _release_sqlite_connection_cursor_publication_rebind_intrinsic
+)
 _DIGEST_INITIAL_WRITE_PARAMETERS = _digest_sqlite_initial_write_parameters_intrinsic
 _DIGEST_INITIAL_WRITE_RESULT = _digest_sqlite_initial_write_result_intrinsic
 _DIGEST_INITIAL_WRITE_PARAMETERS_VERIFIER = _digest_sqlite_initial_write_parameters_intrinsic
@@ -1431,6 +1653,120 @@ def _identity_get(
         return None
     entry = _dictionary_get(registry, _identity(key))
     return entry.value if entry is not None and entry.key_ref() is key else None
+
+
+def _rebind_state_set(
+    registry: dict[int, _IdentityEntry],
+    key: object,
+    authority: _SQLiteCursorOuterPublicationAuthority,
+    state: object,
+) -> None:
+    """Register a rebind identity without a value-to-key retention cycle."""
+
+    _identity_set(
+        registry,
+        key,
+        _WeakPublicationRebindState(_STABLE_REF(authority), _STABLE_REF(state)),
+    )
+
+
+_REGISTER_PUBLICATION_REBIND_CONTEXT = _rebind_state_set
+_REGISTER_PUBLICATION_REBIND_TOMBSTONE = _rebind_state_set
+_REGISTER_POST_REBIND_ADOPTION = _rebind_state_set
+
+
+def _rebind_state_discard_exact(
+    registry: dict[int, _IdentityEntry], key: object
+) -> None:
+    key_id = _STABLE_ID(key)
+    entry = _DICT_GET(registry, key_id)
+    if entry is not None and entry.key_ref() is key:
+        _DICT_POP(registry, key_id, None)
+
+
+def _rebind_state_get(
+    registry: dict[int, _IdentityEntry],
+    key: object,
+    exact_type: type[object],
+    state_type: type[object],
+) -> object | None:
+    selected = _identity_get(registry, key, exact_type)
+    if not isinstance(selected, _WeakPublicationRebindState):
+        return None
+    authority = selected.authority_ref()
+    state = selected.state_ref()
+    if authority is None or _STABLE_TYPE(state) is not state_type:
+        return None
+    return state
+
+
+def _rebind_link_set(
+    registry: dict[int, _PublicationRebindContextLink],
+    key: object,
+    context: _SQLiteCursorPublicationRebindContext,
+) -> None:
+    key_id = _STABLE_ID(key)
+
+    def retire(dead: ReferenceType[object]) -> None:
+        current = _DICT_GET(registry, key_id)
+        if current is not None and (
+            current.key_ref is dead or current.context_ref is dead
+        ):
+            _DICT_POP(registry, key_id, None)
+
+    key_ref = _STABLE_REF(key, retire)
+    context_ref = _STABLE_REF(
+        context,
+        cast(
+            Callable[[ReferenceType[_SQLiteCursorPublicationRebindContext]], None],
+            retire,
+        ),
+    )
+    _DICT_SETITEM(registry, key_id, _PublicationRebindContextLink(key_ref, context_ref))
+
+
+_REGISTER_PUBLICATION_REBIND_LINK = _rebind_link_set
+
+
+def _rebind_link_get(
+    registry: dict[int, _PublicationRebindContextLink],
+    key: object,
+) -> _SQLiteCursorPublicationRebindContext | None:
+    entry = _DICT_GET(registry, _STABLE_ID(key))
+    if entry is None or entry.key_ref() is not key:
+        return None
+    return entry.context_ref()
+
+
+def _rebind_link_discard_exact(
+    registry: dict[int, _PublicationRebindContextLink],
+    key: object,
+    context: _SQLiteCursorPublicationRebindContext,
+) -> None:
+    key_id = _STABLE_ID(key)
+    entry = _DICT_GET(registry, key_id)
+    if (
+        entry is not None
+        and entry.key_ref() is key
+        and entry.context_ref() is context
+    ):
+        _DICT_POP(registry, key_id, None)
+
+
+def _rebind_link_delete_exact(
+    registry: dict[int, _PublicationRebindContextLink],
+    key: object,
+    context: _SQLiteCursorPublicationRebindContext,
+) -> None:
+    key_id = _STABLE_ID(key)
+    entry = _DICT_GET(registry, key_id)
+    if (
+        entry is None
+        or entry.key_ref() is not key
+        or entry.context_ref() is not context
+    ):
+        _fail("GE_CURSOR_B3_PUBLICATION_REBIND_CONTEXT")
+    _DICT_POP(registry, key_id, None)
 
 
 def _retire_dead_link(
@@ -1496,7 +1832,7 @@ def _authority_state(authority: object) -> _AuthorityState:
             "SQLite outer-publication private state drifted",
         )
         _fail("GE_CURSOR_B3_OUTER_AUTHORITY")
-    return state
+    return cast(_AuthorityState, state)
 
 
 def _bind_authority_state(
@@ -1531,6 +1867,15 @@ def _bind_publication_session_state(
             _STABLE_REF(state),
         ),
     )
+
+
+def _bind_publication_rebind_context_state(
+    context: _SQLiteCursorPublicationRebindContext,
+    state: _PublicationRebindContextState,
+) -> None:
+    if _OBJECT_GETATTRIBUTE(context, _REBIND_CONTEXT_STATE_SLOT) is not None:
+        _fail("GE_CURSOR_B3_PUBLICATION_REBIND_CONTEXT")
+    _OBJECT_SETATTR(context, _REBIND_CONTEXT_STATE_SLOT, state)
 
 
 def _publication_session_state(
@@ -1578,6 +1923,74 @@ def _publication_session_state(
                 "SQLite publication-session private state drifted",
             )
         _fail("GE_CURSOR_B3_PUBLICATION_SESSION")
+    return state
+
+
+def _publication_rebind_context_state(
+    context: object,
+) -> _PublicationRebindContextState:
+    selected = _rebind_state_get(
+        _PUBLICATION_REBIND_CONTEXTS,
+        context,
+        _SQLiteCursorPublicationRebindContext,
+        _PublicationRebindContextState,
+    )
+    state = cast(_PublicationRebindContextState | None, selected)
+    try:
+        anchored = _OBJECT_GETATTRIBUTE(context, _REBIND_CONTEXT_STATE_SLOT)
+    except (AttributeError, TypeError):
+        anchored = None
+    if state is None or anchored is not state:
+        _fail("GE_CURSOR_B3_PUBLICATION_REBIND_CONTEXT")
+    authority_state = _authority_state(state.authority)
+    is_current = (
+        authority_state.publication_rebind_context is context
+        and authority_state.publication_rebind_context_state is state
+    )
+    is_released = (
+        state.lifecycle == "released-before-write"
+        and authority_state.publication_rebind_context is not context
+        and authority_state.publication_rebind_context_state is not state
+        and _rebind_link_get(
+            _PUBLICATION_REBIND_CONTEXT_BY_PREPARED_OWNER, state.prepared_owner
+        )
+        is context
+        and _rebind_link_get(_PUBLICATION_REBIND_CONTEXT_BY_SESSION, state.session)
+        is not context
+    )
+    if not is_current and not is_released:
+        _poison(authority_state, state.authority, "SQLite publication rebind context drifted")
+        _fail("GE_CURSOR_B3_PUBLICATION_REBIND_CONTEXT")
+    return state
+
+
+def _publication_session_consumed_tombstone_state(
+    tombstone: object,
+) -> _PublicationSessionConsumedTombstoneState:
+    selected = _rebind_state_get(
+        _PUBLICATION_SESSION_CONSUMED_TOMBSTONES,
+        tombstone,
+        _SQLiteCursorPublicationSessionConsumedTombstone,
+        _PublicationSessionConsumedTombstoneState,
+    )
+    state = cast(_PublicationSessionConsumedTombstoneState | None, selected)
+    if state is None or state.context.tombstone is not tombstone:
+        _fail("GE_CURSOR_B3_PUBLICATION_REBIND_TOMBSTONE")
+    return state
+
+
+def _post_rebind_watermark_adoption_state(
+    adoption: object,
+) -> _PostRebindWatermarkAdoptionState:
+    selected = _rebind_state_get(
+        _POST_REBIND_WATERMARK_ADOPTIONS,
+        adoption,
+        _SQLiteCursorPostRebindWatermarkAdoption,
+        _PostRebindWatermarkAdoptionState,
+    )
+    state = cast(_PostRebindWatermarkAdoptionState | None, selected)
+    if state is None or state.context.adoption is not adoption:
+        _fail("GE_CURSOR_B3_POST_REBIND_ADOPTION")
     return state
 
 
@@ -1707,6 +2120,16 @@ def _poison(
 ) -> None:
     if state.lifecycle == "retired":
         return
+    context = state.publication_rebind_context_state
+    if context is not None:
+        context.lifecycle = "poisoned"
+        if context.tombstone_state is not None:
+            context.tombstone_state.lifecycle = "poisoned"
+        if context.adoption_state is not None:
+            context.adoption_state.lifecycle = "poisoned"
+        session_state = context.session
+        with suppress(BaseException):
+            _publication_session_state(session_state).lifecycle = "poisoned"
     state.lifecycle = "poisoned"
     state.write_phase = "poisoned"
     state.stage_ownership_poison_reason = reason
@@ -1734,6 +2157,13 @@ def _retire(
 ) -> None:
     if state.lifecycle in {"poisoned", "retired"}:
         return
+    context = state.publication_rebind_context_state
+    if context is not None:
+        context.lifecycle = "retired"
+        if context.tombstone_state is not None:
+            context.tombstone_state.lifecycle = "retired"
+        if context.adoption_state is not None:
+            context.adoption_state.lifecycle = "retired"
     state.lifecycle = "retired"
     state.write_phase = "retired"
     with suppress(BaseException):
@@ -1958,7 +2388,11 @@ def _assert_sqlite_cursor_outer_publication_authority_intrinsic(
         clock_generation = _active_clock_graph(state)
         if clock_generation is not generation:
             _fail("GE_CURSOR_B3_OUTER_STALE_FENCE")
-        if state.write_phase == "publication-active":
+        if state.write_phase in {
+            "publication-active",
+            "publication-session-consumed",
+            "cursor-rebind-adopted",
+        }:
             prepared_owner = state.publication_prepared_owner
             session = state.publication_session() if state.publication_session is not None else None
             if (
@@ -1977,6 +2411,20 @@ def _assert_sqlite_cursor_outer_publication_authority_intrinsic(
                 prepared_owner,
                 session,
             )
+            if state.write_phase == "publication-session-consumed":
+                tombstone = state.publication_session_consumed_tombstone
+                if tombstone is None:
+                    _fail("GE_CURSOR_B3_PUBLICATION_REBIND_TOMBSTONE")
+                _assert_sqlite_cursor_publication_session_consumed_tombstone_intrinsic(
+                    tombstone
+                )
+            elif state.write_phase == "cursor-rebind-adopted":
+                adoption = state.post_rebind_watermark_adoption
+                if adoption is None:
+                    _fail("GE_CURSOR_B3_POST_REBIND_ADOPTION")
+                _assert_sqlite_cursor_post_rebind_watermark_adoption_intrinsic(
+                    adoption
+                )
         elif state.write_phase == "initial-stage-adoption-complete":
             _assert_adopted_stage_ownership_from_state(state, authority)
         elif (
@@ -5817,6 +6265,129 @@ def _assert_adopted_stage_ownership_from_state(
     )
 
 
+def _assert_historical_initial_adoption_during_cursor_rebind(
+    state: _AuthorityState,
+    authority: _SQLiteCursorOuterPublicationAuthority,
+    checked: _CheckedInitialPublicationBundle,
+    fence: _SQLiteCursorPostDdlCatalogFence,
+    reader_lease: _SQLiteCursorPostDdlPublicationReaderLease,
+    receipt: _SQLiteCursorInitialStageAdoptionReceipt,
+    record: _InitialStageAdoptionReceiptRecord,
+) -> _SQLiteCursorInitialStageAdoptionReceipt:
+    context = state.publication_rebind_context_state
+    if context is None:
+        _fail("GE_CURSOR_B3_INITIAL_ADOPTION_RECEIPT_DRIFT")
+    phase_valid = False
+    if state.write_phase == "publication-session-consumed":
+        tombstone = state.publication_session_consumed_tombstone
+        if tombstone is None:
+            _fail("GE_CURSOR_B3_INITIAL_ADOPTION_RECEIPT_DRIFT")
+        _assert_sqlite_cursor_publication_session_consumed_tombstone_intrinsic(
+            tombstone
+        )
+        phase_valid = (
+            context.lifecycle == "session-consumed"
+            and context.tombstone is tombstone
+            and context.adoption is None
+            and context.adoption_state is None
+            and state.post_rebind_watermark_adoption is None
+            and state.current_transaction_epoch
+            == context.historical_transaction_epoch
+            and state.current_total_changes == context.historical_total_changes
+        )
+    elif state.write_phase == "cursor-rebind-adopted":
+        adoption_token = state.post_rebind_watermark_adoption
+        if adoption_token is None:
+            _fail("GE_CURSOR_B3_INITIAL_ADOPTION_RECEIPT_DRIFT")
+        _assert_sqlite_cursor_post_rebind_watermark_adoption_intrinsic(adoption_token)
+        adoption = context.adoption_state
+        phase_valid = (
+            adoption is not None
+            and context.lifecycle == "write-adopted"
+            and context.adoption is adoption_token
+            and context.adoption_state is adoption
+            and adoption.adopted_transaction_epoch == state.current_transaction_epoch
+            and adoption.adopted_total_changes == state.current_total_changes
+            and _exact_outer_ledger(
+                adoption.adopted_outer_ledger, record.adopted_outer_ledger
+            )
+        )
+    else:
+        _fail("GE_CURSOR_B3_INITIAL_ADOPTION_RECEIPT_DRIFT")
+    migration_tombstone = record.migration_0002_tombstone_ref()
+    entries_tombstone = record.baseline_entries_tombstone_ref()
+    header_tombstone = record.baseline_header_tombstone_ref()
+    sequence_tombstone = record.operation_sequence_zero_tombstone_ref()
+    retired_b2_fence = record.retired_b2_fence_ref()
+    if (
+        not phase_valid
+        or record.lifecycle != "active"
+        or record.mint_count != 1
+        or record.write_kind != "initial-publication-stage-adoption"
+        or record.authority_ref() is not authority
+        or record.connection_id != _STABLE_ID(state.connection)
+        or record.stage_ref() is not state.stage
+        or record.receipt_ref() is not state.receipt
+        or record.projection_identity_id != _STABLE_ID(state.projection_identity)
+        or record.projection_reference_ref() is not state.projection_reference
+        or record.transfer_ref() is not state.transfer
+        or record.migration_0002_receipt_ref() is not checked.migration_0002_receipt
+        or record.baseline_entries_receipt_ref() is not checked.baseline_entries_receipt
+        or record.baseline_header_receipt_ref() is not checked.baseline_header_receipt
+        or record.operation_sequence_zero_receipt_ref()
+        is not checked.operation_sequence_zero_receipt
+        or record.fence_ref() is not fence
+        or record.reader_lease_ref() is not reader_lease
+        or migration_tombstone is None
+        or entries_tombstone is None
+        or header_tombstone is None
+        or sequence_tombstone is None
+        or retired_b2_fence is None
+        or state.initial_stage_adoption_receipt is not receipt
+        or state.initial_stage_adoption_receipt_mint_count != 1
+        or state.receipt_consumption_count != 4
+        or state.tombstone_mint_count != 4
+        or state.migration_0002_consumed_tombstone is not migration_tombstone
+        or state.baseline_entries_consumed_tombstone is not entries_tombstone
+        or state.baseline_header_consumed_tombstone is not header_tombstone
+        or state.operation_sequence_zero_consumed_tombstone is not sequence_tombstone
+        or context.receipt is not state.receipt
+        or record.adopted_transaction_epoch != context.historical_transaction_epoch
+        or record.adopted_total_changes != context.historical_total_changes
+        or not _exact_outer_ledger(
+            record.adopted_outer_ledger, context.historical_outer_ledger
+        )
+        or record.target_catalog_sha256
+        != SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_EXPECTED_SHA256
+    ):
+        _fail("GE_CURSOR_B3_INITIAL_ADOPTION_RECEIPT_DRIFT")
+    _assert_consumption_intrinsic(
+        _MIGRATION_0002_RECEIPT_CONSUMPTIONS,
+        checked.migration_0002_receipt,
+        migration_tombstone,
+        receipt,
+    )
+    _assert_consumption_intrinsic(
+        _BASELINE_ENTRIES_PUBLICATION_RECEIPT_CONSUMPTIONS,
+        checked.baseline_entries_receipt,
+        entries_tombstone,
+        receipt,
+    )
+    _assert_consumption_intrinsic(
+        _BASELINE_HEADER_PUBLICATION_RECEIPT_CONSUMPTIONS,
+        checked.baseline_header_receipt,
+        header_tombstone,
+        receipt,
+    )
+    _assert_consumption_intrinsic(
+        _OPERATION_SEQUENCE_ZERO_PUBLICATION_RECEIPT_CONSUMPTIONS,
+        checked.operation_sequence_zero_receipt,
+        sequence_tombstone,
+        receipt,
+    )
+    return receipt
+
+
 def _assert_sqlite_cursor_initial_stage_adoption_receipt_intrinsic(
     authority: _SQLiteCursorOuterPublicationAuthority,
     bundle: _SQLiteCursorInitialPublicationReceiptBundle,
@@ -5835,6 +6406,19 @@ def _assert_sqlite_cursor_initial_stage_adoption_receipt_intrinsic(
             or state.initial_stage_adoption_receipt is not receipt
         ):
             _fail("GE_CURSOR_B3_INITIAL_ADOPTION_RECEIPT_SUBSTITUTION")
+        if state.write_phase in {
+            "publication-session-consumed",
+            "cursor-rebind-adopted",
+        }:
+            return _assert_historical_initial_adoption_during_cursor_rebind(
+                state,
+                authority,
+                checked,
+                fence,
+                reader_lease,
+                receipt,
+                record,
+            )
         migration_tombstone = record.migration_0002_tombstone_ref()
         entries_tombstone = record.baseline_entries_tombstone_ref()
         header_tombstone = record.baseline_header_tombstone_ref()
@@ -5959,6 +6543,21 @@ def _create_sqlite_cursor_publication_session_cancellation_controller_intrinsic(
     signal = _SQLiteCursorPublicationSessionCancellationSignal(_CONSTRUCTION_TOKEN)
     _identity_set(_PUBLICATION_CANCELLATIONS, signal, _CancellationState())
     return _SQLiteCursorPublicationSessionCancellationController(_CONSTRUCTION_TOKEN, signal)
+
+
+def _is_sqlite_cursor_publication_session_cancellation_requested_intrinsic(
+    signal: _SQLiteCursorPublicationSessionCancellationSignal | None,
+) -> bool:
+    if signal is None:
+        return False
+    selected = _identity_get(
+        _PUBLICATION_CANCELLATIONS,
+        signal,
+        _SQLiteCursorPublicationSessionCancellationSignal,
+    )
+    if selected is None or _STABLE_TYPE(selected) is not _CancellationState:
+        _fail("GE_CURSOR_B3_PUBLICATION_CANCELLATION")
+    return selected.cancelled
 
 
 def _prepare_sqlite_cursor_publication_session_intrinsic(
@@ -6605,6 +7204,833 @@ def _read_sqlite_cursor_publication_session_snapshot_intrinsic(
     )
 
 
+def _safe_publication_rebind_count(value: object, code: str) -> int:
+    if _STABLE_TYPE(value) is not int or not 0 <= value <= _MAX_SAFE_INTEGER:
+        _fail(code)
+    return value
+
+
+def _prepared_publication_rebind_snapshot_is_exact(
+    snapshot: _SQLiteConnectionCursorPublicationRebindSnapshot,
+    state: _AuthorityState,
+) -> bool:
+    return (
+        _STABLE_TYPE(snapshot) is _SQLiteConnectionCursorPublicationRebindSnapshot
+        and snapshot.lifecycle == "prepared"
+        and snapshot.rebind_sql == SQLITE_CURSOR_PUBLICATION_REBIND_SQL_INTRINSIC
+        and snapshot.rebind_sql_sha256
+        == SQLITE_CURSOR_PUBLICATION_REBIND_SQL_SHA256_INTRINSIC
+        and snapshot.parameter_order
+        == SQLITE_CURSOR_PUBLICATION_REBIND_PARAMETER_ORDER_INTRINSIC
+        and snapshot.changes_sql == SQLITE_CURSOR_PUBLICATION_CHANGES_SQL_INTRINSIC
+        and snapshot.changes_sql_sha256
+        == SQLITE_CURSOR_PUBLICATION_CHANGES_SQL_SHA256_INTRINSIC
+        and snapshot.parameters is None
+        and snapshot.prepare_count == 1
+        and snapshot.execute_count == 0
+        and snapshot.release_count == 0
+        and snapshot.changes_prepare_count == 0
+        and snapshot.changes_fetch_count == 0
+        and snapshot.changes_release_count == 0
+        and snapshot.affected_rows is None
+        and snapshot.changes_affected_rows is None
+        and snapshot.transaction_generation is state.transaction_generation
+        and snapshot.transaction_epoch_before == state.current_transaction_epoch
+        and snapshot.transaction_epoch == state.current_transaction_epoch
+        and snapshot.total_changes_before == state.current_total_changes
+        and snapshot.total_changes == state.current_total_changes
+        and snapshot.total_changes_delta == 0
+        and tuple(snapshot.cursor_ledger_before) == (0, 0, 0)
+        and tuple(snapshot.cursor_ledger_after) == (0, 0, 0)
+        and tuple(snapshot.cursor_ledger_delta) == (0, 0, 0)
+    )
+
+
+def _released_prewrite_publication_rebind_snapshot_is_exact(
+    snapshot: _SQLiteConnectionCursorPublicationRebindSnapshot,
+    context: _PublicationRebindContextState,
+) -> bool:
+    return (
+        _STABLE_TYPE(snapshot) is _SQLiteConnectionCursorPublicationRebindSnapshot
+        and snapshot.lifecycle == "released"
+        and snapshot.rebind_sql == SQLITE_CURSOR_PUBLICATION_REBIND_SQL_INTRINSIC
+        and snapshot.rebind_sql_sha256
+        == SQLITE_CURSOR_PUBLICATION_REBIND_SQL_SHA256_INTRINSIC
+        and snapshot.parameter_order
+        == SQLITE_CURSOR_PUBLICATION_REBIND_PARAMETER_ORDER_INTRINSIC
+        and snapshot.changes_sql == SQLITE_CURSOR_PUBLICATION_CHANGES_SQL_INTRINSIC
+        and snapshot.changes_sql_sha256
+        == SQLITE_CURSOR_PUBLICATION_CHANGES_SQL_SHA256_INTRINSIC
+        and snapshot.parameters is None
+        and snapshot.prepare_count == 1
+        and snapshot.execute_count == 0
+        and snapshot.release_count == 1
+        and snapshot.changes_prepare_count == 0
+        and snapshot.changes_fetch_count == 0
+        and snapshot.changes_release_count == 0
+        and snapshot.affected_rows is None
+        and snapshot.changes_affected_rows is None
+        and snapshot.transaction_generation is context.transaction_generation
+        and snapshot.transaction_epoch_before == context.historical_transaction_epoch
+        and snapshot.transaction_epoch == context.historical_transaction_epoch
+        and snapshot.total_changes_before == context.historical_total_changes
+        and snapshot.total_changes == context.historical_total_changes
+        and snapshot.total_changes_delta == 0
+        and tuple(snapshot.cursor_ledger_before) == (0, 0, 0)
+        and tuple(snapshot.cursor_ledger_after) == (0, 0, 0)
+        and tuple(snapshot.cursor_ledger_delta) == (0, 0, 0)
+    )
+
+
+def _completed_publication_rebind_snapshot_is_exact(
+    snapshot: _SQLiteConnectionCursorPublicationRebindSnapshot,
+    context: _PublicationRebindContextState,
+) -> bool:
+    affected = snapshot.affected_rows
+    prepared = context.prepared_execution_snapshot
+    return (
+        _STABLE_TYPE(snapshot) is _SQLiteConnectionCursorPublicationRebindSnapshot
+        and snapshot.lifecycle == "completed"
+        and snapshot.rebind_sql == SQLITE_CURSOR_PUBLICATION_REBIND_SQL_INTRINSIC
+        and snapshot.rebind_sql_sha256
+        == SQLITE_CURSOR_PUBLICATION_REBIND_SQL_SHA256_INTRINSIC
+        and snapshot.parameter_order
+        == SQLITE_CURSOR_PUBLICATION_REBIND_PARAMETER_ORDER_INTRINSIC
+        and snapshot.changes_sql == SQLITE_CURSOR_PUBLICATION_CHANGES_SQL_INTRINSIC
+        and snapshot.changes_sql_sha256
+        == SQLITE_CURSOR_PUBLICATION_CHANGES_SQL_SHA256_INTRINSIC
+        and snapshot.parameters == context.parameter_values
+        and snapshot.rebind_sql == prepared.rebind_sql
+        and snapshot.rebind_sql_sha256 == prepared.rebind_sql_sha256
+        and snapshot.parameter_order == prepared.parameter_order
+        and snapshot.changes_sql == prepared.changes_sql
+        and snapshot.changes_sql_sha256 == prepared.changes_sql_sha256
+        and snapshot.prepare_count == 1
+        and snapshot.execute_count == 1
+        and snapshot.release_count == 1
+        and snapshot.changes_prepare_count == 1
+        and snapshot.changes_fetch_count == 1
+        and snapshot.changes_release_count == 1
+        and _STABLE_TYPE(affected) is int
+        and 0 <= affected <= _MAX_SAFE_INTEGER
+        and snapshot.changes_affected_rows == affected
+        and snapshot.transaction_generation is context.transaction_generation
+        and snapshot.transaction_generation is prepared.transaction_generation
+        and snapshot.transaction_epoch_before == context.historical_transaction_epoch
+        and snapshot.transaction_epoch_before == prepared.transaction_epoch_before
+        and snapshot.transaction_epoch == context.historical_transaction_epoch + 1
+        and snapshot.total_changes_before == context.historical_total_changes
+        and snapshot.total_changes_before == prepared.total_changes_before
+        and snapshot.total_changes_delta == affected
+        and snapshot.total_changes == context.historical_total_changes + affected
+        and tuple(snapshot.cursor_ledger_before) == (0, 0, 0)
+        and snapshot.cursor_ledger_before == prepared.cursor_ledger_before
+        and tuple(snapshot.cursor_ledger_after) == (affected, 1, 1)
+        and tuple(snapshot.cursor_ledger_delta) == (affected, 1, 1)
+    )
+
+
+def _prepare_sqlite_cursor_publication_rebind_context_intrinsic(
+    session: _SQLiteCursorPublicationSession,
+    execution: _SQLiteConnectionCursorPublicationRebindExecution,
+) -> _SQLiteCursorPublicationRebindContext:
+    """Bind exact active S, opaque P and authentic still-prepared E."""
+
+    _assert_sqlite_cursor_publication_session_intrinsic(session)
+    publication = _publication_session_state(session)
+    authority = publication.authority
+    state = _authority_state(authority)
+    if (
+        _rebind_link_get(_PUBLICATION_REBIND_CONTEXT_BY_SESSION, session) is not None
+        or state.publication_rebind_context is not None
+    ):
+        _poison(state, authority, "SQLite publication rebind context was prepared twice")
+        _fail("GE_CURSOR_B3_PUBLICATION_REBIND_CONTEXT_REUSE")
+    try:
+        execution_snapshot = _READ_CURSOR_PUBLICATION_REBIND_PROGRESS(
+            state.connection, execution
+        )
+        if not _prepared_publication_rebind_snapshot_is_exact(execution_snapshot, state):
+            _fail("GE_CURSOR_B3_PUBLICATION_REBIND_EXECUTION")
+        generation, epoch, total_changes = _owner_snapshot(state.connection)
+        live_lock = _LIVE_LOCK(state.connection)
+        catalog = _READ_VALIDATED_TARGET_CATALOG(state.connection)
+        provenance = _RECEIPT_PROVENANCE(state.receipt)
+        ledger = _outer_ledger_snapshot(state)
+        cursor_count = _safe_publication_rebind_count(
+            provenance.immutable_seal_receipt.cursor_count,
+            "GE_CURSOR_B3_PUBLICATION_REBIND_B2",
+        )
+        immutable_root = provenance.immutable_seal_receipt.immutable_root_sha256
+        if (
+            generation is not state.transaction_generation
+            or epoch != state.current_transaction_epoch
+            or total_changes != state.current_total_changes
+            or live_lock != publication.migration_lock_identity
+            or catalog.catalog_sha256
+            != SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_EXPECTED_SHA256
+            or publication.lifecycle != "publication-active"
+            or publication.rebind_consumed_tombstone is not None
+            or state.write_phase != "publication-active"
+            or state.publication_session is None
+            or state.publication_session() is not session
+            or provenance.projection_identity is not state.projection_identity
+            or provenance.projection_reference is not state.projection_reference
+            or provenance.immutable_seal_receipt.source_descriptor_hash
+            != state.source_descriptor_hash
+            or provenance.immutable_seal_receipt.source_schema_identity_sha256
+            != state.source_schema_identity_sha256
+            or _STABLE_TYPE(immutable_root) is not str
+            or len(immutable_root) != 64
+        ):
+            _fail("GE_CURSOR_B3_PUBLICATION_REBIND_GRAPH")
+    except BaseException:
+        _poison(state, authority, "SQLite publication rebind context preparation failed")
+        raise
+    token: _SQLiteCursorPublicationRebindContext | None = None
+    prepared_owner: _SQLiteCursorPublicationRebindPreparedOwner | None = None
+    try:
+        prepared_owner = _SQLiteCursorPublicationRebindPreparedOwner(_CONSTRUCTION_TOKEN)
+        token = _SQLiteCursorPublicationRebindContext(_CONSTRUCTION_TOKEN)
+        context = _PublicationRebindContextState(
+            session_ref=_STABLE_REF(session),
+            prepared_owner=prepared_owner,
+            execution=execution,
+            prepared_execution_snapshot=execution_snapshot,
+            authority_ref=_STABLE_REF(authority),
+            connection=state.connection,
+            transaction_generation=state.transaction_generation,
+            historical_transaction_epoch=state.current_transaction_epoch,
+            historical_total_changes=state.current_total_changes,
+            historical_outer_ledger=ledger,
+            receipt=state.receipt,
+            pre_rebind_receipt_sha256=provenance.receipt_sha256,
+            b2_cursor_count=cursor_count,
+            b2_immutable_root_sha256=immutable_root,
+            source_descriptor_hash=state.source_descriptor_hash,
+            source_schema_identity=state.source_schema_identity_sha256,
+            target_descriptor_hash=publication.target_descriptor_hash,
+            target_schema_identity=publication.target_schema_identity,
+            parameter_values=(
+                publication.target_descriptor_hash,
+                publication.target_schema_identity,
+                state.source_descriptor_hash,
+                state.source_schema_identity_sha256,
+            ),
+        )
+        _bind_publication_rebind_context_state(token, context)
+        _REGISTER_PUBLICATION_REBIND_CONTEXT(
+            _PUBLICATION_REBIND_CONTEXTS, token, authority, context
+        )
+        _REGISTER_PUBLICATION_REBIND_LINK(
+            _PUBLICATION_REBIND_CONTEXT_BY_SESSION, session, token
+        )
+        _REGISTER_PUBLICATION_REBIND_LINK(
+            _PUBLICATION_REBIND_CONTEXT_BY_PREPARED_OWNER, prepared_owner, token
+        )
+    except BaseException:
+        if token is not None:
+            if prepared_owner is not None:
+                _rebind_link_discard_exact(
+                    _PUBLICATION_REBIND_CONTEXT_BY_PREPARED_OWNER,
+                    prepared_owner,
+                    token,
+                )
+            _rebind_link_discard_exact(
+                _PUBLICATION_REBIND_CONTEXT_BY_SESSION, session, token
+            )
+            _rebind_state_discard_exact(_PUBLICATION_REBIND_CONTEXTS, token)
+            _OBJECT_SETATTR(token, _REBIND_CONTEXT_STATE_SLOT, None)
+        raise
+    exact_token = token
+    state.publication_rebind_context_state = context
+    state.publication_rebind_context = exact_token
+    return exact_token
+
+
+def _snapshot_sqlite_cursor_publication_rebind_context(
+    token: _SQLiteCursorPublicationRebindContext,
+    state: _PublicationRebindContextState,
+) -> _SQLiteCursorPublicationRebindContextSnapshot:
+    return _SQLiteCursorPublicationRebindContextSnapshot(
+        state.lifecycle,
+        state.session,
+        state.prepared_owner,
+        state.execution,
+        state.prepared_execution_snapshot,
+        state.authority,
+        state.connection,
+        state.transaction_generation,
+        state.historical_transaction_epoch,
+        state.historical_total_changes,
+        state.historical_outer_ledger,
+        state.receipt,
+        state.pre_rebind_receipt_sha256,
+        state.b2_cursor_count,
+        state.b2_immutable_root_sha256,
+        state.source_descriptor_hash,
+        state.source_schema_identity,
+        state.target_descriptor_hash,
+        state.target_schema_identity,
+        state.parameter_values,
+    )
+
+
+def _read_sqlite_cursor_publication_rebind_context_snapshot_intrinsic(
+    context: _SQLiteCursorPublicationRebindContext,
+) -> _SQLiteCursorPublicationRebindContextSnapshot:
+    return _snapshot_sqlite_cursor_publication_rebind_context(
+        context, _publication_rebind_context_state(context)
+    )
+
+
+def _assert_sqlite_cursor_publication_rebind_prepared_owner_identity_intrinsic(
+    prepared_owner: _SQLiteCursorPublicationRebindPreparedOwner,
+) -> _SQLiteCursorPublicationRebindPreparedOwner:
+    context_token = _rebind_link_get(
+        _PUBLICATION_REBIND_CONTEXT_BY_PREPARED_OWNER, prepared_owner
+    )
+    if context_token is None:
+        _fail("GE_CURSOR_B3_PUBLICATION_REBIND_PREPARED_OWNER")
+    context = _publication_rebind_context_state(context_token)
+    if context.prepared_owner is not prepared_owner:
+        _fail("GE_CURSOR_B3_PUBLICATION_REBIND_PREPARED_OWNER")
+    return prepared_owner
+
+
+def _assert_sqlite_cursor_publication_rebind_prepared_owner_intrinsic(
+    prepared_owner: _SQLiteCursorPublicationRebindPreparedOwner,
+) -> _SQLiteCursorPublicationRebindPreparedOwner:
+    _assert_sqlite_cursor_publication_rebind_prepared_owner_identity_intrinsic(
+        prepared_owner
+    )
+    context_token = _rebind_link_get(
+        _PUBLICATION_REBIND_CONTEXT_BY_PREPARED_OWNER, prepared_owner
+    )
+    if context_token is None:
+        _fail("GE_CURSOR_B3_PUBLICATION_REBIND_PREPARED_OWNER")
+    context = _publication_rebind_context_state(context_token)
+    state = _authority_state(context.authority)
+    if (
+        context.lifecycle != "prepared"
+        or context.prepared_owner is not prepared_owner
+        or state.publication_rebind_context is not context_token
+        or state.publication_rebind_context_state is not context
+        or _rebind_link_get(_PUBLICATION_REBIND_CONTEXT_BY_SESSION, context.session)
+        is not context_token
+    ):
+        _fail("GE_CURSOR_B3_PUBLICATION_REBIND_PREPARED_OWNER")
+    _assert_sqlite_cursor_publication_session_intrinsic(context.session)
+    return prepared_owner
+
+
+def _release_sqlite_cursor_publication_rebind_context_before_consume_intrinsic(
+    context_token: _SQLiteCursorPublicationRebindContext,
+    prepared_owner: _SQLiteCursorPublicationRebindPreparedOwner,
+) -> _SQLiteCursorPublicationRebindContext:
+    """Outer-authenticated cancellation of exact prepared E before S consumption."""
+
+    context = _publication_rebind_context_state(context_token)
+    authority = context.authority
+    state = _authority_state(authority)
+    if (
+        context.lifecycle != "prepared"
+        or context.prepared_owner is not prepared_owner
+        or _rebind_link_get(
+            _PUBLICATION_REBIND_CONTEXT_BY_PREPARED_OWNER, prepared_owner
+        )
+        is not context_token
+        or _rebind_link_get(_PUBLICATION_REBIND_CONTEXT_BY_SESSION, context.session)
+        is not context_token
+        or state.publication_rebind_context is not context_token
+        or state.publication_rebind_context_state is not context
+    ):
+        _poison(state, authority, "SQLite publication rebind cancellation substituted")
+        _fail("GE_CURSOR_B3_PUBLICATION_REBIND_RELEASE")
+    try:
+        _assert_sqlite_cursor_publication_session_intrinsic(context.session)
+        released = _RELEASE_CURSOR_PUBLICATION_REBIND(
+            context.connection, context.execution
+        )
+        observed = _READ_CURSOR_PUBLICATION_REBIND_PROGRESS(
+            context.connection, context.execution
+        )
+        generation, epoch, total_changes = _owner_snapshot(context.connection)
+        if (
+            not _released_prewrite_publication_rebind_snapshot_is_exact(
+                released, context
+            )
+            or observed != released
+            or generation is not context.transaction_generation
+            or epoch != context.historical_transaction_epoch
+            or total_changes != context.historical_total_changes
+            or not _exact_outer_ledger(
+                _outer_ledger_snapshot(state), context.historical_outer_ledger
+            )
+        ):
+            _fail("GE_CURSOR_B3_PUBLICATION_REBIND_RELEASE")
+        _rebind_link_delete_exact(
+            _PUBLICATION_REBIND_CONTEXT_BY_SESSION, context.session, context_token
+        )
+    except BaseException:
+        _poison(state, authority, "SQLite publication rebind cancellation failed")
+        raise
+    context.lifecycle = "released-before-write"
+    state.publication_rebind_context_state = None
+    state.publication_rebind_context = None
+    return context_token
+
+
+def _consume_sqlite_cursor_publication_session_for_rebind_intrinsic(
+    context_token: _SQLiteCursorPublicationRebindContext,
+) -> _SQLiteCursorPublicationSessionConsumedTombstone:
+    """Preallocate/register T, then consume S in an assignment-only tail."""
+
+    context = _publication_rebind_context_state(context_token)
+    authority = context.authority
+    state = _authority_state(authority)
+    publication = _publication_session_state(context.session)
+    if (
+        context.lifecycle != "prepared"
+        or context.tombstone is not None
+        or state.publication_rebind_context is not context_token
+        or state.publication_session_consumed_tombstone is not None
+        or publication.authority is not authority
+    ):
+        _poison(state, authority, "SQLite publication session consume was reused")
+        _fail("GE_CURSOR_B3_PUBLICATION_REBIND_CONSUME")
+    try:
+        _assert_sqlite_cursor_publication_session_intrinsic(context.session)
+        execution_snapshot = _READ_CURSOR_PUBLICATION_REBIND_PROGRESS(
+            context.connection, context.execution
+        )
+        provenance = _RECEIPT_PROVENANCE(context.receipt)
+        generation, epoch, total_changes = _owner_snapshot(context.connection)
+        if (
+            not _prepared_publication_rebind_snapshot_is_exact(execution_snapshot, state)
+            or execution_snapshot != context.prepared_execution_snapshot
+            or generation is not context.transaction_generation
+            or epoch != context.historical_transaction_epoch
+            or total_changes != context.historical_total_changes
+            or not _exact_outer_ledger(
+                _outer_ledger_snapshot(state), context.historical_outer_ledger
+            )
+            or provenance.receipt_sha256 != context.pre_rebind_receipt_sha256
+            or provenance.immutable_seal_receipt.cursor_count != context.b2_cursor_count
+            or provenance.immutable_seal_receipt.immutable_root_sha256
+            != context.b2_immutable_root_sha256
+        ):
+            _fail("GE_CURSOR_B3_PUBLICATION_REBIND_CONSUME_GRAPH")
+    except BaseException:
+        _poison(state, authority, "SQLite publication session consume validation failed")
+        raise
+    token: _SQLiteCursorPublicationSessionConsumedTombstone | None = None
+    try:
+        token = _SQLiteCursorPublicationSessionConsumedTombstone(_CONSTRUCTION_TOKEN)
+        consumed = _PublicationSessionConsumedTombstoneState(context)
+        _REGISTER_PUBLICATION_REBIND_TOMBSTONE(
+            _PUBLICATION_SESSION_CONSUMED_TOMBSTONES, token, authority, consumed
+        )
+    except BaseException:
+        if token is not None:
+            entry = _DICT_GET(
+                _PUBLICATION_SESSION_CONSUMED_TOMBSTONES, _STABLE_ID(token)
+            )
+            if entry is not None and entry.key_ref() is token:
+                _DICT_POP(
+                    _PUBLICATION_SESSION_CONSUMED_TOMBSTONES,
+                    _STABLE_ID(token),
+                    None,
+                )
+        raise
+    context.tombstone_state = consumed
+    context.tombstone = token
+    context.lifecycle = "session-consumed"
+    publication.rebind_consumed_tombstone = token
+    publication.lifecycle = "consumed-for-rebind"
+    state.publication_session_consumed_tombstone = token
+    state.write_phase = "publication-session-consumed"
+    return token
+
+
+def _assert_sqlite_cursor_publication_session_consumed_tombstone_intrinsic(
+    tombstone_token: _SQLiteCursorPublicationSessionConsumedTombstone,
+) -> _SQLiteCursorPublicationSessionConsumedTombstone:
+    consumed = _publication_session_consumed_tombstone_state(tombstone_token)
+    context = consumed.context
+    state = _authority_state(context.authority)
+    publication = _publication_session_state(context.session)
+    expected_phase = (
+        "cursor-rebind-adopted"
+        if consumed.lifecycle == "adopted"
+        else "publication-session-consumed"
+    )
+    if (
+        consumed.lifecycle not in {"active", "adopted"}
+        or context.tombstone is not tombstone_token
+        or context.tombstone_state is not consumed
+        or state.publication_rebind_context is None
+        or state.publication_rebind_context_state is not context
+        or state.publication_session_consumed_tombstone is not tombstone_token
+        or state.write_phase != expected_phase
+        or publication.lifecycle != "consumed-for-rebind"
+        or publication.rebind_consumed_tombstone is not tombstone_token
+    ):
+        _poison(state, context.authority, "SQLite consumed publication session drifted")
+        _fail("GE_CURSOR_B3_PUBLICATION_REBIND_TOMBSTONE")
+    return tombstone_token
+
+
+def _read_sqlite_cursor_publication_session_consumed_tombstone_snapshot_intrinsic(
+    tombstone: _SQLiteCursorPublicationSessionConsumedTombstone,
+) -> _SQLiteCursorPublicationSessionConsumedTombstoneSnapshot:
+    state = _publication_session_consumed_tombstone_state(tombstone)
+    context = state.context
+    authority_state = _authority_state(context.authority)
+    token = authority_state.publication_rebind_context
+    if token is None:
+        _fail("GE_CURSOR_B3_PUBLICATION_REBIND_CONTEXT")
+    return _SQLiteCursorPublicationSessionConsumedTombstoneSnapshot(
+        state.lifecycle,
+        token,
+        context.session,
+        context.prepared_owner,
+        context.execution,
+        context.historical_transaction_epoch,
+        context.historical_total_changes,
+    )
+
+
+def _assert_consumed_publication_rebind_graph_before_adoption(
+    context: _PublicationRebindContextState,
+    consumed: _PublicationSessionConsumedTombstoneState,
+    state: _AuthorityState,
+) -> None:
+    publication = _publication_session_state(context.session)
+    provenance = _RECEIPT_PROVENANCE(context.receipt)
+    prepared = context.prepared_execution_snapshot
+    catalog = _READ_VALIDATED_TARGET_CATALOG(context.connection)
+    live_lock = _LIVE_LOCK(context.connection)
+    clock_generation = _active_clock_graph(state)
+    second_clock = _READ_CLOCK_EVIDENCE(
+        publication.provider_clock_capability,
+        publication.pre_rebind_clock_evidence,
+    )
+    _ASSERT_CLOCK_PREDECESSOR(
+        publication.provider_clock_capability,
+        publication.pre_rebind_clock_evidence,
+        publication.outer_clock_evidence,
+    )
+    if publication.consumed_tombstone is None:
+        _fail("GE_CURSOR_B3_POST_REBIND_ADOPTION_GRAPH")
+    _ASSERT_CLOCK_TOMBSTONE(
+        publication.provider_clock_capability,
+        publication.pre_rebind_clock_evidence,
+        publication.consumed_tombstone,
+        "cursor-publication-session",
+    )
+    evidence_state = _WEAK_KEY_GET(_EVIDENCE, publication.pre_rebind_clock_evidence)
+    fence = publication.post_ddl_catalog_fence
+    fence_record = _post_ddl_catalog_fence_record(fence)
+    migration_receipt = state.migration_0002_receipt
+    if migration_receipt is None:
+        _fail("GE_CURSOR_B3_POST_REBIND_ADOPTION_GRAPH")
+    _OWNERSHIP_ASSERT_PUBLICATION_SESSION(
+        state.connection,
+        state.stage,
+        state.receipt,
+        state.projection_identity,
+        state.transfer,
+        context.authority,
+        publication.prepared_owner,
+        context.session,
+    )
+    if (
+        publication.lifecycle != "consumed-for-rebind"
+        or publication.authority is not context.authority
+        or publication.connection is not context.connection
+        or publication.receipt is not context.receipt
+        or publication.projection_identity is not state.projection_identity
+        or publication.projection_reference is not state.projection_reference
+        or publication.transfer is not state.transfer
+        or publication.transaction_generation is not context.transaction_generation
+        or publication.migration_lock_capability is not state.migration_lock_capability
+        or publication.provider_clock_capability is not state.provider_clock_capability
+        or publication.outer_clock_evidence is not state.outer_clock_evidence
+        or publication.source_descriptor_hash != context.source_descriptor_hash
+        or publication.source_schema_identity != context.source_schema_identity
+        or publication.target_descriptor_hash != context.target_descriptor_hash
+        or publication.target_schema_identity != context.target_schema_identity
+        or publication.rebind_consumed_tombstone is not context.tombstone
+        or context.tombstone_state is not consumed
+        or clock_generation is not context.transaction_generation
+        or live_lock != publication.migration_lock_identity
+        or second_clock.boundary != "before-cursor-rebind"
+        or second_clock.consumer != "cursor-publication-session"
+        or second_clock.transaction_generation is not context.transaction_generation
+        or second_clock.transaction_epoch != context.historical_transaction_epoch
+        or second_clock.provider_now_ms != publication.pre_rebind_provider_now_ms
+        or evidence_state is None
+        or evidence_state.total_changes != context.historical_total_changes
+        or not evidence_state.consumed
+        or not _prepared_publication_rebind_snapshot_is_exact(prepared, state)
+        or prepared.transaction_epoch_before != context.historical_transaction_epoch
+        or prepared.total_changes_before != context.historical_total_changes
+        or provenance.receipt_sha256 != context.pre_rebind_receipt_sha256
+        or provenance.projection_identity is not state.projection_identity
+        or provenance.projection_reference is not state.projection_reference
+        or provenance.immutable_seal_receipt.cursor_count != context.b2_cursor_count
+        or provenance.immutable_seal_receipt.immutable_root_sha256
+        != context.b2_immutable_root_sha256
+        or provenance.immutable_seal_receipt.source_descriptor_hash
+        != context.source_descriptor_hash
+        or provenance.immutable_seal_receipt.source_schema_identity_sha256
+        != context.source_schema_identity
+        or state.source_descriptor_hash != context.source_descriptor_hash
+        or state.source_schema_identity_sha256 != context.source_schema_identity
+        or state.post_ddl_catalog_fence is not fence
+        or fence_record.authority_ref() is not context.authority
+        or fence_record.migration_0002_receipt_ref() is not migration_receipt
+        or fence_record.transaction_generation is not context.transaction_generation
+        or fence_record.catalog_sha256
+        != SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_EXPECTED_SHA256
+        or catalog.catalog_sha256 != fence_record.catalog_sha256
+        or catalog.application_id != fence_record.catalog_application_id
+        or catalog.user_version != fence_record.catalog_user_version
+        or catalog.row_count != fence_record.catalog_row_count
+        or catalog.canonical_utf8_bytes != fence_record.catalog_canonical_utf8_bytes
+        or catalog.inventory != fence_record.catalog_inventory
+        or not _exact_outer_ledger(
+            _outer_ledger_snapshot(state), context.historical_outer_ledger
+        )
+    ):
+        _fail("GE_CURSOR_B3_POST_REBIND_ADOPTION_GRAPH")
+
+
+def _adopt_sqlite_cursor_post_rebind_watermark_intrinsic(
+    context_token: _SQLiteCursorPublicationRebindContext,
+    tombstone_token: _SQLiteCursorPublicationSessionConsumedTombstone,
+    execution: _SQLiteConnectionCursorPublicationRebindExecution,
+) -> _SQLiteCursorPostRebindWatermarkAdoption:
+    """Adopt E1/T1 from exact completed E; every downstream failure poisons."""
+
+    context = _publication_rebind_context_state(context_token)
+    state = _authority_state(context.authority)
+    try:
+        consumed = _publication_session_consumed_tombstone_state(tombstone_token)
+        if (
+            context.lifecycle != "session-consumed"
+            or context.adoption is not None
+            or context.tombstone is not tombstone_token
+            or context.tombstone_state is not consumed
+            or consumed.context is not context
+            or consumed.lifecycle != "active"
+            or execution is not context.execution
+            or state.write_phase != "publication-session-consumed"
+        ):
+            _fail("GE_CURSOR_B3_POST_REBIND_ADOPTION_REUSE")
+        _assert_sqlite_cursor_publication_session_consumed_tombstone_intrinsic(
+            tombstone_token
+        )
+        _assert_consumed_publication_rebind_graph_before_adoption(
+            context, consumed, state
+        )
+        execution_snapshot = _READ_CURSOR_PUBLICATION_REBIND_PROGRESS(
+            context.connection, execution
+        )
+        generation, epoch, total_changes = _owner_snapshot(context.connection)
+        current_ledger = _outer_ledger_snapshot(state)
+        if (
+            not _completed_publication_rebind_snapshot_is_exact(
+                execution_snapshot, context
+            )
+            or generation is not context.transaction_generation
+            or epoch != execution_snapshot.transaction_epoch
+            or total_changes != execution_snapshot.total_changes
+            or state.current_transaction_epoch != context.historical_transaction_epoch
+            or state.current_total_changes != context.historical_total_changes
+            or not _exact_outer_ledger(
+                current_ledger, context.historical_outer_ledger
+            )
+        ):
+            _fail("GE_CURSOR_B3_POST_REBIND_ADOPTION_GRAPH")
+        affected = cast(int, execution_snapshot.affected_rows)
+        token = _SQLiteCursorPostRebindWatermarkAdoption(_CONSTRUCTION_TOKEN)
+        adoption = _PostRebindWatermarkAdoptionState(
+            context=context,
+            tombstone=consumed,
+            execution_snapshot=execution_snapshot,
+            adopted_transaction_epoch=execution_snapshot.transaction_epoch,
+            adopted_total_changes=execution_snapshot.total_changes,
+            total_changes_delta=execution_snapshot.total_changes_delta,
+            affected_rows=affected,
+            adopted_outer_ledger=current_ledger,
+        )
+        _REGISTER_POST_REBIND_ADOPTION(
+            _POST_REBIND_WATERMARK_ADOPTIONS, token, context.authority, adoption
+        )
+    except BaseException:
+        _poison(state, context.authority, "SQLite post-rebind watermark adoption failed")
+        raise
+    context.adoption_state = adoption
+    context.adoption = token
+    context.lifecycle = "write-adopted"
+    consumed.lifecycle = "adopted"
+    state.current_transaction_epoch = adoption.adopted_transaction_epoch
+    state.current_total_changes = adoption.adopted_total_changes
+    state.post_rebind_watermark_adoption = token
+    state.write_phase = "cursor-rebind-adopted"
+    return token
+
+
+def _assert_sqlite_cursor_post_rebind_watermark_adoption_intrinsic(
+    adoption_token: _SQLiteCursorPostRebindWatermarkAdoption,
+) -> _SQLiteCursorPostRebindWatermarkAdoption:
+    """Repeatable retained-data-only proof with zero SQL and zero clock reads."""
+
+    adoption = _post_rebind_watermark_adoption_state(adoption_token)
+    context = adoption.context
+    state = _authority_state(context.authority)
+    execution = adoption.execution_snapshot
+    if (
+        adoption.lifecycle != "active"
+        or context.lifecycle != "write-adopted"
+        or context.adoption is not adoption_token
+        or context.adoption_state is not adoption
+        or context.tombstone_state is not adoption.tombstone
+        or adoption.tombstone.lifecycle != "adopted"
+        or state.lifecycle != "active"
+        or state.write_phase != "cursor-rebind-adopted"
+        or state.publication_rebind_context_state is not context
+        or state.publication_session_consumed_tombstone is not context.tombstone
+        or state.post_rebind_watermark_adoption is not adoption_token
+        or state.current_transaction_epoch != adoption.adopted_transaction_epoch
+        or state.current_total_changes != adoption.adopted_total_changes
+        or not _exact_outer_ledger(
+            _outer_ledger_snapshot(state), context.historical_outer_ledger
+        )
+        or not _exact_outer_ledger(
+            adoption.adopted_outer_ledger, context.historical_outer_ledger
+        )
+        or execution.transaction_generation is not context.transaction_generation
+        or execution.transaction_epoch != adoption.adopted_transaction_epoch
+        or execution.total_changes_before != context.historical_total_changes
+        or execution.total_changes != adoption.adopted_total_changes
+        or execution.total_changes_delta != adoption.total_changes_delta
+        or execution.affected_rows != adoption.affected_rows
+    ):
+        _poison(state, context.authority, "SQLite post-rebind adoption graph drifted")
+        _fail("GE_CURSOR_B3_POST_REBIND_ADOPTION")
+    return adoption_token
+
+
+def _read_sqlite_cursor_post_rebind_watermark_adoption_snapshot_intrinsic(
+    adoption_token: _SQLiteCursorPostRebindWatermarkAdoption,
+) -> _SQLiteCursorPostRebindWatermarkAdoptionSnapshot:
+    _assert_sqlite_cursor_post_rebind_watermark_adoption_intrinsic(adoption_token)
+    adoption = _post_rebind_watermark_adoption_state(adoption_token)
+    context = adoption.context
+    authority_state = _authority_state(context.authority)
+    context_token = authority_state.publication_rebind_context
+    tombstone_token = context.tombstone
+    if context_token is None or tombstone_token is None:
+        _fail("GE_CURSOR_B3_POST_REBIND_ADOPTION")
+    return _SQLiteCursorPostRebindWatermarkAdoptionSnapshot(
+        adoption.lifecycle,
+        context_token,
+        tombstone_token,
+        context.session,
+        context.prepared_owner,
+        context.execution,
+        adoption.execution_snapshot,
+        context.authority,
+        context.connection,
+        context.transaction_generation,
+        context.historical_transaction_epoch,
+        adoption.adopted_transaction_epoch,
+        context.historical_total_changes,
+        adoption.adopted_total_changes,
+        adoption.total_changes_delta,
+        adoption.affected_rows,
+        context.historical_outer_ledger,
+        adoption.adopted_outer_ledger,
+    )
+
+
+def _poison_sqlite_cursor_publication_rebind_downstream_intrinsic(
+    context_token: _SQLiteCursorPublicationRebindContext,
+    tombstone_token: _SQLiteCursorPublicationSessionConsumedTombstone,
+    reason: str,
+    adoption_token: _SQLiteCursorPostRebindWatermarkAdoption | None = None,
+) -> None:
+    """Authenticated downstream failure bridge for W/Rule 11/Rule 12 owners."""
+
+    selected_context = _rebind_state_get(
+        _PUBLICATION_REBIND_CONTEXTS,
+        context_token,
+        _SQLiteCursorPublicationRebindContext,
+        _PublicationRebindContextState,
+    )
+    selected_tombstone = _rebind_state_get(
+        _PUBLICATION_SESSION_CONSUMED_TOMBSTONES,
+        tombstone_token,
+        _SQLiteCursorPublicationSessionConsumedTombstone,
+        _PublicationSessionConsumedTombstoneState,
+    )
+    context = cast(_PublicationRebindContextState | None, selected_context)
+    consumed = cast(
+        _PublicationSessionConsumedTombstoneState | None, selected_tombstone
+    )
+    if context is None or consumed is None or _STABLE_TYPE(reason) is not str or not reason:
+        _fail("GE_CURSOR_B3_PUBLICATION_REBIND_DOWNSTREAM_PRESENTATION")
+    state = _authority_state(context.authority)
+    if (
+        consumed.context is not context
+        or context.tombstone is not tombstone_token
+        or context.tombstone_state is not consumed
+        or state.publication_rebind_context is not context_token
+        or state.publication_rebind_context_state is not context
+        or state.publication_session_consumed_tombstone is not tombstone_token
+    ):
+        _fail("GE_CURSOR_B3_PUBLICATION_REBIND_DOWNSTREAM_SUBSTITUTION")
+    if context.lifecycle == "session-consumed":
+        if (
+            adoption_token is not None
+            or consumed.lifecycle != "active"
+            or context.adoption is not None
+            or state.write_phase != "publication-session-consumed"
+        ):
+            _fail("GE_CURSOR_B3_PUBLICATION_REBIND_DOWNSTREAM_PHASE")
+        _assert_sqlite_cursor_publication_session_consumed_tombstone_intrinsic(
+            tombstone_token
+        )
+    elif context.lifecycle == "write-adopted":
+        selected_adoption = _rebind_state_get(
+            _POST_REBIND_WATERMARK_ADOPTIONS,
+            adoption_token,
+            _SQLiteCursorPostRebindWatermarkAdoption,
+            _PostRebindWatermarkAdoptionState,
+        )
+        adoption = cast(_PostRebindWatermarkAdoptionState | None, selected_adoption)
+        if (
+            adoption is None
+            or adoption.context is not context
+            or adoption.tombstone is not consumed
+            or context.adoption is not adoption_token
+            or context.adoption_state is not adoption
+            or consumed.lifecycle != "adopted"
+            or state.post_rebind_watermark_adoption is not adoption_token
+            or state.write_phase != "cursor-rebind-adopted"
+        ):
+            _fail("GE_CURSOR_B3_PUBLICATION_REBIND_DOWNSTREAM_PHASE")
+        _assert_sqlite_cursor_post_rebind_watermark_adoption_intrinsic(
+            cast(_SQLiteCursorPostRebindWatermarkAdoption, adoption_token)
+        )
+    else:
+        _fail("GE_CURSOR_B3_PUBLICATION_REBIND_DOWNSTREAM_PHASE")
+    _poison(state, context.authority, reason)
+
+
 def _read_sqlite_cursor_initial_stage_adoption_receipt_snapshot_intrinsic(
     receipt: _SQLiteCursorInitialStageAdoptionReceipt,
 ) -> _SQLiteCursorInitialStageAdoptionReceiptSnapshot:
@@ -6754,6 +8180,11 @@ def _read_sqlite_cursor_outer_publication_authority_snapshot_intrinsic(
         operation_sequence_zero_affected_rows=(state.operation_sequence_zero_affected_rows),
         initial_stage_adoption_receipt=state.initial_stage_adoption_receipt,
         initial_stage_adoption_receipt_mint_count=(state.initial_stage_adoption_receipt_mint_count),
+        publication_rebind_context=state.publication_rebind_context,
+        publication_session_consumed_tombstone=(
+            state.publication_session_consumed_tombstone
+        ),
+        post_rebind_watermark_adoption=state.post_rebind_watermark_adoption,
         receipt_consumption_count=state.receipt_consumption_count,
         tombstone_mint_count=state.tombstone_mint_count,
         migration_0002_consumed_tombstone=state.migration_0002_consumed_tombstone,

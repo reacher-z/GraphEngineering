@@ -20295,3 +20295,216 @@ test 把专用 probe 当成失败。
 env guard失败。Full-package并行 run另遇到既有 reservation-retry timing test一次失败，
 该 exact test随后 isolated 1/1；不把被中断的 full-package run声明为全绿。受影响
 publication 248/248、focused 36/36、typecheck/build 与三份 H0/M0/L0 结论不变。
+
+#### 31.37.67 Wave 1D：outer-owned S→P→T→E→A→W→R11 安全增量接受账本（2026-08-02 PDT 追加；既有内容不改）
+
+本节只接受 31.37.65 中已经实现并取得可复跑证据的 Rule 11 predecessor 安全增量，
+不把整个 31.37.65 hostile 矩阵、Rule 12、third clock 或 master plan 宣称为完成。追加前
+原计划精确为 20,297 行，前缀 SHA-256 为
+`43632443a5dfbd8fc89c1cbb5d896cce3af277186206dbda06da2977391fb227`；该前缀必须继续
+保持 byte-for-byte 不变。
+
+##### 31.37.67.1 本批已落实的运行时拓扑
+
+TypeScript 与 Python 均实现一条由真实 publication session S 进入的序列化叶路径：
+
+1. 首先认证 exact S，伪造、clone、跨图或 lineage 漂移的 S 不得借已取消信号掩盖；
+2. 从 S 所属 connection 取得唯一 E，并由 outer authority 创建 P/context；
+3. P/context 注册、identity link 与 snapshot 注册必须作为一个可回滚边界；
+4. consume S 后产生 exact T，T registration 失败不得留下半注册 token；
+5. 真实执行固定 cursor rebind SQL，参数顺序固定为 target descriptor、target schema、
+   source descriptor、source schema；
+6. 用 real SQLite native affected count、`SELECT changes()`、total changes delta、B2 count
+   与 cursor ledger affected delta形成 closed five-count projection；
+7. E 完成后 outer authority mint exact A，并把 live epoch/total/catalog/owner authority从
+   historical E0/T0推进到 E0+1/T0+N；
+8. W 必须强保留 exact S/P/context/T/A/outer graph与固定 SQL/parameter/count evidence；
+9. R11 gate只消费 W retained evidence，执行期间 additional SQLite prepare/fetch/release
+   必须为零；
+10. R11 success receipt强保留 exact W，从而在只保留 R11 时整个 predecessor graph仍活跃，
+    R11释放后允许回收；
+11. unique composite entry只接受 S与可选 cancellation，不接受 caller 注入的 P、callback、
+    W、T、A或任意独立 connection；
+12. 本模块保持 private implementation boundary，不从 SQLite package root 或 Python
+    `__init__` 导出这些内部 capability。
+
+##### 31.37.67.2 已接受的 authority 与生命周期不变量
+
+- authentic pre-cancel发生在 E prepare 前：S仍 active、未选择 graph、同一 S可重试；
+- second-boundary cancel发生在 P/context prepare 后且 T consume 前：必须 exact release
+  P/context/E，同一 S用 fresh P/E重试；
+- forged或drifted S必须先失败，即使 cancellation 已经为 true；
+- active same-S double prepare是 terminal misuse，不允许两个并存 P/context；
+- cross-graph P/context/T/A substitution不能无声切换 graph；未选中的 graph保持健康；
+- T registration register-then-throw精确清除 partial registry，并允许 authentic retry；
+- A registration fault、post-T owner/total authority drift、W registration fault与R11
+  registration fault都发生在消费边界之后，必须 poison exact selected outer graph；
+- thrown `undefined`、Python `BaseException`与原始 primary failure不得被 cleanup failure替换；
+- exact W replay与R11 mismatch必须终止旧 W latch并 poison selected graph；
+- outer graph一旦被 authenticated poison，历史 W/R11 reader不得继续返回看似有效的 proof；
+- S consume后普通 active-session assertion必须拒绝；historical initial receipt在 T→A 窗口
+  仍可按专用规则读取，但不能把它当 live authority；
+- A repeat assertion和W/R11 proof read必须是 zero-public-I/O；
+- W与R11 registry的 partial-token failure必须 exact discard，捕获的半成品 token不可读；
+- weak/identity registries不得意外 root completed、cancelled或poisoned graph。
+
+##### 31.37.67.3 closed five-count 与 canonical commitment
+
+本批接受的 Rule 11 不是只比较一个 affected-row 数。两端均要求下列五个 safe exact
+integer相等：B2 cursor count、native statement affected count、`changes()` affected count、
+connection total-changes delta、cursor ledger affected delta。任意 slot 单点偏移只能产生一条
+closed violation；NaN、Infinity、boolean、fraction、负数与超 safe-integer 范围值必须拒绝。
+
+固定 rebind SQL SHA-256 为
+`6fc61b515e758a1e84745af28783f4e9dcee5e76f80f314aa25a08980d2fef91`，固定
+`SELECT changes() AS affected_rows` SHA-256 为
+`a6ab435eb54879f942436129997f231de19504b11028b55b014fddc2bb42e112`，canonical parameter
+frame SHA-256 为
+`524ece2b423a16fe16cf147e4918f74029ec71bd1559a65a2e7e2710a73ef37f`。Parity comparator
+不只检查 64 位 hex 外形，还必须从报告中的 SQL文本重新计算 hash并与 golden 比较。
+
+##### 31.37.67.4 已落地的真实图 fixture 与测试矩阵
+
+两端 fixture均从真实 SQLite main rows开始，经过 canonical decoder/sort/seal、exact receipt
+issuer、TEMP B2 campaign、migration、publication chain与Rule11 leaf；0/1/3 cursor cardinality
+均使用真实 rows与非空 roots，而不是手写 snapshot oracle。已覆盖：
+
+- N=0、N=1、N=3 success，epoch delta=1、total delta=N、五 counts=N；
+- hostile iterator/builtin mutation下 closed checker仍使用捕获 intrinsic；
+- pre-cancel、second-boundary cancel、forged-cancel precedence与same-S retry；
+- context三边注册 rollback、T/A/W/R11 register-then-throw cleanup；
+- clone/proxy/cross-run S/T/A/W/R11 presentation与exact replay poison；
+- A catalog/parameter/owner/total drift，真实 post-T connection drift的authenticated poison；
+- zero additional SQLite work的retained W/R11 proof读取；
+- success、prewrite cancel、postconsume poison、Rule11 poison、registration fault的回收轮廓；
+- R11-only strong retention与drop-after-collection；
+- package-root/private-root non-export约束。
+
+TypeScript 最终受影响回归为 13 files / 222 tests全部通过；Rule11 focused suites在此前
+最终候选上为 39/39，改单个描述后的定向测试为1/1。Python outer authority为10/10，
+subprotocol最终为31/31，下层 source regressions为20/20。全仓 TypeScript typecheck、四个
+Python touched test/source的Ruff与两个Python source的mypy全部通过。
+
+##### 31.37.67.5 cross-runtime parity 的可证明范围
+
+新增独立 TypeScript/Python real-SQLite graph builders与reporters，以及一个严格 Node
+comparator。Comparator要求 exact key与key order、exact safe integer、固定 lifecycle、
+compact单行JSON、空stderr、每端两次 byte determinism、跨端 portable bytes exact。
+选择的成功矩阵为0/1/3；代表失败矩阵为pre-cancel、forged-cancel、exact replay poison。
+
+Parity portable identity只包含可由两端独立观察的五条边：session、preparedOwner、context、
+tombstone、adoption。曾经存在的 `sameIdentity.writeReceipt` 是从R11 snapshot取值后自比的
+恒真表达式，已在最终接受前从两端projection与strict schema同步删除。W→R11 exact identity
+继续由两端focused runtime tests通过“先持有独立W、再mint/read R11”证明，不伪装成可跨进程
+序列化的 opaque identity。
+
+最终 parity gate为3/3，真实两端双跑约54.2秒；writer复跑、主Agent前一候选复跑与独立
+auditor复核一致。最终delta独审为 H0/M0/L0。Success cleanup不再吞掉rollback、TEMP stage
+dispose、connection close或temporary root removal failure；存在cleanup failure时reporter必须
+非零退出，primary path已有失败时才保持primary precedence。
+
+##### 31.37.67.6 最终文件身份
+
+- `package.json`：`8741c6f296b0938e54631f0773367e65844c8fb55264b108941601a732224517`；
+- TS outer authority：`1415d1c2d7e1206c8e487ebae987ff29d4789966155dc8348231e4d249483111`；
+- TS rebind runtime：`78ba9b772a3b08b7bc05dd183276aae82122253decde2dd71608fb0b022ad93b`；
+- TS clean graph support：`bba13a05ddb729880cdb44dee087eb107963dd7e2487a05a0adfba1e3fe50dda`；
+- TS Rule11 integration test：`b28e4e3f6f7234bac463efbd2bbfe6c857cd61d8f8d11f79be60881cc794229d`；
+- TS outer authority test：`45a2e8652bd757f731dca8b7ec80b00d009613a2ca9f8a8d06ad58846563fee4`；
+- Python outer authority：`21bb6ad2bbdafadfd83cd67d5a1b33e3aa38fe0dc24a7ec7be7b5fba880683b2`；
+- Python subprotocol：`d762e61cb4bf028b24336cb71be0400aea1b0015716373ca220955f15741a00b`；
+- Python outer test：`cebbc4e9be5f45e9983bcf10f54436e93d9b9ec6ca6f61ee1b0b52208844c694`；
+- Python subprotocol test：`75aac43ba062d36a880ec483b1bc5d0ce9ba7d9503d71993f686db9d11d5ebb2`；
+- TS parity graph：`1c7b5313207ef31b4474dd2c798cc3c713e370871b9a8821524a63a630132967`；
+- TS parity reporter：`12859d1afd962941a35a6efd0679bb4de628c667296ba42677be0648d36f0f66`；
+- Python parity graph：`e3ff93183c87fa6a7073b8aedbe64fa33b76e4f1441f915f169d238d6099d2ae`；
+- Python parity reporter：`b631730cba465595018a41b9341afaf87fa2e25805943be86415eddbec2d829d`；
+- parity comparator：`20bc6844f4fdd74afc3b2cec6de91420a3b67c84a11245ac374d97b2561fee1d`。
+
+以上15个文件权限均为0644。Commit前仍必须重新计算身份，任何变动都必须由后续追加段
+supersede，不能回改本节。
+
+##### 31.37.67.7 本批明确 nonclaims
+
+本批不声称完整覆盖31.37.65.7的所有hostile native seams。尚未由真实可控 seam直接触发的
+项目至少包括：preconsume release本身失败、post-T native statement run抛错、native result
+shape/unsafe count、`changes()` shape/type/range/close failure、B2 root/count/stage/projection与
+outer-ledger private drift、cursor ledger logical/fixed/affected drift的所有组合，以及真正的
+CPython id复用。当前Rule11 mismatch测试含受控private registry/snapshot mutation；它证明
+poison语义，不等同于真实SQLite hook injection。
+
+本批也不声称 Rule12 receipt、third clock、cursor/clock-complete、production hook或manifest
+activation、release readiness、production performance、安全审计全闭环、文档站与生态增长
+完成。GitHub 5K/6K stars是产品与社区目标，不是代码测试能够保证的结果。
+
+#### 31.37.68 Wave 1E—1H 后续最高优先级开发计划（2026-08-02 PDT 追加；既有内容不改）
+
+##### 31.37.68.1 Wave 1E：补齐 Rule11 hostile seam，而不是只扩大测试数量
+
+按“一个production seam、一个成功基线、一个单故障、一个precedence、一个cleanup/GC
+postcondition”的模板实施下列工作；TS与Python使用同名case id，parity只纳入稳定投影：
+
+1. 增加 exact preconsume release fault seam，证明release primary优先于cancel signal、graph
+   poison边界正确、E/context无泄漏且same-S不得错误重试；
+2. 增加 real post-T statement-run throw seam，故障必须发生在T已consume而A/W未mint的窗口，
+   rollback不得复活S，outer必须poison；
+3. 分别注入native affected result为missing field、extra row、string、float、negative、unsafe
+   integer、hostile getter/proxy，确保解析失败先于任意receipt mint；
+4. 对`SELECT changes()`覆盖prepare、fetch、second-row、shape、type、range、close failure，记录
+   statement release次数并验证primary/cleanup precedence；
+5. 对B2 root/count/stage/projection/parameter commitment逐字段单点漂移，确保失败选择正确
+   graph且不会污染未选graph；
+6. 对outer ledger与cursor ledger的logical write、fixed statement、affected watermark逐字段
+   单点漂移，确保closed tuple只报告预期violation且不重复diagnostic；
+7. 覆盖trigger amplification使native count、changes count与total delta产生不同组合；
+8. 增加actual connection close-after-T与rollback failure组合，验证原始native primary保留；
+9. 对W/R11 read、replay、registration fault分别做success/prewrite/postconsume GC矩阵；
+10. Python增加有界真实id-reuse尝试；若平台不能稳定复现，记录attempt budget与诚实skip，
+    不能用普通churn冒充id reuse；
+11. 每个新seam先跑focused，再跑affected，最后才进入cross-runtime portable parity；
+12. 完成后必须新增独立TS、Python、cross-runtime三份H0/M0/L0审计记录。
+
+##### 31.37.68.2 Wave 1F：Rule12 predecessor/success receipt
+
+Rule12必须以R11 success receipt为唯一前驱，不得重新查询或重建W evidence。先冻结两端
+contract：exact R11 owner、固定rule id/position、第三时钟或其明确前置、zero-I/O read budget、
+single-consume/replay policy、success/poison生命周期、outer retained graph、diagnostic上限与
+private-root约束。然后按以下顺序开发：
+
+1. 只读设计审计与TS/Python schema parity；
+2. outer authority增加Rule12 pending/active/poison transition，但不提前export；
+3. TS与Python分别实现exact R11 authenticate、Rule12 evaluate、receipt mint与snapshot read；
+4. composite leaf只在Rule11 success后调用Rule12，所有Rule11 failure路径断言Rule12调用数为零；
+5. replay、clone、proxy、cross-run、registration fault、primary precedence与GC矩阵；
+6. 0/1/3真实图及代表性failure的cross-runtime byte parity；
+7. affected session/rebind/seal/publication regressions、typecheck/build/Ruff/mypy；
+8. H0/M0/L0后才追加“Rule12 safe increment accepted”，仍不得宣称third clock complete。
+
+##### 31.37.68.3 Wave 1G：third clock 与 cursor/clock completion
+
+第三时钟必须有独立source capability、observe boundary、monotonicity、same-provider identity、
+transaction/window归属与replay policy。需要覆盖clock regression、same-value observation、
+provider replacement、wrong connection、wrong lock、pre/post native throw、commit/rollback边界、
+整数范围、snapshot forgery、GC与跨运行时canonical projection。只有outer、session、rebind、
+Rule11、Rule12全部消费同一条经过认证的clock lineage且manifest/production path真实启用时，
+才能把cursor/clock-complete标为完成。
+
+##### 31.37.68.4 Wave 1H：开源交付、采用与质量门禁
+
+协议安全闭环后并行推进但不混淆代码完成度与受欢迎程度：
+
+- public API与private intrinsic边界审计，生成稳定API reference、架构图、failure taxonomy；
+- 15分钟quickstart、三套真实项目recipe、可复制benchmark与failure-injection tutorial；
+- Linux/macOS/Windows、Node LTS矩阵、Python支持矩阵、SQLite版本与feature probing；
+- fuzz/property/state-machine测试、长时间soak、资源泄漏、并发与取消压力测试；
+- dependency/SBOM/license/provenance/secret scan、CodeQL与最小权限workflow；
+- deterministic release artifacts、signed tags、changelog、migration guide与rollback guide；
+- issue/PR templates、good-first-issue、roadmap、governance、security policy与响应SLO；
+- 与Loop Engineering做公开、可复跑、不过度营销的feature/latency/cost/reliability对照；
+- launch前设置可观测KPI：安装成功率、quickstart完成率、CI pass率、issue首次响应、贡献者
+  转化、文档搜索失败与真实用户留存；
+- stars只作为lagging community metric。5K/6K目标需要持续发布、用户价值、可信证据与社区
+  运营，不能写成测试已保证或预计日期已承诺。
+
+每一Wave仍执行：append-only plan prefix proof、durable codex log、显式文件ownership、完整
+diff check、精确author/committer、无coauthor、push后local/tracking/remote object equality。
