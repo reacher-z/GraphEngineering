@@ -17436,3 +17436,268 @@ Authorization remains bounded to the 34-field operation-sequence-zero
 successor in sections 31.37.49.6 and 31.37.49.7. Receipt consumption, atomic
 adoption, parity closure, publication session, rebind, rules, retirement,
 commit, manifest, release, adoption and star claims remain false.
+
+#### 31.37.50 Python B3 operation-sequence-zero acceptance and atomic-adoption successor plan (append-only execution record, 2026-08-01)
+
+This is an EOF-only continuation. Before this append, the plan contained
+17,438 lines with SHA-256
+`fdb0790253fb3bea3f7baae4881360b2690cfcf136670765c294ee6fac0fad23`.
+No earlier byte is changed or reinterpreted.
+
+##### 31.37.50.1 Implemented boundary
+
+The Python candidate implements the fourth initial-write leaf. It authenticates
+the exact reusable, non-consuming baseline-header receipt and writes only the
+operation-sequence singleton at last commit sequence zero. It ends with one
+opaque sequence receipt or a poisoned authority retaining real physical
+progress. It neither consumes the four receipts nor adopts the TEMP stage.
+
+The exact 154-byte statement and SHA-256 are:
+
+```sql
+INSERT INTO main.ge_cycle_operation_sequence (singleton, baseline_id, last_commit_sequence, baseline_captured_at_ms, updated_at_ms) VALUES (1, ?, 0, ?, ?)
+```
+
+`a9afde17c90fcc7381eefa3fa81823752d6f1bc29c9eced2de8b31176cc1dd85`.
+
+Exactly three values are bound: baseline ID, baseline capture time and updated
+time. Singleton one and last commit sequence zero remain SQL literals.
+
+##### 31.37.50.2 Source and outer proof
+
+The source execution is opaque, weakly registered, exact-lineage, one-session
+and one-run. Python prepare is cursor/session reservation rather than native
+compile. Native return records irreversible progress before result and counter
+inspection. Cursor cleanup is exact once and primary failure has precedence.
+
+Source SQL is definition-time captured. Begin verifies the canonical 154-byte
+pair before cursor reservation. Execute fresh-checks both the mutable session
+commitment and independent captured commitment before attempt/epoch/native
+progress, and the native call consumes only definition-time SQL.
+
+The outer writer freshly authenticates the exact header predecessor and exact
+provider clock evidence/value. It permits no wall clock, environment or caller
+timestamp. Updated time must be greater than or equal to captured time.
+
+Independent builder and verifier callables rebuild the exact `1 x 3` frame.
+Outer preflight, mint and assertion authenticate a definition-time SQL/SHA pair
+without runtime global getter lookup. The 34-field receipt order is the exact
+list in section 31.37.49.7.
+
+The successful phase and ledger transitions are:
+
+`baseline-header-complete -> executing-sequence-zero -> sequence-zero-complete`
+
+and `3/33/15 -> 4/34/16`. Any post-native result, counter, digest or cleanup
+fault retains physical progress, mints zero and leaves logical sequence three.
+
+##### 31.37.50.3 Hostile defects closed
+
+Adversarial implementation and review reproduced and closed:
+
+1. source module-global SQL redirect;
+2. source session SQL-only and paired-SHA drift;
+3. outer paired SQL/SHA false receipt;
+4. outer paired SQL/SHA/canonical-getter triple rebind;
+5. receipt phase-regression acceptance; and
+6. SQL identity errors collapsing into generic predecessor diagnostics.
+
+Every SQL attack now fails before native execution or remains bound to the
+canonical INSERT, with zero false receipt. Phase rollback rejects and poisons.
+Final source and outer audits are HIGH 0 / MEDIUM 0 / LOW 0.
+
+##### 31.37.50.4 Evidence before complete-regression barrier
+
+- direct source hostile suite: 28/28 in 123.08 seconds;
+- outer receipt hostile suite: 56/56 in 247.76 seconds;
+- twelve-file serial integration through sequence zero: 443/443 in 1,435.22
+  seconds;
+- TypeScript direct-source and outer oracle: 39/39 in 24.71 seconds;
+- Ruff/format: green;
+- mypy: zero issues across 99 source files;
+- `py_compile` and whitespace gate: green; and
+- two independent final audits: HIGH 0 / MEDIUM 0 / LOW 0.
+
+The complete Python regression is running and is not claimed in this
+subsection. An EOF-only closure must record its exact total and duration before
+commit authorization.
+
+##### 31.37.50.5 Explicit nonclaims
+
+Receipt consumption, atomic stage adoption, 145-case/28-field runtime parity,
+publication session, rebind, rules 11/12, TEMP retirement, transaction commit,
+manifest activation, release, external adoption and star outcomes remain false.
+
+##### 31.37.50.6 Next isolated Python leaf: validation-first four-receipt atomic adoption
+
+After the complete sequence regression and scoped push, the only authorized
+next leaf is sections 31.37.36 and 31.37.37: validation-first atomic adoption
+of the exact migration-0002, baseline-entries, baseline-header and
+operation-sequence-zero receipts.
+
+The adoption call must first authenticate the entire exact graph and all four
+receipts without consuming any. Clone, structural copy, wrong order, cross-run,
+wrong authority/connection/generation/fence/reader/projection, stale ledger,
+receipt replay, duplicate presentation or any consumed tombstone must fail in
+the validation phase with zero receipt consumption and zero stage mutation.
+
+Only after the complete bundle validates may a non-interruptible atomic tail
+consume all four receipts, mint four exact consumed tombstones and transfer the
+TEMP stage from its current authority into the exact adopted owner. No fault
+injection or cancellation boundary may exist inside that tail. Failure before
+the tail leaves the exact bundle retryable; failure after the tail begins
+poisons and requires rollback rather than partial retry.
+
+Production work is expected in:
+
+- `sqlite_cursor_publication_outer_authority.py` for bundle validation,
+  consumption identities, tombstones, adoption receipt, phase and ledger;
+- `sqlite_operation_baseline_cursor_stage_ownership.py` for exact ownership
+  transfer and old-owner rejection; and
+- `sqlite_operation_baseline_stage.py` for adopted stage lifecycle without
+  caller reconstruction.
+
+The dedicated hostile file is
+`test_sqlite_cursor_publication_initial_stage_adoption.py`. It must include
+valid control, each wrong receipt/ordering/identity, validation failure at every
+slot, duplicate/consumed/tombstone presentation, injected failure before and
+inside the atomic-tail boundary, cancellation precedence, weak graph/GC,
+ownership transfer, old-owner rejection, ledger/phase and absence of
+publication-session/rebind/commit authority.
+
+The TypeScript adoption oracle currently contains 17 cases. Acceptance
+requires the Python adoption suite, entries/header/sequence regression, TS
+oracle, full B3 ledger/fixture/migration gates, package/install smoke, Ruff,
+format, mypy, complete Python regression, two zero-severity audits, durable log,
+append-only prefix proof and scoped commit/push.
+
+Passing adoption authorizes only the 145-case/28-field Python runtime parity
+and publication-session successor. It does not authorize cursor rebind,
+rules 11/12, retirement, commit or active-manifest claims.
+
+##### 31.37.50.7 Append-only adoption failure-class and atomic-tail correction
+
+This subsection corrects and expands the successor plan without modifying the
+earlier bytes. It is authoritative where section 31.37.50.6 conflicts with it.
+
+Validation must distinguish caller presentation rejection from authenticated-
+graph corruption. Malformed carrier; wrong arity, order, missing or duplicate
+slot; clone or structural copy; foreign, cross-run or substituted receipt;
+wrong authority, connection, fence, reader, projection or predecessor; and
+Proxy-like, revoked, accessor, custom-iterator or extra-key carrier are
+retryable presentation failures. They consume zero receipts, mint zero
+tombstones/adoption receipts, mutate neither stage nor healthy authority, leave
+phase `sequence-zero-complete` and permit a corrected exact-original bundle.
+
+Only after all four exact private-registry receipt identities are selected does
+live-proof disagreement become corruption. Already-consumed exact-original
+receipt or exact-bundle replay, authority/transfer/stage lifecycle drift,
+transaction-generation replacement, epoch, `total_changes`, write-counter,
+target-catalog, terminal-reader or outer-ledger drift must poison authority,
+ownership transfer and stage, consume zero new receipts, and require rollback
+plus a fresh graph. A foreign tombstone substituted as input is presentation
+rejection; reusing exact originals after successful consumption is terminal
+replay.
+
+Fault injection is exhaustive through every fallible validation/preparation
+slot and the final pre-tail boundary only. Authentic cancellation is polled
+exactly once after both prepared continuations exist and before pending
+tombstone/adoption registration; cancellation there leaves `0/0/0` and the
+same exact bundle retryable. The actual atomic tail exposes no injection,
+cancellation or test-hook seam.
+
+Tail tests must authentically arm the package-private lower tail, publish it
+once to exactly four consumed receipts, four active typed tombstones and one
+active adoption receipt, then separately prove replay rejection and publish
+rejection after lower-tail retirement or poisoning. A source audit must prove
+there is no SQL, provider callback, cancellation read, test hook, transaction
+control, cursor rebind or caller code inside the tail. The earlier request to
+inject a failure inside the tail is withdrawn as incompatible with the no-fail
+tail contract.
+
+The Python successor must additionally freeze and test:
+
+- one exact dense four-slot carrier and rejection of wrong length/order,
+  missing/duplicate slots, list subclasses, custom sequences, Proxy-like or
+  revoked carriers, accessors, custom iteration and extra string/symbol-like
+  keys without invoking caller code during extraction;
+- corrected retry after every retryable presentation family;
+- terminal poison after every exact-graph corruption family;
+- paired outer `initial-publication-adoption-prepared` and lower
+  `initial-adoption-prepared` lifecycles, with complete proof revalidation on
+  prepared retry;
+- fresh 34-object target catalog, terminal one-close/no-cleanup reader and
+  independently rederived projection;
+- adoption of exact epoch, real `total_changes`, v2 main-catalog identity and
+  all three outer-ledger watermarks;
+- retirement of only the obsolete B2 v1 catalog/change fence while retaining
+  the B2 receipt, projection, transfer, TEMP stage, transaction generation,
+  post-DDL reader and post-DDL fence;
+- survival of the post-DDL fence through the exact migration tombstone plus
+  adoption-receipt chain;
+- four pending typed tombstones plus one pending adoption receipt that are
+  unreadable until the single tail exposes only complete `4/4/1` state;
+- both continuation levels burned before mutation, with replay, retire and
+  poison rejection;
+- an adoption receipt committing the full transitive graph, ordered typed
+  tombstones, adopted watermarks/catalog and retired-B2-fence identity;
+- rejection from ordinary assert/read surfaces for all four consumed original
+  receipts;
+- zero permanent SQL, transaction control and cursor-rebind operations;
+- hostile replacements of every reachable captured intrinsic, weak graph/GC
+  behavior and package-root runtime/type isolation.
+
+##### 31.37.50.8 Repository gate evidence on frozen sequence bytes
+
+The required repository gates were rerun after the sequence production and
+hostile-test bytes were frozen:
+
+- `corepack pnpm test:sqlite-ledger-contract`: 61/61 plus every strict
+  validator, 145 B3 hostile records, 25 counter profiles and 20 fault
+  boundaries, with implementation/active-manifest claims false;
+- `corepack pnpm validate:fixtures`: 85 JSON fixtures and 44 case manifests;
+- `corepack pnpm check:sqlite-migrations`: exact source/mirror closure and 6/6
+  executable release tests;
+- `corepack pnpm check:packages`: 9/9 manifests and dry-run tarballs; and
+- `corepack pnpm check:packed-install`, serialized after package-content:
+  9/9 tarballs installed and smoke-tested with healthy binaries.
+
+The complete Python regression is still running and remains the final commit
+barrier. None of these contract or packaging gates flips B3 implementation,
+active-manifest, release or external-adoption claims.
+
+##### 31.37.50.9 Cancellation allocation-boundary clarification
+
+The prepared cancellation observation occurs before any tombstone or adoption-
+receipt allocation **or** registration. It is not sufficient to poll only
+before registry insertion after objects have already been allocated. This
+preserves the stronger section 31.37.36.3 boundary and leaves cancellation with
+no pending object, zero consumption, zero tombstones, zero adoption receipt and
+same-bundle retryability.
+
+##### 31.37.50.10 Final full-suite closure and scoped commit authorization (append-only closure, 2026-08-01)
+
+The complete Python regression finished on the frozen sequence-zero production
+and hostile-test bytes with exit code zero: **3,772 passed in 2,929.24 seconds
+(48 minutes 49 seconds)**, with zero failures and zero skips. No production or
+test file changed between the final 28/28 and 56/56 focused runs, 443/443 serial
+integration, two final audits, repository gates and this complete regression.
+
+Immediately before this closure, the plan had 17,676 lines and SHA-256
+`393271c83159473f35c9fc8d91f1edcad2ff2f4738cd33fbd3578b7b6cda1dc5`.
+The original first 17,438 lines still hash to
+`fdb0790253fb3bea3f7baae4881360b2690cfcf136670765c294ee6fac0fad23`,
+and the first acceptance append through line 17,576 still hashes to
+`33c157d9d37d27ff510b54fc6c49eaecaca836204d7a8d9195a3e64af7d45a96`.
+No earlier byte changed.
+
+Together with the TypeScript 39/39 oracle, 61/61 contract suite plus strict
+validators, 85/44 fixture inventory, 6/6 migration closure, 9/9 package
+contents, 9/9 packed installs, Ruff, format, mypy, compile/whitespace gates and
+final zero-severity audits, this result authorizes one scoped Python
+operation-sequence-zero commit and push.
+
+Authorization remains bounded to validation-first four-receipt atomic adoption
+under sections 31.37.50.6 through 31.37.50.9. Parity, publication session,
+rebind, rules, retirement, commit, manifest, release, external adoption and star
+claims remain false.

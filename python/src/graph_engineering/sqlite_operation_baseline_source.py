@@ -313,6 +313,21 @@ _BASELINE_HEADER_PUBLICATION_INSERT_SQL = (
     SQLITE_CURSOR_BASELINE_HEADER_PUBLICATION_INSERT_SQL_INTRINSIC
 )
 _BASELINE_HEADER_PUBLICATION_CONSTRUCTION_TOKEN = object()
+SQLITE_CURSOR_OPERATION_SEQUENCE_ZERO_INSERT_SQL_INTRINSIC = (
+    "INSERT INTO main.ge_cycle_operation_sequence "
+    "(singleton, baseline_id, last_commit_sequence, baseline_captured_at_ms, "
+    "updated_at_ms) VALUES (1, ?, 0, ?, ?)"
+)
+SQLITE_CURSOR_OPERATION_SEQUENCE_ZERO_INSERT_SQL_SHA256_INTRINSIC = (
+    "a9afde17c90fcc7381eefa3fa81823752d6f1bc29c9eced2de8b31176cc1dd85"
+)
+SQLITE_CURSOR_OPERATION_SEQUENCE_ZERO_PARAMETER_ORDER_INTRINSIC = (
+    "baselineId",
+    "baselineCapturedAtMs",
+    "updatedAtMs",
+)
+_OPERATION_SEQUENCE_ZERO_INSERT_SQL = SQLITE_CURSOR_OPERATION_SEQUENCE_ZERO_INSERT_SQL_INTRINSIC
+_OPERATION_SEQUENCE_ZERO_CONSTRUCTION_TOKEN = object()
 
 
 class _SQLiteConnectionMigration0002Execution:
@@ -441,6 +456,41 @@ class _SQLiteConnectionBaselineHeaderPublicationExecutionSnapshot(NamedTuple):
     close_succeeded: bool
 
 
+class _SQLiteConnectionOperationSequenceZeroExecution:
+    """Opaque source-owner session for the singleton sequence-zero write."""
+
+    __slots__ = ("__weakref__",)
+
+    def __init__(self, token: object) -> None:
+        if token is not _OPERATION_SEQUENCE_ZERO_CONSTRUCTION_TOKEN:
+            raise TypeError("GE_CURSOR_B3_SEQUENCE_ZERO_EXECUTION")
+
+
+class _SQLiteConnectionOperationSequenceZeroStepSnapshot(NamedTuple):
+    affected_rows_delta: Literal[1]
+    completed_execution_count: Literal[1]
+    execute_count: Literal[1]
+    prepare_count: Literal[1]
+    total_changes: int
+    transaction_epoch: int
+    transaction_generation: object
+
+
+class _SQLiteConnectionOperationSequenceZeroExecutionSnapshot(NamedTuple):
+    affected_rows: int
+    completed_execution_count: Literal[0, 1]
+    execute_count: Literal[0, 1]
+    lifecycle: Literal["active", "completed", "poisoned"]
+    prepare_count: Literal[1]
+    total_changes_before: int
+    total_changes: int
+    total_changes_delta: int
+    transaction_epoch: int
+    transaction_generation: object
+    close_attempt_count: Literal[0, 1]
+    close_succeeded: bool
+
+
 @dataclass(slots=True)
 class _PostDdlPublicationReaderState:
     close_attempt_count: Literal[0, 1]
@@ -511,6 +561,27 @@ class _BaselineHeaderPublicationExecutionState:
     transaction_generation: object
 
 
+@dataclass(slots=True)
+class _OperationSequenceZeroExecutionState:
+    affected_rows: int
+    close_attempt_count: Literal[0, 1]
+    close_error_code: str | None
+    close_succeeded: bool
+    completed_execution_count: Literal[0, 1]
+    connection: SQLiteV1BaselineConnectionOwner
+    cursor: sqlite3.Cursor | None
+    execute_count: Literal[0, 1]
+    fixed_insert_sql: str
+    fixed_insert_sql_sha256: str
+    lifecycle: Literal["active", "completed", "poisoned"]
+    prepare_count: Literal[1]
+    total_changes_before: int
+    total_changes: int
+    transaction_epoch_before: int
+    transaction_epoch: int
+    transaction_generation: object
+
+
 _MIGRATION_0002_EXECUTIONS: dict[
     int,
     tuple[
@@ -539,6 +610,13 @@ _BASELINE_HEADER_PUBLICATION_EXECUTIONS: dict[
         _BaselineHeaderPublicationExecutionState,
     ],
 ] = {}
+_OPERATION_SEQUENCE_ZERO_EXECUTIONS: dict[
+    int,
+    tuple[
+        ReferenceType[_SQLiteConnectionOperationSequenceZeroExecution],
+        _OperationSequenceZeroExecutionState,
+    ],
+] = {}
 
 # CPython's sqlite descriptors are captured once so later module/class
 # replacement cannot redirect the package-owned execution lane.
@@ -561,6 +639,12 @@ _BASELINE_HEADER_SQLITE_CONNECTION_TOTAL_CHANGES = sqlite3.Connection.total_chan
 _BASELINE_HEADER_SQLITE_CURSOR_EXECUTE = sqlite3.Cursor.execute
 _BASELINE_HEADER_SQLITE_CURSOR_CLOSE = sqlite3.Cursor.close
 _BASELINE_HEADER_SQLITE_CURSOR_ROWCOUNT = sqlite3.Cursor.rowcount
+_SEQUENCE_ZERO_SQLITE_CONNECTION_CURSOR = sqlite3.Connection.cursor
+_SEQUENCE_ZERO_SQLITE_CONNECTION_IN_TRANSACTION = sqlite3.Connection.in_transaction
+_SEQUENCE_ZERO_SQLITE_CONNECTION_TOTAL_CHANGES = sqlite3.Connection.total_changes
+_SEQUENCE_ZERO_SQLITE_CURSOR_EXECUTE = sqlite3.Cursor.execute
+_SEQUENCE_ZERO_SQLITE_CURSOR_CLOSE = sqlite3.Cursor.close
+_SEQUENCE_ZERO_SQLITE_CURSOR_ROWCOUNT = sqlite3.Cursor.rowcount
 _READ_MIGRATION_0002_ASSET = _read_sqlite_cursor_migration_0002_asset_snapshot_intrinsic
 
 
@@ -869,6 +953,100 @@ def _register_baseline_header_publication_execution(
 
     reference = ref(execution, discard)
     _BASELINE_HEADER_PUBLICATION_EXECUTIONS[execution_id] = (reference, state)
+
+
+def _operation_sequence_zero_fail(code: str) -> Never:
+    raise ValueError(code)
+
+
+def _assert_operation_sequence_zero_sql_commitment(sql: object, sha256: object) -> None:
+    """Authenticate the exact fixed statement without trusting module aliases."""
+
+    if type(sql) is not str or type(sha256) is not str:
+        _operation_sequence_zero_fail("GE_CURSOR_B3_SEQUENCE_ZERO_SQL_IDENTITY")
+    sql_bytes = sql.encode("utf-8")
+    if (
+        sql
+        != "INSERT INTO main.ge_cycle_operation_sequence (singleton, baseline_id, "
+        "last_commit_sequence, baseline_captured_at_ms, updated_at_ms) "
+        "VALUES (1, ?, 0, ?, ?)"
+        or len(sql_bytes) != 154
+        or sha256 != "a9afde17c90fcc7381eefa3fa81823752d6f1bc29c9eced2de8b31176cc1dd85"
+        or hashlib.sha256(sql_bytes).hexdigest() != sha256
+    ):
+        _operation_sequence_zero_fail("GE_CURSOR_B3_SEQUENCE_ZERO_SQL_IDENTITY")
+
+
+def _sequence_zero_native_in_transaction(connection: sqlite3.Connection) -> bool:
+    try:
+        value = _SEQUENCE_ZERO_SQLITE_CONNECTION_IN_TRANSACTION.__get__(
+            connection, sqlite3.Connection
+        )
+    except BaseException as error:
+        raise ValueError("GE_CURSOR_B3_SEQUENCE_ZERO_CONNECTION") from error
+    if type(value) is not bool:
+        _operation_sequence_zero_fail("GE_CURSOR_B3_SEQUENCE_ZERO_CONNECTION")
+    return value
+
+
+def _sequence_zero_native_total_changes(connection: sqlite3.Connection) -> int:
+    try:
+        value = _SEQUENCE_ZERO_SQLITE_CONNECTION_TOTAL_CHANGES.__get__(
+            connection, sqlite3.Connection
+        )
+    except BaseException as error:
+        raise ValueError("GE_CURSOR_B3_SEQUENCE_ZERO_COUNTER") from error
+    if type(value) is not int or not 0 <= value <= MAX_SAFE_INTEGER:
+        _operation_sequence_zero_fail("GE_CURSOR_B3_SEQUENCE_ZERO_COUNTER")
+    return value
+
+
+def _checked_operation_sequence_zero_parameters(
+    baseline_id: object,
+    baseline_captured_at_ms: object,
+    updated_at_ms: object,
+) -> tuple[str, int, int]:
+    if (
+        type(baseline_id) is not str
+        or len(baseline_id) != 67
+        or baseline_id[:3] != "v2-"
+        or not _BASELINE_HEADER_IS_LOWER_HEX_64(baseline_id[3:])
+        or type(baseline_captured_at_ms) is not int
+        or not 0 <= baseline_captured_at_ms <= MAX_SAFE_INTEGER
+        or type(updated_at_ms) is not int
+        or not baseline_captured_at_ms <= updated_at_ms <= MAX_SAFE_INTEGER
+    ):
+        _operation_sequence_zero_fail("GE_CURSOR_B3_SEQUENCE_ZERO_PARAMETERS")
+    return baseline_id, baseline_captured_at_ms, updated_at_ms
+
+
+def _operation_sequence_zero_state(
+    connection: SQLiteV1BaselineConnectionOwner,
+    execution: _SQLiteConnectionOperationSequenceZeroExecution,
+) -> _OperationSequenceZeroExecutionState:
+    if type(execution) is not _SQLiteConnectionOperationSequenceZeroExecution:
+        _operation_sequence_zero_fail("GE_CURSOR_B3_SEQUENCE_ZERO_EXECUTION")
+    current = _OPERATION_SEQUENCE_ZERO_EXECUTIONS.get(id(execution))
+    if current is None or current[0]() is not execution or current[1].connection is not connection:
+        _operation_sequence_zero_fail("GE_CURSOR_B3_SEQUENCE_ZERO_EXECUTION")
+    return current[1]
+
+
+def _register_operation_sequence_zero_execution(
+    execution: _SQLiteConnectionOperationSequenceZeroExecution,
+    state: _OperationSequenceZeroExecutionState,
+) -> None:
+    execution_id = id(execution)
+
+    def discard(
+        reference: ReferenceType[_SQLiteConnectionOperationSequenceZeroExecution],
+    ) -> None:
+        current = _OPERATION_SEQUENCE_ZERO_EXECUTIONS.get(execution_id)
+        if current is not None and current[0] is reference:
+            _OPERATION_SEQUENCE_ZERO_EXECUTIONS.pop(execution_id, None)
+
+    reference = ref(execution, discard)
+    _OPERATION_SEQUENCE_ZERO_EXECUTIONS[execution_id] = (reference, state)
 
 
 class SQLiteV1BaselineConnectionOwner:
@@ -1583,6 +1761,252 @@ class SQLiteV1BaselineConnectionOwner:
             close_succeeded=state.close_succeeded,
         )
 
+    def _begin_operation_sequence_zero_execution(
+        self,
+        _fixed_insert_sql: str = SQLITE_CURSOR_OPERATION_SEQUENCE_ZERO_INSERT_SQL_INTRINSIC,
+        _fixed_insert_sql_sha256: str = (
+            SQLITE_CURSOR_OPERATION_SEQUENCE_ZERO_INSERT_SQL_SHA256_INTRINSIC
+        ),
+    ) -> _SQLiteConnectionOperationSequenceZeroExecution:
+        """Reserve one cursor/session for the fixed singleton INSERT."""
+
+        _assert_operation_sequence_zero_sql_commitment(
+            _fixed_insert_sql,
+            _fixed_insert_sql_sha256,
+        )
+        try:
+            if (
+                not _sequence_zero_native_in_transaction(self.__connection)
+                or self.__transaction_mode != "exclusive"
+                or self.__transaction_generation is None
+                or type(self.__transaction_epoch) is not int
+                or self.__transaction_epoch < 0
+            ):
+                _operation_sequence_zero_fail("GE_CURSOR_B3_SEQUENCE_ZERO_STALE_FENCE")
+            transaction_generation = self.__transaction_generation
+            transaction_epoch = self.__transaction_epoch
+            total_changes = _sequence_zero_native_total_changes(self.__connection)
+        except ValueError:
+            raise
+        except BaseException as error:
+            raise ValueError("GE_CURSOR_B3_SEQUENCE_ZERO_OWNER_OBSERVATION") from error
+
+        # stdlib sqlite3 has no prepare-only API.  This single package-owned
+        # cursor allocation is the prepare reservation; no SQL executes here.
+        try:
+            cursor = _SEQUENCE_ZERO_SQLITE_CONNECTION_CURSOR(self.__connection)
+        except BaseException as error:
+            raise ValueError("GE_CURSOR_B3_SEQUENCE_ZERO_PREPARE") from error
+        try:
+            owner_drifted = (
+                not _sequence_zero_native_in_transaction(self.__connection)
+                or self.__transaction_mode != "exclusive"
+                or self.__transaction_generation is not transaction_generation
+                or self.__transaction_epoch != transaction_epoch
+                or _sequence_zero_native_total_changes(self.__connection) != total_changes
+            )
+        except BaseException as error:
+            with suppress(BaseException):
+                _SEQUENCE_ZERO_SQLITE_CURSOR_CLOSE(cursor)
+            raise ValueError("GE_CURSOR_B3_SEQUENCE_ZERO_OWNER_OBSERVATION") from error
+        if owner_drifted:
+            with suppress(BaseException):
+                _SEQUENCE_ZERO_SQLITE_CURSOR_CLOSE(cursor)
+            _operation_sequence_zero_fail("GE_CURSOR_B3_SEQUENCE_ZERO_OWNER_DRIFT")
+
+        execution = _SQLiteConnectionOperationSequenceZeroExecution(
+            _OPERATION_SEQUENCE_ZERO_CONSTRUCTION_TOKEN
+        )
+        _register_operation_sequence_zero_execution(
+            execution,
+            _OperationSequenceZeroExecutionState(
+                affected_rows=0,
+                close_attempt_count=0,
+                close_error_code=None,
+                close_succeeded=False,
+                completed_execution_count=0,
+                connection=self,
+                cursor=cursor,
+                execute_count=0,
+                fixed_insert_sql=_fixed_insert_sql,
+                fixed_insert_sql_sha256=_fixed_insert_sql_sha256,
+                lifecycle="active",
+                prepare_count=1,
+                total_changes_before=total_changes,
+                total_changes=total_changes,
+                transaction_epoch_before=transaction_epoch,
+                transaction_epoch=transaction_epoch,
+                transaction_generation=transaction_generation,
+            ),
+        )
+        return execution
+
+    def _close_operation_sequence_zero_execution(
+        self,
+        state: _OperationSequenceZeroExecutionState,
+    ) -> None:
+        """Close the reserved cursor exactly once and retain no exception."""
+
+        if state.close_attempt_count == 1:
+            if state.close_error_code is not None:
+                raise ValueError(state.close_error_code)
+            return
+        state.close_attempt_count = 1
+        cursor = state.cursor
+        state.cursor = None
+        if cursor is None:
+            state.close_error_code = "GE_CURSOR_B3_SEQUENCE_ZERO_CLEANUP"
+            raise ValueError(state.close_error_code)
+        try:
+            _SEQUENCE_ZERO_SQLITE_CURSOR_CLOSE(cursor)
+        except BaseException as error:
+            state.close_error_code = "GE_CURSOR_B3_SEQUENCE_ZERO_CLEANUP"
+            raise ValueError(state.close_error_code) from error
+        state.close_succeeded = True
+
+    def _synchronize_operation_sequence_zero_after_failure(
+        self,
+        state: _OperationSequenceZeroExecutionState,
+    ) -> None:
+        """Retain real epoch/change progress without replacing primary errors."""
+
+        if type(self.__transaction_epoch) is int and self.__transaction_epoch >= 0:
+            state.transaction_epoch = self.__transaction_epoch
+        try:
+            total_changes = _sequence_zero_native_total_changes(self.__connection)
+            delta = total_changes - state.total_changes_before
+            if type(delta) is int and 0 <= delta <= MAX_SAFE_INTEGER:
+                state.total_changes = total_changes
+                state.affected_rows = delta
+        except BaseException:
+            pass
+
+    def _execute_operation_sequence_zero(
+        self,
+        execution: _SQLiteConnectionOperationSequenceZeroExecution,
+        baseline_id: object,
+        baseline_captured_at_ms: object,
+        updated_at_ms: object,
+        _fixed_insert_sql: str = SQLITE_CURSOR_OPERATION_SEQUENCE_ZERO_INSERT_SQL_INTRINSIC,
+        _fixed_insert_sql_sha256: str = (
+            SQLITE_CURSOR_OPERATION_SEQUENCE_ZERO_INSERT_SQL_SHA256_INTRINSIC
+        ),
+    ) -> _SQLiteConnectionOperationSequenceZeroStepSnapshot:
+        """Run the fixed three-parameter INSERT once and retain real progress."""
+
+        state = _operation_sequence_zero_state(self, execution)
+        if state.lifecycle != "active":
+            _operation_sequence_zero_fail("GE_CURSOR_B3_SEQUENCE_ZERO_TERMINAL")
+        try:
+            _assert_operation_sequence_zero_sql_commitment(
+                state.fixed_insert_sql,
+                state.fixed_insert_sql_sha256,
+            )
+            _assert_operation_sequence_zero_sql_commitment(
+                _fixed_insert_sql,
+                _fixed_insert_sql_sha256,
+            )
+            parameters = _checked_operation_sequence_zero_parameters(
+                baseline_id,
+                baseline_captured_at_ms,
+                updated_at_ms,
+            )
+            if (
+                not _sequence_zero_native_in_transaction(self.__connection)
+                or self.__transaction_mode != "exclusive"
+                or self.__transaction_generation is not state.transaction_generation
+                or self.__transaction_epoch != state.transaction_epoch
+                or _sequence_zero_native_total_changes(self.__connection) != state.total_changes
+            ):
+                _operation_sequence_zero_fail("GE_CURSOR_B3_SEQUENCE_ZERO_OWNER_DRIFT")
+        except BaseException:
+            self._synchronize_operation_sequence_zero_after_failure(state)
+            state.lifecycle = "poisoned"
+            with suppress(BaseException):
+                self._close_operation_sequence_zero_execution(state)
+            raise
+
+        cursor = state.cursor
+        if cursor is None:
+            state.lifecycle = "poisoned"
+            _operation_sequence_zero_fail("GE_CURSOR_B3_SEQUENCE_ZERO_EXECUTION")
+        state.execute_count = 1
+        if type(self.__transaction_epoch) is not int or self.__transaction_epoch < 0:
+            state.lifecycle = "poisoned"
+            with suppress(BaseException):
+                self._close_operation_sequence_zero_execution(state)
+            _operation_sequence_zero_fail("GE_CURSOR_B3_SEQUENCE_ZERO_EPOCH")
+        self.__transaction_epoch += 1
+        state.transaction_epoch = self.__transaction_epoch
+        try:
+            raw_result = _SEQUENCE_ZERO_SQLITE_CURSOR_EXECUTE(
+                cursor,
+                _fixed_insert_sql,
+                parameters,
+            )
+        except BaseException as error:
+            self._synchronize_operation_sequence_zero_after_failure(state)
+            state.lifecycle = "poisoned"
+            with suppress(BaseException):
+                self._close_operation_sequence_zero_execution(state)
+            raise ValueError("GE_CURSOR_B3_SEQUENCE_ZERO_EXECUTE") from error
+
+        # Native return is irreversible.  Preserve it before inspecting the
+        # returned cursor, rowcount, aggregate counter, or cleanup result.
+        state.completed_execution_count = 1
+        state.affected_rows = 1
+        try:
+            if raw_result is not cursor:
+                _operation_sequence_zero_fail("GE_CURSOR_B3_SEQUENCE_ZERO_RESULT")
+            try:
+                raw_rowcount = _SEQUENCE_ZERO_SQLITE_CURSOR_ROWCOUNT.__get__(cursor, sqlite3.Cursor)
+            except BaseException as error:
+                raise ValueError("GE_CURSOR_B3_SEQUENCE_ZERO_RESULT") from error
+            if type(raw_rowcount) is not int or raw_rowcount != 1:
+                _operation_sequence_zero_fail("GE_CURSOR_B3_SEQUENCE_ZERO_AFFECTED_ROWS")
+            total_changes = _sequence_zero_native_total_changes(self.__connection)
+            if total_changes - state.total_changes != 1:
+                _operation_sequence_zero_fail("GE_CURSOR_B3_SEQUENCE_ZERO_ACCOUNTING")
+            state.total_changes = total_changes
+            state.affected_rows = total_changes - state.total_changes_before
+            state.lifecycle = "completed"
+            self._close_operation_sequence_zero_execution(state)
+            return _SQLiteConnectionOperationSequenceZeroStepSnapshot(
+                affected_rows_delta=1,
+                completed_execution_count=1,
+                execute_count=1,
+                prepare_count=state.prepare_count,
+                total_changes=state.total_changes,
+                transaction_epoch=state.transaction_epoch,
+                transaction_generation=state.transaction_generation,
+            )
+        except BaseException:
+            self._synchronize_operation_sequence_zero_after_failure(state)
+            state.lifecycle = "poisoned"
+            with suppress(BaseException):
+                self._close_operation_sequence_zero_execution(state)
+            raise
+
+    def _read_operation_sequence_zero_execution_snapshot(
+        self,
+        execution: _SQLiteConnectionOperationSequenceZeroExecution,
+    ) -> _SQLiteConnectionOperationSequenceZeroExecutionSnapshot:
+        state = _operation_sequence_zero_state(self, execution)
+        return _SQLiteConnectionOperationSequenceZeroExecutionSnapshot(
+            affected_rows=state.affected_rows,
+            completed_execution_count=state.completed_execution_count,
+            execute_count=state.execute_count,
+            lifecycle=state.lifecycle,
+            prepare_count=state.prepare_count,
+            total_changes_before=state.total_changes_before,
+            total_changes=state.total_changes,
+            total_changes_delta=state.total_changes - state.total_changes_before,
+            transaction_epoch=state.transaction_epoch,
+            transaction_generation=state.transaction_generation,
+            close_attempt_count=state.close_attempt_count,
+            close_succeeded=state.close_succeeded,
+        )
+
     def _begin_migration_0002_execution(
         self,
         asset: object,
@@ -1846,6 +2270,15 @@ _OWNER_EXECUTE_BASELINE_HEADER_PUBLICATION = (
 _OWNER_READ_BASELINE_HEADER_PUBLICATION = (
     SQLiteV1BaselineConnectionOwner._read_baseline_header_publication_execution_snapshot
 )
+_OWNER_BEGIN_OPERATION_SEQUENCE_ZERO = (
+    SQLiteV1BaselineConnectionOwner._begin_operation_sequence_zero_execution
+)
+_OWNER_EXECUTE_OPERATION_SEQUENCE_ZERO = (
+    SQLiteV1BaselineConnectionOwner._execute_operation_sequence_zero
+)
+_OWNER_READ_OPERATION_SEQUENCE_ZERO = (
+    SQLiteV1BaselineConnectionOwner._read_operation_sequence_zero_execution_snapshot
+)
 
 
 def _begin_sqlite_connection_migration_0002_execution_intrinsic(
@@ -2048,6 +2481,47 @@ def _read_sqlite_connection_baseline_header_publication_execution_snapshot_intri
     if type(connection) is not SQLiteV1BaselineConnectionOwner:
         _baseline_header_publication_fail("GE_CURSOR_B3_BASELINE_HEADER_CONNECTION")
     return _OWNER_READ_BASELINE_HEADER_PUBLICATION(connection, execution)
+
+
+def _begin_sqlite_connection_operation_sequence_zero_execution_intrinsic(
+    connection: SQLiteV1BaselineConnectionOwner,
+) -> _SQLiteConnectionOperationSequenceZeroExecution:
+    """Reserve one source-owned cursor for the fixed singleton INSERT."""
+
+    if type(connection) is not SQLiteV1BaselineConnectionOwner:
+        _operation_sequence_zero_fail("GE_CURSOR_B3_SEQUENCE_ZERO_CONNECTION")
+    return _OWNER_BEGIN_OPERATION_SEQUENCE_ZERO(connection)
+
+
+def _execute_sqlite_connection_operation_sequence_zero_intrinsic(
+    connection: SQLiteV1BaselineConnectionOwner,
+    execution: _SQLiteConnectionOperationSequenceZeroExecution,
+    baseline_id: object,
+    baseline_captured_at_ms: object,
+    updated_at_ms: object,
+) -> _SQLiteConnectionOperationSequenceZeroStepSnapshot:
+    """Execute the exact package-owned three-parameter singleton INSERT."""
+
+    if type(connection) is not SQLiteV1BaselineConnectionOwner:
+        _operation_sequence_zero_fail("GE_CURSOR_B3_SEQUENCE_ZERO_CONNECTION")
+    return _OWNER_EXECUTE_OPERATION_SEQUENCE_ZERO(
+        connection,
+        execution,
+        baseline_id,
+        baseline_captured_at_ms,
+        updated_at_ms,
+    )
+
+
+def _read_sqlite_connection_operation_sequence_zero_execution_snapshot_intrinsic(
+    connection: SQLiteV1BaselineConnectionOwner,
+    execution: _SQLiteConnectionOperationSequenceZeroExecution,
+) -> _SQLiteConnectionOperationSequenceZeroExecutionSnapshot:
+    """Read exact prepare/run/completion/counter/cleanup progress."""
+
+    if type(connection) is not SQLiteV1BaselineConnectionOwner:
+        _operation_sequence_zero_fail("GE_CURSOR_B3_SEQUENCE_ZERO_CONNECTION")
+    return _OWNER_READ_OPERATION_SEQUENCE_ZERO(connection, execution)
 
 
 @dataclass(frozen=True, slots=True)
