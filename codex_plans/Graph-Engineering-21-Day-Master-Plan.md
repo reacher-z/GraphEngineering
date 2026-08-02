@@ -20920,3 +20920,138 @@ post-T terminal primary：exact connection、transaction lineage/generation、au
 cleanup失败不覆盖leaf primary。若要求driver-native throw，必须先提供可注入driver adapter或可复现的
 OS/driver failure；否则保持nonclaim。finalizer还必须证明rollback后reopen恢复pre-rebind永久数据、old
 S/T/authority不复活、fresh graph可成功、selected/unselected/abandoned/cross-owner/GC registry全矩阵。
+
+#### 31.37.72 Wave 1E/P4：PostConsumeTransactionFailureFinalizer v1（2026-08-02 PDT 追加；既有内容不改）
+
+本节只接受failure-only、package-private的post-consume transaction finalizer切片，不宣称完整publication
+transaction owner或success path已经存在。追加前计划精确为20,922行，完整前缀SHA-256为
+`b5c618a89c4593f29a0ccc352fc75c6bb4a60fd9ef9b5da018ef01c8284a369b`；前20,922行必须继续
+byte-for-byte不变。
+
+##### 31.37.72.1 Canonical v1 contract 与独立trusted root
+
+新增strict schema、canonical case fixture、validator和Node tests，冻结角色
+`authenticated-post-t-terminal-primary-cleanup-only`。contract明确要求existing primary，并禁止
+no-primary、BEGIN、COMMIT、Rule12、TEMP retirement与success cleanup。exact identity projection携带
+connection、transaction lineage/generation、authority、consumed T与one-shot owner。
+
+固定生命周期和操作顺序：
+
+1. `prepared`；
+2. consume one-shot owner exactly once；
+3. 进入`finalizing`并terminalize selected graph；
+4. 真实rollback attempt exactly once；
+5. 若已返回后注入ambiguity，记录canonical secondary；
+6. 无论rollback阶段是否失败，真实close attempt exactly once；
+7. 若已返回后注入ambiguity，记录canonical tertiary；
+8. 进入`finalized`并重抛original primary。
+
+三个fixture case分别为both faults、rollback-only与close-only。每案都要求authenticated post-T primary，
+`ownerConsumeCount=1`、`terminalizeCount=1`、rollback/close attempt/native-return均为1，selected throw恒为
+`GE_SQLITE_POST_T_TERMINAL_PRIMARY`。canonical diagnostic只含`code/operation/rank/origin`，排除driver
+message、地址与时间。rollback/close origin固定为
+`after-native-return-ambiguous-cleanup-fault`，`driverNativeCleanupThrowClaim=false`。
+
+首次独审发现validator只把fixture内digest归零重算，identity与digest同步修改会自证通过。修复后validator
+内置独立`TRUSTED_FIXTURE_SHA256=81c055216223c89dc68055bbf325a73c61bfb899977dfb6255059137783ae360`，
+要求fixture field、computed digest和trusted root三者相等。正式hostile tests覆盖同步重签identity、unsafe
+generation、四项claims inflation、unknown/order/count/diagnostic/case drift、duplicate keys与trailing JSON。
+最终contract 10/10、standalone validator、B3 regression与diff-check通过；独立复审H0/M0/L0。
+
+##### 31.37.72.2 TypeScript fixed-leaf capture 与真实 rollback/close
+
+新增deep package-private module，不修改serialized Rule11 leaf、connection owner或package root。capture runtime
+arity为1，只接受exact authentic S；模块定义期捕获session snapshot reader与固定
+`executeSQLiteCursorPublicationRebindRule11Intrinsic`。capture先从S认证active predecessor与唯一
+connection/authority/lineage/epoch，再内部调用固定leaf并直接catch。caller没有primary、callback或thunk
+参数；即使JS额外传入一个恶意thunk，它也不会被调用，最终绑定和重抛仍是leaf真实sqlite class 19 primary。
+
+post-catch认证必须同时成立：authority/context/T/E均属于同一S graph；authority/context/T/E poisoned；
+adoption不存在；transaction仍EXCLUSIVE且lineage/epoch不漂移；E execute/release为1、statement logical owner
+retired、affected和changes仍处于native execute failure边界。只有此时才mint opaque one-shot owner。
+
+Finalizer WeakMap state只用WeakRef保存graph identities和primary；fault使用WeakSet，不形成reverse root。
+primary必须在任何owner consume、state transition、rollback或close之前仍exact alive，否则无I/O fail-closed。
+状态严格`prepared→finalizing→finalized`，owner consume与terminalize各一次。rollback使用定义期捕获的trusted
+exec intrinsic真实执行一次；无论rollback native/after-return阶段如何，定义期捕获的base close仍执行一次。
+final snapshot只保存纯canonical counts、trace和ordered diagnostics，不保存Error对象。
+
+真实文件数据库测试通过TEMP trigger在T后触发SQLite native failure；三种fixture组合均真实rollback、真实close、
+reopen后证明`user_version=1`、cursor rows恢复且v2 baseline table不存在。old graph保持poisoned，fresh graph健康。
+hostile matrix覆盖pre-T、wrong/cross S、lineage/epoch、clone/proxy/forge/replay/double owner、registration两阶段
+rollback、abandoned reverse-root、dead primary与GC。模块没有BEGIN、COMMIT、Rule12、success path或root export。
+
+首版独审拒绝了caller-selected primary、二态lifecycle和缺失canonical diagnostics；第二版又发现任意thunk可
+吞真实primary后抛substitute。最终版本删除全部caller thunk入口，固定leaf capture。最终target 10/10、
+isolated GC 11/11、Rule11 regression 20/20、spec 10/10、validator、typecheck与diff-check通过；独立终审
+H0/M0/L0。
+
+##### 31.37.72.3 Python closure-fixed leaf、non-root registry 与终态清根
+
+新增private module且不加入`__all__`，不修改baseline owner或serialized leaf。capture先认证exact active
+S→authority→connection→generation，避免cross authentic graph在任何T/native mutation前被消费。它由
+factory在module definition time把原始Rule11 leaf和capture implementation封入closure cell；公开capture
+不读取可变`_LEAF` global，也没有leaf/implementation override参数。post-import把`_LEAF`替换为“调用真实
+leaf后抛substitute”的攻击中，wrapper call count保持0，owner绑定原始
+`ValueError(GE_CURSOR_B3_CURSOR_REBIND_EXECUTE)`。
+
+post-catch认证要求authority adoption absent、EXCLUSIVE transaction、exact generation/epoch、context/T/E
+同图；lower E必须poisoned、execute/release=1、cursor ownership released、affected尚未可信观察为None、
+cursor ledger为zero projection、changes prepare/fetch/release=0。post-adoption、W/R11 failure、same-generation
+epoch drift与new generation全部拒绝。
+
+由于Python connection owner/plain generation不可weakref，registry state绝不强持它们，只保存connection/
+generation/primary id与authority/context/T/E weakrefs。opaque owner是唯一strong presentation root；owner-held
+registry仍通过weak owner key和双stale-callback context reverse map保持one graph one owner。abandoned owner
+删除后graph/primary cycle可GC并回registry baseline。finalize完成后清空owner全部七个strong slots，terminal
+owner只保留registry纯值snapshot；primary通过薄public frame按exact identity重抛且不长期root graph。
+
+primary与所有armed fault必须在terminalize/I/O之前exact alive，否则fail-closed。三态、owner consume、
+terminalize、rollback/close attempt/native-return/after-return/secondary/tertiary counts及ordered canonical
+diagnostics与同一fixture三案exact对照。真实rollback/close、disk reopen、old graph poison与fresh graph成功均
+验证；另覆盖cross graph、duplicate owner、clone/forge/replay、两阶段register rollback、stale callback、
+dead fault、abandoned/finalized reverse-root GC。
+
+首版独审发现缺少E/adoption认证、dead primary仍cleanup、registry强root、diagnostics缺失与同图多owner；修复后
+又发现`_LEAF`只是赋给可变global而仍可late-read替换。最终closure factory关闭该High。最终focused 16/16、
+subprotocol regression 60 passed/1 expected bounded-id-reuse skip、spec 10/10、validator、Ruff、mypy与
+diff-check通过；独立终审H0/M0/L0。
+
+##### 31.37.72.4 主线程最终验证与文件身份
+
+主线程在最终冻结字节上再次执行：contract 10/10、standalone validator、TS typecheck、Python Ruff
+format/check与mypy、全diff-check；随后并行复跑TS finalizer 10/10（约25.25秒）与Python finalizer 16/16
+（约83.88秒），全部通过。
+
+八个新文件均为0644，最终SHA-256：
+
+- TS source：`3adc3c265a659529bd1570ea31d2b44e9bd76c39962d6b347c771a13e9c57344`；
+- TS test：`7952dfd305c32ef4aaa5055b9faf93cd0db65fb97381e76079a8dbd4278ae2cf`；
+- Python source：`5458d971637cb014d11b6e883b38dc117e2909edf463fdb34bb89d359cdc2c96`；
+- Python test：`e0acb7ef8426a091784eb673ad66d2ffca886bfb600c566603c61abc5fa616f6`；
+- fixture：`97a2d9b290612ecf9eec3dd9fb963d6d26162aebee20afbf6b75225cc3ac0348`；
+- schema：`9269a7610f32884c1538730e2d4c0a0ec994915a4ad76f99f830ec34fdbafe11`；
+- validator：`b79e6a1e4c3b1b4a06400c9b0690701c7adcf970a94017c7016decd3c5c4e995`；
+- tests：`8c8827a59e416d719635f24bedaa562ac6a10ef38c658d1f71d54e46153183cd`。
+
+##### 31.37.72.5 Strict nonclaims 与下一切片
+
+本节实现的是可独立调用并验证的package-private failure finalizer；它尚未接入公开production workflow或
+release gate，因此不能宣称完整transaction owner集成。contract fixture自身的
+`implementationClaim=false`与`releaseGate=false`仍诚实描述contract artifact不会自动证明runtime发布。
+
+仍未完成：
+
+- success transaction owner、BEGIN/COMMIT、Rule12、TEMP retirement与final commit fence；
+- driver-native rollback throw与driver-native close throw；当前只验证真实native return后的ambiguous fault；
+- TS serialized changes hostile primary接入finalizer的完整组合；
+- native/changes/total/ledger pairwise与多点不一致完整矩阵；
+- finalizer cross-runtime canonical reporter byte parity；当前两端各自读取同一trusted fixture并exact对照，
+  但没有独立双runtime reporter；
+- Python真实id reuse动态命中；65,536预算内仍只得到honest skip；
+- Rule12与third clock。
+
+下一切片先建立finalizer cross-runtime reporter，只输出canonical fixture projection，重复执行两端真实SQLite
+并byte-exact比较；随后把TS serialized changes primary提升到同一failure finalizer。只有native和changes
+primary、rollback/reopen/close、counter combinations与portable parity都闭环后，才评估Wave 1E completion，
+仍不得提前进入success commit或Rule12。

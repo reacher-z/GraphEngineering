@@ -1,0 +1,200 @@
+{
+  "schemaVersion": 1,
+  "id": "sqlite-post-consume-transaction-failure-finalizer-v1",
+  "status": "contract-frozen",
+  "claims": {
+    "implementationClaim": false,
+    "protocolClaim": false,
+    "releaseGate": false,
+    "driverNativeCleanupThrowClaim": false
+  },
+  "boundary": {
+    "stableTaskId": "SQLITE-POST-CONSUME-TRANSACTION-FAILURE-FINALIZER",
+    "role": "authenticated-post-t-terminal-primary-cleanup-only",
+    "requiresExistingPrimary": true,
+    "ownsBegin": false,
+    "ownsCommit": false,
+    "ownsRule12": false,
+    "ownsTempRetirement": false,
+    "ownsSuccessPath": false,
+    "noPrimaryBranch": "forbidden"
+  },
+  "identityContract": {
+    "exactRequiredObjects": [
+      "sqlite-connection-object-identity",
+      "unchanged-transaction-lineage-object-identity",
+      "exact-transaction-generation",
+      "outer-publication-authority-object-identity",
+      "consumed-publication-session-tombstone-t-object-identity",
+      "one-shot-finalizer-owner-object-identity"
+    ],
+    "cloneRejected": true,
+    "structuralReconstructionRejected": true,
+    "crossConnectionRejected": true,
+    "crossGenerationRejected": true,
+    "crossAuthorityRejected": true,
+    "unconsumedSessionRejected": true,
+    "ownerReplayRejected": true,
+    "selectedGraphOnly": true
+  },
+  "lifecycleContract": {
+    "stateOrder": ["prepared", "finalizing", "finalized"],
+    "operationOrder": [
+      "consume-one-shot-owner",
+      "terminalize-selected-graph",
+      "attempt-native-rollback-once",
+      "record-rollback-after-return-secondary-if-present",
+      "attempt-native-close-once",
+      "record-close-after-return-tertiary-if-present",
+      "enter-finalized",
+      "rethrow-original-primary"
+    ],
+    "terminalizeBeforeCleanup": true,
+    "ownerConsumeCount": 1,
+    "terminalizeCount": 1,
+    "rollbackAttemptCount": 1,
+    "closeAttemptCount": 1,
+    "closeAttemptedAfterRollbackFailure": true,
+    "finalizedIsTerminal": true
+  },
+  "precedenceContract": {
+    "order": [
+      "authenticated-post-t-terminal-primary",
+      "rollback-after-native-return-secondary",
+      "close-after-native-return-tertiary"
+    ],
+    "selectedThrow": "authenticated-post-t-terminal-primary",
+    "cleanupNeverReplacesPrimary": true,
+    "cleanupFaultsAreCanonicalDiagnostics": true
+  },
+  "diagnosticContract": {
+    "canonicalFields": ["code", "operation", "rank", "origin"],
+    "primary": {
+      "code": "GE_SQLITE_POST_T_TERMINAL_PRIMARY",
+      "operation": "cursor-publication-rule-11",
+      "rank": "primary",
+      "origin": "authenticated-post-t-terminal-primary"
+    },
+    "rollback": {
+      "code": "GE_SQLITE_ROLLBACK_AFTER_NATIVE_RETURN",
+      "operation": "rollback",
+      "rank": "secondary",
+      "origin": "after-native-return-ambiguous-cleanup-fault"
+    },
+    "close": {
+      "code": "GE_SQLITE_CLOSE_AFTER_NATIVE_RETURN",
+      "operation": "close",
+      "rank": "tertiary",
+      "origin": "after-native-return-ambiguous-cleanup-fault"
+    },
+    "driverMessagesExcluded": true,
+    "objectAddressesExcluded": true,
+    "timestampsExcluded": true
+  },
+  "cases": [
+    {
+      "caseId": "native-primary-plus-rollback-and-close-after-return-faults",
+      "identityProjection": {
+        "connection": "connection-A",
+        "transactionLineage": "transaction-lineage-A",
+        "transactionGeneration": 7,
+        "authority": "authority-A",
+        "consumedT": "consumed-T-A",
+        "owner": "finalizer-owner-A"
+      },
+      "input": {
+        "primary": "GE_SQLITE_POST_T_TERMINAL_PRIMARY",
+        "rollbackAfterNativeReturnFault": true,
+        "closeAfterNativeReturnFault": true
+      },
+      "expected": {
+        "stateTrace": ["prepared", "finalizing", "finalized"],
+        "ownerConsumeCount": 1,
+        "terminalizeCount": 1,
+        "rollbackAttemptCount": 1,
+        "rollbackNativeReturnCount": 1,
+        "closeAttemptCount": 1,
+        "closeNativeReturnCount": 1,
+        "selectedThrow": "GE_SQLITE_POST_T_TERMINAL_PRIMARY",
+        "diagnosticCodes": [
+          "GE_SQLITE_POST_T_TERMINAL_PRIMARY",
+          "GE_SQLITE_ROLLBACK_AFTER_NATIVE_RETURN",
+          "GE_SQLITE_CLOSE_AFTER_NATIVE_RETURN"
+        ]
+      }
+    },
+    {
+      "caseId": "native-primary-plus-rollback-after-return-fault-only",
+      "identityProjection": {
+        "connection": "connection-B",
+        "transactionLineage": "transaction-lineage-B",
+        "transactionGeneration": 11,
+        "authority": "authority-B",
+        "consumedT": "consumed-T-B",
+        "owner": "finalizer-owner-B"
+      },
+      "input": {
+        "primary": "GE_SQLITE_POST_T_TERMINAL_PRIMARY",
+        "rollbackAfterNativeReturnFault": true,
+        "closeAfterNativeReturnFault": false
+      },
+      "expected": {
+        "stateTrace": ["prepared", "finalizing", "finalized"],
+        "ownerConsumeCount": 1,
+        "terminalizeCount": 1,
+        "rollbackAttemptCount": 1,
+        "rollbackNativeReturnCount": 1,
+        "closeAttemptCount": 1,
+        "closeNativeReturnCount": 1,
+        "selectedThrow": "GE_SQLITE_POST_T_TERMINAL_PRIMARY",
+        "diagnosticCodes": [
+          "GE_SQLITE_POST_T_TERMINAL_PRIMARY",
+          "GE_SQLITE_ROLLBACK_AFTER_NATIVE_RETURN"
+        ]
+      }
+    },
+    {
+      "caseId": "native-primary-plus-close-after-return-fault-only",
+      "identityProjection": {
+        "connection": "connection-C",
+        "transactionLineage": "transaction-lineage-C",
+        "transactionGeneration": 19,
+        "authority": "authority-C",
+        "consumedT": "consumed-T-C",
+        "owner": "finalizer-owner-C"
+      },
+      "input": {
+        "primary": "GE_SQLITE_POST_T_TERMINAL_PRIMARY",
+        "rollbackAfterNativeReturnFault": false,
+        "closeAfterNativeReturnFault": true
+      },
+      "expected": {
+        "stateTrace": ["prepared", "finalizing", "finalized"],
+        "ownerConsumeCount": 1,
+        "terminalizeCount": 1,
+        "rollbackAttemptCount": 1,
+        "rollbackNativeReturnCount": 1,
+        "closeAttemptCount": 1,
+        "closeNativeReturnCount": 1,
+        "selectedThrow": "GE_SQLITE_POST_T_TERMINAL_PRIMARY",
+        "diagnosticCodes": [
+          "GE_SQLITE_POST_T_TERMINAL_PRIMARY",
+          "GE_SQLITE_CLOSE_AFTER_NATIVE_RETURN"
+        ]
+      }
+    }
+  ],
+  "nonclaims": [
+    "production-finalizer-implementation",
+    "driver-native-rollback-throw",
+    "driver-native-close-throw",
+    "begin-ownership",
+    "commit-ownership",
+    "rule-12-ownership",
+    "temp-stage-retirement",
+    "success-cleanup-path",
+    "rollback-reopen-recovery-proof",
+    "fresh-graph-recovery-proof"
+  ],
+  "fixtureCanonicalSha256": "81c055216223c89dc68055bbf325a73c61bfb899977dfb6255059137783ae360"
+}

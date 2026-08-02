@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/conformance/sqlite-post-consume-transaction-failure-finalizer-v1.schema.json",
+  "title": "SQLite authenticated post-consume transaction failure finalizer contract v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "id", "status", "claims", "boundary", "identityContract", "lifecycleContract", "precedenceContract", "diagnosticContract", "cases", "nonclaims", "fixtureCanonicalSha256"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "id": {"const": "sqlite-post-consume-transaction-failure-finalizer-v1"},
+    "status": {"const": "contract-frozen"},
+    "claims": {"$ref": "#/$defs/claims"},
+    "boundary": {"$ref": "#/$defs/boundary"},
+    "identityContract": {"$ref": "#/$defs/identityContract"},
+    "lifecycleContract": {"$ref": "#/$defs/lifecycleContract"},
+    "precedenceContract": {"$ref": "#/$defs/precedenceContract"},
+    "diagnosticContract": {"$ref": "#/$defs/diagnosticContract"},
+    "cases": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"$ref": "#/$defs/case"}},
+    "nonclaims": {"type": "array", "minItems": 10, "maxItems": 10, "uniqueItems": true, "items": {"type": "string", "minLength": 3}},
+    "fixtureCanonicalSha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  },
+  "$defs": {
+    "closed": {"type": "object", "additionalProperties": false},
+    "claims": {
+      "type": "object", "additionalProperties": false,
+      "required": ["implementationClaim", "protocolClaim", "releaseGate", "driverNativeCleanupThrowClaim"],
+      "properties": {"implementationClaim": {"const": false}, "protocolClaim": {"const": false}, "releaseGate": {"const": false}, "driverNativeCleanupThrowClaim": {"const": false}}
+    },
+    "boundary": {
+      "type": "object", "additionalProperties": false,
+      "required": ["stableTaskId", "role", "requiresExistingPrimary", "ownsBegin", "ownsCommit", "ownsRule12", "ownsTempRetirement", "ownsSuccessPath", "noPrimaryBranch"],
+      "properties": {
+        "stableTaskId": {"const": "SQLITE-POST-CONSUME-TRANSACTION-FAILURE-FINALIZER"},
+        "role": {"const": "authenticated-post-t-terminal-primary-cleanup-only"},
+        "requiresExistingPrimary": {"const": true}, "ownsBegin": {"const": false}, "ownsCommit": {"const": false}, "ownsRule12": {"const": false}, "ownsTempRetirement": {"const": false}, "ownsSuccessPath": {"const": false}, "noPrimaryBranch": {"const": "forbidden"}
+      }
+    },
+    "identityContract": {
+      "type": "object", "additionalProperties": false,
+      "required": ["exactRequiredObjects", "cloneRejected", "structuralReconstructionRejected", "crossConnectionRejected", "crossGenerationRejected", "crossAuthorityRejected", "unconsumedSessionRejected", "ownerReplayRejected", "selectedGraphOnly"],
+      "properties": {
+        "exactRequiredObjects": {"type": "array", "minItems": 6, "maxItems": 6, "uniqueItems": true, "items": {"type": "string"}},
+        "cloneRejected": {"const": true}, "structuralReconstructionRejected": {"const": true}, "crossConnectionRejected": {"const": true}, "crossGenerationRejected": {"const": true}, "crossAuthorityRejected": {"const": true}, "unconsumedSessionRejected": {"const": true}, "ownerReplayRejected": {"const": true}, "selectedGraphOnly": {"const": true}
+      }
+    },
+    "lifecycleContract": {
+      "type": "object", "additionalProperties": false,
+      "required": ["stateOrder", "operationOrder", "terminalizeBeforeCleanup", "ownerConsumeCount", "terminalizeCount", "rollbackAttemptCount", "closeAttemptCount", "closeAttemptedAfterRollbackFailure", "finalizedIsTerminal"],
+      "properties": {
+        "stateOrder": {"$ref": "#/$defs/stateTrace"},
+        "operationOrder": {"type": "array", "minItems": 8, "maxItems": 8, "prefixItems": [{"const": "consume-one-shot-owner"}, {"const": "terminalize-selected-graph"}, {"const": "attempt-native-rollback-once"}, {"const": "record-rollback-after-return-secondary-if-present"}, {"const": "attempt-native-close-once"}, {"const": "record-close-after-return-tertiary-if-present"}, {"const": "enter-finalized"}, {"const": "rethrow-original-primary"}], "items": false},
+        "terminalizeBeforeCleanup": {"const": true}, "ownerConsumeCount": {"const": 1}, "terminalizeCount": {"const": 1}, "rollbackAttemptCount": {"const": 1}, "closeAttemptCount": {"const": 1}, "closeAttemptedAfterRollbackFailure": {"const": true}, "finalizedIsTerminal": {"const": true}
+      }
+    },
+    "precedenceContract": {
+      "type": "object", "additionalProperties": false,
+      "required": ["order", "selectedThrow", "cleanupNeverReplacesPrimary", "cleanupFaultsAreCanonicalDiagnostics"],
+      "properties": {
+        "order": {"type": "array", "minItems": 3, "maxItems": 3, "prefixItems": [{"const": "authenticated-post-t-terminal-primary"}, {"const": "rollback-after-native-return-secondary"}, {"const": "close-after-native-return-tertiary"}], "items": false},
+        "selectedThrow": {"const": "authenticated-post-t-terminal-primary"}, "cleanupNeverReplacesPrimary": {"const": true}, "cleanupFaultsAreCanonicalDiagnostics": {"const": true}
+      }
+    },
+    "diagnostic": {
+      "type": "object", "additionalProperties": false,
+      "required": ["code", "operation", "rank", "origin"],
+      "properties": {"code": {"type": "string", "pattern": "^GE_SQLITE_[A-Z0-9_]+$"}, "operation": {"type": "string", "minLength": 3}, "rank": {"enum": ["primary", "secondary", "tertiary"]}, "origin": {"enum": ["authenticated-post-t-terminal-primary", "after-native-return-ambiguous-cleanup-fault"]}}
+    },
+    "diagnosticContract": {
+      "type": "object", "additionalProperties": false,
+      "required": ["canonicalFields", "primary", "rollback", "close", "driverMessagesExcluded", "objectAddressesExcluded", "timestampsExcluded"],
+      "properties": {
+        "canonicalFields": {"type": "array", "minItems": 4, "maxItems": 4, "prefixItems": [{"const": "code"}, {"const": "operation"}, {"const": "rank"}, {"const": "origin"}], "items": false},
+        "primary": {"$ref": "#/$defs/diagnostic"}, "rollback": {"$ref": "#/$defs/diagnostic"}, "close": {"$ref": "#/$defs/diagnostic"},
+        "driverMessagesExcluded": {"const": true}, "objectAddressesExcluded": {"const": true}, "timestampsExcluded": {"const": true}
+      }
+    },
+    "identityProjection": {
+      "type": "object", "additionalProperties": false,
+      "required": ["connection", "transactionLineage", "transactionGeneration", "authority", "consumedT", "owner"],
+      "properties": {"connection": {"type": "string"}, "transactionLineage": {"type": "string"}, "transactionGeneration": {"type": "integer", "minimum": 0, "maximum": 9007199254740991}, "authority": {"type": "string"}, "consumedT": {"type": "string"}, "owner": {"type": "string"}}
+    },
+    "stateTrace": {"type": "array", "minItems": 3, "maxItems": 3, "prefixItems": [{"const": "prepared"}, {"const": "finalizing"}, {"const": "finalized"}], "items": false},
+    "input": {
+      "type": "object", "additionalProperties": false,
+      "required": ["primary", "rollbackAfterNativeReturnFault", "closeAfterNativeReturnFault"],
+      "properties": {"primary": {"const": "GE_SQLITE_POST_T_TERMINAL_PRIMARY"}, "rollbackAfterNativeReturnFault": {"type": "boolean"}, "closeAfterNativeReturnFault": {"type": "boolean"}}
+    },
+    "expected": {
+      "type": "object", "additionalProperties": false,
+      "required": ["stateTrace", "ownerConsumeCount", "terminalizeCount", "rollbackAttemptCount", "rollbackNativeReturnCount", "closeAttemptCount", "closeNativeReturnCount", "selectedThrow", "diagnosticCodes"],
+      "properties": {
+        "stateTrace": {"$ref": "#/$defs/stateTrace"}, "ownerConsumeCount": {"const": 1}, "terminalizeCount": {"const": 1}, "rollbackAttemptCount": {"const": 1}, "rollbackNativeReturnCount": {"const": 1}, "closeAttemptCount": {"const": 1}, "closeNativeReturnCount": {"const": 1}, "selectedThrow": {"const": "GE_SQLITE_POST_T_TERMINAL_PRIMARY"},
+        "diagnosticCodes": {"type": "array", "minItems": 2, "maxItems": 3, "uniqueItems": true, "items": {"enum": ["GE_SQLITE_POST_T_TERMINAL_PRIMARY", "GE_SQLITE_ROLLBACK_AFTER_NATIVE_RETURN", "GE_SQLITE_CLOSE_AFTER_NATIVE_RETURN"]}}
+      }
+    },
+    "case": {
+      "type": "object", "additionalProperties": false,
+      "required": ["caseId", "identityProjection", "input", "expected"],
+      "properties": {"caseId": {"type": "string", "minLength": 3}, "identityProjection": {"$ref": "#/$defs/identityProjection"}, "input": {"$ref": "#/$defs/input"}, "expected": {"$ref": "#/$defs/expected"}}
+    }
+  }
+}
