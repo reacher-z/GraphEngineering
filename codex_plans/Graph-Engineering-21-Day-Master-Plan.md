@@ -18228,3 +18228,55 @@ future hooks are neither passes nor skips. The final 145-case claim requires
 exact ordered coverage, real hook activation, exact 28-field output, trusted
 hash recomputation, Python/TypeScript canonical equality, zero unexplained
 skip and two independent H0/M0/L0 audits.
+
+##### 31.37.53.8 Append-only success-control counter correction
+
+This subsection corrects one compressed sentence in section 31.37.52.3 without
+modifying that earlier byte range. The frozen fixture
+`parityGates.initialPublicationNormalizedOutput.expectedRecords[0]`, section
+31.37.52.2's separately named arrays and the implemented write effects are the
+authority.
+
+For `initial-publication-success-control`, the exact arrays are:
+
+- prepare: `[20, 1, 1, 1]`;
+- execute: `[1, 12, 1, 1]`;
+- affected rows: `[2, 12, 1, 1]`; and
+- native `total_changes` deltas: `[2, 12, 1, 1]`.
+
+The migration-0002 write affects `1 + legacyOperationCount = 2` rows even
+though it executes once. Therefore the earlier phrase that grouped execute,
+affected and changes under `[1,12,1,1]` is withdrawn. Reporters and the
+comparator must read and validate the four arrays independently and must reject
+the withdrawn grouped value for affected rows or native changes.
+
+##### 31.37.53.9 Initial-publication three-control parity acceptance checkpoint
+
+The isolated section 31.37.52 leaf is accepted on the frozen 2026-08-02 byte
+set. TypeScript and Python independently executed the success, invalid-bundle
+and same-count post-0002 catalog-drift controls against real SQLite databases.
+Both produced the exact three ordered 28-field fixture records and exact
+cross-runtime canonical equality. The corrected invalid retry proved the real
+`4/4/1` receipt-consumption, tombstone-mint and adoption-mint transition and
+proved all four original receipts consumed.
+
+The success control independently proved prepare `[20,1,1,1]`, execute
+`[1,12,1,1]`, affected rows `[2,12,1,1]` and native changes
+`[2,12,1,1]`. Both catalog-success paths proved the exact 34-row frozen digest;
+both drift paths retained 34 rows while proving digest mismatch and their
+runtime-specific exact failure contract. Subject rollback, rebind and commit
+counts remained zero. Explicit isolated probes activated every recorder path,
+and package-root privacy remained closed.
+
+Final gates included comparator 3/3, Python reporter 3/3, TypeScript adoption
+17/17, Python adoption 119/119, ledger 61/61, fixture validation, existing clock
+parity 2/2, static checks, nine npm package-content and packed-install smokes,
+Python wheel/sdist install smokes and two independent H0/M0/L0 audits. The
+durable evidence is
+`codex_logs/reviews/SQLITE-CURSOR-B3-INITIAL-PUBLICATION-PARITY-2026-08-02.md`.
+
+This checkpoint does not activate a publication session, cursor rebind, rules
+11/12, transaction completion, crash/reopen recovery, the full 145-case
+campaign, a v2 manifest or release authorization. The next isolated leaf is
+section 31.37.53.7 item 1: publication-session plus the second provider-clock
+boundary.
