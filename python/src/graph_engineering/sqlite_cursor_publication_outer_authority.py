@@ -23,11 +23,17 @@ from .sqlite_cursor_publication_clock_authority import (
     _EVIDENCE,
     _LOCK_CAPABILITIES,
     _TOMBSTONES,
+    ClockConsumer,
+    _assert_active_second_boundary_graph_intrinsic,
+    _assert_clock_evidence_predecessor_intrinsic,
+    _assert_consumed_clock_tombstone_intrinsic,
+    _assert_prepared_second_boundary_graph_intrinsic,
     _ClockEvidence,
     _consume_provider_clock_evidence_intrinsic,
     _ConsumedClockTombstone,
     _live_lock,
     _MigrationLockCapability,
+    _observe_provider_clock_intrinsic,
     _ProviderClockCapability,
     _read_clock_evidence_snapshot_intrinsic,
 )
@@ -56,6 +62,7 @@ from .sqlite_cursor_publication_target_catalog import (
     SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_EXPECTED_USER_VERSION,
     SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_QUERY,
     SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_QUERY_SHA256,
+    SQLITE_CURSOR_PUBLICATION_TARGET_DESCRIPTOR,
     _read_target_catalog_observation_intrinsic,
     _read_validated_target_catalog_intrinsic,
     _TargetCatalogSnapshot,
@@ -85,16 +92,24 @@ from .sqlite_operation_baseline_cursor_stage_ownership import (
     _assert_sqlite_cursor_stage_ownership_outer_publication_prepared_intrinsic,
     _assert_sqlite_cursor_stage_ownership_post_ddl_reader_terminal_intrinsic,
     _assert_sqlite_cursor_stage_ownership_pre_rebind_complete_intrinsic,
+    _assert_sqlite_cursor_stage_ownership_publication_session_intrinsic,
+    _burn_sqlite_cursor_stage_ownership_publication_session_commit_intrinsic,
+    _burn_sqlite_cursor_stage_ownership_publication_session_intrinsic,
     _complete_sqlite_cursor_stage_ownership_post_ddl_reader_intrinsic,
     _mint_sqlite_cursor_stage_ownership_outer_publication_authority_intrinsic,
     _poison_sqlite_cursor_stage_ownership_outer_publication_intrinsic,
     _prepare_sqlite_cursor_stage_ownership_initial_publication_adoption_intrinsic,
+    _prepare_sqlite_cursor_stage_ownership_publication_session_commit_intrinsic,
+    _prepare_sqlite_cursor_stage_ownership_publication_session_intrinsic,
     _publish_sqlite_cursor_stage_ownership_initial_publication_adoption_intrinsic,
     _publish_sqlite_cursor_stage_ownership_outer_publication_intrinsic,
+    _publish_sqlite_cursor_stage_ownership_publication_session_commit_intrinsic,
+    _publish_sqlite_cursor_stage_ownership_publication_session_intrinsic,
     _register_sqlite_cursor_stage_ownership_post_ddl_reader_intrinsic,
     _retire_sqlite_cursor_stage_ownership_outer_publication_intrinsic,
     _SQLiteCursorStageOwnershipOuterPublicationAuthority,
     _SQLiteCursorStageOwnershipOuterPublicationTail,
+    _SQLiteCursorStageOwnershipPublicationSessionTail,
     _SQLiteCursorStageOwnershipTransfer,
 )
 from .sqlite_operation_baseline_source import (
@@ -247,6 +262,7 @@ _WritePhase: TypeAlias = Literal[
     "executing-sequence-zero",
     "sequence-zero-complete",
     "initial-stage-adoption-complete",
+    "publication-active",
     "poisoned",
     "retired",
 ]
@@ -284,6 +300,65 @@ class _SQLiteCursorOuterPublicationCancellationController:
         )
         if state is None:
             _fail("GE_CURSOR_B3_OUTER_CANCELLATION")
+        cast(_CancellationState, state).cancelled = True
+
+
+class _SQLiteCursorPublicationSessionPreparedOwner:
+    """Opaque owner of the exact three prepared publication continuations."""
+
+    __slots__ = ("__weakref__",)
+
+    def __init__(self, token: object) -> None:
+        if token is not _CONSTRUCTION_TOKEN:
+            raise TypeError("GE_CURSOR_B3_PUBLICATION_PREPARED_OWNER")
+
+
+class _SQLiteCursorPublicationSession:
+    """Opaque single-use identity made active by the B3 publication tail."""
+
+    __slots__ = ("__state", "__weakref__")
+
+    def __init__(self, token: object) -> None:
+        if token is not _CONSTRUCTION_TOKEN:
+            raise TypeError("GE_CURSOR_B3_PUBLICATION_SESSION")
+        object.__setattr__(self, "_SQLiteCursorPublicationSession__state", None)
+
+    def __setattr__(self, _name: str, _value: object) -> None:
+        raise TypeError("GE_CURSOR_B3_PUBLICATION_SESSION_STATE")
+
+
+class _SQLiteCursorPublicationSessionCancellationSignal:
+    __slots__ = ("__weakref__",)
+
+    def __init__(self, token: object) -> None:
+        if token is not _CONSTRUCTION_TOKEN:
+            raise TypeError("GE_CURSOR_B3_PUBLICATION_CANCELLATION")
+
+
+class _SQLiteCursorPublicationSessionCancellationController:
+    __slots__ = ("_signal",)
+
+    def __init__(
+        self,
+        token: object,
+        signal: _SQLiteCursorPublicationSessionCancellationSignal,
+    ) -> None:
+        if token is not _CONSTRUCTION_TOKEN:
+            raise TypeError("GE_CURSOR_B3_PUBLICATION_CANCELLATION")
+        self._signal = signal
+
+    @property
+    def signal(self) -> _SQLiteCursorPublicationSessionCancellationSignal:
+        return self._signal
+
+    def cancel(self) -> None:
+        state = _identity_get(
+            _PUBLICATION_CANCELLATIONS,
+            self._signal,
+            _SQLiteCursorPublicationSessionCancellationSignal,
+        )
+        if state is None:
+            _fail("GE_CURSOR_B3_PUBLICATION_CANCELLATION")
         cast(_CancellationState, state).cancelled = True
 
 
@@ -737,7 +812,7 @@ class _SourceHeaderCommitment:
     source_schema_identity_sha256: str
 
 
-@dataclass(slots=True)
+@dataclass(slots=True, weakref_slot=True)
 class _AuthorityState:
     connection: SQLiteV1BaselineConnectionOwner
     stage: SQLiteV1BaselineTempStage
@@ -813,6 +888,45 @@ class _AuthorityState:
         _SQLiteOperationSequenceZeroPublicationReceiptConsumedTombstone | None
     ) = None
     write_phase: _WritePhase = "ready-0002"
+    publication_prepared_owner: _SQLiteCursorPublicationSessionPreparedOwner | None = None
+    publication_session: ReferenceType[_SQLiteCursorPublicationSession] | None = None
+
+
+@dataclass(slots=True)
+class _PublicationPreparedState:
+    authority_ref: ReferenceType[_SQLiteCursorOuterPublicationAuthority]
+    adoption_receipt_ref: ReferenceType[_SQLiteCursorInitialStageAdoptionReceipt]
+    lower_tail: _SQLiteCursorStageOwnershipPublicationSessionTail | None
+    lifecycle: Literal["prepared", "published", "poisoned"] = "prepared"
+    observed_evidence: _ClockEvidence | None = None
+
+
+@dataclass(slots=True, weakref_slot=True)
+class _PublicationSessionState:
+    prepared_owner: _SQLiteCursorPublicationSessionPreparedOwner
+    authority: _SQLiteCursorOuterPublicationAuthority
+    adoption_receipt: _SQLiteCursorInitialStageAdoptionReceipt
+    connection: SQLiteV1BaselineConnectionOwner
+    stage: SQLiteV1BaselineTempStage
+    receipt: SQLiteCursorPreRebindReceipt
+    projection_reference: SQLiteCursorExactProjectionReference
+    projection_identity: BaselineProjectionIdentity
+    transfer: _SQLiteCursorStageOwnershipTransfer
+    transaction_generation: object
+    migration_lock_capability: _MigrationLockCapability
+    migration_lock_identity: object
+    provider_clock_capability: _ProviderClockCapability
+    outer_clock_evidence: _ClockEvidence
+    outer_provider_now_ms: int
+    pre_rebind_clock_evidence: _ClockEvidence
+    pre_rebind_provider_now_ms: int
+    post_ddl_catalog_fence: _SQLiteCursorPostDdlCatalogFence
+    source_descriptor_hash: str
+    source_schema_identity: str
+    target_descriptor_hash: str
+    target_schema_identity: str
+    consumed_tombstone: _ConsumedClockTombstone | None = None
+    lifecycle: Literal["pending", "publication-active", "poisoned"] = "pending"
 
 
 @dataclass(frozen=True, slots=True)
@@ -1095,13 +1209,22 @@ class _IdentityEntry(NamedTuple):
     value: object
 
 
+class _WeakPublicationSessionState(NamedTuple):
+    authority_ref: ReferenceType[_SQLiteCursorOuterPublicationAuthority]
+    state_ref: ReferenceType[_PublicationSessionState]
+
+
 class _AuthorityLink(NamedTuple):
     key_ref: ReferenceType[object]
     authority_ref: ReferenceType[_SQLiteCursorStageOwnershipOuterPublicationAuthority]
 
 
 _CANCELLATIONS: dict[int, _IdentityEntry] = {}
+_PUBLICATION_CANCELLATIONS: dict[int, _IdentityEntry] = {}
 _AUTHORITIES: dict[int, _IdentityEntry] = {}
+_PUBLICATION_PREPARED: dict[int, _IdentityEntry] = {}
+_PUBLICATION_PREPARED_BY_AUTHORITY: dict[int, _IdentityEntry] = {}
+_PUBLICATION_SESSIONS: dict[int, _IdentityEntry] = {}
 _AUTHORITY_BY_EVIDENCE: dict[int, _AuthorityLink] = {}
 _AUTHORITY_BY_TRANSFER: dict[int, _AuthorityLink] = {}
 _MIGRATION_0002_RECEIPTS: dict[int, _IdentityEntry] = {}
@@ -1126,6 +1249,16 @@ _REF = ref
 _STABLE_ID = _ID
 _STABLE_TYPE = _TYPE
 _STABLE_REF = _REF
+_OBJECT_GETATTRIBUTE = object.__getattribute__
+_OBJECT_SETATTR = object.__setattr__
+_AUTHORITY_SESSION_SLOT = (
+    "_SQLiteCursorStageOwnershipOuterPublicationAuthority__publication_session"
+)
+_AUTHORITY_SESSION_STATE_SLOT = (
+    "_SQLiteCursorStageOwnershipOuterPublicationAuthority__publication_session_state"
+)
+_AUTHORITY_STATE_SLOT = "_SQLiteCursorStageOwnershipOuterPublicationAuthority__publication_state"
+_SESSION_STATE_SLOT = "_SQLiteCursorPublicationSession__state"
 _DICT_GET = dict.get
 _DICT_SETITEM = dict.__setitem__
 _DICT_POP = dict.pop
@@ -1149,6 +1282,32 @@ _OWNERSHIP_PUBLISH_INITIAL_ADOPTION = (
 _OWNERSHIP_ASSERT_INITIAL_ADOPTED = (
     _assert_sqlite_cursor_stage_ownership_initial_publication_adopted_intrinsic
 )
+_OWNERSHIP_PREPARE_PUBLICATION_SESSION = (
+    _prepare_sqlite_cursor_stage_ownership_publication_session_intrinsic
+)
+_OWNERSHIP_PREPARE_PUBLICATION_SESSION_COMMIT = (
+    _prepare_sqlite_cursor_stage_ownership_publication_session_commit_intrinsic
+)
+_OWNERSHIP_BURN_PUBLICATION_SESSION_COMMIT = (
+    _burn_sqlite_cursor_stage_ownership_publication_session_commit_intrinsic
+)
+_OWNERSHIP_PUBLISH_PUBLICATION_SESSION_COMMIT = (
+    _publish_sqlite_cursor_stage_ownership_publication_session_commit_intrinsic
+)
+_OWNERSHIP_BURN_PUBLICATION_SESSION = (
+    _burn_sqlite_cursor_stage_ownership_publication_session_intrinsic
+)
+_OWNERSHIP_PUBLISH_PUBLICATION_SESSION = (
+    _publish_sqlite_cursor_stage_ownership_publication_session_intrinsic
+)
+_OWNERSHIP_ASSERT_PUBLICATION_SESSION = (
+    _assert_sqlite_cursor_stage_ownership_publication_session_intrinsic
+)
+_OBSERVE_CLOCK = _observe_provider_clock_intrinsic
+_ASSERT_CLOCK_PREDECESSOR = _assert_clock_evidence_predecessor_intrinsic
+_ASSERT_CLOCK_TOMBSTONE = _assert_consumed_clock_tombstone_intrinsic
+_ASSERT_PREPARED_SECOND_CLOCK = _assert_prepared_second_boundary_graph_intrinsic
+_ASSERT_ACTIVE_SECOND_CLOCK = _assert_active_second_boundary_graph_intrinsic
 _OWNERSHIP_REGISTER_POST_DDL_READER = (
     _register_sqlite_cursor_stage_ownership_post_ddl_reader_intrinsic
 )
@@ -1318,14 +1477,108 @@ def _link_get(
 
 
 def _authority_state(authority: object) -> _AuthorityState:
-    state = _identity_get(
+    registered = _identity_get(
         _AUTHORITIES,
         authority,
         _SQLiteCursorStageOwnershipOuterPublicationAuthority,
     )
+    state = registered if isinstance(registered, _AuthorityState) else None
+    try:
+        anchored = _OBJECT_GETATTRIBUTE(authority, _AUTHORITY_STATE_SLOT)
+    except (AttributeError, TypeError):
+        anchored = None
     if state is None:
         _fail("GE_CURSOR_B3_OUTER_AUTHORITY")
-    return cast(_AuthorityState, state)
+    if anchored is not state:
+        _poison(
+            state,
+            cast(_SQLiteCursorOuterPublicationAuthority, authority),
+            "SQLite outer-publication private state drifted",
+        )
+        _fail("GE_CURSOR_B3_OUTER_AUTHORITY")
+    return state
+
+
+def _bind_authority_state(
+    authority: _SQLiteCursorOuterPublicationAuthority,
+    state: _AuthorityState,
+) -> None:
+    if _OBJECT_GETATTRIBUTE(authority, _AUTHORITY_STATE_SLOT) is not None:
+        _fail("GE_CURSOR_B3_OUTER_AUTHORITY")
+    _OBJECT_SETATTR(authority, _AUTHORITY_STATE_SLOT, state)
+    _identity_set(_AUTHORITIES, authority, state)
+
+
+def _anchored_publication_session(
+    authority: _SQLiteCursorOuterPublicationAuthority,
+) -> _SQLiteCursorPublicationSession | None:
+    value = _OBJECT_GETATTRIBUTE(authority, _AUTHORITY_SESSION_SLOT)
+    return value if _STABLE_TYPE(value) is _SQLiteCursorPublicationSession else None
+
+
+def _bind_publication_session_state(
+    session: _SQLiteCursorPublicationSession,
+    state: _PublicationSessionState,
+) -> None:
+    if _OBJECT_GETATTRIBUTE(session, _SESSION_STATE_SLOT) is not None:
+        _fail("GE_CURSOR_B3_PUBLICATION_SESSION")
+    _OBJECT_SETATTR(session, _SESSION_STATE_SLOT, state)
+    _identity_set(
+        _PUBLICATION_SESSIONS,
+        session,
+        _WeakPublicationSessionState(
+            _STABLE_REF(state.authority),
+            _STABLE_REF(state),
+        ),
+    )
+
+
+def _publication_session_state(
+    session: object,
+) -> _PublicationSessionState:
+    registered = _identity_get(
+        _PUBLICATION_SESSIONS,
+        session,
+        _SQLiteCursorPublicationSession,
+    )
+    authority = (
+        registered.authority_ref() if isinstance(registered, _WeakPublicationSessionState) else None
+    )
+    authority_anchor = (
+        _OBJECT_GETATTRIBUTE(authority, _AUTHORITY_SESSION_STATE_SLOT)
+        if authority is not None
+        else None
+    )
+    registered_state = (
+        registered.state_ref() if isinstance(registered, _WeakPublicationSessionState) else None
+    )
+    # Only the state reached through the authenticated session registry is
+    # canonical.  Private anchors are redundant identity witnesses and must
+    # never become a writable failure target.
+    state = registered_state
+    try:
+        anchored = _OBJECT_GETATTRIBUTE(session, _SESSION_STATE_SLOT)
+    except (AttributeError, TypeError):
+        anchored = None
+    if (
+        state is None
+        or registered_state is not state
+        or authority_anchor is not state
+        or anchored is not state
+        or authority is None
+        or _anchored_publication_session(authority) is not session
+    ):
+        if authority is not None:
+            authority_state = _authority_state(authority)
+            if state is not None:
+                state.lifecycle = "poisoned"
+            _poison(
+                authority_state,
+                authority,
+                "SQLite publication-session private state drifted",
+            )
+        _fail("GE_CURSOR_B3_PUBLICATION_SESSION")
+    return state
 
 
 def _clock_graph(
@@ -1351,7 +1604,7 @@ def _clock_graph(
         or clock_state.connection is not connection
         or clock_state.lock_capability is not migration_lock_capability
         or clock_state.expected_lock is not lock_state.expected_lock
-        or evidence_state.capability is not provider_clock_capability
+        or evidence_state.capability() is not provider_clock_capability
         or evidence_state.consumed
         or evidence_state.previous_evidence is not None
         or evidence_state.snapshot.boundary != "before-first-permanent-mutation"
@@ -1391,7 +1644,7 @@ def _active_clock_graph(state: _AuthorityState) -> object:
         or clock_state.expected_lock is not lock_state.expected_lock
         or clock_state.poisoned
         or clock_state.transaction_generation is not state.transaction_generation
-        or evidence_state.capability is not state.provider_clock_capability
+        or evidence_state.capability() is not state.provider_clock_capability
         or not evidence_state.consumed
         or evidence_state.previous_evidence is not None
         or evidence_state.snapshot.boundary != "before-first-permanent-mutation"
@@ -1452,7 +1705,7 @@ def _poison(
     authority: _SQLiteCursorOuterPublicationAuthority,
     reason: str,
 ) -> None:
-    if state.lifecycle in {"poisoned", "retired"}:
+    if state.lifecycle == "retired":
         return
     state.lifecycle = "poisoned"
     state.write_phase = "poisoned"
@@ -1636,7 +1889,7 @@ def _prepare_sqlite_cursor_outer_publication_authority_intrinsic(
         current_transaction_epoch=epoch,
         current_total_changes=changes,
     )
-    _identity_set(_AUTHORITIES, authority, state)
+    _bind_authority_state(authority, state)
     _link_set(_AUTHORITY_BY_EVIDENCE, outer_clock_evidence, authority)
     _link_set(_AUTHORITY_BY_TRANSFER, transfer, authority)
     return authority
@@ -1686,6 +1939,7 @@ def _assert_sqlite_cursor_outer_publication_authority_intrinsic(
 ) -> _SQLiteCursorOuterPublicationAuthority:
     state = _authority_state(authority)
     if state.lifecycle == "poisoned" or state.write_phase == "poisoned":
+        _poison(state, authority, "SQLite outer-publication poison propagation")
         _fail("GE_CURSOR_B3_OUTER_POISONED")
     if state.lifecycle == "retired" or state.write_phase == "retired":
         _fail("GE_CURSOR_B3_OUTER_STALE_FENCE")
@@ -1704,7 +1958,26 @@ def _assert_sqlite_cursor_outer_publication_authority_intrinsic(
         clock_generation = _active_clock_graph(state)
         if clock_generation is not generation:
             _fail("GE_CURSOR_B3_OUTER_STALE_FENCE")
-        if state.write_phase == "initial-stage-adoption-complete":
+        if state.write_phase == "publication-active":
+            prepared_owner = state.publication_prepared_owner
+            session = state.publication_session() if state.publication_session is not None else None
+            if (
+                prepared_owner is None
+                or session is None
+                or _anchored_publication_session(authority) is not session
+            ):
+                _fail("GE_CURSOR_B3_PUBLICATION_SESSION")
+            _OWNERSHIP_ASSERT_PUBLICATION_SESSION(
+                state.connection,
+                state.stage,
+                state.receipt,
+                state.projection_identity,
+                state.transfer,
+                authority,
+                prepared_owner,
+                session,
+            )
+        elif state.write_phase == "initial-stage-adoption-complete":
             _assert_adopted_stage_ownership_from_state(state, authority)
         elif (
             state.write_phase == "sequence-zero-complete"
@@ -2642,16 +2915,8 @@ def _execute_sqlite_cursor_post_ddl_publication_reader_intrinsic(
         record.close_attempt_count = 1
         live_authority = authority_reference()
         if live_authority is not None:
-            live_state = _identity_get(
-                _AUTHORITIES,
-                live_authority,
-                _SQLiteCursorStageOwnershipOuterPublicationAuthority,
-            )
-            if live_state is not None:
-                cast(
-                    _AuthorityState,
-                    live_state,
-                ).post_ddl_publication_reader_lease_close_count = 1
+            with suppress(ValueError):
+                _authority_state(live_authority).post_ddl_publication_reader_lease_close_count = 1
         try:
             _CURSOR_CLOSE(cursor)
             record.close_succeeded = True
@@ -2893,6 +3158,7 @@ def _assert_sqlite_cursor_post_ddl_publication_reader_terminal_proof_intrinsic(
             "executing-sequence-zero",
             "sequence-zero-complete",
             "initial-stage-adoption-complete",
+            "publication-active",
         }
         or not _reader_watermarks_not_regressed(state, record)
     ):
@@ -4847,7 +5113,7 @@ def _checked_initial_publication_bundle_presentation_intrinsic(
         or _STABLE_ID(header) == _STABLE_ID(sequence)
     ):
         _fail("GE_CURSOR_B3_INITIAL_ADOPTION_BUNDLE")
-    authority_entry = _identity_get(_AUTHORITIES, authority, _STABLE_TYPE(authority))
+    authority_entry = _authority_state(authority)
     migration_entry = _identity_get(_MIGRATION_0002_RECEIPTS, migration, _STABLE_TYPE(migration))
     entries_entry = _identity_get(
         _BASELINE_ENTRIES_PUBLICATION_RECEIPTS, entries, _STABLE_TYPE(entries)
@@ -5605,7 +5871,7 @@ def _assert_sqlite_cursor_initial_stage_adoption_receipt_intrinsic(
             or state.baseline_entries_consumed_tombstone is not entries_tombstone
             or state.baseline_header_consumed_tombstone is not header_tombstone
             or state.operation_sequence_zero_consumed_tombstone is not sequence_tombstone
-            or state.write_phase != "initial-stage-adoption-complete"
+            or state.write_phase not in {"initial-stage-adoption-complete", "publication-active"}
             or state.current_transaction_epoch != record.adopted_transaction_epoch
             or state.current_total_changes != record.adopted_total_changes
             or not _exact_outer_ledger(_outer_ledger_snapshot(state), record.adopted_outer_ledger)
@@ -5620,7 +5886,8 @@ def _assert_sqlite_cursor_initial_stage_adoption_receipt_intrinsic(
             or changes != record.adopted_total_changes
         ):
             _fail("GE_CURSOR_B3_INITIAL_ADOPTION_RECEIPT_DRIFT")
-        _assert_adopted_stage_ownership_from_state(state, authority)
+        if state.write_phase == "initial-stage-adoption-complete":
+            _assert_adopted_stage_ownership_from_state(state, authority)
         _assert_sqlite_cursor_post_ddl_publication_reader_terminal_proof_intrinsic(
             authority,
             checked.migration_0002_receipt,
@@ -5657,6 +5924,685 @@ def _assert_sqlite_cursor_initial_stage_adoption_receipt_intrinsic(
         if isinstance(error, ValueError) and str(error) == "GE_CURSOR_B3_INITIAL_ADOPTION_RECEIPT":
             _fail("GE_CURSOR_B3_INITIAL_ADOPTION_RECEIPT_SUBSTITUTION")
         raise
+
+
+def _session_adoption_inputs(
+    receipt: _SQLiteCursorInitialStageAdoptionReceipt,
+) -> tuple[
+    _SQLiteCursorInitialPublicationReceiptBundle,
+    _SQLiteCursorPostDdlCatalogFence,
+    _SQLiteCursorPostDdlPublicationReaderLease,
+    _InitialStageAdoptionReceiptRecord,
+]:
+    record = _initial_stage_adoption_receipt_record(receipt)
+    migration = record.migration_0002_receipt_ref()
+    entries = record.baseline_entries_receipt_ref()
+    header = record.baseline_header_receipt_ref()
+    sequence = record.operation_sequence_zero_receipt_ref()
+    fence = record.fence_ref()
+    reader = record.reader_lease_ref()
+    if (
+        migration is None
+        or entries is None
+        or header is None
+        or sequence is None
+        or fence is None
+        or reader is None
+    ):
+        _fail("GE_CURSOR_B3_PUBLICATION_SESSION_GRAPH")
+    return (migration, entries, header, sequence), fence, reader, record
+
+
+def _create_sqlite_cursor_publication_session_cancellation_controller_intrinsic() -> (
+    _SQLiteCursorPublicationSessionCancellationController
+):
+    signal = _SQLiteCursorPublicationSessionCancellationSignal(_CONSTRUCTION_TOKEN)
+    _identity_set(_PUBLICATION_CANCELLATIONS, signal, _CancellationState())
+    return _SQLiteCursorPublicationSessionCancellationController(_CONSTRUCTION_TOKEN, signal)
+
+
+def _prepare_sqlite_cursor_publication_session_intrinsic(
+    authority: _SQLiteCursorOuterPublicationAuthority,
+    adoption_receipt: _SQLiteCursorInitialStageAdoptionReceipt,
+) -> _SQLiteCursorPublicationSessionPreparedOwner:
+    """Validate the adopted graph and prepare all three session continuations."""
+
+    if (
+        _STABLE_TYPE(authority) is not _SQLiteCursorStageOwnershipOuterPublicationAuthority
+        or _STABLE_TYPE(adoption_receipt) is not _SQLiteCursorInitialStageAdoptionReceipt
+    ):
+        _fail("GE_CURSOR_B3_PUBLICATION_SESSION_PRESENTATION")
+    state = _authority_state(authority)
+    if (
+        _identity_get(
+            _INITIAL_STAGE_ADOPTION_RECEIPTS,
+            adoption_receipt,
+            _SQLiteCursorInitialStageAdoptionReceipt,
+        )
+        is None
+    ):
+        _poison(state, authority, "SQLite publication-session receipt forgery")
+        _fail("GE_CURSOR_B3_PUBLICATION_SESSION_GRAPH")
+    existing = state.publication_prepared_owner
+    if existing is not None:
+        prepared_state_value = _identity_get(
+            _PUBLICATION_PREPARED,
+            existing,
+            _SQLiteCursorPublicationSessionPreparedOwner,
+        )
+        prepared_state = cast(_PublicationPreparedState, prepared_state_value)
+        if (
+            prepared_state_value is None
+            or prepared_state.lifecycle != "prepared"
+            or prepared_state.authority_ref() is not authority
+            or prepared_state.adoption_receipt_ref() is not adoption_receipt
+            or state.publication_session is not None
+        ):
+            _poison(state, authority, "SQLite publication-session substitution")
+            _fail("GE_CURSOR_B3_PUBLICATION_SESSION_REUSE")
+        bundle, fence, reader, _record = _session_adoption_inputs(adoption_receipt)
+        _assert_sqlite_cursor_initial_stage_adoption_receipt_intrinsic(
+            authority, bundle, fence, reader, adoption_receipt
+        )
+        repeated_tail = _OWNERSHIP_PREPARE_PUBLICATION_SESSION(
+            state.connection,
+            state.stage,
+            state.receipt,
+            state.projection_identity,
+            state.transfer,
+            authority,
+            existing,
+        )
+        if repeated_tail is not prepared_state.lower_tail:
+            _poison(state, authority, "SQLite publication-session continuation drift")
+            _fail("GE_CURSOR_B3_PUBLICATION_SESSION_GRAPH")
+        return existing
+    if (
+        state.lifecycle != "active"
+        or state.write_phase != "initial-stage-adoption-complete"
+        or state.initial_stage_adoption_receipt is not adoption_receipt
+        or state.publication_session is not None
+    ):
+        _poison(state, authority, "SQLite publication-session preparation drift")
+        _fail("GE_CURSOR_B3_PUBLICATION_SESSION_GRAPH")
+    bundle, fence, reader, _record = _session_adoption_inputs(adoption_receipt)
+    _assert_sqlite_cursor_initial_stage_adoption_receipt_intrinsic(
+        authority, bundle, fence, reader, adoption_receipt
+    )
+    prepared = _SQLiteCursorPublicationSessionPreparedOwner(_CONSTRUCTION_TOKEN)
+    try:
+        lower_tail = _OWNERSHIP_PREPARE_PUBLICATION_SESSION(
+            state.connection,
+            state.stage,
+            state.receipt,
+            state.projection_identity,
+            state.transfer,
+            authority,
+            prepared,
+        )
+        _identity_set(
+            _PUBLICATION_PREPARED,
+            prepared,
+            _PublicationPreparedState(ref(authority), ref(adoption_receipt), lower_tail),
+        )
+        state.publication_prepared_owner = prepared
+        return prepared
+    except BaseException:
+        _poison(state, authority, "SQLite publication-session preparation failed")
+        raise
+
+
+def _observe_sqlite_cursor_publication_session_clock_intrinsic(
+    prepared: _SQLiteCursorPublicationSessionPreparedOwner,
+) -> _ClockEvidence:
+    """Observe boundary two only through the exact prepared session owner."""
+
+    prepared_value = _identity_get(
+        _PUBLICATION_PREPARED,
+        prepared,
+        _SQLiteCursorPublicationSessionPreparedOwner,
+    )
+    if prepared_value is None:
+        _fail("GE_CURSOR_B3_PUBLICATION_PREPARED_OWNER")
+    prepared_state = cast(_PublicationPreparedState, prepared_value)
+    authority = prepared_state.authority_ref()
+    adoption_receipt = prepared_state.adoption_receipt_ref()
+    if authority is None or adoption_receipt is None:
+        _fail("GE_CURSOR_B3_PUBLICATION_PREPARED_OWNER")
+    state = _authority_state(authority)
+    if prepared_state.lifecycle != "prepared":
+        _poison(state, authority, "SQLite publication-session reuse")
+        _fail("GE_CURSOR_B3_PUBLICATION_SESSION_REUSE")
+    if (
+        state.publication_prepared_owner is not prepared
+        or state.initial_stage_adoption_receipt is not adoption_receipt
+        or prepared_state.observed_evidence is not None
+    ):
+        _poison(state, authority, "SQLite publication-session prepared owner drift")
+        _fail("GE_CURSOR_B3_PUBLICATION_SESSION_REUSE")
+    try:
+        _assert_sqlite_cursor_outer_publication_authority_intrinsic(authority)
+        evidence = _OBSERVE_CLOCK(state.provider_clock_capability, "before-cursor-rebind")
+        prepared_state.observed_evidence = evidence
+        return evidence
+    except BaseException:
+        _poison(state, authority, "SQLite publication-session clock observation failed")
+        raise
+
+
+def _capture_atomic_publication_session_tail(
+    burn_publication_commit: Callable[[Any], None] = (_OWNERSHIP_BURN_PUBLICATION_SESSION_COMMIT),
+    consume_clock: Callable[
+        [_ProviderClockCapability, _ClockEvidence, ClockConsumer],
+        _ConsumedClockTombstone,
+    ] = _CONSUME_CLOCK,
+    publish_publication_commit: Callable[[Any], None] = (
+        _OWNERSHIP_PUBLISH_PUBLICATION_SESSION_COMMIT
+    ),
+    object_setattr: Callable[[object, str, object], None] = _OBJECT_SETATTR,
+    authority_session_slot: str = _AUTHORITY_SESSION_SLOT,
+    authority_session_state_slot: str = _AUTHORITY_SESSION_STATE_SLOT,
+    poison: Callable[
+        [_AuthorityState, _SQLiteCursorOuterPublicationAuthority, str], None
+    ] = _poison,
+) -> Callable[..., _SQLiteCursorPublicationSession]:
+    """Capture every fallible atomic-tail operation by exact identity."""
+
+    def atomic_tail(
+        prepared_state: _PublicationPreparedState,
+        publication_commit: object,
+        state: _AuthorityState,
+        authority: _SQLiteCursorOuterPublicationAuthority,
+        session: _SQLiteCursorPublicationSession,
+        session_state: _PublicationSessionState,
+        authority_session_ref: ReferenceType[_SQLiteCursorPublicationSession],
+        evidence: _ClockEvidence,
+    ) -> _SQLiteCursorPublicationSession:
+        try:
+            # Non-interruptible tail: exact captured intrinsics only. Clock
+            # consumption completes its registry work before its evidence burn;
+            # both lower commit continuations are pre-resolved assignments.
+            prepared_state.lifecycle = "published"
+            prepared_state.lower_tail = None
+            burn_publication_commit(publication_commit)
+            tombstone = consume_clock(
+                state.provider_clock_capability,
+                evidence,
+                "cursor-publication-session",
+            )
+            session_state.consumed_tombstone = tombstone
+            publish_publication_commit(publication_commit)
+            state.publication_session = authority_session_ref
+            object_setattr(authority, authority_session_slot, session)
+            object_setattr(authority, authority_session_state_slot, session_state)
+            state.write_phase = "publication-active"
+            session_state.lifecycle = "publication-active"
+            return session
+        except BaseException:
+            session_state.lifecycle = "poisoned"
+            poison(state, authority, "SQLite publication-session atomic tail failed")
+            raise
+
+    return atomic_tail
+
+
+_ATOMIC_PUBLICATION_SESSION_TAIL = _capture_atomic_publication_session_tail()
+del _capture_atomic_publication_session_tail
+
+
+def _publish_sqlite_cursor_publication_session_implementation(
+    prepared: _SQLiteCursorPublicationSessionPreparedOwner,
+    evidence: _ClockEvidence,
+    cancellation: _SQLiteCursorPublicationSessionCancellationSignal | None,
+    atomic_tail: Callable[..., _SQLiteCursorPublicationSession],
+) -> _SQLiteCursorPublicationSession:
+    """Validate boundary two, poll cancellation once, then publish atomically."""
+
+    prepared_value = _identity_get(
+        _PUBLICATION_PREPARED,
+        prepared,
+        _SQLiteCursorPublicationSessionPreparedOwner,
+    )
+    if prepared_value is None:
+        _fail("GE_CURSOR_B3_PUBLICATION_PREPARED_OWNER")
+    prepared_state = cast(_PublicationPreparedState, prepared_value)
+    authority = prepared_state.authority_ref()
+    adoption_receipt = prepared_state.adoption_receipt_ref()
+    if authority is None or adoption_receipt is None:
+        _fail("GE_CURSOR_B3_PUBLICATION_PREPARED_OWNER")
+    state = _authority_state(authority)
+    if prepared_state.lifecycle != "prepared":
+        _poison(state, authority, "SQLite publication-session reuse")
+        _fail("GE_CURSOR_B3_PUBLICATION_SESSION_REUSE")
+    if (
+        state.publication_prepared_owner is not prepared
+        or state.initial_stage_adoption_receipt is not adoption_receipt
+        or prepared_state.observed_evidence is not evidence
+        or _STABLE_TYPE(evidence) is not _ClockEvidence
+        or state.outer_clock_consumed_tombstone is None
+    ):
+        _poison(state, authority, "SQLite publication-session evidence substitution")
+        _fail("GE_CURSOR_B3_PUBLICATION_SESSION_EVIDENCE")
+    try:
+        generation, epoch, changes = _owner_snapshot(state.connection)
+        if (
+            generation is not state.transaction_generation
+            or epoch != state.current_transaction_epoch
+            or changes != state.current_total_changes
+        ):
+            _fail("GE_CURSOR_B3_PUBLICATION_SESSION_LINEAGE")
+        _assert_sqlite_cursor_outer_publication_authority_intrinsic(authority)
+        clock_graph = _ASSERT_PREPARED_SECOND_CLOCK(
+            state.connection,
+            state.migration_lock_capability,
+            state.provider_clock_capability,
+            state.outer_clock_evidence,
+            state.outer_clock_consumed_tombstone,
+            evidence,
+        )
+        bundle, fence, reader, _record = _session_adoption_inputs(adoption_receipt)
+        _assert_sqlite_cursor_initial_stage_adoption_receipt_intrinsic(
+            authority, bundle, fence, reader, adoption_receipt
+        )
+    except BaseException:
+        _poison(state, authority, "SQLite publication-session validation failed")
+        raise
+    cancellation_state: _CancellationState | None = None
+    if cancellation is not None:
+        cancellation_value = _identity_get(
+            _PUBLICATION_CANCELLATIONS,
+            cancellation,
+            _SQLiteCursorPublicationSessionCancellationSignal,
+        )
+        if cancellation_value is None:
+            _fail("GE_CURSOR_B3_PUBLICATION_CANCELLATION")
+        cancellation_state = cast(_CancellationState, cancellation_value)
+    if cancellation_state is not None and cancellation_state.cancelled:
+        _fail("GE_CURSOR_B3_PUBLICATION_CANCELLED")
+
+    session = _SQLiteCursorPublicationSession(_CONSTRUCTION_TOKEN)
+    lock_identity = clock_graph.migration_lock
+    session_state = _PublicationSessionState(
+        prepared_owner=prepared,
+        authority=authority,
+        adoption_receipt=adoption_receipt,
+        connection=state.connection,
+        stage=state.stage,
+        receipt=state.receipt,
+        projection_reference=state.projection_reference,
+        projection_identity=state.projection_identity,
+        transfer=state.transfer,
+        transaction_generation=state.transaction_generation,
+        migration_lock_capability=state.migration_lock_capability,
+        migration_lock_identity=lock_identity,
+        provider_clock_capability=state.provider_clock_capability,
+        outer_clock_evidence=state.outer_clock_evidence,
+        outer_provider_now_ms=state.outer_provider_now_ms,
+        pre_rebind_clock_evidence=evidence,
+        pre_rebind_provider_now_ms=clock_graph.evidence.provider_now_ms,
+        post_ddl_catalog_fence=fence,
+        source_descriptor_hash=state.source_descriptor_hash,
+        source_schema_identity=state.source_schema_identity_sha256,
+        target_descriptor_hash=SQLITE_CURSOR_PUBLICATION_TARGET_DESCRIPTOR.descriptor_hash,
+        target_schema_identity=(SQLITE_CURSOR_PUBLICATION_TARGET_DESCRIPTOR.schema_identity_sha256),
+    )
+    try:
+        _bind_publication_session_state(session, session_state)
+        lower_tail = prepared_state.lower_tail
+        if lower_tail is None:
+            _fail("GE_CURSOR_B3_PUBLICATION_SESSION_GRAPH")
+        authority_session_ref = _STABLE_REF(session)
+        publication_commit = _OWNERSHIP_PREPARE_PUBLICATION_SESSION_COMMIT(
+            lower_tail,
+            session,
+        )
+    except BaseException:
+        prepared_state.lifecycle = "poisoned"
+        with suppress(BaseException):
+            if prepared_state.lower_tail is not None:
+                _OWNERSHIP_BURN_PUBLICATION_SESSION(prepared_state.lower_tail)
+        _poison(state, authority, "SQLite publication-session registration failed")
+        raise
+
+    return atomic_tail(
+        prepared_state,
+        publication_commit,
+        state,
+        authority,
+        session,
+        session_state,
+        authority_session_ref,
+        evidence,
+    )
+
+
+def _capture_publication_session_publisher(
+    implementation: Callable[..., _SQLiteCursorPublicationSession] = (
+        _publish_sqlite_cursor_publication_session_implementation
+    ),
+    atomic_tail: Callable[..., _SQLiteCursorPublicationSession] = (
+        _ATOMIC_PUBLICATION_SESSION_TAIL
+    ),
+) -> Callable[
+    [
+        _SQLiteCursorPublicationSessionPreparedOwner,
+        _ClockEvidence,
+        _SQLiteCursorPublicationSessionCancellationSignal | None,
+    ],
+    _SQLiteCursorPublicationSession,
+]:
+    """Close the atomic tail over exact callables without an injection seam."""
+
+    def publisher(
+        prepared: _SQLiteCursorPublicationSessionPreparedOwner,
+        evidence: _ClockEvidence,
+        cancellation: _SQLiteCursorPublicationSessionCancellationSignal | None = None,
+    ) -> _SQLiteCursorPublicationSession:
+        return implementation(
+            prepared,
+            evidence,
+            cancellation,
+            atomic_tail,
+        )
+
+    return publisher
+
+
+_publish_sqlite_cursor_publication_session_intrinsic = _capture_publication_session_publisher()
+del _capture_publication_session_publisher
+del _publish_sqlite_cursor_publication_session_implementation
+del _ATOMIC_PUBLICATION_SESSION_TAIL
+
+
+def _assert_publication_session_adoption_graph_intrinsic(
+    state: _AuthorityState,
+    authority: _SQLiteCursorOuterPublicationAuthority,
+    adoption_receipt: _SQLiteCursorInitialStageAdoptionReceipt,
+    catalog: _TargetCatalogSnapshot,
+    generation: object,
+    epoch: int,
+    changes: int,
+) -> None:
+    """Reprove the adopted write graph from retained identities and one catalog read."""
+
+    bundle, fence, reader_lease, record = _session_adoption_inputs(adoption_receipt)
+    checked = _checked_initial_publication_bundle_presentation_intrinsic(
+        authority, bundle, fence, reader_lease
+    )
+    migration_tombstone = record.migration_0002_tombstone_ref()
+    entries_tombstone = record.baseline_entries_tombstone_ref()
+    header_tombstone = record.baseline_header_tombstone_ref()
+    sequence_tombstone = record.operation_sequence_zero_tombstone_ref()
+    retired_b2_fence = record.retired_b2_fence_ref()
+    fence_record = _post_ddl_catalog_fence_record(fence)
+    reader_record = _post_ddl_publication_reader_record(reader_lease)
+    current_ledger = _outer_ledger_snapshot(state)
+    if (
+        record.lifecycle != "active"
+        or record.mint_count != 1
+        or record.write_kind != "initial-publication-stage-adoption"
+        or record.authority_ref() is not authority
+        or record.connection_id != _STABLE_ID(state.connection)
+        or record.stage_ref() is not state.stage
+        or record.receipt_ref() is not state.receipt
+        or record.projection_identity_id != _STABLE_ID(state.projection_identity)
+        or record.projection_reference_ref() is not state.projection_reference
+        or record.transfer_ref() is not state.transfer
+        or record.migration_0002_receipt_ref() is not checked.migration_0002_receipt
+        or record.baseline_entries_receipt_ref() is not checked.baseline_entries_receipt
+        or record.baseline_header_receipt_ref() is not checked.baseline_header_receipt
+        or record.operation_sequence_zero_receipt_ref()
+        is not checked.operation_sequence_zero_receipt
+        or record.fence_ref() is not fence
+        or record.reader_lease_ref() is not reader_lease
+        or migration_tombstone is None
+        or entries_tombstone is None
+        or header_tombstone is None
+        or sequence_tombstone is None
+        or retired_b2_fence is None
+        or state.initial_stage_adoption_receipt is not adoption_receipt
+        or state.initial_stage_adoption_receipt_mint_count != 1
+        or state.receipt_consumption_count != 4
+        or state.tombstone_mint_count != 4
+        or state.migration_0002_consumed_tombstone is not migration_tombstone
+        or state.baseline_entries_consumed_tombstone is not entries_tombstone
+        or state.baseline_header_consumed_tombstone is not header_tombstone
+        or state.operation_sequence_zero_consumed_tombstone is not sequence_tombstone
+        or state.write_phase != "publication-active"
+        or state.transaction_generation is not generation
+        or state.current_transaction_epoch != epoch
+        or state.current_total_changes != changes
+        or record.adopted_transaction_epoch != epoch
+        or record.adopted_total_changes != changes
+        or not _exact_outer_ledger(current_ledger, record.adopted_outer_ledger)
+        or record.target_catalog_sha256 != SQLITE_CURSOR_PUBLICATION_TARGET_CATALOG_EXPECTED_SHA256
+        or fence_record.authority_ref() is not authority
+        or fence_record.migration_0002_receipt_ref() is not checked.migration_0002_receipt
+        or fence_record.transaction_generation is not generation
+        or fence_record.catalog_sha256 != record.target_catalog_sha256
+        or not _exact_post_ddl_catalog(catalog, checked.migration_0002_record.post_ddl_catalog)
+        or catalog.application_id != fence_record.catalog_application_id
+        or catalog.user_version != fence_record.catalog_user_version
+        or catalog.row_count != fence_record.catalog_row_count
+        or catalog.canonical_utf8_bytes != fence_record.catalog_canonical_utf8_bytes
+        or catalog.catalog_sha256 != fence_record.catalog_sha256
+        or catalog.inventory != fence_record.catalog_inventory
+        or reader_record.lifecycle != "retired"
+        or reader_record.authority_ref() is not authority
+        or reader_record.migration_0002_receipt_ref() is not checked.migration_0002_receipt
+        or reader_record.fence_ref() is not fence
+        or reader_record.stage_ref() is not state.stage
+        or reader_record.transfer_ref() is not state.transfer
+        or reader_record.projection_reference_ref() is not state.projection_reference
+        or reader_record.transaction_generation is not generation
+        or reader_record.prepare_count != 1
+        or reader_record.execute_count != 1
+        or reader_record.ownership_acquisition_count != 1
+        or reader_record.close_attempt_count != 1
+        or not reader_record.close_succeeded
+        or reader_record.close_error_code is not None
+        or reader_record.rederived_projection is None
+        or reader_record.retained_entries is None
+        or len(reader_record.retained_entries) != reader_record.expected_entry_count
+        or not _same_projection_identity(
+            reader_record.rederived_projection, _expected_reader_projection(reader_record)
+        )
+    ):
+        _fail("GE_CURSOR_B3_PUBLICATION_SESSION_ADOPTION")
+    _assert_consumption_intrinsic(
+        _MIGRATION_0002_RECEIPT_CONSUMPTIONS,
+        checked.migration_0002_receipt,
+        migration_tombstone,
+        adoption_receipt,
+    )
+    _assert_consumption_intrinsic(
+        _BASELINE_ENTRIES_PUBLICATION_RECEIPT_CONSUMPTIONS,
+        checked.baseline_entries_receipt,
+        entries_tombstone,
+        adoption_receipt,
+    )
+    _assert_consumption_intrinsic(
+        _BASELINE_HEADER_PUBLICATION_RECEIPT_CONSUMPTIONS,
+        checked.baseline_header_receipt,
+        header_tombstone,
+        adoption_receipt,
+    )
+    _assert_consumption_intrinsic(
+        _OPERATION_SEQUENCE_ZERO_PUBLICATION_RECEIPT_CONSUMPTIONS,
+        checked.operation_sequence_zero_receipt,
+        sequence_tombstone,
+        adoption_receipt,
+    )
+    _OWNERSHIP_ASSERT_POST_DDL_READER_TERMINAL(
+        state.transfer,
+        authority,
+        reader_lease,
+    )
+
+
+def _assert_sqlite_cursor_publication_session_intrinsic(
+    session: _SQLiteCursorPublicationSession,
+) -> _SQLiteCursorPublicationSession:
+    """Repeatably reprove the active three-layer session without consuming it."""
+
+    session_state = _publication_session_state(session)
+    authority = session_state.authority
+    prepared = session_state.prepared_owner
+    adoption_receipt = session_state.adoption_receipt
+    state = _authority_state(authority)
+    try:
+        if (
+            session_state.lifecycle != "publication-active"
+            or state.lifecycle != "active"
+            or state.write_phase != "publication-active"
+            or state.publication_prepared_owner is not prepared
+            or state.publication_session is None
+            or state.publication_session() is not session
+            or _anchored_publication_session(authority) is not session
+            or state.initial_stage_adoption_receipt is not adoption_receipt
+            or session_state.connection is not state.connection
+            or session_state.stage is not state.stage
+            or session_state.receipt is not state.receipt
+            or session_state.projection_reference is not state.projection_reference
+            or session_state.projection_identity is not state.projection_identity
+            or session_state.transfer is not state.transfer
+            or session_state.transaction_generation is not state.transaction_generation
+            or session_state.migration_lock_capability is not state.migration_lock_capability
+            or session_state.provider_clock_capability is not state.provider_clock_capability
+            or session_state.outer_clock_evidence is not state.outer_clock_evidence
+            or session_state.outer_provider_now_ms != state.outer_provider_now_ms
+            or session_state.post_ddl_catalog_fence is not state.post_ddl_catalog_fence
+            or session_state.source_descriptor_hash != state.source_descriptor_hash
+            or session_state.source_schema_identity != state.source_schema_identity_sha256
+            or session_state.target_descriptor_hash
+            != SQLITE_CURSOR_PUBLICATION_TARGET_DESCRIPTOR.descriptor_hash
+            or session_state.target_schema_identity
+            != SQLITE_CURSOR_PUBLICATION_TARGET_DESCRIPTOR.schema_identity_sha256
+            or session_state.consumed_tombstone is None
+        ):
+            _fail("GE_CURSOR_B3_PUBLICATION_SESSION_GRAPH")
+        generation_before, epoch_before, changes_before = _owner_snapshot(state.connection)
+        live_lock = _LIVE_LOCK(state.connection)
+        catalog = _READ_VALIDATED_TARGET_CATALOG(state.connection)
+        generation_after, epoch_after, changes_after = _owner_snapshot(state.connection)
+        if (
+            generation_before is not generation_after
+            or generation_after is not state.transaction_generation
+            or epoch_before != epoch_after
+            or epoch_after != state.current_transaction_epoch
+            or changes_before != changes_after
+            or changes_after != state.current_total_changes
+        ):
+            _fail("GE_CURSOR_B3_PUBLICATION_SESSION_LINEAGE")
+        clock_graph = _ASSERT_ACTIVE_SECOND_CLOCK(
+            state.connection,
+            state.migration_lock_capability,
+            state.provider_clock_capability,
+            state.outer_clock_evidence,
+            cast(_ConsumedClockTombstone, state.outer_clock_consumed_tombstone),
+            session_state.pre_rebind_clock_evidence,
+            session_state.consumed_tombstone,
+            observed_live_lock=live_lock,
+            observed_transaction_epoch=epoch_after,
+            observed_total_changes=changes_after,
+        )
+        if (
+            clock_graph.migration_lock != session_state.migration_lock_identity
+            or clock_graph.evidence.provider_now_ms != session_state.pre_rebind_provider_now_ms
+            or clock_graph.predecessor_evidence is not state.outer_clock_evidence
+        ):
+            _fail("GE_CURSOR_B3_PUBLICATION_SESSION_EVIDENCE")
+        _assert_publication_session_adoption_graph_intrinsic(
+            state,
+            authority,
+            adoption_receipt,
+            catalog,
+            generation_after,
+            epoch_after,
+            changes_after,
+        )
+        _OWNERSHIP_ASSERT_PUBLICATION_SESSION(
+            state.connection,
+            state.stage,
+            state.receipt,
+            state.projection_identity,
+            state.transfer,
+            authority,
+            prepared,
+            session,
+        )
+        return session
+    except BaseException:
+        session_state.lifecycle = "poisoned"
+        _poison(state, authority, "SQLite publication-session assertion failed")
+        raise
+
+
+class _SQLiteCursorPublicationSessionSnapshot(NamedTuple):
+    lifecycle: Literal["publication-active"]
+    session: _SQLiteCursorPublicationSession
+    prepared_owner: _SQLiteCursorPublicationSessionPreparedOwner
+    authority: _SQLiteCursorOuterPublicationAuthority
+    adoption_receipt: _SQLiteCursorInitialStageAdoptionReceipt
+    receipt: SQLiteCursorPreRebindReceipt
+    projection_reference: SQLiteCursorExactProjectionReference
+    projection_identity: BaselineProjectionIdentity
+    stage: SQLiteV1BaselineTempStage
+    connection: SQLiteV1BaselineConnectionOwner
+    transfer: _SQLiteCursorStageOwnershipTransfer
+    transaction_generation: object
+    migration_lock_identity: object
+    migration_lock_capability: _MigrationLockCapability
+    provider_clock_capability: _ProviderClockCapability
+    outer_clock_evidence: _ClockEvidence
+    outer_provider_now_ms: int
+    pre_rebind_clock_evidence: _ClockEvidence
+    pre_rebind_provider_now_ms: int
+    consumed_tombstone: _ConsumedClockTombstone
+    post_ddl_catalog_fence: _SQLiteCursorPostDdlCatalogFence
+    source_descriptor_hash: str
+    source_schema_identity: str
+    target_descriptor_hash: str
+    target_schema_identity: str
+
+
+def _read_sqlite_cursor_publication_session_snapshot_intrinsic(
+    session: _SQLiteCursorPublicationSession,
+) -> _SQLiteCursorPublicationSessionSnapshot:
+    _assert_sqlite_cursor_publication_session_intrinsic(session)
+    session_state = _publication_session_state(session)
+    authority = session_state.authority
+    prepared = session_state.prepared_owner
+    adoption_receipt = session_state.adoption_receipt
+    tombstone = session_state.consumed_tombstone
+    assert tombstone is not None
+    return _SQLiteCursorPublicationSessionSnapshot(
+        "publication-active",
+        session,
+        prepared,
+        authority,
+        adoption_receipt,
+        session_state.receipt,
+        session_state.projection_reference,
+        session_state.projection_identity,
+        session_state.stage,
+        session_state.connection,
+        session_state.transfer,
+        session_state.transaction_generation,
+        session_state.migration_lock_identity,
+        session_state.migration_lock_capability,
+        session_state.provider_clock_capability,
+        session_state.outer_clock_evidence,
+        session_state.outer_provider_now_ms,
+        session_state.pre_rebind_clock_evidence,
+        session_state.pre_rebind_provider_now_ms,
+        tombstone,
+        session_state.post_ddl_catalog_fence,
+        session_state.source_descriptor_hash,
+        session_state.source_schema_identity,
+        session_state.target_descriptor_hash,
+        session_state.target_schema_identity,
+    )
 
 
 def _read_sqlite_cursor_initial_stage_adoption_receipt_snapshot_intrinsic(

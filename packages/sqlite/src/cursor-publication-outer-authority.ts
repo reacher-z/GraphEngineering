@@ -6,8 +6,12 @@ import { CycleStoreProviderError } from "@graph-engineering/runtime";
 import {
   assertSQLiteCursorOuterClockAuthorityActiveGraphIntrinsic,
   assertSQLiteCursorOuterClockAuthorityGraphIntrinsic,
+  assertSQLiteCursorPublicationSessionClockActiveGraphIntrinsic,
+  assertSQLiteCursorPublicationSessionClockPreparedGraphIntrinsic,
   consumeSQLiteCursorProviderClockEvidenceIntrinsic,
+  observeSQLiteCursorProviderClockIntrinsic,
   readSQLiteCursorProviderClockEvidenceSnapshotIntrinsic,
+  type SQLiteCursorMigrationLockIdentity,
   type SQLiteCursorMigrationLockCapability,
   type SQLiteCursorProviderClockCapability,
   type SQLiteCursorProviderClockConsumedTombstone,
@@ -20,6 +24,8 @@ import {
 } from "./operation-baseline-cursor-ownership.js";
 import {
   assertSQLiteCursorStageOwnershipOuterPublicationOwnedIntrinsic,
+  assertSQLiteCursorStageOwnershipPublicationSessionActiveIntrinsic,
+  assertSQLiteCursorStageOwnershipPublicationSessionPreparedIntrinsic,
   assertSQLiteCursorStageOwnershipOuterPublicationPreparedIntrinsic,
   assertSQLiteCursorStageOwnershipPostDdlReaderTerminalIntrinsic,
   assertSQLiteCursorStageOwnershipPreRebindCompleteIntrinsic,
@@ -28,6 +34,8 @@ import {
   mintSQLiteCursorStageOwnershipOuterPublicationAuthorityIntrinsic,
   poisonSQLiteCursorStageOwnershipOuterPublicationIntrinsic,
   prepareSQLiteCursorStageOwnershipInitialPublicationAdoptionIntrinsic,
+  prepareSQLiteCursorStageOwnershipPublicationSessionIntrinsic,
+  prepareSQLiteCursorStageOwnershipPublicationSessionTransitionIntrinsic,
   publishSQLiteCursorStageOwnershipOuterPublicationIntrinsic,
   publishSQLiteCursorStageOwnershipInitialPublicationAdoptionIntrinsic,
   registerSQLiteCursorStageOwnershipPostDdlReaderIntrinsic,
@@ -35,6 +43,8 @@ import {
   type SQLiteBaselineCursorB2FenceRetirement,
   type SQLiteCursorInitialPublicationStageWatermark,
   type SQLiteCursorStageOwnershipOuterPublicationTail,
+  type SQLiteCursorStageOwnershipPublicationSessionTail,
+  type SQLiteCursorStageOwnershipPublicationSessionTransition,
   type SQLiteCursorStageOwnershipTransfer,
 } from "./operation-baseline-cursor-stage-ownership.js";
 import {
@@ -180,6 +190,53 @@ export interface SQLiteCursorOuterPublicationCancellationController {
   cancel(): void;
 }
 
+/** Opaque owner of the exact three prepared publication continuations. */
+export interface SQLiteCursorPublicationSessionPreparedOwner {
+  readonly __sqliteCursorPublicationSessionPreparedOwner: never;
+}
+
+/** Opaque identity activated by the final publication-session tail. */
+export interface SQLiteCursorPublicationSession {
+  readonly __sqliteCursorPublicationSession: never;
+}
+
+export interface SQLiteCursorPublicationSessionCancellationSignal {
+  readonly __sqliteCursorPublicationSessionCancellationSignal: never;
+}
+
+export interface SQLiteCursorPublicationSessionCancellationController {
+  readonly signal: SQLiteCursorPublicationSessionCancellationSignal;
+  cancel(): void;
+}
+
+export interface SQLiteCursorPublicationSessionSnapshot {
+  readonly lifecycle: "publication-active";
+  readonly outerAuthority: SQLiteCursorOuterPublicationAuthority;
+  readonly initialStageAdoptionReceipt: SQLiteCursorInitialStageAdoptionReceipt;
+  readonly receipt: SQLiteCursorPreRebindReceipt;
+  readonly projectionReference: SQLiteCursorExactProjectionReference;
+  readonly projectionIdentity: OperationBaselineProjectionIdentity;
+  readonly stage: SQLiteBaselineTempStage;
+  readonly connection: SQLiteConnection;
+  readonly transactionLineage: SQLiteConnectionTransactionLineage;
+  readonly transfer: SQLiteCursorStageOwnershipTransfer;
+  readonly migrationLockCapability: SQLiteCursorMigrationLockCapability;
+  readonly migrationLockIdentity: Readonly<SQLiteCursorMigrationLockIdentity>;
+  readonly providerClockCapability: SQLiteCursorProviderClockCapability;
+  readonly outerClockEvidence: SQLiteCursorProviderClockEvidence;
+  readonly outerProviderNowMs: number;
+  readonly preRebindClockEvidence: SQLiteCursorProviderClockEvidence;
+  readonly preRebindProviderNowMs: number;
+  readonly preRebindClockConsumedTombstone:
+    SQLiteCursorProviderClockConsumedTombstone;
+  readonly postDdlCatalogFence: SQLiteCursorPostDdlCatalogFence;
+  readonly sourceDescriptorHash: string;
+  readonly sourceSchemaIdentitySha256: string;
+  readonly targetDescriptorHash: typeof SQLITE_CURSOR_PUBLICATION_TARGET.descriptorHash;
+  readonly targetSchemaIdentitySha256:
+    typeof SQLITE_CURSOR_PUBLICATION_TARGET.schemaIdentitySha256;
+}
+
 export type SQLiteCursorOuterPublicationAuthorityLifecycle =
   | "inactive"
   | "active"
@@ -199,6 +256,7 @@ export type SQLiteCursorOuterPublicationWritePhase =
   | "executing-sequence-zero"
   | "sequence-zero-complete"
   | "initial-stage-adoption-complete"
+  | "publication-active"
   | "poisoned"
   | "retired";
 
@@ -592,6 +650,8 @@ export interface SQLiteCursorOuterPublicationAuthoritySnapshot {
   readonly initialStageAdoptionReceipt:
     SQLiteCursorInitialStageAdoptionReceipt | undefined;
   readonly initialStageAdoptionReceiptMintCount: 0 | 1;
+  readonly publicationPreparedOwner: SQLiteCursorPublicationSessionPreparedOwner | undefined;
+  readonly publicationSession: SQLiteCursorPublicationSession | undefined;
   readonly receiptConsumptionCount: 0 | 4;
   readonly tombstoneMintCount: 0 | 4;
   readonly migration0002ConsumedTombstone:
@@ -661,6 +721,8 @@ interface AuthorityState {
   operationSequenceZeroAffectedRows: 0 | 1;
   initialStageAdoptionReceipt: SQLiteCursorInitialStageAdoptionReceipt | undefined;
   initialStageAdoptionReceiptMintCount: 0 | 1;
+  publicationPreparedOwner: SQLiteCursorPublicationSessionPreparedOwner | undefined;
+  publicationSession: SQLiteCursorPublicationSession | undefined;
   receiptConsumptionCount: 0 | 4;
   tombstoneMintCount: 0 | 4;
   migration0002ConsumedTombstone:
@@ -758,6 +820,28 @@ interface InitialStageAdoptionReceiptState {
   readonly stageWatermark: SQLiteCursorInitialPublicationStageWatermark;
 }
 
+type PublicationPreparedLifecycle = "prepared" | "published" | "poisoned";
+
+interface PublicationPreparedState {
+  readonly adoptionReceipt: SQLiteCursorInitialStageAdoptionReceipt;
+  readonly authority: SQLiteCursorOuterPublicationAuthority;
+  lowerTail: SQLiteCursorStageOwnershipPublicationSessionTail | undefined;
+  lifecycle: PublicationPreparedLifecycle;
+  observedEvidence: SQLiteCursorProviderClockEvidence | undefined;
+}
+
+interface PublicationSessionState {
+  readonly adoptionReceipt: SQLiteCursorInitialStageAdoptionReceipt;
+  readonly authority: SQLiteCursorOuterPublicationAuthority;
+  readonly preparedOwner: SQLiteCursorPublicationSessionPreparedOwner;
+  readonly snapshotBase: Omit<
+    SQLiteCursorPublicationSessionSnapshot,
+    "lifecycle" | "preRebindClockConsumedTombstone"
+  >;
+  consumedTombstone: SQLiteCursorProviderClockConsumedTombstone | undefined;
+  lifecycle: "pending" | "publication-active" | "poisoned";
+}
+
 interface ConsumedTombstoneState {
   readonly adoptionReceipt: SQLiteCursorInitialStageAdoptionReceipt;
   lifecycle: InitialStageAdoptionReceiptLifecycle;
@@ -770,6 +854,12 @@ const AUTHORITIES = new WeakMap<object, AuthorityState>();
 const AUTHORITY_BY_EVIDENCE = new WeakMap<object, SQLiteCursorOuterPublicationAuthority>();
 const AUTHORITY_BY_TRANSFER = new WeakMap<object, SQLiteCursorOuterPublicationAuthority>();
 const CANCELLATIONS = new WeakMap<object, CancellationState>();
+const PUBLICATION_CANCELLATIONS = new WeakMap<object, CancellationState>();
+const PUBLICATION_PREPARED = new WeakMap<object, PublicationPreparedState>();
+const PUBLICATION_PREPARED_BY_AUTHORITY =
+  new WeakMap<object, SQLiteCursorPublicationSessionPreparedOwner>();
+const PUBLICATION_SESSIONS = new WeakMap<object, PublicationSessionState>();
+let publicationPendingRegistrationFault: Readonly<{ readonly error: unknown }> | undefined;
 const MIGRATION_0002_RECEIPTS = new WeakMap<object, Migration0002ReceiptState>();
 const POST_DDL_CATALOG_FENCES = new WeakMap<object, PostDdlCatalogFenceState>();
 const POST_DDL_PUBLICATION_READER_LEASES =
@@ -866,6 +956,20 @@ function poisonAuthorityGraph(
   if (state.lifecycle === "retired" || state.lifecycle === "poisoned") return;
   state.lifecycle = "poisoned";
   state.writePhase = "poisoned";
+  const preparedOwner = state.publicationPreparedOwner;
+  if (preparedOwner !== undefined) {
+    const prepared = reflectApplyIntrinsic(
+      weakMapGetIntrinsic, PUBLICATION_PREPARED, [preparedOwner as object],
+    ) as PublicationPreparedState | undefined;
+    if (prepared !== undefined) prepared.lifecycle = "poisoned";
+  }
+  const session = state.publicationSession;
+  if (session !== undefined) {
+    const publication = reflectApplyIntrinsic(
+      weakMapGetIntrinsic, PUBLICATION_SESSIONS, [session as object],
+    ) as PublicationSessionState | undefined;
+    if (publication !== undefined) publication.lifecycle = "poisoned";
+  }
   // Retain the exact reason handed to the stage-ownership bridge. The bridge
   // throws it, this function swallows that throw, and without this field no
   // caller could ever observe which invariant poisoned the graph.
@@ -887,6 +991,20 @@ function retireAuthorityGraph(
   if (state.lifecycle === "retired" || state.lifecycle === "poisoned") return;
   state.lifecycle = "retired";
   state.writePhase = "retired";
+  const preparedOwner = state.publicationPreparedOwner;
+  if (preparedOwner !== undefined) {
+    const prepared = reflectApplyIntrinsic(
+      weakMapGetIntrinsic, PUBLICATION_PREPARED, [preparedOwner as object],
+    ) as PublicationPreparedState | undefined;
+    if (prepared !== undefined) prepared.lifecycle = "poisoned";
+  }
+  const session = state.publicationSession;
+  if (session !== undefined) {
+    const publication = reflectApplyIntrinsic(
+      weakMapGetIntrinsic, PUBLICATION_SESSIONS, [session as object],
+    ) as PublicationSessionState | undefined;
+    if (publication !== undefined) publication.lifecycle = "poisoned";
+  }
   try {
     retireSQLiteCursorStageOwnershipOuterPublicationIntrinsic(state.transfer, authority);
   } catch {
@@ -937,6 +1055,38 @@ SQLiteCursorOuterPublicationCancellationController {
     signal,
     cancel: (): void => { state.cancelled = true; },
   });
+}
+
+export function createSQLiteCursorPublicationSessionCancellationControllerIntrinsic():
+SQLiteCursorPublicationSessionCancellationController {
+  const signal = objectFreezeIntrinsic(
+    reflectApplyIntrinsic(objectCreateIntrinsic, Object, [null]),
+  ) as SQLiteCursorPublicationSessionCancellationSignal;
+  const state: CancellationState = { cancelled: false };
+  reflectApplyIntrinsic(weakMapSetIntrinsic, PUBLICATION_CANCELLATIONS, [
+    signal as object,
+    state,
+  ]);
+  return objectFreezeIntrinsic({
+    signal,
+    cancel: (): void => { state.cancelled = true; },
+  });
+}
+
+/**
+ * Package-private one-shot fault seam used to prove pending registration is a
+ * terminal failure. It is intentionally absent from the package root.
+ */
+export function injectSQLiteCursorPublicationSessionPendingRegistrationFaultForTestIntrinsic(
+  error: unknown,
+): void {
+  if (publicationPendingRegistrationFault !== undefined) {
+    return fail(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "SQLite publication session pending registration fault is already armed",
+    );
+  }
+  publicationPendingRegistrationFault = objectFreezeIntrinsic({ error });
 }
 
 /**
@@ -1060,6 +1210,8 @@ export function prepareSQLiteCursorOuterPublicationAuthorityIntrinsic(
     operationSequenceZeroAffectedRows: 0,
     initialStageAdoptionReceipt: undefined,
     initialStageAdoptionReceiptMintCount: 0,
+    publicationPreparedOwner: undefined,
+    publicationSession: undefined,
     receiptConsumptionCount: 0,
     tombstoneMintCount: 0,
     migration0002ConsumedTombstone: undefined,
@@ -1193,7 +1345,8 @@ export function assertSQLiteCursorOuterPublicationAuthorityIntrinsic(
     return fail("GE_CYCLE_STORE_INVALID_ARGUMENT", "SQLite outer publication authority is not active");
   }
   try {
-    if (state.writePhase === "initial-stage-adoption-complete") {
+    if (state.writePhase === "initial-stage-adoption-complete"
+        || state.writePhase === "publication-active") {
       const adoptionReceipt = state.initialStageAdoptionReceipt;
       const adoption = adoptionReceipt === undefined ? undefined : reflectApplyIntrinsic(
         weakMapGetIntrinsic, INITIAL_STAGE_ADOPTION_RECEIPTS, [adoptionReceipt as object],
@@ -1201,11 +1354,21 @@ export function assertSQLiteCursorOuterPublicationAuthorityIntrinsic(
       if (adoption === undefined || adoption.lifecycle !== "active") {
         fail("GE_CYCLE_STORE_CORRUPTION", "SQLite initial stage adoption authority drifted");
       }
-      assertSQLiteCursorStageOwnershipInitialPublicationAdoptedIntrinsic(
-        state.connection, state.stage, state.receipt, state.projectionIdentity,
-        state.transfer, authority, adoption.readerLease,
-        adoption.snapshot.retiredB2Fence, adoption.stageWatermark,
-      );
+      if (state.writePhase === "publication-active") {
+        const session = state.publicationSession;
+        if (session === undefined) {
+          fail("GE_CYCLE_STORE_CORRUPTION", "SQLite publication session identity drifted");
+        }
+        assertSQLiteCursorStageOwnershipPublicationSessionActiveIntrinsic(
+          state.transfer, authority, adoptionReceipt!, session,
+        );
+      } else {
+        assertSQLiteCursorStageOwnershipInitialPublicationAdoptedIntrinsic(
+          state.connection, state.stage, state.receipt, state.projectionIdentity,
+          state.transfer, authority, adoption.readerLease,
+          adoption.snapshot.retiredB2Fence, adoption.stageWatermark,
+        );
+      }
     } else {
       assertSQLiteCursorStageOwnershipOuterPublicationOwnedIntrinsic(
         state.connection, state.stage, state.receipt, state.projectionIdentity,
@@ -4851,23 +5014,69 @@ export function assertSQLiteCursorInitialStageAdoptionReceiptIntrinsic(
   }
   const snapshot = record.snapshot;
   try {
-    assertSQLiteCursorStageOwnershipInitialPublicationAdoptedIntrinsic(
-      state.connection, state.stage, state.receipt, state.projectionIdentity, state.transfer,
-      authority, readerLease, snapshot.retiredB2Fence, record.stageWatermark,
-    );
-    const clock = assertSQLiteCursorOuterClockAuthorityActiveGraphIntrinsic(
-      state.connection, state.migrationLockCapability, state.providerClockCapability,
-      state.outerClockEvidence, state.outerClockConsumedTombstone!,
-    );
+    if (state.writePhase === "publication-active") {
+      if (state.publicationSession === undefined) {
+        fail("GE_CYCLE_STORE_CORRUPTION", "SQLite publication session identity drifted");
+      }
+      assertSQLiteCursorStageOwnershipPublicationSessionActiveIntrinsic(
+        state.transfer, authority, receipt, state.publicationSession,
+      );
+    } else {
+      assertSQLiteCursorStageOwnershipInitialPublicationAdoptedIntrinsic(
+        state.connection, state.stage, state.receipt, state.projectionIdentity, state.transfer,
+        authority, readerLease, snapshot.retiredB2Fence, record.stageWatermark,
+      );
+    }
+    let clockTransactionLineage: SQLiteConnectionTransactionLineage;
+    if (state.writePhase === "publication-active") {
+      const session = state.publicationSession;
+      const publication = session === undefined ? undefined : reflectApplyIntrinsic(
+        weakMapGetIntrinsic, PUBLICATION_SESSIONS, [session as object],
+      ) as PublicationSessionState | undefined;
+      if (publication === undefined || publication.lifecycle !== "publication-active"
+          || publication.adoptionReceipt !== receipt
+          || publication.consumedTombstone === undefined) {
+        fail("GE_CYCLE_STORE_CORRUPTION", "SQLite publication session clock identity drifted");
+      }
+      const clock = assertSQLiteCursorPublicationSessionClockActiveGraphIntrinsic(
+        state.connection,
+        state.migrationLockCapability,
+        state.providerClockCapability,
+        state.outerClockEvidence,
+        state.outerClockConsumedTombstone!,
+        publication.snapshotBase.preRebindClockEvidence,
+        publication.consumedTombstone,
+      );
+      const expectedLock = publication.snapshotBase.migrationLockIdentity;
+      if (clock.transactionEpoch !== state.currentTransactionEpoch
+          || clock.totalChanges !== state.currentTotalChanges
+          || clock.migrationLock.lockId !== expectedLock.lockId
+          || clock.migrationLock.ownerId !== expectedLock.ownerId
+          || clock.migrationLock.lockEpoch !== expectedLock.lockEpoch
+          || clock.migrationLock.fencingToken !== expectedLock.fencingToken
+          || clock.migrationLock.activeExpiresAtMs !== expectedLock.activeExpiresAtMs
+          || clock.migrationLock.sourceSchemaVersion !== expectedLock.sourceSchemaVersion
+          || clock.migrationLock.targetSchemaVersion !== expectedLock.targetSchemaVersion) {
+        fail("GE_CYCLE_STORE_CORRUPTION", "SQLite publication session clock graph drifted");
+      }
+      clockTransactionLineage = clock.transactionLineage;
+    } else {
+      clockTransactionLineage = assertSQLiteCursorOuterClockAuthorityActiveGraphIntrinsic(
+        state.connection, state.migrationLockCapability, state.providerClockCapability,
+        state.outerClockEvidence, state.outerClockConsumedTombstone!,
+      ).transactionLineage;
+    }
     const owner = readSQLiteConnectionOwnerSnapshot(state.connection);
     const changes = readSQLiteConnectionTotalChangesSnapshot(state.connection);
     if (!owner.isTransaction || owner.transactionMode !== "exclusive"
         || owner.transactionLineage !== state.transactionLineage
-        || clock.transactionLineage !== state.transactionLineage
+        || clockTransactionLineage !== state.transactionLineage
         || owner.transactionEpoch !== snapshot.adoptedTransactionEpoch
         || changes.transactionEpoch !== owner.transactionEpoch
         || changes.totalChanges !== snapshot.adoptedTotalChanges
-        || state.lifecycle !== "active" || state.writePhase !== "initial-stage-adoption-complete"
+        || state.lifecycle !== "active"
+        || (state.writePhase !== "initial-stage-adoption-complete"
+          && state.writePhase !== "publication-active")
         || state.initialStageAdoptionReceipt !== receipt
         || state.initialStageAdoptionReceiptMintCount !== 1
         || state.receiptConsumptionCount !== 4 || state.tombstoneMintCount !== 4
@@ -4886,10 +5095,547 @@ export function assertSQLiteCursorInitialStageAdoptionReceiptIntrinsic(
     }
     return receipt;
   } catch (error) {
-    terminateAfterInvariantFailure(state, authority, error,
-      "SQLite initial stage adoption receipt validation failed");
+    if (state.writePhase === "publication-active") {
+      poisonAuthorityGraph(
+        state, authority, "SQLite publication session adoption receipt validation failed",
+      );
+    } else {
+      terminateAfterInvariantFailure(state, authority, error,
+        "SQLite initial stage adoption receipt validation failed");
+    }
     throw error;
   }
+}
+
+function selectedInitialAdoptionRecord(
+  state: AuthorityState,
+  authority: SQLiteCursorOuterPublicationAuthority,
+  adoptionReceipt: SQLiteCursorInitialStageAdoptionReceipt,
+): InitialStageAdoptionReceiptState {
+  const record = adoptionReceipt !== null && typeof adoptionReceipt === "object"
+    ? reflectApplyIntrinsic(
+      weakMapGetIntrinsic,
+      INITIAL_STAGE_ADOPTION_RECEIPTS,
+      [adoptionReceipt as object],
+    ) as InitialStageAdoptionReceiptState | undefined
+    : undefined;
+  if (record === undefined || record.lifecycle !== "active"
+      || record.authority !== authority
+      || state.initialStageAdoptionReceipt !== adoptionReceipt
+      || state.initialStageAdoptionReceiptMintCount !== 1) {
+    poisonAuthorityGraph(
+      state, authority, "SQLite publication session adoption receipt was substituted",
+    );
+    return fail(
+      "GE_CYCLE_STORE_CORRUPTION",
+      "SQLite publication session adoption receipt is invalid",
+    );
+  }
+  return record;
+}
+
+/** Reprove every retained adoption identity without issuing any SQL. */
+function assertSQLiteCursorPublicationSessionAdoptionRetainedGraphIntrinsic(
+  state: AuthorityState,
+  authority: SQLiteCursorOuterPublicationAuthority,
+  receipt: SQLiteCursorInitialStageAdoptionReceipt,
+  adoption: InitialStageAdoptionReceiptState,
+): PostDdlCatalogFenceState {
+  const checked = checkedInitialPublicationBundlePresentationIntrinsic(
+    authority, adoption.bundle, adoption.fence, adoption.readerLease,
+  );
+  const snapshot = adoption.snapshot;
+  const fence = postDdlCatalogFenceState(adoption.fence);
+  const reader = postDdlPublicationReaderLeaseState(adoption.readerLease);
+  if (snapshot.authority !== authority
+      || snapshot.connection !== state.connection
+      || snapshot.stage !== state.stage
+      || snapshot.receipt !== state.receipt
+      || snapshot.projectionIdentity !== state.projectionIdentity
+      || snapshot.projectionReference !== state.projectionReference
+      || snapshot.transfer !== state.transfer
+      || snapshot.transactionLineage !== state.transactionLineage
+      || snapshot.migration0002Receipt !== checked.migrationReceipt
+      || snapshot.baselineEntriesPublicationReceipt !== checked.entriesReceipt
+      || snapshot.baselineHeaderPublicationReceipt !== checked.headerReceipt
+      || snapshot.operationSequenceZeroPublicationReceipt !== checked.sequenceReceipt
+      || snapshot.postDdlCatalogFence !== adoption.fence
+      || snapshot.readerLease !== adoption.readerLease
+      || snapshot.readerLeaseLifecycle !== "retired"
+      || snapshot.readerCloseCount !== 1
+      || snapshot.mintCount !== 1
+      || snapshot.writeKind !== "initial-publication-stage-adoption"
+      || state.receiptConsumptionCount !== 4
+      || state.tombstoneMintCount !== 4
+      || state.migration0002ConsumedTombstone !== snapshot.migration0002ConsumedTombstone
+      || state.baselineEntriesConsumedTombstone !== snapshot.baselineEntriesConsumedTombstone
+      || state.baselineHeaderConsumedTombstone !== snapshot.baselineHeaderConsumedTombstone
+      || state.operationSequenceZeroConsumedTombstone
+        !== snapshot.operationSequenceZeroConsumedTombstone
+      || fence.authority !== authority
+      || fence.connection !== state.connection
+      || fence.migration0002Receipt !== checked.migrationReceipt
+      || reader.authority !== authority
+      || reader.connection !== state.connection
+      || reader.stage !== state.stage
+      || reader.transfer !== state.transfer
+      || reader.fence !== adoption.fence
+      || reader.migration0002Receipt !== checked.migrationReceipt
+      || reader.projectionIdentity !== state.projectionIdentity
+      || reader.projectionReference !== state.projectionReference
+      || reader.transactionLineage !== state.transactionLineage
+      || reader.lifecycle !== "retired"
+      || reader.closeAttemptCount !== 1
+      || !reader.closeSucceeded
+      || reader.prepareCount !== 1
+      || reader.executeCount !== 1
+      || reader.ownershipAcquisitionCount !== 1
+      || reader.rederivedProjection === undefined
+      || reader.rederivedProjection.projectionSha256
+        !== snapshot.readerReDerivedProjectionSha256) {
+    fail("GE_CYCLE_STORE_CORRUPTION", "SQLite publication session adoption graph drifted");
+  }
+  const pairs: readonly [object, object][] = [
+    [snapshot.migration0002ConsumedTombstone as object, checked.migrationReceipt as object],
+    [snapshot.baselineEntriesConsumedTombstone as object, checked.entriesReceipt as object],
+    [snapshot.baselineHeaderConsumedTombstone as object, checked.headerReceipt as object],
+    [snapshot.operationSequenceZeroConsumedTombstone as object, checked.sequenceReceipt as object],
+  ];
+  for (let index = 0; index < pairs.length; index += 1) {
+    const pair = pairs[index]!;
+    assertActiveConsumedTombstoneIntrinsic(pair[0], pair[1], receipt);
+  }
+  return fence;
+}
+
+/** Bind one exact future session owner to the adopted graph. */
+export function prepareSQLiteCursorPublicationSessionIntrinsic(
+  authority: SQLiteCursorOuterPublicationAuthority,
+  adoptionReceipt: SQLiteCursorInitialStageAdoptionReceipt,
+): SQLiteCursorPublicationSessionPreparedOwner {
+  const state = authorityState(authority);
+  if (state.lifecycle !== "active"
+      || state.writePhase !== "initial-stage-adoption-complete"
+      || state.publicationSession !== undefined) {
+    return fail("GE_CYCLE_STORE_INVALID_ARGUMENT", "SQLite publication session graph is not ready");
+  }
+  const adoption = selectedInitialAdoptionRecord(state, authority, adoptionReceipt);
+  const existing = reflectApplyIntrinsic(
+    weakMapGetIntrinsic,
+    PUBLICATION_PREPARED_BY_AUTHORITY,
+    [authority as object],
+  ) as SQLiteCursorPublicationSessionPreparedOwner | undefined;
+  if (existing !== undefined) {
+    const prepared = reflectApplyIntrinsic(
+      weakMapGetIntrinsic, PUBLICATION_PREPARED, [existing as object],
+    ) as PublicationPreparedState | undefined;
+    if (prepared === undefined || prepared.lifecycle !== "prepared"
+        || prepared.authority !== authority
+        || prepared.adoptionReceipt !== adoptionReceipt
+        || state.publicationPreparedOwner !== existing) {
+      poisonAuthorityGraph(state, authority, "SQLite publication session preparation drifted");
+      return fail("GE_CYCLE_STORE_CORRUPTION", "SQLite publication session preparation is invalid");
+    }
+    return existing;
+  }
+
+  try {
+    assertSQLiteCursorInitialStageAdoptionReceiptIntrinsic(
+      authority, adoption.bundle, adoption.fence, adoption.readerLease, adoptionReceipt,
+    );
+    const preparedOwner = objectFreezeIntrinsic(
+      reflectApplyIntrinsic(objectCreateIntrinsic, Object, [null]),
+    ) as SQLiteCursorPublicationSessionPreparedOwner;
+    const lowerTail = prepareSQLiteCursorStageOwnershipPublicationSessionIntrinsic(
+      state.connection,
+      state.stage,
+      state.receipt,
+      state.projectionIdentity,
+      state.transfer,
+      authority,
+      adoptionReceipt,
+      preparedOwner,
+    );
+    const prepared: PublicationPreparedState = {
+      adoptionReceipt,
+      authority,
+      lifecycle: "prepared",
+      lowerTail,
+      observedEvidence: undefined,
+    };
+    reflectApplyIntrinsic(weakMapSetIntrinsic, PUBLICATION_PREPARED, [
+      preparedOwner as object,
+      prepared,
+    ]);
+    reflectApplyIntrinsic(weakMapSetIntrinsic, PUBLICATION_PREPARED_BY_AUTHORITY, [
+      authority as object,
+      preparedOwner,
+    ]);
+    state.publicationPreparedOwner = preparedOwner;
+    return preparedOwner;
+  } catch (error) {
+    poisonAuthorityGraph(state, authority, "SQLite publication session preparation failed");
+    throw error;
+  }
+}
+
+function publicationPreparedState(
+  preparedOwner: SQLiteCursorPublicationSessionPreparedOwner,
+): PublicationPreparedState {
+  const prepared = preparedOwner !== null && typeof preparedOwner === "object"
+    ? reflectApplyIntrinsic(
+      weakMapGetIntrinsic, PUBLICATION_PREPARED, [preparedOwner as object],
+    ) as PublicationPreparedState | undefined
+    : undefined;
+  if (prepared === undefined) {
+    return fail("GE_CYCLE_STORE_INVALID_ARGUMENT", "SQLite publication session owner is invalid");
+  }
+  return prepared;
+}
+
+/** The second provider-clock boundary is observable only through this owner. */
+export function observeSQLiteCursorPublicationSessionClockIntrinsic(
+  preparedOwner: SQLiteCursorPublicationSessionPreparedOwner,
+): SQLiteCursorProviderClockEvidence {
+  const prepared = publicationPreparedState(preparedOwner);
+  const state = authorityState(prepared.authority);
+  if (prepared.lifecycle !== "prepared"
+      || state.lifecycle !== "active"
+      || state.writePhase !== "initial-stage-adoption-complete"
+      || state.publicationPreparedOwner !== preparedOwner
+      || prepared.observedEvidence !== undefined) {
+    return fail("GE_CYCLE_STORE_INVALID_ARGUMENT", "SQLite publication session owner is not observable");
+  }
+  const adoption = selectedInitialAdoptionRecord(
+    state, prepared.authority, prepared.adoptionReceipt,
+  );
+  try {
+    assertSQLiteCursorInitialStageAdoptionReceiptIntrinsic(
+      prepared.authority,
+      adoption.bundle,
+      adoption.fence,
+      adoption.readerLease,
+      prepared.adoptionReceipt,
+    );
+    assertSQLiteCursorStageOwnershipPublicationSessionPreparedIntrinsic(
+      state.transfer,
+      prepared.authority,
+      prepared.adoptionReceipt,
+      preparedOwner,
+      prepared.lowerTail!,
+    );
+    const evidence = observeSQLiteCursorProviderClockIntrinsic(
+      state.providerClockCapability,
+      "before-cursor-rebind",
+    );
+    const clock = assertSQLiteCursorPublicationSessionClockPreparedGraphIntrinsic(
+      state.connection,
+      state.migrationLockCapability,
+      state.providerClockCapability,
+      state.outerClockEvidence,
+      state.outerClockConsumedTombstone!,
+      evidence,
+    );
+    if (clock.transactionLineage !== state.transactionLineage
+        || clock.transactionEpoch !== state.currentTransactionEpoch
+        || clock.totalChanges !== state.currentTotalChanges) {
+      fail("GE_CYCLE_STORE_CORRUPTION", "SQLite publication session clock evidence drifted");
+    }
+    prepared.observedEvidence = evidence;
+    return evidence;
+  } catch (error) {
+    poisonAuthorityGraph(state, prepared.authority, "SQLite publication session clock failed");
+    throw error;
+  }
+}
+
+/**
+ * Complete the final synchronous tail after all fallible graph and cancellation
+ * checks.  A valid cancellation leaves the same owner/evidence retryable.
+ */
+export function publishSQLiteCursorPublicationSessionIntrinsic(
+  preparedOwner: SQLiteCursorPublicationSessionPreparedOwner,
+  evidence: SQLiteCursorProviderClockEvidence,
+  cancellation?: SQLiteCursorPublicationSessionCancellationSignal,
+): SQLiteCursorPublicationSession {
+  let cancellationState: CancellationState | undefined;
+  if (cancellation !== undefined) {
+    cancellationState = cancellation !== null && typeof cancellation === "object"
+      ? reflectApplyIntrinsic(
+        weakMapGetIntrinsic, PUBLICATION_CANCELLATIONS, [cancellation as object],
+      ) as CancellationState | undefined
+      : undefined;
+    if (cancellationState === undefined) {
+      return fail(
+        "GE_CYCLE_STORE_INVALID_ARGUMENT",
+        "SQLite publication session cancellation is invalid",
+      );
+    }
+  }
+  const prepared = publicationPreparedState(preparedOwner);
+  const state = authorityState(prepared.authority);
+  if (prepared.lifecycle !== "prepared"
+      || state.lifecycle !== "active"
+      || state.writePhase !== "initial-stage-adoption-complete"
+      || state.publicationPreparedOwner !== preparedOwner
+      || prepared.observedEvidence !== evidence) {
+    poisonAuthorityGraph(state, prepared.authority, "SQLite publication session evidence was substituted");
+    return fail("GE_CYCLE_STORE_CORRUPTION", "SQLite publication session evidence is invalid");
+  }
+  const adoption = selectedInitialAdoptionRecord(
+    state, prepared.authority, prepared.adoptionReceipt,
+  );
+  let clock: ReturnType<
+    typeof assertSQLiteCursorPublicationSessionClockPreparedGraphIntrinsic
+  >;
+  let migrationLockIdentity: Readonly<SQLiteCursorMigrationLockIdentity>;
+  try {
+    assertSQLiteCursorInitialStageAdoptionReceiptIntrinsic(
+      prepared.authority,
+      adoption.bundle,
+      adoption.fence,
+      adoption.readerLease,
+      prepared.adoptionReceipt,
+    );
+    assertSQLiteCursorStageOwnershipPublicationSessionPreparedIntrinsic(
+      state.transfer,
+      prepared.authority,
+      prepared.adoptionReceipt,
+      preparedOwner,
+      prepared.lowerTail!,
+    );
+    clock = assertSQLiteCursorPublicationSessionClockPreparedGraphIntrinsic(
+      state.connection,
+      state.migrationLockCapability,
+      state.providerClockCapability,
+      state.outerClockEvidence,
+      state.outerClockConsumedTombstone!,
+      evidence,
+    );
+    if (clock.transactionLineage !== state.transactionLineage
+        || clock.transactionEpoch !== state.currentTransactionEpoch
+        || clock.totalChanges !== state.currentTotalChanges) {
+      fail("GE_CYCLE_STORE_CORRUPTION", "SQLite publication session clock graph drifted");
+    }
+    migrationLockIdentity = clock.migrationLock;
+  } catch (error) {
+    poisonAuthorityGraph(
+      state, prepared.authority, "SQLite publication session pre-tail validation failed",
+    );
+    throw error;
+  }
+  if (cancellationState?.cancelled === true) {
+    return fail("GE_CYCLE_STORE_UNAVAILABLE", "SQLite publication session was cancelled");
+  }
+
+  let session: SQLiteCursorPublicationSession;
+  let sessionState: PublicationSessionState;
+  let lowerTransition: SQLiteCursorStageOwnershipPublicationSessionTransition;
+  try {
+    session = objectFreezeIntrinsic(
+      reflectApplyIntrinsic(objectCreateIntrinsic, Object, [null]),
+    ) as SQLiteCursorPublicationSession;
+    const snapshotBase = objectFreezeIntrinsic({
+      connection: state.connection,
+      initialStageAdoptionReceipt: prepared.adoptionReceipt,
+      migrationLockCapability: state.migrationLockCapability,
+      migrationLockIdentity,
+      outerAuthority: prepared.authority,
+      outerClockEvidence: state.outerClockEvidence,
+      outerProviderNowMs: state.outerProviderNowMs,
+      postDdlCatalogFence: adoption.fence,
+      preRebindClockEvidence: evidence,
+      preRebindProviderNowMs: clock.providerNowMs,
+      projectionIdentity: state.projectionIdentity,
+      projectionReference: state.projectionReference,
+      providerClockCapability: state.providerClockCapability,
+      receipt: state.receipt,
+      sourceDescriptorHash: state.sourceDescriptorHash,
+      sourceSchemaIdentitySha256: state.sourceSchemaIdentitySha256,
+      stage: state.stage,
+      targetDescriptorHash: SQLITE_CURSOR_PUBLICATION_TARGET.descriptorHash,
+      targetSchemaIdentitySha256: SQLITE_CURSOR_PUBLICATION_TARGET.schemaIdentitySha256,
+      transactionLineage: state.transactionLineage,
+      transfer: state.transfer,
+    } satisfies PublicationSessionState["snapshotBase"]);
+    sessionState = {
+      adoptionReceipt: prepared.adoptionReceipt,
+      authority: prepared.authority,
+      consumedTombstone: undefined,
+      lifecycle: "pending",
+      preparedOwner,
+      snapshotBase,
+    };
+    lowerTransition = prepareSQLiteCursorStageOwnershipPublicationSessionTransitionIntrinsic(
+      state.transfer,
+      prepared.authority,
+      prepared.adoptionReceipt,
+      preparedOwner,
+      prepared.lowerTail!,
+      session,
+    );
+    const registrationFault = publicationPendingRegistrationFault;
+    publicationPendingRegistrationFault = undefined;
+    if (registrationFault !== undefined) throw registrationFault.error;
+    reflectApplyIntrinsic(weakMapSetIntrinsic, PUBLICATION_SESSIONS, [
+      session as object,
+      sessionState,
+    ]);
+  } catch (error) {
+    prepared.lifecycle = "poisoned";
+    poisonAuthorityGraph(
+      state,
+      prepared.authority,
+      "SQLite publication session pending allocation failed",
+    );
+    throw error;
+  }
+
+  try {
+    // Atomic tail: outer burn -> ownership burn -> stage burn -> evidence
+    // consumption -> lower publication -> outer publication -> activation.
+    prepared.lifecycle = "published";
+    prepared.lowerTail = undefined;
+    lowerTransition.burn();
+    const tombstone = consumeSQLiteCursorProviderClockEvidenceIntrinsic(
+      state.providerClockCapability, evidence, "cursor-publication-session",
+    );
+    sessionState.consumedTombstone = tombstone;
+    lowerTransition.publish();
+    state.publicationSession = session;
+    state.writePhase = "publication-active";
+    sessionState.lifecycle = "publication-active";
+    return session;
+  } catch (error) {
+    sessionState.lifecycle = "poisoned";
+    poisonAuthorityGraph(state, prepared.authority, "SQLite publication session tail failed");
+    throw error;
+  }
+}
+
+/** Repeatable read-only proof of the fully published three-layer session. */
+export function assertSQLiteCursorPublicationSessionIntrinsic(
+  session: SQLiteCursorPublicationSession,
+): SQLiteCursorPublicationSession {
+  const publication = session !== null && typeof session === "object"
+    ? reflectApplyIntrinsic(
+      weakMapGetIntrinsic, PUBLICATION_SESSIONS, [session as object],
+    ) as PublicationSessionState | undefined
+    : undefined;
+  if (publication === undefined) {
+    return fail("GE_CYCLE_STORE_INVALID_ARGUMENT", "SQLite publication session is invalid");
+  }
+  const state = authorityState(publication.authority);
+  if (publication.lifecycle !== "publication-active"
+      || publication.consumedTombstone === undefined
+      || state.lifecycle !== "active"
+      || state.writePhase !== "publication-active"
+      || state.publicationSession !== session
+      || state.publicationPreparedOwner !== publication.preparedOwner) {
+    poisonAuthorityGraph(state, publication.authority, "SQLite publication session identity drifted");
+    return fail("GE_CYCLE_STORE_CORRUPTION", "SQLite publication session is not active");
+  }
+  const adoption = selectedInitialAdoptionRecord(
+    state, publication.authority, publication.adoptionReceipt,
+  );
+  try {
+    assertSQLiteCursorStageOwnershipPublicationSessionActiveIntrinsic(
+      state.transfer, publication.authority, publication.adoptionReceipt, session,
+    );
+    const fence = assertSQLiteCursorPublicationSessionAdoptionRetainedGraphIntrinsic(
+      state, publication.authority, publication.adoptionReceipt, adoption,
+    );
+    const ownerBefore = readSQLiteConnectionOwnerSnapshot(state.connection);
+    const changesBefore = readSQLiteConnectionTotalChangesSnapshot(state.connection);
+    const retainedClock = assertSQLiteCursorPublicationSessionClockActiveGraphIntrinsic(
+      state.connection,
+      state.migrationLockCapability,
+      state.providerClockCapability,
+      state.outerClockEvidence,
+      state.outerClockConsumedTombstone!,
+      publication.snapshotBase.preRebindClockEvidence,
+      publication.consumedTombstone,
+    );
+    const catalog = readValidatedSQLiteCursorPublicationTargetCatalogObservationIntrinsic(
+      state.connection,
+    );
+    const ownerAfter = readSQLiteConnectionOwnerSnapshot(state.connection);
+    const changesAfter = readSQLiteConnectionTotalChangesSnapshot(state.connection);
+    const adoptionSnapshot = adoption.snapshot;
+    const sessionSnapshot = publication.snapshotBase;
+    if (sessionSnapshot.connection !== state.connection
+        || sessionSnapshot.initialStageAdoptionReceipt !== publication.adoptionReceipt
+        || sessionSnapshot.migrationLockCapability !== state.migrationLockCapability
+        || sessionSnapshot.outerAuthority !== publication.authority
+        || sessionSnapshot.outerClockEvidence !== state.outerClockEvidence
+        || sessionSnapshot.postDdlCatalogFence !== adoption.fence
+        || sessionSnapshot.projectionIdentity !== state.projectionIdentity
+        || sessionSnapshot.projectionReference !== state.projectionReference
+        || sessionSnapshot.providerClockCapability !== state.providerClockCapability
+        || sessionSnapshot.receipt !== state.receipt
+        || sessionSnapshot.sourceDescriptorHash !== state.sourceDescriptorHash
+        || sessionSnapshot.sourceSchemaIdentitySha256 !== state.sourceSchemaIdentitySha256
+        || sessionSnapshot.stage !== state.stage
+        || sessionSnapshot.targetDescriptorHash
+          !== SQLITE_CURSOR_PUBLICATION_TARGET.descriptorHash
+        || sessionSnapshot.targetSchemaIdentitySha256
+          !== SQLITE_CURSOR_PUBLICATION_TARGET.schemaIdentitySha256
+        || sessionSnapshot.transactionLineage !== state.transactionLineage
+        || sessionSnapshot.transfer !== state.transfer
+        || retainedClock.transactionLineage !== state.transactionLineage
+        || retainedClock.transactionEpoch !== state.currentTransactionEpoch
+        || retainedClock.totalChanges !== state.currentTotalChanges
+        || retainedClock.migrationLock.lockId !== sessionSnapshot.migrationLockIdentity.lockId
+        || retainedClock.migrationLock.ownerId !== sessionSnapshot.migrationLockIdentity.ownerId
+        || retainedClock.migrationLock.lockEpoch
+          !== sessionSnapshot.migrationLockIdentity.lockEpoch
+        || retainedClock.migrationLock.fencingToken
+          !== sessionSnapshot.migrationLockIdentity.fencingToken
+        || retainedClock.migrationLock.activeExpiresAtMs
+          !== sessionSnapshot.migrationLockIdentity.activeExpiresAtMs
+        || retainedClock.migrationLock.sourceSchemaVersion
+          !== sessionSnapshot.migrationLockIdentity.sourceSchemaVersion
+        || retainedClock.migrationLock.targetSchemaVersion
+          !== sessionSnapshot.migrationLockIdentity.targetSchemaVersion
+        || ownerBefore.transactionLineage !== state.transactionLineage
+        || ownerAfter.transactionLineage !== ownerBefore.transactionLineage
+        || ownerBefore.transactionEpoch !== adoptionSnapshot.adoptedTransactionEpoch
+        || ownerAfter.transactionEpoch !== ownerBefore.transactionEpoch
+        || changesBefore.transactionEpoch !== ownerBefore.transactionEpoch
+        || changesAfter.transactionEpoch !== ownerAfter.transactionEpoch
+        || changesBefore.totalChanges !== adoptionSnapshot.adoptedTotalChanges
+        || changesAfter.totalChanges !== changesBefore.totalChanges
+        || !exactLedger(outerLedgerSnapshot(state), adoptionSnapshot.adoptedOuterLedger)
+        || adoption.fence !== sessionSnapshot.postDdlCatalogFence
+        || fence.snapshot.catalogSha256 !== adoptionSnapshot.targetCatalogSha256
+        || catalog.catalogSha256 !== fence.snapshot.catalogSha256
+        || catalog.canonicalUtf8Bytes !== fence.snapshot.catalogCanonicalUtf8Bytes
+        || catalog.rowCount !== fence.snapshot.catalogRowCount
+        || catalog.applicationId !== fence.snapshot.applicationId
+        || catalog.userVersion !== fence.snapshot.userVersion) {
+      fail("GE_CYCLE_STORE_CORRUPTION", "SQLite publication session retained graph drifted");
+    }
+    return session;
+  } catch (error) {
+    poisonAuthorityGraph(
+      state, publication.authority, "SQLite publication session validation failed",
+    );
+    throw error;
+  }
+}
+
+export function readSQLiteCursorPublicationSessionSnapshotIntrinsic(
+  session: SQLiteCursorPublicationSession,
+): SQLiteCursorPublicationSessionSnapshot {
+  assertSQLiteCursorPublicationSessionIntrinsic(session);
+  const publication = reflectApplyIntrinsic(
+    weakMapGetIntrinsic, PUBLICATION_SESSIONS, [session as object],
+  ) as PublicationSessionState;
+  return objectFreezeIntrinsic({
+    ...publication.snapshotBase,
+    lifecycle: "publication-active",
+    preRebindClockConsumedTombstone: publication.consumedTombstone!,
+  });
 }
 
 export function readSQLiteCursorInitialStageAdoptionReceiptSnapshotIntrinsic(
@@ -4933,6 +5679,8 @@ export function readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(
     baselineHeaderConsumedTombstone: state.baselineHeaderConsumedTombstone,
     initialStageAdoptionReceipt: state.initialStageAdoptionReceipt,
     initialStageAdoptionReceiptMintCount: state.initialStageAdoptionReceiptMintCount,
+    publicationPreparedOwner: state.publicationPreparedOwner,
+    publicationSession: state.publicationSession,
     migration0002ConsumedTombstone: state.migration0002ConsumedTombstone,
     operationSequenceZeroAffectedRows: state.operationSequenceZeroAffectedRows,
     operationSequenceZeroExecuteCount: state.operationSequenceZeroExecuteCount,

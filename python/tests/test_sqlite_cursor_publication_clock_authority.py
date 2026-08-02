@@ -1,16 +1,22 @@
 from __future__ import annotations
 
+import gc
 from collections.abc import Callable, Iterator
 from contextlib import suppress
+from dataclasses import replace
 from pathlib import Path
+from weakref import ref
 
 import pytest
 
+import graph_engineering.sqlite_cursor_publication_clock_authority as clock_module
 from graph_engineering.sqlite_cursor_publication_clock_authority import (
     SQLITE_CURSOR_CLOCK_BOUNDARIES,
     SQLITE_CURSOR_CLOCK_CONSUMERS,
+    _assert_active_second_boundary_graph_intrinsic,
     _assert_clock_evidence_predecessor_intrinsic,
     _assert_consumed_clock_tombstone_intrinsic,
+    _assert_prepared_second_boundary_graph_intrinsic,
     _ClockEvidence,
     _consume_provider_clock_evidence_intrinsic,
     _create_migration_lock_capability_intrinsic,
@@ -196,6 +202,94 @@ def test_rejects_skipped_cloned_and_substituted_authority() -> None:
         close_run(connection)
 
 
+def test_orphaned_evidence_rejects_fresh_exact_capability_without_identity_rebinding() -> None:
+    connection = open_run()
+    try:
+        clock, lock, source = authority(connection, [100, 200])
+        evidence = _observe_provider_clock_intrinsic(clock, "before-first-permanent-mutation")
+        clock_ref = ref(clock)
+        del clock, lock, source
+        for _ in range(8):
+            gc.collect()
+        assert clock_ref() is None
+        clone = object.__new__(_ProviderClockCapability)
+        with expect_code("GE_CURSOR_B3_CLOCK_EVIDENCE"):
+            _read_clock_evidence_snapshot_intrinsic(clone, evidence)
+        fresh, _fresh_lock, _fresh_source = authority(connection, [200])
+        with expect_code("GE_CURSOR_B3_CLOCK_EVIDENCE"):
+            _read_clock_evidence_snapshot_intrinsic(fresh, evidence)
+        with expect_code("GE_CURSOR_B3_CLOCK_EVIDENCE"):
+            _consume_provider_clock_evidence_intrinsic(
+                fresh,
+                evidence,
+                "outer-publication-authority",
+            )
+    finally:
+        close_run(connection)
+
+
+def test_live_tombstone_retains_exact_evidence_chain_then_releases_all_clock_registries() -> None:
+    for _ in range(3):
+        gc.collect()
+    baseline = tuple(
+        len(registry)
+        for registry in (
+            clock_module._CLOCK_SOURCES,
+            clock_module._LOCK_CAPABILITIES,
+            clock_module._CLOCK_CAPABILITIES,
+            clock_module._EVIDENCE,
+            clock_module._TOMBSTONES,
+        )
+    )
+    connection = open_run()
+    try:
+        clock, lock, source = authority(connection, [100])
+        evidence = _observe_provider_clock_intrinsic(clock, "before-first-permanent-mutation")
+        tombstone = _consume_provider_clock_evidence_intrinsic(
+            clock,
+            evidence,
+            "outer-publication-authority",
+        )
+        clock_ref = ref(clock)
+        evidence_ref = ref(evidence)
+        del clock, evidence, lock, source
+        for _ in range(8):
+            gc.collect()
+        retained_clock = clock_ref()
+        retained_evidence = evidence_ref()
+        assert retained_clock is not None
+        assert retained_evidence is not None
+        assert (
+            _assert_consumed_clock_tombstone_intrinsic(
+                retained_clock,
+                retained_evidence,
+                tombstone,
+                "outer-publication-authority",
+            )
+            is tombstone
+        )
+        del retained_clock, retained_evidence, tombstone
+        for _ in range(12):
+            gc.collect()
+        assert clock_ref() is None
+        assert evidence_ref() is None
+        assert (
+            tuple(
+                len(registry)
+                for registry in (
+                    clock_module._CLOCK_SOURCES,
+                    clock_module._LOCK_CAPABILITIES,
+                    clock_module._CLOCK_CAPABILITIES,
+                    clock_module._EVIDENCE,
+                    clock_module._TOMBSTONES,
+                )
+            )
+            == baseline
+        )
+    finally:
+        close_run(connection)
+
+
 @pytest.mark.parametrize("provider_now", [1_000, 1_001])
 def test_rejects_equal_or_past_expiry(provider_now: int) -> None:
     connection = open_run()
@@ -289,3 +383,279 @@ def test_poisoned_reentrant_observation_cannot_mint_evidence() -> None:
             _observe_provider_clock_intrinsic(clock, "before-first-permanent-mutation")
     finally:
         close_run(connection)
+
+
+def _second_boundary_graph() -> tuple[
+    SQLiteV1BaselineConnectionOwner,
+    _MigrationLockCapability,
+    _ProviderClockCapability,
+    _ClockEvidence,
+    object,
+    _ClockEvidence,
+]:
+    connection = open_run()
+    clock, lock, _source = authority(connection, [100, 200, 300])
+    outer = _observe_provider_clock_intrinsic(clock, "before-first-permanent-mutation")
+    outer_tombstone = _consume_provider_clock_evidence_intrinsic(
+        clock, outer, "outer-publication-authority"
+    )
+    second = _observe_provider_clock_intrinsic(clock, "before-cursor-rebind")
+    return connection, lock, clock, outer, outer_tombstone, second
+
+
+def test_second_boundary_prepared_and_active_assertions_are_symmetric_and_read_only() -> None:
+    connection, lock, clock, outer, outer_tombstone, second = _second_boundary_graph()
+    try:
+        epoch = connection.transaction_epoch
+        changes = connection.total_changes
+        prepared = _assert_prepared_second_boundary_graph_intrinsic(
+            connection,
+            lock,
+            clock,
+            outer,
+            outer_tombstone,  # type: ignore[arg-type]
+            second,
+        )
+        assert prepared.evidence.boundary == "before-cursor-rebind"
+        assert prepared.evidence.consumer == "cursor-publication-session"
+        assert prepared.predecessor_evidence is outer
+        assert prepared.migration_lock == LOCK
+        assert connection.transaction_epoch == epoch
+        assert connection.total_changes == changes
+
+        second_tombstone = _consume_provider_clock_evidence_intrinsic(
+            clock, second, "cursor-publication-session"
+        )
+        with expect_code("GE_CURSOR_B3_CLOCK_SECOND_GRAPH"):
+            _assert_prepared_second_boundary_graph_intrinsic(
+                connection,
+                lock,
+                clock,
+                outer,
+                outer_tombstone,  # type: ignore[arg-type]
+                second,
+            )
+        active = _assert_active_second_boundary_graph_intrinsic(
+            connection,
+            lock,
+            clock,
+            outer,
+            outer_tombstone,  # type: ignore[arg-type]
+            second,
+            second_tombstone,
+        )
+        assert active == prepared
+        assert (
+            _assert_active_second_boundary_graph_intrinsic(
+                connection,
+                lock,
+                clock,
+                outer,
+                outer_tombstone,  # type: ignore[arg-type]
+                second,
+                second_tombstone,
+            )
+            == active
+        )
+        assert connection.transaction_epoch == epoch
+        assert connection.total_changes == changes
+    finally:
+        close_run(connection)
+
+
+@pytest.mark.parametrize("evidence_owner", ("outer", "second"))
+def test_second_boundary_rejects_snapshot_expiry_substitution(
+    evidence_owner: str,
+) -> None:
+    connection, lock, clock, outer, outer_tombstone, second = _second_boundary_graph()
+    try:
+        evidence = outer if evidence_owner == "outer" else second
+        evidence_state = clock_module._EVIDENCE[evidence]
+        evidence_state.snapshot = replace(
+            evidence_state.snapshot,
+            active_expires_at_ms=999,
+        )
+        with expect_code("GE_CURSOR_B3_CLOCK_SECOND_GRAPH"):
+            _assert_prepared_second_boundary_graph_intrinsic(
+                connection,
+                lock,
+                clock,
+                outer,
+                outer_tombstone,  # type: ignore[arg-type]
+                second,
+            )
+    finally:
+        close_run(connection)
+
+
+def test_second_boundary_graph_rejects_unconsumed_substitution_and_early_third() -> None:
+    connection, lock, clock, outer, outer_tombstone, second = _second_boundary_graph()
+    foreign_connection, foreign_lock, foreign_clock, *_foreign = _second_boundary_graph()
+    try:
+        with expect_code("GE_CURSOR_B3_CLOCK_SECOND_GRAPH"):
+            _assert_active_second_boundary_graph_intrinsic(
+                connection,
+                lock,
+                clock,
+                outer,
+                outer_tombstone,  # type: ignore[arg-type]
+                second,
+                object(),  # type: ignore[arg-type]
+            )
+        for substituted in (
+            (foreign_connection, lock, clock),
+            (connection, foreign_lock, clock),
+            (connection, lock, foreign_clock),
+        ):
+            with expect_code("GE_CURSOR_B3_CLOCK_SECOND_GRAPH"):
+                _assert_prepared_second_boundary_graph_intrinsic(
+                    substituted[0],
+                    substituted[1],  # type: ignore[arg-type]
+                    substituted[2],  # type: ignore[arg-type]
+                    outer,
+                    outer_tombstone,  # type: ignore[arg-type]
+                    second,
+                )
+        second_tombstone = _consume_provider_clock_evidence_intrinsic(
+            clock, second, "cursor-publication-session"
+        )
+        _observe_provider_clock_intrinsic(clock, "before-verification")
+        with expect_code("GE_CURSOR_B3_CLOCK_SECOND_GRAPH"):
+            _assert_active_second_boundary_graph_intrinsic(
+                connection,
+                lock,
+                clock,
+                outer,
+                outer_tombstone,  # type: ignore[arg-type]
+                second,
+                second_tombstone,
+            )
+    finally:
+        close_run(connection)
+        close_run(foreign_connection)
+
+
+def test_clock_consume_record_construction_failure_keeps_evidence_unconsumed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connection = open_run()
+    try:
+        clock, _lock, _source = authority(connection, [100])
+        evidence = _observe_provider_clock_intrinsic(clock, "before-first-permanent-mutation")
+
+        def fail_record(*_args: object) -> object:
+            raise MemoryError("injected tombstone-state allocation failure")
+
+        monkeypatch.setattr(clock_module, "_TombstoneState", fail_record)
+        with pytest.raises(MemoryError, match="allocation failure"):
+            _consume_provider_clock_evidence_intrinsic(
+                clock, evidence, "outer-publication-authority"
+            )
+        assert clock_module._EVIDENCE[evidence].consumed is False
+        monkeypatch.undo()
+        tombstone = _consume_provider_clock_evidence_intrinsic(
+            clock, evidence, "outer-publication-authority"
+        )
+        assert (
+            _assert_consumed_clock_tombstone_intrinsic(
+                clock, evidence, tombstone, "outer-publication-authority"
+            )
+            is tombstone
+        )
+    finally:
+        close_run(connection)
+
+
+def test_clock_consume_registry_failure_keeps_evidence_unconsumed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connection = open_run()
+    try:
+        clock, _lock, _source = authority(connection, [100])
+        evidence = _observe_provider_clock_intrinsic(clock, "before-first-permanent-mutation")
+
+        class FailingRegistry:
+            def __setitem__(self, _key: object, _value: object) -> None:
+                raise MemoryError("injected tombstone registry failure")
+
+        monkeypatch.setattr(clock_module, "_TOMBSTONES", FailingRegistry())
+        with pytest.raises(MemoryError, match="registry failure"):
+            _consume_provider_clock_evidence_intrinsic(
+                clock, evidence, "outer-publication-authority"
+            )
+        assert clock_module._EVIDENCE[evidence].consumed is False
+        monkeypatch.undo()
+        _consume_provider_clock_evidence_intrinsic(clock, evidence, "outer-publication-authority")
+    finally:
+        close_run(connection)
+
+
+@pytest.mark.parametrize(
+    ("column", "value"),
+    [
+        ("active_lock_id", "other-lock"),
+        ("active_owner_id", "other-owner"),
+        ("active_source_version", 2),
+        ("active_target_version", 3),
+        ("active_lock_epoch", 2),
+        ("active_fencing_token", 2),
+        ("active_expires_at_ms", 999),
+    ],
+)
+def test_second_boundary_rejects_every_live_lock_field_drift(
+    column: str,
+    value: object,
+) -> None:
+    connection, lock, clock, outer, outer_tombstone, second = _second_boundary_graph()
+    try:
+        connection.execute("PRAGMA ignore_check_constraints = ON").close()
+        connection.execute(
+            f"UPDATE main.ge_cycle_migration_lock SET {column} = ? WHERE singleton = 1",
+            (value,),
+        ).close()
+        with expect_code("GE_CURSOR_B3_CLOCK_SECOND_GRAPH"):
+            _assert_prepared_second_boundary_graph_intrinsic(
+                connection,
+                lock,
+                clock,
+                outer,
+                outer_tombstone,  # type: ignore[arg-type]
+                second,
+            )
+    finally:
+        close_run(connection)
+
+
+def test_second_boundary_rejects_replaced_lineage_and_poisoned_authority() -> None:
+    connection, lock, clock, outer, outer_tombstone, second = _second_boundary_graph()
+    try:
+        connection.rollback()
+        connection.execute("BEGIN EXCLUSIVE").close()
+        with expect_code("GE_CURSOR_B3_TRANSACTION_LINEAGE"):
+            _assert_prepared_second_boundary_graph_intrinsic(
+                connection,
+                lock,
+                clock,
+                outer,
+                outer_tombstone,  # type: ignore[arg-type]
+                second,
+            )
+    finally:
+        close_run(connection)
+
+    poisoned, poisoned_lock, poisoned_clock, first, first_tombstone, next_evidence = (
+        _second_boundary_graph()
+    )
+    try:
+        clock_module._CLOCK_CAPABILITIES[poisoned_clock].poisoned = True
+        with expect_code("GE_CURSOR_B3_CLOCK_SECOND_GRAPH"):
+            _assert_prepared_second_boundary_graph_intrinsic(
+                poisoned,
+                poisoned_lock,
+                poisoned_clock,
+                first,
+                first_tombstone,  # type: ignore[arg-type]
+                next_evidence,
+            )
+    finally:
+        close_run(poisoned)

@@ -152,6 +152,9 @@ _SQLiteCursorOuterPublicationState = Literal[
     "published",
     "initial-adoption-prepared",
     "initial-publication-adopted",
+    "publication-session-prepared",
+    "publication-session-burned",
+    "publication-active",
     "retired",
     "poisoned",
 ]
@@ -193,6 +196,16 @@ class _SQLiteBaselineCursorInitialPublicationAdoptionTail:
             raise TypeError("SQLite cursor initial publication tails are module-minted")
 
 
+class _SQLiteBaselineCursorPublicationSessionTail:
+    """Single-use continuation from the adopted TEMP stage to B3 publication."""
+
+    __slots__ = ("__weakref__",)
+
+    def __init__(self, token: object) -> None:
+        if token is not _CURSOR_PUBLICATION_CONSTRUCTION_TOKEN:
+            raise TypeError("SQLite cursor publication-session tails are module-minted")
+
+
 class _SQLiteBaselineCursorInitialPublicationAdoptionMint(NamedTuple):
     retired_b2_fence: _SQLiteBaselineCursorB2FenceRetirement
     tail: _SQLiteBaselineCursorInitialPublicationAdoptionTail
@@ -228,6 +241,29 @@ class _SQLiteBaselineCursorInitialPublicationAdoptionContinuation:
     watermark: _SQLiteCursorInitialPublicationWatermarkRecord
 
 
+@dataclass(frozen=True, slots=True)
+class _SQLiteBaselineCursorPublicationSessionContinuation:
+    authority_ref: ReferenceType[object]
+    prepared_owner_ref: ReferenceType[object]
+    projection_identity: BaselineProjectionIdentity
+    stage_ref: ReferenceType[SQLiteV1BaselineTempStage]
+
+
+@dataclass(frozen=True, slots=True)
+class _SQLiteBaselineCursorPublicationSessionCommit:
+    """Fully resolved, callback-free input to the B3 assignment tail."""
+
+    continuation: _SQLiteBaselineCursorPublicationSessionContinuation
+    registration: tuple[
+        ReferenceType[_SQLiteBaselineCursorPublicationSessionTail],
+        _SQLiteBaselineCursorPublicationSessionContinuation,
+    ]
+    session_ref: ReferenceType[object]
+    stage: SQLiteV1BaselineTempStage
+    tail: _SQLiteBaselineCursorPublicationSessionTail
+    tail_id: int
+
+
 _CURSOR_B2_FENCE_RETIREMENTS: dict[
     int,
     tuple[
@@ -240,6 +276,13 @@ _CURSOR_INITIAL_PUBLICATION_ADOPTION_TAILS: dict[
     tuple[
         ReferenceType[_SQLiteBaselineCursorInitialPublicationAdoptionTail],
         _SQLiteBaselineCursorInitialPublicationAdoptionContinuation,
+    ],
+] = {}
+_CURSOR_PUBLICATION_SESSION_TAILS: dict[
+    int,
+    tuple[
+        ReferenceType[_SQLiteBaselineCursorPublicationSessionTail],
+        _SQLiteBaselineCursorPublicationSessionContinuation,
     ],
 ] = {}
 
@@ -481,6 +524,66 @@ def _discard_cursor_initial_publication_adoption_tail(
     current = _dict_get(_registry, tail_id)
     if current is not None and current[0]() is tail:
         _dict_pop(_registry, tail_id, None)
+
+
+def _register_cursor_publication_session_tail(
+    tail: _SQLiteBaselineCursorPublicationSessionTail,
+    continuation: _SQLiteBaselineCursorPublicationSessionContinuation,
+) -> None:
+    tail_id = id(tail)
+
+    def discard(reference: ReferenceType[_SQLiteBaselineCursorPublicationSessionTail]) -> None:
+        current = _DICT_GET(_CURSOR_PUBLICATION_SESSION_TAILS, tail_id)
+        if current is not None and current[0] is reference:
+            _DICT_POP(_CURSOR_PUBLICATION_SESSION_TAILS, tail_id, None)
+
+    _DICT_SETITEM(
+        _CURSOR_PUBLICATION_SESSION_TAILS,
+        tail_id,
+        (ref(tail, discard), continuation),
+    )
+
+
+def _burn_cursor_publication_session_tail(
+    tail: object,
+) -> _SQLiteBaselineCursorPublicationSessionContinuation:
+    if type(tail) is not _SQLiteBaselineCursorPublicationSessionTail:
+        raise ValueError("SQLite cursor publication-session tail is invalid")
+    tail_id = id(tail)
+    current = _DICT_GET(_CURSOR_PUBLICATION_SESSION_TAILS, tail_id)
+    if current is None or current[0]() is not tail:
+        raise ValueError("SQLite cursor publication-session tail is invalid")
+    _DICT_POP(_CURSOR_PUBLICATION_SESSION_TAILS, tail_id, None)
+    return current[1]
+
+
+def _prepare_cursor_publication_session_commit(
+    tail: object,
+    session: object,
+    session_ref: ReferenceType[object],
+) -> _SQLiteBaselineCursorPublicationSessionCommit:
+    """Resolve an exact stage and continuation into an atomic-tail commit."""
+
+    if type(tail) is not _SQLiteBaselineCursorPublicationSessionTail:
+        raise ValueError("SQLite cursor publication-session tail is invalid")
+    current = _DICT_GET(_CURSOR_PUBLICATION_SESSION_TAILS, id(tail))
+    stage = current[1].stage_ref() if current is not None else None
+    if current is None or current[0]() is not tail or stage is None:
+        raise ValueError("SQLite cursor publication-session tail is invalid")
+    return stage._prepare_cursor_publication_session_commit(
+        tail,
+        current[1],
+        session,
+        session_ref,
+    )
+
+
+def _discard_cursor_publication_session_tail(tail: object) -> None:
+    if type(tail) is not _SQLiteBaselineCursorPublicationSessionTail:
+        return
+    current = _DICT_GET(_CURSOR_PUBLICATION_SESSION_TAILS, id(tail))
+    if current is not None and current[0]() is tail:
+        _DICT_POP(_CURSOR_PUBLICATION_SESSION_TAILS, id(tail), None)
 
 
 def _copy_initial_publication_stage_watermark(
@@ -1844,6 +1947,9 @@ class SQLiteV1BaselineTempStage:
         "_cursor_post_ddl_reader_cleanup",
         "_cursor_post_ddl_reader_lease",
         "_cursor_post_ddl_reader_state",
+        "_cursor_publication_prepared_owner_ref",
+        "_cursor_publication_session_ref",
+        "_cursor_publication_session_tail",
         "_cursor_transfer_allowed_total_changes",
         "_cursor_transfer_capture_epoch",
         "_cursor_transfer_catalog_created",
@@ -1958,6 +2064,11 @@ class SQLiteV1BaselineTempStage:
         self._cursor_post_ddl_reader_authority_ref: ReferenceType[object] | None = None
         self._cursor_post_ddl_reader_lease: object | None = None
         self._cursor_post_ddl_reader_cleanup: Callable[[], None] | None = None
+        self._cursor_publication_prepared_owner_ref: ReferenceType[object] | None = None
+        self._cursor_publication_session_ref: ReferenceType[object] | None = None
+        self._cursor_publication_session_tail: (
+            _SQLiteBaselineCursorPublicationSessionTail | None
+        ) = None
         self._cursor_transfer_lineage: object | None = None
         self._ordered_handoff_started = False
         self._ordered_handoff_completed = False
@@ -4016,7 +4127,8 @@ class SQLiteV1BaselineTempStage:
         if (
             self._state != "open"
             or _registry_get(_registered_stages, self) is not self._connection
-            or self._cursor_outer_publication_state != "initial-publication-adopted"
+            or self._cursor_outer_publication_state
+            not in {"initial-publication-adopted", "publication-session-prepared"}
             or self._cursor_outer_publication_authority_ref is None
             or self._cursor_outer_publication_authority_ref() is not authority
             or self._cursor_post_ddl_reader_authority_ref is None
@@ -4059,7 +4171,170 @@ class SQLiteV1BaselineTempStage:
                 "SQLite cursor initial publication adopted fence changed",
             )
 
+    def _prepare_cursor_publication_session(
+        self,
+        authority: object,
+        prepared_owner: object,
+        projection_identity: BaselineProjectionIdentity,
+    ) -> _SQLiteBaselineCursorPublicationSessionTail:
+        """Prepare the TEMP-stage continuation without publishing an identity."""
+
+        if type(projection_identity) is not BaselineProjectionIdentity:
+            raise ValueError("SQLite cursor publication-session projection is invalid")
+        authority_ref = self._cursor_outer_publication_authority_ref
+        if (
+            self._state != "open"
+            or authority_ref is None
+            or authority_ref() is not authority
+            or self._cursor_transfer_projection is not projection_identity
+            or self._cursor_initial_publication_outer_ledger is None
+        ):
+            raise ValueError("SQLite cursor publication-session owner is invalid")
+        if self._cursor_outer_publication_state == "publication-session-prepared":
+            existing_owner_ref = self._cursor_publication_prepared_owner_ref
+            tail = self._cursor_publication_session_tail
+            current = (
+                _DICT_GET(_CURSOR_PUBLICATION_SESSION_TAILS, id(tail)) if tail is not None else None
+            )
+            if (
+                existing_owner_ref is None
+                or existing_owner_ref() is not prepared_owner
+                or tail is None
+                or current is None
+                or current[0]() is not tail
+                or current[1].stage_ref() is not self
+            ):
+                raise ValueError("SQLite cursor publication-session preparation is invalid")
+            return tail
+        if (
+            self._cursor_outer_publication_state != "initial-publication-adopted"
+            or self._cursor_publication_prepared_owner_ref is not None
+            or self._cursor_publication_session_ref is not None
+            or self._cursor_publication_session_tail is not None
+        ):
+            raise ValueError("SQLite cursor publication-session preparation is invalid")
+        try:
+            prepared_owner_ref = ref(prepared_owner)
+        except TypeError:
+            raise ValueError("SQLite cursor publication-session owner is invalid") from None
+        tail = _SQLiteBaselineCursorPublicationSessionTail(_CURSOR_PUBLICATION_CONSTRUCTION_TOKEN)
+        _register_cursor_publication_session_tail(
+            tail,
+            _SQLiteBaselineCursorPublicationSessionContinuation(
+                authority_ref,
+                prepared_owner_ref,
+                projection_identity,
+                ref(self),
+            ),
+        )
+        self._cursor_publication_prepared_owner_ref = prepared_owner_ref
+        self._cursor_publication_session_tail = tail
+        self._cursor_outer_publication_state = "publication-session-prepared"
+        return tail
+
+    def _publish_cursor_publication_session(
+        self,
+        continuation: _SQLiteBaselineCursorPublicationSessionContinuation,
+        session: object,
+    ) -> None:
+        """Compatibility path for callers that already burned the old tail."""
+
+        prepared_owner_ref = self._cursor_publication_prepared_owner_ref
+        if (
+            continuation.stage_ref() is not self
+            or self._cursor_outer_publication_state != "publication-session-prepared"
+            or prepared_owner_ref is None
+            or prepared_owner_ref is not continuation.prepared_owner_ref
+            or continuation.authority_ref is not self._cursor_outer_publication_authority_ref
+            or continuation.projection_identity is not self._cursor_transfer_projection
+        ):
+            raise ValueError("SQLite cursor publication-session continuation is invalid")
+        self._cursor_publication_session_ref = ref(session)
+        self._cursor_publication_session_tail = None
+        self._cursor_outer_publication_state = "publication-active"
+
+    def _prepare_cursor_publication_session_commit(
+        self,
+        tail: object,
+        continuation: _SQLiteBaselineCursorPublicationSessionContinuation,
+        session: object,
+        session_ref: ReferenceType[object],
+    ) -> _SQLiteBaselineCursorPublicationSessionCommit:
+        """Resolve every registry/weak-reference check before the atomic tail."""
+
+        if type(tail) is not _SQLiteBaselineCursorPublicationSessionTail:
+            raise ValueError("SQLite cursor publication-session tail is invalid")
+        tail_id = id(tail)
+        registration = _DICT_GET(_CURSOR_PUBLICATION_SESSION_TAILS, tail_id)
+        prepared_owner_ref = self._cursor_publication_prepared_owner_ref
+        if (
+            registration is None
+            or registration[0]() is not tail
+            or registration[1] is not continuation
+            or continuation.stage_ref() is not self
+            or session_ref() is not session
+            or self._cursor_outer_publication_state != "publication-session-prepared"
+            or prepared_owner_ref is None
+            or prepared_owner_ref is not continuation.prepared_owner_ref
+            or continuation.authority_ref is not self._cursor_outer_publication_authority_ref
+            or continuation.projection_identity is not self._cursor_transfer_projection
+            or self._cursor_publication_session_tail is not tail
+            or self._cursor_publication_session_ref is not None
+        ):
+            raise ValueError("SQLite cursor publication-session continuation is invalid")
+        return _SQLiteBaselineCursorPublicationSessionCommit(
+            continuation=continuation,
+            registration=registration,
+            session_ref=session_ref,
+            stage=self,
+            tail=tail,
+            tail_id=tail_id,
+        )
+
+    def _burn_cursor_publication_session_commit(
+        self,
+        commit: _SQLiteBaselineCursorPublicationSessionCommit,
+    ) -> None:
+        """Burn the prevalidated stage tail with no lookup or validation."""
+
+        self._cursor_publication_session_tail = None
+        self._cursor_outer_publication_state = "publication-session-burned"
+
+    def _publish_cursor_publication_session_commit(
+        self,
+        commit: _SQLiteBaselineCursorPublicationSessionCommit,
+    ) -> None:
+        """Activate the already-burned stage by assignments only."""
+
+        self._cursor_publication_session_ref = commit.session_ref
+        self._cursor_outer_publication_state = "publication-active"
+
+    def _assert_cursor_publication_session_active(
+        self,
+        authority: object,
+        prepared_owner: object,
+        session: object,
+        projection_identity: BaselineProjectionIdentity,
+    ) -> None:
+        if (
+            self._state != "open"
+            or self._cursor_outer_publication_state != "publication-active"
+            or self._cursor_outer_publication_authority_ref is None
+            or self._cursor_outer_publication_authority_ref() is not authority
+            or self._cursor_publication_prepared_owner_ref is None
+            or self._cursor_publication_prepared_owner_ref() is not prepared_owner
+            or self._cursor_publication_session_ref is None
+            or self._cursor_publication_session_ref() is not session
+            or self._cursor_transfer_projection is not projection_identity
+            or self._cursor_publication_session_tail is not None
+        ):
+            raise ValueError("SQLite cursor publication-session identity is invalid")
+
     def _retire_cursor_outer_publication(self) -> None:
+        _discard_cursor_publication_session_tail(self._cursor_publication_session_tail)
+        self._cursor_publication_session_tail = None
+        self._cursor_publication_session_ref = None
+        self._cursor_publication_prepared_owner_ref = None
         tail = self._cursor_initial_publication_adoption_tail
         if tail is not None:
             _discard_cursor_initial_publication_adoption_tail(tail)
@@ -4088,6 +4363,8 @@ class SQLiteV1BaselineTempStage:
         ):
             raise ValueError("SQLite cursor outer publication authority is invalid")
         self._cursor_outer_publication_state = "poisoned"
+        _discard_cursor_publication_session_tail(self._cursor_publication_session_tail)
+        self._cursor_publication_session_tail = None
         _CURSOR_STAGE_POISON(self, message)
 
     def _abort_cursor_pre_rebind_campaign(
@@ -4478,6 +4755,10 @@ class SQLiteV1BaselineTempStage:
         adoption_tail = self._cursor_initial_publication_adoption_tail
         if adoption_tail is not None:
             _discard_cursor_initial_publication_adoption_tail(adoption_tail)
+        _discard_cursor_publication_session_tail(self._cursor_publication_session_tail)
+        self._cursor_publication_session_tail = None
+        self._cursor_publication_session_ref = None
+        self._cursor_publication_prepared_owner_ref = None
         adoption_retirement = self._cursor_initial_publication_adoption_retirement
         if adoption_retirement is not None:
             _discard_cursor_b2_fence_retirement(adoption_retirement)
@@ -4661,6 +4942,10 @@ class SQLiteV1BaselineTempStage:
         adoption_tail = self._cursor_initial_publication_adoption_tail
         if adoption_tail is not None:
             _discard_cursor_initial_publication_adoption_tail(adoption_tail)
+        _discard_cursor_publication_session_tail(self._cursor_publication_session_tail)
+        self._cursor_publication_session_tail = None
+        self._cursor_publication_session_ref = None
+        self._cursor_publication_prepared_owner_ref = None
         adoption_retirement = self._cursor_initial_publication_adoption_retirement
         if adoption_retirement is not None:
             _discard_cursor_b2_fence_retirement(adoption_retirement)

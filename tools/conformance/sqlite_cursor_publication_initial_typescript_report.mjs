@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 
 import { canonicalHash, canonicalSerialize } from "../../packages/core/dist/index.js";
@@ -108,7 +109,7 @@ const databaseExecIntrinsic = DatabaseSync.prototype.exec;
 let activeRecorder = null;
 let capturedNativeDatabase = null;
 
-class CounterRecorder {
+export class CounterRecorder {
   constructor() {
     this.providerClockReadCount = 0;
     this.clockEvidenceConsumeCount = 0;
@@ -229,7 +230,7 @@ DatabaseSync.prototype.exec = function auditedExec(sql) {
   return Reflect.apply(databaseExecIntrinsic, this, [sql]);
 };
 
-function invariant(condition, message) {
+export function invariant(condition, message) {
   if (!condition) throw new Error(message);
 }
 
@@ -449,7 +450,7 @@ function mintPreRebindReceipt(sourceSummary, projectionIdentity) {
   return new SQLiteCursorPreRebindReceiptIssuer(input).issue(input);
 }
 
-function createGraph(recorder) {
+export function createGraph(recorder) {
   capturedNativeDatabase = null;
   const root = mkdtempSync(join(tmpdir(), "graph-engineering-b3-initial-ts-parity-"));
   const connection = new SQLiteConnection(join(root, "cycle-store.db"));
@@ -571,7 +572,7 @@ function createGraph(recorder) {
   }
 }
 
-function disposeGraph(graph) {
+export function disposeGraph(graph) {
   try { graph.stage.dispose(); } catch { /* A hostile case may poison the stage. */ }
   try {
     if (graph.connection.isOpen && graph.connection.isTransaction) {
@@ -582,6 +583,23 @@ function disposeGraph(graph) {
   rmSync(graph.root, { recursive: true, force: true });
 }
 
+/** Detach tracing before cleanup rollback so subject counters remain exact. */
+export function detachActiveRecorder() {
+  activeRecorder = null;
+}
+
+export function recordInitialAdoptionCounts(recorder, authority) {
+  for (let index = 0; index < authority.receiptConsumptionCount; index += 1) {
+    recorder.initialWriteReceiptConsumed();
+  }
+  for (let index = 0; index < authority.tombstoneMintCount; index += 1) {
+    recorder.initialWriteReceiptTombstoned();
+  }
+  for (let index = 0; index < authority.initialStageAdoptionReceiptMintCount; index += 1) {
+    recorder.stageAdoptionReceiptMinted();
+  }
+}
+
 function executeMigration(graph, recorder) {
   const receipt = executeSQLiteCursorMigration0002CatalogRebuildIntrinsic(graph.authority);
   const snapshot = readSQLiteMigration0002CatalogRebuildReceiptSnapshotIntrinsic(receipt);
@@ -589,7 +607,7 @@ function executeMigration(graph, recorder) {
   return receipt;
 }
 
-function executeThroughInitialWrites(graph, recorder) {
+export function executeThroughInitialWrites(graph, recorder) {
   const migrationReceipt = executeMigration(graph, recorder);
   const fence = mintSQLiteCursorPostDdlCatalogFenceIntrinsic(
     graph.authority,
@@ -658,7 +676,7 @@ function executeThroughInitialWrites(graph, recorder) {
   };
 }
 
-function recordFromObservation({
+export function recordFromObservation({
   authority,
   bundleRetryable,
   caseId,
@@ -967,25 +985,31 @@ function counterProbe() {
   });
 }
 
-const cases = Object.freeze([
-  runSuccessControl(),
-  runInvalidBundleControl(),
-  runCatalogDriftControl(),
-]);
+export function runInitialPublicationTypescriptReport() {
+  const cases = Object.freeze([
+    runSuccessControl(),
+    runInvalidBundleControl(),
+    runCatalogDriftControl(),
+  ]);
+  return Object.freeze({
+    runtime: "typescript",
+    publicExports: {
+      packageRootAdoption: Object.hasOwn(
+        publicApi,
+        "adoptSQLiteCursorInitialPublicationStageIntrinsic",
+      ),
+      packageRootMeasurement: Object.hasOwn(
+        publicApi,
+        "readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic",
+      ),
+    },
+    counterProbe: counterProbe(),
+    rollbackCount: 0,
+    cases,
+  });
+}
 
-process.stdout.write(`${JSON.stringify({
-  runtime: "typescript",
-  publicExports: {
-    packageRootAdoption: Object.hasOwn(
-      publicApi,
-      "adoptSQLiteCursorInitialPublicationStageIntrinsic",
-    ),
-    packageRootMeasurement: Object.hasOwn(
-      publicApi,
-      "readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic",
-    ),
-  },
-  counterProbe: counterProbe(),
-  rollbackCount: 0,
-  cases,
-})}\n`);
+if (process.argv[1] !== undefined
+    && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  process.stdout.write(`${JSON.stringify(runInitialPublicationTypescriptReport())}\n`);
+}

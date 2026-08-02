@@ -18724,3 +18724,337 @@ its focused tests. Its acceptance remains conditional on real-SQLite behavior,
 cross-runtime canonical parity, honest activated-record accounting, affected
 and artifact regressions, public-surface privacy, final independent audits and
 identical local/upstream/remote commit objects.
+
+#### 31.37.56 Discovered second-clock authority bridge correction
+
+This subsection is appended after the contract-hardening commit and does not
+alter any earlier plan byte. The 18,726-line plan at commit `91b37ba` has
+SHA-256
+`49deea85390aceead5dc06cd63986bdfdad9477884b56e364307855e238c6cab`.
+That complete prefix must remain exact.
+
+##### 31.37.56.1 Why the file boundary must expand
+
+The post-contract runtime API audit found one implementation dependency that
+the earlier three-file-per-language estimate missed. The existing clock
+modules can display an evidence snapshot and prove one predecessor edge, but
+their general inspection functions intentionally do not authorize lifecycle
+state. They do not jointly prove that the second evidence:
+
+- belongs to the exact connection, migration-lock capability and provider
+  capability;
+- is the capability's current head at exact boundary index two;
+- has boundary `before-cursor-rebind` and consumer
+  `cursor-publication-session`;
+- has the exact already-consumed outer evidence as predecessor;
+- remains unconsumed before the publication tail;
+- retains an exact consumed tombstone after the publication tail;
+- preserves the full live lock tuple, transaction lineage, transaction epoch
+  and total-changes value across the proof query; and
+- has not been overtaken by an early third `before-verification` observation.
+
+The general consume primitive cannot substitute for this proof. The frozen
+tail burns all three prepared continuations before consuming evidence. If an
+already-consumed or no-longer-current second evidence is discovered only by
+the consume call, a validation failure has incorrectly crossed the atomic-tail
+boundary. Cancellation also cannot be observed after an early consume used as
+a probe.
+
+Therefore the runtime ownership list in §31.37.54.8 is extended, not replaced:
+the TypeScript lane additionally owns
+`packages/sqlite/src/cursor-publication-clock-authority.ts` and
+`packages/sqlite/test/cursor-publication-clock-authority.test.ts`; the Python
+lane additionally owns
+`python/src/graph_engineering/sqlite_cursor_publication_clock_authority.py` and
+`python/tests/test_sqlite_cursor_publication_clock_authority.py`. No package
+root export, spec change or public API expansion is authorized.
+
+##### 31.37.56.2 Exact minimal internal API
+
+Each clock runtime adds one immutable second-boundary graph snapshot and two
+package-private assertions. Naming follows the runtime's established style,
+but semantics must be identical.
+
+The prepared assertion accepts the exact connection, migration-lock
+capability, provider-clock capability, outer evidence, outer consumed
+tombstone and pre-rebind evidence. It returns the second evidence's existing
+snapshot together with a frozen copy of the exact expected migration-lock
+tuple and the exact predecessor evidence identity. It is read-only and must
+not call the provider clock.
+
+The active assertion accepts the same graph plus the exact pre-rebind consumed
+tombstone. It proves the same boundary remains the current head at index two,
+the second evidence is consumed exactly once by
+`cursor-publication-session`, both tombstones bind their exact evidence and
+consumer, and no third observation has occurred. It is also read-only and
+must not call the provider clock.
+
+Both assertions must reject:
+
+1. opaque clones, foreign objects, cross-run identities and substituted
+   capability/evidence/tombstone objects;
+2. wrong connection or migration-lock capability;
+3. poisoned or reentrant provider-clock authority;
+4. an index other than two or a head other than the exact second evidence;
+5. wrong boundary, consumer, predecessor, distinctness or consumption state;
+6. missing or mismatched first/second tombstones;
+7. non-exclusive, ended or replaced transaction lineage;
+8. transaction-epoch or total-changes drift during the proof;
+9. any live-lock field drift, including ID, owner, source/target version,
+   epoch, fencing token or active expiry; and
+10. a third clock observation before the future cursor-clock owner legally
+    consumes the publication session.
+
+The snapshot carries no caller-provided values and performs no normalization
+that could hide identity drift. The full lock tuple comes from the exact
+private capability state after a fresh live-lock equality proof. Returning a
+copy of its scalar values does not transfer the opaque capability.
+
+##### 31.37.56.3 Atomicity correction in the Python mirror
+
+The Python evidence-consume primitive must match the already-correct
+TypeScript ordering: construct the tombstone, construct/register its immutable
+registry state, and only then flip the one-way evidence `consumed` flag. If
+allocation or registry insertion fails, evidence remains unconsumed and no
+half-transition exists. This ordering correction applies to every clock
+consumer and therefore requires all existing clock and outer-authority tests,
+not only the new session test, to pass.
+
+The new Python session implementation must use the clock-owned second-boundary
+assertions. It may not add another direct reach-through into
+`_CLOCK_CAPABILITIES`, `_EVIDENCE`, `_LOCK_CAPABILITIES` or `_TOMBSTONES` for
+session lifecycle logic. Existing first-boundary implementation internals are
+outside this isolated refactor unless a regression forces a minimal correction.
+
+##### 31.37.56.4 Focused clock tests
+
+Both clock suites add symmetric tests for:
+
+- first observed/consumed, second observed/unconsumed prepared success;
+- second consumed with both exact tombstones active success;
+- prepared rejection after the second evidence is consumed;
+- active rejection while the second evidence is still unconsumed;
+- rejection after an early third observation;
+- wrong second boundary/consumer/predecessor and first/second substitution;
+- wrong connection, migration-lock capability and provider capability;
+- outer or second tombstone clone/substitution;
+- ended or replaced exclusive transaction lineage;
+- transaction epoch, total changes and every live lock field drifting;
+- poisoned/reentrant provider authority;
+- repeatable assertions causing zero provider callbacks, zero evidence
+  consumption and zero SQL mutation; and
+- package-root and packed-artifact privacy for every new type and function.
+
+The session suites must independently exercise the helpers through the
+prepare-observe-publish orchestration; a green direct clock unit test is not a
+substitute for the integration test.
+
+##### 31.37.56.5 Acceptance and nonclaims
+
+The clock expansion is accepted only with TypeScript build/typecheck, both
+focused clock suites, both publication-session suites, existing outer-
+authority/adoption/clock regressions, clock parity, initial-publication parity,
+SQLite ledger/migration/fixture gates, static no-tail-I/O inspection and exact
+cross-runtime session evidence. An independent reviewer must confirm that the
+new helpers are internal-only and that neither helper can observe provider
+time, consume evidence, execute a permanent write, rebind a cursor, control a
+transaction or advance a lifecycle.
+
+This correction does not add a fifth clock boundary, relax current-head
+requirements, activate cursor-clock capability, execute cursor rebind, claim
+rules 11/12, or widen any public API. It does not change the frozen contract
+fixture or any of its `145/145/25/28` dimensions and trusted hashes. If the
+implementation exposes a further missing contract authority, development
+stops at the same serialized barrier and another append-only correction is
+required before expanding scope.
+
+#### 31.37.57 Publication-session runtime, lifecycle and cross-runtime parity acceptance checkpoint
+
+This checkpoint is appended after the complete publication-session runtime
+implementation and does not replace, revise or weaken any earlier plan byte.
+Before this append, the complete 18,869-line plan had SHA-256
+`78ffe6851d1762272eb5a5a7ee9508c8d2ad4792fbf59a3d379efb0920f6ec71`.
+That exact prefix is a permanent append-only anchor.
+
+The bounded §31.37.54 stage-9-to-stage-10 objective is now implemented in both
+runtimes and accepted for a scoped commit. TypeScript and Python both execute
+the same ordered lifecycle:
+
+1. validate the exact adopted authority graph and prepare all three private
+   ownership continuations while state remains `pre-rebind-complete`;
+2. observe exactly the second provider-clock boundary
+   `before-cursor-rebind`, with consumer `cursor-publication-session` and the
+   exact first evidence as predecessor;
+3. revalidate the prepared graph, exact unconsumed evidence, exclusive
+   transaction lineage, live migration-lock tuple, post-0002 catalog fence,
+   stage-adoption graph and unchanged ledger;
+4. observe authentic cancellation once before pending registration and before
+   evidence consumption;
+5. preconstruct and privately register pending session state so allocation or
+   registry failure cannot leave consumed evidence with no proof object;
+6. enter the non-interruptible tail, burn both prepared lower continuations,
+   consume the exact second evidence, retain its tombstone, publish ownership
+   and TEMP-stage state, install the exact outer session and activate all three
+   owners together; and
+7. run a repeatable read-only active assertion that proves the exact current
+   head/index-two clock graph, both tombstones, 22 commitments, four ownership
+   identities, transaction lineage, live lock and catalog fence without a
+   third clock observation.
+
+##### 31.37.57.1 Accepted ownership, atomicity and failure semantics
+
+The session remains opaque, module-minted, package-private and single-use.
+Clones, reconstructed values, foreign graph identities, cross-run objects,
+substituted receipts/capabilities/evidence/tombstones, wrong consumers,
+incorrect predecessors and early third observations are rejected. No public
+root or declaration exports a session type, prepared owner, cancellation
+controller, lifecycle operation or private snapshot helper.
+
+Healthy cancellation is observed before the irreversible tail and permits the
+same exact prepared graph and same exact already-observed unconsumed evidence
+to retry. Pending registration failure burns preparation and poisons the exact
+selected graph without consuming evidence. Any failure after irreversible
+work begins is terminal. Poison propagates idempotently through outer
+authority, ownership transfer and TEMP stage even if the outer authority was
+already poisoned.
+
+Python clock consumption now constructs and registers the immutable tombstone
+before flipping evidence to consumed. Its outer atomic tail captures the exact
+burn, clock-consume, publish, slot-set and poison intrinsics in a hidden
+closure, so mutable module alias replacement cannot redirect execution. Lower
+ownership and stage continuations are pre-resolved and assignment-only. The
+outer tail's one fallible clock-consume intrinsic preserves the registry-before-
+burn ordering and is not misrepresented as an assignment.
+
+Python's private retention graph preserves authority-to-session and
+session-to-authority usability without globally rooting dead graphs. Complete
+graph collection restores the exact 31-entry registry baseline. Old clock
+capability/evidence rings can be collected, while a live tombstone retains the
+exact evidence chain needed for proof. Foreign anchor/state injection poisons
+only the selected target graph and cannot contaminate the healthy source.
+
+TypeScript complete-graph collection is proved in an isolated
+`node --expose-gc` process over the graph, outer authority, prepared owner,
+evidence, session, adoption receipt, ownership transfer, TEMP stage and
+connection. Every active assertion consumes exactly one semantic lock read and
+one two-component catalog observation. It performs no provider callback,
+evidence consume, write SQL, transaction control, cursor rebind or commit.
+
+##### 31.37.57.2 Honest hostile execution and static evidence
+
+The frozen hostile registry remains 145 obligations, 145 records, 25 counter
+profiles and 28 normalized fields, with
+`runtimeExecutionEvidenceClaim=false`. This leaf identifies 25 publication-
+session/pre-rebind-clock candidates and honestly executes four in both real
+runtimes: ordinals `20`, `100`, `101` and `102`. The remaining 21 candidates
+are explicitly accounted for as unavailable because the corresponding private
+injection seam, future consumer/cursor-clock boundary or frozen rejection mode
+does not exist in this leaf. Unavailable is not counted as pass or skip, and
+four activated records are never described as 145-record runtime completion.
+
+Reporters construct independent real SQLite graphs and contain no copied
+normalized fixture oracle. The comparator loads the frozen fixture itself,
+reconstructs each expected 28-field record, requires exact key order/types and
+compares canonical success, cancellation and hostile bytes across runtimes.
+Each activated record proves the exact raw runtime error, semantic code,
+poisoned-graph non-retryability and fresh-graph recovery.
+
+The final TypeScript static gate uses one shared AST kernel imported by both
+reporter and comparator. That kernel independently parses the source TS and
+the actually executed dist JS, requires zero parse diagnostics and unique
+target function/method declarations, and checks the exact ordered statements
+and call targets in all five closures: outer tail, ownership burn, ownership
+publish, stage burn and stage publish. The outer call allowlist is exactly
+`lowerTransition.burn`, clock evidence consume and
+`lowerTransition.publish`; lower closures permit only their exact next-layer
+call and frozen assignments.
+
+Hostile self-tests inject forbidden lower direct dispatch and stale activation
+into both source and dist, add parse errors and duplicate declarations, and
+prove the shared kernel fails closed. Preloaded source/dist mutations run the
+actual standalone reporter and require nonzero exit plus empty stdout. The
+reporter verifies every one of its 14 gates before constructing or emitting a
+report, so a false static gate can never be published as trusted JSON.
+
+The final conformance SHA-256 values are:
+
+- activated-record accounting:
+  `0b043cbb479948d7f32c4dd68f1ba1e02cf43e5759dd771a3eefed382ba202be`;
+- shared TypeScript tail-audit kernel:
+  `dce2b1ef88ce9332f5a47e3fcb7c7a7c272fc8f6f7ec93555f2530eb8a1c5d7a`;
+- TypeScript session reporter:
+  `cbfe67896e8cae69ba6dba2d5ba38828ee1baba7a18288d49d345529d13543af`;
+- Python session reporter:
+  `27c54cbc87bc8489698829bb9991ef27246ce1de4f87b73f556b6dddbc2505e8`;
+- session comparator:
+  `423e2be3b16fc3043ca5a2fe4815dcfd6654dfbd024b2d296b02252885c41556`;
+  and
+- reusable initial TypeScript reporter:
+  `7030c05925133cceb151184efd10f07aee8a542286488ca0cbb2e2417a516924`.
+
+##### 31.37.57.3 Final validation matrix
+
+The accepted frozen behavior has the following evidence:
+
+- TypeScript publication-session/query focused suites: 3 files, 26 tests;
+- TypeScript affected regression: 6 files, 14 suites, 435 tests;
+- complete TypeScript SQLite suite: 37 files, 85 suites, 1,061 tests;
+- isolated TypeScript complete-graph GC: 1/1;
+- Python clock/session focused suite: 55/55;
+- Python directed lifetime/atomic-tail selector: 11/11 with 44 deselected;
+- Python independent frozen-byte selector: 10/10;
+- Python complete ten-file affected regression: 307/307 in 871.77 seconds;
+- final publication-session parity: 12/12, zero failed or skipped, including
+  shared-kernel source/dist fail-closed mutation evidence;
+- initial-publication parity: 3/3;
+- provider-clock parity: 2/2;
+- SQLite contract/ledger gates: 62/62;
+- fixture validation: 85 JSON fixtures and 44 manifests;
+- TypeScript typecheck, Python Ruff/format, four-module mypy and six-file
+  `py_compile`: all passed;
+- npm package-content and packed-install checks: nine tarballs each;
+- final Python wheel/sdist: 115/116 archive members, isolated entry points,
+  version, shared YAML, validate and doctor all passed;
+- source/wheel/sdist embedded Python outer-authority SHA equality and zero
+  repository-root/tool/Codex/spec/test leakage;
+- canonical one-JSON-plus-one-LF reporter stdout and empty stderr;
+- documentation-link and diff-whitespace gates; and
+- independent TypeScript runtime, Python runtime, conformance and final
+  acceptance reviews at H0/M0/L0.
+
+The final Python six-file `sha256sum` record aggregate is
+`2bed98d73d5d5c8774c2f380b8a751aef8163508643db7cdd7aefdb1dda2e177`.
+The final wheel and sdist SHA-256 values are respectively
+`058c7a1a3ec56c12cef3177fcaf412ba4e8c6a891096b1160790ed8fb48c7893`
+and `ec09b558c0cd13f0e1872f9bc2c6206bc1dade630214c757042c411551cd37be`.
+The durable defect chronology, per-file hashes, query/GC evidence and exact
+nonclaims are recorded in
+`codex_logs/reviews/SQLITE-CURSOR-B3-PUBLICATION-SESSION-RUNTIME-PARITY-2026-08-02.md`.
+
+##### 31.37.57.4 Commit, remote equality and successor boundary
+
+Integration stages only the four TypeScript production modules, four Python
+production modules, focused/runtime/GC tests, five reporter/accounting files,
+the shared static kernel, comparator, package script, durable log and this
+append. Generated dist artifacts, caches, virtual environments, temporary
+databases and unrelated work are excluded. The commit uses exactly
+`reacher-z <mtrxcop@gmail.com>`, contains no co-author trailer, and is pushed to
+`origin/feat/authoring-foundation`. Local HEAD, the remote-tracking ref and
+`git ls-remote` must resolve to the same object before the checkpoint is handed
+off.
+
+This acceptance does not execute cursor UPDATE/rebind, rules 11/12, a third
+provider-clock observation, cursor-clock mint/consume, lineage or metadata
+publication, TEMP retirement, transaction commit, crash/reopen recovery,
+145/145 hostile runtime execution, active-manifest switch, release readiness,
+production use, external adoption or any GitHub-star result.
+
+The next development leaf is the inseparable cursor-rebind + rules 11/12 +
+third-clock + cursor-clock boundary already frozen by §31.37.54.10. Before any
+permanent UPDATE is accepted, its contract must close the exact fixed statement
+shape, prepare/execute/affected-row/native-change counters, `changes()` and
+`total_changes` proofs, cursor write-ledger receipt, rule-11 catalog/data proof,
+rule-12 lineage/projection proof, third `before-verification` clock predecessor,
+single-use cursor-clock capability and all-three-owner transition to
+`cursor/clock-complete`. No commit, TEMP retirement or post-commit manifest work
+may enter that leaf, and no rebind-only intermediate commit is permitted.

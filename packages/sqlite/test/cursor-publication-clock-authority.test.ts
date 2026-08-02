@@ -8,6 +8,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   SQLITE_CURSOR_CLOCK_BOUNDARIES,
   SQLITE_CURSOR_CLOCK_CONSUMERS,
+  assertSQLiteCursorPublicationSessionClockActiveGraphIntrinsic,
+  assertSQLiteCursorPublicationSessionClockPreparedGraphIntrinsic,
   assertSQLiteCursorProviderClockConsumedTombstoneIntrinsic,
   assertSQLiteCursorProviderClockEvidencePredecessorIntrinsic,
   consumeSQLiteCursorProviderClockEvidenceIntrinsic,
@@ -19,6 +21,7 @@ import {
   type SQLiteCursorMigrationLockCapability,
   type SQLiteCursorMigrationLockIdentity,
   type SQLiteCursorProviderClockCapability,
+  type SQLiteCursorProviderClockConsumedTombstone,
   type SQLiteCursorProviderClockEvidence,
   type SQLiteCursorProviderClockSource,
 } from "../src/cursor-publication-clock-authority.js";
@@ -94,6 +97,39 @@ function expectCode(callback: () => unknown, code: string): CycleStoreProviderEr
   throw new Error(`expected ${code}`);
 }
 
+function preparedSessionClockGraph(
+  connection: SQLiteConnection,
+  values: readonly number[] = [100, 200, 300],
+): Readonly<{
+  clock: SQLiteCursorProviderClockCapability;
+  lock: SQLiteCursorMigrationLockCapability;
+  outerEvidence: SQLiteCursorProviderClockEvidence;
+  outerTombstone: SQLiteCursorProviderClockConsumedTombstone;
+  preRebindEvidence: SQLiteCursorProviderClockEvidence;
+}> {
+  const run = authority(connection, values);
+  const outerEvidence = observeSQLiteCursorProviderClockIntrinsic(
+    run.clock,
+    "before-first-permanent-mutation",
+  );
+  const outerTombstone = consumeSQLiteCursorProviderClockEvidenceIntrinsic(
+    run.clock,
+    outerEvidence,
+    "outer-publication-authority",
+  );
+  const preRebindEvidence = observeSQLiteCursorProviderClockIntrinsic(
+    run.clock,
+    "before-cursor-rebind",
+  );
+  return Object.freeze({
+    clock: run.clock,
+    lock: run.lock,
+    outerEvidence,
+    outerTombstone,
+    preRebindEvidence,
+  });
+}
+
 afterEach(() => {
   for (const connection of connections.splice(0)) {
     try {
@@ -111,6 +147,224 @@ afterEach(() => {
 });
 
 describe("SQLite B3 provider-clock authority", () => {
+  it("proves the exact prepared and active second-boundary session graphs", () => {
+    const connection = openRun();
+    const run = preparedSessionClockGraph(connection);
+
+    const prepared = assertSQLiteCursorPublicationSessionClockPreparedGraphIntrinsic(
+      connection,
+      run.lock,
+      run.clock,
+      run.outerEvidence,
+      run.outerTombstone,
+      run.preRebindEvidence,
+    );
+    expect(Object.isFrozen(prepared)).toBe(true);
+    expect(Object.isFrozen(prepared.migrationLock)).toBe(true);
+    expect(prepared).toMatchObject({
+      activeExpiresAtMs: 1_000,
+      boundary: "before-cursor-rebind",
+      consumer: "cursor-publication-session",
+      migrationLock: LOCK,
+      previousEvidence: run.outerEvidence,
+      providerNowMs: 200,
+    });
+
+    const preRebindTombstone = consumeSQLiteCursorProviderClockEvidenceIntrinsic(
+      run.clock,
+      run.preRebindEvidence,
+      "cursor-publication-session",
+    );
+    expectCode(
+      () => assertSQLiteCursorPublicationSessionClockPreparedGraphIntrinsic(
+        connection,
+        run.lock,
+        run.clock,
+        run.outerEvidence,
+        run.outerTombstone,
+        run.preRebindEvidence,
+      ),
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+    );
+
+    const active = assertSQLiteCursorPublicationSessionClockActiveGraphIntrinsic(
+      connection,
+      run.lock,
+      run.clock,
+      run.outerEvidence,
+      run.outerTombstone,
+      run.preRebindEvidence,
+      preRebindTombstone,
+    );
+    expect(active.previousEvidence).toBe(run.outerEvidence);
+    expect(active).toEqual(prepared);
+    expect(assertSQLiteCursorPublicationSessionClockActiveGraphIntrinsic(
+      connection,
+      run.lock,
+      run.clock,
+      run.outerEvidence,
+      run.outerTombstone,
+      run.preRebindEvidence,
+      preRebindTombstone,
+    )).toEqual(active);
+  });
+
+  it("rejects active proof before consumption and rejects tombstone clones", () => {
+    const connection = openRun();
+    const run = preparedSessionClockGraph(connection);
+    const clone = Object.freeze(Object.create(null)) as
+      SQLiteCursorProviderClockConsumedTombstone;
+    expectCode(
+      () => assertSQLiteCursorPublicationSessionClockActiveGraphIntrinsic(
+        connection,
+        run.lock,
+        run.clock,
+        run.outerEvidence,
+        run.outerTombstone,
+        run.preRebindEvidence,
+        clone,
+      ),
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+    );
+    const preRebindTombstone = consumeSQLiteCursorProviderClockEvidenceIntrinsic(
+      run.clock,
+      run.preRebindEvidence,
+      "cursor-publication-session",
+    );
+    expectCode(
+      () => assertSQLiteCursorPublicationSessionClockActiveGraphIntrinsic(
+        connection,
+        run.lock,
+        run.clock,
+        run.outerEvidence,
+        clone,
+        run.preRebindEvidence,
+        preRebindTombstone,
+      ),
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+    );
+  });
+
+  it("rejects predecessor, capability, and connection substitutions", () => {
+    const firstConnection = openRun();
+    const secondConnection = openRun();
+    const first = preparedSessionClockGraph(firstConnection);
+    const second = preparedSessionClockGraph(secondConnection);
+
+    for (const assertion of [
+      () => assertSQLiteCursorPublicationSessionClockPreparedGraphIntrinsic(
+        firstConnection,
+        first.lock,
+        first.clock,
+        second.outerEvidence,
+        first.outerTombstone,
+        first.preRebindEvidence,
+      ),
+      () => assertSQLiteCursorPublicationSessionClockPreparedGraphIntrinsic(
+        firstConnection,
+        second.lock,
+        first.clock,
+        first.outerEvidence,
+        first.outerTombstone,
+        first.preRebindEvidence,
+      ),
+      () => assertSQLiteCursorPublicationSessionClockPreparedGraphIntrinsic(
+        firstConnection,
+        first.lock,
+        second.clock,
+        first.outerEvidence,
+        first.outerTombstone,
+        first.preRebindEvidence,
+      ),
+      () => assertSQLiteCursorPublicationSessionClockPreparedGraphIntrinsic(
+        secondConnection,
+        first.lock,
+        first.clock,
+        first.outerEvidence,
+        first.outerTombstone,
+        first.preRebindEvidence,
+      ),
+    ]) {
+      expectCode(assertion, "GE_CYCLE_STORE_INVALID_ARGUMENT");
+    }
+  });
+
+  it("rejects a second-boundary graph overtaken by an early third observation", () => {
+    const connection = openRun();
+    const run = preparedSessionClockGraph(connection);
+    observeSQLiteCursorProviderClockIntrinsic(run.clock, "before-verification");
+    expectCode(
+      () => assertSQLiteCursorPublicationSessionClockPreparedGraphIntrinsic(
+        connection,
+        run.lock,
+        run.clock,
+        run.outerEvidence,
+        run.outerTombstone,
+        run.preRebindEvidence,
+      ),
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+    );
+
+    const activeConnection = openRun();
+    const active = preparedSessionClockGraph(activeConnection);
+    const tombstone = consumeSQLiteCursorProviderClockEvidenceIntrinsic(
+      active.clock,
+      active.preRebindEvidence,
+      "cursor-publication-session",
+    );
+    observeSQLiteCursorProviderClockIntrinsic(active.clock, "before-verification");
+    expectCode(
+      () => assertSQLiteCursorPublicationSessionClockActiveGraphIntrinsic(
+        activeConnection,
+        active.lock,
+        active.clock,
+        active.outerEvidence,
+        active.outerTombstone,
+        active.preRebindEvidence,
+        tombstone,
+      ),
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+    );
+  });
+
+  it("rejects post-observation total-change and live-lock drift", () => {
+    const changedConnection = openRun();
+    const changed = preparedSessionClockGraph(changedConnection);
+    changedConnection.prepare(
+      "UPDATE main.ge_cycle_schema SET updated_at_ms = updated_at_ms + 1 WHERE singleton = 1",
+      "inspect-schema",
+    ).run();
+    expectCode(
+      () => assertSQLiteCursorPublicationSessionClockPreparedGraphIntrinsic(
+        changedConnection,
+        changed.lock,
+        changed.clock,
+        changed.outerEvidence,
+        changed.outerTombstone,
+        changed.preRebindEvidence,
+      ),
+      "GE_CYCLE_STORE_STALE_FENCE",
+    );
+
+    const lockConnection = openRun();
+    const lockRun = preparedSessionClockGraph(lockConnection);
+    lockConnection.prepare(
+      "UPDATE main.ge_cycle_migration_lock SET active_owner_id = ? WHERE singleton = 1",
+      "inspect-schema",
+    ).run("substituted-owner");
+    expectCode(
+      () => assertSQLiteCursorPublicationSessionClockPreparedGraphIntrinsic(
+        lockConnection,
+        lockRun.lock,
+        lockRun.clock,
+        lockRun.outerEvidence,
+        lockRun.outerTombstone,
+        lockRun.preRebindEvidence,
+      ),
+      "GE_CYCLE_STORE_STALE_FENCE",
+    );
+  });
+
   it("mints four distinct chained receipts and consumes each through its exact owner", () => {
     const run = authority(openRun(), [100, 200, 300, 400]);
     const evidence: SQLiteCursorProviderClockEvidence[] = [];

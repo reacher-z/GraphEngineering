@@ -10,11 +10,14 @@ import {
   SQLiteBaselineTempStage,
   abortSQLiteBaselineCursorStageTransferIntrinsic,
   abortSQLiteBaselineCursorPreRebindIntrinsic,
+  assertSQLiteBaselineCursorPublicationSessionActiveIntrinsic,
+  assertSQLiteBaselineCursorPublicationSessionPreparedIntrinsic,
   assertSQLiteBaselineCursorInitialPublicationAdoptedIntrinsic,
   assertSQLiteBaselineCursorOuterPublicationActiveIntrinsic,
   assertSQLiteBaselineCursorPreRebindCompleteIntrinsic,
   beginSQLiteBaselineCursorStageTransferIntrinsic,
   beginSQLiteBaselineCursorPreRebindIntrinsic,
+  burnSQLiteBaselineCursorPublicationSessionIntrinsic,
   completeSQLiteBaselineCursorPreRebindIntrinsic,
   createSQLiteBaselineCursorSealTempTableIntrinsic,
   clearSQLiteBaselineCursorPostDdlReaderCleanupIntrinsic,
@@ -23,15 +26,20 @@ import {
   fenceSQLiteBaselineCursorPreRebindIntrinsic,
   insertSQLiteBaselineCursorPreRebindRowIntrinsic,
   poisonSQLiteBaselineCursorOuterPublicationIntrinsic,
+  prepareSQLiteBaselineCursorPublicationSessionIntrinsic,
+  prepareSQLiteBaselineCursorPublicationSessionTransitionIntrinsic,
   prepareSQLiteBaselineCursorInitialPublicationAdoptionIntrinsic,
   prepareSQLiteBaselineCursorOuterPublicationIntrinsic,
   publishSQLiteBaselineCursorInitialPublicationAdoptionIntrinsic,
   publishSQLiteBaselineCursorOuterPublicationIntrinsic,
+  publishSQLiteBaselineCursorPublicationSessionIntrinsic,
   registerSQLiteBaselineCursorPostDdlReaderCleanupIntrinsic,
   registerSQLiteBaselineCursorPreRebindCleanupIntrinsic,
   retireSQLiteBaselineCursorOuterPublicationIntrinsic,
   type SQLiteBaselineCursorB2FenceRetirement,
   type SQLiteBaselineCursorInitialPublicationAdoptionTail,
+  type SQLiteBaselineCursorPublicationSessionTail,
+  type SQLiteBaselineCursorPublicationSessionTransition,
   type SQLiteCursorInitialPublicationStageWatermark,
 } from "./operation-baseline-stage.js";
 import type { SQLiteCursorStageValue } from "./operation-baseline-cursor-inspection.js";
@@ -76,9 +84,22 @@ export interface SQLiteCursorStageOwnershipInitialPublicationAdoptionMint {
   readonly watermark: SQLiteCursorInitialPublicationStageWatermark;
 }
 
+/** Single-use ownership continuation for the final publication-session tail. */
+export interface SQLiteCursorStageOwnershipPublicationSessionTail {
+  readonly __sqliteCursorStageOwnershipPublicationSessionTail: never;
+}
+
+/** Fully resolved ownership/stage transition for the final atomic tail. */
+export interface SQLiteCursorStageOwnershipPublicationSessionTransition {
+  readonly burn: () => void;
+  readonly publish: () => void;
+}
+
 type TransferLifecycle = "b2-active" | "pre-rebind-complete"
   | "outer-publication-prepared" | "outer-publication-owned"
   | "initial-publication-adoption-prepared" | "initial-publication-adopted"
+  | "publication-session-prepared" | "publication-session-burned"
+  | "publication-active"
   | "retired" | "poisoned";
 
 interface TransferState {
@@ -91,6 +112,10 @@ interface TransferState {
     SQLiteCursorStageOwnershipInitialPublicationAdoptionMint | undefined;
   initialPublicationAdoptionTail:
     SQLiteCursorStageOwnershipInitialPublicationAdoptionTail | undefined;
+  publicationSessionAdoptionReceipt: object | undefined;
+  publicationSessionPreparedOwner: object | undefined;
+  publicationSession: object | undefined;
+  publicationSessionTail: SQLiteCursorStageOwnershipPublicationSessionTail | undefined;
   readonly preTransferWitness: SQLiteCursorPreRebindConnectionProvenance;
   readonly projectionIdentity: OperationBaselineProjectionIdentity;
   readonly receipt: SQLiteCursorPreRebindReceipt;
@@ -119,6 +144,15 @@ interface InitialPublicationAdoptionTailContinuation {
 }
 const INITIAL_PUBLICATION_ADOPTION_TAILS =
   new WeakMap<object, InitialPublicationAdoptionTailContinuation>();
+interface PublicationSessionTailContinuation {
+  readonly adoptionReceipt: object;
+  readonly authority: object;
+  readonly preparedOwner: object;
+  readonly stageTail: SQLiteBaselineCursorPublicationSessionTail;
+  readonly transferState: TransferState;
+}
+const PUBLICATION_SESSION_TAILS =
+  new WeakMap<object, PublicationSessionTailContinuation>();
 const weakMapGetIntrinsic = WeakMap.prototype.get;
 const weakMapSetIntrinsic = WeakMap.prototype.set;
 const weakMapDeleteIntrinsic = WeakMap.prototype.delete;
@@ -239,6 +273,10 @@ export function beginSQLiteCursorStageOwnershipTransfer(
       postDdlReaderCleanup: undefined,
       postDdlReaderLease: undefined,
       postDdlReaderLifecycle: "unused",
+      publicationSessionAdoptionReceipt: undefined,
+      publicationSessionPreparedOwner: undefined,
+      publicationSession: undefined,
+      publicationSessionTail: undefined,
       receipt,
       session,
       stage,
@@ -770,7 +808,8 @@ export function assertSQLiteCursorStageOwnershipInitialPublicationAdoptedIntrins
     connection, stage, receipt, projectionIdentity, transfer,
   );
   const mint = state.initialPublicationAdoptionMint;
-  if (state.lifecycle !== "initial-publication-adopted"
+  if ((state.lifecycle !== "initial-publication-adopted"
+        && state.lifecycle !== "publication-session-prepared")
       || state.outerAuthority !== authority
       || state.postDdlReaderLifecycle !== "closed"
       || state.postDdlReaderLease !== lease
@@ -783,6 +822,209 @@ export function assertSQLiteCursorStageOwnershipInitialPublicationAdoptedIntrins
     stage, authority, lease, retiredB2Fence, watermark,
   );
   return transfer;
+}
+
+/**
+ * Bind one exact future publication-session owner across ownership and stage.
+ * No provider access occurs here; the outer authority owns all read fences.
+ */
+export function prepareSQLiteCursorStageOwnershipPublicationSessionIntrinsic(
+  connection: SQLiteConnection,
+  stage: SQLiteBaselineTempStage,
+  receipt: SQLiteCursorPreRebindReceipt,
+  projectionIdentity: OperationBaselineProjectionIdentity,
+  transfer: SQLiteCursorStageOwnershipTransfer,
+  authority: object,
+  adoptionReceipt: object,
+  preparedOwner: object,
+): SQLiteCursorStageOwnershipPublicationSessionTail {
+  const state = checkedTransferIdentityGraph(
+    connection, stage, receipt, projectionIdentity, transfer,
+  );
+  checkedOpaqueAuthority(authority);
+  if (state.lifecycle === "publication-session-prepared") {
+    if (state.outerAuthority !== authority
+        || state.publicationSessionAdoptionReceipt !== adoptionReceipt
+        || state.publicationSessionPreparedOwner !== preparedOwner
+        || state.publicationSessionTail === undefined) {
+      return invalid("SQLite cursor publication session preparation is invalid");
+    }
+    return state.publicationSessionTail;
+  }
+  if (state.lifecycle !== "initial-publication-adopted"
+      || state.outerAuthority !== authority
+      || state.publicationSessionAdoptionReceipt !== undefined
+      || state.publicationSessionPreparedOwner !== undefined
+      || state.publicationSession !== undefined
+      || state.publicationSessionTail !== undefined) {
+    return invalid("SQLite cursor publication session owner is invalid");
+  }
+  const stageTail = prepareSQLiteBaselineCursorPublicationSessionIntrinsic(
+    stage, authority, adoptionReceipt, preparedOwner,
+  );
+  const tail = reflectApplyIntrinsic(
+    objectFreezeIntrinsic,
+    Object,
+    [reflectApplyIntrinsic(objectCreateIntrinsic, Object, [null])],
+  ) as SQLiteCursorStageOwnershipPublicationSessionTail;
+  const continuation: PublicationSessionTailContinuation = {
+    adoptionReceipt,
+    authority,
+    preparedOwner,
+    stageTail,
+    transferState: state,
+  };
+  reflectApplyIntrinsic(weakMapSetIntrinsic, PUBLICATION_SESSION_TAILS, [
+    tail as object,
+    continuation,
+  ]);
+  state.publicationSessionAdoptionReceipt = adoptionReceipt;
+  state.publicationSessionPreparedOwner = preparedOwner;
+  state.publicationSessionTail = tail;
+  state.lifecycle = "publication-session-prepared";
+  return tail;
+}
+
+/** Resolve every fallible continuation check before the atomic tail. */
+export function assertSQLiteCursorStageOwnershipPublicationSessionPreparedIntrinsic(
+  transfer: SQLiteCursorStageOwnershipTransfer,
+  authority: object,
+  adoptionReceipt: object,
+  preparedOwner: object,
+  tail: SQLiteCursorStageOwnershipPublicationSessionTail,
+): void {
+  const state = readTransferState(transfer);
+  const continuation = tail !== null && typeof tail === "object"
+    ? reflectApplyIntrinsic(weakMapGetIntrinsic, PUBLICATION_SESSION_TAILS, [tail as object]) as
+      PublicationSessionTailContinuation | undefined
+    : undefined;
+  if (state === undefined || continuation === undefined
+      || continuation.transferState !== state
+      || continuation.authority !== authority
+      || continuation.adoptionReceipt !== adoptionReceipt
+      || continuation.preparedOwner !== preparedOwner
+      || state.lifecycle !== "publication-session-prepared"
+      || state.outerAuthority !== authority
+      || state.publicationSessionAdoptionReceipt !== adoptionReceipt
+      || state.publicationSessionPreparedOwner !== preparedOwner
+      || state.publicationSessionTail !== tail
+      || state.publicationSession !== undefined) {
+    return invalid("SQLite cursor publication session continuation is invalid");
+  }
+  assertSQLiteBaselineCursorPublicationSessionPreparedIntrinsic(
+    state.stage,
+    authority,
+    adoptionReceipt,
+    preparedOwner,
+    continuation.stageTail,
+  );
+}
+
+/** Materialize every lower continuation before the non-interruptible tail. */
+export function prepareSQLiteCursorStageOwnershipPublicationSessionTransitionIntrinsic(
+  transfer: SQLiteCursorStageOwnershipTransfer,
+  authority: object,
+  adoptionReceipt: object,
+  preparedOwner: object,
+  tail: SQLiteCursorStageOwnershipPublicationSessionTail,
+  session: object,
+): SQLiteCursorStageOwnershipPublicationSessionTransition {
+  const state = readTransferState(transfer);
+  const continuation = tail !== null && typeof tail === "object"
+    ? reflectApplyIntrinsic(weakMapGetIntrinsic, PUBLICATION_SESSION_TAILS, [tail as object]) as
+      PublicationSessionTailContinuation | undefined
+    : undefined;
+  if (state === undefined || continuation === undefined
+      || continuation.transferState !== state
+      || continuation.authority !== authority
+      || continuation.adoptionReceipt !== adoptionReceipt
+      || continuation.preparedOwner !== preparedOwner
+      || state.lifecycle !== "publication-session-prepared"
+      || state.outerAuthority !== authority
+      || state.publicationSessionAdoptionReceipt !== adoptionReceipt
+      || state.publicationSessionPreparedOwner !== preparedOwner
+      || state.publicationSessionTail !== tail
+      || state.publicationSession !== undefined) {
+    return invalid("SQLite cursor publication session continuation is invalid");
+  }
+  const stageTransition: SQLiteBaselineCursorPublicationSessionTransition =
+    prepareSQLiteBaselineCursorPublicationSessionTransitionIntrinsic(
+      state.stage,
+      authority,
+      adoptionReceipt,
+      preparedOwner,
+      continuation.stageTail,
+      session,
+    );
+  return objectFreezeIntrinsic({
+    burn: (): void => {
+      state.publicationSessionTail = undefined;
+      state.publicationSession = session;
+      state.lifecycle = "publication-session-burned";
+      stageTransition.burn();
+    },
+    publish: (): void => {
+      stageTransition.publish();
+      state.publicationSession = session;
+      state.lifecycle = "publication-active";
+    },
+  });
+}
+
+/**
+ * Atomic-tail primitive: burn ownership, then stage.  All identities were
+ * resolved by the immediately preceding prepared assertion.
+ */
+export function burnSQLiteCursorStageOwnershipPublicationSessionIntrinsic(
+  tail: SQLiteCursorStageOwnershipPublicationSessionTail,
+  session: object,
+): void {
+  const continuation = reflectApplyIntrinsic(
+    weakMapGetIntrinsic,
+    PUBLICATION_SESSION_TAILS,
+    [tail as object],
+  ) as PublicationSessionTailContinuation;
+  reflectApplyIntrinsic(weakMapDeleteIntrinsic, PUBLICATION_SESSION_TAILS, [tail as object]);
+  const state = continuation.transferState;
+  state.publicationSessionTail = undefined;
+  state.publicationSession = session;
+  state.lifecycle = "publication-session-burned";
+  burnSQLiteBaselineCursorPublicationSessionIntrinsic(
+    state.stage, continuation.stageTail, session,
+  );
+}
+
+/** Publish stage, then ownership after clock evidence has been consumed. */
+export function publishSQLiteCursorStageOwnershipPublicationSessionIntrinsic(
+  transfer: SQLiteCursorStageOwnershipTransfer,
+  session: object,
+): void {
+  const state = readTransferState(transfer)!;
+  publishSQLiteBaselineCursorPublicationSessionIntrinsic(state.stage, session);
+  state.publicationSession = session;
+  state.lifecycle = "publication-active";
+}
+
+/** Reusable stable identity proof for the two lower publication layers. */
+export function assertSQLiteCursorStageOwnershipPublicationSessionActiveIntrinsic(
+  transfer: SQLiteCursorStageOwnershipTransfer,
+  authority: object,
+  adoptionReceipt: object,
+  session: object,
+): void {
+  const state = readTransferState(transfer);
+  if (state === undefined
+      || state.lifecycle !== "publication-active"
+      || state.outerAuthority !== authority
+      || state.publicationSessionAdoptionReceipt !== adoptionReceipt
+      || state.publicationSessionPreparedOwner === undefined
+      || state.publicationSession !== session
+      || state.publicationSessionTail !== undefined) {
+    return invalid("SQLite cursor publication session is invalid");
+  }
+  assertSQLiteBaselineCursorPublicationSessionActiveIntrinsic(
+    state.stage, authority, adoptionReceipt, session,
+  );
 }
 
 function closeActivePostDdlReader(state: TransferState): void {
@@ -814,7 +1056,10 @@ export function retireSQLiteCursorStageOwnershipOuterPublicationIntrinsic(
   if (state === undefined || (state.lifecycle !== "outer-publication-prepared"
         && state.lifecycle !== "outer-publication-owned"
         && state.lifecycle !== "initial-publication-adoption-prepared"
-        && state.lifecycle !== "initial-publication-adopted")
+        && state.lifecycle !== "initial-publication-adopted"
+        && state.lifecycle !== "publication-session-prepared"
+        && state.lifecycle !== "publication-session-burned"
+        && state.lifecycle !== "publication-active")
       || state.outerAuthority !== authority) {
     return invalid("SQLite cursor outer publication authority is invalid");
   }
@@ -829,6 +1074,14 @@ export function retireSQLiteCursorStageOwnershipOuterPublicationIntrinsic(
       INITIAL_PUBLICATION_ADOPTION_TAILS,
       [state.initialPublicationAdoptionTail as object],
     );
+  }
+  if (state.publicationSessionTail !== undefined) {
+    reflectApplyIntrinsic(
+      weakMapDeleteIntrinsic,
+      PUBLICATION_SESSION_TAILS,
+      [state.publicationSessionTail as object],
+    );
+    state.publicationSessionTail = undefined;
   }
   closeActivePostDdlReader(state);
   retireSQLiteBaselineCursorOuterPublicationIntrinsic(state.stage);
@@ -847,7 +1100,10 @@ export function poisonSQLiteCursorStageOwnershipOuterPublicationIntrinsic(
       || (state.lifecycle !== "outer-publication-prepared"
         && state.lifecycle !== "outer-publication-owned"
         && state.lifecycle !== "initial-publication-adoption-prepared"
-        && state.lifecycle !== "initial-publication-adopted")) {
+        && state.lifecycle !== "initial-publication-adopted"
+        && state.lifecycle !== "publication-session-prepared"
+        && state.lifecycle !== "publication-session-burned"
+        && state.lifecycle !== "publication-active")) {
     return invalid("SQLite cursor outer publication authority is invalid");
   }
   state.lifecycle = "poisoned";
@@ -863,6 +1119,14 @@ export function poisonSQLiteCursorStageOwnershipOuterPublicationIntrinsic(
       INITIAL_PUBLICATION_ADOPTION_TAILS,
       [state.initialPublicationAdoptionTail as object],
     );
+  }
+  if (state.publicationSessionTail !== undefined) {
+    reflectApplyIntrinsic(
+      weakMapDeleteIntrinsic,
+      PUBLICATION_SESSION_TAILS,
+      [state.publicationSessionTail as object],
+    );
+    state.publicationSessionTail = undefined;
   }
   return poisonSQLiteBaselineCursorOuterPublicationIntrinsic(
     state.stage, authority, message,

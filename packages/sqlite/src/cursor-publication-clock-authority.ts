@@ -75,6 +75,19 @@ export interface SQLiteCursorProviderClockEvidenceSnapshot {
   readonly transactionEpoch: bigint;
 }
 
+/**
+ * Immutable proof of the exact second provider-clock boundary retained by a
+ * cursor-publication session. The predecessor remains an opaque identity;
+ * the migration-lock value is a frozen scalar copy, not a transferable lock
+ * capability.
+ */
+export interface SQLiteCursorPublicationSessionClockGraphSnapshot
+  extends SQLiteCursorProviderClockEvidenceSnapshot {
+  readonly migrationLock: Readonly<SQLiteCursorMigrationLockIdentity>;
+  readonly previousEvidence: SQLiteCursorProviderClockEvidence;
+  readonly totalChanges: number;
+}
+
 interface MigrationLockCapabilityState {
   readonly connection: SQLiteConnection;
   readonly expectedLock: Readonly<SQLiteCursorMigrationLockIdentity>;
@@ -97,6 +110,7 @@ interface CapabilityState {
 interface EvidenceState extends SQLiteCursorProviderClockEvidenceSnapshot {
   readonly capability: SQLiteCursorProviderClockCapability;
   readonly previousEvidence: SQLiteCursorProviderClockEvidence | undefined;
+  readonly totalChanges: number;
   consumed: boolean;
 }
 
@@ -424,6 +438,7 @@ export function observeSQLiteCursorProviderClockIntrinsic(
       consumer: SQLITE_CURSOR_CLOCK_CONSUMERS[boundary],
       previousEvidence: state.previousEvidence,
       providerNowMs,
+      totalChanges: changesAfter.totalChanges,
       transactionEpoch: ownerAfter.transactionEpoch,
       transactionLineage: state.transactionLineage,
     } satisfies EvidenceState]);
@@ -641,4 +656,179 @@ export function assertSQLiteCursorOuterClockAuthorityActiveGraphIntrinsic(
     transactionLineage: receipt.transactionLineage,
     transactionEpoch: readSQLiteConnectionOwnerSnapshot(connection).transactionEpoch,
   });
+}
+
+function assertSQLiteCursorPublicationSessionClockGraph(
+  connection: SQLiteConnection,
+  migrationLockCapability: SQLiteCursorMigrationLockCapability,
+  capability: SQLiteCursorProviderClockCapability,
+  outerEvidence: SQLiteCursorProviderClockEvidence,
+  outerTombstone: SQLiteCursorProviderClockConsumedTombstone,
+  preRebindEvidence: SQLiteCursorProviderClockEvidence,
+  preRebindTombstone: SQLiteCursorProviderClockConsumedTombstone | undefined,
+  expectedConsumed: boolean,
+): SQLiteCursorPublicationSessionClockGraphSnapshot {
+  const clock = capabilityState(capability);
+  const lockCapability = migrationLockCapability !== null
+      && typeof migrationLockCapability === "object"
+    ? reflectApplyIntrinsic(weakMapGetIntrinsic, LOCK_CAPABILITIES, [
+      migrationLockCapability as object,
+    ]) as MigrationLockCapabilityState | undefined
+    : undefined;
+  const outer = outerEvidence !== null && typeof outerEvidence === "object"
+    ? reflectApplyIntrinsic(weakMapGetIntrinsic, EVIDENCE, [outerEvidence as object]) as
+      EvidenceState | undefined
+    : undefined;
+  const second = preRebindEvidence !== null && typeof preRebindEvidence === "object"
+    ? reflectApplyIntrinsic(weakMapGetIntrinsic, EVIDENCE, [preRebindEvidence as object]) as
+      EvidenceState | undefined
+    : undefined;
+  const outerConsumed = outerTombstone !== null && typeof outerTombstone === "object"
+    ? reflectApplyIntrinsic(weakMapGetIntrinsic, TOMBSTONES, [outerTombstone as object]) as
+      TombstoneState | undefined
+    : undefined;
+  const secondConsumed = preRebindTombstone !== undefined
+      && preRebindTombstone !== null && typeof preRebindTombstone === "object"
+    ? reflectApplyIntrinsic(weakMapGetIntrinsic, TOMBSTONES, [
+      preRebindTombstone as object,
+    ]) as TombstoneState | undefined
+    : undefined;
+
+  if (clock.connection !== connection
+      || clock.migrationLockCapability !== migrationLockCapability
+      || lockCapability === undefined
+      || lockCapability.connection !== connection
+      || lockCapability.transactionLineage !== clock.transactionLineage
+      || !sameLock(lockCapability.expectedLock, clock.expectedLock)
+      || clock.poisoned
+      || clock.observing
+      || clock.nextBoundaryIndex !== 2
+      || clock.previousEvidence !== preRebindEvidence
+      || clock.previousProviderNowMs !== second?.providerNowMs
+      || outer === undefined
+      || outer.capability !== capability
+      || outer.boundary !== "before-first-permanent-mutation"
+      || outer.consumer !== "outer-publication-authority"
+      || outer.previousEvidence !== undefined
+      || !outer.consumed
+      || outerConsumed === undefined
+      || outerConsumed.capability !== capability
+      || outerConsumed.evidence !== outerEvidence
+      || outerConsumed.consumer !== "outer-publication-authority"
+      || second === undefined
+      || second.capability !== capability
+      || second.boundary !== "before-cursor-rebind"
+      || second.consumer !== "cursor-publication-session"
+      || second.previousEvidence !== outerEvidence
+      || preRebindEvidence === outerEvidence
+      || second.consumed !== expectedConsumed
+      || second.activeExpiresAtMs !== clock.expectedLock.activeExpiresAtMs
+      || second.providerNowMs < outer.providerNowMs
+      || (expectedConsumed
+        ? secondConsumed === undefined
+          || secondConsumed.capability !== capability
+          || secondConsumed.evidence !== preRebindEvidence
+          || secondConsumed.consumer !== "cursor-publication-session"
+        : preRebindTombstone !== undefined)) {
+    return fail(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      expectedConsumed
+        ? "SQLite active cursor publication session clock graph is invalid"
+        : "SQLite prepared cursor publication session clock graph is invalid",
+    );
+  }
+
+  requireExclusiveLineage(connection, clock.transactionLineage);
+  const ownerBefore = readSQLiteConnectionOwnerSnapshot(connection);
+  const changesBefore = readSQLiteConnectionTotalChangesSnapshot(connection);
+  const lock = liveLock(connection);
+  const ownerAfter = readSQLiteConnectionOwnerSnapshot(connection);
+  const changesAfter = readSQLiteConnectionTotalChangesSnapshot(connection);
+  if (!sameLock(lock, clock.expectedLock)
+      || ownerBefore.transactionLineage !== clock.transactionLineage
+      || ownerAfter.transactionLineage !== clock.transactionLineage
+      || ownerBefore.transactionEpoch !== second.transactionEpoch
+      || ownerAfter.transactionEpoch !== ownerBefore.transactionEpoch
+      || changesBefore.transactionEpoch !== ownerBefore.transactionEpoch
+      || changesAfter.transactionEpoch !== ownerAfter.transactionEpoch
+      || changesBefore.totalChanges !== second.totalChanges
+      || changesAfter.totalChanges !== changesBefore.totalChanges
+      || second.transactionLineage !== clock.transactionLineage) {
+    return fail(
+      "GE_CYCLE_STORE_STALE_FENCE",
+      expectedConsumed
+        ? "SQLite active cursor publication session clock graph changed"
+        : "SQLite prepared cursor publication session clock graph changed",
+    );
+  }
+
+  return objectFreezeIntrinsic({
+    activeExpiresAtMs: second.activeExpiresAtMs,
+    boundary: second.boundary,
+    consumer: second.consumer,
+    migrationLock: objectFreezeIntrinsic({
+      activeExpiresAtMs: clock.expectedLock.activeExpiresAtMs,
+      fencingToken: clock.expectedLock.fencingToken,
+      lockEpoch: clock.expectedLock.lockEpoch,
+      lockId: clock.expectedLock.lockId,
+      ownerId: clock.expectedLock.ownerId,
+      sourceSchemaVersion: clock.expectedLock.sourceSchemaVersion,
+      targetSchemaVersion: clock.expectedLock.targetSchemaVersion,
+    }),
+    previousEvidence: outerEvidence,
+    providerNowMs: second.providerNowMs,
+    totalChanges: second.totalChanges,
+    transactionEpoch: second.transactionEpoch,
+    transactionLineage: second.transactionLineage,
+  });
+}
+
+/**
+ * Prove the exact unconsumed second-boundary graph before entering the cursor
+ * publication session's non-interruptible tail. This performs no clock read or
+ * mutation.
+ */
+export function assertSQLiteCursorPublicationSessionClockPreparedGraphIntrinsic(
+  connection: SQLiteConnection,
+  migrationLockCapability: SQLiteCursorMigrationLockCapability,
+  capability: SQLiteCursorProviderClockCapability,
+  outerEvidence: SQLiteCursorProviderClockEvidence,
+  outerTombstone: SQLiteCursorProviderClockConsumedTombstone,
+  preRebindEvidence: SQLiteCursorProviderClockEvidence,
+): SQLiteCursorPublicationSessionClockGraphSnapshot {
+  return assertSQLiteCursorPublicationSessionClockGraph(
+    connection,
+    migrationLockCapability,
+    capability,
+    outerEvidence,
+    outerTombstone,
+    preRebindEvidence,
+    undefined,
+    false,
+  );
+}
+
+/**
+ * Revalidate the exact consumed second-boundary graph retained by an active
+ * publication session without observing a third clock boundary.
+ */
+export function assertSQLiteCursorPublicationSessionClockActiveGraphIntrinsic(
+  connection: SQLiteConnection,
+  migrationLockCapability: SQLiteCursorMigrationLockCapability,
+  capability: SQLiteCursorProviderClockCapability,
+  outerEvidence: SQLiteCursorProviderClockEvidence,
+  outerTombstone: SQLiteCursorProviderClockConsumedTombstone,
+  preRebindEvidence: SQLiteCursorProviderClockEvidence,
+  preRebindTombstone: SQLiteCursorProviderClockConsumedTombstone,
+): SQLiteCursorPublicationSessionClockGraphSnapshot {
+  return assertSQLiteCursorPublicationSessionClockGraph(
+    connection,
+    migrationLockCapability,
+    capability,
+    outerEvidence,
+    outerTombstone,
+    preRebindEvidence,
+    preRebindTombstone,
+    true,
+  );
 }

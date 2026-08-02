@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Final, Literal, NoReturn, TypeVar, cast
-from weakref import WeakKeyDictionary
+from typing import Final, Literal, NamedTuple, NoReturn, TypeVar, cast
+from weakref import ReferenceType, WeakKeyDictionary, ref
 
 from .sqlite_operation_baseline_source import (
     SQLiteV1BaselineConnectionOwner,
@@ -64,6 +64,12 @@ class _ClockEvidenceSnapshot:
     active_expires_at_ms: int
     transaction_generation: object
     transaction_epoch: int
+
+
+class _SecondBoundaryGraphSnapshot(NamedTuple):
+    evidence: _ClockEvidenceSnapshot
+    migration_lock: _MigrationLockIdentity
+    predecessor_evidence: _ClockEvidence
 
 
 class _ProviderClockSource:
@@ -129,9 +135,10 @@ class _ClockCapabilityState:
 
 @dataclass(slots=True)
 class _EvidenceState:
-    capability: _ProviderClockCapability
+    capability: ReferenceType[_ProviderClockCapability]
     snapshot: _ClockEvidenceSnapshot
     previous_evidence: _ClockEvidence | None
+    total_changes: int
     consumed: bool = False
 
 
@@ -364,9 +371,10 @@ def _observe_provider_clock_intrinsic(
             transaction_epoch=epoch_after,
         )
         _EVIDENCE[evidence] = _EvidenceState(
-            capability=capability,
+            capability=ref(capability),
             snapshot=snapshot,
             previous_evidence=state.previous_evidence,
+            total_changes=changes_after,
         )
         state.previous_evidence = evidence
         state.previous_provider_now_ms = provider_now_ms
@@ -385,13 +393,14 @@ def _consume_provider_clock_evidence_intrinsic(
     if _weak_get(_CLOCK_CAPABILITIES, capability) is None:
         _fail("GE_CURSOR_B3_CLOCK_CAPABILITY")
     state = _weak_get(_EVIDENCE, evidence)
-    if state is None or state.capability is not capability or state.snapshot.consumer != consumer:
+    if state is None or state.capability() is not capability or state.snapshot.consumer != consumer:
         _fail("GE_CURSOR_B3_CLOCK_EVIDENCE")
     if state.consumed:
         _fail("GE_CURSOR_B3_CLOCK_REPLAY")
-    state.consumed = True
     tombstone = _ConsumedClockTombstone(_CONSTRUCTION_TOKEN)
-    _TOMBSTONES[tombstone] = _TombstoneState(capability, evidence, consumer)
+    tombstone_state = _TombstoneState(capability, evidence, consumer)
+    _TOMBSTONES[tombstone] = tombstone_state
+    state.consumed = True
     return tombstone
 
 
@@ -399,7 +408,7 @@ def _read_clock_evidence_snapshot_intrinsic(
     capability: _ProviderClockCapability, evidence: _ClockEvidence
 ) -> _ClockEvidenceSnapshot:
     state = _weak_get(_EVIDENCE, evidence)
-    if state is None or state.capability is not capability:
+    if state is None or state.capability() is not capability:
         _fail("GE_CURSOR_B3_CLOCK_EVIDENCE")
     return state.snapshot
 
@@ -412,11 +421,189 @@ def _assert_clock_evidence_predecessor_intrinsic(
     state = _weak_get(_EVIDENCE, evidence)
     if (
         state is None
-        or state.capability is not capability
+        or state.capability() is not capability
         or state.previous_evidence is not previous_evidence
     ):
         _fail("GE_CURSOR_B3_CLOCK_CHAIN")
     return evidence
+
+
+def _assert_second_boundary_graph(
+    connection: SQLiteV1BaselineConnectionOwner,
+    lock_capability: _MigrationLockCapability,
+    capability: _ProviderClockCapability,
+    outer_evidence: _ClockEvidence,
+    outer_tombstone: _ConsumedClockTombstone,
+    pre_rebind_evidence: _ClockEvidence,
+    pre_rebind_tombstone: _ConsumedClockTombstone | None,
+    *,
+    active: bool,
+    observed_live_lock: _MigrationLockIdentity | None = None,
+    observed_transaction_epoch: int | None = None,
+    observed_total_changes: int | None = None,
+) -> _SecondBoundaryGraphSnapshot:
+    """Prove the exact two-boundary clock graph without observing or consuming."""
+
+    if (
+        type(connection) is not SQLiteV1BaselineConnectionOwner
+        or type(lock_capability) is not _MigrationLockCapability
+        or type(capability) is not _ProviderClockCapability
+        or type(outer_evidence) is not _ClockEvidence
+        or type(outer_tombstone) is not _ConsumedClockTombstone
+        or type(pre_rebind_evidence) is not _ClockEvidence
+        or (active and type(pre_rebind_tombstone) is not _ConsumedClockTombstone)
+        or (not active and pre_rebind_tombstone is not None)
+        or pre_rebind_evidence is outer_evidence
+    ):
+        _fail("GE_CURSOR_B3_CLOCK_SECOND_GRAPH")
+    lock_state = _weak_get(_LOCK_CAPABILITIES, lock_capability)
+    clock_state = _weak_get(_CLOCK_CAPABILITIES, capability)
+    outer_state = _weak_get(_EVIDENCE, outer_evidence)
+    second_state = _weak_get(_EVIDENCE, pre_rebind_evidence)
+    outer_tombstone_state = _weak_get(_TOMBSTONES, outer_tombstone)
+    second_tombstone_state = (
+        _weak_get(_TOMBSTONES, pre_rebind_tombstone) if pre_rebind_tombstone is not None else None
+    )
+    if (
+        lock_state is None
+        or clock_state is None
+        or outer_state is None
+        or second_state is None
+        or outer_tombstone_state is None
+        or lock_state.connection is not connection
+        or clock_state.connection is not connection
+        or clock_state.lock_capability is not lock_capability
+        or clock_state.expected_lock is not lock_state.expected_lock
+        or clock_state.transaction_generation is not lock_state.transaction_generation
+        or clock_state.poisoned
+        or clock_state.observing
+        or clock_state.next_boundary_index != 2
+        or clock_state.previous_evidence is not pre_rebind_evidence
+        or clock_state.previous_provider_now_ms != second_state.snapshot.provider_now_ms
+        or outer_state.capability() is not capability
+        or not outer_state.consumed
+        or outer_state.previous_evidence is not None
+        or outer_state.snapshot.boundary != "before-first-permanent-mutation"
+        or outer_state.snapshot.consumer != "outer-publication-authority"
+        or outer_state.snapshot.transaction_generation is not lock_state.transaction_generation
+        or outer_state.snapshot.active_expires_at_ms
+        != lock_state.expected_lock.active_expires_at_ms
+        or second_state.capability() is not capability
+        or second_state.previous_evidence is not outer_evidence
+        or second_state.snapshot.boundary != "before-cursor-rebind"
+        or second_state.snapshot.consumer != "cursor-publication-session"
+        or second_state.snapshot.transaction_generation is not lock_state.transaction_generation
+        or second_state.snapshot.active_expires_at_ms
+        != lock_state.expected_lock.active_expires_at_ms
+        or second_state.consumed is not active
+        or outer_tombstone_state.capability is not capability
+        or outer_tombstone_state.evidence is not outer_evidence
+        or outer_tombstone_state.consumer != "outer-publication-authority"
+        or (
+            active
+            and (
+                second_tombstone_state is None
+                or second_tombstone_state.capability is not capability
+                or second_tombstone_state.evidence is not pre_rebind_evidence
+                or second_tombstone_state.consumer != "cursor-publication-session"
+            )
+        )
+    ):
+        _fail("GE_CURSOR_B3_CLOCK_SECOND_GRAPH")
+    generation = lock_state.transaction_generation
+    supplied_observation = observed_live_lock is not None
+    if supplied_observation != (
+        observed_transaction_epoch is not None and observed_total_changes is not None
+    ):
+        _fail("GE_CURSOR_B3_CLOCK_SECOND_GRAPH")
+    _require_lineage(connection, generation)
+    if supplied_observation:
+        live_after = observed_live_lock
+        epoch_after = observed_transaction_epoch
+        changes_after = observed_total_changes
+    else:
+        epoch_before = connection.transaction_epoch
+        changes_before = connection.total_changes
+        live_before = _live_lock(connection)
+        _require_lineage(connection, generation)
+        epoch_after = connection.transaction_epoch
+        changes_after = connection.total_changes
+        live_after = _live_lock(connection)
+        if (
+            epoch_before != epoch_after
+            or changes_before != changes_after
+            or live_before != live_after
+        ):
+            _fail("GE_CURSOR_B3_CLOCK_SECOND_GRAPH")
+    if (
+        live_after != lock_state.expected_lock
+        or second_state.snapshot.transaction_epoch != epoch_after
+        or second_state.total_changes != changes_after
+    ):
+        _fail("GE_CURSOR_B3_CLOCK_SECOND_GRAPH")
+    expected = lock_state.expected_lock
+    lock_copy = _MigrationLockIdentity(
+        expected.lock_id,
+        expected.owner_id,
+        expected.source_schema_version,
+        expected.target_schema_version,
+        expected.lock_epoch,
+        expected.fencing_token,
+        expected.active_expires_at_ms,
+    )
+    return _SecondBoundaryGraphSnapshot(
+        second_state.snapshot,
+        lock_copy,
+        outer_evidence,
+    )
+
+
+def _assert_prepared_second_boundary_graph_intrinsic(
+    connection: SQLiteV1BaselineConnectionOwner,
+    lock_capability: _MigrationLockCapability,
+    capability: _ProviderClockCapability,
+    outer_evidence: _ClockEvidence,
+    outer_tombstone: _ConsumedClockTombstone,
+    pre_rebind_evidence: _ClockEvidence,
+) -> _SecondBoundaryGraphSnapshot:
+    return _assert_second_boundary_graph(
+        connection,
+        lock_capability,
+        capability,
+        outer_evidence,
+        outer_tombstone,
+        pre_rebind_evidence,
+        None,
+        active=False,
+    )
+
+
+def _assert_active_second_boundary_graph_intrinsic(
+    connection: SQLiteV1BaselineConnectionOwner,
+    lock_capability: _MigrationLockCapability,
+    capability: _ProviderClockCapability,
+    outer_evidence: _ClockEvidence,
+    outer_tombstone: _ConsumedClockTombstone,
+    pre_rebind_evidence: _ClockEvidence,
+    pre_rebind_tombstone: _ConsumedClockTombstone,
+    *,
+    observed_live_lock: _MigrationLockIdentity | None = None,
+    observed_transaction_epoch: int | None = None,
+    observed_total_changes: int | None = None,
+) -> _SecondBoundaryGraphSnapshot:
+    return _assert_second_boundary_graph(
+        connection,
+        lock_capability,
+        capability,
+        outer_evidence,
+        outer_tombstone,
+        pre_rebind_evidence,
+        pre_rebind_tombstone,
+        active=True,
+        observed_live_lock=observed_live_lock,
+        observed_transaction_epoch=observed_transaction_epoch,
+        observed_total_changes=observed_total_changes,
+    )
 
 
 def _assert_consumed_clock_tombstone_intrinsic(

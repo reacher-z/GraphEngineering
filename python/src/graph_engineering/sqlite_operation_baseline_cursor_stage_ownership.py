@@ -37,9 +37,14 @@ from .sqlite_operation_baseline_source import (
 )
 from .sqlite_operation_baseline_stage import (
     SQLiteV1BaselineTempStage,
+    _burn_cursor_publication_session_tail,
+    _prepare_cursor_publication_session_commit,
     _SQLiteBaselineCursorB2FenceRetirement,
     _SQLiteBaselineCursorInitialPublicationAdoptionMint,
     _SQLiteBaselineCursorInitialPublicationAdoptionTail,
+    _SQLiteBaselineCursorPublicationSessionCommit,
+    _SQLiteBaselineCursorPublicationSessionContinuation,
+    _SQLiteBaselineCursorPublicationSessionTail,
     _SQLiteCursorInitialPublicationOuterLedgerWatermark,
     _SQLiteCursorInitialPublicationStageWatermark,
 )
@@ -64,6 +69,9 @@ _TransferLifecycle = Literal[
     "outer-publication-owned",
     "initial-publication-adoption-prepared",
     "initial-publication-adopted",
+    "publication-session-prepared",
+    "publication-session-burned",
+    "publication-active",
     "retired",
     "poisoned",
 ]
@@ -73,11 +81,34 @@ _PostDdlReaderLifecycle = Literal["unused", "active", "closed", "poisoned"]
 class _SQLiteCursorStageOwnershipOuterPublicationAuthority:
     """Exact package-private inactive/active outer-owner identity."""
 
-    __slots__ = ("__weakref__",)
+    __slots__ = (
+        "__publication_session",
+        "__publication_session_state",
+        "__publication_state",
+        "__weakref__",
+    )
 
     def __init__(self, construction_token: object) -> None:
         if construction_token is not _CONSTRUCTION_TOKEN:
             raise TypeError("cursor outer publication authorities are module-minted")
+        object.__setattr__(
+            self,
+            "_SQLiteCursorStageOwnershipOuterPublicationAuthority__publication_session",
+            None,
+        )
+        object.__setattr__(
+            self,
+            "_SQLiteCursorStageOwnershipOuterPublicationAuthority__publication_session_state",
+            None,
+        )
+        object.__setattr__(
+            self,
+            "_SQLiteCursorStageOwnershipOuterPublicationAuthority__publication_state",
+            None,
+        )
+
+    def __setattr__(self, _name: str, _value: object) -> None:
+        raise TypeError("cursor outer publication authority state is immutable")
 
 
 class _SQLiteCursorStageOwnershipOuterPublicationTail:
@@ -109,6 +140,14 @@ class _SQLiteCursorStageOwnershipInitialPublicationAdoptionMint(NamedTuple):
     retired_b2_fence: _SQLiteBaselineCursorB2FenceRetirement
     tail: _SQLiteCursorStageOwnershipInitialPublicationAdoptionTail
     watermark: _SQLiteCursorInitialPublicationStageWatermark
+
+
+class _SQLiteCursorStageOwnershipPublicationSessionTail:
+    __slots__ = ("__weakref__",)
+
+    def __init__(self, construction_token: object) -> None:
+        if construction_token is not _CONSTRUCTION_TOKEN:
+            raise TypeError("cursor publication-session tails are module-minted")
 
 
 @dataclass(slots=True, weakref_slot=True)
@@ -143,6 +182,10 @@ class _TransferMetadata:
     post_ddl_reader_cleanup: Callable[[], None] | None = None
     post_ddl_reader_lease: object | None = None
     post_ddl_reader_lifecycle: _PostDdlReaderLifecycle = "unused"
+    publication_prepared_owner_ref: ReferenceType[object] | None = None
+    publication_session_ref: ReferenceType[object] | None = None
+    publication_session_tail: _SQLiteCursorStageOwnershipPublicationSessionTail | None = None
+    publication_session_stage_tail: _SQLiteBaselineCursorPublicationSessionTail | None = None
 
 
 _TRANSFERS: WeakKeyDictionary[_SQLiteCursorStageOwnershipTransfer, _TransferMetadata] = (
@@ -165,12 +208,33 @@ class _InitialPublicationAdoptionTailContinuation:
     transfer_ref: ReferenceType[_TransferMetadata]
 
 
+@dataclass(frozen=True, slots=True)
+class _PublicationSessionTailContinuation:
+    tail_ref: ReferenceType[_SQLiteCursorStageOwnershipPublicationSessionTail]
+    stage_tail: _SQLiteBaselineCursorPublicationSessionTail
+    transfer_ref: ReferenceType[_TransferMetadata]
+
+
+@dataclass(frozen=True, slots=True)
+class _SQLiteCursorStageOwnershipPublicationSessionCommit:
+    """Prevalidated lower-graph state for the callback-free B3 tail."""
+
+    continuation: _PublicationSessionTailContinuation
+    metadata: _TransferMetadata
+    registration: _PublicationSessionTailContinuation
+    session_ref: ReferenceType[object]
+    stage_commit: _SQLiteBaselineCursorPublicationSessionCommit
+    tail: _SQLiteCursorStageOwnershipPublicationSessionTail
+    tail_id: int
+
+
 # These registries deliberately do not key on the caller-provided object.  A
 # WeakKeyDictionary would execute hostile ``__hash__``/``__eq__`` hooks before
 # validating exact provenance.  The id-keyed entry carries a weak referent and
 # every lookup requires exact type plus ``referent is token`` before mutation.
 _OUTER_PUBLICATION_TAILS: dict[int, _OuterPublicationTailContinuation] = {}
 _INITIAL_PUBLICATION_ADOPTION_TAILS: dict[int, _InitialPublicationAdoptionTailContinuation] = {}
+_PUBLICATION_SESSION_TAILS: dict[int, _PublicationSessionTailContinuation] = {}
 
 _DICT_GET = dict.get
 _DICT_POP = dict.pop
@@ -273,6 +337,17 @@ _STAGE_PUBLISH_INITIAL_PUBLICATION_ADOPTION = (
 )
 _STAGE_ASSERT_INITIAL_PUBLICATION_ADOPTED = (
     SQLiteV1BaselineTempStage._assert_cursor_initial_publication_adopted
+)
+_STAGE_PREPARE_PUBLICATION_SESSION = SQLiteV1BaselineTempStage._prepare_cursor_publication_session
+_STAGE_PUBLISH_PUBLICATION_SESSION = SQLiteV1BaselineTempStage._publish_cursor_publication_session
+_STAGE_BURN_PUBLICATION_SESSION_COMMIT = (
+    SQLiteV1BaselineTempStage._burn_cursor_publication_session_commit
+)
+_STAGE_PUBLISH_PUBLICATION_SESSION_COMMIT = (
+    SQLiteV1BaselineTempStage._publish_cursor_publication_session_commit
+)
+_STAGE_ASSERT_PUBLICATION_SESSION = (
+    SQLiteV1BaselineTempStage._assert_cursor_publication_session_active
 )
 _STAGE_RETIRE_OUTER_PUBLICATION = SQLiteV1BaselineTempStage._retire_cursor_outer_publication
 _STAGE_POISON_OUTER_PUBLICATION = SQLiteV1BaselineTempStage._poison_cursor_outer_publication
@@ -1197,6 +1272,9 @@ def _assert_sqlite_cursor_stage_ownership_post_ddl_reader_terminal_intrinsic(
             "outer-publication-owned",
             "initial-publication-adoption-prepared",
             "initial-publication-adopted",
+            "publication-session-prepared",
+            "publication-session-burned",
+            "publication-active",
         }
         or registered_authority is not authority
         or metadata.post_ddl_reader_lifecycle != "closed"
@@ -1404,7 +1482,7 @@ def _assert_sqlite_cursor_stage_ownership_initial_publication_adopted_intrinsic(
     except _value_error:
         supplied_watermark_record = None
     if (
-        metadata.lifecycle != "initial-publication-adopted"
+        metadata.lifecycle not in {"initial-publication-adopted", "publication-session-prepared"}
         or registered_authority is not authority
         or metadata.post_ddl_reader_lifecycle != "closed"
         or metadata.post_ddl_reader_lease is not lease
@@ -1427,6 +1505,263 @@ def _assert_sqlite_cursor_stage_ownership_initial_publication_adopted_intrinsic(
     return transfer
 
 
+def _prepare_sqlite_cursor_stage_ownership_publication_session_intrinsic(
+    connection: SQLiteV1BaselineConnectionOwner,
+    stage: SQLiteV1BaselineTempStage,
+    receipt: SQLiteCursorPreRebindReceipt,
+    projection_identity: BaselineProjectionIdentity,
+    transfer: _SQLiteCursorStageOwnershipTransfer,
+    authority: object,
+    prepared_owner: object,
+) -> _SQLiteCursorStageOwnershipPublicationSessionTail:
+    """Prepare both lower publication continuations without consuming either."""
+
+    metadata = _checked_transfer_identity_graph(
+        connection, stage, receipt, projection_identity, transfer
+    )
+    registered_authority = _metadata_outer_publication_authority(metadata)
+    if registered_authority is not authority:
+        raise ValueError("SQLite cursor publication-session authority is invalid")
+    if metadata.lifecycle == "publication-session-prepared":
+        owner_ref = metadata.publication_prepared_owner_ref
+        tail = metadata.publication_session_tail
+        continuation = _DICT_GET(_PUBLICATION_SESSION_TAILS, id(tail)) if tail is not None else None
+        if (
+            owner_ref is None
+            or owner_ref() is not prepared_owner
+            or tail is None
+            or continuation is None
+            or continuation.tail_ref() is not tail
+            or continuation.transfer_ref() is not metadata
+            or continuation.stage_tail is not metadata.publication_session_stage_tail
+        ):
+            raise ValueError("SQLite cursor publication-session preparation is invalid")
+        return tail
+    if (
+        metadata.lifecycle != "initial-publication-adopted"
+        or metadata.publication_prepared_owner_ref is not None
+        or metadata.publication_session_ref is not None
+        or metadata.publication_session_tail is not None
+        or metadata.publication_session_stage_tail is not None
+    ):
+        raise ValueError("SQLite cursor publication-session preparation is invalid")
+    try:
+        prepared_owner_ref = ref(prepared_owner)
+    except TypeError:
+        raise ValueError("SQLite cursor publication-session owner is invalid") from None
+    stage_tail = _STAGE_PREPARE_PUBLICATION_SESSION(
+        stage, authority, prepared_owner, projection_identity
+    )
+    tail = _SQLiteCursorStageOwnershipPublicationSessionTail(_CONSTRUCTION_TOKEN)
+    tail_id = id(tail)
+
+    def discard(
+        reference: ReferenceType[_SQLiteCursorStageOwnershipPublicationSessionTail],
+    ) -> None:
+        current = _DICT_GET(_PUBLICATION_SESSION_TAILS, tail_id)
+        if current is not None and current.tail_ref is reference:
+            _DICT_POP(_PUBLICATION_SESSION_TAILS, tail_id, None)
+
+    tail_ref = ref(tail, discard)
+    _DICT_SETITEM(
+        _PUBLICATION_SESSION_TAILS,
+        tail_id,
+        _PublicationSessionTailContinuation(tail_ref, stage_tail, ref(metadata)),
+    )
+    metadata.publication_prepared_owner_ref = prepared_owner_ref
+    metadata.publication_session_tail = tail
+    metadata.publication_session_stage_tail = stage_tail
+    metadata.lifecycle = "publication-session-prepared"
+    return tail
+
+
+def _burn_sqlite_cursor_stage_ownership_publication_session_intrinsic(
+    tail: _SQLiteCursorStageOwnershipPublicationSessionTail,
+) -> tuple[
+    _PublicationSessionTailContinuation,
+    _SQLiteBaselineCursorPublicationSessionContinuation,
+]:
+    """Burn transfer then TEMP-stage continuations; perform no publication or I/O."""
+
+    if type(tail) is not _SQLiteCursorStageOwnershipPublicationSessionTail:
+        raise ValueError("SQLite cursor publication-session tail is invalid")
+    tail_id = id(tail)
+    continuation = _DICT_GET(_PUBLICATION_SESSION_TAILS, tail_id)
+    metadata = continuation.transfer_ref() if continuation is not None else None
+    if (
+        continuation is None
+        or continuation.tail_ref() is not tail
+        or metadata is None
+        or metadata.lifecycle != "publication-session-prepared"
+        or metadata.publication_session_tail is not tail
+        or metadata.publication_session_stage_tail is not continuation.stage_tail
+    ):
+        raise ValueError("SQLite cursor publication-session tail is invalid")
+    _DICT_POP(_PUBLICATION_SESSION_TAILS, tail_id, None)
+    stage_continuation = _burn_cursor_publication_session_tail(continuation.stage_tail)
+    return continuation, stage_continuation
+
+
+def _publish_sqlite_cursor_stage_ownership_publication_session_intrinsic(
+    continuation: _PublicationSessionTailContinuation,
+    stage_continuation: _SQLiteBaselineCursorPublicationSessionContinuation,
+    session: object,
+) -> None:
+    """Publish the already-burned lower identities without SQL or callbacks."""
+
+    metadata = continuation.transfer_ref()
+    if (
+        metadata is None
+        or metadata.lifecycle != "publication-session-prepared"
+        or metadata.publication_session_stage_tail is not continuation.stage_tail
+    ):
+        raise ValueError("SQLite cursor publication-session continuation is invalid")
+    _STAGE_PUBLISH_PUBLICATION_SESSION(metadata.stage, stage_continuation, session)
+    metadata.publication_session_ref = ref(session)
+    metadata.publication_session_tail = None
+    metadata.publication_session_stage_tail = None
+    metadata.lifecycle = "publication-active"
+
+
+def _prepare_sqlite_cursor_stage_ownership_publication_session_commit_intrinsic(
+    tail: _SQLiteCursorStageOwnershipPublicationSessionTail,
+    session: object,
+) -> _SQLiteCursorStageOwnershipPublicationSessionCommit:
+    """Resolve both registries and all weak references before the atomic tail."""
+
+    if type(tail) is not _SQLiteCursorStageOwnershipPublicationSessionTail:
+        raise ValueError("SQLite cursor publication-session tail is invalid")
+    tail_id = id(tail)
+    continuation = _DICT_GET(_PUBLICATION_SESSION_TAILS, tail_id)
+    metadata = continuation.transfer_ref() if continuation is not None else None
+    if (
+        continuation is None
+        or continuation.tail_ref() is not tail
+        or metadata is None
+        or metadata.lifecycle != "publication-session-prepared"
+        or metadata.publication_session_tail is not tail
+        or metadata.publication_session_stage_tail is not continuation.stage_tail
+        or metadata.publication_session_ref is not None
+    ):
+        raise ValueError("SQLite cursor publication-session tail is invalid")
+    try:
+        session_ref = ref(session)
+    except TypeError:
+        raise ValueError("SQLite cursor publication-session identity is invalid") from None
+    stage_commit = _prepare_cursor_publication_session_commit(
+        continuation.stage_tail,
+        session,
+        session_ref,
+    )
+    return _SQLiteCursorStageOwnershipPublicationSessionCommit(
+        continuation=continuation,
+        metadata=metadata,
+        registration=continuation,
+        session_ref=session_ref,
+        stage_commit=stage_commit,
+        tail=tail,
+        tail_id=tail_id,
+    )
+
+
+def _burn_sqlite_cursor_stage_ownership_publication_session_commit_implementation(
+    commit: _SQLiteCursorStageOwnershipPublicationSessionCommit,
+    burn_stage_commit: Callable[
+        [SQLiteV1BaselineTempStage, _SQLiteBaselineCursorPublicationSessionCommit], None
+    ],
+) -> None:
+    """Burn ownership then stage with no lookup, validation, or callbacks."""
+
+    commit.metadata.publication_session_tail = None
+    commit.metadata.lifecycle = "publication-session-burned"
+    burn_stage_commit(commit.metadata.stage, commit.stage_commit)
+
+
+def _publish_sqlite_cursor_stage_ownership_publication_session_commit_implementation(
+    commit: _SQLiteCursorStageOwnershipPublicationSessionCommit,
+    publish_stage_commit: Callable[
+        [SQLiteV1BaselineTempStage, _SQLiteBaselineCursorPublicationSessionCommit], None
+    ],
+) -> None:
+    """Publish stage then ownership after evidence consumption, by assignment."""
+
+    publish_stage_commit(commit.metadata.stage, commit.stage_commit)
+    commit.metadata.publication_session_ref = commit.session_ref
+    commit.metadata.publication_session_stage_tail = None
+    commit.metadata.lifecycle = "publication-active"
+
+
+def _capture_publication_session_commit_actions(
+    burn_implementation: Callable[..., None] = (
+        _burn_sqlite_cursor_stage_ownership_publication_session_commit_implementation
+    ),
+    publish_implementation: Callable[..., None] = (
+        _publish_sqlite_cursor_stage_ownership_publication_session_commit_implementation
+    ),
+    burn_stage_commit: Callable[
+        [SQLiteV1BaselineTempStage, _SQLiteBaselineCursorPublicationSessionCommit], None
+    ] = _STAGE_BURN_PUBLICATION_SESSION_COMMIT,
+    publish_stage_commit: Callable[
+        [SQLiteV1BaselineTempStage, _SQLiteBaselineCursorPublicationSessionCommit], None
+    ] = _STAGE_PUBLISH_PUBLICATION_SESSION_COMMIT,
+) -> tuple[
+    Callable[[_SQLiteCursorStageOwnershipPublicationSessionCommit], None],
+    Callable[[_SQLiteCursorStageOwnershipPublicationSessionCommit], None],
+]:
+    """Close both assignment tails over their exact TEMP-stage callables."""
+
+    def burn(
+        commit: _SQLiteCursorStageOwnershipPublicationSessionCommit,
+    ) -> None:
+        burn_implementation(commit, burn_stage_commit)
+
+    def publish(
+        commit: _SQLiteCursorStageOwnershipPublicationSessionCommit,
+    ) -> None:
+        publish_implementation(commit, publish_stage_commit)
+
+    return burn, publish
+
+
+(
+    _burn_sqlite_cursor_stage_ownership_publication_session_commit_intrinsic,
+    _publish_sqlite_cursor_stage_ownership_publication_session_commit_intrinsic,
+) = _capture_publication_session_commit_actions()
+del _capture_publication_session_commit_actions
+del _burn_sqlite_cursor_stage_ownership_publication_session_commit_implementation
+del _publish_sqlite_cursor_stage_ownership_publication_session_commit_implementation
+
+
+def _assert_sqlite_cursor_stage_ownership_publication_session_intrinsic(
+    connection: SQLiteV1BaselineConnectionOwner,
+    stage: SQLiteV1BaselineTempStage,
+    receipt: SQLiteCursorPreRebindReceipt,
+    projection_identity: BaselineProjectionIdentity,
+    transfer: _SQLiteCursorStageOwnershipTransfer,
+    authority: object,
+    prepared_owner: object,
+    session: object,
+) -> _SQLiteCursorStageOwnershipTransfer:
+    metadata = _checked_transfer_identity_graph(
+        connection, stage, receipt, projection_identity, transfer
+    )
+    if (
+        metadata.lifecycle != "publication-active"
+        or _metadata_outer_publication_authority(metadata) is not authority
+        or metadata.publication_prepared_owner_ref is None
+        or metadata.publication_prepared_owner_ref() is not prepared_owner
+        or metadata.publication_session_ref is None
+        or metadata.publication_session_ref() is not session
+        or metadata.publication_session_tail is not None
+        or metadata.publication_session_stage_tail is not None
+    ):
+        raise ValueError("SQLite cursor publication-session identity is invalid")
+    _STAGE_ASSERT_PUBLICATION_SESSION(
+        stage, authority, prepared_owner, session, projection_identity
+    )
+    return transfer
+
+
 def _close_active_post_ddl_reader(
     metadata: _TransferMetadata,
     _base_exception: type[BaseException] = BaseException,
@@ -1444,6 +1779,20 @@ def _close_active_post_ddl_reader(
             return
     metadata.post_ddl_reader_cleanup = None
     metadata.post_ddl_reader_lifecycle = "poisoned"
+
+
+def _burn_publication_session_tail(metadata: _TransferMetadata) -> None:
+    tail = metadata.publication_session_tail
+    if tail is not None:
+        continuation = _DICT_GET(_PUBLICATION_SESSION_TAILS, id(tail))
+        if continuation is not None and continuation.tail_ref() is tail:
+            _DICT_POP(_PUBLICATION_SESSION_TAILS, id(tail), None)
+    stage_tail = metadata.publication_session_stage_tail
+    if stage_tail is not None:
+        with suppress(ValueError):
+            _burn_cursor_publication_session_tail(stage_tail)
+    metadata.publication_session_tail = None
+    metadata.publication_session_stage_tail = None
 
 
 def _retire_sqlite_cursor_stage_ownership_outer_publication_intrinsic(
@@ -1476,12 +1825,16 @@ def _retire_sqlite_cursor_stage_ownership_outer_publication_intrinsic(
             "outer-publication-owned",
             "initial-publication-adoption-prepared",
             "initial-publication-adopted",
+            "publication-session-prepared",
+            "publication-session-burned",
+            "publication-active",
         }
         or registered_authority is not authority
     ):
         raise ValueError("SQLite cursor outer publication authority is invalid")
     _burn_outer(metadata.outer_tail)
     _burn_adoption(metadata.initial_publication_adoption_tail)
+    _burn_publication_session_tail(metadata)
     _close_reader(metadata)
     _stage_retire(metadata.stage)
     _clear_adoption(metadata)
@@ -1526,6 +1879,9 @@ def _poison_sqlite_cursor_stage_ownership_outer_publication_intrinsic(
             "outer-publication-owned",
             "initial-publication-adoption-prepared",
             "initial-publication-adopted",
+            "publication-session-prepared",
+            "publication-session-burned",
+            "publication-active",
             # The publication wrapper burns its continuation and marks the
             # bridge terminal before entering the stage's no-fail publish.
             # If that final stage gate rejects, the outer atomic-tail catcher
@@ -1538,6 +1894,7 @@ def _poison_sqlite_cursor_stage_ownership_outer_publication_intrinsic(
     _close_reader(metadata)
     _burn_outer(metadata.outer_tail)
     _burn_adoption(metadata.initial_publication_adoption_tail)
+    _burn_publication_session_tail(metadata)
     _clear_adoption(metadata)
     _stage_poison(
         metadata.stage,
