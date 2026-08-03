@@ -1,0 +1,770 @@
+"""Package-private SQLite publication transaction owner (P9 BEGIN tranche)."""
+
+from __future__ import annotations
+
+import sqlite3
+from contextlib import suppress
+from dataclasses import dataclass
+from typing import Literal, NamedTuple, Never, cast
+from weakref import ReferenceType, ref
+
+from .sqlite_operation_baseline_source import SQLiteV1BaselineConnectionOwner
+
+_CONSTRUCTION_TOKEN = object()
+_TYPE = type
+
+GUARDED_TRANSACTION_CONTROL_PATHS = (
+    "connection-commit-method",
+    "connection-rollback-method",
+    "execute-COMMIT-or-END",
+    "execute-ROLLBACK",
+    "execute-BEGIN",
+    "execute-SAVEPOINT-or-RELEASE-or-ROLLBACK-TO",
+    "multi-statement-exec-containing-transaction-control",
+    "prepared-statement-containing-transaction-control",
+    "script-containing-implicit-or-explicit-transaction-control",
+    "nested-BEGIN",
+    "close-live-guarded-transaction",
+    "newly-prepared-permanent-DML-after-pre-retirement",
+    "already-prepared-permanent-DML-after-pre-retirement",
+    "newly-prepared-permanent-DDL-after-pre-retirement",
+    "already-prepared-permanent-DDL-after-pre-retirement",
+    "persistent-PRAGMA-including-user-version-or-application-id",
+    "VACUUM-ANALYZE-or-REINDEX",
+    "ATTACH-DETACH-or-connection-topology-change",
+    "any-other-permanent-state-mutation-or-transaction-proof-history-change",
+)
+
+
+def _fail(code: str) -> Never:
+    raise ValueError(code)
+
+
+class _SQLiteCursorPublicationTransactionLineage:
+    __slots__ = ("__weakref__",)
+
+
+class _SQLiteCursorPublicationTransactionGeneration:
+    __slots__ = ("__promoted", "__tombstoned", "__weakref__")
+
+    def __init__(self, token: object) -> None:
+        if token is not _CONSTRUCTION_TOKEN:
+            raise TypeError("GE_SQLITE_TX_OWNER_GENERATION")
+        self.__promoted = False
+        self.__tombstoned = False
+
+    def _promote(self) -> None:
+        if self.__promoted or self.__tombstoned:
+            _fail("GE_SQLITE_TX_OWNER_GENERATION_REPLAY")
+        self.__promoted = True
+
+    def _tombstone(self) -> None:
+        if self.__tombstoned:
+            return
+        self.__tombstoned = True
+
+
+class _SQLiteCursorPublicationBeginReceipt:
+    __slots__ = (
+        "__connection",
+        "__epoch",
+        "__generation",
+        "__lineage",
+        "__mode",
+        "__owner",
+        "__temp_mutation_epoch",
+        "__total_changes",
+        "__weakref__",
+    )
+
+    def __init__(
+        self,
+        owner: _SQLiteCursorPublicationTransactionOwner,
+        connection: SQLiteV1BaselineConnectionOwner,
+        lineage: _SQLiteCursorPublicationTransactionLineage,
+        generation: _SQLiteCursorPublicationTransactionGeneration,
+        epoch: int,
+        total_changes: int,
+        temp_mutation_epoch: int,
+        token: object,
+    ) -> None:
+        if token is not _CONSTRUCTION_TOKEN:
+            raise TypeError("GE_SQLITE_TX_OWNER_BEGIN_RECEIPT")
+        self.__owner: _SQLiteCursorPublicationTransactionOwner | None = owner
+        self.__connection: SQLiteV1BaselineConnectionOwner | None = connection
+        self.__lineage: _SQLiteCursorPublicationTransactionLineage | None = lineage
+        self.__generation: _SQLiteCursorPublicationTransactionGeneration | None = generation
+        self.__mode: Literal["exclusive"] | None = "exclusive"
+        self.__epoch = epoch
+        self.__total_changes = total_changes
+        self.__temp_mutation_epoch = temp_mutation_epoch
+
+    def _clear(self) -> None:
+        self.__owner = None
+        self.__connection = None
+        self.__lineage = None
+        self.__generation = None
+        self.__mode = None
+
+
+class _SQLiteCursorPublicationAuthenticatedFailure(BaseException):
+    __slots__ = ("__owner", "__weakref__")
+
+    def __init__(self, owner: _SQLiteCursorPublicationTransactionOwner, token: object) -> None:
+        if token is not _CONSTRUCTION_TOKEN:
+            raise TypeError("GE_SQLITE_TX_OWNER_PRIMARY")
+        self.__owner: _SQLiteCursorPublicationTransactionOwner | None = owner
+        super().__init__("GE_SQLITE_TX_OWNER_AUTHENTICATED_FAILURE")
+
+    def _clear(self) -> None:
+        self.__owner = None
+
+
+class _SQLiteCursorPublicationTransactionOwner:
+    __slots__ = (
+        "__connection",
+        "__generation",
+        "__lineage",
+        "__primary",
+        "__receipt",
+        "__source_fingerprint",
+        "__weakref__",
+    )
+
+    def __init__(
+        self,
+        connection: SQLiteV1BaselineConnectionOwner,
+        lineage: _SQLiteCursorPublicationTransactionLineage,
+        generation: _SQLiteCursorPublicationTransactionGeneration,
+        token: object,
+    ) -> None:
+        if token is not _CONSTRUCTION_TOKEN:
+            raise TypeError("GE_SQLITE_TX_OWNER_CONSTRUCTION")
+        self.__connection: SQLiteV1BaselineConnectionOwner | None = connection
+        self.__lineage: _SQLiteCursorPublicationTransactionLineage | None = lineage
+        self.__generation: _SQLiteCursorPublicationTransactionGeneration | None = generation
+        self.__receipt: _SQLiteCursorPublicationBeginReceipt | None = None
+        self.__primary: _SQLiteCursorPublicationAuthenticatedFailure | None = None
+        self.__source_fingerprint: tuple[object, ...] | None = None
+
+
+class _SQLiteCursorPublicationTransactionOwnerSnapshot(NamedTuple):
+    lifecycle: str
+    registration_count: int
+    provisional_generation_mint_count: int
+    provisional_generation_promotion_count: int
+    provisional_generation_tombstone_count: int
+    begin_attempt_count: int
+    begin_native_return_count: int
+    begin_receipt_mint_count: int
+    rollback_attempt_count: int
+    rollback_native_return_count: int
+    close_attempt_count: int
+    close_native_return_count: int
+    reopen_attempt_count: int
+    reopen_source_v1_count: int
+    runtime_transaction_control_count: int
+    commit_attempt_count: int
+    commit_hard_disabled: bool
+    exact_generation_active: bool
+    exact_lineage_selected: bool
+    transaction_mode: str | None
+    transaction_epoch: int
+    total_changes: int
+    temp_mutation_epoch: int
+    transaction_epoch_advanced_exactly_once_by_owner: bool
+    total_changes_unchanged_by_begin: bool
+    temp_mutation_epoch_unchanged_by_begin: bool
+    guard_rejection_counts: tuple[int, ...]
+
+
+class _SQLiteCursorPublicationBeginReceiptSnapshot(NamedTuple):
+    exact_owner: bool
+    exact_connection: bool
+    exact_lineage: bool
+    exact_generation: bool
+    exclusive_mode: bool
+    transaction_epoch: int
+    total_changes: int
+    temp_mutation_epoch: int
+    begin_attempt_count: Literal[1]
+
+
+@dataclass(slots=True)
+class _State:
+    connection_ref: ReferenceType[SQLiteV1BaselineConnectionOwner]
+    lineage_ref: ReferenceType[_SQLiteCursorPublicationTransactionLineage]
+    generation_ref: ReferenceType[_SQLiteCursorPublicationTransactionGeneration]
+    lifecycle: str = "registered"
+    registration_count: int = 1
+    provisional_generation_mint_count: int = 1
+    provisional_generation_promotion_count: int = 0
+    provisional_generation_tombstone_count: int = 0
+    begin_attempt_count: int = 0
+    begin_native_return_count: int = 0
+    begin_receipt_mint_count: int = 0
+    rollback_attempt_count: int = 0
+    rollback_native_return_count: int = 0
+    close_attempt_count: int = 0
+    close_native_return_count: int = 0
+    reopen_attempt_count: int = 0
+    reopen_source_v1_count: int = 0
+    runtime_transaction_control_count: int = 0
+    commit_attempt_count: int = 0
+    transaction_mode: str | None = None
+    transaction_epoch: int = 0
+    total_changes: int = 0
+    temp_mutation_epoch: int = 0
+    registration_epoch: int = 0
+    registration_total_changes: int = 0
+    registration_temp_mutation_epoch: int = 0
+    exact_generation_active: bool = False
+    exact_lineage_selected: bool = False
+    begin_transaction_epoch_advanced_exactly_once: bool = False
+    begin_total_changes_unchanged: bool = False
+    begin_temp_mutation_epoch_unchanged: bool = False
+    guard_rejection_counts: tuple[int, ...] = (0,) * 19
+    primary_ref: ReferenceType[_SQLiteCursorPublicationAuthenticatedFailure] | None = None
+
+
+class _Entry(NamedTuple):
+    owner_ref: ReferenceType[_SQLiteCursorPublicationTransactionOwner]
+    state: _State
+
+
+_OWNERS: dict[int, _Entry] = {}
+
+_INSTALL_GUARD = SQLiteV1BaselineConnectionOwner._install_publication_transaction_guard
+_DISCARD_GUARD = SQLiteV1BaselineConnectionOwner._discard_publication_transaction_guard
+_RECOVERABLE = SQLiteV1BaselineConnectionOwner._publication_transaction_recoverable
+_BEGIN_EXCLUSIVE = SQLiteV1BaselineConnectionOwner._begin_publication_transaction_exclusive
+_OBSERVE = SQLiteV1BaselineConnectionOwner._observe_publication_transaction
+_ROLLBACK = SQLiteV1BaselineConnectionOwner._rollback_publication_transaction
+_CLOSE = SQLiteV1BaselineConnectionOwner._close_publication_transaction
+_SOURCE_FINGERPRINT = SQLiteV1BaselineConnectionOwner._publication_transaction_source_fingerprint
+_VALIDATE_SOURCE_V1 = SQLiteV1BaselineConnectionOwner._validate_publication_transaction_source_v1
+_VALIDATE_ACTIVE_SOURCE_V1 = (
+    SQLiteV1BaselineConnectionOwner._validate_publication_transaction_source_v1_active
+)
+_REOPEN_FINGERPRINT = (
+    SQLiteV1BaselineConnectionOwner._reopen_publication_transaction_source_fingerprint
+)
+
+
+def _state(owner: _SQLiteCursorPublicationTransactionOwner) -> _State:
+    if _TYPE(owner) is not _SQLiteCursorPublicationTransactionOwner:
+        _fail("GE_SQLITE_TX_OWNER_PRESENTATION")
+    entry = _OWNERS.get(id(owner))
+    if entry is None or entry.owner_ref() is not owner:
+        _fail("GE_SQLITE_TX_OWNER_PRESENTATION")
+    return entry.state
+
+
+def _presentation(
+    owner: _SQLiteCursorPublicationTransactionOwner,
+) -> tuple[
+    SQLiteV1BaselineConnectionOwner,
+    _SQLiteCursorPublicationTransactionLineage,
+    _SQLiteCursorPublicationTransactionGeneration,
+]:
+    try:
+        connection = object.__getattribute__(
+            owner, "_SQLiteCursorPublicationTransactionOwner__connection"
+        )
+        lineage = object.__getattribute__(
+            owner, "_SQLiteCursorPublicationTransactionOwner__lineage"
+        )
+        generation = object.__getattribute__(
+            owner, "_SQLiteCursorPublicationTransactionOwner__generation"
+        )
+    except (AttributeError, TypeError):
+        _fail("GE_SQLITE_TX_OWNER_PRESENTATION")
+    if (
+        _TYPE(connection) is not SQLiteV1BaselineConnectionOwner
+        or _TYPE(lineage) is not _SQLiteCursorPublicationTransactionLineage
+        or _TYPE(generation) is not _SQLiteCursorPublicationTransactionGeneration
+    ):
+        _fail("GE_SQLITE_TX_OWNER_PRESENTATION")
+    return connection, lineage, generation
+
+
+def _guard_case(operation: str, sql: str | None, lifecycle: str) -> int | None:
+    if operation == "commit":
+        return 0
+    if operation == "rollback":
+        return 1
+    if operation == "close":
+        return 10
+    if operation == "executescript":
+        return 8
+    if operation != "execute" or sql is None:
+        return 18
+    upper = sql.upper()
+    statements = [part for part in upper.split(";") if part.strip()]
+    if len(statements) > 1:
+        return 6
+    words = upper.replace(";", " ").split()
+    token = words[0] if words else ""
+    if token in {"COMMIT", "END"}:
+        return 2
+    if token == "ROLLBACK" and "TO" not in words:
+        return 3
+    if token == "BEGIN":
+        return 9 if lifecycle == "active" else 4
+    if token in {"SAVEPOINT", "RELEASE"} or (token == "ROLLBACK" and "TO" in words):
+        return 5
+    if token in {"INSERT", "UPDATE", "DELETE", "REPLACE"}:
+        return 11
+    if token in {"CREATE", "ALTER", "DROP"}:
+        return 13
+    if token == "PRAGMA":
+        return 15
+    if token in {"VACUUM", "ANALYZE", "REINDEX"}:
+        return 16
+    if token in {"ATTACH", "DETACH"}:
+        return 17
+    if token == "SELECT":
+        return None
+    return 18
+
+
+def _reject_guard(owner: _SQLiteCursorPublicationTransactionOwner, case_index: int) -> Never:
+    state = _state(owner)
+    if state.lifecycle not in {"registered", "active"} or not 0 <= case_index < len(
+        GUARDED_TRANSACTION_CONTROL_PATHS
+    ):
+        _fail("GE_SQLITE_TX_OWNER_GUARD_STATE")
+    counts = list(state.guard_rejection_counts)
+    counts[case_index] += 1
+    state.guard_rejection_counts = tuple(counts)
+    code = (
+        "GE_SQLITE_TX_OWNER_COMMIT_HARD_DISABLED"
+        if case_index in {0, 2}
+        else "GE_SQLITE_TX_OWNER_GUARD"
+    )
+    _fail(code)
+
+
+def _guard_callback(
+    owner_ref: ReferenceType[_SQLiteCursorPublicationTransactionOwner],
+    operation: str,
+    sql: str | None,
+) -> None:
+    owner = owner_ref()
+    if owner is None:
+        _fail("GE_SQLITE_TX_OWNER_ABANDONED")
+    case_index = _guard_case(operation, sql, _state(owner).lifecycle)
+    if case_index is not None:
+        _reject_guard(owner, case_index)
+
+
+def _register_sqlite_cursor_publication_transaction_owner_intrinsic(
+    connection: SQLiteV1BaselineConnectionOwner,
+) -> _SQLiteCursorPublicationTransactionOwner:
+    if _TYPE(connection) is not SQLiteV1BaselineConnectionOwner or not _RECOVERABLE(connection):
+        _fail("GE_SQLITE_TX_OWNER_REGISTRATION")
+    lineage = _SQLiteCursorPublicationTransactionLineage()
+    generation = _SQLiteCursorPublicationTransactionGeneration(_CONSTRUCTION_TOKEN)
+    owner = _SQLiteCursorPublicationTransactionOwner(
+        connection, lineage, generation, _CONSTRUCTION_TOKEN
+    )
+    state = _State(ref(connection), ref(lineage), ref(generation))
+
+    # Do not close over owner in either weak callback.
+    owner_id = id(owner)
+
+    def discard_exact(dead_ref: ReferenceType[_SQLiteCursorPublicationTransactionOwner]) -> None:
+        entry = _OWNERS.get(owner_id)
+        if entry is not None and entry.owner_ref is dead_ref:
+            _OWNERS.pop(owner_id, None)
+
+    owner_ref = ref(owner, discard_exact)
+    _OWNERS[owner_id] = _Entry(owner_ref, state)
+
+    def guard(operation: str, sql: str | None) -> None:
+        _guard_callback(owner_ref, operation, sql)
+
+    try:
+        _INSTALL_GUARD(connection, owner, guard)
+        try:
+            _VALIDATE_SOURCE_V1(connection, owner)
+        except BaseException as error:
+            raise ValueError("GE_SQLITE_TX_OWNER_SOURCE_V1") from error
+        source_fingerprint = _SOURCE_FINGERPRINT(connection, owner)
+        object.__setattr__(
+            owner,
+            "_SQLiteCursorPublicationTransactionOwner__source_fingerprint",
+            source_fingerprint,
+        )
+        state.registration_epoch = connection.transaction_epoch
+        state.registration_total_changes = connection.total_changes
+        state.registration_temp_mutation_epoch = connection.temp_mutation_epoch
+        state.temp_mutation_epoch = state.registration_temp_mutation_epoch
+        state.transaction_epoch = state.registration_epoch
+        state.total_changes = state.registration_total_changes
+    except BaseException:
+        _OWNERS.pop(owner_id, None)
+        with suppress(BaseException):
+            _DISCARD_GUARD(connection, owner)
+        raise
+    return owner
+
+
+def _observe(
+    owner: _SQLiteCursorPublicationTransactionOwner,
+) -> tuple[bool, bool, bool, str | None, int, int, int] | None:
+    connection, lineage, generation = _presentation(owner)
+    try:
+        return _OBSERVE(connection, owner, lineage, generation)
+    except BaseException:
+        return None
+
+
+def _close_reopen_source_v1(
+    owner: _SQLiteCursorPublicationTransactionOwner,
+) -> Literal["source-v1", "corrupt", "unavailable"]:
+    state = _state(owner)
+    state.lifecycle = "awaiting-reopen"
+    connection, _lineage, _generation = _presentation(owner)
+    source_fingerprint = object.__getattribute__(
+        owner, "_SQLiteCursorPublicationTransactionOwner__source_fingerprint"
+    )
+    state.close_attempt_count += 1
+    close_returned = False
+    try:
+        _CLOSE(connection, owner)
+        state.close_native_return_count += 1
+        close_returned = True
+    except BaseException:
+        pass
+    state.reopen_attempt_count += 1
+    try:
+        reopened = _REOPEN_FINGERPRINT(connection, owner)
+    except (OSError, sqlite3.Error):
+        state.lifecycle = "reopen-unavailable"
+        return "unavailable"
+    except BaseException:
+        state.lifecycle = "corrupt"
+        return "corrupt"
+    finally:
+        if close_returned:
+            with suppress(BaseException):
+                _DISCARD_GUARD(connection, owner)
+    reopened_topology = cast(tuple[tuple[object, ...], ...], reopened[5])
+    source_v1 = (
+        reopened[0:1] == source_fingerprint
+        and reopened[1] == (1_195_724_359,)
+        and reopened[2] == (1,)
+        and reopened[3] == (("ok",),)
+        and not reopened[4]
+        and tuple(row[1] for row in reopened_topology) in {("main",), ("main", "temp")}
+        and not reopened[6]
+    )
+    if source_v1:
+        state.reopen_source_v1_count += 1
+        state.lifecycle = "reopen-verified-v1"
+        return "source-v1"
+    state.lifecycle = "corrupt"
+    return "corrupt"
+
+
+def _raise_reopen_terminal_outcome(
+    primary: BaseException,
+    classification: Literal["source-v1", "corrupt", "unavailable"],
+) -> Never:
+    if classification == "source-v1":
+        raise primary.with_traceback(None) from None
+    code = (
+        "GE_SQLITE_TX_OWNER_REOPEN_CORRUPTION"
+        if classification == "corrupt"
+        else "GE_SQLITE_TX_OWNER_REOPEN_UNAVAILABLE"
+    )
+    raise ValueError(code) from primary.with_traceback(None)
+
+
+def _clear_presentation(owner: _SQLiteCursorPublicationTransactionOwner) -> None:
+    receipt = object.__getattribute__(owner, "_SQLiteCursorPublicationTransactionOwner__receipt")
+    primary = object.__getattribute__(owner, "_SQLiteCursorPublicationTransactionOwner__primary")
+    generation = object.__getattribute__(
+        owner, "_SQLiteCursorPublicationTransactionOwner__generation"
+    )
+    if _TYPE(receipt) is _SQLiteCursorPublicationBeginReceipt:
+        receipt._clear()
+    if _TYPE(primary) is _SQLiteCursorPublicationAuthenticatedFailure:
+        primary._clear()
+    if _TYPE(generation) is _SQLiteCursorPublicationTransactionGeneration:
+        generation._tombstone()
+    for name in (
+        "__connection",
+        "__lineage",
+        "__generation",
+        "__receipt",
+        "__primary",
+        "__source_fingerprint",
+    ):
+        object.__setattr__(owner, f"_SQLiteCursorPublicationTransactionOwner{name}", None)
+
+
+def _begin_sqlite_cursor_publication_transaction_intrinsic(
+    owner: _SQLiteCursorPublicationTransactionOwner,
+) -> _SQLiteCursorPublicationBeginReceipt:
+    state = _state(owner)
+    if state.lifecycle != "registered" or state.begin_attempt_count != 0:
+        _fail("GE_SQLITE_TX_OWNER_BEGIN_REPLAY")
+    connection, lineage, generation = _presentation(owner)
+    state.lifecycle = "beginning"
+    state.begin_attempt_count = 1
+    state.runtime_transaction_control_count += 1
+    primary: BaseException | None = None
+    try:
+        _BEGIN_EXCLUSIVE(connection, owner, lineage, generation)
+        state.begin_native_return_count = 1
+    except BaseException as error:
+        primary = error
+    observation = _observe(owner)
+    if primary is None and observation is not None:
+        (
+            in_transaction,
+            same_lineage,
+            same_generation,
+            mode,
+            epoch,
+            total_changes,
+            temp_mutation_epoch,
+        ) = observation
+        state.transaction_epoch = epoch
+        state.total_changes = total_changes
+        state.temp_mutation_epoch = temp_mutation_epoch
+        semantic_source_v1 = False
+        try:
+            _VALIDATE_ACTIVE_SOURCE_V1(
+                connection,
+                owner,
+                lineage,
+                generation,
+            )
+            current_fingerprint = _SOURCE_FINGERPRINT(connection, owner)
+            fingerprint_unchanged = current_fingerprint == object.__getattribute__(
+                owner,
+                "_SQLiteCursorPublicationTransactionOwner__source_fingerprint",
+            )
+            semantic_source_v1 = True
+        except BaseException:
+            fingerprint_unchanged = False
+        if (
+            in_transaction
+            and same_lineage
+            and same_generation
+            and mode == "exclusive"
+            and epoch == state.registration_epoch + 1
+            and total_changes == state.registration_total_changes
+            and temp_mutation_epoch == state.registration_temp_mutation_epoch
+            and semantic_source_v1
+            and fingerprint_unchanged
+        ):
+            generation._promote()
+            state.provisional_generation_promotion_count = 1
+            state.begin_receipt_mint_count = 1
+            state.lifecycle = "active"
+            state.exact_generation_active = True
+            state.exact_lineage_selected = True
+            state.transaction_mode = mode
+            state.begin_transaction_epoch_advanced_exactly_once = True
+            state.begin_total_changes_unchanged = True
+            state.begin_temp_mutation_epoch_unchanged = True
+            receipt = _SQLiteCursorPublicationBeginReceipt(
+                owner,
+                connection,
+                lineage,
+                generation,
+                epoch,
+                total_changes,
+                temp_mutation_epoch,
+                _CONSTRUCTION_TOKEN,
+            )
+            object.__setattr__(
+                owner, "_SQLiteCursorPublicationTransactionOwner__receipt", receipt
+            )
+            return receipt
+        primary = ValueError("GE_SQLITE_TX_OWNER_BEGIN_POSTFLIGHT")
+        state.lifecycle = "begin-postflight-in-doubt"
+    elif primary is None:
+        primary = ValueError("GE_SQLITE_TX_OWNER_BEGIN_POSTFLIGHT_UNAVAILABLE")
+        state.lifecycle = "begin-postflight-in-doubt"
+    else:
+        state.lifecycle = "begin-in-doubt"
+
+    generation._tombstone()
+    state.provisional_generation_tombstone_count = 1
+    if observation is not None:
+        (
+            in_transaction,
+            same_lineage,
+            same_generation,
+            mode,
+            epoch,
+            total_changes,
+            _temp_mutation_epoch,
+        ) = observation
+        state.transaction_epoch = epoch
+        state.total_changes = total_changes
+        state.temp_mutation_epoch = _temp_mutation_epoch
+        if in_transaction and same_lineage and same_generation and mode == "exclusive":
+            state.lifecycle = "begin-failed-same-generation-active"
+            state.rollback_attempt_count = 1
+            state.runtime_transaction_control_count += 1
+            try:
+                _ROLLBACK(connection, owner, lineage, generation)
+                state.rollback_native_return_count = 1
+                state.transaction_epoch = connection.transaction_epoch
+                state.total_changes = connection.total_changes
+                state.temp_mutation_epoch = connection.temp_mutation_epoch
+            except BaseException:
+                pass
+    reopen_classification = _close_reopen_source_v1(owner)
+    state.exact_generation_active = False
+    state.exact_lineage_selected = False
+    state.transaction_mode = None
+    _clear_presentation(owner)
+    state.lifecycle = "finalized"
+    assert primary is not None
+    _raise_reopen_terminal_outcome(primary, reopen_classification)
+
+
+def _select_sqlite_cursor_publication_authenticated_failure_intrinsic(
+    owner: _SQLiteCursorPublicationTransactionOwner,
+) -> _SQLiteCursorPublicationAuthenticatedFailure:
+    """Select the one exact package-owned active-transaction failure claim."""
+    state = _state(owner)
+    if state.lifecycle != "active" or state.primary_ref is not None:
+        _fail("GE_SQLITE_TX_OWNER_PRIMARY")
+    primary = _SQLiteCursorPublicationAuthenticatedFailure(owner, _CONSTRUCTION_TOKEN)
+    state.primary_ref = ref(primary)
+    object.__setattr__(owner, "_SQLiteCursorPublicationTransactionOwner__primary", primary)
+    return primary
+
+
+def _finalize_sqlite_cursor_publication_transaction_failure_intrinsic(
+    owner: _SQLiteCursorPublicationTransactionOwner,
+    primary: _SQLiteCursorPublicationAuthenticatedFailure,
+) -> Never:
+    state = _state(owner)
+    if (
+        state.lifecycle != "active"
+        or state.primary_ref is None
+        or state.primary_ref() is not primary
+        or object.__getattribute__(
+            primary, "_SQLiteCursorPublicationAuthenticatedFailure__owner"
+        )
+        is not owner
+    ):
+        _fail("GE_SQLITE_TX_OWNER_PRIMARY")
+    connection, _lineage, generation = _presentation(owner)
+    observation = _observe(owner)
+    if observation is None or observation[:4] != (True, True, True, "exclusive"):
+        _fail("GE_SQLITE_TX_OWNER_FAILURE_AUTHORITY")
+    state.lifecycle = "failure-claimed"
+    state.rollback_attempt_count = 1
+    state.runtime_transaction_control_count += 1
+    try:
+        _ROLLBACK(connection, owner, _lineage, generation)
+        state.rollback_native_return_count = 1
+        state.lifecycle = "rolled-back"
+        state.transaction_epoch = connection.transaction_epoch
+        state.total_changes = connection.total_changes
+        state.temp_mutation_epoch = connection.temp_mutation_epoch
+    except BaseException:
+        state.lifecycle = "rollback-failed"
+    reopen_classification = _close_reopen_source_v1(owner)
+    state.exact_generation_active = False
+    state.exact_lineage_selected = False
+    state.transaction_mode = None
+    _clear_presentation(owner)
+    state.lifecycle = "finalized"
+    _raise_reopen_terminal_outcome(primary, reopen_classification)
+
+
+def _commit_sqlite_cursor_publication_transaction_intrinsic(
+    owner: _SQLiteCursorPublicationTransactionOwner,
+    _fence: object,
+) -> Never:
+    state = _state(owner)
+    if state.lifecycle != "active":
+        _fail("GE_SQLITE_TX_OWNER_COMMIT_HARD_DISABLED")
+    _fail("GE_SQLITE_TX_OWNER_COMMIT_HARD_DISABLED")
+
+
+def _read_sqlite_cursor_publication_transaction_owner_snapshot_intrinsic(
+    owner: _SQLiteCursorPublicationTransactionOwner,
+) -> _SQLiteCursorPublicationTransactionOwnerSnapshot:
+    state = _state(owner)
+    return _SQLiteCursorPublicationTransactionOwnerSnapshot(
+        state.lifecycle,
+        state.registration_count,
+        state.provisional_generation_mint_count,
+        state.provisional_generation_promotion_count,
+        state.provisional_generation_tombstone_count,
+        state.begin_attempt_count,
+        state.begin_native_return_count,
+        state.begin_receipt_mint_count,
+        state.rollback_attempt_count,
+        state.rollback_native_return_count,
+        state.close_attempt_count,
+        state.close_native_return_count,
+        state.reopen_attempt_count,
+        state.reopen_source_v1_count,
+        state.runtime_transaction_control_count,
+        state.commit_attempt_count,
+        True,
+        state.exact_generation_active,
+        state.exact_lineage_selected,
+        state.transaction_mode,
+        state.transaction_epoch,
+        state.total_changes,
+        state.temp_mutation_epoch,
+        state.begin_transaction_epoch_advanced_exactly_once,
+        state.begin_total_changes_unchanged,
+        state.begin_temp_mutation_epoch_unchanged,
+        state.guard_rejection_counts,
+    )
+
+
+def _read_sqlite_cursor_publication_begin_receipt_snapshot_intrinsic(
+    owner: _SQLiteCursorPublicationTransactionOwner,
+    receipt: _SQLiteCursorPublicationBeginReceipt,
+) -> _SQLiteCursorPublicationBeginReceiptSnapshot:
+    state = _state(owner)
+    if (
+        state.lifecycle != "active"
+        or _TYPE(receipt) is not _SQLiteCursorPublicationBeginReceipt
+        or object.__getattribute__(
+            owner, "_SQLiteCursorPublicationTransactionOwner__receipt"
+        )
+        is not receipt
+    ):
+        _fail("GE_SQLITE_TX_OWNER_BEGIN_RECEIPT")
+    connection, lineage, generation = _presentation(owner)
+    return _SQLiteCursorPublicationBeginReceiptSnapshot(
+        object.__getattribute__(receipt, "_SQLiteCursorPublicationBeginReceipt__owner")
+        is owner,
+        object.__getattribute__(
+            receipt, "_SQLiteCursorPublicationBeginReceipt__connection"
+        )
+        is connection,
+        object.__getattribute__(receipt, "_SQLiteCursorPublicationBeginReceipt__lineage")
+        is lineage,
+        object.__getattribute__(
+            receipt, "_SQLiteCursorPublicationBeginReceipt__generation"
+        )
+        is generation,
+        object.__getattribute__(receipt, "_SQLiteCursorPublicationBeginReceipt__mode")
+        == "exclusive",
+        object.__getattribute__(receipt, "_SQLiteCursorPublicationBeginReceipt__epoch"),
+        object.__getattribute__(
+            receipt, "_SQLiteCursorPublicationBeginReceipt__total_changes"
+        ),
+        object.__getattribute__(
+            receipt, "_SQLiteCursorPublicationBeginReceipt__temp_mutation_epoch"
+        ),
+        1,
+    )

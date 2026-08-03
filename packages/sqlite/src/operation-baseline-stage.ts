@@ -3820,6 +3820,10 @@ export class SQLiteBaselineTempStage {
             transactionLineage: this.#connection.transactionLineage,
             transactionMode: this.#connection.transactionMode,
             transactionEpoch: this.#connection.transactionEpoch,
+            tempMutationEpoch: this.#connection.tempMutationEpoch,
+            publicationTransactionGeneration:
+              readSQLiteConnectionOwnerSnapshot(this.#connection)
+                .publicationTransactionGeneration,
           };
     } catch {
       return unavailable("SQLite provider is closed");

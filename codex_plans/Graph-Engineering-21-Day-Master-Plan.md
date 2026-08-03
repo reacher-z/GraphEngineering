@@ -21713,3 +21713,318 @@ P8只完成契约与redbar。仍未完成：
 下一bounded objective固定为P9：先实现TypeScript与Python的package-private owner registration、19类connection
 terminal/mutation guard、pre-I/O provisional generation和guarded BEGIN/failure cleanup；COMMIT路径必须继续
 hard-disabled。P9双runtime与parity闭环后，才能进入Rule12/third clock，不能跳过完整30-stage前驱直接执行COMMIT。
+
+#### 31.37.77 Wave 1E/P9：双runtime publication transaction owner、guarded BEGIN与failure-cleanup实现（2026-08-02 PDT追加；既有内容不改）
+
+本节严格追加于既有21,715行之后。追加前完整计划SHA-256为
+`8d1b44f07a81c600e4e5af6cc654c59f8de92942eaf8fafb1ec609139fcccf76`；前21,715行必须保持
+byte-for-byte不变。本节执行31.37.76.12规定的P9 bounded objective，只关闭package-private owner注册、
+pre-I/O provisional generation、19类guard、exact guarded BEGIN、认证failure cleanup与portable parity；不宣称
+runtime COMMIT、success path、complete-v2、public API、release gate或整个Wave 1E/Graph Engineering计划完成。
+
+##### 31.37.77.1 bounded objective、并行开发拓扑与接受边界
+
+P9采用主Agent集成与三类并行lane：TypeScript/Node SQLite owner与连接边界、Python/sqlite3 owner与identity/GC、
+独立plan/truth/correctness审计。主Agent独占root CI/package、`codex_plans`与`codex_logs`；runtime lane只修改自己的
+实现和测试。多轮审计在focused tests已绿时仍持续REJECT，直到exact path、semantic audit、lifecycle、calendar、
+checkpoint/revision与ledger result全部闭合。
+
+P9允许的runtime claims严格为：
+
+1. 双runtime存在package-private transaction owner实现；
+2. registration发生在BEGIN I/O前；
+3. registration mint一个distinct weakref-capable provisional generation和attempted lineage；
+4. native BEGIN最多attempt一次且固定为exact owner-controlled `BEGIN EXCLUSIVE`；
+5. returned postflight全部成立后才promotion同一generation并mint exact begin receipt；
+6. 19个contract guard类别均无native I/O绕过；
+7. exact active transaction可以select一个authenticated failure primary；
+8. 已实现failure路径执行有界rollback、close与source-v1 reopen；
+9. corruption与I/O unavailable具有不同稳定结果，最终强presentation graph被清空；
+10. 三个portable common cases与19个portable guard entries在TS/Python严格相等；
+11. runtime-local report诚实保留Node/Python能力差异；
+12. COMMIT在任何native I/O前hard-disabled。
+
+仍为false的claims包括driver-native BEGIN/rollback/close throw、runtime COMMIT、success owner、complete-v2 classifier、
+crash/process recovery、public export、manifest/release acceptance。P8 fixture的32个future scenarios仍不是P9执行证据。
+
+##### 31.37.77.2 package-private TypeScript authority graph
+
+TypeScript新增`cursor-publication-transaction-owner.ts`，使用null-prototype frozen opaque objects与private WeakMap：
+
+1. owner、provisional generation、attempted lineage、begin receipt、failure capture均为distinct exact objects；
+2. `OWNER_STATES`只以exact owner object为key；
+3. reverse connection registry只保存`WeakRef<OwnerState>`，不以地址/整数/字符串作为authority；
+4. begin receipt registry弱绑定owner、connection、lineage、generation与三个clock snapshot；
+5. failure capture绑定exact state、owner与primary，clone/spread/substitute全部拒绝；
+6. abandoned owner不会解除connection guard，下一次route fail-closed为abandoned；
+7. terminalize清空connection、reopen capability、generation、lineage、receipt与primary；
+8. module不从package root导出，构建后的`dist/index.d.ts`与`dist/index.js`没有internal symbol。
+
+registration先读取captured lower snapshot与total changes，拒绝已有transaction、lineage/mode、epoch不一致、
+non-file-backed或不recoverable连接。随后创建owner graph，执行source-v1 audit，安装exact guard与lower-owned reopen
+capability，再保存source fingerprint。任何中间异常都会删除owner/reverse registry并撤销guard/capability，不留下partial
+authority。
+
+##### 31.37.77.3 immutable exact path与opaque one-shot reopen capability
+
+审计发现原实现保留caller relative path，工作目录变化后独立audit/reopen可能打开另一个同名数据库。最终边界为：
+
+1. constructor验证caller path后立即通过definition-time captured `node:path.resolve`生成absolute path；
+2. native DatabaseSync open使用该absolute path；
+3. registration与post-BEGIN audit调用captured package-private lower method并使用同一absolute path；
+4. reopen capability在lower注册时封装同一absolute path、exact owner与exact connection WeakRef；
+5. public `connection.path`仍返回原caller spelling以保持兼容，但不参与authority；
+6. owner layer无法读取path、传入replacement path、callback或database factory；
+7. capability只能在exact connection closed之后consume一次；clone、cross-owner、cross-connection与replay全部拒绝；
+8. 两个不同cwd下同名、其中一个损坏的数据库回归证明audit始终绑定最初native open identity。
+
+##### 31.37.77.4 complete source-v1 registration envelope
+
+TS registration audit与Python lower validator共同要求：
+
+1. exact application ID与user_version=1；
+2. exact schema/migration singleton与trusted schema identity/descriptor/lineage hashes；
+3. main catalog为closed set，仅允许source-v1 table/index及SQLite内部auto indexes；
+4. trigger/view/side table/extra explicit index全部拒绝；
+5. `PRAGMA database_list`只允许main或main+empty temp；
+6. ATTACH/DETACH或任何额外topology拒绝；
+7. TEMP schema必须为空；
+8. `integrity_check=ok`且`foreign_key_check=[]`；
+9. canonical rows、record/checkpoint/operation/cursor carriers、hash chain、stream tail、revision、lease/migration fence
+   与cursor binding通过complete semantic audit；
+10. full persistent catalog digest与application semantic digest共同进入source fingerprint；
+11. audit结果只返回bounded digest/计数，不返回path、payload或强对象图。
+
+Python不以`integrity_check`代替application semantics。最终实现复用definition-time captured provider semantic audit，真实
+`value_blob`/hash corruption在registration前拒绝；reopen也必须经过相同complete validator。
+
+##### 31.37.77.5 exact guarded BEGIN与pre-promotion postflight
+
+BEGIN状态顺序固定：
+
+`registered -> beginning -> active | begin-postflight-in-doubt | begin-in-doubt`。
+
+成功promotion前必须同时证明：
+
+1. exact owner仍present；
+2. exact registered connection仍open；
+3. exact attempted lineage被lower选中；
+4. exact provisional generation为native active generation；
+5. transaction mode为exclusive；
+6. transaction epoch等于registration epoch+1；
+7. total changes等于registration snapshot；
+8. conservative TEMP mutation epoch等于registration snapshot；
+9. complete source-v1 semantics在exact active transaction内重新执行并通过；
+10. registration fingerprint与post-BEGIN fingerprint完全相等；
+11. begin native return count等于1且attempt count等于1；
+12. receipt尚未mint。
+
+只有上述12项全部成立才promotion同一provisional object、写promotion count=1、mint一个receipt并进入active。receipt
+snapshot证明exact owner/connection/lineage/generation、exclusive、transaction epoch、total changes、TEMP epoch与
+attempt=1。任何失败先tombstone provisional authority，绝不先mint再撤销。
+
+##### 31.37.77.6 registration-to-BEGIN writer race闭合
+
+初版只在registration做semantic validation，external writer可在validate与BEGIN之间修改文件。最终双runtime顺序为：
+
+1. registration complete semantic audit；
+2. registration fingerprint snapshot；
+3. exact lower BEGIN EXCLUSIVE；
+4. exact active generation/lineage/mode/clock observation；
+5. transaction内再次complete semantic audit；
+6. 再次读取source fingerprint；
+7. 与registration fingerprint做exact equality；
+8. equality与所有postflight都通过后才promotion/receipt。
+
+测试同时覆盖writer在registration完成后提交，以及更窄的validate完成、initial fingerprint前已写入corruption。后者即使
+registration fingerprint本身记录了坏状态，也会被transaction内complete semantic audit拒绝；两种情况均promotion=0、
+receipt=0、rollback/close/reopen有界执行，corruption outcome主导并保留original primary diagnostic。
+
+##### 31.37.77.7 19类terminal/permanent-mutation guard
+
+guard inventory与P8完全一致，顺序不得漂移：connection commit、connection rollback、COMMIT/END、ROLLBACK、BEGIN、
+SAVEPOINT family、multi-statement transaction control、prepared transaction control、script transaction control、nested
+BEGIN、live close、新prepared permanent DML、旧prepared permanent DML、新prepared permanent DDL、旧prepared
+permanent DDL、persistent PRAGMA、VACUUM/ANALYZE/REINDEX、ATTACH/DETACH/topology、catch-all permanent/proof-history
+mutation。
+
+Node实现19条均有real runtime rejection。Python sqlite3没有三个prepared-only public capabilities，因此16条real runtime
+route加3条`structurally-absent`，不创建fake method。portable inventory仍为19条且共同结果均是
+`no-native-io-bypass`。每个拒绝前后比较transaction epoch、total changes与TEMP epoch；只看到异常不算零I/O证明。
+
+##### 31.37.77.8 independent conservative TEMP epoch
+
+TEMP proof不能复用`total_changes`。两runtime维护独立conservative TEMP mutation attempt epoch：
+
+1. TEMP DDL/DML与无法静态证明read-only的TEMP-affecting语句都会monotonic advance；
+2. persistent DML/DDL、transaction control与topology routes由guard拒绝；
+3. 明确read-only SELECT与允许的read-only PRAGMA不推进TEMP clock；
+4. Python trace callback只排除closed read-only PRAGMA，含`=`或其他不明确PRAGMA保守计mutation；
+5. TS prepared pure SELECT返回raw StatementSync，避免Proxy incompatible receiver；
+6. begin receipt同时commit independent TEMP epoch；
+7. post-BEGIN要求TEMP epoch与registration相同；
+8. absolute TEMP epoch粒度是runtime-local，portable claim只比较本次BEGIN delta=0。
+
+##### 31.37.77.9 authenticated failure cleanup与diagnostic precedence
+
+active owner只能capture一次exact object primary。failure capture不是evidence而是one-shot authority。finalize顺序为：
+
+1. exact capture/state/owner/primary identity认证；
+2. 重新观察exact active exclusive lineage/generation；
+3. `failure-claimed -> rolling-back`；
+4. rollback最多一次；
+5. returned才进入rolled-back，throw进入rollback-failed/in-doubt；
+6. close最多一次；
+7. consume exact reopen capability一次；
+8. transient分类`reopen-verified-v1 | reopen-unavailable | corrupt`；
+9. 清空全部strong presentation graph；
+10. terminal snapshot统一为finalized。
+
+source-v1 cleanup原样重抛exact primary。corrupt以稳定`GE_SQLITE_TX_OWNER_REOPEN_CORRUPTION`主导，并以cause或
+AggregateError保留original primary；unavailable以`GE_SQLITE_TX_OWNER_REOPEN_UNAVAILABLE`主导并同样保留primary。
+fingerprint drift明确是corruption，不得被普通I/O unavailable吞并。diagnostic顺序保留terminal primary、rollback
+secondary、close tertiary与reopen audit。
+
+##### 31.37.77.10 systematic definition-time intrinsic hardening
+
+独立review证明只捕获Database方法不足。最终semantic audit definition-time捕获并通过captured `Reflect.apply`使用：
+
+- DatabaseSync constructor与prepare/exec/close；
+- StatementSync all/get与四个policy setters；
+- Buffer constructor/from/equals/toString；
+- TextDecoder constructor/decode；
+- createHash constructor与update/digest；
+- JSON.parse、Object keys/freeze/prototype/descriptor；
+- Array isArray/push，其他map/filter/slice/some/entries改为显式index loops；
+- Map get/set与显式headCount，不读取mutable Map size getter；
+- Set has；
+- String includes/startsWith/lowercase/charCodeAt/slice；
+- Date.parse、Number/BigInt/isSafeInteger/isFinite；
+- Uint8Array type test与TypedArray byteLength getter；
+- runtime codec四个outer methods，同时不把它们当最终authority。
+
+Node builtin named exports是live bindings，可被`syncBuiltinESMExports`更新，因此constructor/function值本身也在module load
+时复制。catalog whitespace normalization不再使用RegExp replace/exec，而是手写ECMAScript whitespace code-unit collapse。
+
+##### 31.37.77.11 raw blob、record domain hash与closed ledger validation
+
+shared codec用于得到typed result，但最终authority由semantic-local checks重新建立：
+
+1. record blob必须等于parsed record的local canonical UTF-8 bytes；
+2. checkpoint blob必须等于parsed checkpoint的local canonical bytes；
+3. operation result blob与checkpoint summary blob同样exact byte rebound；
+4. value blob必须等于canonical value bytes并匹配valueBytes；
+5. value hash由hardened canonical hash独立重算；
+6. record hash使用captured SHA-256按`CYCLE_STORE_RECORD_DOMAIN`与exact body独立重算；
+7. SQL record hash、decoded record hash、previous chain与stream tail必须全部一致；
+8. ledger result本地validator覆盖9种mutation operation；
+9. 每种result都是closed exact-key object；
+10. identifier、64-lowerhex hash、safe integer、tail consistency与固定mode constants本地验证；
+11. lease/migration acquired/expires timestamp均本地验证且expires严格大于acquired；
+12. legal-hold IDs必须identifier-valid、严格递增且无duplicate；
+13. embedded identity结果继续绑定retained DB evidence；
+14. 不含target identity或request bytes的历史不能被伪造为已证明，保留nonclaim。
+
+这关闭clean database redirection、Buffer equals恒真、hostile decoder、Object.freeze forged record、reversed lease expiry与
+invalid legal-hold result等实际false-accept路径。
+
+##### 31.37.77.12 deterministic checkpoint/revision与Gregorian calendar
+
+checkpoint current row在接受前执行exact 9-key local contract：scope/id/stream identifiers、bound sequence/hash、createdAt、
+value hash/bytes/value均本地验证；raw blob、summary blob与SQL columns exact rebound。每个put revision调用同一local summary
+validator并绑定current checkpoint。put与delete两条branch之前都验证tenantId、scope与checkpointId，避免delete tombstone
+绕过schema未提供的identifier CHECK。
+
+RFC3339不能只依赖Node `Date.parse`，因为它会normalize不可能日期。最终validator先从captured RegExp exec获得closed形状，
+再手动验证：year>=1、month 1..12、day按month、Gregorian leap rule、hour/minute/second与offset范围，最后才用captured
+Date.parse得到epoch。测试拒绝year 0000、非闰年2月29、2月31、4月31，并接受真实2024 leap day；TS/Python不再在这些
+source-v1 rows上分歧。
+
+##### 31.37.77.13 portable parity、runtime-local truth与CI
+
+portable report字段为schemaVersion、contractId、P8 trusted fixture digest、cases、guardInventory、claims、nonclaims与
+runtimeLocalCapabilityEvidence。portable equality剥离runtimeLocal后做exact JSON equality。三个common cases为：
+
+1. `begin-returned-active`；
+2. `active-authenticated-failure-cleanup`；
+3. `commit-hard-disabled`。
+
+claims只激活owner registration、pre-I/O generation、returned exact BEGIN、common no-I/O guard、authenticated returned
+cleanup与commit disabled。native throws、success、commit、complete-v2、public/release全部false。TS report通过`uv`启动
+Python；CI环境安装uv，专门gate不允许portable tests skip。
+
+root新增`test:sqlite-transaction-owner-runtime`：sqlite typecheck、portable parity、forced-GC owner tests、Python focused
+owner tests。`.github/workflows/ci.yml`的cross-language-conformance job执行该gate。P8 contract gate保持独立且仍输出
+`contract-frozen-redbar`，不能因P9局部实现而改写P8 fixture claims。
+
+##### 31.37.77.14 rejected-first review完整修复序列
+
+至少15轮阻断问题在commit前被修复：Python application semantic corruption、validate-to-BEGIN TOCTOU、Node isOpen
+descriptor兼容、Database/Statement prototype redirect、Array push、Buffer equals/from、Map size getter、Node builtin live
+binding、RegExp exec、ambient codec parse、record domain hash、ledger expiry/governance、relative cwd path substitution、
+calendar normalization、checkpoint delete revision identifier。每次审计均保持REJECT，focused green或full-suite green都没有覆盖
+未关闭的semantic defect。不存在被commit后再掩盖的rejected version。
+
+##### 31.37.77.15 final deterministic verification evidence
+
+最终主集成门：
+
+- `test:sqlite-transaction-owner-runtime`：parity 2/2、TS forced-GC owner 27/27、Python owner 35/35；
+- TS semantic+integrity：12/12；
+- Python source+owner：82/82；
+- TypeScript typecheck/build：通过；
+- SQLite public root：1/1且dist root无internal owner/auditor symbols；
+- Ruff全changed Python set：通过；
+- mypy两个changed Python implementation modules：通过；
+- P8 contract：20/20，canonical validator与两个trusted anchors通过；
+- fixtures：89 JSON/46 manifests及完整repository corpus通过；
+- docs links：478个通过；
+- stage/rebind single-worker regression：469/469；
+- 完整SQLite single-worker suite（最后focused deltas前）：44 files pass、1 conditional file skip、1,252 tests pass、
+  2 conditional skips、0 failures、795.29秒；
+- final focused path/lifecycle/calendar/revision deltas由27/27 owner、12/12 semantic/integrity、parity、typecheck、build与
+  public root重新覆盖；
+- `git diff --check`通过。
+
+完整审计证据写入
+`codex_logs/reviews/SQLITE-PUBLICATION-TRANSACTION-OWNER-RUNTIME-WAVE1E-P9-2026-08-02.md`。
+
+##### 31.37.77.16 strict nonclaims与P10执行顺序
+
+P9完成后仍不得宣称：
+
+1. Rule12 upper receipt或main-table seal acceptance已实现；
+2. third/pre-verification clock或cursor-clock-complete已实现；
+3. lineage/metadata/rules/fresh-v2/physical-semantic publication receipts已实现；
+4. pre-retirement adoption或exact cursor TEMP retirement已实现；
+5. fourth/pre-commit clock或final migration-lock transaction fence已实现；
+6. runtime COMMIT、success selection或commit ambiguity已实现；
+7. complete-v2/crash/process reopen classifier已实现；
+8. request_hash可在没有retained canonical request bytes时独立重算；
+9. 不含target identity的historical ledger result可恢复target-specific truth；
+10. transaction owner是public package API；
+11. manifest/release acceptance或整个21-day master plan已完成；
+12. GitHub 5K/6K star或受欢迎度可由代码/测试保证。
+
+下一bounded objective固定为P10：实现Rule12 main-table seal acceptance与third/pre-verification clock authority，并在双runtime
+及portable parity中证明one-way adoption。P10期间COMMIT继续hard-disabled；不得跳过cursor-clock-complete、lineage、rules、
+fresh-v2、TEMP retirement、fourth clock与exact final fence直接进入success path。
+
+#### 31.37.78 P9 final correction：Python absolute source identity与terminal mode清理（2026-08-02 PDT追加；既有内容不改）
+
+本节严格追加于31.37.77之后，不修改31.37.77或更早字节。fresh-context release-readiness审计在TS absolute-path修复后
+发现Python仍保存caller relative spelling作为reopen authority：若首次connect后切换cwd，cleanup可能打开另一个同名文件。
+同一审计还发现Python finalized snapshot保留`transaction_mode="exclusive"`，而TS终态已清空mode。此前plan与focused
+parity没有覆盖这两个runtime-local字段，因此保持REJECT并补最终修复：
+
+1. `SQLiteV1BaselineConnectionOwner`在第一次`sqlite3.connect`前用definition-time captured `abspath`冻结exact
+   filesystem identity；`:memory:`保持原语义；
+2. native initial open、guarded transaction、close与reopen全部使用同一pinned absolute location；
+3. caller无法在registration/BEGIN/cleanup之间通过`chdir`替换authority；
+4. regression在目录A用relative filename建立source-v1，在目录B建立同名invalid database，切换cwd后执行BEGIN与
+   authenticated cleanup；reopen仍审计目录A并原样重抛exact primary；
+5. begin-failure与authenticated-failure两个terminal path都在finalized前清空`state.transaction_mode`；
+6. terminal snapshot现在与TS一致：lifecycle finalized、transaction mode null/None、exact lineage/generation false、全部
+   presentation graph清空；
+7. 最终Python gates：owner 36/36、source+owner 83/83、Ruff通过、mypy 0 issues、portable parity 2/2、diff-check通过；
+8. 该修复不激活COMMIT、success、complete-v2、public API或release claims；P10顺序保持31.37.77.16不变。

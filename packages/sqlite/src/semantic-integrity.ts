@@ -1,14 +1,17 @@
 import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, StatementSync } from "node:sqlite";
 import { TextDecoder } from "node:util";
+import { isUint8Array } from "node:util/types";
 
-import { canonicalHash, canonicalSerialize } from "@graph-engineering/core";
+import { canonicalSerialize } from "@graph-engineering/core";
 import {
+  CYCLE_STORE_RECORD_DOMAIN,
   CYCLE_STORE_PROVIDER_CONTRACT_VERSION,
   CycleStoreProviderError,
   cycleStoreAdapterCodec,
   type CycleStoreAppendResult,
+  type CycleStoreCheckpoint,
   type CycleStoreCheckpointSummary,
   type CycleStoreLease,
   type CycleStoreMigrationLock,
@@ -26,20 +29,85 @@ import {
   SQLITE_SCHEMA_SQL_SHA256,
 } from "./migrations.js";
 import {
-  hardenSQLiteStatement,
-  sqliteBlob,
   sqliteNullableText,
   sqliteRow,
-  sqliteSafeInteger,
   sqliteText,
 } from "./sqlite-codec.js";
 import { translateSQLiteError } from "./sqlite-errors.js";
 import { SQLITE_CYCLE_STORE_DESCRIPTOR_HASH } from "./sqlite-profile.js";
 
 const OPERATION: CycleStoreProviderOperation = "inspect-schema";
+const bufferIntrinsic = Buffer;
+const createHashIntrinsic = createHash;
+const databaseSyncIntrinsic = DatabaseSync;
+const textDecoderIntrinsic = TextDecoder;
+const isUint8ArrayIntrinsic = isUint8Array;
+const arrayIntrinsic = Array;
+const jsonIntrinsic = JSON;
+const dateIntrinsic = Date;
+const numberConstructorIntrinsic = Number;
+const uint8ArrayIntrinsic = Uint8Array;
+const reflectApplyIntrinsic = Reflect.apply;
+const objectFreezeIntrinsic = Object.freeze;
+const objectGetPrototypeOfIntrinsic = Object.getPrototypeOf;
+const objectGetOwnPropertyDescriptorIntrinsic = Object.getOwnPropertyDescriptor;
+const objectKeysIntrinsic = Object.keys;
+const arrayIsArrayIntrinsic = Array.isArray;
+const arrayPushIntrinsic = Array.prototype.push;
+const stringIncludesIntrinsic = String.prototype.includes;
+const stringStartsWithIntrinsic = String.prototype.startsWith;
+const stringToLowerCaseIntrinsic = String.prototype.toLowerCase;
+const stringCharCodeAtIntrinsic = String.prototype.charCodeAt;
+const stringSliceIntrinsic = String.prototype.slice;
+const jsonParseIntrinsic = JSON.parse;
+const dateParseIntrinsic = Date.parse;
+const numberIsSafeIntegerIntrinsic = Number.isSafeInteger;
+const numberIsFiniteIntrinsic = Number.isFinite;
+const numberIntrinsic = Number;
+const bigintIntrinsic = BigInt;
+const mapIntrinsic = Map;
+const setIntrinsic = Set;
+const mapGetIntrinsic = Map.prototype.get;
+const mapSetIntrinsic = Map.prototype.set;
+const setHasIntrinsic = Set.prototype.has;
+const bufferFromIntrinsic = Buffer.from;
+const bufferEqualsIntrinsic = Buffer.prototype.equals;
+const bufferToStringIntrinsic = Buffer.prototype.toString;
+const textDecoderDecodeIntrinsic = TextDecoder.prototype.decode;
+const regexpExecIntrinsic = RegExp.prototype.exec;
+const typedArrayPrototypeIntrinsic = reflectApplyIntrinsic(
+  objectGetPrototypeOfIntrinsic,
+  Object,
+  [uint8ArrayIntrinsic.prototype],
+) as object;
+const typedArrayByteLengthGetterIntrinsic = (reflectApplyIntrinsic(
+  objectGetOwnPropertyDescriptorIntrinsic,
+  Object,
+  [typedArrayPrototypeIntrinsic, "byteLength"],
+) as PropertyDescriptor).get!;
+const databasePrepareIntrinsic = DatabaseSync.prototype.prepare;
+const databaseExecIntrinsic = DatabaseSync.prototype.exec;
+const databaseCloseIntrinsic = DatabaseSync.prototype.close;
+const statementAllIntrinsic = StatementSync.prototype.all;
+const statementGetIntrinsic = StatementSync.prototype.get;
+const statementSetAllowBareNamedParametersIntrinsic =
+  StatementSync.prototype.setAllowBareNamedParameters;
+const statementSetAllowUnknownNamedParametersIntrinsic =
+  StatementSync.prototype.setAllowUnknownNamedParameters;
+const statementSetReadBigIntsIntrinsic = StatementSync.prototype.setReadBigInts;
+const statementSetReturnArraysIntrinsic = StatementSync.prototype.setReturnArrays;
+const hashProbe = createHashIntrinsic("sha256");
+const hashUpdateIntrinsic = hashProbe.update;
+const hashDigestIntrinsic = hashProbe.digest;
+const codecParseStoredRecordIntrinsic = cycleStoreAdapterCodec.parseStoredRecord;
+const codecParseStoredCheckpointIntrinsic = cycleStoreAdapterCodec.parseStoredCheckpoint;
+const codecDecodeLedgerResultIntrinsic = cycleStoreAdapterCodec.decodeLedgerResult;
 const MAX_SAFE_INTEGER = Number.MAX_SAFE_INTEGER;
 const SEMANTIC_DIGEST_DOMAIN = "graph-engineering/sqlite-semantic-audit/v1\0";
-const MUTATION_OPERATIONS = new Set<CycleStoreMutationOperation>([
+const LEDGER_IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
+const LEDGER_HASH = /^[0-9a-f]{64}$/u;
+const LEDGER_RFC3339 = /^(\d{4})-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/u;
+const MUTATION_OPERATIONS = new setIntrinsic<CycleStoreMutationOperation>([
   "append",
   "save-checkpoint",
   "delete-checkpoint",
@@ -50,7 +118,7 @@ const MUTATION_OPERATIONS = new Set<CycleStoreMutationOperation>([
   "acquire-migration-lock",
   "release-migration-lock",
 ]);
-const REQUIRED_MIGRATION_POSTCONDITIONS = Object.freeze([
+const REQUIRED_MIGRATION_POSTCONDITIONS = objectFreezeIntrinsic([
   "application-id-matches",
   "user-version-is-1",
   "schema-singleton-is-manifest-bound",
@@ -115,12 +183,379 @@ function fail(check: string): never {
   );
 }
 
+function bufferFrom(value: string | ArrayBufferView): Buffer {
+  return reflectApplyIntrinsic(bufferFromIntrinsic, bufferIntrinsic, [value]) as Buffer;
+}
+
+function bufferFromUtf8(value: string): Buffer {
+  return reflectApplyIntrinsic(bufferFromIntrinsic, bufferIntrinsic, [value, "utf8"]) as Buffer;
+}
+
+function sqliteBlob(
+  value: unknown,
+  operation: CycleStoreProviderOperation,
+  label: string,
+): Buffer {
+  if (!reflectApplyIntrinsic(isUint8ArrayIntrinsic, undefined, [value])) {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_CORRUPTION",
+      operation,
+      `stored ${label} is invalid`,
+    );
+  }
+  return bufferFrom(value as Uint8Array);
+}
+
+function sqliteSafeInteger(
+  value: unknown,
+  minimum: number,
+  maximum: number,
+  operation: CycleStoreProviderOperation,
+  label: string,
+): number {
+  const minimumBigInt = reflectApplyIntrinsic(bigintIntrinsic, undefined, [minimum]) as bigint;
+  const maximumBigInt = reflectApplyIntrinsic(bigintIntrinsic, undefined, [maximum]) as bigint;
+  if (typeof value !== "bigint" || value < minimumBigInt || value > maximumBigInt) {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_CORRUPTION",
+      operation,
+      `stored ${label} is invalid`,
+    );
+  }
+  return reflectApplyIntrinsic(numberIntrinsic, undefined, [value]) as number;
+}
+
+function buffersEqual(left: Buffer, right: Uint8Array): boolean {
+  return reflectApplyIntrinsic(bufferEqualsIntrinsic, left, [right]) as boolean;
+}
+
+function byteLength(value: Uint8Array): number {
+  return reflectApplyIntrinsic(typedArrayByteLengthGetterIntrinsic, value, []) as number;
+}
+
+function updateHash(
+  digest: ReturnType<typeof createHash>,
+  value: string,
+  encoding?: BufferEncoding,
+): void {
+  reflectApplyIntrinsic(hashUpdateIntrinsic, digest, encoding === undefined
+    ? [value]
+    : [value, encoding]);
+}
+
+function digestHex(digest: ReturnType<typeof createHash>): string {
+  return reflectApplyIntrinsic(hashDigestIntrinsic, digest, ["hex"]) as string;
+}
+
+function domainHash(domain: string, value: unknown): string {
+  const digest = createHashIntrinsic("sha256");
+  updateHash(digest, domain, "utf8");
+  updateHash(digest, canonicalSerialize(value), "utf8");
+  return digestHex(digest);
+}
+
+function canonicalDigest(value: unknown): string {
+  const digest = createHashIntrinsic("sha256");
+  updateHash(digest, canonicalSerialize(value), "utf8");
+  return digestHex(digest);
+}
+
+function ledgerObject(
+  value: unknown,
+  expectedKeys: readonly string[],
+): Record<string, unknown> {
+  if (typeof value !== "object" || value === null
+      || reflectApplyIntrinsic(arrayIsArrayIntrinsic, arrayIntrinsic, [value])) {
+    return fail("operation ledger result contract");
+  }
+  const actualKeys = reflectApplyIntrinsic(
+    objectKeysIntrinsic,
+    Object,
+    [value],
+  ) as readonly string[];
+  if (actualKeys.length !== expectedKeys.length) {
+    return fail("operation ledger result contract");
+  }
+  for (let actualIndex = 0; actualIndex < actualKeys.length; actualIndex += 1) {
+    let found = false;
+    for (let expectedIndex = 0; expectedIndex < expectedKeys.length; expectedIndex += 1) {
+      if (actualKeys[actualIndex] === expectedKeys[expectedIndex]) {
+        found = true;
+        break;
+      }
+    }
+    if (!found) return fail("operation ledger result contract");
+  }
+  return value as Record<string, unknown>;
+}
+
+function ledgerPattern(value: unknown, pattern: RegExp): value is string {
+  return typeof value === "string"
+    && reflectApplyIntrinsic(regexpExecIntrinsic, pattern, [value]) !== null;
+}
+
+function ledgerIdentifier(value: unknown): value is string {
+  return ledgerPattern(value, LEDGER_IDENTIFIER) && value !== "." && value !== "..";
+}
+
+function ledgerHash(value: unknown): value is string {
+  return ledgerPattern(value, LEDGER_HASH);
+}
+
+function ledgerInteger(value: unknown, minimum: number, maximum: number): value is number {
+  return typeof value === "number"
+    && reflectApplyIntrinsic(numberIsSafeIntegerIntrinsic, numberConstructorIntrinsic, [value])
+    && value >= minimum && value <= maximum;
+}
+
+function ledgerTimestampMs(value: unknown): number | null {
+  if (typeof value !== "string") return null;
+  const match = reflectApplyIntrinsic(regexpExecIntrinsic, LEDGER_RFC3339, [value]) as
+    RegExpExecArray | null;
+  if (match === null) return null;
+  const year = reflectApplyIntrinsic(numberIntrinsic, undefined, [match[1]]) as number;
+  const month = reflectApplyIntrinsic(numberIntrinsic, undefined, [match[2]]) as number;
+  const day = reflectApplyIntrinsic(numberIntrinsic, undefined, [match[3]]) as number;
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  let maximumDay = 31;
+  if (month === 2) maximumDay = leap ? 29 : 28;
+  else if (month === 4 || month === 6 || month === 9 || month === 11) maximumDay = 30;
+  if (year < 1 || day > maximumDay) return null;
+  const milliseconds = reflectApplyIntrinsic(dateParseIntrinsic, dateIntrinsic, [value]) as number;
+  return reflectApplyIntrinsic(numberIsFiniteIntrinsic, numberConstructorIntrinsic, [milliseconds])
+    ? milliseconds
+    : null;
+}
+
+function validateLedgerTail(value: unknown): void {
+  const tail = ledgerObject(value, ["exists", "sequence", "recordHash"]);
+  if (typeof tail.exists !== "boolean"
+      || !ledgerInteger(tail.sequence, -1, MAX_SAFE_INTEGER)
+      || (tail.recordHash !== null && !ledgerHash(tail.recordHash))
+      || (tail.exists === false && (tail.sequence !== -1 || tail.recordHash !== null))
+      || (tail.exists === true && (tail.sequence < 0 || tail.recordHash === null))) {
+    return fail("operation ledger result contract");
+  }
+}
+
+function validateLedgerCheckpointSummary(value: unknown): void {
+  const summary = ledgerObject(value, [
+    "checkpointScope",
+    "checkpointId",
+    "streamId",
+    "boundSequence",
+    "boundRecordHash",
+    "createdAt",
+    "valueHash",
+    "valueBytes",
+  ]);
+  if (!ledgerIdentifier(summary.checkpointScope)
+      || !ledgerIdentifier(summary.checkpointId)
+      || !ledgerIdentifier(summary.streamId)
+      || !ledgerInteger(summary.boundSequence, 0, MAX_SAFE_INTEGER)
+      || !ledgerHash(summary.boundRecordHash)
+      || ledgerTimestampMs(summary.createdAt) === null
+      || !ledgerHash(summary.valueHash)
+      || !ledgerInteger(summary.valueBytes, 0, 16_777_216)) {
+    return fail("operation ledger result contract");
+  }
+}
+
+function validateStoredCheckpoint(value: unknown): void {
+  const checkpoint = ledgerObject(value, [
+    "checkpointScope",
+    "checkpointId",
+    "streamId",
+    "boundSequence",
+    "boundRecordHash",
+    "createdAt",
+    "valueHash",
+    "valueBytes",
+    "value",
+  ]);
+  if (!ledgerIdentifier(checkpoint.checkpointScope)
+      || !ledgerIdentifier(checkpoint.checkpointId)
+      || !ledgerIdentifier(checkpoint.streamId)
+      || !ledgerInteger(checkpoint.boundSequence, 0, MAX_SAFE_INTEGER)
+      || !ledgerHash(checkpoint.boundRecordHash)
+      || ledgerTimestampMs(checkpoint.createdAt) === null
+      || !ledgerHash(checkpoint.valueHash)
+      || !ledgerInteger(checkpoint.valueBytes, 0, 16_777_216)
+      || canonicalDigest(checkpoint.value) !== checkpoint.valueHash
+      || byteLength(bufferFromUtf8(canonicalSerialize(checkpoint.value)))
+        !== checkpoint.valueBytes) {
+    return fail("checkpoint local contract");
+  }
+}
+
+function validateLedgerLease(value: unknown): void {
+  const lease = ledgerObject(value, [
+    "leaseId",
+    "holderId",
+    "leaseEpoch",
+    "fencingToken",
+    "acquiredAt",
+    "expiresAt",
+  ]);
+  const acquiredAtMs = ledgerTimestampMs(lease.acquiredAt);
+  const expiresAtMs = ledgerTimestampMs(lease.expiresAt);
+  if (!ledgerIdentifier(lease.leaseId)
+      || !ledgerIdentifier(lease.holderId)
+      || !ledgerInteger(lease.leaseEpoch, 1, MAX_SAFE_INTEGER)
+      || !ledgerInteger(lease.fencingToken, 1, MAX_SAFE_INTEGER)
+      || acquiredAtMs === null || expiresAtMs === null
+      || expiresAtMs <= acquiredAtMs) {
+    return fail("operation ledger result contract");
+  }
+}
+
+function validateLedgerGovernance(value: unknown): void {
+  const governance = ledgerObject(value, [
+    "legalHoldIds",
+    "retentionMode",
+    "archiveMode",
+    "compactionMode",
+  ]);
+  if (!reflectApplyIntrinsic(arrayIsArrayIntrinsic, arrayIntrinsic, [governance.legalHoldIds])
+      || governance.retentionMode !== "retain-authoritative-history"
+      || governance.archiveMode !== "lossless-before-delete"
+      || governance.compactionMode !== "logical-history-preserving") {
+    return fail("operation ledger result contract");
+  }
+  const holdIds = governance.legalHoldIds as readonly unknown[];
+  let previous: string | null = null;
+  for (let index = 0; index < holdIds.length; index += 1) {
+    const holdId = holdIds[index];
+    if (!ledgerIdentifier(holdId) || (previous !== null && previous >= holdId)) {
+      return fail("operation ledger result contract");
+    }
+    previous = holdId;
+  }
+}
+
+function validateLedgerMigrationLock(value: unknown): void {
+  const lock = ledgerObject(value, [
+    "lockId",
+    "ownerId",
+    "sourceSchemaVersion",
+    "targetSchemaVersion",
+    "lockEpoch",
+    "fencingToken",
+    "acquiredAt",
+    "expiresAt",
+  ]);
+  const acquiredAtMs = ledgerTimestampMs(lock.acquiredAt);
+  const expiresAtMs = ledgerTimestampMs(lock.expiresAt);
+  if (!ledgerIdentifier(lock.lockId)
+      || !ledgerIdentifier(lock.ownerId)
+      || !ledgerInteger(lock.sourceSchemaVersion, 1, MAX_SAFE_INTEGER)
+      || !ledgerInteger(lock.targetSchemaVersion, 1, MAX_SAFE_INTEGER)
+      || lock.targetSchemaVersion <= lock.sourceSchemaVersion
+      || !ledgerInteger(lock.lockEpoch, 1, MAX_SAFE_INTEGER)
+      || !ledgerInteger(lock.fencingToken, 1, MAX_SAFE_INTEGER)
+      || acquiredAtMs === null || expiresAtMs === null
+      || expiresAtMs <= acquiredAtMs) {
+    return fail("operation ledger result contract");
+  }
+}
+
+function validateLedgerResult(
+  operation: CycleStoreMutationOperation,
+  value: unknown,
+): void {
+  switch (operation) {
+    case "append": {
+      const append = ledgerObject(value, ["tail", "appendedRecords"]);
+      validateLedgerTail(append.tail);
+      if (!ledgerInteger(append.appendedRecords, 1, 64)) {
+        return fail("operation ledger result contract");
+      }
+      return;
+    }
+    case "save-checkpoint":
+      validateLedgerCheckpointSummary(value);
+      return;
+    case "delete-checkpoint": {
+      const deletion = ledgerObject(value, ["deleted"]);
+      if (typeof deletion.deleted !== "boolean") {
+        return fail("operation ledger result contract");
+      }
+      return;
+    }
+    case "acquire-lease":
+    case "renew-lease":
+      validateLedgerLease(value);
+      return;
+    case "release-lease": {
+      const inspection = ledgerObject(value, [
+        "status",
+        "lease",
+        "lastLeaseEpoch",
+        "lastFencingToken",
+      ]);
+      if (inspection.status !== "released" || inspection.lease !== null
+          || !ledgerInteger(inspection.lastLeaseEpoch, 0, MAX_SAFE_INTEGER)
+          || !ledgerInteger(inspection.lastFencingToken, 0, MAX_SAFE_INTEGER)) {
+        return fail("operation ledger result contract");
+      }
+      return;
+    }
+    case "set-legal-hold":
+      validateLedgerGovernance(value);
+      return;
+    case "acquire-migration-lock":
+      validateLedgerMigrationLock(value);
+      return;
+    case "release-migration-lock":
+      if (value !== null) return fail("operation ledger result contract");
+  }
+}
+
+function numericProjection(values: readonly unknown[]): readonly unknown[] {
+  const projected: unknown[] = [];
+  for (let index = 0; index < values.length; index += 1) {
+    const value = values[index];
+    reflectApplyIntrinsic(arrayPushIntrinsic, projected, [
+      typeof value === "bigint"
+        ? reflectApplyIntrinsic(numberIntrinsic, undefined, [value])
+        : value,
+    ]);
+  }
+  return projected;
+}
+
+function isEcmaWhitespaceCodeUnit(value: number): boolean {
+  return (value >= 0x0009 && value <= 0x000d)
+    || value === 0x0020 || value === 0x00a0 || value === 0x1680
+    || (value >= 0x2000 && value <= 0x200a)
+    || value === 0x2028 || value === 0x2029 || value === 0x202f
+    || value === 0x205f || value === 0x3000 || value === 0xfeff;
+}
+
+function normalizeSQLiteCatalogSql(value: string): string {
+  let normalized = "";
+  let pendingSpace = false;
+  for (let index = 0; index < value.length; index += 1) {
+    const codeUnit = reflectApplyIntrinsic(stringCharCodeAtIntrinsic, value, [index]) as number;
+    if (isEcmaWhitespaceCodeUnit(codeUnit)) {
+      if (normalized.length !== 0) pendingSpace = true;
+      continue;
+    }
+    if (pendingSpace) {
+      normalized += " ";
+      pendingSpace = false;
+    }
+    normalized += reflectApplyIntrinsic(stringSliceIntrinsic, value, [index, index + 1]) as string;
+  }
+  return normalized;
+}
+
 function checkedPath(value: unknown): string {
   if (typeof value !== "string"
       || value.length === 0
-      || value.includes("\0")
+      || reflectApplyIntrinsic(stringIncludesIntrinsic, value, ["\0"])
       || value === ":memory:"
-      || value.startsWith("file::memory:")) {
+      || reflectApplyIntrinsic(stringStartsWithIntrinsic, value, ["file::memory:"])) {
     throw new CycleStoreProviderError(
       "GE_CYCLE_STORE_INVALID_ARGUMENT",
       OPERATION,
@@ -130,8 +565,29 @@ function checkedPath(value: unknown): string {
   return value;
 }
 
-function statement(database: DatabaseSync, sql: string) {
-  return hardenSQLiteStatement(database.prepare(sql));
+interface SQLiteAuditStatement {
+  all(...parameters: readonly unknown[]): readonly unknown[];
+  get(...parameters: readonly unknown[]): unknown;
+}
+
+function statement(database: DatabaseSync, sql: string): SQLiteAuditStatement {
+  const native = reflectApplyIntrinsic(databasePrepareIntrinsic, database, [sql]) as StatementSync;
+  reflectApplyIntrinsic(statementSetAllowBareNamedParametersIntrinsic, native, [false]);
+  reflectApplyIntrinsic(statementSetAllowUnknownNamedParametersIntrinsic, native, [false]);
+  reflectApplyIntrinsic(statementSetReadBigIntsIntrinsic, native, [true]);
+  reflectApplyIntrinsic(statementSetReturnArraysIntrinsic, native, [true]);
+  return {
+    all: (...parameters: readonly unknown[]) => reflectApplyIntrinsic(
+      statementAllIntrinsic,
+      native,
+      parameters,
+    ) as readonly unknown[],
+    get: (...parameters: readonly unknown[]) => reflectApplyIntrinsic(
+      statementGetIntrinsic,
+      native,
+      parameters,
+    ),
+  };
 }
 
 function rows(database: DatabaseSync, sql: string): readonly unknown[] {
@@ -193,12 +649,13 @@ function checkPragma(database: DatabaseSync, pragma: "quick_check" | "integrity_
 
 function canonicalBlob(value: unknown, label: string): unknown {
   const blob = sqliteBlob(value, OPERATION, label);
-  if (blob.byteLength < 2 || (blob[0] === 0xef && blob[1] === 0xbb && blob[2] === 0xbf)) {
+  if (byteLength(blob) < 2 || (blob[0] === 0xef && blob[1] === 0xbb && blob[2] === 0xbf)) {
     return fail(label);
   }
   try {
-    const text = new TextDecoder("utf-8", { fatal: true }).decode(blob);
-    const decoded = JSON.parse(text) as unknown;
+    const decoder = new textDecoderIntrinsic("utf-8", { fatal: true });
+    const text = reflectApplyIntrinsic(textDecoderDecodeIntrinsic, decoder, [blob]) as string;
+    const decoded = reflectApplyIntrinsic(jsonParseIntrinsic, jsonIntrinsic, [text]) as unknown;
     if (canonicalSerialize(decoded) !== text) return fail(label);
     return decoded;
   } catch (error) {
@@ -212,23 +669,28 @@ function same(left: unknown, right: unknown): boolean {
 }
 
 function catalogHash(database: DatabaseSync): string {
-  const catalog = rows(database, `
+  const observed = rows(database, `
     SELECT type, name, tbl_name, sql
       FROM sqlite_schema
      WHERE name GLOB 'ge_cycle_*'
        AND type IN ('table', 'index')
        AND sql IS NOT NULL
      ORDER BY type, name
-  `).map((value, index) => {
+  `);
+  const catalog: unknown[] = [];
+  for (let index = 0; index < observed.length; index += 1) {
+    const value = observed[index];
     const row = sqliteRow(value, 4, OPERATION, `schema catalog row ${index}`);
-    return {
+    reflectApplyIntrinsic(arrayPushIntrinsic, catalog, [{
       type: sqliteText(row[0], OPERATION, "schema catalog type"),
       name: sqliteText(row[1], OPERATION, "schema catalog name"),
       tableName: sqliteText(row[2], OPERATION, "schema catalog table"),
-      sql: sqliteText(row[3], OPERATION, "schema catalog SQL").replace(/\s+/gu, " ").trim(),
-    };
-  });
-  return createHash("sha256").update(canonicalSerialize(catalog), "utf8").digest("hex");
+      sql: normalizeSQLiteCatalogSql(sqliteText(row[3], OPERATION, "schema catalog SQL")),
+    }]);
+  }
+  const digest = createHashIntrinsic("sha256");
+  updateHash(digest, canonicalSerialize(catalog), "utf8");
+  return digestHex(digest);
 }
 
 function inspectIdentity(database: DatabaseSync): {
@@ -313,24 +775,26 @@ function inspectIdentity(database: DatabaseSync): {
 }
 
 function updateDigest(digest: ReturnType<typeof createHash>, label: string, value: unknown): void {
-  digest.update(label, "utf8");
-  digest.update("\0", "utf8");
-  digest.update(canonicalSerialize(value), "utf8");
-  digest.update("\0", "utf8");
+  updateHash(digest, label, "utf8");
+  updateHash(digest, "\0", "utf8");
+  updateHash(digest, canonicalSerialize(value), "utf8");
+  updateHash(digest, "\0", "utf8");
 }
 
 function inspectRecords(
   database: DatabaseSync,
   digest: ReturnType<typeof createHash>,
 ): Map<string, RecordHead> {
-  const heads = new Map<string, RecordHead>();
+  const heads = new mapIntrinsic<string, RecordHead>();
+  let headCount = 0;
   const recordRows = rows(database, `
     SELECT tenant_id, stream_id, sequence, record_id, previous_record_hash,
            value_hash, value_bytes, value_blob, record_hash, record_blob
       FROM ge_cycle_records
      ORDER BY tenant_id, stream_id, sequence
   `);
-  for (const [index, raw] of recordRows.entries()) {
+  for (let index = 0; index < recordRows.length; index += 1) {
+    const raw = recordRows[index];
     const row = sqliteRow(raw, 10, OPERATION, `record row ${index}`);
     const tenantId = sqliteText(row[0], OPERATION, "record tenant");
     const streamId = sqliteText(row[1], OPERATION, "record stream");
@@ -342,9 +806,22 @@ function inspectRecords(
     const valueBlob = sqliteBlob(row[7], OPERATION, "record value blob");
     const recordHash = sqliteText(row[8], OPERATION, "record hash");
     const recordBlob = sqliteBlob(row[9], OPERATION, "record blob");
-    const record = cycleStoreAdapterCodec.parseStoredRecord(recordBlob, OPERATION);
+    const record = reflectApplyIntrinsic(
+      codecParseStoredRecordIntrinsic,
+      cycleStoreAdapterCodec,
+      [recordBlob, OPERATION],
+    ) as CycleStoreRecord;
     const key = canonicalSerialize([tenantId, streamId]);
-    const previous = heads.get(key);
+    const previous = reflectApplyIntrinsic(mapGetIntrinsic, heads, [key]) as
+      RecordHead | undefined;
+    const expectedRecordHash = domainHash(CYCLE_STORE_RECORD_DOMAIN, {
+      recordId,
+      sequence,
+      previousRecordHash: previousHash,
+      valueHash,
+      valueBytes,
+      value: record.value,
+    });
     if (sequence !== (previous?.sequence ?? -1) + 1
         || previousHash !== (previous?.recordHash ?? null)
         || record.recordId !== recordId
@@ -353,12 +830,19 @@ function inspectRecords(
         || record.valueHash !== valueHash
         || record.valueBytes !== valueBytes
         || record.recordHash !== recordHash
-        || valueBlob.byteLength !== valueBytes
-        || !valueBlob.equals(Buffer.from(canonicalSerialize(record.value), "utf8"))
-        || canonicalHash(record.value) !== valueHash) {
+        || record.recordHash !== expectedRecordHash
+        || recordHash !== expectedRecordHash
+        || byteLength(valueBlob) !== valueBytes
+        || !buffersEqual(recordBlob, bufferFromUtf8(canonicalSerialize(record)))
+        || !buffersEqual(valueBlob, bufferFromUtf8(canonicalSerialize(record.value)))
+        || canonicalDigest(record.value) !== valueHash) {
       return fail("record canonical chain");
     }
-    heads.set(key, { sequence, recordHash, count: (previous?.count ?? 0) + 1 });
+    if (previous === undefined) headCount += 1;
+    reflectApplyIntrinsic(mapSetIntrinsic, heads, [
+      key,
+      { sequence, recordHash, count: (previous?.count ?? 0) + 1 },
+    ]);
     updateDigest(digest, "record", { tenantId, streamId, record });
   }
 
@@ -366,13 +850,18 @@ function inspectRecords(
     SELECT tenant_id, stream_id, tail_sequence, tail_record_hash
       FROM ge_cycle_streams ORDER BY tenant_id, stream_id
   `);
-  for (const [index, raw] of streamRows.entries()) {
+  for (let index = 0; index < streamRows.length; index += 1) {
+    const raw = streamRows[index];
     const row = sqliteRow(raw, 4, OPERATION, `stream row ${index}`);
     const tenantId = sqliteText(row[0], OPERATION, "stream tenant");
     const streamId = sqliteText(row[1], OPERATION, "stream id");
     const sequence = integer(row[2], -1, MAX_SAFE_INTEGER, "stream tail sequence");
     const recordHash = sqliteNullableText(row[3], OPERATION, "stream tail hash");
-    const head = heads.get(canonicalSerialize([tenantId, streamId]));
+    const head = reflectApplyIntrinsic(
+      mapGetIntrinsic,
+      heads,
+      [canonicalSerialize([tenantId, streamId])],
+    ) as RecordHead | undefined;
     if (head === undefined
       ? (sequence !== -1 || recordHash !== null)
       : (sequence !== head.sequence || recordHash !== head.recordHash)) {
@@ -380,13 +869,17 @@ function inspectRecords(
     }
     updateDigest(digest, "stream", { tenantId, streamId, sequence, recordHash });
   }
-  if (streamRows.length !== heads.size) return fail("stream record cardinality");
+  if (streamRows.length !== headCount) return fail("stream record cardinality");
   return heads;
 }
 
 function mutationOperation(value: unknown): CycleStoreMutationOperation {
   const operation = sqliteText(value, OPERATION, "ledger operation");
-  if (!MUTATION_OPERATIONS.has(operation as CycleStoreMutationOperation)) {
+  if (!reflectApplyIntrinsic(
+    setHasIntrinsic,
+    MUTATION_OPERATIONS,
+    [operation as CycleStoreMutationOperation],
+  )) {
     return fail("ledger operation");
   }
   return operation as CycleStoreMutationOperation;
@@ -397,7 +890,8 @@ function inspectOperations(database: DatabaseSync, digest: ReturnType<typeof cre
     SELECT tenant_id, operation_id, operation_name, request_hash, result_blob, result_hash
       FROM ge_cycle_operations ORDER BY tenant_id, operation_id
   `);
-  for (const [index, raw] of operationRows.entries()) {
+  for (let index = 0; index < operationRows.length; index += 1) {
+    const raw = operationRows[index];
     const row = sqliteRow(raw, 6, OPERATION, `operation row ${index}`);
     const tenantId = sqliteText(row[0], OPERATION, "operation tenant");
     const operationId = sqliteText(row[1], OPERATION, "operation id");
@@ -405,9 +899,14 @@ function inspectOperations(database: DatabaseSync, digest: ReturnType<typeof cre
     const requestHash = sqliteText(row[3], OPERATION, "operation request hash");
     const resultBlob = sqliteBlob(row[4], OPERATION, "operation result blob");
     const resultHash = sqliteText(row[5], OPERATION, "operation result hash");
-    const result = cycleStoreAdapterCodec.decodeLedgerResult(operation, resultBlob);
-    const encoded = Buffer.from(cycleStoreAdapterCodec.encodeLedgerResult(operation, result));
-    if (!encoded.equals(resultBlob) || canonicalHash(result) !== resultHash) {
+    const result = reflectApplyIntrinsic(
+      codecDecodeLedgerResultIntrinsic,
+      cycleStoreAdapterCodec,
+      [operation, resultBlob],
+    );
+    validateLedgerResult(operation, result);
+    const encoded = bufferFromUtf8(canonicalSerialize(result));
+    if (!buffersEqual(encoded, resultBlob) || canonicalDigest(result) !== resultHash) {
       return fail("operation ledger result");
     }
     if (operation === "append") {
@@ -456,8 +955,10 @@ function inspectOperations(database: DatabaseSync, digest: ReturnType<typeof cre
       if (retainedRevision === undefined) return fail("checkpoint ledger revision binding");
     } else if (operation === "acquire-lease" || operation === "renew-lease") {
       const lease = result as CycleStoreLease;
-      const acquiredAtMs = Date.parse(lease.acquiredAt);
-      if (!Number.isSafeInteger(acquiredAtMs) || acquiredAtMs < 0) {
+      const acquiredAtMs = reflectApplyIntrinsic(dateParseIntrinsic, dateIntrinsic, [lease.acquiredAt]) as
+        number;
+      if (!reflectApplyIntrinsic(numberIsSafeIntegerIntrinsic, numberConstructorIntrinsic, [acquiredAtMs])
+          || acquiredAtMs < 0) {
         return fail("lease ledger time binding");
       }
       const retainedIdentity = statement(database, `
@@ -475,8 +976,10 @@ function inspectOperations(database: DatabaseSync, digest: ReturnType<typeof cre
       if (retainedIdentity === undefined) return fail("lease ledger identity binding");
     } else if (operation === "acquire-migration-lock") {
       const lock = result as CycleStoreMigrationLock;
-      const acquiredAtMs = Date.parse(lock.acquiredAt);
-      if (!Number.isSafeInteger(acquiredAtMs) || acquiredAtMs < 0) {
+      const acquiredAtMs = reflectApplyIntrinsic(dateParseIntrinsic, dateIntrinsic, [lock.acquiredAt]) as
+        number;
+      if (!reflectApplyIntrinsic(numberIsSafeIntegerIntrinsic, numberConstructorIntrinsic, [acquiredAtMs])
+          || acquiredAtMs < 0) {
         return fail("migration ledger time binding");
       }
       const retainedIdentity = statement(database, `
@@ -509,7 +1012,8 @@ function inspectCheckpoints(database: DatabaseSync, digest: ReturnType<typeof cr
       FROM ge_cycle_checkpoints
      ORDER BY tenant_id, checkpoint_scope, checkpoint_id
   `);
-  for (const [index, raw] of checkpointRows.entries()) {
+  for (let index = 0; index < checkpointRows.length; index += 1) {
+    const raw = checkpointRows[index];
     const row = sqliteRow(raw, 14, OPERATION, `checkpoint row ${index}`);
     const tenantId = sqliteText(row[0], OPERATION, "checkpoint tenant");
     const scope = sqliteText(row[1], OPERATION, "checkpoint scope");
@@ -525,7 +1029,12 @@ function inspectCheckpoints(database: DatabaseSync, digest: ReturnType<typeof cr
     const summaryBlob = sqliteBlob(row[11], OPERATION, "checkpoint summary blob");
     const checkpointRevision = integer(row[12], 1, MAX_SAFE_INTEGER, "checkpoint revision");
     const committedAtMs = integer(row[13], 0, MAX_SAFE_INTEGER, "checkpoint commit time");
-    const checkpoint = cycleStoreAdapterCodec.parseStoredCheckpoint(checkpointBlob, OPERATION);
+    const checkpoint = reflectApplyIntrinsic(
+      codecParseStoredCheckpointIntrinsic,
+      cycleStoreAdapterCodec,
+      [checkpointBlob, OPERATION],
+    ) as CycleStoreCheckpoint;
+    validateStoredCheckpoint(checkpoint);
     const summary = checkpointSummary(checkpoint as unknown as Record<string, unknown>);
     if (checkpoint.checkpointScope !== scope
         || checkpoint.checkpointId !== checkpointId
@@ -535,12 +1044,11 @@ function inspectCheckpoints(database: DatabaseSync, digest: ReturnType<typeof cr
         || checkpoint.createdAt !== createdAt
         || checkpoint.valueHash !== valueHash
         || checkpoint.valueBytes !== valueBytes
-        || valueBlob.byteLength !== valueBytes
-        || !valueBlob.equals(Buffer.from(canonicalSerialize(checkpoint.value), "utf8"))
-        || canonicalHash(checkpoint.value) !== valueHash
-        || !summaryBlob.equals(Buffer.from(
-          cycleStoreAdapterCodec.encodeLedgerResult("save-checkpoint", summary),
-        ))) {
+        || byteLength(valueBlob) !== valueBytes
+        || !buffersEqual(checkpointBlob, bufferFromUtf8(canonicalSerialize(checkpoint)))
+        || !buffersEqual(valueBlob, bufferFromUtf8(canonicalSerialize(checkpoint.value)))
+        || canonicalDigest(checkpoint.value) !== valueHash
+        || !buffersEqual(summaryBlob, bufferFromUtf8(canonicalSerialize(summary)))) {
       return fail("checkpoint canonical binding");
     }
     const retainedRevision = statement(database, `
@@ -560,8 +1068,10 @@ function inspectCheckpoints(database: DatabaseSync, digest: ReturnType<typeof cr
     if (integer(revisionRow[0], 1, MAX_SAFE_INTEGER, "current checkpoint revision")
           !== checkpointRevision
         || sqliteText(revisionRow[1], OPERATION, "current checkpoint revision action") !== "put"
-        || !sqliteBlob(revisionRow[2], OPERATION, "current checkpoint revision summary")
-          .equals(summaryBlob)
+        || !buffersEqual(
+          sqliteBlob(revisionRow[2], OPERATION, "current checkpoint revision summary"),
+          summaryBlob,
+        )
         || integer(revisionRow[3], 0, MAX_SAFE_INTEGER, "current checkpoint sequence")
           !== checkpoint.boundSequence
         || sqliteText(revisionRow[4], OPERATION, "current checkpoint record hash")
@@ -593,13 +1103,19 @@ function inspectCheckpoints(database: DatabaseSync, digest: ReturnType<typeof cr
   `);
   let priorKey: string | null = null;
   let priorRevision = 0;
-  for (const [index, raw] of revisionRows.entries()) {
+  for (let index = 0; index < revisionRows.length; index += 1) {
+    const raw = revisionRows[index];
     const row = sqliteRow(raw, 11, OPERATION, `checkpoint revision row ${index}`);
     const tenantId = sqliteText(row[0], OPERATION, "revision tenant");
     const scope = sqliteText(row[1], OPERATION, "revision scope");
     const revision = integer(row[2], 1, MAX_SAFE_INTEGER, "checkpoint revision");
     const checkpointId = sqliteText(row[3], OPERATION, "revision checkpoint id");
     const action = sqliteText(row[4], OPERATION, "revision action");
+    if (!ledgerIdentifier(tenantId)
+        || !ledgerIdentifier(scope)
+        || !ledgerIdentifier(checkpointId)) {
+      return fail("checkpoint revision identifier");
+    }
     const key = canonicalSerialize([tenantId, scope]);
     const expectedRevision = key === priorKey ? priorRevision + 1 : 1;
     if (revision !== expectedRevision) return fail("checkpoint revision sequence");
@@ -607,13 +1123,19 @@ function inspectCheckpoints(database: DatabaseSync, digest: ReturnType<typeof cr
     priorRevision = revision;
     if (action === "put") {
       const summaryBlob = sqliteBlob(row[5], OPERATION, "revision summary");
-      const summary = cycleStoreAdapterCodec.decodeLedgerResult("save-checkpoint", summaryBlob);
+      const summary = reflectApplyIntrinsic(
+        codecDecodeLedgerResultIntrinsic,
+        cycleStoreAdapterCodec,
+        ["save-checkpoint", summaryBlob],
+      ) as CycleStoreCheckpointSummary;
+      validateLedgerCheckpointSummary(summary);
       const boundSequence = integer(row[6], 0, MAX_SAFE_INTEGER, "revision sequence");
       const boundHash = sqliteText(row[7], OPERATION, "revision record hash");
       const createdAt = sqliteText(row[8], OPERATION, "revision created time");
       const valueHash = sqliteText(row[9], OPERATION, "revision value hash");
       const valueBytes = integer(row[10], 1, 16_777_216, "revision value bytes");
-      if (summary.checkpointScope !== scope
+      if (!buffersEqual(summaryBlob, bufferFromUtf8(canonicalSerialize(summary)))
+          || summary.checkpointScope !== scope
           || summary.checkpointId !== checkpointId
           || summary.boundSequence !== boundSequence
           || summary.boundRecordHash !== boundHash
@@ -624,7 +1146,9 @@ function inspectCheckpoints(database: DatabaseSync, digest: ReturnType<typeof cr
       }
       updateDigest(digest, "checkpoint-revision", { tenantId, revision, action, summary });
     } else if (action === "delete") {
-      if (row.slice(5).some((value) => value !== null)) return fail("checkpoint deletion revision");
+      for (let fieldIndex = 5; fieldIndex < row.length; fieldIndex += 1) {
+        if (row[fieldIndex] !== null) return fail("checkpoint deletion revision");
+      }
       updateDigest(digest, "checkpoint-revision", {
         tenantId,
         scope,
@@ -693,7 +1217,10 @@ function inspectFences(database: DatabaseSync, digest: ReturnType<typeof createH
       FROM ge_cycle_migration_lock CROSS JOIN ge_cycle_schema
      WHERE ge_cycle_migration_lock.singleton = 1 AND ge_cycle_schema.singleton = 1
   `).get(), 12, OPERATION, "migration lock singleton");
-  const activeNulls = migration.slice(0, 8).filter((value) => value === null).length;
+  let activeNulls = 0;
+  for (let index = 0; index < 8; index += 1) {
+    if (migration[index] === null) activeNulls += 1;
+  }
   const lastEpoch = integer(migration[8], 0, MAX_SAFE_INTEGER, "last migration epoch");
   const lastFence = integer(migration[9], 0, MAX_SAFE_INTEGER, "last migration fence");
   const clockHighWater = integer(migration[10], 0, MAX_SAFE_INTEGER, "provider clock high-water");
@@ -763,19 +1290,21 @@ function inspectFences(database: DatabaseSync, digest: ReturnType<typeof createH
     return fail("used migration identities");
   }
 
-  for (const [index, raw] of rows(database, `
+  const leaseRows = rows(database, `
     SELECT tenant_id, stream_id, last_lease_epoch, last_fencing_token,
            active_lease_id, active_holder_id, active_lease_epoch,
            active_fencing_token, active_acquired_at_ms, active_expires_at_ms
       FROM ge_cycle_leases ORDER BY tenant_id, stream_id
-  `).entries()) {
+  `);
+  for (let index = 0; index < leaseRows.length; index += 1) {
+    const raw = leaseRows[index];
     const row = sqliteRow(raw, 10, OPERATION, `lease row ${index}`);
-    updateDigest(digest, "lease", row.map((value) => typeof value === "bigint" ? Number(value) : value));
+    updateDigest(digest, "lease", numericProjection(row));
   }
   updateDigest(
     digest,
     "migration-lock",
-    migration.map((value) => typeof value === "bigint" ? Number(value) : value),
+    numericProjection(migration),
   );
 }
 
@@ -787,7 +1316,8 @@ function inspectCursors(database: DatabaseSync, digest: ReturnType<typeof create
            snapshot_blob, created_at_ms, expires_at_ms, consumed_at_ms
       FROM ge_cycle_cursors ORDER BY tenant_id, token_hash
   `);
-  for (const [index, raw] of cursorRows.entries()) {
+  for (let index = 0; index < cursorRows.length; index += 1) {
+    const raw = cursorRows[index];
     const row = sqliteRow(raw, 16, OPERATION, `cursor row ${index}`);
     const tenantId = sqliteText(row[0], OPERATION, "cursor tenant");
     const tokenHash = sqliteText(row[1], OPERATION, "cursor token hash");
@@ -841,19 +1371,21 @@ function inspectCursors(database: DatabaseSync, digest: ReturnType<typeof create
         pageSize,
       };
       if (streamId !== null || scope === null || tailSequence !== null || tailHash !== null
-          || !same(requestScope, expectedScope) || !Array.isArray(snapshot)
-          || nextPosition > snapshot.length) {
+          || !same(requestScope, expectedScope)
+          || !reflectApplyIntrinsic(arrayIsArrayIntrinsic, arrayIntrinsic, [snapshot])) {
         return fail("checkpoint cursor binding");
       }
+      const snapshotItems = snapshot as readonly unknown[];
+      if (nextPosition > snapshotItems.length) return fail("checkpoint cursor binding");
       const summaries: CycleStoreCheckpointSummary[] = [];
-      for (const summary of snapshot) {
-        const decoded = cycleStoreAdapterCodec.decodeLedgerResult(
-          "save-checkpoint",
-          Buffer.from(canonicalSerialize(summary), "utf8"),
-        );
-        const encoded = Buffer.from(
-          cycleStoreAdapterCodec.encodeLedgerResult("save-checkpoint", decoded),
-        );
+      for (let summaryIndex = 0; summaryIndex < snapshotItems.length; summaryIndex += 1) {
+        const summary = snapshotItems[summaryIndex];
+        const decoded = reflectApplyIntrinsic(
+          codecDecodeLedgerResultIntrinsic,
+          cycleStoreAdapterCodec,
+          ["save-checkpoint", bufferFromUtf8(canonicalSerialize(summary))],
+        ) as CycleStoreCheckpointSummary;
+        const encoded = bufferFromUtf8(canonicalSerialize(decoded));
         if (decoded.checkpointScope !== scope || statement(database, `
           SELECT 1 FROM ge_cycle_checkpoint_revisions
            WHERE tenant_id = ? AND checkpoint_scope = ? AND checkpoint_id = ?
@@ -862,7 +1394,7 @@ function inspectCursors(database: DatabaseSync, digest: ReturnType<typeof create
         `).get(tenantId, scope, decoded.checkpointId, encoded) === undefined) {
           return fail("checkpoint cursor revision binding");
         }
-        summaries.push(decoded);
+        reflectApplyIntrinsic(arrayPushIntrinsic, summaries, [decoded]);
       }
       for (let index = 1; index < summaries.length; index += 1) {
         const prior = summaries[index - 1]!;
@@ -899,7 +1431,7 @@ function counters(database: DatabaseSync): SQLiteSemanticCounters {
     MAX_SAFE_INTEGER,
     `${table} count`,
   );
-  return Object.freeze({
+  return objectFreezeIntrinsic({
     streams: count("ge_cycle_streams"),
     records: count("ge_cycle_records"),
     operations: count("ge_cycle_operations"),
@@ -929,11 +1461,16 @@ function inspectConnectionSettings(database: DatabaseSync): void {
     ["writable_schema", 0],
     ["query_only", 1],
   ] as const;
-  for (const [name, expected] of expectedIntegers) {
+  for (let index = 0; index < expectedIntegers.length; index += 1) {
+    const [name, expected] = expectedIntegers[index]!;
     const actual = scalarInteger(database, `PRAGMA ${name}`, 0, MAX_SAFE_INTEGER, name);
     if (actual !== expected) return fail("connection settings");
   }
-  const journalMode = scalarText(database, "PRAGMA journal_mode", "journal mode").toLowerCase();
+  const journalMode = reflectApplyIntrinsic(
+    stringToLowerCaseIntrinsic,
+    scalarText(database, "PRAGMA journal_mode", "journal mode"),
+    [],
+  ) as string;
   if (journalMode !== "wal" && journalMode !== "delete") {
     return fail("connection settings");
   }
@@ -958,7 +1495,7 @@ export function inspectSQLiteCycleStoreIntegrity(
   }
   let database: DatabaseSync | undefined;
   try {
-    database = new DatabaseSync(safePath, {
+    database = new databaseSyncIntrinsic(safePath, {
       allowExtension: false,
       enableDoubleQuotedStringLiterals: false,
       enableForeignKeyConstraints: true,
@@ -966,9 +1503,11 @@ export function inspectSQLiteCycleStoreIntegrity(
       readOnly: true,
       timeout: 250,
     });
-    database.exec("PRAGMA trusted_schema = OFF; PRAGMA query_only = ON");
+    reflectApplyIntrinsic(databaseExecIntrinsic, database, [
+      "PRAGMA trusted_schema = OFF; PRAGMA query_only = ON",
+    ]);
     inspectConnectionSettings(database);
-    database.exec("BEGIN");
+    reflectApplyIntrinsic(databaseExecIntrinsic, database, ["BEGIN"]);
     checkPragma(database, "quick_check");
     if (rows(database, "PRAGMA foreign_key_check").length !== 0) {
       return fail("foreign keys");
@@ -978,7 +1517,8 @@ export function inspectSQLiteCycleStoreIntegrity(
     const semanticCounters = counters(database);
     let semanticSha256: string | null = null;
     if (level === "semantic") {
-      const digest = createHash("sha256").update(SEMANTIC_DIGEST_DOMAIN, "utf8");
+      const digest = createHashIntrinsic("sha256");
+      updateHash(digest, SEMANTIC_DIGEST_DOMAIN, "utf8");
       updateDigest(digest, "schema", {
         applicationId: SQLITE_CYCLE_STORE_APPLICATION_ID,
         schemaVersion: SQLITE_CYCLE_STORE_SCHEMA_VERSION,
@@ -992,7 +1532,7 @@ export function inspectSQLiteCycleStoreIntegrity(
       inspectCheckpoints(database, digest);
       inspectFences(database, digest);
       inspectCursors(database, digest);
-      for (const [label, sql] of [
+      const trailingQueries = [
         ["legal-hold", `SELECT tenant_id, stream_id, hold_id, placed_at_ms
                           FROM ge_cycle_legal_holds ORDER BY tenant_id, stream_id, hold_id`],
         ["used-lease", `SELECT tenant_id, stream_id, lease_id, lease_epoch,
@@ -1001,17 +1541,20 @@ export function inspectSQLiteCycleStoreIntegrity(
                          ORDER BY tenant_id, stream_id, lease_id`],
         ["used-migration", `SELECT lock_id, lock_epoch, fencing_token, first_used_at_ms
                               FROM ge_cycle_used_migration_lock_ids ORDER BY lock_id`],
-      ] as const) {
-        for (const raw of rows(database, sql)) {
-          assertAuditRow(raw, label, digest);
+      ] as const;
+      for (let queryIndex = 0; queryIndex < trailingQueries.length; queryIndex += 1) {
+        const [label, sql] = trailingQueries[queryIndex]!;
+        const trailingRows = rows(database, sql);
+        for (let rowIndex = 0; rowIndex < trailingRows.length; rowIndex += 1) {
+          assertAuditRow(trailingRows[rowIndex], label, digest);
         }
       }
       updateDigest(digest, "counters", semanticCounters);
-      semanticSha256 = digest.digest("hex");
+      semanticSha256 = digestHex(digest);
     }
-    database.exec("COMMIT");
+    reflectApplyIntrinsic(databaseExecIntrinsic, database, ["COMMIT"]);
     const sqliteVersion = scalarText(database, "SELECT sqlite_version()", "SQLite version");
-    return Object.freeze({
+    return objectFreezeIntrinsic({
       level,
       quickCheck: "ok",
       integrityCheck: level === "quick" ? "not-run" : "ok",
@@ -1038,11 +1581,11 @@ export function inspectSQLiteCycleStoreIntegrity(
     }
     throw translateSQLiteError(error, OPERATION);
   } finally {
-    if (database?.isOpen === true) {
-      if (database.isTransaction) {
-        try { database.exec("ROLLBACK"); } catch { /* preserve the safe audit error */ }
-      }
-      database.close();
+    if (database !== undefined) {
+      try {
+        reflectApplyIntrinsic(databaseExecIntrinsic, database, ["ROLLBACK"]);
+      } catch { /* preserve the safe audit error */ }
+      reflectApplyIntrinsic(databaseCloseIntrinsic, database, []);
     }
   }
 }
@@ -1052,16 +1595,33 @@ function assertAuditRow(
   label: string,
   digest: ReturnType<typeof createHash>,
 ): void {
-  if (!Array.isArray(value)) return fail(`${label} row`);
-  const normalized = value.map((field) => {
+  if (!reflectApplyIntrinsic(arrayIsArrayIntrinsic, arrayIntrinsic, [value])) {
+    return fail(`${label} row`);
+  }
+  const fields = value as readonly unknown[];
+  const normalized: unknown[] = [];
+  for (let index = 0; index < fields.length; index += 1) {
+    const field = fields[index];
     if (typeof field === "bigint") {
-      if (field < 0n || field > BigInt(MAX_SAFE_INTEGER)) return fail(`${label} integer`);
-      return Number(field);
+      const maximum = reflectApplyIntrinsic(bigintIntrinsic, undefined, [MAX_SAFE_INTEGER]) as bigint;
+      if (field < 0n || field > maximum) return fail(`${label} integer`);
+      reflectApplyIntrinsic(arrayPushIntrinsic, normalized, [
+        reflectApplyIntrinsic(numberIntrinsic, undefined, [field]),
+      ]);
+      continue;
     }
-    if (typeof field !== "string" && field !== null && !(field instanceof Uint8Array)) {
+    if (typeof field !== "string" && field !== null
+        && !reflectApplyIntrinsic(isUint8ArrayIntrinsic, undefined, [field])) {
       return fail(`${label} field`);
     }
-    return field instanceof Uint8Array ? Buffer.from(field).toString("hex") : field;
-  });
+    const normalizedField = reflectApplyIntrinsic(isUint8ArrayIntrinsic, undefined, [field])
+      ? reflectApplyIntrinsic(
+        bufferToStringIntrinsic,
+        bufferFrom(field as Uint8Array),
+        ["hex"],
+      )
+      : field;
+    reflectApplyIntrinsic(arrayPushIntrinsic, normalized, [normalizedField]);
+  }
   updateDigest(digest, label, normalized);
 }

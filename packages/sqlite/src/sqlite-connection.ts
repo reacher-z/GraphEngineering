@@ -5,6 +5,7 @@ import {
   type BackupProgressInfo,
 } from "node:sqlite";
 import { performance } from "node:perf_hooks";
+import { resolve as resolvePath } from "node:path";
 import { isProxy, isUint8Array } from "node:util/types";
 
 import {
@@ -19,6 +20,7 @@ import {
   sqliteText,
 } from "./sqlite-codec.js";
 import { isRetryableSQLiteLockError, translateSQLiteError } from "./sqlite-errors.js";
+import { auditSQLitePublicationSourceV1 } from "./sqlite-publication-source-v1-audit.js";
 import {
   readSQLiteCursorMigration0002AssetSnapshotIntrinsic,
   type SQLiteCursorMigration0002Asset,
@@ -44,12 +46,14 @@ import {
 
 const databasePrepareIntrinsic = DatabaseSync.prototype.prepare;
 const databaseCloseIntrinsic = DatabaseSync.prototype.close;
+const pathResolveIntrinsic = resolvePath;
 const reflectApplyIntrinsic = Reflect.apply;
 const reflectOwnKeysIntrinsic = Reflect.ownKeys;
 const objectFreezeIntrinsic = Object.freeze;
 const objectCreateIntrinsic = Object.create;
 const objectGetOwnPropertyDescriptorIntrinsic = Object.getOwnPropertyDescriptor;
 const objectGetPrototypeOfIntrinsic = Object.getPrototypeOf;
+const objectIsFrozenIntrinsic = Object.isFrozen;
 const arrayIsArrayIntrinsic = Array.isArray;
 const arrayPrototypeIntrinsic = Array.prototype;
 const numberIntrinsic = Number;
@@ -322,6 +326,28 @@ export interface SQLiteConnectionTransactionLineage {
   readonly __sqliteConnectionTransactionLineage: never;
 }
 
+export type SQLiteConnectionPublicationTransactionGuardRoute =
+  | "exec"
+  | "prepare"
+  | "prepared-execute"
+  | "immediate"
+  | "close"
+  | "connection-commit"
+  | "connection-rollback";
+
+export interface SQLiteConnectionPublicationTransactionGuard {
+  readonly check: (
+    connection: SQLiteConnection,
+    route: SQLiteConnectionPublicationTransactionGuardRoute,
+    sql: string | null,
+  ) => void;
+}
+
+/** Package-private authority binding one owner to this connection's immutable file identity. */
+export interface SQLiteConnectionPublicationReopenCapability {
+  readonly __sqliteConnectionPublicationReopenCapability: never;
+}
+
 export interface SQLiteWalCheckpointReport {
   readonly mode: SQLiteWalCheckpointMode;
   readonly busy: 0;
@@ -335,6 +361,8 @@ export interface SQLiteConnectionOwnerSnapshot {
   readonly transactionLineage: SQLiteConnectionTransactionLineage | null;
   readonly transactionEpoch: bigint;
   readonly transactionMode: SQLiteTransactionMode | null;
+  readonly tempMutationEpoch: bigint;
+  readonly publicationTransactionGeneration: object | null;
 }
 
 /** Package-private, base-intrinsic row-change observation. */
@@ -1373,6 +1401,16 @@ function preparedStatementMayMutateOwnerState(sql: string): boolean {
   ) as boolean;
 }
 
+function statementMayAffectTempState(sql: string): boolean {
+  const token = firstSQLiteToken(sql);
+  // This is a conservative attempt epoch, not a successful-write counter.
+  // Unqualified names and triggers can target TEMP, so every non-read
+  // statement advances it. BEGIN itself cannot change TEMP state; COMMIT and
+  // rollback can change visibility and therefore do advance the boundary.
+  return token !== "SELECT" && token !== "EXPLAIN" && token !== "VALUES"
+    && token !== "BEGIN";
+}
+
 function ownerControlMayReplaceTransaction(sql: string, token: string): boolean {
   if (token === "SAVEPOINT" || token === "RELEASE") return false;
   if (token === "ROLLBACK") {
@@ -1535,11 +1573,45 @@ const SQLITE_CONNECTION_EXECUTE_CURSOR_REBIND = Symbol(
 const SQLITE_CONNECTION_RELEASE_CURSOR_REBIND = Symbol(
   "SQLiteConnection.releaseCursorRebind",
 );
+const SQLITE_CONNECTION_REGISTER_PUBLICATION_TRANSACTION_OWNER = Symbol(
+  "SQLiteConnection.registerPublicationTransactionOwner",
+);
+const SQLITE_CONNECTION_PUBLICATION_TRANSACTION_OWNER_CONTROL = Symbol(
+  "SQLiteConnection.publicationTransactionOwnerControl",
+);
+const SQLITE_CONNECTION_PUBLICATION_TRANSACTION_OWNER_CLOSE = Symbol(
+  "SQLiteConnection.publicationTransactionOwnerClose",
+);
+const SQLITE_CONNECTION_RAW_COMMIT_METHOD = Symbol("SQLiteConnection.rawCommitMethod");
+const SQLITE_CONNECTION_RAW_ROLLBACK_METHOD = Symbol("SQLiteConnection.rawRollbackMethod");
+const SQLITE_CONNECTION_CONSUME_PUBLICATION_REOPEN_CAPABILITY = Symbol(
+  "SQLiteConnection.consumePublicationReopenCapability",
+);
+const SQLITE_CONNECTION_AUDIT_PUBLICATION_SOURCE_V1 = Symbol(
+  "SQLiteConnection.auditPublicationSourceV1",
+);
+
+interface SQLiteConnectionPublicationTransactionOwnerState {
+  readonly owner: WeakRef<object>;
+  readonly check: SQLiteConnectionPublicationTransactionGuard["check"];
+}
+
+interface SQLiteConnectionPublicationReopenCapabilityState {
+  readonly owner: WeakRef<object>;
+  readonly connection: WeakRef<object>;
+  readonly path: string;
+}
+
+const sqliteConnectionPublicationReopenCapabilities = new WeakMap<
+  object,
+  SQLiteConnectionPublicationReopenCapabilityState
+>();
 
 /** One hardened, synchronous, file-backed SQLite connection. */
 export class SQLiteConnection {
   readonly #database: DatabaseSync;
   readonly #path: string;
+  readonly #absolutePath: string;
   readonly #busyTimeoutMs: number;
   readonly #maxBusyAttempts: number;
   readonly #maxBusyElapsedMs: number;
@@ -1547,9 +1619,16 @@ export class SQLiteConnection {
   #transactionLineage: SQLiteConnectionTransactionLineage | null = null;
   #transactionEpoch = 0n;
   #transactionMode: SQLiteTransactionMode | null = null;
+  #tempMutationEpoch = 0n;
+  #publicationTransactionGeneration: object | null = null;
+  #publicationTransactionOwner: SQLiteConnectionPublicationTransactionOwnerState | null = null;
 
   constructor(path: string, options: SQLiteConnectionOptions = {}) {
     this.#path = checkedPath(path);
+    // A relative filename is interpreted by SQLite at native open time.  Keep
+    // the public spelling for compatibility, but bind every later independent
+    // audit/reopen to the same absolute identity captured at construction.
+    this.#absolutePath = pathResolveIntrinsic(this.#path);
     this.#busyTimeoutMs = checkedBusyTimeout(
       options.busyTimeoutMs ?? DEFAULT_SQLITE_BUSY_TIMEOUT_MS,
     );
@@ -1571,7 +1650,7 @@ export class SQLiteConnection {
 
     let database: DatabaseSync | undefined;
     try {
-      database = new DatabaseSync(this.#path, {
+      database = new DatabaseSync(this.#absolutePath, {
         allowExtension: false,
         enableDoubleQuotedStringLiterals: false,
         enableForeignKeyConstraints: true,
@@ -1637,7 +1716,8 @@ export class SQLiteConnection {
     if (epochBefore !== epochAfter || lineageBefore !== lineageAfter
         || transactionBefore !== transactionAfter
         || (transactionAfter && lineageAfter === null)
-        || (!transactionAfter && lineageAfter !== null)) {
+        || (!transactionAfter && lineageAfter !== null)
+        || (!transactionAfter && this.#publicationTransactionGeneration !== null)) {
       throw new CycleStoreProviderError(
         "GE_CYCLE_STORE_CORRUPTION",
         "inspect-schema",
@@ -1649,6 +1729,10 @@ export class SQLiteConnection {
       transactionLineage: lineageAfter,
       transactionEpoch: epochAfter,
       transactionMode: mode,
+      tempMutationEpoch: this.#tempMutationEpoch,
+      publicationTransactionGeneration: transactionAfter
+        ? this.#publicationTransactionGeneration
+        : null,
     });
   }
 
@@ -1681,6 +1765,133 @@ export class SQLiteConnection {
     });
   }
 
+  [SQLITE_CONNECTION_REGISTER_PUBLICATION_TRANSACTION_OWNER](
+    owner: object,
+    guard: SQLiteConnectionPublicationTransactionGuard,
+  ): SQLiteConnectionPublicationReopenCapability {
+    this.#assertOpen("inspect-schema");
+    const checkDescriptor: PropertyDescriptor | undefined =
+      guard !== null && typeof guard === "object" && !isProxy(guard)
+      ? reflectApplyIntrinsic(objectGetOwnPropertyDescriptorIntrinsic, Object, [guard, "check"])
+      : undefined;
+    if (owner === null || typeof owner !== "object" || isProxy(owner)
+        || checkDescriptor === undefined || !("value" in checkDescriptor)
+        || typeof checkDescriptor.value !== "function"
+        || objectGetPrototypeOfIntrinsic(guard) !== null || !objectIsFrozenIntrinsic(guard)
+        || this.#publicationTransactionOwner !== null
+        || this.#database.isTransaction || this.#transactionLineage !== null
+        || this.#transactionMode !== null) {
+      throw new CycleStoreProviderError(
+        "GE_CYCLE_STORE_INVALID_ARGUMENT",
+        "inspect-schema",
+        "SQLite publication transaction owner registration is invalid",
+      );
+    }
+    this.#assertPublicationTransactionRegistrationTopology();
+    this.#publicationTransactionOwner = objectFreezeIntrinsic({
+      owner: new weakRefIntrinsic(owner),
+      check: checkDescriptor.value as SQLiteConnectionPublicationTransactionGuard["check"],
+    });
+    const capability = objectFreezeIntrinsic(objectCreateIntrinsic(null)) as
+      SQLiteConnectionPublicationReopenCapability;
+    reflectApplyIntrinsic(weakMapSetIntrinsic, sqliteConnectionPublicationReopenCapabilities, [
+      capability as object,
+      objectFreezeIntrinsic({
+        owner: new weakRefIntrinsic(owner),
+        connection: new weakRefIntrinsic(this),
+        path: this.#absolutePath,
+      } satisfies SQLiteConnectionPublicationReopenCapabilityState),
+    ]);
+    return capability;
+  }
+
+  [SQLITE_CONNECTION_CONSUME_PUBLICATION_REOPEN_CAPABILITY](
+    capability: SQLiteConnectionPublicationReopenCapability,
+    owner: object,
+  ): string {
+    const capabilityState = capability !== null && typeof capability === "object"
+      && !isProxy(capability)
+      ? reflectApplyIntrinsic(
+        weakMapGetIntrinsic,
+        sqliteConnectionPublicationReopenCapabilities,
+        [capability as object],
+      ) as SQLiteConnectionPublicationReopenCapabilityState | undefined
+      : undefined;
+    const selectedOwner = capabilityState === undefined ? undefined
+      : reflectApplyIntrinsic(weakRefDerefIntrinsic, capabilityState.owner, []) as object | undefined;
+    const selectedConnection = capabilityState === undefined ? undefined
+      : reflectApplyIntrinsic(
+        weakRefDerefIntrinsic,
+        capabilityState.connection,
+        [],
+      ) as object | undefined;
+    if (capabilityState === undefined || selectedOwner !== owner || selectedConnection !== this
+        || !this.#closed || this.#database.isOpen) {
+      throw new CycleStoreProviderError(
+        "GE_CYCLE_STORE_INVALID_ARGUMENT",
+        "inspect-schema",
+        "SQLite publication reopen capability identity or lifecycle is invalid",
+      );
+    }
+    // Reopen authority is one-shot even when the independent audit fails.
+    reflectApplyIntrinsic(weakMapDeleteIntrinsic, sqliteConnectionPublicationReopenCapabilities, [
+      capability as object,
+    ]);
+    return auditSQLitePublicationSourceV1(capabilityState.path);
+  }
+
+  [SQLITE_CONNECTION_AUDIT_PUBLICATION_SOURCE_V1](): string {
+    this.#assertOpen("inspect-schema");
+    return auditSQLitePublicationSourceV1(this.#absolutePath);
+  }
+
+  [SQLITE_CONNECTION_PUBLICATION_TRANSACTION_OWNER_CONTROL](
+    owner: object,
+    control: "begin-exclusive" | "rollback",
+    lineage: SQLiteConnectionTransactionLineage,
+    generation: object,
+  ): void {
+    this.#assertPublicationTransactionOwner(owner);
+    if (lineage === null || typeof lineage !== "object" || isProxy(lineage)
+        || generation === null || typeof generation !== "object" || isProxy(generation)
+        || lineage === generation) {
+      throw new CycleStoreProviderError(
+        "GE_CYCLE_STORE_INVALID_ARGUMENT",
+        "inspect-schema",
+        "SQLite publication transaction generation is invalid",
+      );
+    }
+    if (control === "begin-exclusive") {
+      if (this.#database.isTransaction || this.#transactionLineage !== null
+          || this.#transactionMode !== null) {
+        throw new CycleStoreProviderError(
+          "GE_CYCLE_STORE_INVALID_ARGUMENT",
+          "inspect-schema",
+          "SQLite publication BEGIN requires an unguarded autocommit generation",
+        );
+      }
+      this.#execTrustedUnchecked("BEGIN EXCLUSIVE", "inspect-schema", lineage, generation);
+      return;
+    }
+    if (control !== "rollback" || !this.#database.isTransaction
+        || this.#transactionLineage !== lineage
+        || this.#publicationTransactionGeneration !== generation
+        || this.#transactionMode !== "exclusive") {
+      throw new CycleStoreProviderError(
+        "GE_CYCLE_STORE_INVALID_ARGUMENT",
+        "inspect-schema",
+        "SQLite publication rollback owner is invalid",
+      );
+    }
+    this.#execTrustedUnchecked("ROLLBACK", "inspect-schema");
+  }
+
+  [SQLITE_CONNECTION_PUBLICATION_TRANSACTION_OWNER_CLOSE](owner: object): void {
+    this.#assertPublicationTransactionOwner(owner);
+    this.#closeUnchecked();
+    this.#publicationTransactionOwner = null;
+  }
+
   #readTotalChangesCounter(): number {
     const statement = hardenSQLiteNativeStatementIntrinsic(reflectApplyIntrinsic(
       databasePrepareIntrinsic, this.#database, ["SELECT total_changes()"],
@@ -1699,6 +1910,63 @@ export class SQLiteConnection {
     );
   }
 
+  #assertPublicationTransactionRegistrationTopology(): void {
+    const databaseList = hardenSQLiteNativeStatementIntrinsic(reflectApplyIntrinsic(
+      databasePrepareIntrinsic,
+      this.#database,
+      ["PRAGMA database_list"],
+    ) as StatementSync);
+    const rows = reflectApplyIntrinsic(statementAllIntrinsic, databaseList, []) as readonly unknown[];
+    let mainCount = 0;
+    let tempCount = 0;
+    for (let index = 0; index < rows.length; index += 1) {
+      const row = sqliteRow(rows[index], 3, "inspect-schema", `database list row ${index}`);
+      const name = sqliteText(row[1], "inspect-schema", `database list name ${index}`);
+      if (name === "main") mainCount += 1;
+      else if (name === "temp") tempCount += 1;
+      else {
+        throw new CycleStoreProviderError(
+          "GE_CYCLE_STORE_CORRUPTION",
+          "inspect-schema",
+          "SQLite publication transaction owner found an attached database",
+        );
+      }
+    }
+    if (mainCount !== 1 || tempCount > 1 || rows.length !== mainCount + tempCount) {
+      throw new CycleStoreProviderError(
+        "GE_CYCLE_STORE_CORRUPTION",
+        "inspect-schema",
+        "SQLite publication transaction owner database topology is invalid",
+      );
+    }
+
+    const tempCatalog = hardenSQLiteNativeStatementIntrinsic(reflectApplyIntrinsic(
+      databasePrepareIntrinsic,
+      this.#database,
+      ["SELECT count(*) FROM temp.sqlite_schema "
+        + "WHERE substr(lower(name), 1, 7) <> 'sqlite_'"],
+    ) as StatementSync);
+    const tempCatalogCount = sqliteSafeInteger(
+      sqliteRow(
+        reflectApplyIntrinsic(statementGetIntrinsic, tempCatalog, []),
+        1,
+        "inspect-schema",
+        "temporary catalog count",
+      )[0],
+      0,
+      Number.MAX_SAFE_INTEGER,
+      "inspect-schema",
+      "temporary catalog count",
+    );
+    if (tempCatalogCount !== 0) {
+      throw new CycleStoreProviderError(
+        "GE_CYCLE_STORE_CORRUPTION",
+        "inspect-schema",
+        "SQLite publication transaction owner temporary catalog is not empty",
+      );
+    }
+  }
+
   get isTransaction(): boolean {
     this.#assertOpen("inspect-schema");
     return this.#database.isTransaction;
@@ -1708,6 +1976,12 @@ export class SQLiteConnection {
   get transactionEpoch(): bigint {
     this.#assertOpen("inspect-schema");
     return this.#transactionEpoch;
+  }
+
+  /** Conservative monotonic boundary for every attempted TEMP-affecting statement. */
+  get tempMutationEpoch(): bigint {
+    this.#assertOpen("inspect-schema");
+    return this.#tempMutationEpoch;
   }
 
   /** Object-identity-stable lineage for the current transaction generation. */
@@ -1803,6 +2077,7 @@ export class SQLiteConnection {
 
   prepare(sql: string, operation: CycleStoreProviderOperation): StatementSync {
     this.#assertOpen(operation);
+    this.#assertPublicationTransactionPublicRoute("prepare", sql);
     if (isForbiddenTempDirectoryPragma(sql)) {
       throw new CycleStoreProviderError(
         "GE_CYCLE_STORE_INVALID_ARGUMENT",
@@ -1823,8 +2098,10 @@ export class SQLiteConnection {
     }
     try {
       const statement = hardenSQLiteStatement(this.#database.prepare(sql));
-      return preparedStatementMayMutateOwnerState(sql)
-        ? this.#epochTrackedStatement(statement)
+      const trackEpoch = preparedStatementMayMutateOwnerState(sql);
+      const trackTempMutation = statementMayAffectTempState(sql);
+      return trackEpoch || trackTempMutation
+        ? this.#guardedPublicStatement(statement, sql, trackEpoch, trackTempMutation)
         : statement;
     } catch (error) {
       throw translateSQLiteError(error, operation);
@@ -1982,6 +2259,7 @@ export class SQLiteConnection {
       ) as StatementSync);
       state.preparedStatementCount += 1;
       this.#transactionEpoch += 1n;
+      this.#tempMutationEpoch += 1n;
       rawResult = reflectApplyIntrinsic(statementRunIntrinsic, statement, []);
     } catch (error) {
       state.transactionEpoch = this.#transactionEpoch;
@@ -2211,6 +2489,7 @@ export class SQLiteConnection {
     let rawResult: unknown;
     state.executeCount += 1;
     this.#transactionEpoch += 1n;
+    this.#tempMutationEpoch += 1n;
     try {
       rawResult = reflectApplyIntrinsic(statementRunIntrinsic, state.statement, parameters);
     } catch (error) {
@@ -2406,6 +2685,7 @@ export class SQLiteConnection {
     let rawResult: unknown;
     state.executeCount = 1;
     this.#transactionEpoch += 1n;
+    this.#tempMutationEpoch += 1n;
     try {
       rawResult = reflectApplyIntrinsic(statementRunIntrinsic, state.statement, parameters);
     } catch (error) {
@@ -2594,6 +2874,7 @@ export class SQLiteConnection {
     let rawResult: unknown;
     state.executeCount = 1;
     this.#transactionEpoch += 1n;
+    this.#tempMutationEpoch += 1n;
     try {
       rawResult = reflectApplyIntrinsic(statementRunIntrinsic, state.statement, parameters);
     } catch (error) {
@@ -2787,6 +3068,7 @@ export class SQLiteConnection {
     state.parameterValues = parameterValues;
     state.executeCount = 1;
     this.#transactionEpoch += 1n;
+    this.#tempMutationEpoch += 1n;
     let rawResult: unknown;
     try {
       rawResult = reflectApplyIntrinsic(statementRunIntrinsic, state.statement, parameterValues);
@@ -3043,7 +3325,12 @@ export class SQLiteConnection {
     }
   }
 
-  #epochTrackedStatement(statement: StatementSync): StatementSync {
+  #guardedPublicStatement(
+    statement: StatementSync,
+    sql: string,
+    trackEpoch: boolean,
+    trackTempMutation: boolean,
+  ): StatementSync {
     const executionMethods = new Set<PropertyKey>(["all", "get", "iterate", "run"]);
     return new Proxy(statement, {
       get: (target, property) => {
@@ -3051,7 +3338,9 @@ export class SQLiteConnection {
         if (typeof value !== "function") return value;
         if (!executionMethods.has(property)) return value.bind(target) as unknown;
         return (...parameters: unknown[]): unknown => {
-          this.#transactionEpoch += 1n;
+          this.#assertPublicationTransactionPublicRoute("prepared-execute", sql);
+          if (trackEpoch) this.#transactionEpoch += 1n;
+          if (trackTempMutation) this.#tempMutationEpoch += 1n;
           return reflectApplyIntrinsic(value, target, parameters);
         };
       },
@@ -3060,6 +3349,16 @@ export class SQLiteConnection {
 
   execTrusted(sql: string, operation: CycleStoreProviderOperation): void {
     this.#assertOpen(operation);
+    this.#assertPublicationTransactionPublicRoute("exec", sql);
+    this.#execTrustedUnchecked(sql, operation);
+  }
+
+  #execTrustedUnchecked(
+    sql: string,
+    operation: CycleStoreProviderOperation,
+    ownerLineage?: SQLiteConnectionTransactionLineage,
+    ownerGeneration?: object,
+  ): void {
     if (isForbiddenTempDirectoryPragma(sql)) {
       throw new CycleStoreProviderError(
         "GE_CYCLE_STORE_INVALID_ARGUMENT",
@@ -3072,27 +3371,32 @@ export class SQLiteConnection {
     const mayReplaceLineage = ownerControlMayReplaceTransaction(sql, token)
       || (mayContainAdditionalStatement(sql) && containsOwnerTransactionControl(sql));
     this.#transactionEpoch += 1n;
+    if (statementMayAffectTempState(sql)) this.#tempMutationEpoch += 1n;
     try {
       this.#database.exec(sql);
     } catch (error) {
       const afterFailure = this.#database.isTransaction;
       if ((!before && afterFailure) || (before && afterFailure && mayReplaceLineage)) {
-        this.#transactionLineage = Object.freeze(
+        this.#transactionLineage = (ownerLineage ?? Object.freeze(
           Object.create(null),
-        ) as SQLiteConnectionTransactionLineage;
+        )) as SQLiteConnectionTransactionLineage;
+        this.#publicationTransactionGeneration = ownerGeneration ?? null;
       } else if (!afterFailure) {
         this.#transactionLineage = null;
+        this.#publicationTransactionGeneration = null;
       }
       this.#transactionMode = afterFailure ? "unknown" : null;
       throw translateSQLiteError(error, operation);
     }
     const after = this.#database.isTransaction;
     if ((!before && after) || (before && after && mayReplaceLineage)) {
-      this.#transactionLineage = Object.freeze(
+      this.#transactionLineage = (ownerLineage ?? Object.freeze(
         Object.create(null),
-      ) as SQLiteConnectionTransactionLineage;
+      )) as SQLiteConnectionTransactionLineage;
+      this.#publicationTransactionGeneration = ownerGeneration ?? null;
     } else if (!after) {
       this.#transactionLineage = null;
+      this.#publicationTransactionGeneration = null;
     }
     if (!after) {
       this.#transactionMode = null;
@@ -3111,6 +3415,7 @@ export class SQLiteConnection {
     action: () => T,
   ): T {
     this.#assertOpen(operation);
+    this.#assertPublicationTransactionPublicRoute("immediate", null);
     if (this.#database.isTransaction) {
       throw new CycleStoreProviderError(
         "GE_CYCLE_STORE_INTERNAL",
@@ -3126,6 +3431,7 @@ export class SQLiteConnection {
         this.#transactionLineage = Object.freeze(
           Object.create(null),
         ) as SQLiteConnectionTransactionLineage;
+        this.#publicationTransactionGeneration = null;
         this.#transactionMode = "immediate";
         const result = action();
         if ((typeof result === "object" && result !== null && "then" in result)
@@ -3138,16 +3444,20 @@ export class SQLiteConnection {
         }
         this.#database.exec("COMMIT");
         this.#transactionEpoch += 1n;
+        this.#tempMutationEpoch += 1n;
         this.#transactionLineage = null;
         this.#transactionMode = null;
+        this.#publicationTransactionGeneration = null;
         return result;
       } catch (error) {
         if (this.#database.isTransaction) {
           try {
             this.#database.exec("ROLLBACK");
             this.#transactionEpoch += 1n;
+            this.#tempMutationEpoch += 1n;
             this.#transactionLineage = null;
             this.#transactionMode = null;
+            this.#publicationTransactionGeneration = null;
           } catch {
             // The original safe error remains authoritative. A subsequent use
             // will fail its invariant checks if rollback did not restore state.
@@ -3158,6 +3468,7 @@ export class SQLiteConnection {
           // not retain an owner proof once SQLite has returned to autocommit.
           this.#transactionLineage = null;
           this.#transactionMode = null;
+          this.#publicationTransactionGeneration = null;
         }
         if (isRetryableSQLiteLockError(error)
             && attempt < this.#maxBusyAttempts
@@ -3182,11 +3493,30 @@ export class SQLiteConnection {
     );
   }
 
+  [SQLITE_CONNECTION_RAW_COMMIT_METHOD](): void {
+    this.#assertOpen("inspect-schema");
+    this.#assertPublicationTransactionPublicRoute("connection-commit", "COMMIT");
+    this.#execTrustedUnchecked("COMMIT", "inspect-schema");
+  }
+
+  [SQLITE_CONNECTION_RAW_ROLLBACK_METHOD](): void {
+    this.#assertOpen("inspect-schema");
+    this.#assertPublicationTransactionPublicRoute("connection-rollback", "ROLLBACK");
+    this.#execTrustedUnchecked("ROLLBACK", "inspect-schema");
+  }
+
   close(): void {
+    if (this.#closed) return;
+    this.#assertPublicationTransactionPublicRoute("close", null);
+    this.#closeUnchecked();
+  }
+
+  #closeUnchecked(): void {
     if (this.#closed) return;
     this.#closed = true;
     this.#transactionLineage = null;
     this.#transactionMode = null;
+    this.#publicationTransactionGeneration = null;
     if (this.#database.isOpen) {
       reflectApplyIntrinsic(databaseCloseIntrinsic, this.#database, []);
     }
@@ -3200,6 +3530,29 @@ export class SQLiteConnection {
         "SQLite provider is closed",
       );
     }
+  }
+
+  #assertPublicationTransactionOwner(owner: object): void {
+    const state = this.#publicationTransactionOwner;
+    const selected = state === null
+      ? undefined
+      : reflectApplyIntrinsic(weakRefDerefIntrinsic, state.owner, []) as object | undefined;
+    if (selected !== owner) {
+      throw new CycleStoreProviderError(
+        "GE_CYCLE_STORE_INVALID_ARGUMENT",
+        "inspect-schema",
+        "SQLite publication transaction owner identity is invalid",
+      );
+    }
+  }
+
+  #assertPublicationTransactionPublicRoute(
+    route: SQLiteConnectionPublicationTransactionGuardRoute,
+    sql: string | null,
+  ): void {
+    const state = this.#publicationTransactionOwner;
+    if (state === null) return;
+    reflectApplyIntrinsic(state.check, undefined, [this, route, sql]);
   }
 
   #pragmaValue(name: string): unknown {
@@ -3315,8 +3668,26 @@ const sqliteConnectionExecuteCursorRebindIntrinsic =
   SQLiteConnection.prototype[SQLITE_CONNECTION_EXECUTE_CURSOR_REBIND];
 const sqliteConnectionReleaseCursorRebindIntrinsic =
   SQLiteConnection.prototype[SQLITE_CONNECTION_RELEASE_CURSOR_REBIND];
+const sqliteConnectionRegisterPublicationTransactionOwnerIntrinsic =
+  SQLiteConnection.prototype[SQLITE_CONNECTION_REGISTER_PUBLICATION_TRANSACTION_OWNER];
+const sqliteConnectionPublicationTransactionOwnerControlIntrinsic =
+  SQLiteConnection.prototype[SQLITE_CONNECTION_PUBLICATION_TRANSACTION_OWNER_CONTROL];
+const sqliteConnectionPublicationTransactionOwnerCloseIntrinsic =
+  SQLiteConnection.prototype[SQLITE_CONNECTION_PUBLICATION_TRANSACTION_OWNER_CLOSE];
+const sqliteConnectionConsumePublicationReopenCapabilityIntrinsic =
+  SQLiteConnection.prototype[SQLITE_CONNECTION_CONSUME_PUBLICATION_REOPEN_CAPABILITY];
+const sqliteConnectionAuditPublicationSourceV1Intrinsic =
+  SQLiteConnection.prototype[SQLITE_CONNECTION_AUDIT_PUBLICATION_SOURCE_V1];
+const sqliteConnectionRawCommitMethodIntrinsic =
+  SQLiteConnection.prototype[SQLITE_CONNECTION_RAW_COMMIT_METHOD];
+const sqliteConnectionRawRollbackMethodIntrinsic =
+  SQLiteConnection.prototype[SQLITE_CONNECTION_RAW_ROLLBACK_METHOD];
 const sqliteConnectionExecTrustedIntrinsic = SQLiteConnection.prototype.execTrusted;
 const sqliteConnectionPrepareIntrinsic = SQLiteConnection.prototype.prepare;
+const sqliteConnectionPathGetterIntrinsic = Object.getOwnPropertyDescriptor(
+  SQLiteConnection.prototype,
+  "path",
+)!.get!;
 
 const POST_REBIND_ZERO_IDENTITY = "0".repeat(64);
 
@@ -3780,6 +4151,109 @@ export function readSQLiteConnectionTotalChangesSnapshot(
   connection: SQLiteConnection,
 ): SQLiteConnectionTotalChangesSnapshot {
   return reflectApplyIntrinsic(sqliteConnectionTotalChangesSnapshotIntrinsic, connection, []);
+}
+
+/** Install the package-private publication owner guard before native BEGIN I/O. */
+export function registerSQLiteConnectionPublicationTransactionOwnerIntrinsic(
+  connection: SQLiteConnection,
+  owner: object,
+  guard: SQLiteConnectionPublicationTransactionGuard,
+): SQLiteConnectionPublicationReopenCapability {
+  return reflectApplyIntrinsic(sqliteConnectionRegisterPublicationTransactionOwnerIntrinsic, connection, [
+    owner,
+    guard,
+  ]) as SQLiteConnectionPublicationReopenCapability;
+}
+
+/** Registration audit through the captured immutable base connection path. */
+export function auditSQLiteConnectionPublicationSourceV1Intrinsic(
+  connection: SQLiteConnection,
+): string {
+  return reflectApplyIntrinsic(
+    sqliteConnectionAuditPublicationSourceV1Intrinsic,
+    connection,
+    [],
+  ) as string;
+}
+
+/** Consume the exact lower-owned reopen authority without exposing its path. */
+export function consumeSQLiteConnectionPublicationReopenCapabilityIntrinsic(
+  capability: SQLiteConnectionPublicationReopenCapability,
+  owner: object,
+  connection: SQLiteConnection,
+): string {
+  return reflectApplyIntrinsic(
+    sqliteConnectionConsumePublicationReopenCapabilityIntrinsic,
+    connection,
+    [capability, owner],
+  ) as string;
+}
+
+/** Revoke the one lower-owned reopen authority at the terminal boundary. */
+export function revokeSQLiteConnectionPublicationReopenCapabilityIntrinsic(
+  capability: SQLiteConnectionPublicationReopenCapability,
+  owner: object,
+): void {
+  const state = capability !== null && typeof capability === "object" && !isProxy(capability)
+    ? reflectApplyIntrinsic(
+      weakMapGetIntrinsic,
+      sqliteConnectionPublicationReopenCapabilities,
+      [capability as object],
+    ) as SQLiteConnectionPublicationReopenCapabilityState | undefined
+    : undefined;
+  const selectedOwner = state === undefined ? undefined
+    : reflectApplyIntrinsic(weakRefDerefIntrinsic, state.owner, []) as object | undefined;
+  if (state === undefined || selectedOwner !== owner) {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "inspect-schema",
+      "SQLite publication reopen capability revocation is invalid",
+    );
+  }
+  reflectApplyIntrinsic(weakMapDeleteIntrinsic, sqliteConnectionPublicationReopenCapabilities, [
+    capability as object,
+  ]);
+}
+
+/** Execute exactly one owner-authorized BEGIN or rollback through captured base code. */
+export function executeSQLiteConnectionPublicationTransactionOwnerControlIntrinsic(
+  connection: SQLiteConnection,
+  owner: object,
+  control: "begin-exclusive" | "rollback",
+  lineage: SQLiteConnectionTransactionLineage,
+  generation: object,
+): void {
+  reflectApplyIntrinsic(sqliteConnectionPublicationTransactionOwnerControlIntrinsic, connection, [
+    owner,
+    control,
+    lineage,
+    generation,
+  ]);
+}
+
+/** Close the exact guarded connection through its exact live owner. */
+export function closeSQLiteConnectionPublicationTransactionOwnerIntrinsic(
+  connection: SQLiteConnection,
+  owner: object,
+): void {
+  reflectApplyIntrinsic(sqliteConnectionPublicationTransactionOwnerCloseIntrinsic, connection, [owner]);
+}
+
+/** Capture the immutable file identity without invoking a subclass accessor. */
+export function readSQLiteConnectionPathIntrinsic(connection: SQLiteConnection): string {
+  return reflectApplyIntrinsic(sqliteConnectionPathGetterIntrinsic, connection, []) as string;
+}
+
+/** Exercise the package-owned raw commit method through captured base code. */
+export function executeSQLiteConnectionRawCommitMethodIntrinsic(connection: SQLiteConnection): void {
+  reflectApplyIntrinsic(sqliteConnectionRawCommitMethodIntrinsic, connection, []);
+}
+
+/** Exercise the package-owned raw rollback method through captured base code. */
+export function executeSQLiteConnectionRawRollbackMethodIntrinsic(
+  connection: SQLiteConnection,
+): void {
+  reflectApplyIntrinsic(sqliteConnectionRawRollbackMethodIntrinsic, connection, []);
 }
 
 function postRebindSealScanSnapshot(

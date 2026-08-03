@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import sqlite3
 from collections.abc import Callable, Generator, Iterator, Mapping
 from contextlib import suppress
 from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
+from os.path import abspath
 from types import MappingProxyType
 from typing import Any, Literal, NamedTuple, Never, cast
 from weakref import ReferenceType, ref
@@ -28,9 +30,12 @@ from .sqlite_cursor_publication_migration_0002_asset import (
 )
 from .sqlite_cycle_store import (
     _REQUIRED_MIGRATION_POSTCONDITIONS,
+    SQLITE_CYCLE_STORE_CATALOG_SHA256,
     SQLITE_CYCLE_STORE_DESCRIPTOR_HASH,
     SQLITE_CYCLE_STORE_SCHEMA_IDENTITY_SHA256,
+    SQLiteCycleStoreProvider,
     _load_migration_assets,
+    _migration_postconditions_blob,
 )
 from .sqlite_operation_baseline import (
     BASELINE_ENTRY_KINDS,
@@ -56,6 +61,7 @@ class _IdentityIterationState:
 
 _COOPERATIVE_CONSTRUCTION_TOKEN = object()
 _TYPE = type
+_ABSOLUTE_PATH = abspath
 
 
 class _CooperativeSourceItem:
@@ -178,9 +184,39 @@ def _forbidden_temp_store_directory(sql: str) -> bool:
     return "pragma" in lowered and "temp_store_directory" in lowered
 
 
+def _temp_mutation_epoch_advancing_sql(sql: str) -> bool:
+    """Conservatively advance for every native statement that may mutate state.
+
+    The TEMP epoch is deliberately broader than textual ``TEMP`` writes: raw
+    internal statements and trigger bodies share the same trace callback, and
+    every statement except the read/begin floor advances the proof epoch.
+    """
+
+    token = _first_sqlite_token(sql)
+    if token == "PRAGMA":
+        normalized = " ".join(sql.strip().upper().split())
+        if "=" in normalized:
+            return True
+        read_only_pragmas = (
+            "PRAGMA APPLICATION_ID",
+            "PRAGMA DATABASE_LIST",
+            "PRAGMA FOREIGN_KEY_CHECK",
+            "PRAGMA INTEGRITY_CHECK",
+            "PRAGMA QUICK_CHECK",
+            "PRAGMA TABLE_INFO",
+            "PRAGMA USER_VERSION",
+        )
+        return not normalized.startswith(read_only_pragmas)
+    return bool(token) and token not in {"BEGIN", "EXPLAIN", "SELECT", "VALUES"}
+
+
 def _first_sqlite_token(sql: str) -> str:
     tokens = _leading_sqlite_tokens(sql, 1)
     return tokens[0] if tokens else ""
+
+
+def _abandoned_transaction_owner_guard(_operation: str, _sql: str | None) -> Never:
+    raise ValueError("GE_SQLITE_TX_OWNER_ABANDONED")
 
 
 def _leading_sqlite_tokens(sql: str, limit: int) -> tuple[str, ...]:
@@ -921,6 +957,7 @@ _CURSOR_PUBLICATION_SEAL_READ_EXECUTIONS: dict[
 # replacement cannot redirect the package-owned execution lane.
 _SQLITE_CONNECTION_CURSOR = sqlite3.Connection.cursor
 _SQLITE_CONNECTION_IN_TRANSACTION = sqlite3.Connection.in_transaction
+_SQLITE_CONNECTION_SET_TRACE_CALLBACK = sqlite3.Connection.set_trace_callback
 _SQLITE_CONNECTION_TOTAL_CHANGES = sqlite3.Connection.total_changes
 _SQLITE_CURSOR_EXECUTE = sqlite3.Cursor.execute
 _SQLITE_CURSOR_CLOSE = sqlite3.Cursor.close
@@ -2016,18 +2053,43 @@ class SQLiteV1BaselineConnectionOwner:
 
     __slots__ = (
         "__connection",
+        "__location",
+        "__publication_transaction_closed",
+        "__publication_transaction_guard",
+        "__publication_transaction_lineage",
+        "__publication_transaction_owner_ref",
+        "__temp_mutation_epoch",
         "__transaction_epoch",
         "__transaction_generation",
         "__transaction_mode",
+        "__weakref__",
     )
 
     def __init__(self, location: str) -> None:
         if type(location) is not str or not location:
             raise TypeError("baseline owner requires one SQLite location")
-        self.__connection = sqlite3.connect(location)
+        # Freeze a filesystem authority before the first native open.  A
+        # relative spelling must never be re-resolved against a later cwd when
+        # the guarded publication transaction closes and reopens its source.
+        pinned_location = location if location == ":memory:" else _ABSOLUTE_PATH(location)
+        self.__connection = sqlite3.connect(pinned_location)
+        self.__location = pinned_location
+        self.__publication_transaction_closed = False
+        self.__publication_transaction_guard: Callable[[str, str | None], None] | None = None
+        self.__publication_transaction_lineage: object | None = None
+        self.__publication_transaction_owner_ref: ReferenceType[object] | None = None
         self.__transaction_epoch = 0
+        self.__temp_mutation_epoch = 0
         self.__transaction_generation: object | None = None
         self.__transaction_mode: SQLiteTransactionMode | None = None
+        owner_ref = ref(self)
+
+        def trace_temp_mutation(sql: str) -> None:
+            owner = owner_ref()
+            if owner is not None and _temp_mutation_epoch_advancing_sql(sql):
+                owner.__temp_mutation_epoch += 1
+
+        _SQLITE_CONNECTION_SET_TRACE_CALLBACK(self.__connection, trace_temp_mutation)
 
     @property
     def in_transaction(self) -> bool:
@@ -2040,6 +2102,10 @@ class SQLiteV1BaselineConnectionOwner:
     @property
     def transaction_epoch(self) -> int:
         return self.__transaction_epoch
+
+    @property
+    def temp_mutation_epoch(self) -> int:
+        return self.__temp_mutation_epoch
 
     @property
     def _transaction_generation(self) -> object | None:
@@ -2064,6 +2130,7 @@ class SQLiteV1BaselineConnectionOwner:
         sql: str,
         parameters: tuple[object, ...] = (),
     ) -> _SQLiteCursorCapability:
+        self.__assert_publication_transaction_guard("execute", sql)
         if _forbidden_temp_store_directory(sql):
             raise ValueError("SQLite temp_store_directory is forbidden")
         before = self.__connection.in_transaction
@@ -4162,6 +4229,7 @@ class SQLiteV1BaselineConnectionOwner:
         )
 
     def executescript(self, sql: str) -> None:
+        self.__assert_publication_transaction_guard("executescript", sql)
         if _forbidden_temp_store_directory(sql):
             raise ValueError("SQLite temp_store_directory is forbidden")
         try:
@@ -4173,20 +4241,245 @@ class SQLiteV1BaselineConnectionOwner:
             self.__transaction_epoch += 1
 
     def commit(self) -> None:
+        self.__assert_publication_transaction_guard("commit", None)
         self.__connection.commit()
         self.__transaction_generation = None
         self.__transaction_mode = None
         self.__transaction_epoch += 1
 
     def rollback(self) -> None:
+        self.__assert_publication_transaction_guard("rollback", None)
         self.__connection.rollback()
         self.__transaction_generation = None
         self.__transaction_mode = None
         self.__transaction_epoch += 1
 
     def close(self) -> None:
+        self.__assert_publication_transaction_guard("close", None)
         self.__connection.close()
         self.__transaction_generation = None
+
+    def __assert_publication_transaction_guard(
+        self,
+        operation: str,
+        sql: str | None,
+    ) -> None:
+        callback = self.__publication_transaction_guard
+        owner_ref = self.__publication_transaction_owner_ref
+        if callback is None and owner_ref is None:
+            return
+        if owner_ref is not None and owner_ref() is None:
+            raise ValueError("GE_SQLITE_TX_OWNER_ABANDONED")
+        if callback is None or owner_ref is None:
+            raise ValueError("GE_SQLITE_TX_OWNER_GUARD_STATE")
+        callback(operation, sql)
+
+    def _install_publication_transaction_guard(
+        self,
+        owner: object,
+        callback: Callable[[str, str | None], None],
+    ) -> None:
+        if (
+            self.__publication_transaction_guard is not None
+            or self.__publication_transaction_owner_ref is not None
+            or self.__connection.in_transaction
+            or self.__transaction_generation is not None
+            or self.__publication_transaction_lineage is not None
+        ):
+            raise ValueError("GE_SQLITE_TX_OWNER_REGISTRATION")
+        connection_ref = ref(self)
+
+        def owner_collected(dead_ref: ReferenceType[object]) -> None:
+            connection = connection_ref()
+            if (
+                connection is not None
+                and connection.__publication_transaction_owner_ref is dead_ref
+            ):
+                # Fail closed forever.  Losing the only live authority must not
+                # turn an owned transaction into an unguarded raw connection.
+                connection.__publication_transaction_guard = _abandoned_transaction_owner_guard
+
+        try:
+            owner_ref = ref(owner, owner_collected)
+        except TypeError as error:
+            raise TypeError("GE_SQLITE_TX_OWNER_WEAK_IDENTITY") from error
+        self.__publication_transaction_owner_ref = owner_ref
+        self.__publication_transaction_guard = callback
+
+    def _publication_transaction_recoverable(self) -> bool:
+        return self.__location != ":memory:"
+
+    def _discard_publication_transaction_guard(self, owner: object) -> None:
+        owner_ref = self.__publication_transaction_owner_ref
+        if owner_ref is None or owner_ref() is not owner:
+            raise ValueError("GE_SQLITE_TX_OWNER_PRESENTATION")
+        if not self.__publication_transaction_closed and (
+            self.__connection.in_transaction
+            or self.__transaction_generation is not None
+            or self.__transaction_mode is not None
+            or self.__publication_transaction_lineage is not None
+        ):
+            raise ValueError("GE_SQLITE_TX_OWNER_LIVE_GUARD")
+        self.__publication_transaction_owner_ref = None
+        self.__publication_transaction_guard = None
+
+    def _begin_publication_transaction_exclusive(
+        self,
+        owner: object,
+        lineage: object,
+        generation: object,
+    ) -> None:
+        owner_ref = self.__publication_transaction_owner_ref
+        if (
+            owner_ref is None
+            or owner_ref() is not owner
+            or self.__connection.in_transaction
+            or self.__transaction_generation is not None
+            or self.__transaction_mode is not None
+            or self.__publication_transaction_lineage is not None
+        ):
+            raise ValueError("GE_SQLITE_TX_OWNER_BEGIN_PRESENTATION")
+        self.__publication_transaction_lineage = lineage
+        self.__transaction_generation = generation
+        self.__transaction_mode = "exclusive"
+        self.__transaction_epoch += 1
+        cursor = self.__connection.execute("BEGIN EXCLUSIVE")
+        cursor.close()
+
+    def _observe_publication_transaction(
+        self,
+        owner: object,
+        lineage: object,
+        generation: object,
+    ) -> tuple[bool, bool, bool, SQLiteTransactionMode | None, int, int, int]:
+        owner_ref = self.__publication_transaction_owner_ref
+        if owner_ref is None or owner_ref() is not owner:
+            raise ValueError("GE_SQLITE_TX_OWNER_PRESENTATION")
+        in_transaction = _SQLITE_CONNECTION_IN_TRANSACTION.__get__(
+            self.__connection, sqlite3.Connection
+        )
+        return (
+            in_transaction,
+            self.__publication_transaction_lineage is lineage,
+            self.__transaction_generation is generation,
+            self.__transaction_mode,
+            self.__transaction_epoch,
+            _SQLITE_CONNECTION_TOTAL_CHANGES.__get__(self.__connection, sqlite3.Connection),
+            self.__temp_mutation_epoch,
+        )
+
+    def _rollback_publication_transaction(
+        self,
+        owner: object,
+        lineage: object,
+        generation: object,
+    ) -> None:
+        owner_ref = self.__publication_transaction_owner_ref
+        if (
+            owner_ref is None
+            or owner_ref() is not owner
+            or not self.__connection.in_transaction
+            or self.__publication_transaction_lineage is not lineage
+            or self.__transaction_generation is not generation
+            or self.__transaction_mode != "exclusive"
+        ):
+            raise ValueError("GE_SQLITE_TX_OWNER_PRESENTATION")
+        self.__connection.rollback()
+        self.__transaction_generation = None
+        self.__transaction_mode = None
+        self.__publication_transaction_lineage = None
+        self.__transaction_epoch += 1
+
+    def _tombstone_publication_transaction_generation(
+        self,
+        owner: object,
+        generation: object,
+    ) -> None:
+        owner_ref = self.__publication_transaction_owner_ref
+        if (
+            owner_ref is None
+            or owner_ref() is not owner
+            or self.__transaction_generation is not generation
+        ):
+            raise ValueError("GE_SQLITE_TX_OWNER_PRESENTATION")
+        # This tombstones authority at the transaction-owner layer only.  The
+        # connection must retain exact-generation evidence until an authorised
+        # rollback has checked it at the I/O boundary.
+
+    def _close_publication_transaction(self, owner: object) -> None:
+        owner_ref = self.__publication_transaction_owner_ref
+        if owner_ref is None or owner_ref() is not owner:
+            raise ValueError("GE_SQLITE_TX_OWNER_PRESENTATION")
+        self.__connection.close()
+        self.__transaction_generation = None
+        self.__transaction_mode = None
+        self.__publication_transaction_lineage = None
+        self.__publication_transaction_closed = True
+
+    def _publication_transaction_source_fingerprint(self, owner: object) -> tuple[object, ...]:
+        owner_ref = self.__publication_transaction_owner_ref
+        if owner_ref is None or owner_ref() is not owner:
+            raise ValueError("GE_SQLITE_TX_OWNER_PRESENTATION")
+        logical_dump = tuple(self.__connection.iterdump())
+        return (logical_dump,)
+
+    def _validate_publication_transaction_source_v1(self, owner: object) -> None:
+        owner_ref = self.__publication_transaction_owner_ref
+        if owner_ref is None or owner_ref() is not owner or self.__connection.in_transaction:
+            raise ValueError("GE_SQLITE_TX_OWNER_SOURCE_V1")
+        _validate_publication_transaction_source_v1_connection(self.__connection)
+
+    def _validate_publication_transaction_source_v1_active(
+        self,
+        owner: object,
+        lineage: object,
+        generation: object,
+    ) -> None:
+        owner_ref = self.__publication_transaction_owner_ref
+        if (
+            owner_ref is None
+            or owner_ref() is not owner
+            or not self.__connection.in_transaction
+            or self.__publication_transaction_lineage is not lineage
+            or self.__transaction_generation is not generation
+            or self.__transaction_mode != "exclusive"
+        ):
+            raise ValueError("GE_SQLITE_TX_OWNER_SOURCE_V1")
+        _validate_publication_transaction_source_v1_connection(self.__connection)
+
+    def _reopen_publication_transaction_source_fingerprint(
+        self,
+        owner: object,
+    ) -> tuple[object, ...]:
+        owner_ref = self.__publication_transaction_owner_ref
+        if owner_ref is None or owner_ref() is not owner:
+            raise ValueError("GE_SQLITE_TX_OWNER_PRESENTATION")
+        if self.__location == ":memory:":
+            raise ValueError("GE_SQLITE_TX_OWNER_REOPEN_MEMORY")
+        audit = sqlite3.connect(self.__location)
+        try:
+            _validate_publication_transaction_source_v1_connection(audit)
+            logical_dump = tuple(audit.iterdump())
+            application_id = audit.execute("PRAGMA application_id").fetchone()
+            user_version = audit.execute("PRAGMA user_version").fetchone()
+            integrity = audit.execute("PRAGMA integrity_check").fetchall()
+            foreign_keys = audit.execute("PRAGMA foreign_key_check").fetchall()
+            topology = audit.execute("PRAGMA database_list").fetchall()
+            temp_catalog = audit.execute(
+                "SELECT type, name, tbl_name, sql FROM temp.sqlite_schema "
+                "ORDER BY type COLLATE BINARY, name COLLATE BINARY"
+            ).fetchall()
+            return (
+                logical_dump,
+                application_id,
+                user_version,
+                tuple(tuple(row) for row in integrity),
+                tuple(tuple(row) for row in foreign_keys),
+                tuple(tuple(row) for row in topology),
+                tuple(tuple(row) for row in temp_catalog),
+            )
+        finally:
+            audit.close()
 
 
 _OWNER_BEGIN_MIGRATION_0002 = SQLiteV1BaselineConnectionOwner._begin_migration_0002_execution
@@ -5058,6 +5351,13 @@ _TABLES: tuple[tuple[BaselineEntryKind, str], ...] = (
 )
 
 _SOURCE_ASSETS = _load_migration_assets()
+_SQLITE_CYCLE_STORE_SEMANTIC_AUDIT = SQLiteCycleStoreProvider._semantic_audit
+_SQLITE_CYCLE_STORE_VALIDATE_SCHEMA = SQLiteCycleStoreProvider._validate_schema
+_SQLITE_CYCLE_STORE_RECORD_FROM_ROW = SQLiteCycleStoreProvider._record_from_row
+_SQLITE_CYCLE_STORE_CHECKPOINT_FROM_ROW = SQLiteCycleStoreProvider._checkpoint_from_row
+_SQLITE_CYCLE_STORE_DECODE_CHECKPOINT_SNAPSHOT = (
+    SQLiteCycleStoreProvider._decode_checkpoint_snapshot
+)
 
 _MAXIMUM_NON_CURSOR_OBSERVED_SQL = """SELECT max(observed_at_ms) FROM (
  SELECT created_at_ms AS observed_at_ms FROM ge_cycle_schema
@@ -5076,6 +5376,249 @@ _MAXIMUM_NON_CURSOR_OBSERVED_SQL = """SELECT max(observed_at_ms) FROM (
  UNION ALL SELECT first_used_at_ms FROM ge_cycle_used_migration_lock_ids
  UNION ALL SELECT updated_at_ms FROM ge_cycle_migration_lock
 )"""
+
+_SOURCE_V1_AUTO_INDEX_CATALOG = frozenset(
+    {
+        (
+            "index",
+            "sqlite_autoindex_ge_cycle_migrations_1",
+            "ge_cycle_migrations",
+            None,
+        ),
+        (
+            "index",
+            "sqlite_autoindex_ge_cycle_migrations_2",
+            "ge_cycle_migrations",
+            None,
+        ),
+        (
+            "index",
+            "sqlite_autoindex_ge_cycle_used_migration_lock_ids_1",
+            "ge_cycle_used_migration_lock_ids",
+            None,
+        ),
+    }
+)
+
+
+def _validate_publication_transaction_source_v1_connection(
+    connection: sqlite3.Connection,
+) -> None:
+    """Validate the complete pre-BEGIN source-v1 and connection closed sets."""
+
+    topology = connection.execute("PRAGMA database_list").fetchall()
+    if (
+        not topology
+        or any(
+            len(row) != 3
+            or type(row[0]) is not int
+            or type(row[1]) is not str
+            or type(row[2]) is not str
+            for row in topology
+        )
+        or tuple(row[1] for row in topology) not in {("main",), ("main", "temp")}
+    ):
+        raise ValueError("GE_SQLITE_TX_OWNER_SOURCE_V1")
+    temp_catalog = connection.execute(
+        "SELECT type, name, tbl_name, sql FROM temp.sqlite_schema "
+        "ORDER BY type COLLATE BINARY, name COLLATE BINARY"
+    ).fetchall()
+    if temp_catalog:
+        raise ValueError("GE_SQLITE_TX_OWNER_SOURCE_V1")
+
+    application_id = connection.execute("PRAGMA application_id").fetchone()
+    user_version = connection.execute("PRAGMA user_version").fetchone()
+    if application_id != (1_195_724_359,) or user_version != (1,):
+        raise ValueError("GE_SQLITE_TX_OWNER_SOURCE_V1")
+
+    identity = _SOURCE_ASSETS.schema_identity
+    required_tables = cast(JsonObject, identity["requiredTables"])
+    required_indexes = frozenset(cast(list[str], identity["requiredIndexes"]))
+    catalog_rows = connection.execute(
+        "SELECT type, name, tbl_name, sql FROM main.sqlite_schema "
+        "ORDER BY type COLLATE BINARY, name COLLATE BINARY"
+    ).fetchall()
+    if any(
+        len(row) != 4
+        or type(row[0]) is not str
+        or type(row[1]) is not str
+        or type(row[2]) is not str
+        or (row[3] is not None and type(row[3]) is not str)
+        for row in catalog_rows
+    ):
+        raise ValueError("GE_SQLITE_TX_OWNER_SOURCE_V1")
+    catalog = {tuple(row) for row in catalog_rows}
+    table_sql = {
+        cast(str, row[1]): cast(str, row[3])
+        for row in catalog_rows
+        if row[0] == "table" and row[3] is not None
+    }
+    explicit_indexes = {
+        cast(str, row[1])
+        for row in catalog_rows
+        if row[0] == "index" and row[3] is not None
+    }
+    expected_catalog_size = (
+        len(required_tables) + len(required_indexes) + len(_SOURCE_V1_AUTO_INDEX_CATALOG)
+    )
+    if (
+        set(table_sql) != set(required_tables)
+        or explicit_indexes != required_indexes
+        or len(catalog) != expected_catalog_size
+        or not _SOURCE_V1_AUTO_INDEX_CATALOG.issubset(catalog)
+        or any(row[0] not in {"table", "index"} for row in catalog_rows)
+    ):
+        raise ValueError("GE_SQLITE_TX_OWNER_SOURCE_V1")
+    for table_name, expected_columns_value in required_tables.items():
+        sql = table_sql[table_name]
+        if "STRICT" not in sql.upper():
+            raise ValueError("GE_SQLITE_TX_OWNER_SOURCE_V1")
+        escaped = table_name.replace('"', '""')
+        columns = [
+            cast(str, row[1])
+            for row in connection.execute(f'PRAGMA table_info("{escaped}")').fetchall()
+        ]
+        if columns != expected_columns_value:
+            raise ValueError("GE_SQLITE_TX_OWNER_SOURCE_V1")
+    normalized_catalog: list[JsonObject] = []
+    for row in connection.execute(
+        "SELECT type, name, tbl_name, sql FROM main.sqlite_schema "
+        "WHERE name GLOB 'ge_cycle_*' AND type IN ('table', 'index') "
+        "AND sql IS NOT NULL ORDER BY type, name"
+    ).fetchall():
+        if len(row) != 4 or not all(type(value) is str for value in row):
+            raise ValueError("GE_SQLITE_TX_OWNER_SOURCE_V1")
+        normalized_catalog.append(
+            cast(
+                JsonObject,
+                {
+                    "type": row[0],
+                    "name": row[1],
+                    "tableName": row[2],
+                    "sql": re.sub(r"\s+", " ", row[3]).strip(),
+                },
+            )
+        )
+    if canonical_sha256(normalized_catalog) != SQLITE_CYCLE_STORE_CATALOG_SHA256:
+        raise ValueError("GE_SQLITE_TX_OWNER_SOURCE_V1")
+
+    schema_row = connection.execute(
+        """SELECT current_version, min_reader_version, max_reader_version,
+                  min_writer_version, max_writer_version, schema_identity_sha256,
+                  latest_migration_sha256, provider_descriptor_hash,
+                  latest_migration_applied_at_ms, created_at_ms, updated_at_ms
+             FROM ge_cycle_schema WHERE singleton = 1"""
+    ).fetchone()
+    if (
+        schema_row is None
+        or len(schema_row) != 11
+        or schema_row[:5] != (1, 1, 1, 1, 1)
+        or schema_row[5] != SQLITE_CYCLE_STORE_SCHEMA_IDENTITY_SHA256
+        or schema_row[7] != SQLITE_CYCLE_STORE_DESCRIPTOR_HASH
+        or not all(type(value) is int for value in schema_row[8:11])
+        or not all(0 <= value <= MAX_SAFE_INTEGER for value in schema_row[8:11])
+        or schema_row[8] != schema_row[10]
+        or schema_row[9] > schema_row[10]
+    ):
+        raise ValueError("GE_SQLITE_TX_OWNER_SOURCE_V1")
+    migration_row = connection.execute(
+        """SELECT previous_version, migration_id, sql_sha256,
+                  schema_identity_sha256, applied_at_ms, reversibility,
+                  postconditions_blob
+             FROM ge_cycle_migrations WHERE version = 1"""
+    ).fetchone()
+    valid_lineages = {
+        (0, "fresh-v1-baseline", _SOURCE_ASSETS.schema_sql_hash),
+        (0, "alpha-v0-to-v1", _SOURCE_ASSETS.migration_sql_hash),
+    }
+    if (
+        migration_row is None
+        or len(migration_row) != 7
+        or tuple(migration_row[:3]) not in valid_lineages
+        or migration_row[3] != SQLITE_CYCLE_STORE_SCHEMA_IDENTITY_SHA256
+        or migration_row[4] != schema_row[8]
+        or migration_row[5] != "rebuild-from-verified-backup-only"
+        or migration_row[6] != _migration_postconditions_blob()
+        or schema_row[6] != migration_row[2]
+    ):
+        raise ValueError("GE_SQLITE_TX_OWNER_SOURCE_V1")
+
+    total = 0
+    for _kind, table in _TABLES:
+        count = connection.execute(f"SELECT count(*) FROM {table}").fetchone()
+        if count is None or type(count[0]) is not int or not 0 <= count[0] <= MAX_SAFE_INTEGER:
+            raise ValueError("GE_SQLITE_TX_OWNER_SOURCE_V1")
+        total += count[0]
+        if total > MAX_SAFE_INTEGER:
+            raise ValueError("GE_SQLITE_TX_OWNER_SOURCE_V1")
+    singleton_counts = (
+        connection.execute("SELECT count(*) FROM ge_cycle_schema").fetchone(),
+        connection.execute("SELECT count(*) FROM ge_cycle_migrations").fetchone(),
+        connection.execute("SELECT count(*) FROM ge_cycle_migration_lock").fetchone(),
+    )
+    if singleton_counts != ((1,), (1,), (1,)):
+        raise ValueError("GE_SQLITE_TX_OWNER_SOURCE_V1")
+    maximum = connection.execute(_MAXIMUM_NON_CURSOR_OBSERVED_SQL).fetchone()
+    high_water = connection.execute(
+        "SELECT updated_at_ms FROM ge_cycle_migration_lock WHERE singleton = 1"
+    ).fetchone()
+    integrity = connection.execute("PRAGMA integrity_check").fetchall()
+    foreign_keys = connection.execute("PRAGMA foreign_key_check").fetchall()
+    if (
+        maximum is None
+        or high_water is None
+        or type(maximum[0]) is not int
+        or type(high_water[0]) is not int
+        or not 0 <= maximum[0] <= MAX_SAFE_INTEGER
+        or not 0 <= high_water[0] <= MAX_SAFE_INTEGER
+        or high_water[0] < maximum[0]
+        or integrity != [("ok",)]
+        or foreign_keys
+    ):
+        raise ValueError("GE_SQLITE_TX_OWNER_SOURCE_V1")
+
+    # Reuse the provider's complete bounded semantic verifier rather than
+    # treating SQLite structural integrity as application-level integrity.
+    # This traverses canonical record/checkpoint/operation/cursor carriers,
+    # hash chains, stream tails, histories, fences, and cursor bindings.
+    auditor = cast(Any, object.__new__(SQLiteCycleStoreProvider))
+    auditor._assets = _SOURCE_ASSETS
+    auditor._descriptor = cast(
+        JsonObject,
+        {"descriptorHash": SQLITE_CYCLE_STORE_DESCRIPTOR_HASH},
+    )
+    # The semantic body dispatches these helpers through ``self``. Bind the
+    # definition-time captured intrinsics on the private one-shot auditor so
+    # late class replacement cannot weaken registration evidence.
+    auditor._validate_schema = _SQLITE_CYCLE_STORE_VALIDATE_SCHEMA.__get__(
+        auditor, SQLiteCycleStoreProvider
+    )
+    auditor._record_from_row = _SQLITE_CYCLE_STORE_RECORD_FROM_ROW.__get__(
+        auditor, SQLiteCycleStoreProvider
+    )
+    auditor._checkpoint_from_row = _SQLITE_CYCLE_STORE_CHECKPOINT_FROM_ROW.__get__(
+        auditor, SQLiteCycleStoreProvider
+    )
+    auditor._decode_checkpoint_snapshot = (
+        _SQLITE_CYCLE_STORE_DECODE_CHECKPOINT_SNAPSHOT.__get__(
+            auditor, SQLiteCycleStoreProvider
+        )
+    )
+    report = _SQLITE_CYCLE_STORE_SEMANTIC_AUDIT(
+        auditor,
+        connection,
+        "inspect-schema",
+    )
+    if (
+        report.get("level") != "semantic"
+        or report.get("applicationId") != 1_195_724_359
+        or report.get("schemaVersion") != 1
+        or report.get("schemaIdentitySha256")
+        != SQLITE_CYCLE_STORE_SCHEMA_IDENTITY_SHA256
+        or report.get("descriptorHash") != SQLITE_CYCLE_STORE_DESCRIPTOR_HASH
+        or report.get("catalogSha256") != SQLITE_CYCLE_STORE_CATALOG_SHA256
+    ):
+        raise ValueError("GE_SQLITE_TX_OWNER_SOURCE_V1")
 
 _SCHEMA_ENTRY_SQL = """SELECT current_version, min_reader_version,
  max_reader_version, min_writer_version, max_writer_version,

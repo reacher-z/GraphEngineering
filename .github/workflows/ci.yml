@@ -178,6 +178,7 @@ jobs:
       - run: pnpm test:sqlite-docs
       - run: pnpm test:sqlite-python-benchmark
       - run: pnpm test:conformance
+      - run: pnpm test:sqlite-transaction-owner-runtime
 
   sqlite-cursor-pre-rebind-parity:
     name: SQLite cursor pre-rebind parity
