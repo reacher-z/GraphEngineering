@@ -41,12 +41,14 @@ test("a release cannot be marked completed over an open roll-up", () => {
   rejects("completed-dependency-open", () => validateTaskGraph(registry, null, RULES));
 });
 
-test("API, pattern, and security semantic edges are machine-required", () => {
+test("API, pattern, security, and SQLite composition semantic edges are machine-required", () => {
   for (const [consumer, producer] of [
     ["D14-API-FREEZE-050", "D4-TRACE-SUBGRAPH-022"],
     ["D15-EXPLORER-060", "D9-OPS-CONTROL-085"],
     ["D19-RC-065", "CTRL-PATTERNS-071"],
     ["D16-SECURITY-062", "D15-EXPLORER-060"],
+    ["D9-SQLITE-OWNER-COMPOSITION-P11-094", "D9-SQLITE-PUBLICATION-TX-OWNER-092"],
+    ["D9-SQLITE-OWNER-COMPOSITION-P11-094", "D9-SQLITE-RULE12-CLOCK-P10-093"],
   ]) {
     const registry = clone(REGISTRY);
     const task = registry.tasks.find(({ id }) => id === consumer);

@@ -70,7 +70,9 @@
     {"consumer": "D9-SQLITE-RULE11-PREDECESSOR-091", "producer": "D6-DURABLE-CONFORMANCE-011", "reason": "the SQLite publication branch consumes dual-runtime durable conformance"},
     {"consumer": "D9-SQLITE-PUBLICATION-TX-OWNER-092", "producer": "D9-SQLITE-RULE11-PREDECESSOR-091", "reason": "P9 begins only after exact Rule 11"},
     {"consumer": "D9-SQLITE-RULE12-CLOCK-P10-093", "producer": "D9-SQLITE-RULE11-PREDECESSOR-091", "reason": "P10 consumes the accepted Rule 11 predecessor"},
-    {"consumer": "D9-SQLITE-RULE12-CLOCK-P10-093", "producer": "D9-SQLITE-PUBLICATION-TX-OWNER-092", "reason": "P10 consumes the guarded P9 transaction owner"}
+    {"consumer": "D9-SQLITE-RULE12-CLOCK-P10-093", "producer": "D9-SQLITE-PUBLICATION-TX-OWNER-092", "reason": "P10 consumes the guarded P9 transaction owner"},
+    {"consumer": "D9-SQLITE-OWNER-COMPOSITION-P11-094", "producer": "D9-SQLITE-PUBLICATION-TX-OWNER-092", "reason": "P11 composition must consume the exact guarded P9 transaction owner"},
+    {"consumer": "D9-SQLITE-OWNER-COMPOSITION-P11-094", "producer": "D9-SQLITE-RULE12-CLOCK-P10-093", "reason": "P11 composition must preserve the accepted bounded P10 publication predecessor"}
   ],
   "invalidation_roots": [
     "CTRL-ACCEPTANCE-070",

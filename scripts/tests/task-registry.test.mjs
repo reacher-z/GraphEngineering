@@ -28,10 +28,10 @@ function rejects(code, operation) {
 
 test("live registry is structurally valid and acyclic", () => {
   const registry = validateTaskRegistry(REGISTRY, { repoRoot: ROOT });
-  assert.equal(registry.taskCount, 111);
+  assert.equal(registry.taskCount, 112);
   const graph = validateTaskGraph(REGISTRY, GRAPH, RULES);
-  assert.equal(graph.taskCount, 111);
-  assert.equal(graph.semanticEdgeCount, 70);
+  assert.equal(graph.taskCount, 112);
+  assert.equal(graph.semanticEdgeCount, 72);
 });
 
 test("raw duplicate JSON keys cannot hide dependency attacks", () => {

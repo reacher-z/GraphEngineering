@@ -241,3 +241,24 @@ subgraph/reducer/artifact/stream/trace, D6 barrier tranche 2, and D7 native
 cycle/conformance closure. P10 may proceed in its independent SQLite lane, but
 it must not consume all implementation capacity while those release-spine
 predecessors remain Open.
+
+## 2026-08-03 PDT P10 immutable acceptance and P11 composition truth
+
+- P10 is Green only for its bounded Rule 12 plus unconsumed third-clock scope.
+  Immutable implementation commit:
+  `e8e2598fa78e11427684be727c4198f6ce2ba02b`. Native focused, exact
+  cross-runtime parity, static/build, affected regressions and the complete
+  SQLite suite passed; independent disposition is H0/M0/L0.
+- P10's terminal facts are Rule12 accepted, third evidence observed but not
+  consumed, provider clock observed/consumed `3/2`, and COMMIT not presented.
+  It does not close cursor-clock, TEMP retirement, final fence, complete-v2,
+  public API, D9, RC, stable release, or external adoption.
+- `D9-SQLITE-OWNER-COMPOSITION-P11-094` is Planned. The existing P9 owner and
+  P10 publication predecessor are not yet one transitive runtime authority
+  graph. P11 must implement the append-only §31.37.81/82/84 contract: explicit
+  parent/child mutation scopes, authenticated fixed reads, exact P9 failure
+  capture/cleanup, file-backed composition, and portable provenance through
+  the unconsumed third clock while COMMIT remains disabled.
+- Registry expansion to 112 tasks and P10 completion do not change release
+  weight. Candidate-bound evidence closure remains audit-only at 0/93 until a
+  future immutable release candidate closes every release-rollup predecessor.

@@ -535,7 +535,10 @@ flowchart LR
   R11 --> P9[D9-SQLITE-PUBLICATION-TX-OWNER-092]
   R11 --> P10[D9-SQLITE-RULE12-CLOCK-P10-093]
   P9 --> P10
+  P9 --> P11[D9-SQLITE-OWNER-COMPOSITION-P11-094]
+  P10 --> P11
   P10 -. supporting evidence only .-> D9X[D9-DURABLE-EXT-SPEC-031]
+  P11 -. future supporting evidence only .-> D9X
 ```
 
 - `D9-SQLITE-RULE11-PREDECESSOR-091` records the exact connection-owned
@@ -543,9 +546,14 @@ flowchart LR
   the one-shot zero-I/O Rule 11 owner. It does not claim Rule 12 or a clock.
 - `D9-SQLITE-PUBLICATION-TX-OWNER-092` records P9's package-private guarded
   BEGIN owner and returned-failure cleanup. It retains a hard-disabled COMMIT.
-- `D9-SQLITE-RULE12-CLOCK-P10-093` is the active P10 leaf. Its maximum success
+- `D9-SQLITE-RULE12-CLOCK-P10-093` is the completed bounded P10 leaf. Its maximum success
   is Rule 12 plus an unconsumed third clock (`3/2`); cursor-clock completion and
   every later publication/commit transition remain downstream.
+- `D9-SQLITE-OWNER-COMPOSITION-P11-094` is the planned four-slice composition
+  task. It must thread the exact P9 owner/BEGIN receipt and explicit scoped
+  read/write authority through B2, the fixed permanent-write stages, Rule 11,
+  Rule 12, and the still-unconsumed third clock. It does not authorize COMMIT
+  or stage 18.
 
 These tasks carry no direct release-checklist weight. They may become evidence
 inside the future D9 extended-durability candidate only after redaction,

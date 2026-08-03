@@ -5,6 +5,11 @@ evidence is recorded by the subsequent registry/evidence commit.
 
 Date: 2026-08-02/03 PDT
 
+Immutable implementation commit:
+`e8e2598fa78e11427684be727c4198f6ce2ba02b` (author and committer
+`reacher-z <mtrxcop@gmail.com>`, no co-author). Local, tracking, and remote
+branch SHAs were verified identical after push.
+
 ## Accepted scope under review
 
 This review covers exactly one bounded package-private transition:
