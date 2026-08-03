@@ -9,6 +9,7 @@ import {
   assertSQLiteCursorOuterClockAuthorityGraphIntrinsic,
   assertSQLiteCursorPublicationSessionClockActiveGraphIntrinsic,
   assertSQLiteCursorPublicationSessionClockPreparedGraphIntrinsic,
+  assertSQLiteCursorRule12CurrentClockAuthorityIntrinsic,
   consumeSQLiteCursorProviderClockEvidenceIntrinsic,
   observeSQLiteCursorProviderClockIntrinsic,
   readSQLiteCursorProviderClockEvidenceSnapshotIntrinsic,
@@ -91,6 +92,7 @@ import {
   readSQLiteConnectionOperationSequenceZeroExecutionSnapshotIntrinsic,
   readSQLiteConnectionMigration0002ExecutionSnapshotIntrinsic,
   readSQLiteConnectionCursorRebindExecutionSnapshotIntrinsic,
+  readSQLiteConnectionPostRebindSealQueryPlansIntrinsic,
   releaseSQLiteConnectionCursorRebindExecutionIntrinsic,
   returnSQLiteStatementIteratorNativeIntrinsic,
   type SQLiteConnectionCursorRebindExecution,
@@ -99,6 +101,7 @@ import {
   type SQLiteConnectionBaselineEntryPublicationRow,
   type SQLiteConnectionBaselineHeaderPublicationRow,
   type SQLiteConnectionOperationSequenceZeroRow,
+  type SQLiteConnectionPostRebindSealQueryPlanSnapshot,
   readSQLiteConnectionOwnerSnapshot,
   readSQLiteConnectionTotalChangesSnapshot,
 } from "./sqlite-connection.js";
@@ -132,6 +135,9 @@ import {
 import {
   SQLITE_CURSOR_PUBLICATION_CHANGES_SQL_INTRINSIC,
   SQLITE_CURSOR_PUBLICATION_CHANGES_SQL_SHA256_INTRINSIC,
+  SQLITE_CURSOR_PUBLICATION_POST_REBIND_KEY_DRIVER_SQL_SHA256_INTRINSIC,
+  SQLITE_CURSOR_PUBLICATION_POST_REBIND_MAIN_KEY_COUNT_SQL_SHA256_INTRINSIC,
+  SQLITE_CURSOR_PUBLICATION_POST_REBIND_POINT_LOOKUP_SQL_SHA256_INTRINSIC,
   SQLITE_CURSOR_PUBLICATION_REBIND_PARAMETER_ORDER_INTRINSIC,
   SQLITE_CURSOR_PUBLICATION_REBIND_SQL_INTRINSIC,
   SQLITE_CURSOR_PUBLICATION_REBIND_SQL_SHA256_INTRINSIC,
@@ -297,6 +303,13 @@ export interface SQLiteCursorPublicationRebindContextSnapshot {
   readonly targetDescriptorHash: typeof SQLITE_CURSOR_PUBLICATION_TARGET.descriptorHash;
   readonly targetSchemaIdentitySha256:
     typeof SQLITE_CURSOR_PUBLICATION_TARGET.schemaIdentitySha256;
+  readonly migrationLockCapability: SQLiteCursorMigrationLockCapability;
+  readonly providerClockCapability: SQLiteCursorProviderClockCapability;
+  readonly outerClockEvidence: SQLiteCursorProviderClockEvidence;
+  readonly outerClockConsumedTombstone: SQLiteCursorProviderClockConsumedTombstone;
+  readonly preRebindClockEvidence: SQLiteCursorProviderClockEvidence;
+  readonly preRebindClockConsumedTombstone: SQLiteCursorProviderClockConsumedTombstone;
+  readonly rule12QueryPlans: SQLiteConnectionPostRebindSealQueryPlanSnapshot;
   readonly parameterValues: NonNullable<
     SQLiteConnectionCursorRebindExecutionSnapshot["parameterValues"]
   >;
@@ -357,6 +370,8 @@ export type SQLiteCursorOuterPublicationWritePhase =
   | "publication-active"
   | "publication-session-consumed"
   | "cursor-rebind-adopted"
+  | "rule12-seal-accepted"
+  | "pre-verification-clock-read-unconsumed"
   | "poisoned"
   | "retired";
 
@@ -757,6 +772,9 @@ export interface SQLiteCursorOuterPublicationAuthoritySnapshot {
     SQLiteCursorPublicationSessionConsumedTombstone | undefined;
   readonly postRebindWatermarkAdoption:
     SQLiteCursorPostRebindWatermarkAdoption | undefined;
+  readonly rule11Receipt: object | undefined;
+  readonly rule12Receipt: object | undefined;
+  readonly preVerificationClockEvidence: object | undefined;
   readonly receiptConsumptionCount: 0 | 4;
   readonly tombstoneMintCount: 0 | 4;
   readonly migration0002ConsumedTombstone:
@@ -832,6 +850,9 @@ interface AuthorityState {
   publicationSessionConsumedTombstone:
     SQLiteCursorPublicationSessionConsumedTombstone | undefined;
   postRebindWatermarkAdoption: SQLiteCursorPostRebindWatermarkAdoption | undefined;
+  rule11Receipt: object | undefined;
+  rule12Receipt: object | undefined;
+  preVerificationClockEvidence: object | undefined;
   receiptConsumptionCount: 0 | 4;
   tombstoneMintCount: 0 | 4;
   migration0002ConsumedTombstone:
@@ -973,6 +994,13 @@ interface PublicationRebindContextState {
   readonly targetDescriptorHash: typeof SQLITE_CURSOR_PUBLICATION_TARGET.descriptorHash;
   readonly targetSchemaIdentitySha256:
     typeof SQLITE_CURSOR_PUBLICATION_TARGET.schemaIdentitySha256;
+  readonly migrationLockCapability: SQLiteCursorMigrationLockCapability;
+  readonly providerClockCapability: SQLiteCursorProviderClockCapability;
+  readonly outerClockEvidence: SQLiteCursorProviderClockEvidence;
+  readonly outerClockConsumedTombstone: SQLiteCursorProviderClockConsumedTombstone;
+  readonly preRebindClockEvidence: SQLiteCursorProviderClockEvidence;
+  readonly preRebindClockConsumedTombstone: SQLiteCursorProviderClockConsumedTombstone;
+  readonly rule12QueryPlans: SQLiteConnectionPostRebindSealQueryPlanSnapshot;
   readonly parameterValues: NonNullable<
     SQLiteConnectionCursorRebindExecutionSnapshot["parameterValues"]
   >;
@@ -1052,6 +1080,7 @@ let publicationRebindRegistrationFault: Readonly<{
   readonly stage: PublicationRebindRegistrationFaultStage;
 }> | undefined;
 let publicationPendingRegistrationFault: Readonly<{ readonly error: unknown }> | undefined;
+let rule12SealAdoptionFault: Readonly<{ readonly error: unknown }> | undefined;
 const MIGRATION_0002_RECEIPTS = new WeakMap<object, Migration0002ReceiptState>();
 const POST_DDL_CATALOG_FENCES = new WeakMap<object, PostDdlCatalogFenceState>();
 const POST_DDL_PUBLICATION_READER_LEASES =
@@ -1359,6 +1388,19 @@ export function injectSQLiteCursorPublicationRebindRegistrationFaultForTestIntri
   publicationRebindRegistrationFault = objectFreezeIntrinsic({ error, stage });
 }
 
+/** One-shot seam proving Rule 12 remains failure-atomic after R11 completion. */
+export function injectSQLiteCursorRule12SealAdoptionFaultForTestIntrinsic(
+  error: unknown,
+): void {
+  if (rule12SealAdoptionFault !== undefined) {
+    return fail(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "SQLite Rule 12 seal adoption fault is already armed",
+    );
+  }
+  rule12SealAdoptionFault = objectFreezeIntrinsic({ error });
+}
+
 /**
  * Package-private one-shot seam for exercising the closed rebind validation
  * tuple. The weak key is the exact authentic context and the value is only an
@@ -1569,6 +1611,9 @@ export function prepareSQLiteCursorOuterPublicationAuthorityIntrinsic(
     publicationRebindContext: undefined,
     publicationSessionConsumedTombstone: undefined,
     postRebindWatermarkAdoption: undefined,
+    rule11Receipt: undefined,
+    rule12Receipt: undefined,
+    preVerificationClockEvidence: undefined,
     receiptConsumptionCount: 0,
     tombstoneMintCount: 0,
     migration0002ConsumedTombstone: undefined,
@@ -1705,7 +1750,9 @@ export function assertSQLiteCursorOuterPublicationAuthorityIntrinsic(
     if (state.writePhase === "initial-stage-adoption-complete"
         || state.writePhase === "publication-active"
         || state.writePhase === "publication-session-consumed"
-        || state.writePhase === "cursor-rebind-adopted") {
+        || state.writePhase === "cursor-rebind-adopted"
+        || state.writePhase === "rule12-seal-accepted"
+        || state.writePhase === "pre-verification-clock-read-unconsumed") {
       const adoptionReceipt = state.initialStageAdoptionReceipt;
       const adoption = adoptionReceipt === undefined ? undefined : reflectApplyIntrinsic(
         weakMapGetIntrinsic, INITIAL_STAGE_ADOPTION_RECEIPTS, [adoptionReceipt as object],
@@ -1715,7 +1762,9 @@ export function assertSQLiteCursorOuterPublicationAuthorityIntrinsic(
       }
       if (state.writePhase === "publication-active"
           || state.writePhase === "publication-session-consumed"
-          || state.writePhase === "cursor-rebind-adopted") {
+          || state.writePhase === "cursor-rebind-adopted"
+          || state.writePhase === "rule12-seal-accepted"
+          || state.writePhase === "pre-verification-clock-read-unconsumed") {
         const session = state.publicationSession;
         if (session === undefined) {
           fail("GE_CYCLE_STORE_CORRUPTION", "SQLite publication session identity drifted");
@@ -1727,7 +1776,9 @@ export function assertSQLiteCursorOuterPublicationAuthorityIntrinsic(
           assertSQLiteCursorPublicationSessionConsumedTombstoneIntrinsic(
             state.publicationSessionConsumedTombstone!,
           );
-        } else if (state.writePhase === "cursor-rebind-adopted") {
+        } else if (state.writePhase === "cursor-rebind-adopted"
+            || state.writePhase === "rule12-seal-accepted"
+            || state.writePhase === "pre-verification-clock-read-unconsumed") {
           assertSQLiteCursorPostRebindWatermarkAdoptionIntrinsic(
             state.postRebindWatermarkAdoption!,
           );
@@ -6249,6 +6300,16 @@ export function prepareSQLiteCursorPublicationRebindContextIntrinsic(
     return fail("GE_CYCLE_STORE_CORRUPTION", "SQLite publication rebind predecessor is invalid");
   }
 
+  let rule12QueryPlans: SQLiteConnectionPostRebindSealQueryPlanSnapshot;
+  try {
+    rule12QueryPlans = readSQLiteConnectionPostRebindSealQueryPlansIntrinsic(state.connection);
+  } catch (error) {
+    poisonAuthorityGraph(
+      state, publication.authority, "SQLite Rule 12 query-plan proof failed before rebind",
+    );
+    throw error;
+  }
+
   const preparedOwner =
     mintPublicationRebindOpaqueIntrinsic<SQLiteCursorPublicationRebindPreparedOwner>();
   const token = mintPublicationRebindOpaqueIntrinsic<SQLiteCursorPublicationRebindContext>();
@@ -6279,6 +6340,13 @@ export function prepareSQLiteCursorPublicationRebindContextIntrinsic(
     sourceSchemaIdentitySha256: state.sourceSchemaIdentitySha256,
     targetDescriptorHash: SQLITE_CURSOR_PUBLICATION_TARGET.descriptorHash,
     targetSchemaIdentitySha256: SQLITE_CURSOR_PUBLICATION_TARGET.schemaIdentitySha256,
+    migrationLockCapability: publication.snapshotBase.migrationLockCapability,
+    providerClockCapability: publication.snapshotBase.providerClockCapability,
+    outerClockEvidence: publication.snapshotBase.outerClockEvidence,
+    outerClockConsumedTombstone: state.outerClockConsumedTombstone!,
+    preRebindClockEvidence: publication.snapshotBase.preRebindClockEvidence,
+    preRebindClockConsumedTombstone: publication.consumedTombstone!,
+    rule12QueryPlans,
     token,
     tombstone: undefined,
     transactionLineage: state.transactionLineage,
@@ -6395,6 +6463,13 @@ function snapshotPublicationRebindContext(
     sourceSchemaIdentitySha256: state.sourceSchemaIdentitySha256,
     targetDescriptorHash: state.targetDescriptorHash,
     targetSchemaIdentitySha256: state.targetSchemaIdentitySha256,
+    migrationLockCapability: state.migrationLockCapability,
+    providerClockCapability: state.providerClockCapability,
+    outerClockEvidence: state.outerClockEvidence,
+    outerClockConsumedTombstone: state.outerClockConsumedTombstone,
+    preRebindClockEvidence: state.preRebindClockEvidence,
+    preRebindClockConsumedTombstone: state.preRebindClockConsumedTombstone,
+    rule12QueryPlans: state.rule12QueryPlans,
     transactionLineage: state.transactionLineage,
   });
 }
@@ -6403,6 +6478,71 @@ export function readSQLiteCursorPublicationRebindContextSnapshotIntrinsic(
   context: SQLiteCursorPublicationRebindContext,
 ): SQLiteCursorPublicationRebindContextSnapshot {
   return snapshotPublicationRebindContext(publicationRebindContextState(context));
+}
+
+/**
+ * Provider-free Rule 12 entry proof. This deliberately runs before the first
+ * cancellation observation: authentic graph ownership, current lineage/live
+ * lock, a fresh physical target-catalog read and the retained three-EQP proof
+ * must win over an already-cancelled presentation.
+ */
+export function assertSQLiteCursorRule12EntryAuthorityIntrinsic(
+  contextToken: SQLiteCursorPublicationRebindContext,
+  adoptionToken: SQLiteCursorPostRebindWatermarkAdoption,
+): void {
+  const context = publicationRebindContextState(contextToken);
+  const adoption = postRebindWatermarkAdoptionState(adoptionToken);
+  const state = authorityState(context.authority);
+  try {
+    assertSQLiteCursorPostRebindWatermarkAdoptionIntrinsic(adoptionToken);
+    if (adoption.context !== context || context.adoption !== adoptionToken
+        || adoption.lifecycle !== "active" || context.lifecycle !== "write-adopted"
+        || state.lifecycle !== "active" || state.writePhase !== "cursor-rebind-adopted"
+        || state.publicationRebindContext !== contextToken
+        || state.postRebindWatermarkAdoption !== adoptionToken
+        || state.rule11Receipt !== undefined || state.rule12Receipt !== undefined
+        || state.preVerificationClockEvidence !== undefined) {
+      fail("GE_CYCLE_STORE_CORRUPTION", "SQLite Rule 12 entry authority is invalid");
+    }
+    const current = assertSQLiteCursorRule12CurrentClockAuthorityIntrinsic(
+      context.connection,
+      context.migrationLockCapability,
+      context.providerClockCapability,
+      context.outerClockEvidence,
+      context.outerClockConsumedTombstone,
+      context.preRebindClockEvidence,
+      context.preRebindClockConsumedTombstone,
+    );
+    const catalog = readValidatedSQLiteCursorPublicationTargetCatalogObservationIntrinsic(
+      context.connection,
+    );
+    const fence = postDdlCatalogFenceState(state.postDdlCatalogFence!);
+    const plans = context.rule12QueryPlans;
+    if (catalog.catalogSha256 !== fence.snapshot.catalogSha256
+        || catalog.canonicalUtf8Bytes !== fence.snapshot.catalogCanonicalUtf8Bytes
+        || catalog.rowCount !== fence.snapshot.catalogRowCount
+        || catalog.applicationId !== fence.snapshot.applicationId
+        || catalog.userVersion !== fence.snapshot.userVersion
+        || current.transactionEpoch !== adoption.adoptedTransactionEpoch
+        || current.totalChanges !== adoption.adoptedTotalChanges
+        || state.currentTransactionEpoch !== adoption.adoptedTransactionEpoch
+        || state.currentTotalChanges !== adoption.adoptedTotalChanges
+        || !objectIsFrozenIntrinsic(plans) || plans.probeCount !== 3
+        || plans.mainKeyCountSqlSha256
+          !== SQLITE_CURSOR_PUBLICATION_POST_REBIND_MAIN_KEY_COUNT_SQL_SHA256_INTRINSIC
+        || plans.driverSqlSha256
+          !== SQLITE_CURSOR_PUBLICATION_POST_REBIND_KEY_DRIVER_SQL_SHA256_INTRINSIC
+        || plans.pointLookupSqlSha256
+          !== SQLITE_CURSOR_PUBLICATION_POST_REBIND_POINT_LOOKUP_SQL_SHA256_INTRINSIC
+        || plans.mainKeyCountDetails.length !== 1 || plans.driverDetails.length !== 1
+        || plans.pointLookupDetails.length !== 1 || !plans.sorterFree
+        || !plans.primaryKeyPointLookup) {
+      fail("GE_CYCLE_STORE_CORRUPTION", "SQLite Rule 12 entry proof drifted");
+    }
+  } catch (error) {
+    poisonAuthorityGraph(state, context.authority, "SQLite Rule 12 entry proof failed");
+    throw error;
+  }
 }
 
 function releasedPublicationRebindSnapshotIsExact(
@@ -6868,7 +7008,9 @@ export function assertSQLiteCursorPostRebindWatermarkAdoptionIntrinsic(
       || context.tombstone !== adoption.tombstone.token
       || adoption.tombstone.lifecycle !== "adopted"
       || state.lifecycle !== "active"
-      || state.writePhase !== "cursor-rebind-adopted"
+      || (state.writePhase !== "cursor-rebind-adopted"
+        && state.writePhase !== "rule12-seal-accepted"
+        && state.writePhase !== "pre-verification-clock-read-unconsumed")
       || state.publicationRebindContext !== context.token
       || state.publicationSessionConsumedTombstone !== adoption.tombstone.token
       || state.postRebindWatermarkAdoption !== adoptionToken
@@ -6890,6 +7032,68 @@ export function assertSQLiteCursorPostRebindWatermarkAdoptionIntrinsic(
     return fail("GE_CYCLE_STORE_CORRUPTION", "SQLite post-rebind adoption is invalid");
   }
   return adoptionToken;
+}
+
+/**
+ * One-way adoption of an exact upper Rule 12 success receipt. The Rule 12
+ * module owns both opaque rule identities; this bridge owns only the retained
+ * outer lifecycle and refuses a second or substituted adoption.
+ */
+export function adoptSQLiteCursorRule12SealAcceptanceIntrinsic(
+  contextToken: SQLiteCursorPublicationRebindContext,
+  adoptionToken: SQLiteCursorPostRebindWatermarkAdoption,
+  rule11Receipt: object,
+  rule12Receipt: object,
+): void {
+  const context = publicationRebindContextState(contextToken);
+  const adoption = postRebindWatermarkAdoptionState(adoptionToken);
+  const state = authorityState(context.authority);
+  if (rule11Receipt === null || typeof rule11Receipt !== "object"
+      || rule12Receipt === null || typeof rule12Receipt !== "object"
+      || adoption.context !== context || context.adoption !== adoptionToken
+      || adoption.lifecycle !== "active" || context.lifecycle !== "write-adopted"
+      || state.lifecycle !== "active" || state.writePhase !== "cursor-rebind-adopted"
+      || state.postRebindWatermarkAdoption !== adoptionToken
+      || state.rule11Receipt !== undefined || state.rule12Receipt !== undefined
+      || state.preVerificationClockEvidence !== undefined) {
+    poisonAuthorityGraph(state, context.authority, "SQLite Rule 12 seal adoption drifted");
+    return fail("GE_CYCLE_STORE_CORRUPTION", "SQLite Rule 12 seal adoption is invalid");
+  }
+  const adoptionFault = rule12SealAdoptionFault;
+  rule12SealAdoptionFault = undefined;
+  if (adoptionFault !== undefined) throw adoptionFault.error;
+  state.rule11Receipt = rule11Receipt;
+  state.rule12Receipt = rule12Receipt;
+  state.writePhase = "rule12-seal-accepted";
+}
+
+/** Retain the fresh, still-unconsumed third evidence after exact Rule 12. */
+export function adoptSQLiteCursorPreVerificationClockEvidenceIntrinsic(
+  contextToken: SQLiteCursorPublicationRebindContext,
+  adoptionToken: SQLiteCursorPostRebindWatermarkAdoption,
+  rule11Receipt: object,
+  rule12Receipt: object,
+  evidence: object,
+): void {
+  const context = publicationRebindContextState(contextToken);
+  const adoption = postRebindWatermarkAdoptionState(adoptionToken);
+  const state = authorityState(context.authority);
+  if (evidence === null || typeof evidence !== "object"
+      || adoption.context !== context || context.adoption !== adoptionToken
+      || adoption.lifecycle !== "active" || context.lifecycle !== "write-adopted"
+      || state.lifecycle !== "active" || state.writePhase !== "rule12-seal-accepted"
+      || state.postRebindWatermarkAdoption !== adoptionToken
+      || state.rule11Receipt !== rule11Receipt || state.rule12Receipt !== rule12Receipt
+      || state.preVerificationClockEvidence !== undefined) {
+    poisonAuthorityGraph(
+      state, context.authority, "SQLite pre-verification clock adoption drifted",
+    );
+    return fail(
+      "GE_CYCLE_STORE_CORRUPTION", "SQLite pre-verification clock adoption is invalid",
+    );
+  }
+  state.preVerificationClockEvidence = evidence;
+  state.writePhase = "pre-verification-clock-read-unconsumed";
 }
 
 /**
@@ -6928,7 +7132,9 @@ export function poisonSQLiteCursorPublicationRebindAfterConsumeIntrinsic(
     && context.lifecycle === "write-adopted"
     && context.adoption === adoptionToken
     && consumed.lifecycle === "adopted"
-    && state.writePhase === "cursor-rebind-adopted"
+    && (state.writePhase === "cursor-rebind-adopted"
+      || state.writePhase === "rule12-seal-accepted"
+      || state.writePhase === "pre-verification-clock-read-unconsumed")
     && state.postRebindWatermarkAdoption === adoptionToken;
   if (consumed.context !== context
       || context.tombstone !== tombstoneToken
@@ -6990,7 +7196,9 @@ export function readSQLiteCursorInitialStageAdoptionReceiptSnapshotIntrinsic(
   }
   const state = authorityState(record.authority);
   if (state.writePhase === "publication-session-consumed"
-      || state.writePhase === "cursor-rebind-adopted") {
+      || state.writePhase === "cursor-rebind-adopted"
+      || state.writePhase === "rule12-seal-accepted"
+      || state.writePhase === "pre-verification-clock-read-unconsumed") {
     const contextToken = state.publicationRebindContext;
     const tombstone = state.publicationSessionConsumedTombstone;
     const context = contextToken === undefined
@@ -7036,7 +7244,9 @@ export function readSQLiteCursorInitialStageAdoptionReceiptSnapshotIntrinsic(
       record.bundle[3] as object,
       receipt,
     );
-    if (state.writePhase === "cursor-rebind-adopted") {
+    if (state.writePhase === "cursor-rebind-adopted"
+        || state.writePhase === "rule12-seal-accepted"
+        || state.writePhase === "pre-verification-clock-read-unconsumed") {
       assertSQLiteCursorPostRebindWatermarkAdoptionIntrinsic(
         state.postRebindWatermarkAdoption!,
       );
@@ -7081,6 +7291,9 @@ export function readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(
     publicationRebindContext: state.publicationRebindContext,
     publicationSessionConsumedTombstone: state.publicationSessionConsumedTombstone,
     postRebindWatermarkAdoption: state.postRebindWatermarkAdoption,
+    rule11Receipt: state.rule11Receipt,
+    rule12Receipt: state.rule12Receipt,
+    preVerificationClockEvidence: state.preVerificationClockEvidence,
     migration0002ConsumedTombstone: state.migration0002ConsumedTombstone,
     operationSequenceZeroAffectedRows: state.operationSequenceZeroAffectedRows,
     operationSequenceZeroExecuteCount: state.operationSequenceZeroExecuteCount,

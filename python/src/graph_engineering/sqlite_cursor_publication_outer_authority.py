@@ -138,6 +138,7 @@ from .sqlite_operation_baseline_source import (
     _read_sqlite_connection_baseline_entry_publication_execution_snapshot_intrinsic,
     _read_sqlite_connection_baseline_header_publication_execution_snapshot_intrinsic,
     _read_sqlite_connection_cursor_publication_rebind_snapshot_intrinsic,
+    _read_sqlite_connection_cursor_publication_seal_query_plans_intrinsic,
     _read_sqlite_connection_migration_0002_execution_snapshot_intrinsic,
     _read_sqlite_connection_operation_sequence_zero_execution_snapshot_intrinsic,
     _read_sqlite_connection_post_ddl_publication_reader_snapshot_intrinsic,
@@ -146,6 +147,7 @@ from .sqlite_operation_baseline_source import (
     _SQLiteConnectionBaselineHeaderPublicationExecution,
     _SQLiteConnectionCursorPublicationRebindExecution,
     _SQLiteConnectionCursorPublicationRebindSnapshot,
+    _SQLiteConnectionCursorPublicationSealQueryPlansSnapshot,
     _SQLiteConnectionMigration0002Execution,
     _SQLiteConnectionOperationSequenceZeroExecution,
 )
@@ -274,6 +276,8 @@ _WritePhase: TypeAlias = Literal[
     "publication-active",
     "publication-session-consumed",
     "cursor-rebind-adopted",
+    "rule12-seal-accepted",
+    "pre-verification-clock-read-unconsumed",
     "poisoned",
     "retired",
 ]
@@ -450,6 +454,7 @@ class _SQLiteCursorPublicationRebindContextSnapshot(NamedTuple):
     source_schema_identity: str
     target_descriptor_hash: str
     target_schema_identity: str
+    rule12_query_plans: _SQLiteConnectionCursorPublicationSealQueryPlansSnapshot
     parameter_values: tuple[str, str, str, str]
 
 
@@ -912,6 +917,9 @@ class _SQLiteCursorOuterPublicationAuthoritySnapshot(NamedTuple):
         _SQLiteCursorPublicationSessionConsumedTombstone | None
     )
     post_rebind_watermark_adoption: _SQLiteCursorPostRebindWatermarkAdoption | None
+    rule11_receipt: object | None
+    rule12_receipt: object | None
+    pre_verification_clock_evidence: object | None
     receipt_consumption_count: Literal[0, 4]
     tombstone_mint_count: Literal[0, 4]
     migration_0002_consumed_tombstone: (
@@ -1029,6 +1037,9 @@ class _AuthorityState:
         _SQLiteCursorPublicationSessionConsumedTombstone | None
     ) = None
     post_rebind_watermark_adoption: _SQLiteCursorPostRebindWatermarkAdoption | None = None
+    rule11_receipt: ReferenceType[object] | None = None
+    rule12_receipt: ReferenceType[object] | None = None
+    pre_verification_clock_evidence: ReferenceType[object] | None = None
 
 
 @dataclass(slots=True)
@@ -1091,6 +1102,7 @@ class _PublicationRebindContextState:
     source_schema_identity: str
     target_descriptor_hash: str
     target_schema_identity: str
+    rule12_query_plans: _SQLiteConnectionCursorPublicationSealQueryPlansSnapshot
     parameter_values: tuple[str, str, str, str]
     lifecycle: Literal[
         "prepared",
@@ -2404,6 +2416,8 @@ def _assert_sqlite_cursor_outer_publication_authority_intrinsic(
             "publication-active",
             "publication-session-consumed",
             "cursor-rebind-adopted",
+            "rule12-seal-accepted",
+            "pre-verification-clock-read-unconsumed",
         }:
             prepared_owner = state.publication_prepared_owner
             session = state.publication_session() if state.publication_session is not None else None
@@ -2430,7 +2444,11 @@ def _assert_sqlite_cursor_outer_publication_authority_intrinsic(
                 _assert_sqlite_cursor_publication_session_consumed_tombstone_intrinsic(
                     tombstone
                 )
-            elif state.write_phase == "cursor-rebind-adopted":
+            elif state.write_phase in {
+                "cursor-rebind-adopted",
+                "rule12-seal-accepted",
+                "pre-verification-clock-read-unconsumed",
+            }:
                 adoption = state.post_rebind_watermark_adoption
                 if adoption is None:
                     _fail("GE_CURSOR_B3_POST_REBIND_ADOPTION")
@@ -6307,7 +6325,11 @@ def _assert_historical_initial_adoption_during_cursor_rebind(
             == context.historical_transaction_epoch
             and state.current_total_changes == context.historical_total_changes
         )
-    elif state.write_phase == "cursor-rebind-adopted":
+    elif state.write_phase in {
+        "cursor-rebind-adopted",
+        "rule12-seal-accepted",
+        "pre-verification-clock-read-unconsumed",
+    }:
         adoption_token = state.post_rebind_watermark_adoption
         if adoption_token is None:
             _fail("GE_CURSOR_B3_INITIAL_ADOPTION_RECEIPT_DRIFT")
@@ -6421,6 +6443,8 @@ def _assert_sqlite_cursor_initial_stage_adoption_receipt_intrinsic(
         if state.write_phase in {
             "publication-session-consumed",
             "cursor-rebind-adopted",
+            "rule12-seal-accepted",
+            "pre-verification-clock-read-unconsumed",
         }:
             return _assert_historical_initial_adoption_during_cursor_rebind(
                 state,
@@ -7364,6 +7388,11 @@ def _prepare_sqlite_cursor_publication_rebind_context_intrinsic(
         )
         if not _prepared_publication_rebind_snapshot_is_exact(execution_snapshot, state):
             _fail("GE_CURSOR_B3_PUBLICATION_REBIND_EXECUTION")
+        rule12_query_plans = (
+            _read_sqlite_connection_cursor_publication_seal_query_plans_intrinsic(
+                state.connection
+            )
+        )
         generation, epoch, total_changes = _owner_snapshot(state.connection)
         live_lock = _LIVE_LOCK(state.connection)
         catalog = _READ_VALIDATED_TARGET_CATALOG(state.connection)
@@ -7423,6 +7452,7 @@ def _prepare_sqlite_cursor_publication_rebind_context_intrinsic(
             source_schema_identity=state.source_schema_identity_sha256,
             target_descriptor_hash=publication.target_descriptor_hash,
             target_schema_identity=publication.target_schema_identity,
+            rule12_query_plans=rule12_query_plans,
             parameter_values=(
                 publication.target_descriptor_hash,
                 publication.target_schema_identity,
@@ -7484,6 +7514,7 @@ def _snapshot_sqlite_cursor_publication_rebind_context(
         state.source_schema_identity,
         state.target_descriptor_hash,
         state.target_schema_identity,
+        state.rule12_query_plans,
         state.parameter_values,
     )
 
@@ -7672,10 +7703,14 @@ def _assert_sqlite_cursor_publication_session_consumed_tombstone_intrinsic(
     context = consumed.context
     state = _authority_state(context.authority)
     publication = _publication_session_state(context.session)
-    expected_phase = (
-        "cursor-rebind-adopted"
+    expected_phases = (
+        {
+            "cursor-rebind-adopted",
+            "rule12-seal-accepted",
+            "pre-verification-clock-read-unconsumed",
+        }
         if consumed.lifecycle == "adopted"
-        else "publication-session-consumed"
+        else {"publication-session-consumed"}
     )
     if (
         consumed.lifecycle not in {"active", "adopted"}
@@ -7684,7 +7719,7 @@ def _assert_sqlite_cursor_publication_session_consumed_tombstone_intrinsic(
         or state.publication_rebind_context is None
         or state.publication_rebind_context_state is not context
         or state.publication_session_consumed_tombstone is not tombstone_token
-        or state.write_phase != expected_phase
+        or state.write_phase not in expected_phases
         or publication.lifecycle != "consumed-for-rebind"
         or publication.rebind_consumed_tombstone is not tombstone_token
     ):
@@ -7912,7 +7947,12 @@ def _assert_sqlite_cursor_post_rebind_watermark_adoption_intrinsic(
         or context.tombstone_state is not adoption.tombstone
         or adoption.tombstone.lifecycle != "adopted"
         or state.lifecycle != "active"
-        or state.write_phase != "cursor-rebind-adopted"
+        or state.write_phase
+        not in {
+            "cursor-rebind-adopted",
+            "rule12-seal-accepted",
+            "pre-verification-clock-read-unconsumed",
+        }
         or state.publication_rebind_context_state is not context
         or state.publication_session_consumed_tombstone is not context.tombstone
         or state.post_rebind_watermark_adoption is not adoption_token
@@ -7934,6 +7974,77 @@ def _assert_sqlite_cursor_post_rebind_watermark_adoption_intrinsic(
         _poison(state, context.authority, "SQLite post-rebind adoption graph drifted")
         _fail("GE_CURSOR_B3_POST_REBIND_ADOPTION")
     return adoption_token
+
+
+def _adopt_sqlite_cursor_rule12_seal_acceptance_intrinsic(
+    context_token: _SQLiteCursorPublicationRebindContext,
+    adoption_token: _SQLiteCursorPostRebindWatermarkAdoption,
+    rule11_receipt: object,
+    rule12_receipt: object,
+) -> None:
+    """Retain exact Rule 11/12 identities and advance the outer phase once."""
+
+    context = _publication_rebind_context_state(context_token)
+    adoption = _post_rebind_watermark_adoption_state(adoption_token)
+    state = _authority_state(context.authority)
+    if (
+        rule11_receipt is None
+        or rule12_receipt is None
+        or adoption.context is not context
+        or context.adoption is not adoption_token
+        or context.adoption_state is not adoption
+        or adoption.lifecycle != "active"
+        or context.lifecycle != "write-adopted"
+        or state.lifecycle != "active"
+        or state.write_phase != "cursor-rebind-adopted"
+        or state.post_rebind_watermark_adoption is not adoption_token
+        or state.rule11_receipt is not None
+        or state.rule12_receipt is not None
+        or state.pre_verification_clock_evidence is not None
+    ):
+        _poison(state, context.authority, "SQLite Rule 12 seal adoption drifted")
+        _fail("GE_CURSOR_B3_RULE12_OUTER_ADOPTION")
+    state.rule11_receipt = _STABLE_REF(rule11_receipt)
+    state.rule12_receipt = _STABLE_REF(rule12_receipt)
+    state.write_phase = "rule12-seal-accepted"
+
+
+def _adopt_sqlite_cursor_pre_verification_clock_evidence_intrinsic(
+    context_token: _SQLiteCursorPublicationRebindContext,
+    adoption_token: _SQLiteCursorPostRebindWatermarkAdoption,
+    rule11_receipt: object,
+    rule12_receipt: object,
+    evidence: object,
+) -> None:
+    """Retain one fresh unconsumed third evidence and advance once."""
+
+    context = _publication_rebind_context_state(context_token)
+    adoption = _post_rebind_watermark_adoption_state(adoption_token)
+    state = _authority_state(context.authority)
+    if (
+        evidence is None
+        or adoption.context is not context
+        or context.adoption is not adoption_token
+        or context.adoption_state is not adoption
+        or adoption.lifecycle != "active"
+        or context.lifecycle != "write-adopted"
+        or state.lifecycle != "active"
+        or state.write_phase != "rule12-seal-accepted"
+        or state.post_rebind_watermark_adoption is not adoption_token
+        or state.rule11_receipt is None
+        or state.rule11_receipt() is not rule11_receipt
+        or state.rule12_receipt is None
+        or state.rule12_receipt() is not rule12_receipt
+        or state.pre_verification_clock_evidence is not None
+    ):
+        _poison(
+            state,
+            context.authority,
+            "SQLite pre-verification clock adoption drifted",
+        )
+        _fail("GE_CURSOR_B3_PRE_VERIFICATION_OUTER_ADOPTION")
+    state.pre_verification_clock_evidence = _STABLE_REF(evidence)
+    state.write_phase = "pre-verification-clock-read-unconsumed"
 
 
 def _read_sqlite_cursor_post_rebind_watermark_adoption_snapshot_intrinsic(
@@ -8121,7 +8232,12 @@ def _poison_sqlite_cursor_publication_rebind_downstream_intrinsic(
             or context.adoption_state is not adoption
             or consumed.lifecycle != "adopted"
             or state.post_rebind_watermark_adoption is not adoption_token
-            or state.write_phase != "cursor-rebind-adopted"
+            or state.write_phase
+            not in {
+                "cursor-rebind-adopted",
+                "rule12-seal-accepted",
+                "pre-verification-clock-read-unconsumed",
+            }
         ):
             _fail("GE_CURSOR_B3_PUBLICATION_REBIND_DOWNSTREAM_PHASE")
         _assert_sqlite_cursor_post_rebind_watermark_adoption_intrinsic(
@@ -8286,6 +8402,17 @@ def _read_sqlite_cursor_outer_publication_authority_snapshot_intrinsic(
             state.publication_session_consumed_tombstone
         ),
         post_rebind_watermark_adoption=state.post_rebind_watermark_adoption,
+        rule11_receipt=(
+            state.rule11_receipt() if state.rule11_receipt is not None else None
+        ),
+        rule12_receipt=(
+            state.rule12_receipt() if state.rule12_receipt is not None else None
+        ),
+        pre_verification_clock_evidence=(
+            state.pre_verification_clock_evidence()
+            if state.pre_verification_clock_evidence is not None
+            else None
+        ),
         receipt_consumption_count=state.receipt_consumption_count,
         tombstone_mint_count=state.tombstone_mint_count,
         migration_0002_consumed_tombstone=state.migration_0002_consumed_tombstone,

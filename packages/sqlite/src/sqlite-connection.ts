@@ -33,8 +33,11 @@ import {
   SQLITE_CURSOR_PUBLICATION_REBIND_SQL_INTRINSIC,
   SQLITE_CURSOR_PUBLICATION_REBIND_SQL_SHA256_INTRINSIC,
   SQLITE_CURSOR_PUBLICATION_POST_REBIND_KEY_DRIVER_SQL_INTRINSIC,
+  SQLITE_CURSOR_PUBLICATION_POST_REBIND_KEY_DRIVER_SQL_SHA256_INTRINSIC,
   SQLITE_CURSOR_PUBLICATION_POST_REBIND_MAIN_KEY_COUNT_SQL_INTRINSIC,
+  SQLITE_CURSOR_PUBLICATION_POST_REBIND_MAIN_KEY_COUNT_SQL_SHA256_INTRINSIC,
   SQLITE_CURSOR_PUBLICATION_POST_REBIND_POINT_LOOKUP_SQL_INTRINSIC,
+  SQLITE_CURSOR_PUBLICATION_POST_REBIND_POINT_LOOKUP_SQL_SHA256_INTRINSIC,
   type SQLiteCursorPublicationRebindParameters,
   type SQLiteCursorPublicationRebindParameterTuple,
 } from "./cursor-publication-rebind-contract.js";
@@ -65,8 +68,11 @@ const stringCharCodeAtIntrinsic = String.prototype.charCodeAt;
 const stringIndexOfIntrinsic = String.prototype.indexOf;
 const stringSliceIntrinsic = String.prototype.slice;
 const stringStartsWithIntrinsic = String.prototype.startsWith;
+const stringIncludesIntrinsic = String.prototype.includes;
 const stringToUpperCaseIntrinsic = String.prototype.toUpperCase;
 const arrayIncludesIntrinsic = Array.prototype.includes;
+const arrayJoinIntrinsic = Array.prototype.join;
+const arrayPushIntrinsic = Array.prototype.push;
 const setHasIntrinsic = Set.prototype.has;
 const regexpExecIntrinsic = RegExp.prototype.exec;
 const regexpReplaceIntrinsic = RegExp.prototype[Symbol.replace];
@@ -633,6 +639,21 @@ export interface SQLiteConnectionPostRebindSealScanEvidence
   readonly computedImmutableRootSha256: string;
   readonly observedDescriptorHash: string | null;
   readonly observedSchemaIdentitySha256: string | null;
+}
+
+export interface SQLiteConnectionPostRebindSealQueryPlanSnapshot {
+  readonly probeCount: 3;
+  readonly mainKeyCountSqlSha256:
+    typeof SQLITE_CURSOR_PUBLICATION_POST_REBIND_MAIN_KEY_COUNT_SQL_SHA256_INTRINSIC;
+  readonly driverSqlSha256:
+    typeof SQLITE_CURSOR_PUBLICATION_POST_REBIND_KEY_DRIVER_SQL_SHA256_INTRINSIC;
+  readonly pointLookupSqlSha256:
+    typeof SQLITE_CURSOR_PUBLICATION_POST_REBIND_POINT_LOOKUP_SQL_SHA256_INTRINSIC;
+  readonly mainKeyCountDetails: readonly string[];
+  readonly driverDetails: readonly string[];
+  readonly pointLookupDetails: readonly string[];
+  readonly sorterFree: true;
+  readonly primaryKeyPointLookup: true;
 }
 
 interface Migration0002ExecutionState {
@@ -1540,6 +1561,9 @@ const SQLITE_CONNECTION_TOTAL_CHANGES_SNAPSHOT = Symbol(
 const SQLITE_CONNECTION_PREPARE_NATIVE_READ = Symbol(
   "SQLiteConnection.prepareNativeRead",
 );
+const SQLITE_CONNECTION_READ_POST_REBIND_QUERY_PLANS = Symbol(
+  "SQLiteConnection.readPostRebindQueryPlans",
+);
 const SQLITE_CONNECTION_BEGIN_MIGRATION_0002 = Symbol(
   "SQLiteConnection.beginMigration0002",
 );
@@ -2156,6 +2180,89 @@ export class SQLiteConnection {
     } catch (error) {
       throw translateSQLiteError(error, operation);
     }
+  }
+
+  [SQLITE_CONNECTION_READ_POST_REBIND_QUERY_PLANS]():
+  SQLiteConnectionPostRebindSealQueryPlanSnapshot {
+    this.#assertOpen("inspect-schema");
+    const read = (
+      sql: string,
+      parameters: readonly string[],
+      label: "main" | "driver" | "point",
+    ): readonly string[] => {
+      const statement = hardenSQLiteNativeStatementIntrinsic(reflectApplyIntrinsic(
+        databasePrepareIntrinsic,
+        this.#database,
+        [`EXPLAIN QUERY PLAN ${sql}`],
+      ) as StatementSync);
+      const rows = reflectApplyIntrinsic(statementAllIntrinsic, statement, parameters) as unknown[];
+      const details: string[] = [];
+      for (let index = 0; index < rows.length; index += 1) {
+        const row = sqliteRow(rows[index], 4, "inspect-schema", `${label} EQP row`);
+        const detail = sqliteText(row[3], "inspect-schema", `${label} EQP detail`);
+        const upper = reflectApplyIntrinsic(stringToUpperCaseIntrinsic, detail, []) as string;
+        if (reflectApplyIntrinsic(stringIncludesIntrinsic, upper, ["AUTOMATIC"])
+            || reflectApplyIntrinsic(stringIncludesIntrinsic, upper, ["MATERIALIZE"])
+            || reflectApplyIntrinsic(stringIncludesIntrinsic, upper, ["USE TEMP B-TREE"])
+            || reflectApplyIntrinsic(stringIncludesIntrinsic, upper, ["CO-ROUTINE"])) {
+          throw new CycleStoreProviderError(
+            "GE_CYCLE_STORE_CORRUPTION",
+            "inspect-schema",
+            `SQLite ${label} Rule 12 query plan uses a forbidden operator`,
+          );
+        }
+        reflectApplyIntrinsic(arrayPushIntrinsic, details, [detail]);
+      }
+      if (details.length !== 1) {
+        throw new CycleStoreProviderError(
+          "GE_CYCLE_STORE_CORRUPTION",
+          "inspect-schema",
+          `SQLite ${label} Rule 12 query plan has an unexpected shape`,
+        );
+      }
+      const joined = reflectApplyIntrinsic(
+        stringToUpperCaseIntrinsic,
+        reflectApplyIntrinsic(arrayJoinIntrinsic, details, ["\n"]),
+        [],
+      ) as string;
+      const has = (needle: string): boolean => reflectApplyIntrinsic(
+        stringIncludesIntrinsic, joined, [needle],
+      ) as boolean;
+      const accepted = label === "main"
+        ? has("SCAN") && has("GE_CYCLE_CURSORS")
+        : label === "driver"
+          ? has("SCAN") && has("GE_BLR_CURSOR_SEAL")
+          : has("SEARCH") && has("GE_CYCLE_CURSORS")
+            && has("TENANT_ID=?") && has("TOKEN_HASH=?");
+      if (!accepted) {
+        throw new CycleStoreProviderError(
+          "GE_CYCLE_STORE_CORRUPTION",
+          "inspect-schema",
+          `SQLite ${label} Rule 12 query plan is invalid`,
+        );
+      }
+      return objectFreezeIntrinsic(details);
+    };
+    return objectFreezeIntrinsic({
+      probeCount: 3 as const,
+      mainKeyCountSqlSha256:
+        SQLITE_CURSOR_PUBLICATION_POST_REBIND_MAIN_KEY_COUNT_SQL_SHA256_INTRINSIC,
+      driverSqlSha256:
+        SQLITE_CURSOR_PUBLICATION_POST_REBIND_KEY_DRIVER_SQL_SHA256_INTRINSIC,
+      pointLookupSqlSha256:
+        SQLITE_CURSOR_PUBLICATION_POST_REBIND_POINT_LOOKUP_SQL_SHA256_INTRINSIC,
+      mainKeyCountDetails: read(
+        SQLITE_CURSOR_PUBLICATION_POST_REBIND_MAIN_KEY_COUNT_SQL_INTRINSIC, [], "main",
+      ),
+      driverDetails: read(
+        SQLITE_CURSOR_PUBLICATION_POST_REBIND_KEY_DRIVER_SQL_INTRINSIC, [], "driver",
+      ),
+      pointLookupDetails: read(
+        SQLITE_CURSOR_PUBLICATION_POST_REBIND_POINT_LOOKUP_SQL_INTRINSIC, ["", ""], "point",
+      ),
+      sorterFree: true as const,
+      primaryKeyPointLookup: true as const,
+    });
   }
 
   [SQLITE_CONNECTION_BEGIN_MIGRATION_0002](
@@ -3646,6 +3753,8 @@ const sqliteConnectionTotalChangesSnapshotIntrinsic =
   SQLiteConnection.prototype[SQLITE_CONNECTION_TOTAL_CHANGES_SNAPSHOT];
 const sqliteConnectionPrepareNativeReadIntrinsic =
   SQLiteConnection.prototype[SQLITE_CONNECTION_PREPARE_NATIVE_READ];
+const sqliteConnectionReadPostRebindQueryPlansIntrinsic =
+  SQLiteConnection.prototype[SQLITE_CONNECTION_READ_POST_REBIND_QUERY_PLANS];
 const sqliteConnectionBeginMigration0002Intrinsic =
   SQLiteConnection.prototype[SQLITE_CONNECTION_BEGIN_MIGRATION_0002];
 const sqliteConnectionExecuteMigration0002NextIntrinsic =
@@ -4006,6 +4115,7 @@ function consumePostRebindPointRow(
 function scanPostRebindDrivenSeal(
   state: PostRebindSealScanState,
   mainKeyCount: number,
+  cancellationRequested?: () => boolean,
 ): Readonly<{
   readonly accumulatorCount: number;
   readonly computedImmutableRootSha256: string;
@@ -4075,6 +4185,13 @@ function scanPostRebindDrivenSeal(
         accumulator.append(row);
         state.lookupCount += 1;
       });
+      if (cancellationRequested?.() === true) {
+        throw new CycleStoreProviderError(
+          "GE_CYCLE_STORE_UNAVAILABLE",
+          "inspect-schema",
+          "SQLite Rule 12 seal scan was cancelled after the current point cursor closed",
+        );
+      }
       assertPostRebindSealScanOwner(state);
     }
   } catch (error) {
@@ -4151,6 +4268,17 @@ export function readSQLiteConnectionTotalChangesSnapshot(
   connection: SQLiteConnection,
 ): SQLiteConnectionTotalChangesSnapshot {
   return reflectApplyIntrinsic(sqliteConnectionTotalChangesSnapshotIntrinsic, connection, []);
+}
+
+/** Run the three frozen sorter-free Rule 12 EQP probes before cursor UPDATE. */
+export function readSQLiteConnectionPostRebindSealQueryPlansIntrinsic(
+  connection: SQLiteConnection,
+): SQLiteConnectionPostRebindSealQueryPlanSnapshot {
+  return reflectApplyIntrinsic(
+    sqliteConnectionReadPostRebindQueryPlansIntrinsic,
+    connection,
+    [],
+  );
 }
 
 /** Install the package-private publication owner guard before native BEGIN I/O. */
@@ -4361,6 +4489,7 @@ export function beginSQLiteConnectionPostRebindSealScanIntrinsic(
 export function executeSQLiteConnectionPostRebindSealScanIntrinsic(
   connection: SQLiteConnection,
   execution: SQLiteConnectionPostRebindSealScanExecution,
+  cancellationRequested?: () => boolean,
 ): SQLiteConnectionPostRebindSealScanEvidence {
   const state = postRebindSealScanState(connection, execution);
   if (state.lifecycle !== "active") {
@@ -4382,7 +4511,7 @@ export function executeSQLiteConnectionPostRebindSealScanIntrinsic(
       );
     }
     assertPostRebindSealScanOwner(state);
-    seal = scanPostRebindDrivenSeal(state, mainKeyCount);
+    seal = scanPostRebindDrivenSeal(state, mainKeyCount, cancellationRequested);
     assertPostRebindSealScanOwner(state);
     if (state.mainKeyCountPrepareCount !== 1
         || state.mainKeyCountTerminalFetchCount !== 1

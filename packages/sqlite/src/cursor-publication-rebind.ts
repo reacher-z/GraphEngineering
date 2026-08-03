@@ -144,7 +144,7 @@ export interface SQLiteCursorRebindWriteReceiptSnapshot {
 }
 
 export interface SQLiteCursorRebindRule11OwnerSnapshot {
-  readonly lifecycle: "active";
+  readonly lifecycle: "active" | "rule12-pending" | "rule12-complete";
   readonly ruleId: typeof SQLITE_CURSOR_REBIND_RULE11_ID_INTRINSIC;
   readonly position: typeof SQLITE_CURSOR_REBIND_RULE11_POSITION_INTRINSIC;
   readonly writeReceipt: SQLiteCursorRebindWriteReceipt;
@@ -181,7 +181,8 @@ interface WriteState {
 interface Rule11State {
   readonly token: SQLiteCursorRebindRule11Owner;
   readonly write: WriteState;
-  readonly lifecycle: "active";
+  lifecycle: "active" | "rule12-pending" | "rule12-complete" | "poisoned";
+  rule12Receipt: object | undefined;
 }
 
 type ProtocolRegistrationStage = "write" | "rule11";
@@ -1323,7 +1324,12 @@ export function executeSQLiteCursorRebindRule11GateIntrinsic(
     return fail("GE_CYCLE_STORE_CORRUPTION", "SQLite Rule 11 five counts disagree");
   }
   const token = opaque<SQLiteCursorRebindRule11Owner>();
-  const owner: Rule11State = { token, write: state, lifecycle: "active" };
+  const owner: Rule11State = {
+    token,
+    write: state,
+    lifecycle: "active",
+    rule12Receipt: undefined,
+  };
   try {
     throwRegistrationFault("rule11");
     reflectApplyIntrinsic(weakMapSetIntrinsic, RULE11, [token as object, owner]);
@@ -1343,7 +1349,7 @@ export function executeSQLiteCursorRebindRule11GateIntrinsic(
 
 function snapshotRule11(state: Rule11State): SQLiteCursorRebindRule11OwnerSnapshot {
   return objectFreezeIntrinsic({
-    lifecycle: "active",
+    lifecycle: state.lifecycle as Exclude<Rule11State["lifecycle"], "poisoned">,
     ruleId: SQLITE_CURSOR_REBIND_RULE11_ID_INTRINSIC,
     position: SQLITE_CURSOR_REBIND_RULE11_POSITION_INTRINSIC,
     writeReceipt: state.write.token,
@@ -1367,11 +1373,67 @@ export function readSQLiteCursorRebindRule11OwnerSnapshotIntrinsic(
   owner: SQLiteCursorRebindRule11Owner,
 ): SQLiteCursorRebindRule11OwnerSnapshot {
   const state = rule11State(owner);
-  if (state.write.lifecycle !== "rule11-complete") {
+  if (state.write.lifecycle !== "rule11-complete" || state.lifecycle === "poisoned") {
     return fail("GE_CYCLE_STORE_CORRUPTION", "SQLite Rule 11 owner is terminal");
   }
   assertWriteRetainedGraph(state.write);
   return snapshotRule11(state);
+}
+
+/** Select exact R11 once as the sole upper Rule 12 predecessor. Zero I/O. */
+export function prepareSQLiteCursorRebindRule11ForRule12Intrinsic(
+  owner: SQLiteCursorRebindRule11Owner,
+): SQLiteCursorRebindRule11OwnerSnapshot {
+  const state = rule11State(owner);
+  if (state.lifecycle !== "active" || state.write.lifecycle !== "rule11-complete") {
+    poisonAfterConsume(
+      state.write.context,
+      state.write.tombstone,
+      state.write.adoption,
+      "SQLite Rule 11 predecessor was replayed for Rule 12",
+    );
+    state.lifecycle = "poisoned";
+    return fail("GE_CYCLE_STORE_CORRUPTION", "SQLite Rule 11 predecessor is terminal");
+  }
+  assertWriteRetainedGraph(state.write);
+  state.lifecycle = "rule12-pending";
+  return snapshotRule11(state);
+}
+
+/** Bind the exact successful Rule 12 receipt to its consumed R11 predecessor. */
+export function completeSQLiteCursorRebindRule11ForRule12Intrinsic(
+  owner: SQLiteCursorRebindRule11Owner,
+  rule12Receipt: object,
+): void {
+  const state = rule11State(owner);
+  if (rule12Receipt === null || typeof rule12Receipt !== "object"
+      || state.lifecycle !== "rule12-pending" || state.rule12Receipt !== undefined
+      || state.write.lifecycle !== "rule11-complete") {
+    state.lifecycle = "poisoned";
+    poisonAfterConsume(
+      state.write.context,
+      state.write.tombstone,
+      state.write.adoption,
+      "SQLite Rule 12 predecessor completion drifted",
+    );
+    return fail("GE_CYCLE_STORE_CORRUPTION", "SQLite Rule 12 predecessor is invalid");
+  }
+  state.rule12Receipt = rule12Receipt;
+  state.lifecycle = "rule12-complete";
+}
+
+/** Terminally poison the exact selected R11 graph while preserving its primary. */
+export function poisonSQLiteCursorRebindRule11ForRule12Intrinsic(
+  owner: SQLiteCursorRebindRule11Owner,
+  message: string,
+): void {
+  const state = rule11State(owner);
+  if ((state.lifecycle !== "rule12-pending" && state.lifecycle !== "rule12-complete")
+      || typeof message !== "string" || message.length === 0) {
+    return fail("GE_CYCLE_STORE_INVALID_ARGUMENT", "SQLite Rule 12 poison graph is invalid");
+  }
+  state.lifecycle = "poisoned";
+  poisonAfterConsume(state.write.context, state.write.tombstone, state.write.adoption, message);
 }
 
 function cleanupUnboundExecution(

@@ -41,6 +41,11 @@ export interface SQLiteConnectionPostRebindSealReadExecution {
   readonly __sqliteConnectionPostRebindSealReadExecution: never;
 }
 
+/** Opaque bridge from the authentic outer cancellation registry. */
+export interface SQLiteConnectionPostRebindSealReadCancellationAuthority {
+  readonly __sqliteConnectionPostRebindSealReadCancellationAuthority: never;
+}
+
 export interface SQLiteConnectionPostRebindSealReadEvidence {
   readonly lifecycle: "completed";
   readonly mainKeyCount: number;
@@ -129,6 +134,34 @@ interface ReadState {
 
 const READS = new WeakMap<object, ReadState>();
 const USED_REBINDS = new WeakMap<object, true>();
+const CANCELLATION_AUTHORITIES = new WeakMap<object, Readonly<{
+  readonly signal: object;
+  readonly observe: (signal: object) => boolean;
+}>>();
+
+/** Bind an already-authenticated package-private signal to a captured observer. */
+export function createSQLiteConnectionPostRebindSealReadCancellationAuthorityIntrinsic(
+  signal: object,
+  observe: (signal: object) => boolean,
+): SQLiteConnectionPostRebindSealReadCancellationAuthority {
+  if (signal === null || typeof signal !== "object" || isProxy(signal)
+      || typeof observe !== "function") {
+    throw providerError(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "SQLite post-rebind seal cancellation authority is invalid",
+    );
+  }
+  // Authenticate before minting so a cancelled request cannot mask a forged signal.
+  observe(signal);
+  const token = objectFreezeIntrinsic(
+    reflectApplyIntrinsic(objectCreateIntrinsic, Object, [null]),
+  ) as SQLiteConnectionPostRebindSealReadCancellationAuthority;
+  reflectApplyIntrinsic(weakMapSetIntrinsic, CANCELLATION_AUTHORITIES, [
+    token as object,
+    objectFreezeIntrinsic({ signal, observe }),
+  ]);
+  return token;
+}
 
 function providerError(
   code: "GE_CYCLE_STORE_INVALID_ARGUMENT" | "GE_CYCLE_STORE_CORRUPTION",
@@ -227,6 +260,7 @@ export function beginSQLiteConnectionPostRebindSealReadIntrinsic(
 export function executeSQLiteConnectionPostRebindSealReadIntrinsic(
   connection: SQLiteConnection,
   execution: SQLiteConnectionPostRebindSealReadExecution,
+  cancellationAuthority?: SQLiteConnectionPostRebindSealReadCancellationAuthority,
 ): SQLiteConnectionPostRebindSealReadEvidence {
   const state = readState(connection, execution);
   if (state.lifecycle !== "active") {
@@ -237,9 +271,29 @@ export function executeSQLiteConnectionPostRebindSealReadIntrinsic(
   }
   let scan: ReturnType<typeof executeSQLiteConnectionPostRebindSealScanIntrinsic>;
   try {
+    const cancellation = cancellationAuthority === undefined
+      ? undefined
+      : reflectApplyIntrinsic(
+        weakMapGetIntrinsic,
+        CANCELLATION_AUTHORITIES,
+        [cancellationAuthority as object],
+      ) as Readonly<{
+        readonly signal: object;
+        readonly observe: (signal: object) => boolean;
+      }> | undefined;
+    if (cancellationAuthority !== undefined && cancellation === undefined) {
+      throw providerError(
+        "GE_CYCLE_STORE_INVALID_ARGUMENT",
+        "SQLite post-rebind seal cancellation authority is invalid",
+      );
+    }
     assertOwnerUnchanged(state);
     scan = executeSQLiteConnectionPostRebindSealScanIntrinsic(
-      connection, state.scanExecution,
+      connection,
+      state.scanExecution,
+      cancellation === undefined
+        ? undefined
+        : (): boolean => cancellation.observe(cancellation.signal),
     );
     assertOwnerUnchanged(state);
     if (scan.transactionLineage !== state.transactionLineage

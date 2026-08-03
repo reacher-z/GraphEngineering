@@ -180,6 +180,9 @@ jobs:
       - run: pnpm test:sqlite-python-benchmark
       - run: pnpm test:conformance
       - run: pnpm test:sqlite-transaction-owner-runtime
+      - name: Enforce SQLite Rule 12 cross-runtime parity
+        timeout-minutes: 10
+        run: pnpm test:sqlite-cursor-publication-rule12-parity
 
   sqlite-cursor-pre-rebind-parity:
     name: SQLite cursor pre-rebind parity

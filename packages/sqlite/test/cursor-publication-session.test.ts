@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  assertSQLiteCursorPublicationSessionClockActiveGraphIntrinsic,
   assertSQLiteCursorPublicationSessionClockPreparedGraphIntrinsic,
   consumeSQLiteCursorProviderClockEvidenceIntrinsic,
   observeSQLiteCursorProviderClockIntrinsic,
@@ -285,23 +286,46 @@ describe("SQLite cursor publication session", () => {
       .toMatchObject({ lifecycle: "active", writePhase: "initial-stage-adoption-complete" });
   });
 
-  it("rejects publication when a third clock boundary advances ahead of the second", () => {
+  it("rejects an unauthenticated third clock boundary without advancing the session clock", () => {
     const graph = adoptedGraph();
     const preparedOwner = prepareSQLiteCursorPublicationSessionIntrinsic(
       graph.authority, graph.adoptionReceipt,
     );
     const evidence = observeSQLiteCursorPublicationSessionClockIntrinsic(preparedOwner);
-    observeSQLiteCursorProviderClockIntrinsic(
-      graph.providerClockCapability, "before-verification",
+    const authority = readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(
+      graph.authority,
     );
 
     expectProviderError(
-      () => publishSQLiteCursorPublicationSessionIntrinsic(preparedOwner, evidence),
+      () => observeSQLiteCursorProviderClockIntrinsic(
+        graph.providerClockCapability, "before-verification",
+      ),
       "GE_CYCLE_STORE_INVALID_ARGUMENT",
-      /prepared cursor publication session clock graph is invalid/u,
+      /^SQLite before-verification clock requires exact Rule 12 authority$/u,
     );
+    expect(assertSQLiteCursorPublicationSessionClockPreparedGraphIntrinsic(
+      graph.connection,
+      graph.migrationLockCapability,
+      graph.providerClockCapability,
+      graph.outerClockEvidence,
+      authority.outerClockConsumedTombstone!,
+      evidence,
+    ).boundary).toBe("before-cursor-rebind");
+
+    const session = publishSQLiteCursorPublicationSessionIntrinsic(preparedOwner, evidence);
+    const snapshot = readSQLiteCursorPublicationSessionSnapshotIntrinsic(session);
+    expect(assertSQLiteCursorPublicationSessionIntrinsic(session)).toBe(session);
+    expect(assertSQLiteCursorPublicationSessionClockActiveGraphIntrinsic(
+      graph.connection,
+      graph.migrationLockCapability,
+      graph.providerClockCapability,
+      graph.outerClockEvidence,
+      authority.outerClockConsumedTombstone!,
+      evidence,
+      snapshot.preRebindClockConsumedTombstone,
+    ).boundary).toBe("before-cursor-rebind");
     expect(readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(graph.authority))
-      .toMatchObject({ lifecycle: "poisoned", writePhase: "poisoned" });
+      .toMatchObject({ lifecycle: "active", writePhase: "publication-active" });
   });
 
   it("poisons the selected graph for cross-run evidence and leaves the source graph live", () => {

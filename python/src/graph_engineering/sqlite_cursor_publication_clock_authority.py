@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextlib import suppress
 from dataclasses import dataclass
-from typing import Final, Literal, NamedTuple, NoReturn, TypeVar, cast
+from typing import Any, Final, Literal, NamedTuple, NoReturn, TypeVar, cast
 from weakref import ReferenceType, WeakKeyDictionary, ref
 
 from .sqlite_operation_baseline_source import (
@@ -72,6 +73,14 @@ class _SecondBoundaryGraphSnapshot(NamedTuple):
     predecessor_evidence: _ClockEvidence
 
 
+class _ThirdBoundaryGraphSnapshot(NamedTuple):
+    evidence: _ClockEvidenceSnapshot
+    migration_lock: _MigrationLockIdentity
+    predecessor_evidence: _ClockEvidence
+    head_index: Literal[3]
+    consumed: Literal[False]
+
+
 class _ProviderClockSource:
     __slots__ = ("__weakref__",)
 
@@ -131,6 +140,9 @@ class _ClockCapabilityState:
     poisoned: bool = False
     previous_evidence: _ClockEvidence | None = None
     previous_provider_now_ms: int | None = None
+    before_verification_authorized: bool = False
+    selected_rule12_receipt: ReferenceType[object] | None = None
+    selected_third_evidence: ReferenceType[_ClockEvidence] | None = None
 
 
 @dataclass(slots=True)
@@ -321,6 +333,26 @@ def _observe_provider_clock_intrinsic(
     )
     if boundary != expected_boundary:
         _fail("GE_CURSOR_B3_CLOCK_ORDER")
+    if boundary == "before-verification" and not state.before_verification_authorized:
+        _fail("GE_CURSOR_B3_CLOCK_ORDER")
+    if boundary == "before-commit":
+        state.poisoned = True
+        receipt = (
+            state.selected_rule12_receipt()
+            if state.selected_rule12_receipt is not None
+            else None
+        )
+        if receipt is not None:
+            from .sqlite_cursor_publication_rule12 import (
+                _poison_sqlite_cursor_publication_rule12_after_success_intrinsic,
+            )
+
+            with suppress(BaseException):
+                _poison_sqlite_cursor_publication_rule12_after_success_intrinsic(
+                    cast(Any, receipt),
+                    "SQLite before-commit bypass attempted before cursor-clock",
+                )
+        _fail("GE_CURSOR_B3_CLOCK_ORDER")
     _require_lineage(state.connection, state.transaction_generation)
     epoch_before = state.connection.transaction_epoch
     changes_before = state.connection.total_changes
@@ -333,7 +365,7 @@ def _observe_provider_clock_intrinsic(
     state.observing = True
     try:
         provider_now_value: object = provider_now()
-    except Exception as error:
+    except BaseException as error:
         state.observing = False
         if state.poisoned:
             raise ValueError("GE_CURSOR_B3_CLOCK_REENTRANT") from error
@@ -380,9 +412,45 @@ def _observe_provider_clock_intrinsic(
         state.previous_provider_now_ms = provider_now_ms
         state.next_boundary_index += 1
         return evidence
-    except Exception:
+    except BaseException:
         state.poisoned = True
         raise
+
+
+def _observe_authorized_before_verification_clock_intrinsic(
+    capability: _ProviderClockCapability,
+    predecessor: _ClockEvidence,
+    receipt: object,
+    authorization: object,
+) -> _ClockEvidence:
+    """Open the package-private authorization window for boundary three only."""
+
+    from .sqlite_cursor_publication_rule12 import (
+        _verify_sqlite_cursor_rule12_third_observation_authorization_intrinsic,
+    )
+
+    state = _weak_get(_CLOCK_CAPABILITIES, capability)
+    if (
+        state is None
+        or type(predecessor) is not _ClockEvidence
+        or state.before_verification_authorized
+        or state.observing
+        or state.poisoned
+        or state.next_boundary_index != 2
+        or state.previous_evidence is not predecessor
+        or not _verify_sqlite_cursor_rule12_third_observation_authorization_intrinsic(
+            receipt,
+            authorization,
+            capability,
+            predecessor,
+        )
+    ):
+        _fail("GE_CURSOR_B3_CLOCK_THIRD_AUTHORITY")
+    state.before_verification_authorized = True
+    try:
+        return _observe_provider_clock_intrinsic(capability, "before-verification")
+    finally:
+        state.before_verification_authorized = False
 
 
 def _consume_provider_clock_evidence_intrinsic(
@@ -397,6 +465,8 @@ def _consume_provider_clock_evidence_intrinsic(
         _fail("GE_CURSOR_B3_CLOCK_EVIDENCE")
     if state.consumed:
         _fail("GE_CURSOR_B3_CLOCK_REPLAY")
+    if consumer == "cursor-clock-capability":
+        _fail("GE_CURSOR_B3_CLOCK_THIRD_CONSUME_UNAVAILABLE")
     tombstone = _ConsumedClockTombstone(_CONSTRUCTION_TOKEN)
     tombstone_state = _TombstoneState(capability, evidence, consumer)
     _TOMBSTONES[tombstone] = tombstone_state
@@ -606,6 +676,37 @@ def _assert_active_second_boundary_graph_intrinsic(
     )
 
 
+def _assert_consumed_second_boundary_graph_after_rebind_intrinsic(
+    connection: SQLiteV1BaselineConnectionOwner,
+    lock_capability: _MigrationLockCapability,
+    capability: _ProviderClockCapability,
+    outer_evidence: _ClockEvidence,
+    outer_tombstone: _ConsumedClockTombstone,
+    pre_rebind_evidence: _ClockEvidence,
+    pre_rebind_tombstone: _ConsumedClockTombstone,
+    historical_transaction_epoch: int,
+    historical_total_changes: int,
+) -> _SecondBoundaryGraphSnapshot:
+    """Authenticate the consumed second edge after the rebind advanced counters."""
+
+    lock_state = _weak_get(_LOCK_CAPABILITIES, lock_capability)
+    if lock_state is None:
+        _fail("GE_CURSOR_B3_CLOCK_SECOND_GRAPH")
+    return _assert_second_boundary_graph(
+        connection,
+        lock_capability,
+        capability,
+        outer_evidence,
+        outer_tombstone,
+        pre_rebind_evidence,
+        pre_rebind_tombstone,
+        active=True,
+        observed_live_lock=lock_state.expected_lock,
+        observed_transaction_epoch=historical_transaction_epoch,
+        observed_total_changes=historical_total_changes,
+    )
+
+
 def _assert_consumed_clock_tombstone_intrinsic(
     capability: _ProviderClockCapability,
     evidence: _ClockEvidence,
@@ -621,3 +722,188 @@ def _assert_consumed_clock_tombstone_intrinsic(
     ):
         _fail("GE_CURSOR_B3_CLOCK_TOMBSTONE")
     return tombstone
+
+
+def _assert_unconsumed_third_boundary_graph_intrinsic(
+    connection: SQLiteV1BaselineConnectionOwner,
+    lock_capability: _MigrationLockCapability,
+    capability: _ProviderClockCapability,
+    pre_rebind_evidence: _ClockEvidence,
+    evidence: _ClockEvidence,
+    transaction_generation: object,
+    transaction_epoch: int,
+    total_changes: int,
+) -> _ThirdBoundaryGraphSnapshot:
+    """Prove the retained 3/2 clock head without SQL or provider callbacks."""
+
+    lock_state = _weak_get(_LOCK_CAPABILITIES, lock_capability)
+    clock_state = _weak_get(_CLOCK_CAPABILITIES, capability)
+    second_state = _weak_get(_EVIDENCE, pre_rebind_evidence)
+    third_state = _weak_get(_EVIDENCE, evidence)
+    if (
+        type(connection) is not SQLiteV1BaselineConnectionOwner
+        or type(lock_capability) is not _MigrationLockCapability
+        or type(capability) is not _ProviderClockCapability
+        or type(pre_rebind_evidence) is not _ClockEvidence
+        or type(evidence) is not _ClockEvidence
+        or evidence is pre_rebind_evidence
+        or lock_state is None
+        or clock_state is None
+        or second_state is None
+        or third_state is None
+        or lock_state.connection is not connection
+        or clock_state.connection is not connection
+        or clock_state.lock_capability is not lock_capability
+        or clock_state.transaction_generation is not transaction_generation
+        or clock_state.poisoned
+        or clock_state.observing
+        or clock_state.next_boundary_index != 3
+        or clock_state.previous_evidence is not evidence
+        or second_state.capability() is not capability
+        or not second_state.consumed
+        or third_state.capability() is not capability
+        or third_state.previous_evidence is not pre_rebind_evidence
+        or third_state.snapshot.boundary != "before-verification"
+        or third_state.snapshot.consumer != "cursor-clock-capability"
+        or third_state.snapshot.transaction_generation is not transaction_generation
+        or third_state.snapshot.transaction_epoch != transaction_epoch
+        or third_state.total_changes != total_changes
+        or third_state.consumed
+        or connection._transaction_generation is not transaction_generation
+        or connection.transaction_epoch != transaction_epoch
+        or connection.total_changes != total_changes
+    ):
+        _fail("GE_CURSOR_B3_CLOCK_THIRD_GRAPH")
+    expected = lock_state.expected_lock
+    return _ThirdBoundaryGraphSnapshot(
+        third_state.snapshot,
+        _MigrationLockIdentity(
+            expected.lock_id,
+            expected.owner_id,
+            expected.source_schema_version,
+            expected.target_schema_version,
+            expected.lock_epoch,
+            expected.fencing_token,
+            expected.active_expires_at_ms,
+        ),
+        pre_rebind_evidence,
+        3,
+        False,
+    )
+
+
+def _assert_current_third_observation_lineage_intrinsic(
+    connection: SQLiteV1BaselineConnectionOwner,
+    lock_capability: _MigrationLockCapability,
+    capability: _ProviderClockCapability,
+    transaction_generation: object,
+    transaction_epoch: int,
+    total_changes: int,
+) -> _MigrationLockIdentity:
+    """Read and authenticate current post-rebind lineage before cancellation."""
+
+    lock_state = _weak_get(_LOCK_CAPABILITIES, lock_capability)
+    clock_state = _weak_get(_CLOCK_CAPABILITIES, capability)
+    if (
+        lock_state is None
+        or clock_state is None
+        or lock_state.connection is not connection
+        or clock_state.connection is not connection
+        or clock_state.lock_capability is not lock_capability
+        or clock_state.transaction_generation is not transaction_generation
+        or clock_state.poisoned
+        or clock_state.observing
+        or clock_state.next_boundary_index != 2
+    ):
+        _fail("GE_CURSOR_B3_CLOCK_THIRD_LINEAGE")
+    _require_lineage(connection, transaction_generation)
+    epoch_before = connection.transaction_epoch
+    changes_before = connection.total_changes
+    current_lock = _live_lock(connection)
+    _require_lineage(connection, transaction_generation)
+    if (
+        epoch_before != transaction_epoch
+        or changes_before != total_changes
+        or connection.transaction_epoch != transaction_epoch
+        or connection.total_changes != total_changes
+        or current_lock != lock_state.expected_lock
+    ):
+        _fail("GE_CURSOR_B3_CLOCK_THIRD_LINEAGE")
+    return current_lock
+
+
+def _bind_selected_rule12_third_evidence_intrinsic(
+    capability: _ProviderClockCapability,
+    receipt: object,
+    evidence: _ClockEvidence,
+) -> None:
+    """Bind the selected P10 graph so a premature fourth attempt poisons it."""
+
+    state = _weak_get(_CLOCK_CAPABILITIES, capability)
+    evidence_state = _weak_get(_EVIDENCE, evidence)
+    if (
+        state is None
+        or receipt is None
+        or evidence_state is None
+        or evidence_state.capability() is not capability
+        or evidence_state.snapshot.boundary != "before-verification"
+        or evidence_state.consumed
+        or state.next_boundary_index != 3
+        or state.previous_evidence is not evidence
+        or state.selected_rule12_receipt is not None
+        or state.selected_third_evidence is not None
+    ):
+        _fail("GE_CURSOR_B3_CLOCK_THIRD_GRAPH")
+    try:
+        state.selected_rule12_receipt = ref(receipt)
+        state.selected_third_evidence = ref(evidence)
+    except TypeError as error:
+        state.selected_rule12_receipt = None
+        state.selected_third_evidence = None
+        raise ValueError("GE_CURSOR_B3_CLOCK_THIRD_GRAPH") from error
+
+
+def _discard_failed_rule12_third_evidence_intrinsic(
+    capability: _ProviderClockCapability,
+    predecessor: _ClockEvidence,
+    evidence: _ClockEvidence,
+) -> None:
+    """Poison and erase an observed third edge that failed downstream adoption.
+
+    Observation and graph adoption are one logical operation.  Once the
+    provider call minted boundary three, any later registration/adoption fault
+    must make the partially returned evidence unreadable and leave the clock
+    incapable of issuing another edge.  The caller retains and re-raises the
+    original failure.
+    """
+
+    state = _weak_get(_CLOCK_CAPABILITIES, capability)
+    evidence_state = _weak_get(_EVIDENCE, evidence)
+    if (
+        state is None
+        or type(predecessor) is not _ClockEvidence
+        or type(evidence) is not _ClockEvidence
+        or evidence is predecessor
+        or evidence_state is None
+        or evidence_state.capability() is not capability
+        or evidence_state.previous_evidence is not predecessor
+        or evidence_state.snapshot.boundary != "before-verification"
+        or evidence_state.snapshot.consumer != "cursor-clock-capability"
+        or evidence_state.consumed
+        or state.next_boundary_index != 3
+        or state.previous_evidence is not evidence
+    ):
+        # An unexpected cleanup presentation is itself unsafe.  Poison any
+        # authentic capability we can still identify, but do not guess at an
+        # evidence entry belonging to a different graph.
+        if state is not None:
+            state.poisoned = True
+            state.before_verification_authorized = False
+            state.selected_rule12_receipt = None
+            state.selected_third_evidence = None
+        _fail("GE_CURSOR_B3_CLOCK_THIRD_GRAPH")
+    state.poisoned = True
+    state.before_verification_authorized = False
+    state.selected_rule12_receipt = None
+    state.selected_third_evidence = None
+    del _EVIDENCE[evidence]

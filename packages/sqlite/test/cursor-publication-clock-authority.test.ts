@@ -289,21 +289,21 @@ describe("SQLite B3 provider-clock authority", () => {
     }
   });
 
-  it("rejects a second-boundary graph overtaken by an early third observation", () => {
+  it("keeps third-boundary minting behind exact Rule 12 authority", () => {
     const connection = openRun();
     const run = preparedSessionClockGraph(connection);
-    observeSQLiteCursorProviderClockIntrinsic(run.clock, "before-verification");
     expectCode(
-      () => assertSQLiteCursorPublicationSessionClockPreparedGraphIntrinsic(
-        connection,
-        run.lock,
-        run.clock,
-        run.outerEvidence,
-        run.outerTombstone,
-        run.preRebindEvidence,
-      ),
+      () => observeSQLiteCursorProviderClockIntrinsic(run.clock, "before-verification"),
       "GE_CYCLE_STORE_INVALID_ARGUMENT",
     );
+    expect(() => assertSQLiteCursorPublicationSessionClockPreparedGraphIntrinsic(
+      connection,
+      run.lock,
+      run.clock,
+      run.outerEvidence,
+      run.outerTombstone,
+      run.preRebindEvidence,
+    )).not.toThrow();
 
     const activeConnection = openRun();
     const active = preparedSessionClockGraph(activeConnection);
@@ -312,19 +312,19 @@ describe("SQLite B3 provider-clock authority", () => {
       active.preRebindEvidence,
       "cursor-publication-session",
     );
-    observeSQLiteCursorProviderClockIntrinsic(active.clock, "before-verification");
     expectCode(
-      () => assertSQLiteCursorPublicationSessionClockActiveGraphIntrinsic(
-        activeConnection,
-        active.lock,
-        active.clock,
-        active.outerEvidence,
-        active.outerTombstone,
-        active.preRebindEvidence,
-        tombstone,
-      ),
+      () => observeSQLiteCursorProviderClockIntrinsic(active.clock, "before-verification"),
       "GE_CYCLE_STORE_INVALID_ARGUMENT",
     );
+    expect(() => assertSQLiteCursorPublicationSessionClockActiveGraphIntrinsic(
+      activeConnection,
+      active.lock,
+      active.clock,
+      active.outerEvidence,
+      active.outerTombstone,
+      active.preRebindEvidence,
+      tombstone,
+    )).not.toThrow();
   });
 
   it("rejects post-observation total-change and live-lock drift", () => {
@@ -365,11 +365,11 @@ describe("SQLite B3 provider-clock authority", () => {
     );
   });
 
-  it("mints four distinct chained receipts and consumes each through its exact owner", () => {
-    const run = authority(openRun(), [100, 200, 300, 400]);
+  it("mints and consumes the first two receipts but blocks raw third and fourth minting", () => {
+    const run = authority(openRun(), [100, 200]);
     const evidence: SQLiteCursorProviderClockEvidence[] = [];
     let previous: SQLiteCursorProviderClockEvidence | undefined;
-    for (const boundary of SQLITE_CURSOR_CLOCK_BOUNDARIES) {
+    for (const boundary of SQLITE_CURSOR_CLOCK_BOUNDARIES.slice(0, 2)) {
       const current = observeSQLiteCursorProviderClockIntrinsic(run.clock, boundary);
       expect(current).not.toBe(previous);
       expect(assertSQLiteCursorProviderClockEvidencePredecessorIntrinsic(
@@ -388,9 +388,9 @@ describe("SQLite B3 provider-clock authority", () => {
     }
     expect(evidence.map((item) =>
       readSQLiteCursorProviderClockEvidenceSnapshotIntrinsic(run.clock, item).providerNowMs,
-    )).toEqual([100, 200, 300, 400]);
+    )).toEqual([100, 200]);
 
-    for (const [index, boundary] of SQLITE_CURSOR_CLOCK_BOUNDARIES.entries()) {
+    for (const [index, boundary] of SQLITE_CURSOR_CLOCK_BOUNDARIES.slice(0, 2).entries()) {
       const current = evidence[index]!;
       const consumer = SQLITE_CURSOR_CLOCK_CONSUMERS[boundary];
       const tombstone = consumeSQLiteCursorProviderClockEvidenceIntrinsic(
@@ -405,9 +405,11 @@ describe("SQLite B3 provider-clock authority", () => {
       );
     }
     expectCode(
-      () => observeSQLiteCursorProviderClockIntrinsic(
-        run.clock, "before-commit",
-      ),
+      () => observeSQLiteCursorProviderClockIntrinsic(run.clock, "before-verification"),
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+    );
+    expectCode(
+      () => observeSQLiteCursorProviderClockIntrinsic(run.clock, "before-commit"),
       "GE_CYCLE_STORE_INVALID_ARGUMENT",
     );
   });
@@ -444,7 +446,7 @@ describe("SQLite B3 provider-clock authority", () => {
       .not.toBe(before.transactionLineage);
     expectCode(
       () => observeSQLiteCursorProviderClockIntrinsic(run.clock, "before-verification"),
-      "GE_CYCLE_STORE_STALE_FENCE",
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
     );
   });
 

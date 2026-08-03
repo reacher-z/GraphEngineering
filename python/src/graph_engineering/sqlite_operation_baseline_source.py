@@ -535,6 +535,21 @@ SQLITE_CURSOR_PUBLICATION_SEAL_POINT_LOOKUP_SQL_INTRINSIC = (
 SQLITE_CURSOR_PUBLICATION_SEAL_POINT_LOOKUP_SQL_SHA256_INTRINSIC = (
     "bd056ee55f2bd27eee3277ed7bfee8ae7b7db935edc3cf0937fc8167e2eac342"
 )
+
+
+class _SQLiteConnectionCursorPublicationSealQueryPlansSnapshot(NamedTuple):
+    probe_count: Literal[3]
+    identities: tuple[str, str, str]
+    sql_sha256: tuple[str, str, str]
+    normalized_details: tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]
+    normalized_plan_sha256: tuple[str, str, str]
+    sorter_free: Literal[True]
+    primary_key_point_lookup: Literal[True]
+    transaction_generation: object
+    transaction_epoch: int
+    total_changes: int
+
+
 _CURSOR_PUBLICATION_SEAL_READ_CONSTRUCTION_TOKEN = object()
 
 
@@ -2689,6 +2704,8 @@ class SQLiteV1BaselineConnectionOwner:
     def _execute_cursor_publication_seal_read(
         self,
         execution: _SQLiteConnectionCursorPublicationSealReadExecution,
+        expected_cursor_count: int | None = None,
+        after_point_close: Callable[[], None] | None = None,
         _state_for: Callable[..., _CursorPublicationSealReadExecutionState] = (
             _cursor_publication_seal_read_state
         ),
@@ -2734,6 +2751,20 @@ class SQLiteV1BaselineConnectionOwner:
         """Compute raw bounded seal evidence without accepting Rule 12."""
 
         state = _state_for(self, execution)
+        if (
+            expected_cursor_count is not None
+            and (
+                type(expected_cursor_count) is not int
+                or not 0 <= expected_cursor_count <= MAX_SAFE_INTEGER
+            )
+        ):
+            _cursor_publication_seal_read_fail(
+                "GE_CURSOR_B3_CURSOR_SEAL_READ_EXPECTED_COUNT"
+            )
+        if after_point_close is not None and not callable(after_point_close):
+            _cursor_publication_seal_read_fail(
+                "GE_CURSOR_B3_CURSOR_SEAL_READ_CANCELLATION"
+            )
 
         def prove_lineage() -> None:
             current_total = _native_total_changes(self.__connection)
@@ -2914,6 +2945,13 @@ class SQLiteV1BaselineConnectionOwner:
                 "GE_CURSOR_B3_CURSOR_SEAL_READ_MAIN_CLOSE",
             )
             prove_lineage()
+            if (
+                expected_cursor_count is not None
+                and state.main_key_row_count != expected_cursor_count
+            ):
+                _cursor_publication_seal_read_fail(
+                    "GE_CURSOR_B3_CURSOR_SEAL_READ_MAIN_COUNT"
+                )
 
             driver_cursor = prepare_cursor(
                 "driver_cursor", "GE_CURSOR_B3_CURSOR_SEAL_READ_DRIVER_PREPARE"
@@ -3024,6 +3062,8 @@ class SQLiteV1BaselineConnectionOwner:
                     del decoded, physical_row
                 close_point("GE_CURSOR_B3_CURSOR_SEAL_READ_POINT_CLOSE")
                 prove_lineage()
+                if after_point_close is not None:
+                    after_point_close()
 
             point_statement_owner.release()
             close_cursor(
@@ -3033,6 +3073,8 @@ class SQLiteV1BaselineConnectionOwner:
                 "GE_CURSOR_B3_CURSOR_SEAL_READ_DRIVER_CLOSE",
             )
             prove_lineage()
+            if after_point_close is not None:
+                after_point_close()
             if accumulator is None:
                 try:
                     accumulator = cast(Any, _accumulator_type)(0, "0" * 64, "0" * 64)
@@ -4552,6 +4594,132 @@ _OWNER_RELEASE_CURSOR_PUBLICATION_SEAL_READ = (
 _OWNER_READ_CURSOR_PUBLICATION_SEAL_READ = (
     SQLiteV1BaselineConnectionOwner._read_cursor_publication_seal_read_snapshot
 )
+_OWNER_EXECUTE_QUERY_PLAN = SQLiteV1BaselineConnectionOwner.execute
+_QUERY_PLAN_FETCHONE = _SQLiteCursorCapability.fetchone
+_QUERY_PLAN_CLOSE = _SQLiteCursorCapability.close
+_QUERY_PLAN_STR_SPLIT = str.split
+_QUERY_PLAN_STR_JOIN = str.join
+
+
+def _read_sqlite_connection_cursor_publication_seal_query_plans_intrinsic(
+    connection: SQLiteV1BaselineConnectionOwner,
+    _execute: Callable[..., _SQLiteCursorCapability] = _OWNER_EXECUTE_QUERY_PLAN,
+    _fetchone: Callable[[_SQLiteCursorCapability], tuple[object, ...] | None] = (
+        _QUERY_PLAN_FETCHONE
+    ),
+    _close: Callable[[_SQLiteCursorCapability], None] = _QUERY_PLAN_CLOSE,
+    _split: Callable[..., list[str]] = _QUERY_PLAN_STR_SPLIT,
+    _join: Callable[..., str] = _QUERY_PLAN_STR_JOIN,
+) -> _SQLiteConnectionCursorPublicationSealQueryPlansSnapshot:
+    """Run the three fixed EQP probes before the cursor rebind can execute."""
+
+    if type(connection) is not SQLiteV1BaselineConnectionOwner:
+        _cursor_publication_seal_read_fail(
+            "GE_CURSOR_B3_CURSOR_SEAL_QUERY_PLAN_CONNECTION"
+        )
+    generation = connection._transaction_generation
+    epoch = connection.transaction_epoch
+    changes = connection.total_changes
+    probes = (
+        (
+            "main-cursor-primary-key-count-order-without-sort",
+            SQLITE_CURSOR_PUBLICATION_SEAL_MAIN_KEY_SCAN_SQL_INTRINSIC,
+            SQLITE_CURSOR_PUBLICATION_SEAL_MAIN_KEY_SCAN_SQL_SHA256_INTRINSIC,
+            (),
+        ),
+        (
+            "temp-driver-primary-key-order-without-sort",
+            SQLITE_CURSOR_PUBLICATION_SEAL_KEY_DRIVER_SQL_INTRINSIC,
+            SQLITE_CURSOR_PUBLICATION_SEAL_KEY_DRIVER_SQL_SHA256_INTRINSIC,
+            (),
+        ),
+        (
+            "main-cursor-primary-key-point-lookup",
+            SQLITE_CURSOR_PUBLICATION_SEAL_POINT_LOOKUP_SQL_INTRINSIC,
+            SQLITE_CURSOR_PUBLICATION_SEAL_POINT_LOOKUP_SQL_SHA256_INTRINSIC,
+            ("eqp", "0" * 64),
+        ),
+    )
+    observed: list[tuple[str, ...]] = []
+    digests: list[str] = []
+    for _identity_value, sql, _sql_digest, parameters in probes:
+        cursor = _execute(
+            connection, "EXPLAIN QUERY PLAN " + sql, parameters
+        )
+        details: list[str] = []
+        primary: BaseException | None = None
+        try:
+            while True:
+                row = _fetchone(cursor)
+                if row is None:
+                    break
+                if type(row) is not tuple or len(row) != 4 or type(row[3]) is not str:
+                    _cursor_publication_seal_read_fail(
+                        "GE_CURSOR_B3_CURSOR_SEAL_QUERY_PLAN_SHAPE"
+                    )
+                details.append(
+                    _join(" ", _split(row[3]))
+                )
+        except BaseException as error:
+            primary = error
+            raise
+        finally:
+            if primary is None:
+                _close(cursor)
+            else:
+                with suppress(BaseException):
+                    _close(cursor)
+        if not details:
+            _cursor_publication_seal_read_fail(
+                "GE_CURSOR_B3_CURSOR_SEAL_QUERY_PLAN_SHAPE"
+            )
+        joined = "\n".join(details).upper()
+        if any(
+            forbidden in joined
+            for forbidden in (
+                "AUTOMATIC",
+                "MATERIALIZE",
+                "USE TEMP B-TREE",
+                "CO-ROUTINE",
+            )
+        ):
+            _cursor_publication_seal_read_fail(
+                "GE_CURSOR_B3_CURSOR_SEAL_QUERY_PLAN_FORBIDDEN"
+            )
+        frozen = tuple(details)
+        observed.append(frozen)
+        digests.append(canonical_sha256(list(frozen)))
+    if (
+        observed[0] != ("SCAN main.ge_cycle_cursors",)
+        or observed[1] != ("SCAN temp.ge_blr_cursor_seal",)
+        or observed[2]
+        != (
+            "SEARCH main.ge_cycle_cursors USING PRIMARY KEY "
+            "(tenant_id=? AND token_hash=?)",
+        )
+        or not connection.in_exclusive_transaction
+        or connection._transaction_generation is not generation
+        or connection.transaction_epoch != epoch
+        or connection.total_changes != changes
+    ):
+        _cursor_publication_seal_read_fail(
+            "GE_CURSOR_B3_CURSOR_SEAL_QUERY_PLAN_IDENTITY"
+        )
+    return _SQLiteConnectionCursorPublicationSealQueryPlansSnapshot(
+        3,
+        cast(tuple[str, str, str], tuple(probe[0] for probe in probes)),
+        cast(tuple[str, str, str], tuple(probe[2] for probe in probes)),
+        cast(
+            tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]],
+            tuple(observed),
+        ),
+        cast(tuple[str, str, str], tuple(digests)),
+        True,
+        True,
+        generation,
+        epoch,
+        changes,
+    )
 
 
 def _prepare_sqlite_connection_cursor_publication_rebind_intrinsic(
@@ -4683,17 +4851,26 @@ def _begin_sqlite_connection_cursor_publication_seal_read_intrinsic(
 def _execute_sqlite_connection_cursor_publication_seal_read_intrinsic(
     connection: SQLiteV1BaselineConnectionOwner,
     execution: _SQLiteConnectionCursorPublicationSealReadExecution,
+    expected_cursor_count: int | None = None,
+    after_point_close: Callable[[], None] | None = None,
     _implementation: Callable[
         [
             SQLiteV1BaselineConnectionOwner,
             _SQLiteConnectionCursorPublicationSealReadExecution,
+            int | None,
+            Callable[[], None] | None,
         ],
         _SQLiteConnectionCursorPublicationSealReadSnapshot,
     ] = _OWNER_EXECUTE_CURSOR_PUBLICATION_SEAL_READ,
 ) -> _SQLiteConnectionCursorPublicationSealReadSnapshot:
     if type(connection) is not SQLiteV1BaselineConnectionOwner:
         _cursor_publication_seal_read_fail("GE_CURSOR_B3_CURSOR_SEAL_READ_CONNECTION")
-    return _implementation(connection, execution)
+    return _implementation(
+        connection,
+        execution,
+        expected_cursor_count,
+        after_point_close,
+    )
 
 
 def _release_sqlite_connection_cursor_publication_seal_read_intrinsic(

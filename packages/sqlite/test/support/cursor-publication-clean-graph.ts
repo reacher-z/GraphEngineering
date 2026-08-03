@@ -5,12 +5,23 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
+  adoptSQLiteCursorInitialPublicationStageIntrinsic,
   activateSQLiteCursorOuterPublicationAuthorityIntrinsic,
+  executeSQLiteCursorBaselineEntriesPublicationIntrinsic,
+  executeSQLiteCursorBaselineHeaderPublicationIntrinsic,
   executeSQLiteCursorMigration0002CatalogRebuildIntrinsic,
+  executeSQLiteCursorOperationSequenceZeroPublicationIntrinsic,
+  executeSQLiteCursorPostDdlPublicationReaderIntrinsic,
   mintSQLiteCursorPostDdlCatalogFenceIntrinsic,
+  mintSQLiteCursorPostDdlPublicationReaderLeaseIntrinsic,
+  observeSQLiteCursorPublicationSessionClockIntrinsic,
+  prepareSQLiteCursorPublicationSessionIntrinsic,
   prepareSQLiteCursorOuterPublicationAuthorityIntrinsic,
+  publishSQLiteCursorPublicationSessionIntrinsic,
+  type SQLiteCursorInitialPublicationReceiptBundle,
   type SQLiteCursorOuterPublicationAuthority,
   type SQLiteCursorPostDdlCatalogFence,
+  type SQLiteCursorPublicationSession,
   type SQLiteMigration0002CatalogRebuildReceipt,
 } from "../../src/cursor-publication-outer-authority.js";
 import {
@@ -104,7 +115,9 @@ export interface ReaderLeaseTestGraph {
 
 export interface ReaderLeaseTestGraphOptions {
   readonly cursorCount?: number;
+  readonly cursorFixture?: "reader" | "python-p10-parity";
   readonly outerProviderNowMs?: number;
+  readonly providerClockNow?: () => number;
   /** One exact-connection, one-shot hook before TEMP stage/B2 authority capture. */
   readonly beforeBaselineStageCreation?: (connection: SQLiteConnection) => void;
 }
@@ -180,7 +193,11 @@ function mintPreRebindReceipt(
   return new SQLiteCursorPreRebindReceiptIssuer(input).issue(input);
 }
 
-function insertAuthenticCursorRows(connection: SQLiteConnection, cursorCount: number): void {
+function insertAuthenticCursorRows(
+  connection: SQLiteConnection,
+  cursorCount: number,
+  fixture: "reader" | "python-p10-parity",
+): void {
   const descriptor = createSQLiteCycleStoreDescriptor().descriptorHash;
   const schema = sqliteText(sqliteRow(connection.prepare(
     "SELECT schema_identity_sha256 FROM main.ge_cycle_schema WHERE singleton = 1",
@@ -195,13 +212,18 @@ function insertAuthenticCursorRows(connection: SQLiteConnection, cursorCount: nu
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `, "inspect-schema");
   for (let ordinal = 1; ordinal <= cursorCount; ordinal += 1) {
-    const streamId = `stream-reader-cursor-${ordinal}`;
+    const reverse = cursorCount - ordinal + 1;
+    const streamId = fixture === "python-p10-parity"
+      ? `stream-${reverse.toString().padStart(4, "0")}`
+      : `stream-reader-cursor-${ordinal}`;
     insert.run(
-      `tenant-reader-cursor-${ordinal}`,
+      fixture === "python-p10-parity"
+        ? `tenant-${reverse.toString().padStart(4, "0")}`
+        : `tenant-reader-cursor-${ordinal}`,
       ordinal.toString(16).padStart(64, "0"),
       "event",
-      "2".repeat(64),
-      "3".repeat(64),
+      (fixture === "python-p10-parity" ? "b" : "2").repeat(64),
+      (fixture === "python-p10-parity" ? "c" : "3").repeat(64),
       streamId,
       null,
       Buffer.from(
@@ -216,8 +238,8 @@ function insertAuthenticCursorRows(connection: SQLiteConnection, cursorCount: nu
       descriptor,
       schema,
       Buffer.from('{"exists":false,"recordHash":null,"sequence":-1}', "utf8"),
-      READER_CAPTURED_AT_MS - 100,
-      READER_CAPTURED_AT_MS + 100,
+      fixture === "python-p10-parity" ? 500 : READER_CAPTURED_AT_MS - 100,
+      fixture === "python-p10-parity" ? 1_500 : READER_CAPTURED_AT_MS + 100,
       null,
     );
   }
@@ -281,7 +303,7 @@ export function createReaderLeaseTestGraph(
       READER_CAPTURED_AT_MS - 10 + index,
     );
   }
-  insertAuthenticCursorRows(connection, cursorCount);
+  insertAuthenticCursorRows(connection, cursorCount, options.cursorFixture ?? "reader");
   const beforeBaselineStageCreation = options.beforeBaselineStageCreation;
   try {
     beforeBaselineStageCreation?.(connection);
@@ -346,7 +368,7 @@ export function createReaderLeaseTestGraph(
       LOCK,
     );
     const providerClockSource = createSQLiteCursorProviderClockSourceIntrinsic(
-      () => options.outerProviderNowMs ?? READER_CAPTURED_AT_MS,
+      options.providerClockNow ?? (() => options.outerProviderNowMs ?? READER_CAPTURED_AT_MS),
     );
     const providerClockCapability = createSQLiteCursorProviderClockCapabilityIntrinsic(
       connection,
@@ -412,4 +434,57 @@ export function disposeReaderLeaseTestGraph(graph: ReaderLeaseTestGraph): void {
   } catch { /* Best effort. */ }
   try { if (graph.connection.isOpen) graph.connection.close(); } catch { /* Best effort. */ }
   rmSync(graph.root, { recursive: true, force: true });
+}
+
+/** Build the authentic initial-publication graph and retain exact session S. */
+export function publishReaderLeaseTestGraphSession(
+  graph: ReaderLeaseTestGraph,
+): SQLiteCursorPublicationSession {
+  const reader = mintSQLiteCursorPostDdlPublicationReaderLeaseIntrinsic(
+    graph.authority,
+    graph.migration0002Receipt,
+    graph.fence,
+  );
+  executeSQLiteCursorPostDdlPublicationReaderIntrinsic(
+    graph.authority,
+    graph.migration0002Receipt,
+    graph.fence,
+    reader,
+  );
+  const entries = executeSQLiteCursorBaselineEntriesPublicationIntrinsic(
+    graph.authority,
+    graph.migration0002Receipt,
+    graph.fence,
+    reader,
+  );
+  const header = executeSQLiteCursorBaselineHeaderPublicationIntrinsic(
+    graph.authority,
+    graph.migration0002Receipt,
+    graph.fence,
+    reader,
+    entries,
+  );
+  const sequence = executeSQLiteCursorOperationSequenceZeroPublicationIntrinsic(
+    graph.authority,
+    graph.migration0002Receipt,
+    graph.fence,
+    reader,
+    entries,
+    header,
+  );
+  const bundle = Object.freeze([
+    graph.migration0002Receipt,
+    entries,
+    header,
+    sequence,
+  ] as const satisfies SQLiteCursorInitialPublicationReceiptBundle);
+  const adoption = adoptSQLiteCursorInitialPublicationStageIntrinsic(
+    graph.authority,
+    bundle,
+    graph.fence,
+    reader,
+  );
+  const prepared = prepareSQLiteCursorPublicationSessionIntrinsic(graph.authority, adoption);
+  const evidence = observeSQLiteCursorPublicationSessionClockIntrinsic(prepared);
+  return publishSQLiteCursorPublicationSessionIntrinsic(prepared, evidence);
 }

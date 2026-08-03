@@ -192,9 +192,13 @@ class _WriteRecord:
     consumed: bool = False
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(slots=True)
 class _Rule11Record:
     snapshot: _SQLiteCursorPublicationRule11SuccessReceiptSnapshot
+    lifecycle: Literal["active", "rule12-pending", "rule12-complete", "poisoned"] = (
+        "active"
+    )
+    rule12_receipt: ReferenceType[object] | None = None
 
 
 @dataclass(slots=True)
@@ -1274,7 +1278,7 @@ def _read_sqlite_cursor_publication_rebind_write_receipt_snapshot_intrinsic(
 def _read_sqlite_cursor_publication_rule11_receipt_snapshot_intrinsic(
     receipt: _SQLiteCursorPublicationRule11SuccessReceipt,
 ) -> _SQLiteCursorPublicationRule11SuccessReceiptSnapshot:
-    result = cast(
+    record = cast(
         _Rule11Record,
         _record(
             _RULE11_RECEIPTS,
@@ -1283,7 +1287,10 @@ def _read_sqlite_cursor_publication_rule11_receipt_snapshot_intrinsic(
             _Rule11Record,
             "GE_CURSOR_B3_RULE11_RECEIPT",
         ),
-    ).snapshot
+    )
+    if record.lifecycle == "poisoned":
+        _fail("GE_CURSOR_B3_RULE11_RECEIPT")
+    result = record.snapshot
     write = cast(
         _WriteRecord,
         _record(
@@ -1303,6 +1310,137 @@ def _read_sqlite_cursor_publication_rule11_receipt_snapshot_intrinsic(
     if write_snapshot.counts != result.counts:
         _fail("GE_CURSOR_B3_RULE11_RECEIPT")
     return result
+
+
+def _prepare_sqlite_cursor_publication_rule11_for_rule12_intrinsic(
+    receipt: _SQLiteCursorPublicationRule11SuccessReceipt,
+) -> _SQLiteCursorPublicationRule11SuccessReceiptSnapshot:
+    """Consume the authentic R11 lifecycle into one pending Rule 12 attempt."""
+
+    record = cast(
+        _Rule11Record,
+        _record(
+            _RULE11_RECEIPTS,
+            receipt,
+            _SQLiteCursorPublicationRule11SuccessReceipt,
+            _Rule11Record,
+            "GE_CURSOR_B3_RULE11_RECEIPT",
+        ),
+    )
+    if record.lifecycle != "active" or record.rule12_receipt is not None:
+        if record.lifecycle != "poisoned":
+            _poison_sqlite_cursor_publication_rule11_for_rule12_intrinsic(
+                receipt, "SQLite Rule 11 predecessor replayed for Rule 12"
+            )
+        _fail("GE_CURSOR_B3_RULE12_REPLAY")
+    snapshot = _read_sqlite_cursor_publication_rule11_receipt_snapshot_intrinsic(
+        receipt
+    )
+    record.lifecycle = "rule12-pending"
+    return snapshot
+
+
+def _complete_sqlite_cursor_publication_rule11_for_rule12_intrinsic(
+    receipt: _SQLiteCursorPublicationRule11SuccessReceipt,
+    rule12_receipt: object,
+) -> None:
+    """Publish the exact Rule 12 successor into the real R11 owner once."""
+
+    record = cast(
+        _Rule11Record,
+        _record(
+            _RULE11_RECEIPTS,
+            receipt,
+            _SQLiteCursorPublicationRule11SuccessReceipt,
+            _Rule11Record,
+            "GE_CURSOR_B3_RULE11_RECEIPT",
+        ),
+    )
+    if (
+        rule12_receipt is None
+        or record.lifecycle != "rule12-pending"
+        or record.rule12_receipt is not None
+    ):
+        _poison_sqlite_cursor_publication_rule11_for_rule12_intrinsic(
+            receipt, "SQLite Rule 12 successor adoption drifted"
+        )
+        _fail("GE_CURSOR_B3_RULE12_ADOPTION")
+    try:
+        record.rule12_receipt = ref(rule12_receipt)
+    except TypeError as error:
+        _poison_sqlite_cursor_publication_rule11_for_rule12_intrinsic(
+            receipt, "SQLite Rule 12 successor was not weak-referenceable"
+        )
+        raise ValueError("GE_CURSOR_B3_RULE12_ADOPTION") from error
+    record.lifecycle = "rule12-complete"
+
+
+def _assert_sqlite_cursor_publication_rule11_rule12_successor_intrinsic(
+    receipt: _SQLiteCursorPublicationRule11SuccessReceipt,
+    rule12_receipt: object,
+) -> None:
+    record = cast(
+        _Rule11Record,
+        _record(
+            _RULE11_RECEIPTS,
+            receipt,
+            _SQLiteCursorPublicationRule11SuccessReceipt,
+            _Rule11Record,
+            "GE_CURSOR_B3_RULE11_RECEIPT",
+        ),
+    )
+    if (
+        record.lifecycle != "rule12-complete"
+        or record.rule12_receipt is None
+        or record.rule12_receipt() is not rule12_receipt
+    ):
+        _fail("GE_CURSOR_B3_RULE12_ADOPTION")
+
+
+def _poison_sqlite_cursor_publication_rule11_for_rule12_intrinsic(
+    receipt: _SQLiteCursorPublicationRule11SuccessReceipt,
+    reason: str,
+) -> None:
+    """Poison the exact R11/W/outer graph while preserving an upper primary."""
+
+    record = cast(
+        _Rule11Record,
+        _record(
+            _RULE11_RECEIPTS,
+            receipt,
+            _SQLiteCursorPublicationRule11SuccessReceipt,
+            _Rule11Record,
+            "GE_CURSOR_B3_RULE11_RECEIPT",
+        ),
+    )
+    if type(reason) is not str or not reason:
+        _fail("GE_CURSOR_B3_RULE12_POISON")
+    if record.lifecycle == "poisoned":
+        return
+    record.lifecycle = "poisoned"
+    write_record = cast(
+        _WriteRecord,
+        _record(
+            _WRITE_RECEIPTS,
+            record.snapshot.write_receipt,
+            _SQLiteCursorPublicationRebindWriteReceipt,
+            _WriteRecord,
+            "GE_CURSOR_B3_RULE11_RECEIPT",
+        ),
+    )
+    write = _authenticate_retained_write_receipt(
+        record.snapshot.write_receipt,
+        write_record,
+        required_lifecycle="rule11-complete",
+        code="GE_CURSOR_B3_RULE11_RECEIPT",
+    )
+    write_record.snapshot = write._replace(lifecycle="poisoned")
+    _poison_sqlite_cursor_publication_rebind_downstream_intrinsic(
+        write.context,
+        write.consumed_tombstone,
+        reason,
+        write.post_rebind_adoption,
+    )
 
 
 def _execute_sqlite_cursor_publication_rebind_rule11_intrinsic(

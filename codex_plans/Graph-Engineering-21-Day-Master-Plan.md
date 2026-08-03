@@ -22169,3 +22169,453 @@ cross-run/registration/adoption/cancellation/provider/lock/lineage/watermark fai
 intrinsic hostile；Ruff/mypy/typecheck/build；affected session/rebind/seal/clock/transaction-owner regressions；normalized portable equality；
 完整SQLite regression；独立H0/M0/L0；append-only prefix proof；durable log；exact identity commit/push。满足前P10 registry保持
 `in_progress`，COMMIT保持hard-disabled，release evidence保持0/93。
+
+#### 31.37.81 Wave 1E/P11：P9 owner/BEGIN与publication chain的scoped-mutation真实组合计划（2026-08-03 PDT追加；既有内容不改）
+
+本节只追加，不修改此前22,171行。P10审计确认一个必须显式保留的系统级缺口：P9已经分别实现package-private
+transaction owner、guarded `BEGIN EXCLUSIVE`、19类connection guard、failure cleanup与COMMIT hard-disable；P10则从existing
+exact exclusive transaction的R11 predecessor开始，完成R12与未消费third clock。两者在当前runtime仍是两张独立authority graph，
+不能因为registry dependency或单独测试全绿就宣称已经end-to-end组合。
+
+当前TS clean graph仍直接执行raw `BEGIN EXCLUSIVE`；Python B2/P8 fixture同样从既有raw transaction进入。直接在fixture尾部
+注册P9 owner不可行：P9要求file-backed、autocommit、pre-BEGIN source-v1，且active guard会拒绝旧链随后合法执行的TEMP/main
+DDL/DML。反方向把P9测试owner对象塞入R12 snapshot也是假集成，因为旧30-stage lower writes不会消费owner authority。P11必须新增
+显式、bounded、phase-bound mutation capability并贯穿真实lower I/O，禁止ambient flag、caller SQL与任意callback。
+
+##### 31.37.81.1 P11精确边界与永久nonclaims
+
+P11最终只允许以下唯一成功前缀：
+
+```text
+file-backed exact source-v1 audit
+  -> P9 owner registration
+  -> exact guarded BEGIN receipt
+  -> owner-bound B2 TEMP construction/campaign
+  -> outer clock + exact outer authority
+  -> owner-scoped migration-0002
+  -> owner-scoped baseline entries/header/operation-sequence-zero
+  -> initial-stage adoption
+  -> pre-rebind second clock consumed
+  -> owner-scoped cursor rebind
+  -> exact R11
+  -> exact R12
+  -> third clock observed but unconsumed (3/2)
+```
+
+这个终点最多证明30-stage inventory的stage 1..17已由同一个P9 owner graph支配，并额外mint了仍未消费的third evidence。
+stage 18 `pre-verification-clock-evidence-consumed`保持false。P11不得消费third evidence、mint/activate cursor-clock capability、
+发布cursor-clock-complete、lineage/metadata/rules、fresh-v2、physical/semantic final state、pre-retirement fence、TEMP retirement、
+fourth clock、final transaction fence、success arbiter、COMMIT、complete-v2、public API、manifest、RC、stable release或star结果。
+
+所有成功与失败report必须固定：`thirdEvidenceConsumed=false`、`commitPresented=false`、`commitAttemptCount=0`、
+`highestAccepted30Stage=17`。任何public `commit()`、raw SQL `COMMIT/END`、prepared transaction-control或owner commit presentation，
+都必须在native I/O之前拒绝。P11的“成功”只是可供下一slice继续的authenticated active graph，不是用户可见完成态。
+
+##### 31.37.81.2 新opaque composition与mutation scope
+
+双runtime新增package-private opaque `SQLiteCursorPublicationOwnerComposition`与
+`SQLiteCursorPublicationMutationScope`（Python使用同义私有类）。唯一composition mint入口只接受exact P9 owner与exact current
+BEGIN receipt；caller不能传connection、path、lineage、generation、watermark、SQL、hash、callback、Boolean claim或snapshot。
+
+owner module必须从private registries重新取得并验证：
+
+1. owner exact type/object identity、active lifecycle与one-shot presentation；
+2. begin receipt正是owner当前未退休receipt；
+3. exact connection、exclusive lineage、provisional/promoted generation全部一致；
+4. native transaction仍active，epoch/total/temp watermarks等于BEGIN postflight；
+5. source-v1 fingerprint、absolute reopen identity与file-backed recoverability仍成立；
+6. composition此前未mint，receipt未被clone/proxy/subclass/cross-run对象替代。
+
+composition强保留exact owner、begin receipt、connection、lineage、generation与source fingerprint，直到failure finalization或未来
+success finalization。下游stage、outer、session、rebind、R11、R12、third graph必须transitively强保留同一个composition对象；仅比较
+connection或标量watermark不算provenance。public/read snapshot只能暴露immutable scalar evidence、phase、route/count与
+`exactOwner=true`/`exactBeginReceipt=true`等经过重认证的事实，不能暴露owner、receipt、scope、path、native handle或mutable buffer。
+
+BEGIN receipt保存的是BEGIN时冻结基线，合法写入后不得修改receipt来冒充current evidence。composition必须分别保存：
+
+- `beginTransactionEpoch/beginTotalChanges/beginTempMutationEpoch`；
+- `currentTransactionEpoch/currentTotalChanges/currentTempMutationEpoch`；
+- 每个scope的pre/post watermark与expected delta；
+- P9 owner state中的current字段若需要推进，必须与immutable begin-receipt字段拆开。
+
+##### 31.37.81.3 composition与scope单向状态机
+
+composition严格单向状态机冻结为：
+
+```text
+unadopted
+ -> begin-adopted
+ -> b2-scope-active -> b2-complete
+ -> outer-clock-consumed -> outer-active
+ -> migration-0002-scope-active -> post-ddl-fenced
+ -> baseline-entries-scope-active
+ -> baseline-header-scope-active
+ -> operation-sequence-zero-scope-active
+ -> initial-stage-adopted
+ -> pre-rebind-clock-consumed -> session-active
+ -> cursor-rebind-scope-active
+ -> rule11-complete -> rule12-complete
+ -> third-observed-unconsumed
+```
+
+每个中间态只有一个合法后继；skip、reorder、repeat、cross-owner、cross-connection或cross-run presentation全部terminal。任何授权窗口
+打开后的失败必须进入：
+
+```text
+phase-active -> failure-pending/poisoned
+ -> P9 failure-claimed
+ -> rolling-back | rollback-in-doubt
+ -> close
+ -> reopen-source-v1 | corrupt | unavailable
+ -> finalized
+```
+
+单个mutation scope的状态机固定为`issued -> entered -> returned -> consumed`或`entered -> failed/poisoned`。multi-row scope还必须
+保存strict `nextOrdinal/expectedCount`；只有最后一项native returned且postflight通过后才能consume。clone、proxy、subclass、structural
+copy、wrong phase、wrong route、wrong predecessor、extra/missing ordinal、repeat enter、post-consume reuse、GC后id reuse全部zero-I/O拒绝。
+
+##### 31.37.81.4 lower connection显式authority contract
+
+禁止用ContextVar、AsyncLocal、thread-local、process-global“currently authorized” Boolean或ambient stack传递写权限；禁止scope接受
+caller thunk/callback/SQL。connection owner增加private scoped write入口，并在P9 registration时安装definition-time captured三类hooks：
+`authorize-before`、`native-returned`、`failed`。
+
+每个既有fixed lower writer必须显式接收exact scope。guard active时缺scope立刻拒绝；scope验证exact connection、composition、owner、
+phase、route ID、fixed SQL digest、predecessor与ordinal。native执行顺序固定为：
+
+1. presentation/type/identity/authentication；
+2. current owner/lineage/generation/watermark/live-lock/catalog proof；
+3. route ID、exact frozen SQL bytes/hash、phase、ordinal与parameter provenance；
+4. scope标记`entered`；
+5. package-owned prepare/execute，不接受caller SQL/callback；
+6. native-return计数与affected-row证据；
+7. scope标记`returned`并推进ordinal；
+8. postflight reproof与composition current watermark推进；
+9. 最后一项完成后one-shot consume。
+
+异常路径调用failed hook、poison scope/composition并保留原primary；authorization window必须在`finally`清除。公共
+`prepare/exec/execute/executescript/commit/rollback/close`永远不接受scope，因此scope不能升级成任意SQL通行证。旧无owner的细粒度
+单元fixture可以暂时保留legacy path以维持回归，但不得计作P11 evidence；guard-active lower write缺scope必须新增拒绝。
+
+##### 31.37.81.5 fixed route allowlist与全局denylist
+
+授权必须同时绑定route descriptor、exact SQL bytes/hash、phase、ordinal与parameter provenance，不能仅按首token、SQL hash或caller
+给出的operation string放行。
+
+1. `b2-temp-stage`只允许固定TEMP catalog table/index/view DDL、固定stage INSERT、cursor-seal TEMP DDL/INSERT、campaign固定TEMP
+   updates与其受控failure cleanup DROP。动态次数只能来自已验证source/projection counts并受既有限额。`temp_store/cache_size/
+   cache_spill`等配置必须在P9 registration前完成；active owner不接受caller PRAGMA。
+2. `main:migration-0002`只允许trusted asset的exact ordered statements；prepared/execute/close ordinal与计划冻结值完全一致，不能替换、
+   reorder、skip或repeat。
+3. `main:baseline-entries`只允许唯一exact INSERT，prepare=1、execute=retained entry count；每行参数来自exact reader/projection
+   provenance，caller不能提交rows。
+4. `main:baseline-header`只允许exact header INSERT，prepare/execute=`1/1`。
+5. `main:operation-sequence-zero`只允许exact sequence-zero INSERT，prepare/execute=`1/1`。
+6. `main:cursor-rebind`只允许exact UPDATE，prepare=1、logical execute=1、affected=N；仅exact publication session/rebind predecessor
+   可mint scope。
+7. R12 seal/EQP是read-only route，不需要mutation scope，但必须验证同一个composition、lineage、current watermark、live lock与catalog。
+
+全局显式deny：BEGIN/COMMIT/END/ROLLBACK/SAVEPOINT family、ATTACH/DETACH、VACUUM/ANALYZE/REINDEX、persistent PRAGMA、任何非allowlist
+main/TEMP DDL/DML、multi-statement/script、caller SQL、caller callback、prepared handle在scope外运行、scope跨phase/connection/owner、
+scope consume后复用、以及P11未授权的TEMP retirement。
+
+##### 31.37.81.6 30-stage provenance threading顺序
+
+source fixture seed、migration-lock seed与TEMP storage config必须在registration前完成，并commit到exact source-v1；registration audit仍
+要求TEMP schema符合P9冻结前提。随后执行owner registration、guarded BEGIN与composition adoption，之后才创建owner-bound B2 stage。
+
+普通`proveSQLiteExclusiveBaselineTransaction(connection)`不能进入P11 accepted path；新增owner-bound proof只能由composition mint。
+`SQLiteBaselineTempStage` hidden state保存composition；B2 source、stage、projection、cursor ownership/campaign、seal receipt的每个successor
+必须验证同一composition。
+
+outer prepare/activate验证stage composition、exact P9 lineage/generation与composition current watermark。每个永久writer从exact predecessor
+请求对应scope，lower API显式present scope；scope完成后composition watermark、outer ledger、native total changes必须exact相等。initial
+adoption、session、rebind、R11、R12与third继续保留同一composition，禁止在中途退化为connection+scalar比较。
+
+最终R12 receipt与third evidence必须transitively证明exact owner与exact begin receipt，但third仍unconsumed、observed/consumed=`3/2`；
+任何snapshot或report若把stage18标为true必须fail closed。
+
+##### 31.37.81.7 failure、rollback、close与reopen
+
+新增composition driver是P11唯一accepted orchestration path。BEGIN成功后的任意同步异常（TS包括primitive throw并稳定包裹；Python捕获
+`BaseException`）统一选择exact P9 failure authority并进入P9 finalizer，caller不能忘记cleanup；各stage不得自行raw rollback/close。
+
+原stage/native primary优先于scope cleanup secondary；rollback secondary、close tertiary、reopen audit最后。rollback仅由P9 exact owner执行
+且最多一次；只有exact same generation/lineage仍active时才rollback，不能在身份不确定时回滚陌生事务。即使observation失败，也必须进入
+bounded close/reopen partition，不能卡在active或in-doubt registry。
+
+failure reopen必须验证absolute source identity、source-v1 fingerprint、application/user version、catalog、integrity与foreign keys；所有本事务
+main写必须因rollback消失，TEMP不得残留。fingerprint/catalog drift分类corrupt，I/O不可用分类unresolved。terminalize必须tombstone所有live
+scope/composition、retire begin receipt并清理强presentation graph。
+
+P11成功停在active third-unconsumed，不可调用public rollback清理测试。测试必须使用package-private authenticated bounded-stop cleanup，
+执行exact owner rollback/close/reopen并验证source-v1；这只是test teardown/future continuation boundary，不是COMMIT authority。
+
+##### 31.37.81.8 四个可独立验收与提交的子切片
+
+1. **P11-A contract/redbar/lower substrate**：冻结spec、fixture/schema/validator；实现owner+begin adoption、begin/current watermark拆分、opaque
+   composition/scope与lower explicit authorization。只证明missing/wrong scope zero-I/O和COMMIT disabled，不运行完整chain。
+2. **P11-B owner-composed B2**：pre-owner config、file-backed source-v1、P9 BEGIN、B2 TEMP exact scope、stage强保留与统一P9 cleanup；不执行
+   main permanent writes。
+3. **P11-C outer stages 5..12**：outer activation、migration-0002、baseline entries/header、operation-sequence-zero四类main scope，关闭exact
+   ledger/watermark/failure matrix；不进入session/rebind。
+4. **P11-D stages 13..17 + pending 18**：initial adoption、second clock/session、cursor-rebind scope、R11/R12、third observed-unconsumed；完成
+   cross-runtime parity、GC/privacy/full suite。每个子切片必须独立H0/M0/L0、log、evidence、commit/push，不能提前claim下一slice。
+
+##### 31.37.81.9 实现文件与所有权
+
+主Agent新增`spec/sqlite-cursor-publication-owner-composition-p11.md`与conformance case/schema/validator/test，更新spec索引、root scripts、CI、
+append-only plan/log/registry。禁止修改P8/P9/P10 trusted fixture bytes来让实现“通过”。
+
+TS新增`packages/sqlite/src/cursor-publication-owner-composition.ts`，修改transaction-owner、sqlite-connection、baseline stage/reconcile、cursor
+ownership/campaign、outer authority、session/rebind/R12/clock等package-private模块；新增composition focused、parity reporter与forced-GC probe。
+Python新增对应private module，修改transaction owner、baseline source/stage/ownership/campaign、outer/subprotocol/R12/third；新增focused、normalized
+reporter、GC与deterministic id-collision tests。两runtime均不得从package root或Python `__init__.py`导出新authority。
+
+##### 31.37.81.10 hostile、parity、GC与CI验收矩阵
+
+P11至少执行以下证据，任何一项缺失保持registry `in_progress`：
+
+1. 真实file-backed SQLite N=0/1/3 success；owner registration=1、BEGIN attempt/return=`1/1`、begin receipt=1、commit=0、R11/R12=`1/1`、
+   third=`3/2`、highest stage=17。
+2. 每个scope的missing/clone/proxy/subclass/replay/cross-owner/cross-connection/wrong predecessor/wrong phase/reorder/skip/extra ordinal/
+   after-consume prepared run全部before native I/O拒绝。
+3. public 19 guard矩阵保持全拒；guard-active时每个private lower write缺scope也拒绝；raw SQL/hash/asset/callback不能代替scope。
+4. B2每个TEMP边界与五类main phase的prepare前、prepare后、每次native return后、postflight、registration/adoption failure fault；所有I/O向量
+   始终commit=0、rollback<=1、close<=1、reopen<=1。
+5. BEGIN基线/current watermark分离；lineage/generation持续exact；每phase epoch/total/temp delta与native lower accounting相等。
+6. authority/lineage/live-lock/catalog/scope corruption先于cancellation，cancel不得泄漏scope或掩盖stale/corruption。
+7. cleanup后独立reopen source-v1，v2永久对象不存在，original primary身份/因果链保留。
+8. success teardown、任意poison、owner abandonment与scope drop forced-GC；TS WeakMap/WeakRef无reverse root，Python weak registries无key反向强持有，
+   stale callback与deterministic ID collision不能删除新identity。
+9. prototype/WeakMap/WeakRef/Reflect/Object/sqlite connection/cursor/asset/SQL constant hostile substitution下，definition-time captured paths保持或
+   fail closed。
+10. npm dist/root与Python `__init__`不泄漏composition/scope/owner私有API。
+11. normalized parity至少包含caseId、highestAcceptedStage、third consumed flag、phase order、per-scope issue/enter/return/consume/fail counts、
+    SQL route IDs+trusted digests、begin/current watermark/delta、N/root/identities、R11/R12/clock counts、I/O vector、cleanup classification、claims/
+    nonclaims。TS必须启动Python reporter并做exact key/order/value JSON equality；CI无uv或skip即失败。
+12. P11 focused、P8/P9/P10完整门禁、TS typecheck/build、Python Ruff/mypy、完整SQLite single-worker regression、fixtures/docs/diff-check与独立
+    H0/M0/L0全部通过。
+
+P11只有在一个真实P9 exact begin receipt被双runtime one-shot adopt、所有B2及五类永久写必须present exact bounded scope、最终R12/third
+能transitively追溯到同一owner/receipt、任一失败由P9唯一rollback/close/reopen后才可accepted。即使accepted，release evidence仍为0/93，
+COMMIT与stage18仍为false，不能宣称完整Wave 1E、完整D9、RC、stable或star目标已实现。
+
+#### 31.37.82 P11独立审计勘误与可执行合同收紧（2026-08-03 PDT追加；既有内容不改）
+
+本节只追加，不回改31.37.81。独立只读审计验证前22,171行SHA-256仍为
+`5040b7885e1416227ee390be222e4bbe27afadaba267bd429efc0f39df97a648`，同时对31.37.81给出H6/M5 REJECT。
+因此31.37.81只能作为初始设计输入，P11实现必须同时满足以下勘误；勘误未通过独立H0/M0/L0前，P11 registry保持
+`in_progress`且不能开始P11-B success claim。
+
+##### 31.37.82.1 highest-stage报告按真实前缀计算
+
+31.37.81.1的`highestAccepted30Stage=17`只适用于P11-D最终成功case，不能用于所有failure report。每个case必须从exact retained
+stage receipts计算`highestAccepted30Stage`，不得由fault name硬编码。失败在B2、outer、0002、entries、header、sequence-zero、initial
+adoption、session或rebind时，只报告失败前最后一个完整accepted stage；正在active/pending/entered的stage不算accepted。
+
+report同时输出`attemptedStage`、`highestAcceptedStage`、`acceptedStageReceiptCount`与按ordinal排序的`acceptedStageIds`。validator要求stage
+前缀连续、不得包含attempted失败项、不得越过slice上限：P11-A无30-stage success claim，P11-B只到B2冻结上限，P11-C只到其exact
+outer/write上限，P11-D成功才到17。hostile fixture将early fault伪报17时必须fail closed。
+
+##### 31.37.82.2 multi-item scope改为ordinal child-permit状态机
+
+31.37.81.3的单线`issued -> entered -> returned -> consumed`只适用于single-item scope。multi-statement/multi-row route改为一个parent
+scope加每ordinal独立opaque child permit：
+
+```text
+parent-issued(expectedCount=N,nextOrdinal=0)
+  -> child-issued(i)
+  -> child-entered(i)
+  -> child-native-returned(i)
+  -> child-postflight-accepted(i)
+  -> child-consumed(i), parent.nextOrdinal=i+1
+  -> ...
+  -> parent-complete when nextOrdinal=N
+  -> parent-consumed
+```
+
+任意`child-entered/native-returned`之后的validation/postflight/registration失败都有显式`child-failed -> parent-poisoned`边。只有
+`child-consumed(i)`之后才能mint `i+1`；同一child repeat-enter、future ordinal提前、past ordinal replay、missing ordinal、extra ordinal、
+cross-parent/owner/connection全部zero-I/O拒绝。migration-0002以contract冻结的statement sequence作为expectedCount；baseline entries以exact
+retained projection count为N；B2 paired/multi writes使用各route独立parent，不能让一个全局ordinal混淆不同SQL域。
+
+`expectedCount=0`必须是显式路径：parent验证exact zero provenance后，不mint child，执行zero-item postflight，再one-shot
+`parent-complete -> consumed`。测试分别覆盖真实zero-entry route、伪zero、N=0 cursor但nonzero baseline entries、以及zero parent replay。
+
+##### 31.37.82.3 authenticated fixed-read authority
+
+P11-A新增与mutation scope分离的opaque `SQLiteCursorPublicationFixedReadPermit`。它不是任意read capability，只绑定exact owner/
+composition/connection/phase、one frozen route ID、exact SQL bytes/hash、parameter shape、maximum rows/cursors、prepare/fetch/close budget与
+zero-mutation watermarks。公共connection仍只按P9既有规则放行普通SELECT；所有P11 special reads走private permit入口。
+
+初始read allowlist至少冻结：
+
+1. pre-registration TEMP configuration verification；能在registration前完成的`temp_store/cache_size/cache_spill`必须提前完成并冻结receipt；
+2. owner-active B2若仍必须复读这些PRAGMA，只允许exact read-only PRAGMA route，验证没有赋值、没有persistent effect、temp epoch不变；
+3. B2/cursor campaign的fixed `EXPLAIN QUERY PLAN`三probe，绑定exact target SQL与EQP row budget；
+4. migration lock、catalog identity、watermark与source/postflight reads；
+5. R12 main/TEMP seal reads继续使用其existing exact read authority，但必须证明同一个composition。
+
+permit状态机为`issued -> prepared -> bounded-reading -> terminal-row-observed -> closed -> consumed`；N=0也必须terminal fetch+close。
+prepare/fetch/decode/close任何failure执行primary-over-cleanup、poison selected graph且zero mutation。validator要求epoch/total/temp before/after完全
+一致；EXPLAIN/PRAGMA不能因为首token不为SELECT被错误当作writer，也不能通过generic public guard白名单放宽。
+
+##### 31.37.82.4 跨runtime statement retirement抽象
+
+portable contract不再要求不存在的TS statement `close/finalize` API。每个child permit统一报告抽象
+`statementRetirement="released-before-next-ordinal"`，并由runtime-local evidence证明：
+
+- TypeScript Node `StatementSync`：不缓存handle、不跨ordinal保留强引用、run返回且handle离开owned scope；如果Node未来提供dispose，另加native
+  evidence但不改变portable语义；
+- Python sqlite3：cursor close attempt/return必须`1/1`，close failure是secondary且不得替换primary；
+- 两runtime共同证明上一ordinal的statement/cursor不可由caller访问、不可在下一ordinal或scope consumed后执行。
+
+portable report比较route/ordinal/prepare/native-return/abstract-retirement/postflight/consume；runtime-local report保留TS handle capability与Python
+close counts，禁止为了parity捏造TS native close。
+
+##### 31.37.82.5 Python P9 opaque failure capture升级
+
+P11-A必须先升级Python transaction owner failure API，不能用新生成的authenticated exception冒充原primary。新增opaque
+`_SQLiteCursorPublicationTransactionFailureCapture`，唯一mint入口接受exact active owner与原始`BaseException`，private registry强保留exact
+primary identity、owner、connection、lineage、generation与capture ordinal。finalizer只接受exact capture；clone/cross-owner/replay拒绝。
+
+捕获后原primary仍是最终raise对象；rollback/close/reopen secondary通过cause/diagnostic graph保留，不替换其identity。即使owner observation
+unavailable、lineage proof返回不完整或native accessor抛错，finalizer也必须进入bounded partition：能证明exact active generation才rollback，
+否则禁止猜测rollback但仍close exact owned connection并使用absolute source identity reopen/audit。所有路径最多rollback/close/reopen=`1/1/1`，
+不得在active/in-doubt registry提前return。
+
+TS现有failure capture也纳入portable cases；两runtime共同测试primitive/non-Error wrapping、Python `KeyboardInterrupt/SystemExit`等
+`BaseException`、observation failure、rollback/close/reopen secondary、exact primary identity与one-shot replay。
+
+##### 31.37.82.6 B2 failure cleanup不再需要poison后DROP authority
+
+P11 accepted owner-composed路径选择单一规则：scope/composition一旦failed或poisoned，不再签发局部DROP permit。部分TEMP/main构造全部由P9
+exact transaction rollback、connection close与reopen清除；这消除“先poison再授权cleanup DROP”的死锁。旧legacy无owner fixture可保留局部
+DROP用于历史单元测试，但不计P11 evidence。
+
+failure前已mint但未entered的child/read permit全部tombstone；entered handle由lower `finally`做bounded native resource release，但不得执行额外
+SQL cleanup。测试在每个TEMP DDL/DML fault后证明：没有post-poison DROP、rollback<=1、close<=1、reopen<=1、reopened TEMP为空且source-v1
+permanent catalog/bytes精确恢复。cleanup fault不能创建新mutation authority。
+
+##### 31.37.82.7 stage切片编号冻结
+
+P11实现前新增machine-readable stage inventory，禁止仅靠段落文字。切片边界按实际inventory ID而非模糊范围冻结：
+
+- P11-A：authority substrate，无accepted 30-stage completion；
+- P11-B：从owner BEGIN composition到B2 exact receipt，report列出真实最后stage ID；
+- P11-C：outer clock/authority、migration-0002、post-DDL fence、baseline entries/header/sequence-zero，只到initial adoption之前；
+- P11-D：initial-stage adoption开始，经过second clock/session/rebind/R11/R12，到third observed-unconsumed；30-stage的stage18仍false。
+
+conformance fixture为每个named stage给唯一ordinal、required predecessor、mint/consume counts与slice owner；validator拒绝stage重号、范围交叠、
+P11-C/D同时claim initial adoption或用旧“5..12/13..17”文本覆盖machine inventory。
+
+##### 31.37.82.8 bounded-stop cleanup是P9 owner的测试专用failure capture
+
+禁止新增第三种rollback authority。P11成功测试读取third-unconsumed snapshot后，用package-private test-only bounded-stop adapter把一个冻结的
+`P11_BOUNDED_STOP_NO_COMMIT` primary交给同一个P9 opaque failure-capture/finalizer；它走同一rollback/close/reopen状态机并与未来success
+claim/COMMIT capability互斥。adapter不从package root导出，production build可保留private但无public入口。
+
+测试必须证明bounded-stop capture one-shot、不能与普通failure capture或未来success token并存、commitAttemptCount仍0、rollback/close/reopen
+计数受限、reopened exact source-v1。不得直接调用public rollback或connection private native rollback绕过owner。
+
+##### 31.37.82.9 完整实现文件route inventory
+
+P11-A spec阶段必须用`rg`/AST生成双runtime fixed read/write route inventory并由fixture冻结，不能依赖31.37.81.9的示例清单。TS至少审计并按
+实际调用修改`operation-baseline-source.ts`、stage、handoff、reconcile、cursor invariants/ownership/campaign、outer、session/rebind/R12/clock、
+transaction owner与sqlite connection。Python至少审计baseline source、stage/handoff/cooperation、reconcile、legacy/cursor invariant campaigns、
+ownership、outer/subprotocol/R12/third与transaction owner。
+
+每个发现的native write/read route必须被分类为pre-registration、public harmless SELECT、authenticated fixed-read、scoped mutation或forbidden；
+unknown route使validator失败。新增route必须同时更新fixture、portable/nonportable evidence与hostile tests，禁止silent fallback。
+
+##### 31.37.82.10 composition adoption原子顺序
+
+唯一adoption tail严格为：authenticate owner+receipt -> 构造所有immutable objects -> 注册composition与owner/receipt exact binding -> 将receipt
+标为composition-pending -> owner state one-way adopt -> composition `begin-adopted`。在最后one-way commit之前caller得不到composition。
+
+registration/binding/pending/owner-adopt四个fault point都有one-shot seam；任何失败保留原primary、删除partial registry entries、tombstone constructed
+objects并立即进入同一P9 failure capture/finalizer。owner adoption成功后后续publish失败不能恢复为unadopted或retry；必须poison/finalize。
+captured partial composition/scope/read permit在fault observer中也不可读取或present。
+
+##### 31.37.82.11 勘误验收门禁
+
+在P11-A实现前先完成独立redbar/validator，至少证明：early failure stage不能伪报17；20-statement与N-row child permits可推进且postflight failure
+有边；zero expected count可消费；owner-active fixed PRAGMA/EQP read可执行且zero mutation；TS/Python retirement不伪造native close；Python original
+primary identity与observation-unavailable cleanup；poison后无DROP authority；machine stage/file/route inventory闭合；bounded-stop复用P9 failure
+authority；composition四点adoption failure atomicity。该redbar与最终实现均需独立H0/M0/L0。
+
+#### 31.37.83 Wave 1E/P10最终接受记录（2026-08-03 PDT追加；既有内容不改）
+
+P10冻结diff经独立终审最终`ACCEPT — H0/M0/L0`。最终门禁：TS Rule12/third focused 29/29；Python focused 41/41、0 skip；
+required cross-runtime real-SQLite parity 2/2；TS typecheck；Python Ruff/mypy；完整SQLite single-worker/forks 46 files passed、2 conditional
+skipped，1,288 tests passed、3 conditional skipped、0 failed，883.89秒；diff check通过。旧session direct-third测试只更新为P10 Rule12-only
+authority契约，implementation没有放宽。
+
+接受边界严格为exact R11 -> bounded R12 -> exact opaque R12 receipt -> authenticated third observation -> retained unconsumed evidence 3/2。
+P10不消费third、不完成cursor-clock、不观察fourth、不mint final fence、不执行COMMIT、不reopen complete-v2、不export public API、不关闭D9/
+release evidence、不证明stars。P9 owner与旧publication chain的真实composition由31.37.81+31.37.82的P11执行；release evidence仍0/93。
+
+#### 31.37.84 P11第二次独立审计勘误与P10 registry对账顺序（2026-08-03 PDT追加；既有内容不改）
+
+本节只追加，不修改31.37.81至31.37.83。第二轮只读审计验证前22,402行SHA-256为
+`fb2be2549f75e82d57ae320cdc87d5c4b304d49772f379d70ffbc86079665bf0`，并确认31.37.82已关闭首轮H6/M5中的主要问题；
+剩余H1/M3来自reusable statement、fixed-read retirement、B2/R12 EQP数量与P10 registry提交时序，按本节冻结。
+
+##### 31.37.84.1 one-shot statement与parent-owned reusable statement分型
+
+mutation route必须在fixture中显式选择两种互斥模型，不能把per-child retirement强加给reusable statement：
+
+1. `child-owned-one-shot`用于migration/B2中每ordinal独立prepare的SQL。每个child own一个statement/cursor，portable顺序是
+   `prepare -> execute -> native-return -> resource-retired -> postflight -> child-consumed`；下一ordinal前上一resource必须retired。
+2. `parent-owned-reusable`用于baseline entries等`prepare=1, execute=N` route。parent scope exact prepare一次并私有强保留handle；每个ordinal
+   child只拥有一次`executionLease`，顺序是`lease-issued -> entered -> execute-returned -> lease-released -> postflight -> child-consumed`。
+   caller永远看不到handle，child release不retire parent statement；parent在N个child完成或任一failure后只执行一次abstract retirement。
+
+parent-owned route portable counts固定`prepare=1, execute=N, executionLeaseReleased=N, parentResourceRetired=1`。`expectedCount=0`仍执行
+prepare=1、execute=0、child count=0、zero-item postflight与parent retirement=1；这条语义必须有真实双runtime test。failure在第i次execute、
+lease release、child postflight或parent retirement时进入parent poison，并由P9 finalizer cleanup；primary-over-retirement保持。
+
+runtime-local retirement：TS证明parent `StatementSync`不泄漏、只由parent lexical state持有并在terminal后清引用；Python证明parent cursor
+close attempt/return=`1/1`。portable parity只比较abstract `parentResourceRetired`，不伪造TS native close。
+
+##### 31.37.84.2 fixed-read portable resource retirement
+
+31.37.82.3 fixed-read状态机中的`closed`统一改读为portable `resource-retired`语义，不要求每个runtime存在native close API：
+
+```text
+issued -> prepared -> bounded-reading -> terminal-row-observed
+       -> resource-retired -> consumed
+```
+
+TS iterator read必须调用/证明iterator `return()`；scalar `StatementSync.get()`则证明handle仅存在于permit-owned lexical scope、未写入caller或
+长期registry、terminal后清除private reference。Python cursor保持close attempt/return=`1/1`。所有runtime都证明下一read permit前前一native
+resource不可再执行，failure时primary不被retirement替换。portable report使用`resourceRetired=true`和resource kind；runtime-local report
+分别给iterator-return、lexical-release或cursor-close，不允许为了相等捏造native API。
+
+##### 31.37.84.3 B2与R12 EQP inventory分离
+
+B2 cursor campaign与P10/R12 EQP是两套不同证据，fixture与route IDs必须分开冻结：
+
+- B2 fixed EQP set精确为15条，沿用既有campaign的15-route inventory、顺序、SQL digest、forbidden-plan与resource budget；
+- R12 fixed EQP set精确为3条：main key count/scan、TEMP driver与main PK point lookup；
+- P11 owner-active fixed-read permits必须覆盖全部15条B2 EQP；R12只复用/认证其3条独立probe；
+- validator拒绝把3当作B2总数、把15当作R12总数、合并route IDs、重复digest冒充不同probe或遗漏B2其余12条。
+
+双runtime parity分别报告`b2EqpProbeCount=15`与`rule12EqpProbeCount=3`，并保留各自route/digest数组；hostile test删除或交换任一项必须
+fail closed。
+
+##### 31.37.84.4 P10 immutable evidence采用两提交闭环
+
+P10 acceptance不能在实现commit未知时伪造completion evidence。提交顺序冻结为：
+
+1. 先在registry仍`in_progress`时提交并推送P10实现、测试、CI、review candidate/final gate与append-only plan；验证local/tracking/remote
+   implementation SHA完全一致。
+2. 再以该immutable SHA更新`D9-SQLITE-RULE12-CLOCK-P10-093`为`completed`，写入五条expected-test exact结果、review/spec/artifact路径、
+   `commit:<implementation-sha>`、completed time/heartbeat与bounded next action。
+3. 同一evidence commit新增P11 pending/in-progress task，依赖P10与P9，expected artifacts/tests绑定31.37.81/82/84，但不获得release weight；
+   dependency graph/coverage matrix/scanner同步。
+4. 重跑task controls、release map、evidence closure audit-only、docs与diff check；提交并推送evidence commit，再次核对三方SHA。
+
+第1与第2提交之间短暂`in_progress`是诚实的immutable evidence获取窗口；只有第2提交及其控制门禁通过后，plan、review与registry才完成对账。
+release evidence继续0/93，P11保持未实现，不能因P10 registry完成而获得D9或release completion。
