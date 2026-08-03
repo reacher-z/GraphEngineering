@@ -194,6 +194,12 @@ jobs:
       - name: Enforce SQLite callsite-classification coverage parity
         timeout-minutes: 10
         run: pnpm test:sqlite-owner-composition-callsite-classification-parity
+      - name: Validate the bounded SQLite P11 baseline-source callsite map
+        timeout-minutes: 10
+        run: pnpm test:sqlite-owner-composition-callsite-map-contract
+      - name: Enforce the SQLite P11 scanner-classifier route-map join
+        timeout-minutes: 10
+        run: pnpm test:sqlite-owner-composition-callsite-route-map
 
   sqlite-cursor-pre-rebind-parity:
     name: SQLite cursor pre-rebind parity

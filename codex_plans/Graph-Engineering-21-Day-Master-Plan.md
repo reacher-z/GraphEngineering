@@ -23223,3 +23223,53 @@ consume、COMMIT、D9/release/RC/stars。
    receipt acceptance、cleanup和四项claim flags；success/failure矩阵必须exact parity。
 6. NP1仍不自动完成P11-B/C/D、stage18、COMMIT、D9或release；完成后仍需独立审计和
    append-only immutable evidence reconciliation。
+
+#### 31.37.96 P11-A-RM1 scoped route-map实现检查点（2026-08-03 PDT追加；既有内容不改）
+
+本节只追加RM1实际实现与验收事实，不回改31.37.94/95。追加前完整23,225行计划
+SHA-256固定为
+`bc46ef2b6028b140a9531fec76b4d1f2268defce73a1faab3a9093fd721dc0bf`。
+
+1. canonical fixture精确冻结两个baseline-source文件的65个scanner identity：
+   TypeScript 18、Python 47；identity有序、一一、不可删除、重复、重排、跨语言替换
+   或从display label重建。
+2. receiver总账保持真实：TS 18全部wrapper/probe；Python为32 confirmed-native、
+   6 wrapper/probe、9 unknown。65项全部`disposition=unknown`，不以receiver truth、
+   exact digest或source provenance替代route authority。
+3. 结构化账本精确为23 call families、50 logical executions、50 resource lifecycles。
+   prepare/read与cursor/execute阶段可共享一个execution/resource identity；同一函数中
+   的独立SQL不得被压成一条edge，跨cursor拼接必须fail closed。
+4. 每项绑定call family、logical execution、resource lifecycle、API stage、connection
+   role、invocation contexts、operation kind、receiver/lower edge、SQL/dynamic closure、
+   parameters、phase、owner/composition、budget、retirement、risk/threat/barriers、
+   non-authorizing role与negative facts。
+5. 九类threat code必须按角色机检：generic sink escalation、digest-not-authority、
+   context conflation、injection seam、API-stage double count、resource cross pairing、
+   dynamic identifier expansion、reopened-audit permit forbidden、wrapper provenance
+   not composition。删除或错移required threat必须失败。
+6. invocation context明确拆分`rm1PermitAvailable=false`和future policy。public generic
+   execute、script/control、inactive validation、reopened audit永远`never`；active shared
+   validator只有拆成closed private leaf后才可能进入`requires-context-split`。
+7. dynamic closure区分`sourceAssetSha256`与`expansionSqlSha256`：12-family runtime
+   SQL digest完整有序、migration-0002的20 statement digest完整有序、requiredTables
+   绑定13项schema identity asset、captured fixed SQL绑定cardinality 1。未知route或
+   receiver不允许抹掉已知closure事实，也不允许closure事实授予permit。
+8. fixture raw SHA-256固定为
+   `16d7514e1fa9995c64c55132844b295c671af8fdc611df8c247261c2d61bf8c7`，
+   sorted canonical SHA-256固定为
+   `85e05220c392c31af0d3a947185250c59913f05bd22fb1c0332310c0137a4364`。
+   TypeScript/Python source blob SHA分别为`d112fb088039a0ed139eeb15e63dabd0a011fc3cf45f24ec0c8cfd1f47be6b68`
+   与`74ea2f6e81f29973a2bbb3a720c7ebf1efdea46cbf51b1cb76c4ad14fea69f3b`。
+9. source blob必须从CLI实际canonical root重算，不能从tool模块所在checkout读取；
+   alternate root缺文件、line-preserving semantic drift、symlink、escape和别名路径均
+   fail closed。scanner与Python classifier各双跑并要求byte deterministic。
+10. 冻结gate为callsite contract 6/6、route-map hostile 11/11、discovery/classifier/
+    route联合19/19、P11 contract/runtime/parity、TypeScript typecheck、Python Ruff/
+    strict Mypy、CI/package parse、docs与diff check。新增uv-dependent gates只进入已有
+    pinned setup-uv+locked sync的cross-language CI job。
+11. 独立whole-diff审计最终H0/M0/L0，但只接受RM1 scoped inventory。必须继续保持
+    `routeClosureClaimed=false`、`nativeProjectionAuthority=false`、
+    `runtimeRouteAuthority=false`、`nativeSourceProvenance=false`、
+    `genuineZeroClaim=false`、`actualNativeIoCount=0`、`sqlAuthority=false`。
+12. RM1不完成P11-A，不启动NP1 authority，不完成P11-B/C/D，不授权stage18/COMMIT，
+    不完成D9，不增加release weight，也不证明RC/stable、外部adoption或stars。

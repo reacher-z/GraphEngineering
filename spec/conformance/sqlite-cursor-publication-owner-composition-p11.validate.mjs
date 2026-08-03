@@ -27,7 +27,7 @@ const ROUTES_CANONICAL_SHA256 =
 const STAGES_CANONICAL_SHA256 =
   "3d0aa8aba16f779f1ba1addc53ab01756a535ce653d22a4449ae757f6dfe7f1e";
 const MARKDOWN_RAW_SHA256 =
-  "a8e9ff2a3941edb08f56b2bd9556b99a89c9a8913c89bff03b5ebd084e0f2a32";
+  "d8ef8c97b69f663ea337cf293559a7ddef819d595a4c51667bc38f1cce1253c6";
 const SUPPORTED_MUTATION_COUNT_POLICIES = [
   ["b2.cursor-seal-table-ddl", { kind: "exact", expectedCount: 1 }],
   ["main.migration-0002", { kind: "exact", expectedCount: 20 }],

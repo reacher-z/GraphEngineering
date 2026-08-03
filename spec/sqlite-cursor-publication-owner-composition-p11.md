@@ -8,6 +8,7 @@ Machine-readable companions:
 
 - `spec/sqlite-cursor-publication-owner-composition-p11.routes.json`
 - `spec/sqlite-cursor-publication-owner-composition-p11.stages.json`
+- `spec/sqlite-cursor-publication-owner-composition-p11.callsites.json`
 
 The normative design inputs are append-only master-plan sections 31.37.81,
 31.37.82, and 31.37.84. Later corrections win: 31.37.84 overrides resource
@@ -284,6 +285,51 @@ Consequently classification progress never by itself changes
 `routeClosureClaimed=false` or the acceptance requirement of zero unknown
 native routes.
 
+### 4.6 Scoped baseline-source route-map evidence
+
+The RM1 callsite fixture is a non-authorizing, source-scoped evidence map. It
+must contain exactly the 18 scanner identities in the TypeScript operation
+baseline source and the 47 identities in the Python operation baseline source.
+Its 65 entries are a one-to-one partition of those scanner candidates; an
+occurrence may not be removed, merged with its prepare/execute counterpart, or
+reconstructed from a display label.
+
+Each entry binds the complete scanner identity and receiver classification,
+the lower-edge evidence currently available, SQL digest or closed-expansion
+evidence, parameter provenance, phase, owner/composition expectation, row and
+cursor budgets, resource lifecycle, route ID, disposition, and a reason. A
+field whose evidence is not closed is represented explicitly as unresolved;
+it is never inferred from a method name or filled with a permissive default.
+Wrapper and lower-native identities cannot both count as one authorized I/O.
+
+The fixture distinguishes a call family from a logical execution and from a
+resource lifecycle. Prepare/read stages may share one logical execution, while
+independent SQL statements in one function may not. Multi-context callsites
+enumerate every known invocation context and mark permit-forbidden contexts;
+a scalar function name cannot collapse inactive, active-owner, and reopened
+audit connections. Risk codes and authority barriers make generic-sink
+escalation, digest substitution, API-stage double counting, injection seams,
+resource cross-pairing, dynamic expansion, provenance substitution, and
+reopened-audit permit reuse machine-checkable. Dynamic closure records its
+source, cardinality, and canonicalization rule even while unresolved, and each
+scoped source is bound by its content SHA-256.
+
+Every invocation context records `rm1PermitAvailable=false`. This bounded RM1
+fact is distinct from `permanentlyPermitForbidden=true`, which is reserved for
+contexts such as reopened audit or transaction-control paths that can never
+reuse an active P11 permit. An active-owner context may remain a future
+closed-leaf candidate without receiving any authority in RM1.
+
+RM1 is deliberately an inventory checkpoint. Every entry remains
+`disposition=unknown`, `runtimeRouteAuthority=false`, and
+`nativeProjectionAuthority=false`. A receiver classified as native is not an
+authorized P11 route, exact SQL alone is insufficient, and a forbidden or
+unknown entry cannot mint/adopt a count receipt. The scoped fixture therefore
+does not alter `routeClosureClaimed=false`, `nativeSourceProvenance=false`,
+`genuineZeroClaim=false`, `actualNativeIoCount=0`, or `sqlAuthority=false`.
+Runtime-real native projection and fixed-read retirement belong to the
+separate NP1 successor after RM1 is independently accepted.
+
 ## 5. Lower native execution contract
 
 No ContextVar, AsyncLocal, thread-local, process-global flag, ambient stack, or
@@ -538,6 +584,11 @@ state.
 
 At minimum, a fixture validator must reject:
 
+- an RM1 callsite map with anything other than the exact 18 TypeScript plus 47
+  Python baseline-source identities; missing, duplicate, reordered, rewritten,
+  cross-language, or scanner/classifier-drifted entries; an unresolved field
+  represented as closed; wrapper/lower-edge double counting; or any entry that
+  sets runtime route/native projection authority before NP1;
 - malformed JSON, duplicate route/stage IDs, duplicate stage ordinals, broken
   predecessors, noncontinuous accepted prefixes, and overlapping slice claims;
 - a route with no classification, a native callsite missing from source
