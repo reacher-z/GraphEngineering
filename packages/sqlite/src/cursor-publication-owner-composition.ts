@@ -424,6 +424,24 @@ function isExactMutationDescriptor(
   ]) as boolean;
 }
 
+function isExactMutationExpectedCount(
+  descriptor: SQLiteCursorPublicationMutationRouteDescriptor,
+  expectedCount: number,
+): boolean {
+  if (!numberIsSafeIntegerIntrinsic(expectedCount)) return false;
+  if (descriptor === SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[1]) {
+    return expectedCount === 20;
+  }
+  if (descriptor === SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[2]) {
+    return expectedCount >= 0 && expectedCount <= 1_024;
+  }
+  return (descriptor === SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[0]
+      || descriptor === SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[3]
+      || descriptor === SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[4]
+      || descriptor === SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[5])
+    && expectedCount === 1;
+}
+
 function isExactFixedReadDescriptor(
   descriptor: SQLiteCursorPublicationFixedReadRouteDescriptor,
 ): boolean {
@@ -452,6 +470,19 @@ function terminalCompositionFailure(
     primary,
   );
   return finalizeSQLiteCursorPublicationTransactionFailureIntrinsic(capture);
+}
+
+function authenticateActiveBeginOrTerminate(
+  composition: CompositionState,
+): ReturnType<typeof authenticateActiveBegin> {
+  try {
+    return authenticateActiveBegin(composition);
+  } catch (error) {
+    if (composition.lifecycle === "begin-adopted") {
+      return terminalCompositionFailure(composition, primaryObject(error));
+    }
+    throw error;
+  }
 }
 
 function poisonParent(parent: ParentScopeState, child?: ChildPermitState): never {
@@ -637,7 +668,7 @@ export function readSQLiteCursorPublicationOwnerCompositionSnapshotIntrinsic(
   if (state.lifecycle === "constructing") {
     return fail("GE_SQLITE_P11_INVALID_STATE", "owner composition is not published");
   }
-  const current = authenticateActiveBegin(state);
+  const current = authenticateActiveBeginOrTerminate(state);
   return objectFreezeIntrinsic({
     acceptedStageIds: objectFreezeIntrinsic([]) as readonly [],
     acceptedStageReceiptCount: 0,
@@ -671,8 +702,7 @@ export function issueSQLiteCursorPublicationMutationParentScopeIntrinsic(
     return fail("GE_SQLITE_P11_SCOPE_INVALID", "mutation parent scope input is invalid");
   }
   if (!isExactMutationDescriptor(descriptor)
-      || !numberIsSafeIntegerIntrinsic(expectedCount) || expectedCount < 0
-      || expectedCount > 1_024) {
+      || !isExactMutationExpectedCount(descriptor, expectedCount)) {
     return terminalCompositionFailure(
       compositionState,
       new SQLiteCursorPublicationOwnerCompositionError(
@@ -681,7 +711,7 @@ export function issueSQLiteCursorPublicationMutationParentScopeIntrinsic(
       ),
     );
   }
-  authenticateActiveBegin(compositionState);
+  authenticateActiveBeginOrTerminate(compositionState);
   const parent = objectFreezeIntrinsic(objectCreateIntrinsic(null)) as
     SQLiteCursorPublicationMutationParentScope;
   const reusable = descriptor.model === "parent-owned-reusable";
@@ -916,7 +946,7 @@ export function issueSQLiteCursorPublicationFixedReadPermitIntrinsic(
       ),
     );
   }
-  authenticateActiveBegin(compositionState);
+  authenticateActiveBeginOrTerminate(compositionState);
   const permit = objectFreezeIntrinsic(objectCreateIntrinsic(null)) as
     SQLiteCursorPublicationFixedReadPermit;
   const state: FixedReadPermitState = {
@@ -1043,7 +1073,7 @@ export function boundedStopSQLiteCursorPublicationOwnerCompositionForTestIntrins
       || isProxy(primary)) {
     return fail("GE_SQLITE_P11_INVALID_STATE", "bounded-stop presentation is invalid");
   }
-  authenticateActiveBegin(state);
+  authenticateActiveBeginOrTerminate(state);
   state.lifecycle = "poisoned";
   const capture = captureSQLiteCursorPublicationTransactionFailureIntrinsic(state.owner, primary);
   return finalizeSQLiteCursorPublicationTransactionFailureIntrinsic(capture);
@@ -1066,7 +1096,7 @@ export function assertSQLiteCursorPublicationOwnerCompositionRule12Intrinsic(
   if (state.lifecycle !== "begin-adopted") {
     return fail("GE_SQLITE_P11_INVALID_STATE", "owner composition is terminal");
   }
-  authenticateActiveBegin(state);
+  authenticateActiveBeginOrTerminate(state);
   try {
     readSQLiteCursorRule12SuccessReceiptSnapshotIntrinsic(rule12Receipt);
   } catch (cause) {

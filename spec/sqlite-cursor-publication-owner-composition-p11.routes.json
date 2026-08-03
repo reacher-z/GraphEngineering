@@ -144,7 +144,7 @@
       ]
     },
     {"id": "b2.common-stage-insert", "classification": "scoped-mutation", "model": "parent-owned-reusable", "phase": "b2-scope-active", "pythonSqlSha256": "ce9953e3c1d9c19fb48ec469dd4c4ef99d3c54c07897c232f6ddac4f62861560", "typescriptSqlSha256": "c7d83c56e78a4438087cd4a3028ca69c1bc609861e9b332a2f6e8967ccf6c4de"},
-    {"id": "b2.cursor-seal-table-ddl", "classification": "scoped-mutation", "model": "child-owned-one-shot", "phase": "b2-scope-active", "sqlSha256": "032db65e1e8c11d90ed27fc6a6e2cab130d1bf33c7d688381f5666379c52b84a"},
+    {"id": "b2.cursor-seal-table-ddl", "classification": "scoped-mutation", "model": "child-owned-one-shot", "phase": "b2-scope-active", "sqlSha256": "032db65e1e8c11d90ed27fc6a6e2cab130d1bf33c7d688381f5666379c52b84a", "countPolicy": {"kind": "exact", "expectedCount": 1}},
     {"id": "b2.cursor-seal-insert", "classification": "scoped-mutation", "model": "parent-owned-reusable", "phase": "b2-scope-active", "sqlSha256": "fbcf5255335c392f4f18818d8f12e79abbcfc677f768579fbe05f317a7a4774b"}
   ],
   "migration0002Route": {
@@ -154,6 +154,7 @@
     "phase": "migration-0002-scope-active",
     "assetSha256": "1bf03d68eed45366bc7b34ccc329faa51ea389362db59f6a4307b3033d37a96d",
     "expectedCount": 20,
+    "countPolicy": {"kind": "exact", "expectedCount": 20},
     "statementSqlSha256": [
       "39fbe05cf1aeb4883c47efc286b2f0aab3af90a1d0c079287887345df22db549",
       "9298e43ac33cf17e5d546e2c227845edfe9ebeadbad28e0c7fcd5bd065afecd1",
@@ -178,10 +179,10 @@
     ]
   },
   "permanentMutationRoutes": [
-    {"id": "main.baseline-entries", "classification": "scoped-mutation", "model": "parent-owned-reusable", "phase": "baseline-entries-scope-active", "sqlSha256": "b522e3ee2bb4599d74b32c8602242b1b74c3f804dd9129a8eb5a0f529cdca88b", "prepare": 1, "execute": "retained-entry-count"},
-    {"id": "main.baseline-header", "classification": "scoped-mutation", "model": "child-owned-one-shot", "phase": "baseline-header-scope-active", "sqlSha256": "b1a32ec385dd78f9727a63b9c303a9cb95c9525910010984d09b7f0fd868e79a", "prepare": 1, "execute": 1},
-    {"id": "main.operation-sequence-zero", "classification": "scoped-mutation", "model": "child-owned-one-shot", "phase": "operation-sequence-zero-scope-active", "sqlSha256": "a9afde17c90fcc7381eefa3fa81823752d6f1bc29c9eced2de8b31176cc1dd85", "prepare": 1, "execute": 1},
-    {"id": "main.cursor-rebind", "classification": "scoped-mutation", "model": "child-owned-one-shot", "phase": "cursor-rebind-scope-active", "sqlSha256": "6fc61b515e758a1e84745af28783f4e9dcee5e76f80f314aa25a08980d2fef91", "prepare": 1, "execute": 1, "affectedRows": "N"}
+    {"id": "main.baseline-entries", "classification": "scoped-mutation", "model": "parent-owned-reusable", "phase": "baseline-entries-scope-active", "sqlSha256": "b522e3ee2bb4599d74b32c8602242b1b74c3f804dd9129a8eb5a0f529cdca88b", "prepare": 1, "execute": "retained-entry-count", "countPolicy": {"kind": "bounded-dynamic", "minimum": 0, "maximum": 1024, "requiresFutureExactCountProvenance": true, "zeroIsOnlyShapeUntilReceipt": true}},
+    {"id": "main.baseline-header", "classification": "scoped-mutation", "model": "child-owned-one-shot", "phase": "baseline-header-scope-active", "sqlSha256": "b1a32ec385dd78f9727a63b9c303a9cb95c9525910010984d09b7f0fd868e79a", "prepare": 1, "execute": 1, "countPolicy": {"kind": "exact", "expectedCount": 1}},
+    {"id": "main.operation-sequence-zero", "classification": "scoped-mutation", "model": "child-owned-one-shot", "phase": "operation-sequence-zero-scope-active", "sqlSha256": "a9afde17c90fcc7381eefa3fa81823752d6f1bc29c9eced2de8b31176cc1dd85", "prepare": 1, "execute": 1, "countPolicy": {"kind": "exact", "expectedCount": 1}},
+    {"id": "main.cursor-rebind", "classification": "scoped-mutation", "model": "child-owned-one-shot", "phase": "cursor-rebind-scope-active", "sqlSha256": "6fc61b515e758a1e84745af28783f4e9dcee5e76f80f314aa25a08980d2fef91", "prepare": 1, "execute": 1, "affectedRows": "N", "countPolicy": {"kind": "exact", "expectedCount": 1}}
   ],
   "fixedReadRoutes": {
     "base": [
@@ -275,6 +276,7 @@
     "eqpSetsAreDisjointByRouteId": true,
     "missingOrDuplicateEqpRouteRejected": true,
     "unknownRouteRejectedBeforeNativeIo": true,
+    "fakeZeroCanCompleteWithoutExactCountReceipt": false,
     "failedOrPoisonedGraphCanMintDropPermit": false,
     "commitAttemptCount": 0
   }

@@ -15,7 +15,51 @@ test("P11 route and stage inventories validate as an honest redbar contract", ()
     routeClosureClaimed: false,
     rule12EqpProbeCount: 3,
     stageCount: 30,
+    supportedMutationDescriptorCount: 6,
   });
+});
+
+test("all six supported mutation count policies reject deletion, drift, and fake zero", () => {
+  const policyRoutes = (candidate) => [
+    candidate.routes.b2MutationRoutes.find(
+      ({ id }) => id === "b2.cursor-seal-table-ddl",
+    ),
+    candidate.routes.migration0002Route,
+    ...candidate.routes.permanentMutationRoutes,
+  ];
+  assert.equal(policyRoutes(canonical).length, 6);
+
+  for (let index = 0; index < 6; index += 1) {
+    const missing = clone(canonical);
+    delete policyRoutes(missing)[index].countPolicy;
+    assert.throws(() => validateP11Contract(missing));
+  }
+
+  for (const mutate of [
+    (candidate) => { policyRoutes(candidate)[0].countPolicy.expectedCount = 2; },
+    (candidate) => { policyRoutes(candidate)[1].countPolicy.expectedCount = 19; },
+    (candidate) => { policyRoutes(candidate)[2].countPolicy.minimum = 1; },
+    (candidate) => { policyRoutes(candidate)[2].countPolicy.maximum = 1_025; },
+    (candidate) => {
+      policyRoutes(candidate)[2].countPolicy.requiresFutureExactCountProvenance = false;
+    },
+    (candidate) => {
+      policyRoutes(candidate)[2].countPolicy.zeroIsOnlyShapeUntilReceipt = false;
+    },
+    (candidate) => {
+      policyRoutes(candidate)[2].countPolicy.fakeZeroCompletionClaimed = true;
+    },
+    (candidate) => { policyRoutes(candidate)[3].countPolicy.expectedCount = 0; },
+    (candidate) => { policyRoutes(candidate)[4].countPolicy.expectedCount = 2; },
+    (candidate) => { policyRoutes(candidate)[5].countPolicy.kind = "bounded-dynamic"; },
+    (candidate) => {
+      candidate.routes.acceptanceAssertions.fakeZeroCanCompleteWithoutExactCountReceipt = true;
+    },
+  ]) {
+    const candidate = clone(canonical);
+    mutate(candidate);
+    assert.throws(() => validateP11Contract(candidate));
+  }
 });
 
 test("B2 15 and Rule12 3 EQP inventories cannot be merged, omitted, or duplicated", () => {

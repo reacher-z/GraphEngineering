@@ -22758,3 +22758,139 @@ total-change drift的回归建议，不是native SQL、route closure或resource 
 substrate保留；Python scope/read、actual native-callsite unknown=0、runtime-real retirement、portable parity、P11-B/C/D、stage18、
 third consume、COMMIT、D9 release completion及stars目标继续Open。下一实现批次必须从Python独立scope/read parity开始，并继续使用
 rejected-first审计与两提交不可变证据闭环。
+
+#### 31.37.87 P11-A scope/read parity、count policy与native-callsite discovery检查点（2026-08-03 PDT追加；既有内容不改）
+
+本节严格追加于既有22,760行之后。追加前整份计划SHA-256为
+`91dac4ba6d42023e34b47913617414a2d8277da78828187c46c994e75b5fdfbe`；此前缀必须逐字保持。这里记录的是P11-A
+zero-I/O authority substrate的第二个bounded tranche，不是P11-A native route closure，更不是P11-B/C/D、D9或release完成。
+
+##### 31.37.87.1 rejected-first结论与修复纪律
+
+本批没有把首轮green当成接受。三条独立实现线与主线程交叉审计依次发现并关闭以下问题：
+
+1. native-callsite scanner首版会把任意`mystery.prepare(...)`/`mystery.execute(...)`派生的statement/cursor错误升级为proven；
+   exact-known SQL因而可能被误分类。修复后派生receiver只能继承已证明lower receiver的置信度，不能凭方法名升级；TS与Python均新增
+   unknown receiver + exact-known SQL hostile，必须保持unknown。
+2. mutation parent首版只校验caller传入count为0..1024，导致`main.migration-0002`可用0、singleton DDL可用2完成authority
+   shape。修复后exact route identity绑定count policy：migration精确20；B2 seal DDL、baseline header、operation sequence zero与
+   cursor rebind精确1；只有baseline entries reusable shape允许0..1024。
+3. `baseline-entries`的动态0/3没有projection/root/count receipt，不能写成genuine-zero或真实N。parity case改名
+   `reusable-shape-0/3`，portable字段固定`dynamicCountProvenance=false`，nonclaim新增`dynamic-count-provenance`。
+4. Python minted token首版slots可被`object.__setattr__`绕过，registry虽识别原token却会在presentation mismatch局部抛错并留下
+   active owner。修复后composition/parent/child/fixed token普通set/del立即terminalize；底层set/del绕过也从registry record refs
+   恢复exact owner/composition/parent并进入同一P9 failure capture/finalizer，不能信任已篡改token attr。
+5. Python composition虽definition-time捕获object intrinsics，P9 finalizer首版仍有38处动态object get/set，替换
+   `builtins.object`后会在secondary cleanup fault中留下active transaction。P9现机械捕获并替换这些intrinsics；hostile replacement
+   的get/set/del均抛sentinel时，P11 order primary仍保持exact identity且rollback/close/reopen=`1/1/1`、COMMIT 0。
+6. root runtime script首版在corepack-only环境中调用裸`pnpm`而失败。标准入口现统一使用`corepack pnpm`，避免CI安装行为掩盖本地
+   不可复现问题。
+
+任何后续审计若重新复现上述任一问题，必须把本tranche重新标记rejected；不得以测试总数增长替代语义关闭。
+
+##### 31.37.87.2 machine count-policy contract
+
+P11 route fixture对当前六个runtime-supported mutation descriptors增加exact `countPolicy`：
+
+- `b2.cursor-seal-table-ddl`：`exact-static=1`；
+- `main.migration-0002`：`exact-static=20`，同时保留asset SHA与20个statement SHA；
+- `main.baseline-entries`：`bounded-dynamic=0..1024`，并固定
+  `requiresFutureExactCountProvenance=true`、`zeroIsOnlyShapeUntilReceipt=true`、`fakeZeroCompletionClaimed=false`；
+- `main.baseline-header`、`main.operation-sequence-zero`与`main.cursor-rebind`：各`exact-static=1`。
+
+acceptance fixture明确`fakeZeroCanCompleteWithoutExactCountReceipt=false`。validator维护独立expected-policy矩阵，检查六项数量、kind、
+exact count、bounds与两个future-provenance flag；hostile test删除任一policy，或把1改2、20改19、bounds改1/1025、future flag改false、
+fake-zero claim改true，均fail closed。更新后contract gate为6/6，summary新增`supportedMutationDescriptorCount=6`；
+route closure仍false、actual unclassified仍null，count policy不能冒充native-callsite closure。
+
+##### 31.37.87.3 TypeScript zero-I/O lattice hardened evidence
+
+TypeScript在既有package-private composition lattice上增加route-count exact guard与完整native-current drift矩阵：
+
+- 24个导出派生transition分别在真实transaction epoch、TEMP mutation epoch或total changes漂移后重证；
+- transaction-ended、lineage replacement与generation replacement都必须在新authority/use前失败；
+- reproof failure先poison selected composition，再把同一primary交给P9 finalizer；
+- 20组wrong-count hostile包含fixed route的0/2/19/21、负数、1025、fraction、NaN、Infinity、boolean、string、bigint、boxed/
+  Proxy输入，全部在mutation native I/O前失败并完成P9 bounded cleanup；
+- clone/proxy descriptor、Reflect/Object/WeakMap/WeakRef、isolated `--expose-gc`仍通过；
+- `actualNativeIoCount=0`、`sqlAuthority=false`、native retirement与route closure继续false。
+
+focused TypeScript P11为70/70；P9 affected suite为26 pass/1 environment-conditional skip；SQLite typecheck通过。这里的native drift
+是对P9 current observation的真实扰动检测，不代表P11 scope已经执行native SQL。
+
+##### 31.37.87.4 Python independent scope/read lattice与exact cleanup
+
+Python独立实现与TS同义但非共享代码的mutation parent/ordinal child与fixed-read state machines：
+
+- migration N=20、singleton N=1与baseline reusable shape N=0/3；child issue/enter/return/retire/postflight/consume严格ordinal；
+- reusable prepare=1、execution lease release=N、zero postflight、parent retirement=1；
+- B2 15与Rule12 3 fixed-read descriptors分离；zero/2 row执行issued→prepared→bounded-reading→terminal→resource-retired→consumed；
+- route descriptor必须是fixture-derived exact singleton identity；NamedTuple clone即使value相等也拒绝并terminalize；
+- 每个parent/child/read lookup与transition现场调用P9 native-current observation，不依赖cached snapshot；
+- snapshot drift、order failure、count failure、ordinary token mutation与base-object mutation绕过全部保留exact primary并进入P9 cleanup；
+- composition、parent、child、fixed permit与四个weak registry在外部引用drop并双GC后回baseline，不形成反向强根或stale-ID删除；
+- native cursor close attempt/return仍0/0，因为本slice没有native cursor；不能把abstract release伪写成真实close。
+
+focused Python P11为73/73；P9+P11为109/109；P10 Rule12 41/41；Ruff与两source mypy通过。P9 transaction-owner改动只做
+definition-time object intrinsic capture，不扩展BEGIN/cleanup/COMMIT语义。
+
+##### 31.37.87.5 normalized cross-runtime parity
+
+新增P11 normalized reporter与TS-launches-Python parity。portable case固定顺序为：
+
+1. `child-owned-20`：migration exact descriptor count shape；
+2. `reusable-shape-0`与`reusable-shape-3`：明确没有dynamic count provenance；
+3. `fixed-read-0`与`fixed-read-2`；
+4. `mutation-order-failure`：exact code与P9 rollback/close/reopen/COMMIT计数。
+
+每个case及全局invariants都包含`actualNativeIoCount=0`、`sqlAuthority=false`、`dynamicCountProvenance=false`、
+`routeClosure=false`、`stage18Accepted=false`与`commitAttemptCount=0`。runtime-local resource kind独立：TS只报告
+iterator-return/lexical-release抽象，Python报告abstract-python-cursor-release；portable equality不捏造API。TypeScript启动Python两次，
+Python stdout单行canonical JSON、两次4,574 bytes逐字一致；portable JSON byte-for-byte一致。专用环境要求uv，缺失必须fail而非skip。
+parity gate为3/3，TS typecheck、Python reporter Ruff/mypy通过。
+
+##### 31.37.87.6 deterministic native-callsite discovery及诚实红门
+
+新增只读deterministic scanner，默认扫描`packages/sqlite/src/**/*.ts`与`python/src/graph_engineering/sqlite_*.py`。TypeScript使用
+repository-pinned compiler AST，Python使用stdlib AST子进程。scanner解析literal、static template、function-local alias、member alias、
+concatenation、interpolation、method alias及prepared lineage；但只有receiver provenance已证明且SQL exact、digest在fixture中唯一可解释时才可能
+分类。name heuristic、dynamic/interpolated SQL、computed method、unresolved prepared lineage、unknown receiver、exact但未登记digest全部保留unknown。
+
+生产扫描两次byte deterministic：70 files（TS 43、Python 27），457 candidates（TS 206、Python 251），343 exact SQL；
+operation候选为read 227、mutation 82、transaction/forbidden 33、other unknown 115。当前457/457全部
+`routeClassification=unknown`，fixture digest candidate仅1，classified=0，`routeClosureClaimed=false`。这些数字是下一轮人工/机器
+triage的工作清单，不是457个确认P11 callsite，也不是unknown=0证据。scanner hostile 3/3并接入root package/CI plan-validation入口。
+
+##### 31.37.87.7 当前nonclaims与下一bounded objective
+
+本tranche仍不接受：真实P11 native SQL、真实iterator/cursor/statement retirement、baseline count/root receipt、457个候选的route分类、
+actual native unknown=0、P11-B owner-composed B2、P11-C permanent writes、P11-D R11/R12/third transitive provenance、third consume、stage18、
+fourth clock、TEMP retirement、final fence、success、COMMIT、D9 completion、release weight、RC/stable或stars结果。
+
+下一bounded objective必须按以下顺序执行：
+
+1. 将457 candidates按native receiver truth分成confirmed-native、wrapper/guard/test-like production probe与false positive；任何unknown不得丢弃；
+2. 为confirmed native callsite生成稳定`path:line:method:SQL-origin` identity，绑定exact fixture route或明确forbidden；跨文件SQL alias不能凭名称猜测；
+3. 先接owner-active fixed reads与runtime-real retirement，证明mutation delta 0及前一resource不能跨permit使用；
+4. 为baseline entries引入exact retained projection/count receipt，使genuine N=0与fake-zero可区分，再允许native reusable execution；
+5. 每接一个mutation route都绑定lower writer hook、prepare/execute/retirement count、fault boundary与P9 exact cleanup；
+6. 只有confirmed native unknown实际为0、双runtime real-SQL tests/parity全绿、完整SQLite回归与独立H0/M0/L0后，才可把P11-A标记complete并开始P11-B。
+
+提交仍采用两阶段：先提交并推送实现/测试/spec/CI/append-only plan，验证local/tracking/remote immutable SHA；再在后续evidence commit
+更新registry heartbeat/review/coverage，但P11保持`in_progress`、completed tasks仍44、release evidence仍0/93。
+
+#### 31.37.88 §31.37.87 exact-field与drift-evidence勘误（2026-08-03 PDT追加；既有内容不改）
+
+本节只追加勘误，不回改31.37.87。追加前计划为22,880行，SHA-256固定为
+`40095c789cd74de7d52377fb206a1e79b882b3a94238e9048b09c02664ef3482`。
+
+31.37.87.2中的`exact-static`是概念描述，不是fixture逐字段值。canonical `countPolicy.kind`实际固定为`"exact"`，并分别用
+`expectedCount: 1`或`expectedCount: 20`表达singleton/migration策略。baseline policy实际只含`kind: "bounded-dynamic"`、
+`minimum: 0`、`maximum: 1024`、`requiresFutureExactCountProvenance: true`与`zeroIsOnlyShapeUntilReceipt: true`；
+`fakeZeroCompletionClaimed`不在该policy对象中。fake-zero禁止项由独立acceptance assertion
+`fakeZeroCanCompleteWithoutExactCountReceipt: false`表达。validator同时冻结policy对象和acceptance assertion，因此实现语义不变。
+
+31.37.87.3中的24-transition drift证据应精确理解为：测试先执行真实migration前四条语句，使transaction epoch、TEMP mutation epoch与
+total changes共同偏离cached begin watermarks，然后对24个导出派生transition逐项验证current reproof与P9 cleanup。当前测试没有把三类
+watermark drift分别隔离成三组72-case矩阵；因此只能声称“每个transition拒绝已发生的组合native-current drift”，不能声称每类drift都已
+单独注入并独立定位。独立三类fault isolation仍是future hardening，不影响本tranche bounded zero-I/O H0/M0/L0接受。

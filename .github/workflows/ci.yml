@@ -34,6 +34,7 @@ jobs:
       - run: pnpm test:sqlite-ledger-contract
       - run: pnpm test:sqlite-transaction-owner-contract
       - run: pnpm test:sqlite-owner-composition-contract
+      - run: pnpm test:sqlite-owner-composition-callsite-discovery
       - run: pnpm check:docs
       - run: pnpm check:task-controls
       - run: pnpm check:sqlite-migrations
@@ -184,6 +185,9 @@ jobs:
       - name: Enforce SQLite Rule 12 cross-runtime parity
         timeout-minutes: 10
         run: pnpm test:sqlite-cursor-publication-rule12-parity
+      - name: Enforce SQLite P11 owner-composition cross-runtime parity
+        timeout-minutes: 10
+        run: pnpm test:sqlite-owner-composition-parity
 
   sqlite-cursor-pre-rebind-parity:
     name: SQLite cursor pre-rebind parity

@@ -23,11 +23,25 @@ const OWNER_CASE_PATH = path.join(
 );
 const SHA256 = /^[0-9a-f]{64}$/u;
 const ROUTES_CANONICAL_SHA256 =
-  "5a74f6c92068e79cd013bbe66a4f999854fdf0732863df4a94ca7d9adbe36d11";
+  "2424d6a1e049f2d7515d343684fe96b72c6f5fa3e327e68224e218257aa04c09";
 const STAGES_CANONICAL_SHA256 =
   "3d0aa8aba16f779f1ba1addc53ab01756a535ce653d22a4449ae757f6dfe7f1e";
 const MARKDOWN_RAW_SHA256 =
-  "36c4c267f730b457758aa65227c5267d416119950f72c9e8371e09e0dfb18af4";
+  "8c28cbe9329deea8393f3ecbeeece87aa5b04bacc8134aa38d60057587cbfb12";
+const SUPPORTED_MUTATION_COUNT_POLICIES = [
+  ["b2.cursor-seal-table-ddl", { kind: "exact", expectedCount: 1 }],
+  ["main.migration-0002", { kind: "exact", expectedCount: 20 }],
+  ["main.baseline-entries", {
+    kind: "bounded-dynamic",
+    minimum: 0,
+    maximum: 1_024,
+    requiresFutureExactCountProvenance: true,
+    zeroIsOnlyShapeUntilReceipt: true,
+  }],
+  ["main.baseline-header", { kind: "exact", expectedCount: 1 }],
+  ["main.operation-sequence-zero", { kind: "exact", expectedCount: 1 }],
+  ["main.cursor-rebind", { kind: "exact", expectedCount: 1 }],
+];
 
 function readJson(file) {
   return JSON.parse(fs.readFileSync(file, "utf8"));
@@ -135,6 +149,18 @@ function validateRoutes(routes, { repoRoot = ROOT } = {}) {
     routes.permanentMutationRoutes.find(({ id }) => id === "main.baseline-entries")?.model,
     "parent-owned-reusable",
   );
+  const supportedMutationRoutes = [
+    routes.b2MutationRoutes.find(({ id }) => id === "b2.cursor-seal-table-ddl"),
+    routes.migration0002Route,
+    ...routes.permanentMutationRoutes,
+  ];
+  assert.equal(supportedMutationRoutes.every((route) => route !== undefined), true);
+  assert.deepEqual(
+    supportedMutationRoutes.map(({ id, countPolicy }) => [id, countPolicy]),
+    SUPPORTED_MUTATION_COUNT_POLICIES,
+    "all six P11-A supported mutation descriptors must retain their exact count policy",
+  );
+  unique(supportedMutationRoutes.map(({ id }) => id), "P11-A supported mutation descriptors");
 
   const b2Eqp = routes.fixedReadRoutes.b2EqpSet;
   const rule12Eqp = routes.fixedReadRoutes.rule12EqpSet;
@@ -158,6 +184,7 @@ function validateRoutes(routes, { repoRoot = ROOT } = {}) {
     eqpSetsAreDisjointByRouteId: true,
     missingOrDuplicateEqpRouteRejected: true,
     unknownRouteRejectedBeforeNativeIo: true,
+    fakeZeroCanCompleteWithoutExactCountReceipt: false,
     failedOrPoisonedGraphCanMintDropPermit: false,
     commitAttemptCount: 0,
   });
@@ -329,6 +356,10 @@ function validateMarkdown(markdownText) {
     "commitAttemptCount=0",
     "B2 EQP set: exactly 15",
     "R12 EQP set: exactly 3",
+    "requiresFutureExactCountProvenance=true",
+    "zeroIsOnlyShapeUntilReceipt=true",
+    "dynamicCountProvenance=false",
+    "fake-zero completion claim",
     "The exact original Python primary is re-raised",
     "It must not be cited as P11 completion.",
   ]) assert.equal(markdownText.includes(required), true, `missing Markdown invariant: ${required}`);
@@ -343,6 +374,7 @@ export function validateP11Contract({ markdownText, routes, stages, ownerCase, r
     routeClosureClaimed: routes.sourceInventory.routeClosureClaimedByThisArtifact,
     rule12EqpProbeCount: routes.fixedReadRoutes.rule12EqpSet.routeIds.length,
     stageCount: stages.stages.length,
+    supportedMutationDescriptorCount: SUPPORTED_MUTATION_COUNT_POLICIES.length,
   };
 }
 

@@ -156,6 +156,18 @@ runtime alias must update the route fixture and hostile tests before it can run
 under an active P11 owner. Token classification, SQL hash alone, caller route
 names, and ambient booleans are not authorization.
 
+P11-A freezes a count policy for each of the six mutation descriptors that its
+zero-I/O lattice can mint. `main.migration-0002` requires exact count 20.
+`b2.cursor-seal-table-ddl`, `main.baseline-header`,
+`main.operation-sequence-zero`, and `main.cursor-rebind` each require exact
+count 1. Only `main.baseline-entries` accepts a bounded dynamic count, in the
+inclusive range 0..1024. This is a shape constraint, not evidence that a
+source projection produced that count. Its machine policy therefore keeps
+`requiresFutureExactCountProvenance=true` and
+`zeroIsOnlyShapeUntilReceipt=true`. Deleting, widening, substituting, or
+moving a count policy to another descriptor is contract drift and fails
+before mutation authority or native I/O.
+
 The route fixture inventories the actual plan modules in both runtimes. The
 audit includes baseline source/stage/handoff/cooperation/reconcile, all
 stream/record/checkpoint/lease/lock/hold/legacy/cursor invariant paths, cursor
@@ -200,6 +212,12 @@ The only permanent route families before the P11 terminal boundary are:
 3. baseline header, exact INSERT `1/1`;
 4. operation sequence zero, exact INSERT `1/1`;
 5. cursor rebind, exact UPDATE, prepare/execute `1/1`, affected rows N.
+
+The first, third, fourth, and fifth child-owned descriptor counts are frozen
+as 20, 1, 1, and 1 respectively. Baseline entries alone is bounded-dynamic
+0..1024. Until a future lower-owned exact retained-projection/count receipt is
+adopted, P11-A may demonstrate only reusable state-machine shapes for N=0 or
+N>0. It cannot report those shapes as genuine retained-entry cardinality.
 
 Asset substitution, statement replacement, reorder, skip, repeat, extra
 statement, caller row injection, caller parameters, or execution outside the
@@ -285,11 +303,14 @@ retires the parent handle. TypeScript proves private lexical retention and
 terminal reference clearing; Python proves one parent-cursor close attempt and
 return. Portable parity never invents a TypeScript native close API.
 
-For `N=0`, exact zero provenance is still authenticated, prepare remains 1,
-execute and child count are 0, zero-item postflight runs once, and the parent
-resource retires once before parent consumption. A claimed zero that disagrees
-with the source/projection count is hostile input. Tests distinguish a genuine
-zero route from N=0 cursors with nonzero baseline entries.
+For a future fully integrated `N=0` path, exact zero provenance must be
+authenticated, prepare remains 1, execute and child count are 0, zero-item
+postflight runs once, and the parent resource retires once before parent
+consumption. P11-A currently has no exact retained-projection/count receipt:
+its bounded zero is only a reusable state-machine shape and cannot complete a
+genuine-zero claim. A claimed zero without that future receipt, or one that
+disagrees with the source/projection count, is hostile input. Future tests must
+distinguish a genuine zero route from N=0 cursors with nonzero baseline entries.
 
 ## 7. Authenticated fixed reads
 
@@ -414,8 +435,9 @@ independently demonstrate all of the following:
 1. an early fault cannot report stage 17 or include its attempted stage;
 2. the exact 20-statement migration child sequence advances one ordinal at a
    time and a postflight failure has `child-failed -> parent-poisoned`;
-3. reusable N-row leases, genuine zero count, fake zero, zero replay, and
-   N=0-cursor/nonzero-entry cases obey the selected resource model;
+3. reusable N-row lease shapes remain bounded, while genuine zero count,
+   fake zero, zero replay, and N=0-cursor/nonzero-entry completion remain red
+   until an exact lower-owned count receipt exists;
 4. owner-active fixed PRAGMA and all 15 B2 EQP permits are bounded, retired,
    consumed, and have zero mutation;
 5. TypeScript and Python retirement evidence is runtime-real and portable
@@ -446,6 +468,11 @@ consume/fail counts, ordered route IDs and trusted digests, begin/current
 watermarks and deltas, N/root/identity evidence, R11/R12/clock counts, I/O
 vector, cleanup classification, claims, and nonclaims.
 
+P11-A normalized reports label the reusable cases as shapes, carry
+`dynamicCountProvenance=false` in every case and the portable envelope, and
+list `dynamic-count-provenance` as a nonclaim. The exact migration count-20
+descriptor shape is portable evidence, but it is not native SQL execution.
+
 Runtime-local evidence retains TypeScript iterator-return/lexical-release and
 Python cursor-close counts. Exact JSON key/order/value parity is required only
 for portable fields. A TypeScript parity test launches the Python reporter;
@@ -469,6 +496,10 @@ At minimum, a fixture validator must reject:
   inventory, an unknown SQL/digest/parameter source, or a mutation route with no
   explicit resource model;
 - migration statement count other than 20;
+- deletion or drift of any of the six supported descriptor `countPolicy`
+  objects, singleton counts other than 1, migration count other than 20,
+  baseline-entry bounds other than 0..1024, or a fake-zero completion claim
+  before an exact retained-projection/count receipt;
 - B2 EQP count other than 15 or R12 EQP count other than 3;
 - child-owned next-ordinal before retirement, reusable prepare other than one,
   missing parent retirement, or a zero route that skips prepare/postflight;

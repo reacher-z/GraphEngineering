@@ -13,6 +13,8 @@ from .sqlite_operation_baseline_source import SQLiteV1BaselineConnectionOwner
 _CONSTRUCTION_TOKEN = object()
 _TYPE = type
 _ISINSTANCE = isinstance
+_OBJECT_GETATTRIBUTE = object.__getattribute__
+_OBJECT_SETATTR = object.__setattr__
 
 GUARDED_TRANSACTION_CONTROL_PATHS = (
     "connection-commit-method",
@@ -187,9 +189,7 @@ class _SQLiteCursorPublicationTransactionOwner:
         if token is not _CONSTRUCTION_TOKEN:
             raise TypeError("GE_SQLITE_TX_OWNER_CONSTRUCTION")
         self.__connection: SQLiteV1BaselineConnectionOwner | None = connection
-        self.__failure_capture: (
-            _SQLiteCursorPublicationTransactionFailureCapture | None
-        ) = None
+        self.__failure_capture: _SQLiteCursorPublicationTransactionFailureCapture | None = None
         self.__lineage: _SQLiteCursorPublicationTransactionLineage | None = lineage
         self.__generation: _SQLiteCursorPublicationTransactionGeneration | None = generation
         self.__receipt: _SQLiteCursorPublicationBeginReceipt | None = None
@@ -288,9 +288,9 @@ class _State:
     begin_temp_mutation_epoch_unchanged: bool = False
     guard_rejection_counts: tuple[int, ...] = (0,) * 19
     primary_ref: ReferenceType[_SQLiteCursorPublicationAuthenticatedFailure] | None = None
-    failure_capture_ref: (
-        ReferenceType[_SQLiteCursorPublicationTransactionFailureCapture] | None
-    ) = None
+    failure_capture_ref: ReferenceType[_SQLiteCursorPublicationTransactionFailureCapture] | None = (
+        None
+    )
     failure_capture_ordinal: int = 0
     composition_pending_ref: ReferenceType[object] | None = None
     composition_ref: ReferenceType[object] | None = None
@@ -338,13 +338,11 @@ def _presentation(
     _SQLiteCursorPublicationTransactionGeneration,
 ]:
     try:
-        connection = object.__getattribute__(
+        connection = _OBJECT_GETATTRIBUTE(
             owner, "_SQLiteCursorPublicationTransactionOwner__connection"
         )
-        lineage = object.__getattribute__(
-            owner, "_SQLiteCursorPublicationTransactionOwner__lineage"
-        )
-        generation = object.__getattribute__(
+        lineage = _OBJECT_GETATTRIBUTE(owner, "_SQLiteCursorPublicationTransactionOwner__lineage")
+        generation = _OBJECT_GETATTRIBUTE(
             owner, "_SQLiteCursorPublicationTransactionOwner__generation"
         )
     except (AttributeError, TypeError):
@@ -461,7 +459,7 @@ def _register_sqlite_cursor_publication_transaction_owner_intrinsic(
         except BaseException as error:
             raise ValueError("GE_SQLITE_TX_OWNER_SOURCE_V1") from error
         source_fingerprint = _SOURCE_FINGERPRINT(connection, owner)
-        object.__setattr__(
+        _OBJECT_SETATTR(
             owner,
             "_SQLiteCursorPublicationTransactionOwner__source_fingerprint",
             source_fingerprint,
@@ -504,7 +502,7 @@ def _close_reopen_source_v1(
     else:
         connection = retained_connection
     if retained_source_fingerprint is None:
-        source_fingerprint = object.__getattribute__(
+        source_fingerprint = _OBJECT_GETATTRIBUTE(
             owner, "_SQLiteCursorPublicationTransactionOwner__source_fingerprint"
         )
     else:
@@ -564,14 +562,12 @@ def _raise_reopen_terminal_outcome(
 
 def _clear_presentation(owner: _SQLiteCursorPublicationTransactionOwner) -> None:
     state = _state(owner)
-    receipt = object.__getattribute__(owner, "_SQLiteCursorPublicationTransactionOwner__receipt")
-    primary = object.__getattribute__(owner, "_SQLiteCursorPublicationTransactionOwner__primary")
-    failure_capture = object.__getattribute__(
+    receipt = _OBJECT_GETATTRIBUTE(owner, "_SQLiteCursorPublicationTransactionOwner__receipt")
+    primary = _OBJECT_GETATTRIBUTE(owner, "_SQLiteCursorPublicationTransactionOwner__primary")
+    failure_capture = _OBJECT_GETATTRIBUTE(
         owner, "_SQLiteCursorPublicationTransactionOwner__failure_capture"
     )
-    generation = object.__getattribute__(
-        owner, "_SQLiteCursorPublicationTransactionOwner__generation"
-    )
+    generation = _OBJECT_GETATTRIBUTE(owner, "_SQLiteCursorPublicationTransactionOwner__generation")
     if _TYPE(receipt) is _SQLiteCursorPublicationBeginReceipt:
         receipt._clear()
     if _TYPE(primary) is _SQLiteCursorPublicationAuthenticatedFailure:
@@ -591,7 +587,7 @@ def _clear_presentation(owner: _SQLiteCursorPublicationTransactionOwner) -> None
         "__primary",
         "__source_fingerprint",
     ):
-        object.__setattr__(owner, f"_SQLiteCursorPublicationTransactionOwner{name}", None)
+        _OBJECT_SETATTR(owner, f"_SQLiteCursorPublicationTransactionOwner{name}", None)
 
 
 def _begin_sqlite_cursor_publication_transaction_intrinsic(
@@ -633,7 +629,7 @@ def _begin_sqlite_cursor_publication_transaction_intrinsic(
                 generation,
             )
             current_fingerprint = _SOURCE_FINGERPRINT(connection, owner)
-            fingerprint_unchanged = current_fingerprint == object.__getattribute__(
+            fingerprint_unchanged = current_fingerprint == _OBJECT_GETATTRIBUTE(
                 owner,
                 "_SQLiteCursorPublicationTransactionOwner__source_fingerprint",
             )
@@ -671,9 +667,7 @@ def _begin_sqlite_cursor_publication_transaction_intrinsic(
                 temp_mutation_epoch,
                 _CONSTRUCTION_TOKEN,
             )
-            object.__setattr__(
-                owner, "_SQLiteCursorPublicationTransactionOwner__receipt", receipt
-            )
+            _OBJECT_SETATTR(owner, "_SQLiteCursorPublicationTransactionOwner__receipt", receipt)
             return receipt
         primary = ValueError("GE_SQLITE_TX_OWNER_BEGIN_POSTFLIGHT")
         state.lifecycle = "begin-postflight-in-doubt"
@@ -733,7 +727,7 @@ def _select_sqlite_cursor_publication_authenticated_failure_intrinsic(
         _fail("GE_SQLITE_TX_OWNER_PRIMARY")
     primary = _SQLiteCursorPublicationAuthenticatedFailure(owner, _CONSTRUCTION_TOKEN)
     state.primary_ref = ref(primary)
-    object.__setattr__(owner, "_SQLiteCursorPublicationTransactionOwner__primary", primary)
+    _OBJECT_SETATTR(owner, "_SQLiteCursorPublicationTransactionOwner__primary", primary)
     return primary
 
 
@@ -760,8 +754,7 @@ def _capture_sqlite_cursor_publication_transaction_failure_intrinsic(
         if (
             _TYPE(retained_connection) is not SQLiteV1BaselineConnectionOwner
             or _TYPE(retained_lineage) is not _SQLiteCursorPublicationTransactionLineage
-            or _TYPE(retained_generation)
-            is not _SQLiteCursorPublicationTransactionGeneration
+            or _TYPE(retained_generation) is not _SQLiteCursorPublicationTransactionGeneration
         ):
             _fail("GE_SQLITE_TX_OWNER_FAILURE_CAPTURE")
         connection = retained_connection
@@ -783,7 +776,7 @@ def _capture_sqlite_cursor_publication_transaction_failure_intrinsic(
     )
     state.failure_capture_ordinal = ordinal
     state.failure_capture_ref = ref(capture)
-    object.__setattr__(
+    _OBJECT_SETATTR(
         owner,
         "_SQLiteCursorPublicationTransactionOwner__failure_capture",
         capture,
@@ -806,9 +799,7 @@ def _prepare_sqlite_cursor_publication_owner_composition_adoption_intrinsic(
         or state.failure_capture_ref is not None
         or state.composition_pending_ref is not None
         or state.composition_ref is not None
-        or object.__getattribute__(
-            owner, "_SQLiteCursorPublicationTransactionOwner__receipt"
-        )
+        or _OBJECT_GETATTRIBUTE(owner, "_SQLiteCursorPublicationTransactionOwner__receipt")
         is not receipt
     ):
         _fail("GE_SQLITE_P11_COMPOSITION_ADOPTION")
@@ -826,13 +817,14 @@ def _prepare_sqlite_cursor_publication_owner_composition_adoption_intrinsic(
         current_fingerprint = _SOURCE_FINGERPRINT(connection, owner)
     except BaseException as error:
         raise ValueError("GE_SQLITE_P11_COMPOSITION_ADOPTION") from error
-    expected_fingerprint = object.__getattribute__(
+    expected_fingerprint = _OBJECT_GETATTRIBUTE(
         owner, "_SQLiteCursorPublicationTransactionOwner__source_fingerprint"
     )
     if (
         observation is None
         or observation[:4] != (True, True, True, "exclusive")
-        or observation[4:] != (
+        or observation[4:]
+        != (
             state.transaction_epoch,
             state.total_changes,
             state.temp_mutation_epoch,
@@ -873,9 +865,7 @@ def _complete_sqlite_cursor_publication_owner_composition_adoption_intrinsic(
         or state.composition_pending_ref is None
         or state.composition_pending_ref() is not composition
         or state.composition_ref is not None
-        or object.__getattribute__(
-            owner, "_SQLiteCursorPublicationTransactionOwner__receipt"
-        )
+        or _OBJECT_GETATTRIBUTE(owner, "_SQLiteCursorPublicationTransactionOwner__receipt")
         is not receipt
     ):
         _fail("GE_SQLITE_P11_COMPOSITION_ADOPTION")
@@ -910,9 +900,7 @@ def _assert_sqlite_cursor_publication_owner_composition_intrinsic(
         state.lifecycle != "active"
         or state.composition_ref is None
         or state.composition_ref() is not composition
-        or object.__getattribute__(
-            owner, "_SQLiteCursorPublicationTransactionOwner__receipt"
-        )
+        or _OBJECT_GETATTRIBUTE(owner, "_SQLiteCursorPublicationTransactionOwner__receipt")
         is not receipt
     ):
         _fail("GE_SQLITE_P11_COMPOSITION_PRESENTATION")
@@ -924,7 +912,8 @@ def _assert_sqlite_cursor_publication_owner_composition_intrinsic(
     if (
         observation is None
         or observation[:4] != (True, True, True, "exclusive")
-        or observation[4:] != (
+        or observation[4:]
+        != (
             state.transaction_epoch,
             state.total_changes,
             state.temp_mutation_epoch,
@@ -1005,32 +994,28 @@ def _finalize_sqlite_cursor_publication_transaction_failure_capture_intrinsic(
         or _TYPE(capture) is not _SQLiteCursorPublicationTransactionFailureCapture
         or state.failure_capture_ref is None
         or state.failure_capture_ref() is not capture
-        or object.__getattribute__(
-            owner, "_SQLiteCursorPublicationTransactionOwner__failure_capture"
-        )
+        or _OBJECT_GETATTRIBUTE(owner, "_SQLiteCursorPublicationTransactionOwner__failure_capture")
         is not capture
-        or object.__getattribute__(
-            capture, "_SQLiteCursorPublicationTransactionFailureCapture__owner"
-        )
+        or _OBJECT_GETATTRIBUTE(capture, "_SQLiteCursorPublicationTransactionFailureCapture__owner")
         is not owner
     ):
         _fail("GE_SQLITE_TX_OWNER_FAILURE_CAPTURE")
-    primary = object.__getattribute__(
+    primary = _OBJECT_GETATTRIBUTE(
         capture, "_SQLiteCursorPublicationTransactionFailureCapture__primary"
     )
-    connection = object.__getattribute__(
+    connection = _OBJECT_GETATTRIBUTE(
         capture, "_SQLiteCursorPublicationTransactionFailureCapture__connection"
     )
-    lineage = object.__getattribute__(
+    lineage = _OBJECT_GETATTRIBUTE(
         capture, "_SQLiteCursorPublicationTransactionFailureCapture__lineage"
     )
-    generation = object.__getattribute__(
+    generation = _OBJECT_GETATTRIBUTE(
         capture, "_SQLiteCursorPublicationTransactionFailureCapture__generation"
     )
-    ordinal = object.__getattribute__(
+    ordinal = _OBJECT_GETATTRIBUTE(
         capture, "_SQLiteCursorPublicationTransactionFailureCapture__ordinal"
     )
-    source_fingerprint = object.__getattribute__(
+    source_fingerprint = _OBJECT_GETATTRIBUTE(
         capture, "_SQLiteCursorPublicationTransactionFailureCapture__source_fingerprint"
     )
     if (
@@ -1066,9 +1051,7 @@ def _finalize_sqlite_cursor_publication_transaction_failure_intrinsic(
         state.lifecycle != "active"
         or state.primary_ref is None
         or state.primary_ref() is not primary
-        or object.__getattribute__(
-            primary, "_SQLiteCursorPublicationAuthenticatedFailure__owner"
-        )
+        or _OBJECT_GETATTRIBUTE(primary, "_SQLiteCursorPublicationAuthenticatedFailure__owner")
         is not owner
     ):
         _fail("GE_SQLITE_TX_OWNER_PRIMARY")
@@ -1150,34 +1133,21 @@ def _read_sqlite_cursor_publication_begin_receipt_snapshot_intrinsic(
     if (
         state.lifecycle != "active"
         or _TYPE(receipt) is not _SQLiteCursorPublicationBeginReceipt
-        or object.__getattribute__(
-            owner, "_SQLiteCursorPublicationTransactionOwner__receipt"
-        )
+        or _OBJECT_GETATTRIBUTE(owner, "_SQLiteCursorPublicationTransactionOwner__receipt")
         is not receipt
     ):
         _fail("GE_SQLITE_TX_OWNER_BEGIN_RECEIPT")
     connection, lineage, generation = _presentation(owner)
     return _SQLiteCursorPublicationBeginReceiptSnapshot(
-        object.__getattribute__(receipt, "_SQLiteCursorPublicationBeginReceipt__owner")
-        is owner,
-        object.__getattribute__(
-            receipt, "_SQLiteCursorPublicationBeginReceipt__connection"
-        )
+        _OBJECT_GETATTRIBUTE(receipt, "_SQLiteCursorPublicationBeginReceipt__owner") is owner,
+        _OBJECT_GETATTRIBUTE(receipt, "_SQLiteCursorPublicationBeginReceipt__connection")
         is connection,
-        object.__getattribute__(receipt, "_SQLiteCursorPublicationBeginReceipt__lineage")
-        is lineage,
-        object.__getattribute__(
-            receipt, "_SQLiteCursorPublicationBeginReceipt__generation"
-        )
+        _OBJECT_GETATTRIBUTE(receipt, "_SQLiteCursorPublicationBeginReceipt__lineage") is lineage,
+        _OBJECT_GETATTRIBUTE(receipt, "_SQLiteCursorPublicationBeginReceipt__generation")
         is generation,
-        object.__getattribute__(receipt, "_SQLiteCursorPublicationBeginReceipt__mode")
-        == "exclusive",
-        object.__getattribute__(receipt, "_SQLiteCursorPublicationBeginReceipt__epoch"),
-        object.__getattribute__(
-            receipt, "_SQLiteCursorPublicationBeginReceipt__total_changes"
-        ),
-        object.__getattribute__(
-            receipt, "_SQLiteCursorPublicationBeginReceipt__temp_mutation_epoch"
-        ),
+        _OBJECT_GETATTRIBUTE(receipt, "_SQLiteCursorPublicationBeginReceipt__mode") == "exclusive",
+        _OBJECT_GETATTRIBUTE(receipt, "_SQLiteCursorPublicationBeginReceipt__epoch"),
+        _OBJECT_GETATTRIBUTE(receipt, "_SQLiteCursorPublicationBeginReceipt__total_changes"),
+        _OBJECT_GETATTRIBUTE(receipt, "_SQLiteCursorPublicationBeginReceipt__temp_mutation_epoch"),
         1,
     )
