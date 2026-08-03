@@ -23466,3 +23466,19 @@ COMMIT、P11-A/B/C/D整体、D9、93项release evidence、RC/stable、外部adop
 6. 任何测试、reporter、文档、日志或review把最终baseline total 0/1记为success，或把空
    optional family/subprojection记为baseline genuine zero，均为H级阻塞；必须修复后才可接受
    NP1。此勘误不降低31.37.98的identity、12-family、retirement、fault、cleanup和parity门槛。
+
+#### 31.37.100 NP1 canonical contract不可变提交绑定（2026-08-03 PDT追加；既有内容不改）
+
+追加前完整23,468行计划SHA-256为
+`77e04ef8a2dce0433b257a0be62fa4f0eea71dcb8357853dd6d69bd0057abfec`。
+NP1详细执行合同、N值勘误、canonical P11规范与其Markdown防漂移锚点已提交并推送为
+`96eec95022ab6ac96bbea1e0886de6198d355c01`；作者/提交者均为
+`reacher-z <mtrxcop@gmail.com>`，无co-author，local/tracking/remote三方SHA一致。
+
+该提交只冻结并验证NP1 contract：shape-only与lower-native provenance分离、任何native
+I/O前绑定exact owner/BEGIN/composition/hidden connection、禁止source-only drain后事后adopt、
+12-family完整exhaust/retirement、optional dynamic N=0/1/3对应total 3/4/6、baseline
+`genuineZeroClaim=false`以及total 0/1负向拒绝。P11 contract hostile gate为6/6，Markdown
+link check为478项，diff check通过。它不包含或接受仍在工作树中的双runtime实现，不证明
+runtime native projection、fault matrix或portable parity；P11继续`in_progress`，release
+继续audit-only 0/93。下一步严格按该commit完成无环双runtime实现并取得独立H0/M0/L0。

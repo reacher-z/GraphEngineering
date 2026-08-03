@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-08-03T12:47:19Z",
+  "updated_at": "2026-08-03T13:13:11Z",
   "repository": ".",
   "scan_policy": {
     "warning_after_minutes": 60,
@@ -2263,10 +2263,12 @@
         "spec/sqlite-cursor-publication-owner-composition-p11.callsites.json",
         "spec/conformance/sqlite-cursor-publication-owner-composition-p11-callsite-map.validate.mjs",
         "tools/sqlite-native-callsite-route-map.mjs",
+        "spec/conformance/sqlite-cursor-publication-owner-composition-p11.validate.mjs",
         "codex_logs/reviews/SQLITE-PUBLICATION-OWNER-COMPOSITION-P11-A-2026-08-03.md",
         "codex_logs/reviews/SQLITE-P11-A-SCOPE-READ-PARITY-DISCOVERY-2026-08-03.md",
         "codex_logs/reviews/SQLITE-P11-A-COUNT-RECEIPT-CALLSITE-TRIAGE-2026-08-03.md",
-        "codex_logs/reviews/SQLITE-P11-A-RM1-ROUTE-MAP-REDTEAM-2026-08-03.md"
+        "codex_logs/reviews/SQLITE-P11-A-RM1-ROUTE-MAP-REDTEAM-2026-08-03.md",
+        "codex_logs/reviews/SQLITE-P11-A-NP1-CONTRACT-2026-08-03.md"
       ],
       "expected_tests": [
         "P11-A opaque composition scoped mutation fixed-read and Python failure-capture contract",
@@ -2278,10 +2280,10 @@
       "evidence_required": true,
       "assigned_at": "2026-08-03T09:07:21Z",
       "started_at": "2026-08-03T09:10:00Z",
-      "last_heartbeat": "2026-08-03T12:47:19Z",
+      "last_heartbeat": "2026-08-03T13:13:11Z",
       "risk": "critical",
       "blocker": null,
-      "next_action": "Begin the separate P11-A-NP1 tranche after immutable RM1 commit 1e774b41cec1a2d1b18109c4078a13ea69715c93: make the baseline-source layer exclusively own the native projection receipt, prove file-backed N=0/1/3 read exhaustion and runtime-real statement/cursor retirement in both runtimes, and preserve every route/COMMIT/release nonclaim until independent acceptance"
+      "next_action": "Implement the immutable NP1 contract at 96eec95022ab6ac96bbea1e0886de6198d355c01 with the acyclic source-to-transaction-owner reproof before every native projection I/O; prove optional dynamic N=0/1/3 as total projections 3/4/6, impossible total 0/1 rejection, runtime-real retirement, hostile/fault parity and H0/M0/L0 while preserving all route, COMMIT and release nonclaims"
     }
   ]
 }
