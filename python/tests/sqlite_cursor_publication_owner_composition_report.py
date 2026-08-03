@@ -84,8 +84,22 @@ def _mutation_case(
     graph = composition._adopt_sqlite_cursor_publication_owner_composition_intrinsic(
         owner, receipt
     )
+    count_proof: int | composition._SQLiteCursorPublicationRetainedCountReceipt
+    if descriptor is composition._SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[2]:
+        retained_projection = tuple(
+            ("retained-entry", ordinal) for ordinal in range(expected_count)
+        )
+        count_proof = (
+            composition._mint_sqlite_cursor_publication_retained_count_receipt_intrinsic(
+                graph,
+                descriptor,
+                retained_projection,
+            )
+        )
+    else:
+        count_proof = expected_count
     parent = composition._issue_sqlite_cursor_publication_mutation_parent_scope_intrinsic(
-        graph, descriptor, expected_count
+        graph, descriptor, count_proof
     )
     if descriptor.model == "parent-owned-reusable":
         composition._prepare_sqlite_cursor_publication_reusable_parent_intrinsic(parent)

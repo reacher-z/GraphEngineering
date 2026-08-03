@@ -28,6 +28,9 @@ from .sqlite_cursor_publication_transaction_owner import (
 _CONSTRUCTION_TOKEN = object()
 _TYPE = type
 _ID = id
+_LEN = len
+_INT: type[int] = int
+_TUPLE: type[tuple[object, ...]] = tuple
 _OBJECT_GETATTRIBUTE = object.__getattribute__
 _OBJECT_SETATTR = object.__setattr__
 _DICT_GET = dict.get
@@ -100,6 +103,41 @@ class _SQLiteCursorPublicationMutationParentScope:
 
     def __delattr__(self, _name: str) -> Never:
         _reject_parent_token_mutation(self)
+
+
+class _SQLiteCursorPublicationRetainedCountReceipt:
+    """Opaque one-shot identity for one immutable retained projection."""
+
+    __slots__ = ("__composition", "__projection", "__weakref__")
+
+    def __init__(
+        self,
+        composition: _SQLiteCursorPublicationOwnerComposition,
+        projection: tuple[object, ...],
+        token: object,
+    ) -> None:
+        if token is not _CONSTRUCTION_TOKEN:
+            raise TypeError("GE_SQLITE_P11_RETAINED_COUNT_CONSTRUCTION")
+        _OBJECT_SETATTR(
+            self,
+            "_SQLiteCursorPublicationRetainedCountReceipt__composition",
+            composition,
+        )
+        _OBJECT_SETATTR(
+            self,
+            "_SQLiteCursorPublicationRetainedCountReceipt__projection",
+            projection,
+        )
+
+    def __setattr__(self, _name: str, _value: object) -> Never:
+        _reject_retained_count_receipt_mutation(self)
+
+    def __delattr__(self, _name: str) -> Never:
+        _reject_retained_count_receipt_mutation(self)
+
+
+class _RetainedCountNonce:
+    __slots__ = ()
 
 
 class _SQLiteCursorPublicationMutationChildPermit:
@@ -339,6 +377,22 @@ class _SQLiteCursorPublicationMutationParentScopeSnapshot(NamedTuple):
     sql_authority: Literal[False]
 
 
+class _SQLiteCursorPublicationRetainedCountReceiptSnapshot(NamedTuple):
+    route_id: Literal["main.baseline-entries"]
+    lifecycle: Literal["issued", "consumed", "poisoned"]
+    retained_count: int
+    exact_owner: Literal[True]
+    exact_generation: Literal[True]
+    exact_scope: bool
+    exact_retained_projection_identity: Literal[True]
+    exact_retained_projection_count: Literal[True]
+    native_source_provenance: Literal[False]
+    genuine_zero_claim: Literal[False]
+    one_shot: Literal[True]
+    actual_native_io_count: Literal[0]
+    sql_authority: Literal[False]
+
+
 class _SQLiteCursorPublicationMutationChildPermitSnapshot(NamedTuple):
     ordinal: int
     model: str
@@ -394,6 +448,7 @@ class _ParentRecord:
     descriptor: _SQLiteCursorPublicationMutationRouteDescriptor
     expected_count: int
     lifecycle: str
+    retained_count_receipt: _SQLiteCursorPublicationRetainedCountReceipt | None = None
     next_ordinal: int = 0
     active_child_ref: ReferenceType[_SQLiteCursorPublicationMutationChildPermit] | None = None
     child_issued_count: int = 0
@@ -410,6 +465,27 @@ class _ParentRecord:
 class _ParentEntry(NamedTuple):
     token_ref: ReferenceType[_SQLiteCursorPublicationMutationParentScope]
     record: _ParentRecord
+
+
+@dataclass(slots=True)
+class _RetainedCountReceiptRecord:
+    composition_ref: ReferenceType[_SQLiteCursorPublicationOwnerComposition]
+    owner_ref: ReferenceType[_SQLiteCursorPublicationTransactionOwner]
+    begin_receipt_ref: ReferenceType[_SQLiteCursorPublicationBeginReceipt]
+    connection_ref: ReferenceType[object]
+    lineage_ref: ReferenceType[object]
+    generation_ref: ReferenceType[object]
+    descriptor: _SQLiteCursorPublicationMutationRouteDescriptor
+    retained_projection: tuple[object, ...]
+    retained_count: int
+    nonce: object
+    parent_ref: ReferenceType[_SQLiteCursorPublicationMutationParentScope] | None = None
+    lifecycle: Literal["issued", "consumed", "poisoned"] = "issued"
+
+
+class _RetainedCountReceiptEntry(NamedTuple):
+    token_ref: ReferenceType[_SQLiteCursorPublicationRetainedCountReceipt]
+    record: _RetainedCountReceiptRecord
 
 
 @dataclass(slots=True)
@@ -445,6 +521,7 @@ class _FixedReadEntry(NamedTuple):
 
 
 _PARENT_SCOPES: dict[int, _ParentEntry] = {}
+_RETAINED_COUNT_RECEIPTS: dict[int, _RetainedCountReceiptEntry] = {}
 _CHILD_PERMITS: dict[int, _ChildEntry] = {}
 _FIXED_READ_PERMITS: dict[int, _FixedReadEntry] = {}
 
@@ -467,6 +544,23 @@ def _reject_parent_token_mutation(
     primary = ValueError("GE_SQLITE_P11_SCOPE_INVALID")
     entry = _DICT_GET(_PARENT_SCOPES, _ID(parent))
     if entry is None or entry.token_ref() is not parent:
+        raise primary
+    composition = entry.record.composition_ref()
+    if composition is None:
+        raise primary
+    composition_record = _record_for(composition)
+    entry.record.lifecycle = "poisoned"
+    if composition_record.lifecycle == "begin-adopted":
+        _terminal_composition_failure(composition, composition_record, primary)
+    raise primary
+
+
+def _reject_retained_count_receipt_mutation(
+    receipt: _SQLiteCursorPublicationRetainedCountReceipt,
+) -> Never:
+    primary = ValueError("GE_SQLITE_P11_SCOPE_INVALID")
+    entry = _DICT_GET(_RETAINED_COUNT_RECEIPTS, _ID(receipt))
+    if entry is None or entry.token_ref() is not receipt:
         raise primary
     composition = entry.record.composition_ref()
     if composition is None:
@@ -761,13 +855,124 @@ def _mutation_expected_count_is_exact(
 ) -> bool:
     """Apply the count policy carried by each exact frozen route identity."""
 
-    if _TYPE(expected_count) is not int:
+    if _TYPE(expected_count) is not _INT:
         return False
     if descriptor is _SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[1]:
         return expected_count == 20
     if descriptor is _SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[2]:
-        return 0 <= expected_count <= 1_024
+        return False
     return expected_count == 1
+
+
+def _retained_count_receipt_record_for(
+    composition: _SQLiteCursorPublicationOwnerComposition,
+    receipt: _SQLiteCursorPublicationRetainedCountReceipt,
+) -> tuple[_RetainedCountReceiptRecord, _Record]:
+    composition_record = _record_for(composition)
+    if _TYPE(receipt) is not _SQLiteCursorPublicationRetainedCountReceipt:
+        _terminal_composition_failure(
+            composition,
+            composition_record,
+            ValueError("GE_SQLITE_P11_SCOPE_INVALID"),
+        )
+    entry = _DICT_GET(_RETAINED_COUNT_RECEIPTS, _ID(receipt))
+    if entry is None or entry.token_ref() is not receipt:
+        _terminal_composition_failure(
+            composition,
+            composition_record,
+            ValueError("GE_SQLITE_P11_SCOPE_INVALID"),
+        )
+    record = entry.record
+    registered_composition = record.composition_ref()
+    if registered_composition is not composition:
+        _terminal_composition_failure(
+            composition,
+            composition_record,
+            ValueError("GE_SQLITE_P11_SCOPE_INVALID"),
+        )
+    try:
+        presented_composition = _OBJECT_GETATTRIBUTE(
+            receipt,
+            "_SQLiteCursorPublicationRetainedCountReceipt__composition",
+        )
+        presented_projection = _OBJECT_GETATTRIBUTE(
+            receipt,
+            "_SQLiteCursorPublicationRetainedCountReceipt__projection",
+        )
+    except BaseException as primary:
+        record.lifecycle = "poisoned"
+        _terminal_composition_failure(composition, composition_record, primary)
+    if (
+        presented_composition is not composition
+        or presented_projection is not record.retained_projection
+        or record.owner_ref() is not composition_record.owner_ref()
+        or record.begin_receipt_ref() is not composition_record.receipt_ref()
+        or composition_record.connection_ref is None
+        or record.connection_ref() is not composition_record.connection_ref()
+        or composition_record.lineage_ref is None
+        or record.lineage_ref() is not composition_record.lineage_ref()
+        or composition_record.generation_ref is None
+        or record.generation_ref() is not composition_record.generation_ref()
+        or record.descriptor is not _SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[2]
+        or _TYPE(record.retained_projection) is not _TUPLE
+        or _LEN(record.retained_projection) != record.retained_count
+        or record.nonce is None
+    ):
+        record.lifecycle = "poisoned"
+        _terminal_composition_failure(
+            composition,
+            composition_record,
+            ValueError("GE_SQLITE_P11_SCOPE_INVALID"),
+        )
+    bound_parent = None if record.parent_ref is None else record.parent_ref()
+    bound_parent_entry = (
+        None if bound_parent is None else _DICT_GET(_PARENT_SCOPES, _ID(bound_parent))
+    )
+    if (
+        (record.lifecycle == "issued" and record.parent_ref is not None)
+        or (
+            record.lifecycle == "consumed"
+            and (
+                bound_parent_entry is None
+                or bound_parent_entry.token_ref() is not bound_parent
+                or bound_parent_entry.record.composition_ref() is not composition
+                or bound_parent_entry.record.retained_count_receipt is not receipt
+            )
+        )
+    ):
+        record.lifecycle = "poisoned"
+        _terminal_composition_failure(
+            composition,
+            composition_record,
+            ValueError("GE_SQLITE_P11_SCOPE_INVALID"),
+        )
+    try:
+        _reauthenticate_composition(composition, composition_record)
+    except BaseException as primary:
+        record.lifecycle = "poisoned"
+        _terminal_composition_failure(composition, composition_record, primary)
+    return record, composition_record
+
+
+def _register_retained_count_receipt(
+    receipt: _SQLiteCursorPublicationRetainedCountReceipt,
+    record: _RetainedCountReceiptRecord,
+) -> None:
+    token_id = _ID(receipt)
+
+    def discard_exact(
+        dead_ref: ReferenceType[_SQLiteCursorPublicationRetainedCountReceipt],
+    ) -> None:
+        entry = _DICT_GET(_RETAINED_COUNT_RECEIPTS, token_id)
+        if entry is not None and entry.token_ref is dead_ref:
+            _DICT_POP(_RETAINED_COUNT_RECEIPTS, token_id, None)
+
+    token_ref = ref(receipt, discard_exact)
+    _DICT_SET(
+        _RETAINED_COUNT_RECEIPTS,
+        token_id,
+        _RetainedCountReceiptEntry(token_ref, record),
+    )
 
 
 def _register_parent(
@@ -861,6 +1066,100 @@ def _parent_record_for(
     return entry.record, composition, composition_record
 
 
+def _mint_sqlite_cursor_publication_retained_count_receipt_intrinsic(
+    composition: _SQLiteCursorPublicationOwnerComposition,
+    descriptor: _SQLiteCursorPublicationMutationRouteDescriptor,
+    retained_projection: tuple[object, ...],
+) -> _SQLiteCursorPublicationRetainedCountReceipt:
+    """Bind the actual immutable retained projection without accepting a count."""
+
+    composition_record = _record_for(composition)
+    if (
+        composition_record.lifecycle != "begin-adopted"
+        or descriptor is not _SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[2]
+        or _TYPE(retained_projection) is not _TUPLE
+        or _LEN(retained_projection) > 1_024
+    ):
+        _terminal_composition_failure(
+            composition,
+            composition_record,
+            ValueError("GE_SQLITE_P11_SCOPE_INVALID"),
+        )
+    try:
+        _reauthenticate_composition(composition, composition_record)
+    except BaseException as primary:
+        _terminal_composition_failure(composition, composition_record, primary)
+    owner = composition_record.owner_ref()
+    begin_receipt = composition_record.receipt_ref()
+    connection = (
+        None
+        if composition_record.connection_ref is None
+        else composition_record.connection_ref()
+    )
+    lineage = None if composition_record.lineage_ref is None else composition_record.lineage_ref()
+    generation = (
+        None
+        if composition_record.generation_ref is None
+        else composition_record.generation_ref()
+    )
+    if (
+        _TYPE(owner) is not _SQLiteCursorPublicationTransactionOwner
+        or _TYPE(begin_receipt) is not _SQLiteCursorPublicationBeginReceipt
+        or connection is None
+        or lineage is None
+        or generation is None
+    ):
+        _terminal_composition_failure(
+            composition,
+            composition_record,
+            ValueError("GE_SQLITE_P11_SCOPE_INVALID"),
+        )
+    retained_count = _LEN(retained_projection)
+    receipt = _SQLiteCursorPublicationRetainedCountReceipt(
+        composition,
+        retained_projection,
+        _CONSTRUCTION_TOKEN,
+    )
+    _register_retained_count_receipt(
+        receipt,
+        _RetainedCountReceiptRecord(
+            composition_ref=ref(composition),
+            owner_ref=ref(owner),
+            begin_receipt_ref=ref(begin_receipt),
+            connection_ref=ref(connection),
+            lineage_ref=ref(lineage),
+            generation_ref=ref(generation),
+            descriptor=descriptor,
+            retained_projection=retained_projection,
+            retained_count=retained_count,
+            nonce=_RetainedCountNonce(),
+        ),
+    )
+    return receipt
+
+
+def _read_sqlite_cursor_publication_retained_count_receipt_snapshot_intrinsic(
+    composition: _SQLiteCursorPublicationOwnerComposition,
+    receipt: _SQLiteCursorPublicationRetainedCountReceipt,
+) -> _SQLiteCursorPublicationRetainedCountReceiptSnapshot:
+    record, _composition_record = _retained_count_receipt_record_for(composition, receipt)
+    return _SQLiteCursorPublicationRetainedCountReceiptSnapshot(
+        route_id="main.baseline-entries",
+        lifecycle=record.lifecycle,
+        retained_count=record.retained_count,
+        exact_owner=True,
+        exact_generation=True,
+        exact_scope=record.lifecycle == "consumed",
+        exact_retained_projection_identity=True,
+        exact_retained_projection_count=True,
+        native_source_provenance=False,
+        genuine_zero_claim=False,
+        one_shot=True,
+        actual_native_io_count=0,
+        sql_authority=False,
+    )
+
+
 def _child_record_for(
     child: _SQLiteCursorPublicationMutationChildPermit,
 ) -> tuple[_ChildRecord, _ParentRecord, _SQLiteCursorPublicationMutationParentScope]:
@@ -950,21 +1249,51 @@ def _poison_parent(
 def _issue_sqlite_cursor_publication_mutation_parent_scope_intrinsic(
     composition: _SQLiteCursorPublicationOwnerComposition,
     descriptor: _SQLiteCursorPublicationMutationRouteDescriptor,
-    expected_count: int,
+    count_proof: int | _SQLiteCursorPublicationRetainedCountReceipt,
 ) -> _SQLiteCursorPublicationMutationParentScope:
     """Mint one route-bound zero-I/O parent; this function never executes SQL."""
 
     composition_record = _record_for(composition)
     if composition_record.lifecycle != "begin-adopted":
         _fail("GE_SQLITE_P11_SCOPE_INVALID")
-    if not _is_exact_mutation_descriptor(descriptor) or not _mutation_expected_count_is_exact(
-        descriptor, expected_count
-    ):
+    if not _is_exact_mutation_descriptor(descriptor):
         _terminal_composition_failure(
             composition,
             composition_record,
             ValueError("GE_SQLITE_P11_SCOPE_INVALID"),
         )
+    retained_count_record: _RetainedCountReceiptRecord | None = None
+    retained_count_receipt: _SQLiteCursorPublicationRetainedCountReceipt | None = None
+    if descriptor is _SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[2]:
+        if _TYPE(count_proof) is not _SQLiteCursorPublicationRetainedCountReceipt:
+            _terminal_composition_failure(
+                composition,
+                composition_record,
+                ValueError("GE_SQLITE_P11_SCOPE_INVALID"),
+            )
+        retained_count_receipt = count_proof
+        retained_count_record, _ = _retained_count_receipt_record_for(
+            composition, retained_count_receipt
+        )
+        if retained_count_record.lifecycle != "issued":
+            retained_count_record.lifecycle = "poisoned"
+            _terminal_composition_failure(
+                composition,
+                composition_record,
+                ValueError("GE_SQLITE_P11_SCOPE_INVALID"),
+            )
+        expected_count = retained_count_record.retained_count
+    else:
+        if _TYPE(count_proof) is not _INT or not _mutation_expected_count_is_exact(
+            descriptor,
+            count_proof,
+        ):
+            _terminal_composition_failure(
+                composition,
+                composition_record,
+                ValueError("GE_SQLITE_P11_SCOPE_INVALID"),
+            )
+        expected_count = count_proof
     try:
         _reauthenticate_composition(composition, composition_record)
     except BaseException as primary:
@@ -980,8 +1309,19 @@ def _issue_sqlite_cursor_publication_mutation_parent_scope_intrinsic(
     parent = _SQLiteCursorPublicationMutationParentScope(composition, _CONSTRUCTION_TOKEN)
     _register_parent(
         parent,
-        _ParentRecord(ref(composition), descriptor, expected_count, lifecycle),
+        _ParentRecord(
+            ref(composition),
+            descriptor,
+            expected_count,
+            lifecycle,
+            retained_count_receipt=(
+                None if retained_count_record is None else retained_count_receipt
+            ),
+        ),
     )
+    if retained_count_record is not None:
+        retained_count_record.parent_ref = ref(parent)
+        retained_count_record.lifecycle = "consumed"
     return parent
 
 
@@ -1008,7 +1348,7 @@ def _issue_sqlite_cursor_publication_mutation_child_permit_intrinsic(
     if (
         state.lifecycle != "parent-ready"
         or active_child is not None
-        or _TYPE(ordinal) is not int
+        or _TYPE(ordinal) is not _INT
         or ordinal != state.next_ordinal
         or ordinal >= state.expected_count
     ):
@@ -1212,7 +1552,7 @@ def _issue_sqlite_cursor_publication_fixed_read_permit_intrinsic(
         _fail("GE_SQLITE_P11_FIXED_READ_INVALID")
     if (
         not _is_exact_fixed_read_descriptor(descriptor)
-        or _TYPE(maximum_rows) is not int
+        or _TYPE(maximum_rows) is not _INT
         or maximum_rows < 0
         or maximum_rows > 4_096
     ):

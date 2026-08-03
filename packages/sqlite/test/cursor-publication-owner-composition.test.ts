@@ -24,6 +24,7 @@ import {
   issueSQLiteCursorPublicationFixedReadPermitIntrinsic,
   issueSQLiteCursorPublicationMutationChildPermitIntrinsic,
   issueSQLiteCursorPublicationMutationParentScopeIntrinsic,
+  mintSQLiteCursorPublicationRetainedCountReceiptIntrinsic,
   observeSQLiteCursorPublicationFixedReadRowIntrinsic,
   observeSQLiteCursorPublicationFixedReadTerminalIntrinsic,
   prepareSQLiteCursorPublicationFixedReadPermitIntrinsic,
@@ -32,6 +33,7 @@ import {
   readSQLiteCursorPublicationMutationChildPermitSnapshotIntrinsic,
   readSQLiteCursorPublicationMutationParentScopeSnapshotIntrinsic,
   readSQLiteCursorPublicationOwnerCompositionSnapshotIntrinsic,
+  readSQLiteCursorPublicationRetainedCountReceiptSnapshotIntrinsic,
   recordSQLiteCursorPublicationMutationChildReturnIntrinsic,
   retireSQLiteCursorPublicationFixedReadResourceIntrinsic,
   retireSQLiteCursorPublicationMutationChildResourceIntrinsic,
@@ -111,6 +113,21 @@ function compositionFor(graph: P9Graph): SQLiteCursorPublicationOwnerComposition
   );
 }
 
+function retainedCountReceiptFor(
+  composition: SQLiteCursorPublicationOwnerComposition,
+  retainedCount: number,
+) {
+  const retainedProjection = Object.freeze(Array.from(
+    { length: retainedCount },
+    (_, ordinal) => Object.freeze({ ordinal }),
+  ));
+  return mintSQLiteCursorPublicationRetainedCountReceiptIntrinsic(
+    composition,
+    SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[2],
+    retainedProjection,
+  );
+}
+
 type P11DerivedTransitionPreparation = (
   composition: SQLiteCursorPublicationOwnerComposition,
 ) => () => unknown;
@@ -175,7 +192,7 @@ const P11_DERIVED_TRANSITIONS: readonly (readonly [
     const parent = issueSQLiteCursorPublicationMutationParentScopeIntrinsic(
       composition,
       SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[2],
-      0,
+      retainedCountReceiptFor(composition, 0),
     );
     return () => prepareSQLiteCursorPublicationReusableParentIntrinsic(parent);
   }],
@@ -211,7 +228,7 @@ const P11_DERIVED_TRANSITIONS: readonly (readonly [
     const parent = issueSQLiteCursorPublicationMutationParentScopeIntrinsic(
       composition,
       SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[2],
-      0,
+      retainedCountReceiptFor(composition, 0),
     );
     prepareSQLiteCursorPublicationReusableParentIntrinsic(parent);
     return () => acceptSQLiteCursorPublicationMutationZeroItemPostflightIntrinsic(parent);
@@ -220,7 +237,7 @@ const P11_DERIVED_TRANSITIONS: readonly (readonly [
     const parent = issueSQLiteCursorPublicationMutationParentScopeIntrinsic(
       composition,
       SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[2],
-      0,
+      retainedCountReceiptFor(composition, 0),
     );
     prepareSQLiteCursorPublicationReusableParentIntrinsic(parent);
     acceptSQLiteCursorPublicationMutationZeroItemPostflightIntrinsic(parent);
@@ -230,7 +247,7 @@ const P11_DERIVED_TRANSITIONS: readonly (readonly [
     const parent = issueSQLiteCursorPublicationMutationParentScopeIntrinsic(
       composition,
       SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[2],
-      0,
+      retainedCountReceiptFor(composition, 0),
     );
     prepareSQLiteCursorPublicationReusableParentIntrinsic(parent);
     acceptSQLiteCursorPublicationMutationZeroItemPostflightIntrinsic(parent);
@@ -540,10 +557,11 @@ describe("SQLite P11-A owner composition substrate", () => {
   it.each([0, 2])(
     "runs the reusable parent model for expectedCount=%i with one parent retirement",
     (expectedCount) => {
+      const composition = compositionFor(p9Graph());
       const parent = issueSQLiteCursorPublicationMutationParentScopeIntrinsic(
-        compositionFor(p9Graph()),
+        composition,
         SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[2],
-        expectedCount,
+        retainedCountReceiptFor(composition, expectedCount),
       );
       prepareSQLiteCursorPublicationReusableParentIntrinsic(parent);
       if (expectedCount === 0) {
@@ -577,6 +595,186 @@ describe("SQLite P11-A owner composition substrate", () => {
     },
   );
 
+  it("derives zero from one exact retained projection without claiming native provenance", () => {
+    const graph = p9Graph();
+    const composition = compositionFor(graph);
+    const receipt = retainedCountReceiptFor(composition, 0);
+    expect(readSQLiteCursorPublicationRetainedCountReceiptSnapshotIntrinsic(
+      composition,
+      receipt,
+    )).toEqual({
+      actualNativeIoCount: 0,
+      exactGeneration: true,
+      exactOwner: true,
+      exactScope: false,
+      exactRetainedProjectionCount: true,
+      exactRetainedProjectionIdentity: true,
+      genuineZeroClaim: false,
+      lifecycle: "issued",
+      nativeSourceProvenance: false,
+      oneShot: true,
+      retainedCount: 0,
+      routeId: "main.baseline-entries",
+      sqlAuthority: false,
+    });
+    const parent = issueSQLiteCursorPublicationMutationParentScopeIntrinsic(
+      composition,
+      SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[2],
+      receipt,
+    );
+    expect(readSQLiteCursorPublicationRetainedCountReceiptSnapshotIntrinsic(
+      composition,
+      receipt,
+    )).toMatchObject({ exactScope: true, lifecycle: "consumed", retainedCount: 0 });
+    expect(readSQLiteCursorPublicationMutationParentScopeSnapshotIntrinsic(parent))
+      .toMatchObject({ actualNativeIoCount: 0, expectedCount: 0, sqlAuthority: false });
+  });
+
+  it("rejects scalar fake-zero and retained-count receipt replay through exact P9 cleanup", () => {
+    const fakeGraph = p9Graph();
+    const fakeComposition = compositionFor(fakeGraph);
+    expect(() => issueSQLiteCursorPublicationMutationParentScopeIntrinsic(
+      fakeComposition,
+      SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[2],
+      0,
+    )).toThrowError(expect.objectContaining({ code: "GE_SQLITE_P11_SCOPE_INVALID" }));
+    expect(readSQLiteCursorPublicationTransactionOwnerSnapshotIntrinsic(fakeGraph.owner))
+      .toMatchObject({ commitAttemptCount: 0, lifecycle: "finalized" });
+
+    const replayGraph = p9Graph();
+    const replayComposition = compositionFor(replayGraph);
+    const receipt = retainedCountReceiptFor(replayComposition, 0);
+    issueSQLiteCursorPublicationMutationParentScopeIntrinsic(
+      replayComposition,
+      SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[2],
+      receipt,
+    );
+    expect(() => issueSQLiteCursorPublicationMutationParentScopeIntrinsic(
+      replayComposition,
+      SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[2],
+      receipt,
+    )).toThrowError(expect.objectContaining({ code: "GE_SQLITE_P11_SCOPE_INVALID" }));
+    expect(readSQLiteCursorPublicationTransactionOwnerSnapshotIntrinsic(replayGraph.owner))
+      .toMatchObject({ commitAttemptCount: 0, lifecycle: "finalized" });
+  });
+
+  it.each([
+    ["mutable", []],
+    ["sparse", Object.freeze(new Array(1))],
+    ["array-subclass", Object.freeze(new (class extends Array<unknown> {})())],
+    ["oversized", Object.freeze(Array.from({ length: 1_025 }, () => Object.freeze({})))],
+    ["proxy", new Proxy(Object.freeze([]), {})],
+  ] as const)("rejects %s retained projections before any route I/O", (_caseName, projection) => {
+    const graph = p9Graph();
+    const composition = compositionFor(graph);
+    expect(() => mintSQLiteCursorPublicationRetainedCountReceiptIntrinsic(
+      composition,
+      SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[2],
+      projection,
+    )).toThrowError(expect.objectContaining({ code: "GE_SQLITE_P11_SCOPE_INVALID" }));
+    expect(readSQLiteCursorPublicationTransactionOwnerSnapshotIntrinsic(graph.owner))
+      .toMatchObject({ commitAttemptCount: 0, lifecycle: "finalized" });
+  });
+
+  it("rejects a retained projection receipt minted for any non-baseline route", () => {
+    const graph = p9Graph();
+    const composition = compositionFor(graph);
+    expect(() => mintSQLiteCursorPublicationRetainedCountReceiptIntrinsic(
+      composition,
+      SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[0],
+      Object.freeze([]),
+    )).toThrowError(expect.objectContaining({ code: "GE_SQLITE_P11_SCOPE_INVALID" }));
+    expect(readSQLiteCursorPublicationTransactionOwnerSnapshotIntrinsic(graph.owner))
+      .toMatchObject({ commitAttemptCount: 0, lifecycle: "finalized" });
+  });
+
+  it("keeps receipt authority in registry identity despite Reflect and structural bypasses", () => {
+    const validComposition = compositionFor(p9Graph());
+    const validReceipt = retainedCountReceiptFor(validComposition, 0);
+    expect(Reflect.set(validReceipt as object, "retainedCount", 99)).toBe(false);
+    expect(() => Object.defineProperty(validReceipt, "retainedCount", { value: 99 }))
+      .toThrow(TypeError);
+    expect(issueSQLiteCursorPublicationMutationParentScopeIntrinsic(
+      validComposition,
+      SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[2],
+      validReceipt,
+    )).toBeTypeOf("object");
+
+    const proxyGraph = p9Graph();
+    const proxyComposition = compositionFor(proxyGraph);
+    const proxiedReceipt = new Proxy(retainedCountReceiptFor(proxyComposition, 0), {});
+    expect(() => issueSQLiteCursorPublicationMutationParentScopeIntrinsic(
+      proxyComposition,
+      SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[2],
+      proxiedReceipt,
+    )).toThrow();
+    expect(readSQLiteCursorPublicationTransactionOwnerSnapshotIntrinsic(proxyGraph.owner))
+      .toMatchObject({ commitAttemptCount: 0, lifecycle: "finalized" });
+
+    const cloneGraph = p9Graph();
+    const cloneComposition = compositionFor(cloneGraph);
+    const clonedReceipt = Object.freeze({
+      ...retainedCountReceiptFor(cloneComposition, 0),
+    });
+    expect(() => issueSQLiteCursorPublicationMutationParentScopeIntrinsic(
+      cloneComposition,
+      SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[2],
+      clonedReceipt as never,
+    )).toThrowError(expect.objectContaining({ code: "GE_SQLITE_P11_SCOPE_INVALID" }));
+    expect(readSQLiteCursorPublicationTransactionOwnerSnapshotIntrinsic(cloneGraph.owner))
+      .toMatchObject({ commitAttemptCount: 0, lifecycle: "finalized" });
+  });
+
+  it("strongly retains the consumed receipt and projection while its parent is live", async () => {
+    const composition = compositionFor(p9Graph());
+    let receipt = retainedCountReceiptFor(composition, 2);
+    const receiptReference = new WeakRef(receipt as object);
+    const parent = issueSQLiteCursorPublicationMutationParentScopeIntrinsic(
+      composition,
+      SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[2],
+      receipt,
+    );
+    receipt = undefined as never;
+    for (let round = 0; round < 4; round += 1) {
+      globalThis.gc?.();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+    const retainedReceipt = receiptReference.deref();
+    expect(retainedReceipt).toBeDefined();
+    expect(readSQLiteCursorPublicationRetainedCountReceiptSnapshotIntrinsic(
+      composition,
+      retainedReceipt as never,
+    )).toMatchObject({ lifecycle: "consumed", retainedCount: 2 });
+    expect(readSQLiteCursorPublicationMutationParentScopeSnapshotIntrinsic(parent))
+      .toMatchObject({ expectedCount: 2 });
+  });
+
+  it("terminalizes only the presented composition on a cross-composition receipt attack", () => {
+    const sourceGraph = p9Graph();
+    const sourceComposition = compositionFor(sourceGraph);
+    const sourceReceipt = retainedCountReceiptFor(sourceComposition, 0);
+    const targetGraph = p9Graph();
+    const targetComposition = compositionFor(targetGraph);
+    expect(() => issueSQLiteCursorPublicationMutationParentScopeIntrinsic(
+      targetComposition,
+      SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[2],
+      sourceReceipt,
+    )).toThrowError(expect.objectContaining({ code: "GE_SQLITE_P11_SCOPE_INVALID" }));
+    expect(readSQLiteCursorPublicationTransactionOwnerSnapshotIntrinsic(targetGraph.owner))
+      .toMatchObject({ commitAttemptCount: 0, lifecycle: "finalized" });
+    expect(readSQLiteCursorPublicationRetainedCountReceiptSnapshotIntrinsic(
+      sourceComposition,
+      sourceReceipt,
+    )).toMatchObject({ exactScope: false, lifecycle: "issued", retainedCount: 0 });
+    expect(issueSQLiteCursorPublicationMutationParentScopeIntrinsic(
+      sourceComposition,
+      SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[2],
+      sourceReceipt,
+    )).toBeTypeOf("object");
+    expect(readSQLiteCursorPublicationTransactionOwnerSnapshotIntrinsic(sourceGraph.owner))
+      .toMatchObject({ commitAttemptCount: 0, lifecycle: "active" });
+  });
+
   it.each([0, 3, 4, 5] as const)(
     "accepts only the exact singleton count for mutation route index %i",
     (routeIndex) => {
@@ -595,11 +793,12 @@ describe("SQLite P11-A owner composition substrate", () => {
     },
   );
 
-  it("accepts the inclusive 1024 baseline-entry shape boundary without mutation I/O", () => {
+  it("accepts the inclusive 1024 projection-count boundary without mutation I/O", () => {
+    const composition = compositionFor(p9Graph());
     const parent = issueSQLiteCursorPublicationMutationParentScopeIntrinsic(
-      compositionFor(p9Graph()),
+      composition,
       SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[2],
-      1_024,
+      retainedCountReceiptFor(composition, 1_024),
     );
     expect(readSQLiteCursorPublicationMutationParentScopeSnapshotIntrinsic(parent))
       .toMatchObject({
@@ -790,13 +989,24 @@ describe("SQLite P11-A owner composition substrate", () => {
       .toMatchObject({ commitAttemptCount: 0, lifecycle: "finalized" });
 
     const composition = compositionFor(p9Graph());
+    const retainedCountReceipt = retainedCountReceiptFor(composition, 0);
 
     const someDescriptor = Object.getOwnPropertyDescriptor(Array.prototype, "some")!;
     const includesDescriptor = Object.getOwnPropertyDescriptor(Array.prototype, "includes")!;
+    const arrayIsArrayDescriptor = Object.getOwnPropertyDescriptor(Array, "isArray")!;
     const safeIntegerDescriptor = Object.getOwnPropertyDescriptor(Number, "isSafeInteger")!;
     const reflectApplyDescriptor = Object.getOwnPropertyDescriptor(Reflect, "apply")!;
     const objectCreateDescriptor = Object.getOwnPropertyDescriptor(Object, "create")!;
     const objectFreezeDescriptor = Object.getOwnPropertyDescriptor(Object, "freeze")!;
+    const objectGetOwnPropertyDescriptorDescriptor = Object.getOwnPropertyDescriptor(
+      Object,
+      "getOwnPropertyDescriptor",
+    )!;
+    const objectGetPrototypeOfDescriptor = Object.getOwnPropertyDescriptor(
+      Object,
+      "getPrototypeOf",
+    )!;
+    const objectIsFrozenDescriptor = Object.getOwnPropertyDescriptor(Object, "isFrozen")!;
     const weakMapGetDescriptor = Object.getOwnPropertyDescriptor(WeakMap.prototype, "get")!;
     const weakMapHasDescriptor = Object.getOwnPropertyDescriptor(WeakMap.prototype, "has")!;
     const weakMapSetDescriptor = Object.getOwnPropertyDescriptor(WeakMap.prototype, "set")!;
@@ -815,6 +1025,10 @@ describe("SQLite P11-A owner composition substrate", () => {
         ...includesDescriptor,
         value: () => { throw new Error("hostile Array.prototype.includes"); },
       });
+      Object.defineProperty(Array, "isArray", {
+        ...arrayIsArrayDescriptor,
+        value: () => { throw new Error("hostile Array.isArray"); },
+      });
       Object.defineProperty(Number, "isSafeInteger", {
         ...safeIntegerDescriptor,
         value: () => { throw new Error("hostile Number.isSafeInteger"); },
@@ -826,6 +1040,18 @@ describe("SQLite P11-A owner composition substrate", () => {
       Object.defineProperty(Object, "freeze", {
         ...objectFreezeDescriptor,
         value: () => { throw new Error("hostile Object.freeze"); },
+      });
+      Object.defineProperty(Object, "getOwnPropertyDescriptor", {
+        ...objectGetOwnPropertyDescriptorDescriptor,
+        value: () => { throw new Error("hostile Object.getOwnPropertyDescriptor"); },
+      });
+      Object.defineProperty(Object, "getPrototypeOf", {
+        ...objectGetPrototypeOfDescriptor,
+        value: () => { throw new Error("hostile Object.getPrototypeOf"); },
+      });
+      Object.defineProperty(Object, "isFrozen", {
+        ...objectIsFrozenDescriptor,
+        value: () => { throw new Error("hostile Object.isFrozen"); },
       });
       Object.defineProperty(WeakMap.prototype, "get", {
         ...weakMapGetDescriptor,
@@ -854,7 +1080,7 @@ describe("SQLite P11-A owner composition substrate", () => {
       parent = issueSQLiteCursorPublicationMutationParentScopeIntrinsic(
         composition,
         SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[2],
-        0,
+        retainedCountReceipt,
       );
       prepareSQLiteCursorPublicationReusableParentIntrinsic(parent);
       acceptSQLiteCursorPublicationMutationZeroItemPostflightIntrinsic(parent);
@@ -873,10 +1099,18 @@ describe("SQLite P11-A owner composition substrate", () => {
     } finally {
       Object.defineProperty(Array.prototype, "some", someDescriptor);
       Object.defineProperty(Array.prototype, "includes", includesDescriptor);
+      Object.defineProperty(Array, "isArray", arrayIsArrayDescriptor);
       Object.defineProperty(Number, "isSafeInteger", safeIntegerDescriptor);
       Object.defineProperty(Reflect, "apply", reflectApplyDescriptor);
       Object.defineProperty(Object, "create", objectCreateDescriptor);
       Object.defineProperty(Object, "freeze", objectFreezeDescriptor);
+      Object.defineProperty(
+        Object,
+        "getOwnPropertyDescriptor",
+        objectGetOwnPropertyDescriptorDescriptor,
+      );
+      Object.defineProperty(Object, "getPrototypeOf", objectGetPrototypeOfDescriptor);
+      Object.defineProperty(Object, "isFrozen", objectIsFrozenDescriptor);
       Object.defineProperty(WeakMap.prototype, "get", weakMapGetDescriptor);
       Object.defineProperty(WeakMap.prototype, "has", weakMapHasDescriptor);
       Object.defineProperty(WeakMap.prototype, "set", weakMapSetDescriptor);
@@ -1089,6 +1323,12 @@ describe("SQLite P11-A owner composition substrate", () => {
       "issueSQLiteCursorPublicationMutationParentScopeIntrinsic",
     );
     expect(sqliteRoot).not.toHaveProperty(
+      "mintSQLiteCursorPublicationRetainedCountReceiptIntrinsic",
+    );
+    expect(sqliteRoot).not.toHaveProperty(
+      "readSQLiteCursorPublicationRetainedCountReceiptSnapshotIntrinsic",
+    );
+    expect(sqliteRoot).not.toHaveProperty(
       "issueSQLiteCursorPublicationFixedReadPermitIntrinsic",
     );
   });
@@ -1124,6 +1364,12 @@ function buildAndAbandonP11AuthorityGraph(): Readonly<{
     SQLITE_CURSOR_PUBLICATION_P11_FIXED_READ_ROUTES[0],
     1,
   );
+  const retainedCountReceipt = retainedCountReceiptFor(composition, 0);
+  const retainedCountParent = issueSQLiteCursorPublicationMutationParentScopeIntrinsic(
+    composition,
+    SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[2],
+    retainedCountReceipt,
+  );
   const finalized = new Set<string>();
   const registry = new FinalizationRegistry<string>((label) => finalized.add(label));
   const referents = [
@@ -1134,6 +1380,8 @@ function buildAndAbandonP11AuthorityGraph(): Readonly<{
     ["mutation-parent", parent],
     ["mutation-child", child],
     ["fixed-read", fixedRead],
+    ["retained-count-receipt", retainedCountReceipt],
+    ["retained-count-parent", retainedCountParent],
   ].map(([label, value]) => {
     registry.register(value as object, label as string);
     return { label: label as string, reference: new WeakRef(value as object) };

@@ -37,15 +37,94 @@ function slash(value) {
   return value.split(path.sep).join("/");
 }
 
+export function compareUnicodeCodePoints(left, right) {
+  const leftPoints = [...left];
+  const rightPoints = [...right];
+  const sharedLength = Math.min(leftPoints.length, rightPoints.length);
+  for (let index = 0; index < sharedLength; index += 1) {
+    const difference = leftPoints[index].codePointAt(0) - rightPoints[index].codePointAt(0);
+    if (difference !== 0) return difference;
+  }
+  return leftPoints.length - rightPoints.length;
+}
+
 function walkFiles(directory, predicate) {
   if (!fs.existsSync(directory)) return [];
   const result = [];
-  for (const entry of fs.readdirSync(directory, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true }).sort((a, b) =>
+    compareUnicodeCodePoints(a.name, b.name))) {
     const target = path.join(directory, entry.name);
     if (entry.isDirectory()) result.push(...walkFiles(target, predicate));
     else if (entry.isFile() && predicate(target)) result.push(target);
   }
   return result;
+}
+
+function canonicalDirectory(directory) {
+  const resolved = path.resolve(directory);
+  let canonical;
+  try {
+    canonical = fs.realpathSync(resolved);
+  } catch (error) {
+    throw new Error(`Repository root does not resolve to a directory: ${resolved}: ${error.message}`, {
+      cause: error,
+    });
+  }
+  if (!fs.statSync(canonical).isDirectory()) {
+    throw new Error(`Repository root is not a directory: ${resolved}`);
+  }
+  return canonical;
+}
+
+function isContainedFilePath(root, target) {
+  const relative = path.relative(root, target);
+  return relative.length > 0
+    && !path.isAbsolute(relative)
+    && relative !== ".."
+    && !relative.startsWith(`..${path.sep}`);
+}
+
+function resolveExplicitFile(root, input, optionName) {
+  if (typeof input !== "string" || input.length === 0) {
+    throw new Error(`${optionName} path must be a non-empty relative path`);
+  }
+  if (path.isAbsolute(input)) {
+    throw new Error(`${optionName} path must be relative to the repository root: ${input}`);
+  }
+  const normalized = path.normalize(input);
+  if (normalized === "." || normalized === ".." || slash(normalized) !== slash(input)) {
+    throw new Error(`${optionName} path must use its canonical root-relative spelling: ${input}`);
+  }
+  const resolved = path.resolve(root, normalized);
+  if (!isContainedFilePath(root, resolved)) {
+    throw new Error(`${optionName} path escapes the repository root: ${input}`);
+  }
+  let canonical;
+  try {
+    canonical = fs.realpathSync(resolved);
+  } catch (error) {
+    throw new Error(`${optionName} path does not resolve to a file: ${input}: ${error.message}`, {
+      cause: error,
+    });
+  }
+  if (!isContainedFilePath(root, canonical)) {
+    throw new Error(`${optionName} path resolves outside the repository root: ${input}`);
+  }
+  if (canonical !== resolved) {
+    throw new Error(`${optionName} path is a non-canonical alias or symbolic link: ${input}`);
+  }
+  if (!fs.statSync(canonical).isFile()) {
+    throw new Error(`${optionName} path is not a file: ${input}`);
+  }
+  return canonical;
+}
+
+function resolveExplicitFiles(root, inputs, optionName) {
+  const files = inputs.map((input) => resolveExplicitFile(root, input, optionName));
+  if (new Set(files).size !== files.length) {
+    throw new Error(`${optionName} paths must not contain duplicate files`);
+  }
+  return files.sort(compareUnicodeCodePoints);
 }
 
 function loadTypeScript() {
@@ -58,7 +137,14 @@ function loadTypeScript() {
 }
 
 function createScope(parent = null) {
-  return { expressions: new Map(), methods: new Map(), parent, receivers: new Map() };
+  return {
+    expressions: new Map(),
+    methods: new Map(),
+    parent,
+    properties: new Map(),
+    receivers: new Map(),
+    thisReceiver: parent?.thisReceiver,
+  };
 }
 
 function lookup(scope, field, name) {
@@ -90,11 +176,175 @@ function tsMember(ts, expression) {
 }
 
 function tsNameHeuristic(name) {
-  if (/^(audit|conn|connection|database|db)$/iu.test(name)) return { confidence: "heuristic", kind: "database" };
-  if (/(connection|database)$/iu.test(name)) return { confidence: "heuristic", kind: "database" };
-  if (/(cursor)$/iu.test(name)) return { confidence: "heuristic", kind: "cursor" };
-  if (/(statement|stmt)$/iu.test(name)) return { confidence: "heuristic", kind: "statement" };
-  return { confidence: "unknown", kind: "unknown" };
+  if (/^(audit|conn|connection|database|db)$/iu.test(name)) return "database";
+  if (/(connection|database)$/iu.test(name)) return "database";
+  if (/(cursor)$/iu.test(name)) return "cursor";
+  if (/(statement|stmt)$/iu.test(name)) return "statement";
+  return "unknown";
+}
+
+function unknownTsReceiver(name = null) {
+  const hint = name === null ? "unknown" : tsNameHeuristic(name);
+  return {
+    aliasDepth: null,
+    confidence: "unknown",
+    evidence: "unresolved",
+    family: "unknown",
+    hint,
+    kind: "unknown",
+  };
+}
+
+function provenTsReceiver(kind, family, evidence, aliasDepth = 0) {
+  return { aliasDepth, confidence: "proven", evidence, family, hint: kind, kind };
+}
+
+function aliasedTsReceiver(receiver, evidence) {
+  if (receiver.confidence !== "proven") return unknownTsReceiver();
+  return {
+    ...receiver,
+    aliasDepth: (receiver.aliasDepth ?? 0) + 1,
+    evidence: `${evidence}:${receiver.evidence}`,
+  };
+}
+
+function tsPropertyName(ts, name) {
+  if (!name) return null;
+  if (ts.isIdentifier(name) || ts.isPrivateIdentifier(name)
+      || ts.isStringLiteral(name) || ts.isNumericLiteral(name)) return name.text;
+  return null;
+}
+
+function tsHasModifier(ts, node, kind) {
+  return node.modifiers?.some((modifier) => modifier.kind === kind) ?? false;
+}
+
+function collectTsReceiverMetadata(ts, source, absolute) {
+  const nativeTypes = new Map();
+  const wrapperTypes = new Set();
+  const localClasses = new Map();
+  const localInterfaces = new Set();
+  const ambiguousLocalTypes = new Set();
+  for (const statement of source.statements) {
+    if (ts.isImportDeclaration(statement) && ts.isStringLiteral(statement.moduleSpecifier)) {
+      const clause = statement.importClause;
+      if (!clause?.namedBindings || !ts.isNamedImports(clause.namedBindings)) continue;
+      for (const specifier of clause.namedBindings.elements) {
+        const imported = specifier.propertyName?.text ?? specifier.name.text;
+        const local = specifier.name.text;
+        if (statement.moduleSpecifier.text === "node:sqlite") {
+          if (imported === "DatabaseSync") nativeTypes.set(local, "database");
+          if (imported === "StatementSync") nativeTypes.set(local, "statement");
+        }
+        if (/^(?:\.\/|\.\.\/).*sqlite-connection\.js$/u.test(statement.moduleSpecifier.text)
+            && imported === "SQLiteConnection") wrapperTypes.add(local);
+      }
+    }
+  }
+  function collectLocalTypes(node) {
+    if (ts.isClassDeclaration(node) && node.name) {
+      if (localClasses.has(node.name.text) || localInterfaces.has(node.name.text)) {
+        ambiguousLocalTypes.add(node.name.text);
+      }
+      localClasses.set(node.name.text, node);
+    }
+    if (ts.isInterfaceDeclaration(node) && node.name) {
+      if (localClasses.has(node.name.text) || localInterfaces.has(node.name.text)) {
+        ambiguousLocalTypes.add(node.name.text);
+      }
+      localInterfaces.add(node.name.text);
+    }
+    ts.forEachChild(node, collectLocalTypes);
+  }
+  collectLocalTypes(source);
+  if (path.basename(absolute) === "sqlite-connection.ts") wrapperTypes.add("SQLiteConnection");
+  const classLineages = new Map();
+  const resolving = new Set();
+  function resolveClassLineage(name) {
+    if (classLineages.has(name)) return classLineages.get(name);
+    if (resolving.has(name)) return unknownTsReceiver(name);
+    const declaration = localClasses.get(name);
+    if (!declaration) return unknownTsReceiver(name);
+    if (ambiguousLocalTypes.has(name)) {
+      const unknown = unknownTsReceiver(name);
+      classLineages.set(name, unknown);
+      return unknown;
+    }
+    if (wrapperTypes.has(name)) {
+      const known = provenTsReceiver("database", "wrapper", `sqlite-wrapper-class:${name}`);
+      classLineages.set(name, known);
+      return known;
+    }
+    resolving.add(name);
+    const heritage = declaration.heritageClauses?.find(({ token }) =>
+      token === ts.SyntaxKind.ExtendsKeyword)?.types;
+    let lineage = unknownTsReceiver(name);
+    if (heritage?.length === 1) {
+      const expression = heritage[0].expression;
+      const baseName = expression.getText().split(".").at(-1) ?? expression.getText();
+      if (localClasses.has(baseName)) {
+        const base = resolveClassLineage(baseName);
+        if (base.confidence === "proven" && base.family !== "non-sqlite") {
+          lineage = aliasedTsReceiver(base, `local-class-extends:${name}:${baseName}`);
+        }
+      } else if (localInterfaces.has(baseName)) {
+        lineage = unknownTsReceiver(name);
+      } else if (nativeTypes.has(baseName)) {
+        const nativeKind = nativeTypes.get(baseName);
+        lineage = provenTsReceiver(
+          nativeKind,
+          "native",
+          `local-class-extends-node:sqlite:${name}:${baseName}`,
+        );
+      } else if (wrapperTypes.has(baseName)) {
+        lineage = provenTsReceiver(
+          "database",
+          "wrapper",
+          `local-class-extends-sqlite-wrapper:${name}:${baseName}`,
+        );
+      }
+    }
+    resolving.delete(name);
+    classLineages.set(name, lineage);
+    return lineage;
+  }
+  for (const name of localClasses.keys()) resolveClassLineage(name);
+  return {
+    ambiguousLocalTypes,
+    classLineages,
+    localClasses,
+    localInterfaces,
+    nativeTypes,
+    wrapperTypes,
+  };
+}
+
+function tsReceiverFromType(ts, type, metadata) {
+  if (!type) return unknownTsReceiver();
+  if (ts.isUnionTypeNode(type)) {
+    const material = type.types.filter((entry) => ![
+      ts.SyntaxKind.NullKeyword,
+      ts.SyntaxKind.UndefinedKeyword,
+      ts.SyntaxKind.VoidKeyword,
+    ].includes(entry.kind));
+    if (material.length !== 1) return unknownTsReceiver();
+    return tsReceiverFromType(ts, material[0], metadata);
+  }
+  const text = type.getText().replace(/^readonly\s+/u, "").replace(/<.*>$/u, "");
+  const name = text.split(".").at(-1) ?? text;
+  if (metadata.localClasses.has(name)) {
+    return metadata.classLineages.get(name) ?? unknownTsReceiver(name);
+  }
+  if (metadata.localInterfaces.has(name)) return unknownTsReceiver(name);
+  const nativeKind = metadata.nativeTypes.get(name);
+  if (nativeKind) return provenTsReceiver(nativeKind, "native", `node:sqlite-type:${name}`);
+  if (metadata.wrapperTypes.has(name)) {
+    return provenTsReceiver("database", "wrapper", `sqlite-wrapper-type:${name}`);
+  }
+  if (name === "RegExp" || ["string", "number", "bigint", "boolean", "symbol"].includes(name)) {
+    return provenTsReceiver("non-sqlite", "non-sqlite", `non-sqlite-type:${name}`);
+  }
+  return unknownTsReceiver();
 }
 
 function resolveTsString(ts, expression, scope, seen = new Set(), aliasShape = null) {
@@ -146,53 +396,99 @@ function resolveTsString(ts, expression, scope, seen = new Set(), aliasShape = n
   return { preview: node.getText().slice(0, 160), shape: "expression", status: "unknown" };
 }
 
-function inferTsReceiver(ts, expression, scope, seen = new Set()) {
+function inferTsReceiver(ts, expression, scope, metadata, seen = new Set()) {
   const node = unwrapTs(ts, expression);
-  if (!node) return { confidence: "unknown", kind: "unknown" };
+  if (!node) return unknownTsReceiver();
   if (ts.isIdentifier(node)) {
-    if (seen.has(node.text)) return { confidence: "unknown", kind: "unknown" };
+    if (seen.has(node.text)) return unknownTsReceiver(node.text);
     const known = lookup(scope, "receivers", node.text);
     if (known) return known;
     const bound = lookup(scope, "expressions", node.text);
     if (bound) {
       seen.add(node.text);
-      const inferred = inferTsReceiver(ts, bound, scope, seen);
+      const inferred = inferTsReceiver(ts, bound, scope, metadata, seen);
       seen.delete(node.text);
-      if (inferred.kind !== "unknown") return inferred;
+      if (inferred.confidence === "proven") return aliasedTsReceiver(inferred, `identifier:${node.text}`);
     }
-    return tsNameHeuristic(node.text);
+    return unknownTsReceiver(node.text);
+  }
+  if (node.kind === ts.SyntaxKind.ThisKeyword) {
+    return scope.thisReceiver ?? unknownTsReceiver("this");
+  }
+  if (ts.isRegularExpressionLiteral(node)) {
+    return provenTsReceiver("non-sqlite", "non-sqlite", "regexp-literal");
+  }
+  if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)
+      || ts.isNumericLiteral(node) || ts.isBigIntLiteral(node)
+      || node.kind === ts.SyntaxKind.TrueKeyword || node.kind === ts.SyntaxKind.FalseKeyword) {
+    return provenTsReceiver("non-sqlite", "non-sqlite", "primitive-literal");
+  }
+  if (ts.isArrayLiteralExpression(node) || ts.isObjectLiteralExpression(node)) {
+    return provenTsReceiver("non-sqlite", "non-sqlite", "local-literal");
   }
   if (ts.isNewExpression(node)) {
-    const name = node.expression.getText();
-    if (/(DatabaseSync|Database|Connection)$/u.test(name)) return { confidence: "proven", kind: "database" };
+    const name = node.expression.getText().split(".").at(-1) ?? node.expression.getText();
+    if (metadata.localClasses.has(name)) {
+      return metadata.classLineages.get(name) ?? unknownTsReceiver(name);
+    }
+    if (metadata.localInterfaces.has(name)) return unknownTsReceiver(name);
+    const nativeKind = metadata.nativeTypes.get(name);
+    if (nativeKind) return provenTsReceiver(nativeKind, "native", `node:sqlite-constructor:${name}`);
+    if (metadata.wrapperTypes.has(name)) {
+      return provenTsReceiver("database", "wrapper", `sqlite-wrapper-constructor:${name}`);
+    }
+    if (name === "RegExp") {
+      return provenTsReceiver("non-sqlite", "non-sqlite", `non-sqlite-constructor:${name}`);
+    }
   }
   if (ts.isCallExpression(node)) {
     const called = tsMember(ts, node.expression);
     if (called && /^prepare/u.test(called.method)) {
-      const lower = inferTsReceiver(ts, called.receiver, scope, seen);
-      return lower.kind === "database"
-        ? { confidence: lower.confidence, kind: "statement" }
-        : { confidence: "unknown", kind: "unknown" };
+      const lower = inferTsReceiver(ts, called.receiver, scope, metadata, seen);
+      // A wrapper instance's own method name does not prove its return type.
+      // Imported/typed wrapper handles and properties are separately trusted,
+      // but cross-method flow stays unknown without a local native lineage.
+      return lower.kind === "database" && lower.confidence === "proven"
+          && !lower.evidence.startsWith("sqlite-wrapper-class:")
+        ? { ...aliasedTsReceiver(lower, `prepare-return:${called.method}`), hint: "statement", kind: "statement" }
+        : unknownTsReceiver();
     }
     if (called?.method === "cursor") {
-      const lower = inferTsReceiver(ts, called.receiver, scope, seen);
-      return lower.kind === "database"
-        ? { confidence: lower.confidence, kind: "cursor" }
-        : { confidence: "unknown", kind: "unknown" };
+      const lower = inferTsReceiver(ts, called.receiver, scope, metadata, seen);
+      return lower.kind === "database" && lower.confidence === "proven"
+        ? { ...aliasedTsReceiver(lower, "cursor-return"), hint: "cursor", kind: "cursor" }
+        : unknownTsReceiver();
     }
   }
   const member = tsMember(ts, node);
   if (member) {
-    const direct = tsNameHeuristic(member.method.replace(/^#/u, ""));
-    if (direct.kind !== "unknown") return direct;
-    return inferTsReceiver(ts, member.receiver, scope, seen);
+    const property = member.method.replace(/^#/u, "");
+    const base = unwrapTs(ts, member.receiver);
+    if (base.kind === ts.SyntaxKind.ThisKeyword) {
+      const known = lookup(scope, "properties", property);
+      return known ? aliasedTsReceiver(known, `this-property:${property}`) : unknownTsReceiver(property);
+    }
+    if (ts.isIdentifier(base)) {
+      const bound = lookup(scope, "expressions", base.text);
+      const object = unwrapTs(ts, bound);
+      if (object && ts.isObjectLiteralExpression(object)) {
+        for (const entry of object.properties) {
+          if (!ts.isPropertyAssignment(entry) || tsPropertyName(ts, entry.name) !== property) continue;
+          const inferred = inferTsReceiver(ts, entry.initializer, scope, metadata, seen);
+          return inferred.confidence === "proven"
+            ? aliasedTsReceiver(inferred, `object-property:${base.text}.${property}`)
+            : unknownTsReceiver(property);
+        }
+      }
+    }
+    return unknownTsReceiver(property);
   }
-  return { confidence: "unknown", kind: "unknown" };
+  return unknownTsReceiver();
 }
 
 function tsSqlForCall(ts, call, method, receiver, scope) {
   if (method === "cursor") return { origin: "none", evidence: { shape: "absent", status: "absent" } };
-  if (STATEMENT_METHODS.has(method) && receiver.kind === "statement") {
+  if (STATEMENT_METHODS.has(method) && (receiver.kind === "statement" || receiver.hint === "statement")) {
     const target = unwrapTs(ts, tsMember(ts, call.expression)?.receiver);
     let source = target;
     if (ts.isIdentifier(target)) source = unwrapTs(ts, lookup(scope, "expressions", target.text) ?? target);
@@ -210,34 +506,78 @@ function tsSqlForCall(ts, call, method, receiver, scope) {
 function scanTypeScriptFile(ts, absolute, root) {
   const text = fs.readFileSync(absolute, "utf8");
   const source = ts.createSourceFile(absolute, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const metadata = collectTsReceiverMetadata(ts, source, absolute);
   const callsites = [];
 
   function visit(node, scope) {
     let active = scope;
-    if (ts.isFunctionLike(node) && node !== source) {
+    if (ts.isClassLike(node)) {
       active = createScope(scope);
-      for (const parameter of node.parameters ?? []) {
-        if (!ts.isIdentifier(parameter.name)) continue;
-        const typeText = parameter.type?.getText() ?? "";
-        if (/(DatabaseSync|SqliteConnection|SQLite.*Connection)/u.test(typeText)) active.receivers.set(parameter.name.text, { confidence: "proven", kind: "database" });
-        else {
-          const guess = tsNameHeuristic(parameter.name.text);
-          if (guess.kind !== "unknown") active.receivers.set(parameter.name.text, guess);
+      const className = node.name?.text ?? "<anonymous>";
+      active.thisReceiver = metadata.classLineages.get(className) ?? unknownTsReceiver("this");
+      for (const member of node.members) {
+        if (!ts.isPropertyDeclaration(member)) continue;
+        if (tsHasModifier(ts, member, ts.SyntaxKind.StaticKeyword)) continue;
+        const name = tsPropertyName(ts, member.name)?.replace(/^#/u, "");
+        if (!name) continue;
+        const typed = tsReceiverFromType(ts, member.type, metadata);
+        if (typed.confidence === "proven") active.properties.set(name, typed);
+        else if (member.initializer) {
+          const inferred = inferTsReceiver(ts, member.initializer, active, metadata);
+          if (inferred.confidence === "proven") active.properties.set(name, inferred);
         }
       }
     }
+    if (ts.isPropertyDeclaration(node)
+        && tsHasModifier(ts, node, ts.SyntaxKind.StaticKeyword)) {
+      active = createScope(scope);
+      active.thisReceiver = unknownTsReceiver("this");
+    }
+    if (ts.isClassStaticBlockDeclaration?.(node)) {
+      active = createScope(scope);
+      active.thisReceiver = unknownTsReceiver("this");
+    }
+    if (ts.isFunctionLike(node) && node !== source) {
+      active = createScope(scope);
+      if (!ts.isArrowFunction(node)) {
+        const instanceClassMember = ts.isClassLike(node.parent)
+          && !tsHasModifier(ts, node, ts.SyntaxKind.StaticKeyword);
+        active.thisReceiver = instanceClassMember
+          ? scope.thisReceiver ?? unknownTsReceiver("this")
+          : unknownTsReceiver("this");
+      }
+      for (const parameter of node.parameters ?? []) {
+        if (!ts.isIdentifier(parameter.name)) continue;
+        const typed = tsReceiverFromType(ts, parameter.type, metadata);
+        active.receivers.set(parameter.name.text, typed.confidence === "proven"
+          ? typed
+          : unknownTsReceiver(parameter.name.text));
+      }
+    }
 
-    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
-      active.expressions.set(node.name.text, node.initializer);
-      const inferred = inferTsReceiver(ts, node.initializer, active);
-      if (inferred.kind !== "unknown") active.receivers.set(node.name.text, inferred);
-      const member = tsMember(ts, node.initializer);
-      if (member && ALL_METHODS.has(member.method)) active.methods.set(node.name.text, { method: member.method, receiver: member.receiver });
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)) {
+      if (node.initializer) active.expressions.set(node.name.text, node.initializer);
+      const typed = tsReceiverFromType(ts, node.type, metadata);
+      const inferred = node.initializer
+        ? inferTsReceiver(ts, node.initializer, active, metadata)
+        : unknownTsReceiver(node.name.text);
+      active.receivers.set(node.name.text, typed.confidence === "proven"
+        ? typed
+        : inferred.confidence === "proven"
+          ? aliasedTsReceiver(inferred, `variable:${node.name.text}`)
+          : unknownTsReceiver(node.name.text));
+      const member = node.initializer && tsMember(ts, node.initializer);
+      if (member && ALL_METHODS.has(member.method)) {
+        active.methods.set(node.name.text, { method: member.method, receiver: member.receiver });
+      }
     }
     if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken && ts.isIdentifier(node.left)) {
       active.expressions.set(node.left.text, node.right);
-      const inferred = inferTsReceiver(ts, node.right, active);
-      if (inferred.kind !== "unknown") active.receivers.set(node.left.text, inferred);
+      const inferred = inferTsReceiver(ts, node.right, active, metadata);
+      active.receivers.set(node.left.text, inferred.confidence === "proven"
+        ? aliasedTsReceiver(inferred, `assignment:${node.left.text}`)
+        : unknownTsReceiver(node.left.text));
+      active.methods.delete(node.left.text);
     }
 
     if (ts.isCallExpression(node)) {
@@ -257,8 +597,10 @@ function scanTypeScriptFile(ts, absolute, root) {
         }
       }
       if (method && (ALL_METHODS.has(method) || method === COMPUTED_METHOD)) {
-        const receiver = inferTsReceiver(ts, receiverExpression, active);
-        const include = SQL_ENTRY_METHODS.has(method) || receiver.kind !== "unknown";
+        const receiver = inferTsReceiver(ts, receiverExpression, active, metadata);
+        const include = SQL_ENTRY_METHODS.has(method)
+          || (receiver.kind !== "unknown" && receiver.kind !== "non-sqlite")
+          || (STATEMENT_METHODS.has(method) && receiver.hint === "statement");
         if (include) {
           const position = source.getLineAndCharacterOfPosition(node.getStart(source));
           const sql = method === COMPUTED_METHOD
@@ -272,6 +614,10 @@ function scanTypeScriptFile(ts, absolute, root) {
             methodAlias: alias,
             path: slash(path.relative(root, absolute)),
             receiverConfidence: receiver.confidence,
+            receiverEvidence: receiver.evidence,
+            receiverEvidenceAliasDepth: receiver.aliasDepth,
+            receiverFamily: receiver.family,
+            receiverKindHint: receiver.hint,
             receiverKind: receiver.kind,
             sqlEvidence: sql.evidence,
             sqlOrigin: sql.origin,
@@ -413,12 +759,41 @@ for file in files:
 print(json.dumps(result,separators=(",",":"),sort_keys=True))
 `;
 
-function scanPythonFiles(files, root) {
+function scanPythonFiles(files, root, spawn = spawnSync) {
   if (files.length === 0) return [];
   const python = process.env.PYTHON ?? "python3";
-  const result = spawnSync(python, ["-c", PYTHON_SCANNER, root, ...files], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
-  if (result.status !== 0) throw new Error(`Python AST discovery failed: ${result.stderr || result.stdout}`);
-  return JSON.parse(result.stdout);
+  const result = spawn(python, ["-c", PYTHON_SCANNER, root, ...files], {
+    encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  if (result.error) {
+    throw new Error(`Python AST discovery spawn failed: ${result.error.message}`, {
+      cause: result.error,
+    });
+  }
+  if (result.signal !== null && result.signal !== undefined) {
+    throw new Error(`Python AST discovery was terminated by signal ${result.signal}`);
+  }
+  if (result.status !== 0) {
+    throw new Error(`Python AST discovery failed with status ${String(result.status)}: ${result.stderr || result.stdout}`);
+  }
+  if (typeof result.stderr !== "string" || result.stderr.length !== 0) {
+    throw new Error(`Python AST discovery wrote stderr despite success: ${String(result.stderr)}`);
+  }
+  if (typeof result.stdout !== "string") {
+    throw new Error("Python AST discovery returned a non-text stdout payload");
+  }
+  try {
+    return JSON.parse(result.stdout);
+  } catch (error) {
+    throw new Error(`Python AST discovery returned invalid JSON: ${error.message}`, {
+      cause: error,
+    });
+  }
+}
+
+export function scanPythonFilesForTest(files, root, spawn) {
+  return scanPythonFiles(files, root, spawn);
 }
 
 function digestIndex(fixture) {
@@ -457,6 +832,39 @@ function sqlToken(sql) {
   return withoutComments.match(/^([A-Za-z]+)/u)?.[1]?.toUpperCase() ?? null;
 }
 
+function stableCallsiteIdentity(callsite) {
+  const fields = {
+    column: callsite.column,
+    line: callsite.line,
+    method: callsite.method,
+    path: callsite.path,
+    sqlOrigin: callsite.sqlOrigin,
+  };
+  return { ...fields, sha256: sha256(JSON.stringify(fields)) };
+}
+
+function classifyTypeScriptCallsite(callsite) {
+  const context = /(?:^|\/)(?:[^/]*(?:integrity|invariants|audit)[^/]*)\.ts$/u.test(callsite.path)
+    ? "test-like-production-probe"
+    : callsite.receiverFamily === "wrapper" || /(?:owner|guard)/u.test(path.basename(callsite.path))
+      ? "wrapper-or-guard"
+      : "production-runtime";
+  const disposition = callsite.receiverFamily === "non-sqlite"
+    ? "false-positive"
+    : callsite.receiverFamily === "native" && callsite.receiverConfidence === "proven"
+      ? "confirmed-native-receiver"
+      : callsite.receiverFamily === "wrapper" && callsite.receiverConfidence === "proven"
+        ? "wrapper-guard-or-test-like-production-probe"
+        : "unknown";
+  return {
+    context,
+    disposition,
+    receiverEvidence: callsite.receiverEvidence,
+    receiverEvidenceAliasDepth: callsite.receiverEvidenceAliasDepth,
+    receiverFamily: callsite.receiverFamily,
+  };
+}
+
 function classifyCallsite(callsite, index) {
   const evidence = { ...callsite.sqlEvidence };
   let digest = null;
@@ -485,6 +893,10 @@ function classifyCallsite(callsite, index) {
     operationClass,
     routeClassification,
     sqlEvidence: { ...evidence, sha256: digest, token },
+    stableIdentity: stableCallsiteIdentity(callsite),
+    ...(callsite.language === "typescript"
+      ? { typescriptClassification: classifyTypeScriptCallsite(callsite) }
+      : {}),
     unknown: routeClassification === "unknown",
   };
 }
@@ -513,11 +925,19 @@ function parseArguments(argv) {
 }
 
 export function scanRepository(options = {}) {
-  const root = path.resolve(options.root ?? process.cwd());
-  const tsFiles = (options.typescript?.length ? options.typescript.map((file) => path.resolve(root, file)) : walkFiles(path.join(root, "packages/sqlite/src"), (file) => file.endsWith(".ts") && !file.endsWith(".d.ts"))).sort();
-  const pythonFiles = (options.python?.length ? options.python.map((file) => path.resolve(root, file)) : walkFiles(path.join(root, "python/src/graph_engineering"), (file) => /^sqlite_.*\.py$/u.test(path.basename(file)))).sort();
-  const fixturePath = options.fixture === null ? null : path.resolve(root, options.fixture ?? DEFAULT_FIXTURE);
-  const fixture = fixturePath && fs.existsSync(fixturePath) ? JSON.parse(fs.readFileSync(fixturePath, "utf8")) : {};
+  const root = canonicalDirectory(options.root ?? process.cwd());
+  const tsFiles = options.typescript?.length
+    ? resolveExplicitFiles(root, options.typescript, "TypeScript")
+    : walkFiles(path.join(root, "packages/sqlite/src"), (file) =>
+      file.endsWith(".ts") && !file.endsWith(".d.ts")).sort(compareUnicodeCodePoints);
+  const pythonFiles = options.python?.length
+    ? resolveExplicitFiles(root, options.python, "Python")
+    : walkFiles(path.join(root, "python/src/graph_engineering"), (file) =>
+      /^sqlite_.*\.py$/u.test(path.basename(file))).sort(compareUnicodeCodePoints);
+  const fixturePath = options.fixture === null
+    ? null
+    : resolveExplicitFile(root, options.fixture ?? DEFAULT_FIXTURE, "Fixture");
+  const fixture = fixturePath ? JSON.parse(fs.readFileSync(fixturePath, "utf8")) : {};
   const index = digestIndex(fixture);
   const ts = loadTypeScript();
   const raw = [
@@ -525,8 +945,19 @@ export function scanRepository(options = {}) {
     ...scanPythonFiles(pythonFiles, root),
   ];
   const callsites = raw.map((callsite) => classifyCallsite(callsite, index)).sort((a, b) =>
-    a.path.localeCompare(b.path) || a.line - b.line || a.column - b.column || a.method.localeCompare(b.method));
+    compareUnicodeCodePoints(a.path, b.path)
+    || a.line - b.line
+    || a.column - b.column
+    || compareUnicodeCodePoints(a.method, b.method));
   const byLanguage = Object.fromEntries(["python", "typescript"].map((language) => [language, callsites.filter((item) => item.language === language).length]));
+  const typescriptCallsiteClassifications = Object.fromEntries([
+    "confirmed-native-receiver",
+    "wrapper-guard-or-test-like-production-probe",
+    "false-positive",
+    "unknown",
+  ].map((classification) => [classification, callsites.filter((item) =>
+    item.language === "typescript"
+    && item.typescriptClassification.disposition === classification).length]));
   const unknownCount = callsites.filter(({ unknown }) => unknown).length;
   return {
     callsites,
@@ -539,6 +970,8 @@ export function scanRepository(options = {}) {
       "Static discovery does not execute imports, callbacks, monkey patches, or runtime-generated method names.",
       "Cross-file and member SQL aliases that cannot be proven from a local immutable expression remain unknown.",
       "Receiver-name heuristics never authorize a fixture classification.",
+      "TypeScript receiver names are candidate hints only and never increase receiver confidence.",
+      "TypeScript confirmed-native status requires local node:sqlite syntax evidence; cross-file return values remain unknown.",
       "This inventory is evidence for closing future gaps, not evidence that native-callsite closure has been achieved.",
     ],
     policy: {
@@ -547,9 +980,14 @@ export function scanRepository(options = {}) {
       exactSqlWithoutUniqueFixtureClassification: "unknown",
       heuristicOrUnknownReceiver: "unknown",
       routeClosureClaimed: false,
+      typescriptReceiverEvidence: {
+        aliasPropagation: "proven-only",
+        nameHintsIncreaseConfidence: false,
+        unknownCandidatesDropped: false,
+      },
     },
     routeClosureClaimed: false,
-    schemaVersion: 1,
+    schemaVersion: 2,
     summary: {
       byLanguage,
       callsiteCount: callsites.length,
@@ -559,6 +997,7 @@ export function scanRepository(options = {}) {
       fixtureDigestCandidateCount: callsites.filter(({ fixtureClassificationCandidate }) => fixtureClassificationCandidate !== null).length,
       unknownCount,
       scannedFileCount: tsFiles.length + pythonFiles.length,
+      typescriptCallsiteClassifications,
     },
   };
 }

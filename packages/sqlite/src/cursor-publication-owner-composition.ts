@@ -20,6 +20,11 @@ import {
 
 const objectCreateIntrinsic = Object.create;
 const objectFreezeIntrinsic = Object.freeze;
+const objectGetOwnPropertyDescriptorIntrinsic = Object.getOwnPropertyDescriptor;
+const objectGetPrototypeOfIntrinsic = Object.getPrototypeOf;
+const objectIsFrozenIntrinsic = Object.isFrozen;
+const arrayIsArrayIntrinsic = Array.isArray;
+const arrayPrototypeIntrinsic = Array.prototype;
 const arrayIncludesIntrinsic = Array.prototype.includes;
 const arraySomeIntrinsic = Array.prototype.some;
 const numberIsSafeIntegerIntrinsic = Number.isSafeInteger;
@@ -139,6 +144,30 @@ export const SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES = objectFreezeIntrins
 
 export interface SQLiteCursorPublicationMutationParentScope {
   readonly __sqliteCursorPublicationMutationParentScope: never;
+}
+
+/**
+ * One-shot proof that the baseline-entry count came from one exact retained
+ * projection rather than from a caller-supplied scalar.
+ */
+export interface SQLiteCursorPublicationRetainedCountReceipt {
+  readonly __sqliteCursorPublicationRetainedCountReceipt: never;
+}
+
+export interface SQLiteCursorPublicationRetainedCountReceiptSnapshot {
+  readonly routeId: "main.baseline-entries";
+  readonly lifecycle: "issued" | "consumed" | "poisoned";
+  readonly retainedCount: number;
+  readonly exactOwner: true;
+  readonly exactGeneration: true;
+  readonly exactScope: boolean;
+  readonly exactRetainedProjectionIdentity: true;
+  readonly exactRetainedProjectionCount: true;
+  readonly nativeSourceProvenance: false;
+  readonly genuineZeroClaim: false;
+  readonly oneShot: true;
+  readonly actualNativeIoCount: 0;
+  readonly sqlAuthority: false;
 }
 
 export interface SQLiteCursorPublicationMutationChildPermit {
@@ -273,6 +302,7 @@ interface ParentScopeState {
   readonly composition: SQLiteCursorPublicationOwnerComposition;
   readonly descriptor: SQLiteCursorPublicationMutationRouteDescriptor;
   readonly expectedCount: number;
+  readonly retainedCountReceipt: SQLiteCursorPublicationRetainedCountReceipt | undefined;
   lifecycle: SQLiteCursorPublicationMutationParentScopeSnapshot["lifecycle"];
   nextOrdinal: number;
   activeChild: SQLiteCursorPublicationMutationChildPermit | undefined;
@@ -285,6 +315,19 @@ interface ParentScopeState {
   reusableParentPrepareCount: 0 | 1;
   reusableExecutionLeaseReleasedCount: number;
   parentResourceRetiredCount: 0 | 1;
+}
+
+interface RetainedCountReceiptState {
+  readonly token: SQLiteCursorPublicationRetainedCountReceipt;
+  readonly composition: SQLiteCursorPublicationOwnerComposition;
+  readonly owner: SQLiteCursorPublicationTransactionOwner;
+  readonly beginReceipt: SQLiteCursorPublicationTransactionBeginReceipt;
+  readonly descriptor: typeof SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[2];
+  readonly retainedProjection: readonly unknown[];
+  readonly retainedCount: number;
+  readonly nonce: object;
+  parent: WeakRef<object> | undefined;
+  lifecycle: SQLiteCursorPublicationRetainedCountReceiptSnapshot["lifecycle"];
 }
 
 interface ChildPermitState {
@@ -313,6 +356,7 @@ const COMPOSITIONS = new WeakMap<object, CompositionState>();
 const OWNER_ADOPTIONS = new WeakMap<object, WeakRef<object>>();
 const BEGIN_RECEIPT_ADOPTIONS = new WeakMap<object, WeakRef<object>>();
 const PARENT_SCOPES = new WeakMap<object, ParentScopeState>();
+const RETAINED_COUNT_RECEIPTS = new WeakMap<object, RetainedCountReceiptState>();
 const CHILD_PERMITS = new WeakMap<object, ChildPermitState>();
 const FIXED_READ_PERMITS = new WeakMap<object, FixedReadPermitState>();
 let adoptionFaultForTest: Readonly<{
@@ -433,13 +477,88 @@ function isExactMutationExpectedCount(
     return expectedCount === 20;
   }
   if (descriptor === SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[2]) {
-    return expectedCount >= 0 && expectedCount <= 1_024;
+    return false;
   }
   return (descriptor === SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[0]
       || descriptor === SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[3]
       || descriptor === SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[4]
       || descriptor === SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[5])
     && expectedCount === 1;
+}
+
+function exactRetainedProjectionCount(retainedProjection: readonly unknown[]): number | undefined {
+  if (retainedProjection === null || typeof retainedProjection !== "object"
+      || isProxy(retainedProjection) || !arrayIsArrayIntrinsic(retainedProjection)
+      || objectGetPrototypeOfIntrinsic(retainedProjection) !== arrayPrototypeIntrinsic
+      || !objectIsFrozenIntrinsic(retainedProjection)) {
+    return undefined;
+  }
+  const lengthDescriptor = objectGetOwnPropertyDescriptorIntrinsic(retainedProjection, "length");
+  const retainedCount = lengthDescriptor?.value;
+  if (!numberIsSafeIntegerIntrinsic(retainedCount)
+      || retainedCount < 0 || retainedCount > 1_024) {
+    return undefined;
+  }
+  for (let ordinal = 0; ordinal < retainedCount; ordinal += 1) {
+    const descriptor = objectGetOwnPropertyDescriptorIntrinsic(
+      retainedProjection,
+      String(ordinal),
+    );
+    if (descriptor === undefined || !("value" in descriptor)) return undefined;
+  }
+  return retainedCount;
+}
+
+function retainedCountReceiptStateFor(
+  composition: SQLiteCursorPublicationOwnerComposition,
+  receipt: SQLiteCursorPublicationRetainedCountReceipt,
+): RetainedCountReceiptState {
+  const compositionState = stateFor(composition);
+  try {
+    presentation(receipt as object, "retained-count receipt");
+  } catch (error) {
+    return terminalCompositionFailure(compositionState, primaryObject(error));
+  }
+  const state = reflectApplyIntrinsic(weakMapGetIntrinsic, RETAINED_COUNT_RECEIPTS, [
+    receipt as object,
+  ]) as RetainedCountReceiptState | undefined;
+  if (state === undefined || state.token !== receipt || state.composition !== composition
+      || state.owner !== compositionState.owner
+      || state.beginReceipt !== compositionState.beginReceipt
+      || state.descriptor !== SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[2]
+      || state.nonce === null || typeof state.nonce !== "object"
+      || exactRetainedProjectionCount(state.retainedProjection) !== state.retainedCount) {
+    return terminalCompositionFailure(
+      compositionState,
+      new SQLiteCursorPublicationOwnerCompositionError(
+        "GE_SQLITE_P11_SCOPE_INVALID",
+        "retained-count receipt is not the exact current baseline projection proof",
+      ),
+    );
+  }
+  const boundParent = state.parent === undefined
+    ? undefined
+    : reflectApplyIntrinsic(weakRefDerefIntrinsic, state.parent, []) as object | undefined;
+  const boundParentState = boundParent === undefined
+    ? undefined
+    : reflectApplyIntrinsic(weakMapGetIntrinsic, PARENT_SCOPES, [boundParent]) as
+      ParentScopeState | undefined;
+  if ((state.lifecycle === "issued" && state.parent !== undefined)
+      || (state.lifecycle === "consumed"
+        && (boundParentState === undefined || boundParentState.token !== boundParent
+          || boundParentState.composition !== composition
+          || boundParentState.retainedCountReceipt !== receipt))) {
+    state.lifecycle = "poisoned";
+    return terminalCompositionFailure(
+      compositionState,
+      new SQLiteCursorPublicationOwnerCompositionError(
+        "GE_SQLITE_P11_SCOPE_INVALID",
+        "retained-count receipt scope binding drifted",
+      ),
+    );
+  }
+  authenticateActiveBeginOrTerminate(compositionState);
+  return state;
 }
 
 function isExactFixedReadDescriptor(
@@ -691,18 +810,96 @@ export function readSQLiteCursorPublicationOwnerCompositionSnapshotIntrinsic(
   });
 }
 
+/**
+ * Bind one exact immutable retained projection to the current P9 owner graph.
+ *
+ * The receipt token is its unguessable nonce and is consumed exactly once by
+ * the baseline-entry parent scope.  This function reads no database state and
+ * grants no SQL authority; a future native reader must supply its actual
+ * retained projection here.
+ */
+export function mintSQLiteCursorPublicationRetainedCountReceiptIntrinsic(
+  composition: SQLiteCursorPublicationOwnerComposition,
+  descriptor: SQLiteCursorPublicationMutationRouteDescriptor,
+  retainedProjection: readonly unknown[],
+): SQLiteCursorPublicationRetainedCountReceipt {
+  const compositionState = stateFor(composition);
+  if (compositionState.lifecycle !== "begin-adopted"
+      || descriptor !== SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[2]) {
+    return terminalCompositionFailure(
+      compositionState,
+      new SQLiteCursorPublicationOwnerCompositionError(
+        "GE_SQLITE_P11_SCOPE_INVALID",
+        "retained-count receipt input is invalid",
+      ),
+    );
+  }
+  const retainedCount = exactRetainedProjectionCount(retainedProjection);
+  if (retainedCount === undefined) {
+    return terminalCompositionFailure(
+      compositionState,
+      new SQLiteCursorPublicationOwnerCompositionError(
+        "GE_SQLITE_P11_SCOPE_INVALID",
+        "retained projection must be an exact frozen dense array",
+      ),
+    );
+  }
+  authenticateActiveBeginOrTerminate(compositionState);
+  const receipt = objectFreezeIntrinsic(objectCreateIntrinsic(null)) as
+    SQLiteCursorPublicationRetainedCountReceipt;
+  const nonce = objectFreezeIntrinsic(objectCreateIntrinsic(null)) as object;
+  const state: RetainedCountReceiptState = {
+    beginReceipt: compositionState.beginReceipt,
+    composition,
+    descriptor: SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[2],
+    lifecycle: "issued",
+    nonce,
+    owner: compositionState.owner,
+    parent: undefined,
+    retainedCount,
+    retainedProjection,
+    token: receipt,
+  };
+  reflectApplyIntrinsic(weakMapSetIntrinsic, RETAINED_COUNT_RECEIPTS, [
+    receipt as object,
+    state,
+  ]);
+  return receipt;
+}
+
+export function readSQLiteCursorPublicationRetainedCountReceiptSnapshotIntrinsic(
+  composition: SQLiteCursorPublicationOwnerComposition,
+  receipt: SQLiteCursorPublicationRetainedCountReceipt,
+): SQLiteCursorPublicationRetainedCountReceiptSnapshot {
+  const state = retainedCountReceiptStateFor(composition, receipt);
+  return objectFreezeIntrinsic({
+    actualNativeIoCount: 0,
+    exactGeneration: true,
+    exactOwner: true,
+    exactScope: state.lifecycle === "consumed",
+    exactRetainedProjectionCount: true,
+    exactRetainedProjectionIdentity: true,
+    genuineZeroClaim: false,
+    lifecycle: state.lifecycle,
+    oneShot: true,
+    nativeSourceProvenance: false,
+    retainedCount: state.retainedCount,
+    routeId: state.descriptor.routeId,
+    sqlAuthority: false,
+  });
+}
+
 /** Issue a pure P11-A parent scope; it has no SQL or connection execution surface. */
 export function issueSQLiteCursorPublicationMutationParentScopeIntrinsic(
   composition: SQLiteCursorPublicationOwnerComposition,
   descriptor: SQLiteCursorPublicationMutationRouteDescriptor,
-  expectedCount: number,
+  countProof: number | SQLiteCursorPublicationRetainedCountReceipt,
 ): SQLiteCursorPublicationMutationParentScope {
   const compositionState = stateFor(composition);
   if (compositionState.lifecycle !== "begin-adopted") {
     return fail("GE_SQLITE_P11_SCOPE_INVALID", "mutation parent scope input is invalid");
   }
-  if (!isExactMutationDescriptor(descriptor)
-      || !isExactMutationExpectedCount(descriptor, expectedCount)) {
+  if (!isExactMutationDescriptor(descriptor)) {
     return terminalCompositionFailure(
       compositionState,
       new SQLiteCursorPublicationOwnerCompositionError(
@@ -710,6 +907,46 @@ export function issueSQLiteCursorPublicationMutationParentScopeIntrinsic(
         "mutation parent scope input is invalid",
       ),
     );
+  }
+  let expectedCount: number;
+  let retainedCountReceipt: RetainedCountReceiptState | undefined;
+  if (descriptor === SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[2]) {
+    if (countProof === null || typeof countProof !== "object") {
+      return terminalCompositionFailure(
+        compositionState,
+        new SQLiteCursorPublicationOwnerCompositionError(
+          "GE_SQLITE_P11_SCOPE_INVALID",
+          "baseline-entry scope requires an exact retained-count receipt",
+        ),
+      );
+    }
+    retainedCountReceipt = retainedCountReceiptStateFor(
+      composition,
+      countProof as SQLiteCursorPublicationRetainedCountReceipt,
+    );
+    if (retainedCountReceipt.lifecycle !== "issued") {
+      retainedCountReceipt.lifecycle = "poisoned";
+      return terminalCompositionFailure(
+        compositionState,
+        new SQLiteCursorPublicationOwnerCompositionError(
+          "GE_SQLITE_P11_SCOPE_INVALID",
+          "retained-count receipt was replayed",
+        ),
+      );
+    }
+    expectedCount = retainedCountReceipt.retainedCount;
+  } else {
+    if (typeof countProof !== "number"
+        || !isExactMutationExpectedCount(descriptor, countProof)) {
+      return terminalCompositionFailure(
+        compositionState,
+        new SQLiteCursorPublicationOwnerCompositionError(
+          "GE_SQLITE_P11_SCOPE_INVALID",
+          "mutation parent scope input is invalid",
+        ),
+      );
+    }
+    expectedCount = countProof;
   }
   authenticateActiveBeginOrTerminate(compositionState);
   const parent = objectFreezeIntrinsic(objectCreateIntrinsic(null)) as
@@ -726,6 +963,7 @@ export function issueSQLiteCursorPublicationMutationParentScopeIntrinsic(
     composition,
     descriptor,
     expectedCount,
+    retainedCountReceipt: retainedCountReceipt?.token,
     lifecycle: reusable
       ? "parent-issued"
       : expectedCount === 0 ? "awaiting-zero-postflight" : "parent-ready",
@@ -736,6 +974,10 @@ export function issueSQLiteCursorPublicationMutationParentScopeIntrinsic(
     token: parent,
   };
   reflectApplyIntrinsic(weakMapSetIntrinsic, PARENT_SCOPES, [parent as object, state]);
+  if (retainedCountReceipt !== undefined) {
+    retainedCountReceipt.parent = new weakRefIntrinsic(parent as object);
+    retainedCountReceipt.lifecycle = "consumed";
+  }
   return parent;
 }
 

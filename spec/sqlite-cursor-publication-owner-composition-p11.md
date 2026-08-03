@@ -168,6 +168,28 @@ source projection produced that count. Its machine policy therefore keeps
 moving a count policy to another descriptor is contract drift and fails
 before mutation authority or native I/O.
 
+P11-A may additionally bind an exact immutable retained-projection identity to
+one opaque, owner/generation/route-bound, one-shot projection-count receipt.
+The receipt computes its count from the retained container through captured
+intrinsics; it never accepts a caller-supplied scalar. The baseline-entry parent
+must strongly retain the consumed receipt, and the receipt state must strongly
+retain the exact projection, until the parent becomes terminal. Scalar zero,
+mutable/sparse/subclass/proxy containers, cloned or replayed receipts, and
+cross-composition presentation fail closed through the exact P9 cleanup path.
+Presentation against the wrong composition must not poison the foreign source
+receipt, because that would turn the verifier into a cross-owner denial-of-
+service primitive.
+
+This zero-I/O receipt proves only projection identity and count. A package
+caller can still present an immutable empty container, so the receipt does not
+prove that a native lower-owned reader produced that container and does not
+authorize a genuine-zero claim. Its scalar snapshot must therefore expose
+`nativeSourceProvenance=false`, `genuineZeroClaim=false`,
+`actualNativeIoCount=0`, and `sqlAuthority=false`. Native-source provenance,
+root/entry authentication, execute-N binding, and genuine N=0 remain red until
+the lower-owned runtime reader mints or adopts the projection under its own
+closed authority.
+
 The route fixture inventories the actual plan modules in both runtimes. The
 audit includes baseline source/stage/handoff/cooperation/reconcile, all
 stream/record/checkpoint/lease/lock/hold/legacy/cursor invariant paths, cursor
@@ -236,6 +258,31 @@ Public `prepare/exec/execute/executescript/commit/rollback/close` never accept a
 P11 scope or permit. A scope cannot be converted into a generic connection
 capability. Raw `COMMIT` and owner commit presentation are both unavailable;
 all reports keep commit attempts at zero.
+
+### 4.5 Conservative native-callsite triage
+
+Discovery and authorization are deliberately separate layers. The syntax
+scanner preserves every candidate and assigns a stable identity containing at
+least repository-relative path, line, column, method, SQL origin, and a digest
+of those fields. Receiver triage may place a candidate in exactly one of:
+
+- `confirmed-native-receiver`, only from locally provable runtime types,
+  constructors, or same-scope alias/property derivation;
+- `wrapper-guard-or-test-like-production-probe`, only from an exact known
+  wrapper/guard type or captured wrapper method;
+- `false-positive`, only when local syntax proves a non-SQLite receiver; or
+- `unknown`, which is the mandatory default for name hints, cross-file return
+  guesses, unresolved members, computed callables, or conflicting evidence.
+
+TypeScript and Python classifiers are independent and deterministic. They may
+use runtime-specific structural evidence, but receiver names never increase
+confidence, duplicate candidates are not collapsed, and an unknown is never
+dropped. These four triage categories do not change `routeClassification`:
+every candidate remains route-unknown until its exact SQL/parameter/phase/
+owner/budget/resource contract is fixture-bound or explicitly forbidden.
+Consequently classification progress never by itself changes
+`routeClosureClaimed=false` or the acceptance requirement of zero unknown
+native routes.
 
 ## 5. Lower native execution contract
 
@@ -306,11 +353,12 @@ return. Portable parity never invents a TypeScript native close API.
 For a future fully integrated `N=0` path, exact zero provenance must be
 authenticated, prepare remains 1, execute and child count are 0, zero-item
 postflight runs once, and the parent resource retires once before parent
-consumption. P11-A currently has no exact retained-projection/count receipt:
-its bounded zero is only a reusable state-machine shape and cannot complete a
-genuine-zero claim. A claimed zero without that future receipt, or one that
-disagrees with the source/projection count, is hostile input. Future tests must
-distinguish a genuine zero route from N=0 cursors with nonzero baseline entries.
+consumption. P11-A currently has no exact lower-owned/native-source retained-
+projection/count receipt. Its zero-I/O projection-count receipt still yields
+only a reusable state-machine shape and cannot complete a genuine-zero claim.
+A claimed zero without future native-source provenance, or one that disagrees
+with the source/projection count, is hostile input. Future tests must distinguish
+a genuine zero route from N=0 cursors with nonzero baseline entries.
 
 ## 7. Authenticated fixed reads
 

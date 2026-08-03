@@ -21,6 +21,7 @@ import {
   issueSQLiteCursorPublicationFixedReadPermitIntrinsic,
   issueSQLiteCursorPublicationMutationChildPermitIntrinsic,
   issueSQLiteCursorPublicationMutationParentScopeIntrinsic,
+  mintSQLiteCursorPublicationRetainedCountReceiptIntrinsic,
   observeSQLiteCursorPublicationFixedReadRowIntrinsic,
   observeSQLiteCursorPublicationFixedReadTerminalIntrinsic,
   prepareSQLiteCursorPublicationFixedReadPermitIntrinsic,
@@ -116,10 +117,20 @@ function mutationCase(
     graph.owner,
     graph.receipt,
   );
+  const countProof = descriptor === SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[2]
+    ? mintSQLiteCursorPublicationRetainedCountReceiptIntrinsic(
+      composition,
+      descriptor,
+      Object.freeze(Array.from(
+        { length: expectedCount },
+        (_, ordinal) => Object.freeze({ ordinal }),
+      )),
+    )
+    : expectedCount;
   const parent = issueSQLiteCursorPublicationMutationParentScopeIntrinsic(
     composition,
     descriptor,
-    expectedCount,
+    countProof,
   );
   if (descriptor.model === "parent-owned-reusable") {
     prepareSQLiteCursorPublicationReusableParentIntrinsic(parent);

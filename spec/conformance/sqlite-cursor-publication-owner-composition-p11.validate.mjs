@@ -27,7 +27,7 @@ const ROUTES_CANONICAL_SHA256 =
 const STAGES_CANONICAL_SHA256 =
   "3d0aa8aba16f779f1ba1addc53ab01756a535ce653d22a4449ae757f6dfe7f1e";
 const MARKDOWN_RAW_SHA256 =
-  "8c28cbe9329deea8393f3ecbeeece87aa5b04bacc8134aa38d60057587cbfb12";
+  "a8e9ff2a3941edb08f56b2bd9556b99a89c9a8913c89bff03b5ebd084e0f2a32";
 const SUPPORTED_MUTATION_COUNT_POLICIES = [
   ["b2.cursor-seal-table-ddl", { kind: "exact", expectedCount: 1 }],
   ["main.migration-0002", { kind: "exact", expectedCount: 20 }],
@@ -359,6 +359,10 @@ function validateMarkdown(markdownText) {
     "requiresFutureExactCountProvenance=true",
     "zeroIsOnlyShapeUntilReceipt=true",
     "dynamicCountProvenance=false",
+    "nativeSourceProvenance=false",
+    "genuineZeroClaim=false",
+    "confirmed-native-receiver",
+    "routeClosureClaimed=false",
     "fake-zero completion claim",
     "The exact original Python primary is re-raised",
     "It must not be cited as P11 completion.",

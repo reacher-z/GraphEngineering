@@ -26,6 +26,15 @@ def _capture_and_finalize(owner: object, primary: BaseException) -> None:
     assert raised.value is primary
 
 
+def _retained_count_receipt_for(adopted: object, retained_count: int) -> object:
+    retained_projection = tuple({"ordinal": ordinal} for ordinal in range(retained_count))
+    return composition._mint_sqlite_cursor_publication_retained_count_receipt_intrinsic(
+        adopted,
+        composition._SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[2],
+        retained_projection,
+    )
+
+
 def test_exact_p9_owner_and_begin_receipt_are_adopted_once(tmp_path: Path) -> None:
     connection, owner, receipt = _active(tmp_path / "composition.sqlite")
     adopted = composition._adopt_sqlite_cursor_publication_owner_composition_intrinsic(
@@ -510,7 +519,7 @@ def test_parent_owned_reusable_scope_handles_zero_and_n_without_native_io(
     )
     route = composition._SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[2]
     parent = composition._issue_sqlite_cursor_publication_mutation_parent_scope_intrinsic(
-        adopted, route, expected_count
+        adopted, route, _retained_count_receipt_for(adopted, expected_count)
     )
     composition._prepare_sqlite_cursor_publication_reusable_parent_intrinsic(parent)
     for ordinal in range(expected_count):
@@ -536,6 +545,276 @@ def test_parent_owned_reusable_scope_handles_zero_and_n_without_native_io(
     assert snapshot.actual_native_io_count == 0
     assert snapshot.sql_authority is False
     _capture_and_finalize(owner, RuntimeError("bounded stop"))
+
+
+def test_retained_projection_count_receipt_is_one_shot_and_has_explicit_nonclaims(
+    tmp_path: Path,
+) -> None:
+    _connection, owner, begin_receipt = _active(tmp_path / "retained-count.sqlite")
+    adopted = composition._adopt_sqlite_cursor_publication_owner_composition_intrinsic(
+        owner, begin_receipt
+    )
+    retained_count_receipt = _retained_count_receipt_for(adopted, 0)
+    snapshot = (
+        composition._read_sqlite_cursor_publication_retained_count_receipt_snapshot_intrinsic(
+            adopted, retained_count_receipt
+        )
+    )
+    assert snapshot.route_id == "main.baseline-entries"
+    assert snapshot.lifecycle == "issued"
+    assert snapshot.retained_count == 0
+    assert snapshot.exact_owner is True
+    assert snapshot.exact_generation is True
+    assert snapshot.exact_scope is False
+    assert snapshot.exact_retained_projection_identity is True
+    assert snapshot.exact_retained_projection_count is True
+    assert snapshot.native_source_provenance is False
+    assert snapshot.genuine_zero_claim is False
+    assert snapshot.one_shot is True
+    assert snapshot.actual_native_io_count == 0
+    assert snapshot.sql_authority is False
+
+    parent = composition._issue_sqlite_cursor_publication_mutation_parent_scope_intrinsic(
+        adopted,
+        composition._SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[2],
+        retained_count_receipt,
+    )
+    consumed_snapshot = (
+        composition._read_sqlite_cursor_publication_retained_count_receipt_snapshot_intrinsic(
+            adopted, retained_count_receipt
+        )
+    )
+    assert consumed_snapshot.lifecycle == "consumed"
+    assert consumed_snapshot.exact_scope is True
+    assert (
+        composition._read_sqlite_cursor_publication_mutation_parent_scope_snapshot_intrinsic(
+            parent
+        ).expected_count
+        == 0
+    )
+    _capture_and_finalize(owner, RuntimeError("bounded stop"))
+
+
+def test_scalar_fake_zero_and_retained_count_receipt_replay_fail_closed(
+    tmp_path: Path,
+) -> None:
+    _connection, fake_owner, fake_begin = _active(tmp_path / "fake-zero.sqlite")
+    fake_composition = composition._adopt_sqlite_cursor_publication_owner_composition_intrinsic(
+        fake_owner, fake_begin
+    )
+    with pytest.raises(ValueError, match=r"^GE_SQLITE_P11_SCOPE_INVALID$"):
+        composition._issue_sqlite_cursor_publication_mutation_parent_scope_intrinsic(
+            fake_composition,
+            composition._SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[2],
+            0,
+        )
+    assert (
+        transaction._read_sqlite_cursor_publication_transaction_owner_snapshot_intrinsic(
+            fake_owner
+        ).commit_attempt_count
+        == 0
+    )
+
+    _connection, replay_owner, replay_begin = _active(tmp_path / "receipt-replay.sqlite")
+    replay_composition = composition._adopt_sqlite_cursor_publication_owner_composition_intrinsic(
+        replay_owner, replay_begin
+    )
+    retained_count_receipt = _retained_count_receipt_for(replay_composition, 0)
+    composition._issue_sqlite_cursor_publication_mutation_parent_scope_intrinsic(
+        replay_composition,
+        composition._SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[2],
+        retained_count_receipt,
+    )
+    with pytest.raises(ValueError, match=r"^GE_SQLITE_P11_SCOPE_INVALID$"):
+        composition._issue_sqlite_cursor_publication_mutation_parent_scope_intrinsic(
+            replay_composition,
+            composition._SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[2],
+            retained_count_receipt,
+        )
+    terminal = transaction._read_sqlite_cursor_publication_transaction_owner_snapshot_intrinsic(
+        replay_owner
+    )
+    assert terminal.lifecycle == "finalized"
+    assert terminal.commit_attempt_count == 0
+
+
+def test_parent_strongly_retains_consumed_count_receipt_and_projection(
+    tmp_path: Path,
+) -> None:
+    _connection, owner, begin_receipt = _active(tmp_path / "receipt-retained.sqlite")
+    adopted = composition._adopt_sqlite_cursor_publication_owner_composition_intrinsic(
+        owner, begin_receipt
+    )
+    retained_count_receipt = _retained_count_receipt_for(adopted, 2)
+    retained_count_receipt_ref = ref(retained_count_receipt)
+    parent = composition._issue_sqlite_cursor_publication_mutation_parent_scope_intrinsic(
+        adopted,
+        composition._SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[2],
+        retained_count_receipt,
+    )
+    del retained_count_receipt
+    gc.collect()
+    assert retained_count_receipt_ref() is not None
+    assert (
+        composition._read_sqlite_cursor_publication_mutation_parent_scope_snapshot_intrinsic(
+            parent
+        ).expected_count
+        == 2
+    )
+    _capture_and_finalize(owner, RuntimeError("bounded stop"))
+
+
+def test_abandoned_receipt_callback_cannot_delete_reused_identity_entry(
+    tmp_path: Path,
+) -> None:
+    _connection, owner, begin_receipt = _active(tmp_path / "receipt-id-reuse.sqlite")
+    adopted = composition._adopt_sqlite_cursor_publication_owner_composition_intrinsic(
+        owner, begin_receipt
+    )
+    abandoned = _retained_count_receipt_for(adopted, 0)
+    abandoned_id = id(abandoned)
+    abandoned_entry = composition._RETAINED_COUNT_RECEIPTS[abandoned_id]
+    stale_callback = abandoned_entry.token_ref.__callback__
+    assert stale_callback is not None
+    abandoned_ref = ref(abandoned)
+    del abandoned
+    gc.collect()
+    assert abandoned_ref() is None
+    assert abandoned_id not in composition._RETAINED_COUNT_RECEIPTS
+
+    replacement = _retained_count_receipt_for(adopted, 1)
+    replacement_id = id(replacement)
+    replacement_entry = composition._RETAINED_COUNT_RECEIPTS[replacement_id]
+    if replacement_id != abandoned_id:
+        composition._RETAINED_COUNT_RECEIPTS.pop(replacement_id)
+        composition._RETAINED_COUNT_RECEIPTS[abandoned_id] = replacement_entry
+    try:
+        stale_callback(abandoned_entry.token_ref)
+        assert composition._RETAINED_COUNT_RECEIPTS[abandoned_id] is replacement_entry
+    finally:
+        if replacement_id != abandoned_id:
+            composition._RETAINED_COUNT_RECEIPTS.pop(abandoned_id, None)
+            composition._RETAINED_COUNT_RECEIPTS[replacement_id] = replacement_entry
+    assert (
+        composition._read_sqlite_cursor_publication_retained_count_receipt_snapshot_intrinsic(
+            adopted, replacement
+        ).retained_count
+        == 1
+    )
+    _capture_and_finalize(owner, RuntimeError("bounded stop"))
+
+
+def test_retained_count_receipt_base_setattr_tamper_terminally_fails_exact_graph(
+    tmp_path: Path,
+) -> None:
+    _connection, owner, begin_receipt = _active(tmp_path / "receipt-tamper.sqlite")
+    adopted = composition._adopt_sqlite_cursor_publication_owner_composition_intrinsic(
+        owner, begin_receipt
+    )
+    retained_count_receipt = _retained_count_receipt_for(adopted, 1)
+    object.__setattr__(
+        retained_count_receipt,
+        "_SQLiteCursorPublicationRetainedCountReceipt__projection",
+        (),
+    )
+    with pytest.raises(ValueError, match=r"^GE_SQLITE_P11_SCOPE_INVALID$"):
+        composition._issue_sqlite_cursor_publication_mutation_parent_scope_intrinsic(
+            adopted,
+            composition._SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[2],
+            retained_count_receipt,
+        )
+    terminal = transaction._read_sqlite_cursor_publication_transaction_owner_snapshot_intrinsic(
+        owner
+    )
+    assert terminal.lifecycle == "finalized"
+    assert terminal.rollback_attempt_count == 1
+    assert terminal.close_attempt_count == 1
+    assert terminal.reopen_attempt_count == 1
+    assert terminal.commit_attempt_count == 0
+
+
+@pytest.mark.parametrize("projection", [[], tuple(range(1_025))])
+def test_retained_count_receipt_rejects_invalid_projection(
+    tmp_path: Path, projection: object
+) -> None:
+    _connection, owner, begin_receipt = _active(tmp_path / "receipt-invalid.sqlite")
+    adopted = composition._adopt_sqlite_cursor_publication_owner_composition_intrinsic(
+        owner, begin_receipt
+    )
+    with pytest.raises(ValueError, match=r"^GE_SQLITE_P11_SCOPE_INVALID$"):
+        composition._mint_sqlite_cursor_publication_retained_count_receipt_intrinsic(
+            adopted,
+            composition._SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[2],
+            projection,  # type: ignore[arg-type]
+        )
+    terminal = transaction._read_sqlite_cursor_publication_transaction_owner_snapshot_intrinsic(
+        owner
+    )
+    assert terminal.lifecycle == "finalized"
+    assert terminal.commit_attempt_count == 0
+
+
+def test_retained_count_receipt_rejects_non_baseline_route(tmp_path: Path) -> None:
+    _connection, owner, begin_receipt = _active(tmp_path / "receipt-route.sqlite")
+    adopted = composition._adopt_sqlite_cursor_publication_owner_composition_intrinsic(
+        owner, begin_receipt
+    )
+    with pytest.raises(ValueError, match=r"^GE_SQLITE_P11_SCOPE_INVALID$"):
+        composition._mint_sqlite_cursor_publication_retained_count_receipt_intrinsic(
+            adopted,
+            composition._SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[0],
+            (),
+        )
+    terminal = transaction._read_sqlite_cursor_publication_transaction_owner_snapshot_intrinsic(
+        owner
+    )
+    assert terminal.lifecycle == "finalized"
+    assert terminal.commit_attempt_count == 0
+
+
+def test_cross_composition_receipt_attack_does_not_poison_source_receipt(
+    tmp_path: Path,
+) -> None:
+    _source_connection, source_owner, source_begin = _active(tmp_path / "source.sqlite")
+    source_composition = composition._adopt_sqlite_cursor_publication_owner_composition_intrinsic(
+        source_owner, source_begin
+    )
+    source_receipt = _retained_count_receipt_for(source_composition, 0)
+    _target_connection, target_owner, target_begin = _active(tmp_path / "target.sqlite")
+    target_composition = composition._adopt_sqlite_cursor_publication_owner_composition_intrinsic(
+        target_owner, target_begin
+    )
+    with pytest.raises(ValueError, match=r"^GE_SQLITE_P11_SCOPE_INVALID$"):
+        composition._issue_sqlite_cursor_publication_mutation_parent_scope_intrinsic(
+            target_composition,
+            composition._SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[2],
+            source_receipt,
+        )
+    target_terminal = (
+        transaction._read_sqlite_cursor_publication_transaction_owner_snapshot_intrinsic(
+            target_owner
+        )
+    )
+    assert target_terminal.lifecycle == "finalized"
+    source_snapshot = (
+        composition._read_sqlite_cursor_publication_retained_count_receipt_snapshot_intrinsic(
+            source_composition, source_receipt
+        )
+    )
+    assert source_snapshot.lifecycle == "issued"
+    assert source_snapshot.exact_scope is False
+    composition._issue_sqlite_cursor_publication_mutation_parent_scope_intrinsic(
+        source_composition,
+        composition._SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[2],
+        source_receipt,
+    )
+    assert (
+        transaction._read_sqlite_cursor_publication_transaction_owner_snapshot_intrinsic(
+            source_owner
+        ).lifecycle
+        == "active"
+    )
+    _capture_and_finalize(source_owner, RuntimeError("bounded stop"))
 
 
 def test_mutation_order_failure_terminally_poisons_exact_p9_graph(
@@ -690,7 +969,7 @@ def test_fixed_mutation_route_wrong_counts_terminally_fail_before_route_io(
 
 
 @pytest.mark.parametrize("expected_count", [0, 1_024])
-def test_reusable_route_accepts_bounded_zero_io_shapes_without_provenance_claim(
+def test_reusable_route_accepts_bounded_projection_counts_without_native_provenance_claim(
     tmp_path: Path, expected_count: int
 ) -> None:
     _connection, owner, receipt = _active(tmp_path / f"reusable-bound-{expected_count}.sqlite")
@@ -700,7 +979,7 @@ def test_reusable_route_accepts_bounded_zero_io_shapes_without_provenance_claim(
     parent = composition._issue_sqlite_cursor_publication_mutation_parent_scope_intrinsic(
         adopted,
         composition._SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[2],
-        expected_count,
+        _retained_count_receipt_for(adopted, expected_count),
     )
     snapshot = composition._read_sqlite_cursor_publication_mutation_parent_scope_snapshot_intrinsic(
         parent
@@ -923,6 +1202,7 @@ def test_abandoned_active_scope_child_and_fixed_permit_leave_no_registry_roots(
     owner_baseline = len(transaction._OWNERS)
     composition_baseline = len(composition._COMPOSITIONS)
     parent_baseline = len(composition._PARENT_SCOPES)
+    retained_count_baseline = len(composition._RETAINED_COUNT_RECEIPTS)
     child_baseline = len(composition._CHILD_PERMITS)
     fixed_baseline = len(composition._FIXED_READ_PERMITS)
     connection, owner, receipt = _active(tmp_path / "scope-gc.sqlite")
@@ -940,6 +1220,14 @@ def test_abandoned_active_scope_child_and_fixed_permit_leave_no_registry_roots(
         composition._SQLITE_CURSOR_PUBLICATION_P11_FIXED_READ_ROUTES[0],
         0,
     )
+    retained_count_receipt = _retained_count_receipt_for(adopted, 0)
+    retained_count_parent = (
+        composition._issue_sqlite_cursor_publication_mutation_parent_scope_intrinsic(
+            adopted,
+            composition._SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[2],
+            retained_count_receipt,
+        )
+    )
     connection_ref = ref(connection)
     owner_ref = ref(owner)
     receipt_ref = ref(receipt)
@@ -947,7 +1235,11 @@ def test_abandoned_active_scope_child_and_fixed_permit_leave_no_registry_roots(
     parent_ref = ref(parent)
     child_ref = ref(child)
     permit_ref = ref(permit)
+    retained_count_receipt_ref = ref(retained_count_receipt)
+    retained_count_parent_ref = ref(retained_count_parent)
 
+    del retained_count_parent
+    del retained_count_receipt
     del permit
     del child
     del parent
@@ -959,6 +1251,8 @@ def test_abandoned_active_scope_child_and_fixed_permit_leave_no_registry_roots(
     gc.collect()
 
     assert permit_ref() is None
+    assert retained_count_parent_ref() is None
+    assert retained_count_receipt_ref() is None
     assert child_ref() is None
     assert parent_ref() is None
     assert adopted_ref() is None
@@ -968,6 +1262,7 @@ def test_abandoned_active_scope_child_and_fixed_permit_leave_no_registry_roots(
     assert len(composition._FIXED_READ_PERMITS) == fixed_baseline
     assert len(composition._CHILD_PERMITS) == child_baseline
     assert len(composition._PARENT_SCOPES) == parent_baseline
+    assert len(composition._RETAINED_COUNT_RECEIPTS) == retained_count_baseline
     assert len(composition._COMPOSITIONS) == composition_baseline
     assert len(transaction._OWNERS) == owner_baseline
 
@@ -1134,3 +1429,72 @@ def test_definition_time_object_intrinsics_survive_builtins_replacement(
     assert terminal.close_attempt_count == 1
     assert terminal.reopen_attempt_count == 1
     assert terminal.commit_attempt_count == 0
+
+
+def test_definition_time_int_and_tuple_types_survive_builtins_replacement(
+    tmp_path: Path,
+) -> None:
+    _connection, owner, begin_receipt = _active(tmp_path / "hostile-types.sqlite")
+    adopted = composition._adopt_sqlite_cursor_publication_owner_composition_intrinsic(
+        owner, begin_receipt
+    )
+    retained_projection = ({"ordinal": 0},)
+    original_int = builtins.int
+    original_tuple = builtins.tuple
+
+    class HostileInt(int):
+        pass
+
+    class HostileTuple(tuple):
+        pass
+
+    thrown: BaseException | None = None
+    retained_parent: object | None = None
+    fixed_permit: object | None = None
+    child: object | None = None
+    try:
+        builtins.int = HostileInt  # type: ignore[misc,assignment]
+        builtins.tuple = HostileTuple  # type: ignore[misc,assignment]
+        retained_count_receipt = (
+            composition._mint_sqlite_cursor_publication_retained_count_receipt_intrinsic(
+                adopted,
+                composition._SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[2],
+                retained_projection,
+            )
+        )
+        retained_parent = (
+            composition._issue_sqlite_cursor_publication_mutation_parent_scope_intrinsic(
+                adopted,
+                composition._SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[2],
+                retained_count_receipt,
+            )
+        )
+        one_parent = composition._issue_sqlite_cursor_publication_mutation_parent_scope_intrinsic(
+            adopted,
+            composition._SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[0],
+            1,
+        )
+        child = composition._issue_sqlite_cursor_publication_mutation_child_permit_intrinsic(
+            one_parent, 0
+        )
+        fixed_permit = composition._issue_sqlite_cursor_publication_fixed_read_permit_intrinsic(
+            adopted,
+            composition._SQLITE_CURSOR_PUBLICATION_P11_FIXED_READ_ROUTES[0],
+            0,
+        )
+    except BaseException as error:
+        thrown = error
+    finally:
+        builtins.int = original_int  # type: ignore[misc,assignment]
+        builtins.tuple = original_tuple  # type: ignore[misc,assignment]
+    assert thrown is None
+    assert retained_parent is not None
+    assert fixed_permit is not None
+    assert child is not None
+    assert (
+        composition._read_sqlite_cursor_publication_mutation_parent_scope_snapshot_intrinsic(
+            retained_parent
+        ).expected_count
+        == 1
+    )
+    _capture_and_finalize(owner, RuntimeError("bounded stop"))

@@ -22906,3 +22906,212 @@ watermark drift分别隔离成三组72-case矩阵；因此只能声称“每个t
 test passed，不增加completed task、semantic edge或release weight。457/457 discovery candidates仍unknown；native SQL、runtime-real
 retirement、dynamic count provenance、P11-A/B/C/D、stage18与COMMIT继续Open。下一实现commit从保守分类457 candidates与exact baseline
 count receipt开始，仍采用实现commit后再evidence reconciliation的两阶段闭环。
+
+#### 31.37.90 P11-A exact projection-count receipt与双runtime native-callsite保守分类执行计划（2026-08-03 PDT追加；既有内容不改）
+
+本节只追加于既有22,908行之后。追加前完整计划SHA-256固定为
+`ce9a6b00ad99494ece99d73951baa0e2dcc8cd865bfd3853aac2a3a07549b681`；前22,908行不得回改、重排、格式化或删除。本节把
+31.37.89的下一bounded action落为可执行实现与后续闭环，但仍不把projection-count shape、receiver triage或局部测试误写成P11-A native
+closure、D9 completion、release candidate或production readiness。
+
+##### 31.37.90.1 本tranche交付边界与不可越权原则
+
+本tranche同时推进两个互不冒充的证据层：第一层是baseline entries的zero-I/O exact retained projection/count receipt；第二层是457个
+native-callsite discovery candidates的receiver truth保守分类。第一层回答“这个count是否从当前被强保留的容器长度计算，而不是调用者标量”；
+第二层回答“当前调用receiver是否能由本文件结构证明为native、known wrapper/probe、non-SQLite false positive或仍unknown”。两层都不回答
+“这个SQL route是否已获P11 authority”，因此不得把receipt或triage category直接接到`routeClassification`、accepted stage或release evidence。
+
+必须长期冻结以下separation of claims：
+
+1. projection-count receipt只证明projection identity+computed count，不证明projection来自native reader；
+2. immutable empty projection与native genuine empty projection当前仍不可区分，因此`genuineZeroClaim=false`；
+3. confirmed-native-receiver只证明receiver provenance，不证明SQL/parameters/phase/budget/resource lifecycle获授权；
+4. wrapper/probe分类不是false positive，必须继续追踪其lower native edge；
+5. proven false positive只允许本地语法证明receiver非SQLite，不能由文件名或方法名猜测；
+6. unknown永不丢弃，全部route仍unknown，route closure继续false；
+7. P11保持`in_progress`，completed task、semantic edge与release weight均不增加；
+8. stage18、third consumption、COMMIT presentation/attempt继续为false/0。
+
+##### 31.37.90.2 exact projection-count receipt：双runtime最小可信核
+
+TypeScript新增package-private opaque `SQLiteCursorPublicationRetainedCountReceipt`，Python新增独立opaque
+`_SQLiteCursorPublicationRetainedCountReceipt`。mint入口只接受exact active composition、canonical
+`main.baseline-entries` descriptor和runtime-local exact immutable retained container。TypeScript要求exact plain frozen dense Array，拒绝Proxy、
+Array subclass、hole、mutable array与>1024；Python要求exact tuple而不是tuple subclass，并冻结定义时`type/tuple/int/len/id/object`等关键intrinsics。
+
+receipt private state至少绑定：
+
+- exact composition token；
+- exact P9 transaction owner；
+- exact BEGIN receipt；
+- current connection/lineage/generation reproof；
+- canonical baseline-entry descriptor object identity；
+- exact retained projection object identity；
+- definition-owned computed retained count；
+- unguessable receipt token与独立nonce；
+- lifecycle `issued -> consumed`或terminal `poisoned`；
+- consumed parent反向identity，禁止同receipt绑定第二parent。
+
+baseline parent issuance不再接受bounded scalar 0..1024。descriptor为baseline entries时第三参数必须是当前composition的issued receipt；另外五个
+fixed-count routes仍只接受canonical scalar policy（migration20、其余singleton1）。parent注册完成后才把receipt标记consumed，parent state强持有
+receipt，receipt state强持有projection；Python weak registry callback只有exact weakref identity匹配时才可删除旧bucket，模拟object ID reuse不得误删
+新对象。parent token释放后整图才可由GC回收，不能因为receipt weak key提前消失而丢失projection provenance。
+
+receipt public scalar snapshot只允许：route、lifecycle、retainedCount、exact owner/generation/projection identity/count flags、oneShot与四个严格
+nonclaims。必须固定`nativeSourceProvenance=false`、`genuineZeroClaim=false`、`actualNativeIoCount=0`、`sqlAuthority=false`，禁止泄漏owner、
+BEGIN receipt、connection、lineage、generation、projection entries、nonce、absolute path或native handle。
+
+##### 31.37.90.3 receipt hostile与failure-atomic矩阵
+
+双runtime至少持续覆盖：
+
+1. baseline裸scalar0、3、1024均在parent issuance前失败，并走exact P9 rollback/close/reopen；
+2. mutable、sparse、subclass、Proxy/伪装container失败；
+3. wrong descriptor、clone、plain object、receipt Proxy、cross-composition、cross-owner失败；
+4. consumed receipt replay失败，不能生成第二parent；
+5. cross-composition攻击只能terminalize被呈现的target composition，不能poison foreign source receipt；
+6. receipt成功消费后parent强持有它与projection，GC不得提前清除；
+7. abandoned receipt可回收，但stale weak callback/object ID reuse不得删除新registry entry；
+8. TS Object/Reflect/WeakMap/Array intrinsics在definition之后替换不改变成功或失败路径；
+9. Python builtins `int`、`tuple`、`len`、`type`和base `object.__setattr__/__delattr__`替换/绕过仍fail closed；
+10. fixed route count、child ordinal、fixed-read maximum rows不能因dynamic builtins RHS substitution接受伪整数；
+11. projection-derived 0/3/1024 shape仍prepare1、execute lease N、parent retirement1，且native I/O继续0；
+12. 任何primary failure不被cleanup secondary替换，commit attempts保持0。
+
+独立审计动态复现了一个真实Python builtins绕过：虽然LHS使用captured `_TYPE`，RHS仍动态解析`int/tuple`，攻击者可把可变FakeTuple或
+自定义FakeInt伪装为exact input。修复必须定义时捕获`_INT`与`_TUPLE`，替换该模块全部六处exact-type RHS，并用成功路径hostile tests冻结；
+不得只修receipt而保留ordinal/maximumRows旧洞。Mypy redundant cast与generic type annotation必须清零后才接受。
+
+##### 31.37.90.4 TypeScript receiver triage规则与结果
+
+scanner schema升级但保持read-only。每个callsite新增稳定identity对象：repository-relative `path`、`line`、`column`、`method`、
+`sqlOrigin`及这些字段canonical JSON的SHA-256。identity用于后续人工/机器mapping，不是authorization token。全局457 identities必须unique；
+重复Python source identity由独立classifier增加deterministic occurrence ordinal而不是silent dedupe。
+
+TS receiver confidence只能由以下本地证据升级：
+
+- `node:sqlite` exact import alias中的`DatabaseSync`/`StatementSync` type或constructor；
+- exact known `SQLiteConnection` import/type/constructor；
+- proven receiver的same-scope immutable variable alias、assignment、object property、class property；
+- proven database的prepare-return到statement、cursor-return到cursor；
+- exact local non-SQLite type/constructor或RegExp literal，用于proven false positive。
+
+名字只保留`hint`，绝不生成heuristic confidence；污染后的alias必须降回unknown；cross-file return、computed member、unresolved this property、
+混合union与名字类似db/connection/statement的变量均不得升级。SQL exact digest即使命中fixture也仍只是candidate，不能修改route unknown。
+
+当前生产扫描保持457 total、TS206、Python251、343 exact SQL、23 callsite files、fixture digest candidate1、fixture classified0、route unknown457。
+新增无callsite Python classifier使scanned files从70变71，但candidate count不漂移。TS206分桶固定为：confirmed native15、exact wrapper/guard/
+test-like production probe184、proven false positive5、unknown2。5个false positives均有本地non-SQLite receiver证据，不能把其他unknown批量归零。
+
+##### 31.37.90.5 Python独立AST classifier规则与结果
+
+Python classifier必须消费scanner JSON并重新读取repository内source AST，不能信任scanner的`receiverConfidence`作为最终证据。source path必须
+repository-relative、resolve后仍在root内、存在且为file；absolute path、traversal和symlink escape fail closed。每个candidate按path/line/column/
+method/sqlOrigin/canonical candidate稳定排序，保留duplicate occurrence并生成64hex candidateId。
+
+confirmed native只允许exact `sqlite3.Connection/Cursor` annotation、`sqlite3.connect()` construction、same lexical scope alias/cursor derivation或
+全部member writes均能证明native的class property。exact captured known wrapper method单列wrapper/probe。跨函数return inference、unbound native method、
+member来源冲突、名字heuristic、无法映射exact AST call全部unknown。只有literal None、exact non-SQLite local type等结构证据可成为false positive。
+
+当前251 Python candidates一一保留，canonical分桶为confirmed native187、wrapper/guard/test-like production probe32、false positive0、unknown32。
+`routeAuthorization=false`、`routeClosureClaimed=false`、`unknownCandidatesDropped=false`。分类器不得导入或执行被扫描模块，不得联网，不得写文件。
+
+##### 31.37.90.6 强制跨进程coverage/parity gate
+
+新增Node test直接运行scanner两次与`uv` Python reporter两次，不允许availability skip。spawn error、signal、timeout、nonzero exit、任何stderr、
+多行/非canonical JSON均fail。测试必须：
+
+1. 比较scanner完整JSON两次byte identical；
+2. 比较Python完整report两次byte identical；
+3. 验证scanner 457 stable identities全局unique；
+4. 验证TS206/Python251及inputs/byLanguage齐全；
+5. 按classifier同一排序+occurrence规则重建251 Python identities并deep-equal；
+6. 重算251 candidateId SHA-256并要求unique；
+7. 验证canonical四桶key、计数总和251、unknownCount32；
+8. 验证routeAuthorization/routeClosure/unknownDropped全部false；
+9. 用synthetic process results证明error/nonzero/stderr都fail closed。
+
+root package新增独立Python classification gate和cross-process parity gate，并接入CI plan-validation job。所有root脚本必须使用`corepack pnpm`；本tranche
+同时修正P10 Rule12 runtime gate残留的bare `pnpm`，避免PATH环境把产品回归伪装成代码失败。
+
+##### 31.37.90.7 已执行验证与当前接受度
+
+当前验证基线：P11 contract/validator 6/6；TS receipt/owner composition focused 81/81；Python focused83/83；forced P11 portable parity3/3；
+TS scanner hostile3/3；Python classifier hostile6/6+Ruff+Mypy；cross-process classification parity2/2；P9 parity2/2、TS27/27、Python36/36；
+P10 Rule12 runtime gate exit0；TS typecheck、owner-composition Ruff/Mypy与diff-check通过。portable parity的baseline0/3 cases已改为从本地immutable
+projection mint receipt，但仍保持case名`reusable-shape-0/3`与`dynamicCountProvenance=false`，不能改名genuine zero。
+
+本tranche可接受为“exact retained projection-count shape + receiver triage substrate”，不可接受为P11-A complete。理由是：lower-owned native reader尚未
+成为唯一receipt mint/adopt authority；202 confirmed-native callsites（TS15+Python187）及216 wrapper/probe edges尚未逐条绑定exact route/forbidden；
+全部457 route classification仍unknown；fixed-read retirement仍zero-I/O模拟；native mutation writer hook尚未消费scope；full SQLite regression和real
+file-backed N=0/1/3尚未形成P11-A terminal evidence。
+
+##### 31.37.90.8 下一最高并行度开发图
+
+下一批固定为四lane diamond，main agent在barrier整合：
+
+- Lane A（TS native map）：逐条审计15 confirmed native与184 wrapper/probe，沿`SQLiteConnection -> #database` lower edge生成稳定callsite mapping；
+- Lane B（Python native map）：逐条审计187 confirmed native与32 wrapper/probe，区分直接sqlite3、captured wrapper、protocol probe与irrelevant store routes；
+- Lane C（native projection authority）：在closed lower reader中产生exact retained projection/root/count receipt，移除任意package caller伪empty能力；
+- Lane D（fixed read retirement）：选择一个owner-active fixed route，在真实file-backed SQLite上证明prepare/read/terminal/close或iterator-return/consume，
+  mutation delta0且旧resource不可跨permit重用；
+- Main barrier：合并route manifest、fixture validator、portable parity、fault matrix、CI、spec、append-only plan与独立H0/M0/L0。
+
+每个confirmed native mapping必须包含`stableIdentity -> receiverEvidence -> lowerNativeEdge -> exact SQL origin/digest -> parameters provenance -> phase ->
+owner/composition -> row/cursor budget -> resource lifecycle -> routeId/classification`。找不到任一字段就保持unknown。wrapper edge不能既算wrapper又算native
+closure；应保留wrapper identity并另绑唯一lower native target，避免double-count或漏掉动态lower call。
+
+##### 31.37.90.9 native-source receipt与genuine-zero关闭条件
+
+projection-count receipt下一步必须由lower-owned native reader独占mint/adopt，不再导出任意projection mint surface。native reader需在active owner下通过exact
+fixed-read permit获取source rows，构造不可变normalized entries、root/hash、count与resource retirement receipt；composition只接受该opaque lower receipt，
+不能接受entries、count、digest或callback。genuine N=0必须证明：source reader实际terminal、retained entries exact empty、root/count一致、prepare1、execute0、
+zero-postflight1、parent retirement1、old iterator/cursor closed/returned且不可重用。N=0 cursor但source projection非空必须fail before writer prepare。
+
+real file-backed matrix至少N=0/1/3，双runtime独立实现；TS记录iterator-return或lexical release真实语义，Python记录cursor close attempt/return真实语义，
+portable report只比较共有字段，禁止虚构TS cursor close。fault points覆盖prepare before/after native return、row decode、terminal observation、resource retirement、
+receipt mint、parent adoption、child execute/return/retire/postflight。每点保持commit0、rollback<=1、close<=1、reopen<=1及exact primary identity。
+
+##### 31.37.90.10 commit、evidence与release纪律
+
+本批继续严格两阶段提交：第一commit只含implementation/tests/spec/validator/package/CI/new review/append-only plan，使用
+`reacher-z <mtrxcop@gmail.com>`且无co-author；push后验证local/tracking/remote同一immutable SHA。第二commit才刷新task registry heartbeat/artifacts、daily log、
+coverage matrix与dependency graph，仍把P11保持`in_progress`且不写expected_tests passed/completion evidence。任何测试结果必须绑定第一commit SHA后才能进入
+review immutable binding。
+
+release checklist不因本批变化。completed tasks仍44，release overlay继续audit-only 0/93；不能引用receiver bucket减少、receipt tests增加或CI job新增来增加
+release weight。只有未来native route unknown实际为0、lower native count provenance与fixed-read retirement真实完成、P11-A完整red gates双runtime全绿、full
+SQLite regression与独立H0/M0/L0后，才能把P11-A slice标记complete；P11-B/C/D仍需各自实现与证据，最终P11 task completion远晚于P11-A。
+
+#### 31.37.91 §31.37.90 CI job归属勘误（2026-08-03 PDT追加；既有内容不改）
+
+本节只追加勘误，不回改31.37.90。追加前计划为23,084行，SHA-256固定为
+`882b05994cbab40e8a87b21cb24f2b909182de6e4e7430b04b004cf21d54114a`。
+
+31.37.90.6所写“接入CI plan-validation job”应精确更正为：纯Node native-callsite discovery继续在`protocol` job执行；需要`uv run`的
+Python classifier和cross-process classification parity必须在`cross-language-conformance` job执行。后者已有pinned
+`astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9`、uv 0.11.11与locked Python sync，并为两个新增gate各设置10分钟
+timeout。不得把uv-dependent命令放回只有Node/pnpm setup的protocol job，否则clean GitHub runner会因`uv: command not found`形成CI blocker。
+
+#### 31.37.92 §31.37.90 classifier hardening与最终计数勘误（2026-08-03 PDT追加；既有内容不改）
+
+本节只追加勘误，不回改31.37.90/91。追加前计划为23,094行，SHA-256固定为
+`4d55ec83276c0bb4d8cc420db2545327db912096337766671a00a79d1ac8c43e`。
+
+31.37.90.5/6中的Python初始分桶`187/32/0/32`与`unknownCount32`在独立red-team后收紧为最终
+`187 confirmed-native / 31 wrapper-guard-test-like probe / 0 false-positive / 33 unknown`。一个仅在无关helper参数上出现
+`sqlite3.Connection`的mixed local class不再被整类升级为wrapper；local class只有exact known import lineage或candidate method沿exact
+native member delegation时才可升级，其余回落unknown。这个计数变化是更保守的证据修正，不改变251 candidate总量，更不改变route unknown457。
+
+最终hostile gate也应更正为scanner6/6、Python classifier10/10+Ruff+strict project-config Mypy、cross-process parity2/2。新增冻结项包括：
+
+1. 任意local class/interface、unknown inheritance与不充分`this`证据不得成为false-positive；exact node:sqlite/wrapper inheritance才可正向分类；
+2. nested Python scanner的spawn error、signal、nonzero、任意stderr与invalid JSON全部fail closed；
+3. TS/Python/fixture explicit path必须canonical root-relative regular nonsymlink file，拒绝absolute、escape、`.`/`..` alias、directory、missing与duplicate；
+4. Node与Python统一Unicode code-point sort，不依赖ICU/locale；
+5. Python candidate sort/candidateId canonical JSON固定`ensure_ascii=False`，与JS UTF-8 `JSON.stringify`对Unicode path/method产生相同SHA-256；
+6. classifier Mypy gate显式加载`python/pyproject.toml`，不得使用default弱配置；
+7. uv-dependent gates只在pinned setup-uv+locked sync的cross-language CI job执行。
+
+生产scanner完整JSON双跑byte-identical，SHA-256为`df4691df331d3e03e7c4f71de455a3f6bff14eb731ecfd46ebbe72bc04ad1b0d`；
+457 total、TS206/Python251、TS buckets15/184/5/2、71 scanned files保持不变。以上hardening仍只提高triage可信度，不授权任何route closure。
