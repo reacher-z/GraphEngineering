@@ -22619,3 +22619,126 @@ P10 acceptance不能在实现commit未知时伪造completion evidence。提交�
 
 第1与第2提交之间短暂`in_progress`是诚实的immutable evidence获取窗口；只有第2提交及其控制门禁通过后，plan、review与registry才完成对账。
 release evidence继续0/93，P11保持未实现，不能因P10 registry完成而获得D9或release completion。
+
+#### 31.37.85 P11-A authority substrate、机器清单与rejected-first验证检查点（2026-08-03 PDT追加；既有内容不改）
+
+本节严格追加于既有22,621行之后，不修改31.37.84或任何更早字节。追加前整份计划SHA-256为
+`c74be11fc0ecc59a256ea69c132c43b4b6dbf087465fc07856c34bea87a47221`。本检查点记录P11-A的
+可接受authority substrate与机器契约进展，但不把zero-I/O状态机、设计清单或局部runtime测试误写成P11-A全部完成，
+更不宣称P11-B/C/D、真实P9→P10端到端组合、COMMIT、release或stars目标完成。
+
+##### 31.37.85.1 P10 evidence闭环已完成且不增加release权重
+
+P10 implementation commit固定为`e8e2598fa78e11427684be727c4198f6ce2ba02b`，后续evidence commit固定为
+`20f881efc634e9f5f467605e5f10b8495711fd77`。两者均已用`reacher-z <mtrxcop@gmail.com>`提交并推送，
+无co-author；local、tracking与remote SHA一致。P10 registry现只在冻结scope内completed：exact R11 → bounded R12 →
+unconsumed third clock `3/2`。P11依赖P9/P10的两条edge已成为machine-required semantic edges；删除任一edge的hostile
+mutation都会fail closed。task controls为112 tasks、44 completed、299 explicit edges、72 semantic edges与12/12 tests；
+release map 178/178与40/40、evidence closure 102/102、docs 478 links均通过。release evidence仍为audit-only `0/93`。
+
+##### 31.37.85.2 三份P11机器契约与完整冻结边界
+
+新增但仍标记`p11-a-redbar-contract`的权威文件为：
+
+1. `spec/sqlite-cursor-publication-owner-composition-p11.md`：自然语言contract、A-D切片、failure/nonclaim边界；
+2. `spec/sqlite-cursor-publication-owner-composition-p11.routes.json`：route分类、resource model、fixed SQL digest、
+   B2/R12 EQP与source discovery证据；
+3. `spec/sqlite-cursor-publication-owner-composition-p11.stages.json`：canonical 30-stage inventory、predecessor、
+   slice ownership、third `3/2`与post-P11禁止项。
+
+routes fixture冻结pre-registration、public harmless SELECT、authenticated fixed read、scoped mutation与forbidden五类。
+unknown route默认forbidden；caller route ID、SQL、digest、callback与multi-statement不能授权。migration-0002冻结trusted asset及
+20条statement digest；B2 TEMP/main route family与五类permanent write分别绑定child-owned-one-shot或
+parent-owned-reusable模型。B2 EQP精确15条，R12 EQP精确3条；两组route ID不交叠，不能用15冒充3或用3冒充15。
+
+stage fixture逐字复用P9 canonical 30-stage顺序。P11-A accepted ordinal为空；P11-B最多1..4；P11-C只拥有5..11并要求
+1..4前缀；P11-D只拥有12..17并要求1..11前缀。third-clock-observed-unconsumed是stage17后的辅助evidence，不是stage18。
+stage18至30全部`p11Accepted=false`、mint/consume 0；P11-D最大报告仍为stage17、third false、commitPresented false、
+commitAttemptCount 0。
+
+source discovery记录read-only rg、Python AST与imported-global string scan。当前证据为81个global string candidates、60个unique、
+1个non-SQL role false positive、59个qualifying fixed literals与147个AST prefix candidates。因为function-local、interpolated
+SQL与TypeScript template expression尚需future native-callsite validator完全解析，fixture诚实记录
+`observedActualUnclassifiedNativeCallsiteCount=null`与`routeClosureClaimedByThisArtifact=false`；P11-A最终接受仍要求实际unknown 0。
+
+##### 31.37.85.3 conformance validator与hostile closure
+
+新增`spec/conformance/sqlite-cursor-publication-owner-composition-p11.validate.mjs`与对应test。validator使用canonical stable
+object SHA冻结完整routes/stages对象，以raw SHA冻结主Markdown，同时显式验证：
+
+1. exact route/classification/source inventory、SHA-256 shape、migration 20与每route resource model；
+2. B2 15/R12 3的exact count、order、ID/digest分离；
+3. canonical 30 ordinals、exact predecessor、exact B/C/D owner与continuous 1..17 ownership；
+4. child-owned与parent-owned两条N=0路径；reusable必须prepare once、zero postflight、parent retirement、complete、consume；
+5. composition adoption exact六步与registration/binding/pending/owner-adopt四个fault point；
+6. fixed-read portable retirement状态、Python exact BaseException、observation-unavailable close/reopen与P9 bounded stop；
+7. ten P11-A red gates、stage18 false、third unconsumed、COMMIT 0、route closure false/null与strict nonclaims。
+
+首版validator虽4/4测试通过，独立hostile审计仍REJECT H2/M2：零化digest、交换B2顺序、删除pre-registration/B2 route、
+删除TS source path、修改slice owner、删除red gate或bounded-stop P9 binding均错误通过。修复后exact entire-object/Markdown
+binding与显式语义检查同时存在；原12个逃逸变异及新增Markdown/nonclaim与child-owned-zero变异共14/14被拒绝。
+最终contract gate为5/5、0 skip，独立结论`ACCEPT H0/M0/L0`，并已接入package script与CI plan-validation job。
+
+##### 31.37.85.4 TypeScript P11-A zero-I/O authority substrate
+
+TypeScript新增package-private composition module并扩展P9 owner的one-way adoption hook。唯一mint输入仍是exact owner与exact current
+BEGIN receipt；composition内部`constructing`在owner adopt与最后publish前不可读取。registration、binding、pending、owner-adopt
+四个fault observer都能捕获partial token但snapshot/presentation全部拒绝；原primary进入同一P9 failure capture/finalizer，
+rollback/close/reopen各最多1、commit 0。owner adopt后fault不能恢复unadopted或retry。
+
+本slice实现两个纯authority state machine，但明确`actualNativeIoCount=0`、`sqlAuthority=false`：
+
+- mutation parent/child支持child-owned-one-shot与parent-owned-reusable；ordinal严格、N=0显式、parent prepare/retirement分型；
+- fixed read permit支持issued→prepared→bounded-reading→terminal→resource-retired→consumed的portable抽象；
+- route descriptor为冻结单例并绑定spec exact route ID/SHA；clone/proxy descriptor在任何I/O前拒绝；
+- 每次派生authority迁移通过P9 owner package-private current assertion重读native connection owner、lineage、generation、
+  exclusive mode、transaction/temp epoch与total changes；不只信cached snapshot；
+- 任一parent/child/fixed-read order failure先poison exact composition，再以同一error object进入P9 finalizer；旧authority与兄弟
+  authority不能继续使用或mint新authority；
+- bounded-stop复用P9 capture/finalizer并保留exact primary；package root不export任何新authority；legacy raw-BEGIN P10
+  receipt仍terminal reject，禁止标量假集成。
+
+首轮独立审计曾REJECT H1/M3/L1，因为局部scope/read poison没有terminalize composition、native reproof不足、route为placeholder，
+且GC/hostile/native retirement证据不完整。H1与可收口M项已修：最终focused 17/17、P9 27/27、SQLite typecheck、contract
+validator与diff-check通过；独立复审`ACCEPT H0/M0/L1`。L1是未来native drift direct fault regression建议，不阻塞本zero-I/O
+substrate，但不能据此宣称真实read/retirement或完整route closure。
+
+##### 31.37.85.5 Python exact-primary与composition adoption substrate
+
+Python P9 owner新增opaque exact failure capture。capture显式强保留原始BaseException identity、exact owner、connection、lineage、
+generation、source fingerprint与monotonic ordinal；clone、cross-owner、replay与并存旧authenticated primary均拒绝。finalizer在能证明
+exact generation/lineage active时最多rollback一次；observation/presentation unavailable时不猜rollback，但仍使用capture-retained
+connection与absolute identity执行close/reopen。source-v1、corrupt与unavailable三种reopen结果都重新raise exact original primary；后两者
+只把classification ValueError作为secondary cause，不能替换primary identity。
+
+Python composition由对象本身单向强留owner/receipt，receipt transitively保留connection/lineage/generation；全局composition registry
+只保留weak composition/owner/receipt/connection/lineage/generation引用，删除owner→composition反向强边。active graph即使未显式cleanup，
+外部引用全部drop并双GC后composition、receipt、owner、connection与registry bucket都释放，避免永久事务/文件锁。
+
+wrong/cross-owner receipt、preflight presentation exception与四点adoption fault在exact owner已经识别后都进入同一P9 capture/finalizer；
+四个seam各向observer传partial token且snapshot全拒绝。最终Python focused 19/19；P9+P11 55/55；P10 Rule12 41/41；Ruff、
+mypy与diff-check通过。独立复审关闭snapshot arity、primary replacement、preflight no-cleanup、reverse-root GC与partial visibility五类
+问题，结论`ACCEPT H0/M0/L0`。
+
+Python本检查点尚未实现mutation/fixed-read状态机，只保留不可由caller构造的reserved opaque types；因此不能宣称双runtime scope/read
+parity。TypeScript的portable retirement也只是zero-I/O抽象状态，不是native iterator/cursor/statement retirement evidence。
+
+##### 31.37.85.6 当前严格nonclaims与下一bounded objective
+
+本检查点只接受三个可独立复用的进展：机器契约、TypeScript zero-I/O authority lattice、Python exact-primary/adoption substrate。
+以下全部保持Open：
+
+1. P11-A actual native-callsite closure与unknown count 0；
+2. Python mutation parent/child与fixed-read permit状态机；
+3. 双runtime real owner-active PRAGMA/EQP fixed read、B2 15 probe与runtime-real retirement；
+4. exact lower writer hook、migration 20、baseline reusable N/0与all fault boundaries；
+5. complete forced-GC/stale-ID/prototype/WeakMap/WeakRef/Reflect/Object hostile矩阵；
+6. portable P11 reporter与TS-launches-Python exact parity；
+7. P11-B owner-composed B2、P11-C permanent writes与P11-D真实R11/R12/third provenance；
+8. third consume、cursor-clock-complete、stage18、fourth clock、TEMP retirement、final fence、success、COMMIT与complete-v2；
+9. public API、D9 completion、candidate-bound release evidence、RC、stable、5K/6K stars或受欢迎度保证。
+
+下一bounded objective固定为完成P11-A剩余red gates：先在Python实现与TS同义但独立的zero-I/O scope/read lattice，再把两runtime
+descriptor严格绑定machine route fixture并建立normalized parity；随后逐route接owner-active fixed reads与lower mutation hooks，每接一个native
+callsite就必须更新fixture、fault matrix与runtime-real retirement evidence。只有unknown native callsite实际为0、P11-A完整red matrix双runtime
+全绿并经独立H0/M0/L0后，才可开始P11-B success claim。P11 registry在此期间保持`in_progress`且不获得release weight。

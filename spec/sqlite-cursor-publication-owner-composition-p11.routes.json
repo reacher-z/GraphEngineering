@@ -1,0 +1,281 @@
+{
+  "schemaVersion": 1,
+  "contractId": "sqlite-cursor-publication-owner-composition-p11-routes-v1",
+  "status": "p11-a-redbar-contract",
+  "normativePlanSections": ["31.37.81", "31.37.82", "31.37.84"],
+  "sqlIdentity": {
+    "digest": "sha256",
+    "encoding": "utf-8",
+    "comparison": "exact-runtime-sql-bytes",
+    "aliasesDoNotCreateAdditionalRoutes": true,
+    "runtimeSpecificFormattingRequiresRuntimeSpecificDigest": true
+  },
+  "inventoryPolicy": {
+    "defaultClassification": "forbidden",
+    "unknownRoute": "reject-before-native-io",
+    "callerSuppliedRouteId": false,
+    "callerSuppliedSql": false,
+    "callerSuppliedDigest": false,
+    "callerSuppliedCallback": false,
+    "multiStatementSql": false,
+    "registrationMustCloseInventory": true,
+    "newNativeCallsiteRequiresFixtureUpdate": true
+  },
+  "classifications": [
+    {
+      "id": "pre-registration",
+      "requiresOwner": false,
+      "requiresComposition": false,
+      "nativeIoAllowedAfterOwnerRegistration": false
+    },
+    {
+      "id": "public-harmless-select",
+      "requiresOwner": false,
+      "requiresComposition": false,
+      "constraints": ["single-statement", "read-only", "bounded", "no-pragma-write", "no-user-defined-side-effect"]
+    },
+    {
+      "id": "authenticated-fixed-read",
+      "requiresOwner": true,
+      "requiresComposition": true,
+      "requiresFixedReadPermit": true
+    },
+    {
+      "id": "scoped-mutation",
+      "requiresOwner": true,
+      "requiresComposition": true,
+      "requiresMutationScope": true
+    },
+    {
+      "id": "forbidden",
+      "nativeIoAllowed": false
+    }
+  ],
+  "resourceModels": {
+    "child-owned-one-shot": {
+      "portableOrder": ["child-issued", "prepared", "entered", "native-returned", "resource-retired", "postflight-accepted", "child-consumed"],
+      "nextOrdinalBeforeRetirement": false
+    },
+    "parent-owned-reusable": {
+      "portableOrder": ["parent-issued", "prepared-once", "lease-issued", "entered", "execute-returned", "lease-released", "postflight-accepted", "child-consumed", "parent-resource-retired", "parent-consumed"],
+      "counts": {"prepare": 1, "execute": "N", "executionLeaseReleased": "N", "parentResourceRetired": 1},
+      "zeroCount": {"prepare": 1, "execute": 0, "childCount": 0, "zeroItemPostflight": 1, "parentResourceRetired": 1}
+    },
+    "fixed-read": {
+      "portableOrder": ["issued", "prepared", "bounded-reading", "terminal-row-observed", "resource-retired", "consumed"],
+      "typescriptEvidence": ["iterator-return", "lexical-handle-release"],
+      "pythonEvidence": ["cursor-close-attempt-1", "cursor-close-return-1"]
+    }
+  },
+  "preRegistrationRoutes": [
+    {"id": "pre.temp-store.write", "classification": "pre-registration", "kind": "write", "sqlPattern": "PRAGMA temp_store = FILE", "boundedExecutions": 1},
+    {"id": "pre.temp-cache-size.write", "classification": "pre-registration", "kind": "write", "sqlPattern": "PRAGMA temp.cache_size = -<validated-kib>", "boundedExecutions": 1},
+    {"id": "pre.cache-spill.write", "classification": "pre-registration", "kind": "write", "sqlPattern": "PRAGMA cache_spill = ON", "boundedExecutions": 1},
+    {"id": "pre.temp-store.read", "classification": "pre-registration", "kind": "read", "sqlSha256": "60b8152c72cf6885eeb46cc10c145ab3b8a688dd5e3a2569fd06ddf0426c97f6", "maximumRows": 1},
+    {"id": "pre.temp-cache-size.read", "classification": "pre-registration", "kind": "read", "sqlSha256": "949a27bf2c8cce26eb05935493ec15b9259d885cce697cd9c287d0c4e7b7dd8f", "maximumRows": 1},
+    {"id": "pre.cache-spill.read", "classification": "pre-registration", "kind": "read", "sqlSha256": "dbc78903a40d517244a99a499d20a71efb7229721a464ded15602af8f12a9d56", "maximumRows": 1}
+  ],
+  "publicHarmlessSelectRoutes": [
+    {"id": "public.select.single-bounded", "classification": "public-harmless-select", "sqlShape": "SELECT-only", "ownerActiveSpecialReadExcluded": true},
+    {"id": "public.with-readonly.single-bounded", "classification": "public-harmless-select", "sqlShape": "WITH-read-only-SELECT-only", "ownerActiveSpecialReadExcluded": true}
+  ],
+  "b2MutationRoutes": [
+    {
+      "id": "b2.temp-table-ddl",
+      "classification": "scoped-mutation",
+      "model": "child-owned-one-shot",
+      "phase": "b2-scope-active",
+      "expectedCount": 13,
+      "members": [
+        {"ordinal": 0, "object": "ge_blr_stage", "pythonSqlSha256": "d519f54fc81269a4142dda199265c9ee6918a0be628a94b70a8ecbbc676cd6c4"},
+        {"ordinal": 1, "object": "ge_blr_schema", "pythonSqlSha256": "14a76d9490c8a5765431684db3e05fb49937717fffddb41b78c972e956b50c7b"},
+        {"ordinal": 2, "object": "ge_blr_migrations", "pythonSqlSha256": "61bd08f249f6312f5c5a8d4b7a6cf243b5304a3c1003d82c3cfb3975ebb99f4b"},
+        {"ordinal": 3, "object": "ge_blr_streams", "pythonSqlSha256": "a1108b8e0d374e95ce7c842119f09b0d79a0db1551f2c8f633c418557c2db726"},
+        {"ordinal": 4, "object": "ge_blr_records", "pythonSqlSha256": "e54024b33e6f40ba101f446bac50a0827297e06ead519201f2895ab41acb0a8f"},
+        {"ordinal": 5, "object": "ge_blr_checkpoint_current", "pythonSqlSha256": "ebfbb48cc4ca26922c44f811f033a3e09cc61dc1b90e63b7be9014054b7de9e0"},
+        {"ordinal": 6, "object": "ge_blr_checkpoint_revisions", "pythonSqlSha256": "615cb80670518e243409b4235fa8184a628fa991c5eacfdff93084dc1ca83fea"},
+        {"ordinal": 7, "object": "ge_blr_leases", "pythonSqlSha256": "2ab7a21d62c8fe711af5ac9397cfb48025a897c3a799db14df5c5ec949056bcb"},
+        {"ordinal": 8, "object": "ge_blr_used_leases", "pythonSqlSha256": "0530f0d0bbafa2bd466d2cbcf068c883f8605fd02e9b3e570653f83e31c92e64"},
+        {"ordinal": 9, "object": "ge_blr_holds", "pythonSqlSha256": "58b9ef948bc63df6a75cd6fd428bdb45fdfa01fdabf1986f35aedcd948b7b375"},
+        {"ordinal": 10, "object": "ge_blr_migration_lock", "pythonSqlSha256": "652a18b0c21c8b69d667de11316af4f9c2c7e8c616cecd4df39e7f0773ccc032"},
+        {"ordinal": 11, "object": "ge_blr_used_migration_locks", "pythonSqlSha256": "ea630d329066ab6d75aa4ba8e0a1e2f5bb0d0f6082310a9e6b33c1e9fc8c4187"},
+        {"ordinal": 12, "object": "ge_blr_legacy_operations", "pythonSqlSha256": "662578c324ae5492a312c368930de1b035bc2042653c727e30672ed20b7aa613"}
+      ]
+    },
+    {
+      "id": "b2.temp-index-ddl",
+      "classification": "scoped-mutation",
+      "model": "child-owned-one-shot",
+      "phase": "b2-scope-active",
+      "expectedCount": 10,
+      "memberSqlSha256": [
+        "623bc1fc35c546605365aee454f437471b2e3c3a5e3450d6704246c4db797c95",
+        "14cb943a6c137cd5feab2663550784c96af35f35f8af3b5008446324fc9be114",
+        "00956bc644c235500568b8eae735305196a5350f2872088115286fcd57ad1e92",
+        "ab4ce284f46f25c553a72e6eaa01bffd6c372deabe2d7b79c433536376f17889",
+        "eee2a6bd9d04275bbe6c457f8b5e2363acca58c55e5affb20975909a556f66c8",
+        "65cf766e5724e5ebb2b824d84971410821fc56f49a969b9456a077b811fb97a8",
+        "ea8ba1cbffa32461f0e168842bffbc57d630aea0fc20c17951c980284fbbce97",
+        "4da7bb491bebc83c1e06781111bb57fa0a0287748b6778e42a0c8773d17b7b8c",
+        "77a63272ea5b1e94fec3056782bef2ec3da4f0451c5889ee94190449fc229aad",
+        "216ef69dbaf66da01c9ec5524f76c75bf44518a1cf1f1538655f3ee0cfa913a8"
+      ]
+    },
+    {"id": "b2.temp-relation-view-ddl", "classification": "scoped-mutation", "model": "child-owned-one-shot", "phase": "b2-scope-active", "expectedCount": 1, "pythonSqlSha256": "b0176e6d75fe2df4c8c1af446f826cf2cb2359e50daa879cd8a773ce63f98a5d"},
+    {
+      "id": "b2.temp-relation-inserts",
+      "classification": "scoped-mutation",
+      "model": "parent-owned-reusable",
+      "phase": "b2-scope-active",
+      "routeDomains": ["schema", "migration", "stream", "record", "checkpoint-current", "checkpoint-revision", "lease", "used-lease", "hold", "migration-lock", "used-migration-lock", "legacy-operation"],
+      "sqlSha256": [
+        "5c77b1648a7433e7b42646ee649a9f4058195a4a3339597cb5d14ff62cc6ef27",
+        "5925683b4a24865cc076edcc2aed6e5d5fe1af0ebf286a38762d26b9509fe2b8",
+        "41ad03356c9ad9436afbffa2d5b45d8dd14dfd0fc75cd8fd191169ccffc14172",
+        "226732e2e763c5fd5cc19d4262a550f1f4d0ba3b7c173713dc08602bcef79efa",
+        "3bbf7bf54a9c3f9415c1959f60e6203a4388285005b1c3b59b261f056d243420",
+        "764c58d14b8e65a3436a290958768fcf6cfee76c2763880ad7183aaa16c1acab",
+        "424e2a79054c8d54232995f1ae1069b2541f69845b793b89f1a49167ac8984e9",
+        "a56cd1c4322aef44da304ed73823ac07ae7b704689e199415f84b09f27d19f28",
+        "39ddae3d33cf4662dec1d08defb13776a9564047b3fe65eb08df8201b243554f",
+        "6ef3fe3abc770c4b45c2324b0b3dd7f78896de5d75fdb608df27e68e2fa5a93c",
+        "712320b061c136b9039a473d3e491b022c9c326306dd0ef9a3c62879e53401f0",
+        "6c456dadfdadcf9d0b42156afb86f06b23fdb18587b14cc2396d60b86e76af79"
+      ]
+    },
+    {"id": "b2.common-stage-insert", "classification": "scoped-mutation", "model": "parent-owned-reusable", "phase": "b2-scope-active", "pythonSqlSha256": "ce9953e3c1d9c19fb48ec469dd4c4ef99d3c54c07897c232f6ddac4f62861560", "typescriptSqlSha256": "c7d83c56e78a4438087cd4a3028ca69c1bc609861e9b332a2f6e8967ccf6c4de"},
+    {"id": "b2.cursor-seal-table-ddl", "classification": "scoped-mutation", "model": "child-owned-one-shot", "phase": "b2-scope-active", "sqlSha256": "032db65e1e8c11d90ed27fc6a6e2cab130d1bf33c7d688381f5666379c52b84a"},
+    {"id": "b2.cursor-seal-insert", "classification": "scoped-mutation", "model": "parent-owned-reusable", "phase": "b2-scope-active", "sqlSha256": "fbcf5255335c392f4f18818d8f12e79abbcfc677f768579fbe05f317a7a4774b"}
+  ],
+  "migration0002Route": {
+    "id": "main.migration-0002",
+    "classification": "scoped-mutation",
+    "model": "child-owned-one-shot",
+    "phase": "migration-0002-scope-active",
+    "assetSha256": "1bf03d68eed45366bc7b34ccc329faa51ea389362db59f6a4307b3033d37a96d",
+    "expectedCount": 20,
+    "statementSqlSha256": [
+      "39fbe05cf1aeb4883c47efc286b2f0aab3af90a1d0c079287887345df22db549",
+      "9298e43ac33cf17e5d546e2c227845edfe9ebeadbad28e0c7fcd5bd065afecd1",
+      "29895d7d0930ceb7d0d9fc250d3f13092d0b12826c7da0442211245f39cb5dd3",
+      "6001b142147605b3e5b4ff97f5347201779cf5ffb3581c14a461baec4abc872e",
+      "ea25855509280dcb6c422b47cb858a42326012a03cc68bef76bf85d0ba7f946a",
+      "dc8776286fc2c30c3ab48e8eb09e74d4211874e344f96bd31a96c89873fb6449",
+      "f59e491b93bfad3ac5d10261dbca71a49f4e632fe9f559fd9210492fb2486acd",
+      "2f843bef0ac6724e732e316acf94aa25d8c6137264a3e7cb8e7cda5ef28043cb",
+      "b40c5bb7380be1862fdbfcebac8125cfd4ebf6c6d87b6bc460335b668724f210",
+      "40b4fc06fd27ed161ce8954c7206150a06d597fe01522bb6ed046ade89645b63",
+      "44becc1597a8c1812e344b9cd7af5e5c9e7ab5f809c62e39e6a61a8eb2297ae3",
+      "0b4428982442333d01fb1368d519857384c00ba7561dd8c3fdc4f7eaee0ef42d",
+      "04050d3496eccf2e70d82c259a7753b7ec495aae755e467a63882a965edc668a",
+      "340e1297fa528a919bf4c9cc22e366ec05c36011c04f049fad207fa41aacb8fc",
+      "a68fcd89b907a97d0dadc9836f803c4b9bf03d340209f0fda97170ce3dfff6e8",
+      "77a58fd1a355c0e675e31473a2affb4a626b1759bf40cc04b4f5cc187fe74895",
+      "103a8efc28ffbd40ef8110dafe1d1adf3bcd5c6e1109d6868f61ed79c57a1d26",
+      "4b5123c7e1c0d281c30e03d326432af8e5f3747e35b0cd7aad5b296ff1e82334",
+      "04ff81ec5941d015bfe0bcada44939fa0c80b5bb4a901b226c37f354ed093361",
+      "4515ed5babfb72d88dbaba3134c1d0a0735122930f541fdc0859c72dae979425"
+    ]
+  },
+  "permanentMutationRoutes": [
+    {"id": "main.baseline-entries", "classification": "scoped-mutation", "model": "parent-owned-reusable", "phase": "baseline-entries-scope-active", "sqlSha256": "b522e3ee2bb4599d74b32c8602242b1b74c3f804dd9129a8eb5a0f529cdca88b", "prepare": 1, "execute": "retained-entry-count"},
+    {"id": "main.baseline-header", "classification": "scoped-mutation", "model": "child-owned-one-shot", "phase": "baseline-header-scope-active", "sqlSha256": "b1a32ec385dd78f9727a63b9c303a9cb95c9525910010984d09b7f0fd868e79a", "prepare": 1, "execute": 1},
+    {"id": "main.operation-sequence-zero", "classification": "scoped-mutation", "model": "child-owned-one-shot", "phase": "operation-sequence-zero-scope-active", "sqlSha256": "a9afde17c90fcc7381eefa3fa81823752d6f1bc29c9eced2de8b31176cc1dd85", "prepare": 1, "execute": 1},
+    {"id": "main.cursor-rebind", "classification": "scoped-mutation", "model": "child-owned-one-shot", "phase": "cursor-rebind-scope-active", "sqlSha256": "6fc61b515e758a1e84745af28783f4e9dcee5e76f80f314aa25a08980d2fef91", "prepare": 1, "execute": 1, "affectedRows": "N"}
+  ],
+  "fixedReadRoutes": {
+    "base": [
+      {"id": "read.temp-table-list", "classification": "authenticated-fixed-read", "sqlSha256": "1a5673ba64ea33f0bf3f0d5bd9327b1aaf16314c9a04d231e99e250e6fd56a23"},
+      {"id": "read.post-ddl-stage", "classification": "authenticated-fixed-read", "sqlSha256": "adae52750ecd70a75090b52de7d60763eea144c1383cf4739df9d8e8a6b2357f"},
+      {"id": "read.target-catalog", "classification": "authenticated-fixed-read", "sqlSha256": "bd9a24c0e8307f473f6160b940effdfb77007144fbeea83628f0b7664df1410c"},
+      {"id": "read.migration-temp-conflict", "classification": "authenticated-fixed-read", "sqlSha256": "55d7e8c19b639472c44c5f5b8ead4235ca881a5df2337580af9d6350b5719a92"},
+      {"id": "read.cursor-main-projection", "classification": "authenticated-fixed-read", "sqlSha256": "dda30c873dcae965e1cac3f6478549b98e2414e982c1287997b93a2c09d760a4"},
+      {"id": "read.cursor-seal-projection", "classification": "authenticated-fixed-read", "sqlSha256": "c169d8478a327605640a031bc1129d699341165bc6f59bdf7151c3e33677458e"},
+      {"id": "read.sqlite-changes", "classification": "authenticated-fixed-read", "sqlSha256": "a6ab435eb54879f942436129997f231de19504b11028b55b014fddc2bb42e112"}
+    ],
+    "baselineSourceProjectionSqlSha256": [
+      "8ffde53dd9642e4b4e37e579de3f8c2c411095679395d68e2be1359cd273f9e4",
+      "b5b5b6587d8dae2586cda00c9e436c0384072bf0a8cdbbbd65328fc10436e496",
+      "b76f6abdd606d3defe7f77abc3636b0281ff4e714c48cc2409faabd3827fd3bb",
+      "7db69257f8b5f2e21738b5b3370fb9dc14f6e75ee9636ca2001aa950b4cdb535",
+      "bddb88f8baca7022ef0ac14ebdd4d598e2ecf19c076629903480f4a9fc1a63d6",
+      "62bf2391c8dfe50a17c9636e319b9b184a326ad9157476522195b9457dae6496",
+      "1abc05b876d2ad8c78a87b6736258178486a6ddd1f35cd319e2714249fa91662",
+      "b55445b32e75113577233516fa389ea79d0d4afd973225aa87c1fc44533a4134",
+      "f3ef1ab0ecc92658772de6eb38b16b654e3da29335f33feabf61d581c9ed2514",
+      "202b1d58c214d10f7124c518bc2ecef2ef16fff50e3b819f0733f62d82e5bed8",
+      "cbbd8c601ea128a98a19901ba3ad88df0cb66b9d7033e9dfd14c06ce81d0c5f2",
+      "9393d2c28ec4ce9892febafcd4c34fc5c976059623a110b72d4bfd36479762f8"
+    ],
+    "b2EqpSet": {
+      "setId": "p11-b2-eqp-15",
+      "expectedCount": 15,
+      "routeIds": [
+        "b2.eqp.source", "b2.eqp.stage-insert", "b2.eqp.stage-seal", "b2.eqp.count-marker", "b2.eqp.event-lookup", "b2.eqp.checkpoint-lookup",
+        "b2.eqp.row-marker.authorization", "b2.eqp.row-marker.scope", "b2.eqp.row-marker.blob-canonical", "b2.eqp.row-marker.position", "b2.eqp.row-marker.expiry-consumption", "b2.eqp.row-marker.catalog-binding", "b2.eqp.row-marker.shape", "b2.eqp.row-marker.event-binding", "b2.eqp.row-marker.checkpoint-binding"
+      ],
+      "sqlSha256": [
+        "dda30c873dcae965e1cac3f6478549b98e2414e982c1287997b93a2c09d760a4", "fbcf5255335c392f4f18818d8f12e79abbcfc677f768579fbe05f317a7a4774b", "c169d8478a327605640a031bc1129d699341165bc6f59bdf7151c3e33677458e", "d4fa6279ee8d237b0ec82d9aed1b70e804d45890dd6d02313ac9ffea6260c830", "86a336dc93fc818fc41b0e2fdf204256dc197515919f5431084e71adf45585d4", "8b6322cee22b003a9d8ac33caafcde5272473e9da86dc7f8d21db3209523aba0", "4b05dede61e9303c06a459416e8d6da4eac6007dedbab602ae4f4b942e9fbebf", "9bf6d38c051294f87798839738e5f913c69a54e8ac81dd571e36eda33ea8b628", "64b77f510a88d3091603b5d9c93d58a5eb69d65c20f67c081847654434e514b8", "aa3a0bbb0a07137a0e497c9140d359608358b5fd3bf1ac7e1ed15a34893678b3", "494b6ae97f33349cfb787afedc3bbf2ee69021a669abb4dd14273028d2117771", "6dec1fa0dc5aa8b48c9fa45c50ed2dba32cb2a01c83f934407484c1200460562", "2600c8112c8e55f814a0f57ea50b822eb14c91e13871bec99965e7aa6a91c8cd", "515c1832cfc0238339a838245b7afabc83ca319e7f74fdeabbad6904152e3909", "92315896aa7d1f1acab782dad89641687da88350f5843f9c34d32026f6a9c8ce"
+      ]
+    },
+    "rule12EqpSet": {
+      "setId": "p11-rule12-eqp-3",
+      "expectedCount": 3,
+      "routeIds": ["rule12.eqp.main-key-scan", "rule12.eqp.temp-key-driver", "rule12.eqp.main-point-lookup"],
+      "sqlSha256": ["09d1ce669070093fbbf0dfd8ce7e2a7bbfde96d051b3ce9341be85495479ec32", "1694ab6fe938203b0d8f6cb72cf82238e89234c21086ff5d224c7de4db7b1266", "bd056ee55f2bd27eee3277ed7bfee8ae7b7db935edc3cf0937fc8167e2eac342"]
+    }
+  },
+  "forbiddenRoutes": {
+    "classification": "forbidden",
+    "transactionControl": ["BEGIN", "COMMIT", "END", "ROLLBACK", "SAVEPOINT", "RELEASE"],
+    "databaseAttachment": ["ATTACH", "DETACH"],
+    "maintenance": ["VACUUM", "ANALYZE", "REINDEX"],
+    "persistentPragma": true,
+    "nonAllowlistedMainOrTempDdlDml": true,
+    "scriptOrMultipleStatements": true,
+    "postPoisonDrop": true,
+    "p11TempRetirement": true,
+    "preparedHandleOutsideScope": true,
+    "commitAuthorityAvailable": false
+  },
+  "sourceInventory": {
+    "typescript": [
+      "packages/sqlite/src/operation-baseline-source.ts", "packages/sqlite/src/operation-baseline-stage.ts", "packages/sqlite/src/operation-baseline-handoff.ts", "packages/sqlite/src/operation-baseline-reconcile.ts", "packages/sqlite/src/operation-baseline-cooperation.ts", "packages/sqlite/src/operation-baseline-cursor-invariants.ts", "packages/sqlite/src/operation-baseline-cursor-ownership.ts", "packages/sqlite/src/operation-baseline-cursor-campaign.ts", "packages/sqlite/src/operation-baseline-stream-record-invariants.ts", "packages/sqlite/src/operation-baseline-checkpoint-invariants.ts", "packages/sqlite/src/operation-baseline-lease-lock-hold-invariants.ts", "packages/sqlite/src/operation-baseline-legacy-invariants.ts", "packages/sqlite/src/cursor-publication-outer-authority.ts", "packages/sqlite/src/cursor-publication-rebind.ts", "packages/sqlite/src/cursor-publication-rule12-read.ts", "packages/sqlite/src/cursor-publication-rule12.ts", "packages/sqlite/src/cursor-publication-clock-authority.ts", "packages/sqlite/src/cursor-publication-transaction-owner.ts", "packages/sqlite/src/sqlite-connection.ts"
+    ],
+    "python": [
+      "python/src/graph_engineering/sqlite_operation_baseline_source.py", "python/src/graph_engineering/sqlite_operation_baseline_stage.py", "python/src/graph_engineering/sqlite_operation_baseline_handoff.py", "python/src/graph_engineering/sqlite_operation_baseline_cooperation.py", "python/src/graph_engineering/sqlite_operation_baseline_cursor_invariants.py", "python/src/graph_engineering/sqlite_operation_baseline_cursor_ownership.py", "python/src/graph_engineering/sqlite_operation_baseline_cursor_campaign.py", "python/src/graph_engineering/sqlite_operation_baseline_stream_record_invariants.py", "python/src/graph_engineering/sqlite_operation_baseline_checkpoint_invariants.py", "python/src/graph_engineering/sqlite_operation_baseline_lease_lock_hold_invariants.py", "python/src/graph_engineering/sqlite_operation_baseline_legacy_invariants.py", "python/src/graph_engineering/sqlite_cursor_publication_outer_authority.py", "python/src/graph_engineering/sqlite_cursor_publication_subprotocol.py", "python/src/graph_engineering/sqlite_cursor_publication_rule12.py", "python/src/graph_engineering/sqlite_cursor_publication_third_clock.py", "python/src/graph_engineering/sqlite_cursor_publication_clock_authority.py", "python/src/graph_engineering/sqlite_cursor_publication_transaction_owner.py"
+    ],
+    "discoveryEvidence": {
+      "workingTreeDate": "2026-08-03",
+      "method": "read-only-rg-plus-python-ast-and-imported-module-global-string-scan",
+      "commands": [
+        "rg -n native-SQL-prefix-and-execution-callsite-patterns packages/sqlite/src python/src/graph_engineering",
+        "python ast.walk over selected sqlite_operation_baseline* and sqlite_cursor_publication* modules",
+        "import selected Python plan modules and hash module-global str/tuple SQL values with sha256(raw UTF-8)"
+      ],
+      "importedModuleGlobalStringCandidateCount": 81,
+      "importedModuleGlobalUniqueCandidateCount": 60,
+      "nonSqlRoleLabelFalsePositiveCount": 1,
+      "qualifyingExactFixedSqlLiteralCount": 59,
+      "pythonAstSqlPrefixLiteralCandidateCount": 147,
+      "observedActualUnclassifiedNativeCallsiteCount": null,
+      "limitations": [
+        "AST literal candidates include documentation, forbidden-control probes, aliases, and f-string templates, so they are discovery evidence rather than native-callsite closure.",
+        "Imported module globals omit function-local and interpolated fixed SQL.",
+        "TypeScript template expressions require the future conformance validator to resolve runtime-local exact bytes.",
+        "This P11-A redbar artifact must not claim route closure until a validator maps every native callsite and reports zero unclassified callsites."
+      ]
+    },
+    "unclassifiedCallsiteCountRequiredForAcceptance": 0,
+    "routeClosureClaimedByThisArtifact": false
+  },
+  "acceptanceAssertions": {
+    "b2EqpProbeCount": 15,
+    "rule12EqpProbeCount": 3,
+    "eqpSetsAreDisjointByRouteId": true,
+    "missingOrDuplicateEqpRouteRejected": true,
+    "unknownRouteRejectedBeforeNativeIo": true,
+    "failedOrPoisonedGraphCanMintDropPermit": false,
+    "commitAttemptCount": 0
+  }
+}

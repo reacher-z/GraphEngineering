@@ -114,6 +114,20 @@ export interface SQLiteCursorPublicationTransactionBeginReceiptSnapshot {
   readonly beginAttempt: 1;
 }
 
+/** Package-private exact-current reproof for one adopted P11 composition. */
+export interface SQLiteCursorPublicationTransactionOwnerCurrentSnapshot {
+  readonly exactOwner: true;
+  readonly exactBeginReceipt: true;
+  readonly exactComposition: true;
+  readonly exactConnection: true;
+  readonly exactTransactionLineage: true;
+  readonly exactTransactionGeneration: true;
+  readonly exclusiveMode: true;
+  readonly transactionEpoch: bigint;
+  readonly totalChanges: number;
+  readonly tempMutationEpoch: bigint;
+}
+
 export type SQLiteCursorPublicationTransactionOwnerLifecycle =
   | "registered"
   | "beginning"
@@ -218,6 +232,8 @@ interface OwnerState {
   guardRejectionCount: number;
   primary: object | undefined;
   beginReceipt: WeakRef<object> | undefined;
+  compositionLifecycle: "unadopted" | "pending" | "adopted";
+  composition: WeakRef<object> | undefined;
   readonly diagnosticCodes: (
     | "GE_SQLITE_TX_OWNER_TERMINAL_PRIMARY"
     | "GE_SQLITE_TX_OWNER_ROLLBACK_SECONDARY"
@@ -478,6 +494,7 @@ function terminalize(state: OwnerState): void {
   state.transactionGeneration = null;
   state.transactionMode = null;
   state.primary = undefined;
+  state.composition = undefined;
   state.lifecycle = "finalized";
 }
 
@@ -540,6 +557,8 @@ export function registerSQLiteCursorPublicationTransactionOwnerIntrinsic(
     guardRejectionCount: 0,
     primary: undefined,
     beginReceipt: undefined,
+    compositionLifecycle: "unadopted",
+    composition: undefined,
     diagnosticCodes: [],
   };
   reflectApplyIntrinsic(weakMapSetIntrinsic, OWNER_STATES, [owner as object, state]);
@@ -758,8 +777,9 @@ export function readSQLiteCursorPublicationTransactionBeginReceiptIntrinsic(
   if (receiptState === undefined || selectedOwner !== owner || connection !== state.connection
       || lineage !== state.transactionLineage || generation !== state.provisionalGeneration
       || generation !== state.transactionGeneration
-      || receiptState.transactionEpoch !== state.transactionEpoch
-      || receiptState.totalChanges !== state.totalChanges) {
+      || receiptState.transactionEpoch !== state.initialTransactionEpoch + 1n
+      || receiptState.totalChanges !== state.initialTotalChanges
+      || receiptState.tempMutationEpoch !== state.initialTempMutationEpoch) {
     return ownerError("GE_SQLITE_TX_OWNER_INVALID_AUTHORITY", "BEGIN receipt is stale");
   }
   return objectFreezeIntrinsic({
@@ -772,6 +792,121 @@ export function readSQLiteCursorPublicationTransactionBeginReceiptIntrinsic(
     totalChanges: receiptState.totalChanges,
     tempMutationEpoch: receiptState.tempMutationEpoch,
     beginAttempt: 1,
+  });
+}
+
+function assertCurrentBeginReceiptForComposition(
+  state: OwnerState,
+  owner: SQLiteCursorPublicationTransactionOwner,
+  receipt: SQLiteCursorPublicationTransactionBeginReceipt,
+): void {
+  readSQLiteCursorPublicationTransactionBeginReceiptIntrinsic(owner, receipt);
+  const selected = state.beginReceipt === undefined
+    ? undefined
+    : reflectApplyIntrinsic(weakRefDerefIntrinsic, state.beginReceipt, []) as object | undefined;
+  if (state.lifecycle !== "active" || selected !== receipt) {
+    ownerError("GE_SQLITE_TX_OWNER_INVALID_AUTHORITY", "composition BEGIN receipt is stale");
+  }
+}
+
+/** Enter the one-way P11 owner-composition adoption tail. */
+export function prepareSQLiteCursorPublicationOwnerCompositionAdoptionIntrinsic(
+  owner: SQLiteCursorPublicationTransactionOwner,
+  receipt: SQLiteCursorPublicationTransactionBeginReceipt,
+  composition: object,
+): void {
+  const state = stateForOwner(owner);
+  if (composition === null || typeof composition !== "object" || isProxy(composition)
+      || state.compositionLifecycle !== "unadopted" || state.composition !== undefined) {
+    ownerError("GE_SQLITE_TX_OWNER_INVALID_AUTHORITY", "owner composition adoption is invalid");
+  }
+  assertCurrentBeginReceiptForComposition(state, owner, receipt);
+  state.composition = new weakRefIntrinsic(composition);
+  state.compositionLifecycle = "pending";
+}
+
+/** Commit the exact pending P11 composition; this transition cannot be reversed. */
+export function adoptSQLiteCursorPublicationOwnerCompositionIntrinsic(
+  owner: SQLiteCursorPublicationTransactionOwner,
+  receipt: SQLiteCursorPublicationTransactionBeginReceipt,
+  composition: object,
+): void {
+  const state = stateForOwner(owner);
+  const selected = state.composition === undefined
+    ? undefined
+    : reflectApplyIntrinsic(weakRefDerefIntrinsic, state.composition, []) as object | undefined;
+  if (state.compositionLifecycle !== "pending" || selected !== composition) {
+    ownerError("GE_SQLITE_TX_OWNER_INVALID_AUTHORITY", "pending owner composition is invalid");
+  }
+  assertCurrentBeginReceiptForComposition(state, owner, receipt);
+  state.compositionLifecycle = "adopted";
+}
+
+/** Abort only a not-yet-adopted tail before P9 terminal failure finalization. */
+export function abortSQLiteCursorPublicationOwnerCompositionAdoptionIntrinsic(
+  owner: SQLiteCursorPublicationTransactionOwner,
+  composition: object,
+): void {
+  const state = stateForOwner(owner);
+  const selected = state.composition === undefined
+    ? undefined
+    : reflectApplyIntrinsic(weakRefDerefIntrinsic, state.composition, []) as object | undefined;
+  if (state.compositionLifecycle !== "pending" || selected !== composition) {
+    ownerError("GE_SQLITE_TX_OWNER_INVALID_AUTHORITY", "pending owner composition is invalid");
+  }
+  state.composition = undefined;
+  state.compositionLifecycle = "unadopted";
+}
+
+/**
+ * Reprove the exact adopted P11 graph against the lower connection's current
+ * native owner and total-change observations.  This does not execute SQL and
+ * does not grant a mutation or fixed-read route.
+ */
+export function assertSQLiteCursorPublicationOwnerCompositionCurrentIntrinsic(
+  owner: SQLiteCursorPublicationTransactionOwner,
+  receipt: SQLiteCursorPublicationTransactionBeginReceipt,
+  composition: object,
+): SQLiteCursorPublicationTransactionOwnerCurrentSnapshot {
+  const state = stateForOwner(owner);
+  const selected = state.composition === undefined
+    ? undefined
+    : reflectApplyIntrinsic(weakRefDerefIntrinsic, state.composition, []) as object | undefined;
+  if (state.lifecycle !== "active" || state.compositionLifecycle !== "adopted"
+      || selected !== composition || state.connection === null
+      || state.transactionLineage === null || state.transactionGeneration === null) {
+    return ownerError(
+      "GE_SQLITE_TX_OWNER_INVALID_AUTHORITY",
+      "adopted owner composition is not current",
+    );
+  }
+  assertCurrentBeginReceiptForComposition(state, owner, receipt);
+  const nativeOwner = readSQLiteConnectionOwnerSnapshot(state.connection);
+  const nativeTotal = readSQLiteConnectionTotalChangesSnapshot(state.connection);
+  if (!nativeOwner.isTransaction
+      || nativeOwner.transactionLineage !== state.transactionLineage
+      || nativeOwner.publicationTransactionGeneration !== state.transactionGeneration
+      || nativeOwner.transactionMode !== "exclusive"
+      || nativeOwner.transactionEpoch !== state.transactionEpoch
+      || nativeOwner.tempMutationEpoch !== state.tempMutationEpoch
+      || nativeTotal.transactionEpoch !== state.transactionEpoch
+      || nativeTotal.totalChanges !== state.totalChanges) {
+    return ownerError(
+      "GE_SQLITE_TX_OWNER_INVALID_AUTHORITY",
+      "adopted owner composition native state drifted",
+    );
+  }
+  return objectFreezeIntrinsic({
+    exactOwner: true,
+    exactBeginReceipt: true,
+    exactComposition: true,
+    exactConnection: true,
+    exactTransactionLineage: true,
+    exactTransactionGeneration: true,
+    exclusiveMode: true,
+    transactionEpoch: nativeOwner.transactionEpoch,
+    totalChanges: nativeTotal.totalChanges,
+    tempMutationEpoch: nativeOwner.tempMutationEpoch,
   });
 }
 

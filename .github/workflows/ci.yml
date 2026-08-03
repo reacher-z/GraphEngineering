@@ -33,6 +33,7 @@ jobs:
       - run: pnpm validate:fixtures
       - run: pnpm test:sqlite-ledger-contract
       - run: pnpm test:sqlite-transaction-owner-contract
+      - run: pnpm test:sqlite-owner-composition-contract
       - run: pnpm check:docs
       - run: pnpm check:task-controls
       - run: pnpm check:sqlite-migrations

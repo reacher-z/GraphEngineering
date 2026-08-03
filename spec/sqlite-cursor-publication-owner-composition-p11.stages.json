@@ -1,0 +1,146 @@
+{
+  "schemaVersion": 1,
+  "contractId": "sqlite-cursor-publication-owner-composition-p11-stages-v1",
+  "status": "p11-a-redbar-contract",
+  "canonicalInventorySource": "spec/conformance/sqlite-cursor-publication-transaction-owner-v1.case.json#/dependencyContract/atomicPublicationOrder",
+  "stageCount": 30,
+  "stages": [
+    {"ordinal": 1, "id": "source-v1-semantically-valid", "requiredPredecessor": null, "sliceOwner": "P11-B", "successMintCount": 1, "successConsumeCount": 1},
+    {"ordinal": 2, "id": "transaction-owner-registered", "requiredPredecessor": "source-v1-semantically-valid", "sliceOwner": "P11-B", "successMintCount": 1, "successConsumeCount": 1},
+    {"ordinal": 3, "id": "begin-exclusive-returned", "requiredPredecessor": "transaction-owner-registered", "sliceOwner": "P11-B", "successMintCount": 1, "successConsumeCount": 1},
+    {"ordinal": 4, "id": "b2-pre-rebind-complete", "requiredPredecessor": "begin-exclusive-returned", "sliceOwner": "P11-B", "successMintCount": 1, "successConsumeCount": 1},
+    {"ordinal": 5, "id": "outer-clock-evidence-consumed", "requiredPredecessor": "b2-pre-rebind-complete", "sliceOwner": "P11-C", "successMintCount": 1, "successConsumeCount": 1},
+    {"ordinal": 6, "id": "outer-publication-authority-minted", "requiredPredecessor": "outer-clock-evidence-consumed", "sliceOwner": "P11-C", "successMintCount": 1, "successConsumeCount": 1},
+    {"ordinal": 7, "id": "migration-0002-catalog-rebuild", "requiredPredecessor": "outer-publication-authority-minted", "sliceOwner": "P11-C", "successMintCount": 1, "successConsumeCount": 1},
+    {"ordinal": 8, "id": "post-0002-catalog-fence-adopted", "requiredPredecessor": "migration-0002-catalog-rebuild", "sliceOwner": "P11-C", "successMintCount": 1, "successConsumeCount": 1},
+    {"ordinal": 9, "id": "baseline-entries-published", "requiredPredecessor": "post-0002-catalog-fence-adopted", "sliceOwner": "P11-C", "successMintCount": 1, "successConsumeCount": 1},
+    {"ordinal": 10, "id": "baseline-header-published", "requiredPredecessor": "baseline-entries-published", "sliceOwner": "P11-C", "successMintCount": 1, "successConsumeCount": 1},
+    {"ordinal": 11, "id": "operation-sequence-zero-published", "requiredPredecessor": "baseline-header-published", "sliceOwner": "P11-C", "successMintCount": 1, "successConsumeCount": 1},
+    {"ordinal": 12, "id": "post-ddl-stage-authority-adopted", "requiredPredecessor": "operation-sequence-zero-published", "sliceOwner": "P11-D", "successMintCount": 1, "successConsumeCount": 1},
+    {"ordinal": 13, "id": "pre-rebind-clock-evidence-consumed", "requiredPredecessor": "post-ddl-stage-authority-adopted", "sliceOwner": "P11-D", "successMintCount": 1, "successConsumeCount": 1},
+    {"ordinal": 14, "id": "cursor-publication-session-minted", "requiredPredecessor": "pre-rebind-clock-evidence-consumed", "sliceOwner": "P11-D", "successMintCount": 1, "successConsumeCount": 1},
+    {"ordinal": 15, "id": "cursor-rebind-executed-once", "requiredPredecessor": "cursor-publication-session-minted", "sliceOwner": "P11-D", "successMintCount": 1, "successConsumeCount": 1},
+    {"ordinal": 16, "id": "rule-11-rebind-count-accepted", "requiredPredecessor": "cursor-rebind-executed-once", "sliceOwner": "P11-D", "successMintCount": 1, "successConsumeCount": 1},
+    {"ordinal": 17, "id": "rule-12-main-table-seal-accepted", "requiredPredecessor": "rule-11-rebind-count-accepted", "sliceOwner": "P11-D", "successMintCount": 1, "successConsumeCount": 1},
+    {"ordinal": 18, "id": "pre-verification-clock-evidence-consumed", "requiredPredecessor": "rule-12-main-table-seal-accepted", "sliceOwner": "POST-P11", "p11MintCount": 0, "p11ConsumeCount": 0, "p11Accepted": false},
+    {"ordinal": 19, "id": "cursor-clock-complete", "requiredPredecessor": "pre-verification-clock-evidence-consumed", "sliceOwner": "POST-P11", "p11MintCount": 0, "p11ConsumeCount": 0, "p11Accepted": false},
+    {"ordinal": 20, "id": "migration-lineage-published", "requiredPredecessor": "cursor-clock-complete", "sliceOwner": "POST-P11", "p11MintCount": 0, "p11ConsumeCount": 0, "p11Accepted": false},
+    {"ordinal": 21, "id": "schema-and-descriptor-metadata-published", "requiredPredecessor": "migration-lineage-published", "sliceOwner": "POST-P11", "p11MintCount": 0, "p11ConsumeCount": 0, "p11Accepted": false},
+    {"ordinal": 22, "id": "publication-rules-accepted", "requiredPredecessor": "schema-and-descriptor-metadata-published", "sliceOwner": "POST-P11", "p11MintCount": 0, "p11ConsumeCount": 0, "p11Accepted": false},
+    {"ordinal": 23, "id": "fresh-v2-catalog-equivalence-accepted", "requiredPredecessor": "publication-rules-accepted", "sliceOwner": "POST-P11", "p11MintCount": 0, "p11ConsumeCount": 0, "p11Accepted": false},
+    {"ordinal": 24, "id": "physical-and-semantic-postconditions-accepted", "requiredPredecessor": "fresh-v2-catalog-equivalence-accepted", "sliceOwner": "POST-P11", "p11MintCount": 0, "p11ConsumeCount": 0, "p11Accepted": false},
+    {"ordinal": 25, "id": "pre-retirement-stage-fence-adopted", "requiredPredecessor": "physical-and-semantic-postconditions-accepted", "sliceOwner": "POST-P11", "p11MintCount": 0, "p11ConsumeCount": 0, "p11Accepted": false},
+    {"ordinal": 26, "id": "cursor-temp-stage-retired", "requiredPredecessor": "pre-retirement-stage-fence-adopted", "sliceOwner": "POST-P11", "p11MintCount": 0, "p11ConsumeCount": 0, "p11Accepted": false},
+    {"ordinal": 27, "id": "pre-commit-clock-evidence-consumed", "requiredPredecessor": "cursor-temp-stage-retired", "sliceOwner": "POST-P11", "p11MintCount": 0, "p11ConsumeCount": 0, "p11Accepted": false},
+    {"ordinal": 28, "id": "final-migration-lock-transaction-fence-accepted", "requiredPredecessor": "pre-commit-clock-evidence-consumed", "sliceOwner": "POST-P11", "p11MintCount": 0, "p11ConsumeCount": 0, "p11Accepted": false},
+    {"ordinal": 29, "id": "success-commit-authority-selected-internal-state-no-new-capability", "requiredPredecessor": "final-migration-lock-transaction-fence-accepted", "sliceOwner": "POST-P11", "p11MintCount": 0, "p11ConsumeCount": 0, "p11Accepted": false},
+    {"ordinal": 30, "id": "single-atomic-commit", "requiredPredecessor": "success-commit-authority-selected-internal-state-no-new-capability", "sliceOwner": "POST-P11", "p11MintCount": 0, "p11ConsumeCount": 0, "p11Accepted": false}
+  ],
+  "slices": [
+    {"id": "P11-A", "purpose": "authority-substrate-and-redbar", "acceptedStageOrdinals": [], "maximumAcceptedStage": 0, "completionClaimAllowed": false},
+    {"id": "P11-B", "purpose": "owner-composed-b2", "acceptedStageOrdinals": [1, 2, 3, 4], "maximumAcceptedStage": 4, "lastStageId": "b2-pre-rebind-complete"},
+    {"id": "P11-C", "purpose": "outer-and-permanent-writes-before-initial-adoption", "acceptedStageOrdinals": [5, 6, 7, 8, 9, 10, 11], "requiresPrefixThrough": 4, "maximumAcceptedStage": 11, "lastStageId": "operation-sequence-zero-published"},
+    {"id": "P11-D", "purpose": "initial-adoption-through-rule12-and-third-observation", "acceptedStageOrdinals": [12, 13, 14, 15, 16, 17], "requiresPrefixThrough": 11, "maximumAcceptedStage": 17, "lastStageId": "rule-12-main-table-seal-accepted"}
+  ],
+  "auxiliaryTerminalEvidence": {
+    "id": "third-clock-observed-unconsumed",
+    "afterStageOrdinal": 17,
+    "partOfThirtyStageInventory": false,
+    "observedCount": 3,
+    "consumedCount": 2,
+    "thirdEvidenceConsumed": false,
+    "stage18Accepted": false
+  },
+  "compositionAdoption": {
+    "order": [
+      "authenticate-owner-and-begin-receipt",
+      "construct-all-immutable-objects",
+      "register-composition-and-exact-owner-receipt-binding",
+      "mark-receipt-composition-pending",
+      "owner-state-one-way-adopt",
+      "composition-begin-adopted"
+    ],
+    "callerCanObserveBeforeCommit": false,
+    "faultPoints": [
+      {"id": "registration-fault", "rollbackPartialRegistry": true, "tombstoneConstructedObjects": true},
+      {"id": "binding-fault", "rollbackPartialRegistry": true, "tombstoneConstructedObjects": true},
+      {"id": "pending-fault", "rollbackPartialRegistry": true, "tombstoneConstructedObjects": true},
+      {"id": "owner-adopt-fault", "rollbackPartialRegistry": true, "tombstoneConstructedObjects": true}
+    ],
+    "retryAfterOwnerAdopt": false
+  },
+  "mutationParentChildContract": {
+    "parentStates": ["parent-issued", "parent-complete", "parent-consumed", "parent-poisoned"],
+    "childStates": ["child-issued", "child-entered", "child-native-returned", "child-resource-retired-or-lease-released", "child-postflight-accepted", "child-consumed", "child-failed"],
+    "nextChildMintRequiresPreviousConsumed": true,
+    "futurePastMissingExtraOrdinalRejectedBeforeIo": true,
+    "crossParentOwnerConnectionRejectedBeforeIo": true,
+    "zeroExpectedCount": {
+      "child-owned-one-shot": ["prove-exact-zero-provenance", "mint-no-child", "zero-item-postflight", "parent-complete", "parent-consumed"],
+      "parent-owned-reusable": ["prove-exact-zero-provenance", "prepare-once", "mint-no-child", "zero-item-postflight", "awaiting-parent-resource-retirement", "parent-resource-retired", "parent-complete", "parent-consumed"]
+    }
+  },
+  "fixedReadContract": {
+    "states": ["issued", "prepared", "bounded-reading", "terminal-row-observed", "resource-retired", "consumed"],
+    "zeroRowsStillRequiresTerminalObservationAndRetirement": true,
+    "mutationWatermarkDelta": 0,
+    "primaryOverRetirementFailure": true
+  },
+  "failureContract": {
+    "states": ["phase-active", "failure-pending-or-poisoned", "p9-failure-claimed", "rolling-back-or-rollback-in-doubt", "close", "reopen-source-v1-or-corrupt-or-unavailable", "finalized"],
+    "pythonCapture": "exact-original-BaseException-identity",
+    "typescriptPrimitiveThrow": "stable-wrapper-with-original-cause",
+    "rollbackOnlyWhenExactGenerationAndLineageStillActive": true,
+    "observationUnavailableStillClosesAndReopens": true,
+    "postPoisonDropPermitAllowed": false,
+    "limits": {"commit": 0, "rollbackMaximum": 1, "closeMaximum": 1, "reopenMaximum": 1},
+    "primaryErrorPrecedence": ["native-or-validation-primary", "resource-retirement-secondary", "rollback-secondary", "close-tertiary", "reopen-diagnostic"]
+  },
+  "boundedStop": {
+    "testOnly": true,
+    "primary": "P11_BOUNDED_STOP_NO_COMMIT",
+    "usesP9FailureCaptureAndFinalizer": true,
+    "createsThirdRollbackAuthority": false,
+    "oneShot": true,
+    "mutuallyExclusiveWithSuccessOrOtherFailureCapture": true
+  },
+  "p11ARedGates": [
+    "early-failure-cannot-report-stage-17",
+    "migration-20-child-permits-and-postflight-failure-edge",
+    "n-row-child-permits-and-zero-expected-count",
+    "owner-active-fixed-pragma-and-b2-eqp-read-zero-mutation",
+    "typescript-and-python-retirement-evidence-is-not-fabricated",
+    "python-original-baseexception-and-observation-unavailable-cleanup",
+    "poisoned-graph-mints-no-drop-authority",
+    "route-and-stage-inventory-is-closed-with-unknown-fail-closed",
+    "bounded-stop-reuses-exact-p9-failure-authority",
+    "composition-registration-binding-pending-owner-adopt-faults-are-atomic"
+  ],
+  "reportContract": {
+    "requiredFields": ["attemptedStage", "highestAcceptedStage", "acceptedStageReceiptCount", "acceptedStageIds", "thirdEvidenceConsumed", "commitPresented", "commitAttemptCount"],
+    "acceptedStageIdsMustBeContinuousPrefix": true,
+    "attemptedFailedStageExcluded": true,
+    "highestAcceptedStageDerivedFromRetainedReceipts": true,
+    "sliceMaximumEnforced": true,
+    "p11DSuccess": {"highestAcceptedStage": 17, "thirdEvidenceConsumed": false, "commitPresented": false, "commitAttemptCount": 0},
+    "stage18MustRemainFalse": true
+  },
+  "nonClaims": [
+    "pre-verification-clock-evidence-consumed",
+    "cursor-clock-complete",
+    "migration-lineage-published",
+    "schema-and-descriptor-metadata-published",
+    "publication-rules-accepted",
+    "fresh-v2-catalog-equivalence-accepted",
+    "physical-and-semantic-postconditions-accepted",
+    "pre-retirement-stage-fence-adopted",
+    "cursor-temp-stage-retired",
+    "pre-commit-clock-evidence-consumed",
+    "final-migration-lock-transaction-fence-accepted",
+    "success-commit-authority-selected",
+    "single-atomic-commit",
+    "complete-v2",
+    "public-api",
+    "release-or-stars"
+  ]
+}
