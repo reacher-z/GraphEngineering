@@ -23,7 +23,10 @@ from .sqlite_cursor_publication_subprotocol import (
 )
 from .sqlite_operation_baseline_source import (
     SQLiteV1BaselineConnectionOwner,
+    _arm_sqlite_connection_cursor_publication_rebind_changes_primary_capture_intrinsic,
+    _CursorPublicationChangesPrimaryCapture,
     _read_sqlite_connection_cursor_publication_rebind_snapshot_intrinsic,
+    _reset_sqlite_connection_cursor_publication_rebind_changes_primary_capture_intrinsic,
     _SQLiteConnectionCursorPublicationRebindExecution,
     _take_sqlite_connection_cursor_publication_rebind_changes_primary_intrinsic,
 )
@@ -316,7 +319,7 @@ def _authenticate_exact_post_t_primary_graph(
     primary: BaseException,
     *,
     _expected_boundary: _PrimaryBoundary | None = None,
-    _consume_lower_primary: bool = False,
+    _lower_primary_capture: _CursorPublicationChangesPrimaryCapture | None = None,
     _trusted_boundary: _PrimaryBoundary | None = None,
 ) -> tuple[
     _SQLiteCursorPublicationRebindContext,
@@ -398,11 +401,11 @@ def _authenticate_exact_post_t_primary_graph(
     else:
         if _trusted_boundary is not None:
             lower_boundary = _trusted_boundary
-        elif _consume_lower_primary:
+        elif _lower_primary_capture is not None:
             try:
                 lower_boundary = (
                     _take_sqlite_connection_cursor_publication_rebind_changes_primary_intrinsic(
-                        connection, execution, primary
+                        _lower_primary_capture, connection, execution, primary
                     )
                 )
             except BaseException:
@@ -410,6 +413,17 @@ def _authenticate_exact_post_t_primary_graph(
         else:
             _fail("GE_CURSOR_B3_POSTCONSUME_GRAPH")
         affected = execution_snapshot.affected_rows
+        total_delta = execution_snapshot.total_changes_delta
+        authenticated_post_query_counter_mismatch = (
+            lower_boundary == "serialized-changes-post-query"
+            and type(primary) is ValueError
+            and primary.args == ("GE_CURSOR_B3_CURSOR_CHANGES_LINEAGE",)
+            and changes_counts == (1, 1, 1)
+            and execution_snapshot.changes_affected_rows == affected
+            and type(affected) is int
+            and type(total_delta) is int
+            and total_delta > affected
+        )
         if (
             type(affected) is not int
             or not 0 <= affected <= _MAX_SAFE_INTEGER
@@ -418,9 +432,11 @@ def _authenticate_exact_post_t_primary_graph(
             or execution_snapshot.cursor_ledger_before != (0, 0, 0)
             or execution_snapshot.cursor_ledger_after != (affected, 1, 1)
             or execution_snapshot.cursor_ledger_delta != (affected, 1, 1)
-            or execution_snapshot.total_changes_delta != affected
+            or type(total_delta) is not int
+            or not 0 <= total_delta <= _MAX_SAFE_INTEGER
+            or (total_delta != affected and not authenticated_post_query_counter_mismatch)
             or execution_snapshot.total_changes
-            != execution_snapshot.total_changes_before + affected
+            != execution_snapshot.total_changes_before + total_delta
             or connection.total_changes != execution_snapshot.total_changes
             or execution_snapshot.transaction_epoch_before
             != context_snapshot.historical_transaction_epoch
@@ -500,18 +516,30 @@ def _capture_implementation(
         or session_snapshot.transaction_generation is not connection._transaction_generation
     ):
         _fail("GE_CURSOR_B3_POSTCONSUME_GRAPH")
-    primary: BaseException | None = None
-    try:
-        exact_leaf(session)
-    except BaseException as error:
-        primary = error
-    if primary is None:
-        _fail("GE_CURSOR_B3_POSTCONSUME_NO_PRIMARY")
-    context, tombstone, execution, generation, epoch, primary_boundary = (
-        _authenticate_exact_post_t_primary_graph(
-            connection, authority, primary, _consume_lower_primary=True
+    lower_capture, lower_token = (
+        _arm_sqlite_connection_cursor_publication_rebind_changes_primary_capture_intrinsic(
+            connection
         )
     )
+    primary: BaseException | None = None
+    try:
+        try:
+            exact_leaf(session)
+        except BaseException as error:
+            primary = error
+        if primary is None:
+            _fail("GE_CURSOR_B3_POSTCONSUME_NO_PRIMARY")
+        authenticated = _authenticate_exact_post_t_primary_graph(
+            connection,
+            authority,
+            primary,
+            _lower_primary_capture=lower_capture,
+        )
+    finally:
+        _reset_sqlite_connection_cursor_publication_rebind_changes_primary_capture_intrinsic(
+            lower_capture, lower_token
+        )
+    context, tombstone, execution, generation, epoch, primary_boundary = authenticated
     if primary_boundary == "native-execute" and not _native_primary(primary):
         _fail("GE_CURSOR_B3_POSTCONSUME_PRIMARY")
     owner = _PostConsumeTransactionFailureFinalizer(

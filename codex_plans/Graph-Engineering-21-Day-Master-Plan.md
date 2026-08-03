@@ -21227,3 +21227,134 @@ subprotocol长测由owner Agent在同一冻结SHA运行，独立审计又对关�
    ambiguity injection，必须继续保持明确nonclaim；
 9. Python 65,536预算内未实际观察id reuse，只能声明bounded honest attempt和环境skip，不能宣称运行时动态命中；
 10. package-private模块尚未接入公开production workflow或release gate，不能宣称用户已经获得完整事务API。
+
+#### 31.37.74 Wave 1E/P6：五维counter matrix、copied-context exact-E与portable parity（2026-08-02 PDT追加；既有内容不改）
+
+本节严格追加于既有21,229行之后。追加前完整计划SHA-256为
+`d9fde5c715aad19e6bb2d9d9060645711e59421d9c994fee9e4837258c5230cf`；前21,229行必须保持
+byte-for-byte不变。本节落实31.37.73.5的counter-combination优先级，同时记录三次由独立审计阻止的
+过早结论：Python整数ID冒充对象身份、mutable ContextVar跨复制上下文、TypeScript outer-first短路导致
+组合覆盖夸大。三项均在commit前修复并重新冻结。
+
+##### 31.37.74.1 Python exact-E票据：从H1 ID复用到H0/M0/L0
+
+上一节采用的`id(E)`票据被新复审推翻。raw pre-query与raw post-query两案在原E离开except并释放后，
+第一次同类异常分配即复用了同一整数ID；替代对象因此通过旧take。clear-before-check只能阻止第二次探测，
+不能让一个可复用整数成为对象身份。把E强存入global execution state也不可接受：E traceback可保活proof
+frame与execution，而global state又保活E，weak execution callback永远没有机会清理。
+
+最终采用只在fixed leaf同步调用期间存在的ContextVar handoff。第一次版本虽然解决ID reuse，却让
+`copy_context()`继承同一个mutable capture；child context写入后parent成功mint，且保留copied Context会
+通过不可清除的connection字段保活图。独审真实复现为M1，版本再次拒绝。
+
+最终闭包由两层组成：
+
+1. frozen phase wrapper保存arm nonce、shared ticket与`armed|recorded|consumed`；
+2. shared ticket的connection/state/error/boundary均为可清空字段；
+3. arm只允许当前Context没有ticket，并生成不可复用nonce；
+4. lower recorder要求当前phase为armed、exact connection/state且ticket仍空；
+5. recorder写ticket后在当前Context执行`set(recorded)`，child set不会改变parent phase；
+6. take先复制presentation，把当前Context切到consumed，再清connection/state/E/boundary；
+7. 清空之后才比较phase、nonce、exact connection、exact state、poisoned lifecycle与`primary is E`；
+8. finally中的reset无条件再次清全部强边并恢复原token；
+9. 无ticket replay不会安装consumed phase；nested arm与cross connection均fail-closed；
+10. retained child Context即使仍保存recorded wrapper，也只指向被parent reset清空的shared ticket。
+
+正式测试让lower proof在`copy_context().run(...)`执行。parent capture必须得到
+`GE_CURSOR_B3_POSTCONSUME_GRAPH`、finalizer owner数量不增加、parent ContextVar为None；随后故意保留child
+Context，关闭图并16轮GC，execution/error/authority WeakRef全部dead、execution registry回到baseline、
+child ticket connection/error/state/boundary全部None。六个lower boundary的transferable traceback substitute、
+两个live-E ID生命周期、nested/cross/replay、normal exact primary与cleanup precedence继续通过。
+
+Python real trigger仅对exact post-query `ValueError(GE_CURSOR_B3_CURSOR_CHANGES_LINEAGE)`开放窄路径：
+changes counts必须`1/1/1`、changes affected必须等于native affected、total delta必须大于affected，其他
+connection/generation/epoch/ledger条件仍exact。相同counter shape下的raw post-query异常必须拒绝。
+
+最终主线程完整门禁：finalizer 51/51（268.96秒）、subprotocol 60 pass加1个honest bounded ID-reuse skip
+（251.35秒）、lower source 40/40（2.31秒）。Ruff机械格式化finalizer与test后，独审以`git diff -w`
+确认无语义变化，并在最终字节上复跑copied-context、六boundary traceback、real trigger与raw rejection 9/9。
+Ruff lint、两文件format-check、mypy、py_compile与diff-check通过；最终独审H0/M0/L0。
+
+##### 31.37.74.2 TypeScript真实E后五维projection与completed-E finalizer
+
+TS新增package-private exact-S→exact-E evidence-mismatch seam，固定维度为native affected（N）、changes
+affected（C）、total delta（T）、outer ledger（O）与cursor ledger（L）。S输入必须是普通Array、严格排序、
+无重复且1至5项；WeakMap/WeakRef handoff认证session、authority、connection、context、prepared owner与execution，
+并与release/changes fault arms互斥。lower只在真实UPDATE、真实`changes()`与真实total观察全部完成后consume；
+production execution snapshot始终保留真实N=C=T=L。
+
+矩阵执行十个`C(5,2)` pair与四个multi：`{N,C,T}`、`{C,O,L}`、`{N,C,T,L}`、
+`{N,C,T,O,L}`。第一版O-containing案在outer检查处提前throw，导致其他选中projection没有求值；虽然
+metadata列出完整集合，却不能宣称完整matrix。独审判为M，最终修复为先冻结observed counts、构造全部
+projected counts、运行pure five-count evaluator并保存结果，然后才选择outer-first poison。
+
+`evidenceProjectionIsExact`逐字段要求projected=observed+selected offset，要求evaluatedDimensions与selection
+exact相同、outer bit exact，并重新运行checker比较accepted/violation。completed-E capture/finalize graph
+predicate对outer与five-count两路都要求checker rejected且violation=1。含O仍确定性first poison outer，W与
+R11 absent；不含O的case first poison five-count，W poisoned而R11 absent。每个unselected相邻图都正常完成
+Rule11，证明seam不污染其他S/E。
+
+completed primary ticket只存WeakRef，以exact E为key；registration rollback、dead/cross/forged/substitute、
+destructive mismatch、replay均拒绝。capture认证同一T/context/tombstone/adoption/execution/primary与完整projection，
+finalize重做pure graph assertion。五维case再叠加rollback/close ambiguity，最终仍按primary > rollback > close
+重抛exact leaf primary。abandoned completed mismatch的GC child证明无reverse root。
+
+最终TS targeted 17案通过；Rule11 44与finalizer 20合计64/64；typecheck、build与diff-check通过。
+独立审计先发现并推动M修复，最终结论H0/M0/L0。
+
+##### 31.37.74.3 Portable真实trigger与11个checker组合
+
+portable层不伪造两个runtime没有共同native seam的观察。它分三层输出：
+
+1. authentic real-SQLite baseline：B2/N/C/T/L=`1/1/1/1/1`，outer ledger `4/27/9`不变，cursor
+   ledger `0/0/0→1/1/1`，runtime checker接受；
+2. genuine `AFTER UPDATE` amplification：B2/N/C/T/L=`1/1/1/2/1`，真实不等边为N!=T、C!=T、
+   T!=L，exact primary保留并经rollback/close；
+3. 从authentic tuple派生的pure checker inputs：N/C/T/L六pair、四triple与一four-way，共11案；每案调用
+   runtime真实Rule11 checker并得到rejected、violation=1、diagnosticsTruncated=false。
+
+第三层明确声明不是native observation。O相关组合、独立N/C、N/L、C/L native drift与driver-native
+shape/throw被列为固定nonclaim。real trigger finalize后重开实际文件，exact验证cursor=1、operation=1、
+v2 artifact=0、FK violation=0、integrity=ok。
+
+Comparator要求exact keys、order、safe integers、case/subset order、claims/nonclaims与recovery；每个reporter
+双跑验证runtime内byte determinism，再去除唯一runtime label要求runtime-neutral byte equality。hostile suite
+覆盖key/order/scalar/subset/case/claim/nonclaim/recovery漂移。最终新parity 3/3（32.99秒），旧Rule11和旧
+finalizer parity 4/4（115.40秒）。
+
+##### 31.37.74.4 最终冻结身份与门禁
+
+全部文件mode 0644，SHA-256：
+
+- TS rebind：`5c27bfa818ea611eddada813e8cc8c79058bd4a01ace3e735c9ce23954ba1e6b`；
+- TS finalizer：`dfcd8534ca9900b3965900fbc4dedcff9d0f40019e9364db7e1ad040f4120d89`；
+- TS connection：`139adb6967787eca4707ae93d1b840e080ac466a2e772a733b801692ff4495c4`；
+- TS Rule11 test：`bcfd544b7280a696ce8f7de005e709ace4f5a754ee4f18d76d4e30a70023e81f`；
+- Python lower：`b3f28c3edf86a32c5c7778f4d2e116660c35f228d7abff3bb246a63bb001b961`；
+- Python finalizer：`fbd3e1e3e6c81649b407c4aa8263c293c4406afbb462d35f4baeecb5ff4940e1`；
+- Python finalizer test：`d451013434ded959bbdda92633a4abc813710eeff2fd09049d51f8d30a463862`；
+- TS counter reporter：`b5ddb68aad7c7f95ad4058130c6f68231d53cb0397b31a988cf23360a85c1560`；
+- Python counter reporter：`a923add81d56a5160d279392c1c85c0c5b70b629052e43420d839e1d80439f68`；
+- counter parity：`da96fd7a42bd31080f6a714f0f2c7d37e345c9cab22ecb67fb6f74ccf4ce8df4`。
+
+完整审计轨迹、rejected H1/M implementations、命令、恢复证据与nonclaims保存在
+`codex_logs/reviews/SQLITE-COUNTER-COMBINATION-CONTEXT-TICKET-WAVE1E-2026-08-02.md`。
+
+##### 31.37.74.5 Remaining strict nonclaims与下一优先级
+
+本节关闭TS runtime-local完整五维matrix、completed-E failure finalizer、Python exact-E copied-context漏洞与
+portable真实trigger/checker组合，但仍不宣称整个Wave 1E或SQLite transaction owner完成：
+
+1. Python尚无与TS同构的runtime-local五维post-observation projection matrix；当前只有真实T amplification与
+   portable pure-checker组合；
+2. portable层没有共同native O/N-C/N-L/C-L独立seam，必须继续保持nonclaim；
+3. driver-native rollback throw与close throw仍未由真实driver adapter复现；
+4. success transaction owner、BEGIN/COMMIT authority、Rule12、TEMP retirement、third clock与final commit
+   fence全部未完成；
+5. package-private模块仍未接入公开workflow、package-root API或release gate；
+6. CPython 65,536预算的既有真实ID reuse测试仍可能honest skip；本轮消除的是identity设计对ID唯一性的依赖，
+   不是宣称所有环境都动态观察到reuse；
+7. 下一切片只能在“Python runtime-local五维matrix”与“success transaction owner contract”中选择一个
+   bounded objective，不能把两者混成无法独立验证的完成声明；
+8. 在public integration、success/failure transaction ownership、Rule12/fence与release acceptance全部闭环前，
+   Graph Engineering整体计划、5K/6K star目标和开源交付状态继续保持进行中，star数量不能由代码验证保证。

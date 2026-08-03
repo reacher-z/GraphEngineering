@@ -8,12 +8,16 @@ import {
   readSQLiteCursorPublicationSessionSnapshotIntrinsic,
   readSQLiteCursorPublicationSessionConsumedTombstoneSnapshotIntrinsic,
   type SQLiteCursorOuterPublicationAuthority,
+  type SQLiteCursorPostRebindWatermarkAdoption,
   type SQLiteCursorPublicationRebindContext,
   type SQLiteCursorPublicationSession,
   type SQLiteCursorPublicationSessionConsumedTombstone,
 } from "./cursor-publication-outer-authority.js";
 import {
+  assertSQLiteCursorRebindCompletedFailureForFinalizerIntrinsic,
   executeSQLiteCursorPublicationRebindRule11Intrinsic,
+  takeSQLiteCursorRebindCompletedFailureForFinalizerIntrinsic,
+  type SQLiteCursorRebindCompletedFailureBoundary,
 } from "./cursor-publication-rebind.js";
 import {
   SQLiteConnection,
@@ -44,6 +48,10 @@ const readSQLiteConnectionCursorRebindExecutionSnapshotVerifierIntrinsic =
   readSQLiteConnectionCursorRebindExecutionSnapshotIntrinsic;
 const readSQLiteConnectionCursorRebindChangesFailureBoundaryVerifierIntrinsic =
   readSQLiteConnectionCursorRebindChangesFailureBoundaryIntrinsic;
+const takeCompletedFailureVerifierIntrinsic =
+  takeSQLiteCursorRebindCompletedFailureForFinalizerIntrinsic;
+const assertCompletedFailureVerifierIntrinsic =
+  assertSQLiteCursorRebindCompletedFailureForFinalizerIntrinsic;
 const readOuterSnapshotIntrinsic =
   readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic;
 const readContextSnapshotIntrinsic =
@@ -75,7 +83,9 @@ export type SQLiteCursorPostConsumePrimaryBoundary =
   | "changes-fetch"
   | "changes-shape"
   | "changes-release"
-  | "changes-postflight";
+  | "changes-postflight"
+  | "rule11-outer-ledger"
+  | "rule11-five-count";
 
 export interface SQLiteCursorPostConsumeFinalizerDiagnostic {
   readonly code:
@@ -275,6 +285,8 @@ function exactPoisonedPrimaryGraph(
   connection: SQLiteConnection,
   authority: SQLiteCursorOuterPublicationAuthority,
   transactionLineage: SQLiteConnectionTransactionLineage,
+  leafPrimary?: object,
+  trustedCompletedBoundary?: SQLiteCursorRebindCompletedFailureBoundary,
 ): Readonly<{
   context: SQLiteCursorPublicationRebindContext;
   tombstone: SQLiteCursorPublicationSessionConsumedTombstone;
@@ -303,7 +315,6 @@ function exactPoisonedPrimaryGraph(
   const commonGraphIsInvalid = authoritySnapshot.lifecycle !== "poisoned"
       || authoritySnapshot.writePhase !== "poisoned"
       || authoritySnapshot.connection !== connection
-      || authoritySnapshot.postRebindWatermarkAdoption !== undefined
       || authoritySnapshot.transactionLineage !== transactionLineage
       || contextSnapshot.lifecycle !== "poisoned"
       || contextSnapshot.outerAuthority !== authority
@@ -315,13 +326,65 @@ function exactPoisonedPrimaryGraph(
       || tombstoneSnapshot.preparedOwner !== contextSnapshot.preparedOwner
       || !ownerSnapshot.isTransaction || ownerSnapshot.transactionMode !== "exclusive"
       || ownerSnapshot.transactionLineage !== transactionLineage
-      || executionSnapshot.lifecycle !== "poisoned"
       || executionSnapshot.transactionLineage !== transactionLineage
       || executionSnapshot.transactionEpoch !== ownerSnapshot.transactionEpoch
       || executionSnapshot.executeCount !== 1
       || executionSnapshot.releaseCount !== 1
       || !executionSnapshot.statementOwnershipRetired;
   if (commonGraphIsInvalid) {
+    return fail("SQLite post-consume transaction primary graph is invalid");
+  }
+  if (executionSnapshot.lifecycle === "completed") {
+    const adoption = authoritySnapshot.postRebindWatermarkAdoption;
+    const affected = executionSnapshot.affectedRows;
+    if (adoption === undefined || changesFailureBoundary !== null
+        || !numberIsSafeIntegerIntrinsic(affected) || affected < 0
+        || affected !== contextSnapshot.b2CursorCount
+        || executionSnapshot.changesAffectedRows !== affected
+        || executionSnapshot.changesPrepareCount !== 1
+        || executionSnapshot.changesFetchCount !== 1
+        || executionSnapshot.changesReleaseCount !== 1
+        || executionSnapshot.cursorLedgerLogicalWriteSequence !== 1
+        || executionSnapshot.cursorLedgerFixedStatementCount !== 1
+        || executionSnapshot.cursorLedgerAffectedRowsWatermark !== affected
+        || executionSnapshot.totalChangesDelta !== affected) {
+      return fail("SQLite post-consume transaction completed primary graph is invalid");
+    }
+    let completedBoundary: SQLiteCursorRebindCompletedFailureBoundary;
+    if (trustedCompletedBoundary === undefined) {
+      if (leafPrimary === undefined) {
+        return fail("SQLite post-consume transaction completed primary is absent");
+      }
+      completedBoundary = takeCompletedFailureVerifierIntrinsic(
+        connection,
+        contextSnapshot.session,
+        context,
+        tombstone,
+        adoption as SQLiteCursorPostRebindWatermarkAdoption,
+        contextSnapshot.execution,
+        leafPrimary,
+      );
+    } else {
+      completedBoundary = trustedCompletedBoundary;
+      assertCompletedFailureVerifierIntrinsic(
+        contextSnapshot.execution,
+        context,
+        tombstone,
+        adoption as SQLiteCursorPostRebindWatermarkAdoption,
+        completedBoundary,
+      );
+    }
+    return objectFreezeIntrinsic({
+      context,
+      tombstone,
+      transactionEpoch: ownerSnapshot.transactionEpoch,
+      primaryBoundary: completedBoundary === "outer-ledger"
+        ? "rule11-outer-ledger"
+        : "rule11-five-count",
+    });
+  }
+  if (executionSnapshot.lifecycle !== "poisoned"
+      || authoritySnapshot.postRebindWatermarkAdoption !== undefined) {
     return fail("SQLite post-consume transaction primary graph is invalid");
   }
   let primaryBoundary: SQLiteCursorPostConsumePrimaryBoundary;
@@ -521,6 +584,7 @@ export function captureSQLiteCursorPostConsumeTransactionFailureIntrinsic(
       connection,
       authority,
       predecessor.transactionLineage,
+      primary,
     );
     state.context = weak(selected.context as object);
     state.tombstone = weak(selected.tombstone as object);
@@ -610,6 +674,10 @@ export function finalizeSQLiteCursorPostConsumeTransactionFailureIntrinsic(
     connection,
     authority,
     transactionLineage,
+    leafPrimary,
+    state.primaryBoundary === "rule11-outer-ledger"
+      ? "outer-ledger"
+      : state.primaryBoundary === "rule11-five-count" ? "five-count" : undefined,
   );
   if (selected.context !== context || selected.tombstone !== tombstone
       || selected.transactionEpoch !== state.transactionEpoch

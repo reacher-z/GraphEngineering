@@ -764,6 +764,13 @@ export type SQLiteCursorRebindChangesFaultStage =
   | "shape-after-validation"
   | "release-after-logical-retirement";
 
+export type SQLiteCursorRebindEvidenceMismatchDimension =
+  | "native-affected"
+  | "changes-affected"
+  | "total-delta"
+  | "outer-ledger"
+  | "cursor-ledger";
+
 interface CursorRebindChangesFaultState {
   readonly connection: WeakRef<object>;
   readonly error: WeakRef<object>;
@@ -777,6 +784,14 @@ const CURSOR_REBIND_RELEASE_FAULTS = new WeakMap<
 const CURSOR_REBIND_CHANGES_FAULTS = new WeakMap<
   object,
   CursorRebindChangesFaultState
+>();
+interface CursorRebindEvidenceMismatchState {
+  readonly connection: WeakRef<object>;
+  readonly dimensions: readonly SQLiteCursorRebindEvidenceMismatchDimension[];
+}
+const CURSOR_REBIND_EVIDENCE_MISMATCHES = new WeakMap<
+  object,
+  CursorRebindEvidenceMismatchState
 >();
 type CursorRebindRegistrationFailure =
   | Readonly<{ readonly kind: "direct"; readonly error: unknown }>
@@ -857,6 +872,57 @@ function takeCursorRebindChangesFaultAtBoundary(
     );
   }
   return error;
+}
+
+const CURSOR_REBIND_EVIDENCE_DIMENSION_ORDER = objectFreezeIntrinsic([
+  "native-affected",
+  "changes-affected",
+  "total-delta",
+  "outer-ledger",
+  "cursor-ledger",
+] as const);
+
+function exactCursorRebindEvidenceMismatchDimensions(
+  input: readonly SQLiteCursorRebindEvidenceMismatchDimension[],
+): readonly SQLiteCursorRebindEvidenceMismatchDimension[] {
+  if (input === null || typeof input !== "object" || isProxy(input)
+      || !reflectApplyIntrinsic(arrayIsArrayIntrinsic, Array, [input])
+      || objectGetPrototypeOfIntrinsic(input) !== arrayPrototypeIntrinsic
+      || input.length < 1 || input.length > CURSOR_REBIND_EVIDENCE_DIMENSION_ORDER.length) {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "inspect-schema",
+      "SQLite cursor rebind evidence mismatch dimensions are invalid",
+    );
+  }
+  const normalized: SQLiteCursorRebindEvidenceMismatchDimension[] = [];
+  let priorRank = -1;
+  for (let index = 0; index < input.length; index += 1) {
+    const descriptor = reflectApplyIntrinsic(
+      objectGetOwnPropertyDescriptorIntrinsic,
+      Object,
+      [input, String(index)],
+    ) as PropertyDescriptor | undefined;
+    const dimension = descriptor !== undefined && "value" in descriptor
+      ? descriptor.value as unknown
+      : undefined;
+    const rank = dimension === "native-affected" ? 0
+      : dimension === "changes-affected" ? 1
+        : dimension === "total-delta" ? 2
+          : dimension === "outer-ledger" ? 3
+            : dimension === "cursor-ledger" ? 4
+              : -1;
+    if (rank <= priorRank) {
+      throw new CycleStoreProviderError(
+        "GE_CYCLE_STORE_INVALID_ARGUMENT",
+        "inspect-schema",
+        "SQLite cursor rebind evidence mismatch dimensions are invalid",
+      );
+    }
+    normalized[index] = dimension as SQLiteCursorRebindEvidenceMismatchDimension;
+    priorRank = rank;
+  }
+  return objectFreezeIntrinsic(normalized);
 }
 
 function invalid(message: string): never {
@@ -4268,6 +4334,9 @@ export function injectSQLiteConnectionCursorRebindReleaseFaultForTestIntrinsic(
       || error === null || isProxy(error)
       || reflectApplyIntrinsic(weakMapHasIntrinsic, CURSOR_REBIND_RELEASE_FAULTS, [
         execution as object,
+      ])
+      || reflectApplyIntrinsic(weakMapHasIntrinsic, CURSOR_REBIND_EVIDENCE_MISMATCHES, [
+        execution as object,
       ])) {
     throw new CycleStoreProviderError(
       "GE_CYCLE_STORE_INVALID_ARGUMENT",
@@ -4335,6 +4404,9 @@ export function injectSQLiteConnectionCursorRebindChangesFaultForTestIntrinsic(
       || error === null || isProxy(error)
       || reflectApplyIntrinsic(weakMapHasIntrinsic, CURSOR_REBIND_CHANGES_FAULTS, [
         execution as object,
+      ])
+      || reflectApplyIntrinsic(weakMapHasIntrinsic, CURSOR_REBIND_EVIDENCE_MISMATCHES, [
+        execution as object,
       ])) {
     throw new CycleStoreProviderError(
       "GE_CYCLE_STORE_INVALID_ARGUMENT",
@@ -4378,6 +4450,98 @@ export function injectSQLiteConnectionCursorRebindChangesFaultRegistrationFailur
   }
   cursorRebindChangesFaultRegistrationFailureForTest =
     cursorRebindRegistrationFailure(error);
+}
+
+/** Package-private exact-E one-shot projection mismatch seam. */
+export function injectSQLiteConnectionCursorRebindEvidenceMismatchForTestIntrinsic(
+  connection: SQLiteConnection,
+  execution: SQLiteConnectionCursorRebindExecution,
+  dimensions: readonly SQLiteCursorRebindEvidenceMismatchDimension[],
+): void {
+  const state = execution !== null && typeof execution === "object" && !isProxy(execution)
+    ? reflectApplyIntrinsic(weakMapGetIntrinsic, CURSOR_REBIND_EXECUTIONS, [
+      execution as object,
+    ]) as CursorRebindExecutionState | undefined
+    : undefined;
+  const selected = exactCursorRebindEvidenceMismatchDimensions(dimensions);
+  if (state === undefined || state.connection !== connection
+      || state.lifecycle !== "active" || state.statement === null
+      || state.executeCount !== 0 || state.releaseCount !== 0
+      || reflectApplyIntrinsic(weakMapHasIntrinsic, CURSOR_REBIND_EVIDENCE_MISMATCHES, [
+        execution as object,
+      ])
+      || reflectApplyIntrinsic(weakMapHasIntrinsic, CURSOR_REBIND_RELEASE_FAULTS, [
+        execution as object,
+      ])
+      || reflectApplyIntrinsic(weakMapHasIntrinsic, CURSOR_REBIND_CHANGES_FAULTS, [
+        execution as object,
+      ])) {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "inspect-schema",
+      "SQLite cursor rebind evidence mismatch is invalid",
+    );
+  }
+  reflectApplyIntrinsic(weakMapSetIntrinsic, CURSOR_REBIND_EVIDENCE_MISMATCHES, [
+    execution as object,
+    objectFreezeIntrinsic({
+      connection: new weakRefIntrinsic(connection as object),
+      dimensions: selected,
+    }),
+  ]);
+}
+
+/** Consume the exact-E projection only after every real observation completed. */
+export function takeSQLiteConnectionCursorRebindEvidenceMismatchForTestIntrinsic(
+  connection: SQLiteConnection,
+  execution: SQLiteConnectionCursorRebindExecution,
+): readonly SQLiteCursorRebindEvidenceMismatchDimension[] | null {
+  const state = execution !== null && typeof execution === "object" && !isProxy(execution)
+    ? reflectApplyIntrinsic(weakMapGetIntrinsic, CURSOR_REBIND_EXECUTIONS, [
+      execution as object,
+    ]) as CursorRebindExecutionState | undefined
+    : undefined;
+  if (state === undefined || state.connection !== connection
+      || state.lifecycle !== "completed" || state.statement !== null
+      || state.executeCount !== 1 || state.releaseCount !== 1
+      || state.changesPrepareCount !== 1 || state.changesFetchCount !== 1
+      || state.changesReleaseCount !== 1 || state.changesAffectedRows === null) {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "inspect-schema",
+      "SQLite cursor rebind evidence mismatch take is invalid",
+    );
+  }
+  const pending = reflectApplyIntrinsic(
+    weakMapGetIntrinsic,
+    CURSOR_REBIND_EVIDENCE_MISMATCHES,
+    [execution as object],
+  ) as CursorRebindEvidenceMismatchState | undefined;
+  if (pending === undefined) return null;
+  if (!reflectApplyIntrinsic(
+    weakMapDeleteIntrinsic,
+    CURSOR_REBIND_EVIDENCE_MISMATCHES,
+    [execution as object],
+  )) {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_CORRUPTION",
+      "inspect-schema",
+      "SQLite cursor rebind evidence mismatch identity drifted",
+    );
+  }
+  const selectedConnection = reflectApplyIntrinsic(
+    weakRefDerefIntrinsic,
+    pending.connection,
+    [],
+  ) as object | undefined;
+  if (selectedConnection !== connection) {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_CORRUPTION",
+      "inspect-schema",
+      "SQLite cursor rebind evidence mismatch identity drifted",
+    );
+  }
+  return pending.dimensions;
 }
 
 /** Package-private one-shot fault seam proving cleanup never replaces a primary. */

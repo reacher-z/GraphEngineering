@@ -28,6 +28,7 @@ import {
   publishSQLiteCursorPublicationSessionIntrinsic,
   poisonSQLiteCursorPublicationRebindAfterConsumeIntrinsic,
   prepareSQLiteCursorPublicationRebindContextIntrinsic,
+  readSQLiteCursorPostRebindWatermarkAdoptionSnapshotIntrinsic,
   readSQLiteCursorPublicationRebindContextSnapshotIntrinsic,
   readSQLiteCursorPublicationSessionConsumedTombstoneSnapshotIntrinsic,
   readSQLiteCursorPublicationSessionSnapshotIntrinsic,
@@ -43,13 +44,18 @@ import {
   executeSQLiteCursorPublicationRebindRule11Intrinsic,
   executeSQLiteCursorRebindRule11GateIntrinsic,
   injectSQLiteCursorRebindCancelBeforeExecuteForTestIntrinsic,
+  injectSQLiteCursorRebindCompletedFailureRegistrationFailureForTestIntrinsic,
+  injectSQLiteCursorRebindEvidenceMismatchForTestIntrinsic,
   injectSQLiteCursorRebindPostconsumeChangesFaultForTestIntrinsic,
   injectSQLiteCursorRebindPostconsumeChangesFaultRegistrationFailureForTestIntrinsic,
   injectSQLiteCursorRebindPreconsumeReleaseFaultForTestIntrinsic,
   injectSQLiteCursorRebindPreconsumeReleaseFaultRegistrationFailureForTestIntrinsic,
   injectSQLiteCursorRebindProtocolRegistrationFaultForTestIntrinsic,
   readSQLiteCursorRebindRule11OwnerSnapshotIntrinsic,
+  readSQLiteCursorRebindEvidenceMismatchOutcomeForTestIntrinsic,
   readSQLiteCursorRebindWriteReceiptSnapshotIntrinsic,
+  takeSQLiteCursorRebindCompletedFailureForFinalizerIntrinsic,
+  type SQLiteCursorRebindEvidenceMismatchOutcomeForTest,
   type SQLiteCursorRebindRule11FiveCounts,
 } from "../src/cursor-publication-rebind.js";
 import {
@@ -59,12 +65,25 @@ import {
   SQLITE_CURSOR_SEAL_EMPTY_ROOT,
 } from "../src/operation-baseline-cursor-invariants.js";
 import {
+  SQLiteConnection,
   beginSQLiteConnectionCursorRebindExecutionIntrinsic,
+  executeSQLiteConnectionCursorRebindIntrinsic,
   injectSQLiteConnectionCursorRebindChangesFaultRegistrationFailureForTestIntrinsic,
+  injectSQLiteConnectionCursorRebindEvidenceMismatchForTestIntrinsic,
   readSQLiteConnectionCursorRebindChangesFailureBoundaryIntrinsic,
   injectSQLiteConnectionCursorRebindReleaseFaultRegistrationFailureForTestIntrinsic,
   readSQLiteConnectionCursorRebindExecutionSnapshotIntrinsic,
+  takeSQLiteConnectionCursorRebindEvidenceMismatchForTestIntrinsic,
+  type SQLiteConnectionCursorRebindExecution,
+  type SQLiteCursorRebindEvidenceMismatchDimension,
 } from "../src/sqlite-connection.js";
+import {
+  finalizeSQLiteCursorPostConsumeTransactionFailureIntrinsic,
+  captureSQLiteCursorPostConsumeTransactionFailureIntrinsic,
+  injectSQLiteCursorPostConsumeCloseAfterNativeReturnAmbiguousFaultForTestIntrinsic,
+  injectSQLiteCursorPostConsumeRollbackAfterNativeReturnAmbiguousFaultForTestIntrinsic,
+  readSQLiteCursorPostConsumeTransactionFailureFinalizerSnapshotIntrinsic,
+} from "../src/cursor-publication-transaction-finalizer.js";
 import {
   createReaderLeaseTestGraph,
   disposeReaderLeaseTestGraph,
@@ -139,6 +158,37 @@ function counts(value: number): SQLiteCursorRebindRule11FiveCounts {
   });
 }
 
+const EVIDENCE_DIMENSION_PAIRS = [
+  ["native-affected", "changes-affected"],
+  ["native-affected", "total-delta"],
+  ["native-affected", "outer-ledger"],
+  ["native-affected", "cursor-ledger"],
+  ["changes-affected", "total-delta"],
+  ["changes-affected", "outer-ledger"],
+  ["changes-affected", "cursor-ledger"],
+  ["total-delta", "outer-ledger"],
+  ["total-delta", "cursor-ledger"],
+  ["outer-ledger", "cursor-ledger"],
+] as const satisfies readonly (readonly [
+  SQLiteCursorRebindEvidenceMismatchDimension,
+  SQLiteCursorRebindEvidenceMismatchDimension,
+])[];
+
+const EVIDENCE_MULTI_DIMENSION_CASES = [
+  ["native-affected", "changes-affected", "total-delta"],
+  ["changes-affected", "outer-ledger", "cursor-ledger"],
+  ["native-affected", "changes-affected", "total-delta", "cursor-ledger"],
+  [
+    "native-affected",
+    "changes-affected",
+    "total-delta",
+    "outer-ledger",
+    "cursor-ledger",
+  ],
+] as const satisfies readonly (
+  readonly SQLiteCursorRebindEvidenceMismatchDimension[]
+)[];
+
 function installNativeRebindAbortTrigger(
   connection: ReaderLeaseTestGraph["connection"],
 ): void {
@@ -158,7 +208,8 @@ interface TrackedReferent {
 function trackDroppedScenario(
   scenario: "success" | "prewrite-cancel" | "postconsume-poison"
     | "write-fault" | "rule11-fault" | "native-run-fault"
-    | "release-fault" | "abandoned-release-fault" | "abandoned-changes-fault",
+    | "release-fault" | "abandoned-release-fault" | "abandoned-changes-fault"
+    | "abandoned-completed-mismatch",
 ): Readonly<{
   readonly finalized: Set<string>;
   readonly referents: readonly TrackedReferent[];
@@ -172,7 +223,38 @@ function trackDroppedScenario(
     : {});
   const session = publicationSession(value);
   let identities: readonly (readonly [string, object])[];
-  if (scenario === "abandoned-changes-fault") {
+  if (scenario === "abandoned-completed-mismatch") {
+    injectSQLiteCursorRebindEvidenceMismatchForTestIntrinsic(
+      session,
+      Object.freeze(["native-affected", "changes-affected"]),
+    );
+    let primary: unknown;
+    try {
+      executeSQLiteCursorPublicationRebindRule11Intrinsic(session);
+    } catch (error) {
+      primary = error;
+    }
+    if (!(primary instanceof Error)) throw new Error("completed mismatch primary is absent");
+    const retainedPrimary = primary as Error & { graph?: object; session?: object };
+    retainedPrimary.graph = value;
+    retainedPrimary.session = session;
+    const authority = readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(value.authority);
+    const context = authority.publicationRebindContext!;
+    const tombstone = authority.publicationSessionConsumedTombstone!;
+    const adoption = authority.postRebindWatermarkAdoption!;
+    const execution = readSQLiteCursorPublicationRebindContextSnapshotIntrinsic(context).execution;
+    identities = [
+      ["graph", value],
+      ["authority", value.authority],
+      ["connection", value.connection],
+      ["session", session],
+      ["context", context],
+      ["tombstone", tombstone],
+      ["adoption", adoption],
+      ["execution", execution],
+      ["reverse-root-error", retainedPrimary],
+    ];
+  } else if (scenario === "abandoned-changes-fault") {
     const error = new Error("abandoned exact-S changes fault") as Error & {
       authority?: object;
       session?: object;
@@ -435,6 +517,145 @@ function trackAbandonedExactSRegistrationFailure(): Readonly<{
   return { finalized, referents, registry };
 }
 
+function expectEvidenceMismatchFailClosed(
+  dimensions: readonly SQLiteCursorRebindEvidenceMismatchDimension[],
+): void {
+  const selected = graph(1);
+  const unselected = graph(1);
+  const selectedSession = publicationSession(selected);
+  const unselectedSession = publicationSession(unselected);
+  injectSQLiteCursorRebindEvidenceMismatchForTestIntrinsic(selectedSession, dimensions);
+
+  const unselectedRule11 = executeSQLiteCursorPublicationRebindRule11Intrinsic(
+    unselectedSession,
+  );
+  expect(readSQLiteCursorRebindRule11OwnerSnapshotIntrinsic(unselectedRule11))
+    .toMatchObject({ lifecycle: "active", counts: counts(1), violationCount: 0 });
+  expect(readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(unselected.authority))
+    .toMatchObject({ lifecycle: "active", writePhase: "cursor-rebind-adopted" });
+
+  const capture = captureSQLiteCursorPostConsumeTransactionFailureIntrinsic(selectedSession);
+
+  const authority = readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(
+    selected.authority,
+  );
+  const context = authority.publicationRebindContext!;
+  const tombstone = authority.publicationSessionConsumedTombstone!;
+  const adoption = authority.postRebindWatermarkAdoption!;
+  const contextSnapshot = readSQLiteCursorPublicationRebindContextSnapshotIntrinsic(context);
+  const execution = contextSnapshot.execution;
+  const native = readSQLiteConnectionCursorRebindExecutionSnapshotIntrinsic(
+    selected.connection,
+    execution,
+  );
+  const hasOuter = dimensions.includes("outer-ledger");
+  const firstPoisonReason = hasOuter
+    ? "SQLite rebind evidence mismatch outer ledger"
+    : "SQLite Rule 11 five counts disagree";
+  expect(capture.leafPrimary).toMatchObject({
+    code: "GE_CYCLE_STORE_CORRUPTION",
+    message: firstPoisonReason,
+  });
+  expect(readSQLiteCursorPostConsumeTransactionFailureFinalizerSnapshotIntrinsic(
+    capture.owner,
+  )).toMatchObject({
+    lifecycle: "prepared",
+    primaryBoundary: hasOuter ? "rule11-outer-ledger" : "rule11-five-count",
+    rollbackAttemptCount: 0,
+    closeAttemptCount: 0,
+  });
+  const expectedOutcome: SQLiteCursorRebindEvidenceMismatchOutcomeForTest = {
+    adoptionLifecycle: "poisoned",
+    countEvaluation: {
+      accepted: false,
+      violationCount: 1,
+    },
+    dimensions,
+    evaluatedDimensions: dimensions,
+    firstPoisonReason,
+    outerMismatch: hasOuter,
+    projectedCounts: {
+      b2CursorCount: 1,
+      nativeAffectedCount: dimensions.includes("native-affected") ? 2 : 1,
+      changesAffectedCount: dimensions.includes("changes-affected") ? 2 : 1,
+      totalChangesDelta: dimensions.includes("total-delta") ? 2 : 1,
+      cursorLedgerAffectedDelta: dimensions.includes("cursor-ledger") ? 2 : 1,
+    },
+    realEvidenceObserved: true,
+    rule11Lifecycle: "absent",
+    tombstoneLifecycle: "poisoned",
+    writeLifecycle: hasOuter ? "absent" : "poisoned",
+  };
+
+  expect(authority).toMatchObject({
+    lifecycle: "poisoned",
+    stageOwnershipPoisonReason: firstPoisonReason,
+    writePhase: "poisoned",
+  });
+  expect(readSQLiteCursorPublicationRebindContextSnapshotIntrinsic(context).lifecycle)
+    .toBe("poisoned");
+  expect(readSQLiteCursorPublicationSessionConsumedTombstoneSnapshotIntrinsic(tombstone).lifecycle)
+    .toBe("poisoned");
+  expect(() => readSQLiteCursorPostRebindWatermarkAdoptionSnapshotIntrinsic(adoption))
+    .toThrow(/post-rebind adoption is invalid/u);
+  expect(readSQLiteCursorRebindEvidenceMismatchOutcomeForTestIntrinsic(
+    selected.connection,
+    execution,
+  )).toEqual(expectedOutcome);
+  expect(native).toMatchObject({
+    affectedRows: 1,
+    changesAffectedRows: 1,
+    changesFetchCount: 1,
+    changesPrepareCount: 1,
+    changesReleaseCount: 1,
+    cursorLedgerAffectedRowsWatermark: 1,
+    cursorLedgerFixedStatementCount: 1,
+    cursorLedgerLogicalWriteSequence: 1,
+    executeCount: 1,
+    lifecycle: "completed",
+    releaseCount: 1,
+    totalChangesDelta: 1,
+  });
+
+  if (dimensions.length === 5) {
+    injectSQLiteCursorPostConsumeRollbackAfterNativeReturnAmbiguousFaultForTestIntrinsic(
+      capture.owner,
+    );
+    injectSQLiteCursorPostConsumeCloseAfterNativeReturnAmbiguousFaultForTestIntrinsic(
+      capture.owner,
+    );
+  }
+
+  let finalizedPrimary: unknown;
+  try {
+    finalizeSQLiteCursorPostConsumeTransactionFailureIntrinsic(capture.owner);
+  } catch (error) {
+    finalizedPrimary = error;
+  }
+  expect(finalizedPrimary).toBe(capture.leafPrimary);
+  expect(readSQLiteCursorPostConsumeTransactionFailureFinalizerSnapshotIntrinsic(
+    capture.owner,
+  )).toMatchObject({
+    lifecycle: "finalized",
+    primaryBoundary: hasOuter ? "rule11-outer-ledger" : "rule11-five-count",
+    rollbackAttemptCount: 1,
+    rollbackNativeReturnCount: 1,
+    rollbackSecondaryFailureCount: dimensions.length === 5 ? 1 : 0,
+    closeAttemptCount: 1,
+    closeNativeReturnCount: 1,
+    closeTertiaryFailureCount: dimensions.length === 5 ? 1 : 0,
+  });
+  const reopened = new SQLiteConnection(`${selected.root}/cycle-store.db`);
+  try {
+    expect(reopened.prepare(
+      "SELECT count(*) FROM main.ge_cycle_cursors",
+      "inspect-schema",
+    ).get()).toEqual([0n]);
+  } finally {
+    reopened.close();
+  }
+}
+
 afterEach(() => {
   for (const value of graphs.splice(0)) disposeReaderLeaseTestGraph(value);
 });
@@ -481,6 +702,216 @@ describe("SQLite cursor publication rebind Rule 11 integration", () => {
       extra: 0,
     } as SQLiteCursorRebindRule11FiveCounts)).toThrow(/count tuple is invalid/u);
   });
+
+  it.each(EVIDENCE_DIMENSION_PAIRS)(
+    "fails closed for authentic post-observation evidence pair %s + %s",
+    (left, right) => {
+      expectEvidenceMismatchFailClosed(Object.freeze([left, right]));
+    },
+  );
+
+  it.each(EVIDENCE_MULTI_DIMENSION_CASES.map((dimensions) => [dimensions] as const))(
+    "fails closed when an agreeing subset cannot mask mismatch set %j",
+    (dimensions) => {
+      expectEvidenceMismatchFailClosed(dimensions);
+    },
+  );
+
+  it("authenticates the exact S arm and rejects malformed, replayed and competing arms", () => {
+    const value = graph(1);
+    const session = publicationSession(value);
+    expect(() => injectSQLiteCursorRebindEvidenceMismatchForTestIntrinsic(
+      Object.freeze(Object.create(null)) as SQLiteCursorPublicationSession,
+      Object.freeze(["native-affected", "changes-affected"]),
+    )).toThrow(/publication session is invalid/u);
+    expect(() => injectSQLiteCursorRebindEvidenceMismatchForTestIntrinsic(
+      new Proxy(session, {}),
+      Object.freeze(["native-affected", "changes-affected"]),
+    )).toThrow(/publication session is invalid/u);
+    for (const dimensions of [
+      Object.freeze([]),
+      Object.freeze(["native-affected", "native-affected"]),
+      Object.freeze(["cursor-ledger", "native-affected"]),
+      new Proxy(Object.freeze(["native-affected", "changes-affected"]), {}),
+    ]) {
+      expect(() => injectSQLiteCursorRebindEvidenceMismatchForTestIntrinsic(
+        session,
+        dimensions as readonly SQLiteCursorRebindEvidenceMismatchDimension[],
+      )).toThrow(/evidence mismatch dimensions are invalid/u);
+    }
+    injectSQLiteCursorRebindEvidenceMismatchForTestIntrinsic(
+      session,
+      Object.freeze(["native-affected", "changes-affected"]),
+    );
+    expect(() => injectSQLiteCursorRebindEvidenceMismatchForTestIntrinsic(
+      session,
+      Object.freeze(["total-delta", "cursor-ledger"]),
+    )).toThrow(/evidence mismatch is already armed/u);
+    expect(() => injectSQLiteCursorRebindPostconsumeChangesFaultForTestIntrinsic(
+      session,
+      "fetch-after-native-return",
+      new Error("competing changes arm"),
+    )).toThrow(/changes fault is invalid/u);
+    expect(() => injectSQLiteCursorRebindPreconsumeReleaseFaultForTestIntrinsic(
+      session,
+      new Error("competing release arm"),
+    )).toThrow(/preconsume release fault is invalid/u);
+  });
+
+  it("binds the lower projection to one exact connection/E and consumes it once", () => {
+    const selected = graph(1);
+    const other = graph(1);
+    const selectedSession = publicationSession(selected);
+    const snapshot = readSQLiteCursorPublicationSessionSnapshotIntrinsic(selectedSession);
+    const execution = beginSQLiteConnectionCursorRebindExecutionIntrinsic(selected.connection);
+    const otherExecution = beginSQLiteConnectionCursorRebindExecutionIntrinsic(other.connection);
+    const dimensions = Object.freeze([
+      "native-affected",
+      "cursor-ledger",
+    ] as const);
+    expect(() => injectSQLiteConnectionCursorRebindEvidenceMismatchForTestIntrinsic(
+      other.connection,
+      execution,
+      dimensions,
+    )).toThrow(/evidence mismatch is invalid/u);
+    expect(() => injectSQLiteConnectionCursorRebindEvidenceMismatchForTestIntrinsic(
+      selected.connection,
+      Object.freeze(Object.create(null)) as SQLiteConnectionCursorRebindExecution,
+      dimensions,
+    )).toThrow(/evidence mismatch is invalid/u);
+    expect(() => injectSQLiteConnectionCursorRebindEvidenceMismatchForTestIntrinsic(
+      selected.connection,
+      new Proxy(execution, {}),
+      dimensions,
+    )).toThrow(/evidence mismatch is invalid/u);
+    injectSQLiteConnectionCursorRebindEvidenceMismatchForTestIntrinsic(
+      selected.connection,
+      execution,
+      dimensions,
+    );
+    expect(() => injectSQLiteConnectionCursorRebindEvidenceMismatchForTestIntrinsic(
+      selected.connection,
+      execution,
+      Object.freeze(["changes-affected", "total-delta"]),
+    )).toThrow(/evidence mismatch is invalid/u);
+    executeSQLiteConnectionCursorRebindIntrinsic(selected.connection, execution, {
+      sourceDescriptorHash: snapshot.sourceDescriptorHash,
+      sourceSchemaIdentitySha256: snapshot.sourceSchemaIdentitySha256,
+      targetDescriptorHash: snapshot.targetDescriptorHash,
+      targetSchemaIdentitySha256: snapshot.targetSchemaIdentitySha256,
+    });
+    expect(() => takeSQLiteConnectionCursorRebindEvidenceMismatchForTestIntrinsic(
+      other.connection,
+      execution,
+    )).toThrow(/execution is invalid|take is invalid/u);
+    expect(takeSQLiteConnectionCursorRebindEvidenceMismatchForTestIntrinsic(
+      selected.connection,
+      execution,
+    )).toEqual(dimensions);
+    expect(takeSQLiteConnectionCursorRebindEvidenceMismatchForTestIntrinsic(
+      selected.connection,
+      execution,
+    )).toBeNull();
+    expect(readSQLiteConnectionCursorRebindExecutionSnapshotIntrinsic(
+      other.connection,
+      otherExecution,
+    )).toMatchObject({ lifecycle: "active", executeCount: 0, releaseCount: 0 });
+  });
+
+  it("rolls back a completed-E ticket registration failure and clears the global arm", () => {
+    const selected = graph(1);
+    const session = publicationSession(selected);
+    const registrationPrimary = new Error("completed-E registration primary");
+    injectSQLiteCursorRebindEvidenceMismatchForTestIntrinsic(
+      session,
+      Object.freeze(["native-affected", "changes-affected"]),
+    );
+    injectSQLiteCursorRebindCompletedFailureRegistrationFailureForTestIntrinsic(
+      registrationPrimary,
+    );
+    expect(() => captureSQLiteCursorPostConsumeTransactionFailureIntrinsic(session))
+      .toThrow(/completed failure ticket is invalid/u);
+    const authority = readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(
+      selected.authority,
+    );
+    const context = authority.publicationRebindContext!;
+    const tombstone = authority.publicationSessionConsumedTombstone!;
+    const adoption = authority.postRebindWatermarkAdoption!;
+    const execution = readSQLiteCursorPublicationRebindContextSnapshotIntrinsic(
+      context,
+    ).execution;
+    expect(() => takeSQLiteCursorRebindCompletedFailureForFinalizerIntrinsic(
+      selected.connection,
+      session,
+      context,
+      tombstone,
+      adoption,
+      execution,
+      registrationPrimary,
+    )).toThrow(/completed failure ticket is invalid/u);
+
+    const retry = graph(1);
+    const retrySession = publicationSession(retry);
+    injectSQLiteCursorRebindEvidenceMismatchForTestIntrinsic(
+      retrySession,
+      Object.freeze(["native-affected", "changes-affected"]),
+    );
+    const capture = captureSQLiteCursorPostConsumeTransactionFailureIntrinsic(retrySession);
+    let caught: unknown;
+    try {
+      finalizeSQLiteCursorPostConsumeTransactionFailureIntrinsic(capture.owner);
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBe(capture.leafPrimary);
+  });
+
+  it.each(["substitute-primary", "cross-connection"] as const)(
+    "destructively rejects one completed-E ticket %s mismatch",
+    (scenario) => {
+      const selected = graph(1);
+      const other = graph(1);
+      const session = publicationSession(selected);
+      injectSQLiteCursorRebindEvidenceMismatchForTestIntrinsic(
+        session,
+        Object.freeze(["native-affected", "changes-affected"]),
+      );
+      let primary: unknown;
+      try {
+        executeSQLiteCursorPublicationRebindRule11Intrinsic(session);
+      } catch (error) {
+        primary = error;
+      }
+      expect(primary).toBeInstanceOf(Error);
+      const authority = readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(
+        selected.authority,
+      );
+      const context = authority.publicationRebindContext!;
+      const tombstone = authority.publicationSessionConsumedTombstone!;
+      const adoption = authority.postRebindWatermarkAdoption!;
+      const execution = readSQLiteCursorPublicationRebindContextSnapshotIntrinsic(
+        context,
+      ).execution;
+      expect(() => takeSQLiteCursorRebindCompletedFailureForFinalizerIntrinsic(
+        scenario === "cross-connection" ? other.connection : selected.connection,
+        session,
+        context,
+        tombstone,
+        adoption,
+        execution,
+        scenario === "substitute-primary" ? new Error("substitute") : primary as object,
+      )).toThrow(/completed failure ticket is invalid/u);
+      expect(() => takeSQLiteCursorRebindCompletedFailureForFinalizerIntrinsic(
+        selected.connection,
+        session,
+        context,
+        tombstone,
+        adoption,
+        execution,
+        primary as object,
+      )).toThrow(/completed failure ticket is invalid/u);
+    },
+  );
 
   it.each([0, 1, 3])(
     "runs the authentic S-P-T-E-A-W-R11 chain for %i real cursors and retains exact ledgers",
@@ -1231,11 +1662,21 @@ describe("SQLite cursor publication rebind Rule 11 integration", () => {
       "injectSQLiteConnectionCursorRebindReleaseFaultRegistrationFailureForTestIntrinsic",
       "injectSQLiteConnectionCursorRebindChangesFaultForTestIntrinsic",
       "injectSQLiteConnectionCursorRebindChangesFaultRegistrationFailureForTestIntrinsic",
+      "injectSQLiteConnectionCursorRebindEvidenceMismatchForTestIntrinsic",
+      "takeSQLiteConnectionCursorRebindEvidenceMismatchForTestIntrinsic",
+      "SQLiteCursorRebindEvidenceMismatchDimension",
       "readSQLiteConnectionCursorRebindChangesFailureBoundaryIntrinsic",
       "injectSQLiteCursorRebindPreconsumeReleaseFaultForTestIntrinsic",
       "injectSQLiteCursorRebindPreconsumeReleaseFaultRegistrationFailureForTestIntrinsic",
       "injectSQLiteCursorRebindPostconsumeChangesFaultForTestIntrinsic",
       "injectSQLiteCursorRebindPostconsumeChangesFaultRegistrationFailureForTestIntrinsic",
+      "injectSQLiteCursorRebindEvidenceMismatchForTestIntrinsic",
+      "readSQLiteCursorRebindEvidenceMismatchOutcomeForTestIntrinsic",
+      "SQLiteCursorRebindEvidenceMismatchOutcomeForTest",
+      "injectSQLiteCursorRebindCompletedFailureRegistrationFailureForTestIntrinsic",
+      "takeSQLiteCursorRebindCompletedFailureForFinalizerIntrinsic",
+      "assertSQLiteCursorRebindCompletedFailureForFinalizerIntrinsic",
+      "SQLiteCursorRebindCompletedFailureBoundary",
       "SQLiteCursorRebindChangesFaultStage",
       "SQLiteCursorRebindWriteReceipt",
       "SQLiteCursorRebindRule11Owner",
@@ -1280,7 +1721,7 @@ describe("SQLite cursor publication rebind Rule 11 integration", () => {
       ].join("\n")).toBe(0);
     }, 160_000);
   } else {
-    it("collects every exact identity in all nine terminal or abandoned profiles", async () => {
+    it("collects every exact identity in all ten terminal or abandoned profiles", async () => {
       expect(typeof globalThis.gc).toBe("function");
       const scenarios = [
         "success",
@@ -1292,6 +1733,7 @@ describe("SQLite cursor publication rebind Rule 11 integration", () => {
         "release-fault",
         "abandoned-release-fault",
         "abandoned-changes-fault",
+        "abandoned-completed-mismatch",
       ] as const;
       for (let index = 0; index < scenarios.length; index += 1) {
         const tracked = trackDroppedScenario(scenarios[index]!);

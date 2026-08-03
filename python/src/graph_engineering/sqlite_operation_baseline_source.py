@@ -7,6 +7,7 @@ import json
 import sqlite3
 from collections.abc import Callable, Generator, Iterator, Mapping
 from contextlib import suppress
+from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, Literal, NamedTuple, Never, cast
@@ -439,8 +440,29 @@ class _CursorPublicationRebindExecutionState:
     cursor_ledger_fixed_statement_count: Literal[0, 1] = 0
     cursor_ledger_affected_rows_watermark: int = 0
     seal_read_begin_count: Literal[0, 1] = 0
-    changes_primary_id: int | None = None
-    changes_primary_boundary: _CursorPublicationChangesPrimaryBoundary | None = None
+
+
+@dataclass(slots=True)
+class _CursorPublicationChangesPrimaryCapture:
+    nonce: object
+    connection: SQLiteV1BaselineConnectionOwner | None
+    state: _CursorPublicationRebindExecutionState | None = None
+    error: BaseException | None = None
+    boundary: _CursorPublicationChangesPrimaryBoundary | None = None
+    consumed: bool = False
+    invalid: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class _CursorPublicationChangesPrimaryCapturePhase:
+    nonce: object
+    capture: _CursorPublicationChangesPrimaryCapture
+    phase: Literal["armed", "recorded", "consumed"]
+
+
+_CURSOR_PUBLICATION_CHANGES_PRIMARY_CAPTURE: ContextVar[
+    _CursorPublicationChangesPrimaryCapturePhase | None
+] = ContextVar("ge_sqlite_cursor_publication_changes_primary_capture", default=None)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1516,12 +1538,56 @@ def _take_cursor_publication_rebind_release_fault_exact(
     return error
 
 
+def _arm_sqlite_connection_cursor_publication_rebind_changes_primary_capture_intrinsic(
+    connection: SQLiteV1BaselineConnectionOwner,
+) -> tuple[
+    _CursorPublicationChangesPrimaryCapture,
+    Token[_CursorPublicationChangesPrimaryCapturePhase | None],
+]:
+    """Arm one context-local exact-E handoff for the fixed outer leaf call."""
+
+    if (
+        type(connection) is not SQLiteV1BaselineConnectionOwner
+        or _CURSOR_PUBLICATION_CHANGES_PRIMARY_CAPTURE.get() is not None
+    ):
+        _cursor_publication_rebind_fail("GE_CURSOR_B3_CURSOR_CHANGES_PRIMARY")
+    nonce = object()
+    capture = _CursorPublicationChangesPrimaryCapture(nonce, connection)
+    armed = _CursorPublicationChangesPrimaryCapturePhase(nonce, capture, "armed")
+    return capture, _CURSOR_PUBLICATION_CHANGES_PRIMARY_CAPTURE.set(armed)
+
+
+def _reset_sqlite_connection_cursor_publication_rebind_changes_primary_capture_intrinsic(
+    capture: _CursorPublicationChangesPrimaryCapture,
+    token: Token[_CursorPublicationChangesPrimaryCapturePhase | None],
+) -> None:
+    """Erase every strong handoff edge and restore the prior context on all exits."""
+
+    current = _CURSOR_PUBLICATION_CHANGES_PRIMARY_CAPTURE.get()
+    capture.connection = None
+    capture.state = None
+    capture.error = None
+    capture.boundary = None
+    capture.consumed = True
+    capture.invalid = True
+    try:
+        _CURSOR_PUBLICATION_CHANGES_PRIMARY_CAPTURE.reset(token)
+    except (RuntimeError, ValueError):
+        _cursor_publication_rebind_fail("GE_CURSOR_B3_CURSOR_CHANGES_PRIMARY")
+    if (
+        current is None
+        or current.capture is not capture
+        or current.nonce is not capture.nonce
+    ):
+        _cursor_publication_rebind_fail("GE_CURSOR_B3_CURSOR_CHANGES_PRIMARY")
+
+
 def _record_cursor_publication_rebind_changes_primary_exact(
     state: _CursorPublicationRebindExecutionState,
     error: BaseException,
     boundary: _CursorPublicationChangesPrimaryBoundary,
 ) -> None:
-    """Record only the exact E identity and honest lower boundary, never E itself."""
+    """Write the first exact E into the active synchronous capture, if armed."""
 
     if (
         not isinstance(error, BaseException)
@@ -1536,37 +1602,82 @@ def _record_cursor_publication_rebind_changes_primary_exact(
         }
     ):
         _cursor_publication_rebind_fail("GE_CURSOR_B3_CURSOR_CHANGES_PRIMARY")
-    # A direct lower caller may replay an already-poisoned E without consuming
-    # the first proof.  Preserve the original exact primary and never let
-    # provenance bookkeeping replace the replay's real lineage error.
-    if state.changes_primary_id is not None or state.changes_primary_boundary is not None:
+    current = _CURSOR_PUBLICATION_CHANGES_PRIMARY_CAPTURE.get()
+    if current is None:
         return
-    state.changes_primary_id = id(error)
-    state.changes_primary_boundary = boundary
+    capture = current.capture
+    if (
+        current.phase != "armed"
+        or current.nonce is not capture.nonce
+        or capture.consumed
+        or capture.invalid
+        or state.connection is not capture.connection
+        or capture.state is not None
+        or capture.error is not None
+        or capture.boundary is not None
+    ):
+        capture.invalid = True
+        return
+    capture.state = state
+    capture.error = error
+    capture.boundary = boundary
+    _CURSOR_PUBLICATION_CHANGES_PRIMARY_CAPTURE.set(
+        _CursorPublicationChangesPrimaryCapturePhase(
+            capture.nonce, capture, "recorded"
+        )
+    )
 
 
 def _take_sqlite_connection_cursor_publication_rebind_changes_primary_intrinsic(
+    capture: _CursorPublicationChangesPrimaryCapture,
     connection: SQLiteV1BaselineConnectionOwner,
     execution: _SQLiteConnectionCursorPublicationRebindExecution,
     error: BaseException,
 ) -> _CursorPublicationChangesPrimaryBoundary:
     """Consume one exact lower E proof; clear before validating caller identity."""
 
-    if type(connection) is not SQLiteV1BaselineConnectionOwner or not isinstance(
-        error, BaseException
+    if (
+        type(capture) is not _CursorPublicationChangesPrimaryCapture
+        or type(connection) is not SQLiteV1BaselineConnectionOwner
+        or not isinstance(error, BaseException)
     ):
         _cursor_publication_rebind_fail("GE_CURSOR_B3_CURSOR_CHANGES_PRIMARY")
-    state = _cursor_publication_rebind_state(connection, execution)
-    primary_id = state.changes_primary_id
-    boundary = state.changes_primary_boundary
-    state.changes_primary_id = None
-    state.changes_primary_boundary = None
+    current = _CURSOR_PUBLICATION_CHANGES_PRIMARY_CAPTURE.get()
+    recorded_connection = capture.connection
+    recorded_state = capture.state
+    primary = capture.error
+    boundary = capture.boundary
+    invalid = capture.invalid
+    capture.connection = None
+    capture.state = None
+    capture.error = None
+    capture.boundary = None
+    capture.consumed = True
+    capture.invalid = True
     if (
-        state.connection is not connection
+        current is not None
+        and current.capture is capture
+        and current.nonce is capture.nonce
+    ):
+        _CURSOR_PUBLICATION_CHANGES_PRIMARY_CAPTURE.set(
+            _CursorPublicationChangesPrimaryCapturePhase(
+                capture.nonce, capture, "consumed"
+            )
+        )
+    state = _cursor_publication_rebind_state(connection, execution)
+    if (
+        current is None
+        or current.phase != "recorded"
+        or current.capture is not capture
+        or current.nonce is not capture.nonce
+        or invalid
+        or recorded_connection is not connection
+        or recorded_state is not state
+        or state.connection is not connection
         or state.lifecycle != "poisoned"
-        or primary_id is None
+        or primary is None
         or boundary is None
-        or primary_id != id(error)
+        or primary is not error
     ):
         _cursor_publication_rebind_fail("GE_CURSOR_B3_CURSOR_CHANGES_PRIMARY")
     return boundary
