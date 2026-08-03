@@ -34,6 +34,7 @@
     "lint": "corepack pnpm -r lint",
     "validate:fixtures": "node scripts/validate-fixtures.mjs",
     "check:docs": "node scripts/check-doc-links.mjs",
+    "check:task-controls": "node scripts/check-task-registry.mjs --registry codex_logs/task-registry.json && node scripts/check-task-graph.mjs --registry codex_logs/task-registry.json --dependency-graph codex_plans/delivery/task-dependency-graph.md --rules codex_plans/delivery/release-dependency-rules.json && node --test scripts/tests/task-registry.test.mjs",
     "check:release-map": "node scripts/check-release-task-map.mjs && node --test scripts/tests/release-task-map.test.mjs",
     "check:evidence-closure": "node scripts/check-evidence-closure.mjs --json && node --test scripts/tests/evidence-closure.test.mjs",
     "check:packages": "node scripts/check-package-contents.mjs",

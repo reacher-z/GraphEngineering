@@ -22028,3 +22028,144 @@ parity没有覆盖这两个runtime-local字段，因此保持REJECT并补最终�
    presentation graph清空；
 7. 最终Python gates：owner 36/36、source+owner 83/83、Ruff通过、mypy 0 issues、portable parity 2/2、diff-check通过；
 8. 该修复不激活COMMIT、success、complete-v2、public API或release claims；P10顺序保持31.37.77.16不变。
+
+#### 31.37.79 全计划当前真值、控制面补账与release零权重检查点（2026-08-02 PDT追加；既有内容不改）
+
+本节严格追加于既有22,030行之后。追加前完整计划SHA-256为
+`a2a8b224993b79adfd2b20d3a78e8591dd7e53fc2cdb18756f406afee198cdf0`；前22,030行必须持续
+byte-for-byte不变。本节记录主Agent与独立审计Agent对整份计划、registry、coverage、release map、candidate overlay、
+源码、测试、CI、文档与distribution状态的重新核验，不把P9或任何局部高质量切片误写成21-day master plan完成。
+
+##### 31.37.79.1 当前权威完成度与release判定
+
+独立审计完整读取22,030行并逐项映射§10–§31。当前仓库只能描述为`source-only early alpha with bounded accepted
+slices`，不能描述为complete RC、stable-v1、production-ready或计划全部完成。现场门禁为：
+
+1. release task map为178/178 leaves，其中175 blocking、3 non-blocking，mapping完整但不代表leaf Green；
+2. release checklist的178 leaves全部保持Open，candidate coordinates为空；
+3. evidence closure为`audit-only`、candidate `null`、selected task count `0`、release weight `0/93`；
+4. P9 commit `1cb77f03bcfd785183cbaf819a02c287308e9bc0`只证明package-private transaction owner bounded slice；
+5. active SQLite manifest仍为schema-v1，v2只存在preview，不得用B3源码或测试数量推断manifest activation；
+6. no macOS/Windows candidate matrix、no global 90% statements/85% branches candidate gate、no 100 randomized-fault
+   report、no external usability evidence、no trusted registry provenance；
+7. stars仍是organic lagging outcome，5K/6K不能由实现、测试、计划或日期保证。
+
+当前最高fan-out未完成门依次为D9 redaction all-sink closure、D4 subgraph/reducer/artifact/stream/trace、D6 barrier
+tranche 2、D7 native/conformance/timeout divergence、D9 approval/extended durability，然后才是D10 budget、D11 verification、
+D12 isolation、provider/API/plugin、production storage/Explorer、安全/平台/Beta/RC/provenance/release链。SQLite P10可作为
+独立lane推进，但不能持续吞噬所有runtime capacity并阻塞这些主干前驱。
+
+##### 31.37.79.2 registry的SQLite supporting chain补账
+
+旧registry只有108项，未表达8月1日至2日已接受的B3/Rule11/P9工作，coverage matrix也仍停在7月26日。为防止源码
+进度成为不可扫描的隐形工作，新增三个无直接release-weight的supporting controls：
+
+1. `D9-SQLITE-RULE11-PREDECESSOR-091`：双runtime connection-owned bounded post-rebind seal primitive，publication/
+   session/rebind watermark chain与exact zero-I/O Rule11 owner；依赖已完成TS/Python persistence及durable conformance；
+2. `D9-SQLITE-PUBLICATION-TX-OWNER-092`：P9 guarded BEGIN owner，依赖091，COMMIT hard-disabled；
+3. `D9-SQLITE-RULE12-CLOCK-P10-093`：当前in-progress P10，依赖091与092。
+
+同时补D15 Explorer对`D9-OPS-CONTROL-085`的direct semantic edge，防止Explorer在没有真实status/replay/fork operational
+state时被错误标为可完成。更新后registry为111 tasks、43 completed、297 explicit edges；scanner一次新鲜扫描为47 healthy、
+61 waiting、3 stale、0 blocked、0 integration risk、15/81 evidence gates satisfied。scanner仍只是liveness/artifact signal，
+不能替代semantic、candidate、security、external或provenance evidence。
+
+##### 31.37.79.3 strict task control的rejected-first修复
+
+计划文档此前多次引用`scripts/check-task-registry.mjs`与`scripts/check-task-graph.mjs`，但文件实际不存在。首版补齐后
+即使5项测试通过，独立hostile audit仍保持REJECT并证明四类High问题：candidate参数只检查commit存在却读取dirty worktree；
+`evidence_required:false`可全局waive strict；普通`JSON.parse`允许duplicate-key隐藏恶意depends_on；graph checker没有计划
+承诺的semantic dependency rules/invalidation。另有timestamp normalization、future evidence、fake references、symlink/
+directory artifact、completed consumer over reopened predecessor、old review覆盖later fixes等Medium问题。
+
+最终remediation必须并已实现以下结构门，而这些结构门仍不自动增加0/93 release weight：
+
+1. raw JSON duplicate-key fail-closed parser；
+2. canonical UTC instant与assignment/start/completion/evidence chronology；
+3. typed `evidence_required`，strict completed task不能用false waiver；
+4. strict CLI必须有exact full candidate SHA，candidate必须是HEAD ancestor；
+5. registry、artifact与reference从candidate Git blob/tree读取，dirty/untracked/symlink不能满足candidate；
+6. dangling/self/cycle、unknown documented task、completed consumer over reopened predecessor全部拒绝；
+7. `release-dependency-rules.json`冻结70条P0/P1/release/091–093 direct semantic edges与5个invalidation roots；
+8. negative mutation覆盖missing semantic edge、reopened predecessor、premature release、worktree substitution、unrelated candidate、
+   fabricated reference、missing artifact、impossible/future/order timestamp、duplicate JSON；
+9. `pnpm check:task-controls`接入CI，当前输出111 tasks、43 completed、297 edges、70 semantic edges、acyclic、12/12；
+10. dedicated release invalidation为4/4；strict无candidate与repository-root错误candidate均按预期exit 1。
+
+历史29项缺少完整candidate evidence的completed task仍不能获得release权重；严格工具的正确行为是拒绝，而不是为了CI绿色
+降低标准。当前CI只执行structural/semantic controls；真正release candidate仍必须通过candidate-bound evidence overlay和独立审阅。
+
+##### 31.37.79.4 文档与审计证据
+
+当前真值已append到`codex_plans/delivery/master-plan-coverage-matrix.md`与
+`codex_plans/delivery/task-dependency-graph.md`；完整审计落盘
+`codex_logs/reviews/MASTER-PLAN-COMPLETION-AUDIT-2026-08-02.md`，开发流水落盘
+`codex_logs/daily/2026-08-02.md`。本检查点不修改任何既有计划字节，不填充candidate overlay，不把registry status、scanner
+heartbeat、历史review或aggregate test count作为release evidence。
+
+#### 31.37.80 P10 Rule12与第三clock执行契约冻结及双runtime开发状态（2026-08-02 PDT追加；既有内容不改）
+
+本节冻结31.37.77.16的下一bounded objective并记录进行中状态，不宣称P10已接受。规范落盘
+`spec/sqlite-cursor-publication-rule12-clock-p10.md`。P10唯一允许的成功链为：
+
+`exact active Rule11 owner → one-way Rule12 pending → bounded real seal acceptance → exact opaque Rule12 receipt →
+authenticated before-verification provider observation → unconsumed exact third evidence (3/2)`。
+
+##### 31.37.80.1 P10严格终点与禁止越界
+
+P10成功终点必须保持provider observations/consumes=`3/2`。第三evidence不能在P10被generic consume；generic third调用必须
+缺exact R12 authority而拒绝；第四`before-commit`必须hard-disabled。P10不得mint cursor-clock capability，不得使outer、session、
+ownership或stage进入`cursor/clock-complete`，不得发布lineage/metadata/rules/fresh-v2/physical-semantic receipts，不得adopt
+pre-retirement fence，不得retire cursor TEMP，不得mint final fence、选择success或执行COMMIT。
+
+##### 31.37.80.2 Rule12 exact acceptance
+
+Rule12 ID固定`BLR_CURSOR_SEAL_MISMATCH`、position 12，唯一前驱是exact live R11 object。R11必须在原subprotocol owner内完成
+`active → rule12-pending → rule12-complete | poisoned`，新module自己的USED set不能冒充前驱消费。clone、proxy、cross-run、
+replay、registration/adoption fault全部terminal poison且不mint receipt。
+
+lower connection owner复用固定main-key scan、TEMP driver与reusable point lookup，18-column decode与O(1) accumulator。成功同时证明：
+
+1. main/driver/lookup/accumulator/point execute/create/close全部等于retained B2 N；
+2. main与driver prepare/terminal/close=`1/1/1`，point prepare/execute/release=`1/N/1`；
+3. active/live physical/live carrier终态`0/0/0`，max分别不超过`2/1/1`；
+4. 每个point close和lineage proof之后、下一driver fetch之前观察authentic cancellation；
+5. computed root等于B2 root；N=0还必须等于canonical empty root且两个observed target identities均为空；
+6. N>0 observed descriptor/schema逐行一致且等于exact target；
+7. transaction lineage/epoch/total watermark从R11到read finish不漂移；
+8. 三个真实SQLite EQP probe发生在session consume/UPDATE之前，禁止sort/materialize/automatic/co-routine，point必须PK search；
+9. violation count 0、diagnostics truncated false；raw row/native handle/mutable buffer不进入receipt。
+
+取消precedence必须是authority/current lineage/live-lock/catalog/EQP先于cancellation；不能让cancel掩盖corruption或stale fence。
+N=0不能通过Boolean短路身份/root proof，也必须在最终comparison之后再观察一次cancellation。
+
+##### 31.37.80.3 third clock exact authority
+
+第三clock wrapper唯一输入exact R12 receipt与optional authentic cancellation。provider callback前必须证明clock head 2、exact second
+predecessor、两张已consumed tombstone、same provider/lock capability、current exclusive generation、current post-rebind epoch/total、
+fresh live-lock tuple与未过期窗口；之后才观察cancellation和provider。generic clock primitive的private authorization window必须
+由R12-minted、receipt/capability/predecessor绑定的不可伪造token打开，并在`finally`清理。provider抛任意BaseException都必须
+清`observing`/authorization、poison graph并给出稳定失败，不能留下reentrant stuck state。
+
+成功third evidence必须boundary `before-verification`、consumer `cursor-clock-capability`、head 3、exact previous second、same lineage/
+epoch/total、unconsumed false flag。repeatable read不能再次调用provider。third generic consume、fourth observe、wrong predecessor、
+provider throw/unsafe/regression/expiry、live-lock/lineage/watermark drift、replay全部拒绝并保持COMMIT 0。
+
+##### 31.37.80.4 当前执行状态与rejected-first问题
+
+TypeScript lane当前已完成package-private R12、R11 bridge、真实EQP、cancellation seam、R12-authenticated third latch、3/2 receipt、
+GC/privacy/static与normalized report。focused evidence为dedicated 12/12、combined 4 files 91/91、typecheck、diff check；该lane
+仍需cross-runtime parity与独立final review，不能单端自证P10。
+
+Python lane当前仍在remediation，focused中间快照13/13不覆盖全部semantic blockers。独立审计保持REJECT并要求关闭：真实R11
+lifecycle而非module latch；constant SQL hash/field-name不得冒充EQP/blob proof；generic third/consume/fourth绕过；prepare/auth failure
+pending poison；N=0 identity/empty-root；authority/lineage/live-lock在cancellation/provider之前；provider BaseException cleanup；
+reverse-root registry GC环、bounded ID reuse；portable reporter与跨runtime exact comparator。所有问题H0/M0/L0前不得追加P10 accepted。
+
+##### 31.37.80.5 P10接受门禁
+
+P10最终接受至少要求：TS/Python 0/1/3真实SQLite success；完整count/root/target/EQP/resource/lifecycle negative；replay/clone/
+cross-run/registration/adoption/cancellation/provider/lock/lineage/watermark failure；success/third/poison GC与privacy；definition-time
+intrinsic hostile；Ruff/mypy/typecheck/build；affected session/rebind/seal/clock/transaction-owner regressions；normalized portable equality；
+完整SQLite regression；独立H0/M0/L0；append-only prefix proof；durable log；exact identity commit/push。满足前P10 registry保持
+`in_progress`，COMMIT保持hard-disabled，release evidence保持0/93。

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-07-30T13:45:00Z",
+  "updated_at": "2026-08-03T07:27:09Z",
   "repository": ".",
   "scan_policy": {
     "warning_after_minutes": 60,
@@ -1307,7 +1307,7 @@
       "owner": "platform + observability lanes",
       "status": "planned",
       "work_package": "WP8-WP10",
-      "depends_on": ["D15-STORAGE-WORKERS-054", "D11-VERIFY-CONFORMANCE-043", "D14-API-FREEZE-050", "D9-REDACTION-CONFORMANCE-089"],
+      "depends_on": ["D15-STORAGE-WORKERS-054", "D11-VERIFY-CONFORMANCE-043", "D14-API-FREEZE-050", "D9-REDACTION-CONFORMANCE-089", "D9-OPS-CONTROL-085"],
       "expected_artifacts": ["apps/explorer", "packages/observability", "docs/OBSERVABILITY.md"],
       "expected_tests": ["static/live topology", "checkpoint time travel", "critical path/utilization/barrier/verdict views", "console/JSONL/OTLP exporters", "interactive linear-versus-graph comparison uses real topology and events and displays accurate limitations", "topology state budget critical-path utilization barrier-wait retry verdict and replay-fork history views pass deterministic UI smoke tests"],
       "assigned_at": "2026-07-26T16:45:30Z",
@@ -2057,6 +2057,155 @@
       "risk": "high",
       "blocker": null,
       "next_action": "TypeScript races a setTimeout macrotask against a handler that settles in a microtask, so a synchronous handler can never time out; Python dispatches a non-coroutine handler through asyncio.to_thread, so the same handler races the wall clock, and under load it times out, aborts the attempt before the event carrying the campaign boundary is built, and writes a divergent in-doubt activity. Measured: TypeScript 0 timeouts in 20 iterations with a 300ms blocking handler against timeoutMs 100; Python dispatch latency inflated from p99 0.86ms to a 661ms maximum under 32 spinners, with an unmodified-tree control of 1 pass in 5 runs. Conformance campaigns are now normatively barred from synchronous handlers, which removes the observable flake but not the divergence. Choose between running Python non-coroutine handlers inline, which matches TypeScript but retires Python's stronger blocking-handler charge-and-never-commit guarantee that TypeScript cannot express, and driving attempt timeout from the injected clock, which is fully deterministic but makes timeoutMs unreachable in the campaigns that require it to fire. Both are specification decisions, not bug fixes"
+    },
+    {
+      "id": "D9-SQLITE-RULE11-PREDECESSOR-091",
+      "title": "Dual-runtime SQLite publication chain through exact Rule 11",
+      "owner": "integration lane with independent TypeScript and Python SQLite lanes",
+      "status": "completed",
+      "work_package": "WP3-WP9-WP11",
+      "depends_on": ["D2-TS-PERSIST-001", "D2-PY-PERSIST-001", "D6-DURABLE-CONFORMANCE-011"],
+      "expected_artifacts": [
+        "packages/sqlite/src/cursor-publication-rebind.ts",
+        "packages/sqlite/src/cursor-publication-rule12-read.ts",
+        "python/src/graph_engineering/sqlite_cursor_publication_subprotocol.py",
+        "python/src/graph_engineering/sqlite_operation_baseline_source.py",
+        "codex_logs/reviews/SQLITE-CURSOR-RULE11-OUTER-AUTHORITY-FINAL-AUDIT-2026-08-02.md"
+      ],
+      "expected_tests": [
+        "bounded connection-owned post-rebind seal evidence in both runtimes",
+        "exact publication session rebind watermark adoption and write receipt",
+        "zero-I/O five-count Rule 11 one-shot success owner",
+        "cross-runtime Rule 11 parity hostile lifecycle and GC"
+      ],
+      "test_evidence": [
+        {
+          "requirement": "bounded connection-owned post-rebind seal evidence in both runtimes",
+          "result": "passed",
+          "recorded_at": "2026-08-02T18:27:19Z",
+          "reference": "commit:973ef280f6fdf76e6a936da7e10530eab932ff7f; codex_logs/reviews/SQLITE-CURSOR-B3-POST-REBIND-SEAL-EVIDENCE-2026-08-02.md"
+        },
+        {
+          "requirement": "exact publication session rebind watermark adoption and write receipt",
+          "result": "passed",
+          "recorded_at": "2026-08-02T21:57:04Z",
+          "reference": "commits b8f656bae9b199b027f08de27352fe3a0c12b492, 11f9dae5f693fc418092eefa573345840caef337, and 125343ff242e8e40134ee342205f31cf6b90b773; native TypeScript and Python rebind subprotocol suites"
+        },
+        {
+          "requirement": "zero-I/O five-count Rule 11 one-shot success owner",
+          "result": "passed",
+          "recorded_at": "2026-08-02T22:38:57Z",
+          "reference": "commit:effe9974fba5724f84eaa71b65098ae123806bb1; packages/sqlite/test/cursor-publication-rebind-rule11.test.ts and python/tests/test_sqlite_cursor_publication_rule11_outer_authority.py"
+        },
+        {
+          "requirement": "cross-runtime Rule 11 parity hostile lifecycle and GC",
+          "result": "passed",
+          "recorded_at": "2026-08-02T22:38:57Z",
+          "reference": "codex_logs/reviews/SQLITE-CURSOR-RULE11-OUTER-AUTHORITY-FINAL-AUDIT-2026-08-02.md and Rule 11 portable parity gate"
+        }
+      ],
+      "completion_evidence": [
+        "commit:effe9974fba5724f84eaa71b65098ae123806bb1",
+        "codex_logs/reviews/SQLITE-CURSOR-RULE11-OUTER-AUTHORITY-FINAL-AUDIT-2026-08-02.md",
+        "codex_logs/reviews/SQLITE-CURSOR-B3-POST-REBIND-SEAL-EVIDENCE-2026-08-02.md"
+      ],
+      "evidence_required": true,
+      "assigned_at": "2026-08-02T18:27:19Z",
+      "started_at": "2026-08-02T18:27:19Z",
+      "last_heartbeat": "2026-08-02T22:38:57Z",
+      "completed_at": "2026-08-02T22:38:57Z",
+      "risk": "critical",
+      "blocker": null,
+      "next_action": "Remain the exact immutable predecessor for P9 owner containment and P10 Rule 12; do not infer third-clock or COMMIT authority"
+    },
+    {
+      "id": "D9-SQLITE-PUBLICATION-TX-OWNER-092",
+      "title": "Dual-runtime guarded SQLite publication transaction owner P9",
+      "owner": "integration lane with independent TypeScript and Python SQLite lanes",
+      "status": "completed",
+      "work_package": "WP3-WP9-WP11",
+      "depends_on": ["D9-SQLITE-RULE11-PREDECESSOR-091"],
+      "expected_artifacts": [
+        "spec/sqlite-cursor-publication-transaction-owner-v1.md",
+        "packages/sqlite/src/cursor-publication-transaction-owner.ts",
+        "python/src/graph_engineering/sqlite_cursor_publication_transaction_owner.py",
+        "codex_logs/reviews/SQLITE-PUBLICATION-TRANSACTION-OWNER-RUNTIME-WAVE1E-P9-2026-08-02.md"
+      ],
+      "expected_tests": [
+        "portable transaction-owner runtime parity",
+        "TypeScript forced-GC owner guards and cleanup",
+        "Python owner guards cleanup source audit and lifecycle",
+        "package-private surface and COMMIT hard-disable"
+      ],
+      "test_evidence": [
+        {
+          "requirement": "portable transaction-owner runtime parity",
+          "result": "passed",
+          "recorded_at": "2026-08-03T06:46:57Z",
+          "reference": "root test:sqlite-transaction-owner-runtime parity report: 2/2"
+        },
+        {
+          "requirement": "TypeScript forced-GC owner guards and cleanup",
+          "result": "passed",
+          "recorded_at": "2026-08-03T06:46:57Z",
+          "reference": "packages/sqlite/test/cursor-publication-transaction-owner.test.ts: 27/27; semantic and integrity focused suites: 12/12"
+        },
+        {
+          "requirement": "Python owner guards cleanup source audit and lifecycle",
+          "result": "passed",
+          "recorded_at": "2026-08-03T06:46:57Z",
+          "reference": "python/tests/test_sqlite_cursor_publication_transaction_owner.py: 36/36; source plus owner: 83/83; Ruff and mypy passed"
+        },
+        {
+          "requirement": "package-private surface and COMMIT hard-disable",
+          "result": "passed",
+          "recorded_at": "2026-08-03T06:46:57Z",
+          "reference": "SQLite public-root privacy 1/1; commit-hard-disabled portable case; full serial SQLite suite 1252 passed, 2 conditional skipped, 0 failed"
+        }
+      ],
+      "completion_evidence": [
+        "commit:1cb77f03bcfd785183cbaf819a02c287308e9bc0",
+        "codex_logs/reviews/SQLITE-PUBLICATION-TRANSACTION-OWNER-RUNTIME-WAVE1E-P9-2026-08-02.md",
+        "spec/sqlite-cursor-publication-transaction-owner-v1.md"
+      ],
+      "evidence_required": true,
+      "assigned_at": "2026-08-03T03:55:40Z",
+      "started_at": "2026-08-03T03:55:40Z",
+      "last_heartbeat": "2026-08-03T06:46:57Z",
+      "completed_at": "2026-08-03T06:46:57Z",
+      "risk": "critical",
+      "blocker": null,
+      "next_action": "Retain package privacy and COMMIT hard-disable while P10 proves Rule 12 and the unconsumed third clock"
+    },
+    {
+      "id": "D9-SQLITE-RULE12-CLOCK-P10-093",
+      "title": "Dual-runtime SQLite Rule 12 and unconsumed pre-verification clock P10",
+      "owner": "integration lane with independent TypeScript and Python SQLite lanes",
+      "status": "in_progress",
+      "work_package": "WP3-WP9-WP11",
+      "depends_on": ["D9-SQLITE-RULE11-PREDECESSOR-091", "D9-SQLITE-PUBLICATION-TX-OWNER-092"],
+      "expected_artifacts": [
+        "spec/sqlite-cursor-publication-rule12-clock-p10.md",
+        "packages/sqlite/src/cursor-publication-rule12.ts",
+        "python/src/graph_engineering/sqlite_cursor_publication_rule12.py",
+        "codex_logs/reviews/SQLITE-PUBLICATION-RULE12-CLOCK-P10-2026-08-02.md"
+      ],
+      "expected_tests": [
+        "exact Rule 11 to bounded Rule 12 one-shot transition",
+        "Rule 12 count root identity lifecycle resource and failure matrix",
+        "authenticated third provider clock observation remains unconsumed",
+        "TypeScript Python portable success and representative failure parity",
+        "package privacy GC affected regressions and COMMIT remains disabled"
+      ],
+      "test_evidence": [],
+      "completion_evidence": [],
+      "evidence_required": true,
+      "assigned_at": "2026-08-03T06:50:00Z",
+      "started_at": "2026-08-03T06:50:00Z",
+      "last_heartbeat": "2026-08-03T06:59:23Z",
+      "risk": "critical",
+      "blocker": null,
+      "next_action": "Implement independent native Rule 12 owners and exact third-clock wrappers, join portable reports, and keep third evidence unconsumed with COMMIT hard-disabled"
     }
   ]
 }

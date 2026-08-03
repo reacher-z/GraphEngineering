@@ -519,3 +519,35 @@ or whether a report is truthful. That judgment remains the responsibility of
 the distinct independent reviewer and its immutable report. Registry status,
 scanner output, superseded records, and historical completion logs remain zero
 weight without this candidate binding.
+
+## 12. SQLite publication supporting chain added after the P9 audit
+
+The SQLite v1-to-v2 publication work is a supporting branch of D9 durability,
+not a bypass around the redaction, approval, extended-durability, or release
+joins. The registry now exposes its current accepted predecessor and bounded
+work instead of hiding them inside broad planned task titles:
+
+```mermaid
+flowchart LR
+  TSP[D2-TS-PERSIST-001] --> R11[D9-SQLITE-RULE11-PREDECESSOR-091]
+  PYP[D2-PY-PERSIST-001] --> R11
+  DUR[D6-DURABLE-CONFORMANCE-011] --> R11
+  R11 --> P9[D9-SQLITE-PUBLICATION-TX-OWNER-092]
+  R11 --> P10[D9-SQLITE-RULE12-CLOCK-P10-093]
+  P9 --> P10
+  P10 -. supporting evidence only .-> D9X[D9-DURABLE-EXT-SPEC-031]
+```
+
+- `D9-SQLITE-RULE11-PREDECESSOR-091` records the exact connection-owned
+  post-rebind seal primitive and the publication/session/rebind chain through
+  the one-shot zero-I/O Rule 11 owner. It does not claim Rule 12 or a clock.
+- `D9-SQLITE-PUBLICATION-TX-OWNER-092` records P9's package-private guarded
+  BEGIN owner and returned-failure cleanup. It retains a hard-disabled COMMIT.
+- `D9-SQLITE-RULE12-CLOCK-P10-093` is the active P10 leaf. Its maximum success
+  is Rule 12 plus an unconsumed third clock (`3/2`); cursor-clock completion and
+  every later publication/commit transition remain downstream.
+
+These tasks carry no direct release-checklist weight. They may become evidence
+inside the future D9 extended-durability candidate only after redaction,
+approval, full recovery/storage conformance, manifest activation, and the
+remaining SQLite publication chain close on one immutable candidate.

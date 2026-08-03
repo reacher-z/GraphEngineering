@@ -34,6 +34,7 @@ jobs:
       - run: pnpm test:sqlite-ledger-contract
       - run: pnpm test:sqlite-transaction-owner-contract
       - run: pnpm check:docs
+      - run: pnpm check:task-controls
       - run: pnpm check:sqlite-migrations
       - run: pnpm check:release-map
       - run: pnpm check:evidence-closure

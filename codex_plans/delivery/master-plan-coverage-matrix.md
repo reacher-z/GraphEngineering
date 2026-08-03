@@ -190,3 +190,54 @@ required documents exist and pass checks, package provenance is verified, and
 the release checklist records a go decision. External adoption and the 6,000+
 star target are reported honestly as outcomes; they cannot be fabricated or
 declared complete by code changes.
+
+## 2026-08-02 PDT control-truth reconciliation
+
+This append supersedes only stale checkpoint counts above; it does not upgrade
+any capability, release, or adoption claim that lacks its own evidence.
+
+- The registry now contains 111 unique tasks. The new narrow controls are
+  `D9-SQLITE-RULE11-PREDECESSOR-091`,
+  `D9-SQLITE-PUBLICATION-TX-OWNER-092`, and
+  `D9-SQLITE-RULE12-CLOCK-P10-093`; they prevent the substantial B3/P9/P10
+  SQLite work from remaining invisible inside the broader planned D9 durable
+  extension tasks.
+- P9 is Green only for its bounded package-private scope: dual-runtime owner
+  registration, 19 semantic guard classes, guarded `BEGIN EXCLUSIVE`,
+  authenticated returned-failure cleanup, portable parity, GC/privacy checks,
+  and a hard-disabled COMMIT path. Its immutable implementation commit is
+  `1cb77f03bcfd785183cbaf819a02c287308e9bc0` and its review is
+  `codex_logs/reviews/SQLITE-PUBLICATION-TRANSACTION-OWNER-RUNTIME-WAVE1E-P9-2026-08-02.md`.
+  It is not evidence for the complete D9 store/recovery surface.
+- P10 is In Progress. Its frozen boundary is exact Rule 11 consumption, bounded
+  Rule 12 main/TEMP seal acceptance, and one authenticated but unconsumed
+  `before-verification` clock observation (`3/2`). Cursor-clock completion,
+  TEMP retirement, the fourth clock, final fence, COMMIT, complete-v2, and
+  release remain explicitly outside P10.
+- A fresh scanner run after reconciliation reported 111 tasks, 47 healthy, 61
+  waiting, 3 stale, 0 blocked, 0 integration risks, and 15 of 81 evidence gates
+  satisfied. Scanner health remains liveness evidence only.
+- A fresh release-map check passed 178/178 leaves (175 blocking and 3
+  non-blocking), with 111 registry tasks and an acyclic dependency graph. This
+  proves mapping integrity, not release readiness.
+- A fresh evidence-closure audit remained `audit-only`, with no candidate,
+  zero selected tasks, and release weight `0/93`. The 178 release-checklist
+  leaves therefore remain Open for a candidate-bound stable/RC decision.
+- The reconciliation initially proved that the planning documents named
+  `scripts/check-task-registry.mjs` and `scripts/check-task-graph.mjs` while
+  neither executable existed. This checkpoint closes that control gap: both
+  commands now reject duplicate-key JSON and validate task shape, canonical
+  timestamps/chronology, artifact paths, dependency existence/cycles,
+  documented task references, 70 required semantic edges and completion
+  invalidation. `pnpm check:task-controls` runs twelve focused hostile tests in
+  CI. Candidate mode reads the registry and artifact entries from immutable Git
+  objects instead of the dirty worktree. Release-strict mode cannot be waived
+  with `evidence_required:false` and intentionally fails until historical
+  completed tasks receive the missing candidate-bound evidence, so structural
+  health cannot masquerade as evidence closure.
+
+The highest-fan-out repository-owned gates remain D9 redaction, D4
+subgraph/reducer/artifact/stream/trace, D6 barrier tranche 2, and D7 native
+cycle/conformance closure. P10 may proceed in its independent SQLite lane, but
+it must not consume all implementation capacity while those release-spine
+predecessors remain Open.
