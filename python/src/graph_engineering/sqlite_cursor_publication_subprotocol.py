@@ -20,6 +20,7 @@ from .sqlite_cursor_publication_outer_authority import (
     _is_sqlite_cursor_publication_session_cancellation_requested_intrinsic,
     _poison_sqlite_cursor_publication_rebind_downstream_intrinsic,
     _prepare_sqlite_cursor_publication_rebind_context_intrinsic,
+    _read_sqlite_cursor_poisoned_post_rebind_graph_snapshot_intrinsic,
     _read_sqlite_cursor_post_rebind_watermark_adoption_snapshot_intrinsic,
     _read_sqlite_cursor_publication_rebind_context_snapshot_intrinsic,
     _read_sqlite_cursor_publication_session_consumed_tombstone_snapshot_intrinsic,
@@ -45,6 +46,8 @@ from .sqlite_operation_baseline_source import (
     _execute_sqlite_connection_cursor_publication_rebind_intrinsic,
     _prepare_sqlite_connection_cursor_publication_rebind_intrinsic,
     _prove_sqlite_connection_cursor_publication_rebind_changes_intrinsic,
+    _read_sqlite_connection_cursor_publication_rebind_snapshot_intrinsic,
+    _record_sqlite_connection_cursor_publication_rebind_completed_primary_intrinsic,
     _release_sqlite_connection_cursor_publication_rebind_intrinsic,
     _SQLiteConnectionCursorPublicationRebindExecution,
     _SQLiteConnectionCursorPublicationRebindSnapshot,
@@ -54,6 +57,9 @@ RULE11_ID: Literal["BLR_CURSOR_REBIND_COUNT"] = "BLR_CURSOR_REBIND_COUNT"
 RULE11_POSITION: Literal[11] = 11
 _CONSTRUCTION_TOKEN = object()
 _TYPE = type
+_LEN = len
+_INT = int
+_VALUE_ERROR = ValueError
 _ID = id
 _REF = ref
 _TUPLE: Any = tuple
@@ -65,7 +71,7 @@ _DIGEST_PARAMETERS = _digest_sqlite_initial_write_parameters_intrinsic
 
 
 def _fail(code: str) -> Never:
-    raise ValueError(code)
+    raise _VALUE_ERROR(code)
 
 
 class _SQLiteCursorPublicationRebindWriteReceipt:
@@ -96,6 +102,37 @@ class _Rule11CheckResult(NamedTuple):
     accepted: bool
     violation_count: Literal[0, 1]
     diagnostic: str | None
+
+
+_EvidenceMismatchDimension = Literal[
+    "native-affected",
+    "changes-affected",
+    "total-delta",
+    "outer-ledger",
+    "cursor-ledger",
+]
+_EVIDENCE_DIMENSION_ORDER: tuple[_EvidenceMismatchDimension, ...] = (
+    "native-affected",
+    "changes-affected",
+    "total-delta",
+    "outer-ledger",
+    "cursor-ledger",
+)
+
+
+class _EvidenceMismatchOutcomeSnapshot(NamedTuple):
+    dimensions: tuple[_EvidenceMismatchDimension, ...]
+    evaluated_dimensions: tuple[_EvidenceMismatchDimension, ...]
+    observed_counts: _Rule11CountProjection
+    projected_counts: _Rule11CountProjection
+    check: _Rule11CheckResult
+    real_evidence_observed: Literal[True]
+    outer_mismatch: bool
+    first_poison_reason: str
+    tombstone_lifecycle: Literal["poisoned"]
+    adoption_lifecycle: Literal["poisoned"]
+    write_lifecycle: Literal["absent", "poisoned"]
+    rule11_lifecycle: Literal["absent"]
 
 
 class _SQLiteCursorPublicationRebindWriteReceiptSnapshot(NamedTuple):
@@ -173,6 +210,32 @@ class _PendingPreconsumeReleaseFault:
     error_ref: ReferenceType[BaseException]
 
 
+@dataclass(frozen=True, slots=True)
+class _PendingEvidenceMismatch:
+    authority_ref: ReferenceType[_SQLiteCursorOuterPublicationAuthority]
+    connection_id: int
+    dimensions: tuple[_EvidenceMismatchDimension, ...]
+
+
+@dataclass(slots=True)
+class _EvidenceMismatchOutcome:
+    dimensions: tuple[_EvidenceMismatchDimension, ...]
+    evaluated_dimensions: tuple[_EvidenceMismatchDimension, ...] | None = None
+    observed_counts: _Rule11CountProjection | None = None
+    projected_counts: _Rule11CountProjection | None = None
+    check: _Rule11CheckResult | None = None
+    real_evidence_observed: bool = False
+    outer_mismatch: bool | None = None
+    first_poison_reason: str | None = None
+    tombstone_ref: ReferenceType[_SQLiteCursorPublicationSessionConsumedTombstone] | None = None
+    adoption_ref: ReferenceType[_SQLiteCursorPostRebindWatermarkAdoption] | None = None
+    write_ref: ReferenceType[_SQLiteCursorPublicationRebindWriteReceipt] | None = None
+    tombstone_lifecycle: Literal["absent", "active", "poisoned"] = "absent"
+    adoption_lifecycle: Literal["absent", "active", "poisoned"] = "absent"
+    write_lifecycle: Literal["absent", "active", "poisoned"] = "absent"
+    rule11_lifecycle: Literal["absent"] = "absent"
+
+
 class _Entry(NamedTuple):
     key_ref: ReferenceType[object]
     value: object
@@ -182,6 +245,8 @@ _WRITE_RECEIPTS: dict[int, _Entry] = {}
 _RULE11_RECEIPTS: dict[int, _Entry] = {}
 _WRITE_BY_CONTEXT: dict[int, _Entry] = {}
 _PRECONSUME_RELEASE_FAULTS: dict[int, _Entry] = {}
+_EVIDENCE_MISMATCHES_BY_SESSION: dict[int, _Entry] = {}
+_EVIDENCE_MISMATCH_OUTCOMES: dict[int, _Entry] = {}
 
 
 def _register(registry: dict[int, _Entry], owner: object, value: object) -> None:
@@ -199,6 +264,8 @@ _REGISTER_WRITE = _register
 _REGISTER_RULE11 = _register
 _REGISTER_CONTEXT_LATCH = _register
 _REGISTER_PRECONSUME_RELEASE_FAULT = _register
+_REGISTER_EVIDENCE_MISMATCH = _register
+_REGISTER_EVIDENCE_OUTCOME = _register
 
 
 def _discard_exact(registry: dict[int, _Entry], owner: object) -> None:
@@ -242,7 +309,11 @@ def _arm_sqlite_cursor_publication_preconsume_release_fault_for_test_intrinsic(
         _fail("GE_CURSOR_B3_REBIND_RELEASE_FAULT")
     snapshot = _read_sqlite_cursor_publication_session_snapshot_intrinsic(session)
     current = _DICT_GET(_PRECONSUME_RELEASE_FAULTS, _ID(session))
-    if current is not None and current.key_ref() is session:
+    evidence = _DICT_GET(_EVIDENCE_MISMATCHES_BY_SESSION, _ID(session))
+    if (
+        (current is not None and current.key_ref() is session)
+        or (evidence is not None and evidence.key_ref() is session)
+    ):
         _fail("GE_CURSOR_B3_REBIND_RELEASE_FAULT")
     try:
         _REGISTER_PRECONSUME_RELEASE_FAULT(
@@ -298,6 +369,399 @@ def _handoff_sqlite_cursor_publication_preconsume_release_fault_for_test_intrins
         snapshot.connection, execution, error
     )
     return True
+
+
+def _exact_evidence_mismatch_dimensions(
+    dimensions: object,
+) -> tuple[_EvidenceMismatchDimension, ...]:
+    if _TYPE(dimensions) is not tuple or not 2 <= _LEN(dimensions) <= 5:
+        _fail("GE_CURSOR_B3_REBIND_EVIDENCE_DIMENSIONS")
+    prior = -1
+    selected: list[_EvidenceMismatchDimension] = []
+    for dimension in dimensions:
+        if _TYPE(dimension) is not str:
+            _fail("GE_CURSOR_B3_REBIND_EVIDENCE_DIMENSIONS")
+        try:
+            rank = _EVIDENCE_DIMENSION_ORDER.index(cast(_EvidenceMismatchDimension, dimension))
+        except _VALUE_ERROR:
+            _fail("GE_CURSOR_B3_REBIND_EVIDENCE_DIMENSIONS")
+        if rank <= prior:
+            _fail("GE_CURSOR_B3_REBIND_EVIDENCE_DIMENSIONS")
+        selected.append(cast(_EvidenceMismatchDimension, dimension))
+        prior = rank
+    return cast(tuple[_EvidenceMismatchDimension, ...], _TUPLE(selected))
+
+
+def _arm_sqlite_cursor_publication_rebind_evidence_mismatch_for_test_intrinsic(
+    session: _SQLiteCursorPublicationSession,
+    dimensions: object,
+) -> None:
+    """Arm one exact S for a post-observation five-dimension projection."""
+
+    selected = _exact_evidence_mismatch_dimensions(dimensions)
+    snapshot = _read_sqlite_cursor_publication_session_snapshot_intrinsic(session)
+    current = _DICT_GET(_EVIDENCE_MISMATCHES_BY_SESSION, _ID(session))
+    competing = _DICT_GET(_PRECONSUME_RELEASE_FAULTS, _ID(session))
+    if (
+        (current is not None and current.key_ref() is session)
+        or (competing is not None and competing.key_ref() is session)
+    ):
+        _fail("GE_CURSOR_B3_REBIND_EVIDENCE_ARM")
+    try:
+        _REGISTER_EVIDENCE_MISMATCH(
+            _EVIDENCE_MISMATCHES_BY_SESSION,
+            session,
+            _PendingEvidenceMismatch(
+                _REF(snapshot.authority), _ID(snapshot.connection), selected
+            ),
+        )
+    except BaseException:
+        _discard_exact(_EVIDENCE_MISMATCHES_BY_SESSION, session)
+        raise
+
+
+def _handoff_sqlite_cursor_publication_rebind_evidence_mismatch_intrinsic(
+    session: _SQLiteCursorPublicationSession,
+    context: _SQLiteCursorPublicationRebindContext,
+    prepared_owner: _SQLiteCursorPublicationRebindPreparedOwner,
+    execution: _SQLiteConnectionCursorPublicationRebindExecution,
+    _register_outcome: Any = _REGISTER_EVIDENCE_OUTCOME,
+) -> None:
+    """Delete exact-S pending state before binding its pure outcome to exact E."""
+
+    current = _DICT_GET(_EVIDENCE_MISMATCHES_BY_SESSION, _ID(session))
+    if current is None or current.key_ref() is not session:
+        return
+    pending = current.value if _TYPE(current.value) is _PendingEvidenceMismatch else None
+    _discard_exact(_EVIDENCE_MISMATCHES_BY_SESSION, session)
+    try:
+        snapshot = _read_sqlite_cursor_publication_rebind_context_snapshot_intrinsic(context)
+        if (
+            pending is None
+            or pending.authority_ref() is not snapshot.authority
+            or pending.connection_id != _ID(snapshot.connection)
+            or snapshot.lifecycle != "prepared"
+            or snapshot.session is not session
+            or snapshot.prepared_owner is not prepared_owner
+            or snapshot.execution is not execution
+            or _DICT_GET(_EVIDENCE_MISMATCH_OUTCOMES, _ID(execution)) is not None
+        ):
+            _fail("GE_CURSOR_B3_REBIND_EVIDENCE_HANDOFF")
+        _register_outcome(
+            _EVIDENCE_MISMATCH_OUTCOMES,
+            execution,
+            _EvidenceMismatchOutcome(pending.dimensions),
+        )
+    except BaseException:
+        _discard_exact(_EVIDENCE_MISMATCH_OUTCOMES, execution)
+        raise
+
+
+def _evidence_mismatch_outcome(
+    execution: _SQLiteConnectionCursorPublicationRebindExecution,
+) -> _EvidenceMismatchOutcome | None:
+    current = _DICT_GET(_EVIDENCE_MISMATCH_OUTCOMES, _ID(execution))
+    if current is None:
+        return None
+    if current.key_ref() is not execution or _TYPE(current.value) is not _EvidenceMismatchOutcome:
+        _fail("GE_CURSOR_B3_REBIND_EVIDENCE_OUTCOME")
+    return current.value
+
+
+def _evidence_projection_is_exact(outcome: _EvidenceMismatchOutcome) -> bool:
+    observed = outcome.observed_counts
+    projected = outcome.projected_counts
+    check = outcome.check
+    evaluated = outcome.evaluated_dimensions
+    if (
+        observed is None
+        or projected is None
+        or check is None
+        or evaluated is None
+        or outcome.outer_mismatch is None
+        or evaluated != outcome.dimensions
+    ):
+        return False
+    expected = _check_sqlite_cursor_publication_rule11_counts_intrinsic(projected)
+    return (
+        projected.b2_cursor_count == observed.b2_cursor_count
+        and projected.native_affected_count
+        == observed.native_affected_count
+        + _INT(_mismatch_includes(evaluated, "native-affected"))
+        and projected.changes_affected_count
+        == observed.changes_affected_count
+        + _INT(_mismatch_includes(evaluated, "changes-affected"))
+        and projected.total_changes_delta
+        == observed.total_changes_delta
+        + _INT(_mismatch_includes(evaluated, "total-delta"))
+        and projected.cursor_ledger_affected_delta
+        == observed.cursor_ledger_affected_delta
+        + _INT(_mismatch_includes(evaluated, "cursor-ledger"))
+        and outcome.outer_mismatch
+        is _mismatch_includes(evaluated, "outer-ledger")
+        and check == expected
+    )
+
+
+def _mismatch_includes(
+    dimensions: tuple[_EvidenceMismatchDimension, ...],
+    dimension: _EvidenceMismatchDimension,
+) -> bool:
+    return dimension in dimensions
+
+
+def _project_evidence_mismatch(
+    outcome: _EvidenceMismatchOutcome,
+    observed: _Rule11CountProjection,
+) -> _Rule11CountProjection:
+    dimensions = outcome.dimensions
+    projected = _Rule11CountProjection(
+        observed.b2_cursor_count,
+        observed.native_affected_count
+        + _INT(_mismatch_includes(dimensions, "native-affected")),
+        observed.changes_affected_count
+        + _INT(_mismatch_includes(dimensions, "changes-affected")),
+        observed.total_changes_delta
+        + _INT(_mismatch_includes(dimensions, "total-delta")),
+        observed.cursor_ledger_affected_delta
+        + _INT(_mismatch_includes(dimensions, "cursor-ledger")),
+    )
+    check = _check_sqlite_cursor_publication_rule11_counts_intrinsic(projected)
+    outcome.evaluated_dimensions = dimensions
+    outcome.observed_counts = observed
+    outcome.projected_counts = projected
+    outcome.check = check
+    outcome.real_evidence_observed = True
+    outcome.outer_mismatch = _mismatch_includes(dimensions, "outer-ledger")
+    return projected
+
+
+def _read_sqlite_cursor_publication_rebind_evidence_mismatch_outcome_for_test_intrinsic(
+    connection: SQLiteV1BaselineConnectionOwner,
+    execution: _SQLiteConnectionCursorPublicationRebindExecution,
+) -> _EvidenceMismatchOutcomeSnapshot:
+    """Expose only immutable scalar evidence from the pair/multi mismatch seam."""
+
+    _read_sqlite_connection_cursor_publication_rebind_snapshot_intrinsic(
+        connection, execution
+    )
+    outcome = _evidence_mismatch_outcome(execution)
+    if outcome is None or not _evidence_projection_is_exact(outcome):
+        _fail("GE_CURSOR_B3_REBIND_EVIDENCE_OUTCOME")
+    observed = outcome.observed_counts
+    projected = outcome.projected_counts
+    check = outcome.check
+    evaluated = outcome.evaluated_dimensions
+    reason = outcome.first_poison_reason
+    if (
+        observed is None
+        or projected is None
+        or check is None
+        or evaluated is None
+        or outcome.outer_mismatch is None
+        or reason is None
+        or outcome.real_evidence_observed is not True
+        or outcome.tombstone_lifecycle != "poisoned"
+        or outcome.adoption_lifecycle != "poisoned"
+        or outcome.write_lifecycle not in {"absent", "poisoned"}
+    ):
+        _fail("GE_CURSOR_B3_REBIND_EVIDENCE_OUTCOME")
+    return _EvidenceMismatchOutcomeSnapshot(
+        outcome.dimensions,
+        evaluated,
+        observed,
+        projected,
+        check,
+        True,
+        outcome.outer_mismatch,
+        reason,
+        "poisoned",
+        "poisoned",
+        outcome.write_lifecycle,
+        "absent",
+    )
+
+
+def _assert_sqlite_cursor_publication_rebind_completed_failure_for_finalizer_intrinsic(
+    connection: SQLiteV1BaselineConnectionOwner,
+    context: _SQLiteCursorPublicationRebindContext,
+    tombstone: _SQLiteCursorPublicationSessionConsumedTombstone,
+    adoption: _SQLiteCursorPostRebindWatermarkAdoption,
+    execution: _SQLiteConnectionCursorPublicationRebindExecution,
+    boundary: Literal["rule11-outer-ledger", "rule11-five-count"],
+) -> _SQLiteCursorPublicationRebindWriteReceipt | None:
+    """Repeatably authenticate completed E and retain exact W for finalization."""
+
+    if _TYPE(boundary) is not str or boundary not in {
+        "rule11-outer-ledger",
+        "rule11-five-count",
+    }:
+        _fail("GE_CURSOR_B3_REBIND_COMPLETED_FAILURE")
+    execution_snapshot = (
+        _read_sqlite_connection_cursor_publication_rebind_snapshot_intrinsic(
+            connection, execution
+        )
+    )
+    context_snapshot = _read_sqlite_cursor_publication_rebind_context_snapshot_intrinsic(
+        context
+    )
+    tombstone_snapshot = (
+        _read_sqlite_cursor_publication_session_consumed_tombstone_snapshot_intrinsic(
+            tombstone
+        )
+    )
+    try:
+        poisoned_graph = (
+            _read_sqlite_cursor_poisoned_post_rebind_graph_snapshot_intrinsic(
+                context, tombstone, adoption
+            )
+        )
+    except BaseException:
+        _fail("GE_CURSOR_B3_REBIND_COMPLETED_FAILURE")
+    outcome = _evidence_mismatch_outcome(execution)
+    selected_tombstone = (
+        outcome.tombstone_ref() if outcome is not None and outcome.tombstone_ref else None
+    )
+    selected_adoption = (
+        outcome.adoption_ref() if outcome is not None and outcome.adoption_ref else None
+    )
+    selected_write = (
+        outcome.write_ref() if outcome is not None and outcome.write_ref else None
+    )
+    affected = execution_snapshot.affected_rows
+    changes_affected = execution_snapshot.changes_affected_rows
+    authentic_observed = (
+        _Rule11CountProjection(
+            context_snapshot.b2_cursor_count,
+            affected,
+            changes_affected,
+            execution_snapshot.total_changes_delta,
+            execution_snapshot.cursor_ledger_delta.affected_rows_watermark,
+        )
+        if _TYPE(context_snapshot.b2_cursor_count) is int
+        and _TYPE(affected) is int
+        and _TYPE(changes_affected) is int
+        else None
+    )
+    if (
+        outcome is None
+        or execution_snapshot.lifecycle != "completed"
+        or authentic_observed is None
+        or outcome.observed_counts != authentic_observed
+        or execution_snapshot.rebind_sql
+        != SQLITE_CURSOR_PUBLICATION_REBIND_SQL_INTRINSIC
+        or execution_snapshot.rebind_sql_sha256
+        != SQLITE_CURSOR_PUBLICATION_REBIND_SQL_SHA256_INTRINSIC
+        or execution_snapshot.parameter_order
+        != SQLITE_CURSOR_PUBLICATION_REBIND_PARAMETER_ORDER_INTRINSIC
+        or execution_snapshot.parameters != context_snapshot.parameter_values
+        or execution_snapshot.changes_sql
+        != SQLITE_CURSOR_PUBLICATION_CHANGES_SQL_INTRINSIC
+        or execution_snapshot.changes_sql_sha256
+        != SQLITE_CURSOR_PUBLICATION_CHANGES_SQL_SHA256_INTRINSIC
+        or execution_snapshot.prepare_count != 1
+        or execution_snapshot.execute_count != 1
+        or execution_snapshot.release_count != 1
+        or execution_snapshot.changes_prepare_count != 1
+        or execution_snapshot.changes_fetch_count != 1
+        or execution_snapshot.changes_release_count != 1
+        or execution_snapshot.transaction_generation
+        is not context_snapshot.transaction_generation
+        or execution_snapshot.transaction_epoch_before
+        != context_snapshot.historical_transaction_epoch
+        or execution_snapshot.transaction_epoch
+        != context_snapshot.historical_transaction_epoch + 1
+        or execution_snapshot.total_changes_before
+        != context_snapshot.historical_total_changes
+        or execution_snapshot.total_changes
+        != context_snapshot.historical_total_changes
+        + execution_snapshot.total_changes_delta
+        or execution_snapshot.cursor_ledger_before != (0, 0, 0)
+        or execution_snapshot.cursor_ledger_delta != (affected, 1, 1)
+        or execution_snapshot.cursor_ledger_after != (affected, 1, 1)
+        or context_snapshot.lifecycle != "poisoned"
+        or context_snapshot.connection is not connection
+        or context_snapshot.execution is not execution
+        or tombstone_snapshot.lifecycle != "poisoned"
+        or tombstone_snapshot.context is not context
+        or tombstone_snapshot.execution is not execution
+        or poisoned_graph.poison_reason != outcome.first_poison_reason
+        or poisoned_graph.historical_transaction_epoch
+        != context_snapshot.historical_transaction_epoch
+        or poisoned_graph.adopted_transaction_epoch
+        != execution_snapshot.transaction_epoch
+        or poisoned_graph.historical_total_changes
+        != context_snapshot.historical_total_changes
+        or poisoned_graph.adopted_total_changes != execution_snapshot.total_changes
+        or poisoned_graph.total_changes_delta != execution_snapshot.total_changes_delta
+        or poisoned_graph.affected_rows != affected
+        or not _exact_ledger(
+            poisoned_graph.historical_outer_ledger,
+            context_snapshot.historical_outer_ledger,
+        )
+        or not _exact_ledger(
+            poisoned_graph.adopted_outer_ledger,
+            context_snapshot.historical_outer_ledger,
+        )
+        or selected_tombstone is not tombstone
+        or selected_adoption is not adoption
+        or outcome.real_evidence_observed is not True
+        or outcome.tombstone_lifecycle != "poisoned"
+        or outcome.adoption_lifecycle != "poisoned"
+        or outcome.rule11_lifecycle != "absent"
+        or not _evidence_projection_is_exact(outcome)
+        or outcome.check is None
+        or outcome.check.accepted
+        or outcome.check.violation_count != 1
+    ):
+        _fail("GE_CURSOR_B3_REBIND_COMPLETED_FAILURE")
+    if boundary == "rule11-outer-ledger":
+        if (
+            outcome.first_poison_reason
+            != "SQLite rebind evidence mismatch outer ledger"
+            or outcome.outer_mismatch is not True
+            or outcome.write_lifecycle != "absent"
+            or selected_write is not None
+        ):
+            _fail("GE_CURSOR_B3_REBIND_COMPLETED_FAILURE")
+        return None
+    if (
+        outcome.first_poison_reason != "SQLite Rule 11 five counts disagree"
+        or outcome.outer_mismatch is not False
+        or outcome.write_lifecycle != "poisoned"
+        or selected_write is None
+    ):
+        _fail("GE_CURSOR_B3_REBIND_COMPLETED_FAILURE")
+    write = cast(
+        _WriteRecord,
+        _record(
+            _WRITE_RECEIPTS,
+            selected_write,
+            _SQLiteCursorPublicationRebindWriteReceipt,
+            _WriteRecord,
+            "GE_CURSOR_B3_REBIND_COMPLETED_FAILURE",
+        ),
+    )
+    write_snapshot = write.snapshot
+    latch = _DICT_GET(_WRITE_BY_CONTEXT, _ID(context))
+    if (
+        not write.consumed
+        or write_snapshot.lifecycle != "poisoned"
+        or write_snapshot.rule11_consume_count != 1
+        or write_snapshot.connection is not connection
+        or write_snapshot.context is not context
+        or write_snapshot.consumed_tombstone is not tombstone
+        or write_snapshot.post_rebind_adoption is not adoption
+        or write_snapshot.rebind_execution is not execution
+        or write_snapshot.counts != outcome.projected_counts
+        or latch is None
+        or latch.key_ref() is not context
+        or _TYPE(latch.value) is not _ContextLatch
+        or cast(_ContextLatch, latch.value).lifecycle != "poisoned"
+        or cast(_ContextLatch, latch.value).write_receipt_ref() is not selected_write
+    ):
+        _fail("GE_CURSOR_B3_REBIND_COMPLETED_FAILURE")
+    return selected_write
 
 
 def _safe_count(value: object) -> int:
@@ -477,7 +941,7 @@ def _authenticate_retained_write_receipt(
         adoption = _read_sqlite_cursor_post_rebind_watermark_adoption_snapshot_intrinsic(
             snapshot.post_rebind_adoption
         )
-    except ValueError:
+    except _VALUE_ERROR:
         _fail(code)
     if (
         context.lifecycle != "write-adopted"
@@ -522,13 +986,24 @@ def _mint_sqlite_cursor_publication_rebind_write_receipt_intrinsic(
         changes_affected = _safe_count(execution.changes_affected_rows)
         total_delta = _safe_count(execution.total_changes_delta)
         ledger_delta = _safe_count(execution.cursor_ledger_delta.affected_rows_watermark)
-        counts = _Rule11CountProjection(
+        observed_counts = _Rule11CountProjection(
             _safe_count(context_snapshot.b2_cursor_count),
             affected,
             changes_affected,
             total_delta,
             ledger_delta,
         )
+        mismatch_outcome = _evidence_mismatch_outcome(context_snapshot.execution)
+        counts = (
+            observed_counts
+            if mismatch_outcome is None
+            else _project_evidence_mismatch(mismatch_outcome, observed_counts)
+        )
+        if mismatch_outcome is not None:
+            mismatch_outcome.tombstone_ref = _REF(tombstone)
+            mismatch_outcome.adoption_ref = _REF(adoption)
+            mismatch_outcome.tombstone_lifecycle = "active"
+            mismatch_outcome.adoption_lifecycle = "active"
         if (
             parameters is None
             or execution.rebind_sql != SQLITE_CURSOR_PUBLICATION_REBIND_SQL_INTRINSIC
@@ -567,6 +1042,28 @@ def _mint_sqlite_cursor_publication_rebind_write_receipt_intrinsic(
             )
         ):
             _fail("GE_CURSOR_B3_REBIND_WRITE_GRAPH")
+        if mismatch_outcome is not None:
+            check = mismatch_outcome.check
+            if check is None or check.accepted or check.violation_count != 1:
+                _fail("GE_CURSOR_B3_REBIND_EVIDENCE_OUTCOME")
+            if mismatch_outcome.outer_mismatch:
+                reason = "SQLite rebind evidence mismatch outer ledger"
+                primary = _VALUE_ERROR("GE_CURSOR_B3_REBIND_EVIDENCE_OUTER")
+                try:
+                    _poison_outer(context, tombstone, adoption, reason)
+                except BaseException:
+                    pass
+                else:
+                    mismatch_outcome.first_poison_reason = reason
+                    mismatch_outcome.tombstone_lifecycle = "poisoned"
+                    mismatch_outcome.adoption_lifecycle = "poisoned"
+                    _record_sqlite_connection_cursor_publication_rebind_completed_primary_intrinsic(
+                        context_snapshot.connection,
+                        context_snapshot.execution,
+                        primary,
+                        "rule11-outer-ledger",
+                    )
+                raise primary
         receipt = _SQLiteCursorPublicationRebindWriteReceipt(_CONSTRUCTION_TOKEN)
         snapshot = _SQLiteCursorPublicationRebindWriteReceiptSnapshot(
             "write-receipt-minted",
@@ -608,12 +1105,38 @@ def _mint_sqlite_cursor_publication_rebind_write_receipt_intrinsic(
         latch = _ContextLatch("write-receipt-minted", _REF(receipt))
         _REGISTER_WRITE(_WRITE_RECEIPTS, receipt, record)
         _REGISTER_CONTEXT_LATCH(_WRITE_BY_CONTEXT, context, latch)
+        if mismatch_outcome is not None:
+            mismatch_outcome.write_ref = _REF(receipt)
+            mismatch_outcome.write_lifecycle = "active"
     except BaseException as primary:
         if "receipt" in locals():
             _discard_exact(_WRITE_RECEIPTS, receipt)
         _discard_exact(_WRITE_BY_CONTEXT, context)
-        with suppress(BaseException):
-            _poison_outer(context, tombstone, adoption, "SQLite rebind W mint failed")
+        reason = (
+            mismatch_outcome.first_poison_reason
+            if "mismatch_outcome" in locals()
+            and mismatch_outcome is not None
+            and mismatch_outcome.first_poison_reason is not None
+            else "SQLite rebind W mint failed"
+        )
+        should_poison = (
+            "mismatch_outcome" not in locals()
+            or mismatch_outcome is None
+            or mismatch_outcome.first_poison_reason is None
+        )
+        if should_poison:
+            try:
+                _poison_outer(context, tombstone, adoption, reason)
+            except BaseException:
+                pass
+            else:
+                if "mismatch_outcome" in locals() and mismatch_outcome is not None:
+                    mismatch_outcome.first_poison_reason = reason
+                    mismatch_outcome.tombstone_lifecycle = "poisoned"
+                    mismatch_outcome.adoption_lifecycle = "poisoned"
+                    if "receipt" in locals():
+                        mismatch_outcome.write_ref = None
+                        mismatch_outcome.write_lifecycle = "absent"
         raise primary
     return receipt
 
@@ -632,6 +1155,8 @@ def _execute_sqlite_cursor_publication_rule11_intrinsic(
         ),
     )
     snapshot = record.snapshot
+    mismatch_outcome = _evidence_mismatch_outcome(snapshot.rebind_execution)
+    intended_count_mismatch: ValueError | None = None
     try:
         snapshot = _authenticate_retained_write_receipt(
             receipt,
@@ -640,10 +1165,23 @@ def _execute_sqlite_cursor_publication_rule11_intrinsic(
             code="GE_CURSOR_B3_RULE11_REUSE",
         )
         check = _check_sqlite_cursor_publication_rule11_counts_intrinsic(snapshot.counts)
+        if not check.accepted or check.violation_count != 0:
+            if (
+                mismatch_outcome is not None
+                and mismatch_outcome.outer_mismatch is False
+                and mismatch_outcome.check == check
+                and snapshot.counts == mismatch_outcome.projected_counts
+                and not check.accepted
+                and check.violation_count == 1
+                and _evidence_projection_is_exact(mismatch_outcome)
+            ):
+                intended_count_mismatch = _VALUE_ERROR(
+                    "GE_CURSOR_B3_RULE11_COUNT_MISMATCH"
+                )
+                raise intended_count_mismatch
+            _fail("GE_CURSOR_B3_RULE11_COUNT_MISMATCH")
         if (
-            not check.accepted
-            or check.violation_count != 0
-            or snapshot.cursor_ledger_logical_write_delta != 1
+            snapshot.cursor_ledger_logical_write_delta != 1
             or snapshot.cursor_ledger_fixed_statement_delta != 1
             or not snapshot.outer_ledger_unchanged
             or not _exact_ledger(snapshot.outer_ledger_before, snapshot.outer_ledger_after)
@@ -672,13 +1210,35 @@ def _execute_sqlite_cursor_publication_rule11_intrinsic(
         latch_entry = _DICT_GET(_WRITE_BY_CONTEXT, _ID(snapshot.context))
         if latch_entry is not None and latch_entry.key_ref() is snapshot.context:
             cast(_ContextLatch, latch_entry.value).lifecycle = "poisoned"
-        with suppress(BaseException):
+        reason = "SQLite Rule 11 failed"
+        selected_count_mismatch = (
+            mismatch_outcome is not None and primary is intended_count_mismatch
+        )
+        if mismatch_outcome is not None:
+            mismatch_outcome.write_lifecycle = "poisoned"
+        if selected_count_mismatch:
+            reason = "SQLite Rule 11 five counts disagree"
+        try:
             _poison_outer(
                 snapshot.context,
                 snapshot.consumed_tombstone,
                 snapshot.post_rebind_adoption,
-                "SQLite Rule 11 failed",
+                reason,
             )
+        except BaseException:
+            pass
+        else:
+            if mismatch_outcome is not None:
+                mismatch_outcome.first_poison_reason = reason
+                mismatch_outcome.tombstone_lifecycle = "poisoned"
+                mismatch_outcome.adoption_lifecycle = "poisoned"
+            if selected_count_mismatch:
+                _record_sqlite_connection_cursor_publication_rebind_completed_primary_intrinsic(
+                    snapshot.connection,
+                    snapshot.rebind_execution,
+                    primary,
+                    "rule11-five-count",
+                )
         raise primary
     record.consumed = True
     record.snapshot = snapshot._replace(
@@ -807,6 +1367,16 @@ def _execute_sqlite_cursor_publication_rebind_rule11_intrinsic(
             _fail("GE_CURSOR_B3_REBIND_RELEASE_FAULT")
         _fail("GE_CURSOR_B3_REBIND_CANCELLED")
     try:
+        _handoff_sqlite_cursor_publication_rebind_evidence_mismatch_intrinsic(
+            session, context, prepared_owner, execution
+        )
+    except BaseException as primary:
+        with suppress(BaseException):
+            _release_sqlite_cursor_publication_rebind_context_before_consume_intrinsic(
+                context, prepared_owner
+            )
+        raise primary
+    try:
         tombstone = _consume_sqlite_cursor_publication_session_for_rebind_intrinsic(
             context
         )
@@ -840,15 +1410,38 @@ def _execute_sqlite_cursor_publication_rebind_rule11_intrinsic(
         )
         return _execute_sqlite_cursor_publication_rule11_intrinsic(write)
     except BaseException as primary:
+        execution_completed = False
         with suppress(BaseException):
-            _release_sqlite_connection_cursor_publication_rebind_intrinsic(
-                connection, execution
+            execution_completed = (
+                _read_sqlite_connection_cursor_publication_rebind_snapshot_intrinsic(
+                    connection, execution
+                ).lifecycle
+                == "completed"
             )
-        with suppress(BaseException):
-            _poison_sqlite_cursor_publication_rebind_downstream_intrinsic(
-                context,
-                tombstone,
-                "SQLite serialized rebind Rule 11 failed after T",
-                adoption,
+        if not execution_completed:
+            with suppress(BaseException):
+                _release_sqlite_connection_cursor_publication_rebind_intrinsic(
+                    connection, execution
+                )
+        mismatch_outcome = _evidence_mismatch_outcome(execution)
+        if mismatch_outcome is None or mismatch_outcome.first_poison_reason is None:
+            fallback_reason = (
+                "SQLite Rule 11 failed"
+                if mismatch_outcome is not None
+                else "SQLite serialized rebind Rule 11 failed after T"
             )
+            try:
+                _poison_sqlite_cursor_publication_rebind_downstream_intrinsic(
+                    context,
+                    tombstone,
+                    fallback_reason,
+                    adoption,
+                )
+            except BaseException:
+                pass
+            else:
+                if mismatch_outcome is not None:
+                    mismatch_outcome.first_poison_reason = fallback_reason
+                    mismatch_outcome.tombstone_lifecycle = "poisoned"
+                    mismatch_outcome.adoption_lifecycle = "poisoned"
         raise primary

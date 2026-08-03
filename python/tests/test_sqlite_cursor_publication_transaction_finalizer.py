@@ -103,8 +103,19 @@ def _captured_failure(
         graph.connection, graph.authority, session
     )
     presentation = finalizer._owner_presentation(owner)
-    connection, authority, context, tombstone, execution, _generation, primary = presentation
+    (
+        connection,
+        authority,
+        context,
+        tombstone,
+        execution,
+        _generation,
+        primary,
+        adoption,
+        write,
+    ) = presentation
     assert connection is graph.connection and authority is graph.authority
+    assert adoption is None and write is None
     return graph, owner, primary, context, tombstone, execution
 
 
@@ -266,11 +277,20 @@ def _captured_changes_failure(
     assert rebound_calls == 0
     assert len(protocol._WRITE_RECEIPTS) == write_before
     assert len(protocol._RULE11_RECEIPTS) == rule11_before
-    connection, authority, context, tombstone, execution, _generation, primary = (
-        finalizer._owner_presentation(owner)
-    )
+    (
+        connection,
+        authority,
+        context,
+        tombstone,
+        execution,
+        _generation,
+        primary,
+        adoption,
+        write,
+    ) = finalizer._owner_presentation(owner)
     assert connection is graph.connection and authority is graph.authority
     assert execution is executions[0]
+    assert adoption is None and write is None
     return graph, owner, primary, context, tombstone, execution
 
 
@@ -961,7 +981,7 @@ def test_capture_leaf_is_definition_time_closure_not_rebindable_global(
     assert closure["exact_leaf"].cell_contents is exact_leaf
     assert closure["implementation"].cell_contents is finalizer._capture_implementation
     owner = capture(graph.connection, graph.authority, session)
-    primary = finalizer._owner_presentation(owner)[-1]
+    primary = finalizer._owner_presentation(owner)[6]
     assert type(primary) is ValueError
     assert primary.args == ("GE_CURSOR_B3_CURSOR_REBIND_EXECUTE",)
     assert rebound_calls == 0
@@ -1131,9 +1151,18 @@ def test_real_after_update_counter_amplification_finalizes_and_rolls_back(
     owner = finalizer._capture_sqlite_cursor_postconsume_transaction_failure_finalizer_intrinsic(
         graph.connection, graph.authority, _session(graph)
     )
-    _connection, _authority, _context, _tombstone, execution, _generation, primary = (
-        finalizer._owner_presentation(owner)
-    )
+    (
+        _connection,
+        _authority,
+        _context,
+        _tombstone,
+        execution,
+        _generation,
+        primary,
+        adoption,
+        write,
+    ) = finalizer._owner_presentation(owner)
+    assert adoption is None and write is None
     native = source._read_sqlite_connection_cursor_publication_rebind_snapshot_intrinsic(
         graph.connection, execution
     )
@@ -1492,3 +1521,457 @@ def test_finalized_owner_retains_only_pure_snapshot_not_graph_or_primary(
     assert [diagnostic.code for diagnostic in snapshot.diagnostics] == [
         "GE_SQLITE_POST_T_TERMINAL_PRIMARY"
     ]
+
+
+_CANONICAL_EVIDENCE_MISMATCH_MATRIX = (
+    ("N+C", ("native-affected", "changes-affected")),
+    ("N+T", ("native-affected", "total-delta")),
+    ("N+O", ("native-affected", "outer-ledger")),
+    ("N+L", ("native-affected", "cursor-ledger")),
+    ("C+T", ("changes-affected", "total-delta")),
+    ("C+O", ("changes-affected", "outer-ledger")),
+    ("C+L", ("changes-affected", "cursor-ledger")),
+    ("T+O", ("total-delta", "outer-ledger")),
+    ("T+L", ("total-delta", "cursor-ledger")),
+    ("O+L", ("outer-ledger", "cursor-ledger")),
+    ("N+C+T", ("native-affected", "changes-affected", "total-delta")),
+    ("C+O+L", ("changes-affected", "outer-ledger", "cursor-ledger")),
+    (
+        "N+C+T+L",
+        ("native-affected", "changes-affected", "total-delta", "cursor-ledger"),
+    ),
+    (
+        "N+C+T+O+L",
+        (
+            "native-affected",
+            "changes-affected",
+            "total-delta",
+            "outer-ledger",
+            "cursor-ledger",
+        ),
+    ),
+)
+
+
+@pytest.mark.parametrize(
+    ("_case_id", "dimensions"),
+    _CANONICAL_EVIDENCE_MISMATCH_MATRIX,
+    ids=[case_id for case_id, _dimensions in _CANONICAL_EVIDENCE_MISMATCH_MATRIX],
+)
+def test_pair_multi_evidence_matrix_captures_completed_e_and_finalizes_exact_primary(
+    _case_id: str,
+    dimensions: tuple[str, ...],
+) -> None:
+    graph = _CursorAdoptionGraph(1)
+    session = _session(graph)
+    protocol._arm_sqlite_cursor_publication_rebind_evidence_mismatch_for_test_intrinsic(
+        session, dimensions
+    )
+
+    owner = finalizer._capture_sqlite_cursor_postconsume_transaction_failure_finalizer_intrinsic(
+        graph.connection, graph.authority, session
+    )
+    (
+        connection,
+        authority,
+        context,
+        tombstone,
+        execution,
+        _generation,
+        primary,
+        adoption,
+        write,
+    ) = finalizer._owner_presentation(owner)
+    assert connection is graph.connection
+    assert authority is graph.authority
+    assert adoption is not None
+
+    native = source._read_sqlite_connection_cursor_publication_rebind_snapshot_intrinsic(
+        graph.connection, execution
+    )
+    assert native.lifecycle == "completed"
+    assert (
+        native.affected_rows,
+        native.changes_affected_rows,
+        native.total_changes_delta,
+        native.cursor_ledger_delta.affected_rows_watermark,
+    ) == (1, 1, 1, 1)
+    assert native.cursor_ledger_before == (0, 0, 0)
+    assert native.cursor_ledger_after == native.cursor_ledger_delta == (1, 1, 1)
+
+    outcome = (
+        protocol._read_sqlite_cursor_publication_rebind_evidence_mismatch_outcome_for_test_intrinsic(
+            graph.connection, execution
+        )
+    )
+    assert outcome.dimensions == dimensions
+    assert outcome.evaluated_dimensions == dimensions
+    assert outcome.real_evidence_observed is True
+    assert outcome.observed_counts == protocol._Rule11CountProjection(1, 1, 1, 1, 1)
+    assert outcome.projected_counts == protocol._Rule11CountProjection(
+        1,
+        1 + int("native-affected" in dimensions),
+        1 + int("changes-affected" in dimensions),
+        1 + int("total-delta" in dimensions),
+        1 + int("cursor-ledger" in dimensions),
+    )
+    assert outcome.check.accepted is False
+    assert outcome.check.violation_count == 1
+    assert outcome.outer_mismatch is ("outer-ledger" in dimensions)
+    assert outcome.rule11_lifecycle == "absent"
+    assert outcome.tombstone_lifecycle == outcome.adoption_lifecycle == "poisoned"
+
+    context_snapshot = (
+        outer._read_sqlite_cursor_publication_rebind_context_snapshot_intrinsic(context)
+    )
+    tombstone_snapshot = (
+        outer._read_sqlite_cursor_publication_session_consumed_tombstone_snapshot_intrinsic(
+            tombstone
+        )
+    )
+    authority_snapshot = (
+        outer._read_sqlite_cursor_outer_publication_authority_snapshot_intrinsic(
+            graph.authority
+        )
+    )
+    assert context_snapshot.lifecycle == tombstone_snapshot.lifecycle == "poisoned"
+    assert authority_snapshot.post_rebind_watermark_adoption is adoption
+    assert authority_snapshot.lifecycle == authority_snapshot.write_phase == "poisoned"
+
+    selected = _read_finalizer(owner)
+    if "outer-ledger" in dimensions:
+        assert write is None
+        assert outcome.write_lifecycle == "absent"
+        assert outcome.first_poison_reason == (
+            "SQLite rebind evidence mismatch outer ledger"
+        )
+        assert selected.primary_boundary == "rule11-outer-ledger"
+        assert type(primary) is ValueError
+        assert primary.args == ("GE_CURSOR_B3_REBIND_EVIDENCE_OUTER",)
+    else:
+        assert write is not None
+        assert outcome.write_lifecycle == "poisoned"
+        assert outcome.first_poison_reason == "SQLite Rule 11 five counts disagree"
+        assert selected.primary_boundary == "rule11-five-count"
+        assert type(primary) is ValueError
+        assert primary.args == ("GE_CURSOR_B3_RULE11_COUNT_MISMATCH",)
+
+    finalized = _finalize(owner, primary)
+    assert finalized.rollback_attempt_count == finalized.rollback_native_return_count == 1
+    assert finalized.close_attempt_count == finalized.close_native_return_count == 1
+    assert finalizer._owner_presentation(owner) == (None,) * 9
+
+
+def test_all_five_cleanup_primary_precedes_ambiguous_faults_and_fresh_graph_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    location = tmp_path / "all-five-recovery.sqlite3"
+    original_init = source.SQLiteV1BaselineConnectionOwner.__init__
+    with monkeypatch.context() as redirected:
+        redirected.setattr(
+            source.SQLiteV1BaselineConnectionOwner,
+            "__init__",
+            lambda owner, _location: original_init(owner, str(location)),
+        )
+        graph = _CursorAdoptionGraph(1)
+    raw = cast(
+        sqlite3.Connection,
+        object.__getattribute__(
+            graph.connection, "_SQLiteV1BaselineConnectionOwner__connection"
+        ),
+    )
+    before = raw.execute("SELECT * FROM main.ge_cycle_cursors ORDER BY tenant_id").fetchall()
+    assert raw.execute("PRAGMA main.user_version").fetchone() == (2,)
+    assert raw.execute("SELECT COUNT(*) FROM main.ge_cycle_schema").fetchone() == (1,)
+    assert raw.execute("SELECT COUNT(*) FROM main.ge_cycle_cursors").fetchone() == (1,)
+    session = _session(graph)
+    dimensions = _CANONICAL_EVIDENCE_MISMATCH_MATRIX[-1][1]
+    protocol._arm_sqlite_cursor_publication_rebind_evidence_mismatch_for_test_intrinsic(
+        session, dimensions
+    )
+    owner = finalizer._capture_sqlite_cursor_postconsume_transaction_failure_finalizer_intrinsic(
+        graph.connection, graph.authority, session
+    )
+    primary = finalizer._owner_presentation(owner)[6]
+    rollback_fault = RollbackSecondary("after rollback return")
+    close_fault = CloseTertiary("after close return")
+    finalizer._arm_sqlite_cursor_postconsume_after_native_return_fault_for_test_intrinsic(
+        owner, "rollback", rollback_fault
+    )
+    finalizer._arm_sqlite_cursor_postconsume_after_native_return_fault_for_test_intrinsic(
+        owner, "close", close_fault
+    )
+    finalized = _finalize(owner, primary)
+    assert finalized.primary_boundary == "rule11-outer-ledger"
+    assert finalized.rollback_after_native_return_ambiguous_fault_count == 1
+    assert finalized.close_after_native_return_ambiguous_fault_count == 1
+    assert [diagnostic.rank for diagnostic in finalized.diagnostics] == [
+        "primary",
+        "secondary",
+        "tertiary",
+    ]
+    reopened = sqlite3.connect(location)
+    try:
+        after = reopened.execute(
+            "SELECT * FROM main.ge_cycle_cursors ORDER BY tenant_id"
+        ).fetchall()
+        assert reopened.execute("PRAGMA main.user_version").fetchone() == (1,)
+        assert reopened.execute("PRAGMA main.application_id").fetchone() == (1_195_724_359,)
+        assert reopened.execute("SELECT COUNT(*) FROM main.ge_cycle_schema").fetchone() == (
+            1,
+        )
+        assert reopened.execute("SELECT COUNT(*) FROM main.ge_cycle_cursors").fetchone() == (
+            1,
+        )
+        assert reopened.execute(
+            "SELECT COUNT(*) FROM main.sqlite_master "
+            "WHERE name IN ('ge_cycle_operation_baselines', "
+            "'ge_cycle_operation_baseline_entries')"
+        ).fetchone() == (0,)
+        assert reopened.execute("PRAGMA main.integrity_check").fetchone() == ("ok",)
+        assert reopened.execute("PRAGMA main.foreign_key_check").fetchall() == []
+    finally:
+        reopened.close()
+    assert after == before
+
+    fresh = _CursorAdoptionGraph(1)
+    result = protocol._execute_sqlite_cursor_publication_rebind_rule11_intrinsic(
+        _session(fresh)
+    )
+    assert (
+        protocol._read_sqlite_cursor_publication_rule11_receipt_snapshot_intrinsic(
+            result
+        ).violation_count
+        == 0
+    )
+    fresh.connection.rollback()
+    fresh.connection.close()
+
+
+def test_completed_finalizer_rejects_hostile_mutated_boundary_before_io() -> None:
+    class HostileBoundary(str):
+        hooks = 0
+
+        def __hash__(self) -> int:
+            type(self).hooks += 1
+            raise AssertionError("hostile boundary hash executed")
+
+        def __eq__(self, _other: object) -> bool:
+            type(self).hooks += 1
+            raise AssertionError("hostile boundary equality executed")
+
+        def __bool__(self) -> bool:
+            type(self).hooks += 1
+            raise AssertionError("hostile boundary truthiness executed")
+
+    graph = _CursorAdoptionGraph(1)
+    session = _session(graph)
+    protocol._arm_sqlite_cursor_publication_rebind_evidence_mismatch_for_test_intrinsic(
+        session, ("native-affected", "changes-affected")
+    )
+    owner = finalizer._capture_sqlite_cursor_postconsume_transaction_failure_finalizer_intrinsic(
+        graph.connection, graph.authority, session
+    )
+    primary = finalizer._owner_presentation(owner)[6]
+    state = finalizer._state(owner)
+    state.primary_boundary = cast(Any, HostileBoundary("rule11-five-count"))
+    with pytest.raises(ValueError, match="GE_CURSOR_B3_POSTCONSUME_GRAPH"):
+        finalizer._finalize_sqlite_cursor_postconsume_transaction_failure_intrinsic(owner)
+    assert HostileBoundary.hooks == 0
+    assert state.lifecycle == "prepared"
+    assert state.owner_consume_count == 0
+    assert state.rollback_attempt_count == state.close_attempt_count == 0
+
+    state.primary_boundary = "rule11-five-count"
+    _finalize(owner, primary)
+
+
+def test_completed_capture_survives_copy_context_and_finalize_replay_is_zero_io() -> None:
+    graph = _CursorAdoptionGraph(1)
+    session = _session(graph)
+    protocol._arm_sqlite_cursor_publication_rebind_evidence_mismatch_for_test_intrinsic(
+        session, ("native-affected", "changes-affected")
+    )
+    owner = copy_context().run(
+        finalizer._capture_sqlite_cursor_postconsume_transaction_failure_finalizer_intrinsic,
+        graph.connection,
+        graph.authority,
+        session,
+    )
+    primary = finalizer._owner_presentation(owner)[6]
+    finalized = _finalize(owner, primary)
+    assert finalized.primary_boundary == "rule11-five-count"
+    assert finalized.rollback_attempt_count == finalized.close_attempt_count == 1
+    with pytest.raises(ValueError, match="GE_CURSOR_B3_POSTCONSUME_REPLAY"):
+        finalizer._finalize_sqlite_cursor_postconsume_transaction_failure_intrinsic(owner)
+    replayed = _read_finalizer(owner)
+    assert replayed.rollback_attempt_count == replayed.close_attempt_count == 1
+
+
+def test_completed_finalizer_strong_a_w_presentation_clears_and_collects() -> None:
+    def capture_finalize_drop() -> tuple[Any, list[Any]]:
+        graph = _CursorAdoptionGraph(1)
+        session = _session(graph)
+        protocol._arm_sqlite_cursor_publication_rebind_evidence_mismatch_for_test_intrinsic(
+            session, ("native-affected", "changes-affected")
+        )
+        owner = (
+            finalizer._capture_sqlite_cursor_postconsume_transaction_failure_finalizer_intrinsic(
+                graph.connection, graph.authority, session
+            )
+        )
+        presentation = finalizer._owner_presentation(owner)
+        primary = presentation[6]
+        adoption = presentation[7]
+        write = presentation[8]
+        assert adoption is not None and write is not None
+        marker = PrimaryCollectionMarker()
+        cast(Any, primary).collection_marker = marker
+        weak = [ref(adoption), ref(write), ref(marker)]
+        _finalize(owner, primary)
+        assert finalizer._owner_presentation(owner) == (None,) * 9
+        return owner, weak
+
+    owner, weak = capture_finalize_drop()
+    for _ in range(16):
+        gc.collect()
+    assert all(item() is None for item in weak)
+    assert _read_finalizer(owner).lifecycle == "finalized"
+
+
+def test_generic_completed_rule11_registration_error_is_not_finalizer_admitted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class GenericRule11Registration(BaseException):
+        pass
+
+    graph = _CursorAdoptionGraph(1)
+    session = _session(graph)
+
+    def reject_registration(*_args: object) -> None:
+        raise GenericRule11Registration("generic registration failure")
+
+    baseline = len(finalizer._POSTCONSUME_TRANSACTION_FAILURE_FINALIZERS)
+    monkeypatch.setattr(protocol, "_REGISTER_RULE11", reject_registration)
+    with pytest.raises(ValueError, match="GE_CURSOR_B3_POSTCONSUME_GRAPH"):
+        finalizer._capture_sqlite_cursor_postconsume_transaction_failure_finalizer_intrinsic(
+            graph.connection, graph.authority, session
+        )
+    assert len(finalizer._POSTCONSUME_TRANSACTION_FAILURE_FINALIZERS) == baseline
+    authority_snapshot = (
+        outer._read_sqlite_cursor_outer_publication_authority_snapshot_intrinsic(
+            graph.authority
+        )
+    )
+    assert authority_snapshot.lifecycle == "poisoned"
+    assert authority_snapshot.stage_ownership_poison_reason != (
+        "SQLite Rule 11 five counts disagree"
+    )
+    graph.connection.rollback()
+    graph.connection.close()
+
+
+def test_generic_evidence_write_drift_is_not_completed_finalizer_admitted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    graph = _CursorAdoptionGraph(1)
+    session = _session(graph)
+    protocol._arm_sqlite_cursor_publication_rebind_evidence_mismatch_for_test_intrinsic(
+        session, ("native-affected", "changes-affected")
+    )
+    original_rule11 = protocol._execute_sqlite_cursor_publication_rule11_intrinsic
+
+    def drift(receipt: Any) -> Any:
+        entry = protocol._WRITE_RECEIPTS[id(receipt)]
+        write_record = cast(Any, entry.value)
+        write_record.snapshot = write_record.snapshot._replace(
+            counts=protocol._Rule11CountProjection(1, 2, 1, 1, 1)
+        )
+        return original_rule11(receipt)
+
+    monkeypatch.setattr(
+        protocol, "_execute_sqlite_cursor_publication_rule11_intrinsic", drift
+    )
+    baseline = len(finalizer._POSTCONSUME_TRANSACTION_FAILURE_FINALIZERS)
+    with pytest.raises(ValueError, match="GE_CURSOR_B3_POSTCONSUME_GRAPH"):
+        finalizer._capture_sqlite_cursor_postconsume_transaction_failure_finalizer_intrinsic(
+            graph.connection, graph.authority, session
+        )
+    assert len(finalizer._POSTCONSUME_TRANSACTION_FAILURE_FINALIZERS) == baseline
+    authority_snapshot = (
+        outer._read_sqlite_cursor_outer_publication_authority_snapshot_intrinsic(
+            graph.authority
+        )
+    )
+    context = authority_snapshot.publication_rebind_context
+    assert context is not None
+    execution = outer._read_sqlite_cursor_publication_rebind_context_snapshot_intrinsic(
+        context
+    ).execution
+    outcome = (
+        protocol._read_sqlite_cursor_publication_rebind_evidence_mismatch_outcome_for_test_intrinsic(
+            graph.connection, execution
+        )
+    )
+    assert outcome.first_poison_reason == "SQLite Rule 11 failed"
+    assert outcome.tombstone_lifecycle == outcome.adoption_lifecycle == "poisoned"
+    assert outcome.write_lifecycle == "poisoned"
+    assert outcome.rule11_lifecycle == "absent"
+    graph.connection.rollback()
+    graph.connection.close()
+
+
+def test_completed_primary_take_substitution_clears_before_validation_and_replay() -> None:
+    graph = _CursorAdoptionGraph(1)
+    session = _session(graph)
+    protocol._arm_sqlite_cursor_publication_rebind_evidence_mismatch_for_test_intrinsic(
+        session, ("native-affected", "changes-affected")
+    )
+    capture, token = (
+        source._arm_sqlite_connection_cursor_publication_rebind_changes_primary_capture_intrinsic(
+            graph.connection
+        )
+    )
+    baseline = len(finalizer._POSTCONSUME_TRANSACTION_FAILURE_FINALIZERS)
+    primary: BaseException | None = None
+    try:
+        try:
+            protocol._execute_sqlite_cursor_publication_rebind_rule11_intrinsic(session)
+        except BaseException as error:
+            primary = error
+        assert primary is not None
+        authority_snapshot = (
+            outer._read_sqlite_cursor_outer_publication_authority_snapshot_intrinsic(
+                graph.authority
+            )
+        )
+        context = authority_snapshot.publication_rebind_context
+        assert context is not None
+        execution = (
+            outer._read_sqlite_cursor_publication_rebind_context_snapshot_intrinsic(
+                context
+            ).execution
+        )
+        substitute = SubstitutePrimary("wrong completed E")
+        with pytest.raises(ValueError, match="GE_CURSOR_B3_CURSOR_CHANGES_PRIMARY"):
+            source._take_sqlite_connection_cursor_publication_rebind_changes_primary_intrinsic(
+                capture, graph.connection, execution, substitute
+            )
+        assert capture.connection is None
+        assert capture.state is None
+        assert capture.error is None
+        assert capture.boundary is None
+        assert capture.consumed is True
+        assert capture.invalid is True
+        with pytest.raises(ValueError, match="GE_CURSOR_B3_CURSOR_CHANGES_PRIMARY"):
+            source._take_sqlite_connection_cursor_publication_rebind_changes_primary_intrinsic(
+                capture, graph.connection, execution, primary
+            )
+        assert len(finalizer._POSTCONSUME_TRANSACTION_FAILURE_FINALIZERS) == baseline
+    finally:
+        source._reset_sqlite_connection_cursor_publication_rebind_changes_primary_capture_intrinsic(
+            capture, token
+        )
+        graph.connection.rollback()
+        graph.connection.close()

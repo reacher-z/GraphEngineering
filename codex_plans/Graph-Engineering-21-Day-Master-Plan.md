@@ -21358,3 +21358,159 @@ portable真实trigger/checker组合，但仍不宣称整个Wave 1E或SQLite tran
    bounded objective，不能把两者混成无法独立验证的完成声明；
 8. 在public integration、success/failure transaction ownership、Rule12/fence与release acceptance全部闭环前，
    Graph Engineering整体计划、5K/6K star目标和开源交付状态继续保持进行中，star数量不能由代码验证保证。
+
+#### 31.37.75 Wave 1E/P7：Python runtime-local五维matrix与completed-E finalizer闭环（2026-08-02 PDT追加；既有内容不改）
+
+本节严格追加于既有21,360行之后。追加前完整计划SHA-256为
+`9dd23326f102e67fb478df5fdb88779d1ce7edb79c4cf6351c0fc58aee5aad82`；前21,360行必须保持
+byte-for-byte不变。本节执行31.37.74.5第1项，关闭Python缺失的runtime-local五维post-observation
+pair/multi matrix。它不扩大portable层声明，也不把package-private test seam冒充公开事务API。
+
+##### 31.37.75.1 并行开发拓扑、文件边界与完成定义
+
+本轮采用一个implementation owner、两个连续独立审计lane与一个subprotocol adversarial-test owner并行工作：
+
+1. implementation owner负责Python lower ContextVar、outer poison-safe graph、subprotocol、finalizer与finalizer tests；
+2. Context/ticket审计lane持续检查ID reuse、copy_context、clear-before-validation、weak registry和first-primary；
+3. TS-to-Python mapping审计lane先冻结14案顺序、O/W分支和completed/poisoned互斥contract；
+4. adversarial-test owner在明确handoff后独占subprotocol test文件，避免共享工作树写冲突；
+5. 最终diff审计lane在所有truthfulness与late-builtin修复后重新检查冻结字节；
+6. 主Agent只做集成、独立测试、计划/日志追加、commit和push，不覆盖其他lane未完成的文件。
+
+完成定义不是“14个pure checker输入通过”，而是每案必须从exact S进入真实SQLite UPDATE，冻结真实
+B2/N/C/T/L=`1/1/1/1/1`，在真实E completed和A minted之后投影，随后走O-first或five-count primary，
+由exact ContextVar ticket交给failure finalizer，执行rollback/close并保持恢复完整性。
+
+##### 31.37.75.2 exact-S pair/multi contract与竞态关闭
+
+Python新增package-private exact-S evidence arm。dimension固定顺序为N/C/T/O/L，输入必须是exact tuple、
+exact str、严格canonical order、无重复，且长度2至5。单维不在本pair/multi seam声明范围：特别是O-only
+不会制造five-count checker rejection，因此不能混入本轮完成定义。
+
+S registry使用`dict[id(S)] -> (weakref(S), pure pending)`，ID只用于bucket定位，每次读取都要求
+`key_ref() is S`，stale callback也只在callback weakref仍是当前entry weakref时删除。arm与既有
+preconsume-release seam双向互斥；无论先arm哪一方，第二方都必须失败且不得消费第一票。
+
+handoff按delete-before-register执行，认证exact authority、connection、context、prepared owner和E。
+第二次cancellation检查发生在evidence handoff之前，因此prepare后取消会释放P/context/E但保留S票，
+同一S重试无需re-arm。outcome registration即使register-then-throw，也必须删除pending/outcome、释放
+prepared context/E、禁止T/native I/O，并允许同一S无seam正常重试。
+
+##### 31.37.75.3 真实观测、全部projection与O-first顺序
+
+真实UPDATE、statement release、`changes()`、total changes、cursor ledger与A adoption全部成功后才冻结：
+
+- B2 cursor count；
+- native affected N；
+- changes affected C；
+- total changes delta T；
+- cursor ledger affected delta L；
+- outer-ledger mismatch bit O。
+
+selected N/C/T/L分别对真实值加1，O只设置outer bit。全部selected projection、evaluated dimension tuple与
+five-count checker必须在任何O-first poison之前完成并保存。`_evidence_projection_is_exact`逐字段重算
+projected=observed+selected offset，重跑checker并核对outer bit，避免metadata声称“评估过”但实际短路。
+
+固定14案与TS相同：十个pair N+C、N+T、N+O、N+L、C+T、C+O、C+L、T+O、T+L、O+L；
+四个multi N+C+T、C+O+L、N+C+T+L、N+C+T+O+L。所有案checker rejected、violation=1。
+含O的case first reason固定为outer ledger、W/R11 absent；不含O的case mint exact W后由Rule11 count gate
+失败，W consumed/poisoned、R11 absent。
+
+##### 31.37.75.4 completed-E exact primary与poison-safe C/T/A graph
+
+既有hybrid ContextVar ticket扩展两个exact boundary：`rule11-outer-ledger`和`rule11-five-count`。
+lower recorder只在E lifecycle=`completed`时接受，旧changes boundaries仍只接受`poisoned`，两个分支互斥。
+ticket在同步leaf期间强持exact connection/state/E/boundary；take先切换phase、清空所有强字段，再验证caller
+exact identity与boundary。wrong primary、cross E/connection或hostile boundary都会不可逆消费票据，正确重放也失败。
+
+新增outer-owned poison-safe snapshot helper从outer模块内部认证exact context/tombstone/adoption registry state、
+authority当前token/state链接、全部poisoned lifecycle、saved E snapshot与live completed E逐字段相等、epoch、
+total、outer ledger与authoritative poison reason。subprotocol不再直接信任可替换的mutable adoption state。
+
+##### 31.37.75.5 completed finalizer分支与强引用边界
+
+failure finalizer保留旧poisoned-E branch的`A is None`要求，并增加互斥completed-E branch：
+
+1. authority/context/T必须poisoned，但E必须completed且A必须exact存在；
+2. observed五计数必须从exact context/E重新计算并与outcome相等；
+3. O boundary要求exact reason、W absent；five boundary要求exact consumed+poisoned W与poisoned latch；
+4. 两路都要求R11 absent、checker rejected/violation=1、projection verifier exact；
+5. capture destructive take exact primary一次，finalize只重复认证graph，不第二次take；
+6. opaque owner为finalize前presentation强持exact A/W，global state只保存weak refs；
+7. finalize后owner九个presentation字段全部清空，A/W/E/primary graph可GC；
+8. trusted boundary必须先exact-str检查再做membership，hostile hash/eq/bool不会被执行。
+
+##### 31.37.75.6 first-primary、truthfulness与被拒绝实现
+
+审计在开发中阻止并修复六类问题：
+
+1. evidence handoff过早导致第二边界取消吞掉S票；最终移动到cancel/release分支之后、T之前；
+2. release与evidence arm单向互斥导致双挂；最终改为双向拒绝并保留第一票；
+3. Rule11 generic异常被冒充five-count completed primary；最终用本地exact intended-primary identity gating；
+4. completed graph起初没有认证authority-owned exact A state，且W验证代码曾被提前return绕过；最终由outer
+   poison-safe helper与return-after-validation关闭；
+5. outer poison前就写T/A poisoned与completed ticket会在cleanup fault时留下虚假结构化状态；最终只有
+   authenticated outer poison成功后才更新T/A/reason并record ticket；
+6. generic Rule11失败起初让structured outcome继续声称T/A/W active；最终W同步poison，outer poison成功后
+   T/A与generic first reason同步，仍严格禁止completed ticket。
+
+selected O/five primary始终优先于outer poison cleanup fault。poison失败被抑制但不会生成票据或虚假T/A状态；
+generic mint/Rule11 failure也保存真实first reason/lifecycle。新增代码全部使用definition-time稳定的
+`_TYPE/_REF/_LEN/_INT/_VALUE_ERROR/_TUPLE`，防止late builtin替换进入认证路径。
+
+##### 31.37.75.7 决定性测试与恢复证据
+
+subprotocol新增/扩展覆盖：
+
+- exact/hostile dimension tuple与str、空/单维/重复/逆序/超长/forged S；
+- 两种arm顺序、第二边界cancel票据保留、register-then-throw清理与同S重试；
+- 14案真实observed/projected/checker/O-W lifecycle；
+- checker-before-O-poison事件顺序；
+- retained-W drift与generic Rule11 registration不得mint completed ticket；
+- selected count与selected O primary在outer poison失败时仍优先且不写假ticket；
+- pending/outcome weak registry、replacement entry与stale callback安全。
+
+finalizer新增/扩展覆盖：
+
+- 14案真实capture/finalize、exact boundary/A/W/primary、rollback和close；
+- all-five叠加rollback/close after-native-return ambiguity，diagnostic顺序primary/secondary/tertiary；
+- 同一SQLite文件reopen后cursor rows不变、user_version/application_id正确、v2 tables absent、
+  `integrity_check=ok`、`foreign_key_check=[]`；
+- hostile trusted boundary零I/O拒绝；copy_context capture、finalize replay零额外I/O；
+- A/W/primary强presentation finalize后清空并GC；
+- completed exact ticket substitute primary destructive take、字段清空与正确primary replay拒绝。
+
+冻结字节最终完整回归：subprotocol `84 passed, 1 skipped in 346.88s`；唯一skip是65,536次有界CPython
+ID reuse观察未命中，设计不依赖该观察。finalizer `72 passed in 352.45s`。独立定向门包括14/14、
+19/19、22/22、20/20、40/40与最新补充6/6；Ruff、mypy、py_compile、diff-check全部通过。
+两个独立最终审计均为H0/M0/L0。
+
+##### 31.37.75.8 冻结文件身份
+
+六个文件mode均为0644，SHA-256：
+
+- lower source：`c108907b58806400a40785f3827ed3c49fd5d9abe8baa4d37505c1b66e3ae7b5`；
+- outer authority：`620794e88c9b5010965e332f69b5a3bb6a823638511395ae69768c712b42cbe8`；
+- subprotocol：`2111dd5655187b0e58f5e795d3e5bd83014b477fe6fdfaba158959135aa4cdd1`；
+- transaction finalizer：`114811206a78193d966cdef2b5837cb157f5f765c43fc3015633c3872fe9c4d4`；
+- subprotocol test：`405d957bc7fd4f75808c5a83d17ce417ebb13c4a6157782c2ae852f2b771025f`；
+- finalizer test：`746fd631b57b6bcbd66d0d13066c1fb07101fd864e7dd60734b1a6bf17e71916`。
+
+完整开发与审计证据保存于
+`codex_logs/reviews/SQLITE-PYTHON-FIVE-DIMENSION-COMPLETED-E-MATRIX-WAVE1E-P7-2026-08-02.md`。
+
+##### 31.37.75.9 Remaining strict nonclaims与下一最高优先级
+
+本节关闭31.37.74.5第1项Python runtime-local pair/multi五维matrix，但不宣称Wave 1E、SQLite事务或整个
+Graph Engineering计划完成：
+
+1. portable层仍没有共同native O/N-C/N-L/C-L seam，既有nonclaim保持；
+2. driver-native rollback throw与close throw仍无真实adapter复现；
+3. success transaction owner、BEGIN/COMMIT authority、Rule12、TEMP retirement、third clock与final commit
+   fence仍是SQLite主线下一阶段；
+4. package-private模块仍未进入公开workflow、package-root API与release acceptance；
+5. pair/multi test seam不接受单维；不得将其写成与TS test intrinsic 1..5输入完全同构的公开声明；
+6. CPython ID reuse观察可以honest skip，但exact identity实现已不依赖ID唯一性；
+7. 下一bounded objective应优先success transaction owner contract：定义BEGIN owner、success COMMIT authority、
+   failure rollback owner互斥，之后再进入Rule12/final fence；
+8. 开源受欢迎程度与5K/6K star是产品/社区目标，不是本轮代码可保证的测试后置条件。

@@ -55,6 +55,7 @@ class _IdentityIterationState:
 
 
 _COOPERATIVE_CONSTRUCTION_TOKEN = object()
+_TYPE = type
 
 
 class _CooperativeSourceItem:
@@ -407,6 +408,8 @@ _CursorPublicationChangesPrimaryBoundary = Literal[
     "serialized-changes-fetch",
     "serialized-changes-release",
     "serialized-changes-post-query",
+    "rule11-outer-ledger",
+    "rule11-five-count",
 ]
 
 
@@ -1547,7 +1550,7 @@ def _arm_sqlite_connection_cursor_publication_rebind_changes_primary_capture_int
     """Arm one context-local exact-E handoff for the fixed outer leaf call."""
 
     if (
-        type(connection) is not SQLiteV1BaselineConnectionOwner
+        _TYPE(connection) is not SQLiteV1BaselineConnectionOwner
         or _CURSOR_PUBLICATION_CHANGES_PRIMARY_CAPTURE.get() is not None
     ):
         _cursor_publication_rebind_fail("GE_CURSOR_B3_CURSOR_CHANGES_PRIMARY")
@@ -1591,6 +1594,7 @@ def _record_cursor_publication_rebind_changes_primary_exact(
 
     if (
         not isinstance(error, BaseException)
+        or _TYPE(boundary) is not str
         or boundary
         not in {
             "serialized-changes-pre-query",
@@ -1599,6 +1603,8 @@ def _record_cursor_publication_rebind_changes_primary_exact(
             "serialized-changes-fetch",
             "serialized-changes-release",
             "serialized-changes-post-query",
+            "rule11-outer-ledger",
+            "rule11-five-count",
         }
     ):
         _cursor_publication_rebind_fail("GE_CURSOR_B3_CURSOR_CHANGES_PRIMARY")
@@ -1628,6 +1634,26 @@ def _record_cursor_publication_rebind_changes_primary_exact(
     )
 
 
+def _record_sqlite_connection_cursor_publication_rebind_completed_primary_intrinsic(
+    connection: SQLiteV1BaselineConnectionOwner,
+    execution: _SQLiteConnectionCursorPublicationRebindExecution,
+    error: BaseException,
+    boundary: Literal["rule11-outer-ledger", "rule11-five-count"],
+) -> None:
+    """Record exact completed-E only inside the active synchronous leaf capture."""
+
+    if (
+        _TYPE(connection) is not SQLiteV1BaselineConnectionOwner
+        or _TYPE(boundary) is not str
+        or boundary not in {"rule11-outer-ledger", "rule11-five-count"}
+    ):
+        _cursor_publication_rebind_fail("GE_CURSOR_B3_CURSOR_CHANGES_PRIMARY")
+    state = _cursor_publication_rebind_state(connection, execution)
+    if state.lifecycle != "completed":
+        _cursor_publication_rebind_fail("GE_CURSOR_B3_CURSOR_CHANGES_PRIMARY")
+    _record_cursor_publication_rebind_changes_primary_exact(state, error, boundary)
+
+
 def _take_sqlite_connection_cursor_publication_rebind_changes_primary_intrinsic(
     capture: _CursorPublicationChangesPrimaryCapture,
     connection: SQLiteV1BaselineConnectionOwner,
@@ -1637,8 +1663,8 @@ def _take_sqlite_connection_cursor_publication_rebind_changes_primary_intrinsic(
     """Consume one exact lower E proof; clear before validating caller identity."""
 
     if (
-        type(capture) is not _CursorPublicationChangesPrimaryCapture
-        or type(connection) is not SQLiteV1BaselineConnectionOwner
+        _TYPE(capture) is not _CursorPublicationChangesPrimaryCapture
+        or _TYPE(connection) is not SQLiteV1BaselineConnectionOwner
         or not isinstance(error, BaseException)
     ):
         _cursor_publication_rebind_fail("GE_CURSOR_B3_CURSOR_CHANGES_PRIMARY")
@@ -1665,16 +1691,30 @@ def _take_sqlite_connection_cursor_publication_rebind_changes_primary_intrinsic(
             )
         )
     state = _cursor_publication_rebind_state(connection, execution)
+    completed_boundary = _TYPE(boundary) is str and boundary in {
+        "rule11-outer-ledger",
+        "rule11-five-count",
+    }
+    changes_boundary = _TYPE(boundary) is str and boundary in {
+        "serialized-changes-pre-query",
+        "serialized-changes-prepare",
+        "serialized-changes-execute",
+        "serialized-changes-fetch",
+        "serialized-changes-release",
+        "serialized-changes-post-query",
+    }
+    required_lifecycle = "completed" if completed_boundary else "poisoned"
     if (
         current is None
         or current.phase != "recorded"
         or current.capture is not capture
         or current.nonce is not capture.nonce
         or invalid
+        or not (completed_boundary or changes_boundary)
         or recorded_connection is not connection
         or recorded_state is not state
         or state.connection is not connection
-        or state.lifecycle != "poisoned"
+        or state.lifecycle != required_lifecycle
         or primary is None
         or boundary is None
         or primary is not error

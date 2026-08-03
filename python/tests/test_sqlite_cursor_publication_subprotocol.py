@@ -245,6 +245,51 @@ def _session(graph: Any) -> Any:
     )
 
 
+_EVIDENCE_MISMATCH_CASES = (
+    (("native-affected", "changes-affected"), (1, 2, 2, 1, 1), False),
+    (("native-affected", "total-delta"), (1, 2, 1, 2, 1), False),
+    (("native-affected", "outer-ledger"), (1, 2, 1, 1, 1), True),
+    (("native-affected", "cursor-ledger"), (1, 2, 1, 1, 2), False),
+    (("changes-affected", "total-delta"), (1, 1, 2, 2, 1), False),
+    (("changes-affected", "outer-ledger"), (1, 1, 2, 1, 1), True),
+    (("changes-affected", "cursor-ledger"), (1, 1, 2, 1, 2), False),
+    (("total-delta", "outer-ledger"), (1, 1, 1, 2, 1), True),
+    (("total-delta", "cursor-ledger"), (1, 1, 1, 2, 2), False),
+    (("outer-ledger", "cursor-ledger"), (1, 1, 1, 1, 2), True),
+    (
+        ("native-affected", "changes-affected", "total-delta"),
+        (1, 2, 2, 2, 1),
+        False,
+    ),
+    (
+        ("changes-affected", "outer-ledger", "cursor-ledger"),
+        (1, 1, 2, 1, 2),
+        True,
+    ),
+    (
+        (
+            "native-affected",
+            "changes-affected",
+            "total-delta",
+            "cursor-ledger",
+        ),
+        (1, 2, 2, 2, 2),
+        False,
+    ),
+    (
+        (
+            "native-affected",
+            "changes-affected",
+            "total-delta",
+            "outer-ledger",
+            "cursor-ledger",
+        ),
+        (1, 2, 2, 2, 2),
+        True,
+    ),
+)
+
+
 def _graph_to_a() -> tuple[Any, Any, Any, Any, Any, Any]:
     graph = _AdoptionGraph(0)
     session = _session(graph)
@@ -511,6 +556,661 @@ def test_second_boundary_cancellation_releases_p_context_and_same_s_retries(
         )
     finally:
         graph.close()
+
+
+def test_evidence_mismatch_dimensions_require_exact_canonical_pair_or_multi() -> None:
+    class HostileTuple(tuple[Any, ...]):
+        pass
+
+    class HostileString(str):
+        def __eq__(self, _other: object) -> bool:
+            raise AssertionError("hostile string equality ran")
+
+        def __hash__(self) -> int:
+            raise AssertionError("hostile string hash ran")
+
+    graph = _AdoptionGraph(0)
+    try:
+        session = cast(Any, _session(graph))
+        invalid = (
+            (),
+            ("native-affected",),
+            ("native-affected", "native-affected"),
+            ("changes-affected", "native-affected"),
+            (
+                "native-affected",
+                "changes-affected",
+                "total-delta",
+                "outer-ledger",
+                "cursor-ledger",
+                "cursor-ledger",
+            ),
+            HostileTuple(("native-affected", "changes-affected")),
+            (HostileString("native-affected"), "changes-affected"),
+            ("native-affected", object()),
+        )
+        for dimensions in invalid:
+            with _expect("GE_CURSOR_B3_REBIND_EVIDENCE_DIMENSIONS"):
+                protocol._arm_sqlite_cursor_publication_rebind_evidence_mismatch_for_test_intrinsic(
+                    session, dimensions
+                )
+            assert id(session) not in protocol._EVIDENCE_MISMATCHES_BY_SESSION
+
+        protocol._arm_sqlite_cursor_publication_rebind_evidence_mismatch_for_test_intrinsic(
+            session, ("native-affected", "changes-affected")
+        )
+        pending = protocol._EVIDENCE_MISMATCHES_BY_SESSION[id(session)]
+        assert pending.key_ref() is session
+        assert cast(Any, pending.value).dimensions == (
+            "native-affected",
+            "changes-affected",
+        )
+        with _expect("GE_CURSOR_B3_REBIND_EVIDENCE_ARM"):
+            protocol._arm_sqlite_cursor_publication_rebind_evidence_mismatch_for_test_intrinsic(
+                cast(Any, session), ("native-affected", "total-delta")
+            )
+        assert protocol._EVIDENCE_MISMATCHES_BY_SESSION[id(session)] is pending
+        forged = cast(Any, object.__new__(type(session)))
+        with _expect("GE_CURSOR_B3_PUBLICATION_SESSION"):
+            protocol._arm_sqlite_cursor_publication_rebind_evidence_mismatch_for_test_intrinsic(
+                forged, ("native-affected", "changes-affected")
+            )
+    finally:
+        graph.close()
+
+
+def test_release_and_evidence_arms_are_symmetric_and_preserve_first_ticket() -> None:
+    class ReleasePrimary(BaseException):
+        pass
+
+    evidence_first = _AdoptionGraph(1)
+    release_first = _AdoptionGraph(0)
+    try:
+        evidence_session = _session(evidence_first)
+        protocol._arm_sqlite_cursor_publication_rebind_evidence_mismatch_for_test_intrinsic(
+            evidence_session, ("native-affected", "changes-affected")
+        )
+        with _expect("GE_CURSOR_B3_REBIND_RELEASE_FAULT"):
+            protocol._arm_sqlite_cursor_publication_preconsume_release_fault_for_test_intrinsic(
+                evidence_session, ReleasePrimary("must not replace evidence")
+            )
+        with _expect("GE_CURSOR_B3_RULE11_COUNT_MISMATCH"):
+            protocol._execute_sqlite_cursor_publication_rebind_rule11_intrinsic(
+                evidence_session
+            )
+
+        release_session = _session(release_first)
+        release_primary = ReleasePrimary("must remain selected")
+        protocol._arm_sqlite_cursor_publication_preconsume_release_fault_for_test_intrinsic(
+            release_session, release_primary
+        )
+        with _expect("GE_CURSOR_B3_REBIND_EVIDENCE_ARM"):
+            protocol._arm_sqlite_cursor_publication_rebind_evidence_mismatch_for_test_intrinsic(
+                release_session, ("native-affected", "changes-affected")
+            )
+        with pytest.raises(ReleasePrimary) as raised:
+            protocol._execute_sqlite_cursor_publication_rebind_rule11_intrinsic(
+                release_session
+            )
+        assert raised.value is release_primary
+    finally:
+        evidence_first.close()
+        release_first.close()
+
+
+def test_second_boundary_cancellation_preserves_evidence_arm_for_same_s_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    graph = _CursorAdoptionGraph(1)
+    try:
+        session = cast(Any, _session(graph))
+        original_check = protocol.__dict__[
+            "_is_sqlite_cursor_publication_session_cancellation_requested_intrinsic"
+        ]
+        original_prepare = protocol.__dict__[
+            "_prepare_sqlite_connection_cursor_publication_rebind_intrinsic"
+        ]
+        answers = iter((False, True))
+        executions: list[Any] = []
+
+        def check(_signal: object) -> bool:
+            return next(answers)
+
+        def prepare(connection: Any) -> Any:
+            execution = original_prepare(connection)
+            executions.append(execution)
+            return execution
+
+        monkeypatch.setattr(
+            protocol,
+            "_is_sqlite_cursor_publication_session_cancellation_requested_intrinsic",
+            check,
+        )
+        monkeypatch.setattr(
+            protocol,
+            "_prepare_sqlite_connection_cursor_publication_rebind_intrinsic",
+            prepare,
+        )
+        protocol._arm_sqlite_cursor_publication_rebind_evidence_mismatch_for_test_intrinsic(
+            session, ("native-affected", "changes-affected")
+        )
+        with _expect("GE_CURSOR_B3_REBIND_CANCELLED"):
+            protocol._execute_sqlite_cursor_publication_rebind_rule11_intrinsic(session)
+        pending = protocol._EVIDENCE_MISMATCHES_BY_SESSION[id(session)]
+        assert pending.key_ref() is session
+        assert cast(Any, pending.value).dimensions == (
+            "native-affected",
+            "changes-affected",
+        )
+        cancelled = source._read_sqlite_connection_cursor_publication_rebind_snapshot_intrinsic(
+            graph.connection, executions[0]
+        )
+        assert (cancelled.lifecycle, cancelled.execute_count, cancelled.release_count) == (
+            "released",
+            0,
+            1,
+        )
+
+        monkeypatch.setattr(
+            protocol,
+            "_is_sqlite_cursor_publication_session_cancellation_requested_intrinsic",
+            original_check,
+        )
+        with _expect("GE_CURSOR_B3_RULE11_COUNT_MISMATCH"):
+            protocol._execute_sqlite_cursor_publication_rebind_rule11_intrinsic(
+                cast(Any, session)
+            )
+        outcome = (
+            protocol._read_sqlite_cursor_publication_rebind_evidence_mismatch_outcome_for_test_intrinsic(
+                graph.connection, executions[1]
+            )
+        )
+        assert outcome.observed_counts == (1, 1, 1, 1, 1)
+        assert outcome.projected_counts == (1, 2, 2, 1, 1)
+    finally:
+        graph.close()
+
+
+def test_evidence_outcome_registration_failure_cleans_and_same_s_retries_normally(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class RegistrationPrimary(BaseException):
+        pass
+
+    graph = _CursorAdoptionGraph(1)
+    try:
+        session = _session(graph)
+        executions: list[Any] = []
+        original_prepare = protocol.__dict__[
+            "_prepare_sqlite_connection_cursor_publication_rebind_intrinsic"
+        ]
+        original_handoff = protocol.__dict__[
+            "_handoff_sqlite_cursor_publication_rebind_evidence_mismatch_intrinsic"
+        ]
+        original_register = protocol._REGISTER_EVIDENCE_OUTCOME
+
+        def prepare(connection: Any) -> Any:
+            execution = original_prepare(connection)
+            executions.append(execution)
+            return execution
+
+        def register_then_fail(*args: object) -> None:
+            original_register(*cast(Any, args))
+            raise RegistrationPrimary("outcome registration")
+
+        def handoff(*args: object) -> None:
+            original_handoff(*cast(Any, args), _register_outcome=register_then_fail)
+
+        monkeypatch.setattr(
+            protocol,
+            "_prepare_sqlite_connection_cursor_publication_rebind_intrinsic",
+            prepare,
+        )
+        monkeypatch.setattr(
+            protocol,
+            "_handoff_sqlite_cursor_publication_rebind_evidence_mismatch_intrinsic",
+            handoff,
+        )
+        protocol._arm_sqlite_cursor_publication_rebind_evidence_mismatch_for_test_intrinsic(
+            session, ("native-affected", "changes-affected")
+        )
+        with pytest.raises(RegistrationPrimary):
+            protocol._execute_sqlite_cursor_publication_rebind_rule11_intrinsic(session)
+        assert id(session) not in protocol._EVIDENCE_MISMATCHES_BY_SESSION
+        assert id(executions[0]) not in protocol._EVIDENCE_MISMATCH_OUTCOMES
+        released = source._read_sqlite_connection_cursor_publication_rebind_snapshot_intrinsic(
+            graph.connection, executions[0]
+        )
+        assert (released.lifecycle, released.execute_count, released.release_count) == (
+            "released",
+            0,
+            1,
+        )
+        authority = outer._read_sqlite_cursor_outer_publication_authority_snapshot_intrinsic(
+            graph.authority
+        )
+        assert authority.lifecycle == "active"
+        assert authority.publication_rebind_context is None
+        assert authority.publication_session_consumed_tombstone is None
+
+        monkeypatch.setattr(
+            protocol,
+            "_handoff_sqlite_cursor_publication_rebind_evidence_mismatch_intrinsic",
+            original_handoff,
+        )
+        result = protocol._execute_sqlite_cursor_publication_rebind_rule11_intrinsic(
+            session
+        )
+        assert (
+            protocol._read_sqlite_cursor_publication_rule11_receipt_snapshot_intrinsic(
+                result
+            ).counts
+            == (1, 1, 1, 1, 1)
+        )
+    finally:
+        graph.close()
+
+
+@pytest.mark.parametrize(
+    ("dimensions", "projected", "outer_mismatch"),
+    _EVIDENCE_MISMATCH_CASES,
+)
+def test_all_ordered_evidence_mismatch_cases_use_authentic_observations(
+    monkeypatch: pytest.MonkeyPatch,
+    dimensions: tuple[str, ...],
+    projected: tuple[int, int, int, int, int],
+    outer_mismatch: bool,
+) -> None:
+    graph = _CursorAdoptionGraph(1)
+    try:
+        session = _session(graph)
+        executions: list[Any] = []
+        original_prepare = protocol.__dict__[
+            "_prepare_sqlite_connection_cursor_publication_rebind_intrinsic"
+        ]
+
+        def prepare(connection: Any) -> Any:
+            execution = original_prepare(connection)
+            executions.append(execution)
+            return execution
+
+        monkeypatch.setattr(
+            protocol,
+            "_prepare_sqlite_connection_cursor_publication_rebind_intrinsic",
+            prepare,
+        )
+        protocol._arm_sqlite_cursor_publication_rebind_evidence_mismatch_for_test_intrinsic(
+            session, dimensions
+        )
+        expected = (
+            "GE_CURSOR_B3_REBIND_EVIDENCE_OUTER"
+            if outer_mismatch
+            else "GE_CURSOR_B3_RULE11_COUNT_MISMATCH"
+        )
+        with _expect(expected):
+            protocol._execute_sqlite_cursor_publication_rebind_rule11_intrinsic(session)
+        assert len(executions) == 1
+        outcome = (
+            protocol._read_sqlite_cursor_publication_rebind_evidence_mismatch_outcome_for_test_intrinsic(
+                graph.connection, executions[0]
+            )
+        )
+        assert outcome.dimensions == dimensions
+        assert outcome.evaluated_dimensions == dimensions
+        assert outcome.observed_counts == (1, 1, 1, 1, 1)
+        assert outcome.projected_counts == projected
+        assert outcome.check == (False, 1, "cursor rebind count mismatch")
+        assert outcome.real_evidence_observed is True
+        assert outcome.outer_mismatch is outer_mismatch
+        assert outcome.tombstone_lifecycle == "poisoned"
+        assert outcome.adoption_lifecycle == "poisoned"
+        assert outcome.write_lifecycle == ("absent" if outer_mismatch else "poisoned")
+        assert outcome.rule11_lifecycle == "absent"
+        assert outcome.first_poison_reason == (
+            "SQLite rebind evidence mismatch outer ledger"
+            if outer_mismatch
+            else "SQLite Rule 11 five counts disagree"
+        )
+    finally:
+        graph.close()
+
+
+def test_generic_retained_write_drift_cannot_mint_completed_primary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    graph = _CursorAdoptionGraph(1)
+    try:
+        session = _session(graph)
+        executions: list[Any] = []
+        completed: list[tuple[object, ...]] = []
+        original_prepare = protocol.__dict__[
+            "_prepare_sqlite_connection_cursor_publication_rebind_intrinsic"
+        ]
+        original_rule11 = protocol.__dict__[
+            "_execute_sqlite_cursor_publication_rule11_intrinsic"
+        ]
+        original_record = protocol.__dict__[
+            "_record_sqlite_connection_cursor_publication_rebind_completed_primary_intrinsic"
+        ]
+
+        def prepare(connection: Any) -> Any:
+            execution = original_prepare(connection)
+            executions.append(execution)
+            return execution
+
+        def drift(receipt: Any) -> Any:
+            entry = protocol._WRITE_RECEIPTS[id(receipt)]
+            record = cast(Any, entry.value)
+            record.snapshot = record.snapshot._replace(
+                counts=protocol._Rule11CountProjection(1, 2, 1, 1, 1)
+            )
+            return original_rule11(receipt)
+
+        def record(*args: object) -> None:
+            completed.append(args)
+            original_record(*cast(Any, args))
+
+        monkeypatch.setattr(
+            protocol,
+            "_prepare_sqlite_connection_cursor_publication_rebind_intrinsic",
+            prepare,
+        )
+        monkeypatch.setattr(
+            protocol, "_execute_sqlite_cursor_publication_rule11_intrinsic", drift
+        )
+        monkeypatch.setattr(
+            protocol,
+            "_record_sqlite_connection_cursor_publication_rebind_completed_primary_intrinsic",
+            record,
+        )
+        protocol._arm_sqlite_cursor_publication_rebind_evidence_mismatch_for_test_intrinsic(
+            session, ("native-affected", "changes-affected")
+        )
+        with _expect("GE_CURSOR_B3_RULE11_COUNT_MISMATCH"):
+            protocol._execute_sqlite_cursor_publication_rebind_rule11_intrinsic(session)
+        assert completed == []
+        outcome = (
+            protocol._read_sqlite_cursor_publication_rebind_evidence_mismatch_outcome_for_test_intrinsic(
+                graph.connection, executions[0]
+            )
+        )
+        assert outcome.first_poison_reason == "SQLite Rule 11 failed"
+        assert outcome.tombstone_lifecycle == "poisoned"
+        assert outcome.adoption_lifecycle == "poisoned"
+        assert outcome.write_lifecycle == "poisoned"
+        assert outcome.rule11_lifecycle == "absent"
+    finally:
+        graph.close()
+
+
+def test_selected_count_primary_precedes_outer_poison_failure_without_false_ticket(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    graph = _CursorAdoptionGraph(1)
+    try:
+        session = _session(graph)
+        protocol._arm_sqlite_cursor_publication_rebind_evidence_mismatch_for_test_intrinsic(
+            session, ("native-affected", "changes-affected")
+        )
+        execution = source._prepare_sqlite_connection_cursor_publication_rebind_intrinsic(
+            graph.connection
+        )
+        context = outer._prepare_sqlite_cursor_publication_rebind_context_intrinsic(
+            session, execution
+        )
+        context_snapshot = (
+            outer._read_sqlite_cursor_publication_rebind_context_snapshot_intrinsic(
+                context
+            )
+        )
+        prepared_owner = context_snapshot.prepared_owner
+        protocol._prepare_sqlite_cursor_publication_rebind_subprotocol_intrinsic(
+            context, prepared_owner
+        )
+        protocol._handoff_sqlite_cursor_publication_rebind_evidence_mismatch_intrinsic(
+            session, context, prepared_owner, execution
+        )
+        tombstone = outer._consume_sqlite_cursor_publication_session_for_rebind_intrinsic(
+            context
+        )
+        source._execute_sqlite_connection_cursor_publication_rebind_intrinsic(
+            graph.connection, execution, *context_snapshot.parameter_values
+        )
+        source._release_sqlite_connection_cursor_publication_rebind_intrinsic(
+            graph.connection, execution
+        )
+        source._prove_sqlite_connection_cursor_publication_rebind_changes_intrinsic(
+            graph.connection, execution
+        )
+        adoption = outer._adopt_sqlite_cursor_post_rebind_watermark_intrinsic(
+            context, tombstone, execution
+        )
+        write = protocol._mint_sqlite_cursor_publication_rebind_write_receipt_intrinsic(
+            context, prepared_owner, tombstone, adoption
+        )
+        completed: list[tuple[object, ...]] = []
+
+        def reject_poison(*_args: object) -> None:
+            raise RuntimeError("outer poison cleanup failed")
+
+        def record(*args: object) -> None:
+            completed.append(args)
+
+        monkeypatch.setattr(protocol, "_poison_outer", reject_poison)
+        monkeypatch.setattr(
+            protocol,
+            "_record_sqlite_connection_cursor_publication_rebind_completed_primary_intrinsic",
+            record,
+        )
+        with pytest.raises(ValueError) as raised:
+            protocol._execute_sqlite_cursor_publication_rule11_intrinsic(write)
+        assert raised.value.args == ("GE_CURSOR_B3_RULE11_COUNT_MISMATCH",)
+        assert completed == []
+
+        write_record = cast(Any, protocol._WRITE_RECEIPTS[id(write)].value)
+        assert write_record.consumed is True
+        assert write_record.snapshot.lifecycle == "poisoned"
+        assert write_record.snapshot.rule11_consume_count == 1
+        latch = cast(Any, protocol._WRITE_BY_CONTEXT[id(context)].value)
+        assert latch.lifecycle == "poisoned"
+        outcome = protocol._evidence_mismatch_outcome(execution)
+        assert outcome is not None
+        assert outcome.write_lifecycle == "poisoned"
+        assert outcome.tombstone_lifecycle == "active"
+        assert outcome.adoption_lifecycle == "active"
+        assert outcome.first_poison_reason is None
+    finally:
+        graph.close()
+
+
+def test_selected_outer_primary_precedes_poison_failure_without_false_ticket(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    graph = _CursorAdoptionGraph(1)
+    try:
+        session = _session(graph)
+        protocol._arm_sqlite_cursor_publication_rebind_evidence_mismatch_for_test_intrinsic(
+            session, ("native-affected", "outer-ledger")
+        )
+        execution = source._prepare_sqlite_connection_cursor_publication_rebind_intrinsic(
+            graph.connection
+        )
+        context = outer._prepare_sqlite_cursor_publication_rebind_context_intrinsic(
+            session, execution
+        )
+        context_snapshot = (
+            outer._read_sqlite_cursor_publication_rebind_context_snapshot_intrinsic(
+                context
+            )
+        )
+        prepared_owner = context_snapshot.prepared_owner
+        protocol._prepare_sqlite_cursor_publication_rebind_subprotocol_intrinsic(
+            context, prepared_owner
+        )
+        protocol._handoff_sqlite_cursor_publication_rebind_evidence_mismatch_intrinsic(
+            session, context, prepared_owner, execution
+        )
+        tombstone = outer._consume_sqlite_cursor_publication_session_for_rebind_intrinsic(
+            context
+        )
+        source._execute_sqlite_connection_cursor_publication_rebind_intrinsic(
+            graph.connection, execution, *context_snapshot.parameter_values
+        )
+        source._release_sqlite_connection_cursor_publication_rebind_intrinsic(
+            graph.connection, execution
+        )
+        source._prove_sqlite_connection_cursor_publication_rebind_changes_intrinsic(
+            graph.connection, execution
+        )
+        adoption = outer._adopt_sqlite_cursor_post_rebind_watermark_intrinsic(
+            context, tombstone, execution
+        )
+        completed: list[tuple[object, ...]] = []
+
+        def reject_poison(*_args: object) -> None:
+            raise RuntimeError("outer poison cleanup failed")
+
+        def record(*args: object) -> None:
+            completed.append(args)
+
+        monkeypatch.setattr(protocol, "_poison_outer", reject_poison)
+        monkeypatch.setattr(
+            protocol,
+            "_record_sqlite_connection_cursor_publication_rebind_completed_primary_intrinsic",
+            record,
+        )
+        with pytest.raises(ValueError) as raised:
+            protocol._mint_sqlite_cursor_publication_rebind_write_receipt_intrinsic(
+                context, prepared_owner, tombstone, adoption
+            )
+        assert raised.value.args == ("GE_CURSOR_B3_REBIND_EVIDENCE_OUTER",)
+        assert completed == []
+        outcome = protocol._evidence_mismatch_outcome(execution)
+        assert outcome is not None
+        assert outcome.write_lifecycle == "absent"
+        assert outcome.tombstone_lifecycle == "active"
+        assert outcome.adoption_lifecycle == "active"
+        assert outcome.first_poison_reason is None
+    finally:
+        graph.close()
+
+
+def test_outer_mismatch_evaluates_checker_before_no_write_poison(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    graph = _CursorAdoptionGraph(1)
+    try:
+        session = _session(graph)
+        ordered: list[str] = []
+        original_check = protocol.__dict__[
+            "_check_sqlite_cursor_publication_rule11_counts_intrinsic"
+        ]
+        original_poison = protocol.__dict__["_poison_outer"]
+
+        def check(projection: Any) -> Any:
+            ordered.append("check")
+            return original_check(projection)
+
+        def poison(*args: object) -> None:
+            ordered.append("poison")
+            original_poison(*cast(Any, args))
+
+        monkeypatch.setattr(
+            protocol, "_check_sqlite_cursor_publication_rule11_counts_intrinsic", check
+        )
+        monkeypatch.setattr(protocol, "_poison_outer", poison)
+        protocol._arm_sqlite_cursor_publication_rebind_evidence_mismatch_for_test_intrinsic(
+            session, ("native-affected", "outer-ledger")
+        )
+        with _expect("GE_CURSOR_B3_REBIND_EVIDENCE_OUTER"):
+            protocol._execute_sqlite_cursor_publication_rebind_rule11_intrinsic(session)
+        assert ordered[0] == "check"
+        assert ordered[1:] and set(ordered[1:]) == {"poison"}
+    finally:
+        graph.close()
+
+
+def test_evidence_pending_registry_is_weak_and_stale_callback_safe() -> None:
+    for _ in range(3):
+        gc.collect()
+    baseline = len(protocol._EVIDENCE_MISMATCHES_BY_SESSION)
+    graph = _AdoptionGraph(1)
+    session = _session(graph)
+    protocol._arm_sqlite_cursor_publication_rebind_evidence_mismatch_for_test_intrinsic(
+        session, ("native-affected", "changes-affected")
+    )
+    session_id = id(session)
+    original = protocol._EVIDENCE_MISMATCHES_BY_SESSION[session_id]
+    replacement = object.__new__(type(session))
+    replacement_ref = ref(replacement)
+    protocol._EVIDENCE_MISMATCHES_BY_SESSION[session_id] = protocol._Entry(
+        replacement_ref, original.value
+    )
+    callback = original.key_ref.__callback__
+    assert callback is not None
+    callback(original.key_ref)
+    assert protocol._EVIDENCE_MISMATCHES_BY_SESSION[session_id].key_ref() is replacement
+    protocol._EVIDENCE_MISMATCHES_BY_SESSION[session_id] = original
+
+    session_ref = ref(session)
+    graph.close()
+    del callback, graph, original, replacement, replacement_ref, session
+    for _ in range(12):
+        gc.collect()
+    assert session_ref() is None
+    assert len(protocol._EVIDENCE_MISMATCHES_BY_SESSION) == baseline
+
+
+def test_evidence_outcome_registry_is_weak_and_stale_callback_safe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for _ in range(3):
+        gc.collect()
+    baseline = len(protocol._EVIDENCE_MISMATCH_OUTCOMES)
+    graph = _CursorAdoptionGraph(1)
+    session = _session(graph)
+    executions: list[Any] = []
+    original_prepare = protocol.__dict__[
+        "_prepare_sqlite_connection_cursor_publication_rebind_intrinsic"
+    ]
+
+    def prepare(connection: Any) -> Any:
+        execution = original_prepare(connection)
+        executions.append(execution)
+        return execution
+
+    monkeypatch.setattr(
+        protocol,
+        "_prepare_sqlite_connection_cursor_publication_rebind_intrinsic",
+        prepare,
+    )
+    protocol._arm_sqlite_cursor_publication_rebind_evidence_mismatch_for_test_intrinsic(
+        session, ("native-affected", "changes-affected")
+    )
+    with _expect("GE_CURSOR_B3_RULE11_COUNT_MISMATCH"):
+        protocol._execute_sqlite_cursor_publication_rebind_rule11_intrinsic(session)
+    execution = executions[0]
+    execution_id = id(execution)
+    original = protocol._EVIDENCE_MISMATCH_OUTCOMES[execution_id]
+    replacement = object.__new__(type(execution))
+    replacement_ref = ref(replacement)
+    protocol._EVIDENCE_MISMATCH_OUTCOMES[execution_id] = protocol._Entry(
+        replacement_ref, original.value
+    )
+    callback = original.key_ref.__callback__
+    assert callback is not None
+    callback(original.key_ref)
+    assert protocol._EVIDENCE_MISMATCH_OUTCOMES[execution_id].key_ref() is replacement
+    protocol._EVIDENCE_MISMATCH_OUTCOMES[execution_id] = original
+
+    execution_ref = ref(execution)
+    graph.close()
+    del callback, execution, graph, original, replacement, replacement_ref, session
+    executions.clear()
+    for _ in range(12):
+        gc.collect()
+    assert execution_ref() is None
+    assert len(protocol._EVIDENCE_MISMATCH_OUTCOMES) == baseline
 
 
 def test_exact_s_preconsume_release_fault_is_selected_one_shot_and_isolated() -> None:

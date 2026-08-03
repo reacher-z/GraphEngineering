@@ -14,12 +14,15 @@ from .sqlite_cursor_publication_outer_authority import (
     _read_sqlite_cursor_publication_session_consumed_tombstone_snapshot_intrinsic,
     _read_sqlite_cursor_publication_session_snapshot_intrinsic,
     _SQLiteCursorOuterPublicationAuthority,
+    _SQLiteCursorPostRebindWatermarkAdoption,
     _SQLiteCursorPublicationRebindContext,
     _SQLiteCursorPublicationSession,
     _SQLiteCursorPublicationSessionConsumedTombstone,
 )
 from .sqlite_cursor_publication_subprotocol import (
+    _assert_sqlite_cursor_publication_rebind_completed_failure_for_finalizer_intrinsic,
     _execute_sqlite_cursor_publication_rebind_rule11_intrinsic,
+    _SQLiteCursorPublicationRebindWriteReceipt,
 )
 from .sqlite_operation_baseline_source import (
     SQLiteV1BaselineConnectionOwner,
@@ -36,6 +39,8 @@ _LEAF = _execute_sqlite_cursor_publication_rebind_rule11_intrinsic
 _OWNER_ROLLBACK = SQLiteV1BaselineConnectionOwner.rollback
 _OWNER_CLOSE = SQLiteV1BaselineConnectionOwner.close
 _MAX_SAFE_INTEGER = 9_007_199_254_740_991
+_TYPE = type
+_REF = ref
 
 _PrimaryBoundary = Literal[
     "native-execute",
@@ -45,6 +50,8 @@ _PrimaryBoundary = Literal[
     "serialized-changes-fetch",
     "serialized-changes-release",
     "serialized-changes-post-query",
+    "rule11-outer-ledger",
+    "rule11-five-count",
 ]
 
 
@@ -56,6 +63,7 @@ class _PostConsumeTransactionFailureFinalizer:
     """Opaque owner; strong presentation lives here, never in a registry value."""
 
     __slots__ = (
+        "__adoption",
         "__authority",
         "__connection",
         "__context",
@@ -64,6 +72,7 @@ class _PostConsumeTransactionFailureFinalizer:
         "__primary",
         "__tombstone",
         "__weakref__",
+        "__write",
     )
 
     def __init__(
@@ -75,6 +84,8 @@ class _PostConsumeTransactionFailureFinalizer:
         execution: _SQLiteConnectionCursorPublicationRebindExecution,
         generation: object,
         primary: BaseException,
+        adoption: _SQLiteCursorPostRebindWatermarkAdoption | None,
+        write: _SQLiteCursorPublicationRebindWriteReceipt | None,
         token: object,
     ) -> None:
         if token is not _CONSTRUCTION_TOKEN:
@@ -86,6 +97,8 @@ class _PostConsumeTransactionFailureFinalizer:
         object.__setattr__(self, "_PostConsumeTransactionFailureFinalizer__execution", execution)
         object.__setattr__(self, "_PostConsumeTransactionFailureFinalizer__generation", generation)
         object.__setattr__(self, "_PostConsumeTransactionFailureFinalizer__primary", primary)
+        object.__setattr__(self, "_PostConsumeTransactionFailureFinalizer__adoption", adoption)
+        object.__setattr__(self, "_PostConsumeTransactionFailureFinalizer__write", write)
 
     def __setattr__(self, _name: str, _value: object) -> None:
         raise TypeError("GE_CURSOR_B3_POSTCONSUME_FINALIZER_STATE")
@@ -150,6 +163,8 @@ class _FinalizerState:
     primary_id: int
     transaction_epoch: int
     primary_boundary: _PrimaryBoundary
+    adoption_ref: ReferenceType[_SQLiteCursorPostRebindWatermarkAdoption] | None = None
+    write_ref: ReferenceType[_SQLiteCursorPublicationRebindWriteReceipt] | None = None
     lifecycle: Literal["prepared", "finalizing", "finalized"] = "prepared"
     state_trace: tuple[str, ...] = ("prepared",)
     owner_consume_count: Literal[0, 1] = 0
@@ -191,6 +206,8 @@ def _owner_presentation(
     _SQLiteConnectionCursorPublicationRebindExecution,
     object,
     BaseException,
+    _SQLiteCursorPostRebindWatermarkAdoption | None,
+    _SQLiteCursorPublicationRebindWriteReceipt | None,
 ]:
     try:
         values = (
@@ -201,6 +218,8 @@ def _owner_presentation(
             object.__getattribute__(owner, "_PostConsumeTransactionFailureFinalizer__execution"),
             object.__getattribute__(owner, "_PostConsumeTransactionFailureFinalizer__generation"),
             object.__getattribute__(owner, "_PostConsumeTransactionFailureFinalizer__primary"),
+            object.__getattribute__(owner, "_PostConsumeTransactionFailureFinalizer__adoption"),
+            object.__getattribute__(owner, "_PostConsumeTransactionFailureFinalizer__write"),
         )
     except (AttributeError, TypeError):
         _fail("GE_CURSOR_B3_POSTCONSUME_FINALIZER")
@@ -213,6 +232,8 @@ def _owner_presentation(
             _SQLiteConnectionCursorPublicationRebindExecution,
             object,
             BaseException,
+            _SQLiteCursorPostRebindWatermarkAdoption | None,
+            _SQLiteCursorPublicationRebindWriteReceipt | None,
         ],
         values,
     )
@@ -302,7 +323,7 @@ def _authenticate_exact_native_primary_graph(
     object,
     int,
 ]:
-    context, tombstone, execution, generation, epoch, _boundary = (
+    context, tombstone, execution, generation, epoch, _boundary, _adoption, _write = (
         _authenticate_exact_post_t_primary_graph(
             connection,
             authority,
@@ -328,7 +349,28 @@ def _authenticate_exact_post_t_primary_graph(
     object,
     int,
     _PrimaryBoundary,
+    _SQLiteCursorPostRebindWatermarkAdoption | None,
+    _SQLiteCursorPublicationRebindWriteReceipt | None,
 ]:
+    legal_boundaries = {
+        "native-execute",
+        "serialized-changes-pre-query",
+        "serialized-changes-prepare",
+        "serialized-changes-execute",
+        "serialized-changes-fetch",
+        "serialized-changes-release",
+        "serialized-changes-post-query",
+        "rule11-outer-ledger",
+        "rule11-five-count",
+    }
+    if _trusted_boundary is not None and (
+        _TYPE(_trusted_boundary) is not str or _trusted_boundary not in legal_boundaries
+    ):
+        _fail("GE_CURSOR_B3_POSTCONSUME_GRAPH")
+    if _expected_boundary is not None and (
+        _TYPE(_expected_boundary) is not str or _expected_boundary not in legal_boundaries
+    ):
+        _fail("GE_CURSOR_B3_POSTCONSUME_GRAPH")
     try:
         authority_snapshot = _read_sqlite_cursor_outer_publication_authority_snapshot_intrinsic(
             authority
@@ -356,7 +398,6 @@ def _authenticate_exact_post_t_primary_graph(
         or authority_snapshot.lifecycle != "poisoned"
         or authority_snapshot.write_phase != "poisoned"
         or authority_snapshot.connection is not connection
-        or authority_snapshot.post_rebind_watermark_adoption is not None
         or context_snapshot.lifecycle != "poisoned"
         or context_snapshot.authority is not authority
         or context_snapshot.connection is not connection
@@ -371,7 +412,6 @@ def _authenticate_exact_post_t_primary_graph(
         or generation is not context_snapshot.transaction_generation
         or generation is not execution_snapshot.transaction_generation
         or type(epoch) is not int
-        or execution_snapshot.lifecycle != "poisoned"
         or execution_snapshot.execute_count != 1
         or execution_snapshot.release_count != 1
     ):
@@ -382,6 +422,79 @@ def _authenticate_exact_post_t_primary_graph(
         execution_snapshot.changes_fetch_count,
         execution_snapshot.changes_release_count,
     )
+    if execution_snapshot.lifecycle == "completed":
+        adoption = authority_snapshot.post_rebind_watermark_adoption
+        affected = execution_snapshot.affected_rows
+        total_delta = execution_snapshot.total_changes_delta
+        if (
+            adoption is None
+            or _TYPE(affected) is not int
+            or not 0 <= affected <= _MAX_SAFE_INTEGER
+            or affected != context_snapshot.b2_cursor_count
+            or execution_snapshot.changes_affected_rows != affected
+            or changes_counts != (1, 1, 1)
+            or execution_snapshot.cursor_ledger_before != (0, 0, 0)
+            or execution_snapshot.cursor_ledger_after != (affected, 1, 1)
+            or execution_snapshot.cursor_ledger_delta != (affected, 1, 1)
+            or total_delta != affected
+            or execution_snapshot.total_changes
+            != execution_snapshot.total_changes_before + affected
+            or connection.total_changes != execution_snapshot.total_changes
+            or execution_snapshot.transaction_epoch_before
+            != context_snapshot.historical_transaction_epoch
+            or execution_snapshot.transaction_epoch
+            != context_snapshot.historical_transaction_epoch + 1
+            or epoch != execution_snapshot.transaction_epoch
+        ):
+            _fail("GE_CURSOR_B3_POSTCONSUME_GRAPH")
+        if _trusted_boundary is not None:
+            completed_boundary = _trusted_boundary
+        elif _lower_primary_capture is not None:
+            try:
+                completed_boundary = (
+                    _take_sqlite_connection_cursor_publication_rebind_changes_primary_intrinsic(
+                        _lower_primary_capture, connection, execution, primary
+                    )
+                )
+            except BaseException:
+                _fail("GE_CURSOR_B3_POSTCONSUME_GRAPH")
+        else:
+            _fail("GE_CURSOR_B3_POSTCONSUME_GRAPH")
+        if _TYPE(completed_boundary) is not str or completed_boundary not in {
+            "rule11-outer-ledger",
+            "rule11-five-count",
+        }:
+            _fail("GE_CURSOR_B3_POSTCONSUME_GRAPH")
+        write = (
+            _assert_sqlite_cursor_publication_rebind_completed_failure_for_finalizer_intrinsic(
+                connection,
+                context,
+                tombstone,
+                adoption,
+                execution,
+                cast(
+                    Literal["rule11-outer-ledger", "rule11-five-count"],
+                    completed_boundary,
+                ),
+            )
+        )
+        if _expected_boundary is not None and completed_boundary != _expected_boundary:
+            _fail("GE_CURSOR_B3_POSTCONSUME_GRAPH")
+        return (
+            context,
+            tombstone,
+            execution,
+            generation,
+            epoch,
+            completed_boundary,
+            adoption,
+            write,
+        )
+    if (
+        execution_snapshot.lifecycle != "poisoned"
+        or authority_snapshot.post_rebind_watermark_adoption is not None
+    ):
+        _fail("GE_CURSOR_B3_POSTCONSUME_GRAPH")
     boundary: _PrimaryBoundary
     if (
         execution_snapshot.affected_rows is None
@@ -411,6 +524,15 @@ def _authenticate_exact_post_t_primary_graph(
             except BaseException:
                 _fail("GE_CURSOR_B3_POSTCONSUME_GRAPH")
         else:
+            _fail("GE_CURSOR_B3_POSTCONSUME_GRAPH")
+        if _TYPE(lower_boundary) is not str or lower_boundary not in {
+            "serialized-changes-pre-query",
+            "serialized-changes-prepare",
+            "serialized-changes-execute",
+            "serialized-changes-fetch",
+            "serialized-changes-release",
+            "serialized-changes-post-query",
+        }:
             _fail("GE_CURSOR_B3_POSTCONSUME_GRAPH")
         affected = execution_snapshot.affected_rows
         total_delta = execution_snapshot.total_changes_delta
@@ -485,7 +607,7 @@ def _authenticate_exact_post_t_primary_graph(
             _fail("GE_CURSOR_B3_POSTCONSUME_GRAPH")
     if _expected_boundary is not None and boundary != _expected_boundary:
         _fail("GE_CURSOR_B3_POSTCONSUME_GRAPH")
-    return context, tombstone, execution, generation, epoch, boundary
+    return context, tombstone, execution, generation, epoch, boundary, None, None
 
 
 def _capture_implementation(
@@ -539,7 +661,16 @@ def _capture_implementation(
         _reset_sqlite_connection_cursor_publication_rebind_changes_primary_capture_intrinsic(
             lower_capture, lower_token
         )
-    context, tombstone, execution, generation, epoch, primary_boundary = authenticated
+    (
+        context,
+        tombstone,
+        execution,
+        generation,
+        epoch,
+        primary_boundary,
+        adoption,
+        write,
+    ) = authenticated
     if primary_boundary == "native-execute" and not _native_primary(primary):
         _fail("GE_CURSOR_B3_POSTCONSUME_PRIMARY")
     owner = _PostConsumeTransactionFailureFinalizer(
@@ -550,6 +681,8 @@ def _capture_implementation(
         execution,
         generation,
         primary,
+        adoption,
+        write,
         _CONSTRUCTION_TOKEN,
     )
     state = _FinalizerState(
@@ -562,6 +695,8 @@ def _capture_implementation(
         id(primary),
         epoch,
         primary_boundary,
+        _REF(adoption) if adoption is not None else None,
+        _REF(write) if write is not None else None,
     )
     try:
         _register_owner_intrinsic(owner, state)
@@ -671,6 +806,8 @@ def _clear_owner_presentation(
         "__execution",
         "__generation",
         "__primary",
+        "__adoption",
+        "__write",
     ):
         object.__setattr__(
             owner,
@@ -687,9 +824,17 @@ def _finalize_impl(
     state = _state(owner)
     if state.lifecycle != "prepared" or state.owner_consume_count != 0:
         _fail("GE_CURSOR_B3_POSTCONSUME_REPLAY")
-    connection, authority, context, tombstone, execution, generation, primary = _owner_presentation(
-        owner
-    )
+    (
+        connection,
+        authority,
+        context,
+        tombstone,
+        execution,
+        generation,
+        primary,
+        adoption,
+        write,
+    ) = _owner_presentation(owner)
     rollback_fault = state.rollback_fault_ref() if state.rollback_fault_ref is not None else None
     close_fault = state.close_fault_ref() if state.close_fault_ref is not None else None
     if (
@@ -700,6 +845,14 @@ def _finalize_impl(
         or state.execution_ref() is not execution
         or id(generation) != state.generation_id
         or id(primary) != state.primary_id
+        or (
+            (state.adoption_ref is None and adoption is not None)
+            or (state.adoption_ref is not None and state.adoption_ref() is not adoption)
+        )
+        or (
+            (state.write_ref is None and write is not None)
+            or (state.write_ref is not None and state.write_ref() is not write)
+        )
         or (state.rollback_fault_ref is not None and rollback_fault is None)
         or (state.close_fault_ref is not None and close_fault is None)
     ):
@@ -717,6 +870,8 @@ def _finalize_impl(
         generation,
         state.transaction_epoch,
         state.primary_boundary,
+        adoption,
+        write,
     ):
         _fail("GE_CURSOR_B3_POSTCONSUME_PRESENTATION")
     if state.primary_boundary == "native-execute" and not _native_primary(primary):

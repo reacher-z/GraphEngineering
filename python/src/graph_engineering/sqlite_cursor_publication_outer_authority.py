@@ -484,6 +484,18 @@ class _SQLiteCursorPostRebindWatermarkAdoptionSnapshot(NamedTuple):
     adopted_outer_ledger: _SQLiteCursorOuterPublicationLedgerSnapshot
 
 
+class _SQLiteCursorPoisonedPostRebindGraphSnapshot(NamedTuple):
+    poison_reason: str
+    historical_transaction_epoch: int
+    adopted_transaction_epoch: int
+    historical_total_changes: int
+    adopted_total_changes: int
+    total_changes_delta: int
+    affected_rows: int
+    historical_outer_ledger: _SQLiteCursorOuterPublicationLedgerSnapshot
+    adopted_outer_ledger: _SQLiteCursorOuterPublicationLedgerSnapshot
+
+
 class _SQLiteMigration0002CatalogRebuildReceipt:
     __slots__ = ("__weakref__",)
 
@@ -7946,6 +7958,95 @@ def _read_sqlite_cursor_post_rebind_watermark_adoption_snapshot_intrinsic(
         context.authority,
         context.connection,
         context.transaction_generation,
+        context.historical_transaction_epoch,
+        adoption.adopted_transaction_epoch,
+        context.historical_total_changes,
+        adoption.adopted_total_changes,
+        adoption.total_changes_delta,
+        adoption.affected_rows,
+        context.historical_outer_ledger,
+        adoption.adopted_outer_ledger,
+    )
+
+
+def _read_sqlite_cursor_poisoned_post_rebind_graph_snapshot_intrinsic(
+    context_token: _SQLiteCursorPublicationRebindContext,
+    tombstone_token: _SQLiteCursorPublicationSessionConsumedTombstone,
+    adoption_token: _SQLiteCursorPostRebindWatermarkAdoption,
+) -> _SQLiteCursorPoisonedPostRebindGraphSnapshot:
+    """Poison-safe exact C/T/A registry proof for completed-failure finalization."""
+
+    selected_context = _rebind_state_get(
+        _PUBLICATION_REBIND_CONTEXTS,
+        context_token,
+        _SQLiteCursorPublicationRebindContext,
+        _PublicationRebindContextState,
+    )
+    selected_tombstone = _rebind_state_get(
+        _PUBLICATION_SESSION_CONSUMED_TOMBSTONES,
+        tombstone_token,
+        _SQLiteCursorPublicationSessionConsumedTombstone,
+        _PublicationSessionConsumedTombstoneState,
+    )
+    selected_adoption = _rebind_state_get(
+        _POST_REBIND_WATERMARK_ADOPTIONS,
+        adoption_token,
+        _SQLiteCursorPostRebindWatermarkAdoption,
+        _PostRebindWatermarkAdoptionState,
+    )
+    context = cast(_PublicationRebindContextState | None, selected_context)
+    tombstone = cast(_PublicationSessionConsumedTombstoneState | None, selected_tombstone)
+    adoption = cast(_PostRebindWatermarkAdoptionState | None, selected_adoption)
+    if context is None or tombstone is None or adoption is None:
+        _fail("GE_CURSOR_B3_POST_REBIND_POISONED_GRAPH")
+    authority = context.authority
+    state = _authority_state(authority)
+    execution_snapshot = (
+        _read_sqlite_connection_cursor_publication_rebind_snapshot_intrinsic(
+            context.connection, context.execution
+        )
+    )
+    if (
+        state.lifecycle != "poisoned"
+        or state.write_phase != "poisoned"
+        or context.lifecycle != "poisoned"
+        or tombstone.lifecycle != "poisoned"
+        or adoption.lifecycle != "poisoned"
+        or state.publication_rebind_context is not context_token
+        or state.publication_rebind_context_state is not context
+        or state.publication_session_consumed_tombstone is not tombstone_token
+        or state.post_rebind_watermark_adoption is not adoption_token
+        or context.tombstone is not tombstone_token
+        or context.tombstone_state is not tombstone
+        or context.adoption is not adoption_token
+        or context.adoption_state is not adoption
+        or tombstone.context is not context
+        or adoption.context is not context
+        or adoption.tombstone is not tombstone
+        or execution_snapshot.lifecycle != "completed"
+        or _STABLE_TYPE(adoption.execution_snapshot)
+        is not _STABLE_TYPE(execution_snapshot)
+        or adoption.execution_snapshot != execution_snapshot
+        or _STABLE_TYPE(state.stage_ownership_poison_reason) is not str
+        or not state.stage_ownership_poison_reason
+        or state.current_transaction_epoch != adoption.adopted_transaction_epoch
+        or state.current_total_changes != adoption.adopted_total_changes
+        or adoption.execution_snapshot.transaction_generation
+        is not context.transaction_generation
+        or adoption.adopted_transaction_epoch != execution_snapshot.transaction_epoch
+        or adoption.adopted_total_changes != execution_snapshot.total_changes
+        or adoption.total_changes_delta != execution_snapshot.total_changes_delta
+        or adoption.affected_rows != execution_snapshot.affected_rows
+        or not _exact_outer_ledger(
+            _outer_ledger_snapshot(state), context.historical_outer_ledger
+        )
+        or not _exact_outer_ledger(
+            adoption.adopted_outer_ledger, context.historical_outer_ledger
+        )
+    ):
+        _fail("GE_CURSOR_B3_POST_REBIND_POISONED_GRAPH")
+    return _SQLiteCursorPoisonedPostRebindGraphSnapshot(
+        state.stage_ownership_poison_reason,
         context.historical_transaction_epoch,
         adoption.adopted_transaction_epoch,
         context.historical_total_changes,
