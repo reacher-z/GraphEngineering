@@ -18,6 +18,7 @@ import {
 import {
   SQLiteConnection,
   execSQLiteConnectionTrustedIntrinsic,
+  readSQLiteConnectionCursorRebindChangesFailureBoundaryIntrinsic,
   readSQLiteConnectionCursorRebindExecutionSnapshotIntrinsic,
   readSQLiteConnectionOwnerSnapshot,
   type SQLiteConnectionTransactionLineage,
@@ -26,6 +27,7 @@ import {
 const PROVIDER_OPERATION = "inspect-schema" as const;
 const objectCreateIntrinsic = Object.create;
 const objectFreezeIntrinsic = Object.freeze;
+const numberIsSafeIntegerIntrinsic = Number.isSafeInteger;
 const reflectApplyIntrinsic = Reflect.apply;
 const weakMapDeleteIntrinsic = WeakMap.prototype.delete;
 const weakMapGetIntrinsic = WeakMap.prototype.get;
@@ -40,6 +42,8 @@ const execSQLiteConnectionTrustedVerifierIntrinsic = execSQLiteConnectionTrusted
 const readSQLiteConnectionOwnerSnapshotVerifierIntrinsic = readSQLiteConnectionOwnerSnapshot;
 const readSQLiteConnectionCursorRebindExecutionSnapshotVerifierIntrinsic =
   readSQLiteConnectionCursorRebindExecutionSnapshotIntrinsic;
+const readSQLiteConnectionCursorRebindChangesFailureBoundaryVerifierIntrinsic =
+  readSQLiteConnectionCursorRebindChangesFailureBoundaryIntrinsic;
 const readOuterSnapshotIntrinsic =
   readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic;
 const readContextSnapshotIntrinsic =
@@ -64,6 +68,14 @@ export interface SQLiteCursorPostConsumeTransactionFailureCapture {
   readonly owner: SQLiteCursorPostConsumeTransactionFailureFinalizerOwner;
   readonly leafPrimary: object;
 }
+
+export type SQLiteCursorPostConsumePrimaryBoundary =
+  | "native-execute"
+  | "changes-prepare"
+  | "changes-fetch"
+  | "changes-shape"
+  | "changes-release"
+  | "changes-postflight";
 
 export interface SQLiteCursorPostConsumeFinalizerDiagnostic {
   readonly code:
@@ -91,6 +103,7 @@ export interface SQLiteCursorPostConsumeTransactionFailureFinalizerSnapshot {
   readonly closeAfterNativeReturnAmbiguousFaultCount: 0 | 1;
   readonly closeTertiaryFailureCount: 0 | 1;
   readonly selectedThrow: "GE_SQLITE_POST_T_TERMINAL_PRIMARY";
+  readonly primaryBoundary: SQLiteCursorPostConsumePrimaryBoundary;
   readonly diagnosticCodes: readonly SQLiteCursorPostConsumeFinalizerDiagnostic["code"][];
   readonly diagnostics: readonly SQLiteCursorPostConsumeFinalizerDiagnostic[];
   readonly claims: Readonly<{
@@ -117,6 +130,7 @@ interface FinalizerState {
   tombstone: WeakRef<object> | undefined;
   readonly transactionLineage: WeakRef<object>;
   transactionEpoch: bigint;
+  primaryBoundary: SQLiteCursorPostConsumePrimaryBoundary | undefined;
   lifecycle: "capturing" | "prepared" | "finalizing" | "finalized";
   ownerConsumeCount: 0 | 1;
   terminalizeCount: 0 | 1;
@@ -257,7 +271,7 @@ function preCaptureGraph(
   });
 }
 
-function exactPoisonedNativePrimaryGraph(
+function exactPoisonedPrimaryGraph(
   connection: SQLiteConnection,
   authority: SQLiteCursorOuterPublicationAuthority,
   transactionLineage: SQLiteConnectionTransactionLineage,
@@ -265,6 +279,7 @@ function exactPoisonedNativePrimaryGraph(
   context: SQLiteCursorPublicationRebindContext;
   tombstone: SQLiteCursorPublicationSessionConsumedTombstone;
   transactionEpoch: bigint;
+  primaryBoundary: SQLiteCursorPostConsumePrimaryBoundary;
 }> {
   const authoritySnapshot = readOuterSnapshotIntrinsic(authority);
   const context = authoritySnapshot.publicationRebindContext;
@@ -280,7 +295,12 @@ function exactPoisonedNativePrimaryGraph(
       connection,
       contextSnapshot.execution,
     );
-  if (authoritySnapshot.lifecycle !== "poisoned"
+  const changesFailureBoundary =
+    readSQLiteConnectionCursorRebindChangesFailureBoundaryVerifierIntrinsic(
+      connection,
+      contextSnapshot.execution,
+    );
+  const commonGraphIsInvalid = authoritySnapshot.lifecycle !== "poisoned"
       || authoritySnapshot.writePhase !== "poisoned"
       || authoritySnapshot.connection !== connection
       || authoritySnapshot.postRebindWatermarkAdoption !== undefined
@@ -300,17 +320,101 @@ function exactPoisonedNativePrimaryGraph(
       || executionSnapshot.transactionEpoch !== ownerSnapshot.transactionEpoch
       || executionSnapshot.executeCount !== 1
       || executionSnapshot.releaseCount !== 1
-      || !executionSnapshot.statementOwnershipRetired
-      || executionSnapshot.affectedRows !== 0
-      || executionSnapshot.changesPrepareCount !== 0
-      || executionSnapshot.changesFetchCount !== 0
-      || executionSnapshot.changesReleaseCount !== 0) {
-    return fail("SQLite post-consume transaction native-primary graph is invalid");
+      || !executionSnapshot.statementOwnershipRetired;
+  if (commonGraphIsInvalid) {
+    return fail("SQLite post-consume transaction primary graph is invalid");
+  }
+  let primaryBoundary: SQLiteCursorPostConsumePrimaryBoundary;
+  const affected = executionSnapshot.affectedRows;
+  const nativeExecutePrimary = changesFailureBoundary === null
+    && affected === 0
+    && executionSnapshot.cursorLedgerLogicalWriteSequence === 0
+    && executionSnapshot.cursorLedgerFixedStatementCount === 0
+    && executionSnapshot.cursorLedgerAffectedRowsWatermark === 0
+    && executionSnapshot.changesAffectedRows === null
+    && executionSnapshot.changesPrepareCount === 0
+    && executionSnapshot.changesFetchCount === 0
+    && executionSnapshot.changesReleaseCount === 0
+    && executionSnapshot.totalChangesDelta === 0;
+  if (nativeExecutePrimary) {
+    primaryBoundary = "native-execute";
+  } else {
+    if (!numberIsSafeIntegerIntrinsic(affected) || affected < 0
+        || affected !== contextSnapshot.b2CursorCount
+        || executionSnapshot.cursorLedgerLogicalWriteSequence !== 1
+        || executionSnapshot.cursorLedgerFixedStatementCount !== 1
+        || executionSnapshot.cursorLedgerAffectedRowsWatermark !== affected
+        || !numberIsSafeIntegerIntrinsic(executionSnapshot.totalChangesDelta)
+        || executionSnapshot.totalChangesDelta < 0) {
+      return fail("SQLite post-consume transaction changes-primary progress is invalid");
+    }
+    if (changesFailureBoundary === null) {
+      if (executionSnapshot.changesPrepareCount === 0
+          && executionSnapshot.changesFetchCount === 0
+          && executionSnapshot.changesReleaseCount === 0
+          && executionSnapshot.changesAffectedRows === null
+          && executionSnapshot.totalChangesDelta === affected) {
+        primaryBoundary = "changes-prepare";
+      } else if (executionSnapshot.changesPrepareCount === 1
+          && executionSnapshot.changesFetchCount === 1
+          && executionSnapshot.changesReleaseCount === 1
+          && executionSnapshot.changesAffectedRows === null
+          && executionSnapshot.totalChangesDelta === affected) {
+        primaryBoundary = "changes-fetch";
+      } else if (executionSnapshot.changesPrepareCount === 1
+          && executionSnapshot.changesFetchCount === 1
+          && executionSnapshot.changesReleaseCount === 1
+          && executionSnapshot.changesAffectedRows === affected) {
+        primaryBoundary = "changes-postflight";
+      } else {
+        return fail("SQLite post-consume transaction genuine changes evidence is invalid");
+      }
+    } else {
+      if (executionSnapshot.changesReleaseCount !== 1
+          || executionSnapshot.totalChangesDelta !== affected) {
+        return fail("SQLite post-consume transaction injected changes evidence is invalid");
+      }
+      switch (changesFailureBoundary) {
+        case "prepare-after-native-return":
+          if (executionSnapshot.changesPrepareCount !== 1
+              || executionSnapshot.changesFetchCount !== 0
+              || executionSnapshot.changesAffectedRows !== null) {
+            return fail("SQLite post-consume transaction changes-prepare evidence is invalid");
+          }
+          primaryBoundary = "changes-prepare";
+          break;
+        case "fetch-after-native-return":
+          if (executionSnapshot.changesPrepareCount !== 1
+              || executionSnapshot.changesFetchCount !== 1
+              || executionSnapshot.changesAffectedRows !== null) {
+            return fail("SQLite post-consume transaction changes-fetch evidence is invalid");
+          }
+          primaryBoundary = "changes-fetch";
+          break;
+        case "shape-after-validation":
+          if (executionSnapshot.changesPrepareCount !== 1
+              || executionSnapshot.changesFetchCount !== 1
+              || executionSnapshot.changesAffectedRows !== affected) {
+            return fail("SQLite post-consume transaction changes-shape evidence is invalid");
+          }
+          primaryBoundary = "changes-shape";
+          break;
+        case "release-after-logical-retirement":
+          if (executionSnapshot.changesPrepareCount !== 1
+              || executionSnapshot.changesFetchCount !== 1
+              || executionSnapshot.changesAffectedRows !== affected) {
+            return fail("SQLite post-consume transaction changes-release evidence is invalid");
+          }
+          primaryBoundary = "changes-release";
+          break;
+      }
+    }
   }
   return objectFreezeIntrinsic({
     context,
     tombstone,
     transactionEpoch: ownerSnapshot.transactionEpoch,
+    primaryBoundary,
   });
 }
 
@@ -369,6 +473,7 @@ export function captureSQLiteCursorPostConsumeTransactionFailureIntrinsic(
     tombstone: undefined,
     transactionLineage: weak(predecessor.transactionLineage as object),
     transactionEpoch: predecessor.transactionEpoch,
+    primaryBoundary: undefined,
     lifecycle: "capturing",
     ownerConsumeCount: 0,
     terminalizeCount: 0,
@@ -412,7 +517,7 @@ export function captureSQLiteCursorPostConsumeTransactionFailureIntrinsic(
   }
   try {
     const primary = exactObject(leafPrimary, "directly caught leaf primary");
-    const selected = exactPoisonedNativePrimaryGraph(
+    const selected = exactPoisonedPrimaryGraph(
       connection,
       authority,
       predecessor.transactionLineage,
@@ -421,6 +526,7 @@ export function captureSQLiteCursorPostConsumeTransactionFailureIntrinsic(
     state.tombstone = weak(selected.tombstone as object);
     state.leafPrimary = weak(primary);
     state.transactionEpoch = selected.transactionEpoch;
+    state.primaryBoundary = selected.primaryBoundary;
     state.lifecycle = "prepared";
     return objectFreezeIntrinsic({ owner, leafPrimary: primary });
   } catch (error) {
@@ -500,13 +606,14 @@ export function finalizeSQLiteCursorPostConsumeTransactionFailureIntrinsic(
       || tombstone === undefined || transactionLineage === undefined) {
     return fail("SQLite post-consume transaction finalizer graph expired");
   }
-  const selected = exactPoisonedNativePrimaryGraph(
+  const selected = exactPoisonedPrimaryGraph(
     connection,
     authority,
     transactionLineage,
   );
   if (selected.context !== context || selected.tombstone !== tombstone
-      || selected.transactionEpoch !== state.transactionEpoch) {
+      || selected.transactionEpoch !== state.transactionEpoch
+      || selected.primaryBoundary !== state.primaryBoundary) {
     return fail("SQLite post-consume transaction finalizer graph drifted");
   }
 
@@ -607,6 +714,7 @@ export function readSQLiteCursorPostConsumeTransactionFailureFinalizerSnapshotIn
       state.closeAfterNativeReturnAmbiguousFaultCount,
     closeTertiaryFailureCount: state.closeTertiaryFailureCount,
     selectedThrow: PRIMARY_DIAGNOSTIC.code,
+    primaryBoundary: state.primaryBoundary!,
     diagnosticCodes: diagnosticCodes(state),
     diagnostics: diagnostics(state),
     claims: CLAIMS,

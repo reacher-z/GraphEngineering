@@ -43,6 +43,8 @@ import {
   executeSQLiteCursorPublicationRebindRule11Intrinsic,
   executeSQLiteCursorRebindRule11GateIntrinsic,
   injectSQLiteCursorRebindCancelBeforeExecuteForTestIntrinsic,
+  injectSQLiteCursorRebindPostconsumeChangesFaultForTestIntrinsic,
+  injectSQLiteCursorRebindPostconsumeChangesFaultRegistrationFailureForTestIntrinsic,
   injectSQLiteCursorRebindPreconsumeReleaseFaultForTestIntrinsic,
   injectSQLiteCursorRebindPreconsumeReleaseFaultRegistrationFailureForTestIntrinsic,
   injectSQLiteCursorRebindProtocolRegistrationFaultForTestIntrinsic,
@@ -58,6 +60,8 @@ import {
 } from "../src/operation-baseline-cursor-invariants.js";
 import {
   beginSQLiteConnectionCursorRebindExecutionIntrinsic,
+  injectSQLiteConnectionCursorRebindChangesFaultRegistrationFailureForTestIntrinsic,
+  readSQLiteConnectionCursorRebindChangesFailureBoundaryIntrinsic,
   injectSQLiteConnectionCursorRebindReleaseFaultRegistrationFailureForTestIntrinsic,
   readSQLiteConnectionCursorRebindExecutionSnapshotIntrinsic,
 } from "../src/sqlite-connection.js";
@@ -154,7 +158,7 @@ interface TrackedReferent {
 function trackDroppedScenario(
   scenario: "success" | "prewrite-cancel" | "postconsume-poison"
     | "write-fault" | "rule11-fault" | "native-run-fault"
-    | "release-fault" | "abandoned-release-fault",
+    | "release-fault" | "abandoned-release-fault" | "abandoned-changes-fault",
 ): Readonly<{
   readonly finalized: Set<string>;
   readonly referents: readonly TrackedReferent[];
@@ -168,7 +172,26 @@ function trackDroppedScenario(
     : {});
   const session = publicationSession(value);
   let identities: readonly (readonly [string, object])[];
-  if (scenario === "abandoned-release-fault") {
+  if (scenario === "abandoned-changes-fault") {
+    const error = new Error("abandoned exact-S changes fault") as Error & {
+      authority?: object;
+      session?: object;
+    };
+    error.authority = value.authority;
+    error.session = session;
+    injectSQLiteCursorRebindPostconsumeChangesFaultForTestIntrinsic(
+      session,
+      "fetch-after-native-return",
+      error,
+    );
+    identities = [
+      ["graph", value],
+      ["authority", value.authority],
+      ["connection", value.connection],
+      ["session", session],
+      ["reverse-root-error", error],
+    ];
+  } else if (scenario === "abandoned-release-fault") {
     const error = new Error("abandoned exact-S release fault") as Error & {
       authority?: object;
       session?: object;
@@ -364,6 +387,18 @@ function armAndDropExactSReleaseError(
 ): WeakRef<object> {
   const error = new Error("dead exact-S release primary");
   injectSQLiteCursorRebindPreconsumeReleaseFaultForTestIntrinsic(session, error);
+  return new WeakRef(error);
+}
+
+function armAndDropExactSChangesError(
+  session: SQLiteCursorPublicationSession,
+): WeakRef<object> {
+  const error = new Error("dead exact-S changes primary");
+  injectSQLiteCursorRebindPostconsumeChangesFaultForTestIntrinsic(
+    session,
+    "fetch-after-native-return",
+    error,
+  );
   return new WeakRef(error);
 }
 
@@ -715,6 +750,121 @@ describe("SQLite cursor publication rebind Rule 11 integration", () => {
       .toThrow(/publication session is not active/u);
     expect(readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(unselected.authority))
       .toMatchObject({ lifecycle: "active", writePhase: "cursor-rebind-adopted" });
+  });
+
+  it.each([
+    ["prepare-after-native-return", "changes-prepare", [1, 0, 1], null],
+    ["fetch-after-native-return", "changes-fetch", [1, 1, 1], null],
+    ["shape-after-validation", "changes-shape", [1, 1, 1], 1],
+    ["release-after-logical-retirement", "changes-release", [1, 1, 1], 1],
+  ] as const)(
+    "hands exact S to exact E and preserves %s primary after T",
+    (stage, _projection, expectedCounts, expectedChanges) => {
+      const selected = graph(1);
+      const unselected = graph(1);
+      const selectedSession = publicationSession(selected);
+      const unselectedSession = publicationSession(unselected);
+      const primary = new Error(`selected exact-S ${stage}`);
+      injectSQLiteCursorRebindPostconsumeChangesFaultForTestIntrinsic(
+        selectedSession,
+        stage,
+        primary,
+      );
+      expect(() => injectSQLiteCursorRebindPostconsumeChangesFaultForTestIntrinsic(
+        selectedSession,
+        stage,
+        new Error("double exact-S changes arm"),
+      )).toThrow(/changes fault is invalid/u);
+      expect(() => executeSQLiteCursorPublicationRebindRule11Intrinsic(unselectedSession))
+        .not.toThrow();
+      let caught: unknown;
+      try {
+        executeSQLiteCursorPublicationRebindRule11Intrinsic(selectedSession);
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBe(primary);
+      const authority = readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(
+        selected.authority,
+      );
+      const context = authority.publicationRebindContext!;
+      const contextSnapshot = readSQLiteCursorPublicationRebindContextSnapshotIntrinsic(context);
+      expect(authority).toMatchObject({
+        lifecycle: "poisoned",
+        postRebindWatermarkAdoption: undefined,
+        publicationSessionConsumedTombstone: {},
+        writePhase: "poisoned",
+      });
+      expect(readSQLiteConnectionCursorRebindExecutionSnapshotIntrinsic(
+        selected.connection,
+        contextSnapshot.execution,
+      )).toMatchObject({
+        affectedRows: 1,
+        changesAffectedRows: expectedChanges,
+        changesFetchCount: expectedCounts[1],
+        changesPrepareCount: expectedCounts[0],
+        changesReleaseCount: expectedCounts[2],
+        cursorLedgerAffectedRowsWatermark: 1,
+        cursorLedgerFixedStatementCount: 1,
+        cursorLedgerLogicalWriteSequence: 1,
+        executeCount: 1,
+        lifecycle: "poisoned",
+        releaseCount: 1,
+        statementOwnershipRetired: true,
+        totalChangesDelta: 1,
+      });
+      expect(readSQLiteConnectionCursorRebindChangesFailureBoundaryIntrinsic(
+        selected.connection,
+        contextSnapshot.execution,
+      )).toBe(stage);
+      expect(readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(unselected.authority))
+        .toMatchObject({ lifecycle: "active", writePhase: "cursor-rebind-adopted" });
+    },
+  );
+
+  it("rejects forged/cross/proxy changes arms and rolls back exact-S/E registration", () => {
+    const value = graph(1);
+    const other = graph(1);
+    const session = publicationSession(value);
+    const otherSession = publicationSession(other);
+    const primary = new Error("selected upper changes primary");
+    expect(() => injectSQLiteCursorRebindPostconsumeChangesFaultForTestIntrinsic(
+      Object.freeze(Object.create(null)) as SQLiteCursorPublicationSession,
+      "fetch-after-native-return",
+      primary,
+    )).toThrow(/publication session is invalid/u);
+    expect(() => injectSQLiteCursorRebindPostconsumeChangesFaultForTestIntrinsic(
+      new Proxy(session, {}),
+      "fetch-after-native-return",
+      primary,
+    )).toThrow(/publication session is invalid/u);
+    expect(() => injectSQLiteCursorRebindPostconsumeChangesFaultForTestIntrinsic(
+      session,
+      "fetch-after-native-return",
+      Object.freeze(new Proxy({}, {})),
+    )).toThrow(/changes fault is invalid/u);
+    injectSQLiteCursorRebindPostconsumeChangesFaultRegistrationFailureForTestIntrinsic(primary);
+    expect(() => injectSQLiteCursorRebindPostconsumeChangesFaultForTestIntrinsic(
+      session,
+      "fetch-after-native-return",
+      new Error("discarded upper changes arm"),
+    )).toThrow(primary);
+
+    const handoffPrimary = new Error("selected lower registration primary");
+    injectSQLiteConnectionCursorRebindChangesFaultRegistrationFailureForTestIntrinsic(
+      handoffPrimary,
+    );
+    injectSQLiteCursorRebindPostconsumeChangesFaultForTestIntrinsic(
+      session,
+      "fetch-after-native-return",
+      new Error("discarded lower changes arm"),
+    );
+    expect(() => executeSQLiteCursorPublicationRebindRule11Intrinsic(session))
+      .toThrow(handoffPrimary);
+    expect(readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(value.authority))
+      .toMatchObject({ lifecycle: "active", writePhase: "publication-active" });
+    expect(() => executeSQLiteCursorPublicationRebindRule11Intrinsic(session)).not.toThrow();
+    expect(() => executeSQLiteCursorPublicationRebindRule11Intrinsic(otherSession)).not.toThrow();
   });
 
   it("rolls back exact-S and exact-E partial registrations without consuming S", () => {
@@ -1079,8 +1229,14 @@ describe("SQLite cursor publication rebind Rule 11 integration", () => {
       "executeSQLiteCursorRebindRule11GateIntrinsic",
       "injectSQLiteConnectionCursorRebindReleaseFaultForTestIntrinsic",
       "injectSQLiteConnectionCursorRebindReleaseFaultRegistrationFailureForTestIntrinsic",
+      "injectSQLiteConnectionCursorRebindChangesFaultForTestIntrinsic",
+      "injectSQLiteConnectionCursorRebindChangesFaultRegistrationFailureForTestIntrinsic",
+      "readSQLiteConnectionCursorRebindChangesFailureBoundaryIntrinsic",
       "injectSQLiteCursorRebindPreconsumeReleaseFaultForTestIntrinsic",
       "injectSQLiteCursorRebindPreconsumeReleaseFaultRegistrationFailureForTestIntrinsic",
+      "injectSQLiteCursorRebindPostconsumeChangesFaultForTestIntrinsic",
+      "injectSQLiteCursorRebindPostconsumeChangesFaultRegistrationFailureForTestIntrinsic",
+      "SQLiteCursorRebindChangesFaultStage",
       "SQLiteCursorRebindWriteReceipt",
       "SQLiteCursorRebindRule11Owner",
     ]) {
@@ -1124,7 +1280,7 @@ describe("SQLite cursor publication rebind Rule 11 integration", () => {
       ].join("\n")).toBe(0);
     }, 160_000);
   } else {
-    it("collects every exact identity in all eight terminal or abandoned profiles", async () => {
+    it("collects every exact identity in all nine terminal or abandoned profiles", async () => {
       expect(typeof globalThis.gc).toBe("function");
       const scenarios = [
         "success",
@@ -1135,6 +1291,7 @@ describe("SQLite cursor publication rebind Rule 11 integration", () => {
         "rule11-fault",
         "release-fault",
         "abandoned-release-fault",
+        "abandoned-changes-fault",
       ] as const;
       for (let index = 0; index < scenarios.length; index += 1) {
         const tracked = trackDroppedScenario(scenarios[index]!);
@@ -1169,6 +1326,26 @@ describe("SQLite cursor publication rebind Rule 11 integration", () => {
         });
       expect(readSQLiteCursorPublicationSessionSnapshotIntrinsic(session).lifecycle)
         .toBe("publication-active");
+      expect(() => executeSQLiteCursorPublicationRebindRule11Intrinsic(session)).not.toThrow();
+    }, 120_000);
+
+    it("discards a dead exact-S changes error before T and retries the same S", async () => {
+      expect(typeof globalThis.gc).toBe("function");
+      const value = graph(1);
+      const session = publicationSession(value);
+      const errorReference = armAndDropExactSChangesError(session);
+      expect(await forceBoundedCollection([
+        { label: "changes-error", reference: errorReference },
+      ])).toEqual([]);
+      expect(() => executeSQLiteCursorPublicationRebindRule11Intrinsic(session))
+        .toThrow(/postconsume changes fault identity drifted/u);
+      expect(readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(value.authority))
+        .toMatchObject({
+          lifecycle: "active",
+          publicationRebindContext: undefined,
+          publicationSessionConsumedTombstone: undefined,
+          writePhase: "publication-active",
+        });
       expect(() => executeSQLiteCursorPublicationRebindRule11Intrinsic(session)).not.toThrow();
     }, 120_000);
 

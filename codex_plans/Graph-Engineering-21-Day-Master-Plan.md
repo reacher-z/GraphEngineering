@@ -21055,3 +21055,175 @@ release gate，因此不能宣称完整transaction owner集成。contract fixtur
 并byte-exact比较；随后把TS serialized changes primary提升到同一failure finalizer。只有native和changes
 primary、rollback/reopen/close、counter combinations与portable parity都闭环后，才评估Wave 1E completion，
 仍不得提前进入success commit或Rule12。
+
+#### 31.37.73 Wave 1E/P5：changes-primary、exact-E lower identity 与精确恢复 parity（2026-08-02 PDT 追加；既有内容不改）
+
+本节严格追加于既有21,057行之后。追加前完整计划SHA-256为
+`e169f16803070e063f826d5bc2245f317db12afdaa2c3d26e7874e72c6d112ef`；前21,057行必须保持
+byte-for-byte不变。本节把31.37.72明确留下的两个直接缺口——finalizer双runtime reporter与serialized
+changes primary——推进到可验证状态，但不把failure-only finalizer夸大成完整transaction owner。
+
+##### 31.37.73.1 拒绝“布尔值相同即恢复相同”的假 parity
+
+第一版reporter虽然runtime-neutral bytes相同，但独立Agent实际读取数据库后发现TS rollback重开游标数为0，
+Python为1。原因不是comparator随机性，而是fixture语义不相同：TS在`BEGIN EXCLUSIVE`后才插入control
+operation与cursor，所以rollback一起撤销；Python先commit v1 source baseline再BEGIN，所以rollback后仍为1。
+四个布尔字段把两个不同数据库压扁成同一结果，属于H1 evidence defect；第一版没有进入commit。
+
+最终TS Rule11 graph helper按Python顺序执行：schema与migration lock就绪后，在autocommit状态插入固定
+operation和N=1 cursor，然后配置TEMP storage并BEGIN。既有Rule11 parity完整3/3回归证明这一更改没有破坏
+success/pre-cancel/replay等原有投影。
+
+恢复投影不再输出含糊布尔值，而是冻结以下有序exact字段：
+
+1. `applicationId=1195724359`；
+2. `userVersion=1`；
+3. schema singleton `currentVersion=1`；
+4. v1 schema identity SHA-256为`f3d961...baff4`；
+5. 使用production相同catalog query、空白归一化与canonical serialization得到可信
+   `catalogSha256=8fab5049...7264`；
+6. committed `cursorCount=1`与`operationCount=1`；
+7. migration rename临时表、三个baseline/sequence表及其unique indexes、两个v2 operation indexes共九个
+   v2-only artifact的合计为0；
+8. `foreignKeyViolationCount=0`；
+9. `integrityCheck=ok`；
+10. 显式domain
+    `graph-engineering/sqlite-post-consume-transaction-failure-finalizer-baseline-data/v1\0`；
+11. 对`ge_cycle_cursors`与`ge_cycle_operations`全部有序字段做typed cell投影，BLOB转lowercase hex、整数转
+    canonical safe decimal，再得到双端共同
+    `baselineDataSha256=7844faec4246da8bbc86a74f5677117f04ac7f574e0bdc1eee5558dea8d0efce`。
+
+Comparator要求report/case/count/diagnostic/claim/recovery全部exact keys且key order固定。除原有unknown、case
+order、unsafe integer、count、diagnostic order与claim hostile外，对每个recovery字段各做一次非null值漂移和
+一次null漂移，并覆盖unknown与delete。Node test的`before()`先fresh build SQLite，禁止用旧dist产生绿灯。
+Python root从`mkdtemp`开始即进入完整try/finally，graph construction自身失败也不能泄露目录。
+
+最终新parity重复通过，主线程在所有runtime source最终冻结后再次得到1/1（约51.79秒）；旧Rule11 parity
+3/3；独立复审检查27项v1 catalog、九项v2 artifact、临时目录0→0与reporter重复输出，结论H0/M0/L0。
+
+##### 31.37.73.2 TypeScript exact-S→context/P/E→exact-E changes fault seam
+
+upper exact-S seam只接受authentic active S、四个固定stage与non-Proxy weak-referenceable E。WeakMap key为S，
+value只通过WeakRef持有authority、connection与error，并禁止与preconsume release seam同时占用同一S。
+register-then-throw failure会删除pending arm；handoff先从S registry delete，再deref并认证authority、connection、
+context lifecycle、session、prepared owner与execution，最后把同一Error交给lower exact-E seam。
+
+lower exact-E seam只接受同connection的active E、未execute/未release状态与四个固定stage。WeakMap key为E，
+value弱持connection/error。take只在stage相同才进入，delete-before-deref；dead error、dead/cross connection、
+duplicate、forged/proxy、registration failure与replay全部fail-closed。普通Error只有在
+`error === selectedChangesPrimary`时才绕过generic SQLite translator，从而保持exact object identity；所有
+非selected native/provider Error仍沿原有translation路径。
+
+显式`changesFailureBoundary`不是“当前准备执行哪个stage”的进度标志。它只在exact registered E已经被
+成功take后写入，否则native prepare/all/shape/postflight primary必须保持null。这一修复避免真实native
+`all()` throw被错误标为`fetch-after-native-return`。finalizer对null与explicit两类证据分别认证：
+
+- native execute：affected=0、total delta=0、private ledger为0、changes counts为0；
+- genuine prepare/release-before-proof：affected精确等于B2、ledger `(affected,1,1)`、changes `0/0/0`；
+- genuine fetch/native-all/shape validation：同一native进度、changes `1/1/1`、observed changes absent；
+- genuine postflight：changes `1/1/1`且observed changes=affected；
+- injected prepare：`1/0/1`与result absent；
+- injected fetch：`1/1/1`与result absent；
+- injected shape/release：`1/1/1`与result=affected，且分别保留shape-after-validation与
+  release-after-logical-retirement身份。
+
+所有changes primary必须绑定`affected === contextSnapshot.b2CursorCount`，因此0/1/3人口均有效；logical
+write sequence与fixed statement count均为1，watermark与total delta精确等于affected，authority/context/T/E
+同图poisoned且adoption不存在。capture和finalize都比较同一pure `primaryBoundary`，cleanup仍按original primary
+> rollback secondary > close tertiary顺序。
+
+测试覆盖upper/lower双registration rollback、double/cross/forged/proxy/dead error、selected/unselected、
+normal success不受影响、真实native prepare/all/postflight、四个explicit stage、B2 0/1/3、近邻counter reject、
+rollback/close/reopen、root non-export与九种terminal/abandoned GC profile。六个完整TS文件最终91/91，typecheck
+通过。独审H0/M0/L1只发现共用registration helper在changes error过期时仍显示release文案；最终helper增加
+`release|changes`及`preconsume release|postconsume changes`固定kind参数，focused 11/11与typecheck通过，
+该Low关闭。Node `StatementSync`没有native close接口，因此release仍只声明logical retirement。
+
+##### 31.37.73.3 Python六个lower changes边界与exact object identity
+
+Python第一版把changes primary扩展为pre-query、prepare、execute、fetch、release、post-query，并用definition-
+time fixed leaf直接catch E；authority/context/T/E、B2、epoch、total与ledger认证正确。但最初只接受
+`(0,0,0)` prepare、`(1,1,1)` fetch/release，漏掉`SELECT changes()` execute的`(1,0,1)`、pre-query
+lineage/raw/foreign cursor以及post-query native total/lineage，独审判定H1。补齐状态后，第二次独审又证明
+traceback code-object membership不是exact E身份：不同SubstitutePrimary可复制`real.__traceback__`，在相同
+poisoned state中通过分类并mint owner。两版缺陷都在commit前拒绝。
+
+最终身份票据由lower connection execution owner产生，不再由finalizer猜测traceback：
+
+1. 每个changes primary真正离开lower proof前，execution state记录`id(E)`与一个六路boundary；
+2. state不保存E或traceback，不新增reverse strong root；
+3. package-private take接收exact connection、E与caught Error；
+4. take先读取ID/boundary并把两个field清为None，再检查lifecycle、connection与`id(error)`；
+5. mismatch、wrong E与replay都会破坏性消费，不能把接口当反复探测oracle；
+6. capture只在changes graph调用take，native execute仍沿原有exact SQLite ValueError/cause认证；
+7. genuine capture保存pure boundary；finalize不重复take，而用owner保存的exact primary weak presentation、
+   primary ID、boundary与完整graph predicate复核。
+
+六路lower recording点与state projection：
+
+- pre-query：transaction/native total lineage读取raw throw或lineage predicate failure，`0/0/0`、result absent；
+- prepare：cursor factory wrapper或foreign cursor failure，`0/0/0`、result absent；
+- execute：固定`SELECT changes() AS affected_rows`与empty params失败，`1/0/1`、result absent；
+- fetch：fetchmany、outer/row shape、zero/two/type/negative/unsafe validation，`1/1/1`、result absent；
+- release：changes result已等于affected、logical/native cursor close wrapper primary，`1/1/1`；
+- post-query：native total raw throw或post-proof lineage mismatch，`1/1/1`、result=affected。
+
+最终攻击测试对六个边界逐一运行真实lower失败，outer wrapper捕获real E，构造不同Error并显式
+`with_traceback(real.__traceback__)`后抛出。6/6 substitute都被finalizer拒绝为postconsume graph错误且不mint；
+随后用真实original E直接调用lower take也失败，证明wrong-object检查之前已经clear。genuine完整matrix仍
+保留exact primary并能finalize。另有definition-time `_LEAF` rebind、same-shape no-traceback、W/R11 counts、
+0/1/3 population、cleanup precedence、真实file rollback/close/reopen、fresh graph、abandoned/finalized GC。
+
+最终冻结字节验证：finalizer 44 passed（217.70秒）；subprotocol 60 passed和1个既有bounded CPython
+id-reuse环境skip（239.03秒）；lower source 40 passed（1.90秒）；copied-traceback 6 passed（28.13秒）；
+Ruff lint、mypy与diff-check通过。最终第三方只读复审重新执行六案与genuine 20案，H0/M0/L0。
+
+`sqlite_operation_baseline_source.py`在本轮base commit上已经存在整文件Ruff formatter drift；CI只执行
+Ruff lint。本轮不为了一个局部lower owner seam机械改写数百行无关格式；最终Ruff lint clean，两个source和
+test的mypy clean，新增/修改hunk满足现有文件格式并通过diff-check。
+
+##### 31.37.73.4 主线程最终门禁、文件身份与证据日志
+
+主线程在最终runtime冻结后执行：contract 10/10、standalone validator、TS typecheck、TS finalizer 20/20、
+TS registration/exact-S/exact-E focused 11/11、Python copied-traceback 6/6、Python lower source 40/40、
+Python Ruff lint与三文件mypy、最终real-SQLite parity 1/1、whole-tree diff-check，全部通过。完整finalizer与
+subprotocol长测由owner Agent在同一冻结SHA运行，独立审计又对关键攻击矩阵复跑。
+
+本轮13个runtime/test/conformance文件均为0644，最终SHA-256：
+
+- TS rebind：`ef0a5a141f3e719f83b7e6908ddc50974ec8f673b6f8d5f0fd0cd702b9b1712f`；
+- TS finalizer：`3c938e6d00ea70af63b39577a5e3557b152d615a3e14db0d6f2b6e62ee6532bd`；
+- TS connection：`62e553dbd29798c94c2140a5fcba35b76268195d4543f088c2cec01529b34d9a`；
+- TS connection test：`b491f916a7f1d1b6f93fd16e78e82f730e9733b54cca627698ab4c73932c1ba7`；
+- TS Rule11 test：`034bf09da8fca924072009740eba9d9ce52264b1381a92fc98061f867deb0bb9`；
+- TS finalizer test：`8cbb7cfff8f5bed6a183f9b2e7e955ea819c520f97d41bdc580e25e1d415a56d`；
+- Python lower source：`f1e883f43f363d22fe90da188042462c9099b507a5cbfa4a4c608f7c54f330f7`；
+- Python finalizer：`0d538ff906aed829570dd06cec9f7be4985dbdc59a26954fcd7220b6f06588a3`；
+- Python finalizer test：`1bad045c8a6df8d902a7b3fc8639aed22e4a502ee5abeaeb90afd67848569017`；
+- TS Rule11 graph helper：`f6cf1c28df55b3a243336cd2a5354839440f54704cdcc7716e79bbb661abd397`；
+- TS reporter：`85ea8a4093c21799b8726c4c8761e95152f6b9d19a1b7c5170fe8a7653b2653c`；
+- Python reporter：`4274ee529be36340667ae1bd86c25efe11b8925afbc7baf30e037487ef004c13`；
+- parity test：`f9f258582358acc383730f4f4dcd1d8fd3035d5b3c3ce34f7fef0c2802a84912`。
+
+完整审计轨迹、两次被拒绝H1、TS Low修复、命令与nonclaims保存于
+`codex_logs/reviews/SQLITE-POST-CONSUME-FINALIZER-CHANGES-PARITY-V2-2026-08-02.md`。
+
+##### 31.37.73.5 Remaining strict nonclaims 与下一最高优先级开发
+
+本节关闭finalizer reporter parity、TS/Python完整changes primary边界与Python exact E transferable traceback
+缺口，但Wave 1E仍不能标记完成，下一阶段必须继续：
+
+1. 生成native affected、changes affected、total delta、outer ledger与cursor ledger的pairwise两点不一致
+   全组合，不只单字段与少量近邻；
+2. 生成三点及以上multi-corruption组合，确认任何一个一致子集都不能掩盖其他不一致；
+3. 给每一组合固定selected/unselected graph、T/adoption/W/R11 lifecycle与first poison reason predicate；
+4. 把portable reporter扩到共同可实现的counter-combination cases，但不同runtime没有共同native seam的case
+   仍保持runtime-local nonclaim，不能伪造JSON；
+5. 评估所有post-T primary是否均能交给failure finalizer，而不会在serialized leaf内偷偷rollback；
+6. 完成counter closure和独立复审后，才可评估failure-side Wave 1E完成度；
+7. success transaction owner、BEGIN/COMMIT、Rule12、TEMP retirement、third clock与final commit fence必须作为
+   后续独立contract推进，不能借failure finalizer提前声明；
+8. driver-native rollback/close throw仍需真实driver adapter或可复现底层故障；当前只拥有真实native return后
+   ambiguity injection，必须继续保持明确nonclaim；
+9. Python 65,536预算内未实际观察id reuse，只能声明bounded honest attempt和环境skip，不能宣称运行时动态命中；
+10. package-private模块尚未接入公开production workflow或release gate，不能宣称用户已经获得完整事务API。

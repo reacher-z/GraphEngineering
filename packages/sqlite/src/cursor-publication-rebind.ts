@@ -30,12 +30,14 @@ import {
 import {
   beginSQLiteConnectionCursorRebindExecutionIntrinsic,
   executeSQLiteConnectionCursorRebindIntrinsic,
+  injectSQLiteConnectionCursorRebindChangesFaultForTestIntrinsic,
   injectSQLiteConnectionCursorRebindReleaseFaultForTestIntrinsic,
   releaseSQLiteConnectionCursorRebindExecutionIntrinsic,
   type SQLiteConnection,
   type SQLiteConnectionCursorRebindExecution,
   type SQLiteConnectionCursorRebindExecutionSnapshot,
   type SQLiteConnectionTransactionLineage,
+  type SQLiteCursorRebindChangesFaultStage,
 } from "./sqlite-connection.js";
 
 const isProxyIntrinsic = isProxy;
@@ -196,10 +198,19 @@ const PRECONSUME_RELEASE_FAULTS = new WeakMap<
   object,
   PendingPreconsumeReleaseFault
 >();
+interface PendingPostconsumeChangesFault extends PendingPreconsumeReleaseFault {
+  readonly stage: SQLiteCursorRebindChangesFaultStage;
+}
+const POSTCONSUME_CHANGES_FAULTS = new WeakMap<
+  object,
+  PendingPostconsumeChangesFault
+>();
 type PreconsumeReleaseRegistrationFailure =
   | Readonly<{ readonly kind: "direct"; readonly error: unknown }>
   | Readonly<{ readonly kind: "weak"; readonly error: WeakRef<object> }>;
 let preconsumeReleaseFaultRegistrationFailureForTest:
+  PreconsumeReleaseRegistrationFailure | undefined;
+let postconsumeChangesFaultRegistrationFailureForTest:
   PreconsumeReleaseRegistrationFailure | undefined;
 
 function preconsumeReleaseRegistrationFailure(
@@ -215,6 +226,7 @@ function preconsumeReleaseRegistrationFailure(
 
 function throwPreconsumeReleaseRegistrationFailure(
   failure: PreconsumeReleaseRegistrationFailure,
+  faultKind: "preconsume release" | "postconsume changes",
 ): never {
   if (failure.kind === "direct") throw failure.error;
   const error = reflectApplyIntrinsic(
@@ -225,7 +237,7 @@ function throwPreconsumeReleaseRegistrationFailure(
   if (error === undefined) {
     return fail(
       "GE_CYCLE_STORE_CORRUPTION",
-      "SQLite rebind preconsume release fault registration failure expired",
+      `SQLite rebind ${faultKind} fault registration failure expired`,
     );
   }
   throw error;
@@ -368,6 +380,9 @@ export function injectSQLiteCursorRebindPreconsumeReleaseFaultForTestIntrinsic(
       || isProxyIntrinsic(error)
       || reflectApplyIntrinsic(weakMapHasIntrinsic, PRECONSUME_RELEASE_FAULTS, [
         session as object,
+      ])
+      || reflectApplyIntrinsic(weakMapHasIntrinsic, POSTCONSUME_CHANGES_FAULTS, [
+        session as object,
       ])) {
     return fail(
       "GE_CYCLE_STORE_INVALID_ARGUMENT",
@@ -387,7 +402,7 @@ export function injectSQLiteCursorRebindPreconsumeReleaseFaultForTestIntrinsic(
     const registrationFailure = preconsumeReleaseFaultRegistrationFailureForTest;
     preconsumeReleaseFaultRegistrationFailureForTest = undefined;
     if (registrationFailure !== undefined) {
-      throwPreconsumeReleaseRegistrationFailure(registrationFailure);
+      throwPreconsumeReleaseRegistrationFailure(registrationFailure, "preconsume release");
     }
   } catch (registrationError) {
     reflectApplyIntrinsic(weakMapDeleteIntrinsic, PRECONSUME_RELEASE_FAULTS, [
@@ -409,6 +424,123 @@ export function injectSQLiteCursorRebindPreconsumeReleaseFaultRegistrationFailur
   }
   preconsumeReleaseFaultRegistrationFailureForTest =
     preconsumeReleaseRegistrationFailure(error);
+}
+
+/** Package-private exact-S arm handed to the exact E after preparation. */
+export function injectSQLiteCursorRebindPostconsumeChangesFaultForTestIntrinsic(
+  session: SQLiteCursorPublicationSession,
+  stage: SQLiteCursorRebindChangesFaultStage,
+  error: unknown,
+): void {
+  const snapshot = readSQLiteCursorPublicationSessionSnapshotIntrinsic(session);
+  if ((stage !== "prepare-after-native-return"
+      && stage !== "fetch-after-native-return"
+      && stage !== "shape-after-validation"
+      && stage !== "release-after-logical-retirement")
+      || (typeof error !== "object" && typeof error !== "function") || error === null
+      || isProxyIntrinsic(error)
+      || reflectApplyIntrinsic(weakMapHasIntrinsic, POSTCONSUME_CHANGES_FAULTS, [
+        session as object,
+      ])
+      || reflectApplyIntrinsic(weakMapHasIntrinsic, PRECONSUME_RELEASE_FAULTS, [
+        session as object,
+      ])) {
+    return fail(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "SQLite rebind postconsume changes fault is invalid",
+    );
+  }
+  const pending = objectFreezeIntrinsic({
+    authority: new weakRefIntrinsic(snapshot.outerAuthority as object),
+    connection: new weakRefIntrinsic(snapshot.connection as object),
+    error: new weakRefIntrinsic(error),
+    stage,
+  });
+  try {
+    reflectApplyIntrinsic(weakMapSetIntrinsic, POSTCONSUME_CHANGES_FAULTS, [
+      session as object,
+      pending,
+    ]);
+    const registrationFailure = postconsumeChangesFaultRegistrationFailureForTest;
+    postconsumeChangesFaultRegistrationFailureForTest = undefined;
+    if (registrationFailure !== undefined) {
+      throwPreconsumeReleaseRegistrationFailure(registrationFailure, "postconsume changes");
+    }
+  } catch (registrationError) {
+    reflectApplyIntrinsic(weakMapDeleteIntrinsic, POSTCONSUME_CHANGES_FAULTS, [
+      session as object,
+    ]);
+    throw registrationError;
+  }
+}
+
+/** Package-private failure after exact-S changes-fault registration. */
+export function injectSQLiteCursorRebindPostconsumeChangesFaultRegistrationFailureForTestIntrinsic(
+  error: unknown,
+): void {
+  if (postconsumeChangesFaultRegistrationFailureForTest !== undefined) {
+    return fail(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "SQLite rebind postconsume changes fault registration failure is armed",
+    );
+  }
+  postconsumeChangesFaultRegistrationFailureForTest =
+    preconsumeReleaseRegistrationFailure(error);
+}
+
+function handoffPostconsumeChangesFault(
+  session: SQLiteCursorPublicationSession,
+  context: SQLiteCursorPublicationRebindContext,
+  preparedOwner: SQLiteCursorPublicationRebindPreparedOwner,
+  execution: SQLiteConnectionCursorRebindExecution,
+): void {
+  const pending = reflectApplyIntrinsic(
+    weakMapGetIntrinsic,
+    POSTCONSUME_CHANGES_FAULTS,
+    [session as object],
+  ) as PendingPostconsumeChangesFault | undefined;
+  if (pending === undefined) return;
+  if (!reflectApplyIntrinsic(
+    weakMapDeleteIntrinsic,
+    POSTCONSUME_CHANGES_FAULTS,
+    [session as object],
+  )) {
+    return fail(
+      "GE_CYCLE_STORE_CORRUPTION",
+      "SQLite rebind postconsume changes fault identity drifted",
+    );
+  }
+  const authority = reflectApplyIntrinsic(
+    weakRefDerefIntrinsic,
+    pending.authority,
+    [],
+  ) as object | undefined;
+  const connection = reflectApplyIntrinsic(
+    weakRefDerefIntrinsic,
+    pending.connection,
+    [],
+  ) as SQLiteConnection | undefined;
+  const error = reflectApplyIntrinsic(
+    weakRefDerefIntrinsic,
+    pending.error,
+    [],
+  ) as object | undefined;
+  const snapshot = readSQLiteCursorPublicationRebindContextSnapshotIntrinsic(context);
+  if (authority === undefined || connection === undefined || error === undefined
+      || snapshot.outerAuthority !== authority || snapshot.connection !== connection
+      || snapshot.lifecycle !== "prepared" || snapshot.session !== session
+      || snapshot.preparedOwner !== preparedOwner || snapshot.execution !== execution) {
+    return fail(
+      "GE_CYCLE_STORE_CORRUPTION",
+      "SQLite rebind postconsume changes fault identity drifted",
+    );
+  }
+  injectSQLiteConnectionCursorRebindChangesFaultForTestIntrinsic(
+    connection,
+    execution,
+    pending.stage,
+    error,
+  );
 }
 
 function handoffPreconsumeReleaseFault(
@@ -824,6 +956,13 @@ export function executeSQLiteCursorPublicationRebindRule11Intrinsic(
       return fail("GE_CYCLE_STORE_CORRUPTION", "SQLite rebind release fault did not fire");
     }
     return fail("GE_CYCLE_STORE_UNAVAILABLE", "SQLite cursor rebind was cancelled before execute");
+  }
+
+  try {
+    handoffPostconsumeChangesFault(session, context, preparedOwner, execution);
+  } catch (error) {
+    cleanupPreparedContext(context, preparedOwner);
+    throw error;
   }
 
   let tombstone: SQLiteCursorPublicationSessionConsumedTombstone;

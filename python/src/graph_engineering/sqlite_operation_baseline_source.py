@@ -399,6 +399,16 @@ class _SQLiteConnectionCursorPublicationRebindSnapshot(NamedTuple):
     cursor_ledger_delta: _SQLiteCursorPrivateWriteLedgerSnapshot
 
 
+_CursorPublicationChangesPrimaryBoundary = Literal[
+    "serialized-changes-pre-query",
+    "serialized-changes-prepare",
+    "serialized-changes-execute",
+    "serialized-changes-fetch",
+    "serialized-changes-release",
+    "serialized-changes-post-query",
+]
+
+
 @dataclass(slots=True)
 class _CursorPublicationRebindExecutionState:
     connection: SQLiteV1BaselineConnectionOwner
@@ -429,6 +439,8 @@ class _CursorPublicationRebindExecutionState:
     cursor_ledger_fixed_statement_count: Literal[0, 1] = 0
     cursor_ledger_affected_rows_watermark: int = 0
     seal_read_begin_count: Literal[0, 1] = 0
+    changes_primary_id: int | None = None
+    changes_primary_boundary: _CursorPublicationChangesPrimaryBoundary | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1504,6 +1516,62 @@ def _take_cursor_publication_rebind_release_fault_exact(
     return error
 
 
+def _record_cursor_publication_rebind_changes_primary_exact(
+    state: _CursorPublicationRebindExecutionState,
+    error: BaseException,
+    boundary: _CursorPublicationChangesPrimaryBoundary,
+) -> None:
+    """Record only the exact E identity and honest lower boundary, never E itself."""
+
+    if (
+        not isinstance(error, BaseException)
+        or boundary
+        not in {
+            "serialized-changes-pre-query",
+            "serialized-changes-prepare",
+            "serialized-changes-execute",
+            "serialized-changes-fetch",
+            "serialized-changes-release",
+            "serialized-changes-post-query",
+        }
+    ):
+        _cursor_publication_rebind_fail("GE_CURSOR_B3_CURSOR_CHANGES_PRIMARY")
+    # A direct lower caller may replay an already-poisoned E without consuming
+    # the first proof.  Preserve the original exact primary and never let
+    # provenance bookkeeping replace the replay's real lineage error.
+    if state.changes_primary_id is not None or state.changes_primary_boundary is not None:
+        return
+    state.changes_primary_id = id(error)
+    state.changes_primary_boundary = boundary
+
+
+def _take_sqlite_connection_cursor_publication_rebind_changes_primary_intrinsic(
+    connection: SQLiteV1BaselineConnectionOwner,
+    execution: _SQLiteConnectionCursorPublicationRebindExecution,
+    error: BaseException,
+) -> _CursorPublicationChangesPrimaryBoundary:
+    """Consume one exact lower E proof; clear before validating caller identity."""
+
+    if type(connection) is not SQLiteV1BaselineConnectionOwner or not isinstance(
+        error, BaseException
+    ):
+        _cursor_publication_rebind_fail("GE_CURSOR_B3_CURSOR_CHANGES_PRIMARY")
+    state = _cursor_publication_rebind_state(connection, execution)
+    primary_id = state.changes_primary_id
+    boundary = state.changes_primary_boundary
+    state.changes_primary_id = None
+    state.changes_primary_boundary = None
+    if (
+        state.connection is not connection
+        or state.lifecycle != "poisoned"
+        or primary_id is None
+        or boundary is None
+        or primary_id != id(error)
+    ):
+        _cursor_publication_rebind_fail("GE_CURSOR_B3_CURSOR_CHANGES_PRIMARY")
+    return boundary
+
+
 def _cursor_publication_rebind_snapshot(
     state: _CursorPublicationRebindExecutionState,
 ) -> _SQLiteConnectionCursorPublicationRebindSnapshot:
@@ -2182,22 +2250,37 @@ class SQLiteV1BaselineConnectionOwner:
                 and self.__transaction_epoch == state.transaction_epoch
                 and _native_total_changes(self.__connection) == state.total_changes
             )
-        except BaseException:
+        except BaseException as error:
             state.lifecycle = "poisoned"
+            _record_cursor_publication_rebind_changes_primary_exact(
+                state, error, "serialized-changes-pre-query"
+            )
             raise
         if not lineage_valid:
             state.lifecycle = "poisoned"
-            _cursor_publication_rebind_fail("GE_CURSOR_B3_CURSOR_CHANGES_LINEAGE")
+            lineage_error = ValueError("GE_CURSOR_B3_CURSOR_CHANGES_LINEAGE")
+            _record_cursor_publication_rebind_changes_primary_exact(
+                state, lineage_error, "serialized-changes-pre-query"
+            )
+            raise lineage_error
         try:
             changes_cursor = _cursor_factory(self.__connection)
         except BaseException as error:
             state.lifecycle = "poisoned"
-            raise ValueError("GE_CURSOR_B3_CURSOR_CHANGES_PREPARE") from error
+            prepare_error = ValueError("GE_CURSOR_B3_CURSOR_CHANGES_PREPARE")
+            _record_cursor_publication_rebind_changes_primary_exact(
+                state, prepare_error, "serialized-changes-prepare"
+            )
+            raise prepare_error from error
         if not _cursor_belongs(changes_cursor, self.__connection):
             with suppress(BaseException):
                 _cursor_close(changes_cursor)
             state.lifecycle = "poisoned"
-            _cursor_publication_rebind_fail("GE_CURSOR_B3_CURSOR_CHANGES_PREPARE")
+            prepare_error = ValueError("GE_CURSOR_B3_CURSOR_CHANGES_PREPARE")
+            _record_cursor_publication_rebind_changes_primary_exact(
+                state, prepare_error, "serialized-changes-prepare"
+            )
+            raise prepare_error
         state.changes_prepare_count = 1
 
         primary: BaseException | None = None
@@ -2225,14 +2308,28 @@ class SQLiteV1BaselineConnectionOwner:
             close_error = error
         if primary is not None:
             state.lifecycle = "poisoned"
+            _record_cursor_publication_rebind_changes_primary_exact(
+                state,
+                primary,
+                "serialized-changes-execute"
+                if state.changes_fetch_count == 0
+                else "serialized-changes-fetch",
+            )
             raise primary
         if close_error is not None:
             state.lifecycle = "poisoned"
-            raise ValueError("GE_CURSOR_B3_CURSOR_CHANGES_RELEASE") from close_error
+            primary = ValueError("GE_CURSOR_B3_CURSOR_CHANGES_RELEASE")
+            _record_cursor_publication_rebind_changes_primary_exact(
+                state, primary, "serialized-changes-release"
+            )
+            raise primary from close_error
         try:
             current_total = _native_total_changes(self.__connection)
-        except BaseException:
+        except BaseException as error:
             state.lifecycle = "poisoned"
+            _record_cursor_publication_rebind_changes_primary_exact(
+                state, error, "serialized-changes-post-query"
+            )
             raise
         if (
             current_total != state.total_changes
@@ -2241,7 +2338,11 @@ class SQLiteV1BaselineConnectionOwner:
             or self.__transaction_generation is not state.transaction_generation
         ):
             state.lifecycle = "poisoned"
-            _cursor_publication_rebind_fail("GE_CURSOR_B3_CURSOR_CHANGES_LINEAGE")
+            primary = ValueError("GE_CURSOR_B3_CURSOR_CHANGES_LINEAGE")
+            _record_cursor_publication_rebind_changes_primary_exact(
+                state, primary, "serialized-changes-post-query"
+            )
+            raise primary
         state.lifecycle = "completed"
         return _cursor_publication_rebind_snapshot(state)
 

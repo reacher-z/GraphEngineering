@@ -44,6 +44,30 @@ class SubstitutePrimary(BaseException):
     pass
 
 
+class ChangesPreparePrimary(BaseException):
+    pass
+
+
+class ChangesFetchPrimary(BaseException):
+    pass
+
+
+class ChangesPreQueryPrimary(BaseException):
+    pass
+
+
+class ChangesExecutePrimary(BaseException):
+    pass
+
+
+class ChangesPostQueryPrimary(BaseException):
+    pass
+
+
+class ChangesCloseSecondary(BaseException):
+    pass
+
+
 def _install_native_abort(graph: Any) -> None:
     raw = cast(
         sqlite3.Connection,
@@ -80,6 +104,172 @@ def _captured_failure(
     presentation = finalizer._owner_presentation(owner)
     connection, authority, context, tombstone, execution, _generation, primary = presentation
     assert connection is graph.connection and authority is graph.authority
+    return graph, owner, primary, context, tombstone, execution
+
+
+def _captured_changes_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    case: str,
+    *,
+    location: Path | None = None,
+    population: int = 1,
+    definition_time_leaf_attack: bool = False,
+) -> tuple[Any, Any, BaseException, Any, Any, Any]:
+    original_init = source.SQLiteV1BaselineConnectionOwner.__init__
+    original_prepare = protocol.__dict__[
+        "_prepare_sqlite_connection_cursor_publication_rebind_intrinsic"
+    ]
+    executions: list[Any] = []
+
+    def prepare(connection: Any) -> Any:
+        execution = original_prepare(connection)
+        executions.append(execution)
+        return execution
+
+    prepare_primary = ChangesPreparePrimary("serialized changes prepare")
+    fetch_primary = ChangesFetchPrimary("serialized changes fetch")
+    pre_query_primary = ChangesPreQueryPrimary("serialized changes pre-query")
+    execute_primary = ChangesExecutePrimary("serialized changes execute")
+    post_query_primary = ChangesPostQueryPrimary("serialized changes post-query")
+    total_changes_calls = 0
+    foreign_connection = sqlite3.connect(":memory:") if case == "foreign-cursor" else None
+
+    def fail_prepare(_raw: sqlite3.Connection) -> sqlite3.Cursor:
+        raise prepare_primary
+
+    def foreign_cursor(_raw: sqlite3.Connection) -> sqlite3.Cursor:
+        assert foreign_connection is not None
+        return foreign_connection.cursor()
+
+    def pre_query_in_transaction(_raw: sqlite3.Connection) -> bool:
+        if case == "pre-query-raw":
+            raise pre_query_primary
+        return False
+
+    def fail_execute(
+        _cursor: sqlite3.Cursor,
+        sql: str,
+        parameters: tuple[()],
+    ) -> sqlite3.Cursor:
+        assert sql == source.SQLITE_CURSOR_PUBLICATION_CHANGES_SQL_INTRINSIC
+        assert parameters == ()
+        raise execute_primary
+
+    def post_query_total_changes(raw: sqlite3.Connection) -> int:
+        nonlocal total_changes_calls
+        total_changes_calls += 1
+        if total_changes_calls == 1:
+            return raw.total_changes
+        if case == "post-query-raw":
+            raise post_query_primary
+        return raw.total_changes + 1
+
+    rows_by_case: dict[str, object] = {
+        "zero": [],
+        "two": [(population,), (population,)],
+        "shape": ((population,),),
+        "type": [(str(population),)],
+        "negative": [(-1,)],
+        "unsafe": [(2**53,)],
+        "close": [(population,)],
+        "shape-and-close": [()],
+    }
+
+    def fetch(_cursor: sqlite3.Cursor, size: int) -> object:
+        assert size == 2
+        if case == "fetch":
+            raise fetch_primary
+        return rows_by_case.get(case, [(population,)])
+
+    def close_then_secondary(cursor: sqlite3.Cursor) -> None:
+        source._CURSOR_REBIND_SQLITE_CURSOR_CLOSE(cursor)
+        raise ChangesCloseSecondary("serialized changes close")
+
+    def prove(connection: Any, execution: Any) -> Any:
+        assert executions == [execution]
+        implementation = (
+            source.SQLiteV1BaselineConnectionOwner._prove_cursor_publication_rebind_changes
+        )
+        if case == "prepare":
+            return implementation(connection, execution, _cursor_factory=fail_prepare)
+        if case == "foreign-cursor":
+            return implementation(connection, execution, _cursor_factory=foreign_cursor)
+        if case in {"pre-query-lineage", "pre-query-raw"}:
+            return implementation(
+                connection,
+                execution,
+                _native_in_transaction=pre_query_in_transaction,
+            )
+        if case == "execute":
+            return implementation(connection, execution, _cursor_execute=fail_execute)
+        if case in {"post-query-lineage", "post-query-raw"}:
+            return implementation(
+                connection,
+                execution,
+                _native_total_changes=post_query_total_changes,
+                _cursor_fetchmany=fetch,
+            )
+        if case in {"close", "shape-and-close"}:
+            return implementation(
+                connection,
+                execution,
+                _cursor_fetchmany=fetch,
+                _cursor_close=close_then_secondary,
+            )
+        return implementation(connection, execution, _cursor_fetchmany=fetch)
+
+    monkeypatch.setattr(
+        protocol,
+        "_prepare_sqlite_connection_cursor_publication_rebind_intrinsic",
+        prepare,
+    )
+    monkeypatch.setattr(
+        protocol,
+        "_prove_sqlite_connection_cursor_publication_rebind_changes_intrinsic",
+        prove,
+    )
+    if location is None:
+        graph = _CursorAdoptionGraph(population)
+    else:
+        with monkeypatch.context() as redirected:
+            redirected.setattr(
+                source.SQLiteV1BaselineConnectionOwner,
+                "__init__",
+                lambda owner, _location: original_init(owner, str(location)),
+            )
+            graph = _CursorAdoptionGraph(population)
+    session = _session(graph)
+    rebound_calls = 0
+    if definition_time_leaf_attack:
+        exact_leaf = finalizer._LEAF
+
+        def rebound(selected: Any) -> Any:
+            nonlocal rebound_calls
+            rebound_calls += 1
+            exact_leaf(selected)
+            raise SubstitutePrimary("substitute after rebound leaf")
+
+        monkeypatch.setattr(finalizer, "_LEAF", rebound)
+    write_before = len(protocol._WRITE_RECEIPTS)
+    rule11_before = len(protocol._RULE11_RECEIPTS)
+    try:
+        owner = (
+            finalizer._capture_sqlite_cursor_postconsume_transaction_failure_finalizer_intrinsic(
+                graph.connection, graph.authority, session
+            )
+        )
+    finally:
+        if foreign_connection is not None:
+            foreign_connection.close()
+    assert len(executions) == 1
+    assert rebound_calls == 0
+    assert len(protocol._WRITE_RECEIPTS) == write_before
+    assert len(protocol._RULE11_RECEIPTS) == rule11_before
+    connection, authority, context, tombstone, execution, _generation, primary = (
+        finalizer._owner_presentation(owner)
+    )
+    assert connection is graph.connection and authority is graph.authority
+    assert execution is executions[0]
     return graph, owner, primary, context, tombstone, execution
 
 
@@ -126,11 +316,375 @@ def test_capture_authenticates_exact_native_primary_e_and_rejects_caller_primary
         native.changes_fetch_count,
         native.changes_release_count,
     ) == (0, 0, 0)
+    assert _read_finalizer(owner).primary_boundary == "native-execute"
     assert not hasattr(
         finalizer,
         "_prepare_sqlite_cursor_postconsume_transaction_failure_finalizer_intrinsic",
     )
     _finalize(owner, primary)
+
+
+@pytest.mark.parametrize(
+    ("case", "boundary", "changes_counts", "primary_code"),
+    [
+        (
+            "pre-query-lineage",
+            "serialized-changes-pre-query",
+            (0, 0, 0),
+            "GE_CURSOR_B3_CURSOR_CHANGES_LINEAGE",
+        ),
+        ("pre-query-raw", "serialized-changes-pre-query", (0, 0, 0), None),
+        (
+            "prepare",
+            "serialized-changes-prepare",
+            (0, 0, 0),
+            "GE_CURSOR_B3_CURSOR_CHANGES_PREPARE",
+        ),
+        (
+            "foreign-cursor",
+            "serialized-changes-prepare",
+            (0, 0, 0),
+            "GE_CURSOR_B3_CURSOR_CHANGES_PREPARE",
+        ),
+        ("execute", "serialized-changes-execute", (1, 0, 1), None),
+        ("fetch", "serialized-changes-fetch", (1, 1, 1), None),
+        (
+            "zero",
+            "serialized-changes-fetch",
+            (1, 1, 1),
+            "GE_CURSOR_B3_CURSOR_CHANGES_SHAPE",
+        ),
+        (
+            "two",
+            "serialized-changes-fetch",
+            (1, 1, 1),
+            "GE_CURSOR_B3_CURSOR_CHANGES_SHAPE",
+        ),
+        (
+            "shape",
+            "serialized-changes-fetch",
+            (1, 1, 1),
+            "GE_CURSOR_B3_CURSOR_CHANGES_SHAPE",
+        ),
+        (
+            "type",
+            "serialized-changes-fetch",
+            (1, 1, 1),
+            "GE_CURSOR_B3_CURSOR_CHANGES_SHAPE",
+        ),
+        (
+            "negative",
+            "serialized-changes-fetch",
+            (1, 1, 1),
+            "GE_CURSOR_B3_CURSOR_CHANGES_VALUE",
+        ),
+        (
+            "unsafe",
+            "serialized-changes-fetch",
+            (1, 1, 1),
+            "GE_CURSOR_B3_CURSOR_CHANGES_VALUE",
+        ),
+        (
+            "close",
+            "serialized-changes-release",
+            (1, 1, 1),
+            "GE_CURSOR_B3_CURSOR_CHANGES_RELEASE",
+        ),
+        (
+            "post-query-lineage",
+            "serialized-changes-post-query",
+            (1, 1, 1),
+            "GE_CURSOR_B3_CURSOR_CHANGES_LINEAGE",
+        ),
+        ("post-query-raw", "serialized-changes-post-query", (1, 1, 1), None),
+        (
+            "shape-and-close",
+            "serialized-changes-fetch",
+            (1, 1, 1),
+            "GE_CURSOR_B3_CURSOR_CHANGES_SHAPE",
+        ),
+    ],
+)
+def test_capture_authenticates_serialized_changes_primary_matrix(
+    monkeypatch: pytest.MonkeyPatch,
+    case: str,
+    boundary: str,
+    changes_counts: tuple[int, int, int],
+    primary_code: str | None,
+) -> None:
+    graph, owner, primary, _context, _tombstone, execution = _captured_changes_failure(
+        monkeypatch, case
+    )
+    snapshot = _read_finalizer(owner)
+    native = source._read_sqlite_connection_cursor_publication_rebind_snapshot_intrinsic(
+        graph.connection, execution
+    )
+    assert snapshot.primary_boundary == boundary
+    assert type(snapshot.primary_boundary) is str
+    assert json.loads(json.dumps(snapshot.primary_boundary)) == boundary
+    assert native.lifecycle == "poisoned"
+    assert (native.execute_count, native.release_count, native.affected_rows) == (1, 1, 1)
+    assert native.total_changes_delta == 1
+    assert native.cursor_ledger_before == (0, 0, 0)
+    assert native.cursor_ledger_after == native.cursor_ledger_delta == (1, 1, 1)
+    assert (
+        native.changes_prepare_count,
+        native.changes_fetch_count,
+        native.changes_release_count,
+    ) == changes_counts
+    authority = outer._read_sqlite_cursor_outer_publication_authority_snapshot_intrinsic(
+        graph.authority
+    )
+    assert authority.post_rebind_watermark_adoption is None
+    if primary_code is None:
+        expected_type = {
+            "pre-query-raw": ChangesPreQueryPrimary,
+            "execute": ChangesExecutePrimary,
+            "fetch": ChangesFetchPrimary,
+            "post-query-raw": ChangesPostQueryPrimary,
+        }[case]
+        assert type(primary) is expected_type
+    else:
+        assert type(primary) is ValueError
+        assert primary.args == (primary_code,)
+    if case in {"close", "post-query-lineage", "post-query-raw"}:
+        assert native.changes_affected_rows == 1
+    else:
+        assert native.changes_affected_rows is None
+    _finalize(owner, primary)
+
+
+@pytest.mark.parametrize(
+    ("population", "case", "boundary"),
+    [
+        (0, "prepare", "serialized-changes-prepare"),
+        (3, "shape", "serialized-changes-fetch"),
+    ],
+)
+def test_changes_primary_affected_count_matches_exact_b2_population(
+    monkeypatch: pytest.MonkeyPatch,
+    population: int,
+    case: str,
+    boundary: str,
+) -> None:
+    graph, owner, primary, context, _tombstone, execution = _captured_changes_failure(
+        monkeypatch, case, population=population
+    )
+    context_snapshot = outer._read_sqlite_cursor_publication_rebind_context_snapshot_intrinsic(
+        context
+    )
+    native = source._read_sqlite_connection_cursor_publication_rebind_snapshot_intrinsic(
+        graph.connection, execution
+    )
+    assert context_snapshot.b2_cursor_count == population
+    assert native.affected_rows == native.total_changes_delta == population
+    assert native.cursor_ledger_after == native.cursor_ledger_delta == (population, 1, 1)
+    assert _read_finalizer(owner).primary_boundary == boundary
+    _finalize(owner, primary)
+
+
+def test_execute_primary_uses_definition_time_leaf_and_wins_cleanup_precedence(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    location = tmp_path / "postconsume-changes-execute.sqlite3"
+    graph, owner, primary, _context, _tombstone, execution = _captured_changes_failure(
+        monkeypatch,
+        "execute",
+        location=location,
+        definition_time_leaf_attack=True,
+    )
+    rollback = RollbackSecondary("execute rollback after return")
+    close = CloseTertiary("execute close after return")
+    finalizer._arm_sqlite_cursor_postconsume_after_native_return_fault_for_test_intrinsic(
+        owner, "rollback", rollback
+    )
+    finalizer._arm_sqlite_cursor_postconsume_after_native_return_fault_for_test_intrinsic(
+        owner, "close", close
+    )
+    native = source._read_sqlite_connection_cursor_publication_rebind_snapshot_intrinsic(
+        graph.connection, execution
+    )
+    assert type(primary) is ChangesExecutePrimary
+    assert native.changes_prepare_count == native.changes_release_count == 1
+    assert native.changes_fetch_count == 0
+    snapshot = _finalize(owner, primary)
+    assert snapshot.primary_boundary == "serialized-changes-execute"
+    assert snapshot.rollback_native_return_count == snapshot.close_native_return_count == 1
+    assert [item.rank for item in snapshot.diagnostics] == [
+        "primary",
+        "secondary",
+        "tertiary",
+    ]
+    reopened = sqlite3.connect(location)
+    try:
+        assert reopened.execute(
+            "SELECT current_version FROM ge_cycle_schema WHERE singleton = 1"
+        ).fetchone() == (1,)
+        assert reopened.execute(
+            "SELECT count(*) FROM ge_cycle_cursors "
+            "WHERE descriptor_hash = ? AND schema_identity_sha256 = ?",
+            (
+                "4071e4e5e2cddad01af4f87e4df45fa55bbc4e238674174ce40eca765d2c03fe",
+                "f3d961d4d96e93a7fab13a91b374c27ff877a93332ff7ed7426f1fff982baff4",
+            ),
+        ).fetchone() == (1,)
+    finally:
+        reopened.close()
+
+
+@pytest.mark.parametrize(
+    ("case", "changes_counts"),
+    [
+        ("pre-query", (0, 0, 0)),
+        ("prepare", (0, 0, 0)),
+        ("execute", (1, 0, 1)),
+        ("fetch", (1, 1, 1)),
+        ("release", (1, 1, 1)),
+        ("post-query", (1, 1, 1)),
+    ],
+)
+def test_transferred_real_traceback_cannot_substitute_exact_lower_primary(
+    monkeypatch: pytest.MonkeyPatch,
+    case: str,
+    changes_counts: tuple[int, int, int],
+) -> None:
+    graph = _CursorAdoptionGraph(1)
+    session = _session(graph)
+    executions: list[Any] = []
+    original_prepare = protocol.__dict__[
+        "_prepare_sqlite_connection_cursor_publication_rebind_intrinsic"
+    ]
+    original = source.SQLiteV1BaselineConnectionOwner._prove_cursor_publication_rebind_changes
+    total_calls = 0
+    real_primaries: list[BaseException] = []
+    substitutes: list[SubstitutePrimary] = []
+
+    def prepare(connection: Any) -> Any:
+        execution = original_prepare(connection)
+        executions.append(execution)
+        return execution
+
+    def fail_execute(
+        _cursor: sqlite3.Cursor,
+        sql: str,
+        parameters: tuple[()],
+    ) -> sqlite3.Cursor:
+        assert sql == source.SQLITE_CURSOR_PUBLICATION_CHANGES_SQL_INTRINSIC
+        assert parameters == ()
+        raise ChangesExecutePrimary("real lower execute primary")
+
+    def fail_pre_query(_raw: sqlite3.Connection) -> bool:
+        raise ChangesPreQueryPrimary("real lower pre-query primary")
+
+    def fail_prepare(_raw: sqlite3.Connection) -> sqlite3.Cursor:
+        raise ChangesPreparePrimary("real lower prepare primary")
+
+    def fail_fetch(_cursor: sqlite3.Cursor, size: int) -> object:
+        assert size == 2
+        raise ChangesFetchPrimary("real lower fetch primary")
+
+    def fail_release(_cursor: sqlite3.Cursor) -> None:
+        raise ChangesCloseSecondary("real lower release primary")
+
+    def fail_second_total(raw: sqlite3.Connection) -> int:
+        nonlocal total_calls
+        total_calls += 1
+        if total_calls == 1:
+            return raw.total_changes
+        raise ChangesPostQueryPrimary("real lower post-query primary")
+
+    def prove(connection: Any, execution: Any) -> Any:
+        try:
+            if case == "pre-query":
+                return original(
+                    connection,
+                    execution,
+                    _native_in_transaction=fail_pre_query,
+                )
+            if case == "prepare":
+                return original(connection, execution, _cursor_factory=fail_prepare)
+            if case == "execute":
+                return original(connection, execution, _cursor_execute=fail_execute)
+            if case == "fetch":
+                return original(connection, execution, _cursor_fetchmany=fail_fetch)
+            if case == "release":
+                return original(connection, execution, _cursor_close=fail_release)
+            return original(connection, execution, _native_total_changes=fail_second_total)
+        except BaseException as real:
+            real_primaries.append(real)
+            replacement = SubstitutePrimary(f"substituted {case} primary").with_traceback(
+                real.__traceback__
+            )
+            substitutes.append(replacement)
+            raise replacement from None
+
+    monkeypatch.setattr(
+        protocol,
+        "_prepare_sqlite_connection_cursor_publication_rebind_intrinsic",
+        prepare,
+    )
+    monkeypatch.setattr(
+        protocol,
+        "_prove_sqlite_connection_cursor_publication_rebind_changes_intrinsic",
+        prove,
+    )
+    before = len(finalizer._POSTCONSUME_TRANSACTION_FAILURE_FINALIZERS)
+    with pytest.raises(ValueError, match=r"^GE_CURSOR_B3_POSTCONSUME_GRAPH$"):
+        finalizer._capture_sqlite_cursor_postconsume_transaction_failure_finalizer_intrinsic(
+            graph.connection, graph.authority, session
+        )
+    assert len(finalizer._POSTCONSUME_TRANSACTION_FAILURE_FINALIZERS) == before
+    assert len(executions) == 1
+    assert len(real_primaries) == len(substitutes) == 1
+    transferred = substitutes[0].__traceback__
+    assert transferred is not None
+    codes: list[Any] = []
+    while transferred is not None:
+        codes.append(transferred.tb_frame.f_code)
+        transferred = transferred.tb_next
+    assert original.__code__ in codes
+    native = source._read_sqlite_connection_cursor_publication_rebind_snapshot_intrinsic(
+        graph.connection, executions[0]
+    )
+    assert native.lifecycle == "poisoned"
+    assert (
+        native.changes_prepare_count,
+        native.changes_fetch_count,
+        native.changes_release_count,
+    ) == changes_counts
+    with pytest.raises(ValueError, match=r"^GE_CURSOR_B3_CURSOR_CHANGES_PRIMARY$"):
+        source._take_sqlite_connection_cursor_publication_rebind_changes_primary_intrinsic(
+            graph.connection, executions[0], real_primaries[0]
+        )
+    graph.close()
+
+
+def test_serialized_changes_fetch_primary_wins_over_changes_close_and_cleanup_faults(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    graph, owner, primary, _context, _tombstone, _execution = _captured_changes_failure(
+        monkeypatch, "shape-and-close"
+    )
+    rollback = RollbackSecondary("rollback after return")
+    close = CloseTertiary("close after return")
+    finalizer._arm_sqlite_cursor_postconsume_after_native_return_fault_for_test_intrinsic(
+        owner, "rollback", rollback
+    )
+    finalizer._arm_sqlite_cursor_postconsume_after_native_return_fault_for_test_intrinsic(
+        owner, "close", close
+    )
+    snapshot = _finalize(owner, primary)
+    assert type(primary) is ValueError
+    assert primary.args == ("GE_CURSOR_B3_CURSOR_CHANGES_SHAPE",)
+    assert snapshot.primary_boundary == "serialized-changes-fetch"
+    assert [item.rank for item in snapshot.diagnostics] == [
+        "primary",
+        "secondary",
+        "tertiary",
+    ]
+    with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
+        graph.connection.execute("SELECT 1")
 
 
 def test_capture_leaf_is_definition_time_closure_not_rebindable_global(
@@ -245,6 +799,53 @@ def test_real_rollback_close_reopen_restores_and_fresh_graph_succeeds(
             _session(fresh)
         )
         result = protocol._read_sqlite_cursor_publication_rule11_receipt_snapshot_intrinsic(rule11)
+        assert result.violation_count == 0
+        assert result.counts == (1, 1, 1, 1, 1)
+    finally:
+        fresh.close()
+
+
+def test_serialized_changes_primary_real_rollback_close_reopen_restores_native_write(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    location = tmp_path / "postconsume-changes.sqlite3"
+    graph, owner, primary, _context, _tombstone, execution = _captured_changes_failure(
+        monkeypatch, "close", location=location
+    )
+    native = source._read_sqlite_connection_cursor_publication_rebind_snapshot_intrinsic(
+        graph.connection, execution
+    )
+    assert native.affected_rows == native.total_changes_delta == 1
+    assert native.changes_affected_rows == 1
+    assert _read_finalizer(owner).primary_boundary == "serialized-changes-release"
+    snapshot = _finalize(owner, primary)
+    assert snapshot.rollback_attempt_count == snapshot.rollback_native_return_count == 1
+    assert snapshot.close_attempt_count == snapshot.close_native_return_count == 1
+
+    reopened = sqlite3.connect(location)
+    try:
+        assert reopened.execute(
+            "SELECT current_version FROM ge_cycle_schema WHERE singleton = 1"
+        ).fetchone() == (1,)
+        assert reopened.execute(
+            "SELECT count(*) FROM ge_cycle_cursors "
+            "WHERE descriptor_hash = ? AND schema_identity_sha256 = ?",
+            (
+                "4071e4e5e2cddad01af4f87e4df45fa55bbc4e238674174ce40eca765d2c03fe",
+                "f3d961d4d96e93a7fab13a91b374c27ff877a93332ff7ed7426f1fff982baff4",
+            ),
+        ).fetchone() == (1,)
+    finally:
+        reopened.close()
+
+    monkeypatch.undo()
+    fresh = _CursorAdoptionGraph(1)
+    try:
+        receipt = protocol._execute_sqlite_cursor_publication_rebind_rule11_intrinsic(
+            _session(fresh)
+        )
+        result = protocol._read_sqlite_cursor_publication_rule11_receipt_snapshot_intrinsic(receipt)
         assert result.violation_count == 0
         assert result.counts == (1, 1, 1, 1, 1)
     finally:
@@ -436,6 +1037,49 @@ def test_abandoned_owner_reverse_primary_graph_collects_and_stale_callback_is_sa
         gc.collect()
     assert all(item() is None for item in weak)
     assert marker_ref() is None
+    assert (
+        len(finalizer._POSTCONSUME_TRANSACTION_FAILURE_FINALIZERS),
+        len(finalizer._POSTCONSUME_TRANSACTION_FAILURE_FINALIZER_BY_CONTEXT),
+    ) == baseline
+    stale_owner()
+    stale_context()
+    assert (
+        len(finalizer._POSTCONSUME_TRANSACTION_FAILURE_FINALIZERS),
+        len(finalizer._POSTCONSUME_TRANSACTION_FAILURE_FINALIZER_BY_CONTEXT),
+    ) == baseline
+
+
+def test_abandoned_serialized_changes_owner_reverse_primary_graph_collects(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for _ in range(3):
+        gc.collect()
+    baseline = (
+        len(finalizer._POSTCONSUME_TRANSACTION_FAILURE_FINALIZERS),
+        len(finalizer._POSTCONSUME_TRANSACTION_FAILURE_FINALIZER_BY_CONTEXT),
+    )
+    graph, owner, primary, context, tombstone, execution = _captured_changes_failure(
+        monkeypatch, "shape"
+    )
+    cast(Any, primary).graph = graph
+    owner_id = id(owner)
+    stale_owner = finalizer._POSTCONSUME_TRANSACTION_FAILURE_FINALIZERS[owner_id].key_ref
+    stale_context = finalizer._POSTCONSUME_TRANSACTION_FAILURE_FINALIZER_BY_CONTEXT[
+        id(context)
+    ].context_ref
+    weak = [
+        ref(graph.authority),
+        ref(context),
+        ref(tombstone),
+        ref(execution),
+        ref(owner),
+    ]
+    monkeypatch.undo()
+    graph.close()
+    del context, execution, graph, owner, primary, tombstone
+    for _ in range(16):
+        gc.collect()
+    assert all(item() is None for item in weak)
     assert (
         len(finalizer._POSTCONSUME_TRANSACTION_FAILURE_FINALIZERS),
         len(finalizer._POSTCONSUME_TRANSACTION_FAILURE_FINALIZER_BY_CONTEXT),

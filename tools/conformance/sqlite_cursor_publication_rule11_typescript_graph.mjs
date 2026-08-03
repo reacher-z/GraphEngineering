@@ -233,10 +233,10 @@ export function createRule11TypescriptGraph(cursorCount) {
       appliedAtMs: RULE11_PARITY_CAPTURED_AT_MS - 2,
     });
     installMigrationLock(connection);
-    configureSQLiteBaselineTempStorage(connection);
-    connection.execTrusted("BEGIN EXCLUSIVE", "inspect-schema");
     insertControlOperation(connection);
     insertCursorRows(connection, cursorCount);
+    configureSQLiteBaselineTempStorage(connection);
+    connection.execTrusted("BEGIN EXCLUSIVE", "inspect-schema");
     stage = createSQLiteBaselineTempStage(
       connection,
       proveSQLiteExclusiveBaselineTransaction(connection),

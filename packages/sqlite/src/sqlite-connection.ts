@@ -668,6 +668,7 @@ interface CursorRebindExecutionState {
   changesFetchCount: 0 | 1;
   changesPrepareCount: 0 | 1;
   changesReleaseCount: 0 | 1;
+  changesFailureBoundary: SQLiteCursorRebindChangesFaultStage | null;
   readonly connection: SQLiteConnection;
   cursorLedgerAffectedRowsWatermark: number;
   cursorLedgerFixedStatementCount: 0 | 1;
@@ -757,14 +758,32 @@ interface CursorRebindReleaseFaultState {
   readonly error: WeakRef<object>;
 }
 
+export type SQLiteCursorRebindChangesFaultStage =
+  | "prepare-after-native-return"
+  | "fetch-after-native-return"
+  | "shape-after-validation"
+  | "release-after-logical-retirement";
+
+interface CursorRebindChangesFaultState {
+  readonly connection: WeakRef<object>;
+  readonly error: WeakRef<object>;
+  readonly stage: SQLiteCursorRebindChangesFaultStage;
+}
+
 const CURSOR_REBIND_RELEASE_FAULTS = new WeakMap<
   object,
   CursorRebindReleaseFaultState
+>();
+const CURSOR_REBIND_CHANGES_FAULTS = new WeakMap<
+  object,
+  CursorRebindChangesFaultState
 >();
 type CursorRebindRegistrationFailure =
   | Readonly<{ readonly kind: "direct"; readonly error: unknown }>
   | Readonly<{ readonly kind: "weak"; readonly error: WeakRef<object> }>;
 let cursorRebindReleaseFaultRegistrationFailureForTest:
+  CursorRebindRegistrationFailure | undefined;
+let cursorRebindChangesFaultRegistrationFailureForTest:
   CursorRebindRegistrationFailure | undefined;
 
 function cursorRebindRegistrationFailure(
@@ -780,6 +799,7 @@ function cursorRebindRegistrationFailure(
 
 function throwCursorRebindRegistrationFailure(
   failure: CursorRebindRegistrationFailure,
+  faultKind: "release" | "changes",
 ): never {
   if (failure.kind === "direct") throw failure.error;
   const error = reflectApplyIntrinsic(
@@ -791,10 +811,52 @@ function throwCursorRebindRegistrationFailure(
     throw new CycleStoreProviderError(
       "GE_CYCLE_STORE_CORRUPTION",
       "inspect-schema",
-      "SQLite cursor rebind release fault registration failure expired",
+      `SQLite cursor rebind ${faultKind} fault registration failure expired`,
     );
   }
   throw error;
+}
+
+function takeCursorRebindChangesFaultAtBoundary(
+  execution: SQLiteConnectionCursorRebindExecution,
+  state: CursorRebindExecutionState,
+  stage: SQLiteCursorRebindChangesFaultStage,
+): object | undefined {
+  const fault = reflectApplyIntrinsic(
+    weakMapGetIntrinsic,
+    CURSOR_REBIND_CHANGES_FAULTS,
+    [execution as object],
+  ) as CursorRebindChangesFaultState | undefined;
+  if (fault === undefined || fault.stage !== stage) return undefined;
+  if (!reflectApplyIntrinsic(
+    weakMapDeleteIntrinsic,
+    CURSOR_REBIND_CHANGES_FAULTS,
+    [execution as object],
+  )) {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_CORRUPTION",
+      "inspect-schema",
+      "SQLite cursor rebind changes fault identity drifted",
+    );
+  }
+  const connection = reflectApplyIntrinsic(
+    weakRefDerefIntrinsic,
+    fault.connection,
+    [],
+  ) as object | undefined;
+  const error = reflectApplyIntrinsic(
+    weakRefDerefIntrinsic,
+    fault.error,
+    [],
+  ) as object | undefined;
+  if (connection !== state.connection || error === undefined) {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_CORRUPTION",
+      "inspect-schema",
+      "SQLite cursor rebind changes fault identity drifted",
+    );
+  }
+  return error;
 }
 
 function invalid(message: string): never {
@@ -2587,6 +2649,7 @@ export class SQLiteConnection {
     const state: CursorRebindExecutionState = {
       affectedRows: 0,
       changesAffectedRows: null,
+      changesFailureBoundary: null,
       changesFetchCount: 0,
       changesPrepareCount: 0,
       changesReleaseCount: 0,
@@ -2712,25 +2775,71 @@ export class SQLiteConnection {
     this.#retireCursorRebindStatement(state);
 
     let changesStatement: StatementSync | null = null;
+    let selectedChangesPrimary: object | undefined;
     try {
+      state.changesFailureBoundary = null;
       changesStatement = hardenSQLiteNativeStatementIntrinsic(reflectApplyIntrinsic(
         databasePrepareIntrinsic,
         this.#database,
         [SQLITE_CURSOR_PUBLICATION_CHANGES_SQL_INTRINSIC],
       ) as StatementSync);
       state.changesPrepareCount = 1;
+      selectedChangesPrimary = takeCursorRebindChangesFaultAtBoundary(
+        execution,
+        state,
+        "prepare-after-native-return",
+      );
+      if (selectedChangesPrimary !== undefined) {
+        state.changesFailureBoundary = "prepare-after-native-return";
+        throw selectedChangesPrimary;
+      }
+      state.changesFailureBoundary = null;
       state.changesFetchCount = 1;
+      const changesRows = reflectApplyIntrinsic(statementAllIntrinsic, changesStatement, []);
+      selectedChangesPrimary = takeCursorRebindChangesFaultAtBoundary(
+        execution,
+        state,
+        "fetch-after-native-return",
+      );
+      if (selectedChangesPrimary !== undefined) {
+        state.changesFailureBoundary = "fetch-after-native-return";
+        throw selectedChangesPrimary;
+      }
+      state.changesFailureBoundary = null;
       state.changesAffectedRows = exactSQLiteCursorRebindChangesProof(
-        reflectApplyIntrinsic(statementAllIntrinsic, changesStatement, []),
+        changesRows,
         state.affectedRows,
       );
+      selectedChangesPrimary = takeCursorRebindChangesFaultAtBoundary(
+        execution,
+        state,
+        "shape-after-validation",
+      );
+      if (selectedChangesPrimary !== undefined) {
+        state.changesFailureBoundary = "shape-after-validation";
+        throw selectedChangesPrimary;
+      }
+      state.changesReleaseCount = 1;
+      selectedChangesPrimary = takeCursorRebindChangesFaultAtBoundary(
+        execution,
+        state,
+        "release-after-logical-retirement",
+      );
+      if (selectedChangesPrimary !== undefined) {
+        state.changesFailureBoundary = "release-after-logical-retirement";
+        throw selectedChangesPrimary;
+      }
     } catch (error) {
       if (changesStatement !== null) state.changesReleaseCount = 1;
+      reflectApplyIntrinsic(weakMapDeleteIntrinsic, CURSOR_REBIND_CHANGES_FAULTS, [
+        execution as object,
+      ]);
       this.#synchronizeCursorRebindAfterFailure(state);
       state.lifecycle = "poisoned";
+      if (error === selectedChangesPrimary) throw error;
       throw translateSQLiteError(error, "inspect-schema");
     }
-    state.changesReleaseCount = 1;
+    state.changesFailureBoundary = null;
 
     try {
       state.totalChangesAfter = this.#readTotalChangesCounter();
@@ -4178,7 +4287,7 @@ export function injectSQLiteConnectionCursorRebindReleaseFaultForTestIntrinsic(
     const registrationFailure = cursorRebindReleaseFaultRegistrationFailureForTest;
     cursorRebindReleaseFaultRegistrationFailureForTest = undefined;
     if (registrationFailure !== undefined) {
-      throwCursorRebindRegistrationFailure(registrationFailure);
+      throwCursorRebindRegistrationFailure(registrationFailure, "release");
     }
   } catch (registrationError) {
     reflectApplyIntrinsic(weakMapDeleteIntrinsic, CURSOR_REBIND_RELEASE_FAULTS, [
@@ -4203,6 +4312,74 @@ export function injectSQLiteConnectionCursorRebindReleaseFaultRegistrationFailur
     cursorRebindRegistrationFailure(error);
 }
 
+/** Package-private exact-E one-shot serialized changes boundary fault seam. */
+export function injectSQLiteConnectionCursorRebindChangesFaultForTestIntrinsic(
+  connection: SQLiteConnection,
+  execution: SQLiteConnectionCursorRebindExecution,
+  stage: SQLiteCursorRebindChangesFaultStage,
+  error: unknown,
+): void {
+  const state = execution !== null && typeof execution === "object" && !isProxy(execution)
+    ? reflectApplyIntrinsic(weakMapGetIntrinsic, CURSOR_REBIND_EXECUTIONS, [
+      execution as object,
+    ]) as CursorRebindExecutionState | undefined
+    : undefined;
+  if (state === undefined || state.connection !== connection
+      || state.lifecycle !== "active" || state.statement === null
+      || state.executeCount !== 0 || state.releaseCount !== 0
+      || (stage !== "prepare-after-native-return"
+        && stage !== "fetch-after-native-return"
+        && stage !== "shape-after-validation"
+        && stage !== "release-after-logical-retirement")
+      || (typeof error !== "object" && typeof error !== "function")
+      || error === null || isProxy(error)
+      || reflectApplyIntrinsic(weakMapHasIntrinsic, CURSOR_REBIND_CHANGES_FAULTS, [
+        execution as object,
+      ])) {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "inspect-schema",
+      "SQLite cursor rebind changes fault is invalid",
+    );
+  }
+  const fault = objectFreezeIntrinsic({
+    connection: new weakRefIntrinsic(connection as object),
+    error: new weakRefIntrinsic(error),
+    stage,
+  });
+  try {
+    reflectApplyIntrinsic(weakMapSetIntrinsic, CURSOR_REBIND_CHANGES_FAULTS, [
+      execution as object,
+      fault,
+    ]);
+    const registrationFailure = cursorRebindChangesFaultRegistrationFailureForTest;
+    cursorRebindChangesFaultRegistrationFailureForTest = undefined;
+    if (registrationFailure !== undefined) {
+      throwCursorRebindRegistrationFailure(registrationFailure, "changes");
+    }
+  } catch (registrationError) {
+    reflectApplyIntrinsic(weakMapDeleteIntrinsic, CURSOR_REBIND_CHANGES_FAULTS, [
+      execution as object,
+    ]);
+    throw registrationError;
+  }
+}
+
+/** Package-private failure after exact-E changes-fault registration. */
+export function injectSQLiteConnectionCursorRebindChangesFaultRegistrationFailureForTestIntrinsic(
+  error: unknown,
+): void {
+  if (cursorRebindChangesFaultRegistrationFailureForTest !== undefined) {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "inspect-schema",
+      "SQLite cursor rebind changes fault registration failure is armed",
+    );
+  }
+  cursorRebindChangesFaultRegistrationFailureForTest =
+    cursorRebindRegistrationFailure(error);
+}
+
 /** Package-private one-shot fault seam proving cleanup never replaces a primary. */
 export function injectSQLiteConnectionCursorRebindCleanupFaultForTestIntrinsic(
   error: unknown,
@@ -4215,6 +4392,26 @@ export function injectSQLiteConnectionCursorRebindCleanupFaultForTestIntrinsic(
     );
   }
   cursorRebindCleanupFaultForTest = objectFreezeIntrinsic({ error });
+}
+
+/** Package-private exact-E read of the terminal serialized changes boundary. */
+export function readSQLiteConnectionCursorRebindChangesFailureBoundaryIntrinsic(
+  connection: SQLiteConnection,
+  execution: SQLiteConnectionCursorRebindExecution,
+): SQLiteCursorRebindChangesFaultStage | null {
+  const state = execution !== null && typeof execution === "object" && !isProxy(execution)
+    ? reflectApplyIntrinsic(weakMapGetIntrinsic, CURSOR_REBIND_EXECUTIONS, [
+      execution as object,
+    ]) as CursorRebindExecutionState | undefined
+    : undefined;
+  if (state === undefined || state.connection !== connection) {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      "inspect-schema",
+      "SQLite cursor rebind execution is invalid",
+    );
+  }
+  return state.changesFailureBoundary;
 }
 
 /** Read immutable real lifecycle, counter and private cursor-ledger progress. */

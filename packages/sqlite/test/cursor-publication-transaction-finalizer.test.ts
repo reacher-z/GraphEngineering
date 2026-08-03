@@ -1,9 +1,10 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { DatabaseSync, StatementSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 
 import { CycleStoreProviderError } from "@graph-engineering/runtime";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import * as sqliteRoot from "../src/index.js";
 import {
@@ -17,11 +18,13 @@ import {
   prepareSQLiteCursorPublicationSessionIntrinsic,
   publishSQLiteCursorPublicationSessionIntrinsic,
   readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic,
+  readSQLiteCursorPublicationRebindContextSnapshotIntrinsic,
   type SQLiteCursorInitialPublicationReceiptBundle,
   type SQLiteCursorPublicationSession,
 } from "../src/cursor-publication-outer-authority.js";
 import {
   executeSQLiteCursorPublicationRebindRule11Intrinsic,
+  injectSQLiteCursorRebindPostconsumeChangesFaultForTestIntrinsic,
 } from "../src/cursor-publication-rebind.js";
 import {
   captureSQLiteCursorPostConsumeTransactionFailureIntrinsic,
@@ -34,7 +37,12 @@ import {
   type SQLiteCursorPostConsumeTransactionFailureCapture,
   type SQLiteCursorPostConsumeTransactionFailureFinalizerOwner,
 } from "../src/cursor-publication-transaction-finalizer.js";
-import { SQLiteConnection } from "../src/sqlite-connection.js";
+import {
+  SQLiteConnection,
+  injectSQLiteConnectionCursorRebindCleanupFaultForTestIntrinsic,
+  readSQLiteConnectionCursorRebindExecutionSnapshotIntrinsic,
+  type SQLiteCursorRebindChangesFaultStage,
+} from "../src/sqlite-connection.js";
 import {
   createReaderLeaseTestGraph,
   disposeReaderLeaseTestGraph,
@@ -132,6 +140,69 @@ function publicationSession(value: ReaderLeaseTestGraph): SQLiteCursorPublicatio
   return publishSQLiteCursorPublicationSessionIntrinsic(prepared, evidence);
 }
 
+type OuterAuthorityModule = typeof import("../src/cursor-publication-outer-authority.js");
+type DynamicReaderLeaseGraph = ReturnType<
+  typeof import("./support/cursor-publication-clean-graph.js")["createReaderLeaseTestGraph"]
+>;
+
+function dynamicPublicationSession(
+  value: DynamicReaderLeaseGraph,
+  outer: OuterAuthorityModule,
+): ReturnType<OuterAuthorityModule["publishSQLiteCursorPublicationSessionIntrinsic"]> {
+  const reader = outer.mintSQLiteCursorPostDdlPublicationReaderLeaseIntrinsic(
+    value.authority,
+    value.migration0002Receipt,
+    value.fence,
+  );
+  outer.executeSQLiteCursorPostDdlPublicationReaderIntrinsic(
+    value.authority,
+    value.migration0002Receipt,
+    value.fence,
+    reader,
+  );
+  const entries = outer.executeSQLiteCursorBaselineEntriesPublicationIntrinsic(
+    value.authority,
+    value.migration0002Receipt,
+    value.fence,
+    reader,
+  );
+  const header = outer.executeSQLiteCursorBaselineHeaderPublicationIntrinsic(
+    value.authority,
+    value.migration0002Receipt,
+    value.fence,
+    reader,
+    entries,
+  );
+  const sequence = outer.executeSQLiteCursorOperationSequenceZeroPublicationIntrinsic(
+    value.authority,
+    value.migration0002Receipt,
+    value.fence,
+    reader,
+    entries,
+    header,
+  );
+  const bundle = Object.freeze([
+    value.migration0002Receipt,
+    entries,
+    header,
+    sequence,
+  ] as const);
+  const adoption = outer.adoptSQLiteCursorInitialPublicationStageIntrinsic(
+    value.authority,
+    bundle,
+    value.fence,
+    reader,
+  );
+  const prepared = outer.prepareSQLiteCursorPublicationSessionIntrinsic(
+    value.authority,
+    adoption,
+  );
+  return outer.publishSQLiteCursorPublicationSessionIntrinsic(
+    prepared,
+    outer.observeSQLiteCursorPublicationSessionClockIntrinsic(prepared),
+  );
+}
+
 function installNativeRebindAbortTrigger(connection: SQLiteConnection): void {
   connection.execTrusted(
     "CREATE TEMP TRIGGER ge_transaction_finalizer_native_abort "
@@ -157,6 +228,20 @@ function capturedNativeGraph(): CapturedNativeGraph {
   const selected = activeNativeGraph();
   const capture = captureSQLiteCursorPostConsumeTransactionFailureIntrinsic(selected.session);
   return { ...selected, capture };
+}
+
+function capturedChangesGraph(
+  stage: SQLiteCursorRebindChangesFaultStage,
+  cursorCount = 1,
+): CapturedNativeGraph {
+  const graph = createReaderLeaseTestGraph(1, { cursorCount });
+  graphs.push(graph);
+  const session = publicationSession(graph);
+  const primary = new Error(`transaction finalizer ${stage}`);
+  injectSQLiteCursorRebindPostconsumeChangesFaultForTestIntrinsic(session, stage, primary);
+  const capture = captureSQLiteCursorPostConsumeTransactionFailureIntrinsic(session);
+  expect(capture.leafPrimary).toBe(primary);
+  return { graph, session, capture };
 }
 
 function finalizeAndCatch(capture: SQLiteCursorPostConsumeTransactionFailureCapture): object {
@@ -187,6 +272,331 @@ afterEach(() => {
 });
 
 describe.sequential("SQLite post-consume transaction failure finalizer", () => {
+  it.each([
+    ["prepare-after-native-return", "changes-prepare"],
+    ["fetch-after-native-return", "changes-fetch"],
+    ["shape-after-validation", "changes-shape"],
+    ["release-after-logical-retirement", "changes-release"],
+  ] as const)(
+    "finalizes authenticated %s primary without replacing it",
+    (stage, primaryBoundary) => {
+      const value = capturedChangesGraph(stage);
+      expect(readSQLiteCursorPostConsumeTransactionFailureFinalizerSnapshotIntrinsic(
+        value.capture.owner,
+      )).toMatchObject({
+        lifecycle: "prepared",
+        primaryBoundary,
+        rollbackAttemptCount: 0,
+        closeAttemptCount: 0,
+      });
+      injectSQLiteCursorPostConsumeRollbackAfterNativeReturnAmbiguousFaultForTestIntrinsic(
+        value.capture.owner,
+      );
+      injectSQLiteCursorPostConsumeCloseAfterNativeReturnAmbiguousFaultForTestIntrinsic(
+        value.capture.owner,
+      );
+      const selected = finalizeAndCatch(value.capture);
+      expect(selected).toBe(value.capture.leafPrimary);
+      expect(readSQLiteCursorPostConsumeTransactionFailureFinalizerSnapshotIntrinsic(
+        value.capture.owner,
+      )).toMatchObject({
+        lifecycle: "finalized",
+        primaryBoundary,
+        rollbackAttemptCount: 1,
+        rollbackNativeReturnCount: 1,
+        closeAttemptCount: 1,
+        closeNativeReturnCount: 1,
+        diagnosticCodes: [
+          "GE_SQLITE_POST_T_TERMINAL_PRIMARY",
+          "GE_SQLITE_ROLLBACK_AFTER_NATIVE_RETURN",
+          "GE_SQLITE_CLOSE_AFTER_NATIVE_RETURN",
+        ],
+      });
+      const reopened = new SQLiteConnection(`${value.graph.root}/cycle-store.db`);
+      try {
+        expect(reopened.prepare(
+          "SELECT count(*) FROM main.ge_cycle_cursors",
+          "inspect-schema",
+        ).get()).toEqual([0n]);
+      } finally {
+        reopened.close();
+      }
+    },
+  );
+
+  it.each([0, 3] as const)(
+    "binds changes-primary evidence to exact B2 population %s",
+    (cursorCount) => {
+      const value = capturedChangesGraph("fetch-after-native-return", cursorCount);
+      expect(readSQLiteCursorPostConsumeTransactionFailureFinalizerSnapshotIntrinsic(
+        value.capture.owner,
+      )).toMatchObject({ primaryBoundary: "changes-fetch" });
+      const outer = readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(
+        value.graph.authority,
+      );
+      const context = outer.publicationRebindContext!;
+      const contextSnapshot = readSQLiteCursorPublicationRebindContextSnapshotIntrinsic(context);
+      expect(contextSnapshot.b2CursorCount).toBe(cursorCount);
+      expect(readSQLiteConnectionCursorRebindExecutionSnapshotIntrinsic(
+        value.graph.connection,
+        contextSnapshot.execution,
+      )).toMatchObject({
+        affectedRows: cursorCount,
+        changesAffectedRows: null,
+        changesFetchCount: 1,
+        changesPrepareCount: 1,
+        changesReleaseCount: 1,
+        cursorLedgerAffectedRowsWatermark: cursorCount,
+        cursorLedgerFixedStatementCount: 1,
+        cursorLedgerLogicalWriteSequence: 1,
+        executeCount: 1,
+        lifecycle: "poisoned",
+        releaseCount: 1,
+        totalChangesDelta: cursorCount,
+      });
+      finalizeAndCatch(value.capture);
+      expect(readSQLiteCursorPostConsumeTransactionFailureFinalizerSnapshotIntrinsic(
+        value.capture.owner,
+      )).toMatchObject({
+        lifecycle: "finalized",
+        primaryBoundary: "changes-fetch",
+        rollbackNativeReturnCount: 1,
+        closeNativeReturnCount: 1,
+      });
+    },
+  );
+
+  it("authenticates and finalizes a genuine native all primary without mislabeling it", async () => {
+    const allDescriptor = Object.getOwnPropertyDescriptor(StatementSync.prototype, "all")!;
+    let nativeAllPrimary: object | undefined;
+    let dynamicGraph: ReturnType<
+      typeof import("./support/cursor-publication-clean-graph.js")["createReaderLeaseTestGraph"]
+    > | undefined;
+    let dynamicSupport: typeof import("./support/cursor-publication-clean-graph.js") | undefined;
+    vi.resetModules();
+    try {
+      Object.defineProperty(StatementSync.prototype, "all", {
+        ...allDescriptor,
+        value(this: StatementSync, ...parameters: unknown[]): unknown {
+          if (this.sourceSQL === "SELECT changes() AS affected_rows") {
+            if (nativeAllPrimary === undefined) throw new Error("native primary not installed");
+            throw nativeAllPrimary;
+          }
+          return Reflect.apply(
+            allDescriptor.value as (...input: unknown[]) => unknown,
+            this,
+            parameters,
+          );
+        },
+      });
+      const outer = await import("../src/cursor-publication-outer-authority.js");
+      const runtime = await import("@graph-engineering/runtime");
+      const connection = await import("../src/sqlite-connection.js");
+      const dynamicFinalizer = await import(
+        "../src/cursor-publication-transaction-finalizer.js"
+      );
+      nativeAllPrimary = new runtime.CycleStoreProviderError(
+        "GE_CYCLE_STORE_UNAVAILABLE",
+        "inspect-schema",
+        "real native changes all primary",
+      );
+      dynamicSupport = await import("./support/cursor-publication-clean-graph.js");
+      dynamicGraph = dynamicSupport.createReaderLeaseTestGraph(1, { cursorCount: 1 });
+      Object.defineProperty(StatementSync.prototype, "all", allDescriptor);
+      const session = dynamicPublicationSession(dynamicGraph, outer);
+      const capture = dynamicFinalizer
+        .captureSQLiteCursorPostConsumeTransactionFailureIntrinsic(session);
+      expect(capture.leafPrimary).toBe(nativeAllPrimary);
+      expect(dynamicFinalizer
+        .readSQLiteCursorPostConsumeTransactionFailureFinalizerSnapshotIntrinsic(
+          capture.owner,
+        )).toMatchObject({ primaryBoundary: "changes-fetch" });
+      const outerSnapshot = outer.readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(
+        dynamicGraph.authority,
+      );
+      const contextSnapshot = outer.readSQLiteCursorPublicationRebindContextSnapshotIntrinsic(
+        outerSnapshot.publicationRebindContext!,
+      );
+      expect(connection.readSQLiteConnectionCursorRebindExecutionSnapshotIntrinsic(
+        dynamicGraph.connection,
+        contextSnapshot.execution,
+      )).toMatchObject({
+        affectedRows: 1,
+        changesAffectedRows: null,
+        changesFetchCount: 1,
+        changesPrepareCount: 1,
+        changesReleaseCount: 1,
+        cursorLedgerAffectedRowsWatermark: 1,
+        cursorLedgerFixedStatementCount: 1,
+        cursorLedgerLogicalWriteSequence: 1,
+        totalChangesDelta: 1,
+      });
+      let caught: unknown;
+      try {
+        dynamicFinalizer.finalizeSQLiteCursorPostConsumeTransactionFailureIntrinsic(
+          capture.owner,
+        );
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBe(nativeAllPrimary);
+    } finally {
+      Object.defineProperty(StatementSync.prototype, "all", allDescriptor);
+      if (dynamicSupport !== undefined && dynamicGraph !== undefined) {
+        dynamicSupport.disposeReaderLeaseTestGraph(dynamicGraph);
+      }
+      vi.resetModules();
+    }
+  });
+
+  it("authenticates a genuine changes prepare primary with exact 0/0/0 evidence", async () => {
+    const prepareDescriptor = Object.getOwnPropertyDescriptor(DatabaseSync.prototype, "prepare")!;
+    let preparePrimary: object | undefined;
+    let dynamicGraph: DynamicReaderLeaseGraph | undefined;
+    let dynamicSupport: typeof import("./support/cursor-publication-clean-graph.js") | undefined;
+    vi.resetModules();
+    try {
+      Object.defineProperty(DatabaseSync.prototype, "prepare", {
+        ...prepareDescriptor,
+        value(this: DatabaseSync, sql: string): StatementSync {
+          if (sql === "SELECT changes() AS affected_rows") {
+            if (preparePrimary === undefined) throw new Error("prepare primary not installed");
+            throw preparePrimary;
+          }
+          return Reflect.apply(
+            prepareDescriptor.value as (statement: string) => StatementSync,
+            this,
+            [sql],
+          );
+        },
+      });
+      const outer = await import("../src/cursor-publication-outer-authority.js");
+      const runtime = await import("@graph-engineering/runtime");
+      const connection = await import("../src/sqlite-connection.js");
+      const dynamicFinalizer = await import(
+        "../src/cursor-publication-transaction-finalizer.js"
+      );
+      preparePrimary = new runtime.CycleStoreProviderError(
+        "GE_CYCLE_STORE_UNAVAILABLE",
+        "inspect-schema",
+        "real changes prepare primary",
+      );
+      dynamicSupport = await import("./support/cursor-publication-clean-graph.js");
+      dynamicGraph = dynamicSupport.createReaderLeaseTestGraph(1, { cursorCount: 1 });
+      Object.defineProperty(DatabaseSync.prototype, "prepare", prepareDescriptor);
+      const session = dynamicPublicationSession(dynamicGraph, outer);
+      const capture = dynamicFinalizer
+        .captureSQLiteCursorPostConsumeTransactionFailureIntrinsic(session);
+      expect(capture.leafPrimary).toBe(preparePrimary);
+      expect(dynamicFinalizer
+        .readSQLiteCursorPostConsumeTransactionFailureFinalizerSnapshotIntrinsic(
+          capture.owner,
+        )).toMatchObject({ primaryBoundary: "changes-prepare" });
+      const outerSnapshot = outer.readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(
+        dynamicGraph.authority,
+      );
+      const contextSnapshot = outer.readSQLiteCursorPublicationRebindContextSnapshotIntrinsic(
+        outerSnapshot.publicationRebindContext!,
+      );
+      expect(connection.readSQLiteConnectionCursorRebindExecutionSnapshotIntrinsic(
+        dynamicGraph.connection,
+        contextSnapshot.execution,
+      )).toMatchObject({
+        affectedRows: 1,
+        changesAffectedRows: null,
+        changesFetchCount: 0,
+        changesPrepareCount: 0,
+        changesReleaseCount: 0,
+        cursorLedgerAffectedRowsWatermark: 1,
+        cursorLedgerFixedStatementCount: 1,
+        cursorLedgerLogicalWriteSequence: 1,
+        totalChangesDelta: 1,
+      });
+      let caught: unknown;
+      try {
+        dynamicFinalizer.finalizeSQLiteCursorPostConsumeTransactionFailureIntrinsic(
+          capture.owner,
+        );
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBe(preparePrimary);
+    } finally {
+      Object.defineProperty(DatabaseSync.prototype, "prepare", prepareDescriptor);
+      if (dynamicSupport !== undefined && dynamicGraph !== undefined) {
+        dynamicSupport.disposeReaderLeaseTestGraph(dynamicGraph);
+      }
+      vi.resetModules();
+    }
+  });
+
+  it("authenticates a genuine postflight disagreement and preserves its exact primary", () => {
+    const graph = createReaderLeaseTestGraph(1, {
+      beforeBaselineStageCreation(connection) {
+        connection.execTrusted(
+          "CREATE TABLE main.ge_transaction_finalizer_audit (tenant_id TEXT NOT NULL)",
+          "inspect-schema",
+        );
+        connection.execTrusted(
+          "CREATE TRIGGER main.ge_transaction_finalizer_audit_trigger "
+            + "AFTER UPDATE ON main.ge_cycle_cursors BEGIN "
+            + "INSERT INTO ge_transaction_finalizer_audit (tenant_id) VALUES (NEW.tenant_id); END",
+          "inspect-schema",
+        );
+      },
+      cursorCount: 1,
+    });
+    graphs.push(graph);
+    const capture = captureSQLiteCursorPostConsumeTransactionFailureIntrinsic(
+      publicationSession(graph),
+    );
+    expect(capture.leafPrimary).toMatchObject({ code: "GE_CYCLE_STORE_CORRUPTION" });
+    expect(readSQLiteCursorPostConsumeTransactionFailureFinalizerSnapshotIntrinsic(
+      capture.owner,
+    )).toMatchObject({ primaryBoundary: "changes-postflight" });
+    const outer = readSQLiteCursorOuterPublicationAuthoritySnapshotIntrinsic(graph.authority);
+    const context = readSQLiteCursorPublicationRebindContextSnapshotIntrinsic(
+      outer.publicationRebindContext!,
+    );
+    expect(readSQLiteConnectionCursorRebindExecutionSnapshotIntrinsic(
+      graph.connection,
+      context.execution,
+    )).toMatchObject({
+      affectedRows: 1,
+      changesAffectedRows: 1,
+      changesFetchCount: 1,
+      changesPrepareCount: 1,
+      changesReleaseCount: 1,
+      cursorLedgerAffectedRowsWatermark: 1,
+      cursorLedgerFixedStatementCount: 1,
+      cursorLedgerLogicalWriteSequence: 1,
+      totalChangesDelta: 2,
+    });
+    let caught: unknown;
+    try {
+      finalizeSQLiteCursorPostConsumeTransactionFailureIntrinsic(capture.owner);
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBe(capture.leafPrimary);
+  });
+
+  it("rejects a changes-primary near-neighbor without exact total progress", () => {
+    const graph = createReaderLeaseTestGraph(1, { cursorCount: 1 });
+    graphs.push(graph);
+    const session = publicationSession(graph);
+    injectSQLiteCursorRebindPostconsumeChangesFaultForTestIntrinsic(
+      session,
+      "fetch-after-native-return",
+      new Error("near-neighbor selected primary"),
+    );
+    injectSQLiteConnectionCursorRebindCleanupFaultForTestIntrinsic(
+      new Error("hide total progress"),
+    );
+    expect(() => captureSQLiteCursorPostConsumeTransactionFailureIntrinsic(session))
+      .toThrow(/injected changes evidence is invalid/u);
+  });
+
   it.each(fixture.cases)(
     "matches the frozen projection for $caseId",
     (entry) => {

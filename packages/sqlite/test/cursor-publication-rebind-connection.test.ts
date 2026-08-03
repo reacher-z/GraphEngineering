@@ -18,9 +18,12 @@ import {
 import {
   beginSQLiteConnectionCursorRebindExecutionIntrinsic,
   executeSQLiteConnectionCursorRebindIntrinsic,
+  injectSQLiteConnectionCursorRebindChangesFaultForTestIntrinsic,
+  injectSQLiteConnectionCursorRebindChangesFaultRegistrationFailureForTestIntrinsic,
   injectSQLiteConnectionCursorRebindCleanupFaultForTestIntrinsic,
   injectSQLiteConnectionCursorRebindReleaseFaultForTestIntrinsic,
   injectSQLiteConnectionCursorRebindReleaseFaultRegistrationFailureForTestIntrinsic,
+  readSQLiteConnectionCursorRebindChangesFailureBoundaryIntrinsic,
   readSQLiteConnectionCursorRebindExecutionSnapshotIntrinsic,
   readSQLiteConnectionOwnerSnapshot,
   readSQLiteConnectionTotalChangesSnapshot,
@@ -334,6 +337,155 @@ afterEach(() => {
 });
 
 describe("SQLite connection cursor publication rebind", () => {
+  it.each([
+    ["prepare-after-native-return", [1, 0, 1], null],
+    ["fetch-after-native-return", [1, 1, 1], null],
+    ["shape-after-validation", [1, 1, 1], 2],
+    ["release-after-logical-retirement", [1, 1, 1], 2],
+  ] as const)(
+    "binds one %s primary to exact E after real UPDATE progress",
+    (stage, expectedCounts, expectedChanges) => {
+      const value = graphWithCursors(2);
+      const execution = begin(value);
+      const primary = new Error(`exact-E ${stage}`);
+      injectSQLiteConnectionCursorRebindChangesFaultForTestIntrinsic(
+        value.connection,
+        execution,
+        stage,
+        primary,
+      );
+      let caught: unknown;
+      try {
+        executeSQLiteConnectionCursorRebindIntrinsic(
+          value.connection,
+          execution,
+          parameters(),
+        );
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBe(primary);
+      expect(readSQLiteConnectionCursorRebindExecutionSnapshotIntrinsic(
+        value.connection,
+        execution,
+      )).toMatchObject({
+        affectedRows: 2,
+        changesAffectedRows: expectedChanges,
+        changesFetchCount: expectedCounts[1],
+        changesPrepareCount: expectedCounts[0],
+        changesReleaseCount: expectedCounts[2],
+        cursorLedgerAffectedRowsWatermark: 2,
+        cursorLedgerFixedStatementCount: 1,
+        cursorLedgerLogicalWriteSequence: 1,
+        executeCount: 1,
+        lifecycle: "poisoned",
+        releaseCount: 1,
+        statementOwnershipRetired: true,
+        totalChangesDelta: 2,
+      });
+      expect(readSQLiteConnectionCursorRebindChangesFailureBoundaryIntrinsic(
+        value.connection,
+        execution,
+      )).toBe(stage);
+    },
+  );
+
+  it("keeps an injected changes primary above counter-sync cleanup", () => {
+    const value = graphWithCursors(2);
+    const execution = begin(value);
+    const primary = new Error("selected changes primary above cleanup");
+    injectSQLiteConnectionCursorRebindChangesFaultForTestIntrinsic(
+      value.connection,
+      execution,
+      "fetch-after-native-return",
+      primary,
+    );
+    injectSQLiteConnectionCursorRebindCleanupFaultForTestIntrinsic(
+      new Error("discarded changes cleanup"),
+    );
+    let caught: unknown;
+    try {
+      executeSQLiteConnectionCursorRebindIntrinsic(value.connection, execution, parameters());
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBe(primary);
+    expect(readSQLiteConnectionCursorRebindChangesFailureBoundaryIntrinsic(
+      value.connection,
+      execution,
+    )).toBe("fetch-after-native-return");
+    expect(readSQLiteConnectionCursorRebindExecutionSnapshotIntrinsic(
+      value.connection,
+      execution,
+    )).toMatchObject({ lifecycle: "poisoned", totalChangesDelta: 0 });
+  });
+
+  it("authenticates, one-shots and rolls back exact-E changes-fault registration", () => {
+    const selected = graphWithCursors(1);
+    const other = graphWithCursors(1);
+    const execution = begin(selected);
+    const otherExecution = begin(other);
+    const primary = new Error("selected exact-E changes primary");
+    expect(() => injectSQLiteConnectionCursorRebindChangesFaultForTestIntrinsic(
+      other.connection,
+      execution,
+      "fetch-after-native-return",
+      primary,
+    )).toThrow(/changes fault is invalid/u);
+    expect(() => injectSQLiteConnectionCursorRebindChangesFaultForTestIntrinsic(
+      selected.connection,
+      Object.freeze(Object.create(null)) as SQLiteConnectionCursorRebindExecution,
+      "fetch-after-native-return",
+      primary,
+    )).toThrow(/changes fault is invalid/u);
+    expect(() => injectSQLiteConnectionCursorRebindChangesFaultForTestIntrinsic(
+      selected.connection,
+      new Proxy(execution, {}),
+      "fetch-after-native-return",
+      primary,
+    )).toThrow(/changes fault is invalid/u);
+    injectSQLiteConnectionCursorRebindChangesFaultForTestIntrinsic(
+      selected.connection,
+      execution,
+      "fetch-after-native-return",
+      primary,
+    );
+    expect(() => injectSQLiteConnectionCursorRebindChangesFaultForTestIntrinsic(
+      selected.connection,
+      execution,
+      "fetch-after-native-return",
+      new Error("double arm"),
+    )).toThrow(/changes fault is invalid/u);
+    expect(() => executeSQLiteConnectionCursorRebindIntrinsic(
+      selected.connection,
+      execution,
+      parameters(),
+    )).toThrow(primary);
+
+    const registrationPrimary = new Error("changes registration primary");
+    injectSQLiteConnectionCursorRebindChangesFaultRegistrationFailureForTestIntrinsic(
+      registrationPrimary,
+    );
+    expect(() => injectSQLiteConnectionCursorRebindChangesFaultForTestIntrinsic(
+      other.connection,
+      otherExecution,
+      "prepare-after-native-return",
+      new Error("discarded arm"),
+    )).toThrow(registrationPrimary);
+    const retryPrimary = new Error("retry changes primary");
+    injectSQLiteConnectionCursorRebindChangesFaultForTestIntrinsic(
+      other.connection,
+      otherExecution,
+      "prepare-after-native-return",
+      retryPrimary,
+    );
+    expect(() => executeSQLiteConnectionCursorRebindIntrinsic(
+      other.connection,
+      otherExecution,
+      parameters(),
+    )).toThrow(retryPrimary);
+  });
+
   it("binds a preconsume release fault to one authentic connection and exact E", () => {
     const selected = graphWithCursors(1);
     const unselected = graphWithCursors(1);
@@ -889,6 +1041,11 @@ describe("SQLite connection cursor publication rebind", () => {
           message,
         );
         expectPoisonedChangesProofSnapshot(connectionModule, graph, execution, [1, 1, 1]);
+        expect(connectionModule
+          .readSQLiteConnectionCursorRebindChangesFailureBoundaryIntrinsic(
+            graph.connection,
+            execution,
+          )).toBeNull();
       });
       if (name === "outer Array Proxy") expect(outerProxyTraps.count).toBe(0);
       if (name === "row Array Proxy") expect(rowProxyTraps.count).toBe(0);
@@ -926,6 +1083,10 @@ describe("SQLite connection cursor publication rebind", () => {
       }
       expect(caught).toBe(primary);
       expectPoisonedChangesProofSnapshot(connectionModule, graph, execution, [1, 1, 1], 0);
+      expect(connectionModule.readSQLiteConnectionCursorRebindChangesFailureBoundaryIntrinsic(
+        graph.connection,
+        execution,
+      )).toBeNull();
     });
   });
 
@@ -962,6 +1123,10 @@ describe("SQLite connection cursor publication rebind", () => {
       }
       expect(caught).toBe(primary);
       expectPoisonedChangesProofSnapshot(connectionModule, graph, execution, [0, 0, 0], 0);
+      expect(connectionModule.readSQLiteConnectionCursorRebindChangesFailureBoundaryIntrinsic(
+        graph.connection,
+        execution,
+      )).toBeNull();
     });
   });
 
@@ -1200,6 +1365,40 @@ function buildArmedReleaseFaultAndDropRebindGraph(): Readonly<{
   return { finalized, referents, registry };
 }
 
+function buildArmedChangesFaultAndDropRebindGraph(): Readonly<{
+  readonly finalized: Set<string>;
+  readonly referents: readonly RebindTrackedReferent[];
+  readonly registry: FinalizationRegistry<string>;
+}> {
+  const graph = createReaderLeaseTestGraph(1);
+  const execution = beginSQLiteConnectionCursorRebindExecutionIntrinsic(graph.connection);
+  const error = new Error("abandoned exact-E changes fault") as Error & {
+    connection?: object;
+    execution?: object;
+  };
+  error.connection = graph.connection;
+  error.execution = execution;
+  injectSQLiteConnectionCursorRebindChangesFaultForTestIntrinsic(
+    graph.connection,
+    execution,
+    "fetch-after-native-return",
+    error,
+  );
+  const finalized = new Set<string>();
+  const registry = new FinalizationRegistry<string>((label) => finalized.add(label));
+  const values = [
+    ["changes-execution", execution],
+    ["changes-connection", graph.connection],
+    ["changes-reverse-root-error", error],
+  ] as const;
+  const referents = values.map(([label, value]) => {
+    registry.register(value, label);
+    return { label, reference: new WeakRef(value) };
+  });
+  disposeReaderLeaseTestGraph(graph);
+  return { finalized, referents, registry };
+}
+
 function buildAbandonedReleaseRegistrationFailureGraph(): Readonly<{
   readonly finalized: Set<string>;
   readonly referents: readonly RebindTrackedReferent[];
@@ -1240,6 +1439,20 @@ function armAndDropExactEReleaseError(
   injectSQLiteConnectionCursorRebindReleaseFaultForTestIntrinsic(
     connection,
     execution,
+    error,
+  );
+  return new WeakRef(error);
+}
+
+function armAndDropExactEChangesError(
+  connection: ReaderLeaseTestGraph["connection"],
+  execution: SQLiteConnectionCursorRebindExecution,
+): WeakRef<object> {
+  const error = new Error("dead exact-E changes primary");
+  injectSQLiteConnectionCursorRebindChangesFaultForTestIntrinsic(
+    connection,
+    execution,
+    "prepare-after-native-return",
     error,
   );
   return new WeakRef(error);
@@ -1318,6 +1531,46 @@ describe("SQLite cursor-rebind isolated released-graph GC", () => {
         `finalized=${[...tracked.finalized].sort().join(",") || "none"}`,
       ].join("; ")).toEqual([]);
       expect(tracked.registry).toBeInstanceOf(FinalizationRegistry);
+    }, 120_000);
+
+    it("collects an abandoned changes arm with an error reverse-root to E and connection", async () => {
+      expect(typeof globalThis.gc).toBe("function");
+      const tracked = buildArmedChangesFaultAndDropRebindGraph();
+      const live = await forceRebindGraphCollection(tracked.referents);
+      expect(live, [
+        "armed exact-E changes graph retained a reverse-root chain",
+        `live=${live.join(",") || "none"}`,
+        `finalized=${[...tracked.finalized].sort().join(",") || "none"}`,
+      ].join("; ")).toEqual([]);
+      expect(tracked.registry).toBeInstanceOf(FinalizationRegistry);
+    }, 120_000);
+
+    it("exact-discards a dead exact-E changes primary before returning corruption", async () => {
+      expect(typeof globalThis.gc).toBe("function");
+      const value = graphWithCursors(1);
+      const execution = begin(value);
+      const errorReference = armAndDropExactEChangesError(value.connection, execution);
+      expect(await forceRebindGraphCollection([
+        { label: "changes-error", reference: errorReference },
+      ])).toEqual([]);
+      expect(() => executeSQLiteConnectionCursorRebindIntrinsic(
+        value.connection,
+        execution,
+        parameters(),
+      )).toThrow(/changes fault identity drifted/u);
+      expect(readSQLiteConnectionCursorRebindChangesFailureBoundaryIntrinsic(
+        value.connection,
+        execution,
+      )).toBeNull();
+      expect(readSQLiteConnectionCursorRebindExecutionSnapshotIntrinsic(
+        value.connection,
+        execution,
+      )).toMatchObject({
+        affectedRows: 1,
+        changesPrepareCount: 1,
+        lifecycle: "poisoned",
+        releaseCount: 1,
+      });
     }, 120_000);
 
     it("fails closed after the selected exact-E error dies and exact-discards the arm", async () => {
