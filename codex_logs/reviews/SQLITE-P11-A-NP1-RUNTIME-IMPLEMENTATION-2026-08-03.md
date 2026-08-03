@@ -142,14 +142,18 @@ fresh post-log acceptance audit concluded `H0 / M0 / L0` with no blocker.
 - Documentation: 478 local Markdown links.
 - `git diff --check`: pass.
 
-No commit or push is authorized by this candidate log alone.
+## Immutable commit binding
 
-## Immutable commit binding pending
+The accepted implementation was committed as
+`3608d82407905c16c6094598872995384c836b93` with subject
+`feat(sqlite): implement NP1 native projection`. It contains 32 paths, 7,670
+insertions, and 99 deletions. Author and committer are both
+`reacher-z <mtrxcop@gmail.com>`; the commit body is empty and has no co-author
+trailer.
 
-After the final regression and fresh `H0 / M0 / L0` review, the implementation
-commit must use author and committer `reacher-z <mtrxcop@gmail.com>`, contain no
-co-author trailer, be pushed to `origin/feat/authoring-foundation`, and have
-identical local/tracking/remote SHAs. A later evidence-only commit will append
-that immutable SHA here and reconcile only the P11 task heartbeat, artifact
-inventory, and truthful next action while preserving `in_progress` and every
-nonclaim above.
+The commit was pushed to `origin/feat/authoring-foundation`. Read-after-write
+verification proved local `HEAD`, the tracking ref, and `git ls-remote` all
+equal the full SHA above. This evidence reconciliation keeps P11 `in_progress`,
+adds no completion/test evidence or release weight, and advances only the
+bounded next action to the remaining P11-A global route-unknown closure and red
+matrix.
