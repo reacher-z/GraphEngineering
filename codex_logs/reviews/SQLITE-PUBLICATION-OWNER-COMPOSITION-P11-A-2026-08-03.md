@@ -69,5 +69,7 @@ transitive composition, no third consume, no stage 18, no fourth clock, no TEMP
 retirement, no final fence, no COMMIT, no public API, no release weight, and no
 claim about GitHub stars.
 
-The implementation commit SHA is intentionally recorded by the subsequent
-registry/evidence reconciliation commit after the implementation commit exists.
+The immutable bounded-substrate implementation commit is
+`02fffe7e3c7dbf54439454568c303f944c4c7f75`. It was committed as
+`reacher-z <mtrxcop@gmail.com>` without a co-author and verified identical at
+local, tracking, and remote refs before this evidence reconciliation.

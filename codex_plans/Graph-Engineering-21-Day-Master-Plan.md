@@ -22742,3 +22742,19 @@ parity。TypeScript的portable retirement也只是zero-I/O抽象状态，不是n
 descriptor严格绑定machine route fixture并建立normalized parity；随后逐route接owner-active fixed reads与lower mutation hooks，每接一个native
 callsite就必须更新fixture、fault matrix与runtime-real retirement evidence。只有unknown native callsite实际为0、P11-A完整red matrix双runtime
 全绿并经独立H0/M0/L0后，才可开始P11-B success claim。P11 registry在此期间保持`in_progress`且不获得release weight。
+
+#### 31.37.86 P11-A bounded substrate immutable evidence（2026-08-03 PDT追加；既有内容不改）
+
+本节仅追加于31.37.85之后。追加前计划为22,744行，SHA-256固定为
+`ad332d19bded752862c98304f675493a1b53d95fdc064c6d189e9f01c1e5e608`；任何后续验证必须证明此前缀逐字不变。
+
+P11-A bounded substrate实现commit固定为`02fffe7e3c7dbf54439454568c303f944c4c7f75`，共16个文件、4,589行新增、
+8行删除。提交作者与提交者均为`reacher-z <mtrxcop@gmail.com>`，无co-author；push后local、tracking与remote SHA完全一致。
+最终whole-batch只读审计结论为`ACCEPT AS BOUNDED P11-A SUBSTRATE — H0/M0/L1`。L1仅为未来直接模拟native epoch/
+total-change drift的回归建议，不是native SQL、route closure或resource retirement已经存在的证据。
+
+证据对账只把`D9-SQLITE-OWNER-COMPOSITION-P11-094`从`planned`推进为`in_progress`，不标记completed，不增加release权重，
+不写任何P11 expected test为完整passed。已冻结的machine contract、TypeScript zero-I/O lattice与Python exact-primary/adoption
+substrate保留；Python scope/read、actual native-callsite unknown=0、runtime-real retirement、portable parity、P11-B/C/D、stage18、
+third consume、COMMIT、D9 release completion及stars目标继续Open。下一实现批次必须从Python独立scope/read parity开始，并继续使用
+rejected-first审计与两提交不可变证据闭环。

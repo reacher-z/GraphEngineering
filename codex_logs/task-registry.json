@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-08-03T09:07:21Z",
+  "updated_at": "2026-08-03T10:03:56Z",
   "repository": ".",
   "scan_policy": {
     "warning_after_minutes": 60,
@@ -2247,14 +2247,14 @@
       "id": "D9-SQLITE-OWNER-COMPOSITION-P11-094",
       "title": "Compose the exact P9 transaction owner through the bounded SQLite publication chain",
       "owner": "main integration lane with independent TypeScript Python and adversarial review lanes",
-      "status": "planned",
+      "status": "in_progress",
       "work_package": "WP3-WP9-WP11",
       "depends_on": ["D9-SQLITE-PUBLICATION-TX-OWNER-092", "D9-SQLITE-RULE12-CLOCK-P10-093"],
       "expected_artifacts": [
         "spec/sqlite-cursor-publication-owner-composition-p11.md",
         "packages/sqlite/src/cursor-publication-owner-composition.ts",
         "python/src/graph_engineering/sqlite_cursor_publication_owner_composition.py",
-        "codex_logs/reviews/SQLITE-PUBLICATION-OWNER-COMPOSITION-P11.md"
+        "codex_logs/reviews/SQLITE-PUBLICATION-OWNER-COMPOSITION-P11-A-2026-08-03.md"
       ],
       "expected_tests": [
         "P11-A opaque composition scoped mutation fixed-read and Python failure-capture contract",
@@ -2265,11 +2265,11 @@
       ],
       "evidence_required": true,
       "assigned_at": "2026-08-03T09:07:21Z",
-      "started_at": null,
-      "last_heartbeat": "2026-08-03T09:07:21Z",
+      "started_at": "2026-08-03T09:10:00Z",
+      "last_heartbeat": "2026-08-03T10:03:56Z",
       "risk": "critical",
       "blocker": null,
-      "next_action": "Freeze P11-A conformance redbars and route inventory before implementing any scoped write or fixed-read authority"
+      "next_action": "Continue from bounded substrate commit 02fffe7e3c7dbf54439454568c303f944c4c7f75: implement Python scope/read parity, close actual native routes and runtime retirement, then complete P11-B/C/D without authorizing COMMIT or release weight"
     }
   ]
 }

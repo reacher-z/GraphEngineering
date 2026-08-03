@@ -253,12 +253,14 @@ predecessors remain Open.
   consumed, provider clock observed/consumed `3/2`, and COMMIT not presented.
   It does not close cursor-clock, TEMP retirement, final fence, complete-v2,
   public API, D9, RC, stable release, or external adoption.
-- `D9-SQLITE-OWNER-COMPOSITION-P11-094` is Planned. The existing P9 owner and
-  P10 publication predecessor are not yet one transitive runtime authority
-  graph. P11 must implement the append-only §31.37.81/82/84 contract: explicit
-  parent/child mutation scopes, authenticated fixed reads, exact P9 failure
-  capture/cleanup, file-backed composition, and portable provenance through
-  the unconsumed third clock while COMMIT remains disabled.
+- `D9-SQLITE-OWNER-COMPOSITION-P11-094` is In Progress. Immutable bounded
+  substrate commit `02fffe7e3c7dbf54439454568c303f944c4c7f75` supplies the
+  machine contract, TypeScript zero-I/O authority lattice, and Python
+  exact-primary/adoption substrate. It does not yet make the P9 owner and P10
+  publication predecessor one transitive native runtime authority graph.
+  Python scope/read parity, actual native route closure, runtime-real resource
+  retirement, portable parity, and every P11-B/C/D slice remain Open while
+  COMMIT and release weight stay disabled.
 - Registry expansion to 112 tasks and P10 completion do not change release
   weight. Candidate-bound evidence closure remains audit-only at 0/93 until a
   future immutable release candidate closes every release-rollup predecessor.

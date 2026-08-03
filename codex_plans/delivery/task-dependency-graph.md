@@ -549,11 +549,13 @@ flowchart LR
 - `D9-SQLITE-RULE12-CLOCK-P10-093` is the completed bounded P10 leaf. Its maximum success
   is Rule 12 plus an unconsumed third clock (`3/2`); cursor-clock completion and
   every later publication/commit transition remain downstream.
-- `D9-SQLITE-OWNER-COMPOSITION-P11-094` is the planned four-slice composition
-  task. It must thread the exact P9 owner/BEGIN receipt and explicit scoped
-  read/write authority through B2, the fixed permanent-write stages, Rule 11,
-  Rule 12, and the still-unconsumed third clock. It does not authorize COMMIT
-  or stage 18.
+- `D9-SQLITE-OWNER-COMPOSITION-P11-094` is the in-progress four-slice
+  composition task. Commit `02fffe7e3c7dbf54439454568c303f944c4c7f75`
+  establishes only the machine contract, TypeScript zero-I/O authority lattice,
+  and Python exact-primary/adoption substrate. It must still thread native
+  scoped read/write authority through B2, fixed permanent writes, Rule 11,
+  Rule 12, and the still-unconsumed third clock. It does not authorize stage 18,
+  COMMIT, D9 completion, or release weight.
 
 These tasks carry no direct release-checklist weight. They may become evidence
 inside the future D9 extended-durability candidate only after redaction,
