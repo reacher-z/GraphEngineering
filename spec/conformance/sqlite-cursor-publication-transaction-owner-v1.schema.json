@@ -1,0 +1,288 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/conformance/sqlite-cursor-publication-transaction-owner-v1.schema.json",
+  "title": "SQLite cursor publication transaction owner contract v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion","id","status","claims","anchors","boundary","beginContract","identityContract","dependencyContract","arbiterContract","registryContract","lifecycleContract","commitAmbiguityContract","reopenClassificationContract","failurePrecedenceContract","futureCaseCounterContract","beginPostflightFutureTargets","cleanupFaultFutureTargets","reopenOutcomeFutureTargets","futureTargetCases","nonclaims","fixtureDigestContract","fixtureCanonicalSha256"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "id": {"const": "sqlite-cursor-publication-transaction-owner-v1"},
+    "status": {"const": "contract-frozen-redbar"},
+    "claims": {"$ref": "#/$defs/claims"},
+    "anchors": {"$ref": "#/$defs/anchors"},
+    "boundary": {"$ref": "#/$defs/boundary"},
+    "beginContract": {"$ref": "#/$defs/beginContract"},
+    "identityContract": {"$ref": "#/$defs/identityContract"},
+    "dependencyContract": {"$ref": "#/$defs/dependencyContract"},
+    "arbiterContract": {"$ref": "#/$defs/arbiterContract"},
+    "registryContract": {"$ref": "#/$defs/registryContract"},
+    "lifecycleContract": {"$ref": "#/$defs/lifecycleContract"},
+    "commitAmbiguityContract": {"$ref": "#/$defs/commitAmbiguityContract"},
+    "reopenClassificationContract": {"$ref": "#/$defs/reopenClassificationContract"},
+    "failurePrecedenceContract": {"$ref": "#/$defs/failurePrecedenceContract"},
+    "futureCaseCounterContract": {"$ref": "#/$defs/futureCaseCounterContract"},
+    "beginPostflightFutureTargets": {"type":"array","minItems":3,"maxItems":3,"items":{"$ref":"#/$defs/beginPostflightFutureTarget"}},
+    "cleanupFaultFutureTargets": {"type":"array","minItems":4,"maxItems":4,"items":{"$ref":"#/$defs/cleanupFaultFutureTarget"}},
+    "reopenOutcomeFutureTargets": {"type":"array","minItems":3,"maxItems":3,"items":{"$ref":"#/$defs/reopenOutcomeFutureTarget"}},
+    "futureTargetCases": {"type":"array","minItems":13,"maxItems":13,"items":{"$ref":"#/$defs/futureCase"}},
+    "nonclaims": {"type":"array","minItems":15,"maxItems":15,"uniqueItems":true,"items":{"type":"string","minLength":3}},
+    "fixtureDigestContract": {"$ref": "#/$defs/fixtureDigestContract"},
+    "fixtureCanonicalSha256": {"type":"string","pattern":"^[0-9a-f]{64}$"}
+  },
+  "$defs": {
+    "claims": {
+      "type":"object","additionalProperties":false,
+      "required":["implementationClaim","protocolClaim","releaseGate","runtimeTransactionControlClaim","driverNativeBeginThrowClaim","driverNativeCommitThrowClaim","crashReopenClaim","publicApiClaim"],
+      "properties": {
+        "implementationClaim":{"const":false},"protocolClaim":{"const":false},"releaseGate":{"const":false},
+        "runtimeTransactionControlClaim":{"const":false},"driverNativeBeginThrowClaim":{"const":false},
+        "driverNativeCommitThrowClaim":{"const":false},"crashReopenClaim":{"const":false},"publicApiClaim":{"const":false}
+      }
+    },
+    "anchors": {
+      "type":"object","additionalProperties":false,
+      "required":["rebindContractId","rebindFixtureCanonicalSha256","failureFinalizerContractId","failureFinalizerFixtureCanonicalSha256"],
+      "properties": {
+        "rebindContractId":{"const":"sqlite-cursor-publication-rebind-v2"},
+        "rebindFixtureCanonicalSha256":{"const":"d368cd53e819e06e950f2dabedcb5a5b2fca535536efe85abb2e4b488bae2e7d"},
+        "failureFinalizerContractId":{"const":"sqlite-post-consume-transaction-failure-finalizer-v1"},
+        "failureFinalizerFixtureCanonicalSha256":{"const":"81c055216223c89dc68055bbf325a73c61bfb899977dfb6255059137783ae360"}
+      }
+    },
+    "boundary": {
+      "type":"object","additionalProperties":false,
+      "required":["stableTaskId","role","beginSql","commitSemanticOperation","rollbackSemanticOperation","activeOwnerRawTransactionControl","failureCleanupWithoutAuthenticatedPrimary","callerCallbackOrThunk","callerSuppliedOutcome","futureTargetCasesAreRuntimeEvidence","runtimeExecutedCaseCount","contractRuntimeTransactionControlCount","guardedTransactionControlPaths"],
+      "properties": {
+        "stableTaskId":{"const":"SQLITE-CURSOR-PUBLICATION-TRANSACTION-OWNER"},
+        "role":{"const":"atomic-publication-transaction-outcome-arbitration-contract-only"},
+        "beginSql":{"const":"BEGIN EXCLUSIVE"},
+        "commitSemanticOperation":{"const":"native-driver-commit-on-exact-owned-connection"},
+        "rollbackSemanticOperation":{"const":"native-driver-rollback-on-exact-owned-connection"},
+        "activeOwnerRawTransactionControl":{"const":"forbidden"},
+        "failureCleanupWithoutAuthenticatedPrimary":{"const":"forbidden"},
+        "callerCallbackOrThunk":{"const":"forbidden"},"callerSuppliedOutcome":{"const":"forbidden"},
+        "futureTargetCasesAreRuntimeEvidence":{"const":false},"runtimeExecutedCaseCount":{"const":0},
+        "contractRuntimeTransactionControlCount":{"const":0},
+        "guardedTransactionControlPaths":{"type":"array","minItems":19,"maxItems":19,"uniqueItems":true,"items":{"type":"string"}}
+      }
+    },
+    "beginContract": {
+      "type":"object","additionalProperties":false,
+      "required":["registrationBeforeBeginIo","requiresOpenAutocommitUnguardedConnection","authority","nativeObservationSource","callerOutcomeInputForbidden","attemptMaximum","retryForbidden","provisionalGenerationMintedBeforeBeginIo","provisionalGenerationBinding","provisionalGenerationPromotion","provisionalGenerationTombstone","beginReceiptBeforePromotionForbidden","returnedNextState","returnedPostflightMismatchState","returnedAutocommitCleanup","returnedDifferentGenerationCleanup","returnedObservationUnavailableCleanup","throwSameGenerationActiveCleanup","throwAutocommitCleanup","throwObservationUnavailableCleanup","beginPrimaryPrecedesCleanupDiagnostics","receiptCommitments"],
+      "properties": {
+        "registrationBeforeBeginIo":{"const":true},"requiresOpenAutocommitUnguardedConnection":{"const":true},
+        "authority":{"const":"exact-one-shot-transaction-owner"},
+        "nativeObservationSource":{"const":"definition-time-captured-connection-owner-intrinsic"},
+        "callerOutcomeInputForbidden":{"const":true},"attemptMaximum":{"const":1},"retryForbidden":{"const":true},
+        "provisionalGenerationMintedBeforeBeginIo":{"const":true},
+        "provisionalGenerationBinding":{"const":"exact-owner-plus-exact-connection-plus-single-begin-attempt-nonce"},
+        "provisionalGenerationPromotion":{"const":"only-after-returned-postflight-proves-exact-exclusive-transaction-active"},
+        "provisionalGenerationTombstone":{"const":"before-any-failed-postflight-or-throw-cleanup"},
+        "beginReceiptBeforePromotionForbidden":{"const":true},
+        "returnedNextState":{"const":"active"},
+        "returnedPostflightMismatchState":{"const":"begin-postflight-in-doubt"},
+        "returnedAutocommitCleanup":{"const":"stable-postflight-primary-no-rollback-close-once-reopen-source-v1"},
+        "returnedDifferentGenerationCleanup":{"const":"stable-postflight-primary-no-rollback-close-once-reopen-or-corrupt"},
+        "returnedObservationUnavailableCleanup":{"const":"stable-postflight-primary-no-rollback-close-once-reopen-or-unresolved"},
+        "throwSameGenerationActiveCleanup":{"const":"tombstone-begin-authority-then-rollback-once-close-once-reopen-source-v1"},
+        "throwAutocommitCleanup":{"const":"no-rollback-close-once-reopen-source-v1"},
+        "throwObservationUnavailableCleanup":{"const":"no-rollback-close-once-reopen-or-unresolved"},
+        "beginPrimaryPrecedesCleanupDiagnostics":{"const":true},
+        "receiptCommitments":{"type":"array","minItems":9,"maxItems":9,"uniqueItems":true,"items":{"type":"string"}}
+      }
+    },
+    "identityContract": {
+      "type":"object","additionalProperties":false,
+      "required":["commonExactObjects","failurePresentationObjects","successCommitPresentationObjects","commitFailureCleanupPresentationObjects","finalFenceTransitivelyAuthenticates","successOwnerDirectStrongPresentation","cloneProxySubclassOrReconstructionRejected","crossConnectionLineageGenerationAuthorityOrRunRejected","ownerAndFenceReplayRejected","integerIdIsBucketOnlyNeverAuthority"],
+      "properties": {
+        "commonExactObjects":{"type":"array","minItems":6,"maxItems":6,"uniqueItems":true,"items":{"type":"string"}},
+        "failurePresentationObjects":{"type":"array","minItems":3,"maxItems":3,"uniqueItems":true,"items":{"type":"string"}},
+        "successCommitPresentationObjects":{"type":"array","minItems":2,"maxItems":2,"uniqueItems":true,"items":{"type":"string"}},
+        "commitFailureCleanupPresentationObjects":{"type":"array","minItems":3,"maxItems":3,"uniqueItems":true,"items":{"type":"string"}},
+        "finalFenceTransitivelyAuthenticates":{"type":"array","minItems":13,"maxItems":13,"uniqueItems":true,"items":{"type":"string"}},
+        "successOwnerDirectStrongPresentation":{"const":"exact-final-commit-fence-only"},
+        "cloneProxySubclassOrReconstructionRejected":{"const":true},
+        "crossConnectionLineageGenerationAuthorityOrRunRejected":{"const":true},
+        "ownerAndFenceReplayRejected":{"const":true},"integerIdIsBucketOnlyNeverAuthority":{"const":true}
+      }
+    },
+    "dependencyContract": {
+      "type":"object","additionalProperties":false,
+      "required":["atomicPublicationOrder","directCommitAuthoritiesRejected","validationBeforeFenceConsumption","fenceConsumptionBeforeCommitIo","successSelectionMintsNewCapability","permanentWriteAfterPreRetirementForbidden","ownedTempResidueAtCommit"],
+      "properties": {
+        "atomicPublicationOrder":{"type":"array","minItems":30,"maxItems":30,"uniqueItems":true,"items":{"type":"string"}},
+        "directCommitAuthoritiesRejected":{"type":"array","minItems":8,"maxItems":8,"uniqueItems":true,"items":{"type":"string"}},
+        "validationBeforeFenceConsumption":{"const":true},"fenceConsumptionBeforeCommitIo":{"const":true},
+        "successSelectionMintsNewCapability":{"const":false},"permanentWriteAfterPreRetirementForbidden":{"const":true},
+        "ownedTempResidueAtCommit":{"const":0}
+      }
+    },
+    "arbiterContract": {
+      "type":"object","additionalProperties":false,
+      "required":["registrationKey","postBeginBinding","postOuterBinding","bindingDirection","claimStateOrder","atMostOneLiveOutcomeClaim","failureClaimBlocksSuccess","successClaimBlocksPostConsumeFailureOwner","commitFailureCleanupIsInternalToSuccessClaim","successAuthorityTombstoneBeforeCommitFailureCleanup","connectionTerminalGuardRequired","contextVarSuccessAuthorityForbidden"],
+      "properties": {
+        "registrationKey":{"const":"exact-connection-plus-transaction-owner"},
+        "postBeginBinding":{"const":"exact-begin-receipt-plus-lineage-plus-generation"},
+        "postOuterBinding":{"const":"exact-outer-publication-authority"},
+        "bindingDirection":{"const":"one-way-monotonic"},
+        "claimStateOrder":{"type":"array","minItems":2,"maxItems":2,"prefixItems":[{"const":"unclaimed"},{"const":"failure-claimed-or-success-claimed"}],"items":false},
+        "atMostOneLiveOutcomeClaim":{"const":true},"failureClaimBlocksSuccess":{"const":true},
+        "successClaimBlocksPostConsumeFailureOwner":{"const":true},"commitFailureCleanupIsInternalToSuccessClaim":{"const":true},
+        "successAuthorityTombstoneBeforeCommitFailureCleanup":{"const":true},"connectionTerminalGuardRequired":{"const":true},
+        "contextVarSuccessAuthorityForbidden":{"const":true}
+      }
+    },
+    "registryContract": {
+      "type":"object","additionalProperties":false,
+      "required":["successAuthorityTransport","ownerRegistryKey","reverseEntry","connectionIdentityBearer","generationIdentityBearer","integerIdUse","authentication","partialRegistrationResidue","staleWeakrefCallbackMustMatchExactStoredEntry","abandonedOwnerGraphCollectible","terminalStrongGraphReferences","terminalSnapshotPureValuesNoPathExceptionOrAddress","ambientOrCopiedContextAuthority"],
+      "properties": {
+        "successAuthorityTransport":{"const":"explicit-final-fence-parameter-only"},
+        "ownerRegistryKey":{"const":"exact-live-owner-object"},
+        "reverseEntry":{"const":"exact-live-weak-connection-lineage-generation-authority-and-owner"},
+        "connectionIdentityBearer":{"const":"exact-weakref-capable-owner-wrapper-not-raw-driver-handle"},
+        "generationIdentityBearer":{"const":"exact-weakref-capable-opaque-provisional-generation-promoted-on-success"},
+        "integerIdUse":{"const":"bucket-selection-only"},"authentication":{"const":"exact-live-object-identity-only"},
+        "partialRegistrationResidue":{"const":0},"staleWeakrefCallbackMustMatchExactStoredEntry":{"const":true},
+        "abandonedOwnerGraphCollectible":{"const":true},"terminalStrongGraphReferences":{"const":0},
+        "terminalSnapshotPureValuesNoPathExceptionOrAddress":{"const":true},
+        "ambientOrCopiedContextAuthority":{"const":"forbidden"}
+      }
+    },
+    "lifecycleContract": {
+      "type":"object","additionalProperties":false,
+      "required":["states","allowedTransitions","beginCommitRollbackCloseRetryForbidden","attemptMaximumPerOperation","rollbackFailureStillAttemptsCloseOnce","rollbackThrowNeverClaimsRolledBack","terminalStrongPresentationCleared"],
+      "properties": {
+        "states":{"type":"array","minItems":25,"maxItems":25,"uniqueItems":true,"items":{"type":"string"}},
+        "allowedTransitions":{"type":"array","minItems":36,"maxItems":36,"uniqueItems":true,"items":{"type":"string"}},
+        "beginCommitRollbackCloseRetryForbidden":{"const":true},"attemptMaximumPerOperation":{"const":1},
+        "rollbackFailureStillAttemptsCloseOnce":{"const":true},"rollbackThrowNeverClaimsRolledBack":{"const":true},
+        "terminalStrongPresentationCleared":{"const":true}
+      }
+    },
+    "commitAmbiguityContract": {
+      "type":"object","additionalProperties":false,
+      "required":["trustedIntrinsicObservations","sameExactGenerationProof","commitReturned","commitThrowSameExactGenerationActive","commitThrowAutocommit","commitThrowDifferentGenerationOrObservationUnavailable","transactionEpochComparisonBaseline","commitRetryForbidden","autocommitAloneDoesNotProveCompleteV2"],
+      "properties": {
+        "trustedIntrinsicObservations":{"type":"array","minItems":4,"maxItems":4,"uniqueItems":true,"items":{"type":"string"}},
+        "sameExactGenerationProof":{"type":"array","minItems":6,"maxItems":6,"uniqueItems":true,"items":{"type":"string"}},
+        "commitReturned":{"const":"no-rollback-reopen-must-prove-complete-v2"},
+        "commitThrowSameExactGenerationActive":{"const":"tombstone-success-authority-internal-cleanup-rollback-once-close-once-reopen-must-prove-source-v1"},
+        "commitThrowAutocommit":{"const":"commit-in-doubt-no-rollback-close-once-reopen-classifies-exact-v1-or-v2"},
+        "commitThrowDifferentGenerationOrObservationUnavailable":{"const":"commit-in-doubt-no-rollback-close-once-reopen-or-unresolved"},
+        "transactionEpochComparisonBaseline":{"const":"exact-pre-commit-attempt-snapshot-plus-only-the-owner-recorded-commit-attempt-accounting-transition"},
+        "commitRetryForbidden":{"const":true},"autocommitAloneDoesNotProveCompleteV2":{"const":true}
+      }
+    },
+    "reopenClassificationContract": {
+      "type":"object","additionalProperties":false,
+      "required":["reopenAuthority","callerPathOrCallbackForbidden","memoryDatabaseProductionOwnerForbidden","actualClassificationExactlyOne","classifications","requiredEvidence","autocommitOrUserVersionAloneForbidden","commitReturnedThenSourceV1OrIntermediate","rollbackCompletedThenCompleteV2OrIntermediate","commitInDoubtThenSourceV1","commitInDoubtThenCompleteV2","commitInDoubtThenIntermediate","commitInDoubtThenUnavailable"],
+      "properties": {
+        "reopenAuthority":{"const":"definition-time-captured-opaque-database-reopen-capability"},
+        "callerPathOrCallbackForbidden":{"const":true},"memoryDatabaseProductionOwnerForbidden":{"const":true},
+        "actualClassificationExactlyOne":{"const":true},
+        "classifications":{"type":"array","minItems":4,"maxItems":4,"uniqueItems":true,"items":{"type":"string"}},
+        "requiredEvidence":{"type":"array","minItems":10,"maxItems":10,"uniqueItems":true,"items":{"type":"string"}},
+        "autocommitOrUserVersionAloneForbidden":{"const":true},
+        "commitReturnedThenSourceV1OrIntermediate":{"const":"corrupt"},
+        "rollbackCompletedThenCompleteV2OrIntermediate":{"const":"corrupt"},
+        "commitInDoubtThenSourceV1":{"const":"commit-failed"},
+        "commitInDoubtThenCompleteV2":{"const":"recovered-success"},
+        "commitInDoubtThenIntermediate":{"const":"corrupt"},"commitInDoubtThenUnavailable":{"const":"unresolved"}
+      }
+    },
+    "failurePrecedenceContract": {
+      "type":"object","additionalProperties":false,
+      "required":["diagnosticOrder","originalNativeThrowRetainedAsPrimaryDiagnostic","rollbackOrCloseNeverOverwritesPrimaryDiagnostic","closeFailureDoesNotProveTransactionOutcome","reopenClassificationRequiredDespiteCloseFailure","corruptionMayDominateApiOutcomeButRetainsOriginalPrimaryDiagnostic"],
+      "properties": {
+        "diagnosticOrder":{"type":"array","minItems":6,"maxItems":6,"uniqueItems":true,"items":{"type":"string"}},
+        "originalNativeThrowRetainedAsPrimaryDiagnostic":{"const":true},
+        "rollbackOrCloseNeverOverwritesPrimaryDiagnostic":{"const":true},
+        "closeFailureDoesNotProveTransactionOutcome":{"const":true},
+        "reopenClassificationRequiredDespiteCloseFailure":{"const":true},
+        "corruptionMayDominateApiOutcomeButRetainsOriginalPrimaryDiagnostic":{"const":true}
+      }
+    },
+    "futureCaseCounterContract": {
+      "type":"object","additionalProperties":false,
+      "required":["ioCountOrder","ownershipCountOrder","countsAreNormativeFutureTargetsNotRuntimeEvidence"],
+      "properties": {
+        "ioCountOrder":{"type":"array","minItems":5,"maxItems":5,"uniqueItems":true,"items":{"type":"string"}},
+        "ownershipCountOrder":{"type":"array","minItems":5,"maxItems":5,"uniqueItems":true,"items":{"type":"string"}},
+        "countsAreNormativeFutureTargetsNotRuntimeEvidence":{"const":true}
+      }
+    },
+    "beginPostflightFutureTarget": {
+      "type":"object","additionalProperties":false,
+      "required":["caseId","runtimeExecuted","trustedIntrinsicObservation","rollbackAttemptCount","closeAttemptCount","reopenObservation","apiOutcome"],
+      "properties": {
+        "caseId":{"type":"string"},"runtimeExecuted":{"const":false},
+        "trustedIntrinsicObservation":{"enum":["verified-autocommit","different-generation-active","observation-unavailable"]},
+        "rollbackAttemptCount":{"const":0},"closeAttemptCount":{"const":1},
+        "reopenObservation":{"enum":["source-v1","intermediate-corrupt","unavailable-unresolved"]},
+        "apiOutcome":{"enum":["begin-postflight-failed","corruption","unresolved"]}
+      }
+    },
+    "cleanupFaultFutureTarget": {
+      "type":"object","additionalProperties":false,
+      "required":["caseId","runtimeExecuted","rollbackResult","rollbackThrowTiming","postRollbackObservation","closeResult","reopenObservation","stateAfterRollback","apiOutcome"],
+      "properties": {
+        "caseId":{"type":"string"},"runtimeExecuted":{"const":false},
+        "rollbackResult":{"enum":["returned","threw"]},
+        "rollbackThrowTiming":{"enum":["not-applicable","before-native-return","after-native-return","outcome-unavailable"]},
+        "postRollbackObservation":{"enum":["verified-autocommit","same-exact-exclusive-generation-active","observation-unavailable"]},
+        "closeResult":{"enum":["returned","threw"]},
+        "reopenObservation":{"enum":["source-v1","unavailable-unresolved"]},
+        "stateAfterRollback":{"enum":["rolled-back","rollback-failed","rollback-in-doubt"]},
+        "apiOutcome":{"enum":["original-primary-failure","unresolved"]}
+      }
+    },
+    "reopenOutcomeFutureTarget": {
+      "type":"object","additionalProperties":false,
+      "required":["preReopenOutcome","coveredCommitIntrinsicObservations","sourceV1ApiOutcome","completeV2ApiOutcome","intermediateApiOutcome","unavailableApiOutcome"],
+      "properties": {
+        "preReopenOutcome":{"enum":["commit-returned","rollback-completed","commit-in-doubt"]},
+        "coveredCommitIntrinsicObservations":{"type":"array","minItems":1,"maxItems":3,"uniqueItems":true,"items":{"enum":["not-applicable","verified-autocommit","different-generation-active","observation-unavailable"]}},
+        "sourceV1ApiOutcome":{"enum":["corruption","original-primary-failure","commit-failed"]},
+        "completeV2ApiOutcome":{"enum":["success","corruption","recovered-success"]},
+        "intermediateApiOutcome":{"const":"corruption"},"unavailableApiOutcome":{"const":"unresolved"}
+      }
+    },
+    "oracle": {
+      "type":"object","additionalProperties":false,"required":["phase","authority","nativeResult","trustedIntrinsicObservation","reopenObservation"],
+      "properties": {
+        "phase":{"enum":["contract","begin","active-failure","commit"]},
+        "authority":{"enum":["none","exact-transaction-owner","exact-authenticated-terminal-primary","exact-final-commit-fence"]},
+        "nativeResult":{"enum":["not-attempted","returned","threw"]},
+        "trustedIntrinsicObservation":{"enum":["not-applicable","same-exact-exclusive-generation-active","verified-autocommit","different-generation-active","observation-unavailable"]},
+        "reopenObservation":{"enum":["not-attempted","source-v1","complete-v2","intermediate-corrupt","unavailable-unresolved"]}
+      }
+    },
+    "futureExpected": {
+      "type":"object","additionalProperties":false,"required":["selectedOwner","ioCounts","ownershipCounts","terminalClassification","apiOutcome"],
+      "properties": {
+        "selectedOwner":{"enum":["unclaimed","transaction-owner-active","begin-failure-cleanup-owned","begin-in-doubt","failure-claimed","success-claimed","success-claimed-internal-cleanup","success-claimed-commit-in-doubt"]},
+        "ioCounts":{"type":"array","minItems":5,"maxItems":5,"items":{"enum":[0,1]}},
+        "ownershipCounts":{"type":"array","minItems":5,"maxItems":5,"items":{"enum":[0,1]}},
+        "terminalClassification":{"enum":["contract-redbar","active","source-v1","complete-v2","intermediate-corrupt","unavailable-unresolved"]},
+        "apiOutcome":{"enum":["not-executed","active","begin-failed","failure","success","recovered-success","unresolved","corruption"]}
+      }
+    },
+    "futureCase": {
+      "type":"object","additionalProperties":false,"required":["caseId","runtimeExecuted","oracle","expected"],
+      "properties":{"caseId":{"type":"string","minLength":3},"runtimeExecuted":{"const":false},"oracle":{"$ref":"#/$defs/oracle"},"expected":{"$ref":"#/$defs/futureExpected"}}
+    },
+    "fixtureDigestContract": {
+      "type":"object","additionalProperties":false,
+      "required":["domainUtf8","algorithm","canonicalJsonProfile","preimage","selfFieldReplacement","digestHexEncoding"],
+      "properties": {
+        "domainUtf8":{"const":"graph-engineering/sqlite-cursor-publication-transaction-owner-v1-fixture/v1\u0000"},
+        "algorithm":{"const":"sha256-domain-utf8-plus-canonical-json-utf8"},
+        "canonicalJsonProfile":{"const":"graph-engineering/canonical-json/v1alpha1-unicode-code-point-key-order"},
+        "preimage":{"const":"entire-fixture-with-fixtureCanonicalSha256-replaced-by-64-lowercase-zeroes"},
+        "selfFieldReplacement":{"const":"0000000000000000000000000000000000000000000000000000000000000000"},
+        "digestHexEncoding":{"const":"lowercase-hex"}
+      }
+    }
+  }
+}

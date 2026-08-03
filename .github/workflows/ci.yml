@@ -32,6 +32,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm validate:fixtures
       - run: pnpm test:sqlite-ledger-contract
+      - run: pnpm test:sqlite-transaction-owner-contract
       - run: pnpm check:docs
       - run: pnpm check:sqlite-migrations
       - run: pnpm check:release-map

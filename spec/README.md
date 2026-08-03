@@ -78,6 +78,15 @@ production evidence; executable conformance remains the capability gate. Their
 v1alpha1 authoritative payloads are explicitly inline-unredacted and therefore
 do not satisfy the still-open D9 protected-payload or stable-release gate.
 
+The future single `BEGIN EXCLUSIVE` owner, its monotonic failure/success
+arbiter, complete 30-stage publication order, final-fence-only COMMIT authority,
+commit-ambiguity partition, and exact reopen classifier are frozen as a
+contract-only redbar by
+[sqlite-cursor-publication-transaction-owner-v1.md](sqlite-cursor-publication-transaction-owner-v1.md).
+Its 32 future target scenarios are explicitly not runtime evidence: no runtime
+transaction control, driver-native throw, crash/reopen, public API, protocol,
+or release claim is active.
+
 Scheduler-integrated conditional routing, its compiler diagnostics and its
 `routedBranches` lowering are frozen by
 [integrated-router-semantics.md](integrated-router-semantics.md). The remaining

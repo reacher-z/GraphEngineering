@@ -1,0 +1,372 @@
+{
+  "schemaVersion": 1,
+  "id": "sqlite-cursor-publication-transaction-owner-v1",
+  "status": "contract-frozen-redbar",
+  "claims": {
+    "implementationClaim": false,
+    "protocolClaim": false,
+    "releaseGate": false,
+    "runtimeTransactionControlClaim": false,
+    "driverNativeBeginThrowClaim": false,
+    "driverNativeCommitThrowClaim": false,
+    "crashReopenClaim": false,
+    "publicApiClaim": false
+  },
+  "anchors": {
+    "rebindContractId": "sqlite-cursor-publication-rebind-v2",
+    "rebindFixtureCanonicalSha256": "d368cd53e819e06e950f2dabedcb5a5b2fca535536efe85abb2e4b488bae2e7d",
+    "failureFinalizerContractId": "sqlite-post-consume-transaction-failure-finalizer-v1",
+    "failureFinalizerFixtureCanonicalSha256": "81c055216223c89dc68055bbf325a73c61bfb899977dfb6255059137783ae360"
+  },
+  "boundary": {
+    "stableTaskId": "SQLITE-CURSOR-PUBLICATION-TRANSACTION-OWNER",
+    "role": "atomic-publication-transaction-outcome-arbitration-contract-only",
+    "beginSql": "BEGIN EXCLUSIVE",
+    "commitSemanticOperation": "native-driver-commit-on-exact-owned-connection",
+    "rollbackSemanticOperation": "native-driver-rollback-on-exact-owned-connection",
+    "activeOwnerRawTransactionControl": "forbidden",
+    "failureCleanupWithoutAuthenticatedPrimary": "forbidden",
+    "callerCallbackOrThunk": "forbidden",
+    "callerSuppliedOutcome": "forbidden",
+    "futureTargetCasesAreRuntimeEvidence": false,
+    "runtimeExecutedCaseCount": 0,
+    "contractRuntimeTransactionControlCount": 0,
+    "guardedTransactionControlPaths": [
+      "connection-commit-method",
+      "connection-rollback-method",
+      "execute-COMMIT-or-END",
+      "execute-ROLLBACK",
+      "execute-BEGIN",
+      "execute-SAVEPOINT-or-RELEASE-or-ROLLBACK-TO",
+      "multi-statement-exec-containing-transaction-control",
+      "prepared-statement-containing-transaction-control",
+      "script-containing-implicit-or-explicit-transaction-control",
+      "nested-BEGIN",
+      "close-live-guarded-transaction",
+      "newly-prepared-permanent-DML-after-pre-retirement",
+      "already-prepared-permanent-DML-after-pre-retirement",
+      "newly-prepared-permanent-DDL-after-pre-retirement",
+      "already-prepared-permanent-DDL-after-pre-retirement",
+      "persistent-PRAGMA-including-user-version-or-application-id",
+      "VACUUM-ANALYZE-or-REINDEX",
+      "ATTACH-DETACH-or-connection-topology-change",
+      "any-other-permanent-state-mutation-or-transaction-proof-history-change"
+    ]
+  },
+  "beginContract": {
+    "registrationBeforeBeginIo": true,
+    "requiresOpenAutocommitUnguardedConnection": true,
+    "authority": "exact-one-shot-transaction-owner",
+    "nativeObservationSource": "definition-time-captured-connection-owner-intrinsic",
+    "callerOutcomeInputForbidden": true,
+    "attemptMaximum": 1,
+    "retryForbidden": true,
+    "provisionalGenerationMintedBeforeBeginIo": true,
+    "provisionalGenerationBinding": "exact-owner-plus-exact-connection-plus-single-begin-attempt-nonce",
+    "provisionalGenerationPromotion": "only-after-returned-postflight-proves-exact-exclusive-transaction-active",
+    "provisionalGenerationTombstone": "before-any-failed-postflight-or-throw-cleanup",
+    "beginReceiptBeforePromotionForbidden": true,
+    "returnedNextState": "active",
+    "returnedPostflightMismatchState": "begin-postflight-in-doubt",
+    "returnedAutocommitCleanup": "stable-postflight-primary-no-rollback-close-once-reopen-source-v1",
+    "returnedDifferentGenerationCleanup": "stable-postflight-primary-no-rollback-close-once-reopen-or-corrupt",
+    "returnedObservationUnavailableCleanup": "stable-postflight-primary-no-rollback-close-once-reopen-or-unresolved",
+    "throwSameGenerationActiveCleanup": "tombstone-begin-authority-then-rollback-once-close-once-reopen-source-v1",
+    "throwAutocommitCleanup": "no-rollback-close-once-reopen-source-v1",
+    "throwObservationUnavailableCleanup": "no-rollback-close-once-reopen-or-unresolved",
+    "beginPrimaryPrecedesCleanupDiagnostics": true,
+    "receiptCommitments": [
+      "exact-transaction-owner-identity",
+      "exact-connection-object-identity",
+      "exact-transaction-lineage-object-identity",
+      "exact-transaction-generation-commitment",
+      "exclusive-mode",
+      "transaction-epoch",
+      "total-changes",
+      "temp-mutation-epoch",
+      "begin-attempt-one"
+    ]
+  },
+  "identityContract": {
+    "commonExactObjects": [
+      "sqlite-connection-object-identity",
+      "transaction-owner-object-identity",
+      "begin-receipt-object-identity",
+      "transaction-lineage-object-identity",
+      "transaction-generation-commitment",
+      "database-reopen-capability-object-identity"
+    ],
+    "failurePresentationObjects": [
+      "transaction-owner-object-identity",
+      "authenticated-terminal-primary-object-identity",
+      "post-consume-failure-rollback-owner-object-identity"
+    ],
+    "successCommitPresentationObjects": [
+      "transaction-owner-object-identity",
+      "final-commit-fence-receipt-object-identity"
+    ],
+    "commitFailureCleanupPresentationObjects": [
+      "transaction-owner-object-identity",
+      "native-commit-primary-object-identity",
+      "internal-commit-failure-cleanup-owner-object-identity"
+    ],
+    "finalFenceTransitivelyAuthenticates": [
+      "outer-publication-authority-object-identity",
+      "rule-11-success-receipt-object-identity",
+      "rule-12-success-receipt-object-identity",
+      "pre-verification-clock-consumed-receipt-object-identity",
+      "cursor-clock-complete-capability-object-identity",
+      "lineage-publication-receipt-object-identity",
+      "metadata-publication-receipt-object-identity",
+      "publication-rules-receipt-object-identity",
+      "fresh-v2-catalog-receipt-object-identity",
+      "physical-semantic-audit-receipt-object-identity",
+      "pre-retirement-stage-fence-receipt-object-identity",
+      "stage-retirement-receipt-object-identity",
+      "pre-commit-clock-consumed-receipt-object-identity"
+    ],
+    "successOwnerDirectStrongPresentation": "exact-final-commit-fence-only",
+    "cloneProxySubclassOrReconstructionRejected": true,
+    "crossConnectionLineageGenerationAuthorityOrRunRejected": true,
+    "ownerAndFenceReplayRejected": true,
+    "integerIdIsBucketOnlyNeverAuthority": true
+  },
+  "dependencyContract": {
+    "atomicPublicationOrder": [
+      "source-v1-semantically-valid",
+      "transaction-owner-registered",
+      "begin-exclusive-returned",
+      "b2-pre-rebind-complete",
+      "outer-clock-evidence-consumed",
+      "outer-publication-authority-minted",
+      "migration-0002-catalog-rebuild",
+      "post-0002-catalog-fence-adopted",
+      "baseline-entries-published",
+      "baseline-header-published",
+      "operation-sequence-zero-published",
+      "post-ddl-stage-authority-adopted",
+      "pre-rebind-clock-evidence-consumed",
+      "cursor-publication-session-minted",
+      "cursor-rebind-executed-once",
+      "rule-11-rebind-count-accepted",
+      "rule-12-main-table-seal-accepted",
+      "pre-verification-clock-evidence-consumed",
+      "cursor-clock-complete",
+      "migration-lineage-published",
+      "schema-and-descriptor-metadata-published",
+      "publication-rules-accepted",
+      "fresh-v2-catalog-equivalence-accepted",
+      "physical-and-semantic-postconditions-accepted",
+      "pre-retirement-stage-fence-adopted",
+      "cursor-temp-stage-retired",
+      "pre-commit-clock-evidence-consumed",
+      "final-migration-lock-transaction-fence-accepted",
+      "success-commit-authority-selected-internal-state-no-new-capability",
+      "single-atomic-commit"
+    ],
+    "directCommitAuthoritiesRejected": [
+      "boolean-success",
+      "rule-11-success-receipt",
+      "raw-seal-read-evidence",
+      "rule-12-success-receipt",
+      "pre-verification-clock-evidence",
+      "cursor-clock-complete-capability",
+      "stage-retirement-receipt",
+      "pre-commit-clock-evidence"
+    ],
+    "validationBeforeFenceConsumption": true,
+    "fenceConsumptionBeforeCommitIo": true,
+    "successSelectionMintsNewCapability": false,
+    "permanentWriteAfterPreRetirementForbidden": true,
+    "ownedTempResidueAtCommit": 0
+  },
+  "arbiterContract": {
+    "registrationKey": "exact-connection-plus-transaction-owner",
+    "postBeginBinding": "exact-begin-receipt-plus-lineage-plus-generation",
+    "postOuterBinding": "exact-outer-publication-authority",
+    "bindingDirection": "one-way-monotonic",
+    "claimStateOrder": ["unclaimed", "failure-claimed-or-success-claimed"],
+    "atMostOneLiveOutcomeClaim": true,
+    "failureClaimBlocksSuccess": true,
+    "successClaimBlocksPostConsumeFailureOwner": true,
+    "commitFailureCleanupIsInternalToSuccessClaim": true,
+    "successAuthorityTombstoneBeforeCommitFailureCleanup": true,
+    "connectionTerminalGuardRequired": true,
+    "contextVarSuccessAuthorityForbidden": true
+  },
+  "registryContract": {
+    "successAuthorityTransport": "explicit-final-fence-parameter-only",
+    "ownerRegistryKey": "exact-live-owner-object",
+    "reverseEntry": "exact-live-weak-connection-lineage-generation-authority-and-owner",
+    "connectionIdentityBearer": "exact-weakref-capable-owner-wrapper-not-raw-driver-handle",
+    "generationIdentityBearer": "exact-weakref-capable-opaque-provisional-generation-promoted-on-success",
+    "integerIdUse": "bucket-selection-only",
+    "authentication": "exact-live-object-identity-only",
+    "partialRegistrationResidue": 0,
+    "staleWeakrefCallbackMustMatchExactStoredEntry": true,
+    "abandonedOwnerGraphCollectible": true,
+    "terminalStrongGraphReferences": 0,
+    "terminalSnapshotPureValuesNoPathExceptionOrAddress": true,
+    "ambientOrCopiedContextAuthority": "forbidden"
+  },
+  "lifecycleContract": {
+    "states": [
+      "registered", "beginning", "active", "begin-postflight-in-doubt",
+      "begin-failed-same-generation-active", "begin-in-doubt", "failure-claimed", "success-claimed", "committing",
+      "commit-returned", "commit-failed-same-generation-active", "commit-in-doubt",
+      "success-authority-tombstoned", "commit-failure-cleanup-owned", "rolling-back",
+      "rolled-back", "rollback-failed", "rollback-in-doubt", "closing", "awaiting-reopen", "reopen-verified-v1",
+      "reopen-verified-v2", "reopen-unavailable", "corrupt", "finalized"
+    ],
+    "allowedTransitions": [
+      "registered->beginning", "beginning->active", "beginning->begin-postflight-in-doubt",
+      "beginning->begin-failed-same-generation-active", "beginning->begin-in-doubt",
+      "begin-postflight-in-doubt->closing",
+      "begin-failed-same-generation-active->rolling-back", "begin-in-doubt->closing",
+      "active->failure-claimed", "failure-claimed->rolling-back",
+      "active->success-claimed", "success-claimed->committing",
+      "committing->commit-returned", "committing->commit-failed-same-generation-active",
+      "committing->commit-in-doubt", "commit-returned->success-authority-tombstoned",
+      "commit-in-doubt->success-authority-tombstoned",
+      "commit-failed-same-generation-active->success-authority-tombstoned",
+      "success-authority-tombstoned->commit-failure-cleanup-owned",
+      "success-authority-tombstoned->closing",
+      "commit-failure-cleanup-owned->rolling-back", "rolling-back->rolled-back",
+      "rolling-back->rollback-failed", "rollback-failed->closing",
+      "rollback-failed->rollback-in-doubt", "rollback-in-doubt->closing",
+      "rolled-back->closing",
+      "closing->awaiting-reopen", "awaiting-reopen->reopen-verified-v1",
+      "awaiting-reopen->reopen-verified-v2", "awaiting-reopen->reopen-unavailable",
+      "awaiting-reopen->corrupt", "reopen-verified-v1->finalized",
+      "reopen-verified-v2->finalized", "reopen-unavailable->finalized",
+      "corrupt->finalized"
+    ],
+    "beginCommitRollbackCloseRetryForbidden": true,
+    "attemptMaximumPerOperation": 1,
+    "rollbackFailureStillAttemptsCloseOnce": true,
+    "rollbackThrowNeverClaimsRolledBack": true,
+    "terminalStrongPresentationCleared": true
+  },
+  "commitAmbiguityContract": {
+    "trustedIntrinsicObservations": [
+      "same-exact-exclusive-generation-active",
+      "verified-autocommit",
+      "different-generation-active",
+      "observation-unavailable"
+    ],
+    "sameExactGenerationProof": [
+      "exact-owned-connection-is-live",
+      "native-in-transaction-true",
+      "exact-lineage-object-still-selected",
+      "exact-generation-commitment-unchanged",
+      "transaction-epoch-unchanged",
+      "exclusive-mode-still-selected"
+    ],
+    "commitReturned": "no-rollback-reopen-must-prove-complete-v2",
+    "commitThrowSameExactGenerationActive": "tombstone-success-authority-internal-cleanup-rollback-once-close-once-reopen-must-prove-source-v1",
+    "commitThrowAutocommit": "commit-in-doubt-no-rollback-close-once-reopen-classifies-exact-v1-or-v2",
+    "commitThrowDifferentGenerationOrObservationUnavailable": "commit-in-doubt-no-rollback-close-once-reopen-or-unresolved",
+    "transactionEpochComparisonBaseline": "exact-pre-commit-attempt-snapshot-plus-only-the-owner-recorded-commit-attempt-accounting-transition",
+    "commitRetryForbidden": true,
+    "autocommitAloneDoesNotProveCompleteV2": true
+  },
+  "reopenClassificationContract": {
+    "reopenAuthority": "definition-time-captured-opaque-database-reopen-capability",
+    "callerPathOrCallbackForbidden": true,
+    "memoryDatabaseProductionOwnerForbidden": true,
+    "actualClassificationExactlyOne": true,
+    "classifications": ["source-v1", "complete-v2", "intermediate-corrupt", "unavailable-unresolved"],
+    "requiredEvidence": [
+      "exact-database-reopen-identity",
+      "application-id-and-user-version",
+      "exact-physical-catalog-digest",
+      "schema-descriptor-and-lineage-metadata",
+      "baseline-entry-count-and-root",
+      "cursor-count-root-and-target-identities",
+      "operation-sequence-and-legacy-replay-commitments",
+      "migration-lock-terminal-state",
+      "integrity-check-ok",
+      "foreign-key-check-empty"
+    ],
+    "autocommitOrUserVersionAloneForbidden": true,
+    "commitReturnedThenSourceV1OrIntermediate": "corrupt",
+    "rollbackCompletedThenCompleteV2OrIntermediate": "corrupt",
+    "commitInDoubtThenSourceV1": "commit-failed",
+    "commitInDoubtThenCompleteV2": "recovered-success",
+    "commitInDoubtThenIntermediate": "corrupt",
+    "commitInDoubtThenUnavailable": "unresolved"
+  },
+  "failurePrecedenceContract": {
+    "diagnosticOrder": [
+      "presentation-or-authority-rejection-before-io",
+      "final-fence-validation-before-consumption",
+      "native-begin-or-commit-primary",
+      "rollback-secondary-if-authorized",
+      "close-tertiary",
+      "reopen-audit-diagnostic"
+    ],
+    "originalNativeThrowRetainedAsPrimaryDiagnostic": true,
+    "rollbackOrCloseNeverOverwritesPrimaryDiagnostic": true,
+    "closeFailureDoesNotProveTransactionOutcome": true,
+    "reopenClassificationRequiredDespiteCloseFailure": true,
+    "corruptionMayDominateApiOutcomeButRetainsOriginalPrimaryDiagnostic": true
+  },
+  "futureCaseCounterContract": {
+    "ioCountOrder": [
+      "begin-attempt", "commit-attempt", "rollback-attempt", "close-attempt", "reopen-attempt"
+    ],
+    "ownershipCountOrder": [
+      "failure-claim", "success-claim", "success-authority-tombstone",
+      "begin-failure-cleanup-claim", "commit-failure-cleanup-claim"
+    ],
+    "countsAreNormativeFutureTargetsNotRuntimeEvidence": true
+  },
+  "beginPostflightFutureTargets": [
+    {"caseId":"begin-returned-postflight-autocommit","runtimeExecuted":false,"trustedIntrinsicObservation":"verified-autocommit","rollbackAttemptCount":0,"closeAttemptCount":1,"reopenObservation":"source-v1","apiOutcome":"begin-postflight-failed"},
+    {"caseId":"begin-returned-postflight-different-generation","runtimeExecuted":false,"trustedIntrinsicObservation":"different-generation-active","rollbackAttemptCount":0,"closeAttemptCount":1,"reopenObservation":"intermediate-corrupt","apiOutcome":"corruption"},
+    {"caseId":"begin-returned-postflight-observation-unavailable","runtimeExecuted":false,"trustedIntrinsicObservation":"observation-unavailable","rollbackAttemptCount":0,"closeAttemptCount":1,"reopenObservation":"unavailable-unresolved","apiOutcome":"unresolved"}
+  ],
+  "cleanupFaultFutureTargets": [
+    {"caseId":"rollback-returned-close-returned","runtimeExecuted":false,"rollbackResult":"returned","rollbackThrowTiming":"not-applicable","postRollbackObservation":"verified-autocommit","closeResult":"returned","reopenObservation":"source-v1","stateAfterRollback":"rolled-back","apiOutcome":"original-primary-failure"},
+    {"caseId":"rollback-threw-autocommit-close-returned","runtimeExecuted":false,"rollbackResult":"threw","rollbackThrowTiming":"after-native-return","postRollbackObservation":"verified-autocommit","closeResult":"returned","reopenObservation":"source-v1","stateAfterRollback":"rollback-failed","apiOutcome":"original-primary-failure"},
+    {"caseId":"rollback-threw-active-close-returned","runtimeExecuted":false,"rollbackResult":"threw","rollbackThrowTiming":"before-native-return","postRollbackObservation":"same-exact-exclusive-generation-active","closeResult":"returned","reopenObservation":"source-v1","stateAfterRollback":"rollback-in-doubt","apiOutcome":"original-primary-failure"},
+    {"caseId":"rollback-threw-observation-unavailable-close-threw","runtimeExecuted":false,"rollbackResult":"threw","rollbackThrowTiming":"outcome-unavailable","postRollbackObservation":"observation-unavailable","closeResult":"threw","reopenObservation":"unavailable-unresolved","stateAfterRollback":"rollback-in-doubt","apiOutcome":"unresolved"}
+  ],
+  "reopenOutcomeFutureTargets": [
+    {"preReopenOutcome":"commit-returned","coveredCommitIntrinsicObservations":["not-applicable"],"sourceV1ApiOutcome":"corruption","completeV2ApiOutcome":"success","intermediateApiOutcome":"corruption","unavailableApiOutcome":"unresolved"},
+    {"preReopenOutcome":"rollback-completed","coveredCommitIntrinsicObservations":["not-applicable"],"sourceV1ApiOutcome":"original-primary-failure","completeV2ApiOutcome":"corruption","intermediateApiOutcome":"corruption","unavailableApiOutcome":"unresolved"},
+    {"preReopenOutcome":"commit-in-doubt","coveredCommitIntrinsicObservations":["verified-autocommit","different-generation-active","observation-unavailable"],"sourceV1ApiOutcome":"commit-failed","completeV2ApiOutcome":"recovered-success","intermediateApiOutcome":"corruption","unavailableApiOutcome":"unresolved"}
+  ],
+  "futureTargetCases": [
+    {"caseId":"contract-redbar","runtimeExecuted":false,"oracle":{"phase":"contract","authority":"none","nativeResult":"not-attempted","trustedIntrinsicObservation":"not-applicable","reopenObservation":"not-attempted"},"expected":{"selectedOwner":"unclaimed","ioCounts":[0,0,0,0,0],"ownershipCounts":[0,0,0,0,0],"terminalClassification":"contract-redbar","apiOutcome":"not-executed"}},
+    {"caseId":"begin-returned-active","runtimeExecuted":false,"oracle":{"phase":"begin","authority":"exact-transaction-owner","nativeResult":"returned","trustedIntrinsicObservation":"same-exact-exclusive-generation-active","reopenObservation":"not-attempted"},"expected":{"selectedOwner":"transaction-owner-active","ioCounts":[1,0,0,0,0],"ownershipCounts":[0,0,0,0,0],"terminalClassification":"active","apiOutcome":"active"}},
+    {"caseId":"begin-threw-same-generation-active","runtimeExecuted":false,"oracle":{"phase":"begin","authority":"exact-transaction-owner","nativeResult":"threw","trustedIntrinsicObservation":"same-exact-exclusive-generation-active","reopenObservation":"source-v1"},"expected":{"selectedOwner":"begin-failure-cleanup-owned","ioCounts":[1,0,1,1,1],"ownershipCounts":[0,0,0,1,0],"terminalClassification":"source-v1","apiOutcome":"begin-failed"}},
+    {"caseId":"begin-threw-autocommit","runtimeExecuted":false,"oracle":{"phase":"begin","authority":"exact-transaction-owner","nativeResult":"threw","trustedIntrinsicObservation":"verified-autocommit","reopenObservation":"source-v1"},"expected":{"selectedOwner":"begin-in-doubt","ioCounts":[1,0,0,1,1],"ownershipCounts":[0,0,0,0,0],"terminalClassification":"source-v1","apiOutcome":"begin-failed"}},
+    {"caseId":"begin-threw-observation-unavailable","runtimeExecuted":false,"oracle":{"phase":"begin","authority":"exact-transaction-owner","nativeResult":"threw","trustedIntrinsicObservation":"observation-unavailable","reopenObservation":"unavailable-unresolved"},"expected":{"selectedOwner":"begin-in-doubt","ioCounts":[1,0,0,1,1],"ownershipCounts":[0,0,0,0,0],"terminalClassification":"unavailable-unresolved","apiOutcome":"unresolved"}},
+    {"caseId":"terminal-primary-selects-failure-claim","runtimeExecuted":false,"oracle":{"phase":"active-failure","authority":"exact-authenticated-terminal-primary","nativeResult":"not-attempted","trustedIntrinsicObservation":"same-exact-exclusive-generation-active","reopenObservation":"source-v1"},"expected":{"selectedOwner":"failure-claimed","ioCounts":[1,0,1,1,1],"ownershipCounts":[1,0,0,0,0],"terminalClassification":"source-v1","apiOutcome":"failure"}},
+    {"caseId":"commit-returned-reopen-v2","runtimeExecuted":false,"oracle":{"phase":"commit","authority":"exact-final-commit-fence","nativeResult":"returned","trustedIntrinsicObservation":"verified-autocommit","reopenObservation":"complete-v2"},"expected":{"selectedOwner":"success-claimed","ioCounts":[1,1,0,1,1],"ownershipCounts":[0,1,1,0,0],"terminalClassification":"complete-v2","apiOutcome":"success"}},
+    {"caseId":"commit-threw-same-generation-active-rollback-v1","runtimeExecuted":false,"oracle":{"phase":"commit","authority":"exact-final-commit-fence","nativeResult":"threw","trustedIntrinsicObservation":"same-exact-exclusive-generation-active","reopenObservation":"source-v1"},"expected":{"selectedOwner":"success-claimed-internal-cleanup","ioCounts":[1,1,1,1,1],"ownershipCounts":[0,1,1,0,1],"terminalClassification":"source-v1","apiOutcome":"failure"}},
+    {"caseId":"commit-threw-autocommit-reopen-v1","runtimeExecuted":false,"oracle":{"phase":"commit","authority":"exact-final-commit-fence","nativeResult":"threw","trustedIntrinsicObservation":"verified-autocommit","reopenObservation":"source-v1"},"expected":{"selectedOwner":"success-claimed-commit-in-doubt","ioCounts":[1,1,0,1,1],"ownershipCounts":[0,1,1,0,0],"terminalClassification":"source-v1","apiOutcome":"failure"}},
+    {"caseId":"commit-threw-autocommit-reopen-v2","runtimeExecuted":false,"oracle":{"phase":"commit","authority":"exact-final-commit-fence","nativeResult":"threw","trustedIntrinsicObservation":"verified-autocommit","reopenObservation":"complete-v2"},"expected":{"selectedOwner":"success-claimed-commit-in-doubt","ioCounts":[1,1,0,1,1],"ownershipCounts":[0,1,1,0,0],"terminalClassification":"complete-v2","apiOutcome":"recovered-success"}},
+    {"caseId":"commit-threw-different-generation-reopen-intermediate","runtimeExecuted":false,"oracle":{"phase":"commit","authority":"exact-final-commit-fence","nativeResult":"threw","trustedIntrinsicObservation":"different-generation-active","reopenObservation":"intermediate-corrupt"},"expected":{"selectedOwner":"success-claimed-commit-in-doubt","ioCounts":[1,1,0,1,1],"ownershipCounts":[0,1,1,0,0],"terminalClassification":"intermediate-corrupt","apiOutcome":"corruption"}},
+    {"caseId":"commit-threw-observation-unavailable-reopen-unavailable","runtimeExecuted":false,"oracle":{"phase":"commit","authority":"exact-final-commit-fence","nativeResult":"threw","trustedIntrinsicObservation":"observation-unavailable","reopenObservation":"unavailable-unresolved"},"expected":{"selectedOwner":"success-claimed-commit-in-doubt","ioCounts":[1,1,0,1,1],"ownershipCounts":[0,1,1,0,0],"terminalClassification":"unavailable-unresolved","apiOutcome":"unresolved"}},
+    {"caseId":"commit-threw-autocommit-reopen-intermediate","runtimeExecuted":false,"oracle":{"phase":"commit","authority":"exact-final-commit-fence","nativeResult":"threw","trustedIntrinsicObservation":"verified-autocommit","reopenObservation":"intermediate-corrupt"},"expected":{"selectedOwner":"success-claimed-commit-in-doubt","ioCounts":[1,1,0,1,1],"ownershipCounts":[0,1,1,0,0],"terminalClassification":"intermediate-corrupt","apiOutcome":"corruption"}}
+  ],
+  "nonclaims": [
+    "runtime-owner-implementation", "runtime-begin-execution", "runtime-commit-execution",
+    "runtime-rollback-integration", "rule-12-success-receipt", "third-clock-authorization",
+    "cursor-clock-complete", "post-cursor-adoption", "temp-stage-retirement",
+    "pre-commit-clock-authorization", "final-commit-fence-implementation",
+    "driver-native-begin-or-commit-throw", "commit-crash-reopen-proof",
+    "package-root-public-export", "active-manifest-release"
+  ],
+  "fixtureDigestContract": {
+    "domainUtf8": "graph-engineering/sqlite-cursor-publication-transaction-owner-v1-fixture/v1\u0000",
+    "algorithm": "sha256-domain-utf8-plus-canonical-json-utf8",
+    "canonicalJsonProfile": "graph-engineering/canonical-json/v1alpha1-unicode-code-point-key-order",
+    "preimage": "entire-fixture-with-fixtureCanonicalSha256-replaced-by-64-lowercase-zeroes",
+    "selfFieldReplacement": "0000000000000000000000000000000000000000000000000000000000000000",
+    "digestHexEncoding": "lowercase-hex"
+  },
+  "fixtureCanonicalSha256": "e900c0d822a31690c6cd4ef8d160d1cc4474bf4c605471d1aac899d4b293b303"
+}

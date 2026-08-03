@@ -21514,3 +21514,202 @@ Graph Engineering计划完成：
 7. 下一bounded objective应优先success transaction owner contract：定义BEGIN owner、success COMMIT authority、
    failure rollback owner互斥，之后再进入Rule12/final fence；
 8. 开源受欢迎程度与5K/6K star是产品/社区目标，不是本轮代码可保证的测试后置条件。
+
+#### 31.37.76 Wave 1E/P8：SQLite publication transaction owner contract/redbar冻结（2026-08-02 PDT追加；既有内容不改）
+
+本节严格追加于既有21,516行之后。追加前完整计划SHA-256为
+`016dcdbe152a126070c4f37199296df58650d6df570b849e45a7d1df638a4965`；前21,516行必须保持
+byte-for-byte不变。本节执行31.37.75.9第7项，仅关闭success transaction owner的机器可执行契约与
+redbar，不宣称TS/Python runtime已执行BEGIN、COMMIT、rollback、close或reopen。
+
+##### 31.37.76.1 bounded objective、并行审计与证据边界
+
+P8采用主Agent集成加三条独立只读lane：计划/真实性审计、TypeScript/SQLite安全语义审计、
+Python/identity/GC/validator审计。第一轮终审主动REJECT了测试全绿但oracle不完整的版本，阻止将以下缺口
+冻结进协议：BEGIN returned异常postflight缺失、rollback throw无合法状态出口、BEGIN throw无法认证同一
+generation、success tombstone计数与状态不一致、epoch比较基线模糊、持久PRAGMA/拓扑写绕过、reopen矩阵
+不完整。主Agent修复后重新运行全部门禁与三路复审；最终三路均为H0/M0/L0、ACCEPT。
+
+接受范围严格是`contract-frozen-redbar`：
+
+1. `implementationClaim=false`；
+2. `protocolClaim=false`；
+3. `releaseGate=false`；
+4. `runtimeExecutedCaseCount=0`；
+5. `contractRuntimeTransactionControlCount=0`；
+6. driver-native BEGIN/COMMIT throw、crash/reopen、public API继续为false；
+7. 32个future scenarios是normative oracle，不是runtime execution evidence；
+8. star 5K/6K继续是产品与社区目标，不能由本契约或测试保证。
+
+##### 31.37.76.2 staged transaction owner与pre-I/O provisional generation
+
+owner binding不能在对象尚不存在时伪造一次性全图key，因此冻结为单向三阶段：
+
+1. BEGIN I/O前注册exact connection-owner wrapper与transaction owner；
+2. 注册阶段mint weakref-capable opaque provisional generation，绑定exact owner、exact connection与单次
+   BEGIN attempt nonce；
+3. native BEGIN返回后，只有postflight证明同一exact exclusive transaction active，才promotion同一
+   provisional object并mint begin receipt；
+4. BEGIN throw或任何returned postflight mismatch都在cleanup前tombstone provisional generation；
+5. promotion前mint begin receipt永久禁止；
+6. begin receipt冻结owner、connection、lineage、generation、exclusive mode、transaction epoch、
+   `total_changes`、TEMP mutation epoch与attempt=1；
+7. outer authority随后通过exact begin receipt/lineage/generation做one-way adoption，不允许回退或替换。
+
+这解决Python当前generation只在execute成功后创建、raw `sqlite3.Connection`与普通`object()`不能weakref的
+现实差异：registry中的connection是weakref-capable owner wrapper，generation是专用opaque bearer，绝不要求
+weakref raw driver handle或将整数ID当authority。
+
+##### 31.37.76.3 BEGIN returned/throw完整fail-closed partition
+
+BEGIN attempt最大1且禁止retry。caller不得提供Boolean、callback、thunk、connection、path或outcome。
+definition-time captured connection intrinsic冻结以下分区：
+
+1. returned + exact same exclusive generation active：promotion、begin receipt、进入active；
+2. returned + verified autocommit：stable postflight primary、rollback=0、close=1、reopen source-v1；
+3. returned + different generation active：不得rollback未知transaction，close/reopen，intermediate判corrupt；
+4. returned + observation unavailable：不得猜测或rollback，close/reopen，unavailable判unresolved；
+5. threw + exact provisional generation active：保留BEGIN primary，tombstone authority，rollback一次、close一次、
+   reopen必须source-v1；
+6. threw + verified autocommit：rollback=0、close=1、reopen必须source-v1；
+7. threw + observation unavailable：rollback=0、close/reopen，无法审计则unresolved。
+
+所有presentation/authority/registration failure都发生在native I/O前；throw或mismatch不会留下unpresented
+live authority、partial registry residue或可重放begin capability。
+
+##### 31.37.76.4 direct presentation、30-stage transitive chain与final-fence唯一性
+
+success COMMIT direct presentation严格只有transaction owner与exact final commit fence两个对象。Rule11、raw
+seal、Rule12、pre-verification clock、cursor-clock capability、retirement receipt、pre-commit clock或Boolean
+全部明确拒绝为direct authority。final fence传递认证其祖先，不要求caller重呈每个祖先形成第二授权路径。
+
+完整atomic publication order冻结30阶段：source-v1 semantic validity、owner registration、BEGIN、B2、outer
+clock/authority、migration 0002、post-DDL adoption、baseline entry/header、operation sequence、pre-rebind clock、
+session/rebind、Rule11、Rule12、pre-verification clock、cursor-clock complete、lineage/metadata、rules、fresh-v2、
+physical/semantic audit、pre-retirement fence、TEMP retirement、pre-commit clock、final migration-lock transaction
+fence、internal success selection、single atomic COMMIT。internal success selection不mint新capability。
+
+validation发生在destructive fence consumption前，fence consumption发生在native COMMIT I/O前。pre-retirement
+后owned TEMP residue必须为0，且所有永久状态或proof-history mutation都被connection guard拦截。
+
+##### 31.37.76.5 monotonic arbiter、success tombstone与commit-primary cleanup
+
+arbiter只有`unclaimed -> failure-claimed | success-claimed`，任意时刻最多一个live outcome claim。failure claim
+阻断success；success claim阻断既有post-consume failure owner。COMMIT exact-active throw不做历史
+success→failure crossover，而是保留在success claim内部：
+
+`success-claimed -> committing -> commit-failed-same-generation-active -> success-authority-tombstoned ->`
+`internal-commit-failure-cleanup-owner -> rolling-back`。
+
+commit returned与commit-in-doubt同样先经过`success-authority-tombstoned`再close/reopen，因此future ownership
+counter第三位与真实lifecycle一致。五位I/O向量顺序固定BEGIN/COMMIT/rollback/close/reopen；五位ownership
+向量固定failure claim/success claim/success tombstone/begin cleanup claim/commit cleanup claim。
+
+##### 31.37.76.6 COMMIT intrinsic partition与epoch baseline
+
+COMMIT最多attempt一次、永久禁止retry。rollback只在六项proof同时成立时授权：exact owned connection live、
+native in-transaction=true、exact lineage仍selected、generation commitment unchanged、transaction epoch unchanged、
+exclusive mode still selected。epoch的“unchanged”以exact pre-COMMIT-attempt snapshot为baseline，只允许owner记录
+唯一commit-attempt accounting transition，任何额外epoch movement都拒绝rollback。
+
+四个分区：
+
+1. COMMIT returned：rollback=0，close/reopen必须证明complete-v2；
+2. COMMIT threw + same exact generation active：tombstone success，internal cleanup rollback=1，reopen必须source-v1；
+3. COMMIT threw + verified autocommit：commit-in-doubt，rollback=0，reopen单值分类v1或v2；
+4. COMMIT threw + different generation active或observation unavailable：commit-in-doubt，rollback=0，
+   close/reopen或unresolved。
+
+autocommit永远不能单独证明complete-v2；reopen输出不能使用`source-v1-or-complete-v2`伪单值。
+
+##### 31.37.76.7 rollback/close ambiguity与diagnostic precedence
+
+状态机新增`rollback-failed`与`rollback-in-doubt`。只有native rollback returned可进入`rolled-back`；throw永远
+不能伪称rolled-back。rollback throw仍必须close一次并reopen。cleanup future matrix冻结：
+
+1. returned → `rollbackThrowTiming=not-applicable`；
+2. threw+autocommit → `after-native-return`；
+3. threw+exact-active → `before-native-return`；
+4. threw+observation unavailable → `outcome-unavailable`。
+
+这些是future targets，不激活driver-native throw claim。rollback/close都不retry。原生BEGIN/COMMIT primary
+始终保留为primary diagnostic，rollback为secondary、close为tertiary、reopen audit随后；corruption可主导API
+outcome但必须保留原primary diagnostic，cleanup fault不得覆盖它。
+
+##### 31.37.76.8 reopen capability、单值分类与完整矩阵
+
+reopen只能使用definition-time captured opaque database capability；commit后caller不得替换path或callback，
+`:memory:`不能进入production recoverable owner。分类证据同时要求exact reopen identity、application ID与
+user_version、physical catalog digest、schema/descriptor/lineage metadata、baseline count/root、cursor
+count/root/targets、operation-sequence与legacy replay commitments、migration-lock terminal state、
+`integrity_check=ok`与empty `foreign_key_check`。
+
+矩阵冻结commit-returned、rollback-completed、commit-in-doubt三种pre-reopen outcome乘以source-v1、complete-v2、
+intermediate、unavailable四分类。commit-in-doubt行共同覆盖verified-autocommit、different-generation-active、
+observation-unavailable：v1=commit failed，v2=recovered success，intermediate=corruption，unavailable=unresolved。
+commit returned只有v2是success；rollback completed只有v1保留original-primary failure。
+
+##### 31.37.76.9 terminal guard与所有持久写绕过
+
+19类guard覆盖connection commit/rollback、SQL COMMIT/END/ROLLBACK/BEGIN、SAVEPOINT/RELEASE/ROLLBACK TO、
+multi-statement、prepared、script、nested BEGIN、live close、新旧prepared permanent DML/DDL，以及persistent
+PRAGMA（含user_version/application_id）、VACUUM、ANALYZE、REINDEX、ATTACH/DETACH和connection topology。
+最后一条catch-all冻结任何其他permanent-state mutation或transaction-proof-history change，因此列表不是
+可绕过的SQL白名单。
+
+##### 31.37.76.10 strict validator、trusted roots与CI
+
+新增closed Draft 2020-12 schema、strict JSON parser、semantic validator、malicious tests与human specification。
+strict parser拒绝duplicate keys、trailing data、`__proto__`与`constructor`。Schema-only acceptance明确不是
+trusted acceptance；必须组合schema、semantic validator与domain-separated trusted root。
+
+fixture digest domain为
+`graph-engineering/sqlite-cursor-publication-transaction-owner-v1-fixture/v1\0`，canonical key order按Unicode
+code point。最终trusted digest为
+`e900c0d822a31690c6cd4ef8d160d1cc4474bf4c605471d1aac899d4b293b303`；fixture field、computed digest与validator
+embedded trusted root必须三方一致。canonical validator默认`verifyAnchors=true`，真实运行rebind-v2与
+post-consume finalizer validator并核对两个独立trusted roots。
+
+20个Node对抗测试覆盖claims inflation、anchor drift、transaction/write bypass、BEGIN provisional receipt、
+direct/transitive identity、30-stage reorder、lower authority injection、arbiter crossover、lifecycle shortcut、
+same-generation proof、reopen evidence、diagnostic precedence、future counter、BEGIN returned mismatch、rollback
+throw states/timing、完整reopen matrix、同步恶意重签、trusted root、unknown fields与strict JSON。
+
+`test:sqlite-transaction-owner-contract`已接入`.github/workflows/ci.yml`，并以`--no-warnings`运行测试与canonical
+validator。最终门禁：20/20测试、validator、89 JSON fixture总检查、478 Markdown links与diff-check全部通过。
+
+##### 31.37.76.11 冻结文件身份与审计日志
+
+集成前冻结字节mode均为0644，SHA-256：
+
+- CI workflow：`0aabb5ee18ce821c59de0521617d145187835bfe5806b2b0c05ff848c7c80d08`；
+- root package：`24873237d926499f512caf4785d8388f7d2a414a3b960178016ef52292993c9f`；
+- spec index：`14106e2f434b733535ea6ae4dbcd7be8d83d51fd8e27edddedc046bbae1add99`；
+- fixture：`3b4fe85133857e12e5c2202724ff8e7abc3c3e56dc40694eb9aebd0911aeabb5`；
+- schema：`7b15a8b69889dd2adcb93eff8d4807677f2c284ae9436df8091bc2c1c006b30c`；
+- validator：`b6d59728188c919b3d62dfec8dfe848a1df6d876e5fb15c3e50bcd28d423c99c`；
+- tests：`a992033cde8b9d296b6247cc05c21b63b145fcb5c4f699a157c6b97f7aafbee1`；
+- human spec：`20abcb41a3ebb8c72da7c5f322921dbd110a9175bac4fa02f2b592683c404d2a`。
+
+注意：上述hash是throw-timing最终微调前的中间记录，真正commit前必须在审计日志中写入最终文件hash，
+并以最终hash为准；计划记录不回写旧行。完整rejected-first-audit、修复、命令与最终证据保存于
+`codex_logs/reviews/SQLITE-PUBLICATION-TRANSACTION-OWNER-CONTRACT-WAVE1E-P8-2026-08-02.md`。
+
+##### 31.37.76.12 Remaining strict nonclaims与下一实现顺序
+
+P8只完成契约与redbar。仍未完成：
+
+1. TS/Python runtime transaction owner registration、connection terminal guard与guarded BEGIN；
+2. runtime provisional generation、begin receipt与failure cleanup；
+3. portable owner parity；
+4. Rule12 upper receipt与main-table seal acceptance；
+5. third/pre-verification clock与cursor-clock-complete；
+6. lineage/metadata/rules/fresh-v2/physical-semantic receipts；
+7. pre-retirement adoption、exact cursor TEMP retirement；
+8. fourth/pre-commit clock与final migration-lock transaction fence；
+9. runtime COMMIT、commit ambiguity、rollback/close native faults与reopen classifier；
+10. atomic orchestrator、crash/process interop、public export、manifest activation与release acceptance。
+
+下一bounded objective固定为P9：先实现TypeScript与Python的package-private owner registration、19类connection
+terminal/mutation guard、pre-I/O provisional generation和guarded BEGIN/failure cleanup；COMMIT路径必须继续
+hard-disabled。P9双runtime与parity闭环后，才能进入Rule12/third clock，不能跳过完整30-stage前驱直接执行COMMIT。
