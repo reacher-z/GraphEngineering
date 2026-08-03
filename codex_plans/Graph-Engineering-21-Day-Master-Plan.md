@@ -23273,3 +23273,12 @@ SHA-256固定为
     `genuineZeroClaim=false`、`actualNativeIoCount=0`、`sqlAuthority=false`。
 12. RM1不完成P11-A，不启动NP1 authority，不完成P11-B/C/D，不授权stage18/COMMIT，
     不完成D9，不增加release weight，也不证明RC/stable、外部adoption或stars。
+
+#### 31.37.97 RM1不可变提交绑定（2026-08-03 PDT追加；既有内容不改）
+
+追加前23,275行计划SHA-256为
+`86dc338446b5a635c4575b908b8302301cef12a70d24787d69657e2fb15e9e07`。
+RM1已提交并推送为`1e774b41cec1a2d1b18109c4078a13ea69715c93`，共11文件、
+11,609 insertions、1 deletion；作者/提交者为`reacher-z <mtrxcop@gmail.com>`，
+无co-author，local/tracking/remote一致。该绑定只接受65-callsite scoped inventory，
+P11继续in_progress，release继续audit-only 0/93；下一批严格进入31.37.95定义的NP1。

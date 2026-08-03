@@ -283,3 +283,12 @@ predecessors remain Open.
 - P11 stays In Progress with no completed-test evidence or release weight.
   Native projection ownership, runtime-real fixed-read retirement, exact route
   contracts, and P11-B/C/D remain Open. Evidence closure stays audit-only 0/93.
+
+## 2026-08-03 PDT P11-A-RM1 immutable acceptance
+
+- Commit `1e774b41cec1a2d1b18109c4078a13ea69715c93` freezes the
+  non-authorizing 65-callsite baseline-source map with H0/M0/L0 review.
+- It advances only inventory evidence inside P11. All route/native projection
+  authority remains false; P11 stays In Progress and release remains 0/93.
+- The next bounded work is NP1 native projection ownership and runtime-real
+  retirement; P11-B/C/D and COMMIT remain Open.

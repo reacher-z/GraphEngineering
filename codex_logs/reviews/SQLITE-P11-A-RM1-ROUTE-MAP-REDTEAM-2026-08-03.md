@@ -122,3 +122,13 @@ The master plan remains append-only: its first 23,225 lines retain SHA-256
 `bc46ef2b6028b140a9531fec76b4d1f2268defce73a1faab3a9093fd721dc0bf`.
 Section 31.37.96 extends it to 23,275 lines with SHA-256
 `86dc338446b5a635c4575b908b8302301cef12a70d24787d69657e2fb15e9e07`.
+
+## Immutable implementation binding
+
+The accepted RM1 implementation is commit
+`1e774b41cec1a2d1b18109c4078a13ea69715c93`: 11 files, 11,609 insertions,
+1 deletion. Author and committer are `reacher-z <mtrxcop@gmail.com>`, no
+co-author is present, and local/tracking/remote refs were verified identical.
+The append-only plan binding extends the 23,275-line prefix to 23,284 lines;
+the resulting SHA-256 is
+`6ed704a3deb52fbe8426d15596f0372b8aff65cf64e9b196a93eb66ab15bf2a3`.

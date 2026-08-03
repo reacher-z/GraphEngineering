@@ -572,3 +572,8 @@ callsite triage, but creates no dependency edge and completes no release
 ancestor. Next progress must connect a lower-owned native projection reader to
 explicitly mapped native routes and prove runtime-real read retirement without
 widening P9/P10 authority.
+
+RM1 commit `1e774b41cec1a2d1b18109c4078a13ea69715c93` remains inside the
+existing P11 node. Its 65-callsite map adds no dependency edge or release
+ancestor; NP1 must prove native projection ownership and real retirement before
+P11-A can advance.
