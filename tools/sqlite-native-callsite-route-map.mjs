@@ -18,12 +18,12 @@ import { fileURLToPath } from "node:url";
 import { compareUnicodeCodePoints } from "./sqlite-native-callsite-discovery.mjs";
 
 const SHA256 = /^[0-9a-f]{64}$/u;
-const MANIFEST_RAW_SHA256 = "16d7514e1fa9995c64c55132844b295c671af8fdc611df8c247261c2d61bf8c7";
-const MANIFEST_CANONICAL_SHA256 = "85e05220c392c31af0d3a947185250c59913f05bd22fb1c0332310c0137a4364";
+const MANIFEST_RAW_SHA256 = "6c3567d141e43c39246ef2dc4531118c460300290db2dd2a5658b24186d34aa7";
+const MANIFEST_CANONICAL_SHA256 = "95a40c0b5a97f3ce1d015f2574e4f29d3ce2bdf1543204b89714df4f9cc2316a";
 const TYPESCRIPT_SOURCE = "packages/sqlite/src/operation-baseline-source.ts";
 const PYTHON_SOURCE = "python/src/graph_engineering/sqlite_operation_baseline_source.py";
-const EXPECTED_COUNTS = Object.freeze({ python: 47, typescript: 18 });
-const EXPECTED_TOTAL = 65;
+const EXPECTED_COUNTS = Object.freeze({ python: 50, typescript: 20 });
+const EXPECTED_TOTAL = 70;
 const RECEIVER_CATEGORIES = new Set([
   "confirmed-native-receiver",
   "wrapper-guard-or-test-like-production-probe",
@@ -198,7 +198,7 @@ function validateScannerReport(scannerReport) {
   const policy = object(report.policy, "scanner report.policy");
   requiredBoolean(policy, "routeClosureClaimed", false, "scanner report.policy");
   const callsites = array(report.callsites, "scanner report.callsites");
-  if (callsites.length !== 457) fail("scanner report must retain all 457 global candidates");
+  if (callsites.length !== 485) fail("scanner report must retain all 485 global candidates");
 
   const stableIds = new Set();
   const normalized = [];
@@ -268,8 +268,8 @@ function validateClassifierReport(classifierReport, scannerCandidates) {
 
   const raw = array(report.candidates, "Python classifier report.candidates");
   const expected = pythonOccurrenceCandidates(scannerCandidates);
-  if (raw.length !== expected.length || raw.length !== 251) {
-    fail("Python classifier must retain all 251 scanner candidates");
+  if (raw.length !== expected.length || raw.length !== 254) {
+    fail("Python classifier must retain all 254 scanner candidates");
   }
   const expectedById = new Map(expected.map((candidate) => [candidate.candidateSha256, candidate]));
   const result = new Map();
@@ -797,26 +797,26 @@ function validateManifestPreamble(manifest, sourceRoot) {
   requiredBoolean(scope, "nativeProjectionAuthority", false, "manifest.scope");
   requiredBoolean(scope, "runtimeRouteAuthority", false, "manifest.scope");
   requiredBoolean(scope, "unknownCandidatesDropped", false, "manifest.scope");
-  if (scope.scopedCallsiteCount !== EXPECTED_TOTAL || scope.globalScannerCallsiteCount !== 457) {
+  if (scope.scopedCallsiteCount !== EXPECTED_TOTAL || scope.globalScannerCallsiteCount !== 485) {
     fail("manifest.scope candidate counts are invalid");
   }
   const sourceFiles = array(scope.sourceFiles, "manifest.scope.sourceFiles");
   const expectedSources = [
     {
-      expectedCallsiteCount: 18,
+      expectedCallsiteCount: 20,
       language: "typescript",
       path: TYPESCRIPT_SOURCE,
       sourceBlobSha256: sha256(fs.readFileSync(path.join(sourceRoot, TYPESCRIPT_SOURCE))),
     },
     {
-      expectedCallsiteCount: 47,
+      expectedCallsiteCount: 50,
       language: "python",
       path: PYTHON_SOURCE,
       sourceBlobSha256: sha256(fs.readFileSync(path.join(sourceRoot, PYTHON_SOURCE))),
     },
   ];
   if (stableJson(sourceFiles) !== stableJson(expectedSources)) {
-    fail("manifest.scope.sourceFiles must be the exact ordered 18+47 source scope");
+    fail("manifest.scope.sourceFiles must be the exact ordered 20+50 source scope");
   }
 
   const policy = object(manifest.classificationPolicy, "manifest.classificationPolicy");
@@ -870,7 +870,19 @@ function validateContextualFields(entry, candidate, label) {
     fail(`${label} cannot hint a non-unknown disposition for an unknown operation`);
   }
   if (candidate.scanner.language === "typescript") {
-    if (callFamilyId !== `ts:baseline-source:${candidate.identity.line}`) {
+    const helperFamilies = new Map([
+      [528, "ts:baseline-source:native:exactlyOne"],
+      [531, "ts:baseline-source:native:exactlyOne"],
+      [547, "ts:baseline-source:native:exactlyOne"],
+      [591, "ts:baseline-source:native:exactlyOne"],
+      [658, "ts:baseline-source:native:transactionRows"],
+      [661, "ts:baseline-source:native:transactionRows"],
+      [682, "ts:baseline-source:native:transactionRows"],
+      [743, "ts:baseline-source:native:transactionRows"],
+    ]);
+    const expectedFamily = helperFamilies.get(candidate.identity.line)
+      ?? `ts:baseline-source:${candidate.identity.line}`;
+    if (callFamilyId !== expectedFamily) {
       fail(`${label}.callFamilyId does not bind its TypeScript source expression`);
     }
     if (apiStage !== candidate.identity.method) {
@@ -1173,7 +1185,7 @@ export function buildSQLiteNativeCallsiteRouteMap(
   const python = validateClassifierReport(classifierReport, scannerCandidates);
   const typescript = typescriptCandidates(scannerCandidates);
   const allCandidates = new Map([...typescript, ...python]);
-  if (allCandidates.size !== 457) fail("cross-language candidate identities are not globally unique");
+  if (allCandidates.size !== 485) fail("cross-language candidate identities are not globally unique");
 
   const expected = [...allCandidates.values()]
     .filter(({ identity }) => identity.path === TYPESCRIPT_SOURCE || identity.path === PYTHON_SOURCE)
@@ -1184,13 +1196,13 @@ export function buildSQLiteNativeCallsiteRouteMap(
   ]));
   if (expected.length !== EXPECTED_TOTAL
       || stableJson(expectedLanguageCounts) !== stableJson(EXPECTED_COUNTS)) {
-    fail("scanner/classifier source scope is not exactly 18 TypeScript plus 47 Python candidates");
+    fail("scanner/classifier source scope is not exactly 20 TypeScript plus 50 Python candidates");
   }
 
   const manifest = object(manifestValue, "manifest");
   validateManifestPreamble(manifest, sourceRoot);
   const rawCallsites = array(manifest.callsites, "manifest.callsites");
-  if (rawCallsites.length !== expected.length) fail("manifest must contain exactly 65 callsites");
+  if (rawCallsites.length !== expected.length) fail("manifest must contain exactly 70 callsites");
   const seen = new Set();
   const callsites = rawCallsites.map((entryValue, index) => {
     const raw = object(entryValue, `manifest.callsites[${index}]`);

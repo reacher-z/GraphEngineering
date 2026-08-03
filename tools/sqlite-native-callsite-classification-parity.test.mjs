@@ -131,17 +131,17 @@ test("Python classifier is a deterministic one-to-one partition of scanner candi
   assert.equal(classifierFirstProcess.stdout, classifierSecondProcess.stdout);
   assert.deepEqual(classifierSecond, classifierFirst);
 
-  assert.equal(scannerFirst.callsites.length, 457);
-  assert.equal(scannerFirst.summary.callsiteCount, 457);
+  assert.equal(scannerFirst.callsites.length, 485);
+  assert.equal(scannerFirst.summary.callsiteCount, 485);
   const scannerIdentities = scannerFirst.callsites.map(stableIdentityKey);
-  assert.equal(new Set(scannerIdentities).size, 457, "scanner stable identities must be unique");
+  assert.equal(new Set(scannerIdentities).size, 485, "scanner stable identities must be unique");
   const scannerLanguageCounts = Object.fromEntries(
     ["python", "typescript"].map((language) => [
       language,
       scannerFirst.callsites.filter((callsite) => callsite.language === language).length,
     ]),
   );
-  assert.deepEqual(scannerLanguageCounts, { python: 251, typescript: 206 });
+  assert.deepEqual(scannerLanguageCounts, { python: 254, typescript: 231 });
   assert.deepEqual(scannerFirst.summary.byLanguage, scannerLanguageCounts);
   assert.equal(scannerFirst.inputs.pythonFiles.length > 0, true);
   assert.equal(scannerFirst.inputs.typescriptFiles.length > 0, true);
@@ -149,32 +149,32 @@ test("Python classifier is a deterministic one-to-one partition of scanner candi
 
   const expectedPythonIdentities = scannerPythonIdentities(scannerFirst.callsites);
   const actualPythonIdentities = classifierFirst.candidates.map(({ identity }) => identity);
-  assert.equal(expectedPythonIdentities.length, 251);
-  assert.equal(actualPythonIdentities.length, 251);
+  assert.equal(expectedPythonIdentities.length, 254);
+  assert.equal(actualPythonIdentities.length, 254);
   assert.deepEqual(actualPythonIdentities, expectedPythonIdentities);
   assert.equal(
     new Set(actualPythonIdentities.map(stableJson)).size,
-    251,
+    254,
     "classifier identity plus duplicate occurrence must be unique",
   );
 
   const candidateIds = classifierFirst.candidates.map(({ candidateId }) => candidateId);
   assert.equal(candidateIds.every((candidateId) => SHA256.test(candidateId)), true);
-  assert.equal(new Set(candidateIds).size, 251, "candidate IDs must be unique");
+  assert.equal(new Set(candidateIds).size, 254, "candidate IDs must be unique");
   classifierFirst.candidates.forEach((candidate) => {
     assert.equal(candidate.candidateId, candidateIdFor(candidate.identity));
   });
 
   const reportedCounts = classifierFirst.summary.categoryCounts;
   assert.deepEqual(Object.keys(reportedCounts), CATEGORIES);
-  assert.equal(CATEGORIES.reduce((total, category) => total + reportedCounts[category], 0), 251);
+  assert.equal(CATEGORIES.reduce((total, category) => total + reportedCounts[category], 0), 254);
   const observedCounts = Object.fromEntries(CATEGORIES.map((category) => [
     category,
     classifierFirst.candidates.filter((candidate) => candidate.category === category).length,
   ]));
   assert.deepEqual(reportedCounts, observedCounts);
-  assert.equal(classifierFirst.summary.inputPythonCandidateCount, 251);
-  assert.equal(classifierFirst.summary.classifiedCandidateCount, 251);
+  assert.equal(classifierFirst.summary.inputPythonCandidateCount, 254);
+  assert.equal(classifierFirst.summary.classifiedCandidateCount, 254);
   assert.equal(classifierFirst.summary.unknownCount, reportedCounts.unknown);
 
   assert.deepEqual(classifierFirst.classificationPolicy, {

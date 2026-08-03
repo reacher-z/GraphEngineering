@@ -17,6 +17,14 @@ function hostileWorkspace() {
   fs.writeFileSync(path.join(root, "sample.ts"), `
     import { DatabaseSync as NativeDatabase } from "node:sqlite";
     import { SQLiteConnection as WrapperConnection } from "./sqlite-connection.js";
+    import {
+      prepareSQLiteConnectionIntrinsic as importedPrepare,
+      iterateSQLiteStatementNativeIntrinsic as importedIterate,
+      nextSQLiteStatementIteratorNativeIntrinsic as importedNext,
+      returnSQLiteStatementIteratorNativeIntrinsic as importedReturn,
+    } from "./sqlite-connection.js";
+    import type { prepareSQLiteConnectionIntrinsic as typePrepare } from "./sqlite-connection.js";
+    import { prepareSQLiteConnectionIntrinsic as fakePrepare } from "./fake/sqlite-connection.js";
     declare class Database { prepare(sql: string): any; exec(sql: string): void }
     declare const unknownSql: string;
     declare const table: string;
@@ -25,6 +33,62 @@ function hostileWorkspace() {
     const database = new NativeDatabase(":memory:");
     declare const wrapper: WrapperConnection;
     const exactSql = "SELECT 1";
+    const capturedPrepare = importedPrepare;
+    const capturedIterate = importedIterate;
+    const capturedNext = importedNext;
+    const capturedReturn = importedReturn;
+    const intrinsicStatement = capturedPrepare(wrapper, exactSql, "inspect-schema");
+    const intrinsicIterator = capturedIterate(intrinsicStatement);
+    capturedNext(intrinsicIterator);
+    capturedReturn(intrinsicIterator);
+    function sameNameButShadowed(importedPrepare) {
+      importedPrepare(wrapper, "SELECT hostile-shadow", "inspect-schema");
+    }
+    function sameNameLocal() {
+      const prepareSQLiteConnectionIntrinsic = unresolved;
+      prepareSQLiteConnectionIntrinsic(wrapper, "SELECT hostile-local", "inspect-schema");
+    }
+    let mutablePrepare = importedPrepare;
+    mutablePrepare = unresolved;
+    mutablePrepare(wrapper, "SELECT hostile-mutable", "inspect-schema");
+    {
+      const capturedPrepare = unresolved;
+      capturedPrepare(wrapper, "SELECT hostile-block", "inspect-schema");
+    }
+    capturedPrepare(wrapper, "SELECT outer-restored", "inspect-schema");
+    {
+      function capturedPrepare() { return unresolved(); }
+      capturedPrepare(wrapper, "SELECT hostile-function", "inspect-schema");
+    }
+    try { throw unresolved(); } catch (capturedPrepare) {
+      capturedPrepare(wrapper, "SELECT hostile-catch", "inspect-schema");
+    }
+    function varHoistShadow() {
+      capturedPrepare(wrapper, "SELECT hostile-var-hoist", "inspect-schema");
+      var capturedPrepare = unresolved;
+    }
+    function destructuringShadow(value) {
+      const { capturedPrepare } = value;
+      capturedPrepare(wrapper, "SELECT hostile-destructure", "inspect-schema");
+    }
+    for (const capturedPrepare of [unresolved]) {
+      capturedPrepare(wrapper, "SELECT hostile-for-of", "inspect-schema");
+    }
+    for (const capturedPrepare in { value: unresolved }) {
+      capturedPrepare(wrapper, "SELECT hostile-for-in", "inspect-schema");
+    }
+    for (let capturedPrepare = unresolved; false; capturedPrepare = unresolved) {
+      capturedPrepare(wrapper, "SELECT hostile-for", "inspect-schema");
+    }
+    switch (exactSql) {
+      case "never":
+        const capturedPrepare = unresolved;
+        capturedPrepare(wrapper, "SELECT hostile-switch", "inspect-schema");
+        break;
+    }
+    capturedPrepare(wrapper, "SELECT outer-after-loops", "inspect-schema");
+    typePrepare(wrapper, "SELECT hostile-type-import", "inspect-schema");
+    fakePrepare(wrapper, "SELECT hostile-fake-module", "inspect-schema");
     database.prepare(exactSql).get();
     const databaseAlias = database;
     databaseAlias.exec(\`INSERT INTO \${table} VALUES (1)\`);
@@ -96,6 +160,9 @@ def inspect(connection: sqlite3.Connection, table: str, unknown_sql: str) -> Non
     getattr(connection, table)("SELECT 6")
     mystery.execute("SELECT 1").run()
 `);
+  fs.writeFileSync(path.join(root, "sqlite-connection.ts"), "export {};\n");
+  fs.mkdirSync(path.join(root, "fake"));
+  fs.writeFileSync(path.join(root, "fake", "sqlite-connection.ts"), "export {};\n");
   fs.writeFileSync(path.join(root, "routes.json"), JSON.stringify({
     routes: [{ classification: "authenticated-fixed-read", id: "known.select-one", sqlSha256: digest("SELECT 1") }],
     routeClosureClaimedByThisArtifact: false,
@@ -111,9 +178,51 @@ test("scanner follows only evidence-backed TypeScript receiver aliases and keeps
   assert.equal(report.policy.dynamicOrUnresolvedSql, "unknown");
   assert.deepEqual(report.policy.typescriptReceiverEvidence, {
     aliasPropagation: "proven-only",
+    definitionTimeNativeHelperAliasPropagation: "exact-sqlite-connection-import-and-const-only",
     nameHintsIncreaseConfidence: false,
     unknownCandidatesDropped: false,
   });
+  for (const method of [
+    "iterateSQLiteStatementNativeIntrinsic",
+    "nextSQLiteStatementIteratorNativeIntrinsic",
+    "returnSQLiteStatementIteratorNativeIntrinsic",
+  ]) {
+    assert.equal(report.callsites.filter(({ method: observed }) => observed === method).length, 1);
+  }
+  assert.equal(report.callsites.filter(({ method }) =>
+    method === "prepareSQLiteConnectionIntrinsic").length, 3);
+  const nativePrepare = report.callsites.find(({ method }) =>
+    method === "prepareSQLiteConnectionIntrinsic");
+  assert.ok(nativePrepare);
+  assert.equal(nativePrepare.methodAlias, true);
+  assert.equal(nativePrepare.receiverFamily, "native");
+  assert.equal(nativePrepare.receiverConfidence, "proven");
+  assert.equal(nativePrepare.sqlOrigin, "native-helper-direct-argument");
+  assert.equal(nativePrepare.sqlEvidence.sha256, digest("SELECT 1"));
+  assert.ok(report.callsites.some(({ method, sqlEvidence }) =>
+    method === "prepareSQLiteConnectionIntrinsic"
+    && sqlEvidence.sha256 === digest("SELECT outer-restored")));
+  assert.ok(report.callsites.some(({ method, sqlEvidence }) =>
+    method === "prepareSQLiteConnectionIntrinsic"
+    && sqlEvidence.sha256 === digest("SELECT outer-after-loops")));
+  for (const sql of [
+    "SELECT hostile-shadow",
+    "SELECT hostile-local",
+    "SELECT hostile-mutable",
+    "SELECT hostile-block",
+    "SELECT hostile-function",
+    "SELECT hostile-catch",
+    "SELECT hostile-var-hoist",
+    "SELECT hostile-destructure",
+    "SELECT hostile-for-of",
+    "SELECT hostile-for-in",
+    "SELECT hostile-for",
+    "SELECT hostile-switch",
+    "SELECT hostile-type-import",
+    "SELECT hostile-fake-module",
+  ]) {
+    assert.equal(report.callsites.some(({ sqlEvidence }) => sqlEvidence.sha256 === digest(sql)), false);
+  }
   assert.ok(report.callsites.some(({ fixtureClassificationCandidate, fixtureMatches, receiverConfidence, receiverFamily, routeClassification, sqlEvidence, typescriptClassification }) =>
     receiverConfidence === "proven"
     && receiverFamily === "native"
@@ -240,6 +349,79 @@ test("scanner follows Python function-local SQL, connection/cursor aliases, f-st
   assert.equal(calls.some(({ line, method }) => method === "run" && line === unknownExactExecute.line), false);
   assert.ok(calls.some(({ method, routeClassification, sqlOrigin }) => method === "<computed>" && sqlOrigin === "computed-method" && routeClassification === "unknown"));
   assert.ok(calls.filter(({ unknown }) => unknown).length >= 4);
+});
+
+test("Python native-projection helpers require the exact private binder graph", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "ge-sqlite-native-helper-"));
+  t.after(() => fs.rmSync(root, { force: true, recursive: true }));
+  const production = fs.readFileSync(new URL(
+    "../python/src/graph_engineering/sqlite_operation_baseline_source.py",
+    import.meta.url,
+  ), "utf8");
+  const accepted = path.join(root, "accepted.py");
+  fs.writeFileSync(accepted, production);
+  const acceptedCalls = scanPythonFilesForTest([accepted], root)
+    .filter(({ method }) => ["owner_execute", "cursor_fetchmany", "cursor_close"].includes(method));
+  assert.deepEqual(acceptedCalls.map(({ method }) => method), [
+    "owner_execute",
+    "cursor_fetchmany",
+    "cursor_close",
+  ]);
+  assert.equal(acceptedCalls.every(({ receiverConfidence }) => receiverConfidence === "proven"), true);
+
+  const broken = path.join(root, "broken.py");
+  const installStatement = [
+    "_install_sqlite_cursor_publication_native_projection_producer_intrinsic(",
+    "    _bind_sqlite_v1_baseline_native_projection_producer(",
+    "        _produce_sqlite_v1_baseline_native_projection_receipt_implementation",
+    "    )",
+    ")",
+  ].join("\n");
+  assert.equal(production.includes(installStatement), true);
+  const nestedInstall = installStatement.split("\n").map((line) => `    ${line}`).join("\n");
+  const hostileBinders = [
+    production.replace(
+      "_NATIVE_PROJECTION_OWNER_EXECUTE = SQLiteV1BaselineConnectionOwner.execute",
+      "_NATIVE_PROJECTION_OWNER_EXECUTE = hostile_owner_execute",
+    ),
+    production.replace(
+      "            raise provenance_error_factory()\n        return implementation(",
+      "            raise provenance_error_factory()\n        return hostile(",
+    ),
+    production.replace(
+      "    identity_families = _NATIVE_PROJECTION_IDENTITY_FAMILIES",
+      "    implementation = hostile",
+    ),
+    production.replace("    return produce", "    return hostile"),
+    production.replace(
+      "            raise provenance_error_factory()\n        return implementation(",
+      "            raise provenance_error_factory()\n        owner_execute = hostile\n        return implementation(",
+    ),
+    production.replace(
+      "_NATIVE_PROJECTION_OWNER_EXECUTE = SQLiteV1BaselineConnectionOwner.execute",
+      "_NATIVE_PROJECTION_OWNER_EXECUTE = SQLiteV1BaselineConnectionOwner.execute\n_NATIVE_PROJECTION_OWNER_EXECUTE: object = hostile_owner_execute",
+    ),
+    production.replace(installStatement, `if False:\n${nestedInstall}`),
+    production.replace(installStatement, `def never_called():\n${nestedInstall}`),
+    `${production}\nif False:\n${nestedInstall}\n`,
+    `${production}\ndef never_called():\n${nestedInstall}\n`,
+  ];
+  for (const [index, hostile] of hostileBinders.entries()) {
+    fs.writeFileSync(broken, hostile);
+    assert.equal(scanPythonFilesForTest([broken], root).some(({ method }) =>
+      ["owner_execute", "cursor_fetchmany", "cursor_close"].includes(method)), false,
+    `hostile binder ${index} was upgraded`);
+  }
+
+  const namesOnly = path.join(root, "names_only.py");
+  fs.writeFileSync(namesOnly, `
+def same_names(owner_execute, cursor_fetchmany, cursor_close, connection, cursor):
+    owner_execute(connection, "SELECT hostile", ())
+    cursor_fetchmany(cursor, 1)
+    cursor_close(cursor)
+    owner_execute = lambda *_args: None
+`);
+  assert.equal(scanPythonFilesForTest([namesOnly], root).length, 0);
 });
 
 test("inventory is deterministic and exact-but-unregistered SQL stays unknown", (t) => {

@@ -216,6 +216,146 @@ def test_scanner_confidence_and_cross_function_return_annotation_never_upgrade_n
     assert len(report.candidates) == 3
 
 
+def _native_projection_helper_candidates(source: str) -> list[dict[str, object]]:
+    tree = ast.parse(source)
+    implementations = [
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name
+        == "_produce_sqlite_v1_baseline_native_projection_receipt_implementation"
+    ]
+    assert len(implementations) == 1
+    calls = {
+        node.func.id: node
+        for node in ast.walk(implementations[0])
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id in {"owner_execute", "cursor_fetchmany", "cursor_close"}
+    }
+    assert set(calls) == {"owner_execute", "cursor_fetchmany", "cursor_close"}
+    selected = []
+    for method, origin, kind in (
+        ("owner_execute", "native-helper-direct-argument", "database"),
+        ("cursor_fetchmany", "native-cursor-fetch-lineage", "cursor"),
+        ("cursor_close", "native-cursor-retirement-lineage", "cursor"),
+    ):
+        candidate = _candidate(calls[method], method)
+        candidate["receiverConfidence"] = "proven"
+        candidate["receiverKind"] = kind
+        candidate["sqlOrigin"] = origin
+        candidate["sqlEvidence"] = {
+            "status": "unknown",
+            "shape": "identifier-alias" if method == "owner_execute" else origin,
+            "sha256": None,
+            "token": None,
+        }
+        selected.append(candidate)
+    return selected
+
+
+def test_native_projection_helper_classification_independently_reproves_binder(
+    tmp_path: Path,
+) -> None:
+    production = (
+        Path(__file__).resolve().parents[1]
+        / "src/graph_engineering/sqlite_operation_baseline_source.py"
+    ).read_text(encoding="utf-8")
+    candidates = _native_projection_helper_candidates(production)
+    (tmp_path / "sample.py").write_text(production, encoding="utf-8")
+    accepted = classify_sqlite_native_python_callsites(
+        {"callsites": candidates}, tmp_path
+    )
+    assert [candidate.category for candidate in accepted.candidates] == [
+        "confirmed-native-receiver",
+        "confirmed-native-receiver",
+        "confirmed-native-receiver",
+    ]
+
+    install_statement = "\n".join(
+        (
+            "_install_sqlite_cursor_publication_native_projection_producer_intrinsic(",
+            "    _bind_sqlite_v1_baseline_native_projection_producer(",
+            "        _produce_sqlite_v1_baseline_native_projection_receipt_implementation",
+            "    )",
+            ")",
+        )
+    )
+    assert install_statement in production
+    nested_install = "\n".join(
+        f"    {line}" for line in install_statement.splitlines()
+    )
+    hostile_sources = (
+        production.replace(
+            "_NATIVE_PROJECTION_OWNER_EXECUTE = SQLiteV1BaselineConnectionOwner.execute",
+            "_NATIVE_PROJECTION_OWNER_EXECUTE = hostile_owner_execute",
+        ),
+        production.replace(
+            "owner_execute,\n            cursor_fetchmany,\n            cursor_close,",
+            "cursor_fetchmany,\n            owner_execute,\n            cursor_close,",
+            1,
+        ),
+        production.replace(
+            "    owner_execute: Callable[",
+            "    hostile_owner_execute: Callable[",
+            1,
+        ),
+        production.replace(
+            "    cursor_close_attempt_count = 0",
+            "    owner_execute = owner_execute",
+            1,
+        ),
+        production.replace(
+            "_produce_sqlite_v1_baseline_native_projection_receipt_implementation\n    )",
+            "hostile_native_projection_implementation\n    )",
+            1,
+        ),
+        production.replace(
+            "            raise provenance_error_factory()\n        return implementation(",
+            "            raise provenance_error_factory()\n        return hostile(",
+            1,
+        ),
+        production.replace(
+            "    identity_families = _NATIVE_PROJECTION_IDENTITY_FAMILIES",
+            "    implementation = hostile",
+            1,
+        ),
+        production.replace("    return produce", "    return hostile", 1),
+        production.replace(
+            "            raise provenance_error_factory()\n        return implementation(",
+            "            raise provenance_error_factory()\n"
+            "        owner_execute = hostile\n"
+            "        return implementation(",
+            1,
+        ),
+        production.replace(
+            "_NATIVE_PROJECTION_OWNER_EXECUTE = SQLiteV1BaselineConnectionOwner.execute",
+            "_NATIVE_PROJECTION_OWNER_EXECUTE = "
+            "SQLiteV1BaselineConnectionOwner.execute\n"
+            "_NATIVE_PROJECTION_OWNER_EXECUTE: object = hostile_owner_execute",
+            1,
+        ),
+        production.replace(
+            install_statement,
+            f"if False:\n{nested_install}",
+            1,
+        ),
+        production.replace(
+            install_statement,
+            f"def never_called():\n{nested_install}",
+            1,
+        ),
+        f"{production}\nif False:\n{nested_install}\n",
+        f"{production}\ndef never_called():\n{nested_install}\n",
+    )
+    for hostile in hostile_sources:
+        (tmp_path / "sample.py").write_text(hostile, encoding="utf-8")
+        rejected = classify_sqlite_native_python_callsites(
+            {"callsites": candidates}, tmp_path
+        )
+        assert {candidate.category for candidate in rejected.candidates} == {"unknown"}
+
+
 @pytest.mark.parametrize(
     "candidate",
     [
@@ -275,7 +415,7 @@ def test_unicode_candidate_id_hashes_canonical_utf8_json(tmp_path: Path) -> None
     assert report.candidates[0].candidate_id == hashlib.sha256(canonical).hexdigest()
 
 
-def test_repository_report_classifies_all_251_candidates_and_is_deterministic() -> None:
+def test_repository_report_classifies_all_254_candidates_and_is_deterministic() -> None:
     first = build_report()
     second = build_report()
 
@@ -283,10 +423,10 @@ def test_repository_report_classifies_all_251_candidates_and_is_deterministic() 
         second, separators=(",", ":")
     )
     assert first["summary"] == {
-        "inputPythonCandidateCount": 251,
-        "classifiedCandidateCount": 251,
+        "inputPythonCandidateCount": 254,
+        "classifiedCandidateCount": 254,
         "categoryCounts": {
-            "confirmed-native-receiver": 187,
+            "confirmed-native-receiver": 190,
             "wrapper-guard-or-test-like-production-probe": 31,
             "false-positive": 0,
             "unknown": 33,

@@ -35,22 +35,25 @@ function expectRejected(mutator, pattern) {
   assert.throws(() => build(manifest), pattern);
 }
 
-test("RM1 joins the exact 18+47 source scope and is byte deterministic", () => {
+test("RM1 joins the exact 20+50 source scope and is byte deterministic", () => {
   const first = build();
   const second = build();
   assert.deepEqual(second, first);
   assert.equal(JSON.stringify(second), JSON.stringify(first));
-  assert.equal(first.callsites.length, 65);
-  assert.deepEqual(first.summary.languageCounts, { typescript: 18, python: 47 });
+  assert.equal(first.callsites.length, 70);
+  assert.deepEqual(first.summary.languageCounts, { typescript: 20, python: 50 });
   assert.deepEqual(first.summary.receiverCategoryCountsByLanguage, {
-    typescript: { "wrapper-guard-or-test-like-production-probe": 18 },
+    typescript: {
+      "confirmed-native-receiver": 8,
+      "wrapper-guard-or-test-like-production-probe": 12,
+    },
     python: {
-      "confirmed-native-receiver": 32,
+      "confirmed-native-receiver": 35,
       unknown: 9,
       "wrapper-guard-or-test-like-production-probe": 6,
     },
   });
-  assert.deepEqual(first.summary.dispositionCounts, { unknown: 65 });
+  assert.deepEqual(first.summary.dispositionCounts, { unknown: 70 });
   assert.equal(first.summary.callFamilyCount, 23);
   assert.equal(first.summary.logicalExecutionCount, 50);
   assert.equal(first.summary.resourceLifecycleCount, 50);
@@ -67,7 +70,7 @@ test("RM1 joins the exact 18+47 source scope and is byte deterministic", () => {
     unknownCandidatesDropped: false,
   });
   assert.equal(new Set(first.callsites.map((entry) =>
-    entry.stableIdentity.candidateSha256)).size, 65);
+    entry.stableIdentity.candidateSha256)).size, 70);
   assert.equal(first.callsites.every(({ disposition, nativeProjectionAuthority, routeId, runtimeRouteAuthority }) =>
     disposition === "unknown"
     && nativeProjectionAuthority === false
@@ -89,10 +92,10 @@ test("RM1 builder requires the scanner/classifier repository root", () => {
 test("RM1 rejects missing, duplicate, reordered, and drifted identities", () => {
   expectRejected(
     (manifest) => manifest.callsites.pop(),
-    /exactly 65 callsites/u,
+    /exactly 70 callsites/u,
   );
   expectRejected(
-    (manifest) => { manifest.callsites[64] = structuredClone(manifest.callsites[0]); },
+    (manifest) => { manifest.callsites[69] = structuredClone(manifest.callsites[0]); },
     /duplicate manifest candidate|missing, reordered/u,
   );
   expectRejected(
@@ -108,7 +111,7 @@ test("RM1 rejects missing, duplicate, reordered, and drifted identities", () => 
     /drifted from scanner/u,
   );
   expectRejected(
-    (manifest) => { manifest.callsites[18].stableIdentity.candidateSha256 = "0".repeat(64); },
+    (manifest) => { manifest.callsites[20].stableIdentity.candidateSha256 = "0".repeat(64); },
     /outside scanner\/classifier evidence/u,
   );
 });
@@ -119,11 +122,11 @@ test("RM1 requires every route-shape field and exact scanner/classifier evidence
     /fields must be exactly/u,
   );
   expectRejected(
-    (manifest) => { manifest.callsites[0].receiverEvidence.category = "confirmed-native-receiver"; },
+    (manifest) => { manifest.callsites[8].receiverEvidence.category = "confirmed-native-receiver"; },
     /drifted from receiver classifier/u,
   );
   expectRejected(
-    (manifest) => { manifest.callsites[18].receiverEvidence.reason = "name heuristic"; },
+    (manifest) => { manifest.callsites[20].receiverEvidence.reason = "name heuristic"; },
     /drifted from receiver classifier/u,
   );
   expectRejected(
@@ -154,27 +157,27 @@ test("RM1 lower edges are singular, same-language, and category compatible", () 
   assert.ok(pythonNative);
   expectRejected(
     (manifest) => {
-      manifest.callsites[0].lowerNativeEdge.status = "unique-lower-native-receiver";
-      manifest.callsites[0].lowerNativeEdge.targetCandidateSha256 =
+      manifest.callsites[8].lowerNativeEdge.status = "unique-lower-native-receiver";
+      manifest.callsites[8].lowerNativeEdge.targetCandidateSha256 =
         pythonNative.stableIdentity.candidateSha256;
     },
     /same runtime language/u,
   );
   expectRejected(
     (manifest) => {
-      manifest.callsites[0].lowerNativeEdge.targetCandidateSha256 = [
+      manifest.callsites[8].lowerNativeEdge.targetCandidateSha256 = [
         pythonNative.stableIdentity.candidateSha256,
       ];
     },
     /null or a lowercase SHA-256/u,
   );
   expectRejected(
-    (manifest) => { manifest.callsites[18].lowerNativeEdge.targetCandidateSha256 = null; },
+    (manifest) => { manifest.callsites[20].lowerNativeEdge.targetCandidateSha256 = null; },
     /confirmed native candidate itself exactly once/u,
   );
   expectRejected(
     (manifest) => { manifest.callsites[19].lowerNativeEdge.status = "self-native-receiver"; },
-    /cannot assert a lower native edge/u,
+    /cannot assert a lower native edge|wrapper edge must be explicitly unresolved/u,
   );
 });
 
@@ -224,12 +227,12 @@ test("RM1 rejects family, stage, scope, source-blob, and summary drift", () => {
     /must expose cursor allocation/u,
   );
   expectRejected(
-    (manifest) => { manifest.scope.sourceFiles[0].expectedCallsiteCount = 19; },
-    /exact ordered 18\+47 source scope/u,
+    (manifest) => { manifest.scope.sourceFiles[0].expectedCallsiteCount = 21; },
+    /exact ordered 20\+50 source scope/u,
   );
   expectRejected(
     (manifest) => { manifest.scope.sourceFiles[0].sourceBlobSha256 = "0".repeat(64); },
-    /exact ordered 18\+47 source scope/u,
+    /exact ordered 20\+50 source scope/u,
   );
   expectRejected(
     (manifest) => { manifest.summary.callFamilyCount += 1; },
@@ -303,11 +306,11 @@ test("RM1 requires complete, unique risk, barrier, and threat coverage", () => {
 
 test("RM1 rejects logical-execution, resource, and cursor cross-pairing", () => {
   expectRejected(
-    (manifest) => { manifest.callsites[0].logicalExecutionId = manifest.callsites[2].logicalExecutionId; },
+    (manifest) => { manifest.callsites[0].logicalExecutionId = manifest.callsites[4].logicalExecutionId; },
     /partition must be exactly|crosses call families/u,
   );
   expectRejected(
-    (manifest) => { manifest.callsites[0].resourceLifecycleId = manifest.callsites[2].resourceLifecycleId; },
+    (manifest) => { manifest.callsites[0].resourceLifecycleId = manifest.callsites[4].resourceLifecycleId; },
     /partition must be exactly|crosses resource lifecycles/u,
   );
   const cursorIndexes = inputs.manifest.callsites

@@ -45,6 +45,195 @@ _KNOWN_WRAPPER_TYPES = frozenset(
         "SQLiteV1BaselineConnectionOwner",
     }
 )
+_NATIVE_PROJECTION_HELPERS = {
+    "owner_execute": _NATIVE_CONNECTION,
+    "cursor_fetchmany": _NATIVE_CURSOR,
+    "cursor_close": _NATIVE_CURSOR,
+}
+_NATIVE_PROJECTION_BINDINGS = {
+    "owner_execute": (
+        "_NATIVE_PROJECTION_OWNER_EXECUTE",
+        "SQLiteV1BaselineConnectionOwner.execute",
+    ),
+    "cursor_fetchmany": (
+        "_NATIVE_PROJECTION_CURSOR_FETCHMANY",
+        "_SQLiteCursorCapability.fetchmany",
+    ),
+    "cursor_close": (
+        "_NATIVE_PROJECTION_CURSOR_CLOSE",
+        "_SQLiteCursorCapability.close",
+    ),
+}
+
+
+def _ast_dotted(node: ast.AST) -> str | None:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        base = _ast_dotted(node.value)
+        return f"{base}.{node.attr}" if base is not None else None
+    return None
+
+
+def _exact_top_level_function(tree: ast.Module, name: str) -> ast.FunctionDef | None:
+    matches = [
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == name
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _direct_assignments(function: ast.FunctionDef) -> dict[str, list[ast.expr]]:
+    result: dict[str, list[ast.expr]] = {}
+    for statement in function.body:
+        if (
+            isinstance(statement, ast.Assign)
+            and len(statement.targets) == 1
+            and isinstance(statement.targets[0], ast.Name)
+        ):
+            result.setdefault(statement.targets[0].id, []).append(statement.value)
+        elif (
+            isinstance(statement, ast.AnnAssign)
+            and isinstance(statement.target, ast.Name)
+            and statement.value is not None
+        ):
+            result.setdefault(statement.target.id, []).append(statement.value)
+    return result
+
+
+def _prove_native_projection_helpers(
+    tree: ast.Module,
+) -> tuple[ast.FunctionDef | None, dict[str, str]]:
+    implementation = _exact_top_level_function(
+        tree, "_produce_sqlite_v1_baseline_native_projection_receipt_implementation"
+    )
+    binder = _exact_top_level_function(
+        tree, "_bind_sqlite_v1_baseline_native_projection_producer"
+    )
+    if implementation is None or binder is None:
+        return None, {}
+    parameters = [
+        argument.arg
+        for argument in (*implementation.args.posonlyargs, *implementation.args.args)
+    ]
+    if parameters[8:11] != list(_NATIVE_PROJECTION_HELPERS):
+        return None, {}
+    module_assignments: dict[str, list[ast.expr]] = {}
+    for statement in tree.body:
+        if (
+            isinstance(statement, ast.Assign)
+            and len(statement.targets) == 1
+            and isinstance(statement.targets[0], ast.Name)
+        ):
+            module_assignments.setdefault(statement.targets[0].id, []).append(
+                statement.value
+            )
+        elif (
+            isinstance(statement, ast.AnnAssign)
+            and isinstance(statement.target, ast.Name)
+            and statement.value is not None
+        ):
+            module_assignments.setdefault(statement.target.id, []).append(
+                statement.value
+            )
+    binder_assignments = _direct_assignments(binder)
+    for parameter, (binding, qualified) in _NATIVE_PROJECTION_BINDINGS.items():
+        if len(module_assignments.get(binding, ())) != 1 or _ast_dotted(
+            module_assignments[binding][0]
+        ) != qualified:
+            return None, {}
+        if len(binder_assignments.get(parameter, ())) != 1 or _ast_dotted(
+            binder_assignments[parameter][0]
+        ) != binding:
+            return None, {}
+        if any(
+            isinstance(node, ast.Name)
+            and isinstance(node.ctx, ast.Store)
+            and node.id == parameter
+            for node in ast.walk(implementation)
+        ):
+            return None, {}
+    produce = [
+        node
+        for node in binder.body
+        if isinstance(node, ast.FunctionDef) and node.name == "produce"
+    ]
+    if len(produce) != 1:
+        return None, {}
+    binder_returns = [
+        node for node in binder.body if isinstance(node, ast.Return)
+    ]
+    binder_return_value = binder_returns[0].value if len(binder_returns) == 1 else None
+    if binder_return_value is None or _ast_dotted(binder_return_value) != "produce":
+        return None, {}
+    if any(
+        isinstance(node, ast.Name)
+        and isinstance(node.ctx, ast.Store)
+        and node.id == "implementation"
+        for node in ast.walk(binder)
+    ):
+        return None, {}
+    if any(
+        isinstance(node, ast.Name)
+        and isinstance(node.ctx, ast.Store)
+        and node.id in _NATIVE_PROJECTION_HELPERS
+        for node in ast.walk(produce[0])
+    ):
+        return None, {}
+    returns = [
+        node
+        for node in ast.walk(produce[0])
+        if isinstance(node, ast.Return)
+    ]
+    if (
+        len(returns) != 1
+        or not isinstance(returns[0].value, ast.Call)
+        or _ast_dotted(returns[0].value.func) != "implementation"
+        or len(returns[0].value.args) < 11
+    ):
+        return None, {}
+    implementation_call = returns[0].value
+    if [
+        _ast_dotted(implementation_call.args[index])
+        for index in (8, 9, 10)
+    ] != list(_NATIVE_PROJECTION_HELPERS):
+        return None, {}
+    install_name = (
+        "_install_sqlite_cursor_publication_native_projection_producer_intrinsic"
+    )
+    all_installs = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and _ast_dotted(node.func) == install_name
+    ]
+    top_level_installs = [
+        statement.value
+        for statement in tree.body
+        if isinstance(statement, ast.Expr)
+        and isinstance(statement.value, ast.Call)
+        and _ast_dotted(statement.value.func) == install_name
+    ]
+    if (
+        len(all_installs) != 1
+        or len(top_level_installs) != 1
+        or all_installs[0] is not top_level_installs[0]
+    ):
+        return None, {}
+    install = top_level_installs[0]
+    if len(install.args) != 1 or install.keywords:
+        return None, {}
+    bound = install.args[0]
+    if (
+        not isinstance(bound, ast.Call)
+        or _ast_dotted(bound.func)
+        != "_bind_sqlite_v1_baseline_native_projection_producer"
+        or len(bound.args) != 1
+        or bound.keywords
+        or _ast_dotted(bound.args[0]) != implementation.name
+    ):
+        return None, {}
+    return implementation, dict(_NATIVE_PROJECTION_HELPERS)
 
 
 @dataclass(frozen=True, slots=True)
@@ -156,6 +345,10 @@ class _SourceAnalyzer(ast.NodeVisitor):
 
     def __init__(self, source: str, module_name: str) -> None:
         self.tree = ast.parse(source)
+        (
+            self.native_projection_implementation,
+            self.native_projection_helpers,
+        ) = _prove_native_projection_helpers(self.tree)
         self.module_name = module_name
         self.imports: dict[str, str] = {}
         self.classes: dict[str, ast.ClassDef] = {}
@@ -249,6 +442,21 @@ class _SourceAnalyzer(ast.NodeVisitor):
         return matches[0] if len(matches) == 1 else None
 
     def classify_call(self, call: ast.Call, method: str) -> _Provenance:
+        if (
+            isinstance(call.func, ast.Name)
+            and call.func.id == method
+            and self.node_scope.get(call) is self.native_projection_implementation
+            and method in self.native_projection_helpers
+        ):
+            kind = self.native_projection_helpers[method]
+            qualified_type = (
+                "sqlite3.Connection" if kind == _NATIVE_CONNECTION else "sqlite3.Cursor"
+            )
+            return _Provenance(
+                kind,
+                f"exact private native-projection binder capability: {method}",
+                qualified_type,
+            )
         if isinstance(call.func, ast.Attribute):
             receiver = self._resolve_expression(
                 call.func.value,
@@ -592,6 +800,12 @@ class _SourceAnalyzer(ast.NodeVisitor):
         return max(matches, key=lambda item: (item.line, item.column), default=None)
 
     def _call_method(self, call: ast.Call) -> str | None:
+        if (
+            isinstance(call.func, ast.Name)
+            and self.node_scope.get(call) is self.native_projection_implementation
+            and call.func.id in self.native_projection_helpers
+        ):
+            return call.func.id
         if isinstance(call.func, ast.Attribute):
             return call.func.attr
         if isinstance(call.func, ast.Name):

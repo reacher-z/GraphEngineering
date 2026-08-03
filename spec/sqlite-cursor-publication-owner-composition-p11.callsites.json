@@ -2,24 +2,24 @@
   "schemaVersion": 1,
   "contractId": "sqlite-cursor-publication-owner-composition-p11-callsites-v1",
   "status": "p11-a-rm1-inventory-only",
-  "sourceImplementationCommit": "90fae463db5ef3097cf4b21ff4e07517edfbebd0",
+  "sourceImplementationCommit": "3608d82407905c16c6094598872995384c836b93",
   "scope": {
     "sourceFiles": [
       {
         "language": "typescript",
         "path": "packages/sqlite/src/operation-baseline-source.ts",
-        "expectedCallsiteCount": 18,
-        "sourceBlobSha256": "d112fb088039a0ed139eeb15e63dabd0a011fc3cf45f24ec0c8cfd1f47be6b68"
+        "expectedCallsiteCount": 20,
+        "sourceBlobSha256": "32a08c5a5d2d7695a544787368cb4c97507dae830eea5531e73d7f003f75c6f2"
       },
       {
         "language": "python",
         "path": "python/src/graph_engineering/sqlite_operation_baseline_source.py",
-        "expectedCallsiteCount": 47,
-        "sourceBlobSha256": "74ea2f6e81f29973a2bbb3a720c7ebf1efdea46cbf51b1cb76c4ad14fea69f3b"
+        "expectedCallsiteCount": 50,
+        "sourceBlobSha256": "9c4662c457cba1331ac8c83b3ca67586167da2e736ebe1fff6efb155ba62edfb"
       }
     ],
-    "scopedCallsiteCount": 65,
-    "globalScannerCallsiteCount": 457,
+    "scopedCallsiteCount": 70,
+    "globalScannerCallsiteCount": 485,
     "routeAuthorization": false,
     "routeClosureClaimed": false,
     "nativeProjectionAuthority": false,
@@ -41,36 +41,37 @@
   },
   "summary": {
     "languageCounts": {
-      "python": 47,
-      "typescript": 18
+      "typescript": 20,
+      "python": 50
     },
     "receiverCategoryCountsByLanguage": {
       "typescript": {
-        "wrapper-guard-or-test-like-production-probe": 18
+        "confirmed-native-receiver": 8,
+        "wrapper-guard-or-test-like-production-probe": 12
       },
       "python": {
-        "confirmed-native-receiver": 32,
+        "confirmed-native-receiver": 35,
         "unknown": 9,
         "wrapper-guard-or-test-like-production-probe": 6
       }
     },
     "dispositionCounts": {
-      "unknown": 65
+      "unknown": 70
     },
     "candidateDispositionHintCounts": {
-      "forbidden": 2,
-      "unknown": 63
+      "unknown": 68,
+      "forbidden": 2
     },
     "sqlStatusCounts": {
+      "unknown": 22,
+      "exact": 39,
       "absent": 6,
-      "dynamic": 3,
-      "exact": 41,
-      "unknown": 15
+      "dynamic": 3
     },
     "lowerNativeEdgeStatusCounts": {
-      "self-native-receiver": 32,
-      "unresolved": 9,
-      "unresolved-wrapper-edge": 24
+      "self-native-receiver": 43,
+      "unresolved-wrapper-edge": 18,
+      "unresolved": 9
     },
     "callFamilyCount": 23,
     "logicalExecutionCount": 50,
@@ -81,30 +82,30 @@
       "language": "typescript",
       "stableIdentity": {
         "path": "packages/sqlite/src/operation-baseline-source.ts",
-        "line": 232,
+        "line": 528,
         "column": 21,
-        "method": "iterate",
-        "sqlOrigin": "prepared-statement",
+        "method": "prepareSQLiteConnectionIntrinsic",
+        "sqlOrigin": "native-helper-direct-argument",
         "occurrence": 0,
-        "scannerSha256": "cca40bfa8c5a0dcc180bc55c21bf6e07d087bd77baa4b4bd7a9fd82b292f2c44",
-        "candidateSha256": "cca40bfa8c5a0dcc180bc55c21bf6e07d087bd77baa4b4bd7a9fd82b292f2c44"
+        "scannerSha256": "cef8b0d5d989565166b4d0c83c19c4c64d94fcc3153830faa39472d36d628d19",
+        "candidateSha256": "cef8b0d5d989565166b4d0c83c19c4c64d94fcc3153830faa39472d36d628d19"
       },
       "receiverEvidence": {
-        "category": "wrapper-guard-or-test-like-production-probe",
+        "category": "confirmed-native-receiver",
         "confidence": "proven",
-        "family": "wrapper",
-        "kind": "statement",
+        "family": "native",
+        "kind": "database",
         "aliasDepth": 1,
-        "reason": "prepare-return:prepare:sqlite-wrapper-type:SQLiteConnection"
+        "reason": "sqlite-connection-native-helper-import:prepareSQLiteConnectionIntrinsic"
       },
       "operationKind": "generic-sql-sink",
-      "apiStage": "iterate",
-      "connectionRole": "guarded-wrapper-statement",
+      "apiStage": "prepareSQLiteConnectionIntrinsic",
+      "connectionRole": "lower-native-connection-helper",
       "candidateDispositionHint": "unknown",
       "lowerNativeEdge": {
-        "status": "unresolved-wrapper-edge",
-        "targetCandidateSha256": null,
-        "reason": "The wrapper/probe lower native target is not uniquely proven in this scope."
+        "status": "self-native-receiver",
+        "targetCandidateSha256": "cef8b0d5d989565166b4d0c83c19c4c64d94fcc3153830faa39472d36d628d19",
+        "reason": "The exact definition-time helper binding proves this lower native candidate itself; inventory evidence does not grant route authority."
       },
       "sqlEvidence": {
         "status": "unknown",
@@ -113,8 +114,8 @@
         "token": null
       },
       "parameterProvenance": {
-        "status": "known-zero-parameter",
-        "source": "source-call-arity"
+        "status": "unresolved",
+        "source": null
       },
       "phase": {
         "status": "unresolved",
@@ -141,12 +142,12 @@
       },
       "routeId": null,
       "disposition": "unknown",
-      "reason": "The prepare and terminal get/iterate candidate share one logical edge; the wrapper lower-native target, phase, budgets, lifecycle, and route remain unresolved.",
+      "reason": "The lower native prepare/read/retirement lifecycle edge and bounded family expansion are structurally proven, but parameters, phase, owner/composition identity, budgets, accepted retirement receipt, and runtime route authority remain unresolved.",
       "nativeProjectionAuthority": false,
       "runtimeRouteAuthority": false,
-      "callFamilyId": "ts:baseline-source:232",
-      "logicalExecutionId": "ts:baseline-source:232",
-      "resourceLifecycleId": "resource:ts:baseline-source:232",
+      "callFamilyId": "ts:baseline-source:native:exactlyOne",
+      "logicalExecutionId": "ts:baseline-source:native:exactlyOne",
+      "resourceLifecycleId": "resource:ts:baseline-source:native:exactlyOne",
       "invocationContexts": [
         {
           "id": "exactlyOne",
@@ -156,7 +157,7 @@
         }
       ],
       "negativeFacts": {
-        "zeroParameter": true,
+        "zeroParameter": null,
         "noSqlRoute": false,
         "controlStatement": false,
         "reopenAuditOnly": false,
@@ -164,15 +165,25 @@
         "nativeProjectionProduced": false
       },
       "dynamicClosure": {
-        "status": "unresolved",
-        "source": "identifier-alias",
-        "cardinality": null,
-        "quoting": null,
+        "status": "bounded-static-family-unresolved-route",
+        "source": "exactlyOne-definition-time-family-set",
+        "cardinality": 3,
+        "quoting": "source-definition-fixed-sql",
         "assetOrdinal": null,
-        "digestKind": "none",
+        "digestKind": "sql-expansion-set",
         "sourceAssetSha256": null,
-        "expansionSqlSha256": [],
-        "componentContract": []
+        "expansionSqlSha256": [
+          "5f5e39c28916165795db1c9411283cb1eea61bbda1c53649c8bdb9f627642812",
+          "319c11951339eaf5df892c740d38848a9d96e6d660ae8540066e14c0921e2ce4",
+          "2dcfddc32b9f0c90e19f219a40a59cacdb4cc894fac08f58c4cd4644849547c7"
+        ],
+        "componentContract": [
+          "family",
+          "sql",
+          "decoder",
+          "fetch",
+          "retirement"
+        ]
       },
       "nonAuthorizingRole": {
         "id": "callsite-inventory",
@@ -182,8 +193,8 @@
         "mayAuthorizeRuntimeRoute": false
       },
       "riskCodes": [
-        "R2_LOWER_EDGE_UNRESOLVED",
         "R3_SQL_CLOSURE_UNRESOLVED",
+        "R4_PARAMETERS_UNRESOLVED",
         "R5_PHASE_UNRESOLVED",
         "R6_OWNER_COMPOSITION_UNRESOLVED",
         "R7_BUDGET_UNRESOLVED",
@@ -194,8 +205,8 @@
         "route-disposition-unknown",
         "native-projection-authority-false",
         "runtime-route-authority-false",
-        "lower-native-edge-unresolved",
         "sql-closure-unresolved",
+        "parameter-provenance-unresolved",
         "phase-unresolved",
         "owner-composition-unresolved",
         "budget-unresolved",
@@ -206,47 +217,48 @@
         "GENERIC_SINK_ESCALATION",
         "INJECTION_SEAM",
         "API_STAGE_DOUBLE_COUNT",
-        "WRAPPER_PROVENANCE_NOT_COMPOSITION"
+        "DYNAMIC_IDENTIFIER_EXPANSION",
+        "RESOURCE_CROSS_PAIRING"
       ]
     },
     {
       "language": "typescript",
       "stableIdentity": {
         "path": "packages/sqlite/src/operation-baseline-source.ts",
-        "line": 232,
-        "column": 21,
-        "method": "prepare",
-        "sqlOrigin": "direct-argument",
+        "line": 531,
+        "column": 20,
+        "method": "iterateSQLiteStatementNativeIntrinsic",
+        "sqlOrigin": "native-statement-lineage",
         "occurrence": 0,
-        "scannerSha256": "86810eb5fd46fc9b902f9cd64db55f722ecec48830da44dddbd03b2b10eeb498",
-        "candidateSha256": "86810eb5fd46fc9b902f9cd64db55f722ecec48830da44dddbd03b2b10eeb498"
+        "scannerSha256": "f5c2d64b4051c54bf85a0af65942431d57d9a21794850d0c528656fa3f429593",
+        "candidateSha256": "f5c2d64b4051c54bf85a0af65942431d57d9a21794850d0c528656fa3f429593"
       },
       "receiverEvidence": {
-        "category": "wrapper-guard-or-test-like-production-probe",
+        "category": "confirmed-native-receiver",
         "confidence": "proven",
-        "family": "wrapper",
-        "kind": "database",
-        "aliasDepth": 0,
-        "reason": "sqlite-wrapper-type:SQLiteConnection"
+        "family": "native",
+        "kind": "statement",
+        "aliasDepth": 1,
+        "reason": "sqlite-connection-native-helper-import:iterateSQLiteStatementNativeIntrinsic"
       },
       "operationKind": "generic-sql-sink",
-      "apiStage": "prepare",
-      "connectionRole": "guarded-wrapper-connection",
+      "apiStage": "iterateSQLiteStatementNativeIntrinsic",
+      "connectionRole": "lower-native-statement-helper",
       "candidateDispositionHint": "unknown",
       "lowerNativeEdge": {
-        "status": "unresolved-wrapper-edge",
-        "targetCandidateSha256": null,
-        "reason": "The wrapper/probe lower native target is not uniquely proven in this scope."
+        "status": "self-native-receiver",
+        "targetCandidateSha256": "f5c2d64b4051c54bf85a0af65942431d57d9a21794850d0c528656fa3f429593",
+        "reason": "The exact definition-time helper binding proves this lower native candidate itself; inventory evidence does not grant route authority."
       },
       "sqlEvidence": {
         "status": "unknown",
-        "shape": "identifier-alias",
+        "shape": "native-statement-lineage",
         "sha256": null,
         "token": null
       },
       "parameterProvenance": {
-        "status": "known-zero-parameter",
-        "source": "source-call-arity"
+        "status": "unresolved",
+        "source": null
       },
       "phase": {
         "status": "unresolved",
@@ -273,12 +285,12 @@
       },
       "routeId": null,
       "disposition": "unknown",
-      "reason": "The prepare and terminal get/iterate candidate share one logical edge; the wrapper lower-native target, phase, budgets, lifecycle, and route remain unresolved.",
+      "reason": "The lower native prepare/read/retirement lifecycle edge and bounded family expansion are structurally proven, but parameters, phase, owner/composition identity, budgets, accepted retirement receipt, and runtime route authority remain unresolved.",
       "nativeProjectionAuthority": false,
       "runtimeRouteAuthority": false,
-      "callFamilyId": "ts:baseline-source:232",
-      "logicalExecutionId": "ts:baseline-source:232",
-      "resourceLifecycleId": "resource:ts:baseline-source:232",
+      "callFamilyId": "ts:baseline-source:native:exactlyOne",
+      "logicalExecutionId": "ts:baseline-source:native:exactlyOne",
+      "resourceLifecycleId": "resource:ts:baseline-source:native:exactlyOne",
       "invocationContexts": [
         {
           "id": "exactlyOne",
@@ -288,7 +300,7 @@
         }
       ],
       "negativeFacts": {
-        "zeroParameter": true,
+        "zeroParameter": null,
         "noSqlRoute": false,
         "controlStatement": false,
         "reopenAuditOnly": false,
@@ -296,15 +308,25 @@
         "nativeProjectionProduced": false
       },
       "dynamicClosure": {
-        "status": "unresolved",
-        "source": "identifier-alias",
-        "cardinality": null,
-        "quoting": null,
+        "status": "bounded-static-family-unresolved-route",
+        "source": "exactlyOne-definition-time-family-set",
+        "cardinality": 3,
+        "quoting": "source-definition-fixed-sql",
         "assetOrdinal": null,
-        "digestKind": "none",
+        "digestKind": "sql-expansion-set",
         "sourceAssetSha256": null,
-        "expansionSqlSha256": [],
-        "componentContract": []
+        "expansionSqlSha256": [
+          "5f5e39c28916165795db1c9411283cb1eea61bbda1c53649c8bdb9f627642812",
+          "319c11951339eaf5df892c740d38848a9d96e6d660ae8540066e14c0921e2ce4",
+          "2dcfddc32b9f0c90e19f219a40a59cacdb4cc894fac08f58c4cd4644849547c7"
+        ],
+        "componentContract": [
+          "family",
+          "sql",
+          "decoder",
+          "fetch",
+          "retirement"
+        ]
       },
       "nonAuthorizingRole": {
         "id": "callsite-inventory",
@@ -314,8 +336,8 @@
         "mayAuthorizeRuntimeRoute": false
       },
       "riskCodes": [
-        "R2_LOWER_EDGE_UNRESOLVED",
         "R3_SQL_CLOSURE_UNRESOLVED",
+        "R4_PARAMETERS_UNRESOLVED",
         "R5_PHASE_UNRESOLVED",
         "R6_OWNER_COMPOSITION_UNRESOLVED",
         "R7_BUDGET_UNRESOLVED",
@@ -326,8 +348,8 @@
         "route-disposition-unknown",
         "native-projection-authority-false",
         "runtime-route-authority-false",
-        "lower-native-edge-unresolved",
         "sql-closure-unresolved",
+        "parameter-provenance-unresolved",
         "phase-unresolved",
         "owner-composition-unresolved",
         "budget-unresolved",
@@ -338,299 +360,324 @@
         "GENERIC_SINK_ESCALATION",
         "INJECTION_SEAM",
         "API_STAGE_DOUBLE_COUNT",
-        "WRAPPER_PROVENANCE_NOT_COMPOSITION"
+        "DYNAMIC_IDENTIFIER_EXPANSION",
+        "RESOURCE_CROSS_PAIRING"
       ]
     },
     {
       "language": "typescript",
       "stableIdentity": {
         "path": "packages/sqlite/src/operation-baseline-source.ts",
-        "line": 256,
-        "column": 7,
-        "method": "get",
-        "sqlOrigin": "prepared-statement",
-        "occurrence": 0,
-        "scannerSha256": "780035f86f2ea979283948f820d82eee715801371ea660f4a6f17d916f85818f",
-        "candidateSha256": "780035f86f2ea979283948f820d82eee715801371ea660f4a6f17d916f85818f"
-      },
-      "receiverEvidence": {
-        "category": "wrapper-guard-or-test-like-production-probe",
-        "confidence": "proven",
-        "family": "wrapper",
-        "kind": "statement",
-        "aliasDepth": 1,
-        "reason": "prepare-return:prepare:sqlite-wrapper-type:SQLiteConnection"
-      },
-      "operationKind": "read-candidate",
-      "apiStage": "get",
-      "connectionRole": "guarded-wrapper-statement",
-      "candidateDispositionHint": "unknown",
-      "lowerNativeEdge": {
-        "status": "unresolved-wrapper-edge",
-        "targetCandidateSha256": null,
-        "reason": "The wrapper/probe lower native target is not uniquely proven in this scope."
-      },
-      "sqlEvidence": {
-        "status": "exact",
-        "shape": "literal",
-        "sha256": "dfc8475884a82560ecb3903e1898b64c18835025d22213ff710dff5542a42a60",
-        "token": "SELECT"
-      },
-      "parameterProvenance": {
-        "status": "known-zero-parameter",
-        "source": "source-call-arity"
-      },
-      "phase": {
-        "status": "unresolved",
-        "value": null
-      },
-      "ownerCompositionExpectation": {
-        "status": "unresolved",
-        "owner": null,
-        "composition": null
-      },
-      "budget": {
-        "row": {
-          "kind": "unknown",
-          "maximum": null
-        },
-        "cursor": {
-          "kind": "unknown",
-          "maximum": null
-        }
-      },
-      "resourceLifecycle": {
-        "status": "unresolved",
-        "states": []
-      },
-      "routeId": null,
-      "disposition": "unknown",
-      "reason": "The prepare and terminal get/iterate candidate share one logical edge; the wrapper lower-native target, phase, budgets, lifecycle, and route remain unresolved.",
-      "nativeProjectionAuthority": false,
-      "runtimeRouteAuthority": false,
-      "callFamilyId": "ts:baseline-source:256",
-      "logicalExecutionId": "ts:baseline-source:256",
-      "resourceLifecycleId": "resource:ts:baseline-source:256",
-      "invocationContexts": [
-        {
-          "id": "totalChanges",
-          "connectionState": "caller-owned-exclusive-transaction",
-          "rm1PermitAvailable": false,
-          "futurePermitPolicy": "requires-closed-leaf"
-        }
-      ],
-      "negativeFacts": {
-        "zeroParameter": true,
-        "noSqlRoute": false,
-        "controlStatement": false,
-        "reopenAuditOnly": false,
-        "dynamicSqlUnclosed": false,
-        "nativeProjectionProduced": false
-      },
-      "dynamicClosure": {
-        "status": "exact-static",
-        "source": "literal",
-        "cardinality": 1,
-        "quoting": "source-frozen",
-        "assetOrdinal": null,
-        "digestKind": "sql-expansion",
-        "sourceAssetSha256": null,
-        "expansionSqlSha256": [
-          "dfc8475884a82560ecb3903e1898b64c18835025d22213ff710dff5542a42a60"
-        ],
-        "componentContract": []
-      },
-      "nonAuthorizingRole": {
-        "id": "callsite-inventory",
-        "inventoryEvidenceOnly": true,
-        "mayIssuePermit": false,
-        "mayMintNativeProjection": false,
-        "mayAuthorizeRuntimeRoute": false
-      },
-      "riskCodes": [
-        "R2_LOWER_EDGE_UNRESOLVED",
-        "R5_PHASE_UNRESOLVED",
-        "R6_OWNER_COMPOSITION_UNRESOLVED",
-        "R7_BUDGET_UNRESOLVED",
-        "R8_RESOURCE_LIFECYCLE_UNRESOLVED",
-        "R9_ROUTE_AUTHORITY_ABSENT"
-      ],
-      "authorityBarriers": [
-        "route-disposition-unknown",
-        "native-projection-authority-false",
-        "runtime-route-authority-false",
-        "lower-native-edge-unresolved",
-        "phase-unresolved",
-        "owner-composition-unresolved",
-        "budget-unresolved",
-        "resource-lifecycle-unresolved"
-      ],
-      "cursorPair": null,
-      "threatCodes": [
-        "DIGEST_NOT_AUTHORITY",
-        "API_STAGE_DOUBLE_COUNT",
-        "WRAPPER_PROVENANCE_NOT_COMPOSITION"
-      ]
-    },
-    {
-      "language": "typescript",
-      "stableIdentity": {
-        "path": "packages/sqlite/src/operation-baseline-source.ts",
-        "line": 256,
-        "column": 7,
-        "method": "prepare",
-        "sqlOrigin": "direct-argument",
-        "occurrence": 0,
-        "scannerSha256": "ed779dab38e5b311909b9eb94b9992736047da234ca7f95e3dbc4171d4c92e80",
-        "candidateSha256": "ed779dab38e5b311909b9eb94b9992736047da234ca7f95e3dbc4171d4c92e80"
-      },
-      "receiverEvidence": {
-        "category": "wrapper-guard-or-test-like-production-probe",
-        "confidence": "proven",
-        "family": "wrapper",
-        "kind": "database",
-        "aliasDepth": 0,
-        "reason": "sqlite-wrapper-type:SQLiteConnection"
-      },
-      "operationKind": "read-candidate",
-      "apiStage": "prepare",
-      "connectionRole": "guarded-wrapper-connection",
-      "candidateDispositionHint": "unknown",
-      "lowerNativeEdge": {
-        "status": "unresolved-wrapper-edge",
-        "targetCandidateSha256": null,
-        "reason": "The wrapper/probe lower native target is not uniquely proven in this scope."
-      },
-      "sqlEvidence": {
-        "status": "exact",
-        "shape": "literal",
-        "sha256": "dfc8475884a82560ecb3903e1898b64c18835025d22213ff710dff5542a42a60",
-        "token": "SELECT"
-      },
-      "parameterProvenance": {
-        "status": "known-zero-parameter",
-        "source": "source-call-arity"
-      },
-      "phase": {
-        "status": "unresolved",
-        "value": null
-      },
-      "ownerCompositionExpectation": {
-        "status": "unresolved",
-        "owner": null,
-        "composition": null
-      },
-      "budget": {
-        "row": {
-          "kind": "unknown",
-          "maximum": null
-        },
-        "cursor": {
-          "kind": "unknown",
-          "maximum": null
-        }
-      },
-      "resourceLifecycle": {
-        "status": "unresolved",
-        "states": []
-      },
-      "routeId": null,
-      "disposition": "unknown",
-      "reason": "The prepare and terminal get/iterate candidate share one logical edge; the wrapper lower-native target, phase, budgets, lifecycle, and route remain unresolved.",
-      "nativeProjectionAuthority": false,
-      "runtimeRouteAuthority": false,
-      "callFamilyId": "ts:baseline-source:256",
-      "logicalExecutionId": "ts:baseline-source:256",
-      "resourceLifecycleId": "resource:ts:baseline-source:256",
-      "invocationContexts": [
-        {
-          "id": "totalChanges",
-          "connectionState": "caller-owned-exclusive-transaction",
-          "rm1PermitAvailable": false,
-          "futurePermitPolicy": "requires-closed-leaf"
-        }
-      ],
-      "negativeFacts": {
-        "zeroParameter": true,
-        "noSqlRoute": false,
-        "controlStatement": false,
-        "reopenAuditOnly": false,
-        "dynamicSqlUnclosed": false,
-        "nativeProjectionProduced": false
-      },
-      "dynamicClosure": {
-        "status": "exact-static",
-        "source": "literal",
-        "cardinality": 1,
-        "quoting": "source-frozen",
-        "assetOrdinal": null,
-        "digestKind": "sql-expansion",
-        "sourceAssetSha256": null,
-        "expansionSqlSha256": [
-          "dfc8475884a82560ecb3903e1898b64c18835025d22213ff710dff5542a42a60"
-        ],
-        "componentContract": []
-      },
-      "nonAuthorizingRole": {
-        "id": "callsite-inventory",
-        "inventoryEvidenceOnly": true,
-        "mayIssuePermit": false,
-        "mayMintNativeProjection": false,
-        "mayAuthorizeRuntimeRoute": false
-      },
-      "riskCodes": [
-        "R2_LOWER_EDGE_UNRESOLVED",
-        "R5_PHASE_UNRESOLVED",
-        "R6_OWNER_COMPOSITION_UNRESOLVED",
-        "R7_BUDGET_UNRESOLVED",
-        "R8_RESOURCE_LIFECYCLE_UNRESOLVED",
-        "R9_ROUTE_AUTHORITY_ABSENT"
-      ],
-      "authorityBarriers": [
-        "route-disposition-unknown",
-        "native-projection-authority-false",
-        "runtime-route-authority-false",
-        "lower-native-edge-unresolved",
-        "phase-unresolved",
-        "owner-composition-unresolved",
-        "budget-unresolved",
-        "resource-lifecycle-unresolved"
-      ],
-      "cursorPair": null,
-      "threatCodes": [
-        "DIGEST_NOT_AUTHORITY",
-        "API_STAGE_DOUBLE_COUNT",
-        "WRAPPER_PROVENANCE_NOT_COMPOSITION"
-      ]
-    },
-    {
-      "language": "typescript",
-      "stableIdentity": {
-        "path": "packages/sqlite/src/operation-baseline-source.ts",
-        "line": 286,
+        "line": 547,
         "column": 20,
-        "method": "iterate",
-        "sqlOrigin": "prepared-statement",
+        "method": "nextSQLiteStatementIteratorNativeIntrinsic",
+        "sqlOrigin": "native-iterator-lineage",
         "occurrence": 0,
-        "scannerSha256": "27653ef14e80dba6c8f6c107337b03512dbba50842b0a1ae2e6bf3c07f03e1df",
-        "candidateSha256": "27653ef14e80dba6c8f6c107337b03512dbba50842b0a1ae2e6bf3c07f03e1df"
+        "scannerSha256": "3971bb630fa68c0dfe8aa0e2d45b219ef55e166c5d727a16c3976390d64a8e10",
+        "candidateSha256": "3971bb630fa68c0dfe8aa0e2d45b219ef55e166c5d727a16c3976390d64a8e10"
       },
       "receiverEvidence": {
-        "category": "wrapper-guard-or-test-like-production-probe",
+        "category": "confirmed-native-receiver",
         "confidence": "proven",
-        "family": "wrapper",
-        "kind": "statement",
+        "family": "native",
+        "kind": "iterator",
         "aliasDepth": 1,
-        "reason": "prepare-return:prepare:sqlite-wrapper-type:SQLiteConnection"
+        "reason": "sqlite-connection-native-helper-import:nextSQLiteStatementIteratorNativeIntrinsic"
       },
       "operationKind": "generic-sql-sink",
-      "apiStage": "iterate",
-      "connectionRole": "guarded-wrapper-statement",
+      "apiStage": "nextSQLiteStatementIteratorNativeIntrinsic",
+      "connectionRole": "lower-native-iterator-helper",
       "candidateDispositionHint": "unknown",
       "lowerNativeEdge": {
-        "status": "unresolved-wrapper-edge",
-        "targetCandidateSha256": null,
-        "reason": "The wrapper/probe lower native target is not uniquely proven in this scope."
+        "status": "self-native-receiver",
+        "targetCandidateSha256": "3971bb630fa68c0dfe8aa0e2d45b219ef55e166c5d727a16c3976390d64a8e10",
+        "reason": "The exact definition-time helper binding proves this lower native candidate itself; inventory evidence does not grant route authority."
+      },
+      "sqlEvidence": {
+        "status": "unknown",
+        "shape": "native-iterator-lineage",
+        "sha256": null,
+        "token": null
+      },
+      "parameterProvenance": {
+        "status": "unresolved",
+        "source": null
+      },
+      "phase": {
+        "status": "unresolved",
+        "value": null
+      },
+      "ownerCompositionExpectation": {
+        "status": "unresolved",
+        "owner": null,
+        "composition": null
+      },
+      "budget": {
+        "row": {
+          "kind": "unknown",
+          "maximum": null
+        },
+        "cursor": {
+          "kind": "unknown",
+          "maximum": null
+        }
+      },
+      "resourceLifecycle": {
+        "status": "unresolved",
+        "states": []
+      },
+      "routeId": null,
+      "disposition": "unknown",
+      "reason": "The lower native prepare/read/retirement lifecycle edge and bounded family expansion are structurally proven, but parameters, phase, owner/composition identity, budgets, accepted retirement receipt, and runtime route authority remain unresolved.",
+      "nativeProjectionAuthority": false,
+      "runtimeRouteAuthority": false,
+      "callFamilyId": "ts:baseline-source:native:exactlyOne",
+      "logicalExecutionId": "ts:baseline-source:native:exactlyOne",
+      "resourceLifecycleId": "resource:ts:baseline-source:native:exactlyOne",
+      "invocationContexts": [
+        {
+          "id": "exactlyOne",
+          "connectionState": "caller-owned-exclusive-transaction",
+          "rm1PermitAvailable": false,
+          "futurePermitPolicy": "never"
+        }
+      ],
+      "negativeFacts": {
+        "zeroParameter": null,
+        "noSqlRoute": false,
+        "controlStatement": false,
+        "reopenAuditOnly": false,
+        "dynamicSqlUnclosed": false,
+        "nativeProjectionProduced": false
+      },
+      "dynamicClosure": {
+        "status": "bounded-static-family-unresolved-route",
+        "source": "exactlyOne-definition-time-family-set",
+        "cardinality": 3,
+        "quoting": "source-definition-fixed-sql",
+        "assetOrdinal": null,
+        "digestKind": "sql-expansion-set",
+        "sourceAssetSha256": null,
+        "expansionSqlSha256": [
+          "5f5e39c28916165795db1c9411283cb1eea61bbda1c53649c8bdb9f627642812",
+          "319c11951339eaf5df892c740d38848a9d96e6d660ae8540066e14c0921e2ce4",
+          "2dcfddc32b9f0c90e19f219a40a59cacdb4cc894fac08f58c4cd4644849547c7"
+        ],
+        "componentContract": [
+          "family",
+          "sql",
+          "decoder",
+          "fetch",
+          "retirement"
+        ]
+      },
+      "nonAuthorizingRole": {
+        "id": "callsite-inventory",
+        "inventoryEvidenceOnly": true,
+        "mayIssuePermit": false,
+        "mayMintNativeProjection": false,
+        "mayAuthorizeRuntimeRoute": false
+      },
+      "riskCodes": [
+        "R3_SQL_CLOSURE_UNRESOLVED",
+        "R4_PARAMETERS_UNRESOLVED",
+        "R5_PHASE_UNRESOLVED",
+        "R6_OWNER_COMPOSITION_UNRESOLVED",
+        "R7_BUDGET_UNRESOLVED",
+        "R8_RESOURCE_LIFECYCLE_UNRESOLVED",
+        "R9_ROUTE_AUTHORITY_ABSENT"
+      ],
+      "authorityBarriers": [
+        "route-disposition-unknown",
+        "native-projection-authority-false",
+        "runtime-route-authority-false",
+        "sql-closure-unresolved",
+        "parameter-provenance-unresolved",
+        "phase-unresolved",
+        "owner-composition-unresolved",
+        "budget-unresolved",
+        "resource-lifecycle-unresolved"
+      ],
+      "cursorPair": null,
+      "threatCodes": [
+        "GENERIC_SINK_ESCALATION",
+        "INJECTION_SEAM",
+        "API_STAGE_DOUBLE_COUNT",
+        "DYNAMIC_IDENTIFIER_EXPANSION",
+        "RESOURCE_CROSS_PAIRING"
+      ]
+    },
+    {
+      "language": "typescript",
+      "stableIdentity": {
+        "path": "packages/sqlite/src/operation-baseline-source.ts",
+        "line": 591,
+        "column": 7,
+        "method": "returnSQLiteStatementIteratorNativeIntrinsic",
+        "sqlOrigin": "native-iterator-lineage",
+        "occurrence": 0,
+        "scannerSha256": "e017efc7d974d8f9b4ef921371d24a892f9e337aa7bdf91faee6ec50f7c07602",
+        "candidateSha256": "e017efc7d974d8f9b4ef921371d24a892f9e337aa7bdf91faee6ec50f7c07602"
+      },
+      "receiverEvidence": {
+        "category": "confirmed-native-receiver",
+        "confidence": "proven",
+        "family": "native",
+        "kind": "iterator",
+        "aliasDepth": 1,
+        "reason": "sqlite-connection-native-helper-import:returnSQLiteStatementIteratorNativeIntrinsic"
+      },
+      "operationKind": "generic-sql-sink",
+      "apiStage": "returnSQLiteStatementIteratorNativeIntrinsic",
+      "connectionRole": "lower-native-iterator-retirement-helper",
+      "candidateDispositionHint": "unknown",
+      "lowerNativeEdge": {
+        "status": "self-native-receiver",
+        "targetCandidateSha256": "e017efc7d974d8f9b4ef921371d24a892f9e337aa7bdf91faee6ec50f7c07602",
+        "reason": "The exact definition-time helper binding proves this lower native candidate itself; inventory evidence does not grant route authority."
+      },
+      "sqlEvidence": {
+        "status": "unknown",
+        "shape": "native-iterator-lineage",
+        "sha256": null,
+        "token": null
+      },
+      "parameterProvenance": {
+        "status": "unresolved",
+        "source": null
+      },
+      "phase": {
+        "status": "unresolved",
+        "value": null
+      },
+      "ownerCompositionExpectation": {
+        "status": "unresolved",
+        "owner": null,
+        "composition": null
+      },
+      "budget": {
+        "row": {
+          "kind": "unknown",
+          "maximum": null
+        },
+        "cursor": {
+          "kind": "unknown",
+          "maximum": null
+        }
+      },
+      "resourceLifecycle": {
+        "status": "unresolved",
+        "states": []
+      },
+      "routeId": null,
+      "disposition": "unknown",
+      "reason": "The lower native prepare/read/retirement lifecycle edge and bounded family expansion are structurally proven, but parameters, phase, owner/composition identity, budgets, accepted retirement receipt, and runtime route authority remain unresolved.",
+      "nativeProjectionAuthority": false,
+      "runtimeRouteAuthority": false,
+      "callFamilyId": "ts:baseline-source:native:exactlyOne",
+      "logicalExecutionId": "ts:baseline-source:native:exactlyOne",
+      "resourceLifecycleId": "resource:ts:baseline-source:native:exactlyOne",
+      "invocationContexts": [
+        {
+          "id": "exactlyOne",
+          "connectionState": "caller-owned-exclusive-transaction",
+          "rm1PermitAvailable": false,
+          "futurePermitPolicy": "never"
+        }
+      ],
+      "negativeFacts": {
+        "zeroParameter": null,
+        "noSqlRoute": false,
+        "controlStatement": false,
+        "reopenAuditOnly": false,
+        "dynamicSqlUnclosed": false,
+        "nativeProjectionProduced": false
+      },
+      "dynamicClosure": {
+        "status": "bounded-static-family-unresolved-route",
+        "source": "exactlyOne-definition-time-family-set",
+        "cardinality": 3,
+        "quoting": "source-definition-fixed-sql",
+        "assetOrdinal": null,
+        "digestKind": "sql-expansion-set",
+        "sourceAssetSha256": null,
+        "expansionSqlSha256": [
+          "5f5e39c28916165795db1c9411283cb1eea61bbda1c53649c8bdb9f627642812",
+          "319c11951339eaf5df892c740d38848a9d96e6d660ae8540066e14c0921e2ce4",
+          "2dcfddc32b9f0c90e19f219a40a59cacdb4cc894fac08f58c4cd4644849547c7"
+        ],
+        "componentContract": [
+          "family",
+          "sql",
+          "decoder",
+          "fetch",
+          "retirement"
+        ]
+      },
+      "nonAuthorizingRole": {
+        "id": "callsite-inventory",
+        "inventoryEvidenceOnly": true,
+        "mayIssuePermit": false,
+        "mayMintNativeProjection": false,
+        "mayAuthorizeRuntimeRoute": false
+      },
+      "riskCodes": [
+        "R3_SQL_CLOSURE_UNRESOLVED",
+        "R4_PARAMETERS_UNRESOLVED",
+        "R5_PHASE_UNRESOLVED",
+        "R6_OWNER_COMPOSITION_UNRESOLVED",
+        "R7_BUDGET_UNRESOLVED",
+        "R8_RESOURCE_LIFECYCLE_UNRESOLVED",
+        "R9_ROUTE_AUTHORITY_ABSENT"
+      ],
+      "authorityBarriers": [
+        "route-disposition-unknown",
+        "native-projection-authority-false",
+        "runtime-route-authority-false",
+        "sql-closure-unresolved",
+        "parameter-provenance-unresolved",
+        "phase-unresolved",
+        "owner-composition-unresolved",
+        "budget-unresolved",
+        "resource-lifecycle-unresolved"
+      ],
+      "cursorPair": null,
+      "threatCodes": [
+        "GENERIC_SINK_ESCALATION",
+        "INJECTION_SEAM",
+        "API_STAGE_DOUBLE_COUNT",
+        "DYNAMIC_IDENTIFIER_EXPANSION",
+        "RESOURCE_CROSS_PAIRING"
+      ]
+    },
+    {
+      "language": "typescript",
+      "stableIdentity": {
+        "path": "packages/sqlite/src/operation-baseline-source.ts",
+        "line": 658,
+        "column": 21,
+        "method": "prepareSQLiteConnectionIntrinsic",
+        "sqlOrigin": "native-helper-direct-argument",
+        "occurrence": 0,
+        "scannerSha256": "4c238b1af2e2d3c675d8fca08ebc491f6bc0a7bab1f1bdf84708fcd2bdf5967f",
+        "candidateSha256": "4c238b1af2e2d3c675d8fca08ebc491f6bc0a7bab1f1bdf84708fcd2bdf5967f"
+      },
+      "receiverEvidence": {
+        "category": "confirmed-native-receiver",
+        "confidence": "proven",
+        "family": "native",
+        "kind": "database",
+        "aliasDepth": 1,
+        "reason": "sqlite-connection-native-helper-import:prepareSQLiteConnectionIntrinsic"
+      },
+      "operationKind": "generic-sql-sink",
+      "apiStage": "prepareSQLiteConnectionIntrinsic",
+      "connectionRole": "lower-native-connection-helper",
+      "candidateDispositionHint": "unknown",
+      "lowerNativeEdge": {
+        "status": "self-native-receiver",
+        "targetCandidateSha256": "4c238b1af2e2d3c675d8fca08ebc491f6bc0a7bab1f1bdf84708fcd2bdf5967f",
+        "reason": "The exact definition-time helper binding proves this lower native candidate itself; inventory evidence does not grant route authority."
       },
       "sqlEvidence": {
         "status": "unknown",
@@ -639,8 +686,8 @@
         "token": null
       },
       "parameterProvenance": {
-        "status": "known-zero-parameter",
-        "source": "source-call-arity"
+        "status": "unresolved",
+        "source": null
       },
       "phase": {
         "status": "unresolved",
@@ -667,12 +714,12 @@
       },
       "routeId": null,
       "disposition": "unknown",
-      "reason": "The prepare and terminal get/iterate candidate share one logical edge; the wrapper lower-native target, phase, budgets, lifecycle, and route remain unresolved.",
+      "reason": "The lower native prepare/read/retirement lifecycle edge and bounded family expansion are structurally proven, but parameters, phase, owner/composition identity, budgets, accepted retirement receipt, and runtime route authority remain unresolved.",
       "nativeProjectionAuthority": false,
       "runtimeRouteAuthority": false,
-      "callFamilyId": "ts:baseline-source:286",
-      "logicalExecutionId": "ts:baseline-source:286",
-      "resourceLifecycleId": "resource:ts:baseline-source:286",
+      "callFamilyId": "ts:baseline-source:native:transactionRows",
+      "logicalExecutionId": "ts:baseline-source:native:transactionRows",
+      "resourceLifecycleId": "resource:ts:baseline-source:native:transactionRows",
       "invocationContexts": [
         {
           "id": "transactionRows",
@@ -682,7 +729,7 @@
         }
       ],
       "negativeFacts": {
-        "zeroParameter": true,
+        "zeroParameter": null,
         "noSqlRoute": false,
         "controlStatement": false,
         "reopenAuditOnly": false,
@@ -690,15 +737,31 @@
         "nativeProjectionProduced": false
       },
       "dynamicClosure": {
-        "status": "unresolved",
-        "source": "identifier-alias",
-        "cardinality": null,
-        "quoting": null,
+        "status": "bounded-static-family-unresolved-route",
+        "source": "transactionRows-definition-time-family-set",
+        "cardinality": 9,
+        "quoting": "source-definition-fixed-sql",
         "assetOrdinal": null,
-        "digestKind": "none",
+        "digestKind": "sql-expansion-set",
         "sourceAssetSha256": null,
-        "expansionSqlSha256": [],
-        "componentContract": []
+        "expansionSqlSha256": [
+          "58ce57a98f4764a5a9f3fb0d0c8cbf5c7c6c750d936272fafb886cf70fbbe06f",
+          "4175582b79b284dc76b0e2831ed99fff5c6281cd9cec3a0450de3c46c92a02ae",
+          "ed12e5eda66ae832048a8a6b6013525a4e3299cd9d504990897c5ac79773e7b0",
+          "0b2d668ba0bdb007867433b89d3bf25baf9a9fe3b175d8c85a7cf508652c24a1",
+          "7efd6a6717e91358e02045a7088515a76f582964b66f913cf125bf9b227e3f4b",
+          "1c826fc00982fc0f6a6b9135e5d9f20e1e333e287b6b3356aa0e02b6fd0c29a4",
+          "8ab72ef7a67b381810441b55acedfad29d12a7ff268fec27cb97e12b2e55464d",
+          "f506c5efb4ee1330f679340339d66435bd14c8368de6c018caf50d1314ab261e",
+          "a1bcd756f6aa187865b737f68f56906e1243883eddd0998673ef8015556e0ddd"
+        ],
+        "componentContract": [
+          "family",
+          "sql",
+          "decoder",
+          "fetch",
+          "retirement"
+        ]
       },
       "nonAuthorizingRole": {
         "id": "callsite-inventory",
@@ -708,8 +771,8 @@
         "mayAuthorizeRuntimeRoute": false
       },
       "riskCodes": [
-        "R2_LOWER_EDGE_UNRESOLVED",
         "R3_SQL_CLOSURE_UNRESOLVED",
+        "R4_PARAMETERS_UNRESOLVED",
         "R5_PHASE_UNRESOLVED",
         "R6_OWNER_COMPOSITION_UNRESOLVED",
         "R7_BUDGET_UNRESOLVED",
@@ -720,8 +783,8 @@
         "route-disposition-unknown",
         "native-projection-authority-false",
         "runtime-route-authority-false",
-        "lower-native-edge-unresolved",
         "sql-closure-unresolved",
+        "parameter-provenance-unresolved",
         "phase-unresolved",
         "owner-composition-unresolved",
         "budget-unresolved",
@@ -732,47 +795,48 @@
         "GENERIC_SINK_ESCALATION",
         "INJECTION_SEAM",
         "API_STAGE_DOUBLE_COUNT",
-        "WRAPPER_PROVENANCE_NOT_COMPOSITION"
+        "DYNAMIC_IDENTIFIER_EXPANSION",
+        "RESOURCE_CROSS_PAIRING"
       ]
     },
     {
       "language": "typescript",
       "stableIdentity": {
         "path": "packages/sqlite/src/operation-baseline-source.ts",
-        "line": 286,
+        "line": 661,
         "column": 20,
-        "method": "prepare",
-        "sqlOrigin": "direct-argument",
+        "method": "iterateSQLiteStatementNativeIntrinsic",
+        "sqlOrigin": "native-statement-lineage",
         "occurrence": 0,
-        "scannerSha256": "c80abaa606aef9266c3322de8a1770d77944319f7c28ab4d8f6c234ee63df939",
-        "candidateSha256": "c80abaa606aef9266c3322de8a1770d77944319f7c28ab4d8f6c234ee63df939"
+        "scannerSha256": "c156c685a92b92d5577f6042ad0c9fd45ba50f767536663675204aacc71f38ad",
+        "candidateSha256": "c156c685a92b92d5577f6042ad0c9fd45ba50f767536663675204aacc71f38ad"
       },
       "receiverEvidence": {
-        "category": "wrapper-guard-or-test-like-production-probe",
+        "category": "confirmed-native-receiver",
         "confidence": "proven",
-        "family": "wrapper",
-        "kind": "database",
-        "aliasDepth": 0,
-        "reason": "sqlite-wrapper-type:SQLiteConnection"
+        "family": "native",
+        "kind": "statement",
+        "aliasDepth": 1,
+        "reason": "sqlite-connection-native-helper-import:iterateSQLiteStatementNativeIntrinsic"
       },
       "operationKind": "generic-sql-sink",
-      "apiStage": "prepare",
-      "connectionRole": "guarded-wrapper-connection",
+      "apiStage": "iterateSQLiteStatementNativeIntrinsic",
+      "connectionRole": "lower-native-statement-helper",
       "candidateDispositionHint": "unknown",
       "lowerNativeEdge": {
-        "status": "unresolved-wrapper-edge",
-        "targetCandidateSha256": null,
-        "reason": "The wrapper/probe lower native target is not uniquely proven in this scope."
+        "status": "self-native-receiver",
+        "targetCandidateSha256": "c156c685a92b92d5577f6042ad0c9fd45ba50f767536663675204aacc71f38ad",
+        "reason": "The exact definition-time helper binding proves this lower native candidate itself; inventory evidence does not grant route authority."
       },
       "sqlEvidence": {
         "status": "unknown",
-        "shape": "identifier-alias",
+        "shape": "native-statement-lineage",
         "sha256": null,
         "token": null
       },
       "parameterProvenance": {
-        "status": "known-zero-parameter",
-        "source": "source-call-arity"
+        "status": "unresolved",
+        "source": null
       },
       "phase": {
         "status": "unresolved",
@@ -799,12 +863,12 @@
       },
       "routeId": null,
       "disposition": "unknown",
-      "reason": "The prepare and terminal get/iterate candidate share one logical edge; the wrapper lower-native target, phase, budgets, lifecycle, and route remain unresolved.",
+      "reason": "The lower native prepare/read/retirement lifecycle edge and bounded family expansion are structurally proven, but parameters, phase, owner/composition identity, budgets, accepted retirement receipt, and runtime route authority remain unresolved.",
       "nativeProjectionAuthority": false,
       "runtimeRouteAuthority": false,
-      "callFamilyId": "ts:baseline-source:286",
-      "logicalExecutionId": "ts:baseline-source:286",
-      "resourceLifecycleId": "resource:ts:baseline-source:286",
+      "callFamilyId": "ts:baseline-source:native:transactionRows",
+      "logicalExecutionId": "ts:baseline-source:native:transactionRows",
+      "resourceLifecycleId": "resource:ts:baseline-source:native:transactionRows",
       "invocationContexts": [
         {
           "id": "transactionRows",
@@ -814,7 +878,7 @@
         }
       ],
       "negativeFacts": {
-        "zeroParameter": true,
+        "zeroParameter": null,
         "noSqlRoute": false,
         "controlStatement": false,
         "reopenAuditOnly": false,
@@ -822,15 +886,31 @@
         "nativeProjectionProduced": false
       },
       "dynamicClosure": {
-        "status": "unresolved",
-        "source": "identifier-alias",
-        "cardinality": null,
-        "quoting": null,
+        "status": "bounded-static-family-unresolved-route",
+        "source": "transactionRows-definition-time-family-set",
+        "cardinality": 9,
+        "quoting": "source-definition-fixed-sql",
         "assetOrdinal": null,
-        "digestKind": "none",
+        "digestKind": "sql-expansion-set",
         "sourceAssetSha256": null,
-        "expansionSqlSha256": [],
-        "componentContract": []
+        "expansionSqlSha256": [
+          "58ce57a98f4764a5a9f3fb0d0c8cbf5c7c6c750d936272fafb886cf70fbbe06f",
+          "4175582b79b284dc76b0e2831ed99fff5c6281cd9cec3a0450de3c46c92a02ae",
+          "ed12e5eda66ae832048a8a6b6013525a4e3299cd9d504990897c5ac79773e7b0",
+          "0b2d668ba0bdb007867433b89d3bf25baf9a9fe3b175d8c85a7cf508652c24a1",
+          "7efd6a6717e91358e02045a7088515a76f582964b66f913cf125bf9b227e3f4b",
+          "1c826fc00982fc0f6a6b9135e5d9f20e1e333e287b6b3356aa0e02b6fd0c29a4",
+          "8ab72ef7a67b381810441b55acedfad29d12a7ff268fec27cb97e12b2e55464d",
+          "f506c5efb4ee1330f679340339d66435bd14c8368de6c018caf50d1314ab261e",
+          "a1bcd756f6aa187865b737f68f56906e1243883eddd0998673ef8015556e0ddd"
+        ],
+        "componentContract": [
+          "family",
+          "sql",
+          "decoder",
+          "fetch",
+          "retirement"
+        ]
       },
       "nonAuthorizingRole": {
         "id": "callsite-inventory",
@@ -840,8 +920,8 @@
         "mayAuthorizeRuntimeRoute": false
       },
       "riskCodes": [
-        "R2_LOWER_EDGE_UNRESOLVED",
         "R3_SQL_CLOSURE_UNRESOLVED",
+        "R4_PARAMETERS_UNRESOLVED",
         "R5_PHASE_UNRESOLVED",
         "R6_OWNER_COMPOSITION_UNRESOLVED",
         "R7_BUDGET_UNRESOLVED",
@@ -852,8 +932,8 @@
         "route-disposition-unknown",
         "native-projection-authority-false",
         "runtime-route-authority-false",
-        "lower-native-edge-unresolved",
         "sql-closure-unresolved",
+        "parameter-provenance-unresolved",
         "phase-unresolved",
         "owner-composition-unresolved",
         "budget-unresolved",
@@ -864,20 +944,319 @@
         "GENERIC_SINK_ESCALATION",
         "INJECTION_SEAM",
         "API_STAGE_DOUBLE_COUNT",
-        "WRAPPER_PROVENANCE_NOT_COMPOSITION"
+        "DYNAMIC_IDENTIFIER_EXPANSION",
+        "RESOURCE_CROSS_PAIRING"
       ]
     },
     {
       "language": "typescript",
       "stableIdentity": {
         "path": "packages/sqlite/src/operation-baseline-source.ts",
-        "line": 841,
+        "line": 682,
+        "column": 20,
+        "method": "nextSQLiteStatementIteratorNativeIntrinsic",
+        "sqlOrigin": "native-iterator-lineage",
+        "occurrence": 0,
+        "scannerSha256": "51a232ec4fecf1ba8eb345bfcc366967a5c9d64b66e8d16bc409e5bc92b7bcbc",
+        "candidateSha256": "51a232ec4fecf1ba8eb345bfcc366967a5c9d64b66e8d16bc409e5bc92b7bcbc"
+      },
+      "receiverEvidence": {
+        "category": "confirmed-native-receiver",
+        "confidence": "proven",
+        "family": "native",
+        "kind": "iterator",
+        "aliasDepth": 1,
+        "reason": "sqlite-connection-native-helper-import:nextSQLiteStatementIteratorNativeIntrinsic"
+      },
+      "operationKind": "generic-sql-sink",
+      "apiStage": "nextSQLiteStatementIteratorNativeIntrinsic",
+      "connectionRole": "lower-native-iterator-helper",
+      "candidateDispositionHint": "unknown",
+      "lowerNativeEdge": {
+        "status": "self-native-receiver",
+        "targetCandidateSha256": "51a232ec4fecf1ba8eb345bfcc366967a5c9d64b66e8d16bc409e5bc92b7bcbc",
+        "reason": "The exact definition-time helper binding proves this lower native candidate itself; inventory evidence does not grant route authority."
+      },
+      "sqlEvidence": {
+        "status": "unknown",
+        "shape": "native-iterator-lineage",
+        "sha256": null,
+        "token": null
+      },
+      "parameterProvenance": {
+        "status": "unresolved",
+        "source": null
+      },
+      "phase": {
+        "status": "unresolved",
+        "value": null
+      },
+      "ownerCompositionExpectation": {
+        "status": "unresolved",
+        "owner": null,
+        "composition": null
+      },
+      "budget": {
+        "row": {
+          "kind": "unknown",
+          "maximum": null
+        },
+        "cursor": {
+          "kind": "unknown",
+          "maximum": null
+        }
+      },
+      "resourceLifecycle": {
+        "status": "unresolved",
+        "states": []
+      },
+      "routeId": null,
+      "disposition": "unknown",
+      "reason": "The lower native prepare/read/retirement lifecycle edge and bounded family expansion are structurally proven, but parameters, phase, owner/composition identity, budgets, accepted retirement receipt, and runtime route authority remain unresolved.",
+      "nativeProjectionAuthority": false,
+      "runtimeRouteAuthority": false,
+      "callFamilyId": "ts:baseline-source:native:transactionRows",
+      "logicalExecutionId": "ts:baseline-source:native:transactionRows",
+      "resourceLifecycleId": "resource:ts:baseline-source:native:transactionRows",
+      "invocationContexts": [
+        {
+          "id": "transactionRows",
+          "connectionState": "caller-owned-exclusive-transaction",
+          "rm1PermitAvailable": false,
+          "futurePermitPolicy": "never"
+        }
+      ],
+      "negativeFacts": {
+        "zeroParameter": null,
+        "noSqlRoute": false,
+        "controlStatement": false,
+        "reopenAuditOnly": false,
+        "dynamicSqlUnclosed": false,
+        "nativeProjectionProduced": false
+      },
+      "dynamicClosure": {
+        "status": "bounded-static-family-unresolved-route",
+        "source": "transactionRows-definition-time-family-set",
+        "cardinality": 9,
+        "quoting": "source-definition-fixed-sql",
+        "assetOrdinal": null,
+        "digestKind": "sql-expansion-set",
+        "sourceAssetSha256": null,
+        "expansionSqlSha256": [
+          "58ce57a98f4764a5a9f3fb0d0c8cbf5c7c6c750d936272fafb886cf70fbbe06f",
+          "4175582b79b284dc76b0e2831ed99fff5c6281cd9cec3a0450de3c46c92a02ae",
+          "ed12e5eda66ae832048a8a6b6013525a4e3299cd9d504990897c5ac79773e7b0",
+          "0b2d668ba0bdb007867433b89d3bf25baf9a9fe3b175d8c85a7cf508652c24a1",
+          "7efd6a6717e91358e02045a7088515a76f582964b66f913cf125bf9b227e3f4b",
+          "1c826fc00982fc0f6a6b9135e5d9f20e1e333e287b6b3356aa0e02b6fd0c29a4",
+          "8ab72ef7a67b381810441b55acedfad29d12a7ff268fec27cb97e12b2e55464d",
+          "f506c5efb4ee1330f679340339d66435bd14c8368de6c018caf50d1314ab261e",
+          "a1bcd756f6aa187865b737f68f56906e1243883eddd0998673ef8015556e0ddd"
+        ],
+        "componentContract": [
+          "family",
+          "sql",
+          "decoder",
+          "fetch",
+          "retirement"
+        ]
+      },
+      "nonAuthorizingRole": {
+        "id": "callsite-inventory",
+        "inventoryEvidenceOnly": true,
+        "mayIssuePermit": false,
+        "mayMintNativeProjection": false,
+        "mayAuthorizeRuntimeRoute": false
+      },
+      "riskCodes": [
+        "R3_SQL_CLOSURE_UNRESOLVED",
+        "R4_PARAMETERS_UNRESOLVED",
+        "R5_PHASE_UNRESOLVED",
+        "R6_OWNER_COMPOSITION_UNRESOLVED",
+        "R7_BUDGET_UNRESOLVED",
+        "R8_RESOURCE_LIFECYCLE_UNRESOLVED",
+        "R9_ROUTE_AUTHORITY_ABSENT"
+      ],
+      "authorityBarriers": [
+        "route-disposition-unknown",
+        "native-projection-authority-false",
+        "runtime-route-authority-false",
+        "sql-closure-unresolved",
+        "parameter-provenance-unresolved",
+        "phase-unresolved",
+        "owner-composition-unresolved",
+        "budget-unresolved",
+        "resource-lifecycle-unresolved"
+      ],
+      "cursorPair": null,
+      "threatCodes": [
+        "GENERIC_SINK_ESCALATION",
+        "INJECTION_SEAM",
+        "API_STAGE_DOUBLE_COUNT",
+        "DYNAMIC_IDENTIFIER_EXPANSION",
+        "RESOURCE_CROSS_PAIRING"
+      ]
+    },
+    {
+      "language": "typescript",
+      "stableIdentity": {
+        "path": "packages/sqlite/src/operation-baseline-source.ts",
+        "line": 743,
+        "column": 7,
+        "method": "returnSQLiteStatementIteratorNativeIntrinsic",
+        "sqlOrigin": "native-iterator-lineage",
+        "occurrence": 0,
+        "scannerSha256": "a0940ec619f0bd6e43cdbd0d884cf73e2d37c36a5ed16392fbd6d16abb499ac5",
+        "candidateSha256": "a0940ec619f0bd6e43cdbd0d884cf73e2d37c36a5ed16392fbd6d16abb499ac5"
+      },
+      "receiverEvidence": {
+        "category": "confirmed-native-receiver",
+        "confidence": "proven",
+        "family": "native",
+        "kind": "iterator",
+        "aliasDepth": 1,
+        "reason": "sqlite-connection-native-helper-import:returnSQLiteStatementIteratorNativeIntrinsic"
+      },
+      "operationKind": "generic-sql-sink",
+      "apiStage": "returnSQLiteStatementIteratorNativeIntrinsic",
+      "connectionRole": "lower-native-iterator-retirement-helper",
+      "candidateDispositionHint": "unknown",
+      "lowerNativeEdge": {
+        "status": "self-native-receiver",
+        "targetCandidateSha256": "a0940ec619f0bd6e43cdbd0d884cf73e2d37c36a5ed16392fbd6d16abb499ac5",
+        "reason": "The exact definition-time helper binding proves this lower native candidate itself; inventory evidence does not grant route authority."
+      },
+      "sqlEvidence": {
+        "status": "unknown",
+        "shape": "native-iterator-lineage",
+        "sha256": null,
+        "token": null
+      },
+      "parameterProvenance": {
+        "status": "unresolved",
+        "source": null
+      },
+      "phase": {
+        "status": "unresolved",
+        "value": null
+      },
+      "ownerCompositionExpectation": {
+        "status": "unresolved",
+        "owner": null,
+        "composition": null
+      },
+      "budget": {
+        "row": {
+          "kind": "unknown",
+          "maximum": null
+        },
+        "cursor": {
+          "kind": "unknown",
+          "maximum": null
+        }
+      },
+      "resourceLifecycle": {
+        "status": "unresolved",
+        "states": []
+      },
+      "routeId": null,
+      "disposition": "unknown",
+      "reason": "The lower native prepare/read/retirement lifecycle edge and bounded family expansion are structurally proven, but parameters, phase, owner/composition identity, budgets, accepted retirement receipt, and runtime route authority remain unresolved.",
+      "nativeProjectionAuthority": false,
+      "runtimeRouteAuthority": false,
+      "callFamilyId": "ts:baseline-source:native:transactionRows",
+      "logicalExecutionId": "ts:baseline-source:native:transactionRows",
+      "resourceLifecycleId": "resource:ts:baseline-source:native:transactionRows",
+      "invocationContexts": [
+        {
+          "id": "transactionRows",
+          "connectionState": "caller-owned-exclusive-transaction",
+          "rm1PermitAvailable": false,
+          "futurePermitPolicy": "never"
+        }
+      ],
+      "negativeFacts": {
+        "zeroParameter": null,
+        "noSqlRoute": false,
+        "controlStatement": false,
+        "reopenAuditOnly": false,
+        "dynamicSqlUnclosed": false,
+        "nativeProjectionProduced": false
+      },
+      "dynamicClosure": {
+        "status": "bounded-static-family-unresolved-route",
+        "source": "transactionRows-definition-time-family-set",
+        "cardinality": 9,
+        "quoting": "source-definition-fixed-sql",
+        "assetOrdinal": null,
+        "digestKind": "sql-expansion-set",
+        "sourceAssetSha256": null,
+        "expansionSqlSha256": [
+          "58ce57a98f4764a5a9f3fb0d0c8cbf5c7c6c750d936272fafb886cf70fbbe06f",
+          "4175582b79b284dc76b0e2831ed99fff5c6281cd9cec3a0450de3c46c92a02ae",
+          "ed12e5eda66ae832048a8a6b6013525a4e3299cd9d504990897c5ac79773e7b0",
+          "0b2d668ba0bdb007867433b89d3bf25baf9a9fe3b175d8c85a7cf508652c24a1",
+          "7efd6a6717e91358e02045a7088515a76f582964b66f913cf125bf9b227e3f4b",
+          "1c826fc00982fc0f6a6b9135e5d9f20e1e333e287b6b3356aa0e02b6fd0c29a4",
+          "8ab72ef7a67b381810441b55acedfad29d12a7ff268fec27cb97e12b2e55464d",
+          "f506c5efb4ee1330f679340339d66435bd14c8368de6c018caf50d1314ab261e",
+          "a1bcd756f6aa187865b737f68f56906e1243883eddd0998673ef8015556e0ddd"
+        ],
+        "componentContract": [
+          "family",
+          "sql",
+          "decoder",
+          "fetch",
+          "retirement"
+        ]
+      },
+      "nonAuthorizingRole": {
+        "id": "callsite-inventory",
+        "inventoryEvidenceOnly": true,
+        "mayIssuePermit": false,
+        "mayMintNativeProjection": false,
+        "mayAuthorizeRuntimeRoute": false
+      },
+      "riskCodes": [
+        "R3_SQL_CLOSURE_UNRESOLVED",
+        "R4_PARAMETERS_UNRESOLVED",
+        "R5_PHASE_UNRESOLVED",
+        "R6_OWNER_COMPOSITION_UNRESOLVED",
+        "R7_BUDGET_UNRESOLVED",
+        "R8_RESOURCE_LIFECYCLE_UNRESOLVED",
+        "R9_ROUTE_AUTHORITY_ABSENT"
+      ],
+      "authorityBarriers": [
+        "route-disposition-unknown",
+        "native-projection-authority-false",
+        "runtime-route-authority-false",
+        "sql-closure-unresolved",
+        "parameter-provenance-unresolved",
+        "phase-unresolved",
+        "owner-composition-unresolved",
+        "budget-unresolved",
+        "resource-lifecycle-unresolved"
+      ],
+      "cursorPair": null,
+      "threatCodes": [
+        "GENERIC_SINK_ESCALATION",
+        "INJECTION_SEAM",
+        "API_STAGE_DOUBLE_COUNT",
+        "DYNAMIC_IDENTIFIER_EXPANSION",
+        "RESOURCE_CROSS_PAIRING"
+      ]
+    },
+    {
+      "language": "typescript",
+      "stableIdentity": {
+        "path": "packages/sqlite/src/operation-baseline-source.ts",
+        "line": 1322,
         "column": 7,
         "method": "get",
         "sqlOrigin": "prepared-statement",
         "occurrence": 0,
-        "scannerSha256": "3efa7ad97ba019c4a94dcf3e4a8ac582e2d2ec69d1adea391a571f7456678792",
-        "candidateSha256": "3efa7ad97ba019c4a94dcf3e4a8ac582e2d2ec69d1adea391a571f7456678792"
+        "scannerSha256": "8d01f58a2067b7b35c6d955dbb558889c13142fdfc697d1925c18bf40ca78310",
+        "candidateSha256": "8d01f58a2067b7b35c6d955dbb558889c13142fdfc697d1925c18bf40ca78310"
       },
       "receiverEvidence": {
         "category": "wrapper-guard-or-test-like-production-probe",
@@ -934,9 +1313,9 @@
       "reason": "The prepare and terminal get/iterate candidate share one logical edge; the wrapper lower-native target, phase, budgets, lifecycle, and route remain unresolved.",
       "nativeProjectionAuthority": false,
       "runtimeRouteAuthority": false,
-      "callFamilyId": "ts:baseline-source:841",
-      "logicalExecutionId": "ts:baseline-source:841",
-      "resourceLifecycleId": "resource:ts:baseline-source:841",
+      "callFamilyId": "ts:baseline-source:1322",
+      "logicalExecutionId": "ts:baseline-source:1322",
+      "resourceLifecycleId": "resource:ts:baseline-source:1322",
       "invocationContexts": [
         {
           "id": "captureSQLiteV1BaselineSourceSummary.applicationId",
@@ -1002,13 +1381,13 @@
       "language": "typescript",
       "stableIdentity": {
         "path": "packages/sqlite/src/operation-baseline-source.ts",
-        "line": 841,
+        "line": 1322,
         "column": 7,
         "method": "prepare",
         "sqlOrigin": "direct-argument",
         "occurrence": 0,
-        "scannerSha256": "f9898e9df75ff5f64adbcbaa352c65fa72da8d62cfb0edebdfada9582f6ed34d",
-        "candidateSha256": "f9898e9df75ff5f64adbcbaa352c65fa72da8d62cfb0edebdfada9582f6ed34d"
+        "scannerSha256": "bc4618178e87a782116d4eb50af4852cdca1061edc8a3f1df76ab63e879de534",
+        "candidateSha256": "bc4618178e87a782116d4eb50af4852cdca1061edc8a3f1df76ab63e879de534"
       },
       "receiverEvidence": {
         "category": "wrapper-guard-or-test-like-production-probe",
@@ -1065,9 +1444,9 @@
       "reason": "The prepare and terminal get/iterate candidate share one logical edge; the wrapper lower-native target, phase, budgets, lifecycle, and route remain unresolved.",
       "nativeProjectionAuthority": false,
       "runtimeRouteAuthority": false,
-      "callFamilyId": "ts:baseline-source:841",
-      "logicalExecutionId": "ts:baseline-source:841",
-      "resourceLifecycleId": "resource:ts:baseline-source:841",
+      "callFamilyId": "ts:baseline-source:1322",
+      "logicalExecutionId": "ts:baseline-source:1322",
+      "resourceLifecycleId": "resource:ts:baseline-source:1322",
       "invocationContexts": [
         {
           "id": "captureSQLiteV1BaselineSourceSummary.applicationId",
@@ -1133,13 +1512,13 @@
       "language": "typescript",
       "stableIdentity": {
         "path": "packages/sqlite/src/operation-baseline-source.ts",
-        "line": 856,
+        "line": 1337,
         "column": 7,
         "method": "get",
         "sqlOrigin": "prepared-statement",
         "occurrence": 0,
-        "scannerSha256": "3dac420fb2e75a892a9ca6236c78c8a00d8cde6bf0166e2af54d7eb3ad0e0d4b",
-        "candidateSha256": "3dac420fb2e75a892a9ca6236c78c8a00d8cde6bf0166e2af54d7eb3ad0e0d4b"
+        "scannerSha256": "f5b4f6010b751778d25d54b59a8f08b26af20f64069d250c3cbbcd418431bb35",
+        "candidateSha256": "f5b4f6010b751778d25d54b59a8f08b26af20f64069d250c3cbbcd418431bb35"
       },
       "receiverEvidence": {
         "category": "wrapper-guard-or-test-like-production-probe",
@@ -1196,9 +1575,9 @@
       "reason": "The prepare and terminal get/iterate candidate share one logical edge; the wrapper lower-native target, phase, budgets, lifecycle, and route remain unresolved.",
       "nativeProjectionAuthority": false,
       "runtimeRouteAuthority": false,
-      "callFamilyId": "ts:baseline-source:856",
-      "logicalExecutionId": "ts:baseline-source:856",
-      "resourceLifecycleId": "resource:ts:baseline-source:856",
+      "callFamilyId": "ts:baseline-source:1337",
+      "logicalExecutionId": "ts:baseline-source:1337",
+      "resourceLifecycleId": "resource:ts:baseline-source:1337",
       "invocationContexts": [
         {
           "id": "captureSQLiteV1BaselineSourceSummary.userVersion",
@@ -1264,13 +1643,13 @@
       "language": "typescript",
       "stableIdentity": {
         "path": "packages/sqlite/src/operation-baseline-source.ts",
-        "line": 856,
+        "line": 1337,
         "column": 7,
         "method": "prepare",
         "sqlOrigin": "direct-argument",
         "occurrence": 0,
-        "scannerSha256": "06b29fd92a9bec8f9fcf53d4889919bb5e6bf5a307eac7cc247f0b92edf57bed",
-        "candidateSha256": "06b29fd92a9bec8f9fcf53d4889919bb5e6bf5a307eac7cc247f0b92edf57bed"
+        "scannerSha256": "7603464c742b92d3501620b68ccc135909d21a69ad1fd5ece7db88e5cf4208aa",
+        "candidateSha256": "7603464c742b92d3501620b68ccc135909d21a69ad1fd5ece7db88e5cf4208aa"
       },
       "receiverEvidence": {
         "category": "wrapper-guard-or-test-like-production-probe",
@@ -1327,9 +1706,9 @@
       "reason": "The prepare and terminal get/iterate candidate share one logical edge; the wrapper lower-native target, phase, budgets, lifecycle, and route remain unresolved.",
       "nativeProjectionAuthority": false,
       "runtimeRouteAuthority": false,
-      "callFamilyId": "ts:baseline-source:856",
-      "logicalExecutionId": "ts:baseline-source:856",
-      "resourceLifecycleId": "resource:ts:baseline-source:856",
+      "callFamilyId": "ts:baseline-source:1337",
+      "logicalExecutionId": "ts:baseline-source:1337",
+      "resourceLifecycleId": "resource:ts:baseline-source:1337",
       "invocationContexts": [
         {
           "id": "captureSQLiteV1BaselineSourceSummary.userVersion",
@@ -1395,13 +1774,13 @@
       "language": "typescript",
       "stableIdentity": {
         "path": "packages/sqlite/src/operation-baseline-source.ts",
-        "line": 869,
+        "line": 1350,
         "column": 28,
         "method": "get",
         "sqlOrigin": "prepared-statement",
         "occurrence": 0,
-        "scannerSha256": "833f3612bc4379feb8c1cf971dabb65670a4b03ffe48d0e4d7cad8662fd6e52a",
-        "candidateSha256": "833f3612bc4379feb8c1cf971dabb65670a4b03ffe48d0e4d7cad8662fd6e52a"
+        "scannerSha256": "c29de247fe90b61d9f0390ce71993f77b2857c3cd1fec07b1e33d1e2087155b1",
+        "candidateSha256": "c29de247fe90b61d9f0390ce71993f77b2857c3cd1fec07b1e33d1e2087155b1"
       },
       "receiverEvidence": {
         "category": "wrapper-guard-or-test-like-production-probe",
@@ -1458,9 +1837,9 @@
       "reason": "The prepare and terminal get/iterate candidate share one logical edge; the wrapper lower-native target, phase, budgets, lifecycle, and route remain unresolved.",
       "nativeProjectionAuthority": false,
       "runtimeRouteAuthority": false,
-      "callFamilyId": "ts:baseline-source:869",
-      "logicalExecutionId": "ts:baseline-source:869",
-      "resourceLifecycleId": "resource:ts:baseline-source:869",
+      "callFamilyId": "ts:baseline-source:1350",
+      "logicalExecutionId": "ts:baseline-source:1350",
+      "resourceLifecycleId": "resource:ts:baseline-source:1350",
       "invocationContexts": [
         {
           "id": "captureSQLiteV1BaselineSourceSummary.sourceIdentity",
@@ -1526,13 +1905,13 @@
       "language": "typescript",
       "stableIdentity": {
         "path": "packages/sqlite/src/operation-baseline-source.ts",
-        "line": 869,
+        "line": 1350,
         "column": 28,
         "method": "prepare",
         "sqlOrigin": "direct-argument",
         "occurrence": 0,
-        "scannerSha256": "6478b558ea0e728ba35a715a9a364dc2c974055e457e8f32f62c6553ec26c371",
-        "candidateSha256": "6478b558ea0e728ba35a715a9a364dc2c974055e457e8f32f62c6553ec26c371"
+        "scannerSha256": "b98346ccd6501fe2a7d9d58fadad9e64a6a7510a86800c1a828ce3e8ec7550c0",
+        "candidateSha256": "b98346ccd6501fe2a7d9d58fadad9e64a6a7510a86800c1a828ce3e8ec7550c0"
       },
       "receiverEvidence": {
         "category": "wrapper-guard-or-test-like-production-probe",
@@ -1589,9 +1968,9 @@
       "reason": "The prepare and terminal get/iterate candidate share one logical edge; the wrapper lower-native target, phase, budgets, lifecycle, and route remain unresolved.",
       "nativeProjectionAuthority": false,
       "runtimeRouteAuthority": false,
-      "callFamilyId": "ts:baseline-source:869",
-      "logicalExecutionId": "ts:baseline-source:869",
-      "resourceLifecycleId": "resource:ts:baseline-source:869",
+      "callFamilyId": "ts:baseline-source:1350",
+      "logicalExecutionId": "ts:baseline-source:1350",
+      "resourceLifecycleId": "resource:ts:baseline-source:1350",
       "invocationContexts": [
         {
           "id": "captureSQLiteV1BaselineSourceSummary.sourceIdentity",
@@ -1657,13 +2036,13 @@
       "language": "typescript",
       "stableIdentity": {
         "path": "packages/sqlite/src/operation-baseline-source.ts",
-        "line": 912,
+        "line": 1393,
         "column": 5,
         "method": "get",
         "sqlOrigin": "prepared-statement",
         "occurrence": 0,
-        "scannerSha256": "69aeed0e53bb57f74b1022fc0a54668b507f9b97678649d45f8baecfd9359cbe",
-        "candidateSha256": "69aeed0e53bb57f74b1022fc0a54668b507f9b97678649d45f8baecfd9359cbe"
+        "scannerSha256": "e0600c9d432f6f129d96666de66c69a32ffdb11b5c7b8016c1555b98d4942398",
+        "candidateSha256": "e0600c9d432f6f129d96666de66c69a32ffdb11b5c7b8016c1555b98d4942398"
       },
       "receiverEvidence": {
         "category": "wrapper-guard-or-test-like-production-probe",
@@ -1720,9 +2099,9 @@
       "reason": "The prepare and terminal get/iterate candidate share one logical edge; the wrapper lower-native target, phase, budgets, lifecycle, and route remain unresolved.",
       "nativeProjectionAuthority": false,
       "runtimeRouteAuthority": false,
-      "callFamilyId": "ts:baseline-source:912",
-      "logicalExecutionId": "ts:baseline-source:912",
-      "resourceLifecycleId": "resource:ts:baseline-source:912",
+      "callFamilyId": "ts:baseline-source:1393",
+      "logicalExecutionId": "ts:baseline-source:1393",
+      "resourceLifecycleId": "resource:ts:baseline-source:1393",
       "invocationContexts": [
         {
           "id": "captureSQLiteV1BaselineSourceSummary.baselineCounts",
@@ -1788,13 +2167,13 @@
       "language": "typescript",
       "stableIdentity": {
         "path": "packages/sqlite/src/operation-baseline-source.ts",
-        "line": 912,
+        "line": 1393,
         "column": 5,
         "method": "prepare",
         "sqlOrigin": "direct-argument",
         "occurrence": 0,
-        "scannerSha256": "9967ff2cfe940293a6cab9e6f88fd727bcfd1fcca7f8a8f1c57edf24afc99712",
-        "candidateSha256": "9967ff2cfe940293a6cab9e6f88fd727bcfd1fcca7f8a8f1c57edf24afc99712"
+        "scannerSha256": "f97ab1a0cfb67adf828188b9a1c3de49cac89a5a8852ab9fd2ae8a07b52f2392",
+        "candidateSha256": "f97ab1a0cfb67adf828188b9a1c3de49cac89a5a8852ab9fd2ae8a07b52f2392"
       },
       "receiverEvidence": {
         "category": "wrapper-guard-or-test-like-production-probe",
@@ -1851,9 +2230,9 @@
       "reason": "The prepare and terminal get/iterate candidate share one logical edge; the wrapper lower-native target, phase, budgets, lifecycle, and route remain unresolved.",
       "nativeProjectionAuthority": false,
       "runtimeRouteAuthority": false,
-      "callFamilyId": "ts:baseline-source:912",
-      "logicalExecutionId": "ts:baseline-source:912",
-      "resourceLifecycleId": "resource:ts:baseline-source:912",
+      "callFamilyId": "ts:baseline-source:1393",
+      "logicalExecutionId": "ts:baseline-source:1393",
+      "resourceLifecycleId": "resource:ts:baseline-source:1393",
       "invocationContexts": [
         {
           "id": "captureSQLiteV1BaselineSourceSummary.baselineCounts",
@@ -1919,13 +2298,13 @@
       "language": "typescript",
       "stableIdentity": {
         "path": "packages/sqlite/src/operation-baseline-source.ts",
-        "line": 925,
+        "line": 1421,
         "column": 15,
         "method": "get",
         "sqlOrigin": "prepared-statement",
         "occurrence": 0,
-        "scannerSha256": "23f59056b7484c4e778a9bd2013192a92912c853a16959ab9fa3cdcccadd6ae1",
-        "candidateSha256": "23f59056b7484c4e778a9bd2013192a92912c853a16959ab9fa3cdcccadd6ae1"
+        "scannerSha256": "b815155aab62733e9c059dae7ef36919a68543a06d84dbea424491f9c9a84a04",
+        "candidateSha256": "b815155aab62733e9c059dae7ef36919a68543a06d84dbea424491f9c9a84a04"
       },
       "receiverEvidence": {
         "category": "wrapper-guard-or-test-like-production-probe",
@@ -1982,9 +2361,9 @@
       "reason": "The prepare and terminal get/iterate candidate share one logical edge; the wrapper lower-native target, phase, budgets, lifecycle, and route remain unresolved.",
       "nativeProjectionAuthority": false,
       "runtimeRouteAuthority": false,
-      "callFamilyId": "ts:baseline-source:925",
-      "logicalExecutionId": "ts:baseline-source:925",
-      "resourceLifecycleId": "resource:ts:baseline-source:925",
+      "callFamilyId": "ts:baseline-source:1421",
+      "logicalExecutionId": "ts:baseline-source:1421",
+      "resourceLifecycleId": "resource:ts:baseline-source:1421",
       "invocationContexts": [
         {
           "id": "captureSQLiteV1BaselineSourceSummary.maximumNonCursorObserved",
@@ -2050,13 +2429,13 @@
       "language": "typescript",
       "stableIdentity": {
         "path": "packages/sqlite/src/operation-baseline-source.ts",
-        "line": 925,
+        "line": 1421,
         "column": 15,
         "method": "prepare",
         "sqlOrigin": "direct-argument",
         "occurrence": 0,
-        "scannerSha256": "18673e280420545c115da1fb282279f57c39a49e6f14f7f56d086ffc88077e4c",
-        "candidateSha256": "18673e280420545c115da1fb282279f57c39a49e6f14f7f56d086ffc88077e4c"
+        "scannerSha256": "58124595fb819fc352ee67cc307eb4e8c54d6018b3655af8a251a5feab9b68e7",
+        "candidateSha256": "58124595fb819fc352ee67cc307eb4e8c54d6018b3655af8a251a5feab9b68e7"
       },
       "receiverEvidence": {
         "category": "wrapper-guard-or-test-like-production-probe",
@@ -2113,9 +2492,9 @@
       "reason": "The prepare and terminal get/iterate candidate share one logical edge; the wrapper lower-native target, phase, budgets, lifecycle, and route remain unresolved.",
       "nativeProjectionAuthority": false,
       "runtimeRouteAuthority": false,
-      "callFamilyId": "ts:baseline-source:925",
-      "logicalExecutionId": "ts:baseline-source:925",
-      "resourceLifecycleId": "resource:ts:baseline-source:925",
+      "callFamilyId": "ts:baseline-source:1421",
+      "logicalExecutionId": "ts:baseline-source:1421",
+      "resourceLifecycleId": "resource:ts:baseline-source:1421",
       "invocationContexts": [
         {
           "id": "captureSQLiteV1BaselineSourceSummary.maximumNonCursorObserved",
@@ -2181,13 +2560,13 @@
       "language": "typescript",
       "stableIdentity": {
         "path": "packages/sqlite/src/operation-baseline-source.ts",
-        "line": 932,
+        "line": 1428,
         "column": 15,
         "method": "get",
         "sqlOrigin": "prepared-statement",
         "occurrence": 0,
-        "scannerSha256": "d63d03251fa77eda2b761e7bfa62fa20549eb7c4df17afcaffa20fabcb420a2f",
-        "candidateSha256": "d63d03251fa77eda2b761e7bfa62fa20549eb7c4df17afcaffa20fabcb420a2f"
+        "scannerSha256": "2af2a942bd07798315aed342c263b93d381e607b0557951d857a154c85fca4ad",
+        "candidateSha256": "2af2a942bd07798315aed342c263b93d381e607b0557951d857a154c85fca4ad"
       },
       "receiverEvidence": {
         "category": "wrapper-guard-or-test-like-production-probe",
@@ -2244,9 +2623,9 @@
       "reason": "The prepare and terminal get/iterate candidate share one logical edge; the wrapper lower-native target, phase, budgets, lifecycle, and route remain unresolved.",
       "nativeProjectionAuthority": false,
       "runtimeRouteAuthority": false,
-      "callFamilyId": "ts:baseline-source:932",
-      "logicalExecutionId": "ts:baseline-source:932",
-      "resourceLifecycleId": "resource:ts:baseline-source:932",
+      "callFamilyId": "ts:baseline-source:1428",
+      "logicalExecutionId": "ts:baseline-source:1428",
+      "resourceLifecycleId": "resource:ts:baseline-source:1428",
       "invocationContexts": [
         {
           "id": "captureSQLiteV1BaselineSourceSummary.providerHighWater",
@@ -2312,13 +2691,13 @@
       "language": "typescript",
       "stableIdentity": {
         "path": "packages/sqlite/src/operation-baseline-source.ts",
-        "line": 932,
+        "line": 1428,
         "column": 15,
         "method": "prepare",
         "sqlOrigin": "direct-argument",
         "occurrence": 0,
-        "scannerSha256": "7d48d78d85c12e216fa814ef052257c94fe4eb131d34b4a334b48880c9c1628f",
-        "candidateSha256": "7d48d78d85c12e216fa814ef052257c94fe4eb131d34b4a334b48880c9c1628f"
+        "scannerSha256": "6cf1f0dde5cf36a9c1c29d6396338817a13e436f53a0c536ba07963a567b5b61",
+        "candidateSha256": "6cf1f0dde5cf36a9c1c29d6396338817a13e436f53a0c536ba07963a567b5b61"
       },
       "receiverEvidence": {
         "category": "wrapper-guard-or-test-like-production-probe",
@@ -2375,9 +2754,9 @@
       "reason": "The prepare and terminal get/iterate candidate share one logical edge; the wrapper lower-native target, phase, budgets, lifecycle, and route remain unresolved.",
       "nativeProjectionAuthority": false,
       "runtimeRouteAuthority": false,
-      "callFamilyId": "ts:baseline-source:932",
-      "logicalExecutionId": "ts:baseline-source:932",
-      "resourceLifecycleId": "resource:ts:baseline-source:932",
+      "callFamilyId": "ts:baseline-source:1428",
+      "logicalExecutionId": "ts:baseline-source:1428",
+      "resourceLifecycleId": "resource:ts:baseline-source:1428",
       "invocationContexts": [
         {
           "id": "captureSQLiteV1BaselineSourceSummary.providerHighWater",
@@ -2443,13 +2822,13 @@
       "language": "python",
       "stableIdentity": {
         "path": "python/src/graph_engineering/sqlite_operation_baseline_source.py",
-        "line": 2153,
+        "line": 2159,
         "column": 18,
         "method": "execute",
         "sqlOrigin": "direct-argument",
         "occurrence": 0,
-        "scannerSha256": "3011b5fa0125be8ece5171031cf10fa7d8d5e6cadccaf5f5c55224be109e77ba",
-        "candidateSha256": "84c727a247ca05c00310373ccd47e49b2e5c257f1840b7ee39ec7c6fc63dd3f3"
+        "scannerSha256": "83486fabb8109b78ae086193f7e5c38c0009d4e69e671ae76307b421d162fed0",
+        "candidateSha256": "d8f002e0c49efde2a02df52efa8141b560f8e922d4f21964e0a3bde85777c840"
       },
       "receiverEvidence": {
         "category": "confirmed-native-receiver",
@@ -2465,7 +2844,7 @@
       "candidateDispositionHint": "unknown",
       "lowerNativeEdge": {
         "status": "self-native-receiver",
-        "targetCandidateSha256": "84c727a247ca05c00310373ccd47e49b2e5c257f1840b7ee39ec7c6fc63dd3f3",
+        "targetCandidateSha256": "d8f002e0c49efde2a02df52efa8141b560f8e922d4f21964e0a3bde85777c840",
         "reason": "Local structure identifies this native receiver; that fact is not route authority."
       },
       "sqlEvidence": {
@@ -2573,13 +2952,13 @@
       "language": "python",
       "stableIdentity": {
         "path": "python/src/graph_engineering/sqlite_operation_baseline_source.py",
-        "line": 3012,
+        "line": 3018,
         "column": 32,
         "method": "execute",
         "sqlOrigin": "direct-argument",
         "occurrence": 0,
-        "scannerSha256": "e949fae387525911f6401ee18432384e5b70ad8590c4d3ee7e446109c104bcaf",
-        "candidateSha256": "67df2bed8fdd338376ebbb0a7362cba122bda0523c58e5af81f5faace63679bb"
+        "scannerSha256": "cf12420b2b6a6a477bf60802350501fa44ff8dd15bd6854e543278c5993948ee",
+        "candidateSha256": "fff6d95732d66bb364ae0ff066235de6b38f7ececa872032c41d179ea35ddb11"
       },
       "receiverEvidence": {
         "category": "unknown",
@@ -2710,13 +3089,13 @@
       "language": "python",
       "stableIdentity": {
         "path": "python/src/graph_engineering/sqlite_operation_baseline_source.py",
-        "line": 3201,
+        "line": 3207,
         "column": 22,
         "method": "cursor",
         "sqlOrigin": "none",
         "occurrence": 0,
-        "scannerSha256": "f95944bfda3baa112aa8466062258066b2d33ec8516dc5f7e64bf3857c08f5e2",
-        "candidateSha256": "ccb743868b62d223fbe3b6dbe35cfc981d4189a852761307ae34a6c46b1371c9"
+        "scannerSha256": "a39bd74d6c5135c1bbcec98c75859fbae2f53913baeafd9245ea03bc17012a7f",
+        "candidateSha256": "7f466c20fe923733050f1f90397ffe4b69625b17fa0e49ea9c6127430e46bfbe"
       },
       "receiverEvidence": {
         "category": "confirmed-native-receiver",
@@ -2732,7 +3111,7 @@
       "candidateDispositionHint": "unknown",
       "lowerNativeEdge": {
         "status": "self-native-receiver",
-        "targetCandidateSha256": "ccb743868b62d223fbe3b6dbe35cfc981d4189a852761307ae34a6c46b1371c9",
+        "targetCandidateSha256": "7f466c20fe923733050f1f90397ffe4b69625b17fa0e49ea9c6127430e46bfbe",
         "reason": "Local structure identifies this native receiver; that fact is not route authority."
       },
       "sqlEvidence": {
@@ -2828,8 +3207,8 @@
       ],
       "cursorPair": {
         "status": "unresolved-binding",
-        "allocationCandidateSha256": "ccb743868b62d223fbe3b6dbe35cfc981d4189a852761307ae34a6c46b1371c9",
-        "executionCandidateSha256": "03478beca5c4f172ec72764b9801158f199b5d63617cb5c797218cc2da952622",
+        "allocationCandidateSha256": "7f466c20fe923733050f1f90397ffe4b69625b17fa0e49ea9c6127430e46bfbe",
+        "executionCandidateSha256": "4897b328f915cd972e2113161624f2a16446e8ccf6bfb4cdb46f897f3b848dc8",
         "connectionGeneration": {
           "status": "unresolved",
           "value": null
@@ -2852,13 +3231,13 @@
       "language": "python",
       "stableIdentity": {
         "path": "python/src/graph_engineering/sqlite_operation_baseline_source.py",
-        "line": 3243,
+        "line": 3249,
         "column": 13,
         "method": "execute",
         "sqlOrigin": "direct-argument",
         "occurrence": 0,
-        "scannerSha256": "62f0b0fc0e5cd329c6e122b2abcae44c2b8a6c43eae42f0e7c7d1614d0709a87",
-        "candidateSha256": "03478beca5c4f172ec72764b9801158f199b5d63617cb5c797218cc2da952622"
+        "scannerSha256": "40cd2c6be651cb554a9e96df534f9846625ebf898bd5b44eba753e84d64ea9c4",
+        "candidateSha256": "4897b328f915cd972e2113161624f2a16446e8ccf6bfb4cdb46f897f3b848dc8"
       },
       "receiverEvidence": {
         "category": "unknown",
@@ -2980,8 +3359,8 @@
       ],
       "cursorPair": {
         "status": "unresolved-binding",
-        "allocationCandidateSha256": "ccb743868b62d223fbe3b6dbe35cfc981d4189a852761307ae34a6c46b1371c9",
-        "executionCandidateSha256": "03478beca5c4f172ec72764b9801158f199b5d63617cb5c797218cc2da952622",
+        "allocationCandidateSha256": "7f466c20fe923733050f1f90397ffe4b69625b17fa0e49ea9c6127430e46bfbe",
+        "executionCandidateSha256": "4897b328f915cd972e2113161624f2a16446e8ccf6bfb4cdb46f897f3b848dc8",
         "connectionGeneration": {
           "status": "unresolved",
           "value": null
@@ -3005,13 +3384,13 @@
       "language": "python",
       "stableIdentity": {
         "path": "python/src/graph_engineering/sqlite_operation_baseline_source.py",
-        "line": 3344,
+        "line": 3350,
         "column": 22,
         "method": "cursor",
         "sqlOrigin": "none",
         "occurrence": 0,
-        "scannerSha256": "690b6279f66a34c9639ca2a23ceef34101031060280fa85957a41d23d01ac306",
-        "candidateSha256": "7bb76c58da98da8c205a3f4a48854d28c7883d0f3e59bf7e98bf1a11bdf0f033"
+        "scannerSha256": "24d6953b4d65ef62e6d2b379afcab6427d7ba3461ab2ea4e79a840e5b4962ac7",
+        "candidateSha256": "679ae6e32bc468f3cdb4a9e531b8eb6fdb89854888810ede11459135a7c84a25"
       },
       "receiverEvidence": {
         "category": "confirmed-native-receiver",
@@ -3027,7 +3406,7 @@
       "candidateDispositionHint": "unknown",
       "lowerNativeEdge": {
         "status": "self-native-receiver",
-        "targetCandidateSha256": "7bb76c58da98da8c205a3f4a48854d28c7883d0f3e59bf7e98bf1a11bdf0f033",
+        "targetCandidateSha256": "679ae6e32bc468f3cdb4a9e531b8eb6fdb89854888810ede11459135a7c84a25",
         "reason": "Local structure identifies this native receiver; that fact is not route authority."
       },
       "sqlEvidence": {
@@ -3123,8 +3502,8 @@
       ],
       "cursorPair": {
         "status": "unresolved-binding",
-        "allocationCandidateSha256": "7bb76c58da98da8c205a3f4a48854d28c7883d0f3e59bf7e98bf1a11bdf0f033",
-        "executionCandidateSha256": "27406b301619d7ded9c51f54e7ecb3a0cc409385dc83b1847410f67fdeed6074",
+        "allocationCandidateSha256": "679ae6e32bc468f3cdb4a9e531b8eb6fdb89854888810ede11459135a7c84a25",
+        "executionCandidateSha256": "afad201c3cf447b4566a53dbe0d8c3f8f0ef1a302b07f5b2917d280fc3954860",
         "connectionGeneration": {
           "status": "unresolved",
           "value": null
@@ -3147,13 +3526,13 @@
       "language": "python",
       "stableIdentity": {
         "path": "python/src/graph_engineering/sqlite_operation_baseline_source.py",
-        "line": 3501,
+        "line": 3507,
         "column": 26,
         "method": "execute",
         "sqlOrigin": "direct-argument",
         "occurrence": 0,
-        "scannerSha256": "09137baffe26bac1853e1e23423df450e62c373e1e503afab6816d1bfb57a46c",
-        "candidateSha256": "27406b301619d7ded9c51f54e7ecb3a0cc409385dc83b1847410f67fdeed6074"
+        "scannerSha256": "071fee55e44ee160f45a30b1ac308d39510d192909e1a5dce7a75440a6308793",
+        "candidateSha256": "afad201c3cf447b4566a53dbe0d8c3f8f0ef1a302b07f5b2917d280fc3954860"
       },
       "receiverEvidence": {
         "category": "unknown",
@@ -3275,8 +3654,8 @@
       ],
       "cursorPair": {
         "status": "unresolved-binding",
-        "allocationCandidateSha256": "7bb76c58da98da8c205a3f4a48854d28c7883d0f3e59bf7e98bf1a11bdf0f033",
-        "executionCandidateSha256": "27406b301619d7ded9c51f54e7ecb3a0cc409385dc83b1847410f67fdeed6074",
+        "allocationCandidateSha256": "679ae6e32bc468f3cdb4a9e531b8eb6fdb89854888810ede11459135a7c84a25",
+        "executionCandidateSha256": "afad201c3cf447b4566a53dbe0d8c3f8f0ef1a302b07f5b2917d280fc3954860",
         "connectionGeneration": {
           "status": "unresolved",
           "value": null
@@ -3300,13 +3679,13 @@
       "language": "python",
       "stableIdentity": {
         "path": "python/src/graph_engineering/sqlite_operation_baseline_source.py",
-        "line": 3603,
+        "line": 3609,
         "column": 22,
         "method": "cursor",
         "sqlOrigin": "none",
         "occurrence": 0,
-        "scannerSha256": "779f62b8961ef75dc5c8ba6864ce28eb62b16d7c38050ff601a647cf37e300f8",
-        "candidateSha256": "3db48ffdc148acf2a5281daf9206fa0fd3f10862e1646a16df1e3007f59ccf1c"
+        "scannerSha256": "2bf89571c1d45ceba501b72e8e11b3e6ad606ae99a0069fa88392960e89b80fa",
+        "candidateSha256": "83dba16a30617cdfb38d63f625e00987f291724a282e57cd8985028e6e81eea7"
       },
       "receiverEvidence": {
         "category": "confirmed-native-receiver",
@@ -3322,7 +3701,7 @@
       "candidateDispositionHint": "unknown",
       "lowerNativeEdge": {
         "status": "self-native-receiver",
-        "targetCandidateSha256": "3db48ffdc148acf2a5281daf9206fa0fd3f10862e1646a16df1e3007f59ccf1c",
+        "targetCandidateSha256": "83dba16a30617cdfb38d63f625e00987f291724a282e57cd8985028e6e81eea7",
         "reason": "Local structure identifies this native receiver; that fact is not route authority."
       },
       "sqlEvidence": {
@@ -3418,8 +3797,8 @@
       ],
       "cursorPair": {
         "status": "unresolved-binding",
-        "allocationCandidateSha256": "3db48ffdc148acf2a5281daf9206fa0fd3f10862e1646a16df1e3007f59ccf1c",
-        "executionCandidateSha256": "adce6fa522c529c5dd5c721ab9ecab67ce1f49d97b0c05271ca883db05bde106",
+        "allocationCandidateSha256": "83dba16a30617cdfb38d63f625e00987f291724a282e57cd8985028e6e81eea7",
+        "executionCandidateSha256": "ebfd2bef0b16771595f2b568336296887243f6738edeeba976141a59d500c872",
         "connectionGeneration": {
           "status": "unresolved",
           "value": null
@@ -3442,13 +3821,13 @@
       "language": "python",
       "stableIdentity": {
         "path": "python/src/graph_engineering/sqlite_operation_baseline_source.py",
-        "line": 3756,
+        "line": 3762,
         "column": 26,
         "method": "execute",
         "sqlOrigin": "direct-argument",
         "occurrence": 0,
-        "scannerSha256": "a561af1b558be1b9a1ef57879e951555066de723a2493738c97ffca608b28353",
-        "candidateSha256": "adce6fa522c529c5dd5c721ab9ecab67ce1f49d97b0c05271ca883db05bde106"
+        "scannerSha256": "e099415188c366ed9346db987704a3fe7f9379983814d22210fc53360f286f12",
+        "candidateSha256": "ebfd2bef0b16771595f2b568336296887243f6738edeeba976141a59d500c872"
       },
       "receiverEvidence": {
         "category": "unknown",
@@ -3570,8 +3949,8 @@
       ],
       "cursorPair": {
         "status": "unresolved-binding",
-        "allocationCandidateSha256": "3db48ffdc148acf2a5281daf9206fa0fd3f10862e1646a16df1e3007f59ccf1c",
-        "executionCandidateSha256": "adce6fa522c529c5dd5c721ab9ecab67ce1f49d97b0c05271ca883db05bde106",
+        "allocationCandidateSha256": "83dba16a30617cdfb38d63f625e00987f291724a282e57cd8985028e6e81eea7",
+        "executionCandidateSha256": "ebfd2bef0b16771595f2b568336296887243f6738edeeba976141a59d500c872",
         "connectionGeneration": {
           "status": "unresolved",
           "value": null
@@ -3595,13 +3974,13 @@
       "language": "python",
       "stableIdentity": {
         "path": "python/src/graph_engineering/sqlite_operation_baseline_source.py",
-        "line": 3859,
+        "line": 3865,
         "column": 22,
         "method": "cursor",
         "sqlOrigin": "none",
         "occurrence": 0,
-        "scannerSha256": "5467b2391bd974e6bd00539d54259a8f1c22f5fdd189c59f7a24a3b73cc3334b",
-        "candidateSha256": "7a90089b95f9b930ce605571d8e661a57fbc8728b906857e6972d8ba9e351304"
+        "scannerSha256": "71edc655a3092a290952bb0b92bdc44a7f1ac655ff9b4d6e9ac0ea32ac1a1ce9",
+        "candidateSha256": "468f8e63cb3b1d1c92b853e1f70b0d557fd927117f1e8735817bad8a3de76437"
       },
       "receiverEvidence": {
         "category": "confirmed-native-receiver",
@@ -3617,7 +3996,7 @@
       "candidateDispositionHint": "unknown",
       "lowerNativeEdge": {
         "status": "self-native-receiver",
-        "targetCandidateSha256": "7a90089b95f9b930ce605571d8e661a57fbc8728b906857e6972d8ba9e351304",
+        "targetCandidateSha256": "468f8e63cb3b1d1c92b853e1f70b0d557fd927117f1e8735817bad8a3de76437",
         "reason": "Local structure identifies this native receiver; that fact is not route authority."
       },
       "sqlEvidence": {
@@ -3713,8 +4092,8 @@
       ],
       "cursorPair": {
         "status": "unresolved-binding",
-        "allocationCandidateSha256": "7a90089b95f9b930ce605571d8e661a57fbc8728b906857e6972d8ba9e351304",
-        "executionCandidateSha256": "47f9b33db0be4348dea6b45207c7c0ef988448878424ebfccf7741b51a7b163b",
+        "allocationCandidateSha256": "468f8e63cb3b1d1c92b853e1f70b0d557fd927117f1e8735817bad8a3de76437",
+        "executionCandidateSha256": "c489372325b722291e069703148c12d58233f80018bcc5cf8fefc9a03c6f04ff",
         "connectionGeneration": {
           "status": "unresolved",
           "value": null
@@ -3737,13 +4116,13 @@
       "language": "python",
       "stableIdentity": {
         "path": "python/src/graph_engineering/sqlite_operation_baseline_source.py",
-        "line": 4004,
+        "line": 4010,
         "column": 26,
         "method": "execute",
         "sqlOrigin": "direct-argument",
         "occurrence": 0,
-        "scannerSha256": "4e70204f8ffe3e919af07e46d3b9781ccc22e132760ebf6feb914e570f1b2297",
-        "candidateSha256": "47f9b33db0be4348dea6b45207c7c0ef988448878424ebfccf7741b51a7b163b"
+        "scannerSha256": "521558ea2bec75180e4b0d21eb4466693c8bb335b42c11bfbb2d0229430a6b3c",
+        "candidateSha256": "c489372325b722291e069703148c12d58233f80018bcc5cf8fefc9a03c6f04ff"
       },
       "receiverEvidence": {
         "category": "unknown",
@@ -3865,8 +4244,8 @@
       ],
       "cursorPair": {
         "status": "unresolved-binding",
-        "allocationCandidateSha256": "7a90089b95f9b930ce605571d8e661a57fbc8728b906857e6972d8ba9e351304",
-        "executionCandidateSha256": "47f9b33db0be4348dea6b45207c7c0ef988448878424ebfccf7741b51a7b163b",
+        "allocationCandidateSha256": "468f8e63cb3b1d1c92b853e1f70b0d557fd927117f1e8735817bad8a3de76437",
+        "executionCandidateSha256": "c489372325b722291e069703148c12d58233f80018bcc5cf8fefc9a03c6f04ff",
         "connectionGeneration": {
           "status": "unresolved",
           "value": null
@@ -3890,13 +4269,13 @@
       "language": "python",
       "stableIdentity": {
         "path": "python/src/graph_engineering/sqlite_operation_baseline_source.py",
-        "line": 4100,
+        "line": 4106,
         "column": 22,
         "method": "cursor",
         "sqlOrigin": "none",
         "occurrence": 0,
-        "scannerSha256": "448f9f779064409b0691608697f6d0f29317ca7564de2d0ff51f6836eabdea03",
-        "candidateSha256": "c523b29d54c14d4fd7a7d57da78757e7a9b4f76b13f2f9b8ede4a8f5f940ed8d"
+        "scannerSha256": "287562e007fecc0972767c893fa2d7996f8670e3931589446f8b242bb3deb860",
+        "candidateSha256": "df63b191d024f6429da4c2251a12ad7047e4ead97e29cfc6c5b03cecd8cc2f1a"
       },
       "receiverEvidence": {
         "category": "confirmed-native-receiver",
@@ -3912,7 +4291,7 @@
       "candidateDispositionHint": "unknown",
       "lowerNativeEdge": {
         "status": "self-native-receiver",
-        "targetCandidateSha256": "c523b29d54c14d4fd7a7d57da78757e7a9b4f76b13f2f9b8ede4a8f5f940ed8d",
+        "targetCandidateSha256": "df63b191d024f6429da4c2251a12ad7047e4ead97e29cfc6c5b03cecd8cc2f1a",
         "reason": "Local structure identifies this native receiver; that fact is not route authority."
       },
       "sqlEvidence": {
@@ -4008,8 +4387,8 @@
       ],
       "cursorPair": {
         "status": "unresolved-binding",
-        "allocationCandidateSha256": "c523b29d54c14d4fd7a7d57da78757e7a9b4f76b13f2f9b8ede4a8f5f940ed8d",
-        "executionCandidateSha256": "78fc60d8fd2f5a8ca86e9e314b433530613331b7d4dcf5325ad5e84b3741a936",
+        "allocationCandidateSha256": "df63b191d024f6429da4c2251a12ad7047e4ead97e29cfc6c5b03cecd8cc2f1a",
+        "executionCandidateSha256": "3457378bbc54f266865dacbc61f13b20cf239c4c35d58c669eb8e4f3b28d33ee",
         "connectionGeneration": {
           "status": "unresolved",
           "value": null
@@ -4032,13 +4411,13 @@
       "language": "python",
       "stableIdentity": {
         "path": "python/src/graph_engineering/sqlite_operation_baseline_source.py",
-        "line": 4104,
+        "line": 4110,
         "column": 13,
         "method": "execute",
         "sqlOrigin": "direct-argument",
         "occurrence": 0,
-        "scannerSha256": "4a678c2ae8df09b47025984fc0aa4cc8578c3a0a71fd9520804b4b335a266b26",
-        "candidateSha256": "78fc60d8fd2f5a8ca86e9e314b433530613331b7d4dcf5325ad5e84b3741a936"
+        "scannerSha256": "c314bbc101c1d639e8abe2ee71434c47e5f25385aaa8a6f00d232b3074ec56d7",
+        "candidateSha256": "3457378bbc54f266865dacbc61f13b20cf239c4c35d58c669eb8e4f3b28d33ee"
       },
       "receiverEvidence": {
         "category": "unknown",
@@ -4160,8 +4539,8 @@
       ],
       "cursorPair": {
         "status": "unresolved-binding",
-        "allocationCandidateSha256": "c523b29d54c14d4fd7a7d57da78757e7a9b4f76b13f2f9b8ede4a8f5f940ed8d",
-        "executionCandidateSha256": "78fc60d8fd2f5a8ca86e9e314b433530613331b7d4dcf5325ad5e84b3741a936",
+        "allocationCandidateSha256": "df63b191d024f6429da4c2251a12ad7047e4ead97e29cfc6c5b03cecd8cc2f1a",
+        "executionCandidateSha256": "3457378bbc54f266865dacbc61f13b20cf239c4c35d58c669eb8e4f3b28d33ee",
         "connectionGeneration": {
           "status": "unresolved",
           "value": null
@@ -4185,13 +4564,13 @@
       "language": "python",
       "stableIdentity": {
         "path": "python/src/graph_engineering/sqlite_operation_baseline_source.py",
-        "line": 4175,
+        "line": 4181,
         "column": 26,
         "method": "cursor",
         "sqlOrigin": "none",
         "occurrence": 0,
-        "scannerSha256": "cddae219a27b0041c6f9d8647ff58f2f92dfd77765b314861f36ef36123ad7da",
-        "candidateSha256": "a797db4f81f37f32a340338b178598554c464526702fc713672fa6519ef7e81d"
+        "scannerSha256": "38fce754cac8d5132de1f065a768ff041f7664226a14ed0bd7af5559ed23c669",
+        "candidateSha256": "b29b3bb8945c44788599b9d3f5212c03b9b239b906010aef4533389525f2cd5a"
       },
       "receiverEvidence": {
         "category": "confirmed-native-receiver",
@@ -4207,7 +4586,7 @@
       "candidateDispositionHint": "unknown",
       "lowerNativeEdge": {
         "status": "self-native-receiver",
-        "targetCandidateSha256": "a797db4f81f37f32a340338b178598554c464526702fc713672fa6519ef7e81d",
+        "targetCandidateSha256": "b29b3bb8945c44788599b9d3f5212c03b9b239b906010aef4533389525f2cd5a",
         "reason": "Local structure identifies this native receiver; that fact is not route authority."
       },
       "sqlEvidence": {
@@ -4303,8 +4682,8 @@
       ],
       "cursorPair": {
         "status": "unresolved-binding",
-        "allocationCandidateSha256": "a797db4f81f37f32a340338b178598554c464526702fc713672fa6519ef7e81d",
-        "executionCandidateSha256": "08c7ec4fb15c941ffccdb00c2ad6844d8309300ad14224c4a5ee2776b6f1c0b8",
+        "allocationCandidateSha256": "b29b3bb8945c44788599b9d3f5212c03b9b239b906010aef4533389525f2cd5a",
+        "executionCandidateSha256": "df1984a568e989253959c84e57f9aa9ca42d93f13d2f825c05b7e2471ea8b5cd",
         "connectionGeneration": {
           "status": "unresolved",
           "value": null
@@ -4327,13 +4706,13 @@
       "language": "python",
       "stableIdentity": {
         "path": "python/src/graph_engineering/sqlite_operation_baseline_source.py",
-        "line": 4186,
+        "line": 4192,
         "column": 17,
         "method": "execute",
         "sqlOrigin": "direct-argument",
         "occurrence": 0,
-        "scannerSha256": "0fcc7a1448a4c3a501440c7a962252800ac994692bc853ef92fde6216bd48bff",
-        "candidateSha256": "08c7ec4fb15c941ffccdb00c2ad6844d8309300ad14224c4a5ee2776b6f1c0b8"
+        "scannerSha256": "b8b6866dc971497fec5f14ee893d5eb9963347fa704e6b24069f1cc88c285e3f",
+        "candidateSha256": "df1984a568e989253959c84e57f9aa9ca42d93f13d2f825c05b7e2471ea8b5cd"
       },
       "receiverEvidence": {
         "category": "unknown",
@@ -4478,8 +4857,8 @@
       ],
       "cursorPair": {
         "status": "unresolved-binding",
-        "allocationCandidateSha256": "a797db4f81f37f32a340338b178598554c464526702fc713672fa6519ef7e81d",
-        "executionCandidateSha256": "08c7ec4fb15c941ffccdb00c2ad6844d8309300ad14224c4a5ee2776b6f1c0b8",
+        "allocationCandidateSha256": "b29b3bb8945c44788599b9d3f5212c03b9b239b906010aef4533389525f2cd5a",
+        "executionCandidateSha256": "df1984a568e989253959c84e57f9aa9ca42d93f13d2f825c05b7e2471ea8b5cd",
         "connectionGeneration": {
           "status": "unresolved",
           "value": null
@@ -4505,13 +4884,13 @@
       "language": "python",
       "stableIdentity": {
         "path": "python/src/graph_engineering/sqlite_operation_baseline_source.py",
-        "line": 4278,
+        "line": 4284,
         "column": 13,
         "method": "executescript",
         "sqlOrigin": "direct-argument",
         "occurrence": 0,
-        "scannerSha256": "54f231147afb94061fc5c8dfa2fd3bf3ba45d20e46fd96ebd74b822e3b3aa29d",
-        "candidateSha256": "3ef952263b1de70d3674b3ec719ec2829a8edbd18bce9b373a112b969e2589c2"
+        "scannerSha256": "3025e92ef4039b35a467dd6cb3701174b57117e6226d0f1f8ebc01a2acc55579",
+        "candidateSha256": "a28c0e1fabd5ab641c658c42d04776f762dcaefaae954aebaace20668416f57f"
       },
       "receiverEvidence": {
         "category": "confirmed-native-receiver",
@@ -4527,7 +4906,7 @@
       "candidateDispositionHint": "forbidden",
       "lowerNativeEdge": {
         "status": "self-native-receiver",
-        "targetCandidateSha256": "3ef952263b1de70d3674b3ec719ec2829a8edbd18bce9b373a112b969e2589c2",
+        "targetCandidateSha256": "a28c0e1fabd5ab641c658c42d04776f762dcaefaae954aebaace20668416f57f",
         "reason": "Local structure identifies this native receiver; that fact is not route authority."
       },
       "sqlEvidence": {
@@ -4633,13 +5012,13 @@
       "language": "python",
       "stableIdentity": {
         "path": "python/src/graph_engineering/sqlite_operation_baseline_source.py",
-        "line": 4388,
+        "line": 4394,
         "column": 18,
         "method": "execute",
         "sqlOrigin": "direct-argument",
         "occurrence": 0,
-        "scannerSha256": "1f37714234047df4a64f999513e1fccb5f7ece5181a41a9a50087a9501a85713",
-        "candidateSha256": "22f45f7555e487104a3edc3b7e49665eab09b12eb24dd286a91177bba7300ecd"
+        "scannerSha256": "5a0be341c414271700a55642e0b431550477dea8ddeed092a2e855def3ded4d8",
+        "candidateSha256": "095ff4aa63ea68373e5a20983f9e695fda2af830f8b8f9d6db39ac26513cc004"
       },
       "receiverEvidence": {
         "category": "confirmed-native-receiver",
@@ -4655,7 +5034,7 @@
       "candidateDispositionHint": "forbidden",
       "lowerNativeEdge": {
         "status": "self-native-receiver",
-        "targetCandidateSha256": "22f45f7555e487104a3edc3b7e49665eab09b12eb24dd286a91177bba7300ecd",
+        "targetCandidateSha256": "095ff4aa63ea68373e5a20983f9e695fda2af830f8b8f9d6db39ac26513cc004",
         "reason": "Local structure identifies this native receiver; that fact is not route authority."
       },
       "sqlEvidence": {
@@ -4760,13 +5139,13 @@
       "language": "python",
       "stableIdentity": {
         "path": "python/src/graph_engineering/sqlite_operation_baseline_source.py",
-        "line": 4505,
+        "line": 4511,
         "column": 30,
         "method": "execute",
         "sqlOrigin": "direct-argument",
         "occurrence": 0,
-        "scannerSha256": "1f2f7f576d5e3a9bc8f73c46af01909d59613eac3aa79ebdfcd3719702e03db4",
-        "candidateSha256": "835a9cfdf18330f4db50802edaee87600fbfd19c24c52fd7d63dd2b3db971d60"
+        "scannerSha256": "f0d73960bbab03df0ef3ae4529088eccbc23c31ce3083ee327c2fc8092de44dd",
+        "candidateSha256": "d165ebc14dc4a4fe1eb3a035437a7defcac4f2e47835dec0a712a71a28a8fd83"
       },
       "receiverEvidence": {
         "category": "confirmed-native-receiver",
@@ -4782,7 +5161,7 @@
       "candidateDispositionHint": "unknown",
       "lowerNativeEdge": {
         "status": "self-native-receiver",
-        "targetCandidateSha256": "835a9cfdf18330f4db50802edaee87600fbfd19c24c52fd7d63dd2b3db971d60",
+        "targetCandidateSha256": "d165ebc14dc4a4fe1eb3a035437a7defcac4f2e47835dec0a712a71a28a8fd83",
         "reason": "Local structure identifies this native receiver; that fact is not route authority."
       },
       "sqlEvidence": {
@@ -4888,13 +5267,13 @@
       "language": "python",
       "stableIdentity": {
         "path": "python/src/graph_engineering/sqlite_operation_baseline_source.py",
-        "line": 4506,
+        "line": 4512,
         "column": 28,
         "method": "execute",
         "sqlOrigin": "direct-argument",
         "occurrence": 0,
-        "scannerSha256": "b12db35b5e2c17967280eac3de27645bcbd0593eea78b9abe2e438bac31640fb",
-        "candidateSha256": "9bd9fc69f2a4cb595e59822d0032912718b8da234066c9b1bfd85583cc39ef04"
+        "scannerSha256": "f8a8cacabe08c228b06192a6d1b67c6dd38ce8f78b4d888a759674058e43beec",
+        "candidateSha256": "10004f4af6571b9845efcdaf3da52685a3491ff349e76070f84ec069ec239f85"
       },
       "receiverEvidence": {
         "category": "confirmed-native-receiver",
@@ -4910,7 +5289,7 @@
       "candidateDispositionHint": "unknown",
       "lowerNativeEdge": {
         "status": "self-native-receiver",
-        "targetCandidateSha256": "9bd9fc69f2a4cb595e59822d0032912718b8da234066c9b1bfd85583cc39ef04",
+        "targetCandidateSha256": "10004f4af6571b9845efcdaf3da52685a3491ff349e76070f84ec069ec239f85",
         "reason": "Local structure identifies this native receiver; that fact is not route authority."
       },
       "sqlEvidence": {
@@ -5016,13 +5395,13 @@
       "language": "python",
       "stableIdentity": {
         "path": "python/src/graph_engineering/sqlite_operation_baseline_source.py",
-        "line": 4507,
+        "line": 4513,
         "column": 25,
         "method": "execute",
         "sqlOrigin": "direct-argument",
         "occurrence": 0,
-        "scannerSha256": "de21998135de1d100bcfcb5cc87e3223d5e780d3deacb84f7974adee5dba8844",
-        "candidateSha256": "81637510ddd181134ce84595a7a524d0b0f9b7e299011ccfce0cb5ca8812889d"
+        "scannerSha256": "14aeca6fb2a5ec00a7f75799e4e6af399952bb1fb0c454ba80117e3bc5f42f60",
+        "candidateSha256": "e8cd1c02779bed7cb801bcef8555988b0df467bf658b1ac223f96171fdb56aac"
       },
       "receiverEvidence": {
         "category": "confirmed-native-receiver",
@@ -5038,7 +5417,7 @@
       "candidateDispositionHint": "unknown",
       "lowerNativeEdge": {
         "status": "self-native-receiver",
-        "targetCandidateSha256": "81637510ddd181134ce84595a7a524d0b0f9b7e299011ccfce0cb5ca8812889d",
+        "targetCandidateSha256": "e8cd1c02779bed7cb801bcef8555988b0df467bf658b1ac223f96171fdb56aac",
         "reason": "Local structure identifies this native receiver; that fact is not route authority."
       },
       "sqlEvidence": {
@@ -5144,13 +5523,13 @@
       "language": "python",
       "stableIdentity": {
         "path": "python/src/graph_engineering/sqlite_operation_baseline_source.py",
-        "line": 4508,
+        "line": 4514,
         "column": 28,
         "method": "execute",
         "sqlOrigin": "direct-argument",
         "occurrence": 0,
-        "scannerSha256": "8a3549ae45e8cc9e1482dcdfdd36376f6c1c5205f3b9e108b90f0fd86e0febe0",
-        "candidateSha256": "29bfca2893e6e5e56e72977d8257c67533e004019252b99617323d6be8471879"
+        "scannerSha256": "427794607e3f1091888ff4b06e9f0202afd92252be8e6728e63dcea590954500",
+        "candidateSha256": "5abc344b0cf5f2966a2b4df4174e89917a9f9166c70daa913cf3dab7a75b7454"
       },
       "receiverEvidence": {
         "category": "confirmed-native-receiver",
@@ -5166,7 +5545,7 @@
       "candidateDispositionHint": "unknown",
       "lowerNativeEdge": {
         "status": "self-native-receiver",
-        "targetCandidateSha256": "29bfca2893e6e5e56e72977d8257c67533e004019252b99617323d6be8471879",
+        "targetCandidateSha256": "5abc344b0cf5f2966a2b4df4174e89917a9f9166c70daa913cf3dab7a75b7454",
         "reason": "Local structure identifies this native receiver; that fact is not route authority."
       },
       "sqlEvidence": {
@@ -5272,13 +5651,13 @@
       "language": "python",
       "stableIdentity": {
         "path": "python/src/graph_engineering/sqlite_operation_baseline_source.py",
-        "line": 4509,
+        "line": 4515,
         "column": 24,
         "method": "execute",
         "sqlOrigin": "direct-argument",
         "occurrence": 0,
-        "scannerSha256": "175cf0fd9ccc1f3f5268e4b1e034567a43f7b648199d0e2ca8985b5f03ff6b7e",
-        "candidateSha256": "2685690557642e63882e439947dfa9cee01058206a40f0fc7173d388dcc222ae"
+        "scannerSha256": "042320a27b6d04f10197643701b850d0b1cc3bc332b0e0658702dbadc317ac95",
+        "candidateSha256": "6afe09f52d7c57b4a6d97112f41cefe9c024ae20f75cca3552f1ec18adbf39ac"
       },
       "receiverEvidence": {
         "category": "confirmed-native-receiver",
@@ -5294,7 +5673,7 @@
       "candidateDispositionHint": "unknown",
       "lowerNativeEdge": {
         "status": "self-native-receiver",
-        "targetCandidateSha256": "2685690557642e63882e439947dfa9cee01058206a40f0fc7173d388dcc222ae",
+        "targetCandidateSha256": "6afe09f52d7c57b4a6d97112f41cefe9c024ae20f75cca3552f1ec18adbf39ac",
         "reason": "Local structure identifies this native receiver; that fact is not route authority."
       },
       "sqlEvidence": {
@@ -5400,13 +5779,13 @@
       "language": "python",
       "stableIdentity": {
         "path": "python/src/graph_engineering/sqlite_operation_baseline_source.py",
-        "line": 4510,
+        "line": 4516,
         "column": 28,
         "method": "execute",
         "sqlOrigin": "direct-argument",
         "occurrence": 0,
-        "scannerSha256": "65b5cfcaec2e7881061c85f7258deae61664f105439b63666b18381903d2b2eb",
-        "candidateSha256": "daf90817eed1e267569505aecb583499f84f3cc5c25f4392151844d39a1f5f21"
+        "scannerSha256": "809ca27b9e7271716c6ec6527e5fd3648491c6648eb1442abb39f01b30aac135",
+        "candidateSha256": "0500d6f28bc6eb2445b1f7a8d887d177a39d129b0b9c560b3c4c8614b975e31a"
       },
       "receiverEvidence": {
         "category": "confirmed-native-receiver",
@@ -5422,7 +5801,7 @@
       "candidateDispositionHint": "unknown",
       "lowerNativeEdge": {
         "status": "self-native-receiver",
-        "targetCandidateSha256": "daf90817eed1e267569505aecb583499f84f3cc5c25f4392151844d39a1f5f21",
+        "targetCandidateSha256": "0500d6f28bc6eb2445b1f7a8d887d177a39d129b0b9c560b3c4c8614b975e31a",
         "reason": "Local structure identifies this native receiver; that fact is not route authority."
       },
       "sqlEvidence": {
@@ -5528,13 +5907,13 @@
       "language": "python",
       "stableIdentity": {
         "path": "python/src/graph_engineering/sqlite_operation_baseline_source.py",
-        "line": 5317,
+        "line": 5323,
         "column": 22,
         "method": "execute",
         "sqlOrigin": "direct-argument",
         "occurrence": 0,
-        "scannerSha256": "e769791212554816e104c6ce254290dea7a878fe0e918825085d9d8cf52eda26",
-        "candidateSha256": "b0fcba91e26c63736f7760a403d178f40334a75dfc3260f079d7b450a8954289"
+        "scannerSha256": "0ffd62962bf2c5b171014751bcee23d02ef1467ae17b8b0e0bcd3439d062cc5b",
+        "candidateSha256": "be9cea03411bd63a6fb8fdd73b8c933b17b98528d26b565b7c9d3af6e9f88665"
       },
       "receiverEvidence": {
         "category": "unknown",
@@ -5680,13 +6059,13 @@
       "language": "python",
       "stableIdentity": {
         "path": "python/src/graph_engineering/sqlite_operation_baseline_source.py",
-        "line": 5355,
+        "line": 5361,
         "column": 26,
         "method": "execute",
         "sqlOrigin": "direct-argument",
         "occurrence": 0,
-        "scannerSha256": "9dc87ce65311da05875b1983fd34fc23c78b78dfcf672446eb1bf3b7d94a14bf",
-        "candidateSha256": "e44681b8dc1b7c9d48473ed59dbca8e7f80209ac92bce9c22c7f11c54ced07fb"
+        "scannerSha256": "9df91bcad43c70eaaa61a1eb86736ef09bb583e16ed6f03753bef858a0be9b12",
+        "candidateSha256": "6f5c87ed380fb477558ce9bb78aa9bb48054a011d8e6487a577265735b7df8e3"
       },
       "receiverEvidence": {
         "category": "unknown",
@@ -5832,13 +6211,13 @@
       "language": "python",
       "stableIdentity": {
         "path": "python/src/graph_engineering/sqlite_operation_baseline_source.py",
-        "line": 5586,
+        "line": 5747,
         "column": 16,
         "method": "execute",
         "sqlOrigin": "direct-argument",
         "occurrence": 0,
-        "scannerSha256": "ef6b2d7945f89c6cb3a7842b357bb4f1e6a7ecc6c546d2a4fb9a1dee9f4117b6",
-        "candidateSha256": "627a51545409cc9a097aa56141e4643c9b1c72235762977a8e2ab075a6dde856"
+        "scannerSha256": "ee463a0d46c267e74ef748f1bff1a1e60cc9e00e090ad5a21d6c45ad359b9ceb",
+        "candidateSha256": "429e418c8931b2db2b0d50eaa1d183ffbe0a54efe1049f2968bef23614f6aa44"
       },
       "receiverEvidence": {
         "category": "confirmed-native-receiver",
@@ -5854,7 +6233,7 @@
       "candidateDispositionHint": "unknown",
       "lowerNativeEdge": {
         "status": "self-native-receiver",
-        "targetCandidateSha256": "627a51545409cc9a097aa56141e4643c9b1c72235762977a8e2ab075a6dde856",
+        "targetCandidateSha256": "429e418c8931b2db2b0d50eaa1d183ffbe0a54efe1049f2968bef23614f6aa44",
         "reason": "Local structure identifies this native receiver; that fact is not route authority."
       },
       "sqlEvidence": {
@@ -5973,13 +6352,13 @@
       "language": "python",
       "stableIdentity": {
         "path": "python/src/graph_engineering/sqlite_operation_baseline_source.py",
-        "line": 5599,
+        "line": 5760,
         "column": 20,
         "method": "execute",
         "sqlOrigin": "direct-argument",
         "occurrence": 0,
-        "scannerSha256": "22c53c97509fb08e7ebdf326d633558457cbb5c0d2afa54eee20298103c8ee9c",
-        "candidateSha256": "8c2739edee22e9a3c636d704e11099e1b0c7d42a1c3e4a93f6be8bd352c76403"
+        "scannerSha256": "189f486477ab29fb2e5812078c1fa0394b54b412e780a22cad6786e08a1d7f17",
+        "candidateSha256": "711e69e7a62d201309208e477799f7d382dcdb4150338b640e55485a60a2523e"
       },
       "receiverEvidence": {
         "category": "confirmed-native-receiver",
@@ -5995,7 +6374,7 @@
       "candidateDispositionHint": "unknown",
       "lowerNativeEdge": {
         "status": "self-native-receiver",
-        "targetCandidateSha256": "8c2739edee22e9a3c636d704e11099e1b0c7d42a1c3e4a93f6be8bd352c76403",
+        "targetCandidateSha256": "711e69e7a62d201309208e477799f7d382dcdb4150338b640e55485a60a2523e",
         "reason": "Local structure identifies this native receiver; that fact is not route authority."
       },
       "sqlEvidence": {
@@ -6114,13 +6493,13 @@
       "language": "python",
       "stableIdentity": {
         "path": "python/src/graph_engineering/sqlite_operation_baseline_source.py",
-        "line": 5606,
+        "line": 5767,
         "column": 22,
         "method": "execute",
         "sqlOrigin": "direct-argument",
         "occurrence": 0,
-        "scannerSha256": "a69b6ce19f0f7f7a8bc4d12f91d356718cc87496530b9d1ffd29a45af0d6374d",
-        "candidateSha256": "5ecda4243f3e79a12163c6e27885b6b8fa080c3e4bfb532e330b0049ceaa7d4e"
+        "scannerSha256": "a69450eb8a3f2eb79a690f5bfe845f6fe0a1ad3fc17cf9095dc3d26b39e2e830",
+        "candidateSha256": "9a279f7f138cbf1e443be90cb65074208827df4eb2ddcf6d18d5ad5d5d3c1050"
       },
       "receiverEvidence": {
         "category": "confirmed-native-receiver",
@@ -6136,7 +6515,7 @@
       "candidateDispositionHint": "unknown",
       "lowerNativeEdge": {
         "status": "self-native-receiver",
-        "targetCandidateSha256": "5ecda4243f3e79a12163c6e27885b6b8fa080c3e4bfb532e330b0049ceaa7d4e",
+        "targetCandidateSha256": "9a279f7f138cbf1e443be90cb65074208827df4eb2ddcf6d18d5ad5d5d3c1050",
         "reason": "Local structure identifies this native receiver; that fact is not route authority."
       },
       "sqlEvidence": {
@@ -6255,13 +6634,13 @@
       "language": "python",
       "stableIdentity": {
         "path": "python/src/graph_engineering/sqlite_operation_baseline_source.py",
-        "line": 5607,
+        "line": 5768,
         "column": 20,
         "method": "execute",
         "sqlOrigin": "direct-argument",
         "occurrence": 0,
-        "scannerSha256": "c5092da07121ac29eb7fae0a2edfdafc92d9c96a838b788656b1131c91f11709",
-        "candidateSha256": "7990b4882214ce60c8611274bcecc99cef920135e81fe701c37dc8d046f00d9d"
+        "scannerSha256": "445260b9208f0e33be05e2c70c7034dcbe54369815739fab9fe407626337b295",
+        "candidateSha256": "f7d85ad9d4bc37159d18d536b44513999c0f12afb5067a3909351654b6abc998"
       },
       "receiverEvidence": {
         "category": "confirmed-native-receiver",
@@ -6277,7 +6656,7 @@
       "candidateDispositionHint": "unknown",
       "lowerNativeEdge": {
         "status": "self-native-receiver",
-        "targetCandidateSha256": "7990b4882214ce60c8611274bcecc99cef920135e81fe701c37dc8d046f00d9d",
+        "targetCandidateSha256": "f7d85ad9d4bc37159d18d536b44513999c0f12afb5067a3909351654b6abc998",
         "reason": "Local structure identifies this native receiver; that fact is not route authority."
       },
       "sqlEvidence": {
@@ -6396,13 +6775,13 @@
       "language": "python",
       "stableIdentity": {
         "path": "python/src/graph_engineering/sqlite_operation_baseline_source.py",
-        "line": 5614,
+        "line": 5775,
         "column": 20,
         "method": "execute",
         "sqlOrigin": "direct-argument",
         "occurrence": 0,
-        "scannerSha256": "c7ab5514d9d4f490da882d20d516d89f95f877131b143af962b5e336fb5dfe1c",
-        "candidateSha256": "ac407b2dc9683e82e838d251257fb647a199b9fd66ccb4d2255446e1a843b650"
+        "scannerSha256": "e601f87d4b0c07b559129e082b15fef6e3e61ad57dad1623c0d6170953d19f1a",
+        "candidateSha256": "19e25fc4e3c48688293a45d1ea7f62ecb00d2017cbdb17498ba02e93d4f6a135"
       },
       "receiverEvidence": {
         "category": "confirmed-native-receiver",
@@ -6418,7 +6797,7 @@
       "candidateDispositionHint": "unknown",
       "lowerNativeEdge": {
         "status": "self-native-receiver",
-        "targetCandidateSha256": "ac407b2dc9683e82e838d251257fb647a199b9fd66ccb4d2255446e1a843b650",
+        "targetCandidateSha256": "19e25fc4e3c48688293a45d1ea7f62ecb00d2017cbdb17498ba02e93d4f6a135",
         "reason": "Local structure identifies this native receiver; that fact is not route authority."
       },
       "sqlEvidence": {
@@ -6537,13 +6916,13 @@
       "language": "python",
       "stableIdentity": {
         "path": "python/src/graph_engineering/sqlite_operation_baseline_source.py",
-        "line": 5656,
+        "line": 5817,
         "column": 24,
         "method": "execute",
         "sqlOrigin": "direct-argument",
         "occurrence": 0,
-        "scannerSha256": "fcca2432693096de9ed56a1e1964da955463e8b93aca50579fb6c7897634f67e",
-        "candidateSha256": "4dc051063bfd1816a458757fc570577101cc07cdfea3aff9180754c34cd7d873"
+        "scannerSha256": "8a0be12d1021f78fd743c9bdd1e47a1150c98b921bcb752fb2b31d440062caf8",
+        "candidateSha256": "f0e7cb880f9b8500d01e0d796e3e10d5d63c4747e8db1f74e24457e95346c6e4"
       },
       "receiverEvidence": {
         "category": "confirmed-native-receiver",
@@ -6559,7 +6938,7 @@
       "candidateDispositionHint": "unknown",
       "lowerNativeEdge": {
         "status": "self-native-receiver",
-        "targetCandidateSha256": "4dc051063bfd1816a458757fc570577101cc07cdfea3aff9180754c34cd7d873",
+        "targetCandidateSha256": "f0e7cb880f9b8500d01e0d796e3e10d5d63c4747e8db1f74e24457e95346c6e4",
         "reason": "Local structure identifies this native receiver; that fact is not route authority."
       },
       "sqlEvidence": {
@@ -6681,13 +7060,13 @@
       "language": "python",
       "stableIdentity": {
         "path": "python/src/graph_engineering/sqlite_operation_baseline_source.py",
-        "line": 5661,
+        "line": 5822,
         "column": 16,
         "method": "execute",
         "sqlOrigin": "direct-argument",
         "occurrence": 0,
-        "scannerSha256": "1e6481263d65a875c7713108144361170e6faea8712542b1aaa99f0b7861490a",
-        "candidateSha256": "c148a1ae1281f2c590fed9af61c46ca30fad137ac62b2e8e75e4553b3925f160"
+        "scannerSha256": "a4f563f6734e2c3936fa6130cd486fbade04b1148ba406741a07aa472256e708",
+        "candidateSha256": "1805a1890a217e27a682fdd088b94c589a99766e907f0faa055781728301366e"
       },
       "receiverEvidence": {
         "category": "confirmed-native-receiver",
@@ -6703,7 +7082,7 @@
       "candidateDispositionHint": "unknown",
       "lowerNativeEdge": {
         "status": "self-native-receiver",
-        "targetCandidateSha256": "c148a1ae1281f2c590fed9af61c46ca30fad137ac62b2e8e75e4553b3925f160",
+        "targetCandidateSha256": "1805a1890a217e27a682fdd088b94c589a99766e907f0faa055781728301366e",
         "reason": "Local structure identifies this native receiver; that fact is not route authority."
       },
       "sqlEvidence": {
@@ -6822,13 +7201,13 @@
       "language": "python",
       "stableIdentity": {
         "path": "python/src/graph_engineering/sqlite_operation_baseline_source.py",
-        "line": 5682,
+        "line": 5843,
         "column": 18,
         "method": "execute",
         "sqlOrigin": "direct-argument",
         "occurrence": 0,
-        "scannerSha256": "fa5f5fc04d09257413b54513d19beea41654d3d2f1135cebc3d01c81df9e213e",
-        "candidateSha256": "9efb7d9efdefdd6d6bb33c02a24db50508ffbb346e4a849141709f28dd2ac62c"
+        "scannerSha256": "0854398712fca2033b21981f2af072dcb41cdbb75e6118be3a56eba4958f8a5c",
+        "candidateSha256": "04e85060bb7cdc707eb6630f6319852b7d380b338eb8f2b6bef14b6c28a94aaa"
       },
       "receiverEvidence": {
         "category": "confirmed-native-receiver",
@@ -6844,7 +7223,7 @@
       "candidateDispositionHint": "unknown",
       "lowerNativeEdge": {
         "status": "self-native-receiver",
-        "targetCandidateSha256": "9efb7d9efdefdd6d6bb33c02a24db50508ffbb346e4a849141709f28dd2ac62c",
+        "targetCandidateSha256": "04e85060bb7cdc707eb6630f6319852b7d380b338eb8f2b6bef14b6c28a94aaa",
         "reason": "Local structure identifies this native receiver; that fact is not route authority."
       },
       "sqlEvidence": {
@@ -6963,13 +7342,13 @@
       "language": "python",
       "stableIdentity": {
         "path": "python/src/graph_engineering/sqlite_operation_baseline_source.py",
-        "line": 5701,
+        "line": 5862,
         "column": 21,
         "method": "execute",
         "sqlOrigin": "direct-argument",
         "occurrence": 0,
-        "scannerSha256": "5ecbb493fe5017454429cd906454658c6f7b085f5566f663eed520f266e3424e",
-        "candidateSha256": "817459b362f17a294a6bddef11f6dba6b0b0f0cd7b0f83ed99052b1cebea8970"
+        "scannerSha256": "53ed86a8e1b8fca4a96b7a01ecf987696b260c2b8a673d5e143c9cfc7f749c18",
+        "candidateSha256": "a8c21fdba0b488bfbd9bea6333ccca88959eb2b14b9ff0893c8613890956df77"
       },
       "receiverEvidence": {
         "category": "confirmed-native-receiver",
@@ -6985,7 +7364,7 @@
       "candidateDispositionHint": "unknown",
       "lowerNativeEdge": {
         "status": "self-native-receiver",
-        "targetCandidateSha256": "817459b362f17a294a6bddef11f6dba6b0b0f0cd7b0f83ed99052b1cebea8970",
+        "targetCandidateSha256": "a8c21fdba0b488bfbd9bea6333ccca88959eb2b14b9ff0893c8613890956df77",
         "reason": "Local structure identifies this native receiver; that fact is not route authority."
       },
       "sqlEvidence": {
@@ -7104,13 +7483,13 @@
       "language": "python",
       "stableIdentity": {
         "path": "python/src/graph_engineering/sqlite_operation_baseline_source.py",
-        "line": 5725,
+        "line": 5886,
         "column": 17,
         "method": "execute",
         "sqlOrigin": "direct-argument",
         "occurrence": 0,
-        "scannerSha256": "900282fd955768f9fbcde98d4d8f4ea10ed99af2f8a669ac947e336087710a79",
-        "candidateSha256": "6e07d25c46087fbf9575b5fc97ada36ae31bf715c3502335cdad59a767d851ab"
+        "scannerSha256": "d7fed57daa316fdb0afe1619a33e0518ed8c14fe69f9d48c28ae5e9a84ff4045",
+        "candidateSha256": "c00859352f9ed0bd03b976ab744c7f046ae32167aa0433371c5ca364253faf45"
       },
       "receiverEvidence": {
         "category": "confirmed-native-receiver",
@@ -7126,7 +7505,7 @@
       "candidateDispositionHint": "unknown",
       "lowerNativeEdge": {
         "status": "self-native-receiver",
-        "targetCandidateSha256": "6e07d25c46087fbf9575b5fc97ada36ae31bf715c3502335cdad59a767d851ab",
+        "targetCandidateSha256": "c00859352f9ed0bd03b976ab744c7f046ae32167aa0433371c5ca364253faf45",
         "reason": "Local structure identifies this native receiver; that fact is not route authority."
       },
       "sqlEvidence": {
@@ -7248,13 +7627,13 @@
       "language": "python",
       "stableIdentity": {
         "path": "python/src/graph_engineering/sqlite_operation_baseline_source.py",
-        "line": 5732,
+        "line": 5893,
         "column": 9,
         "method": "execute",
         "sqlOrigin": "direct-argument",
         "occurrence": 0,
-        "scannerSha256": "0dd0e4f63863358780f20f50664c43cc101eff6b455f7e1f437597c8b87198b1",
-        "candidateSha256": "3a07f5c88b8aa070c5f65e046fd7416a0afd2770f71e29625300c4821c911408"
+        "scannerSha256": "ee2c1ca848324f4d767ff23d1fe50e352d3cca6971be5ae553d7617736855326",
+        "candidateSha256": "cd9143adb0e0ff604b28274a83fc1e38e4ebc02eb20e541cf45296b34d45be84"
       },
       "receiverEvidence": {
         "category": "confirmed-native-receiver",
@@ -7270,7 +7649,7 @@
       "candidateDispositionHint": "unknown",
       "lowerNativeEdge": {
         "status": "self-native-receiver",
-        "targetCandidateSha256": "3a07f5c88b8aa070c5f65e046fd7416a0afd2770f71e29625300c4821c911408",
+        "targetCandidateSha256": "cd9143adb0e0ff604b28274a83fc1e38e4ebc02eb20e541cf45296b34d45be84",
         "reason": "Local structure identifies this native receiver; that fact is not route authority."
       },
       "sqlEvidence": {
@@ -7389,13 +7768,13 @@
       "language": "python",
       "stableIdentity": {
         "path": "python/src/graph_engineering/sqlite_operation_baseline_source.py",
-        "line": 5733,
+        "line": 5894,
         "column": 9,
         "method": "execute",
         "sqlOrigin": "direct-argument",
         "occurrence": 0,
-        "scannerSha256": "59abcc7ae159c32ba55852bc695be46c886b216b99a9ced861d95fc70d556f21",
-        "candidateSha256": "a1ba98ce6b8042832a3b8635a4ee463c68f66c127ee8e8f15ed6fee523885898"
+        "scannerSha256": "803342f5c2b2d9fdcb9e51bd0ef36552a384f0009356cc79b707200f2433c5b2",
+        "candidateSha256": "31bffe62bd001b06ca76858b2f68bc01d044d145407841391bcbe1009ef662a1"
       },
       "receiverEvidence": {
         "category": "confirmed-native-receiver",
@@ -7411,7 +7790,7 @@
       "candidateDispositionHint": "unknown",
       "lowerNativeEdge": {
         "status": "self-native-receiver",
-        "targetCandidateSha256": "a1ba98ce6b8042832a3b8635a4ee463c68f66c127ee8e8f15ed6fee523885898",
+        "targetCandidateSha256": "31bffe62bd001b06ca76858b2f68bc01d044d145407841391bcbe1009ef662a1",
         "reason": "Local structure identifies this native receiver; that fact is not route authority."
       },
       "sqlEvidence": {
@@ -7530,13 +7909,13 @@
       "language": "python",
       "stableIdentity": {
         "path": "python/src/graph_engineering/sqlite_operation_baseline_source.py",
-        "line": 5734,
+        "line": 5895,
         "column": 9,
         "method": "execute",
         "sqlOrigin": "direct-argument",
         "occurrence": 0,
-        "scannerSha256": "08d35b29f4acc9e37d5519f2f130cccdd8a29aa228b65e75d2560e3bb1abf7d3",
-        "candidateSha256": "048097d4181a1c7788d23a0acbf0b338757ac4b3fde1fe75215da2483ae76d4b"
+        "scannerSha256": "3aef41b75ff8e32c5a94aea09173a236c07b30a6af58d595de2f66cff994dfe1",
+        "candidateSha256": "edfe4717edcb99f02af6aaaac52df1664d7b54a3d42734aa58b29718507bd1a2"
       },
       "receiverEvidence": {
         "category": "confirmed-native-receiver",
@@ -7552,7 +7931,7 @@
       "candidateDispositionHint": "unknown",
       "lowerNativeEdge": {
         "status": "self-native-receiver",
-        "targetCandidateSha256": "048097d4181a1c7788d23a0acbf0b338757ac4b3fde1fe75215da2483ae76d4b",
+        "targetCandidateSha256": "edfe4717edcb99f02af6aaaac52df1664d7b54a3d42734aa58b29718507bd1a2",
         "reason": "Local structure identifies this native receiver; that fact is not route authority."
       },
       "sqlEvidence": {
@@ -7671,13 +8050,13 @@
       "language": "python",
       "stableIdentity": {
         "path": "python/src/graph_engineering/sqlite_operation_baseline_source.py",
-        "line": 5738,
+        "line": 5899,
         "column": 15,
         "method": "execute",
         "sqlOrigin": "direct-argument",
         "occurrence": 0,
-        "scannerSha256": "9b25919c2a097e060b53e4f1c35ebb60e674994588ea5e2583edd70bf237d1c6",
-        "candidateSha256": "1cb38327989cac755d59e1c4b112db762acc9a817de2567e3f8dbe080c30d97d"
+        "scannerSha256": "4221c5e45b9630fa02b5ccf0a74ca5566a46dfcf137f98bfab16db2d873a7524",
+        "candidateSha256": "50886e9a9eb81e8f25218a9d86cc78e8ec8c857933795e6a64bbec8be092c3b5"
       },
       "receiverEvidence": {
         "category": "confirmed-native-receiver",
@@ -7693,7 +8072,7 @@
       "candidateDispositionHint": "unknown",
       "lowerNativeEdge": {
         "status": "self-native-receiver",
-        "targetCandidateSha256": "1cb38327989cac755d59e1c4b112db762acc9a817de2567e3f8dbe080c30d97d",
+        "targetCandidateSha256": "50886e9a9eb81e8f25218a9d86cc78e8ec8c857933795e6a64bbec8be092c3b5",
         "reason": "Local structure identifies this native receiver; that fact is not route authority."
       },
       "sqlEvidence": {
@@ -7812,13 +8191,13 @@
       "language": "python",
       "stableIdentity": {
         "path": "python/src/graph_engineering/sqlite_operation_baseline_source.py",
-        "line": 5739,
+        "line": 5900,
         "column": 18,
         "method": "execute",
         "sqlOrigin": "direct-argument",
         "occurrence": 0,
-        "scannerSha256": "e9e2009ec4820941211ce0d28b936d3e7cff1f010daf5efb0f09322598ac0d19",
-        "candidateSha256": "0724a46f6a59e239dc657c377d3bd523148ea1426ffbec4770d86bd9a0a8f8a2"
+        "scannerSha256": "0941ae777e81257fed62d5182ee8fc1b50cb07d7029323de713faacf53f778af",
+        "candidateSha256": "3d7cfc20d826d63cd4768ba8abc7a60f61bd53967d081a12d33f9eae7cd428fd"
       },
       "receiverEvidence": {
         "category": "confirmed-native-receiver",
@@ -7834,7 +8213,7 @@
       "candidateDispositionHint": "unknown",
       "lowerNativeEdge": {
         "status": "self-native-receiver",
-        "targetCandidateSha256": "0724a46f6a59e239dc657c377d3bd523148ea1426ffbec4770d86bd9a0a8f8a2",
+        "targetCandidateSha256": "3d7cfc20d826d63cd4768ba8abc7a60f61bd53967d081a12d33f9eae7cd428fd",
         "reason": "Local structure identifies this native receiver; that fact is not route authority."
       },
       "sqlEvidence": {
@@ -7953,13 +8332,13 @@
       "language": "python",
       "stableIdentity": {
         "path": "python/src/graph_engineering/sqlite_operation_baseline_source.py",
-        "line": 5742,
+        "line": 5903,
         "column": 17,
         "method": "execute",
         "sqlOrigin": "direct-argument",
         "occurrence": 0,
-        "scannerSha256": "3b4568ea9d75b97da936ab388d46a40a81c126959c92b3c578cfeb4c63967013",
-        "candidateSha256": "ac847ea6d87b114bd35098d923799712614f67281484809e77eb856f16c98aeb"
+        "scannerSha256": "3251030d82d96ec11a6f3c776d7058902ec8629d18145416793dc230e0521cde",
+        "candidateSha256": "0c3a820c22f14ff7fd8ce64943d352107e67ac54a430ccb69ab1be18a38281d0"
       },
       "receiverEvidence": {
         "category": "confirmed-native-receiver",
@@ -7975,7 +8354,7 @@
       "candidateDispositionHint": "unknown",
       "lowerNativeEdge": {
         "status": "self-native-receiver",
-        "targetCandidateSha256": "ac847ea6d87b114bd35098d923799712614f67281484809e77eb856f16c98aeb",
+        "targetCandidateSha256": "0c3a820c22f14ff7fd8ce64943d352107e67ac54a430ccb69ab1be18a38281d0",
         "reason": "Local structure identifies this native receiver; that fact is not route authority."
       },
       "sqlEvidence": {
@@ -8094,13 +8473,13 @@
       "language": "python",
       "stableIdentity": {
         "path": "python/src/graph_engineering/sqlite_operation_baseline_source.py",
-        "line": 5743,
+        "line": 5904,
         "column": 20,
         "method": "execute",
         "sqlOrigin": "direct-argument",
         "occurrence": 0,
-        "scannerSha256": "742fac7fda10dcde3eca480b0926b896949a5073a62a17bfbc0e841ee8d6ec6a",
-        "candidateSha256": "73d244c0e224978606ac67185d62d0a3140f3ffc899d816a378481955906a8e5"
+        "scannerSha256": "a833d2d73b7e5317e32ecdfd85f0f1b978fe735e5b3578e32f62386c447d5d9c",
+        "candidateSha256": "c67338178baea5fa999639e61633ae542d543f1debb08d93b818dd81c9d8b367"
       },
       "receiverEvidence": {
         "category": "confirmed-native-receiver",
@@ -8116,7 +8495,7 @@
       "candidateDispositionHint": "unknown",
       "lowerNativeEdge": {
         "status": "self-native-receiver",
-        "targetCandidateSha256": "73d244c0e224978606ac67185d62d0a3140f3ffc899d816a378481955906a8e5",
+        "targetCandidateSha256": "c67338178baea5fa999639e61633ae542d543f1debb08d93b818dd81c9d8b367",
         "reason": "Local structure identifies this native receiver; that fact is not route authority."
       },
       "sqlEvidence": {
@@ -8235,13 +8614,13 @@
       "language": "python",
       "stableIdentity": {
         "path": "python/src/graph_engineering/sqlite_operation_baseline_source.py",
-        "line": 6370,
+        "line": 6532,
         "column": 26,
         "method": "execute",
         "sqlOrigin": "direct-argument",
         "occurrence": 0,
-        "scannerSha256": "d21a891360c968025af3fe67211dc63604f9fafe8f9674f2b4e5b9564f0a1fa2",
-        "candidateSha256": "6f5f01c9cc5dbb10c8717c902889360ab90457b4a8112d497f4dd84527e22c65"
+        "scannerSha256": "7237e3f1c5f12820381c934b0d9e8b5506e8145075fde60abc1f60789539440d",
+        "candidateSha256": "875ff3b89707aa801362d6f6df2c97b3e3fb4dad70482b0d8999fe69ae019fdb"
       },
       "receiverEvidence": {
         "category": "wrapper-guard-or-test-like-production-probe",
@@ -8365,13 +8744,13 @@
       "language": "python",
       "stableIdentity": {
         "path": "python/src/graph_engineering/sqlite_operation_baseline_source.py",
-        "line": 6377,
+        "line": 6539,
         "column": 27,
         "method": "execute",
         "sqlOrigin": "direct-argument",
         "occurrence": 0,
-        "scannerSha256": "7dfa181c295ec7c16f0aa640c5cbc5d57e11f20491d3445365814c81970a9530",
-        "candidateSha256": "f15fc282be429499580ccba8d68a6823a54d19f1d9330fe7ba74ffe326284916"
+        "scannerSha256": "345f281221c20d1c5300a18e9d966a5f656e164230678780549da5e96293758f",
+        "candidateSha256": "54966e64c460d6020c11d1020699d476b14443a0185f41cbe8fcfbaeff218d6a"
       },
       "receiverEvidence": {
         "category": "wrapper-guard-or-test-like-production-probe",
@@ -8495,13 +8874,13 @@
       "language": "python",
       "stableIdentity": {
         "path": "python/src/graph_engineering/sqlite_operation_baseline_source.py",
-        "line": 6384,
+        "line": 6546,
         "column": 14,
         "method": "execute",
         "sqlOrigin": "direct-argument",
         "occurrence": 0,
-        "scannerSha256": "d3389c78333d2504101258bd55967367403c50c76a31243605ffb322902cf824",
-        "candidateSha256": "f8c311bd7b73723ecbc79253f3930237a226a48f3c57881a5ed430f131ca54d4"
+        "scannerSha256": "21a3db2f1e540de46a1d01a2d9618a64cfff5097c87b248da7fa1087b28d44ef",
+        "candidateSha256": "f2892668d2ca9e6a703f75b6df87042b4153ad4d0dcf306268e882496f6f7a4e"
       },
       "receiverEvidence": {
         "category": "wrapper-guard-or-test-like-production-probe",
@@ -8625,13 +9004,13 @@
       "language": "python",
       "stableIdentity": {
         "path": "python/src/graph_engineering/sqlite_operation_baseline_source.py",
-        "line": 6425,
+        "line": 6587,
         "column": 15,
         "method": "execute",
         "sqlOrigin": "direct-argument",
         "occurrence": 0,
-        "scannerSha256": "ca730a0fe09959ecc2010b8ca26514d7a1f12d0308db75434ef0b7f55f0dd37c",
-        "candidateSha256": "8053fe1ac5493081b536a9ffc6a458a4667649bde5e227599c12436dbf3dc583"
+        "scannerSha256": "f82bb74ee370efaed49efa9dde372a8b54d6a05cec0fbd8edfe85c242a00f548",
+        "candidateSha256": "706fe80466401fb0ba26c5af40afe213b44baf588dcdb65ef2a826ea1be49901"
       },
       "receiverEvidence": {
         "category": "wrapper-guard-or-test-like-production-probe",
@@ -8758,13 +9137,13 @@
       "language": "python",
       "stableIdentity": {
         "path": "python/src/graph_engineering/sqlite_operation_baseline_source.py",
-        "line": 6436,
+        "line": 6598,
         "column": 19,
         "method": "execute",
         "sqlOrigin": "direct-argument",
         "occurrence": 0,
-        "scannerSha256": "b54d41a72a1703c8c60bd02e4142f378d2c028ec9ded44676de39f7238f96aaf",
-        "candidateSha256": "bba2e0667a09b71915a6826caf9871672ca9dbe47487b68fca36409f08ff314a"
+        "scannerSha256": "4387beab72299023ef287fe48473846c0dfe8bd44c515e35493d1fd2ab53a254",
+        "candidateSha256": "291d532102543d6e9b55386ad5808efb2a02ecdaa9e9eee9a0e25df44cdddcbb"
       },
       "receiverEvidence": {
         "category": "wrapper-guard-or-test-like-production-probe",
@@ -8888,13 +9267,13 @@
       "language": "python",
       "stableIdentity": {
         "path": "python/src/graph_engineering/sqlite_operation_baseline_source.py",
-        "line": 6437,
+        "line": 6599,
         "column": 16,
         "method": "execute",
         "sqlOrigin": "direct-argument",
         "occurrence": 0,
-        "scannerSha256": "82c252ac7519f327561f1726298154943251b834605c23a830c4ded3b9ca36b6",
-        "candidateSha256": "0fca8153d5bd0400994eae98015c834edc618fe3b5be67cc108ebacf3d21e617"
+        "scannerSha256": "4d9f9cc220b29060298c020bec64f761e632739f19182cd430ea70b76c83d41f",
+        "candidateSha256": "876ba4227d0ecf74288c39a8aecd6e1a48e10e13c3fcb84b7725a9cb722168aa"
       },
       "receiverEvidence": {
         "category": "wrapper-guard-or-test-like-production-probe",
@@ -9012,6 +9391,462 @@
       "threatCodes": [
         "DIGEST_NOT_AUTHORITY",
         "WRAPPER_PROVENANCE_NOT_COMPOSITION"
+      ]
+    },
+    {
+      "language": "python",
+      "stableIdentity": {
+        "path": "python/src/graph_engineering/sqlite_operation_baseline_source.py",
+        "line": 7238,
+        "column": 26,
+        "method": "owner_execute",
+        "sqlOrigin": "native-helper-direct-argument",
+        "occurrence": 0,
+        "scannerSha256": "b6c68520e13a118e8cf3f37e75e4d6433bf025509a5b48f755b331130cf583d5",
+        "candidateSha256": "5ac32dbc37013b07ab5595690524be428c1783f84451f70e2e57db3637f4fb35"
+      },
+      "receiverEvidence": {
+        "category": "confirmed-native-receiver",
+        "confidence": "proven",
+        "family": null,
+        "kind": "database",
+        "aliasDepth": null,
+        "reason": "exact private native-projection binder capability: owner_execute"
+      },
+      "operationKind": "generic-sql-sink",
+      "apiStage": "prepare",
+      "connectionRole": "lower-native-connection-helper",
+      "candidateDispositionHint": "unknown",
+      "lowerNativeEdge": {
+        "status": "self-native-receiver",
+        "targetCandidateSha256": "5ac32dbc37013b07ab5595690524be428c1783f84451f70e2e57db3637f4fb35",
+        "reason": "The exact definition-time helper binding proves this lower native candidate itself; inventory evidence does not grant route authority."
+      },
+      "sqlEvidence": {
+        "status": "unknown",
+        "shape": "identifier-alias",
+        "sha256": null,
+        "token": null
+      },
+      "parameterProvenance": {
+        "status": "unresolved",
+        "source": null
+      },
+      "phase": {
+        "status": "unresolved",
+        "value": null
+      },
+      "ownerCompositionExpectation": {
+        "status": "unresolved",
+        "owner": null,
+        "composition": null
+      },
+      "budget": {
+        "row": {
+          "kind": "unknown",
+          "maximum": null
+        },
+        "cursor": {
+          "kind": "unknown",
+          "maximum": null
+        }
+      },
+      "resourceLifecycle": {
+        "status": "unresolved",
+        "states": []
+      },
+      "routeId": null,
+      "disposition": "unknown",
+      "reason": "The lower native prepare/read/retirement lifecycle edge and bounded family expansion are structurally proven, but parameters, phase, owner/composition identity, budgets, accepted retirement receipt, and runtime route authority remain unresolved.",
+      "nativeProjectionAuthority": false,
+      "runtimeRouteAuthority": false,
+      "callFamilyId": "py:native-projection-family-loop",
+      "logicalExecutionId": "py:native-projection-family-loop",
+      "resourceLifecycleId": "resource:py:native-projection-family-loop",
+      "invocationContexts": [
+        {
+          "id": "lowerOwnedNativeProjection",
+          "connectionState": "caller-owned-exclusive-transaction",
+          "rm1PermitAvailable": false,
+          "futurePermitPolicy": "never"
+        }
+      ],
+      "negativeFacts": {
+        "zeroParameter": null,
+        "noSqlRoute": false,
+        "controlStatement": false,
+        "reopenAuditOnly": false,
+        "dynamicSqlUnclosed": false,
+        "nativeProjectionProduced": false
+      },
+      "dynamicClosure": {
+        "status": "bounded-static-family-unresolved-route",
+        "source": "lowerOwnedNativeProjection-definition-time-family-set",
+        "cardinality": 12,
+        "quoting": "source-definition-fixed-sql",
+        "assetOrdinal": null,
+        "digestKind": "sql-expansion-set",
+        "sourceAssetSha256": null,
+        "expansionSqlSha256": [
+          "8ffde53dd9642e4b4e37e579de3f8c2c411095679395d68e2be1359cd273f9e4",
+          "b5b5b6587d8dae2586cda00c9e436c0384072bf0a8cdbbbd65328fc10436e496",
+          "b76f6abdd606d3defe7f77abc3636b0281ff4e714c48cc2409faabd3827fd3bb",
+          "7db69257f8b5f2e21738b5b3370fb9dc14f6e75ee9636ca2001aa950b4cdb535",
+          "bddb88f8baca7022ef0ac14ebdd4d598e2ecf19c076629903480f4a9fc1a63d6",
+          "62bf2391c8dfe50a17c9636e319b9b184a326ad9157476522195b9457dae6496",
+          "1abc05b876d2ad8c78a87b6736258178486a6ddd1f35cd319e2714249fa91662",
+          "b55445b32e75113577233516fa389ea79d0d4afd973225aa87c1fc44533a4134",
+          "f3ef1ab0ecc92658772de6eb38b16b654e3da29335f33feabf61d581c9ed2514",
+          "202b1d58c214d10f7124c518bc2ecef2ef16fff50e3b819f0733f62d82e5bed8",
+          "cbbd8c601ea128a98a19901ba3ad88df0cb66b9d7033e9dfd14c06ce81d0c5f2",
+          "9393d2c28ec4ce9892febafcd4c34fc5c976059623a110b72d4bfd36479762f8"
+        ],
+        "componentContract": [
+          "family",
+          "sql",
+          "decoder",
+          "fetch",
+          "retirement"
+        ]
+      },
+      "nonAuthorizingRole": {
+        "id": "callsite-inventory",
+        "inventoryEvidenceOnly": true,
+        "mayIssuePermit": false,
+        "mayMintNativeProjection": false,
+        "mayAuthorizeRuntimeRoute": false
+      },
+      "riskCodes": [
+        "R3_SQL_CLOSURE_UNRESOLVED",
+        "R4_PARAMETERS_UNRESOLVED",
+        "R5_PHASE_UNRESOLVED",
+        "R6_OWNER_COMPOSITION_UNRESOLVED",
+        "R7_BUDGET_UNRESOLVED",
+        "R8_RESOURCE_LIFECYCLE_UNRESOLVED",
+        "R9_ROUTE_AUTHORITY_ABSENT"
+      ],
+      "authorityBarriers": [
+        "route-disposition-unknown",
+        "native-projection-authority-false",
+        "runtime-route-authority-false",
+        "sql-closure-unresolved",
+        "parameter-provenance-unresolved",
+        "phase-unresolved",
+        "owner-composition-unresolved",
+        "budget-unresolved",
+        "resource-lifecycle-unresolved"
+      ],
+      "cursorPair": null,
+      "threatCodes": [
+        "GENERIC_SINK_ESCALATION",
+        "INJECTION_SEAM",
+        "API_STAGE_DOUBLE_COUNT",
+        "DYNAMIC_IDENTIFIER_EXPANSION",
+        "RESOURCE_CROSS_PAIRING"
+      ]
+    },
+    {
+      "language": "python",
+      "stableIdentity": {
+        "path": "python/src/graph_engineering/sqlite_operation_baseline_source.py",
+        "line": 7254,
+        "column": 28,
+        "method": "cursor_fetchmany",
+        "sqlOrigin": "native-cursor-fetch-lineage",
+        "occurrence": 0,
+        "scannerSha256": "e0150d7853a3fc81693861b9b20af0aca48bc28a0c62e4813cf9a524db4f2a06",
+        "candidateSha256": "5e4df2f3af504fbc575d556f411b4a2d68bbbb3108d6bdc785f0ea7531580326"
+      },
+      "receiverEvidence": {
+        "category": "confirmed-native-receiver",
+        "confidence": "proven",
+        "family": null,
+        "kind": "cursor",
+        "aliasDepth": null,
+        "reason": "exact private native-projection binder capability: cursor_fetchmany"
+      },
+      "operationKind": "generic-sql-sink",
+      "apiStage": "fetch",
+      "connectionRole": "lower-native-cursor-fetch-helper",
+      "candidateDispositionHint": "unknown",
+      "lowerNativeEdge": {
+        "status": "self-native-receiver",
+        "targetCandidateSha256": "5e4df2f3af504fbc575d556f411b4a2d68bbbb3108d6bdc785f0ea7531580326",
+        "reason": "The exact definition-time helper binding proves this lower native candidate itself; inventory evidence does not grant route authority."
+      },
+      "sqlEvidence": {
+        "status": "unknown",
+        "shape": "native-cursor-fetch-lineage",
+        "sha256": null,
+        "token": null
+      },
+      "parameterProvenance": {
+        "status": "unresolved",
+        "source": null
+      },
+      "phase": {
+        "status": "unresolved",
+        "value": null
+      },
+      "ownerCompositionExpectation": {
+        "status": "unresolved",
+        "owner": null,
+        "composition": null
+      },
+      "budget": {
+        "row": {
+          "kind": "unknown",
+          "maximum": null
+        },
+        "cursor": {
+          "kind": "unknown",
+          "maximum": null
+        }
+      },
+      "resourceLifecycle": {
+        "status": "unresolved",
+        "states": []
+      },
+      "routeId": null,
+      "disposition": "unknown",
+      "reason": "The lower native prepare/read/retirement lifecycle edge and bounded family expansion are structurally proven, but parameters, phase, owner/composition identity, budgets, accepted retirement receipt, and runtime route authority remain unresolved.",
+      "nativeProjectionAuthority": false,
+      "runtimeRouteAuthority": false,
+      "callFamilyId": "py:native-projection-family-loop",
+      "logicalExecutionId": "py:native-projection-family-loop",
+      "resourceLifecycleId": "resource:py:native-projection-family-loop",
+      "invocationContexts": [
+        {
+          "id": "lowerOwnedNativeProjection",
+          "connectionState": "caller-owned-exclusive-transaction",
+          "rm1PermitAvailable": false,
+          "futurePermitPolicy": "never"
+        }
+      ],
+      "negativeFacts": {
+        "zeroParameter": null,
+        "noSqlRoute": false,
+        "controlStatement": false,
+        "reopenAuditOnly": false,
+        "dynamicSqlUnclosed": false,
+        "nativeProjectionProduced": false
+      },
+      "dynamicClosure": {
+        "status": "bounded-static-family-unresolved-route",
+        "source": "lowerOwnedNativeProjection-definition-time-family-set",
+        "cardinality": 12,
+        "quoting": "source-definition-fixed-sql",
+        "assetOrdinal": null,
+        "digestKind": "sql-expansion-set",
+        "sourceAssetSha256": null,
+        "expansionSqlSha256": [
+          "8ffde53dd9642e4b4e37e579de3f8c2c411095679395d68e2be1359cd273f9e4",
+          "b5b5b6587d8dae2586cda00c9e436c0384072bf0a8cdbbbd65328fc10436e496",
+          "b76f6abdd606d3defe7f77abc3636b0281ff4e714c48cc2409faabd3827fd3bb",
+          "7db69257f8b5f2e21738b5b3370fb9dc14f6e75ee9636ca2001aa950b4cdb535",
+          "bddb88f8baca7022ef0ac14ebdd4d598e2ecf19c076629903480f4a9fc1a63d6",
+          "62bf2391c8dfe50a17c9636e319b9b184a326ad9157476522195b9457dae6496",
+          "1abc05b876d2ad8c78a87b6736258178486a6ddd1f35cd319e2714249fa91662",
+          "b55445b32e75113577233516fa389ea79d0d4afd973225aa87c1fc44533a4134",
+          "f3ef1ab0ecc92658772de6eb38b16b654e3da29335f33feabf61d581c9ed2514",
+          "202b1d58c214d10f7124c518bc2ecef2ef16fff50e3b819f0733f62d82e5bed8",
+          "cbbd8c601ea128a98a19901ba3ad88df0cb66b9d7033e9dfd14c06ce81d0c5f2",
+          "9393d2c28ec4ce9892febafcd4c34fc5c976059623a110b72d4bfd36479762f8"
+        ],
+        "componentContract": [
+          "family",
+          "sql",
+          "decoder",
+          "fetch",
+          "retirement"
+        ]
+      },
+      "nonAuthorizingRole": {
+        "id": "callsite-inventory",
+        "inventoryEvidenceOnly": true,
+        "mayIssuePermit": false,
+        "mayMintNativeProjection": false,
+        "mayAuthorizeRuntimeRoute": false
+      },
+      "riskCodes": [
+        "R3_SQL_CLOSURE_UNRESOLVED",
+        "R4_PARAMETERS_UNRESOLVED",
+        "R5_PHASE_UNRESOLVED",
+        "R6_OWNER_COMPOSITION_UNRESOLVED",
+        "R7_BUDGET_UNRESOLVED",
+        "R8_RESOURCE_LIFECYCLE_UNRESOLVED",
+        "R9_ROUTE_AUTHORITY_ABSENT"
+      ],
+      "authorityBarriers": [
+        "route-disposition-unknown",
+        "native-projection-authority-false",
+        "runtime-route-authority-false",
+        "sql-closure-unresolved",
+        "parameter-provenance-unresolved",
+        "phase-unresolved",
+        "owner-composition-unresolved",
+        "budget-unresolved",
+        "resource-lifecycle-unresolved"
+      ],
+      "cursorPair": null,
+      "threatCodes": [
+        "GENERIC_SINK_ESCALATION",
+        "INJECTION_SEAM",
+        "API_STAGE_DOUBLE_COUNT",
+        "DYNAMIC_IDENTIFIER_EXPANSION",
+        "RESOURCE_CROSS_PAIRING"
+      ]
+    },
+    {
+      "language": "python",
+      "stableIdentity": {
+        "path": "python/src/graph_engineering/sqlite_operation_baseline_source.py",
+        "line": 7298,
+        "column": 25,
+        "method": "cursor_close",
+        "sqlOrigin": "native-cursor-retirement-lineage",
+        "occurrence": 0,
+        "scannerSha256": "220c53f35910a27f011ba44e283aec461836dbc997176892067765dfb728483b",
+        "candidateSha256": "07365166be5fbbb9ab463e5ba2f580489d6d07b4cacdf5b88bd283e0b145dd1e"
+      },
+      "receiverEvidence": {
+        "category": "confirmed-native-receiver",
+        "confidence": "proven",
+        "family": null,
+        "kind": "cursor",
+        "aliasDepth": null,
+        "reason": "exact private native-projection binder capability: cursor_close"
+      },
+      "operationKind": "generic-sql-sink",
+      "apiStage": "close-retirement",
+      "connectionRole": "lower-native-cursor-retirement-helper",
+      "candidateDispositionHint": "unknown",
+      "lowerNativeEdge": {
+        "status": "self-native-receiver",
+        "targetCandidateSha256": "07365166be5fbbb9ab463e5ba2f580489d6d07b4cacdf5b88bd283e0b145dd1e",
+        "reason": "The exact definition-time helper binding proves this lower native candidate itself; inventory evidence does not grant route authority."
+      },
+      "sqlEvidence": {
+        "status": "unknown",
+        "shape": "native-cursor-retirement-lineage",
+        "sha256": null,
+        "token": null
+      },
+      "parameterProvenance": {
+        "status": "unresolved",
+        "source": null
+      },
+      "phase": {
+        "status": "unresolved",
+        "value": null
+      },
+      "ownerCompositionExpectation": {
+        "status": "unresolved",
+        "owner": null,
+        "composition": null
+      },
+      "budget": {
+        "row": {
+          "kind": "unknown",
+          "maximum": null
+        },
+        "cursor": {
+          "kind": "unknown",
+          "maximum": null
+        }
+      },
+      "resourceLifecycle": {
+        "status": "unresolved",
+        "states": []
+      },
+      "routeId": null,
+      "disposition": "unknown",
+      "reason": "The lower native prepare/read/retirement lifecycle edge and bounded family expansion are structurally proven, but parameters, phase, owner/composition identity, budgets, accepted retirement receipt, and runtime route authority remain unresolved.",
+      "nativeProjectionAuthority": false,
+      "runtimeRouteAuthority": false,
+      "callFamilyId": "py:native-projection-family-loop",
+      "logicalExecutionId": "py:native-projection-family-loop",
+      "resourceLifecycleId": "resource:py:native-projection-family-loop",
+      "invocationContexts": [
+        {
+          "id": "lowerOwnedNativeProjection",
+          "connectionState": "caller-owned-exclusive-transaction",
+          "rm1PermitAvailable": false,
+          "futurePermitPolicy": "never"
+        }
+      ],
+      "negativeFacts": {
+        "zeroParameter": null,
+        "noSqlRoute": false,
+        "controlStatement": false,
+        "reopenAuditOnly": false,
+        "dynamicSqlUnclosed": false,
+        "nativeProjectionProduced": false
+      },
+      "dynamicClosure": {
+        "status": "bounded-static-family-unresolved-route",
+        "source": "lowerOwnedNativeProjection-definition-time-family-set",
+        "cardinality": 12,
+        "quoting": "source-definition-fixed-sql",
+        "assetOrdinal": null,
+        "digestKind": "sql-expansion-set",
+        "sourceAssetSha256": null,
+        "expansionSqlSha256": [
+          "8ffde53dd9642e4b4e37e579de3f8c2c411095679395d68e2be1359cd273f9e4",
+          "b5b5b6587d8dae2586cda00c9e436c0384072bf0a8cdbbbd65328fc10436e496",
+          "b76f6abdd606d3defe7f77abc3636b0281ff4e714c48cc2409faabd3827fd3bb",
+          "7db69257f8b5f2e21738b5b3370fb9dc14f6e75ee9636ca2001aa950b4cdb535",
+          "bddb88f8baca7022ef0ac14ebdd4d598e2ecf19c076629903480f4a9fc1a63d6",
+          "62bf2391c8dfe50a17c9636e319b9b184a326ad9157476522195b9457dae6496",
+          "1abc05b876d2ad8c78a87b6736258178486a6ddd1f35cd319e2714249fa91662",
+          "b55445b32e75113577233516fa389ea79d0d4afd973225aa87c1fc44533a4134",
+          "f3ef1ab0ecc92658772de6eb38b16b654e3da29335f33feabf61d581c9ed2514",
+          "202b1d58c214d10f7124c518bc2ecef2ef16fff50e3b819f0733f62d82e5bed8",
+          "cbbd8c601ea128a98a19901ba3ad88df0cb66b9d7033e9dfd14c06ce81d0c5f2",
+          "9393d2c28ec4ce9892febafcd4c34fc5c976059623a110b72d4bfd36479762f8"
+        ],
+        "componentContract": [
+          "family",
+          "sql",
+          "decoder",
+          "fetch",
+          "retirement"
+        ]
+      },
+      "nonAuthorizingRole": {
+        "id": "callsite-inventory",
+        "inventoryEvidenceOnly": true,
+        "mayIssuePermit": false,
+        "mayMintNativeProjection": false,
+        "mayAuthorizeRuntimeRoute": false
+      },
+      "riskCodes": [
+        "R3_SQL_CLOSURE_UNRESOLVED",
+        "R4_PARAMETERS_UNRESOLVED",
+        "R5_PHASE_UNRESOLVED",
+        "R6_OWNER_COMPOSITION_UNRESOLVED",
+        "R7_BUDGET_UNRESOLVED",
+        "R8_RESOURCE_LIFECYCLE_UNRESOLVED",
+        "R9_ROUTE_AUTHORITY_ABSENT"
+      ],
+      "authorityBarriers": [
+        "route-disposition-unknown",
+        "native-projection-authority-false",
+        "runtime-route-authority-false",
+        "sql-closure-unresolved",
+        "parameter-provenance-unresolved",
+        "phase-unresolved",
+        "owner-composition-unresolved",
+        "budget-unresolved",
+        "resource-lifecycle-unresolved"
+      ],
+      "cursorPair": null,
+      "threatCodes": [
+        "GENERIC_SINK_ESCALATION",
+        "INJECTION_SEAM",
+        "API_STAGE_DOUBLE_COUNT",
+        "DYNAMIC_IDENTIFIER_EXPANSION",
+        "RESOURCE_CROSS_PAIRING"
       ]
     }
   ],

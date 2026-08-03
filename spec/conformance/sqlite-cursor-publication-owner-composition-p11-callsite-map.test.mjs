@@ -39,7 +39,7 @@ function validateMutation(manifest) {
   });
 }
 
-test("frozen RM1 map is a live one-to-one 18+47 scanner/classifier join", () => {
+test("frozen RM1 map is a live one-to-one 20+50 scanner/classifier join", () => {
   const summary = validateP11CallsiteMap({
     ...loadP11CallsiteMap(),
     scannerReport: scanRepository({ root: ROOT }),
@@ -49,7 +49,7 @@ test("frozen RM1 map is a live one-to-one 18+47 scanner/classifier join", () => 
     callFamilyCount: 23,
     logicalExecutionCount: 50,
     routeClosureClaimed: false,
-    scopedCallsiteCount: 65,
+    scopedCallsiteCount: 70,
   });
 });
 
@@ -116,17 +116,19 @@ test("cursor allocation execution identity and retirement uncertainty cannot cro
 
 test("context split, closure digests, role threats and barriers are mandatory", () => {
   const context = mutatedFixture();
-  const shared = context.callsites.find(({ stableIdentity }) => stableIdentity.line === 5656);
+  const shared = context.callsites.find(({ stableIdentity }) => stableIdentity.line === 5817);
   shared.invocationContexts[1].futurePermitPolicy = "never";
   assert.throws(() => validateMutation(context));
 
   const closure = mutatedFixture();
-  const family = closure.callsites.find(({ stableIdentity }) => stableIdentity.line === 5317);
+  const family = closure.callsites.find(({ stableIdentity }) => stableIdentity.line === 5323);
   family.dynamicClosure.expansionSqlSha256.pop();
   assert.throws(() => validateMutation(closure));
 
   const threat = mutatedFixture();
-  const wrapper = threat.callsites.find(({ language }) => language === "typescript");
+  const wrapper = threat.callsites.find(({ language, receiverEvidence }) =>
+    language === "typescript"
+    && receiverEvidence.category === "wrapper-guard-or-test-like-production-probe");
   wrapper.threatCodes = wrapper.threatCodes.filter(
     (code) => code !== "WRAPPER_PROVENANCE_NOT_COMPOSITION",
   );

@@ -15,8 +15,8 @@ const PYTHON_REPORTER = path.join(
   ROOT,
   "python/tests/sqlite_native_callsite_classification_report.py",
 );
-const RAW_SHA256 = "16d7514e1fa9995c64c55132844b295c671af8fdc611df8c247261c2d61bf8c7";
-const CANONICAL_SHA256 = "85e05220c392c31af0d3a947185250c59913f05bd22fb1c0332310c0137a4364";
+const RAW_SHA256 = "6c3567d141e43c39246ef2dc4531118c460300290db2dd2a5658b24186d34aa7";
+const CANONICAL_SHA256 = "95a40c0b5a97f3ce1d015f2574e4f29d3ce2bdf1543204b89714df4f9cc2316a";
 const SHA256 = /^[0-9a-f]{64}$/u;
 const TS_PATH = "packages/sqlite/src/operation-baseline-source.ts";
 const PY_PATH = "python/src/graph_engineering/sqlite_operation_baseline_source.py";
@@ -56,8 +56,8 @@ const AUTHORITY_BARRIERS = [
   "resource-lifecycle-unresolved",
 ];
 const SOURCE_HASHES = new Map([
-  [TS_PATH, "d112fb088039a0ed139eeb15e63dabd0a011fc3cf45f24ec0c8cfd1f47be6b68"],
-  [PY_PATH, "74ea2f6e81f29973a2bbb3a720c7ebf1efdea46cbf51b1cb76c4ad14fea69f3b"],
+  [TS_PATH, "32a08c5a5d2d7695a544787368cb4c97507dae830eea5531e73d7f003f75c6f2"],
+  [PY_PATH, "9c4662c457cba1331ac8c83b3ca67586167da2e736ebe1fff6efb155ba62edfb"],
 ]);
 const CURSOR_FAMILIES = new Set([
   "py:post-ddl-reader",
@@ -231,14 +231,39 @@ function validateSemanticGroups(callsites) {
   assert.equal(new Set(callsites.map(({ logicalExecutionId }) => logicalExecutionId)).size, 50);
   assert.equal(new Set(callsites.map(({ resourceLifecycleId }) => resourceLifecycleId)).size, 50);
   const tsFamilies = Map.groupBy(callsites.filter(({ language }) => language === "typescript"), ({ callFamilyId }) => callFamilyId);
-  assert.equal(tsFamilies.size, 9);
-  for (const family of tsFamilies.values()) {
-    assert.equal(family.length, 2);
+  assert.equal(tsFamilies.size, 8);
+  for (const [familyId, family] of tsFamilies) {
+    const nativeHelper = familyId.startsWith("ts:baseline-source:native:");
+    assert.equal(family.length, nativeHelper ? 4 : 2);
     assert.equal(new Set(family.map(({ logicalExecutionId }) => logicalExecutionId)).size, 1);
-    assert.equal(family.filter(({ apiStage }) => apiStage === "prepare").length, 1);
-    assert.equal(family.filter(({ apiStage }) => apiStage === "get" || apiStage === "iterate").length, 1);
+    if (nativeHelper) {
+      assert.deepEqual(family.map(({ connectionRole }) => connectionRole), [
+        "lower-native-connection-helper",
+        "lower-native-statement-helper",
+        "lower-native-iterator-helper",
+        "lower-native-iterator-retirement-helper",
+      ]);
+      const expectedCardinality = familyId.endsWith(":exactlyOne") ? 3 : 9;
+      assert.equal(family.every(({ dynamicClosure }) =>
+        dynamicClosure.status === "bounded-static-family-unresolved-route"
+        && dynamicClosure.cardinality === expectedCardinality), true);
+    } else {
+      assert.equal(family.filter(({ apiStage }) => apiStage === "prepare").length, 1);
+      assert.equal(family.filter(({ apiStage }) => apiStage === "get" || apiStage === "iterate").length, 1);
+    }
     assert.equal(family.every(({ threatCodes }) => threatCodes.includes("API_STAGE_DOUBLE_COUNT")), true);
   }
+  const pythonNativeProjection = callsites.filter(({ callFamilyId }) =>
+    callFamilyId === "py:native-projection-family-loop");
+  assert.deepEqual(pythonNativeProjection.map(({ apiStage, connectionRole }) =>
+    [apiStage, connectionRole]), [
+    ["prepare", "lower-native-connection-helper"],
+    ["fetch", "lower-native-cursor-fetch-helper"],
+    ["close-retirement", "lower-native-cursor-retirement-helper"],
+  ]);
+  assert.equal(pythonNativeProjection.every(({ receiverEvidence, dynamicClosure }) =>
+    receiverEvidence.category === "confirmed-native-receiver"
+    && dynamicClosure.cardinality === 12), true);
   for (const familyId of CURSOR_FAMILIES) {
     const family = callsites.filter(({ callFamilyId }) => callFamilyId === familyId);
     assert.equal(family.length, 2);
@@ -261,12 +286,12 @@ function validateSemanticGroups(callsites) {
   }
   assert.deepEqual(
     callsites.filter(({ candidateDispositionHint }) => candidateDispositionHint === "forbidden").map(({ stableIdentity }) => stableIdentity.line),
-    [4278, 4388],
+    [4284, 4394],
   );
   const audit = callsites.filter(({ operationKind }) => operationKind === "reopen-audit-read");
-  assert.deepEqual(audit.map(({ stableIdentity }) => stableIdentity.line), [4505, 4506, 4507, 4508, 4509, 4510]);
+  assert.deepEqual(audit.map(({ stableIdentity }) => stableIdentity.line), [4511, 4512, 4513, 4514, 4515, 4516]);
   assert.equal(new Set(audit.map(({ logicalExecutionId }) => logicalExecutionId)).size, 6);
-  const shared = callsites.filter(({ stableIdentity: { line } }) => line >= 5586 && line <= 5743);
+  const shared = callsites.filter(({ operationKind }) => operationKind === "source-v1-validation-read");
   for (const callsite of shared) {
     assert.deepEqual(callsite.invocationContexts.map(({ connectionState, futurePermitPolicy }) => [connectionState, futurePermitPolicy]), [
       ["inactive-owner", "never"],
@@ -275,26 +300,26 @@ function validateSemanticGroups(callsites) {
     ]);
     assert.equal(callsite.threatCodes.includes("CONTEXT_CONFLATION"), true);
   }
-  for (const line of [3012, 3243, 3501, 3756, 4004, 4104]) {
+  for (const line of [3018, 3249, 3507, 3762, 4010, 4110]) {
     const callsite = callsites.find(({ stableIdentity }) => stableIdentity.line === line);
     assert.equal(callsite.dynamicClosure.cardinality, 1);
-    assert.equal(callsite.dynamicClosure.expansionSqlSha256.length, line === 3012 ? 0 : 1);
+    assert.equal(callsite.dynamicClosure.expansionSqlSha256.length, line === 3018 ? 0 : 1);
     assert.equal(callsite.threatCodes.includes("INJECTION_SEAM"), true);
   }
-  for (const line of [5317, 5355]) {
+  for (const line of [5323, 5361]) {
     const callsite = callsites.find(({ stableIdentity }) => stableIdentity.line === line);
     assert.equal(callsite.dynamicClosure.cardinality, 12);
     assert.equal(callsite.dynamicClosure.expansionSqlSha256.length, 12);
     assert.deepEqual(callsite.dynamicClosure.componentContract, ["kind", "sql", "decoder", "fetch"]);
   }
-  const migration = callsites.find(({ stableIdentity }) => stableIdentity.line === 4186);
+  const migration = callsites.find(({ stableIdentity }) => stableIdentity.line === 4192);
   assert.equal(migration.dynamicClosure.cardinality, 20);
   assert.equal(migration.dynamicClosure.assetOrdinal, "required-1-through-20");
   assert.equal(migration.dynamicClosure.expansionSqlSha256.length, 20);
-  const requiredTables = callsites.find(({ stableIdentity }) => stableIdentity.line === 5656);
+  const requiredTables = callsites.find(({ stableIdentity }) => stableIdentity.line === 5817);
   assert.equal(requiredTables.dynamicClosure.cardinality, 13);
   assert.equal(requiredTables.dynamicClosure.digestKind, "source-asset");
-  for (const line of [5725, 6425]) {
+  for (const line of [5886, 6587]) {
     const callsite = callsites.find(({ stableIdentity }) => stableIdentity.line === line);
     assert.equal(callsite.dynamicClosure.cardinality, 12);
     assert.equal(callsite.dynamicClosure.source, "_TABLES-frozen-12");
@@ -304,14 +329,14 @@ function validateSemanticGroups(callsites) {
 }
 
 function validateLiveJoin(manifest, scannerReport, pythonReport) {
-  assert.equal(scannerReport.summary.callsiteCount, 457);
+  assert.equal(scannerReport.summary.callsiteCount, 485);
   assert.equal(scannerReport.routeClosureClaimed, false);
   const scoped = scannerReport.callsites.filter(({ path: sourcePath }) => sourcePath === TS_PATH || sourcePath === PY_PATH);
-  assert.equal(scoped.length, 65);
+  assert.equal(scoped.length, 70);
   const scannerByKey = new Map(scoped.map((callsite) => [identityKey(callsite), callsite]));
   const pythonByKey = new Map(pythonReport.candidates.filter(({ identity }) => identity.path === PY_PATH)
     .map((callsite) => [identityKey(callsite.identity), callsite]));
-  assert.equal(pythonByKey.size, 47);
+  assert.equal(pythonByKey.size, 50);
   for (const entry of manifest.callsites) {
     const key = identityKey(entry.stableIdentity);
     const scanner = scannerByKey.get(key);
@@ -351,9 +376,9 @@ export function validateP11CallsiteMap({
   assert.equal(manifest.schemaVersion, 1);
   assert.equal(manifest.contractId, "sqlite-cursor-publication-owner-composition-p11-callsites-v1");
   assert.equal(manifest.status, "p11-a-rm1-inventory-only");
-  assert.equal(manifest.sourceImplementationCommit, "90fae463db5ef3097cf4b21ff4e07517edfbebd0");
-  assert.equal(manifest.scope.scopedCallsiteCount, 65);
-  assert.equal(manifest.scope.globalScannerCallsiteCount, 457);
+  assert.equal(manifest.sourceImplementationCommit, "3608d82407905c16c6094598872995384c836b93");
+  assert.equal(manifest.scope.scopedCallsiteCount, 70);
+  assert.equal(manifest.scope.globalScannerCallsiteCount, 485);
   assert.deepEqual(
     [manifest.scope.routeAuthorization, manifest.scope.routeClosureClaimed, manifest.scope.nativeProjectionAuthority, manifest.scope.runtimeRouteAuthority, manifest.scope.unknownCandidatesDropped],
     [false, false, false, false, false],
@@ -369,18 +394,18 @@ export function validateP11CallsiteMap({
   assert.deepEqual(manifest.threatCodeVocabulary, THREAT_CODES);
   assert.deepEqual(manifest.authorityBarrierVocabulary, AUTHORITY_BARRIERS);
   assert.deepEqual(manifest.futurePermitPolicyVocabulary, ["never", "requires-context-split", "requires-closed-leaf"]);
-  assert.equal(manifest.callsites.length, 65);
+  assert.equal(manifest.callsites.length, 70);
   manifest.callsites.forEach(validateCallsite);
-  assert.equal(new Set(manifest.callsites.map(({ stableIdentity }) => stableIdentity.candidateSha256)).size, 65);
-  assert.deepEqual(counts(manifest.callsites.map(({ language }) => language)), { python: 47, typescript: 18 });
-  assert.deepEqual(counts(manifest.callsites.map(({ disposition }) => disposition)), { unknown: 65 });
+  assert.equal(new Set(manifest.callsites.map(({ stableIdentity }) => stableIdentity.candidateSha256)).size, 70);
+  assert.deepEqual(counts(manifest.callsites.map(({ language }) => language)), { python: 50, typescript: 20 });
+  assert.deepEqual(counts(manifest.callsites.map(({ disposition }) => disposition)), { unknown: 70 });
   validateSemanticGroups(manifest.callsites);
   if (scannerReport !== undefined || pythonReport !== undefined) {
     assert.ok(scannerReport);
     assert.ok(pythonReport);
     validateLiveJoin(manifest, scannerReport, pythonReport);
   }
-  return { callFamilyCount: 23, logicalExecutionCount: 50, routeClosureClaimed: false, scopedCallsiteCount: 65 };
+  return { callFamilyCount: 23, logicalExecutionCount: 50, routeClosureClaimed: false, scopedCallsiteCount: 70 };
 }
 
 export function loadP11CallsiteMap() {

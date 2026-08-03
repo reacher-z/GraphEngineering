@@ -23621,3 +23621,89 @@ SHA-256为`686092349089eb71ce95e5dcf89929a198e9e9d9cdfa386ec0a995395475bade`。
 5. 本勘误不放宽资源退役、raw receipt私有性或one-shot要求；相反，它禁止用一个含糊的零计数
    掩盖真实内部transition。NP1仍只是P11-A bounded tranche，P11-B/C/D、stage18、third clock、
    COMMIT、D9、release与GitHub star目标全部保持nonclaim。
+
+#### 31.37.105 NP1后全局native-callsite闭包补强与CI遗漏修复合同（2026-08-03 PDT追加；既有内容不改）
+
+本节严格追加于既有23,623行之后；追加前整份计划SHA-256固定为
+`92b436db91f891de0f03e4d4a45e38f64ddd418c34ab376a5f1d8ba66445c42f`。NP1 runtime提交与其
+evidence提交推送后，重新运行RM1全局scanner发现：NP1把TypeScript lower native访问改为
+definition-time intrinsic后，旧scanner不识别函数式helper，因而把全局candidate从冻结457项
+错误观察为451项；同时NP1聚焦验收命令没有串联已存在的classification parity、callsite-map
+contract与route-map join，导致聚焦门全绿但完整CI闭包必红。本节只定义修复这一证据盲区的
+下一bounded tranche；它不回写NP1事实，不把scanner数量变化当作route授权或P11-A完成。
+
+##### 31.37.105.1 双运行时helper发现必须来自结构证明
+
+1. TypeScript scanner必须识别从canonical
+   `packages/sqlite/src/sqlite-connection.ts`导出的四类lower helper：prepare、iterate、next与
+   return。只有canonical contained module解析、非type-only import和definition-time `const`
+   alias链同时成立时才能把调用列为confirmed native receiver candidate；相同basename的假
+   模块、同名局部函数、参数、mutable `let`、赋值覆盖或未解析导入不得升级。
+2. TypeScript词法模型必须覆盖source、function、block、catch、for/for-in/for-of与switch。
+   `var`函数级hoist、function/class声明、let/const temporal shadow和binding pattern都必须
+   fail conservative；内层shadow退出后外层合法helper必须恢复，不能因共享scope泄漏而漏报。
+3. Python scanner只可在
+   `_produce_sqlite_v1_baseline_native_projection_receipt_implementation`的exact private binder
+   图上识别`owner_execute`、`cursor_fetchmany`与`cursor_close`。结构证明必须同时绑定module
+   capture、binder direct assignment、参数ordinal、nested produce传参、唯一install调用与
+   binder唯一`return produce`；任何Assign/AnnAssign/rebinding、参数store、替换return或替换
+   install必须使三项全部退回不可升级状态。
+4. Python独立classifier不得信任scanner自报的`receiverConfidence`。它必须重新解析同一source
+   并独立复证完整binder图；伪造scanner字段、修改binding/order/store/install/return中的任一
+   项只能得到unknown，不能得到confirmed-native。
+5. scanner只生成观察candidate，所有candidate的`routeClassification`仍为unknown，
+   `routeClosureClaimed=false`，exact SQL digest、receiver truth或helper provenance均不能单独
+   产生runtime route authority、projection authority或任意SQL authority。
+
+##### 31.37.105.2 新canonical数量、scope与资源语义
+
+1. 完成上述证明后，全局inventory必须精确为485项：TypeScript 231、Python 254；485项必须
+   全部保留、稳定identity唯一、byte deterministic且route-unknown。任何未来源码变化导致数量
+   或identity漂移都必须先重跑人工/机器triage，不得直接改常量使测试变绿。
+2. RM1 bounded scope必须精确为70项：TypeScript
+   `operation-baseline-source.ts` 20项，Python同名source 50项。TS 20由旧12个wrapper
+   prepare/get观察加NP1的8个helper调用组成；Python 50由旧47项加NP1的execute/fetch/close
+   三个静态helper callsite组成。静态三项代表闭合12-family循环，不得伪写成运行时只有一次。
+3. TS新增8项必须按`exactlyOne`与`transactionRows`分别绑定两个call family、两个logical
+   execution与两个resource lifecycle；每组stage严格为prepare、iterate、next、return，return
+   必须是retirement证据，不能与next合并或从manifest删除。closed expansion分别覆盖3与9个
+   family，总计12，且一个generic static execution不得冒充12个互不相关route authority。
+4. Python新增三项必须绑定同一NP1 logical execution/resource lineage的prepare、bounded fetch、
+   close/retirement阶段，并绑定12-family ordered SQL closure。close不得跨cursor配对，fetch不得
+   以terminal空batch省略，static callsite计数不得代替runtime 12/12 prepare/terminal/close证据。
+5. 更新后的manifest仍保持23个call families、50个logical executions与50个resource
+   lifecycles；这是旧generic成员调用被更精确helper阶段替换后的净结构，不是删除native工作。
+   validator必须按exact semantic groups证明该守恒，而不是只检查总数。
+
+##### 31.37.105.3 hostile、漂移与验收门
+
+1. TypeScript hostile至少覆盖：参数/函数/class/var/let/const/catch/loop/switch shadow、内层退出
+   后outer恢复、destructuring、mutable alias、type-only import、存在但非canonical的假
+   `sqlite-connection`、缺文件/符号链接/escape与helper method换位；任一假helper不得进入清单。
+2. Python hostile至少覆盖：三module capture任一改名或重复、AnnAssign覆盖、binder capture重绑、
+   nested produce重绑、参数ordinal交换、implementation参数store、nested return替换、binder
+   `return produce`替换、install删除/重复/换参；scanner必须0 helper升级，classifier必须独立
+   unknown。
+3. callsite manifest必须重新绑定两个source blob、raw fixture digest、sorted canonical digest、
+   70项stable/candidate identity与485全局partition。删除、重复、重排、跨语言替换、line/column/
+   method/sqlOrigin漂移、family/execution/resource跨配、retirement删除和nonclaim提升全部fail closed。
+4. 必跑discovery、Python classifier pytest/Ruff/strict mypy、cross-process classification parity、
+   callsite-map contract、route-map 11项hostile、完整NP1 contract/runtime/parity、P11/P10/P9相关
+   回归、package/CI JSON、docs、task/release/evidence controls和`git diff --check`。
+5. root `test:sqlite-native-projection-runtime`必须在NP1 focused/parity之后串联上述五个全局route
+   gates，使本地一键验收与CI拓扑一致；未来修改lower source而未更新inventory时必须在同一命令
+   中失败，不能再次依靠独立CI job偶然发现。
+6. 接受前必须由独立reviewer复跑已知反例并检查完整diff；H/M全部修复，L修复或记录具体bounded
+   rationale。实现提交继续使用`reacher-z <mtrxcop@gmail.com>`且无co-author，push后验证local、
+   tracking与remote SHA相同，再用独立evidence提交追加不可变绑定。
+
+##### 31.37.105.4 严格nonclaims与后继闭包顺序
+
+本tranche只恢复并加强native-callsite观察系统与NP1验收拓扑。485项仍是candidate inventory，
+70项仍是bounded RM1 map；它们不证明全局confirmed native unknown为0，不授权65/70项执行SQL，
+不完成P11-A/B/C/D、stage18、third clock、COMMIT、D9、93项release evidence、RC或stable。
+后继工作必须从485项中按独立receiver truth划出confirmed-native、wrapper/probe、false-positive与
+unknown，逐个confirmed-native绑定fixed route或forbidden disposition、owner/composition、预算、
+fault与runtime-real retirement；只有confirmed native route unknown实际为0、双runtime完整red
+matrix和SQLite全回归通过并取得独立H0/M0/L0，才允许把P11-A标记完成。GitHub star与受欢迎度
+仍是开源发布后的外部增长目标，不能由计划、测试数量或本次CI修复保证。

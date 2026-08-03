@@ -25,6 +25,32 @@ const SQL_ENTRY_METHODS = new Set([
 const STATEMENT_METHODS = new Set(["get", "all", "run", "iterate"]);
 const ALL_METHODS = new Set([...SQL_ENTRY_METHODS, ...STATEMENT_METHODS]);
 const COMPUTED_METHOD = "<computed>";
+const SQLITE_CONNECTION_NATIVE_HELPERS = new Map([
+  ["prepareSQLiteConnectionIntrinsic", Object.freeze({
+    canonicalMethod: "prepareSQLiteConnectionIntrinsic",
+    receiverKind: "database",
+    sqlArgumentIndex: 1,
+    sqlOrigin: "native-helper-direct-argument",
+  })],
+  ["iterateSQLiteStatementNativeIntrinsic", Object.freeze({
+    canonicalMethod: "iterateSQLiteStatementNativeIntrinsic",
+    receiverKind: "statement",
+    sqlArgumentIndex: null,
+    sqlOrigin: "native-statement-lineage",
+  })],
+  ["nextSQLiteStatementIteratorNativeIntrinsic", Object.freeze({
+    canonicalMethod: "nextSQLiteStatementIteratorNativeIntrinsic",
+    receiverKind: "iterator",
+    sqlArgumentIndex: null,
+    sqlOrigin: "native-iterator-lineage",
+  })],
+  ["returnSQLiteStatementIteratorNativeIntrinsic", Object.freeze({
+    canonicalMethod: "returnSQLiteStatementIteratorNativeIntrinsic",
+    receiverKind: "iterator",
+    sqlArgumentIndex: null,
+    sqlOrigin: "native-iterator-lineage",
+  })],
+]);
 const WRITE_TOKENS = new Set(["ALTER", "CREATE", "DELETE", "DROP", "INSERT", "REPLACE", "UPDATE"]);
 const READ_TOKENS = new Set(["EXPLAIN", "PRAGMA", "SELECT", "WITH"]);
 const CONTROL_TOKENS = new Set(["ATTACH", "BEGIN", "COMMIT", "DETACH", "END", "RELEASE", "ROLLBACK", "SAVEPOINT", "VACUUM"]);
@@ -139,6 +165,7 @@ function loadTypeScript() {
 function createScope(parent = null) {
   return {
     expressions: new Map(),
+    helpers: new Map(),
     methods: new Map(),
     parent,
     properties: new Map(),
@@ -219,8 +246,19 @@ function tsHasModifier(ts, node, kind) {
   return node.modifiers?.some((modifier) => modifier.kind === kind) ?? false;
 }
 
+function isExactSQLiteConnectionModule(absolute, moduleSpecifier) {
+  if (moduleSpecifier !== "./sqlite-connection.js") return false;
+  const sourcePath = path.join(path.dirname(absolute), "sqlite-connection.ts");
+  try {
+    return fs.realpathSync(sourcePath) === sourcePath && fs.statSync(sourcePath).isFile();
+  } catch {
+    return false;
+  }
+}
+
 function collectTsReceiverMetadata(ts, source, absolute) {
   const nativeTypes = new Map();
+  const nativeHelpers = new Map();
   const wrapperTypes = new Set();
   const localClasses = new Map();
   const localInterfaces = new Set();
@@ -236,8 +274,13 @@ function collectTsReceiverMetadata(ts, source, absolute) {
           if (imported === "DatabaseSync") nativeTypes.set(local, "database");
           if (imported === "StatementSync") nativeTypes.set(local, "statement");
         }
-        if (/^(?:\.\/|\.\.\/).*sqlite-connection\.js$/u.test(statement.moduleSpecifier.text)
+        if (isExactSQLiteConnectionModule(absolute, statement.moduleSpecifier.text)
             && imported === "SQLiteConnection") wrapperTypes.add(local);
+        if (!clause.isTypeOnly && !specifier.isTypeOnly
+            && isExactSQLiteConnectionModule(absolute, statement.moduleSpecifier.text)
+            && SQLITE_CONNECTION_NATIVE_HELPERS.has(imported)) {
+          nativeHelpers.set(local, SQLITE_CONNECTION_NATIVE_HELPERS.get(imported));
+        }
       }
     }
   }
@@ -315,7 +358,64 @@ function collectTsReceiverMetadata(ts, source, absolute) {
     localClasses,
     localInterfaces,
     nativeTypes,
+    nativeHelpers,
     wrapperTypes,
+  };
+}
+
+function resolveTsNativeHelper(ts, expression, scope) {
+  const node = unwrapTs(ts, expression);
+  if (!ts.isIdentifier(node)) return null;
+  return lookup(scope, "helpers", node.text) ?? null;
+}
+
+function tsBindingNames(ts, name, result = []) {
+  if (ts.isIdentifier(name)) result.push(name.text);
+  else if (ts.isObjectBindingPattern(name) || ts.isArrayBindingPattern(name)) {
+    for (const element of name.elements) {
+      if (ts.isBindingElement(element)) tsBindingNames(ts, element.name, result);
+    }
+  }
+  return result;
+}
+
+function predeclareTsLexicalBindings(ts, statements, scope) {
+  for (const statement of statements ?? []) {
+    if ((ts.isFunctionDeclaration(statement) || ts.isClassDeclaration(statement))
+        && statement.name) {
+      scope.helpers.set(statement.name.text, null);
+      continue;
+    }
+    if (!ts.isVariableStatement(statement)) continue;
+    const lexical = (statement.declarationList.flags & (ts.NodeFlags.Const | ts.NodeFlags.Let)) !== 0;
+    if (!lexical) continue;
+    for (const declaration of statement.declarationList.declarations) {
+      for (const name of tsBindingNames(ts, declaration.name)) scope.helpers.set(name, null);
+    }
+  }
+}
+
+function predeclareTsVarBindings(ts, node, scope, root = node) {
+  if (node !== root && ts.isFunctionLike(node)) return;
+  if (ts.isVariableDeclarationList(node)
+      && (node.flags & (ts.NodeFlags.Const | ts.NodeFlags.Let)) === 0) {
+    for (const declaration of node.declarations) {
+      for (const name of tsBindingNames(ts, declaration.name)) scope.helpers.set(name, null);
+    }
+  }
+  ts.forEachChild(node, (child) => predeclareTsVarBindings(ts, child, scope, root));
+}
+
+function tsNativeHelperSql(ts, call, helper, scope) {
+  if (helper.sqlArgumentIndex === null) {
+    return {
+      origin: helper.sqlOrigin,
+      evidence: { shape: helper.sqlOrigin, status: "unknown" },
+    };
+  }
+  return {
+    origin: helper.sqlOrigin,
+    evidence: resolveTsString(ts, call.arguments[helper.sqlArgumentIndex], scope),
   };
 }
 
@@ -511,6 +611,35 @@ function scanTypeScriptFile(ts, absolute, root) {
 
   function visit(node, scope) {
     let active = scope;
+    if (ts.isBlock(node)) {
+      active = createScope(scope);
+      predeclareTsLexicalBindings(ts, node.statements, active);
+    }
+    if (ts.isCatchClause(node)) {
+      active = createScope(scope);
+      if (node.variableDeclaration) {
+        for (const name of tsBindingNames(ts, node.variableDeclaration.name)) {
+          active.helpers.set(name, null);
+        }
+      }
+    }
+    if (ts.isForStatement(node) || ts.isForInStatement(node) || ts.isForOfStatement(node)) {
+      active = createScope(scope);
+      const initializer = node.initializer;
+      if (initializer && ts.isVariableDeclarationList(initializer)) {
+        for (const declaration of initializer.declarations) {
+          for (const name of tsBindingNames(ts, declaration.name)) active.helpers.set(name, null);
+        }
+      }
+    }
+    if (ts.isSwitchStatement(node)) {
+      active = createScope(scope);
+      predeclareTsLexicalBindings(
+        ts,
+        node.caseBlock.clauses.flatMap((clause) => [...clause.statements]),
+        active,
+      );
+    }
     if (ts.isClassLike(node)) {
       active = createScope(scope);
       const className = node.name?.text ?? "<anonymous>";
@@ -546,7 +675,10 @@ function scanTypeScriptFile(ts, absolute, root) {
           ? scope.thisReceiver ?? unknownTsReceiver("this")
           : unknownTsReceiver("this");
       }
+      if (node.name && ts.isIdentifier(node.name)) active.helpers.set(node.name.text, null);
+      if (node.body) predeclareTsVarBindings(ts, node.body, active);
       for (const parameter of node.parameters ?? []) {
+        for (const name of tsBindingNames(ts, parameter.name)) active.helpers.set(name, null);
         if (!ts.isIdentifier(parameter.name)) continue;
         const typed = tsReceiverFromType(ts, parameter.type, metadata);
         active.receivers.set(parameter.name.text, typed.confidence === "proven"
@@ -557,6 +689,13 @@ function scanTypeScriptFile(ts, absolute, root) {
 
     if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)) {
       if (node.initializer) active.expressions.set(node.name.text, node.initializer);
+      const declarationList = node.parent;
+      const immutable = ts.isVariableDeclarationList(declarationList)
+        && (declarationList.flags & ts.NodeFlags.Const) !== 0;
+      const helper = immutable && node.initializer
+        ? resolveTsNativeHelper(ts, node.initializer, active)
+        : null;
+      active.helpers.set(node.name.text, helper);
       const typed = tsReceiverFromType(ts, node.type, metadata);
       const inferred = node.initializer
         ? inferTsReceiver(ts, node.initializer, active, metadata)
@@ -578,9 +717,32 @@ function scanTypeScriptFile(ts, absolute, root) {
         ? aliasedTsReceiver(inferred, `assignment:${node.left.text}`)
         : unknownTsReceiver(node.left.text));
       active.methods.delete(node.left.text);
+      active.helpers.set(node.left.text, null);
     }
 
     if (ts.isCallExpression(node)) {
+      const nativeHelper = resolveTsNativeHelper(ts, node.expression, active);
+      if (nativeHelper !== null) {
+        const position = source.getLineAndCharacterOfPosition(node.getStart(source));
+        const sql = tsNativeHelperSql(ts, node, nativeHelper, active);
+        callsites.push({
+          column: position.character + 1,
+          language: "typescript",
+          line: position.line + 1,
+          method: nativeHelper.canonicalMethod,
+          methodAlias: ts.isIdentifier(unwrapTs(ts, node.expression))
+            && unwrapTs(ts, node.expression).text !== nativeHelper.canonicalMethod,
+          path: slash(path.relative(root, absolute)),
+          receiverConfidence: "proven",
+          receiverEvidence: `sqlite-connection-native-helper-import:${nativeHelper.canonicalMethod}`,
+          receiverEvidenceAliasDepth: 1,
+          receiverFamily: "native",
+          receiverKindHint: nativeHelper.receiverKind,
+          receiverKind: nativeHelper.receiverKind,
+          sqlEvidence: sql.evidence,
+          sqlOrigin: sql.origin,
+        });
+      }
       let method;
       let receiverExpression;
       let alias = false;
@@ -627,7 +789,11 @@ function scanTypeScriptFile(ts, absolute, root) {
     }
     ts.forEachChild(node, (child) => visit(child, active));
   }
-  visit(source, createScope());
+  const rootScope = createScope();
+  for (const [name, helper] of metadata.nativeHelpers) rootScope.helpers.set(name, helper);
+  predeclareTsLexicalBindings(ts, source.statements, rootScope);
+  predeclareTsVarBindings(ts, source, rootScope);
+  visit(source, rootScope);
   return callsites;
 }
 
@@ -638,7 +804,7 @@ METHODS={"exec","execute","executemany","executescript","prepare","cursor","get"
 SQL_ENTRY={"exec","execute","executemany","executescript","prepare","cursor"}
 
 class Scope:
- def __init__(self,parent=None): self.parent=parent; self.expr={}; self.recv={}; self.methods={}
+ def __init__(self,parent=None): self.parent=parent; self.expr={}; self.recv={}; self.methods={}; self.helpers={}
  def get(self,field,name):
   cur=self
   while cur:
@@ -705,16 +871,91 @@ def infer(node,scope,seen=None):
   return infer(node.value,scope,seen)
  return {"kind":"unknown","confidence":"unknown"}
 
+NATIVE_PROJECTION_HELPERS={
+ "owner_execute":("database","native-helper-direct-argument",1),
+ "cursor_fetchmany":("cursor","native-cursor-fetch-lineage",None),
+ "cursor_close":("cursor","native-cursor-retirement-lineage",None),
+}
+NATIVE_PROJECTION_BINDINGS={
+ "owner_execute":("_NATIVE_PROJECTION_OWNER_EXECUTE","SQLiteV1BaselineConnectionOwner.execute"),
+ "cursor_fetchmany":("_NATIVE_PROJECTION_CURSOR_FETCHMANY","_SQLiteCursorCapability.fetchmany"),
+ "cursor_close":("_NATIVE_PROJECTION_CURSOR_CLOSE","_SQLiteCursorCapability.close"),
+}
+
+def dotted(node):
+ if isinstance(node,ast.Name):return node.id
+ if isinstance(node,ast.Attribute):
+  base=dotted(node.value)
+  return f"{base}.{node.attr}" if base else None
+ return None
+
+def exact_named_function(tree,name):
+ found=[node for node in tree.body if isinstance(node,(ast.FunctionDef,ast.AsyncFunctionDef)) and node.name==name]
+ return found[0] if len(found)==1 else None
+
+def direct_assignments(function):
+ result={}
+ for statement in function.body:
+  if isinstance(statement,ast.Assign) and len(statement.targets)==1 and isinstance(statement.targets[0],ast.Name):
+   result.setdefault(statement.targets[0].id,[]).append(statement.value)
+  elif isinstance(statement,ast.AnnAssign) and isinstance(statement.target,ast.Name) and statement.value is not None:
+   result.setdefault(statement.target.id,[]).append(statement.value)
+ return result
+
+def prove_native_projection_helpers(tree):
+ implementation=exact_named_function(tree,"_produce_sqlite_v1_baseline_native_projection_receipt_implementation")
+ binder=exact_named_function(tree,"_bind_sqlite_v1_baseline_native_projection_producer")
+ if implementation is None or binder is None:return (None,{})
+ parameters=[argument.arg for argument in implementation.args.posonlyargs+implementation.args.args]
+ if len(parameters)<11 or parameters[8:11]!=list(NATIVE_PROJECTION_HELPERS):return (None,{})
+ module_assignments={}
+ for statement in tree.body:
+  if isinstance(statement,ast.Assign) and len(statement.targets)==1 and isinstance(statement.targets[0],ast.Name):
+   module_assignments.setdefault(statement.targets[0].id,[]).append(statement.value)
+  elif isinstance(statement,ast.AnnAssign) and isinstance(statement.target,ast.Name) and statement.value is not None:
+   module_assignments.setdefault(statement.target.id,[]).append(statement.value)
+ binder_assignments=direct_assignments(binder)
+ for parameter,(binding,qualified) in NATIVE_PROJECTION_BINDINGS.items():
+  if len(module_assignments.get(binding,()))!=1 or dotted(module_assignments[binding][0])!=qualified:return (None,{})
+  if len(binder_assignments.get(parameter,()))!=1 or dotted(binder_assignments[parameter][0])!=binding:return (None,{})
+  if any(isinstance(node,ast.Name) and isinstance(node.ctx,ast.Store) and node.id==parameter for node in ast.walk(implementation)):
+   return (None,{})
+ produce=[node for node in binder.body if isinstance(node,(ast.FunctionDef,ast.AsyncFunctionDef)) and node.name=="produce"]
+ if len(produce)!=1:return (None,{})
+ binder_returns=[node for node in binder.body if isinstance(node,ast.Return)]
+ if len(binder_returns)!=1 or dotted(binder_returns[0].value)!="produce":return (None,{})
+ if any(isinstance(node,ast.Name) and isinstance(node.ctx,ast.Store) and node.id=="implementation" for node in ast.walk(binder)):return (None,{})
+ if any(isinstance(node,ast.Name) and isinstance(node.ctx,ast.Store) and node.id in NATIVE_PROJECTION_HELPERS for node in ast.walk(produce[0])):return (None,{})
+ returns=[node for node in ast.walk(produce[0]) if isinstance(node,ast.Return)]
+ if len(returns)!=1 or not isinstance(returns[0].value,ast.Call):return (None,{})
+ implementation_call=returns[0].value
+ if dotted(implementation_call.func)!="implementation" or len(implementation_call.args)<11:return (None,{})
+ if [dotted(implementation_call.args[index]) for index in (8,9,10)]!=list(NATIVE_PROJECTION_HELPERS):return (None,{})
+ install_name="_install_sqlite_cursor_publication_native_projection_producer_intrinsic"
+ all_installs=[node for node in ast.walk(tree) if isinstance(node,ast.Call) and dotted(node.func)==install_name]
+ top_level_installs=[statement.value for statement in tree.body if isinstance(statement,ast.Expr) and isinstance(statement.value,ast.Call) and dotted(statement.value.func)==install_name]
+ if len(all_installs)!=1 or len(top_level_installs)!=1 or all_installs[0] is not top_level_installs[0]:return (None,{})
+ install=top_level_installs[0]
+ if len(install.args)!=1 or install.keywords:return (None,{})
+ bound=install.args[0]
+ if not isinstance(bound,ast.Call) or dotted(bound.func)!="_bind_sqlite_v1_baseline_native_projection_producer" or len(bound.args)!=1 or bound.keywords or dotted(bound.args[0])!=implementation.name:return (None,{})
+ return (implementation,NATIVE_PROJECTION_HELPERS)
+
 class Scanner(ast.NodeVisitor):
- def __init__(self,file,root):self.file=file;self.root=root;self.scope=Scope();self.out=[]
+ def __init__(self,file,root,tree):
+  self.file=file;self.root=root;self.scope=Scope();self.out=[]
+  self.native_projection_implementation,self.native_projection_helpers=prove_native_projection_helpers(tree)
  def visit_FunctionDef(self,node):
   old=self.scope;self.scope=Scope(old)
   for arg in node.args.posonlyargs+node.args.args+node.args.kwonlyargs:
+   self.scope.helpers[arg.arg]=None
    ann=ast.unparse(arg.annotation) if arg.annotation else ""
    if "sqlite3.Connection" in ann or ann.endswith("Connection"):self.scope.recv[arg.arg]={"kind":"database","confidence":"proven"}
    else:
     g=guess(arg.arg)
     if g["kind"]!="unknown":self.scope.recv[arg.arg]=g
+  if node is self.native_projection_implementation:
+   self.scope.helpers.update(self.native_projection_helpers)
   for item in node.body:self.visit(item)
   self.scope=old
  def visit_AsyncFunctionDef(self,node):self.visit_FunctionDef(node)
@@ -724,16 +965,24 @@ class Scanner(ast.NodeVisitor):
     self.scope.expr[target.id]=node.value
     r=infer(node.value,self.scope)
     if r["kind"]!="unknown":self.scope.recv[target.id]=r
+    self.scope.helpers[target.id]=None
     base,name=member(node.value)
     if name in METHODS:self.scope.methods[target.id]=(name,base)
   self.generic_visit(node)
  def visit_AnnAssign(self,node):
   if isinstance(node.target,ast.Name) and node.value is not None:
    self.scope.expr[node.target.id]=node.value
+   self.scope.helpers[node.target.id]=None
    r=infer(node.value,self.scope)
    if r["kind"]!="unknown":self.scope.recv[node.target.id]=r
   self.generic_visit(node)
  def visit_Call(self,node):
+  if isinstance(node.func,ast.Name):
+   helper=self.scope.get("helpers",node.func.id)
+   if helper is not None:
+    kind,origin,sql_index=helper
+    evidence=resolve_string(node.args[sql_index] if sql_index is not None and len(node.args)>sql_index else None,self.scope) if sql_index is not None else {"status":"unknown","shape":origin}
+    self.out.append({"language":"python","path":self.file.relative_to(self.root).as_posix(),"line":node.lineno,"column":node.col_offset+1,"method":node.func.id,"methodAlias":True,"receiverKind":kind,"receiverConfidence":"proven","sqlOrigin":origin,"sqlEvidence":evidence})
   base,name=member(node.func);alias=False
   if name is None and isinstance(node.func,ast.Call) and isinstance(node.func.func,ast.Name) and node.func.func.id=="getattr" and len(node.func.args)>=2:
    base=node.func.args[0];attribute=node.func.args[1]
@@ -755,7 +1004,7 @@ class Scanner(ast.NodeVisitor):
 
 root=pathlib.Path(sys.argv[1]).resolve();files=[pathlib.Path(x).resolve() for x in sys.argv[2:]];result=[]
 for file in files:
- tree=ast.parse(file.read_text(encoding="utf-8"),filename=str(file));scanner=Scanner(file,root);scanner.visit(tree);result.extend(scanner.out)
+ tree=ast.parse(file.read_text(encoding="utf-8"),filename=str(file));scanner=Scanner(file,root,tree);scanner.visit(tree);result.extend(scanner.out)
 print(json.dumps(result,separators=(",",":"),sort_keys=True))
 `;
 
@@ -982,6 +1231,7 @@ export function scanRepository(options = {}) {
       routeClosureClaimed: false,
       typescriptReceiverEvidence: {
         aliasPropagation: "proven-only",
+        definitionTimeNativeHelperAliasPropagation: "exact-sqlite-connection-import-and-const-only",
         nameHintsIncreaseConfidence: false,
         unknownCandidatesDropped: false,
       },
