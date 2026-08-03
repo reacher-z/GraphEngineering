@@ -551,8 +551,9 @@ drift, definition-time intrinsic substitution, GC abandonment, stale weak
 callbacks, and deterministic object-ID collision.
 
 Every native failure boundary records commit 0, rollback <=1, close <=1, and
-reopen <=1. Focused tests use real file-backed SQLite for N=0/1/3; provider/model
-tests remain deterministic and offline.
+reopen <=1. Focused tests use real file-backed SQLite for optional dynamic-row
+N=0/1/3, producing complete baseline totals 3/4/6 as defined in section 13;
+provider/model tests remain deterministic and offline.
 
 ## 11. Cross-runtime and privacy evidence
 
@@ -618,3 +619,149 @@ review.
 
 Until those implementation and verification gates pass, this specification is
 an executable design boundary only. It must not be cited as P11 completion.
+
+## 13. NP1 lower-owned native projection contract
+
+NP1 closes one P11-A red gate for route `main.baseline-entries`. It does not
+close the global native-callsite inventory, accept a publication stage, or
+authorize COMMIT. The only positive claim introduced by NP1 is that one exact
+retained projection was produced by the baseline-source layer from the exact
+current file-backed source transaction and was fully exhausted and retired
+before its one-shot receipt was issued.
+
+### 13.1 Separate authority domains
+
+The existing retained-count receipt remains a shape-only, zero-I/O receipt.
+It accepts an exact frozen array in TypeScript or exact tuple in Python only to
+exercise the reusable-scope lattice. Its snapshots remain
+`nativeSourceProvenance=false`, `genuineZeroClaim=false`,
+`actualNativeIoCount=0`, and `sqlAuthority=false`. A shape-only receipt or its
+parent scope can never enter a native prepare/read/write intrinsic.
+
+The NP1 receipt uses a distinct exact type and distinct identity registry. It
+must never be converted to the shape-only receipt as an adaptation step. Any
+parent derived from it records unforgeable `countProvenance=lower-native`;
+shape-only parents record `countProvenance=shape-only`. Native continuation
+accepts only the former, while all generic hostile inputs fail before native
+prepare with logical native read and write counts both zero.
+
+No NP1 entry point accepts caller-provided SQL, identifiers, count, projection,
+root, digest, decoder, callback, connection/path, lineage, generation, cursor,
+statement, or iterator. The baseline-source implementation captures all query
+and decoder definitions at module definition time and constructs the retained
+projection itself. Snapshots are passive evidence and are never authority.
+
+### 13.2 Exact graph binding
+
+The native projection graph binds exact identities for transaction owner,
+BEGIN receipt, composition, current connection, lineage, generation, source
+summary, source envelope, and one read session. The connection binding is
+reproved through the transaction owner private registry; matching scalar
+epochs, paths, counts, digests, or structurally equal objects are insufficient.
+The source summary is accepted only if it is the exact live summary registered
+by the baseline-source capture operation for that connection and transaction.
+
+The dependency direction is acyclic: baseline-source may import the
+transaction-owner's exact composition/connection reproof; owner-composition
+may import both; transaction-owner does not import baseline-source. The source
+retrieves the hidden connection from its exact summary registry and presents it
+with owner, BEGIN receipt, and composition to that reproof before any native
+projection I/O. A source-only drain followed by post-hoc owner adoption is
+forbidden because it would leave the read itself outside the authenticated
+graph.
+
+Every boundary before and after prepare, native row return, decode, terminal
+observation, resource retirement, receipt mint, and receipt consumption
+reproves the current graph. Cross-owner, cross-BEGIN, cross-composition,
+cross-connection, cross-summary, cross-session, generation/lineage drift,
+reopen, clone, proxy, subclass, reconstruction, and replay fail closed.
+
+### 13.3 Complete twelve-family drain
+
+The lower-owned read traverses all twelve canonical baseline entry families in
+their frozen order. Each family uses a definition-time fixed SQL/decoder pair,
+has its own logical execution and native resource identity, reaches a real
+terminal observation, and retires that resource before the final receipt can
+be issued. Prepare/iterate/next/terminal are stages of one logical execution,
+not additional executions.
+
+For every family, the decoded row count equals the exact captured
+`countsByKind` value. The ordered observed count vector equals the ordered
+expected vector, their sum equals `expectedEntryCount`, and the retained
+projection length equals that same sum. Entries pass the existing canonical
+key/state validation before retention. The receipt binds the ordered family
+SQL digests, expected and observed vectors, source-envelope digest, projection
+canonical digest, retained count, read-session identity, and resource
+retirement evidence.
+
+The success corpus uses real temporary file-backed databases and runs the
+complete twelve-family drain. In this corpus N=0/1/3 denotes optional dynamic
+rows in addition to the three mandatory singleton families
+`schema-envelope`, `migration-lineage`, and `migration-lock-current`; the
+resulting retained totals are therefore 3/4/6. A zero-sized cursor or family
+subprojection does not prove a zero-sized baseline projection.
+
+For the v1 `main.baseline-entries` domain, `genuineZeroClaim` is always false
+because the exact captured source cannot contain fewer than those three
+mandatory entries. Final totals zero and one are hostile fail-closed cases, not
+success fixtures. A scalar zero, empty fixture, expected count, empty
+array/tuple, or caller hint proves neither a baseline total nor genuine zero.
+The general genuine-zero predicate remains reserved for a future route/domain
+whose own authenticated source permits zero: native provenance, complete
+family exhaustion, exact expected/observed vector equality, both totals zero,
+exact route/source match, complete resource retirement, and one successful
+receipt consumption would all be required together.
+
+### 13.4 Runtime-real retirement
+
+TypeScript reports the runtime's real statement/iterator terminal and
+`return()` or lexical-release behavior without relabeling it as a driver API
+that does not exist. Python records every exact created `sqlite3.Cursor` and
+requires close attempt/native return exactly 1/1 per cursor. A resource that
+was never created has no retirement count; an already created resource cannot
+be retired zero or two times. GC is only a hostile registry test and is never
+the success retirement mechanism.
+
+Partial read, early iterator return, abandonment, decode/reconciliation fault,
+terminal-probe fault, retirement fault, fence drift, or any fault before final
+consumption permanently poisons the read session. No usable partial projection
+or native receipt escapes. The existing exact P9 failure capture/finalizer is
+the only cleanup owner: COMMIT remains zero, rollback and close are each at
+most once, reopen is attempted, and the exact primary identity takes precedence
+over retirement and cleanup secondaries.
+
+### 13.5 Lifecycle, parity, and failure reports
+
+The only successful lifecycle is `issued -> prepared -> reading ->
+terminal-observed -> resource-retired -> receipt-issued -> consumed`. Any
+failure transitions to terminal `poisoned`; it cannot resume, mint again,
+consume again, or cross into another composition. Terminal cleanup tombstones
+private registry entries without making integer object IDs an authority.
+
+The normalized portable report includes contract/case IDs, route, source
+family count, ordered SQL digest, expected and observed count vectors, expected
+and retained totals, projection digest, logical native reads, prepare/decode/
+terminal counts, normalized retirement, receipt lifecycle, exact binding
+booleans, count provenance, authority flags, cleanup counts, and primary
+preservation. Runtime-local output separately names TypeScript iterator/lexical
+release or Python cursor close details.
+
+A failure report has null projection count and digest, receipt mint/consume
+counts zero, the exact failed stage, bounded resource evidence, and P9 cleanup.
+It cannot normalize a failed or partial read as empty success. TypeScript runs
+the Python reporter twice; both portable reports are byte-identical and equal,
+while runtime-local evidence remains truthful to each driver.
+
+NP1 tests include `baseline-dynamic-0-total-3`,
+`baseline-dynamic-1-total-4`, and `baseline-dynamic-3-total-6` success cases;
+impossible baseline-total-0/1 failures; fake empty/nonempty projections, scalar zero, count hints,
+all exact-identity cross/replay attacks, per-family and per-row stage faults,
+wrong family/total counts, partial reads, terminal and retirement faults,
+double return/close/mint/consume, abandonment/GC, and primary-plus-cleanup
+faults. Every failure verifies pre-authority rejection where applicable,
+receipt mint/consume zero, COMMIT zero, and primary precedence.
+
+Passing this section proves only the bounded `main.baseline-entries` native
+projection tranche. P11-A still requires the remaining route closure and red
+matrix; P11-B/C/D, stage 18, COMMIT, D9, release evidence, RC/stable, adoption,
+and popularity targets remain nonclaims.

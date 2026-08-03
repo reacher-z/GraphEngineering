@@ -27,7 +27,7 @@ const ROUTES_CANONICAL_SHA256 =
 const STAGES_CANONICAL_SHA256 =
   "3d0aa8aba16f779f1ba1addc53ab01756a535ce653d22a4449ae757f6dfe7f1e";
 const MARKDOWN_RAW_SHA256 =
-  "d8ef8c97b69f663ea337cf293559a7ddef819d595a4c51667bc38f1cce1253c6";
+  "98c6183ab99a9fdbdfd881e0f46305af18251197dcd07f169825c47048253473";
 const SUPPORTED_MUTATION_COUNT_POLICIES = [
   ["b2.cursor-seal-table-ddl", { kind: "exact", expectedCount: 1 }],
   ["main.migration-0002", { kind: "exact", expectedCount: 20 }],
@@ -365,6 +365,12 @@ function validateMarkdown(markdownText) {
     "routeClosureClaimed=false",
     "fake-zero completion claim",
     "The exact original Python primary is re-raised",
+    "countProvenance=lower-native",
+    "A source-only drain followed by post-hoc owner adoption is",
+    "baseline-dynamic-0-total-3",
+    "baseline-dynamic-1-total-4",
+    "baseline-dynamic-3-total-6",
+    "`genuineZeroClaim` is always false",
     "It must not be cited as P11 completion.",
   ]) assert.equal(markdownText.includes(required), true, `missing Markdown invariant: ${required}`);
 }

@@ -23282,3 +23282,187 @@ RM1已提交并推送为`1e774b41cec1a2d1b18109c4078a13ea69715c93`，共11文件
 11,609 insertions、1 deletion；作者/提交者为`reacher-z <mtrxcop@gmail.com>`，
 无co-author，local/tracking/remote一致。该绑定只接受65-callsite scoped inventory，
 P11继续in_progress，release继续audit-only 0/93；下一批严格进入31.37.95定义的NP1。
+
+#### 31.37.98 P11-A-NP1 lower-owned native projection详细执行合同（2026-08-03 PDT追加；既有内容不改）
+
+本节只把31.37.95展开为可实现、可否证、可跨运行时核对的执行合同，不回改任何既有
+计划文字。追加前完整23,284行计划SHA-256固定为
+`6ed704a3deb52fbe8426d15596f0372b8aff65cf64e9b196a93eb66ab15bf2a3`。
+NP1的唯一目标是证明`main.baseline-entries`投影确实来自当前P9 owner所持有的同一
+file-backed SQLite连接、同一BEGIN receipt、同一exclusive transaction generation以及
+同一已认证source summary，并且lower source在receipt发行前已经完整读取、完整解码、
+观测每个family的terminal状态并退役全部native资源。NP1不是P11-A全局route closure，
+更不是P11-B/C/D、stage18、COMMIT、D9或release完成。
+
+##### 31.37.98.1 authority与API封闭边界
+
+1. 保留现有generic retained-projection receipt作为明确的zero-I/O shape receipt；其
+   `nativeSourceProvenance=false`、`genuineZeroClaim=false`、`actualNativeIoCount=0`、
+   `sqlAuthority=false`不可改变。旧receipt类型、identity registry和consume入口不得与
+   NP1 native receipt互认，避免任意冻结array/tuple被提升为原生来源证据。
+2. NP1唯一生产入口必须由baseline-source模块拥有。调用者不得传入SQL、table name、
+   projection、count、root/hash、decoder、iterator/cursor、callback、connection path、
+   lineage scalar、generation scalar或任何“expected zero”提示；这些事实必须由lower
+   module从其定义时固定的12-family查询、exact source summary与私有owner binding取得。
+3. NP1入口只接收opaque owner/BEGIN/composition/source-summary能力。transaction-owner
+   层必须通过私有WeakMap/identity registry重证exact owner、exact BEGIN receipt、exact
+   composition、exact current connection、lineage、generation及exclusive transaction；
+   不能用相等epoch、文件名、database path、total_changes或结构相同对象替代identity。
+4. source summary必须是现有capture API真实发行并仍在私有registry中的exact instance；
+   clone、proxy、subclass、spread copy、JSON round-trip、跨连接summary、旧generation
+   summary、reopen前summary和已消费summary全部拒绝。source envelope、clock evidence、
+   countsByKind与expectedEntryCount必须保留其原始identity/摘要绑定，不能由caller重建。
+5. composition只签发一次性native-projection mint authority，并绑定route
+   `main.baseline-entries`、owner、BEGIN、composition、connection、lineage、generation、
+   source summary与read-session nonce；lower source独占消费authority，composition只可
+   adopt lower source返回的opaque native receipt。authority、native receipt及adoption
+   receipt均不得clone、代理、子类化、跨session使用或replay。
+6. NP1成功后也不把raw SQL执行授权暴露给package caller。`sqlAuthority`继续为false，
+   表示receipt不能成为任意SQL permit；允许为true的只是独立字段
+   `nativeProjectionAuthority`与`nativeSourceProvenance`，且只指这一次固定projection。
+
+##### 31.37.98.2 lower-owned 12-family读取与计数守恒
+
+1. source模块内部按既有`BASELINE_ENTRY_KINDS` canonical顺序读取全部12个family；每个
+   family的SQL与decoder均在模块定义时冻结，不允许运行时字符串、caller identifier、
+   可替换callback或外部table mapping。SQL digest有序清单必须进入receipt/report证据。
+2. 每个family在prepare前、prepare后、每次native next/fetch前后、terminal observation
+   前后、resource retirement前后以及receipt mint前后重证owner/BEGIN/composition/
+   connection/lineage/generation/source epoch/total_changes/temp-mutation epoch未漂移。
+3. logical native read按family/execution计数，prepare/iterate/next/get/terminal是同一
+   execution的API stage，不能重复计数；resource identity按真实statement/iterator或
+   cursor记录，不能把同一资源拆成多个来伪造retirement，也不能跨family配对。
+4. 每个family必须读到terminal，而不是只读expected N行后提前停止。实际decoded row数
+   必须等于captured `countsByKind[family]`，12-family总和必须等于source summary的
+   `expectedEntryCount`，最终retained projection长度必须等于该总和；任一不等即fail
+   closed且不得发行receipt。
+5. 每个decoded entry必须经过现有canonical key/state validation；projection在lower
+   module内完整构造并冻结/tuple化，同时计算domain-separated canonical projection SHA-256
+   与source envelope SHA-256。caller永远看不到可在mint前替换的mutable builder。
+6. N=0/1/3验收必须来自三个真实临时file-backed数据库及真实fixture状态，而不是mock
+   iterator、内存数据库、scalar count或caller-supplied rows。三个case均完整跑12-family，
+   N表示最终projection总数；若某个专门cursor子投影为0而baseline expected总数大于0，
+   不得把它表述为baseline genuine zero。
+7. `genuineZeroClaim=true`必须同时满足：native source provenance为真、12-family全部完整
+   exhaust、每个observed count等于captured expected count、expected projection count为0、
+   retained count为0、route/source domain精确匹配、全部资源成功退役且receipt被一次性
+   consume。仅有empty array/tuple、scalar zero、fixture row count或expected hint永远不足。
+
+##### 31.37.98.3 双运行时resource retirement与异常优先级
+
+1. TypeScript必须记录每个真实iterator/statement的创建、terminal observation、return/
+   lexical release attempt与native return。完整exhaust不能替代显式可审计retirement；
+   若底层driver只提供lexical release，report必须准确命名runtime-local机制而非伪报close。
+2. Python必须为每个创建成功的exact `sqlite3.Cursor`记录close attempt/native return，
+   正常路径要求每个cursor精确1/1；未创建的cursor不得计数，已创建cursor不得0次或2次
+   close。cursor identity只保留在私有registry，不以`id()`重用作为authority。
+3. prepare/bind/step/read/decode/reconcile/terminal/exhaust/retire/finalize/adopt任一点失败都
+   必须永久poison read session、禁止native receipt发行或消费，并进入现有P9 exact failure
+   capture/finalizer。不得另建第三种rollback/close/reopen authority。
+4. cleanup要求rollback attempt/native return至多1/1、close至多1/1、reopen必尝试，且
+   COMMIT attempt/native return恒为0。若primary fault与retirement/cleanup fault并存，必须
+   保留exact primary identity；secondary只进入有界诊断，不得覆盖、聚合或吞掉primary。
+5. partial read、generator/iterator early return、consumer abandonment、GC、decode exception、
+   terminal probe exception、retirement exception、mint前最后一刻漂移均不得留下可adopt
+   receipt。GC只用于证明registry不会因identity复用误接受，不得作为正常retirement机制。
+
+##### 31.37.98.4 receipt生命周期与可观测合同
+
+1. canonical lifecycle为`issued -> prepared -> reading -> terminal-observed ->
+   resource-retired -> receipt-issued -> consumed`；failure只可转入`poisoned`，不存在从
+   poisoned回到active、二次mint、二次consume或跨composition adoption的边。
+2. native receipt至少绑定：exact owner、BEGIN、composition、connection、lineage、
+   generation、source summary、source envelope digest、route ID、12个ordered SQL digest、
+   ordered expected/observed family counts、expected/retained projection count、projection
+   canonical digest、read-session nonce、resource identities与retirement telemetry。
+3. snapshot只能暴露冻结标量/摘要/有界计数，不暴露connection、cursor、statement、
+   iterator、nonce、mutable projection builder或可复用mint authority。snapshot本身不具
+   authority，结构相同snapshot不能被adopt或consume。
+4. receipt必须强留exact retained projection直到parent composition完成合法consume或进入
+   terminal failure；terminal后registry tombstone且不能凭旧object、clone或GC/id重用恢复。
+5. normalized success report至少包含schema/contract/case、route、source family count、
+   ordered SQL digest、expected/observed counts、expected/retained count、projection digest、
+   logical native reads、prepare/terminal/decode/retirement计数、receipt lifecycle、exact
+   binding booleans、authority flags、cleanup counts与primary-preserved。
+6. normalized failure report中projection count/hash必须为null、receipt mint/consume均0，
+   并记录精确failure stage、resource retirement状态及P9 cleanup；不得输出partial projection
+   内容或将failed read归一化为empty success。
+
+##### 31.37.98.5 hostile与fault-injection矩阵
+
+1. 伪造输入：empty/nonempty frozen array、tuple、scalar 0/1/3、fixture count、expected count、
+   caller rows、caller SQL、caller decoder、caller iterator/cursor、snapshot clone全部拒绝。
+2. identity攻击：owner/BEGIN/composition/connection/source summary/read session各自cross、
+   clone、proxy、subclass、replay；同path不同connection、同epoch不同owner、reopen前后、
+   generation drift、lineage drift、total_changes drift、temp epoch drift全部拒绝。
+3. stage faults：每个family的prepare before/after、bind before/after、每row step before/after、
+   decode/reconcile、terminal before/after、retire before/after；最终family terminal后、全部
+   retire后、mint before/after以及adopt before/after均需要可复现fault seam。
+4. conservation faults：少一family、多一family、family重排、count少1/多1、total少1/多1、
+   duplicated row、wrong kind、wrong key/state、projection reorder、digest替换、resource跨配对、
+   API stage双计均必须fail closed。
+5. lifecycle hostile：partial iteration、double return/close、double mint、double consume、
+   abandon then GC、receipt GC、composition先终止、P9 cleanup并发触发、primary+cleanup双故障；
+   success/failure后均验证COMMIT 0。
+6. success矩阵固定N=0/1/3，两运行时每case至少断言12-family full terminal、计数守恒、
+   projection digest稳定、exact binding全true、retirement完整、mint/consume 1/1以及重复运行
+   normalized portable部分byte-identical。
+
+##### 31.37.98.6 parity、回归、审计与提交顺序
+
+1. 先完成TypeScript/Python各自focused red-green tests，再新增各自normalized reporter；
+   TypeScript launcher必须运行Python reporter两次、比较双方portable JSON exact equality并
+   单独保留runtime-local retirement detail。reporter不得从fixture直接拼出预期结果。
+2. 必跑TS focused NP1、完整P11 owner-composition、transaction-owner、operation-baseline
+   source tests及SQLite typecheck；Python focused NP1、对应P9/P10/P11/source tests、Ruff、
+   strict Mypy；随后运行P11 contract/route-map/scanner/classifier/parity、package/CI JSON、
+   docs、task/release/evidence controls和`git diff --check`。
+3. 独立reviewer必须读取完整diff与测试证据，分别给出authority/identity、native lifecycle、
+   cleanup/primary precedence、portable parity与nonclaim verdict；任何H/M必须修复并重审，
+   L必须修复或记录具体bounded rationale。不能以“内部API”作为缺测试的理由。
+4. 实现commit只包含runtime、contract、tests、reporter、tool/package/CI wiring和必要文档；
+   作者/提交者固定`reacher-z <mtrxcop@gmail.com>`，不带co-author。push后核对local、tracking、
+   remote SHA一致，再用独立evidence commit追加plan/log/task heartbeat与immutable SHA binding。
+5. evidence reconciliation只能把NP1记录为P11-A的一个bounded completed tranche；P11 registry
+   继续`in_progress`，completed-task总数、semantic completion edge和release 0/93权重不增加。
+   下一bounded action必须明确指向P11-A剩余全局route unknown closure/red matrix，不能越级
+   宣称P11-B、P11-C、P11-D或D9完成。
+
+##### 31.37.98.7 NP1明确nonclaims
+
+即使本节全部通过，也只证明`main.baseline-entries`这一条lower-owned native projection在
+双运行时的来源、完整exhaust、计数/摘要、资源退役、one-shot adoption与failure cleanup。
+它不证明65个RM1 callsite均获route authority，不证明全局457 candidates unknown=0，不证明
+任意caller SQL安全，不证明permanent writes、B2 EQP、R11/R12、third clock consume、stage18、
+COMMIT、P11-A/B/C/D整体、D9、93项release evidence、RC/stable、外部adoption、GitHub stars
+或市场受欢迎度。stars只能作为发布后可观测增长目标，不能由实现测试或计划文本保证。
+
+#### 31.37.99 NP1 N值语义与不可达genuine-zero勘误（2026-08-03 PDT追加；既有内容不改）
+
+本节勘误31.37.95、31.37.98中把N=0/1/3简写为最终baseline projection总数的歧义；
+既有文字保持不动，但实现与验收必须以本节为准。追加前完整23,438行计划SHA-256为
+`e57702c3ffaa644419feaabd599521288fa39f3b49d42856c9275a1324400c5f`。
+
+1. 现有双运行时v1 baseline source对`schema-envelope`、`migration-lineage`与
+   `migration-lock-current`三个family各强制exact singleton，因此任何真实通过现有capture
+   invariants的file-backed source都有`expectedEntryCount >= 3`。最终12-family projection
+   总数0或1在该route/domain下数学不可达；不得靠mock、删除singleton、绕过capture、伪造
+   summary或更换source invariants制造“成功”。
+2. NP1真实success矩阵中的N重新定义为“除三个mandatory singleton之外的可选动态行数”。
+   N=0/1/3分别对应最终retained baseline projection总数3/4/6；每个case仍须完整读取全部
+   12 families、逐family observed==expected、总和守恒并完成runtime-real retirement。
+3. `main.baseline-entries`的`genuineZeroClaim`在当前v1 contract下恒为false，即使某个可选
+   family或post-DDL cursor子投影为空。最终总数0/1必须成为负向fail-closed测试，证明lower
+   source拒绝与mandatory singleton/captured summary不一致的count/projection。
+4. 若实现保留N=0/1/3的可空子投影测试，它必须使用不同的scoped route/source domain，
+   明确`compositionAdoptionAuthority=false`、`nativeProjectionAuthority=false`，且不能转换、
+   adopt或mint `main.baseline-entries` lower-native parent。子投影证据只证明该native cursor
+   的exhaust/retirement，不证明baseline总投影或genuine zero。
+5. normalized parity success case ID固定表达可选行数与总数，例如
+   `baseline-dynamic-0-total-3`、`baseline-dynamic-1-total-4`、
+   `baseline-dynamic-3-total-6`；authority中的`genuineZeroClaim=false`。负向case明确包含
+   `baseline-total-0-impossible`与`baseline-total-1-impossible`，且projection count/hash为
+   null、receipt mint/consume为0、native continuation authority为0。
+6. 任何测试、reporter、文档、日志或review把最终baseline total 0/1记为success，或把空
+   optional family/subprojection记为baseline genuine zero，均为H级阻塞；必须修复后才可接受
+   NP1。此勘误不降低31.37.98的identity、12-family、retirement、fault、cleanup和parity门槛。
