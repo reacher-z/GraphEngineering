@@ -556,6 +556,10 @@ flowchart LR
   scoped read/write authority through B2, fixed permanent writes, Rule 11,
   Rule 12, and the still-unconsumed third clock. It does not authorize stage 18,
   COMMIT, D9 completion, or release weight.
+- Bounded successor commit `7448c27f1b09e3feaa7021e378f5ccd7fcc66141`
+  closes zero-I/O scope/read parity and produces a 457-candidate discovery
+  inventory, but every candidate remains unknown. This is progress inside the
+  same P11 node, not a new completed dependency edge or native closure claim.
 
 These tasks carry no direct release-checklist weight. They may become evidence
 inside the future D9 extended-durability candidate only after redaction,

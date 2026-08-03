@@ -261,6 +261,12 @@ predecessors remain Open.
   Python scope/read parity, actual native route closure, runtime-real resource
   retirement, portable parity, and every P11-B/C/D slice remain Open while
   COMMIT and release weight stay disabled.
+- Immutable tranche `7448c27f1b09e3feaa7021e378f5ccd7fcc66141`
+  adds dual-runtime zero-I/O scope/read parity, route-bound count-policy guards,
+  definition-time hostile cleanup, and deterministic native-callsite discovery.
+  Its production scan deliberately leaves 457/457 candidates unknown; it adds
+  no native route-closure, runtime-real retirement, P11 completion, or release
+  weight.
 - Registry expansion to 112 tasks and P10 completion do not change release
   weight. Candidate-bound evidence closure remains audit-only at 0/93 until a
   future immutable release candidate closes every release-rollup predecessor.

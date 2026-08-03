@@ -22894,3 +22894,15 @@ fourth clock、TEMP retirement、final fence、success、COMMIT、D9 completion�
 total changes共同偏离cached begin watermarks，然后对24个导出派生transition逐项验证current reproof与P9 cleanup。当前测试没有把三类
 watermark drift分别隔离成三组72-case矩阵；因此只能声称“每个transition拒绝已发生的组合native-current drift”，不能声称每类drift都已
 单独注入并独立定位。独立三类fault isolation仍是future hardening，不影响本tranche bounded zero-I/O H0/M0/L0接受。
+
+#### 31.37.89 P11-A parity/discovery immutable evidence（2026-08-03 PDT追加；既有内容不改）
+
+本节仅追加于既有22,896行之后；追加前计划SHA-256为
+`c774b1ec313d4dc6ebb5aafbb52244cb6303466bec2e9d4f73f801237bcf9627`。bounded implementation commit固定为
+`7448c27f1b09e3feaa7021e378f5ccd7fcc66141`，19 files、4,668 insertions、201 deletions；作者与提交者均为
+`reacher-z <mtrxcop@gmail.com>`，无co-author，local/tracking/remote SHA一致。final whole-batch与勘误复审均为H0/M0/L0。
+
+本immutable binding只刷新P11 `in_progress` heartbeat、expected artifacts、review与下一bounded action；不记录任何完整P11 expected
+test passed，不增加completed task、semantic edge或release weight。457/457 discovery candidates仍unknown；native SQL、runtime-real
+retirement、dynamic count provenance、P11-A/B/C/D、stage18与COMMIT继续Open。下一实现commit从保守分类457 candidates与exact baseline
+count receipt开始，仍采用实现commit后再evidence reconciliation的两阶段闭环。

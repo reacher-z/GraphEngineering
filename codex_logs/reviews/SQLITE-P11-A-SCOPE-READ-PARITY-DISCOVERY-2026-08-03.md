@@ -128,3 +128,11 @@ as a separate acceptance assertion, and 24 transitions tested after combined
 transaction/TEMP/total-change drift rather than three isolated drift campaigns.
 With that append-only correction, the final whole-batch disposition is
 H0/M0/L0. Isolated per-watermark fault campaigns remain future hardening.
+
+## Immutable implementation binding
+
+The accepted bounded implementation is commit
+`7448c27f1b09e3feaa7021e378f5ccd7fcc66141`: 19 files, 4,668 insertions and
+201 deletions. Author and committer are `reacher-z <mtrxcop@gmail.com>` with no
+co-author. Local, tracking and remote branch refs were verified identical before
+this evidence reconciliation.
