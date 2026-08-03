@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-08-03T15:09:14Z",
+  "updated_at": "2026-08-03T15:59:41Z",
   "repository": ".",
   "scan_policy": {
     "warning_after_minutes": 60,
@@ -2293,7 +2293,12 @@
         "python/tests/sqlite_cursor_publication_native_projection_report.py",
         "python/tests/test_sqlite_cursor_publication_native_projection.py",
         "codex_logs/reviews/SQLITE-P11-A-NP1-RUNTIME-IMPLEMENTATION-2026-08-03.md",
-        "codex_logs/reviews/SQLITE-P11-A-NP1-EVIDENCE-BINDING-AUDIT-2026-08-03.md"
+        "codex_logs/reviews/SQLITE-P11-A-NP1-EVIDENCE-BINDING-AUDIT-2026-08-03.md",
+        "tools/sqlite-native-callsite-discovery.test.mjs",
+        "python/tests/test_sqlite_native_callsite_classification.py",
+        "spec/conformance/sqlite-cursor-publication-owner-composition-p11-callsite-map.test.mjs",
+        "tools/sqlite-native-callsite-route-map.test.mjs",
+        "codex_logs/reviews/SQLITE-P11-A-GLOBAL-CALLSITE-INVENTORY-CLOSURE-2026-08-03.md"
       ],
       "expected_tests": [
         "P11-A opaque composition scoped mutation fixed-read and Python failure-capture contract",
@@ -2305,10 +2310,10 @@
       "evidence_required": true,
       "assigned_at": "2026-08-03T09:07:21Z",
       "started_at": "2026-08-03T09:10:00Z",
-      "last_heartbeat": "2026-08-03T15:09:14Z",
+      "last_heartbeat": "2026-08-03T15:59:41Z",
       "risk": "critical",
       "blocker": null,
-      "next_action": "NP1 lower-native projection is immutably accepted at 3608d82407905c16c6094598872995384c836b93 with H0/M0/L0; continue P11-A by closing the remaining global route-unknown inventory and red matrix without claiming P11-B/C/D, stage 18, third-clock consumption, COMMIT, D9, release readiness, GitHub stars, or popularity"
+      "next_action": "The strengthened 485-candidate scanner classifier and 70-callsite RM1 observation map are immutably accepted at a7452f03d4dfe7d5001f49acfaae4d037bd9bc04 with H0/M0/L0, while all 485 routes remain unknown and non-authorizing; next conservatively partition the whole inventory and bind each confirmed native callsite to a fixed or forbidden route with owner, budget, fault and retirement evidence without claiming P11-B/C/D, stage 18, third-clock consumption, COMMIT, D9, release readiness, GitHub stars, or popularity"
     }
   ]
 }
