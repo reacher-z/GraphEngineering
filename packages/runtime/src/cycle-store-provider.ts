@@ -11,6 +11,10 @@ import {
 import { snapshotJson } from "./json.js";
 import type { JsonValue } from "./types.js";
 
+const arraySomeIntrinsic = Array.prototype.some;
+const objectFreezeIntrinsic = Object.freeze;
+const reflectApplyIntrinsic = Reflect.apply;
+
 export const CYCLE_STORE_PROVIDER_API_VERSION =
   "graphengineering.reacher-z.github.io/cycle-store-providers/v1alpha1" as const;
 export const CYCLE_STORE_PROVIDER_CONTRACT_VERSION =
@@ -116,7 +120,7 @@ export class CycleStoreProviderError extends Error {
     this.code = code;
     this.operation = operation;
     this.retryable = RETRYABLE_CODES.has(code);
-    this.details = Object.freeze({ ...details });
+    this.details = objectFreezeIntrinsic({ ...details });
   }
 
   toJSON(): SerializedCycleStoreProviderError {
@@ -578,7 +582,11 @@ function exactKeys(
   const actual = Object.keys(value).sort();
   const expected = [...keys].sort();
   if (actual.length !== expected.length
-      || actual.some((key, index) => key !== expected[index])) {
+      || reflectApplyIntrinsic(
+        arraySomeIntrinsic,
+        actual,
+        [(key: string, index: number) => key !== expected[index]],
+      ) as boolean) {
     providerError("GE_CYCLE_STORE_INVALID_ARGUMENT", operation, `${label} must be closed`, {
       actual,
       expected,

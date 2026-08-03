@@ -17,6 +17,17 @@ import {
   type SQLiteCursorPublicationTransactionBeginReceiptSnapshot,
   type SQLiteCursorPublicationTransactionOwner,
 } from "./cursor-publication-transaction-owner.js";
+import {
+  adoptSQLiteV1BaselineLowerOwnedNativeProjectionIntrinsic,
+  assertSQLiteV1BaselineLowerOwnedNativeProjectionIntrinsic,
+  captureAndConsumeSQLiteV1BaselineLowerOwnedNativeProjectionIntrinsic,
+  type SQLiteV1BaselineSourceSummary,
+  type SQLiteV1BaselineLowerOwnedNativeProjection,
+  type SQLiteV1BaselineLowerOwnedNativeProjectionSnapshot,
+} from "./operation-baseline-source.js";
+import {
+  installSQLiteCursorPublicationNativeProjectionConsumerIntrinsic,
+} from "./cursor-publication-native-projection-bridge.js";
 
 const objectCreateIntrinsic = Object.create;
 const objectFreezeIntrinsic = Object.freeze;
@@ -35,6 +46,46 @@ const weakMapDeleteIntrinsic = WeakMap.prototype.delete;
 const weakMapSetIntrinsic = WeakMap.prototype.set;
 const weakRefDerefIntrinsic = WeakRef.prototype.deref;
 const weakRefIntrinsic = WeakRef;
+const captureAndConsumeSQLiteV1BaselineLowerOwnedNativeProjectionDefinitionIntrinsic =
+  captureAndConsumeSQLiteV1BaselineLowerOwnedNativeProjectionIntrinsic;
+const adoptSQLiteV1BaselineLowerOwnedNativeProjectionDefinitionIntrinsic =
+  adoptSQLiteV1BaselineLowerOwnedNativeProjectionIntrinsic;
+const assertSQLiteV1BaselineLowerOwnedNativeProjectionDefinitionIntrinsic =
+  assertSQLiteV1BaselineLowerOwnedNativeProjectionIntrinsic;
+
+export type SQLiteCursorPublicationNativeProjectionCompositionFaultPoint =
+  | "consume-before"
+  | "consume-after"
+  | "parent-issue-before"
+  | "parent-issue-after";
+let nativeProjectionCompositionFaultForTest: Readonly<{
+  readonly point: SQLiteCursorPublicationNativeProjectionCompositionFaultPoint;
+  readonly error: object;
+}> | undefined;
+
+function maybeThrowNativeProjectionCompositionFaultForTest(
+  point: SQLiteCursorPublicationNativeProjectionCompositionFaultPoint,
+): void {
+  const fault = nativeProjectionCompositionFaultForTest;
+  if (fault?.point !== point) return;
+  nativeProjectionCompositionFaultForTest = undefined;
+  throw fault.error;
+}
+
+/** Package-private one-shot atomic-pipeline fault seam. */
+export function injectSQLiteCursorPublicationNativeProjectionCompositionFaultForTestIntrinsic(
+  point: SQLiteCursorPublicationNativeProjectionCompositionFaultPoint,
+  error: object,
+): void {
+  if (nativeProjectionCompositionFaultForTest !== undefined || error === null
+      || typeof error !== "object" || isProxy(error)) {
+    return fail(
+      "GE_SQLITE_P11_INVALID_AUTHORITY",
+      "native projection composition fault injection is invalid",
+    );
+  }
+  nativeProjectionCompositionFaultForTest = objectFreezeIntrinsic({ error, point });
+}
 
 export type SQLiteCursorPublicationOwnerCompositionErrorCode =
   | "GE_SQLITE_P11_INVALID_AUTHORITY"
@@ -170,6 +221,18 @@ export interface SQLiteCursorPublicationRetainedCountReceiptSnapshot {
   readonly sqlAuthority: false;
 }
 
+export interface SQLiteCursorPublicationNativeProjectionReceipt {
+  readonly __sqliteCursorPublicationNativeProjectionReceipt: never;
+}
+
+export interface SQLiteCursorPublicationNativeProjectionReceiptSnapshot
+  extends Omit<SQLiteV1BaselineLowerOwnedNativeProjectionSnapshot, "lifecycle"> {
+  readonly lifecycle: "issued" | "consumed";
+  readonly nativeProjectionAuthority: true;
+  readonly countProvenance: "lower-native";
+  readonly oneShot: true;
+}
+
 export interface SQLiteCursorPublicationMutationChildPermit {
   readonly __sqliteCursorPublicationMutationChildPermit: never;
 }
@@ -199,7 +262,10 @@ export interface SQLiteCursorPublicationMutationParentScopeSnapshot {
   readonly reusableParentPrepareCount: 0 | 1;
   readonly reusableExecutionLeaseReleasedCount: number;
   readonly parentResourceRetiredCount: 0 | 1;
+  /** I/O performed by this mutation scope itself (never source projection reads). */
   readonly actualNativeIoCount: 0;
+  readonly countProvenance: "shape-only" | "lower-native";
+  readonly nativeProjectionLogicalReadCount: 0 | 12;
   readonly sqlAuthority: false;
 }
 
@@ -295,6 +361,9 @@ interface CompositionState {
   readonly beginReceipt: SQLiteCursorPublicationTransactionBeginReceipt;
   readonly begin: SQLiteCursorPublicationTransactionBeginReceiptSnapshot;
   lifecycle: "constructing" | "begin-adopted" | "poisoned";
+  nativeProjectionAdoptionCount: 0 | 1;
+  nativeProjectionLifecycle: "unused" | "issued" | "consumed";
+  nativeProjectionParent: WeakRef<object> | undefined;
 }
 
 interface ParentScopeState {
@@ -303,6 +372,9 @@ interface ParentScopeState {
   readonly descriptor: SQLiteCursorPublicationMutationRouteDescriptor;
   readonly expectedCount: number;
   readonly retainedCountReceipt: SQLiteCursorPublicationRetainedCountReceipt | undefined;
+  nativeProjectionReceipt: SQLiteCursorPublicationNativeProjectionReceipt | undefined;
+  readonly countProvenance: "shape-only" | "lower-native";
+  readonly nativeProjectionLogicalReadCount: 0 | 12;
   lifecycle: SQLiteCursorPublicationMutationParentScopeSnapshot["lifecycle"];
   nextOrdinal: number;
   activeChild: SQLiteCursorPublicationMutationChildPermit | undefined;
@@ -328,6 +400,15 @@ interface RetainedCountReceiptState {
   readonly nonce: object;
   parent: WeakRef<object> | undefined;
   lifecycle: SQLiteCursorPublicationRetainedCountReceiptSnapshot["lifecycle"];
+}
+
+interface NativeProjectionReceiptState {
+  readonly token: SQLiteCursorPublicationNativeProjectionReceipt;
+  readonly composition: SQLiteCursorPublicationOwnerComposition;
+  readonly sourceProjection: SQLiteV1BaselineLowerOwnedNativeProjection;
+  readonly sourceSnapshot: SQLiteV1BaselineLowerOwnedNativeProjectionSnapshot;
+  lifecycle: SQLiteCursorPublicationNativeProjectionReceiptSnapshot["lifecycle"];
+  parent: SQLiteCursorPublicationMutationParentScope | undefined;
 }
 
 interface ChildPermitState {
@@ -357,6 +438,7 @@ const OWNER_ADOPTIONS = new WeakMap<object, WeakRef<object>>();
 const BEGIN_RECEIPT_ADOPTIONS = new WeakMap<object, WeakRef<object>>();
 const PARENT_SCOPES = new WeakMap<object, ParentScopeState>();
 const RETAINED_COUNT_RECEIPTS = new WeakMap<object, RetainedCountReceiptState>();
+const NATIVE_PROJECTION_RECEIPTS = new WeakMap<object, NativeProjectionReceiptState>();
 const CHILD_PERMITS = new WeakMap<object, ChildPermitState>();
 const FIXED_READ_PERMITS = new WeakMap<object, FixedReadPermitState>();
 let adoptionFaultForTest: Readonly<{
@@ -411,6 +493,7 @@ function parentStateFor(
     authenticateActiveBegin(composition);
   } catch (error) {
     state.lifecycle = "poisoned";
+    state.nativeProjectionReceipt = undefined;
     if (composition?.lifecycle === "begin-adopted") {
       return terminalCompositionFailure(composition, primaryObject(error));
     }
@@ -579,11 +662,28 @@ function primaryObject(cause: unknown): object {
     );
 }
 
+function poisonCompositionState(composition: CompositionState): void {
+  composition.lifecycle = "poisoned";
+  const nativeParent = composition.nativeProjectionParent === undefined
+    ? undefined
+    : reflectApplyIntrinsic(weakRefDerefIntrinsic, composition.nativeProjectionParent, []);
+  if (nativeParent !== undefined) {
+    const nativeParentState = reflectApplyIntrinsic(weakMapGetIntrinsic, PARENT_SCOPES, [
+      nativeParent,
+    ]) as ParentScopeState | undefined;
+    if (nativeParentState?.composition === composition.token) {
+      nativeParentState.nativeProjectionReceipt = undefined;
+      nativeParentState.lifecycle = "poisoned";
+    }
+  }
+  composition.nativeProjectionParent = undefined;
+}
+
 function terminalCompositionFailure(
   composition: CompositionState,
   primary: object,
 ): never {
-  composition.lifecycle = "poisoned";
+  poisonCompositionState(composition);
   const capture = captureSQLiteCursorPublicationTransactionFailureIntrinsic(
     composition.owner,
     primary,
@@ -606,8 +706,10 @@ function authenticateActiveBeginOrTerminate(
 
 function poisonParent(parent: ParentScopeState, child?: ChildPermitState): never {
   parent.lifecycle = "poisoned";
+  parent.nativeProjectionReceipt = undefined;
   if (child !== undefined) child.lifecycle = "poisoned";
   const composition = stateFor(parent.composition);
+  composition.nativeProjectionParent = undefined;
   const primary = new SQLiteCursorPublicationOwnerCompositionError(
     "GE_SQLITE_P11_SCOPE_ORDER",
     "mutation permit transition is out of order",
@@ -727,6 +829,9 @@ export function adoptSQLiteCursorPublicationOwnerCompositionIntrinsic(
     begin,
     beginReceipt,
     lifecycle: "constructing",
+    nativeProjectionAdoptionCount: 0,
+    nativeProjectionLifecycle: "unused",
+    nativeProjectionParent: undefined,
     owner,
     token: composition,
   };
@@ -889,6 +994,245 @@ export function readSQLiteCursorPublicationRetainedCountReceiptSnapshotIntrinsic
   });
 }
 
+function nativeProjectionReceiptStateFor(
+  composition: SQLiteCursorPublicationOwnerComposition,
+  receipt: SQLiteCursorPublicationNativeProjectionReceipt,
+): NativeProjectionReceiptState {
+  const compositionState = stateFor(composition);
+  const state = receipt !== null && typeof receipt === "object" && !isProxy(receipt)
+    ? reflectApplyIntrinsic(weakMapGetIntrinsic, NATIVE_PROJECTION_RECEIPTS, [
+      receipt as object,
+    ]) as NativeProjectionReceiptState | undefined
+    : undefined;
+  if (state === undefined || state.token !== receipt || state.composition !== composition
+      || compositionState.nativeProjectionAdoptionCount !== 1
+      || compositionState.nativeProjectionLifecycle !== state.lifecycle) {
+    return terminalCompositionFailure(
+      compositionState,
+      new SQLiteCursorPublicationOwnerCompositionError(
+        "GE_SQLITE_P11_SCOPE_INVALID",
+        "lower-native projection receipt graph is invalid",
+      ),
+    );
+  }
+  assertSQLiteV1BaselineLowerOwnedNativeProjectionDefinitionIntrinsic(
+    state.sourceProjection,
+    compositionState.owner,
+    compositionState.beginReceipt,
+    composition as object,
+  );
+  return state;
+}
+
+/**
+ * Adopt one exact lower-owned projection. This is a registry-distinct NP1
+ * authority; the older retained-array receipt remains shape-only and cannot be
+ * presented here.
+ */
+export function adoptSQLiteCursorPublicationNativeProjectionIntrinsic(
+  composition: SQLiteCursorPublicationOwnerComposition,
+  projection: SQLiteV1BaselineLowerOwnedNativeProjection,
+): SQLiteCursorPublicationNativeProjectionReceipt {
+  const compositionState = stateFor(composition);
+  if (compositionState.lifecycle !== "begin-adopted") {
+    return fail("GE_SQLITE_P11_SCOPE_INVALID", "owner composition is terminal");
+  }
+  if (compositionState.nativeProjectionAdoptionCount !== 0
+      || compositionState.nativeProjectionLifecycle !== "unused") {
+    return terminalCompositionFailure(
+      compositionState,
+      new SQLiteCursorPublicationOwnerCompositionError(
+        "GE_SQLITE_P11_SCOPE_INVALID",
+        "lower-native projection adoption is invalid",
+      ),
+    );
+  }
+  authenticateActiveBeginOrTerminate(compositionState);
+  let sourceSnapshot: SQLiteV1BaselineLowerOwnedNativeProjectionSnapshot;
+  try {
+    sourceSnapshot = adoptSQLiteV1BaselineLowerOwnedNativeProjectionDefinitionIntrinsic(
+      projection,
+      compositionState.owner,
+      compositionState.beginReceipt,
+      composition as object,
+    );
+  } catch (cause) {
+    // Presentation is destructive only to the target graph.  The lower
+    // registry validates every foreign binding before changing its one-shot
+    // state, so a foreign source projection remains usable by its owner.
+    return terminalCompositionFailure(compositionState, primaryObject(cause));
+  }
+  const receipt = objectFreezeIntrinsic(objectCreateIntrinsic(null)) as
+    SQLiteCursorPublicationNativeProjectionReceipt;
+  const state: NativeProjectionReceiptState = {
+    composition,
+    lifecycle: "issued",
+    parent: undefined,
+    sourceProjection: projection,
+    sourceSnapshot,
+    token: receipt,
+  };
+  reflectApplyIntrinsic(weakMapSetIntrinsic, NATIVE_PROJECTION_RECEIPTS, [
+    receipt as object,
+    state,
+  ]);
+  compositionState.nativeProjectionAdoptionCount = 1;
+  compositionState.nativeProjectionLifecycle = "issued";
+  return receipt;
+}
+
+/**
+ * The single normal-flow NP1 boundary: drain all fixed lower-native reads,
+ * adopt their opaque projection, consume that receipt, and issue the exact
+ * reusable parent in one synchronous pipeline. Neither intermediate token can
+ * be orphaned or garbage-collected by a caller.
+ * Any source, native, decode, retirement, hash, or mint failure is terminal
+ * and is finalized by the existing P9 rollback/close/reopen authority while
+ * preserving the exact primary object.
+ */
+export function captureSQLiteCursorPublicationNativeProjectionIntrinsic(
+  composition: SQLiteCursorPublicationOwnerComposition,
+  sourceSummary: SQLiteV1BaselineSourceSummary,
+): SQLiteCursorPublicationMutationParentScope {
+  const compositionState = stateFor(composition);
+  if (compositionState.lifecycle !== "begin-adopted") {
+    return fail("GE_SQLITE_P11_SCOPE_INVALID", "owner composition is terminal");
+  }
+  if (compositionState.nativeProjectionAdoptionCount !== 0
+      || compositionState.nativeProjectionLifecycle !== "unused") {
+    return terminalCompositionFailure(
+      compositionState,
+      new SQLiteCursorPublicationOwnerCompositionError(
+        "GE_SQLITE_P11_SCOPE_INVALID",
+        "lower-native projection capture is invalid",
+      ),
+    );
+  }
+  authenticateActiveBeginOrTerminate(compositionState);
+  try {
+    return captureAndConsumeSQLiteV1BaselineLowerOwnedNativeProjectionDefinitionIntrinsic(
+      compositionState.owner,
+      compositionState.beginReceipt,
+      composition as object,
+      sourceSummary,
+    ) as SQLiteCursorPublicationMutationParentScope;
+  } catch (cause) {
+    if (compositionState.lifecycle !== "begin-adopted") throw cause;
+    const primary = primaryObject(cause);
+    const ownerSnapshot = readSQLiteCursorPublicationTransactionOwnerSnapshotIntrinsic(
+      compositionState.owner,
+    );
+    if (ownerSnapshot.lifecycle === "active") {
+      return terminalCompositionFailure(compositionState, primary);
+    }
+    poisonCompositionState(compositionState);
+    throw primary;
+  }
+}
+
+export function readSQLiteCursorPublicationNativeProjectionReceiptSnapshotIntrinsic(
+  composition: SQLiteCursorPublicationOwnerComposition,
+  receipt: SQLiteCursorPublicationNativeProjectionReceipt,
+): SQLiteCursorPublicationNativeProjectionReceiptSnapshot {
+  const state = nativeProjectionReceiptStateFor(composition, receipt);
+  return objectFreezeIntrinsic({
+    ...state.sourceSnapshot,
+    countProvenance: "lower-native",
+    lifecycle: state.lifecycle,
+    nativeProjectionAuthority: true,
+    oneShot: true,
+  });
+}
+
+/**
+ * Issue the only parent scope carrying lower-native count provenance. Generic
+ * retained-array receipts continue through the shape-only issuer below.
+ */
+export function issueSQLiteCursorPublicationNativeMutationParentScopeIntrinsic(
+  composition: SQLiteCursorPublicationOwnerComposition,
+  receipt: SQLiteCursorPublicationNativeProjectionReceipt,
+): SQLiteCursorPublicationMutationParentScope {
+  const compositionState = stateFor(composition);
+  const native = nativeProjectionReceiptStateFor(composition, receipt);
+  if (native.lifecycle !== "issued" || native.parent !== undefined
+      || compositionState.nativeProjectionLifecycle !== "issued") {
+    return terminalCompositionFailure(
+      compositionState,
+      new SQLiteCursorPublicationOwnerCompositionError(
+        "GE_SQLITE_P11_SCOPE_INVALID",
+        "lower-native projection receipt was replayed",
+      ),
+    );
+  }
+  authenticateActiveBeginOrTerminate(compositionState);
+  maybeThrowNativeProjectionCompositionFaultForTest("parent-issue-before");
+  const parent = objectFreezeIntrinsic(objectCreateIntrinsic(null)) as
+    SQLiteCursorPublicationMutationParentScope;
+  const state: ParentScopeState = {
+    activeChild: undefined,
+    childConsumedCount: 0,
+    childEnteredCount: 0,
+    childIssuedCount: 0,
+    childNativeReturnCount: 0,
+    childPostflightAcceptedCount: 0,
+    childResourceRetiredCount: 0,
+    composition,
+    descriptor: SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[2],
+    expectedCount: native.sourceSnapshot.retainedCount,
+    countProvenance: "lower-native",
+    lifecycle: "parent-issued",
+    nativeProjectionReceipt: receipt,
+    nativeProjectionLogicalReadCount: 12,
+    nextOrdinal: 0,
+    parentResourceRetiredCount: 0,
+    retainedCountReceipt: undefined,
+    reusableExecutionLeaseReleasedCount: 0,
+    reusableParentPrepareCount: 0,
+    token: parent,
+  };
+  reflectApplyIntrinsic(weakMapSetIntrinsic, PARENT_SCOPES, [parent as object, state]);
+  compositionState.nativeProjectionParent = new weakRefIntrinsic(parent as object);
+  native.lifecycle = "consumed";
+  native.parent = parent;
+  compositionState.nativeProjectionLifecycle = "consumed";
+  // This is the true after boundary: every parent, receipt, composition, and
+  // strong-retention link is complete, but no caller has received the parent.
+  maybeThrowNativeProjectionCompositionFaultForTest("parent-issue-after");
+  return parent;
+}
+
+/** Fail-closed provenance gate for a future real reusable mutation bridge. */
+export function assertSQLiteCursorPublicationNativeMutationParentIntrinsic(
+  parent: SQLiteCursorPublicationMutationParentScope,
+): SQLiteCursorPublicationNativeProjectionReceiptSnapshot {
+  const state = parentStateFor(parent);
+  if (state.nativeProjectionReceipt === undefined) {
+    return poisonParent(state);
+  }
+  return readSQLiteCursorPublicationNativeProjectionReceiptSnapshotIntrinsic(
+    state.composition,
+    state.nativeProjectionReceipt,
+  );
+}
+
+export interface SQLiteCursorPublicationNativeReceiptRetentionProbeForTest {
+  readonly isRetained: () => boolean;
+}
+
+/** Test-only scalar probe; the weak target never crosses this module boundary. */
+export function observeSQLiteCursorPublicationNativeReceiptRetentionForTestIntrinsic(
+  parent: SQLiteCursorPublicationMutationParentScope,
+): SQLiteCursorPublicationNativeReceiptRetentionProbeForTest | undefined {
+  const state = parentStateFor(parent);
+  if (state.nativeProjectionReceipt === undefined) return undefined;
+  const retained = new weakRefIntrinsic(state.nativeProjectionReceipt as object);
+  return objectFreezeIntrinsic({
+    isRetained: (): boolean => (
+      reflectApplyIntrinsic(weakRefDerefIntrinsic, retained, []) !== undefined
+    ),
+  });
+}
+
 /** Issue a pure P11-A parent scope; it has no SQL or connection execution surface. */
 export function issueSQLiteCursorPublicationMutationParentScopeIntrinsic(
   composition: SQLiteCursorPublicationOwnerComposition,
@@ -963,7 +1307,10 @@ export function issueSQLiteCursorPublicationMutationParentScopeIntrinsic(
     composition,
     descriptor,
     expectedCount,
+    countProvenance: "shape-only",
     retainedCountReceipt: retainedCountReceipt?.token,
+    nativeProjectionReceipt: undefined,
+    nativeProjectionLogicalReadCount: 0,
     lifecycle: reusable
       ? "parent-issued"
       : expectedCount === 0 ? "awaiting-zero-postflight" : "parent-ready",
@@ -1128,6 +1475,8 @@ export function consumeSQLiteCursorPublicationMutationParentScopeIntrinsic(
     return poisonParent(state);
   }
   state.lifecycle = "parent-consumed";
+  state.nativeProjectionReceipt = undefined;
+  stateFor(state.composition).nativeProjectionParent = undefined;
 }
 
 export function readSQLiteCursorPublicationMutationParentScopeSnapshotIntrinsic(
@@ -1144,10 +1493,12 @@ export function readSQLiteCursorPublicationMutationParentScopeSnapshotIntrinsic(
     childNativeReturnCount: state.childNativeReturnCount,
     childPostflightAcceptedCount: state.childPostflightAcceptedCount,
     childResourceRetiredCount: state.childResourceRetiredCount,
+    countProvenance: state.countProvenance,
     expectedCount: state.expectedCount,
     lifecycle: state.lifecycle,
     model: state.descriptor.model,
     nextOrdinal: state.nextOrdinal,
+    nativeProjectionLogicalReadCount: state.nativeProjectionLogicalReadCount,
     parentResourceRetiredCount: state.parentResourceRetiredCount,
     reusableExecutionLeaseReleasedCount: state.reusableExecutionLeaseReleasedCount,
     reusableParentPrepareCount: state.reusableParentPrepareCount,
@@ -1359,3 +1710,29 @@ export function assertSQLiteCursorPublicationOwnerCompositionRule12Intrinsic(
     ),
   );
 }
+
+// Install the sole synchronous lower-token consumer during module definition.
+// No execution-time caller can provide or replace this callback.
+installSQLiteCursorPublicationNativeProjectionConsumerIntrinsic(
+  (composition, projection) => {
+    const exactComposition = composition as SQLiteCursorPublicationOwnerComposition;
+    const compositionState = stateFor(exactComposition);
+    try {
+      maybeThrowNativeProjectionCompositionFaultForTest("consume-before");
+      const receipt = adoptSQLiteCursorPublicationNativeProjectionIntrinsic(
+        exactComposition,
+        projection as SQLiteV1BaselineLowerOwnedNativeProjection,
+      );
+      maybeThrowNativeProjectionCompositionFaultForTest("consume-after");
+      return issueSQLiteCursorPublicationNativeMutationParentScopeIntrinsic(
+        exactComposition,
+        receipt,
+      ) as object;
+    } catch (cause) {
+      if (compositionState.lifecycle === "begin-adopted") {
+        return terminalCompositionFailure(compositionState, primaryObject(cause));
+      }
+      throw cause;
+    }
+  },
+);

@@ -1,0 +1,414 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/conformance/sqlite-cursor-publication-native-projection-np1.schema.json",
+  "title": "SQLite P11-A NP1 normalized native projection report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "contractId", "implementation", "portable", "runtimeLocal"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "contractId": { "const": "sqlite-cursor-publication-native-projection-np1/v1" },
+    "implementation": { "enum": ["typescript", "python"] },
+    "portable": { "$ref": "#/$defs/portable" },
+    "runtimeLocal": { "$ref": "#/$defs/runtimeLocal" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "implementation": { "const": "typescript" } } },
+      "then": {
+        "properties": {
+          "runtimeLocal": {
+            "type": "object",
+            "properties": {
+              "runtime": { "const": "typescript" },
+              "retirementMechanism": { "const": "native-iterator-return" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "implementation": { "const": "python" } } },
+      "then": {
+        "properties": {
+          "runtimeLocal": {
+            "type": "object",
+            "properties": {
+              "runtime": { "const": "python" },
+              "retirementMechanism": { "const": "cursor-close" }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "familyCount": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entryKind", "count"],
+      "properties": {
+        "entryKind": {
+          "enum": [
+            "schema-envelope",
+            "migration-lineage",
+            "stream-head",
+            "record-identity",
+            "checkpoint-current",
+            "checkpoint-revision",
+            "lease-current",
+            "used-lease-identity",
+            "legal-hold",
+            "migration-lock-current",
+            "used-migration-lock-identity",
+            "legacy-operation"
+          ]
+        },
+        "count": { "type": "integer", "minimum": 0, "maximum": 1024 }
+      }
+    },
+    "bindings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "exactOwner",
+        "exactBeginReceipt",
+        "exactComposition",
+        "exactConnection",
+        "exactLineage",
+        "exactGeneration",
+        "exactSourceSummary",
+        "exactSourceEnvelope",
+        "exactReadSession"
+      ],
+      "properties": {
+        "exactOwner": { "const": true },
+        "exactBeginReceipt": { "const": true },
+        "exactComposition": { "const": true },
+        "exactConnection": { "const": true },
+        "exactLineage": { "const": true },
+        "exactGeneration": { "const": true },
+        "exactSourceSummary": { "const": true },
+        "exactSourceEnvelope": { "const": true },
+        "exactReadSession": { "const": true }
+      }
+    },
+    "successAuthority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "countProvenance",
+        "nativeSourceProvenance",
+        "nativeProjectionAuthority",
+        "genuineZeroClaim",
+        "oneShot",
+        "sqlAuthority",
+        "callerSuppliedCount",
+        "callerSuppliedProjection",
+        "physicalNativeIoCountClaimed"
+      ],
+      "properties": {
+        "countProvenance": { "const": "lower-native" },
+        "nativeSourceProvenance": { "const": true },
+        "nativeProjectionAuthority": { "const": true },
+        "genuineZeroClaim": { "const": false },
+        "oneShot": { "const": true },
+        "sqlAuthority": { "const": false },
+        "callerSuppliedCount": { "const": false },
+        "callerSuppliedProjection": { "const": false },
+        "physicalNativeIoCountClaimed": { "const": false }
+      }
+    },
+    "successCleanup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "receiptMintCount",
+        "receiptConsumeCount",
+        "rollbackAttemptCount",
+        "closeAttemptCount",
+        "reopenAttemptCount",
+        "commitAttemptCount",
+        "primaryPreserved"
+      ],
+      "properties": {
+        "receiptMintCount": { "const": 1 },
+        "receiptConsumeCount": { "const": 1 },
+        "rollbackAttemptCount": { "const": 0 },
+        "closeAttemptCount": { "const": 0 },
+        "reopenAttemptCount": { "const": 0 },
+        "commitAttemptCount": { "const": 0 },
+        "primaryPreserved": { "const": true }
+      }
+    },
+    "successCase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "caseId",
+        "outcome",
+        "routeId",
+        "sourceFamilyCount",
+        "optionalDynamicCount",
+        "orderedNormalizedSqlSha256",
+        "expectedFamilyCounts",
+        "observedFamilyCounts",
+        "expectedProjectionCount",
+        "retainedProjectionCount",
+        "sourceEnvelopeSha256",
+        "projectionCanonicalSha256",
+        "logicalNativeReadCount",
+        "prepareCount",
+        "terminalObservationCount",
+        "decodeCount",
+        "resourceRetirement",
+        "receiptLifecycle",
+        "bindings",
+        "authority",
+        "cleanup"
+      ],
+      "properties": {
+        "caseId": {
+          "enum": [
+            "baseline-dynamic-0-total-3",
+            "baseline-dynamic-1-total-4",
+            "baseline-dynamic-3-total-6"
+          ]
+        },
+        "outcome": { "const": "success" },
+        "routeId": { "const": "main.baseline-entries" },
+        "sourceFamilyCount": { "const": 12 },
+        "optionalDynamicCount": { "enum": [0, 1, 3] },
+        "orderedNormalizedSqlSha256": {
+          "type": "array",
+          "minItems": 12,
+          "maxItems": 12,
+          "items": { "$ref": "#/$defs/sha256" }
+        },
+        "expectedFamilyCounts": {
+          "type": "array",
+          "minItems": 12,
+          "maxItems": 12,
+          "items": { "$ref": "#/$defs/familyCount" }
+        },
+        "observedFamilyCounts": {
+          "type": "array",
+          "minItems": 12,
+          "maxItems": 12,
+          "items": { "$ref": "#/$defs/familyCount" }
+        },
+        "expectedProjectionCount": { "enum": [3, 4, 6] },
+        "retainedProjectionCount": { "enum": [3, 4, 6] },
+        "sourceEnvelopeSha256": { "$ref": "#/$defs/sha256" },
+        "projectionCanonicalSha256": { "$ref": "#/$defs/sha256" },
+        "logicalNativeReadCount": { "const": 12 },
+        "prepareCount": { "const": 12 },
+        "terminalObservationCount": { "const": 12 },
+        "decodeCount": { "enum": [3, 4, 6] },
+        "resourceRetirement": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "normalized",
+            "resourceCount",
+            "attemptCount",
+            "returnCount",
+            "exactPairing"
+          ],
+          "properties": {
+            "normalized": { "const": "complete" },
+            "resourceCount": { "const": 12 },
+            "attemptCount": { "const": 12 },
+            "returnCount": { "const": 12 },
+            "exactPairing": { "const": true }
+          }
+        },
+        "receiptLifecycle": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "mintCount", "consumeCount", "replayRejected"],
+          "properties": {
+            "state": { "const": "consumed" },
+            "mintCount": { "const": 1 },
+            "consumeCount": { "const": 1 },
+            "replayRejected": { "const": true }
+          }
+        },
+        "bindings": { "$ref": "#/$defs/bindings" },
+        "authority": { "$ref": "#/$defs/successAuthority" },
+        "cleanup": { "$ref": "#/$defs/successCleanup" }
+      }
+    },
+    "rejectionCase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "caseId",
+        "outcome",
+        "routeId",
+        "requestedProjectionCount",
+        "failedStage",
+        "retainedProjectionCount",
+        "projectionCanonicalSha256",
+        "logicalNativeReadCount",
+        "receiptMintCount",
+        "receiptConsumeCount",
+        "nativeProjectionAuthority",
+        "cleanup"
+      ],
+      "properties": {
+        "caseId": {
+          "enum": ["baseline-total-0-impossible", "baseline-total-1-impossible"]
+        },
+        "outcome": { "const": "failure" },
+        "routeId": { "const": "main.baseline-entries" },
+        "requestedProjectionCount": { "enum": [0, 1] },
+        "failedStage": { "const": "pre-native-source-conservation" },
+        "retainedProjectionCount": { "type": "null" },
+        "projectionCanonicalSha256": { "type": "null" },
+        "logicalNativeReadCount": { "const": 0 },
+        "receiptMintCount": { "const": 0 },
+        "receiptConsumeCount": { "const": 0 },
+        "nativeProjectionAuthority": { "const": false },
+        "cleanup": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "rollbackAttemptCount",
+            "closeAttemptCount",
+            "reopenAttemptCount",
+            "commitAttemptCount",
+            "primaryPreserved"
+          ],
+          "properties": {
+            "rollbackAttemptCount": { "const": 1 },
+            "closeAttemptCount": { "const": 1 },
+            "reopenAttemptCount": { "const": 1 },
+            "commitAttemptCount": { "const": 0 },
+            "primaryPreserved": { "const": true }
+          }
+        }
+      }
+    },
+    "portable": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["successCases", "rejectionCases", "invariants", "nonclaims"],
+      "properties": {
+        "successCases": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": { "$ref": "#/$defs/successCase" }
+        },
+        "rejectionCases": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": { "$ref": "#/$defs/rejectionCase" }
+        },
+        "invariants": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mandatorySingletonCount",
+            "optionalDynamicCounts",
+            "completeProjectionCounts",
+            "sourceFamilyCount",
+            "genuineZeroClaim",
+            "physicalNativeIoCountClaimed",
+            "sqlAuthority",
+            "routeClosure",
+            "stage18Accepted",
+            "commitAttemptCount"
+          ],
+          "properties": {
+            "mandatorySingletonCount": { "const": 3 },
+            "optionalDynamicCounts": {
+              "type": "array",
+              "minItems": 3,
+              "maxItems": 3,
+              "prefixItems": [{ "const": 0 }, { "const": 1 }, { "const": 3 }],
+              "items": false
+            },
+            "completeProjectionCounts": {
+              "type": "array",
+              "minItems": 3,
+              "maxItems": 3,
+              "prefixItems": [{ "const": 3 }, { "const": 4 }, { "const": 6 }],
+              "items": false
+            },
+            "sourceFamilyCount": { "const": 12 },
+            "genuineZeroClaim": { "const": false },
+            "physicalNativeIoCountClaimed": { "const": false },
+            "sqlAuthority": { "const": false },
+            "routeClosure": { "const": false },
+            "stage18Accepted": { "const": false },
+            "commitAttemptCount": { "const": 0 }
+          }
+        },
+        "nonclaims": {
+          "type": "array",
+          "minItems": 8,
+          "maxItems": 8,
+          "prefixItems": [
+            { "const": "global-native-route-closure" },
+            { "const": "arbitrary-sql-authority" },
+            { "const": "p11-a-completion" },
+            { "const": "p11-b-c-or-d" },
+            { "const": "stage-18-acceptance" },
+            { "const": "runtime-commit-execution" },
+            { "const": "release-evidence" },
+            { "const": "release-or-popularity" }
+          ],
+          "items": false
+        }
+      }
+    },
+    "runtimeLocalCase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "caseId",
+        "resourceCount",
+        "attemptCount",
+        "returnCount",
+        "orderedRawSqlSha256"
+      ],
+      "properties": {
+        "caseId": {
+          "enum": [
+            "baseline-dynamic-0-total-3",
+            "baseline-dynamic-1-total-4",
+            "baseline-dynamic-3-total-6"
+          ]
+        },
+        "resourceCount": { "const": 12 },
+        "attemptCount": { "const": 12 },
+        "returnCount": { "const": 12 },
+        "orderedRawSqlSha256": {
+          "type": "array",
+          "minItems": 12,
+          "maxItems": 12,
+          "items": { "$ref": "#/$defs/sha256" }
+        }
+      }
+    },
+    "runtimeLocal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["runtime", "retirementMechanism", "successCases"],
+      "properties": {
+        "runtime": { "enum": ["typescript", "python"] },
+        "retirementMechanism": { "enum": ["native-iterator-return", "cursor-close"] },
+        "successCases": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": { "$ref": "#/$defs/runtimeLocalCase" }
+        }
+      }
+    }
+  }
+}

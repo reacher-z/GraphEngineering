@@ -23482,3 +23482,142 @@ I/O前绑定exact owner/BEGIN/composition/hidden connection、禁止source-only 
 link check为478项，diff check通过。它不包含或接受仍在工作树中的双runtime实现，不证明
 runtime native projection、fault matrix或portable parity；P11继续`in_progress`，release
 继续audit-only 0/93。下一步严格按该commit完成无环双runtime实现并取得独立H0/M0/L0。
+
+#### 31.37.101 NP1双运行时无环拓扑勘误（2026-08-03 PDT追加；既有内容不改）
+
+本节只修正31.37.100中把模块依赖方向写成双运行时完全相同的过度约束，不改变任何
+pre-I/O authority、identity、retirement、cleanup、fault或parity门槛。追加前完整23,484行
+计划SHA-256为
+`fcff41d3c4533ef877220b5611485e2e6cd6c32b5a4b38b56709f8f3c63372a9`。
+
+1. TypeScript允许`operation-baseline-source -> transaction-owner`直接调用exact
+   composition/connection reproof，composition再依赖source与owner；transaction-owner不依赖
+   source，因此无环。
+2. Python transaction-owner既有安全边界必须在定义时捕获source内的exact
+   `SQLiteV1BaselineConnectionOwner`类及其private intrinsics，不能为追求表面相同而删除
+   该runtime依赖。Python新增无业务依赖的import-leaf bridge：leaf不import source、
+   composition或transaction-owner；transaction-owner一次性安装exact reproof，source在
+   定义时闭包捕获stable invoke，缺失或重复安装fail closed。
+3. portable要求不变：source从exact summary registry取得hidden connection，在任何native
+   projection I/O之前以及prepare/next/decode/terminal/retire边界前后重证exact owner、BEGIN、
+   composition、connection、lineage与generation；不存在source/composition直接反向环、
+   动态global lookup、caller callback或post-hoc adoption。
+4. 两运行时都必须提供不可分离的正常入口，使lower drain在同一同步协议内被composition
+   adopt；raw lower token不得作为可被caller成功后abandon/GC的正常产物。任何source或
+   adoption fault仍由exact target graph的P9 authority终结，foreign source graph不得被污染。
+5. runtime-local import拓扑不进入portable parity字段；parity比较authority、binding、
+   counts/digests、lifecycle、retirement normalization、cleanup与nonclaims。实现仍需完整
+   hostile/fault/GC矩阵与独立H0/M0/L0，P11及release状态不变。
+
+#### 31.37.102 NP1执行补强：不可伪造report、闭包私有authority与穷举fault矩阵（2026-08-03 PDT追加；既有内容不改）
+
+本节是在真实双runtime实现和独立敌意审查期间发现的必要验收补强；它只增加可证伪性，
+不修改31.37.98至31.37.101的任何既有文字、状态或nonclaim。追加前完整23,510行计划
+SHA-256为`686092349089eb71ce95e5dcf89929a198e9e9d9cdfa386ec0a995395475bade`。
+
+1. 新增严格的NP1 report JSON Schema与语义validator。顶层必须且只能包含schema version、
+   contract ID、implementation、portable与runtime-local；所有object都拒绝额外字段，所有固定
+   枚举、boolean authority、cleanup count、12-family vector、3个success case、2个impossible
+   total rejection case与8项nonclaim都由schema精确约束。schema通过后仍必须执行语义验证，
+   防止合法shape内部的case重排、family重排、count守恒破坏、mandatory singleton漂移、
+   source envelope漂移、projection digest复用或runtime raw SQL inventory跨case漂移。
+2. portable SQL identity不能直接比较两runtime因缩进/换行不同而变化的raw SQL bytes，也不能
+   只要求两个reporter彼此相等。统一算法固定为：CRLF/CR转LF、trim、所有Unicode whitespace
+   run折叠为一个ASCII space、UTF-8 SHA-256；12项按RM1 canonical family order排列。
+   validator内另存一份由真实TS definition-time SQL生成、人工复核并冻结的12-digest oracle，
+   每个case必须逐项等于oracle。各runtime的byte-exact raw SQL SHA-256保留在runtime-local，
+   并要求本runtime三次success run内部完全一致；portable parity不伪称两driver raw SQL相同。
+3. TS reporter必须由真实temporary file-backed SQLite运行生成3/4/6 projection，而非静态构造
+   JSON；它必须产生严格一行canonical JSON、stderr为空、连续两次stdout byte-identical，
+   并由上述schema与semantic validator验证。Python reporter也必须真实运行同一fixture，
+   严格一行输出并双跑byte-identical。最终TS测试主动spawn Python两次，先分别validate，再对
+   portable canonical bytes做exact equality；缺少uv/reporter时CI强制环境变量必须fail而非skip。
+4. success reporter只能读取atomic normal entry返回的passive parent/receipt snapshot标量，禁止
+   取得raw drain token、receipt、projection object、registry、cursor、statement、iterator、
+   read-session nonce object或connection authority。`exactResourcePairing=true`必须来自12个
+   definition-captured native resource identities的prepare→terminal→retire一一配对，不得由
+   reporter常量写死。rejection normalization只有在exact structured error code/message与P9
+   finalized counters同时匹配时才能声称`pre-native-source-conservation`；仅凭caller填写的
+   case ID、requested count或cleanup counters不能升级为证据。
+5. Python module namespace不得留下可调用的receipt mint/lookup/register、可写receipt/source
+   registry、construction token、mutable record或返回raw projection的observer。registry、token、
+   immutable record与permanent issued/poison tombstone均进入closure cell；绑定完成后只保留normal
+   atomic entry、passive detached scalar snapshot和不返回authority的test计数器。任何测试observer
+   返回的key/state必须是canonical encode/decode后的detached copy，原地mutation不能影响record。
+6. Python source capture record固定exact summary weakref、record-owned connection identity、
+   counts mapping identity与ordered immutable tuple、expected total、source envelope bytes、clock
+   evidence、transaction epoch/total与issued/poison tombstone。producer在definition time闭包捕获
+   record lookup、graph reproof、family SQL/decoder tuple、canonical encoder/hash和native cursor
+   intrinsics；I/O只使用record-owned connection。修改summary属性、iteration flag、module/class
+   method、object `__dict__`、clone/subclass、GC/id reuse或同步修改presentation object均不能伪造。
+7. receipt private record不可由module caller取得或修改。每次validate/consume都从不可变record
+   重新计算projection domain digest、ordered family count vector、total、source envelope digest与
+   unique read-session/resource pairing；只修改receipt presentation必须使exact target进入P9终态，
+   receipt mint/consume authority归零且不能污染foreign graph。normal entry内部必须原子执行
+   drain→mint→consume→lower-native parent issue；中间receipt或projection不得返回、abandon或靠GC
+   清理，atomic entry只返回parent和post-consume passive snapshot。
+8. fault seam与测试必须支持family-qualified、boundary-qualified和适用时row-qualified注入，不能
+   用“总是在第一个family失败”的7个全局point冒充穷举。对12 families逐一覆盖prepare前后、
+   native fetch/next前后、decode前后、terminal前后、retire/return/close前后；零行family仍覆盖
+   prepare、terminal、retire，有行family覆盖first row，N=3 legacy-operation另覆盖first/middle/last。
+   digest、mint、consume与parent-issue也各有before/after或等价精确边界。
+9. 每个fault case都断言抛出同一个primary object；已创建resource严格retire attempt/native return
+   1/1，未创建resource为0，后续family不启动；projection count/hash为null或不可观察，receipt
+   mint/consume为0；target P9 rollback/close/reopen各按边界exact once、COMMIT=0。另设primary加
+   retire secondary、primary加rollback/close/reopen secondary组合，证明primary precedence且
+   secondary只能进入bounded diagnostics。矩阵必须以程序化table生成并报告case count，防止
+   手写遗漏某个family、before/after或row position。
+10. NP1只有在TS focused/typecheck、Python focused/Ruff/mypy、schema hostile tests、TS reporter
+    双跑、Python reporter双跑、portable parity、existing P11/P9/P10回归、全包测试相关分片、docs、
+    task controls、release map、evidence closure与`git diff --check`全部通过，并取得独立whole-diff
+    H0/M0/L0后才能提交runtime tranche。即使上述全部通过，也只关闭bounded NP1 red gate；P11-A
+    其余route、P11-B/C/D、stage18、third clock、COMMIT、D9、RC/stable、5K/6K star与受欢迎程度
+    继续是明确nonclaim，不能用测试通过推断市场结果。
+
+#### 31.37.103 NP1 portable SQL空白集合勘误与跨语言反例门（2026-08-03 PDT追加；既有内容不改）
+
+本节修正31.37.102第2项中“所有Unicode whitespace”会在JavaScript `\\s`与Python
+`str.split`之间产生不一致的歧义；不修改既有文字，也不改变已冻结的12项oracle。追加前完整
+23,575行计划SHA-256为
+`786fc6e992240949ecf17035a5f3babedb7d09fb49f17d0a88293ad35911f09f`。
+
+1. normalized SQL算法唯一允许折叠的格式空白集合固定为`U+0009 TAB`、`U+000A LF`、
+   `U+000B VT`、`U+000C FF`、`U+000D CR`与`U+0020 SPACE`。先把CRLF和单独CR规范成
+   LF，再只从两端移除该集合，并把该集合的每个连续run折叠成一个`U+0020`；结果按UTF-8
+   编码后计算SHA-256。实现不得使用JavaScript `\\s`、Python无参数`strip()`/`split()`或
+   其他runtime自定义Unicode whitespace表。
+2. `U+00A0 NO-BREAK SPACE`、`U+0085 NEXT LINE`、`U+FEFF BOM`、`U+001C FILE
+   SEPARATOR`及所有不属于上述六项集合的Unicode scalar必须原样保留；它们位于SQL内部或
+   边缘时都不得被静默折叠或trim。portable报告的规范化digest因此对这些字符敏感。
+3. 两runtime都必须加入直接helper hostile tests：包含CRLF/CR、六项ASCII格式空白的输入必须
+   收敛到同一canonical bytes；逐项注入上述四个跨runtime反例必须产生不同digest。测试必须
+   直接调用生产helper，不能在test/report层复制一个替代normalizer。
+4. 现有12条definition-time SQL只含ASCII格式空白，因此冻结oracle无需变化；validator继续
+   要求三种success case逐项精确等于该oracle。任何oracle变化都视为source SQL或算法漂移，
+   必须独立复核，不能借本勘误自动更新golden。
+5. 本勘误纳入NP1 runtime、portable parity、spec contract与CI强制门；只有TS、Python反例测试
+   和双runtime report同时green，才能声称空白语义一致。它不扩大NP1完成范围，也不改变P11、
+   release、star或市场受欢迎程度的nonclaim。
+
+#### 31.37.104 NP1 fault receipt计数语义勘误（2026-08-03 PDT追加；既有内容不改）
+
+本节修正31.37.102第9项把failure后的“零存活authority”简写成所有边界历史mint/consume
+事件也必须为零的不可实现歧义；既有文字保持不动。追加前完整23,600行计划SHA-256为
+`812aad2d926a0a778dd098bec5d8cdc6426eb645b7af9d86bb5e1642f5cfd9a6`。
+
+1. failure report中的`receiptMintCount=0`与`receiptConsumeCount=0`继续是portable的
+   “escaped/live continuation authority”计数：failure返回caller时不得存在可被caller取得、
+   adopt、consume或replay的receipt/parent/token。它们不是已经发生过的内部历史事件计数。
+2. 历史事件必须按真实边界分别记账，不能为了满足portable零authority而倒写为零：mint前
+   fault为historical mint/consume `0/0`；mint成功后的fault允许mint历史为1；consume成功后的
+   fault允许历史为`1/1`；parent issue after fault允许parent曾在内部登记，但终态必须poison、
+   清除强authority并且parent永不跨caller边界。两runtime边界名称不同则保留runtime-local
+   telemetry，portable只比较等价lifecycle与零存活authority。
+3. `baseline-total-0-impossible`与`baseline-total-1-impossible`仍在任何native source/receipt
+   发行前拒绝，因此它们的portable和historical mint/consume都严格为`0/0`，现有schema不变。
+4. family/row/digest/mint/consume/parent fault矩阵必须断言：同一primary、P9 bounded cleanup、
+   COMMIT 0、caller无parent、composition poisoned、重复normal entry只得到terminal rejection且
+   rollback/close/reopen计数不再增加。对晚期fault只声称零存活authority，不声称历史未执行。
+5. 本勘误不放宽资源退役、raw receipt私有性或one-shot要求；相反，它禁止用一个含糊的零计数
+   掩盖真实内部transition。NP1仍只是P11-A bounded tranche，P11-B/C/D、stage18、third clock、
+   COMMIT、D9、release与GitHub star目标全部保持nonclaim。

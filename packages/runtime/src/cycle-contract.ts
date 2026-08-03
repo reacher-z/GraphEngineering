@@ -36,6 +36,11 @@ import {
 } from "./cycle-types.js";
 import type { JsonValue } from "./types.js";
 
+const arrayPushIntrinsic = Array.prototype.push;
+const arraySomeIntrinsic = Array.prototype.some;
+const objectFreezeIntrinsic = Object.freeze;
+const reflectApplyIntrinsic = Reflect.apply;
+
 export const CYCLE_CONTROLLER_DOMAIN = "graph-engineering/cycle-controller/v1alpha1\0";
 export const CYCLE_REQUEST_DOMAIN = "graph-engineering/cycle-controller-request/v1alpha1\0";
 export const CYCLE_EVENT_DOMAIN = "graph-engineering/cycle-event/v1alpha1\0";
@@ -76,7 +81,11 @@ function exactKeys(
 ): void {
   const actual = Object.keys(value).sort(compareUnicodeCodePoints);
   const wanted = [...expected].sort(compareUnicodeCodePoints);
-  if (actual.length !== wanted.length || actual.some((key, index) => key !== wanted[index])) {
+  if (actual.length !== wanted.length || reflectApplyIntrinsic(
+    arraySomeIntrinsic,
+    actual,
+    [(key: string, index: number) => key !== wanted[index]],
+  ) as boolean) {
     fail(code, controllerRunId, `${label} must be closed`, { actual, expected: wanted });
   }
 }
@@ -149,7 +158,9 @@ function inspectPortable(value: unknown, maximumBytes?: number): string {
       throw new TypeError(`symbol key is not portable at ${item.path}`);
     }
     ancestors.add(item.value);
-    pending.push({ value: item.value, depth: item.depth, path: item.path, exit: true });
+    reflectApplyIntrinsic(arrayPushIntrinsic, pending, [
+      { value: item.value, depth: item.depth, path: item.path, exit: true },
+    ]);
     const descriptors = Object.getOwnPropertyDescriptors(item.value);
     const keys = Object.keys(descriptors).filter((key) => !(Array.isArray(item.value) && key === "length"));
     if (Array.isArray(item.value)) {
@@ -165,7 +176,9 @@ function inspectPortable(value: unknown, maximumBytes?: number): string {
       if (descriptor === undefined || !Object.hasOwn(descriptor, "value") || descriptor.enumerable !== true) {
         throw new TypeError(`accessor or hidden property at ${item.path}/${key}`);
       }
-      pending.push({ value: descriptor.value, depth: item.depth + 1, path: `${item.path}/${key}` });
+      reflectApplyIntrinsic(arrayPushIntrinsic, pending, [
+        { value: descriptor.value, depth: item.depth + 1, path: `${item.path}/${key}` },
+      ]);
     }
   }
   const serialized = canonicalSerialize(value);
@@ -181,7 +194,7 @@ export function captureBoundedJson(
   maximumBytes?: number,
 ): { readonly value: JsonValue; readonly canonicalJson: string } {
   const canonicalJson = inspectPortable(value, maximumBytes);
-  return Object.freeze({ value: snapshotJson(value), canonicalJson });
+  return objectFreezeIntrinsic({ value: snapshotJson(value), canonicalJson });
 }
 
 /** Construct the truthful inline-alpha carrier used by the D7 protocol. */

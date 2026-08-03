@@ -27,7 +27,7 @@ const ROUTES_CANONICAL_SHA256 =
 const STAGES_CANONICAL_SHA256 =
   "3d0aa8aba16f779f1ba1addc53ab01756a535ce653d22a4449ae757f6dfe7f1e";
 const MARKDOWN_RAW_SHA256 =
-  "98c6183ab99a9fdbdfd881e0f46305af18251197dcd07f169825c47048253473";
+  "363786579a357b03113dfb767e04a382b2660dc6e2be4f27c20455efefe8e311";
 const SUPPORTED_MUTATION_COUNT_POLICIES = [
   ["b2.cursor-seal-table-ddl", { kind: "exact", expectedCount: 1 }],
   ["main.migration-0002", { kind: "exact", expectedCount: 20 }],
@@ -366,7 +366,8 @@ function validateMarkdown(markdownText) {
     "fake-zero completion claim",
     "The exact original Python primary is re-raised",
     "countProvenance=lower-native",
-    "A source-only drain followed by post-hoc owner adoption is",
+    "Python uses a separate\nimport-leaf bridge",
+    "A source-only drain followed by post-hoc owner\nadoption is",
     "baseline-dynamic-0-total-3",
     "baseline-dynamic-1-total-4",
     "baseline-dynamic-3-total-6",

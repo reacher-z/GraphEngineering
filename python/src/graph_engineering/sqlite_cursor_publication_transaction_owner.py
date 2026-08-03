@@ -3,12 +3,18 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
 from typing import Literal, NamedTuple, Never, cast
 from weakref import ReferenceType, ref
 
-from .sqlite_operation_baseline_source import SQLiteV1BaselineConnectionOwner
+from .sqlite_cursor_publication_native_projection_bridge import (
+    _install_sqlite_cursor_publication_native_projection_bridge_intrinsic,
+)
+from .sqlite_operation_baseline_source import (
+    SQLiteV1BaselineConnectionOwner,
+)
 
 _CONSTRUCTION_TOKEN = object()
 _TYPE = type
@@ -1151,3 +1157,14 @@ def _read_sqlite_cursor_publication_begin_receipt_snapshot_intrinsic(
         _OBJECT_GETATTRIBUTE(receipt, "_SQLiteCursorPublicationBeginReceipt__temp_mutation_epoch"),
         1,
     )
+
+
+_install_sqlite_cursor_publication_native_projection_bridge_intrinsic(
+    cast(
+        Callable[[object, object, object], object],
+        _assert_sqlite_cursor_publication_owner_composition_intrinsic,
+    ),
+)
+globals().pop(
+    "_install_sqlite_cursor_publication_native_projection_bridge_intrinsic", None
+)

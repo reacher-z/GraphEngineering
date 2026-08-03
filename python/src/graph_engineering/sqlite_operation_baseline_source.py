@@ -28,6 +28,12 @@ from .sqlite_cursor_publication_migration_0002_asset import (
     _read_sqlite_cursor_migration_0002_asset_snapshot_intrinsic,
     _SQLiteCursorMigration0002Asset,
 )
+from .sqlite_cursor_publication_native_projection_bridge import (
+    _install_sqlite_cursor_publication_native_projection_abandoner_intrinsic,
+    _install_sqlite_cursor_publication_native_projection_producer_intrinsic,
+    _install_sqlite_cursor_publication_native_projection_receipt_views_intrinsic,
+    _invoke_sqlite_cursor_publication_native_projection_reproof_intrinsic,
+)
 from .sqlite_cycle_store import (
     _REQUIRED_MIGRATION_POSTCONDITIONS,
     SQLITE_CYCLE_STORE_CATALOG_SHA256,
@@ -5485,8 +5491,161 @@ class SQLiteV1BaselineSourceSummary:
 _CAPTURED_SOURCE_SUMMARIES: dict[int, ReferenceType[SQLiteV1BaselineSourceSummary]] = {}
 
 
+class SQLiteV1BaselineNativeProjectionProvenanceError(ValueError):
+    """Stable structured rejection for an unregistered or altered NP1 source."""
+
+    code: Literal["GE_SQLITE_P11_NATIVE_PROJECTION_SOURCE_PROVENANCE"] = (
+        "GE_SQLITE_P11_NATIVE_PROJECTION_SOURCE_PROVENANCE"
+    )
+
+    def __init__(self) -> None:
+        super().__init__("SQLite v1 baseline lower-owned source is invalid")
+
+
+@dataclass(frozen=True, slots=True)
+class _NativeProjectionSourceSummaryRecord:
+    summary_ref: ReferenceType[SQLiteV1BaselineSourceSummary]
+    connection_ref: ReferenceType[SQLiteV1BaselineConnectionOwner]
+    counts_identity: Mapping[BaselineEntryKind, int]
+    counts_tuple: tuple[tuple[BaselineEntryKind, int], ...]
+    expected_entry_count: int
+    source_envelope_bytes: bytes
+    source_total_changes: int
+    captured_transaction_epoch: int
+    clock_evidence: SQLiteV1BaselineClockEvidence
+
+
+class _NativeProjectionSourceSummaryEvidence(NamedTuple):
+    counts: tuple[tuple[BaselineEntryKind, int], ...]
+    expected_entry_count: int
+    source_envelope_sha256: str
+    source_total_changes: int
+    captured_transaction_epoch: int
+    issued: bool
+
+
+def _native_projection_source_summary_registry_cell() -> tuple[
+    Callable[[SQLiteV1BaselineSourceSummary], None],
+    Callable[
+        [SQLiteV1BaselineSourceSummary], _NativeProjectionSourceSummaryRecord
+    ],
+    Callable[
+        [SQLiteV1BaselineSourceSummary, _NativeProjectionSourceSummaryRecord], None
+    ],
+    Callable[
+        [SQLiteV1BaselineSourceSummary, _NativeProjectionSourceSummaryRecord], bool
+    ],
+    Callable[
+        [SQLiteV1BaselineSourceSummary], _NativeProjectionSourceSummaryEvidence
+    ],
+]:
+    """Own NP1 source authority in a non-addressable closure.
+
+    Only detached scalar evidence leaves this cell.  In particular, neither the
+    provenance record nor its one-shot tombstone can be recovered from module
+    globals and replaced by a late monkeypatch.
+    """
+
+    records: dict[int, _NativeProjectionSourceSummaryRecord] = {}
+    issued: set[int] = set()
+    summary_type = SQLiteV1BaselineSourceSummary
+    record_factory = _NativeProjectionSourceSummaryRecord
+    evidence_factory = _NativeProjectionSourceSummaryEvidence
+    weak_ref = ref
+    digest = hashlib.sha256
+    provenance_error_factory = SQLiteV1BaselineNativeProjectionProvenanceError
+
+    def register(summary: SQLiteV1BaselineSourceSummary) -> None:
+        identity = id(summary)
+
+        def discard_exact(
+            dead_ref: ReferenceType[SQLiteV1BaselineSourceSummary],
+        ) -> None:
+            record = records.get(identity)
+            if record is not None and record.summary_ref is dead_ref:
+                records.pop(identity, None)
+                issued.discard(identity)
+
+        summary_ref = weak_ref(summary, discard_exact)
+        records[identity] = record_factory(
+            summary_ref,
+            weak_ref(summary._connection),
+            summary.counts_by_kind,
+            tuple(summary.counts_by_kind.items()),
+            summary.expected_entry_count,
+            summary._source_envelope_bytes,
+            summary._source_total_changes,
+            summary._captured_transaction_epoch,
+            summary.clock_evidence,
+        )
+
+    def lookup(
+        summary: SQLiteV1BaselineSourceSummary,
+    ) -> _NativeProjectionSourceSummaryRecord:
+        if type(summary) is not summary_type:
+            raise provenance_error_factory()
+        record = records.get(id(summary))
+        if record is None or record.summary_ref() is not summary:
+            raise provenance_error_factory()
+        connection = record.connection_ref()
+        if (
+            connection is None
+            or summary._connection is not connection
+            or summary.counts_by_kind is not record.counts_identity
+            or tuple(summary.counts_by_kind.items()) != record.counts_tuple
+            or summary.expected_entry_count != record.expected_entry_count
+            or summary._source_envelope_bytes != record.source_envelope_bytes
+            or summary._source_total_changes != record.source_total_changes
+            or summary._captured_transaction_epoch != record.captured_transaction_epoch
+            or summary.clock_evidence is not record.clock_evidence
+        ):
+            raise provenance_error_factory()
+        return record
+
+    def claim(
+        summary: SQLiteV1BaselineSourceSummary,
+        record: _NativeProjectionSourceSummaryRecord,
+    ) -> None:
+        if lookup(summary) is not record or id(summary) in issued:
+            raise ValueError("GE_SQLITE_P11_NATIVE_PROJECTION_SOURCE_REPLAY")
+        issued.add(id(summary))
+
+    def is_issued(
+        summary: SQLiteV1BaselineSourceSummary,
+        record: _NativeProjectionSourceSummaryRecord,
+    ) -> bool:
+        return lookup(summary) is record and id(summary) in issued
+
+    def observe(
+        summary: SQLiteV1BaselineSourceSummary,
+    ) -> _NativeProjectionSourceSummaryEvidence:
+        record = lookup(summary)
+        return evidence_factory(
+            tuple(record.counts_tuple),
+            record.expected_entry_count,
+            digest(record.source_envelope_bytes).hexdigest(),
+            record.source_total_changes,
+            record.captured_transaction_epoch,
+            id(summary) in issued,
+        )
+
+    return register, lookup, claim, is_issued, observe
+
+
+(
+    _register_native_projection_source_summary,
+    _native_projection_source_summary_record_for,
+    _claim_native_projection_source_summary,
+    _native_projection_source_summary_is_issued,
+    _read_native_projection_source_summary_evidence_for_test,
+) = _native_projection_source_summary_registry_cell()
+
+
 def _register_sqlite_v1_baseline_source_summary(
     summary: SQLiteV1BaselineSourceSummary,
+    _register_native: Callable[
+        [SQLiteV1BaselineSourceSummary], None
+    ] = _register_native_projection_source_summary,
 ) -> None:
     """Retain only weak, exact-identity evidence of module capture."""
 
@@ -5496,7 +5655,9 @@ def _register_sqlite_v1_baseline_source_summary(
         if _CAPTURED_SOURCE_SUMMARIES.get(identity) is reference:
             _CAPTURED_SOURCE_SUMMARIES.pop(identity, None)
 
-    _CAPTURED_SOURCE_SUMMARIES[identity] = ref(summary, discard)
+    summary_ref = ref(summary, discard)
+    _CAPTURED_SOURCE_SUMMARIES[identity] = summary_ref
+    _register_native(summary)
 
 
 def _assert_sqlite_v1_baseline_source_summary_provenance(
@@ -6357,10 +6518,11 @@ def _integer(value: object, label: str, minimum: int = 0) -> int:
     return value
 
 
-def capture_sqlite_v1_baseline_source_summary(
+def _capture_sqlite_v1_baseline_source_summary_implementation(
     connection: SQLiteV1BaselineConnectionOwner,
     *,
     captured_at_ms: int,
+    register_summary: Callable[[SQLiteV1BaselineSourceSummary], None],
 ) -> SQLiteV1BaselineSourceSummary:
     """Capture source identity and exact family counts without ending the transaction."""
 
@@ -6461,5 +6623,1032 @@ def capture_sqlite_v1_baseline_source_summary(
         connection.transaction_epoch,
     )
     summary._assert_capture_transaction()
-    _register_sqlite_v1_baseline_source_summary(summary)
+    register_summary(summary)
     return summary
+
+
+def _bind_sqlite_v1_baseline_source_summary_capture() -> Callable[
+    ..., SQLiteV1BaselineSourceSummary
+]:
+    implementation = _capture_sqlite_v1_baseline_source_summary_implementation
+    register_summary = _register_sqlite_v1_baseline_source_summary
+
+    def capture(
+        connection: SQLiteV1BaselineConnectionOwner,
+        *,
+        captured_at_ms: int,
+    ) -> SQLiteV1BaselineSourceSummary:
+        return implementation(
+            connection,
+            captured_at_ms=captured_at_ms,
+            register_summary=register_summary,
+        )
+
+    return capture
+
+
+capture_sqlite_v1_baseline_source_summary = (
+    _bind_sqlite_v1_baseline_source_summary_capture()
+)
+
+
+_NATIVE_PROJECTION_CONSTRUCTION_TOKEN = object()
+_NATIVE_PROJECTION_IDENTITY_FAMILIES = _identity_families()
+_NATIVE_PROJECTION_ASSERT_CAPTURE = SQLiteV1BaselineSourceSummary._assert_capture_transaction
+_NATIVE_PROJECTION_REQUIRE_FAMILIES = SQLiteV1BaselineSourceSummary._require_implemented_families
+_NATIVE_PROJECTION_RECONCILE_ENTRY = SQLiteV1BaselineSourceSummary._reconcile_identity_entry
+_NATIVE_PROJECTION_OWNER_EXECUTE = SQLiteV1BaselineConnectionOwner.execute
+_NATIVE_PROJECTION_CURSOR_FETCHMANY = _SQLiteCursorCapability.fetchmany
+_NATIVE_PROJECTION_CURSOR_CLOSE = _SQLiteCursorCapability.close
+_NATIVE_PROJECTION_CURSOR_IDENTITY_GET = object.__getattribute__
+_NATIVE_PROJECTION_CURSOR_IDENTITY_TYPE = sqlite3.Cursor
+_NATIVE_PROJECTION_FAULTS: ContextVar[Mapping[str, BaseException] | None] = ContextVar(
+    "ge_sqlite_native_projection_faults", default=None
+)
+_NATIVE_PROJECTION_LAST_FAILURE_TELEMETRY: ContextVar[
+    tuple[int, int, int, int] | None
+] = ContextVar("ge_sqlite_native_projection_last_failure_telemetry", default=None)
+
+
+def _bind_sqlite_v1_baseline_normalized_sql_sha256() -> Callable[[str], str]:
+    ascii_format_whitespace = re.compile(r"[\x09-\x0d\x20]+")
+    ascii_format_edges = "\x09\x0a\x0b\x0c\x0d\x20"
+    sha256 = hashlib.sha256
+
+    def normalized_sha256(sql: str) -> str:
+        if type(sql) is not str:
+            raise TypeError("GE_SQLITE_P11_NATIVE_PROJECTION_SQL_TEXT")
+        line_normalized = sql.replace("\r\n", "\n").replace("\r", "\n")
+        normalized = ascii_format_whitespace.sub(
+            " ", line_normalized.strip(ascii_format_edges)
+        )
+        return sha256(normalized.encode("utf-8")).hexdigest()
+
+    return normalized_sha256
+
+
+_sqlite_v1_baseline_normalized_sql_sha256_intrinsic = (
+    _bind_sqlite_v1_baseline_normalized_sql_sha256()
+)
+
+
+def _inject_sqlite_v1_baseline_native_projection_fault_intrinsic(point: str) -> None:
+    faults = _NATIVE_PROJECTION_FAULTS.get()
+    if faults is not None:
+        error = faults.get(point)
+        if error is not None:
+            raise error
+
+
+def _sqlite_v1_baseline_native_projection_graph_parts(
+    adoption: object,
+) -> tuple[object, object, object]:
+    try:
+        return (
+            object.__getattribute__(adoption, "connection"),
+            object.__getattribute__(adoption, "lineage"),
+            object.__getattribute__(adoption, "generation"),
+        )
+    except (AttributeError, TypeError) as error:
+        raise ValueError("GE_SQLITE_P11_NATIVE_PROJECTION_GRAPH") from error
+
+
+class _SQLiteV1BaselineNativeProjectionReceipt:
+    """Opaque proof of one fully exhausted lower-owned 12-family projection."""
+
+    __slots__ = ("__composition", "__projection", "__summary", "__weakref__")
+
+    def __init__(
+        self,
+        _composition: object,
+        _summary: SQLiteV1BaselineSourceSummary,
+        _projection: tuple[BaselineEntryInput, ...],
+        _token: object,
+    ) -> None:
+        raise TypeError("GE_SQLITE_P11_NATIVE_PROJECTION_RECEIPT_CONSTRUCTION")
+
+    def __setattr__(self, _name: str, _value: object) -> Never:
+        _reject_sqlite_v1_baseline_native_projection_receipt_mutation(self)
+
+    def __delattr__(self, _name: str) -> Never:
+        _reject_sqlite_v1_baseline_native_projection_receipt_mutation(self)
+
+
+class _NativeProjectionReadSessionNonce:
+    __slots__ = ()
+
+
+class _SQLiteV1BaselineNativeProjectionReceiptSnapshot(NamedTuple):
+    contract: Literal["sqlite-v1-baseline-native-projection-np1"]
+    route_id: Literal["main.baseline-entries"]
+    lifecycle: Literal["receipt-issued", "consumed", "poisoned"]
+    source_family_count: Literal[12]
+    ordered_sql_sha256: tuple[str, ...]
+    ordered_normalized_sql_sha256: tuple[str, ...]
+    expected_family_counts: tuple[tuple[str, int], ...]
+    observed_family_counts: tuple[tuple[str, int], ...]
+    expected_projection_count: int
+    retained_count: int
+    source_envelope_sha256: str
+    projection_sha256: str
+    logical_native_read_count: Literal[12]
+    prepare_count: Literal[12]
+    terminal_observed_count: Literal[12]
+    cursor_close_attempt_count: Literal[12]
+    cursor_close_return_count: Literal[12]
+    exact_resource_pairing: Literal[True]
+    exact_owner: Literal[True]
+    exact_begin_receipt: Literal[True]
+    exact_composition: Literal[True]
+    exact_connection: Literal[True]
+    exact_lineage: Literal[True]
+    exact_generation: Literal[True]
+    exact_source_summary: Literal[True]
+    exact_read_session: Literal[True]
+    full_exhausted: Literal[True]
+    native_source_provenance: Literal[True]
+    native_projection_authority: Literal[True]
+    genuine_zero_claim: Literal[False]
+    one_shot: Literal[True]
+    actual_native_io_count: None
+    sql_authority: Literal[False]
+
+
+@dataclass(frozen=True, slots=True)
+class _NativeProjectionReceiptRecord:
+    composition_ref: ReferenceType[object]
+    owner_ref: ReferenceType[object]
+    begin_receipt_ref: ReferenceType[object]
+    connection_ref: ReferenceType[SQLiteV1BaselineConnectionOwner]
+    lineage_ref: ReferenceType[object]
+    generation_ref: ReferenceType[object]
+    summary: SQLiteV1BaselineSourceSummary
+    projection: tuple[BaselineEntryInput, ...]
+    ordered_sql_sha256: tuple[str, ...]
+    ordered_normalized_sql_sha256: tuple[str, ...]
+    family_retirements: tuple[_NativeProjectionFamilyRetirement, ...]
+    expected_family_counts: tuple[tuple[str, int], ...]
+    observed_family_counts: tuple[tuple[str, int], ...]
+    source_envelope_sha256: str
+    projection_sha256: str
+    prepare_count: int
+    terminal_observed_count: int
+    cursor_close_attempt_count: int
+    cursor_close_return_count: int
+    read_session_nonce: object
+
+
+@dataclass(frozen=True, slots=True)
+class _NativeProjectionFamilyRetirement:
+    entry_kind: str
+    resource_identity: sqlite3.Cursor
+    raw_sql_sha256: str
+    normalized_sql_sha256: str
+    expected_count: int
+    observed_count: int
+    prepare_count: Literal[1]
+    terminal_count: Literal[1]
+    retirement_attempt_count: Literal[1]
+    retirement_return_count: Literal[1]
+
+
+class _NativeProjectionReceiptEntry(NamedTuple):
+    receipt_ref: ReferenceType[_SQLiteV1BaselineNativeProjectionReceipt]
+    record: _NativeProjectionReceiptRecord
+
+
+def _native_projection_receipt_registry_cell() -> tuple[
+    Callable[
+        [
+            object,
+            SQLiteV1BaselineSourceSummary,
+            tuple[BaselineEntryInput, ...],
+            _NativeProjectionReceiptRecord,
+        ],
+        _SQLiteV1BaselineNativeProjectionReceipt,
+    ],
+    Callable[[object], _NativeProjectionReceiptRecord | None],
+    Callable[[object], str | None],
+    Callable[[object, str, str], bool],
+    Callable[[object], None],
+    Callable[[object], None],
+    Callable[[object], int],
+]:
+    registry: dict[int, _NativeProjectionReceiptEntry] = {}
+    lifecycles: dict[int, Literal["receipt-issued", "consumed", "poisoned"]] = {}
+    receipt_type = _SQLiteV1BaselineNativeProjectionReceipt
+    entry_factory = _NativeProjectionReceiptEntry
+    weak_ref = ref
+    object_new = object.__new__
+    object_setattr = object.__setattr__
+
+    def mint(
+        composition: object,
+        summary: SQLiteV1BaselineSourceSummary,
+        projection: tuple[BaselineEntryInput, ...],
+        record: _NativeProjectionReceiptRecord,
+    ) -> _SQLiteV1BaselineNativeProjectionReceipt:
+        receipt = object_new(receipt_type)
+        object_setattr(
+            receipt,
+            "_SQLiteV1BaselineNativeProjectionReceipt__composition",
+            composition,
+        )
+        object_setattr(
+            receipt, "_SQLiteV1BaselineNativeProjectionReceipt__summary", summary
+        )
+        object_setattr(
+            receipt,
+            "_SQLiteV1BaselineNativeProjectionReceipt__projection",
+            projection,
+        )
+        receipt_id = id(receipt)
+
+        def discard_exact(
+            dead_ref: ReferenceType[_SQLiteV1BaselineNativeProjectionReceipt],
+        ) -> None:
+            entry = registry.get(receipt_id)
+            if entry is not None and entry.receipt_ref is dead_ref:
+                registry.pop(receipt_id, None)
+                lifecycles.pop(receipt_id, None)
+
+        registry[receipt_id] = entry_factory(
+            weak_ref(receipt, discard_exact), record
+        )
+        lifecycles[receipt_id] = "receipt-issued"
+        return receipt
+
+    def lookup(receipt: object) -> _NativeProjectionReceiptRecord | None:
+        entry = registry.get(id(receipt))
+        if entry is None or entry.receipt_ref() is not receipt:
+            return None
+        return entry.record
+
+    def lifecycle_for(receipt: object) -> str | None:
+        if lookup(receipt) is None:
+            return None
+        return lifecycles.get(id(receipt))
+
+    def transition(receipt: object, expected: str, successor: str) -> bool:
+        receipt_id = id(receipt)
+        if lookup(receipt) is None or lifecycles.get(receipt_id) != expected:
+            if receipt_id in lifecycles:
+                lifecycles[receipt_id] = "poisoned"
+            return False
+        if successor not in {"consumed", "poisoned"}:
+            lifecycles[receipt_id] = "poisoned"
+            return False
+        lifecycles[receipt_id] = cast(
+            Literal["receipt-issued", "consumed", "poisoned"], successor
+        )
+        return True
+
+    def poison(receipt: object) -> None:
+        receipt_id = id(receipt)
+        if lookup(receipt) is not None:
+            lifecycles[receipt_id] = "poisoned"
+
+    def abandon(receipt: object) -> None:
+        receipt_id = id(receipt)
+        entry = registry.get(receipt_id)
+        if entry is None or entry.receipt_ref() is not receipt:
+            return
+        lifecycles[receipt_id] = "poisoned"
+        registry.pop(receipt_id, None)
+        lifecycles.pop(receipt_id, None)
+
+    def count_for(composition: object) -> int:
+        return sum(
+            entry.record.composition_ref() is composition for entry in registry.values()
+        )
+
+    return mint, lookup, lifecycle_for, transition, poison, abandon, count_for
+
+
+(
+    _mint_native_projection_receipt,
+    _lookup_native_projection_receipt_record,
+    _native_projection_receipt_lifecycle_for,
+    _transition_native_projection_receipt_lifecycle,
+    _poison_native_projection_receipt,
+    _abandon_native_projection_receipt,
+    _count_native_projection_receipts_for_test,
+) = _native_projection_receipt_registry_cell()
+_install_sqlite_cursor_publication_native_projection_abandoner_intrinsic(
+    _abandon_native_projection_receipt
+)
+
+
+def _native_projection_receipt_record_for_implementation(
+    composition: object,
+    receipt: object,
+    reprove: Callable[[object, object, object], object],
+    lookup_receipt: Callable[[object], _NativeProjectionReceiptRecord | None],
+    source_record_for: Callable[
+        [SQLiteV1BaselineSourceSummary], _NativeProjectionSourceSummaryRecord
+    ],
+    graph_parts: Callable[[object], tuple[object, object, object]],
+    source_is_issued: Callable[
+        [SQLiteV1BaselineSourceSummary, _NativeProjectionSourceSummaryRecord], bool
+    ],
+    canonical_encoder: Callable[[object], bytes],
+    sha256: Callable[[bytes], Any],
+    receipt_type: type[_SQLiteV1BaselineNativeProjectionReceipt],
+    read_session_nonce_type: type[_NativeProjectionReadSessionNonce],
+    object_getattribute: Callable[[object, str], object],
+    poison_receipt: Callable[[object], None],
+    family_retirement_type: type[_NativeProjectionFamilyRetirement],
+    resource_identity_type: type[sqlite3.Cursor],
+) -> _NativeProjectionReceiptRecord:
+    if type(receipt) is not receipt_type:
+        raise ValueError("GE_SQLITE_P11_NATIVE_PROJECTION_RECEIPT_INVALID")
+    record = lookup_receipt(receipt)
+    if record is None:
+        raise ValueError("GE_SQLITE_P11_NATIVE_PROJECTION_RECEIPT_INVALID")
+    registered_composition = record.composition_ref()
+    if registered_composition is not composition:
+        raise ValueError("GE_SQLITE_P11_NATIVE_PROJECTION_RECEIPT_INVALID")
+    try:
+        presented_composition = object_getattribute(
+            receipt, "_SQLiteV1BaselineNativeProjectionReceipt__composition"
+        )
+        presented_summary = object_getattribute(
+            receipt, "_SQLiteV1BaselineNativeProjectionReceipt__summary"
+        )
+        presented_projection = object_getattribute(
+            receipt, "_SQLiteV1BaselineNativeProjectionReceipt__projection"
+        )
+    except BaseException:
+        poison_receipt(receipt)
+        raise
+    if (
+        presented_composition is not composition
+        or presented_summary is not record.summary
+        or presented_projection is not record.projection
+        or record.connection_ref() is not record.summary._connection
+        or len(record.projection)
+        != sum(count for _kind, count in record.expected_family_counts)
+        or record.expected_family_counts != record.observed_family_counts
+        or record.prepare_count != 12
+        or record.terminal_observed_count != 12
+        or record.cursor_close_attempt_count != 12
+        or record.cursor_close_return_count != 12
+        or type(record.read_session_nonce) is not read_session_nonce_type
+        or len(record.family_retirements) != 12
+        or tuple(item.entry_kind for item in record.family_retirements)
+        != tuple(kind for kind, _count in record.expected_family_counts)
+        or tuple(item.raw_sql_sha256 for item in record.family_retirements)
+        != record.ordered_sql_sha256
+        or tuple(item.normalized_sql_sha256 for item in record.family_retirements)
+        != record.ordered_normalized_sql_sha256
+        or len({id(item.resource_identity) for item in record.family_retirements}) != 12
+        or any(
+            type(item) is not family_retirement_type
+            or type(item.resource_identity) is not resource_identity_type
+            or item.expected_count != record.expected_family_counts[index][1]
+            or item.observed_count != record.observed_family_counts[index][1]
+            or item.prepare_count != 1
+            or item.terminal_count != 1
+            or item.retirement_attempt_count != 1
+            or item.retirement_return_count != 1
+            for index, item in enumerate(record.family_retirements)
+        )
+    ):
+        poison_receipt(receipt)
+        raise ValueError("GE_SQLITE_P11_NATIVE_PROJECTION_RECEIPT_INVALID")
+    source_record = source_record_for(record.summary)
+    if not source_is_issued(record.summary, source_record):
+        poison_receipt(receipt)
+        raise ValueError("GE_SQLITE_P11_NATIVE_PROJECTION_RECEIPT_INVALID")
+    recomputed_projection_sha256 = sha256(
+        b"graph-engineering/sqlite-v1-baseline-projection/v1\x00"
+        + canonical_encoder(
+            [
+                {
+                    "entryKind": entry.entry_kind,
+                    "key": entry.key,
+                    "state": entry.state,
+                }
+                for entry in record.projection
+            ]
+        )
+    ).hexdigest()
+    if (
+        record.source_envelope_sha256
+        != sha256(source_record.source_envelope_bytes).hexdigest()
+        or record.projection_sha256 != recomputed_projection_sha256
+    ):
+        poison_receipt(receipt)
+        raise ValueError("GE_SQLITE_P11_NATIVE_PROJECTION_RECEIPT_INVALID")
+    adoption = reprove(
+        record.owner_ref(), record.begin_receipt_ref(), composition
+    )
+    connection, lineage, generation = graph_parts(adoption)
+    if (
+        connection is not record.connection_ref()
+        or lineage is not record.lineage_ref()
+        or generation is not record.generation_ref()
+    ):
+        poison_receipt(receipt)
+        raise ValueError("GE_SQLITE_P11_NATIVE_PROJECTION_RECEIPT_INVALID")
+    return record
+
+
+def _bind_native_projection_receipt_validator() -> Callable[
+    [object, object], _NativeProjectionReceiptRecord
+]:
+    implementation = _native_projection_receipt_record_for_implementation
+    reprove = _invoke_sqlite_cursor_publication_native_projection_reproof_intrinsic
+    lookup_receipt = _lookup_native_projection_receipt_record
+    source_record_for = _native_projection_source_summary_record_for
+    graph_parts = _sqlite_v1_baseline_native_projection_graph_parts
+    source_is_issued = _native_projection_source_summary_is_issued
+    canonical_encoder = canonical_bytes
+    sha256 = hashlib.sha256
+    receipt_type = _SQLiteV1BaselineNativeProjectionReceipt
+    read_session_nonce_type = _NativeProjectionReadSessionNonce
+    object_getattribute = object.__getattribute__
+    poison_receipt = _poison_native_projection_receipt
+    family_retirement_type = _NativeProjectionFamilyRetirement
+    resource_identity_type = _NATIVE_PROJECTION_CURSOR_IDENTITY_TYPE
+
+    def validate(composition: object, receipt: object) -> _NativeProjectionReceiptRecord:
+        return implementation(
+            composition,
+            receipt,
+            reprove,
+            lookup_receipt,
+            source_record_for,
+            graph_parts,
+            source_is_issued,
+            canonical_encoder,
+            sha256,
+            receipt_type,
+            read_session_nonce_type,
+            object_getattribute,
+            poison_receipt,
+            family_retirement_type,
+            resource_identity_type,
+        )
+
+    return validate
+
+
+_native_projection_receipt_record_for = _bind_native_projection_receipt_validator()
+
+
+def _bind_native_projection_receipt_mutation_rejection() -> Callable[
+    [_SQLiteV1BaselineNativeProjectionReceipt], Never
+]:
+    lookup = _lookup_native_projection_receipt_record
+    poison = _poison_native_projection_receipt
+
+    def reject(receipt: _SQLiteV1BaselineNativeProjectionReceipt) -> Never:
+        primary = ValueError("GE_SQLITE_P11_NATIVE_PROJECTION_RECEIPT_INVALID")
+        record = lookup(receipt)
+        if record is not None:
+            poison(receipt)
+        raise primary
+
+    return reject
+
+
+_reject_sqlite_v1_baseline_native_projection_receipt_mutation = (
+    _bind_native_projection_receipt_mutation_rejection()
+)
+
+
+def _produce_sqlite_v1_baseline_native_projection_receipt_implementation(
+    owner: object,
+    begin_receipt: object,
+    composition: object,
+    summary: SQLiteV1BaselineSourceSummary,
+    identity_families: tuple[
+        tuple[BaselineEntryKind, str, Callable[[object], BaselineEntryInput], int], ...
+    ],
+    assert_capture: Callable[[SQLiteV1BaselineSourceSummary], None],
+    require_families: Callable[[SQLiteV1BaselineSourceSummary], None],
+    reconcile_entry: Callable[
+        [SQLiteV1BaselineSourceSummary, BaselineEntryInput, JsonObject], None
+    ],
+    owner_execute: Callable[
+        [SQLiteV1BaselineConnectionOwner, str, tuple[object, ...]],
+        _SQLiteCursorCapability,
+    ],
+    cursor_fetchmany: Callable[
+        [_SQLiteCursorCapability, int], list[tuple[object, ...]]
+    ],
+    cursor_close: Callable[[_SQLiteCursorCapability], None],
+    inject_fault: Callable[[str], None],
+    reprove: Callable[[object, object, object], object],
+    source_record_for: Callable[
+        [SQLiteV1BaselineSourceSummary], _NativeProjectionSourceSummaryRecord
+    ],
+    claim_source: Callable[
+        [SQLiteV1BaselineSourceSummary, _NativeProjectionSourceSummaryRecord], None
+    ],
+    graph_parts: Callable[[object], tuple[object, object, object]],
+    baseline_entry_kinds: tuple[BaselineEntryKind, ...],
+    decode_envelope: Callable[[bytes], JsonObject],
+    canonical_encoder: Callable[[object], bytes],
+    sha256: Callable[[bytes], Any],
+    mint_receipt: Callable[
+        [
+            object,
+            SQLiteV1BaselineSourceSummary,
+            tuple[BaselineEntryInput, ...],
+            _NativeProjectionReceiptRecord,
+        ],
+        _SQLiteV1BaselineNativeProjectionReceipt,
+    ],
+    nonce_factory: Callable[[], object],
+    receipt_record_factory: Callable[..., _NativeProjectionReceiptRecord],
+    weak_ref: Callable[[object], Any],
+    set_failure_telemetry: Callable[
+        [tuple[int, int, int, int] | None], object
+    ],
+    family_retirement_factory: Callable[..., _NativeProjectionFamilyRetirement],
+    cursor_identity_get: Callable[[object, str], object],
+    cursor_identity_type: type[sqlite3.Cursor],
+    normalized_sql_sha256: Callable[[str], str],
+) -> _SQLiteV1BaselineNativeProjectionReceipt:
+    """Drain all fixed source families and mint one exact lower-native receipt.
+
+    No caller-controlled SQL, count, projection, decoder, iterator, cursor, or
+    callback crosses this boundary.  The only data capability is a provenance-
+    registered source summary already bound to its exact connection/generation.
+    """
+
+    exact_summary: SQLiteV1BaselineSourceSummary | None = None
+    source_selected = False
+    prepare_count = 0
+    terminal_observed_count = 0
+    cursor_close_attempt_count = 0
+    cursor_close_return_count = 0
+    set_failure_telemetry(None)
+    try:
+        source_record = source_record_for(summary)
+        exact_summary = summary
+        assert_capture(exact_summary)
+        require_families(exact_summary)
+        if exact_summary._identity_iteration_state.started:
+            raise ValueError("GE_SQLITE_P11_NATIVE_PROJECTION_SOURCE_REPLAY")
+
+        initial_adoption = reprove(owner, begin_receipt, composition)
+        initial_parts = graph_parts(initial_adoption)
+        source_connection = source_record.connection_ref()
+        if source_connection is None or initial_parts[0] is not source_connection:
+            raise ValueError("GE_SQLITE_P11_NATIVE_PROJECTION_SOURCE_CONNECTION")
+        claim_source(exact_summary, source_record)
+        source_selected = True
+
+        def reprove_graph() -> tuple[object, object, object]:
+            checked = reprove(owner, begin_receipt, composition)
+            parts = graph_parts(checked)
+            current_record = source_record_for(exact_summary)
+            if current_record is not source_record or parts[0] is not source_connection:
+                raise ValueError("GE_SQLITE_P11_NATIVE_PROJECTION_SOURCE_CONNECTION")
+            return parts
+
+        reprove_graph()
+        exact_summary._identity_iteration_state.started = True
+        projection: list[BaselineEntryInput] = []
+        observed_counts: list[tuple[str, int]] = []
+        family_retirements: list[_NativeProjectionFamilyRetirement] = []
+        envelope = decode_envelope(source_record.source_envelope_bytes)
+        families = identity_families
+        ordered_sql_sha256 = tuple(
+            sha256(sql.encode("utf-8")).hexdigest()
+            for _kind, sql, _capture, _fetch_size in families
+        )
+        ordered_normalized_sql_sha256 = tuple(
+            normalized_sql_sha256(sql)
+            for _kind, sql, _capture, _fetch_size in families
+        )
+        for family_ordinal, (kind, sql, capture, fetch_size) in enumerate(families):
+            reprove_graph()
+            assert_capture(exact_summary)
+            cursor: _SQLiteCursorCapability | None = None
+            family_primary: BaseException | None = None
+            resource_identity: sqlite3.Cursor | None = None
+            emitted = 0
+            try:
+                inject_fault(f"prepare-before:{kind}")
+                reprove_graph()
+                cursor = owner_execute(source_connection, sql, ())
+                candidate_identity = cursor_identity_get(
+                    cursor, "_SQLiteCursorCapability__cursor"
+                )
+                if type(candidate_identity) is not cursor_identity_type:
+                    raise ValueError(
+                        "GE_SQLITE_P11_NATIVE_PROJECTION_RESOURCE_PAIRING"
+                    )
+                resource_identity = candidate_identity
+                prepare_count += 1
+                reprove_graph()
+                inject_fault(f"prepare-after:{kind}")
+                while True:
+                    inject_fault(f"fetch-before:{kind}")
+                    reprove_graph()
+                    assert_capture(exact_summary)
+                    rows = cursor_fetchmany(cursor, fetch_size)
+                    reprove_graph()
+                    inject_fault(f"fetch-after:{kind}")
+                    if not rows:
+                        inject_fault(f"terminal-before:{kind}")
+                        reprove_graph()
+                        terminal_observed_count += 1
+                        reprove_graph()
+                        inject_fault(f"terminal-after:{kind}")
+                        break
+                    for row in rows:
+                        inject_fault(f"decode-before:{kind}:{emitted}")
+                        inject_fault(f"decode-before:{kind}")
+                        reprove_graph()
+                        assert_capture(exact_summary)
+                        reprove_graph()
+                        entry = capture(row)
+                        reconcile_entry(exact_summary, entry, envelope)
+                        reprove_graph()
+                        inject_fault(f"decode-after:{kind}")
+                        inject_fault(f"decode-after:{kind}:{emitted}")
+                        projection.append(entry)
+                        emitted += 1
+                expected_for_kind = dict(source_record.counts_tuple)[kind]
+                if emitted != expected_for_kind:
+                    raise ValueError(
+                        f"GE_SQLITE_P11_NATIVE_PROJECTION_{kind.upper()}_COUNT"
+                    )
+            except BaseException as error:
+                family_primary = error
+            finally:
+                if cursor is not None:
+                    try:
+                        inject_fault(f"close-before:{kind}")
+                    except BaseException as boundary_error:
+                        if family_primary is None:
+                            family_primary = boundary_error
+                    try:
+                        reprove_graph()
+                    except BaseException as boundary_error:
+                        if family_primary is None:
+                            family_primary = boundary_error
+                    cursor_close_attempt_count += 1
+                    try:
+                        cursor_close(cursor)
+                        cursor_close_return_count += 1
+                    except BaseException as close_error:
+                        if family_primary is None:
+                            family_primary = close_error
+                    try:
+                        reprove_graph()
+                    except BaseException as boundary_error:
+                        if family_primary is None:
+                            family_primary = boundary_error
+                    try:
+                        inject_fault(f"close-after:{kind}")
+                    except BaseException as boundary_error:
+                        if family_primary is None:
+                            family_primary = boundary_error
+            if family_primary is not None:
+                raise family_primary
+            observed_counts.append((kind, emitted))
+            if resource_identity is None:
+                raise ValueError("GE_SQLITE_P11_NATIVE_PROJECTION_RESOURCE_PAIRING")
+            family_retirements.append(
+                family_retirement_factory(
+                    kind,
+                    resource_identity,
+                    ordered_sql_sha256[family_ordinal],
+                    ordered_normalized_sql_sha256[family_ordinal],
+                    dict(source_record.counts_tuple)[kind],
+                    emitted,
+                    1,
+                    1,
+                    1,
+                    1,
+                )
+            )
+            reprove_graph()
+        retained_projection = tuple(projection)
+        expected_counts = tuple(
+            source_record.counts_tuple
+        )
+        observed_family_counts = tuple(observed_counts)
+        if (
+            tuple(kind for kind, _count in observed_family_counts) != baseline_entry_kinds
+            or observed_family_counts != expected_counts
+            or len(retained_projection) != source_record.expected_entry_count
+            or prepare_count != 12
+            or terminal_observed_count != 12
+            or cursor_close_attempt_count != 12
+            or cursor_close_return_count != 12
+        ):
+            raise ValueError("GE_SQLITE_P11_NATIVE_PROJECTION_CONSERVATION")
+        exact_summary._identity_iteration_state.completed = True
+        _adoption_connection, adoption_lineage, adoption_generation = reprove_graph()
+        inject_fault("digest-before")
+        projection_sha256 = sha256(
+            b"graph-engineering/sqlite-v1-baseline-projection/v1\x00"
+            + canonical_encoder(
+                [
+                    {
+                        "entryKind": entry.entry_kind,
+                        "key": entry.key,
+                        "state": entry.state,
+                    }
+                    for entry in retained_projection
+                ]
+            )
+        ).hexdigest()
+        inject_fault("digest-after")
+        inject_fault("mint-before")
+        receipt_record = receipt_record_factory(
+                weak_ref(composition),
+                weak_ref(owner),
+                weak_ref(begin_receipt),
+                weak_ref(exact_summary._connection),
+                weak_ref(adoption_lineage),
+                weak_ref(adoption_generation),
+                exact_summary,
+                retained_projection,
+                ordered_sql_sha256,
+                ordered_normalized_sql_sha256,
+                tuple(family_retirements),
+                expected_counts,
+                observed_family_counts,
+                sha256(source_record.source_envelope_bytes).hexdigest(),
+                projection_sha256,
+                prepare_count,
+                terminal_observed_count,
+                cursor_close_attempt_count,
+                cursor_close_return_count,
+                nonce_factory(),
+            )
+        receipt = mint_receipt(
+            composition,
+            exact_summary,
+            retained_projection,
+            receipt_record,
+        )
+        inject_fault("mint-after")
+        return receipt
+    except BaseException as primary:
+        set_failure_telemetry(
+            (
+                prepare_count,
+                terminal_observed_count,
+                cursor_close_attempt_count,
+                cursor_close_return_count,
+            )
+        )
+        if exact_summary is not None and source_selected:
+            with suppress(BaseException):
+                exact_summary._identity_iteration_state.poisoned = True
+        raise primary
+
+
+def _bind_sqlite_v1_baseline_native_projection_producer(
+    implementation: Callable[..., _SQLiteV1BaselineNativeProjectionReceipt],
+) -> Callable[
+    [object, object, object, object], object,
+]:
+    identity_families = _NATIVE_PROJECTION_IDENTITY_FAMILIES
+    assert_capture = _NATIVE_PROJECTION_ASSERT_CAPTURE
+    require_families = _NATIVE_PROJECTION_REQUIRE_FAMILIES
+    reconcile_entry = _NATIVE_PROJECTION_RECONCILE_ENTRY
+    owner_execute = _NATIVE_PROJECTION_OWNER_EXECUTE
+    cursor_fetchmany = _NATIVE_PROJECTION_CURSOR_FETCHMANY
+    cursor_close = _NATIVE_PROJECTION_CURSOR_CLOSE
+    inject_fault = _inject_sqlite_v1_baseline_native_projection_fault_intrinsic
+    reprove = _invoke_sqlite_cursor_publication_native_projection_reproof_intrinsic
+    source_record_for = _native_projection_source_summary_record_for
+    claim_source = _claim_native_projection_source_summary
+    graph_parts = _sqlite_v1_baseline_native_projection_graph_parts
+    baseline_entry_kinds = BASELINE_ENTRY_KINDS
+    json_loads = json.loads
+    canonical_encoder = canonical_bytes
+    sha256 = hashlib.sha256
+    mint_receipt = _mint_native_projection_receipt
+    nonce_factory = _NativeProjectionReadSessionNonce
+    receipt_record_factory = _NativeProjectionReceiptRecord
+    weak_ref = ref
+    set_failure_telemetry = _NATIVE_PROJECTION_LAST_FAILURE_TELEMETRY.set
+    summary_type = SQLiteV1BaselineSourceSummary
+    provenance_error_factory = SQLiteV1BaselineNativeProjectionProvenanceError
+    family_retirement_factory = _NativeProjectionFamilyRetirement
+    cursor_identity_get = _NATIVE_PROJECTION_CURSOR_IDENTITY_GET
+    cursor_identity_type = _NATIVE_PROJECTION_CURSOR_IDENTITY_TYPE
+
+    normalized_sql_sha256 = _sqlite_v1_baseline_normalized_sql_sha256_intrinsic
+
+    def decode_envelope(value: bytes) -> JsonObject:
+        decoded = json_loads(value)
+        if type(decoded) is not dict:
+            raise ValueError("GE_SQLITE_P11_NATIVE_PROJECTION_SOURCE_PROVENANCE")
+        return cast(JsonObject, decoded)
+
+    def produce(
+        owner: object,
+        begin_receipt: object,
+        composition: object,
+        summary: object,
+    ) -> object:
+        if type(summary) is not summary_type:
+            raise provenance_error_factory()
+        return implementation(
+            owner,
+            begin_receipt,
+            composition,
+            summary,
+            identity_families,
+            assert_capture,
+            require_families,
+            reconcile_entry,
+            owner_execute,
+            cursor_fetchmany,
+            cursor_close,
+            inject_fault,
+            reprove,
+            source_record_for,
+            claim_source,
+            graph_parts,
+            baseline_entry_kinds,
+            decode_envelope,
+            canonical_encoder,
+            sha256,
+            mint_receipt,
+            nonce_factory,
+            receipt_record_factory,
+            weak_ref,
+            set_failure_telemetry,
+            family_retirement_factory,
+            cursor_identity_get,
+            cursor_identity_type,
+            normalized_sql_sha256,
+        )
+
+    return produce
+
+
+_install_sqlite_cursor_publication_native_projection_producer_intrinsic(
+    _bind_sqlite_v1_baseline_native_projection_producer(
+        _produce_sqlite_v1_baseline_native_projection_receipt_implementation
+    )
+)
+
+
+def _read_sqlite_v1_baseline_native_projection_receipt_snapshot_implementation(
+    composition: object,
+    receipt: object,
+    validate: Callable[[object, object], _NativeProjectionReceiptRecord],
+    lifecycle_for: Callable[[object], str | None],
+    snapshot_factory: Callable[..., _SQLiteV1BaselineNativeProjectionReceiptSnapshot],
+) -> _SQLiteV1BaselineNativeProjectionReceiptSnapshot:
+    record = validate(composition, receipt)
+    lifecycle = lifecycle_for(receipt)
+    if lifecycle not in {"receipt-issued", "consumed", "poisoned"}:
+        raise ValueError("GE_SQLITE_P11_NATIVE_PROJECTION_RECEIPT_INVALID")
+    return snapshot_factory(
+        "sqlite-v1-baseline-native-projection-np1",
+        "main.baseline-entries",
+        lifecycle,
+        12,
+        record.ordered_sql_sha256,
+        record.ordered_normalized_sql_sha256,
+        record.expected_family_counts,
+        record.observed_family_counts,
+        sum(count for _kind, count in record.expected_family_counts),
+        len(record.projection),
+        record.source_envelope_sha256,
+        record.projection_sha256,
+        12,
+        12,
+        12,
+        12,
+        12,
+        True,
+        True,
+        True,
+        True,
+        True,
+        True,
+        True,
+        True,
+        True,
+        True,
+        True,
+        True,
+        False,
+        True,
+        None,
+        False,
+    )
+
+
+def _consume_sqlite_v1_baseline_native_projection_receipt_implementation(
+    composition: object,
+    receipt: object,
+    validate: Callable[[object, object], _NativeProjectionReceiptRecord],
+    transition: Callable[[object, str, str], bool],
+) -> int:
+    record = validate(composition, receipt)
+    if not transition(receipt, "receipt-issued", "consumed"):
+        raise ValueError("GE_SQLITE_P11_NATIVE_PROJECTION_RECEIPT_REPLAY")
+    return len(record.projection)
+
+
+def _bind_native_projection_receipt_views() -> tuple[
+    Callable[
+        [object, object], _SQLiteV1BaselineNativeProjectionReceiptSnapshot
+    ],
+    Callable[[object, object], int],
+]:
+    validate = _native_projection_receipt_record_for
+    lifecycle_for = _native_projection_receipt_lifecycle_for
+    transition = _transition_native_projection_receipt_lifecycle
+    snapshot_factory = _SQLiteV1BaselineNativeProjectionReceiptSnapshot
+    snapshot_implementation = (
+        _read_sqlite_v1_baseline_native_projection_receipt_snapshot_implementation
+    )
+    consume_implementation = (
+        _consume_sqlite_v1_baseline_native_projection_receipt_implementation
+    )
+
+    def snapshot(
+        composition: object, receipt: object
+    ) -> _SQLiteV1BaselineNativeProjectionReceiptSnapshot:
+        return snapshot_implementation(
+            composition, receipt, validate, lifecycle_for, snapshot_factory
+        )
+
+    def consume(composition: object, receipt: object) -> int:
+        return consume_implementation(composition, receipt, validate, transition)
+
+    return snapshot, consume
+
+
+(
+    _read_sqlite_v1_baseline_native_projection_receipt_snapshot_intrinsic,
+    _consume_sqlite_v1_baseline_native_projection_receipt_intrinsic,
+) = _bind_native_projection_receipt_views()
+_install_sqlite_cursor_publication_native_projection_receipt_views_intrinsic(
+    _read_sqlite_v1_baseline_native_projection_receipt_snapshot_intrinsic,
+    _consume_sqlite_v1_baseline_native_projection_receipt_intrinsic,
+)
+
+globals().pop("_mint_native_projection_receipt", None)
+globals().pop("_lookup_native_projection_receipt_record", None)
+globals().pop("_native_projection_receipt_lifecycle_for", None)
+globals().pop("_transition_native_projection_receipt_lifecycle", None)
+globals().pop("_poison_native_projection_receipt", None)
+globals().pop("_abandon_native_projection_receipt", None)
+globals().pop("_native_projection_receipt_record_for", None)
+globals().pop("_native_projection_receipt_record_for_implementation", None)
+globals().pop("_register_native_projection_source_summary", None)
+globals().pop("_native_projection_source_summary_record_for", None)
+globals().pop("_claim_native_projection_source_summary", None)
+globals().pop("_native_projection_source_summary_is_issued", None)
+globals().pop("_NATIVE_PROJECTION_CONSTRUCTION_TOKEN", None)
+globals().pop("_NATIVE_PROJECTION_IDENTITY_FAMILIES", None)
+globals().pop("_NATIVE_PROJECTION_ASSERT_CAPTURE", None)
+globals().pop("_NATIVE_PROJECTION_REQUIRE_FAMILIES", None)
+globals().pop("_NATIVE_PROJECTION_RECONCILE_ENTRY", None)
+globals().pop("_NATIVE_PROJECTION_OWNER_EXECUTE", None)
+globals().pop("_NATIVE_PROJECTION_CURSOR_FETCHMANY", None)
+globals().pop("_NATIVE_PROJECTION_CURSOR_CLOSE", None)
+globals().pop("_NativeProjectionSourceSummaryRecord", None)
+globals().pop("_NativeProjectionReceiptRecord", None)
+globals().pop("_NativeProjectionReceiptEntry", None)
+globals().pop("_SQLiteV1BaselineNativeProjectionReceipt", None)
+globals().pop("_NativeProjectionReadSessionNonce", None)
+globals().pop("_NativeProjectionFamilyRetirement", None)
+globals().pop("_NATIVE_PROJECTION_CURSOR_IDENTITY_GET", None)
+globals().pop("_NATIVE_PROJECTION_CURSOR_IDENTITY_TYPE", None)
+globals().pop("_consume_sqlite_v1_baseline_native_projection_receipt_intrinsic", None)
+globals().pop("_native_projection_source_summary_registry_cell", None)
+globals().pop("_native_projection_receipt_registry_cell", None)
+globals().pop("_bind_native_projection_receipt_validator", None)
+globals().pop("_bind_native_projection_receipt_mutation_rejection", None)
+globals().pop("_bind_sqlite_v1_baseline_native_projection_producer", None)
+globals().pop("_produce_sqlite_v1_baseline_native_projection_receipt_implementation", None)
+globals().pop("_bind_native_projection_receipt_views", None)
+globals().pop("_read_sqlite_v1_baseline_native_projection_receipt_snapshot_implementation", None)
+globals().pop("_consume_sqlite_v1_baseline_native_projection_receipt_implementation", None)
+globals().pop("_register_sqlite_v1_baseline_source_summary", None)
+globals().pop("_bind_sqlite_v1_baseline_source_summary_capture", None)
+globals().pop("_capture_sqlite_v1_baseline_source_summary_implementation", None)
+globals().pop("_bind_sqlite_v1_baseline_normalized_sql_sha256", None)
+globals().pop(
+    "_install_sqlite_cursor_publication_native_projection_abandoner_intrinsic", None
+)
+globals().pop(
+    "_install_sqlite_cursor_publication_native_projection_producer_intrinsic", None
+)
+globals().pop(
+    "_install_sqlite_cursor_publication_native_projection_receipt_views_intrinsic",
+    None,
+)
+globals().pop(
+    "_invoke_sqlite_cursor_publication_native_projection_reproof_intrinsic", None
+)

@@ -1,6 +1,8 @@
 import { canonicalSerialize } from "@graph-engineering/core";
 import type { JsonValue } from "./types.js";
 
+const objectFreezeIntrinsic = Object.freeze;
+
 function assertPortableNumbers(value: JsonValue): void {
   if (typeof value === "number") {
     if (Number.isInteger(value) && !Number.isSafeInteger(value)) {
@@ -15,7 +17,7 @@ function assertPortableNumbers(value: JsonValue): void {
 function deepFreeze(value: JsonValue): JsonValue {
   if (typeof value !== "object" || value === null) return value;
   for (const child of Object.values(value)) deepFreeze(child);
-  return Object.freeze(value);
+  return objectFreezeIntrinsic(value);
 }
 
 /**

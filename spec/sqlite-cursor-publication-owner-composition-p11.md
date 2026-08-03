@@ -9,11 +9,20 @@ Machine-readable companions:
 - `spec/sqlite-cursor-publication-owner-composition-p11.routes.json`
 - `spec/sqlite-cursor-publication-owner-composition-p11.stages.json`
 - `spec/sqlite-cursor-publication-owner-composition-p11.callsites.json`
+- `spec/conformance/sqlite-cursor-publication-native-projection-np1.schema.json`
+- `spec/conformance/sqlite-cursor-publication-native-projection-np1.validate.mjs`
+- `spec/conformance/sqlite-cursor-publication-native-projection-np1.test.mjs`
 
 The normative design inputs are append-only master-plan sections 31.37.81,
 31.37.82, and 31.37.84. Later corrections win: 31.37.84 overrides resource
 retirement and EQP-count wording in 31.37.82, and 31.37.82/84 override the
-initial design in 31.37.81. Existing P8, P9, and P10 fixtures remain immutable.
+initial design in 31.37.81. The bounded NP1 tranche additionally follows
+31.37.98 through 31.37.104: 31.37.101 freezes the runtime-specific acyclic
+topologies, 31.37.102 adds executable reporter and fault-matrix gates, and
+31.37.103 corrects portable SQL normalization to the exact ASCII formatting
+whitespace set. Section 31.37.104 distinguishes zero surviving failure
+authority from truthful runtime-local historical mint/consume transitions.
+Existing P8, P9, and P10 fixtures remain immutable.
 
 ## 1. Purpose and hard boundary
 
@@ -661,14 +670,23 @@ epochs, paths, counts, digests, or structurally equal objects are insufficient.
 The source summary is accepted only if it is the exact live summary registered
 by the baseline-source capture operation for that connection and transaction.
 
-The dependency direction is acyclic: baseline-source may import the
-transaction-owner's exact composition/connection reproof; owner-composition
-may import both; transaction-owner does not import baseline-source. The source
-retrieves the hidden connection from its exact summary registry and presents it
-with owner, BEGIN receipt, and composition to that reproof before any native
-projection I/O. A source-only drain followed by post-hoc owner adoption is
-forbidden because it would leave the read itself outside the authenticated
-graph.
+The dependency direction is acyclic in each runtime. TypeScript may import the
+transaction-owner's exact composition/connection reproof directly from the
+baseline-source module. Python's transaction-owner already captures the exact
+baseline connection-owner class at definition time, so Python uses a separate
+import-leaf bridge with no source, owner-composition, or transaction-owner
+business dependency. The transaction owner installs the exact reproof once;
+the source captures the leaf invocation closure at definition time; replay or
+missing installation fails closed. This runtime-local topology difference does
+not change the portable authority graph.
+
+In both runtimes the source retrieves the hidden connection from its exact
+summary registry and presents it with owner, BEGIN receipt, and composition to
+the reproof before any native projection I/O and around every native boundary.
+There is no direct source/owner-composition import cycle and no dynamically
+replaceable reproof lookup. A source-only drain followed by post-hoc owner
+adoption is forbidden because it would leave the read itself outside the
+authenticated graph.
 
 Every boundary before and after prepare, native row return, decode, terminal
 observation, resource retirement, receipt mint, and receipt consumption
@@ -739,18 +757,33 @@ consume again, or cross into another composition. Terminal cleanup tombstones
 private registry entries without making integer object IDs an authority.
 
 The normalized portable report includes contract/case IDs, route, source
-family count, ordered SQL digest, expected and observed count vectors, expected
+family count, ordered normalized SQL digest, expected and observed count vectors, expected
 and retained totals, projection digest, logical native reads, prepare/decode/
 terminal counts, normalized retirement, receipt lifecycle, exact binding
 booleans, count provenance, authority flags, cleanup counts, and primary
 preservation. Runtime-local output separately names TypeScript iterator/lexical
-release or Python cursor close details.
+release or Python cursor close details and retains the twelve raw SQL digests.
+For portable comparison, each runtime converts CRLF or CR to LF, trims only
+ASCII SQL formatting whitespace (`U+0009` through `U+000D` and `U+0020`),
+collapses each run of exactly that set to one ASCII space, hashes those UTF-8
+bytes with SHA-256, and preserves every other Unicode scalar and the canonical
+family order. The conformance
+validator binds the resulting vector to a frozen expected inventory rather than
+trusting two reporters merely because they agree with each other.
 
 A failure report has null projection count and digest, receipt mint/consume
 counts zero, the exact failed stage, bounded resource evidence, and P9 cleanup.
 It cannot normalize a failed or partial read as empty success. TypeScript runs
 the Python reporter twice; both portable reports are byte-identical and equal,
 while runtime-local evidence remains truthful to each driver.
+
+Before normalization, each reporter must match its runtime's exact structured
+error class, stable code, message, and P9 counters. The native codes are
+runtime-specific (`GE_CYCLE_STORE_INVALID_ARGUMENT` in TypeScript and
+`GE_SQLITE_P11_NATIVE_PROJECTION_SOURCE_PROVENANCE` in Python); portable parity
+maps both only after that proof to the canonical
+`pre-native-source-conservation` failed stage. A caller-provided stage string
+cannot substitute for either runtime-local structured check.
 
 NP1 tests include `baseline-dynamic-0-total-3`,
 `baseline-dynamic-1-total-4`, and `baseline-dynamic-3-total-6` success cases;

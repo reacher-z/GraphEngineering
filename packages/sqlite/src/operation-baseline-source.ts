@@ -1,5 +1,6 @@
 import { Buffer } from "node:buffer";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
+import { isProxy } from "node:util/types";
 
 import { canonicalHash, canonicalSerialize } from "@graph-engineering/core";
 import {
@@ -41,8 +42,25 @@ import {
 } from "./sqlite-codec.js";
 import {
   SQLiteConnection,
+  iterateSQLiteStatementNativeIntrinsic,
+  nextSQLiteStatementIteratorNativeIntrinsic,
+  prepareSQLiteConnectionIntrinsic,
   readSQLiteConnectionOwnerSnapshot,
+  readSQLiteConnectionTotalChangesSnapshot,
+  returnSQLiteStatementIteratorNativeIntrinsic,
 } from "./sqlite-connection.js";
+import {
+  assertSQLiteCursorPublicationOwnerCompositionConnectionIntrinsic,
+  captureSQLiteCursorPublicationTransactionFailureIntrinsic,
+  finalizeSQLiteCursorPublicationTransactionFailureIntrinsic,
+  readSQLiteCursorPublicationTransactionOwnerSnapshotIntrinsic,
+  type SQLiteCursorPublicationTransactionBeginReceipt,
+  type SQLiteCursorPublicationTransactionOwner,
+} from "./cursor-publication-transaction-owner.js";
+import {
+  consumeSQLiteCursorPublicationNativeProjectionIntrinsic,
+  hasSQLiteCursorPublicationNativeProjectionConsumerIntrinsic,
+} from "./cursor-publication-native-projection-bridge.js";
 import {
   SQLITE_ALPHA_V0_TO_V1_SQL_SHA256,
   SQLITE_SCHEMA_IDENTITY_SHA256,
@@ -52,6 +70,43 @@ import { SQLITE_CYCLE_STORE_DESCRIPTOR_HASH } from "./sqlite-profile.js";
 
 const OPERATION = "inspect-schema" as const;
 const MAX_SAFE_BIGINT = BigInt(Number.MAX_SAFE_INTEGER);
+const SQLITE_V1_BASELINE_NATIVE_PROJECTION_DOMAIN =
+  "graph-engineering/sqlite-v1-baseline-projection/v1\0" as const;
+const SQLITE_V1_BASELINE_READ_SESSION_DOMAIN =
+  "graph-engineering/sqlite-v1-baseline-read-session/v1\0" as const;
+// Capture every lower native bridge at definition time.  The projection path
+// must not consult a replaceable instance/prototype export after authority has
+// been established.
+const prepareSQLiteConnectionDefinitionIntrinsic = prepareSQLiteConnectionIntrinsic;
+const iterateSQLiteStatementDefinitionIntrinsic = iterateSQLiteStatementNativeIntrinsic;
+const nextSQLiteStatementIteratorDefinitionIntrinsic =
+  nextSQLiteStatementIteratorNativeIntrinsic;
+const returnSQLiteStatementIteratorDefinitionIntrinsic =
+  returnSQLiteStatementIteratorNativeIntrinsic;
+const randomBytesDefinitionIntrinsic = randomBytes;
+const reflectApplyDefinitionIntrinsic = Reflect.apply;
+const objectCreateDefinitionIntrinsic = Object.create;
+const objectFreezeDefinitionIntrinsic = Object.freeze;
+const objectFromEntriesDefinitionIntrinsic = Object.fromEntries;
+const arrayFilterDefinitionIntrinsic = Array.prototype.filter;
+const arrayFindIndexDefinitionIntrinsic = Array.prototype.findIndex;
+const arrayMapDefinitionIntrinsic = Array.prototype.map;
+const arrayPushDefinitionIntrinsic = Array.prototype.push;
+const arrayReduceDefinitionIntrinsic = Array.prototype.reduce;
+const arraySliceDefinitionIntrinsic = Array.prototype.slice;
+const arraySomeDefinitionIntrinsic = Array.prototype.some;
+const mapConstructorDefinitionIntrinsic = Map;
+const mapGetDefinitionIntrinsic = Map.prototype.get;
+const mapSetDefinitionIntrinsic = Map.prototype.set;
+const setConstructorDefinitionIntrinsic = Set;
+const setAddDefinitionIntrinsic = Set.prototype.add;
+const setHasDefinitionIntrinsic = Set.prototype.has;
+const weakMapGetDefinitionIntrinsic = WeakMap.prototype.get;
+const weakMapSetDefinitionIntrinsic = WeakMap.prototype.set;
+const consumeSQLiteCursorPublicationNativeProjectionDefinitionIntrinsic =
+  consumeSQLiteCursorPublicationNativeProjectionIntrinsic;
+const hasSQLiteCursorPublicationNativeProjectionConsumerDefinitionIntrinsic =
+  hasSQLiteCursorPublicationNativeProjectionConsumerIntrinsic;
 
 export type SQLiteV1BaselineCounts = Readonly<Record<OperationBaselineEntryKind, number>>;
 
@@ -93,13 +148,230 @@ export interface SQLiteV1BaselineSourceSummary {
   readonly entries: () => Generator<OperationBaselineEntryInput, void, undefined>;
 }
 
+export interface SQLiteV1BaselineLowerOwnedNativeProjection {
+  readonly __sqliteV1BaselineLowerOwnedNativeProjection: never;
+}
+
+export interface SQLiteV1BaselineNativeFamilyRetirementSnapshot {
+  readonly entryKind: OperationBaselineEntryKind;
+  readonly expectedCount: number;
+  readonly observedCount: number;
+  readonly terminalObserved: true;
+  readonly retirementKind: "iterator-return" | "lexical-release";
+  readonly retirementAttemptCount: 1;
+  readonly retirementSuccessCount: 1;
+  readonly prepareCount: 1;
+  readonly terminalCount: 1;
+  readonly sqlSha256: string;
+  readonly normalizedSqlSha256: string;
+}
+
+export interface SQLiteV1BaselineLowerOwnedNativeProjectionSnapshot {
+  readonly routeId: "main.baseline-entries";
+  readonly sourceDomain: "sqlite-v1-baseline-source";
+  readonly lifecycle: "retired" | "adopted";
+  readonly expectedProjectionCount: number;
+  readonly retainedCount: number;
+  readonly projectionSha256: string;
+  readonly sourceEnvelopeSha256: string;
+  readonly sourceSummarySha256: string;
+  readonly readSessionSha256: string;
+  readonly exactReadSession: true;
+  readonly exactResourcePairing: true;
+  readonly nativeSourceProvenance: true;
+  readonly fullExhausted: true;
+  readonly exactSourceConnection: true;
+  readonly familyCount: 12;
+  readonly familyRetirements: readonly SQLiteV1BaselineNativeFamilyRetirementSnapshot[];
+  readonly genuineZeroClaim: false;
+  readonly logicalNativeReadCount: 12;
+  readonly physicalNativeIoCountClaimed: false;
+  readonly sqlAuthority: false;
+  readonly exactOwner: true;
+  readonly exactBeginReceipt: true;
+  readonly exactComposition: true;
+  readonly exactTransactionLineage: true;
+  readonly exactTransactionGeneration: true;
+}
+
+interface MutableNativeFamilyRetirement {
+  readonly entryKind: OperationBaselineEntryKind;
+  readonly expectedCount: number;
+  observedCount: number;
+  terminalObserved: boolean;
+  readonly retirementKind: "iterator-return" | "lexical-release";
+  retirementAttemptCount: number;
+  retirementSuccessCount: number;
+  prepareCount: number;
+  terminalCount: number;
+  sqlSha256: string | undefined;
+  normalizedSqlSha256: string | undefined;
+  readonly resourceIdentity: object;
+  statementIdentity: object | undefined;
+  iteratorIdentity: object | undefined;
+  retiredIteratorIdentity: object | undefined;
+}
+
+interface SQLiteV1BaselineNativeDrainResult {
+  readonly entries: readonly OperationBaselineEntryInput[];
+  readonly familyRetirements: readonly SQLiteV1BaselineNativeFamilyRetirementSnapshot[];
+  readonly resourceIdentities: readonly object[];
+}
+
+function nativeRetirementFor(
+  retirements: ReadonlyMap<OperationBaselineEntryKind, MutableNativeFamilyRetirement> | undefined,
+  entryKind: OperationBaselineEntryKind,
+): MutableNativeFamilyRetirement | undefined {
+  return retirements === undefined
+    ? undefined
+    : reflectApplyDefinitionIntrinsic(mapGetDefinitionIntrinsic, retirements, [entryKind]) as
+      MutableNativeFamilyRetirement | undefined;
+}
+
 /** Private registry state for one exact summary returned by this module. */
 interface SQLiteV1BaselineCapturedSourceState {
   readonly connection: SQLiteConnection;
   readonly transactionEpoch: bigint;
+  readonly nativeDrain: (reprove: () => void) => SQLiteV1BaselineNativeDrainResult;
 }
 
 const CAPTURED_CURSOR_SOURCES = new WeakMap<object, SQLiteV1BaselineCapturedSourceState>();
+const LOWER_OWNED_NATIVE_PROJECTIONS = new WeakMap<object, {
+  readonly connection: SQLiteConnection;
+  readonly sourceSummary: SQLiteV1BaselineSourceSummary;
+  readonly owner: SQLiteCursorPublicationTransactionOwner;
+  readonly beginReceipt: SQLiteCursorPublicationTransactionBeginReceipt;
+  readonly composition: object;
+  readonly transactionEpoch: bigint;
+  readonly retainedEntries: readonly OperationBaselineEntryInput[];
+  readonly resourceIdentities: readonly object[];
+  readonly readSessionIdentity: object;
+  readonly snapshot: SQLiteV1BaselineLowerOwnedNativeProjectionSnapshot;
+  adopted: boolean;
+}>();
+
+export type SQLiteV1BaselineNativeProjectionFaultPoint =
+  | "prepare-before" | "prepare-after"
+  | "next-before" | "next-after"
+  | "decode-before" | "decode-after"
+  | "terminal-before" | "terminal-after"
+  | "retirement-reproof-before" | "return" | "retirement-reproof-after"
+  | "hash-before" | "hash-after"
+  | "mint-before" | "mint-after";
+
+export interface SQLiteV1BaselineNativeProjectionFaultForTest {
+  readonly point: SQLiteV1BaselineNativeProjectionFaultPoint;
+  readonly error: object;
+  readonly family?: OperationBaselineEntryKind;
+  readonly rowOrdinal?: number;
+}
+
+let nativeProjectionFaultsForTest: readonly Readonly<
+  SQLiteV1BaselineNativeProjectionFaultForTest
+>[] | undefined;
+export interface SQLiteV1BaselineNativeProjectionFailureTelemetryForTest {
+  readonly nativeReturnAttemptCount: number;
+  readonly nativeReturnSuccessCount: number;
+  readonly secondaryFailureCount: number;
+}
+let currentNativeProjectionFailureTelemetryForTest: {
+  nativeReturnAttemptCount: number;
+  nativeReturnSuccessCount: number;
+  secondaryFailureCount: number;
+} | undefined;
+let lastNativeProjectionFailureTelemetryForTest:
+SQLiteV1BaselineNativeProjectionFailureTelemetryForTest | undefined;
+
+function retainNativeProjectionPrimary(
+  primary: { readonly present: boolean; readonly value: unknown },
+  error: unknown,
+): { readonly present: boolean; readonly value: unknown } {
+  if (!primary.present) return { present: true, value: error };
+  if (currentNativeProjectionFailureTelemetryForTest !== undefined) {
+    currentNativeProjectionFailureTelemetryForTest.secondaryFailureCount += 1;
+  }
+  return primary;
+}
+
+export function readSQLiteV1BaselineNativeProjectionFailureTelemetryForTestIntrinsic():
+SQLiteV1BaselineNativeProjectionFailureTelemetryForTest | undefined {
+  return lastNativeProjectionFailureTelemetryForTest;
+}
+
+function maybeThrowNativeProjectionFaultForTest(
+  point: SQLiteV1BaselineNativeProjectionFaultPoint,
+  retirement?: MutableNativeFamilyRetirement,
+  rowOrdinal?: number,
+): void {
+  const faults = nativeProjectionFaultsForTest;
+  const index = faults === undefined
+    ? -1
+    : reflectApplyDefinitionIntrinsic(
+      arrayFindIndexDefinitionIntrinsic,
+      faults,
+      [(fault: SQLiteV1BaselineNativeProjectionFaultForTest) => fault.point === point
+        && (fault.family === undefined || fault.family === retirement?.entryKind)
+        && (fault.rowOrdinal === undefined || fault.rowOrdinal === rowOrdinal)],
+    ) as number;
+  if (faults === undefined || index < 0) return;
+  const fault = faults[index]!;
+  const remaining = reflectApplyDefinitionIntrinsic(
+    arrayFilterDefinitionIntrinsic,
+    faults,
+    [(_value: SQLiteV1BaselineNativeProjectionFaultForTest, ordinal: number) => ordinal !== index],
+  ) as SQLiteV1BaselineNativeProjectionFaultForTest[];
+  nativeProjectionFaultsForTest = remaining.length === 0
+    ? undefined
+    : objectFreezeDefinitionIntrinsic(remaining);
+  throw fault.error;
+}
+
+/** Package-private one-shot native projection fault seam. */
+export function injectSQLiteV1BaselineNativeProjectionFaultForTestIntrinsic(
+  point: SQLiteV1BaselineNativeProjectionFaultPoint,
+  error: object,
+  family?: OperationBaselineEntryKind,
+  rowOrdinal?: number,
+): void {
+  injectSQLiteV1BaselineNativeProjectionFaultSequenceForTestIntrinsic([
+    {
+      error,
+      point,
+      ...(family === undefined ? {} : { family }),
+      ...(rowOrdinal === undefined ? {} : { rowOrdinal }),
+    },
+  ]);
+}
+
+/** Package-private bounded multi-fault seam for exact-primary precedence. */
+export function injectSQLiteV1BaselineNativeProjectionFaultSequenceForTestIntrinsic(
+  faults: readonly SQLiteV1BaselineNativeProjectionFaultForTest[],
+): void {
+  const hasInvalidFault = reflectApplyDefinitionIntrinsic(
+    arraySomeDefinitionIntrinsic,
+    faults,
+    [({ error, rowOrdinal }: SQLiteV1BaselineNativeProjectionFaultForTest) => error === null
+      || typeof error !== "object" || isProxy(error)
+      || (rowOrdinal !== undefined
+        && (!Number.isSafeInteger(rowOrdinal) || rowOrdinal < 0))],
+  ) as boolean;
+  if (nativeProjectionFaultsForTest !== undefined || faults.length < 1
+      || faults.length > 4 || hasInvalidFault) {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      OPERATION,
+      "SQLite native projection fault injection is invalid",
+    );
+  }
+  nativeProjectionFaultsForTest = objectFreezeDefinitionIntrinsic(
+    reflectApplyDefinitionIntrinsic(
+      arrayMapDefinitionIntrinsic,
+      faults,
+      [(fault: SQLiteV1BaselineNativeProjectionFaultForTest) =>
+        objectFreezeDefinitionIntrinsic({ ...fault })],
+    ) as SQLiteV1BaselineNativeProjectionFaultForTest[],
+  );
+}
 
 interface SQLiteV1BaselineTransactionGuard {
   totalChanges: number;
@@ -131,6 +403,18 @@ function fail(message: string): never {
   throw new CycleStoreProviderError("GE_CYCLE_STORE_CORRUPTION", OPERATION, message);
 }
 
+/** Cross-runtime SQL identity: CRLF-neutral and formatting-whitespace neutral. */
+export function sqliteV1BaselineNormalizedSqlSha256Intrinsic(sql: string): string {
+  return createHash("sha256")
+    .update(
+      sql.replace(/\r\n?/gu, "\n")
+        .replace(/^[\t\n\v\f\r ]+|[\t\n\v\f\r ]+$/gu, "")
+        .replace(/[\t\n\v\f\r ]+/gu, " "),
+      "utf8",
+    )
+    .digest("hex");
+}
+
 function safeBigInt(value: unknown, label: string): bigint {
   if (typeof value !== "bigint" || value < 0n || value > MAX_SAFE_BIGINT) {
     return fail(`SQLite v1 baseline ${label} is outside bounds`);
@@ -160,7 +444,11 @@ function validatedEntry(
   } catch {
     return fail(`SQLite v1 baseline ${entryKind} row is invalid`);
   }
-  return Object.freeze({ entryKind, key: Object.freeze(key), state: Object.freeze(state) });
+  return objectFreezeDefinitionIntrinsic({
+    entryKind,
+    key: objectFreezeDefinitionIntrinsic(key),
+    state: objectFreezeDefinitionIntrinsic(state),
+  });
 }
 
 function decodedCheckpointSummary(blob: Buffer): Readonly<Record<string, unknown>> {
@@ -178,7 +466,7 @@ function decodedCheckpointSummary(blob: Buffer): Readonly<Record<string, unknown
   ))) {
     return fail("SQLite v1 baseline checkpoint summary carrier is noncanonical");
   }
-  return Object.freeze({ ...summary });
+  return objectFreezeDefinitionIntrinsic({ ...summary });
 }
 
 const LEGACY_OPERATIONS = new Set<CycleStoreMutationOperation>([
@@ -195,7 +483,11 @@ const LEGACY_OPERATIONS = new Set<CycleStoreMutationOperation>([
 
 function legacyOperation(value: unknown): CycleStoreMutationOperation {
   const operation = sqliteText(value, OPERATION, "legacy operation name");
-  if (!LEGACY_OPERATIONS.has(operation as CycleStoreMutationOperation)) {
+  if (!(reflectApplyDefinitionIntrinsic(
+    setHasDefinitionIntrinsic,
+    LEGACY_OPERATIONS,
+    [operation as CycleStoreMutationOperation],
+  ) as boolean)) {
     return fail("SQLite v1 baseline legacy operation name is invalid");
   }
   return operation as CycleStoreMutationOperation;
@@ -226,14 +518,101 @@ function exactlyOne(
   sql: string,
   length: number,
   label: string,
+  retirement?: MutableNativeFamilyRetirement,
+  reprove?: () => void,
 ): readonly unknown[] {
   let result: readonly unknown[] | undefined;
   let count = 0;
-  for (const raw of connection.prepare(sql, OPERATION).iterate()) {
-    count += 1;
-    if (count > 1) return fail(`SQLite v1 baseline ${label} cardinality is invalid`);
-    result = sqliteRow(raw, length, OPERATION, label);
+  reprove?.();
+  maybeThrowNativeProjectionFaultForTest("prepare-before", retirement, 0);
+  const statement = prepareSQLiteConnectionDefinitionIntrinsic(connection, sql, OPERATION);
+  maybeThrowNativeProjectionFaultForTest("prepare-after", retirement, 0);
+  reprove?.();
+  const iterator = iterateSQLiteStatementDefinitionIntrinsic(statement);
+  let primary: { readonly present: boolean; readonly value: unknown } = {
+    present: false,
+    value: undefined,
+  };
+  if (retirement !== undefined) {
+    retirement.statementIdentity = statement;
+    retirement.iteratorIdentity = iterator;
+    retirement.prepareCount += 1;
+    retirement.sqlSha256 = createHash("sha256").update(sql).digest("hex");
+    retirement.normalizedSqlSha256 = sqliteV1BaselineNormalizedSqlSha256Intrinsic(sql);
   }
+  try {
+    while (true) {
+      reprove?.();
+      maybeThrowNativeProjectionFaultForTest("next-before", retirement, count);
+      const next = nextSQLiteStatementIteratorDefinitionIntrinsic(iterator);
+      maybeThrowNativeProjectionFaultForTest("next-after", retirement, count);
+      reprove?.();
+      const done = next.done;
+      reprove?.();
+      if (done) {
+        maybeThrowNativeProjectionFaultForTest("terminal-before", retirement, count);
+        if (retirement !== undefined) {
+          retirement.terminalObserved = true;
+          retirement.terminalCount += 1;
+        }
+        maybeThrowNativeProjectionFaultForTest("terminal-after", retirement, count);
+        break;
+      }
+      count += 1;
+      if (retirement !== undefined) retirement.observedCount += 1;
+      if (count > 1) return fail(`SQLite v1 baseline ${label} cardinality is invalid`);
+      reprove?.();
+      maybeThrowNativeProjectionFaultForTest("decode-before", retirement, count - 1);
+      result = sqliteRow(next.value, length, OPERATION, label);
+      maybeThrowNativeProjectionFaultForTest("decode-after", retirement, count - 1);
+      reprove?.();
+    }
+  } catch (error) {
+    primary = retainNativeProjectionPrimary(primary, error);
+  } finally {
+    if (retirement !== undefined) {
+      retirement.retirementAttemptCount += 1;
+    }
+    try {
+      maybeThrowNativeProjectionFaultForTest(
+        "retirement-reproof-before",
+        retirement,
+        retirement?.observedCount,
+      );
+      reprove?.();
+    } catch (error) {
+      primary = retainNativeProjectionPrimary(primary, error);
+    }
+    try {
+      if (currentNativeProjectionFailureTelemetryForTest !== undefined) {
+        currentNativeProjectionFailureTelemetryForTest.nativeReturnAttemptCount += 1;
+      }
+      maybeThrowNativeProjectionFaultForTest("return", retirement, retirement?.observedCount);
+      returnSQLiteStatementIteratorDefinitionIntrinsic(iterator);
+      if (currentNativeProjectionFailureTelemetryForTest !== undefined) {
+        currentNativeProjectionFailureTelemetryForTest.nativeReturnSuccessCount += 1;
+      }
+      if (retirement !== undefined && retirement.iteratorIdentity !== iterator) {
+        return fail("SQLite v1 baseline native iterator resource pairing drifted");
+      }
+      if (retirement !== undefined) retirement.retiredIteratorIdentity = iterator;
+      if (retirement !== undefined) retirement.retirementSuccessCount += 1;
+    } catch (error) {
+      primary = retainNativeProjectionPrimary(primary, error);
+    }
+    try {
+      reprove?.();
+      maybeThrowNativeProjectionFaultForTest(
+        "retirement-reproof-after",
+        retirement,
+        retirement?.observedCount,
+      );
+    } catch (error) {
+      primary = retainNativeProjectionPrimary(primary, error);
+    }
+    if (primary.present) throw primary.value;
+  }
+  if (primary.present) throw primary.value;
   if (count !== 1 || result === undefined) {
     return fail(`SQLite v1 baseline ${label} cardinality is invalid`);
   }
@@ -251,18 +630,7 @@ function nullableText(value: unknown, label: string): string | null {
 }
 
 function totalChanges(connection: SQLiteConnection): number {
-  return sqliteSafeInteger(
-    sqliteRow(
-      connection.prepare("SELECT total_changes()", OPERATION).get(),
-      1,
-      OPERATION,
-      "transaction change counter",
-    )[0],
-    0,
-    Number.MAX_SAFE_INTEGER,
-    OPERATION,
-    "transaction change counter",
-  );
+  return readSQLiteConnectionTotalChangesSnapshot(connection).totalChanges;
 }
 
 function requireCaptureTransaction(
@@ -282,19 +650,121 @@ function* transactionRows(
   connection: SQLiteConnection,
   guard: SQLiteV1BaselineTransactionGuard,
   sql: string,
+  retirement?: MutableNativeFamilyRetirement,
+  reprove?: () => void,
 ): Generator<unknown, void, undefined> {
-  const iterator = connection.prepare(sql, OPERATION).iterate()[Symbol.iterator]();
+  reprove?.();
+  maybeThrowNativeProjectionFaultForTest("prepare-before", retirement, 0);
+  const statement = prepareSQLiteConnectionDefinitionIntrinsic(connection, sql, OPERATION);
+  maybeThrowNativeProjectionFaultForTest("prepare-after", retirement, 0);
+  reprove?.();
+  const iterator = iterateSQLiteStatementDefinitionIntrinsic(statement);
+  let primary: { readonly present: boolean; readonly value: unknown } = {
+    present: false,
+    value: undefined,
+  };
+  if (retirement !== undefined) {
+    retirement.statementIdentity = statement;
+    retirement.iteratorIdentity = iterator;
+    retirement.prepareCount += 1;
+    retirement.sqlSha256 = createHash("sha256").update(sql).digest("hex");
+    retirement.normalizedSqlSha256 = sqliteV1BaselineNormalizedSqlSha256Intrinsic(sql);
+  }
   try {
     while (true) {
       requireCaptureTransaction(connection, guard);
-      const next = iterator.next();
-      if (next.done) return;
+      reprove?.();
+      maybeThrowNativeProjectionFaultForTest(
+        "next-before",
+        retirement,
+        retirement?.observedCount,
+      );
+      const next = nextSQLiteStatementIteratorDefinitionIntrinsic(iterator);
+      maybeThrowNativeProjectionFaultForTest(
+        "next-after",
+        retirement,
+        retirement?.observedCount,
+      );
+      reprove?.();
+      const done = next.done;
+      reprove?.();
+      if (done) {
+        maybeThrowNativeProjectionFaultForTest(
+          "terminal-before",
+          retirement,
+          retirement?.observedCount,
+        );
+        if (retirement !== undefined) {
+          retirement.terminalObserved = true;
+          retirement.terminalCount += 1;
+        }
+        maybeThrowNativeProjectionFaultForTest(
+          "terminal-after",
+          retirement,
+          retirement?.observedCount,
+        );
+        return;
+      }
+      if (retirement !== undefined) retirement.observedCount += 1;
       requireCaptureTransaction(connection, guard);
+      reprove?.();
+      maybeThrowNativeProjectionFaultForTest(
+        "decode-before",
+        retirement,
+        retirement === undefined ? undefined : retirement.observedCount - 1,
+      );
       yield next.value;
+      maybeThrowNativeProjectionFaultForTest(
+        "decode-after",
+        retirement,
+        retirement === undefined ? undefined : retirement.observedCount - 1,
+      );
+      reprove?.();
     }
+  } catch (error) {
+    primary = retainNativeProjectionPrimary(primary, error);
   } finally {
-    iterator.return?.();
+    if (retirement !== undefined) retirement.retirementAttemptCount += 1;
+    try {
+      maybeThrowNativeProjectionFaultForTest(
+        "retirement-reproof-before",
+        retirement,
+        retirement?.observedCount,
+      );
+      reprove?.();
+    } catch (error) {
+      primary = retainNativeProjectionPrimary(primary, error);
+    }
+    try {
+      if (currentNativeProjectionFailureTelemetryForTest !== undefined) {
+        currentNativeProjectionFailureTelemetryForTest.nativeReturnAttemptCount += 1;
+      }
+      maybeThrowNativeProjectionFaultForTest("return", retirement, retirement?.observedCount);
+      returnSQLiteStatementIteratorDefinitionIntrinsic(iterator);
+      if (currentNativeProjectionFailureTelemetryForTest !== undefined) {
+        currentNativeProjectionFailureTelemetryForTest.nativeReturnSuccessCount += 1;
+      }
+      if (retirement !== undefined && retirement.iteratorIdentity !== iterator) {
+        return fail("SQLite v1 baseline native iterator resource pairing drifted");
+      }
+      if (retirement !== undefined) retirement.retiredIteratorIdentity = iterator;
+      if (retirement !== undefined) retirement.retirementSuccessCount += 1;
+    } catch (error) {
+      primary = retainNativeProjectionPrimary(primary, error);
+    }
+    try {
+      reprove?.();
+      maybeThrowNativeProjectionFaultForTest(
+        "retirement-reproof-after",
+        retirement,
+        retirement?.observedCount,
+      );
+    } catch (error) {
+      primary = retainNativeProjectionPrimary(primary, error);
+    }
+    if (primary.present) throw primary.value;
   }
+  if (primary.present) throw primary.value;
 }
 
 function* streamV1Entries(
@@ -303,6 +773,8 @@ function* streamV1Entries(
   countsByKind: SQLiteV1BaselineCounts,
   guard: SQLiteV1BaselineTransactionGuard,
   expectedMigrationAppliedAtMs: number,
+  nativeRetirements?: ReadonlyMap<OperationBaselineEntryKind, MutableNativeFamilyRetirement>,
+  reprove?: () => void,
 ): Generator<OperationBaselineEntryInput, void, undefined> {
   requireCaptureTransaction(connection, guard);
 
@@ -312,7 +784,7 @@ function* streamV1Entries(
            latest_migration_sha256, latest_migration_applied_at_ms,
            provider_descriptor_hash, created_at_ms, updated_at_ms
       FROM ge_cycle_schema WHERE singleton = 1
-  `, 11, "schema singleton");
+  `, 11, "schema singleton", nativeRetirementFor(nativeRetirements, "schema-envelope"), reprove);
   const schemaState = {
     createdAtMs: sqliteSafeInteger(schema[9], 0, Number.MAX_SAFE_INTEGER, OPERATION, "schema creation time"),
     currentVersion: sqliteSafeInteger(schema[0], 1, 1, OPERATION, "schema version"),
@@ -341,7 +813,7 @@ function* streamV1Entries(
            postconditions_blob
       FROM ge_cycle_migrations
      ORDER BY CAST(version AS TEXT) COLLATE BINARY
-  `, 8, "migration lineage");
+  `, 8, "migration lineage", nativeRetirementFor(nativeRetirements, "migration-lineage"), reprove);
   const postconditionsBlob = sqliteBlob(migration[7], OPERATION, "migration postconditions");
   let postconditions: unknown;
   try {
@@ -386,7 +858,7 @@ function* streamV1Entries(
            created_at_ms, updated_at_ms
       FROM ge_cycle_streams
      ORDER BY stream_id COLLATE BINARY, tenant_id COLLATE BINARY
-  `)) {
+  `, nativeRetirementFor(nativeRetirements, "stream-head"), reprove)) {
     streamCount += 1;
     const row = sqliteRow(raw, 6, OPERATION, "stream head");
     const state = {
@@ -414,7 +886,7 @@ function* streamV1Entries(
            committed_at_ms
       FROM ge_cycle_records
      ORDER BY record_id COLLATE BINARY, tenant_id COLLATE BINARY
-  `)) {
+  `, nativeRetirementFor(nativeRetirements, "record-identity"), reprove)) {
     recordCount += 1;
     const row = sqliteRow(raw, 11, OPERATION, "record identity");
     const tenantId = sqliteText(row[0], OPERATION, "record tenant ID");
@@ -469,7 +941,7 @@ function* streamV1Entries(
      ORDER BY checkpoint_id COLLATE BINARY,
               checkpoint_scope COLLATE BINARY,
               tenant_id COLLATE BINARY
-  `)) {
+  `, nativeRetirementFor(nativeRetirements, "checkpoint-current"), reprove)) {
     checkpointCount += 1;
     const row = sqliteRow(raw, 14, OPERATION, "checkpoint current");
     const tenantId = sqliteText(row[0], OPERATION, "checkpoint tenant ID");
@@ -544,7 +1016,7 @@ function* streamV1Entries(
      ORDER BY checkpoint_scope COLLATE BINARY,
               CAST(revision AS TEXT) COLLATE BINARY,
               tenant_id COLLATE BINARY
-  `)) {
+  `, nativeRetirementFor(nativeRetirements, "checkpoint-revision"), reprove)) {
     revisionCount += 1;
     const row = sqliteRow(raw, 12, OPERATION, "checkpoint revision");
     const tenantId = sqliteText(row[0], OPERATION, "revision tenant ID");
@@ -576,7 +1048,16 @@ function* streamV1Entries(
         return fail("SQLite v1 baseline checkpoint revision identity drifted");
       }
     } else if (action === "delete") {
-      if (row.slice(5, 11).some((value) => value !== null)) {
+      const deletedTail = reflectApplyDefinitionIntrinsic(
+        arraySliceDefinitionIntrinsic,
+        row,
+        [5, 11],
+      ) as unknown[];
+      if (reflectApplyDefinitionIntrinsic(
+        arraySomeDefinitionIntrinsic,
+        deletedTail,
+        [(value: unknown) => value !== null],
+      ) as boolean) {
         return fail("SQLite v1 baseline checkpoint delete revision is invalid");
       }
     } else {
@@ -614,7 +1095,7 @@ function* streamV1Entries(
            updated_at_ms
       FROM ge_cycle_leases
      ORDER BY stream_id COLLATE BINARY, tenant_id COLLATE BINARY
-  `)) {
+  `, nativeRetirementFor(nativeRetirements, "lease-current"), reprove)) {
     leaseCount += 1;
     const row = sqliteRow(raw, 11, OPERATION, "lease current");
     const tenantId = sqliteText(row[0], OPERATION, "lease tenant ID");
@@ -648,7 +1129,7 @@ function* streamV1Entries(
       FROM ge_cycle_used_lease_ids
      ORDER BY lease_id COLLATE BINARY, stream_id COLLATE BINARY,
               tenant_id COLLATE BINARY
-  `)) {
+  `, nativeRetirementFor(nativeRetirements, "used-lease-identity"), reprove)) {
     usedLeaseCount += 1;
     const row = sqliteRow(raw, 6, OPERATION, "used lease identity");
     const tenantId = sqliteText(row[0], OPERATION, "used lease tenant ID");
@@ -677,7 +1158,7 @@ function* streamV1Entries(
       FROM ge_cycle_legal_holds
      ORDER BY hold_id COLLATE BINARY, stream_id COLLATE BINARY,
               tenant_id COLLATE BINARY
-  `)) {
+  `, nativeRetirementFor(nativeRetirements, "legal-hold"), reprove)) {
     holdCount += 1;
     const row = sqliteRow(raw, 4, OPERATION, "legal hold");
     const tenantId = sqliteText(row[0], OPERATION, "hold tenant ID");
@@ -705,7 +1186,7 @@ function* streamV1Entries(
            active_acquired_at_ms, active_expires_at_ms, last_lock_epoch,
            last_fencing_token, updated_at_ms
       FROM ge_cycle_migration_lock WHERE singleton = 1
-  `, 12, "migration lock singleton");
+  `, 12, "migration lock singleton", nativeRetirementFor(nativeRetirements, "migration-lock-current"), reprove);
   const lockState = {
     activeAcquiredAtMs: nullableInteger(lock[7], 0, "active migration acquisition time"),
     activeExpiresAtMs: nullableInteger(lock[8], 0, "active migration expiry time"),
@@ -727,7 +1208,7 @@ function* streamV1Entries(
     SELECT lock_id, lock_epoch, fencing_token, first_used_at_ms
       FROM ge_cycle_used_migration_lock_ids
      ORDER BY lock_id COLLATE BINARY
-  `)) {
+  `, nativeRetirementFor(nativeRetirements, "used-migration-lock-identity"), reprove)) {
     usedLockCount += 1;
     const row = sqliteRow(raw, 4, OPERATION, "used migration lock identity");
     const lockId = sqliteText(row[0], OPERATION, "used migration lock ID");
@@ -752,7 +1233,7 @@ function* streamV1Entries(
            result_blob, result_hash, committed_at_ms
       FROM ge_cycle_operations
      ORDER BY operation_id COLLATE BINARY, tenant_id COLLATE BINARY
-  `)) {
+  `, nativeRetirementFor(nativeRetirements, "legacy-operation"), reprove)) {
     legacyCount += 1;
     const row = sqliteRow(raw, 7, OPERATION, "legacy operation");
     const tenantId = sqliteText(row[0], OPERATION, "legacy operation tenant ID");
@@ -914,12 +1395,27 @@ export function captureSQLiteV1BaselineSourceSummary(
     OPERATION,
     "baseline source counts",
   );
-  const bigintCounts = rawCounts.map((value, index) => safeBigInt(value, `${BASELINE_ENTRY_KINDS[index]} count`));
-  const total = bigintCounts.reduce((sum, value) => sum + value, 0n);
+  const bigintCounts = reflectApplyDefinitionIntrinsic(
+    arrayMapDefinitionIntrinsic,
+    rawCounts,
+    [(value: unknown, index: number) =>
+      safeBigInt(value, `${BASELINE_ENTRY_KINDS[index]} count`)],
+  ) as bigint[];
+  const total = reflectApplyDefinitionIntrinsic(
+    arrayReduceDefinitionIntrinsic,
+    bigintCounts,
+    [(sum: bigint, value: bigint) => sum + value, 0n],
+  ) as bigint;
   if (total > MAX_SAFE_BIGINT) return fail("SQLite v1 baseline total count is outside bounds");
-  const countsByKind = Object.freeze(Object.fromEntries(
-    BASELINE_ENTRY_KINDS.map((kind, index) => [kind, Number(bigintCounts[index])]),
-  )) as SQLiteV1BaselineCounts;
+  const countEntries = reflectApplyDefinitionIntrinsic(
+    arrayMapDefinitionIntrinsic,
+    BASELINE_ENTRY_KINDS,
+    [(kind: OperationBaselineEntryKind, index: number) =>
+      [kind, Number(bigintCounts[index])] as const],
+  ) as readonly (readonly [OperationBaselineEntryKind, number])[];
+  const countsByKind = objectFreezeDefinitionIntrinsic(
+    objectFromEntriesDefinitionIntrinsic(countEntries),
+  ) as SQLiteV1BaselineCounts;
 
   const maximumNonCursorObservedAtMs = sqliteSafeInteger(
     sqliteRow(connection.prepare(SQLITE_V1_BASELINE_MAXIMUM_NON_CURSOR_OBSERVED_SQL, OPERATION).get(), 1, OPERATION, "non-cursor provider clock")[0],
@@ -941,17 +1437,17 @@ export function captureSQLiteV1BaselineSourceSummary(
   if (captured < providerHighWaterAtMs) {
     return fail("SQLite v1 baseline capture predates provider clock high-water");
   }
-  const clockEvidence: SQLiteV1BaselineClockEvidence = Object.freeze({
+  const clockEvidence: SQLiteV1BaselineClockEvidence = objectFreezeDefinitionIntrinsic({
     capturedAtMs: captured,
     maximumNonCursorObservedAtMs,
     providerHighWaterAtMs,
   });
-  const transactionGuard: SQLiteV1BaselineTransactionGuard = Object.freeze({
+  const transactionGuard: SQLiteV1BaselineTransactionGuard = objectFreezeDefinitionIntrinsic({
     totalChanges: totalChanges(connection),
     transactionEpoch: connection.transactionEpoch,
   });
   requireCaptureTransaction(connection, transactionGuard);
-  const frozenEnvelope = Object.freeze(sourceEnvelope);
+  const frozenEnvelope = objectFreezeDefinitionIntrinsic(sourceEnvelope);
   let entriesTaken = false;
   let cooperativeHandoffStage: object | undefined;
   let cooperativeHandoffTotalChanges: number | undefined;
@@ -960,8 +1456,16 @@ export function captureSQLiteV1BaselineSourceSummary(
     OperationBaselineEntryInput,
     void,
     undefined
-  > => {
-    const implementedKinds = new Set<OperationBaselineEntryKind>([
+  > => takeEntriesWithRetirements(guard);
+  const takeEntriesWithRetirements = (
+    guard: SQLiteV1BaselineTransactionGuard,
+    nativeRetirements?: ReadonlyMap<
+      OperationBaselineEntryKind,
+      MutableNativeFamilyRetirement
+    >,
+    reprove?: () => void,
+  ): Generator<OperationBaselineEntryInput, void, undefined> => {
+    const implementedKindValues = [
       "schema-envelope",
       "migration-lineage",
       "stream-head",
@@ -974,12 +1478,29 @@ export function captureSQLiteV1BaselineSourceSummary(
       "migration-lock-current",
       "used-migration-lock-identity",
       "legacy-operation",
-    ]);
+    ] as const;
+    const implementedKinds = new setConstructorDefinitionIntrinsic<
+      OperationBaselineEntryKind
+    >();
+    for (let ordinal = 0; ordinal < implementedKindValues.length; ordinal += 1) {
+      reflectApplyDefinitionIntrinsic(setAddDefinitionIntrinsic, implementedKinds, [
+        implementedKindValues[ordinal]!,
+      ]);
+    }
     requireCaptureTransaction(connection, guard);
     if (countsByKind["schema-envelope"] !== 1
         || countsByKind["migration-lineage"] !== 1
         || countsByKind["migration-lock-current"] !== 1
-        || BASELINE_ENTRY_KINDS.some((kind) => !implementedKinds.has(kind) && countsByKind[kind] !== 0)) {
+        || reflectApplyDefinitionIntrinsic(
+          arraySomeDefinitionIntrinsic,
+          BASELINE_ENTRY_KINDS,
+          [(kind: OperationBaselineEntryKind) =>
+            !(reflectApplyDefinitionIntrinsic(
+              setHasDefinitionIntrinsic,
+              implementedKinds,
+              [kind],
+            ) as boolean) && countsByKind[kind] !== 0],
+        ) as boolean) {
       return fail("SQLite v1 baseline iterator cannot cover unimplemented source families");
     }
     if (entriesTaken) return fail("SQLite v1 baseline source entries are one-shot");
@@ -990,6 +1511,8 @@ export function captureSQLiteV1BaselineSourceSummary(
       countsByKind,
       guard,
       expectedMigrationAppliedAtMs,
+      nativeRetirements,
+      reprove,
     );
   };
   const entries = (): Generator<OperationBaselineEntryInput, void, undefined> =>
@@ -1113,7 +1636,7 @@ export function captureSQLiteV1BaselineSourceSummary(
         "SQLite baseline ordered handoff source binding is invalid",
       );
     }
-    return Object.freeze({
+    return objectFreezeDefinitionIntrinsic({
       countsByKind,
       expectedEntryCount: Number(total),
       sourceEnvelope: frozenEnvelope,
@@ -1121,7 +1644,7 @@ export function captureSQLiteV1BaselineSourceSummary(
       transactionEpoch: transactionGuard.transactionEpoch,
     });
   };
-  const summary = Object.freeze({
+  const summary = objectFreezeDefinitionIntrinsic({
     sourceEnvelope: frozenEnvelope,
     countsByKind,
     expectedEntryCount: Number(total),
@@ -1130,10 +1653,137 @@ export function captureSQLiteV1BaselineSourceSummary(
     [SQLITE_BASELINE_COOPERATIVE_ENTRIES]: cooperativeEntries,
     [SQLITE_BASELINE_ORDERED_HANDOFF_SOURCE]: orderedHandoffSource,
   });
-  CAPTURED_CURSOR_SOURCES.set(summary, Object.freeze({
+  reflectApplyDefinitionIntrinsic(weakMapSetDefinitionIntrinsic, CAPTURED_CURSOR_SOURCES, [
+    summary,
+    objectFreezeDefinitionIntrinsic({
     connection,
+    nativeDrain: (reprove: () => void): SQLiteV1BaselineNativeDrainResult => {
+      const retirements = new mapConstructorDefinitionIntrinsic<
+        OperationBaselineEntryKind,
+        MutableNativeFamilyRetirement
+      >();
+      for (let ordinal = 0; ordinal < BASELINE_ENTRY_KINDS.length; ordinal += 1) {
+        const entryKind = BASELINE_ENTRY_KINDS[ordinal]!;
+        reflectApplyDefinitionIntrinsic(mapSetDefinitionIntrinsic, retirements, [
+          entryKind,
+          {
+            entryKind,
+            expectedCount: countsByKind[entryKind],
+            observedCount: 0,
+            prepareCount: 0,
+            retirementAttemptCount: 0,
+            retirementKind: "iterator-return",
+            retirementSuccessCount: 0,
+            resourceIdentity: objectFreezeDefinitionIntrinsic(
+              objectCreateDefinitionIntrinsic(null),
+            ) as object,
+            statementIdentity: undefined,
+            iteratorIdentity: undefined,
+            retiredIteratorIdentity: undefined,
+            sqlSha256: undefined,
+            normalizedSqlSha256: undefined,
+            terminalCount: 0,
+            terminalObserved: false,
+          } satisfies MutableNativeFamilyRetirement,
+        ]);
+      }
+      const retainedEntries: OperationBaselineEntryInput[] = [];
+      const iterator = takeEntriesWithRetirements(transactionGuard, retirements, reprove);
+      while (true) {
+        reprove();
+        const next = iterator.next();
+        reprove();
+        const done = next.done;
+        reprove();
+        if (done) break;
+        reprove();
+        reflectApplyDefinitionIntrinsic(arrayPushDefinitionIntrinsic, retainedEntries, [
+          next.value,
+        ]);
+        reprove();
+      }
+      const familyRetirements = reflectApplyDefinitionIntrinsic(
+        arrayMapDefinitionIntrinsic,
+        BASELINE_ENTRY_KINDS,
+        [(entryKind: OperationBaselineEntryKind) => {
+        const evidence = reflectApplyDefinitionIntrinsic(
+          mapGetDefinitionIntrinsic,
+          retirements,
+          [entryKind],
+        ) as MutableNativeFamilyRetirement | undefined;
+        if (evidence === undefined) {
+          return fail(`SQLite v1 baseline ${entryKind} native retirement is missing`);
+        }
+        if (evidence.observedCount !== evidence.expectedCount
+            || !evidence.terminalObserved
+            || evidence.prepareCount !== 1
+            || evidence.terminalCount !== 1
+            || evidence.retirementAttemptCount !== 1
+            || evidence.retirementSuccessCount !== 1
+            || evidence.statementIdentity === undefined
+            || evidence.iteratorIdentity === undefined
+            || evidence.retiredIteratorIdentity !== evidence.iteratorIdentity
+            || evidence.normalizedSqlSha256 === undefined
+            || evidence.sqlSha256 === undefined) {
+          return fail(`SQLite v1 baseline ${entryKind} native retirement is incomplete`);
+        }
+        return objectFreezeDefinitionIntrinsic({
+          entryKind,
+          expectedCount: evidence.expectedCount,
+          observedCount: evidence.observedCount,
+          prepareCount: 1 as const,
+          retirementAttemptCount: 1 as const,
+          retirementKind: evidence.retirementKind,
+          retirementSuccessCount: 1 as const,
+          normalizedSqlSha256: evidence.normalizedSqlSha256,
+          sqlSha256: evidence.sqlSha256,
+          terminalCount: 1 as const,
+          terminalObserved: true as const,
+        });
+      }],
+      ) as SQLiteV1BaselineNativeDrainResult["familyRetirements"];
+      const resourceIdentities = objectFreezeDefinitionIntrinsic(
+        reflectApplyDefinitionIntrinsic(
+          arrayMapDefinitionIntrinsic,
+          BASELINE_ENTRY_KINDS,
+          [(entryKind: OperationBaselineEntryKind) => {
+            const evidence = reflectApplyDefinitionIntrinsic(
+              mapGetDefinitionIntrinsic,
+              retirements,
+              [entryKind],
+            ) as MutableNativeFamilyRetirement | undefined;
+            return evidence === undefined
+              ? fail(`SQLite v1 baseline ${entryKind} native retirement is missing`)
+              : evidence.resourceIdentity;
+          }],
+        ) as object[],
+      );
+      const uniqueResourceIdentities = new setConstructorDefinitionIntrinsic<object>();
+      for (let ordinal = 0; ordinal < resourceIdentities.length; ordinal += 1) {
+        const identity = resourceIdentities[ordinal]!;
+        if (reflectApplyDefinitionIntrinsic(
+          setHasDefinitionIntrinsic,
+          uniqueResourceIdentities,
+          [identity],
+        ) as boolean) {
+          return fail("SQLite v1 baseline native family resource identities collided");
+        }
+        reflectApplyDefinitionIntrinsic(setAddDefinitionIntrinsic, uniqueResourceIdentities, [
+          identity,
+        ]);
+      }
+      if (retainedEntries.length !== Number(total)) {
+        return fail("SQLite v1 baseline lower-owned projection count is invalid");
+      }
+      return objectFreezeDefinitionIntrinsic({
+        entries: objectFreezeDefinitionIntrinsic(retainedEntries),
+        familyRetirements: objectFreezeDefinitionIntrinsic(familyRetirements),
+        resourceIdentities,
+      });
+    },
     transactionEpoch: transactionGuard.transactionEpoch,
-  }));
+    }),
+  ]);
   return summary;
 }
 
@@ -1150,7 +1800,9 @@ export function assertSQLiteV1BaselineCursorSourceProvenance(
   connection: SQLiteConnection,
 ): void {
   const state = sourceSummary !== null && typeof sourceSummary === "object"
-    ? CAPTURED_CURSOR_SOURCES.get(sourceSummary as object)
+    ? reflectApplyDefinitionIntrinsic(weakMapGetDefinitionIntrinsic, CAPTURED_CURSOR_SOURCES, [
+      sourceSummary as object,
+    ]) as SQLiteV1BaselineCapturedSourceState | undefined
     : undefined;
   if (state === undefined
       || state.connection !== connection) {
@@ -1173,4 +1825,258 @@ export function assertSQLiteV1BaselineCursorSourceProvenance(
       || final.transactionEpoch !== first.transactionEpoch) {
     return fail("SQLite v1 baseline captured transaction changed");
   }
+}
+
+/**
+ * Exhaust all twelve native source families and retain the exact normalized
+ * projection behind an opaque lower-owned token. No caller projection, count,
+ * SQL, descriptor, or route hint is accepted.
+ */
+function drainSQLiteV1BaselineLowerOwnedNativeProjectionIntrinsic(
+  owner: SQLiteCursorPublicationTransactionOwner,
+  beginReceipt: SQLiteCursorPublicationTransactionBeginReceipt,
+  composition: object,
+  sourceSummary: SQLiteV1BaselineSourceSummary,
+): SQLiteV1BaselineLowerOwnedNativeProjection {
+  const state = sourceSummary !== null && typeof sourceSummary === "object"
+    ? reflectApplyDefinitionIntrinsic(weakMapGetDefinitionIntrinsic, CAPTURED_CURSOR_SOURCES, [
+      sourceSummary as object,
+    ]) as SQLiteV1BaselineCapturedSourceState | undefined
+    : undefined;
+  if (state === undefined) {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      OPERATION,
+      "SQLite v1 baseline lower-owned source is invalid",
+    );
+  }
+  const reprove = (): void => {
+    assertSQLiteCursorPublicationOwnerCompositionConnectionIntrinsic(
+      owner,
+      beginReceipt,
+      composition,
+      state.connection,
+    );
+    assertSQLiteV1BaselineCursorSourceProvenance(sourceSummary, state.connection);
+  };
+  reprove();
+  const drained = state.nativeDrain(reprove);
+  reprove();
+  maybeThrowNativeProjectionFaultForTest("hash-before");
+  const projectionSha256 = createHash("sha256")
+    .update(SQLITE_V1_BASELINE_NATIVE_PROJECTION_DOMAIN)
+    .update(canonicalSerialize(drained.entries))
+    .digest("hex");
+  maybeThrowNativeProjectionFaultForTest("hash-after");
+  reprove();
+  const retainedCount = drained.entries.length;
+  const sourceEnvelopeSha256 = canonicalHash(sourceSummary.sourceEnvelope);
+  const sourceSummarySha256 = canonicalHash({
+    clockEvidence: sourceSummary.clockEvidence,
+    countsByKind: sourceSummary.countsByKind,
+    expectedEntryCount: sourceSummary.expectedEntryCount,
+    sourceEnvelope: sourceSummary.sourceEnvelope,
+  });
+  // The opaque identity is the authority.  Its random commitment is evidence
+  // only and is intentionally distinct from the deterministic projection hash.
+  const readSessionIdentity = objectFreezeDefinitionIntrinsic(
+    objectCreateDefinitionIntrinsic(null),
+  ) as object;
+  const readSessionNonce = randomBytesDefinitionIntrinsic(32);
+  const readSessionSha256 = createHash("sha256")
+    .update(SQLITE_V1_BASELINE_READ_SESSION_DOMAIN)
+    .update(readSessionNonce)
+    .update(projectionSha256)
+    .update(sourceEnvelopeSha256)
+    .update(sourceSummarySha256)
+    .digest("hex");
+  readSessionNonce.fill(0);
+  reprove();
+  maybeThrowNativeProjectionFaultForTest("mint-before");
+  const token = objectFreezeDefinitionIntrinsic(objectCreateDefinitionIntrinsic(null)) as
+    SQLiteV1BaselineLowerOwnedNativeProjection;
+  const snapshot: SQLiteV1BaselineLowerOwnedNativeProjectionSnapshot =
+    objectFreezeDefinitionIntrinsic({
+    exactSourceConnection: true,
+    exactBeginReceipt: true,
+    exactComposition: true,
+    exactOwner: true,
+    exactResourcePairing: true,
+    exactTransactionGeneration: true,
+    exactTransactionLineage: true,
+    expectedProjectionCount: sourceSummary.expectedEntryCount,
+    exactReadSession: true,
+    familyCount: 12,
+    familyRetirements: drained.familyRetirements,
+    fullExhausted: true,
+    genuineZeroClaim: false,
+    lifecycle: "retired",
+    logicalNativeReadCount: 12,
+    nativeSourceProvenance: true,
+    physicalNativeIoCountClaimed: false,
+    projectionSha256,
+    readSessionSha256,
+    retainedCount,
+    routeId: "main.baseline-entries",
+    sourceDomain: "sqlite-v1-baseline-source",
+    sourceEnvelopeSha256,
+    sourceSummarySha256,
+    sqlAuthority: false,
+    });
+  reflectApplyDefinitionIntrinsic(
+    weakMapSetDefinitionIntrinsic,
+    LOWER_OWNED_NATIVE_PROJECTIONS,
+    [token as object, {
+    adopted: false,
+    beginReceipt,
+    composition,
+    connection: state.connection,
+    owner,
+    retainedEntries: drained.entries,
+    resourceIdentities: drained.resourceIdentities,
+    readSessionIdentity,
+    snapshot,
+    sourceSummary,
+    transactionEpoch: state.transactionEpoch,
+    }],
+  );
+  maybeThrowNativeProjectionFaultForTest("mint-after");
+  return token;
+}
+
+/**
+ * Synchronously drain and hand the opaque lower token to the definition-time
+ * P11 consumer.  The intermediate token is never observable by a caller and
+ * every direct-call/source/native/consumer fault enters the exact P9 terminal
+ * finalizer before returning control.
+ */
+export function captureAndConsumeSQLiteV1BaselineLowerOwnedNativeProjectionIntrinsic(
+  owner: SQLiteCursorPublicationTransactionOwner,
+  beginReceipt: SQLiteCursorPublicationTransactionBeginReceipt,
+  composition: object,
+  sourceSummary: SQLiteV1BaselineSourceSummary,
+): object {
+  currentNativeProjectionFailureTelemetryForTest = {
+    nativeReturnAttemptCount: 0,
+    nativeReturnSuccessCount: 0,
+    secondaryFailureCount: 0,
+  };
+  lastNativeProjectionFailureTelemetryForTest = undefined;
+  try {
+    if (!hasSQLiteCursorPublicationNativeProjectionConsumerDefinitionIntrinsic()) {
+      throw new Error("SQLite native projection consumer is unavailable");
+    }
+    const projection = drainSQLiteV1BaselineLowerOwnedNativeProjectionIntrinsic(
+      owner,
+      beginReceipt,
+      composition,
+      sourceSummary,
+    );
+    const parent = consumeSQLiteCursorPublicationNativeProjectionDefinitionIntrinsic(
+      composition,
+      projection as object,
+    );
+    currentNativeProjectionFailureTelemetryForTest = undefined;
+    return parent;
+  } catch (cause) {
+    lastNativeProjectionFailureTelemetryForTest = objectFreezeDefinitionIntrinsic({
+      nativeReturnAttemptCount:
+        currentNativeProjectionFailureTelemetryForTest?.nativeReturnAttemptCount ?? 0,
+      nativeReturnSuccessCount:
+        currentNativeProjectionFailureTelemetryForTest?.nativeReturnSuccessCount ?? 0,
+      secondaryFailureCount:
+        currentNativeProjectionFailureTelemetryForTest?.secondaryFailureCount ?? 0,
+    });
+    currentNativeProjectionFailureTelemetryForTest = undefined;
+    const primary = cause !== null && typeof cause === "object"
+      ? cause as object
+      : new CycleStoreProviderError(
+        "GE_CYCLE_STORE_CORRUPTION",
+        OPERATION,
+        "SQLite native projection threw a non-object primary",
+        { cause },
+      );
+    // The installed consumer may already have terminalized the target. Never
+    // attempt a second claim, and never replace the exact primary it threw.
+    try {
+      if (readSQLiteCursorPublicationTransactionOwnerSnapshotIntrinsic(owner).lifecycle
+          !== "active") {
+        throw primary;
+      }
+    } catch (snapshotFailure) {
+      if (snapshotFailure === primary) throw primary;
+      throw primary;
+    }
+    const capture = captureSQLiteCursorPublicationTransactionFailureIntrinsic(owner, primary);
+    return finalizeSQLiteCursorPublicationTransactionFailureIntrinsic(capture);
+  }
+}
+
+/** Package-private exact-connection proof; it exposes only scalar evidence. */
+export function assertSQLiteV1BaselineLowerOwnedNativeProjectionIntrinsic(
+  projection: SQLiteV1BaselineLowerOwnedNativeProjection,
+  owner: SQLiteCursorPublicationTransactionOwner,
+  beginReceipt: SQLiteCursorPublicationTransactionBeginReceipt,
+  composition: object,
+): SQLiteV1BaselineLowerOwnedNativeProjectionSnapshot {
+  const state = projection !== null && typeof projection === "object"
+    ? reflectApplyDefinitionIntrinsic(
+      weakMapGetDefinitionIntrinsic,
+      LOWER_OWNED_NATIVE_PROJECTIONS,
+      [projection as object],
+    ) as (typeof LOWER_OWNED_NATIVE_PROJECTIONS extends WeakMap<object, infer V>
+      ? V : never) | undefined
+    : undefined;
+  if (state === undefined || state.owner !== owner || state.beginReceipt !== beginReceipt
+      || state.composition !== composition
+      || state.retainedEntries.length !== state.snapshot.retainedCount
+      || state.snapshot.expectedProjectionCount !== state.snapshot.retainedCount) {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      OPERATION,
+      "SQLite v1 baseline lower-owned projection is invalid",
+    );
+  }
+  assertSQLiteCursorPublicationOwnerCompositionConnectionIntrinsic(
+    owner,
+    beginReceipt,
+    composition,
+    state.connection,
+  );
+  assertSQLiteV1BaselineCursorSourceProvenance(state.sourceSummary, state.connection);
+  return state.adopted
+    ? objectFreezeDefinitionIntrinsic({ ...state.snapshot, lifecycle: "adopted" })
+    : state.snapshot;
+}
+
+/** One-shot lower-layer adoption, callable only after the transaction owner reproof. */
+export function adoptSQLiteV1BaselineLowerOwnedNativeProjectionIntrinsic(
+  projection: SQLiteV1BaselineLowerOwnedNativeProjection,
+  owner: SQLiteCursorPublicationTransactionOwner,
+  beginReceipt: SQLiteCursorPublicationTransactionBeginReceipt,
+  composition: object,
+): SQLiteV1BaselineLowerOwnedNativeProjectionSnapshot {
+  const state = projection !== null && typeof projection === "object"
+    ? reflectApplyDefinitionIntrinsic(
+      weakMapGetDefinitionIntrinsic,
+      LOWER_OWNED_NATIVE_PROJECTIONS,
+      [projection as object],
+    ) as (typeof LOWER_OWNED_NATIVE_PROJECTIONS extends WeakMap<object, infer V>
+      ? V : never) | undefined
+    : undefined;
+  if (state === undefined || state.adopted) {
+    throw new CycleStoreProviderError(
+      "GE_CYCLE_STORE_INVALID_ARGUMENT",
+      OPERATION,
+      "SQLite v1 baseline lower-owned projection was replayed",
+    );
+  }
+  assertSQLiteV1BaselineLowerOwnedNativeProjectionIntrinsic(
+    projection,
+    owner,
+    beginReceipt,
+    composition,
+  );
+  state.adopted = true;
+  return objectFreezeDefinitionIntrinsic({ ...state.snapshot, lifecycle: "adopted" });
 }

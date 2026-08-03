@@ -8,8 +8,11 @@ const bufferCompareIntrinsic = Buffer.compare;
 const bufferEqualsIntrinsic = Buffer.prototype.equals;
 const bufferFromIntrinsic = Buffer.from;
 const bufferToStringIntrinsic = Buffer.prototype.toString;
+const arraySomeIntrinsic = Array.prototype.some;
+const mapHasIntrinsic = Map.prototype.has;
 const objectFreezeIntrinsic = Object.freeze;
 const reflectApplyIntrinsic = Reflect.apply;
+const setHasIntrinsic = Set.prototype.has;
 
 export const BASELINE_ID_DOMAIN = "graph-engineering/sqlite-operation-baseline-id/v1\0";
 export const BASELINE_ENTRY_DOMAIN = "graph-engineering/sqlite-operation-baseline-entry/v1\0";
@@ -149,7 +152,11 @@ function detachedRecord(value: unknown, label: string): Record<string, unknown> 
 function exact(record: Record<string, unknown>, keys: readonly string[], label: string): void {
   const actual = Object.keys(record).sort();
   const expected = [...keys].sort();
-  if (actual.length !== expected.length || actual.some((key, index) => key !== expected[index])) {
+  if (actual.length !== expected.length || reflectApplyIntrinsic(
+    arraySomeIntrinsic,
+    actual,
+    [(key: string, index: number) => key !== expected[index]],
+  ) as boolean) {
     invalid(`${label} fields`);
   }
 }
@@ -279,7 +286,11 @@ function validateState(kind: OperationBaselineEntryKind, value: unknown): Record
         exact(postconditions, ["requiredPostconditions"], `${label}.postconditions`);
         if (!Array.isArray(postconditions.requiredPostconditions)
           || postconditions.requiredPostconditions.length === 0
-          || postconditions.requiredPostconditions.some((item) => typeof item !== "string" || item.length === 0)) invalid(`${label}.postconditions.requiredPostconditions`);
+          || reflectApplyIntrinsic(
+            arraySomeIntrinsic,
+            postconditions.requiredPostconditions,
+            [(item: unknown) => typeof item !== "string" || item.length === 0],
+          ) as boolean) invalid(`${label}.postconditions.requiredPostconditions`);
       }
       integer(record, "previousVersion", label, 0);
       if (record.reversibility !== "rebuild-from-verified-backup-only") invalid(`${label}.reversibility`);
@@ -305,7 +316,17 @@ function validateState(kind: OperationBaselineEntryKind, value: unknown): Record
       const action = string(record, "action", label); if (action !== "put" && action !== "delete") invalid(`${label}.action`);
       nullableString(record, "boundRecordHash", label, HASH); nullableInteger(record, "boundSequence", label); nullableTimestamp(record, "checkpointCreatedAt", label); id("checkpointId"); id("checkpointScope"); time("recordedAtMs"); integer(record, "revision", label, 1); checkpointSummary(record.summary, label); id("tenantId"); nullableInteger(record, "valueBytes", label); nullableString(record, "valueHash", label, HASH);
       const nullable = ["boundRecordHash", "boundSequence", "checkpointCreatedAt", "summary", "valueBytes", "valueHash"] as const;
-      if (action === "put" ? nullable.some((key) => record[key] === null) : nullable.some((key) => record[key] !== null)) invalid(`${label}.${action}`);
+      if (action === "put"
+        ? reflectApplyIntrinsic(
+          arraySomeIntrinsic,
+          nullable,
+          [(key: (typeof nullable)[number]) => record[key] === null],
+        ) as boolean
+        : reflectApplyIntrinsic(
+          arraySomeIntrinsic,
+          nullable,
+          [(key: (typeof nullable)[number]) => record[key] !== null],
+        ) as boolean) invalid(`${label}.${action}`);
       validateCheckpointSummaryIdentity(kind, record);
       break;
     }
@@ -350,7 +371,11 @@ function validateState(kind: OperationBaselineEntryKind, value: unknown): Record
     case "used-migration-lock-identity":
       exact(record, ["fencingToken", "firstUsedAtMs", "lockEpoch", "lockId"], label); integer(record, "fencingToken", label, 1); time("firstUsedAtMs"); integer(record, "lockEpoch", label, 1); id("lockId"); if (record.fencingToken !== record.lockEpoch) invalid(`${label}.epoch/fence identity`); break;
     case "legacy-operation":
-      exact(record, ["committedAtMs", "operationId", "operationName", "requestHash", "resultBlobSha256", "resultHash", "tenantId"], label); time("committedAtMs"); id("operationId"); if (!LEGACY_OPERATION_NAMES.has(nonempty(record, "operationName", label))) invalid(`${label}.operationName`); hash(record, "requestHash", label); hash(record, "resultBlobSha256", label); hash(record, "resultHash", label); id("tenantId"); break;
+      exact(record, ["committedAtMs", "operationId", "operationName", "requestHash", "resultBlobSha256", "resultHash", "tenantId"], label); time("committedAtMs"); id("operationId"); if (!(reflectApplyIntrinsic(
+        setHasIntrinsic,
+        LEGACY_OPERATION_NAMES,
+        [nonempty(record, "operationName", label)],
+      ) as boolean)) invalid(`${label}.operationName`); hash(record, "requestHash", label); hash(record, "resultBlobSha256", label); hash(record, "resultHash", label); id("tenantId"); break;
   }
   return record;
 }
@@ -374,7 +399,12 @@ function validateCheckpointSummaryIdentity(
         ["checkpointCreatedAt", "createdAt"], ["valueHash", "valueHash"],
         ["valueBytes", "valueBytes"],
       ] as const);
-  if (pairs.some(([stateField, summaryField]) => state[stateField] !== summary[summaryField])) {
+  if (reflectApplyIntrinsic(
+    arraySomeIntrinsic,
+    pairs,
+    [([stateField, summaryField]: (typeof pairs)[number]) =>
+      state[stateField] !== summary[summaryField]],
+  ) as boolean) {
     invalid(`${kind} summary identity`);
   }
 }
@@ -405,7 +435,11 @@ function validateEntryIdentity(
     "used-migration-lock-identity": ["lockId"],
     "legacy-operation": ["operationId", "tenantId"],
   };
-  if (shared[kind].some((field) => key[field] !== state[field])) {
+  if (reflectApplyIntrinsic(
+    arraySomeIntrinsic,
+    shared[kind],
+    [(field: string) => key[field] !== state[field]],
+  ) as boolean) {
     invalid(`${kind} key/state identity`);
   }
 
@@ -434,12 +468,16 @@ export function createOperationBaselineId(value: unknown): string {
 }
 
 export function encodeOperationBaselineKey(kind: OperationBaselineEntryKind, value: unknown): Buffer {
-  if (!KIND_RANK.has(kind)) return invalid("entry kind");
+  if (!(reflectApplyIntrinsic(mapHasIntrinsic, KIND_RANK, [kind]) as boolean)) {
+    return invalid("entry kind");
+  }
   return canonicalBytes(validateKey(kind, value), 2, MAX_BASELINE_KEY_BYTES, `${kind} key`);
 }
 
 export function encodeOperationBaselineState(kind: OperationBaselineEntryKind, value: unknown): Buffer {
-  if (!KIND_RANK.has(kind)) return invalid("entry kind");
+  if (!(reflectApplyIntrinsic(mapHasIntrinsic, KIND_RANK, [kind]) as boolean)) {
+    return invalid("entry kind");
+  }
   return canonicalBytes(validateState(kind, value), 2, MAX_BASELINE_STATE_BYTES, `${kind} state`);
 }
 

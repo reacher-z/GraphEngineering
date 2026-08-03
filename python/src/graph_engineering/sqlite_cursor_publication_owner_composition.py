@@ -9,10 +9,18 @@ third-clock consumer, success claim, or COMMIT authority.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal, NamedTuple, Never
 from weakref import ReferenceType, ref
 
+from .sqlite_cursor_publication_native_projection_bridge import (
+    _install_sqlite_cursor_publication_native_projection_adopter_intrinsic,
+    _invoke_sqlite_cursor_publication_native_projection_pipeline_intrinsic,
+    _invoke_sqlite_cursor_publication_native_projection_receipt_consume_intrinsic,
+    _invoke_sqlite_cursor_publication_native_projection_receipt_snapshot_intrinsic,
+    _seal_sqlite_cursor_publication_native_projection_bridge_intrinsic,
+)
 from .sqlite_cursor_publication_transaction_owner import (
     _abort_sqlite_cursor_publication_owner_composition_adoption_intrinsic,
     _assert_sqlite_cursor_publication_owner_composition_intrinsic,
@@ -47,6 +55,13 @@ def _inject_sqlite_cursor_publication_owner_composition_adoption_fault_intrinsic
     _composition: _SQLiteCursorPublicationOwnerComposition,
 ) -> None:
     """Definition-owned no-op seam used only by package tests."""
+
+
+def _inject_sqlite_cursor_publication_native_projection_adoption_fault_intrinsic(
+    _point: str,
+    _composition: _SQLiteCursorPublicationOwnerComposition,
+) -> None:
+    """Fail-closed test seam; it cannot mint or weaken native authority."""
 
 
 class _SQLiteCursorPublicationOwnerComposition:
@@ -373,6 +388,7 @@ class _SQLiteCursorPublicationMutationParentScopeSnapshot(NamedTuple):
     reusable_parent_prepare_count: int
     reusable_execution_lease_released_count: int
     parent_resource_retired_count: int
+    count_provenance: Literal["shape-only", "lower-native"]
     actual_native_io_count: Literal[0]
     sql_authority: Literal[False]
 
@@ -391,6 +407,11 @@ class _SQLiteCursorPublicationRetainedCountReceiptSnapshot(NamedTuple):
     one_shot: Literal[True]
     actual_native_io_count: Literal[0]
     sql_authority: Literal[False]
+
+
+class _SQLiteCursorPublicationNativeProjectionAdoption(NamedTuple):
+    parent: _SQLiteCursorPublicationMutationParentScope
+    receipt_snapshot: object
 
 
 class _SQLiteCursorPublicationMutationChildPermitSnapshot(NamedTuple):
@@ -448,7 +469,8 @@ class _ParentRecord:
     descriptor: _SQLiteCursorPublicationMutationRouteDescriptor
     expected_count: int
     lifecycle: str
-    retained_count_receipt: _SQLiteCursorPublicationRetainedCountReceipt | None = None
+    count_provenance: Literal["shape-only", "lower-native"] = "shape-only"
+    retained_count_receipt: object | None = None
     next_ordinal: int = 0
     active_child_ref: ReferenceType[_SQLiteCursorPublicationMutationChildPermit] | None = None
     child_issued_count: int = 0
@@ -524,6 +546,187 @@ _PARENT_SCOPES: dict[int, _ParentEntry] = {}
 _RETAINED_COUNT_RECEIPTS: dict[int, _RetainedCountReceiptEntry] = {}
 _CHILD_PERMITS: dict[int, _ChildEntry] = {}
 _FIXED_READ_PERMITS: dict[int, _FixedReadEntry] = {}
+
+
+def _native_projection_parent_receipt_cell() -> tuple[
+    Callable[
+        [
+            _SQLiteCursorPublicationMutationParentScope,
+            _SQLiteCursorPublicationOwnerComposition,
+            object,
+            object,
+            _ParentRecord,
+        ],
+        None,
+    ],
+    Callable[
+        [
+            _SQLiteCursorPublicationMutationParentScope,
+            _SQLiteCursorPublicationOwnerComposition,
+            _ParentRecord,
+        ],
+        tuple[object, bool] | None,
+    ],
+    Callable[[_SQLiteCursorPublicationMutationParentScope, _ParentRecord], None],
+    Callable[[_SQLiteCursorPublicationMutationParentScope], None],
+    Callable[[_SQLiteCursorPublicationOwnerComposition], None],
+]:
+    retained: dict[
+        int,
+        tuple[
+            ReferenceType[_SQLiteCursorPublicationMutationParentScope],
+            ReferenceType[_SQLiteCursorPublicationOwnerComposition],
+            object | None,
+            object,
+            int,
+            tuple[object, ...],
+        ],
+    ] = {}
+
+    validate = _invoke_sqlite_cursor_publication_native_projection_receipt_snapshot_intrinsic
+    native_descriptor = _SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[2]
+    object_getattribute = _OBJECT_GETATTRIBUTE
+
+    def state_signature(record: _ParentRecord) -> tuple[object, ...]:
+        return (
+            record.descriptor,
+            record.expected_count,
+            record.lifecycle,
+            record.count_provenance,
+            record.retained_count_receipt,
+            record.next_ordinal,
+            record.active_child_ref,
+            record.child_issued_count,
+            record.child_entered_count,
+            record.child_native_return_count,
+            record.child_resource_retired_count,
+            record.child_postflight_accepted_count,
+            record.child_consumed_count,
+            record.reusable_parent_prepare_count,
+            record.reusable_execution_lease_released_count,
+            record.parent_resource_retired_count,
+        )
+
+    def retain(
+        parent: _SQLiteCursorPublicationMutationParentScope,
+        composition: _SQLiteCursorPublicationOwnerComposition,
+        receipt: object,
+        snapshot: object,
+        record: _ParentRecord,
+    ) -> None:
+        parent_id = _ID(parent)
+
+        def discard_exact(
+            dead_ref: ReferenceType[_SQLiteCursorPublicationMutationParentScope],
+        ) -> None:
+            entry = retained.get(parent_id)
+            if entry is not None and entry[0] is dead_ref:
+                retained.pop(parent_id, None)
+
+        validated_snapshot = validate(composition, receipt)
+        expected_count = object_getattribute(
+            validated_snapshot, "expected_projection_count"
+        )
+        if (
+            parent_id in retained
+            or validated_snapshot != snapshot
+            or object_getattribute(validated_snapshot, "route_id")
+            != "main.baseline-entries"
+            or object_getattribute(validated_snapshot, "retained_count")
+            != expected_count
+            or record.descriptor is not native_descriptor
+            or record.expected_count != expected_count
+            or record.lifecycle != "parent-issued"
+            or record.count_provenance != "lower-native"
+            or record.retained_count_receipt is not None
+            or record.next_ordinal != 0
+            or record.active_child_ref is not None
+            or any(
+                count != 0
+                for count in (
+                    record.child_issued_count,
+                    record.child_entered_count,
+                    record.child_native_return_count,
+                    record.child_resource_retired_count,
+                    record.child_postflight_accepted_count,
+                    record.child_consumed_count,
+                    record.reusable_parent_prepare_count,
+                    record.reusable_execution_lease_released_count,
+                    record.parent_resource_retired_count,
+                )
+            )
+        ):
+            raise ValueError("GE_SQLITE_P11_NATIVE_PROJECTION_RECEIPT_INVALID")
+        retained[parent_id] = (
+            ref(parent, discard_exact),
+            ref(composition),
+            receipt,
+            validated_snapshot,
+            expected_count,
+            state_signature(record),
+        )
+
+    def assert_exact(
+        parent: _SQLiteCursorPublicationMutationParentScope,
+        composition: _SQLiteCursorPublicationOwnerComposition,
+        record: _ParentRecord,
+    ) -> tuple[object, bool] | None:
+        entry = retained.get(_ID(parent))
+        if entry is None:
+            return None
+        if (
+            entry[0]() is not parent
+            or entry[1]() is not composition
+            or (entry[2] is not None and validate(composition, entry[2]) != entry[3])
+            or record.descriptor is not native_descriptor
+            or record.expected_count != entry[4]
+            or record.count_provenance != "lower-native"
+            or state_signature(record) != entry[5]
+            or (entry[2] is None) != (record.lifecycle == "parent-consumed")
+        ):
+            raise ValueError("GE_SQLITE_P11_NATIVE_PROJECTION_RECEIPT_INVALID")
+        return entry[3], entry[2] is not None
+
+    def advance(
+        parent: _SQLiteCursorPublicationMutationParentScope,
+        record: _ParentRecord,
+    ) -> None:
+        parent_id = _ID(parent)
+        entry = retained.get(parent_id)
+        if entry is None:
+            return
+        if (
+            entry[0]() is not parent
+            or record.descriptor is not native_descriptor
+            or record.expected_count != entry[4]
+            or record.count_provenance != "lower-native"
+        ):
+            raise ValueError("GE_SQLITE_P11_NATIVE_PROJECTION_RECEIPT_INVALID")
+        retained[parent_id] = (*entry[:5], state_signature(record))
+
+    def release_parent(parent: _SQLiteCursorPublicationMutationParentScope) -> None:
+        entry = retained.get(_ID(parent))
+        if entry is None or entry[0]() is not parent:
+            raise ValueError("GE_SQLITE_P11_NATIVE_PROJECTION_RECEIPT_INVALID")
+        retained[_ID(parent)] = (entry[0], entry[1], None, *entry[3:])
+
+    def release_composition(
+        composition: _SQLiteCursorPublicationOwnerComposition,
+    ) -> None:
+        for parent_id, entry in tuple(retained.items()):
+            if entry[1]() is composition:
+                retained[parent_id] = (entry[0], entry[1], None, *entry[3:])
+
+    return retain, assert_exact, advance, release_parent, release_composition
+
+
+(
+    _retain_native_projection_parent_receipt,
+    _assert_native_projection_parent_receipt,
+    _advance_native_projection_parent_state,
+    _release_native_projection_parent_receipt,
+    _release_native_projection_composition_receipts,
+) = _native_projection_parent_receipt_cell()
 
 
 def _reject_composition_token_mutation(
@@ -810,10 +1013,14 @@ def _terminal_composition_failure(
     _composition: _SQLiteCursorPublicationOwnerComposition,
     record: _Record,
     primary: BaseException,
+    _release_native: Callable[
+        [_SQLiteCursorPublicationOwnerComposition], None
+    ] = _release_native_projection_composition_receipts,
 ) -> Never:
     """Poison the selected composition and finalize through exact P9 authority."""
 
     record.lifecycle = "poisoned"
+    _release_native(_composition)
     owner = record.owner_ref()
     if _TYPE(owner) is not _SQLiteCursorPublicationTransactionOwner:
         raise primary
@@ -1028,6 +1235,14 @@ def _register_fixed_read(
 
 def _parent_record_for(
     parent: _SQLiteCursorPublicationMutationParentScope,
+    _assert_native: Callable[
+        [
+            _SQLiteCursorPublicationMutationParentScope,
+            _SQLiteCursorPublicationOwnerComposition,
+            _ParentRecord,
+        ],
+        tuple[object, bool] | None,
+    ] = _assert_native_projection_parent_receipt,
 ) -> tuple[_ParentRecord, _SQLiteCursorPublicationOwnerComposition, _Record]:
     if _TYPE(parent) is not _SQLiteCursorPublicationMutationParentScope:
         _fail("GE_SQLITE_P11_SCOPE_INVALID")
@@ -1058,6 +1273,17 @@ def _parent_record_for(
         _fail("GE_SQLITE_P11_COMPOSITION_PRESENTATION")
     try:
         _reauthenticate_composition(composition, composition_record)
+        private_native_snapshot = _assert_native(parent, composition, entry.record)
+        if (private_native_snapshot is not None) != (
+            entry.record.count_provenance == "lower-native"
+        ):
+            raise ValueError("GE_SQLITE_P11_NATIVE_PROJECTION_RECEIPT_INVALID")
+        if (
+            private_native_snapshot is not None
+            and not private_native_snapshot[1]
+            and entry.record.lifecycle != "parent-consumed"
+        ):
+            raise ValueError("GE_SQLITE_P11_NATIVE_PROJECTION_RECEIPT_INVALID")
     except BaseException as primary:
         entry.record.lifecycle = "poisoned"
         if composition_record.lifecycle == "begin-adopted":
@@ -1325,8 +1551,126 @@ def _issue_sqlite_cursor_publication_mutation_parent_scope_intrinsic(
     return parent
 
 
+def _adopt_sqlite_cursor_publication_native_projection_receipt_intrinsic(
+    composition: _SQLiteCursorPublicationOwnerComposition,
+    native_receipt: object,
+    consume_receipt: Callable[[object, object], int],
+) -> _SQLiteCursorPublicationMutationParentScope:
+    """Adopt an exact lower-source receipt without converting it to shape evidence."""
+
+    composition_record = _record_for(composition)
+    try:
+        _reauthenticate_composition(composition, composition_record)
+        _inject_sqlite_cursor_publication_native_projection_adoption_fault_intrinsic(
+            "consume-before", composition
+        )
+        retained_count = consume_receipt(composition, native_receipt)
+        _inject_sqlite_cursor_publication_native_projection_adoption_fault_intrinsic(
+            "consume-after", composition
+        )
+    except BaseException as primary:
+        if composition_record.lifecycle == "begin-adopted":
+            _terminal_composition_failure(composition, composition_record, primary)
+        raise
+    descriptor = _SQLITE_CURSOR_PUBLICATION_P11_MUTATION_ROUTES[2]
+    parent = _SQLiteCursorPublicationMutationParentScope(composition, _CONSTRUCTION_TOKEN)
+    _register_parent(
+        parent,
+        _ParentRecord(
+            ref(composition),
+            descriptor,
+            retained_count,
+            "parent-issued",
+            count_provenance="lower-native",
+            retained_count_receipt=None,
+        ),
+    )
+    _inject_sqlite_cursor_publication_native_projection_adoption_fault_intrinsic(
+        "parent-registered", composition
+    )
+    return parent
+
+
+def _install_bound_sqlite_cursor_publication_native_projection_adopter() -> None:
+    adopter_implementation = (
+        _adopt_sqlite_cursor_publication_native_projection_receipt_intrinsic
+    )
+    consumer = (
+        _invoke_sqlite_cursor_publication_native_projection_receipt_consume_intrinsic
+    )
+    snapshotter = (
+        _invoke_sqlite_cursor_publication_native_projection_receipt_snapshot_intrinsic
+    )
+    retainer = _retain_native_projection_parent_receipt
+
+    def adopt(composition: object, receipt: object) -> tuple[object, object]:
+        if _TYPE(composition) is not _SQLiteCursorPublicationOwnerComposition:
+            raise ValueError("GE_SQLITE_P11_NATIVE_PROJECTION_ADOPTION")
+        parent = adopter_implementation(composition, receipt, consumer)
+        snapshot = snapshotter(composition, receipt)
+        parent_entry = _DICT_GET(_PARENT_SCOPES, _ID(parent))
+        if parent_entry is None or parent_entry.token_ref() is not parent:
+            raise ValueError("GE_SQLITE_P11_NATIVE_PROJECTION_ADOPTION")
+        retainer(parent, composition, receipt, snapshot, parent_entry.record)
+        _inject_sqlite_cursor_publication_native_projection_adoption_fault_intrinsic(
+            "parent-after", composition
+        )
+        return parent, snapshot
+
+    _install_sqlite_cursor_publication_native_projection_adopter_intrinsic(adopt)
+
+
+_install_bound_sqlite_cursor_publication_native_projection_adopter()
+
+
+def _bind_sqlite_cursor_publication_native_projection_atomic_entry() -> Callable[
+    [_SQLiteCursorPublicationOwnerComposition, object],
+    _SQLiteCursorPublicationNativeProjectionAdoption,
+]:
+    pipeline = _invoke_sqlite_cursor_publication_native_projection_pipeline_intrinsic
+
+    def capture_and_adopt(
+        composition: _SQLiteCursorPublicationOwnerComposition,
+        source_summary: object,
+    ) -> _SQLiteCursorPublicationNativeProjectionAdoption:
+        """Synchronously drain and adopt NP1 evidence without exposing a raw receipt."""
+
+        composition_record = _record_for(composition)
+        try:
+            owner, begin_receipt = _composition_owner_receipt(
+                composition, composition_record
+            )
+            _reauthenticate_composition(composition, composition_record)
+            parent, receipt_snapshot = pipeline(
+                owner,
+                begin_receipt,
+                composition,
+                source_summary,
+            )
+            if _TYPE(parent) is not _SQLiteCursorPublicationMutationParentScope:
+                raise ValueError("GE_SQLITE_P11_NATIVE_PROJECTION_ADOPTION")
+            return _SQLiteCursorPublicationNativeProjectionAdoption(
+                parent, receipt_snapshot
+            )
+        except BaseException as primary:
+            if composition_record.lifecycle == "begin-adopted":
+                _terminal_composition_failure(composition, composition_record, primary)
+            raise
+
+    return capture_and_adopt
+
+
+_capture_and_adopt_sqlite_cursor_publication_native_projection_intrinsic = (
+    _bind_sqlite_cursor_publication_native_projection_atomic_entry()
+)
+_seal_sqlite_cursor_publication_native_projection_bridge_intrinsic()
+
+
 def _prepare_sqlite_cursor_publication_reusable_parent_intrinsic(
     parent: _SQLiteCursorPublicationMutationParentScope,
+    _advance_native: Callable[
+        [_SQLiteCursorPublicationMutationParentScope, _ParentRecord], None
+    ] = _advance_native_projection_parent_state,
 ) -> None:
     state, composition, composition_record = _parent_record_for(parent)
     if (
@@ -1337,11 +1681,15 @@ def _prepare_sqlite_cursor_publication_reusable_parent_intrinsic(
         _poison_parent(state, composition, composition_record)
     state.reusable_parent_prepare_count = 1
     state.lifecycle = "awaiting-zero-postflight" if state.expected_count == 0 else "parent-ready"
+    _advance_native(parent, state)
 
 
 def _issue_sqlite_cursor_publication_mutation_child_permit_intrinsic(
     parent: _SQLiteCursorPublicationMutationParentScope,
     ordinal: int,
+    _advance_native: Callable[
+        [_SQLiteCursorPublicationMutationParentScope, _ParentRecord], None
+    ] = _advance_native_projection_parent_state,
 ) -> _SQLiteCursorPublicationMutationChildPermit:
     state, composition, composition_record = _parent_record_for(parent)
     active_child = None if state.active_child_ref is None else state.active_child_ref()
@@ -1359,11 +1707,15 @@ def _issue_sqlite_cursor_publication_mutation_child_permit_intrinsic(
     state.active_child_ref = ref(child)
     state.child_issued_count += 1
     state.lifecycle = "child-active"
+    _advance_native(parent, state)
     return child
 
 
 def _enter_sqlite_cursor_publication_mutation_child_permit_intrinsic(
     child: _SQLiteCursorPublicationMutationChildPermit,
+    _advance_native: Callable[
+        [_SQLiteCursorPublicationMutationParentScope, _ParentRecord], None
+    ] = _advance_native_projection_parent_state,
 ) -> None:
     child_state, parent_state, parent = _child_record_for(child)
     _mutation_child_transition(
@@ -1375,10 +1727,14 @@ def _enter_sqlite_cursor_publication_mutation_child_permit_intrinsic(
         "child-entered",
     )
     parent_state.child_entered_count += 1
+    _advance_native(parent, parent_state)
 
 
 def _record_sqlite_cursor_publication_mutation_child_return_intrinsic(
     child: _SQLiteCursorPublicationMutationChildPermit,
+    _advance_native: Callable[
+        [_SQLiteCursorPublicationMutationParentScope, _ParentRecord], None
+    ] = _advance_native_projection_parent_state,
 ) -> None:
     child_state, parent_state, parent = _child_record_for(child)
     _mutation_child_transition(
@@ -1390,10 +1746,14 @@ def _record_sqlite_cursor_publication_mutation_child_return_intrinsic(
         "child-native-returned",
     )
     parent_state.child_native_return_count += 1
+    _advance_native(parent, parent_state)
 
 
 def _retire_sqlite_cursor_publication_mutation_child_resource_intrinsic(
     child: _SQLiteCursorPublicationMutationChildPermit,
+    _advance_native: Callable[
+        [_SQLiteCursorPublicationMutationParentScope, _ParentRecord], None
+    ] = _advance_native_projection_parent_state,
 ) -> None:
     child_state, parent_state, parent = _child_record_for(child)
     _mutation_child_transition(
@@ -1407,10 +1767,14 @@ def _retire_sqlite_cursor_publication_mutation_child_resource_intrinsic(
     parent_state.child_resource_retired_count += 1
     if child_state.model == "parent-owned-reusable":
         parent_state.reusable_execution_lease_released_count += 1
+    _advance_native(parent, parent_state)
 
 
 def _accept_sqlite_cursor_publication_mutation_child_postflight_intrinsic(
     child: _SQLiteCursorPublicationMutationChildPermit,
+    _advance_native: Callable[
+        [_SQLiteCursorPublicationMutationParentScope, _ParentRecord], None
+    ] = _advance_native_projection_parent_state,
 ) -> None:
     child_state, parent_state, parent = _child_record_for(child)
     _mutation_child_transition(
@@ -1422,6 +1786,7 @@ def _accept_sqlite_cursor_publication_mutation_child_postflight_intrinsic(
         "child-postflight-accepted",
     )
     parent_state.child_postflight_accepted_count += 1
+    _advance_native(parent, parent_state)
 
 
 def _mutation_child_transition(
@@ -1445,6 +1810,9 @@ def _mutation_child_transition(
 
 def _consume_sqlite_cursor_publication_mutation_child_permit_intrinsic(
     child: _SQLiteCursorPublicationMutationChildPermit,
+    _advance_native: Callable[
+        [_SQLiteCursorPublicationMutationParentScope, _ParentRecord], None
+    ] = _advance_native_projection_parent_state,
 ) -> None:
     child_state, parent_state, parent = _child_record_for(child)
     active = None if parent_state.active_child_ref is None else parent_state.active_child_ref()
@@ -1453,6 +1821,16 @@ def _consume_sqlite_cursor_publication_mutation_child_permit_intrinsic(
         or active is not child
         or child_state.lifecycle != "child-postflight-accepted"
         or child_state.ordinal != parent_state.next_ordinal
+        or parent_state.child_issued_count
+        != parent_state.child_entered_count
+        or parent_state.child_entered_count
+        != parent_state.child_native_return_count
+        or parent_state.child_native_return_count
+        != parent_state.child_resource_retired_count
+        or parent_state.child_resource_retired_count
+        != parent_state.child_postflight_accepted_count
+        or parent_state.child_postflight_accepted_count
+        != parent_state.child_consumed_count + 1
     ):
         _state, composition, composition_record = _parent_record_for(parent)
         _poison_parent(parent_state, composition, composition_record, child_state)
@@ -1466,10 +1844,14 @@ def _consume_sqlite_cursor_publication_mutation_child_permit_intrinsic(
         parent_state.lifecycle = "awaiting-parent-resource-retirement"
     else:
         parent_state.lifecycle = "parent-complete"
+    _advance_native(parent, parent_state)
 
 
 def _accept_sqlite_cursor_publication_mutation_zero_item_postflight_intrinsic(
     parent: _SQLiteCursorPublicationMutationParentScope,
+    _advance_native: Callable[
+        [_SQLiteCursorPublicationMutationParentScope, _ParentRecord], None
+    ] = _advance_native_projection_parent_state,
 ) -> None:
     state, composition, composition_record = _parent_record_for(parent)
     if state.expected_count != 0 or state.lifecycle != "awaiting-zero-postflight":
@@ -1479,10 +1861,14 @@ def _accept_sqlite_cursor_publication_mutation_zero_item_postflight_intrinsic(
         if state.descriptor.model == "parent-owned-reusable"
         else "parent-complete"
     )
+    _advance_native(parent, state)
 
 
 def _retire_sqlite_cursor_publication_reusable_parent_resource_intrinsic(
     parent: _SQLiteCursorPublicationMutationParentScope,
+    _advance_native: Callable[
+        [_SQLiteCursorPublicationMutationParentScope, _ParentRecord], None
+    ] = _advance_native_projection_parent_state,
 ) -> None:
     state, composition, composition_record = _parent_record_for(parent)
     if (
@@ -1494,15 +1880,43 @@ def _retire_sqlite_cursor_publication_reusable_parent_resource_intrinsic(
         _poison_parent(state, composition, composition_record)
     state.parent_resource_retired_count = 1
     state.lifecycle = "parent-complete"
+    _advance_native(parent, state)
 
 
-def _consume_sqlite_cursor_publication_mutation_parent_scope_intrinsic(
+def _consume_sqlite_cursor_publication_mutation_parent_scope_implementation(
     parent: _SQLiteCursorPublicationMutationParentScope,
+    release_native: Callable[[_SQLiteCursorPublicationMutationParentScope], None],
+    advance_native: Callable[
+        [_SQLiteCursorPublicationMutationParentScope, _ParentRecord], None
+    ],
 ) -> None:
     state, composition, composition_record = _parent_record_for(parent)
     if state.lifecycle != "parent-complete" or state.next_ordinal != state.expected_count:
         _poison_parent(state, composition, composition_record)
     state.lifecycle = "parent-consumed"
+    if state.count_provenance == "lower-native":
+        advance_native(parent, state)
+        release_native(parent)
+
+
+def _bind_sqlite_cursor_publication_mutation_parent_consumer() -> Callable[
+    [_SQLiteCursorPublicationMutationParentScope], None
+]:
+    implementation = (
+        _consume_sqlite_cursor_publication_mutation_parent_scope_implementation
+    )
+    release_native = _release_native_projection_parent_receipt
+    advance_native = _advance_native_projection_parent_state
+
+    def consume(parent: _SQLiteCursorPublicationMutationParentScope) -> None:
+        implementation(parent, release_native, advance_native)
+
+    return consume
+
+
+_consume_sqlite_cursor_publication_mutation_parent_scope_intrinsic = (
+    _bind_sqlite_cursor_publication_mutation_parent_consumer()
+)
 
 
 def _read_sqlite_cursor_publication_mutation_parent_scope_snapshot_intrinsic(
@@ -1526,6 +1940,7 @@ def _read_sqlite_cursor_publication_mutation_parent_scope_snapshot_intrinsic(
         state.reusable_parent_prepare_count,
         state.reusable_execution_lease_released_count,
         state.parent_resource_retired_count,
+        state.count_provenance,
         0,
         False,
     )
@@ -1670,3 +2085,33 @@ def _read_sqlite_cursor_publication_fixed_read_permit_snapshot_intrinsic(
         0,
         False,
     )
+
+
+globals().pop("_retain_native_projection_parent_receipt", None)
+globals().pop("_assert_native_projection_parent_receipt", None)
+globals().pop("_advance_native_projection_parent_state", None)
+globals().pop("_release_native_projection_parent_receipt", None)
+globals().pop("_release_native_projection_composition_receipts", None)
+globals().pop("_native_projection_parent_receipt_cell", None)
+globals().pop("_adopt_sqlite_cursor_publication_native_projection_receipt_intrinsic", None)
+globals().pop("_install_bound_sqlite_cursor_publication_native_projection_adopter", None)
+globals().pop("_bind_sqlite_cursor_publication_native_projection_atomic_entry", None)
+globals().pop(
+    "_consume_sqlite_cursor_publication_mutation_parent_scope_implementation", None
+)
+globals().pop("_bind_sqlite_cursor_publication_mutation_parent_consumer", None)
+globals().pop(
+    "_install_sqlite_cursor_publication_native_projection_adopter_intrinsic", None
+)
+globals().pop(
+    "_invoke_sqlite_cursor_publication_native_projection_pipeline_intrinsic", None
+)
+globals().pop(
+    "_invoke_sqlite_cursor_publication_native_projection_receipt_consume_intrinsic",
+    None,
+)
+globals().pop(
+    "_invoke_sqlite_cursor_publication_native_projection_receipt_snapshot_intrinsic",
+    None,
+)
+globals().pop("_seal_sqlite_cursor_publication_native_projection_bridge_intrinsic", None)

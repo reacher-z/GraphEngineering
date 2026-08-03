@@ -33,6 +33,7 @@ const weakMapSetIntrinsic = WeakMap.prototype.set;
 const weakRefDerefIntrinsic = WeakRef.prototype.deref;
 const weakRefIntrinsic = WeakRef;
 const reflectApplyIntrinsic = Reflect.apply;
+const arrayPushIntrinsic = Array.prototype.push;
 
 export const SQLITE_CURSOR_PUBLICATION_TRANSACTION_GUARD_PATHS = objectFreezeIntrinsic([
   "connection-commit-method",
@@ -127,6 +128,7 @@ export interface SQLiteCursorPublicationTransactionOwnerCurrentSnapshot {
   readonly totalChanges: number;
   readonly tempMutationEpoch: bigint;
 }
+
 
 export type SQLiteCursorPublicationTransactionOwnerLifecycle =
   | "registered"
@@ -241,6 +243,7 @@ interface OwnerState {
     | "GE_SQLITE_TX_OWNER_REOPEN_AUDIT"
   )[];
 }
+
 
 interface BeginReceiptState {
   readonly owner: WeakRef<object>;
@@ -417,7 +420,9 @@ function auditReopenedSourceV1(state: OwnerState, primary: object): void {
     const corrupt = codeDescriptor !== undefined && "value" in codeDescriptor
       && codeDescriptor.value === "GE_CYCLE_STORE_CORRUPTION";
     state.lifecycle = corrupt ? "corrupt" : "reopen-unavailable";
-    state.diagnosticCodes.push("GE_SQLITE_TX_OWNER_REOPEN_AUDIT");
+    reflectApplyIntrinsic(arrayPushIntrinsic, state.diagnosticCodes, [
+      "GE_SQLITE_TX_OWNER_REOPEN_AUDIT",
+    ]);
     ownerError(
       corrupt
         ? "GE_SQLITE_TX_OWNER_REOPEN_CORRUPTION"
@@ -430,7 +435,9 @@ function auditReopenedSourceV1(state: OwnerState, primary: object): void {
   }
   if (reopenedFingerprint !== state.sourceFingerprint) {
     state.lifecycle = "corrupt";
-    state.diagnosticCodes.push("GE_SQLITE_TX_OWNER_REOPEN_AUDIT");
+    reflectApplyIntrinsic(arrayPushIntrinsic, state.diagnosticCodes, [
+      "GE_SQLITE_TX_OWNER_REOPEN_AUDIT",
+    ]);
     ownerError(
       "GE_SQLITE_TX_OWNER_REOPEN_CORRUPTION",
       "reopened source-v1 fingerprint drifted",
@@ -458,7 +465,9 @@ function closeOwnedConnection(state: OwnerState, owner: object): void {
       throw injected;
     }
   } catch {
-    state.diagnosticCodes.push("GE_SQLITE_TX_OWNER_CLOSE_TERTIARY");
+    reflectApplyIntrinsic(arrayPushIntrinsic, state.diagnosticCodes, [
+      "GE_SQLITE_TX_OWNER_CLOSE_TERTIARY",
+    ]);
   }
 }
 
@@ -610,7 +619,9 @@ export function beginSQLiteCursorPublicationTransactionOwnerIntrinsic(
         "native BEGIN threw a non-object primary",
         { cause: primary },
       );
-    state.diagnosticCodes.push("GE_SQLITE_TX_OWNER_TERMINAL_PRIMARY");
+    reflectApplyIntrinsic(arrayPushIntrinsic, state.diagnosticCodes, [
+      "GE_SQLITE_TX_OWNER_TERMINAL_PRIMARY",
+    ]);
     let exactActive = false;
     try {
       captureConnectionSnapshot(state);
@@ -642,7 +653,9 @@ export function beginSQLiteCursorPublicationTransactionOwnerIntrinsic(
         captureConnectionSnapshot(state);
       } catch {
         state.lifecycle = "rollback-in-doubt";
-        state.diagnosticCodes.push("GE_SQLITE_TX_OWNER_ROLLBACK_SECONDARY");
+        reflectApplyIntrinsic(arrayPushIntrinsic, state.diagnosticCodes, [
+          "GE_SQLITE_TX_OWNER_ROLLBACK_SECONDARY",
+        ]);
       }
     } else {
       state.lifecycle = "begin-in-doubt";
@@ -666,7 +679,9 @@ export function beginSQLiteCursorPublicationTransactionOwnerIntrinsic(
       "GE_SQLITE_TX_OWNER_BEGIN_POSTFLIGHT",
       "BEGIN returned without the exact exclusive owner postflight",
     );
-    state.diagnosticCodes.push("GE_SQLITE_TX_OWNER_TERMINAL_PRIMARY");
+    reflectApplyIntrinsic(arrayPushIntrinsic, state.diagnosticCodes, [
+      "GE_SQLITE_TX_OWNER_TERMINAL_PRIMARY",
+    ]);
     tombstoneProvisional(state);
     state.lifecycle = "begin-postflight-in-doubt";
     closeOwnedConnection(state, owner as object);
@@ -697,7 +712,9 @@ export function beginSQLiteCursorPublicationTransactionOwnerIntrinsic(
     );
   }
   if (sourcePostflightPrimary !== undefined) {
-    state.diagnosticCodes.push("GE_SQLITE_TX_OWNER_TERMINAL_PRIMARY");
+    reflectApplyIntrinsic(arrayPushIntrinsic, state.diagnosticCodes, [
+      "GE_SQLITE_TX_OWNER_TERMINAL_PRIMARY",
+    ]);
     tombstoneProvisional(state);
     state.lifecycle = "rolling-back";
     state.rollbackAttemptCount = 1;
@@ -715,7 +732,9 @@ export function beginSQLiteCursorPublicationTransactionOwnerIntrinsic(
       captureConnectionSnapshot(state);
     } catch {
       state.lifecycle = "rollback-in-doubt";
-      state.diagnosticCodes.push("GE_SQLITE_TX_OWNER_ROLLBACK_SECONDARY");
+      reflectApplyIntrinsic(arrayPushIntrinsic, state.diagnosticCodes, [
+        "GE_SQLITE_TX_OWNER_ROLLBACK_SECONDARY",
+      ]);
     }
     closeOwnedConnection(state, owner as object);
     try {
@@ -910,6 +929,27 @@ export function assertSQLiteCursorPublicationOwnerCompositionCurrentIntrinsic(
   });
 }
 
+/** Reprove that one caller-presented connection is this adopted graph's exact connection. */
+export function assertSQLiteCursorPublicationOwnerCompositionConnectionIntrinsic(
+  owner: SQLiteCursorPublicationTransactionOwner,
+  receipt: SQLiteCursorPublicationTransactionBeginReceipt,
+  composition: object,
+  connection: SQLiteConnection,
+): SQLiteCursorPublicationTransactionOwnerCurrentSnapshot {
+  const state = stateForOwner(owner);
+  if (state.connection !== connection) {
+    return ownerError(
+      "GE_SQLITE_TX_OWNER_INVALID_AUTHORITY",
+      "adopted owner composition connection identity is invalid",
+    );
+  }
+  return assertSQLiteCursorPublicationOwnerCompositionCurrentIntrinsic(
+    owner,
+    receipt,
+    composition,
+  );
+}
+
 /** One-shot after-native-return fault seam; it does not claim a driver-native throw. */
 export function injectSQLiteCursorPublicationBeginAfterNativeReturnFaultForTestIntrinsic(
   error: object,
@@ -974,7 +1014,9 @@ export function captureSQLiteCursorPublicationTransactionFailureIntrinsic(
   }
   state.lifecycle = "failure-claimed";
   state.primary = primary;
-  state.diagnosticCodes.push("GE_SQLITE_TX_OWNER_TERMINAL_PRIMARY");
+  reflectApplyIntrinsic(arrayPushIntrinsic, state.diagnosticCodes, [
+    "GE_SQLITE_TX_OWNER_TERMINAL_PRIMARY",
+  ]);
   retireBeginReceipt(state);
   const capture = objectFreezeIntrinsic(objectCreateIntrinsic(null)) as
     SQLiteCursorPublicationTransactionFailureCapture;
@@ -1030,7 +1072,9 @@ export function finalizeSQLiteCursorPublicationTransactionFailureIntrinsic(
     captureConnectionSnapshot(state);
   } catch {
     state.lifecycle = "rollback-failed";
-    state.diagnosticCodes.push("GE_SQLITE_TX_OWNER_ROLLBACK_SECONDARY");
+    reflectApplyIntrinsic(arrayPushIntrinsic, state.diagnosticCodes, [
+      "GE_SQLITE_TX_OWNER_ROLLBACK_SECONDARY",
+    ]);
     try {
       const observed = readSQLiteConnectionOwnerSnapshot(connection);
       if (observed.isTransaction) state.lifecycle = "rollback-in-doubt";

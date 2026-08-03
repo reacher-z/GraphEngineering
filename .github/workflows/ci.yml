@@ -188,6 +188,9 @@ jobs:
       - name: Enforce SQLite P11 owner-composition cross-runtime parity
         timeout-minutes: 10
         run: pnpm test:sqlite-owner-composition-parity
+      - name: Enforce SQLite NP1 lower-native projection runtime and parity
+        timeout-minutes: 15
+        run: pnpm test:sqlite-native-projection-runtime
       - name: Classify every Python SQLite callsite candidate
         timeout-minutes: 10
         run: pnpm test:sqlite-owner-composition-python-callsite-classification
