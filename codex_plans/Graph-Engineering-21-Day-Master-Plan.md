@@ -23115,3 +23115,111 @@ native member delegation时才可升级，其余回落unknown。这个计数变�
 
 生产scanner完整JSON双跑byte-identical，SHA-256为`df4691df331d3e03e7c4f71de455a3f6bff14eb731ecfd46ebbe72bc04ad1b0d`；
 457 total、TS206/Python251、TS buckets15/184/5/2、71 scanned files保持不变。以上hardening仍只提高triage可信度，不授权任何route closure。
+
+#### 31.37.93 P11-A count-receipt与callsite-triage不可变检查点（2026-08-03 PDT追加；既有内容不改）
+
+本节只追加不可变实现绑定，不回写任何旧计划字节。追加前完整23,117行前缀
+SHA-256必须保持为
+`f9ce35de3177b0e837a23c1e0bcd569f209ed6498268764abbf0d524ea07c551`。
+
+1. 18文件、3,827 insertions、97 deletions的实现已原子提交并推送为
+   `90fae463db5ef3097cf4b21ff4e07517edfbebd0`。作者和提交者精确为
+   `reacher-z <mtrxcop@gmail.com>`，无co-author；local、tracking、remote引用
+   必须继续指向同一对象。
+2. TypeScript/Python retained projection count只接受definition-owned、opaque、
+   one-shot receipt。receipt绑定exact composition、P9 owner、BEGIN generation、
+   baseline descriptor、retained projection identity、computed count与nonce。
+3. scalar fake zero、clone、Proxy、subclass、cross-composition、cross-generation、
+   replay、captured intrinsics、Python builtin/base replacement、GC/id reuse和P9
+   cleanup后使用均须fail closed；不得退化为结构或truthiness检查。
+4. scanner仍给出457个稳定identity并保持`routeClosureClaimed=false`。最终triage为：
+   TypeScript 15 native/184 wrapper-probe/5 false-positive/2 unknown；Python
+   187 native/31 wrapper-probe/0 false-positive/33 unknown。
+5. explicit path必须canonical、root-contained、regular、non-symlink且不重复；排序
+   使用Unicode code-point；candidate ID基于UTF-8 canonical JSON。Python child对
+   spawn error、signal、nonzero、stderr和invalid JSON一律fail closed。
+6. 冻结验收：P11 parity3、TS81、Python83、scanner6、Python classifier10、
+   classification parity2、typecheck、Ruff、strict Mypy、spec/structure/diff gates
+   全绿。production scanner双跑SHA-256为
+   `df4691df331d3e03e7c4f71de455a3f6bff14eb731ecfd46ebbe72bc04ad1b0d`。
+7. 独立审计为H0/M0/L0，但只接受bounded scope。P11继续`in_progress`，并保持
+   `nativeSourceProvenance=false`、`genuineZeroClaim=false`、
+   `actualNativeIoCount=0`、`sqlAuthority=false`。
+8. 不登记completed-test evidence，不增加release weight，不授权COMMIT。native
+   route closure、runtime-real retirement、P11-B/C/D、D9、RC/stable仍为Open。
+
+#### 31.37.94 P11-A-RM1 baseline-source scoped route map执行计划（2026-08-03 PDT追加）
+
+下一批必须先冻结route evidence，再单独实现native projection，避免把route、authority、
+resource三个审计边界揉进一个提交。RM1仅覆盖两个baseline-source owner文件：
+TypeScript `packages/sqlite/src/operation-baseline-source.ts`的18条candidate，以及
+Python `python/src/graph_engineering/sqlite_operation_baseline_source.py`的47条candidate，
+合计65条；不扩展到stage/campaign/B2，不修改真实SQL执行路径。
+
+##### RM1-A：canonical 65-entry manifest
+
+1. 新建规范化callsite manifest；每项必须包含language、canonical path、line、column、
+   method、sqlOrigin、occurrence/stable SHA、receiver evidence、receiver category、
+   唯一lower native edge、exact SQL digest或closed dynamic expansion、parameter
+   provenance、phase、owner/composition expectation、row/cursor budget、resource
+   lifecycle、routeId、disposition和reason。
+2. disposition只允许`authenticated-fixed-read`、`scoped-mutation`、`forbidden`、
+   `unknown`。缺任何证据字段都必须保持unknown；不能靠方法名、SQL关键词或路径
+   相似度自动升级。
+3. manifest对这两个文件的65个scanner identity必须一对一partition：不得丢失、
+   重复、合并occurrence、重签identity或把wrapper与lower native edge双计。
+4. 当前9个Python structural unknown必须保留unknown+reason，除非同一提交中新增可
+   复现的unbound-method/member-write lineage证据；验收不要求虚构unknown=0。
+
+##### RM1-B：validator、join工具与hostile矩阵
+
+1. 新增canonical manifest validator和focused validator tests；新增只读route-map
+   join工具，把现有scanner、Python classifier与manifest按stable identity连接。
+2. 删除、重复、交换、path/line/column/method/sqlOrigin漂移、candidate SHA重签、
+   跨语言替换、字段删除、跨route挪用都必须失败。
+3. dynamic/f-string/template只有fixture冻结的closed expansion set可进入candidate；
+   caller-supplied SQL/table/callback保持unknown或forbidden。
+4. wrapper必须唯一指向lower edge；一对多、环、悬空、native+wrapper双计失败。
+5. control/script/transaction callsite不得取得permit；unknown不得被drop、折叠为
+   false-positive或计入route coverage。
+6. scoped报告必须精确为18+47=65，同时复核全局457总量和真实remaining unknown；
+   `routeClosureClaimed`始终为false。
+7. 所有manifest/report双跑byte-identical，Unicode排序一致；inventory drift、fixture
+   hash drift或classifier drift在CI中fail closed。
+
+##### RM1-C：文件、CI和回归边界
+
+1. 计划新增`spec/sqlite-cursor-publication-owner-composition-p11.callsites.json`、
+   callsite-map validator及测试、`tools/sqlite-native-callsite-route-map.mjs`及hostile
+   tests；更新P11 spec/validator、package scripts和CI gate。
+2. 仅在真实结构证据需要时修改scanner/classifier及其测试；不得为通过fixture降低
+   unknown-default。RM1不修改owner-composition runtime、operation-baseline-source
+   runtime以及P8/P9/P10 trusted assets。
+3. 必跑P11 contract/runtime/parity、scanner6、classifier10+Ruff+strict Mypy、
+   classification parity2、P9/P10回归、docs、task/release/evidence controls和diff check。
+4. 至少一个独立architecture reviewer与一个hostile manifest reviewer复核冻结diff；
+   H/M必须修复，L必须修复或以严格bounded rationale登记。
+
+##### RM1-D：验收与nonclaims
+
+RM1只接受“两个baseline-source文件的可复现、可审计route-map inventory”。即使65项
+字段闭合，也不授权SQL，不声称全局unknown=0或P11-A closure，不声称native-source
+provenance、genuine N=0、root/count receipt、execute-N binding、runtime-real cursor/
+statement retirement、writer hook、N=0/1/3 success、P11-B/C/D、stage18、third clock
+consume、COMMIT、D9/release/RC/stars。
+
+#### 31.37.95 P11-A-NP1 native projection后继计划（RM1验收后方可开始）
+
+1. source模块独占构造lower-owned opaque native receipt；composition只能adopt该
+   receipt，并移除或封闭任何package caller可直接使用的generic projection mint。
+2. 在真实file-backed SQLite上覆盖N=0/1/3；TypeScript证明iterator/statement lexical
+   release，Python证明cursor close精确1/1，并绑定root/hash/count/owner/generation/permit。
+3. prepare/bind/step/read/exhaust/close/finalize/cleanup逐阶段fault injection全部走P9
+   cleanup且commit count为0；partial read、double close、GC、rebind、cross-db、
+   cross-connection、replay、cross-owner/generation都fail closed。
+4. 只有真实read完整exhaust并runtime-real retirement后才可mint genuine-zero receipt；
+   fixture row count、expected count、scalar zero和caller hint永远不能替代native telemetry。
+5. 双运行时reporter规范化route ID、baseline digest、projection lifecycle、retirement、
+   receipt acceptance、cleanup和四项claim flags；success/failure矩阵必须exact parity。
+6. NP1仍不自动完成P11-B/C/D、stage18、COMMIT、D9或release；完成后仍需独立审计和
+   append-only immutable evidence reconciliation。

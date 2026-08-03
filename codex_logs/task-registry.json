@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-08-03T10:57:46Z",
+  "updated_at": "2026-08-03T11:52:52Z",
   "repository": ".",
   "scan_policy": {
     "warning_after_minutes": 60,
@@ -2257,8 +2257,12 @@
         "packages/sqlite/test/cursor-publication-owner-composition-parity.test.ts",
         "python/tests/sqlite_cursor_publication_owner_composition_report.py",
         "tools/sqlite-native-callsite-discovery.mjs",
+        "python/src/graph_engineering/sqlite_native_callsite_classification.py",
+        "python/tests/sqlite_native_callsite_classification_report.py",
+        "tools/sqlite-native-callsite-classification-parity.test.mjs",
         "codex_logs/reviews/SQLITE-PUBLICATION-OWNER-COMPOSITION-P11-A-2026-08-03.md",
-        "codex_logs/reviews/SQLITE-P11-A-SCOPE-READ-PARITY-DISCOVERY-2026-08-03.md"
+        "codex_logs/reviews/SQLITE-P11-A-SCOPE-READ-PARITY-DISCOVERY-2026-08-03.md",
+        "codex_logs/reviews/SQLITE-P11-A-COUNT-RECEIPT-CALLSITE-TRIAGE-2026-08-03.md"
       ],
       "expected_tests": [
         "P11-A opaque composition scoped mutation fixed-read and Python failure-capture contract",
@@ -2270,10 +2274,10 @@
       "evidence_required": true,
       "assigned_at": "2026-08-03T09:07:21Z",
       "started_at": "2026-08-03T09:10:00Z",
-      "last_heartbeat": "2026-08-03T10:57:46Z",
+      "last_heartbeat": "2026-08-03T11:52:52Z",
       "risk": "critical",
       "blocker": null,
-      "next_action": "Continue from bounded commits 02fffe7e3c7dbf54439454568c303f944c4c7f75 and 7448c27f1b09e3feaa7021e378f5ccd7fcc66141: classify all 457 discovery candidates conservatively, add exact baseline count provenance and runtime-real fixed-read retirement, then close native P11-A before P11-B/C/D without COMMIT or release weight"
+      "next_action": "Execute P11-A-RM1 after bounded commit 90fae463db5ef3097cf4b21ff4e07517edfbebd0: freeze a canonical one-to-one route or forbidden map for the 18 TypeScript and 47 Python baseline-source candidates while preserving every unsupported callsite as unknown and routeClosureClaimed=false; only after independent RM1 acceptance begin the separate lower-owned native projection and runtime-real retirement tranche, without COMMIT or release weight"
     }
   ]
 }

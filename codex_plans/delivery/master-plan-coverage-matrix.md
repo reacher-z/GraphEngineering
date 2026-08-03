@@ -270,3 +270,16 @@ predecessors remain Open.
 - Registry expansion to 112 tasks and P10 completion do not change release
   weight. Candidate-bound evidence closure remains audit-only at 0/93 until a
   future immutable release candidate closes every release-rollup predecessor.
+
+## 2026-08-03 PDT P11 count provenance and triage checkpoint
+
+- Immutable commit `90fae463db5ef3097cf4b21ff4e07517edfbebd0` adds the
+  dual-runtime retained-projection count receipt and deterministic conservative
+  TypeScript/Python callsite classification. Independent disposition is
+  H0/M0/L0.
+- The scanner remains a 457-callsite, route-unknown inventory. The 15
+  TypeScript and 187 Python confirmed-native receivers define the next mapping
+  set only; they do not authorize any route.
+- P11 stays In Progress with no completed-test evidence or release weight.
+  Native projection ownership, runtime-real fixed-read retirement, exact route
+  contracts, and P11-B/C/D remain Open. Evidence closure stays audit-only 0/93.

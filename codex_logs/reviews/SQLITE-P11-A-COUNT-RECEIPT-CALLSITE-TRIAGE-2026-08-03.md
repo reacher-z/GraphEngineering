@@ -136,3 +136,17 @@ locale-ordering, Unicode candidate-ID, strict-Mypy, CI-uv, reporter migration,
 and specification wording findings, the frozen whole-diff review is
 `H0 / M0 / L0`. This accepts the tranche only within the bounded scope and
 strict nonclaims above; it does not change P11 or release status.
+
+## Immutable implementation binding
+
+The accepted 18-file implementation was committed and pushed as
+`90fae463db5ef3097cf4b21ff4e07517edfbebd0` with 3,827 insertions and 97
+deletions. Author and committer are `reacher-z <mtrxcop@gmail.com>` and no
+co-author trailer is present. Local, tracking, and remote branch refs were
+verified at that exact object. This binding does not broaden the bounded
+review disposition or any nonclaim above.
+
+The evidence reconciliation preserves the 23,117-line master-plan prefix at
+SHA-256 `f9ce35de3177b0e837a23c1e0bcd569f209ed6498268764abbf0d524ea07c551`
+and appends RM1/NP1 planning through line 23,225. The resulting plan SHA-256 is
+`bc46ef2b6028b140a9531fec76b4d1f2268defce73a1faab3a9093fd721dc0bf`.

@@ -565,3 +565,10 @@ These tasks carry no direct release-checklist weight. They may become evidence
 inside the future D9 extended-durability candidate only after redaction,
 approval, full recovery/storage conformance, manifest activation, and the
 remaining SQLite publication chain close on one immutable candidate.
+
+Commit `90fae463db5ef3097cf4b21ff4e07517edfbebd0` advances only the existing
+P11 node. It adds a definition-owned count-receipt edge and conservative
+callsite triage, but creates no dependency edge and completes no release
+ancestor. Next progress must connect a lower-owned native projection reader to
+explicitly mapped native routes and prove runtime-real read retirement without
+widening P9/P10 authority.
