@@ -1,5 +1,11 @@
 export { PatternInputError, type PatternErrorCode } from "./errors.js";
 export {
+  citedResearch,
+  claimId,
+  type CitedResearchOptions,
+  type CitedSource,
+} from "./cited-research.js";
+export {
   ecosystemScan,
   type EcosystemScanOptions,
   type ScanSource,

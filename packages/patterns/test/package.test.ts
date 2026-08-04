@@ -14,6 +14,8 @@ test("package marks itself side-effect free and exposes only the intended API", 
   assert.equal(manifest.sideEffects, false);
   assert.deepEqual(Object.keys(publicApi).sort(), [
     "PatternInputError",
+    "citedResearch",
+    "claimId",
     "diamond",
     "ecosystemScan",
     "loopUntilDry",

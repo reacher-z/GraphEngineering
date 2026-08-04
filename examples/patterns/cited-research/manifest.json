@@ -1,0 +1,226 @@
+{
+  "apiVersion": "graphengineering.reacher-z.github.io/pattern-bundle/v1alpha1",
+  "kind": "PatternBundle",
+  "patternId": "pattern-02-cited-deep-research",
+  "version": "0.1.0",
+  "title": "Cited deep research (reduced form)",
+  "maturity": "alpha",
+  "intent": "Scope one question into independent cited source jobs, run them in parallel with bounded retries, extract claims at exactly one fan-in barrier that gives every claim a stable hash-derived identity, adversarially review each cited claim in a fixed skeptic slot, and adjudicate at a second barrier that assigns supported / contradicted / insufficient-evidence verdicts, enforces a citation-coverage gate (a claim citing no source item is rejected with a recorded reason), and emits an exportable evidence table whose every citation and counter-evidence reference resolves to a committed fixture item. This is the master-plan Pattern 02 reduced to what the runtime actually delivers today; see limitations for everything the full pattern would add.",
+  "nonGoals": [
+    "It does not fan out per claim. The master-plan pattern spawns one skeptic per extracted claim at run time; that is dynamic graph growth, which every runtime here refuses pre-dispatch (`maxDynamicNodes` requires the unimplemented `dynamic-graph-patch` capability). The skeptic stage is a fixed slot count chosen at construction time, and more cited claims than slots is a loud failure, not a truncation.",
+    "Its skeptics are not verifiers. They are ordinary `agent` nodes — the `validator` node kind is capability-gated and refused before dispatch — and their adversarial content is scripted fixture data, not reasoning.",
+    "It does not research anything. Every source finding, claim, citation and contradiction comes from the deterministic mock adapter and a committed fixture.",
+    "It does not judge truth. A verdict is a deterministic function of fixture citations and fixture skeptic findings; 'supported' means corroborated-in-the-corpus, not true.",
+    "It does not enforce a budget or a rate limit. See policy.budget.enforcement.",
+    "It does not enforce a permission or an isolation boundary. See policy.permissions.enforcement.",
+    "It does not retain anything between runs; the journal and payload store are in-memory."
+  ],
+
+  "graphs": {
+    "json": "cited-research.graph.json",
+    "yaml": "cited-research.graph.yaml",
+    "canonicalHash": "7d9e60a3811f0518a0c3e123c8109ee0dd5221dbbca83668d90acc347f4ae6c2",
+    "note": "Both documents are byte-equivalent after canonicalization, and both language runners assert that against the constructor output before running anything."
+  },
+
+  "constructors": {
+    "typescript": {
+      "package": "@graph-engineering/patterns",
+      "export": "citedResearch",
+      "source": "../../../packages/patterns/src/cited-research.ts"
+    },
+    "python": {
+      "module": "graph_engineering.patterns",
+      "callable": "cited_research",
+      "source": "../../../python/src/graph_engineering/patterns/cited_research.py"
+    },
+    "parity": "Both constructors produce the same canonical document; the runners assert equality against the committed graph in each language. The claim-identity rule is likewise paired: `claimId` (TypeScript) and `claim_id` (Python) are the same first-12-hex-of-SHA-256 function, pinned with identical literals in both language test suites."
+  },
+
+  "fixtures": {
+    "sourceCorpus": "fixtures/sources.json",
+    "expectedRun": "fixtures/expected-run.json",
+    "expectedEvents": "fixtures/expected-events.json",
+    "note": "The expected events and the expected evidence table live in files. The runners and the package tests compare against them; they never restate them inline."
+  },
+
+  "adapters": {
+    "deterministicMock": "mock-adapter.descriptor.json",
+    "realProvider": null,
+    "note": "No real provider adapter exists in this repository. See docs/patterns/cited-research.md#real-provider-setup for what would have to be supplied."
+  },
+
+  "executions": {
+    "mockEndToEnd": {
+      "typescript": "node examples/patterns/cited-research/run.mjs",
+      "python": "uv run --project python python examples/patterns/cited-research/run.py"
+    },
+    "injectedFailureAndResume": {
+      "typescript": "node examples/patterns/cited-research/resume.mjs",
+      "python": "uv run --project python python examples/patterns/cited-research/resume.py"
+    }
+  },
+
+  "tests": {
+    "unit": "corepack pnpm --filter @graph-engineering/patterns test",
+    "fixtureAgreement": "packages/patterns/test/cited-research.test.ts",
+    "crossLanguage": "Both runners compare against the same fixtures/expected-events.json and fixtures/expected-run.json; agreement between the lanes is what the shared files enforce. The Python constructor and claim-id rule are additionally tested by python/tests/test_patterns_cited_research.py, which pins the same claim-id literals as the TypeScript suite.",
+    "packedInstall": null,
+    "note": "There is no automated packed-install test for this bundle. CI runs this bundle's four runner commands as subprocesses via `pnpm check:pattern-runners` and validates this manifest via `pnpm check:patterns`."
+  },
+
+  "policy": {
+    "budget": {
+      "declared": {
+        "maxProviderCallsPerRun": 12,
+        "maxProviderCallsPerAgentNode": 2,
+        "maxTotalNodeAttempts": 15,
+        "maxWallClockMsPerDispatch": 30000,
+        "maxCostUsdPerRun": 0.5
+      },
+      "enforcement": "none",
+      "enforcedBy": null,
+      "note": "These numbers are documentation, not a control. No runtime component in this repository reads or enforces a token, money, time or rate budget; the master-plan 'bounded research cost' requirement is therefore NOT delivered. The only numbers that actually bind a run are the Graph IR policies (maxConcurrency, maxFanOut, maxTotalAttempts) and each agent node's retry.maxAttempts, which the scheduler does enforce."
+    },
+    "modelRouting": {
+      "declared": "One mock adapter per source and per skeptic slot, selected by node id.",
+      "enforcement": "none",
+      "note": "Routing here is executor wiring in the example, not a runtime policy object."
+    },
+    "permissions": {
+      "declared": {
+        "network": "deny",
+        "filesystemWrite": "deny",
+        "filesystemRead": "bundle directory only",
+        "process": "deny",
+        "credentials": "none",
+        "egressAllowlist": []
+      },
+      "enforcement": "none",
+      "enforcedBy": null,
+      "note": "There is no isolation provider, so nothing enforces any of this. The reason the runs perform no network access is that the code contains no network call and the mock adapter cannot make one — not that a sandbox refused it."
+    },
+    "approval": {
+      "declared": "none",
+      "enforcement": "none",
+      "note": "This pattern has no human approval step. No approval provider exists."
+    },
+    "redaction": {
+      "declared": "Durable payload protection is configured and mandatory; every authoritative value reaches the journal as a protected reference under the default capture policy.",
+      "enforcement": "enforced",
+      "enforcedBy": "durable payload protection; a durable run without it fails closed with PAYLOAD_PROTECTION_REQUIRED before the first event and the first executor call",
+      "note": "Both runners assert the fail-closed path."
+    },
+    "retention": {
+      "declared": "In-memory journal and payload store for the examples; nothing is written to disk. No evidence table, verdict or claim id survives the process.",
+      "enforcement": "n/a"
+    },
+    "isolation": {
+      "declared": "none",
+      "enforcement": "none",
+      "note": "No isolation provider exists."
+    }
+  },
+
+  "demonstrations": {
+    "normal": {
+      "status": "delivered",
+      "where": "run.mjs / run.py, phases 2 and 3"
+    },
+    "retry": {
+      "status": "delivered",
+      "where": "resume.mjs / resume.py, scenario A — GE_ADAPTER_RATE_LIMITED injected on attempt 1 of source-docs"
+    },
+    "crashAndResume": {
+      "status": "delivered",
+      "where": "resume.mjs / resume.py, scenario B — the journal commits and then loses the process; the resumed run never re-invokes the committed source"
+    },
+    "replay": {
+      "status": "delivered",
+      "where": "resume.mjs / resume.py — resuming an already terminal run returns the recorded result with zero new events and zero executor calls"
+    },
+    "failClosedWithoutProtection": {
+      "status": "delivered",
+      "where": "resume.mjs / resume.py — PAYLOAD_PROTECTION_REQUIRED, zero executor calls"
+    },
+    "timeout": {
+      "status": "not-delivered",
+      "reason": "A deterministic timeout demonstration would need a controllable clock in the run path; this bundle reads no clock at all, by design."
+    },
+    "cancellation": {
+      "status": "not-delivered",
+      "reason": "Cancellation during adjudication is a listed Pattern 02 negative case. It is not demonstrated here."
+    },
+    "fork": {
+      "status": "not-delivered",
+      "reason": "Replay/fork of a durable run is not exercised by this bundle."
+    },
+    "supportedClaim": {
+      "status": "delivered",
+      "where": "fixtures/sources.json — claim 82329aad7ca5 is proposed independently by the changelog and docs sources with one resolvable citation each; the adjudicator accepts it as supported and both citations are in the committed evidence table."
+    },
+    "contradictedClaim": {
+      "status": "delivered",
+      "where": "fixtures/sources.json — the skeptic in slot 1 genuinely contradicts claim 35833d9539b3 with counter-evidence that resolves to the docs item doc-budget; the verdict is contradicted and the contradiction stays in the evidence table instead of erasing the claim."
+    },
+    "uncitedClaimRejected": {
+      "status": "delivered",
+      "where": "fixtures/sources.json — claim 3af1931aeb2b cites no source item; the citation-coverage gate rejects it with reason 'citation-coverage: cites no source item', it holds no skeptic slot, and the rejection is in the committed evidence table, not silent."
+    },
+    "insufficientEvidence": {
+      "status": "delivered",
+      "where": "fixtures/sources.json — claim 6e607e6cb91c is cited by exactly one source and no skeptic contradicts it; the verdict is insufficient-evidence and the claim is kept but not accepted."
+    },
+    "claimIdStability": {
+      "status": "delivered",
+      "where": "Both language test suites pin claimId/claim_id to the same literals; the adjudicator additionally recomputes every reviewed claim's id from its text at run time, so a drifted hash rule fails the run."
+    },
+    "dynamicSkepticFanOut": {
+      "status": "blocked",
+      "reason": "One skeptic per extracted claim needs runtime graph growth, and the `dynamic-graph-patch` capability behind `maxDynamicNodes` is refused pre-dispatch by every runtime in this repository. The skeptic stage is a fixed construction-time slot count instead; more cited claims than slots fails loudly."
+    },
+    "partialVerdictsOnSourceFailure": {
+      "status": "blocked",
+      "reason": "Both barriers are static all-success joins. If one source or one skeptic fails permanently, no verdicts are produced at all. Partial adjudication needs quorum or settled barrier behaviour, which is capability-gated and not implemented."
+    }
+  },
+
+  "diagrams": {
+    "topology": "README.md#topology",
+    "sequence": "README.md#sequence",
+    "recovery": "README.md#recovery",
+    "dataFlow": "README.md#data-flow",
+    "authority": "README.md#authority",
+    "traceVisualization": "Both runners emit an event-order trace showing the three source lanes overlapping, the claims barrier waiting, the three skeptic lanes overlapping, and the adjudicate barrier waiting. The scale is the journal sequence number, not wall-clock time."
+  },
+
+  "docs": {
+    "bundleReadme": "README.md",
+    "launchGuides": "../../../docs/patterns/cited-research.md",
+    "runbook": "../../../docs/patterns/cited-research.md#operational-runbook"
+  },
+
+  "limitations": {
+    "staticSkepticSlots": "There is no per-claim fan-out. The graph carries exactly three skeptic nodes fixed at construction time; the claims barrier assigns cited claims to slots in claim-id order and fails loudly if there are more cited claims than slots. Dynamic per-claim skeptics need the `dynamic-graph-patch` runtime capability (`maxDynamicNodes`), which every runtime in this repository refuses pre-dispatch.",
+    "skepticsAreAgents": "The skeptics are `agent` nodes because the `validator` node kind is capability-gated and refused before dispatch. Nothing here claims verifier semantics: the adversarial reviews are deterministic mock outputs scripted from the committed corpus, and the only skeptic properties the run actually enforces are the slot/claim-id/text-hash cross-checks in the adjudicator.",
+    "barriersAreAllSuccess": "Both `claims` and `adjudicate` are static {\"condition\": \"all\"} joins, not integrated barrier policies. Quorum, deadline and late-arrival behaviour do not exist; a permanently failed source or skeptic yields no verdicts at all.",
+    "verdictsAreNotTruth": "A verdict is a deterministic function of fixture citations and fixture skeptic findings. 'Supported' means at least two distinct corpus sources cite resolvable items and no scripted contradiction exists — it is corroboration accounting, not verification of content.",
+    "claimIdsAreTextHashes": "A claim id is a hash of the exact claim text. Two sources must propose byte-identical text to be counted as one claim; a paraphrased duplicate becomes a separate claim with a separate id. No semantic deduplication exists.",
+    "noRealProvider": "Nothing in this bundle has ever contacted a provider or performed research. There is no provider client in this repository.",
+    "budgetsAreDocumentation": "See policy.budget.enforcement: none. There is no rate limiting and no cost bound beyond the scheduler's attempt policies.",
+    "permissionsAreDocumentation": "See policy.permissions.enforcement: none.",
+    "noRetainedState": "No evidence table, verdict or claim registry survives between runs; the journal and payload store are in-memory and vanish with the process.",
+    "noObservabilityBackend": "There is no metrics or tracing backend. The observability queries in the launch guide are journal projections, not queries against a running system.",
+    "noSupportBundleTool": "There is no support-bundle command. The launch guide documents what to collect by hand.",
+    "noIndependentReview": "This bundle has not been independently reviewed.",
+    "packedInstallNotTested": "No CI job runs the runners from packed artifacts; they run from the workspace build."
+  },
+
+  "testedVersions": {
+    "node": ">=20",
+    "python": ">=3.11",
+    "graphIr": "graphengineering.reacher-z.github.io/v1alpha1",
+    "adapterContract": "adapter-contract/v1alpha1",
+    "eventJournal": "graphengineering.reacher-z.github.io/events/v1alpha2"
+  }
+}

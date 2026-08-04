@@ -1,0 +1,214 @@
+apiVersion: graphengineering.reacher-z.github.io/v1alpha1
+kind: Graph
+metadata:
+  description: Scope one question into cited source jobs, extract stable claims at one barrier, adversarially review fixed claim slots, then adjudicate verdicts behind a citation-coverage gate
+  labels:
+    graphengineering.reacher-z.github.io/pattern: diamond/v1alpha1
+    graphengineering.reacher-z.github.io/runtime-capability: dag/v1alpha1
+  name: cited-research
+  version: 1.0.0
+inputSchema:
+  type: object
+outputSchema:
+  type: object
+entrypoints:
+- scope
+outputs:
+  verdicts:
+    node: adjudicate
+nodes:
+- config:
+    claimSlots: 3
+    operation: scope
+    sources:
+    - changelog
+    - docs
+    - interviews
+  id: scope
+  inputSchema:
+    type: object
+  kind: transform
+  outputSchema:
+    type: object
+  sideEffects: none
+- config:
+    role: release history and changelog entries
+    sourceKey: changelog
+  id: source-changelog
+  inputSchema:
+    type: object
+  kind: agent
+  outputSchema:
+    type: object
+  retry:
+    maxAttempts: 2
+  sideEffects: none
+- config:
+    role: reference documentation and manifests
+    sourceKey: docs
+  id: source-docs
+  inputSchema:
+    type: object
+  kind: agent
+  outputSchema:
+    type: object
+  retry:
+    maxAttempts: 2
+  sideEffects: none
+- config:
+    role: practitioner interview notes
+    sourceKey: interviews
+  id: source-interviews
+  inputSchema:
+    type: object
+  kind: agent
+  outputSchema:
+    type: object
+  retry:
+    maxAttempts: 2
+  sideEffects: none
+- config:
+    condition: all
+  id: claims
+  inputSchema:
+    type: object
+  kind: barrier
+  outputSchema:
+    type: object
+  sideEffects: none
+- id: skeptic-1
+  kind: agent
+  inputSchema:
+    type: object
+  outputSchema:
+    type: object
+  config:
+    operation: adversarial-review
+    slot: 1
+  retry:
+    maxAttempts: 2
+  sideEffects: none
+- id: skeptic-2
+  kind: agent
+  inputSchema:
+    type: object
+  outputSchema:
+    type: object
+  config:
+    operation: adversarial-review
+    slot: 2
+  retry:
+    maxAttempts: 2
+  sideEffects: none
+- id: skeptic-3
+  kind: agent
+  inputSchema:
+    type: object
+  outputSchema:
+    type: object
+  config:
+    operation: adversarial-review
+    slot: 3
+  retry:
+    maxAttempts: 2
+  sideEffects: none
+- id: adjudicate
+  kind: barrier
+  inputSchema:
+    type: object
+  outputSchema:
+    type: object
+  config:
+    condition: all
+  sideEffects: none
+edges:
+- id: ge-diamond-0001
+  from:
+    node: scope
+  to:
+    node: source-changelog
+  mode: value
+- id: ge-diamond-0002
+  from:
+    node: scope
+  to:
+    node: source-docs
+  mode: value
+- id: ge-diamond-0003
+  from:
+    node: scope
+  to:
+    node: source-interviews
+  mode: value
+- id: ge-diamond-0004
+  from:
+    node: source-changelog
+  to:
+    node: claims
+    port: changelog
+  mode: value
+- id: ge-diamond-0005
+  from:
+    node: source-docs
+  to:
+    node: claims
+    port: docs
+  mode: value
+- id: ge-diamond-0006
+  from:
+    node: source-interviews
+  to:
+    node: claims
+    port: interviews
+  mode: value
+- id: ge-diamond-0007
+  from:
+    node: claims
+  to:
+    node: skeptic-1
+  mode: value
+- id: ge-diamond-0008
+  from:
+    node: claims
+  to:
+    node: skeptic-2
+  mode: value
+- id: ge-diamond-0009
+  from:
+    node: claims
+  to:
+    node: skeptic-3
+  mode: value
+- id: ge-diamond-0010
+  from:
+    node: skeptic-1
+  to:
+    node: adjudicate
+    port: skeptic-1
+  mode: value
+- id: ge-diamond-0011
+  from:
+    node: skeptic-2
+  to:
+    node: adjudicate
+    port: skeptic-2
+  mode: value
+- id: ge-diamond-0012
+  from:
+    node: skeptic-3
+  to:
+    node: adjudicate
+    port: skeptic-3
+  mode: value
+- id: ge-diamond-0013
+  from:
+    node: claims
+  to:
+    node: adjudicate
+    port: claims
+  mode: value
+policies:
+  maxConcurrency: 3
+  maxDepth: 5
+  maxFanOut: 4
+  maxTotalAttempts: 15

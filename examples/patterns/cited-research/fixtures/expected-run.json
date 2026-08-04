@@ -1,0 +1,147 @@
+{
+  "$comment": "Expected result of the deterministic mock end-to-end run. Both language runners compare against this file instead of restating it inline.",
+  "graphHash": "7d9e60a3811f0518a0c3e123c8109ee0dd5221dbbca83668d90acc347f4ae6c2",
+  "maxObservedConcurrency": 3,
+  "output": {
+    "verdicts": {
+      "citationCoverage": {
+        "claimsCited": 3,
+        "claimsRejectedForNoCitation": [
+          "3af1931aeb2b"
+        ],
+        "claimsTotal": 4,
+        "requiredCitationsPerClaim": 1
+      },
+      "evidenceTable": [
+        {
+          "accepted": false,
+          "citations": [
+            {
+              "itemId": "int-lead",
+              "link": "interviews://example.invalid/notes/team-lead",
+              "source": "interviews",
+              "title": "Interview: a team lead reports that budget caps stopped an overrun"
+            }
+          ],
+          "claimId": "35833d9539b3",
+          "distinctSources": [
+            "interviews"
+          ],
+          "proposedBy": [
+            "interviews"
+          ],
+          "reason": "skeptic presented counter-evidence",
+          "skeptic": {
+            "counterEvidence": {
+              "itemId": "doc-budget",
+              "link": "docs://example.invalid/patterns/manifest-policy",
+              "note": "Every committed pattern-bundle manifest records policy.budget.enforcement: none; no runtime component reads or enforces a token, money, time or rate budget. The interview describes retry.maxAttempts stopping the overrun, not a budget.",
+              "source": "docs",
+              "title": "Pattern bundle manifests record policy.budget.enforcement: none"
+            },
+            "finding": "contradicted",
+            "slot": 1
+          },
+          "text": "Declared budgets are enforced at runtime for every durable graph run.",
+          "verdict": "contradicted"
+        },
+        {
+          "accepted": false,
+          "citations": [],
+          "claimId": "3af1931aeb2b",
+          "distinctSources": [],
+          "proposedBy": [
+            "interviews"
+          ],
+          "reason": "citation-coverage: cites no source item",
+          "skeptic": null,
+          "text": "The scheduler always selects the cheapest capable model for each agent node.",
+          "verdict": "rejected"
+        },
+        {
+          "accepted": false,
+          "citations": [
+            {
+              "itemId": "chg-120",
+              "link": "changelog://example.invalid/releases/1.2.0",
+              "source": "changelog",
+              "title": "1.2.0 release notes: durable runs refuse to start without payload protection"
+            }
+          ],
+          "claimId": "6e607e6cb91c",
+          "distinctSources": [
+            "changelog"
+          ],
+          "proposedBy": [
+            "changelog"
+          ],
+          "reason": "single-source claim without independent corroboration",
+          "skeptic": {
+            "counterEvidence": null,
+            "finding": "no-contradiction",
+            "slot": 2
+          },
+          "text": "Durable runs fail closed with PAYLOAD_PROTECTION_REQUIRED when payload protection is not configured.",
+          "verdict": "insufficient-evidence"
+        },
+        {
+          "accepted": true,
+          "citations": [
+            {
+              "itemId": "chg-140",
+              "link": "changelog://example.invalid/releases/1.4.0",
+              "source": "changelog",
+              "title": "1.4.0 release notes: resume replays the journal and reuses committed node results"
+            },
+            {
+              "itemId": "doc-resume",
+              "link": "docs://example.invalid/runtime/resume",
+              "source": "docs",
+              "title": "Runtime guide: a resume reads the journal and never re-invokes a committed node"
+            }
+          ],
+          "claimId": "82329aad7ca5",
+          "distinctSources": [
+            "changelog",
+            "docs"
+          ],
+          "proposedBy": [
+            "changelog",
+            "docs"
+          ],
+          "reason": "corroborated by 2 independent sources with no contradiction",
+          "skeptic": {
+            "counterEvidence": null,
+            "finding": "no-contradiction",
+            "slot": 3
+          },
+          "text": "A resumed durable run reuses committed node results instead of re-invoking their executors.",
+          "verdict": "supported"
+        }
+      ],
+      "generatedFrom": "committed fixture corpus; no provider was contacted and no clock was read",
+      "question": "What can a team actually rely on when running durable multi-agent graphs today?",
+      "slotAssignments": {
+        "1": "35833d9539b3",
+        "2": "6e607e6cb91c",
+        "3": "82329aad7ca5"
+      },
+      "verdicts": {
+        "contradicted": [
+          "35833d9539b3"
+        ],
+        "insufficientEvidence": [
+          "6e607e6cb91c"
+        ],
+        "rejected": [
+          "3af1931aeb2b"
+        ],
+        "supported": [
+          "82329aad7ca5"
+        ]
+      }
+    }
+  },
+  "status": "succeeded",
+  "totalAttempts": 9
+}

@@ -1,0 +1,94 @@
+{
+  "$comment": "The deterministic research corpus. Both language runners script the mock adapter from this file, so 'what the sources reported' and 'what the skeptics argued' are committed fixtures and not code. Nothing here is fetched; the links are opaque identifiers and no runner reads a clock. The corpus deliberately contains all four verdict cases: one claim proposed independently by two sources (supported), one claim a skeptic genuinely contradicts with resolvable counter-evidence (contradicted, kept in the evidence table with the contradiction), one claim citing no source item (rejected by the citation-coverage gate with a recorded reason), and one single-source claim with no contradiction (insufficient-evidence). Skeptic slots are keyed by slot number; slot order is the cited claims sorted by their stable hash-derived claim id, which both language lanes recompute and cross-check at run time.",
+  "question": "What can a team actually rely on when running durable multi-agent graphs today?",
+  "claimSlots": 3,
+  "sources": {
+    "changelog": {
+      "role": "release history and changelog entries",
+      "items": [
+        {
+          "itemId": "chg-140",
+          "title": "1.4.0 release notes: resume replays the journal and reuses committed node results",
+          "link": "changelog://example.invalid/releases/1.4.0"
+        },
+        {
+          "itemId": "chg-120",
+          "title": "1.2.0 release notes: durable runs refuse to start without payload protection",
+          "link": "changelog://example.invalid/releases/1.2.0"
+        }
+      ],
+      "claims": [
+        {
+          "text": "A resumed durable run reuses committed node results instead of re-invoking their executors.",
+          "citations": ["chg-140"]
+        },
+        {
+          "text": "Durable runs fail closed with PAYLOAD_PROTECTION_REQUIRED when payload protection is not configured.",
+          "citations": ["chg-120"]
+        }
+      ]
+    },
+    "docs": {
+      "role": "reference documentation and manifests",
+      "items": [
+        {
+          "itemId": "doc-resume",
+          "title": "Runtime guide: a resume reads the journal and never re-invokes a committed node",
+          "link": "docs://example.invalid/runtime/resume"
+        },
+        {
+          "itemId": "doc-budget",
+          "title": "Pattern bundle manifests record policy.budget.enforcement: none",
+          "link": "docs://example.invalid/patterns/manifest-policy"
+        }
+      ],
+      "claims": [
+        {
+          "text": "A resumed durable run reuses committed node results instead of re-invoking their executors.",
+          "citations": ["doc-resume"]
+        }
+      ]
+    },
+    "interviews": {
+      "role": "practitioner interview notes",
+      "items": [
+        {
+          "itemId": "int-lead",
+          "title": "Interview: a team lead reports that budget caps stopped an overrun",
+          "link": "interviews://example.invalid/notes/team-lead"
+        }
+      ],
+      "claims": [
+        {
+          "text": "Declared budgets are enforced at runtime for every durable graph run.",
+          "citations": ["int-lead"]
+        },
+        {
+          "text": "The scheduler always selects the cheapest capable model for each agent node.",
+          "citations": []
+        }
+      ]
+    }
+  },
+  "skeptics": {
+    "1": {
+      "claimText": "Declared budgets are enforced at runtime for every durable graph run.",
+      "finding": "contradicted",
+      "counterEvidence": {
+        "source": "docs",
+        "itemId": "doc-budget",
+        "note": "Every committed pattern-bundle manifest records policy.budget.enforcement: none; no runtime component reads or enforces a token, money, time or rate budget. The interview describes retry.maxAttempts stopping the overrun, not a budget."
+      }
+    },
+    "2": {
+      "claimText": "Durable runs fail closed with PAYLOAD_PROTECTION_REQUIRED when payload protection is not configured.",
+      "finding": "no-contradiction",
+      "counterEvidence": null
+    },
+    "3": {
+      "claimText": "A resumed durable run reuses committed node results instead of re-invoking their executors.",
+      "finding": "no-contradiction",
+      "counterEvidence": null
+    }
+  }
+}

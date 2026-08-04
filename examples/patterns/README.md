@@ -1,11 +1,15 @@
 # Runnable pattern showcase
 
-Two complete pattern bundles live beside this showcase, each with its own
+Three complete pattern bundles live beside this showcase, each with its own
 manifest, canonical graph pair, deterministic fixtures, and dual-language
 runners:
 
 - [`research-diamond/`](research-diamond/README.md) — Pattern 01, the
   multi-source research diamond.
+- [`cited-research/`](cited-research/README.md) — Pattern 02, cited deep
+  research in honest reduced form (stable hash-derived claim ids, a static
+  skeptic stage instead of per-claim fan-out, a citation-coverage gate and an
+  exportable evidence table; see its manifest's limitations).
 - [`ecosystem-scan/`](ecosystem-scan/README.md) — Pattern 10, the scheduled
   ecosystem scan in honest reduced form (nothing in it is actually scheduled;
   see its manifest's limitations).
