@@ -1,0 +1,219 @@
+{
+  "apiVersion": "graphengineering.reacher-z.github.io/pattern-bundle/v1alpha1",
+  "kind": "PatternBundle",
+  "patternId": "pattern-10-scheduled-ecosystem-scan",
+  "version": "0.1.0",
+  "title": "Scheduled ecosystem scan (reduced form)",
+  "maturity": "alpha",
+  "intent": "Enumerate a versioned source inventory, fetch every source in parallel with bounded retries, meet at exactly one fan-in barrier that window-gates, deduplicates and resolves version disagreements deterministically, and emit one globally ranked digest whose every date and link comes from the committed fixtures. This is the master-plan Pattern 10 reduced to what the runtime actually delivers today; see limitations for everything the full pattern would add.",
+  "nonGoals": [
+    "It is not scheduled. Nothing in this repository runs on a schedule, holds a schedule identity, or takes an overlap lease; every run of this bundle starts because a person invoked a runner. The word 'scheduled' in the title names the master-plan pattern, not a delivered capability.",
+    "It does not fetch anything. Every feed result in this bundle comes from the deterministic mock adapter and a committed fixture.",
+    "It does not read a clock. The scan window, every publication date and every retrieval date are fixture data; window gating is lexicographic comparison of ISO-8601 strings.",
+    "It does not enforce a budget or a rate limit. See policy.budget.enforcement.",
+    "It does not enforce a permission or an isolation boundary. See policy.permissions.enforcement.",
+    "It does not classify impact or relevance and it does not verify content across sources beyond version-conflict reporting; ranking is by fixture publication date only.",
+    "It does not retain partial results when a source fails permanently. See limitations.partialSourceFailureRetention."
+  ],
+
+  "graphs": {
+    "json": "ecosystem-scan.graph.json",
+    "yaml": "ecosystem-scan.graph.yaml",
+    "canonicalHash": "105772b922af64758407ad71f4e47cb35964609728861ec0bf8baed343388303",
+    "note": "Both documents are byte-equivalent after canonicalization, and both language runners assert that against the constructor output before running anything."
+  },
+
+  "constructors": {
+    "typescript": {
+      "package": "@graph-engineering/patterns",
+      "export": "ecosystemScan",
+      "source": "../../../packages/patterns/src/ecosystem-scan.ts"
+    },
+    "python": {
+      "module": "graph_engineering.patterns",
+      "callable": "ecosystem_scan",
+      "source": "../../../python/src/graph_engineering/patterns/ecosystem_scan.py"
+    },
+    "parity": "Both constructors produce the same canonical document; the runners assert equality against the committed graph in each language."
+  },
+
+  "fixtures": {
+    "sourceCorpus": "fixtures/sources.json",
+    "expectedRun": "fixtures/expected-run.json",
+    "expectedEvents": "fixtures/expected-events.json",
+    "note": "The expected events and the expected digest live in files. The runners and the package tests compare against them; they never restate them inline."
+  },
+
+  "adapters": {
+    "deterministicMock": "mock-adapter.descriptor.json",
+    "realProvider": null,
+    "note": "No real provider adapter exists in this repository. See docs/patterns/ecosystem-scan.md#real-provider-setup for what would have to be supplied."
+  },
+
+  "executions": {
+    "mockEndToEnd": {
+      "typescript": "node examples/patterns/ecosystem-scan/run.mjs",
+      "python": "uv run --project python python examples/patterns/ecosystem-scan/run.py"
+    },
+    "injectedFailureAndResume": {
+      "typescript": "node examples/patterns/ecosystem-scan/resume.mjs",
+      "python": "uv run --project python python examples/patterns/ecosystem-scan/resume.py"
+    }
+  },
+
+  "tests": {
+    "unit": "corepack pnpm --filter @graph-engineering/patterns test",
+    "fixtureAgreement": "packages/patterns/test/ecosystem-scan.test.ts",
+    "crossLanguage": "Both runners compare against the same fixtures/expected-events.json and fixtures/expected-run.json; agreement between the lanes is what the shared files enforce. The Python constructor is additionally tested by python/tests/test_patterns_ecosystem_scan.py.",
+    "packedInstall": null,
+    "note": "There is no automated packed-install test for this bundle. CI runs all four example runners as subprocesses via `pnpm check:pattern-runners` and validates this manifest via `pnpm check:patterns`."
+  },
+
+  "policy": {
+    "budget": {
+      "declared": {
+        "maxProviderCallsPerRun": 6,
+        "maxProviderCallsPerSource": 2,
+        "maxTotalNodeAttempts": 9,
+        "maxWallClockMsPerFetch": 30000,
+        "maxCostUsdPerRun": 0.25
+      },
+      "enforcement": "none",
+      "enforcedBy": null,
+      "note": "These numbers are documentation, not a control. No runtime component in this repository reads or enforces a token, money, time or rate budget; the master-plan 'bounded rate/cost' requirement is therefore NOT delivered. The only numbers that actually bind a run are the Graph IR policies (maxConcurrency, maxFanOut, maxTotalAttempts) and each fetch node's retry.maxAttempts, which the scheduler does enforce."
+    },
+    "modelRouting": {
+      "declared": "One mock adapter per source, selected by source key.",
+      "enforcement": "none",
+      "note": "Routing here is executor wiring in the example, not a runtime policy object."
+    },
+    "permissions": {
+      "declared": {
+        "network": "deny",
+        "filesystemWrite": "deny",
+        "filesystemRead": "bundle directory only",
+        "process": "deny",
+        "credentials": "none",
+        "egressAllowlist": []
+      },
+      "enforcement": "none",
+      "enforcedBy": null,
+      "note": "There is no isolation provider, so nothing enforces any of this. The master-plan 'per-source privacy/network limits' are therefore NOT delivered. The reason the runs perform no network access is that the code contains no network call and the mock adapter cannot make one — not that a sandbox refused it."
+    },
+    "approval": {
+      "declared": "none",
+      "enforcement": "none",
+      "note": "This pattern has no human approval step. No approval provider exists."
+    },
+    "redaction": {
+      "declared": "Durable payload protection is configured and mandatory; every authoritative value reaches the journal as a protected reference under the default capture policy.",
+      "enforcement": "enforced",
+      "enforcedBy": "durable payload protection; a durable run without it fails closed with PAYLOAD_PROTECTION_REQUIRED before the first event and the first executor call",
+      "note": "Both runners assert the fail-closed path."
+    },
+    "retention": {
+      "declared": "In-memory journal and payload store for the examples; nothing is written to disk. The master-plan 'retained last-success metadata' between scans is NOT delivered — nothing survives the process.",
+      "enforcement": "n/a"
+    },
+    "isolation": {
+      "declared": "none",
+      "enforcement": "none",
+      "note": "No isolation provider exists."
+    }
+  },
+
+  "demonstrations": {
+    "normal": {
+      "status": "delivered",
+      "where": "run.mjs / run.py, phases 2 and 3"
+    },
+    "retry": {
+      "status": "delivered",
+      "where": "resume.mjs / resume.py, scenario A — GE_ADAPTER_RATE_LIMITED injected on attempt 1 of fetch-registry"
+    },
+    "crashAndResume": {
+      "status": "delivered",
+      "where": "resume.mjs / resume.py, scenario B — the journal commits and then loses the process; the resumed run never re-invokes the committed fetch"
+    },
+    "replay": {
+      "status": "delivered",
+      "where": "resume.mjs / resume.py — resuming an already terminal run returns the recorded result with zero new events and zero executor calls"
+    },
+    "failClosedWithoutProtection": {
+      "status": "delivered",
+      "where": "resume.mjs / resume.py — PAYLOAD_PROTECTION_REQUIRED, zero executor calls"
+    },
+    "timeout": {
+      "status": "not-delivered",
+      "reason": "A deterministic timeout demonstration would need a controllable clock in the run path; this bundle reads no clock at all, by design."
+    },
+    "cancellation": {
+      "status": "not-delivered",
+      "reason": "Cancellation during ranking is a listed Pattern 10 negative case. It is not demonstrated here."
+    },
+    "fork": {
+      "status": "not-delivered",
+      "reason": "Replay/fork of a durable run is not exercised by this bundle."
+    },
+    "duplicateSyndication": {
+      "status": "delivered",
+      "where": "fixtures/sources.json — item-cli-release is reported by both the registry and the releases source with the same version; the digest folds it into one entry with two sightings and both sources listed."
+    },
+    "versionConflict": {
+      "status": "delivered",
+      "where": "fixtures/sources.json — item-core-release is version 2.1.0 in the registry source and 2.0.0 in the releases source; normalize resolves it deterministically (highest-version-wins, winner's date and link) and reports both positions in versionConflicts instead of hiding the disagreement."
+    },
+    "outOfWindowDate": {
+      "status": "delivered",
+      "where": "fixtures/sources.json — item-advisory-2025-104 is published before the scan window and is dropped with reason published-outside-scan-window; the drop is in the committed digest, not silent."
+    },
+    "scheduleOverlap": {
+      "status": "blocked",
+      "reason": "There is no schedule identity and no overlap lease. Two concurrent invocations against one shared journal are not fenced by anything in this repository; the master-plan overlap-lease requirement is unimplemented."
+    },
+    "partialSourceFailureRetention": {
+      "status": "blocked",
+      "reason": "The normalize node is a static all-success barrier. If one source fails permanently the barrier is never satisfied and no digest is produced. Retaining partial sources needs quorum or settled barrier behaviour, which is capability-gated and not implemented."
+    }
+  },
+
+  "diagrams": {
+    "topology": "README.md#topology",
+    "sequence": "README.md#sequence",
+    "recovery": "README.md#recovery",
+    "dataFlow": "README.md#data-flow",
+    "authority": "README.md#authority",
+    "traceVisualization": "Both runners emit an event-order trace showing the three fetch lanes overlapping and the barrier waiting. The scale is the journal sequence number, not wall-clock time."
+  },
+
+  "docs": {
+    "bundleReadme": "README.md",
+    "launchGuides": "../../../docs/patterns/ecosystem-scan.md",
+    "runbook": "../../../docs/patterns/ecosystem-scan.md#operational-runbook"
+  },
+
+  "limitations": {
+    "noSchedule": "There is no scheduler, no schedule identity and no scheduled-run provenance. The 'scheduled' in the pattern title is aspiration inherited from the master plan; every run here is started by hand.",
+    "noOverlapLease": "Nothing fences two concurrent runs. The in-run overlap that IS proven (the promise gate / asyncio.Barrier across the three fetch lanes) is parallelism inside one run, not schedule-overlap protection between runs.",
+    "rankingBarrierIsAllSuccess": "The normalize barrier is the static {\"condition\": \"all\"} join, not an integrated barrier policy. Quorum, deadline and late-source behaviour do not exist; a permanently failed source yields no digest at all.",
+    "noRealProvider": "Nothing in this bundle has ever contacted a feed or a provider. There is no provider client in this repository.",
+    "budgetsAreDocumentation": "See policy.budget.enforcement: none. There is no rate limiting and no cost bound beyond the scheduler's attempt policies.",
+    "permissionsAreDocumentation": "See policy.permissions.enforcement: none.",
+    "noImpactClassification": "The master-plan impact/relevance classification and cross-source content verification are not implemented; ranking is by fixture publication date with itemId tie-break, and version conflicts are reported, not adjudicated.",
+    "noRetainedLastSuccess": "No last-success metadata survives between runs; the journal and payload store are in-memory and vanish with the process.",
+    "datesAreFixtureData": "Every date in the digest is committed fixture data compared lexicographically. No clock is read, which also means no defence against a source reporting a plausible-but-wrong date beyond the window gate.",
+    "partialSourceFailureRetention": "Blocked on barrier policy; see demonstrations.partialSourceFailureRetention.",
+    "noObservabilityBackend": "There is no metrics or tracing backend. The observability queries in the launch guide are journal projections, not queries against a running system.",
+    "noSupportBundleTool": "There is no support-bundle command. The launch guide documents what to collect by hand.",
+    "noIndependentReview": "This bundle has not been independently reviewed.",
+    "packedInstallNotTested": "No CI job runs the runners from packed artifacts; they run from the workspace build."
+  },
+
+  "testedVersions": {
+    "node": ">=20",
+    "python": ">=3.11",
+    "graphIr": "graphengineering.reacher-z.github.io/v1alpha1",
+    "adapterContract": "adapter-contract/v1alpha1",
+    "eventJournal": "graphengineering.reacher-z.github.io/events/v1alpha2"
+  }
+}

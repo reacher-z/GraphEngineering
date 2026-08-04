@@ -1,0 +1,89 @@
+{
+  "$comment": "Expected result of the deterministic mock end-to-end run. Both language runners compare against this file instead of restating it inline.",
+  "graphHash": "105772b922af64758407ad71f4e47cb35964609728861ec0bf8baed343388303",
+  "status": "succeeded",
+  "maxObservedConcurrency": 3,
+  "totalAttempts": 6,
+  "output": {
+    "digest": {
+      "coverage": {
+        "sourcesFailed": 0,
+        "sourcesReporting": 3
+      },
+      "droppedItems": [
+        {
+          "itemId": "item-advisory-2025-104",
+          "publishedAt": "2025-12-15T00:00:00.000Z",
+          "reason": "published-outside-scan-window",
+          "source": "advisories"
+        }
+      ],
+      "duplicateItemIds": [
+        "item-cli-release",
+        "item-core-release"
+      ],
+      "entries": [
+        {
+          "itemId": "item-advisory-2026-001",
+          "link": "advisories://example.invalid/security/2026-001",
+          "publishedAt": "2026-01-20T00:00:00.000Z",
+          "rank": 1,
+          "sources": [
+            "advisories"
+          ],
+          "title": "Advisory 2026-001: journal guard bypass fixed in runtime 1.4.2",
+          "version": "1.4.2"
+        },
+        {
+          "itemId": "item-core-release",
+          "link": "registry://example.invalid/packages/graph-core/2.1.0",
+          "publishedAt": "2026-01-12T00:00:00.000Z",
+          "rank": 2,
+          "sources": [
+            "registry",
+            "releases"
+          ],
+          "title": "graph-core published to the package registry",
+          "version": "2.1.0"
+        },
+        {
+          "itemId": "item-cli-release",
+          "link": "registry://example.invalid/packages/graph-cli/3.2.0",
+          "publishedAt": "2026-01-08T00:00:00.000Z",
+          "rank": 3,
+          "sources": [
+            "registry",
+            "releases"
+          ],
+          "title": "graph-cli published to the package registry",
+          "version": "3.2.0"
+        }
+      ],
+      "generatedFrom": "committed fixture dates; no clock was read",
+      "inventoryVersion": "2026-01",
+      "versionConflicts": [
+        {
+          "itemId": "item-core-release",
+          "reported": [
+            {
+              "publishedAt": "2026-01-12T00:00:00.000Z",
+              "source": "registry",
+              "version": "2.1.0"
+            },
+            {
+              "publishedAt": "2026-01-05T00:00:00.000Z",
+              "source": "releases",
+              "version": "2.0.0"
+            }
+          ],
+          "resolvedVersion": "2.1.0",
+          "rule": "highest-version-wins"
+        }
+      ],
+      "window": {
+        "from": "2026-01-01T00:00:00.000Z",
+        "to": "2026-01-31T23:59:59.000Z"
+      }
+    }
+  }
+}

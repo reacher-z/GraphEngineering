@@ -1,5 +1,15 @@
 # Runnable pattern showcase
 
+Two complete pattern bundles live beside this showcase, each with its own
+manifest, canonical graph pair, deterministic fixtures, and dual-language
+runners:
+
+- [`research-diamond/`](research-diamond/README.md) — Pattern 01, the
+  multi-source research diamond.
+- [`ecosystem-scan/`](ecosystem-scan/README.md) — Pattern 10, the scheduled
+  ecosystem scan in honest reduced form (nothing in it is actually scheduled;
+  see its manifest's limitations).
+
 This example constructs the four topology patterns exported by the
 built `@graph-engineering/patterns` package, sends every result through the
 canonical core compiler again, and prints one stable JSON report containing

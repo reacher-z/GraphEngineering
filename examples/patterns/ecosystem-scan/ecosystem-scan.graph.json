@@ -1,0 +1,212 @@
+{
+  "apiVersion": "graphengineering.reacher-z.github.io/v1alpha1",
+  "kind": "Graph",
+  "metadata": {
+    "description": "Enumerate a versioned source inventory, fetch in parallel, normalize at one barrier, then rank one digest",
+    "labels": {
+      "graphengineering.reacher-z.github.io/pattern": "diamond/v1alpha1",
+      "graphengineering.reacher-z.github.io/runtime-capability": "dag/v1alpha1"
+    },
+    "name": "ecosystem-scan",
+    "version": "1.0.0"
+  },
+  "inputSchema": {
+    "type": "object"
+  },
+  "outputSchema": {
+    "type": "object"
+  },
+  "entrypoints": [
+    "inventory"
+  ],
+  "outputs": {
+    "digest": {
+      "node": "digest"
+    }
+  },
+  "nodes": [
+    {
+      "config": {
+        "inventoryVersion": "2026-01",
+        "operation": "inventory",
+        "sources": [
+          "advisories",
+          "registry",
+          "releases"
+        ]
+      },
+      "id": "inventory",
+      "inputSchema": {
+        "type": "object"
+      },
+      "kind": "transform",
+      "outputSchema": {
+        "type": "object"
+      },
+      "sideEffects": "none"
+    },
+    {
+      "config": {
+        "feed": "advisories://example.invalid/security",
+        "sourceKey": "advisories"
+      },
+      "id": "fetch-advisories",
+      "inputSchema": {
+        "type": "object"
+      },
+      "kind": "agent",
+      "outputSchema": {
+        "type": "object"
+      },
+      "retry": {
+        "maxAttempts": 2
+      },
+      "sideEffects": "none"
+    },
+    {
+      "config": {
+        "feed": "registry://example.invalid/packages",
+        "sourceKey": "registry"
+      },
+      "id": "fetch-registry",
+      "inputSchema": {
+        "type": "object"
+      },
+      "kind": "agent",
+      "outputSchema": {
+        "type": "object"
+      },
+      "retry": {
+        "maxAttempts": 2
+      },
+      "sideEffects": "none"
+    },
+    {
+      "config": {
+        "feed": "releases://example.invalid/graph-engineering",
+        "sourceKey": "releases"
+      },
+      "id": "fetch-releases",
+      "inputSchema": {
+        "type": "object"
+      },
+      "kind": "agent",
+      "outputSchema": {
+        "type": "object"
+      },
+      "retry": {
+        "maxAttempts": 2
+      },
+      "sideEffects": "none"
+    },
+    {
+      "config": {
+        "condition": "all"
+      },
+      "id": "normalize",
+      "inputSchema": {
+        "type": "object"
+      },
+      "kind": "barrier",
+      "outputSchema": {
+        "type": "object"
+      },
+      "sideEffects": "none"
+    },
+    {
+      "config": {
+        "operation": "rank-digest"
+      },
+      "id": "digest",
+      "inputSchema": {
+        "type": "object"
+      },
+      "kind": "transform",
+      "outputSchema": {
+        "type": "object"
+      },
+      "sideEffects": "none"
+    }
+  ],
+  "edges": [
+    {
+      "id": "ge-diamond-0001",
+      "from": {
+        "node": "inventory"
+      },
+      "to": {
+        "node": "fetch-advisories"
+      },
+      "mode": "value"
+    },
+    {
+      "id": "ge-diamond-0002",
+      "from": {
+        "node": "inventory"
+      },
+      "to": {
+        "node": "fetch-registry"
+      },
+      "mode": "value"
+    },
+    {
+      "id": "ge-diamond-0003",
+      "from": {
+        "node": "inventory"
+      },
+      "to": {
+        "node": "fetch-releases"
+      },
+      "mode": "value"
+    },
+    {
+      "id": "ge-diamond-0004",
+      "from": {
+        "node": "fetch-advisories"
+      },
+      "to": {
+        "node": "normalize",
+        "port": "advisories"
+      },
+      "mode": "value"
+    },
+    {
+      "id": "ge-diamond-0005",
+      "from": {
+        "node": "fetch-registry"
+      },
+      "to": {
+        "node": "normalize",
+        "port": "registry"
+      },
+      "mode": "value"
+    },
+    {
+      "id": "ge-diamond-0006",
+      "from": {
+        "node": "fetch-releases"
+      },
+      "to": {
+        "node": "normalize",
+        "port": "releases"
+      },
+      "mode": "value"
+    },
+    {
+      "id": "ge-diamond-0007",
+      "from": {
+        "node": "normalize"
+      },
+      "to": {
+        "node": "digest"
+      },
+      "mode": "value"
+    }
+  ],
+  "policies": {
+    "maxConcurrency": 3,
+    "maxDepth": 4,
+    "maxFanOut": 3,
+    "maxTotalAttempts": 9
+  }
+}
