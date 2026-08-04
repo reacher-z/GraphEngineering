@@ -1,0 +1,91 @@
+apiVersion: graphengineering.reacher-z.github.io/v1alpha1
+kind: Graph
+metadata:
+  description: 'Teaching diamond: split one brief, draft two independent branches, merge deterministically'
+  name: course-module-07-diamond
+  version: 1.0.0
+inputSchema:
+  type: object
+  additionalProperties: false
+  required:
+  - brief
+  properties:
+    brief:
+      type: string
+      minLength: 1
+outputSchema:
+  type: object
+entrypoints:
+- split
+outputs:
+  report:
+    node: merge
+nodes:
+- id: split
+  kind: transform
+  inputSchema:
+    type: object
+  outputSchema:
+    type: object
+  config:
+    operation: identity
+  sideEffects: none
+- id: draft-outline
+  kind: agent
+  inputSchema:
+    type: object
+  outputSchema:
+    type: object
+  config:
+    role: Draft the structural outline for the brief
+  sideEffects: none
+- id: draft-examples
+  kind: agent
+  inputSchema:
+    type: object
+  outputSchema:
+    type: object
+  config:
+    role: Draft concrete worked examples for the brief
+  sideEffects: none
+- id: merge
+  kind: transform
+  inputSchema:
+    type: object
+  outputSchema:
+    type: object
+  config:
+    operation: sorted-merge
+  sideEffects: none
+edges:
+- id: split-outline
+  from:
+    node: split
+  to:
+    node: draft-outline
+  mode: value
+- id: split-examples
+  from:
+    node: split
+  to:
+    node: draft-examples
+  mode: value
+- id: outline-merge
+  from:
+    node: draft-outline
+  to:
+    node: merge
+    port: outline
+  mode: value
+- id: examples-merge
+  from:
+    node: draft-examples
+  to:
+    node: merge
+    port: examples
+  mode: value
+policies:
+  maxConcurrency: 2
+  maxDepth: 8
+  maxFanOut: 4
+  maxTotalAttempts: 8

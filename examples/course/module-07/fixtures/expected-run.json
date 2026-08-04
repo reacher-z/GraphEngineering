@@ -1,0 +1,22 @@
+{
+  "graphHash": "5cd653fa4ef297b8d4903b1e8bc54e0ad3552f78f3d54aac2570dfe413d4c0e9",
+  "status": "succeeded",
+  "maxObservedConcurrency": 2,
+  "totalAttempts": 4,
+  "output": {
+    "report": {
+      "branches": ["examples", "outline"],
+      "findings": [
+        {
+          "branch": "examples",
+          "finding": "examples branch: drafted independently for how a diamond joins parallel work"
+        },
+        {
+          "branch": "outline",
+          "finding": "outline branch: drafted independently for how a diamond joins parallel work"
+        }
+      ],
+      "mergedFrom": 2
+    }
+  }
+}
