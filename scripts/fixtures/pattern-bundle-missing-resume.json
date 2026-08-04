@@ -13,14 +13,12 @@
     "It does not judge which side of a contradiction is right; it reports both positions with their citations.",
     "It does not retain partial results when a source fails permanently. See limitations.partialSourceFailureRetention."
   ],
-
   "graphs": {
     "json": "research-diamond.graph.json",
     "yaml": "research-diamond.graph.yaml",
     "canonicalHash": "f266955aef97a44b8635271fa3c20ab2790abaa7a4815a08810d784c08eb2eef",
     "note": "Both documents are byte-equivalent after canonicalization, and both language runners assert that against the constructor output before running anything."
   },
-
   "constructors": {
     "typescript": {
       "package": "@graph-engineering/patterns",
@@ -34,39 +32,30 @@
     },
     "parity": "Both constructors produce the same canonical document; the runners assert equality against the committed graph in each language."
   },
-
   "fixtures": {
     "sourceCorpus": "fixtures/sources.json",
     "expectedRun": "fixtures/expected-run.json",
     "expectedEvents": "fixtures/expected-events.json",
     "note": "The expected events and the expected report live in files. The runners and the package tests compare against them; they never restate them inline."
   },
-
   "adapters": {
     "deterministicMock": "mock-adapter.descriptor.json",
     "realProvider": null,
     "note": "No real provider adapter exists in this repository. See docs/patterns/research-diamond.md#real-provider-setup for what would have to be supplied."
   },
-
   "executions": {
     "mockEndToEnd": {
       "typescript": "node examples/patterns/research-diamond/run.mjs",
       "python": "uv run --project python python examples/patterns/research-diamond/run.py"
-    },
-    "injectedFailureAndResume": {
-      "typescript": "node examples/patterns/research-diamond/resume.mjs",
-      "python": "uv run --project python python examples/patterns/research-diamond/resume.py"
     }
   },
-
   "tests": {
     "unit": "corepack pnpm --filter @graph-engineering/patterns test",
     "fixtureAgreement": "packages/patterns/test/research-diamond.test.ts",
     "crossLanguage": "Both runners compare against the same fixtures/expected-events.json and fixtures/expected-run.json; agreement between the lanes is what the shared files enforce.",
     "packedInstall": null,
-    "note": "There is no automated packed-install test for this bundle. CI runs all four example runners as subprocesses via `pnpm check:pattern-runners` and validates this manifest via `pnpm check:patterns`."
+    "note": "There is no automated packed-install test for this bundle, and no CI job runs the two example runners. They are run by hand."
   },
-
   "policy": {
     "budget": {
       "declared": {
@@ -119,7 +108,6 @@
       "note": "No isolation provider exists."
     }
   },
-
   "demonstrations": {
     "normal": {
       "status": "delivered",
@@ -128,14 +116,6 @@
     "retry": {
       "status": "delivered",
       "where": "resume.mjs / resume.py, scenario A — GE_ADAPTER_RATE_LIMITED injected on attempt 1 of source-web"
-    },
-    "crashAndResume": {
-      "status": "delivered",
-      "where": "resume.mjs / resume.py, scenario B — the journal commits and then loses the process; the resumed run never re-invokes the committed source"
-    },
-    "replay": {
-      "status": "delivered",
-      "where": "resume.mjs / resume.py — resuming an already terminal run returns the recorded result with zero new events and zero executor calls"
     },
     "failClosedWithoutProtection": {
       "status": "delivered",
@@ -174,7 +154,6 @@
       "reason": "The merge node is a static all-success barrier. If one source fails permanently the barrier is never satisfied and no partial report is produced. Retaining partial sources needs quorum or settled barrier behaviour, which is capability-gated and not implemented."
     }
   },
-
   "diagrams": {
     "topology": "README.md#topology",
     "sequence": "README.md#sequence",
@@ -183,13 +162,11 @@
     "authority": "README.md#authority",
     "traceVisualization": "Both runners emit an event-order trace showing the three source lanes overlapping and the barrier waiting. The scale is the journal sequence number, not wall-clock time."
   },
-
   "docs": {
     "bundleReadme": "README.md",
     "launchGuides": "../../../docs/patterns/research-diamond.md",
     "runbook": "../../../docs/patterns/research-diamond.md#operational-runbook"
   },
-
   "limitations": {
     "noRealProvider": "Nothing in this bundle has ever contacted a provider. There is no provider client in this repository.",
     "budgetsAreDocumentation": "See policy.budget.enforcement: none.",
@@ -198,9 +175,8 @@
     "noObservabilityBackend": "There is no metrics or tracing backend. The observability queries in the launch guide are journal projections, not queries against a running system.",
     "noSupportBundleTool": "There is no support-bundle command. The launch guide documents what to collect by hand.",
     "noIndependentReview": "This bundle has not been independently reviewed.",
-    "packedInstallNotTested": "No CI job runs the runners from packed artifacts; they run from the workspace build."
+    "notInCi": "No CI job runs the two example runners."
   },
-
   "testedVersions": {
     "node": ">=20",
     "python": ">=3.11",

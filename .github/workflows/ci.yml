@@ -74,6 +74,7 @@ jobs:
         run: pnpm --filter '!@graph-engineering/sqlite' --recursive build
       - run: node examples/quickstart/run.mjs
       - run: node examples/patterns/showcase.mjs
+      - run: pnpm check:patterns
       - if: matrix.sqlite
         run: pnpm typecheck
       - if: ${{ !matrix.sqlite }}
@@ -181,6 +182,7 @@ jobs:
       - run: pnpm test:sqlite-docs
       - run: pnpm test:sqlite-python-benchmark
       - run: pnpm test:conformance
+      - run: pnpm check:pattern-runners
       - run: pnpm test:sqlite-transaction-owner-runtime
       - name: Enforce SQLite Rule 12 cross-runtime parity
         timeout-minutes: 10

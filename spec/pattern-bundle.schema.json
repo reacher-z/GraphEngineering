@@ -1,0 +1,281 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reacher-z.github.io/GraphEngineering/schemas/v1alpha1/pattern-bundle.schema.json",
+  "title": "Graph Engineering pattern bundle manifest",
+  "description": "Machine-readable contract for one executable pattern bundle under examples/patterns/. The schema is deliberately closed: a bundle that omits its resume execution, its tests, its limitations, or its policy honesty declarations does not validate. Enforcement values include \"none\" and demonstration statuses include \"not-delivered\" and \"blocked\" because a manifest that honestly declares a gap is valid; a manifest that hides one is not.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "patternId",
+    "version",
+    "title",
+    "maturity",
+    "intent",
+    "nonGoals",
+    "graphs",
+    "constructors",
+    "fixtures",
+    "adapters",
+    "executions",
+    "tests",
+    "policy",
+    "demonstrations",
+    "diagrams",
+    "docs",
+    "limitations",
+    "testedVersions"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "graphengineering.reacher-z.github.io/pattern-bundle/v1alpha1"
+    },
+    "kind": { "const": "PatternBundle" },
+    "patternId": {
+      "type": "string",
+      "pattern": "^pattern-[0-9]{2}(-[a-z0-9]+)+$"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+    },
+    "title": { "$ref": "#/$defs/nonEmptyString" },
+    "maturity": { "enum": ["alpha", "beta", "stable"] },
+    "intent": { "$ref": "#/$defs/nonEmptyString" },
+    "nonGoals": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/nonEmptyString" }
+    },
+    "graphs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["json", "yaml", "canonicalHash"],
+      "properties": {
+        "json": { "type": "string", "pattern": "\\.json$" },
+        "yaml": { "type": "string", "pattern": "\\.ya?ml$" },
+        "canonicalHash": { "$ref": "#/$defs/sha256" },
+        "note": { "$ref": "#/$defs/nonEmptyString" }
+      }
+    },
+    "constructors": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["typescript", "python"],
+      "properties": {
+        "typescript": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["package", "export", "source"],
+          "properties": {
+            "package": { "$ref": "#/$defs/nonEmptyString" },
+            "export": { "$ref": "#/$defs/nonEmptyString" },
+            "source": { "$ref": "#/$defs/nonEmptyString" }
+          }
+        },
+        "python": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["module", "callable", "source"],
+          "properties": {
+            "module": { "$ref": "#/$defs/nonEmptyString" },
+            "callable": { "$ref": "#/$defs/nonEmptyString" },
+            "source": { "$ref": "#/$defs/nonEmptyString" }
+          }
+        },
+        "parity": { "$ref": "#/$defs/nonEmptyString" }
+      }
+    },
+    "fixtures": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sourceCorpus", "expectedRun", "expectedEvents"],
+      "properties": {
+        "sourceCorpus": { "$ref": "#/$defs/nonEmptyString" },
+        "expectedRun": { "$ref": "#/$defs/nonEmptyString" },
+        "expectedEvents": { "$ref": "#/$defs/nonEmptyString" },
+        "note": { "$ref": "#/$defs/nonEmptyString" }
+      }
+    },
+    "adapters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["deterministicMock", "realProvider"],
+      "properties": {
+        "deterministicMock": { "$ref": "#/$defs/nonEmptyString" },
+        "realProvider": {
+          "anyOf": [{ "$ref": "#/$defs/nonEmptyString" }, { "type": "null" }]
+        },
+        "note": { "$ref": "#/$defs/nonEmptyString" }
+      }
+    },
+    "executions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mockEndToEnd", "injectedFailureAndResume"],
+      "properties": {
+        "mockEndToEnd": { "$ref": "#/$defs/languageCommands" },
+        "injectedFailureAndResume": { "$ref": "#/$defs/languageCommands" }
+      }
+    },
+    "tests": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["unit", "fixtureAgreement", "crossLanguage", "packedInstall"],
+      "properties": {
+        "unit": { "$ref": "#/$defs/nonEmptyString" },
+        "fixtureAgreement": { "$ref": "#/$defs/nonEmptyString" },
+        "crossLanguage": { "$ref": "#/$defs/nonEmptyString" },
+        "packedInstall": {
+          "anyOf": [{ "$ref": "#/$defs/nonEmptyString" }, { "type": "null" }]
+        },
+        "note": { "$ref": "#/$defs/nonEmptyString" }
+      }
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "budget",
+        "modelRouting",
+        "permissions",
+        "approval",
+        "redaction",
+        "retention",
+        "isolation"
+      ],
+      "properties": {
+        "budget": { "$ref": "#/$defs/policyControl" },
+        "modelRouting": { "$ref": "#/$defs/policyControl" },
+        "permissions": { "$ref": "#/$defs/policyControl" },
+        "approval": { "$ref": "#/$defs/policyControl" },
+        "redaction": { "$ref": "#/$defs/policyControl" },
+        "retention": { "$ref": "#/$defs/policyControl" },
+        "isolation": { "$ref": "#/$defs/policyControl" }
+      }
+    },
+    "demonstrations": {
+      "type": "object",
+      "minProperties": 6,
+      "required": [
+        "normal",
+        "retry",
+        "timeout",
+        "cancellation",
+        "crashAndResume",
+        "replay"
+      ],
+      "propertyNames": { "pattern": "^[a-z][a-zA-Z0-9]*$" },
+      "properties": {
+        "normal": { "$ref": "#/$defs/demonstration" },
+        "retry": { "$ref": "#/$defs/demonstration" },
+        "timeout": { "$ref": "#/$defs/demonstration" },
+        "cancellation": { "$ref": "#/$defs/demonstration" },
+        "crashAndResume": { "$ref": "#/$defs/demonstration" },
+        "replay": { "$ref": "#/$defs/demonstration" }
+      },
+      "additionalProperties": { "$ref": "#/$defs/demonstration" }
+    },
+    "diagrams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["topology", "sequence", "recovery", "dataFlow", "authority"],
+      "properties": {
+        "topology": { "$ref": "#/$defs/documentAnchor" },
+        "sequence": { "$ref": "#/$defs/documentAnchor" },
+        "recovery": { "$ref": "#/$defs/documentAnchor" },
+        "dataFlow": { "$ref": "#/$defs/documentAnchor" },
+        "authority": { "$ref": "#/$defs/documentAnchor" },
+        "traceVisualization": { "$ref": "#/$defs/nonEmptyString" }
+      }
+    },
+    "docs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bundleReadme", "launchGuides", "runbook"],
+      "properties": {
+        "bundleReadme": { "$ref": "#/$defs/nonEmptyString" },
+        "launchGuides": { "$ref": "#/$defs/nonEmptyString" },
+        "runbook": { "$ref": "#/$defs/nonEmptyString" }
+      }
+    },
+    "limitations": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": { "pattern": "^[a-z][a-zA-Z0-9]*$" },
+      "additionalProperties": { "$ref": "#/$defs/nonEmptyString" }
+    },
+    "testedVersions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["node", "python", "graphIr", "adapterContract", "eventJournal"],
+      "properties": {
+        "node": { "$ref": "#/$defs/nonEmptyString" },
+        "python": { "$ref": "#/$defs/nonEmptyString" },
+        "graphIr": { "$ref": "#/$defs/nonEmptyString" },
+        "adapterContract": { "$ref": "#/$defs/nonEmptyString" },
+        "eventJournal": { "$ref": "#/$defs/nonEmptyString" }
+      }
+    }
+  },
+  "$defs": {
+    "nonEmptyString": { "type": "string", "minLength": 1 },
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "languageCommands": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["typescript", "python"],
+      "properties": {
+        "typescript": { "$ref": "#/$defs/nonEmptyString" },
+        "python": { "$ref": "#/$defs/nonEmptyString" }
+      }
+    },
+    "policyControl": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["declared", "enforcement"],
+      "properties": {
+        "declared": {},
+        "enforcement": { "enum": ["none", "enforced", "n/a"] },
+        "enforcedBy": {
+          "anyOf": [{ "$ref": "#/$defs/nonEmptyString" }, { "type": "null" }]
+        },
+        "note": { "$ref": "#/$defs/nonEmptyString" }
+      }
+    },
+    "demonstration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status"],
+      "properties": {
+        "status": { "enum": ["delivered", "not-delivered", "blocked"] },
+        "where": { "$ref": "#/$defs/nonEmptyString" },
+        "reason": { "$ref": "#/$defs/nonEmptyString" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "delivered" } }, "required": ["status"] },
+          "then": {
+            "properties": { "where": { "$ref": "#/$defs/nonEmptyString" } },
+            "required": ["where"]
+          }
+        },
+        {
+          "if": {
+            "properties": { "status": { "enum": ["not-delivered", "blocked"] } },
+            "required": ["status"]
+          },
+          "then": {
+            "properties": { "reason": { "$ref": "#/$defs/nonEmptyString" } },
+            "required": ["reason"]
+          }
+        }
+      ]
+    },
+    "documentAnchor": {
+      "type": "string",
+      "pattern": "^[^\\s#]+\\.md#[a-z0-9]+(-[a-z0-9]+)*$"
+    }
+  }
+}

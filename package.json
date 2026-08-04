@@ -38,6 +38,8 @@
     "check:release-map": "node scripts/check-release-task-map.mjs && node --test scripts/tests/release-task-map.test.mjs",
     "check:evidence-closure": "node scripts/check-evidence-closure.mjs --json && node --test scripts/tests/evidence-closure.test.mjs",
     "check:packages": "node scripts/check-package-contents.mjs",
+    "check:patterns": "corepack pnpm --filter @graph-engineering/core build && node scripts/check-pattern-bundles.mjs --all --negative-fixture scripts/fixtures/pattern-bundle-missing-resume.json",
+    "check:pattern-runners": "corepack pnpm --filter @graph-engineering/core build && corepack pnpm --filter @graph-engineering/persistence build && corepack pnpm --filter @graph-engineering/runtime build && corepack pnpm --filter @graph-engineering/adapters build && corepack pnpm --filter @graph-engineering/patterns build && node scripts/check-pattern-runners.mjs",
     "check:packed-install": "node scripts/check-packed-install.mjs",
     "check:sqlite-migrations": "node --no-warnings scripts/check-sqlite-migration-release.mjs --source-only && node --no-warnings --test scripts/tests/sqlite-migration-release.test.mjs",
     "check:sqlite-artifacts": "node --no-warnings scripts/check-sqlite-migration-release.mjs --artifacts",
